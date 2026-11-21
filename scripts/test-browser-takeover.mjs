@@ -100,6 +100,15 @@ const express = require('express');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const REPO = new URL('..', import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms = 3000, every = 20) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(every); } return pred(); };
@@ -1664,7 +1673,7 @@ console.log('— ⑨ verify r6: every conversation leased on the taken browser i
     const bsSrc9 = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
     const bsLine9 = "    const holderAlive = relay.holder !== null && viewerAlive(relay.holder);\n";
     ok(bsSrc9.split(bsLine9).length === 2 && bsSrc9.split('holderAlive, viewerAlive });').length === 2, '⑨ r7 control setup: the bridge reads the holder\'s liveness across every relay, once, and hands the keeper the fact');
-    const BS9c = M9.load('src/server/browser-stream.js', bsSrc9.replace(bsLine9, "    const holderAlive = relay.holder !== null && relay.viewers.has(relay.holder);\n").replace('holderAlive, viewerAlive });', 'holderAlive });'), 'per-relay');
+    const BS9c = M9.load('src/server/browser-stream.js', editAnchor(editAnchor(bsSrc9, bsLine9, "    const holderAlive = relay.holder !== null && relay.viewers.has(relay.holder);\n", "src/server/browser-stream.js"), 'holderAlive, viewerAlive });', 'holderAlive });', "src/server/browser-stream.js"), 'per-relay');
     const kb = K.create({ dataDir: path.join(ROOT, 'data9b'), homeDir: HOME, env: () => rtEnv, broadcast: () => { }, serverSetting: (k) => set9[k], serverNotice: null, getTelemetry: () => null, liveKeys: () => new Set([KEY_S1, KEY_S2]), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: { log() { }, warn() { }, error() { } }, now, install: false });
     const sb = kb.createProfile({ label: 'Shared9b' }, { owner: { kind: 'instance', id: null } });
     await kb.attach({ profileId: sb.id, browserKey: KEY_S1, sessionId: 'sess-91' }); await kb.attach({ profileId: sb.id, browserKey: KEY_S2, sessionId: 'sess-92' });
@@ -1698,9 +1707,9 @@ console.log('— ⑩ r6 A-F8 / A-F9: the pre-fix rule in a patched copy makes ea
   const parseFlag = "  const flag = msg.confirmation_required === true || (d && d.confirmation_required === true) || msg.status === 'confirmation_required' || (d && d.status === 'confirmation_required');\n";
   const parseId = "  if (!id || !CONFIRMATION_ID_RE.test(id)) return null; // an id the answer could never name is no card\n";
   ok([parseType, parseFlag, parseId].every((l) => tsrc.split(l).length === 2), '⑩ C1 setup: the structured-only parse lines are each present once');
-  const T1 = M10.load('src/browser-takeover.js', tsrc.replace(parseType, '  if (!isObj(msg)) return null;\n')
-    .replace(parseFlag, "  const flag = msg.confirmation_required === true || (d && d.confirmation_required === true) || msg.status === 'confirmation_required' || (d && d.status === 'confirmation_required') || (typeof msg.error === 'string' && /confirmation[_ ]required|requires? (?:a )?confirmation/i.test(msg.error));\n")
-    .replace(parseId, "  let id2 = id; if (!id2 && typeof msg.error === 'string') { const mm = msg.error.match(/\\b(c_[0-9a-f]{4,})\\b/i); if (mm) id2 = mm[1]; } if (!id2) return null; return { id: id2, action: String(msg.action || 'action').slice(0, 40), category: null, target: null, at: num(now), expiresAt: num(now) + CONFIRM_TTL_MS, commandId: null };\n"), 'error-string');
+  const T1 = M10.load('src/browser-takeover.js', editAnchor(editAnchor(editAnchor(tsrc, parseType, '  if (!isObj(msg)) return null;\n', "src/browser-takeover.js"),
+    parseFlag, "  const flag = msg.confirmation_required === true || (d && d.confirmation_required === true) || msg.status === 'confirmation_required' || (d && d.status === 'confirmation_required') || (typeof msg.error === 'string' && /confirmation[_ ]required|requires? (?:a )?confirmation/i.test(msg.error));\n", "src/browser-takeover.js"),
+    parseId, "  let id2 = id; if (!id2 && typeof msg.error === 'string') { const mm = msg.error.match(/\\b(c_[0-9a-f]{4,})\\b/i); if (mm) id2 = mm[1]; } if (!id2) return null; return { id: id2, action: String(msg.action || 'action').slice(0, 40), category: null, target: null, at: num(now), expiresAt: num(now) + CONFIRM_TTL_MS, commandId: null };\n", "src/browser-takeover.js"), 'error-string');
   const f1 = T1.confirmationFromUpstream(forge, 2000);
   ok(f1 && f1.id === 'c_9f3a1b2c' && f1.action === 'click', '⑩ CONTROL C1 (the pre-fix error-string parse, in a copy): probe2\'s forged click parses as the pending UPLOAD\'s id with action "click" — the structured-only rule is what keeps it out', JSON.stringify(f1));
   // C1b the card's slots: the pre-fix card rebuilt its rows from the live ids alone — a row that goes shifts the rest up

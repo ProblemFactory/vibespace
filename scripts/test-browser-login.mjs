@@ -40,6 +40,15 @@ const ok = (c, label, detail) => {
   else { fail++; console.error('  ✗ ' + label + (detail !== undefined ? '\n      ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : '')); }
   return !!c;
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, label) => ok(JSON.stringify(a) === JSON.stringify(b), label, { got: a, want: b });
 const quiet = { log() {}, warn() {}, error() {} };
 const stubLoginChannel = ({ mediated = false, proxy = true, ephemeral = false, remote = false, external = false, remoteSession = false, hasCdp = true, label = 'ShopProfile', action = 'fill' } = {}) =>
@@ -1388,9 +1397,9 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
     'MUTANT 2 RED (read-fence-removed): real liveFillVerdict blocks `eval` [login_fill_live]; mutant admits `eval` while secret is live');
 
   // Mutant 3: remove `<input type="password">` mask check & post-submit wipe -> types password into `<input type="text">` and leaves plaintext after submit!
-  const m3LfSrc = lfSrc
-    .replaceAll("const wantSecretPw = Boolean(secret && slot !== 'otp');", 'const wantSecretPw = false;')
-    .replace('async function wipeTabTypedInputs(', 'async function wipeTabTypedInputs() { return { ok: true, wiped: 0 }; }\nasync function _deadWipeTabTypedInputs(');
+  const m3LfSrc = editAnchor(editAnchor(lfSrc,
+    "const wantSecretPw = Boolean(secret && slot !== 'otp');", 'const wantSecretPw = false;', "src/server/browser-login-fill.js", 'all'),
+    'async function wipeTabTypedInputs(', 'async function wipeTabTypedInputs() { return { ok: true, wiped: 0 }; }\nasync function _deadWipeTabTypedInputs(', "src/server/browser-login-fill.js");
   const LF_M3 = m3LfSrc !== lfSrc ? MUT.load('src/server/browser-login-fill.js', m3LfSrc, 'mask-wipe-removed') : null;
   const fkM3 = await startFakeKernel({ firstUrl: 'https://shop.example.test/login' });
   try {
@@ -1437,9 +1446,9 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   }
 
   // Mutant 4 (L1): remove `multipart/` branch & fail-closed default -> cross-origin FormData body leaks secret unblocked!
-  const m4BdSrc = bdSrc
-    .replace("if (media.startsWith('multipart/') || (!media && /^--[^\\r\\n]{1,128}\\r?\\ncontent-disposition:/i.test(bodyText))) {", 'if (false) {')
-    .replace("return { carries: false, undecodable: true, reason: `unsupported_content_type:${media || 'unknown'}` };", "return { carries: false, undecodable: false, reason: 'none' };");
+  const m4BdSrc = editAnchor(editAnchor(bdSrc,
+    "if (media.startsWith('multipart/') || (!media && /^--[^\\r\\n]{1,128}\\r?\\ncontent-disposition:/i.test(bodyText))) {", 'if (false) {', "src/server/browser-dialogs.js"),
+    "return { carries: false, undecodable: true, reason: `unsupported_content_type:${media || 'unknown'}` };", "return { carries: false, undecodable: false, reason: 'none' };", "src/server/browser-dialogs.js");
   const BD_M4 = m4BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m4BdSrc, 'multipart-branch-removed') : null;
   {
     const m4Secret = 'Mut4Secret!' + crypto.randomBytes(4).toString('hex');
@@ -1491,16 +1500,16 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   );
   const BD_M6 = m6BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m6BdSrc, 'usernameHint-field-mismatch') : null;
   // Mutant 7 (L4): restore cross-tab `preferRef` fallback in `pickScopedTabFor` -> `@e2` on tab B types into background tab A!
-  const m7BdSrc = bdSrc
-    .replace('function pickScopedTabFor(w, target, { targetId = null } = {}) {', 'function pickScopedTabFor(w, target, { targetId = null, preferRef = null } = {}) {')
-    .replace(
+  const m7BdSrc = editAnchor(editAnchor(editAnchor(bdSrc,
+    'function pickScopedTabFor(w, target, { targetId = null } = {}) {', 'function pickScopedTabFor(w, target, { targetId = null, preferRef = null } = {}) {', "src/server/browser-dialogs.js"),
+    
       'if (actE && inScope(scope, actE.targetId) && actE.sid) return actE;',
-      'if (actE && inScope(scope, actE.targetId) && actE.sid && (!preferRef || actE.snapshotRefs?.specs?.has(preferRef))) return actE;\n    if (preferRef) { const withRef = [...w.targets.values()].find((x) => x.sid && x.snapshotRefs?.specs?.has(preferRef)); if (withRef) return withRef; }',
-    )
-    .replace(
+      'if (actE && inScope(scope, actE.targetId) && actE.sid && (!preferRef || actE.snapshotRefs?.specs?.has(preferRef))) return actE;\n    if (preferRef) { const withRef = [...w.targets.values()].find((x) => x.sid && x.snapshotRefs?.specs?.has(preferRef)); if (withRef) return withRef; }'
+    , "src/server/browser-dialogs.js"),
+    
       'const isRef = /^@[A-Za-z0-9_-]+$/.test(tgtStr);\n    const e = pickScopedTabFor(w, target, { targetId });',
-      'const isRef = /^@[A-Za-z0-9_-]+$/.test(tgtStr);\n    const e = pickScopedTabFor(w, target, { targetId, preferRef: isRef ? tgtStr : null });',
-    );
+      'const isRef = /^@[A-Za-z0-9_-]+$/.test(tgtStr);\n    const e = pickScopedTabFor(w, target, { targetId, preferRef: isRef ? tgtStr : null });'
+    , "src/server/browser-dialogs.js");
   const BD_M7 = m7BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m7BdSrc, 'cross-tab-ref-fallback') : null;
   // Mutant 9 (M1): skip `precheckVaultFill` -> locked vault sends CDP calls and returns `login_phishing` on wrong-origin tab!
   const m9BdSrc = bdSrc.replace('if (!prechecked) {', 'if (false && !prechecked) {');
@@ -1588,12 +1597,12 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   }
 
   // Mutant 8 (L5): re-introduce async gap between focus-check and `Input.insertText` -> `setTimeout(0)` decoy receives plaintext secret!
-  const m8LfSrc = lfSrc
-    .replace("if (typeof setTimeout === 'function') {", "if (false && typeof setTimeout === 'function') {")
-    .replaceAll('try { node.inert = true; } catch {}', '/* inert disabled */')
-    .replace("window.addEventListener('focusin', onTypingFocusGuard, true);", '/* focusin guard disabled */')
-    .replace("window.addEventListener('focus', onTypingFocusGuard, true);", '/* focus guard disabled */')
-    .replace("const ins = await send('Input.insertText', { text: val });", "await new Promise((r) => setTimeout(r, 15)); const ins = await send('Input.insertText', { text: val });");
+  const m8LfSrc = editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(lfSrc,
+    "if (typeof setTimeout === 'function') {", "if (false && typeof setTimeout === 'function') {", "src/server/browser-login-fill.js"),
+    'try { node.inert = true; } catch {}', '/* inert disabled */', "src/server/browser-login-fill.js", 'all'),
+    "window.addEventListener('focusin', onTypingFocusGuard, true);", '/* focusin guard disabled */', "src/server/browser-login-fill.js"),
+    "window.addEventListener('focus', onTypingFocusGuard, true);", '/* focus guard disabled */', "src/server/browser-login-fill.js"),
+    "const ins = await send('Input.insertText', { text: val });", "await new Promise((r) => setTimeout(r, 15)); const ins = await send('Input.insertText', { text: val });", "src/server/browser-login-fill.js");
   const LF_M8 = m8LfSrc !== lfSrc ? MUT.load('src/server/browser-login-fill.js', m8LfSrc, 'async-focus-seam') : null;
   {
     const fkM8 = await startFakeKernel({ firstUrl: 'https://shop.example.test/login' });
@@ -1655,10 +1664,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   const BD_M10 = m10BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m10BdSrc, 'n1-hold-relaxes-fetch') : null;
 
   // Mutant 11 (N1b): `toPerson` sends raw `Fetch.disable` bypassing `syncTabFetchMode` (leaving `e.fetchMode` stale) -> mode flip drops `*` intercept!
-  const m11BdSrc = bdSrc
-    .replace('if (e.enabled) { await syncTabFetchMode(w, e);', "if (e.enabled) { await call(w, 'Fetch.disable', {}, e.sid);")
-    .replace('  function armPrompts(w, e) {\n    if (!e.sid) return;\n    call(w, \'Page.setInterceptFileChooserDialog\', { enabled: true }, e.sid).then((r) => { if (r && r.error) say(\'fc:\' + r.error.message, `${w.profileId}: the file chooser was not hooked — ${r.error.message}`); });\n    syncTabFetchMode(w, e);',
-      '  function armPrompts(w, e) {\n    if (!e.sid) return;\n    call(w, \'Fetch.enable\', { patterns: [{ urlPattern: \'*\', resourceType: \'Document\', requestStage: \'Request\' }], handleAuthRequests: true }, e.sid);');
+  const m11BdSrc = editAnchor(editAnchor(bdSrc,
+    'if (e.enabled) { await syncTabFetchMode(w, e);', "if (e.enabled) { await call(w, 'Fetch.disable', {}, e.sid);", "src/server/browser-dialogs.js"),
+    '  function armPrompts(w, e) {\n    if (!e.sid) return;\n    call(w, \'Page.setInterceptFileChooserDialog\', { enabled: true }, e.sid).then((r) => { if (r && r.error) say(\'fc:\' + r.error.message, `${w.profileId}: the file chooser was not hooked — ${r.error.message}`); });\n    syncTabFetchMode(w, e);',
+      '  function armPrompts(w, e) {\n    if (!e.sid) return;\n    call(w, \'Fetch.enable\', { patterns: [{ urlPattern: \'*\', resourceType: \'Document\', requestStage: \'Request\' }], handleAuthRequests: true }, e.sid);', "src/server/browser-dialogs.js");
   const BD_M11 = m11BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m11BdSrc, 'n1-toperson-bypasses-sync') : null;
 
   // Mutant 12 (N2): `noteSnapshot` calls `Accessibility.getFullAXTree` over the watch socket (r23's bug) -> 3,000-row page drops watch with 1009!
@@ -1683,12 +1692,12 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   const BD_M14 = m14BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m14BdSrc, 'm2-network-never-disabled') : null;
 
   // Mutant 15 (N5): strip post-prepare `inert` + `onTypingFocusGuard` + `onTargetBlurGuard` -> post-prepare macrotask decoy receives `Input.insertText`!
-  const m15LfSrc = lfSrc
-    .replaceAll('try { node.inert = true; } catch {}', '/* inert off */')
-    .replaceAll("try { if (node.setAttribute) node.setAttribute('inert', ''); } catch {}", '/* attr off */')
-    .replace("window.addEventListener('focusin', onTypingFocusGuard, true);", '/* focusin off */')
-    .replace("window.addEventListener('focus', onTypingFocusGuard, true);", '/* focus off */')
-    .replace("el.addEventListener('blur', onTargetBlurGuard, true);", '/* blur off */');
+  const m15LfSrc = editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(lfSrc,
+    'try { node.inert = true; } catch {}', '/* inert off */', "src/server/browser-login-fill.js", 'all'),
+    "try { if (node.setAttribute) node.setAttribute('inert', ''); } catch {}", '/* attr off */', "src/server/browser-login-fill.js", 'all'),
+    "window.addEventListener('focusin', onTypingFocusGuard, true);", '/* focusin off */', "src/server/browser-login-fill.js"),
+    "window.addEventListener('focus', onTypingFocusGuard, true);", '/* focus off */', "src/server/browser-login-fill.js"),
+    "el.addEventListener('blur', onTargetBlurGuard, true);", '/* blur off */', "src/server/browser-login-fill.js");
   const LF_M15 = m15LfSrc !== lfSrc ? MUT.load('src/server/browser-login-fill.js', m15LfSrc, 'n5-typing-guard-removed') : null;
 
   // Mutant 16 (m3): `dialogAnswerFor` omits `else if (started) D.verbStarted` -> `fill --vault` `/audit` decrements parallel verb!
@@ -2287,23 +2296,23 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             { rRefused, rAttachErr, rNoUpgrade, rNodesCap, watchAxCalls, watchState: standingWatch.readyState, lingeringTcpAfter });
 
           // Mutant 21 (A3): restore r24's fallback onto `call` (standing watch) when short socket fails -> 8,000 × 2,048-char reply (16.71 MiB) closes standing watch with 1006!
-          const m21LfSrc = lfSrc
-            .replace(
+          const m21LfSrc = editAnchor(editAnchor(editAnchor(editAnchor(lfSrc,
+            
               'async function resolveSnapshotRef({\n  wsUrl = \'\',\n  WebSocketImpl = null,\n  targetId = null,',
-              'async function resolveSnapshotRef({\n  wsUrl = \'\',\n  WebSocketImpl = null,\n  call = null,\n  targetId = null,',
-            )
-            .replace(
+              'async function resolveSnapshotRef({\n  wsUrl = \'\',\n  WebSocketImpl = null,\n  call = null,\n  targetId = null,'
+            , "src/server/browser-login-fill.js"),
+            
               "    const cause = String((shortSess && shortSess.error) || 'connection failed').slice(0, 160);\n    return {\n      ok: false,\n      code: 'target_not_found',\n      reason: 'ax_connect_failed',\n      error: `element ${key} could not be resolved because the short accessibility connection failed (${cause}) — pass a CSS selector to fill --vault instead`,\n    };\n  }\n\n  const send = shortSess.send;\n  const isTooLarge = shortSess.isTooLarge;\n  const isTimedOut = shortSess.isTimedOut;",
-              "  }\n  const useShort = shortSess && shortSess.ok ? shortSess : null;\n  const send = useShort ? useShort.send : makeSend(call, null, undefined);\n  const isTooLarge = useShort ? useShort.isTooLarge : () => false;\n  const isTimedOut = useShort ? useShort.isTimedOut : () => false;",
-            )
-            .replace(
+              "  }\n  const useShort = shortSess && shortSess.ok ? shortSess : null;\n  const send = useShort ? useShort.send : makeSend(call, null, undefined);\n  const isTooLarge = useShort ? useShort.isTooLarge : () => false;\n  const isTimedOut = useShort ? useShort.isTimedOut : () => false;"
+            , "src/server/browser-login-fill.js"),
+            
               '    const tgts = await shortSess.browserSend(\'Target.getTargets\', {});',
-              '    const tgts = useShort ? await useShort.browserSend(\'Target.getTargets\', {}) : null;',
-            )
-            .replace(
+              '    const tgts = useShort ? await useShort.browserSend(\'Target.getTargets\', {}) : null;'
+            , "src/server/browser-login-fill.js"),
+            
               '  } finally {\n    await shortSess.close();\n  }',
-              '  } finally {\n    if (shortSess && shortSess.close) await shortSess.close();\n  }',
-            );
+              '  } finally {\n    if (shortSess && shortSess.close) await shortSess.close();\n  }'
+            , "src/server/browser-login-fill.js");
           const LF_M21 = m21LfSrc !== lfSrc ? MUT.load('src/server/browser-login-fill.js', m21LfSrc, 'a3-short-socket-falls-back-to-watch') : null;
           if (LF_M21) {
             let closeCode = 0;
@@ -2581,9 +2590,9 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         }
 
         // MUTANT 24 RED (Compulsory 1): restore r25's non-idempotent `let schema = 1;` in `recordOf` -> ALL 7 owner-door regressions reproduce RED on `.390` vault!
-        const m24BlSrc = blSrc
-          .replace('  const schema = 2;', '  let schema = 1;')
-          .replace('  if (hasThreeSlotShape) {\n    if (r.schema === 1) return null;', '  if (hasThreeSlotShape) {\n    if (r.schema === 1) return null;\n    schema = 2;');
+        const m24BlSrc = editAnchor(editAnchor(blSrc,
+          '  const schema = 2;', '  let schema = 1;', "src/browser-login.js"),
+          '  if (hasThreeSlotShape) {\n    if (r.schema === 1) return null;', '  if (hasThreeSlotShape) {\n    if (r.schema === 1) return null;\n    schema = 2;', "src/browser-login.js");
         if (m24BlSrc !== blSrc) {
           const blM24Path = MUT.write('src/browser-login.js', m24BlSrc, 'r26-c1-non-idempotent-recordof', { name: 'r26-c1-bl' });
           const BL_M24 = require(blM24Path);

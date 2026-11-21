@@ -27,6 +27,15 @@ const F = require('../src/browser-facts.js');
 const DA = require('../src/desktop-apps.js');
 let pass = 0, fail = 0;
 const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** a wait that names its effect (lane fast-debt-clear): poll `f` until it holds, at most `ms` — the assert after it judges */
 const until = async (f, ms = 3000) => { const end = Date.now() + ms; while (!f() && Date.now() < end) await sleep(10); return f(); };
@@ -777,7 +786,7 @@ setMode('ok');
   const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), kFrom = 'engineArgs.push(rec.proxyRoad.arg, ENG.PROXY_UDP_ARG);';
   if (kSrc.split(kFrom).length !== 2) throw new Error('the UDP mutant\'s anchor must occur exactly once');
   const Mod = require('node:module'), kFile = path.join(REPO, 'src/server/browser-keeper.js'), kMod = new Mod(kFile, null);
-  kMod.filename = kFile; kMod.paths = Mod._nodeModulePaths(path.dirname(kFile)); kMod._compile(kSrc.split(kFrom).join('engineArgs.push(rec.proxyRoad.arg);'), kFile);
+  kMod.filename = kFile; kMod.paths = Mod._nodeModulePaths(path.dirname(kFile)); kMod._compile(editAnchor(kSrc, kFrom, 'engineArgs.push(rec.proxyRoad.arg);', "src/server/browser-keeper.js", 'join'), kFile);
   const KU = kMod.exports;
   const DATA_U = path.join(S, 'data-udp-red'); fs.mkdirSync(DATA_U, { recursive: true });
   const kU = KU.create({ dataDir: DATA_U, homeDir: HOME, env: () => rtEnv, serverSetting: (x) => settings[x], serverNotice: () => 1, liveKeys: () => new Set(), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: jlog, install: false, tickMs: 3600e3, displaySessions: DK, attachSocketBase: SOCKBASE });

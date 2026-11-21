@@ -42,6 +42,15 @@ process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true 
 let passed = 0, failed = 0;
 const say = console.log.bind(console);
 function ok(c, name, detail) { if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 700)}`); } return !!c; }
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const quiet = async (fn) => { const o = console.log, w = console.warn, e = console.error, lines = []; console.log = (...a) => lines.push(a.join(' ')); console.warn = console.log; console.error = console.log; try { const r = await fn(); return { r, lines }; } finally { console.log = o; console.warn = w; console.error = e; } };
 
 function archive(rev, tag) {
@@ -1358,7 +1367,7 @@ if (CONTROLS) {
   if (ok(QMSRC.split(ANCH).length === 2, 'the patch «markRefused no-op» applies to this tree\'s quota-model.js (its anchor is there once)')) {
     // a COPY of src/ (a symlinked module resolves its requires from its real path, which would load the unpatched file)
     const M = path.join(ROOT, 'patch-m4'); fs.cpSync(path.join(REPO, 'src'), path.join(M, 'src'), { recursive: true });
-    fs.writeFileSync(path.join(M, 'src/quota-model.js'), QMSRC.replace(ANCH, ANCH + '  return set;   // the patch: no refusal stamp\n'));
+    fs.writeFileSync(path.join(M, 'src/quota-model.js'), editAnchor(QMSRC, ANCH, ANCH + '  return set;   // the patch: no refusal stamp\n', "src/quota-model.js"));
     for (const f of ['package.json', 'node_modules', 'data', 'server.js']) { try { fs.symlinkSync(path.join(REPO, f), path.join(M, f)); } catch { } }
     for (const leg of ['rejection-is-a-mark', 'twin-refusal', 'guess-and-replace']) { const r = await run(leg, M); ok(!r.ok, `with no refusal stamp ⇒ RED at ${leg}: ${r.detail}`); }
   }
@@ -1400,7 +1409,7 @@ if (CONTROLS) {
   say('RED CONTROL — a refusal\'s mark never overtaken (`refusedAt != null ? true`), a patch the suite carries');
   if (ok(QMSRC.split(OVR).length === 2, 'the patch «never overtaken» applies to this tree\'s quota-model.js (its anchor is there once)')) {
     const M2 = path.join(ROOT, 'patch-ovr'); fs.cpSync(path.join(REPO, 'src'), path.join(M2, 'src'), { recursive: true });
-    fs.writeFileSync(path.join(M2, 'src/quota-model.js'), QMSRC.replace(OVR, 'mark: refusedAt != null ? true : '));
+    fs.writeFileSync(path.join(M2, 'src/quota-model.js'), editAnchor(QMSRC, OVR, 'mark: refusedAt != null ? true : ', "src/quota-model.js"));
     for (const f of ['package.json', 'node_modules', 'data', 'server.js']) { try { fs.symlinkSync(path.join(REPO, f), path.join(M2, f)); } catch { } }
     const r = await run('refusal-then-reading', M2); ok(!r.ok, `a refusal's mark never overtaken ⇒ RED at refusal-then-reading: ${r.detail}`);
   }

@@ -12,6 +12,15 @@ const { AccountManager } = require(path.resolve('src/accounts.js'));
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pool-'));
 let pass = 0, fail = 0;
 const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ck(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const am = new AccountManager({ dataDir: DATA });
 const login = (id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'),
@@ -446,7 +455,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   const file = path.resolve('src/accounts.js'), src = fs.readFileSync(file, 'utf8'), cut = "      if (f && f.code === 'vault_locked') return { code: 'vault-locked' };\n";
   ck('RED CONTROL (b): the patch (the vault code dropped — 9d53db09\'s _unplaceableWhy) hits', src.includes(cut));
   if (src.includes(cut)) {
-    const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src.replace(cut, ''), file);
+    const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(editAnchor(src, cut, '', "src/accounts.js"), file);
     const rc = await run(m.exports.AccountManager, 'mut');
     ck('RED CONTROL (b): without the vault code the same locked vault is told «… (key-unreadable) — re-login» — the wrong remedy', !!rc.locked && rc.locked.code === 'oat-not-in-folder' && /\(key-unreadable\) — re-login$/.test(APA.unplaceableText(rc.locked)));
   }

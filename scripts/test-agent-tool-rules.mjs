@@ -74,6 +74,15 @@ const HSW = require(path.join(REPO, 'src/harness-settings-words.js'));   // B-82
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -354,7 +363,7 @@ console.log('⑫ r2 controls: each finding\'s pin goes red on a patched copy wit
   ok(!!f6 && f6.describeAgentCommand('vibespace-job rm j_1 --stop').steps[0].key === 'Check on a background job', 'F6 CONTROL: the pre-fix words read `rm --stop` as "Check on a background job" — the F6 pins can go red');
   // F5: the pre-fix adapter (ultracode pushed as its own flag before extraArgs)
   const asrc = fs.readFileSync(path.join(REPO, 'src/adapters/claude-code.js'), 'utf8');
-  const a5s = asrc.replace("      args.push('--effort', 'xhigh');\n", "      args.push('--effort', 'xhigh', '--settings', JSON.stringify({ ultracode: true }));\n").replace('      if (userSettingsMergeable) mergeSettings({ ultracode: true });', '      if (false) mergeSettings({ ultracode: true });');
+  const a5s = editAnchor(editAnchor(asrc, "      args.push('--effort', 'xhigh');\n", "      args.push('--effort', 'xhigh', '--settings', JSON.stringify({ ultracode: true }));\n", "src/adapters/claude-code.js"), '      if (userSettingsMergeable) mergeSettings({ ultracode: true });', '      if (false) mergeSettings({ ultracode: true });', "src/adapters/claude-code.js");
   const A5 = a5s !== asrc ? M.load('src/adapters/claude-code.js', a5s, 'f5').ClaudeCodeAdapter : null;
   const warn = console.warn; console.warn = () => {};
   let n5 = -1; try { n5 = A5 ? new A5({ claudeCmd: 'claude' }).buildSessionArgs({ cwd: '/tmp', mode: 'chat', effort: 'ultracode', extraArgs: ['--settings', '/home/u/s.json'] }).args.filter((x) => x === '--settings').length : -1; } finally { console.warn = warn; }
@@ -397,7 +406,7 @@ console.log('⑬ r3 — the publish ask rule follows the SPAWN mode (our rules n
   // CONTROL: a patched copy of the verdict that ALWAYS injects (the r2 behaviour) goes red on the bypass leg
   const M3 = mutantCopies('agent-tool-rules-r3', REPO);
   const rsrc = fs.readFileSync(path.join(REPO, 'src/agent-tool-rules.js'), 'utf8');
-  const always = rsrc.replace('return ASK_RULE_MODES.includes(mode) ? claudeAskRules() : [];', 'return claudeAskRules();');
+  const always = editAnchor(rsrc, 'return ASK_RULE_MODES.includes(mode) ? claudeAskRules() : [];', 'return claudeAskRules();', "src/agent-tool-rules.js");
   let bypassOnMutant = null;
   if (always !== rsrc) {
     const rp = M3.write('src/agent-tool-rules.js', always, 'r3-always', { esm: false, name: 'agent-tool-rules-r3-always' });

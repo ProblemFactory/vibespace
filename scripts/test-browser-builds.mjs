@@ -44,6 +44,15 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const thr = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
 const BB = require('../src/browser-builds.js');
@@ -1709,7 +1718,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const iA1 = 'const sections = namesOf(sectionsAsked), includeSensitive = namesOf(sensitiveAsked);', iA2 = "if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(";
   if (!pssI.includes(iA1) || !pssI.includes(iA2)) ok(false, 'control (i): the anchors (the section list read once) are not in this tree', { iA1: pssI.includes(iA1), iA2: pssI.includes(iA2) });
   else {
-    const PRi = MUTU.load('src/routes/persistence.js', pssI.replace(iA1, 'const sections = sectionsAsked, includeSensitive = sensitiveAsked;').replace(iA2, "if (Array.isArray(sections) && sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows("), 'two-readers');
+    const PRi = MUTU.load('src/routes/persistence.js', editAnchor(editAnchor(pssI, iA1, 'const sections = sectionsAsked, includeSensitive = sensitiveAsked;', "src/routes/persistence.js"), iA2, "if (Array.isArray(sections) && sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(", "src/routes/persistence.js"), 'two-readers');
     const PDi = path.join(ROOT, 'persist-v3-two-readers'); fs.mkdirSync(PDi, { recursive: true });
     PRi.setup({ dataDir: PDi, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => {} });
     const appI = expressE(); appI.use(expressE.json()); appI.use(PRi.router);
@@ -1758,7 +1767,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const anchor = "    if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id, ...(v.failed ? { failed: v.failed } : {}) }); }";
   // lane engine-args-string r2: the wrapper step refuses a launch with no program by name — the mutant also skips it (a keeper
   // that falls back to Chrome would): absent on an older tree, that second patch is a no-op
-  const fb = ks.replace(anchor, "    if (!v.ok) return {};").replace('        const ew = engineProgramOf(p, buildEnv);', '        const ew = buildEnv.executablePath ? engineProgramOf(p, buildEnv) : { program: null, args: [] };');
+  const fb = editAnchor(editAnchor(ks, anchor, "    if (!v.ok) return {};", "src/server/browser-keeper.js"), '        const ew = engineProgramOf(p, buildEnv);', '        const ew = buildEnv.executablePath ? engineProgramOf(p, buildEnv) : { program: null, args: [] };', "src/server/browser-keeper.js");
   ok(ks.includes(anchor) && fb !== ks, 'control (e): the patch (a keeper that starts Chrome when the engine\'s kernel vanished) applies');
   const Ke = MUT.load('src/server/browser-keeper.js', fb, 'engine-fallback');
   fs.mkdirSync(path.join(ROOT, 'data-ce'), { recursive: true });
@@ -1779,7 +1788,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   // lane engine-spi-egress: (g) the OLD own-argument rule — a plugin's proxy rides; (h) a keeper that does not wrap — the browser unproxied
   const ownAnchor = "const OWN_ARG_RE = /^--?(?:remote-debugging-(?:port|pipe|address)|user-data-dir|proxy-server|proxy-bypass-list|proxy-pac-url|winhttp-proxy-resolver|no-proxy-server|proxy-auto-detect)(?:=|$)/;";
   const proxAnchor = '    const proxied = args.map(switchFormOf).filter((a) => PROXY_ARG_RE.test(a));'; // L1b r4: the rule reads the trimmed form
-  const ENg = MUT.load('src/browser-engines.js', es.replace(ownAnchor, 'const OWN_ARG_RE = /^--(?:remote-debugging-(?:port|pipe|address)|user-data-dir)(?:=|$)/;').replace(proxAnchor, '    const proxied = [];'), 'old-own-args');
+  const ENg = MUT.load('src/browser-engines.js', editAnchor(editAnchor(es, ownAnchor, 'const OWN_ARG_RE = /^--(?:remote-debugging-(?:port|pipe|address)|user-data-dir)(?:=|$)/;', "src/browser-engines.js"), proxAnchor, '    const proxied = [];', "src/browser-engines.js"), 'old-own-args');
   ok(es.includes(ownAnchor) && es.includes(proxAnchor) && ENg.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--proxy-server=http://evil.test:8080'] } }, { id: EID }).ok === true, 'control (g): the base\'s own-argument rule ACCEPTS a plugin\'s --proxy-server — exactly what ⑦\'s V1 row catches');
   const wrapAnchor = '    const egress = engine.egress || pproxy ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || \'\', ...(engine.egress ? { setting: engine.egress.setting, fallback: engine.egress.default } : {}), ...(pproxy ? { proxy: pproxy } : {}) }) : null;';   // B-8b87: + a profile's proxy rides the same egress pair
   if (!ks.includes(wrapAnchor)) ok(false, 'control (h): the anchor (the keeper\'s wrap) is not in this tree', wrapAnchor);
@@ -2467,7 +2476,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   const judgeAnchor = "      if (!p || p.sha256 !== sha256) return { ok: false, why: 'stale', p };\n";
   ok(EDS.includes(shaAnchor) && EDS.includes(judgeAnchor), 'control: the sha256 check\'s anchor (and the landing judge\'s) is in engine-distribution.js');
   const { mutantCopies: mutantCopies8 } = await import('./mutant-copy.mjs');
-  const EDx = mutantCopies8('builds-kernel', REPO).load('src/server/engine-distribution.js', EDS.replace(shaAnchor, "    if (false) throw named('build_verify_failed',").replace(judgeAnchor, ''), 'no-sha');
+  const EDx = mutantCopies8('builds-kernel', REPO).load('src/server/engine-distribution.js', editAnchor(editAnchor(EDS, shaAnchor, "    if (false) throw named('build_verify_failed',", "src/server/engine-distribution.js"), judgeAnchor, '', "src/server/engine-distribution.js"), 'no-sha');
   const EDxi = EDx.create({ dataDir: path.join(EROOT, 'data'), engines: ENGR, loader: LDR, resolveUrl, log: { log() {}, warn() {} } });
   writeKJ('/k.tar.zst', 'a'.repeat(64), { bytes: ARCH.length });
   const ex8 = await thrK(EDxi.installKernel(EID, { wait: true }));

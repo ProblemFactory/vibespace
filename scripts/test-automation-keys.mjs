@@ -97,6 +97,15 @@ const { UserTodoManager } = R('src/user-todos.js');
 const OPS = R('src/server/conversation-ops.js');
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), m, { got: a, want: b });
 const M = mutantCopies('automation-keys', ROOT);
 const SRC = fs.readFileSync(path.join(ROOT, 'src/automation-keys.js'), 'utf8');
@@ -368,7 +377,7 @@ const hitsIn = (dir, needles) => { const out = []; const walk = (d) => { for (co
   const ESRC = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8');
   const needle = 'const pairOf = (keyId, subject, verb) => `${keyId}|${subject}|${verb}`;';
   ok(ESRC.split(needle).length === 2, 'ANCHOR: the card\'s pair is spelled once');
-  const MX = M.load('src/server/automation-engine.js', ESRC.replace(needle, 'const pairOf = (keyId, subject) => `${keyId}|${subject}`;').replace("grant(q.keyId, [q.subject], { by: answeredBy, mode: a === 'always' ? 'always' : 'once', fromAsk: true })", "grant(q.keyId, [q.subject], { by: answeredBy, mode: a === 'always' ? 'always' : 'once' })"), 'one-card');
+  const MX = M.load('src/server/automation-engine.js', editAnchor(editAnchor(ESRC, needle, 'const pairOf = (keyId, subject) => `${keyId}|${subject}`;', "src/server/automation-engine.js"), "grant(q.keyId, [q.subject], { by: answeredBy, mode: a === 'always' ? 'always' : 'once', fromAsk: true", "grant(q.keyId, [q.subject], { by: answeredBy, mode: a === 'always' ? 'always' : 'once'", "src/server/automation-engine.js"), 'one-card');
   const ranX = [];
   const wx = await mkWorld('ask-one-card', { verbs: { 'conversations.rename': () => { ranX.push('rename'); return { ok: true }; }, 'conversations.open': () => { ranX.push('open'); return { ok: true }; } } });
   const ex = MX.create({ dataDir: wx.dir, vault: wx.vault, userTodos: wx.userTodos, now: wx.now, verbs: { 'conversations.rename': () => { ranX.push('rename'); return { ok: true }; }, 'conversations.open': () => { ranX.push('open'); return { ok: true }; } } });
@@ -872,7 +881,7 @@ console.log('⑫b MUTANT — the limits judged AFTER the spend authorizer (insid
     }`;
   const act = '    try { result = await impl(runArgs, { caller, keyId: key.id, scopes: Array.isArray(key.scopes) ? key.scopes.slice() : [], identity: A.identityOf(key.id), grant: verdict.grant, reach }); }';   // + scopes: lane login-request-card
   ok(ESRC.split(judge).length === 2 && ESRC.split(act).length === 2, 'ANCHOR: the judge and the act are each spelled once');
-  const MX = M.load('src/server/automation-engine.js', ESRC.replace(judge, '    let runArgs = v0.args;').replace(act, `    try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); if (verb === 'conversations.open') { const lim = await limitsJudge(keyById(key.id) || key, v0.args); if (!lim.ok) result = lim; } }`), 'limits-after');
+  const MX = M.load('src/server/automation-engine.js', editAnchor(editAnchor(ESRC, judge, '    let runArgs = v0.args;', "src/server/automation-engine.js"), act, `    try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); if (verb === 'conversations.open') { const lim = await limitsJudge(keyById(key.id) || key, v0.args); if (!lim.ok) result = lim; } }`, "src/server/automation-engine.js"), 'limits-after');
   const rig = judgeRig();
   const w = await mkWorld('judge-mutant');
   const e = judgeEngine(MX, w, rig);
@@ -973,8 +982,8 @@ const B3190 = (() => {
   // lane lg-group-parents U3d: the target's lineage as handed + whether its groups could be read (the line carries its comment)
   const FACTS = "  const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds: (Array.isArray(t.groups) ? t.groups : []).filter(Boolean).map(String), inheritedGroupIds: Array.isArray(t.inherited) ? t.inherited.filter(Boolean).map(String) : t.inherited, groupsUnreadable: t.groupsUnreadable === true };   // the U3d read (2, 3): a lineage that could not be read is unreadable\n";
   const anchored = () => SRC.split(SIG).length === 2 && SRC.split(FACTS).length === 2;
-  const oldB = (carve = true) => SRC.replace(SIG, SIG.replace('target = {}, ', 'target = {}, grants = [], ')).replace(FACTS, FACTS
-    + `  if ((Array.isArray(grants) ? grants : []).map(grantOf).some((g) => { if (!g || g.keyId !== keyId || g.subject === 'external') return false; const v = GM.admits([useRowOf(g)].filter(Boolean), facts); return v.ok${carve ? " && v.via !== 'everyone'" : ''}; })) return { ok: true, by: 'grant' };\n`);
+  const oldB = (carve = true) => editAnchor(editAnchor(SRC, SIG, SIG.replace('target = {}, ', 'target = {}, grants = [], '), "src/automation-keys.js"), FACTS, FACTS
+    + `  if ((Array.isArray(grants) ? grants : []).map(grantOf).some((g) => { if (!g || g.keyId !== keyId || g.subject === 'external') return false; const v = GM.admits([useRowOf(g)].filter(Boolean), facts); return v.ok${carve ? " && v.via !== 'everyone'" : ''}; })) return { ok: true, by: 'grant' };\n`, "src/automation-keys.js");
   return { anchored, oldB };
 })();
 

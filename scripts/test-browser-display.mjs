@@ -40,6 +40,15 @@ const S = require('../src/browser-stream.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const REPO = new URL('..', import.meta.url).pathname;
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -677,7 +686,7 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   const plannedLine = '    const planned = (file) => (rec && rec.display && file ? displays.fileFor(file, rec.display) : file);';
   ok(src.includes(factLine) && src.includes(envLine) && src.includes(plannedLine), 'CONTROL setup: the launch\'s fact line and /resolve\'s planned-file line are found in the keeper');
   // (i) THE PRE-FIX LAUNCH: no fact ⇒ the preference decides ⇒ the incident, reproduced
-  const pre = MK.load('src/server/browser-keeper.js', src.replace(factLine, '        rec.display = null;').replace(envLine, '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: env0 });'), 'no-fact');
+  const pre = MK.load('src/server/browser-keeper.js', editAnchor(editAnchor(src, factLine, '        rec.display = null;', "src/server/browser-keeper.js"), envLine, '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: env0 });', "src/server/browser-keeper.js"), 'no-fact');
   const kPre = mkKeeper(pre);
   Rt.setup({ keeper: kPre, activeSessions: sessions, browserEnv: () => null, adoptRoots: { homeDir: fakeHome, dataDir: DATA }, tasksForSession: () => [] });
   const s1 = mkSession('sess-c1', KEY_C1, 'c', pairsN(KEY_C1), 'N');
