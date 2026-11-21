@@ -284,6 +284,9 @@ console.log('④ L3 one event\'s strings: an over-long id dropped AND counted, n
   const sameE = fs.statSync(cfE).ino === inoE;
   await led.ingestRemoteEvents('host-e', 'box-e', '', { cursors: { '/p/a.jsonl': { offset: 99, lastRid: 'r9' } }, since: 'hub' });
   ok(sameE && fs.statSync(cfE).ino !== inoE && led.hostCursorOf('host-e').cursors['/p/a.jsonl'].offset === 99, 'the hub\'s kept cursor file is written only when the cursor moved — the same cursors again rewrite nothing (the same inode), a moved one is written', { same: sameE });
+  const onDisk = JSON.parse(fs.readFileSync(cfE, 'utf8')), dig = led._hostCursorDigest && led._hostCursorDigest.get('host-e');
+  ok(!led._hostCursorJson && typeof dig === 'string' && dig.length === 44 && onDisk.cursorsDigest === dig && onDisk.cursors['/p/a.jsonl'].offset === 99 && onDisk.v === 1,
+    'r806: the hub keeps the map\'s DIGEST to compare (44 characters a machine), never a second copy of its text; the record is written from the one string, its digest in it (a restart compares without a second stringify)', { dig: dig && dig.length, keys: Object.keys(onDisk) });
   // (r557 (2)) no bound named (an OLDER hub keeps no cursor of an event-less walk): the default bound fires only once an event went
   const hn = homeOf('l3-floor'); put(path.join(projOf(hn, '-home-u-floor'), SID1 + '.jsonl'), Array.from({ length: 5 }, () => JSON.stringify({ type: 'user', timestamp: TS }) + '\n').join('') + rec('req_n1') + rec('req_n2') + rec('req_n3'));
   const bare = walk(W, hn, { maxMs: 500, now: seqClock([0]) }), floor = walk(W, hn, { maxMs: 500, now: seqClock([0]), needEvent: true });

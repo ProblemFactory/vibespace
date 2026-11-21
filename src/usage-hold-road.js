@@ -1577,15 +1577,21 @@ class UsageHoldRoad {
     const prev = this.hostCursorOf(hostId);
     // B-5278 (the coordinator's r557 (3)): written only when the cursor MOVED — an acked harvest that found nothing hands its
     // cursors over too (B-5278 unit 1), and the release's writer rewrote the whole map each time (tens of MB a minute a host
-    // on a big machine, a synchronous write on the loop)
+    // on a big machine, a synchronous write on the loop). r806: NO SECOND COPY OF THE MAP — it is stringified ONCE, only its
+    // digest (sha-256, in the record too: a restart compares without a second stringify) is kept to compare, and the record
+    // is written from that same string (the map last in it)
     const json = JSON.stringify(cursors);
-    if (!this._hostCursorJson) this._hostCursorJson = new Map();
-    const was = this._hostCursorJson.has(hostId) ? this._hostCursorJson.get(hostId) : (prev ? JSON.stringify(prev.cursors) : null);
-    if (prev && prev.since === since && was === json) { this._hostCursorJson.set(hostId, json); return prev; }
-    const rec = { v: 1, host: String(hostId), cursors, since, lastTs: lastTs || (prev && prev.lastTs) || null, lastRid: lastRid || (prev && prev.lastRid) || null, events, at: Date.now() };
-    timedSync('usage-host-cursors.write', () => { fs.mkdirSync(this.hostCursorsDir, { recursive: true }); this._writeAtomic(this._hostCursorFile(hostId), JSON.stringify(rec)); });
+    const digest = require('crypto').createHash('sha256').update(json).digest('base64');
+    if (!this._hostCursorDigest) this._hostCursorDigest = new Map();
+    const was = this._hostCursorDigest.has(hostId) ? this._hostCursorDigest.get(hostId)
+      : prev ? (prev.cursorsDigest || require('crypto').createHash('sha256').update(JSON.stringify(prev.cursors)).digest('base64')) : null;
+    if (prev && prev.since === since && was === digest) { this._hostCursorDigest.set(hostId, digest); return prev; }
+    const head = { v: 1, host: String(hostId), since, lastTs: lastTs || (prev && prev.lastTs) || null, lastRid: lastRid || (prev && prev.lastRid) || null, events, at: Date.now(), cursorsDigest: digest };
+    const text = JSON.stringify(head).slice(0, -1) + ',"cursors":' + json + '}';
+    timedSync('usage-host-cursors.write', () => { fs.mkdirSync(this.hostCursorsDir, { recursive: true }); this._writeAtomic(this._hostCursorFile(hostId), text); });
+    const rec = { ...head, cursors };
     this._hostCursors.set(hostId, rec);
-    this._hostCursorJson.set(hostId, json);
+    this._hostCursorDigest.set(hostId, digest);
     return rec;
   }
   /** The warm still loading past the takeover bound → {bytesLeft, at}, else null. A sync reader meanwhile answers from the
