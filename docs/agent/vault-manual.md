@@ -71,7 +71,9 @@ Ask again after the unlock.
 - `vault://agent:<scope>/<name>` — YOUR OWN entries (`mint` / `put`): the scope is this conversation, added by the hub; you
   choose only `<name>` (letters, digits, `.` `_` `-`). **Yours to use with no switch, no grant and no card** — this
   conversation runs with them without asking anyone (it keeps them if it ends and comes back). Another conversation's own
-  entry is never yours (`use_not_granted`).
+  entry is yours only when the user shares it with you — for the hosts its row names (`vibespace-vault list` shows it);
+  anything else is `use_not_granted`. A run that names a shared entry never draws a card: every other entry in it is judged
+  by its own rule, and `run_not_admitted` names the first one that is not admitted, with why.
 - **Never referenced by a run**: sign-in and login tokens, machine pairing tokens, channel tokens, passkeys, automation
   keys, the stores' own keys — each has its own door (`entry_has_its_own_door` names it).
 
@@ -351,6 +353,7 @@ password you were handed in the chat when they can.
 | `human_only` | a person's door (unlock, set up, change, show a value, open for runs, answer a card) | the page |
 | `entry_not_runnable` | the entry is closed for runs (never one of your own) | the Vault window row's «Usable by agent runs» — or your `request` in For you |
 | `use_not_granted` | this conversation may not use it (another conversation's own entry, or a grant that ended) | your `request` in For you |
+| `run_not_admitted` (+ `why`) | a run that names an entry shared with you: each entry is judged by its own rule and the one named is not admitted (a value you minted for another host, an entry with no standing approval for you) — such a run never draws a card | run that entry on its own (it draws its own card), or without the shared entry |
 | `entry_has_its_own_door` | a sign-in / pairing / channel token, a passkey, a key | the door the answer names (Channels panel, Accounts…) |
 | `entry_unknown` | no such entry (any more) | — (`vibespace-vault list`) |
 | `request_pending` · `request_quiet` | you already asked for that entry / the user said no a moment ago (10 minutes) | For you (the open question) |
