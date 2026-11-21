@@ -148,6 +148,10 @@ const LOGS_REST_FACTOR = 10; // lane job-logs-sweep r2: a pass rests ≥ 10× it
 const LOGS_RETRY_MS = 300_000; // lane job-logs-sweep: a failed pass inside an open catch-up is retried after 5 min (a held remover, a storage that did not answer)
 const LOGS_OWED_MAX = 5000; // lane job-logs-sweep: whole-dir removals owed after a held / failed batch, kept in memory at most
 const ARCHIVE_SWEEP_MS = 5 * 60 * 1000;
+// B-360d (the owner's hub on 2.369.413: two loop holds of 1.2 and 1.4 s at the stamp read, from the collection pass — a synchronous
+// open blocked on the data folder's mount): every file ask of the collection pass runs OFF the loop, ONE at a time, the whole pass
+// bounded by this; what does not answer in it is UNKNOWN, and nothing is collected on an unknown
+const GC_FILES_MS = 10000;
 // A STOP'S GRACE and THE REAP'S BOUND (lane jobs-memory-bound, acceptance round 5): a stop's SIGTERM, then STOP_GRACE_MS before
 // the kill step — the owner's stop, a timeout, an until-marker and a stop the sweep honors alike (the tick never cuts it short);
 // a read of a scope's cgroup.procs answers within REAP_READ_MS or the run is judged without it (a busy threadpool never holds
@@ -3819,31 +3823,68 @@ class JobManager {
       this._spawn(child, trigger);
     }
   }
+  /** B-360d — ONE FILE ASK OF THE COLLECTION PASS, off the loop (`make` → an fs.promises call), waited on until `until` (an instant).
+   *  A read that has not come back is NEVER started again beside itself (the file-thread outage class: one pool thread at most):
+   *  while one is out — this pass's or an earlier pass's — the pass asks nothing more. → {v} (its answer) | {e} (its error, an
+   *  answer too: no such file) | null — UNKNOWN: it did not answer in time, or one is still out */
+  async _gcAsk(make, until) {
+    if (this._gcOut) return null;
+    const left = until - Date.now();
+    if (!(left > 0)) return null;
+    const p = Promise.resolve().then(make).then((v) => ({ v }), (e) => ({ e }));
+    this._gcOut = p;
+    let timer = null;
+    const got = await Promise.race([p, new Promise((r) => { timer = setTimeout(() => r(null), left); timer.unref?.(); })]);
+    clearTimeout(timer);
+    if (got) { if (this._gcOut === p) this._gcOut = null; return got; }
+    p.then(() => { if (this._gcOut === p) this._gcOut = null; });   // the slot frees when the read answers — never before
+    return null;
+  }
   async _gc({ now: at = now() } = {}) {
     if (this.readOnly) return;
     const cutoff = at - 14 * 86400e3, whole = [], gone = [];
-    try { // spill files: age-swept alongside the records they narrate
+    // B-360d: NO SYNCHRONOUS FILE CALL OF THIS PASS ON THE LOOP — each ask is off it (_gcAsk: one at a time), the pass bounded by
+    // GC_FILES_MS; an ask that does not answer in time is UNKNOWN, and nothing is collected on an unknown (never a guess)
+    const until = Date.now() + (Number(this.d.gcFilesMs) > 0 ? Number(this.d.gcFilesMs) : GC_FILES_MS);
+    let unknown = 0;
+    { // spill files: age-swept alongside the records they narrate
       const dir = path.join(this.d.dataDir, 'job-notifications-read');
-      for (const f of fs.readdirSync(dir)) {
-        try { if (fs.statSync(path.join(dir, f)).mtimeMs < cutoff) fs.unlinkSync(path.join(dir, f)); } catch { }
-      }
-    } catch { }
-    for (const [id, job] of this.jobs) {
-      const stamp = this._readStamp(job);
-      if (this._verifyAlive(stamp)) continue; // NEVER gc live work, regardless of record state
-      if (job.kind === 'task' && ['done', 'interrupted'].includes(job.state)) {
-        // B-c17d: a cron's child is its RUN RING while the parent still schedules fires (the archive sweep's own question) — a
-        // cron that fires less often than every 14 days (monthly) lost its child, its run list and its journal between two fires
-        if (this._cronParentActive(job)) continue;
-        const run = job.runs && job.runs[job.runs.length - 1];
-        if (run && run.endedAt && run.endedAt < cutoff) {
-          if (this._notifsUnread && job.clearedAt) continue;   // the B-f276 remainder (5), its read r3 (S2): its record judges the held notices
-          this.jobs.delete(id); this._dirty = true;
-          (this._removalOwed || (this._removalOwed = new Map())).set(id, job);   // the moved2 census: its logs kept until the removal lands
-          whole.push(id); gone.push(id);
+      const ls = await this._gcAsk(() => fs.promises.readdir(dir), until);
+      if (!ls) unknown++;
+      else if (Array.isArray(ls.v)) {
+        for (const f of ls.v) {
+          const fp = path.join(dir, f), st = await this._gcAsk(() => fs.promises.stat(fp), until);
+          if (!st) { unknown++; break; }
+          if (st.v && st.v.mtimeMs < cutoff && !(await this._gcAsk(() => fs.promises.unlink(fp), until))) { unknown++; break; }
         }
       }
     }
+    // THE STAMP DECIDES ONLY FOR A RECORD THIS PASS WOULD COLLECT (B-360d): those are found first, and only their stamps are read
+    const collectable = (job) => {
+      if (job.kind !== 'task' || !['done', 'interrupted'].includes(job.state)) return false;
+      // B-c17d: a cron's child is its RUN RING while the parent still schedules fires (the archive sweep's own question) — a
+      // cron that fires less often than every 14 days (monthly) lost its child, its run list and its journal between two fires
+      if (this._cronParentActive(job)) return false;
+      const run = job.runs && job.runs[job.runs.length - 1];
+      if (!(run && run.endedAt && run.endedAt < cutoff)) return false;
+      return !(this._notifsUnread && job.clearedAt);   // the B-f276 remainder (5), its read r3 (S2): its record judges the held notices
+    };
+    for (const [id, job] of [...this.jobs]) {
+      if (!collectable(job)) continue;
+      const run = job.runs[job.runs.length - 1];
+      const got = await this._gcAsk(() => fs.promises.readFile(path.join(this._ctlDir(job, run.startedAt), 'pid.json'), 'utf-8'), until);
+      if (!got) { unknown++; continue; }   // UNKNOWN: its stamp did not answer — nothing of it is collected this pass
+      let stamp = null;
+      if (typeof got.v === 'string') { try { stamp = JSON.parse(got.v); } catch { stamp = null; } }
+      if (this._verifyAlive(stamp)) continue; // NEVER gc live work, regardless of record state
+      if (this.jobs.get(id) !== job || !collectable(job)) continue;   // the record moved while its stamp was read (a restart, a removal)
+      this.jobs.delete(id); this._dirty = true;
+      (this._removalOwed || (this._removalOwed = new Map())).set(id, job);   // the moved2 census: its logs kept until the removal lands
+      whole.push(id); gone.push(id);
+    }
+    if (unknown) {
+      if (!this._gcUnknownSaid) { this._gcUnknownSaid = true; this.d.log(`[jobs] the collection pass: ${unknown} file read(s) did not answer in time (the data folder's storage may hang) — nothing of theirs is collected; the next pass asks again once the read that is out has come back (said once)`); }
+    } else this._gcUnknownSaid = false;
     // ARCHIVED records keep their record (the cap bounds it) but their log
     // dirs follow the SAME 14-day retention as a live record's (triage §13)
     try {
@@ -4653,4 +4694,4 @@ class JobManager {
   _hum(ms) { const m = Math.round(Math.abs(ms) / 60000); return m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; }
 }
 
-module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS, jobEnv, wrapperEnv, WRAPPER_ENV_KEEP, WRAPPER_PROTO, UPDATE_WINDOW_MS };
+module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS, GC_FILES_MS, jobEnv, wrapperEnv, WRAPPER_ENV_KEEP, WRAPPER_PROTO, UPDATE_WINDOW_MS };

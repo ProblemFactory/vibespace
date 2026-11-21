@@ -77,7 +77,7 @@ try {
   {
     // f. §S, stronger: every removal call of jobs.js is a listed site; no alias of a removing fs call; the record never written by hand
     const JS4 = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
-    const REMOVALS_OK = ['fs.renameSync(file', 'fs.renameSync(tmp', 'fs.unlinkSync(path.join(dir', 'fs.unlinkSync(specPath', 'fs.unlinkSync(this.lockFile', 'fs.promises.rename(f', 'fs.promises.rename(file'];   // bl-jobs B-f276 cure r1: + the lifted note's rename to <store>.unread-done-<ms>; r2: + the late load's set-aside of a store (off the loop)
+    const REMOVALS_OK = ['fs.renameSync(file', 'fs.renameSync(tmp', 'fs.promises.unlink(fp', 'fs.unlinkSync(specPath', 'fs.unlinkSync(this.lockFile', 'fs.promises.rename(f', 'fs.promises.rename(file'];   // bl-jobs B-f276 cure r1: + the lifted note's rename to <store>.unread-done-<ms>; r2: + the late load's set-aside of a store (off the loop)
     const removals = [...JS4.matchAll(/fs\.(?:unlink|rm|rmdir|rename)Sync\(\s*[^,)]*|fs\.promises\.(?:rm|unlink|rmdir|rename)\(\s*[^,)]*/g)].map((m) => m[0]);
     const strangers = removals.filter((r) => !REMOVALS_OK.includes(r));
     ok(removals.length === 8 && !strangers.length, `jobs.js's removal calls are exactly the listed eight (the set-aside renames of a store — at boot and in the late load —, the atomic writes' renames, the spill files, a failed spawn's own spec, the lock, the lifted note's rename) — none under job-logs by another helper${strangers.length ? ': ' + strangers.join(' | ') : ''}`);

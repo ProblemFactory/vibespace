@@ -744,7 +744,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
   // each); (S1) the read waits while the job records that judge its notices are held; (S2) the hourly gc keeps a CLEARED record
   // while the notices are held (its record judges them)
   {
-    const SLOT = '    const read = await p; clearTimeout(tm);\n', JUDGE = "    if (this._unread.store || this._unread.archive) { done();", GCK = '          if (this._notifsUnread && job.clearedAt) continue;';
+    const SLOT = '    const read = await p; clearTimeout(tm);\n', JUDGE = "    if (this._unread.store || this._unread.archive) { done();", GCK = '      return !(this._notifsUnread && job.clearedAt);';   // B-360d: the pass's `collectable` predicate
     ok(JSRC.split(SLOT).length === 2 && JSRC.split(JUDGE).length === 2 && JSRC.split(GCK).length === 2, 'control setup: the anchors of the r3 controls are in jobs.js');
     const r3 = async (Mod, name) => {
       const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
@@ -777,7 +777,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
     ok(g.whileHung === 1 && g.waitedForRecords === true && g.gcKept, 'its read r3: a hung read keeps its one slot (no second read per try — M1), the read waits while the job records are held (S1), the gc keeps a cleared record while the notices are held (S2)', g);
     const gx = await r3(MJ.load('src/jobs.js', anchored(JSRC, SLOT, '    this._notifsP = null; const read = await p; clearTimeout(tm);   /* MUTANT: the slot freed at once */\n', 'srl-778a'), 'r3-slot'), 'notifs-r3-slot');
     const gj = await r3(MJ.load('src/jobs.js', anchored(JSRC, JUDGE, '    if (false) { done();', 'srl-779a'), 'r3-judge'), 'notifs-r3-judge');
-    const gg = await r3(MJ.load('src/jobs.js', anchored(JSRC, GCK, '          /* MUTANT: gc as before */', 'srl-780a'), 'r3-gc'), 'notifs-r3-gc');
+    const gg = await r3(MJ.load('src/jobs.js', anchored(JSRC, GCK, '      return true; /* MUTANT: gc as before */', 'srl-780a'), 'r3-gc'), 'notifs-r3-gc');
     ok(gx.whileHung === 2 && gj.waitedForRecords === false && !gg.gcKept, 'CONTROLS (each cure cut alone, in a copy): a second read starts while the first hangs; the notices are merged while their records are held; the gc removes the cleared record', { gx, gj, gg });
   }
   // its read r4 (S1): the boot found the JOB RECORDS held (jobs.json unreadable) and read the notices UNJUDGED — when the records read

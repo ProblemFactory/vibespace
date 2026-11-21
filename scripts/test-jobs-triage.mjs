@@ -616,9 +616,9 @@ console.log('§13 B-c17d: a monthly cron keeps its child (its run ring) between 
     // CONTROL (scripts/mutant-copy.mjs): the release's gc — leg (a) never asks the parent
     const MJ = mutantCopies('jobs-cron-gc-c17d', ROOT);
     const jsrc = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
-    const guard = '        if (this._cronParentActive(job)) continue;\n';
+    const guard = '      if (this._cronParentActive(job)) return false;\n';   // B-360d: the pass asks it in its `collectable` predicate
     ok(jsrc.split(guard).length === 2, 'B-c17d control setup: the gc asks the parent on one line');
-    const JMod = MJ.load('src/jobs.js', jsrc.replace(guard, '        // MUTANT: the release — the gc never asks the parent\n'));
+    const JMod = MJ.load('src/jobs.js', jsrc.replace(guard, '      // MUTANT: the release — the gc never asks the parent\n'));
     const d13c = mkDir('jobs-triage-cron-gc-mut'); seed(d13c);
     const X = new JMod.JobManager({ dataDir: d13c, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy });
     X.init(); await X._gc({ now: T0 });
