@@ -662,9 +662,11 @@ ok(P && P.unclaimed.length === 1 && /Frobnicate/.test(P.unclaimed[0].s), 'CONTRO
   const K3 = [...words.keys()].find((k) => k.endsWith('Every other option in this section only applies while this is ON.'));
   const v3 = (VALUES.get(K3) || {}).ja || '', back = v3.replace('このセクションの他のオプションはすべて、', '以下のオプションはすべて');   // stale-pins: kept — the control puts the cured value back on purpose
   const vj = new Map(VALUES); if (K3) vj.set(K3, { ...(VALUES.get(K3) || {}), ja: back });
-  const J = K3 ? census(words, vj).find((c) => c.scope === 'ui') : null;
-  ok(!!K3 && back !== v3 && !netOf(UIT, K3) && !!J && J.unclaimed.length === 1 && J.unclaimed[0].s === K3,
-    'CONTROL (B-8703 unit 2): the ja «以下のオプション» put back is RED by its English form (the ja net reads «以下の» + a control\'s word); the cured value is caught by no net', { K3: !!K3, changed: back !== v3, unclaimed: J && J.unclaimed.map((x) => x.s) });
+  // the census judges each sentence alone, so a census of this one sentence gives it the whole census's verdict (no second full pass)
+  const one = new Map(K3 ? [[K3, words.get(K3)]] : []);
+  const J = K3 ? census(one, vj).find((c) => c.scope === 'ui') : null, J0 = census(one);
+  ok(!!K3 && back !== v3 && !netOf(UIT, K3) && !!J && J.unclaimed.length === 1 && J.unclaimed[0].s === K3 && J0.every((c) => c.unclaimed.length === 0),
+    'CONTROL (B-8703 unit 2): the ja «以下のオプション» put back is RED by its English form (the ja net reads «以下の» + a control\'s word); the cured value is caught by no net', { K3: !!K3, changed: back !== v3, unclaimed: J && J.unclaimed.map((x) => x.s), cured: J0.map((c) => c.unclaimed.length) });
 }
 const fc = ui && ui.rows.get('folder-create');
 const stripped = (f) => (f === 'src/lib/path-field.js' ? (sources.get(f) || '').replace(/data-act="tick"/g, 'data-act="gone"') : sources.get(f) || '');
