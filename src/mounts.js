@@ -379,6 +379,7 @@ class MountManager {
         const tmp = `${cached}.tmp-${process.pid}`;
         execFile('sh', ['-c', `cp "${binPath}" "${tmp}" && chmod 755 "${tmp}" && mv "${tmp}" "${cached}"`], { timeout: 180000 }, (err) => {
           this._fastBinCopying = false;
+          if (err) this._fastBinMemo = { src: binPath, use: binPath };   // B-323e: a FAILED copy is remembered (the network path stands) — never redone at every rcloneBin() (each list of the mounts)
           if (!err) {
             try {
               for (const f of fs.readdirSync(cacheDir)) { // prune superseded copies

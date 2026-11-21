@@ -1819,7 +1819,7 @@ await section(async () => {
     { file: 'src/sysinfo.js', needle: "runProgram('ps', ['aux', '--sort=-rss']", why: 'ONE per sysinfo read (topProcs), never per item; PS_MAX_BUFFER governs its size (B-360d: on the hub through its starter, never a fork of the hub).' },
     { file: 'src/sysinfo.js', needle: "runProgram('ps', ['aux']", why: 'ONE per sysinfo read — the fallback for a `ps` with no --sort.' },
     { file: 'src/sysinfo.js', needle: "runProgram('ps', ['axo', PS_COLUMNS]", why: 'ONE per process-list read (listProcs), the System panel table.' },
-    { file: 'src/server/memory-pressure-watch.js', needle: "execFile('ps', ['axo', 'pid=,ppid=,rss=,comm=,args=']", why: 'ONE per memory-pressure EPISODE start + ONE per 5-min own-Chrome scan (lane browser-resource-care) — async, never per process; PS_MAX_BUFFER governs its size.' },
+    { file: 'src/server/memory-pressure-watch.js', needle: "via('ps', ['axo', 'pid=,ppid=,rss=,comm=,args=']", why: 'ONE per memory-pressure EPISODE start + ONE per 5-min own-Chrome scan (lane browser-resource-care) — async, never per process; PS_MAX_BUFFER governs its size; through the hub\'s starter since B-323e.' },
     { file: 'src/transcript-service.js', needle: "execFileSync('fuser', [fp]", why: 'ONE per human-triggered `rescue` — the two-writer refusal. Not on any poll.' },
     { file: 'src/incident.js', needle: "sh('ps', ['-eo', 'pid,ppid,lstart,etime,rss,stat,args']", why: 'ONE per HUMAN-TRIGGERED incident capture ("Report a problem"), and the WHOLE-TABLE form — the frozen scene is exactly what a human needs and /proc would only re-implement `ps`. Not on any poll, create or kill. Spelled through a promisified alias, which is why TOOL_FIRST exists.' },
   ];
@@ -1882,7 +1882,7 @@ await section(async () => {
     `(b) every sweep fact resolves to exactly ONE defining module (${ambiguous.join(' | ') || 'clean'})`);
   const SWEEP_ALLOWED = [
     { file: 'src/session-store.js', needle: 'execFile(cmd, args,', why: 'THE async exec primitive itself, the body of execFileP. It starts nothing on its own — this census is about its CALLERS.' },
-    { file: 'src/session-store.js', needle: "execFileP('tmux', ['list-panes'", why: 'ONE PER SWEEP, and only where a `tmux` binary is on PATH (statted, never `which`); the map is cached for TMUX_MAP_TTL_MS so a create/kill burst shares it. This is the one child process a sweep may start.' },
+    { file: 'src/session-store.js', needle: "childStarter().run('tmux', ['list-panes'", why: 'ONE PER SWEEP, and only where a `tmux` binary is on PATH (statted, never `which`); the map is cached for TMUX_MAP_TTL_MS so a create/kill burst shares it. Asked of the hub\'s STARTER by the main thread since B-323e (the sweep\'s worker is handed the map) — the one child a sweep may cause.' },
     { file: 'src/session-store.js', needle: "execFileP('ps', ['-p', String(pid), '-o', 'comm=']", why: 'NO-/proc FALLBACK ONLY (isProcessClaudeAsync) — see (a).' },
     { file: 'src/cli-identity.js', needle: "execImpl('ps', ['-p', String(pid), '-o', 'args=']", why: 'NO-/proc FALLBACK ONLY (procArgv) — see (a).' },
     { file: 'src/cli-identity.js', needle: "execImpl('ps', ['-p', String(pid), '-o', 'uid=,args=']", why: 'NO-/proc FALLBACK ONLY (readPsIdentity) — see (a).' },
@@ -6351,6 +6351,26 @@ await section(async () => {
   const argv93 = s93.sites.flatMap((x) => (x.argv || []).map((w) => w.name));
   ok(j93.red.length === 0, `§94 ${s93.sites.length} child sites + ${s93.copies.length} whole-env copies: every raw one a row with its reason ${JSON.stringify(cls93)}; ${argv93.length} NAME=value words on argv, none secret-shaped${argv93.length ? ' (' + [...new Set(argv93)].join(' ') + ')' : ''}; ${j93.roads.length} ssh roads ${JSON.stringify(road93)}${j93.red.length ? ' — RED: ' + j93.red.join(' | ') : ''}`);
   { const rd94b = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { return ''; } }, pr94b = C.priorityJudge(rd94b, C.filesOf(REPO)); ok(!pr94b.length, `§94b B-460d THE PRIORITY ROADS (scripts/spawn-env-census.mjs): ${C.PRIORITY_ROADS.length} places, every session line a row or an exception (${C.PRIORITY_EXCEPT.length}) — what a local conversation or a job starts takes nice -n 5 there; mutants in test-session-spawn-line ④${pr94b.length ? ' — ' + pr94b.join(' | ') : ''}`); }
+  // §94c B-323e's RATCHET (lane bl-keys-misc, 主开发 r1351): EVERY DIRECT START OF THE HUB NAMES WHAT FIRES IT (scripts/start-triggers.mjs) —
+  // a press, a start, a long-lived child, a TIMER (a debt that only shrinks), another process; a synchronous start on a timer is red
+  // with no row possible (save the platform-guarded rows the ruling holds)
+  { const ST = await import('./start-triggers.mjs'); const rd94c = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { return ''; } };
+    const sync94c = ST.syncScan(REPO, C.filesOf(REPO)), j94c = ST.judge({ sites: s93.sites, syncSites: sync94c, read: rd94c });
+    for (const p of j94c.paid) console.log(`    paid  ${p}`);
+    ok(j94c.red.length === 0, `§94c B-323e THE START CENSUS: ${s93.sites.filter((x) => ST.hubFile(x.file)).length} direct starts + ${sync94c.length} synchronous ones in the hub's files, each a row naming what fires it ${JSON.stringify(j94c.table)}; the timer debt ${j94c.debt} ≤ ${ST.TIMER_DEBT_SUM}; no synchronous start on a timer without its platform guard`, j94c.red.slice(0, 12));
+    const f94c = 'src/server/memory-pressure-watch.js', plant94c = "setInterval(() => require('child_process').execFile('vs-planted-probe', ['--x'], () => {}), 60000);\n";
+    const jP = ST.judge({ sites: C.scan(REPO, { files: [f94c], patch: { [f94c]: rd94c(f94c) + plant94c } }).sites, syncSites: [], read: rd94c }, { rows: ST.ROWS.filter((r) => r[0] === f94c), syncRows: [], debtSum: ST.TIMER_DEBT_SUM });
+    const jDebt = ST.judge({ sites: [], syncSites: [] }, { rows: [...ST.ROWS.filter((r) => r[2] === 'timer'), ['src/x-planted.js', "'y'", 'timer', 1, 'a new timer row']], syncRows: ST.SYNC_ROWS.filter((r) => r[2] === 'timer'), debtSum: ST.TIMER_DEBT_SUM });
+    const jSync = ST.judge({ sites: [], syncSites: [{ file: 'src/x-planted.js', line: 3, cmd: "'ps'" }], read: () => '' }, { rows: [], syncRows: [['src/x-planted.js', "'ps'", 'timer', 1, 'planted']], debtSum: 99 });
+    const jDead = ST.judge({ sites: s93.sites.filter((x) => x.file !== 'src/ssh-key.js'), syncSites: sync94c, read: rd94c });
+    const jGuard = ST.judge({ sites: [], syncSites: [{ file: 'src/usage-routes.js', line: rd94c('src/usage-routes.js').split('\n').findIndex((l) => l.includes("execFileSync('security'")) + 1, cmd: "'security'" }], read: (f) => rd94c(f).split("process.platform === 'darwin'").join('true') }, { rows: [], syncRows: ST.SYNC_ROWS.filter((r) => r[0] === 'src/usage-routes.js'), debtSum: 99 });
+    // 主开发 r1363: a guard that is not a platform fact (a setting, a flag, an env word) is NOT a guard — a site planted behind a setting
+    const set94c = "function poll() { if (serverSetting('usage.activePolling') === true) { require('child_process').execFileSync('ps', ['-A']); } }\nsetInterval(poll, 90000);\n";
+    const jSet = ST.judge({ sites: [], syncSites: ST.syncScan(REPO, ['src/x-planted.js'], { patch: { 'src/x-planted.js': set94c } }), read: () => set94c }, { rows: [], syncRows: [['src/x-planted.js', "'ps'", 'timer', 1, 'planted behind a setting', "serverSetting('usage.activePolling') === true", 'a cost written out as the law asks, the same length a real row says it in']], debtSum: 99 });
+    ok(jP.red.some((r) => r.includes('vs-planted-probe')) && jDebt.red.some((r) => r.includes('TIMER_DEBT_SUM')) && jSync.red.some((r) => r.startsWith('A SYNCHRONOUS START ON A TIMER')) && jDead.red.some((r) => r.includes('src/ssh-key.js')) && jGuard.red.some((r) => r.includes('src/usage-routes.js')) && jSet.red.some((r) => r.includes('no platform fact')),
+      '§94c CONTROLS: a timer start planted in a copy of a hub file is red BY NAME; one more timer row passes the debt\'s sum; a synchronous timer row with no guard is red with no row possible; a press row whose site is gone is DEAD; a guard not in its site\'s lines is red; a synchronous start planted behind a SETTING, its row naming the setting as its guard, is red (no platform fact)',
+      { planted: jP.red, debt: jDebt.red.filter((r) => r.includes('TIMER')), sync: jSync.red, dead: jDead.red, guard: jGuard.red, setting: jSet.red });
+  }
   // CONTROLS — one file scanned, judged by its own rows: the Xvnc spawn given `...process.env` / no env at all, the session
   // back on `{ ...process.env, DISPLAY }`, the ssh bridge's env taken away, a new raw probe, an env copied in one function and
   // spawned in another, a dead row ⇒ RED; a comment and a *Sync child stay quiet

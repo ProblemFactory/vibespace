@@ -34,6 +34,13 @@ const exec = (cmd, args, timeout = 5000) => new Promise((resolve) => {
   catch { resolve(null); }
 });
 
+// B-323e (lane bl-keys-misc, 主开发 r1351 (4)): THE HUB hands its starter (server.js, at this module's require) — its `--version`
+// asks (the 15-min version tick of src/server/oat-file-sync.js, GET /api/backend-status' two) never fork the hub; the device
+// agent hands nothing and keeps its own exec
+let versionVia = null;
+function useStarter(via) { versionVia = typeof via === 'function' ? via : null; }
+const execVersion = (p) => (versionVia ? versionVia(p, ['--version'], { timeout: 5000 }).then((r) => (r && !r.err ? String(r.stdout || '') : null), () => null) : exec(p, ['--version']));
+
 /** NO REAL AGENT CLI UNDER THE FLAG (B-ec25, lane bl-tests-e): VS_NO_REAL_CLI=1 (every lane env, acceptance run, the test
  *  machine) means a probe here never STARTS an agent CLI the process found by itself (a PATH lookup, the resolver's
  *  /usr/local/bin, /usr/bin) — a scratch hub booted with no stand-in ran the real binaries' --help / --version / sandbox
@@ -273,7 +280,7 @@ async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex', helper = nul
     if (!p) { b.installed = false; b.version = null; continue; }
     const notRun = realCliRefusal(key, { cmd: p });   // B-ec25: found, never started — the version unknown, said by name
     if (notRun) { b.installed = true; b.version = null; b.notRun = notRun; sayNotRun(`${key} --version`, notRun); continue; }
-    const v = await exec(p, ['--version']);
+    const v = await execVersion(p);
     b.installed = v !== null;
     b.version = v ? v.trim().split('\n')[0] : null;
   }
@@ -359,7 +366,7 @@ async function cliVersion(cmd, { id = 'claude' } = {}) {
   if (!p) return null;
   const notRun = realCliRefusal(id, { cmd: p });   // B-ec25: the oat tick's read — «no answer», the last known version stands
   if (notRun) { sayNotRun(`${id} --version`, notRun); return null; }
-  const v = await exec(p, ['--version']);
+  const v = await execVersion(p);
   if (!v || !v.trim()) return null;
   return v.split('\n').map((l) => l.trim()).find((l) => cliVersionOf(l)) || 'unparsed';
 }
@@ -453,4 +460,4 @@ async function cliBinaryIdentity(cmd) {
   try { const real = await fs.promises.realpath(p); const st = await fs.promises.stat(real); return { path: real, cmd: p, size: st.size, identity: `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}:${Math.round(st.ctimeMs)}` }; } catch { return null; }
 }
 
-module.exports = { settingsMergeOp, sweepMergedSettings, SETTINGS_KEEP_MS, SUBS_MAX, EMAIL_MAX, cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, cliLevel, _levelReset, _levelInFlight, realCliRefusal, sayNotRun, startHelperFact, forgetLoginDir, useShellsSaid };
+module.exports = { useStarter, settingsMergeOp, sweepMergedSettings, SETTINGS_KEEP_MS, SUBS_MAX, EMAIL_MAX, cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, cliLevel, _levelReset, _levelInFlight, realCliRefusal, sayNotRun, startHelperFact, forgetLoginDir, useShellsSaid };

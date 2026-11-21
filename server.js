@@ -658,7 +658,7 @@ sysinfo.startWatch({
 
 const { convOps } = require('./src/server/task-groups-wiring.js').mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, serverSetting, sessionStatusKey, spendGuard }); // the Task Groups' routes (/api/tasks …, the Context table's), mounted where they stood; convOps stays a server.js name (broadcastActiveSessions)
 
-const machineProbes = require('./src/machine-probes');
+const machineProbes = require('./src/machine-probes'); machineProbes.useStarter(require('./src/server/child-starter').execFileVia(require('./src/server/child-starter').childStarter()));   // B-323e: the hub's --version asks ride its starter
 const { parseRateLimitEvent, captureRateLimitEvent } = require('./src/rate-limit-capture.js');
 const { scheduleCtxSync, remoteCtxBaseFor } = require('./src/server/task-groups-wiring.js').ctxSync({ tasks, hosts: () => hosts, activeSessions, integrationEnabled, serverNotice, sessionStatusKey }); // the remote context-folder auto-sync and its 60 s timer, started where they started
 

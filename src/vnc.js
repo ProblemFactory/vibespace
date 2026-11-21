@@ -46,7 +46,7 @@
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
-const { spawn, execFileSync } = require('child_process');
+const { spawn } = require('child_process');
 const { serviceEnv } = require('./agent-env.js');
 
 const VNC_PORT = parseInt(process.env.VIBESPACE_VNC_PORT || '', 10) || 5901;
@@ -55,9 +55,10 @@ const STATE_FILE = 'vnc.json';      // B-956d: the display the running Desktop a
 const DISPLAYFD_MS = 10000;         // the X server's answer on fd 3 (measured ~40 ms for Xvfb; a bound, never a sleep)
 const VNC_GEOMETRY = process.env.VIBESPACE_VNC_GEOMETRY || '1920x1080';
 
-function which(cmd) {
-  try { return execFileSync('which', [cmd], { timeout: 2000 }).toString().trim() || null; } catch { return null; }
-}
+// B-323e (lane bl-keys-misc, 主开发 r1351 (6)): where a program lives — the kept lookup (src/plugins/which-kept.js: a found OR a
+// missing answer kept 60 s), asked of the hub's starter; never a SYNCHRONOUS child (status() runs on the belt's 60 s facts
+// refresh: a box with no Xvnc paid two synchronous forks of the hub a minute)
+const which = (cmd) => require('./plugins/which-kept.js').whichFresh(cmd);
 
 function portListening(port, timeoutMs = 700) {
   return new Promise((resolve) => {
@@ -110,16 +111,16 @@ class VncManager {
     return { running: this._running, display: this.display, port: this.port, authFile: null, refresh: () => this.status() };
   }
 
-  _findXvnc() {
+  async _findXvnc() {
     if (this._xvncBin) return this._xvncBin;
-    this._xvncBin = which('Xtigervnc') || which('Xvnc');
+    this._xvncBin = (await which('Xtigervnc')) || (await which('Xvnc'));
     return this._xvncBin;
   }
 
   async status() {
     const running = await portListening(this.port);
     this._running = running;
-    return { available: running || !!this._findXvnc(), running, port: this.port };
+    return { available: running || !!(await this._findXvnc()), running, port: this.port };
   }
 
   /** Start (or adopt) the desktop stack. Resolves to status(). */
@@ -131,7 +132,7 @@ class VncManager {
 
   async _ensureRunning() {
     if (await portListening(this.port)) return this.status(); // adopt — on the RECORDED display (constructor), B-956d
-    const xvnc = this._findXvnc();
+    const xvnc = await this._findXvnc();
     if (!xvnc) throw new Error('no VNC server installed (Xtigervnc/Xvnc not on PATH)');
     // the flags' reasons (-localhost, SecurityTypes None, -UseBlacklist 0) live on _spawnX
     // B-956d: the preferred display first; held ⇒ the X server picks a free one itself (-displayfd)
@@ -152,7 +153,7 @@ class VncManager {
       await new Promise((r) => setTimeout(r, 100));
     }
     if (!(await portListening(this.port))) throw new Error('VNC server failed to start');
-    this._startSession();
+    await this._startSession();
     return this.status();
   }
 
@@ -203,12 +204,12 @@ class VncManager {
   }
 
   /** Desktop session on the VNC display: XFCE preferred, fallbacks probed. */
-  _startSession() {
+  async _startSession() {
     // a service's env, not the hub's (lane spawn-env-census): the user's shell names (USER / LOGNAME / SHELL — the
     // allowlist deploy/sysroot/vs-sysroot-enter hands a user's shell) + DISPLAY; no XAUTHORITY (our Xvnc runs without an
     // auth cookie file) and no bus of the hub's (dbus-launch starts the session's own)
     const env = serviceEnv(process.env, { keep: ['USER', 'LOGNAME', 'SHELL'], add: { DISPLAY: this.display } });
-    const dbusLaunch = which('dbus-launch');
+    const dbusLaunch = await which('dbus-launch');
     const candidates = [
       ['xfce4-session', []],
       ['startxfce4', []],
@@ -216,7 +217,7 @@ class VncManager {
       ['xterm', []], // last resort: at least a usable terminal appears
     ];
     for (const [cmd, args] of candidates) {
-      const bin = which(cmd);
+      const bin = await which(cmd);
       if (!bin) continue;
       const [c, a] = dbusLaunch && cmd !== 'xterm'
         ? [dbusLaunch, ['--exit-with-session', bin, ...args]]

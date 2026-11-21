@@ -720,7 +720,7 @@ function setup(ctx) {
     try { waiting = typeof ctx.waitingAll === 'function' ? ctx.waitingAll() : null; } catch (e) { console.warn('[sessions] the waiting notices:', e.message); }
     const payload = {
       active, webuiPids: [...(webuiPids || [])], devSnap, order, offLoop, others, signInPids: [...signInPids], kept, waiting, bound, maxBytes: _sweepTest.answerMaxBytes || SWEEP_ANSWER_MAX_BYTES,
-      facts: { roots: SP.snapshot(), blocked: DOOR.snapshot() },
+      facts: { roots: SP.snapshot(), blocked: DOOR.snapshot(), tmux: [...(await require('../session-store').getTmuxPaneMapAsync())] },   // B-323e: the pane map asked HERE (the main thread, through the starter) — the worker never starts tmux
     };
     let out;
     // a FIRST sweep (no list yet) waits for the serial lane's turn briefly — a worker not running yet means the old road once

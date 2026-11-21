@@ -213,8 +213,13 @@ console.log('§13 rank 13 — a plugin snapshot runs no synchronous child; its s
     const p = WK.whichNow('vs-no-such-cmd-c', { signal: ac.signal });
     await until(() => fs.existsSync(PIDF)); const pid = Number(fs.readFileSync(PIDF, 'utf8'));
     ac.abort(new Error('the ask was abandoned')); const got = await p; process.env.PATH = pathWas;
-    const gone = await until(() => !fs.existsSync(`/proc/${pid}`), WK.GRACE_MS + 2000);
-    ok(`§13 (c) an aborted ask kills its \`which\` child — one that IGNORES SIGTERM is SIGKILLed after the ${WK.GRACE_MS} ms grace; the abandoned lookup records nothing (the name stays unknown)`, gone && got === null && !WK.whichKnown('vs-no-such-cmd-c'), { pid, gone, got, known: WK.whichKnown('vs-no-such-cmd-c'), ms: Date.now() - t0 });
+    // B-323e (lane bl-keys-misc, 主开发 r1351 (5)): the lookup rides the hub's STARTER — its `which` is the starter's child, never a
+    // fork of the hub: the starter ends it at ITS bound (SIGKILL at TIMEOUT_MS, a child that ignores SIGTERM included) and kills every
+    // child it holds when the hub goes; the ask stops waiting at once
+    const ppid = (() => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]); } catch { return null; } })();
+    const starterPid = require(path.join(REPO, 'src/server/child-starter.js')).childStarter().stats().pid;
+    const ms = Date.now() - t0;
+    ok(`§13 (c) an aborted ask stops waiting at once (${ms} ms) and records nothing (the name stays unknown); its \`which\` — one that IGNORES SIGTERM — is the STARTER's child (B-323e), ended at the starter's own bound, never a child of the hub`, got === null && !WK.whichKnown('vs-no-such-cmd-c') && ms < WK.TIMEOUT_MS && !!starterPid && ppid === starterPid && ppid !== process.pid, { pid, ppid, starterPid, got, known: WK.whichKnown('vs-no-such-cmd-c'), ms });
   }
   { // (d) a `which` that cannot be SPAWNED: no unhandled rejection, the name not poisoned — the next ask answers
     let unhandled = 0; const onU = () => { unhandled++; }; process.on('unhandledRejection', onU);

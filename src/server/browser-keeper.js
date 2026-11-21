@@ -7829,15 +7829,14 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!id) return null;
     const m = cliVersions.get(p);
     if (m && m.id === id && (m.version || now() - (m.at || 0) < CLI_FRESH_MS)) return m.version; // B-7a30: a silent answer is remembered for 10 s
-    return await new Promise((resolve) => {
-      try {
-        require('child_process').execFile(p, ['--version'], { timeout: 8000, encoding: 'utf8', env: F.sanitizeProbeEnv({ ...(env() || {}), PATH: (env() || {}).PATH || process.env.PATH || '' }) }, (er, so, se) => {
-          const v = F.versionFromProbe({ err: er, stdout: so, stderr: se }) || null; // verify r1 ⑦ + r2 ⑥: ONE probe table (browser-facts.versionFromProbe) — a crash names no version, a version on stdout counts whatever the exit
-          cliVersions.set(p, { id, version: v, at: now() }); // B-7a30: a silent one too (asked again after CLI_FRESH_MS)
-          resolve(v);
-        });
-      } catch { resolve(null); }
-    });
+    // B-323e (lane bl-keys-misc, 主开发 r1351 (6)): the ask rides the hub's starter — the keeper's 5 s tick re-asks a binary that says
+    // no version every CLI_FRESH_MS, never a fork of the hub; the child gets the service env + the PATH its site gave (the probe
+    // needs no more). The starter's answer read as the probe table reads execFile's: missing ⇒ null, no answer / timed out ⇒ ''
+    const r = await Promise.resolve().then(() => require('./child-starter').childStarter().run(p, ['--version'], { timeoutMs: 8000, capture: true, maxBuffer: 1024 * 1024, envAdd: { PATH: (env() || {}).PATH || process.env.PATH || '' } })).catch(() => null);
+    const er = !r || r.unknown || r.timedOut || r.overflow ? { killed: true } : r.started === false ? { code: r.error || null } : r.code !== 0 ? { code: r.code } : null;
+    const v = F.versionFromProbe({ err: er, stdout: r && r.stdout, stderr: r && r.stderr }) || null; // verify r1 ⑦ + r2 ⑥: ONE probe table (browser-facts.versionFromProbe) — a crash names no version, a version on stdout counts whatever the exit
+    cliVersions.set(p, { id, version: v, at: now() }); // B-7a30: a silent one too (asked again after CLI_FRESH_MS)
+    return v;
   }
   /** The version a binary said (no fork) — null when it was never asked or its file changed since (checked off the loop). */
   async function knownVersionOf(p) { const m = p ? cliVersions.get(p) : null; if (!m || !m.version) return null; return (await fileFactOf(p)).id === m.id ? m.version : null; }

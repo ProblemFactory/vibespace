@@ -163,13 +163,21 @@ function tmuxOnPath() {
   return found;
 }
 
+/** B-323e (lane bl-keys-misc, 主开发 r1351 (2) — the owner's hub HAS tmux on its PATH): `tmux list-panes` was a start of its own at
+ *  every sessions sweep (~every 5 s per open page), forked from the sweep's WORKER (a fork copies the hub's whole page tables
+ *  whichever thread asks). Now the MAIN thread asks it of the hub's starter (src/server/child-starter.js), memoised as before
+ *  (TMUX_MAP_TTL_MS), and HANDS the map to the worker with the sweep's facts (setTmuxPanes); a worker never starts it. */
+let _handedPanes = null;   // the worker's: the main thread's last map
+function setTmuxPanes(entries) { _handedPanes = new Map(Array.isArray(entries) ? entries : []); }
 async function getTmuxPaneMapAsync() {
   const now = Date.now();
+  if (!require('worker_threads').isMainThread) return _handedPanes || new Map();   // B-323e: a worker never starts it
   if (_paneMapMemo && now - _paneMapMemo.at < TMUX_MAP_TTL_MS) return _paneMapMemo.map;
   const map = new Map();
   await landTmuxMounts();   // B-1425: a tmux on an NFS / home PATH dir is seen — off the main thread
   if (!tmuxOnPath()) { _paneMapMemo = { at: now, map }; return map; } // no binary ⇒ no spawn
-  const out = await execFileP('tmux', ['list-panes', '-a', '-F', '#{pane_pid}||#{session_name}:#{window_index}.#{pane_index}'], { timeout: 3000 });
+  const r = await Promise.resolve().then(() => require('./server/child-starter').childStarter().run('tmux', ['list-panes', '-a', '-F', '#{pane_pid}||#{session_name}:#{window_index}.#{pane_index}'], { timeoutMs: 3000, capture: true, maxBuffer: 1024 * 1024, envAdd: { PATH: process.env.PATH || '', ...(process.env.TMUX_TMPDIR ? { TMUX_TMPDIR: process.env.TMUX_TMPDIR } : {}) } })).catch(() => null);
+  const out = r && !r.unknown && !r.timedOut && !r.overflow && r.code === 0 ? String(r.stdout || '') : null;
   for (const line of String(out || '').trim().split('\n')) {
     const [pid, target] = line.split('||');
     if (pid && target) map.set(parseInt(pid), target);
@@ -1880,7 +1888,7 @@ module.exports = { setJsonlHeld, noteJsonlView, dropJsonlView, dropJsonlViews, j
   cwdToProjectDir,
   transcriptPathOf,
   recoverCwdFromProjDir,
-  getTmuxPaneMapAsync,
+  getTmuxPaneMapAsync, setTmuxPanes,
   tmuxOnPath,
   landTmuxMounts,   // B-1425 (cure): the async landing of a tmux on an NFS / home PATH dir
   findTmuxTargetAsync,

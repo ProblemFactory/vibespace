@@ -2269,9 +2269,8 @@ class HostManager {
    *  only); a pre-signing agent there (no --land-upgrade) ⇒ the SIGNED release lands unverified once, like every
    *  pre-signing dial device. A refusal / a first trust reach the same door; the host keeps its running agent.
    *  Not a fence against a hub that holds this host's ssh key (that is a shell already — design q-042 D6). */
-  installAgentd(id, bundlePath, version, hostToken) {
+  async installAgentd(id, bundlePath, version, hostToken) {
     const h = this.get(id);
-    const { execFileSync } = require('child_process');
     if (!fs.existsSync(bundlePath)) throw new Error('device daemon bundle missing: ' + bundlePath);
     const rel = require('./agentd/client.js').DeviceManager.releaseOf(bundlePath, String(version));
     const ver = String(rel.version || version).replace(/[^\w.-]/g, '');
@@ -2282,7 +2281,10 @@ class HostManager {
       fs.copyFileSync(bundlePath, path.join(stage, 'agentd.js'));
       fs.writeFileSync(path.join(stage, 'token'), String(hostToken), { mode: 0o600 });
       if (rel.signed) fs.writeFileSync(path.join(stage, 'agentd.manifest.json'), JSON.stringify(rel.manifest));
-      const tar = execFileSync('tar', ['-c', '-C', stage, 'agentd.js', 'token', ...(rel.signed ? ['agentd.manifest.json'] : [])], { timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
+      // B-323e (lane bl-keys-misc, 主开发 r1351): the tar is ASYNC — it was a SYNCHRONOUS start (up to 15 s held) redone on every connect
+      // while an install keeps failing (connects come from polls); its bytes cannot cross the starter's line pipe: a direct start, a
+      // TIMER debt row of the start census (scripts/start-triggers.mjs)
+      const tar = await new Promise((resolve, reject) => execFile('tar', ['-c', '-C', stage, 'agentd.js', 'token', ...(rel.signed ? ['agentd.manifest.json'] : [])], { timeout: 15000, maxBuffer: 32 * 1024 * 1024, encoding: 'buffer' }, (e, out) => (e ? reject(e) : resolve(out))));
       const remote = installAgentdScript(ver, rel.signed);
       return new Promise((resolve, reject) => {
         const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--', remote],

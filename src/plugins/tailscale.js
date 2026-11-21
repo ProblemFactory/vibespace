@@ -31,15 +31,17 @@ const { whichKept, whichNow, graceKill, GRACE_MS } = require('./which-kept.js');
 // ONE async child with a timeout → {code, out} (code null on spawn failure / timeout) — never a sync child on the hub's loop (rank 13)
 // an async child with its timeout — it NEVER throws or rejects (rank 13 round 2: a probe with nothing to run answers what it
 // knows): no program ⇒ {code: null}; an aborted ask (`signal`, the manager's bound) starts nothing and kills the child it holds
+// B-323e (lane bl-keys-misc, 主开发 r1351 (5)): it rides the hub's STARTER (src/server/child-starter.js) — never a fork of the hub
+// (the Log-in dialog asks the status every 3 s). The starter ends the child at its bound (SIGKILL at `ms`); an aborted ask stops
+// waiting at once ({code: null}) — its child ends at that bound (the starter kills by its own timer, never by a pid of ours)
 const run = (prog, args, ms, signal) => new Promise((resolve) => {
   if (!prog || (signal && signal.aborted)) return resolve({ code: null, out: '' });
-  let c = null;
-  const onAbort = () => graceKill(c, GRACE_MS); // round 3: a child that ignores SIGTERM is SIGKILLed after a grace (our own, by its handle)
-  if (signal) signal.addEventListener('abort', onAbort, { once: true }); // before the spawn: it runs before execFile's own abort handling
-  try {
-    c = execFile(prog, args, { encoding: 'utf-8', timeout: ms, maxBuffer: 16 << 20, ...(signal ? { signal } : {}) }, (err, out) => { if (signal) signal.removeEventListener('abort', onAbort); resolve({ code: err ? (typeof err.code === 'number' ? err.code : null) : 0, out: String(out || '') }); });
-  } catch { if (signal) signal.removeEventListener('abort', onAbort); return resolve({ code: null, out: '' }); }
-  graceKill(c, ms + GRACE_MS);
+  let over = false;
+  const end = (r) => { if (over) return; over = true; if (signal) signal.removeEventListener('abort', onAbort); resolve(r); };
+  const onAbort = () => end({ code: null, out: '' });
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
+  Promise.resolve().then(() => require('../server/child-starter').childStarter().run(prog, args, { timeoutMs: ms, capture: true, maxBuffer: 16 << 20, envAdd: { PATH: process.env.PATH || '' } }))
+    .then((r) => end({ code: r && r.started !== false && !r.unknown && !r.timedOut && !r.overflow && typeof r.code === 'number' ? r.code : null, out: String((r && r.stdout) || '') }), () => end({ code: null, out: '' }));
 });
 const { pidCmdline, pidAlive } = require('./proc.js');
 const DNS = require('../tailscale-dns.js');

@@ -7,10 +7,33 @@ const WO = require('../write-origin.js');   // piece 7: the person's door for th
 /** a PERSON on THIS instance's own page: no bearer of any kind, and a browser that says it is on this page (src/routes/vault.js
  *  personVerdict's rule — a browser-less local write is no person here) */
 const personHere = (req) => { const h = (req && req.headers) || {}; if (WO.pressBearer(h) || typeof (req.body && req.body.token) === 'string') return false; return WO.pageVerdict(h, WO.ownOriginOf(h, { encrypted: !!(req.socket && req.socket.encrypted) })).ok === true; };
-const { execFile } = require('child_process');
 const { JobManager } = require('../jobs.js');
 const M = require('../job-model.js');
 const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loaded with the module, never on a catch-up's pass (batch 21's cure)
+
+// B-323e (lane bl-keys-misc, 主开发 r1351 (1)): THE JOBS LIST'S «outside the registry» rows (`systemctl --user list-units`,
+// `crontab -l`) were two direct starts from the hub's main process at EVERY render of the Jobs list — every `jobs-updated`
+// broadcast (every job change, unthrottled) while the sidebar's Jobs tab or a Background Work window is open, and every 30 s
+// per open window. Now they ride the hub's starter (src/server/child-starter.js) and ONE answer stands ESCAPES_FRESH_MS for
+// every page and every render; a read in flight is shared — a render, a page, a broadcast starts nothing of its own.
+const ESCAPES_FRESH_MS = 30000;
+function escapesReader({ via, now = () => Date.now(), freshMs = ESCAPES_FRESH_MS } = {}) {
+  let last = null;   // { at (0 while in flight), p }
+  return function read() {
+    if (last && (last.at === 0 || now() - last.at < freshMs)) return last.p;
+    const run = via || require('./child-starter').execFileVia(require('./child-starter').childStarter());
+    const one = last = { at: 0, p: null };
+    one.p = (async () => {
+      const out = { systemd: [], crontab: [] };
+      const a = await run('systemctl', ['--user', 'list-units', '--type=service,timer', '--state=running,active', '--no-legend', '--plain'], { timeout: 5000 });
+      if (!a.err && a.stdout) out.systemd = a.stdout.split('\n').filter((l) => l.trim() && !/^(vibespace|dbus|pipewire|wireplumber|gvfs|xdg|gnome|tracker|at-spi|pulse)/.test(l.trim())).map((l) => l.trim().split(/\s+/)[0]).slice(0, 40);
+      const b = await run('crontab', ['-l'], { timeout: 5000 });
+      if (!b.err && b.stdout) out.crontab = b.stdout.split('\n').filter((l) => l.trim() && !l.startsWith('#')).slice(0, 40);
+      return out;
+    })().catch(() => ({ systemd: [], crontab: [] })).finally(() => { one.at = now(); });
+    return one.p;
+  };
+}
 
 function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null, onStash = () => {}, onRunEnded = () => {}, sessionStatusKey = null }) {
   // THE FILER'S KEY (lane job-notify-user r5): this file is origin 'jobs''s one filer (src/inbox-origin.js FIELDS_FILERS) —
@@ -425,17 +448,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   // lane job-secrets-retire: GET/POST /api/jobs-secrets (a plaintext data/job-secrets.json no client wrote) are gone —
   // a job's secret comes from the vault (job-model vetSpec refuses a named envFrom `envfrom_retired`)
   // read-only escape visibility: hand-rolled systemd/crontab jobs OUTSIDE the registry
-  app.get('/api/jobs-escapes', (req, res) => {
-    const out = { systemd: [], crontab: [] };
-    execFile('systemctl', ['--user', 'list-units', '--type=service,timer', '--state=running,active', '--no-legend', '--plain'], { timeout: 5000 }, (e, so) => {
-      if (!e && so) out.systemd = so.split('\n').filter((l) => l.trim() && !/^(vibespace|dbus|pipewire|wireplumber|gvfs|xdg|gnome|tracker|at-spi|pulse)/.test(l.trim())).map((l) => l.trim().split(/\s+/)[0]).slice(0, 40);
-      execFile('crontab', ['-l'], { timeout: 5000 }, (e2, so2) => {
-        if (!e2 && so2) out.crontab = so2.split('\n').filter((l) => l.trim() && !l.startsWith('#')).slice(0, 40);
-        res.json(out);
-      });
-    });
-  });
-
+  const readEscapes = escapesReader();
+  app.get('/api/jobs-escapes', async (req, res) => { res.json(await readEscapes()); });
   // Live-session catch-up (2.344.1): sessions spawned BEFORE 2.344.0 lack the
   // --settings crossSessionInbound accept, and dtach sessions survive updates
   // for weeks — their bypass-mode inbound would HOLD our notifications in a
@@ -483,4 +497,4 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   };
 }
 
-module.exports = { create };
+module.exports = { create, escapesReader, ESCAPES_FRESH_MS };

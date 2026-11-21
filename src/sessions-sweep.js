@@ -23,7 +23,7 @@ let last = null;   // { rows, byKey: Map, at, ms }
 
 async function sweepInThread({ active = [], webuiPids = [], devSnap = null, order = [], offLoop = null, others = {}, signInPids = [], kept = [], waiting = null, facts = null, bound = [], maxBytes = 0 } = {}) {
   const t0 = Date.now();
-  if (facts && !isMainThread) A.setFacts(facts);
+  if (facts && !isMainThread) { A.setFacts(facts); require('./session-store').setTmuxPanes(facts.tmux); }   // B-323e: the main thread's pane map (it never starts tmux here)
   const liveIds = new Map(active);   // the live sessions' two facts the walk reads (claudeSessionId, _childPid)
   const perHarness = [];
   for (const id of order) {

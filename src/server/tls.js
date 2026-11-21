@@ -91,6 +91,18 @@ function runChild(bin, args, timeout) {
   });
 }
 
+/** B-323e (lane bl-keys-misc, 主开发 r1351 (6)): THE PASS'S CHILDREN ride the hub's starter (src/server/child-starter.js) — the
+ *  hourly `tailscale status` / `tailscale cert` never fork the hub on its timer. runChild's answer: {code: 0 | n | 'ENOENT' |
+ *  'TIMEOUT', out, err, ms}; the starter's «no answer» reads TIMEOUT (it did not answer in time). The boot's liveness probes
+ *  (src/server/boot-restore.js) keep runChild — a start's, named in the start census. */
+function runViaStarter(bin, args, timeout) {
+  const t0 = Date.now();
+  return Promise.resolve().then(() => require('./child-starter').childStarter().run(bin, args, { timeoutMs: timeout, capture: true, maxBuffer: 4 * 1024 * 1024 })).then((r) => {
+    const code = !r || r.unknown || r.timedOut ? 'TIMEOUT' : r.started === false ? (r.error === 'ENOENT' ? 'ENOENT' : (r.error || 1)) : r.overflow ? 1 : r.code === 0 ? 0 : (r.code != null ? r.code : (r.signal || 1));
+    return { code, out: String((r && r.stdout) || ''), err: String((r && (r.stderr || r.error)) || (code === 'TIMEOUT' ? 'timeout' : '')), ms: Date.now() - t0 };
+  }, (e) => ({ code: 1, out: '', err: String((e && e.message) || e), ms: Date.now() - t0 }));
+}
+
 /** The facts of a cert+key pair on disk: { cert, key, notAfter, names, pem } (pem only when both read). */
 async function readPair(certFile, keyFile) {
   const out = { cert: false, key: false, notAfter: null, names: [], pem: null };
@@ -108,7 +120,7 @@ async function readPair(certFile, keyFile) {
 }
 
 function create({ app, httpServer, dataDir, port, serverSetting = () => undefined, getUserTodos = () => null, log = console, env = process.env,
-  tailscaleBin: binArg, run = runChild, now = () => Date.now(), user = (() => { try { return os.userInfo().username; } catch { return 'vibespace'; } })(),
+  tailscaleBin: binArg, run = runViaStarter, now = () => Date.now(), user = (() => { try { return os.userInfo().username; } catch { return 'vibespace'; } })(),
   statusTimeoutMs = STATUS_TIMEOUT_MS, timers = { setTimeout, clearTimeout }, step = (name, fn) => fn(), holdMaxMs = HOLD_MAX_MS, onCertificate = () => { } } = {}) {   // onCertificate(pem | null): the live pair changed (B2b: a piped hub pushes it to the interface, which holds the port)
   const tailscaleBin = binArg === null ? null : binArg || env.VIBESPACE_TAILSCALE_BIN || 'tailscale';
   const dir = path.join(dataDir, 'tls');
@@ -310,4 +322,4 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
     _https: () => httpsServer, _state: () => ({ ...state }), _cadence: () => ({ started, liveOnce, misses, nextMs }), INBOX_KEY };
 }
 
-module.exports = { create, acceptAs, runChild, readPair, INBOX_KEY, STATUS_TIMEOUT_MS, CERT_TIMEOUT_MS, PASS_MS, KILL_AFTER_MS };
+module.exports = { create, acceptAs, runChild, runViaStarter, readPair, INBOX_KEY, STATUS_TIMEOUT_MS, CERT_TIMEOUT_MS, PASS_MS, KILL_AFTER_MS };

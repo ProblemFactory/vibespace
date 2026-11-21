@@ -12,7 +12,9 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
+// B-323e (lane bl-keys-misc, 主开发 r1351 (3)): the 5-min scan's `ps` and its `du` ride the hub's starter — never a fork of the
+// hub on its own timer (the scan runs from boot, with no condition)
+const via = (cmd, args, o) => require('./child-starter').execFileVia(require('./child-starter').childStarter())(cmd, args, o);
 const MP = require('../memory-pressure.js');
 const SI = require('../sysinfo.js'); // lane ledger-dedup-law F5: THE command-line reader (cmdlineHead) — the shared module, never a second one here
 
@@ -26,7 +28,7 @@ const PS_MAX_BUFFER = 64 * 1024 * 1024;
 
 function psTable() {
   return new Promise((resolve) => {
-    execFile('ps', ['axo', 'pid=,ppid=,rss=,comm=,args='], { timeout: 15000, maxBuffer: PS_MAX_BUFFER }, (err, out) => {
+    via('ps', ['axo', 'pid=,ppid=,rss=,comm=,args='], { timeout: 15000, maxBuffer: PS_MAX_BUFFER }).then(({ err, stdout: out }) => {
       if (err) return resolve([]);
       const rows = [];
       for (const ln of String(out).split('\n')) {
@@ -47,7 +49,7 @@ async function withPss(rows, n = PSS_READS) {
 function du(paths, timeout = 20000) {
   if (!paths.length) return Promise.resolve([]);
   return new Promise((resolve) => {
-    execFile('du', ['-s', '-B1', '--', ...paths], { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, out) => {
+    via('du', ['-s', '-B1', '--', ...paths], { timeout, maxBuffer: 8 * 1024 * 1024 }).then(({ stdout: out }) => {
       resolve(String(out || '').split('\n').map((l) => /^(\d+)\s+(.+)$/.exec(l)).filter(Boolean).map((m) => ({ path: m[2], bytes: +m[1] })));
     });
   });
