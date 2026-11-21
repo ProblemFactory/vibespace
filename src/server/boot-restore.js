@@ -655,8 +655,9 @@ async function reprobePass() {
 // ATTACH_BATCH = 8: the measured attach is ~1.1 ms of JavaScript a survivor plus its fork (localAttach 88 ms over 80) — eight a
 // turn stays an order of magnitude under the 250 ms boot law; the restore's own timing is said once, at the end.
 const ATTACH_BATCH = 8, ATTACH_RETRY_MS = [2000, 10000, 30000];
+const REGISTER_BATCH = 32;   // B-cd4b unit 3: survivors registered a turn (~42 ms at the first test machine's 1.3 ms a survivor)
 const { turn: loopTurn } = require('./loop-turns.js');
-function drainSurvivorAttaches(queue, { tRestore, tBuilt }) {
+function drainSurvivorAttaches(queue, { tRestore, tBuilt, regTurns = null }) {
   const total = queue.length;
   if (!total) return;
   let batches = 0, longest = 0, attachMs = 0, used = 0, caught = 0;
@@ -693,7 +694,7 @@ function drainSurvivorAttaches(queue, { tRestore, tBuilt }) {
     for (const entry of queue.splice(0, ATTACH_BATCH)) attach(entry);
     const ms = performance.now() - t0; batches++; attachMs += ms; if (ms > longest) longest = ms;
     if (queue.length) { loopTurn(one); return; }
-    console.log(`[boot-restore] ${total} survivor(s): registered in ${Math.round(tBuilt - tRestore)} ms; attached in ${batches} batch(es) of ≤ ${ATTACH_BATCH} (${Math.round(attachMs)} ms, the longest batch ${Math.round(longest)} ms)${used ? `; ${used} attached at their first use` : ''}${caught ? `; ${caught} caught up what they wrote since the read` : ''}`);
+    console.log(`[boot-restore] ${total} survivor(s): registered in ${Math.round(tBuilt - tRestore)} ms; attached in ${batches} batch(es) of ≤ ${ATTACH_BATCH} (${Math.round(attachMs)} ms, the longest batch ${Math.round(longest)} ms)${used ? `; ${used} attached at their first use` : ''}${caught ? `; ${caught} caught up what they wrote since the read` : ''}${regTurns && regTurns.n > 1 ? `; registered in ${regTurns.n} turns of ≤ ${REGISTER_BATCH} (the longest ${Math.round(regTurns.longest)} ms)` : ''}`);
   };
   if (total <= ATTACH_BATCH) one(); else loopTurn(one);   // the round's follow: a big restore's first batch leaves the registration's turn
 }
@@ -797,6 +798,8 @@ function restoreSessions() {
   })));
 
   const attachQueue = [], tRestore = performance.now();   // B-cd4b: every survivor in the live set at once, its attach queued
+  const regTurns = { n: 0, longest: 0 };   // B-cd4b unit 3: the registration's turns (said in the restore's line)
+  function* registerEach() {   // B-cd4b unit 3: ONE survivor a step — the batches below take REGISTER_BATCH of them a turn
   for (const sockFile of sockets) {
     const socketPath = path.join(SOCKETS_DIR, sockFile);
     try { fs.statSync(socketPath); } catch { continue; }
@@ -968,8 +971,11 @@ function restoreSessions() {
     if (open.size) pendingProbes.set(sockFile, { id, session, socketPath, q: open });
 
     console.log(`  ✓ Reconnected: ${session.name} (${session.cwd})`);
+    yield;
   }
-  drainSurvivorAttaches(attachQueue, { tRestore, tBuilt: performance.now() });
+  }
+  const finish = () => {   // B-cd4b unit 3: after the LAST registration batch (every survivor in the live set): the attaches, the said lines, the timers
+  drainSurvivorAttaches(attachQueue, { tRestore, tBuilt: performance.now(), regTurns });
   sayDead();
   if (pendingProbes.size) {
     const named = [...pendingProbes].slice(0, 3).map(([sockFile]) => `${P.unanswered.get(sockFile) || 'not asked'} ${sockFile}`).join(', ');
@@ -1094,6 +1100,22 @@ function restoreSessions() {
       }
     }, 3000); // after refreshWebuiPids has populated _childPid
   }
+  };
+  // B-cd4b unit 3 (主开发 r688 / r844): THE REGISTRATION IN BATCHES — its pass grows with the count (~1.3 ms a survivor on the first
+  // test machine: 105 ms at 80, the 250 ms law alone near 190). A restore of up to REGISTER_BATCH survivors registers in this one
+  // turn, as it always did; a bigger one registers REGISTER_BATCH a turn, each batch AHEAD of every other queued turn
+  // (src/server/loop-turns.js `first`): the listen step's rest ('listen-rest', asked by server.js right after this returns) runs only
+  // after the LAST batch, and the front holds every new connection until it has run (src/server/tls.js turn) — nothing asks for a
+  // survivor before the live set is whole. The attaches, the said lines and the timers follow the last batch (finish).
+  const it = registerEach();
+  if (sockets.length <= REGISTER_BATCH) { while (!it.next().done) { } regTurns.n = 1; finish(); return; }
+  const oneBatch = () => {
+    const t0 = performance.now(); let n = 0, done = false;
+    while (n < REGISTER_BATCH) { if (it.next().done) { done = true; break; } n++; }
+    const ms = performance.now() - t0; regTurns.n++; if (ms > regTurns.longest) regTurns.longest = ms;
+    if (done) finish(); else loopTurn(oneBatch, { first: true });
+  };
+  oneBatch();
 }
 
 // ── R6: boot RE-OPEN of local daemon PIPE sessions (agentdPipe metas) ────────
