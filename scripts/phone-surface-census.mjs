@@ -10,15 +10,15 @@
 //   · the Settings view's categories (src/lib/settings-schema.js SETTINGS_CATEGORIES) — a VIEW each, plus the four
 //     windows the reading named (the For-you window, a Task Group's Settings, the folder field's list, the live view)
 // Each surface has ONE row: an OPENER (a page expression that opens it — one call) or an EXCUSE (what opening it would
-// take, in words). A surface with neither — or with both — is red; a row whose surface is gone is red; the count of
-// excuses is printed and may only FALL (EXCUSE_CEILING equals it).
+// take, in words). A surface with neither — or with both — is red; a row whose surface is gone is red; a surface excused
+// by its FILE's words is one of EXCUSED_BY_FILE_WORDS by name (a new one is red by its key: the way up is a named excuse).
 // THE LAWS (measured in the page, MEASURE_SOURCE): L1 the surface's box inside the screen · L2 nothing wider than its
 // surface — every visible descendant inside the surface's inner box, unless a sideways clip below the surface holds it
 // (that clip is judged as an element itself) · L3 no sideways scroll — no scroller in the surface (the surface too) whose
 // content is wider than it, unless DECLARED with its why, and the page itself never scrolls sideways. L4 (the finger rule:
 // primary controls ≥ 44 px, field text ≥ 16 px) is MEASURED AND PRINTED a surface, NOT a law (主开发 r1198 rules on it
-// from the numbers). RATCHET = what is red today, a count a surface × language × law; it only goes down: a new red is red,
-// and a cured red the table still lists is red until its row is lowered.
+// from the numbers). RATCHET = what is red today BY NAME, a surface × language × law; it only goes down: a new red name is
+// red, and a cured one the table still lists is red until its row is lowered.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -36,7 +36,7 @@ const base = (f) => path.basename(f, '.js');
  *  src/ read file by file (a copy without git). Sorted, repo-relative. */
 export function srcFiles(repo) {
   try {
-    const out = execFileSync('git', ['-C', repo, 'grep', '--untracked', '-l', '-F', ...NEEDLES.flatMap((k) => ['-e', k]), '--', 'src'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const out = execFileSync('git', ['-C', repo, 'grep', '-l', '-F', ...NEEDLES.flatMap((k) => ['-e', k]), '--', 'src'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     return out.split('\n').filter((f) => f.endsWith('.js')).sort();
   } catch (e) {
     if (e && e.status === 1) return [];   // git ran: no file names one
@@ -60,8 +60,17 @@ export function sitesOf(src, parse, file = null) {
     if (node.type === 'FunctionDeclaration') return node.id?.name || '(anon)';
     if (parent?.type === 'VariableDeclarator' && parent.id.type === 'Identifier') return parent.id.name;
     if (parent?.type === 'MethodDefinition' || parent?.type === 'Property') return parent.key.name || parent.key.value || '(computed)';
-    if (parent?.type === 'AssignmentExpression') { const l = parent.left; return l.type === 'MemberExpression' ? (l.property.name || '(member)') : (l.name || '(assign)'); }
-    if (parent?.type === 'CallExpression') { const c = parent.callee; return `(cb of ${c.type === 'MemberExpression' ? (c.property.name || '') : (c.name || '')})`; }
+    if (parent?.type === 'AssignmentExpression') {   // `uploadBtn.onclick = …` keeps its object's name (round w8jjldn9f (3): two onclicks are two names, not #2)
+      const l = parent.left;
+      if (l.type !== 'MemberExpression') return l.name || '(assign)';
+      const o = l.object, on = o.type === 'Identifier' ? o.name : (o.type === 'MemberExpression' && !o.computed ? o.property.name : null), pn = l.property.name || '(member)';
+      return on ? `${on}.${pn}` : pn;
+    }
+    if (parent?.type === 'CallExpression') {   // a listener by its event's name: `(on contextmenu)`
+      const c = parent.callee, cn = c.type === 'MemberExpression' ? (c.property.name || '') : (c.name || '');
+      if (cn === 'addEventListener' && parent.arguments[0]?.type === 'Literal') return `(on ${parent.arguments[0].value})`;
+      return `(cb of ${cn})`;
+    }
     return '(anon)';
   };
   const out = [], chain = [];
@@ -137,8 +146,16 @@ export function deriveSurfaces(repo, { files = null, read = (f) => fs.readFileSy
   return list;
 }
 
-/** The four windows the reading named (r1188 (2)) — declared, not derived: each is a window or a field, not a call site. */
-export const VIEWS = ['foryou-window', 'task-group-settings', 'folder-field-list', 'live-view'];
+/** The four windows the reading named (r1188 (2)) and the two hand-built floats the round named — declared, not derived:
+ *  each is a window, a field or a float with no call site of a helper. */
+export const VIEWS = ['foryou-window', 'task-group-settings', 'folder-field-list', 'live-view', 'window-switcher', 'usage-popup'];
+// THE BLIND SHAPES (round w8jjldn9f (4) — what the derivation cannot see, named so nobody reads the list as whole): a float a
+// file builds by hand and tags with no popover mark (two the phone opens most are declared above: the title's window switcher
+// .mobile-win-switcher and the usage popup .usage-popup — mobile-nav.js PHONE_SURFACES); a plugin's own panel (plugin-client.js
+// draws what a plugin asks); anything inside a frame (a document or a design window's iframe); a surface reached through ONE
+// wrapper (showWindowContextMenu, a row-menu helper) counts as that wrapper's one key, however many menus it draws.
+// KEYS are the call's functions, outermost first — `obj.onclick` and `(on contextmenu)` name a handler — and only a second call
+// inside the very same functions takes `#2` by its order in the file (round (3): an insertion above it renames it).
 
 // ── THE OPENERS ── a page expression run as `(async () => { … })()` with `app` (window.app), `M` (every module this table
 // names, by file name: M['utils'] = src/lib/utils.js), `FX` (the suite's fixture: accounts A / B / L, pool P, Task Group
@@ -179,6 +196,18 @@ export const OPENERS = {
   'dialog:vault-change-dialog': { open: `M['vault-unlock'].showChange()`, mods: ['src/lib/vault-unlock.js'] },
   'dialog:static:dialog-new-session': { open: `app.showNewSessionDialog({})`, root: '#dialog-new-session', close: `document.querySelector('#dialog-new-session .dialog-close').click()` },
   'dialog:path-picker': { open: `app.showNewSessionDialog({}); await new Promise((r) => setTimeout(r, 300)); document.querySelector('#dialog-new-session .pf-pick').click()`, close: `document.querySelector('#dialog-new-session .dialog-close').click()` },
+  // UNIT 2 (主开发 r1349): THE CONVERSATION'S SURFACES — `chat()` opens the seeded conversation (the tree's stand-in agent) on the
+  // phone and waits for its first answer; `FX.todo` is the For-you item its turn filed
+  'menu:chat-input:constructor>plusBtn.onclick': { open: `await chat(); document.querySelector('.window[class~="window-active"] .chat-plus-btn').click()` },
+  // the status strip's dropdowns: ONE hand-built float (chat-status-bar.js showDropdown) — the model's, then the effort's and the permission mode's as its draws
+  'popover:hand:chat-status-bar:_onClick>showDropdown': { open: `await chat(); document.querySelector('.window[class~="window-active"] .chat-status-model').click()`,
+    // on a phone effort and output style fold into the model chip's sheet: their draws go through its rows, as a finger does
+    // (a folded chip pressed directly anchors its dropdown on a hidden box — above the screen)
+    also: [{ label: 'effort', open: `await chat(); document.querySelector('.window[class~="window-active"] .chat-status-model').click(); for (let i = 0; i < 40 && document.querySelectorAll('.chat-status-fold-row').length < 1; i++) await new Promise((r) => setTimeout(r, 100)); document.querySelectorAll('.chat-status-fold-row')[0].click()` },
+      { label: 'style', open: `await chat(); document.querySelector('.window[class~="window-active"] .chat-status-model').click(); for (let i = 0; i < 40 && document.querySelectorAll('.chat-status-fold-row').length < 2; i++) await new Promise((r) => setTimeout(r, 100)); document.querySelectorAll('.chat-status-fold-row')[1].click()` }] },
+  'menu:session-card:renderSessionCard>(on contextmenu)': { open: `await chat(); const c = [...document.querySelectorAll('.session-item-card')].find((x) => x.getClientRects().length) || document.querySelector('.session-item-card'); c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 300 }))` },
+  'menu:chat-view:_showMsgMenu': { open: `await chat(); const cv = [...app.sessions.values()].find((v) => v && v.sessionId === FX.sid); const m = [...document.querySelectorAll('.window[class~="window-active"] .chat-msg')].find((x) => x._rawMsg && x._rawMsg.role === 'assistant'); cv._showMsgMenu(m._rawMsg, 120, 300)` },
+  'menu:taskbar:showWindowContextMenu': { open: `await chat(); M['taskbar'].showWindowContextMenu(app, app.wm.activeWindowId, 120, 120)`, mods: ['src/lib/taskbar.js'] },
   // menus and popovers — one call, an anchor of the suite's own
   // the phone's own sheets (mobile-nav.js _sheet — ONE call site, three doors): «+», then ⋯ as a second draw of the same surface
   'menu:mobile-nav:_sheet': { open: `document.getElementById('mobile-nav-new').click()`, also: [{ label: 'more', open: `app._mobileNav._openMore()` }] },
@@ -188,9 +217,11 @@ export const OPENERS = {
   'popover:sidebar:_showBackendFilterMenu': { open: `app.sidebar._showBackendFilterMenu(anchor())` },
   // views — the Settings view a category at a time (on a phone the view shows the category alone); the named windows
   'view:foryou-window': { open: `M['inbox-window'].openInboxWindow(app, {})`, root: '.window[class~="window-active"]', mods: ['src/lib/inbox-window.js'] },
+  'view:window-switcher': { open: `await chat(); document.getElementById('mobile-nav-title').click()`, root: '.mobile-win-switcher' },
   'view:task-group-settings': { open: `M['task-detail'].openTaskDetail(app, FX.task, { tab: 'settings' })`, root: '.window[class~="window-active"]', mods: ['src/lib/task-detail.js'] },
-  // the list floats on the page (path-field.js moves it to <body>, .pf-list.pf-float, fixed): measured as its own surface
-  'view:folder-field-list': { open: `app.showNewSessionDialog({}); await new Promise((r) => setTimeout(r, 300)); const i = document.getElementById('input-cwd'); i.focus(); i.dispatchEvent(new Event('focus')); i.dispatchEvent(new Event('input', { bubbles: true }))`, root: '.pf-list.pf-float:not([hidden])', close: `document.querySelector('#dialog-new-session .dialog-close').click()` },
+  // ON A PHONE the list stays in the field's own wrap (path-field.js: isPhone() — never floated): the new-conversation dialog is
+  // measured with the list open, opened as a finger opens it (a press in the field, then its focus); its open list the fact
+  'view:folder-field-list': { open: `app.showNewSessionDialog({}); await new Promise((r) => setTimeout(r, 300)); const i = document.getElementById('input-cwd'); i.focus(); i.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); i.dispatchEvent(new Event('input', { bubbles: true }))`, root: '#dialog-new-session', ready: `!!document.querySelector('#dialog-new-session .pf-list:not([hidden])')`, close: `document.querySelector('#dialog-new-session .dialog-close').click()` },
 };
 export const settingsOpener = SETTINGS_OPEN;
 
@@ -264,7 +295,7 @@ export const EXCUSE_BY_FILE = {
   'task-log': 'needs a Task Group\'s log with an item', 'taskbar': 'a desk taskbar door (the phone has no taskbar)',
   'toolbar-fold': 'a desk toolbar fold (the phone has no toolbar)', 'usage-dashboard': 'needs the usage dashboard panel',
   'usage-window': 'needs the usage window', 'user-todos-panel': 'needs a For-you row',
-  'chat-status-bar': 'needs a conversation\'s status strip (its dropdowns)', 'gear-menu': 'a submenu of the ⚙ popover — needs a press on its row',
+  'gear-menu': 'a submenu of the ⚙ popover — needs a press on its row',
   'terminal': 'needs a terminal window', 'desktop-picker': 'needs the desktop picker (a desktop machine to pick from)',
   'new-session-form': 'the new-conversation dialog\'s Task Group picker — needs a press on its button with Task Groups to pick',
 };
@@ -276,8 +307,12 @@ export const EXCUSES = {
   'dialog:self-update-dialog': 'runs the hub\'s self-update — never opened by a census',
   'dialog:update-confirm-dialog': 'needs an update on offer from the hub',
   'view:live-view': 'needs a live agent browser (a running keeper and its view) — the seeded hub starts none',
+  'menu:chat-input:constructor>uploadBtn.onclick': 'the desk composer\'s upload menu — on a phone the composer\'s row is rebuilt around its «+» sheet and this button leaves the page',
+  'menu:inbox-window:openInboxWindow>act': 'the For-you card\'s ⋯ — drawn only for an app-install card (inbox-window-layout.js cardActs); the seeded ask has none',
+  'dialog:window-share-dialog': 'needs a desktop app window — its reach is asked of the desktop apps engine, which the scratch hub does not run',
+  'dialog:window-ask-dialog': 'needs a desktop app window — its reach is asked of the desktop apps engine, which the scratch hub does not run',
+  'view:usage-popup': 'needs a usage reading — the bar hides its usage door while there is none, as in the scratch hub',
   'popover:hand:utils:showImageOverlay': 'needs a picture to show full screen (a picture in a conversation or a file)',
-  'menu:taskbar:showWindowContextMenu': 'needs a window on show — a phone reaches it through the bar\'s ⋯ (src/lib/trailing-bar.js)',
 };
 /** The words that excuse a key, or null when it has none: its own, else its file's. */
 export function excuseOf(s) {
@@ -300,8 +335,232 @@ export function drawsOf(s) {
   if (!o) return [];
   return [{ key: s.key, ...o }, ...(o.also || []).map((v) => ({ key: `${s.key}~${v.label}`, ...o, ...v, also: undefined }))];
 }
-/** THE COUNT OF EXCUSES — it may only fall: the fast suite reds when the derived count differs. */
-export const EXCUSE_CEILING = 234; // the excuses counted at a117cebb8 (the fast suite prints the count; an opener that replaces an excuse lowers it)
+/** THE SURFACES EXCUSED BY THEIR FILE'S WORDS, BY NAME (round w8jjldn9f (2) — a number could be edited up; a list cannot grow
+ *  without a name): every key below takes its file's words; a key no longer excused that way (opened, given its own words,
+ *  gone) must leave the list; a NEW key excused only by its file's words is red. The way up is a named excuse in EXCUSES. */
+/** ITS LENGTH MAY ONLY FALL (unit 2's read: appending a key to the list cleared its red with no words): a longer list is red,
+ *  a shorter one asks this number down to it. The way up is a named excuse in EXCUSES. */
+export const EXCUSED_BY_FILE_WORDS_MAX = 218;
+export const EXCUSED_BY_FILE_WORDS = Object.freeze([
+  "dialog:app-deb-dialog",
+  "dialog:app-help-dialog",
+  "dialog:app-search-dialog",
+  "dialog:app-source-dialog",
+  "dialog:browser-build-dialog:openBuildDialog",
+  "dialog:browser-exit-dialog",
+  "dialog:browser-proxy-dialog",
+  "dialog:browser-switcher-dialog",
+  "dialog:browser-trace-entry-dialog",
+  "dialog:browser-who-dialog:openWhoDialog",
+  "dialog:cfg-dialog-overlay",
+  "dialog:chan-access-dialog",
+  "dialog:chan-account-reach-dialog",
+  "dialog:chan-api-dialog",
+  "dialog:chan-around-sheet",
+  "dialog:chan-attn-sheet",
+  "dialog:chan-group-dialog",
+  "dialog:chan-notify-dialog",
+  "dialog:chan-options-dialog",
+  "dialog:chan-push-dialog",
+  "dialog:chan-reach-dialog",
+  "dialog:chan-remove-refused",
+  "dialog:chan-search-dialog",
+  "dialog:chan-wh-callers",
+  "dialog:chan-wh-send",
+  "dialog:design-boards-sheet",
+  "dialog:design-comment-sheet",
+  "dialog:design-published-dialog",
+  "dialog:desktop-adopt-dialog",
+  "dialog:desktop-install-dialog",
+  "dialog:desktop-remove-failed",
+  "dialog:device-acts-dialog",
+  "dialog:device-elevate-dialog",
+  "dialog:device-pair-dialog",
+  "dialog:dialout-dialog",
+  "dialog:doc-comment-sheet",
+  "dialog:doc-link-dialog",
+  "dialog:exit-access-dialog",
+  "dialog:exit-runs-dialog",
+  "dialog:feedback-sheet",
+  "dialog:ffmpeg-get-sheet",
+  "dialog:file-props-dialog",
+  "dialog:guided-cli-dialog",
+  "dialog:harness-service-dialog",
+  "dialog:host-key-dialog",
+  "dialog:host-setup-dialog",
+  "dialog:incident-report-dialog",
+  "dialog:job-new-dialog",
+  "dialog:local-oracle-dialog",
+  "dialog:machine-desktop-confirm",
+  "dialog:machine-desktop-dialog",
+  "dialog:machine-desktop-handover",
+  "dialog:machine-desktop-signin",
+  "dialog:machine-window-picker",
+  "dialog:mount-edit-dialog",
+  "dialog:mounts-dialog:mountsDialog",
+  "dialog:mounts-dialog:reauthDialog",
+  "dialog:oat-dialog",
+  "dialog:page-published-dialog",
+  "dialog:plugin-client:_hostApi>createModalShell",
+  "dialog:plugin-consent-dialog",
+  "dialog:plugin-install-dialog",
+  "dialog:ports-dialog",
+  "dialog:provider-new-key",
+  "dialog:publish-page-dialog",
+  "dialog:record-clear-dialog",
+  "dialog:refresh-live-dialog",
+  "dialog:relay-identity",
+  "dialog:remoteapp-settings",
+  "dialog:reset-credit-dialog",
+  "dialog:signin-dialog",
+  "dialog:tailscale-login",
+  "dialog:vault-ak-audit",
+  "dialog:vault-ak-edit",
+  "dialog:vault-ak-grant",
+  "dialog:vault-ak-reach",
+  "dialog:vault-filter-dialog",
+  "dialog:vault-login-grants:grantDialog",
+  "dialog:vault-login-site-pick",
+  "dialog:vault-login-totp",
+  "dialog:vault-paste-dialog",
+  "dialog:vault-reveal-dialog",
+  "dialog:vault-totp-grant",
+  "dialog:vault-use-grant",
+  "dialog:vault-words-edit",
+  "dialog:voice-sheet",
+  "menu:app-install-dialog:renderAppsSection>bSrc.onclick",
+  "menu:app:_setupChromeContextMenus>(on contextmenu)",
+  "menu:app:_setupChromeContextMenus>(on contextmenu)#2",
+  "menu:artifact-card:pickMenu",
+  "menu:artifact-card:renderArtifactList>(on click)",
+  "menu:artifact-card:rowMenuAt",
+  "menu:artifact-card:serviceMenu",
+  "menu:artifacts-window:mountArtifactsWindow>rowEl>(on click)",
+  "menu:browser-live-window:createLiveView>fitChip.onclick",
+  "menu:browser-live-window:createLiveView>moreBtn.onclick",
+  "menu:browser-live-window:createLiveView>stripMenu",
+  "menu:browser-live-window:createLiveView>stripMoreBtn.onclick",
+  "menu:browser-live-window:createLiveView>tabRowMore.onclick",
+  "menu:browser-passkeys-view:pkRowPatch>more.onclick",
+  "menu:browser-profile-picker:installBrowserProfilePicker>prototype.showBrowserProfilePicker",
+  "menu:browser-trace-view:openBrowserProfilesWindow>openRowMenu",
+  "menu:channel-filter-editor:showGrainMenu",
+  "menu:channel-msg-bar:msgActionMenu",
+  "menu:channel-outbox:drafterMenu",
+  "menu:channel-outbox:renderProposalCard>chevron>(cb of armedOnly)",
+  "menu:channel-window:openChannelWindow>onAuthor",
+  "menu:channel-window:openChannelWindow>renderBar>more.onclick",
+  "menu:channel-window:openGroupWindow>drawBar>more.onclick",
+  "menu:channel-window:openGroupWindow>msgMenu",
+  "menu:channels-panel:renderChannelsPanel>accountCard>openMenu",
+  "menu:channels-panel:renderChannelsPanel>groupRowBuild>el.oncontextmenu",
+  "menu:channels-panel:renderChannelsPanel>groupRowBuild>el.oncontextmenu#2",
+  "menu:channels-panel:renderChannelsPanel>rowBuild>el.oncontextmenu",
+  "menu:channels-panel:renderChannelsPanel>section>openMenu",
+  "menu:chat-renderers:_openRelTarget",
+  "menu:chat-renderers:_renderPeerMsg>oncontextmenu",
+  "menu:chat-renderers:_renderPeerMsg>oncontextmenu#2",
+  "menu:chat-renderers:_searchByName",
+  "menu:chat-renderers:setupLinkHandler>(on click)",
+  "menu:chat-renderers:setupLinkHandler>(on contextmenu)",
+  "menu:design-home:openDesignHome>menu",
+  "menu:design-window:openDesign>(on click)",
+  "menu:desktop-app-launcher:showLaunchDialog>cardMenuControl>c.onclick",
+  "menu:desktop-app-launcher:showLaunchDialog>cardScaleControl>c.onclick",
+  "menu:desktop-app-window:openDesktopApp>moreBtn.onclick",
+  "menu:desktop-app-window:openDesktopApp>openPinMenu",
+  "menu:desktop-app-window:openDesktopApp>openScaleMenu",
+  "menu:desktop-manager:_openDesktopList",
+  "menu:desktop-manager:_renderSwitcher>(on contextmenu)",
+  "menu:desktop-manager:_rowDoors>open",
+  "menu:desktop-switch-sheet:openDesktopSheet>(cb of forEach)>(on contextmenu)",
+  "menu:doc-window-ui:mountDocWindow>(on click)",
+  "menu:doc-window-ui:mountDocWindow>styleMenu",
+  "menu:doc-window-ui:mountDocWindow>tableMenu",
+  "menu:file-explorer:_renderBookmarks>(cb of forEach)>(on contextmenu)",
+  "menu:file-explorer:_showColumnMenu",
+  "menu:file-explorer:constructor>btnMore.onclick",
+  "menu:inbox-window:openInboxWindow>(on contextmenu)",
+  "menu:jobs-panel:renderCard>el.oncontextmenu",
+  "menu:machine-desktop:openMachineDesktop>(cb of btn)",
+  "menu:machine-desktop:openMachineDesktop>drawStreamSeg>(cb of btn)",
+  "menu:manage-agents:foldRowByTier>layout>more.onclick",
+  "menu:manage-agents:installManageAgents>_poolMembersDialog>wire>b.onclick",
+  "menu:manage-agents:installManageAgents>_renderClaudeAccounts>addAcctBtn.onclick",
+  "menu:manage-agents:installManageAgents>_renderClaudeAccounts>left.onclick",
+  "menu:manage-agents:installManageAgents>_renderClaudeAccounts>left.onclick#2",
+  "menu:manage-agents:installManageAgents>_renderCodexAccounts>left.onclick",
+  "menu:manage-agents:installManageAgents>_renderCodexAccounts>left.onclick#2",
+  "menu:manage-agents:installManageAgents>_renderHomeAccounts>left.onclick",
+  "menu:manage-agents:installManageAgents>_showAgentsDialog>renderMachine>chkBtn.onclick",
+  "menu:mobile-nav:_showWindowSwitcher>renderContent>(on contextmenu)",
+  "menu:plugins-ui:installPluginsUI>openPluginsDialog>renderManifestPlugins>onChip",
+  "menu:provider-roster:renderProviderRows>onclick",
+  "menu:rail-row:railRow>more.onclick",
+  "menu:reply-pictures:replyPictures>btn.onclick",
+  "menu:session-lifecycle:installSessionLifecycle>showBillingSwitcher",
+  "menu:session-lifecycle:installSessionLifecycle>showBillingSwitcher#2",
+  "menu:session-props:openSessionProps>fillHistory>(cb of then)>histMenu",
+  "menu:sidebar-mounts:installSidebarMounts>_showEditMountDialog>pick.onclick",
+  "menu:sidebar-mounts:installSidebarMounts>_wireGmailLabelsPicker>btn.onclick",
+  "menu:sidebar-mounts:installSidebarMounts>_wireSharedDrivePicker>btn.onclick",
+  "menu:sidebar-rail:installSidebarRail>_portProtoMenu",
+  "menu:sidebar-render-mobile:installSidebarRenderMobile>proto._renderMobileFolderList>(on contextmenu)",
+  "menu:sidebar-render:installSidebarRender>proto._renderGrouped>(on contextmenu)",
+  "menu:sidebar-tasks:installSidebarTasks>proto._renderTaskViewFlat>addCard.onclick",
+  "menu:sidebar-tasks:installSidebarTasks>proto._showTaskContextMenu",
+  "menu:sidebar:constructor>listMenuBtn.onclick",
+  "menu:sidebar:constructor>sortBtn.onclick",
+  "menu:sidebar:constructor>sortBtn.onclick#2",
+  "menu:tab-group:_showSplitMenu",
+  "menu:task-detail:openTaskDetail>renderSettings>addPar.onclick",
+  "menu:task-detail:openTaskDetail>renderSettings>refBtn.onclick",
+  "menu:task-log:mountTaskLog>activityMenu",
+  "menu:task-log:mountTaskLog>renderBacklog>addItemRow>(on contextmenu)",
+  "menu:toolbar-fold:installToolbarFold>(on click)",
+  "menu:toolbar-fold:openTerminalFrom",
+  "menu:usage-dashboard:renderPanel>menu.onclick",
+  "menu:usage-window:renderControls>dashBtn.onclick",
+  "menu:user-todos-panel:installUserTodos>rowClick",
+  "menu:user-todos-panel:installUserTodos>rowMenu",
+  "menu:vault-window:openVaultWindow>addB.onclick",
+  "popover:browser-live-window:createLiveView>openCapPopover",
+  "popover:channels-panel:openAttentionDoor",
+  "popover:chat-minimap:_showToc",
+  "popover:doc-window-ui:mountDocWindow>(cb of )>open",
+  "popover:doc-window-ui:mountDocWindow>noteBox",
+  "popover:doc-window-ui:mountDocWindow>offerComment",
+  "popover:file-explorer-uploads:installExplorerUploads>_triggerUpload",
+  "popover:file-explorer:_showViewMenu",
+  "popover:hand:app:_initMaintenanceBanner>render>(on click)",
+  "popover:hand:browser-trace-view:openBrowserProfilesWindow>info.onclick",
+  "popover:hand:chat-input:_updateTodoDisplay>_todoDisplay.onclick",
+  "popover:hand:chat-renderers:addWrapToggles>langBtn.onclick",
+  "popover:hand:chat-view:_showMsgMeta",
+  "popover:hand:desktop-picker:openDesktopPicker",
+  "popover:hand:feedback-sheet:openFeedbackSheet",
+  "popover:hand:file-explorer-ops:installExplorerOps>_buildMenu",
+  "popover:hand:gear-menu:buildGearMenu>renderHead",
+  "popover:hand:new-session-form:installNewSessionForm>prototype._nsGroupMenu",
+  "popover:hand:terminal:_showSettings",
+  "popover:open-with:officeOfferAt",
+  "popover:principal-picker:principalPicker>trigger.onclick",
+  "popover:reaction-picker:openReactionPicker",
+  "popover:reaction-picker:showWho",
+  "popover:session-card:renderSessionCard>_showConfigPopover",
+  "popover:sidebar-tasks:installSidebarTasks>proto._showSessionStatusPopover",
+  "popover:sidebar-tasks:installSidebarTasks>proto._showTaskBindPopover",
+  "popover:sidebar-tasks:installSidebarTasks>proto._showTaskFoldersPopover",
+  "popover:stream-pill:createStreamPill>openMenu",
+  "popover:stream-stats:createStreamStats>open",
+  "popover:taskbar:showHiddenTiles",
+  "popover:taskbar:showTabGroupList",
+  "popover:taskbar:showWindowList",
+  "popover:usage-dashboard:openPanelEditor",
+  "popover:user-todos-panel:installUserTodos>openMiniInbox",
+  "popover:vault-automation:showVerbs",
+  "popover:window-share:mountLaunchShareRow>btn.onclick",
+]);
 
 /** A sideways scroller a surface may hold, each with its why (L3 lets it scroll; L2 does not judge what it clips). */
 export const DECLARED_SCROLLERS = [
@@ -309,28 +568,43 @@ export const DECLARED_SCROLLERS = [
   { sel: '.pf-chipline', why: 'the folder field\'s chip line scrolls sideways by design (one line of chips)' },
 ];
 
-/** THE RATCHET — what is red today: { [key]: { [lang]: { L1?, L2?, L3? } } }. Filled from the first counted run; only falls. */
+/** THE RATCHET — what is red today, BY NAME (round w8jjldn9f (1): a count let one cut element be traded for another and read
+ *  «held»): { [key]: { [lang]: { L1?|L2?|L3?: { [element name]: count } } } } — the name is the element's structural one (tag,
+ *  #id or two classes — never its words, which move with the language and the fixture). Filled from the first counted run;
+ *  it only falls. */
 export const RATCHET = {};
 
-/** The verdict of a run against the ratchet: results = [{ key, lang, L1, L2, L3 }] → [{ key, lang, law, now, was, verdict }]
- *  verdict: 'new' (more than the table) · 'cured' (fewer — lower the table) · 'held' (equal, > 0) · 'clean' (0 and 0). */
+const lawNames = (r, law) => (r.names && r.names[law]) || {};
+/** The verdict of a run against the ratchet: results = [{ key, lang, L1, L2, L3, names: { L1: {name: n}, … } }] →
+ *  [{ key, lang, law, now, was, verdict, added, gone }] — verdict: 'new' (a name more than the table holds) · 'cured' (a name the
+ *  table holds is fewer or gone — lower the table) · 'held' (the same names, > 0) · 'clean' (none). */
 export function judge(results, ratchet = RATCHET) {
   const out = [];
   for (const r of results) for (const law of ['L1', 'L2', 'L3']) {
-    const now = r[law] || 0, was = ratchet[r.key]?.[r.lang]?.[law] || 0;
-    out.push({ key: r.key, lang: r.lang, law, now, was, verdict: now > was ? 'new' : now < was ? 'cured' : now ? 'held' : 'clean' });
+    const now = lawNames(r, law), was = ratchet[r.key]?.[r.lang]?.[law] || {};
+    const added = Object.keys(now).filter((n) => now[n] > (was[n] || 0)), gone = Object.keys(was).filter((n) => (now[n] || 0) < was[n]);
+    const sum = (m) => Object.values(m).reduce((a, b) => a + b, 0);
+    out.push({ key: r.key, lang: r.lang, law, now: sum(now), was: sum(was), added, gone, verdict: added.length ? 'new' : gone.length ? 'cured' : sum(now) ? 'held' : 'clean' });
   }
   return out;
 }
 
-/** The ratchet a run would write: the reds of `results` (a count > 0 only), keys sorted. */
+/** The ratchet a run would write: the reds of `results` by name (a surface with none has no row), keys sorted. */
 export function ratchetOf(results) {
   const t = {};
   for (const r of [...results].sort((a, b) => (a.key + a.lang).localeCompare(b.key + b.lang))) {
-    const laws = Object.fromEntries(['L1', 'L2', 'L3'].filter((l) => r[l] > 0).map((l) => [l, r[l]]));
+    const laws = {};
+    for (const l of ['L1', 'L2', 'L3']) { const m = lawNames(r, l); if (Object.keys(m).length) laws[l] = Object.fromEntries(Object.keys(m).sort().map((n) => [n, m[n]])); }
     if (Object.keys(laws).length) (t[r.key] = t[r.key] || {})[r.lang] = laws;
   }
   return t;
+}
+
+/** The names of one measure's reds, law by law: { L1: { name: count }, … } (MEASURE_SOURCE's entries carry `k`). */
+export function namesOf(m) {
+  const o = {};
+  for (const l of ['L1', 'L2', 'L3']) { const c = {}; for (const x of m[l] || []) c[x.k] = (c[x.k] || 0) + 1; o[l] = c; }
+  return o;
 }
 
 /** THE MEASURE, run IN THE PAGE: (root, declared selectors) → { box, vw, vh, L1: [...], L2: [...], L3: [...], L4 }. Each entry
@@ -341,36 +615,41 @@ export function ratchetOf(results) {
 export const MEASURE_SOURCE = `(root, declared) => {
   const vw = innerWidth, vh = innerHeight;
   const R = (r) => [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)];
-  const name = (el) => { let s = el.tagName.toLowerCase(); if (el.id) s += '#' + el.id; else if (typeof el.className === 'string' && el.className.trim()) s += '.' + el.className.trim().split(/\\s+/).slice(0, 2).join('.');
-    const tx = (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 24); return tx ? s + ' «' + tx + '»' : s; };
+  // a STRUCTURAL name (round w8jjldn9f (1), its read's 6 / 7): the tag, its #id (never one with a digit — ids minted at run time
+  // carry counters and hashes) or its first two classes (an svg's too); a bare tag goes under its parent's name; siblings that
+  // share a name are told apart by their place among them
+  const own = (el) => { const tag = el.tagName.toLowerCase(); if (el.id && !/\\d/.test(el.id)) return tag + '#' + el.id; const c = ((el.getAttribute && el.getAttribute('class')) || '').trim(); return c ? tag + '.' + c.split(/\\s+/).slice(0, 2).join('.') : tag; };
+  const kOf = (el) => { let s = own(el); if (s === el.tagName.toLowerCase() && el !== root && el.parentElement) s = kOf(el.parentElement) + '>' + s;
+    const p = el.parentElement; if (p && el !== root) { const same = [...p.children].filter((x) => own(x) === own(el)); if (same.length > 1) s += ':nth(' + same.indexOf(el) + ')'; } return s; };
+  const name = (el) => { const s = kOf(el), tx = (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 24); return tx ? s + ' «' + tx + '»' : s; };
   const cs = (el) => getComputedStyle(el);
   const vis = (el) => { if (!el.getClientRects().length) return false; const c = cs(el); return c.visibility !== 'hidden' && c.display !== 'none'; };
   const isDecl = (el) => declared.some((d) => { try { return el.matches(d); } catch { return false; } });
   const rb = root.getBoundingClientRect(), c0 = cs(root);
   const L1 = [];
-  if (rb.left < -0.5 || rb.top < -0.5 || rb.right > vw + 0.5 || rb.bottom > vh + 0.5) L1.push({ el: name(root), at: R(rb), vw, vh });
+  if (rb.left < -0.5 || rb.top < -0.5 || rb.right > vw + 0.5 || rb.bottom > vh + 0.5) L1.push({ el: name(root), k: kOf(root), at: R(rb), vw, vh });
   const inL = rb.left + (parseFloat(c0.borderLeftWidth) || 0), inR = rb.right - (parseFloat(c0.borderRightWidth) || 0);
   const L2 = [], L3 = [], past = new Set();
   const all = [root, ...root.querySelectorAll('*')];
   for (const el of all) {
     if (el !== root && !vis(el)) continue;
     const c = cs(el);
-    if ((c.overflowX === 'auto' || c.overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 1 && !isDecl(el)) L3.push({ el: name(el), sw: el.scrollWidth, cw: el.clientWidth });
+    if ((c.overflowX === 'auto' || c.overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 1 && !isDecl(el)) L3.push({ el: name(el), k: kOf(el), sw: el.scrollWidth, cw: el.clientWidth });
     if (el === root || c.position === 'fixed') continue;
     let a = el.parentElement, under = false, inPast = false;
     while (a && a !== root) { if (past.has(a)) { inPast = true; break; } const ca = cs(a); if (ca.overflowX !== 'visible' || ca.position === 'fixed') { under = true; break; } a = a.parentElement; }
     if (under || inPast) continue;
     const r = el.getBoundingClientRect();
     if (!r.width && !r.height) continue;
-    if (r.left < inL - 0.5 || r.right > inR + 0.5) { past.add(el); L2.push({ el: name(el), at: R(r), box: [Math.round(inL), Math.round(inR)] }); continue; }
+    if (r.left < inL - 0.5 || r.right > inR + 0.5) { past.add(el); L2.push({ el: name(el), k: kOf(el), at: R(r), box: [Math.round(inL), Math.round(inR)] }); continue; }
     // WORDS PAST A BOX THAT FITS (the reader's 6): a block holding its own text whose words run out of it (nowrap, a long
     // unbroken path) and past the surface — its box is inside, what a person reads is not
     if (c.overflowX === 'visible' && el.clientWidth > 0 && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && r.left + el.scrollWidth > inR + 0.5) {
-      past.add(el); L2.push({ el: name(el), at: R(r), words: Math.round(r.left + el.scrollWidth), box: [Math.round(inL), Math.round(inR)] });
+      past.add(el); L2.push({ el: name(el), k: kOf(el) + ':words', at: R(r), words: Math.round(r.left + el.scrollWidth), box: [Math.round(inL), Math.round(inR)] });
     }
   }
   const se = document.scrollingElement;
-  if (se && se.scrollWidth > vw + 1) L3.push({ el: 'the page', sw: se.scrollWidth, cw: vw });
+  if (se && se.scrollWidth > vw + 1) L3.push({ el: 'the page', k: 'page', sw: se.scrollWidth, cw: vw });
   const PRIMARY = 'button, [role="button"], select, input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), textarea, [role="menuitem"]';
   const ctl = [...(root.matches(PRIMARY) ? [root] : []), ...root.querySelectorAll(PRIMARY)].filter(vis);
   const small = [], font = [];
@@ -384,30 +663,46 @@ export const MEASURE_SOURCE = `(root, declared) => {
 
 /** THE TABLES AGAINST THE LIST → problems [{ kind, key, words }] (empty = whole). kind: 'no-row' (neither an opener nor an
  *  excuse) · 'both' (an opener AND words of its own) · 'gone' (a row of OPENERS / EXCUSES names no surface) · 'stale-file'
- *  (EXCUSE_BY_FILE words no surface takes) · 'ceiling' (the excuses counted ≠ the ceiling) · 'ratchet' (a ratchet row for a
- *  surface with no opener, a language other than zh / en, a law other than L1–L3, a count that is not a whole number > 0). */
-export function checkTables(list, t = { OPENERS, EXCUSES, EXCUSE_BY_FILE, RATCHET, EXCUSE_CEILING }) {
+ *  (EXCUSE_BY_FILE words no surface takes) · 'new-by-file' (a surface excused by its file's words and not listed by name) ·
+ *  'stale-excuse' (a listed name no longer excused that way) · 'list-grew' / 'list-max' (the list's length against its max,
+ *  which only falls) · 'ratchet' (a ratchet row for a surface with no opener, a language other than zh / en, a law other than
+ *  L1–L3, a name table that is not names with whole counts > 0). */
+export function checkTables(list, t = { OPENERS, EXCUSES, EXCUSE_BY_FILE, RATCHET, EXCUSED_BY_FILE_WORDS }) {
   const P = [], keys = new Set(list.map((s) => s.key));
   const opener = (s) => t.OPENERS[s.key] || (s.key.startsWith('view:settings:') ? SETTINGS_OPEN(s.category) : null);
   const words = (s) => t.EXCUSES[s.key] || (s.file ? t.EXCUSE_BY_FILE[base(s.file)] : null) || null;
   let excused = 0;
-  const filesUsed = new Set();
+  const filesUsed = new Set(), listed = new Set(t.EXCUSED_BY_FILE_WORDS), byFile = new Set();
   for (const s of list) {
     const o = opener(s), own = t.EXCUSES[s.key], w = words(s);
     if (o && own) P.push({ kind: 'both', key: s.key, words: 'an opener and words of its own' });
     else if (!o && !w) P.push({ kind: 'no-row', key: s.key, words: `${s.file}:${s.line || ''} (${s.chain.join('>') || 'top'}) — no opener, no excuse` });
-    if (!o && w) { excused++; if (!own && s.file) filesUsed.add(base(s.file)); }
+    if (!o && w) {
+      excused++;
+      if (!own && s.file) {
+        filesUsed.add(base(s.file)); byFile.add(s.key);
+        // round w8jjldn9f (2): a NEW surface in a file whose words excuse others is red BY NAME — its file's words cover only
+        // the keys listed today; a new one takes an opener, or words of its own (a named excuse is the only way up)
+        if (!listed.has(s.key)) P.push({ kind: 'new-by-file', key: s.key, words: `${s.file}:${s.line || ''} — a new surface in ${base(s.file)}.js: give it an opener, or words of its own in EXCUSES` });
+      }
+    }
   }
+  for (const k of listed) if (!byFile.has(k)) P.push({ kind: 'stale-excuse', key: k, words: 'listed as excused by its file\'s words, but it is opened now, has words of its own, or is gone — take it out of EXCUSED_BY_FILE_WORDS' });
+  const max = t.EXCUSED_BY_FILE_WORDS_MAX ?? EXCUSED_BY_FILE_WORDS_MAX;
+  if (listed.size > max) P.push({ kind: 'list-grew', key: 'EXCUSED_BY_FILE_WORDS', words: `${listed.size} names, the most it may hold is ${max} — a new surface takes an opener or words of its own in EXCUSES` });
+  if (listed.size < max) P.push({ kind: 'list-max', key: 'EXCUSED_BY_FILE_WORDS_MAX', words: `the list holds ${listed.size} names: lower EXCUSED_BY_FILE_WORDS_MAX to ${listed.size} (it only falls)` });
   for (const k of Object.keys(t.OPENERS)) if (!keys.has(k)) P.push({ kind: 'gone', key: k, words: 'an opener for a surface the tree no longer holds' });
   for (const k of Object.keys(t.EXCUSES)) if (!keys.has(k)) P.push({ kind: 'gone', key: k, words: 'words for a surface the tree no longer holds' });
   for (const f of Object.keys(t.EXCUSE_BY_FILE)) if (!filesUsed.has(f)) P.push({ kind: 'stale-file', key: f, words: 'file words no excused surface takes' });
-  if (excused !== t.EXCUSE_CEILING) P.push({ kind: 'ceiling', key: 'EXCUSE_CEILING', words: `${excused} surfaces excused, the ceiling says ${t.EXCUSE_CEILING} — it may only fall: set it to ${excused} when an opener replaced an excuse` });
   for (const [k, by] of Object.entries(t.RATCHET)) {
     const [k0, variant] = k.split('~'), s = list.find((x) => x.key === k0), o = s && opener(s);
     if (!o || (variant && !(o.also || []).some((v) => v.label === variant))) { P.push({ kind: 'ratchet', key: k, words: 'a ratchet row for a surface (or a draw) with no opener' }); continue; }
     for (const [lang, laws] of Object.entries(by)) {
       if (lang !== 'zh' && lang !== 'en') P.push({ kind: 'ratchet', key: k, words: `language ${lang}` });
-      for (const [law, n] of Object.entries(laws)) if (!/^L[123]$/.test(law) || !Number.isInteger(n) || n <= 0) P.push({ kind: 'ratchet', key: k, words: `${lang} ${law}: ${n}` });
+      for (const [law, names] of Object.entries(laws)) {
+        if (!/^L[123]$/.test(law) || !names || typeof names !== 'object' || !Object.keys(names).length) { P.push({ kind: 'ratchet', key: k, words: `${lang} ${law}: not a table of names` }); continue; }
+        for (const [n, c] of Object.entries(names)) if (!n || !Number.isInteger(c) || c <= 0) P.push({ kind: 'ratchet', key: k, words: `${lang} ${law} «${n}»: ${c}` });
+      }
     }
   }
   return { problems: P, excused, opened: list.filter((s) => opener(s)).length };

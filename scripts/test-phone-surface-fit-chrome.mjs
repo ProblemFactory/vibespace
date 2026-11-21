@@ -64,7 +64,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // the scratch HOME's ~/.local/bin, found through a scratch login shell; the hub's own PATH keeps no directory with either
 const SHAPE_DIR = path.join(fakeHome, '.vs-shape', 'installed'), CLI_BIN = path.join(fakeHome, '.local', 'bin'), TOOLS = path.join(fakeHome, '.vs-shape', 'tools');
 for (const d of [SHAPE_DIR, CLI_BIN, TOOLS]) fs.mkdirSync(d, { recursive: true });
-fs.writeFileSync(path.join(CLI_BIN, 'claude'), '#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.314 (Claude Code)"; exit 0; }\nexit 1\n', { mode: 0o755 });
+// UNIT 2 (主开发 r1349): the claude stand-in also IS the conversation's agent — the tree's stand-in, never a real one: a launch
+// in stream-json answers each person's line with one turn (a long paragraph, so the message menu has words); any other call
+// ends at once
+fs.writeFileSync(path.join(CLI_BIN, 'claude'), `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args.includes('--version')) { console.log('2.1.314 (Claude Code)'); process.exit(0); }
+if (!args.some((a) => /stream-json/.test(a))) process.exit(1);
+const SID = 'fit-' + process.pid, out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5-1', cwd: process.cwd(), tools: ['Read'], permissionMode: 'default', claude_code_version: '2.1.314' });
+let n = 0, buf = '';
+process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); let m = null; try { m = JSON.parse(line); } catch {} if (!m || m.type !== 'user') continue; const k = n++;
+  setTimeout(() => {
+    out({ type: 'assistant', session_id: SID, uuid: 'a-' + k, message: { id: 'm' + k, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'The retry waits two seconds and gives up after three tries today; the path it writes to is /srv/payments/refunds/retry-queue/2026/11/a-long-folder-name-that-never-breaks.json, and the change makes the wait configurable.' }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 40 } } });
+    out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 300, num_turns: 1, result: 'done', session_id: SID, total_cost_usd: 0.001, usage: { input_tokens: 10, output_tokens: 40 } });
+  }, 200); } });
+process.stdin.on('end', () => process.exit(0));
+`, { mode: 0o755 });
 fs.writeFileSync(path.join(CLI_BIN, 'codex'), '#!/bin/sh\n[ "$1" = --version ] && { echo "codex-cli 0.130.0"; exit 0; }\nexit 1\n', { mode: 0o755 });
 fs.symlinkSync(['/usr/bin/printenv', '/bin/printenv'].find((p) => fs.existsSync(p)) || '/usr/bin/printenv', path.join(TOOLS, 'printenv'));
 fs.writeFileSync(path.join(SHAPE_DIR, 'login-shell'), `#!/bin/sh\nPATH='${CLI_BIN}:${TOOLS}:/usr/bin:/bin'; export PATH\nwhile [ $# -gt 0 ]; do case "$1" in -c) shift; exec /bin/sh -c "$1";; *) shift;; esac; done; exec /bin/sh -i\n`, { mode: 0o755 });
@@ -76,7 +92,7 @@ const tables = C.checkTables(list);   // the fast suite's verdict on the tables,
 const want = list.filter((s) => FAMILIES.includes(s.family));
 const opened = want.filter((s) => C.openerOf(s)), excused = want.filter((s) => !C.openerOf(s));
 const draws = opened.flatMap((s) => C.drawsOf(s).map((d) => ({ ...d, s })));   // a surface's opener, then its variants (key~label)
-console.log(`the list: ${list.length} surfaces (derived from the tree) — this run's families ${FAMILIES.join(', ')}: ${opened.length} with an opener, ${excused.length} excused (EXCUSE_CEILING ${C.EXCUSE_CEILING} over every family) · langs ${LANGS.join(', ')}`);
+console.log(`the list: ${list.length} surfaces (derived from the tree) — this run's families ${FAMILIES.join(', ')}: ${opened.length} with an opener, ${excused.length} excused (${C.EXCUSED_BY_FILE_WORDS.length} by their file's words, named) · langs ${LANGS.join(', ')}`);
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -105,10 +121,34 @@ if (!(await hub.ready({ ms: 40000 }))) console.log(`  (the hub did not answer in
 const api = async (p, body) => (await fetch(ORIGIN + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
 const FX = {};
 for (const [k, n] of [['A', 'Work Max'], ['B', 'Personal Max'], ['L', 'A very long subscription account name that runs to sixty chars']]) FX[k] = (await api('/api/accounts/subscription', { name: n })).id;
-FX.P = (await api('/api/accounts/pool', { name: 'Main pool', members: [FX.A, FX.B] })).id;
-const tg = await api('/api/tasks', { name: 'A Task Group whose name runs long enough to wrap twice on a phone' });
+FX.P = (await api('/api/accounts/pool', { name: 'Main pool', members: [FX.A, FX.B] })).id || null;   // accounts.js createPool refuses with no logged-in subscription — none in a scratch hub: the pool members' dialog is drawn for no pool (its own words)
+const tg = await api('/api/tasks', { title: 'A Task Group whose name runs long enough to wrap twice on a phone' });   // the store's field is `title`
 FX.task = tg && (tg.id || tg.task?.id || tg.taskId) || null;
-check('the fixture stands: three accounts, a pool, a Task Group', !!(FX.A && FX.B && FX.L && FX.P && FX.task), FX);
+// ONE CONVERSATION (unit 2): created through the hub's socket as the page creates one, a turn answered by the stand-in; its name
+// long enough to wrap on a phone (the For-you card's ⋯ — the one surface an item would open — is app-install only: no item seeded)
+// NO REAL CLI EVER (the read's 9 — VS_NO_REAL_CLI guards the probes, never a spawn): the conversation is created only once the
+// hub's own census says claude is the login shell's stand-in (a status read asks the shell; until it answered, the hub's walk
+// may hold a real binary). Bounded at 20 s; not the stand-in ⇒ no conversation (its surfaces red by name).
+let cliRow = null;
+for (let i = 0; i < 40; i++) {
+  try { cliRow = (await (await fetch(ORIGIN + '/api/backend-status')).json()).claude || null; } catch { cliRow = null; }
+  // 'shell' = the login shell's answer, and its PATH puts the stand-in's bin FIRST (a real claude in /usr/bin comes after it);
+  // a row that names a path names the stand-in's
+  if (cliRow && cliRow.provenance === 'shell' && !(/"\/(?:usr|opt|home)\/[^"]*\/claude"/.test(JSON.stringify(cliRow)) && !JSON.stringify(cliRow).includes(path.join(CLI_BIN, 'claude')))) break;
+  cliRow = null; await sleep(500);
+}
+check('the hub found claude through the login shell AS THE STAND-IN, before any conversation is created (no real CLI can be spawned)', !!cliRow, cliRow);
+const WS = require('ws'), hubWs = new WS(`ws://127.0.0.1:${PORT}/ws`), frames = [];
+await new Promise((r, j) => { hubWs.on('open', r); hubWs.on('error', j); }).catch(() => {});
+hubWs.on('message', (d) => { try { frames.push(JSON.parse(String(d))); } catch { } });
+const CONV_CWD = path.join(fakeHome, 'work', 'payments-refunds-retry'); fs.mkdirSync(CONV_CWD, { recursive: true });
+if (cliRow) hubWs.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: CONV_CWD, reqId: 'fit-conv' }));
+for (let i = 0; i < 160 && !FX.sid; i++) { const f = frames.find((m) => m && m.type === 'created' && m.reqId === 'fit-conv'); if (f) FX.sid = f.sessionId; else await sleep(150); }
+FX.cwd = CONV_CWD; FX.name = 'Refund retries: make the wait configurable before the release';
+if (FX.sid) hubWs.send(JSON.stringify({ type: 'chat-input', sessionId: FX.sid, text: 'Why does the refund retry give up so early?' }));
+const fxMissing = ['A', 'B', 'L', 'task', 'sid'].filter((k) => !FX[k]);
+check(`the fixture stands: three accounts, a Task Group, ONE conversation of the stand-in agent${fxMissing.length ? ' — MISSING: ' + fxMissing.join(', ') : ''} (a pool: ${FX.P ? 'yes' : 'none — no logged-in subscription to pool'})`, fxMissing.length === 0, FX);
+try { hubWs.close(); } catch { } frames.length = 0;   // the fixture's socket ends with the fixture (the read's 12)
 check('the census tables are whole against the tree (test-phone-surface-fit\'s verdict)', tables.problems.length === 0, tables.problems.slice(0, 6));
 
 // ── raw CDP ──
@@ -149,6 +189,16 @@ await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
   const vis = (e) => { if (!e || !e.getClientRects().length) return false; const c = getComputedStyle(e); return c.visibility !== 'hidden' && c.display !== 'none'; };
   const SEL = ${JSON.stringify(FAMILY_SEL)};
   window.__fitAnchor = () => { let a = document.getElementById('fit-anchor'); if (!a) { a = document.createElement('button'); a.id = 'fit-anchor'; a.textContent = '·'; a.style.cssText = 'position:fixed;left:205px;top:160px;width:24px;height:24px;z-index:1'; document.body.appendChild(a); } return a; };
+  // the seeded conversation, open and on show, its first answer drawn (a content fact, not a time)
+  window.__fitChat = async () => {
+    const find = () => [...app.wm.windows.values()].find((w) => w.type === 'chat' && app.sessions.get(w.id)?.sessionId === window.__fitFx.sid);
+    if (!find()) app.attachSession(window.__fitFx.sid, window.__fitFx.name, window.__fitFx.cwd, { mode: 'chat', backend: 'claude' });
+    for (let i = 0; i < 80 && !find(); i++) await new Promise((r) => setTimeout(r, 100));
+    const w = find(); if (!w) throw new Error('the seeded conversation never opened');
+    app.wm.revealWindow?.(w.id); app.wm.focusWindow?.(w.id);
+    for (let i = 0; i < 80 && ![...document.querySelectorAll('.window[class~="window-active"] .chat-msg')].some((m) => m._rawMsg && m._rawMsg.role === 'assistant'); i++) await new Promise((r) => setTimeout(r, 100));
+    return w;
+  };
   window.__fitMark = (kind) => { document.querySelectorAll(SEL[kind]).forEach((e) => { if (vis(e)) e.dataset.fitSeen = '1'; }); };
   window.__fitFind = (kind, rootSel) => {
     document.querySelectorAll('[data-fit-root]').forEach((e) => delete e.dataset.fitRoot);
@@ -189,12 +239,17 @@ const MEASURE = (rootExpr) => evalJs(`(${C.MEASURE_SOURCE})(${rootExpr}, ${JSON.
  *  its rows still arrive) → { at, m } | { failed } */
 const openAndMeasure = async (s, o = C.openerOf(s)) => {
   await evalJs(`window.__fitMark(${JSON.stringify(s.kind)})`);
-  const ran = await evalJs(`(async () => { const app = window.app, M = window.__fitMods, FX = window.__fitFx, anchor = window.__fitAnchor;
+  const ran = await evalJs(`(async () => { const app = window.app, M = window.__fitMods, FX = window.__fitFx, anchor = window.__fitAnchor, chat = window.__fitChat;
     const go = (async () => { ${o.open}; })(); return await Promise.race([go.then(() => 'ok', (e) => 'threw: ' + (e && e.message || e)), new Promise((r) => setTimeout(() => r('ok-pending'), 8000))]); })()`).catch((e) => 'threw: ' + e.message);
   if (String(ran).startsWith('threw')) return { failed: `the opener ${ran}` };
   let at = null; const t1 = performance.now();
   while (performance.now() - t1 < 5000 && !(at = await evalJs(`window.__fitFind(${JSON.stringify(s.kind)}, ${JSON.stringify(o.root || null)})`).catch(() => null))) await sleep(120);
   if (!at) return { failed: `no ${o.root || FAMILY_SEL[s.kind]} appeared in 5 s (the opener said ${ran})` };
+  // A CONTENT FACT FIRST (round w8jjldn9f (5): a surface whose rows arrive by a fetch is measured filled, not at a time): nothing
+  // in it still says it is loading (aria-busy), and the opener's own fact when it names one — each bounded at 6 s
+  const quiet = await waitFor(`(() => { const r = document.querySelector('[data-fit-root]'); return !!r && !r.querySelector('[aria-busy="true"]') && r.getAttribute('aria-busy') !== 'true'; })()`, 6000);
+  if (!quiet) console.log(`      (${s.key}: still aria-busy after 6 s — measured as it stood)`);   // said, never silent (the read's 13)
+  if (o.ready && !(await waitFor(`(() => { try { return !!(${o.ready}); } catch { return false; } })()`, 6000))) console.log(`      (${s.key}: its content fact «${o.ready}» never held in 6 s — measured as it stood)`);
   const KEY = `(() => { const r = document.querySelector('[data-fit-root]'); if (!r) return null; const b = r.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height), r.scrollWidth, r.scrollHeight, r.getElementsByTagName('*').length].join(','); })()`;
   for (let k = 0, prev = await evalJs(KEY).catch(() => null); k < 16; k++) { await sleep(130); const now = await evalJs(KEY).catch(() => null); if (now === prev) break; prev = now; }
   const m = await MEASURE(`document.querySelector('[data-fit-root]')`).catch((e) => ({ error: e.message }));
@@ -223,20 +278,20 @@ for (const lang of LANGS) {
       const r = await openAndMeasure(s, d);
       if (r.failed) {
         failed.push({ key: d.key, lang, why: r.failed });
-        check(`[${lang}] ${d.key} opens (${s.file || 'view'})`, false, r.failed);
+        check(`[${lang}] ${d.key} opens (${s.file || 'view'}) — ${String(r.failed).slice(0, 220)}`, false, r.failed);   // the reason ON the ✗ line: a heavy runner's summary keeps only that line
         await shot(`${lang}-OPENER-${d.key}`);
         await load(lang); since = 0; continue;
       }
-      const { m } = r, row = { key: d.key, lang, L1: m.L1.length, L2: m.L2.length, L3: m.L3.length };
+      const { m } = r, row = { key: d.key, lang, L1: m.L1.length, L2: m.L2.length, L3: m.L3.length, names: C.namesOf(m) };
       results.push(row);
       l4.push({ key: d.key, lang, n: m.L4.n, small: m.L4.small, font: m.L4.font, ex: m.L4.ex });
       const v = C.judge([row]);
       const bad = v.filter((x) => x.verdict === 'new' || x.verdict === 'cured');
       const red = row.L1 + row.L2 + row.L3 > 0;
       if (red) await shot(`${lang}-${d.key}`);
-      const said = `L1 ${row.L1} · L2 ${row.L2} · L3 ${row.L3} (ratchet ${['L1', 'L2', 'L3'].map((l) => C.RATCHET[d.key]?.[lang]?.[l] || 0).join('/')}) · L4 ${m.L4.small}/${m.L4.n} small, ${m.L4.font} small text · ${secs(ts)} s`;
+      const said = `L1 ${row.L1} · L2 ${row.L2} · L3 ${row.L3} (ratchet ${v.map((x) => x.was).join('/')}) · L4 ${m.L4.small}/${m.L4.n} small, ${m.L4.font} small text · ${secs(ts)} s`;
       check(`[${lang}] ${d.key} — ${said}`, bad.length === 0,
-        bad.map((x) => `${x.law} ${x.verdict === 'new' ? 'NEW' : 'CURED — lower the ratchet row'}: ${x.now} (was ${x.was})`).join('; ') + ' — ' + JSON.stringify({ box: m.box, L1: m.L1.slice(0, 3), L2: m.L2.slice(0, 5), L3: m.L3.slice(0, 3) }));
+        bad.map((x) => `${x.law} ${x.verdict === 'new' ? 'NEW ' + JSON.stringify(x.added) : 'CURED — lower the ratchet row ' + JSON.stringify(x.gone)}: ${x.now} (was ${x.was})`).join('; ') + ' — ' + JSON.stringify({ box: m.box, L1: m.L1.slice(0, 3), L2: m.L2.slice(0, 5), L3: m.L3.slice(0, 3) }));
       if (pageErrors.length > e0) console.log(`      (the page threw while it was open: ${pageErrors.slice(e0).map((x) => String(x).split('\n')[0]).join(' | ').slice(0, 300)})`);
       if (s.family !== 'views' || !s.key.startsWith('view:settings:')) { await close(d); if (s.family === 'views') { await load(lang); since = 0; } }
       since++;
@@ -302,7 +357,7 @@ console.log('\n── L4 (the finger rule — printed, not a law): primary contr
 for (const x of l4) if (x.small || x.font) console.log(`  ${x.lang} ${x.key}: ${x.small}/${x.n} small, ${x.font} small text  ${x.ex.join(' · ').slice(0, 220)}`);
 console.log(`  L4 in all: ${l4.reduce((a, x) => a + x.small, 0)} controls under 44 px and ${l4.reduce((a, x) => a + x.font, 0)} fields under 16 px over ${l4.length} surface draws (${l4.filter((x) => x.small || x.font).length} with any)`);
 console.log(`\nRATCHET-NOW (the table this run would write; ${Object.keys(C.ratchetOf(results)).length} surfaces red today):\n${JSON.stringify(C.ratchetOf(results), null, 1)}`);
-console.log(`\nexcused (not opened): ${excused.length} of this run's families — EXCUSE_CEILING ${C.EXCUSE_CEILING} over the whole list; opener failures: ${failed.length}${failed.length ? ' — ' + failed.map((f) => `${f.lang} ${f.key}`).join(', ') : ''}`);
+console.log(`\nexcused (not opened): ${excused.length} of this run's families (${C.EXCUSED_BY_FILE_WORDS.length} named by their file's words over the whole list); opener failures: ${failed.length}${failed.length ? ' — ' + failed.map((f) => `${f.lang} ${f.key}`).join(', ') : ''}`);
 console.log(`the verdicts: ${all.filter((x) => x.verdict === 'new').length} new, ${all.filter((x) => x.verdict === 'cured').length} cured-but-listed, ${all.filter((x) => x.verdict === 'held').length} held at the ratchet`);
 const total = secs(T0);
 console.log(`THE SUITE'S TIME: ${total} s in all — ${Object.entries(timing).map(([k, v]) => `${k} ${v} s`).join(' · ')}${Number(total) > 600 ? ' — OVER TEN MINUTES: split by family (--family dialogs | menus | views)' : ''}`);

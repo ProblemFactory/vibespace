@@ -1449,9 +1449,9 @@ export function createPopover(anchor, className, opts = {}) {
     // inside. A box no wider than the screen less its pads gets no style, so nothing on a desk moves. (Its PLACE is the
     // anchor's, as before: one near the right edge still narrows to the room there — a slide like menuPlace's would move
     // desk popovers too.)
-    if (pop._heldW) { pop.style.maxWidth = pop._ownMaxW || ''; pop.style.overflowX = pop._ownOverflowX || ''; pop._heldW = false; }   // measured afresh each time (a rotation, a row grown)
-    const at = pop.style.left;
-    pop.style.left = (MENU_PAD / Z) + 'px';   // measured where it has the screen's width
+    if (pop._heldW) { pop.style.maxWidth = pop._ownMaxW || ''; pop.style.overflowX = pop._ownOverflowX || ''; pop._heldW = false; }   // measured afresh at each clamp (its first frame, its content resized — a turn of the screen alone re-clamps nothing)
+    const at = pop.style.left, atR = pop.style.right;
+    pop.style.left = (MENU_PAD / Z) + 'px'; pop.style.right = 'auto';   // measured where it has the screen's width (a right-anchored box too: held by its right it would read the fill, not its width)
     const across = vw - 2 * MENU_PAD, natural = pop.getBoundingClientRect().width;
     if (natural > across) {
       pop._ownMaxW = pop.style.maxWidth; pop._ownOverflowX = pop.style.overflowX;   // what the caller wrote is put back when the box fits again
@@ -1461,7 +1461,7 @@ export function createPopover(anchor, className, opts = {}) {
       if (drawn > across + 0.5) pop.style.maxWidth = (Math.max(0, 2 * across - drawn) / Z) + 'px';
       pop._heldW = true;
     }
-    pop.style.left = at;
+    pop.style.left = at; pop.style.right = atR;
     const pr = pop.getBoundingClientRect();
     if (pr.right > vw) pop.style.left = (Math.max(0, vw - pr.width - 4) / Z) + 'px';
     if (pr.bottom > vh) pop.style.top = (Math.max(0, vh - pr.height - 4) / Z) + 'px';
