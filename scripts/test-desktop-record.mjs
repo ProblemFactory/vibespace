@@ -90,6 +90,15 @@ const MODEL = 'src/lib/desktop-record.js';
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // a fake DOM just wide enough for the client modules' imports, showToast (its history lands in localStorage) and the
 // desktop previews (#desktop-previews, counted rect by rect)
@@ -1689,14 +1698,14 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   {
     const find = '    if (this._resyncStale) { if (!this._resyncing) this._resyncFromServer(); return; }';
     ok(LSRC0.includes(find), 'control stale-base-saved: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '').replace('const RESYNC_RETRY_MS = 1500;', 'const RESYNC_RETRY_MS = 150;'), 'stale-base-saved', { esm: true }))).LayoutManager, { quiet: true, legs: ['st'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(editAnchor(LSRC0, find, '', "src/lib/layout.js", 'first'), 'const RESYNC_RETRY_MS = 1500;', 'const RESYNC_RETRY_MS = 150;', "src/lib/layout.js"), 'stale-base-saved', { esm: true }))).LayoutManager, { quiet: true, legs: ['st'] });
     ok(f.some((n) => /a stale base is never saved/.test(n)), `control stale-base-saved: the page writes its stale base after a failed re-read (RED) (${f.length})`);
   }
   // (ad) verify r3 ④: the failed re-read told to the console only
   {
     const find = "      if (!this._staleTold) { this._staleTold = true; showToast(t(";
     ok(LSRC0.includes(find), 'control stale-untold: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, "      if (false) { this._staleTold = true; showToast(t(").replace('const RESYNC_RETRY_MS = 1500;', 'const RESYNC_RETRY_MS = 150;'), 'stale-untold', { esm: true }))).LayoutManager, { quiet: true, legs: ['st'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(editAnchor(LSRC0, find, "      if (false) { this._staleTold = true; showToast(t(", "src/lib/layout.js"), 'const RESYNC_RETRY_MS = 1500;', 'const RESYNC_RETRY_MS = 150;', "src/lib/layout.js"), 'stale-untold', { esm: true }))).LayoutManager, { quiet: true, legs: ['st'] });
     ok(f.some((n) => /the user is told ONCE/.test(n)) && !f.some((n) => /a stale base is never saved/.test(n)), `control stale-untold: a console line only (RED) — the hold still holds (${f.length})`);
   }
   // (ag) verify r4 ①: THE UNSAVED ACT reverted — actHeld reduced to the receipt clause (r2's rule): a record received after an unsaved act undoes it
@@ -1740,7 +1749,7 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
     const f1 = '            if (this.actHeld(w._chainAt, receivedAt, w)) { heldKept = true; continue; }\n';
     const f2 = "          if ((tc.tabs || []).some((id) => { const m = this.app.wm.windows.get(String(id)); return m && this.actHeld(m._chainAt, receivedAt, m); })) { heldKept = true; continue; }\n";
     ok(LSRC0.includes(f1) && LSRC0.includes(f2), 'control chain-unheld: the patched lines exist in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(f1, '').replace(f2, ''), 'chain-unheld', { esm: true }))).LayoutManager, { quiet: true, legs: ['ch'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(editAnchor(LSRC0, f1, '', "src/lib/layout.js"), f2, '', "src/lib/layout.js"), 'chain-unheld', { esm: true }))).LayoutManager, { quiet: true, legs: ['ch'] });
     ok(f.some((n) => /a MERGE made in the cooldown/.test(n)) && f.some((n) => /a SIDE-BY-SIDE made in the cooldown/.test(n)) && f.some((n) => /a TEAR-OFF made in the cooldown/.test(n)), `control chain-unheld: without the hold the merge dissolves, the split falls back to tabs and the tear-off is re-grouped — RED (${f.length})`);
     // ((ch)'s text half — bindSplit without its stamp is RED by §6's chain-witness pin, a patched src/lib/tab-group.js string: MOVED to the fast scripts/test-desktop-record-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
@@ -1749,7 +1758,7 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
     const find = "    if (json === this._lastSentJson && !this._unacked.some((s) => s.desks.includes(desktopId || ''))) {\n";
     const find2 = '{ this._lastSentJson = null; this._unacked = this._unacked.filter((s) => s.at == null); }';
     ok(LSRC0.includes(find) && LSRC0.includes(find2), 'control noop-unread: the patched lines exist in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '    if (json === this._lastSentJson) {\n').replace(find2, '{ this._unacked = this._unacked.filter((s) => s.at == null); }'), 'noop-unread', { esm: true }))).LayoutManager, { quiet: true, legs: ['ak2'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(editAnchor(LSRC0, find, '    if (json === this._lastSentJson) {\n', "src/lib/layout.js"), find2, '{ this._unacked = this._unacked.filter((s) => s.at == null); }', "src/lib/layout.js"), 'noop-unread', { esm: true }))).LayoutManager, { quiet: true, legs: ['ak2'] });
     ok(f.some((n) => /RE-SENT after the reconnect although its text equals/.test(n)), `control noop-unread: the held drag on the desktop on show is kept on the page but never reaches the server — RED (${f.length})`);
   }
   // (ak) verify r5 ⑤: a refusal that CARRIES (the refused desktop released with the save) — RED by leg ar

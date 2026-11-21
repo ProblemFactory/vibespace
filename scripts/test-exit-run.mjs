@@ -63,6 +63,15 @@ const grantLists = (grants, hid, lists) => { const w = grants.setMany(listRows(h
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, n) => ok(JSON.stringify(a) === JSON.stringify(b), n, { got: a, want: b });
 const section = async (name, fn) => { console.log(name); try { await fn(); } catch (e) { fail++; console.error(`  ✗ ${name} threw: ${e.stack || e.message}`); } };
 /** B-48a4: the audit's RECORD = the lines on disk + the lines the one appender (src/device-audit.js journal) still queues for the store
@@ -905,7 +914,7 @@ await section('§7 controls (patched copies)', async () => {
   ok(readsLive(Ec.outputHeads({ stdout: LIVE }).stdout), 'CONTROL (c): without the belt a frame in a command\'s output is live in the stored head — the §2 / §3 legs go red');
   // (d) a daemon built from a copy that never consults the judge — the production shape over a REAL child
   const adSrc = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-  const adMut = adSrc.replace('const sf = XS.spawnFailure(err);', 'const sf = null;');
+  const adMut = editAnchor(adSrc, 'const sf = XS.spawnFailure(err);', 'const sf = null;', "src/agentd/agentd.js");
   ok(adMut !== adSrc, '(d) the patch applies');
   // the copy is BUNDLED (esbuild renames a shadowed `require`, so mutant-copy's CJS re-binding cannot be used here):
   // its relative requires are re-based onto the real modules by path, the file lives in this run's scratch dir
@@ -1014,7 +1023,7 @@ await section('§7 controls (patched copies)', async () => {
   // (s) verify r4 F3: the JWT alternative restored into PREFIX_RE, the scan removed — the §2d jwt legs go red (×65 at ×8)
   // lane job-notify-user r6: PREFIX_RE's last group closes `…{8,255})(?![A-Za-z0-9_\-]))/g;` (the letters-and-digits families have their
   // own tail before it) — the JWT alternative goes back into THAT group, under the old tail
-  const ssMutS = ssSrc.replace("|jbt_[A-Za-z0-9_\\-]{8,255})(?![A-Za-z0-9_\\-]))/g;", "|jbt_[A-Za-z0-9_\\-]{8,255}|eyJ[A-Za-z0-9_\\-]{8,65536}\\.eyJ[A-Za-z0-9_\\-]{8,65536}\\.[A-Za-z0-9_\\-]{8,65536})(?![A-Za-z0-9_\\-]))/g;").replace("    const jwt = redactJwt(text); text = jwt.text; n += jwt.n;", '').replace("|vsmt_|vswh_|vswp_|jbt_)/;", "|vsmt_|vswh_|vswp_|jbt_|eyJ)/;");
+  const ssMutS = editAnchor(editAnchor(editAnchor(ssSrc, "|jbt_[A-Za-z0-9_\\-]{8,255})(?![A-Za-z0-9_\\-]))/g;", "|jbt_[A-Za-z0-9_\\-]{8,255}|eyJ[A-Za-z0-9_\\-]{8,65536}\\.eyJ[A-Za-z0-9_\\-]{8,65536}\\.[A-Za-z0-9_\\-]{8,65536})(?![A-Za-z0-9_\\-]))/g;", "src/secret-shapes.js"), "    const jwt = redactJwt(text); text = jwt.text; n += jwt.n;", '', "src/secret-shapes.js"), "|vsmt_|vswh_|vswp_|jbt_)/;", "|vsmt_|vswh_|vswp_|jbt_|eyJ)/;", "src/secret-shapes.js");
   ok(ssMutS !== ssSrc && ssMutS.includes('|eyJ[A-Za-z0-9_\\-]{8,65536}\\.eyJ') && !ssMutS.includes('const jwt = redactJwt(text)'), '(s) the patch applies (the alternative IS in PREFIX_RE — r6: a comment\'s `eyJ[A-Za-z0-9_` no longer passes for it)');
   const fS = M.write('src/secret-shapes.js', ssMutS, 'jwtre'), SSs = require(fS);
   { const v = stepsOf(R4_SHAPES.jwtDashStorm, 512, 8, { module: fS }); ok(!v.err && !v.ok && SSs.redactSecrets('x-eyJaaaaaaaa.eyJbbbbbbbb.cccccccc y').text === 'x-eyJ«redacted» y', `CONTROL (s): the JWT alternative reads quadratic by the count — ${stepsLine(v)} at ×8 input, the plain token still hidden (the §2d jwt legs go red)`, v); }
@@ -1024,12 +1033,12 @@ await section('§7 controls (patched copies)', async () => {
   const SSt = M.load('src/secret-shapes.js', ssMutT, 'nlperhead');
   { const c = countNl(SSt.redactSecrets, R4_WORK.kvQuotedLine(65536)); ok(c >= 6000, `CONTROL (t): the per-head search reads ${c} line-end searches for one line (the §2d work witness goes red)`); }
   // (u) verify r4 F5: the three bounds of an open-quoted continuation removed — the §2d F5 rows go red (the whole deeper block hidden again)
-  const ssMutU = ssSrc.replace("if (!l.trim()) { if (quoted) break; continue; }", "if (!l.trim()) continue;").replace("      if (quoted && ++taken > CONT_QUOTED_MAX) break;", "").replace("      if (closes) break;", "");
+  const ssMutU = editAnchor(editAnchor(editAnchor(ssSrc, "if (!l.trim()) { if (quoted) break; continue; }", "if (!l.trim()) continue;", "src/secret-shapes.js"), "      if (quoted && ++taken > CONT_QUOTED_MAX) break;", "", "src/secret-shapes.js"), "      if (closes) break;", "", "src/secret-shapes.js");
   ok(ssMutU !== ssSrc && !ssMutU.includes('if (closes) break;'), '(u) the patch applies');
   const SSu = M.load('src/secret-shapes.js', ssMutU, 'quotedunbounded');
   { const t = 'password: "\n' + '  line\n'.repeat(300) + 'next: 1\n'; ok((SSu.redactSecrets(t).text.match(/«redacted»/g) || []).length === 300 && /other: 1/.test(SS.redactSecrets('password: "abc\n  def"\n  other: 1\n').text) && !/other: 1/.test(SSu.redactSecrets('password: "abc\n  def"\n  other: 1\n').text), 'CONTROL (u): without the bounds 300 of 300 deeper lines go and the line after the closing quote too — the §2d F5 rows go red (the verify r3 shape)'); }
   // (v) verify r4 F7: R5 before R6 again, without the REG_ guard — the two-blank reg row keeps its value
-  const ssMutV = ssSrc.replace("    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; if (say) say(name); return `${ind}${name}${sep}${REDACTED}`; });   // verify r4 F7: before R5\n", '').replace("    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });\n", "    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });\n    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; return `${ind}${name}${sep}${REDACTED}`; });\n").replace('(?!«)(?!REG_(?:SZ|EXPAND_SZ|BINARY|MULTI_SZ|DWORD|QWORD|LINK|NONE)\\b)\\S{1,65536}/gi;', '(?!«)\\S{1,65536}/gi;');
+  const ssMutV = editAnchor(editAnchor(editAnchor(ssSrc, "    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; if (say) say(name); return `${ind}${name}${sep}${REDACTED}`; });   // verify r4 F7: before R5\n", '', "src/secret-shapes.js"), "    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });\n", "    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });\n    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; return `${ind}${name}${sep}${REDACTED}`; });\n", "src/secret-shapes.js"), '(?!«)(?!REG_(?:SZ|EXPAND_SZ|BINARY|MULTI_SZ|DWORD|QWORD|LINK|NONE)\\b)\\S{1,65536}/gi;', '(?!«)\\S{1,65536}/gi;', "src/secret-shapes.js");
   ok(ssMutV !== ssSrc && !ssMutV.includes('(?!REG_)') && ssMutV.indexOf('REG_RE, (m') > ssMutV.indexOf('WORD_RUN_RE, (m'), '(v) the patch applies');
   const SSv = M.load('src/secret-shapes.js', ssMutV, 'r5first');
   ok(/hunter2/.test(SSv.redactSecrets('  Password  REG_SZ  hunter2\n').text) && !/hunter2/.test(SSv.redactSecrets('    Password    REG_SZ    hunter2\n').text), 'CONTROL (v): with R5 first a two-blank reg row keeps hunter2 (the four-blank one is hidden) — the §2d F7 row goes red');
@@ -1553,7 +1562,7 @@ else if (line === 'file-missing') { process.stderr.write(Buffer.from(${JSON.stri
   const reds = cpTable(M9.load('src/exit-shell.js', xsMut9, 'string')).filter(([c]) => !c).length;
   ok(reds >= 5, `CONTROL (w1): a decoder that is String(stdout) — ${reds} rows of the table go red`);
   const adSrc9 = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-  const adMut9 = adSrc9.replace('const dec = win ? XS.decodeRunOutput(', 'const dec = false ? XS.decodeRunOutput(');
+  const adMut9 = editAnchor(adSrc9, 'const dec = win ? XS.decodeRunOutput(', 'const dec = false ? XS.decodeRunOutput(', "src/agentd/agentd.js");
   ok(adMut9 !== adSrc9, '(w2) the patch applies');
   const adCopy9 = path.join(M9.dir, 'agentd-string.cjs');
   fs.writeFileSync(adCopy9, adMut9.replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`).replace(/require\('\.\//g, `require('${path.join(REPO, 'src/agentd')}/`));

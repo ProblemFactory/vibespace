@@ -23,6 +23,15 @@ const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true 
 
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // fake pool: link → dirA; ranked fallback = B
@@ -158,7 +167,7 @@ async function twoProvider(bundlePath, tag, { control = true } = {}) {
   const SOA = 'const next = ranked.find((m) => m.provider != null && String(m.provider) === provider) || null;';
   check('mutant: the anchor (the device\'s provider filter) hits once', soSrc.split(SOA).length === 2);
   const mutFile = path.join(tmp, 'sealed-orders-filter-dropped.js');
-  fs.writeFileSync(mutFile, soSrc.replace(SOA, 'const next = ranked[0] || null; // PATCHED: the provider filter dropped'));
+  fs.writeFileSync(mutFile, editAnchor(soSrc, SOA, 'const next = ranked[0] || null; // PATCHED: the provider filter dropped', "src/sealed-orders.js"));
   const mutBundle = path.join(tmp, 'agentd-mut.js');
   await esbuild.build({ entryPoints: [path.join(repo, 'src/agentd/agentd.js')], bundle: true, platform: 'node', outfile: mutBundle, logLevel: 'silent',
     plugins: [stampPlugin(version), { name: 'sealed-orders-mutant', setup(b) { b.onResolve({ filter: /sealed-orders\.js$/ }, () => ({ path: mutFile })); } }] });   // the same stamp as the real bundle (agentd-bundle.mjs)

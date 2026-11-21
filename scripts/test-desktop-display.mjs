@@ -29,6 +29,15 @@ sweepLegacy(repo, ['src'], /^vs-dd-mut-(\d+)-/);   // what a pre-fix run strande
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (why) => { skipped++; console.log(`  ⚠ SKIP: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -499,7 +508,7 @@ console.log('§5 THE XPRA RUNG (P8-2, 2026-09-21): the argv table, the HTTP list
       const R1 = ["`--bind-tcp=127.0.0.1:${port},${XPRA_BIND_REFUSALS}`", '`--bind-tcp=127.0.0.1:${port}`'];
       const R2 = ["{ env: { ...(env || process.env), XPRA_CLIENT_CAN_SHUTDOWN: '0' }, logFd, extraStdio: 'pipe', name: 'xpra' }", "{ env, logFd, extraStdio: 'pipe', name: 'xpra' }"];
       ok(srcD.split(R1[0]).length === 2 && srcD.split(R2[0]).length === 2, 'the bind refusals and the shutdown switch are each spelled once (the control patches exactly them)');
-      const mfile = MUTDD.write('src/desktop-display.js', srcD.replace(R1[0], R1[1]).replace(R2[0], R2[1]), 'life');
+      const mfile = MUTDD.write('src/desktop-display.js', editAnchor(editAnchor(srcD, R1[0], R1[1], "src/desktop-display.js"), R2[0], R2[1], "src/desktop-display.js"), 'life');
       try {
         const Dm = require(mfile);
         const ca = await session(Dm, 'c-stop', stopReq), cb = await session(Dm, 'c-exit', exitReq), cc = await session(Dm, 'c-shut', shutdown);

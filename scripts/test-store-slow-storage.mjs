@@ -67,6 +67,15 @@ const ROOT = `/tmp/storeslow-${process.pid}`, BACK = path.join(ROOT, 'back'), MN
 const PRELOAD = path.join(REPO, 'scripts/fixtures/store-slow-preload.cjs');
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const info = (s) => console.log('  · ' + s);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let strace = null, hubPid = 0, mounted = false;
@@ -402,7 +411,7 @@ if (!OTHER && leg('D')) {
   // round 3: exitFlush({only:'rank0'}) begins the exit by itself, so the mutant removes the whole START of the exit
   const sj = fs.readFileSync(path.join(mutDir, 'server.js'), 'utf8'), ANCHOR = "try { const SW0 = require('./src/store-writer.js').storeWriter(); SW0.beginExit(); SW0.exitFlush({ only: 'rank0' }); } catch {} ";
   ok(sj.split(ANCHOR).length === 2, 'LAW D control premise: the shutdown begins its exit once (beginExit + the rank-0 flush — the mutant removes exactly that statement)');
-  fs.writeFileSync(path.join(mutDir, 'server.js'), sj.split(ANCHOR).join(''));
+  fs.writeFileSync(path.join(mutDir, 'server.js'), editAnchor(sj, ANCHOR, '', "server.js", 'join'));
   const h = await boot('exitD-mut', mutDir, DELAY);
   loadNow('exitD-mut');
   if (!h.readyAt || !h.hub) { ok(false, 'LAW D control: the hub became ready', fs.readFileSync(h.logf, 'utf8').slice(-800)); await stopHub(h, 'SIGKILL', 2000); }

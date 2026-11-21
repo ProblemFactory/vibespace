@@ -57,6 +57,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 /** executable lines only: a REFUTED mechanism must stay named in comments */
 const code = (f) => read(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
@@ -1769,9 +1778,9 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     ok('§15 NEGATIVE CONTROL setup: …and so is the rewrite decision (the spread that replaced the preserve list)',
       shipped.split(SPREAD).length === 2, '');
     const preFixTool = path.join(w2.root, 'vibespace-usage.prefix');
-    fs.writeFileSync(preFixTool, shipped
-      .replace(NEEDLE, "const c = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, String(key).replace(/[^\\w.-]/g, '_') + '.json'), 'utf-8')); const w = c && c.ownWindow;")
-      .replace(SPREAD, ''), { mode: 0o755 });
+    fs.writeFileSync(preFixTool, editAnchor(editAnchor(shipped,
+      NEEDLE, "const c = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, String(key).replace(/[^\\w.-]/g, '_') + '.json'), 'utf-8')); const w = c && c.ownWindow;", "data/bin/vibespace-usage"),
+      SPREAD, '', "data/bin/vibespace-usage"), { mode: 0o755 });
     for (const id of [w2.LINK, w2.SPARE, w2.FISH]) {         // put the window back IN the snapshot, pre-fix style
       const c = w2.readCache(id);
       c.ownWindow = { sevenDay: w2.WIN[id], fiveHour: null, scoped: { fable: w2.WIN[id] }, at: Date.now(), source: 'on-demand' };
@@ -1789,8 +1798,8 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     {
       const w3 = mkIncidentWorld();
       const halfTool = path.join(w3.root, 'vibespace-usage.halffix');
-      fs.writeFileSync(halfTool, shipped.replace(NEEDLE,
-        "const c = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, String(key).replace(/[^\\w.-]/g, '_') + '.json'), 'utf-8')); const w = c && c.ownWindow;"), { mode: 0o755 });
+      fs.writeFileSync(halfTool, editAnchor(shipped, NEEDLE,
+        "const c = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, String(key).replace(/[^\\w.-]/g, '_') + '.json'), 'utf-8')); const w = c && c.ownWindow;", "data/bin/vibespace-usage"), { mode: 0o755 });
       for (const id of [w3.LINK]) {
         const c = w3.readCache(id);
         c.ownWindow = { sevenDay: w3.WIN[id], fiveHour: null, scoped: { fable: w3.WIN[id] }, at: Date.now(), source: 'on-demand' };
@@ -1935,7 +1944,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       ok('§15 NEGATIVE CONTROL setup: the re-point age has ONE source in the shipped tool (the patch below must hit it)',
         shipped.split(NEW_SRC).length === 2, '');
       const preFix = path.join(w.root, 'vibespace-usage.observation-age');
-      fs.writeFileSync(preFix, shipped.replace(NEW_SRC, OLD_SRC), { mode: 0o755 });
+      fs.writeFileSync(preFix, editAnchor(shipped, NEW_SRC, OLD_SRC, "data/bin/vibespace-usage"), { mode: 0o755 });
       playPooled(preFix, w, { pct: 96, sevenDayReset: w.WIN[w.LINK], slotFp: 'same', slotAtMinutesAgo: 30, ages: [w.LINK, w.SPARE, w.FISH] });
       ok('§15 NEGATIVE CONTROL: fed its own OBSERVATION age instead of the re-point\'s, the same render expires a shadow that had not started — 96 % onto the low-usage member, and the SECOND false switch',
         Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.96) < 1e-9 && w.am.poolCurrent(w.P) === w.FISH,
@@ -2007,7 +2016,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     {
       const w = mkIncidentWorld();
       const preFix = path.join(w.root, 'vibespace-usage.no-guard');
-      fs.writeFileSync(preFix, shipped.replace(GUARD_ASK, GUARD_OFF), { mode: 0o755 });
+      fs.writeFileSync(preFix, editAnchor(shipped, GUARD_ASK, GUARD_OFF, "data/bin/vibespace-usage"), { mode: 0o755 });
       renderKeyed(preFix, w, w.SPARE, { pct: 96, sevenDayReset: w.WIN[w.LINK] });
       ok('§15 NEGATIVE CONTROL: without it, the highest-frequency producer on the instance writes another member\'s numbers onto whatever key its spawn was given',
         Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.96) < 1e-9, JSON.stringify(w.readCache(w.SPARE).sevenDay));
@@ -3350,7 +3359,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       // tree is never written, §21 measures it.
       const src = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
       const marker = 'function wallTargetFor(session, poolId, b, pinned) {';
-      const patched = src.replace(marker, marker + '\n  return { member: pinned, why: null };  // PRE-FIX: the turn pin, unconditionally');
+      const patched = editAnchor(src, marker, marker + '\n  return { member: pinned, why: null };  // PRE-FIX: the turn pin, unconditionally', "src/server/usage-pool-engine.js");
       ok('§18 NEGATIVE CONTROL: the patch hit the product source', patched !== src && patched.includes('PRE-FIX: the turn pin'));
       const I2 = mkIncident();
       const w2 = I2.w;
@@ -3502,7 +3511,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       const src = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
       const NEEDLE = '      writeKey = wallRecordTarget(session, key, ev);';
       ok('§18d NEGATIVE CONTROL setup: the per-record call is a single line (the patch must hit it)', src.split(NEEDLE).length === 2);
-      const patched = src.replace(NEEDLE, '      writeKey = key;  // PRE-FIX: the per-record write asked nothing');
+      const patched = editAnchor(src, NEEDLE, '      writeKey = key;  // PRE-FIX: the per-record write asked nothing', "src/server/usage-pool-engine.js");
       const T2 = mkTwoBucket();
       const eng2 = MUT.load('src/server/usage-pool-engine.js', patched, '18d').create({
         app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} },
@@ -3976,7 +3985,7 @@ esac
     ok('§19 ④ CONTROL setup: the isolation line, the gate, the c2 stamp gate and the cwd are each a single occurrence in the shipped source (the patch below must hit them)', src.split(ISO).length === 2 && src.split(GATE).length === 2 && src.split(STAMP).length === 2 && src.split(CWD).length === 2);
     const preFixDir = path.join(w2.root, 'prefix'); fs.mkdirSync(preFixDir, { recursive: true });
     const preFixPath = path.join(preFixDir, 'usage-routes.js');
-    fs.writeFileSync(preFixPath, src.replace(ISO, '').replace(CWD, '{ env, cwd: os.tmpdir(), timeout: 60000, maxBuffer: 1024 * 1024 }').replace(GATE, '  if (false && idv.refused) {').replace(STAMP, '      if (w.sevenDay || w.fiveHour || Object.keys(w.scoped).length) { // PRE-FIX (c2): any panel stamps the sidecar').replace(/require\('\.\//g, `require('${path.join(REPO, 'src')}/`));
+    fs.writeFileSync(preFixPath, editAnchor(editAnchor(editAnchor(editAnchor(src, ISO, '', "src/usage-routes.js"), CWD, '{ env, cwd: os.tmpdir(), timeout: 60000, maxBuffer: 1024 * 1024 }', "src/usage-routes.js"), GATE, '  if (false && idv.refused) {', "src/usage-routes.js"), STAMP, '      if (w.sevenDay || w.fiveHour || Object.keys(w.scoped).length) { // PRE-FIX (c2): any panel stamps the sidecar', "src/usage-routes.js").replace(/require\('\.\//g, `require('${path.join(REPO, 'src')}/`));
     const preFix = require(preFixPath);
     w2.obs.set(w2.CID, { orgUuid: 'org-own', acct: w2.LINK, known: true, ts: Date.now() });
     const capA = quiet(); w2.reading(0.05, { resetsAt: OWN_WIN }); w2.reading(0.06, { resetsAt: OWN_WIN }); w2.reading(0.07, { resetsAt: OWN_WIN }); capA.done(); // K = 3 candidates: the witness + the API-stamped sidecar exist before the pre-fix probe pollutes them
