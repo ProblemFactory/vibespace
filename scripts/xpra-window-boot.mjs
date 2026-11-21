@@ -59,6 +59,7 @@ export async function bootXpraWindow(part) {
   const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
   const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
   let failed = 0, skipped = 0;
+  let front = null;   // the page in front (see frontShot)
   const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
   const skip = (n, why) => { skipped++; console.log(`  ⚠ SKIP ${n}: ${why}`); };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -243,7 +244,9 @@ export async function bootXpraWindow(part) {
     });
     const evalJs = async (expr, { ms } = {}) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }, ms ? { ms } : undefined); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || JSON.stringify(r.exceptionDetails))); return r.result.value; };
     await cdp('Page.enable'); await cdp('Runtime.enable');
-    return { ws, cdp, evalJs, logs, close: () => { try { ws.close(); } catch {} } };
+    const me = { ws, cdp, evalJs, logs, close: () => { try { ws.close(); } catch {} }, toFront: async () => { await cdp('Page.bringToFront', {}, { ms: 10000 }); front = me; await sleep(150); } };
+    front = me;   // the page connected last is the one in front (the launch's first tab, then each tab /json/new opened)
+    return me;
   }
   const openPage = async (p, origin) => { await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await p.cdp('Page.navigate', { url: `${origin}/` }); await sleep(1500); await p.evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })', { ms: 90000 }); await until(() => p.evalJs('app.layoutManager && app.layoutManager._restoring === false'), 12000, 250); };
   const trustedClickAt = async (p, x, y, modifiers = 0, button = 'left') => {
@@ -255,12 +258,35 @@ export async function bootXpraWindow(part) {
   const WIN = (appId) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(appId)}); if (!w) return null; const v = w._desktopAppView; const r = v && v.pane ? v.pane.getBoundingClientRect() : null; return { id: w.id, title: w.title, status: v ? v.status.textContent : null, kind: v && v.pane ? 'xpra' : 'rfb', pane: r ? { x: r.x, y: r.y, w: r.width, h: r.height } : null, windows: v && v.windows ? v.windows() : [], chip: v && v.chip ? { shown: v.chip.style.display !== 'none', text: v.chipText, rect: (() => { const c = v.chip.getBoundingClientRect(); return { x: c.x, y: c.y, w: c.width, h: c.height }; })() } : null, els: v && v.pane ? [...v.pane.querySelectorAll('.xpra-win')].map((e) => { const c = e.getBoundingClientRect(); return { wid: e.dataset.wid, x: c.x, y: c.y, w: c.width, h: c.height }; }) : [] }; })()`;
   // x5: a window's seat as the page has it — the view's mode, the seats broadcast, the overlay (shown / title / words / the button's rect), the stage
   const SEAT = (appId) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(appId)}); if (!w) return null; const v = w._desktopAppView; const o = w.content.querySelector('.desktop-app-blocked'); const b = o && o.querySelector('.desktop-app-resume'); const br = b && b.getBoundingClientRect(); const pr = v && v.pane ? v.pane.getBoundingClientRect() : null; return { id: w.id, title: w.title, status: v ? v.status.textContent : null, mode: v ? v.mode : null, scale: v ? v.stageScale : null, windows: v && v.windows ? v.windows() : [], pane: pr ? { x: pr.x, y: pr.y, w: pr.width, h: pr.height } : null, paneKey: w._desktopPaneKey, seats: w._desktopSeats || null, overlay: o ? { shown: getComputedStyle(o).display !== 'none', title: o.querySelector('.desktop-app-blocked-title').textContent, titleKids: o.querySelector('.desktop-app-blocked-title').childElementCount, msg: o.querySelector('.term-blocked-msg').textContent, btn: br ? { x: br.x, y: br.y, w: br.width, h: br.height } : null } : null, stageEls: v && v.stage ? [...v.stage.children].map((e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }) : [] }; })()`;
+  // A PICTURE IS OF THE PAGE IN FRONT (主开发 r1109, 2026-11-21 — the class of test-oat-mint-ui's 2.369.414 red: a capture of a
+  // BACKGROUND tab waits for a frame that tab may never make). `front` = the page in front: the page connected LAST (the launch's
+  // first tab, then every tab /json/new opens — Chrome puts a new tab in front); a page brought there by toFront() takes it.
+  // frontShot(p, params) brings p to the front first when it is not there (bounded, ONE retry said by name) and hands the front
+  // back to the page that had it, so a part's other legs run with the page in front they had. Every capture of this helper goes
+  // through it (measurePane, identity7); where p is already in front it captures as before and brings nothing.
+  const frontShot = async (p, params) => {
+    const was = front;
+    for (let i = 0; i < 2; i++) {
+      if (front !== p) await p.toFront();
+      try {
+        const shot = await p.cdp('Page.captureScreenshot', params, { ms: 10000 });
+        if (i) console.log('    (a picture came on its one retry, its page brought to the front again)');
+        if (was && was !== p && was.ws.readyState === 1) await was.toFront();
+        return shot;
+      } catch (e) {
+        if (i) throw new Error(`a picture did not come twice, its page brought to the front each time — ${e.message}`);
+        console.log(`    (a picture: ${String(e.message).slice(0, 160)} — once more, its page brought to the front)`);
+        front = null;
+      }
+    }
+    return null;
+  };
   /** The pane's pixels: a screenshot clip decoded IN THE PAGE (no node PNG library) — black pixels outside the
    *  app window rect(s), the covered fraction, and the non-black fraction inside the main window. */
   const measurePane = async (p, appId) => {
     const st = await p.evalJs(WIN(appId));
     if (!st || !st.pane) return null;
-    const shot = await p.cdp('Page.captureScreenshot', { format: 'png', clip: { x: st.pane.x, y: st.pane.y, width: st.pane.w, height: st.pane.h, scale: 1 } });
+    const shot = await frontShot(p, { format: 'png', clip: { x: st.pane.x, y: st.pane.y, width: st.pane.w, height: st.pane.h, scale: 1 } });
     const rects = st.els.map((e) => ({ x: e.x - st.pane.x, y: e.y - st.pane.y, w: e.w, h: e.h }));
     const r = await p.evalJs(`(async () => { const img = new Image(); img.src = 'data:image/png;base64,' + ${JSON.stringify(shot.data)}; await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0); const d = ctx.getImageData(0, 0, c.width, c.height).data; const rects = ${JSON.stringify(rects)}; const inside = (x, y) => rects.some((r) => x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h); let blackOut = 0, out = 0, inN = 0, inBright = 0; for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) { const i = (y * c.width + x) * 4; const dark = d[i] + d[i + 1] + d[i + 2] < 30; if (inside(x, y)) { inN++; if (!dark) inBright++; } else { out++; if (dark) blackOut++; } } return { w: c.width, h: c.height, out, blackOut, inN, inBrightFrac: inN ? inBright / inN : 0 }; })()`);
     const main = st.windows.find((w) => w.kind === 'main') || st.windows[0] || null;
@@ -349,7 +375,7 @@ export async function bootXpraWindow(part) {
     const cw = Math.min(v.canvas.w, v.main.w, Math.floor(v.pane.w * dpr)) - 4, chh = Math.min(v.canvas.h, v.main.h, Math.floor(v.pane.h * dpr)) - 4;
     const px = (x, y, w, h) => p.evalJs(`(() => { const ww = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); const cv = ww._desktopAppView.pane.querySelector('.xpra-win-main canvas'); const d = cv.getContext('2d').getImageData(${x}, ${y}, ${w}, ${h}).data; const g = new Array(${w} * ${h}); for (let i = 0; i < g.length; i++) g[i] = Math.round((d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3); return g; })()`);
     const c0 = await px(2, 2, cw, chh);
-    const shot = await p.cdp('Page.captureScreenshot', { format: 'png' });
+    const shot = await frontShot(p, { format: 'png' });
     const c1 = await px(2, 2, cw, chh);
     const sg = await p.evalJs(`(async () => { const img = new Image(); img.src = 'data:image/png;base64,' + ${JSON.stringify(shot.data)}; await img.decode(); const W = img.naturalWidth, H = img.naturalHeight; const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d'); x.drawImage(img, 0, 0); const d = x.getImageData(0, 0, W, H).data; const g = new Array(W * H); for (let i = 0; i < W * H; i++) g[i] = Math.round((d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3); return { W, g }; })()`);
     const X0 = Math.round((v.canvas.rx + 2 / dpr) * dpr), Y0 = Math.round((v.canvas.ry + 2 / dpr) * dpr);
