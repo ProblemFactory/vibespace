@@ -82,7 +82,7 @@ try {
   const ZH14 = read('src/lib/i18n-zh.js');
   ok(/\n {2}"allowed": "已允许",/.test(ZH14), 'zh: «allowed» = «已允许»');
   const DOOR = read('src/server/vault-run-door.js');
-  ok(/const grantedFor = a === 'once' \? 'once' : '8h';\n {4}settleRequest\(q, 'granted', 'answered', \{ \.\.\.\(mark\(\) \|\| \{\}\), grantedFor, until \}\);\n {4}return \{ ok: true, outcome: a === 'once' \? 'granted-once' : 'granted', grantedFor, until \};/.test(DOOR) && !/'granted-8h'/.test(DOOR), 'r6: the door writes `granted` (the value every reader names) + `grantedFor` / `until` on the record, and answers the outcome the production client toasts (`granted-once` / `granted`) + the same `grantedFor` — never `granted-8h`');
+  ok(/const grantedFor = a === 'once' \? 'once' : '8h';\n(?: {4}\/\/[^\n]*\n)* {4}settleRequest\(q, 'granted', 'answered', \{ \.\.\.\(mark\(\) \|\| \{\}\), grantedFor, until(?:, [^}\n]*)? \}\);\n {4}return \{ ok: true, outcome: a === 'once' \? 'granted-once' : 'granted', grantedFor, until \};/.test(DOOR) && !/'granted-8h'/.test(DOOR), 'r6: the door writes `granted` (the value every reader names) + `grantedFor` / `until` on the record (the B-a14b remainder: + whose approval of which entry — additive facts), and answers the outcome the production client toasts (`granted-once` / `granted`) + the same `grantedFor` — never `granted-8h`');
 } catch (e) { ok(false, '⑭ «allowed» in zh and the door\'s grantedFor threw on this tree: ' + ((e && e.message) || e)); }
 
 console.log('⑯ (d) a LATE Allow is never toasted «denied» (source pin)');

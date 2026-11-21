@@ -441,7 +441,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  (no value: a conversation, an entry id, when, how, the purpose's words), written through THE store writer (0600, paced) and read
    *  once at the start through THE STORE READ: bytes that do not parse are set aside (dated, never written over) and it starts
    *  empty; a READ that fails is held until the next start — nothing is written over it (the ends stay in memory, said once). */
-  const ENDED_MS = 24 * 3600e3, ENDED_MAX = 200, ENDS_SAID = new Set(['time', 'used', 'lock']);
+  const ENDED_MS = 24 * 3600e3, ENDED_MAX = 200, ENDS_SAID = new Set(['time', 'used', 'lock', 'restart']);   // B-a14b's remainder (r1482): + a restart (the vault locks at each start)
   const endedGrants = new Map();
   const ENDS_FILE = path.join(dataDir, 'vault-grant-ends.json');
   const ENDS_VALID = (d) => !!d && typeof d === 'object' && Array.isArray(d.ends);
@@ -477,6 +477,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     } catch (e) { log(`the grant ends could not be handed to the writer (${e.message})`); }
   }
   const offTimeOf = (g, since = Number(g && g.at) || 0) => { let t = 0; for (const id of (g && Array.isArray(g.entries) ? g.entries : [])) { const o = offAt.has(id) ? (offAt.get(id) || 0) : 0; if (o && o >= since && o > t) t = o; } return t; };   // when the owner switched an entry of this grant (or late pass) OFF at or after `since` — its approval; 0: not since (B-a14b follow, r901)
+  // B-a14b's remainder (the read): WHEN the owner last switched an entry OFF — this life's `offAt`, or (after a RESTART, memory gone)
+  // the persisted switch store's last toggle (`touched[id]`, stamped on every toggle) when the entry is suspended now: an OFF that
+  // came after an approval stays the owner's news across a restart (a restart end is never said over it). `touched` is an ORDERING
+  // stamp (max(now, newest + 1)): after a clock step back an approval given after an OFF can read as before it — the end is then
+  // hidden as entry_not_runnable, which errs safe (the entry IS off)
+  const offSinceOf = (d, id) => Math.max(offAt.get(id) || 0, d && d.touched ? Number(d.touched[id]) || 0 : 0);
   const offAt = new Map();   // entry id → when the owner last switched it OFF (≤ ENDED_MAX): an end of a grant given BEFORE that OFF is not the news
   function noteEnded(g, endedBy, endedAt) {
     if (!g || !g.conv || !Array.isArray(g.entries) || !g.entries.length || !ENDS_SAID.has(endedBy)) return;
@@ -1845,7 +1851,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // (`grantedFor` 'once' | '8h', `until`: the new reader says the duration, an old one «allowed»); the answer's `outcome`
     // stays the one the production client toasts (`granted-once` / `granted`) + the same `grantedFor`
     const grantedFor = a === 'once' ? 'once' : '8h';
-    settleRequest(q, 'granted', 'answered', { ...(mark() || {}), grantedFor, until });
+    // B-a14b's remainder (r1482): the record keeps WHOSE approval of WHICH entry it is (the conversation, the entry, when, its
+    // purpose — the words the request already showed, never a value): a restart ends the grant (memory), and the start writes
+    // that end for this conversation × entry from here, so the agent is told how its approval ended
+    settleRequest(q, 'granted', 'answered', { ...(mark() || {}), grantedFor, until, conv: q.scope, entry: q.id, at: t, purpose: String(q.purpose || '').slice(0, 400) });
     return { ok: true, outcome: a === 'once' ? 'granted-once' : 'granted', grantedFor, until };
   }
   /** lane vault-paste-request: THE PASTE IS THE GRANT — the owner pasted a NEW free entry into For you in answer to THIS
@@ -1898,7 +1907,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       standing: standingOf(caller),   // lane vault-standing-request: the STANDING grants this conversation holds — «standing · <scope> · since <when>»
       // B-a14b: the approvals of this conversation that ENDED in the last 24 h — newest first — so an agent never reads a gone
       // approval as a bug: how it ended, when, and the request that asks again
-      ended: [...endedGrants.values()].filter((e) => e.conv === scope && t - e.endedAt <= ENDED_MS && !mine.some((g) => g.entries.includes(e.id)) && !usableHere(e.id) && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && (offAt.get(e.id) || 0) >= e.grantAt)).sort((a, b) => b.endedAt - a.endedAt)   // (an entry THIS conversation can use now — ON, and its member resumed where a press opened it — is never «ask again»; B-a14b)
+      ended: [...endedGrants.values()].filter((e) => e.conv === scope && t - e.endedAt <= ENDED_MS && !mine.some((g) => g.entries.includes(e.id)) && !usableHere(e.id) && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && offSinceOf(dOn, e.id) >= e.grantAt)).sort((a, b) => b.endedAt - a.endedAt)   // (an entry THIS conversation can use now — ON, and its member resumed where a press opened it — is never «ask again»; B-a14b)
         .map((e) => ({ entry: refOfId(e.id), ...wordsOfId(e.id), endedBy: e.endedBy, endedAt: new Date(e.endedAt).toISOString(), once: e.once, purpose: e.purpose })),
       uses: typeof vault.usesOf === 'function' ? vault.usesOf(scope) : [],
     };
@@ -2159,7 +2168,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const suspended = refused || !!(row && d && d.suspended && d.suspended.has(r.id));   // round 2 MAJOR: the owner turned this entry OFF — every grant is suspended while it is (kept, not deleted); round 3: a refused store suspends EVERYTHING
       const open = sw || !!g || (sharedIds.has(r.id) && !refused);   // B-bc3b: an agent's entry the owner SHARED with this caller (its grant row, judged above) — no switch is its; round 4 (MAJOR item 4): ON is an ALLOW-LIST — only the owner's switch (`runnable`, trusted store) or the once-grant the owner's answer wrote opens the entry; a standing vault-use grant is honoured ONLY when the switch is ON too (a refused / wiped / replayed store lists nothing ON ⇒ fail closed; an entry with a grant but never switched ON is PAUSED — A7)
       const e0 = !open && row && !own && !refused ? endedOf(scope, r.id) : null;
-      const ended = e0 && !(suspended && (offAt.get(r.id) || 0) >= e0.grantAt) ? e0 : null;   // B-a14b: an approval that ended — said as itself; an OFF that came AFTER the approval was given is the owner's news (a grant given after the OFF, then used, is said as used)
+      const ended = e0 && !(suspended && offSinceOf(d, r.id) >= e0.grantAt) ? e0 : null;   // B-a14b: an approval that ended — said as itself; an OFF that came AFTER the approval was given is the owner's news (a grant given after the OFF, then used, is said as used)
       let bytes = 0;
       if (row && (open || own)) { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } }
       entries.push({ id: r.id, exists: !!row, open, bytes, on: sw, ...(own ? { own: true, prov: pv.prov === 'minted' ? 'minted' : 'stored', forHost: pv.forHost || null } : {}), ...(ended ? { ended: { by: ended.endedBy, at: new Date(ended.endedAt).toISOString(), ...(suspended ? { off: true } : {}) } } : {}) });   // r13 should: `off` — the owner had switched the entry OFF before this approval, and it still is
@@ -2567,7 +2576,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   if (userTodos && typeof userTodos.resolvedOf === 'function' && typeof userTodos.noteFact === 'function') {
     const tBoot = now();   // the restart ended them — its time, even when they are noted at a later read
     const endGrants = () => {
-      try { const t0 = tBoot; for (const it of userTodos.resolvedOf(REQUEST_TYPE)) { const f = it.resolvedFact || {}; if (it.resolvedBy === 'granted' && Number(f.until) > t0 && !f.endedAt) userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); } } catch { }
+      // B-a14b's remainder (r1482): a grant still live at the start ended at it — its record says so, AND the end is written for its
+      // conversation × entry (the ends store): `uses` lists it, the next run is refused grant_expired saying the restart (it read
+      // entry_not_runnable — «not switched on» — before). A record from before (no conversation / entry in its facts) is ended on
+      // the record only
+      try { const t0 = tBoot; for (const it of userTodos.resolvedOf(REQUEST_TYPE)) { try { const f = it.resolvedFact || {}; if (it.resolvedBy === 'granted' && Number(f.until) > t0 && !f.endedAt) { userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); if (typeof f.conv === 'string' && f.conv && f.conv.length <= 200 && typeof f.entry === 'string' && f.entry && f.entry.length <= 400) noteEnded({ conv: f.conv, entries: [f.entry], once: f.grantedFor === 'once', at: Number(f.at) || 0, purpose: SS.redactSecrets(typeof f.purpose === 'string' ? f.purpose : '').text.slice(0, 400) }, 'restart', t0); } } catch (e) { log(`a live approval's record could not be ended at the start (${(e && e.message) || e}) — the next record goes on`); } } } catch { }   // one record at a time; bounded and belted as the ends file's load (the read)
       try { const t0 = tBoot; for (const it of userTodos.resolvedOf(ACTION_TYPE)) { const f = it.resolvedFact || {}; if (it.resolvedBy === 'always' && f.alwaysFor === '8h' && Number(f.until) > t0 && !f.endedAt) userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); } } catch { }   // an 8-hour «always» is memory too
     };
     if (typeof userTodos.whenRead === 'function') userTodos.whenRead(endGrants, 'a restart ends every grant'); else endGrants();

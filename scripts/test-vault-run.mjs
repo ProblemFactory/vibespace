@@ -1488,7 +1488,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     ok(!!(mf && fr && fr.usedBy === 'time'), 'RED control: no first-end guard (the batch\'s first shape) ⇒ the timer writes «its 8 hours ran out» over the spent run', fr);
     // the OFF half takes BOTH guards away: the first-end guard AND the list's «an OFF after the approval is the owner's news» —
     // either alone keeps the OFF from reading as «ran out» (the restack's tb run showed the one-guard mutant listing nothing there)
-    const f0 = " && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && (offAt.get(e.id) || 0) >= e.grantAt)";
+    const f0 = " && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && offSinceOf(dOn, e.id) >= e.grantAt)";   // (B-a14b remainder: the OFF's time read through offSinceOf)
     const mf2 = SRCf.split(g0).length === 2 && SRCf.split(f0).length === 2 ? M.load('src/server/vault-run-door.js', anchored(editAnchor(editAnchor(SRCf, g0, '', "src/server/vault-run-door.js"), f0, '', "src/server/vault-run-door.js"), "      if (offAt.has(id) && (offAt.get(id) || 0) >= (Number(g.at) || 0)) continue;", '', 'test-vault-run B-a14b: no OFF skip at the record'), 'firstend-off') : null;   // B-a14b: the OFF after the approval is skipped at the RECORD too now — the third guard taken away with the two
     const fr2 = mf2 ? await firstEnd(mf2) : null;
     ok(!!(mf2 && fr2 && fr2.offList === 1), 'RED control: no first-end guard AND no «an OFF after the approval» filter ⇒ the timer\'s «its 8 hours ran out» is listed over the owner\'s OFF', fr2);
@@ -1786,9 +1786,71 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     };
     const orr = await offRestart(DOOR);
     ok(orr.running && orr.afterRestart.length === 0, `wl932b4e8: an end after the owner's OFF of an approval given before it is never recorded — a restart says nothing over the OFF — ${JSON.stringify(orr)}`, orr);
-    const mor = M.load('src/server/vault-run-door.js', anchored(SRCa, "      if (offAt.has(id) && (offAt.get(id) || 0) >= (Number(g.at) || 0)) continue;", '', 'test-vault-run wl932b4e8: no record-time OFF skip'), 'a14b-offskip');
+    const mor = M.load('src/server/vault-run-door.js', anchored(anchored(SRCa, "      if (offAt.has(id) && (offAt.get(id) || 0) >= (Number(g.at) || 0)) continue;", '', 'test-vault-run wl932b4e8: no record-time OFF skip'), '  const offSinceOf = (d, id) => Math.max(offAt.get(id) || 0, d && d.touched ? Number(d.touched[id]) || 0 : 0);', '  const offSinceOf = (d, id) => offAt.get(id) || 0;', 'test-vault-run B-a14b remainder: and the OFF from memory alone'), 'a14b-offskip');   // B-a14b's remainder: the persisted toggle hides that end too now — each guard alone keeps the OFF the news, so the RED takes both
     const orrR = await offRestart(mor);
-    ok(orrR.running && orrR.afterRestart.join() === 'used', `RED control: no record-time OFF skip ⇒ after a restart the end is said over the owner's OFF (its time forgotten) — ${JSON.stringify(orrR)}`, orrR);
+    ok(orrR.running && orrR.afterRestart.join() === 'used', `RED control: no record-time OFF skip AND the OFF read from memory alone ⇒ after a restart the end is said over the owner's OFF (its time forgotten) — ${JSON.stringify(orrR)}`, orrR);
+    // B-a14b's remainder (主开发 r1482): A RESTART ENDS a live approval (the vault locks at each start) — and the AGENT is told: a
+    // new door over the same data (the restart) lists the end «restart» in `uses` and refuses the next run grant_expired with the
+    // restart in its words (it read entry_not_runnable — «not switched on» — before); its For-you record says «restart»; a record
+    // from before (no conversation / entry in its facts) is ended on the record only. RED: the start writes no end
+    const restartEnds = async (mod, { old = false } = {}) => {
+      const ws = await world();
+      ws.door = ws.mk(mod, { timers: { set: () => 0, clear: () => { } } });
+      const qs = ws.door.request({ caller: c8, entry: M1, purpose: 'a restart in between' });
+      const ans = ws.door.answerRequest(qs.askId, { answer: '8h', reauthed: true, person: true });   // live for 8 hours
+      const g = [...ws.door._grants.values()].find((x) => x.conv === c8.scope), todoId = g ? g.todoId : null;
+      const it0 = todoId ? ws.userTodos.get(todoId) : null, f0 = (it0 && it0.resolvedFact) || {};
+      const facts = { conv: f0.conv === c8.scope, entry: f0.entry === 'mounts:m1#secretKey', purpose: f0.purpose === 'a restart in between' };
+      if (old && it0 && it0.resolvedFact) { delete it0.resolvedFact.conv; delete it0.resolvedFact.entry; }   // a record written before this release
+      const liveEnded = ws.door.usesFor(c8).ended.length;
+      ws.door = ws.mk(mod, { timers: { set: () => 0, clear: () => { } } });   // THE RESTART: a new door over the same data (its grants were memory)
+      const recEnd = () => { const x = todoId ? ws.userTodos.get(todoId) : null; return (x && x.resolvedFact && x.resolvedFact.endedBy) || null; };
+      for (let k = 0; k < 200 && !recEnd(); k++) await new Promise((r) => setImmediate(r));   // the start's sweep has run: the record says how it ended
+      const e0 = ws.door.usesFor(c8).ended[0] || null;
+      const ra = await runAnswered(ws, ENV('env'), { caller: c8 });
+      return { answered: !!(ans && ans.ok), facts, liveEnded, afterRestart: e0 ? { endedBy: e0.endedBy, purpose: e0.purpose, entry: e0.entry } : null, code: ra.r.code, card: !!ra.card, restartWords: typeof ra.r.words === 'string' && /the hub restarted at \d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(ra.r.words), recordEnd: recEnd() };
+    };
+    const rse = await restartEnds(DOOR);
+    ok(rse.answered && rse.facts.conv && rse.facts.entry && rse.facts.purpose && rse.liveEnded === 0 && rse.afterRestart && rse.afterRestart.endedBy === 'restart' && rse.afterRestart.purpose === 'a restart in between' && rse.afterRestart.entry === M1 && rse.code === 'grant_expired' && rse.restartWords && rse.recordEnd === 'restart',
+      `B-a14b's remainder: a RESTART ends a live approval and the agent is told — \`uses\` lists «restart», the next run is refused grant_expired saying the hub restarted, the record says so — ${JSON.stringify(rse)}`, rse);
+    const mrse = M.load('src/server/vault-run-door.js', anchored(SRCa, " if (typeof f.conv === 'string' && f.conv && f.conv.length <= 200 && typeof f.entry === 'string' && f.entry && f.entry.length <= 400) noteEnded({ conv: f.conv, entries: [f.entry], once: f.grantedFor === 'once', at: Number(f.at) || 0, purpose: SS.redactSecrets(typeof f.purpose === 'string' ? f.purpose : '').text.slice(0, 400) }, 'restart', t0);", '', 'test-vault-run B-a14b remainder: the start writes no end'), 'a14b-restart');
+    const rser = await restartEnds(mrse);
+    ok(rser.recordEnd === 'restart' && !rser.afterRestart && rser.code !== 'grant_expired', `RED control: the start writes no end (the release) ⇒ \`uses\` silent after a restart and the run refused as ${rser.code} — never «your approval ended» — ${JSON.stringify(rser)}`, rser);
+    const rso = await restartEnds(DOOR, { old: true });
+    ok(rso.recordEnd === 'restart' && !rso.afterRestart, `B-a14b's remainder: a record from before (no conversation / entry in its facts) is ended on the record only — nothing written for an entry it cannot name — ${JSON.stringify({ recordEnd: rso.recordEnd, afterRestart: rso.afterRestart })}`, rso);
+    // the read: an OFF while a spent once-grant's run RUNS, then a RESTART before that run ends (its record still reads live): the
+    // restart's end must not be said over the owner's OFF — the persisted toggle is the OFF's time. RED: the OFF read from memory
+    // alone (gone at the restart) ⇒ «the hub restarted … it already was when they approved», false
+    const offThenRestart = async (mod) => {
+      const wq = await world(), clk = { t: Date.now() };
+      wq.door = wq.mk(mod, { now: () => clk.t, timers: { set: () => 0, clear: () => { } } });
+      const h = await runHeld(wq);   // a once-grant approved and spent by a run held open
+      clk.t += 1000;
+      const off = wq.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });   // the owner's OFF, a second after the approval, while the run runs
+      wq.door = wq.mk(mod, { now: () => clk.t, timers: { set: () => 0, clear: () => { } } });   // THE RESTART before the run ended
+      const recOf = () => (wq.userTodos.resolvedOf('vault-grant-ask') || []).find((x) => x.resolvedBy === 'granted');
+      for (let k = 0; k < 200 && !((recOf() || {}).resolvedFact || {}).endedAt; k++) await new Promise((r) => setImmediate(r));   // the start's sweep ended the approval's record
+      const listed = wq.door.usesFor(c8).ended.map((e) => e.endedBy);
+      const r = await wq.door.run({ caller: c8, args: ENV('env'), cwd: wq.work });
+      h.ac.abort(); await h.pr;   // the old run ends (its door's own business)
+      return { running: h.running, off: !!(off && off.ok !== false), recordEnd: ((recOf() || {}).resolvedFact || {}).endedBy || null, listed, code: r.code, offWords: typeof r.words === 'string' && /it already was when they approved/.test(r.words) };
+    };
+    const otr = await offThenRestart(DOOR);
+    ok(otr.running && otr.off && otr.recordEnd === 'restart' && otr.listed.length === 0 && otr.code === 'entry_not_runnable' && !otr.offWords, `the read: an OFF while the run ran, then a restart — the OFF stays the owner's news (no «restart» said over it; the run refused entry_not_runnable) — ${JSON.stringify(otr)}`, otr);
+    const motr = M.load('src/server/vault-run-door.js', anchored(SRCa, '  const offSinceOf = (d, id) => Math.max(offAt.get(id) || 0, d && d.touched ? Number(d.touched[id]) || 0 : 0);', '  const offSinceOf = (d, id) => offAt.get(id) || 0;', 'test-vault-run B-a14b remainder: the OFF from memory alone'), 'a14b-off-restart');
+    const otrR = await offThenRestart(motr);
+    ok(otrR.listed.join() === 'restart' && otrR.code === 'grant_expired' && otrR.offWords, `RED control: the OFF read from memory alone ⇒ after the restart «restart» is said over the owner's OFF, with «it already was when they approved» — false — ${JSON.stringify(otrR)}`, otrR);
+    // …and EVERY end the door can say has the agent CLI's words (data/bin/vibespace-vault `uses`): a census of the two lists.
+    // RED: the CLI without the restart's words
+    const endsSaidOf = (src) => { const m = /ENDS_SAID = new Set\(\[([^\]]*)\]\)/.exec(src); return m ? [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]) : null; };
+    const cliHowOf = (src) => { const m = /const how = \{([^}]*)\};/.exec(src); return m ? [...m[1].matchAll(/([a-z]+): '/g)].map((x) => x[1]) : null; };
+    const CLIsrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-vault'), 'utf8');
+    const saidAll = (doorSrc, cliSrc) => { const said = endsSaidOf(doorSrc) || [], how = cliHowOf(cliSrc) || []; return { said, how, unsaid: said.filter((k) => !how.includes(k)) }; };
+    const cz = saidAll(SRCa, CLIsrc), czR = saidAll(SRCa, anchored(CLIsrc, ", restart: 'the hub restarted (the vault locks at each start)'", '', 'test-vault-run B-a14b remainder: the CLI without the restart'));
+    const fallbackOf = (said) => said.filter((k) => /^it ended at /.test(VR.endedWhy({ by: k, at: '2026-11-21T12:00:00.000Z' })));   // an end the door says with no words of its own
+    cz.wordless = fallbackOf(cz.said); cz.probe = fallbackOf(['gone']);   // the probe proves itself: an end with no words of its own IS found
+    ok(cz.said.includes('restart') && cz.said.length >= 4 && cz.unsaid.length === 0 && cz.wordless.length === 0 && cz.probe.join() === 'gone', `B-a14b's remainder: every end the door can say has the agent CLI's words and its own words in the refusal — ${JSON.stringify(cz)}`, cz);
+    ok(czR.unsaid.join() === 'restart', `RED control: the CLI without the restart's words ⇒ named — ${JSON.stringify(czR)}`, czR);
     // r13 should (the readers of batch 52): an approval the user gave while the entry was ALREADY switched OFF — its end is said
     // as itself (the OFF came before it: not the news) AND the switch as it is: «the entry itself is switched off (it already was
     // when they approved)», never «the entry was not switched off» (the door's `off` on the ended fact)

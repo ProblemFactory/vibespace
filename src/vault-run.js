@@ -153,12 +153,13 @@ const WORDS = Object.freeze({
   spawn_failed: 'the program could not be started',
 });
 function refuse(code, extra = {}) { return { ok: false, code, words: WORDS[code] || code, ...extra }; }
-/** B-a14b: how an approval ended, in the agent's words — `ended` = { by: 'time'|'used'|'lock', at: ISO } (the door's record). */
+/** B-a14b: how an approval ended, in the agent's words — `ended` = { by: 'time'|'used'|'lock'|'restart', at: ISO } (the door's record). */
 function endedWhy(ended) {
   const iso = ended && typeof ended.at === 'string' ? ended.at : '', at = iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : 'a moment ago';
   if (ended && ended.by === 'time') return `its 8 hours ran out at ${at}`;
   if (ended && ended.by === 'used') return `its one run was used at ${at}`;
   if (ended && ended.by === 'lock') return `a lock of the vault ended it at ${at} (a lock ends every approval)`;
+  if (ended && ended.by === 'restart') return `the hub restarted at ${at} (the vault locks at each start, which ends every approval)`;   // B-a14b's remainder (r1482)
   return `it ended at ${at}`;
 }
 /** B-a14b (r13 should): the end in the agent's words, and the switch as it IS — an approval the user gave while the entry was
