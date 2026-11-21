@@ -44,7 +44,7 @@ const { parseRunDir, journalAttemptsFromText, journalFold, journalAttemptsOf, tr
 const { list: listHarnesses } = require('../harnesses');
 const { findSessionJsonlPath } = require('../session-store');
 const { collectCodexThreadMetasAsync } = require('../codex-session-store');
-const { findCodexSessionJsonlPath, jsonlGapInfo, jsonlGapInfoAsync, readJsonlLineRange, readJsonlLineRangeAsync, scanJsonlUserTurns, scanJsonlUserTurnsAsync, searchJsonlFull, searchJsonlFullStream } = require('../adapters/codex');
+const { findCodexSessionJsonlPath, jsonlGapInfo, jsonlGapInfoAsync, readJsonlLineRange, readJsonlLineRangeAsync, scanJsonlUserTurns, scanJsonlUserTurnsAsync, searchJsonlFull, searchJsonlFullStream, readerRefusedAnswer } = require('../adapters/codex');
 
 // B-360d / B-891e: the row key, the realpath'd cwd, the keyed row and the kept metas' read-back live in
 // src/sessions-assemble.js — ONE copy for this thread and the sweep's worker
@@ -109,7 +109,7 @@ function setup(ctx) {
     // holding it was unreachable" produce the same empty view otherwise.
     if (!fp) return res.json({ gap: null, ...(hostFetchError ? { error: hostFetchError } : {}) });
     // row B-422c (主开发 r1006): the transcript reader REFUSED (a pool failure) — said by name, never «no gap» (the page: a toast)
-    const readerRefused = (e) => res.status(503).set('Retry-After', String(Math.max(2, Math.ceil(((e.retryAt || 0) - Date.now()) / 1000)))).json({ error: e.message, code: e.code, storageHung: !!e.storageHung, retryAt: e.retryAt || null, retryIn: Number(e.retryAt) ? Math.max(0, e.retryAt - Date.now()) : null });   // r1243: which door refused, when again (also as a delay: the page's clock is not the hub's)
+    const readerRefused = (e) => { const a = readerRefusedAnswer(e); return res.status(a.status).set('Retry-After', a.retryAfter).json(a.body); };   // r1243 / r1461: which door refused, when again (the pure answer below)
     if (refused) return readerRefused(refused);
     if (!gap) return res.json({ gap: null });
     if (req.query.info) return res.json({ gap });
@@ -196,7 +196,7 @@ function setup(ctx) {
     let list = [];
     try {
       const facts = await collectCodexThreadMetasAsync();
-      if (!facts) return res.json({ subagents: [], reason: 'transcript_reader_restarting', error: 'the transcript reader is restarting — try again in a moment' });   // row B-422c: no listing kept yet — said, never walked on the loop
+      if (!facts) return res.json({ subagents: [], reason: 'transcript_reader_restarting', readerGone: !!require('../adapters/codex').poolGone(), error: 'the transcript reader is restarting — try again in a moment' });   // row B-422c: no listing kept yet — said, never walked on the loop
       const { metas } = facts;
       list = metas
         .filter((m) => m.agentKind === 'subagent' && m.parentThreadId === threadId)

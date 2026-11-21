@@ -15111,4 +15111,7 @@ export default {
   "The history is not loaded yet, or not all of it — the transcript reader is restarting. It fills in here by itself in a moment.": "历史记录尚未加载，或只加载了一部分——转录读取器正在重启。稍后会在这里自动补全。",
   "This conversation's file is not answering, so its history is not loaded yet (or not all of it). Trying again at {time} — it fills in here by itself.": "此对话的文件没有响应，所以历史记录尚未加载（或只加载了一部分）。将在 {time} 再试——届时会在这里自动补全。",
   "This conversation's file is not answering — trying again at {time}.": "此对话的文件没有响应——将在 {time} 再试。",
+  "The history is not loaded yet, or not all of it — the transcript reader is not running. Trying again at {time}.": "历史记录尚未加载，或只加载了一部分——转录读取器没有在运行。将在 {time} 再试。",
+  "The transcript reader is not running — trying again at {time}.": "转录读取器没有在运行——将在 {time} 再试。",
+  "The transcript reader is not running.": "转录读取器没有在运行。",
 };

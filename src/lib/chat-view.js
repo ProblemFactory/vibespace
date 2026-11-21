@@ -20,7 +20,8 @@ const MOVED_PRESS_ROWS = '.chat-channel-touch, .chat-peer-name';
 /** the cure: a row by a KEY that outlives a re-render — a channel row's own key, else its record and its words (a peer's name is
  *  rebuilt by innerHTML when its message re-renders) — so no node is kept and a redrawn row is the same row */
 const pressKeyOf = (row) => (!row ? null : row.dataset?.key ? 'k:' + row.dataset.key : 'm:' + (row.closest?.('[data-msg-id]')?.dataset?.msgId || '') + '|' + (row.textContent || ''));
-import { stampAt as when, num, span, stampSpan, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { stampAt as when, num, span, stampSpan, clockOf } from './page-time.js';
+import { reaskNext, retryAtOf } from './history-reask.js'; // row B-422c (r1461): the page's re-ask of a history «not loaded» — PURE // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the message details' stored values in words (the walk's chat-core-4)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
 import { waitingTurnOf, signinWallOf } from '../signin-model.js'; // PURE (lane door-signin-fixes): the turn waiting at the wall; which wall a death gets
@@ -2769,7 +2770,7 @@ class ChatView {
     // row B-422c: a history the transcript reader refused (its kept copy, or nothing) is a FAILED fetch — the view that stands is never
     // replaced by a short one; the person is told «try again» (a toast, at most one each few seconds; the 2 s poll stays quiet)
     if (data && data.notLoaded) {
-      if (!quietRefusal) this._sayReaderRestarting({ storageHung: !!data.storageHung, retryAt: data.retryAt || null, retryIn: data.retryIn ?? null });
+      if (!quietRefusal) this._sayReaderRestarting({ storageHung: !!data.storageHung, readerGone: !!data.readerGone, retryAt: data.retryAt || null, retryIn: data.retryIn ?? null });
       throw Object.assign(new Error(t('The transcript reader is restarting — try again in a moment.')), { code: data.notLoaded });
     }
     if (applyTotal && typeof data.total === 'number') this._total = data.total; // (a tail fetch applies its own once its slab is the view — r4)
@@ -3490,7 +3491,7 @@ class ChatView {
       if (!res.ok) {
         // row B-422c (主开发 r1006 item 3): a read the transcript reader REFUSED asks the person to try again — a toast, never silence
         let body = null; try { body = await res.json(); } catch { }
-        if (body && body.code === 'transcript_reader_restarting') this._sayReaderRestarting({ storageHung: !!body.storageHung, retryAt: body.retryAt || null, retryIn: body.retryIn ?? null });
+        if (body && body.code === 'transcript_reader_restarting') this._sayReaderRestarting({ storageHung: !!body.storageHung, readerGone: !!body.readerGone, retryAt: body.retryAt || null, retryIn: body.retryIn ?? null });
         return { ok: false, error: (body && body.error) || `HTTP ${res.status}`, code: (body && body.code) || null };
       }
       return { ok: true, data: await res.json() };
@@ -3500,87 +3501,103 @@ class ChatView {
   }
 
   /** row B-422c: the transcript reader refused a read — said once every few seconds, never a toast per slab; r1243 item 1: in the
-   *  words of the door that refused (the STORAGE's: its file is not answering, and when it is tried again) */
+   *  words of the door that refused (the STORAGE's: its file is not answering, and when it is tried again; r1461 (1): the reader GONE
+   *  — the pool will not come back by itself: no «moment» promised) */
   _sayReaderRestarting(info = null) {
     const now = Date.now();
     if (this._readerRestartingSaidAt && now - this._readerRestartingSaidAt < 5000) return;
     this._readerRestartingSaidAt = now;
-    if (info && info.storageHung) showToast(t("This conversation's file is not answering — trying again at {time}.", { time: this._clockOf(this._retryAtOf(info)) }));
+    const at = retryAtOf(info, now);
+    if (info && info.storageHung) showToast(t("This conversation's file is not answering — trying again at {time}.", { time: this._clockOf(at) }));
+    else if (info && info.readerGone) showToast(at ? t('The transcript reader is not running — trying again at {time}.', { time: this._clockOf(at) }) : t('The transcript reader is not running.'));   // no time said (a listing): none promised
     else showToast(t('The transcript reader is restarting — try again in a moment.'));
   }
   /** the page's own clock (src/lib/page-time.js — the page's language and zone) */
   _clockOf(ms) { return clockOf(Number(ms) || Date.now(), { seconds: true }); }
-  /** the time the server gave, on THIS page's clock: its delay (`retryIn`, counted from the hub's now) from the page's now — a page's
-   *  clock ahead or behind the hub's re-asks neither early nor late, and prints its own time; else the hub's instant */
-  _retryAtOf(info) {
-    const d = info && info.retryIn != null ? Number(info.retryIn) : NaN;
-    return Number.isFinite(d) ? Date.now() + Math.max(0, d) : (Number(info && info.retryAt) || 0);
-  }
 
-  /** row B-422c (主开发 r1006 item 3): the history WAITS — said in plain words where it would be (never an empty pane), once per attach
-   *  that says so, in the words of the door that refused (r1243 item 1); and (r1243 item 2) the page ASKS AGAIN BY ITSELF at the time
-   *  the server gave (`info.retryAt` — the storage's retry, the moment the main process's read opens, a worker's respawn) or when the
-   *  server pushes `history-ready`: never a re-open */
-  _sayHistoryNotLoaded(code, { again = false, info = null } = {}) {
+  /** row B-422c (主开发 r1006 item 3): the history WAITS — said in plain words where it would be (never an empty pane), in the words of
+   *  the door that refused (r1243 item 1), ONE line: a later answer changes its words in place (a re-ask that changes nothing moves no
+   *  row — r1461 (3)), a rebuild that removed it says it again after the slab, the history that loads removes it. And (r1243 item 2)
+   *  the page ASKS AGAIN BY ITSELF — the decision is src/lib/history-reask.js's (PURE: the back-off, the cheap ask, the reload) */
+  _sayHistoryNotLoaded(code, { info = null } = {}) {   // (a caller's `again` — a reset that removed the line — needs nothing now: the line's place decides)
     if (!code) return;
-    this._historyNotLoadedCode = code;
-    const owed = this._historyReadyOwed; this._historyReadyOwed = false;   // `history-ready` came while this answer was on its way: ask again soon
-    const at = this._scheduleHistoryReask(this._retryAtOf(info), { prompt: owed });   // the time the page REALLY asks again (the back-off, an earlier ask kept)
-    if (!again && this._historyNotLoadedSaid === code + (this._lastAttachedAt || 0)) return;
-    this._historyNotLoadedSaid = code + (this._lastAttachedAt || 0);
-    // ONE line: a later answer REPLACES it (a view's re-asks never pile lines up), and the history that loads removes it
-    try { this._historyNotLoadedEl?.remove(); } catch { }
-    if (info && info.storageHung) this._historyNotLoadedEl = this._renderers.appendSystem(t("This conversation's file is not answering, so its history is not loaded yet (or not all of it). Trying again at {time} — it fills in here by itself.", { time: this._clockOf(at) }));
-    else this._historyNotLoadedEl = this._renderers.appendSystem(t('The history is not loaded yet, or not all of it — the transcript reader is restarting. It fills in here by itself in a moment.'));
+    if (this._readOnly) this._listenHistoryReady();   // a view: the hub tells it too (its view waits on that history — r1461 (2))
+    const at = this._reaskEvent({ type: 'not-loaded', code, info }).due;   // the time the page REALLY asks again (the back-off, an earlier ask kept)
+    let words;
+    if (info && info.storageHung) words = t("This conversation's file is not answering, so its history is not loaded yet (or not all of it). Trying again at {time} — it fills in here by itself.", { time: this._clockOf(at) });
+    else if (info && info.readerGone) words = t('The history is not loaded yet, or not all of it — the transcript reader is not running. Trying again at {time}.', { time: this._clockOf(at) });
+    else words = t('The history is not loaded yet, or not all of it — the transcript reader is restarting. It fills in here by itself in a moment.');
+    const el = this._historyNotLoadedEl, inner = el && el.isConnected ? el.querySelector('.chat-system') : null;
+    if (inner) { inner.textContent = words; return; }   // the line stands: only its words change (no row added, none moved)
+    this._historyNotLoadedEl = this._renderers.appendSystem(words);
   }
-  /** the history loaded (an attach said nothing of it): no more re-asks, the line gone */
+  /** the history loaded (an answer carried it): no more asks, the line gone */
   _historyLoadedNow() {
-    this._historyNotLoadedCode = null; this._historyReaskTries = 0; this._historyReadyOwed = false;
-    clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null; this._historyReaskDue = 0;
+    this._reaskEvent({ type: 'loaded' });
+    try { this._historyReadyOff?.(); } catch { } this._historyReadyOff = null;
     try { this._historyNotLoadedEl?.remove(); } catch { } this._historyNotLoadedEl = null;
   }
-  /** one re-ask at `at` while the window lives and its history is still not loaded — never sooner than its BACK-OFF (2 s, doubling at
-   *  each re-ask answered «not loaded» again: a re-ask of a live window is a whole re-attach), never later than 10 min; `prompt`
-   *  (the server said `history-ready` meanwhile): 2 s. An EARLIER ask already set stands (one answer is said twice — the attach
-   *  handler, then the reset its new rebuild arms — and the second must not push the first's prompt ask back). → the time it asks */
-  _scheduleHistoryReask(at, { prompt = false } = {}) {
-    const floor = prompt ? 2000 : Math.min(10 * 60000, 2000 * 2 ** Math.min(this._historyReaskTries || 0, 9));
-    const due = Date.now() + Math.min(10 * 60000, Math.max(floor, (Number(at) || 0) - Date.now()));
-    if (this._historyReaskTimer && this._historyReaskDue && this._historyReaskDue <= due) return this._historyReaskDue;
-    clearTimeout(this._historyReaskTimer);
-    this._historyReaskDue = due;
-    this._historyReaskTimer = setTimeout(() => this._reaskHistory(), due - Date.now());
-    return due;
+  /** the server says the history is readable (`history-ready`: the push, or the cheap ask's reply) */
+  _onHistoryReady() { this._reaskEvent({ type: 'ready' }); }
+  /** a VIEW window hears its own `history-ready` (a live window's attach handler does): the push of its view id, or its ask's reply */
+  _listenHistoryReady() {
+    const spec = this._viewSpecNow();
+    if (!spec || this._historyReadyOff || typeof this.ws?.onGlobal !== 'function') return;
+    const vid = spec.sessionId;
+    this._historyReadyOff = this.ws.onGlobal((m) => { if (m && m.type === 'history-ready' && m.sessionId === vid && !this._disposed) this._onHistoryReady(); });
   }
-  /** the server's push (`history-ready`): ask again now — unless a re-ask is already on its way (its answer is the history, or it
-   *  owes one more ask soon) */
-  _onHistoryReady() {
-    if (!this._historyNotLoadedCode) return;
-    if (this._historyReaskSentAt && this._historyReaskSentAt > (this._lastAttachedAt || 0) && Date.now() - this._historyReaskSentAt < 30000) { this._historyReadyOwed = true; return; }
-    this._reaskHistory();
+  /** ONE event through the pure decision → its act: a timer armed / cancelled, the cheap ask, the reload. → the new state */
+  _reaskEvent(ev) {
+    const { state, act } = reaskNext(this._reask, { now: Date.now(), ...ev });
+    this._reask = state;
+    if (act === 'arm' || act === 'cancel' || act === 'ask') { clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null; }
+    if (act === 'arm' && !this._disposed) this._historyReaskTimer = setTimeout(() => this._reaskEvent({ type: 'due' }), Math.max(0, state.due - Date.now()));
+    if (act === 'ask') this._askHistory();
+    if (act === 'reload') this._reloadHistory();
+    return state;
   }
-  _reaskHistory() {
-    clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null; this._historyReaskDue = 0;
-    if (this._disposed || !this._historyNotLoadedCode) return;
-    this._historyReaskTries = (this._historyReaskTries || 0) + 1;
-    this._historyReaskSentAt = Date.now();
-    if (!this._readOnly) { this._reattach(false); return; }   // a live window: the attach reads it again (its answer re-renders, or says it again)
-    // a view-only window: its view request again — its OWN answer only (one socket, every window); a live window whose session
-    // ENDED meanwhile (read-only, no view request of its own) asks its conversation's view — the line said it fills in by itself
-    const spec = this._viewAttachSpec || (this._viewAttachSpec = this._viewSpecOfIds());
-    if (!spec || !this.ws?.request) return;
-    const sid = spec.sessionId;
-    try { this._historyReaskCancel?.(); } catch { }
-    this._historyReaskCancel = this.ws.request(spec, (msg) => {
+  /** the view request of this window: a view-only window's own; a live window whose session ENDED meanwhile asks its conversation's */
+  _viewSpecNow() { return this._readOnly ? (this._viewAttachSpec || (this._viewAttachSpec = this._viewSpecOfIds())) : null; }
+  /** THE CHEAP ASK (r1461 (3)): `history-ask` — the hub reads again and rebuilds NOTHING; «not loaded» again ⇒ only the time in the
+   *  line's words changes; `history-ready` ⇒ the reload. ITS OWN answer only (one socket carries every window's frames) */
+  _askHistory() {
+    if (this._disposed || !this.ws?.request) return;
+    const spec = this._viewSpecNow();
+    if (this._readOnly && !spec) return;
+    const ask = spec
+      ? { type: 'history-ask', sessionId: spec.sessionId, viewOnly: true, backend: spec.backend, backendSessionId: spec.backendSessionId, claudeSessionId: spec.claudeSessionId, cwd: spec.cwd, host: spec.host }
+      : { type: 'history-ask', sessionId: this.sessionId };
+    const sid = ask.sessionId, code = () => this._reask?.code;
+    if (spec) this._listenHistoryReady();
+    try { this._historyAskCancel?.(); } catch { }
+    this._historyAskCancel = this.ws.request(ask, (msg) => {
       if (msg.sessionId !== sid) return;   // its OWN answer only (test-contributions: every error branch is id-gated)
+      if (msg.type === 'error') { this._reaskEvent({ type: 'not-loaded', code: code(), info: null }); return true; }   // asked again at the back-off, never stopped for good
       if (this._disposed) return true;
-      if (msg.type === 'error') { this._scheduleHistoryReask(0); return true; }   // its own error: asked again at the back-off, never stopped for good
+      if (msg.type === 'history-not-loaded') { this._sayHistoryNotLoaded(msg.historyNotLoaded, { info: msg.historyNotLoadedInfo || null }); return true; }
+      if (msg.type === 'history-ready') { if (spec && !this._historyReadyOff) this._onHistoryReady(); return true; }   // taken ONCE: a live window's by its attach handler, a view's by its own listener
+      return false;
+    }, { isAlive: () => !this._disposed, timeoutMs: 20000, onTimeout: () => this._reaskEvent({ type: 'not-loaded', code: code(), info: null }), resend: true });
+  }
+  /** THE RELOAD — only when the hub said the history is readable: a live window re-attaches (its rebuild draws it), a view-only window
+   *  re-sends its view request and replaces its slab */
+  _reloadHistory() {
+    if (this._disposed) return;
+    if (!this._readOnly) { this._reattach(false); return; }
+    const spec = this._viewSpecNow();
+    if (!spec || !this.ws?.request) return;
+    const sid = spec.sessionId, code = () => this._reask?.code;
+    try { this._historyReloadCancel?.(); } catch { }
+    this._historyReloadCancel = this.ws.request(spec, (msg) => {
+      if (msg.sessionId !== sid) return;   // its OWN answer only (one socket, every window)
+      if (msg.type === 'error') { this._reaskEvent({ type: 'not-loaded', code: code(), info: null }); return true; }
+      if (this._disposed) return true;
       if (msg.type !== 'attached') return false;
       if (msg.messages?.length) this._reloadViewSlab(msg);
       if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { again: true, info: msg.historyNotLoadedInfo || null });
       else this._historyLoadedNow();
       return true;
-    }, { isAlive: () => !this._disposed, timeoutMs: 20000, onTimeout: () => this._scheduleHistoryReask(0), resend: true });
+    }, { isAlive: () => !this._disposed, timeoutMs: 20000, onTimeout: () => this._reaskEvent({ type: 'not-loaded', code: code(), info: null }), resend: true });
   }
   /** a view-only window's re-asked slab REPLACES the one it drew (never added under it) — unless it is still the copy drawn: «not
    *  loaded» again over the same total, or the tail it holds already (where a person paged or jumped to stays as it is) */
@@ -6463,7 +6480,7 @@ class ChatView {
     const q = new URLSearchParams({ backend: backend || 'codex', threadId: backendSessionId });
     if (host) q.set('host', host);
     const r = await fetchJson(`/api/subagents?${q.toString()}`);
-    if (r?.reason === 'transcript_reader_restarting') { this._sayReaderRestarting(); return; }   // row B-422c: in the page's words, never the server's
+    if (r?.reason === 'transcript_reader_restarting') { this._sayReaderRestarting({ readerGone: !!r.readerGone }); return; }   // row B-422c: in the page's words, never the server's
     if (r?.error) { showToast(r.error, { type: 'error' }); return; }
     const list = Array.isArray(r?.subagents) ? r.subagents : [];
     const hit = list.find((s) => s.agentPath === agentPath)
@@ -8522,7 +8539,7 @@ class ChatView {
   dispose() {
     this._statusBar?.dispose?.();
     clearTimeout(this._rewindAnswerTimer); this._rewindCancel?.(); // B-437e: a closed view says nothing about a rewind
-    clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null; try { this._historyReaskCancel?.(); } catch { }   // row B-422c: a closed view asks nothing again
+    clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null; try { this._historyAskCancel?.(); this._historyReloadCancel?.(); this._historyReadyOff?.(); } catch { }   // row B-422c: a closed view asks nothing again
     try { this._outboxOff?.(); } catch { } // lane outbox-session-chip: the chip stops hearing the outbox feed
     try { this._needsCards?.stop(); } catch { } // lane chat-needs-you-card
     try { this._signInCard?.destroy(); } catch { } // lane door-signin-card

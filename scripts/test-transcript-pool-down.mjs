@@ -24,6 +24,7 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { checker } from './lib/check.mjs';
+import * as RQ from '../src/lib/history-reask.js';   // row B-422c (r1461): the page's re-ask decision, PURE
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -407,29 +408,203 @@ C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
   ok(/pathKeys: \['fp'\],/.test(ad) && /climb: false,/.test(ad) && /laneOpts: \{ history: \{ resourceLimits: \{ maxOldGenerationSizeMb: HISTORY_HEAP_MB \}, hungMs: 0 \} \}/.test(ad), 'the transcript pool is built with all three (pathKeys fp, climb false, the history lane hungMs 0)');
 }
 
+// ── r1461 (round wwvmy3yti): THE LEGS ITS READERS FOUND MISSING — the page's re-ask as a PURE decision with its controls, who gets
+// the push, the storage retry's own park, a late I/O failure, the codex double fault, the 503 with its retry time ──
+console.log('r1461: the page\'s re-ask decision, the push\'s waiters, the two parks, a late I/O failure, the codex double fault, the 503');
+{
+  // (a) THE STORM BOUND: a window answered «not loaded» again at every ask (the hub's time «now») asks ≤ 4 times in its first minute,
+  // ≤ 8 in ten (2 s doubling, ≤ 10 min). CONTROL: the back-off RESET at every answer (a reconnect's «not loaded» counted as a fresh
+  // start) asks ~30 times a minute — 40 windows, 1200 asks: the leg sees it
+  const NL = (now) => ({ type: 'not-loaded', now, code: 'transcript_reader_restarting', info: { retryIn: 0 } });
+  const asksIn = (next, ms) => {
+    let st, t = 0, asks = 0;
+    st = next(st, NL(t)).state;
+    while (st.due && st.due <= ms) { t = st.due; const r = next(st, { type: 'due', now: t }); st = r.state; if (r.act === 'ask') { asks++; st = next(st, NL(t)).state; } }
+    return asks;
+  };
+  const resetting = (st, ev) => RQ.reaskNext(ev.type === 'not-loaded' ? { ...st, tries: 0 } : st, ev);
+  const a1 = asksIn(RQ.reaskNext, 60000), a10 = asksIn(RQ.reaskNext, 600000), c1 = asksIn(resetting, 60000);
+  ok(a1 <= 4 && a10 <= 8 && c1 >= 25, `the storm bound: ${a1} asks in the first minute, ${a10} in ten (2 s doubling, ≤ 10 min) — CONTROL: a back-off reset at every answer asks ${c1} times a minute`, { a1, a10, c1 });
+  // (b) ONLY AN ANSWER THAT CARRIES THE HISTORY RESETS IT: after a load, the next «not loaded» asks at 2 s again. CONTROL: tries kept
+  // over a load (never reset) — that window waits its old back-off
+  let st = RQ.reaskNext(undefined, NL(0)).state;
+  for (let i = 0; i < 5; i++) { st = RQ.reaskNext(st, { type: 'due', now: st.due }).state; st = RQ.reaskNext(st, NL(st.due || 0)).state; }
+  const afterLoad = RQ.reaskNext(RQ.reaskNext(st, { type: 'loaded' }).state, NL(1e6)).state;
+  const neverReset = (s0, ev) => ev.type === 'loaded' ? { state: { ...s0, code: null, due: 0 }, act: 'cancel' } : RQ.reaskNext(s0, ev);
+  const keptOver = RQ.reaskNext(neverReset(st, { type: 'loaded' }).state, NL(1e6)).state;
+  ok(st.tries === 5 && afterLoad.tries === 0 && afterLoad.due - 1e6 === RQ.FLOOR_MS && keptOver.due - 1e6 > RQ.FLOOR_MS * 16, `a load resets the back-off (the next ask at +${afterLoad.due - 1e6} ms) — CONTROL: tries kept over a load wait +${keptOver.due - 1e6} ms`, { tries: st.tries, after: afterLoad.due - 1e6, kept: keptOver.due - 1e6 });
+  // (c) THE CHEAP ASK, THEN THE RELOAD ONLY WHEN READABLE: the timer asks (`ask`), never reloads; `ready` reloads once; a second
+  // ready while that reload is on its way is that reload (owed) — and an answer «not loaded» after it asks again in 2 s
+  let s2 = RQ.reaskNext(undefined, NL(0)).state, t2 = 0;   // a real timeline: each ask at its due, answered «not loaded» then
+  for (let i = 0; i < 4; i++) { t2 = s2.due; s2 = RQ.reaskNext(s2, { type: 'due', now: t2 }).state; s2 = RQ.reaskNext(s2, NL(t2)).state; }
+  const dueAct = RQ.reaskNext(s2, { type: 'due', now: s2.due }).act;
+  const r1 = RQ.reaskNext(s2, { type: 'ready', now: t2 + 100 }), r2 = RQ.reaskNext(r1.state, { type: 'ready', now: t2 + 600 });
+  const afterOwed = RQ.reaskNext(r2.state, NL(t2 + 1000)).state;
+  ok(s2.tries === 4 && dueAct === 'ask' && r1.act === 'reload' && r2.act === null && r2.state.owed === true && afterOwed.due - (t2 + 1000) === RQ.PROMPT_MS, `the timer ASKS (${dueAct}), the hub's «ready» RELOADS once (${r1.act}, then ${r2.act}: owed), and a «not loaded» after the owed ready asks again in ${afterOwed.due - (t2 + 1000)} ms (not its back-off's ${s2.due - t2} ms)`);
+  // (d) AN EARLIER ASK STANDS (one answer said twice: the attach handler, then the reset) and the hub's time on the PAGE's clock
+  const early = RQ.reaskAt({ now: 0, at: 0, tries: 6, pendingDue: 2000 }), late = RQ.reaskAt({ now: 0, at: 0, tries: 6 });
+  const hubNow = 5_000_000, pageNow = hubNow + 3_600_000;   // a page clock an hour ahead of the hub's
+  const viaDelay = RQ.retryAtOf({ retryAt: hubNow + 30000, retryIn: 30000 }, pageNow), viaInstant = RQ.retryAtOf({ retryAt: hubNow + 30000 }, pageNow);
+  ok(early === 2000 && late === 128000 && viaDelay === pageNow + 30000 && viaInstant < pageNow, `an earlier ask stands (${early} ms, not ${late}); the hub's next try counted on the page's clock (+${viaDelay - pageNow} ms — by the hub's instant alone it would be already past)`);
+}
+{
+  // (e) WHO GETS THE PUSH (r1461 (2)): every live conversation whose history waits on that transcript BY THE ID ITS MARKS ARE KEPT
+  // UNDER (getHistorySessionId — a fork's or a resumed parent's backend id first), on every device; never another conversation's,
+  // never one loaded, never one nobody watches. CONTROL: the old match (claudeSessionId) misses the fork and takes a stranger
+  const devices = (n) => new Map(Array.from({ length: n }, (_, i) => [{ device: i }, {}]));
+  const sessions = new Map([
+    ['live-two-devices', { claudeSessionId: 'X', backendSessionId: 'X', clients: devices(2) }],
+    ['fork-of-x', { claudeSessionId: 'Z', backendSessionId: 'X', clients: devices(1) }],
+    ['loaded', { claudeSessionId: 'X', _historyLoaded: true, clients: devices(1) }],
+    ['another-conversation', { claudeSessionId: 'Y', clients: devices(1) }],
+    ['nobody-watching', { claudeSessionId: 'X', clients: new Map() }],
+    ['reads-w', { claudeSessionId: 'X', backendSessionId: 'W', clients: devices(1) }],
+  ]);
+  const got = SS0.historyWaitersOf(sessions, 'X').map(([sid]) => sid);
+  const told = SS0.historyWaitersOf(sessions, 'X').reduce((n, [, s]) => n + s.clients.size, 0);
+  const old = [...sessions].filter(([, s]) => s.claudeSessionId === 'X' && !s._historyLoaded && s.clients.size).map(([sid]) => sid);
+  ok(got.join() === 'live-two-devices,fork-of-x' && told === 3 && old.join() === 'live-two-devices,reads-w', `the push reaches ${got.join(' + ')} (${told} devices) — CONTROL: by claudeSessionId alone it reached ${old.join(' + ')}`, { got, old });
+}
+{
+  // (e2) THE VIEW WINDOWS WAITING ON IT (not in activeSessions: a stopped conversation, View History): told once at its readable, by
+  // the view id each asked under; a closed socket skipped; another history's views never; bounded
+  const { createViewWaiters } = require(path.join(REPO, 'src/ws-handler.js'));
+  const W = createViewWaiters({ max: 3 });
+  const wsA = { open: true }, wsB = { open: false };
+  W.note('X', wsA, 'view-1'); W.note('X', wsB, 'view-2'); W.note('X', wsA, 'view-1b'); W.note('Y', wsA, 'view-y');
+  const takeX = W.take('X', (w) => w.open).map(([w, v]) => (w === wsA ? 'A:' : 'B:') + v), again = W.take('X', (w) => w.open), takeY = W.take('Y', (w) => w.open).map(([, v]) => v);
+  for (const id of ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']) W.note(id, wsA, 'v-' + id);
+  ok(takeX.join() === 'A:view-1,A:view-1b' && again.length === 0 && takeY.join() === 'view-y' && W.size() === 3, `the views waiting on X are told once (${takeX.join(', ')}; a closed socket skipped; again: ${again.length}); Y's view only at Y's; the map bounded (${W.size()})`);
+}
+{
+  // (e3) A CODEX CONVERSATION'S MARK (its reader, by its own thread id — the id its windows wait under): «not loaded» marks it, the
+  // read that next loads it tells the listeners once
+  const heard = []; const off = SS0.onHistoryReadable((id) => heard.push(id));
+  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' }));
+  const m1 = new CS.CodexSessionMessages({ backend: 'codex', backendSessionId: tid, cwd, buffer: '' }, tid, {}); await m1.rawAsync();
+  const before = heard.filter((x) => x === tid).length;
+  C._setTranscriptPoolForTest(up());
+  const m2 = new CS.CodexSessionMessages({ backend: 'codex', backendSessionId: tid, cwd, buffer: '' }, tid, {}); await m2.rawAsync();
+  const m3 = new CS.CodexSessionMessages({ backend: 'codex', backendSessionId: tid, cwd, buffer: '' }, tid, {}); await m3.rawAsync();
+  off();
+  ok(!!m1.notLoaded && before === 0 && !m2.notLoaded && heard.filter((x) => x === tid).length === 1, `a codex conversation answered «not loaded» (${m1.notLoaded}) is told ONCE when its reader next loads it (${heard.filter((x) => x === tid).length})`, { notLoaded: m1.notLoaded, heard });
+}
+{
+  // (f) THE STORAGE RETRY'S OWN PARK (r1461 (1)): the pool gone, one conversation's storage dead — its due retry on the main process
+  // parks, and while it stays parked ANOTHER file's read goes on (RED at 82ca957dc: every other file refused «a read … still parked»),
+  // a SECOND storage retry waits its turn (one parked at a time); a plain read that parks still holds the plain road (unit 2's
+  // rule) — and a late I/O FAILURE keeps the own-deadline mark (the storage failing), a late answer of the file ends it
+  const lines = fs.readFileSync(claudeFp, 'utf8').split('\n').filter(Boolean);   // the placed Claude transcript's records
+  const mk = (name) => { const f = path.join(projDir, name); fs.writeFileSync(f, lines.slice(0, 60).join('\n') + '\n'); return f; };
+  const D = mk('dead-storage.jsonl'), D2 = mk('dead-storage-2.jsonl'), H = mk('healthy.jsonl'), E = mk('late-eio.jsonl'), N = mk('late-enoent.jsonl'), O = mk('other.jsonl');
+  const realOpen = fs.promises.open, plan = new Map();   // fp → { after, fail }: a placed answer (never a clock guess of the storage)
+  fs.promises.open = function (p, ...a) { const q = plan.get(p); if (!q) return realOpen.call(this, p, ...a); return new Promise((res, rej) => setTimeout(() => (q.fail ? rej(Object.assign(new Error(`a placed ${q.fail}`), { code: q.fail })) : res(realOpen.call(fs.promises, p, ...a))), q.after)); };
+  const settle = async (cond, ms = 3000) => { const t0 = Date.now(); while (!cond() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 20)); return cond(); };
+  try {
+    C._setSlicedForTest({ afterMs: 0, deadlineMs: 300, storageRetryMs: 0 });   // the read's deadline 300 ms: a healthy 60-line file reads far inside it
+    C._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' }));
+    for (const f of [D, D2]) { try { await C.readJsonlTailAsync(f, { dropSubagent: true }); } catch { } }   // the storage's (sticky)
+    C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' }));
+    for (const f of [H, E, N, O]) { try { await C.readJsonlTailAsync(f, { dropSubagent: true }); } catch { } }   // refused, not the storage's
+    const G = { _closed: true, calls: [], call(op) { this.calls.push(op); return Promise.reject(Object.assign(new Error('safeFs closed'), { status: 503 })); } };
+    C._setTranscriptPoolForTest(G);
+    let gone = null; try { await C.readJsonlTailAsync(O, { dropSubagent: true }); } catch (e) { gone = e; }
+    ok(!!gone && gone.readerGone === true && C.poolGone(), `a refusal of a pool GONE says so (readerGone) — the page promises no «moment»`, { readerGone: gone && gone.readerGone });
+    plan.set(D, { after: 1200, fail: 'EIO' }); plan.set(D2, { after: 1200, fail: 'EIO' });
+    const p1 = C.readJsonlTailSliced(D, { dropSubagent: true, storageRetry: true }).then(() => null, (e) => e);
+    const e1 = await p1;
+    const st1 = C.slicedState(), road2 = C.slicedRoadFor(D2, { storageRetry: true }), roadH = C.slicedRoadFor(H);
+    let readH = null; try { readH = await C.readJsonlTailSliced(H, { dropSubagent: true }); } catch (e) { readH = e; }
+    ok(!!e1 && e1.code === 'sliced_read_deadline' && st1.storageParked === 1 && st1.parked === 0 && !road2.ok && /storage retry/.test(road2.why) && roadH.ok && readH && readH.entry && readH.entry.messages.length > 0,
+      `a storage retry parked in a dead file (storageParked ${st1.storageParked}) refuses NO other file: a healthy one reads (${readH && readH.entry ? readH.entry.messages.length + ' records' : readH && readH.message}); a SECOND storage retry waits its turn («${road2.why}»)`, { st1, road2, roadH });
+    // …and while it is parked a second storage retry's GAP is not spent (it could not run) and the page is told not before a minute
+    const t1 = Date.now(), dueD2 = C.storageRetryDue(D2), nextD2 = C.nextReadAt(D2);
+    ok(dueD2 === false && nextD2 - t1 >= 59000, `with the storage retry's one place held, another dead file's retry is not due (its gap kept) and its page asks again in +${nextD2 - t1} ms`, { dueD2 });
+    // the parked storage retry's late FAILURE frees its place — its file stays the storage's
+    await settle(() => C.slicedState().storageParked === 0);
+    ok(C.slicedState().storageParked === 0 && C.fileStorageHung(D), 'the parked storage retry\'s late failure frees its place — the file stays the storage\'s', C.slicedState());
+    // a plain read that parks: the plain road holds (unit 2's), the storage's line is its own — measured with a real retry gap (5 s)
+    C._setSlicedForTest({ afterMs: 0, deadlineMs: 300, storageRetryMs: 5000 });
+    plan.set(E, { after: 600, fail: 'EIO' });
+    const eE = await C.readJsonlTailSliced(E, { dropSubagent: true }).then(() => null, (e) => e);
+    const st2 = C.slicedState(), roadO = C.slicedRoadFor(O);
+    ok(!!eE && eE.code === 'sliced_read_deadline' && st2.parked === 1 && st2.storageParked === 0 && !roadO.ok && /still parked/.test(roadO.why), `a PLAIN read parked holds the plain road as before («${roadO.why}»)`, { st2 });
+    // …and its file is never read again while that read is parked: a storage retry of THE SAME file is refused (RED at 54a51379b's
+    // first form: the plain park left no retry time — the retry was due at once and went into the same dead file), and it waits a gap
+    const roadE = C.slicedRoadFor(E, { storageRetry: true }), dueE = C.storageRetryDue(E), nextE = C.nextReadAt(E) - Date.now();
+    ok(!roadE.ok && /its own read on the main process is still parked/.test(roadE.why) && dueE === false && nextE >= 4000, `a storage retry into the file a plain read is parked in is refused («${roadE.why}») and waits its gap (due: ${dueE}; the page asks again in +${nextE} ms)`, { roadE, dueE, nextE });
+    // the late answers: E's I/O failure KEEPS its own-deadline mark; then N's late ENOENT (the file's own answer) ends N's
+    await settle(() => C.slicedState().parked === 0);
+    const keptE = C.fileStorageHung(E);
+    plan.set(N, { after: 600, fail: 'ENOENT' });
+    await C.readJsonlTailSliced(N, { dropSubagent: true }).then(() => null, () => null);
+    const markedN = C.fileStorageHung(N);
+    await settle(() => C.slicedState().parked === 0);
+    const endedN = !C.fileStorageHung(N);
+    ok(keptE && markedN && endedN, `a late I/O FAILURE (EIO) after the hang keeps the own-deadline mark (the storage failing: ${keptE}); CONTROL: a late ENOENT — the file's own answer — ends it (${endedN})`, { keptE, markedN, endedN });
+  } finally { fs.promises.open = realOpen; plan.clear(); C._setSlicedForTest({}); }
+}
+{
+  // (g) THE CODEX DOUBLE FAULT: a rollout the storage's, the pool GONE ⇒ its due retry is the main process's own read — loaded, the
+  // mark ends. CONTROL: the pool only refusing (no worker, not gone) ⇒ the pool is asked again, «not loaded», still the storage's
+  const parseWith = (p) => { C._setTranscriptPoolForTest(p); return CS.parseCodexSessionJsonlAsync(tid, { fp: codexFp }); };
+  C._setSlicedForTest({ storageRetryMs: 0 });
+  await parseWith(up());   // a history read the pool answers: no refusal of it stands
+  await parseWith(refusing({ status: 503, code: 'path-hung' }));   // the storage's
+  const Nw = refusing({ status: 503, code: 'no-worker' });
+  const ctl = await parseWith(Nw);
+  const ctlHung = C.fileStorageHung(codexFp);
+  const G = { _closed: true, call() { return Promise.reject(Object.assign(new Error('safeFs closed'), { status: 503 })); } };
+  const got = await parseWith(G);
+  ok(!!ctl.notLoaded && ctl.storageHung === true && ctlHung && Nw.calls.length >= 1 && Array.isArray(got) && !got.notLoaded && got.length > 1000 && !C.fileStorageHung(codexFp),
+    `the codex double fault: the pool GONE ⇒ the due retry reads on the main process (${got.length} records, the mark ended) — CONTROL: the pool only refusing ⇒ asked again (${Nw.calls.length}), «not loaded»`, { ctl: ctl.notLoaded, n: got.length });
+  C._setSlicedForTest({});
+}
+{
+  // (h) THE 503 WITH ITS RETRY TIME (src/routes/sessions.js through the pure readerRefusedAnswer) and nextReadAt's other branches
+  const now = 1_000_000;
+  const a = C.readerRefusedAnswer({ message: 'm', code: 'transcript_reader_restarting', storageHung: true, retryAt: now + 30000 }, now);
+  const past = C.readerRefusedAnswer({ code: 'transcript_reader_restarting', retryAt: now - 5000, readerGone: true }, now);
+  const none = C.readerRefusedAnswer({ code: 'transcript_reader_restarting' }, now);
+  ok(a.status === 503 && a.retryAfter === '30' && a.body.retryIn === 30000 && a.body.storageHung === true && a.body.readerGone === false
+    && past.retryAfter === '2' && past.body.retryIn === 0 && past.body.readerGone === true && none.retryAfter === '2' && none.body.retryAt === null && none.body.retryIn === null,
+    `the 503: Retry-After ${a.retryAfter} s + retryIn ${a.body.retryIn} ms + its door; a past time ⇒ ${past.retryAfter} s / 0; none ⇒ ${none.retryAfter} s / null`);
+  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' }));
+  const fresh = path.join(projDir, 'fresh-refusal.jsonl'); fs.writeFileSync(fresh, fs.readFileSync(claudeFp, 'utf8').split('\n').filter(Boolean).slice(0, 5).join('\n') + '\n');
+  try { await C.readJsonlTailAsync(fresh, { dropSubagent: true }); } catch { }
+  const t0 = Date.now(), atFresh = C.nextReadAt(fresh), atZst = C.nextReadAt(path.join(projDir, 'never.jsonl.zst'));
+  ok(atFresh - t0 >= 9500 && atFresh < atZst && atZst - t0 >= 59000, `nextReadAt: a fresh refusal ⇒ when the main process's read opens (+${atFresh - t0} ms); a compressed rollout ⇒ a minute (+${atZst - t0} ms)`);
+}
+C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
+
 // ── THE PAGE'S WIRING (the page's words are drawn by the chrome suites; these pins hold the roads that say them) ──
 {
   const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), csr = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8'), sl = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
+  const ws = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+  const askCase = ws.slice(ws.indexOf("case 'history-ask': {"), ws.indexOf("case 'attach': {"));
   const pins = [
-    ['the page fetch of a refused history FAILS (the view that stands kept), «try again» unless quiet — in its door\'s words', /if \(data && data\.notLoaded\) \{\n\s+if \(!quietRefusal\) this\._sayReaderRestarting\(\{ storageHung: !!data\.storageHung, retryAt: data\.retryAt \|\| null, retryIn: data\.retryIn \?\? null \}\);\n\s+throw /.test(cv)],
+    ['the page fetch of a refused history FAILS (the view that stands kept), «try again» unless quiet — in its door\'s words', /if \(data && data\.notLoaded\) \{\n\s+if \(!quietRefusal\) this\._sayReaderRestarting\(\{ storageHung: !!data\.storageHung, readerGone: !!data\.readerGone, retryAt: data\.retryAt \|\| null, retryIn: data\.retryIn \?\? null \}\);\n\s+throw /.test(cv)],
     ['the read-only 2 s poll asks quietly', /_fetchMessagePage\(nextOffset, 200, \{ withStatus: true, quietRefusal: true \}\)/.test(cv)],
     ['the view reset says the line again (after the heal: test-hidden-view-suspend pins nothing between the rebuild and it)', /this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\);\s*\n(\s*\/\/.*\n)*\s*this\._seqPoisoned = false;\n\s+if \(msg && msg\.historyNotLoaded\) this\._sayHistoryNotLoaded\(msg\.historyNotLoaded, \{ again: true, info: msg\.historyNotLoadedInfo \|\| null \}\);/.test(cv)],
-    ['r1243: the storage\'s own words (its file not answering, trying again at a time)', /if \(info && info\.storageHung\) this\._historyNotLoadedEl = this\._renderers\.appendSystem\(t\("This conversation's file is not answering, so its history is not loaded yet/.test(cv)],
-    ['r1243: the page asks again BY ITSELF at the server\'s time, and at history-ready', /const at = this\._scheduleHistoryReask\(this\._retryAtOf\(info\), \{ prompt: owed \}\);/.test(cv) && /msg\.type === 'history-ready' && msg\.sessionId === sessionId\) \{\n\s+this\._onHistoryReady\(\);/.test(cv) && /if \(!this\._readOnly\) \{ this\._reattach\(false\); return; \}/.test(cv)],
-    ['the re-ask BACKS OFF (2 s doubling at each «not loaded» again, ≤ 10 min) and a history-ready while one is on its way is that ask', /const floor = prompt \? 2000 : Math\.min\(10 \* 60000, 2000 \* 2 \*\* Math\.min\(this\._historyReaskTries \|\| 0, 9\)\);/.test(cv) && /this\._historyReaskTries = \(this\._historyReaskTries \|\| 0\) \+ 1;/.test(cv) && /\{ this\._historyReadyOwed = true; return; \}/.test(cv)],
-    ['the server\'s time on the page\'s clock: its delay (retryIn) from the page\'s now — the hub sends it with every refusal', /return Number\.isFinite\(d\) \? Date\.now\(\) \+ Math\.max\(0, d\) : \(Number\(info && info\.retryAt\) \|\| 0\);/.test(cv) && /const withRetryIn = \(info\) =>/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8')) && /retryIn: Number\(e\.retryAt\)/.test(fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8')) && /retryIn: Number\(v\.notLoadedInfo\.retryAt\)/.test(fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8'))],
-    ['the time in the page\'s own clock (page-time clockOf — its language, its zone), never toLocaleTimeString', /_clockOf\(ms\) \{ return clockOf\(Number\(ms\) \|\| Date\.now\(\), \{ seconds: true \}\); \}/.test(cv) && /const when = clockOf\(/.test(csr) && !/toLocaleTimeString/.test(csr)],   // stale-pins: kept (the absence check: chat-search prints no toLocaleTimeString any more)
-    ['a view-only re-ask takes ITS OWN answer only (one socket, every window) and replaces its slab and its line', /if \(msg\.sessionId !== sid\) return;/.test(cv) && /if \(msg\.messages\?\.length\) this\._reloadViewSlab\(msg\);/.test(cv) && /try \{ this\._historyNotLoadedEl\?\.remove\(\); \} catch \{ \}\n\s+if \(info && info\.storageHung\) this\._historyNotLoadedEl = /.test(cv)],
-    ['an earlier ask set stands (the attach handler and the reset say one answer twice — a history-ready\'s prompt ask is not pushed back), and the line prints the time it REALLY asks', /if \(this\._historyReaskTimer && this\._historyReaskDue && this\._historyReaskDue <= due\) return this\._historyReaskDue;/.test(cv) && /\{ time: this\._clockOf\(at\) \}/.test(cv)],
-    ['a view\'s re-asked slab: «not loaded» again over the same total is left as drawn; else EVERY row goes (a record drawn as a system row too) and the page\'s own lines are said again', /if \(msg\.historyNotLoaded && this\._total === total\) return;/.test(cv) && /_reloadViewSlab\(msg\) \{[\s\S]{0,900}this\._messageList\.querySelectorAll\('\.chat-msg, \.chat-msg-system'\)\.forEach\(el => el\.remove\(\)\);[\s\S]{0,400}if \(this\._rescueNoteSaid\) this\._renderers\.appendSystem/.test(cv)],
-    ['a live window whose session ENDED while its history was not loaded asks its conversation\'s view (never a sub-agent viewer\'s parent)', /const spec = this\._viewAttachSpec \|\| \(this\._viewAttachSpec = this\._viewSpecOfIds\(\)\);/.test(cv) && /_viewSpecOfIds\(\) \{\n\s+if \(this\.sessionId\.startsWith\('sub-'\)\) return null;/.test(cv)],
-    ['a closed view asks nothing again', /clearTimeout\(this\._historyReaskTimer\); this\._historyReaskTimer = null; try \{ this\._historyReaskCancel\?\.\(\); \} catch \{ \}   \/\/ row B-422c: a closed view/.test(cv)],
+    ['the words of the door that refused: the storage\'s, the reader GONE\'s (no «moment» — r1461 (1)), the reader restarting\'s', /if \(info && info\.storageHung\) words = t\("This conversation's file is not answering, so its history is not loaded yet/.test(cv) && /else if \(info && info\.readerGone\) words = t\('The history is not loaded yet, or not all of it — the transcript reader is not running\. Trying again at \{time\}\.'/.test(cv) && /else if \(info && info\.readerGone\) showToast\(at \? t\('The transcript reader is not running — trying again at \{time\}\.'/.test(cv)],
+    ['ONE line: a later answer changes its WORDS in place — a re-ask that changes nothing adds no row and moves none (r1461 (3))', /if \(inner\) \{ inner\.textContent = words; return; \}/.test(cv)],
+    ['the page\'s re-ask is the PURE decision\'s (src/lib/history-reask.js — legs above): its timer, its act', /import \{ reaskNext, retryAtOf \} from '\.\/history-reask\.js';/.test(cv) && /const \{ state, act \} = reaskNext\(this\._reask, \{ now: Date\.now\(\), \.\.\.ev \}\);/.test(cv) && /setTimeout\(\(\) => this\._reaskEvent\(\{ type: 'due' \}\)/.test(cv)],
+    ['the timer\'s ask is the CHEAP one (`history-ask`); the reload — a live window\'s re-attach — only when the hub said readable', /: \{ type: 'history-ask', sessionId: this\.sessionId \};/.test(cv) && /_reloadHistory\(\) \{\n\s+if \(this\._disposed\) return;\n\s+if \(!this\._readOnly\) \{ this\._reattach\(false\); return; \}/.test(cv) && /msg\.type === 'history-ready' && msg\.sessionId === sessionId\) \{\n\s+this\._onHistoryReady\(\);/.test(cv)],
+    ['the hub\'s `history-ask` REBUILDS NOTHING: it reads again and answers `history-not-loaded` (the door, the next try) or `history-ready`', askCase.length > 200 && !/rebuildHistory|convertWithCards|createMessageManager/.test(askCase) && /reply\(\{ type: 'history-not-loaded', historyNotLoaded: sm\.notLoaded,/.test(askCase) && /reply\(\{ type: 'history-ready' \}\)/.test(askCase) && /live\.clients\.has\(ws\)/.test(askCase)],
+    ['the push matches the id the marks are kept under (historyWaitersOf — r1461 (2))', /for \(const \[sid, s\] of SSH\.historyWaitersOf\(activeSessions, historyId\)\)/.test(ws) && !/s\.claudeSessionId !== claudeSessionId/.test(ws)],   // stale-pins: kept (the absence check: the listener matches by claudeSessionId no more)
+    ['the ask and the reload take ITS OWN answer only (one socket carries every window\'s)', (cv.match(/if \(msg\.sessionId !== sid\) return;/g) || []).length >= 2],
+    ['the time in the page\'s own clock (page-time clockOf — its language, its zone), never toLocaleTimeString', /_clockOf\(ms\) \{ return clockOf\(Number\(ms\) \|\| Date\.now\(\), \{ seconds: true \}\); \}/.test(cv) && /const when = clockOf\(retryAtOf\(data, Date\.now\(\)\)/.test(csr) && !/toLocaleTimeString/.test(csr)],   // stale-pins: kept (the absence check: chat-search prints no toLocaleTimeString any more)
+    ['a view\'s reloaded slab: «not loaded» again over the same total is left as drawn; else EVERY row goes (a record drawn as a system row too) and the page\'s own lines are said again', /if \(msg\.historyNotLoaded && this\._total === total\) return;/.test(cv) && /_reloadViewSlab\(msg\) \{[\s\S]{0,900}this\._messageList\.querySelectorAll\('\.chat-msg, \.chat-msg-system'\)\.forEach\(el => el\.remove\(\)\);[\s\S]{0,400}if \(this\._rescueNoteSaid\) this\._renderers\.appendSystem/.test(cv)],
+    ['a live window whose session ENDED while its history was not loaded asks its conversation\'s view (never a sub-agent viewer\'s parent)', /_viewSpecNow\(\) \{ return this\._readOnly \? \(this\._viewAttachSpec \|\| \(this\._viewAttachSpec = this\._viewSpecOfIds\(\)\)\) : null; \}/.test(cv) && /_viewSpecOfIds\(\) \{\n\s+if \(this\.sessionId\.startsWith\('sub-'\)\) return null;/.test(cv)],
+    ['a closed view asks nothing again', /clearTimeout\(this\._historyReaskTimer\); this\._historyReaskTimer = null; try \{ this\._historyAskCancel\?\.\(\); this\._historyReloadCancel\?\.\(\); this\._historyReadyOff\?\.\(\); \} catch \{ \}   \/\/ row B-422c: a closed view/.test(cv)],
     ['r1243: a view-only window keeps its own request for the re-ask', /chatView\._viewAttachSpec = viewSpec;/.test(sl) && /this\._viewAttachSpec = spec;/.test(cv)],
     ['the minimap fallback draws nothing from it', /if \(d\.turns\?\.length && !d\.notLoaded\) this\._chatMinimap\.render\(d\.turns\)/.test(cv)],
-    ['/api/subagents\' reason in the page\'s words', /if \(r\?\.reason === 'transcript_reader_restarting'\) \{ this\._sayReaderRestarting\(\); return; \}/.test(cv)],
-    ['a search of it says «try again» (or the storage\'s words), never «No results»', /this\._searchStatus\.textContent = data\.storageHung \? t\("This conversation's file is not answering — trying again at \{time\}\.", \{ time: when \}\) : t\('The transcript reader is restarting — try again in a moment\.'\);/.test(csr)],
-    ['the resume road says the line', /if \(data\.notLoaded\) chatView\._sayHistoryNotLoaded\?\.\(data\.notLoaded, \{ info: \{ storageHung: !!data\.storageHung, retryAt: data\.retryAt \|\| null, retryIn: data\.retryIn \?\? null \} \}\);/.test(sl)],
-    ['the REBUILD alone sets _historyNotLoaded (never an attach that joined it)', /session\._historyNotLoaded = notLoaded \|\| null;/.test(fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8')) && !/session\._historyNotLoaded = /.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'))],   // stale-pins: kept (the absence check: ws-handler writes it no more)
+    ['/api/subagents\' reason in the page\'s words — the reader gone\'s with no time promised', /if \(r\?\.reason === 'transcript_reader_restarting'\) \{ this\._sayReaderRestarting\(\{ readerGone: !!r\.readerGone \}\); return; \}/.test(cv) && /: t\('The transcript reader is not running\.'\)\);/.test(cv)],
+    ['a VIEW hears its own history-ready (the hub notes the view waiting at its view attach and its ask, and tells it at the readable)', /this\._historyReadyOff = this\.ws\.onGlobal\(\(m\) => \{ if \(m && m\.type === 'history-ready' && m\.sessionId === vid && !this\._disposed\) this\._onHistoryReady\(\); \}\);/.test(cv) && /for \(const \[vws, vsid\] of _viewWaiters\.take\(historyId, \(w\) => w\.readyState === WS_OPEN\)\)/.test(ws) && /if \(sm\.notLoaded\) _viewWaiters\.note\(SSH\.getHistorySessionId\(\{ backendSessionId, claudeSessionId: data\.claudeSessionId \|\| backendSessionId \}\), ws, data\.sessionId\);/.test(ws) && /if \(viewHid\) _viewWaiters\.note\(viewHid, ws, data\.sessionId\);/.test(askCase)],
+    ['the hub\'s ask: a newer ask of the same window supersedes an older one before it reads; a read that failed is never «ready»', /await readOffLoop\(sm, \{ label: `history-ask \$\{data\.sessionId\}`, wanted: current \}\);/.test(askCase) && /if \(!parsed\) \{ reply\(\{ type: 'history-not-loaded', historyNotLoaded: 'transcript_reader_restarting', historyNotLoadedInfo: null \}\); break; \}/.test(askCase)],
+    ['a search of it says the door\'s words (the storage\'s, the reader gone\'s, the reader restarting\'s), never «No results»', /this\._searchStatus\.textContent = data\.storageHung \? t\("This conversation's file is not answering — trying again at \{time\}\.", \{ time: when \}\)\n\s+: data\.readerGone \? t\('The transcript reader is not running — trying again at \{time\}\.', \{ time: when \}\)/.test(csr)],
+    ['the resume road says the line', /if \(data\.notLoaded\) chatView\._sayHistoryNotLoaded\?\.\(data\.notLoaded, \{ info: \{ storageHung: !!data\.storageHung, readerGone: !!data\.readerGone, retryAt: data\.retryAt \|\| null, retryIn: data\.retryIn \?\? null \} \}\);/.test(sl)],
+    ['the REBUILD alone sets _historyNotLoaded (never an attach that joined it)', /session\._historyNotLoaded = notLoaded \|\| null;/.test(fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8')) && !/session\._historyNotLoaded = /.test(ws)],   // stale-pins: kept (the absence check: ws-handler writes it no more)
   ];
   for (const [name, held] of pins) ok(held, `the page: ${name}`);
 }

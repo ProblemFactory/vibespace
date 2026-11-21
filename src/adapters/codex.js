@@ -716,15 +716,23 @@ const isStorageHung = (e, fp, { ownCall = false } = {}) => !!e && (e.code === 'p
 function readerRefusal(e, fp = null, opts = {}) {
   return Object.assign(new Error(READER_RESTARTING), { code: 'transcript_reader_restarting', status: 503, why: (e && (e.code || e.message)) || 'no transcript pool on this process', storageHung: isStorageHung(e, fp, opts) });
 }
+/** row B-422c (r1243 / r1461): the transcript reader's refusal by name as the HTTP answer — PURE → { status, retryAfter, body }: which
+ *  door refused (storageHung: the storage's own words; readerGone: the pool gone — no «moment»), its next try as the hub's instant
+ *  (retryAt) and as a delay (retryIn: a page's clock is not the hub's); Retry-After in whole seconds, never under 2 */
+function readerRefusedAnswer(e, now = Date.now()) {
+  const at = Number(e && e.retryAt) || 0;
+  return { status: 503, retryAfter: String(Math.max(2, Math.ceil((at - now) / 1000))),
+    body: { error: e && e.message, code: e && e.code, storageHung: !!(e && e.storageHung), readerGone: !!(e && e.readerGone), retryAt: at || null, retryIn: at ? Math.max(0, at - now) : null } };
+}
 /** one op through the transcript pool → its answer; a pool failure ⇒ the refusal by name, never a read on this loop */
 async function poolRead(op, payload, opts) {
   const fp = payload && payload.fp;   // unit 2: the FILE's state — a refusal notes it, any answer for it (a result, or the op's own error) forgives it
   const pool = _transcriptPoolGet();
-  if (!pool) { const r = readerRefusal(null); notePoolRefusing(r); noteFileRefusal(fp, r, { history: HISTORY_OPS.has(op) }); r.retryAt = nextReadAt(fp); throw r; }
+  if (!pool) { const r = readerRefusal(null); notePoolRefusing(r); noteFileRefusal(fp, r, { history: HISTORY_OPS.has(op) }); r.retryAt = nextReadAt(fp); r.readerGone = poolGone(); throw r; }
   let out;
   try { out = await pool.call(op, payload, opts); }
   catch (e) {
-    if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e, fp); notePoolRefusing(e); noteFileRefusal(fp, r, { history: HISTORY_OPS.has(op) }); r.retryAt = nextReadAt(fp); throw r; }   // its next try, after the record took the refusal
+    if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e, fp); notePoolRefusing(e); noteFileRefusal(fp, r, { history: HISTORY_OPS.has(op) }); r.retryAt = nextReadAt(fp); r.readerGone = poolGone(); throw r; }   // its next try, after the record took the refusal
     poolAnswered(fp, op);   // the op's own error: a worker ran it — the pool answered
     throw e;
   }
@@ -878,6 +886,7 @@ const STORAGE_RETRY_MAX_MS = 8 * 60000;
 function storageRetryDue(fp) {
   const r = fp && _fileRefusals.get(fp);
   if (!r || !(r.storage || r.ownDeadline)) return true;   // the door or the pool's memory alone: the pool's door answers at once
+  if (poolGone() && _storageParked) return false;   // the pool gone: the ONE storage retry the main process may hold is parked — this one cannot run; its gap is not spent
   const now = Date.now();
   if (now < (r.retryAt || 0)) return false;
   r.retryGap = Math.min(STORAGE_RETRY_MAX_MS, (r.retryGap || STORAGE_RETRY_MS) * 2);   // the next retry waits twice as long (30 s, 1 min, 2 … ≤ 8 min)
@@ -898,6 +907,11 @@ function poolRefusing() { return _transcriptPool === false || poolGone() || (!!_
 const _fileRefusals = new Map();   // fp → { firstAt, lastAt, count, storage, ownDeadline, why } — the pool's refusals of ONE file, standing
 const _slicedSaid = new Set();
 let _slicedChain = Promise.resolve(), _slicedParked = 0;
+// r1461 (1): the STORAGE RETRY's own line and its own parked count — a read parked by one conversation's storage retry (the pool gone,
+// its mount dead) never refuses or holds another file's read, and at most ONE storage retry is parked at a time however many
+// conversations sit on the dead mount (the main process holds at most two libuv threads in dead files: one of each)
+let _storageChain = Promise.resolve(), _storageParked = 0;
+const _parkedFiles = new Set();   // the files a main-process read is parked in: never a second read sent into one (plain or storage retry)
 const _slicedJoin = new Map();     // kind:fp → the read in flight (a second ask of the same file joins it)
 function noteFileRefusal(fp, refusal, { history = false } = {}) {
   if (!fp) return null;
@@ -941,6 +955,7 @@ function fileStorageHung(fp) {
 function slicedRoadFor(fp, { storageRetry = false } = {}) {
   const rec = fp && _fileRefusals.get(fp);
   if (!rec) return { ok: false, why: 'no refusal of it stands' };
+  if (_parkedFiles.has(fp)) return { ok: false, why: 'its own read on the main process is still parked — never a second one into the same file' };   // r1461's read: a storage retry into the file a plain read is parked in
   // `storageRetry`: the storage's DUE retry (storageRetryDue claimed it) while the pool refuses every call — the pool cannot retry it,
   // so the main process does, under the same guard (one at a time, none while one is parked, the read's own deadline)
   if (!storageRetry && fileStorageHung(fp)) return { ok: false, why: 'its storage hung (a deadline, a hung path or a blocked mount) — never tried here' };
@@ -949,12 +964,13 @@ function slicedRoadFor(fp, { storageRetry = false } = {}) {
   let mp = false; try { mp = require('../mount-door').blocked(fp); } catch { mp = false; }
   if (mp) return { ok: false, why: 'its mount is blocked' };
   if (_transcriptPool && typeof _transcriptPool._hungOf === 'function' && _transcriptPool._hungOf({ fp }, 'jsonlTail', 0)) return { ok: false, why: 'the transcript pool remembers it hung' };   // patience 0: any entry AT OR ABOVE it refuses (every transcript entry is one)
-  if (_slicedParked) return { ok: false, why: 'a read on the main process is still parked in a file that never answered' };
+  if (!storageRetry && _slicedParked) return { ok: false, why: 'a read on the main process is still parked in a file that never answered' };
+  if (storageRetry && _storageParked) return { ok: false, why: 'a storage retry on the main process is still parked in a file that never answered — one at a time' };
   return { ok: true, why: `the transcript reader refused it for ${Math.round(stood / 1000)} s (${rec.count} refusals: ${rec.why})` };
 }
 const STORAGE_FAIL_CODES = new Set(['EIO', 'ETIMEDOUT', 'ESTALE', 'EHOSTDOWN', 'EHOSTUNREACH', 'ENOTCONN', 'ECONNRESET', 'ECONNABORTED', 'EREMOTEIO', 'ENXIO']);
 /** the file's bounded tail bytes, every call async, under ONE deadline (a deadline ⇒ the storage's, `storageHung`) */
-function _readTailBytesAsync(fp) {
+function _readTailBytesAsync(fp, { storageRetry = false } = {}) {
   let parked = false, timer = null;
   const work = (async () => {
     const fh = await fs.promises.open(fp, 'r');
@@ -973,8 +989,8 @@ function _readTailBytesAsync(fp) {
   // a late reply that is the FILE's answer — its bytes, or the file's own error (a FIFO's ESPIPE, a gone file, a folder) — is the storage
   // answering; an I/O failure after the hang (EIO, ETIMEDOUT, ESTALE … a soft mount giving up) is the storage FAILING: the mark stays
   const answered = () => { if (parked) { const r = _fileRefusals.get(fp); if (r) r.ownDeadline = false; } };
-  work.then(answered, (e) => { if (!STORAGE_FAIL_CODES.has(e && e.code)) answered(); }).finally(() => { if (parked) _slicedParked--; });   // a parked read that answers late frees its place — and the file answered: its own-deadline mark ends
-  const deadline = new Promise((_, rej) => { timer = setTimeout(() => { parked = true; _slicedParked++; rej(Object.assign(new Error(`no answer in ${SLICED_READ_DEADLINE_MS / 1000} s — the storage hangs`), { code: 'sliced_read_deadline', storageHung: true })); }, SLICED_READ_DEADLINE_MS); });
+  work.then(answered, (e) => { if (!STORAGE_FAIL_CODES.has(e && e.code)) answered(); }).finally(() => { if (parked) { _parkedFiles.delete(fp); if (storageRetry) _storageParked--; else _slicedParked--; } });   // a parked read that answers late frees its place — and the file answered: its own-deadline mark ends
+  const deadline = new Promise((_, rej) => { timer = setTimeout(() => { parked = true; _parkedFiles.add(fp); if (storageRetry) _storageParked++; else _slicedParked++; rej(Object.assign(new Error(`no answer in ${SLICED_READ_DEADLINE_MS / 1000} s — the storage hangs`), { code: 'sliced_read_deadline', storageHung: true })); }, SLICED_READ_DEADLINE_MS); });
   return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
 }
 /** the line parse in slices: SLICE_LINES lines at a time until SLICE_MS, then the loop's turn */
@@ -1003,13 +1019,18 @@ function _slicedTurn(kind, fp, read, { storageRetry = false } = {}) {
       return out;
     }
     catch (e) {
-      if (e && (e.storageHung || e.code === 'sliced_read_deadline')) (_fileRefusals.get(fp) || noteFileRefusal(fp, { why: e.message }, { history: true })).ownDeadline = true;   // a record evicted meanwhile is made again (a history read's)
+      if (e && (e.storageHung || e.code === 'sliced_read_deadline')) {   // our own read's deadline: the storage's for the record's life — and its retry waits a GAP (r1461's read: with no retryAt it was due at once, and went into the file its read is parked in)
+        const rec = _fileRefusals.get(fp) || noteFileRefusal(fp, { why: e.message }, { history: true });
+        rec.ownDeadline = true;
+        if (!(rec.retryAt > Date.now())) { rec.retryGap = rec.retryGap || STORAGE_RETRY_MS; rec.retryAt = Date.now() + rec.retryGap; }
+      }   // a record evicted meanwhile is made again (a history read's)
       sayOnce('failed:' + fp, `[transcript] ${path.basename(fp)}: the main process's read of its history failed (${(e && e.message) || e}) — «not loaded» (row B-422c)`);
       throw e;
     }
   };
-  const turn = _slicedChain.then(run, run);
-  _slicedChain = turn.then(() => { }, () => { });
+  // a storage retry takes ITS OWN line (r1461 (1)): one of them at a time, never ahead of nor behind another file's read
+  const turn = (storageRetry ? _storageChain : _slicedChain).then(run, run);
+  if (storageRetry) _storageChain = turn.then(() => { }, () => { }); else _slicedChain = turn.then(() => { }, () => { });
   _slicedJoin.set(key, turn);
   turn.then(() => _slicedJoin.delete(key), () => _slicedJoin.delete(key));
   return turn;
@@ -1018,7 +1039,7 @@ function _slicedTurn(kind, fp, read, { storageRetry = false } = {}) {
 function readJsonlTailSliced(fp, { dropSubagent = false, storageRetry = false } = {}) {
   return _slicedTurn('tail' + (dropSubagent ? '-d' : ''), fp, async () => {
     if (isZstPath(fp)) throw Object.assign(new Error('a compressed rollout — only the worker decompresses it'), { code: 'sliced_zst' });
-    const { stat, size, lower, from, raw } = await _readTailBytesAsync(fp);
+    const { stat, size, lower, from, raw } = await _readTailBytesAsync(fp, { storageRetry });
     let start = from, buf = raw, incr = true;
     if (lower >= 0) { const nl = raw.indexOf(10); if (nl === -1) incr = false; else { buf = raw.subarray(nl + 1); start = from + nl + 1; } }
     const got = await _stepSliced(_jsonlLineStepper(buf, start, !!dropSubagent));
@@ -1039,7 +1060,7 @@ function readJsonlTailSliced(fp, { dropSubagent = false, storageRetry = false } 
 function readCodexRolloutSliced(fp, { storageRetry = false } = {}) {
   return _slicedTurn('rollout', fp, async () => {
     if (isZstPath(fp)) throw Object.assign(new Error('a compressed rollout — only the worker decompresses it'), { code: 'sliced_zst' });
-    const { lower, raw } = await _readTailBytesAsync(fp);
+    const { lower, raw } = await _readTailBytesAsync(fp, { storageRetry });
     let buf = raw;
     if (lower >= 0) { const nl = raw.indexOf(10); if (nl !== -1) buf = raw.subarray(nl + 1); }
     const got = await _stepSliced(_jsonlLineStepper(buf, 0, false));
@@ -1054,14 +1075,14 @@ function readCodexRolloutSliced(fp, { storageRetry = false } = {}) {
 function nextReadAt(fp) {
   const now = Date.now(), floor = now + 2000;
   const r = fp && _fileRefusals.get(fp);
-  if (fileStorageHung(fp)) return Math.max(floor, (r && r.retryAt) || now + STORAGE_RETRY_MS);
+  if (fileStorageHung(fp)) return Math.max(floor, (r && r.retryAt) || now + STORAGE_RETRY_MS, poolGone() && _storageParked ? now + 60000 : 0);   // the storage retry's one place held: not before a minute
   if (r && r.firstAt + SLICED_AFTER_MS > now) return Math.max(floor, r.firstAt + SLICED_AFTER_MS + 250);
   if (_slicedParked || (fp && isZstPath(fp))) return now + 60000;
   return floor;
 }
 /** row B-422c unit 2's legs: the stated time and the read's deadline (ms; null = the product's), and the file records' state */
 function _setSlicedForTest({ afterMs = null, deadlineMs = null, standGapMs = null, storageRetryMs = null } = {}) { SLICED_AFTER_MS = afterMs == null ? 10000 : afterMs; SLICED_READ_DEADLINE_MS = deadlineMs == null ? 60000 : deadlineMs; STAND_GAP_MS = standGapMs == null ? 120000 : standGapMs; STORAGE_RETRY_MS = storageRetryMs == null ? 30000 : storageRetryMs; }
-const slicedState = () => ({ files: _fileRefusals.size, parked: _slicedParked, said: _slicedSaid.size });
+const slicedState = () => ({ files: _fileRefusals.size, parked: _slicedParked, storageParked: _storageParked, parkedFiles: _parkedFiles.size, said: _slicedSaid.size });
 
 /** Generic off-loop call (S3: codex discovery ops) → the worker's result. Row B-422c: `whenRefused(refusal)` is what a POOL
  *  FAILURE answers — a kept answer or null, NEVER a read on this loop (the release ran an inline walk here: the codex sessions
@@ -1809,7 +1830,7 @@ class CodexAdapter extends BackendAdapter {
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
   _setTranscriptPoolForTest, // row B-422c's legs
-  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, fileRefused, poolRefusing, poolGone, storageRetryDue, nextReadAt, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
+  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, readerRefusedAnswer, fileStorageHung, fileRefused, poolRefusing, poolGone, storageRetryDue, nextReadAt, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,

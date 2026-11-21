@@ -1,5 +1,6 @@
 import { t } from './i18n.js';
 import { clockOf } from './page-time.js';   // row B-422c: the page's own clock (its language, its zone)
+import { retryAtOf } from './history-reask.js';   // row B-422c: the hub's next try counted on this page's clock
 import { metric } from './telemetry-client.js';
 import { enterSubmits } from './chat-enter-keys.js';
 
@@ -166,9 +167,10 @@ class ChatSearch {
       // row B-422c: a history the transcript reader refused cannot be searched — said, never «No results»
       if (data && data.notLoaded) {   // r1243 item 1: in the words of the door that refused
         if (!stale()) {
-          const d = data.retryIn != null ? Number(data.retryIn) : NaN;   // the delay from the hub's now, counted on this page's clock
-          const when = clockOf(Number.isFinite(d) ? Date.now() + Math.max(0, d) : (Number(data.retryAt) || Date.now()), { seconds: true });
-          this._searchStatus.textContent = data.storageHung ? t("This conversation's file is not answering — trying again at {time}.", { time: when }) : t('The transcript reader is restarting — try again in a moment.');
+          const when = clockOf(retryAtOf(data, Date.now()) || Date.now(), { seconds: true });   // the hub's next try on this page's clock (its delay)
+          this._searchStatus.textContent = data.storageHung ? t("This conversation's file is not answering — trying again at {time}.", { time: when })
+            : data.readerGone ? t('The transcript reader is not running — trying again at {time}.', { time: when })   // r1461 (1): the pool gone — no «moment»
+              : t('The transcript reader is restarting — try again in a moment.');
         }
         return;
       }

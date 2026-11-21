@@ -15110,4 +15110,7 @@ export default {
   "The history is not loaded yet, or not all of it — the transcript reader is restarting. It fills in here by itself in a moment.": "履歴はまだ読み込まれていないか、一部だけです。記録の読み取りが再起動中です。少し後にここで自動的に補われます。",
   "This conversation's file is not answering, so its history is not loaded yet (or not all of it). Trying again at {time} — it fills in here by itself.": "この会話のファイルが応答しないため、履歴はまだ読み込まれていないか、一部だけです。{time} に再試行し、ここで自動的に補われます。",
   "This conversation's file is not answering — trying again at {time}.": "この会話のファイルが応答していません。{time} に再試行します。",
+  "The history is not loaded yet, or not all of it — the transcript reader is not running. Trying again at {time}.": "履歴はまだ読み込まれていないか、一部だけです。記録の読み取りが動いていません。{time} に再試行します。",
+  "The transcript reader is not running — trying again at {time}.": "記録の読み取りが動いていません。{time} に再試行します。",
+  "The transcript reader is not running.": "記録の読み取りが動いていません。",
 };

@@ -273,6 +273,23 @@ async function warmTaskStateFor(session) {
 // the hub's; the page counts from its own now when the frame lands
 const withRetryIn = (info) => (info ? { ...info, retryIn: Number(info.retryAt) ? Math.max(0, info.retryAt - Date.now()) : null } : null);
 let _historyReadableOff = null;   // the one listener of this process (a later registration — a test's next scene — replaces it)
+// r1461 (2): the VIEW windows waiting on a history (a stopped conversation, View History — not in activeSessions): history id → the
+// sockets and the view ids they asked under; told once at that history's readable, then forgotten. Bounded; a closed socket skipped
+function createViewWaiters({ max = 4096 } = {}) {
+  const byId = new Map();
+  return {
+    note(historyId, ws, sid) {
+      if (!historyId || !ws || !sid) return;
+      let m = byId.get(historyId);
+      if (!m) { m = new Map(); byId.set(historyId, m); while (byId.size > max) byId.delete(byId.keys().next().value); }
+      let ids = m.get(ws); if (!ids) { ids = new Set(); m.set(ws, ids); } ids.add(sid);
+    },
+    take(historyId, open) { const m = byId.get(historyId); byId.delete(historyId); const out = []; for (const [ws, ids] of m || []) if (open(ws)) for (const sid of ids) out.push([ws, sid]); return out; },
+    size: () => byId.size,
+  };
+}
+const _viewWaiters = createViewWaiters();
+const _askSeq = new WeakMap();   // ws → Map(asked id → the newest ask's number): an older ask of the same window is dropped before it reads
 function registerWsHandler(wss, ctx) {
   const missing = WS_CTX_CONTRACT.filter((k) => !(k in ctx));
   if (missing.length) throw new Error('[ws-handler] ctx contract violated — missing: ' + missing.join(', '));
@@ -292,13 +309,15 @@ function registerWsHandler(wss, ctx) {
 
   // ROW B-422c (主开发 r1243 item 2): A PAGE TOLD «NOT LOADED» IS NOTIFIED when the session store next loads that history (its one
   // entry point, src/session-store.js onHistoryReadable): every live conversation of that transcript whose history is not loaded
-  // gets `history-ready` — its page asks again by itself (a re-attach), never a re-open
+  // gets `history-ready` — its page asks again by itself (a re-attach), never a re-open. r1461 (2): matched by the id the marks are
+  // kept under (the parse's — getHistorySessionId: a fork or a resumed parent reads by its backend id), never by claudeSessionId alone
   try { _historyReadableOff?.(); } catch { }
-  _historyReadableOff = require('./session-store').onHistoryReadable((claudeSessionId) => {
-    for (const [sid, s] of activeSessions) {
-      if (!s || s.claudeSessionId !== claudeSessionId || s._historyLoaded || !(s.clients instanceof Map) || !s.clients.size) continue;
+  const SSH = require('./session-store');
+  _historyReadableOff = SSH.onHistoryReadable((historyId) => {
+    for (const [sid, s] of SSH.historyWaitersOf(activeSessions, historyId)) {
       try { broadcastToSession(s, sid, { type: 'history-ready', sessionId: sid }); } catch (e) { console.warn('[ws] history-ready not sent:', e && e.message); }
     }
+    for (const [vws, vsid] of _viewWaiters.take(historyId, (w) => w.readyState === WS_OPEN)) { try { vws.send(JSON.stringify({ type: 'history-ready', sessionId: vsid })); } catch { } }   // the views waiting on it
   });
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -1503,6 +1522,41 @@ function registerWsHandler(wss, ctx) {
         }
 
         case 'view-close': { try { require('./session-store').dropJsonlView(ws, data.sessionId); } catch { } break; } // B-360d (A) r1374: a history window closed — its tail's hold goes with it
+        // ROW B-422c (主开发 r1461 (3)): THE PAGE'S RE-ASK OF A HISTORY ANSWERED «NOT LOADED», CHEAP. The reader reads again — the warm,
+        // then the read (off the loop; a refused file answered from memory) — and NOTHING is rebuilt: still «not loaded» ⇒ the door and
+        // the next try (`history-not-loaded`: the page changes only the time in its words); loaded ⇒ `history-ready` to THIS page, which
+        // then re-attaches (a live window) or re-sends its view. A live session: its own clients only; a view: by its own ids.
+        case 'history-ask': {
+          const live = data.sessionId ? activeSessions.get(data.sessionId) : null;
+          const reply = (o) => { try { ws.send(JSON.stringify({ sessionId: data.sessionId, ...o })); } catch { } };
+          let seqs = _askSeq.get(ws); if (!seqs) { seqs = new Map(); _askSeq.set(ws, seqs); }
+          const askNo = (seqs.get(data.sessionId) || 0) + 1; seqs.set(data.sessionId, askNo);
+          const current = () => ws.readyState === WS_OPEN && seqs.get(data.sessionId) === askNo;   // the page's newer ask of the same window supersedes this one (it re-asks when an answer is late)
+          let viewHid = null;
+          let sm = null;
+          if (live) {
+            if (!(live.clients instanceof Map && live.clients.has(ws))) break;
+            if (live._historyLoaded) { reply({ type: 'history-ready' }); break; }
+            const hid = SSH.getHistorySessionId(live);   // the id its marks and its parse use
+            try { const warm = harnessOf(live.backend || 'claude').store?.warmTranscript; if (warm && hid) await warm(hid, live.cwd, { remote: !!live.host, session: live }); } catch { }
+            sm = createSessionMessages(live, data.sessionId);
+          } else if (data.viewOnly && (data.backendSessionId || data.claudeSessionId)) {
+            const bsid = data.backendSessionId || data.claudeSessionId;
+            try { const warm = harnessOf(data.backend || 'claude').store?.warmTranscript; if (warm) await warm(bsid, data.cwd || '', { remote: !!data.host }); } catch { }
+            sm = createSessionMessages({ backend: data.backend || 'claude', backendSessionId: bsid, claudeSessionId: data.claudeSessionId || bsid, cwd: data.cwd || '', buffer: '' });
+            viewHid = SSH.getHistorySessionId({ backendSessionId: bsid, claudeSessionId: data.claudeSessionId || bsid });
+          } else break;
+          await readOffLoop(sm, { label: `history-ask ${data.sessionId}`, wanted: current });
+          if (!current()) break;
+          let parsed = true;
+          try { sm.raw(); } catch (e) { parsed = false; console.warn(`[ws] history-ask ${data.sessionId}: its read failed — ${(e && e.message) || e}`); }   // a reader with no off-loop read (claude's): its parse — the warm's copy, or the refusal from memory
+          if (!parsed) { reply({ type: 'history-not-loaded', historyNotLoaded: 'transcript_reader_restarting', historyNotLoadedInfo: null }); break; }   // never «ready» for a read that failed
+          if (!sm.notLoaded) { reply({ type: 'history-ready' }); break; }
+          if (viewHid) _viewWaiters.note(viewHid, ws, data.sessionId);   // a VIEW waiting on it: told at its readable (r1461 (2))
+          reply({ type: 'history-not-loaded', historyNotLoaded: sm.notLoaded, historyNotLoadedInfo: withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone }) });
+          break;
+        }
+
         case 'attach': {
           // PROOF-OF-LIFE ACK (2.234.1, userL mass "session died" incident):
           // the full attach reply can lawfully take >20s (degraded event loop,
@@ -1699,7 +1753,7 @@ function registerWsHandler(wss, ctx) {
                   // transcript worker, the merge in slices — measured 380–880 ms of one sync hold per 120 MB rollout); raw() then reads it.
                   // L3: its turn in the hub's line — a person's window first, the first attach of a bulk resume's conversation after them
                   await readOffLoop(sm, { bulk: bulkRead, label: data.sessionId });
-                  await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null, fromStart: sm.fromStart === true && !session.host, notLoaded: sm.notLoaded || null, notLoadedInfo: sm.notLoaded ? { storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null } : null }); // B-437e: a paired machine's copy may be a stale fetch: never whole on a rebuild // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
+                  await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null, fromStart: sm.fromStart === true && !session.host, notLoaded: sm.notLoaded || null, notLoadedInfo: sm.notLoaded ? { storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone } : null }); // B-437e: a paired machine's copy may be a stale fetch: never whole on a rebuild // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
                 }
                 finally { clearInterval(progressTimer); }
                 // A kill / CLI exit can land during the (now non-blocking)
@@ -2006,8 +2060,9 @@ function registerWsHandler(wss, ctx) {
             const mm = createMessageManager(data.backend || 'claude', data.sessionId || 'view', { threadId: backendSessionId }); // the rendered conversation's id (codex ledger key)
             await require('./transcript-service.js').gatedRead({ host: data.host || null, conv: backendSessionId }, () => convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId }), { artifacts: artifactDeriveOpts({ backend: data.backend || 'claude', cwd: data.cwd || '' }) })); // lane artifacts-model: its deliverable cards, derived at the read // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once); its browser-session cards by time (2026-09-27)
             try { if (typeof mm.endLateAllows === 'function') mm.endLateAllows(false); } catch { }   // B-9ff2's remainder (r1296 (2)): a STOPPED conversation's waiting late Allows — the agent never said
+            if (sm.notLoaded) _viewWaiters.note(SSH.getHistorySessionId({ backendSessionId, claudeSessionId: data.claudeSessionId || backendSessionId }), ws, data.sessionId);   // r1461 (2): this view waits on it — told at its readable
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: data.name || '', cwd: data.cwd || '', mode: 'chat',
-              messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true, historyNotLoaded: sm.notLoaded || null, historyNotLoadedInfo: sm.notLoaded ? withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null }) : null }));   // row B-422c // the slab asked for, as the live attach (perf r1)
+              messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true, historyNotLoaded: sm.notLoaded || null, historyNotLoadedInfo: sm.notLoaded ? withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone }) : null }));   // row B-422c // the slab asked for, as the live attach (perf r1)
             if (ws.readyState === WS_OPEN) for (const [, s] of activeSessions) if (addressableId(s) === backendSessionId) BULK.replied(s);   // B-cd4b r1093, THE DOOR: View History replied the history of the live conversation it names (its own address: a pending fork carrying the id is not it)
           } else {
             // Include sessionId so the requesting ChatView can correlate the
@@ -2209,4 +2264,4 @@ function registerWsHandler(wss, ctx) {
 
 // pickCodexThreadCandidate also serves restoreSessions' id recapture (a
 // restart inside the create-time capture window killed the retry chain)
-module.exports = { registerWsHandler, noConvoRef, pickCodexThreadCandidate, agentEnv, WS_CTX_CONTRACT, isTypedInput };
+module.exports = { createViewWaiters, registerWsHandler, noConvoRef, pickCodexThreadCandidate, agentEnv, WS_CTX_CONTRACT, isTypedInput };
