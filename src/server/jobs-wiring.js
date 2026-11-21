@@ -272,6 +272,13 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       held: jm.heldDigest(),
     });
   });
+  // B-360d unit 3 (the hub profile's rank 9): THE HELD DIGEST ALONE — a chat view's chip seed while the page keeps none yet
+  // (src/lib/jobs-held.js: one ask a page, shared). The same digest every jobs-updated carries; never a job's snapshot (the list
+  // above snapshots and enriches EVERY job on the loop). Before /api/jobs/:id, which would take «held» for an id.
+  app.get('/api/jobs/held', (req, res) => {
+    if (!jm.ready) return res.status(503).json({ error: jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting' });
+    res.json({ held: jm.heldDigest() });
+  });
   // the manager design's piece 7: the rows the person's doors list (the Terminate confirm, the proposal card) — each registered
   // job or schedule the conversation OWNS that can still deliver (a cron's runs ride their parent's row; an ended one-shot
   // delivers nothing more), with its next fire and its STORED grant (PURE src/delivery-wake.js wakeChoiceRows). Read-only.

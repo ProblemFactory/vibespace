@@ -1434,8 +1434,9 @@ class ChatView {
     this.ws.onGlobal(this._handler);
     // seed the held chip once — the digest rides broadcasts, and a window
     // opened while notifications are already held would otherwise wait for
-    // the next job event to learn about them
-    fetchJson('/api/jobs').then((r) => { if (r && r.held) this._applyJobsHeld(r.held); }).catch(() => {});
+    // the next job event to learn about them. B-360d unit 3 (rank 9): from the digest the app keeps (src/lib/jobs-held.js) —
+    // ONE small ask a page while none is kept, never the whole jobs list per view
+    (this.app && this.app.jobsHeld ? this.app.jobsHeld.seed() : fetchJson('/api/jobs/held').then((r) => (r && r.held) || null)).then((h) => { if (h) this._applyJobsHeld(h); }).catch(() => {});
 
     // Connection state: freeze on disconnect, re-attach + sync on reconnect
     this._disconnected = false;

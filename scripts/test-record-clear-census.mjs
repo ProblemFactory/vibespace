@@ -380,6 +380,7 @@ const ROUTES = {
   'GET /api/jobs': 'reads',
   'POST /api/jobs': 'echo',
   'GET /api/jobs/:id': 'reads',
+  'GET /api/jobs/held': 'meta',                       // B-360d unit 3: the held digest alone — counts and reason codes by conversation, never a record's words
   'POST /api/jobs/seen': 'meta',
   'POST /api/jobs/:id/:act': 'echo',
   'GET /api/jobs-escapes': 'meta',
@@ -1342,7 +1343,8 @@ const ORDER = [
   ['src/lib/jobs-panel.js', 'const r = await fetchJson(`/api/jobs/${jobId}`);', /^[^\n]*\n\s*if \(seq !== renderSeq\) return;/, 'latest', 'the Job input window: the latest render paints (r5 ①)'],
   ['src/lib/jobs-panel.js', "fetchJson('/api/jobs?archived=1').then((r) => {", /^[^\n]*\n\s*if \(!box\.isConnected\) return;/, 'own-container', 'the archived list: its box is made by the render that fetched it, and every render replaces the list'],
   ['src/lib/jobs-panel.js', 'const r = await fetchJson(`/api/jobs/${j.id}?tail=60`);', null, 'own-container', 'an expanded card\'s detail: the answer paints only into the detail element the same call made, and every list render (a clear\'s jobs-updated included) replaces the card'],
-  ['src/lib/chat-view.js', "fetchJson('/api/jobs').then((r) => { if (r && r.held) this._applyJobsHeld(r.held); })", null, 'counts', 'the held-notifications chip: the held digest\'s counts and reason codes — no job words'],
+  ['src/lib/chat-view.js', "fetchJson('/api/jobs/held').then((r) => (r && r.held) || null)).then((h) => { if (h) this._applyJobsHeld(h); })", null, 'counts', 'the held-notifications chip (B-360d unit 3: from the app\'s kept digest; this ask only where no app keeps one): the held digest\'s counts and reason codes — no job words'],
+  ['src/lib/jobs-held.js', "const p = Promise.resolve().then(() => fetchJson('/api/jobs/held')).then((r) => {", null, 'counts', 'B-360d unit 3: the page\'s ONE ask for the held digest while none is kept — the digest\'s counts and reason codes, no job words'],
   ['src/lib/sidebar-rail.js', "const jb = await fetchJson('/api/jobs').catch(() => null);", null, 'counts', 'the rail badge: badgeCounts + the held digest\'s counts and reason codes — no job words'],
   ['src/lib/sidebar-rail.js', "fetchJson('/api/channel-groups').then((r) => { if (r && Array.isArray(r.groups)) this._railChanBadge(", null, 'counts', 'the rail badge: the groups\' unread counts — no message words'],
   ['src/lib/channel-group-dialogs.js', "const r = await fetchJson('/api/channel-groups/roster');", null, 'no-words', 'the invite roster: live sessions (ids + their own names) — no group message'],

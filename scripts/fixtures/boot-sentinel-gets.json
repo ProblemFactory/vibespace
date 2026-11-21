@@ -247,6 +247,7 @@
   "/api/jobs-escapes",
   "/api/jobs-wake-grants",
   "/api/jobs/:id",
+  "/api/jobs/held",
   "/api/layout-history",
   "/api/layouts",
   "/api/loop-holds",

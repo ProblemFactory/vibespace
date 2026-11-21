@@ -23,6 +23,7 @@ import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
+import { createHeldKeeper } from './jobs-held.js';   // B-360d unit 3: the held digest, kept once a page
 import { heldWordsOf, anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
 import { lateFocus } from './late-focus.js'; // B-c87d: a go-to that lands after an await asks THE door (the keyboard stays where the person last put it)
 import { askTails, withTails, credentialDoorWords } from './account-tails.js'; // B-ba7d: the accounts list carries no key tail — the person's read lays it on
@@ -384,6 +385,11 @@ class App {
       else if (msg.type === 'store-unsaved') noteStoreUnsaved(msg);   // B-225b's second half: a write the storage refused — kept, written again
       else if (msg.type === 'store-saved') noteStoreSaved(msg.file);
     });
+    // B-360d unit 3 (rank 9): THE HELD DIGEST, KEPT ONCE A PAGE — every jobs-updated carries it; each chat view seeds its chip
+    // from here (one GET /api/jobs/held a page while none is kept), never from the whole jobs list
+    this.jobsHeld = createHeldKeeper({ fetchJson });
+    this.ws.onGlobal((msg) => this.jobsHeld.note(msg));
+    this.ws.onStateChange((connected) => { if (!connected) this.jobsHeld.drop(); });   // a frame may be missed while away — the next seed asks
 
     // Sync settings from other clients via WebSocket
     this.ws.onGlobal((msg) => {
