@@ -50,14 +50,15 @@ const tlsDir = path.join(wt, 'tls-pair'); fs.mkdirSync(tlsDir, { recursive: true
 execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', path.join(tlsDir, 'key.pem'), '-out', path.join(tlsDir, 'cert.pem'), '-days', '2', '-subj', '/CN=localhost'], { stdio: 'ignore' });
 const hubEnv = (home) => ({ PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`, HOME: home, CLAUDE_CMD: stub, VIBESPACE_SKIP_AGENT_HOOKS: '1', VS_NO_REAL_CLI: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1', HOST: '127.0.0.1',
   VIBESPACE_TLS_CERT: path.join(tlsDir, 'cert.pem'), VIBESPACE_TLS_KEY: path.join(tlsDir, 'key.pem') });
-const link = path.join(path.dirname(wt), `vs-pair-${process.pid}.sock`);
+const linkDir = scratch('iface-pair-link'); fs.mkdirSync(linkDir, { recursive: true, mode: 0o700 });   // THE LINK'S FOLDER is this account's alone (r1124 2): the interface refuses /tmp itself, which every account may write
+const link = path.join(linkDir, 'link.sock');
 const kids = [], outs = new Map();
 const keep = (name, child) => { kids.push(child); outs.set(name, ''); for (const s of [child.stdout, child.stderr]) s && s.on('data', (b) => outs.set(name, outs.get(name) + b)); return child; };
 const cleanup = () => {
   for (const k of kids) { try { k.kill('SIGKILL'); } catch { } }
   for (const r of [wt, wtPlain, fakeHome, plainHome]) { try { endRootedProcesses(r); } catch { } }
   for (const w of [wt, wtPlain]) { try { execSync(`git worktree remove --force ${w}`, { cwd: repo, stdio: 'ignore' }); } catch { } }
-  for (const d of [fakeHome, plainHome, stub, link]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
+  for (const d of [fakeHome, plainHome, stub, linkDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });

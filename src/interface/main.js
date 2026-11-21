@@ -15,8 +15,12 @@
 // `process.env.HOST || '0.0.0.0'` (one owner of the port: the interface, in the piped form, holds the port the hub would).
 // THE LAST RESORT: an uncaught error is said once (its name and message — never a start line) and the process exits 1;
 // the supervisor starts the next one, and pages reconnect.
+// THE LINK'S FOLDER IS THIS ACCOUNT'S ALONE (主开发 r1124 2; the contract's dated line): who may listen at the link's path
+// is whoever may write its folder, so the interface starts only on a folder this account owns that no other account can
+// write (no group or other write bit) — any other is a bad start, said by name (exit 2), before the path is touched.
 // Once it listens it makes no synchronous disk call (scripts/test-interface-process.mjs holds it as a law, with the graph).
 const net = require('net');
+const path = require('path');
 const fsp = require('fs').promises;
 const { create } = require('./index.js');
 const { START_WORD, openStart, firstLine, whyText } = require('../start-pipe.js');
@@ -24,6 +28,16 @@ const { START_WORD, openStart, firstLine, whyText } = require('../start-pipe.js'
 /** where the interface listens: the hub's own defaults (server.js lines `const PORT = process.env.PORT || 3456;` and
  *  `const HOST = process.env.HOST || '0.0.0.0';` — scripts/test-interface-process.mjs ⑥ reads both) */
 const listenAt = (env = {}) => ({ port: Number(env.PORT || 3456), host: env.HOST || '0.0.0.0' });
+
+/** the link's folder judged → null (this account's alone) | the words of why not. `uid` = this process's account. */
+async function linkFolderWhy(link, uid = typeof process.getuid === 'function' ? process.getuid() : null) {
+  const dir = path.dirname(path.resolve(link));
+  let st; try { st = await fsp.stat(dir); } catch (e) { return `the link's folder ${dir} cannot be read (${(e && e.code) || 'error'})`; }
+  if (!st.isDirectory()) return `the link's folder ${dir} is no folder`;
+  if (uid !== null && st.uid !== uid) return `the link's folder ${dir} belongs to another account (uid ${st.uid}) — it must be this account's alone`;
+  if (st.mode & 0o022) return `the link's folder ${dir} can be written by other accounts (mode ${(st.mode & 0o7777).toString(8)}) — it must be this account's alone`;
+  return null;
+}
 
 /** → { iface, ready: Promise<{ port, link }>, stop() } — `pipe` = a suite's stream handed in AS the start pipe (else the
  *  descriptor VIBESPACE_START_FD names); `exit(code)` ends the process (a suite hands a spy); `startMs` the start line's bound. */
@@ -34,6 +48,8 @@ function main({ pipe = null, env = process.env, exit = (c) => process.exit(c), l
   const ready = new Promise((res, rej) => { readyResolve = res; readyReject = rej; });
   ready.catch(() => { });
   async function start(line) {
+    const folder = await linkFolderWhy(line.link);   // BEFORE the path is touched: another account's folder is never written in
+    if (folder) { const e = new Error(folder); e.badStart = true; throw e; }
     started = { party: line.party, link: line.link };   // the secret of the interface's own start is not kept: it joins no link
     await fsp.rm(line.link, { force: true });          // a stale socket file of a previous start (before listen: off the loop anyway)
     linkServer = net.createServer((s) => { iface.attachLink(s); });
@@ -56,7 +72,7 @@ function main({ pipe = null, env = process.env, exit = (c) => process.exit(c), l
     if (s.why) return ends(whyText(s), 2);
     const m = s.first, input = s.pipe;
     if (!(m && m.op === 'start' && m.party === 'interface' && typeof m.link === 'string')) return ends(whyText({ why: 'no-start' }), 2);
-    start(m).catch((e) => { const why = `the interface could not start (${(e && e.code) || 'error'})`; try { log.error?.(`[interface] ${why} — it ends`); } catch { } readyReject(new Error(why)); stop(1); });   // said BY NAME (the link socket or the port refused)
+    start(m).catch((e) => { if (e && e.badStart) return ends(e.message, 2); const why = `the interface could not start (${(e && e.code) || 'error'})`; try { log.error?.(`[interface] ${why} — it ends`); } catch { } readyReject(new Error(why)); stop(1); });   // said BY NAME (the link socket or the port refused)
     input.on('data', lines);
     input.on('end', () => stop(0));      // END OF FILE: the supervisor is gone
     input.on('error', () => stop(0));
@@ -84,4 +100,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main, listenAt };
+module.exports = { main, listenAt, linkFolderWhy };

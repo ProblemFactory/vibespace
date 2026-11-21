@@ -24,6 +24,7 @@ const { START_LINE_MS, MAX_START_LINE, takeWord, firstLine, whyText } = require(
 const { digestOf } = require('../link-proof.js');   // PURE, crypto only: the digest every join proves with
 
 let claimed = null;   // the boot's start, TAKEN at server.js line 5 (claim): the word, the one line, the pipe CLOSED
+let claimedDecision = null;   // that start JUDGED, once (decide): its parsed line is dropped there (主开发 r1124 1)
 /** THE hub's own end: its normal SIGTERM shutdown (the stores flushed) — ONE site for every end this module makes (§85's row) */
 const endSelf = () => process.kill(process.pid, 'SIGTERM');
 /** A BAD START EXITS WITH ITS OWN STATUS: 2 — never 0 (a stop) nor 1 (a crash), the interface's code for a bad start too;
@@ -92,7 +93,13 @@ function judge(s) {
  *  `ms` the start line's bound (START_LINE_MS) */
 function decide({ env = process.env, pipe = null, ms } = {}) {
   if (pipe) return firstLine(pipe, { ms }).then((s) => { try { pipe.destroy(); } catch { } return judge(s); });
-  return Promise.resolve(judge(env === process.env && claimed ? claimed : takeStart(env, ms)));
+  if (env === process.env && claimed) {
+    // THE PARSED START LINE IS DROPPED ONCE JUDGED: from here the start value is held by the decision alone, and only until
+    // wire() makes its digest — this module keeps no copy of the line (claim() answers { word, fd } after this)
+    if (!claimedDecision) { claimedDecision = judge(claimed); claimed = { word: claimed.word, fd: claimed.fd }; }
+    return Promise.resolve(claimedDecision);
+  }
+  return Promise.resolve(judge(takeStart(env, ms)));
 }
 
 /** A BAD START ENDS AT ONCE, by name (law 3): server.js runs this on decide()'s answer (line 109), so the line and the end
@@ -120,6 +127,11 @@ function certificate(pem) { if (wired) wired.pushCertificate(pem); else earlyPem
 const REJOIN_MS = 30000;
 const REJOIN_FIRST_MS = 50;        // the first re-join try after the link's death
 const REJOIN_STEP_MAX_MS = 2000;   // the longest wait between tries (the wait doubles up to it)
+/** THE LAST TRY'S FLOOR (主开发 r1124 3): a try's answer bound is what is left of REJOIN_MS, never under this — what a real,
+ *  slow start of a new interface meets (its challenge, this hub's proof, its ack). No try STARTS past the bound; the last one
+ *  may run up to this floor past it, so the hub's end comes at most REJOIN_TRY_FLOOR_MS after REJOIN_MS. */
+const REJOIN_TRY_FLOOR_MS = 1000;
+const monoNow = () => performance.now();   // the re-join's clock: a wall-clock step (Date.now) never stretches nor cuts the bound
 
 /** the ONE seam of the plain form: the hub's own listener (B2c deletes it) */
 function plainListen(hub, port, host, cb) { return hub.listen(port, host, cb); }
@@ -131,11 +143,16 @@ function plainListen(hub, port, host, cb) { return hub.listen(port, host, cb); }
 function wire(decision, { hub, server, join = require('./interface-party.js').join, end = endSelf, log = console, rejoinMs = REJOIN_MS } = {}) {
   let record = { form: decision.form, listened: false }, party = null, pendingPem, lastPem;
   const listenOwn = hub.listen;
+  // THE PORT IS DECIDED ONCE (主开发 r1124 4): server.js makes ONE boot call; a second call is refused by name and does nothing
+  // (in the piped form it would join again with no start value left; in the plain form listen on the port twice)
+  let listenCalls = 0;
+  const firstListen = () => { if (++listenCalls === 1) return true; try { log.error?.(`[hub-port] listen called again (call ${listenCalls}) — refused: this hub's port is decided once, at its one boot call`); } catch { } return false; };
   const push = (pem) => { try { party.mux.control(pem ? { op: 'certificate', cert: String(pem.cert), key: String(pem.key) } : { op: 'certificate' }); } catch { } };
   if (decision.form === 'plain') {
-    hub.listen = (port, host, cb) => { record = { form: 'plain', listened: true, port: Number(port) }; return plainListen({ listen: (...a) => listenOwn.apply(hub, a) }, port, host, () => { try { log.log?.(`[hub-port] ${JSON.stringify(record)}`); } catch { } cb && cb(); }); };
+    hub.listen = (port, host, cb) => { if (!firstListen()) return hub; record = { form: 'plain', listened: true, port: Number(port) }; return plainListen({ listen: (...a) => listenOwn.apply(hub, a) }, port, host, () => { try { log.log?.(`[hub-port] ${JSON.stringify(record)}`); } catch { } cb && cb(); }); };
   } else {
     hub.listen = (port, host, cb) => {   // PIPED: the port is the interface's — this hub never listens on it
+      if (!firstListen()) return hub;
       if (!decision.start) { if (!decision.ended) { badStart = true; try { log.error?.(`[hub-port] ${whyText(decision)} — this hub cannot join and ends`); } catch { } end(); } return hub; }   // each bad start BY NAME (never the line), once
       // the start value is held only until its digest is made: every join proves with the digest (src/link-proof.js), and
       // a re-join holds nothing more — the start value is on no link and, from here, in no structure of this module
@@ -144,17 +161,17 @@ function wire(decision, { hub, server, join = require('./interface-party.js').jo
       const onDead = () => {   // the interface's link ended: every channel with it; this hub waits for a NEW interface (r1060)
         party = null;
         try { log.error?.(`[hub-port] the interface's link ended — this hub waits up to ${rejoinMs / 1000} s for a new interface (never its own listener)`); } catch { }
-        const until = Date.now() + rejoinMs; let step = REJOIN_FIRST_MS, tries = 0;
+        const until = monoNow() + rejoinMs; let step = REJOIN_FIRST_MS, tries = 0;
         const attempt = () => {
           tries++;
-          const answerMs = Math.max(REJOIN_FIRST_MS, Math.min(require('./interface-party.js').JOIN_ANSWER_MS, until - Date.now()));   // a try never runs past the bound
+          const answerMs = Math.max(REJOIN_TRY_FLOOR_MS, Math.min(require('./interface-party.js').JOIN_ANSWER_MS, until - monoNow()));   // what is left of the bound, never under the floor
           join({ start, server, onDead, answerMs }).then((p) => {
             party = p;
             try { log.log?.(`[hub-port] a new interface took this hub (try ${tries}) — it goes on: the same process, its vault and conversations kept`); } catch { }
             if (lastPem !== undefined) push(lastPem);   // the new interface has no certificate until this hub pushes it again
           }, (e) => {
             if (e && /auth-fail/.test(e.message)) { try { log.error?.(`[hub-port] the new interface refused this hub (${e.message}) — it ends`); } catch { } end(); return; }   // not this generation: it never tries again
-            if (Date.now() + step > until) { try { log.error?.(`[hub-port] no interface took this hub within ${rejoinMs / 1000} s — this hub ends (never its own listener)`); } catch { } end(); return; }
+            if (monoNow() + step > until) { try { log.error?.(`[hub-port] no interface took this hub within ${rejoinMs / 1000} s — this hub ends (never its own listener)`); } catch { } end(); return; }
             setTimeout(attempt, step); step = Math.min(step * 2, REJOIN_STEP_MAX_MS);
           });
         };
@@ -172,4 +189,4 @@ function wire(decision, { hub, server, join = require('./interface-party.js').jo
   return wired;
 }
 
-module.exports = { claim, decide, endBadStart, exitStatus, EXIT_BAD_START, certificate, wire, plainListen, REJOIN_MS };
+module.exports = { claim, decide, endBadStart, exitStatus, EXIT_BAD_START, certificate, wire, plainListen, REJOIN_MS, REJOIN_TRY_FLOOR_MS };

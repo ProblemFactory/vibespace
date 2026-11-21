@@ -19,6 +19,9 @@
 //   ⑦ THE START NAMES ITS PIPE (主开发 00:02Z, law 1 amended; src/start-pipe.js, shared with the hub): without VIBESPACE_START_FD the
 //     interface reads no descriptor and ends by name (exit 2); a first line that is no interface start, or a silent pipe,
 //     ends by name (exit 2, a bad start's own status — 1 is a start that failed, 0 the supervisor gone) — the silent one inside its bound. (The bound's red control is test-hub-port ⑧'s: one reader.)
+//   ⑧ THE LINK'S FOLDER IS THIS ACCOUNT'S ALONE (主开发 r1124 2): a folder any other account can write (777, the group's 770,
+//     /tmp's own 1777) is a bad start by name (exit 2), and the file at the link's path is never touched; a folder another
+//     account owns is refused too; 700 starts as before. RED CONTROL: the check cut ⇒ it starts on a folder every account can write.
 // in-process; a scratch dir under os.tmpdir().
 import fs from 'node:fs';
 import os from 'node:os';
@@ -199,6 +202,34 @@ console.log('— ⑦ THE START NAMES ITS PIPE: no word ⇒ no descriptor read, i
   await until(() => x3.length, 2000);
   const took = Date.now() - t0;
   ok(x3[0] === 2 && took >= SILENT_MS - 10 && took < 10 * SILENT_MS && l3.some((l) => l.includes('no line on the start pipe within 0.12 s')), `a SILENT start pipe: exit(${x3[0]}) after ${took} ms (the bound 120 ms) «${l3.join(' | ')}»`, { x3, l3 });
+}
+
+console.log('— ⑧ THE LINK\'S FOLDER IS THIS ACCOUNT\'S ALONE: a folder others can write ⇒ a bad start by name (exit 2), its path never touched');
+{
+  const M = require(path.join(REPO, 'src/interface/main.js'));
+  const said = (lines) => ({ log: (l) => lines.push(String(l)), error: (l) => lines.push(String(l)) });
+  let nf = 0;
+  /** main() with its link in a fresh folder of `mode` — a FILE planted at the link's path first, to see it is never touched */
+  async function onFolder(mode, mod = M) {
+    const dir = path.join(T, `folder${++nf}`); fs.mkdirSync(dir); fs.chmodSync(dir, mode);
+    const link = path.join(dir, 'link.sock'); fs.writeFileSync(link, 'what stood here before');
+    const lines = [], exits = [], pipe = new PassThrough();
+    const m = mod.main({ pipe, env: { PORT: '0', HOST: '127.0.0.1' }, exit: (c) => exits.push(c), log: said(lines) });
+    pipe.write(JSON.stringify({ op: 'start', party: 'interface', secret: crypto.randomBytes(32).toString('hex'), link }) + '\n');
+    const up = await m.ready.then(() => true, () => false);
+    let kept = null; try { kept = fs.readFileSync(link, 'utf8'); } catch { }
+    if (up) await m.stop(0); else await until(() => exits.length, 2000);
+    fs.chmodSync(dir, 0o700);
+    return { mode: mode.toString(8), up, exits, lines, kept };
+  }
+  const shut = [await onFolder(0o777), await onFolder(0o770), await onFolder(0o1777)];   // every account; the group; /tmp's own shape
+  ok(shut.every((r) => !r.up && r.exits[0] === 2 && r.kept === 'what stood here before' && r.lines.some((l) => l.includes(`can be written by other accounts (mode ${r.mode})`) && l.includes('it ends'))), `a folder others can write is refused by name, exit 2, before its path is touched: ${shut.map((r) => `${r.mode} → exit ${r.exits[0]}, «${(r.lines[0] || '').slice(0, 70)}…»`).join(' · ')}`, shut);
+  const own = await onFolder(0o700);
+  const other = await M.linkFolderWhy(path.join(T, 'x.sock'), (typeof process.getuid === 'function' ? process.getuid() : 0) + 1);
+  ok(own.up && own.exits[0] === 0 && typeof other === 'string' && other.includes('belongs to another account'), `a folder of this account alone (700) starts as before; one another account owns is refused: «${other}»`, { own, other });
+  const FOLDER = '    if (folder) { const e = new Error(folder); e.badStart = true; throw e; }\n';
+  const open = await onFolder(0o777, compileAt('src/interface/main.js', once('src/interface/main.js', FOLDER).replace(FOLDER, '')));
+  ok(open.up && open.kept !== 'what stood here before', `RED CONTROL — the check cut: it starts on a folder every account can write (up ${open.up}), the file at its path removed`, open);
 }
 
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);

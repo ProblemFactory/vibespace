@@ -7,7 +7,9 @@
 //   ② PLAIN — no start pipe: the hub's own listener is called with (PORT, HOST); the join NEVER; the record says
 //     {form:'plain', listened:true, port}. RED CONTROL: a join planted in the plain form ⇒ it is called.
 //   ③ NO FALLBACK — a piped hub whose link dies, or whose join is refused, ENDS and never opens its own listener.
-//     RED CONTROL: a fallback listen planted on the link's death ⇒ the listener is called.
+//     RED CONTROL: a fallback listen planted on the link's death ⇒ the listener is called. THE LAST TRY'S FLOOR (主开发 r1124
+//     3): each re-join try is given at least REJOIN_TRY_FLOOR_MS to be answered (RED: the release's 50 ms floor ⇒ less). A
+//     SECOND LISTEN CALL is refused by name in both forms (r1124 4; RED: the guard cut ⇒ it joins again).
 //   ④ NO WORD, NO LOOK (主开发 00:02Z, law 1 amended): a hub started without VIBESPACE_START_FD is plain, and a pipe LEFT on
 //     its fd 3 is never looked at and never read (a real child: fd 3 spied, the line still in the pipe after the decision).
 //     RED CONTROL: today's code — fd 3 looked at with no word ⇒ a plain hub takes itself for a piped one.
@@ -17,7 +19,9 @@
 //   ⑤ THE SECRET travels only on fd 3 and in memory: no log line, no record, no error text carries it; a child started
 //     with its start pipe on a REAL fd 3 (named by the word) decides «piped» and its own output, argv and environment
 //     carry no secret.
-//     RED CONTROL: a log of the start line planted ⇒ the secret is found in the output.
+//     RED CONTROL: a log of the start line planted ⇒ the secret is found in the output. ON server.js's OWN ROAD (claim at its
+//     line 5, decide at its line 109) the module keeps no parsed start line once it is judged (主开发 r1124 1): a child prints
+//     what claim() still holds — { word, fd }. RED CONTROL: the drop cut ⇒ the line is kept, the secret in it.
 //   ⑦ THE PLAIN FORM IS A DEBT WITH A COUNT (law 3): «§B2c THE HUB'S OWN LISTENER» — owed while the hub boots outside the
 //     boot helper (test-architecture §57c's BOOTS_OUTSIDE_HELPER where the tree has it, else §57c's own pattern counted:
 //     only an overcount) stay above the floor; AT the floor it goes red «DELETE THE LISTENER NOW, B2c». RED CONTROL: the
@@ -78,15 +82,16 @@ const stubPort = process.pid % 50000 + 1024;   // the port a STUB hub is asked t
 const pipeWith = (...lines) => { const p = new PassThrough(); for (const l of lines) p.write(JSON.stringify(l) + '\n'); return p; };
 
 /** the hub's boot through `mod`: a stub hub (its own listener counted), a stub join, the lines the module said */
-async function bootThrough(mod, decision, { joinResult = 'ack', joinPlan = null, rejoinMs, deathAfter = false, joinWith = null, settleMs = 10 } = {}) {
-  const calls = { own: [], join: [], ended: 0, cb: 0, endedAt: null }, lines = [];
+async function bootThrough(mod, decision, { joinResult = 'ack', joinPlan = null, rejoinMs, deathAfter = false, joinWith = null, settleMs = 10, listenTwice = false } = {}) {
+  const calls = { own: [], join: [], answer: [], ended: 0, cb: 0, endedAt: null }, lines = [];
   const hub = { listen: (port, host, cb) => { calls.own.push([port, host]); setImmediate(() => cb && cb()); return hub; } };
   let dead = null;
   // the stub join: each try answers by `joinPlan(n)` (the n-th try) — ack, refused (auth-fail), or gone (no interface at the path)
-  const join = joinWith || (({ start, onDead }) => { calls.join.push(start && start.link); dead = onDead; const r = joinPlan ? joinPlan(calls.join.length) : joinResult; return r === 'ack' ? Promise.resolve({}) : r === 'gone' ? Promise.reject(new Error('the link ended before the interface answered (ECONNREFUSED)')) : Promise.reject(new Error('the interface refused this party (auth-fail)')); });
+  const join = joinWith || (({ start, onDead, answerMs }) => { calls.join.push(start && start.link); calls.answer.push(answerMs); dead = onDead; const r = joinPlan ? joinPlan(calls.join.length) : joinResult; return r === 'ack' ? Promise.resolve({}) : r === 'gone' ? Promise.reject(new Error('the link ended before the interface answered (ECONNREFUSED)')) : Promise.reject(new Error('the interface refused this party (auth-fail)')); });
   const log = { log: (l) => lines.push(String(l)), error: (l) => lines.push(String(l)) };
   const w = mod.wire(decision, { hub, server: {}, join, end: () => { calls.ended++; calls.endedAt = Date.now(); }, log, ...(rejoinMs ? { rejoinMs } : {}) });
   hub.listen(stubPort, '0.0.0.0', () => { calls.cb++; });
+  if (listenTwice) hub.listen(stubPort, '0.0.0.0', () => { calls.cb++; });   // server.js makes ONE boot call: a second is refused by name
   if (joinWith) await until(() => calls.ended > 0 || calls.cb > 0, settleMs); else await sleep(settleMs);   // a real join: wait for the end or the boot callback, bounded
   if (deathAfter && dead) { dead('stream closed'); await until(() => calls.ended > 0 || (joinPlan && calls.join.length > 1 && lines.some((l) => l.includes('took this hub'))), (rejoinMs || 100) * 6); }
   return { calls, lines, record: w.bound() };
@@ -131,6 +136,21 @@ console.log('— ③ NO FALLBACK: a piped hub whose link dies waits for a new in
   const ONDEAD = "      const onDead = () => {   // the interface's link ended: every channel with it; this hub waits for a NEW interface (r1060)\n";
   const fallback = await bootThrough(mutant(ONDEAD, ONDEAD + "        listenOwn.apply(hub, [port, host, () => { }]);\n"), await fresh(), { deathAfter: true, rejoinMs: REJOIN, joinPlan: (n) => (n === 1 ? 'ack' : 'gone') });
   ok(fallback.calls.own.length === 1, `RED CONTROL — a fallback listen planted on the link's death: the hub's own listener is called (${fallback.calls.own.length})`, fallback.calls);
+  // THE LAST TRY'S FLOOR (主开发 r1124 3): every try inside the bound is given at least REJOIN_TRY_FLOOR_MS to be answered —
+  // what a slow, real start meets — so the end comes at most that floor past REJOIN_MS (the bound said as it is)
+  const tries = died.calls.answer.slice(1);   // the boot's own join is the first
+  ok(HP.REJOIN_TRY_FLOOR_MS === 1000 && tries.length >= 1 && tries.every((a) => a >= HP.REJOIN_TRY_FLOOR_MS), `the last try's floor is said by name (REJOIN_TRY_FLOOR_MS = ${HP.REJOIN_TRY_FLOOR_MS} ms): each of the ${tries.length} tries inside the 0.15 s bound was given ${JSON.stringify(tries)} ms to be answered, never the bound's last crumbs`, died.calls.answer);
+  const FLOOR = '          const answerMs = Math.max(REJOIN_TRY_FLOOR_MS, ';
+  const crumbs = await bootThrough(mutant(FLOOR, '          const answerMs = Math.max(REJOIN_FIRST_MS, '), await fresh(), { deathAfter: true, rejoinMs: REJOIN, joinPlan: (n) => (n === 1 ? 'ack' : 'gone') });
+  ok(crumbs.calls.answer.slice(1).some((a) => a < HP.REJOIN_TRY_FLOOR_MS), `RED CONTROL — the release's floor (the first wait, 50 ms): a try inside the bound gets ${JSON.stringify(crumbs.calls.answer.slice(1))} ms, under what a real start meets`, crumbs.calls.answer);
+  // A SECOND LISTEN CALL IS REFUSED BY NAME (主开发 r1124 4): the port is decided once — in the piped form a second call would
+  // join again with no start value left (its digest made of nothing), in the plain form listen on the port twice
+  const twice = await bootThrough(HP, await fresh(), { listenTwice: true });
+  const plainTwice = await bootThrough(HP, await HP.decide({ env: {} }), { listenTwice: true });
+  ok(twice.calls.join.length === 1 && twice.calls.cb === 1 && twice.calls.own.length === 0 && twice.lines.some((l) => l.includes('listen called again (call 2) — refused')) && plainTwice.calls.own.length === 1 && plainTwice.calls.cb === 1 && plainTwice.lines.some((l) => l.includes('listen called again (call 2) — refused')), `a second listen call is refused by name and does nothing: piped, ${twice.calls.join.length} join; plain, ${plainTwice.calls.own.length} listen of its own`, { piped: twice.lines, plain: plainTwice.lines });
+  const GUARD = '  const firstListen = () => { if (++listenCalls === 1) return true; ';
+  const unguarded = await bootThrough(mutant(GUARD, '  const firstListen = () => { return true; '), await fresh(), { listenTwice: true });
+  ok(unguarded.calls.join.length === 2, `RED CONTROL — the guard cut: a second listen call joins again (${unguarded.calls.join.length} joins)`, unguarded.calls);
 }
 
 
@@ -201,7 +221,7 @@ console.log('— ④ NO WORD, NO LOOK: a hub nobody named a start pipe to is pla
   const want = crypto.createHash('sha256').update(LINE4).digest('hex');
   const law = await runProbe(['read3'], { fd3: true, write: LINE4 });
   ok(law.j && law.j.form === 'plain' && law.j.fstat3 === 0 && law.j.rest === want && law.j.own === 1, `no word, a pipe left on fd 3 carrying a hub's start line: ${law.j && law.j.form}; fd 3 looked at ${law.j && law.j.fstat3} times; the line still whole in the pipe: ${!!law.j && law.j.rest === want}; its own listener called ${law.j && law.j.own} time`, law);
-  const N4 = "  return Promise.resolve(judge(env === process.env && claimed ? claimed : takeStart(env, ms)));\n";
+  const N4 = "  return Promise.resolve(judge(takeStart(env, ms)));\n";
   const src4 = read('src/server/hub-port.js'); if (src4.split(N4).length !== 2) throw new Error('CONTROL needle not found exactly once: decide');
   const looks = path.join(T, 'hub-port-looks.js');
   fs.writeFileSync(looks, src4.replace(N4, "  return Promise.resolve(judge(takeStart({ ...env, VIBESPACE_START_FD: '3' }, ms)));\n"));
@@ -231,6 +251,27 @@ console.log('— ⑤ THE SECRET travels only on fd 3 and in memory');
   try { argv = fs.readFileSync(`/proc/${child.pid}/cmdline`, 'utf8'); environ = fs.readFileSync(`/proc/${child.pid}/environ`, 'utf8'); } catch { }
   await new Promise((r) => child.once('exit', r));
   ok(/^form piped link /.test(out) && !out.includes(SECRET) && argv.length > 0 && !argv.includes(SECRET) && !environ.includes(SECRET), `a child with its start pipe on a REAL fd 3: «${out.trim().slice(0, 60)}…»; the secret in its output: ${out.includes(SECRET)}, argv: ${argv.includes(SECRET)}, environment: ${environ.includes(SECRET)}`);
+  // THE CLAIMED ROAD, as server.js runs it (claim() at its line 5, decide() at its line 109): once the start is judged the
+  // module keeps NO parsed start line (主开发 r1124 1) — the child prints what claim() still holds after the judge
+  const probeClaimed = path.join(T, 'probe-claimed.cjs');
+  fs.writeFileSync(probeClaimed, `const fs = require('fs'), Module = require('module'); const FILE = ${JSON.stringify(path.join(REPO, 'src/server/hub-port.js'))};
+const copy = process.argv[2]; let HP; if (copy) { const m = new Module(FILE, null); m.filename = FILE; m.paths = Module._nodeModulePaths(require('path').dirname(FILE)); m._compile(fs.readFileSync(copy, 'utf8'), FILE); HP = m.exports; } else HP = require(FILE);
+HP.claim(); HP.decide().then((d) => { const kept = HP.claim(); console.log(JSON.stringify({ form: d.form, keys: Object.keys(kept), kept })); setTimeout(() => process.exit(0), 50); });\n`);
+  const claimedRun = async (copy) => {
+    const c = spawn(process.execPath, [probeClaimed, ...(copy ? [copy] : [])], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH, VIBESPACE_START_FD: '3' } });
+    let o = ''; c.stdout.on('data', (b) => { o += b; }); c.stderr.on('data', (b) => { o += b; });
+    c.stdio[3].on('error', () => { }); c.stdio[3].write(JSON.stringify(START) + '\n');
+    await new Promise((r) => c.once('exit', r));
+    let j = null; try { j = JSON.parse(o.trim().split('\n').pop()); } catch { }
+    return { o, j };
+  };
+  const claimedNow = await claimedRun();
+  ok(claimedNow.j && claimedNow.j.form === 'piped' && JSON.stringify(claimedNow.j.keys) === '["word","fd"]' && !claimedNow.o.includes(SECRET), `the claimed road (server.js's own: claim, then decide): once judged the module keeps ${JSON.stringify(claimedNow.j && claimedNow.j.keys)} — no parsed start line; the secret in nothing it holds`, claimedNow.o.slice(0, 200));
+  const DROP = '    if (!claimedDecision) { claimedDecision = judge(claimed); claimed = { word: claimed.word, fd: claimed.fd }; }\n';
+  const src5 = read('src/server/hub-port.js'); if (src5.split(DROP).length !== 2) throw new Error('CONTROL needle not found exactly once: the drop');
+  const keeps = path.join(T, 'hub-port-keeps.js'); fs.writeFileSync(keeps, src5.replace(DROP, '    if (!claimedDecision) { claimedDecision = judge(claimed); }\n'));
+  const claimedKept = await claimedRun(keeps);
+  ok(claimedKept.j && claimedKept.j.keys.includes('first') && claimedKept.o.includes(SECRET), `RED CONTROL — the drop cut: the module keeps the parsed start line (${JSON.stringify(claimedKept.j && claimedKept.j.keys)}), the secret in it`);
   const plainChild = spawn(process.execPath, [probe], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH } });
   let out2 = ''; plainChild.stdout.on('data', (b) => { out2 += b; });
   await new Promise((r) => plainChild.once('exit', r));

@@ -4,7 +4,9 @@
 // join of src/server/interface-party.js) over a real http.Server; every byte of the link captured by the suite:
 //   ① THE GREETING, VERSION 2: the interface's first frame is a challenge; the hub answers with a proof; THE START VALUE IS ON
 //     NO FRAME of the whole exchange (the join, pages, a re-join), and the digest neither. RED CONTROL: a party that says the
-//     version-1 hello puts its start value on the link — and the interface refuses it by name ('v1-start-value').
+//     version-1 hello puts its start value on the link — and the interface refuses it by name ('v1-start-value'). The capture
+//     reads each value in its common spellings (主开发 r1124 6: hex, HEX, bytes, base64, base64url, the hex text's base64).
+//     RED CONTROL: a party that puts its start value in base64 on a frame — missed by the hex search, found by the spellings.
 //   ② A WRONG PROOF IS REFUSED AND COUNTED; A STORM OF THEM NEVER DISPLACES THE HUB: 200 links naming the hub with wrong
 //     proofs — each refused and counted, the joined hub's link never ended, pages answered through it all along. RED CONTROL:
 //     the proof's check cut ⇒ the first wrong join is admitted and REPLACES the hub (its link ends).
@@ -14,7 +16,10 @@
 //     has not admitted the hub refuses it and the hub ends at once (the supervisor writes the admit first). RED CONTROLS: the
 //     end put back (the hub ends at the link's death); the bound cut (with no interface back, the hub never ends).
 //   ④ THE DIGEST IS NEVER LOGGED OR SENT BACK by the interface (a census over its log and reply sites, and the run's own
-//     journal and capture). RED CONTROL: a planted log of the digest is found.
+//     journal and capture). RED CONTROL: a planted log of the digest is found. AND THE ADMIT'S HOLDER, not only a word
+//     (主开发 r1124 6): every name the admission binds the digest to, and every name an admit line is handed in by — no log
+//     or reply call's whole argument carries one. RED CONTROLS: a log through a renamed holder across two lines, and the
+//     whole admit line logged in main.js — each missed by the word census, found by the holder's.
 // in-process; a scratch dir under os.tmpdir(); a throwaway self-signed pair made with openssl.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -61,8 +66,11 @@ async function anInterface(link, { admissionMod = null, journal = [] } = {}) {
 function capture() {
   const frames = [];
   const connect = (p) => { const s = net.connect(p); const w = s.write.bind(s); s.write = (d, ...rest) => { frames.push(Buffer.from(d)); return w(d, ...rest); }; s.on('data', (b) => frames.push(Buffer.from(b))); return s; };
-  return { frames, connect, holds: (text) => Buffer.concat(frames).includes(Buffer.from(text)) };
+  return { frames, connect, holds: (text) => Buffer.concat(frames).includes(Buffer.from(text)), holdsAny: (hex) => spellings(hex).some((b) => Buffer.concat(frames).includes(b)) };
 }
+/** a hex value in its common spellings (主开发 r1124 6): its hex text either case, its bytes, their base64 and base64url, and
+ *  the base64 of the hex text itself */
+const spellings = (hex) => { const raw = Buffer.from(hex, 'hex'); return [hex, hex.toUpperCase(), raw.toString('base64'), raw.toString('base64url'), Buffer.from(hex).toString('base64')].map((t) => Buffer.from(t)).concat([raw]); };
 /** today's hub's own wiring (hub-port.js wire), its handler's memory telling the same process from a new one */
 function aHub({ secret, link, hp = require(path.join(REPO, 'src/server/hub-port.js')), cap = capture(), rejoinMs = 3000 }) {
   const born = crypto.randomBytes(4).toString('hex'); let n = 0; const lines = []; let ended = 0, booted = 0;
@@ -86,7 +94,7 @@ console.log('— ① THE GREETING, VERSION 2: a challenge, a proof — the start
   const first = (() => { const b = Buffer.concat(H.cap.frames); const i = b.indexOf(Buffer.from('{')); const j = b.indexOf(0x0a, i); return i >= 0 && j > i ? b.subarray(i, j).toString() : ''; })();
   let firstOp = null; try { firstOp = JSON.parse(first).op; } catch { }
   ok(H.booted() === 1 && page.status === 200 && firstOp === 'challenge', `the hub joined and a page was answered through it (${page.status}); the link's first line is the interface's «${firstOp}»`, { first: first.slice(0, 120) });
-  ok(!H.cap.holds(k.secret) && !H.cap.holds(k.digest) && H.cap.frames.length > 0, `the start value is on none of the link's ${H.cap.frames.length} frames, and the digest neither (the hub proved, never sent)`);
+  ok(!H.cap.holdsAny(k.secret) && !H.cap.holdsAny(k.digest) && H.cap.frames.length > 0, `the start value is on none of the link's ${H.cap.frames.length} frames in any of its ${spellings(k.secret).length} common spellings (hex, HEX, bytes, base64, base64url, the hex's base64), and the digest neither (the hub proved, never sent)`);
   await A.close();
   // RED CONTROL: a party that says the VERSION-1 hello — its start value IS on the link, and the interface refuses it by name
   const k1 = startPair(), link1 = sockPath(), B = await anInterface(link1); B.I.admit({ party: 'hub', digest: k1.digest });
@@ -95,6 +103,13 @@ console.log('— ① THE GREETING, VERSION 2: a challenge, a proof — the start
   await until(() => refused, 2000);
   ok(cap1.holds(k1.secret) && refused && B.I.stats().lastRefused === 'v1-start-value', `RED CONTROL — the version-1 hello: its start value is on the link (${cap1.holds(k1.secret)}), and the interface refuses it by name («${B.I.stats().lastRefused}»)`);
   try { mx.destroy(); } catch { } await B.close();
+  // RED CONTROL for the spellings: a party that puts its start value on the link in base64 — the hex search alone misses it
+  const k2 = startPair(), link2 = sockPath(), C = await anInterface(link2); C.I.admit({ party: 'hub', digest: k2.digest });
+  const cap2 = capture(); let refused2 = false;
+  const s2 = cap2.connect(link2); const mx2 = new Mux(s2, { heartbeat: false, closeAfterQueue: true, onControl: (m) => { if (m && m.op === 'challenge') mx2.control({ op: 'hello', protoVersion: 2, party: 'hub', proof: LP.proofOf(LP.digestOf('another value'), m.nonce, 'hub'), note: Buffer.from(k2.secret, 'hex').toString('base64') }); if (m && m.op === 'auth-fail') refused2 = true; }, onData: (c, b) => mx2.credit(c, b.length) });
+  await until(() => refused2, 2000);
+  ok(refused2 && !cap2.holds(k2.secret) && cap2.holdsAny(k2.secret), `RED CONTROL — the start value in base64 on a frame: the hex search alone finds it ${cap2.holds(k2.secret)}, the spellings ${cap2.holdsAny(k2.secret)}`);
+  try { mx2.destroy(); } catch { } await C.close();
 }
 
 lap('② ');
@@ -167,7 +182,7 @@ console.log('— ③ THE HUB OUTLIVES ITS INTERFACE: a new interface on the same
   const ONDEAD = "      const onDead = () => {   // the interface's link ended: every channel with it; this hub waits for a NEW interface (r1060)\n";
   const ended = await outlive({ hp: mutant('src/server/hub-port.js', ONDEAD, ONDEAD + '        end(); return;\n'), waitMs: 1000 });
   ok(ended.ended === 1 && ended.twoStatus !== 200, `RED CONTROL — the end put back: the hub ends at its link's death (${ended.ended}) and B answers no page from it (${ended.twoStatus})`, ended);
-  const BOUND = '            if (Date.now() + step > until) {';
+  const BOUND = '            if (monoNow() + step > until) {';
   const endless = await outlive({ hp: mutant('src/server/hub-port.js', BOUND, '            if (false) {'), comesBack: false, rejoinMs: 300, waitMs: 1500 });
   ok(endless.ended === 0, `RED CONTROL — the bound cut: with no interface back, the hub still has not ended five times past its bound (${endless.ended})`, endless);
 }
@@ -183,6 +198,37 @@ console.log('— ④ THE DIGEST IS NEVER LOGGED OR SENT BACK by the interface');
   const planted = files.map((f) => (f.rel === 'src/interface/admission.js' ? { ...f, src: f.src.replace("    if (!digest) return { ok: false, why: 'not-admitted' };", "    if (!digest) return { ok: false, why: 'not-admitted' };\n    console.error(`[admission] the admitted digest: ${digest}`);") } : f));
   const red = census(planted);
   ok(red.length === 1, `RED CONTROL — a log of the digest planted in the admission: the census finds it (${red.length})`, red.map((h) => `${h.rel}:${h.i}`));
+  // THE ADMIT'S HOLDER, NOT ONLY A WORD (主开发 r1124 6): the names the admission binds the digest to — its Map, every name
+  // taken from the Map or from an admit line, the admit's own parameter — and every name an admit line is handed in by
+  // (main.js's `.admit(m)`). Every log or reply call's WHOLE argument (across lines) is read: one that carries a holder's
+  // value is found, whatever it is called. A holder's name read only for a property that is no value (its party, its link,
+  // its op, the Map's keys or size) is no leak.
+  const NO_VALUE = new Set(['party', 'link', 'op', 'protoVersion', 'keys', 'size', 'has']);
+  const holdersOf = (f) => {
+    const src = strip(f.src), names = new Set();
+    if (f.rel === 'src/interface/admission.js') {
+      const map = /const (\w+) = new Map\(\);[^\n]*digest/.exec(f.src); if (map) names.add(map[1]);
+      const param = /function admit\((\w+)/.exec(src); if (param) names.add(param[1]);
+      for (const m of src.matchAll(/(\w+)\s*=\s*(?:\w+\s*&&\s*)?(\w+)\.(get\(|digest\b)/g)) if (m[3] === 'digest' || names.has(m[2])) names.add(m[1]);
+    }
+    for (const m of src.matchAll(/\.admit\((\w+)\)/g)) names.add(m[1]);
+    return names;
+  };
+  const callArgs = (src) => {   // each log / reply call's argument, its parentheses balanced (it may span lines)
+    const out = [], re = /(?:\bconsole\.\w+|\blog\.\w+(?:\?\.)?|\.control|\.write|\.end|\.json)\(/g; let m;
+    while ((m = re.exec(src))) { let depth = 1, i = re.lastIndex; for (; i < src.length && depth; i++) { if (src[i] === '(') depth++; else if (src[i] === ')') depth--; } out.push({ at: src.slice(0, m.index).split('\n').length, arg: src.slice(re.lastIndex, i - 1) }); }
+    for (const a of src.matchAll(/said\.\w+\s*=\s*([^;\n]+)/g)) out.push({ at: src.slice(0, a.index).split('\n').length, arg: a[1] });
+    return out;
+  };
+  const carries = (arg, names) => [...names].filter((n) => [...arg.matchAll(new RegExp(`\\b${n}\\b(\\s*\\.\\s*(\\w+))?`, 'g'))].some((x) => !x[2] || !NO_VALUE.has(x[2])));
+  const holderCensus = (fs_) => { const holders = new Map(fs_.map((f) => [f.rel, holdersOf(f)])); const all = new Set([...holders.values()].flatMap((h) => [...h])); return { all, hits: fs_.flatMap((f) => { const names = holders.get(f.rel); return names.size ? callArgs(strip(f.src)).filter((c) => carries(c.arg, names).length).map((c) => `${f.rel}:${c.at} ${carries(c.arg, names).join(',')}`) : []; }) }; };
+  const real = holderCensus(files);
+  ok(['digests', 'digest', 'line', 'm'].every((n) => real.all.has(n)) && real.hits.length === 0, `the admit's holders (${[...real.all].join(', ')}): no log or reply call of the interface carries one (${real.hits.length})`, real.hits);
+  const RENAMED = "    const digest = digests.get(party);\n";
+  const renamed = files.map((f) => (f.rel === 'src/interface/admission.js' ? { ...f, src: f.src.replace(RENAMED, RENAMED + "    const kept = digests.get(party);\n    console.error(\n      `[admission] ${kept}`);\n") } : f));
+  const viaMain = files.map((f) => (f.rel === 'src/interface/main.js' ? { ...f, src: f.src.replace("    else if (m.op === 'admit') iface.admit(m);\n", "    else if (m.op === 'admit') { log.error?.(`[interface] the admit ${JSON.stringify(m)}`); iface.admit(m); }\n") } : f));
+  const rn = holderCensus(renamed), vm = holderCensus(viaMain);
+  ok(census(renamed).length === 0 && rn.hits.length === 1 && census(viaMain).length === 0 && vm.hits.length === 1, `RED CONTROLS — a log through a renamed holder across two lines (the word census finds ${census(renamed).length}, the holder census ${rn.hits.length}: ${rn.hits.join(' ')}); the whole admit line logged in main.js (${census(viaMain).length} / ${vm.hits.length}: ${vm.hits.join(' ')})`, { rn: rn.hits, vm: vm.hits });
 }
 
 lap('the end');
