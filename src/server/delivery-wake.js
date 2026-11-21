@@ -82,7 +82,8 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     if (heldNow) return { ok: false, outcome: 'held', code: 'held', why: String(heldNow).slice(0, 200) };
     // the kept record read ONCE, through piece 4's reader (src/server/resume-line.js keptFacts): how it ended, who ended it, the account
     const meta = facts && facts.kept ? { stopReason: facts.stopReason || null, stoppedAt: facts.stoppedAt || null, endedBy: facts.endedBy || null, accountId: facts.accountId || null, host: facts.hostId || null } : null;
-    const verdict = D.deliveryResumeVerdict({ ...(facts || {}), archived: seams.isArchived(key) }, seams.rowOf(backend));
+    const verdict0 = D.deliveryResumeVerdict({ ...(facts || {}), archived: seams.isArchived(key) }, seams.rowOf(backend));
+    const verdict = verdict0 && verdict0.code === 'archived' ? { ...verdict0, why: archivedWhy(key, verdict0.why) } : verdict0;
     const how = D.endedHow(meta);
     // the person's GRANT is read off each delivering job's row NOW (at the line), never remembered from the park
     const grantOf = (id) => { try { const g = jobGrantOf(id); return g && g.granted === true ? g : { granted: false, by: null }; } catch { return { granted: false, by: null }; } };
@@ -195,13 +196,16 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
   }
 
   /** the park's rung hands an owed wake here (src/server/conversation-deliver.js registerEndedWake) */
+  /** B-0248 (c) r1092: the archived refusal's words — when the person's UN-ARCHIVE is owed and not on disk yet, said so (a person whose
+   *  page shows it un-archived learns why a result waits) */
+  const archivedWhy = (key, why) => { try { return typeof seams.unarchiveOwed === 'function' && seams.unarchiveOwed(key) ? 'archived; its un-archive is not saved yet' : why; } catch { return why; } };
   async function onEndedWake(cid, entry) {
     const k = seams.keyOf(cid);
     if (!k || !k.sessionKey) return { outcome: 'failed', why: 'no conversation key for it' };
     const key = k.sessionKey, backend = key.slice(0, key.indexOf(':')) || 'claude';
     const archived = seams.isArchived(key);
     if (archived === null) return { outcome: 'refused', code: 'store_unread', why: 'the conversation list could not be read — whether it is archived is not known' };   // B-225b R3: UNKNOWN refuses by name (the words keep waiting)
-    if (archived) return { outcome: 'refused', code: 'archived', why: 'it is archived' };
+    if (archived) return { outcome: 'refused', code: 'archived', why: archivedWhy(key, 'it is archived') };
     const q = resumeLine.submit({ target: key, by: null, payload: { run: () => startOne(cid, entry, key, backend) } });
     if (!q.ok) return { outcome: 'refused', code: q.code, why: `the resume line refused it (${q.code}${q.count ? ', ' + q.count : ''})` };
     // JOINED a resume already in the line (a key's conversations.resume of the same conversation): its answer is the reopen's,

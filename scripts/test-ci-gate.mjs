@@ -191,7 +191,10 @@ console.log('\n§2 tier hygiene');
   const overRows = fast.filter((s) => s.over !== undefined).map((s) => s.name).sort();
   // the debt count's bound: 12 since lane fast-tier-ratchet (2026-10-20) — B-e601 r2 (the coordinator, 23:23Z): it STAYS 12; a row
   // over 10 s leaves (a heavy twin, or cut) before the bound moves
-  ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overRows.length <= 12,
+  // lane bl-loop-b (B-0248 (c), 主开发 r1092): 12 → 13 — r1092 made two false rows true (test-user-state-echo, test-user-state-bounds: over
+  // 10 s at their base already) with their named debt (B-54a9), beside the census suite's; the bound moves by that order's arithmetic.
+  // Its move onto the train 30b4e5093 (主开发 r1503): the train's 11 rows under its 12 + this unit's 3 = 14 — both sides' debts kept
+  ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overRows.length <= 14,
     `the over-list == the fast rows ≥ 10 s by their stated time (${overRows.length}: ${overRows.join(', ') || 'none'}) — no silent slow row, no paid debt kept`);
   for (const s of fast.filter((x) => x.over !== undefined)) console.log(`      over · ${s.name} · ${(fastRuleFindings(s, '').measuredMs / 1000).toFixed(1)} s · ${s.over}`);
   // MEASURED AGAINST STATED (B-eedd): the rule above judges the STATED time, so a whole green tier records its readings

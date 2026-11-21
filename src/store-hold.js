@@ -83,7 +83,8 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     try {
       const w = W();
       if (w && typeof w.pending === 'function' && w.pending(file) && typeof w.flushSync === 'function') {
-        const r = w.flushSync([file]); owedHere = true;
+        owedHere = true;   // (r1092: set BEFORE the call — a flush that throws must not leave the old bytes read as the store's state)
+        const r = w.flushSync([file]);
         leftHere = r && Array.isArray(r.left) ? (r.left.find((x) => x === file || (x && x.file === file)) || null) : null;
       }
     } catch (e) { if (owedHere) leftHere = { why: (e && e.message) || String(e) }; }
@@ -305,6 +306,8 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
 
   return {
     readAtStart, readAgain, answer, refuseIfHeld, write, set, adoptRead, takeText, setAside, stop, flush, owedAgain, owe, after, notDurable,
+    /** r1092: the value whose bytes the writer took and did NOT land yet (in flight, or failed and owed) — undefined when none */
+    inFlight: () => (producedSeq > toldSeq ? producedValue : undefined),
     owed: owedFacts,   // the owed write's facts ({ file, code, why, since, rung }), or null
     held: () => (held ? { file: path.basename(file), kind: held.kind, code: held.code, since: held.since, rung: held.rung } : null),
     isMissing: () => missing, file,

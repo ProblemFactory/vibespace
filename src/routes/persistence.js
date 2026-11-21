@@ -719,11 +719,22 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   };
   /** r1054 (7): THE NAME'S LANDING, for the rename verb — a promise: true once the list ON DISK holds `name` for `key` (at once when
    *  it already does), false when the write that carries it failed or passed the writer's bound (kept, written again) */
+  //   (r1092's law: at once only when the landed list, the write in flight and the pending list all hold that name — a rename BACK to
+  //   the landed name while another name is owed waits for its own write's landing)
   router.nameLanded = (key, name) => {
     const k = String(key || ''), v = String(name == null ? '' : name).trim();
-    let landedNow = false;
-    try { landedNow = ((userStateOut().customNames || {})[k] || '') === v; } catch { landedNow = false; }
-    return landedNow ? Promise.resolve(true) : landedOf(userStateHold);
+    const nameIn = (st) => ((st && st.customNames) || {})[k] || '';
+    let agree = false;
+    try { const inFlight = userStateHold.inFlight(); agree = nameIn(userStateOut()) === v && nameIn(readUserState()) === v && (inFlight === undefined || nameIn(inFlight) === v); } catch { agree = false; }
+    return agree ? Promise.resolve(true) : landedOf(userStateHold);
+  };
+  /** r1092: an UN-ARCHIVE OWED — the landed list holds the conversation, the pending one does not (the person's un-archive is not saved
+   *  yet): the wake's refusal says so, so that a person whose page shows it un-archived learns why a result waits */
+  router.unarchiveOwed = (key) => {
+    const k = String(key || ''); if (!k) return false;
+    const bare = k.includes(':') ? k.slice(k.indexOf(':') + 1) : k;
+    const holds = (st) => Array.isArray(st && st.archivedSessions) && st.archivedSessions.some((x) => String(x) === k || String(x) === bare);
+    try { return holds(userStateOut()) && !holds(readUserState()); } catch { return false; }
   };
 
   // lane conversations-archive-verb: ONE archive from the server (the automation verb conversations.archive) through the same
@@ -737,11 +748,15 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       const list = Array.isArray(cur.archivedSessions) ? cur.archivedSessions : [];
       const bare = k.slice(k.indexOf(':') + 1);
       const holds = (l) => Array.isArray(l) && l.some((x) => String(x) === k || String(x) === bare);
-      // r1053 (2): «ALREADY ARCHIVED» IS JUDGED FROM THE LANDED LIST ALONE — on disk ⇒ already, at once (never a wait on whatever the
-      // store owes now: an unrelated later change failing would answer not-durable for an archive that IS on disk, at every retry);
-      // in the pending list only ⇒ its own archive is still owed: told when that lands
-      if (holds(userStateOut().archivedSessions)) return { ok: true, already: true, landed: Promise.resolve(true) };
-      if (holds(list)) return { ok: true, already: false, landed: landedOf(userStateHold) };
+      // r1092, THE LAW WHOLE: A DOOR THAT TELLS ANYONE «DONE» ANSWERS AT ONCE ONLY WHEN WHAT IS ON DISK AND WHAT IS OWED AGREE THAT IT IS
+      // DONE — the landed list, the write in flight (or failed and owed) and the pending list all hold it ⇒ already, at once (an
+      // unrelated write failing changes none of the three: still at once); the pending list holds it and another does not ⇒ its own
+      // archive is owed: told at that landing; the pending list does NOT hold it (an un-archive owed, or never archived) ⇒ WRITTEN
+      if (holds(list)) {
+        const inFlight = userStateHold.inFlight();
+        if (holds(userStateOut().archivedSessions) && (inFlight === undefined || holds(inFlight && inFlight.archivedSessions))) return { ok: true, already: true, landed: Promise.resolve(true) };
+        return { ok: true, already: false, landed: landedOf(userStateHold) };
+      }
       writeUserState({ ...cur, archivedSessions: [...list, k] });
     } catch (e) { if (e && (e.code === 'store_unread' || e.code === 'store_appeared')) return { ok: false, code: e.code, why: e.message }; throw e; }   // B-225b: by name
     // B-0248 (c): `landed` — a promise of the LANDING (true on disk; false: not yet, kept and written again) — the archive verb tells
