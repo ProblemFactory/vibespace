@@ -22,7 +22,7 @@
 // the page's current event is not to be had (a browser that does not expose window.event), the open falls to the safe default.
 // Gate: scripts/test-late-focus.mjs (the verdict's table, the census of every focus after an await, a red control per site kind) and
 // the heavy test-late-focus-chrome (a window opened, another window clicked while it opens, typed: where the text went).
-import { lateFocusVerdict, lateFocusTakes, actOpenStart } from './keyboard-yield.js';
+import { lateFocusVerdict, lateFocusTakes, actOpenStart, fieldHoldsKeys } from './keyboard-yield.js';
 import { DIALOG_ROOTS } from './form-yield.js';
 import { lastPersonAct, pageClock } from './utils.js';
 
@@ -97,7 +97,8 @@ export function mayTakeKeys({ win = null, since = PAGE_START } = {}) {
   const ae = document.activeElement;
   if (ae && String(ae.tagName || '').toUpperCase() === 'IFRAME' && !insideWindow(win, ae)) return false;
   const s = asStart(since) || { at: PAGE_START, by: null }, a = lastPersonAct();
-  const field = !!ae && isTypingField(ae) && !insideWindow(win, ae);   // the field the person is in, outside the opening window
+  // the field the person is in, outside the opening window — only one still in the page and drawn (r871: a hidden or gone field is no field)
+  const field = !!ae && fieldHoldsKeys({ typing: isTypingField(ae), connected: ae.isConnected !== false, drawn: typeof ae.getClientRects === 'function' ? ae.getClientRects().length > 0 : true, inside: insideWindow(win, ae) });
   return lateFocusTakes({ since: s.at, handed: !!s.by, field, act: a ? { at: a.at, inside: actInside(win, a) } : null }) === 'take';
 }
 

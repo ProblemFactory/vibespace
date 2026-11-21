@@ -2154,6 +2154,7 @@ export function installManageAgents(App, ctx = {}) {
         }
       };
       const doTest = (model = '') => { // model: a 模型… row's id (the dialog's 「测试」); the menu's Test passes none
+        const openAt = this._openStartNow?.();   // B-c87d r871: the probe terminal's start is this press
         if (!a?.loggedIn) { showToast(t('This account isn’t signed in yet — use “Add ChatGPT account…” to finish the login first.'), { type: 'error' }); return; }
         if (keyRow.dataset.blocked) {
           showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on “Ship subscription logins to remote hosts”.', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000, action: settingsDoor(this, 'accounts.shipSubscriptionToRemote', { label: t('Turn on…') }) || undefined });
@@ -2162,7 +2163,7 @@ export function installManageAgents(App, ctx = {}) {
         done();
         // With a remote host selected the test runs ON that host (auth.json
         // ships to it) — proving the full remote path.
-        this.createSession({ backend: 'codex', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined, ...(model ? { model } : {}) });
+        this.createSession({ backend: 'codex', mode: 'terminal', cwd: '', openAt, accountId: id, ephemeral: true, hostId: selectedHost || undefined, ...(model ? { model } : {}) });
       };
       const doRename = async () => {
         const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
@@ -3667,6 +3668,7 @@ export function installManageAgents(App, ctx = {}) {
       const a = claudeAccts.find(x => x.id === id);
       const isSub = a?.type === 'subscription';
       const doTest = (model = '') => { // model: a 模型… row's id (the dialog's 「测试」); the menu's Test passes none
+        const openAt = this._openStartNow?.();   // B-c87d r871: the probe terminal's start is this press
         // LINKED account (2.237.3, userN's report "Test says not signed in"):
         // this account's email IS the selected host's own login, so on that
         // host it needs NO local creds and NO shipped dir — the correct spawn
@@ -3706,7 +3708,7 @@ export function installManageAgents(App, ctx = {}) {
         // facts (email-linked → host login; host-held dir → that dir), so the
         // test shows the account it claims to test. §ban-safety unaffected —
         // both server paths ship zero creds.
-        this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined, ...(model ? { model } : {}) });
+        this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', openAt, accountId: id, ephemeral: true, hostId: selectedHost || undefined, ...(model ? { model } : {}) });
         // /status DISPLAY caveat (2.244.2, verified forensically on Novita:
         // the spawn refreshed the HELD dir's token — billing correct — while
         // /status Organization/Email showed the MACHINE login): the CLI reads

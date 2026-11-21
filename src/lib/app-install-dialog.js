@@ -501,12 +501,13 @@ export function openAgentHelp(app, m, { request: carried = '' } = {}) {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const request = input.value.trim();
+    const openAt = app._openStartNow?.();   // B-c87d r871: the helper's start is this press, read before the prompt's network wait
     go.disabled = true;
     const r = await fetchJson(`/api/apps/helper-prompt?${q({ host: m.hostId, q: request })}`);
     if (!r || r.error || !r.prompt) { go.disabled = false; showToast(t('Could not start the helper: {why}', { why: (r && r.error) || t('server unreachable') }), { type: 'error' }); return; }
     close();
     if (typeof app.createSession !== 'function') { showToast(t('Could not start the helper: {why}', { why: 'no session' }), { type: 'error' }); return; }
-    app.createSession({ cwd: '', name: request ? t('Install app · {request}', { request: request.slice(0, 40) }) : t('App install helper'), /* design 009 S6: named by the user's own words */ mode: 'chat', backend: 'claude', hostId: m.hostId && m.hostId !== 'local' ? m.hostId : undefined, initialMessage: r.prompt,
+    app.createSession({ cwd: '', openAt, name: request ? t('Install app · {request}', { request: request.slice(0, 40) }) : t('App install helper'), /* design 009 S6: named by the user's own words */ mode: 'chat', backend: 'claude', hostId: m.hostId && m.hostId !== 'local' ? m.hostId : undefined, initialMessage: r.prompt,
       onCreateResult: async (okd, msg) => {
         if (!okd || !msg || !msg.sessionId) return;
         const h = await fetchJson('/api/apps/helpers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: m.hostId, sessionId: msg.sessionId, request }) });

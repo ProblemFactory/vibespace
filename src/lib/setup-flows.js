@@ -448,12 +448,13 @@ export function installSetupFlows(App) {
           paintFolderChips(chipsEl, chips, { selected: first, onPick: (c) => { cwdPf.set(c.path, { commit: false }); } });
         });
         const go = async (mode) => {
+          const openAt = this._openStartNow?.();   // B-c87d r871: the start is this press, read before the folder's commit and ensure
           // lane path-field: the field's resolution (a relative one / a few letters) — one that does not take stays here and says why
           const v = cwdInput.value.trim() ? await cwdPf.commit() : null;
           if (cwdInput.value.trim() && (!v || !(await cwdPf.ensure()))) return;
           const cwd = v ? v.path : undefined;
           done();
-          this.createSession({ cwd, mode, backend: 'claude' });
+          this.createSession({ cwd, mode, backend: 'claude', openAt });
         };
         content.querySelector('#ob-chat').onclick = () => go('chat');
         content.querySelector('#ob-term').onclick = (e) => { e.preventDefault(); go('terminal'); };

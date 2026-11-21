@@ -27,10 +27,20 @@ const LIST_MAX = 3;               // the names a failure line lists before «and
  *  itself at the unlock (src/lib/session-lifecycle.js) take their turns in ONE queue — `fn` starts when the previous turn's
  *  create has ended (its promise settled), so two bulk roads never have two creates in flight. → fn's promise */
 let lane = Promise.resolve();
+// B-c87d r871: A TASK OF ITS OWN through a message channel (a hidden tab's timer throttle never paces it; its 'message' event is no
+// person's act) — one channel per hand-off, closed when its message lands (it holds a process open only while it waits, as a timer
+// would); a timer where no channel is to be had
+const ownTask = (r) => {
+  let ch = null;
+  try { ch = typeof MessageChannel === 'function' ? new MessageChannel() : null; } catch { ch = null; }
+  if (!ch) { setTimeout(r, 0); return; }
+  ch.port1.onmessage = () => { try { ch.port1.close(); } catch { } r(); };
+  ch.port2.postMessage(0);
+};
 export function inTurn(fn) {
-  // B-c87d r673: every turn starts in a task of its own (a 0 ms timer), never inside the dispatch of the press that ended the turn
-  // before it (a window's close settling the previous create): an open made inside that press would take it as its start
-  const run = lane.then(() => new Promise((r) => setTimeout(r, 0))).then(() => fn());
+  // B-c87d r673: every turn starts in a task of its own, never inside the dispatch of the press that ended the turn before it (a
+  // window's close settling the previous create): an open made inside that press would take it as its start
+  const run = lane.then(() => new Promise((r) => ownTask(r))).then(() => fn());
   lane = run.then(() => { }, () => { });
   return run;
 }
@@ -149,7 +159,7 @@ export function resumeGroup(app, sessions, { nameOf = (s) => s.name } = {}) {
     else if (s.status === 'tmux') app.attachTmuxSession(s.tmuxTarget, s.name, s.cwd);
   }
   if (checking.length) showToast(t('{n} not resumed: still checking whether they run in another terminal — resume each one by itself', { n: checking.length }), { type: 'info', duration: 6000 });
-  return resumePaced(app, stopped, { extra: {}, later: { stay: true, bulk: true } });   // the press reads first; the rest in the hub's bulk line (L3)
+  return resumePaced(app, stopped, { extra: { openAt: app._openStartNow?.() }, later: { stay: true, bulk: true } });   // the press reads first (B-c87d r871: handed the press's start — its turn runs in a task of its own); the rest in the hub's bulk line (L3)
 }
 
 /** the group button's press: the pace started, and anything thrown inside it SAID (S3 — never an unhandled rejection) */

@@ -37,6 +37,7 @@ globalThis.window = { addEventListener: (type, fn) => { (HANDLERS[type] ||= []).
 const KY = await import('../src/lib/keyboard-yield.js');
 const LF = await import('../src/lib/late-focus.js');
 const UT = await import('../src/lib/utils.js');
+const RP = await import('../src/lib/resume-pacer.js');
 // …and a stand-in document only AFTER the imports (utils.js installs its tooltip at import when a document exists); the door reads
 // it when it is called: no app dialog open, nothing focused
 globalThis.document = { querySelectorAll: () => [], activeElement: null };
@@ -90,6 +91,20 @@ ok(wideFails.length === 1 && /^a message/.test(wideFails[0]), 'CONTROL: the list
 ok(Object.isFrozen(KY.ACT_EVENT_KINDS) && KY.ACT_EVENT_KINDS.length === 15, `the list is CLOSED: frozen, ${KY.ACT_EVENT_KINDS.length} kinds (${KY.ACT_EVENT_KINDS.join(', ')})`);
 const i1 = KY.actOpenStart(evOf('keydown', { timeStamp: 42 }), 100), i2 = KY.actOpenStart(evOf('keydown', { timeStamp: 1.7e12 }), 100);
 ok(!!i1 && i1.at === 42 && i1.by === 'act' && !!i2 && i2.at === 100, 'bound 2: the start is the act\'s OWN instant on the page\'s clock (its timeStamp), not the moment the maker runs; a timeStamp off this clock (an epoch) falls to now', { i1, i2 });
+
+console.log('§1d A FIELD THAT IS HIDDEN OR GONE IS NO FIELD (r871, PURE keyboard-yield.js fieldHoldsKeys)');
+const FIELD_ROWS = [
+  ['a typing field outside the opening window, in the page and drawn: it holds the keys', { typing: true, connected: true, drawn: true, inside: false }, true],
+  ['…the same field HIDDEN (a dialog hid with the person\'s Enter in it): no field', { typing: true, connected: true, drawn: false, inside: false }, false],
+  ['…the same field GONE from the page: no field', { typing: true, connected: false, drawn: true, inside: false }, false],
+  ['a field inside the opening window: not elsewhere', { typing: true, connected: true, drawn: true, inside: true }, false],
+  ['no typing field (a button, the body): no field', { typing: false, connected: true, drawn: true, inside: false }, false],
+];
+const badField = FIELD_ROWS.filter(([, a, w]) => KY.fieldHoldsKeys(a) !== w).map(([n]) => n);
+ok(badField.length === 0, `the field fact's ${FIELD_ROWS.length} rows: only a field still in the page and drawn, outside the opening window, holds the person's keys`, badField);
+const CURE_RULE = (a) => !!a.typing && !a.inside;   // the round before (a field counted whether or not it was drawn)
+const fieldFails = FIELD_ROWS.filter(([, a, w]) => CURE_RULE(a) !== w).map(([n]) => n);
+ok(fieldFails.length === 2 && fieldFails.every((n) => /HIDDEN|GONE/.test(n)), `RED: the round before's rule (a field drawn or not) is refused by the hidden and the gone rows — ${fieldFails.join(' · ')}`, fieldFails);
 
 console.log('§2 where an act lands (late-focus.js insideWindow)');
 class N {
@@ -176,7 +191,7 @@ ok(firstShape({ layoutManager: { _booting: true, _bootRestoring: false } }, fals
 }
 // …and every pressed road HANDS ITS PRESS ON as the open's start (the Resume bar, the resume's roads, the makers, a desktop switch's
 // replay, a preset, the four roads that wait for a kill or a live CLI, the For-you reply); r673: the makers open at ONE start fact
-const pressRoads = ({ cv, sl, lj, ut }) => {
+const pressRoads = ({ cv, sl, lj, ut, ap, ma, sf, ai, rp }) => {
   const body = (src, head) => { const a = src.indexOf(head); if (a < 0) return ''; const b = src.indexOf('\n  }', a + head.length); return b < 0 ? '' : src.slice(a, b); };
   const arrow = (src, head) => { const a = src.indexOf(head); if (a < 0) return ''; const b = src.indexOf('\n  };', a); return b < 0 ? '' : src.slice(a, b); };
   const beforeAwait = (b, decl) => { const d = b.indexOf(decl), w = b.indexOf('await '); return d > 0 && (w < 0 || d < w); };
@@ -198,10 +213,17 @@ const pressRoads = ({ cv, sl, lj, ut }) => {
     ['r671: the re-send reads it at its press and carries it through the live CLI\'s wait', /^  _resendWaiting\(at\) \{[^\n]*\n    if \(at === undefined\) at = this\.app\?\._openStartNow\?\.\(\);/.test(rsw) && rsw.includes('this._resendWaiting(at); }); return; }') && rsw.includes('openAt: at,')],
     ['r671: the For-you reply reads it before its network wait and hands it to the reopened conversation', beforeAwait(pr, 'const at = app._openStartNow?.();') && (pr.match(/openReopened\(r, at\)/g) || []).length === 2 && orp.includes('openAt: at };')],
     ['r671: the «already live» answer attaches with the create\'s start and its quiet', sl.includes('            openAt, ...(quiet ? { quiet: true } : {}),')],
+    ['r871: New Session\'s Create reads its start at the press, before the path\'s commit, and hands it to the create', (() => { const b = ap.slice(ap.indexOf("document.querySelector('#dialog-new-session .btn-create').addEventListener('click', async (ev) => {")); const d = b.indexOf('const openAt = this._openStartNow?.();'), w = b.indexOf('await '); return d > 0 && d < w && b.includes('this._nsCreated?.(msg, { channels }); }, openAt });'); })()],
+    ['r871: Fork reads it before the harness offer\'s wait', (() => { const b = body(sl, '  async _doForkSession('); const d = b.indexOf('const openAt = this._openStartNow();'), w = b.indexOf('await '); return d > 0 && d < w && /this\.createSession\(\{\n\s+cwd: sessionInfo\.cwd,\n\s+name: forkName,\n\s+resumeId,\n\s+mode,\n\s+openAt,/.test(b); })()],
+    ['r871: the agents\' two probe terminals read it at their press', (ma.match(/const doTest = \(model = ''\) => \{[^\n]*\n        const openAt = this\._openStartNow\?\.\(\);/g) || []).length === 2 && (ma.match(/mode: 'terminal', cwd: '', openAt, accountId: id, ephemeral: true/g) || []).length === 2],
+    ['r871: the setup flow reads it before the folder\'s commit', /const go = async \(mode\) => \{\n\s+const openAt = this\._openStartNow\?\.\(\);[\s\S]{0,700}this\.createSession\(\{ cwd, mode, backend: 'claude', openAt \}\);/.test(sf)],
+    ['r871: the app install dialog reads it before the prompt\'s network wait', (() => { const b = ai.slice(ai.lastIndexOf('  form.onsubmit = async (e) => {', ai.indexOf('/api/apps/helper-prompt'))); const d = b.indexOf('const openAt = app._openStartNow?.();'), w = b.indexOf('await '); return d > 0 && d < w && b.includes("app.createSession({ cwd: '', openAt, name:"); })()],
+    ['r871: the group\'s Resume all hands the press\'s start to its FIRST member only', rp.includes('return resumePaced(app, stopped, { extra: { openAt: app._openStartNow?.() }, later: { stay: true, bulk: true } });')],
   ];
 };
 {
-  const S = { cv: read('src/lib/chat-view.js'), sl: read('src/lib/session-lifecycle.js'), lj: read('src/lib/layout.js'), ut: read('src/lib/user-todos-actions.js') };
+  const S = { cv: read('src/lib/chat-view.js'), sl: read('src/lib/session-lifecycle.js'), lj: read('src/lib/layout.js'), ut: read('src/lib/user-todos-actions.js'),
+    ap: read('src/lib/app.js'), ma: read('src/lib/manage-agents.js'), sf: read('src/lib/setup-flows.js'), ai: read('src/lib/app-install-dialog.js'), rp: read('src/lib/resume-pacer.js') };
   const R0 = pressRoads(S);
   ok(R0.every(([, g]) => g), `every pressed road hands its PRESS on as the open's start (${R0.length} rows)`, R0.filter(([, g]) => !g).map(([n]) => n));
   // CONTROLS: a road planted to hand NOTHING is red by its row, the rest green — the Resume bar, a switch's replay, the billing switch
@@ -209,9 +231,21 @@ const pressRoads = ({ cv, sl, lj, ut }) => {
     ['the Resume bar', 0, { ...S, cv: S.cv.replace('  _resumeAndClose({ accountId, asked = false, at = this.app?._openStartNow?.() } = {}) {', '  _resumeAndClose({ accountId, asked = false } = {}) {') }],   // stale-pins: kept (the base's text, planted)
     ['a switch\'s replay', 5, { ...S, lj: S.lj.replace("this.app._replayStart = replayAt && typeof replayAt === 'object' ? replayAt : null; ", '') }],
     ['the billing switch', 8, { ...S, sl: S.sl.replace(', onCreateResult: persistOnSuccess, openAt: at });', ', onCreateResult: persistOnSuccess });') }],   // stale-pins: kept (the base's text, planted)
+    ['New Session', 14, { ...S, ap: S.ap.replace('this._nsCreated?.(msg, { channels }); }, openAt });', 'this._nsCreated?.(msg, { channels }); } });') }],   // stale-pins: kept (the base's text, planted)
   ];
   const plantOut = plants.map(([n, i, P]) => { const R = pressRoads(P); return { n, red: !R[i][1], restGreen: R.every(([, g], j) => j === i || g), changed: P !== S && JSON.stringify(P) !== JSON.stringify(S) }; });
   ok(plantOut.every((x) => x.red && x.restGreen && x.changed), `CONTROL: a road planted to hand nothing is red by its own row, the rest green — ${plantOut.map((x) => `${x.n}: ${x.red ? 'red' : 'GREEN'}`).join(' · ')}`, plantOut);
+}
+// r871 — THE LANE'S TASK OF ITS OWN: a turn never runs inside its caller's microtasks (the press that settled the turn before it), and
+// its hand-off is a message channel (no timer throttle in a hidden tab; a 'message' event is no person's act)
+{
+  let ran = false;
+  const turn = RP.inTurn(() => { ran = true; });
+  for (let i = 0; i < 6; i++) await Promise.resolve();
+  const early = ran; await turn;
+  const PS = read('src/lib/resume-pacer.js');
+  ok(early === false && ran === true && /ch = typeof MessageChannel === 'function' \? new MessageChannel\(\) : null;/.test(PS) && /ch\.port1\.onmessage = \(\) => \{ try \{ ch\.port1\.close\(\); \} catch \{ \} r\(\); \};/.test(PS) && !KY.ACT_EVENT_KINDS.includes('message'),
+    'r871: a turn of the bulk lane runs in a task of its own (not in its caller\'s microtasks), handed off through a message channel closed when its message lands — a \'message\' event is no act', { early, ran });
 }
 // r558 (ruled in): a press INTO the opening window's own «Connecting…» body — removed by its answer before the door is asked — lies
 // inside that window: the stamp keeps the window part it landed in
@@ -268,6 +302,14 @@ const pressRoads = ({ cv, sl, lj, ut }) => {
   ok(viaMsg.by === 'road' && viaMsg.at === 7, '…while an open made inside a hub message\'s dispatch keeps the start its road handed (by the road)');
   globalThis.window.event = { type: 'keydown', isTrusted: true, timeStamp: 5 }; const quietOpen = LF.openStart(app0, { quiet: true }); globalThis.window.event = undefined;
   ok(quietOpen.by === null && quietOpen.at === LF.PAGE_START, '…and an open nobody pressed (quiet) is the page\'s and unhanded, whatever event it is made in');
+  // r871: the focused field HIDDEN (a browser that leaves the focus on a dialog's hidden input) or GONE is no field — an unhanded start takes
+  const hidden = new N('ns-name', 'INPUT'); hidden.type = 'text'; hidden.getClientRects = () => []; const dlg = new N('dialog'); dlg.add(hidden);
+  globalThis.document.activeElement = hidden; const vH = view();
+  ok(LF.lateFocus(vH, { win: WC, since: LF.openStart(app0) }) === true && vH.n === 1, 'r871: the focus left on a HIDDEN input (its dialog hid): no field — the unhanded open takes the keys (the person never types into nothing)');
+  const gone = new N('ns-name', 'INPUT'); gone.type = 'text'; gone.isConnected = false; globalThis.document.activeElement = gone; const vG = view();
+  ok(LF.lateFocus(vG, { win: WC, since: LF.openStart(app0) }) === true && vG.n === 1, '…and on an input GONE from the page: no field — taken');
+  hidden.getClientRects = () => [{ width: 10, height: 10 }]; globalThis.document.activeElement = hidden; const vH2 = view();
+  ok(LF.lateFocus(vH2, { win: WC, since: LF.openStart(app0) }) === false && vH2.n === 0, 'CONTROL: the same input DRAWN is a field the person is in — the unhanded open drops');
   globalThis.document.activeElement = null;
 }
 const t2 = LF.openClock(); await tick(); pressAt(inA); const v2 = view();
@@ -508,4 +550,23 @@ const c3 = census(m3);
 ok(c1.unnamed.join() === `${NEW_FILE}:1 box.focus()` && !!c2 && c2.miscount.some((x) => x.startsWith('src/lib/session-lifecycle.js «ta.focus()» ×2')) && !!c3 && c3.miscount.some((x) => x.startsWith('src/lib/window-share.js ×2')),
   `CONTROL: a NEW late focus in a file the table does not name is red by file and line (${c1.unnamed.join(' · ')}); a second one with the SAME WORDS in the class code is red by its count (${c2 && c2.miscount.join(' · ')}); one more in a NAMED file is red by its count (${c3 && c3.miscount.join(' · ')})`, { c1: c1.unnamed, c2: c2 && c2.miscount, c3: c3 && c3.miscount });
 
+// r871 — EVERY START STILL READ AS A BARE CLOCK NUMBER (by nobody: the safe default), named by its file with its count and why
+const BARE = {
+  'src/lib/chat-view.js': [1, 'the rewind answer\'s start, read at the press and kept across a reload in the tab\'s storage; the press is in the window\'s own message, so no field elsewhere holds the keys'],
+  'src/lib/desktop-app-window.js': [4, 'the first connect\'s start (the window\'s own making — a restore or a press) and the satellite\'s (the app showed a window, nobody pressed): unhanded ON PURPOSE; «Resume here» and «Take over» are read at the press (the press is inside the window)'],
+  'src/lib/external-editor.js': [3, 'the pane\'s open on the CLI\'s signal: unhanded ON PURPOSE (no person\'s press; the pane sits in the terminal\'s own window); its two closes are read at the person\'s press, inside that window'],
+  'src/lib/internal-link-ui.js': [1, 'the link\'s other-desktop go-to, read at the link\'s press (the press leaves no field focused)'],
+  'src/lib/terminal.js': [4, 'the terminal\'s paste roads, read at the paste or the tap (the terminal itself holds the keys: inside its window); the pad\'s fallback is unhanded'],
+};
+{
+  const bareOf = (src) => (src.match(/\bopenClock\(\)/g) || []).length;
+  const files = [...PAGE.keys()].filter((f) => f !== 'src/lib/late-focus.js');
+  const seen = files.map((f) => [f, bareOf(PAGE.get(f))]).filter(([, n]) => n > 0);
+  const off = seen.filter(([f, n]) => !BARE[f] || BARE[f][0] !== n).map(([f, n]) => `${f} ×${n}${BARE[f] ? ` (named ×${BARE[f][0]})` : ' (NOT NAMED)'}`);
+  const stale = Object.keys(BARE).filter((f) => !seen.some(([g]) => g === f));
+  ok(off.length === 0 && stale.length === 0, `r871: every bare clock start in the page's code is named with its why (${seen.reduce((n, [, k]) => n + k, 0)} reads in ${seen.length} files)`, { off, stale });
+  const planted = new Map(PAGE); planted.set('src/lib/zz-bare-plant.js', 'export const at = openClock();\n');
+  const offP = [...planted.keys()].filter((f) => f !== 'src/lib/late-focus.js').map((f) => [f, bareOf(planted.get(f))]).filter(([f, n]) => n > 0 && (!BARE[f] || BARE[f][0] !== n));
+  ok(offP.length === 1 && offP[0][0] === 'src/lib/zz-bare-plant.js', 'CONTROL: a NEW bare clock start in a file the table does not name is red by its file', offP);
+}
 report();

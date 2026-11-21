@@ -2100,6 +2100,7 @@ export function installSessionLifecycle(App, ctx = {}) {
   async _doForkSession(sessionInfo, initialMessage = '', resumeAt = null, customName = '') {
     const backend = sessionInfo.backend || 'claude';
     const resumeId = sessionInfo.backendSessionId || sessionInfo.sessionId;
+    const openAt = this._openStartNow();   // B-c87d r871: the fork's start is its press, read before the harness offer's wait
     // A fork of an OpenCode conversation is MINTED through the background
     // service (POST /session/:id/fork) — unlike a resume it genuinely cannot
     // work without it, so this one waits for the offer and only then spawns.
@@ -2136,6 +2137,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       name: forkName,
       resumeId,
       mode,
+      openAt,
       backend,
       backendSessionId: resumeId,
       fork: true,

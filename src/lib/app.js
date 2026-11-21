@@ -1683,6 +1683,7 @@ class App {
     document.querySelector('#dialog-new-session .btn-create').addEventListener('click', async (ev) => {
       const createBtn = ev.currentTarget;
       if (createBtn.dataset.busy) return; // Enter + click racing the async check
+      const openAt = this._openStartNow?.();   // B-c87d r871: the create's start is this press, read before the path's commit and the folder's ensure
       const backend = document.getElementById('input-backend').value || 'claude';
       const hostId = document.getElementById('input-host')?.value || undefined;
       // lane new-session-form: THE PATH FIELD COMMITS FIRST (the contract: Create awaits pf.commit() — a value that does not
@@ -1725,7 +1726,7 @@ class App {
       // q-053 §3: the account's provider serves no model — the row says so with its door; Create says it too, never spawns
       if (document.querySelector('#row-model .ns-models-none:not(.hidden)')) { showToast(t('This account’s provider has no models — set them up first'), { type: 'error' }); return; }
       const channels = this._nsChannelTicks?.() || [];
-      this.createSession({ ...plan.payload, onCreateResult: (ok, msg) => { if (ok) this._nsCreated?.(msg, { channels }); } });
+      this.createSession({ ...plan.payload, onCreateResult: (ok, msg) => { if (ok) this._nsCreated?.(msg, { channels }); }, openAt });
       this.hideDialogs();
     });
 

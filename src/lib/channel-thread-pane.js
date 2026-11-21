@@ -25,7 +25,7 @@ import { composerMode } from './channel-groups-view.js';
 import { pageUpVerdict, isUpKey, isTypingTarget, wheelTowardOlder } from './channel-paging.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { enterSubmits } from './chat-enter-keys.js';
-import { lateFocus, openClock } from './late-focus.js'; // B-c87d: the pane's composer takes the keys after its render only through THE door
+import { lateFocus, startNow } from './late-focus.js'; // B-c87d: the pane's composer takes the keys after its render only through THE door
 
 /** W1 — THE QUOTE LINE above a reply's body: `↩ author: first line` as a button (a click jumps to the parent);
  *  a parent not loaded / in another chat is said in words, never a blank. `onJump(vendorId, place)`. */
@@ -328,7 +328,7 @@ export function createThreadPane(host, ctx) {
    *  thread itself, undefined (a chip's open) = the target this thread last had. */
   function open(th, { from = null, target = undefined, focus = false } = {}) {
     if (!th) return;
-    const openAt = openClock();   // B-c87d: the pane's open began NOW (the person's «Reply in thread»); its render answers later
+    const openAt = startNow();   // B-c87d: the pane's open began NOW (the person's «Reply in thread» — r871: inside that press, its start handed); its render answers later
     if (cur) { scrolls.set(cur.key, list.scrollTop); const ta = foot.querySelector('textarea'); if (ta) drafts.set(cur.key, ta.value); }
     returnFocus = from || null;
     cur = { key: th.key, root: th.root || null, count: th.count || 0, separate: !!th.separate, walked: !!th.walked, rootRec: th.rootRec || null, fresh: !!th.fresh };

@@ -122,6 +122,12 @@ export function lateFocusTakes({ since, act, handed = false, field = false } = {
   if (!handed && field) return 'drop';
   return 'take';
 }
+/** B-c87d r871 — DOES A FIELD HOLD THE PERSON'S KEYS? PURE: a typing field (or a frame) outside the opening window that is still in
+ *  the page AND drawn. A field that is hidden (a dialog that hid with the person's Enter in it) or gone is no field: a browser that
+ *  leaves the focus on a hidden input must not keep the keys there (the person would type into nothing) */
+export function fieldHoldsKeys({ typing = false, connected = true, drawn = true, inside = false } = {}) {
+  return !!typing && connected !== false && drawn !== false && !inside;
+}
 /** B-c87d r673 — THE ACT A PERSON IS DOING RIGHT NOW: the kinds of the page's current event that are a person's own input (a press,
  *  a click, a key, a submit, a change of a control; a paste and a drop are a key's and a press's own events). A CLOSED list: a hub
  *  message, a load, a timer, a transition or animation, a focus or visibility change are NOT acts, nor is anything a script
