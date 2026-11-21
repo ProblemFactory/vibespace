@@ -350,10 +350,7 @@ class MessageWindow {
     const wasLive = this._live;
     this._live = false; // a history conversion says no op (a move included)
     try { for (const record of records || []) {
-      if (beforeRecord) {
-        try { const p = beforeRecord(record); if (p && typeof p.then === 'function') await p; }
-        catch (e) { const r = (e && e.record) || record; console.error(`[${this._logTag}] the step before a record failed during history rebuild (record ${(r && (r.uuid || r.id || r.type)) || '?'}): ${(e && e.message) || e}`); } // B-299b (主开发 r751): said, never silent — a paced fold that broke midway lost that record's later rows
-      }
+      if (beforeRecord) { const p = this._beforeRecord(beforeRecord, record); if (p) await p; }
       try { this._feedRecord(record, false); }
       catch (e) { console.error(`[${this._logTag}] record skipped during history rebuild:`, e.message); }
       done++;
@@ -366,6 +363,16 @@ class MessageWindow {
     this._finishHistory();
     return this.messages;
   }
+
+  /** The step before a record (`beforeRecord`) → null, or the promise to await (B-299b: the artifact derivation's PACED fold). It
+   *  never throws: a failure is SAID (主开发 r751 — a paced fold that broke midway lost that record's later rows; the error names the
+   *  record it was folding when the deriver tagged it), never silent, and the record is still fed. */
+  _beforeRecord(fn, record) {
+    let p = null;
+    try { p = fn(record); } catch (e) { this._beforeRecordFailed(e, record); return null; }
+    return p && typeof p.then === 'function' ? p.then(() => { }, (e) => this._beforeRecordFailed(e, record)) : null;
+  }
+  _beforeRecordFailed(e, record) { const r = (e && e.record) || record; console.error(`[${this._logTag}] the step before a record failed during history rebuild (record ${(r && (r.uuid || r.id || r.type)) || '?'}): ${(e && e.message) || e}`); }
 
   /** Process a single live record. Emits create/edit ops via listeners. */
   processLive(record) { this._feedRecord(record, true); }
