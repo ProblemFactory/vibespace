@@ -167,7 +167,7 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
     };
     const sl = await stripLeg(SYNC);
     ok(sl.ok && sl.had && !sl.left && sl.others, 'the REMOVAL through the helper (--uninstall): our entries gone, every other key of the file as it was (the managed key included)', sl);
-    const SM = require(MC.write(SYNC_REL, anchored(src(SYNC_REL), 'planFor({ hooks: strip ? true : hooks })', 'planFor({ hooks: strip ? false : hooks })', 'a strip plan without its hook rows'), 'strip-no-hooks'));
+    const SM = require(MC.write(SYNC_REL, anchored(src(SYNC_REL), 'planFor({ hooks: strip ? true : hooks })', 'planFor({ hooks: strip ? false : hooks })', 'a strip plan without its hook rows'), 'strip-no-hooks'));   // stale-pins: kept (the line's first build, rebuilt for the red control)
     const mkS = (M) => M.create({ serverSetting: () => undefined, harnesses: require(path.join(REPO, 'src/harnesses/index.js')), adapterRegistry: { get: () => null }, activeSessions: new Map(), hookRegistrationSafe: () => true, home, helperPath: path.join(genRoot, 'data', 'bin', 'vibespace-hook-register.mjs'), starter, hooksWanted: () => true, log: () => {}, warn: () => {} });
     const slm = await stripLeg(mkS(SM));
     ok(slm.had && slm.left, 'RED (a strip plan without its hook rows — this line\'s first build): the removal «lands» and strips nothing', slm);
