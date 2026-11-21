@@ -115,6 +115,7 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot, bringTab } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1354)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -257,6 +258,11 @@ function painted(img, r, textual) {
 
 // ── CDP plumbing ──
 const WebSocket = require('ws');
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1354; test-ci-gate §2o's page factory): newPage() opens each page with /json/new, which Chrome puts in FRONT
+// (p2 opened after p1 and stays open: p1's JUDGED pixel probes were of a page behind it).
+// ONE front state; every picture goes through frontShot (its page brought to the front only when it is not there, bounded,
+// one retry said by name, the front handed back to the page that had it, so each other leg runs with the page in front it had)
+const FS = frontState();
 async function newPage() {
   const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' });
   const tgt = await r.json();
@@ -283,18 +289,20 @@ async function newPage() {
     for (let i = 0; i < 160; i++) { try { if (await evaljs('!!(window.app && window.app.wm)')) return true; } catch {} await sleep(250); }
     return false;
   };
+  const bring = bringTab(CDP_PORT, tgt.id);   // the browser's own door: close() below drops only the socket, the tab stays
+  becameFront(FS, tgt.id, bring);   // /json/new put this tab in front
   /** PIXEL PROBES: scroll each selector into view, shoot, judge its crop. */
   const probe = async (label, sel, { textual = true } = {}) => {
     const rect = await evaljs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center', inline: 'nearest' }); const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, vw: window.innerWidth }; })()`);
     if (!rect) return ok(false, `PIXELS ${label}: ${sel} is drawn`, 'element MISSING');
     await sleep(80);
-    const shot = await cdp('Page.captureScreenshot', { format: 'png' });
+    const shot = await frontShot(FS, tgt.id, bring, () => cdp('Page.captureScreenshot', { format: 'png' }), { name: `the picture of ${label}` });
     const img = decodePng(Buffer.from(shot.result.data, 'base64'));
     const inside = rect.x >= -1 && rect.x + rect.w <= rect.vw + 1;
     const v = painted(img, { x: rect.x, y: Math.max(0, rect.y), w: rect.w, h: Math.min(rect.h, img.h - Math.max(0, rect.y)) }, textual);
     ok(inside && v.ok, `PIXELS ${label}: inside the 375px viewport and painted (${v.why}${inside ? '' : `, x=${Math.round(rect.x)} w=${Math.round(rect.w)}`})`);
   };
-  return { cdp, evaljs, load, probe, close: () => { try { ws.close(); } catch {} } };
+  return { key: tgt.id, bring, cdp, evaljs, load, probe, close: () => { try { ws.close(); } catch {} } };
 }
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 
@@ -1209,7 +1217,7 @@ const p2 = await newPage();
     const r = await p1.evaljs(`(() => { const s = ${BLK}.querySelector(':scope > .mounts-field-hint'); const was = s.textContent; const body = ${DLGC}; const dlg = body.closest('.dialog'); const out = {}; const host = 'h'.repeat(228) + '.example.test';   // 228 + 13 = 241
       for (const [k, txt] of [['host241', 'It comes back to this VibeSpace’s own address (' + host + ') and finishes by itself — approve access, then come back to this dialog.'], ['unbroken300', 'x'.repeat(300)]]) { s.textContent = txt; out[k] = { hostLen: host.length, len: txt.length, bodyOver: body.scrollWidth - body.clientWidth, dlgOver: dlg.scrollWidth - dlg.clientWidth, statusW: Math.round(s.getBoundingClientRect().width), bodyW: Math.round(body.getBoundingClientRect().width) }; }
       s.textContent = was; return out; })()`);
-    if (process.env.GCW_SHOTS) { await p1.evaljs(`(() => { const s = ${BLK}.querySelector(':scope > .mounts-field-hint'); s.dataset.was = s.textContent; s.textContent = 'It comes back to this VibeSpace’s own address (' + 'h'.repeat(228) + '.example.test) and finishes by itself — approve access, then come back to this dialog.'; s.scrollIntoView({ block: 'center' }); return 1; })()`); const shot = await p1.cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.GCW_SHOTS, `e2-${width}.png`), Buffer.from(shot.result.data, 'base64')); await p1.evaljs(`(() => { const s = ${BLK}.querySelector(':scope > .mounts-field-hint'); s.textContent = s.dataset.was; return 1; })()`); }
+    if (process.env.GCW_SHOTS) { await p1.evaljs(`(() => { const s = ${BLK}.querySelector(':scope > .mounts-field-hint'); s.dataset.was = s.textContent; s.textContent = 'It comes back to this VibeSpace’s own address (' + 'h'.repeat(228) + '.example.test) and finishes by itself — approve access, then come back to this dialog.'; s.scrollIntoView({ block: 'center' }); return 1; })()`); const shot = await frontShot(FS, p1.key, p1.bring, () => p1.cdp('Page.captureScreenshot', { format: 'png' }), { name: 'the GCW_SHOTS picture' }); fs.writeFileSync(path.join(process.env.GCW_SHOTS, `e2-${width}.png`), Buffer.from(shot.result.data, 'base64')); await p1.evaljs(`(() => { const s = ${BLK}.querySelector(':scope > .mounts-field-hint'); s.textContent = s.dataset.was; return 1; })()`); }
     return r;
   };
   const w1280 = await wrapAt(1280), w390 = await wrapAt(390);
@@ -1409,7 +1417,7 @@ const p2 = await newPage();
   await p1.probe('⚙ → Integrations: the Gmail setup card, opened', `.integ-setup-card[data-integ-setup="gmail"] .oauth-setup`);
   const fit = await p1.evaljs(`(() => { const bad = []; for (const el of document.querySelectorAll('.integ-setup-card button, .integ-setup-card a, .integ-setup-card code')) { const r = el.getBoundingClientRect(); if (r.width === 0 && r.height === 0) continue; if (r.right > 376 || r.left < -1) bad.push((el.className || el.tagName) + ':' + Math.round(r.left) + '-' + Math.round(r.right)); } return bad; })()`);
   ok(!fit.length, `375×667: every Copy button, console link and address of the setup cards inside the viewport (offenders: ${fit.join(', ') || 'none'})`);
-  if (process.env.OAUTH_SETUP_SHOTS) { const s = await p1.cdp('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); fs.writeFileSync(path.join(process.env.OAUTH_SETUP_SHOTS, 'integrations-gmail-setup.png'), Buffer.from(s.result.data, 'base64')); }
+  if (process.env.OAUTH_SETUP_SHOTS) { const s = await frontShot(FS, p1.key, p1.bring, () => p1.cdp('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }), { name: 'the OAUTH_SETUP_SHOTS picture' }); fs.writeFileSync(path.join(process.env.OAUTH_SETUP_SHOTS, 'integrations-gmail-setup.png'), Buffer.from(s.result.data, 'base64')); }
   // the Connect dialog: the fold BEFORE the first attempt
   const DLGC = `document.querySelector('.dialog-body[data-chan-dialog="connect"]')`;
   const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('[id^="chan-account-"]')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
@@ -1428,7 +1436,7 @@ const p2 = await newPage();
   ok(await p1.evaljs(`(window.__opened || []).length`) === before, 'nothing was started to show it (no sign-in page opened)');
   await p1.evaljs(`(() => { const f = [...${DLGC}.querySelectorAll(':scope > details.oauth-setup-fold')].find((x) => x.style.display !== 'none'); f.open = true; return 1; })()`);
   await p1.probe('the Connect dialog: the setup fold opened (Custom)', `[id^="chan-account-"] details.oauth-setup-fold[data-who="custom"][data-kind="gmail"] .oauth-setup`);
-  if (process.env.OAUTH_SETUP_SHOTS) { const s = await p1.cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.OAUTH_SETUP_SHOTS, 'connect-gmail-fold.png'), Buffer.from(s.result.data, 'base64')); }
+  if (process.env.OAUTH_SETUP_SHOTS) { const s = await frontShot(FS, p1.key, p1.bring, () => p1.cdp('Page.captureScreenshot', { format: 'png' }), { name: 'the OAUTH_SETUP_SHOTS picture' }); fs.writeFileSync(path.join(process.env.OAUTH_SETUP_SHOTS, 'connect-gmail-fold.png'), Buffer.from(s.result.data, 'base64')); }
   // Gmail's OAuth client type (an account option): what Google is asked for
   const kind = await p1.evaljs(`(() => { const d = ${DLGC}; const sel = [...d.querySelectorAll('select')].find((s) => JSON.stringify([...s.options].map((o) => o.value)) === JSON.stringify(['', 'web', 'desktop'])); if (!sel) return null; let l = sel.previousElementSibling; while (l && l.tagName !== 'LABEL') l = l.previousElementSibling; return { label: l && l.textContent, options: [...sel.options].map((o) => o.textContent), value: sel.value }; })()`);
   ok(kind && kind.label === 'OAuth client type' && JSON.stringify(kind.options) === JSON.stringify(['Not said', 'Web application', 'Desktop app']) && kind.value === '', `Gmail's form asks the OAuth client type: Not said / Web application / Desktop app (${JSON.stringify(kind)})`);

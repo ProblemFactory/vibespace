@@ -46,6 +46,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratchDir, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, stillPresser, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1354)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -115,6 +116,11 @@ for (let i = 0; i < 120 && !target; i++) {
   if (!target) await sleep(250);
 }
 if (!target) { console.error('✗ chrome never exposed a CDP page target'); process.exit(1); }
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1354; test-ci-gate §2o's page factory): the phone (the launch's own tab), then desk and tab (Target.createTarget,
+// which Chrome puts in FRONT): the battery's threw-path picture of the phone could be of a page behind them.
+// ONE front state; every picture goes through frontShot (its page brought to the front only when it is not there, bounded,
+// one retry said by name, the front handed back to the page that had it, so each other leg runs with the page in front it had)
+const FS = frontState();
 const connectPage = async (wsUrl) => {
   const sock = new WebSocket(wsUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => sock.on('open', r));
@@ -137,8 +143,10 @@ const connectPage = async (wsUrl) => {
   };
   const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await evalJs(expr)) return true; await sleep(150); } return evalJs(expr); };
   const waitApp = () => evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })');
-  const front = () => cdp('Page.bringToFront');
-  const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch {} };
+  const bring = () => cdp('Page.bringToFront');
+  const front = async () => { await bring(); becameFront(FS, wsUrl, bring); };
+  const shot = async (name) => { try { const r = await frontShot(FS, wsUrl, bring, () => cdp('Page.captureScreenshot', { format: 'png' }), { name: `the picture ${name}` }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch {} };
+  becameFront(FS, wsUrl, bring);   // connected right after its tab opened: the launch's own tab, or a Target.createTarget tab in front
   return { cdp, send, evalJs, waitFor, waitApp, front, shot, pageErrors };
 };
 // the page's event log (window CAPTURE — before the door can stop anything) + every menu build, from the first script

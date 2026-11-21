@@ -1459,22 +1459,43 @@ console.log('\n§2m one page load: a suite waits for the NEW document\'s app, ti
 // that script, or the verdict is red. «REAL» = its capture can be of a page behind another: named here by name every run (the
 // cure owed, each its own small unit on 主开发's word — a fast-tier red would hold every lane). A script newly named and not
 // read is red by name; a verdict for a script no longer named goes (a cured one's row). This file is not walked (its
-// controls carry the shape). KNOWN BLIND SPOTS (said): a capture wrapped in a helper whose front call sits more than six
-// lines above it; a second page opened through another helper's name.
+// controls carry the shape). THE PAGE FACTORY (主开发 r1354, lane bl-tests-e — the blind spot that hid EIGHT suites, and three
+// of the first reads were wrong): ONE /json/new or createTarget inside a function the script CALLS more than once (its newPage() /
+// page()) opens a second page as surely as two in the text — named too. KNOWN BLIND SPOTS (said): a capture wrapped in a helper
+// whose front call sits more than six lines above it (test-mobile-select's threw-path picture hid so — cured by r1354 all the
+// same); a page opened by a helper of ANOTHER file; a tab the product opens itself (window.open not stubbed); and of the factory
+// rule (its fresh read): ONE call site in a loop or a map that keeps several pages open; a factory that is not async; a function
+// written `name (` with a space; an async closure defined between the factory's head and its page-opening line (the nearest wins).
 console.log('\n§2o a picture is of the page in front: every script that opens a second page and captures with no bring-to-front is read, by name');
 {
   const t0 = Date.now();
   const CAP = ['Page', 'captureScreenshot'].join('.'), NEWP = '/json/' + 'new', CT = ['Target', 'createTarget'].join('.');
   const FIRST = new RegExp('\\.(?:find|filter)\\(\\(?\\s*(\\w+)\\s*\\)?\\s*=>\\s*\\1\\.type === \'page\'\\)|' + ['waitPage', 'List\\('].join('') + '|' + ['cdpPage', 'Target\\('].join(''));
   const FRONTED = new RegExp([['bringTo', 'Front'].join(''), ['to', 'Front\\('].join(''), ['activate', 'Target'].join(''), '\\.front\\(\\)', ['front', 'Shot\\('].join('')].join('|'));   // frontShot( = scripts/cdp-front-shot.mjs, the ONE helper
+  // THE PAGE FACTORY (r1354): the function around a page-opening line (the nearest `async function NAME(` / `const NAME = async`
+  // within 40 lines above it) and how often the script calls it — two calls are two pages
+  const FACTORY_DEF = /(async\s+function\s+(\w+)\s*\(|(?:const|let)\s+(\w+)\s*=\s*async\b)/;
+  const factoryCalls = (L, body) => {
+    let most = 0;
+    L.forEach((l, i) => {
+      if (!l.includes(NEWP) && !l.includes(CT)) return;
+      for (let j = i; j >= Math.max(0, i - 40); j--) {
+        const m = FACTORY_DEF.exec(L[j]);
+        if (!m) continue;
+        most = Math.max(most, body.split(new RegExp('\\b' + (m[2] || m[3]) + '\\(')).length - 1 - (m[2] ? 1 : 0));
+        break;
+      }
+    });
+    return most;
+  };
   const backgroundShape = (t) => {
     if (!t.includes(CAP)) return null;
     const L = t.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l)), body = L.join('\n');
-    const news = body.split(NEWP).length - 1 + body.split(CT).length - 1, first = FIRST.test(body);
-    if (!(news >= 2 || (news >= 1 && first))) return null;
+    const news = body.split(NEWP).length - 1 + body.split(CT).length - 1, first = FIRST.test(body), factory = factoryCalls(L, body);
+    if (!(news >= 2 || (news >= 1 && first) || factory >= 2)) return null;
     const bare = [];
     L.forEach((l, i) => { if (l.includes(CAP) && !FRONTED.test(L.slice(Math.max(0, i - 6), i + 1).join('\n'))) bare.push(i + 1); });
-    return bare.length ? { news, first, bare } : null;
+    return bare.length ? { news, first, factory, bare } : null;
   };
   // THE READ VERDICTS (2026-11-21, every named script read: which page each capture is of, and what is in front then)
   const OWN_WINDOW = 'its further pages open in windows of their own (Target.createTarget newWindow: true): each window keeps its own front tab';
@@ -1503,6 +1524,46 @@ console.log('\n§2o a picture is of the page in front: every script that opens a
     'scripts/test-record-clear-ui.mjs': ['front', 'its second page is in a browser context of its own (Target.createBrowserContext), and a window holds one context (Chromium\'s rule, read, not measured here): P1 stays its window\'s front tab', 'Target.createBrowserContext'],
     'scripts/test-resume-pages-follow-chrome.mjs': ['front', OWN_WINDOW, "Target.createTarget', { url: 'about:blank', newWindow: true }"],
     'scripts/test-split-ux.mjs': ['front', 'P1 is brought to the front before its pictures; its other pages open in windows of their own (newWindow: true)', "await P1.send('Page.bringToFront');"],
+    // r1354 (lane bl-tests-e): the scripts THE PAGE FACTORY names, each read (three readers + by hand, 2026-11-21) — front
+    'scripts/dbg-comm-surfaces.mjs': ['front', "a debugging script, not a suite: each pass opens ONE page (newPage) and closes it (/json/close) before the next pass opens its own; its window.open records and opens nothing", "const close = async () => { try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t.id}`); }"],
+    'scripts/test-agent-window-chrome.mjs': ['front', OWN_WINDOW, "send('Target.createTarget', { url: 'about:blank', newWindow: true })"],
+    'scripts/test-attention-policy-ui.mjs': ['front', "every shot is of the newest /json/new page: d's shots come before ph opens; ph, sp, each loop's p and sb are shot before the next page opens", "const ph = await page(390, 844, 'w=100%25');"],
+    'scripts/test-auto-resume-bulk-chrome.mjs': ['front', OWN_WINDOW, "send('Target.createTarget', { url: 'about:blank', newWindow: true })"],
+    'scripts/test-channel-api-chrome.mjs': ['front', "p1 is shot before the next newPage() opens; p3, p9, p10 and pH are each shot before a later page opens", "ok(await p1.shot('api-dialog-zh.png'"],
+    'scripts/test-channel-edit-autosize.mjs': ['front', "the desk page is shot before the phone page opens, and the phone page is the newest when shot", "const P = await page(390, 780, 'after.js');"],
+    'scripts/test-channel-outbox-window.mjs': ['front', "p1, p2, p3 and p5 are each shot while newest; ocdPage runs one page at a time, so each p is the newest at its shot", "for (const lang of ['zh', 'en']) await ocdPage(lang);"],
+    'scripts/test-channel-reauth-line.mjs': ['front', "d is shot before ph opens; ph and lp are each the newest when shot", "const ph = await page(390, 844, 'b=after.js&w=100%25');"],
+    'scripts/test-channel-row-notices.mjs': ['front', "d's shots come before r opens; ph is the newest at its shot", "await d.shot('fold.png');"],
+    'scripts/test-channels-fold-default.mjs': ['front', "d's shots come before ph opens; ph is the newest at its shot", "await d.shot('desk-filter.png');"],
+    'scripts/test-channels-groups-e2e.mjs': ['front', "its one capture is of p2, the newest page then; the next page opens after it", "const png = await p2.cdp('Page.captureScreenshot'"],
+    'scripts/test-channels-internal-look.mjs': ['front', "d is shot before ph opens; ph, then p5, are the newest when shot", "const p5 = await page(1100, 900, 'b=after.js', READY);"],
+    'scripts/test-channels-list-polish-ui.mjs': ['front', "p1 is probed and shot before p2 opens; p2 is never shot; p3 is the newest when probed", "const C = await probe(p3, 'lark/oc_dm');"],
+    'scripts/test-decision-attention-ui.mjs': ['front', "each page() opens a /json/new tab, and every shot is of the newest page, taken before the next page()", "async function page(w, h, query) {"],
+    'scripts/test-decision-engine.mjs': ['front', "each shot is of the page just opened; the next page() comes only after its shots", "async function page(w, h, lang) {"],
+    'scripts/test-decision-rule.mjs': ['front', "each shot is of the newest /json/new tab; openPluginsDialog is a stub on the harness app, so nothing opens a real tab", "async function page(w, h, lang, ready ="],
+    'scripts/test-desktop-app-rung-chrome.mjs': ['front', OWN_WINDOW, "{ url: 'about:blank', newWindow: true }); // each client its OWN window"],
+    'scripts/test-desktop-display-modes-chrome.mjs': ['front', "every page is closed (/json/close) before the next opens; in its one two-page stretch p is shot before q and r4 open, and they close before p again", "await r4.close(); await q.close();"],
+    'scripts/test-desktop-signin-chrome.mjs': ['front', "all shots are of the first page, the only test tab then; the later pages take no shot", "const p = await page('ja');"],
+    'scripts/test-desktop-v2-chrome.mjs': ['front', "each shot is of the newest tab; its page() sections never overlap a shot of an older page", "async function page(w, h, winCss, dpr = 1, at = '/') {"],
+    'scripts/test-desktop-v2-latency-chrome.mjs': ['front', "its shots are of the newest page; the page opened later takes no shot", "async function page(w, h, winCss, origin ="],
+    'scripts/test-desktop-webrtc-chrome.mjs': ['front', "each page is closed (/json/close) before the next; in the R/B pair R is shot and closed before B opens", "await R.q.close();"],
+    'scripts/test-feedback-ui.mjs': ['front', OWN_WINDOW, "bcall('Target.createTarget', { url: 'about:blank', newWindow: true })"],
+    'scripts/test-lark-consent-chain.mjs': ['front', "all its shots are of d, taken before L, L3 and c open; the harness stubs window.open", "const L = await page(800, 600, `http://127.0.0.1:${LPORT}/api/channels/oauth/cb/lark?code=c1"],
+    'scripts/test-login-grant-chrome.mjs': ['front', "each shot is of the newest tab: p2 opens only after p's shots", "const p2 = await page({ ...o, query: 'mode=head'"],
+    'scripts/test-mac-ard-signin-chrome.mjs': ['front', "desk is the only test tab for its shots and is closed before the phone page opens", "const phone = await page(390, 844, `http://${IP}:${PORT}/`);"],
+    'scripts/test-machine-app-chrome.mjs': ['front', "one page a section, opened and shot before the next page()", "async function page(w, h, winCss) {"],
+    'scripts/test-machine-desktop-apps-chrome.mjs': ['front', "each shot is of the page just opened", "async function page(w, h) {"],
+    'scripts/test-phone-composer-chrome.mjs': ['front', "every shot is of the newest page() (its close() drops only the socket, but no older page is shot again)", "async function page(w, h, { phone, theme = 'dark', css = 'real' })"],
+    'scripts/test-refresh-note-chrome.mjs': ['front', OWN_WINDOW, "Target.createTarget', { url: 'about:blank', newWindow: true }"],
+    'scripts/test-remoteapp-card.mjs': ['front', "every shot is of the newest page(): p, then ph, then en", "const p = await page(1100, 1700, 'zh');"],
+    'scripts/test-resume-account-chrome.mjs': ['front', OWN_WINDOW, "Target.createTarget', { url: 'about:blank', newWindow: true }"],
+    'scripts/test-slack-search-chrome.mjs': ['front', "the pr shots come before the second tab pp opens, and pp is the newest at its shot", "const pp = await CDP('zh', 390, 844);"],
+    'scripts/test-task-detail-chrome.mjs': ['front', OWN_WINDOW, "Target.createTarget', { url: 'about:blank', newWindow: true }"],
+    'scripts/test-usage-window-pivots.mjs': ['front', "all shots are of P, before the second tab Q opens; Q, R, S and X are never captured", "const Q = await page('after.js');"],
+    'scripts/test-voice-chrome.mjs': ['front', "each block opens a new page() and captures only that newest page", "async function page(w, h, origin, { touch = false, on = true } = {})"],
+    'scripts/test-voice-follow-chrome.mjs': ['front', "p is captured before the next page opens; the later shots are of the page just opened", "async function page(w, h, { touch = false, b = 'page', follow = true } = {})"],
+    'scripts/test-voice-teach-chrome.mjs': ['front', "its consent tab and mutant tabs are closed and p brought back to the front before p's shots; every other shot is of the newest page", "await back.cdp('Page.bringToFront');"],
+    'scripts/test-webhook-section-place.mjs': ['front', "d's shots come before ph opens; ph is the newest at its shot", "const ph = await page(390, 844, 'b=after.js&w=100%25');"],
   };
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((x) => (x.isDirectory() ? (x.name === 'node_modules' ? [] : walk(path.join(d, x.name))) : /\.(mjs|js|cjs)$/.test(x.name) ? [path.join(d, x.name)] : []));
   const files = walk(path.join(REPO, 'scripts')).filter((f) => path.basename(f) !== 'test-ci-gate.mjs'), named = new Map(), texts = new Map();
@@ -1524,11 +1585,15 @@ console.log('\n§2o a picture is of the page in front: every script that opens a
   const P = (lines) => lines.join('\n');
   const SHAPE = {
     'two new pages, a bare capture': P([`const a = await (await fetch(u + '${NEWP}')).json();`, `const b = await (await fetch(u + '${NEWP}')).json();`, `const s = await A.cdp('${CAP}', {});`]),
+    'one page factory called twice (r1354)': P(['async function newPage() {', `  const t = await (await fetch(u + '${NEWP}')).json();`, '  return t;', '}', 'const p1 = await newPage(), p2 = await newPage();', `const s = await p1.cdp('${CAP}');`]),
+    'a const page factory called twice (r1354)': P(['const page = async (w) => {', `  const t = await call('${CT}', { url: 'about:blank' });`, '  return t;', '};', 'const a = await page(1), b = await page(2);', '', '', '', '', '', '', '', `const s = await a.cdp('${CAP}');`]),
     'one new page beside the first tab': P([`const first = list.find((t) => t.type === 'page');`, `const t2 = await call('${CT}', { url: 'about:blank' });`, '', '', '', '', '', '', '', `const shot = await A.cdp('${CAP}');`]),
   };
   const NOT = {
     'its page brought to the front': P([`await call('${CT}', {}); await call('${CT}', {});`, `await A.cdp('${['Page', 'bringTo' + 'Front'].join('.')}');`, `const s = await A.cdp('${CAP}');`]),
     'a helper that fronts its page': P([`await call('${CT}', {}); await call('${CT}', {});`, 'const shot = async () => {', '  await ' + 'to' + 'Front(me);', `  return cdp('${CAP}');`, '};']),
+    'a page factory called once (r1354)': P(['async function newPage() {', `  const t = await (await fetch(u + '${NEWP}')).json();`, '  return t;', '}', 'const p1 = await newPage();', `const s = await p1.cdp('${CAP}');`]),
+    'its picture through frontShot (r1354)': P(['async function newPage() {', `  const t = await (await fetch(u + '${NEWP}')).json();`, '  return t;', '}', 'const p1 = await newPage(), p2 = await newPage();', `const s = await frontShot(FS, p1.key, p1.bring, () => p1.cdp('${CAP}'), { name: 'x' });`]),
     'one page only': P([`const first = list.find((t) => t.type === 'page');`, `const s = await A.cdp('${CAP}');`]),
     'the second page in a comment': P([`const first = list.find((t) => t.type === 'page');`, `// await fetch(u + '${NEWP}')`, `const s = await A.cdp('${CAP}');`]),
   };
@@ -1551,6 +1616,18 @@ console.log('\n§2o a picture is of the page in front: every script that opens a
     const okRetry = r3 === 'late' && said.some((x) => /the picture x\.png: the picture x\.png: no answer in 50 ms — once more/.test(x)) && said.some((x) => /came on its one retry/.test(x)) && st.front.key === 'B';
     let threw = ''; try { await FS.frontShot(st, 'A', mk('A'), () => new Promise(() => {}), q); } catch (e) { threw = String(e.message); }
     ok(okBack && okNoBring && okRetry && /^the picture x\.png did not come twice, its page brought to the front each time — /.test(threw), `the ONE helper (cdp-front-shot.mjs) over stand-ins: a picture of a page behind brings it to the front and hands the front back («${'front A > capture A > front B'}»); a picture of the page in front brings nothing; a capture that never answers is retried ONCE, said; two misses are red by name («${threw.slice(0, 80)}»)`, { okBack, okNoBring, okRetry, said, threw });
+    // pageClosed (r1354): a tab the suite CLOSED leaves the front unknown (Chrome hands it to a NEIGHBOUR tab), so the next picture
+    // brings its own page and hands nothing back to a page that is gone; closing a page NOT in front keeps the front
+    const sc = FS.frontState(), clog = [], mc = (k) => () => { clog.push('front ' + k); return Promise.resolve(true); };
+    FS.becameFront(sc, 'C', mc('C')); FS.pageClosed(sc, 'B'); const keptC = !!sc.front && sc.front.key === 'C';
+    FS.pageClosed(sc, 'C'); const forgot = sc.front === null;
+    const r4 = await FS.frontShot(sc, 'A', mc('A'), async () => { clog.push('capture A'); return 'pngA'; }, q);
+    // bringTab (r1354): the browser's own door brings a tab with no page socket; a tab that is gone is refused by name
+    const asked = [], fakeFetch = (u) => { asked.push(u); const gone = u.endsWith('/gone'); return Promise.resolve({ ok: !gone, status: gone ? 404 : 200 }); };
+    const okTab = await FS.bringTab(9, 'T1', { fetchFn: fakeFetch })().then((v) => v === true, () => false);
+    let goneSaid = ''; try { await FS.bringTab(9, 'gone', { fetchFn: fakeFetch })(); } catch (e) { goneSaid = String(e.message); }
+    ok(okTab && asked[0] === 'http://127.0.0.1:9/json/activate/T1' && /could not be brought to the front \(\/json\/activate answered 404\)/.test(goneSaid), `…and bringTab: a tab is brought through the browser's own door (${asked[0]}); a tab that is gone is refused by name («${goneSaid.slice(0, 90)}»)`, { asked, goneSaid });
+    ok(keptC && forgot && r4 === 'pngA' && clog.join(' > ') === 'front A > capture A' && sc.front.key === 'A', `…and pageClosed: a closed tab's front is forgotten, so the next picture brings its own page and hands nothing back («${clog.join(' > ')}»); closing a page not in front keeps the front`, { keptC, forgot, clog, front: sc.front && sc.front.key });
   }
   console.log(`  (§2o read ${files.length} scripts in ${Date.now() - t0} ms)`);
 }

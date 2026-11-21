@@ -23,6 +23,7 @@ import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { freePort, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot, bringTab } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1354)
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -122,6 +123,11 @@ const raw = (method, p, { headers = {}, body = null } = {}) => new Promise((reso
 const hmacHex = (k, t) => crypto.createHmac('sha256', k).update(t).digest('hex');
 const signed = (slug, b, tok, id, extra = {}) => { const t = String(Math.floor(Date.now() / 1000)); return { 'Content-Type': 'application/json', 'X-Webhook-Caller': id, 'X-Webhook-Timestamp': t, 'X-Webhook-Signature': 'v1=' + hmacHex(tok, WA.signatureBase(t, '/hook/' + slug, b)), ...extra }; };
 
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1354; test-ci-gate §2o's page factory): newPage() opens each page with /json/new, which Chrome puts in FRONT
+// (p2 and p3 opened after p1, then p1's pictures were of a page behind them).
+// ONE front state; every picture goes through frontShot (its page brought to the front only when it is not there, bounded,
+// one retry said by name, the front handed back to the page that had it, so each other leg runs with the page in front it had)
+const FS = frontState();
 async function newPage(metrics = null) {
   const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' });
   const tg = await r.json();
@@ -145,10 +151,12 @@ async function newPage(metrics = null) {
     // the splash covers the page until app.ready (+ its 300 ms fade) — a PNG taken under it shows only the logo
     return !!(await until("!!(window.app && window.app.wm && window.app.sidebar) && !document.getElementById('loading-screen')", 40000));
   };
+  const bring = bringTab(CDP_PORT, tg.id);   // the browser's own door: close() below drops only the socket, the tab stays
+  becameFront(FS, tg.id, bring);   // /json/new put this tab in front
   const shot = async (name, sel = null) => {
     if (!PNG_DIR) return;
     const box = sel ? await evaljs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.max(0, r.left - 6), y: Math.max(0, r.top - 6), width: r.width + 12, height: r.height + 12 }; })()`) : null;
-    const s = await cdp('Page.captureScreenshot', { format: 'png', ...(box ? { clip: { ...box, scale: 1 } } : {}) });
+    const s = await frontShot(FS, tg.id, bring, () => cdp('Page.captureScreenshot', { format: 'png', ...(box ? { clip: { ...box, scale: 1 } } : {}) }), { name: `the picture ${name}` });
     if (s.result && s.result.data) fs.writeFileSync(path.join(PNG_DIR, name), Buffer.from(s.result.data, 'base64'));
   };
   return { cdp, evaljs, until, load, shot, close: () => { try { ws.close(); } catch { } } };

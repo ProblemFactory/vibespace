@@ -6,6 +6,8 @@
 // every other leg runs with the page in front it had. test-ci-gate §2o names every script that captures without it.
 //   frontState() → { front: null | { key, bring } }        the page in front (null: not known — the next picture brings its own)
 //   becameFront(st, key, bring)                             a page came to the front (a new tab the suite opened, or its own bring)
+//   pageClosed(st, key)                                     a tab the suite CLOSED: the front is not known (Chrome hands it to a NEIGHBOUR tab)
+//   bringTab(cdpPort, targetId) → bring                     a tab brought through the browser's own door (/json/activate): no page socket
 //   frontShot(st, key, bring, capture, { name, ms, say })   → capture()'s answer; key = the picture's page, bring() fronts it
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const bounded = (p, ms, what) => new Promise((res, rej) => {
@@ -15,6 +17,14 @@ const bounded = (p, ms, what) => new Promise((res, rej) => {
 
 export const frontState = () => ({ front: null });
 export function becameFront(st, key, bring) { if (st) st.front = { key, bring }; }
+// (r1354, lane bl-tests-e) closing the front tab hands its window's front to a NEIGHBOUR tab, not to the page behind it: the front
+// is then not known, so the next picture brings its own page and hands nothing back to a page that is gone
+export function pageClosed(st, key) { if (st && st.front && st.front.key === key) st.front = null; }
+// (r1354) a bring through the BROWSER's own door, /json/activate/<id>: it needs no page socket, so a page whose socket the suite
+// closed (a close() that drops only the socket: the tab stays, and can be the page in front) can still be brought, or handed the
+// front back — a send on a closed socket answers nothing and would wait out the bound. A tab that is gone is refused by name.
+export const bringTab = (cdpPort, targetId, { fetchFn = fetch } = {}) => () => fetchFn(`http://127.0.0.1:${cdpPort}/json/activate/${targetId}`)
+  .then((r) => { if (!r.ok) throw new Error(`the tab ${targetId} could not be brought to the front (/json/activate answered ${r.status})`); return true; });
 
 export async function frontShot(st, key, bring, capture, { name = 'a picture', ms = 10000, settleMs = 150, say = (m) => console.log(m), sleep = realSleep } = {}) {
   const was = st && st.front;

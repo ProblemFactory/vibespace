@@ -29,6 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot, bringTab } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1354)
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -105,6 +106,11 @@ process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1354; test-ci-gate §2o's page factory): page() opens each page with /json/new, which Chrome puts in FRONT
+// (`now`, then `pre` beside it: now's pictures were of a page behind pre).
+// ONE front state; every picture goes through frontShot (its page brought to the front only when it is not there, bounded,
+// one retry said by name, the front handed back to the page that had it, so each other leg runs with the page in front it had)
+const FS = frontState();
 /** one tab: viewport vw × vh, the Settings window's content w × h, the page now or pre-fix */
 async function page({ vw, vh, w, h, pre = false, fixture = false, mobile = false, nocap = false, lang = 'zh', theme = 'light' }) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
@@ -121,6 +127,8 @@ async function page({ vw, vh, w, h, pre = false, fixture = false, mobile = false
   for (let i = 0; i < 200 && !(await ev('window.__ready === true && document.querySelectorAll(".settings-content .settings-row").length > 20').catch(() => false)); i++) await sleep(50);
   await ev('document.fonts.ready.then(() => true)');
   await sleep(150);   // the facts' {} answers and the rows they redraw settle
+  const bring = bringTab(CDP_PORT, tg.id);   // the browser's own door: close() below drops only the socket, the tab stays
+  becameFront(FS, tg.id, bring);   // /json/new put this tab in front
   const shot = async (file, sel) => {
     if (!SHOTS) return;
     fs.mkdirSync(SHOTS, { recursive: true });
@@ -128,7 +136,7 @@ async function page({ vw, vh, w, h, pre = false, fixture = false, mobile = false
     const clip = await ev(`(() => { const s = ${sel}; const c = document.querySelector('.settings-content'); c.scrollTop += s.getBoundingClientRect().top - c.getBoundingClientRect().top - 8;
       const r = s.getBoundingClientRect(), wr = document.getElementById('win').getBoundingClientRect(); const y = Math.max(0, r.top - 8);
       return { x: 0, y, width: Math.ceil(wr.width), height: Math.ceil(Math.min(r.bottom + 8, innerHeight) - y), scale: 1 }; })()`);
-    const r = await cdp('Page.captureScreenshot', { format: 'png', clip });
+    const r = await frontShot(FS, tg.id, bring, () => cdp('Page.captureScreenshot', { format: 'png', clip }), { name: `the picture ${file}` });
     fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r.result.data, 'base64'));
   };
   return { ev, shot, close: () => { try { ws.close(); } catch { } } };

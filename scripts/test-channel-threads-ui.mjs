@@ -62,6 +62,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot, bringTab } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1354)
 const VNC_ENV = await vncEnv();
 const require = createRequire(import.meta.url);
 
@@ -147,6 +148,12 @@ for (let i = 0; i < 80; i++) { const r = await api('GET', '/api/channels/fake-po
 const WebSocket = require('ws');
 /** test-mobile-select's phone (the chat's proven Android shape) */
 const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36';
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1354; test-ci-gate §2o's page factory): newPage() opens each page with /json/new, which Chrome puts in FRONT
+// (p2…p6, pa, p5 and pk opened after p1 and stay open: legs(p1)'s pictures were of a page behind them). A page's front key is
+// frontKey (its `key` presses a key).
+// ONE front state; every picture goes through frontShot (its page brought to the front only when it is not there, bounded,
+// one retry said by name, the front handed back to the page that had it, so each other leg runs with the page in front it had)
+const FS = frontState();
 async function newPage({ lang = 'zh', phone = false, font = false, width = 360, android = false } = {}) {
   const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' });
   const t = await r.json();
@@ -181,7 +188,9 @@ async function newPage({ lang = 'zh', phone = false, font = false, width = 360, 
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   let ready = false;
   for (let i = 0; i < 160; i++) { try { if (await evaljs("!!(window.app && window.app.wm && window.app.openChannel) && !document.getElementById('loading-screen')")) { ready = true; break; } } catch {} await sleep(250); }
-  const shot = async (file) => { if (!SHOTS) return; try { fs.mkdirSync(SHOTS, { recursive: true }); const r3 = await cdp('Page.captureScreenshot', { format: 'png' }); if (r3.result && r3.result.data) fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r3.result.data, 'base64')); } catch {} };
+  const bring = bringTab(CDP_PORT, t.id);   // the browser's own door: close() below drops only the socket, the tab stays
+  becameFront(FS, t.id, bring);   // /json/new put this tab in front
+  const shot = async (file) => { if (!SHOTS) return; try { fs.mkdirSync(SHOTS, { recursive: true }); const r3 = await frontShot(FS, t.id, bring, () => cdp('Page.captureScreenshot', { format: 'png' }), { name: `the picture ${file}` }); if (r3.result && r3.result.data) fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r3.result.data, 'base64')); } catch {} };
   // `text` (lane reaction-hover): a key that ACTIVATES a focused button (Enter / Space) needs its char — CDP sends no
   // keypress without it, and the browser's own activation never happens
   const key = async (k, code, vk, text) => { await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk, ...(text ? { text, unmodifiedText: text } : {}) }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk }); };
@@ -191,8 +200,8 @@ async function newPage({ lang = 'zh', phone = false, font = false, width = 360, 
   const move = (x, y) => cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' });
   const click = async (x, y) => { await move(x, y); for (const type of ['mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 }); };
   // a clip of the page as base64 PNG (deviceScaleFactor 1 on the desktop page: one pixel = one CSS px)
-  const capture = async ({ name = null, x, y, width: w, height: h }) => { const r3 = await cdp('Page.captureScreenshot', { format: 'png', clip: { x, y, width: w, height: h, scale: 1 } }); const d = r3.result && r3.result.data; if (d && SHOTS && name) { try { fs.mkdirSync(SHOTS, { recursive: true }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(d, 'base64')); } catch {} } return d || null; };
-  return { cdp, evaljs, ready, shot, key, wheel, touch, move, click, capture, errors, close: () => { try { ws.close(); } catch {} } };
+  const capture = async ({ name = null, x, y, width: w, height: h }) => { const r3 = await frontShot(FS, t.id, bring, () => cdp('Page.captureScreenshot', { format: 'png', clip: { x, y, width: w, height: h, scale: 1 } }), { name: `the picture ${name || 'a crop'}` }); const d = r3.result && r3.result.data; if (d && SHOTS && name) { try { fs.mkdirSync(SHOTS, { recursive: true }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(d, 'base64')); } catch {} } return d || null; };
+  return { frontKey: t.id, bring, cdp, evaljs, ready, shot, key, wheel, touch, move, click, capture, errors, close: () => { try { ws.close(); } catch {} } };
 }
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 
@@ -990,7 +999,7 @@ console.log('(p) the phone at 390 px: the long-press menu and the geometry');
       new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList.contains('context-menu')) window.__menus++; }).observe(document.body, { childList: true, subtree: true });
       return 1; })()`);
     if (wp) {
-      await pa.cdp('Page.bringToFront');
+      await pa.cdp('Page.bringToFront'); becameFront(FS, pa.frontKey, pa.bring);
       await pa.cdp('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' });
       // (fired, never awaited: under the touch emulator the press's reply never comes — awaiting it hangs the leg)
       pa.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: wp.x, y: wp.y, button: 'left', clickCount: 1 });
@@ -1010,7 +1019,7 @@ console.log('(p) the phone at 390 px: the long-press menu and the geometry');
     ok(a.log.some((r) => r.type === 'selectstart') && trustedCm.length === 1 && trustedCm[0].ptype === 'touch' && trustedCm[0].prevented === false, 'the native long press happened (selectstart, then a TRUSTED touch contextmenu) and the page did NOT cancel it', J(a.log));
     ok(synthCm.length === 0 && a.menus === 0 && a.built === 0, `no synthetic contextmenu (the door armed no timer on the words), no menu built or open (${a.built} / ${a.menus})`, J({ synth: synthCm, menus: a.menus, built: a.built }));
     pa.close();
-    await p6.cdp('Page.bringToFront');   // p6's own touch legs need the page in front again (else they never return)
+    await p6.cdp('Page.bringToFront'); becameFront(FS, p6.frontKey, p6.bring);   // p6's own touch legs need the page in front again (else they never return)
   }
   // iOS-SHAPED (raw touch events, no native gesture): our door arms no timer on text ⇒ no menu either
   await p6.touch(before.x, before.y, 700);

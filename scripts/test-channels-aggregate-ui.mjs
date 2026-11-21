@@ -70,6 +70,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, takeCspReports, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot, pageClosed, bringTab } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1354)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -183,6 +184,12 @@ ok(await waitServer(), 'the worktree server booted');
 const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' /* the owner's page — lane wake-approve-card r2 */ }, body: body === undefined ? undefined : JSON.stringify(body) }); let j = {}; try { j = await r.json(); } catch {} return { status: r.status, json: j, headers: r.headers }; };
 
 const WebSocket = require('ws');
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1354; test-ci-gate §2o's page factory): newPage() opens each page with /json/new, which Chrome puts in FRONT
+// (p3 opened in front of p1, and after p3's close Chrome hands the front to its neighbour p2, not to p1). After p3's close the front
+// is not known, so the unsaved-sheet picture brings p1 and hands nothing back: p1 stays in front where p2 was (nothing after reads p2).
+// ONE front state; every picture goes through frontShot (its page brought to the front only when it is not there, bounded,
+// one retry said by name, the front handed back to the page that had it, so each other leg runs with the page in front it had)
+const FS = frontState();
 async function newPage() {
   const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' });
   const t = await r.json();
@@ -216,7 +223,9 @@ async function newPage() {
     for (let i = 0; i < 160; i++) { try { if (await evaljs('!!(window.app && window.app.wm && window.app.sidebar)')) return true; } catch {} await sleep(250); }
     return false;
   };
-  return { id: t.id, cdp, evaljs, load, reload: () => load(), close: () => { try { ws.close(); } catch {} } };
+  const bring = bringTab(CDP_PORT, t.id);   // the browser's own door: close() below drops only the socket, the tab stays
+  becameFront(FS, t.id, bring);   // /json/new put this tab in front
+  return { id: t.id, key: t.id, bring, cdp, evaljs, load, reload: () => load(), close: () => { try { ws.close(); } catch {} } };
 }
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 // lane attention-predicate-shared: 「相关」 open (`related: false`) — these legs read the hand-over / read / agent-group rows, which fold under it by default
@@ -641,7 +650,7 @@ for (const lang of ['zh', 'en', 'ja']) {
     ok(c && c.pic && c.pic.who === '李天雨' && c.pic.chip === AROUND_CHIP[lang] && !c.pic.thumb && !c.pic.refused && !c.pic.retry && c.attAsks === 0, `⑪b ${lang} ${tag}: the vendor's picture VibeSpace never stored is the named chip "${AROUND_CHIP[lang]}" — no thumbnail, no "not found · Retry", our attachment route never asked for it`, JSON.stringify(c && { pic: c.pic, attAsks: c.attAsks }));
   }
   pc.close();
-  try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${pc.id}`); } catch {}
+  pageClosed(FS, pc.key); try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${pc.id}`); } catch {}
 }
 
 // ── ④ the override from the row menu, persisted, on a second client, after a reload ──
@@ -1215,7 +1224,7 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   ok(pic && pic.attachments.some((a) => a.role === 'body' && a.mime === 'text/html') && pic.attachments.some((a) => a.cid === 'logo@fake'), 'the record names its formatted BODY (role body, text/html) and its cid: picture (the record keeps `role` and `cid`)', JSON.stringify(pic && pic.attachments));
   // a frame goes live on the list's IntersectionObserver + a frame callback: a BACKGROUND tab runs no frames, so
   // page 1 is brought to the front first (a person reads a mail in the tab they are looking at)
-  await p1.cdp('Page.bringToFront');
+  await p1.cdp('Page.bringToFront'); becameFront(FS, p1.key, p1.bring);
   await p1.evaljs(`(async () => {
     const w = window.app.openChannel('fake-push', '${MAIL}');
     window.__mailW = w;
@@ -1448,7 +1457,7 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   const MF = require(path.join(repo, 'src/mail-frame.js'));
   const ATK = 'fake-push-attack';
   const BP = BEACON_PORT, SP = BEACON_TLS_PORT;
-  await p1.cdp('Page.bringToFront');
+  await p1.cdp('Page.bringToFront'); becameFront(FS, p1.key, p1.bring);
   let n = 0;
   for (let i = 0; i < 160; i++) { const d = await api('GET', `/api/channels/fake-push/${ATK}/messages?limit=200`); n = (d.json.records || []).length; if (n >= Math.min(50, CORPUS.length)) break; await sleep(250); }
   // a FIRST ingest takes the newest 50: the rest through /older (the vendor's own page), honouring the floor
@@ -1738,7 +1747,7 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
     const shot = async (pg, file, sel) => {
       const box = await pg.evaljs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); return { x: Math.max(0, b.left), y: Math.max(0, b.top), width: Math.min(innerWidth, b.right) - Math.max(0, b.left), height: Math.min(innerHeight, b.bottom) - Math.max(0, b.top) }; })()`);
       await sleep(300);
-      const r = await pg.cdp('Page.captureScreenshot', { format: 'png', ...(box && box.width > 0 && box.height > 0 ? { clip: { ...box, scale: 1 } } : {}) });
+      const r = await frontShot(FS, pg.key, pg.bring, () => pg.cdp('Page.captureScreenshot', { format: 'png', ...(box && box.width > 0 && box.height > 0 ? { clip: { ...box, scale: 1 } } : {}) }), { name: `the picture ${file}` });
       if (r.result && r.result.data) fs.writeFileSync(path.join(GSHOTS, file), Buffer.from(r.result.data, 'base64'));
       return !!(r.result && r.result.data);
     };
@@ -1756,7 +1765,7 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
     const restored = await until(async () => { const r = await p1.evaljs(ROWS); return r.rows === 'attachments:ask links:ask offHours:allow' ? r : null; }, 10000);
     await sleep(900);   // the store's 500 ms save debounce
     for (const pg of [p1, p3]) await pg.evaljs(`(() => { const d = document.getElementById('chan-account-reach-dialog'); if (d) { const o = d.closest('.dialog-overlay'); (o || d).remove(); } return 1; })()`);
-    try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${p3.id}`); } catch {}
+    pageClosed(FS, p3.key); try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${p3.id}`); } catch {}
     p3.close();
     ok(!!restored, 'GUARDS teardown: the switches are back on (every guard asks)');
   }
@@ -1809,7 +1818,7 @@ ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send')
   ok(b1.open && b1.sheet && b1.words === '有未保存的更改' && JSON.stringify(b1.buttons) === JSON.stringify(['继续编辑', '放弃', '保存']) && /dialog-unsaved-save/.test(b1.focus || '') && b1.ticked === true,
     'ticked + ✕ ⇒ the dialog STAYS and asks in place: «有未保存的更改» · 继续编辑 / 放弃 / 保存 (保存 focused, the tick kept)', JSON.stringify(b1));
   {
-    const shotR = await p1.cdp('Page.captureScreenshot', { format: 'png' });
+    const shotR = await frontShot(FS, p1.key, p1.bring, () => p1.cdp('Page.captureScreenshot', { format: 'png' }), { name: 'the picture unsaved-sheet-notify.png' });
     if (shotR.result && shotR.result.data) fs.writeFileSync(path.join(USHOTS, 'unsaved-sheet-notify.png'), Buffer.from(shotR.result.data, 'base64'));
     ok(!!(shotR.result && shotR.result.data), `the sheet, shot: ${path.join(USHOTS, 'unsaved-sheet-notify.png')}`);
   }

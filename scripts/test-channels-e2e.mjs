@@ -58,6 +58,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot, bringTab } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1354)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -151,6 +152,11 @@ ok(await waitServer(), 'the worktree server booted');
 
 // ── CDP plumbing (one connection per PAGE — the multi-client leg needs two) ──
 const WebSocket = require('ws');
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1354; test-ci-gate §2o's page factory): newPage() opens each page with /json/new, which Chrome puts in FRONT
+// (p2 opened after p1, then the reject box's picture was of p1 behind it).
+// ONE front state; every picture goes through frontShot (its page brought to the front only when it is not there, bounded,
+// one retry said by name, the front handed back to the page that had it, so each other leg runs with the page in front it had)
+const FS = frontState();
 async function newPage() {
   const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' });
   const t = await r.json();
@@ -172,7 +178,9 @@ async function newPage() {
     for (let i = 0; i < 160; i++) { try { if (await evaljs('!!(window.app && window.app.wm && window.app.sidebar)')) return true; } catch {} await sleep(250); }
     return false;
   };
-  return { cdp, evaljs, load, close: () => { try { ws.close(); } catch {} } };
+  const bring = bringTab(CDP_PORT, t.id);   // the browser's own door: close() below drops only the socket, the tab stays
+  becameFront(FS, t.id, bring);   // /json/new put this tab in front
+  return { key: t.id, bring, cdp, evaljs, load, close: () => { try { ws.close(); } catch {} } };
 }
 
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
@@ -510,7 +518,7 @@ const PROPOSE = (text) => `(async () => {
   if (process.env.VS_PNG_DIR) {   // the Ops window raised, the card in view, the caret back in the box (the plain Enter below types there)
     const r = await p1.evaljs(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops'); window.app.wm.focusWindow(w.id); const card = ${CARD}; card.scrollIntoView({ block: 'center' }); card.querySelector('.chan-prop-rejectbox input.chan-opt-input')?.focus(); const b = card.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; })()`);
     await sleep(300);
-    const shot = await p1.cdp('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, r.x - 8), y: Math.max(0, r.y - 8), width: r.w + 16, height: r.h + 16, scale: 1 } });
+    const shot = await frontShot(FS, p1.key, p1.bring, () => p1.cdp('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, r.x - 8), y: Math.max(0, r.y - 8), width: r.w + 16, height: r.h + 16, scale: 1 } }), { name: 'the picture reject-box-ime.png' });
     if (shot.result && shot.result.data) { fs.mkdirSync(process.env.VS_PNG_DIR, { recursive: true }); fs.writeFileSync(path.join(process.env.VS_PNG_DIR, 'reject-box-ime.png'), Buffer.from(shot.result.data, 'base64')); }
   }
   await p1.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });

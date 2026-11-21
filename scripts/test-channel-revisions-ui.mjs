@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot, bringTab } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1354)
 const VNC_ENV = await vncEnv();
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -63,6 +64,11 @@ for (let i = 0; i < 160; i++) { const r = await api('GET', `/api/channels/fake-p
 ok(Array.isArray(recs) && recs.length >= 5, `the ops room was ingested (${recs.length} records)`);
 
 const WebSocket = require('ws');
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1354; test-ci-gate §2o's page factory): newPage() opens each page with /json/new, which Chrome puts in FRONT
+// (p2 opened beside p1, then p1's pictures were of a page behind it).
+// ONE front state; every picture goes through frontShot (its page brought to the front only when it is not there, bounded,
+// one retry said by name, the front handed back to the page that had it, so each other leg runs with the page in front it had)
+const FS = frontState();
 async function newPage({ lang = 'zh', width = 1100, height = 900, mobile = false } = {}) {
   const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' });
   const t = await r.json();
@@ -85,7 +91,9 @@ async function newPage({ lang = 'zh', width = 1100, height = 900, mobile = false
   let ready = false;
   for (let i = 0; i < 200; i++) { try { if (await evaljs("!!(window.app && window.app.wm && window.app.openChannel) && !document.getElementById('loading-screen')")) { ready = true; break; } } catch {} await sleep(250); }
   if (ready) await evaljs('window.__noReload = 1; true');
-  return { cdp, evaljs, ready, close: () => { try { ws.close(); } catch {} } };
+  const bring = bringTab(CDP_PORT, t.id);   // the browser's own door: close() below drops only the socket, the tab stays
+  becameFront(FS, t.id, bring);   // /json/new put this tab in front
+  return { key: t.id, bring, cdp, evaljs, ready, close: () => { try { ws.close(); } catch {} } };
 }
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 const now0 = Date.now();
@@ -95,7 +103,7 @@ const gone = newest && newest.kind !== 'system' && typeof newest.text === 'strin
 const edit = plain.filter((r) => r !== gone).slice(-2)[0];
 ok(!!gone && !!edit, `two stored messages to change (recall ${gone && gone.vendorId}, edit ${edit && edit.vendorId}; the recalled one is the room's newest: ${gone === newest})`);
 const PNG_DIR = process.env.CRV_PNG_DIR || ROOT;
-const shot = async (p, file) => { const r = await p.cdp('Page.captureScreenshot', { format: 'png' }); const b = r.result && r.result.data; if (b) fs.writeFileSync(path.join(PNG_DIR, file), Buffer.from(b, 'base64')); return !!b; };
+const shot = async (p, file) => { const r = await frontShot(FS, p.key, p.bring, () => p.cdp('Page.captureScreenshot', { format: 'png' }), { name: `the picture ${file}` }); const b = r.result && r.result.data; if (b) fs.writeFileSync(path.join(PNG_DIR, file), Buffer.from(b, 'base64')); return !!b; };
 const OPEN = (tag) => `(async () => {
   const w = window.app.openChannel('fake-poll', ${J(C)});
   try { window.app.wm.toggleMaximize(w.id); } catch {}
