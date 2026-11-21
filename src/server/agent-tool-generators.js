@@ -539,6 +539,9 @@ let ROOT_READ_MS = ROOT_READ_MS_DEFAULT;
 let _rootFsp = fs.promises;   // the reader's file calls (a suite's stand-in through _setRootFs)
 const _rootReads = { started: 0, ended: 0 };   // how many reads were started / came back (the single-flight leg reads them)
 let _rootRead = null, _rootReadAt = 0;
+// r993: who hears a read LAND (the person's CLI index re-places itself when the owner verdict changed — src/server/local-index.js)
+const _landedListeners = new Set();
+const onRootLanded = (fn) => { if (typeof fn === 'function') _landedListeners.add(fn); return () => _landedListeners.delete(fn); };
 // r872 (the gate's box zone): the read in flight was told LATE to a waiting caller — the cache then answers late too. A flag, never the
 // clock again: the deadline timer and Date.now() can differ by a millisecond, and «not judged yet» must never follow a late answer
 let _rootReadLate = false;
@@ -585,7 +588,7 @@ function startRootRead() {
   _rootReads.started++; _rootReadAt = Date.now(); _rootReadLate = false;
   _rootRead = readRootFactsAll(rootDir)
     .catch((e) => ({ root: path.resolve(rootDir), gitDir: null, gitCommonDir: null, error: `the server root could not be read (${(e && e.code) || (e && e.message) || e})` }))
-    .then((f) => { _rootFacts = f; _rootFactsAt = Date.now(); _rootReads.ended++; _rootRead = null; _rootReadLate = false; return f; });
+    .then((f) => { _rootFacts = f; _rootFactsAt = Date.now(); _rootReads.ended++; _rootRead = null; _rootReadLate = false; for (const fn of [..._landedListeners]) { try { fn(f); } catch (e) { console.warn('[root] a landed-read listener failed:', e && e.message); } } return f; });
   return _rootRead;
 }
 const rootStale = (t = Date.now()) => !_rootFacts || !!_rootFacts.error || t - _rootFactsAt > serverRoot.ROOT_FACTS_TTL_MS;   // an erroring read is never kept (verify r1 F1)
@@ -722,7 +725,7 @@ function removeAgentHooks() {
     AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
     createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
     ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
-    rootVerdict, ownerWriteRefusal, refuseOwnerWrite, readRootFacts, rootRecovery, rootFactsNow, rootReadStats, _setRootFs, _setRootReadMs, // B-1425: the facts a caller awaits; the single-flight's counts and the suite seams // verify r1: the facts reader, for the gate's real-filesystem shapes; r2: the recovery fact
+    rootVerdict, ownerWriteRefusal, refuseOwnerWrite, readRootFacts, rootRecovery, rootFactsNow, onRootLanded, rootReadStats, _setRootFs, _setRootReadMs, // B-1425: the facts a caller awaits; the single-flight's counts and the suite seams // verify r1: the facts reader, for the gate's real-filesystem shapes; r2: the recovery fact
     agentHooksStatus,
     HOOK_OPTOUT_FILE: typeof HOOK_OPTOUT_FILE !== 'undefined' ? HOOK_OPTOUT_FILE : undefined,
   };

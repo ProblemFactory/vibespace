@@ -40,6 +40,13 @@ let place = null;        // the PURE place verdict (decided at the boot)
 let file = null;         // <place.dir>/sessions.<rootDigest>.json — this hub's own file
 let hubFacts = null;     // the hub's own facts (pid + birth, root, port, unit, …)
 let timer = null, beat = null, stopped = false, bootP = null;
+// B-1425 (主开发 r993): THE ROLE FOLLOWS THE ROOT VERDICT. The hub's role (a throwaway / the person's) comes from the owner verdict it
+// was handed; a first read that came LATE or failed handed it «unknown». When a LATER read lands with another verdict, the index is
+// configured AGAIN with it, once per change of the verdict, by this module (the one writer): after the boot in flight settled, the
+// old place's file marked stopped (the hub left it), never after the hub's own stop (shutDown). `ownerNow` reads the verdict,
+// `onOwnerChange(fn)` calls fn when a read landed (agent-tool-generators onRootLanded)
+let lastOpts = null, ownerKey = null, unsubOwner = null, reconfP = null, shutDown = false;
+const ownerKeyOf = (o) => (o && o.kind ? `${o.kind}|${o.why || ''}` : 'ok');
 let lastRows = null, failSaid = null, slowSaid = false, inFlight = null, pending = null, stopText = null;
 const attachedAt = new Map();   // session id → the last client attach (pruned to the live ids at each write)
 const framesOf = new Map();
@@ -51,7 +58,30 @@ const digestOf = (root) => crypto.createHash('sha256').update(String(root || '')
 const bounded = (p, ms) => new Promise((res) => { const t = setTimeout(() => res({ ok: false, late: true }), ms); if (t.unref) t.unref(); p.then((v) => { clearTimeout(t); res({ ok: true, v }); }, (e) => { clearTimeout(t); res({ ok: false, e }); }); });
 
 /** The boot: the hub's own facts now (procfs), everything that touches a disk OFF this turn. → api (`ready()` awaits it). */
-function configure({ rootDir, port = null, host = null, version = null, sessions, buffersDir = null, dataDir = null, log = console,
+function configure(opts = {}) {
+  lastOpts = opts; ownerKey = ownerKeyOf(opts.owner); shutDown = false;   // a fresh configure is a fresh life (the hub's stop ended the last)
+  if (!unsubOwner && typeof opts.onOwnerChange === 'function' && typeof opts.ownerNow === 'function') { try { unsubOwner = opts.onOwnerChange(ownerChanged) || true; } catch { unsubOwner = null; } }
+  return configureNow(opts);
+}
+/** A landed read: the verdict changed ⇒ the index placed again with it (serialized after the boot in flight; never after the hub's stop). */
+function ownerChanged() {
+  if (!lastOpts || shutDown) return null;
+  let o = null; try { o = lastOpts.ownerNow(); } catch { o = { kind: 'unknown', why: 'the owner verdict could not be read' }; }
+  if (o && o.pending) return null;   // «not judged yet» is no verdict
+  const k = ownerKeyOf(o);
+  if (k === ownerKey) return null;
+  const was = hubFacts ? hubFacts.throwaway : null;
+  ownerKey = k;
+  reconfP = (reconfP || bootP || Promise.resolve()).then(() => {
+    if (shutDown) return false;
+    say('log', `[local-index] the hub's root verdict changed (${was || 'the person\'s'} → ${o && o.kind ? o.kind : 'the person\'s'}): the index is placed again`);
+    stop();   // the old place's file says the hub left it
+    configureNow({ ...lastOpts, owner: o });
+    return bootP;
+  }).catch(() => false);
+  return reconfP;
+}
+function configureNow({ rootDir, port = null, host = null, version = null, sessions, buffersDir = null, dataDir = null, log = console,
   home = os.homedir(), uid = typeof process.getuid === 'function' ? process.getuid() : null, mountinfo = null, procRoot = '/proc',
   now = Date.now, turnOf = null, heartbeatMs = LI.HEARTBEAT_MS, install = true, throwaway = false, owner = null, adapters = null, harnesses = null,
   env = process.env, xdgRuntimeDir = process.env.XDG_RUNTIME_DIR || '', varTmp = '/var/tmp' } = {}) {
@@ -259,10 +289,10 @@ async function installPersonCli() {
   }
 }
 
-function _reset() { if (timer) clearTimeout(timer); if (beat) clearInterval(beat); cfg = null; place = null; file = null; hubFacts = null; timer = null; beat = null; stopped = false; bootP = null; lastRows = null; failSaid = null; slowSaid = false; inFlight = null; pending = null; stopText = null; attachedAt.clear(); framesOf.clear(); }
+function _reset() { lastOpts = null; ownerKey = null; unsubOwner = null; reconfP = null; shutDown = false; if (timer) clearTimeout(timer); if (beat) clearInterval(beat); cfg = null; place = null; file = null; hubFacts = null; timer = null; beat = null; stopped = false; bootP = null; lastRows = null; failSaid = null; slowSaid = false; inFlight = null; pending = null; stopText = null; attachedAt.clear(); framesOf.clear(); }
 
 const api = {
-  configure, note, stop, placeOf: () => place, fileOf: () => file, hubFactsOf: () => hubFacts, ready: () => bootP || Promise.resolve(false),
+  configure, note, stop: () => { shutDown = true; return stop(); }, placeOf: () => place, reconfigured: () => reconfP || Promise.resolve(false), fileOf: () => file, hubFactsOf: () => hubFacts, ready: () => bootP || Promise.resolve(false),
   flush: (reason = 'flush') => { if (timer) { clearTimeout(timer); timer = null; } return write(reason); }, _reset,
   slowWriteWords,
 };

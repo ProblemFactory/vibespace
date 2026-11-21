@@ -558,6 +558,44 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
     console.log(`  (RED: the first form's mid-line note put back — the last turn LOSES ${lostB.join(', ') || 'nothing'})`);
     ok(!!TB && lostB.join(',') === 'initAfterListen,afterListen,bootEngineDistribution,bootRestored,warmSessions,→bootSessionsIndexed,arm', 'B-1425 r872 RED CONTROL: the cure\'s first note put back mid-line turns the pin red BY THE NAME of each lost call (the three timers\' callees, bootRestored, the sessions sweep, bootPhase.arm) — the text pins stayed green over it', lostB);
   }
+  // r993 THE ROLE FOLLOWS A LATER READ (主开发's ruling: no row — build it): a first read that came LATE handed the index «unknown»; when
+  // a LATER read lands with the facts, the index (src/server/local-index.js, its one writer) is configured AGAIN with them, once per change
+  {
+    const LIm = require(path.join(REPO, 'src/server/local-index.js'));
+    const roleOfLI = (o) => (o && o.kind ? String(o.kind) : false);
+    const scene11 = async (subscribe) => {
+      let rel = null; const held = new Promise((r) => { rel = r; });
+      const G = Gm.create({ rootDir: R8, port: 0 });
+      // the checkout's facts land OUTSIDE any temp folder (a person's checkout), after the first read was told late
+      G._setRootFs({ realpath: async (q) => (q === R8 ? '/home/u/vibespace-standin' : q), stat: async () => { await held; throw Object.assign(new Error('no .git'), { code: 'ENOENT' }); }, readFile: async () => { throw Object.assign(new Error('no'), { code: 'ENOENT' }); } });
+      G._setRootReadMs(30);
+      await G.rootFactsNow();   // the first read LATE: the named late fact
+      const first = G.ownerWriteRefusal(), lines = [];
+      const logL = { log: (l) => lines.push(String(l)), warn: (l) => lines.push(String(l)), error: () => { } };
+      LIm._reset();
+      LIm.configure({ rootDir: R8, sessions: () => new Map(), log: logL, home: path.join(R8, 'li-home'), mountinfo: '', heartbeatMs: 3600000, install: false, owner: first, ...(subscribe ? { ownerNow: G.ownerWriteRefusal, onOwnerChange: G.onRootLanded } : {}) });
+      await LIm.ready();
+      const roleLate = LIm.hubFactsOf().throwaway;
+      rel();   // the held read LANDS
+      for (let i = 0; i < 500 && G.rootReadStats().ended < 1; i++) await new Promise((r) => setImmediate(r));
+      await LIm.reconfigured(); await LIm.ready();
+      const landed = G.ownerWriteRefusal(), roleAfter = LIm.hubFactsOf().throwaway;
+      // a SECOND landed read with the same verdict: no second re-configure (once per change)
+      const ttl0 = SR.ROOT_FACTS_TTL_MS; SR.ROOT_FACTS_TTL_MS = -1; try { G.rootVerdict(); } finally { SR.ROOT_FACTS_TTL_MS = ttl0; }
+      for (let i = 0; i < 500 && G.rootReadStats().ended < 2; i++) await new Promise((r) => setImmediate(r));
+      await LIm.reconfigured();
+      const placedAgain = lines.filter((l) => /the index is placed again/.test(l)).length;
+      LIm.stop(); LIm._reset();
+      return { first: first && first.kind, roleLate, landed: landed ? landed.kind : null, roleAfter, placedAgain };
+    };
+    const red11 = await scene11(false), cure11 = await scene11(true);
+    console.log(`  (a late first read, then a landing — RED (not told of the landing, r980's «it stays»): ${JSON.stringify(red11)}; THE CURE: ${JSON.stringify(cure11)})`);
+    ok(red11.roleLate === 'unknown' && red11.roleAfter === 'unknown' && red11.landed !== 'unknown', 'B-1425 r993 RED (r980\'s behaviour): an index never told of the landing keeps «unknown» for the run though the read landed with the facts', red11);
+    ok(cure11.roleLate === 'unknown' && cure11.roleAfter === roleOfLI(cure11.landed === null ? null : { kind: cure11.landed }) && cure11.roleAfter !== 'unknown' && cure11.placedAgain === 1, 'B-1425 r993: when a LATER read lands with the facts, the index is configured AGAIN with them and holds the LANDED role — once per change of the verdict (a second landing with the same verdict places nothing again)', cure11);
+    const LIsrc2 = read('src/server/local-index.js');
+    ok(/if \(!lastOpts \|\| shutDown\) return null;/.test(LIsrc2) && /stop: \(\) => \{ shutDown = true; return stop\(\); \}/.test(LIsrc2) && /reconfP = \(reconfP \|\| bootP \|\| Promise\.resolve\(\)\)\.then\(/.test(LIsrc2) && /ownerNow: ownerWriteRefusal, onOwnerChange: onRootLanded,/.test(srv8),
+      'B-1425 r993: the re-configure is the index\'s own (after the boot in flight, the old place marked stopped), never after the hub\'s stop; server.js hands it the verdict and the landing');
+  }
   clearInterval(keep8);
 }
 
