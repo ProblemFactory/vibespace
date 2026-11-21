@@ -503,7 +503,12 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   let front = null;       // design 016 S1c: the FRONT X window when it is NOT the app's main ({wid, title} — WeChat's Moments)
   // the stream KIND the record declares; src/lib/stream-views.js answers with its view (keyed by the view module's own STREAM_KIND)
   const streamKindOf = (r) => (r && r.stream) || STATUS_KIND;
+  // B-92aa (the coordinator's r1635): the relaunch fit's PLAN for the new connection's first map — { id, width, height } (CSS px),
+  // set from the fit's ONE computation just before the retarget, read once by THAT app's first connect (another app's view never
+  // takes it), null when no plan exists (the first map then measures the pane, as before)
+  let relaunchPlanned = null;
   const viewOpts = () => ({
+    firstPane: () => { const p = relaunchPlanned; relaunchPlanned = null; return p && p.id === id ? { width: p.width, height: p.height } : null; },
     url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}&pane=${encodeURIComponent(paneKey)}` + (prevPane ? `&prev=${encodeURIComponent(prevPane)}` : ''); }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id + the stable pane key (x5) + its predecessor (the grace)
     labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable') },
     before: readyGate, autoReconnect: true,
@@ -1075,10 +1080,11 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
    *  ASKING client (the layout sync carries the bounds to the others); never a maximized / minimized window, a tab
    *  chain or the phone layout (WindowManager.resizeWindowTo refuses them). Called AFTER retarget, which clears the old
    *  app's minimum — the new app's own minimum arrives with its window and may raise it again. */
-  const fitAfterRelaunch = (g, next) => {
-    if (!g || !next || closed) return false;
-    const p = relaunchPaneCss({ pane: g.pane, mainPx: g.mainPx, dpr: g.dpr, from: g.from, to: next });
-    if (!p) return false;
+  /** B-92aa (r1635): THE ONE COMPUTATION of the relaunch fit — the pane the window is about to have (PURE relaunchPaneCss), or null.
+   *  The new connection's first map and the window's resize below take THIS value; there is no second estimate. */
+  const relaunchFitPlan = (g, next) => (!g || !next || closed ? null : (relaunchPaneCss({ pane: g.pane, mainPx: g.mainPx, dpr: g.dpr, from: g.from, to: next }) || null));
+  const fitAfterRelaunch = (g, next, p) => {
+    if (!g || !next || closed || !p) return false;
     const s = uiScale();
     const done = app.wm.resizeWindowTo(winInfo.id, { w: (p.w + g.chrome.w) / s, h: (p.h + g.chrome.h) / s });
     winInfo._desktopRelaunchFit = { pane: p, chrome: { ...g.chrome }, from: renderOf(g.from), to: renderOf(next), applied: !!done }; // the raw handle the heavy suite reads
@@ -1101,8 +1107,12 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     relaunching = false;
     if (!r || r.error || !r.app || !r.app.id) { showToast(r?.error || t('Could not relaunch the app'), { type: 'error' }); return; }
     showToast(t('{app} relaunched at {scale}×', { app: name, scale: r.app.scale }), { duration: 3500 });
+    // B-92aa (r1635, int361's row 104: «the ORDER IS NAMED»): the fit planned BEFORE the retarget, so the NEW connection's first map
+    // takes the planned pane — final whenever the window's resize lands (a loaded box landed it after the map: a stale map, then a refit)
+    const plan = relaunchFitPlan(geo, r.app);
+    relaunchPlanned = plan ? { id: r.app.id, width: plan.w, height: plan.h } : null;
     retarget(r.app.id); // at once — never waiting for the broadcast echo (the other clients follow it from theirs)
-    fitAfterRelaunch(geo, r.app); // lane D (a) F2: the window keeps the app's size at the new scale
+    fitAfterRelaunch(geo, r.app, plan); // lane D (a) F2: the window keeps the app's size at the new scale — the SAME plan
   }
   /** A record that names its successor (`replacedBy`): this window follows it — same window, the picture reconnects. */
   function followReplacement(r) {

@@ -165,7 +165,7 @@ export function startingText(ms) {
  * Returns { container, bar, mount, pane, status, connect, disconnect, setStatus, addControl,
  *           focus, dispose, setViewOnly, get client, get state, get wanted, windows() }.
  */
-export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, admit = null, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, onSeat = null, onRefused = null, mayFocus = () => true, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, viewerPlatform = navigatorPlatform, hostPlatform = null, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
+export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, admit = null, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, firstPane = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, onSeat = null, onRefused = null, mayFocus = () => true, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, viewerPlatform = navigatorPlatform, hostPlatform = null, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
   const shell = createPictureShell(host, { labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable'), ...labels }, autoReconnect, onStatus, background: 'var(--bg-primary)', focus: () => focus() });
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
   /** lane xpra-mac-modifiers: the primary-modifier map of THIS viewer and THIS app's machine, asked per event (the one table). */
@@ -206,6 +206,10 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   let stageOffset = { x: 0, y: 0 };
   let minSize = null; // the smallest pane (CSS px) — minPaneCss(the main's constraints, the ratio)
   let constraints = null; // the main window's size constraints (device px), as the client last named them
+  // B-92aa (the coordinator's r1635): the pane the caller PLANS for this connection's FIRST map (a relaunch's fit: the pane the
+  // window is about to have), or null. Read once a connect; it sizes the hello and the first main's fit, then is dropped —
+  // the pane itself follows from then on. No plan ⇒ the pane as it is now (today's behaviour, never an invented size).
+  let planned = null;
   let fixedDev = null, fixedCss = null; // lane app-fit-fixed: the app's FIXED window (device px, as the client named it) and its pane (CSS px)
   // LANE D (a): the SCREEN's ratio and the picture's own scale — the windows are laid out at their quotient: X px per CSS
   // px = devicePixelRatio ÷ pictureScale (1.5× on a 2× screen = a GDK_SCALE-2 picture at 2.667 X px per CSS px, shown
@@ -585,7 +589,8 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     try { client?.close(); } catch {}
     clearWindows();
     for (const sat of sats.values()) sat.unbind(); // S2: a new session — each satellite re-binds by wid once its slot is named
-    const s = paneSize();
+    planned = (typeof firstPane === 'function' && firstPane()) || null; // B-92aa: the caller's plan for this first map, if any
+    const s = planned || paneSize();
     drawRatio = ratio(); drawK = pictureK();
     constraints = null; minSize = null;
     client = createXpraClient({
@@ -614,7 +619,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
         window: onWindow, paint: onPaint, title: (text) => { try { onTitle?.(text); } catch {} },
         // F3 (lane D (a)): the window hears the main's metadata (a CSD app folds its bars) and the client gets the pane of
         // AFTER that, inside this call — a main being announced is fitted and mapped at the final pane (no re-fit, no snap-back)
-        main: (win) => { try { onMain?.(win ? { ...win.meta } : null); } catch {} if (client && win && mode === 'active') { const s = paneSize(); client.resize(s.width, s.height); } },
+        main: (win) => { try { onMain?.(win ? { ...win.meta } : null); } catch {} if (client && win && mode === 'active') { const s = planned || paneSize(); planned = null; client.resize(s.width, s.height); } }, // B-92aa: the first main maps at the PLANNED pane (a relaunch's fit not landed yet), then the pane rules
         state: (win, changed) => { if (client && win && win.wid === client.mainWid) { try { onState?.({ ...changed }); } catch {} } else { const sat = win && sats.get(win.wid); if (sat && sat.bound) { try { sat.cb.onState?.({ ...changed }); } catch {} } } },
         slot: onSlot,
         ready: () => { sessionListed = true; for (const sat of [...sats.values()]) sat.settle(); },

@@ -524,7 +524,7 @@ try {
       ['src/desktop-fit.js', "  const gdkScale = r === 'dpi' ? Math.max(1, Math.min(SCALE_MAX, Math.floor(s))) : Math.max(1, Math.min(SCALE_MAX, Math.ceil(s - 1e-9)));", '  const gdkScale = Math.max(1, Math.min(SCALE_MAX, Math.floor(s))); // lane D CONTROL: the floor rule'],
       ['src/desktop-fit.js', "  const dpi = r === 'dpi' ? Math.round(96 * s / gdkScale) : 96;", '  const dpi = Math.round(96 * s / gdkScale);'],
       ['src/desktop-fit.js', "  const pictureScale = r === 'dpi' ? 1 : round4(s / gdkScale);", '  const pictureScale = 1;'],
-      ['src/lib/desktop-app-window.js', '    fitAfterRelaunch(geo, r.app); // lane D (a) F2: the window keeps the app\'s size at the new scale', '    void geo; // lane D CONTROL: the window keeps its size'],
+      ['src/lib/desktop-app-window.js', '    const plan = relaunchFitPlan(geo, r.app);', '    const plan = null; void geo; // lane D CONTROL: the window keeps its size (no fit planned — B-92aa: the first map takes no plan either)'],
       ['src/desktop-serve.js', "      if (rec.browser === 'chromium' && rec.profileDir) {", "      if (false) { // lane D CONTROL: Chrome not seeded"],
     ];
     let once = true;

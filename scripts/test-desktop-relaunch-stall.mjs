@@ -8,6 +8,8 @@
 // (runScale14, the same walk at DPR 1): a relaunch mapped at a size other than its settled main and refit by the client NAMES
 // the order (the cure is that order, one unit); every map final anyway ⇒ the order is not the cause (the row's flake half closes
 // as not reproduced). Printed whole — «B-92aa VERDICT: …». It runs at every gate that runs its class (never behind a flag).
+// r1635: row 104 NAMED the order (3 of 5 relaunches mapped stale); the cure hands the fit's plan to the new connection's first
+// map, so this suite is now THE PROOF: with the hold in place, a stale map is a red check, not a verdict.
 // The boot (the worktree server on the real xpra rung, headless chrome, the private runtime dir) and the teardown are
 // scripts/xpra-window-boot.mjs's (the xpra window family's helper; this suite is no part of that family: it holds none of the
 // giant's §§, test-ci-gate-tiers §8d). §15's walk (runScale14 and what it reads) is copied from test-desktop-xpra-window-scale,
@@ -130,8 +132,8 @@ try {
     for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wts}/${f} && cp -r ${wt}/${f} ${wts}/${f}`);
     fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wts, 'node_modules'));
     fs.mkdirSync(path.join(wts, 'data'), { recursive: true });
-    const FROM = "    fitAfterRelaunch(geo, r.app); // lane D (a) F2: the window keeps the app's size at the new scale";
-    const TO = "    { const g9 = geo, a9 = r.app, t9 = Date.now(); const held = () => { const c9 = view && view.client; if ((c9 && c9.mainWid) || Date.now() - t9 > 8000) { (winInfo._desktopStallHolds = winInfo._desktopStallHolds || []).push(Date.now() - t9); fitAfterRelaunch(g9, a9); } else setTimeout(held, 20); }; setTimeout(held, 20); } // B-92aa PLACED STALL: the relaunch fit held until the new connection's main window is mapped";
+    const FROM = "    fitAfterRelaunch(geo, r.app, plan); // lane D (a) F2: the window keeps the app's size at the new scale — the SAME plan";
+    const TO = "    { const g9 = geo, a9 = r.app, p9 = plan, t9 = Date.now(); const held = () => { const c9 = view && view.client; if ((c9 && c9.mainWid) || Date.now() - t9 > 8000) { (winInfo._desktopStallHolds = winInfo._desktopStallHolds || []).push(Date.now() - t9); fitAfterRelaunch(g9, a9, p9); } else setTimeout(held, 20); }; setTimeout(held, 20); } // B-92aa PLACED STALL: the relaunch fit held until the new connection's main window is mapped";
     const wf = path.join(wts, 'src/lib/desktop-app-window.js'); const src9 = fs.readFileSync(wf, 'utf8');
     check('B-92aa stall: the relaunch fit\'s call is spelled exactly once (the copy holds exactly it)', src9.split(FROM).length === 2);
     fs.writeFileSync(wf, src9.replace(FROM, TO));
@@ -155,7 +157,8 @@ try {
         // the stall's own proof: each relaunch fit the copy HELD, its held ms (the window keeps the list across its retargets)
         const holds = ([...o.steps].reverse().find((st) => st.g && Array.isArray(st.g.holds)) || { g: { holds: [] } }).g.holds;
         console.log(`    MEASURE B-92aa (not a proof): the stalled fit at DPR 1 — ${rows.map((x) => `${x.label} map ${x.map} = main ${x.main}${x.refits.length ? ` (the client refit ${JSON.stringify(x.refits)})` : ''}`).join('; ')}`);
-        console.log(`    B-92aa VERDICT: ${!holds.length ? 'NONE — the copy held no relaunch fit (the stall never ran: no measure)' : stale.length ? `the ORDER IS NAMED — with the relaunch fit landing after the map, ${stale.length} relaunch(es) mapped at a stale size and the client refit them (${stale.map((x) => `${x.label} ${x.map} → ${x.main}`).join(', ')})` : 'the order is NOT the cause — with the fit held past the map every relaunch still mapped its final size (the flake half closes as not reproduced)'}`);
+        console.log(`    B-92aa VERDICT: ${!holds.length ? 'NONE — the copy held no relaunch fit (the stall never ran: no measure)' : stale.length ? `the ORDER still MAPS STALE — ${stale.length} relaunch(es) mapped at a stale size and the client refit them (${stale.map((x) => `${x.label} ${x.map} → ${x.main}`).join(', ')})` : 'THE CURE HOLDS — with the relaunch fit held past the map, every relaunch mapped at its final size (the first map took the fit\'s plan)'}`);
+        check(`B-92aa THE CURE (r1635): with the relaunch fit HELD past the new connection's map, every relaunch maps at its FINAL size — the first map takes the fit's plan (row 104 at 0cc12963d: 3 of 5 mapped stale)`, holds.length >= 1 && stale.length === 0, rows);
         check(`B-92aa stall: the copy HELD the relaunch fit past the map (${holds.length} held: ${holds.join(', ')} ms)`, holds.length >= 1, o.steps.map((x) => x.label));
         check(`B-92aa stall: the stalled-fit copy ran its transitions (${rows.length} connects measured)`, rows.length >= 4, o.steps.map((x) => x.label + (x.err ? ':' + JSON.stringify(x.err) : '')));
       } catch (e) { threw('B-92aa stall', e); }

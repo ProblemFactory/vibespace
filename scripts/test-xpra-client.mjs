@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The negative controls' patched copies of src/lib/xpra-*.js are written
@@ -2316,6 +2317,54 @@ console.log('§XS lane desktop-x-seat-browser r6 (主开发\'s acceptance r5 on 
   ok(sameKey !== dwsrc, 'r7 mutant: the wheel refusal\'s pacer line is spelled once');
   const MP = pacedRun(DW, toastKeys(sameKey));
   ok(!MP.error && MP.bridgeT0 && !MP.wheelT1, `MUTANT one-pacer (the wheel's refusal back on the bridge refusal's pace) ⇒ the leg goes RED: the wheel's refusal at t0 + 1 s is silent (${JSON.stringify(MP)})`, MP);
+}
+
+console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER IS NAMED»): a relaunch\'s PLANNED pane sizes the new connection\'s FIRST map — never the pane as it stands before the fit lands');
+{
+  // the pane BEFORE the relaunch fit lands (the 11-18 red's own stale size), the plan the fit computed (its final size): the main's
+  // first map-window is the PLAN; no plan (none given, or the caller's null) ⇒ the pane as it is, today's road (never an invented
+  // size); the plan is ONE connect's — a reconnect maps the pane. RED CONTROL: today's view (the plan read nowhere) maps the stale pane
+  const firstMap = async (Vmod, firstPane, again = false) => {
+    const host = new El('div');
+    const view = Vmod.createXpraView(host, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async (b) => ({ bitmap: str(b), close() {} }), secure: false, clipboardApi: false, ...(firstPane !== undefined ? { firstPane } : {}) });
+    const pane = host.children[0].children[1].children[0];
+    pane.clientWidth = 1634; pane.clientHeight = 1232;
+    const once = async () => {
+      const n0 = FakeWorker.instances.length;
+      await view.connect();
+      const wk = await until(() => FakeWorker.instances.length > n0 && FakeWorker.instances[FakeWorker.instances.length - 1]);
+      await until(() => wk.sent('hello').length);
+      wk.feed(['hello', { 'packet-types': [] }]);
+      wk.feed(['new-window', 1, 0, 0, 1634, 1232, { title: 'calc' }]);
+      const m = await until(() => wk.sent('map-window')[0]);
+      return m ? [m[4], m[5]] : null;
+    };
+    const first = await once();
+    const second = again ? await once() : null;
+    view.dispose();
+    return { first, second };
+  };
+  let asked = 0;
+  const oneShot = () => { let left = 1; return () => { asked++; return left-- > 0 ? { width: 1818, height: 1232 } : null; }; }; // as the window's viewOpts hands it: once
+  const a = await firstMap(V, oneShot(), true), b = await firstMap(V, undefined), c = await firstMap(V, () => null);
+  ok(same(a.first, [1818, 1232]) && same(a.second, [1634, 1232]) && asked === 2 && same(b.first, [1634, 1232]) && same(c.first, [1634, 1232]),
+    'B-92aa: the main\'s FIRST map takes the planned pane (1818×1232 while the pane still stands at 1634×1232); the plan is one connect\'s (a reconnect maps the pane); no plan, or a null one ⇒ the pane as it is (today\'s road)', { a, b, c, asked });
+  const vsrc = read('src/lib/xpra-view.js');
+  let today = anchored(vsrc, "    planned = (typeof firstPane === 'function' && firstPane()) || null; // B-92aa: the caller's plan for this first map, if any\n    const s = planned || paneSize();", '    const s = paneSize();', 'B-92aa control: today\'s connect');
+  today = anchored(today, 'const s = planned || paneSize(); planned = null; client.resize(s.width, s.height);', 'const s = paneSize(); client.resize(s.width, s.height);', 'B-92aa control: today\'s main announce');
+  const red = await firstMap(await import(pathToFileURL(MUTXC.write('src/lib/xpra-view.js', today, 'b92aa-no-plan')).href), oneShot());
+  ok(same(red.first, [1634, 1232]), `RED CONTROL (B-92aa): today's view reads no plan — the main maps at the STALE pane (${red.first}) and the fit's resize refits it later (the jump a person sees)`, red);
+  // THE ONE COMPUTATION (r1635's first law): desktop-app-window.js plans the fit ONCE, hands that value to the new connection BEFORE
+  // the retarget and resizes the window with the SAME value; another app's view never takes it (keyed by the relaunched id)
+  const dsrc = read('src/lib/desktop-app-window.js');
+  const PINS = [
+    'const relaunchFitPlan = (g, next) => (!g || !next || closed ? null : (relaunchPaneCss({ pane: g.pane, mainPx: g.mainPx, dpr: g.dpr, from: g.from, to: next }) || null));',
+    '    const plan = relaunchFitPlan(geo, r.app);\n    relaunchPlanned = plan ? { id: r.app.id, width: plan.w, height: plan.h } : null;\n    retarget(r.app.id);',
+    '    fitAfterRelaunch(geo, r.app, plan);',
+    "    firstPane: () => { const p = relaunchPlanned; relaunchPlanned = null; return p && p.id === id ? { width: p.width, height: p.height } : null; },",
+  ];
+  const pmiss = PINS.filter((x) => dsrc.split(x).length !== 2);
+  ok(pmiss.length === 0 && dsrc.split('relaunchPaneCss(').length === 2, 'B-92aa (r1635\'s law): the relaunch fit is computed ONCE (relaunchFitPlan, the one relaunchPaneCss call) and that value both sizes the new connection\'s first map (handed before the retarget, keyed by the relaunched id) and resizes the window', pmiss.map((x) => x.slice(0, 60)));
 }
 
 for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 10 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
