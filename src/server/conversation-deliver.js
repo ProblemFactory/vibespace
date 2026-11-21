@@ -539,6 +539,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     }
   }
   let retrySeq = 0;
+  // B-54b7 (主开发 r734 (3)): A PARK ID IS UNIQUE BY CONSTRUCTION — this park's own token beside the clock and its count (a process that
+  // restarted inside the same millisecond, or under a clock stepped back, minted the previous process's id: its count starts at 1 again)
+  const retryRun = require('crypto').randomBytes(4).toString('hex');
   const retryListeners = new Set();
   const turnEndListeners = new Set();
   const lastPostAt = new Map();   // cid → the last SUCCESSFUL post's instant (the park's own floor)
@@ -834,7 +837,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** `opts` = the ladder call's own (the relay of its caller's fromName / cardText / group / retry) */
   function parkRetry(cid, text, opts, { kind, spendReason, charged, attempt }) {
     const now = clock.now();
-    const e = { id: `rt-${now.toString(36)}-${++retrySeq}`, cid, text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.group ? { group: opts.group } : {}), spendReason, producer: (opts.retry && opts.retry.producer) || null, meta: (opts.retry && opts.retry.meta) || null,
+    const e = { id: `rt-${now.toString(36)}-${retryRun}-${++retrySeq}`, cid, text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.group ? { group: opts.group } : {}), spendReason, producer: (opts.retry && opts.retry.producer) || null, meta: (opts.retry && opts.retry.meta) || null,
       charged: charged ? { reason: charged.reason, identity: charged.identity ? { key: charged.identity.key, name: charged.identity.name || charged.identity.key } : null, hold: charged.hold || null, holdAt: now } : null,
       firstAt: now, attempts: [attempt], nextAt: now + RETRY_STEPS_MS[0], retries: 0 };
     retryQueue(cid).push(e);
@@ -874,7 +877,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       scheduleRetry();
       return { parked: true, id: same.id, retryAt: same.nextAt, retryInMs: Math.max(0, same.nextAt - now), merged: true };
     }
-    const e = { id: `rt-${now.toString(36)}-${++retrySeq}`, cid, text, fromName, cardText: null, kind, spendReason, producer, key, meta, senders: sender ? [sender] : [], held: { why: 'paced', reason: String(reason).slice(0, 200) }, charged: null, firstAt: now, attempts: [{ at: now, reason: String(reason).slice(0, 200), phase: 'pace', busy: null, late: 0, why: 'first' }], nextAt: at, retries: 0 };
+    const e = { id: `rt-${now.toString(36)}-${retryRun}-${++retrySeq}`, cid, text, fromName, cardText: null, kind, spendReason, producer, key, meta, senders: sender ? [sender] : [], held: { why: 'paced', reason: String(reason).slice(0, 200) }, charged: null, firstAt: now, attempts: [{ at: now, reason: String(reason).slice(0, 200), phase: 'pace', busy: null, late: 0, why: 'first' }], nextAt: at, retries: 0 };
     retryQueue(cid).push(e);
     writeRetryNow();
     scheduleRetry();
@@ -923,7 +926,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       return { parked: true, id: same.id, merged: true, inLine: !!same.inflight };
     }
     const now = clock.now();
-    const e = { id: `rt-${now.toString(36)}-${++retrySeq}`, cid, text: null, fromName, cardText: cardText ? String(cardText).slice(0, 2000) : null, kind, spendReason, producer, producers: [producer], key: null, meta, metas: meta ? [meta] : [], senders: sender ? [sender] : [], held: { why: 'ended', reason: String(reason || '').slice(0, 200) }, charged: null, firstAt: now, nextAt: now, attempts: [], deliveries: 1 };
+    const e = { id: `rt-${now.toString(36)}-${retryRun}-${++retrySeq}`, cid, text: null, fromName, cardText: cardText ? String(cardText).slice(0, 2000) : null, kind, spendReason, producer, producers: [producer], key: null, meta, metas: meta ? [meta] : [], senders: sender ? [sender] : [], held: { why: 'ended', reason: String(reason || '').slice(0, 200) }, charged: null, firstAt: now, nextAt: now, attempts: [], deliveries: 1 };
     retryQueue(cid).push(e);
     writeRetryNow();
     scheduleRetry();

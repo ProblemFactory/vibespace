@@ -782,7 +782,6 @@ class JobManager {
         // process killed mid-post
         // a notice DRAINED while the file was held (its copy put back at the boot, already in the file) leaves the merge: never twice — FIRST, so the journal
         // never says «waits again» for a copy the merge then removes (the read's should)
-        if (merge && this._parkLeftWhileHeld && this._parkLeftWhileHeld.size) { for (let i = list.length - 1; i >= 0; i--) if (list[i].rt && this._parkLeftWhileHeld.has(list[i].rt)) list.splice(i, 1); }   // B-54b7 (its read's should 3): its park entry was delivered or dropped while held — never twice
         if (merge && this._drainedWhileHeld && this._drainedWhileHeld.size) { for (let i = list.length - 1; i >= 0; i--) if (this._drainedWhileHeld.has(`${cid}\u0000${list[i].jobId}\u0000${list[i].ts}`)) list.splice(i, 1); }
         const ids = new Set();
         for (const n of list) if (n && n.ho) { ids.add(n.ho); delete n.ho; }
@@ -879,7 +878,7 @@ class JobManager {
     this._notifsUnread = null; this._notifsMissingAt = 0; this._notifsTries = 0; this._notifsUnreadSaid = false; this._notifsSaveSaid = false;
     if (this._notifsT) { clearTimeout(this._notifsT); this._notifsT = null; }
     if (a.state === 'data') this._notifsFrom(a.value, { merge: true });
-    this._drainedWhileHeld = null; this._parkLeftWhileHeld = null;   // the sets end with the hold, whatever the read answered (a merge, a file GONE, torn bytes set aside)
+    this._drainedWhileHeld = null;   // the set ends with the hold, whatever the read answered (a merge, a file GONE, torn bytes set aside)
     const now2 = [...this.pendingNotifs.values()].reduce((k, l) => k + l.length, 0);
     this.d.log(`[jobs] job-notifications.json read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${now2 - waiting} notice(s) read` : a.setAside ? `torn bytes, kept aside as ${a.setAside}` : 'the file is GONE'} — ${waiting} that waited here kept`);
     const L = this._saveNotifs(); this._dirty = true;
@@ -1452,9 +1451,8 @@ class JobManager {
     if (!entry || entry.producer !== 'jobs' || !entry.meta || !entry.meta.jobId) return false;
     if (ev === 'wake-owed') return false;   // _oweWake already journaled the owed wake
     if (ev === 'wake') { this._wakeAnswered(cid, entry.meta.jobId, extra); return false; }   // an entry written before `metas`
-    // B-54b7 (its re-read's should 3): an entry THIS engine saw parked can have no twin in a file the previous process left — known by its
-    // own event, never by a clock (a clock stepped back moved the old bound); kept while it is parked, at most a bound of the newest
-    const ownPark = ev === 'parked' || !!(this._parkedHere && this._parkedHere.has(entry.id));
+    // B-54b7 (its re-read's should 3, 主开发 r739): an entry THIS engine saw parked can have no twin in a file the previous process left —
+    // known by its own event, never by a clock; kept while it is parked, at most a bound of the newest (one pruned is only taken, never lost)
     if (ev === 'parked') { const P = this._parkedHere || (this._parkedHere = new Set()); P.add(entry.id); if (P.size > 2000) P.delete(P.values().next().value); }
     else if ((ev === 'delivered' || ev === 'fell' || ev === 'dropped') && this._parkedHere) this._parkedHere.delete(entry.id);
     if ((ev === 'delivered' || ev === 'fell') && this._retryVerdicts) this._retryVerdicts.delete(entry.id);   // r6: the memo ends with its entry
@@ -1477,7 +1475,6 @@ class JobManager {
         this._notifyLogPush(job, { lane, ok: true, to: extra.peerName || null, retries, deliveredAt: extra.deliveredAt || now(), parkedFor: Number(extra.parkedFor) || 0, via, ...(subscriber ? { sub: true } : {}) });
         if (via === 'prompt' && Number(entry.firstAt) >= M.terminalAt(job)) this.markAck(job, 'notified', now(), { quiet: true });   // rode the next prompt: read like a drained stash entry
       }
-      this._parkLeftHeld(entry, ownPark);   // B-54b7 (its read's should 3)
       if (via === 'message') this._stampNotifyFloor(cid, withoutNoticeHead(entry.text));   // R5: the floor counts the delivery that LANDED — the raw text's digest (the ladder's head stripped)
       this._dirty = true;
       try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }
@@ -1487,6 +1484,10 @@ class JobManager {
       const verdict = this._retryVerdicts && this._retryVerdicts.get(entry.id);
       if (this._retryVerdicts) this._retryVerdicts.delete(entry.id);
       if (verdict === 'held-copy') return true;   // B-54b7 (iv): the copy is already on disk here — nothing to close, nothing stashed again
+      if (verdict === 'held-file') {   // B-54b7 (主开发 r739): the previous process's entry while the file is held — TAKEN, never posted; its line waits with no next attempt
+        if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; } this._dirty = true; }
+        this._save(); return this._taken(this._parkCopyIn(cid, entry.id));
+      }
       const why = extra.threw ? 'the delivery check failed — not delivered (withheld)'
         : verdict === 'groups-unread' ? 'the Task Groups store cannot be read — held until it reads, judged then'
         : verdict === 'unknown' ? 'no live record proves its view — held for its next turn, judged there'
@@ -1498,7 +1499,6 @@ class JobManager {
       // B-54b7 (ALSO CURED): a HELD VIEW's line (groups-unread) is a held line too — it answered a plain «taken» and the park's copy left
       // before the line was on disk; both ride the copy's own landing now
       if (verdict === 'unknown' || verdict === 'groups-unread') { this._save(); return this._taken(this._parkCopyIn(cid, entry.id)); }
-      if (!extra.threw) this._parkLeftHeld(entry, ownPark);   // B-54b7 (its read's should 3): refused / gone — owed nowhere (a judge that THREW withheld it: its twin is judged again at its drain)
       return true;
     }
     if (ev === 'fell') {
@@ -1560,11 +1560,6 @@ class JobManager {
   _parkCopyIn(cid, id) { const U = this._unlanded, q = (U && this.pendingNotifs.get(cid)) || []; for (let i = q.length - 1; i >= 0; i--) if (q[i] && q[i].rt === id && U.has(q[i])) return q[i]; return null; }
   /** a taken copy left the stash before its landing (the cap, a drop): the park's copy leaves now — what it held is said by that road */
   _letParkGo(n) { const rec = n && this._unlanded ? this._unlanded.get(n) : null; if (!rec) return; this._unlanded.delete(n); if (rec.go) rec.go(); }
-  /** B-54b7 (its read's should 3): a park entry this engine saw DELIVERED or dropped (not owed) while job-notifications.json is held, and
-   *  that it did not park itself (`own`: only an entry the previous process left can have a twin in the held file — a kill between that
-   *  twin's landing and the park's own rewrite) — the lift's merge strikes the file's twin (rt). Bounded by what the previous process left
-   *  parked; ends with the hold. */
-  _parkLeftHeld(entry, own = false) { if (this._notifsUnread && entry && entry.id && !own) (this._parkLeftWhileHeld || (this._parkLeftWhileHeld = new Set())).add(String(entry.id)); }
   /** B-54b7: a copy taken from the ladder WHILE job-notifications.json was held waits for its own step — no door delivers it before (its
    *  park copy is still on disk: delivered from memory, then a crash, the park's copy came back — twice); the hold's end is not its landing
    *  (its read's should 2: the lift's save may not land at once) */
@@ -1889,6 +1884,18 @@ class JobManager {
     // B-54b7 (iv): a park entry whose copy job-notifications.json ALREADY holds (read at the boot or the merge: a kill between that landing
     // and the park's own rewrite left both on disk) is never delivered or stashed a second time — the park's copy leaves
     if (entry && this._parkOnDisk && this._parkOnDisk.has(entry.id)) { (this._retryVerdicts || (this._retryVerdicts = new Map())).set(entry.id, 'held-copy'); return false; }
+    // B-54b7 (主开发 r739 — two crashes and a hold): while job-notifications.json is HELD, a plain park entry this engine did not park itself
+    // (the previous process left it) may have its twin in that very file — a kill between the twin's landing and the park's own rewrite. It
+    // is never POSTED while held: the store TAKES it (a hidden copy carrying its park id; the ladder's copy kept until the lift's landing) and
+    // the read again keeps ONE (the twin by its id, else this copy). The owner's own copy too: it waits until the file reads (said in the kb).
+    // An owed or ended wake (`held` on the entry: its words are the stash's) and a may-have-landed copy (the fall road takes it) are not this
+    if (this._notifsUnread && !this.readOnly && entry && entry.id && !entry.held && !entry.maybeDelivered && !(this._parkedHere && this._parkedHere.has(entry.id))) {
+      const target = this.jobs.get(meta.jobId) || this.archivedById(meta.jobId) || { id: meta.jobId, name: meta.jobName || meta.jobId };
+      const kind = meta.subscriber ? 'not-running' : 'not-reachable';
+      this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || entry.firstAt }, kind, { stampLast: false, held: { kind }, mark: !!meta.sub, park: entry.id });
+      (this._retryVerdicts || (this._retryVerdicts = new Map())).set(entry.id, 'held-file');
+      return false;
+    }
     if (!meta.subscriber) return true;
     const verdict = this.viewVerdict(cid, meta.jobId, { sub: !!meta.sub });
     if (JobManager.owed(verdict)) return true;   // r6: an owed copy leaves no memo (the ladder delivers or fells it — the memo is for a drop's journal line)

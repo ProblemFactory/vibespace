@@ -984,6 +984,7 @@
 - (2026-11-19) AN ANTIGRAVITY ERROR SAID LAST WAS SAID NOWHERE (B-bba6): no newline ⇒ never flushed; a replaced process's late line only logged. 不变量 = a process's last words are read before its exit is said; a line is filed under the process that wrote it ⇒ kb-bugfix-invariants
 - (2026-11-19) THE HUB ENDED ON A FILE WATCH THE MACHINE REFUSED (ENOSPC: inotify used up by other programs; a helper's watch armed from a retry timer, uncaught). 不变量 = a watch that cannot be armed never ends the hub nor its feature ⇒ kb-bugfix-invariants
 - (2026-11-19) THE FRAME CHECK BUILT AN EXPRESSION FOR EVERY PIECE IT JUDGED — THE HUB'S TOP HOLD WHILE AN AGENT SEARCHED (hotfix 2.369.411). 不变量 = a predicate the belt calls once a piece compiles its expression ONCE (module level, no g / y: no state); test-channel-record ⑩.
+- (2026-11-20) A NOTICE WAITING FOR RETRY WAS LOST AT A RESTART WHILE job-notifications.json COULD NOT BE READ (B-54b7). 不变量 = a copy one store takes leaves the giver's file only at the taker's OWN landing, hidden till then ⇒ kb-bugfix-invariants
 
 ## AN OLD ENGINE'S RAW «>» IN A TITLE ENDED THE ANCHOR TAG THREE PASSES READ (lane setting-doors, the acceptance's F4, 2026-11-15)
 
@@ -10502,3 +10503,54 @@ Gates:
 **THE INTERRUPTION FILTER IS A GUESS.** A replaced IDLE process's late line that says «interrupt» or «cancel» stays quiet: no measurement in the tree shows what the real agy writes on stderr when it is stopped while idle, and no lane runs the real binary. If a false error shows after an idle model switch, look here first (`lateError`'s filter).
 **不变量 = a process's last words are read before its exit is said, a line is filed under the process that wrote it, and an ending process starts nothing.**
 **Pins.** test-agy-harness ⑦c (the stand-in agy only; every placement an order the leg holds — gate files and the wrapper's own log lines): both orders of the last words, the bound, the sign-in, the skip, the late error once / Stop quiet / an interruption quiet, the crash with a switch pending, EPIPE, a line typed in the exit wait, a late line after the next process's start; red controls (anchored mutants): no flush at the end, no wait, no bound, the late error only logged, no open-turn guard, no interruption filter, no ending mark, no stdin listener, no runPrompt guard, «said once» removed, the served model read at the notice.
+
+## A NOTICE WAITING FOR RETRY WAS LOST AT A RESTART WHILE THE NOTICES FILE COULD NOT BE READ (2026-11-20, lane bl-jobs, B-54b7)
+
+**Symptom.** While data/job-notifications.json was HELD (its read failed: EIO, EACCES, a network mount that stopped answering), a Background Work notice that was waiting on the delivery ladder could be lost at a restart.
+
+**Cause.** The jobs store TAKES a parked jobs copy off the ladder into its own stash in two places:
+- the judge's held line: a subscriber's copy that no record proves may view, or a held Task Groups view;
+- a fall: the hour's bound, the park's cap, «not running» — an owner's copy too.
+
+The ladder keeps its copy in msg-retry.json (`handing`) until the taker's `ride(step)` runs. The jobs take rode the store writer's `afterLanding`, which runs a step AT ONCE when the writer owes nothing for the file. A held file is never written, so the writer owed nothing: the park's one durable copy left at once, for a stash line in memory only.
+
+There were two more holes:
+- the judge dropped a whole batch with ONE shared countdown, so no copy of a batch left until its last rider ran: a cap's eviction freed nothing, and a boot during a hold grew the park;
+- a park id was its clock and a count from 1, so a process restarted inside the same instant minted the previous process's id.
+
+**Fix.**
+- src/jobs.js `_taken(item)` → `_rideTaken` rides the copy's OWN landing:
+  - when the file reads, the writer's landing;
+  - while held, the lift's save — ONE `_afterNotifsLift` step for the copies taken while held, each under its own try, never a later take's.
+- `_waitsForLanding` hides a copy taken while held from peekNotifs, drainNotifs and wakeOwed until its own step ran. Each conversation's strip and wake chain are told at that landing.
+- A taken copy that leaves the stash first (the cap of 30, a drop at the drain's judge) lets its park copy go at once (`_letParkGo`).
+- The stash copy carries the park id (`rt`):
+  - a park entry whose copy the file already holds (`_parkOnDisk`, read at the boot and the merge) is never posted or stashed again;
+  - memory's copy of it leaves the merge.
+- TWO CRASHES AND A HOLD (主开发 r739). The twin is on disk; a boot finds the file held and the ladder would post the owner's copy; a second crash comes before the lift; the next boot reads the file and the twin is delivered again — a billed turn twice. Now, while the file is held, a plain park entry this engine did not park itself (the previous process left it, known by the engine's own «parked» events) is never POSTED: the judge TAKES it like an undecided copy (verdict `held-file`). The read again then keeps ONE copy: the file's twin by its id, else this one. This replaced an in-memory «struck» set that the second crash forgot.
+- src/server/conversation-deliver.js judgeRetries: each taken entry leaves at its own taker's landing, written once per landing pass.
+- Every park id carries its park's own token (`retryRun`). An id is unique by construction, not by the clock not repeating.
+
+**SAID, not built (accepted by 主开发, r739).** A copy taken while the file is held stays hidden for the whole hold, which on a broken mount can be days. During a hold EVERY notice the previous process left parked waits until the file reads again, the owner's own too, not only the rare twin. That is the safe side of a broken file: a notice late, never a billed turn twice.
+
+What the person has meanwhile:
+- the hold's For-you item, naming the file and its error; its words («a restart before then loses only what arrived meanwhile») are now true of these copies too;
+- an ended conversation's row in the conversation list, which counts them among its waiting notices (`notifCount`). A live conversation's strip shows them only from their landing.
+
+No door on the page ends this store's hold: the store-held strip with its «Start empty» door covers the persistence stores, not job-notifications.json. The engine reads the file again by itself, off the loop.
+
+**不变量 = a copy one store takes from another leaves the giver's file only at the taker's OWN landing (never at a «landing» a held store answers at once), and no door delivers it before; one copy deliverable at any instant, one copy at every crash point.**
+
+**Pins.** test-notify-retry §B-54b7, on the REAL ladder and engine, with the hold, the lift and every landing placed:
+- the judge road and the fall road;
+- two crash-boots while held;
+- a retry tick, a turn end and a hand-over press during the hold;
+- a slow lift's save, and a versioned landing;
+- the cap through eighty events;
+- a boot's batch past the cap;
+- the twin on disk at a boot that reads the file;
+- two crashes with a held boot between (delivered once; control: the unit before r739, delivered twice);
+- a held boot with no twin (not posted during the hold, delivered once at the read again);
+- the same-instant ids.
+
+Each has a red control in a copy.

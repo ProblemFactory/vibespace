@@ -2464,8 +2464,8 @@ await (async () => {
     R.parkIds = () => { try { return (JSON.parse(fs.readFileSync(R.parkFile, 'utf-8'))[cid] || []).map((e) => e.id); } catch { return []; } };
     R.onDisk = () => { try { return (JSON.parse(fs.readFileSync(R.notifsFile, 'utf-8'))[cid] || []).map((n) => n.rt || null); } catch { return []; } };
     R.mem = () => (R.jm.pendingNotifs.get(cid) || []).map((n) => n.rt || null);
-    R.boot = (Mod, CDm = CD) => {
-      if (R.jm) now += 5000;   // a restart takes seconds (RestartSec=5): a new process's park ids are its clock and its own count from 1
+    R.boot = (Mod, CDm = CD, { sameInstant = false } = {}) => {
+      if (R.jm && !sameInstant) now += 5000;   // a restart takes seconds (RestartSec=5) — not for the ids: each park mints its own token (r734 (3))
       for (const t of timers) t.dead = true;   // the previous process is gone: nothing closed, nothing flushed (a crash)
       if (R.jm) { R.jm._unreadStopped = true; if (R.jm._notifsT) { clearTimeout(R.jm._notifsT); R.jm._notifsT = null; } }
       const P = placedWriter(); R.W = P.W; R.land = P.land; R.landUpTo = P.landUpTo; R.setSlow = P.setSlow;
@@ -2690,40 +2690,79 @@ await (async () => {
     const vx = await viewScene(MB.load('src/jobs.js', anchored(JSRC, VIEW_A, "      if (verdict === 'unknown') { this._save(); return this._taken(this._parkCopyIn(cid, entry.id)); }   // MUTANT: groups-unread answers a plain «taken»", 'b54b7 a held view rides the landing'), 'b54b7-view'), 'view-plain');
     ok(!vx.before.park.length && !vx.before.disk.length, 'CONTROL (c) (groups-unread back to a plain «taken», in a copy): its park copy leaves msg-retry.json before the notices holding it are on disk (red)', JSON.stringify(vx));
   }
-  // its read's should 3: the instant both are on disk, and the boot after it finds the file HELD — the ladder delivers the owner's copy during
-  // the hold (nothing in memory names the twin); at the read again the file's twin is struck, never delivered a second time
-  const heldTwinScene = async (Mod, name, how = 'delivered') => {
+  // 主开发 r739 — TWO CRASHES AND A HOLD, with real files: the twin on disk (a kill between its landing and the park's rewrite); a boot that
+  // finds the notices file HELD (the previous process's entry is TAKEN, never posted); a second crash before the lift; a boot that reads the
+  // file (the twin in it): delivered ONCE. RED control: the unit before this item (the held boot posts the owner's copy — then the twin)
+  const ownerJob = (R, id) => { const job = { id, kind: 'task', name: 'nightly', state: 'done', owner: { conversation: { id: R.cid } }, access: { view: 'all', control: 'session' }, runs: [] }; R.jm.jobs.set(job.id, job); R.jm._save(); R.land(); return job; };
+  const twoCrashScene = async (Mod, name) => {
     const R = mkRig(name); R.lift('{}'); R.boot(Mod);
-    const job = { id: 'jb-5b7f0002', kind: 'task', name: 'nightly', state: 'done', owner: { conversation: { id: R.cid } }, access: { view: 'all', control: 'session' }, runs: [] };
-    R.jm.jobs.set(job.id, job); R.jm._save(); R.land();
+    const job = ownerJob(R, 'jb-5b7f0002');
     R.setAnswer(MISS); R.jm._notifyOwner(job, { what: 'finished: the twin' });
     const id = (await until(() => R.deliver.retryCount(R.cid) === 1)) ? R.deliver.retryPeek(R.cid)[0].id : null;
     const twin = JSON.stringify({ [R.cid]: [{ jobId: job.id, jobName: 'nightly', text: 'finished: the twin', ts: Date.now(), urgency: 'low', held: { kind: 'not-reachable' }, rt: id }] });
-    R.hold(); R.boot(Mod);   // the boot after the kill: the file (holding the twin) cannot be read
-    if (how === 'threw') R.jm.retryOwed = () => { throw new Error('a stand-in: the view source is down'); };   // the judge withholds it
-    R.setAnswer(TAKES); await R.turnEnd();   // the ladder delivers its copy (the owner's, owed) — or withholds it (the judge threw)
-    if (how === 'threw') delete R.jm.retryOwed;
-    // a FRESH event of this engine, parked and delivered during the same hold: never marked (it can have no twin in the file)
-    R.setAnswer(MISS); R.jm._notifyRate.delete(R.cid); R.jm._notifyOwner(job, { what: 'finished: a fresh one while held' });
-    const fresh = (await until(() => R.deliver.retryCount(R.cid) === 1)) ? R.deliver.retryPeek(R.cid)[0].id : null;
-    R.setAnswer(TAKES); await R.advance(35 * 1000);   // its retry: past the ladder's 30 s floor after the post just made
-    const posted = R.posts.length, strike = [...(R.jm._parkLeftWhileHeld || [])];
-    R.lift(twin); await R.jm._notifsRetry();   // the storage answers again, with the twin
+    R.hold(); R.boot(Mod);   // the first crash (the twin landed, the park kept its entry); this boot finds the file held
+    R.setAnswer(TAKES); await R.turnEnd(); await R.advance(35 * 1000);   // its turn end and its retry during the hold
+    const held = { posts: R.posts.length, park: R.parkIds(), mem: R.mem() };
+    R.lift(twin); R.boot(Mod);   // the second crash, before the lift; the next boot reads the file — the twin in it
+    R.setAnswer(TAKES); await R.turnEnd();
     const drained = R.jm.drainNotifs(R.cid).length;
     if (R.jm._notifsT) clearTimeout(R.jm._notifsT);
-    return { id, fresh, strike, posted, drained, delivered: posted + drained, park: R.parkIds().length };
+    return { id, held, posts: R.posts.length, drained, delivered: R.posts.length + drained, park: R.parkIds() };
   };
   {
-    const t = await heldTwinScene({ JobManager }, 'held-twin');
-    ok(!!t.id && !!t.fresh && t.fresh !== t.id && JSON.stringify(t.strike) === JSON.stringify([t.id]) && t.posted === 2 && t.drained === 0 && !t.park, 'B-54b7 (its read\'s should 3): a twin in the held file whose park entry was delivered during the hold is struck at the read again — delivered once; a fresh entry of this engine delivered during the hold is never marked (no clock: its own «parked»)', JSON.stringify(t));
-    const tw = await heldTwinScene({ JobManager }, 'held-twin-threw', 'threw');
-    ok(!!tw.id && JSON.stringify(tw.strike) === '[]' && tw.posted === 1 && tw.drained === 1, 'B-54b7 (its re-read\'s nit 1): a park entry its judge WITHHELD while held (the judge threw) strikes nothing — its twin is kept and delivered at its drain, once', JSON.stringify(tw));
-    const THREW_A = '      if (!extra.threw) this._parkLeftHeld(entry, ownPark);';
-    const twx = await heldTwinScene(MB.load('src/jobs.js', anchored(JSRC, THREW_A, '      this._parkLeftHeld(entry, ownPark); /* MUTANT: a throw strikes too */', 'b54b7 a withheld entry strikes nothing'), 'b54b7-threw-strikes'), 'held-twin-threw-x', 'threw');
-    ok(twx.drained === 0 && twx.posted === 1, 'CONTROL (a throw strikes too, in a copy): the withheld entry\'s twin is struck at the read again — the notice is delivered by nobody (red)', JSON.stringify(twx));
-    const STRIKE_A = '        if (merge && this._parkLeftWhileHeld && this._parkLeftWhileHeld.size) {';
-    const tx = await heldTwinScene(MB.load('src/jobs.js', anchored(JSRC, STRIKE_A, '        if (false) { /* MUTANT: no strike */', 'b54b7 a twin struck at the merge'), 'b54b7-no-strike'), 'held-twin-kept');
-    ok(tx.posted === 2 && tx.drained === 1, 'CONTROL (the strike cut, in a copy): the twin comes back at the read again and is drained after the ladder already delivered it — twice (red)', JSON.stringify(tx));
+    const c2 = await twoCrashScene({ JobManager }, 'two-crashes');
+    console.log('    facts (two crashes) ' + JSON.stringify(c2));
+    ok(!!c2.id && c2.held.posts === 0 && JSON.stringify(c2.held.park) === JSON.stringify([c2.id]) && JSON.stringify(c2.held.mem) === JSON.stringify([c2.id]) && c2.posts === 0 && c2.drained === 1 && c2.delivered === 1 && !c2.park.length, 'B-54b7 (主开发 r739): two crashes and a hold — the held boot TAKES the previous process\'s entry (never posts it), the second crash finds it still parked, the boot that reads the file keeps the twin: delivered ONCE', JSON.stringify(c2));
+    const TAKE_HELD_A = '    if (this._notifsUnread && !this.readOnly && entry && entry.id && !entry.held && !entry.maybeDelivered && !(this._parkedHere && this._parkedHere.has(entry.id))) {';
+    const c2x = await twoCrashScene(MB.load('src/jobs.js', anchored(JSRC, TAKE_HELD_A, '    if (false) { /* MUTANT: the unit before r739 — a held boot posts the previous process\'s entry */', 'b54b7 a held boot takes the previous process\'s entries'), 'b54b7-held-posts'), 'two-crashes-posted');
+    ok(c2x.posts === 1 && c2x.drained === 1 && c2x.delivered === 2, 'CONTROL (the unit before this item, in a copy): the held boot posts the owner\'s copy and the boot that reads the file delivers its twin — a billed turn twice (red)', JSON.stringify(c2x));
+  }
+  // …and a held boot with a plain entry of the previous process and NO twin: not posted during the hold (a turn end, retries past the hour),
+  // delivered once at the read again; a fresh entry of THIS engine during the same hold is posted as ever (it can have no twin)
+  const noTwinScene = async (Mod, name) => {
+    const R = mkRig(name); R.lift('{}'); R.boot(Mod);
+    const job = ownerJob(R, 'jb-5b7f0005');
+    R.setAnswer(MISS); R.jm._notifyOwner(job, { what: 'finished: the old one' });
+    const id = (await until(() => R.deliver.retryCount(R.cid) === 1)) ? R.deliver.retryPeek(R.cid)[0].id : null;
+    R.hold(); R.boot(Mod);   // a crash; this boot finds the file held (no twin anywhere)
+    R.setAnswer(TAKES); await R.turnEnd(); await R.advance(70 * 60 * 1000);
+    const old = { posts: R.posts.length, park: R.parkIds(), mem: R.mem() };
+    R.setAnswer(MISS); R.jm._notifyRate.delete(R.cid); R.jm._notifyOwner(job, { what: 'finished: a fresh one' });
+    const fresh = (await until(() => R.deliver.retryCount(R.cid) === 1)) ? R.deliver.retryPeek(R.cid)[0].id : null;
+    R.setAnswer(TAKES); await R.advance(35 * 1000);   // the fresh one's retry: posted
+    const freshPosted = R.posts.length;
+    R.lift('{}'); await R.jm._notifsRetry(); await turn();
+    const lifted = { park: R.parkIds(), disk: R.onDisk() };
+    const drained = R.jm.drainNotifs(R.cid).length, again = R.jm.drainNotifs(R.cid).length;
+    if (R.jm._notifsT) clearTimeout(R.jm._notifsT);
+    return { id, fresh, old, freshPosted, lifted, drained, again };
+  };
+  {
+    const nt = await noTwinScene({ JobManager }, 'no-twin');
+    console.log('    facts (no twin) ' + JSON.stringify(nt));
+    ok(!!nt.id && nt.old.posts === 0 && JSON.stringify(nt.old.park) === JSON.stringify([nt.id]) && JSON.stringify(nt.old.mem) === JSON.stringify([nt.id]) && !!nt.fresh && nt.fresh !== nt.id && nt.freshPosted === 1 && !nt.lifted.park.length && JSON.stringify(nt.lifted.disk) === JSON.stringify([nt.id]) && nt.drained === 1 && nt.again === 0, 'B-54b7 (主开发 r739): a held boot with the previous process\'s plain entry and no twin — not posted during the hold (a turn end, retries past the hour), delivered ONCE at the read again; a fresh entry of this engine is posted as ever', JSON.stringify(nt));
+  }
+  // 主开发 r734 (3): A PARK ID IS UNIQUE BY CONSTRUCTION — a process that restarts inside the same instant (the clock not moved) never
+  // mints the previous process's id (its count starts at 1 again): the park's own token is in every id
+  const idScene = async (CDm, name) => {
+    const R = mkRig(name); R.lift('{}'); R.boot({ JobManager }, CDm);
+    const job = { id: 'jb-5b7f0004', kind: 'task', name: 'ids', state: 'done', owner: { conversation: { id: R.cid } }, access: { view: 'all', control: 'session' }, runs: [] };
+    R.jm.jobs.set(job.id, job); R.jm._save(); R.land();
+    R.setAnswer(MISS); R.jm._notifyOwner(job, { what: 'the first' });
+    const first = (await until(() => R.deliver.retryCount(R.cid) === 1)) ? R.deliver.retryPeek(R.cid)[0].id : null;
+    R.boot({ JobManager }, CDm, { sameInstant: true });   // a crash and a boot inside the same instant
+    R.jm.jobs.set(job.id, job); R.jm._notifyRate.delete(R.cid); R.jm._notifyOwner(job, { what: 'the second' });
+    const second = (await until(() => R.deliver.retryCount(R.cid) === 2)) ? R.deliver.retryPeek(R.cid).slice(-1)[0].id : null;
+    if (R.jm._notifsT) clearTimeout(R.jm._notifsT);
+    return { first, second };
+  };
+  {
+    const ids = await idScene(CD, 'ids');
+    ok(!!ids.first && !!ids.second && ids.first !== ids.second, 'B-54b7 (主开发 r734 (3)): a park id is unique by construction — the next process, at the same instant, mints a different id (its park\'s own token)', JSON.stringify(ids));
+    const CDSRC2 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
+    const TOKEN_A = "  const retryRun = require('crypto').randomBytes(4).toString('hex');";
+    const idsx = await idScene(MB.load('src/server/conversation-deliver.js', anchored(CDSRC2, TOKEN_A, "  const retryRun = 'x';   /* MUTANT: no token of the process */", 'b54b7 a park id carries its park\'s token'), 'b54b7-no-token'), 'ids-no-token');
+    ok(idsx.first && idsx.first === idsx.second, 'CONTROL (no token, in a copy): the next process mints the previous process\'s id at the same instant (red)', JSON.stringify(idsx));
   }
   // (iv) THE INSTANT BOTH ARE ON DISK (a kill between the notices' landing and the park's own rewrite): the boot judges the park entry — never a second copy
   const bothScene = async (Mod, name, who = 'subscriber') => {
