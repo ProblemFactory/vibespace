@@ -136,7 +136,7 @@ export const ROWS = Object.freeze([
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'walkLadderAfterCredit', 'spend', 1],
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'writeCodexReading', 'readings', 1],
   ['poolMemberOfSessionFor', 'src/server/usage-pool-engine.js', 'heldPoolMemberFor', 'pile', 1],
-  ['poolMemberOfSessionFor', 'src/server/usage-pool-engine.js', 'heldPoolUnknown', 'spend', 1],   // an unknown held member refuses a credit spend
+  ['poolMemberOfSessionFor', 'src/server/usage-pool-engine.js', 'heldPoolUnknown', 'spend', 1],   // an unknown held member refuses a credit spend — and (B-87fd) files no reading
   ['usageCacheKeyFor', 'src/server/usage-pool-engine.js', 'cacheFactsOf', 'readings', 1],
   ['usageCacheKeyFor', 'src/server/usage-pool-engine.js', 'markLimitBannerNow', 'readings', 1],
   ['usageCacheKeyFor', 'src/server/usage-pool-engine.js', 'noteLateFact', 'readings', 1],
@@ -554,7 +554,7 @@ export const CONSUMERS = Object.freeze({
   "gatherPlan": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Plans which conversations may move onto a member; the billing member only gates the provider check; returns sids and skip reasons."},
   "handOverGroups": {"file": "src/server/stash-handover.js", "fields": [], "why": "the group hand-over's spend check per group; returns {ok, code, error} and counts — the verdict's identity is said in words only"},
   "handleResetCreditResult": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Settles a reset-credit answer; liveQuotaKeyFor names the attempt's key for the lookup and the ladder walk; returns nothing."},
-  "heldPoolUnknown": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (the held member's origin is unknown): a gate that refuses money moves, never the member itself."},
+  "heldPoolUnknown": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (the held member's origin is unknown): a gate that refuses money moves and (B-87fd) files no reading, never the member itself."},
   "holdRemoved": {"file": "src/server/usage-pool-engine.js", "fields": ["to"], "why": "Parks a removed member's conversation; heldPoolMemberFor/poolCurrent/_wallScope only gate the act; to is the verdict's parking target."},
   "linkHold": {"file": "src/server/usage-pool-engine.js", "fields": ["on", "linked", "held", "via", "viaId", "soonest", "rejector"], "why": "Returns the link member's own quotaVerdictFor verdict when blocked; its callers read only usable/blockedUntil/reason to re-arm or hold."},
   "list": {"file": "src/accounts.js", "fields": null, "why": "The account roster: each pool row echoes poolCurrent as current/currentName for menus and the page; a roster, not a spend's account.", "gap": "The member rides two levels down (accounts[i].current / currentName) beside default*Id fields named per harness at run time, and list() has dozens of readers."},

@@ -2036,7 +2036,20 @@ function requestSlotFor(session, at = Date.now(), { requestOutAt = null } = {}) 
     return { key: w.key, slotOk: !!w.slotOk, reqAt: t };
   } catch { return null; }
 }
+// B-87fd (主开发's ruling 2026-11-19 22:17Z): A READING IS FILED UNDER THE ACCOUNT THAT PRODUCED IT. A non-hot pool's process whose
+// held member NOTHING names (no spawn stamp, no ledger row before its start — heldPoolUnknown: the auto rung already refuses to
+// spend on it) produced its reading on a member nobody can name: no slot, so the reading is filed NOWHERE — never under the pool's
+// link member, which the resolvers below fall back to. Said once per conversation in the journal.
+const unknownHolderSaid = new Set();
+function saidUnknownHolderReading(session, what) {
+  const sid = (session && session._webuiId) || '?';
+  if (unknownHolderSaid.has(sid)) return;
+  unknownHolderSaid.add(sid);
+  if (unknownHolderSaid.size > 2000) unknownHolderSaid.clear();
+  console.log(`[pool] ${sid}: a ${what} reading is filed nowhere — this process's held member cannot be named (no spawn stamp, no ledger row before its start), so it is never filed under the pool's current member`);
+}
 function readingSlotFor(session, at = Date.now(), opts = {}) {
+  try { if (session && heldPoolUnknown(session)) return { key: null, slotOk: false, slotReason: 'holder-unknown', at }; } catch { }
   // ⓪ THE REQUEST (P1): the account the reading's request went out on — before the turn pin, which it replaces wherever a
   // request is known (the shape the owner's instance showed: a pin re-made by a reading that trailed the turn's result outlived the turn,
   // the deferred move fired at its stop, and the next turn's readings — the new member's — were filed on the old one)
@@ -3532,7 +3545,7 @@ function liveQuotaKeyFor(session) {
   return key;
 }
 function pickLiveProbeSession(target, session) {
-  const live = (s) => !!(s && s.pty && liveReadSource(s.backend) && s.mode === 'chat' && !s.host);
+  const live = (s) => !!(s && s.pty && liveReadSource(s.backend) && s.mode === 'chat' && !s.host && !heldPoolUnknown(s));   // B-87fd: an unknown holder's answer is filed nowhere — never the one asked
   // the asking session itself first: it sits idle-walled on exactly this
   // identity and its app-server is already up
   if (live(session)) return session;
@@ -3808,6 +3821,7 @@ function recordRateLimitEventNow(session, msg) {
     // buckets; this is the same fact in this producer's own shape.
     const fp = win ? `${readingLag.windowFingerprint(win)}|k:${ev.kind}|u:${ev.utilization ?? '-'}` : null;
     const slot = ev.status === 'rejected' ? rejectionSlotFor(session) : readingSlotFor(session, Date.now(), { window: win, fingerprint: fp });
+    if (slot && slot.slotReason === 'holder-unknown') { saidUnknownHolderReading(session, 'rate_limit_event'); return; }   // B-87fd: filed nowhere
     let key = (slot && slot.key) || usageCacheKeyFor(session);
     let refiled = false; // the guard moved this reading off the slot's key — then the slot is not the witness for it
     // THE WITNESS ELIGIBILITY of this reading is judged BEFORE the guard, on
@@ -5685,6 +5699,8 @@ function writeCodexReading(snap, source, { session = null, key: forKey = null } 
   // reason is wrong the same way. The synthesized spent-bucket snapshot on
   // `task_failed` states no reset it did not receive, so it is inert there.
   // the helper's reading names its identity (lane reset-path: no session — the key IS the login it ran on)
+  // B-87fd: filed nowhere — a READING only: the limit banner is a REFUSAL (the wall's own road, as a claude rejection keeps rejectionSlotFor)
+  if (!forKey && source !== 'limit-banner' && session && heldPoolUnknown(session)) { saidUnknownHolderReading(session, 'codex:' + source); return { key: null, snap, archived: true, why: 'holder-unknown' }; }
   const _k0 = forKey || readingSlotFor(session).key || liveQuotaKeyFor(session);
   const key = guardReadingTarget(_k0, readingLag.windowOf(snap), { session, what: 'codex:' + source, entry: snap });
   // an ARCHIVED reading is not an unparseable one — the waiter must be told
@@ -5771,7 +5787,10 @@ function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = 
       // an rpc-rate-limits probe waiting on this session settles AFTER the
       // cache write — its next quotaVerdictFor already reads the fresh file
       settleLive(session, w && w.key ? { ok: true, key: w.key } // R4: the press is answered with WHOSE reading it wrote
-        : { ok: false, archived: !!(w && w.archived), reason: w && w.archived ? 'the reading\'s window is not this account\'s (archived)' : 'unparseable rateLimits' });
+        : { ok: false, archived: !!(w && w.archived), reason: w && w.why === 'holder-unknown' ? 'this conversation\'s held member cannot be named — its reading is filed nowhere' : w && w.archived ? 'the reading\'s window is not this account\'s (archived)' : 'unparseable rateLimits' });
+      // B-87fd: an unknown holder's reading is filed nowhere and counts no member's credits — but it IS the process's own login's: it
+      // still judges this conversation's own wait (the idle wake on a fresh, non-limited reading), never a member's file or wall
+      if (w && w.why === 'holder-unknown') { if (sig.kind !== 'exhausted' && w.snap) { try { noteQuotaReadingForResume(session, w.snap, 'fresh non-limited codex reading (its held member unknown)'); } catch { } } return; }
       // the stored reset-credit count rides ONLY the on-demand read — remember it on
       // the session so the rung knows it even when a later passive push drops it
       // (p2: WITH the identity it was read for — after a pool switch the session

@@ -360,7 +360,14 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const ss = []; for (let i = 1; i <= nSess; i++) ss.push(mk(i));
     const s1 = ss[0];
     // the on-demand read the wrapper does at startup carries the stored count
-    if (credits != null) for (const s of ss) eng.recordCodexQuotaSignal(s, { type: 'rate_limits_updated', onDemand: true, resetCredits: { availableCount: credits }, rateLimits: { primary: { used_percent: 50, window_minutes: 10080, resets_at: nowS + 3 * 86400 }, secondary: null } });
+    // B-87fd (an unknown holder's reading is filed NOWHERE): a world whose process is held-unknown learned the stored count EARLIER,
+    // from a process the hub could name — its startup read is filed under A as before (a stamp for that one read, taken off again)
+    if (credits != null) for (const s of ss) {
+      const unknownNow = held === 'unknown' && !s._heldPoolMember;
+      if (unknownNow) s._heldPoolMember = A;
+      eng.recordCodexQuotaSignal(s, { type: 'rate_limits_updated', onDemand: true, resetCredits: { availableCount: credits }, rateLimits: { primary: { used_percent: 50, window_minutes: 10080, resets_at: nowS + 3 * 86400 }, secondary: null } });
+      if (unknownNow) { delete s._heldPoolMember; delete s._turnReadingSlot; }   // the stamped read's turn pin goes with its stamp
+    }
     // the wall comes LATER than that read: the cache write keeps the newer file,
     // and a wall stamped in the same millisecond as the read would lose the tie
     { const t0 = Date.now(); while (Date.now() < t0 + 2) { } }
@@ -1032,6 +1039,41 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const pre = patchedEngine('noUnknown', [['    if (ci.unknown) {\n', '    if (false) {\n']]);
     ok('R17 NEGATIVE CONTROL: the patch hit the product source', !!pre);
     if (pre) { const { wu: wc } = run(pre); ok('R17 NEGATIVE CONTROL: without the refusal the unknown process spends a credit — the leg sees it', wc.verbs() === 1, `verbs=${wc.verbs()}`); }
+  }
+  // (17c) B-87fd (主开发's ruling 2026-11-19 22:17Z): A READING IS FILED UNDER THE ACCOUNT THAT PRODUCED IT — a process whose held
+  //       member NOTHING names (older than every ledger row, no stamp) pushes its limits: the reading is filed NOWHERE (never under
+  //       the pool's link member A, which every resolver fell back to; nor B; nor the pool), said once. RED: the product with the
+  //       two refusals taken out files it under A.
+  {
+    const wu = world({ mode: 'off', held: 'unknown' });
+    const snapOf = (w) => JSON.stringify([w.cacheOf(w.A), w.cacheOf(w.B), w.cacheOf(w.P)]);
+    const before = snapOf(wu);
+    const l1 = quietly(() => wu.reading(wu.s1, 88));
+    const l2 = quietly(() => wu.reading(wu.s1, 91));
+    const said = (ls) => ls.filter((x) => /filed nowhere — this process's held member cannot be named/.test(x));
+    console.log(`  · the journal said: ${said(l1).concat(said(l2)).join(' | ') || '(nothing)'}`);
+    ok('B-87fd an UNKNOWN holder\'s readings (88 %, then 91 %) are filed NOWHERE — A\'s, B\'s and the pool\'s files unchanged',
+      snapOf(wu) === before && Math.round(wu.cacheOf(wu.A)?.sevenDay?.usedPercent) !== 88 && Math.round(wu.cacheOf(wu.A)?.sevenDay?.usedPercent) !== 91, JSON.stringify({ A: wu.cacheOf(wu.A)?.sevenDay?.usedPercent, B: wu.cacheOf(wu.B)?.sevenDay?.usedPercent, P: !!wu.cacheOf(wu.P) }));
+    ok('B-87fd …said ONCE per conversation in the journal (the first reading only)', said(l1).length === 1 && said(l2).length === 0, JSON.stringify({ first: said(l1).length, second: said(l2).length }));
+    const seenBefore = JSON.stringify(wu.s1._resetCreditsSeen || null);
+    quietly(() => wu.eng.recordCodexQuotaSignal(wu.s1, { type: 'rate_limits_updated', resetCredits: { availableCount: 7 }, rateLimits: { primary: { used_percent: 40, window_minutes: 10080, resets_at: wu.nowS + 3 * 86400 }, secondary: null } }));
+    ok('B-87fd …and its credit count (7) is counted for NO member — the conversation\'s seen count stays the one a named read keyed',
+      JSON.stringify(wu.s1._resetCreditsSeen || null) === seenBefore && !(wu.s1._resetCreditsSeen && wu.s1._resetCreditsSeen.count === 7), JSON.stringify({ before: seenBefore, now: wu.s1._resetCreditsSeen }));
+    const lw = quietly(() => wu.wall());
+    ok('B-87fd …a WALL (the limit banner, a refusal) keeps its own road: never «filed nowhere»', !lw.some((x) => /codex:limit-banner reading is filed nowhere/.test(x)), lw.filter((x) => /filed nowhere|\[wall\]/.test(x)).join(' | ').slice(0, 300));
+    const wk = world({ mode: 'off', held: true });
+    quietly(() => wk.reading(wk.s1, 88));
+    ok('B-87fd …a STAMPED holder\'s reading still lands on its member (A, 88 %)', Math.round(wk.cacheOf(wk.A)?.sevenDay?.usedPercent) === 88, JSON.stringify(wk.cacheOf(wk.A)?.sevenDay));
+    const pre = patchedEngine('unknownFiled', [
+      ["  try { if (session && heldPoolUnknown(session)) return { key: null, slotOk: false, slotReason: 'holder-unknown', at }; } catch { }\n", ''],
+      ["  if (!forKey && source !== 'limit-banner' && session && heldPoolUnknown(session)) { saidUnknownHolderReading(session, 'codex:' + source); return { key: null, snap, archived: true, why: 'holder-unknown' }; }\n", ''],
+    ]);
+    ok('B-87fd NEGATIVE CONTROL: the patch hit the product source (both refusals)', !!pre);
+    if (pre) {
+      const wr = world({ mode: 'off', held: 'unknown', engineModule: pre });
+      quietly(() => wr.reading(wr.s1, 88));
+      ok('B-87fd NEGATIVE CONTROL: without the refusals the unknown holder\'s reading is filed under the pool\'s link member A (88 %) — the leg sees it', Math.round(wr.cacheOf(wr.A)?.sevenDay?.usedPercent) === 88, JSON.stringify(wr.cacheOf(wr.A)?.sevenDay));
+    }
   }
   // (17b) r4: THE LEDGER ANSWER IS STABLE — a pool older than the ledger (no
   //       creation row) keeps naming the member its legacy process started on
