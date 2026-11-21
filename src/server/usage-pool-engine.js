@@ -1459,8 +1459,20 @@ function readApiWitnessFile(key) {
 // wrote it (the witness ring, the renewal, the row's own read; the standing repair carries it unchanged). A row this process
 // has not written is asked of the disk ONCE (its first ask since the start), then memory: the usage route's poll reads this.
 const _heldWin = new Map();
+const HELD_MAX = 4096;   // r6: far past any roster; the oldest key is dropped beyond it
 const heldFact = (f) => (f && Array.isArray(f.names) && f.names.length && Number(f.phase) > 0 ? { names: f.names.slice(0, 4), phase: Number(f.phase), at: Number(f.at) || null } : null);
-function noteHeldWindow(key, f) { _heldWin.delete(key); _heldWin.set(key, heldFact(f)); if (_heldWin.size > 512) _heldWin.delete(_heldWin.keys().next().value); }
+function noteHeldWindow(key, f) { _heldWin.delete(key); _heldWin.set(key, heldFact(f)); if (_heldWin.size > HELD_MAX) _heldWin.delete(_heldWin.keys().next().value); }
+/** r6 (主开发 r814, ruled 3) — WARMED AT THE START, OFF THE POLL: every roster account's and every cache key's held window, and the
+ *  stamp-only members' stamps (the window list), read once by the identity repair's run (the boot's, then hourly and the route's,
+ *  which renew them from disk); the usage poll reads memory only, so the first poll after a restart reads no file. */
+function warmHeldWindows(list) {
+  const keys = new Set();
+  for (const a of (list || [])) if (a && typeof a.id === 'string' && a.id) keys.add(a.id);
+  try { for (const fn of usageWrite.listCacheDir(USAGE_CACHE_DIR)) if (fn.endsWith('.json') && !fn.startsWith('__models__') && !fn.startsWith('.')) keys.add(fn.slice(0, -5)); } catch { }
+  for (const k of keys) { try { const w = readApiWitnessFile(k); noteHeldWindow(k, w && w.foreign); } catch { } }
+  try { _ownWin = null; _ownWinAt = 0; establishedWindows(); } catch { }
+  return keys.size;
+}
 function heldWindowOf(key, w0) {
   if (!key) return null;
   if (!_heldWin.has(key)) { const w = w0 === undefined ? readApiWitnessFile(key) : w0; noteHeldWindow(key, w && w.foreign); }
@@ -1468,8 +1480,9 @@ function heldWindowOf(key, w0) {
   return h ? { ...h, names: h.names.slice() } : null;
 }
 function apiDerivedWindow(key, { witness = false, held = false } = {}) {
-  // B-6a92 r5: `{held: true}` answers the row's held window ALONE, from memory — no file is read (the usage route, every poll)
-  if (held) return { foreign: heldWindowOf(key) };
+  // B-6a92 r5: `{held: true}` answers the row's held window ALONE, from memory — no file is read (the usage route, every poll);
+  // r6: memory ONLY — a key the start's warm and the writers never met has no hold (warmHeldWindows)
+  if (held) { const h = _heldWin.get(key); return { foreign: h ? { ...h, names: h.names.slice() } : null }; }
   const w = readApiWitnessFile(key);
   const ring = Array.isArray(w && w.ring) ? w.ring.filter((e) => e && Number(e.resetsAt) > 0) : [];
   let out = null;
@@ -1614,6 +1627,7 @@ function repairIdentityAnchors(why = 'boot', { since } = {}) {
     const list = (accounts.decisionList && accounts.decisionList(since != null ? { since } : {}).accounts) || [];
     const rep = repairSidecarsByApiPhase({ dataDir: path.join(rootDir, 'data'), accounts: list, id: 'identity-repair:' + why });
     _ownWin = null; _ownWinAt = 0;
+    rep.warmed = warmHeldWindows(list);   // B-6a92 r6: the held facts in memory, off the poll (after the repair's own rewrites)
     const c = rep.counts || {};
     const changed = !!(c.restamped || c.replaced || c.emptied || c.stripped || c.readmitted || c.stamped);
     // the STANDING run (hourly, final verifier: a moved window must not wait
@@ -6795,13 +6809,29 @@ function reanchorLapsedMember(key, idv) {
     const producer = (() => { try { const i = accounts.readSubCreds(key); return i && i.oatFile ? 'oat:' + (Number(i.oatFileGen) > 0 ? Number(i.oatFileGen) : '?') : 'login'; } catch { return null; } })();
     const stamp = { sevenDay, fiveHour: null, scoped, at: now, source: 'api', verifiedAt: now, verifiedBy: 'renewal-panel', n: 1, sessionId: null };
     if (!windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer)) return false; // the ONE writer (null = the folder could not be read: nobody can tell)
-    usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { sevenDay, scoped, at: now, sessionId: null, source: 'renewal-panel', n: 1, ring: [], ringAt: now });
-    noteHeldWindow(key, null); _ownWin = null; _ownWinAt = 0;
+    if (usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { sevenDay, scoped, at: now, sessionId: null, source: 'renewal-panel', n: 1, ring: [], ringAt: now })) noteHeldWindow(key, null);   // r6: memory follows a LANDED write
+    _ownWin = null; _ownWinAt = 0;
     try { oatIdentity.onReanchor(key, { window: stamp, source: 'renewal-panel', independent: producer === 'login' }); } catch { } // lane oat-identity-fix (verify r1 F6)
     console.log(`[usage] window re-anchored: ${nameOf(key)} was lapsed and its /usage panel answered with a NEW weekly window ${readingLag.windowFingerprint(stamp)} (was ${readingLag.windowFingerprint(idv.apiWindow || { sevenDay: null, fiveHour: null, scoped: {} })}) that no other account holds — a renewal; both window sidecars re-anchored on it`);
     try { global.__vsEvent?.('usage-window-reanchored-renewal', key); } catch { }
     return true;
   } catch (e) { console.warn('[usage] renewal re-anchor failed:', e.message); return false; }
+}
+/** B-6a92 r6 — WHO ANSWERED a panel: its own printed / rewritten org (idv.panel), else the folder's login it ran through
+ *  (idv.expected) — {orgUuid, email} in memory, or null when neither names anyone. */
+function answeringLogin(idv) {
+  const has = (x) => x && (x.orgUuid || x.email);
+  return has(idv && idv.panel) ? { orgUuid: idv.panel.orgUuid || null, email: idv.panel.email || null } : has(idv && idv.expected) ? { orgUuid: idv.expected.orgUuid || null, email: idv.expected.email || null } : null;
+}
+/** Two logins the same account? true / false / null (cannot be told). The organisation's id, refined by the e-mail where both
+ *  sides know it (one Team org holds several people's accounts); else the e-mail. Never printed. */
+function sameLogin(a, b) {
+  const low = (v) => (v == null || v === '' ? null : String(v).toLowerCase());
+  if (!a || !b) return null;
+  const ao = low(a.orgUuid), bo = low(b.orgUuid), ae = low(a.email), be = low(b.email);
+  if (ao && bo) return ao !== bo ? false : (ae && be ? ae === be : true);
+  if (ae && be) return ae === be;
+  return null;
 }
 /** B-6a92 r5 (主开发 r677, ruled in 1) — A HELD ROW'S OWN READ IS ITS DOOR. The row says its own window is unknown «until its
  *  own read proves it»; the person's ⟳ on that row (the /usage panel through the row's OWN credential, isolated) is that read:
@@ -6809,7 +6839,10 @@ function reanchorLapsedMember(key, idv) {
  *    the row's old witness is lifted — the row's window is stamped there by its own read, its witness re-anchored (the ring
  *    starts again), the hold ends, and the caller writes the panel's numbers as verified;
  *  - it is VERIFIED on the row's own window: the hold ends there (the row's own window is proven) and the ring starts again.
- *  A panel whose org differs proves nothing. A person's press, attended: nothing here starts a read. → {onHeld} or false */
+ *  A panel whose org differs proves nothing. Nothing here starts a read: the person's ⟳, or the approved automatic usage read
+ *  on its own schedule (ruled r814: the same evidence, the same door). r6: never when the login that answered is a held
+ *  account's, or cannot be told — `{refused: 'signed-in-as' | 'identity-unknown', names}` for the caller's words.
+ *  → {onHeld} · {refused, names} · false */
 function liftHeldWindow(key, idv) {
   try {
     const h = heldWindowOf(key);
@@ -6818,6 +6851,21 @@ function liftHeldWindow(key, idv) {
     const sevenDay = Number(pw.sevenDay) > 0 ? Number(pw.sevenDay) : null;
     const onHeld = !!sevenDay && readingLag.weeklyNear(sevenDay, h.phase) === true;
     if (idv.refused ? !(onHeld && idv.phase === 'differ') : !idv.verified) return false;
+    // r6 (主开发 r814, THE MUST) — THE ANSWER MUST NOT BE A HELD ACCOUNT'S. The panel ran through THIS row's sign-in folder, and
+    // the hold exists for a folder signed in as another account: then the expected identity is read from that same folder, the
+    // org can never differ, and the panel answers in the other account's window. So the identity that ANSWERED (the panel's own
+    // org/e-mail, else the folder's login) is compared with each held account's own login (its folder's): equal ⇒ NO lift,
+    // nothing written, the caller says the folder is signed in as that account; either side unknown ⇒ nothing is proven, no lift.
+    // Compared in memory by the organisation's id (refined by the e-mail where both sides know it: one Team org holds several
+    // people), else the e-mail — never printed.
+    const ans = answeringLogin(idv), seen = [];
+    for (const n of h.names) {
+      const same = sameLogin(ans, (() => { try { return probeLog.machineOauthAccount(accounts.subDir(n)); } catch { return null; } })());
+      if (same === true) return onHeld ? { refused: 'signed-in-as', names: [n] } : false;
+      seen.push(same);
+    }
+    // (a panel VERIFIED on the row's own window is written as it always was; only its lift of the hold waits for the proof)
+    if (seen.some((x) => x !== false)) return onHeld ? { refused: 'identity-unknown', names: h.names.slice() } : false;
     const now = Date.now();
     if (onHeld) {
       const scoped = {};
@@ -6825,8 +6873,11 @@ function liftHeldWindow(key, idv) {
       // WHO ANSWERED (lane oat-identity-fix-r2): the folder's login, or our token file in it
       const producer = (() => { try { const i = accounts.readSubCreds(key); return i && i.oatFile ? 'oat:' + (Number(i.oatFileGen) > 0 ? Number(i.oatFileGen) : '?') : 'login'; } catch { return null; } })();
       const stamp = { sevenDay, fiveHour: null, scoped, at: now, source: 'api', verifiedAt: now, verifiedBy: 'own-panel', n: 1, sessionId: null };
-      if (!windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer)) return false;
+      // r6 (ruled 2): the SIDECAR first, then the stamp — and the sidecar put back as it was when the stamp's write fails (a stamp
+      // on the held phase beside a standing hold would let the guard write that window's readings on the row)
+      const raw0 = readApiWitnessFile(key);
       if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { sevenDay, scoped, at: now, sessionId: null, source: 'own-panel', n: 1, ring: [], ringAt: now })) return false;
+      if (!windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer)) { if (raw0) usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), raw0); return false; }
       try { oatIdentity.onReanchor(key, { window: stamp, source: 'own-panel', independent: producer === 'login' }); } catch { }
     } else {
       const { foreign: _f, ...rest } = readApiWitnessFile(key) || {};

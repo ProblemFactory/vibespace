@@ -660,7 +660,7 @@ function panelIdentityVerdict({ key, cliPanel, expected, before, after, apiWin, 
     // B-6a92 r5: WHILE A HOLD STANDS no run of readings re-anchors the row (they name another known account's window) — the
     // sentence says the one road that does: the row's own read answering in a window
     + (held && Array.isArray(held.names) && held.names.length
-      ? ` — ${me}'s own weekly window is unknown: its readings name ${held.names.map(acctNameOf).join(', ')}'s window, and no run of them re-anchors it; ${me}'s own /usage read proves its window when it answers in ${me}'s own window or in that one`
+      ? ` — ${me}'s own weekly window is unknown: its readings name ${held.names.map(acctNameOf).join(', ')}'s window, and no run of them re-anchors it; ${me}'s own /usage read proves its window when it answers in ${me}'s own window, or in that one through a login that is not ${held.names.map(acctNameOf).join(', ')}'s`
       : movedLikely ? ` — but ${ringAgree} of ${me}'s own last ${ring.length} API readings share the panel's window: ${me}'s weekly window may have MOVED; ${ringK} consecutive agreeing readings re-anchor it automatically (or run the identity repair)` : '');
   else if (verified) why = org === 'agree' ? `panel org matches ${me}'s own login` : `panel weekly window matches ${me}'s API-derived window (${windowFingerprint(apiWin)})`;
   else if (shared) why = `panel weekly window matches ${me}'s API-derived window (${windowFingerprint(apiWin)}) but that phase is shared with ${matched.map(acctNameOf).join(', ')} — not identifying; the panel names no org`;
@@ -815,6 +815,14 @@ async function refreshViaCliPanel(key) {
   if (idv && !isGlobal && typeof app.locals.liftHeldWindow === 'function') {
     const lift = app.locals.liftHeldWindow(key, idv);
     if (lift && lift.onHeld) idv = { ...idv, refused: false, verified: true, verifiedBy: 'own-panel', why: `${acctNameOf(key)}'s own /usage read answered in the weekly window its readings were held on — its own read proves it: stamped there, the hold ended` };
+    // r6 (主开发 r814, THE MUST): the login that answered IS a held account's (this row's folder signed in as it), or whose login
+    // answered cannot be told — NO lift and NOTHING written; the words say what is true (the identity itself is never printed)
+    else if (lift && lift.refused) {
+      const me = acctNameOf(key), them = (lift.names || []).map(acctNameOf).join(', ');
+      idv = { ...idv, refused: true, verified: false, why: lift.refused === 'signed-in-as'
+        ? `${me}'s sign-in folder is signed in as ${them}: this read answered in ${them}'s weekly window, which proves nothing about ${me}'s own — sign ${me} in again with its own account (its own window stays unknown until then)`
+        : `this read answered in ${them}'s weekly window, but whose login answered cannot be told (no account named by ${me}'s or ${them}'s sign-in folder) — ${me}'s own window stays unknown; signing ${me} in again settles it` };
+    }
   }
   probeRec.identity = { org: idv.org || null, phase: idv.phase || null, expected: idv.expected, panel: idv.panel, matched: idv.matched, shared: !!idv.shared, movedLikely: !!idv.movedLikely, apiWindow: idv.apiWindow || null };
   probeRec.identityVerified = idv.verified;

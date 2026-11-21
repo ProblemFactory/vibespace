@@ -453,7 +453,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
 {
   const WS = require(path.join(REPO, 'src/window-stamp.js'));
   const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
-  const held = (engMod = realEng, { ownReading = true, again = null, ro = null, cli = null } = {}) => {
+  const held = (engMod = realEng, { ownReading = true, again = null, ro = null, cli = null, logins = null, routesMod = null } = {}) => {
     // `again`: the same data folder and accounts under a FRESH engine (a restart: no in-memory window cache)
     const root = again ? again.root : endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'rtruth-held-')));
     const dataDir = path.join(root, 'data');
@@ -461,6 +461,8 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const login = (id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), CREDS(id), { mode: 0o600 });
     const V = again ? again.V : am.createSubscription({ name: 'Vela' }).id; if (!again) login(V);
     const O = again ? again.O : am.createSubscription({ name: 'Orin' }).id; if (!again) login(O);
+    // r6: whose login each sign-in folder holds (the CLI's own .claude.json beside the credentials) — invented identities
+    if (!again && logins) for (const [id, who] of [[V, logins.V], [O, logins.O]]) if (who) fs.writeFileSync(path.join(am.subDir(id), '.claude.json'), J({ oauthAccount: { emailAddress: who.email, organizationUuid: who.org } }), { mode: 0o600 });
     const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
     const nowS = Math.floor(Date.now() / 1000), RV = again ? again.RV : nowS + 2 * 86400, RO = again ? again.RO : (ro || nowS + 5 * 86400), RX = again ? again.RX : nowS + 3 * 86400 + 11 * 3600;
     if (!again && ownReading) fs.writeFileSync(path.join(cacheDir, V + '.json'), J({ fetchedAt: Date.now() - 3600e3, source: 'cli-usage', sevenDay: { utilization: 0.2, resetsAt: RV } }));   // Vela's OWN last reading
@@ -480,7 +482,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     // the REAL usage route over the same account manager and engine (the scene's wiring: a stub app, the engine's own doors)
     const routes = {};
     const rapp = { get: (p0, h) => { routes['GET ' + p0] = h; }, post() { }, put() { }, delete() { }, use() { }, locals: app.locals };   // ONE app, as the hub has: the engine's doors on its locals
-    const api = quiet(() => setupUsage({ app: rapp, accounts: am, hosts: null, usageHistory: null, activeSessions: sessions, serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'nocodex'), META_DIR: path.join(root, 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(root, 'buffers'), apiDerivedWindow: eng.apiDerivedWindow, establishedWindows: eng.establishedWindows, ...(cli ? { CLAUDE_CMD: cli } : {}) }));
+    const api = quiet(() => (routesMod || { setupUsage }).setupUsage({ app: rapp, accounts: am, hosts: null, usageHistory: null, activeSessions: sessions, serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'nocodex'), META_DIR: path.join(root, 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(root, 'buffers'), apiDerivedWindow: eng.apiDerivedWindow, establishedWindows: eng.establishedWindows, ...(cli ? { CLAUDE_CMD: cli } : {}) }));
     const usage = () => { const res = { body: null, json(o) { this.body = o; return this; }, status() { return this; } }; quiet(() => routes['GET /api/usage']({ query: {}, headers: {} }, res)); return res.body; };
     return { root, am, eng, api, V, O, RV, RO, RX, cacheDir, reading, own: () => readJ(V + '.json'), stamp: () => readJ(readingLag.windowSidecarName(V)), wit: () => readJ(readingLag.apiWindowSidecarName(V)), usage };
   };
@@ -504,7 +506,15 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   // r5: A RUN SHORTER THAN K (one reading of a third window) rewrites the sidecar and KEEPS the hold — the words never vanish unproven
   H.reading(0.5, H.RX); await sleep(3);
   const hF = H.wit() && H.wit().foreign, hWu = (() => { const u5 = H.usage(); return u5 && u5.accounts && u5.accounts[H.V] && u5.accounts[H.V].windowUnknown; })();
+  const esrc = read(ENG);   // r6: the mutants below are made from the engine as it is
   ok('B-6a92 a run shorter than K (one reading of another window) keeps the hold: the sidecar and the row still name Orin', !!(hF && hF.names[0] === H.O && hWu && hWu.otherNames[0] === 'Orin'), { hF, hWu });
+  // RED CONTROL (r6, ruled 4): the carry removed — the same one reading drops the hold and the words vanish unproven
+  const CARRY = ", ...(heldFact(raw.foreign) ? { foreign: raw.foreign } : {}) };";
+  const mCarry = esrc.includes(CARRY) ? require(MUT.write(ENG, esrc.split(CARRY).join(' };'), 'b6a92-no-carry')) : null;
+  const HC = mCarry ? held(mCarry) : null;
+  if (HC) { await run6(HC); HC.reading(0.5, HC.RX); await sleep(3); }
+  const hcBefore = HC && HC.eng.apiDerivedWindow(HC.V, { held: true }).foreign, hcF = HC && HC.wit() && HC.wit().foreign;
+  ok('B-6a92 RED CONTROL (the short run\'s carry removed): one reading of another window drops the hold — the leg above can fail', !!HC && !hcF && !hcBefore, { hcF, hcBefore });
   const H0 = held(realEng, { ownReading: false });
   await run6(H0);
   const pv0 = H0.eng.poolReadCache(null)(H0.V);
@@ -529,6 +539,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const gRow = ((gRep && gRep.identities) || []).find((r) => r.key === G.V) || {};
   const gSt = G.stamp(), gOwn = G.own(), gWit = G.wit(), gWu = sideOf(G.usage(), G.V);
   const G2 = held(realEng, { again: G });   // …and a restarted hub, reading the hold back from the sidecar the repair left
+  quiet(() => G2.eng.repairIdentityAnchors('boot'));   // r6: the start's identity repair warms the held facts (the poll reads memory only)
   const g2Wu = sideOf(G2.usage(), G2.V);
   ok('B-6a92 THE REPAIR (the must): the standing identity repair counts NONE of the readings the guard found to name Orin as Vela\'s evidence', !!gRow.sources && gRow.sources.named >= 3 && gRow.sources.archived === 0, gRow);
   ok('B-6a92 THE REPAIR: Vela\'s stamp stays its own and its file keeps its own last reading — no restamp, no readmit of Orin\'s numbers', gSt && gSt.sevenDay === G.RV && gOwn && gOwn.sevenDay && gOwn.sevenDay.utilization === 0.2 && gOwn.sevenDay.resetsAt === G.RV, { gSt, own: gOwn && gOwn.sevenDay, row: gRow });
@@ -555,7 +566,9 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const roP = hourAt(5 * 86400), tP = panelText(roP, 12);
   const parsedP = parseCliUsageText(tP);
   ok('B-6a92 SETUP: the stand-in panel parses to the held window exactly', !!(parsedP && parsedP.sevenDay && parsedP.sevenDay.resetsAt === roP), parsedP);
-  const P = held(realEng, { ro: roP, cli: standIn('claude-panel-held.sh', tP) });
+  const ORIN = { email: 'orin@example.test', org: 'org-orin-0001' }, VELA = { email: 'vela@example.test', org: 'org-vela-0001' };   // invented
+  const binHeld = standIn('claude-panel-held.sh', tP);
+  const P = held(realEng, { ro: roP, cli: binHeld, logins: { V: VELA, O: ORIN } });   // each folder holds its OWN account's login
   await run6(P);
   const pBefore = sideOf(P.usage(), P.V);
   const pr = await hush(() => P.api.refreshViaCliPanel(P.V));
@@ -565,26 +578,75 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   P.reading(0.4, P.RO); await sleep(3);
   const pOwn2 = P.own();
   ok('B-6a92 THE DOOR: from then on the row\'s readings in that shared window WRITE on it (honest sharing converges)', !!(pOwn2 && pOwn2.sevenDay && pOwn2.sevenDay.utilization === 0.4 && pOwn2.sevenDay.resetsAt === roP), pOwn2 && pOwn2.sevenDay);
+  // RED CONTROL (r6, ruled 4): no door (the engine's door not handed to the route) — the same read is refused and the row never leaves «unknown»
+  const LOC = "app.locals.liftHeldWindow = liftHeldWindow; // B-6a92 r5: a held row's own ⟳ read is its door\n";
+  const mNoDoor = esrc.includes(LOC) ? require(MUT.write(ENG, esrc.split(LOC).join(''), 'b6a92-no-door')) : null;
+  const PN = mNoDoor ? held(mNoDoor, { ro: roP, cli: binHeld, logins: { V: VELA, O: ORIN } }) : null;
+  if (PN) await run6(PN);
+  const pnr = PN ? await hush(() => PN.api.refreshViaCliPanel(PN.V)) : { v: null };
+  ok('B-6a92 RED CONTROL (no door): the same read is refused, the stamp stays, the row still says unknown — the door legs can fail', !!PN && pnr.v === false && !!sideOf(PN.usage(), PN.V) && (PN.stamp() || {}).sevenDay === PN.RV, { v: pnr.v });
+  // THE MUST (r6, 主开发 r814): VELA'S OWN SIGN-IN FOLDER IS SIGNED IN AS ORIN — the scene the hold exists for. The person presses
+  // ⟳ on Vela; the panel runs through that folder (Orin's login) and answers in Orin's window: NO lift, nothing written, and the
+  // words say the folder is signed in as Orin (the identity itself is never printed)
+  const S = held(realEng, { ro: roP, cli: binHeld, logins: { V: ORIN, O: ORIN } });
+  await run6(S);
+  const sr = await hush(() => S.api.refreshViaCliPanel(S.V));
+  const sv = S.api.panelVerdictFor(S.V) || {}, sSt = S.stamp() || {}, sOwn = S.own() || {}, sWit = S.wit() || {}, sWu = sideOf(S.usage(), S.V);
+  ok('B-6a92 THE DOOR, Vela\'s folder signed in as Orin (the must): no lift and nothing written — Vela\'s stamp, its file, the sidecar\'s name and the row\'s words all stand', sr.v === false && sSt.sevenDay === S.RV && !!(sOwn.sevenDay && sOwn.sevenDay.utilization === 0.2 && sOwn.sevenDay.resetsAt === S.RV) && !!(sWit.foreign && sWit.foreign.names[0] === S.O) && !!(sWu && sWu.otherNames[0] === 'Orin'), { v: sr.v, sSt, own: sOwn.sevenDay, foreign: sWit.foreign, sWu });
+  ok('B-6a92 …and the words say what is true — Vela\'s sign-in folder is signed in as Orin, sign Vela in again — never an address', /Vela's sign-in folder is signed in as Orin/.test(String(sv.why)) && /sign Vela in again/.test(String(sv.why)) && !String(sv.why).includes('@'), sv.why);
+  // RED CONTROL: today's lift (r5: the identity check removed) — the folder signed in as Orin lifts the hold: Vela stamped on Orin's window, Orin's numbers on Vela
+  const IDA = "    const ans = answeringLogin(idv), seen = [];\n", IDB = "    if (seen.some((x) => x !== false)) return onHeld ? { refused: 'identity-unknown', names: h.names.slice() } : false;\n";
+  const ia = esrc.indexOf(IDA), ib = esrc.indexOf(IDB);
+  const mLift = ia > 0 && ib > ia ? require(MUT.write(ENG, esrc.slice(0, ia) + esrc.slice(ib + IDB.length), 'b6a92-r5-lift')) : null;
+  const SR = mLift ? held(mLift, { ro: roP, cli: binHeld, logins: { V: ORIN, O: ORIN } }) : null;
+  if (SR) await run6(SR);
+  const srr = SR ? await hush(() => SR.api.refreshViaCliPanel(SR.V)) : { v: null };
+  const srSt = SR && SR.stamp(), srOwn = SR && SR.own();
+  ok('B-6a92 RED CONTROL (r5\'s lift, no identity check): the folder signed in as Orin lifts the hold — Vela stamped on Orin\'s window and the panel\'s numbers written on Vela as verified', !!SR && srr.v === true && !!(srSt && srSt.sevenDay === roP) && !sideOf(SR.usage(), SR.V) && !!(srOwn && srOwn.sevenDay && srOwn.sevenDay.utilization === 0.12), { v: srr.v, srSt, own: srOwn && srOwn.sevenDay });
+  // …and when whose login answered CANNOT be told (no folder names an account): nothing is proven — no lift, nothing written, said so
+  const U = held(realEng, { ro: roP, cli: binHeld });
+  await run6(U);
+  const ur = await hush(() => U.api.refreshViaCliPanel(U.V));
+  const uv = U.api.panelVerdictFor(U.V) || {}, uSt = U.stamp() || {};
+  ok('B-6a92 THE DOOR, the answering login cannot be told: no lift, nothing written, and the words say whose login answered cannot be told', ur.v === false && uSt.sevenDay === U.RV && !!sideOf(U.usage(), U.V) && /whose login answered cannot be told/.test(String(uv.why)), { v: ur.v, uSt, why: uv.why });
   // …a held row's panel answering a THIRD window is refused (nothing written, the hold stands), and its words say what is true
   const Q = held(realEng, { cli: standIn('claude-panel-third.sh', panelText(hourAt(3 * 86400 + 11 * 3600), 7)) });
   await run6(Q);
   const qr = await hush(() => Q.api.refreshViaCliPanel(Q.V));
   const qv = Q.api.panelVerdictFor(Q.V) || {}, qWu = sideOf(Q.usage(), Q.V), qOwn = Q.own();
+  const RTS = 'src/usage-routes.js', rtsrc = read(RTS), HELDARG = ", held: (wit && wit.foreign) || null });";
+  const mRts = rtsrc.includes(HELDARG) ? require(MUT.write(RTS, rtsrc.split(HELDARG).join(' });'), 'b6a92-no-held-words')) : null;
+  const QN = mRts ? held(realEng, { cli: standIn('claude-panel-third.sh', panelText(hourAt(3 * 86400 + 11 * 3600), 7)), routesMod: mRts }) : null;
+  if (QN) await run6(QN);
+  if (QN) await hush(() => QN.api.refreshViaCliPanel(QN.V));
+  const qnWhy = QN ? String((QN.api.panelVerdictFor(QN.V) || {}).why) : '';
+  ok('B-6a92 RED CONTROL (the hold not told to the panel\'s verdict): the refusal\'s words lose the hold — the words leg below can fail', !!QN && !/own weekly window is unknown/.test(qnWhy) && /not Vela's own API-derived window/.test(qnWhy), qnWhy);
   ok('B-6a92 THE DOOR, refused: a panel answering neither window writes nothing, the hold stands, and its words name the hold and the one road that ends it — never «re-anchor it automatically»', qr.v === false && !!qWu && /own weekly window is unknown: its readings name Orin's window/.test(String(qv.why)) && !/re-anchor it automatically/.test(String(qv.why)) && !!(qOwn && qOwn.sevenDay && qOwn.sevenDay.utilization === 0.2), { v: qr.v, why: qv.why, qWu, own: qOwn && qOwn.sevenDay });
-  // NO FILE IS READ ON A POLL (ruled in 2): the stamps and witness sidecars, counted over ten polls of the usage route (each its
-  // own run) after the first ask of each row since the start — none: the held window and the roster's stamps are memory
-  const T = held();
-  await run6(T);
-  T.usage();
+  // NO FILE IS READ ON A POLL (ruled in 2; r6 ruled 3 and 4): a RESTARTED hub — a fresh engine over the held scene, warmed by its
+  // start's identity repair — then ten polls, each its own run, the clock carried past the window list's 5 s memo halfway, each
+  // poll followed by the window list (as the guard asks it): no poll reads a stamp or a witness sidecar, and the stamp-only
+  // member's stamp (Vela: no cache file) is never read again. PREMISES: the counter sees the sidecar's own road; the memo WAS crossed
+  const T0 = held(realEng, { ownReading: false });
+  await run6(T0);
+  const T = held(realEng, { again: T0 });
+  quiet(() => T.eng.repairIdentityAnchors('boot'));
   const SIDE = [readingLag.windowSidecarName(''), readingLag.apiWindowSidecarName('')];
-  const realRead = fs.readFileSync, seen = [];
-  fs.readFileSync = function (p0, ...a) { try { if (typeof p0 === 'string' && SIDE.some((x) => path.basename(p0).startsWith(x))) seen.push(path.basename(p0)); } catch { } return realRead.call(this, p0, ...a); };
+  const realRead = fs.readFileSync, realNow = Date.now, seen = [];
+  let phase = 'poll';
+  fs.readFileSync = function (p0, ...a) { try { if (typeof p0 === 'string' && SIDE.some((x) => path.basename(p0).startsWith(x))) seen.push(phase + ' ' + path.basename(p0)); } catch { } return realRead.call(this, p0, ...a); };
   let premise = 0, tWu = null;
   try {
-    await sleep(1); T.eng.apiDerivedWindow(T.V, { witness: true }); premise = seen.length; seen.length = 0;   // PREMISE: the counter sees the sidecar's own road
-    for (let i = 0; i < 10; i++) { await sleep(1); tWu = sideOf(T.usage(), T.V); }
-  } finally { fs.readFileSync = realRead; }
-  ok('B-6a92 NO FILE READ ON A POLL: ten polls of the usage route read no stamp and no witness sidecar (the premise: the counter sees a sidecar read), and the row still says Orin', premise > 0 && seen.length === 0 && !!(tWu && tWu.otherNames[0] === 'Orin'), { premise, seen: seen.slice(0, 6), tWu });
+    await sleep(1); phase = 'premise'; T.eng.apiDerivedWindow(T.V, { witness: true }); premise = seen.length; seen.length = 0;   // the sidecar's own road is seen
+    for (let i = 0; i < 10; i++) {
+      await sleep(1);
+      if (i === 5) Date.now = () => realNow() + 6000;   // past the window list's 5 s memo
+      phase = 'poll'; tWu = sideOf(T.usage(), T.V);
+      phase = 'list'; T.eng.establishedWindows();
+    }
+  } finally { fs.readFileSync = realRead; Date.now = realNow; }
+  const vS = readingLag.windowSidecarName(T.V), oS = readingLag.windowSidecarName(T.O);
+  const pollReads = seen.filter((x) => x.startsWith('poll ')), vReads = seen.filter((x) => x === 'list ' + vS), crossed = seen.filter((x) => x === 'list ' + oS).length;
+  ok('B-6a92 NO FILE READ ON A POLL: after a restart warmed at its start, ten polls read no stamp and no witness sidecar, the stamp-only member\'s stamp is never re-read across the 5 s memo, and the row still says Orin (premises: the counter sees a sidecar read; the memo was crossed — a cache-file member\'s stamp re-read)', premise > 0 && crossed > 0 && pollReads.length === 0 && vReads.length === 0 && !!(tWu && tWu.otherNames[0] === 'Orin'), { premise, crossed, pollReads: pollReads.slice(0, 6), vReads: vReads.length, tWu });
   // A MOVE ONTO A PHASE NO KNOWN ACCOUNT HOLDS is as today: K readings re-anchor it
   const X = held();
   for (let i = 0; i < 4; i++) { X.reading(0.33, X.RX); await sleep(3); }
