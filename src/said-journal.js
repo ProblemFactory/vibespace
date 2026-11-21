@@ -55,7 +55,7 @@ function create({ file, rewrite = null, say = () => { }, fs = FS, budget = APPEN
       const b = Buffer.from(pending, 'utf8'); pending = '';
       if (since + b.length > budget) {   // the budget: the whole rewrite has not succeeded for this many bytes — stop, said
         fd = closeWritten(fd, where, say); armed = false;
-        if (!overSaid) { overSaid = true; tell(`${where} appended ${since} bytes since the last whole rewrite (the bound ${budget}) — nothing more is appended until a whole rewrite succeeds`); }
+        if (!overSaid) { overSaid = true; tell(`${where}: a write of ${b.length} bytes would pass its bound (${budget} bytes since the last whole rewrite; ${since} appended) — nothing more is appended until a whole rewrite succeeds`); }
         return false;
       }
       try {
@@ -84,7 +84,7 @@ function create({ file, rewrite = null, say = () => { }, fs = FS, budget = APPEN
 // (feed `lost` before `live`; `drop` = the catch-up's partial last line the hub already holds), or { skipped: why } — fed nothing.
 const DTACH_CLEAR = /^(?:\x1b\[H|\x1b\[[0-3]?J)+/;
 const isTransport = (l) => { if (l[0] !== '{') return false; try { const o = JSON.parse(l); return !!o && typeof o.type === 'string' && o.type[0] === '_'; } catch { return false; } };
-function fenceGap(cu, line, live) {
+function fenceGap(cu, line, live, fed = '') {
   if (!cu) return { skipped: 'the fence is not in the file (nothing written past the catch-up)' };
   if (cu.skipped) return { skipped: cu.skipped };
   const text = String(cu.text || ''), at = text.indexOf(line + '\n');
@@ -92,16 +92,31 @@ function fenceGap(cu, line, live) {
   const fileText = text.slice(0, at);
   const F = fileText ? fileText.replace(/\n$/, '').split('\n') : [];
   const L = String(live || '').replace(/\r\n/g, '\n').replace(DTACH_CLEAR, '').split('\n').filter((l, i, a) => !(i === a.length - 1 && l === '')).filter((l) => l && !isTransport(l));
-  let j = F.length, head = '';
-  for (let i = L.length - 1; i >= 0; i--) {
-    let q = j - 1;
-    while (q >= 0 && !(i === 0 ? F[q].endsWith(L[i]) : F[q] === L[i])) q--;
-    if (q < 0) return { skipped: `a line the live stream brought is not in the file (${L[i].length} bytes)` };
-    if (i === 0 && F[q] !== L[i]) head = F[q].slice(0, F[q].length - L[i].length);   // the connect tore it: its head was dropped
-    j = q;
+  const match = (LL) => {
+    let j = F.length, head = '';
+    for (let i = LL.length - 1; i >= 0; i--) {
+      let q = j - 1;
+      while (q >= 0 && !(i === 0 ? F[q].endsWith(LL[i]) : F[q] === LL[i])) q--;
+      if (q < 0) return { miss: LL[i].length };
+      if (i === 0 && F[q] !== LL[i]) head = F[q].slice(0, F[q].length - LL[i].length);   // the connect tore it: its head was dropped
+      j = q;
+    }
+    return { lost: F.slice(0, j).map((l) => l + '\n').join('') + head };
+  };
+  let m = match(L), twice = 0;
+  if (m.miss !== undefined && fed) {
+    // THE ACCEPTED WINDOW (r1266): a line appended just before the catch-up's read and read off the pty only after the connect — the
+    // catch-up fed it and the live stream brought it again (drawn twice). Its place is BEFORE the catch-up's end: the live stream's
+    // first lines that are the fed text's LAST lines are set aside, and the rest is matched as above
+    const FD = String(fed).replace(/\n$/, '').split('\n');
+    for (let t = Math.min(L.length, FD.length); t > 0 && !twice; t--) {
+      let same = true;
+      for (let i = 0; i < t && same; i++) same = i === 0 ? FD[FD.length - t + i].endsWith(L[i]) : FD[FD.length - t + i] === L[i];
+      if (same) { const m2 = match(L.slice(t)); if (m2.miss === undefined) { m = m2; twice = t; } }
+    }
   }
-  const lost = F.slice(0, j).map((l) => l + '\n').join('') + head;
-  return { lost, drop: cu.drop || '' };
+  if (m.miss !== undefined) return { skipped: `a line the live stream brought is not in the file (${m.miss} bytes)` };
+  return { lost: m.lost, drop: cu.drop || '', twice };
 }
 
 module.exports = { create, APPEND_BUDGET, FENCE_TYPE, FENCE_VERSION, fenceLine, fenceAsk, fenceGap };

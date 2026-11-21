@@ -26,7 +26,12 @@
 //     RED: the tail fed as it lay (the base's shape) ⇒ that line is lost
 //  ⑫ AFTER A FAILED APPEND (a planted write: half its bytes, then ENOSPC) nothing is appended until a whole rewrite succeeds; a second
 //     episode is said again; REDs: the journal left armed (two records merged), said once a life
-//  ⑬ THE APPEND BUDGET: past it nothing more is appended, said once; RED: no budget ⇒ the file grows
+//  ⑬ THE APPEND BUDGET: past it nothing more is appended, said once (a single line over it named by its size); RED: no budget ⇒ the file grows
+// ITS SECOND FOLLOW (主开发 r1266):
+//  ⑭ WHOLE LINES ONLY WHERE A FENCE FOLLOWS: a TERMINAL survivor's screen file gaining a question with no line end is fed as read (the
+//     release's road); RED: whole lines for every survivor ⇒ the question is never drawn
+//  ⑮ A READ TORN INSIDE A MANY-BYTE CHARACTER: its partial compared as BYTES — the torn head leaves the buffer, the line once; RED: as text
+//  and in ⑦ a fence split across two chunks; in ⑧ the accepted window (a line drawn twice set aside, nothing said lost)
 // Run: node scripts/test-wrapper-said-journal.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -260,10 +265,10 @@ setInterval(() => {}, 1e3);
         checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { }, daemonPtyShim: (h) => h, sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null,
         getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn(), getPages: () => null, getPermissionRules: () => null, agentEnv: () => ({}) }); };
     const rec = (k) => JSON.stringify({ type: 'system', subtype: 'informational', level: 'info', content: `GAP-${k}` });
-    const run = async (so, { fence = true, answer = true } = {}) => {
+    const run = async (so, { fence = true, answer = true, split = false } = {}) => {
       const dir = fs.mkdtempSync(path.join(HOME, 'gate-')), file = path.join(dir, 'w.buf');
       fs.writeFileSync(file, rec(0) + '\n');                                   // what the catch-up read
-      const rb = BR.restoreBufOf(file, fs.readFileSync(file));
+      const rb = Object.assign(BR.restoreBufOf(file, fs.readFileSync(file)), { fence: true });   // a journaled wrapper's read (its sidecar adverts caps.fence)
       fs.appendFileSync(file, rec(1) + '\n');                                  // said after the catch-up, before the connect: dtach DROPPED it
       const Ld = ptyListeners(), Le = ptyListeners(), writes = [];
       const duck = { pid: 0, onData: (cb) => Ld.on(cb), onExit: (cb) => Le.on(cb), write(s) { writes.push(String(s)); }, resize() { }, kill() { } };
@@ -278,7 +283,9 @@ setInterval(() => {}, 1e3);
         fs.appendFileSync(file, rec(2) + '\n'); Ld.emit(rec(2) + '\r\n');      // said after the connect: in the file, then on the live stream
         if (answer) {
           const fl = SJ.fenceLine(ask ? ask.id : 'none');
-          fs.appendFileSync(file, fl + '\n' + rec(3) + '\n'); Ld.emit(fl + '\r\n' + rec(3) + '\r\n');   // the fence, then a line after it
+          fs.appendFileSync(file, fl + '\n' + rec(3) + '\n');
+          if (split) { Ld.emit(fl.slice(0, 11)); Ld.emit(fl.slice(11) + '\r\n' + rec(3) + '\r\n'); }   // r1266 (c): the fence split across two chunks
+          else Ld.emit(fl + '\r\n' + rec(3) + '\r\n');   // the fence, then a line after it
         } else await until(() => sess.buffer.includes('GAP-2'), 3000);           // no fence: the bound
         const b = sess.buffer;
         return { threw, asked: !!ask, at: [1, 2, 3].map((k) => b.indexOf(`GAP-${k}`)), n: [1, 2, 3].map((k) => b.split(`GAP-${k}`).length - 1), fence: b.includes(SJ.FENCE_TYPE), warns };
@@ -289,11 +296,13 @@ setInterval(() => {}, 1e3);
     const g = await run(soOf(SO, 'g'));
     const r = await run(soOf(require(M.write('src/server/session-stdout.js', anchored(soSrc, '      else if (gap.lost) {', '      else if (false) {', 'gap-not-fed'), 'gap-not-fed')), 'r'));
     const nf = await run(soOf(SO, 'nf'), { fence: false });
+    const sp = await run(soOf(SO, 'sp'), { split: true });
     const bd = await run(soOf(require(M.write('src/server/session-stdout.js', anchored(soSrc, 'const FENCE_WAIT_MS = 3000,', 'const FENCE_WAIT_MS = 50,', 'short-bound'), 'short-bound')), 'bd'), { answer: false });
     ok(!g.threw && g.asked && g.n.join() === '1,1,1' && g.at[0] < g.at[1] && g.at[1] < g.at[2] && !g.fence,
       `the gate asks the fence at the first byte; what the survivor said between the catch-up and the connect reaches the consumer FIRST (${g.at.join(' < ')}), each live line once, the fence record never`, g);
     ok(!r.threw && r.n[0] === 0 && r.n[1] === 1 && r.n[2] === 1, 'RED: the gap not fed ⇒ the line said between the catch-up and the connect never reaches the conversation', r);
     ok(!nf.threw && !nf.asked && nf.n[1] === 1, 'a wrapper with no fence (its sidecar adverts none): no ask, the live lines as before', nf);
+    ok(!sp.threw && sp.asked && sp.n.join() === '1,1,1' && sp.at[0] < sp.at[1] && sp.at[1] < sp.at[2] && !sp.fence, `a fence SPLIT across two chunks is found (the previous tail + the new bytes), the order kept (${sp.at.join(' < ')})`, sp);
     ok(!bd.threw && bd.asked && bd.n[1] === 1 && bd.n[0] === 0 && bd.warns.some((w) => /no fence came back in 50 ms/.test(w)), 'the bound: no fence back ⇒ the held bytes are fed as they came, and that is SAID', bd);
   }
 
@@ -307,9 +316,11 @@ setInterval(() => {}, 1e3);
     const g5 = SJ.fenceGap({ text: `${A}\n` }, fl, '');
     const g6 = SJ.fenceGap(null, fl, ''), g7 = SJ.fenceGap({ skipped: 'rewritten' }, fl, '');
     const g8 = SJ.fenceGap({ text: `${A}\n${B}\n${fl}\n` }, fl, '');
+    const X = '{"type":"a","n":9}', g9 = SJ.fenceGap({ text: `${B}\n${fl}\n` }, fl, `${X}\r\n${B}\r\n`, `${A}\n${X}\n`), g9n = SJ.fenceGap({ text: `${B}\n${fl}\n` }, fl, `${X}\r\n${B}\r\n`);
     ok(g1.lost === `${A}\n` && g2.lost === `${A}\n${B.slice(0, 5)}` && g3.lost === `${A}\n` && g8.lost === `${A}\n${B}\n`,
       'the gap = the file\'s lines before the fence less the live stream\'s END: a line the connect tore gives back its head; the preamble and the transport records are no live line; nothing live ⇒ all of it', { g1, g2, g3, g8 });
     ok(!!g4.skipped && !!g5.skipped && !!g6.skipped && g7.skipped === 'rewritten', 'a live line the file does not hold, no fence in the file, no file past the catch-up: fed nothing, the reason said', { g4, g5, g6, g7 });
+    ok(g9.lost === '' && g9.twice === 1 && !!g9n.skipped, `THE ACCEPTED WINDOW (r1266): a line the catch-up fed that came live again is set aside as drawn twice (${g9.twice}) — the gap is the rest, nothing said lost; without the catch-up's text it reads as a mismatch`, { g9, g9n });
   }
 
   console.log('— ⑨ THE CENSUS: every ring add and every stdout write of both wrappers, classified');
@@ -364,7 +375,7 @@ setInterval(() => {}, 1e3);
     const run = async (BRm) => {
       const dir = fs.mkdtempSync(path.join(HOME, 'whole-')), file = path.join(dir, 'w.buf');
       fs.writeFileSync(file, rec(0) + '\n');
-      const rb0 = BRm.restoreBufOf(file, fs.readFileSync(file));
+      const rb0 = Object.assign(BRm.restoreBufOf(file, fs.readFileSync(file)), { fence: true });   // a journaled wrapper's read
       const head = BIG.slice(0, 4000);
       fs.appendFileSync(file, rec(1) + '\n' + head);   // THE PLACED STALL: the append of BIG half-written under the catch-up's read
       const cu = BRm.restoreCatchUp(rb0);
@@ -383,11 +394,12 @@ setInterval(() => {}, 1e3);
         const fl = SJ.fenceLine(ask ? ask.id : 'none');
         fs.appendFileSync(file, fl + '\n' + rec(3) + '\n'); Ld.emit(fl + '\r\n' + rec(3) + '\r\n');
       } finally { console.warn = w0; }
-      return { threw, fedText: !!(cu && cu.text), tornFed: !!(cu && cu.text && cu.text.includes(head) && !cu.text.includes(BIG)), partial: cu && cu.rb ? cu.rb.partial.length : null, parsed: sess._apiKeySource || null, gap1: sess.buffer.split('GAP-1').length - 1, gap3: sess.buffer.split('GAP-3').length - 1 };
+      const at = ['GAP-1', '"apiKeySource":"the-whole-line"', 'GAP-3'].map((x) => sess.buffer.indexOf(x));
+      return { threw, fedText: !!(cu && cu.text), tornFed: !!(cu && cu.text && cu.text.includes(head) && !cu.text.includes(BIG)), partial: cu && cu.rb ? cu.rb.partial.length : null, parsed: sess._apiKeySource || null, gap1: sess.buffer.split('GAP-1').length - 1, gap3: sess.buffer.split('GAP-3').length - 1, order: at[0] >= 0 && at[0] < at[1] && at[1] < at[2] };
     };
     const g = await run(BR), r = await run(BRr);
-    ok(!g.threw && g.fedText && !g.tornFed && g.partial === 4000 && g.parsed === 'the-whole-line' && g.gap1 === 1 && g.gap3 === 1,
-      `a catch-up read landing in the middle of an append feeds only its WHOLE lines: the torn tail (${g.partial} bytes) is that read's partial, and the line arrives WHOLE through the fence, parsed by the real claude consumer (its apiKeySource «${g.parsed}»), once`, g);
+    ok(!g.threw && g.fedText && !g.tornFed && g.partial === 4000 && g.parsed === 'the-whole-line' && g.gap1 === 1 && g.gap3 === 1 && g.order,
+      `a catch-up read landing in the middle of an append feeds only its WHOLE lines: the torn tail (${g.partial} bytes) is that read's partial, and the line arrives WHOLE through the fence, parsed by the real claude consumer (its apiKeySource «${g.parsed}»), once, in its order (the caught-up line, the whole line, the live line)`, g);
     ok(!r.threw && r.tornFed && r.parsed === null, 'RED: the read\'s tail fed as it lay (the base\'s shape) ⇒ the consumer holds the head, the whole line lands on top of it, and that said line is lost (nothing parsed)', r);
   }
 
@@ -424,9 +436,60 @@ setInterval(() => {}, 1e3);
       return { res: res.map((x) => (x ? 1 : 0)).join(''), size: fs.statSync(f).size, said: said.filter((l) => /since the last whole rewrite/.test(l)).length };
     };
     const gb = budget(SJ), rb = budget(SJb);
+    const big = (() => { const dir = fs.mkdtempSync(path.join(HOME, 'big-')), f = path.join(dir, 'g.buf'); fs.writeFileSync(f, ''); const said = []; let ring = ''; const j = SJ.create({ file: f, rewrite: () => { fs.writeFileSync(f, ring); j.rewritten(); }, say: (l) => said.push(l), budget: 32 });
+      ring += line(1); j.add(line(1)); j.flush(); ring += line(2); j.add(line(2)); const r2 = j.flush(); j.close(); return { r2, said }; })();
     ok(gb.res === '1111000' && gb.said === 1 && gb.size === 4 * line(0).length,
       `the append budget: past ${3 * line(0).length} bytes appended since the last whole rewrite nothing more is appended, and that is said once (${gb.res}; the file ${gb.size} bytes)`, gb);
     ok(rb.res === '1111111' && rb.size === 7 * line(0).length, 'RED: no budget ⇒ the file grows with every append while the whole rewrite never comes', rb);
+    ok(big.r2 === false && big.said.some((l) => l.includes(`a write of ${line(2).length} bytes would pass its bound`)), `a single line over the budget is named by its size (r1266 (e): never «appended 0 bytes»)`, big);
+  }
+
+  console.log('— ⑭ A TERMINAL\'S CATCH-UP IS FED AS READ (主开发 r1266, the MUST) · ⑮ A READ TORN INSIDE A MANY-BYTE CHARACTER');
+  {
+    const BR = require(path.join(REPO, 'src/server/boot-restore.js')), brSrc = read('src/server/boot-restore.js');
+    const BRall = require(M.write('src/server/boot-restore.js', anchored(brSrc, 'if (!rb.fence) return body.length > pb.length', 'if (false) return body.length > pb.length', 'whole-lines-for-all'), 'whole-lines-for-all'));   // stale-pins: kept (the red plants the follow's first shape: whole lines for every survivor)
+    const BRtext = require(M.write('src/server/boot-restore.js', anchored(brSrc, 'pfx = body.subarray(0, pb.length).equals(pb);', "pfx = body.toString('utf-8').startsWith(rb.partial);", 'partial-as-text'), 'partial-as-text'));
+    const { ptyListeners } = require(path.join(REPO, 'src/pty-duck.js'));
+    const { createMessageManager } = require(path.join(REPO, 'src/normalizers'));
+    const SO = require(path.join(REPO, 'src/server/session-stdout.js'));
+    const anyFn = () => new Proxy(function () { }, { get: (t, k) => (k === 'then' || typeof k === 'symbol' ? undefined : anyFn()), apply: () => undefined });
+    const soOf = (tag) => { const dd = fs.mkdtempSync(path.join(HOME, `so14-${tag}-`)); for (const x of ['buffers', 'meta']) fs.mkdirSync(path.join(dd, x)); const engine = new Proxy({ _vsuPending: new Map() }, { get: (t, k) => (k in t ? t[k] : anyFn()), has: () => true });
+      return SO.create({ rootDir: dd, BUFFERS_DIR: path.join(dd, 'buffers'), META_DIR: path.join(dd, 'meta'), DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(dd, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: new Map(), engine,
+        checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { }, daemonPtyShim: (h) => h, sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null,
+        getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn(), getPages: () => null, getPermissionRules: () => null, agentEnv: () => ({}) }); };
+    const duckOf = () => { const Ld = ptyListeners(), Le = ptyListeners(); return { pid: 0, onData: (cb) => Ld.on(cb), onExit: (cb) => Le.on(cb), write() { }, resize() { }, kill() { } }; };
+    // ⑭ a plain shell survivor: the timer writes a question with NO line end into its screen file inside the attach window
+    const term = (BRm, tag) => {
+      const dir = fs.mkdtempSync(path.join(HOME, 'term-')), file = path.join(dir, 't.buf');
+      fs.writeFileSync(file, '$ ./deploy.sh\r\n');
+      const rb = BRm.restoreBufOf(file, fs.readFileSync(file));   // a terminal's read: no fence (its sidecar adverts none)
+      const ASKQ = 'Overwrite existing file? [y/N] ';
+      fs.writeFileSync(file + '.t', '$ ./deploy.sh\r\nchecking…\r\n' + ASKQ); fs.renameSync(file + '.t', file);   // rewritten WHOLE (the terminal's own road)
+      const cu = BRm.restoreCatchUp(rb);
+      const sess = { mode: 'terminal', backend: 'terminal', buffer: '$ ./deploy.sh\r\n', sockName: null, clients: new Set() };
+      let threw = null; try { soOf(tag).setupSessionPty(sess, 'w-term14', duckOf(), { catchUp: cu && cu.text ? cu : null }); } catch (e) { threw = String((e && e.stack) || e); }
+      return { threw, fed: !!(cu && cu.text && cu.text.includes(ASKQ)), shown: sess.buffer.endsWith(ASKQ) };
+    };
+    const tg = term(BR, 'tg'), tr = term(BRall, 'tr');
+    ok(!tg.threw && tg.fed && tg.shown, 'a TERMINAL survivor whose screen file gains a question with no line end in the attach window: its catch-up feeds the read as the release did — the question is on the screen', tg);
+    ok(!tr.threw && !tr.fed && !tr.shown, 'RED: whole lines for every survivor (the follow\'s first shape) ⇒ the question is never drawn: the program waits on an answer nobody is asked', tr);
+    // ⑮ a chat survivor's registration read torn INSIDE a many-byte character (a Chinese line): the read's partial ends in a
+    // replacement mark — compared as BYTES, the head leaves the buffer and the whole line comes back once
+    const cjk = (BRm, tag) => {
+      const dir = fs.mkdtempSync(path.join(HOME, 'cjk-')), file = path.join(dir, 'c.buf');
+      const LINE = JSON.stringify({ type: 'system', subtype: 'informational', level: 'info', content: '这是一个会被撕开的中文句子，在一个多字节字符的中间' });
+      const lb = Buffer.from(LINE + '\n', 'utf-8'), cut = lb.indexOf(Buffer.from('撕', 'utf-8')) + 1;   // inside the character's three bytes
+      fs.writeFileSync(file, Buffer.concat([Buffer.from('{"type":"system","subtype":"informational","content":"head"}\n'), lb.subarray(0, cut)]));
+      const raw = fs.readFileSync(file), rb = BRm.restoreBufOf(file, raw);
+      fs.appendFileSync(file, lb.subarray(cut));
+      const cu = BRm.restoreCatchUp(rb);
+      const sid = 'w-cjk15', sess = { mode: 'chat', backend: 'claude', buffer: raw.toString('utf-8'), sockName: null, clients: new Set(), _normalizer: createMessageManager('claude', sid) };
+      let threw = null; try { soOf(tag).setupSessionPty(sess, sid, duckOf(), { catchUp: cu && cu.text ? cu : null }); } catch (e) { threw = String((e && e.stack) || e); }
+      return { threw, torn: rb.partial.includes('�'), dropped: !!(cu && cu.drop), whole: sess.buffer.split(LINE).length - 1, mark: sess.buffer.includes('�') };
+    };
+    const cg = cjk(BR, 'cg'), cr = cjk(BRtext, 'cr');
+    ok(!cg.threw && cg.torn && cg.dropped && cg.whole === 1 && !cg.mark, 'a registration read torn INSIDE a many-byte character (its partial ends in a replacement mark): compared as bytes, the torn head leaves the buffer and the whole line is in it ONCE, no mark left', cg);
+    ok(!cr.threw && cr.torn && !cr.dropped && cr.mark, 'RED: the partial compared as decoded text ⇒ never equal: the torn head (its replacement mark) stays glued before the whole line — a page built from it holds a line that will not parse', cr);
   }
 
   console.log('— ⑩ THE RESTORE\'S WIRING (src/server/boot-restore.js)');
@@ -435,7 +498,7 @@ setInterval(() => {}, 1e3);
     const dir = fs.mkdtempSync(path.join(HOME, 'br-')), f = path.join(dir, 'r.buf');
     const a = (n) => `{"type":"a","n":${n}}\n`;
     fs.writeFileSync(f, a(0));
-    const rb0 = BR.restoreBufOf(f, fs.readFileSync(f));
+    const rb0 = Object.assign(BR.restoreBufOf(f, fs.readFileSync(f)), { fence: true });
     fs.appendFileSync(f, a(1));
     const cu = BR.restoreCatchUp(rb0);   // the catch-up: what came after the registration's read — and where ITS read ended
     fs.appendFileSync(f, a(2));
@@ -444,7 +507,7 @@ setInterval(() => {}, 1e3);
     ok(!!cu && cu.text === a(1) && !!cu.rb && cu.rb.len === a(0).length + a(1).length && !!nx && nx.text === a(2)
       && /if \(restoreBuf && wrapperObs && wrapperObs\.caps && wrapperObs\.caps\.fence === SJ\.FENCE_VERSION\) restoreBuf\.fence = true;/.test(brSrc)
       && /const rb0 = session\._restoreBuf, fence = rb0 && rb0\.fence && !\(cu && cu\.skipped\) && !\(cu && cu\.text && !cu\.rb\) \? \{ rb: cu && cu\.text \? cu\.rb : rb0, read: restoreCatchUp \} : null;/.test(brSrc)
-      && /k = gate\.held\.indexOf\(fl, Math\.max\(0, gate\.held\.length - data\.length - fl\.length\)\)/.test(ssSrc) && !/tailAt/.test(brSrc)
+      && /win = gate\.tail \+ data, kw = win\.indexOf\(fl\)/.test(ssSrc) && /const all = gate\.held\.join\(''\), k = gate\.size - win\.length \+ kw;/.test(ssSrc) && !/tailAt/.test(brSrc)
       && /attachToDtach\(id, socketPath, session, \{ restore: true, catchUp: cu && cu\.text \? cu : null, fence \}\);/.test(brSrc)
       && /setupSessionPty\(session, id, attachPty, \{ catchUp, fence \}\);/.test(ssSrc),
       'a fence only for a wrapper whose sidecar adverts it, read from where the catch-up\'s read ENDED (restoreCatchUp returns its own end: the next read is exactly what came after), handed to the local attach only (pinned by text)', { cu: cu && { text: cu.text, len: cu.rb && cu.rb.len }, nx: nx && nx.text });

@@ -130,7 +130,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchU
   // then the file past the catch-up, up to the fence, minus what the live stream brought since the connect (PURE SJ.fenceGap), is
   // fed FIRST, the held bytes after it, and the fence record never. Bounded (FENCE_WAIT_MS, FENCE_HELD_MAX): past it the held
   // bytes are fed as they came and that is SAID. Chat only; the local road only (a restore's attach takes it).
-  const gate = fence && fence.rb && typeof fence.read === 'function' && session.mode === 'chat' ? { cbs: [], held: '', open: false, id: null, timer: null } : null;
+  // r1266: the held bytes a LIST of chunks (never one growing string searched whole), searched as the previous tail + the new bytes;
+  // `fed` = the catch-up's own text (the accepted window: a line it fed that the live stream brings again)
+  const gate = fence && fence.rb && typeof fence.read === 'function' && session.mode === 'chat' ? { cbs: [], held: [], size: 0, tail: '', open: false, id: null, timer: null, fed: catchUp && catchUp.text ? String(catchUp.text) : '' } : null;
   const onDataOwn = (caught || gate) ? Object.getOwnPropertyDescriptor(ptyProcess, 'onData') : null;
   const realOn = (caught || gate) ? ptyProcess.onData : null;
   if (caught || gate) Object.defineProperty(ptyProcess, 'onData', { configurable: true, writable: true, value: (cb) => {
@@ -205,23 +207,26 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchU
     const openGate = (why) => {
       if (gate.open) return;
       gate.open = true; if (gate.timer) { clearTimeout(gate.timer); gate.timer = null; }
-      const held = gate.held; gate.held = '';
+      const held = gate.held.join(''); gate.held = []; gate.size = 0; gate.tail = '';
       if (why) console.warn(`[${id}] the restore's fence: ${why} — what the survivor said between its catch-up and its connect was not read`);
       if (held) feedAll(held);
     };
     realOn.call(ptyProcess, (data) => {
       if (gate.open) { feedAll(data); return; }
-      gate.held += data;
+      gate.held.push(data); gate.size += data.length;
       if (!gate.id) {   // the first byte: dtach's client is connected and raw — the ask is never echoed
         gate.id = `${process.pid.toString(36)}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
         try { ptyProcess.write(SJ.fenceAsk(gate.id) + '\n'); } catch (e) { openGate(`its fence could not be asked (${(e && e.message) || e})`); return; }
       }
-      const fl = SJ.fenceLine(gate.id), k = gate.held.indexOf(fl, Math.max(0, gate.held.length - data.length - fl.length));   // r1236: the NEW bytes only (never the whole hold again at every chunk)
-      if (k < 0) { if (gate.held.length > FENCE_HELD_MAX) openGate(`${gate.held.length} bytes came before its fence`); return; }
-      let end = k + fl.length; if (gate.held[end] === '\r') end++; if (gate.held[end] === '\n') end++;
-      const before = gate.held.slice(0, k), after = gate.held.slice(end);
-      gate.held = ''; gate.open = true; if (gate.timer) { clearTimeout(gate.timer); gate.timer = null; }
-      let gap; try { gap = SJ.fenceGap(fence.read(fence.rb), fl, before); } catch (e) { gap = { skipped: `its file could not be read (${(e && e.message) || e})` }; }
+      const fl = SJ.fenceLine(gate.id), win = gate.tail + data, kw = win.indexOf(fl);   // r1236/r1266: the previous tail + the NEW bytes only
+      if (kw < 0) { gate.tail = win.slice(Math.max(0, win.length - fl.length + 1)); if (gate.size > FENCE_HELD_MAX) openGate(`${gate.size} bytes came before its fence`); return; }
+      const all = gate.held.join(''), k = gate.size - win.length + kw;   // ONE join, when the fence is found
+      gate.held = []; gate.size = 0; gate.tail = '';
+      let end = k + fl.length; if (all[end] === '\r') end++; if (all[end] === '\n') end++;
+      const before = all.slice(0, k), after = all.slice(end);
+      gate.open = true; if (gate.timer) { clearTimeout(gate.timer); gate.timer = null; }
+      let gap; try { gap = SJ.fenceGap(fence.read(fence.rb), fl, before, gate.fed); } catch (e) { gap = { skipped: `its file could not be read (${(e && e.message) || e})` }; }
+      if (gap.twice) console.warn(`[${id}] the restore's fence: ${gap.twice} line(s) the catch-up fed came live again (the accepted window: drawn twice) — nothing was lost`);
       if (gap.skipped) console.warn(`[${id}] the restore's fence: ${gap.skipped} — what the survivor said between its catch-up and its connect was not read`);
       else if (gap.lost) {
         if (gap.drop && session.buffer.endsWith(gap.drop)) session.buffer = session.buffer.slice(0, session.buffer.length - gap.drop.length);

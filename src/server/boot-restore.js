@@ -1325,7 +1325,7 @@ async function readoptOrphanKeeperSessions() {
 const RESTORE_CATCHUP_MAX = 2 * 1024 * 1024, RESTORE_GUARD = 256;
 function restoreBufOf(file, raw) {
   const lineAt = raw.lastIndexOf(10) + 1;   // the byte after the read's last '\n' (0: no whole line yet)
-  return { file, len: raw.length, lineAt, guard: Buffer.from(raw.subarray(Math.max(0, lineAt - RESTORE_GUARD), lineAt)), partial: raw.subarray(lineAt).toString('utf-8') };
+  return { file, len: raw.length, lineAt, guard: Buffer.from(raw.subarray(Math.max(0, lineAt - RESTORE_GUARD), lineAt)), partial: raw.subarray(lineAt).toString('utf-8'), partialBytes: Buffer.from(raw.subarray(lineAt)) };   // r1266: the partial as BYTES too (a read torn inside a many-byte character decodes to a replacement mark)
 }
 /** → null (nothing written since the read), { text, drop } (feed `text`; it begins with `drop`, the read's partial last line,
  *  which leaves the session's buffer first), or { skipped: why }. */
@@ -1338,7 +1338,8 @@ function restoreCatchUp(rb, { max = RESTORE_CATCHUP_MAX } = {}) {
     const read = (at, n) => { const b = Buffer.alloc(Math.max(0, n)); const got = n > 0 ? fs.readSync(fd, b, 0, n, at) : 0; return b.subarray(0, got); };
     // the read's end still where it was: its guard and its partial line, byte for byte (a ring REWRITTEN to the very same size
     // is told from an unchanged file by these bytes, never by the size alone — round wed0m8jzl)
-    const inPlace = () => size >= rb.len && read(rb.lineAt - rb.guard.length, rb.guard.length).equals(rb.guard) && read(rb.lineAt, rb.len - rb.lineAt).toString('utf-8') === rb.partial;
+    const pb = rb.partialBytes || Buffer.from(String(rb.partial || ''), 'utf-8');   // r1266: compared as BYTES — a partial torn inside a many-byte character (a Chinese or Japanese line) never matched as text
+    const inPlace = () => size >= rb.len && read(rb.lineAt - rb.guard.length, rb.guard.length).equals(rb.guard) && read(rb.lineAt, rb.len - rb.lineAt).equals(pb);
     if (size === rb.len && inPlace()) return null;   // nothing written since the read
     let start = -1;
     if (size > rb.len && inPlace()) start = rb.lineAt;   // appended: the plain case
@@ -1354,11 +1355,17 @@ function restoreCatchUp(rb, { max = RESTORE_CATCHUP_MAX } = {}) {
     // from the last line end, so that line arrives whole, once. No line end since the read ⇒ nothing to feed (null): the fence reads
     // from the read's own end, exactly what was fed. THIS read's end comes from the bytes it read (no second read of the tail): its
     // guard is the 256 bytes before that line end — this read's own, after the read's guard (which ends where `start` begins)
-    const body = read(start, size - start), nl = body.lastIndexOf(10);
+    const body = read(start, size - start), pfx = body.subarray(0, pb.length).equals(pb);   // does what follows begin with the read's own partial (its bytes)
+    // r1266 (the law said right): WHOLE LINES ONLY WHERE THE FILE IS APPENDED AND A FENCE FOLLOWS — a journaled chat wrapper (its sidecar
+    // adverts caps.fence). Every other survivor's file is fed AS READ, as the release fed it: a terminal's raw screen bytes, rewritten
+    // whole by a rename (never torn) — a prompt with no line end («Overwrite existing file? [y/N] ») is the text a person must see, and
+    // nothing later delivers it (no fence; a plain shell repaints nothing); an older wrapper's file
+    if (!rb.fence) return body.length > pb.length ? { text: body.toString('utf-8'), drop: pfx ? rb.partial : '' } : null;
+    const nl = body.lastIndexOf(10);
     if (nl < 0) return null;
-    const whole = body.subarray(0, nl + 1), text = whole.toString('utf-8'), ctx = Buffer.concat([rb.guard, whole]);
-    const rbEnd = { file: rb.file, len: size, lineAt: start + nl + 1, guard: Buffer.from(ctx.subarray(Math.max(0, ctx.length - RESTORE_GUARD))), partial: body.subarray(nl + 1).toString('utf-8') };
-    return text.length > rb.partial.length ? { text, drop: text.startsWith(rb.partial) ? rb.partial : '', rb: rbEnd } : null;
+    const whole = body.subarray(0, nl + 1), text = whole.toString('utf-8'), ctx = Buffer.concat([rb.guard, whole]), tailB = body.subarray(nl + 1);
+    const rbEnd = { file: rb.file, len: size, lineAt: start + nl + 1, guard: Buffer.from(ctx.subarray(Math.max(0, ctx.length - RESTORE_GUARD))), partial: tailB.toString('utf-8'), partialBytes: Buffer.from(tailB), fence: true };
+    return whole.length > pb.length ? { text, drop: pfx ? rb.partial : '', rb: rbEnd } : null;
   } catch (e) { return { skipped: `its buffer could not be read (${(e && e.code) || (e && e.message) || e})` }; }
   finally {   // one owner, closed once, the number forgotten at its close; a failed close is SAID (its errno and the file), never swallowed — what was read is returned whatever the close answered (test-fd-close-census)
     if (fd !== null) { try { fs.closeSync(fd); } catch (e) { console.warn(`[boot-restore] the catch-up could not close its descriptor of ${rb.file} (${(e && e.code) || (e && e.message) || e})`); } fd = null; }
