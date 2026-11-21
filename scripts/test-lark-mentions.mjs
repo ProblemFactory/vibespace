@@ -197,6 +197,8 @@ console.log('① the one decision and the wire (PURE, src/channels/lark/mentions
   const wu = LM.wireText('@Ann, hi', [{ at: 4, len: 3, id: A1.id }, { at: 0, len: 3, id: 'not an id' }, { at: 0, len: 3, id: A1.id, tag: true }], un);
   LM.wireText(T, dw.places, unOk);
   ok(wu === '@Ann, hi' && J(un.map((u) => u.why).sort()) === J(['no-such-tag', 'not-on-an-at-sign', 'shape']) && unOk.length === 0, `A DECIDED PLACE THAT DID NOT REACH THE WIRE IS SAID, by its reason (${un.map((u) => u.why).join(', ')}); the text whose places all sit says nothing (${unOk.length})`, J({ un, unOk }));
+  const uo = []; LM.wireText('@Ann hi', [{ at: 0, len: 3, id: A1.id }, { at: 1, len: 2, id: A1.id }], uo);
+  ok(J(uo.map((u) => u.why)) === J(['overlap']), `round wqdnv452s: a decided place that OVERLAPS one already placed is said by its reason (${uo.map((u) => u.why).join(', ')})`);
   const SAID = "  const said = (p, why) => { if (Array.isArray(unplaced)) unplaced.push({ at: p && Number.isInteger(p.at) ? p.at : null, why }); };\n";
   const LMsilent = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, SAID, '  const said = () => {};\n', 'wire-drop-silent'), 'mentions-wire-drop-silent');
   const unR = []; LMsilent.wireText('@Ann, hi', [{ at: 4, len: 3, id: A1.id }], unR);
@@ -293,7 +295,7 @@ const REFUSED = { code: 99991672, msg: 'Access denied. One of the following scop
   const rl = await rateLeg(lark);
   ok(!rl.first.threw && J(rl.first.open) === J(['decorator']) && rl.first.openWhy === 'members-rate-limited' && !rl.next.threw && rl.after === 0 && rl.next.openWhy === 'members-rate-limited', `A READ THAT FAILS NEVER REFUSES: the vendor's rate refusal — the proposal is decided with the word open and said BY ITS CAUSE («${rl.first.openWhy}»); the next reads NOTHING while the back-off holds, said the same (${rl.after}, «${rl.next.openWhy}»)`, J(rl));
   // the follow (r1402 (1)): RED — the words as they were («no answer» for the vendor's rate refusal and its back-off)
-  const RATE_WHY = "    if (names === null) return { list: [], whole: false, why: peopleRefusedUntil > now() ? 'members-rate-limited' : 'members-no-answer' };   // the adapter's back-off holds: no read now\n";
+  const RATE_WHY = "    if (names === null) return { list: [], whole: false, why: vendorPausedUntil > now() && vendorPausedWhy === 'rate' ? 'members-rate-limited' : 'members-no-answer' };   // the back-off that holds, BY ITS CAUSE: the vendor's rate pause, else a transport pause (this chat's or the vendor's)\n";
   const CATCH = "    try { names = await namesFor(convId, { fresh: true }); }\n    catch (e) { return { list: [], whole: false, why: e instanceof ChannelError && e.code === 'auth-expired' ? 'members-signed-out' : e instanceof ChannelError && e.code === 'rate-limited' ? 'members-rate-limited' : 'members-no-answer' }; }   // rate-ok: prepare-members\n";
   const rlW = await rateLeg(MUT.load('src/channels/lark.js', anchored(anchored(larkSrc, CATCH, "    try { names = await namesFor(convId, { fresh: true }); }\n    catch (e) { return { list: [], whole: false, why: e instanceof ChannelError && e.code === 'auth-expired' ? 'members-signed-out' : 'members-no-answer' }; }   // rate-ok: prepare-members\n", 'rate-said-no-answer'), RATE_WHY, "    if (names === null) return { list: [], whole: false, why: 'members-no-answer' };\n", 'backoff-said-no-answer'), 'lark-rate-no-answer'));   // stale-pins: kept (the RED: the words as they were)
   ok(rlW.first.openWhy === 'members-no-answer' && rlW.next.openWhy === 'members-no-answer', `RED CONTROL: the words as they were — the vendor's rate refusal and its back-off are said «${rlW.first.openWhy}» (no answer)`, J(rlW));
@@ -313,6 +315,53 @@ const REFUSED = { code: 99991672, msg: 'Access denied. One of the following scop
   const PAUSE = "const ms = Math.max(1e3, (Number.isFinite(hint) && hint > 0 ? hint : 60) * 1000); return e instanceof ChannelError && e.code === 'rate-limited' ? Math.min(24 * 3600e3, ms) : Math.min(300e3, ms); };";
   const wvR = await waitLeg(MUT.load('src/channels/lark.js', anchored(larkSrc, PAUSE, 'const ms = Math.max(1e3, (Number.isFinite(hint) && hint > 0 ? hint : 60) * 1000); return Math.min(300e3, ms); };', 'rate-pause-capped'), 'lark-rate-pause-capped'));
   ok(wvR.at301 === 2, `RED CONTROL: the pause as it was (five minutes at most) — a proposal at +301 s asks the vendor again BEFORE its 600 s word (${wvR.at301} reads)`, J(wvR));
+  // round wqdnv452s (the MUST, two readers): THE WORDS NAME THE CAUSE THAT SET THE PAUSE. A profile read refused for want of a
+  // privilege (6 h) pauses the people reads ONLY — the next proposal's member read (another privilege) still runs and decides; a
+  // profile read's transport blip pauses the member read for the vendor's moment, said «no answer», never «rate limited». RED:
+  // the wait and the words read off the ONE shared pause (the tip) — 6 h of «rate limited» for a missing privilege, and a blip
+  // said «rate limited»
+  const TOKEN_P = { ...TOKEN, scopes: [...TOKEN.scopes, 'contact:contact:readonly'] };
+  const causeLeg = async (LARK, peer, profileAnswer) => {
+    let t = T0;
+    const s = stub((c) => {
+      if (c.url.includes('/contact/v3/users/')) return profileAnswer();
+      if (isMembers(c)) return jsonRes(200, MEMBERS(c.url.includes('oc_dm') ? [] : [ZHANG]));
+      if (/\/im\/v1\/chats\/oc_dm(\?|$)/.test(c.url)) return jsonRes(200, { code: 0, msg: 'success', data: { chat_mode: 'p2p' } });
+      return jsonRes(200, SENT());
+    });
+    const a = LARK.create({ id: 'l', options: {} }, { resolveIntegration: () => CRED, fetch: s.fetchFn, now: () => t, tokens: tokens(TOKEN_P) });
+    await a.describe('oc_dm', { peerIds: [peer] }).catch(() => null);   // a single chat's peer, named by a profile read
+    const profileReads = s.calls.filter((c) => c.url.includes('/contact/v3/users/')).length;
+    t = T0 + 30e3;
+    const m0 = s.calls.filter((c) => isMembers(c) && c.url.includes('oc_x')).length;
+    const p = await a.prepareSend('oc_x', { text: '@张三 请看', known: [] });
+    return { profileReads, memberReads: s.calls.filter((c) => isMembers(c) && c.url.includes('oc_x')).length - m0, ids: ids(p), openWhy: p.openWhy || null };
+  };
+  const PRIV = () => jsonRes(400, { code: 99991679, msg: 'permission denied: contact range' });
+  const BLIP = () => jsonRes(503, { code: 0, msg: 'service unavailable' });
+  const FRESH_GATE = "    if (fresh && ((c && c.until && now() < c.until) || vendorPausedUntil > now())) return null;\n";
+  const SHARED = MUT.load('src/channels/lark.js', anchored(anchored(larkSrc, FRESH_GATE, "    if (fresh && ((c && c.until && now() < c.until) || peopleRefusedUntil > now())) return null;\n", 'one-shared-pause-gate'), RATE_WHY, "    if (names === null) return { list: [], whole: false, why: peopleRefusedUntil > now() ? 'members-rate-limited' : 'members-no-answer' };\n", 'one-shared-pause-words'), 'lark-one-shared-pause');   // stale-pins: kept (the RED: the tip's one shared pause)
+  const cp = await causeLeg(lark, 'ou_peerpriv0001', PRIV), cb = await causeLeg(lark, 'ou_peerblip0001', BLIP);
+  const cpR = await causeLeg(SHARED, 'ou_peerpriv0002', PRIV), cbR = await causeLeg(SHARED, 'ou_peerblip0002', BLIP);
+  ok(cp.profileReads === 1 && cp.memberReads === 1 && J(cp.ids) === J([ZHANG.id]) && cb.profileReads === 1 && cb.memberReads === 0 && cb.openWhy === 'members-no-answer',
+    `THE WORDS NAME THE CAUSE: a profile refused for want of a privilege pauses the people reads only — the proposal's member read runs (${cp.memberReads}) and 张三 is decided; a profile read's transport blip holds the member read for the vendor's moment, said «${cb.openWhy}»`, J({ cp, cb }));
+  ok(cpR.memberReads === 0 && cpR.openWhy === 'members-rate-limited' && cbR.openWhy === 'members-rate-limited', `RED CONTROL: the tip's one shared pause — a missing privilege blocks the member read and is said «${cpR.openWhy}» (for 6 h), and a transport blip is said «${cbR.openWhy}»`, J({ cpR, cbR }));
+  // round wqdnv452s (shoulds): the rate pause's ONE-DAY ceiling (a broken header never holds the read for ever) and the transport
+  // blip's FIVE-MINUTE bound (kept when the rate branch split off), each by the clock
+  const TOKEN_DAY = { ...TOKEN, expiresAt: T0 + 30 * 86400e3 };   // a sign-in that outlives the day the leg waits (the fixture's lives an hour)
+  const boundLeg = async (answer, at) => {
+    let t = T0, first = true;
+    const s0 = stub((c) => { if (!isMembers(c)) return jsonRes(200, SENT()); if (first) { first = false; return answer(); } return jsonRes(200, MEMBERS([ZHANG])); });
+    const a = lark.create({ id: 'l', options: {} }, { resolveIntegration: () => CRED, fetch: s0.fetchFn, now: () => t, tokens: tokens(TOKEN_DAY) }), calls = s0.calls;
+    await a.prepareSend('oc_x', { text: '@张三 请看', known: [] });
+    const n0 = calls.filter(isMembers).length;
+    const out = [];
+    for (const dt of at) { t = T0 + dt; const p = await a.prepareSend('oc_x', { text: `@张三 ${dt}`, known: [] }); out.push({ dt, read: calls.filter(isMembers).length - n0, ids: ids(p) }); }
+    return out;
+  };
+  const day = await boundLeg(() => ({ ...jsonRes(429, { code: 99991400, msg: 'request trigger frequency limit' }), headers: new Headers({ 'retry-after': '999999999' }) }), [86399e3, 86401e3]);
+  const blip = await boundLeg(() => ({ ...jsonRes(503, { code: 0, msg: 'service unavailable' }), headers: new Headers({ 'retry-after': '900' }) }), [301e3]);
+  ok(day[0].read === 0 && day[1].read === 1 && J(day[1].ids) === J([ZHANG.id]) && blip[0].read === 1, `THE BOUNDS: a rate word of 999 999 999 s holds the member read one day at most (at +86 399 s ${day[0].read} read, at +86 401 s ${day[1].read}); a transport blip asking 900 s holds it five minutes (at +301 s ${blip[0].read} read)`, J({ day, blip }));
   const rlR = await rateLeg(MUT.load('src/channels/lark.js', anchored(larkSrc, CATCH, '    names = await namesFor(convId, { fresh: true });\n', 'read-failure-refuses'), 'lark-read-throws'));
   ok(rlR.first.threw === 'rate-limited', `RED CONTROL: the read's catch cut — the rate refusal refuses the whole proposal (${rlR.first.threw})`, J(rlR));
   { const { a } = mkLark(lark, (c) => (isMembers(c) ? jsonRes(401, { code: 99991668, msg: 'Invalid access token for authorization' }) : jsonRes(200, SENT())));
@@ -364,6 +413,10 @@ const REFUSED = { code: 99991672, msg: 'Access denied. One of the following scop
   ok(s2.wire === 'Hi <at user_id="ou_ann0000001">Ann Lee</at>, and @Zed', 'WITH FILES: the text part (sent first, as its own message) carries the mention in Lark\'s form', J(s2));
   const s2wR = await sendLeg(RELEASE, files);
   ok(s2wR.wire === 'Hi @Ann Lee, and @Zed', `RED CONTROL: the release's files road — the text part «${s2wR.wire}»`);
+  // round wqdnv452s (a should): THE FILES ROAD says a decided place off the text too (its answer carries the count)
+  { const { a } = mkLark(lark, (c) => jsonRes(200, c.url.includes('/im/v1/images') ? LF.answers.image : SENT([])));
+    const rf = await a.send('oc_x', { text: 'Hi', idemKey: 'p-u2', as: 'user', prepared: { mentions: [{ name: 'Ann Lee', id: ANN.id }], places: [{ at: 30, len: 7, id: ANN.id }] }, attachments: files });
+    ok(rf && rf.mentionsUnplaced === 1, `THE FILES ROAD: a decided place off the text is counted on the answer too (${rf && rf.mentionsUnplaced})`, J(rf && { mentionsUnplaced: rf.mentionsUnplaced })); }
 }
 
 console.log('③ the registry: each adapter\'s own id shape; a mention and its name as a PAIR; the places, the read key, the said words');
@@ -402,7 +455,7 @@ const A = 'fake-poll', C = 'fake-poll-ops';
  *  `members` = an array (a whole list), a function of the read's index (→ the read's `{list, whole, why}`), or null (no read);
  *  the ONE decision over the engine's `known` (+ the stand-in records' people `records`). Its send writes the wire with Lark's
  *  own wireText at the decision's places. `withPrepare: false` = the release (Lark declared no prepare step). */
-function dressed({ members = [], taken = null, withPrepare = true, LMM = LM, lost = false, records = [], prepare = null } = {}) {
+function dressed({ members = [], taken = null, withPrepare = true, LMM = LM, lost = false, records = [], prepare = null, unplaced = 0 } = {}) {
   const registry = CH.createChannelRegistry();
   const base = fake.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'] });
   const log = { sends: [], known: [], reads: 0, reconciles: [] };
@@ -418,7 +471,7 @@ function dressed({ members = [], taken = null, withPrepare = true, LMM = LM, los
         log.sends.push({ convId: c, text: args.text, wire, prepared: args.prepared || null });
         const r = await impl.send(c, args);
         const decided = new Set(((args.prepared && args.prepared.mentions) || []).map((m) => m.id)).size;
-        return { ...r, ...(withPrepare ? { mentionsTaken: taken === null ? decided : taken } : {}) };
+        return { ...r, ...(withPrepare ? { mentionsTaken: taken === null ? decided : taken } : {}), ...(unplaced ? { mentionsUnplaced: unplaced } : {}) };
       },
     };
     out.reconcile = async (c, o = {}) => { log.reconciles.push(o); return { landed: true, vendorMessageId: 'v-rec', at: Date.now() }; };
@@ -543,7 +596,7 @@ const ENG_NOKEY = engWithOutbound(anchored(outSrc, KEY_PASS, ' }); }', 'edit-wit
   // the second follow (主开发 r1403 (3)): a press from a PAGE OPENED BEFORE THE UPDATE (its bundle's digest has no decision field)
   // is told the ONE act that ends it — reload this page — by a code that page does not know (it shows the words as they are);
   // RED: that check cut — the old page is answered «changed since shown» at every press, a loop no reading of the card ends
-  const OLD_PAGE = "      if (String(shown) !== now0 && v0.prepared && typeof v0.prepared === 'object' && String(shown) === P.shownDigest(v0, { decision: false })) return { ok: false, code: 'page-outdated', error: 'this page was opened before an update and does not show who this message notifies — nothing was sent; reload this page, then decide', proposal: v0 };\n";
+  const OLD_PAGE = "      if (String(shown) !== now0 && v0.prepared && typeof v0.prepared === 'object' && String(shown) === P.shownDigest(v0, { decision: false })) return { ok: false, code: 'page-outdated', error: 'this page was opened before an update and does not show who this message notifies — nothing was sent; copy any edit you typed, reload this page, then decide', proposal: v0 };\n";
   const ENG_NOOLDPAGE = engWithOutbound(anchored(outSrc, OLD_PAGE, '', 'old-page-unnamed'), 'old-page-unnamed');
   const oldPage = async (ENGM) => { const D8 = dressed({ members: [ZHANG] }); const eng8 = await primed(D8.registry, ENGM); const r8 = await eng8.propose(AGENT, A, C, { text: '@张三 hi' });
     const view8 = eng8.outboxView({ ids: [r8.proposal.id] }).proposals[0];
@@ -553,8 +606,20 @@ const ENG_NOKEY = engWithOutbound(anchored(outSrc, KEY_PASS, ' }); }', 'edit-wit
     const out = { code: a8.code || null, words: a8.error || null, status: require(path.join(REPO, 'src/routes/channels.js')).answer3Status(a8), sentOnRefusal, then: ok8.ok === true };
     eng8.stop(); return out; };
   const op = await oldPage(ENG), opR = await oldPage(ENG_NOOLDPAGE);
+  // round wqdnv452s (a should): the old page's digest is the release's OWN, frozen — 2.369.414's channel-policy.js (a117cebb8)
+  // computed it for this fixed record; a field added to shownFields later moves the tip's and this pin goes red by name
+  const FROZEN = { id: 'p-frozen-0001', adapterId: 'fake-poll', convId: 'fake-poll-ops', text: '@张三 hi', sendAs: 'user', prepared: { mentions: [{ name: '张三', id: 'ou_zhang00001' }], places: [{ at: 0, len: 2, id: 'ou_zhang00001' }], notifies: ['张三'], plain: [], open: [], unchecked: [] } };
+  ok(P.shownDigest(FROZEN, { decision: false }) === 'v1:2a7d4f8df39a1b2a:103' && P.shownDigest(FROZEN) !== 'v1:2a7d4f8df39a1b2a:103', `the old page's digest is 2.369.414's OWN for a fixed record (frozen v1:2a7d4f8df39a1b2a:103, computed by that release's channel-policy.js); this release's differs`);
   ok(op.code === 'page-outdated' && /reload this page/.test(op.words) && op.status === 409 && op.then === true && op.sentOnRefusal === 0, `A PAGE OPENED BEFORE THE UPDATE is told the one act that ends its refusal («${op.words}», ${op.status}); nothing left on that press, and the same record approved from a page of this release sends once`, J(op));
   ok(opR.code === 'changed-since-shown', `RED CONTROL: the old page's check cut — that page is answered «${opR.code}», the refusal its own words call «read it again», which no reading ends`, J(opR));
+  // round wqdnv452s (a should): THE OUTBOUND KEEPS the send's count of decided places that left the wire (the record's result),
+  // and the receipt says it. RED: the outbound's keep cut — the count never reaches the record
+  const KEEP_UNPLACED = ", ...(Number.isInteger(r.mentionsUnplaced) && r.mentionsUnplaced > 0 ? { mentionsUnplaced: Math.min(r.mentionsUnplaced, 100) } : {})";
+  const ENG_NOKEEPU = engWithOutbound(anchored(outSrc, KEEP_UNPLACED, '', 'unplaced-not-kept'), 'unplaced-not-kept');
+  const ku = await proposeSend(dressed({ members: [ZHANG], unplaced: 1 }), '@张三 请看'), kuR = await proposeSend(dressed({ members: [ZHANG], unplaced: 1 }), '@张三 请看', { ENGM: ENG_NOKEEPU });
+  const ruOf = (x) => (x && x.p && x.p.result ? x.p.result.mentionsUnplaced : null);
+  ok(ruOf(ku) === 1 && /not placed: 1 decided mention/.test(P.renderReceiptBlock(P.receiptFor(ku.p))), `THE OUTBOUND KEEPS THE COUNT: the record's result holds it (${ruOf(ku)}) and the receipt says «not placed»`, J(ku.p && ku.p.result));
+  ok(ruOf(kuR) === null || ruOf(kuR) === undefined, `RED CONTROL: the outbound's keep cut — the record holds no count (${ruOf(kuR)}): the send said it and nobody kept it`);
   const D5 = dressed({ members: [ZHANG] });
   const eng5 = await primed(D5.registry);
   const r5 = await eng5.propose(AGENT, A, C, { text: 'hi @Zed and @张三' });

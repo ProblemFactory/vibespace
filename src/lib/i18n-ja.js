@@ -8498,7 +8498,7 @@ export default {
   "this chat was dissolved": "このチャットは解散されました",   // B-82c2 round wfgpbe038
   "the channel did not answer when its members were looked up": "メンバーを照会したときチャネルが応答しませんでした",   // B-82c2 round wfgpbe038
   "the channel's rate limit held back the look-up of its members": "チャネルのレート制限によりメンバーの照会が保留されました",   // B-82c2 the follow (r1402)
-  "This page was opened before an update and does not show who this message notifies — nothing was sent; reload this page, then decide": "このページは更新の前に開かれたため、このメッセージが誰に通知されるかを表示していません —— 何も送信されていません。このページを再読み込みしてから決めてください",   // B-82c2 the follow (r1403)
+  "This page was opened before an update and does not show who this message notifies — nothing was sent; copy any edit you typed, reload this page, then decide": "このページは更新の前に開かれたため、このメッセージが誰に通知されるかを表示していません —— 何も送信されていません。入力した編集をコピーしてから、このページを再読み込みし、決めてください",   // B-82c2 the follow (r1403; round wqdnv452s: copy the edit first)
   "Mentions not placed: {n} — they no longer sat on the text at the send and went as plain characters": "配置されなかったメンション：{n} 件 —— 送信時に本文の位置になく、普通の文字として送信されました",   // B-82c2 the follow (r1402)
   "{names} — sent as plain words, nobody is notified: the channel's rate limit held back the look-up of its members": "{names} —— 普通の文字として送信され、誰にも通知されません：チャネルのレート制限によりメンバーの照会が保留されました",   // B-82c2 the follow (r1402)
   "this account may not read the chat's members": "このアカウントはチャットのメンバーを読み取れません",   // B-82c2 round wfgpbe038

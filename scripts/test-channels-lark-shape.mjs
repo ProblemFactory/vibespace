@@ -2872,7 +2872,7 @@ console.log('\n⑯ lane lark-threads PART B: people named as Lark shows them (do
     // page's profile reads into the vendor's stop — every assertion above would be red on it
     const M9b = mutantCopies('chan-lark-r2-rate', REPO);
     const srcR = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
-    const THROWS = ["      if (e instanceof ChannelError && e.code === 'rate-limited') { peopleRefusedUntil = Math.max(peopleRefusedUntil, now() + peoplePauseMs(e)); throw e; }\n", "        if (e.code === 'rate-limited') throw e;\n", "if (e.code === 'rate-limited') throw e; return c ? c.name : null; }"];
+    const THROWS = ["      if (e instanceof ChannelError && e.code === 'rate-limited') { pausePeople(now() + peoplePauseMs(e), 'rate'); throw e; }\n", "        if (e.code === 'rate-limited') throw e;\n", "if (e.code === 'rate-limited') throw e; return c ? c.name : null; }"];
     ok(THROWS.every((x) => srcR.split(x).length === 2), 'F1 r2 CONTROL setup: the three rethrows are each present once');
     const pre = editAnchor(editAnchor(editAnchor(srcR, THROWS[0], '', "src/channels/lark.js"), THROWS[1], '', "src/channels/lark.js"), THROWS[2], 'return c ? c.name : null; }', "src/channels/lark.js");
     const modPre = M9b.load('src/channels/lark.js', pre, 'pre-r2-rate');

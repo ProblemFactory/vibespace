@@ -1150,7 +1150,7 @@ function create(engineCtx) {
       // B-82c2 the second follow (主开发 r1403 (3)): a press from a PAGE OPENED BEFORE THE UPDATE — its bundle's digest has no
       // decision field, so it is this record's digest without it — is told the ONE act that ends it (reload this page), by a
       // code that page does not know: it shows these words as they are, never «read the card again», which no read ends
-      if (String(shown) !== now0 && v0.prepared && typeof v0.prepared === 'object' && String(shown) === P.shownDigest(v0, { decision: false })) return { ok: false, code: 'page-outdated', error: 'this page was opened before an update and does not show who this message notifies — nothing was sent; reload this page, then decide', proposal: v0 };
+      if (String(shown) !== now0 && v0.prepared && typeof v0.prepared === 'object' && String(shown) === P.shownDigest(v0, { decision: false })) return { ok: false, code: 'page-outdated', error: 'this page was opened before an update and does not show who this message notifies — nothing was sent; copy any edit you typed, reload this page, then decide', proposal: v0 };
       if (String(shown) !== now0) return { ok: false, code: 'changed-since-shown', error: 'this proposal is not what the card you approved showed — nothing was sent; read the card again, then decide', proposal: proposalView(p0) };
     }
     // r3: approving a send that starts a turn is a wake — the echo first
