@@ -287,27 +287,8 @@ function stateVerdict(s, { sign, now = Date.now(), ttlMs = STATE_TTL_MS, kind } 
   return { ok: true, why: null, parts: { flowId: j.f, origin: j.u || null, chain } };
 }
 
-/** lane oauth-landing-words: the landing's languages — the app's own three (src/lib/i18n.js), in its order. */
-const LANGS = Object.freeze(['en', 'zh', 'ja']);
-const ACCEPT_LANGUAGE_MAX = 512;
-/** The app's rule over ONE language tag (src/lib/i18n.js resolveLang, navigator.language): zh* → zh, ja* → ja, else en. */
-const langOfTag = (tag) => { const l = String(tag || '').trim().toLowerCase(); return l.startsWith('zh') ? 'zh' : l.startsWith('ja') ? 'ja' : 'en'; };
-/** The language a landing speaks: the request's `Accept-Language` read the way a browser fills navigator.language — its
- *  FIRST preference (the highest q, the earliest on a tie; a range with q=0 is refused, `*` is no language) — then the
- *  app's rule. PURE; anything that is not a header string is English. */
-function landingLang(acceptLanguage) {
-  if (typeof acceptLanguage !== 'string' || !acceptLanguage) return 'en';
-  let best = null, bestQ = 0;
-  for (const part of acceptLanguage.slice(0, ACCEPT_LANGUAGE_MAX).split(',')) {
-    const [tag, ...params] = part.split(';').map((x) => x.trim());
-    if (!tag || tag === '*' || !/^[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})*$/.test(tag)) continue;
-    const qp = params.find((x) => /^q=/i.test(x));
-    const q = qp ? Number(qp.slice(2)) : 1;
-    if (!(q > 0 && q <= 1)) continue;
-    if (q > bestQ) { best = tag; bestQ = q; }
-  }
-  return best ? langOfTag(best) : 'en';
-}
+// the landing's languages and the asked one: lifted into src/landing-lang.js (the separation's B3b-1 — the interface reads it too)
+const { LANGS, landingLang } = require('./landing-lang.js');
 const escHtml = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 /** The person's address as the page prints it: escaped text (never raw HTML), its `@` as the entity `&#64;`, inside
  *  Cloudflare's exclusion markers — belt and braces against any proxy that rewrites an address it finds in HTML. */

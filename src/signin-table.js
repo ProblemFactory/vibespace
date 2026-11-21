@@ -57,4 +57,70 @@ function judgeRead({ error = null, text = null, linkGone = false } = {}) {
   return { state: parsed };
 }
 
-module.exports = { TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, MAX_TOKENS, OWN_RULE_UPGRADES, LOCAL_ROAD, routeKey, heldWords, escHtml, tokenDigest, DIGEST_RE, loginAlive, cookieMaxAge, judgeRead };
+/** the journal's held line (B-dc3f), said ONCE at the holder's start — `file` the table's path, `sso` = single sign-on still guards */
+function heldJournal(file, why, sso) {
+  const fix = 'if it looks whole, restart VibeSpace first (a read can fail for a moment); otherwise restore it from a backup and restart, or remove it and restart';
+  return sso
+    ? `THE SIGN-IN FILE IS HELD: ${file} is there but ${why} — single sign-on still guards this instance (its logins kept in memory only, until the next restart) and the password sign-in is refused; ${fix}; nothing is written over it`
+    : `THE SIGN-IN FILE IS HELD: ${file} is there but ${why} — every page and API is refused (the sign-in page says so); ${fix} to start with no sign-in; nothing is written over it`;
+}
+/** a held instance's refusal of an upgrade (every one but a paired machine's dial-in): 503 by name, nothing proxied */
+const HELD_UPGRADE = 'HTTP/1.1 503 Service Unavailable\r\nRetry-After: 3600\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{"error":"signin-held"}';
+/** THE PASSWORD'S HASH: scrypt, 32 bytes, over the stored salt (hex) — `hashSync` the plain form's hub, `hash` the interface's
+ *  (async: never on its loop). The same parameters, so a table either holder wrote verifies in the other. */
+const SCRYPT_KEYLEN = 32;
+const hashSync = (password, salt) => crypto.scryptSync(String(password), Buffer.from(salt, 'hex'), SCRYPT_KEYLEN).toString('hex');
+const hash = (password, salt) => new Promise((resolve, reject) => crypto.scrypt(String(password), Buffer.from(salt, 'hex'), SCRYPT_KEYLEN, (e, k) => (e ? reject(e) : resolve(k.toString('hex')))));
+/** does `got` (a hash just made) equal the stored one — in constant time */
+function hashMatches(got, want) {
+  const a = Buffer.from(String(got), 'hex'), b = Buffer.from(String(want), 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+/** THE MIGRATION (once, at the first start of a build that keys logins by digest): a plaintext token map becomes its digests —
+ *  every login stays valid ONCE (an older build never stamped a use, so the migration counts as one: 30 days from `now`,
+ *  still inside its 180-day cap) → the new map, or null when every key is a digest already (nothing to write) */
+function migrateTokens(tokens, now) {
+  if (!tokens || typeof tokens !== 'object' || !Object.keys(tokens).some((k) => !DIGEST_RE.test(k))) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(tokens)) { const d = DIGEST_RE.test(k) ? k : tokenDigest(k); out[d] = { ...(v || {}), usedAt: Number(v && v.usedAt) || now }; }
+  return out;
+}
+/** a new login in the map (its DIGEST — never the token), the dead evicted and the total capped (the least recently used
+ *  first) → the new map */
+function addLogin(tokens, digest, ua, now) {
+  const all = { ...(tokens || {}), [digest]: { createdAt: now, usedAt: now, ua: String(ua).slice(0, 120) } };
+  const entries = Object.entries(all)
+    .filter(([, v]) => loginAlive(v, now))
+    .sort((a, b) => (a[1].usedAt || a[1].createdAt) - (b[1].usedAt || b[1].createdAt));
+  while (entries.length > MAX_TOKENS) entries.shift();
+  return Object.fromEntries(entries);
+}
+/** the held state's page (B-dc3f) in the asked language: why, the way out, and what the file is */
+// ui-words: `data/auth.json` on the page is the file's own name (a path to restore or remove, never words); its words are login-words'
+const heldPage = (held, lang, w) => `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escHtml(w.title)}</title></head><body style="font-family:system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1em;line-height:1.5"><h1 style="font-size:1.3em">${escHtml(w.why)}</h1><p>${escHtml(w.fix)}</p><p style="color:#666;font-size:.9em"><code>data/auth.json</code>: ${escHtml(held.why)}</p></body></html>`;
+/** the held state's answer to an API or a door (B-dc3f), as JSON */
+const heldJson = (held, lang, w) => ({ error: 'signin-held', why: w.why, fix: w.fix, lang, detail: held.why });
+/** THE LOGIN COOKIE: HttpOnly, the whole site, SameSite=Lax — Secure only behind an https INGRESS (`x-forwarded-proto`): the
+ *  hub's own https shares ONE port and host with http, and a Secure cookie set over it would lock the http origin out */
+const loginCookie = (token, maxAgeS, headers = {}) => `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${maxAgeS}; SameSite=Lax;${headers['x-forwarded-proto'] === 'https' ? ' Secure;' : ''}`;
+const CLEAR_COOKIE = `${TOKEN_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`;
+/** the login token a Cookie header carries, or null */
+function cookieTokenOf(cookieHeader) {
+  const m = String(cookieHeader || '').match(new RegExp('(?:^|;\\s*)' + TOKEN_COOKIE + '=([a-f0-9]+)'));
+  return m ? m[1] : null;
+}
+/** THE WRONG-PASSWORD COUNTERS (per address, in memory only — a restart resets them): RATE_FAILS fails lock the address for
+ *  RATE_LOCK_MS. `map` is the holder's own Map. */
+const RATE_FAILS = 5, RATE_LOCK_MS = 60000;
+const rateCheck = (map, ip, now) => { const a = map.get(ip); return !(a && a.lockUntil > now); };
+function rateFail(map, ip, now) {
+  const a = map.get(ip) || { fails: 0, lockUntil: 0 };
+  a.fails++;
+  if (a.fails >= RATE_FAILS) { a.lockUntil = now + RATE_LOCK_MS; a.fails = 0; }
+  map.set(ip, a);
+}
+
+module.exports = {
+  TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, MAX_TOKENS, OWN_RULE_UPGRADES, LOCAL_ROAD, routeKey, heldWords, escHtml, tokenDigest, DIGEST_RE, loginAlive, cookieMaxAge, judgeRead,
+  heldJournal, HELD_UPGRADE, SCRYPT_KEYLEN, hashSync, hash, hashMatches, migrateTokens, addLogin, heldPage, heldJson, loginCookie, CLEAR_COOKIE, cookieTokenOf, RATE_FAILS, RATE_LOCK_MS, rateCheck, rateFail,
+};

@@ -71,7 +71,11 @@ const plainHub = startHub({ root: ROOT, tree: wtPlain, port: PLAIN_PORT, env: { 
 const ifaceSecret = crypto.randomBytes(32).toString('hex'), hubSecret = crypto.randomBytes(32).toString('hex');
 const hubDigest = crypto.createHash('sha256').update(hubSecret).digest('hex');
 const iface = keep('interface', spawn(process.execPath, [path.join(wt, 'src/interface/main.js')], { cwd: wt, env: { PATH: process.env.PATH, PORT: String(IFACE_PORT), HOST: '127.0.0.1', VIBESPACE_START_FD: '3' }, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }));   // the B2b cure: the start NAMES its pipe
-iface.stdio[3].write(JSON.stringify({ op: 'start', party: 'interface', secret: ifaceSecret, link }) + '\n' + JSON.stringify({ op: 'admit', party: 'hub', digest: hubDigest }) + '\n');
+// THE SIGN-IN TABLE the interface holds (piece B3b-1: the start line names it, REQUIRED): the piped hub's own data/auth.json — its
+// folder this account's alone (the link's rule), made 0700 here before the interface judges it; sign-in off in both forms
+// (VIBESPACE_PASSWORD empty, no file), so the oracle's answers and the pair's still meet the same gate
+const signinDir = path.join(wt, 'data'); fs.mkdirSync(signinDir, { recursive: true }); fs.chmodSync(signinDir, 0o700);
+iface.stdio[3].write(JSON.stringify({ op: 'start', party: 'interface', secret: ifaceSecret, link, signin: { file: path.join(signinDir, 'auth.json') } }) + '\n' + JSON.stringify({ op: 'admit', party: 'hub', digest: hubDigest }) + '\n');
 await until(() => /listening on/.test(outs.get('interface')), 20000);
 const pipedStart = Date.now(); let pipedJoined = 0;
 // THE PIPED HUB THROUGH THE BOOT HELPER too (its start pipe on fd 3, named by the start word: startHub's startLine) — the hub

@@ -1,0 +1,333 @@
+'use strict';
+// THE SIGN-IN TABLE IN THE INTERFACE (the separation, M1 — lane B, piece B3b-1; 主开发 r1060 «the interface's ONE store», r1517:
+// GO with decision (A)). In the PIPED form the interface is the table's ONE reader and writer: the same file as the plain form's
+// (data/auth.json — the start line's `signin.file` names it), the same law (src/signin-table.js: the held judgement, a login's
+// life, the hash, the cookie, the counters), the same answers on the sign-in road. The piped hub opens no file
+// (src/server/piped-auth.js).
+//   THE ROAD, ANSWERED HERE: GET/HEAD /login (the page), POST /api/login, /api/clerk-login, /api/logout and
+//     /api/auth/set-password — after the door class the hub's gate runs (src/door.js): a cross-site write refused 403, a spelling
+//     the router matches that the class does not name (and set-password with sign-in on) needs a live login, else 401 — as the
+//     plain form's gate and routes answer them.
+//   EVERY OTHER HEAD carries ONE fact on its open line's stamp (decision (A)): `signin: 'off'` (no sign-in), `signin: { alive:
+//     <the login's full sha256 digest> }` (its cookie names a live login) or `signin: null` (no live login). The hub's gate decides
+//     by it; B3b-2 makes the hub recompute the digest from the cookie it parsed itself (B3b-1 and B3b-2 are picked only together).
+//   THE SLIDE: a use of a live login moves its `usedAt` — on disk at most once an hour, and the next page answer for that login
+//     carries its cookie again (Max-Age: the slide, never past the cap), as the plain form's gate does. A use = a page-class head
+//     or an upgrade from this instance's own page: the two roads on which the plain form's gate checks a cookie (DECLARED: a
+//     private /p page or /svc mount, which the plain form's routes check themselves, does not slide a login here).
+//   HELD (B-dc3f, the same judgement): shut ⇒ every head refused 503 by name but GET/HEAD /login (200, the held words), every
+//     upgrade refused but a paired machine's dial-in; under single sign-on the local password road refused. Nothing written.
+//   NO SIGN-IN WORK ON THE LOOP (law 8): scrypt async, at most SCRYPT_MAX in flight (one more refused by name: 503
+//     «signin-busy»); ONE writer — one write in flight, the newest table coalesced behind it (src/secret-file.js
+//     replaceShreddingAsync: the temp synced, then renamed); Clerk's key set fetched async (8 s), the last good set kept, none ⇒
+//     the SSO sign-in fails closed by name.
+//   IN MEMORY ONLY, DECLARED: the wrong-password counters (an interface restart resets them) and, while held under single sign-on,
+//     its logins (as the plain form).
+const fsp = require('fs').promises;
+const crypto = require('crypto');
+const T = require('../signin-table.js');
+const { loginHtml } = require('../login-page.js');
+const appCsp = require('../app-csp.js');
+const { landingLang } = require('../landing-lang.js');
+const { doorClassOf } = require('../door.js');
+const { crossSiteVerdict, ownOriginOf } = require('../write-origin.js');
+const { replaceShreddingAsync } = require('../secret-file.js');
+const { ClerkAuth } = require('../clerk-auth.js');
+
+const SCRYPT_MAX = 4;     // hashes in flight at once; one more is refused by name (never queued on the loop's work)
+const BODY_MAX = 4096;    // a sign-in body over this is dropped with its connection (the plain form's express_json_lite)
+/** THE ROAD: its routes as the plain form registers them (express: GET answers HEAD too) */
+const ROAD = Object.freeze({ '/login': ['GET', 'HEAD'], '/api/login': ['POST'], '/api/clerk-login': ['POST'], '/api/logout': ['POST'], '/api/auth/set-password': ['POST'] });
+const JSON_TYPE = 'application/json; charset=utf-8';
+const pathOf = (url) => String(url || '/').split('?')[0];
+const busyError = () => Object.assign(new Error('too many sign-ins at once'), { code: 'signin-busy' });
+const heldError = (held) => Object.assign(new Error(`the sign-in file is held (${held.why}) — nothing is written over it`), { code: 'signin-held' });
+
+/** → the table: { load(), ensure(opts), road(req, res, facts) → answered?, head(req, facts, { upgrade }) → { fact, lines },
+ *  upgradeRefused(req), refuseUpgrade(socket), revokeAll(why) → n, stateLine(), onChange(fn), flushed(), stats() }
+ *  `file` absolute (main.js judged it); `clerk` = { publishableKey, allowedEmails } or null (no environment is read);
+ *  `clerkAuth` a suite's stand-in; `now` the clock; `hashOf` the hash (a suite's slow one holds hashes in flight) */
+function create({ file, clerk = null, clerkAuth = null, log = console, now = () => Date.now(), hashOf = T.hash } = {}) {
+  const ck = clerkAuth || (clerk ? new ClerkAuth({ publishableKey: String(clerk.publishableKey || ''), allowedEmails: Array.isArray(clerk.allowedEmails) ? clerk.allowedEmails.join(',') : String(clerk.allowedEmails || ''), keepLastGood: true }) : null);
+  let state = null, held = null, scrypts = 0;
+  const attempts = new Map(), slid = new Set(), listeners = new Set();
+  const said = { writes: 0, writeFails: 0, lastWriteError: null, busy: 0, crossSite: 0 };
+  const sso = () => !!(ck && ck.enabled);
+  const passwordEnabled = () => !!held || !!(state && state.passwordHash);   // held: «on» — a held file never reads as «off»
+  const enabled = () => passwordEnabled() || sso();
+  const shut = () => !!held && !sso();
+  const changed = () => { const line = stateLine(); for (const fn of listeners) { try { fn(line); } catch { } } };
+  function stateLine() { return { op: 'signin-state', enabled: enabled(), password: passwordEnabled(), sso: sso(), held: held ? held.why : null }; }
+
+  // ── THE ONE WRITER: one write in flight, the newest table coalesced behind it ──
+  let writing = null, batch = null;
+  /** → a promise of THIS table's landing (true), or false at once when nothing may be written (no table, or held) */
+  function save() {
+    if (!state || held) return Promise.resolve(false);   // NOTHING is written over a held file
+    if (state.tokens) state.tokensHashed = 1;            // a reader's note: the keys are sha256 digests
+    const text = JSON.stringify(state);
+    if (!batch) { batch = { text }; batch.done = new Promise((res, rej) => { batch.res = res; batch.rej = rej; }); batch.done.catch((e) => e); }
+    else batch.text = text;
+    const done = batch.done;
+    if (!writing) writing = drain();
+    return done;
+  }
+  async function drain() {
+    while (batch) {
+      const b = batch; batch = null;
+      try { await replaceShreddingAsync(file, b.text); said.writes++; b.res(true); }
+      catch (e) {
+        said.writeFails++;
+        const code = (e && e.code) || 'error';
+        if (code !== said.lastWriteError) { try { log.error?.(`[interface] the sign-in table could not be written (${code})${e && e.landed ? ' — the new table landed; a close failed' : ' — the table in memory holds, the next change writes it again'}`); } catch { } }
+        said.lastWriteError = code;
+        if (e && e.landed) b.res(true); else b.rej(e);
+      }
+    }
+    writing = null;
+  }
+
+  // ── THE LOAD, judged by the shared law (B-dc3f's shapes and words) ──
+  function hold(why) {
+    state = sso() ? { tokens: {} } : null;   // single sign-on still guards: its logins in MEMORY only (save writes nothing while held)
+    held = { why };
+    try { log.error?.(`[interface] ${T.heldJournal(file, why, sso())}`); } catch { }   // said ONCE, here, at the start
+  }
+  async function load() {
+    held = null;
+    let text = null, error = null, linkGone = false;
+    try { text = await fsp.readFile(file, 'utf-8'); } catch (e) { error = e || Object.assign(new Error('an error'), { code: 'an error' }); }
+    if (error && error.code === 'ENOENT') { try { await fsp.lstat(file); linkGone = true; } catch (e) { void e; /* nothing at the path */ } }
+    const j = T.judgeRead({ error, text, linkGone });
+    if (j.held) hold(j.held);
+    else if (j.missing) state = null;   // truly missing: nothing at the path — a new instance
+    else {
+      state = j.state;
+      const out = T.migrateTokens(state.tokens, now());   // a plaintext token map becomes its digests (once)
+      if (out) { state.tokens = out; await save().catch((e) => { try { log.warn?.(`[interface] an older build's plaintext login map could not be re-keyed on disk (${(e && e.code) || 'error'}) — it is re-keyed in memory`); } catch { } }); }
+    }
+    changed();
+  }
+
+  // ── THE HASH, bounded ──
+  async function scrypt(pw, salt) {
+    if (scrypts >= SCRYPT_MAX) { said.busy++; throw busyError(); }
+    scrypts++;
+    try { return await hashOf(pw, salt); } finally { scrypts--; }
+  }
+  async function verify(pw) {
+    if (held || !passwordEnabled()) return false;
+    const want = state.passwordHash;
+    return T.hashMatches(await scrypt(pw, state.salt), want);
+  }
+  async function setPassword(pw, { userSet = false } = {}) {
+    if (held) throw heldError(held);
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = await scrypt(pw, salt);
+    state = { passwordHash, salt, userSet: userSet || state?.userSet || false, tokens: state?.tokens || {} };
+    const w = save(); changed(); return w;
+  }
+  /** THE BOOT'S RESOLUTION, as the plain form's ensurePassword (src/auth.js): a user-set state is kept; `password` (the
+   *  supervisor's VIBESPACE_PASSWORD, on the start pipe only) is set when it does not match; `generate` (a container's first
+   *  start) makes one and answers it ONCE, for the journal → { generated? } */
+  async function ensure({ password = '', generate = false } = {}) {
+    if (held || state?.userSet) return {};
+    if (password) { if (!passwordEnabled() || T.hashMatches(await scrypt(password, state.salt), state.passwordHash) === false) await setPassword(password); return {}; }
+    if (passwordEnabled() || !generate) return {};
+    const pw = crypto.randomBytes(9).toString('base64url');
+    await setPassword(pw);
+    return { generated: pw };
+  }
+  function issue(ua) {
+    if (shut()) throw heldError(held);
+    const token = crypto.randomBytes(24).toString('hex');
+    state = state || { tokens: {} };
+    state.tokens = T.addLogin(state.tokens, T.tokenDigest(token), ua || '', now());
+    return { token, written: save() };
+  }
+  function loginOf(token) {
+    if (!token || !state || !state.tokens) return null;
+    const d = T.tokenDigest(token);
+    return Object.prototype.hasOwnProperty.call(state.tokens, d) ? { d, rec: state.tokens[d] } : null;
+  }
+  /** a use of the cookie's login → its digest when alive (sliding it when `slide`), else null */
+  function use(token, slide) {
+    if (shut()) return null;
+    const l = loginOf(token), t = now();
+    if (!l || !T.loginAlive(l.rec, t)) return null;
+    if (slide) {
+      const was = Number(l.rec.usedAt || l.rec.createdAt) || 0;
+      l.rec.usedAt = t;
+      if (t - was >= T.TOKEN_SLIDE_SAVE_MS) { slid.add(l.d); save().catch((e) => e); }   // the in-memory slide holds; a failed write is said by the writer
+    }
+    return l.d;
+  }
+  const originOk = (req, secure) => crossSiteVerdict({ method: req.method, headers: req.headers || {} }, ownOriginOf(req.headers || {}, { encrypted: !!secure })).ok;
+  /** the plain form's requestAuthed: this instance's own page AND (no sign-in, or a live login) */
+  const authed = (req, secure) => !shut() && originOk(req, secure) && (!enabled() || !!use(T.cookieTokenOf(req.headers.cookie), true));
+  /** the cookie line a slid login's next page answer carries (once), or [] */
+  function slideLines(req, d) {
+    if (!d || !slid.delete(d)) return [];
+    const token = T.cookieTokenOf(req.headers.cookie), l = loginOf(token);
+    return l ? ['Set-Cookie', T.loginCookie(token, T.cookieMaxAge(l.rec, now()), req.headers)] : [];
+  }
+  /** EVERY OTHER HEAD: the stamp's fact, and the answer's extra lines (the slide's cookie on a page answer) */
+  function head(req, facts = {}, { upgrade = false } = {}) {
+    if (!enabled()) return { fact: 'off', lines: [] };
+    const token = T.cookieTokenOf(req.headers.cookie);
+    if (!token) return { fact: null, lines: [] };
+    const page = !upgrade && doorClassOf({ method: req.method, path: pathOf(req.url), headers: req.headers, encrypted: !!facts.secure }, { enabled: true }).kind === 'page';
+    const d = use(token, page || (upgrade && originOk(req, facts.secure)));
+    return { fact: d ? { alive: d } : null, lines: page ? slideLines(req, d) : [] };
+  }
+  const upgradeRefused = (req) => shut() && !T.OWN_RULE_UPGRADES.has(pathOf(req.url));
+  function refuseUpgrade(socket) { try { socket.end(T.HELD_UPGRADE, () => socket.destroy()); } catch { try { socket.destroy(); } catch { } } }
+  /** a vault lock (B3b-2's sender, the hub): every login revoked → how many ended (0 while shut, as the plain form) */
+  function revokeAll() {
+    if (!state || shut()) return 0;
+    const n = Object.keys(state.tokens || {}).length;
+    state.tokens = {}; slid.clear();
+    save().catch((e) => e);
+    return n;
+  }
+
+  // ── THE ROAD'S ANSWERS ──
+  const xs = { at: 0, n: 0, muted: 0 };
+  function logCrossSite(req, v) {
+    const t = now(); said.crossSite++;
+    if (t - xs.at > 60e3) { if (xs.muted) { try { log.warn?.(`[interface] ${xs.muted} more cross-site refusals in the last minute (not logged one by one)`); } catch { } } xs.at = t; xs.n = 0; xs.muted = 0; }
+    if (++xs.n > 5) { xs.muted++; return; }
+    try { log.warn?.(`[interface] refused a cross-site ${String(req.method)} ${pathOf(req.url).split('/').slice(0, 4).join('/') || '/'} — ${v.why}, origin ${JSON.stringify(String(v.origin || '-').slice(0, 120))} (own ${v.own || '-'})`); } catch { }
+  }
+  function answer(res, status, body, headers, cookies) {
+    if (res.headersSent || res.destroyed || res.writableEnded) return;
+    const h = { ...headers, 'Content-Length': String(Buffer.byteLength(body)) }; if (cookies && cookies.length) h['Set-Cookie'] = cookies.slice();
+    res.writeHead(status, h); res.end(body);   // framed by its length, as the plain form's express frames it (HEAD: the head alone)
+  }
+  const json = (res, status, obj, cookies, extra = {}) => answer(res, status, JSON.stringify(obj), { 'Content-Type': JSON_TYPE, ...extra }, cookies);
+  /** the plain form's res.redirect (express 4): 302, the Location, its short body by what the page accepts */
+  function redirect(req, res, to, cookies) {
+    const html = /text\/html/.test(String(req.headers.accept || ''));
+    answer(res, 302, html ? `<p>Found. Redirecting to <a href="${T.escHtml(to)}">${T.escHtml(to)}</a></p>` : `Found. Redirecting to ${to}`, { Location: to, Vary: 'Accept', 'Content-Type': html ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8' }, cookies);
+  }
+  function refuseHeld(req, res, { sso: s = false, page = false } = {}) {
+    const lang = landingLang(req.headers['accept-language']), w = T.heldWords(lang, s);
+    if (page || (req.method === 'GET' && String(req.headers.accept || '').includes('text/html'))) return answer(res, page ? 200 : 503, T.heldPage(held, lang, w), { 'Retry-After': '3600', 'Content-Type': 'text/html; charset=utf-8' });
+    return json(res, 503, T.heldJson(held, lang, w), null, { 'Retry-After': '3600' });
+  }
+  const readBody = (req) => new Promise((resolve) => {
+    let data = '', over = false;
+    req.setEncoding('utf8');
+    req.on('data', (c) => { if (over) return; data += c; if (data.length > BODY_MAX) { over = true; req.destroy(); resolve(undefined); } });
+    req.on('end', () => { if (over) return; try { resolve(JSON.parse(data || '{}')); } catch { resolve({}); } });
+    req.on('error', () => { if (!over) { over = true; resolve(undefined); } });
+  });
+  const ipOf = (facts) => facts.addr || '?';
+  const IDLE_S = Math.floor(T.TOKEN_IDLE_MS / 1000);
+  const writeFailed = (res, e, cookies) => json(res, 500, { error: 'The sign-in table could not be written', code: 'signin-write', detail: String((e && e.code) || 'error') }, cookies);
+  const busy = (res, cookies) => json(res, 503, { error: 'Too many sign-ins at once — try again in a moment', code: 'signin-busy' }, cookies, { 'Retry-After': '1' });
+
+  async function handle(key, req, res, facts, cookies) {
+    if (key === '/login') {
+      req.resume();
+      if (!enabled() || authed(req, facts.secure)) return redirect(req, res, '/', cookies);
+      const nonce = crypto.randomBytes(16).toString('base64');   // its one inline script carries this answer's nonce (lane app-page-csp)
+      return answer(res, 200, loginHtml({ clerk: ck, passwordEnabled: held ? false : passwordEnabled(), held, nonce, lang: landingLang(req.headers['accept-language']) }),
+        { [appCsp.HEADER]: appCsp.loginPolicy({ nonce, clerkHost: sso() ? ck.frontendApi : '' }), 'Content-Type': 'text/html; charset=utf-8' }, cookies);
+    }
+    if (key === '/api/logout') {
+      req.resume();
+      const token = T.cookieTokenOf(req.headers.cookie), l = shut() ? null : loginOf(token);
+      if (l) { delete state.tokens[l.d]; slid.delete(l.d); try { await save(); } catch (e) { return writeFailed(res, e, cookies); } }
+      return json(res, 200, { success: true }, [T.CLEAR_COOKIE]);
+    }
+    const body = await readBody(req);
+    if (body === undefined) return;   // over the bound or the page left: its connection is gone (the plain form's)
+    const ip = ipOf(facts);
+    if (key === '/api/login') {
+      if (!enabled()) return json(res, 200, { success: true }, cookies);
+      if (!T.rateCheck(attempts, ip, now())) return json(res, 429, { error: 'Too many attempts — wait a minute', code: 'too-many' }, cookies);
+      let good;
+      try { good = await verify(String(body?.password ?? '')); } catch (e) { if (e && e.code === 'signin-busy') return busy(res, cookies); throw e; }
+      if (!good) { T.rateFail(attempts, ip, now()); return json(res, 401, { error: 'Wrong password', code: 'wrong-password' }, cookies); }
+      attempts.delete(ip);
+      const { token, written } = issue(req.headers['user-agent']);
+      try { await written; } catch (e) { return writeFailed(res, e, cookies); }
+      return json(res, 200, { success: true }, [T.loginCookie(token, IDLE_S, req.headers)]);
+    }
+    if (key === '/api/clerk-login') {
+      if (!sso()) return json(res, 404, { error: 'SSO not configured' }, cookies);
+      if (!T.rateCheck(attempts, ip, now())) return json(res, 429, { error: 'Too many attempts — wait a minute', code: 'too-many' }, cookies);
+      try {
+        const { email } = await ck.verifyToken(String(body?.token || ''));
+        if (!email) return json(res, 403, { error: 'Token has no email claim — add {"email": "{{user.primary_email_address}}"} to the Clerk session token custom claims (or a "vibespace" JWT template)' }, cookies);
+        if (!ck.emailAllowed(email)) { T.rateFail(attempts, ip, now()); return json(res, 403, { error: `${email} is not allowed on this instance` }, cookies); }
+        attempts.delete(ip);
+        const { token, written } = issue(req.headers['user-agent']);
+        await written;
+        return json(res, 200, { success: true, email }, [T.loginCookie(token, IDLE_S, req.headers)]);
+      } catch (e) {
+        T.rateFail(attempts, ip, now());
+        return json(res, 401, { error: `SSO verification failed: ${e && e.message}` }, cookies);
+      }
+    }
+    // /api/auth/set-password — WHO MAY SET A PASSWORD, judged by the instance's state (the plain form's route, src/auth.js)
+    if (enabled() && !passwordEnabled() && !authed(req, facts.secure)) return json(res, 401, { error: 'unauthorized' }, cookies);
+    if (!T.rateCheck(attempts, ip, now())) return json(res, 429, { error: 'Too many attempts — wait a minute', code: 'too-many' }, cookies);
+    const { current, newPassword, remove } = body || {};
+    try {
+      if (passwordEnabled()) {
+        if (!(await verify(String(current ?? '')))) { T.rateFail(attempts, ip, now()); return json(res, 401, { error: 'Current password is wrong' }, cookies); }
+        attempts.delete(ip);
+      }
+      if (remove) {
+        if (!passwordEnabled()) return json(res, 200, { success: true, enabled: enabled() }, cookies);
+        state = { userSet: true, tokens: {} }; slid.clear();
+        const w = save(); changed();
+        try { await w; } catch (e) { return writeFailed(res, e, cookies); }
+        return json(res, 200, { success: true, enabled: enabled() }, [T.CLEAR_COOKIE]);   // single sign-on may keep sign-in on
+      }
+      const pw = String(newPassword ?? '');
+      if (pw.length < 4) return json(res, 400, { error: 'Password must be at least 4 characters' }, cookies);
+      try { await setPassword(pw, { userSet: true }); } catch (e) { if (e && e.code === 'signin-busy') throw e; return writeFailed(res, e, cookies); }   // the hash, then its write landed
+      revokeAll();
+      const { token, written } = issue(req.headers['user-agent']);
+      try { await written; } catch (e) { return writeFailed(res, e, cookies); }
+      return json(res, 200, { success: true, enabled: true }, [T.loginCookie(token, IDLE_S, req.headers)]);
+    } catch (e) { if (e && e.code === 'signin-busy') return busy(res, cookies); throw e; }
+  }
+
+  /** ONE head: answered HERE (the held state, the road) → true; or false — the caller relays it with head()'s fact */
+  function road(req, res, facts = {}) {
+    const p = pathOf(req.url), key = T.routeKey(p);
+    if (held) {   // HELD (B-dc3f): before every door and route
+      if (shut()) { req.resume(); refuseHeld(req, res, { page: (req.method === 'GET' || req.method === 'HEAD') && key === '/login' }); return true; }
+      if (T.LOCAL_ROAD.has(key)) { req.resume(); refuseHeld(req, res, { sso: true }); return true; }
+    }
+    const methods = ROAD[key];
+    if (!methods || !methods.includes(req.method)) return false;
+    const d = doorClassOf({ method: req.method, path: p, headers: req.headers, encrypted: !!facts.secure }, { enabled: enabled() });
+    if (d.kind === 'refused') { req.resume(); logCrossSite(req, d.verdict); json(res, 403, { error: 'cross-site', origin: d.verdict.origin, own: d.verdict.own }); return true; }
+    let cookies = null;
+    if (d.kind === 'page') {   // the plain form's gate: a live login, or the login form / 401
+      const token = T.cookieTokenOf(req.headers.cookie), dg = use(token, true);
+      if (!dg) { req.resume(); if (req.method === 'GET' && String(req.headers.accept || '').includes('text/html')) redirect(req, res, '/login'); else json(res, 401, { error: 'unauthorized' }); return true; }
+      cookies = slideLines(req, dg).slice(1);
+    }
+    handle(key, req, res, facts, cookies).catch((e) => {
+      try { log.error?.(`[interface] the sign-in road failed (${(e && e.code) || (e && e.name) || 'error'}) — answered 500 by name`); } catch { }
+      json(res, 500, { error: 'The sign-in road failed', code: 'signin-failed' });
+    });
+    return true;
+  }
+
+  return {
+    load, ensure, road, head, upgradeRefused, refuseUpgrade, revokeAll, stateLine,
+    onChange: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+    flushed: () => writing || Promise.resolve(),
+    get held() { return held; }, get shut() { return shut(); }, get enabled() { return enabled(); },
+    stats: () => ({ ...said, held: held ? held.why : null, enabled: enabled(), scrypts, logins: Object.keys((state && state.tokens) || {}).length }),
+  };
+}
+
+module.exports = { create, SCRYPT_MAX, BODY_MAX, ROAD };

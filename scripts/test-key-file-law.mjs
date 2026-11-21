@@ -842,7 +842,7 @@ try {
     'src/user-todos.js', 'src/webdav.js',
     'src/usage-hold-road.js', // lane lg-remote-hardening (B-5278 unit 2): the sha256 is the DIGEST of a machine's usage cursor map (transcript paths, byte offsets, request ids) — no secret is digested; it is kept to compare and in that map's own record
   ]);
-  const WRITE_NAMES_KFL = new Set(['writeFileSync', 'writeFile', 'appendFileSync', 'appendFile', 'replaceShredding', 'writeJsonAtomic', '_save', 'saveRegistry']);
+  const WRITE_NAMES_KFL = new Set(['writeFileSync', 'writeFile', 'appendFileSync', 'appendFile', 'replaceShredding', 'replaceShreddingAsync' /* the separation's B3b-1: the interface's sign-in table writer */, 'writeJsonAtomic', '_save', 'saveRegistry']);
   const judgeDigestWriters = (srcMap) => {
     const red = [];
     for (const [rel, text] of srcMap) {

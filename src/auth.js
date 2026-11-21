@@ -33,7 +33,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { LOGIN_WORDS, loginWords } = require('./login-words.js'); // lane ui-language: the sign-in page's words, whole in en / zh / ja
-const { landingLang } = require('./consent-road.js'); // the browser's asked language (the landing pages' one rule)
+const { landingLang } = require('./landing-lang.js'); // the browser's asked language (the landing pages' one rule)
 const appCsp = require('./app-csp.js'); // PURE: the sign-in page's report-only policy (lane app-page-csp)
 const { crossSiteVerdict, ownOriginOf } = require('./write-origin.js');
 const { doorClassOf } = require('./door.js');   // THE DOOR CLASS: one pure function, the middleware judges every request through it
@@ -43,7 +43,8 @@ const PASSES = Object.freeze(new Set(['door', 'open', 'login']));
 const PD = require('./path-dot-segment.js'); // PURE (r1317): a path with a dot segment is never a door
 const { replaceShredding } = require('./secret-file.js');
 // THE TABLE'S SHARED LAW (src/signin-table.js, the separation's B3b-1): the cookie, the ages, the digest, the held judgement and words
-const { TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, MAX_TOKENS, OWN_RULE_UPGRADES, LOCAL_ROAD, routeKey, heldWords, escHtml, tokenDigest, DIGEST_RE, loginAlive, cookieMaxAge, judgeRead } = require('./signin-table.js');
+const { TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, OWN_RULE_UPGRADES, LOCAL_ROAD, routeKey, heldWords, tokenDigest, loginAlive, cookieMaxAge, judgeRead,
+  heldJournal, HELD_UPGRADE, hashSync, hashMatches, migrateTokens, addLogin, heldPage, heldJson, loginCookie, CLEAR_COOKIE, cookieTokenOf, rateCheck, rateFail } = require('./signin-table.js');
 const { loginHtml } = require('./login-page.js');   // the sign-in page, one for both holders
 
 /** the held state's answer (B-dc3f): a page navigation gets the words (in the asked language), an API or a door gets them as
@@ -53,9 +54,9 @@ function refuseHeld(held, req, res, { sso = false, page = false } = {}) {
   const lang = landingLang(req.headers['accept-language']), w = heldWords(lang, sso);
   res.setHeader('Retry-After', '3600');
   if (page || (req.method === 'GET' && String(req.headers.accept || '').includes('text/html'))) {
-    return res.status(page ? 200 : 503).type('html').send(`<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escHtml(w.title)}</title></head><body style="font-family:system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1em;line-height:1.5"><h1 style="font-size:1.3em">${escHtml(w.why)}</h1><p>${escHtml(w.fix)}</p><p style="color:#666;font-size:.9em"><code>data/auth.json</code>: ${escHtml(held.why)}</p></body></html>`);
+    return res.status(page ? 200 : 503).type('html').send(heldPage(held, lang, w));
   }
-  return res.status(503).json({ error: 'signin-held', why: w.why, fix: w.fix, lang, detail: held.why });
+  return res.status(503).json(heldJson(held, lang, w));
 }
 const heldError = (held) => Object.assign(new Error(`the sign-in file is held (${held.why}) — nothing is written over it`), { code: 'signin-held' });
 
@@ -81,10 +82,8 @@ class Auth {
     // THE MIGRATION (once, at the first start of this build): a plaintext token map becomes its digests — every login
     // stays valid ONCE (the cookie's token hashes to its key; an older build never stamped a use, so the migration counts as
     // one: 30 days from now, still inside its 180-day cap); the old file's bytes are overwritten (replaceShredding)
-    const t = this._state && this._state.tokens;
-    if (t && typeof t === 'object' && Object.keys(t).some((k) => !DIGEST_RE.test(k))) {
-      const out = {}, now = Date.now();
-      for (const [k, v] of Object.entries(t)) { const d = DIGEST_RE.test(k) ? k : tokenDigest(k); out[d] = { ...(v || {}), usedAt: Number(v && v.usedAt) || now }; }
+    const out = migrateTokens(this._state && this._state.tokens, Date.now());   // the table's shared law (src/signin-table.js)
+    if (out) {
       this._state.tokens = out;
       try { this._save(); } catch (e) { console.warn('[auth] the login tokens could not be re-written as digests:', e.message); }
     }
@@ -95,10 +94,7 @@ class Auth {
     const sso = !!this._clerk?.enabled;
     this._state = sso ? { tokens: {} } : null;   // single sign-on still guards: its logins in MEMORY only (_save writes nothing while held)
     this._held = { why };
-    const fix = 'if it looks whole, restart VibeSpace first (a read can fail for a moment); otherwise restore it from a backup and restart, or remove it and restart';
-    try { console.error(sso
-      ? `[auth] THE SIGN-IN FILE IS HELD: ${this._file} is there but ${why} — single sign-on still guards this instance (its logins kept in memory only, until the next restart) and the password sign-in is refused; ${fix}; nothing is written over it`
-      : `[auth] THE SIGN-IN FILE IS HELD: ${this._file} is there but ${why} — every page and API is refused (the sign-in page says so); ${fix} to start with no sign-in; nothing is written over it`); } catch { }
+    try { console.error(`[auth] ${heldJournal(this._file, why, sso)}`); } catch { }   // the table's shared words (src/signin-table.js)
   }
 
   /** the held state (B-dc3f), or null: { why } */
@@ -114,7 +110,7 @@ class Auth {
     return this.passwordEnabled ? '  Password auth: ENABLED' : null;
   }
   /** the upgrade dispatcher's refusal while shut: 503 by name, nothing proxied */
-  refuseHeldUpgrade(socket) { try { socket.write('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 3600\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{"error":"signin-held"}'); } catch { } try { socket.destroy(); } catch { } }
+  refuseHeldUpgrade(socket) { try { socket.write(HELD_UPGRADE); } catch { } try { socket.destroy(); } catch { } }
 
   _save() {
     if (!this._state || this._held) return;   // NOTHING is written over a held file
@@ -145,7 +141,7 @@ class Auth {
   get ssoEnabled() { return !!this._clerk?.enabled; }
 
   _hash(password, salt) {
-    return crypto.scryptSync(String(password), Buffer.from(salt, 'hex'), 32).toString('hex');
+    return hashSync(password, salt);   // the table's shared law: scrypt, 32 bytes (src/signin-table.js)
   }
 
   /**
@@ -226,9 +222,7 @@ class Auth {
 
   verifyPassword(password) {
     if (this._held || !this.passwordEnabled) return false;
-    const got = Buffer.from(this._hash(password, this._state.salt), 'hex');
-    const want = Buffer.from(this._state.passwordHash, 'hex');
-    return got.length === want.length && crypto.timingSafeEqual(got, want);
+    return hashMatches(this._hash(password, this._state.salt), this._state.passwordHash);   // constant time (src/signin-table.js)
   }
 
   issueToken(ua = '') {
@@ -238,13 +232,7 @@ class Auth {
     // Clerk-only instances may have no auth.json yet — tokens still persist
     this._state = this._state || { tokens: {} };
     this._state.tokens = this._state.tokens || {};
-    this._state.tokens[tokenDigest(token)] = { createdAt: now, usedAt: now, ua: String(ua).slice(0, 120) };   // the DIGEST — never the token
-    // Evict the dead + cap the total (the least recently used first)
-    const entries = Object.entries(this._state.tokens)
-      .filter(([, v]) => Auth.loginAlive(v, now))
-      .sort((a, b) => (a[1].usedAt || a[1].createdAt) - (b[1].usedAt || b[1].createdAt));
-    while (entries.length > MAX_TOKENS) entries.shift();
-    this._state.tokens = Object.fromEntries(entries);
+    this._state.tokens = addLogin(this._state.tokens, tokenDigest(token), ua, now);   // the DIGEST — never the token; the dead evicted, the total capped (src/signin-table.js)
     this._save();
     return token;
   }
@@ -267,8 +255,7 @@ class Auth {
   _slideCookie(req, res, token) {
     const rec = this._login(token), d = token ? tokenDigest(token) : null;
     if (!rec || !this._slid || !this._slid.delete(d) || !res || typeof res.append !== 'function') return;
-    const secure = req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : '';
-    res.append('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Auth.cookieMaxAge(rec)}; SameSite=Lax;${secure}`);
+    res.append('Set-Cookie', loginCookie(token, Auth.cookieMaxAge(rec), req.headers));
   }
 
   revokeToken(token) {
@@ -278,17 +265,8 @@ class Auth {
   }
 
   // ── Rate limiting ──
-  _rateCheck(ip) {
-    const a = this._attempts.get(ip);
-    if (a && a.lockUntil > Date.now()) return false;
-    return true;
-  }
-  _rateFail(ip) {
-    const a = this._attempts.get(ip) || { fails: 0, lockUntil: 0 };
-    a.fails++;
-    if (a.fails >= 5) { a.lockUntil = Date.now() + 60000; a.fails = 0; }
-    this._attempts.set(ip, a);
-  }
+  _rateCheck(ip) { return rateCheck(this._attempts, ip, Date.now()); }   // the table's shared law: 5 fails lock an address a minute
+  _rateFail(ip) { rateFail(this._attempts, ip, Date.now()); }
   _rateOk(ip) { this._attempts.delete(ip); }
 
   // ── HTTP integration ──
@@ -297,11 +275,7 @@ class Auth {
    *  cookie itself; one sign-in = one handle), or null without one. The ONE cookie reader stays this file (test-auth). */
   static signInHandle(req) { const t = Auth.cookieToken(req); return t ? tokenDigest(t).slice(0, 12) : null; }   // int317: the ONE hash door — the first 12 hex of auth.json's key for this login (no secret)
 
-  static cookieToken(req) {
-    const h = req.headers.cookie || '';
-    const m = h.match(new RegExp('(?:^|;\\s*)' + TOKEN_COOKIE + '=([a-f0-9]+)'));
-    return m ? m[1] : null;
-  }
+  static cookieToken(req) { return cookieTokenOf(req.headers.cookie); }   // the table's shared reader (src/signin-table.js)
 
   /** THE SAME-ORIGIN RULE for this request (src/write-origin.js): a write or a WebSocket handshake that rides the
    *  cookie must come from this instance's own page — its own origin as the reverse proxies forward it */
@@ -364,8 +338,7 @@ class Auth {
     // Secure only behind an https INGRESS (no http door to that host): the hub's own https (src/server/tls.js) shares ONE
     // port + host with http, and a Secure cookie set over it would lock the http origin out (Chrome: an insecure origin
     // never reads or overwrites a Secure cookie) — lane https-tailscale, cookies as before (req.secure was never true)
-    const secure = req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : '';
-    res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(TOKEN_IDLE_MS / 1000)}; SameSite=Lax;${secure}`);   // the slide's 30 days (each use re-sets it)
+    res.setHeader('Set-Cookie', loginCookie(token, Math.floor(TOKEN_IDLE_MS / 1000), req.headers));   // the slide's 30 days (each use re-sets it)
     return token;
   }
 
@@ -422,7 +395,7 @@ class Auth {
     app.post('/api/logout', (req, res) => {
       const token = Auth.cookieToken(req);
       if (token) this.revokeToken(token);
-      res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
+      res.setHeader('Set-Cookie', CLEAR_COOKIE);
       res.json({ success: true });
     });
 
@@ -455,7 +428,7 @@ class Auth {
       if (remove) {
         if (!this.passwordEnabled) return res.json({ success: true, enabled: this.enabled });
         this.removePassword();
-        res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
+        res.setHeader('Set-Cookie', CLEAR_COOKIE);
         return res.json({ success: true, enabled: this.enabled }); // Clerk may keep auth on
       }
       const pw = String(newPassword ?? '');
@@ -463,8 +436,7 @@ class Auth {
       this.setPassword(pw, { userSet: true });
       this.revokeAllTokens();
       const token = this.issueToken(req.headers['user-agent']);
-      const secure = req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : ''; // ingress only — the hub's own https shares the host with http (above)
-      res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(TOKEN_IDLE_MS / 1000)}; SameSite=Lax;${secure}`);
+      res.setHeader('Set-Cookie', loginCookie(token, Math.floor(TOKEN_IDLE_MS / 1000), req.headers)); // Secure behind an https ingress only — the hub's own https shares the host with http (above)
       res.json({ success: true, enabled: true });
     });
   }

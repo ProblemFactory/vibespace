@@ -12,7 +12,9 @@
 //   an upgrade — the head goes onto its channel as received (its lines re-joined), then the page socket and the channel are
 //                piped RAW both ways; nothing after that head is parsed, and the upgraded socket never outlives its channel.
 // IT DECIDES NOTHING (law 3): the open line carries no class — {op, chan, to, trace, stamp: {secure, addr, port}} — and the
-// party's own gate judges every head it serves. It parses heads, never a body's content (the design's sentence, amended by
+// party's own gate judges every head it serves. With the sign-in table in the interface (B3b-1, r1517 (A)) the stamp carries
+// its ONE fact too (`signin`: a fact the table knows, never a class) and a page answer may carry the slide's cookie line
+// (`facts.lines`, after the party's own lines). It parses heads, never a body's content (the design's sentence, amended by
 // r922). A request with no party to hand it to is answered BY NAME (503 «no-owner»), never by a closed socket (law 9).
 // THE STAMP rides the control channel only; channel numbers count up and STOP before they could wrap to 0, the control
 // channel (src/agentd/mux.js writes `chan >>> 0`): no page byte is ever read as a control line (law 5).
@@ -87,7 +89,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
     if (!mux) return null;
     if (next > LAST_CHAN) { if (!exhausted) { exhausted = true; try { log.error?.('[interface] the link\'s channel numbers are spent — no new exchange is opened on it (channel 0 is the control channel, never a page\'s)'); } catch { } } stats.exhausted++; return null; }
     const m = mux, rt = router, chan = next++;
-    m.control({ op: 'open', chan, to: ownerOf({ kind: 'route', method: req.method, path: req.url }), trace: newTrace(), stamp: { secure: !!facts.secure, addr: facts.addr || null, port: facts.port || null } });
+    m.control({ op: 'open', chan, to: ownerOf({ kind: 'route', method: req.method, path: req.url }), trace: newTrace(), stamp: { secure: !!facts.secure, addr: facts.addr || null, port: facts.port || null, ...('signin' in facts ? { signin: facts.signin } : {}) } });
     const sock = rt.open(chan, {});
     const e = { kind, mux: m, sock, page: null, req: null, res: null, out: null, a: null, left: 2 };
     e.done = () => { if (--e.left === 0) live.delete(keyOf(sock)); };   // gone when the channel AND its page side have closed: a byte may wait on the page side after its channel ended
@@ -133,7 +135,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
     });
     out.on('response', (a) => {
       Object.assign(live.get(keyOf(sock)) || {}, { a });
-      const lines = answerLines(req, a.rawHeaders);
+      const lines = answerLines(req, a.rawHeaders).concat(Array.isArray(facts.lines) ? facts.lines : []);   // + the slide's cookie (the sign-in table's), after the party's own
       res.sendDate = false;   // the party's Date line, or none — never one of the interface's
       if (!has(lines, 'content-length') && !has(lines, 'transfer-encoding')) { res.removeHeader('content-length'); res.removeHeader('transfer-encoding'); }   // the party framed it by its channel's close: so is the page's
       try { res.writeHead(a.statusCode, a.statusMessage, lines); }

@@ -42,6 +42,37 @@ function replaceShredding(file, text) {
   }
 }
 
+/** THE SAME REPLACE, ASYNC (the separation's B3b-1: the interface holds the sign-in table and makes no synchronous disk call on
+ *  its loop): never through a link, the old inode opened before the rename, the temp written and SYNCED, then renamed, the folder
+ *  synced (best effort), the old bytes overwritten. A close that fails is never swallowed: the first one is kept and thrown after
+ *  the write's own work is done (a write that LANDED reports its landing — `landed` on the error), so the caller can say it. */
+async function replaceShreddingAsync(file, text) {
+  const fsp = fs.promises;
+  let st = null;
+  try { st = await fsp.lstat(file); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
+  if (st && st.isSymbolicLink()) throw Object.assign(new Error(`${file} is a symbolic link — a secret-bearing file is never rewritten (nor its old bytes overwritten) through a link`), { code: 'ELOOP' });
+  let old = null, size = 0, closeErr = null;
+  const closeOf = async (h) => { try { await h.close(); } catch (e) { if (!closeErr) closeErr = e; } };   // kept, never swallowed
+  try { old = await fsp.open(file, 'r+'); size = (await old.stat()).size; } catch (e) { if (old) await closeOf(old); old = null; size = 0; }
+  const tmp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+  try {
+    const fh = await fsp.open(tmp, 'wx', 0o600);
+    try { await fh.writeFile(text); await fh.sync(); } finally { await closeOf(fh); }   // THE BYTES ON DISK FIRST
+    if (closeErr) throw closeErr;                                                  // a temp whose close failed is never renamed in
+    await fsp.rename(tmp, file);                                                   // then the name points at them
+  } catch (e) {
+    await fsp.unlink(tmp).catch((u) => u);   // never written, or never renamed: the temp goes (a missing one is nothing to do)
+    if (old) await closeOf(old);
+    throw e;
+  }
+  try { const dir = await fsp.open(path.dirname(file), 'r'); try { await dir.sync(); } finally { await closeOf(dir); } } catch (e) { void e; /* the name already points at the synced bytes (best effort: not every platform opens a folder) */ }
+  if (old) {
+    try { if (size > 0) await old.write(crypto.randomBytes(size), 0, size, 0); await old.sync(); } catch (e) { void e; /* the name already holds the new text */ }
+    await closeOf(old);
+  }
+  if (closeErr) throw Object.assign(closeErr, { landed: true });   // the new text is in place; a close failed — said, never swallowed
+}
+
 /** A SECRET-BEARING FILE REMOVED (lane engine-distribution: a git credential handed to ONE clone through a 0600 file — the
  *  askpass's token, a deploy key): its bytes are overwritten in place (random, fsync) before the name is unlinked. Async (the
  *  install road never blocks the loop); never through a link; a missing file is nothing to do. → true when it is gone. */
@@ -58,4 +89,4 @@ async function shredFile(file) {
   try { await fsp.lstat(file); return false; } catch { return true; }
 }
 
-module.exports = { replaceShredding, shredFile };
+module.exports = { replaceShredding, replaceShreddingAsync, shredFile };

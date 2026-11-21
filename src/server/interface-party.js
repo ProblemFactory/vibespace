@@ -14,6 +14,10 @@
 // opens (`{op:'open', chan, to, trace, stamp}`) is ONE page connection. It is handed to the hub's own http.Server as a
 // socket (src/agentd/chan-socket.js: the router credits its own channels — this module never does — and onDead ⇒
 // router.dead()). The stamp the interface wrote — {secure, addr, port} — rides the socket (remoteAddress / encrypted).
+// THE SIGN-IN FACT (piece B3b-1, 主开发 r1517 (A)): when the interface holds the sign-in table, the stamp carries its fact for
+// that head — 'off', { alive: <a login's sha256 digest> } or null — kept on the channel's socket (signinFactOf), read by the
+// piped hub's gate (src/server/piped-auth.js); a malformed fact is kept as null (no login). The table's state line
+// `{op:'signin-state', …}` and its answer to a revoke (`{op:'signin-revoke-all-ack', revoked}`) go to `onSignin`.
 const net = require('net');
 const { Mux } = require('../agentd/mux.js');
 const { createChanSockets } = require('../agentd/chan-socket.js');
@@ -22,6 +26,17 @@ const { digestOf, proofOf } = require('../link-proof.js');   // the greeting, ve
 const PROTO_VERSION = 2;
 const MAX_CONTROL = 64 * 1024;
 const JOIN_ANSWER_MS = 5000;
+const SIGNIN = Symbol('the sign-in fact');
+const DIGEST_RE = /^[0-9a-f]{64}$/;
+/** the stamp's sign-in fact, judged: 'off' | { alive } | null — undefined when the stamp carries none (no table) */
+function factOf(stamp) {
+  if (!stamp || !('signin' in stamp)) return undefined;
+  const f = stamp.signin;
+  if (f === 'off') return 'off';
+  return f && typeof f === 'object' && typeof f.alive === 'string' && DIGEST_RE.test(f.alive) ? { alive: f.alive } : null;
+}
+/** the fact the interface wrote for the head this socket carries (undefined: none — not a channel, or no table) */
+const signinFactOf = (socket) => (socket ? socket[SIGNIN] : undefined);
 
 /** → Promise<{ mux, router, capabilities }> once the interface admitted this party; rejects on auth-fail, a link that
  *  ended first, or no answer inside `answerMs` (e.code 'no-answer'). `server` = the hub's http.Server (each channel:
@@ -51,7 +66,7 @@ function oneExchange(server, log = console) {
  *  answers `{op:'hello', protoVersion:2, party, proof}` — a proof keyed by its DIGEST (src/link-proof.js), never its start
  *  value: no start value is on any frame of any link. `start` names the link and either the start value (`secret`, the
  *  first join: its digest is derived here) or its `digest` alone (a re-join holds nothing more). */
-function join({ start, server, connect = (p) => net.connect(p), onDead = () => { }, answerMs = JOIN_ANSWER_MS, log = console } = {}) {
+function join({ start, server, connect = (p) => net.connect(p), onDead = () => { }, onSignin = () => { }, answerMs = JOIN_ANSWER_MS, log = console } = {}) {
   const digest = start && typeof start.digest === 'string' ? start.digest : start && typeof start.secret === 'string' ? digestOf(start.secret) : null;
   if (!start || typeof start.link !== 'string' || !digest) return Promise.reject(new Error('join: the start line names no link or secret'));
   const party = start.party || 'hub';
@@ -68,6 +83,7 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
           else if (m && m.op === 'auth-fail') { clearTimeout(silent); reject(new Error('the interface refused this party (auth-fail)')); try { mux.destroy(); } catch { } }
           return;
         }
+        if (m && (m.op === 'signin-state' || m.op === 'signin-revoke-all-ack')) { try { onSignin(m); } catch { } return; }   // the interface's sign-in table: its state, and its answer to a revoke (B3b-1)
         if (m && m.op === 'open' && Number.isInteger(m.chan)) {
           // A CHANNEL WITH NO ADDRESS IS REFUSED: the channel socket reads a missing address as the local one, and two doors of the
           // hub trust the local address — the interface never sends one without it, and the default fails closed (r1057 item 2)
@@ -78,6 +94,7 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
             return;
           }
           const s = router.open(m.chan, m.stamp); s[EXCHANGE] = { heads: 0, chan: m.chan };   // ONE exchange this channel
+          s[SIGNIN] = factOf(m.stamp);   // the sign-in table's fact for this head (B3b-1)
           s.on('error', () => { });   // a dead link destroys its channels «with an error»; an UPGRADED socket has no http.Server listener left, so that error would end the hub — the death is said by name (onDead), never thrown
           server.emit('connection', s);
         }
@@ -96,4 +113,4 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
   });
 }
 
-module.exports = { join, oneExchange, PROTO_VERSION, MAX_CONTROL, JOIN_ANSWER_MS };
+module.exports = { join, oneExchange, signinFactOf, factOf, PROTO_VERSION, MAX_CONTROL, JOIN_ANSWER_MS };

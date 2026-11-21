@@ -433,8 +433,9 @@ for (const mode of ['password', 'open']) {
   ok(pins.every((p) => p[1]), `every cookie door of the upgrade dispatcher and the per-mount / per-page doors ask auth.requestAuthed (${pins.length} pins)`, pins.filter((p) => !p[1]).map((p) => p[0]));
   const raw = [];
   const WITHDRAW = /\(req\.headers\.cookie \|\| req\.headers\['sec-fetch-site'\]\)\) return res\.status\(403\)\.json\(\{ error: 'only the agent that (?:proposed it can withdraw|drafted it can ask to resend)/;   // lane bl-msg B-da74: the resend route's role refusal, the same declared shape
-  for (const f of hubFiles()) { if (f === 'src/auth.js') continue; codeLines(readRepo(f)).forEach((l, i) => { if (/\bcookieToken\(|\.checkToken\(|headers\.cookie\b|headers\[['"]cookie['"]\]/.test(l) && !(f === 'src/agent-routes.js' && WITHDRAW.test(l))) raw.push(`${f}:${i + 1}`); }); }
-  ok(raw.length === 0, 'no file but src/auth.js reads the session cookie (cookieToken / checkToken / the Cookie header) — every cookie decision passes the verdict; the withdraw route\'s presence check is the declared role refusal (⑥)', raw);
+  const READERS = new Set(['src/auth.js', 'src/interface/signin.js']);   // the plain form's table, and the piped form's: the interface holds the table (the separation's B3b-1, 主开发 r1060 + r1517)
+  for (const f of hubFiles()) { if (READERS.has(f)) continue; codeLines(readRepo(f)).forEach((l, i) => { if (/\bcookieToken\(|\.checkToken\(|headers\.cookie\b|headers\[['"]cookie['"]\]/.test(l) && !(f === 'src/agent-routes.js' && WITHDRAW.test(l))) raw.push(`${f}:${i + 1}`); }); }
+  ok(raw.length === 0, 'no file but src/auth.js (and, in the piped form, src/interface/signin.js: the interface holds the table) reads the session cookie (cookieToken / checkToken / the Cookie header) — every cookie decision passes the verdict; the withdraw route\'s presence check is the declared role refusal (⑥)', raw);
 }
 
 // ── ⑥ THE ROUTE CENSUS ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -598,10 +599,10 @@ console.log('⑦ LOGIN TOKENS AT REST (lane vault-e2e-password-fix-r2, the owner
     ok(!text.includes(tok) && text.includes(A.tokenDigest(tok)) && (fs.statSync(file).mode & 0o777) === 0o600 && JSON.parse(text).tokensHashed === 1, 'issueToken: auth.json keys the login by sha256(token) — the token itself is in no byte of the file (0600)');
     ok(auth.checkToken(tok) && !auth.checkToken(A.tokenDigest(tok)), 'the cookie\'s token opens; the DIGEST (what a disk thief reads) opens nothing');
     // MUTANT: the pre-r2 issue (the token itself as the map key) ⇒ the at-rest census above is RED
-    const anchor = "this._state.tokens[tokenDigest(token)] = { createdAt: now, usedAt: now, ua: String(ua).slice(0, 120) };";
+    const anchor = "this._state.tokens = addLogin(this._state.tokens, tokenDigest(token), ua, now);";   // the separation's B3b-1: the new login's map entry is the table's shared law (src/signin-table.js addLogin)
     const mutSrc = readRepo(AUTH);
     ok(mutSrc.includes(anchor), 'the mutant\'s anchor is issueToken\'s write');
-    const AM = require(MUT.write(AUTH, mutSrc.replace(anchor, "this._state.tokens[token] = { createdAt: now, usedAt: now, ua: String(ua).slice(0, 120) };"), 'plain-key'));
+    const AM = require(MUT.write(AUTH, mutSrc.replace(anchor, "this._state.tokens = addLogin(this._state.tokens, token, ua, now);"), 'plain-key'));
     const dm = path.join(DIR, `rest-mut-${++seq}`); fs.mkdirSync(dm, { recursive: true });
     const am = new AM.Auth(dm); am.setPassword('pw-m'); const tm = am.issueToken('m');
     ok(fs.readFileSync(path.join(dm, 'auth.json'), 'utf8').includes(tm), 'MUTANT (the token stored as the key) ⇒ RED: the census reads the token in auth.json');
@@ -629,7 +630,7 @@ console.log('⑦ LOGIN TOKENS AT REST (lane vault-e2e-password-fix-r2, the owner
     ok(cookies.length === 1 && ma === 30 * 86400, 'and the cookie is re-set with the slide\'s 30 days (Max-Age) — a login used every day never expires in the browser before the cap', cookies);
     clock = t0 + 200 * DAY + 175 * DAY;
     ok(A.Auth.cookieMaxAge(JSON.parse(fs.readFileSync(file, 'utf8')).tokens[A.tokenDigest(tok3)], clock) === 5 * 86400, 'near the cap the cookie\'s Max-Age is what is LEFT of the 180 days (5 days), never the full 30');
-    ok(/Max-Age=\$\{Math\.floor\(TOKEN_IDLE_MS \/ 1000\)\}/.test(readRepo(AUTH)) && !/Max-Age=\$\{Math\.floor\(TOKEN_TTL_MS/.test(readRepo(AUTH)), 'a sign-in sets the 30-day cookie (never the 180-day one)');
+    ok(/loginCookie\(token, Math\.floor\(TOKEN_IDLE_MS \/ 1000\), req\.headers\)/.test(readRepo(AUTH)) && !/Math\.floor\(TOKEN_TTL_MS/.test(readRepo(AUTH)), 'a sign-in sets the 30-day cookie (never the 180-day one)');   // the cookie's text is the table's shared law (src/signin-table.js loginCookie, the separation's B3b-1)
     // THE MIGRATION: a plaintext map an older build wrote is hashed at the first start — every login inside the cap stays valid once
     clock = realNow();
     const d2 = path.join(DIR, `rest-${++seq}`); fs.mkdirSync(d2, { recursive: true });

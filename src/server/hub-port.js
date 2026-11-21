@@ -25,6 +25,14 @@ const { START_LINE_MS, MAX_START_LINE, takeWord, firstLine, whyText } = require(
 // switch off loads what the release loads (主开发 r1341 6)
 
 let claimed = null;   // the boot's start, TAKEN at server.js line 5 (claim): the word, the one line, the pipe CLOSED
+/** THE PIPED FORM, AS THE START SAID IT (piece B3b-1): server.js builds its sign-in reader by it — piped ⇒ the interface holds
+ *  the table (src/server/piped-auth.js: this hub opens no file) */
+const piped = () => !!(claimed && claimed.word);
+/** the interface's sign-in state line, heard on the link (B3b-1): the piped hub's reader subscribes; the last one is kept for a
+ *  late subscriber, and a re-joined interface says it again */
+let signinListener = null, lastSignin = null;
+const signinHeard = (m) => { if (m && m.op === 'signin-state') lastSignin = m; if (signinListener) { try { signinListener(m); } catch { } } };
+function onSigninState(fn) { signinListener = typeof fn === 'function' ? fn : null; if (signinListener && lastSignin) signinHeard(lastSignin); }
 let claimedDecision = null;   // that start JUDGED, once (decide): its parsed line is dropped there (主开发 r1124 1)
 /** THE hub's own end: its normal SIGTERM shutdown (the stores flushed) — ONE site for every end this module makes (§85's row) */
 const endSelf = () => process.kill(process.pid, 'SIGTERM');
@@ -169,7 +177,7 @@ function wire(decision, { hub, server, join = null, end = endSelf, log = console
         const attempt = () => {
           tries++;
           const answerMs = Math.max(REJOIN_TRY_FLOOR_MS, Math.min(require('./interface-party.js').JOIN_ANSWER_MS, until - monoNow()));   // what is left of the bound, never under the floor
-          joinOf({ start, server, onDead, answerMs }).then((p) => {
+          joinOf({ start, server, onDead, onSignin: signinHeard, answerMs }).then((p) => {
             party = p;
             try { log.log?.(`[hub-port] a new interface took this hub (try ${tries}) — it goes on: the same process, its vault and conversations kept`); } catch { }
             if (lastPem !== undefined) push(lastPem);   // the new interface has no certificate until this hub pushes it again
@@ -181,7 +189,7 @@ function wire(decision, { hub, server, join = null, end = endSelf, log = console
         };
         setTimeout(attempt, REJOIN_FIRST_MS);
       };
-      joinOf({ start, server, onDead })
+      joinOf({ start, server, onDead, onSignin: signinHeard })
         .then((p) => { party = p; record = { form: 'piped', listened: false, link: start.link }; try { log.log?.(`[hub-port] ${JSON.stringify(record)}`); } catch { } if (pendingPem !== undefined) push(pendingPem); cb && cb(); },
           (e) => { try { log.error?.(e && e.code === 'no-answer' ? `[hub-port] ${e.message} — this hub ends` : `[hub-port] the interface refused this hub (${(e && e.message) || 'refused'}) — it ends`); } catch { } end(); });
       return hub;
@@ -193,4 +201,4 @@ function wire(decision, { hub, server, join = null, end = endSelf, log = console
   return wired;
 }
 
-module.exports = { claim, decide, endBadStart, exitStatus, EXIT_BAD_START, certificate, wire, plainListen, REJOIN_MS, REJOIN_TRY_FLOOR_MS };
+module.exports = { claim, decide, endBadStart, exitStatus, EXIT_BAD_START, certificate, wire, plainListen, piped, onSigninState, REJOIN_MS, REJOIN_TRY_FLOOR_MS };

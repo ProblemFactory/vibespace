@@ -114,7 +114,7 @@ const server = http.createServer(app); const hub = require('./src/server/tls.js'
 const { Auth } = require('./src/auth');
 const { ClerkAuth } = require('./src/clerk-auth');
 const clerkAuth = new ClerkAuth();
-const auth = new Auth(path.join(__dirname, 'data'), { clerk: clerkAuth });
+const auth = new (require('./src/server/hub-port.js').piped() ? require('./src/server/piped-auth.js').PipedAuth : Auth)(path.join(__dirname, 'data'), { clerk: clerkAuth });   // B3b-1: piped ⇒ the interface holds the sign-in table, this hub opens no file
 {
   const { generated } = auth.ensurePassword({ generateIfMissing: process.env.VIBESPACE_GENERATE_PASSWORD === '1' });
   if (generated) {

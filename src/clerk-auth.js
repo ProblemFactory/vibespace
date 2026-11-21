@@ -29,7 +29,7 @@
 const crypto = require('crypto');
 
 class ClerkAuth {
-  constructor({ publishableKey, allowedEmails, jwksUrl, issuer } = {}) {
+  constructor({ publishableKey, allowedEmails, jwksUrl, issuer, keepLastGood = false } = {}) {
     this.publishableKey = (publishableKey ?? process.env.VIBESPACE_CLERK_PUBLISHABLE_KEY ?? '').trim();
     const allowRaw = allowedEmails ?? process.env.VIBESPACE_CLERK_ALLOWED_EMAILS ?? '';
     this._allow = String(allowRaw).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -43,6 +43,10 @@ class ClerkAuth {
     this._jwksUrl = jwksUrl || (this.frontendApi ? `https://${this.frontendApi}/.well-known/jwks.json` : '');
     this._jwks = null;          // { keys: [...] }
     this._jwksFetchedAt = 0;
+    // THE LAST GOOD KEY SET (the separation's B3b-1, the interface's holder only — the plain form's hub passes nothing and is
+    // today's): a refresh that fails keeps the set fetched before, so Clerk's outage stops no sign-in a cached key verifies;
+    // with no set ever fetched it still fails closed, by name
+    this._keepLastGood = !!keepLastGood;
   }
 
   get enabled() { return !!(this.publishableKey && this.frontendApi); }
@@ -56,10 +60,15 @@ class ClerkAuth {
   async _getKey(kid, { forceRefresh = false } = {}) {
     const fresh = this._jwks && Date.now() - this._jwksFetchedAt < 3600000;
     if (!fresh || forceRefresh) {
-      const res = await fetch(this._jwksUrl, { signal: AbortSignal.timeout(8000) });
-      if (!res.ok) throw new Error(`JWKS fetch failed (${res.status})`);
-      this._jwks = await res.json();
-      this._jwksFetchedAt = Date.now();
+      try {
+        const res = await fetch(this._jwksUrl, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) throw new Error(`JWKS fetch failed (${res.status})`);
+        this._jwks = await res.json();
+        this._jwksFetchedAt = Date.now();
+      } catch (e) {
+        if (!(this._keepLastGood && this._jwks && Array.isArray(this._jwks.keys))) throw e;   // no set to keep: fails closed, as before
+        this.lastFetchError = String((e && e.message) || e).slice(0, 120);   // kept: the last good set answers below
+      }
     }
     const jwk = (this._jwks?.keys || []).find((k) => k.kid === kid);
     // Unknown kid on a cached set → refetch once (key rotation)

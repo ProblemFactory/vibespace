@@ -42,6 +42,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 5000) => { const t = Date.now(); while (!f()) { if (Date.now() - t > ms) return false; await sleep(5); } return true; };
 const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iface-proc-'));
 process.on('exit', () => { try { fs.rmSync(T, { recursive: true, force: true }); } catch { } });
+// THE SIGN-IN TABLE every start line names (piece B3b-1: REQUIRED) — in T, this account's alone (mkdtemp: 0700); never written here (sign-in off)
+const SIGNIN = { file: path.join(T, 'auth.json') };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 function compileAt(rel, src) { const file = path.join(REPO, rel); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src, file); return m.exports; }
 const once = (rel, needle) => { const src = read(rel); if (src.split(needle).length !== 2) throw new Error(`CONTROL needle not found exactly once in ${rel}: ${needle.slice(0, 80)}`); return src; };
@@ -56,7 +58,7 @@ async function started(mainMod = require(path.join(REPO, 'src/interface/main.js'
   const pipe = new PassThrough(), exits = [];
   const link = path.join(T, `m${++n}.sock`);
   const m = mainMod.main({ pipe, env: { PORT: '0', HOST: '127.0.0.1', ...env }, exit: (c) => exits.push(c), log: quiet });
-  pipe.write(JSON.stringify({ op: 'start', party: 'interface', secret: crypto.randomBytes(32).toString('hex'), link }) + '\n');
+  pipe.write(JSON.stringify({ op: 'start', party: 'interface', secret: crypto.randomBytes(32).toString('hex'), link, signin: SIGNIN }) + '\n');
   const at = await m.ready;
   return { m, pipe, exits, port: at.port, link };
 }
@@ -78,8 +80,11 @@ function graph(entry, srcOf = read) {
 {
   const g = graph('src/interface/main.js');
   const FORBIDDEN = /engine|vault|secret|store|normali[sz]er|message-manager|accounts|channel|auth\b|session/;
-  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/chan-socket.js', 'src/agentd/mux.js', 'src/interface/admission.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/main.js', 'src/interface/owners.js', 'src/interface/relay.js', 'src/link-proof.js', 'src/start-pipe.js']) && g.files.every((f) => !FORBIDDEN.test(f)) && g.builtins.every((b) => builtinModules.includes(b)),
-    `the process's graph: ${g.files.join(', ')}; built-ins ${g.builtins.join(', ')} — no engine, vault, secret-box, store or normaliser module`, g);
+  // THE INTERFACE'S ONE STORE, allowed BY NAME (主开发 r1060; piece B3b-1): the sign-in table's writer (src/secret-file.js — its
+  // async replace) and its single sign-on (src/clerk-auth.js); every other module the walk meets must stay clear of the pattern
+  const SIGNIN_STORE = new Set(['src/secret-file.js', 'src/clerk-auth.js']);
+  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/chan-socket.js', 'src/agentd/mux.js', 'src/app-csp.js', 'src/clerk-auth.js', 'src/door.js', 'src/interface/admission.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/main.js', 'src/interface/owners.js', 'src/interface/relay.js', 'src/interface/signin.js', 'src/landing-lang.js', 'src/link-proof.js', 'src/login-page.js', 'src/login-words.js', 'src/secret-file.js', 'src/signin-table.js', 'src/start-pipe.js', 'src/write-origin.js']) && g.files.every((f) => !FORBIDDEN.test(f) || SIGNIN_STORE.has(f)) && g.builtins.every((b) => builtinModules.includes(b)),
+    `the process's graph: ${g.files.join(', ')}; built-ins ${g.builtins.join(', ')} — no engine, vault, secret-box, store or normaliser module but the sign-in table's own (r1060: ${[...SIGNIN_STORE].join(', ')})`, g);
   const planted = graph('src/interface/main.js', (rel) => (rel === 'src/interface/main.js' ? once(rel, "const { create } = require('./index.js');") + "\nrequire('../vault.js');\n" : read(rel)));
   ok(planted.files.includes('src/vault.js'), 'RED CONTROL — a planted require of the vault is caught in the graph', planted.files);
 }
@@ -156,7 +161,7 @@ console.log('— ④ and ⑤ as a CHILD on a REAL fd 3: it exits when its pipe e
   const child = spawn(process.execPath, [path.join(REPO, 'src/interface/main.js')], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH, PORT: '0', HOST: '127.0.0.1', VIBESPACE_START_FD: '3' } });
   let out = ''; child.stdout.on('data', (b) => { out += b; }); child.stderr.on('data', (b) => { out += b; });
   let exitCode = null; child.once('exit', (c) => { exitCode = c; });
-  child.stdio[3].write(JSON.stringify({ op: 'start', party: 'interface', secret: own, link }) + '\n' + JSON.stringify({ op: 'admit', party: 'hub', digest: hub.digest }) + '\n');
+  child.stdio[3].write(JSON.stringify({ op: 'start', party: 'interface', secret: own, link, signin: SIGNIN }) + '\n' + JSON.stringify({ op: 'admit', party: 'hub', digest: hub.digest }) + '\n');
   const listening = await until(() => /listening on/.test(out), 5000);
   const party = listening ? await join({ start: { party: 'hub', secret: hub.secret, link }, server: hubServer() }).catch(() => null) : null;
   let argv = '', environ = '';
@@ -216,7 +221,7 @@ console.log('— ⑧ THE LINK\'S FOLDER IS THIS ACCOUNT\'S ALONE: a folder other
     const link = path.join(dir, 'link.sock'); fs.writeFileSync(link, 'what stood here before');
     const lines = [], exits = [], pipe = new PassThrough();
     const m = mod.main({ pipe, env: { PORT: '0', HOST: '127.0.0.1' }, exit: (c) => exits.push(c), log: said(lines) });
-    pipe.write(JSON.stringify({ op: 'start', party: 'interface', secret: crypto.randomBytes(32).toString('hex'), link }) + '\n');
+    pipe.write(JSON.stringify({ op: 'start', party: 'interface', secret: crypto.randomBytes(32).toString('hex'), link, signin: SIGNIN }) + '\n');
     const up = await m.ready.then(() => true, () => false);
     let kept = null; try { kept = fs.readFileSync(link, 'utf8'); } catch { }
     if (up) await m.stop(0); else await until(() => exits.length, 2000);

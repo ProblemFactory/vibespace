@@ -245,8 +245,14 @@ async function syncCalls(I) {
   const law = await syncCalls();
   ok(law.ok && law.n === 0, `10 plain and 4 TLS exchanges, a certificate pushed and renewed, a 2 MB answer: ${law.n} synchronous fs / child_process / zlib calls`, law);
   const files = fs.readdirSync(path.join(REPO, 'src/interface')).filter((f) => f.endsWith('.js'));
-  const syncForms = [...files.map((f) => `src/interface/${f}`), 'src/start-pipe.js', 'src/agentd/chan-socket.js'].flatMap((rel) => [...read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1').matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `${rel}: ${m[0]}`));   // + the reader the interface shares with the hub
-  ok(JSON.stringify(files.sort()) === JSON.stringify(['admission.js', 'front.js', 'index.js', 'main.js', 'owners.js', 'relay.js']) && syncForms.length === 0, `and read statically: no …Sync name in src/interface's ${files.length} files nor in src/start-pipe.js, the reader it shares, nor in src/agentd/chan-socket.js (a reference taken at load is seen too)`, syncForms);
+  // + the reader the interface shares with the hub, and the sign-in table's road (piece B3b-1): its page, the asked language and the
+  // async writer's own body (src/secret-file.js replaceShreddingAsync — the plain form's replaceShredding beside it is the hub's;
+  // src/signin-table.js holds the plain form's hashSync, which the interface never calls: the count above holds it at run time)
+  const stripped = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const asyncWriter = (() => { const t = read('src/secret-file.js'), i = t.indexOf('async function replaceShreddingAsync('); return i < 0 ? 'replaceShreddingAsync MISSING Sync' : t.slice(i, t.indexOf('\n}\n', i) + 2); })();
+  const syncForms = [...files.map((f) => `src/interface/${f}`), 'src/start-pipe.js', 'src/agentd/chan-socket.js', 'src/login-page.js', 'src/landing-lang.js'].flatMap((rel) => [...stripped(read(rel)).matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `${rel}: ${m[0]}`))
+    .concat([...stripped(asyncWriter).matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `src/secret-file.js replaceShreddingAsync: ${m[0]}`));
+  ok(JSON.stringify(files.sort()) === JSON.stringify(['admission.js', 'front.js', 'index.js', 'main.js', 'owners.js', 'relay.js', 'signin.js']) && syncForms.length === 0, `and read statically: no …Sync name in src/interface's ${files.length} files nor in src/start-pipe.js, the reader it shares, nor in src/agentd/chan-socket.js, nor in the sign-in road's page, language and async writer (a reference taken at load is seen too)`, syncForms);
   const mutRelay = mutant('src/interface/relay.js', "    stats.exchanges++;", "    stats.exchanges++; require('fs').statSync(__filename);");
   const mut = await syncCalls(interfaceWith({ relay: mutRelay }));
   ok(mut.ok && mut.n > 0, `RED CONTROL — one stat planted on the relay's exchange path: ${mut.n} counted`, mut);
