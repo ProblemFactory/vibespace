@@ -107,6 +107,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import net from 'node:net';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
@@ -440,6 +441,10 @@ async function world(tag, { fixedPath = 'lark/cb', publicUrl = POD, larkPreset =
 /** lane oauth-relay-road: an instance whose relay settings are BLANK (Settings → Channels: no relay page) */
 const NO_RELAY = (k) => (/^channels\.(lark|gmail)RelayUrl$/.test(k) ? '' : undefined);
 const landOn = (consentUrl, code) => { const u = new URL(consentUrl); const back = new URL(u.searchParams.get('redirect_uri')); return `${back.pathname}?code=${encodeURIComponent(code)}&state=${encodeURIComponent(u.searchParams.get('state'))}`; };
+// r1429 (lane bl-tests-e): a fetch that fails says WHY — String(er) drops undici's cause (its code, syscall, address, port)
+const causeOf = (er) => { const c = er && er.cause; return String(er) + (c ? ` — cause ${JSON.stringify({ code: c.code, errno: c.errno, syscall: c.syscall, address: c.address, port: c.port, message: String(c.message || '').slice(0, 160) })}` : ''); };
+/** a raw TCP connect to a loopback port, bounded at 2 s: 'accepted', or the error's code */
+const rawConnect = (port) => new Promise((r) => { const s = net.connect({ host: '127.0.0.1', port }); const t = setTimeout(() => { s.destroy(); r('no answer in 2 s'); }, 2000); s.once('connect', () => { clearTimeout(t); s.destroy(); r('accepted'); }); s.once('error', (e) => { clearTimeout(t); r((e && e.code) || String(e)); }); });
 const waitDone = async (e, flowId) => { for (let i = 0; i < 100 && !(e.oauthStatus(flowId) || {}).done; i++) await sleep(20); return e.oauthStatus(flowId); };
 const HASH = crypto.createHash('sha256').update(CR.CLOSE_SCRIPT).digest('base64');
 
@@ -767,10 +772,17 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
     ok(st.flow.mode === 'fixed' && red === w.fixed && st.flow.listening === true, 'Connect Gmail on a local hub with a WEB company client: redirect_uri = the FIXED loopback (registrable on a Web client), listening', { mode: st.flow.mode, red });
     seen.length = 0;
     const back = new URL(w.fixed); back.searchParams.set('code', 'road-web-code'); back.searchParams.set('state', new URL(st.url).searchParams.get('state'));
-    const landed = await fetch(back.toString()).then((r) => r.status).catch((er) => String(er));
+    // r1429 (lane bl-tests-e): this fetch read «TypeError: fetch failed» ONCE, under a whole gate (run c955ce1f0…-both, the tree
+    // reader, box zone), and String(er) dropped its cause. Read, NOT placed: the listener is this world's own, in this process;
+    // it listens before «listening» reads true (oauth-loopback's listen() resolves on the 'listening' event); a port taken
+    // between fixedPort()'s check and the bind refuses BY NAME at the bind (port-busy: the leg above would be red); the flow
+    // ends by nothing here (its timer is 10 min). So at a failure the leg now says the cause, the flow's own state and whether
+    // a raw connect to the port is accepted right then: the next red places itself.
+    const landed = await fetch(back.toString()).then((r) => r.status).catch((er) => causeOf(er));
+    const atFail = landed === 200 ? null : { flow: (({ listening, running, done, cancelled, why, port, refusal }) => ({ listening, running, done, cancelled, why, port, refusal }))(w.oauth.status(st.flowId) || {}), connect: await rawConnect(Number(new URL(w.fixed).port)) };
     const done = await waitDone(w.e, st.flowId);
     const gt = seen.find((x) => x.path === '/google-oauth/token');
-    ok(landed === 200 && gt && gt.body.redirect_uri === w.fixed && gt.body.code === 'road-web-code' && done && done.ok, 'Google sends the browser to that address: the exchange carries it byte for byte, the flow is done', { landed, redirect: gt && gt.body.redirect_uri, done: done && done.ok });
+    ok(landed === 200 && gt && gt.body.redirect_uri === w.fixed && gt.body.code === 'road-web-code' && done && done.ok, 'Google sends the browser to that address: the exchange carries it byte for byte, the flow is done', { landed, redirect: gt && gt.body.redirect_uri, done: done && done.ok, ...(atFail ? { atFail } : {}) });
     const made = await w.e.connect('gmail', { flowId: st.flowId });
     ok(made && made.adapter && made.adapter.options && made.adapter.options.clientType === 'web', 'the new account takes the preset\'s kind as its option (the dialog sent none)', made && made.adapter && made.adapter.options);
     const kg = (w.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'gmail');
