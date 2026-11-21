@@ -29,7 +29,8 @@
 //      window and the page RELOADS with that save still due — the save HELD in the page before the press (a stall, never the
 //      clock), so the leave's flush is its only road ⇒ after the reload the window is on show again and the hub's record holds
 //      it; RED CONTROL first (the release: no flush at the leave) ⇒ gone after the reload, no row. Each plant comes only after every
-//      record has gone QUIET and the page's two restoring gates are down (measured, never a clock)
+//      record has gone QUIET and the page's two restoring gates are down (measured, never a clock); the gaps between the judged
+//      windows are judged too, and every page's tap is asserted where its facts are read
 //   ⑥ (lane lg-recovery — B-46fc part 2) a socket NOT OPEN at the reload: the leave's flush queues the save in the closed socket and the
 //      page hands the queue to POST /api/layout-sync (fetch keepalive) ⇒ the window is on show after the reload; RED the hand-off cut
 //   ⑦ (its round wgk4tnn0w) a page that only goes HIDDEN offline: the hand-off's request fails ⇒ the frame stays OWED and the socket carries
@@ -187,7 +188,9 @@ else await (async () => {
   // THE SETTLE, MEASURED (law 3 — never a clock): the hub's records of every desktop unchanged and no new refusal for 2.5 s (bounded
   // at 25 s), then this page's two restoring gates down (layout.js _restoring — up 1 s after every remote apply — and the desktop
   // manager's). → { ok, quiet, gates, waitedMs }
-  const recStamp = async () => { const l = await api('/api/layouts'); return J(Object.fromEntries(Object.entries(l.desktops || {}).map(([d, x]) => [d, (x.autoSave || {}).updatedAt || null]))) + '|' + refusedSince(0).length; };
+  // (the round's should: a frame the hub drops as a storm — ws-handler's layoutStormed — writes no line and moves no record; each tapped
+  // page's own count of the frames it sent joins the stamp, so such a page is never «quiet»)
+  const recStamp = async () => { const l = await api('/api/layouts'); const sent = []; for (const X of [P1, PH, P2]) sent.push(X ? await X.ev('(window.__syncs || []).length').catch(() => -1) : 0); return J(Object.fromEntries(Object.entries(l.desktops || {}).map(([d, x]) => [d, (x.autoSave || {}).updatedAt || null]))) + '|' + refusedSince(0).length + '|' + sent.join(','); };
   const settle = async (X = P2, still = 2500, ms = 25000) => {
     const t0s = Date.now(); let last = null, since = Date.now(), quiet = false;
     while (Date.now() - t0s < ms) { const f = await recStamp(); if (f !== last) { last = f; since = Date.now(); } else if (Date.now() - since >= still) { quiet = true; break; } await sleep(200); }
@@ -246,6 +249,7 @@ else await (async () => {
     const j0 = journal.length;
     // the desktop tab OPEN ACROSS THE RESTART reconnects; its person presses «Resume this session» on C's read-only window (N1)
     ok(await until(() => P1.ev('!!(app.ws && app.ws.connected)'), 30000, 250), '② the desktop tab open across the restart reconnected');
+    const tR = Date.now(); await P1.ev(TAP);   // ②'s per-page facts: the tab's sends and the refusals it receives, from its new socket
     await sleep(1500);
     ok(await P1.click(`app.wm.windows.get('c-1') && app.wm.windows.get('c-1').element.querySelector('.chat-resume-btn')`), '② its person presses «Resume this session» on c-1');
     await until(async () => { const v = await P1.ev(VIEW('c-1')); return !!(v && v.live); }, 20000, 250);
@@ -256,6 +260,7 @@ else await (async () => {
     ok(!!c1 && c1.desk === 'desk-c' && c1.gb === J(GB(3)) && !c1others.length && J(afterBar['desk-c']) === J(BEFORE['desk-c']), '② N1 THE RESUME BAR: the resumed window IS row c-1 — same id, live, at its box on C; no second window; the hub\'s C row kept with its box (461b41f78: the bar closed the window it had just resumed)', { c1, c1others, c: afterBar['desk-c'] });
     PH = await newPage({ phone: true });
     ok(!!PH && await PH.boot(), '② the PHONE page (390×844, touch) reconnected first');
+    const phTapped = PH ? await PH.ev(TAP).catch(() => false) : false;
     const offer = `(() => { const d = [...document.querySelectorAll('.dialog')].find((x) => /Resume interrupted sessions/.test(x.textContent)); const b = d && [...d.querySelectorAll('button')].find((x) => /Resume all/.test(x.textContent)); return b ? b.textContent : null; })()`;
     ok(await until(async () => !!(await PH.ev(offer)), 15000, 200), '② the phone offers «Resume all» (the 2.250.0 offer: the stopped conversations of every desktop)', { offer: await PH.ev(offer).catch((e) => e.message), dialogs: await PH.ev(`[...document.querySelectorAll('.dialog, .modal, [role=dialog]')].map((d) => d.textContent.slice(0, 160))`).catch((e) => e.message), sessions: ((await api('/api/sessions')).sessions || []).map((x) => [x.sessionId, x.status, x.backend]).slice(0, 9), active: ((await api('/api/active')).sessions || []).length, wins: await PH.ev('[...app.wm.windows.keys()]').catch((e) => e.message) });
     const offered = await PH.ev(offer), N = Number((/Resume all (\d+)/.exec(offered || '') || [])[1]);
@@ -279,11 +284,19 @@ else await (async () => {
     ok(bNow.every((v, k) => v && v.live && v.desk === 'desk-b' && v.gb === J(GB(k + 1))), '② N2 the desktop tab OPEN ACROSS THE RESTART: its B windows b-1, b-2 are the LIVE sessions under their own ids, at their boxes (461b41f78: dead views kept, the dead recipe written back)', bNow);
     const s2 = await settle(P1);   // what happened, not a clock: the records quiet, the tab's gates down
     const p1warn = (await P1.toasts()).filter((t) => /warn/.test(t[0])).map((t) => t[1]), midRows = await rows();
-    const lines2b = refusedSince(j0), law2b = journalLaw(lines2b, 3); printRefused('② …', lines2b);
+    const lines2b = refusedSince(j0), law2b = journalLaw(lines2b, 3), j2e = journal.length; printRefused('② …', lines2b);
+    // ② per page, bounded by the followed resumes ON EACH DESKTOP (the read's must: Desk B holds TWO followed resumes — b-1, then b-2 400 ms
+    // later — so the desktop tab, or the phone it ties with, may be refused once for each; every other desktop at most once)
+    const CAP2 = { 'desk-b': 2 };
+    const per2 = {}; for (const [k, X] of [['P1', P1], ['PH', PH]]) { const t = X ? await X.ev('!!(app.ws.ws && app.ws.ws.__vsTapped)').catch(() => false) : false; for (const d of META.map((m) => m.id)) per2[`${k} ${d}`] = t ? (await factsOf(X, d, tR)).refused : ['NOT TAPPED']; }
+    const over2 = Object.entries(per2).filter(([kd, r]) => r[0] === 'NOT TAPPED' || r.length > (CAP2[kd.split(' ')[1]] || 1));
+    ok(!over2.length && phTapped !== false, '② per page: no open page refused more often for a desktop than that desktop\'s followed resumes (Desk B twice: b-1 and b-2; every other desktop once) — the desktop tab and the phone, each tapped from its socket', { over2, per2, phTapped });
     ok(s2.ok && !p1warn.length && J(midRows['desk-b']) === J(BEFORE['desk-b']) && law2b.ok, '② …the open tab warns of nothing, the hub\'s B rows keep their ids and boxes, the journal holds no refusal but the followers\' tie', { settled: s2, p1warn, b: midRows['desk-b'], why: law2b.why, lines: lines2b });
 
     // ③ a DESKTOP page connects and visits every desktop: windows where they were; D laid out and saved with positions
     const s3 = await settle(P1), j3 = journal.length;   // ③'s window opens once ②'s followers have gone quiet
+    const gap23 = journal.slice(j2e, j3).split('\n').filter((l) => /REFUSED/.test(l)); printRefused('②→③ (the gap)', gap23);
+    ok(!gap23.length, '② → ③: nothing refused between ②\'s judge and ③\'s window (the round\'s should: every refusing line falls in a judged window)', gap23);
     P2 = await newPage({});
     ok(!!P2 && await P2.boot(), '③ a desktop page connected to the new server');
     const pv2 = await P2.ev(PREVIEW('desk-d'));
@@ -298,7 +311,7 @@ else await (async () => {
     const final = await rows();
     const dPlaced = final['desk-d'].length === 3 && final['desk-d'].every((r) => r[1]);
     ok(PLACED.every((id) => { const [d] = AT[id]; return J(final[d].find((r) => r[0] === id)) === J(BEFORE[d].find((r) => r[0] === id)); }) && dPlaced, '③ …the hub\'s records: A, B, C exactly as before the restart; D\'s rows saved WITH positions now (visiting lays them out)', final);
-    const lines3 = refusedSince(j3), law3 = journalLaw(lines3, 0), warns3 = await warnsOf(); printRefused('③', lines3);
+    const lines3 = refusedSince(j3), law3 = journalLaw(lines3, 0), warns3 = await warnsOf(), j3e = journal.length; printRefused('③', lines3);
     ok(s3.ok && law3.ok && !warns3.P1.length && !warns3.PH.length && !warns3.P2.length, '③ no refusal on any page (nothing is resumed here: no follower, no tie owed), no warn toast on ANY open page (the desktop tab, the phone, this page) — after ②\'s followers had gone quiet', { settled: s3, why: law3.why, lines: lines3, warns3 });
     const pv3 = await P2.ev(PREVIEW('desk-d'));
     ok(pv3 && pv3.placeholders === 0 && pv3.windows === 3 && !pv3.badge, '③ …and D previews its three windows where they now stand (no placeholder)', pv3);
@@ -310,6 +323,8 @@ else await (async () => {
     const winsOf = (cid) => P2.ev(`[...app.wm.windows.values()].filter((w) => (w._openSpec && w._openSpec.backendSessionId === ${J(cid)}) || (w._conversation && w._conversation.backendSessionId === ${J(cid)})).map((w) => w.id)`);
     const tapped = []; for (const X of [P1, PH, P2]) tapped.push(await X.ev(TAP));
     const s4 = await settle(P2), j4 = journal.length, t4 = Date.now();
+    const gap34 = journal.slice(j3e, j4).split('\n').filter((l) => /REFUSED/.test(l)); printRefused('③→④ (the gap)', gap34);
+    ok(!gap34.length, '③ → ④: nothing refused between ③\'s judge and ④\'s window', gap34);
     ok(s4.ok && tapped.every(Boolean), '④ before the stops: ③\'s writes have gone quiet (no record written, no refusal, for 2.5 s), and every open page\'s sends and received refusals are tapped', { settled: s4, tapped });
     await P2.click(`document.querySelector('.desktop-preview-wrapper .desktop-preview[data-desktop-id="desk-c"]')`); await sleep(1800);
     const killConv = (cid) => P2.ev(`(() => { const e = [...app.sessions.entries()].find(([id, v]) => v && v.sessionId && !v._readOnly && app.wm.windows.get(id)?._openSpec?.backendSessionId === ${J(cid)}); if (e) app.killSession(e[1].sessionId, ${J(cid)}); return !!e; })()`); // the conversation's live window, whatever its id
@@ -368,9 +383,20 @@ else await (async () => {
     ok(!cOn.ok && cOn.why.some((w) => /after the settle/.test(w)), '④ CONTROL: a copy in which the phone sends on and on (no settle) is RED, by name', cOn.why);
     ok(!cGate.ok && cGate.why.some((w) => /the layer gate refused/.test(w)), '④ CONTROL: a copy in which the layer gate refuses the phone\'s record is RED, by name', cGate.why);
     const lines4 = refusedSince(j4), law4 = journalLaw(lines4, 3), warns4 = await warnsOf(); printRefused('④', lines4);
+    // CONTROLS of the journal law (the round's should): each of the four OTHER kinds the hub writes, and a stale line that loses a window — red by name
+    const OTHER = ['[layout-sync] REFUSED a record of desktop desk-b: no such desktop (deleted meanwhile); the sender is told',
+      '[layout-sync] REFUSED a record of desktop "Desk B" (desk-b): it drops 1 window(s) with no close/move/kill (b-2) — 2 → 1; the server keeps its record',
+      '[layout-sync] REFUSED a record of desktop "Desk B" (desk-b): its rows disagree about a tab group (b-1, b-2: a member\'s own row names other members) — the server keeps its record',
+      '[layout-sync] REFUSED a phone record of desktop "Desk B" (desk-b): it changes zIndex (window b-2) — a phone writes the workspace only; the server keeps its record',
+      '[layout-sync] REFUSED a phone record of desktop "Desk B" (desk-b): written from an older base (2026-11-20T00:00:00.000Z < the record kept, 2026-11-20T00:00:01.000Z) — 2 → 1 windows; the sender adopts the record kept'];
+    const kindsRed = OTHER.map((l) => journalLaw([l], 9));
+    ok(kindsRed.every((r) => !r.ok && r.why.length === 1), '④ CONTROL: the journal law is RED, by name, for each of the four other kinds of refusal and for a stale line that loses a window', kindsRed.map((r) => r.why[0]));
+    const branches = [['refused twice', { ...TF, refused: ['stale', 'stale'] }, /exactly ONE stale refusal/], ['the row moved', { ...TF, rowKept: false }, /did not keep its id and box/], ['a toast shown', { ...TF, shown: ['global-toast global-toast-info: x'] }, /showed the person a toast/], ['no ack', { ...TF, acks: 0 }, /was not accepted/]];
+    const branchRed = branches.map(([n, f, re]) => [n, phoneTieLaw(f).why.some((w) => re.test(w))]);
+    ok(branchRed.every(([, r]) => r), '④ CONTROL: the phone follower\'s law is RED, by name, for a second refusal, a row that moved, a toast shown, and a frame never acked', branchRed);
     // …and per page (the read: a sum could hide one page refused twice): each open page refused at most ONCE a desktop in ④
-    const per4 = {}; for (const [k, X] of [['P1', P1], ['PH', PH], ['P2', P2]]) for (const d of ['desk-b', 'desk-c']) per4[`${k} ${d}`] = (await factsOf(X, d, t4)).refused;
-    const twice = Object.entries(per4).filter(([, r]) => r.length > 1);
+    const per4 = {}; for (const [k, X] of [['P1', P1], ['PH', PH], ['P2', P2]]) for (const d of ['desk-b', 'desk-c']) { const f = await factsOf(X, d, t4); per4[`${k} ${d}`] = f.tapped ? f.refused : ['NOT TAPPED']; }
+    const twice = Object.entries(per4).filter(([, r]) => r.length > 1 || r[0] === 'NOT TAPPED');
     ok(law4.ok && law4.stale >= 1 && !twice.length && !warns4.P1.length && !warns4.PH.length && !warns4.P2.length, '④ no refusal but the followers\' ties (the older-base kind, N → N windows, at most one a follower a followed resume: the desktop tab follows c-1 and b-2, the phone b-2 — it holds no c-1 — the made phone tie\'s one among them); no page refused twice for one desktop; no warn toast on ANY open page', { why: law4.why, twice, per4, lines: lines4, warns4 });
     await P2.shot('desktop-after-retry-and-double-press');
     // ⑤ B-46fc'S OWN GATE (lane bl-windows — the row: «a chrome leg that opens a window and reloads at 500 ms ⇒ the same window is
