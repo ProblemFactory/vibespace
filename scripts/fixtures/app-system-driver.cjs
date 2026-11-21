@@ -241,11 +241,16 @@ const resetId = () => su('install', '-m', '0644', '-o', 'root', '-g', 'root', '/
   const ib = S.installArgv({ helperSrc: '/tmp/h-mod', sudoersSrc: '/repo/deploy/sysroot/vibespace-sysroot.sudoers' });
   const h7 = run(ib[0], ib.slice(1));
   const h7ok = /^= refused digest-mismatch$/m.test(h7.stdout) && hsum() === live && live === S.HELPER_SHA256;
-  ib[4] = S.INSTALL_SCRIPT.replace('[ "$(sha256sum < "$T/h" | cut -d" " -f1)" = "$3" ] && [ "$(sha256sum < "$T/s0" | cut -d" " -f1)" = "$4" ] || { say refused digest-mismatch; exit 125; }', ':');
-  if (ib[4] !== S.INSTALL_SCRIPT) run(ib[0], ib.slice(1));
+  const noFirst = S.INSTALL_SCRIPT.replace('[ "$(sha256sum < "$T/h" | cut -d" " -f1)" = "$3" ] && [ "$(sha256sum < "$T/s0" | cut -d" " -f1)" = "$4" ] || { say refused digest-mismatch; exit 125; }', ':');
+  // B-bcb8 unit A: the helper's NEW copy is checked by its digest as well (the file that takes the name). With the first
+  // check alone removed, that second check refuses it by name and the live helper stays.
+  ib[4] = noFirst; const h8 = noFirst !== S.INSTALL_SCRIPT ? run(ib[0], ib.slice(1)) : null;
+  const secondHeld = !!h8 && /^= refused helper-not-installed$/m.test(h8.stdout) && hsum() === live;
+  ib[4] = noFirst.replace('[ "$(sha256sum < "$H.new" | cut -d" " -f1)" = "$3" ] && ', '');
+  if (ib[4] !== noFirst) run(ib[0], ib.slice(1));
   const swappedIn = hsum() !== live;
   const ir2 = S.installArgv({ helperSrc: '/repo/deploy/sysroot/vs-sysroot-enter', sudoersSrc: '/repo/deploy/sysroot/vibespace-sysroot.sudoers' }); run(ir2[0], ir2.slice(1));
-  out('hardening 8: a helper source whose bytes are not this release\'s is refused digest-mismatch before install (the live one = HELPER_SHA256); CONTROL: an install without the digest check puts it in place', h7ok && swappedIn && hsum() === live, { real: tail(h7), swappedIn });
+  out('hardening 8: a helper source whose bytes are not this release\'s is refused digest-mismatch before install (the live one = HELPER_SHA256); without that check, the new copy\'s own digest check refuses it (helper-not-installed, B-bcb8 unit A); CONTROL: an install without both checks puts it in place', h7ok && secondHeld && swappedIn && hsum() === live, { real: tail(h7), second: h8 && tail(h8), swappedIn });
 
   // ── controls: each security rule removed from a patched copy of the helper → the bad thing happens ──
   const cNs = ctl('ns', '[ "$(readlink /proc/self/ns/mnt)" != "$(readlink /proc/1/ns/mnt)" ] || die "stage 2 outside a private mount namespace"', ':');
