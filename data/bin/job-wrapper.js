@@ -24,6 +24,10 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+// B-15ac (lane lg-store-writes): the ONE close of a written file — src/fd-close.js, required at the start as kept-copies.js is (the
+// build this wrapper shipped with); a tree without it: the SAME words inline (test-fd-close-census ⑤ pins the two spellings equal)
+let FC = null; try { FC = require(path.join(__dirname, '..', '..', 'src', 'fd-close.js')); } catch { FC = null; }
+const closeWritten = FC ? FC.closeWritten : (fd, where, say) => { if (fd === null || fd === undefined) return null; try { fs.closeSync(fd); } catch (e) { try { say(`${where}: the file could not be closed (${(e && e.code) || 'error'}) — what was written may not be on disk`); } catch { } } return null; };
 const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
 
@@ -192,10 +196,16 @@ let held = null; // a gated rung's words before its proof (THE MEMORY BOUND): th
 function writeLog(buf) {
   if (held) { held.push(buf); return; }
   try {
-    if (logSize + buf.length > logCap) { // rotate: keep ONE previous generation; never unlink the live fd's file
-      try { fs.closeSync(logFd); fs.renameSync(logPath, logPath + '.1'); } catch { }
-      logFd = fs.openSync(logPath, 'a'); logSize = 0;
+    let said = null;
+    if (logFd !== null && logSize + buf.length > logCap) { // rotate: keep ONE previous generation; never unlink the live fd's file
+      // B-15ac: the number is FORGOTTEN in the statement that closes it — a reopen that throws leaves NO number, never a closed one
+      // the next write would go through (another file's by then); a failed close is SAID in the job's log (its new generation)
+      logFd = closeWritten(logFd, "the job's log (its rotation)", (l) => { said = l; });
+      try { fs.renameSync(logPath, logPath + '.1'); } catch { }
+      logSize = 0;
     }
+    if (logFd === null) { logFd = fs.openSync(logPath, 'a'); logSize = fs.fstatSync(logFd).size; }
+    if (said) { const b = Buffer.from(`[job-wrapper] ${said}\n`); fs.writeSync(logFd, b); logSize += b.length; }
     fs.writeSync(logFd, buf); logSize += buf.length;
   } catch { }
 }

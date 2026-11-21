@@ -16,6 +16,7 @@ const fs = require('fs');
 const REMOVAL_RETRY_MS = 60 * 1000;   // 主开发 04:33Z (2b): a removal's own files wait for its record to land — asked again this far apart
 const os = require('os');
 const path = require('path');
+const FC = require('./fd-close.js');   // B-15ac: the ONE close of a written file (a failed close said in the journal)
 const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
 const READ_WAITS_MAX = 256;   // 主开发 01:20Z (4): the waits for a held hosts.json's read are BOUNDED (keyed ones replace: one a key)
 const READ_MS = 60_000;   // the B-f276 remainder's cure: a read again that does not answer in this long is let go (the next try reads afresh)
@@ -1845,7 +1846,7 @@ class HostManager {
    *  to the hub (lane cli-call-timeouts, copied at boot from src/cli-call.js); `vibespace` the PERSON'S CLI (lane human-cli — on a
    *  machine with no hub it answers «no VibeSpace hub has run here» with the door) + `vibespace-local-index.js` its PURE
    *  half (copied at boot from src/local-index.js). test-architecture §52 fails a static tool left out. */
-  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-remote', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-design', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'vibespace-browser-passkey.js', 'vibespace-browser-read-back.js', 'agent-cli-text.js', 'cli-call.js', 'vibespace', 'vibespace-local-index.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-feedback', 'vibespace-vault', 'vibespace-api', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
+  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-remote', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-design', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'vibespace-browser-passkey.js', 'vibespace-browser-read-back.js', 'agent-cli-text.js', 'cli-call.js', 'fd-close.js', 'vibespace', 'vibespace-local-index.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-feedback', 'vibespace-vault', 'vibespace-api', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
   /** Plugin agent-tool shims (Plugin Ph4, 2.369.30): the loader installs a
    *  provider returning the `vibespace-tool-<plugin>-<name>` files it
    *  generates right now, so they ship to ssh hosts and dial devices with the
@@ -2478,7 +2479,7 @@ class HostManager {
         off += n;
       }
       return true;
-    } finally { if (fd !== undefined) { try { fs.closeSync(fd); } catch { } } }
+    } finally { fd = FC.closeWritten(fd, `the hosts delta (${path.basename(cachePath)})`, (l) => console.warn(`[hosts] ${l}`)); }   // B-15ac: said, never swallowed
   }
   /** TERMINAL vs DEGRADABLE (B-7638 round 5). The data-plane rung's catch means
    *  "this transport did not work — try the other one", and that is right for

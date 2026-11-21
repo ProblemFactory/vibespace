@@ -77,7 +77,7 @@ console.log('— ③ THE ROAD CENSUS: every hub path a shipped tool names crosse
 // from src/, the status tool agent-tool-generators.js writes) — a built bundle in data/bin (the device agent's own, which
 // talks to the hub over its dial link, never a tunnel) is no tool. A path counts after a quote, a backtick, a `}` or a `$VAR`.
 const { HostManager } = require('../src/hosts.js');
-const FROM = { 'vibespace-status': 'src/server/agent-tool-generators.js', 'vibespace-browser-verbs.js': 'src/browser-verbs.js', 'vibespace-browser-stuck.js': 'src/browser-stuck.js', 'vibespace-browser-passkey.js': 'src/browser-passkey.js', 'vibespace-browser-read-back.js': 'src/browser-read-back.js', 'agent-cli-text.js': 'src/agent-cli-text.js', 'cli-call.js': 'src/cli-call.js', 'vibespace-local-index.js': 'src/local-index.js' };
+const FROM = { 'vibespace-status': 'src/server/agent-tool-generators.js', 'vibespace-browser-verbs.js': 'src/browser-verbs.js', 'vibespace-browser-stuck.js': 'src/browser-stuck.js', 'vibespace-browser-passkey.js': 'src/browser-passkey.js', 'vibespace-browser-read-back.js': 'src/browser-read-back.js', 'agent-cli-text.js': 'src/agent-cli-text.js', 'cli-call.js': 'src/cli-call.js', 'fd-close.js': 'src/fd-close.js', 'vibespace-local-index.js': 'src/local-index.js' };
 const SHIPPED = [...new Set(HostManager.AGENT_TOOLS.map((t) => FROM[t] || `data/bin/${t}`).concat(['src/server/agent-tool-generators.js']))];
 // a road that is not a tunnel road, said by name: the `vibespace` CLI asks the hub on its OWN box (the local index's port)
 const NOT_TUNNEL = new Map([['/api/home', ['data/bin/vibespace', 'the person\'s CLI asks the hub on its own box (the local index\'s port), never through a tunnel']]]);

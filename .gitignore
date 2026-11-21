@@ -34,6 +34,8 @@ data/bin/vibespace-browser-read-back.js
 data/bin/agent-cli-text.js
 # lane cli-call-timeouts: THE ONE CALL every agent CLI makes to the hub, copied at startup from src/cli-call.js
 data/bin/cli-call.js
+# lane lg-store-writes (B-15ac): the ONE close of a written file, copied at startup from src/fd-close.js
+data/bin/fd-close.js
 # lane human-cli: the person's CLI's PURE half (index place, judge, table, dtach packet, chat frames), copied at startup from src/local-index.js
 data/bin/vibespace-local-index.js
 # downloaded by installRclone()/boot self-heal — a 60MB arch-specific binary must

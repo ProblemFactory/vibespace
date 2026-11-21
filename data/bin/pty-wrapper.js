@@ -5,6 +5,10 @@
 
 const fs = require('fs');
 const path = require('path');
+// B-15ac (lane lg-store-writes): the ONE close of a written file — src/fd-close.js, required at the start as kept-copies.js is (the
+// build this wrapper shipped with); a tree without it: the SAME words inline (test-fd-close-census ⑤ pins the two spellings equal)
+let FC = null; try { FC = require(path.join(__dirname, '..', '..', 'src', 'fd-close.js')); } catch { FC = null; }
+const closeWritten = FC ? FC.closeWritten : (fd, where, say) => { if (fd === null || fd === undefined) return null; try { fs.closeSync(fd); } catch (e) { try { say(`${where}: the file could not be closed (${(e && e.code) || 'error'}) — what was written may not be on disk`); } catch { } } return null; };
 const os = require('os');
 
 // Debug log to file (since stdout goes to dtach PTY, errors are invisible)
@@ -203,7 +207,7 @@ function overwriteIfPresent(file, data, { pad = false } = {}) {
       if (b.length < old) b = Buffer.concat([b, Buffer.alloc(old - b.length, 0x20)]);
     } else fs.ftruncateSync(fd, 0);
     fs.writeSync(fd, b, 0, b.length, 0);
-  } finally { try { fs.closeSync(fd); } catch {} }
+  } finally { fd = closeWritten(fd, `${path.basename(file)} (rewritten in place)`, log); }   // B-15ac: a failed close SAID in this wrapper's log, the number forgotten
   return true;
 }
 const WRAPPER_SIGNO = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };

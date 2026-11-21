@@ -424,6 +424,16 @@ function createCliCallCopy() {
   } catch (e) { console.warn('[tools] the agent CLIs\' call helper not copied beside them: ' + e.message); }
 }
 createCliCallCopy();
+// lane lg-store-writes (B-15ac, 主开发 r755): the ONE close of a written file (src/fd-close.js) rides beside the CLIs the same way —
+// `fd-close.js`, copied at every boot, gitignored, in AGENT_TOOLS; the channels CLI loads it (else says the same words inline)
+function createFdCloseCopy() {   // (off the loop, as the read-back's copy: no synchronous write at the boot)
+  const dst = path.join(AGENT_BIN_DIR, 'fd-close.js'), tmp = dst + '.tmp';
+  fs.promises.mkdir(AGENT_BIN_DIR, { recursive: true })
+    .then(() => fs.promises.copyFile(path.join(rootDir, 'src', 'fd-close.js'), tmp))
+    .then(() => fs.promises.rename(tmp, dst))
+    .catch((e) => console.warn('[tools] the agent CLIs\' close helper not copied beside them: ' + (e && e.message)));
+}
+createFdCloseCopy();
 // lane human-cli: THE PERSON'S CLI (data/bin/vibespace — a human at a terminal, no hub needed) requires its PURE half
 // (src/local-index.js: the index place, the judge, the table, the dtach packet, the chat frames) by the literal name
 // `vibespace-local-index.js` beside it — copied at every boot, gitignored, in AGENT_TOOLS (a paired device or an ssh host

@@ -158,6 +158,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const FC = require('./fd-close.js');   // B-15ac: the ONE close of a written file (a failed close said in the journal)
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
 const { sideKey, validateSide, isSystemRecord, asSystemRecord, isDraftRecord, asDraftRecord } = require('./channel-record.js');   // + the system pair: lane lark-system-records; + the draft pair: lane gmail-draft-not-a-message
@@ -2485,7 +2486,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // channel-store-off-loop (commit 1): every file this store handed to the writer, through it now (a suite that reads
     // the file after close reads its last bytes)
     for (const f of moved) { if (f === stampsFile) continue; try { writeNow(f); } catch (e) { warn(`[channels] ${path.basename(f)} not written at close: ${(e && e.message) || e}`); } }
-    if (journalFd !== null) { try { fs.closeSync(journalFd); } catch { } journalFd = null; }
+    journalFd = FC.closeWritten(journalFd, 'the channels journal', (l) => warn(`[channels] ${l}`));   // B-15ac: said, never swallowed; the number forgotten
     paceFlush();
     dispatchFlush();
     lruFlush();

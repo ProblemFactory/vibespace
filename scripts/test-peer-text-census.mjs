@@ -464,7 +464,7 @@ const DECLARED_ALIASES = {
 // literal name (in a checkout ../../src/agent-cli-text.js, on a host its boot-time copy ./agent-cli-text.js) — is WALKED like
 // them (r3 F5: a module a CLI requires is a file this census reads); it prints nothing, its sentences are returned and
 // each CLI's print of one is a row below.
-const PRINT_CLIS = ['data/bin/vibespace-msg', 'data/bin/vibespace-channels', 'data/bin/vibespace-job', 'data/bin/vibespace-task', 'src/agent-cli-text.js', 'src/cli-call.js'];   // lane cli-call-timeouts: THE ONE CALL every agent CLI requires (it prints the expiry line) is walked beside them
+const PRINT_CLIS = ['data/bin/vibespace-msg', 'data/bin/vibespace-channels', 'data/bin/vibespace-job', 'data/bin/vibespace-task', 'src/agent-cli-text.js', 'src/cli-call.js', 'src/fd-close.js'];   // lane lg-store-writes (B-15ac): THE ONE CLOSE of a written file the channels CLI requires (it prints nothing; its sentence is handed to the caller)   // lane cli-call-timeouts: THE ONE CALL every agent CLI requires (it prints the expiry line) is walked beside them
 // verify r4 F2 (lane peer-census): THE ROSTER IS DERIVED, NEVER A HAND LIST. PRINT_CLIS was three names, so the fourth agent
 // CLI that prints another session's words (vibespace-task — F1) was invisible to the print census, and a NEW file under
 // data/bin printing a peer field would have been too (planted: green, no list edit needed). Every tracked data/bin file
@@ -931,6 +931,8 @@ const PRINTS = {
     'x.error': 'judged:msgName — the hand-over refusal sentence (our words around the caller\'s own path and a conversation id)',
   }),
   ...rows('data/bin/vibespace-channels', {
+    // lane lg-store-writes (B-15ac): the close helper's sentence (src/fd-close.js closeFailedWords — our words around the site's name and an errno)
+    'closeSaid': `${V}:the close helper's one sentence (src/fd-close.js: our words around the site's name and an errno)`,
     // lane pod-oauth-callback: `connect <kind>` and `list`'s not-connected line — a vendor TYPE's label / kind and counts, our words
     'r.connectable': `${V}:the types no account of which holds a sign-in ({kind, label, accounts}) — the engine's connectOffers`,
     'notYet': `${V}:those types (r.connectable, each with a kind)`,

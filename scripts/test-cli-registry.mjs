@@ -69,6 +69,7 @@ const EXCLUDED = Object.freeze({
   'vibespace-browser-read-back.js': 'a module vibespace-browser loads (the read-back of a fill), copied at boot',
   'agent-cli-text.js': 'the ONE-text rule module the free-text CLIs require (lane cli-one-text-arg)',
   'cli-call.js': 'THE ONE CALL every agent CLI makes to its hub, copied at boot (lane cli-call-timeouts)',
+  'fd-close.js': 'the ONE close of a written file the channels CLI loads (a failed close said), copied at boot (lane lg-store-writes, B-15ac)',
   'vibespace': 'THE PERSON\'S CLI (lane human-cli): ls / status / attach / chat for a human at the machine with no hub — it refuses inside an agent session, so no agent is taught it',
   'vibespace-local-index.js': 'a module the person\'s CLI loads (its PURE half, src/local-index.js), copied at boot (lane human-cli)',
   'agent-browser': 'the driver behind vibespace-browser — agents are never taught its name (test-architecture §52)',

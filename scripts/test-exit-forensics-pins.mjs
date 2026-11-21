@@ -63,6 +63,12 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
   const keptOnly = (t) => !/require\((?!['"](fs|path|crypto)['"])[^)]*\)/.test(t.replace(/^\s*(\/\/|\*).*$/gm, '')) && !/\b(net|http|https|dgram|tls)\b['"]\)|\bfetch\(|\bimport\b/.test(t.replace(/^\s*(\/\/|\*).*$/gm, ''));
   ok(keptOnly(read('src/kept-copies.js')) && !keptOnly("const x = require('./other.js');\n") && !keptOnly("const n = require('net');\n") && !keptOnly("fetch('http://x');\n"),
     'chat-wrapper.js\'s kept-copies module (src/kept-copies.js) requires node builtins only (fs, path, crypto) and reaches no network — CONTROL: a relative require, a net require or a fetch is red');
+  // lane lg-store-writes (B-15ac): the ONE close of a written file — src/fd-close.js, SHARED with the hub; admitted on kept-copies'
+  // terms: node builtins only (fs), no network, an EAGER require at the wrapper's start (its fallback says the same words — ⑤ of
+  // test-fd-close-census pins the two spellings equal)
+  const FC_REQ = "require(path.join(__dirname, '..', '..', 'src', 'fd-close.js'))";
+  const fsOnly = (t) => !/require\((?!['"]fs['"])[^)]*\)/.test(t.replace(/^\s*(\/\/|\*).*$/gm, '')) && !/\b(net|http|https|dgram|tls)\b['"]\)|\bfetch\(|\bimport\b/.test(t.replace(/^\s*(\/\/|\*).*$/gm, ''));
+  ok(fsOnly(read('src/fd-close.js')) && !fsOnly("const x = require('./other.js');\n") && !fsOnly("const n = require('net');\n"), 'the wrappers\' close module (src/fd-close.js) requires node builtins only (fs) and reaches no network — CONTROL: a relative or a net require is red');
   const transportPure = (t) => !/\brequire\(|\bimport\b/.test(t.replace(/^\s*\/\/.*$/gm, ''));
   const shipList = (t) => ((t.match(/static AGENT_TOOLS = \[([^\]]*)\]/) || [])[1] || '');
   ok(transportPure(read('src/harnesses/claude-transport.js')) && /'vibespace-status'/.test(shipList(read('src/hosts.js'))) && !/wrapper/.test(shipList(read('src/hosts.js'))),
@@ -76,7 +82,7 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
   ok(transportPure(read('src/conversation-facts.js')) && /^try \{ CF = require\(path\.join\(__dirname, '\.\.', '\.\.', 'src', 'conversation-facts\.js'\)\);/m.test(read('data/bin/chat-wrapper.js')),
     'chat-wrapper.js\'s facts module (src/conversation-facts.js) is PURE (no require / import) and is required once, at the wrapper\'s start (top level)');
   for (const [f, src] of KINDS.map((k) => [path.basename(REL[k]), SRC[k]])) {
-    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '').replace(PI_REQ, '').replace(KC_REQ, '').replace(CF_REQ, '')),
+    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '').replace(PI_REQ, '').replace(KC_REQ, '').replace(CF_REQ, '').replace(FC_REQ, '')),
       `${f}: node builtins only (a STATIC file; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey; dc-harness-store 2.369.213: the claude transport flags' PURE module, below; pid-identity-close 2.369.242: the child's birth, src/proc-identity.js, above; claude-steer-inject 2.369.362: the kept copies, src/kept-copies.js, above; the manager stack: the conversation's facts, src/conversation-facts.js, PURE, above)`);
     const body = src.slice(src.indexOf('function onWrapperSignal'), src.indexOf('for (const sig of Object.keys(WRAPPER_SIGNO))'));
     ok(body.length > 0 && !/await|setTimeout|setImmediate|\.write\(|\.end\(|Promise/.test(body.replace(/fs\.writeFileSync|clearTimeout/g, '')),   // stale-pins: kept — an absence check on ITS own body (fs.writeFileSync left only in src/app-secrets-seal.js by B-694d)

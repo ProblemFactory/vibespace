@@ -44,6 +44,13 @@ const CC = (() => {
   try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
   try { return require('./cli-call.js'); } catch { return null; }
 })();
+// B-15ac (主开发 r755): the ONE close of a written file on the cli-call road — the checkout's src/fd-close.js, else its boot-time copy
+// fd-close.js beside this file; neither (an older host): the SAME words inline (test-fd-close-census ⑤ pins the spellings equal)
+const FCL = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/fd-close.js') : require('./fd-close.js'); } catch { }
+  try { return require('./fd-close.js'); } catch { return null; }
+})();
+const closeWrittenHandle = FCL ? FCL.closeWrittenHandle : async (fh, where, say) => { if (!fh) return null; try { await fh.close(); } catch (e) { try { say(`${where}: the file could not be closed (${(e && e.code) || 'error'}) — what was written may not be on disk`); } catch { } } return null; };
 if (!CC) { console.error('vibespace-channels: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
 CC.cliStart({ tool: 'vibespace-channels', flags: ['--call-timeout'] });
 'use strict';
@@ -582,7 +589,9 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
       // lane channels-attachment-outside-archive (B-5f20): what it did — the message is not in the saved copy
       if (info.source === 'vendor') console.log('(the message is not in the saved copy — read --around showed it; the file was fetched from the vendor by its ids, the message is still not saved)');
     } catch (e) {
-      if (fh) { try { await fh.close(); } catch { } }
+      let closeSaid = null;   // B-15ac: a failed close of the attachment being saved is SAID (the helper's one sentence), never swallowed
+      if (fh) fh = await closeWrittenHandle(fh, 'the attachment being saved', (w) => { closeSaid = w; });
+      if (closeSaid) console.error(`vibespace-channels: ${closeSaid}`);
       try { fs.unlinkSync(part); } catch { }
       console.error(String((e && e.message) || e)); process.exit(1);
     }

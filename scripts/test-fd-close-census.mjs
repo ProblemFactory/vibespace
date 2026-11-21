@@ -20,7 +20,7 @@
 //   above-n       a close of a for loop's own counter: «every descriptor above N» (numbers it never opened)
 //   closer-keeps  a close()/end()/dispose() of an outer function's descriptor that keeps the number (a second call closes it
 //                 again — the placed fault's own shape)
-//   empty-catch   a close under an empty catch: TODAY'S 108 (109 with the held module's) are held as a NAMED ratchet by file (EMPTY_CATCH_DEBT — r621's list, by file,
+//   empty-catch   a close under an empty catch: TODAY'S 101 (102 with the held module's) are held as a NAMED ratchet by file (EMPTY_CATCH_DEBT — r621's list, by file,
 //                 line and function, sent to the coordinator); a new one is red by
 //                 its file, line and function; a file's count that falls is said (lower the row)
 // HELD: nothing since lane lg-leak-census's unit A cured src/usage-ledger-dedup.js and removed its row (r690): that file is judged here
@@ -38,10 +38,13 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { checker } from './lib/check.mjs';
 import { gitEnvFrom } from './git-env.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
+import { anchored, scratchDir } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { ok, report } = checker();
+const J = (x) => JSON.stringify(x);
 
 const acorn = require(path.join(REPO, 'node_modules/acorn'));
 const FSLIKE = /^(fs|fsp|fsP|fsPromises|fsx|nodeFs|_fs)$/;
@@ -236,11 +239,8 @@ const HELD = Object.freeze({});   // EMPTY since lane lg-leak-census's unit A (r
 // TODAY'S closes under an empty catch, by file (r621's list) — the sweep that says a failed close is its own unit; a NEW one is red
 const EMPTY_CATCH_DEBT = Object.freeze({
   "data/bin/agy-wrapper.js": 1,
-  "data/bin/chat-wrapper.js": 1,
-  "data/bin/codex-chat-wrapper.js": 1,
-  "data/bin/job-wrapper.js": 2,
-  "data/bin/pty-wrapper.js": 1,
-  "data/bin/vibespace-channels": 2,
+  "data/bin/job-wrapper.js": 1,
+  "data/bin/vibespace-channels": 1,
   "data/bin/vibespace-claude-subscription-login.mjs": 1,
   "data/bin/vibespace-remote-keeper": 1,
   "data/bin/vibespace-usage-scan": 2,
@@ -253,7 +253,7 @@ const EMPTY_CATCH_DEBT = Object.freeze({
   "src/app-secrets-seal.js": 1,
   "src/app-serve.js": 1,
   "src/app-system-serve.js": 1,
-  "src/channel-store.js": 6,
+  "src/channel-store.js": 5,
   "src/claude-oat-probe.js": 1,
   "src/cli-identity.js": 1,
   "src/codex-fork-ledger-purge.js": 1,
@@ -262,7 +262,7 @@ const EMPTY_CATCH_DEBT = Object.freeze({
   "src/device-audit.js": 1,
   "src/exit-proxy.js": 2,
   "src/harnesses/claude-home.js": 1,
-  "src/hosts.js": 3,
+  "src/hosts.js": 2,
   "src/jobs.js": 2,
   "src/machine-probes.js": 1,
   "src/managed-claude-settings.js": 1,
@@ -395,4 +395,68 @@ for (const [what, src] of Object.entries(greens)) { const v = P(src); ok(v.r.sta
   if (HELD['src/usage-ledger-dedup.js']) ok(fault.length === 1 && fault[0].fn === 'close', `④ the placed fault (src/usage-ledger-dedup.js, lane lg-leak-census's to cure) is FOUND by the census's own rule: ${fault.map(name).join(' · ')}`, fault.map(name));
   else ok(fault.length === 0, '④ src/usage-ledger-dedup.js is judged like every other file (its hold ended): no closer keeps its number there', fault.map(name));
 }
+// ── ⑤ THE ONE CLOSE OF A WRITTEN FILE (row B-15ac — 主开发 r635 / r755): a close of a file that was WRITTEN with no fsync before
+// it is where a deferred write error arrives (a network or FUSE data folder) — said once (its code, where), closed once, the number
+// forgotten; one helper (src/fd-close.js) and ONE spelling: each fallback (the wrappers', the channels CLI's) says the helper's words,
+// built here from its own file's text. A PLACED failure (fs.closeSync answering EIO), never a real mount. RED (in a copy): the hosts
+// delta's old swallow — nothing said.
+console.log('⑤ a close of a written file says a failed close once (its code, where), closes once, forgets the number — one helper, one spelling');
+{
+  const FCm = require(path.join(REPO, 'src/fd-close.js'));
+  const eio = () => Object.assign(new Error('EIO: a stand-in refused close'), { code: 'EIO' });
+  const placed = (fn, refuse = () => true) => { const cs = fs.closeSync; let n = 0; fs.closeSync = function (fd, ...a) { n++; if (refuse(fd)) throw eio(); return cs.call(this, fd, ...a); }; try { return { r: fn(), n }; } finally { fs.closeSync = cs; } };
+  const WORDS = FCm.closeFailedWords('a stand-in store', 'EIO');
+  const said = [];
+  const one = placed(() => FCm.closeWritten(424242, 'a stand-in store', (l) => said.push(l)));
+  const none = placed(() => FCm.closeWritten(null, 'none', (l) => said.push('NOT ' + l)));
+  let threw = null; try { placed(() => FCm.closeWritten(424242, 'x', () => { throw new Error('a sink that throws'); })); } catch (e) { threw = e.message; }
+  ok(one.r === null && one.n === 1 && J(said) === J([WORDS]) && WORDS === 'a stand-in store: the file could not be closed (EIO) — what was written may not be on disk' && none.r === null && none.n === 0 && threw === null,
+    '⑤ closeWritten: a failed close is SAID once (the site\'s name, the code — no path), the descriptor closed ONCE, the number forgotten (→ null); null is closed already; a sink that throws never makes it throw', { said, one: one.n, none: none.n, threw });
+  const hs = []; const hr = await FCm.closeWrittenHandle({ close: async () => { throw eio(); } }, 'a stand-in handle', (l) => hs.push(l));
+  ok(hr === null && J(hs) === J([FCm.closeFailedWords('a stand-in handle', 'EIO')]), '⑤ closeWrittenHandle: a FileHandle\'s failed close is said once in the same words (→ null)', hs);
+  // ONE SPELLING: every fallback, built from its file's own text, says EXACTLY the helper's words
+  const FALL = /const closeWritten = FC \? FC\.closeWritten : (\(fd, where, say\) => \{[^\n]*\});\n/, FALLH = /const closeWrittenHandle = FCL \? FCL\.closeWrittenHandle : (async \(fh, where, say\) => \{[^\n]*\});\n/;
+  const spell = {};
+  for (const f of ['data/bin/chat-wrapper.js', 'data/bin/codex-chat-wrapper.js', 'data/bin/pty-wrapper.js', 'data/bin/job-wrapper.js']) {
+    const m = FALL.exec(FILES[f] || ''); if (!m) { spell[f] = 'no fallback'; continue; }
+    const fb = new Function('fs', `return ${m[1]};`)(fs); const got = [];   // eslint-disable-line no-new-func
+    const r = placed(() => fb(424242, 'a stand-in store', (l) => got.push(l)));
+    spell[f] = r.r === null && J(got) === J([WORDS]) ? 'same' : J(got);
+  }
+  { const m = FALLH.exec(FILES['data/bin/vibespace-channels'] || ''); if (!m) spell['data/bin/vibespace-channels'] = 'no fallback';
+    else { const fb = new Function(`return ${m[1]};`)(); const got = []; const r = await fb({ close: async () => { throw eio(); } }, 'a stand-in handle', (l) => got.push(l));   // eslint-disable-line no-new-func
+      spell['data/bin/vibespace-channels'] = r === null && J(got) === J([FCm.closeFailedWords('a stand-in handle', 'EIO')]) ? 'same' : J(got); } }
+  ok(Object.values(spell).length === 5 && Object.values(spell).every((v) => v === 'same'), '⑤ ONE SPELLING: the four wrappers\' fallbacks and the channels CLI\'s, built from their own text, say EXACTLY the helper\'s words', spell);
+  { const drift = (FILES['data/bin/pty-wrapper.js'] || '').replace('— what was written may not be on disk`); } catch { } } return null; };', '— it may be lost`); } catch { } } return null; };');
+    const m = FALL.exec(drift); const fb = m ? new Function('fs', `return ${m[1]};`)(fs) : null; const got = []; if (fb) placed(() => fb(424242, 'a stand-in store', (l) => got.push(l)));   // eslint-disable-line no-new-func
+    ok(drift !== FILES['data/bin/pty-wrapper.js'] && !!fb && got.length === 1 && got[0] !== WORDS, 'CONTROL (a fallback whose words drifted, in its text): it no longer says the helper\'s words — red', got); }
+  // THE SITES go through it (pins): the hub's two, the three wrappers' overwrite, the job's log rotation (its number forgotten), the CLI
+  const P = (f, re) => re.test(FILES[f] || '');
+  const sites = {
+    hosts: P('src/hosts.js', /\} finally \{ fd = FC\.closeWritten\(fd, `the hosts delta \(\$\{path\.basename\(cachePath\)\}\)`, \(l\) => console\.warn\(`\[hosts\] \$\{l\}`\)\); \}/),
+    channels: P('src/channel-store.js', /journalFd = FC\.closeWritten\(journalFd, 'the channels journal', \(l\) => warn\(`\[channels\] \$\{l\}`\)\);/),
+    chat: P('data/bin/chat-wrapper.js', /\} finally \{ fd = closeWritten\(fd, `\$\{path\.basename\(file\)\} \(rewritten in place\)`, log\); \}/),
+    codex: P('data/bin/codex-chat-wrapper.js', /\} finally \{ fd = closeWritten\(fd, `\$\{path\.basename\(file\)\} \(rewritten in place\)`, log\); \}/),
+    pty: P('data/bin/pty-wrapper.js', /\} finally \{ fd = closeWritten\(fd, `\$\{path\.basename\(file\)\} \(rewritten in place\)`, log\); \}/),
+    job: P('data/bin/job-wrapper.js', /logFd = closeWritten\(logFd, "the job's log \(its rotation\)", \(l\) => \{ said = l; \}\);[\s\S]{0,200}if \(logFd === null\) \{ logFd = fs\.openSync\(logPath, 'a'\);/) && !/fs\.closeSync\(logFd\)/.test(FILES['data/bin/job-wrapper.js'] || ''),
+    cli: P('data/bin/vibespace-channels', /if \(fh\) fh = await closeWrittenHandle\(fh, 'the attachment being saved', \(w\) => \{ closeSaid = w; \}\);\n\s*if \(closeSaid\) console\.error\(`vibespace-channels: \$\{closeSaid\}`\);/),
+  };
+  ok(Object.values(sites).every(Boolean), '⑤ THE SITES go through the helper: the hosts delta, the channels journal, the chat / codex / pty wrappers\' overwrite in place (their own log), the job\'s log rotation (the number forgotten — a reopen that throws leaves none, never a closed one), the channels CLI\'s attachment (pins)', sites);
+  // a hub site DRIVEN: the hosts delta's close refused (placed) — said once in the journal by its name
+  const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
+  const deltaScene = (HM, tag) => {
+    const d = scratchDir('fd-close-delta-' + tag); const f = path.join(d, 'cache.jsonl'); fs.writeFileSync(f, 'old\n');
+    const warns = []; const cw = console.warn; console.warn = (...a) => warns.push(a.join(' '));
+    let r; try { r = placed(() => HM.prototype._appendDeltaAt.call({}, f, 4, Buffer.from('new\n'))); } finally { console.warn = cw; }
+    fs.rmSync(d, { recursive: true, force: true });
+    return { landed: r.r, closes: r.n, said: warns.filter((l) => /^\[hosts\] the hosts delta \(cache\.jsonl\): the file could not be closed \(EIO\)/.test(l)).length };
+  };
+  const ds = deltaScene(HostManager, 'real');
+  ok(ds.landed === true && ds.closes === 1 && ds.said === 1, '⑤ the hosts delta, driven: its close refused (placed) is SAID once in the hub\'s journal by its name — the delta\'s answer unchanged, closed once', ds);
+  const HSRC = FILES['src/hosts.js'];
+  const XH = mutantCopies('fdc-delta-swallow', REPO).load('src/hosts.js', anchored(HSRC, /\} finally \{ fd = FC\.closeWritten\(fd, `the hosts delta[^\n]*\n/, '} finally { if (fd !== undefined) { try { fs.closeSync(fd); } catch { } } }   // MUTANT: the old swallow\n', 'delta-swallow'), 'delta-swallow').HostManager;
+  const xd = deltaScene(XH, 'red');
+  ok(xd.landed === true && xd.said === 0, 'CONTROL (the hosts delta\'s old swallow, in a copy): its close refused and NOTHING said — red', xd);
+}
+
 report();
