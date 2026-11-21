@@ -113,6 +113,9 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
   const AN = (n) => { let o = ''; while (o.length < n) o += crypto.randomBytes(24).toString('base64').replace(/[^A-Za-z0-9]/g, ''); return o.slice(0, n); };
   const T = (t) => redactByValue(t, { typed: true }).text, S = (t) => redactByValue(t).text, R = REDACTED;
   let V = AN(13) + '9!'; while (!/[a-z]/.test(V) || !/[A-Z]/.test(V)) V = AN(13) + '9!';   // a 15-character value with every class
+  // a 20+ run of THREE classes, drawn until it is one — AN alone lacks a class about once in 560 draws at 36 characters (measured: 355 of 200 000), and the run row
+  // rightly keeps such a run: the leg went red by the draw (B-ba09's follow gate, box zone; green at UTC on the same tip)
+  const RUN3 = (n) => { let v = AN(n); while (!/[a-z]/.test(v) || !/[A-Z]/.test(v) || !/[0-9]/.test(v)) v = AN(n); return v; };
   const FAMV = ['gh', 'p_'].join('') + AN(36), JW = ['ey', 'J'].join('') + AN(20) + '.' + ['ey', 'J'].join('') + AN(20) + '.' + AN(24), EY = ['ey', 'J'].join('');
   const H40 = crypto.randomBytes(20).toString('hex'), H64 = crypto.randomBytes(32).toString('hex');
   const PW = ['Correct', 'Horse', 'Battery', 'Staple'], UPW = ['CORRECT', 'HORSE', 'BATTERY'].join('-');   // passphrase fixtures built at run time (secret-scan)
@@ -137,7 +140,7 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
   ok(!jBad.length, `(b) wordValue, the judge, by its clauses: 8+ counting punctuation; two classes (\`- _ .\` are joiners, no class); 8+ digits; 3+ joined parts with a capital or a digit${jBad.length ? ' — ' + jBad.map(([t]) => t).join(', ') : ''}`);
   // (a) the shape rows anywhere — a family (its head kept), a JWT (after `_` too), a 40 / 64-hex digest standing alone, a random run AS TYPED
   const SHAPE = [['deploy ' + H40, 'deploy ' + R], ['pull (' + H64 + ') now', 'pull (' + R + ') now'], ['ci_' + JW, 'ci_' + EY + R], ['x ' + FAMV + ' now', 'x ghp_' + R + ' now'], ['token=' + FAMV, 'token=ghp_' + R],
-    ['deploy ' + AN(36), 'deploy ' + R], ['deploy ' + AN(12) + '!x' + AN(8), 'deploy ' + R]];
+    ['deploy ' + RUN3(36), 'deploy ' + R], ['deploy ' + AN(12) + '!x' + AN(8), 'deploy ' + R]];
   const sBad = SHAPE.filter(([t, want]) => T(t) !== want).map(([t, want]) => `«${t.slice(0, 30)}…» → ${T(t)} (want ${want})`);
   ok(!sBad.length, `(a) a SHAPE is hidden wherever it sits — a family (its head kept, before a word row judges what is left), a JWT after \`_\`, a 40 / 64-hex digest standing alone, a 20+ run of three classes${sBad.length ? ' — ' + sBad.join(' | ') : ''}`);
   const NEVER = ['backup 2026-10-29T03:26:00Z', 'at T03:26:00.123456789Z', 'ship VibeSpace-2.369.362-Linux-x64', 'tag v1.2.3-RC.1+Build.20261029', 'restore 550E8400-e29b-41D4-a716-446655440000',
@@ -147,7 +150,7 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
   ok(!nBad.length && NEVER.slice(0, 9).every((t) => t.split(' ').some((w) => w.length >= 20 && [/[a-z]/, /[A-Z]/, /[0-9]/, /[!-,\/:-@\[-^`{-~]/].filter((re) => re.test(w)).length >= 3)),
     `(a) the six a person reads are NEVER hidden by the run row — a date, a time, a version, a uuid, a path, a URL, an email (each a 20+ run of three classes); short words, a sha joined by \`-\`, an md5, a run of two classes, a run under 20${nBad.length ? ' — ' + nBad.map((t) => `«${t}» → ${T(t)}`).join(' | ') : ''}`);
   // the run row NEVER on a stored slug (labelOf, a scheduled run's record): an older record of short words reads whole; a family still goes
-  const SLUGS = ['GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42', 'QA-run-3-for-PR-482-on-iOS-17-and-M2-Mac', 'deploy-EU-west2-canary', 'deploy-' + AN(36)];
+  const SLUGS = ['GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42', 'QA-run-3-for-PR-482-on-iOS-17-and-M2-Mac', 'deploy-EU-west2-canary', 'deploy-' + RUN3(36)];
   ok(SLUGS.every((t) => S(t) === t) && T('deploy-EU-west2-canary') === 'deploy-EU-west2-canary' && T(['Q7w8E9', 'r0T1y2', 'U3i4O5', 'p6A7s8'].join('-')) === R && S('deploy-' + FAMV) === 'deploy-ghp_' + R && randomRun('A1b2C3d4E5f6G7h8I9j0') && !randomRun('A1b2C3d4E5f6G7h8I9j') && !randomRun('550e8400-e29b-41d4-a716-446655440000'),
     '(a) the run row never runs on a STORED name — a slug reads whole (a name of short words, a kebab name, even a run), a family is still hidden; typed, a kebab name with a plain word between its joiners is a label (r253: the output belt\'s own run test), one with none is one 20+ run (hidden)', SLUGS.map(S));
   // idempotent and bounded (its linearity is counted, never clocked: test-exit-run's r9 name-rule legs, by the work meter)
@@ -190,7 +193,7 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
   const bRed = SLUGS.filter((t) => MB.redactByValue(t).text !== t);
   ok(mutB !== ssrc && bRed.length >= 3, `MUTANT — the run row on a stored slug (r8's labelOf): RED by name — ${bRed.map((t) => `«${t.slice(0, 30)}» → ${MB.redactByValue(t).text}`).join(', ')}`);
   ok(belt.maskForSink('password reset', { byValue: true }) === 'password reset' && belt.maskForSink('password reset', {}) === 'password ' + REDACTED && belt.maskForSink('ship ' + PAT, { byValue: true }).includes(REDACTED)
-    && belt.maskForSink('deploy ' + AN(36), { byValue: true, typed: true }) === 'deploy ' + REDACTED && belt.maskForSink('GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42', { byValue: true }) === 'GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42',
+    && belt.maskForSink('deploy ' + RUN3(36), { byValue: true, typed: true }) === 'deploy ' + REDACTED && belt.maskForSink('GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42', { byValue: true }) === 'GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42',
     'the output belt carries the name rule (`maskForSink(t, { byValue, typed })` — typed: the run row; a stored name: never; a sink text keeps the narrow table\'s hide-more rule)');
 }
 

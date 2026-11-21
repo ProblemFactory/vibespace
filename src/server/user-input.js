@@ -57,7 +57,7 @@ const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-796
 const path = require('path');
 const { wrapperCaps } = require('./wrapper-files.js');
 const { capsOf, sendDoors, doorCapsOf } = require('../backend-caps.js');
-const { requestInFlight, noteTurnFlight, noteRequestSent } = require('../turn-state.js'); // PURE: a request's send instant — the prompt cache's in-flight fact (lane cache-warmth-tiles r4)
+const { requestInFlight, noteTurnFlight, noteRequestSent, localCommandText } = require('../turn-state.js'); // PURE: a request's send instant — the prompt cache's in-flight fact (lane cache-warmth-tiles r4)
 const STDIN_CONFIRM_MS = 600;   // the broken-stdin detector's confirm stage (session-stdout's ATTACH_PROBE_CONFIRM_MS, same reason)
 /** B-02a3: the longest a Stop is taken to settle without the CLI's idle — the wrapper's own backstop for an owed turn (30 s,
  *  data/bin/chat-wrapper.js OWED_BACKSTOP_MS) and a margin; the CLI's idle ends it sooner (claude-stream-json). A Stop window
@@ -189,6 +189,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     }
     const wasInFlight = requestInFlight({ isStreaming: session._isStreaming, turnState: session._turnState }); // read BEFORE the flag write
     session._isStreaming = true;
+    session._lastSendLocal = localCommandText(text);   // B-ba09 r1282 (2): is this send itself a local command (no prompt behind it)?
     if (!wasInFlight) delete session._turnOpenSaidAt;   // lane queued-is-not-woke (the cut, D): a turn marked running with no opening record yet says «it is in a turn»
     // the in-flight cache fact (lane cache-warmth-tiles r5): a send STARTS a request only when none was in flight. Mid-turn
     // (a steer, a dispatch) nothing goes out now — the wrapper holds the frame, a steer rides the next tool result (that

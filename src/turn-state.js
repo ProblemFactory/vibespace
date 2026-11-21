@@ -253,19 +253,37 @@ function sendsRequest(msg) {
 }
 // the CLI's reply to a LOCAL command, by its envelope: its KIND only (a send it ends, a record's kind) — never its words (the /model echo's one reader is src/model-echo.js)
 const LOCAL_REPLY = /^<local-command-stdout>/;
+/** The CLI's ANSWER THAT IS NO TURN, by what was measured (2.1.321 on stdout, scripts/fixtures/claude-cli/2.1.321-typed-model.jsonl):
+ *  a main-thread `result` with num_turns 0 (a TYPED local command — /model, /cost … — is answered by an init, a `<synthetic>`
+ *  assistant record and that result: no request), or a main-thread `<local-command-stdout>` user record (the answer to a set_model
+ *  the hub writes; the recorded /compact reply). */
+function noTurnReply(msg) {
+  if (!msg || msg.parent_tool_use_id || msg.isSidechain) return false;
+  if (msg.type === 'result') return msg.num_turns === 0;
+  return msg.type === 'user' && LOCAL_REPLY.test(userTextOf(msg));
+}
+/** A SEND OF THE PERSON'S THAT IS ITSELF A LOCAL COMMAND («/cost», «/model x», «/compact») — src/server/user-input.js stamps it at
+ *  every send (`session._lastSendLocal`); the parse clears it at every state word and at every no-turn answer. */
+function localCommandText(text) { return typeof text === 'string' && /^\/[A-Za-z][\w:.-]*(?:\s|$)/.test(text.trim()); }
+/** r1282 (2): THE STOP AT A NO-TURN ANSWER, narrow. A pool move deferred while a send held the flag up (a compaction that says no
+ *  running word holds it one to two minutes) is decided AT the answer — only when the person's LAST send was itself a local command:
+ *  no prompt waits behind the answer. THE TWIN'S BLINK forces nothing: a locked conversation whose served model drifted is re-pinned
+ *  at the turn's result (set_model), and that answer can land after the person's next prompt — the flag blinks down until the
+ *  prompt's running word (harmless), and the last send was the prompt, so no stop; the same for «/cost» then a prompt. */
+function stopsAtLocalReply(session) { return !!session && session._lastSendLocal === true; }
 const userTextOf = (msg) => { const c = msg && msg.message && msg.message.content; return (typeof c === 'string' ? c : (Array.isArray(c) ? c.map((b) => (b && b.text) || '').join('') : '')).trim(); };
-/** B-ba09 (B) — A SEND THE CLI ANSWERED WITHOUT A TURN ENDS AT ITS REPLY. A send raises the flag at once (src/server/user-input.js:
- *  the request goes out now); under authority only the CLI's state word lowers it — but a LOCAL command (/cost, /model, /context…) is
- *  answered by the CLI itself: a `<local-command-stdout>` record (the recorded reply shape) and NO state word (it never left idle), so
- *  the flag stood up until an attach reconciled it, and a pool move deferred to the conversation's stop waited for that attach. Fires
- *  ONLY on what was observed: authority, the CLI's last word idle, the flag up, a main-thread reply record. A CLI that says `running`
- *  for such a command is not idle when the reply comes, so this never fires and the state word decides as before. */
+/** B-ba09 (B) — A SEND THE CLI ANSWERED WITHOUT A TURN ENDS AT ITS ANSWER. A send raises the flag at once (src/server/user-input.js:
+ *  the request goes out now); under authority only the CLI's state word lowers it — but a LOCAL command is answered by the CLI itself
+ *  (noTurnReply) with NO state word seen (it never left idle), so the flag stood up until an attach reconciled it, and a pool move
+ *  deferred to the conversation's stop waited for that attach. Fires ONLY on what was observed: authority, the CLI's last word idle,
+ *  the flag up, a no-turn answer — and the parse asks the late rule first (a backlog's answer, a dead bridge's heal draining after a
+ *  new send, ends nothing). A CLI that says `running` for such a command is not idle when the answer comes: this never fires. */
 function sendEndsAtLocalReply(session, msg) {
   if (!session || session._turnStateSeen !== true || session._turnState !== 'idle' || session._isStreaming !== true) return false;
-  if (!msg || msg.type !== 'user' || msg.parent_tool_use_id || msg.isSidechain) return false;
-  return LOCAL_REPLY.test(userTextOf(msg));
+  return noTurnReply(msg);
 }
-/** B-ba09 (C) — THE RECORDER: a record's KIND, never its content (no text, no name, no id — words of a closed shape only), so
+/** B-ba09 (C) — THE RECORDER: a record's KIND, never its content (no text, no name, no id). Its words are of a CLOSED SHAPE, not a
+ *  closed set: a new type or subtype of the CLI's own envelope prints by its name (lowercase and `_`, forty characters at most), so
  *  the attach reconcile's journal line can say which three records stood before a flag it had to correct: the next such hub
  *  journal is proof, not a digest. */
 const KIND_WORD = /^[a-z_]{1,40}$/;
@@ -274,7 +292,7 @@ function recordKind(msg) {
   if (!msg || typeof msg !== 'object') return 'other';
   const sub = msg.parent_tool_use_id || msg.isSidechain ? 'sub:' : '', type = kindWord(msg.type);
   if (type === 'system') return `${sub}system/${kindWord(msg.subtype)}${msg.subtype === 'session_state_changed' && isTurnState(msg.state) ? ':' + msg.state : ''}`;
-  if (type === 'result') return `${sub}result${msg.subtype ? '/' + kindWord(msg.subtype) : ''}`;
+  if (type === 'result') return `${sub}result${msg.subtype ? '/' + kindWord(msg.subtype) : ''}${msg.num_turns === 0 ? ':no_turn' : ''}`;
   if (type !== 'user') return sub + type;
   const c = msg.message && msg.message.content, text = userTextOf(msg);
   if (Array.isArray(c) && c.some((b) => b && b.type === 'tool_result')) return sub + 'user/tool-result';
@@ -302,4 +320,4 @@ const kindWordOrKind = (k) => (typeof k === 'string' && /^(?:sub:)?[a-z_]{1,40}(
 module.exports = { TURN_STATES, isTurnState, turnStateEffect, reconcileAttachStreaming, SIDECAR_SETTLE_MS, AUTHORITATIVE_SETTLE_MS,
   turnStateInRing, restoredTurnState, restoredStreaming, waitingOnUser, stallVerdict, STALL_SILENCE_MS, STALL_COOLDOWN_MS, STALL_MAX_REATTACH,
   requestInFlight, noteTurnFlight, noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest,
-  sendEndsAtLocalReply, recordKind, noteRecordKind, reconciledSay, KINDS_KEPT };
+  sendEndsAtLocalReply, noTurnReply, localCommandText, stopsAtLocalReply, recordKind, noteRecordKind, reconciledSay, KINDS_KEPT };

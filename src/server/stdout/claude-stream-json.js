@@ -42,7 +42,7 @@ const toldUuid = (u) => typeof u === 'string' && u !== '' && !/-0{11,}1?$/.test(
 const SUBAGENT_LAST_READ_MS = 3000;   // after a helper's end is told: the watch stays this long (a transcript written a moment later), then one more read
 const bypassAutoAllow = require('../../server/bypass-auto-allow'); // (spelled from src/ like every require here) lane bypass-no-prompts: under bypassPermissions a can_use_tool is answered at the door
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
-const { isTurnState, turnStateEffect, noteTurnFlight, noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest, sendEndsAtLocalReply, noteRecordKind } = require('../../turn-state.js');
+const { isTurnState, turnStateEffect, noteTurnFlight, noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest, sendEndsAtLocalReply, stopsAtLocalReply, noteRecordKind } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
 const { nextStampIn } = require('../../record-lateness.js'); // PURE: the late-record rule's look-ahead (lane-hot-switch)
 const { parseSetModelEcho } = require('../../model-echo.js'); // the ONE /model echo parser (shared with the status bar + card label)
@@ -1091,6 +1091,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               const changed = session._turnState !== st;
               session._turnState = st;
               session._isStreaming = eff.streaming;
+              session._lastSendLocal = false; // B-ba09 r1282 (2): a state word answers every send before it — no stop is owed past it
               (changed && st === 'running' ? noteRequestSent : noteTurnFlight)(session, Date.now()); // a NEW 'running' (an answer after a pause) sends a request; a pause or idle clears it (lane cache-warmth-tiles r4)
               if (!eff.streaming) { session._fallbackStopFired = false; retireCompaction(session, id); }
               // THE FIRST STOP (2026-09-22): under this authority the `result`
@@ -1145,11 +1146,6 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                 if (!authoritative) session._isStreaming = true;
                 (recordIsLate?.(session, msg) ? noteTurnFlight : noteRequestSent)(session, Date.now()); // the prompt's echo or a TOOL RESULT: a request goes out NOW — a backlog's record proves nothing about now (lane cache-warmth-tiles r4 — the device feed's twin)
                 newLabel = 'thinking...';
-              } else if (sendEndsAtLocalReply(session, msg)) {
-                // B-ba09 (B): a command the CLI answered by itself (its reply, no turn, no state word) ends the send that raised the flag.
-                // The flag and its flight fact only — NO pool stop: the idle word before the send was this conversation's stop, and a
-                // stop here (a late echo after a new prompt, before its running word) would force a pool re-decide as the prompt goes out
-                session._isStreaming = false; noteTurnFlight(session, Date.now()); newLabel = '';
               }
             } else if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain) {
               const blocks = msg.message?.content;
@@ -1295,6 +1291,14 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                 // came from (that is how a second consumer gets written).
                 result: null, error: null,
               });
+            }
+            // B-ba09 (B): the CLI's ANSWER THAT IS NO TURN (a typed command's num_turns-0 result, a <local-command-stdout> reply) ends
+            // the send that raised the flag — never a late record (the late rule above). The pool's stop only when the person's last
+            // send was itself a local command (r1282: no prompt waits behind it — the twin's blink forces nothing)
+            if (!recordIsLate?.(session, msg) && sendEndsAtLocalReply(session, msg)) {
+              session._isStreaming = false; noteTurnFlight(session, Date.now()); newLabel = '';
+              if (stopsAtLocalReply(session)) { try { noteTurnStopped?.(session); } catch { } }
+              session._lastSendLocal = false;
             }
             if (newLabel !== null && session._streamingLabel !== newLabel) {
               session._streamingLabel = newLabel;
