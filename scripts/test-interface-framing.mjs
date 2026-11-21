@@ -341,21 +341,24 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
   const dropOrphan = (raw) => { const out = []; for (let i = 0; i + 1 < raw.length; i += 2) if (lc(raw[i]) !== 'trailer') out.push(raw[i], raw[i + 1]); return out; };
   const seenView = (x, old, chunked) => (x ? { ...x, version: old ? '(DECLARED.version)' : x.version, raw: chunked ? x.raw : dropOrphan(x.raw) } : null);   // DECLARED.orphanTrailer
   const N = 300, diffs = [], tally = {}, declaredSeen = {}; let inner = 0, innerOpened = 0, alive = 0;
-  for (let i = 0; i < N; i++) {
-    const method = pick(METHODS), target = pick(TARGETS), old = rnd() < 0.12, up = !old && rnd() < 0.08;
-    const answer = pick(old || method === 'HEAD' ? ANSWERS.filter((x) => x !== 'trailers') : ANSWERS);   // trailers need a chunked answer: Node's own writer refuses them to HTTP/1.0 and to HEAD, in either form
-    const hs = Array.from({ length: Math.floor(rnd() * 6) }, () => pick(HEADERS));
-    const bodyKind = up ? pick(['none', 'length']) : method === 'GET' || method === 'HEAD' ? pick(['none', 'none', 'length']) : pick(BODIES);
-    const pad = rnd() < 0.06 ? 'X-Pad: ' + 'p'.repeat(16384 - 400 + Math.floor(rnd() * 600)) + '\r\n' : '';   // heads at the size limit: some just under, some over
-    const payload = bodyKind === 'inner-head' ? 'GET /inner HTTP/1.1\r\nHost: hub.example\r\n\r\n' : 'x'.repeat(1 + Math.floor(rnd() * 80));
+  // after the seeded N, FIXED cases: one for each declared entry a seed meets rarely (an HTTP/1.0 head with no Host line)
+  const FIXED = [{ method: 'GET', target: '/api/home', old: true, up: false, answer: 'length', hs: [], bodyKind: 'none', pad: '', host: '', tokens: false }];
+  for (let i = 0; i < N + FIXED.length; i++) {
+    const F = i >= N ? FIXED[i - N] : null;
+    const method = F ? F.method : pick(METHODS), target = F ? F.target : pick(TARGETS), old = F ? F.old : rnd() < 0.12, up = F ? F.up : !old && rnd() < 0.08;
+    const answer = F ? F.answer : pick(old || method === 'HEAD' ? ANSWERS.filter((x) => x !== 'trailers') : ANSWERS);   // trailers need a chunked answer: Node's own writer refuses them to HTTP/1.0 and to HEAD, in either form
+    const hs = F ? F.hs : Array.from({ length: Math.floor(rnd() * 6) }, () => pick(HEADERS));
+    const bodyKind = F ? F.bodyKind : up ? pick(['none', 'length']) : method === 'GET' || method === 'HEAD' ? pick(['none', 'none', 'length']) : pick(BODIES);
+    const pad = F ? F.pad : rnd() < 0.06 ? 'X-Pad: ' + 'p'.repeat(16384 - 400 + Math.floor(rnd() * 600)) + '\r\n' : '';   // heads at the size limit: some just under, some over
+    const payload = bodyKind === 'inner-head' ? 'GET /inner HTTP/1.1\r\nHost: hub.example\r\n\r\n' : 'x'.repeat(1 + Math.floor((F ? 0.5 : rnd()) * 80));
     let framing = '', body = '';
     if (bodyKind === 'length' || bodyKind === 'inner-head') { framing = `Content-Length: ${payload.length}\r\n`; body = payload; }
     else if (bodyKind === 'chunked') { framing = 'Transfer-Encoding: chunked\r\n'; body = `${payload.length.toString(16)};ext=1\r\n${payload}\r\n0\r\n\r\n`; }
     else if (bodyKind === 'chunked+trailers') { framing = 'Transfer-Encoding: chunked\r\nTrailer: X-Sum\r\n'; body = `${payload.length.toString(16)}\r\n${payload}\r\n0\r\nX-Sum: ${digest(payload)}\r\n\r\n`; }
     else if (bodyKind === 'both') { framing = `Content-Length: ${payload.length}\r\nTransfer-Encoding: chunked\r\n`; body = `${payload.length.toString(16)}\r\n${payload}\r\n0\r\n\r\n`; }
     else if (bodyKind === 'expect') { framing = `Expect: 100-continue\r\nContent-Length: ${payload.length}\r\n`; body = payload; }
-    const conn = up ? 'Connection: Upgrade\r\nUpgrade: websocket\r\n' : `${rnd() < 0.3 ? 'Connection: keep-alive, X-Token\r\nX-Token: 1\r\n' : ''}Connection: close\r\n`;
-    const host = rnd() < 0.05 ? '' : 'Host: hub.example\r\n';
+    const conn = up ? 'Connection: Upgrade\r\nUpgrade: websocket\r\n' : `${(F ? F.tokens : rnd() < 0.3) ? 'Connection: keep-alive, X-Token\r\nX-Token: 1\r\n' : ''}Connection: close\r\n`;
+    const host = F ? F.host : rnd() < 0.05 ? '' : 'Host: hub.example\r\n';
     const bytes = `${method} ${target} HTTP/1.${old ? 0 : 1}\r\n${host}X-Answer: ${answer}\r\n${hs.map(([k, v]) => `${k}: ${v}\r\n`).join('')}${pad}${framing}${conn}\r\n${body}`;
     const hostless = old && !host && !hs.some(([k]) => k.toLowerCase() === 'host');   // DECLARED.oldHostless: the hub reads it as HTTP/1.1 with no Host
     const p0 = plainSeen.length, h0 = hubSeen.length, c0 = ifaceCls.length, o0 = P.iface.stats().opened;
@@ -372,6 +375,7 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
     if (hostless) met('oldHostless'); else if (old && sb.length) met('version'), met('oldPage');
     if (!chunked && sb.length && hs.some(([k]) => k === 'Trailer')) met('orphanTrailer');
     if (chunked && sb.length) met('chunks');
+    if (answer === '1xx' && sb.length) met('informational');
     const key = `${va.status.split(' ').slice(0, 2).join(' ')}`; tally[key] = (tally[key] || 0) + 1;
     if (!same) diffs.push({ i, bytes: bytes.slice(0, 260), plain: { view: va, seen: sa, timedOut: a.timedOut }, through: { view: vb, seen: sb, timedOut: b.timedOut, opened, cls: ifaceCls.slice(c0) } });
     if ((await get(P.port, '/alive')).status === 200) alive++;
@@ -381,8 +385,9 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
   for (const d of diffs) console.log(`    DIFFERS #${d.i} ${d.bytes.split('\r\n')[0]} [${partsOf(d)}] ${d.bytes.includes('Expect') ? 'expect ' : ''}${/Upgrade: /.test(d.bytes) ? 'upgrade ' : ''}${d.bytes.includes('Trailer') ? 'trailer ' : ''}`);
   for (const d of diffs.slice(0, 2)) console.log(`    THE FIRST, WHOLE: ${JSON.stringify(d).slice(0, 1400)}`);
   ok(diffs.length === 0, `${N} generated requests (targets absolute, «*», «//», dot segments, %2e, a byte above 0x7f; duplicated and reordered Cookie / Authorization / Origin / Sec-Fetch-Site / Host / X-Forwarded-*; no body, a length, chunked with extensions and trailers, a length AND chunked, Expect, a head inside a body; Connection tokens; upgrades with and without a body; HTTP/1.0; heads at the size limit; answers by length, chunked, streamed, with trailers, close-delimited, 204, 304, 102 + 103, to HEAD): what the hub's handler saw and what the page got are the plain form's but for the declared list (${Object.keys(RELAY.DECLARED).join(', ')}), the door class equal at both ends — ${diffs.length} differ`, diffs.slice(0, 2));
+  ok(Object.keys(RELAY.DECLARED).every((k) => declaredSeen[k] > 0), `every entry of the declared list was MET by a case and read by its name (${Object.keys(RELAY.DECLARED).map((k) => `${k} ×${declaredSeen[k] || 0}`).join(' · ')}) — none is declared unseen`, declaredSeen);
   ok(inner > 0 && innerOpened === inner, `a head inside a body (${inner} cases) opens no channel of its own (${innerOpened} with one open line or none, as the plain hub served one head)`);
-  ok(alive === N, `the interface answered after every case (${alive} of ${N})`);
+  ok(alive === N + FIXED.length, `the interface answered after every case (${alive} of ${N + FIXED.length})`);
   // RED CONTROLS: a forwarder that JOINS duplicate lines; one that RE-ENCODES the target
   const joins = mutant('src/interface/relay.js', 'headers: requestLines(req.rawHeaders),', 'headers: Object.entries(req.headers).flat(),');
   const reenc = mutant('src/interface/relay.js', 'path: req.url,', 'path: encodeURI(decodeURI(req.url)),');
