@@ -191,6 +191,23 @@ const getJson = async (u) => { try { const r = await fetch(`http://127.0.0.1:${P
 const until = async (fn, ms, step = 250) => { const tEnd = Date.now() + ms; for (;;) { const v = await fn(); if (v || Date.now() > tEnd || hubDied) return v; await sleep(step); } };
 const ready = (ms = 180000) => until(async () => { const b = await getJson('/api/boot'); return b && b.phase === 'ready' ? b : null; }, ms);
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+/** r1487 (box row 54: the one-pass copy wrote back 0 of 80 billing sources) — WHEN W1'S END MARKER NEVER COMES, what the scene's hub
+ *  said and holds: its log's lines naming the restore, a fence, a catch-up, a thrown turn or the billing source (the last 40); the
+ *  metas' billing source by VALUE (the end marker counts 'none' alone); the hub's own live rows' billing (`auth`: read from the
+ *  conversation's in-memory source — set but unwritten tells apart from never set); one survivor's buffer file now. Printed only, judged
+ *  nothing: the ✗ above is the leg. */
+async function saySilentBackfill(tag) {
+  const lines = logOf(tag).split('\n').filter((l) => /\[boot-restore\]|fence|catch-up|threw|Error|backfill|billing|apiKeySource|loop-turn|a turn/.test(l));
+  console.log(`  W1's end marker never came — the scene's hub log, ${lines.length} line(s) naming the restore, a fence, a catch-up, a throw or the billing source (the last 40):`);
+  for (const l of lines.slice(-40)) console.log(`    ${l.slice(0, 300)}`);
+  const vals = {}; try { for (const f of fs.readdirSync(META)) { if (!f.endsWith('.json')) continue; const m = readJson(path.join(META, f)); const v = m && 'apiKeySource' in m ? String(m.apiKeySource) : '(absent)'; vals[v] = (vals[v] || 0) + 1; } } catch { }
+  console.log(`  the metas' billing source by value: ${S(vals)}`);
+  const act = await getJson('/api/active'), rows = ((act && act.sessions) || []).filter((r) => liveIds.has(r.id)), bill = {};
+  for (const r of rows) { const a = r.auth, k = a ? `${a.source || '?'}${a.guessed ? ' (guessed)' : ''}` : '(none)'; bill[k] = (bill[k] || 0) + 1; }
+  console.log(`  the hub's live rows' billing (auth, from each conversation's in-memory source): ${S(bill)} — ${rows.length} of ${liveIds.size} rows read`);
+  const one = [...liveIds][0]; let buf = null; try { buf = fs.readFileSync(path.join(BUF, one + '.buf'), 'utf8'); } catch { }
+  console.log(`  one survivor's buffer file now: ${buf == null ? 'none' : `${buf.length} chars, ${buf.split('apiKeySource":"').length - 1} billing record(s), its last line ${S(buf.trimEnd().split('\n').pop().slice(0, 160))}`}`);
+}
 const logOf = (tag) => (hubs[tag] ? hubs[tag].log() : '');
 const startAux = (tag) => {
   const env = { ...strippedEnv(), HOME };   // the helper's rule 9: a process this suite starts carries the HOME in the root
@@ -444,6 +461,7 @@ async function surviveShape(tag, { red = null, scene = null } = {}) {
     const all = await until(() => billedN() >= liveIds.size, 60000, 100);
     tW1 = Date.now();
     check(`${label}: the backfill wrote back every survivor's billing source (${billedN()} of ${liveIds.size}, ${((tW1 - tReady) / 1000).toFixed(1)} s after ready) — W1 ends`, !!all);
+    if (!all) await saySilentBackfill(tag);   // r1487: W1's end marker never came — what the scene's hub said and holds, printed
   }
   const rl = restoreLine(logOf(tag));
   console.log(`  the restore's own line: ${rl ? rl.line : 'NONE'}`);
