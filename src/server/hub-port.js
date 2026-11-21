@@ -33,6 +33,15 @@ const piped = () => !!(claimed && claimed.word);
 let signinListener = null, lastSignin = null;
 const signinHeard = (m) => { if (m && m.op === 'signin-state') lastSignin = m; if (signinListener) { try { signinListener(m); } catch { } } };
 function onSigninState(fn) { signinListener = typeof fn === 'function' ? fn : null; if (signinListener && lastSignin) signinHeard(lastSignin); }
+/** THE VAULT'S REVOKE LINE (piece B3b-2, 主开发 r1123 + r1517): a vault lock signs every login out — in the piped form the table is
+ *  the interface's, so this hub SAYS it on the link, `{op:'signin-revoke-all', why}`, and HOLDS the order until the interface answers
+ *  it (`signin-revoke-all-ack`): said at once when an interface holds this hub, else FIRST after the next join, before anything else
+ *  this hub says; said again after every re-join until it is answered. While it waits, the piped gate honours no login
+ *  (src/server/piped-auth.js). An order given before the wiring is kept for it. → whether the order was taken (the piped form) */
+let earlyRevoke = null;
+function signinRevokeAll(why) { if (wired && wired.revokeAll) return wired.revokeAll(why); earlyRevoke = String(why || 'asked').slice(0, 120); return true; }
+/** is a revoke said and not yet answered? (the piped gate refuses every login while it is) */
+const revokePending = () => (wired && wired.revokePending ? wired.revokePending() : earlyRevoke !== null);
 let claimedDecision = null;   // that start JUDGED, once (decide): its parsed line is dropped there (主开发 r1124 1)
 /** THE hub's own end: its normal SIGTERM shutdown (the stores flushed) — ONE site for every end this module makes (§85's row) */
 const endSelf = () => process.kill(process.pid, 'SIGTERM');
@@ -159,6 +168,10 @@ function wire(decision, { hub, server, join = null, end = endSelf, log = console
   let listenCalls = 0;
   const firstListen = () => { if (++listenCalls === 1) return true; try { log.error?.(`[hub-port] listen called again (call ${listenCalls}) — refused: this hub's port is decided once, at its one boot call`); } catch { } return false; };
   const push = (pem) => { try { party.mux.control(pem ? { op: 'certificate', cert: String(pem.cert), key: String(pem.key) } : { op: 'certificate' }); } catch { } };
+  let pendingRevoke = null;   // B3b-2: a vault lock's revoke, kept until the interface answers it
+  const sayRevoke = () => { if (party && pendingRevoke !== null) { try { party.mux.control({ op: 'signin-revoke-all', why: pendingRevoke }); } catch { } } };
+  const heard = (m) => { if (m && m.op === 'signin-revoke-all-ack') pendingRevoke = null; signinHeard(m); };   // answered: the order is done
+  const revokeAll = (why) => { if (decision.form !== 'piped') return false; pendingRevoke = String(why || 'asked').slice(0, 120); sayRevoke(); return true; };
   if (decision.form === 'plain') {
     hub.listen = (port, host, cb) => { if (!firstListen()) return hub; record = { form: 'plain', listened: true, port: Number(port) }; return plainListen({ listen: (...a) => listenOwn.apply(hub, a) }, port, host, () => { try { log.log?.(`[hub-port] ${JSON.stringify(record)}`); } catch { } cb && cb(); }); };
   } else {
@@ -177,8 +190,8 @@ function wire(decision, { hub, server, join = null, end = endSelf, log = console
         const attempt = () => {
           tries++;
           const answerMs = Math.max(REJOIN_TRY_FLOOR_MS, Math.min(require('./interface-party.js').JOIN_ANSWER_MS, until - monoNow()));   // what is left of the bound, never under the floor
-          joinOf({ start, server, onDead, onSignin: signinHeard, answerMs }).then((p) => {
-            party = p;
+          joinOf({ start, server, onDead, onSignin: heard, answerMs }).then((p) => {
+            party = p; sayRevoke();   // B3b-2: a revoke not yet answered is the FIRST thing this hub says to the new interface
             try { log.log?.(`[hub-port] a new interface took this hub (try ${tries}) — it goes on: the same process, its vault and conversations kept`); } catch { }
             if (lastPem !== undefined) push(lastPem);   // the new interface has no certificate until this hub pushes it again
           }, (e) => {
@@ -189,16 +202,17 @@ function wire(decision, { hub, server, join = null, end = endSelf, log = console
         };
         setTimeout(attempt, REJOIN_FIRST_MS);
       };
-      joinOf({ start, server, onDead, onSignin: signinHeard })
-        .then((p) => { party = p; record = { form: 'piped', listened: false, link: start.link }; try { log.log?.(`[hub-port] ${JSON.stringify(record)}`); } catch { } if (pendingPem !== undefined) push(pendingPem); cb && cb(); },
+      joinOf({ start, server, onDead, onSignin: heard })
+        .then((p) => { party = p; sayRevoke(); record = { form: 'piped', listened: false, link: start.link }; try { log.log?.(`[hub-port] ${JSON.stringify(record)}`); } catch { } if (pendingPem !== undefined) push(pendingPem); cb && cb(); },
           (e) => { try { log.error?.(e && e.code === 'no-answer' ? `[hub-port] ${e.message} — this hub ends` : `[hub-port] the interface refused this hub (${(e && e.message) || 'refused'}) — it ends`); } catch { } end(); });
       return hub;
     };
   }
   const pushCertificate = (pem) => { if (decision.form !== 'piped') return; lastPem = pem || null; if (party) push(pem); else pendingPem = pem || null; };
-  wired = { form: decision.form, bound: () => ({ ...record }), pushCertificate };
+  wired = { form: decision.form, bound: () => ({ ...record }), pushCertificate, revokeAll, revokePending: () => pendingRevoke !== null };
   if (earlyPem !== undefined) { const pem = earlyPem; earlyPem = undefined; pushCertificate(pem); }   // the pair tls.js served before this wiring
+  if (earlyRevoke !== null) { const why = earlyRevoke; earlyRevoke = null; revokeAll(why); }   // a revoke ordered before this wiring
   return wired;
 }
 
-module.exports = { claim, decide, endBadStart, exitStatus, EXIT_BAD_START, certificate, wire, plainListen, piped, onSigninState, REJOIN_MS, REJOIN_TRY_FLOOR_MS };
+module.exports = { claim, decide, endBadStart, exitStatus, EXIT_BAD_START, certificate, wire, plainListen, piped, onSigninState, signinRevokeAll, revokePending, REJOIN_MS, REJOIN_TRY_FLOOR_MS };
