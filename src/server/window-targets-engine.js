@@ -450,7 +450,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     return g;
   }
   /** Lane E: the app's windows → the pixel plan (null when the keeper cannot say — a keeper without `windows`). */
-  async function planFor(rec) {
+  async function planFor(rec, sub = null) {
     if (rec.origin === 'desktop' || typeof keeper.windows !== 'function') return null;
     try {
       let r = await keeper.windows(rec.id);
@@ -465,19 +465,27 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
         audit({ handle: rec.id, verb: 'show-window', by: 'window', ok: !!m.ok, frames: frames.length, ...(m.ok ? {} : { code: m.code }) });
         if (m.ok) { await sleep(300); const again = await keeper.windows(rec.id); if (again && again.ok) r = again; } // the dialog draws on its map
       }
+      // B-dbb4 unit 2 (r772): a window of the app CHOSEN by its handle (`<handle>.w<hex xid>`, named by unit 1) is the call's
+      // subject — its own image, origin and --at; a window gone (closed, never this app's) is refused by name, never the main's
+      if (sub != null) {
+        const row = (r.windows || []).find((w) => w && Number(w.id) === sub);
+        if (!row) throw namedError('window_gone', `the app's window ${UN.subHandle(rec.id, sub)} is gone (closed, or not a window of this app) — \`vibespace-window screenshot ${rec.id}\` names the windows it has now`, { handle: rec.id });
+        const own = R.pixelPlan([row]);
+        return own && own.ok ? { ...own, subject: { id: row.id, handle: UN.subHandle(rec.id, sub), title: String(row.title || row.name || row.instance || row.cls || '').slice(0, 120) } } : own;
+      }
       const plan = R.pixelPlan(r.windows, { pin: PIN.pinOf(rec.pin) }); // lane e2b: a pinned window's image = the pin
       return plan && plan.ok ? { ...plan, unshown: UN.unshownOf(r.windows, plan) } : plan; // B-dbb4: the app's windows this image does not show, named
-    } catch { return null; }
+    } catch (e) { if (e && e.code === 'window_gone') throw e; return null; }
   }
   const streamOf = (rec) => (rec && (rec.stream || M.streamKindOf(rec))) || null; // a FACT the reach view reports, never a branch
   const capsOf = (rec) => M.capsOf(rec); // the rung's capability cells (the view's, else the row's)
   /** The pixel verbs' common door: an injection backend (unless only reading), the plan, the VISIBILITY gate. */
-  async function pixelsFor(rec, who, verb, { inject = true } = {}) {
+  async function pixelsFor(rec, who, verb, { inject = true, sub = null } = {}) {
     const { backends, xenv, bins: b } = await backendsFor(rec);
     if (inject && !backends.injection) { audit({ ...who, verb, by: 'inject', ok: false, code: 'no_injection_backend' }); throw namedError('no_injection_backend', `${verb === 'key' ? 'a chord has no road on the accessibility tree and' : 'this is injection and'} no wired injection backend is available on ${rec.display}: ${wt.verbVerdicts({ backends }).probe}`, { backends: backends.rows }); }
-    const plan = await planFor(rec);
+    const plan = await planFor(rec, sub);
     const vis = R.visibilityVerdict({ perWindow: capsOf(rec).perWindow, plan });
-    if (!vis.ok) { audit({ ...who, verb, by: 'pixels', ok: false, code: vis.code }); throw namedError(vis.code, vis.why.replace('<handle>', rec.id), { handle: rec.id }); }
+    if (!vis.ok) { audit({ ...who, verb, by: 'pixels', ok: false, code: vis.code }); throw namedError(vis.code, vis.why.replace('<handle>', sub != null ? UN.subHandle(rec.id, sub) : rec.id), { handle: rec.id }); }
     return { backends, xenv, bins: b, plan };
   }
   /** fb-bc200800e0 (lane bl-windows): a verb with no point of its own (type, key, a scroll without --at) on a display a viewer
@@ -524,6 +532,13 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (row) return pidAlive(pid) ? DESK.desktopRecord(row) : null;
     if (trustPid && pidAlive(pid)) return DESK.desktopRecord({ handle: DESK.desktopHandle(pid), label: `pid ${pid} (not listed since the restart — \`vibespace-window list\` names it)`, pid, pids: [pid] });
     return null;
+  }
+  /** B-dbb4 unit 2: `<handle>.w<hex X id>` = one window of that app as the call's subject; the whole handle a record wins. */
+  function splitSubject(h0) {
+    const h = String(h0 || '');
+    if (liveAny(h)) return { handle: h, sub: null };
+    const m = UN.SUB_RE.exec(h);
+    return m && liveAny(m[1]) ? { handle: m[1], sub: parseInt(m[2], 16) } : { handle: h, sub: null };
   }
   function liveAny(handle) { const h = String(handle || ''); return liveRecord(h) || liveDesktop(h, { trustPid: leases.has(h) }); }
   /** Every lease on the desktop class goes when the switch is off — the user's decision always wins, before any takeover is asked for. */
@@ -1225,9 +1240,11 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
 
   // ── act ──
   const nodeLine = (e, action) => ({ role: e.role, name: e.name, ...(action ? { action } : {}) });
-  async function act(handle, facts, body = {}) {
+  async function act(handle0, facts, body = {}) {
     const verb = String(body.verb || '');
+    const { handle, sub } = splitSubject(handle0);
     const { rec, lease } = requireLease(handle, facts, verb || 'act');
+    if (sub != null && (body.ref || ['snapshot'].includes(verb))) throw namedError('window_subject_pixels', `${UN.subHandle(rec.id, sub)} is one window of the app, reached by its pixels — \`screenshot\`, \`click --at\`, \`type\`, \`key\`, \`scroll\`; the tree verbs (@refs) take the app's own handle ${rec.id}`, { handle: rec.id });
     if (rec.origin === AGENT_BROWSER_ORIGIN) { try { keeper.noteInput?.(rec.id); } catch { /* the idle clock only */ } } // lane e2a r3 (#7): an agent driving its own browser is not idle
     const base = WT.treeEnvOf(rec, env()); // lane app-display-a11y-bus: the node verbs act on THIS app's a11y bus
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: rec.origin || ORIGIN };
@@ -1303,7 +1320,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (verb === 'click' && body.at) {
       const at = parseAt(body.at);
       if (!at) throw namedError('bad-request', '--at needs `x,y` (integers: a pixel of `vibespace-window screenshot`)');
-      const px = await pixelsFor(rec, who, 'click');
+      const px = await pixelsFor(rec, who, 'click', { sub });
       const pt = await pointOf(rec, px, at, who, 'click');
       held();
       const r = await injecting((signal) => wt.injectClick({ bins: px.bins, xenv: px.xenv, x: pt.x, y: pt.y, button: body.button, signal, python }));
@@ -1313,7 +1330,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (verb === 'click') throw namedError('bad-request', 'click needs a ref (@e7) or --at x,y');
 
     if (verb === 'scroll') {
-      const px = await pixelsFor(rec, who, 'scroll');
+      const px = await pixelsFor(rec, who, 'scroll', { sub });
       let pt = null;
       if (body.at) {
         const at = parseAt(body.at);
@@ -1339,7 +1356,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       const pixelShare = !!rr && (rr.mode === 'pixels' || (rr.mode === 'auto' && res && res.mode === 'pixels'));
       /** Lane E: text as KEYS into whatever holds focus on the app's own display (pixel mode, Chrome's entries). */
       const injected = async (e, line) => {
-        const px = await pixelsFor(rec, who, 'type');
+        const px = await pixelsFor(rec, who, 'type', { sub });
         await displayHolds(rec, px, keysPointOf(px, lease), who, 'type', 'keys are');   // fb-bc200800e0: keys on a display that cannot take them are refused, never «typed»
         if (e) { held(); const f = await wt.focusNode({ entry: e, env: base, ...helperOpts() }); fromHelper(f, { verb: 'focus', by: 'node', node: nodeLine(e) }); await sleep(120); }
         held();
@@ -1376,7 +1393,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (verb === 'key') {
       const chord = wt.parseChord(body.chord);
       if (!chord.ok) throw namedError(chord.code, chord.why);
-      const px = await pixelsFor(rec, who, 'key');
+      const px = await pixelsFor(rec, who, 'key', { sub });
       await displayHolds(rec, px, keysPointOf(px, lease), who, 'key', 'keys are');   // fb-bc200800e0: the same for a chord
       // where the pointer rests before a chord (a bare display has PointerRoot focus): inside the MAIN window when the
       // keeper names it (lane E — tree bounds are toolkit coordinates), else the last snapshot's frame
@@ -1418,7 +1435,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     try { return stillHeld(rec, facts, 'screenshot'); } catch (e) { try { fs.unlinkSync(file); } catch { /* not written */ } throw e; }
   }
   // ── screenshot (the pixel road's read) ──
-  async function screenshot(handle, facts) {
+  async function screenshot(handle0, facts) {
+    const { handle, sub } = splitSubject(handle0);
     const { rec, lease } = requireLease(handle, facts, 'screenshot');
     if (rec.origin === 'desktop') return desktopScreenshot(rec, facts);
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id };
@@ -1429,7 +1447,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const out = path.join(dir, `${rec.id}-${now()}-${process.pid}.png`);
     // lane E (D7): the app's OWN windows composed by root position — never the root (on the xpra rung the root is
     // composited offscreen and grabs black), never AT-SPI bounds (logical px on GTK4, DIP on Chrome)
-    const plan = await planFor(rec);
+    const plan = await planFor(rec, sub);
     if (plan) {
       const vis = R.visibilityVerdict({ perWindow: capsOf(rec).perWindow, plan });
       if (!vis.ok) { audit({ ...who, verb: 'screenshot', by: 'pixels', ok: false, code: vis.code }); throw namedError(vis.code, vis.why.replace('<handle>', rec.id), { handle: rec.id }); }
@@ -1441,7 +1459,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       heldOrUnlink(rec, facts, out); // lane E verify: a revoke during the grab ⇒ the image is deleted, never handed over
       const unshown = Array.isArray(plan.unshown) ? plan.unshown : [];
       audit({ ...who, verb: 'screenshot', by: 'pixels', ok: true, w: r.w, h: r.h, windows: plan.members.length, lit: r.lit, ...(unshown.length ? { unshown: unshown.length } : {}) });
-      return { handle: rec.id, file: out, w: r.w, h: r.h, x: plan.origin.x, y: plan.origin.y, originX: plan.origin.x, originY: plan.origin.y, coords: 'window', scale: Number(rec.scale) || 1, windows: plan.members.length, blank: r.lit === 0, bytes: r.bytes, cropped: true, ...(unshown.length ? { unshown, note: UN.unshownText(unshown, rec.id) } : {}) };
+      return { handle: rec.id, file: out, w: r.w, h: r.h, x: plan.origin.x, y: plan.origin.y, originX: plan.origin.x, originY: plan.origin.y, coords: 'window', scale: Number(rec.scale) || 1, windows: plan.members.length, blank: r.lit === 0, bytes: r.bytes, cropped: true, ...(plan.subject ? { subject: plan.subject } : {}), ...(unshown.length ? { unshown, note: UN.unshownText(unshown, rec.id) } : {}) };
     }
     // no window geometry from the keeper: the display grab, cropped to the last snapshot's frame
     let bounds = null;

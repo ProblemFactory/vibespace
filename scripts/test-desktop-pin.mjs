@@ -480,15 +480,19 @@ console.log('CONTROLS (patched copies)');
   ok(uPin.length === 1 && uPin[0].id === 6 && uPin[0].why === 'clipped' && uPin[0].x === 1400 && uPin[0].y === 700, 'unshownOf: a popup over the pinned main that reaches past the pin\'s box is named clipped', { uPin, main: pPin.main, w: pPin.w, h: pPin.h });
   ok(UN.unshownOf([over, main], R.pixelPlan([over, main])).length === 0 && UN.unshownText([], 'da-x') === '' && UN.unshownOf([main], { ok: false }).length === 0, 'CONTROL: nothing left out ⇒ nothing named, no words; a plan that failed names nothing');
   const words = UN.unshownText(u1, 'da-pop');
-  ok(words.startsWith('this app has 2 more window(s) this image does not show — «Sign in – Google Accounts» 500x600 at -600,-400 of this image: it sits up-left of the main window without covering it') && words.includes('`vibespace-window watch da-pop`') && words.includes('«Hidden» 400x300 at 100,100 of this image: it has no pixels on the display yet') && !/move it yourself|alt\+tab/.test(words),
-    'unshownText: each window by title, size and place, why the image leaves it out, and how it can be reached (the user\'s live view) — never a promise this unit does not keep', words);
+  ok(words.startsWith('this app has 2 more window(s) this image does not show — «Sign in – Google Accounts» 500x600 at -600,-400 of this image: it sits up-left of the main window without covering it') && words.includes('its own handle `da-pop.w2`') && words.includes('«Hidden» 400x300 at 100,100 of this image: it has no pixels on the display yet') && words.includes('`vibespace-window watch da-pop`') && words.includes('A window\'s own handle makes it the subject: `vibespace-window screenshot <its handle>`') && !/alt\+tab|move it yourself/.test(words),
+    'unshownText: each window by title, size and place, why the image leaves it out, and ITS OWN HANDLE (unit 2: the agent chooses it as the subject); an unmapped one waits for the user\'s live view', words);
+  ok(UN.subHandle('da-pop', 0x2a00004) === 'da-pop.w2a00004' && UN.SUB_RE.exec('da-pop.w2a00004')[1] === 'da-pop' && parseInt(UN.SUB_RE.exec('da-pop.w2a00004')[2], 16) === 0x2a00004 && !UN.SUB_RE.test('da-pop'), 'unit 2: a window\'s handle is `<handle>.w<hex X id>` and reads back (the route\'s handle rule already admits it)');
   ok(UN.UNSHOWN_MIN_PX === 100, 'the smallest window named is 100×100 (Chrome\'s helper is 15×15)');
   // THE ENGINE over a fake xpra keeper: the screenshot answer carries {unshown, note}; CONTROL: the popup moved over the main
   const recP = { id: 'da-pop', label: 'Pop', exec: 'x', state: 'ready', display: ':96', pids: { app: 4545 }, backend: 'xpra', startedAt: Date.now(), readyAt: Date.now() };
   let rowsP = [pop, helper, main].map((w) => ({ ...w }));
   const keeperP = { listApps: () => [recP], get: (id) => (id === recP.id ? recP : null), sessionPids: () => [4545], x11EnvFor: () => ({ DISPLAY: ':96' }), windows: async () => ({ ok: true, windows: rowsP.map((w) => ({ ...w })) }) };
+  const shotsP = [], clicksP = [];
   const wtP = { ...WT, probeInputBackends: async () => ({ rows: [{ backend: 'xtest', ok: true }], injection: { backend: 'xtest' }, ours: true }), probeA11y: async () => ({ ok: true, apps: 1 }),
-    windowShot: async ({ out, plan }) => { fs.writeFileSync(out, 'png'); return { ok: true, w: plan.w, h: plan.h, lit: 9, bytes: 3 }; } };
+    windowShot: async ({ out, plan }) => { shotsP.push({ main: plan.main && plan.main.id, w: plan.w, h: plan.h, origin: plan.origin }); fs.writeFileSync(out, 'png'); return { ok: true, w: plan.w, h: plan.h, lit: 9, bytes: 3 }; },
+    displayGeometry: async () => ({ ok: true, w: 4000, h: 3000 }),
+    injectClick: async (o) => { clicksP.push({ x: o.x, y: o.y }); return { ok: true, did: { verb: 'click' } }; } };
   const sessP = new Map([['s1', { agentToken: 'vsst_dbb4', name: 'alpha', backend: 'claude', backendSessionId: 'conv-dbb4' }]]);
   const EP = ENGINE.create({ keeper: keeperP, dataDir: path.join(dir, 'dbb4-engine'), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 });
   const fP = { sessionId: 's1', session: sessP.get('s1'), browserKey: null, name: 'alpha' };
@@ -498,6 +502,16 @@ console.log('CONTROLS (patched copies)');
     ok(sh.windows === 1 && Array.isArray(sh.unshown) && sh.unshown.length === 1 && sh.unshown[0].id === 2 && sh.unshown[0].why === 'outside' && typeof sh.note === 'string' && sh.note.includes('«Sign in – Google Accounts» 500x600 at -600,-400'),
       'the engine\'s screenshot NAMES the popup its image leaves out (unshown + the words) — the image itself unchanged (1 window, the origin the main\'s)', { windows: sh.windows, unshown: sh.unshown, note: sh.note });
     ok(/"verb":"screenshot"[^\n]*"unshown":1/.test(fs.readFileSync(EP.auditFile, 'utf8')), 'audited: the screenshot\'s unshown count');
+    // UNIT 2 (r772): the window's OWN handle is the call's subject — its image, its origin, its --at; CONTROL the app's own handle
+    const sub = await EP.screenshot('da-pop.w2', fP);
+    ok(!!(sub.subject && sub.subject.id === 2 && sub.subject.handle === 'da-pop.w2' && sub.windows === 1 && sub.w === 500 && sub.h === 600 && sub.originX === 0 && sub.originY === 0 && !sub.unshown),
+      'unit 2: `screenshot da-pop.w2` is THAT window\'s own image (500×600, its origin 0,0; the subject named) — never the main window\'s', { subject: sub.subject, w: sub.w, h: sub.h, o: [sub.originX, sub.originY], shot: shotsP[shotsP.length - 1] });
+    await EP.act('da-pop.w2', fP, { verb: 'click', at: '10,20' });
+    await EP.act('da-pop', fP, { verb: 'click', at: '10,20' });
+    ok(clicksP.length === 2 && clicksP[0].x === 10 && clicksP[0].y === 20 && clicksP[1].x === 610 && clicksP[1].y === 420, 'unit 2: `click da-pop.w2 --at 10,20` lands on the POPUP (its origin 0,0 + 10,20); CONTROL: the app\'s own handle maps the same point through the main window (600,400 + 10,20)', clicksP);
+    let gone = null; try { await EP.screenshot('da-pop.w99', fP); } catch (e) { gone = e; }
+    let tree = null; try { await EP.act('da-pop.w2', fP, { verb: 'click', ref: '@e1' }); } catch (e) { tree = e; }
+    ok(!!(gone && gone.code === 'window_gone' && /da-pop\.w99 is gone/.test(gone.message) && tree && tree.code === 'window_subject_pixels'), 'unit 2: a window that is not the app\'s (or gone) is refused window_gone by name, never the main window\'s image; a tree verb on a chosen window is refused by name (window_subject_pixels)', { gone: gone && [gone.code, gone.message], tree: tree && tree.code });
     // THROUGH THE REAL ROUTE AND THE SHIPPED CLI: the header carries a title outside latin-1 (escaped), the CLI prints the words
     const appP = express(); appP.use(express.json()); ROUTES.setup({ engine: EP }); appP.use(ROUTES.router);
     const srvP = await new Promise((res) => { const s0 = appP.listen(0, '127.0.0.1', () => res(s0)); });
@@ -506,9 +520,12 @@ console.log('CONTROLS (patched copies)');
     const c1 = await cliP('screenshot', 'da-pop');
     rowsP = [{ ...pop, x: 650, y: 450 }, helper, main].map((w) => ({ ...w })); // CONTROL: the popup now OVER the main
     const c2 = await cliP('screenshot', 'da-pop');
+    const c3 = await cliP('screenshot', 'da-pop.w2'); // unit 2: the window's own handle through the route and the CLI
     srvP.close();
-    ok(c1.status === 0 && c1.stdout.includes('this app has 1 more window(s) this image does not show — «Sign in – Google Accounts» 500x600 at -600,-400 of this image') && c2.status === 0 && !/does not show/.test(c2.stdout),
+    ok(c1.status === 0 && c1.stdout.includes('this app has 1 more window(s) this image does not show — «Sign in – Google Accounts» 500x600 at -600,-400 of this image') && c1.stdout.includes('its own handle `da-pop.w2`') && c2.status === 0 && !/does not show/.test(c2.stdout),
       'the shipped CLI prints the words under the image line (the title with its en dash through the escaped header); CONTROL: the popup over the main ⇒ in the image, nothing said', { c1: c1.stdout.slice(-400) + c1.stderr.slice(-300), c2: c2.stdout.slice(-300) });
+    ok(c3.status === 0 && c3.stdout.includes('this image is ONE window of the app: da-pop.w2 «Sign in – Google Accounts» — --at, keys and typing on this handle go to it') && c2.stdout.includes('2 windows of the app composed in this image'),
+      'unit 2 through the route + the CLI: `screenshot da-pop.w2` says it is ONE window of the app (its title back through the escaped header); the app\'s own image counts the windows it composed (CONTROL: the popup over the main ⇒ 2)', { c3: c3.stdout.slice(-300) + c3.stderr.slice(-200), c2: c2.stdout.slice(-200) });
   } catch (e) { ok(false, '§DBB4: the engine / route / CLI legs threw', String((e && e.stack) || e).slice(0, 600)); }
 }
 

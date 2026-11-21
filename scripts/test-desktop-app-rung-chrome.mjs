@@ -73,7 +73,11 @@ const srv = spawn(DBUS, ['--', process.execPath, 'server.js'], { cwd: wt, env: s
 srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d)));
 const client = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1400,900', `--user-data-dir=${scratch('da-rung-client')}`, 'about:blank'], { stdio: 'ignore', detached: true });
 const hits = [];
-const page = http.createServer((req, res) => { hits.push({ url: req.url, ua: req.headers['user-agent'] || '' }); res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><title>E2A rung page</title><h1>Hello rung</h1><button>Press me</button>'); });
+// B-dbb4 unit 2's stand-in (r756 / r772): /popups is one button over the whole page — a REAL click (XTEST: a user gesture, so
+// Chrome's popup blocker lets it through) opens two TOP-LEVEL windows by the page's own script, the sign-in shape: one at the
+// display's origin, one far outside it; /p1 and /p2 are their pages (the server sees them load)
+const POPUPS_HTML = '<!doctype html><title>Popups</title><button id="open" style="position:fixed;inset:0;width:100%;height:100%;font-size:40px" onclick="window.open(\'/p1\', \'p1\', \'left=0,top=0,width=520,height=620\'); window.open(\'/p2\', \'p2\', \'left=3200,top=2400,width=420,height=320\')">Open the sign-in windows</button>';
+const page = http.createServer((req, res) => { hits.push({ url: req.url, ua: req.headers['user-agent'] || '' }); res.setHeader('Content-Type', 'text/html'); if (String(req.url).startsWith('/popups')) return res.end(POPUPS_HTML); if (/^\/p[12]\b/.test(String(req.url))) return res.end(`<!doctype html><title>Sign in – stand-in ${String(req.url).slice(2, 3)}</title><h1>Sign in</h1>`); res.end('<!doctype html><title>E2A rung page</title><h1>Hello rung</h1><button>Press me</button>'); });
 await new Promise((r) => page.listen(PAGE_PORT, '127.0.0.1', r));
 const appsOf = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(wt, 'data/desktop-apps.json'), 'utf8')).apps); } catch { return []; } };
 let cleaned = false;
@@ -261,7 +265,7 @@ try {
   // Made deterministic: both clients hold each `launching` answer of a record GET for 4 s, so the ready broadcast lands first.
   const HOLD = `(() => { if (window.__vsF0) return 'on'; const f0 = window.__vsF0 = window.fetch.bind(window); window.__vsHeld = 0; window.fetch = async (u, o) => { const res = await f0(u, o); try { const url = String(typeof u === 'string' ? u : (u && u.url) || '').split('?')[0]; if ((!o || !o.method || o.method === 'GET') && /\\/api\\/desktop\\/apps\\/[^/]+$/.test(url)) { const j = await res.clone().json(); if (j && j.state === 'launching') { window.__vsHeld++; await new Promise((r) => setTimeout(r, 4000)); } } } catch {} return res; }; return 'on'; })()`;
   for (const pg of [desk, phone]) await pg.ev(HOLD);
-  const n2 = await cli('vibespace-browser', ['new', 'Kept', '--backend', 'desktop-app', '--keep-profile', '--mode', 'pixels']);
+  const n2 = await cli('vibespace-browser', ['new', 'Kept', '--backend', 'desktop-app', '--keep-profile', '--mode', 'pixels', '--url', url.replace(/\/rung$/, '/popups')]); // B-dbb4 unit 2: the popup page
   const H2 = (/handle (\S+)/.exec(n2.out) || [])[1];
   const rec2 = await until(async () => { const j = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps`)).json(); const a = (j.apps || []).find((x) => x.id === H2); return a && a.state === 'ready' ? a : null; }, 90000, 500);
   check(`a second desktop browser with --keep-profile (${H2})`, n2.code === 0 && !!rec2 && rec2.keepProfile === true, n2);
@@ -272,6 +276,29 @@ try {
   const shot2 = path.join(PNG_DIR || scratch('da-rung-png'), 'e2c-pixels-screenshot.png'); let ss2 = null, dims2 = null;
   await until(async () => { ss2 = await cli('vibespace-window', ['screenshot', H2, '--out', shot2]); dims2 = pngDims(shot2); return dims2 && dims2[0] === 1920 && dims2[1] === 1080 ? true : null; }, 90000, 3000);
   check(`e2c: vibespace-window screenshot of the --mode pixels browser is exactly 1920×1080 (${dims2 ? dims2.join('×') : 'no PNG'})`, !!dims2 && dims2[0] === 1920 && dims2[1] === 1080, { ss2, dims2 });
+  // B-dbb4 unit 2 (r772), THE STAND-IN on the REAL chromium: a click opens the page's two popups; THE LAW — every window of the
+  // app is either IN the image or NAMED with its own handle (never a silent stay on the first window), and a named window's own
+  // handle gives THAT window's image. Printed whole (a MEASURE of where xpra puts a popup the page placed)
+  {
+    const hits0 = hits.length;
+    const ckP = await cli('vibespace-window', ['click', H2, '--at', '960,540']);
+    const opened = await until(async () => (hits.slice(hits0).some((h) => /^\/p1\b/.test(h.url)) && hits.slice(hits0).some((h) => /^\/p2\b/.test(h.url)) ? true : null), 30000, 500);
+    check(`B-dbb4 stand-in: a REAL click on the page opened its two top-level popups (the server saw /p1 and /p2 load)`, ckP.code === 0 && !!opened, { ckP, hits: hits.slice(hits0).map((h) => h.url) });
+    const shotP = path.join(PNG_DIR || scratch('da-rung-png'), 'dbb4-popups.png'); let ssP = null, acc = null;
+    await until(async () => {
+      ssP = await cli('vibespace-window', ['screenshot', H2, '--out', shotP]);
+      const composed = Number((/(\d+) windows of the app composed in this image/.exec(ssP.out) || [])[1] || 1);
+      const named = [...ssP.out.matchAll(/its own handle `([^`]+)`/g)].map((m) => m[1]);
+      acc = { composed, named };
+      return composed + named.length >= 3 ? acc : null; // the main window + the two popups, each accounted for
+    }, 30000, 2000);
+    console.log(`    MEASURE B-dbb4 (not a proof): after the click the screenshot of ${H2} says: ${JSON.stringify((ssP && ssP.out || '').trim().slice(0, 1600))}`);
+    check(`B-dbb4 THE LAW on the real chromium: every window of the app is in the image or NAMED with its own handle — ${acc ? `${acc.composed} composed + ${acc.named.length} named` : 'not accounted'} (main + 2 popups)`, !!acc && acc.composed + acc.named.length >= 3, { ssP, acc });
+    const own = [];
+    for (const h of (acc && acc.named) || []) { const f = path.join(PNG_DIR || scratch('da-rung-png'), `dbb4-${h}.png`); const r = await cli('vibespace-window', ['screenshot', h, '--out', f]); own.push({ h, code: r.code, dims: pngDims(f), subject: /this image is ONE window of the app: /.test(r.out), out: r.out.trim().slice(0, 300), err: r.err.trim().slice(0, 300) }); }
+    console.log(`    MEASURE B-dbb4 (not a proof): each named window's own screenshot: ${JSON.stringify(own)}`);
+    check(`B-dbb4 unit 2 on the real chromium: each named window's OWN handle gives that window's own image (${own.length} named)`, own.every((x) => (x.code === 0 && x.subject && x.dims) || /\[window_not_visible\]/.test(x.err)), own);
+  }
   // lane e2-canvas (THE SECOND E2 CHROME PATH, 4/6 at 1 and 2 lanes after the first race's fix): xpra 6.5.4 closes a connection
   // whose packet beats its threaded hello answer (server/base.py handle_invalid_packet ⇒ proto.close(), no disconnect packet ⇒
   // the viewer's 1005, every retry racing again) — the bridge's pin ask right behind the hello was that packet. On the REAL xpra:

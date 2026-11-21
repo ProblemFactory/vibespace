@@ -28,17 +28,21 @@ function unshownOf(rows, plan) {
   }
   return out.sort((a, b) => b.w * b.h - a.w * a.h).slice(0, UNSHOWN_KEEP);
 }
-/** …and the agent's words for them: what each is, where, why the image leaves it out, and how it can be reached. '' when none. */
+/** B-dbb4 unit 2 (r772): ONE window of an app as a call's subject — `<handle>.w<hex X id>`: its own image, origin and --at. */
+const SUB_RE = /^(.+)\.w([0-9a-f]{1,8})$/i;
+function subHandle(handle, id) { return `${String(handle || '')}.w${(Number(id) >>> 0).toString(16)}`; }
+/** …and the agent's words for them: what each is, where, why the image leaves it out, and how to reach it — by ITS OWN handle
+ *  (the agent chooses it: its screenshot, --at, keys); an unmapped one has no pixels until the user's live view shows it. */
 function unshownText(list, handle = '<handle>') {
   const rows = Array.isArray(list) ? list.filter((u) => u && u.why) : [];
   if (!rows.length) return '';
   const WHY = {
-    unmapped: 'it has no pixels on the display yet (nobody shows it) — the user\'s live view of the app shows it (`vibespace-window watch ' + handle + '` names where)',
-    outside: 'it sits up-left of the main window without covering it (this image starts at the main window\'s top-left), so no --at of this image reaches it — the user sees it in the live view (`vibespace-window watch ' + handle + '` names where): ask them to finish or move it',
-    clipped: 'it reaches beyond this image\'s pinned size — `vibespace-window size ' + handle + ' auto` shows the whole window',
+    unmapped: 'it has no pixels on the display yet (nobody shows it): its handle reaches it once the user\'s live view of the app shows it (`vibespace-window watch ' + handle + '` names where)',
+    outside: 'it sits up-left of the main window without covering it (this image starts at the main window\'s top-left)',
+    clipped: 'it reaches beyond this image\'s pinned size',
   };
-  const one = (u) => `«${u.title || 'untitled'}» ${u.w}x${u.h} at ${u.x},${u.y} of this image: ${WHY[u.why] || u.why}`;
-  return `this app has ${rows.length} more window(s) this image does not show — ${rows.map(one).join('; ')}`;
+  const one = (u) => `«${u.title || 'untitled'}» ${u.w}x${u.h} at ${u.x},${u.y} of this image: ${WHY[u.why] || u.why} — its own handle \`${subHandle(handle, u.id)}\``;
+  return `this app has ${rows.length} more window(s) this image does not show — ${rows.map(one).join('; ')}. A window's own handle makes it the subject: \`vibespace-window screenshot <its handle>\`, then \`click <its handle> --at x,y\` / \`key\` / \`type\` / \`scroll\` on THAT window's pixels`;
 }
 
-module.exports = { unshownOf, unshownText, UNSHOWN_MIN_PX, UNSHOWN_KEEP };
+module.exports = { unshownOf, unshownText, UNSHOWN_MIN_PX, UNSHOWN_KEEP, SUB_RE, subHandle };
