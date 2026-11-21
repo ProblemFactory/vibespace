@@ -16037,14 +16037,15 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
   If any file fails, or a SECOND RUN over the texts it would write plans anything, nothing is written and the run exits 1. ON DISK too: every file is written to a temp first and renamed only once all stand; a failed temp write removes every temp (nothing changed), a failed rename says its one restore step (`git checkout -- scripts`).
 - **The apply's proof (the integrator's, on the block's assembled tip as its last line; the tool prints it):** the dry run says NOTHING TO DO after it; the stale-pin scan over the APPLIED diff (a negative pin over an edited line stays green in any tier run); the whole fast tier in both zones; every heavy suite it edited; the vacuous legs the first run lists, each cured or named. `--coordinator-word` is a word the integrator types, not a second check.
 - **The list:** scripts/fixtures/unguarded-helpers.json is LOWERED to what the census reads after the run, over the file set §7b reads (scripts/lib/check.mjs counted, never a target). A row only falls; it is never added or raised. §7b's leg asks that the list was READ (its `files` map), no longer that it is long.
-- **At 2.369.414 (a117cebb8), the dry run** (1378 scripts; about 30 s on one core):
+- **At 2.369.414 (a117cebb8) with both cures, the dry run** (run on the test machine as a probe suite, about 60 s; nothing of a lane runs on the hub's box):
   - It guards 1103 helpers in 1034 files: 1074 arrow blocks, 13 functions, 16 arrow expressions.
-  - The census reads 1119 unguarded before and 16 after.
-  - Of 80 432 calls, 42 061 are wrapped (around 67 167 operands) and 38 371 are booleans by their operator.
+  - The census reads 1118 unguarded before and 15 after.
+  - Of 80 433 calls, 42 062 are wrapped in the coercion (around 67 166 operands) and 38 371 are booleans by their operator.
+  - 3 files bind their own `verdictOf` and import the coercion as `verdictOfGuard`: test-enter-census, test-store-write-census, test-user-todos-layout.
   - Left by rule: 13 (exported 1: ci-gate-kit's `ok`, which the test-ci-gate-* suites share; handed on as a value 9; a call by spread 1; a direct eval 2).
-  - Plants: 3. Guarded but no longer read by the census: 1 (test-conversation-index line 10).
+  - Plants: 2. Guarded but no longer read by the census: 1 (test-conversation-index line 10).
   - Self-check failures: 0. The second run plans nothing.
-  - The list goes from 1051 rows / 1121 to 16 / 16.
+  - The list goes from 1051 rows / 1121 to 15 / 15.
 - **Not caught (said):** a swap whose name is a VARIABLE (`check(cond, label)` against a name-first helper): the tool wraps `label`, which coerces as before (a string is not a promise). The leg stays as vacuous as it was.
 - **The generator:** scripts/harness-new.mjs's suite skeleton takes `checker()` (no inline helper): test-harness-add-census §5, with its anchored RED.
 - **test-guard-inline-helpers (fast):** fixtures of each shape (an arrow block; a name-first function called above its hoisted definition; two expression arrows; a shadowing parameter and an inner block; plants in a string, a template, a line comment and a block comment; two helpers, one inside the other's condition; a helper that hands its condition back; a clock bound in an && chain) and each call kind. Every guarantee has an ANCHORED mutant of the tool as its RED:
