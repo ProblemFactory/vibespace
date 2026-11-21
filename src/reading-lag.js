@@ -352,8 +352,61 @@ function isolatedPanelAnchorVerdict({ anchor = null, panelWindow = null, apiWind
   return { action: 'keep', reason: 'no weekly phase to compare' };
 }
 
+// ── THE HELD ROW'S DOOR, ONE PURE VERDICT (B-6a92 r8, 主开发 r873 / r879) ────────────────────────────────────────────────
+// A row whose readings name ANOTHER account's weekly window is HELD (its own window unknown) until its own proven read. The
+// engine gathers the facts and executes the act; it decides nothing. ONE notion of «the same account»: the identity group's —
+// the organisation first, else the address (src/usage-anchors.js identityKeyFor) — as in the pool and the estimator.
+//   rowKey  the row's own identity as its RECORD says it — the group's key 'org:…' / 'email:…' — or null (nothing names it).
+//           Never the row's folder's login: the folder is evidence of who ANSWERS, not of who the row is.
+//   held    [{name, inGroup, login: {org, email} | null}] — each held name: in the row's own identity group or not, and its login
+//           as the one reader gives it (null: none can be read)
+//   answer  the login that answered {org, email} | null — the panel's own, else the folder's it ran through
+//   onHeld  the answer's weekly window is the held one
+//   panel   {refused, verified, phase, org} — the panel's own identity verdict
+// THE LAW: another account's window reaches a row ONLY by that row's own proven read (the answer IS the row's identity); an
+// answer that IS another held account's is refused, naming that account; unknown never lifts; the row's own account under
+// any name (its group, or a login that is its identity — merged or not) is never «another».
+// → {act: 'lift'} the held window is the row's own proven read · {act: 'own'} verified on its own window by its own read (the
+//   hold ends) · {act: 'unhold'} no other account is held (the row's own names only) · {act: 'refuse', code, names} · {act: 'none'}
+const loginKeyOf = (l) => (l && l.org ? 'org:' + String(l.org).toLowerCase() : l && l.email ? 'email:' + String(l.email).trim().toLowerCase() : null);
+const loginIsKey = (l, key) => {
+  if (!l || typeof key !== 'string') return false;
+  if (key.startsWith('org:')) return !!l.org && 'org:' + String(l.org).toLowerCase() === key;
+  if (key.startsWith('email:')) return !!l.email && 'email:' + String(l.email).trim().toLowerCase() === key;
+  return false;
+};
+/** Every refusal's remedy and the state it leads to — ONE column (the table leg applies each and checks the state). */
+const HELD_REFUSALS = {
+  'signed-in-as': { remedy: 'sign-in-own', leadsTo: 'proven' },     // the row's folder holds a held account's login
+  'other-answered': { remedy: 'sign-in-own', leadsTo: 'proven' },   // the row's folder holds a login that is not the row's (by its record)
+  'answer-unnamed': { remedy: 'sign-in-own', leadsTo: 'proven' },   // nothing names whose login answered
+  'row-unknown': { remedy: 'sign-in-own', leadsTo: 'proven' },      // nothing on file names which account the row is
+};
+function heldLiftVerdict({ rowKey = null, held = [], answer = null, onHeld = false, panel = {} } = {}) {
+  const own = (h) => !!h.inGroup || loginIsKey(h.login, rowKey);
+  const others = (held || []).filter((h) => h && !own(h));
+  const aKey = loginKeyOf(answer);
+  const proven = !!rowKey && loginIsKey(answer, rowKey);
+  const p = panel || {};
+  const liftable = p.org !== 'differ' && (p.refused ? (!!onHeld && p.phase === 'differ') : !!p.verified);
+  if (!others.length) return onHeld && liftable && proven ? { act: 'lift' } : { act: 'unhold' };
+  if (p.org === 'differ') return { act: 'none' };
+  if (rowKey && aKey) {
+    const hit = others.filter((h) => loginKeyOf(h.login) === aKey);
+    if (hit.length) return { act: 'refuse', code: 'signed-in-as', names: hit.map((h) => h.name) };
+  }
+  if (!liftable) return { act: 'none' };
+  if (!onHeld) return proven ? { act: 'own' } : { act: 'none' };
+  const names = others.map((h) => h.name);
+  if (!rowKey) return { act: 'refuse', code: 'row-unknown', names };
+  if (!aKey) return { act: 'refuse', code: 'answer-unnamed', names };
+  if (!proven) return { act: 'refuse', code: 'other-answered', names };
+  return { act: 'lift' };
+}
+
 module.exports = {
   WEEK_SEC, JITTER_SEC, SHADOW_MS,
   weeklyPhase, weeklyNear, windowOf, windowFingerprint, windowSidecarName, apiWindowSidecarName, compareWindows,
   decideLagShadow, decideReadingTarget, isolatedPanelAnchorVerdict,
+  heldLiftVerdict, HELD_REFUSALS,
 };

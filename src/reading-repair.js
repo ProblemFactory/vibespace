@@ -1272,13 +1272,15 @@ function _readNdjson(f) {
  *  found to carry — the guard's own verdict on its copy (`entry.verdict.names`), else, for a reading archived before that field,
  *  the `matched` list every archived row has carried since the release. No account is guessed. Such a reading is THAT account's
  *  window, never this row's evidence: another known account's window reaches a row only by the row's own proven read. */
-function namedOthers(x, key) {
+function namedOthers(x, key, own = null) {
   const v = x && x.entry && x.entry.verdict;
   const list = v && Array.isArray(v.names) ? v.names : (Array.isArray(x && x.matched) ? x.matched : []);
-  return list.filter((k) => typeof k === 'string' && k && k !== key);
+  // r8 (主开发 r873, rule 1): every name of the row's own identity group is the row itself (the caller's group, else the key alone)
+  const mine = new Set([key, ...(Array.isArray(own) ? own : [])]);
+  return list.filter((k) => typeof k === 'string' && k && !mine.has(k));
 }
 /** The API phase of ONE account from the three evidence sources, or `top: null`. */
-function apiPhaseFor({ key, anchorRows, mismatchRows, apiwin = null, now = Date.now(), horizonMs = API_PHASE_HORIZON_MS, minRows = API_PHASE_MIN_ROWS, dominance = API_PHASE_DOMINANCE }) {
+function apiPhaseFor({ key, anchorRows, mismatchRows, apiwin = null, now = Date.now(), horizonMs = API_PHASE_HORIZON_MS, minRows = API_PHASE_MIN_ROWS, dominance = API_PHASE_DOMINANCE, own = null }) {
   const hist = new Map();
   // `.apiwin-` is NOT a source (final verifier): it is the witness this repair
   // is judging, and counting it let one poisoned live entry vote for itself.
@@ -1303,7 +1305,7 @@ function apiPhaseFor({ key, anchorRows, mismatchRows, apiwin = null, now = Date.
     // a row written before the field existed is judged on `slotOk` as before
     if (wt && wt.ok === false) { sources.skipped++; continue; }
     // B-6a92 r5: a reading the guard found to name ANOTHER known account's window is that account's, not this row's evidence
-    if (namedOthers(x, key).length) { sources.named++; continue; }
+    if (namedOthers(x, key, own).length) { sources.named++; continue; }
     _tallyPhase(hist, Number(ev.resetsAt), x.at); sources.archived++;
   }
   void apiwin;
@@ -1313,7 +1315,7 @@ function apiPhaseFor({ key, anchorRows, mismatchRows, apiwin = null, now = Date.
 
 /** THE standing identity repair. Same contract as the other two: archive,
  *  never destroy; every archived row carries a reason; idempotent; atomic. */
-function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id = 'sidecars-by-api-phase', now = Date.now(), horizonMs = API_PHASE_HORIZON_MS, readmitMs = READMIT_HORIZON_MS } = {}) {
+function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id = 'sidecars-by-api-phase', now = Date.now(), horizonMs = API_PHASE_HORIZON_MS, readmitMs = READMIT_HORIZON_MS, ownIdsOf = null } = {}) {
   const t0 = Date.now();
   const cacheDir = path.join(dataDir, 'usage-cache');
   const archiveDir = path.join(dataDir, 'archive');
@@ -1333,7 +1335,8 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
   for (const key of ids) {
     const apiwinPath = path.join(cacheDir, apiWindowSidecarName(key));
     const apiwin = _readCacheJson(apiwinPath);
-    const ev = apiPhaseFor({ key, anchorRows, mismatchRows, apiwin, now, horizonMs });
+    let own = null; try { own = typeof ownIdsOf === 'function' ? ownIdsOf(key) : null; } catch { own = null; }   // B-6a92 r8: the row's own identity group
+    const ev = apiPhaseFor({ key, anchorRows, mismatchRows, apiwin, now, horizonMs, own });
     const row = { key, name: nameOf(key), apiPhase: null, resetsAt: null, n: 0, of: ev.total, sources: ev.sources, sidecar: 'no-evidence', sidecarWas: null, apiwin: 'kept', cache: 'kept', readmitted: 0 };
     report.identities.push(row);
     if (!ev.top) { report.counts.noEvidence++; continue; }
@@ -1428,7 +1431,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
       .filter((x) => {
         const e = x.entry && x.entry.ev, sl = x.entry && x.entry.slot;
         if (!e || !sl || !sl.slotOk || e.status === 'rejected' || !(Number(e.resetsAt) > 0)) return false;
-        if (namedOthers(x, key).length) return false;   // B-6a92 r5: another known account's reading is never written back on this row
+        if (namedOthers(x, key, own).length) return false;   // B-6a92 r5: another known account's reading is never written back on this row
         if (e.kind === 'sevenDay' || (e.kind === 'scoped' && e.scopedName)) return weeklyNear(e.resetsAt, api) === true;
         return false;
       })

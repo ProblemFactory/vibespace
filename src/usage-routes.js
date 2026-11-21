@@ -607,6 +607,17 @@ const acctNameOf = (id) => { try { return (accounts.list().accounts || []).find(
 // B-6a92 r7: the held accounts by LABEL in a sentence a person reads — the machine's own login by what it is, a name holding «@»
 // (an address) or no name: «another account»
 const heldWho = (ids) => ids.map((id) => { if (id === '__global__') return "this machine's own login (CLI login)"; const n = acctNameOf(id); return typeof n === 'string' && n && n !== id && !n.includes('@') ? n : 'another account'; }).join(', ');
+// B-6a92 r8 (主开发 r873 item 4): EVERY REFUSAL OF THE HELD ROW'S DOOR, by the verdict's code — the sentence and its remedy, which
+// is the remedy column of reading-lag HELD_REFUSALS (all four: sign the row in again with its own account → its next read is its
+// own proven read). Rows by LABEL; no identity value ever.
+const heldRefusalWords = (code, key, names) => {
+  const id = acctNameOf(key), me = typeof id === 'string' && id && id !== key && !id.includes('@') ? id : 'this account', them = heldWho(names);
+  const remedy = `sign ${me} in again with its own account — its next own read then proves its window`;
+  if (code === 'signed-in-as') return `${me}'s sign-in folder is signed in as ${them}: this read answered as ${them}, which proves nothing about ${me}'s own window — ${remedy}`;
+  if (code === 'other-answered') return `${me}'s sign-in folder is signed in as an account that is not ${me}'s own (by its record): this read proves nothing about ${me}'s window (its readings name ${them}'s) — ${remedy}`;
+  if (code === 'answer-unnamed') return `this read answered in ${them}'s weekly window, but ${me}'s sign-in folder names no login, so whose read it was cannot be told — ${remedy} (the sign-in records its login)`;
+  return `this read answered in ${them}'s weekly window, but nothing on file names which account ${me} is, so it cannot prove ${me}'s window — ${remedy} (the sign-in records which account it is)`;
+};
 /** Re-seed the account's isolated probe config dir: the onboarding flags the
  *  login seed writes + the account's OWN oauthAccount, nothing else. */
 function seedProbeConfigDir(credsDir, probeConfigDir) {
@@ -663,7 +674,7 @@ function panelIdentityVerdict({ key, cliPanel, expected, before, after, apiWin, 
     // B-6a92 r5: WHILE A HOLD STANDS no run of readings re-anchors the row (they name another known account's window) — the
     // sentence says the one road that does: the row's own read answering in a window
     + (held && Array.isArray(held.names) && held.names.length
-      ? ` — ${me}'s own weekly window is unknown: its readings name ${heldWho(held.names)}'s window, and no run of them re-anchors it; ${me}'s own /usage read proves its window when it answers in ${me}'s own window, or in that one through a login that is not ${heldWho(held.names)}'s`
+      ? ` — ${me}'s own weekly window is unknown: its readings name ${heldWho(held.names)}'s window, and no run of them re-anchors it; ${me}'s own /usage read proves its window when the login that answers is ${me}'s own account (by its record)`
       : movedLikely ? ` — but ${ringAgree} of ${me}'s own last ${ring.length} API readings share the panel's window: ${me}'s weekly window may have MOVED; ${ringK} consecutive agreeing readings re-anchor it automatically (or run the identity repair)` : '');
   else if (verified) why = org === 'agree' ? `panel org matches ${me}'s own login` : `panel weekly window matches ${me}'s API-derived window (${windowFingerprint(apiWin)})`;
   else if (shared) why = `panel weekly window matches ${me}'s API-derived window (${windowFingerprint(apiWin)}) but that phase is shared with ${matched.map(acctNameOf).join(', ')} — not identifying; the panel names no org`;
@@ -816,23 +827,10 @@ async function refreshViaCliPanel(key) {
   // answering in the window its readings were held on (an honest shared window) it is the row's proven read: the hold ends,
   // the window is stamped there and the numbers below are written as verified; verified on its own window, the hold ends too
   if (idv && !isGlobal && typeof app.locals.liftHeldWindow === 'function') {
+    // r8 (主开发 r873): the engine executes ONE PURE VERDICT (reading-lag heldLiftVerdict) — here only its act becomes the answer
     const lift = app.locals.liftHeldWindow(key, idv);
-    if (lift && lift.onHeld) idv = { ...idv, refused: false, verified: true, verifiedBy: 'own-panel', why: `${acctNameOf(key)}'s own /usage read answered in the weekly window its readings were held on — its own read proves it: stamped there, the hold ended` };
-    // r6 (主开发 r814, THE MUST): the login that answered IS a held account's (this row's folder signed in as it), or whose login
-    // answered cannot be told — NO lift and NOTHING written; the words say what is true (the identity itself is never printed)
-    else if (lift && lift.refused) {
-      // r7: rows named by their LABEL — the machine's own login by what it is, a name holding «@» (an address) never: «another account»
-      const label = (id, other) => { if (id === '__global__') return "this machine's own login (CLI login)"; const n = acctNameOf(id); return typeof n === 'string' && n && n !== id && !n.includes('@') ? n : (other ? 'another account' : 'this account'); };
-      const me = label(key, false), them = (lift.names || []).map((n) => label(n, true)).join(', ');
-      const unknownWhy = {
-        'answer-unnamed': `${me}'s sign-in folder names no login to tell it from ${them} — signing ${me} in again (the sign-in records its login) settles it`,
-        'held-unread': `the login behind ${them} cannot be read on this hub, so this read cannot be told from it — ${me}'s own window stays unknown until its own readings come back to its own window`,
-        'incomparable': `both sign-in folders name a login, but the two cannot be told apart (one names only an organisation, the other only an address, or one organisation without both addresses) — signing ${me} in again (the sign-in records both) settles it`,
-      };
-      idv = { ...idv, refused: true, verified: false, why: lift.refused === 'signed-in-as'
-        ? `${me}'s sign-in folder is signed in as ${them}: this read answered as ${them}, which proves nothing about ${me}'s own window — sign ${me} in again with its own account (its own window stays unknown until then)`
-        : `this read answered in ${them}'s weekly window, but ${unknownWhy[lift.why] || unknownWhy['answer-unnamed']}` };
-    }
+    if (lift && lift.act === 'lift') idv = { ...idv, refused: false, verified: true, verifiedBy: 'own-panel', why: `${acctNameOf(key)}'s own /usage read answered in the weekly window its readings were held on — its own read proves it: stamped there, the hold ended` };
+    else if (lift && lift.act === 'refuse') idv = { ...idv, refused: true, verified: false, why: heldRefusalWords(lift.code, key, lift.names || []) };
   }
   probeRec.identity = { org: idv.org || null, phase: idv.phase || null, expected: idv.expected, panel: idv.panel, matched: idv.matched, shared: !!idv.shared, movedLikely: !!idv.movedLikely, apiWindow: idv.apiWindow || null };
   probeRec.identityVerified = idv.verified;
