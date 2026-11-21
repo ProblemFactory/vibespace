@@ -11,6 +11,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When an agent's own browser stops by itself, its live view now says why: it sat idle past its timeout, or it ended early for a reason VibeSpace does not know.
 - `vibespace-vault uses` keeps ended approvals across a restart and while the agent cannot use the entry, and says «used» for a one-time run past its hours.
 - On a paired machine with more than 500 project folders, the newest conversations now show in its list; they could be missing.
+- Manage agents: long-lived token notes name the menu item to use; an account whose token expired offers «Long-lived token (expired)…» where it is refused.
+- When VibeSpace stops starting a browser, its live window shows «Agent browser…» right beside the message, instead of a menu path.
 
 ## 2.369.415 — 2026-11-21
 
