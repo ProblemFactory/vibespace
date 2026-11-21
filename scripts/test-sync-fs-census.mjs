@@ -40,6 +40,7 @@ const ROWS = [
   ["server.js", "ensureDir", 2, "local-only", "callers pass only data dirs: USAGE_CACHE_FILE's dir (usage-routes), SOCKETS_DIR/BUFFERS_DIR (ws-create), AGENTD_DIR (spawn/ssh, spawn/dial)."],
   ["server.js", "refreshWebuiPids", 1, "local-only", "metaPath = BUFFERS_DIR/<session id>.json; BUFFERS_DIR = <checkout>/data/session-buffers."],
   ["server.js", "checkAgentHookHealth", 2, "local-only", "HOOK_OPTOUT_FILE = <checkout>/data/.agent-hooks-optout, HOOK_CMD = <checkout>/data/bin/vibespace-hook.mjs (agent-tool-generators.js)."],
+  ["server.js", "hooksWanted", 1, "local-only", "HOOK_OPTOUT_FILE = <checkout>/data/.agent-hooks-optout (agent-tool-generators.js): whether this machine's helper run carries our hook entries (B-ddf3 unit 2 line 1, lane bl-scratch: the plan read when a run starts)."],
   ["src/account-material.js", "repointPoolSymlink", 4, "local-only", "linkPath/creds under <dataDir>/subs (accounts.js pool/session links) or data/browser-env/<key>.profile; targetDir is only symlink text."],
   ["src/account-material.js", "writePrivateFile", 4, "local-only", "dest = files of an account dir <dataDir>/<subsDirName>/<id> (accounts.js L678/L753/L760 _acctDir/subCredsPath)."],
   ["src/account-material.js", "moveCredentialArchives", 3, "local-only", "fromDir/intoDir = two account dirs under <dataDir>/subs (accounts.mergeSubscription, accounts.js:765)."],
