@@ -1922,14 +1922,19 @@ console.log('— ⑪ the agent\'s own set viewport: the answer line (applied / p
   // the user drives: browser_paused + the page's size (their pane rules), nothing ran
   keeper.takeover({ browserKey: KEY_B, profileId: pV.id, viewerId: 77, sessionId: 'sess-vp' });
   const c4e = await runCli(['set', 'viewport', '800', '600']);
-  keeper.handback({ browserKey: KEY_B, profileId: pV.id, cause: 'explicit', pressed: PRESS });
+  const hb5 = keeper.handback({ browserKey: KEY_B, profileId: pV.id, cause: 'explicit', pressed: PRESS });
   clock += 1000; // (the keeper's injected clock: the next command resolves AFTER that takeover — ⑧'s rule)
   ok(c4e.status === 1 && /\[browser_paused\]/.test(c4e.stderr) && c4e.stdout.split('\n').includes('viewport: 1024x768 — the user drives this browser and their pane rules its size, your 800x600 did not apply') && sized(800, 600) === 0,
     'E2E the user drives: refused [browser_paused] AND the answer says the page\'s size — their pane rules it; nothing ran', `${c4e.status} ${c4e.stdout.slice(-200)} ${c4e.stderr.slice(-300)}`);
   // a page that answers no layout viewport: unreadable, by name
+  // r1649 (the load row — seen red at bb81af32f-20261121223637-both, UTC, once: status 1, NOTHING on stdout, and the detail kept
+  // no stderr, so the refusal's own words were lost): its PREMISE is the hand back above — the keeper's own answer, now read
+  // (a hand back it refused leaves the user driving, and this set is then refused [browser_paused]: no verdict on the page);
+  // and the leg's detail keeps stderr, so whatever ends the CLI says itself
+  ok(!!hb5 && hb5.ok !== false, 'E2E the premise of the next leg: the hand back above TOOK (the keeper\'s own answer) — the user no longer drives', JSON.stringify({ ok: hb5 ? hb5.ok : null, why: hb5 ? (hb5.why || hb5.code || hb5.reason || null) : null }));
   fs.writeFileSync(pageFile, JSON.stringify({ w: 1024, h: 768, nolayout: true }));
   const c5e = await runCli(['set', 'viewport', '1100', '700']);
-  ok(c5e.status === 0 && c5e.stdout.split('\n').includes('viewport: unreadable (the page answered no layout viewport) — you asked 1100x700; the size the page took is not known') && sized(1100, 700) === 1, 'E2E a page that cannot be read: the set ran, the answer says unreadable by name — never a guessed number', `${c5e.status} ${c5e.stdout.slice(-300)}`);
+  ok(c5e.status === 0 && c5e.stdout.split('\n').includes('viewport: unreadable (the page answered no layout viewport) — you asked 1100x700; the size the page took is not known') && sized(1100, 700) === 1, 'E2E a page that cannot be read: the set ran, the answer says unreadable by name — never a guessed number', `${c5e.status} ${c5e.stdout.slice(-300)} · stderr: ${c5e.stderr.slice(-400)}`);
   bE.shutdown(); wssC.close();
 }
 
