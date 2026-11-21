@@ -18,22 +18,33 @@
 //
 // THE PERSON'S OWN LATER EDIT (C): the CLI puts back all or nothing, so no file can be left out and a refusal would be a dead
 // end. The press stays the person's, INFORMED: each listed file is judged (changedAfterOf), and when any is not plainly «same»
-// the choice drawn as selected is «the conversation only» (defaultChoiceOf). A file reads «same» ONLY when every edit the agent
-// made of it after the target happened IN THE TARGET'S OWN TURN, none of them was refused, and the file's time sits at the
-// agent's last edit of it. Anything else is «changed» or «could not be checked», with its reason — because a person's edit can
-// hide BETWEEN two of the agent's edits (the agent's later edit makes the file's time its own again), and the records say
-// nothing of it but across a turn boundary or by a refused edit. Failing safe: over-naming, never a silent overwrite. (主开发
-// said «against the backup's time»: the backups are taken at the person's messages, so that alone names every file the agent
-// edited after its latest backup as the person's — the turn rule keeps that safety where it matters.)
+// the choice drawn as selected is «the conversation only» (defaultChoiceOf). THE LAW (主开发 r1232): «same» is said ONLY where
+// the records PROVE that nothing but the agent's own write touched the file since its backup's moment; where they cannot,
+// «could not be checked». THE BACKUP'S MOMENT: the capture does not state it (it was not asked) — so the STRICTER reading is
+// taken: a file the agent edited before the target may have been backed up AT the target's message, and a person's edit after
+// that message would then be lost. «same» therefore needs ALL of: the agent made EXACTLY ONE successful edit of it after the
+// target, in the target's own turn, none refused, it never edited that file before the target in this conversation's records,
+// and the file's time sits at that one edit (1 s after, 5 s before: the one-second grain of the clocks and file times). A
+// person's save between two of the agent's edits, across a turn, under a refused edit, or after an earlier edit's backup is
+// then never a silent «same». Over-naming, never a silent overwrite.
 // AT THE PRESS the dry run is asked AGAIN and judged again: a list or a state that is not the one the confirm drew refuses
 // `changed-since` (the person sees the new list) — the files moved under the confirm (sameDrawOf).
 //
 // «BOTH» (7): dry runs first; then the files, then the conversation; each result said on its own (outcomeOf) — a second step
 // that fails leaves the first said as done; a files step that failed mid-way may have put some files back (said so).
 //
-// PURE: imports only src/rewind-door.js (PURE: the conversation door's one verdict — its refusals are this door's too).
+// A MESSAGE WHOSE CONVERSATION WAS ALREADY TAKEN BACK: nothing is offered there in this tier (主开发 r1232, reversing r1230:
+// its turn is a dead branch — every file judged against it reads «could not be checked»; a row of its own if asked).
+//
+// THE EDIT HISTORY is the normalizer's own records (主开发 r1230: no file read): its tool messages (`tool_result` blocks with
+// the tool's name, its input, its status and `resultAt` — the CLI's own time of the result, the clock of the machine the files
+// are on) and the turn starts between them (src/rewind-cut.js startsATurn).
+//
+// PURE: imports only src/rewind-door.js (PURE: the conversation door's one verdict — its refusals are this door's too) and
+// src/rewind-cut.js (PURE: what starts a turn).
 
 const DOOR = require('./rewind-door.js');
+const { startsATurn } = require('./rewind-cut.js');
 
 const CHOICES = Object.freeze(['conversation', 'files', 'both']);
 const CONVERSATION_ONLY = Object.freeze(['conversation']);
@@ -51,7 +62,9 @@ const FILES_REFUSALS = Object.freeze({ 'files-off': 'cannot', 'not-a-choice': 'c
 const HIGH_SLACK_MS = 1000;
 const LOW_SLACK_MS = 5000;
 // why a file reads «could not be checked» (the confirm words each)
-const UNKNOWN_WHY = Object.freeze(['target-not-found', 'no-edit-known', 'refused-edit', 'several-turns', 'unreadable', 'older-time']);
+const UNKNOWN_WHY = Object.freeze(['target-not-found', 'no-edit-known', 'refused-edit', 'edited-before', 'several-edits', 'several-turns', 'unreadable', 'older-time', 'over-bound']);
+// the files ONE confirm judges (the door reads their times); a list past it: the rest «could not be checked: over-bound»
+const MAX_FILES = 64;
 
 /** the choices the confirm draws: the files ones only where the conversation's own facts say checkpoints are on AND its dry run
  *  listed files it can name (a dry run that refused, or listed none, draws the conversation only) */
@@ -69,7 +82,7 @@ function stepsOf(choice, offered = CHOICES) { return Array.isArray(offered) && o
  *  uuid) `not-offered`; one where it is not drawn (`state.fileCheckpoints` off, or the dry run's) `files-off` */
 function filesVerdict(checkpoints, msg, state = {}, choice = 'conversation', dry = null) {
   if (!Object.prototype.hasOwnProperty.call(STEPS, choice)) return { ok: false, reason: 'not-a-choice', cls: FILES_REFUSALS['not-a-choice'] };
-  const v = DOOR.rewindVerdict(checkpoints, msg, state);
+  const v = DOOR.rewindVerdict(checkpoints, msg, state);   // a message already taken back: refused here too (r1232)
   if (!v.ok) return v;
   if (choice !== 'conversation' && (!checkpoints || checkpoints.granularity !== 'message')) return { ok: false, reason: 'not-offered', cls: DOOR.REWIND_REFUSALS['not-offered'] };
   const steps = stepsOf(choice, choice === 'conversation' ? CHOICES : choicesOf({ checkpoints: state.fileCheckpoints === true, dry }));
@@ -101,51 +114,50 @@ function filesAnswerOf(reply, { dryRun = false } = {}) {
   return { ok: true, dryRun, files: [...new Set(list)], filesKnown, plus: count(reply.insertions), minus: count(reply.deletions), skipped: count(reply.skippedLinks), reason: null, cls: null, text: null };
 }
 
-/** a user row that STARTS a turn (the person's, or one somebody else opened): not a tool result, not a meta or summary row */
-const startsTurn = (r) => {
-  if (!r || r.type !== 'user' || r.isMeta === true || r.isCompactSummary === true) return false;
-  const c = r.message && r.message.content;
-  if (typeof c === 'string') return true;
-  return Array.isArray(c) && c.length > 0 && !c.some((b) => b && b.type === 'tool_result');
-};
-/** THE AGENT'S EDITS of each file AFTER the target message, from the CLI's own records (EDIT_TOOLS): → {known: the target was
- *  found, byPath: {path: {at: the newest successful result's own timestamp, turnsAfter: how many turn starts lie between the
- *  target and that edit, refused: an edit of it was refused (the file changed under the agent)}}} */
-function lastEditsOf(records, { targetUuid } = {}) {
-  const asked = new Map(), byPath = {};
+/** THE AGENT'S EDITS of each file, from the NORMALIZER'S records (主开发 r1230): its tool messages' `tool_result` blocks of one of
+ *  the CLI's file tools (EDIT_TOOLS) naming a path, and the turn starts between → {known: the target was found, before: [path
+ *  the agent edited (successfully) BEFORE the target], byPath: {path: {at: the newest successful result's `resultAt`, count:
+ *  the successful edits after the target, turnsAfter: the turn starts between the target and the newest, refused: an edit of
+ *  it after the target was refused (the file changed under the agent)}}} */
+function editsFromMessages(messages, { targetId } = {}) {
+  const byPath = {}, before = new Set();
   let known = false, turn = 0;
-  for (const r of Array.isArray(records) ? records : []) {
-    if (!known) { if (r && typeof targetUuid === 'string' && r.uuid === targetUuid) known = true; continue; }
-    if (startsTurn(r)) { turn++; continue; }
-    const c = r && r.message && Array.isArray(r.message.content) ? r.message.content : [];
-    if (r && r.type === 'assistant') {
-      for (const b of c) {
-        if (!b || b.type !== 'tool_use' || !EDIT_TOOLS.includes(b.name) || !b.input || typeof b.id !== 'string') continue;
-        const p = typeof b.input.file_path === 'string' ? b.input.file_path : typeof b.input.notebook_path === 'string' ? b.input.notebook_path : null;
-        if (p) asked.set(b.id, p);
-      }
-    } else if (r && r.type === 'user') {
-      const at = Date.parse(r.timestamp);
-      for (const b of c) {
-        if (!b || b.type !== 'tool_result' || !asked.has(b.tool_use_id)) continue;
-        const p = asked.get(b.tool_use_id), e = byPath[p] || (byPath[p] = { at: null, turnsAfter: 0, refused: false });
-        if (b.is_error === true) { e.refused = true; continue; }
-        if (Number.isFinite(at) && !(e.at >= at)) { e.at = at; e.turnsAfter = turn; }
-        else if (turn > e.turnsAfter) e.turnsAfter = turn;
-      }
+  const editOf = (b) => {
+    if (!b || b.type !== 'tool_result' || !EDIT_TOOLS.includes(b.toolName) || !b.input) return null;
+    return typeof b.input.file_path === 'string' ? b.input.file_path : typeof b.input.notebook_path === 'string' ? b.input.notebook_path : null;
+  };
+  for (const m of Array.isArray(messages) ? messages : []) {
+    if (!known) {
+      if (m && typeof targetId === 'string' && m.id === targetId) { known = true; continue; }
+      for (const b of m && Array.isArray(m.content) ? m.content : []) { const p = editOf(b); if (p && b.status !== 'error') before.add(p); }
+      continue;
+    }
+    if (startsATurn(m)) { turn++; continue; }
+    for (const b of m && Array.isArray(m.content) ? m.content : []) {
+      const p = editOf(b);
+      if (!p) continue;
+      const e = byPath[p] || (byPath[p] = { at: null, count: 0, turnsAfter: 0, refused: false });
+      if (b.status === 'error') { e.refused = true; continue; }
+      e.count++;
+      const at = Number(b.resultAt);
+      if (Number.isFinite(at) && !(e.at >= at)) { e.at = at; e.turnsAfter = turn; }
+      else if (turn > e.turnsAfter) e.turnsAfter = turn;
     }
   }
-  return { known, byPath };
+  return { known, before: [...before], byPath };
 }
 
 /** (C) each file the dry run lists → {path, state, why}: 'same' (only as the header says), 'changed' (its time is past the agent's
  *  last edit of it), or 'unknown' with its reason (UNKNOWN_WHY) */
-function changedAfterOf(files, { mtimes = {}, edits = null } = {}) {
-  return (Array.isArray(files) ? files : []).map((path) => {
+function changedAfterOf(files, { mtimes = {}, edits = null, max = MAX_FILES } = {}) {
+  return (Array.isArray(files) ? files : []).map((path, i) => {
+    if (i >= max) return { path, state: 'unknown', why: 'over-bound' };
     if (!edits || edits.known !== true) return { path, state: 'unknown', why: 'target-not-found' };
     const e = edits.byPath && Object.prototype.hasOwnProperty.call(edits.byPath, path) ? edits.byPath[path] : null;
     if (!e || typeof e.at !== 'number' || !Number.isFinite(e.at)) return { path, state: 'unknown', why: e && e.refused ? 'refused-edit' : 'no-edit-known' };
     if (e.refused) return { path, state: 'unknown', why: 'refused-edit' };
+    if (Array.isArray(edits.before) && edits.before.includes(path)) return { path, state: 'unknown', why: 'edited-before' };
+    if (e.count !== 1) return { path, state: 'unknown', why: 'several-edits' };
     if (e.turnsAfter > 0) return { path, state: 'unknown', why: 'several-turns' };
     const m = mtimes ? mtimes[path] : undefined;
     if (typeof m !== 'number' || !Number.isFinite(m)) return { path, state: 'unknown', why: 'unreadable' };
@@ -173,8 +185,12 @@ function sameDrawOf(drawn, now) {
 }
 
 /** (7) the steps' results in their order → {done: [step], failed: step | null, notTried: [step], maybePartial}: a step that fails
- *  stops the ones after it; what was done before it stays said as done; a files step that failed mid-way may have put some
- *  files back (maybePartial — «no files were restored» says it did not) */
+ *  stops the ones after it; what was done before it stays said as done. A FILES STEP THAT FAILED (主开发 r1232 MUST 2) is «not
+ *  known: some files may have been put back» — a press with no answer, a CLI that died mid-press, words this door does not know —
+ *  EXCEPT where nothing was changed by construction: the CLI refused before it began (checkpoints off, no checkpoint), the door
+ *  refused before it sent (changed-since, or anything else it said itself), or the CLI said «No files were restored» (its own
+ *  words when every differing file failed — the capture's pressReply.allFailed) */
+const NO_CHANGE = Object.freeze(['checkpoints-off', 'no-checkpoint', 'changed-since']);
 function outcomeOf(steps, results) {
   const done = [], notTried = [];
   let failed = null;
@@ -184,8 +200,8 @@ function outcomeOf(steps, results) {
     if (r && r.ok === true) done.push(s); else failed = s;
   }
   const fr = failed === 'files' && results ? results.files : null;
-  const maybePartial = !!fr && fr.reason === 'failed' && !/No files were restored/.test(String(fr.text || ''));
+  const maybePartial = failed === 'files' && !(fr && (NO_CHANGE.includes(fr.reason) || fr.sent === false || /No files were restored/.test(String(fr.text || ''))));
   return { done, failed, notTried, maybePartial };
 }
 
-module.exports = { CHOICES, STEPS, EDIT_TOOLS, CLI_WORDS, FAILED_PREFIX, FILES_REFUSALS, HIGH_SLACK_MS, LOW_SLACK_MS, UNKNOWN_WHY, choicesOf, stepsOf, filesVerdict, filesRequestOf, filesAnswerOf, lastEditsOf, changedAfterOf, defaultChoiceOf, sameDrawOf, outcomeOf };
+module.exports = { CHOICES, STEPS, EDIT_TOOLS, CLI_WORDS, FAILED_PREFIX, FILES_REFUSALS, HIGH_SLACK_MS, LOW_SLACK_MS, UNKNOWN_WHY, MAX_FILES, NO_CHANGE, choicesOf, stepsOf, filesVerdict, filesRequestOf, filesAnswerOf, editsFromMessages, changedAfterOf, defaultChoiceOf, sameDrawOf, outcomeOf };
