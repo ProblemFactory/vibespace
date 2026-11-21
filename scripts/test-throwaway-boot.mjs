@@ -159,7 +159,7 @@ const PASSWD_ROWS = Object.freeze([
   { file: 'src/server/tls.js', n: 1, why: 'username — the tailnet certificate user' },
   { file: 'src/hosts.js', n: 1, why: "username — ssh's default user, compared with a host entry's (a name, never a home)" },
   { file: 'data/bin/vibespace-claude-subscription-login.mjs', n: 2, why: 'username — the keychain account (two defaults of one helper)' },
-  { file: 'data/bin/vibespace-browser', n: 1, why: "homedir — THE ACCOUNT'S home, never $HOME (2.369.168 takeover finding 2: HOME is the agent's to set, so a fence that follows it follows the agent)" },
+  { file: 'data/bin/vibespace-browser', n: 1, why: "homedir — THE ACCOUNT'S home, never $HOME (2.369.168 takeover finding 2: HOME is the agent's to set, so a fence that follows it follows the agent) — and NEVER READ under its checkout's own re-home (④: the throwaway hub's home is the account's there)" },
   { file: 'data/bin/vibespace-window', n: 1, why: 'homedir — one spelling of a DENY list: a screenshot is refused in secret folders under every home; compared, never written' },
 ]);
 const SSH_ROW = Object.freeze({ what: "ssh's own passwd home", why: "ssh reads ~/.ssh from the passwd entry whatever HOME says — so a re-homed hub's PATH starts with an ssh of its own on its OWN files (-F /dev/null, its known_hosts and identity, IdentitiesOnly; proven above by `ssh -G`) and its agent socket is dropped (HUB_DROPS)" });
@@ -176,5 +176,23 @@ ok(off.length === 0 && found.length === PASSWD_ROWS.length && files.some((f) => 
 const PLANT = ['const h = os.', 'userInfo', '().', 'homedir;'].join('');   // built at runtime: §68 reads a suite's own text for a passwd-home read
 ok(reads(PLANT) === 1 && reads('// os.userInfo() in a comment') === 0 && reads("const s = 'x'; /* os.userInfo() */") === 0, 'CONTROL: a new os.userInfo() read is counted; one in a comment is not');
 
+
+console.log("— ④ vibespace-browser under a throwaway hub: the account home its agent's ~, Downloads fence, config and profile root use is the hub's OWN (src/browser-account-home.js)");
+{
+  const AH = require(path.join(REPO, 'src/browser-account-home.js'));
+  let asked = 0; const readPw = () => { asked++; return '/home/person'; };
+  const own = AH.accountHomeOf({ env: '/w/wt/.home', treeRoot: '/w/wt', readPw, fallback: '/x' });
+  ok(own.home === '/w/wt/.home' && own.ownTree === true && own.agrees === true && asked === 0,
+    "④ a CLI run from a checkout whose hub re-homed itself ($HOME = <its root>/.home): that home is the account's for every use — the person's passwd home is NEVER READ", { own, asked });
+  const kept = AH.accountHomeOf({ env: '/home/person', treeRoot: '/w/wt', readPw }), moved = AH.accountHomeOf({ env: '/tmp/mine', treeRoot: '/w/wt', readPw });
+  ok(kept.home === '/home/person' && kept.agrees && moved.home === '/home/person' && moved.agrees === false && !moved.ownTree,
+    "④ …anywhere else takeover finding 2 holds: the account's passwd home, and an agent's own $HOME is `agrees: false` (the config refused by name)", { kept, moved });
+  const host = AH.accountHomeOf({ env: '/w/wt/.home', treeRoot: null, readPw }), linked = AH.accountHomeOf({ env: '/w/link/.home', treeRoot: '/w/wt', readPw, realpath: (p) => p.replace('/w/link', '/w/wt') });
+  ok(host.home === '/home/person' && !host.ownTree && linked.ownTree === true,
+    "④ a paired machine's copy (no checkout beside it) keeps the account's rule; the own home is judged by where it RESOLVES (a link to it counts)", { host, linked });
+  const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
+  ok(/require\(path\.join\(treeRoot, 'src', 'browser-account-home\.js'\)\)/.test(cli) && /const HOMES = accountHome\(\);/.test(cli) && /const HOME_DIRS = \[\.\.\.new Set\(\[HOMES\.home, os\.homedir\(\)\]/.test(cli),
+    "④ WIRING: the CLI decides HOMES through it from its OWN checkout (never a device bundle input: src/browser-verbs.js is one), and the fences read HOMES");
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

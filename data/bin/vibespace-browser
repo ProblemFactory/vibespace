@@ -422,8 +422,12 @@ function refuseLocally(r, exitCode = 1) {
  *  on a paired host — never sees `agrees:false`. */
 function accountHome() {
   const env = process.env.HOME || '';
+  const readPw = () => os.userInfo().homedir;
+  // B-ba47 shape H: in a checkout whose hub re-homed itself, $HOME = <its root>/.home is the account's home for every use (src/browser-account-home.js)
+  const treeRoot = fs.existsSync(path.join(__dirname, '..', '..', 'server.js')) ? path.resolve(__dirname, '..', '..') : null;
+  if (treeRoot) { let AH = null; try { AH = require(path.join(treeRoot, 'src', 'browser-account-home.js')); } catch { AH = null; } if (AH) return AH.accountHomeOf({ env, treeRoot, readPw, fallback: os.homedir(), realpath: (d) => fs.realpathSync(d) }); }
   let pw = null;
-  try { pw = os.userInfo().homedir || null; } catch { pw = null; }
+  try { pw = readPw() || null; } catch { pw = null; }
   if (!pw) return { home: os.homedir(), pw: null, env, agrees: true };
   const norm = (d) => { try { return fs.realpathSync(d); } catch { return path.resolve(d); } };
   return { home: pw, pw, env, agrees: !env || norm(env) === norm(pw) };

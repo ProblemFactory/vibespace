@@ -98,10 +98,10 @@ ok(SR.parseGitFile('gitdir: /h/v/.git/worktrees/a\n') === '/h/v/.git/worktrees/a
 ok(SR.parseGitFile('gitdir: ../.git/worktrees/a\r\n') === '../.git/worktrees/a', '…keeps a relative gitdir verbatim (the caller resolves it against the root) and drops a CR');
 ok(SR.parseGitFile('ref: refs/heads/x') === null && SR.parseGitFile('') === null && SR.parseGitFile(null) === null, '…and anything else is null (never a guess)');
 ok(SR.checkoutOfCommonDir('/h/v/.git') === '/h/v' && SR.checkoutOfCommonDir('/srv/v.git/') === '/srv/v.git', 'checkoutOfCommonDir: <repo>/.git names the repo, a bare dir names itself');
-const wtLine = SR.refusalLine(SR.rootVerdict(ROWS[4][1]));
+const wtLine = SR.refusalLine(SR.rootVerdict(ROWS.find(([n]) => n.startsWith('a WORKTREE under /var/tmp (the 2026-10-01 incident shape)'))[1]));
 ok(wtLine === "hooks not registered: this server runs from a git worktree of /home/u/vibespace — the owner's CLI config belongs to that checkout's instance", 'refusalLine: THE worktree journal sentence, word for word', wtLine);
-ok(/^hooks not registered: this server runs from a temporary folder \(\/tmp\/vs-rail-9 is under \/tmp\) — a throwaway server never writes the owner's CLI config$/.test(SR.refusalLine(SR.rootVerdict(ROWS[11][1]))), 'refusalLine: the tmp sentence names the root and its tmp root');
-ok(/^hooks not registered: VIBESPACE_SKIP_AGENT_HOOKS=1 is set for this server$/.test(SR.refusalLine(SR.rootVerdict(ROWS[20][1]))), 'refusalLine: the override sentence names the env var');
+ok(/^hooks not registered: this server runs from a temporary folder \(\/tmp\/vs-rail-9 is under \/tmp\) — a throwaway server never writes the owner's CLI config$/.test(SR.refusalLine(SR.rootVerdict(ROWS.find(([n]) => n.startsWith('a plain copy under /tmp/vs-* (no git)'))[1]))), 'refusalLine: the tmp sentence names the root and its tmp root');
+ok(/^hooks not registered: VIBESPACE_SKIP_AGENT_HOOKS=1 is set for this server$/.test(SR.refusalLine(SR.rootVerdict(ROWS.find(([n]) => n.startsWith('VIBESPACE_SKIP_AGENT_HOOKS=1 on a checkout'))[1]))), 'refusalLine: the override sentence names the env var');
 ok(SR.refusalLine(SR.rootVerdict(ROWS[0][1])) === null && SR.refusalLine(null) === null, 'refusalLine: an ok verdict has no sentence');
 const src = fs.readFileSync(path.join(REPO, 'src/server-root.js'), 'utf8');
 const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
