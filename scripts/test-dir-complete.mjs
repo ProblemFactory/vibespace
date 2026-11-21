@@ -17,6 +17,8 @@
 //     again for PROBE_LATE_MS; a slow probe that answers after all is unmarked; a probe call that fails is late, never the listing's
 //     end; the field marks no late probe asked, through ONE helper at both sites — RED CONTROLS: the old shape (the probes inside the
 //     listing's race), the field without its filter, a site that marks by itself
+//   ③e B-5561: a listing reads names and types only — a dead folder nobody typed sitting in the home never holds the home's rows; each
+//     kid's facts (git, package.json, a link's kind) come from its own call behind the answer (factsLate); RED: the release's listing
 //   ④ the listing cache per folder with mtime invalidation: a second ask < 2 s lists nothing again; later the worker is
 //     asked with `known` and a same mtime answers `same` (no re-read); a new folder (a new mtime) is listed fresh
 //   ⑤ the host rung with a FAKE machine (the real HostManager, its ssh rung stubbed to run the same sh here under a Mac's
@@ -112,7 +114,8 @@ console.log('── ① GET /api/dir-complete over a real tree: bases, q, probe,
   ok('a link to a folder is a LINK (~/合同 → ~/work/contracts), not a second row', mem.links['~/合同'] === '~/work/contracts' && !mem.dirs['~/合同'], [mem.links, !!mem.dirs['~/合同']]);
   const ht = PC.rankCandidates('合同', inp());
   ok('合同 → ~/work/contracts through the link alias', ht.best && ht.best.path === '~/work/contracts' && ht.best.alias && ht.best.alias.from.key === 'link', ht.best);
-  const g = await ask('', { probe: ['~/code/ir-dashboard', '~/nope', '~/code/ir-dashboard/notes.txt'] });
+  let g = await ask('', { probe: ['~/code/ir-dashboard', '~/nope', '~/code/ir-dashboard/notes.txt'] });
+  for (let i = 0; i < 20 && g.factsLate; i++) { await sleep(25); g = await ask('', { probe: ['~/code/ir-dashboard', '~/nope', '~/code/ir-dashboard/notes.txt'] }); }   // B-5561: a home folder's package.json is its own call's (behind the answer): asked again while factsLate, as the page asks
   const ird = g.listing.dirs['~/code/ir-dashboard'] || {};
   ok('probe = each folder\'s facts: exists + git + fileCount + mtime; a missing one is absent; a file is a nondir', ird.git === true && ird.fileCount === 2 && ird.mtime > 0 && !g.listing.dirs['~/nope'] && g.listing.nondirs['~/code/ir-dashboard/notes.txt'] === true, [ird, g.listing.nondirs]);
   ok('self = the checkout the server runs from + its data dir + ~/vibespace (package.json names vibespace)', g.self.roots.includes(REPO) && g.self.roots.includes(path.join(REPO, 'data')) && g.self.roots.includes(path.join(HOME, 'vibespace')), g.self.roots);
@@ -179,7 +182,7 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
       if ((o.blocked || []).some((b) => underP(at, b))) throw Object.assign(new Error('The owner blocked this storage.'), { status: 503, code: 'mount_blocked' });
       const first = reachOf(run, op, p);
       if ((o.blocked || []).some((b) => first.seen.some((q) => underP(q, b)))) fn.blockedReached++;
-      const d = (o.dead || []).find((x) => first.seen.some((q) => underP(q, x.path)));
+      const d = (o.dead || []).find((x) => (!x.op || x.op === op) && first.seen.some((q) => underP(q, x.path)));   // `op`: that op alone hangs there (a listing's own read)
       if (d) { fn.touched++; fn.touchedAt[d.path] = (fn.touchedAt[d.path] || 0) + 1; fn.touchLog.push({ op, at, dead: d.path }); const v = await d.g.p; if (v instanceof Error) throw v; return run(op, p).result; }
       if (o.slow) { const ms = o.slow(op, p); if (ms) await sleep(ms); }
       if (first.err) throw first.err;
@@ -333,17 +336,23 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
     const a = await run(DS);
     ok('③c a new folder beside a DEAD KID (~/work/share): «absent», not partial — the create is offered; «~/work/pay» completes to ~/work/payments by the names (the one match stated under its own key — not literal); «~/work/payments» exists, literal', a.nw.verdict.kind === 'absent' && !a.nw.partial && a.pre.verdict.kind === 'exists' && a.pre.verdict.path === '~/work/payments' && a.pre.verdict.completed && !a.pre.verdict.literal && a.ex.verdict.kind === 'exists' && a.ex.verdict.literal === true, { nw: a.nw.verdict, pre: a.pre.verdict, ex: a.ex.verdict });
     const LISTED = mutant('s4-listed', [['    const ans = PC.lineAnswerOf(st, { files: o.files });', "    if (!st.exists) { const lr = await raceOf(listOne(path.dirname(a), { files: o.files, ...o }), o.untilSoft); if (lr === LATE || !lr || !lr.ok) return { path: c, answer: 'late', at: a }; }\n    const ans = PC.lineAnswerOf(st, { files: o.files });", 'the line waits for its parent\'s listing']]);
-    const b = await run(LISTED);
-    ok('③c RED CONTROL: the line waiting for its parent\'s LISTING — the new folder is LATE while the kid is dead (no folder there could ever be made)', b.nw.verdict.kind === 'late', b.nw.verdict);
+    // (B-5561: a listing reads names and types only, so the dead kid no longer holds it — the scene the control needs is a parent's
+    // listing that HANGS by itself: the stand-in holds ~/work's listing alone; the line's stats there are not held)
+    const runHung = async (D2) => { const g = hold(), gL = hold(), d = mkDS(D2, standIn({ dead: [{ path: SH, g }, { path: WORK, g: gL, op: 'dirSlice' }] })); const r = await d.slice({ text: '~/work/q3-new', bases: ['~'], budgetMs: 150 }); g.open(); gL.open(); return r; };
+    const [hr, hb] = await Promise.all([runHung(DS), runHung(LISTED)]);
+    ok('③c …and while the parent\'s own LISTING hangs, the new folder is still «absent» from the line\'s stats alone (the create offered)', hr.verdict.kind === 'absent', hr.verdict);
+    ok('③c RED CONTROL: the line waiting for its parent\'s LISTING — the new folder is LATE while that listing hangs (no folder there could ever be made)', hb.verdict.kind === 'late', hb.verdict);
   }
   // ③c R-c: EVERY CALL GOES DOWN ITS CHAIN, ONE KEY PER PATH — one dead folder meets ONE call whoever asks (the fresh read's M2): the
   // folder ITSELF typed (the line's own call), then texts under it (each level joined), a probe of it and one under it (row sources state
   // their folder first, the same key), and the rows' listing of the folder above (it names the dead kid, never states it). CONTROLS: without
-  // the descent; the line's own call under a key of its own again; a listing with no skip
+  // the descent; the line's own call under a key of its own again; the release's LISTING (a .git stat per kid — it had to be given the
+  // dead folder as a skip; since B-5561 a listing states no kid, so there is no skip left to take out)
   {
-    const run = async (D2) => { const g = hold(), c = standIn({ dead: [{ path: STALE, g }] }), d = mkDS(D2, c); for (const [t, pr] of [['', []], ['a/b/q3', [STALE]], ['a/b', [path.join(STALE, 'a')]], ['a', []], ['c/z', []]]) await d.slice({ text: t ? path.join(STALE, t) : STALE, bases: [], probe: pr, budgetMs: 50 }); const n = c.touched; g.open(); return n; };
-    const [real, nod, keys, noskip] = await Promise.all([run(DS), run(mutant('s4-nodescent', [["      const d = await descend(a, 'line', o, false);", '      const d = null;', 'no descent']])), run(mutant('s4-linekey', [["      const own = () => once('stat:' + a, 'line', a,", "      const own = () => once('line:' + a, 'line', a,", 'the line\'s own call under its own key']])), run(mutant('s4-noskip', [['files, pkg, skip: skipNow(o.skipAlso) }', 'files, pkg, skip: [] }', 'a listing with no skip']]))]);
-    ok(`③c one dead folder — typed itself, texts under it, a probe of it and under it, the listing above it: ${real} call met it — CONTROLS: no descent ${nod} (capped by the line's two slots) · the line's own key ${keys} · a listing with no skip ${noskip}`, real === 1 && nod >= 2 && keys >= 2 && noskip >= 2, { real, nod, keys, noskip });
+    const OLDL = mutantCopies('dir-complete-s4-oldlist', REPO).load('src/safe-fs-worker.js', anchored(read('src/safe-fs-worker.js'), '        if (e.isDirectory()) { kids.push({ name: e.name }); continue; }', '        if (e.isDirectory()) { kids.push({ name: e.name, git: gitOf(path.join(d, e.name)) }); continue; }', 'the release listing: a .git stat per kid'), 'w-s4-oldlist');
+    const run = async (D2, wrun) => { const g = hold(), c = standIn({ dead: [{ path: STALE, g }], ...(wrun ? { run: wrun } : {}) }), d = mkDS(D2, c); for (const [t, pr] of [['', []], ['a/b/q3', [STALE]], ['a/b', [path.join(STALE, 'a')]], ['a', []], ['c/z', []]]) await d.slice({ text: t ? path.join(STALE, t) : STALE, bases: [], probe: pr, budgetMs: 50 }); const n = c.touched; g.open(); return n; };
+    const [real, nod, keys, noskip] = await Promise.all([run(DS), run(mutant('s4-nodescent', [["      const d = await descend(a, 'line', o, false);", '      const d = null;', 'no descent']])), run(mutant('s4-linekey', [["      const own = () => once('stat:' + a, 'line', a,", "      const own = () => once('line:' + a, 'line', a,", 'the line\'s own call under its own key']])), run(DS, OLDL.runOp)]);
+    ok(`③c one dead folder — typed itself, texts under it, a probe of it and under it, the listing above it: ${real} call met it — CONTROLS: no descent ${nod} (capped by the line's two slots) · the line's own key ${keys} · the release's listing (a .git stat per kid) ${noskip}`, real === 1 && nod >= 2 && keys >= 2 && noskip >= 2, { real, nod, keys, noskip });
   }
   // ③c THE ONE MATCH IS STATED UNDER ITS OWN NAME (the read of the fourth shape, 2026-11-20 11:34Z — its must): a dead mount is the only
   // entry of its folder starting with «n»; the person types «n», «na», «nas» one after another (each its own text). The worker answers
@@ -367,7 +376,7 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
     // (the hub knows its mounts: a listing names a mount, never states it)
     const blockedRun = async (run) => { const c = standIn({ blocked: [NM], run }), d = DS.create({ home: HOME, repoDir: REPO, call: c, mounts: () => [{ path: NM, mounted: true, blocked: true, label: 'nas' }] }); const v = (await d.slice({ text: path.join(NP, 'n'), bases: [], budgetMs: 450 })).verdict; return { reached: c.blockedReached, kind: v && v.kind }; };
     const [real, ctl, bl, blC] = await Promise.all([typing(runOp), typing(WIN.runOp), blockedRun(runOp), blockedRun(WIN.runOp)]);
-    ok(`③c «n», «na», «nas» typed toward a dead mount: ${real.met} LINE call met it (the rows' listing of the folder holding it: ${real.rows.join(' ') || 'none'} — the named cost of a dead kid nobody typed, B-5561), ${real.busy} line slot held; «work-ok» next: ${real.ok} (literal), «new-one»: ${real.nw} (its folder there — Create offered); after the deadline the whole name and a longer prefix: ${real.after} call («${real.whole}», «${real.longer}»)`, real.met === 1 && real.rows.every((x) => x === 'dirSlice:' + NP) && real.busy <= 1 && real.ok === 'exists' && real.okLit && real.nw === 'absent' && real.nwParent && real.after === 0 && real.whole === 'skipped' && real.longer === 'skipped', real);
+    ok(`③c «n», «na», «nas» typed toward a dead mount: ${real.met} LINE call met it (the rows' listing of the folder holding it: ${real.rows.join(' ') || 'none'} — none since B-5561: a listing states no kid), ${real.busy} line slot held; «work-ok» next: ${real.ok} (literal), «new-one»: ${real.nw} (its folder there — Create offered); after the deadline the whole name and a longer prefix: ${real.after} call («${real.whole}», «${real.longer}»)`, real.met === 1 && real.rows.every((x) => x === 'dirSlice:' + NP) && real.busy <= 1 && real.ok === 'exists' && real.okLit && real.nw === 'absent' && real.nwParent && real.after === 0 && real.whole === 'skipped' && real.longer === 'skipped', real);
     ok(`③c a BLOCKED mount the only match of «n»: never stated (${bl.reached} call reached it; the pool refused the hub's own call by its path) — CONTROLS the in-worker stat of the one match: ${ctl.met} calls met the dead mount with ${ctl.busy} line slots held, the blocked one reached ${blC.reached}×`, bl.reached === 0 && ctl.met >= 2 && ctl.busy === 2 && blC.reached >= 1, { real: bl, control: ctl, blockedControl: blC });
   }
   // ③c (the read's should 2) A PRESS KEEPS THE MARK until its own call is SENT: with both line slots held the press's call waits, and a
@@ -378,18 +387,24 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
     const X1 = path.join(TMP, 'xs', 'x1-dead'), X2 = path.join(TMP, 'xs', 'x2-dead'); fs.mkdirSync(X1, { recursive: true }); fs.mkdirSync(X2, { recursive: true });
     const gap = async (D2) => {
       const gS = hold(), g1 = hold(), g2 = hold(), c = standIn({ dead: [{ path: STALE, g: gS }, { path: X1, g: g1 }, { path: X2, g: g2 }] }), d = mkDS(D2, c);
-      // (texts UNDER the dead folder first: nothing lists its parent before the gap — a listing kept 2 s would answer from memory)
+      // (the parent listed FIRST, while nothing holds the rows' one slot — since B-5561 the doors that reach a kid (its own facts call,
+      // the one-match descent) open only on an ANSWERED listing, and that answer is kept 2 s: the gap below reads it from memory)
+      await d.slice({ text: path.join(TMP, 'zz-first'), bases: [], budgetMs: 150 });
       await d.slice({ text: path.join(STALE, 'x'), bases: [], budgetMs: 50 }); gS.open(deadlineOf()); await sleep(20);
       await d.slice({ text: path.join(X1, 'q'), bases: [], budgetMs: 50 }); await d.slice({ text: path.join(X2, 'q'), bases: [], budgetMs: 50 });
       // the press (under the dead folder) goes through its mark and its call WAITS for a line slot; then ANOTHER text beside the dead
-      // folder lists their parent in that gap — the listing's skip must still hold the dead folder
+      // folder, its prefix («stale-sh»), lists their parent in that gap — and the doors that reach the kid since B-5561 (a listing reads no
+      // kid: the kid's OWN facts call, the one-match descent's listing of it) must still obey the dead folder's mark
       await d.slice({ text: path.join(STALE, 'b'), bases: [], budgetMs: 80, press: true });
-      const n0 = c.touchedAt[STALE] || 0;
-      await d.slice({ text: path.join(TMP, 'zz-gap'), bases: [], budgetMs: 150 });
-      const n1 = c.touchedAt[STALE] || 0, held = d._counters.line.busy; g1.open(); g2.open(); return { during: n1 - n0, held };
+      const n0 = c.touchedAt[STALE] || 0, k0 = c.rec.length;
+      const gr = await d.slice({ text: path.join(TMP, 'stale-sh'), bases: [], budgetMs: 150 });
+      await sleep(20);   // (a kid's facts call goes out behind the answer)
+      const n1 = c.touchedAt[STALE] || 0, held = d._counters.line.busy;
+      const gapSeen = { listed: Object.keys((gr.listing && gr.listing.dirs) || {}).filter((k) => k.includes('stale') || k.endsWith('lanes') || k === PC.toTilde(HOME, TMP)), rowsLate: !!gr.rowsLate, factsLate: !!gr.factsLate, calls: c.rec.slice(k0).filter((x) => x.includes('stale')) };
+      g1.open(); g2.open(); return { during: n1 - n0, held, gap: gapSeen };
     };
     const [gr, gc] = await Promise.all([gap(DS), gap(mutant('s4-pressdelete', [['pressed.set(m.path, t); return { through: m }; }', 'pressed.set(m.path, t); if (sent.get(m.key) === m) sent.delete(m.key); return null; }', 'the mark deleted at the press']]))]);
-    ok(`③c a press waiting for a line slot keeps the dead folder's mark: the parent's listing meanwhile met it ${gr.during}× — CONTROL the mark deleted at the press: ${gc.during}×`, gr.during === 0 && gc.during >= 1, { real: gr, control: gc });
+    ok(`③c a press waiting for a line slot keeps the dead folder's mark: a text beside it meanwhile (its kid facts, the one-match descent) met it ${gr.during}× — CONTROL the mark deleted at the press: ${gc.during}×`, gr.during === 0 && gc.during >= 1, { real: gr, control: gc });
   }
   // ③c (the read of round wc9f6okda) THE WALK'S SKIP IS STABLE: a healthy base whose stat is still out (slow, 300 ms) is WALKED, and a
   // search asked twice inside the index's kept time makes ONE walk. CONTROL: calls still in flight in the walk's skip (the cache's name
@@ -402,16 +417,17 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
       const r1 = await d.slice(q), r2 = await d.slice(q);
       return { walks: c.rec.filter((x) => x.startsWith('dirIndex:')).length, row1: !!r1.listing.dirs['~/work/slowbase-r138/deep/needle-q7r'], row2: !!r2.listing.dirs['~/work/slowbase-r138/deep/needle-q7r'] };
     };
-    const [wr, wc] = await Promise.all([walkTwice(DS), walkTwice(mutant('s4-walkinflight', [['      const skip = [...new Set([...me.roots, ...mountPaths, ...marked])];', '      const skip = [...new Set([...me.roots, ...skipNow()])];', 'calls still in flight in the walk\'s skip']]))]);
+    const [wr, wc] = await Promise.all([walkTwice(DS), walkTwice(mutant('s4-walkinflight', [['      const skip = [...new Set([...me.roots, ...mountPaths, ...marked])];', '      const skip = [...new Set([...me.roots, ...mountPaths, ...[...sent.values()].filter((m) => m.entrance).map((m) => m.path)])];', 'calls still in flight in the walk\'s skip']]))]);
     ok(`③c the walk's skip holds only what is stable: a search asked twice makes ${wr.walks} walk, and the folder under a healthy base whose stat was out is in the rows (${wr.row1}, ${wr.row2}) — CONTROL calls in flight in the walk's skip: ${wc.walks} walks, the first rows ${wc.row1 ? 'had' : 'MISSED'} it`, wr.walks === 1 && wr.row1 && wr.row2 && wc.walks === 2 && !wc.row1, { real: wr, control: wc });
   }
-  // ③c (the fresh read's M3) A ROW CALL THE DEADLINE ENDED is not sent again inside its window: the listing of a folder holding a dead kid
-  // nobody typed hangs ONCE, then the rows say they are still looking for 30 s (no call). CONTROL: its own mark ignored — sent again
+  // ③c (the fresh read's M3) A ROW CALL THE DEADLINE ENDED is not sent again inside its window: a folder's listing hangs ONCE (since
+  // B-5561 a listing reads no kid — the stand-in holds the listing's own read of its folder; the line's stats there answer), then the
+  // rows say that folder could not be read for 30 s (no call). CONTROL: its own mark ignored — sent again
   {
     const DK = path.join(TMP, 'dk-parent'), NAS = path.join(DK, 'nas'); fs.mkdirSync(NAS, { recursive: true });
-    const run = async (D2) => { const g = hold(), c = standIn({ dead: [{ path: NAS, g }] }), d = mkDS(D2, c); await d.slice({ text: path.join(DK, 'x'), bases: [], budgetMs: 50 }); g.open(deadlineOf()); await sleep(10); const r2 = await d.slice({ text: path.join(DK, 'y'), bases: [], budgetMs: 150 }); return { lists: c.rec.filter((x) => x === 'dirSlice:' + DK).length, unread: !!r2.rowsUnread && (r2.sourcesUnread || []).includes(DK), verdict: r2.verdict && r2.verdict.kind }; };
+    const run = async (D2) => { const g = hold(), c = standIn({ dead: [{ path: DK, g, op: 'dirSlice' }] }), d = mkDS(D2, c); await d.slice({ text: path.join(DK, 'x'), bases: [], budgetMs: 50 }); g.open(deadlineOf()); await sleep(10); const r2 = await d.slice({ text: path.join(DK, 'y'), bases: [], budgetMs: 150 }); return { lists: c.rec.filter((x) => x === 'dirSlice:' + DK).length, unread: !!r2.rowsUnread && (r2.sourcesUnread || []).includes(DK), verdict: r2.verdict && r2.verdict.kind }; };
     const [real, ctl] = await Promise.all([run(DS), run(mutant('s4-nomark', [['    if (s0 && s0 !== through && s0.hungAt != null && t - s0.hungAt < PROBE_LATE_MS) return Promise.resolve({ skipped: markEnd(s0), at: p });   // its OWN deadline mark: never sent again inside the window\n', '', 'a row call\'s own mark ignored'], ['      if (s1 && s1 !== through && s1.hungAt != null && t1 - s1.hungAt < PROBE_LATE_MS) { free(); return { skipped: markEnd(s1), at: p }; }\n', '', '…at its grant too']]))]);
-    ok(`③c a listing the deadline ended (a dead kid nobody typed): ${real.lists} listing call in two asks, the rows say that folder COULD NOT BE READ (rowsUnread — never «no folders», never «still looking» for 30 s), the line still judges — CONTROL its own mark ignored: ${ctl.lists}`, real.lists === 1 && real.unread && real.verdict === 'absent' && ctl.lists === 2, { real, ctl });
+    ok(`③c a listing the deadline ended: ${real.lists} listing call in two asks, the rows say that folder COULD NOT BE READ (rowsUnread — never «no folders», never «still looking» for 30 s), the line still judges — CONTROL its own mark ignored: ${ctl.lists}`, real.lists === 1 && real.unread && real.verdict === 'absent' && ctl.lists === 2, { real, ctl });
   }
   // ③c R-b + R-d: four dead bases, a relative text — ONE line call into them (the first base; nothing after a late one is asked); then a
   // healthy absolute text is judged on the line's OWN slots while the rows' slot is held. CONTROLS: every candidate at once; one counter
@@ -420,7 +436,7 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
     const run = async (D2) => { const g = hold(), c = standIn({ dead: B4.map((b) => ({ path: b, g })) }), d = mkDS(D2, c); const r1 = await d.slice({ text: './q3', bases: [...B4, '~'], budgetMs: 50 }); const busy = d._counters.line.busy; const r2 = await d.slice({ text: '~/work/payments', bases: [...B4, '~'], budgetMs: 450 }); g.open(); return { r1, r2, busy, line: c.rec.filter((x) => B4.some((b) => x === 'pathStat:' + b || x.startsWith('pathStat:' + b + '/'))).length }; };
     // (the CONCURRENT mutant: every candidate's chain at once — a sequential one that only skips the stop never asks past the budget,
     // its next chain loses the race at its first level before any call)
-    const [real, ALL, ONE] = await Promise.all([run(DS), run(mutant('s4-allatonce', [['      const out = [];\n      for (const x of cands) {\n', '      if (cands.length) return Promise.all(cands.map((x) => lineAnswer(x.c, x.a, o)));\n      const out = [];\n      for (const x of cands) {\n', 'every candidate asked at once']])), run(mutant('s4-onecounter', [['  const C = { line: { cap: LINE_SLOTS, busy: 0, q: [] }, rows: { cap: ROW_SLOTS, busy: 0, q: [] } };', '  const C0 = { cap: LINE_SLOTS, busy: 0, q: [] }; const C = { line: C0, rows: C0 };', 'one shared counter']]))]);   // (each its own slice and stand-in: at once)
+    const [real, ALL, ONE] = await Promise.all([run(DS), run(mutant('s4-allatonce', [['      const out = [];\n      for (const x of cands) {\n', '      if (cands.length) return Promise.all(cands.map((x) => lineAnswer(x.c, x.a, o)));\n      const out = [];\n      for (const x of cands) {\n', 'every candidate asked at once']])), run(mutant('s4-onecounter', [['  const C = { line: { cap: LINE_SLOTS, busy: 0, q: [] }, rows: { cap: ROW_SLOTS, busy: 0, q: [] }, facts: { cap: FACT_SLOTS, busy: 0, q: [] } };', '  const C0 = { cap: LINE_SLOTS, busy: 0, q: [] }; const C = { line: C0, rows: C0, facts: { cap: FACT_SLOTS, busy: 0, q: [] } };', 'one shared counter (the line\'s and the rows\')']]))]);   // (each its own slice and stand-in: at once)
     ok(`③c four dead bases + «./q3»: late on the FIRST base (named), ${real.busy} line slot held — at most the one candidate (0 when the rows' stat of that base went first and the line JOINED it); then «~/work/payments» judged in time on the line's own slots`, real.r1.verdict.kind === 'late' && real.r1.verdict.base === B4[0] && real.busy <= 1 && real.r2.verdict.kind === 'exists' && real.r2.partial === false, { r1: real.r1.verdict, line: real.line, r2: [real.r2.verdict, real.r2.partial] });
     ok(`③c RED CONTROLS: every candidate asked at once (${ALL.busy} line slots held) · ONE shared counter (the healthy text: ${ONE.r2.verdict && ONE.r2.verdict.kind})`, ALL.busy === 2 && ONE.r2.verdict.kind !== 'exists', { all: ALL.busy, one: ONE.r2.verdict });
   }
@@ -505,6 +521,83 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
     ok('③c a PROBE whose stat FAILED (ELOOP): the worker says the error (listing and probe), «no such folder» stays plain absent; the reply names it in probesFailed, not late, not absent — CONTROL: the worker reading every failed stat as absent (no error, no name: the field would take it as not there)', /ELOOP/.test(w.probes[0].err || '') && !w.probes[1].err && w.probes[1].exists === false && /ELOOP/.test(w.dirs[0].err || '') && JSON.stringify(r6.probesFailed) === JSON.stringify([LOOP]) && !(r6.probesLate || []).includes(LOOP) && !wc.probes[0].err && !(r6c.probesFailed || []).includes(LOOP), { w: w.probes, dirs: w.dirs, r6: [r6.probesFailed, r6.probesLate], wc: wc.probes, r6c: r6c.probesFailed });
     const g = hold(), rl = await mkDS(DS, standIn({ dead: [{ path: STALE, g }] })).slice({ text: 'invrel', q: 'invrel', bases: [STALE, '~'], budgetMs: 150 }); g.open();
     ok('③c a row source that did not answer (a dead base, its walk): the reply says rowsLate — the list says «still looking», never «no match»', rl.rowsLate === true, { rowsLate: rl.rowsLate, sourcesLate: rl.sourcesLate });
+  }
+  // ③e B-5561 — A LISTING NEVER TOUCHES ITS KIDS' INSIDES (the coordinator's ruling r1203): the worker lists names and types only; each
+  // kid's facts (a folder's git and package.json name, a symlink's kind and target) come from the KID'S OWN call, in a slot of their own,
+  // behind the answer. THE SCENE: a home holding a DEAD folder nobody typed and the hub does not know as a mount (~/nas — the stand-in's
+  // dead path), a git folder, a folder whose package.json names vibespace, a link to a folder, a link to a file, a dangling link. The
+  // home's listing answers AT ONCE with ~/nas named (no rowsLate, no rowsUnread), no fs call of the listing reaches under any kid, the
+  // dead kid is met by ONE call (its own facts call, behind), and the answer says factsLate. THE NAMED COST (one slot of their own): the
+  // dead kid's call holds the facts slot until the pool's deadline ends it; then its MARK stands (no call more) and the other kids'
+  // facts land — asked again (the page's one quiet ask) the listing carries the badge, the link, the file, the excluded checkout, and
+  // factsLate no longer waits on the dead kid. RED CONTROL: the release's listing (a .git stat and a package.json read per folder kid,
+  // a mutant of the worker) — the home's rows LATE, then COULD NOT BE READ (the listing's own deadline mark)
+  {
+    const K5 = path.join(TMP, 'home-5561'), NAS = path.join(K5, 'nas');
+    for (const d of ['nas/inside', 'proj/.git', 'vs', 'work']) fs.mkdirSync(path.join(K5, d), { recursive: true });
+    fs.writeFileSync(path.join(K5, 'vs', 'package.json'), JSON.stringify({ name: 'vibespace' }));
+    fs.writeFileSync(path.join(K5, 'notes.txt'), 'n\n');
+    try { fs.symlinkSync(path.join(K5, 'proj'), path.join(K5, 'ln-proj')); fs.symlinkSync(path.join(K5, 'notes.txt'), path.join(K5, 'ln-notes')); fs.symlinkSync(path.join(K5, 'gone'), path.join(K5, 'dangling')); } catch { }
+    const Wsrc5 = read('src/safe-fs-worker.js');
+    const OLDW = mutantCopies('dir-complete-5561-oldlist', REPO).load('src/safe-fs-worker.js', anchored(Wsrc5, '        if (e.isDirectory()) { kids.push({ name: e.name }); continue; }',
+      '        if (e.isDirectory()) { const q = path.join(d, e.name); kids.push({ name: e.name, git: gitOf(q), ...pkgOf(q) }); continue; }', 'the release listing: a .git stat and a package.json read per folder kid'), 'w-oldlist');
+    const reach = reachOf(runOp, 'dirSlice', { dirs: [{ path: K5 }], files: true });
+    const fileKids = new Set(['notes.txt'].map((n) => path.join(K5, n)));
+    const under = reach.seen.filter((q) => q !== K5 && q !== path.join(K5, '.git') && !fileKids.has(q));
+    const kids0 = ((reach.res && reach.res.result.dirs[0]) || {}).kids || [];
+    ok(`③e the worker's listing reads names and types only — no fs call under a kid (${under.length}: ${under.slice(0, 4).join(' ')}); a link is named «link: ''»`, under.length === 0 && kids0.some((k) => k.name === 'nas' && k.link == null && k.git === undefined) && kids0.filter((k) => k.link === '').map((k) => k.name).sort().join(',') === 'dangling,ln-notes,ln-proj', { under, kids0 });
+    const scene = async (run, D2 = DS) => {
+      const g = hold(), c = standIn({ dead: [{ path: NAS, g }], run }), d = D2.create({ home: K5, repoDir: REPO, call: c });
+      const q = () => d.slice({ text: '~/', bases: ['~'], budgetMs: 450 });
+      const kidsOf = (r) => ((r.listing && r.listing.dirs['~']) || {}).kids || [];
+      const a1 = await q(); await sleep(20);   // (its facts calls go out behind it)
+      const listMet = c.touchLog.filter((x) => x.dead === NAS && x.op === 'dirSlice').length;
+      // S3 (r1507): TWO facts slots — while the dead kid's call holds one, the other serves the rest (asked again: ~/proj's badge is
+      // there). ~/proj is asked AFTER ~/nas in either asking order (self's home folders, the rows' kids: both by name)
+      const gitOfProj = (r) => !!((r.listing && r.listing.dirs['~/proj']) || {}).git;
+      let held = await q(); for (let i = 0; i < 20 && !gitOfProj(held); i++) { await sleep(25); held = await q(); }
+      const whileHung = { git: gitOfProj(held), link: (held.listing.links || {})['~/ln-proj'] || null, met: c.touchedAt[NAS] || 0 };
+      const metBefore = c.touchedAt[NAS] || 0;
+      g.open(deadlineOf()); await sleep(20);   // the pool's deadline ends the dead kid's call
+      let a2 = await q(); for (let i = 0; i < 20 && (a2.factsLate || !(a2.listing.links || {})['~/ln-proj']); i++) { await sleep(25); a2 = await q(); }   // (the facts land behind it: bounded)
+      const a3 = await q(), a4 = a2;
+      const pick = (r) => ({ kids: kidsOf(r), late: !!r.rowsLate, unread: !!r.rowsUnread, factsLate: !!r.factsLate, git: !!(r.listing.dirs['~/proj'] || {}).git, link: (r.listing.links || {})['~/ln-proj'] || null,
+        dangling: kidsOf(r).includes('dangling') || !!(r.listing.links || {})['~/dangling'], files: ((r.listing.dirs['~'] || {}).fileCount), self: r.self && r.self.roots.includes(path.join(K5, 'vs')) });
+      return { a1: pick(a1), a2: pick(a2), a3: pick(a3), a4: pick(a4), listMet, whileHung, metBefore, metAfter: (c.touchedAt[NAS] || 0) - metBefore, facts: d._counters.facts && d._counters.facts.cap };
+    };
+    const [real, rel] = await Promise.all([scene(runOp), scene(OLDW.runOp)]);
+    ok(`③e a dead ~/nas nobody typed, in the home: the home's listing answers AT ONCE with it named (late ${real.a1.late}, unread ${real.a1.unread}; the listing met it ${real.listMet}×), the dead kid met by ${real.metBefore} call (its own, behind), factsLate ${real.a1.factsLate}`,
+      real.a1.kids.includes('nas') && real.a1.kids.includes('proj') && !real.a1.late && !real.a1.unread && real.listMet === 0 && real.metBefore === 1 && real.a1.factsLate === true && real.facts === 2, real);
+    ok(`③e S3: TWO facts slots — while the dead kid's own call holds one (${real.whileHung.met} call), the other serves the rest before the pool's deadline: ~/proj's git badge (${real.whileHung.git}), ~/ln-proj a LINK (${real.whileHung.link})`, real.whileHung.met === 1 && real.whileHung.git && real.whileHung.link === '~/proj', real.whileHung);
+    ok('③e …the dead kid\'s call ended by the pool\'s deadline, asked again: each kid\'s OWN facts are in the listing — ~/proj\'s git badge, ~/ln-proj a LINK to ~/proj (no second row), ~/ln-notes a file of the home (2 files), the dangling link no row, ~/vs (package.json: vibespace) excluded by self',
+      real.a2.git && real.a2.link === '~/proj' && !real.a2.kids.includes('ln-proj') && real.a2.files === 2 && !real.a2.dangling && real.a2.self, real.a2);
+    ok(`③e …and the dead kid's MARK stands: ${real.metAfter} call more, ~/nas still named, the rows whole, factsLate ${real.a4.factsLate} (nothing left that can land)`,
+      real.metAfter === 0 && real.a3.kids.includes('nas') && !real.a3.late && !real.a3.unread && !real.a4.factsLate, { a3: real.a3, a4: real.a4, metAfter: real.metAfter });
+    ok(`③e RED CONTROL (the release's listing — a .git stat and a package.json read per folder kid): the home's rows LATE (${rel.a1.late}) while ~/nas hangs, then COULD NOT BE READ (${rel.a3.unread}) for the listing's own mark`, rel.a1.late === true && rel.a1.kids.length === 0 && rel.a3.unread === true, { a1: rel.a1, a3: rel.a3 });
+    const DSsrc5 = read('src/server/dir-slice.js'), M5 = mutantCopies('dir-complete-5561-s2s3', REPO);
+    const one = await scene(runOp, M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const FACT_SLOTS = 2;', 'const FACT_SLOTS = 1;', 'one facts slot (84e43bb55)'), 'ds-one-slot'));
+    ok(`③e S3 RED CONTROL (one facts slot): the dead kid's call holds it — no badge on ~/proj before the pool's deadline (${one.whileHung.git})`, one.whileHung.git === false && one.whileHung.met === 1, one.whileHung);
+    // S2 (r1507): a home of 30 folders — a reply asks at most 24 of their own facts (the rest the next ask), and they are KEPT while the
+    // home's time has not moved: past SELF_TTL_MS (the exclusion read again) no home folder is asked again. A text whose rows are about
+    // no kid ('~/zzz'): only `self` asks. RED CONTROLS: no cap; the keep removed (84e43bb55's 30 s facts)
+    const K6 = path.join(TMP, 'home-5561-s2');
+    for (let i = 0; i < 30; i++) fs.mkdirSync(path.join(K6, 'f' + String(i).padStart(2, '0')), { recursive: true });
+    fs.writeFileSync(path.join(K6, 'f07', 'package.json'), JSON.stringify({ name: 'vibespace' }));
+    const s2 = async (D2) => {
+      let ck = 1e12; const c = standIn(), d = D2.create({ home: K6, repoDir: REPO, call: c, now: () => ck });
+      const homeFacts = () => c.rec.filter((x) => /^pathStat:.*\/f\d\d$/.test(x)).length;
+      const q = () => d.slice({ text: '~/zzz', bases: ['~'], budgetMs: 450 });
+      await q(); await sleep(150); const first = homeFacts();
+      await q(); await sleep(150); const all = homeFacts();
+      ck += DS.SELF_TTL_MS + 1000;
+      const r3 = await q(); await sleep(150);
+      return { first, all, later: homeFacts() - all, excluded: !!(r3.self && r3.self.roots.includes(path.join(K6, 'f07'))) };
+    };
+    const [k2, k2cap, k2keep] = await Promise.all([s2(DS),
+      s2(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const SELF_FACTS = 24;', 'const SELF_FACTS = 1000;', 'no cap'), 'ds-no-cap')),
+      s2(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const SELF_KEEP_MS = 10 * 60e3;', 'const SELF_KEEP_MS = 0;', 'no keep'), 'ds-no-keep'))]);
+    ok(`③e S2: a home of 30 folders — ${k2.first} of their own facts asked by the first reply (the cap: 24), ${k2.all} after the next; past the exclusion's re-read ${k2.later} asked again (the home's time held); ~/f07 (vibespace) excluded`, k2.first === 24 && k2.all === 30 && k2.later === 0 && k2.excluded, k2);
+    ok(`③e S2 RED CONTROLS: no cap — ${k2cap.first} asked at once; no keep — ${k2keep.later} asked again`, k2cap.first === 30 && k2keep.later > 0, { cap: k2cap, keep: k2keep });
   }
   // THE FIELD'S SIDE: askedOf (late and failed probes marked nothing) · replyKind (skipped / failed) · THE ONE RESOLVER (model() reads the
   // verdict in hand; target, rankOf and Tab read model) — source pins with their controls

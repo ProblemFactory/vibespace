@@ -46,7 +46,8 @@ const MAX_PROBES = 40;
      answer is the dead thing's ENTRANCE: one call; when the pool's DEADLINE ends it (`safeFsTimeout`) its mark speaks for everything
      below it for PROBE_LATE_MS, and every source there answers SKIPPED with the time the mark ends (R-i) — never «late». A person's
      PRESS sends the entrance's one call ONCE per window (it is attended: never answered from a mark alone). The walk and the row
-     listings take the known entrances (marked, or still out) and the hub's mounts as skips: a listing names such a kid, never states it.
+     listings take the known entrances (marked, or still out) and the hub's mounts as skips: a listing names such a kid, never states it
+     (since B-5561 a listing states NO kid: names and types only — the walk keeps its skip).
      At its GRANT a queued call is judged again: a mark set while it waited answers it, and a call queued past QUEUE_MAX_MS is dropped.
    · TWO COUNTERS (R-d): the line has LINE_SLOTS of its own, the rows ROW_SLOTS. A call counts in its first asker's counter; a later
      asker joins it only once it is SENT (a queued call is no call); at its grant a queued call joins one sent by then. No inline run
@@ -61,11 +62,26 @@ const PROBE_LATE_MS = 30e3;
 const LANDED_FRESH_MS = 2000;
 const LINE_SLOTS = 2;
 const ROW_SLOTS = 1;
+/* B-5561 — A LISTING NEVER TOUCHES ITS KIDS' INSIDES (the coordinator's ruling r1203): the worker lists names and types only; each kid's
+   facts (a folder's git and package.json name, a symlink's kind and target) come from THE KID'S OWN CALL — under its path's one key
+   (`stat:<kid>`, joined by the line and every level: a dead kid is ONE call whoever asks), in a counter of their own (FACT_SLOTS),
+   asked BEHIND the answer (never waited: the line and the rows never wait on them), kept PROBE_LATE_MS. Which kids, per answer: the
+   folder kids the rows are about (the typed last segment's; every kid when it is empty) — at most KID_FACTS —, the symlink kids the rows
+   are about — at most LINK_FACTS (the rest when typed) —, and the home's folder kids for the self facts. A fact asked and not landed
+   when the answer is built: `factsLate` (the page asks once more, quietly — bl-chat-c's). The page's listing keeps its shape: a kid
+   carries its git and its link from its kept facts, so a badge or a symlink row arrives with the answer after its call lands. */
+const FACT_SLOTS = 2;   // S3 (r1507): two — one dead kid holds one slot (at the pool's own deadline), never every page's facts
+const KID_FACTS = 12;
+const LINK_FACTS = 12;
+const SELF_FACTS = 24;  // S2 (r1507): a home folder's own facts asked at most 24 a reply (the rest the next ask)
+const SELF_KEEP_MS = 10 * 60e3; // …and KEPT while the home's own time (its listing's mtime) has not moved, at most this long
 const QUEUE_MAX_MS = 2000;   // a row call still queued this long after it was asked for is dropped (no burst of stale calls)
 const LATE = Object.freeze({ late: true });
 
 function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '..', '..'), dataDir = null, mounts = () => [], now = Date.now } = {}) {
-  const listCache = new Map();   // abs → { at, entry, pkg }
+  const listCache = new Map();   // abs → { at, entry }
+  const kidFacts = new Map();    // abs → { at, f }: a kid's own facts (B-5561: pathStat `facts`), kept PROBE_LATE_MS
+  const selfFacts = new Map();   // a home folder → { at, pkg, homeAt }: its package.json name for `self`, kept while the home's mtime holds (S2)
   const indexCache = new Map();  // root + skip → { at, dirs, links, partial, p }
   let selfCache = { at: 0, v: null, p: null };
   const known = new Map();       // abs → { at, stat }: a bare stat answered < LIST_FRESH_MS ago (a level's «a folder», a candidate's facts)
@@ -77,7 +93,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
   const busy = { refused: 0, reasked: 0, freed: 0, late: 0 }; // M1: the pool found busy — calls refused, re-asks, freed, ended late
   let busySaid = { at: 0, reasked: 0, late: 0 };
   const dataRoot = dataDir || path.join(repoDir, 'data');
-  const C = { line: { cap: LINE_SLOTS, busy: 0, q: [] }, rows: { cap: ROW_SLOTS, busy: 0, q: [] } };
+  const C = { line: { cap: LINE_SLOTS, busy: 0, q: [] }, rows: { cap: ROW_SLOTS, busy: 0, q: [] }, facts: { cap: FACT_SLOTS, busy: 0, q: [] } };
   const pump = (c) => { while (c.busy < c.cap && c.q.length) c.q.shift()(); };
   const grant = (c) => new Promise((res) => { c.q.push(() => { c.busy++; let held = true; res(() => { if (!held) return; held = false; c.busy--; pump(c); }); }); pump(c); });
   const under = (p, q) => p === q || p.startsWith(q === '/' ? '/' : q + '/');
@@ -157,10 +173,40 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
   }
   const raceOf = (p, untilSoft) => Promise.race([Promise.resolve(p).then((r) => r || LATE), untilSoft]);
   const noteKnown = (p, st) => { known.set(p, { at: now(), stat: st }); if (known.size > 2000) for (const k of [...known.keys()].slice(0, 500)) known.delete(k); };
-  /* what a LISTING must not state inside (the worker names such a kid, never stats it): every dead entrance marked or still out, the
-     hub's mounts, and the paths THIS ask states by their own calls (the typed candidates, the probes) — a listing never crosses a known
-     dead folder, and never races a path's own stat into it (R-c) */
-  const skipNow = (also = []) => [...new Set([...mountPaths, ...also, ...[...sent.values()].filter((m) => m.entrance).map((m) => m.path)])];
+  /* (a LISTING states no kid at all since B-5561 — names and types only —, so it needs no skip list: a known dead folder, a mount, a path
+     this ask states by its own call is NAMED by every listing, never crossed) */
+  /* B-5561: A KID'S OWN FACTS — kept, and asked behind an answer (never waited for). → true when asked (it may still land) */
+  const factOf = (p, t = now()) => { const k = kidFacts.get(p); return k && t - k.at < PROBE_LATE_MS ? k.f : null; };
+  function askFacts(p) {
+    const t = now();
+    if (factOf(p, t) || mountPaths.includes(p) || entranceAbove(p, t)) return false;   // kept · a mount (named, never stated) · under a dead mark
+    once('stat:' + p, 'facts', p, () => call('pathStat', { path: p, facts: true }, IDLE_ONLY).then((x) => {
+      const st = x && x.stat;
+      if (st && st.facts && !st.err) {
+        kidFacts.set(p, { at: now(), f: st }); noteKnown(p, st); if (kidFacts.size > 4000) for (const k of [...kidFacts.keys()].slice(0, 1000)) kidFacts.delete(k);
+        if (path.dirname(p) === home) { const h = listCache.get(home); selfFacts.set(p, { at: now(), pkg: st.pkg || null, homeAt: h ? h.entry.mtime : null }); } // S2: the self fact, beside the home's time
+      }
+      return st;
+    }), { entrance: true, born: t });
+    return true;
+  }
+  /* a listing's kids WITH their kept facts (the page's shape: kids [{ name, git, link? }]): a folder kid's git; a symlink kid by its own
+     stat — to a folder: a LINK with its target; to a file: a file of the folder; dangling: no row; not stated yet: named, no row */
+  function withFacts(d) {
+    if (!d || !Array.isArray(d.kids)) return d;
+    const t = now(), kids = [], fl = Array.isArray(d.files) ? d.files.slice() : null;
+    let fc = d.fileCount;
+    for (const k of d.kids) {
+      const f = factOf(path.join(d.path, k.name), t);
+      if (k.link == null) { kids.push(f && f.git ? { ...k, git: true } : k); continue; }
+      if (!f) { kids.push(k); continue; }
+      if (!f.exists) continue;
+      if (f.isDir) { kids.push({ name: k.name, git: !!f.git, link: f.link || '' }); continue; }
+      if (fc != null) fc++;
+      if (fl) fl.push({ name: k.name, size: f.size || 0, mtime: f.mtime || 0 });
+    }
+    return { ...d, kids, ...(fl ? { files: fl } : {}), fileCount: fc };
+  }
   /* THE LINE: one candidate — its chain, then its ONE own call (the stat; absent ⇒ the names under the typed prefix), then the one match's
      stat under the MATCH's own key */
   async function lineAnswer(c, a, o) {
@@ -197,16 +243,16 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
   }
 
   /* ── THE ROWS (best effort, their own slot): a folder listed / a path stated / a root walked — each down its chain first ── */
-  function listOne(a, { files = false, pkg = false, ...o }) {
+  function listOne(a, { files = false, ...o }) {
     const c = listCache.get(a);
-    if (c && (!files || c.entry.files) && (!pkg || c.pkg) && now() - c.at < LIST_FRESH_MS) return Promise.resolve({ ok: c.entry });
-    return once(`list:${files ? 'f' : ''}${pkg ? 'p' : ''}:${a}`, 'rows', a, () => {
-      const c0 = listCache.get(a), base = c0 && (!files || c0.entry.files) && (!pkg || c0.pkg) ? c0 : null;   // `same` answers THIS entry
-      return call('dirSlice', { path: a, dirs: [{ path: a, known: base ? base.entry.mtime : undefined }], files, pkg, skip: skipNow(o.skipAlso) }, IDLE_ONLY).then((r) => {
+    if (c && (!files || c.entry.files) && now() - c.at < LIST_FRESH_MS) return Promise.resolve({ ok: c.entry });
+    return once(`list:${files ? 'f' : ''}:${a}`, 'rows', a, () => {
+      const c0 = listCache.get(a), base = c0 && (!files || c0.entry.files) ? c0 : null;   // `same` answers THIS entry
+      return call('dirSlice', { path: a, dirs: [{ path: a, known: base ? base.entry.mtime : undefined }], files }, IDLE_ONLY).then((r) => {
         const d = ((r && r.dirs) || [])[0] || null;
         if (!d) return null;
-        if (d.same) { if (!base) return null; listCache.set(a, { at: now(), entry: base.entry, pkg: base.pkg }); return base.entry; }
-        if (d.exists && d.isDir !== false && Array.isArray(d.kids)) listCache.set(a, { at: now(), entry: d, pkg });
+        if (d.same) { if (!base) return null; listCache.set(a, { at: now(), entry: base.entry }); return base.entry; }
+        if (d.exists && d.isDir !== false && Array.isArray(d.kids)) listCache.set(a, { at: now(), entry: d });
         else listCache.delete(a);
         if (listCache.size > 2000) for (const k of [...listCache.keys()].slice(0, 500)) listCache.delete(k);
         return d;
@@ -251,12 +297,25 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     const t = now();
     if (selfCache.v && t - selfCache.at < SELF_TTL_MS) return Promise.resolve(selfCache.v);
     if (selfCache.p) return selfCache.p;
-    selfCache.p = Promise.resolve(listOne(home, { pkg: true })).then((r) => {
+    selfCache.p = Promise.resolve(listOne(home, {})).then((r) => {
       const d = r && r.ok;
       if (!d) { selfCache.p = null; return { home, roots: [repoDir, dataRoot] }; }
+      // each home folder's package.json name is THAT folder's own fact (B-5561: its own call, behind); until every one that can land
+      // has, the exclusion is read again at the next ask (the home's listing kept, the facts kept: no call) — never kept a minute short
+      // of a checkout
       const roots = [repoDir, dataRoot];
-      for (const k of d.kids || []) if (k.pkg === PC.SELF_PACKAGE) roots.push(path.join(home, k.name));
-      selfCache = { at: now(), v: { home, roots: [...new Set(roots)] }, p: null };
+      let missing = 0, asked = 0;
+      for (const k of d.kids || []) {
+        if (k.link != null) continue;
+        const p = path.join(home, k.name), sf = selfFacts.get(p);
+        // S2: a home folder's own fact stands while the home's time has not moved (a new folder there moves it), at most SELF_KEEP_MS
+        if (sf && sf.homeAt === d.mtime && now() - sf.at < SELF_KEEP_MS) { if (sf.pkg === PC.SELF_PACKAGE) roots.push(p); continue; }
+        const kf = factOf(p); // a kid's own facts kept for the rows: its self fact too
+        if (kf) { selfFacts.set(p, { at: now(), pkg: kf.pkg || null, homeAt: d.mtime }); if (kf.pkg === PC.SELF_PACKAGE) roots.push(p); continue; }
+        if (asked >= SELF_FACTS) { missing++; continue; } // (the rest at the next ask)
+        if (askFacts(p)) { asked++; missing++; }
+      }
+      selfCache = { at: missing ? 0 : now(), v: { home, roots: [...new Set(roots)] }, p: null, missing };
       return selfCache.v;
     });
     return selfCache.p;
@@ -317,7 +376,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     const until = new Promise((r) => { tm = setTimeout(() => r(LATE), Math.max(50, budgetMs)); });
     const untilSoft = until.then(() => new Promise((r) => setImmediate(() => r(LATE))));   // an answer already in hand beats the deadline
     const okOf = (r) => (r && r !== LATE && r.ok ? r.ok : null);
-    const o = { until, untilSoft, files, press: !!press, budget: Math.max(50, budgetMs), skipAlso: [...candAbs, ...probes], boundAt: Date.now() + Math.max(50, budgetMs), signal };
+    const o = { until, untilSoft, files, press: !!press, budget: Math.max(50, budgetMs), boundAt: Date.now() + Math.max(50, budgetMs), signal };
     for (const [k, m] of sent) if (m.hungAt != null && now() - m.hungAt >= PROBE_LATE_MS) sent.delete(k);   // a mark lives PROBE_LATE_MS
     // THE LINE: the candidates ONE AT A TIME, in the bases' order — stop at the first exact hit or the first that does not answer
     const lineP = (async () => {
@@ -356,11 +415,24 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     }
     if (verdict && (verdict.kind === 'late' || verdict.kind === 'skipped' || verdict.kind === 'failed') && !/^[~/]/.test(String(text).trim())) { const j = tAll.findIndex((b) => PC.joinPath(b.path, String(text).trim()) === verdict.path); if (j >= 0) verdict.base = allBases[j]; }   // R-j: the base that did not answer, in the field's own words
     const listed = listR.map(okOf).filter(Boolean);
+    // B-5561: THE KIDS' OWN FACTS this answer asks for, behind it (never waited): the folder kids and the symlink kids the rows are about
+    const seg = /\s/.test(text) ? '' : String(text).trim().slice(String(text).trim().lastIndexOf('/') + 1).toLowerCase();
+    const factAsked = [];
+    let kn = 0, ln = 0;
+    const askKids = (ds, pre) => {
+      for (const d of ds) for (const k of d.kids || []) {
+        if (!k.name.toLowerCase().startsWith(pre)) continue;
+        const p = path.join(d.path, k.name), isLink = k.link != null;
+        if (isLink ? ln >= LINK_FACTS : kn >= KID_FACTS) continue;
+        if (askFacts(p)) { factAsked.push(p); if (isLink) ln++; else kn++; }
+      }
+    };
     /* exactly one folder starts with the typed last segment → list it too (rows: what is inside; Tab goes in) */
     const lastSeg = /\s/.test(text) || !String(text).includes('/') ? '' : String(text).slice(String(text).lastIndexOf('/') + 1).toLowerCase();
+    const listedTyped = listed.length;   // (the listings after it: the one match's — its rows are all its kids)
     if (lastSeg) {
       const one = [];
-      for (const d of listed) { const hits = (d.kids || []).filter((k) => !k.link && k.name.toLowerCase().startsWith(lastSeg)); if (hits.length === 1) one.push(path.join(d.path, hits[0].name)); }
+      for (const d of listed) { const hits = (d.kids || []).filter((k) => k.link == null && k.name.toLowerCase().startsWith(lastSeg)); if (hits.length === 1) one.push(path.join(d.path, hits[0].name)); }
       if (one.length) listed.push(...(await Promise.all([...new Set(one)].slice(0, 4).map((p) => rowSource(p, o, () => listOne(p, { files, ...o }))))).map(okOf).filter(Boolean));   // down its chain too (a dead kid is met by its one stat)
     }
     // the probes SENT that this reply does not answer (never marked asked by the field): late / skipped → probesLate, an error → probesFailed
@@ -382,15 +454,17 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     }
     // the line's own facts land in the listing too (a candidate's stat, a level's «a folder»): its resolution's facts
     const facts = [...answers.flatMap((x) => [x.stat && x.stat.exists ? x.stat : null, x.stat && x.stat.one && x.stat.one.exists ? x.stat.one : null]).filter(Boolean), ...auxR.map(okOf).filter(Boolean)];
-    const listing = PC.sliceListing({ home, machine: null, dirs: listed, probes: facts, index: idx, mounts: mountRows.filter((m) => !m.blocked), q: fuzzy });
+    askKids(listed.slice(0, listedTyped), seg); askKids(listed.slice(listedTyped), '');
+    const listing = PC.sliceListing({ home, machine: null, dirs: listed.map(withFacts), probes: facts, index: idx, mounts: mountRows.filter((m) => !m.blocked), q: fuzzy });
+    const factsLate = factAsked.some((p) => !factOf(p)) || !!(selfCache.missing && selfCache.v === me);
     // `partial`: the verdict NEEDS a source that did not answer (asked again, bounded); a search's rows when an index root is late or cut.
     // `rowsLate`: a source the rows for this text come from did not answer (the list says «still looking», never «no match» — P8)
     const partial = verdict ? verdict.kind === 'late' : !!(fuzzy && idxPartial);
     const rowsLate = sourcesLate.length > 0 || (fuzzy && idxPartial), rowsUnread = sourcesUnread.length > 0;
-    return { listing, self: me, took: now() - t0, partial, ...(verdict ? { verdict } : {}), ...(rowsLate ? { rowsLate: true } : {}), ...(rowsUnread ? { rowsUnread: true, sourcesUnread } : {}), ...(probesLate.length ? { probesLate } : {}), ...(probesFailed.length ? { probesFailed } : {}), ...(sourcesLate.length ? { sourcesLate } : {}) };
+    return { listing, self: me, took: now() - t0, partial, ...(factsLate ? { factsLate: true } : {}), ...(verdict ? { verdict } : {}), ...(rowsLate ? { rowsLate: true } : {}), ...(rowsUnread ? { rowsUnread: true, sourcesUnread } : {}), ...(probesLate.length ? { probesLate } : {}), ...(probesFailed.length ? { probesFailed } : {}), ...(sourcesLate.length ? { sourcesLate } : {}) };
   }
 
-  return { slice, self, stats: () => ({ noIdle: { ...busy } }), _caches: { listCache, indexCache, known, landed }, _counters: C };
+  return { slice, self, stats: () => ({ noIdle: { ...busy } }), _caches: { listCache, indexCache, known, landed, kidFacts }, _counters: C };
 }
 
-module.exports = { create, LIST_FRESH_MS, INDEX_TTL_MS, SELF_TTL_MS, PROBE_LATE_MS, LANDED_FRESH_MS, LINE_SLOTS, ROW_SLOTS };
+module.exports = { create, LIST_FRESH_MS, INDEX_TTL_MS, SELF_TTL_MS, PROBE_LATE_MS, LANDED_FRESH_MS, LINE_SLOTS, ROW_SLOTS, FACT_SLOTS, KID_FACTS, LINK_FACTS };

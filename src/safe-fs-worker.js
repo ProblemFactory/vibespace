@@ -32,6 +32,10 @@ process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '8';
 /* A stat's error as an ANSWER (B-d833, the coordinator's find 2026-11-20): only «no such file» (ENOENT, or ENOTDIR — a file where a
    folder was) says the path is not there; any other error (EACCES, EIO, ELOOP, a dead mount's ESTALE) is NOT KNOWN, said as such */
 function goneOf(e) { return e && (e.code === 'ENOENT' || e.code === 'ENOTDIR') ? {} : { err: String((e && (e.message || e.code)) || e).slice(0, 200) }; }
+// a folder's own facts, read INSIDE it (the folder's own listing, its probe, or its own `facts` call — B-5561): a .git there; its
+// package.json name (the instance's own checkout is the one named vibespace)
+const gitOf = (d) => { try { fs.statSync(path.join(d, '.git')); return true; } catch { return false; } };
+const pkgOf = (d) => { try { const f = path.join(d, 'package.json'); if (fs.statSync(f).size > 65536) return {}; const n = JSON.parse(fs.readFileSync(f, 'utf8')).name; return typeof n === 'string' ? { pkg: n.slice(0, 80) } : {}; } catch { return {}; } };
 
 function splitCsvLine(line, sep) {
   const out = [];
@@ -164,17 +168,17 @@ const OPS = {
     return { result: { folders: out } };
   },
 
-  // THE PATH FIELD'S SLICE (lane path-field — GET /api/dir-complete): each asked folder listed ONCE with its facts — its
-  // folders (a symlink to a folder resolved: `link` = its target), its files (`files: true`, name/size/mtime; else only
-  // counted), `git` (a .git inside), the folder's own mtime; a folder whose mtime equals `known` answers `same` (the hub's
-  // listing cache keeps it). `probes` = paths stated only (a Task Group's folder, a recent one, a name-derived one):
-  // exists / isDir / git / mtime / fileCount. Bounded: `maxKids` entries per folder (`more`). Never walks.
-  dirSlice({ dirs = [], probes = [], files = false, maxKids = 400, pkg = false, skip = [] }) {
-    // `skip` (B-d833 R-c): a kid that is a known dead folder or a mount is NAMED, never stated inside (its .git, its package.json, a link's target)
-    const skipSet = new Set(Array.isArray(skip) ? skip : []);
-    const gitOf = (d) => { try { fs.statSync(path.join(d, '.git')); return true; } catch { return false; } };
-    // `pkg` (the home's listing): a folder's package.json name — the instance's own checkout is the one named vibespace
-    const pkgOf = (d) => { try { const f = path.join(d, 'package.json'); if (fs.statSync(f).size > 65536) return {}; const n = JSON.parse(fs.readFileSync(f, 'utf8')).name; return typeof n === 'string' ? { pkg: n.slice(0, 80) } : {}; } catch { return {}; } };
+  // THE PATH FIELD'S SLICE (lane path-field — GET /api/dir-complete): each asked folder listed ONCE — its folders, its files
+  // (`files: true`, name/size/mtime; else only counted), `git` (a .git inside the listed folder itself), the folder's own mtime; a
+  // folder whose mtime equals `known` answers `same` (the hub's listing cache keeps it). `probes` = paths stated only (a Task Group's
+  // folder, a recent one, a name-derived one): exists / isDir / git / mtime / fileCount. Bounded: `maxKids` entries per folder
+  // (`more`). Never walks.
+  // A LISTING READS NAMES AND TYPES ONLY (B-5561): no call reaches under a kid (its .git, its package.json, a link's target), so a dead
+  // folder sitting in the listed folder (one nobody typed, not a mount the hub knows) never holds its parent's rows — each kid's facts
+  // come from the KID'S OWN call (pathStat `facts`). A symlink kid is named `link: ''` (its kind and target are its own call's); a file
+  // kid is counted by its type, and with `files` its size and mtime come from its own stat (a file lies on its folder's filesystem,
+  // never a mount). Said and left: on a filesystem whose listing carries no entry types, Node's readdir itself lstats each entry.
+  dirSlice({ dirs = [], probes = [], files = false, maxKids = 400 }) {
     const out = [];
     for (const want of dirs) {
       const d = want && want.path;
@@ -189,18 +193,11 @@ const OPS = {
       const kids = []; const fl = []; let fileCount = 0; let more = false; let n = 0;
       for (const e of list) {
         if (++n > maxKids) { more = true; break; }
-        const p = path.join(d, e.name);
-        if (skipSet.has(p)) { if (e.isDirectory()) kids.push({ name: e.name, git: false }); else if (e.isSymbolicLink()) kids.push({ name: e.name, git: false, link: '' }); continue; }   // (a link's target is its own call's)
-        if (e.isDirectory()) { kids.push({ name: e.name, git: gitOf(p), ...(pkg ? pkgOf(p) : {}) }); continue; }
-        if (e.isSymbolicLink()) {
-          let t = null; try { t = fs.statSync(p); } catch { continue; }   // a dangling link
-          if (t.isDirectory()) { let to = ''; try { to = fs.realpathSync(p); } catch { } kids.push({ name: e.name, git: gitOf(p), link: to }); continue; }
-          if (t.isFile()) { fileCount++; if (files) fl.push({ name: e.name, size: t.size, mtime: t.mtimeMs }); }
-          continue;
-        }
+        if (e.isDirectory()) { kids.push({ name: e.name }); continue; }
+        if (e.isSymbolicLink()) { kids.push({ name: e.name, link: '' }); continue; }   // (its kind and target: its own call's)
         if (e.isFile()) {
           fileCount++;
-          if (files) { let t = null; try { t = fs.statSync(p); } catch { } fl.push({ name: e.name, size: t ? t.size : 0, mtime: t ? t.mtimeMs : 0 }); }
+          if (files) { let t = null; try { t = fs.statSync(path.join(d, e.name)); } catch { } fl.push({ name: e.name, size: t ? t.size : 0, mtime: t ? t.mtimeMs : 0 }); }
         }
       }
       out.push({ path: d, exists: true, isDir: true, mtime: st.mtimeMs, git: gitOf(d), kids, ...(files ? { files: fl } : {}), fileCount, more });
@@ -225,9 +222,12 @@ const OPS = {
   // hang it). NAMES ONLY: the one match is stated by the hub, under ITS OWN name, through the door every level uses (it joins a call
   // already out, obeys the marks, the skip list and the pool's blocked check — the read of the fourth shape, 2026-11-20 11:34Z). `files`
   // lets a file be the answer.
-  pathStat({ path: p, names = null, files = false }) {
-    const bare = (q) => { try { const st = fs.statSync(q); const o = { path: q, exists: true, isDir: st.isDirectory() }; if (o.isDir) { try { if (fs.lstatSync(q).isSymbolicLink()) o.link = fs.realpathSync(q); } catch { } } return o; } catch (e) { return { path: q, exists: false, ...goneOf(e) }; } };
+  pathStat({ path: p, names = null, files = false, facts = false }) {
+    const bare = (q) => { try { const st = fs.statSync(q); const o = { path: q, exists: true, isDir: st.isDirectory() }; if (o.isDir) { try { if (fs.lstatSync(q).isSymbolicLink()) o.link = fs.realpathSync(q); } catch { } } else if (facts) { o.size = st.size; o.mtime = st.mtimeMs; } return o; } catch (e) { return { path: q, exists: false, ...goneOf(e) }; } };
     const stat = bare(p);
+    // `facts` (B-5561): a KID's facts in the kid's own call — a folder's git and package.json name, a file's size and mtime (a link to
+    // a file is a file of its folder) — read inside the kid, nothing beside it
+    if (facts && !stat.err) { stat.facts = true; if (stat.isDir) { stat.git = gitOf(p); Object.assign(stat, pkgOf(p)); } }
     if (names != null && !stat.exists && !stat.err) {
       const pre = String(names).toLowerCase(), dir = path.dirname(p), hits = [];
       try { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { if (!e.name.toLowerCase().startsWith(pre)) continue; if (e.isDirectory() || e.isSymbolicLink() || (files && e.isFile())) { hits.push(e.name); if (hits.length > 20) break; } } }
