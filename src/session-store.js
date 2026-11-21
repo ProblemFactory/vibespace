@@ -772,8 +772,10 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
     let ok;
     try { ok = await w.p; }
     catch (e) {   // row B-422c: noted — nothing parsed on the loop for it; unless a warm that READ answered meanwhile (the cache matches the file)
-      const now = _jsonlCache.get(claudeSessionId);
-      if (e && e.code === NOT_LOADED && !(now && now !== cached && now.mtimeMs === stat.mtimeMs && now.size === stat.size && now.ino === stat.ino)) { refusedNow = true; noteHistoryRefused(claudeSessionId, e, fp); }
+      const now = _jsonlCache.get(claudeSessionId), cur = _historyRefused.get(claudeSessionId);
+      // a STORAGE note another warm took meanwhile stays the storage's (this late refusal of another kind never brings back the 2 s
+      // re-warm and its find + stat on the loop)
+      if (e && e.code === NOT_LOADED && !(now && now !== cached && now.mtimeMs === stat.mtimeMs && now.size === stat.size && now.ino === stat.ino)) { refusedNow = true; noteHistoryRefused(claudeSessionId, e, fp, { stillHung: !!(cur && cur !== noteAtStart && cur.storageHung) }); }
       return false;
     }
     return ok;
