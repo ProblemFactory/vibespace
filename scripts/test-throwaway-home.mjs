@@ -11,8 +11,8 @@
 //       and the PURE verdict keeps its own fast rows (test-home-verdict ②, test-throwaway-boot ⑥); this pin proves the wiring once.
 //   (3) THE CHECK COVERS THE FAILURE: a hub that did NOT re-home is ended at once by the helper (by its identity), and the suite
 //       reports by name every path it touched in the stand-in (the stand-in's listing alone, never a walk of a real home).
-// The features: a chat session on a STAND-IN claude (outside the home), a codex whose only copy is the stand-in's own (refused), a
-// job, both indexes, the update check (offline: a throwaway copy), the first screen's BANNER read in a real browser (its picture).
+// The features: a chat session on a STAND-IN claude (outside the home), a job (and a program only the stand-in's ~/.local/bin holds:
+// not on the hub's PATH), both indexes, the update check (offline: a throwaway copy), the first screen's BANNER read in a real browser (its picture).
 // THE READ RECORDER: a preload in the hub's own process lists every fs call naming the stand-in (either spelling), marked BEFORE or
 // AFTER the re-home; its node children lose NODE_OPTIONS at the re-home (a named NOT of the built env), so what they and the shell
 // children do is judged by the stand-in's listing, byte for byte.
@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { freePorts, vncEnv, scratch, ONBOARDED_SOURCE, CHROME_QUIET } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv, endHub } from './hub-boot.mjs';
 import { loadPage } from './cdp-page-load.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 
 const require = createRequire(import.meta.url);
@@ -62,7 +63,7 @@ put('.vibespace/db/0123456789abcdef/usage.db', "a person's own index: never touc
 put('.config/google-chrome/Local State', '{}\n');
 put('.profile', 'PATH="$HOME/.local/bin:$PATH"; export PATH\n');   // the person's login profile names their own CLIs
 put('.local/bin/claude', '#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.314 (Claude Code)"; exit 0; }\nexit 1\n', 0o755);
-put('.local/bin/codex', '#!/bin/sh\n[ "$1" = --version ] && { echo "codex-cli 0.130.0"; exit 0; }\nexit 1\n', 0o755);
+put('.local/bin/person-cli', '#!/bin/sh\necho "the person\'s own program"\n', 0o755);   // a program only the person\'s ~/.local/bin holds (a made-up name: no host program)
 const standinReal = fs.realpathSync(STANDIN);
 const SPELLINGS = [...new Set([STANDIN, standinReal])];
 const namesStandin = (s) => SPELLINGS.some((p) => String(s).includes(p));
@@ -103,11 +104,11 @@ const api = async (p, body) => { const r = await fetch(ORIGIN + p, body === unde
 
 const before = listing(STANDIN);
 ok(before.filter((l) => l.startsWith('F ')).length >= 10, `(1) the STAND-IN this suite made (${STANDIN}, inside the helper's minted root) holds what a person's home holds (${before.filter((l) => l.startsWith('F ')).length} files: a sign-in, settings, a transcript, the CLIs' state, an index, a browser's, a login profile and two CLIs)`);
-const hubPath = (process.env.PATH || '').split(':').filter((d) => d && !['claude', 'codex'].some((n) => fs.existsSync(path.join(d, n)))).join(':');
+const hubPath = (process.env.PATH || '').split(':').filter((d) => d && !fs.existsSync(path.join(d, 'claude'))).join(':');
 const env = { ...strippedEnv(), ...VNC_ENV, HOME: STANDIN, VIBESPACE_REHOME_NOT_TEMP: OUTSIDE, PATH: `${STANDIN}/.local/bin:${hubPath}`, SHELL: path.join(tools, 'login-shell'),
   CLAUDE_CMD: path.join(tools, 'claude'), CLAUDE_CONFIG_DIR: path.join(STANDIN, '.claude'), VIBESPACE_PASSWORD: '' };
 // no switch that would hide the gates under test: the update check and the runtime check must be off BECAUSE the copy is throwaway
-for (const k of ['VS_NO_REAL_CLI', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_FORCE_AGENT_HOOKS', 'CODEX_CMD', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME', 'VIBESPACE_REAL_INSTALL']) delete env[k];
+for (const k of ['VS_NO_REAL_CLI', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_FORCE_AGENT_HOOKS', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME', 'VIBESPACE_REAL_INSTALL']) delete env[k];
 const hub = startHub({ root, tree: wt, port: PORT, env, nodeArgs: ['-r', RECORDER] });
 const up = await hub.ready({ ms: 120000 });
 ok(up, 'the hub boots through the helper from a LINKED worktree, handed the stand-in as its HOME (and the seam naming its folder no temp root)', hub.log().slice(-1500));
@@ -145,15 +146,14 @@ ok(c1 && c1.type === 'created', 'a chat session starts on the STAND-IN claude it
 for (let i = 0; i < 40 && !fs.existsSync(path.join(own, '.stand-in-claude-was-here', 'home')); i++) await sleep(250);
 ok(fs.existsSync(path.join(own, '.stand-in-claude-was-here', 'home')) && fs.readFileSync(path.join(own, '.stand-in-claude-was-here', 'home'), 'utf8').trim() === own, "…and the CLI it started lives in the hub's OWN home (it wrote its HOME there)");
 if (c1 && c1.sessionId) { ws.send(JSON.stringify({ type: 'kill', sessionId: c1.sessionId })); await waitFrame((m) => (m.type === 'killed' || m.type === 'exited') && m.sessionId === c1.sessionId, 40); }
-ws.send(JSON.stringify({ type: 'create', backend: 'codex', mode: 'chat', cwd, reqId: 'c2', name: 'pin-codex', cols: 80, rows: 24 }));
-const c2 = await waitFrame((m) => (m.type === 'created' || m.type === 'error') && m.reqId === 'c2');
-ok(c2 && c2.type === 'error' && !namesStandin(JSON.stringify(c2)), "codex — whose only copy is the stand-in's own (its ~/.local/bin, on the PATH it was handed and in its login profile) — is REFUSED, and the refusal names no path of the stand-in", c2);
 ws.close();
 for (let i = 0; i < 120; i++) { const r = await fetch(ORIGIN + '/api/jobs').catch(() => null); if (r && r.status === 200) break; await sleep(250); }
-const jb = await api('/api/jobs', { kind: 'task', name: 'pin', cmd: { argv: ['sh', '-c', 'mkdir -p "$HOME/.job-was-here" && echo "$HOME" > "$HOME/.job-was-here/home"'], cwd } });
+const jb = await api('/api/jobs', { kind: 'task', name: 'pin', cmd: { argv: ['sh', '-c', 'mkdir -p "$HOME/.job-was-here" && echo "$HOME" > "$HOME/.job-was-here/home" && { command -v person-cli || echo none; } > "$HOME/.job-was-here/which"'], cwd } });
 let job = null; for (let i = 0; i < 80 && jb.j && jb.j.job; i++) { job = (await api(`/api/jobs/${jb.j.job.id}?tail=20`)).j?.job; if (job && job.run && job.run.endedAt) break; await sleep(500); }
 const jobHome = path.join(own, '.job-was-here', 'home');
 ok(fs.existsSync(jobHome) && fs.readFileSync(jobHome, 'utf8').trim() === own, "a JOB runs with the hub's own home as its $HOME (it wrote there)", { created: jb.status, error: jb.j && jb.j.error, state: job && job.state });
+const which = (() => { try { return fs.readFileSync(path.join(own, '.job-was-here', 'which'), 'utf8').trim(); } catch { return null; } })();
+ok(which === 'none', "…and a program only the stand-in's ~/.local/bin holds (on the PATH it was handed, in its login profile) is NOT on the hub's PATH: the PATH is built, nothing of the handed one carried", which);
 for (let i = 0; i < 30; i++) { try { await fetch(ORIGIN + '/api/search?q=probe'); } catch { } if (/\[search-index\] ready/.test(log())) break; await sleep(1000); }
 for (let i = 0; i < 60 && !/\[usage-index\] ready/.test(log()); i++) await sleep(1000);
 const dirOf = (tag) => { const m = new RegExp(`\\[${tag}\\] ready: [^\\n]*\\((/[^)\\n]+)\\)`).exec(log()); return m ? m[1] : null; };
@@ -164,7 +164,8 @@ if (!CHROME) skip("the first screen's banner in a browser", 'no Chrome on this m
 else {
   const chrome = spawn(CHROME, [...CHROME_QUIET, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
   try {
-    let target = null; for (let i = 0; i < 80 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(250); } }
+    const target = await waitPageTarget(CDP_PORT, { child: chrome, who: 'test-throwaway-home' });   // scripts/cdp-page-target.mjs: a miss always waits, each ask bounded
+    if (!target) throw new Error(`no page target on DevTools port ${CDP_PORT} (${waitPageTarget.lastSeen})`);
     const sock = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 }); await new Promise((r) => sock.on('open', r));
     let seq = 0; const pend = new Map(); sock.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
     const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(method + ': ' + m.error.message)) : res(m.result))); sock.send(JSON.stringify({ id, method, params })); });

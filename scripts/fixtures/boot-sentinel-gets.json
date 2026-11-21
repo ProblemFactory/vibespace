@@ -254,6 +254,7 @@
   "/api/loop-holds/cpu-profiles/:name",
   "/api/machine-mounts",
   "/api/maintenance",
+  "/api/throwaway",
   "/api/may-use",
   "/api/mount-tokens",
   "/api/mounts",
