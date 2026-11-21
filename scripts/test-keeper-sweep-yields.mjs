@@ -427,5 +427,79 @@ console.log('— ⑪ B-346d law 2: a daemon gone BEFORE its idle timeout is neve
     'the kept browser\'s reason: «ended» (found gone before its idle timeout, why unknown) — its tabs reopen by themselves as an idle-out\'s do; the agent\'s words say it', { why: KB.stopWhyOf('ended'), kind: KB.restoreKindFor('ended'), words: KB.stopWhyWords('ended') });
 }
 
+console.log('— ⑫ B-346d\'s RECORDER (r1228): ONE journal record at «daemon gone» — the bound both sides, its Chrome, the hub\'s own signals, the OOM counter');
+{
+  const { anchored } = await import('./scratch.mjs');
+  const SLm = require('../src/server/signal-ledger.js');
+  const GRm = require('../src/browser-gone-record.js');
+  const CLK0 = 1795100000000, IDLE = 900000;
+  const kids = [];
+  const standIn = async (args = []) => { const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', ...args], { stdio: 'ignore' }); kids.push(c); for (let i = 0; i < 100 && F.procStart(c.pid) == null; i++) await new Promise((r) => setTimeout(r, 10)); return c; };
+  const ended = (c) => new Promise((r) => { if (c.exitCode !== null || c.signalCode !== null) return r(); c.once('exit', () => r()); try { c.kill('SIGKILL'); } catch { r(); } });
+  // ONE world: an ephemeral daemon (a stand-in process) seen alive by a tick, its Chrome (a stand-in naming its user-data-dir), the
+  // hub unit's counter (a stand-in memory.events), then the daemon ENDS and the next tick finds it gone 12 s later
+  const recordOf = async (Km, { chromeCase = 'alive', signal = true, oomStart = 3, oomEnd = 4, tickAlive = true, beforeRun = false } = {}) => {
+    const dataDir = path.join(ROOT, 'gone-' + (++dirN)); fs.mkdirSync(dataDir, { recursive: true });
+    const chromeDir = path.join(dataDir, 'chrome-profile'); fs.mkdirSync(chromeDir, { recursive: true });
+    const events = path.join(dataDir, 'memory.events'); fs.writeFileSync(events, `low 0\nhigh 0\nmax 0\noom 0\noom_kill ${oomStart}\n`);
+    const daemon = await standIn();
+    const chrome = chromeCase === 'none' ? null : await standIn([`--user-data-dir=${chromeDir}`]);
+    let clk = CLK0;
+    const key = 'bk-0000c4a' + dirN.toString(16).slice(-1), id = 'bp-' + (0x30000000 + dirN).toString(16);
+    const profile = B.newProfileRecord({ id, label: '(ephemeral) recorder', dir: null, ephemeral: true, owner: { kind: 'conversation', id: key }, now: CLK0 - 60e3 });
+    profile.lastVerbAt = CLK0 - 30e3; profile.verbBeforeAt = CLK0 - 40e3;
+    const browser = { profileId: id, state: 'ready', pid: daemon.pid, starttime: F.procStart(daemon.pid), cdpUrl: null, ns: 'vs-' + key, startedAt: CLK0 - 60e3, idleMs: IDLE,
+      ...(chrome ? { browser: { pid: chrome.pid, starttime: F.procStart(chrome.pid), dir: chromeDir } } : {}) };
+    fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [profile], browsers: { [id]: browser }, children: {}, told: {}, pins: {},
+      leases: [{ profileId: id, browserKey: key, sessionId: 'sess-rec', targetId: null, since: CLK0 - 60e3, input: 'agent', viewers: 0, carrierLostAt: null, alias: 'ephemeral' }] }));
+    const lines = [];
+    const log = { log: (l) => lines.push(String(l)), warn: (l) => lines.push(String(l)), error() { }, info() { } };
+    const k = Km.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv }), liveKeys: () => new Set([key]), now: () => clk, install: false, log, tickMs: 3600e3, oomEventsPath: events });
+    try {
+      if (signal) SLm.noteSignal(daemon.pid, 'the keeper: its stop', 'SIGTERM', beforeRun ? CLK0 - 120e3 : CLK0 - 5e3); // before the run (a reused pid) or during it
+      if (tickAlive) await k.tick();                 // the tick sees the daemon alive at CLK0 (and reads the counter)
+      await ended(daemon);                           // the daemon ENDS (who or what is the record's question)
+      if (chrome && chromeCase === 'gone') await ended(chrome); // …its Chrome with it (both found dead by the next tick)
+      fs.writeFileSync(events, `low 0\nhigh 0\nmax 0\noom 0\noom_kill ${oomEnd}\n`);
+      clk = CLK0 + 12e3;
+      await k.tick();                                // the next tick finds it gone
+      for (let i = 0; i < 200 && !lines.some((l) => l.includes('gone record')); i++) await new Promise((r) => setTimeout(r, 10));
+      return { line: lines.find((l) => l.includes('gone record')) || '', daemon: daemon.pid, chrome: chrome ? chrome.pid : null };
+    } finally { try { k.shutdown(); } catch { /* none */ } for (const c of [daemon, chrome]) if (c) await ended(c); }
+  };
+  const iso = (ms) => new Date(ms).toISOString();
+  const all = await recordOf(K);
+  ok(/gone record bp-/.test(all.line) && all.line.includes(`last seen alive ${iso(CLK0)} (12 s before it was found gone)`) && all.line.includes(`found gone ${iso(CLK0 + 12e3)} by the tick`),
+    'B-346d recorder (a): the record says the last time a tick saw its daemon ALIVE beside the time it was found gone — a bound on both sides (12 s), never only «within N s of a command»', all.line);
+  ok(all.line.includes(`its Chrome: alive (pid ${all.chrome}) when its daemon was found gone — the hub ends it now`), 'B-346d recorder (b): its Chrome OUTLIVED the daemon — said, read before the hub ends it', all.line);
+  ok(all.line.includes(`the hub's own signals: SIGTERM to its daemon (pid ${all.daemon}) by the keeper: its stop at ${iso(CLK0 - 5e3)}`), 'B-346d recorder (c): the hub\'s own signal to that daemon during its run — which site, when (the one ledger a pid)', all.line);
+  ok(all.line.includes('the hub unit\'s OOM kills: 3 → 4: ROSE by 1 during its run'), 'B-346d recorder (d): the hub unit\'s OOM counter at its first tick alive and when found gone — a rise said', all.line);
+  ok(!/https?:|:\/\/|\bwww\./.test(all.line) && !/title/i.test(all.line), 'B-346d recorder: names and numbers only — no page address, no site name, no title in the record', all.line);
+  const [gone, none, quiet, early] = await Promise.all([recordOf(K, { chromeCase: 'gone', signal: false, oomEnd: 3 }), recordOf(K, { chromeCase: 'none', beforeRun: true }), recordOf(K, { chromeCase: 'alive', signal: false }), recordOf(K, { tickAlive: false, signal: false })]);
+  ok(gone.line.includes(`its Chrome: already gone (pid ${gone.chrome})`) && none.line.includes('its Chrome: none recorded for this run'), 'B-346d recorder (b): every case said — a Chrome already gone, none recorded for the run (before: silent unless it outlived its daemon)', { gone: gone.line, none: none.line });
+  ok(gone.line.includes('the hub\'s own signals: none') && none.line.includes('the hub\'s own signals: none'), 'B-346d recorder (c): no signal ⇒ «none»; a row noted BEFORE the run (a reused pid) is never read as this run\'s', { gone: gone.line, none: none.line });
+  ok(gone.line.includes('3 → 3: no change') && early.line.includes('last seen alive never by a tick') && early.line.includes('(no reading at its first tick alive)'), 'B-346d recorder (a)+(d): an unchanged counter says «no change»; a daemon gone before any tick saw it says so (never a made-up bound)', { gone: gone.line, early: early.line });
+  ok(GRm.memoryEventsPathFrom('0::/user.slice/user-1000.slice/user@1000.service/app.slice/vibespace.service\n') === '/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/vibespace.service/memory.events' && GRm.memoryEventsPathFrom('12:cpu:/x\n') === null && GRm.oomKillsFrom('oom 1\noom_kill 7\n') === 7 && GRm.oomKillsFrom('oom 1\n') === null,
+    'B-346d recorder (d): the hub unit\'s memory.events path read off /proc/self/cgroup (cgroup v2 only; none ⇒ unreadable), oom_kill parsed', null);
+  // THE LEDGER'S SITES, each ONCE: the keeper's endProcess (TERM, KILL), its stop (TERM, KILL), the person's process-panel kill
+  const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), wsrc = fs.readFileSync(path.join(REPO, 'src/server/sysinfo-wiring.js'), 'utf8');
+  const n = (t, x) => t.split(x).length - 1;
+  const SITES = [[ksrc, "    SL.noteSignal(pid, site, 'SIGTERM', now());"], [ksrc, "    if (same()) SL.noteSignal(pid, site, 'SIGKILL', now());"], [ksrc, "SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGTERM', now());"], [ksrc, "if (F.pidAlive(rec.pid)) SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGKILL', now());"], [wsrc, "require('./signal-ledger.js').noteSignal(pid, 'the person: the process panel', 'SIG' + sig);"]];
+  ok(SITES.every(([t, x]) => n(t, x) === 1), `B-346d recorder (c): the hub's ${SITES.length} signal sites that can reach a browser's daemon or Chrome each note the ONE ledger, once`, SITES.map(([t, x]) => [x.slice(0, 50), n(t, x)]));
+  // RED CONTROLS — each field taken out of a copy of the keeper (anchored(): each anchor found once, else the control throws by name)
+  const cut = (anchor, to, name) => M.load('src/server/browser-keeper.js', anchored(ksrc, anchor, to, name), name.replace(/[^a-z0-9]+/gi, '-').toLowerCase());
+  const [ca, cb, cc, cd] = await Promise.all([
+    recordOf(cut('      if (isLocalRec(rec)) aliveSeen(rec, t); // B-346d\'s recorder (a): this tick saw its daemon alive\n', '', 'recorder (a) no alive stamp')),
+    recordOf(cut("    const chrome = !b ? { state: 'none' } :", "    const chrome = { state: 'none' }; const chromeRead = !b ? { state: 'none' } :", 'recorder (b) the Chrome never said')),
+    recordOf(cut("    const signals = [...SL.signalsTo(", "    const signals = [] || [...SL.signalsTo(", 'recorder (c) no ledger')),
+    recordOf(cut('    oomSeen = { n: await readOomKills(), at: t };', '    oomSeen = null;', 'recorder (d) no reading at the start')),
+  ]);
+  ok(ca.line.includes('last seen alive never by a tick'), 'CONTROL (a): a keeper whose tick does not stamp «seen alive» says «never by a tick» of a daemon a tick saw — RED', ca.line);
+  ok(cb.line.includes('its Chrome: none recorded for this run') && !cb.line.includes('alive (pid'), 'CONTROL (b): a record that never reads the Chrome says «none recorded» of a Chrome that outlived its daemon — RED', cb.line);
+  ok(cc.line.includes('the hub\'s own signals: none'), 'CONTROL (c): a record that never reads the ledger says «none» of a daemon the hub signalled — RED', cc.line);
+  ok(cd.line.includes('(no reading at its first tick alive)') && !cd.line.includes('ROSE'), 'CONTROL (d): a tick that never reads the counter cannot say the rise — RED', cd.line);
+  for (const c of kids) await ended(c);
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
