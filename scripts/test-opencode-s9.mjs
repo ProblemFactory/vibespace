@@ -25,9 +25,23 @@ import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { startMockServe, createMockState, QUESTION_PART, emit } from './dev/mock-opencode-serve.mjs';
-import { ONBOARDED_SOURCE, withoutVendorKeys, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { ONBOARDED_SOURCE, withoutVendorKeys, vncEnv, CHROME_STORE, CHROME_QUIET, endRootedProcesses } from './scratch.mjs';
 
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
+// A SUITE ENDS WHAT IT STARTS (主开发 r1108 — the integrator's watcher found a «vibespace-device» of this suite alive after it ended): the
+// scratch hub starts its own device agent, detached into its own session by design (src/agentd/client.js — «a server restart never
+// touches the daemon»; it never ends itself), so the hub's kill never reaches it. Every process rooted in the suite's folders (its HOME,
+// its tree — scripts/scratch.mjs endRootedProcesses) is ended, WAITED for (bounded), and any still alive is said by name
+const endRootsAndSay = (roots, ms = 5000) => {
+  const pids = new Set();
+  const live = (p) => { try { const s = fs.readFileSync(`/proc/${p}/stat`, 'latin1'); return s.slice(s.lastIndexOf(')') + 2)[0] !== 'Z'; } catch { return false; } };
+  for (let pass = 0; pass < 2; pass++) {   // a second pass catches a child forked meanwhile
+    for (const r of roots) { try { for (const p of endRootedProcesses(r)) pids.add(p); } catch (e) { console.error(`  ! the end refused ${r}: ${e.message}`); } }
+    const until = Date.now() + ms;
+    while ([...pids].some(live) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);   // a bounded wait for their END (no CPU spent)
+  }
+  for (const p of [...pids].filter(live)) { let c = '?'; try { c = fs.readFileSync(`/proc/${p}/comm`, 'utf8').trim(); } catch { } console.error(`  ! still alive after the suite's end: pid ${p} (${c}) rooted in ${roots.join(', ')}`); }
+};
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const serve = require(path.join(REPO, 'src/opencode-serve.js'));
@@ -2161,6 +2175,7 @@ console.log('\n— A REAL BOOT WITH THE SERVICE OFF (nothing of ours runs or wat
   const cleanup = () => {
     try { srv?.kill('SIGKILL'); } catch { }
     try { const r = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'opencode-serve.json'), 'utf8')); if (r.pid) process.kill(r.pid, 'SIGKILL'); } catch { }
+    endRootsAndSay([wt, ocHome]);   // the hub's device agent (and anything else it started) — before its folders go
     try { execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: REPO, stdio: 'ignore' }); } catch { }
     for (const d of [wt, ocHome]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
   };
@@ -2477,6 +2492,7 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
       try { chrome?.kill('SIGKILL'); } catch { }
       try { srv?.kill('SIGKILL'); } catch { }
       try { const r = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'opencode-serve.json'), 'utf8')); if (r.pid) process.kill(r.pid, 'SIGKILL'); } catch { }
+      endRootsAndSay([wt, udd, ocHome]);   // the hub's device agent (and anything else it started) — before its folders go
       try { execSync(`git worktree remove --force ${wt}`, { cwd: REPO, stdio: 'ignore' }); } catch { }
       for (const d of [wt, udd, ocHome]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
     };

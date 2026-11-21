@@ -39,9 +39,23 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE, withoutVendorKeys, VENDOR_KEY_ENV, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { ONBOARDED_SOURCE, withoutVendorKeys, VENDOR_KEY_ENV, vncEnv, CHROME_STORE, CHROME_QUIET, endRootedProcesses } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
+// A SUITE ENDS WHAT IT STARTS (主开发 r1108 — the integrator's watcher found a «vibespace-device» of this suite alive after it ended): the
+// scratch hub starts its own device agent, detached into its own session by design (src/agentd/client.js — «a server restart never
+// touches the daemon»; it never ends itself), so the hub's kill never reaches it. Every process rooted in the suite's folders (its HOME,
+// its tree — scripts/scratch.mjs endRootedProcesses) is ended, WAITED for (bounded), and any still alive is said by name
+const endRootsAndSay = (roots, ms = 5000) => {
+  const pids = new Set();
+  const live = (p) => { try { const s = fs.readFileSync(`/proc/${p}/stat`, 'latin1'); return s.slice(s.lastIndexOf(')') + 2)[0] !== 'Z'; } catch { return false; } };
+  for (let pass = 0; pass < 2; pass++) {   // a second pass catches a child forked meanwhile
+    for (const r of roots) { try { for (const p of endRootedProcesses(r)) pids.add(p); } catch (e) { console.error(`  ! the end refused ${r}: ${e.message}`); } }
+    const until = Date.now() + ms;
+    while ([...pids].some(live) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);   // a bounded wait for their END (no CPU spent)
+  }
+  for (const p of [...pids].filter(live)) { let c = '?'; try { c = fs.readFileSync(`/proc/${p}/comm`, 'utf8').trim(); } catch { } console.error(`  ! still alive after the suite's end: pid ${p} (${c}) rooted in ${roots.join(', ')}`); }
+};
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -5068,6 +5082,7 @@ process.stdin.on('data', (d) => {
     } catch { }
     try { chrome?.kill('SIGKILL'); } catch { }
     try { srv?.kill('SIGKILL'); } catch { }
+    endRootsAndSay([ROOT]);   // the hub's device agent (one per HOME, kept across the restarts) — before its root goes
     try { execFileSync('git', ['-C', REPO, 'worktree', 'remove', '--force', wt], { stdio: 'ignore', env: GIT_ENV }); } catch { }
     try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
   };

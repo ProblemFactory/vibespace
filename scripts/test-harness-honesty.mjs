@@ -41,7 +41,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE, withoutVendorKeys, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, withoutVendorKeys, vncEnv, CHROME_STORE, CHROME_QUIET, endRootedProcesses } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -158,6 +158,7 @@ const SERVER_REQS = [
   { id: 911, method: 'totally/unknown/method', params: {} },
 ];
 const STUB = `
+process.stdin.on('end', () => process.exit(0));   // as the real app-server: its wrapper gone (stdin closed), it ends — the wrapper hands it nothing on a signal, by design
 const fs = require('fs');
 let b = ''; let turns = 0;
 const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
@@ -211,6 +212,21 @@ const events = () => out.split('\n').filter(Boolean).map((l) => { try { return J
 const readMeta = () => { try { return JSON.parse(fs.readFileSync(metaFile, 'utf8')); } catch { return null; } };
 const waitFor = async (pred, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(80); } return pred(); };
 const sendLine = (o) => w.stdin.write(JSON.stringify(o) + '\n');
+// A SUITE ENDS WHAT IT STARTS (主开发 r1108 — the integrator's watcher found three of this suite's stubs alive after it ended): a wrapper
+// is stopped and WAITED for, it and its stub app-server, by identity (pid + its start time) — bounded; anything still alive is said by
+// name, ended, and red
+const procId = (pid) => { try { const f = fs.readFileSync(`/proc/${pid}/stat`, 'latin1'); const x = f.slice(f.lastIndexOf(')') + 2).split(' '); return x[0] === 'Z' ? null : x[19]; } catch { return null; } };
+const endWrapper = async (label) => {
+  await waitFor(() => Number.isInteger(readMeta()?.childPid), 3000);   // the sidecar names the stub ≤ 200 ms after its spawn
+  const kids = [[w.pid, 'its codex-chat-wrapper'], [readMeta()?.childPid, 'its stub app-server (node -e STUB)']]
+    .filter(([p]) => Number.isInteger(p) && p > 0).map(([p, name]) => ({ p, name, id: procId(p) })).filter((k) => k.id);
+  try { w.kill('SIGTERM'); } catch { }
+  const alive = () => kids.filter((k) => procId(k.p) === k.id);
+  await waitFor(() => alive().length === 0, 5000);
+  const left = alive();
+  for (const k of left) { try { process.kill(k.p, 'SIGKILL'); } catch { } }
+  ok(left.length === 0, `${label}: it and its stub app-server ended within 5 s of its stop (${kids.length} process(es) held by identity)`, left.map((k) => `${k.name} pid ${k.p} still alive — ended by SIGKILL`).join('; '));
+};
 
 ok(await waitFor(() => readMeta()?.threadId === 'th-h'), 'wrapper handshake against the stub app-server');
 
@@ -412,8 +428,7 @@ sendLine({ type: 'chat-input', text: 'again', msgId: 'm2' });
 ok(await waitFor(() => rpc().filter((m) => m.method === 'turn/start').length === 2), 'a second turn starts');
 ok(rpc().filter((m) => m.method === 'turn/start')[1].params.personality === 'friendly', '…and NOW turn/start carries personality (only because the user picked one)', JSON.stringify(rpc().filter((m) => m.method === 'turn/start')[1]?.params));
 
-try { w.kill('SIGTERM'); } catch { }
-await sleep(200);
+await endWrapper('the main wrapper');
 
 // ① the spawn-time value, when the user DID choose one
 console.log('— personality at spawn (chosen)');
@@ -423,15 +438,13 @@ console.log('— personality at spawn (chosen)');
   out = ''; w.stdout.on('data', (d) => { out += d; }); w.stderr.on('data', () => {});
   ok(await waitFor(() => rpc().some((m) => m.method === 'thread/start')), 'wrapper restarted with a chosen style');
   ok(rpc().find((m) => m.method === 'thread/start').params.personality === 'none', "a CHOSEN style is sent — including 'none', which is a real codex value meaning \"no persona\"");
-  try { w.kill('SIGTERM'); } catch { }
-  await sleep(150);
+  await endWrapper("the 'none' wrapper");
   fs.rmSync(rpcLog, { force: true }); fs.rmSync(metaFile, { force: true });
   w = spawnWrapper({ CODEX_WEBUI_PERSONALITY: 'sassy' });
   out = ''; w.stdout.on('data', (d) => { out += d; }); w.stderr.on('data', () => {});
   ok(await waitFor(() => rpc().some((m) => m.method === 'thread/start')), 'wrapper restarted with a bogus style');
   ok(!('personality' in rpc().find((m) => m.method === 'thread/start').params), 'an out-of-enum spawn value is dropped, never forwarded');
-  try { w.kill('SIGTERM'); } catch { }
-  await sleep(150);
+  await endWrapper("the 'sassy' wrapper");
 }
 // the adapter is the ONE place the enum is applied to a spawn
 {
@@ -570,6 +583,7 @@ if (!CHROME) {
   const cleanup = () => {
     try { chrome.kill('SIGKILL'); } catch { }
     try { srv.kill('SIGKILL'); } catch { }
+    for (const r of [wt, `${wt}-chrome`, fakeHome, CWD]) { try { endRootedProcesses(r); } catch { } }   // what the server started (its HOME, its tree) goes with it (test-architecture §57b)
     try { execSync(`git worktree remove --force ${wt}`, { cwd: REPO, stdio: 'ignore' }); } catch { }
     for (const d of [`${wt}-chrome`, fakeHome, CWD]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
   };

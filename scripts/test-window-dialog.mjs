@@ -15,6 +15,7 @@
 // python3 gi / dbus-run-session.
 // Run: node scripts/test-window-dialog.mjs
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { spawn, spawnSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -190,9 +191,17 @@ const chooserOn = async (disp, auth) => (/"(?!xdg-desktop-portal-gtk")([^"]+)": 
 // FileChooser whenever one answers on its bus): a REAL google-chrome with the rung's own argv (M.browserArgv), a page with a file
 // input, the input pressed THROUGH THE TREE ⇒ where does the chooser map?
 const CHROME = ['/opt/google/chrome/chrome'].find((p) => fs.existsSync(p)) || bin('google-chrome');
-const page = path.join(S, 'upload.html'); fs.writeFileSync(page, '<!doctype html><title>vs upload</title><input type="file" aria-label="Pick a file" style="position:fixed;inset:0;width:100%;height:100%">');
+// THE PAGE FROM THE SUITE'S OWN LOOPBACK STAND-IN (主开发 r1108 — as its kin do: test-desktop-app-rung-chrome, test-desktop-xpra-window-open):
+// the rung refuses every file: address (src/desktop-browser-app.js validateBrowserUrl, since .166) — the suite asked it for one and
+// spread the refusal's null argv, so the chooser legs judged nothing for releases
+const UPLOAD = '<!doctype html><title>vs upload</title><input type="file" aria-label="Pick a file" style="position:fixed;inset:0;width:100%;height:100%">';
+const pageSrv = http.createServer((q, r) => { const hit = q.url === '/upload.html'; r.writeHead(hit ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' }); r.end(hit ? UPLOAD : ''); });
+await new Promise((r) => pageSrv.listen(0, '127.0.0.1', r));
+process.on('exit', () => { try { pageSrv.close(); } catch { } });
+const pageUrl = `http://127.0.0.1:${pageSrv.address().port}/upload.html`;
 async function chromeLeg(env, tag) {
-  const av = M.browserArgv({ browser: 'chromium', exec: CHROME, args: ['--disable-features=ChromeWhatsNewUI'] }, { profileDir: path.join(S, `chrome-${tag}`), url: 'file://' + page });
+  const av = M.browserArgv({ browser: 'chromium', exec: CHROME, args: ['--disable-features=ChromeWhatsNewUI'] }, { profileDir: path.join(S, `chrome-${tag}`), url: pageUrl });
+  if (!av.ok) { ok(false, `the rung refused this suite's page — ${av.code}: ${av.error}`, { url: pageUrl }); done(); }   // a refusal is READ, never spread
   // B-9dd0 unit 2: the rung's own argv (av.argv) runs after the suite's quiet switches and its store, so the argv under test is the
   // product's plus those (--no-first-run / --disable-default-apps among them: the first-run window and the Terms branch may not show)
   const c = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, ...av.argv], { env: { ...env, ...(av.env || {}) }, stdio: 'ignore', detached: true });
@@ -219,7 +228,7 @@ async function chromeLeg(env, tag) {
     if (w && !/^vs upload/.test(w.title)) { // a fresh profile opens "What's New" over the URL — load the page through the address bar
       await run(bin('xdotool'), ['windowfocus', '--sync', String(w.id)], ke);
       await run(bin('xdotool'), ['key', 'ctrl+l'], ke); await sleep(300);
-      await run(bin('xdotool'), ['type', '--delay', '5', 'file://' + page], ke); await run(bin('xdotool'), ['key', 'Return'], ke);
+      await run(bin('xdotool'), ['type', '--delay', '5', pageUrl], ke); await run(bin('xdotool'), ['key', 'Return'], ke);
       for (let i = 0; i < 20 && !(w && /^vs upload/.test(w.title)); i++) { await sleep(250); w = (await windowsNow()).find((r) => /Google Chrome$/.test(r.title || '') && r.mapped); }
       await sleep(800);
     }
