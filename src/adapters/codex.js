@@ -709,24 +709,30 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
  *  snapshot gone (another read replaced it) ⇒ asked once more; again ⇒ the one-shot worker read. A page refused by the lane's heap
  *  bound (`heap_bound`) skips the one-shot read (it would hold more). `onFail(why)` hears why the paged road gave up. `slot` (B-299b):
  *  the worker's snapshot slot — '' the history reads' (default), 'helper' the artifact door's (a helper's page 0 never cuts a history read).
- *  → the records, or null (the caller parses on the loop, said) */
-async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '' } = {}) {
+ *  B-cd4b unit 2: `entry` — the claude warm's one-shot reply (readJsonlTail's whole entry, `jsonlTail`) in pages, the worker running the
+ *  same function once: page 0 carries the entry's facts, every page its messages and their line starts; assembled here → { entry, mode,
+ *  bytes }, as `jsonlTail` answers (its one-shot read is the fallback); `dropSubagent` is the worker's own line rule (slot 'warm').
+ *  → the records (or, with `entry`, { entry, mode, bytes }), or null (the caller parses on the loop, said) */
+async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false } = {}) {
   const said = (why) => { _pagedStats.failed++; try { onFail?.(why); } catch { } return null; };
   const pool = _transcriptPoolGet();
   if (!pool) return said('no transcript pool on this process');
   let why = null;
   for (let tries = 0; tries < 2; tries++) {
     try {
-      const out = [];
-      let token = null, total = Infinity, start = 0, gone = false;
+      const out = [], startsOut = [];
+      let token = null, total = Infinity, start = 0, gone = false, head = null;
       while (start < total) {
-        const r = await pool.call('boundedParsedPage', { fp, tailOnly, start, count: page, maxBytes: PAGE_BYTES, capMb: HISTORY_SOFT_CHECK ? HISTORY_HEAP_MB : 0, ...(token ? { token } : {}), ...(slot ? { slot } : {}) });
+        const r = await pool.call('boundedParsedPage', { fp, tailOnly, start, count: page, maxBytes: PAGE_BYTES, capMb: HISTORY_SOFT_CHECK ? HISTORY_HEAP_MB : 0, ...(token ? { token } : {}), ...(slot ? { slot } : {}), ...(entry ? { entry: true } : {}), ...(dropSubagent ? { dropSubagent: true } : {}) });
         if (!r || r.gone) { gone = true; _pagedStats.gone++; why = 'its snapshot was gone twice (another read replaced it)'; break; }
         _pagedStats.pages++;
         token = r.token; total = r.total;
+        if (entry && r.facts) head = r;
         for (const x of r.records) out.push(x);
+        if (entry && r.starts) for (const x of r.starts) startsOut.push(x);
         start = Number.isInteger(r.next) && r.next > start ? r.next : start + page;
       }
+      if (!gone && entry) { _pagedStats.reads++; return head ? { entry: { ...head.facts, messages: out, starts: startsOut }, mode: head.mode, bytes: head.bytes } : said('the paged entry came without its facts'); }
       if (!gone) { _pagedStats.reads++; return out; }
     } catch (e) {
       const code = e && e.code;
@@ -736,7 +742,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
     }
   }
   _pagedStats.oneShot++;
-  const r = await readJsonlBoundedParsedAsync(fp, { tailOnly });
+  const r = entry ? await readJsonlTailAsync(fp, { dropSubagent }) : await readJsonlBoundedParsedAsync(fp, { tailOnly, dropSubagent });
   return r == null ? said(`${why}; then the one-shot read failed too (both pool workers down, or its own failure)`) : r;
 }
 /** B-f3f9: a codex conversation's WHOLE history read, parsed and MERGED in the transcript worker's `history` lane (its fork

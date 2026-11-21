@@ -34,7 +34,8 @@ function _codex() { return require('./adapters/codex'); }
 // 35 MB with the string, the records 71 MB — their strings keep slices of it; one worker after four tails: heap 82 MB, not 155).
 // B-299b (主开发 r604): ONE snapshot per SLOT — '' (the history reads, as before) and 'helper' (the artifact door's helper transcripts,
 // read one at a time by the registry): a helper's first page never replaces the snapshot a person's paged read is reading
-const PAGE_SLOTS = new Set(['', 'helper']);
+// B-cd4b unit 2: 'warm' — the claude transcript warm's ENTRY in pages (`entry`, below), one warm at a time (src/session-store.js)
+const PAGE_SLOTS = new Set(['', 'helper', 'warm']);
 const _pageSnaps = new Map();   // slot → snapshot
 const slotOf = (payload) => (payload && PAGE_SLOTS.has(payload.slot) ? payload.slot : '');
 // B-f3f9: the merged history of ONE conversation, kept for its pages (codexHistoryMergedPage) — its own snapshot beside the lines'
@@ -76,12 +77,33 @@ function runOp(op, payload = {}) {
       };
       let snap = _pageSnaps.get(slot);
       if (!payload.token) {
-        const content = _codex().readJsonlBounded(payload.fp, { tailOnly: payload.tailOnly !== false });
-        snap = { token: `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`, fp: payload.fp, slot, lines: content.split('\n'), timer: null };
+        const token = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        if (payload.entry) {
+          // B-cd4b unit 2: THE WARM'S ONE-SHOT REPLY, IN PAGES — readJsonlTail's OWN full entry (the function `jsonlTail` runs: one
+          // parse, no copy) kept as the snapshot; its messages and their line starts handed back a page at a time, page 0 with the
+          // entry's other facts (the span, the probes, partial, incr) — the main thread yields between pages (measured: ONE clone of a
+          // 100 MB conversation's entry held the hub's loop ~1 s at its deserialize)
+          const t = _codex().readJsonlTail(payload.fp, null, { dropSubagent: !!payload.dropSubagent });
+          snap = { token, fp: payload.fp, slot, entry: t.entry, mode: t.mode, bytes: t.bytes, lines: null, timer: null };
+        } else {
+          const content = _codex().readJsonlBounded(payload.fp, { tailOnly: payload.tailOnly !== false });
+          snap = { token, fp: payload.fp, slot, lines: content.split('\n'), timer: null };
+        }
         _pageSnaps.set(slot, snap);
         overCap('after the tail was read');
       } else if (!snap || snap.token !== payload.token) {
         return { result: { gone: true } };
+      }
+      if (snap.entry) {   // the entry's pages: `count` records or `maxBytes` of their lines' bytes (from the line starts), at least one
+        const E = snap.entry, start = Math.max(0, payload.start | 0), count = Math.max(1, payload.count | 0), total = E.messages.length;
+        const maxBytes = Math.max(0, Number(payload.maxBytes) || 0), lineBytes = (k) => (k < E.starts.length ? (k + 1 < E.starts.length ? E.starts[k + 1] : E.spanEnd) - E.starts[k] : 0);
+        let i = start, bytes = 0;
+        for (; i < Math.min(total, start + count); i++) { if (maxBytes && i > start && bytes >= maxBytes) break; bytes += lineBytes(i); }
+        const out = { token: snap.token, total, next: i, records: E.messages.slice(start, i), starts: E.starts.slice(Math.min(start, E.starts.length), Math.min(i, E.starts.length)) };
+        if (start === 0) { const { messages, starts, ...facts } = E; out.facts = facts; out.mode = snap.mode; out.bytes = snap.bytes; }
+        overCap('after a page');
+        if (i >= total) { clearTimeout(snap.timer); if (_pageSnaps.get(slot) === snap) _pageSnaps.delete(slot); } else _dropPageSnapLater(snap);
+        return { result: out };
       }
       const start = Math.max(0, payload.start | 0), count = Math.max(1, payload.count | 0), total = snap.lines.length;
       const maxBytes = Math.max(0, Number(payload.maxBytes) || 0);

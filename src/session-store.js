@@ -587,6 +587,20 @@ function jsonlCacheClear() { _jsonlCache.clear(); _jsonlResident = 0; }
 // in inline — reading the appended bytes costs less than the worker round trip
 // plus the structured-clone of a whole tail — and the worker's full read
 // returns the same span entry, so the NEXT change is an append too.
+// B-cd4b unit 2 (hold 3): THE WARM'S COLD READ IN PAGES. Its one-shot reply (`jsonlTail`: readJsonlTail's whole entry, a 100 MB
+// conversation's ~70 MB of records) crossed to the main thread in ONE structured clone — measured at a hub restart with 80
+// survivors, the page's re-attaches: the loop held ~1.0–1.3 s at its deserialize. Now the ONE pager carries it
+// (src/adapters/codex.js readJsonlBoundedParsedPagedAsync `entry`: the worker runs the same function once and hands its messages
+// back a page at a time, the loop free between pages); what the warm caches is the SAME entry. ONE warm's pages at a time, in the
+// worker's own slot ('warm'): the worker keeps one snapshot a slot, so a second warm's first page would cut the first's; a person's
+// history read ('') and a helper's ('helper') keep their own snapshots beside it
+let _warmLine = Promise.resolve();
+function warmPaged(fp) {
+  const { readJsonlBoundedParsedPagedAsync } = require('./adapters/codex');
+  const run = _warmLine.then(() => readJsonlBoundedParsedPagedAsync(fp, { entry: true, dropSubagent: true, slot: 'warm' }));
+  _warmLine = run.then(() => { }, () => { });
+  return run;
+}
 async function warmSessionJsonlAsync(claudeSessionId, cwd) {
   let tasks = null;
   try {
@@ -596,7 +610,7 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd) {
     tasks = warmTaskEvents(claudeSessionId, fp, stat); // B-299b A2: the task-tool scan, in the transcript worker, beside the tail's warm
     const cached = _jsonlCache.get(claudeSessionId);
     if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) { _jsonlCachePut(claudeSessionId, cached); return true; } // already warm (touched: the working set)
-    const { readJsonlTail, readJsonlTailAsync } = require('./adapters/codex');
+    const { readJsonlTail } = require('./adapters/codex');
     if (cached && cached.incr && stat.size > cached.size && stat.size - cached.spanEnd <= WARM_INLINE_APPEND_MAX) {
       const t0 = performance.now();
       const r = readJsonlTail(fp, cached, { dropSubagent: true, stat, appendOnly: true });
@@ -608,7 +622,7 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd) {
       }
     }
     const t0 = performance.now();
-    const r = await readJsonlTailAsync(fp, { dropSubagent: true });
+    const r = await warmPaged(fp);   // B-cd4b unit 2: the entry in pages (above)
     if (!r || !r.entry) return false; // worker unavailable — sync path will parse inline
     _stampJsonlParse(r.bytes, performance.now() - t0);
     _jsonlCachePut(claudeSessionId, r.entry);
