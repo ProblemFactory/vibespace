@@ -25,6 +25,7 @@ const PERSON_BOUND_MS = 6000;
 const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 const { get: harnessOf, list: listHarnesses } = require('./harnesses'); // S2: per-harness credential mechanics live on the descriptor (creds)
 const path = require('path');
+const PinRecord = require('./pool-pin-record.js'); // lane lg-group-parents B-526c unit 2: the person's pin records leave with the links' boot sweep
 const { presetOf: builtInProviderOf } = require('./model-providers.js'); // PURE: a built-in record's id (pv-anthropic-…) is never a third-party account (lane lg-providers U2)
 const os = require('os');
 const crypto = require('crypto');
@@ -2429,6 +2430,8 @@ class AccountManager {
         try { if (!fs.readdirSync(dir).length) fs.rmdirSync(dir); } catch { }
       }
     } catch { }
+    // lane lg-group-parents (B-526c unit 2): the PIN RECORDS (data/pool-pins) of conversations that are gone — no meta on disk
+    try { PinRecord.sweep(this.dataDir, (key) => fs.existsSync(path.join(this.dataDir, 'session-meta', key + '.json'))); } catch { }
     // (q-055 M2) an UNPLACED mark of a conversation that no longer exists goes with it
     let cleared = false;
     for (const p of this._state.accounts) for (const k of Object.keys((p && p.unplaced && p.unplaced.links) || {})) if (!liveKeys.has(k)) cleared = this._clearUnplaced(p.id, k) || cleared;

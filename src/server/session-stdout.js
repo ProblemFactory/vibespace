@@ -579,8 +579,8 @@ function sessionMetaOwnerConflict(sockName, meta, had = undefined) {
 let _browserBindings = null;
 const browserBindings = () => _browserBindings || (_browserBindings = require('./browser-bindings.js').create({ dataDir: path.dirname(META_DIR) }));
 /** `{durable: true}` — A BINDING OR A PERSON'S ACT (round 2, law B: the conversation's backend session id after a fork /
- *  resume, a model lock, effort, permission mode, response style, a goal, a rename, a reach level, a pin, an editor in
- *  flight): the write is the writer's NEXT (off the loop, rank 0 at a stop) and the returned promise resolves when it is
+ *  resume, a model lock, effort, permission mode, response style, a goal, a rename, a reach level, an editor in
+ *  flight; a pool pin's durable half is its own record since B-526c unit 2 — src/pool-pin-record.js): the write is the writer's NEXT (off the loop, rank 0 at a stop) and the returned promise resolves when it is
  *  on disk (false: it failed — kept, retried; the caller tells the person) — the caller ANSWERS after it. `{sync: true}`
  *  — a caller that renames / reads the file itself right after (boot-restore's retireDeadSocket): written here, now.
  *  Everything else (stamps, caches, rings re-derived) is paced. Census ⑦ (scripts/test-store-write-census.mjs) pins every

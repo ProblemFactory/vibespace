@@ -12,6 +12,7 @@ const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loa
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const fs = require('fs');
 const path = require('path');
+const PinRecord = require('../pool-pin-record.js'); // lane lg-group-parents B-526c unit 2: the person's pin, on disk before its answer
 const RR = require('../run-reads.js'); // B-403e: one ask per file of the mount per synchronous run (the pool pass, a record, a broadcast)
 const crypto = require('crypto');
 
@@ -7485,13 +7486,16 @@ function pinNotice(poolId, sid, s, kind, { member = null, target = null } = {}, 
     { level: 1, i18n: { key, params, ...(restart ? { then: { key: PIN_RESTART_KEY } } : {}) } });
 }
 /** Persist the pin into the session's meta (a restart restores it at the three boot-restore
- *  sites). Spread what is on disk, re-list only what changed (the persistFallbackStamp idiom). */
+ *  sites). Spread what is on disk, re-list only what changed (the persistFallbackStamp idiom).
+ *  lane lg-group-parents (B-526c unit 2): AT ITS PACE — the pin's durable record is data/pool-pins (src/pool-pin-record.js),
+ *  written before the answer; the boot takes the newer of the two. (Its durable write was dropped by its one caller: the
+ *  answer never waited for it.) */
 function persistPoolPin(session) {
   try {
     if (!session || !session.sockName) return;
     const prev = sessionMetaStore.readSessionMeta?.(session.sockName);
     if (prev === undefined || prev === null || typeof prev !== 'object') return; // not wired / no meta — memory only (never create one here)
-    return sessionMetaStore.writeSessionMeta?.(session.sockName, { ...prev, poolPin: session._poolPin || null }, { durable: true });   // round 2 (law B): the owner's pin — durable before the answer
+    return sessionMetaStore.writeSessionMeta?.(session.sockName, { ...prev, poolPin: session._poolPin || null });   // B-526c unit 2: paced — the record (PinRecord) is the pin's durable half
   } catch (e) { console.warn('[pool] pin not persisted:', e.message); }
 }
 /** THE ONE WRITER of a conversation's pin. `memberId` = a member of the conversation's pool, or
@@ -7510,7 +7514,15 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
   if (s.host) return { ok: false, status: 400, code: 'remote_session', error: 'pooled accounts are local-only — a remote conversation cannot be pinned' };
   const membership = poolMembershipOf(poolId) || [];
   if (memberId != null && (typeof memberId !== 'string' || !membership.includes(memberId))) return { ok: false, status: 400, code: 'not_member', error: 'not a member of this pool: ' + String(memberId) };
-  s._poolPin = memberId ? { memberId, at: now, by } : null;
+  // lane lg-group-parents (B-526c unit 2): THE PERSON'S PIN IS ON DISK BEFORE ITS ANSWER — its own record (synchronous, small),
+  // keyed by the conversation's meta name; a conversation with no meta has nothing a boot restores (memory only, as before). A
+  // record that cannot be written refuses the pin BY NAME — nothing changed
+  const pin = memberId ? { memberId, at: now, by } : null;
+  if (s.sockName) {
+    try { PinRecord.write(accounts.dataDir, poolId, s.sockName, pin); }
+    catch (e) { return { ok: false, status: 503, code: 'pin_not_saved', error: `the pin could not be saved (${(e && e.code) || (e && e.message) || 'the write failed'}) — nothing changed; try again` }; }
+  }
+  s._poolPin = pin;
   persistPoolPin(s);
   const caps = capsOf(a.backend);
   const own = hasOwnPoolLink(poolId, sid);

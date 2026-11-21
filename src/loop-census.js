@@ -92,7 +92,7 @@ const OWNERS = Object.freeze([
     // run-reads (B-403e): KEPT, with its reason (follow-up 5) — src/loop-hold.js instrumentTrim passes the helper's frames when a
     // caller follows (INSTRUMENT_FILES), so a hold is booked on its CALLER (the pass, a record, a broadcast, a store's write); it
     // keeps them only for a stack that is the helper's ALONE (no caller of ours: its memo-drop microtask) — THIS rule books that to money
-    rules: [name('account-(?:pool-auto|usage-routes|models|tails|display-facts)|run-reads|key-names'),   // key-names (B-ee0a smalls): the default key name's ONE function, PURE; account-display-facts (B-360d): the accounts list's kept sign-in facts
+    rules: [name('account-(?:pool-auto|usage-routes|models|tails|display-facts)|run-reads|key-names|pool-pin-record'),   // key-names (B-ee0a smalls): the default key name's ONE function, PURE; account-display-facts (B-360d): the accounts list's kept sign-in facts · pool-pin-record (lane lg-group-parents B-526c unit 2): the person's pool pin record
        but('usage-', 'walker'),
       lead('quota|spend|auto-resume|auto-cli|reset-credit|reading|ledger|stash|provider|providers|model-providers|model-family|wait|park-step|record-lateness|slot-transitions|sealed-orders|window-stamp|weekly-lanes-unfold|plan-names|claude-plan-catalog|login-expiry|cost-segments|catalog-pricing|rate-limit-capture|otel-truth|stream-wall|queued-wakes|queued-file-for-you|conversation-deliver|refresh-note|fixture-ledger-purge|agy-turn-usage|cli-usage-door|door-reads|after-turn-read|stopped-by|bulk-resume|delivery-wake'),
       name(`codex-(?:${CODEX_MONEY})|oat-(?:file-sync|identity|identity-model|shape-routes)`), new RegExp(`^src/harnesses/(?:${QUOTA_HARNESS})\\.js$`)] },

@@ -7,6 +7,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const PinRecord = require('../pool-pin-record.js'); // lane lg-group-parents B-526c unit 2: the person's pin record, newer than the meta's after a stop
 const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): the kinds a governing file covers, for a restored session
 const { restoredStreaming } = require('../turn-state.js'); // PURE (lane parked-ask-stall): the ring's last turn-state record
 const SJ = require('../said-journal.js'); // B-cd4b (the wrapper's hold): which wrapper answers a fence (its sidecar's caps.fence)
@@ -887,6 +888,7 @@ function restoreSessions() {
     // it said between the catch-up and the connect (session-stdout setupSessionPty `fence`); an older wrapper is attached as before
     if (restoreBuf && wrapperObs && wrapperObs.caps && wrapperObs.caps.fence === SJ.FENCE_VERSION) restoreBuf.fence = true;
 
+    PinRecord.pinAtBoot(path.dirname(META_DIR), meta, sockFile);   // B-526c unit 2: the person's pin record, when newer than the meta's
     const session = sessionFromMeta(meta, { // transport-only + per-path facts (win over the shared ones)
       mode: sessionMode,
       pty: null,
@@ -1159,6 +1161,7 @@ function restoreAgentdPipeSessions() {
     const id = 'sess-' + sockFile.replace(/^cw-/, '');
     if (activeSessions.has(id)) continue;
     persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }); // r5
+    PinRecord.pinAtBoot(path.dirname(META_DIR), meta, sockFile);   // B-526c unit 2: the person's pin record, when newer than the meta's
     const session = sessionFromMeta(meta, { // transport-only + per-path facts (win over the shared ones)
       mode: 'chat', backend: meta.backend || 'claude',
       name: meta.name || 'Session', sockName: sockFile,
@@ -1385,4 +1388,4 @@ function restoreCatchUp(rb, { max = RESTORE_CATCHUP_MAX } = {}) {
 // B-cd4b: the LAST billing source a buffer holds (the restore's backfill reads the copy the restore already holds) — PURE
 const API_KEY_SOURCE = 'apiKeySource":"';
 function lastApiKeySource(text) { const k = text.lastIndexOf(API_KEY_SOURCE); if (k < 0) return null; const m = /^apiKeySource":"([^"]*)"/.exec(text.slice(k, k + 200)); return m ? m[1] : null; }
-module.exports = { create, lastApiKeySource, restoreBufOf, restoreCatchUp, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, STOP_DEAD_SOCKET, STOP_ENDED }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
+module.exports = { create, lastApiKeySource, restoreBufOf, restoreCatchUp, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, poolPinFromMeta, STOP_DEAD_SOCKET, STOP_ENDED }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
