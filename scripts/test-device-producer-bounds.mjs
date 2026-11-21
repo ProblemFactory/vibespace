@@ -42,6 +42,8 @@
 //     fixture home, the same readings, order and count (RED: the release's twin).
 //   ⑬ r1155: the ack names what it acks (two reads in flight, the second reply lost: nothing lost; RED: the one slot), the
 //     head on the file's bytes (RED: on the decoded text), the truncated mark through every rung, the twin bounded at its read.
+//   ⑭ r1225: the dropped total only rises (RED: deleted at total = acked), a malformed token removes nothing (RED: the slot), the
+//     executed push carries its token.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -716,6 +718,36 @@ console.log('⑬ r1155 (part 5\'s follow): the ack names what it acks; the head 
   const SH = require('../src/hosts.js').PASSIVE_PEEK_SH;
   ok(/if \[ "\$s" -gt 65536 \]; then left=\$\(\(left\+1\)\); continue; fi; printf '\\n@@vs-passive@@ %s\\n' "\$b"; head -c 65536 "\$b"; done;/.test(SH) && !/cat "\$b"/.test(SH),
     'the twin reads each file within 64 KiB at the read itself, after the size check (the parity leg ⑫ still holds the two roads equal)');
+}
+
+console.log('⑭ r1225 (part 5\'s follow, its smalls): the dropped total only rises; a malformed token removes nothing; the executed push carries its token');
+{
+  const SO = require('../src/sealed-orders.js');
+  const fnSrc = (name, src = AGSRC) => { const a = src.indexOf('function ' + name + '('), b = src.indexOf('\n}\n', a); return a >= 0 && b > a ? src.slice(a, b + 2) : ''; };
+  const method = (name, src = AGSRC) => { let a = src.indexOf('  ' + name + '() {'); if (a < 0) a = src.indexOf('  ' + name + '(token) {'); const b = src.indexOf('\n  },\n', a); return a >= 0 && b > a ? src.slice(a, b + 5) + '\n' : ''; };
+  const poolOf = (src, seed) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'pool14-')), f = path.join(d, 'pool-orders-log.ndjson'), dr = path.join(d, 'pool-orders-dropped');
+    if (seed != null) fs.writeFileSync(f, seed);
+    const FNS = ['readAtMost', 'readHeadOf', 'readDropped', 'writeDropped', 'headSum', 'dropReportHead', 'appendOrderEvent'].map((n) => fnSrc(n, src)).join('');
+    return new Function('fs', 'ORDERS_LOG', 'ORDERS_DROPPED', 'SO', 'log', 'require', FNS + 'return ({ readDropped, writeDropped, obj: {' + method('pendingReport', src) + method('clearReport', src) + '} });')(fs, f, dr, SO, () => { }, require);
+  };
+  const ev = (i) => JSON.stringify({ ts: i, poolId: 'p1', to: 'b' });
+  // (1) ack, a new drop, then the same ack again (late or replayed): the new drop is still said
+  const lateAck = (src) => { const P = poolOf(src, ev(1) + '\n'); P.writeDropped({ total: 2, acked: 0 }); const r = P.obj.pendingReport(); P.obj.clearReport(r.ack); { const x = P.readDropped(); P.writeDropped({ total: x.total + 1, acked: x.acked }); } P.obj.clearReport(r.ack); return P.obj.pendingReport().dropped; };
+  const kept = lateAck(AGSRC);
+  const DelSrc = anchored(AGSRC, '  if (!(d.total > 0)) { fs.rmSync(ORDERS_DROPPED, { force: true }); return; }\n', '  if (!(d.total > d.acked)) { fs.rmSync(ORDERS_DROPPED, { force: true }); return; }\n', 'delete-at-equal');   // the follow's own rule, quoted (stale-pins: kept)
+  const lost = lateAck(DelSrc);
+  ok(kept === 1 && lost === 0, `ack, a new drop, the late ack again: the new drop is still said (${kept}); RED: the file deleted when total met acked (a copy) — the late ack swallows it (${lost})`);
+  // (2) a token present but malformed removes nothing (only a missing one takes the last read's slot)
+  const Q = poolOf(AGSRC, ev(1) + '\n' + ev(2) + '\n');
+  Q.obj.pendingReport(); Q.obj.clearReport({ bytes: 'x', sum: 1 });
+  const q = Q.obj.pendingReport();
+  const SlotSrc = anchored(AGSRC, "    if (token != null && !named) { log('sealed-orders: an ack named a report this agent cannot read: nothing removed'); return; }\n", '', 'malformed-takes-slot');
+  const R = poolOf(SlotSrc, ev(1) + '\n' + ev(2) + '\n');
+  R.obj.pendingReport(); R.obj.clearReport({ bytes: 'x', sum: 1 });
+  ok(q.events.length === 2 && R.obj.pendingReport().events.length === 0, `a malformed token removes nothing (${q.events.length} records stay); RED: falling back to the last read's slot (a copy) removes them`);
+  // (3) the executed push, if an agent ever sends one, hands its own report's token to the ack
+  ok(read('src/agentd/client.js').includes("if (m.op === 'pool-orders-executed') { this._onPoolOrdersExecuted?.(m.events || [], m.reportAck || null); return; }"), 'the executed push (no agent sends it today) hands its own report\'s token to the ack, like the reply');
 }
 
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);

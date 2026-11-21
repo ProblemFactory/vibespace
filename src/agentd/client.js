@@ -614,7 +614,7 @@ class DeviceManager {
               if (m.op === 'usage-events') { this._onUsageEvents?.(m); return; }
               if (m.op === 'session-events') { this._onSessionEvents?.(m); return; } // step-2 dark stream (unsolicited push branch — the three-touch rule)
               if (m.op === 'window-rect') { this._windowWatches?.get(m.wid)?.push(m.result); return; } // lane machine-app-crop: a followed window's change (unsolicited push branch)
-              if (m.op === 'pool-orders-executed') { this._onPoolOrdersExecuted?.(m.events || []); return; }
+              if (m.op === 'pool-orders-executed') { this._onPoolOrdersExecuted?.(m.events || [], m.reportAck || null); return; }   // (r1225) no agent sends it today; if one does, its ack names its own report
               if (m.op === 'stream-ice' || m.op === 'stream-stats') { const f = this._streamWatches?.get(m.sid); if (m.ended) this._streamWatches?.delete(m.sid); try { f?.(m); } catch { } return; } // lane stream-p1a-transport: a stream session's candidates / numbers (unsolicited push branch)
               if (m.op === 'session-open' || m.op === 'pipe-session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
               if (m.op === 'session-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code); return; }

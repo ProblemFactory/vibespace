@@ -1310,7 +1310,8 @@ function readDropped() {
   return { total, acked };
 }
 function writeDropped(d) {
-  if (!(d.total > d.acked)) { fs.rmSync(ORDERS_DROPPED, { force: true }); return; }
+  // (r1225) KEPT once anything was counted, so the total only ever rises: a late or replayed ack after a new drop never swallows it
+  if (!(d.total > 0)) { fs.rmSync(ORDERS_DROPPED, { force: true }); return; }
   const tmp = ORDERS_DROPPED + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify({ total: d.total, acked: d.acked }));
   fs.renameSync(tmp, ORDERS_DROPPED);
@@ -1478,6 +1479,8 @@ const sealedOrders = {
   // older hub's bare ack keeps the last piece's behaviour (the last report answered)
   clearReport(token) {
     const named = token && typeof token === 'object' && Number.isInteger(token.bytes) && token.bytes >= 0 && token.bytes <= 2 * SO.POOL_LOG_BYTES_MAX && typeof token.sum === 'string' && token.sum.length <= 64 && Number.isInteger(token.droppedTotal) && token.droppedTotal >= 0;
+    // (r1225) a token PRESENT BUT MALFORMED removes nothing; only a MISSING one (an older hub's bare ack) takes the last read's slot
+    if (token != null && !named) { log('sealed-orders: an ack named a report this agent cannot read: nothing removed'); return; }
     const rep = named ? token : this._reported;
     if (!named) this._reported = null;
     if (!rep) return;   // a bare ack with nothing answered before it removes nothing
