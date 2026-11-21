@@ -21,6 +21,9 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { makeFixture, writeAliveStamp } from './jobs-triage-fixture.mjs';
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): a read whose state never came is SAID on its own line, right above the
+// judge that reads it, and MARKED (an object or a list carries `timedOut`) — so its red reads that, never a verdict on the product
+const markTimedOut = (v, ms, what) => { console.log(`    (${what}: the state it waits for did not come in ${ms / 1000} s (a wait that expects nothing ends so too); its last read ${JSON.stringify(v === undefined ? null : v).slice(0, 160)})`); return v && typeof v === 'object' ? Object.assign(v, { timedOut: `the state never came in ${ms / 1000} s` }) : v; };
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -85,7 +88,7 @@ const waitServer = async () => { for (let i = 0; i < 80; i++) { try { await fetc
 check('worktree server boots over the seeded fixture', await waitServer());
 // the engine boots ASYNCHRONOUSLY after /api/home answers (adopt-first boot + the single-engine lock):
 // GET /api/jobs is 503 {error:'jobs engine starting'} until then — wait for the engine, not the http server
-const api = await (async () => { let last = null; for (let i = 0; i < 120; i++) { const r = await fetch(`http://127.0.0.1:${PORT}/api/jobs`); last = await r.json(); if (r.status === 200 && last.jobs) return last; await sleep(250); } return last; })();
+const api = await (async () => { let last = null; for (let i = 0; i < 120; i++) { const r = await fetch(`http://127.0.0.1:${PORT}/api/jobs`); last = await r.json(); if (r.status === 200 && last.jobs) return last; await sleep(250); } return markTimedOut(last, 120 * 250, 'GET /api/jobs'); })();
 check('the jobs engine reports ready (GET /api/jobs answers 200 with jobs)', !!(api && api.jobs), api);
 check(`the server serves every fixture record live (${api.jobs && api.jobs.length} = ${fx.jobs.length}; the boot sweep archived nothing)`, api.jobs && api.jobs.length === fx.jobs.length, api.jobs && api.jobs.length);
 check(`…with ${archived.length} archived + ${heldTotal} held in the same answer`, api.archivedCount === archived.length && api.held && api.held.total === heldTotal, { archivedCount: api.archivedCount, held: api.held && api.held.total });

@@ -1569,7 +1569,7 @@ console.log('\n§2p a wait that runs out says so: no heavy suite returns its las
   const t0 = Date.now();
   const acorn = createRequire(import.meta.url)('acorn');
   const { lastReadWaits } = await import('./last-read-waits.mjs');
-  const RATCHET = { 'test-browser-resume-ui': 3, 'test-channel-api-chrome': 1, 'test-jobs-panel': 1, 'test-desktop-app-snap': 1, 'test-parked-ask-ui': 1, 'test-channels-groups-e2e': 2 };   // 2026-11-21: 35 waits in 20 heavy suites; each cure lowers its row
+  const RATCHET = { 'test-browser-resume-ui': 3, 'test-channel-api-chrome': 1, 'test-desktop-app-snap': 1, 'test-parked-ask-ui': 1, 'test-channels-groups-e2e': 2 };   // 2026-11-21: 35 waits in 20 heavy suites; each cure lowers its row
   const heavy = SUITES.filter((x) => x.tier === 'heavy'), per = new Map(), unread = [];
   for (const x of heavy) {
     const f = path.join(REPO, 'scripts', x.name + '.mjs'); if (!fs.existsSync(f)) continue;
