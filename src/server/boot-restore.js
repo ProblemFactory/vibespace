@@ -125,7 +125,7 @@ function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   // B-526c unit 2 (r1070): the pin record at a LOCAL restore — each pool's folder listed ONCE this boot; the record's decision
   // written back into the meta (paced: the record stays); a record that cannot be read said by name
   const pinListings = new Map();
-  const pinAtBoot = (sockFile) => ({ listing: pinListings, write: (m) => writeSessionMeta(sockFile, { ...m }), say: (line) => console.warn(line) });
+  const pinAtBoot = (sockFile) => ({ listing: pinListings, write: PinRecord.writeBack({ readSessionMeta, writeSessionMeta }, sockFile), say: (line) => console.warn(line) });
   // THE CLASSIFIER REROUTE SURVIVES A RESTART (2026-09-13 r3 §7). The stamp
   // says "the CLI is answering with a model we did not ask for"; it is
   // announced ONCE and `scope:"session"`, so it can never be re-learned from

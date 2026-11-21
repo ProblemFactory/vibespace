@@ -10,10 +10,13 @@
  * follows at its pace (a pin `{memberId, at, by}`, a clear `{cleared: true, at, by}` — an older reader sees no pin in it).
  * THE BOOT (restorePin, at the two LOCAL restore sites of src/server/boot-restore.js — the ssh readopt restores a remote
  * conversation, which can never hold a pin): the record DECIDES whenever it exists, and its decision is written back into the
- * meta at that boot (paced; the record stays). ONE BOUND, where no record of this tree's making can tell: an OLDER hub (a
- * downgrade and back) writes only the meta — a later pin of its own carries a later `at` (it wins), and its CLEAR is a bare
- * `poolPin: null`, which this tree never writes; only there are the two FILES' times compared (one filesystem, one clock): a
- * meta written after the record stands, a tie goes to the record. No record (an older tree's data) ⇒ the meta, as before. A
+ * meta at that boot (paced; the record stays) — r1094: the PIN ONLY, over the meta's copy as it stands at that moment (a paced
+ * write of the same boot still pending included: `writeBack`), never a whole copy read earlier. ONE BOUND, where no record of
+ * this tree's making can tell: an OLDER hub (a downgrade and back) writes only the meta — a later pin of its OWN (one without this
+ * tree's `copy` mark: the older hub's pin act writes the pin it holds, which its reader stripped) carries a later `at` and wins,
+ * and its CLEAR is a bare `poolPin: null`, which this tree never writes; only there are the two FILES' times compared (one
+ * filesystem, one clock): a meta written after the record stands, a tie goes to the record. This tree's own copy (marked) never
+ * wins over the record — a clock that stepped back cannot bring an older pin back. No record (an older tree's data) ⇒ the meta, as before. A
  * record that exists and cannot be read is said by name at the boot (the meta's pin is used). The boot reads each pool's
  * folder ONCE (one listing a pool). Every call is booked by the tree's timed wrapper (src/timed-sync.js — a hold on a data
  * folder that is a network mount is at least seen; a synchronous call is never cut short: a write that fails refuses the pin).
@@ -72,7 +75,8 @@ function read(dataDir, poolId, key, listing = null) {
       listing.set(dir, names);
     }
     const l = listing.get(dir);
-    if (l && l.error) return { rec: null, error: l.error };
+    // r1094: a pool whose listing fails is said ONCE (its first conversation), never once a conversation
+    if (l && l.error) { const first = !l.said; l.said = true; return { rec: null, error: first ? l.error : null }; }
     if (!l.has(k)) return { rec: null, error: null };
   }
   try {
@@ -81,14 +85,15 @@ function read(dataDir, poolId, key, listing = null) {
     return rec ? { rec, error: null } : { rec: null, error: 'unreadable text' };
   } catch (e) { return e && e.code === 'ENOENT' ? { rec: null, error: null } : { rec: null, error: (e && e.code) || 'EIO' }; }
 }
-/** The meta's COPY of a record: a pin `{memberId, at, by}`, a clear `{cleared: true, at, by}`. */
-const copyOf = (rec) => (rec.cleared ? { cleared: true, at: rec.at, by: rec.by } : { memberId: rec.memberId, at: rec.at, by: rec.by });
+/** The meta's COPY of a record: a pin `{memberId, at, by, copy}`, a clear `{cleared: true, at, by, copy}` — `copy` marks it as
+ *  this tree's (r1094: never the older hub's own pin, so it never wins over the record by its time). */
+const copyOf = (rec) => (rec.cleared ? { cleared: true, at: rec.at, by: rec.by, copy: true } : { memberId: rec.memberId, at: rec.at, by: rec.by, copy: true });
 /** WHO DECIDES (PURE): the record whenever it exists — but an OLDER hub's act after it: a later pin of its own (a later `at`), or
  *  its clear, a bare `null` this tree never writes, written after the record (`metaAfter`, the files' own times; a tie → the
  *  record). → 'record' | 'meta'. */
 function decide(rec, metaPin, { metaAfter = false } = {}) {
   if (!rec) return 'meta';
-  if (metaPin && typeof metaPin === 'object' && typeof metaPin.memberId === 'string' && Number(metaPin.at) > rec.at) return 'meta';
+  if (metaPin && typeof metaPin === 'object' && metaPin.copy !== true && typeof metaPin.memberId === 'string' && Number(metaPin.at) > rec.at) return 'meta';
   if (metaPin === null && metaAfter) return 'meta';
   return 'record';
 }
@@ -112,8 +117,17 @@ function restorePin(dataDir, meta, key, { listing = null, write: writeMeta = nul
   const copy = copyOf(rec);
   const same = JSON.stringify(mp) === JSON.stringify(copy);
   meta.poolPin = copy;
-  if (!same && typeof writeMeta === 'function') { try { writeMeta(meta); } catch (e) { if (say) say(`[pool] the pin of ${keyOf(key)} could not be written back into its meta (${(e && e.code) || (e && e.message) || e}) — the record still decides at the next boot`); } }
+  if (!same && typeof writeMeta === 'function') { try { writeMeta(copy, meta); } catch (e) { if (say) say(`[pool] the pin of ${keyOf(key)} could not be written back into its meta (${(e && e.code) || (e && e.message) || e}) — the record still decides at the next boot`); } }
   return { from: 'record', rec, wroteBack: !same };
+}
+/** r1094 — THE WRITE-BACK WRITES THE PIN ONLY, over the meta's copy AS IT STANDS at that moment (`readSessionMeta` answers a paced
+ *  write still pending — e.g. the restore's «no start» marker of the same boot — before the file), never a whole copy read
+ *  earlier; `prev` is handed in (no second read). → the writer restorePin calls with the pin's copy. */
+function writeBack({ readSessionMeta, writeSessionMeta }, sockFile) {
+  return (pin) => {
+    const cur = readSessionMeta(sockFile) || {};
+    writeSessionMeta(sockFile, { ...cur, poolPin: pin }, { prev: cur });
+  };
 }
 /** The records whose conversation is gone (`keep(key)` false — its meta is not on disk) and half-made swaps — removed. → how many. */
 function sweep(dataDir, keep) {
@@ -130,4 +144,4 @@ function sweep(dataDir, keep) {
   }
   return dropped;
 }
-module.exports = { recordPath, textOf, pinOf, write, read, copyOf, decide, restorePin, sweep, CLEARED };
+module.exports = { recordPath, textOf, pinOf, write, read, copyOf, decide, restorePin, writeBack, sweep, CLEARED };

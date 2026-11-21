@@ -91,7 +91,9 @@ if (process.argv[2] === '--child') {
     const meta = readMeta();
     const before = metaPinOf(meta), said = [], writes = [];
     // the restore site's own call (the WIRING leg reads it at both local sites): the listing, the write-back, the said line
-    const r = PR.restorePin(dataDir, meta, SOCK, { listing: new Map(), write: (m) => { writes.push(metaPinOf(m)); fs.writeFileSync(metaFile, J(m)); }, say: (l) => said.push(l) });
+    // the write-back through the REAL helper (writeBack: the pin only, over the copy as it stands) over a file-backed store
+    const fileStore = { readSessionMeta: () => readMeta(), writeSessionMeta: (sock, m) => { writes.push(metaPinOf(m)); fs.writeFileSync(metaFile, J(m)); } };
+    const r = PR.restorePin(dataDir, meta, SOCK, { listing: new Map(), write: PR.writeBack(fileStore, SOCK), say: (l) => said.push(l) });
     const pinNow = BR.poolPinFromMeta(meta);   // the ONE pin expression sessionFromMeta restores the pin through
     if (role === 'boot-save') { const m2 = readMeta() || {}; m2.name = 'renamed by an unrelated save'; fs.writeFileSync(metaFile, J(m2)); const t = Date.now() / 1000 + 5; fs.utimesSync(metaFile, t, t); }   // the next ordinary meta save — a NEW file time
     say({ role, before, from: r && r.from, pin: pinNow ? pinNow.memberId : null, wroteBack: !!(r && r.wroteBack), writes, after: metaPinOf(readMeta()), said });
@@ -122,7 +124,8 @@ console.log('① PURE: the record says both, the record decides, the bound, the 
   const cases = {
     none: run({ accountId: 'pool-1' }),
     older: run({ accountId: 'pool-1', poolPin: { memberId: 'm-a', at: 100 } }),
-    same: run({ accountId: 'pool-1', poolPin: { memberId: 'm-b', at: 200, by: 'user' } }),
+    same: run({ accountId: 'pool-1', poolPin: { memberId: 'm-b', at: 200, by: 'user', copy: true } }),
+    staleOwnCopy: run({ accountId: 'pool-1', poolPin: { memberId: 'm-c', at: 300, by: 'user', copy: true } }),
     olderHubPin: run({ accountId: 'pool-1', poolPin: { memberId: 'm-c', at: 300 } }),
     clearRecorded: run({ accountId: 'pool-1', poolPin: { memberId: 'm-b', at: 200 } }, 'cw-c'),
     staleClearCopy: run({ accountId: 'pool-1', poolPin: { cleared: true, at: 150, by: 'user' } }),
@@ -133,10 +136,41 @@ console.log('① PURE: the record says both, the record decides, the bound, the 
   };
   console.log('    who decides: ' + J(cases));
   ok(!!(J(cases.none) === J({ from: 'record', pin: 'm-b', writes: 1 }) && J(cases.older) === J({ from: 'record', pin: 'm-b', writes: 1 }) && J(cases.same) === J({ from: 'record', pin: 'm-b', writes: 0 })
-    && J(cases.olderHubPin) === J({ from: 'meta', pin: 'm-c', writes: 0 }) && J(cases.clearRecorded) === J({ from: 'record', pin: 'cleared', writes: 1 }) && J(cases.staleClearCopy) === J({ from: 'record', pin: 'm-b', writes: 1 })
+    && J(cases.olderHubPin) === J({ from: 'meta', pin: 'm-c', writes: 0 }) && J(cases.staleOwnCopy) === J({ from: 'record', pin: 'm-b', writes: 1 }) && J(cases.clearRecorded) === J({ from: 'record', pin: 'cleared', writes: 1 }) && J(cases.staleClearCopy) === J({ from: 'record', pin: 'm-b', writes: 1 })
     && J(cases.otherPool) === J({ from: null, pin: undefined, writes: 0 }) && J(cases.olderTree) === J({ from: null, pin: 'm-a', writes: 0 })
     && J(cases.olderHubClearAfter) === J({ from: 'meta', pin: null, writes: 0 }) && J(cases.olderHubClearBefore) === J({ from: 'record', pin: 'm-b', writes: 1 })),
-    'THE RECORD DECIDES whenever it exists (a pin over an older copy; a CLEAR the record heard of over the old pin; the record\'s pin over this tree\'s stale cleared copy) and its decision is WRITTEN BACK where the meta said otherwise; the one bound — an older hub\'s later pin, or its bare-null clear written after the record — is the meta\'s; no record ⇒ the meta as before', cases);
+    'THE RECORD DECIDES whenever it exists (a pin over an older copy; a CLEAR the record heard of over the old pin; the record\'s pin over this tree\'s stale cleared copy) and its decision is WRITTEN BACK where the meta said otherwise; the one bound — an older hub\'s OWN later pin (no copy mark), or its bare-null clear written after the record — is the meta\'s; THIS tree\'s own copy, even with a later time (a clock that stepped back), never wins; no record ⇒ the meta as before', cases);
+  // r1094: a pool whose listing fails is said ONCE (three conversations of it, one line)
+  const badPool = path.join(D, 'pool-pins', 'pool-3'); fs.writeFileSync(badPool, 'not a folder');
+  const once = [], lst = new Map();
+  for (const k of ['cw-1', 'cw-2', 'cw-3']) PR.restorePin(D, { accountId: 'pool-3' }, k, { listing: lst, say: (l) => once.push(l) });
+  fs.rmSync(badPool, { force: true });
+  ok(!!(once.length === 1 && /could not be read \(ENOTDIR\)/.test(once[0])), `a pool whose folder cannot be listed is SAID ONCE for its three conversations (${once.length})`, once);
+  // r1094 — THE WRITE-BACK THROUGH THE REAL HELPER over the REAL session-meta store, with a sibling write of the same boot PENDING
+  // (the restore's «no start» marker, persistNoStart's own paced write): the pin only, over the copy as it stands — the marker survives
+  {
+    const RD = path.join(ROOT, 'real'), META = path.join(RD, 'data', 'session-meta'), BUF = path.join(RD, 'data', 'session-buffers');
+    fs.mkdirSync(META, { recursive: true }); fs.mkdirSync(BUF, { recursive: true });
+    const store = require(path.join(REPO, 'src/server/session-stdout.js')).create({ rootDir: RD, BUFFERS_DIR: BUF, META_DIR: META, activeSessions: new Map(), engine: {}, recordUsageAttribution() { }, broadcastToSession() { }, broadcastActiveSessions() { } });
+    const BR = require(path.join(REPO, 'src/server/boot-restore.js'));
+    // both conversations' metas on disk BEFORE the store's first call (it lists the folder once): each one's next write is PACED
+    for (const sock of ['cw-real', 'cw-red']) { fs.writeFileSync(path.join(META, sock + '.json'), J({ accountId: 'pool-r', backend: 'codex', name: 'x' })); PR.write(path.join(RD, 'data'), 'pool-r', sock, { memberId: 'm-b', at: 9, by: 'user' }); }
+    const leg = (PRX, sock) => {
+      const meta = store.readSessionMeta(sock);
+      const marked = BR.persistNoStart(sock, meta, store);
+      const pendingMarker = (store.readSessionMeta(sock) || {}).heldPoolOrigin === 'no-start' && !fs.readFileSync(path.join(META, sock + '.json'), 'utf8').includes('no-start');   // the marker PENDING (in the store, not yet in the file)
+      const r = PRX.restorePin(path.join(RD, 'data'), meta, sock, { listing: new Map(), write: PRX.writeBack(store, sock) });
+      const now = store.readSessionMeta(sock);
+      return { marked, pendingMarker, wroteBack: !!(r && r.wroteBack), marker: now.heldPoolOrigin || null, pin: now.poolPin && now.poolPin.memberId };
+    };
+    const real = leg(PR, 'cw-real');
+    const prsrc = fs.readFileSync(path.join(REPO, 'src/pool-pin-record.js'), 'utf8');
+    const WHOLE = MUT.load('src/pool-pin-record.js', anchored(anchored(prsrc, '  return (pin) => {\n', '  return (pin, whole) => {\n', 'the write-back handed the whole copy'), '    const cur = readSessionMeta(sockFile) || {};\n', '    const cur = whole || {};\n', 'the whole copy read earlier written back'), 'whole-copy');
+    const red = leg(WHOLE, 'cw-red');
+    console.log('    the real helper: ' + J({ real, red }));
+    ok(!!(real.marked && real.pendingMarker && real.wroteBack && real.marker === 'no-start' && real.pin === 'm-b'), 'the boot\'s write-back through the REAL helper over the real session-meta store: the pin written, the «no start» marker pending beside it SURVIVES (the pin only, over the copy as it stands)', real);
+    ok(!!(red.marked && red.pendingMarker && red.wroteBack && red.marker === null && red.pin === 'm-b'), 'RED «the whole copy read earlier» (the tip\'s write-back): the pending «no start» marker is LOST', red);
+  }
   // ONE listing a pool; a record that exists and cannot be read is said by name (a folder in its place)
   const listing = new Map(), said = [];
   for (const k of ['cw-a', 'cw-c', 'cw-x']) PR.restorePin(D, { accountId: 'pool-1' }, k, { listing, say: (l) => said.push(l) });
@@ -154,7 +188,7 @@ console.log('① PURE: the record says both, the record decides, the bound, the 
   const SITE = /PinRecord\.restorePin\(path\.dirname\(META_DIR\), meta, sockFile, pinAtBoot\(sockFile\)\);/;
   const wiring = (src) => [...src.matchAll(/= sessionFromMeta\(meta, \{/g)].map((m) => { const at = m.index; return SITE.test(src.slice(Math.max(0, src.lastIndexOf('\n', src.lastIndexOf('\n', at) - 1)), at)); });
   const w = wiring(br), one = (br.match(/_poolPin:/g) || []).length === 1 && /_poolPin: poolPinFromMeta\(meta\),/.test(br);
-  const helper = /const pinAtBoot = \(sockFile\) => \(\{ listing: pinListings, write: \(m\) => writeSessionMeta\(sockFile, \{ \.\.\.m \}\), say: /.test(br);
+  const helper = /const pinAtBoot = \(sockFile\) => \(\{ listing: pinListings, write: PinRecord\.writeBack\(\{ readSessionMeta, writeSessionMeta \}, sockFile\), say: /.test(br);
   const ue = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8'), ts = fs.readFileSync(path.join(REPO, 'src/timed-sync.js'), 'utf8'), pr = fs.readFileSync(path.join(REPO, 'src/pool-pin-record.js'), 'utf8');
   const writer = /const rec = pin \|\| \{ cleared: true, at: now, by \};[\s\S]{0,400}PinRecord\.write\(accounts\.dataDir, poolId, s\.sockName, rec\);[\s\S]{0,300}s\._poolPin = pin;\n  persistPoolPin\(s, pin \? null : rec\);/.test(ue) && !/\{ durable: true \}\);   \/\/ round 2 \(law B\): the owner's pin/.test(ue);
   const timed = /'pool-pin\.write': row\('write'/.test(ts) && /'pool-pin\.read': row\('read'/.test(ts) && (pr.match(/timedSync\('pool-pin\.(write|read)'/g) || []).length >= 4 && !/\bfs\.unlinkSync\(file\)/.test(pr);
@@ -224,6 +258,6 @@ console.log('③ THE KILLS — real processes over the same folder');
   ok(!!(r.metaCleared === 'cleared' && r.pinB && r.record && r.record.memberId === r.B && r.metaPin === 'cleared' && M2.w.signal === 'SIGKILL'), 'r1070 MUST 2: pin A, clear (both landed), pin B answered with the meta still «cleared»; then SIGKILL', r);
   ok(!!(b1.pin === r.B && b1.wroteBack && b1.after === r.B && b2.pin === r.B && b2.from === 'record' && !b2.wroteBack), 'MUST 2: boot 1 takes the record (B) and WRITES IT BACK; an unrelated meta save after it (a new file time); boot 2 — still B', { b1, b2 });
   // the red world's OWN members (each world mints its own)
-  ok(!!(M2R.w.facts && x1.pin === M2R.w.facts.B && J(x1.writes) === J([]) && x1.after === 'cleared' && x2.pin === null), 'RED «no write-back, the stamped clear read as a bare null»: boot 1 B in memory only; boot 2 drops the person\'s pin', { x1, x2 });
+  ok(!!(M2R.w.facts && x1.pin === M2R.w.facts.B && J(x1.writes) === J([]) && x1.after === 'cleared' && x2.pin === null), 'RED «no write-back AND the stamped clear read as a bare null» (both cut: with the write-back alone cut, the stamped clear never reaches the file-time bound and boot 2 still finds B — the pure leg\'s write counts pin the write-back itself): boot 1 B in memory only; boot 2 drops the person\'s pin', { x1, x2 });
 }
 report();

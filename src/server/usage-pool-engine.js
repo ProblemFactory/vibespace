@@ -7521,7 +7521,7 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
   const rec = pin || { cleared: true, at: now, by };   // r1070: a clear WRITES its mark — the record says what the person last chose, both ways
   if (s.sockName) {
     try { PinRecord.write(accounts.dataDir, poolId, s.sockName, rec); }
-    catch (e) { return { ok: false, status: 503, code: 'pin_not_saved', error: `the pin could not be saved (${(e && e.code) || (e && e.message) || 'the write failed'}) — nothing changed; try again` }; }
+    catch (e) { return { ok: false, status: 503, code: 'pin_not_saved', error: `the ${pin ? 'pin' : 'clear'} could not be saved (${(e && e.code) || (e && e.message) || 'the write failed'}) — nothing changed; try again` }; }
   }
   s._poolPin = pin;
   persistPoolPin(s, pin ? null : rec);
