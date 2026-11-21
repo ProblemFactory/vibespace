@@ -247,8 +247,12 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   // THE NOTE'S RACES, each by a held stand-in (its jsonlTail answered when the leg says; every other op answered in place)
   const holding = (end) => { const P = { calls: [], release: null, call(op, payload) { this.calls.push(op); if (op === 'jsonlTail') return new Promise((res, rej) => { P.release = () => (end === 'read' ? res(Promise.resolve(TW.runOp(op, payload)).then((x) => x.result)) : rej(Object.assign(new Error('a stand-in held, then refused'), { status: 503, code: 'no-worker' }))); }); return Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); } }; return P; };
   const freshNote = async () => { C._setTranscriptPoolForTest(up()); await SS0.warmSessionJsonlAsync(sid, cwd); };
-  // (1) a LATE refusal of another kind never unhangs a storage note another warm took meanwhile
-  await freshNote(); fs.writeFileSync(claudeFp, lines.slice(0, 700).join('\n') + '\n');
+  // (1) a LATE refusal of another kind never unhangs a storage note another warm took meanwhile — from NO note: the earlier legs'
+  // background re-warm settled first (its note's 2 s rate limit would otherwise answer for the guard)
+  for (let i = 0; i < 8; i++) await new Promise((res) => setImmediate(res));
+  await freshNote();
+  ok(!SS0.parseSessionJsonl(sid, cwd).notLoaded, 'premise of the race legs: no note stands (a fresh start)');
+  fs.writeFileSync(claudeFp, lines.slice(0, 700).join('\n') + '\n');
   const D1 = holding('refuse'); C._setTranscriptPoolForTest(D1);
   const lateA = SS0.warmSessionJsonlAsync(sid, cwd);
   const H1 = refusing({ status: 503, code: 'path-hung' }); C._setTranscriptPoolForTest(H1);
@@ -287,7 +291,8 @@ C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
 // no worker sent into it again; the control, a pool without the key: nothing remembered (the release: a fresh worker every ask) ──
 {
   const { SafeFs } = require(path.join(REPO, 'src/safe-fs.js'));
-  const mkPool = (pathKeys) => new SafeFs({ workerPath: path.join(REPO, 'src/transcript-worker.js'), name: 'transcript-leg', poolSize: 1, timeouts: { default: 200 }, ...(pathKeys ? { pathKeys } : {}) });
+  const sleepMs = (ms) => new Promise((res) => setTimeout(res, ms));
+  const mkPool = (pathKeys, extra = {}) => new SafeFs({ workerPath: path.join(REPO, 'src/transcript-worker.js'), name: 'transcript-leg', poolSize: 1, timeouts: { default: 200 }, ...(pathKeys ? { pathKeys } : {}), ...extra });
   const held = async (P) => { let e = null; try { await P.call('__hold', { fp: claudeFp, sab: new SharedArrayBuffer(4), ms: 4000 }); } catch (x) { e = x; } return e; };
   const P1 = mkPool(['fp']), P0 = mkPool(null);
   try {
@@ -296,6 +301,34 @@ C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
     ok(!!e1 && e1.safeFsTimeout === true && !!next && next.code === 'path-hung' && next.status === 503 && !!P1._hungOf({ fp: claudeFp }, 'jsonlTail', 200) && !P0._hungOf({ fp: claudeFp }, 'jsonlTail', 200) && !!e0 && e0.safeFsTimeout === true,
       `a transcript read that ran out its deadline is REMEMBERED by the transcript pool (its key fp): the next read of that file is refused by name (${next && next.code}), no worker sent into it; the control (no key): nothing remembered`, { e1: e1 && (e1.code || e1.message), next: next && next.code, p0Hung: !!P0._hungOf({ fp: claudeFp }, 'jsonlTail', 200) });
   } finally { P1.close(); P0.close(); }
+  // THE DOOR READS `fp` TOO: a transcript under a BLOCKED mount is refused by name at the pool's door, no worker asked (control: no key)
+  const blockedAt = (p) => (String(p).startsWith(projDir + path.sep) ? projDir : false);
+  const B1 = mkPool(['fp'], { blocked: blockedAt }), B0 = mkPool(null, { blocked: blockedAt });
+  try {
+    let b1 = null, b0 = null;
+    try { await B1.call('jsonlTail', { fp: claudeFp, dropSubagent: true }); } catch (x) { b1 = x; }
+    try { await B0.call('jsonlTail', { fp: claudeFp, dropSubagent: true }); } catch (x) { b0 = x; }
+    ok(!!b1 && b1.code === 'storage-blocked' && !(b0 && b0.code === 'storage-blocked'), `a transcript under a blocked mount is refused at the transcript pool's door by name (${b1 && b1.code}); the control (no key): asked of a worker (${b0 ? b0.code || b0.message : 'answered'})`, { b1: b1 && b1.code, b0: b0 && (b0.code || b0.message) });
+  } finally { B1.close(); B0.close(); }
+  // NO FOLDER FROM TWO ENDS (climb: false): two transcripts of one folder that ran out their deadlines never name the folder — a
+  // deadline may end a long parse; the control (a pool that climbs) names it
+  const two = async (P) => { const fa = path.join(projDir, 'aaaa.jsonl'), fb = path.join(projDir, 'bbbb.jsonl'); await Promise.all([fa, fb].map((fp) => P.call('__hold', { fp, sab: new SharedArrayBuffer(4), ms: 4000 }).catch(() => null))); };
+  const third = { fp: path.join(projDir, 'cccc.jsonl') };
+  const K1 = mkPool(['fp'], { poolSize: 2, climb: false }), K0 = mkPool(['fp'], { poolSize: 2 });
+  try {
+    await two(K1); await two(K0);
+    for (let i = 0; i < 50 && !K0._hungOf(third, 'jsonlTail', 200); i++) await sleepMs(20);
+    ok(!K1._hungOf(third, 'jsonlTail', 200) && !!K0._hungOf(third, 'jsonlTail', 200), `two ends in one folder never name the folder in the transcript pool (climb: false): a third conversation of that folder is still asked; the control (a pool that climbs) names it`, { k1: !!K1._hungOf(third, 'jsonlTail', 200), k0: !!K0._hungOf(third, 'jsonlTail', 200) });
+  } finally { K1.close(); K0.close(); }
+  // THE HISTORY LANE ADDS NOTHING (hungMs: 0 — its pages parse a snapshot in memory): its deadline end is never a dead file;
+  // the control (a lane that notes) remembers it
+  const L1 = mkPool(['fp'], { laneOpts: { history: { hungMs: 0 } } }), L0 = mkPool(['fp']);
+  try {
+    for (const P of [L1, L0]) await P.call('__hold', { fp: claudeFp, sab: new SharedArrayBuffer(4), ms: 4000 }, { lane: 'history' }).catch(() => null);
+    ok(!L1._hungOf({ fp: claudeFp }, 'jsonlTail', 200) && !!L0._hungOf({ fp: claudeFp }, 'jsonlTail', 200), 'the history lane\'s deadline end adds nothing to the memory (hungMs: 0); the control lane remembers the file', { l1: !!L1._hungOf({ fp: claudeFp }, 'jsonlTail', 200), l0: !!L0._hungOf({ fp: claudeFp }, 'jsonlTail', 200) });
+  } finally { L1.close(); L0.close(); }
+  const ad = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
+  ok(/pathKeys: \['fp'\],/.test(ad) && /climb: false,/.test(ad) && /laneOpts: \{ history: \{ resourceLimits: \{ maxOldGenerationSizeMb: HISTORY_HEAP_MB \}, hungMs: 0 \} \}/.test(ad), 'the transcript pool is built with all three (pathKeys fp, climb false, the history lane hungMs 0)');
 }
 
 // ── THE PAGE'S WIRING (the page's words are drawn by the chrome suites; these pins hold the roads that say them) ──

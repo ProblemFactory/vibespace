@@ -664,7 +664,8 @@ function _transcriptPoolGet() {
         workerPath: path.join(__dirname, '..', 'transcript-worker.js'), name: 'transcript',
         poolSize: 2,
         pathKeys: ['fp'],   // row B-422c: every op names its transcript `fp` — a blocked mount refused by name, a deadline remembered (B-23e5)
-        laneOpts: { history: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB } } },
+        climb: false,       // …that file alone: a transcript op's deadline may end a long parse, so two never name their folder (a project's every conversation)
+        laneOpts: { history: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB }, hungMs: 0 } },   // row B-422c: the history lane's pages parse a snapshot in memory — its deadline is a parse's, never a dead file: it ASKS the memory, never adds to it (B-23e5's parse-lane rule)
         // B-3b03: no inlineRun — the pool never runs an op on the main thread (a refusal reaches its callers; their own sync
         // fallback after ANY pool failure is theirs — SILENT but for parseCodexSessionJsonl's codex-parse-on-loop: row B-422c)
         timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, taskLines: 120000, boundedParsed: 60000, boundedParsedPage: 60000, codexHistoryMergedPage: 120000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },

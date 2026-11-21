@@ -178,6 +178,7 @@ class SafeFs {
     // row B-422c: the payload keys that NAME a path (the door's blocked check, B-23e5's memory, its forgiving) — PATH_KEYS, plus a
     // pool's own (the transcript pool names its file `fp`: a transcript read that ran out its deadline is remembered like any path)
     this._pathKeys = Array.isArray(opts.pathKeys) && opts.pathKeys.length ? [...new Set([...PATH_KEYS, ...opts.pathKeys])] : PATH_KEYS;   // a stand-in built without this constructor reads PATH_KEYS
+    this._noClimb = opts.climb === false;   // row B-422c: a pool whose deadline may end a long PARSE (the transcript pool) never names a folder from two ends
     this._hungMs = opts.hungMs === 0 ? 0 : opts.hungMs > 0 ? opts.hungMs : HUNG_MS;   // B-23e5: how long a path that ended a worker at its deadline is not asked (0 = no memory: a pool that must keep asking)
     this._hung = new Map();                                  // B-23e5: path → { until, exact, op, bound } (one memory with the lanes)
     this._mountsText = typeof opts.mountsText === 'function' ? opts.mountsText : () => fs.promises.readFile(MOUNTINFO, 'utf8');   // B-23e5: the mount table, read off the loop
@@ -361,7 +362,7 @@ class SafeFs {
       const exact = WIDE_OPS.has(op) || key === 'stat+entryCount' || guardedPath(p);
       this._putHung(p, exact ? { until, under: null, self: { [key]: bound }, ...(early ? { early: true } : {}) } : { until, under: bound, self: {}, ...(early ? { early: true } : {}) });
       const dir = path.dirname(p), was = this._hung.get(dir), now = this._clock();
-      if (!look && !exact && !early && dir && dir !== p && !guardedPath(dir) && (!was || was.under == null || was.until <= now)) {   // a folder whose LISTING hung may still be named; an EARLY end never names one
+      if (!look && !exact && !early && !this._noClimb && dir && dir !== p && !guardedPath(dir) && (!was || was.under == null || was.until <= now)) {   // a folder whose LISTING hung may still be named; an EARLY end never names one
         // EVERY remembered dead sibling is looked at with it (at most 7): a link among them never stops two real dead children (its read)
         const qs = []; for (const [q, m] of this._hung) if (q !== p && !mine.has(q) && m.under != null && !m.early && m.until > now && path.dirname(q) === dir) qs.push(q);
         qs.splice(0, Math.max(0, qs.length - 7));   // the NEWEST seven (the map keeps the oldest first): old links never crowd out new dead children
