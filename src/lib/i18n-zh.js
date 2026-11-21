@@ -15107,4 +15107,6 @@ export default {
   "{n} Background Work result(s) for {convs} conversation(s) on {machine} go out without its word — whether they run cannot be asked of it": "{machine}上 {convs} 个对话的 {n} 条后台工作结果在没有它回应的情况下发出——无法向它询问这些对话是否在运行",
   "They are handed over when each conversation can take them. Update VibeSpace’s device agent on {machine} so it can say whether its conversations run.": "每个对话能接收时就会交给它。请更新{machine}上的 VibeSpace 设备代理，让它能说明自己的对话是否在运行。",
   "They are handed over when each conversation can take them. Pair {machine} with VibeSpace’s device agent so it can say whether its conversations run.": "每个对话能接收时就会交给它。请用 VibeSpace 设备代理配对{machine}，让它能说明自己的对话是否在运行。",
+  "The transcript reader is restarting — try again in a moment.": "转录读取器正在重启——请稍后再试。",
+  "The history is not loaded yet — the transcript reader is restarting. Open this conversation again in a moment to see it.": "历史记录尚未加载——转录读取器正在重启。稍后重新打开此对话即可看到。",
 };

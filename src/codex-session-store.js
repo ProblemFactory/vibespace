@@ -679,6 +679,14 @@ function* mergeCodexRecordsSteps(historyRecords, liveRecords) {
  *  boundedParsed parse — the same tail-only read and line parse), handed back in pages; a missing one, or a pool that is down, the
  *  sync parse — and a parse that goes back on the loop SAYS WHY (L3 cure, 主开发 23:16Z: the paged read's own reason — gone twice,
  *  the lane busy, the worker died, its heap bound, no pool — counted and logged by parseCodexSessionJsonl). */
+const NOT_LOADED = 'transcript_reader_restarting';
+const _notLoadedSaid = new Set();
+function noteNotLoadedOnce(threadId, why) {
+  if (_notLoadedSaid.has(threadId)) return;
+  if (_notLoadedSaid.size > 256) _notLoadedSaid.clear();
+  _notLoadedSaid.add(threadId);
+  console.warn(`[codex] ${threadId}: its history is not loaded yet — the transcript reader could not read it (${why}); nothing is read on the main loop (row B-422c)`);
+}
 async function parseCodexSessionJsonlAsync(threadId, { fp: known } = {}) {
   let fp = null;
   if (known !== undefined) fp = known || null;   // B-f3f9: a path this read already looked up (null = not on disk) — never a second walk
@@ -690,8 +698,12 @@ async function parseCodexSessionJsonlAsync(threadId, { fp: known } = {}) {
       const r = await readJsonlBoundedParsedPagedAsync(fp, { tailOnly: true, onFail: (w) => { why = w; } });   // in pages: the loop free between them
       if (Array.isArray(r)) return r;
     } catch (e) { why = 'the off-loop read threw: ' + ((e && e.message) || e); }
+    // ROW B-422c (主开发 r1006 — A for every road): the off-loop read FAILED (the pool closed, no worker, a deadline, a lane busy or
+    // bounded): NOTHING is parsed on the loop — «not loaded yet» (an empty list tagged; the reader says it, the page shows it)
+    noteNotLoadedOnce(threadId, why);
+    return Object.assign([], { notLoaded: NOT_LOADED, why });
   }
-  return parseCodexSessionJsonl(threadId, { why, fp });   // the path this read already looked up (null = none): never a second walk
+  return parseCodexSessionJsonl(threadId, { why, fp });   // no rollout on disk: the thread/read copy (no file read), never a second walk
 }
 
 /** B-f3f9: the files a conversation's merged read names — its fork ancestry's rollouts in order, its own last — `files` null when
@@ -813,12 +825,17 @@ class CodexSessionMessages {
         }
         for (const [id, fp] of fps) if (fp) fps.delete(id);   // a file the worker failed on may have moved (compressed to .zst): looked up again (its kept path)
       }
-      let history = [];
+      let history = [], notLoaded = null;
       for (const { id: forkId, untilOrdinal } of ancestry) {
-        const forkHistory = tagRecordThread(cutRecordsAtOrdinal(await parseCodexSessionJsonlAsync(forkId, { fp: fps.get(forkId) }), untilOrdinal), forkId);
+        const forkRead = await parseCodexSessionJsonlAsync(forkId, { fp: fps.get(forkId) });
+        if (forkRead.notLoaded) notLoaded = forkRead.notLoaded;
+        const forkHistory = tagRecordThread(cutRecordsAtOrdinal(forkRead, untilOrdinal), forkId);
         if (forkHistory.length) history = await mergeCodexRecordsAsync(history, forkHistory);
       }
-      const currentHistory = threadId ? tagRecordThread(await parseCodexSessionJsonlAsync(threadId, { fp: fps.get(threadId) }), threadId) : [];
+      const currentRead = threadId ? await parseCodexSessionJsonlAsync(threadId, { fp: fps.get(threadId) }) : [];
+      if (currentRead.notLoaded) notLoaded = currentRead.notLoaded;
+      if (notLoaded) this.notLoaded = notLoaded;   // row B-422c: the page says the history waits on the reader (the live buffer still shown)
+      const currentHistory = threadId ? tagRecordThread(currentRead, threadId) : [];
       if (currentHistory.length) history = await mergeCodexRecordsAsync(history, currentHistory);
       const live = parseBufferRecords(this._session?.buffer || '');
       const all = await mergeCodexRecordsAsync(history, live);
@@ -980,11 +997,22 @@ function listCodexThreads({ activeSessions } = {}) {
 }
 
 /** The walk alone, OFF the event loop (the worker twin of
- *  collectCodexThreadMetas; worker down ⇒ the same function runs inline).
+ *  collectCodexThreadMetas; the pool refusing ⇒ its kept listing, never the walk inline — row B-422c).
  *  Used by any request-path consumer that needs the metas but must not block
  *  the loop — /api/subagents measured 193 ms of sync walk on a modest tree. */
 async function collectCodexThreadMetasAsync() {
-  return transcriptWorkerCall('codexThreadMetas', {}, collectCodexThreadMetas);
+  return threadMetasOffLoop();
+}
+/** ROW B-422c: the metas walk OFF the loop, or its KEPT listing — the last one the worker answered — when the pool refuses (null:
+ *  not known yet); never the walk on the main loop (the release walked ~/.codex/sessions inline on the 5 s poll while the pool
+ *  was down). The refusal said once until the walk answers again. */
+let _keptThreadMetas = null, _metasRefusedSaid = false;
+async function threadMetasOffLoop() {
+  let refused = null;
+  const facts = await transcriptWorkerCall('codexThreadMetas', {}, (e) => { refused = e || { why: 'no answer' }; return null; });
+  if (!refused && facts) { _keptThreadMetas = facts; _metasRefusedSaid = false; return facts; }
+  if (!_metasRefusedSaid) { _metasRefusedSaid = true; console.warn(`[codex] the thread listing's walk was refused by the transcript pool (${(refused && (refused.why || refused.message)) || 'no answer'}) — its kept listing is answered${_keptThreadMetas ? '' : ' (none yet: codex threads are not known until it answers)'}; nothing is walked on the main loop`); }
+  return _keptThreadMetas;
 }
 
 /** The 5s-poll listing (S3): walk + head reads + the /proc scan run in the
@@ -993,10 +1021,10 @@ async function collectCodexThreadMetasAsync() {
  *  kept answer, else liveness: 'unknown' on the rows). */
 async function listCodexThreadsAsync({ activeSessions } = {}) {
   const [facts, openThreadIds] = await Promise.all([
-    transcriptWorkerCall('codexThreadMetas', {}, collectCodexThreadMetas),
+    threadMetasOffLoop(),   // row B-422c: the kept listing on a refusal, never the walk inline
     listOpenCodexThreadIdsAsync(),
   ]);
-  return assembleCodexThreads(facts, { activeSessions, openThreadIds: openThreadIds || new Set(), livenessUnknown: !openThreadIds });   // B-f64b: a walk that could not answer is said (liveness: 'unknown'), never a bare «stopped»
+  return assembleCodexThreads(facts || { metas: [], mergedThreadIds: [] }, { activeSessions, openThreadIds: openThreadIds || new Set(), livenessUnknown: !openThreadIds });   // B-f64b: a walk that could not answer is said (liveness: 'unknown'), never a bare «stopped»
 }
 
 // oneReadAtATime: the hub's one-history-read-at-a-time gate, a person's line before a bulk resume's (lane resume-all-paced L3) — test-codex-attach-off-loop ⑤ ⑥

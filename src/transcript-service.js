@@ -363,9 +363,9 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     const hostFetchError = await refreshRemote(r, { throttled: true });
     const fp = filePath(ref);
     if (!fp || !fs.existsSync(fp)) return { gap: null, fp: null, hostFetchError };
-    let gap = null;
-    try { gap = await jsonlGapInfoAsync(fp); } catch { }
-    return { gap, fp, hostFetchError };
+    let gap = null, refused = null;
+    try { gap = await jsonlGapInfoAsync(fp); } catch (e) { if (e && e.code === 'transcript_reader_restarting') refused = e; }   // row B-422c: the reader's refusal carried to the route, never «no gap»
+    return { gap, fp, hostFetchError, ...(refused ? { refused } : {}) };
   }
 
   /** Normalize one raw line-range slab (subagent records dropped to match the
@@ -378,7 +378,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
       return []; // handle said device; a mid-family fallback would mix line spaces
     }
     let records = [];
-    try { records = await readJsonlLineRangeAsync(fp, fromLine, toLine); } catch { }
+    try { records = await readJsonlLineRangeAsync(fp, fromLine, toLine); } catch (e) { if (e && e.code === 'transcript_reader_restarting') throw e; }   // row B-422c: the refusal reaches the route
     records = records.filter((rec) => !isSubagentMessage(rec));
     const r = norm(ref);
     const mm = createMessageManager(r.backend, 'gap', { threadId: r.sessionId }); // a slab carries no session_meta — only the reader knows the file

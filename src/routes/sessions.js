@@ -104,10 +104,13 @@ function setup(ctx) {
     const resolvedSessionId = backendSessionId || claudeSessionId;
     if (!resolvedSessionId) return res.status(400).json({ error: 'backendSessionId or claudeSessionId required' });
     const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, host: req.query.host, memo: {} };   // one request, one read of its history (lane resume-all-paced L3)
-    const { gap, fp, hostFetchError } = await transcripts.gapInfo(ref);
+    const { gap, fp, hostFetchError, refused } = await transcripts.gapInfo(ref);
     // Carry a remote failure to the client: "no transcript" and "the machine
     // holding it was unreachable" produce the same empty view otherwise.
     if (!fp) return res.json({ gap: null, ...(hostFetchError ? { error: hostFetchError } : {}) });
+    // row B-422c (主开发 r1006): the transcript reader REFUSED (a pool failure) — said by name, never «no gap» (the page: a toast)
+    const readerRefused = (e) => res.status(503).set('Retry-After', '2').json({ error: e.message, code: e.code });
+    if (refused) return readerRefused(refused);
     if (!gap) return res.json({ gap: null });
     if (req.query.info) return res.json({ gap });
 
@@ -137,7 +140,7 @@ function setup(ctx) {
 
     if (req.query.fullturnmap) {
       let turns = [];
-      try { turns = await transcripts.fullTurnmap(ref, fp); } catch { turns = []; }
+      try { turns = await transcripts.fullTurnmap(ref, fp); } catch (e) { if (e && e.code === 'transcript_reader_restarting') return readerRefused(e); turns = []; }
       const firstTs = turns.length ? turns[0].ts : 0;
       const lastTs = turns.length ? turns[turns.length - 1].ts : 0;
       return res.json({ fullTurns: turns, firstTs, lastTs, ...gap });
@@ -160,7 +163,8 @@ function setup(ctx) {
       return res.status(400).json({ error: 'endLine or startLine required' });
     }
     if (fromLine >= toLine) return res.json({ messages: [], fromLine: 0, toLine: 0, tailStartLine: gap.tailStartLine });
-    const messages = await transcripts.gapSlab(ref, fp, fromLine, toLine);
+    let messages;
+    try { messages = await transcripts.gapSlab(ref, fp, fromLine, toLine); } catch (e) { if (e && e.code === 'transcript_reader_restarting') return readerRefused(e); throw e; }
     res.json({ messages, fromLine, toLine, tailStartLine: gap.tailStartLine, totalLines: gap.totalLines });
   });
 
@@ -191,7 +195,9 @@ function setup(ctx) {
     if (hit && Date.now() - hit.at < 10000) return res.json({ subagents: hit.list, cached: true });
     let list = [];
     try {
-      const { metas } = await collectCodexThreadMetasAsync();
+      const facts = await collectCodexThreadMetasAsync();
+      if (!facts) return res.json({ subagents: [], reason: 'transcript_reader_restarting', error: 'the transcript reader is restarting — try again in a moment' });   // row B-422c: no listing kept yet — said, never walked on the loop
+      const { metas } = facts;
       list = metas
         .filter((m) => m.agentKind === 'subagent' && m.parentThreadId === threadId)
         .map((m) => ({

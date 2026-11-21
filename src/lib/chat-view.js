@@ -1407,6 +1407,7 @@ class ChatView {
         this._paintOutboxChip(); // lane outbox-session-chip: the session's ids are known now — the chip re-asks the held Outbox rows
         if (msg.normEpoch) this._normEpoch = msg.normEpoch;
         if (msg.remoteState) this._statusBar?.setRemoteState(msg.remoteState);
+        if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded);   // row B-422c: a re-attach whose history waits on the reader
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
         this._onSessionError(msg);
       } else if (msg.type === 'jobs-updated' && msg.held) {
@@ -3477,11 +3478,32 @@ class ChatView {
   async _gapFetch(url) {
     try {
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        // row B-422c (主开发 r1006 item 3): a read the transcript reader REFUSED asks the person to try again — a toast, never silence
+        let body = null; try { body = await res.json(); } catch { }
+        if (body && body.code === 'transcript_reader_restarting') this._sayReaderRestarting();
+        return { ok: false, error: (body && body.error) || `HTTP ${res.status}`, code: (body && body.code) || null };
+      }
       return { ok: true, data: await res.json() };
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };
     }
+  }
+
+  /** row B-422c: the transcript reader refused a read — said once every few seconds, never a toast per slab */
+  _sayReaderRestarting() {
+    const now = Date.now();
+    if (this._readerRestartingSaidAt && now - this._readerRestartingSaidAt < 5000) return;
+    this._readerRestartingSaidAt = now;
+    showToast(t('The transcript reader is restarting — try again in a moment.'));
+  }
+
+  /** row B-422c (主开发 r1006 item 3): the history WAITS ON THE TRANSCRIPT READER — said in plain words where it would be (never an
+   *  empty pane), once per attach that says so */
+  _sayHistoryNotLoaded(code) {
+    if (!code || this._historyNotLoadedSaid === code + (this._lastAttachedAt || 0)) return;
+    this._historyNotLoadedSaid = code + (this._lastAttachedAt || 0);
+    this._renderers.appendSystem(t('The history is not loaded yet — the transcript reader is restarting. Open this conversation again in a moment to see it.'));
   }
 
   // ── Whole-conversation minimap for gapped (huge) sessions ──
@@ -7350,7 +7372,8 @@ class ChatView {
       // _getSessionIds/openSpec — nothing addresses the dead server id anymore.
       this.sessionId = viewId;
       if (msg.messages?.length) this.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
-      else this._renderers.appendSystem(t("No messages in this session's transcript yet."));
+      else if (!msg.historyNotLoaded) this._renderers.appendSystem(t("No messages in this session's transcript yet."));
+      if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded);   // row B-422c: never «no messages» for a history the reader refused
       this._renderers.appendSystem(t('The session is no longer running — showing saved history.'));
       this._setReadOnly();
     };

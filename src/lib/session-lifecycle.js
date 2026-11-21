@@ -1069,6 +1069,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           } else {
             chatView._applyLiveMeta?.(msg); // zero messages still has live state
           }
+          if (msg.historyNotLoaded) chatView._sayHistoryNotLoaded?.(msg.historyNotLoaded);   // row B-422c: the first attach of a history that waits on the reader
           if (msg.viewOnly) chatView._setReadOnly();
           winInfo.onClose = () => {
             const shouldKill = !msg.viewOnly && (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
@@ -2286,12 +2287,13 @@ export function installSessionLifecycle(App, ctx = {}) {
         loadingEl?.remove();
         if (msg.messages?.length) {
           chatView.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
-        } else {
+        } else if (!msg.historyNotLoaded) {
           // Zero messages (empty/aborted transcript, or a brand-new session
           // whose JSONL hasn't flushed yet) — say so instead of a silent blank
           // pane (blank windows read as bugs; real user report).
           chatView._renderers.appendSystem(t("No messages in this session's transcript yet."));
         }
+        if (msg.historyNotLoaded) chatView._sayHistoryNotLoaded?.(msg.historyNotLoaded);   // row B-422c: never «no messages» for a history the reader refused
         return true;
       }
       return false;

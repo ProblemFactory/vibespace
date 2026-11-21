@@ -650,6 +650,19 @@ function jsonlCacheClear() { _jsonlCache.clear(); _jsonlResident = 0; }
 // in inline — reading the appended bytes costs less than the worker round trip
 // plus the structured-clone of a whole tail — and the worker's full read
 // returns the same span entry, so the NEXT change is an append too.
+// ROW B-422c (lane hub-loop-stalls, 主开发 r1006 — A for every road): A WARM WHOSE READ THE TRANSCRIPT POOL REFUSED leaves its
+// session NOTED here; while the note stands the history's sync parse reads NOTHING on the loop — parseSessionJsonl answers the
+// kept copy (the cache's entry as it stands) or «not loaded yet» (an empty list tagged `notLoaded`), and asks the warm again off
+// the loop (at most one every RETRY_WARM_MS a session). The next warm that reads clears it. A deadline or a hung path is the
+// storage's: noted the same (nothing tried on the loop there, ever).
+const _historyRefused = new Map();   // claudeSessionId → {at, why, storageHung}
+const RETRY_WARM_MS = 2000;
+const NOT_LOADED = 'transcript_reader_restarting';
+function noteHistoryRefused(id, e) {
+  const was = _historyRefused.get(id);
+  _historyRefused.set(id, { at: Date.now(), why: (e && e.why) || (e && e.message) || 'refused', storageHung: !!(e && e.storageHung), retryAt: was ? was.retryAt : 0 });
+}
+const notLoadedList = () => Object.assign([], { notLoaded: NOT_LOADED });
 // B-cd4b unit 2 (hold 3): THE WARM'S COLD READ IN PAGES. Its one-shot reply (`jsonlTail`: readJsonlTail's whole entry, a 100 MB
 // conversation's ~70 MB of records) crossed to the main thread in ONE structured clone — measured at a hub restart with 80
 // survivors, the page's re-attaches: the loop held ~1.0–1.3 s at its deserialize. Now the ONE pager carries it
@@ -700,7 +713,7 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
     const stat = fs.statSync(fp);
     tasks = warmTaskEvents(claudeSessionId, fp, stat); // B-299b A2: the task-tool scan, in the transcript worker, beside the tail's warm
     const cached = _jsonlCache.get(claudeSessionId);
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) { _jsonlCachePut(claudeSessionId, cached); return true; } // already warm (touched: the working set)
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) { _historyRefused.delete(claudeSessionId); _jsonlCachePut(claudeSessionId, cached); return true; } // already warm (touched: the working set)
     const { readJsonlTail } = require('./adapters/codex');
     if (cached && cached.incr && stat.size > cached.size && stat.size - cached.spanEnd <= WARM_INLINE_APPEND_MAX) {
       const t0 = performance.now();
@@ -731,11 +744,22 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
       })().finally(() => { if (_warmInFlight.get(fp) === w) _warmInFlight.delete(fp); });
       _warmInFlight.set(fp, w);
     }
-    return await w.p;
+    // row B-422c: a pool refusal of the warm's read (the pager's one-shot fallback refuses by name) — noted, nothing parsed on the loop
+    let ok;
+    try { ok = await w.p; }
+    catch (e) { if (e && e.code === NOT_LOADED) noteHistoryRefused(claudeSessionId, e); return false; }
+    if (ok) _historyRefused.delete(claudeSessionId);
+    return ok;
   } catch { return false; } finally { if (tasks) await tasks; }
 }
 
 function parseSessionJsonl(claudeSessionId, cwd) {
+  const refused = _historyRefused.get(claudeSessionId);
+  if (refused) {   // row B-422c: the warm's read was refused — the kept copy or «not loaded yet», never a parse on the loop
+    if (Date.now() >= refused.retryAt) { refused.retryAt = Date.now() + RETRY_WARM_MS; warmSessionJsonlAsync(claudeSessionId, cwd).catch(() => false); }
+    const kept = _jsonlCache.get(claudeSessionId);
+    return kept && Array.isArray(kept.messages) ? kept.messages : notLoadedList();
+  }
   const fp = findSessionJsonlPath(claudeSessionId, cwd);
   if (!fp) return [];
   try {
@@ -1177,6 +1201,7 @@ class SessionMessages {
     // B-437e files tier (r1247): whether these records reach back to the transcript's FIRST byte — a transcript past the tail
     // bound is read from its tail only (src/adapters/codex.js readJsonlTail: the span's start); no transcript read: not known
     this._fromStart = spanFromStart(historySessionId ? _jsonlCache.get(historySessionId) : null, jsonl);
+    this.notLoaded = (jsonl && jsonl.notLoaded) || null;   // row B-422c: the page says the history waits on the reader
     // THE MERGE MEMO (perf chunk C): the merge below is a pure function of
     // (the jsonl array, the buffer string) and the cache hands back the SAME
     // array until the file changes, so a burst of SessionMessages over one

@@ -674,29 +674,35 @@ function _transcriptPoolGet() {
   }
   return _transcriptPool || null;
 }
-async function jsonlGapInfoAsync(fp) {
-  const pool = _transcriptPoolGet();
-  if (pool) { try { return await pool.call('gapInfo', { fp }); } catch {} }
-  return jsonlGapInfo(fp);
+// ROW B-422c (lane hub-loop-stalls, 主开发 r1006 — A for every road): AFTER A TRANSCRIPT-POOL FAILURE NOTHING IS READ ON THE HUB'S
+// LOOP. A pool failure — a closed pool, no worker, a deadline, a path the pool remembers hung, a busy or bounded lane: every one a
+// 503 or the history lane's own code — refuses BY NAME (`transcript_reader_restarting`; the page says it: «the transcript reader is
+// restarting — try again»); an error of the op itself (the file gone, denied) stays what it was. A deadline or a hung path is the
+// STORAGE's (`storageHung`): nothing is tried there. Never the release's sync whole-file function on the loop. The device's
+// in-place road (a bundle with no worker script: its own loop, by design) is no pool failure.
+const READER_RESTARTING = 'the transcript reader is restarting — try again in a moment';
+const isPoolFailure = (e) => !!e && (e.status === 503 || e.code === 'heap_bound' || e.code === 'history_busy');
+const isStorageHung = (e) => !!e && (e.safeFsTimeout === true || e.code === 'path-hung');
+function readerRefusal(e) {
+  return Object.assign(new Error(READER_RESTARTING), { code: 'transcript_reader_restarting', status: 503, why: (e && (e.code || e.message)) || 'no transcript pool on this process', storageHung: isStorageHung(e) });
 }
-async function readJsonlLineRangeAsync(fp, startLine, endLine) {
+/** one op through the transcript pool → its answer; a pool failure ⇒ the refusal by name, never a read on this loop */
+async function poolRead(op, payload, opts) {
   const pool = _transcriptPoolGet();
-  if (pool) { try { return await pool.call('lineRange', { fp, startLine, endLine }); } catch {} }
-  return readJsonlLineRange(fp, startLine, endLine);
+  if (!pool) throw readerRefusal(null);
+  try { return await pool.call(op, payload, opts); } catch (e) { throw !pool.inPlace && isPoolFailure(e) ? readerRefusal(e) : e; }
 }
-async function scanJsonlUserTurnsAsync(fp, backend, sent = null) {
-  const pool = _transcriptPoolGet();
-  if (pool) { try { return await pool.call('userTurns', { fp, backend, sent }); } catch {} }
-  return scanJsonlUserTurns(fp, backend, sent);
-}
+async function jsonlGapInfoAsync(fp) { return poolRead('gapInfo', { fp }); }
+async function readJsonlLineRangeAsync(fp, startLine, endLine) { return poolRead('lineRange', { fp, startLine, endLine }); }
+async function scanJsonlUserTurnsAsync(fp, backend, sent = null) { return poolRead('userTurns', { fp, backend, sent }); }
 /** readJsonlTail's FULL read in the worker (the async warm's cold path, chunk
  *  C): resolves `{entry, mode, bytes}` — the same span entry the sync reader
- *  builds, so the next change folds in as an append — or null when the pool
- *  is down (the caller's sync path then parses inline). */
+ *  builds, so the next change folds in as an append. Row B-422c: a pool
+ *  failure REJECTS with the refusal by name (the caller keeps its kept copy or
+ *  says «not loaded yet» — never parses inline on the loop); null = an answer
+ *  with no entry. */
 async function readJsonlTailAsync(fp, { dropSubagent = false } = {}) {
-  const pool = _transcriptPoolGet();
-  if (pool) { try { return await pool.call('jsonlTail', { fp, dropSubagent }); } catch {} }
-  return null;
+  return poolRead('jsonlTail', { fp, dropSubagent });
 }
 async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent = false } = {}) {
   const pool = _transcriptPoolGet();
@@ -786,13 +792,12 @@ async function codexHistoryMergedPagedAsync({ files = [], liveBuffer = () => '' 
   }
   return said(why);
 }
-/** Generic off-loop call (S3: codex discovery ops). Resolves the worker's
- *  result, or the inline fallback's when the pool is down/unavailable — the
- *  caller never sees which (same function either way). */
-async function transcriptWorkerCall(op, payload, inlineFn) {
-  const pool = _transcriptPoolGet();
-  if (pool) { try { return await pool.call(op, payload); } catch {} }
-  return inlineFn();
+/** Generic off-loop call (S3: codex discovery ops) → the worker's result. Row B-422c: `whenRefused(refusal)` is what a POOL
+ *  FAILURE answers — a kept answer or null, NEVER a read on this loop (the release ran an inline walk here: the codex sessions
+ *  tree on the 5 s poll while the pool was down); an error of the op itself answers the same. The device's in-place road runs the
+ *  op on its own loop, as before. */
+async function transcriptWorkerCall(op, payload, whenRefused = () => null) {
+  try { return await poolRead(op, payload); } catch (e) { return whenRefused(e); }
 }
 
 function jsonlGapInfo(fp) {

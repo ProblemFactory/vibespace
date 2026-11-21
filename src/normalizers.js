@@ -661,7 +661,7 @@ function artifactDeriveOpts({ backend, cwd, host, sessionId = null } = {}) {
   return typeof of === 'function' ? { artifactsOf: of, cwd: cwd || '', host: host || '', helper: { backend: backend || 'claude', sessionId } } : null;
 }
 const artifactsOptsOf = (session, sessionId) => { const o = artifactDeriveOpts({ backend: session.backend, cwd: session.cwd, host: session.host, sessionId: session.claudeSessionId || session.backendSessionId || null }); return o && artifactQuoteSource ? { ...o, quoted: artifactQuoteSource(session, sessionId || session.sockName) } : o; }; // r10: + whose item a tray answer quotes
-function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null, helperResults = null, fromStart = false } = {}) {
+function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null, helperResults = null, fromStart = false, notLoaded = null } = {}) {
   if (session._rebuildPromise) return session._rebuildPromise;
   const opHandlers = [...(session._normalizer?.listeners || [])];
   // 2.369.402: the conversation's cost fold rides the rebuild — the old normalizer's (the kept fact the boot resumed + every
@@ -705,7 +705,7 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
       // lane group-report-card: a group WAKE's transcript record is drawn as the group card it was live (after the held
       // cards' replay, which matched the record by its original text)
       try { upgradeWakeCards(mm, session._groupCards); } catch (err) { console.error('[normalizer] group wake cards skipped:', err.message); }
-      session._historyLoaded = true;
+      if (!notLoaded) session._historyLoaded = true;   // row B-422c: a history the transcript reader refused stays unloaded — the next attach reads it again
       // lane S1: the rebuilt cards carry the helpers' unanswered asks — every
       // helper view that already exists is handed them, and the inbox re-syncs
       // verify r4: the rebuilt pending set is what the attach payload hands the clients — sealed, so

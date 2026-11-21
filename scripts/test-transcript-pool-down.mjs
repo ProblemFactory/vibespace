@@ -8,8 +8,11 @@
 //   ① the gap read (jsonlGapInfoAsync) ② the slab read (readJsonlLineRangeAsync) ③ the turn map (scanJsonlUserTurnsAsync)
 //   ④ the Claude history (warmSessionJsonlAsync, then SessionMessages) ⑤ the codex history (CodexSessionMessages.rawAsync)
 //   ⑥ the codex thread-metas walk (collectCodexThreadMetasAsync — the 5 s poll's listing)
-// THE LAW: 0 such reads on every road; the three reads refuse by name (the transcript reader is restarting); the two histories
-// answer «not loaded yet» (or their kept copy); the walk answers its kept listing (or «not known»). RED: the base, every road.
+// THE LAW: after the refusal NO CONTENT READ of the transcript (readSync / readFileSync of the file) on any road, and no WALK of the
+// codex sessions folder (readdirSync) by the metas road; the three reads refuse by name (the transcript reader is restarting); the
+// two histories answer «not loaded yet» (or their kept copy); the walk answers its kept listing (or «not known»). A stat or an
+// existsSync of the file and the codex rollout FINDER's walk run with the pool up too (the finder is row B-a60e's): printed, not
+// judged here. RED: the base (c80f44e8b-20261121043050-box: every road read the transcript).
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -93,6 +96,7 @@ async function road(name, fn) {
   console.log(`  · ${name}: ${r.reads.length} sync read(s) of the transcript on the main thread${r.reads.length ? ` (${[...new Set(r.reads)].slice(0, 4).join(', ')})` : ''}; the longest turn ${r.longest} ms; ${r.err ? `refused: ${r.err.code || r.err.status} «${r.err.message}»` : `answered ${JSON.stringify(r.out === undefined ? null : Array.isArray(r.out) ? `[${r.out.length}]` : r.out && typeof r.out === 'object' ? Object.keys(r.out).slice(0, 6) : r.out).slice(0, 120)}`}`);
   return r;
 }
+const content = (r) => r.reads.filter((x) => /^(readSync|readFileSync) /.test(x)), walks = (r) => r.reads.filter((x) => /^readdirSync /.test(x));
 const byName = (r) => !!(r.err && /restarting|try again|transcript_reader/i.test(`${r.err.code} ${r.err.message}`)) || !!(r.out && typeof r.out === 'object' && /restarting|not loaded/i.test(String(r.out.refused || r.out.notLoaded || '')));
 
 console.log('the six roads, the pool refusing');
@@ -113,7 +117,7 @@ const R5 = await road('⑤ the codex history (rawAsync)', async () => {
 });
 const R6 = await road('⑥ the codex thread-metas walk', () => CS.collectCodexThreadMetasAsync());
 
-for (const r of [R1, R2, R3]) ok(r.reads.length === 0 && byName(r), `${r.name}: reads NOTHING on the loop after the pool's refusal and refuses by name (${r.reads.length} sync reads, the longest turn ${r.longest} ms)`, { reads: r.reads.slice(0, 6), err: r.err, out: r.out });
-for (const r of [R4, R5]) ok(r.reads.length === 0 && !!(r.out && r.out.notLoaded), `${r.name}: reads NOTHING on the loop and answers «not loaded yet» (${r.reads.length} sync reads, the longest turn ${r.longest} ms)`, { reads: r.reads.slice(0, 6), out: r.out, err: r.err });
-ok(R6.reads.length === 0, `${R6.name}: walks NOTHING on the loop — the kept listing, or «not known» (${R6.reads.length} sync reads, the longest turn ${R6.longest} ms)`, { reads: R6.reads.slice(0, 6), out: Array.isArray(R6.out) ? R6.out.length : R6.out, err: R6.err });
+for (const r of [R1, R2, R3]) ok(content(r).length === 0 && byName(r), `${r.name}: reads NOTHING of the transcript on the loop after the pool's refusal and refuses by name (${content(r).length} content reads, the longest turn ${r.longest} ms)`, { reads: r.reads.slice(0, 6), err: r.err, out: r.out });
+for (const r of [R4, R5]) ok(content(r).length === 0 && !!(r.out && r.out.notLoaded), `${r.name}: reads NOTHING of the transcript on the loop and answers «not loaded yet» (${content(r).length} content reads, the longest turn ${r.longest} ms)`, { reads: r.reads.slice(0, 6), out: r.out, err: r.err });
+ok(walks(R6).length === 0 && content(R6).length === 0, `${R6.name}: walks NOTHING on the loop — the kept listing, or «not known» (${walks(R6).length} folder reads, the longest turn ${R6.longest} ms)`, { reads: R6.reads.slice(0, 6), out: Array.isArray(R6.out) ? R6.out.length : R6.out, err: R6.err });
 report();

@@ -332,7 +332,7 @@ console.log('— ⑤ descriptor store contract + wiring pins');
   const ag = read('src/agentd/agentd.js');
   ok(/rollout-\.\*\\\.jsonl\(\?:\\\.zst\)\?\$/.test(ag) && /r\.userLines = head\.split/.test(ag) && /listOpenCodexRolloutPaths\(\{ sessionsDir: croot \}\)/.test(ag) && /codexOpen: snap\.codexOpen \|\| \[\]/.test(ag), 'the daemon snapshot carries .zst rollouts, userLines and codexOpen (one implementation via discovery-facts)');
   const tw = read('src/transcript-worker.js');
-  ok(/case 'codexThreadMetas'/.test(tw) && /case 'codexOpenThreads'/.test(tw) && /transcriptWorkerCall\('codexThreadMetas', \{\}, collectCodexThreadMetas\)/.test(read('src/codex-session-store.js')), 'the rollout walk and the /proc scan run as transcript-worker ops with inline fallbacks');
+  ok(/case 'codexThreadMetas'/.test(tw) && /case 'codexOpenThreads'/.test(tw) && /transcriptWorkerCall\('codexThreadMetas', \{\}, \(e\) => \{ refused = /.test(read('src/codex-session-store.js')) && !/transcriptWorkerCall\('codexThreadMetas', \{\}, collectCodexThreadMetas\)/.test(read('src/codex-session-store.js')), 'the rollout walk and the /proc scan run as transcript-worker ops; a refusal answers the kept listing — never the walk inline (row B-422c)');
   const uw = read('src/usage-walker.js'), sc = read('data/bin/vibespace-usage-scan');
   ok(/\\\.jsonl\(\\\.zst\)\?\$\/i/.test(uw) && /\\\.jsonl\(\\\.zst\)\?\$\/i/.test(sc) && /cur\.zsize === st\.size/.test(uw) && /cur\.zsize === st\.size/.test(sc) && /function zstdPlain\(buf\)/.test(uw) && /function zstdPlain\(buf\)/.test(sc), 'walker module + shipped scanner carry the SAME zst handling (lockstep)');
   ok(/'test-codex-zst'/.test(read('scripts/ci.mjs')), 'this suite is in the release gate');
@@ -1882,7 +1882,7 @@ console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, 
   const adSrc = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
   const poolCut = 'function _transcriptPoolGet() {\n';
   if (!adSrc.includes(poolCut)) throw new Error('the anchor of the leg «B-f64b: the pool down» is not in the source');
-  const twcCut = 'async function transcriptWorkerCall(op, payload, inlineFn) {\n';
+  const twcCut = 'async function transcriptWorkerCall(op, payload, whenRefused = () => null) {\n';   // row B-422c: a refusal answers `whenRefused`, never an inline walk
   if (!adSrc.includes(twcCut)) throw new Error('the anchor of the leg «B-f64b: one walk in flight» is not in the source');
   const adDown = MCi.write('src/adapters/codex.js', editAnchor(editAnchor(adSrc, poolCut, 'function _transcriptPoolGet() {\n  return null;   // the leg: the pool is unavailable\n', "src/adapters/codex.js"),
     twcCut, twcCut + "  if (op === 'codexOpenThreads') globalThis.__vsOpenAsks = (globalThis.__vsOpenAsks || 0) + 1;   // the leg counts the walks asked\n", "src/adapters/codex.js"), 'pool-down');
@@ -1891,8 +1891,8 @@ console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, 
   const downCs = (src, tag) => MCi.load('src/codex-session-store.js', src.replace(reqCut, `} = require(${JSON.stringify(adDown)});`), tag);
   const dn = downCs(csSrc, 'pool-down-store');
   const d1 = await procWalksAsync(async () => ({ sync: dn.listCodexThreads({ activeSessions: new Map() }), ids: await dn.listOpenCodexThreadIdsAsync(), list: await dn.listCodexThreadsAsync({ activeSessions: new Map() }) }));
-  ok(d1.n === 0 && d1.out.ids === null && d1.out.list.length > 0 && said(d1.out.list) === 'stopped/unknown' && said(d1.out.sync) === 'stopped/unknown',
-    'B-f64b: the worker POOL DOWN — the liveness walk runs ZERO times on the main thread; both listings SAY the liveness is not known (nothing kept, the next ask tries again)', { n: d1.n, ids: d1.out.ids, st: said(d1.out.list) });
+  ok(d1.n === 0 && d1.out.ids === null && d1.out.list.length === 0 && said(d1.out.sync) === 'stopped/unknown',
+    'B-f64b: the worker POOL DOWN — the liveness walk runs ZERO times on the main thread; the sync listing SAYS the liveness is not known; the async listing answers its KEPT listing — none on a pool down from the start, so no rows (row B-422c: the metas walk never runs inline)', { n: d1.n, ids: d1.out.ids, rows: d1.out.list.length, st: said(d1.out.sync) });
   // ONE walk in flight for both roads: five asks at once are one ask of the worker
   const flight = async (store) => { globalThis.__vsOpenAsks = 0; await Promise.all([store.listOpenCodexThreadIdsAsync(), store.listOpenCodexThreadIdsAsync(), store.listCodexThreadsAsync({ activeSessions: new Map() }), store.listOpenCodexThreadIdsAsync(), store.listOpenCodexThreadIdsAsync()]); return globalThis.__vsOpenAsks; };
   const asks1 = await flight(downCs(csSrc, 'one-in-flight'));
