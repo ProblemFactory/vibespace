@@ -1145,7 +1145,7 @@ console.log('— ⑪ the model chip MATRIX: every harness row × every door — 
     [CV, "this._statusBar.setModel(String(m).replace(/\\[.*$/, ''));", 1, 'live-init'],
     [CV, 'this._statusBar.setServedModel(op.data?.model || null);', 1, 'pick-reply (served-model — master\'s op, master\'s line: a LOCKED chip\'s F1 reads it, round 14)'],
     [CV, "if (msg.code === 'model-refused') this._statusBar?.answerModel?.({ ok: false, answer: msg.reqId ?? null });", 1, 'locked-refused-pick (the model-refused error frame — an OPTIONAL call)'],
-    [SL, 'if (data.chatStatus) chatView.applyStatus(data.chatStatus);', 1, 'withstatus-fetch / resume first-paint'],
+    [SL, 'else if (data.chatStatus) chatView.applyStatus(data.chatStatus);', 1, 'withstatus-fetch / resume first-paint'],   // row B-422c unit 1: `else` — never the status of a history the reader refused
     [SL, 'if (spawnedEffort) chatView.applyStatus({ effort: spawnedEffort });', 1, 'names no model (the spawn\'s effort)'],
   ];
   const ACCEPT11 = Object.fromEntries(SITES11.map(([f, st, n]) => [`${f} :: ${st}`, n]));

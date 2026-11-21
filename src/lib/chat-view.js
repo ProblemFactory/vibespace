@@ -3567,7 +3567,7 @@ class ChatView {
     const sid = spec.sessionId;
     try { this._historyReaskCancel?.(); } catch { }
     this._historyReaskCancel = this.ws.request(spec, (msg) => {
-      if (!msg || msg.sessionId !== sid) return false;
+      if (msg.sessionId !== sid) return;   // its OWN answer only (test-contributions: every error branch is id-gated)
       if (this._disposed) return true;
       if (msg.type === 'error') { this._scheduleHistoryReask(0); return true; }   // its own error: asked again at the back-off, never stopped for good
       if (msg.type !== 'attached') return false;
@@ -7172,10 +7172,10 @@ class ChatView {
     // next attach asks for no seq and rebuilds from the full rung
     try {
       this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, msg);
-      if (msg && msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { again: true, info: msg.historyNotLoadedInfo || null });   // row B-422c: the reset removed the line — said again over the new slab
       // the slab is the truth now: a poisoned watermark is healed (perf r1) —
       // only when the rebuild itself ran through (a throw above keeps it poisoned)
       this._seqPoisoned = false;
+      if (msg && msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { again: true, info: msg.historyNotLoadedInfo || null });   // row B-422c: the reset removed the line — said again over the new slab, after the heal (test-hidden-view-suspend: nothing between the rebuild and it)
     } catch (e) { this._seqPoisoned = true; throw e; }
     this._drainResetQueue(held, msg);
     if (this._connNoticeOwed) { this._connNoticeOwed = false; this._connNotice?.answered(true); }

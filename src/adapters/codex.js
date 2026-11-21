@@ -969,7 +969,8 @@ function _readTailBytesAsync(fp) {
       return { stat, size, lower, from, raw: off === raw.length ? raw : raw.subarray(0, off) };
     } finally { await fh.close().catch((e) => console.warn(`[transcript] the main-process read of ${path.basename(fp)}: its file handle did not close (${e.message})`)); }
   })();
-  work.then(() => { if (parked) { const r = _fileRefusals.get(fp); if (r) r.ownDeadline = false; } }, () => { }).finally(() => { if (parked) _slicedParked--; });   // a parked read that answers late frees its place — and the file answered: its own-deadline mark ends
+  const answered = () => { if (parked) { const r = _fileRefusals.get(fp); if (r) r.ownDeadline = false; } };   // ANY late reply — its bytes or its own error (a FIFO's ESPIPE, a gone file) — is the storage answering
+  work.then(answered, answered).finally(() => { if (parked) _slicedParked--; });   // a parked read that answers late frees its place — and the file answered: its own-deadline mark ends
   const deadline = new Promise((_, rej) => { timer = setTimeout(() => { parked = true; _slicedParked++; rej(Object.assign(new Error(`no answer in ${SLICED_READ_DEADLINE_MS / 1000} s — the storage hangs`), { code: 'sliced_read_deadline', storageHung: true })); }, SLICED_READ_DEADLINE_MS); });
   return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
 }
