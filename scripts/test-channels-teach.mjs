@@ -24,6 +24,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const B = (t) => Buffer.byteLength(String(t || ''), 'utf-8');
 const AR = require(path.join(REPO, 'src/agent-routes.js'));
 const TG = require(path.join(REPO, 'src/task-groups.js'));
@@ -223,7 +232,7 @@ console.log('④ CONTROLS: each leg can go red');
 { // a tools section without the paragraph: a copy of the registry whose channels row teaches nothing at session start (lane
   // cli-registry: the paragraph is that row's), required by a copy of task-groups
   const src = fs.readFileSync(path.join(REPO, 'src/agent-cli-registry.js'), 'utf8');
-  const cut = src.replace("      sessionStart: ({ reach, expired }) => channelsByReach(CHANNELS_SECTION_LINES, reach) + expiredSentence(expired),\n", '      sessionStart: null,\n');   // lane channel-reauth-visible: + the dead sign-ins' sentence
+  const cut = editAnchor(src, "      sessionStart: ({ reach, expired }) => channelsByReach(CHANNELS_SECTION_LINES, reach) + expiredSentence(expired),\n", '      sessionStart: null,\n', "src/agent-cli-registry.js");   // lane channel-reauth-visible: + the dead sign-ins' sentence
   const regCopy = MUT.write('src/agent-cli-registry.js', cut, 'no-paragraph-reg');
   const tsrc = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8');
   const tcut = tsrc.replace("require('./agent-cli-registry.js')", `require(${JSON.stringify(regCopy)})`);
@@ -233,7 +242,7 @@ console.log('④ CONTROLS: each leg can go red');
 }
 { // a route that teaches without asking reach
   const src = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
-  const cut = src.replace("  if (!integrationOnMaster()) return null;\n  const eng = channelsEngine();\n  if (!eng || typeof eng.reachCountFor !== 'function') return null;\n  const t = Date.now();", "  return { at: 0, v: 'read', x: [] };\n  const eng = channelsEngine();\n  const t = Date.now();");   // lane channel-reauth-visible: the memo answers {v, x}
+  const cut = editAnchor(src, "  if (!integrationOnMaster()) return null;\n  const eng = channelsEngine();\n  if (!eng || typeof eng.reachCountFor !== 'function') return null;\n  const t = Date.now();", "  return { at: 0, v: 'read', x: [] };\n  const eng = channelsEngine();\n  const t = Date.now();", "src/agent-routes.js");   // lane channel-reauth-visible: the memo answers {v, x}
   const ARX = MUT.load('src/agent-routes.js', cut, 'teach-anyway');
   const m = await legsOf({ AGR: ARX }, 'teach-anyway');
   ok(cut !== src && taught(m.out.none.p1) && taught(m.out.noEngine.start), 'CONTROL: a route that teaches without reach ⇒ the NO REACH and NO ENGINE legs are RED');
@@ -251,7 +260,7 @@ console.log('④ CONTROLS: each leg can go red');
 }
 { // an engine that counts the Agents adapter: a copy of the access family without the msg-acl skip, required by a copy of the engine
   const src = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8');
-  const cut = src.replace("      if (mod && mod.reach === 'msg-acl') continue;\n      recs.set(r.id, r);", "      recs.set(r.id, r);");
+  const cut = editAnchor(src, "      if (mod && mod.reach === 'msg-acl') continue;\n      recs.set(r.id, r);", "      recs.set(r.id, r);", "src/server/channels-access.js");
   const accessCopy = MUT.write('src/server/channels-access.js', cut, 'count-agents');
   const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
   const ecut = esrc.replace("const ChannelsAccess = require('./channels-access.js');", `const ChannelsAccess = require(${JSON.stringify(accessCopy)});`);

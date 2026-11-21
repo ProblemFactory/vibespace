@@ -43,6 +43,15 @@ const { MountManager } = require(path.join(REPO, 'src/mounts.js'));
 const C = Object.freeze({ lark: { kind: 'lark', api: LARK.API_ROW }, slack: { kind: 'slack', api: SLACK.API_ROW }, google: { kind: 'gmail', api: GMAIL.API_ROW } });
 let pass = 0, fail = 0;
 const ok = (c, name, detail) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 400) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const SRC = fs.readFileSync(path.join(REPO, 'src/channel-api.js'), 'utf8');
 const OSRC = fs.readFileSync(path.join(REPO, 'src/server/channel-api.js'), 'utf8');
 const MUT = mutantCopies('channel-api', REPO);
@@ -992,7 +1001,7 @@ console.log('\nB-4e97: the raw API says which hosts the token reaches, and a sco
   const DOCS_NEW = "hosts: r.reach, ...(r.needs.length ? { needsScope: r.needs,";
   const RUN_NEW = "ms: now() - t0, ...(scopeSays ? { scopeSays } : {}) };";
   ok(OSRC4.split(DOCS_NEW).length === 2 && OSRC4.split(RUN_NEW).length === 2, 'control setup: the docs line and the run line are present once each');
-  const Pre = MUT.load('src/server/channel-api.js', OSRC4.replace(DOCS_NEW, "hosts: v.hosts, ...(false ? { needsScope: r.needs,").replace(RUN_NEW, 'ms: now() - t0 };'), 'b4e97-pre');   // stale-pins: kept (the release's line, restored by the red control)
+  const Pre = MUT.load('src/server/channel-api.js', editAnchor(editAnchor(OSRC4, DOCS_NEW, "hosts: v.hosts, ...(false ? { needsScope: r.needs,", "src/server/channel-api.js"), RUN_NEW, 'ms: now() - t0 };', "src/server/channel-api.js"), 'b4e97-pre');   // stale-pins: kept (the release's line, restored by the red control)
   const P4 = await run4(Pre);
   ok(P4.docs.hosts.length === 8 && P4.sc.status === 403 && P4.sc.scopeSays === undefined && P4.unreach.scopeSays === undefined, 'RED CONTROL: the release\'s orchestrator lists all eight hosts and passes the scope 403 back with no word — the legs above are red on it', JSON.stringify({ hosts: P4.docs.hosts.length, sc: P4.sc.scopeSays }));
 }

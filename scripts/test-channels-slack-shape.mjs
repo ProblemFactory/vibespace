@@ -34,6 +34,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
 const CH = require(path.join(REPO, 'src/channels/index.js'));
@@ -371,7 +380,7 @@ console.log('⑦ controls');
   // verify r1 (F1) CONTROL: the pre-fix skew guard (pin the newest instant) freezes the method after the clock is corrected
   const REBASE = '    if (v < last) {';
   ok(lsrc.includes(REBASE), 'the patch site of the skew control is in slack-limits.js');
-  const L3 = require(MC.write('src/channels/slack-limits.js', lsrc.replace(REBASE, '    if (false) {').replace('    last = v;\n    return v;', '    if (v > last) last = v;\n    return Math.max(v, last);'), 'pinclock'));
+  const L3 = require(MC.write('src/channels/slack-limits.js', editAnchor(editAnchor(lsrc, REBASE, '    if (false) {', "src/channels/slack-limits.js"), '    last = v;\n    return v;', '    if (v > last) last = v;\n    return Math.max(v, last);', "src/channels/slack-limits.js"), 'pinclock'));
   const sk3 = skewLeg(L3);
   ok(!sk3.later && !sk3.send && !sk3.hold, `NEGATIVE CONTROL — a copy that pins the newest instant keeps the method, the send gap and the hold shut after their own durations (${sk3.later}/${sk3.send}/${sk3.hold})`);
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8');
@@ -390,7 +399,7 @@ console.log('⑦ controls');
   ok(m3.v.calls.length === 0, 'the exchange keeps its own shape belt (a copy without the finish check still sends nothing)');
   const EXB = "            if (act.act !== 'connect') throw";
   ok(ssrc.includes(EXB), 'the patch site of the exchange belt is in slack.js');
-  const S4 = require(MC.write('src/channels/slack.js', ssrc.replace(SHAPE, '        if (false) {').replace(EXB, '            if (false) throw'), 'noshape2'));
+  const S4 = require(MC.write('src/channels/slack.js', editAnchor(editAnchor(ssrc, SHAPE, '        if (false) {', "src/channels/slack.js"), EXB, '            if (false) throw', "src/channels/slack.js"), 'noshape2'));
   const m4 = mkAdapter({ mod: S4, connected: false });
   const f4 = await m4.a.auth.begin();
   await m4.a.auth.finish(f4.flowId, 'xoxb' + '-1234567890-abcdefghij').catch(() => null);

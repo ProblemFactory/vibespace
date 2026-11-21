@@ -23,6 +23,15 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const CC = require(path.join(REPO, 'src/cli-call.js'));
 let failed = 0, passed = 0;
 const ok = (c, name, extra) => { if (c) { passed++; console.log('  ✓ ' + name); } else { failed++; console.error('  ✗ ' + name + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-clicall-'));
 
@@ -157,7 +166,7 @@ const run = (bin, args, env = {}, ms = 8000) => new Promise((resolve) => {
   // CONTROL: the same helper with its timer cut (the pre-lane shape: an unbounded wait) is still waiting at twice the budget
   const mutDir = path.join(tmp, 'mut'); fs.mkdirSync(path.join(mutDir, 'data', 'bin'), { recursive: true });
   const src = fs.readFileSync(path.join(REPO, 'src/cli-call.js'), 'utf8');
-  const mut = src.replace('const timer = setTimeout(() => {\n      const phase', 'const timer = setTimeout(() => { return;\n      const phase');
+  const mut = editAnchor(src, 'const timer = setTimeout(() => {\n      const phase', 'const timer = setTimeout(() => { return;\n      const phase', "src/cli-call.js");
   ok(mut !== src, '③ CONTROL setup: the mutant cuts the expiry');
   fs.writeFileSync(path.join(mutDir, 'data', 'bin', 'cli-call.js'), mut);
   fs.copyFileSync(path.join(REPO, 'data/bin/vibespace-task'), path.join(mutDir, 'data', 'bin', 'vibespace-task'));

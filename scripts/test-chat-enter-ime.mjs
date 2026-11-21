@@ -27,6 +27,15 @@ import { pathToFileURL } from 'node:url';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
 const SRC = path.join(REPO, 'src/lib/chat-enter-keys.js');
 
@@ -196,7 +205,7 @@ for (const [n, [re, to], rowIdx] of MUT) {
   ok('control: ' + n, r && !r.ok, r && r.got);
 }
 const sR = fs.readFileSync(path.join(REPO, 'src/lib/chat-enter-keys.js'), 'utf8');
-const noS = path.join(tmp, 'nos.mjs'); fs.writeFileSync(noS, sR.replace("(e.shiftKey ? 'S-' : '') + ", ''));
+const noS = path.join(tmp, 'nos.mjs'); fs.writeFileSync(noS, editAnchor(sR, "(e.shiftKey ? 'S-' : '') + ", '', "src/lib/chat-enter-keys.js"));
 ok('control: the S- prefix removed ⇒ the Shift tap reads as a bare "Shift"', (await import(pathToFileURL(noS).href)).actionKeyWords({ key: 'Shift', shiftKey: true, isComposing: true }).key === 'Shift');
 // the two new words removed, one at a time and together (= the 2.369.267 recorder that wrote inc-mv7mdv6b-emxq)
 const SC = ["const char = e.key.length === 1 && !(e.ctrlKey || e.metaKey || e.altKey);\n  if (char && !e.shiftKey) return null;", "const char = false;\n  if (!(e.key.length > 1 || e.ctrlKey || e.metaKey || e.altKey)) return null;"];
@@ -215,9 +224,9 @@ const ES = (e) => M.enterSubmits(e);
 ok('enterSubmits: a plain Enter (keyCode 13) submits; Shift/Ctrl+Enter are still Enter (the caller decides chords)', ES({ key: 'Enter', keyCode: 13 }) && ES({ key: 'Enter', keyCode: 13, shiftKey: true }) && ES({ key: 'Enter', keyCode: 13, ctrlKey: true }));
 ok('enterSubmits: the input method\'s Enter never submits — isComposing (Chrome/Firefox), keyCode 229 (Safari / the ring\'s [composing]), both, a chord while composing', !ES({ key: 'Enter', isComposing: true, keyCode: 13 }) && !ES({ key: 'Enter', keyCode: 229 }) && !ES({ key: 'Enter', isComposing: true, keyCode: 229 }) && !ES({ key: 'Enter', isComposing: true, metaKey: true }));
 ok('enterSubmits: not Enter / no event ⇒ false (Tab, Escape, a letter, null)', !ES({ key: 'Tab' }) && !ES({ key: 'Escape' }) && !ES({ key: 'a' }) && !ES(null) && !ES(undefined));
-const noG = path.join(tmp, 'nog.mjs'); fs.writeFileSync(noG, sR.replace("e.key === 'Enter' && !imeOwnsKey(e);", "e.key === 'Enter';"));
+const noG = path.join(tmp, 'nog.mjs'); fs.writeFileSync(noG, editAnchor(sR, "e.key === 'Enter' && !imeOwnsKey(e);", "e.key === 'Enter';", "src/lib/chat-enter-keys.js"));
 // §2c's control: the fill guard removed = the recorder that threw at the owner's unlock
-const noF = path.join(tmp, 'nof.mjs'); fs.writeFileSync(noF, sR.replace("  if (!e || typeof e.key !== 'string') return { key: FILL_KEY };\n", ''));
+const noF = path.join(tmp, 'nof.mjs'); fs.writeFileSync(noF, editAnchor(sR, "  if (!e || typeof e.key !== 'string') return { key: FILL_KEY };\n", '', "src/lib/chat-enter-keys.js"));
 let fillThrew = '';
 try { (await import(pathToFileURL(noF).href)).actionKeyWords({ type: 'keydown' }); } catch (x) { fillThrew = x.message; }
 ok('control: §2c\'s guard removed ⇒ a fill throws the incident\'s «Cannot read properties of undefined (reading \'length\')»', fs.readFileSync(noF, 'utf8') !== sR && fillThrew === "Cannot read properties of undefined (reading 'length')", fillThrew);

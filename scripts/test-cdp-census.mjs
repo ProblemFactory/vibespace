@@ -56,6 +56,15 @@ const M = require('../src/browser-mediation.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const FIX = path.join(REPO, 'scripts/fixtures');
 const fixtureOf = (v) => JSON.parse(fs.readFileSync(path.join(FIX, `cdp-protocol-${v}`, 'protocol.json'), 'utf8'));
 const versionOf = (f) => (/Chrome\/(\d+\.\d+\.\d+\.\d+)/.exec(String(f && f.browser || '')) || [])[1] || null;
@@ -307,7 +316,7 @@ console.log('— ⑪ a method name is judged for SHAPE first on the no-row branc
   const medSrc11 = fs.readFileSync(path.join(REPO, 'src/browser-mediation.js'), 'utf8');
   const shapeA = 'const METHOD_NAME_SHAPE = /^[A-Za-z][A-Za-z0-9]*\\.[A-Za-z][A-Za-z0-9]*$/;';
   ok(medSrc11.split(shapeA).length === 2, '⑪ control setup: the shape is spelled once in src/browser-mediation.js');
-  const Mm = MUT11.load('src/browser-mediation.js', medSrc11.replace(shapeA, shapeA.replace('$/;', '$/m;')).replace("require('./cdp-census.js')", `require(${JSON.stringify(path.join(REPO, 'src/cdp-census.js'))})`), 'shape-m-flag');
+  const Mm = MUT11.load('src/browser-mediation.js', editAnchor(editAnchor(medSrc11, shapeA, shapeA.replace('$/;', '$/m;'), "src/browser-mediation.js"), "require('./cdp-census.js')", `require(${JSON.stringify(path.join(REPO, 'src/cdp-census.js'))})`, "src/browser-mediation.js"), 'shape-m-flag');
   const vm = Mm.judge({ id: 31, method: BAD[0], params: {} }, scope(), {});
   ok(Mm.methodShaped(BAD[0]) === true && Mm.refusalCodeOf(vm.reply) === 'method_unclassified',
     '⑪ CONTROL (the m flag planted in a copy): «Evil.x NEWLINE forged line» passes the shape and is refused method_unclassified, not bad_message — the two legs above are RED on it', JSON.stringify({ shaped: Mm.methodShaped(BAD[0]), code: Mm.refusalCodeOf(vm.reply) }));

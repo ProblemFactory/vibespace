@@ -44,6 +44,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = (x) => JSON.stringify(x);
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
 const dictOf = (f) => { const m = new Map(); for (const ln of read(f).split('\n')) { const x = /^  ('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"): ('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"),?$/.exec(ln); if (x) { try { m.set(new Function('return ' + x[1])(), new Function('return ' + x[2])()); } catch { } } } return m; };
@@ -263,7 +272,7 @@ console.log('③ who reacted: names only — "You" for the owner, a nameless rea
   const newWho = "  const parts = [...(w.self ? [t('You')] : []), ...w.names];\n  if (!parts.length) return x && x.count ? t('{n} reactions', { n: x.count }) : '';\n  const names = parts.join(', ');";
   const oldWho = "  if (!w.names.length) return x && x.count ? t('{n} reactions', { n: x.count }) : '';\n  const names = w.names.join(', ');";
   ok(pSrc.includes(newWho) && pSrc.includes("import * as Rx from '../channel-reactions.js';"), 'CONTROL setup: whoText\'s body and its import are found');
-  const pOld = pSrc.replace(newWho, oldWho).replace("import * as Rx from '../channel-reactions.js';", `import * as Rx from ${JSON.stringify(pathToFileURL(rxOld).href)};`);
+  const pOld = editAnchor(editAnchor(pSrc, newWho, oldWho, "src/lib/reaction-picker.js"), "import * as Rx from '../channel-reactions.js';", `import * as Rx from ${JSON.stringify(pathToFileURL(rxOld).href)};`, "src/lib/reaction-picker.js");
   const PickOld = await import(pathToFileURL(M.write(path.join(REPO, 'src/lib/reaction-picker.js'), pOld, 'old-whotext')).href);
   const cw = PickOld.whoText(fire);
   ok(/u-me/.test(cw) && !/^You/.test(cw), `CONTROL: the pre-fix pair words the same fold "${cw}" — the owner's own id, the words the user read`, cw);

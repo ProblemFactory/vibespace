@@ -43,6 +43,15 @@ const rawAA = UsageHistory.prototype.aggregateAsync;
 UsageHistory.prototype.aggregateAsync = function (...a) { return rawAA.apply(this, a).then((x) => { if (!x || !('asOf' in x)) return x; const { asOf, ...r } = x; Object.defineProperty(r, '_asOf', { value: asOf }); return r; }); };
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; } else { fail++; console.log('  ✗ ' + m); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, m) => { const x = JSON.stringify(a), y = JSON.stringify(b); ok(x === y, m + (x === y ? '' : `\n     got  ${x.slice(0, 300)}\n     want ${y.slice(0, 300)}`)); };
 const DAY = 86400e3, NOW = Date.now();
 /** Every read door counted (verify #5): fs.readSync / readFileSync / promises.readFile / FileHandle.read. */
@@ -333,7 +342,7 @@ console.log('§6–§11 r2: the cold walk off the loop, held, single-flight; the
     const rh = new Float64Array(h0); for (let i = 0; i < h0; i++) rh[i] = cc.hrh[i];
     const MW = mutantCopies('cachebounds-walk', REPO);
     const walkSrc = fs.readFileSync(path.join(REPO, 'src/usage-cold-walk.js'), 'utf8');
-    const unverified = walkSrc.replace("if (idHash(line) !== rh) throw stale(where + ' holds another line');", '').replace("if (!ev || (ev.ts || 0) !== ts) throw stale(where + ' holds another row');", '').replace("let ev; try { ev = JSON.parse(line); } catch { throw stale(where + ' is not a row'); }", 'let ev; try { ev = JSON.parse(line); } catch { ev = {}; }').replace("if (o > 0 && buf[o - base - 1] !== 10) throw stale(`${path.basename(fp)}@${o} does not start a line`);", '');
+    const unverified = editAnchor(editAnchor(editAnchor(editAnchor(walkSrc, "if (idHash(line) !== rh) throw stale(where + ' holds another line');", '', "src/usage-cold-walk.js"), "if (!ev || (ev.ts || 0) !== ts) throw stale(where + ' holds another row');", '', "src/usage-cold-walk.js"), "let ev; try { ev = JSON.parse(line); } catch { throw stale(where + ' is not a row'); }", 'let ev; try { ev = JSON.parse(line); } catch { ev = {}; }', "src/usage-cold-walk.js"), "if (o > 0 && buf[o - base - 1] !== 10) throw stale(`${path.basename(fp)}@${o} does not start a line`);", '', "src/usage-cold-walk.js");
     const UW = MW.load('src/usage-cold-walk.js', unverified, 'noverify');
     // The shrink can leave a planned place BEYOND the shard's new end: the structural checks the mutant keeps (`does not
     // start a line` / `has no line end`, usage-cold-walk.js readLinesAt) throw STALE there — which places are planned is a
@@ -425,7 +434,7 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   const t14n = Date.now(), next14 = await t.aggregateAsync({ to: NOW - 5 }), took14n = Date.now() - t14n;
   ok(JSON.stringify(next14.totals) === JSON.stringify(t.aggregate({ to: NOW - 5 }).totals), '§14 the next request starts a NEW worker and answers');
   boundLine('§14', took14, took14n, 'witness: the error is the worker death (code ≠ DEADLINE)');
-  const deaf = uhSrc.replace("w.on('error', (e) => end(reject,", "w.on('error', (e) => void (reject,").replace("w.on('exit', (code) => end(reject,", "w.on('exit', (code) => void (reject,");
+  const deaf = editAnchor(editAnchor(uhSrc, "w.on('error', (e) => end(reject,", "w.on('error', (e) => void (reject,", "src/usage-history.js"), "w.on('exit', (code) => end(reject,", "w.on('exit', (code) => void (reject,", "src/usage-history.js");
   const td = new (M.load('src/usage-history.js', deaf, 'deaf').UsageHistory)({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); td.ledgerWindowMs = 40 * DAY; td.ledgerHotMaxBytes = 60 * 1024; td.warm();
   td.coldWorkerFile = oom; td.coldWorkerHeapMb = 32; td.coldFoldDeadlineMs = 1500;
   // lane fast-debt-clear: THE INDEPENDENT DEADLINE LEGS AT ONCE — this control's 1.5 s deadline elapses while the fallback copy,
