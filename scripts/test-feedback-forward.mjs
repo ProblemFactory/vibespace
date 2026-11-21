@@ -66,6 +66,15 @@ const MUT = mutantCopies('feedback-forward', REPO);
 
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const t0 = Date.now();
 
 // server.js's own body rule: the forward door reads its body AFTER the token (the route's 64 KB parser)
@@ -355,7 +364,7 @@ console.log('⑩ controls (patched copies) and the wiring');
   ok(storeSrc.includes(DEDUPE) && nd.list().reports.length === 2 && rd.list().reports.length === 1, 'CONTROL — without the dedupe a retry is a second record (the real store keeps one)', [nd.list().reports.length, rd.list().reports.length]);
   const KEYF = 'r && r.origin && r.origin.key === keyId && Number(r.markedAt) > s';
   const modelSrc = read('src/feedback-forward-model.js');
-  const mm = MUT.write('src/feedback-forward-model.js', modelSrc.replace(KEYF, 'r && r.origin && Number(r.markedAt) > s'), 'no-key', { name: 'ffm-no-key' });
+  const mm = MUT.write('src/feedback-forward-model.js', editAnchor(modelSrc, KEYF, 'r && r.origin && Number(r.markedAt) > s', "src/feedback-forward-model.js"), 'no-key', { name: 'ffm-no-key' });
   const nk = fresh(MUT.load('src/server/feedback-store.js', storeSrc.replace("require('../feedback-forward-model.js')", `require(${JSON.stringify(mm)})`), 'no-key'));
   const rk = fresh(FS);
   for (const S of [nk, rk]) { const r = S.receive(hostileBody, { key: kId }); clock += 1000; S.setStatus(r.report.id, 'handled', { version: '2.369.333' }); }
@@ -507,7 +516,7 @@ console.log('⑪ THE NO-DOOR PAUSE (lane feedback-forward-404): the target is a 
   {
     const modelSrc = read('src/feedback-forward-model.js'), fwSrc = read('src/server/feedback-forward.js');
     const NODOOR = "  if (s === 404 || s === 405 || s === 501) return 'no-door';\n";
-    const mm = MUT.write('src/feedback-forward-model.js', modelSrc.replace(NODOOR, ''), 'no-door', { name: 'ffm-no-door' });
+    const mm = MUT.write('src/feedback-forward-model.js', editAnchor(modelSrc, NODOOR, '', "src/feedback-forward-model.js"), 'no-door', { name: 'ffm-no-door' });
     const BASE = MUT.load('src/server/feedback-forward.js', fwSrc.replace("require('../feedback-forward-model.js')", `require(${JSON.stringify(mm)})`), 'no-door');
     const day = async (Mod, tag) => {
       const d = path.join(scratchDir('feedback-forward-ctl-' + tag), 'data');
@@ -586,8 +595,8 @@ console.log('⑫ THE ONE WHO FILED IT IS TOLD (lane fleet-feedback-marks): three
     'filerKey: a forwarded report and a job name nobody here; a webui id only while its session runs (its own key); else <harness>:<conversation id>');
   // CONTROLS (patched copies, never src/)
   const MSRC = read('src/feedback-model.js');
-  const named = MSRC.replace("return { kind: 'feedback-handled', id: String(r.id), about: r.about || '', version: r.handledVersion, note: r.handledNote || null };", "return { kind: 'feedback-handled', id: String(r.id), about: r.about || '', version: r.handledVersion, note: r.handledNote || null, by: r.handledBy };")
-    .replace("was handled in ${cleanLine(n.version)}${note ? `: ${note}` : '.'}`;", "was handled in ${cleanLine(n.version)} by ${cleanLine(n.by)}${note ? `: ${note}` : '.'}`;");
+  const named = editAnchor(editAnchor(MSRC, "return { kind: 'feedback-handled', id: String(r.id), about: r.about || '', version: r.handledVersion, note: r.handledNote || null };", "return { kind: 'feedback-handled', id: String(r.id), about: r.about || '', version: r.handledVersion, note: r.handledNote || null, by: r.handledBy };", "src/feedback-model.js"),
+    "was handled in ${cleanLine(n.version)}${note ? `: ${note}` : '.'}`;", "was handled in ${cleanLine(n.version)} by ${cleanLine(n.by)}${note ? `: ${note}` : '.'}`;", "src/feedback-model.js");
   ok(named !== MSRC && named.includes('by: r.handledBy'), 'ANCHOR: the notice and the sentence are spelled once');
   const MX = MUT.load('src/feedback-model.js', named, 'sentence-names-who');
   const mt = rows.map((r) => MX.renderHandledNotice(MX.handledNotice({ ...r, handledVersion: VER, handledNote: NOTE })));

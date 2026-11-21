@@ -29,6 +29,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-csm-'));
 process.env.XDG_RUNTIME_DIR = fs.mkdtempSync(path.join(tmp, 'xdg-')); // every ORCH here puts its runs' folders in the suite's own temp — never the box's runtime dir
 process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } });
@@ -531,12 +540,12 @@ console.log('§6 R8: an ordinary update is a quiet fact; a registered build\'s u
       [CXsrc, 'src/codex-message-manager.js', "require('./message-window.js')"], [CXsrc, 'src/codex-message-manager.js', "    this.harnessLabel = 'Codex';"]])
       ok(src.includes(an), `the anchor of the RED CONTROL (the release's window) is in the source (${file}): ${an.trim()}`);   // each fails BY NAME when gone (rule 06:25Z)
     const NEW_LINES = MWsrc.slice(MWsrc.indexOf('    const table = this.recordTable || null;'), MWsrc.indexOf('    if (table && !_kindsCounted.has(counted)'));
-    const REL = MWsrc.replace(NEW_LINES, "    const claude = (this.harnessLabel || 'Claude Code') === 'Claude Code';\n    const registered = !!ver && claude && registeredClaude(ver);\n    const counted = `${this.harnessLabel || 'Claude Code'}|${ver || '-'}|${key}`;\n")   // stale-pins: kept — the RELEASE's lines, re-planted on purpose (the red control)
-      .replace('    if (table && !_kindsCounted.has(counted)', '    if (!_kindsCounted.has(counted)').replace("`${this.harnessLabel} ${ver || '?'} · ${kind}:${nm}`", "`${this.harnessLabel || 'Claude Code'} ${ver || '?'} · ${kind}:${nm}`")   // stale-pins: kept — the release's lines
-      .replace("'use strict';", "'use strict'; const registeredClaude = () => false;");
+    const REL = editAnchor(editAnchor(editAnchor(editAnchor(MWsrc, NEW_LINES, "    const claude = (this.harnessLabel || 'Claude Code') === 'Claude Code';\n    const registered = !!ver && claude && registeredClaude(ver);\n    const counted = `${this.harnessLabel || 'Claude Code'}|${ver || '-'}|${key}`;\n", "src/message-window.js"),   // stale-pins: kept — the RELEASE's lines, re-planted on purpose (the red control)
+      '    if (table && !_kindsCounted.has(counted)', '    if (!_kindsCounted.has(counted)', "src/message-window.js"), "`${this.harnessLabel} ${ver || '?'} · ${kind}:${nm}`", "`${this.harnessLabel || 'Claude Code'} ${ver || '?'} · ${kind}:${nm}`", "src/message-window.js"),   // stale-pins: kept — the release's lines
+      "'use strict';", "'use strict'; const registeredClaude = () => false;", "src/message-window.js");
     const MX = mutantCopies('cli-self-measure-f1a2', REPO);
     const relWin = NEW_LINES.length > 50 && REL !== MWsrc ? MX.write('src/message-window.js', REL, 'release', { esm: false }) : null;
-    const CXrel = relWin ? CXsrc.replace("require('./message-window.js')", `require(${JSON.stringify(relWin)})`).replace("    this.harnessLabel = 'Codex';", '   ') : null;
+    const CXrel = relWin ? editAnchor(editAnchor(CXsrc, "require('./message-window.js')", `require(${JSON.stringify(relWin)})`, "src/codex-message-manager.js"), "    this.harnessLabel = 'Codex';", '   ', "src/codex-message-manager.js") : null;
     const CodexRel = CXrel && CXrel !== CXsrc ? MX.load('src/codex-message-manager.js', CXrel, 'release').CodexMessageManager : null;
     CodexRel?._seenUnknownRecords?.clear?.();
     const nr = CodexRel ? drive(() => new CodexRel('t-f1a2-rel').processLive({ type: 'event_msg', payload: { type: 'b_f1a2_release_codex_event' } })) : null;

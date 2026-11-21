@@ -22,6 +22,15 @@ const F = await import(path.join(REPO, 'src/lib/foryou-links.js'));
 const fileImports = (src, dir = 'src/lib') => src.replace(/(\b(?:from|import)\s+')(\.\.?\/[^']+)(')/g, (x, a, p, z) => a + 'file://' + path.join(REPO, dir, p) + z); // r10 (F2): every relative import → the file it names
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const links = (s) => F.segmentText(s).filter((g) => g.t === 'link').map((g) => g.kind + ':' + g.ref);
 const J = JSON.stringify;
@@ -205,7 +214,7 @@ const S = await serve(path.join(REPO, 'src/agent-routes/status.js'));
   // CONTROL: the old file-without-them behaviour — a patched route that files the item WITHOUT the refused ones
   const mutDir = fs.mkdtempSync(path.join(TMP, 'mut-'));
   const orig = read('src/agent-routes/status.js');
-  const mut = orig.replace(/        if \(j\.bad\.length\) return res\.status\(422\)[^\n]*\n/, '').replace(/require\('\.\.\//g, `require('${REPO}/src/`);
+  const mut = editAnchor(orig, /        if \(j\.bad\.length\) return res\.status\(422\)[^\n]*\n/, '', "src/agent-routes/status.js").replace(/require\('\.\.\//g, `require('${REPO}/src/`);
   fs.writeFileSync(path.join(mutDir, 'status.js'), mut);
   const M = await serve(path.join(mutDir, 'status.js'));
   const m0 = M.count();
@@ -423,7 +432,7 @@ console.log('\nbatch 47 cure: a producer\'s cut is a cut — only an agent\'s ow
   const NOW_D = "${tgt ? `What it acts on: ${tgt}\\n` : ''}", OLD_D = "${tgt ? `What it acts on: ${tgt}. ` : ''}";   // stale-pins: kept — the RED control re-plants the old detail on purpose
   ok(SRC_HB.split(NOW_T).length === 2 && SRC_HB.split(NOW_D).length === 2, 'setup: the producer\'s words and detail are ONE template each (the controls edit one place)');
   const MH = mutantCopies('foryou-links-handback', REPO);
-  const old = fileFrom(MH.load('src/server/browser-handback.js', SRC_HB.replace(NOW_T, OLD_T).replace(NOW_D, OLD_D), 'own-cut'), cardOf({ url: URL158 })), oldWords = old && kept(old);   // no category: the must's scene
+  const old = fileFrom(MH.load('src/server/browser-handback.js', editAnchor(editAnchor(SRC_HB, NOW_T, OLD_T, "src/server/browser-handback.js"), NOW_D, OLD_D, "src/server/browser-handback.js"), 'own-cut'), cardOf({ url: URL158 })), oldWords = old && kept(old);   // no category: the must's scene
   const oldLinks = oldWords ? lk(oldWords, { whole: true }) : [];
   ok(!!oldWords && oldWords.endsWith(URL158.slice(0, 119) + '…') && J(oldLinks) === J([URL158.slice(0, 119)]),
     'RED CONTROL (the must\'s exact text): the producer\'s own cut at 119 read by the B-3f50 row (whole) — «…on https://shop.example.com/checkout/confirm?order=a1b2…» draws the TRUNCATED address as a link', { text: oldWords, links: oldLinks });

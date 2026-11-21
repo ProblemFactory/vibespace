@@ -20,6 +20,15 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const root = scratch('claude-retention');
 fs.rmSync(root, { recursive: true, force: true });
@@ -239,7 +248,7 @@ function ruleHolds(M, base) {
   // CONTROL ① a patched copy whose create path MAKES the directory (the scope guard's failure) ⇒ the rule judge goes red
   const src = read('src/harness-config.js');
   const needle = "if (!fs.existsSync(path.dirname(file))) return 'no-dir';";
-  const mutSrc = src.replace(needle, "if (!fs.existsSync(path.dirname(file))) fs.mkdirSync(path.dirname(file), { recursive: true });");
+  const mutSrc = editAnchor(src, needle, "if (!fs.existsSync(path.dirname(file))) fs.mkdirSync(path.dirname(file), { recursive: true });", "src/harness-config.js");
   const mutFile = path.join(HKC, 'harness-config-mkdir-control.cjs');
   fs.writeFileSync(mutFile, mutSrc);
   const MUT = require(mutFile);

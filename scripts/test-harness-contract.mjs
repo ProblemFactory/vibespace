@@ -21,6 +21,15 @@ const MUTH = mutantCopies('harness-contract', REPO);
 
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS } = require(path.join(REPO, 'src/harnesses/index.js'));
 const { CREATE_RULES } = require(path.join(REPO, 'src/harness-config.js')); // the create rule's closed set (false | 'dir-exists' — lane hooks-create)
@@ -245,7 +254,7 @@ for (const id of chatHarnessIds()) {
     const src = fs.readFileSync(path.join(REPO, 'src/server/wrapper-files.js'), 'utf8');
     const NEW = "if (c < 0 || argv[c + 1] !== sockPath || !/(chat|acp)-wrapper\\.js/.test(cmd)) continue;";
     const OLD = "if (!cmd.includes(sockPath) || !cmd.includes('dtach\\0-c\\0') || !/(chat|acp)-wrapper\\.js/.test(cmd)) continue;";
-    const mut = src.replace(NEW, OLD).replace("require('../backend-caps.js')", `require(${JSON.stringify(path.join(REPO, 'src/backend-caps.js'))})`);
+    const mut = editAnchor(editAnchor(src, NEW, OLD, "src/server/wrapper-files.js"), "require('../backend-caps.js')", `require(${JSON.stringify(path.join(REPO, 'src/backend-caps.js'))})`, "src/server/wrapper-files.js");
     const file = path.join(d, 'wrapper-files-substring.js');
     fs.writeFileSync(file, mut);
     const red = mut.includes(OLD) && !mut.includes(NEW) ? require(file).wrapperCaps(d, 'sess-missing', '/x', { procDir: proc }) : null;
@@ -1060,7 +1069,7 @@ console.log('\nstore: every declared field is read outside src/harnesses; a fake
     // PATCHED-COPY CONTROL: the old id branch back in resume-store ⇒ the fake
     // harness's hook is never reached (this proof measures the generic path).
     const rsSrc = fs.readFileSync(path.join(REPO, 'src/resume-store.js'), 'utf8');
-    const mut = rsSrc.replace('const sweep = storeOf(backend).writerSweep;', "const sweep = storeOf(backend === 'codex' ? 'codex' : 'claude').writerSweep;");
+    const mut = editAnchor(rsSrc, 'const sweep = storeOf(backend).writerSweep;', "const sweep = storeOf(backend === 'codex' ? 'codex' : 'claude').writerSweep;", "src/resume-store.js");
     ok(mut !== rsSrc, 'PATCHED-COPY CONTROL: the sweep lookup is one identifiable line');
     const mutSo = require(MUTH.write('src/resume-store.js', mut, 'idbranch')).writerSweepOpts('acme-store', live, null);
     ok(mutSo.sweep !== acmeSweep, '…and with the id branch back the fake harness gets claude\'s legs, not its own — RED for the proof above');

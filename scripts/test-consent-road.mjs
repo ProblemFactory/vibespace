@@ -128,6 +128,15 @@ fs.mkdirSync(ROOT, { recursive: true });
 
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? `\n    ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`.slice(0, 900) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const quiet = { log() {}, warn() {}, error() {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const POD = 'https://pod-road.example.test';
@@ -657,7 +666,7 @@ console.log('⑥ RED controls (mutant copies)');
   // for every account): a company preset on a local hub rides the PUBLIC page — red on ①'s preset rows and ⑦'s hub leg
   const PICK = "  if (preset !== null) return own ? { url: own, fleet: true, who: 'preset' } : f ? { url: f, fleet: true, who: 'fleet' } : NO_RELAY;\n";
   const READ = "setting: preset === null ? call('relayUrl') : '' });";
-  const was = MUT.load('src/consent-road.js', roadSrc.replace(PICK, "  if (preset !== null) return f ? { url: f, fleet: true, who: 'fleet' } : own ? { url: own, fleet: false, who: 'preset' } : s ? { url: s, fleet: false, who: 'page' } : NO_RELAY;\n").replace(READ, "setting: call('relayUrl') });"), 'preset-default');
+  const was = MUT.load('src/consent-road.js', editAnchor(editAnchor(roadSrc, PICK, "  if (preset !== null) return f ? { url: f, fleet: true, who: 'fleet' } : own ? { url: own, fleet: false, who: 'preset' } : s ? { url: s, fleet: false, who: 'page' } : NO_RELAY;\n", "src/consent-road.js"), READ, "setting: call('relayUrl') });", "src/consent-road.js"), 'preset-default');
   const pubDeps = { fleetRelayUrl: () => '', relayUrl: () => PUBLIC_RELAY };
   const HUBO = `http://127.0.0.1:${await freePort()}`;
   const realHub = CR.consentRoad({ kind: 'lark', publicUrl: '', origin: HUBO, ...CR.relayOf(pubDeps, PRESET({})) });

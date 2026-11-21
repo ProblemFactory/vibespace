@@ -37,6 +37,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -1875,8 +1884,8 @@ console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, 
   if (!adSrc.includes(poolCut)) throw new Error('the anchor of the leg «B-f64b: the pool down» is not in the source');
   const twcCut = 'async function transcriptWorkerCall(op, payload, inlineFn) {\n';
   if (!adSrc.includes(twcCut)) throw new Error('the anchor of the leg «B-f64b: one walk in flight» is not in the source');
-  const adDown = MCi.write('src/adapters/codex.js', adSrc.replace(poolCut, 'function _transcriptPoolGet() {\n  return null;   // the leg: the pool is unavailable\n')
-    .replace(twcCut, twcCut + "  if (op === 'codexOpenThreads') globalThis.__vsOpenAsks = (globalThis.__vsOpenAsks || 0) + 1;   // the leg counts the walks asked\n"), 'pool-down');
+  const adDown = MCi.write('src/adapters/codex.js', editAnchor(editAnchor(adSrc, poolCut, 'function _transcriptPoolGet() {\n  return null;   // the leg: the pool is unavailable\n', "src/adapters/codex.js"),
+    twcCut, twcCut + "  if (op === 'codexOpenThreads') globalThis.__vsOpenAsks = (globalThis.__vsOpenAsks || 0) + 1;   // the leg counts the walks asked\n", "src/adapters/codex.js"), 'pool-down');
   const reqCut = "} = require('./adapters/codex');";
   if (!csSrc.includes(reqCut)) throw new Error('the anchor of the leg «B-f64b: the store over a pool-down adapter» is not in the source');
   const downCs = (src, tag) => MCi.load('src/codex-session-store.js', src.replace(reqCut, `} = require(${JSON.stringify(adDown)});`), tag);

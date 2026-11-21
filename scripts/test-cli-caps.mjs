@@ -39,6 +39,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, skip = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const CAPS = path.join(REPO, 'src/cli-caps.js');
 const SCRIPT = path.join(REPO, 'scripts/measure-claude-cred-read.mjs');
 const C = require(CAPS);
@@ -319,7 +328,7 @@ console.log('⑦ machine-probes.cliVersion over fake #! binaries');
   const A = ".find((l) => cliVersionOf(l)) || 'unparsed'";
   if (SRCP.includes(A)) {
     const f = path.join(tmp, 'machine-probes-r1.js');
-    fs.writeFileSync(f, anchored(SRCP.replace("return v.split('\\n').map((l) => l.trim())" + A + ';', "return v.trim().split('\\n')[0];").replace("require('./cli-caps.js')", `require(${JSON.stringify(CAPS)})`), "require('./helper-fact.js')", `require(${JSON.stringify(path.join(REPO, 'src/helper-fact.js'))})`, 'probe-helper-fact-path'));   // (B-bc9f: the probe requires the PURE helper-fact too — through anchored(): a moved require throws by name)
+    fs.writeFileSync(f, anchored(editAnchor(editAnchor(SRCP, "return v.split('\\n').map((l) => l.trim())" + A + ';', "return v.trim().split('\\n')[0];", "src/machine-probes.js"), "require('./cli-caps.js')", `require(${JSON.stringify(CAPS)})`, "src/machine-probes.js"), "require('./helper-fact.js')", `require(${JSON.stringify(path.join(REPO, 'src/helper-fact.js'))})`, 'probe-helper-fact-path'));   // (B-bc9f: the probe requires the PURE helper-fact too — through anchored(): a moved require throws by name)
     const r1 = await ver(path.join(tmp, 'claude-warn'), require(f));
     ok('RED CONTROL: the r1 probe (line 1 only) reads the warning, never the upgrade', r1 === 'Warning: an update is available' && C.cliVersionOf(r1) === null, JSON.stringify(r1));
   } else ok('⑦ anchor present in src/machine-probes.js', false, A);

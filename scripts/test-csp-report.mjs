@@ -86,6 +86,15 @@ const SINK = require(path.join(REPO, 'src/server/csp-reports.js'));
 const { Auth } = require(path.join(REPO, 'src/auth.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const ROOT = scratch('csp-report');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 /** A module from a source text at its REAL path (relative requires resolve) — the mutant loader. */
@@ -118,7 +127,7 @@ ok(C.HEADER === 'Content-Security-Policy-Report-Only' && C.ENFORCE_HEADER === 'C
   const src = readRepo('src/app-csp.js');
   const cut = "  ['object-src', [\"'none'\"]],\n";
   ok(src.includes(cut), 'the mutant anchor (the object-src row) is in src/app-csp.js');
-  const M = load(path.join(REPO, 'src/app-csp.js'), src.replace(cut, ''));
+  const M = load(path.join(REPO, 'src/app-csp.js'), editAnchor(src, cut, '', "src/app-csp.js"));
   ok(pinFails(M.appPolicy()).some((f) => /^object-src/.test(f)), 'MUTANT (object-src \'none\' dropped) ⇒ RED: the pin names it', pinFails(M.appPolicy()));
 }
 
@@ -146,7 +155,7 @@ const report = (o = {}) => ({ 'csp-report': { 'document-uri': `http://127.0.0.1:
   const cutBad = CUTS.filter(([u, want]) => C.uriOf(u) !== want).map(([u, want, why]) => ({ why, got: C.uriOf(u), want }));
   ok(!cutBad.length, `a kept path segment that looks like a token is cut to <token> (${CUTS.map((c) => c[2]).join('; ')})`, cutBad);
   const srcT = readRepo('src/app-csp.js'), cutT = ".map((g) => (TOKEN_SEGMENT.test(g) ? '<token>' : g))";
-  const MT = srcT.split(cutT).length === 2 ? load(path.join(REPO, 'src/app-csp.js'), srcT.replace(cutT, '')) : null;
+  const MT = srcT.split(cutT).length === 2 ? load(path.join(REPO, 'src/app-csp.js'), editAnchor(srcT, cutT, '', "src/app-csp.js")) : null;
   ok(MT && MT.uriOf(CUTS[0][0]) === 'https://h.example.net/share/abcdEFGH1234_-xy/x', 'MUTANT (the segment cut dropped) ⇒ RED: the token is kept in the line', MT && MT.uriOf(CUTS[0][0]));
   const rapi = C.reportsOf(JSON.stringify([{ type: 'csp-violation', body: { effectiveDirective: 'script-src-elem', blockedURL: 'eval', sourceFile: 'http://h/x.js', lineNumber: 3, documentURL: 'http://h/', disposition: 'report', sample: SECRET } }, { type: 'deprecation', body: {} }]));
   ok(rapi.length === 1 && rapi[0].blocked === 'eval' && rapi[0].line === 3 && !JSON.stringify(rapi).includes(SECRET), 'the Reporting-API shape (application/reports+json) reads the same, other report types skipped', rapi);
@@ -271,7 +280,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     const src = readRepo('src/app-csp.js');
     const sig = /^const PURIFY_PARSE = \/.*\/;$/m;
     ok(sig.test(src), 'the mutant anchor (the parse signature, PURIFY_PARSE) is in src/app-csp.js');
-    const M = load(path.join(REPO, 'src/app-csp.js'), src.replace(sig, 'const PURIFY_PARSE = /^parseFromString\\(/;'));
+    const M = load(path.join(REPO, 'src/app-csp.js'), editAnchor(src, sig, 'const PURIFY_PARSE = /^parseFromString\\(/;', "src/app-csp.js"));
     const loose = M.purifyParseSites(builds.release.js);
     ok(loose.length > 1, `MUTANT (the signature cut to the call alone) ⇒ RED: ${loose.length} sites — the docx viewer's parse would be called the sanitizer's`, loose);
   }
@@ -517,7 +526,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       const src = readRepo('src/app-csp.js'), row = "const PARSE_SCRIPTS = Object.freeze(['/bundle.js', '/mermaid.js']);";
       ok(src.split(row).length === 2, 'the mutant anchor (the table\'s one row) is in src/app-csp.js');
       const MD = path.join(ROOT, 'mutant-table', 'src'); fs.mkdirSync(path.join(MD, 'server'), { recursive: true });
-      fs.writeFileSync(path.join(MD, 'app-csp.js'), src.replace(row, "const PARSE_SCRIPTS = Object.freeze(['/bundle.js']);"));
+      fs.writeFileSync(path.join(MD, 'app-csp.js'), editAnchor(src, row, "const PARSE_SCRIPTS = Object.freeze(['/bundle.js']);", "src/app-csp.js"));
       const M = require(path.join(MD, 'app-csp.js'));
       const cut = tableFails(M.PARSE_SCRIPTS);
       ok(cut.length === 1 && cut[0] === '/mermaid.js embeds a DOMPurify and is NOT in the table', `MUTANT (/mermaid.js cut from the table) ⇒ RED by name: «${cut.join('; ')}»`, cut);
@@ -574,7 +583,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       const until = (H, ms) => seen(() => H.sink.stats().rejudged, ms);
       const srcK = readRepo('src/server/csp-reports.js'), TRIG = ['  if (stale.length) setImmediate(rejudge);\n', '      rejudge(); // a hub that met the bug'];
       ok(TRIG.every((t) => srcK.split(t).length === 2), 'the mutant\'s anchors: the re-judge\'s two triggers in the sink, the boot\'s setImmediate and the report\'s call');
-      const NB = load(path.join(REPO, 'src/server/csp-reports.js'), srcK.replace(TRIG[0], '').replace(TRIG[1], '      // cut'));
+      const NB = load(path.join(REPO, 'src/server/csp-reports.js'), editAnchor(editAnchor(srcK, TRIG[0], '', "src/server/csp-reports.js"), TRIG[1], '      // cut', "src/server/csp-reports.js"));
       const [H1, HM] = await Promise.all([asServer(SINK, UH), asServer(NB, homes.mutant)]);
       const took = await until(H1, 3000); await tick(Math.max(25, took)); // the mutant has had twice what the real boot took
       const f1 = bootFault(H1), fm = bootFault(HM);
@@ -603,7 +612,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       const NUL = () => null, THROW = () => { throw new ReferenceError("Cannot access 'userTodos' before initialization"); };
       const ANCHOR = 'const todos = storeUp();';
       ok(srcK.split(ANCHOR).length === 2, 'the mutant\'s anchor: the re-judge asks whether the For-you store is up');
-      const MN = load(path.join(REPO, 'src/server/csp-reports.js'), srcK.replace(ANCHOR, 'const todos = storeUp() || { idsWhere: () => [], setStatusMany: () => ({ changed: [] }) };'));
+      const MN = load(path.join(REPO, 'src/server/csp-reports.js'), editAnchor(srcK, ANCHOR, 'const todos = storeUp() || { idsWhere: () => [], setStatusMany: () => ({ changed: [] }) };', "src/server/csp-reports.js"));
       const [HN, HT, HX] = await Promise.all([lateBoot(SINK, homes.null, NUL, { retryMs: 20 }), lateBoot(SINK, homes.throw, THROW, { retryMs: 60e3 }), lateBoot(MN, homes.mutnull, NUL, { retryMs: 20 })]);
       const [, , tX] = await Promise.all([seen(() => HN.asked() >= 2, 3000), seen(() => HT.asked() >= 1, 3000), until(HX, 3000)]); // null: the boot's ask and a retry's; a throw: the boot's; the mutant: its rewrite — the store still not up
       const eN = early(HN), eT = early(HT), eX = early(HX);
@@ -779,7 +788,7 @@ console.log('⑥ the chrome suites\' teardown — a report at the end of a suite
   const cut = "if (CSP_REPORTS_FILE) { process.env[CSP_REPORTS_ENV] = CSP_REPORTS_FILE; process.on('exit', cspReportsAtExit); }";
   ok(src.includes(cut), 'the mutant anchor (the exit hook) is in scripts/scratch.mjs');
   const mut = path.join(dir, 'scratch-mutant.mjs');
-  fs.writeFileSync(mut, src.replace(cut, "if (CSP_REPORTS_FILE) { process.env[CSP_REPORTS_ENV] = CSP_REPORTS_FILE; }").replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
+  fs.writeFileSync(mut, editAnchor(src, cut, "if (CSP_REPORTS_FILE) { process.env[CSP_REPORTS_ENV] = CSP_REPORTS_FILE; }", "scripts/scratch.mjs").replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
   const m = child('test-csp-child-mutant.mjs', mut, true);
   ok(m.rc === 0, 'MUTANT (the exit check cut) ⇒ RED: the reported suite passes', m);
 }
@@ -867,7 +876,7 @@ console.log('⑥d a suite\'s own probe: its report is taken by its payload (take
   const src = readRepo('scripts/scratch.mjs'), anchor = '(r) => PROBE_KEY_FIELDS.every((k) => r[k] === key[k])';
   ok(src.includes(anchor), 'the mutant anchor (the five-field match) is in scripts/scratch.mjs');
   const mut = path.join(dir, 'scratch-mutant.mjs');
-  fs.writeFileSync(mut, src.replace(anchor, '(r) => r.directive === key.directive && r.blocked === key.blocked').replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
+  fs.writeFileSync(mut, editAnchor(src, anchor, '(r) => r.directive === key.directive && r.blocked === key.blocked', "scripts/scratch.mjs").replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
   const m = child('test-csp-child-probe-mutant.mjs', [PROBE, ...near], KEY, mut);
   ok(m.rc === 0 && m.take?.n === 4, 'MUTANT (keyed by directive + blocked alone) ⇒ RED: all 4 lines taken and the suite passes', m.take);
 }
@@ -909,7 +918,7 @@ console.log('⑥e the take never rewrites the hub\'s file: a report appended in 
   const src = readRepo('scripts/scratch.mjs'), anchor = "      lines.forEach((l, i) => { if (parsed[i] && match(parsed[i])) CSP_TAKEN.set(l, (CSP_TAKEN.get(l) || 0) + 1); });\n";
   ok(src.includes(anchor), 'the mutant anchor (the take records what it took, in memory) is in scripts/scratch.mjs');
   const mut = path.join(dir, 'scratch-mutant-rewrite.mjs');
-  fs.writeFileSync(mut, src.replace(anchor, "      if (hit.length) { const keep = lines.filter((l, i) => !(parsed[i] && match(parsed[i]))); const tmp = CSP_REPORTS_FILE + '.take'; fs.writeFileSync(tmp, keep.length ? keep.join('\\n') + '\\n' : ''); fs.renameSync(tmp, CSP_REPORTS_FILE); }\n")
+  fs.writeFileSync(mut, editAnchor(src, anchor, "      if (hit.length) { const keep = lines.filter((l, i) => !(parsed[i] && match(parsed[i]))); const tmp = CSP_REPORTS_FILE + '.take'; fs.writeFileSync(tmp, keep.length ? keep.join('\\n') + '\\n' : ''); fs.renameSync(tmp, CSP_REPORTS_FILE); }\n", "scripts/scratch.mjs")
     .replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
   const m = child('test-csp-child-take-race-mutant.mjs', mut);
   ok(m.race && m.race.hit === 1 && m.race.raw === '2' && m.race.seen === '2' && m.race.sameFile === false,
