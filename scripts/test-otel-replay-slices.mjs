@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// test-otel-replay-slices.mjs — FAST (in-process + four node children): THE STORED-EVENTS REPLAY AT A START, each law on a
+// test-otel-replay-slices.mjs — FAST (in-process + three node children): THE STORED-EVENTS REPLAY AT A START, each law on a
 // small placed stash (row B-360d, lane hub-loop-stalls — 主开发 r713 / r725 / r738). The owner's size is measured by the heavy
 // test-otel-replay-measure; here every law has a leg and, where an earlier form could break it, a RED control. The release's
 // own ingest is one of them: scripts/fixtures/otel-replay/otel-ingest-944de13f9.js.frozen, loaded over the same files.
@@ -83,9 +83,9 @@ console.log('⓪ the line reader (src/ndjson-lines.js)');
     `reads of 7 bytes: the cut lines carried, the file's offsets, the blank line skipped, the 40-byte line (past 16) skipped whole and counted, the unterminated last line handed (sync and async alike)`, { seen, seenA, st, stA });
 }
 
-// THE PLACED STASH A (① ② ③ ④): 230 000 lines (~16 MB, past FILE_MAX), oldest first — every 10th past the horizon, an unknown
+// THE PLACED STASH A (① ② ③ ④): 190 000 lines (~13.7 MB, past FILE_MAX), oldest first — every 10th past the horizon, an unknown
 // org every 997th inside it, a blank line, a torn one, and a last line with no newline; the migration recorded as run
-const NA = 230000, partsA = [], kindsA = [];
+const NA = 190000, partsA = [], kindsA = [];
 for (let k = 0; k < NA; k++) {
   if (k === 1000) { partsA.push('\n'); kindsA.push('blank'); continue; }
   if (k === 2000) { partsA.push('{"rid":"req_torn","ts":\n'); kindsA.push('torn'); continue; }
@@ -99,10 +99,11 @@ const knownA = []; for (let k = 0; k < NA; k++) if (kindsA[k] === 'known') known
 const keepA = new Set(knownA.slice(-CAP)); for (let k = 0; k < NA; k++) if (kindsA[k] === 'unknown') keepA.add(k);
 const expectA = []; for (let k = 0; k < NA; k++) if (keepA.has(k)) expectA.push(partsA[k].endsWith('\n') ? partsA[k] : partsA[k] + '\n');
 const keptA = expectA.join(''), SPILL_A = 50;
-const placeA = (tag, { ledger = true } = {}) => {
+const bodyS = partsA.slice(0, 80000).join('');   // a smaller stash (~5.8 MB: past a read, under FILE_MAX — no trim) for the read and map controls
+const placeA = (tag, { ledger = true, body = bodyA } = {}) => {
   const d = path.join(ROOT, 'a-' + tag), h = path.join(d, 'usage-history');
   fs.mkdirSync(h, { recursive: true });
-  fs.writeFileSync(path.join(h, 'otel-truth.ndjson'), bodyA);
+  fs.writeFileSync(path.join(h, 'otel-truth.ndjson'), body);
   const s = []; for (let k = 0; k < SPILL_A; k++) s.push(JSON.stringify(rec('req_spill' + String(k).padStart(4, '0'))) + '\n');
   fs.writeFileSync(path.join(h, 'otel-truth.pending.ndjson'), s.join(''));
   if (ledger) fs.writeFileSync(path.join(d, 'migrations.json'), JSON.stringify({ applied: { [BACKFILL]: NOW - DAY } }));
@@ -110,7 +111,7 @@ const placeA = (tag, { ledger = true } = {}) => {
 };
 /** one start of `mod` over a placed dir, probed: the reads of the stash and the spill, whole reads, joined buffers, the bytes
  *  its producer hands the writer, the map at every turn, the longest turn; then the trim's end and the drained lines on disk */
-async function startOver(mod, d) {
+async function startOver(mod, d, { trim = true } = {}) {
   const stash = path.join(d, 'usage-history', 'otel-truth.ndjson'), spill = path.join(d, 'usage-history', 'otel-truth.pending.ndjson');
   const which = (p) => (String(p) === stash ? 'stash' : String(p) === spill ? 'spill' : null);
   const P = { opens: { stash: 0, spill: 0 }, readMax: { stash: 0, spill: 0 }, whole: [], concatMax: 0, handed: 0, mapPeak: 0, gapMax: 0, ino0: fs.statSync(stash).ino, size0: fs.statSync(stash).size, said: [] };
@@ -139,12 +140,12 @@ async function startOver(mod, d) {
     await oi.replayed;
     // the trim's end: the file renamed (a new inode), its outcome said, or the release's own temp seen and gone (skipped) — bounded
     let tmpSeen = false;
-    for (let k = 0; k < 200; k++) {
+    for (let k = 0; trim && k < 200; k++) {
       const has = fs.existsSync(stash + '.tmp'); tmpSeen ||= has;
       if (fs.statSync(stash).ino !== P.ino0 || (tmpSeen && !has) || P.said.some((l) => /trim FAILED|kept WHOLE/.test(l))) break;
       await sleep(25);
     }
-    for (let k = 0; k < 100 && countIn(fs.readFileSync(stash, 'utf8'), 'req_spill0049') === 0; k++) await sleep(25);   // the drained lines on disk
+    for (let k = 0; k < 100 && countIn(rfs0.call(fs, stash, 'utf8'), 'req_spill0049') === 0; k++) await sleep(25);   // the drained lines on disk (the suite's own read, never the probe's)
     await SW.durable(stash).catch(() => false);
   } finally {
     spin = false; fsp.open = open0; fsp.readFile = readFile0; fs.readFileSync = rfs0; Buffer.concat = concat0; SW.dirty = dirty0; console.warn = warn0; console.log = log0;
@@ -158,7 +159,9 @@ const brief = (P) => ({ opens: P.opens, readMax: P.readMax, whole: P.whole, conc
 
 console.log(`①②③ a busy start over a placed stash of ${bodyA.length} bytes (${NA} lines; ${knownA.length} known inside 30 days), a spill of ${SPILL_A}`);
 const R = {};
-for (const tag of ['cure', 'release', 'whole', 'uncapped']) { const d = placeA(tag); R[tag] = await startOver(mods[tag], d); forget(d); }
+ok(bodyA.length > 12 * 1048576 && bodyS.length > READ, `premise: the stash is past FILE_MAX (${bodyA.length} bytes), the smaller one past one read (${bodyS.length})`);
+for (const tag of ['cure', 'release']) { const d = placeA(tag); R[tag] = await startOver(mods[tag], d); forget(d); }
+for (const tag of ['whole', 'uncapped']) { const d = placeA(tag, { body: bodyS }); R[tag] = await startOver(mods[tag], d, { trim: false }); forget(d); }
 const C = R.cure;
 console.log(`  · the cure: ${JSON.stringify(brief(C))}`);
 console.log(`  · the release: ${JSON.stringify(brief(R.release))}`);
@@ -173,7 +176,7 @@ ok(C.mapPeak > 0 && C.mapPeak <= CAP && C.oi.stats().rids <= CAP, `② the map n
   const a = await C.oi.observedOrgForRid(keptRid), b = await C.oi.observedOrgForRid(gone);
   ok(a !== undefined && b === undefined, `② the newest rids by file order are the ones kept (${keptRid}: ${a}; ${gone}, older than the newest ${CAP}: ${b})`);
 }
-ok(R.uncapped.mapPeak > CAP && R.release.mapPeak > CAP, `② RED CONTROLS: a copy with the cap cut out of the replay held ${R.uncapped.mapPeak} rids at a turn, the release ${R.release.mapPeak}`);
+ok(R.uncapped.mapPeak > CAP && R.release.mapPeak > CAP, `② RED CONTROLS: a copy with the cap cut out of the replay held ${R.uncapped.mapPeak} rids at a turn (the smaller stash), the release ${R.release.mapPeak}`);
 {
   const rest = C.text.startsWith(keptA) ? C.text.slice(keptA.length) : null;
   const drained = rest == null ? -1 : rest.split('\n').filter(Boolean).length, once = rest != null && Array.from({ length: SPILL_A }, (_, k) => countIn(rest, 'req_spill' + String(k).padStart(4, '0'))).every((n) => n === 1);
@@ -181,7 +184,7 @@ ok(R.uncapped.mapPeak > CAP && R.release.mapPeak > CAP, `② RED CONTROLS: a cop
     `③ THE TRIM LANDS on the busy start: the stash is the count rule's ${keptA.length} bytes exactly (the newest ${CAP} known lines inside 30 days, every unknown one, the last line given its newline) then the ${SPILL_A} drained lines once each`, { rewritten: C.rewritten, size: C.text.length, kept: keptA.length, drained });
   ok(C.said.filter((l) => l.includes('the stash trimmed by its writer')).length === 1, '③ …said once in the journal', C.said.filter((l) => l.includes('[otel]')).slice(0, 4));
 }
-ok(!R.release.rewritten && R.release.text.length > bodyA.length, `③ RED CONTROL (the release): its trim was SKIPPED on the busy start — the stash still ${R.release.text.length} bytes (the drain appended while it wrote)`, brief(R.release));
+ok(!R.release.rewritten && R.release.text.length > bodyA.length, `③ RED CONTROL (the release): its trim did not land on the busy start — the stash still ${R.release.text.length} bytes (the drain appended while it wrote)`, brief(R.release));
 
 console.log('④ a failed trim');
 {
@@ -219,7 +222,7 @@ console.log('⑤ taken once');
   ok(b.twice === 500, `⑤a RED CONTROL (a copy whose cap keeps the OLDEST ${CAP} rids): ${b.twice} of the 500 stashed a second time`, b);
 }
 { // (b) A HARD STOP INSIDE THE REPLAY, for real: a child hub, killed between two of its reads, then a second start
-  const NC = 160000, linesC = []; for (let k = 0; k < NC; k++) linesC.push(JSON.stringify({ rid: 'req_c' + String(k).padStart(6, '0'), ts: NOW - 3600e3 + k, acct: 'sub-true', acctKnown: true }) + '\n');
+  const NC = 100000, linesC = []; for (let k = 0; k < NC; k++) linesC.push(JSON.stringify({ rid: 'req_c' + String(k).padStart(6, '0'), ts: NOW - 3600e3 + k, acct: 'sub-true', acctKnown: true }) + '\n');
   const bodyC = linesC.join('');
   const child = path.join(ROOT, 'child.cjs');
   fs.writeFileSync(child, `'use strict';
@@ -256,17 +259,18 @@ const posts = ['req_post1', 'req_post2', 'req_post3'].map((rid) => oi._ingest(PA
     const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 30000);
     c.on('exit', (code, signal) => { clearTimeout(t); resolve({ code, signal, out: out.trim(), err: err.trim().slice(-400) }); });
   });
-  const stopThenStart = async (modB, tag) => {
-    const d = path.join(ROOT, 'c-' + tag), h = path.join(d, 'usage-history'); fs.mkdirSync(h, { recursive: true });
-    fs.writeFileSync(path.join(h, 'otel-truth.ndjson'), bodyC);
-    const A = await runChild(INGEST, d, 'A');
-    const killedAt = (() => { try { return Number(fs.readFileSync(path.join(d, 'killed-at'), 'utf8')); } catch { return -1; } })();
-    const afterA = fs.readFileSync(path.join(h, 'otel-truth.ndjson'), 'utf8'), spillA = (() => { try { return fs.readFileSync(path.join(h, 'otel-truth.pending.ndjson'), 'utf8'); } catch { return ''; } })();
-    const B = await runChild(modB, d, 'B');
-    const t = fs.readFileSync(path.join(h, 'otel-truth.ndjson'), 'utf8');
-    return { A: { signal: A.signal, killedAt, stashKept: afterA === bodyC, spilled: ['req_post1', 'req_post2', 'req_post3'].filter((r) => countIn(spillA, r) === 1).length }, B: { code: B.code, out: B.out, err: B.code ? B.err : '' }, oldKept: t.startsWith(bodyC), once: ['req_post1', 'req_post2', 'req_post3'].map((r) => countIn(t.slice(bodyC.length), r)) };
+  // the stop (one child), then the start over the state it left — twice from the same state (a copy): the cure's start, and the control's
+  const d = path.join(ROOT, 'c-cure'), h = path.join(d, 'usage-history'); fs.mkdirSync(h, { recursive: true });
+  fs.writeFileSync(path.join(h, 'otel-truth.ndjson'), bodyC);
+  const A = await runChild(INGEST, d, 'A');
+  const killedAt = (() => { try { return Number(fs.readFileSync(path.join(d, 'killed-at'), 'utf8')); } catch { return -1; } })();
+  const afterA = fs.readFileSync(path.join(h, 'otel-truth.ndjson'), 'utf8'), spillA = (() => { try { return fs.readFileSync(path.join(h, 'otel-truth.pending.ndjson'), 'utf8'); } catch { return ''; } })();
+  const d2 = path.join(ROOT, 'c-nodedupe'); fs.cpSync(d, d2, { recursive: true });
+  const startAgain = async (modB, dd) => {
+    const B = await runChild(modB, dd, 'B'), t = fs.readFileSync(path.join(dd, 'usage-history', 'otel-truth.ndjson'), 'utf8');
+    return { A: { signal: A.signal, killedAt, stashKept: afterA === bodyC, spilled: ['req_post1', 'req_post2', 'req_post3'].filter((x) => countIn(spillA, x) === 1).length }, B: { code: B.code, out: B.out, err: B.code ? B.err : '' }, oldKept: t.startsWith(bodyC), once: ['req_post1', 'req_post2', 'req_post3'].map((x) => countIn(t.slice(bodyC.length), x)) };
   };
-  const s = await stopThenStart(INGEST, 'cure'), r = await stopThenStart(NODEDUPE, 'nodedupe');
+  const s = await startAgain(INGEST, d), r = await startAgain(NODEDUPE, d2);
   ok(s.A.signal === 'SIGKILL' && s.A.killedAt > 0 && s.A.killedAt < NC && s.A.stashKept && s.A.spilled === 3,
     `⑤b setup: the first start was KILLED inside its replay (${s.A.killedAt} of ${NC} rids replayed), its stash untouched, the three waiting posts in its spill`, s.A);
   ok(s.B.code === 0 && s.oldKept && s.once.every((n) => n === 1), `⑤b the second start, the posts sent again: the stash is its old ${bodyC.length} bytes plus ONE line per record (${s.once.join(', ')})`, s);
@@ -300,7 +304,7 @@ console.log('⑦ the migration\'s read');
   const BFSRC = fs.readFileSync(path.join(REPO, 'src/ledger-slot-backfill.js'), 'utf8');
   const a7 = BFSRC.indexOf('function readOtelStash(historyDir) {'), b7 = a7 < 0 ? -1 : BFSRC.indexOf('\n}\n', a7);
   ok(a7 > 0 && b7 > a7, '⑦ premise: src/ledger-slot-backfill.js has its readOtelStash');
-  const RELEASE_READ = `function readOtelStash(historyDir) {
+  const RELEASE_READ = /* stale-pins: kept — the release's read, planted back as the RED control */ `function readOtelStash(historyDir) {
   const byRid = new Map(), bySid = new Map();
   let rows = 0;
   let text = ''; try { text = fs.readFileSync(path.join(historyDir, 'otel-truth.ndjson'), 'utf-8'); } catch { return { byRid, bySid, rows }; }

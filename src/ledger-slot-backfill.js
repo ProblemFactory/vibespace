@@ -180,7 +180,7 @@ function readOtelStash(historyDir) {
       if (!byRid.has(r.rid)) byRid.set(r.rid, { acct, sid: r.sid || null, ts: Number(r.ts) || 0 });
       if (r.sid) { const l = bySid.get(r.sid) || []; l.push({ acct, ts: Number(r.ts) || 0 }); bySid.set(r.sid, l); }
     }, { fs });
-  } finally { try { fs.closeSync(fd); } catch { } }
+  } finally { try { fs.closeSync(fd); } catch (e) { console.warn(`[migrate] the OTel stash's descriptor did not close (${e && e.message}) — its rows were read`); } }
   return { byRid, bySid, rows };
 }
 

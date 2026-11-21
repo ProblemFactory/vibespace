@@ -111,7 +111,7 @@ function rewriteJob(m, fs) {
     fs.fsyncSync(out);
   } catch (e) { err = e; }
   if (out != null) { try { fs.closeSync(out); } catch (e) { if (!err) err = e; } }
-  if (src != null) { try { fs.closeSync(src); } catch { } }
+  if (src != null) { try { fs.closeSync(src); } catch (e) { if (!err) err = e; } }   // a close that fails is the job's (every byte or nothing)
   if (err) throw err;   // the caller removes the temp: the file keeps its whole old version
   if (m.mode != null) { try { fs.chmodSync(m.tmp, m.mode); } catch { /* a filesystem without modes */ } }
   fs.renameSync(m.tmp, m.file);   // the commit point: the old whole file or the new one

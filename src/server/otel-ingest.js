@@ -238,7 +238,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
       const recs = [], lines = [], fh = await fs.promises.open(spill, 'r');
       try {
         await eachLine(fh, (buf, a, nl) => { const l = buf.toString('utf8', a, nl); try { const r = JSON.parse(l); if (r && typeof r === 'object') { spillOf.set(r, l + '\n'); recs.push(r); lines.push(l + '\n'); } } catch { } }, STASH_READ);
-      } finally { await fh.close().catch(() => { }); }
+      } finally { await fh.close().catch((e) => console.warn(`[otel] the waiting posts' file did not close (${e && e.message})`)); }
       if (recs.length) { leftover = recs; const mine = spilled.splice(0); for (const l of lines) spilled.push(l); for (const l of mine) spilled.push(l); }   // its lines go first
       spillRead = true;
     } catch (e) {
@@ -251,7 +251,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     if (fh) {
       try { st = await eachLine(fh, onStashLine, STASH_READ); }
       catch (e) { st = null; console.warn(`[otel] truth stash read failed (${e.message}) — the map holds what was read; the stash is not trimmed this start`); }
-      finally { await fh.close().catch(() => { }); }
+      finally { await fh.close().catch((e) => console.warn(`[otel] the stash's descriptor did not close after its replay (${e && e.message})`)); }
     }
     if (head) { order.splice(0, head); head = 0; }
     if (st && lastEnd === st.bytes) stashTorn = true;   // a last line with no newline (a torn tail): the first append starts on a new line, never glued to it

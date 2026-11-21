@@ -142,7 +142,7 @@ console.log('§1 THE REPLAY (a busy start: a spill waits; the migration recorded
     say(`THE KEPT LINES: ${kept.known} known (the oldest of them line ${kept.firstKnown}), ${kept.unknown} unknown, ${kept.old} past the horizon, ${kept.spill} drained from the spill, ${kept.bad} unreadable`);
   }
   ok(trim === 'rewrote the stash', `THE TRIM LANDS on a busy start (the drain appends while it is due): ${trim}`, trim);
-  ok(kept && kept.known === Math.min(CAP, P.known.length) && kept.unknown === P.unknown && kept.old === 0 && kept.spill === SPILL && kept.bad === 0,
+  ok(!!kept && kept.known === Math.min(CAP, P.known.length) && kept.unknown === P.unknown && kept.old === 0 && kept.spill === SPILL && kept.bad === 0,
     `it keeps the count rule's lines exactly — the newest ${CAP} known, all ${P.unknown} unknown, none past the horizon — and the ${SPILL} the drain appended`, kept);
   fs.rmSync(path.join(ROOT, 'data'), { recursive: true, force: true });
 }
@@ -180,7 +180,7 @@ else {
   try { got = readOtelStash(hist); } catch (e) { threw = e; }
   const msA = Math.round(performance.now() - tA);
   say(`the tree's read: ${threw ? 'THREW ' + threw.message : `${got.rows} rows, ${got.byRid.size} rids, ${got.bySid.size} sessions`} in ${msA} ms (resident ${mib(rssA)} → ${mib(process.memoryUsage.rss())})`);
-  ok(!threw && got.rows === knownAll && got.byRid.size === knownAll, `the tree's read takes every known row of it by rows (${got ? got.rows : threw.message} of ${knownAll})`, got && got.rows);
+  ok(!threw && !!got && got.rows === knownAll && got.byRid.size === knownAll, `the tree's read takes every known row of it by rows (${got ? got.rows : threw.message} of ${knownAll})`, got && got.rows);
 }
 fs.rmSync(ROOT, { recursive: true, force: true });
 report();

@@ -147,6 +147,7 @@ const HELPERS = Object.freeze([
   ['src/egress-fence.js', 'the address verdict and one fenced request to an owner-configured address; nothing kept between calls'],
   ['src/cache-bounds.js', 'PURE: no fs, no clock, nothing at module level — the ceilings, and eviction and slab classes acting on the map or slab their CALLER owns'],
   ['src/fixture-guard.js', 'PURE: the one declaration of what a test fixture looks like'],
+  ['src/ndjson-lines.js', 'an ndjson file read by its lines in bounded reads through the descriptor its CALLER opened (fs handed in, nothing kept between calls) — the OTel stash’s replay and the ledger backfill (row B-360d)'],
   ['src/client-swap-step.js', 'PURE, imports nothing: the client-swap rule (what was said, the client in force, who must act → the act) the channel accounts and the storage mounts share'],
   ['src/owner-mark.js', 'r1213: a temp folder\'s owner mark — written, read and judged per call on the folder its CALLER made (the sign-in card, the token mint); nothing kept'],
 ].map(([path, why]) => Object.freeze({ path, why })));
