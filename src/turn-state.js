@@ -263,7 +263,9 @@ function noTurnReply(msg) {
   return msg.type === 'user' && LOCAL_REPLY.test(userTextOf(msg));
 }
 /** A SEND OF THE PERSON'S THAT IS ITSELF A LOCAL COMMAND («/cost», «/model x», «/compact») — src/server/user-input.js stamps it at
- *  every send (`session._lastSendLocal`); the parse clears it at every state word and at every no-turn answer. */
+ *  every send (`session._lastSendLocal`); every other send road clears it (r1505: the automatic resume's continue, server.js); the
+ *  parse clears it at every state word and at every no-turn answer. The words are «a slash and a name»: a skill typed alone reads as
+ *  one too — the residual the kb names. */
 function localCommandText(text) { return typeof text === 'string' && /^\/[A-Za-z][\w:.-]*(?:\s|$)/.test(text.trim()); }
 /** r1282 (2): THE STOP AT A NO-TURN ANSWER, narrow. A pool move deferred while a send held the flag up (a compaction that says no
  *  running word holds it one to two minutes) is decided AT the answer — only when the person's LAST send was itself a local command:

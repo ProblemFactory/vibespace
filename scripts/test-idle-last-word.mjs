@@ -130,6 +130,7 @@ function drive(consumer, steps, { late = [] } = {}) {
     attach(s, id, h, helpers);
     for (const st of steps) {
       if (st && typeof st.send === 'string') { s._isStreaming = true; s._lastSendLocal = TS.localCommandText(st.send); trace.push(['send', true]); continue; } // src/server/user-input.js's two writes at every send (④)
+      if (st && st.auto) { s._isStreaming = true; if (st.auto !== 'release') s._lastSendLocal = false; trace.push(['auto', true]); continue; } // the automatic resume's continue (server.js, ④); 'release' = a9266f5e6..64a0515f3's road, which left the stamp
       h.data(JSON.stringify(st) + '\n');
       trace.push([TS.recordKind(st), s._isStreaming === true]);
     }
@@ -203,6 +204,11 @@ ok(c4.trace[T + 1][1] === true && c4.flag === false, 'control: a sub-conversatio
 const c5 = drive(consumer, [...TURN.filter((r) => !isWord(r)), COMPACT, CAVEAT, REPLY]);
 const r5 = drive(releaseParse, [...TURN.filter((r) => !isWord(r)), COMPACT, CAVEAT, REPLY]);
 ok(c5.s._turnStateSeen !== true && c5.flag === r5.flag && JSON.stringify(c5.trace) === JSON.stringify(r5.trace), 'control: a CLI that never says a word keeps the derived road (no authority ⇒ the answer branch never fires: the same flag as the release)');
+// r1505: THE AUTOMATIC RESUME'S CONTINUE clears the stamp — a «/cost» left unanswered, then the continue goes out, then /cost's reply
+// lands before the continue's running word: a blink, and NO stop while the billed prompt goes out
+const ar = drive(consumer, [...TURN, COST, { auto: true }, REPLY, ...TURN2]), arRel = drive(consumer, [...TURN, COST, { auto: 'release' }, REPLY, ...TURN2]);
+ok(ar.trace[T + 2][1] === false && ar.stops.length === 2 && arRel.stops.length === 3,
+  'r1505: the automatic resume\'s continue after an unanswered «/cost»: the reply blinks the flag and forces NO stop (RED, the follow\'s road that left the stamp: a stop as the billed prompt goes out)', { ar: ar.stops, arRel: arRel.stops });
 const c6 = drive(consumer, [...TURN, COMPACT, RUNNING, REPLY]);
 ok(c6.flag === true && c6.stops.length === 1 && c6.s._lastSendLocal === false, 'control: a CLI that says running for the command — the state word answers the send (the stamp cleared), so its reply under running neither drops nor stops', { flag: c6.flag, stops: c6.stops });
 
@@ -264,7 +270,8 @@ ok(/console\.log\(reconciledSay\(data\.sessionId, rec, session\._turnState, sess
   const callers = files.map((f) => [path.relative(REPO, f), fs.readFileSync(f, 'utf8').split('\n').filter((l) => /\bnoteRecordKind\(session, msg\)/.test(l) && !/function noteRecordKind/.test(l)).length]).filter(([, n]) => n);
   ok(JSON.stringify(writers) === JSON.stringify(['src/turn-state.js']) && JSON.stringify(callers) === JSON.stringify([[CONSUMER, 1]]), 'the kinds have ONE writer (turn-state.js), called at one place (the parse, for every parsed record)', { writers, callers });
   const stamps = files.map((f) => [path.relative(REPO, f), (fs.readFileSync(f, 'utf8').match(/_lastSendLocal\s*=[^=]/g) || []).length]).filter(([, n]) => n).sort((x, y) => x[0].localeCompare(y[0]));
-  ok(JSON.stringify(stamps) === JSON.stringify([[CONSUMER, 2], ['src/server/user-input.js', 1]]), 'the send stamp: ONE writer at the send (user-input), cleared only by the parse (the state word, the no-turn answer)', stamps);
+  ok(JSON.stringify(stamps) === JSON.stringify([['server.js', 1], [CONSUMER, 2], ['src/server/user-input.js', 1]]), 'the send stamp: stamped at the person\'s send (user-input), cleared at the automatic resume\'s send (server.js, r1505) and by the parse (the state word, the no-turn answer) — nothing else writes it', stamps);
+  ok(/s\._isStreaming = true; s\._machineInputAt = Date\.now\(\); s\._lastSendLocal = false;/.test(read('server.js')), 'r1505: the automatic resume\'s send clears the stamp right where it raises the flag');
 }
 ok(M.files.length > 0 && M.files.every((f) => !f.startsWith(REPO)), 'the patched copies live outside the tree');
 
