@@ -521,7 +521,9 @@ try {
           suites: { [PAR]: IMP + stamp('par') + `await new Promise((r) => setTimeout(r, 4000));\n` + stamp('par-end') + "console.log('ALL PASS (1)');\n", [SER]: IMP + stamp('ser') + "console.log('ALL PASS (1)');\n" } });
         const log = path.join(s.root, 'overlap.jsonl');
         const r = spawnSync(process.execPath, [path.join(s.root, 'scripts', 'ci.mjs'), '--heavy', '--sha=' + s.sha, '--isolate', '--only=' + PAR + ',' + SER, '--lock=' + s.lock, '--lock-wait-ms=20000', ...extra],
-          { cwd: s.root, encoding: 'utf-8', env: { ...GIT_ENV, VS_OVERLAP_LOG: log, VIBESPACE_CI_LANES: '2', DISPLAY: ':77', ...(laneRoot ? { VIBESPACE_CI_LANE_ROOT: laneRoot } : {}) }, timeout: 120000 });
+          // no lane root = NONE, even when the caller's own run has one (B-88e5's whole measure: the test machine's heavy runner sets
+          // VIBESPACE_CI_LANE_ROOT and laneEnv hands every suite the runner's env, so the control inherited a root): spawn drops an undefined key
+          { cwd: s.root, encoding: 'utf-8', env: { ...GIT_ENV, VS_OVERLAP_LOG: log, VIBESPACE_CI_LANES: '2', DISPLAY: ':77', VIBESPACE_CI_LANE_ROOT: laneRoot || undefined }, timeout: 120000 });
         const rows = (() => { try { return fs.readFileSync(log, 'utf-8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } })();
         const at = (w) => (rows.find((x) => x.who === w) || {}).at;
         const out = { status: r.status, out: (r.stdout || '') + (r.stderr || ''), rows, ser: at('ser'), parEnd: at('par-end') };
@@ -543,7 +545,7 @@ try {
       const ctl = arm([], null);
       ok(ctl.status === 0 && ctl.ser && ctl.parEnd && ctl.ser >= ctl.parEnd && new RegExp(`parallel lanes drained in \\d+s — serial lane: ${SER}`).test(ctl.out),
         'CONTROL: without --serial-overlap the serial lane runs AFTER the parallel lanes drain (alone, as measured)');
-      ok((ctl.rows.find((x) => x.who === 'par') || {}).display === ':77', 'CONTROL: with no lane root the suite inherits the caller\'s env (DISPLAY :77 here)');
+      ok((ctl.rows.find((x) => x.who === 'par') || {}).display === ':77', `CONTROL: with no lane root the suite inherits the caller's env (DISPLAY :77 here; the caller's own run ${GIT_ENV.VIBESPACE_CI_LANE_ROOT ? 'HAS a lane root, not handed on' : 'has no lane root'})`);
     }
 
     // (1f) A SUITE THAT CRASHES IS A VERDICT, NOT A SUPERSESSION (round 4).
