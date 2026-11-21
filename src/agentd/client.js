@@ -1212,7 +1212,13 @@ class DeviceManager {
     } catch (e) { await abort(); throw e; }
     finally { conn.sessions.delete(chan); }
   }
-  discoverySnapshot() { return this._request({ op: 'discovery-snapshot' }); }
+  async discoverySnapshot() {
+    const r = await this._request({ op: 'discovery-snapshot' });
+    // B-5278 unit 2 (find 1): what the device's list left out is said, once a machine a link (the folders past its bound)
+    const n = r && r.left && Number(r.left.folders);
+    if (n > 0 && !this._discoLeftSaid) { this._discoLeftSaid = true; try { this._log(`[discovery] ${this._machineName() || 'the machine'}: ${n} of its project folders left out of its list (it has more than its bound; the most recently changed are listed)`); } catch { } }
+    return r;
+  }
   /** R5 `discovery.v2` (DARK): the device interprets its OWN snapshot into
    *  session cards with the shared functions — the server's job shrinks to
    *  cross-machine merging. Capability-gated (unknown ops hang old daemons). */

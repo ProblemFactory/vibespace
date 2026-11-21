@@ -222,6 +222,12 @@ function getTranscriptService() {
 // process so a slow home filesystem can never starve the daemon loop. Placed
 // AFTER the module requires (extractTailIds/pidLooksClaude are consts — a
 // top-of-file branch would hit their TDZ) and before any daemon side effect.
+// B-5278 unit 2 (find 1, the coordinator's r442: it leads the unit — a person's newest conversations missing): EVERY
+// project folder is listed BEFORE the time sort. The release took the first 500 in readdir order (no order at all), so on
+// a machine with more folders the NEWEST conversations could be missing from its list; the ssh twin walks every folder.
+// Bounded by construction: past DISCOVERY_FOLDERS_MAX folders the most recently changed ones are read (a folder's own
+// time moves when a transcript is made in it) and the number left out is said (`left.folders`, the hub's journal).
+const DISCOVERY_FOLDERS_MAX = 5000;
 function computeDiscoverySnapshot() {
   const home = os.homedir();
   const locks = [];
@@ -239,9 +245,16 @@ function computeDiscoverySnapshot() {
     }
   } catch { }
   const jsonls = [];
+  let foldersLeft = 0;
   try {
     const projRoot = path.join(home, '.claude', 'projects');
-    for (const d of fs.readdirSync(projRoot).slice(0, 500)) {
+    let dirs = fs.readdirSync(projRoot);
+    if (dirs.length > DISCOVERY_FOLDERS_MAX) {
+      const changed = (d) => { try { return fs.statSync(path.join(projRoot, d)).mtimeMs; } catch { return 0; } };
+      foldersLeft = dirs.length - DISCOVERY_FOLDERS_MAX;
+      dirs = dirs.map((d) => [d, changed(d)]).sort((a, b) => b[1] - a[1]).slice(0, DISCOVERY_FOLDERS_MAX).map((x) => x[0]);
+    }
+    for (const d of dirs) {
       const dp = path.join(projRoot, d);
       let files = []; try { files = fs.readdirSync(dp); } catch { continue; }
       for (const f of files) {
@@ -331,7 +344,7 @@ function computeDiscoverySnapshot() {
     // CO facts: rollouts held open by a codex process on this device = RUNNING threads
     var codexOpen = []; try { codexOpen = listOpenCodexRolloutPaths({ sessionsDir: croot }); } catch { codexOpen = []; }
   } catch { }
-  return { locks, jsonls: top, codexRollouts, codexOpen: codexOpen || [] };
+  return { locks, jsonls: top, codexRollouts, codexOpen: codexOpen || [], ...(foldersLeft ? { left: { folders: foldersLeft } } : {}) };
 }
 if (process.argv.includes('--discovery-snapshot-child')) {
   (async () => {
@@ -2177,7 +2190,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               });
             }
             if (!snap) snap = computeDiscoverySnapshot();
-            mux.control({ op: 'discovery-result', id: msg.id, locks: snap.locks, jsonls: snap.jsonls, codexRollouts: snap.codexRollouts, codexOpen: snap.codexOpen || [], realCwds: snap.realCwds || [] });
+            mux.control({ op: 'discovery-result', id: msg.id, locks: snap.locks, jsonls: snap.jsonls, codexRollouts: snap.codexRollouts, ...(snap.left ? { left: snap.left } : {}), codexOpen: snap.codexOpen || [], realCwds: snap.realCwds || [] });
           } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
         })();
         return;
