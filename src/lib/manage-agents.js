@@ -903,6 +903,8 @@ export function installManageAgents(App, ctx = {}) {
           clearInterval(iv);
           if (r.merged) showToast(t('✓ Recognized as existing account “{name}” — merged (freshest login kept)', { name: r.account?.name || '' }), { duration: 7000 });
           else showToast(t('✓ Added {name}', { name: r.name || t('subscription') }));
+          // B-360d: the same-account fold could not compare these rows (their sign-in could not be read in time) — SAID, never silent
+          if (!r.merged && Array.isArray(r.foldUnjudged) && r.foldUnjudged.length) showToast(t('Could not compare with {names} — their sign-in could not be read; if this login is one of them, two rows now name one account', { names: r.foldUnjudged.map((x) => x.name || x.id).join(', ') }), { duration: 10000 });
         } else if (r?.loginFailed) {
           clearInterval(iv);
           showToast(t('Subscription login could not be saved. Check the login terminal for details, then try again.'), { type: 'error', duration: 8000 });

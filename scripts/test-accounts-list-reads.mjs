@@ -15,6 +15,8 @@
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-acctreads-'));
@@ -40,8 +42,9 @@ const SYNC = ['openSync', 'readFileSync', 'statSync', 'lstatSync', 'readlinkSync
 const syncAsks = { n: 0, stall: false, by: new Map() };
 const sab = new Int32Array(new SharedArrayBuffer(4));
 const under = (p) => typeof p === 'string' && p.startsWith(DATA);
+const ORIG = {};
 for (const name of SYNC) {
-  const orig = fs[name];
+  const orig = fs[name]; ORIG[name] = orig;
   const wrapped = function (p, ...rest) {
     if (under(p)) { syncAsks.n++; syncAsks.by.set(name, (syncAsks.by.get(name) || 0) + 1); if (syncAsks.stall) Atomics.wait(sab, 0, 0, STALL_MS); }
     return orig.call(this, p, ...rest);
@@ -52,16 +55,27 @@ for (const name of SYNC) {
 const countSync = (fn) => { const n0 = syncAsks.n; const t = process.hrtime.bigint(); const out = fn(); return { asks: syncAsks.n - n0, ms: Number(process.hrtime.bigint() - t) / 1e6, out }; };
 
 // ── the FILE DOOR's stand-in: SafeFs's contract, each ask held STALL_MS (a placed stall); `dead` = every ask ends at its deadline ──
-const door = { asks: 0, byOp: new Map(), dead: false, holdMs: STALL_MS };
+const door = { asks: 0, byOp: new Map(), dead: false, holdMs: STALL_MS, deadUnder: new Set(), slowUnder: new Map(), instant: false, inFlight: 0, maxInFlight: 0, textBy: new Map(), watch: null, watchIn: 0, watchMax: 0 };
+const under2 = (p, set) => [...set].some((d) => p === d || p.startsWith(d + path.sep));
+// `instant`: the answer is taken AT THE CALL (a worker that runs before the caller's next synchronous write), then held
+const snapOf = (op, p) => { try { if (op === 'stat') { const st = ORIG.statSync(p); return { ok: true, v: { isFile: st.isFile(), isDirectory: st.isDirectory(), size: st.size, mtimeMs: st.mtimeMs } }; } if (op === 'readText') { const content = ORIG.readFileSync(p, 'utf-8'); return { ok: true, v: { content, size: Buffer.byteLength(content) } }; } if (op === 'realpath') return { ok: true, v: { path: ORIG.realpathSync(p) } }; } catch (e) { return { ok: false, e }; } return null; };
 door.call = async (op, payload = {}, opts = {}) => {
   door.asks++; door.byOp.set(op, (door.byOp.get(op) || 0) + 1);
-  await sleep(door.holdMs);
-  if (door.dead) throw Object.assign(new Error(`safe-fs: ${op} timed out after ${opts.timeoutMs || 0} ms`), { safeFsTimeout: true, code: 'ETIMEDOUT' });
   const p = payload.path;
-  if (op === 'stat') { const st = await fs.promises.stat(p); return { isFile: st.isFile(), isDirectory: st.isDirectory(), size: st.size, mtimeMs: st.mtimeMs }; }
-  if (op === 'readText') { const content = await fs.promises.readFile(p, 'utf-8'); return { content, size: Buffer.byteLength(content) }; }
-  if (op === 'realpath') return { path: await fs.promises.realpath(p) };
-  throw Object.assign(new Error('unknown op ' + op), { code: 'EINVAL' });
+  if (op === 'readText') door.textBy.set(p, (door.textBy.get(p) || 0) + 1);
+  const snap = door.instant ? snapOf(op, p) : null;
+  door.inFlight++; door.maxInFlight = Math.max(door.maxInFlight, door.inFlight);
+  const watched = !!(door.watch && p && p.startsWith(door.watch)); if (watched) { door.watchIn++; door.watchMax = Math.max(door.watchMax, door.watchIn); }
+  try {
+    const slow = [...door.slowUnder].find(([d]) => p === d || p.startsWith(d + path.sep));
+    await sleep(door.holdMs + (slow ? slow[1] : 0));
+    if (door.dead || under2(p, door.deadUnder)) throw Object.assign(new Error(`safe-fs: ${op} timed out after ${opts.timeoutMs || 0} ms`), { safeFsTimeout: true, code: 'ETIMEDOUT' });
+    if (snap) { if (!snap.ok) throw snap.e; return snap.v; }
+    if (op === 'stat') { const st = await fs.promises.stat(p); return { isFile: st.isFile(), isDirectory: st.isDirectory(), size: st.size, mtimeMs: st.mtimeMs }; }
+    if (op === 'readText') { const content = await fs.promises.readFile(p, 'utf-8'); return { content, size: Buffer.byteLength(content) }; }
+    if (op === 'realpath') return { path: await fs.promises.realpath(p) };
+    throw Object.assign(new Error('unknown op ' + op), { code: 'EINVAL' });
+  } finally { door.inFlight--; if (watched) door.watchIn--; }
 };
 const doorCount = () => ({ asks: door.asks, stat: door.byOp.get('stat') || 0, readText: door.byOp.get('readText') || 0, realpath: door.byOp.get('realpath') || 0 });
 
@@ -154,8 +168,9 @@ const was = am0.rowOf(POOL).current, to = IDS.slice(0, 6).find((x) => x !== was)
 am0.setPoolTarget(POOL, to);
 const sw = am0.rowOf(POOL);
 ck('a switch: the next list shows the new member — never the old identity', sw.current === to && sw.email === emailOf(IDS.indexOf(to)));
+const keptBefore = am0._display.size();
 am0.remove(NEW);
-ck('a removal forgets the folder\'s kept facts', !am0.list().accounts.some((x) => x.id === NEW));
+ck('a removal forgets the folder\'s kept facts (the keeper no longer holds it)', am0._display.get(am0._acctDir('claude', NEW)).state === 'unread' && am0._display.size() === keptBefore - 1, JSON.stringify({ before: keptBefore, after: am0._display.size() }));
 
 // ── ⑤ the decision road ──────────────────────────────────────────────────────────────────────────────────────────────
 console.log('\n⑤ the decision road (unknown decides nothing):');
@@ -198,6 +213,213 @@ const keptText = kd.rd.readText(path.join(amD.subDir(IDS[1]), '.credentials.json
 ck('no secret is kept: the kept text holds the marker, not the value', keptText.includes(KEEPER.KEPT) && !keptText.includes(ACCESS));
 ck('…and the kept answer carries no token field', !Object.keys(kd.auth || {}).some((k) => /token$/i.test(k)));
 
+// ── ⑦ round wldn7whag: the keeper's cures ───────────────────────────────────────────────────────────────────────────
+console.log('\n⑦ round wldn7whag — the keeper:');
+{
+  // (a) a create, its confirming read's snapshot (the door answers AT THE CALL: a worker that ran before the write), the write and
+  // a person's ask: the ask reads AFTER the write; RED control: a keeper whose clock cannot order two events in one tick (a
+  // constant: the millisecond race made certain) reuses the create's own confirmation — «not signed in»
+  const sameMs = async (Mgr) => {
+    const am = new Mgr({ dataDir: fs.mkdtempSync(path.join(ROOT, 'same-')), safeFs: door });
+    door.instant = true;
+    const { id } = am.createSubscription({ name: 'Same' });
+    await new Promise((r) => setImmediate(r));   // the create's read takes its snapshot (before the write)
+    signIn(am, id, 55);
+    const f = (await am.signinFactsSettled([id], { withinMs: 0 })).facts.get(id);
+    door.instant = false; await am.displaySettled();
+    return f;
+  };
+  const f = await sameMs(AccountManager);
+  ck('(a) a create, its write and a person\'s ask in one run (the door answers at the call): the ask reads AFTER the write', f.state === 'read' && f.auth.loggedIn === true, JSON.stringify(f && f.auth));
+  const M = mutantCopies('acctreads', REPO);
+  const kPath = M.write('src/account-display-facts.js', anchored(fs.readFileSync(path.join(REPO, 'src/account-display-facts.js'), 'utf8'), 'const clock = () => { const t = now(); lastTick = t > lastTick ? t : lastTick + 0.001; return lastTick; };', 'const clock = () => 1;', 'a clock that cannot order'), 'flat-clock');
+  const MUT = M.load('src/accounts.js', anchored(fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8'), "const DISPLAY = require('./account-display-facts.js');", `const DISPLAY = require(${JSON.stringify(kPath)});`, 'the keeper copy'), 'plain-clock');
+  const fr = await sameMs(MUT.AccountManager);
+  ck('(a) RED control: a clock that cannot order two events answers «not signed in» (the create\'s own confirmation taken as «after»)', fr.state !== 'read' || fr.auth.loggedIn === false, JSON.stringify(fr && fr.auth));
+
+  // (b) a seed is never overwritten by an older read: a read in flight that began BEFORE the sign-in lands after its seed
+  const amB = new AccountManager({ dataDir: fs.mkdtempSync(path.join(ROOT, 'seed-')), safeFs: door });
+  await amB.displaySettled();
+  const { id: SB } = amB.createSubscription({ name: 'Seeded' }); await amB.displaySettled();
+  door.instant = true; door.slowUnder.set(amB.subDir(SB), 40);
+  amB.displayRefresh(SB);                      // the older read …
+  await new Promise((r) => setImmediate(r));   // … takes its first snapshot now — before the sign-in
+  door.instant = false;
+  signIn(amB, SB, 66); amB.finalizeSubscription(SB);   // the writer's seed
+  await amB.displaySettled(); door.slowUnder.clear();
+  const rb = amB.rowOf(SB);
+  ck('(b) a read that began before the sign-in lands after its seed: the row keeps the sign-in (signed in, its email)', rb.loggedIn === true && rb.email === emailOf(66), JSON.stringify({ loggedIn: rb.loggedIn, email: rb.email }));
+
+  // (c) a seed during a read error that is not «absent» states nothing as a fact: the folder is unreadable by name
+  const credsB = path.join(amB.subDir(SB), '.credentials.json');
+  let rc = null;
+  try { fs.chmodSync(credsB, 0o000); amB._displaySeed(amB.get(SB)); rc = amB.rowOf(SB); }
+  finally { fs.chmodSync(credsB, 0o600); }
+  if (process.getuid && process.getuid() === 0) console.log('    · (c) SKIP — root reads a 000 file');
+  else ck('(c) a seed whose read failed (EACCES, not «absent»): «could not be read (EACCES)», never «not signed in»', rc.facts.state === 'unreadable' && rc.facts.reason === 'EACCES' && rc.loggedIn === null, JSON.stringify(rc && rc.facts));
+  await amB.displayRefresh(SB);
+
+  // (d) a CLI rewriting its own settings file is no change a row shows: no push; an identity change is one
+  let pushes = 0;
+  const amD2 = new AccountManager({ dataDir: DATA, safeFs: door, onChange: () => { pushes++; } });
+  await amD2.displaySettled(); await sleep(120); pushes = 0;
+  const cfg0 = path.join(amD2.subDir(IDS[4]), '.claude.json');
+  fs.writeFileSync(cfg0, JSON.stringify({ oauthAccount: { emailAddress: emailOf(4), organizationName: 'Org 4' }, numStartups: 99, projects: { '/x': { allowedTools: [] } } }));
+  fs.utimesSync(cfg0, new Date(), new Date(Date.now() + 3000));
+  await amD2.displayRefresh(IDS[4]); await sleep(120);
+  ck(`(d) the CLI rewrote its settings file (the identity unchanged): no push (${pushes})`, pushes === 0, String(pushes));
+  fs.writeFileSync(cfg0, JSON.stringify({ oauthAccount: { emailAddress: 'moved@example.test', organizationName: 'Org 4' } }));
+  fs.utimesSync(cfg0, new Date(), new Date(Date.now() + 6000));
+  await amD2.displayRefresh(IDS[4]); await sleep(120);
+  ck(`(d) …the identity changed: one push (${pushes})`, pushes === 1, String(pushes));
+  fs.writeFileSync(cfg0, JSON.stringify({ oauthAccount: { emailAddress: emailOf(4), organizationName: 'Org 4' } }));
+  fs.utimesSync(cfg0, new Date(), new Date(Date.now() + 9000));
+  await amD2.displayRefresh(IDS[4]);
+
+  // (e) what is kept: the login file's own shape only; the settings file no text; Antigravity's sign-in file never read
+  const amE = new AccountManager({ dataDir: fs.mkdtempSync(path.join(ROOT, 'keep-')), safeFs: door });
+  const { id: SE } = amE.createSubscription({ name: 'Kept' });
+  const OTHER = ['other', 'service', 'value'].join('-');
+  fs.writeFileSync(path.join(amE.subDir(SE), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: ACCESS, refreshToken: REFRESH, expiresAt: Date.now() + 36e5, scopes: ['user:inference'] }, mcpOAuth: { server: { accessToken: OTHER } } }));
+  fs.writeFileSync(path.join(amE.subDir(SE), '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'kept@example.test' }, mcpServers: { s: { headers: { Authorization: 'Bearer ' + OTHER } } } }));
+  await amE.displayRefresh(SE);
+  const ke = amE._display.get(amE._acctDir('claude', SE));
+  const kt = ke.rd.readText(path.join(amE.subDir(SE), '.credentials.json'));
+  let cfgKept = true; try { ke.rd.readText(path.join(amE.subDir(SE), '.claude.json')); } catch { cfgKept = false; }
+  ck('(e) the login file keeps only its own shape (claudeAiOauth, scrubbed) — no other service\'s credential', kt.includes('claudeAiOauth') && !kt.includes('mcpOAuth') && !kt.includes(OTHER) && !kt.includes(ACCESS), kt.slice(0, 200));
+  ck('(e) the settings file keeps NO text (its identity was read at landing; its other secrets never stay)', cfgKept === false && amE.rowOf(SE).email === 'kept@example.test');
+  const { id: AG, dir: AGD } = amE.createHomeSubscription('antigravity', { name: 'Agy' });
+  const agFile = amE._credsOf('antigravity').displayFiles(AGD)[0].path;
+  fs.mkdirSync(path.dirname(agFile), { recursive: true }); fs.writeFileSync(agFile, 'x'.repeat(64));
+  const t0 = door.textBy.get(agFile) || 0;
+  await amE.displayRefresh(AG);
+  ck('(e) Antigravity\'s sign-in file: its stat alone (never read — as at the release), the row signed in', (door.textBy.get(agFile) || 0) === t0 && amE.rowOf(AG).loggedIn === true, JSON.stringify({ reads: (door.textBy.get(agFile) || 0) - t0, loggedIn: amE.rowOf(AG).loggedIn }));
+
+  // (f) a person's act waits for what it needs, bounded: a slow folder answers «unknown» at the bound
+  const amF = new AccountManager({ dataDir: DATA, safeFs: door });
+  await amF.displaySettled();
+  door.slowUnder.set(amF.subDir(IDS[5]), 400);
+  const tf = Date.now(); const bf = await amF.signinFactsSettled([IDS[5], IDS[6]], { withinMs: 0, boundMs: 40 }); const waited = Date.now() - tf;
+  await amF.displaySettled();
+  // the CONTROL measured in this run: the same slow folder asked with no bound (the wait the bound cuts)
+  const tu = Date.now(); await amF.signinFactsSettled([IDS[5]], { withinMs: 0 }); const unbounded = Date.now() - tu;
+  door.slowUnder.clear();
+  ck(`(f) a bounded ask with one slow folder: back at the bound (${waited} ms, under half the unbounded wait of ${unbounded} ms), the slow one «unknown», the other read`, waited * 2 < unbounded && bf.facts.get(IDS[5]).state === 'unknown' && bf.facts.get(IDS[6]).state === 'read', JSON.stringify({ waited, unbounded, slow: bf.facts.get(IDS[5]).state, other: bf.facts.get(IDS[6]).state }));
+
+  // (g) the door is never flooded: a start reads at most two folders at a time (its OWN data dir, watched by path: every store
+  // has its own keeper, and another store's background re-read is not this start's)
+  const GD = fs.mkdtempSync(path.join(ROOT, 'flood-'));
+  const amGb = new AccountManager({ dataDir: GD, safeFs: door });
+  for (let i = 0; i < 13; i++) { const { id } = amGb.createSubscription({ name: 'G' + i }); signIn(amGb, id, 200 + i); }
+  await amGb.displaySettled();
+  door.watch = GD; door.watchIn = 0; door.watchMax = 0;
+  const amG = new AccountManager({ dataDir: GD, safeFs: door });
+  await amG.displaySettled();
+  door.watch = null;
+  ck(`(g) a start of 13 folders: at most 2 of the door's calls in flight (${door.watchMax}) — a deadline counts from the send`, door.watchMax <= 2 && door.watchMax >= 1, String(door.watchMax));
+
+  // (h) the store's own door (none handed) is ended at close
+  const amH = new AccountManager({ dataDir: fs.mkdtempSync(path.join(ROOT, 'own-')) });
+  amH.createSubscription({ name: 'Own' }); await amH.displaySettled();
+  const own = amH._ownDoor;
+  amH.close();
+  ck('(h) a store built with no door made its own (one worker) and ENDS it at close', !!own && own._closed === true && amH._ownDoor === null);
+}
+
+// ── ⑧ the cures' behaviour: the fold, the backfill, the undecided link, the tick ─────────────────────────────────────
+console.log('\n⑧ the cures\' behaviour (round wldn7whag):');
+{
+  const routes = require(path.join(REPO, 'src/server/account-usage-routes.js'));
+  const mkApp = () => { const h = { get: new Map(), post: new Map() }; const add = (m) => (p, ...f) => h[m].set(p, f[f.length - 1]); return { h, app: { get: add('get'), post: add('post'), put() { }, delete() { }, patch() { }, use() { }, locals: {} } }; };
+  const call = (fn, req = {}) => { let code = 200, body = null; const res = { status(c) { code = c; return this; }, json(b) { body = b; return this; } }; const p = fn({ params: {}, query: {}, body: {}, headers: {}, ...req }, res); return Promise.resolve(p).then(() => ({ code, body })); };
+  const wire = (am, hosts = null) => { const { app, h } = mkApp(); routes.create({ app, rootDir: REPO, HOST: '127.0.0.1', CLAUDE_CMD: 'claude', NODE_CMD: 'node', CLAUDE_SUBSCRIPTION_LOGIN_HELPER: '/nonexistent/helper.js', activeSessions: new Map(), auth: { enabled: false }, engine: { clearSealedOrders: () => { } }, serverSetting: () => null, recordUsageAttribution: () => { }, liveAccountIdSet: () => new Set(), buildClaudeSubscriptionLoginCommand: () => 'claude auth login', getAccounts: () => am, getHosts: () => hosts, getMounts: () => null, getTelemetry: () => null, getUsageHistory: () => null, getLoginExpiryWatch: () => null }); return h; };
+  const quiet = async (fn) => { const o = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { return await fn(); } finally { console.log = o; console.warn = w; } };
+  // (a) THE FOLD: a readable same-account row is folded into; an unreadable one is never folded into, and the answer SAYS it
+  const amR = new AccountManager({ dataDir: fs.mkdtempSync(path.join(ROOT, 'fold-')), safeFs: door, platform: 'linux' });
+  const { id: OLD } = amR.createSubscription({ name: 'Old' }); signIn(amR, OLD, 71); amR.finalizeSubscription(OLD);
+  const { id: OLD2 } = amR.createSubscription({ name: 'Old Two' }); signIn(amR, OLD2, 72); amR.finalizeSubscription(OLD2);
+  const hR = wire(amR);
+  const { id: N1 } = amR.createSubscription({ name: 'New' }); signIn(amR, N1, 71);
+  const r1 = await quiet(() => call(hR.post.get('/api/accounts/subscription/:id/finalize'), { params: { id: N1 } }));
+  ck('(a) the fold: a fresh sign-in whose email a READABLE row holds is folded into it', r1.body && r1.body.merged === true && r1.body.account && r1.body.account.id === OLD, JSON.stringify(r1.body && { merged: r1.body.merged, account: r1.body.account && r1.body.account.id }));
+  door.deadUnder.add(amR.subDir(OLD2));
+  const { id: N2 } = amR.createSubscription({ name: 'New Two' }); signIn(amR, N2, 72);
+  const r2 = await quiet(() => call(hR.post.get('/api/accounts/subscription/:id/finalize'), { params: { id: N2 } }));
+  door.deadUnder.clear();
+  ck('(a) …a row whose sign-in could not be read is NEVER folded into, and the answer names it (foldUnjudged)', r2.body && !r2.body.merged && Array.isArray(r2.body.foldUnjudged) && r2.body.foldUnjudged.some((x) => x.id === OLD2) && !!amR.get(N2), JSON.stringify(r2.body && { merged: r2.body.merged, foldUnjudged: r2.body.foldUnjudged }));
+  // (b) THE BACKFILL: a host's address fills a row's missing email only when that row's sign-in was read now
+  const amS = new AccountManager({ dataDir: fs.mkdtempSync(path.join(ROOT, 'host-')), safeFs: door, platform: 'linux' });
+  const { id: HU } = amS.createSubscription({ name: 'Host Unread' }); fs.writeFileSync(path.join(amS.subDir(HU), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: ACCESS, refreshToken: REFRESH, expiresAt: Date.now() + 36e5 } }));
+  const { id: HR } = amS.createSubscription({ name: 'Host Read' }); fs.writeFileSync(path.join(amS.subDir(HR), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: ACCESS, refreshToken: REFRESH, expiresAt: Date.now() + 36e5 } }));
+  await amS.displayRefresh(HU); await amS.displayRefresh(HR);
+  const hostSt = { get: () => ({ transport: 'ssh', name: 'h' }), accountsStatus: async () => ({ platform: 'linux', hostSubs: [HU, HR], hostSubEmails: { [HU]: 'hu@example.test', [HR]: 'hr@example.test' } }), renameHostSubDir: async () => false };
+  const hS = wire(amS, hostSt);
+  door.deadUnder.add(amS.subDir(HU));
+  const r3 = await quiet(() => call(hS.get.get('/api/hosts/:id/accounts-status'), { params: { id: 'h1' } }));
+  door.deadUnder.clear();
+  ck('(b) the backfill: the row read now takes the host\'s address; the row that could not be read takes NOTHING (and is named)', amS.get(HR).email === 'hr@example.test' && !amS.get(HU).email && Array.isArray(r3.body && r3.body.foldUnjudged) && r3.body.foldUnjudged.some((x) => x.id === HU), JSON.stringify({ HR: amS.get(HR).email, HU: amS.get(HU).email || null, unjudged: r3.body && r3.body.foldUnjudged }));
+  // (c) THE UNDECIDED LINK, both harnesses: a kept link counts only while its address is the machine login's present one
+  const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
+  const LD = fs.mkdtempSync(path.join(ROOT, 'link-'));
+  const amL = new AccountManager({ dataDir: path.join(LD, 'data'), safeFs: door, platform: 'linux' });
+  const LA = amL.createSubscription({ name: 'Link A' }).id; signIn(amL, LA, 81);
+  const LB = amL.createSubscription({ name: 'Link B' }).id; signIn(amL, LB, 82);
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const cxSign = (id, email) => fs.writeFileSync(path.join(amL.codexSubDir(id), 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: ACCESS, id_token: `${b64u({ alg: 'none' })}.${b64u({ email, 'https://api.openai.com/auth': { chatgpt_plan_type: 'plus' } })}.sig` } }));
+  const CA = amL.createCodexSubscription({ name: 'Cx A' }).id; cxSign(CA, 'ca@example.test');
+  const CB = amL.createCodexSubscription({ name: 'Cx B' }).id; cxSign(CB, 'cb@example.test');
+  for (const id of [LA, LB, CA, CB]) amL.displayRefresh(id);
+  await amL.displaySettled();
+  let mClaude = emailOf(81), mCodex = 'ca@example.test';
+  amL.subscriptionStatus = () => ({ loggedIn: true, email: mClaude });
+  amL.codexGlobalStatus = () => ({ loggedIn: true, email: mCodex });
+  const uroutes = {};
+  const cacheL = path.join(LD, 'data', 'usage-cache'); fs.mkdirSync(cacheL, { recursive: true });
+  await quiet(async () => setupUsage({ app: { get: (p, h) => { uroutes['GET ' + p] = h; }, post: (p, h) => { uroutes['POST ' + p] = h; }, put() { }, delete() { }, use() { }, locals: {} }, accounts: amL, hosts: null, usageHistory: null, activeSessions: new Map(), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(LD, 'data', 'usage-cache.json'), USAGE_CACHE_DIR: cacheL, CODEX_SESSIONS_DIR: path.join(LD, 'codex-sessions'), META_DIR: path.join(LD, 'data', 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(LD, 'data', 'session-buffers'), probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: '/nonexistent/claude' }));
+  const usageNow = () => quiet(() => new Promise((resolve) => uroutes['GET /api/usage']({ headers: {}, query: {} }, { json: resolve, status() { return this; } })));
+  await amL.signinFactsSettled();
+  let u = await usageNow();
+  ck('(c) decided: the machine logins link the named rows (claude A, codex A)', u.globalLogin.accountId === LA && u.codexGlobalLogin.accountId === CA, JSON.stringify({ c: u.globalLogin.accountId, x: u.codexGlobalLogin.accountId }));
+  door.deadUnder.add(amL.subDir(LB)); door.deadUnder.add(amL.codexSubDir(CB));
+  await amL.signinFactsSettled([LB, CB], { withinMs: 0 });
+  mClaude = 'someone-new@example.test'; mCodex = 'cx-new@example.test';
+  u = await usageNow();
+  ck('(c) a machine login signed in as ANOTHER identity while a row cannot be read: undecided — the old link is NOT kept (both harnesses)', u.globalLogin.accountId === null && u.codexGlobalLogin.accountId === null, JSON.stringify({ c: u.globalLogin, x: u.codexGlobalLogin }));
+  const usrc = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
+  ck('(c) …and an undecided pass merges nothing on either harness (the merges read the undecided flags)', usrc.includes('const gid = linkUndecided ? null : _usageGlobalLink.accountId;') && usrc.includes('const gid = _codexLinkUndecided ? null : _codexUsageGlobalLink.accountId;'));
+  mClaude = emailOf(81); mCodex = 'ca@example.test';
+  u = await usageNow();
+  ck('(c) the same address again (a row still unreadable): the match among the rows read decides — A again', u.globalLogin.accountId === LA && u.codexGlobalLogin.accountId === CA, JSON.stringify({ c: u.globalLogin.accountId, x: u.codexGlobalLogin.accountId }));
+  door.deadUnder.clear();
+  // (d) THE TICK: one at a time; a sign-in not read is never probed; a door refusal «sign-in-unknown» gives the attempt back
+  const { createAutoCliLoop } = require(path.join(REPO, 'src/server/auto-cli-loop.js'));
+  const NOW = Date.now();
+  const rowRead = { id: 'sub-tick-1', type: 'subscription', backend: 'claude', pooled: false, loggedIn: true, loginState: { state: 'ok' }, facts: { state: 'read' } };
+  const rowUnread = { id: 'sub-tick-2', type: 'subscription', backend: 'claude', pooled: false, loggedIn: null, loginState: { state: 'unknown' }, facts: { state: 'unread' } };
+  const mkLoop = ({ rows, gate = null, verdictCode = null }) => {
+    const st = { probes: [], settles: 0 };
+    const dir = fs.mkdtempSync(path.join(ROOT, 'tick-'));
+    st.loop = createAutoCliLoop({
+      serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined),
+      accounts: { decisionList: () => ({ accounts: rows }), signinFactsSettled: async () => { st.settles++; if (gate) await gate; return { since: 0, facts: new Map() }; } },
+      autoCliReady: () => true, USAGE_CACHE_DIR: dir, usageIdentityGroupsCached: () => [], usageEstimator: { estimateFor: () => null },
+      projectionRereadFor: () => null, projectionBillingIndex: () => null, lastMemberReadAt: () => 0,
+      usage: { refreshViaCliPanel: async (k) => { st.probes.push(k); return false; }, panelVerdictFor: () => (verdictCode ? { at: NOW, code: verdictCode, outcome: 'not-probed', why: verdictCode } : null) },
+      onMemberReadingFresh() { }, dataDir: dir, log() { }, warn() { }, now: () => NOW, rand: () => 0.5,
+    });
+    return st;
+  };
+  let open; const gate = new Promise((r) => { open = r; });
+  const two = mkLoop({ rows: [rowRead], gate });
+  const t1 = two.loop.tick(), t2 = two.loop.tick(); open(); await Promise.all([t1, t2]);
+  ck(`(d) two ticks entered together: ONE settle, ONE probe — the second returns at once (${two.settles} settle(s), ${two.probes.length} probe(s))`, two.settles === 1 && two.probes.length === 1, JSON.stringify({ settles: two.settles, probes: two.probes }));
+  const un = mkLoop({ rows: [rowUnread] }); await un.loop.tick();
+  ck('(d) a row whose sign-in is not read is never probed (no attempt, nothing booked)', un.probes.length === 0, JSON.stringify(un.probes));
+  const back = mkLoop({ rows: [rowRead], verdictCode: 'sign-in-unknown' }); await back.loop.tick(); await back.loop.tick();
+  const kept = mkLoop({ rows: [rowRead], verdictCode: 'login' }); await kept.loop.tick(); await kept.loop.tick();
+  ck(`(d) the door refused «sign-in-unknown»: the attempt is given back — the next tick probes again (${back.probes.length}); CONTROL: a «login» refusal keeps its attempt (${kept.probes.length})`, back.probes.length === 2 && kept.probes.length === 1, JSON.stringify({ back: back.probes.length, kept: kept.probes.length }));
+}
+
 // ── ⑥ the census ─────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('\n⑥ the census — each reader of a row\'s sign-in fields, one kind (DISPLAY / TURN / PERSON / TIMER):');
 const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -207,12 +429,14 @@ const CENSUS = [
   { f: 'src/usage-routes.js', kind: 'DISPLAY', who: 'GET /api/usage `logins` (ALSO CURED: it read every account\'s file on the loop)', has: ['const rd = accounts.displayReaderOf(a.id);'], unread: 'no entry (no claim)', unreadable: 'no entry (no claim)' },
   { f: 'src/server/oat-shape-routes.js', kind: 'DISPLAY', who: 'the shape dialog\'s row (one row by its id)', has: ['accounts.rowOf(id)'], not: ['accounts.list()'], unread: 'the row\'s facts', unreadable: 'the row\'s facts' },
   { f: 'src/server/usage-pool-engine.js', kind: 'TURN', who: 'a reading\'s and a rejection\'s slot (readingSlotFor / rejectionSlotFor)', has: ['function readingSlotFor(session', 'function rejectionSlotFor(session'], unread: 'never the list', unreadable: 'never the list' },
-  { f: 'src/server/account-usage-routes.js', kind: 'PERSON', who: 'a sign-in\'s same-account fold (finalize dupOf)', has: ["const { since } = await accounts.signinFactsSettled(null, { withinMs: 0 });   // every sign-in account's folder, read now"], unread: 'read now, awaited', unreadable: 'never folded into (both kept)' },
+  { f: 'src/server/account-usage-routes.js', kind: 'PERSON', who: 'a sign-in\'s same-account fold (finalize dupOf)', has: ['await accounts.signinFactsNow(compared)', 'foldUnjudged = rowsNow.filter('], unread: 'read now (the folders it compares), bounded', unreadable: 'never folded into (both kept) — and SAID (foldUnjudged)' },
   { f: 'src/server/account-usage-routes.js', kind: 'PERSON', who: 'a host\'s email backfill and fold (accounts-status)', has: ['const readNow = (x) => !x.facts || x.facts.state === \'read\';'], unread: 'read now, awaited', unreadable: 'no backfill, no fold' },
-  { f: 'src/usage-routes.js', kind: 'PERSON', who: '⟳ and the tick\'s pick (refreshViaCliPanel) + the token road\'s same-account email', has: ["const { since } = await accounts.signinFactsSettled([key], { withinMs: 0 });", 'const rowsNow = accounts.decisionList({ since }).accounts || [];'], unread: 'read now, awaited', unreadable: 'refused by name, no spawn, never «re-login»' },
-  { f: 'src/server/auto-cli-loop.js', kind: 'TIMER', who: 'the automatic usage read\'s tick', has: ['await d.accounts.signinFactsSettled();', 'd.accounts.decisionList({ since: factsSince })', 'probeEligibility(a) === SIGNIN_UNKNOWN) continue;'], not: ['d.accounts.list().accounts'], unread: 'NO probe this tick', unreadable: 'NO probe this tick' },   // stale-pins: kept — `not` checks the release's read is GONE
-  { f: 'src/server/login-expiry-watch.js', kind: 'TIMER', who: 'the login-expiry sweep (its notices)', has: ['accounts.decisionLoginStateOf(a.id, t)', 'accounts.signinFactsSettled()'], not: ['accounts.loginStateOf(a.id, t)'], unread: 'no notice, no retraction', unreadable: 'no notice, no retraction' },   // stale-pins: kept — `not` checks the release's read is GONE
-  { f: 'src/usage-routes.js', kind: 'TIMER', who: 'the machine login\'s link and merge (ingestPassiveUsage)', has: ['const dec = accounts.decisionList().accounts || [];', 'const gid = linkUndecided ? null : _usageGlobalLink.accountId;', 'const ingestConfirmed = () => accounts.signinFactsSettled()'], unread: 'no link decided, no merge', unreadable: 'no link decided, no merge' },
+  { f: 'src/usage-routes.js', kind: 'PERSON', who: '⟳ and the tick\'s pick (refreshViaCliPanel) + the token road\'s same-account email', has: ['await accounts.signinFactsNow([key])', 'await accounts.signinFactsNow(compared)', 'const rowsNow = accounts.decisionList({ since }).accounts || [];'], unread: 'read now, awaited', unreadable: 'refused by name, no spawn, never «re-login»' },
+  { f: 'src/server/auto-cli-loop.js', kind: 'TIMER', who: 'the automatic usage read\'s tick', has: ['await d.accounts.signinFactsSettled();', 'd.accounts.decisionList({ since: factsSince })', 'probeEligibility(a) === SIGNIN_UNKNOWN) continue;', 'if (ticking) return;'], not: ['d.accounts.list().accounts'], unread: 'NO probe this tick', unreadable: 'NO probe this tick' },   // stale-pins: kept — `not` checks the release's read is GONE
+  { f: 'src/server/login-expiry-watch.js', kind: 'TIMER', who: 'the login-expiry sweep (its notices)', has: ['accounts.decisionLoginStateOf(a.id, t, ', 'accounts.signinFactsSettled()', 'sweep({ since: settled && settled.since })'], not: ['accounts.loginStateOf(a.id, t)'], unread: 'no notice, no retraction', unreadable: 'no notice, no retraction' },   // stale-pins: kept — `not` checks the release's read is GONE
+  { f: 'src/usage-routes.js', kind: 'TIMER', who: 'the machine login\'s link and merge (ingestPassiveUsage)', has: ['const dec = accounts.decisionList().accounts || [];', 'const gid = linkUndecided ? null : _usageGlobalLink.accountId;', 'const gid = _codexLinkUndecided ? null : _codexUsageGlobalLink.accountId;', 'const ingestConfirmed = () => accounts.signinFactsSettled()'], unread: 'no link decided, no merge', unreadable: 'no link decided, no merge' },
+  { f: 'src/server/usage-pool-engine.js', kind: 'TIMER', who: 'the boot / hourly / manual identity repair (its identity keys)', has: ['accounts.decisionList(since != null ? { since } : {})'], unread: 'no email: «not repaired» (the hourly run repairs)', unreadable: 'the same' },
+  { f: 'server.js', kind: 'TIMER', who: 'the boot and hourly repairs await the facts first', has: ["repairIdentityAnchors('boot', { since: settled && settled.since })", "repairIdentityAnchors('hourly', { since: settled && settled.since })"], unread: '—', unreadable: '—' },
   { f: 'src/server/usage-pool-engine.js', kind: 'TIMER', who: 'the identity groups\' email key', has: ['const roster = accounts.decisionList({ withinMs: 60000 }).accounts || [];'], unread: 'its own identity (no merge)', unreadable: 'its own identity (no merge)' },
   { f: 'server.js', kind: 'TIMER', who: 'OTel\'s org→account email fallback (per record, no wait)', has: ['listAccounts: () => accounts.decisionList().accounts || [],'], unread: '«unknown org» (counted), the rid not remembered', unreadable: 'the same' },
   { f: 'src/lib/manage-agents.js', kind: 'DISPLAY', who: 'the accounts dialog\'s rows (client)', has: ['export function factsWordsHtml(a)', "t('sign-in not read yet')", "t('sign-in could not be read ({why})', { why })"], unread: '«sign-in not read yet»', unreadable: '«sign-in could not be read (why)»' },

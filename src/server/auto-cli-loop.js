@@ -157,7 +157,12 @@ function createAutoCliLoop(d) {
     }
     return true;
   }
+  // ONE TICK AT A TIME (round wldn7whag, the owner's rule: never more probes than ruled): the tick awaits its sign-in facts at its
+  // head — on a stalled share a second tick could enter meanwhile; it returns at once instead
+  let ticking = false;
   async function tick() {
+    if (ticking) return;
+    ticking = true;
     try {
       if (d.serverSetting('accounts.onDemandQuotaRefresh') !== 'auto-cli') return;
       // THE TIMER ROW (B-360d, 主开发 r1221): the sign-in facts confirmed OFF the loop first — awaited, each ask bounded by the
@@ -236,6 +241,7 @@ function createAutoCliLoop(d) {
         (d.metric || global.__vsMetric)?.('auto-cli-refresh-ms', 0);
       }
     } catch (e) { warn('[auto-cli] tick failed: ' + e.message); }
+    finally { ticking = false; }
   }
   // the group's merged memory: per bucket, the latest purchase any id of the identity made
   function mergedReads(ids) {

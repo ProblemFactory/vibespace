@@ -228,7 +228,7 @@ const creds = {
   spawnForm: 'isolated-home',                // accounts.resolveForSpawn: spawnEnv(the account's root)
   keychainSensitive: false,
   parseAuth: parseAgyAuthDir,
-  displayFiles: (dir) => [path.join(dir, TOKEN_REL)],   // the file parseAuth stats — read OFF the loop for the accounts list (B-360d)
+  displayFiles: (dir) => [{ path: path.join(dir, TOKEN_REL), stat: true }],   // the file parseAuth stats — its STAT alone, off the loop (B-360d): never read, as at the release (it is the account's secret)
   parseAuthFile: (file) => parseAgyAuthDir(path.resolve(path.dirname(file), '..', '..')),
   /** The machine's own login for the Agents panel (GET /api/backend-status) — a stat, never a spawn, never a read.
    *  No file may still mean signed in: with a session bus agy keeps the machine login in the OS keyring (unknown). */

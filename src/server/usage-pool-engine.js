@@ -1546,10 +1546,12 @@ function apiWitnessEligibility(session, slot, key) {
 // repairSidecarsByApiPhase). Idempotent, archive-never-destroy, one journal
 // line with the counts, and the established-window memo is dropped so the
 // guard reads the repaired sidecars at once.
-function repairIdentityAnchors(why = 'boot') {
+function repairIdentityAnchors(why = 'boot', { since } = {}) {
   try {
     const { repairSidecarsByApiPhase } = require('../reading-repair.js');
-    const list = (accounts.list && accounts.list().accounts) || [];
+    // the identity keys it decides read the DECISION road (B-360d, round wldn7whag): its callers await the sign-in facts' settle and
+    // hand its `since`; a row not confirmed carries no email — the repair fails toward «not repaired» (the hourly run repairs)
+    const list = (accounts.decisionList && accounts.decisionList(since != null ? { since } : {}).accounts) || [];
     const rep = repairSidecarsByApiPhase({ dataDir: path.join(rootDir, 'data'), accounts: list, id: 'identity-repair:' + why });
     _ownWin = null; _ownWinAt = 0;
     const c = rep.counts || {};

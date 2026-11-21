@@ -117,7 +117,7 @@ console.log('— §5 wiring');
   // from its DECISION road, both the harness's own reader over the SAME kept
   // snapshot. The watch must never grow a credential reader of its own.
   ck('the watch asks the ACCOUNT STORE for the login state — its decision road over the facts the chip is built from',
-    /accounts\.decisionLoginStateOf\(a\.id, t\)/.test(fs.readFileSync(path.join(REPO, 'src/server/login-expiry-watch.js'), 'utf8')));
+    /accounts\.decisionLoginStateOf\(a\.id, t[,)]/.test(fs.readFileSync(path.join(REPO, 'src/server/login-expiry-watch.js'), 'utf8')));
   ck('the harness descriptor is the one place that touches the credential FILE (it also reports the last write)', (() => {
     const cl = fs.readFileSync(path.join(REPO, 'src/harnesses/claude.js'), 'utf8');
     return /writtenAt = fx && Number\.isFinite\(fx\.mtimeMs\) \? fx\.mtimeMs : null/.test(cl) && /fx = rd\.facts\(fp\)/.test(cl) && /function claudeLoginState\(dir, now = Date\.now\(\), rd = RR\)/.test(cl) && /return \{ \.\.\.loginState\(raw, now\), writtenAt \}/.test(cl);   // B-403e: the write time from the SAME open the read made (src/run-reads.js facts); B-360d: the reader is handed (default RR) — the accounts list's kept snapshot answers it the same

@@ -20,6 +20,8 @@ const DISPLAY = require('./account-display-facts.js'); // B-360d (lane chrome-15
 // or confirmed them (each sign-in file's stamp: size + time) started within this — a sign-in changed under the hub from a terminal is
 // seen by a decider within it; a confirmation is asked behind the ask at half of it
 const DECIDE_WITHIN_MS = 10000;
+// …and a person's act waits for the folders it compares at most this long (a stalled unrelated share never holds a press)
+const PERSON_BOUND_MS = 6000;
 const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 const { get: harnessOf, list: listHarnesses } = require('./harnesses'); // S2: per-harness credential mechanics live on the descriptor (creds)
 const path = require('path');
@@ -138,9 +140,8 @@ class AccountManager {
     this._displayMaxAgeMs = displayMaxAgeMs;
     // the file door: the hub hands its own (server.js); a store built with none (a tool, a suite) makes its OWN — the same door, a
     // worker thread with its deadline (one, unref'd: it never holds a process open), built at the first read. ONE road either way.
-    let ownDoor = null;
     const door = safeFs != null ? (typeof safeFs === 'function' ? safeFs : () => safeFs)
-      : () => ownDoor || (ownDoor = new (require('./safe-fs.js').SafeFs)({ poolSize: 1, name: 'accounts-door' }));
+      : () => this._ownDoor || (this._ownDoor = new (require('./safe-fs.js').SafeFs)({ poolSize: 1, name: 'accounts-door' }));
     this._display = DISPLAY.create({ safeFs: door, onLanded: () => this._notifyRowsSoon() });
     this._state = { version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [] };
     this._load();
@@ -495,11 +496,11 @@ class AccountManager {
     if (this._display.stale(dir, this._displayMaxAgeMs)) this._displayRead(a);
     return this._display.get(dir);
   }
-  _displayFilesOf(a) { const be = this._acctBackend(a), creds = this._credsOf(be), dir = this._acctDir(be, a.id); return { creds, dir, files: typeof creds.displayFiles === 'function' ? creds.displayFiles(dir) : [] }; }
-  _displayRead(a, { after = 0, ensure = false } = {}) {
+  _displayFilesOf(a) { const be = this._acctBackend(a), creds = this._credsOf(be), dir = this._acctDir(be, a.id); return { creds, dir, files: typeof creds.displayFiles === 'function' ? creds.displayFiles(dir) : [], keep: typeof creds.displayKeep === 'function' ? creds.displayKeep : null }; }
+  _displayRead(a, { after = 0, ensure = false, urgent = false } = {}) {
     try {
-      const { creds, dir, files } = this._displayFilesOf(a);
-      const p = this._display[ensure ? 'ensure' : 'refresh'](dir, files, (rd) => creds.parseAuth(dir, rd), { link: this._acctType(a) === 'pooled', after });
+      const { creds, dir, files, keep } = this._displayFilesOf(a);
+      const p = this._display[ensure ? 'ensure' : 'refresh'](dir, files, (rd) => creds.parseAuth(dir, rd), { link: this._acctType(a) === 'pooled', after, keep, urgent });
       p.catch(() => { });
       return p;
     } catch { return Promise.resolve(null); }
@@ -509,21 +510,24 @@ class AccountManager {
    *  parsed this folder through run-reads — the same run's answers seed the kept facts, so the next list shows the row at once;
    *  an off-loop read then only confirms */
   _displaySeed(a) {
-    try { const { creds, dir, files } = this._displayFilesOf(a); this._display.seed(dir, files, (rd) => creds.parseAuth(dir, rd), RR); this._displayRead(a); } catch { }
+    // the confirming read starts AFTER the seed (a read already in flight began before the act: it never overwrites the seed)
+    try { const { creds, dir, files, keep } = this._displayFilesOf(a); this._display.seed(dir, files, (rd) => creds.parseAuth(dir, rd), RR, { keep }); this._displayRead(a, { after: this._display.clock() }); } catch { }
   }
   /** the switch: the pool's folder now shows `subId`'s files — seeded from the member the switch has just checked, target set */
   _displaySeedPool(pool, subId) {
     try {
       const m = this.get(subId); if (!m) return;
-      const { creds, dir: mdir, files } = this._displayFilesOf(m);
-      this._display.seed(this._acctDir(this._acctBackend(pool), pool.id), files, (rd) => creds.parseAuth(mdir, rd), RR, { target: subId });
-      this._displayRead(pool);
+      const { creds, dir: mdir, files, keep } = this._displayFilesOf(m);
+      this._display.seed(this._acctDir(this._acctBackend(pool), pool.id), files, (rd) => creds.parseAuth(mdir, rd), RR, { target: subId, keep });
+      this._displayRead(pool, { after: this._display.clock() });
     } catch { }
   }
   /** a removal: the folder's kept facts go with it */
   _displayForget(a) { try { this._display.drop(this._acctDir(this._acctBackend(a), a.id)); } catch { } }
   /** every display read in flight landed (the suites' ONE seam; a clean shutdown) */
   displaySettled() { return this._display.settled(); }
+  /** the store's OWN file door (built only when none was handed: a suite, a tool) is ended — its worker goes (round wldn7whag) */
+  close() { const d = this._ownDoor; this._ownDoor = null; try { if (d && typeof d.close === 'function') d.close(); } catch { } }
   /** ask a folder again now — a suite that wrote a sign-in file itself (the ONE seam, then displaySettled) */
   displayRefresh(id) { const a = this.get(id); if (a) this._displayRead(a, { after: this._display.clock() }); return this._display.settled(); }   // a read that started before the suite's own write is chained once
   /** a landed read that changed what is kept: ONE broadcast for the landings of 100 ms (a start lands many folders together) */
@@ -556,18 +560,26 @@ class AccountManager {
     return { state: 'unknown', why: d.state === 'unreadable' ? 'unreadable' : 'not-read-yet', ...(d.reason ? { reason: d.reason } : {}) };
   }
   /** THE DECISION ACCESSOR (async): the named accounts' folders (default every sign-in account) confirmed OFF the loop — a snapshot
-   *  started at or after (the ask − withinMs; 0 = a person's act: read now), awaited, each ask bounded by the file door's deadline —
-   *  → { since, facts: Map(id → signinFacts) }; pass `since` on to decisionList / decisionRowOf / decisionLoginStateOf */
-  async signinFactsSettled(ids = null, { withinMs = DECIDE_WITHIN_MS } = {}) {
+   *  started at or after (the ask − withinMs; 0 = a person's act: read now), awaited, each ask bounded by the file door's deadline
+   *  and the whole by `boundMs` when given (a person's act) — → { since, facts: Map(id → signinFacts) }; pass `since` on to
+   *  decisionList / decisionRowOf / decisionLoginStateOf */
+  async signinFactsSettled(ids = null, { withinMs = DECIDE_WITHIN_MS, boundMs = 0, urgent = false } = {}) {
     // withinMs 0 = a read that starts AFTER this ask: the keeper's strictly increasing stamp (a write and the ask can share a ms)
     const since = withinMs > 0 ? Date.now() - withinMs : this._display.clock();
     const accs = (Array.isArray(ids) ? ids.map((id) => this.get(id)) : this._state.accounts)
       .filter((a) => a && (this._acctType(a) === 'subscription' || this._acctType(a) === 'pooled'));
-    await Promise.all(accs.map((a) => this._displayRead(a, { after: since, ensure: true })));
+    const all = Promise.all(accs.map((a) => this._displayRead(a, { after: since, ensure: true, urgent })));
+    // A PERSON'S ACT WAITS ON WHAT IT NEEDS, BOUNDED (round wldn7whag): `boundMs` — the folders not landed by then answer
+    // «unknown» (the act says what it could not compare); a timer's settle has no bound but the door's own deadlines
+    if (boundMs > 0) { let t = null; await Promise.race([all, new Promise((r) => { t = setTimeout(r, boundMs); if (t.unref) t.unref(); })]); clearTimeout(t); }
+    else await all;
     const facts = new Map();
     for (const a of accs) facts.set(a.id, this.signinFacts(a.id, { since }));
     return { since, facts };
   }
+  /** A PERSON'S ACT: the named folders read NOW (a read that starts after the ask), the wait bounded by PERSON_BOUND_MS — what did
+   *  not land by then answers «unknown» and the act says it could not compare (round wldn7whag) */
+  signinFactsNow(ids) { return this.signinFactsSettled(ids, { withinMs: 0, boundMs: PERSON_BOUND_MS, urgent: true }); }
   /** the list's rows as a DECIDER reads them: the same rows over the decision road's facts (a row not confirmed since the bound
    *  carries facts { state: 'unread' } and no sign-in field) */
   decisionList(opts = {}) { const was = this._decideSince; this._decideSince = this._decideSinceOf(opts); try { return this.list(); } finally { this._decideSince = was; } }
@@ -982,6 +994,7 @@ class AccountManager {
       }
       this._state.accounts.push(a);
       imported++;
+      { const ty = this._acctType(a); if (ty === 'subscription') this._displaySeed(a); }   // B-360d: the import wrote this folder — its facts set in this step
       if (a.oatEnc) this.syncOatFile(a.id).catch(() => { }); // ours is re-derived here (the export never carries it)
     }
     // Defaults only when the referenced account actually landed and none is set
@@ -1403,6 +1416,7 @@ class AccountManager {
             console.warn(`[pool] "${pool.name}" target was the deleted account — re-pointed to ${to.name}${pick ? ' (decided)' : ''}`);
           } else {
             try { fs.unlinkSync(this.subDir(pool.id)); } catch { } // a dangling link reads as a phantom login path; absent = honestly signed-out
+            this._displayForget(pool);   // B-360d: the pool's folder is gone — never a minute of the removed member's identity on its row
             if (alive.length) {
               this._markUnplaced(pool, null, removedId, removedProvider);
               console.warn(`[pool] "${pool.name}" target was the deleted account and no other ${provWord} member is left — the default is UNPLACED (never moved to another provider)`);

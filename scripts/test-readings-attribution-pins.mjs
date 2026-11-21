@@ -399,16 +399,16 @@ const code = (f) => read(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test
     ok('§19 ⓪ …and the identity gate runs BEFORE the write and returns false on a refusal', body.indexOf('if (idv.refused) {') > 0 && body.indexOf('if (idv.refused) {') < body.indexOf('usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged') && /if \(idv\.refused\) \{[\s\S]{0,1600}?return false;/.test(body));
   }
 {
-    ok('§19 ⑨ …and the standing repair runs HOURLY too (server.js; its anchors read off the loop first since B-1319), quiet unless it changed something', /setInterval\(\(\) => \{ (?:require\('\.\/src\/reading-repair\.js'\)\.prefetchAnchorRows\(path\.join\(__dirname, 'data', 'usage-anchors'\)\)\.then\(\(\) => \{ )?try \{ const rep = repairIdentityAnchors\('hourly'\)/.test(read('server.js')) && /if \(why !== 'hourly' \|\| changed\)/.test(read('src/server/usage-pool-engine.js')));
+    ok('§19 ⑨ …and the standing repair runs HOURLY too (server.js; its anchors read off the loop first since B-1319), quiet unless it changed something', /setInterval\(\(\) => \{ (?:require\('\.\/src\/reading-repair\.js'\)\.prefetchAnchorRows\(path\.join\(__dirname, 'data', 'usage-anchors'\)\)\.then\(\(\) => accounts\.signinFactsSettled\(\)\.catch\(\(\) => \(\{\}\)\)\)\.then\(\(settled\) => \{ )?try \{ const rep = repairIdentityAnchors\('hourly', \{ since: settled && settled\.since \}\)/.test(read('server.js')) && /if \(why !== 'hourly' \|\| changed\)/.test(read('src/server/usage-pool-engine.js')));
 }
 {
   // the wiring pins: registered once, run at every boot after the one-shots, exported, routed
   ok('§20 the migration is registered append-only with a dated id and says out loud what it did',
     /id: '2026-09-repair-sidecars-by-api-phase'/.test(read('src/server/migrations.js')) && /\[migrate\] sidecars-by-api-phase:/.test(read('src/server/migrations.js')));
   ok('§20 …and the SAME repair runs at every boot, after the one-shot registry (server.js), through the engine\'s one entry point',
-    (() => { const sv = read('server.js'); const i = sv.indexOf("repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.();"); return i > 0 && i > sv.indexOf('.runLocalMigrations();'); })() && /repairIdentityAnchors, \/\/ B-855a c2/.test(read('src/server/usage-pool-engine.js')) && /repairSidecarsByApiPhase\(\{ dataDir: path\.join\(rootDir, 'data'\), accounts: list, id: 'identity-repair:' \+ why \}\)/.test(read('src/server/usage-pool-engine.js')));
+    (() => { const sv = read('server.js'); const i = sv.indexOf("repairIdentityAnchors('boot', { since: settled && settled.since }); usage.reloadRateLimitCache?.();"); return i > 0 && i > sv.indexOf('.runLocalMigrations();'); })() && /repairIdentityAnchors, \/\/ B-855a c2/.test(read('src/server/usage-pool-engine.js')) && /repairSidecarsByApiPhase\(\{ dataDir: path\.join\(rootDir, 'data'\), accounts: list, id: 'identity-repair:' \+ why \}\)/.test(read('src/server/usage-pool-engine.js')));
   ok('§20 …the human-triggered route exists and hands the engine\'s entry point to setupUsage',
-    /app\.post\('\/api\/usage\/repair-identity'/.test(read('src/usage-routes.js')) && /repairIdentityAnchors\('manual'\)/.test(read('src/usage-routes.js')) && /establishedWindows, repairIdentityAnchors, probeUsageForAccountKey/.test(read('server.js')));
+    /app\.post\('\/api\/usage\/repair-identity'/.test(read('src/usage-routes.js')) && /repairIdentityAnchors\('manual', \{ since: settled && settled\.since \}\)/.test(read('src/usage-routes.js')) && /establishedWindows, repairIdentityAnchors, probeUsageForAccountKey/.test(read('server.js')));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -327,6 +327,7 @@ function usagePollingEnabled() {
 // ONE entry for the account instead of a confusing duplicate pair).
 let _usageGlobalLink = { email: null, loggedIn: false, accountId: null };
 let _codexUsageGlobalLink = { email: null, loggedIn: false, accountId: null };
+let _codexLinkUndecided = false;   // B-360d (round wldn7whag): this pass could not decide the codex link — its merge does not run
 /** Re-read the persisted machine-login snapshot and re-run the passive merge.
  *  The one-shot migrations run INSIDE server.listen's callback, i.e. AFTER this
  *  module already loaded data/usage-cache.json into `_rateLimitCache` at boot
@@ -353,8 +354,12 @@ function ingestPassiveUsage() {
     const cem = cst.loggedIn && cst.email ? String(cst.email).toLowerCase() : null;
     const cx = dec.filter((a) => a.backend === 'codex' && a.type === 'subscription');
     const cm = cem ? cx.find((a) => a.email && String(a.email).toLowerCase() === cem) : null;
-    if (!(cem && !cm && unsureOf(cx))) _codexUsageGlobalLink = { email: cst.email || null, loggedIn: !!cst.loggedIn, accountId: cm ? cm.id : null };
-  } catch { _codexUsageGlobalLink = { email: null, loggedIn: false, accountId: null }; }
+    _codexLinkUndecided = !!(cem && !cm && unsureOf(cx));
+    // a KEPT link counts only while its address is the machine login's present one (a person signed the machine's codex in as
+    // another identity: the old link names nobody now) — and an undecided pass merges nothing (summarizeCodexRateLimits)
+    if (!_codexLinkUndecided) _codexUsageGlobalLink = { email: cst.email || null, loggedIn: !!cst.loggedIn, accountId: cm ? cm.id : null };
+    else if (String(_codexUsageGlobalLink.email || '').toLowerCase() !== cem) _codexUsageGlobalLink = { email: cst.email || null, loggedIn: !!cst.loggedIn, accountId: null };
+  } catch { _codexUsageGlobalLink = { email: null, loggedIn: false, accountId: null }; _codexLinkUndecided = false; }
   let entries = [];
   try { entries = usageWrite.listCacheDir(USAGE_CACHE_DIR); } catch { entries = []; }
   for (const fn of entries) {
@@ -401,6 +406,8 @@ function ingestPassiveUsage() {
     }
     const actualEmail = _rateLimitCache?.orgEmail || null;
     linkUndecided = !m && !!em && !emailMatch && unsureOf(droster) && !(gOrg && roster.some((a) => _accountUsage[a.id]?.orgUuid === gOrg));
+    // the same gate as codex: a KEPT link counts only while its address is the machine login's present one
+    if (linkUndecided && String(_usageGlobalLink.email || '').toLowerCase() !== em) _usageGlobalLink = { ..._usageGlobalLink, email: st.email || null, loggedIn: !!st.loggedIn, accountId: null };
     if (!linkUndecided) _usageGlobalLink = {
       email: st.email || null, loggedIn: !!st.loggedIn, accountId: m ? m.id : null,
       // Stale-identity surfacing: what the token ACTUALLY belongs to, when the
@@ -663,7 +670,7 @@ async function refreshViaCliPanel(key) {
     // A PERSON'S ⟳ OR THE TICK'S PICK DECIDES A SPAWN (B-360d, 主开发 r1221): the account's sign-in read NOW, off the loop (awaited,
     // bounded by the file door's deadline), and the decision road's row decides; a sign-in that could not be read is refused by
     // name — no spawn, no failed probe booked, never «re-login»
-    const { since } = await accounts.signinFactsSettled([key], { withinMs: 0 });
+    const { since } = await accounts.signinFactsNow([key]);   // THIS account's folder only, bounded (a person's act)
     acctMeta = accounts.decisionRowOf(key, { since });
     if (!acctMeta || acctMeta.type !== 'subscription') return false;
     if (probeEligibility(acctMeta) === SIGNIN_UNKNOWN) {
@@ -1252,7 +1259,9 @@ app.post('/api/usage/refresh', async (req, res) => {
       const gl = accounts.subscriptionStatus();
       // WHICH LOGIN'S TOKEN READS THE PANEL is a DECISION on a person's ⟳ (B-360d, 主开发 r1221): the emails read NOW off the loop
       // (awaited); a row whose sign-in could not be read carries no email — no token chosen by it
-      const { since } = await accounts.signinFactsSettled(null, { withinMs: 0 });
+      // …the folders it COMPARES only, bounded: this account's for a named one; every claude subscription's for the machine login
+      const compared = isGlobal ? (accounts.list().accounts || []).filter((x) => oauthUsageAccount(x)).map((x) => x.id) : [key];
+      const { since } = await accounts.signinFactsNow(compared);
       const rowsNow = accounts.decisionList({ since }).accounts || [];
       if (!isGlobal) {
         const email = String((rowsNow.find((x) => x.id === key) || {}).email || '').toLowerCase();
@@ -1540,7 +1549,7 @@ function summarizeCodexRateLimits() {
   let overall = null;
   for (const s of Object.values(byAccount)) if (!overall || (s.fetchedAt || 0) > (overall.fetchedAt || 0)) overall = s;
   // Same-account merge (codex global ↔ linked named account): newest wins both.
-  const gid = _codexUsageGlobalLink.accountId;
+  const gid = _codexLinkUndecided ? null : _codexUsageGlobalLink.accountId;   // B-360d: never a merge on a link this pass could not decide (the claude road's own gate)
   if (gid) {
     const a = byAccount[gid], g = byAccount['__global_codex__'];
     const newest = (a && (!g || (a.fetchedAt || 0) > (g.fetchedAt || 0))) ? a : g;
@@ -1635,11 +1644,12 @@ app.post('/api/accounts/:id/reset-claim/dismiss', (req, res) => {
   (ok ? resetClaims.persisted() : Promise.resolve(true)).then((durable) => (durable === false ? notDurable() : res.json({ ok })), notDurable);
 });
 
-app.post('/api/usage/repair-identity', (req, res) => {
+app.post('/api/usage/repair-identity', async (req, res) => {
   const auth = String(req.headers.authorization || '');
   if (/^Bearer\s+(vsst_|jbt_)/i.test(auth)) return res.status(403).json({ error: 'human-triggered only', code: 'agent-forbidden' });
   if (typeof repairIdentityAnchors !== 'function') return res.status(503).json({ error: 'identity repair unavailable', code: 'no-engine' });
-  const rep = repairIdentityAnchors('manual');
+  let settled = null; try { settled = await accounts.signinFactsSettled(); } catch { }   // the decision road's facts first (B-360d)
+  const rep = repairIdentityAnchors('manual', { since: settled && settled.since });
   if (rep && rep.error) return res.status(500).json({ error: 'identity repair failed: ' + rep.error, code: 'repair-failed' });
   try { reloadRateLimitCache(); } catch { }
   try { for (const k of Object.keys(_onDemandUsageAt)) delete _onDemandUsageAt[k]; } catch { }

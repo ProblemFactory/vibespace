@@ -41,7 +41,7 @@ find "$HOME/.claude/sessions" -maxdepth 1 -name '*.json' 2>/dev/null | while rea
 done
 ${sweepSharedLegs()}`;
 }
-const { loginState, oatFileOf } = require('../login-expiry'); // PURE: refreshTokenExpiresAt -> ok/expiring/expired/logged-out/unknown; oatFileOf = OUR materialized long-lived-token file
+const { loginState, oatFileOf, OAT_FILE_MARK } = require('../login-expiry'); // PURE: refreshTokenExpiresAt -> ok/expiring/expired/logged-out/unknown; oatFileOf = OUR materialized long-lived-token file
 const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: THE declared settings table (design-harness-settings §2)
 const { cliConfigFile } = require('../harness-config');       // SHARED: the descriptor-side file object over the table's `files` entry
 const fs = require('fs');
@@ -326,6 +326,9 @@ module.exports = {
     parseAuth: parseClaudeAuth,
     // the files parseAuth and loginState open — the accounts list reads them OFF the loop (B-360d, src/account-display-facts.js)
     displayFiles: (dir) => [path.join(dir, '.credentials.json'), path.join(dir, '.claude.json')],
+    // …and what the list KEEPS of each after the parse (round wldn7whag): only what its list-time readers read — the login's own
+    // shape (claudeLoginState) and our long-lived-token mark; the settings file keeps NO text (parseAuth read its identity at landing)
+    displayKeep: (p) => (path.basename(p) === '.credentials.json' ? (o) => (o && typeof o === 'object' ? { claudeAiOauth: o.claudeAiOauth, ...(o[OAT_FILE_MARK] ? { [OAT_FILE_MARK]: o[OAT_FILE_MARK] } : {}) } : null) : null),
   },
   // AUTO-RESUME'S RESUME VERB (owner ruling 2026-09-08: auto-resume is generic,
   // "形式可以不一样 — 有些是发消息, 有些是 start turn 之类的固有指令"). This is

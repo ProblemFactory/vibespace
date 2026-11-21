@@ -304,8 +304,11 @@ app.get('/api/hosts/:id/accounts-status', async (req, res) => {
     if (accounts && r.hostSubEmails && r.platform && r.platform !== 'darwin') {
       // THE BACKFILL AND THE FOLD DECIDE on the rows' emails (B-360d, 主开发 r1221 — a person's act): the sign-ins read NOW off the
       // loop and awaited; a row whose sign-in could not be read is neither backfilled nor folded into
-      const { since } = await accounts.signinFactsSettled(null, { withinMs: 0 });
+      const compared = (accounts.list().accounts || []).filter((x) => oauthUsageAccount(x) || Object.prototype.hasOwnProperty.call(r.hostSubEmails, x.id)).map((x) => x.id);
+      const { since } = await accounts.signinFactsNow(compared);   // the rows it compares, read now, bounded
       const readNow = (x) => !x.facts || x.facts.state === 'read';
+      const unjudged = (accounts.decisionList({ since }).accounts || []).filter((x) => compared.includes(x.id) && !readNow(x));
+      if (unjudged.length) r.foldUnjudged = unjudged.map((x) => ({ id: x.id, name: x.name }));   // said: these rows were not compared
       for (const [dirId, email] of Object.entries(r.hostSubEmails)) {
         try {
           const em = String(email).trim().toLowerCase();
@@ -846,14 +849,17 @@ app.post('/api/accounts/subscription/:id/finalize', async (req, res) => {
     // and awaited (each ask bounded by the file door's deadline); a candidate whose sign-in could not be read is never folded
     // into (both records kept, as a failed merge keeps them). After the wait the record is asked again: a concurrent poll that
     // folded it already answered for it (mergeSubscription is synchronous — nothing runs between this check and that fold).
-    let dupOf = null;
+    let dupOf = null, foldUnjudged = null;
     if (fin?.loggedIn && fin?.email && !fin.localOnly && accounts) {
       const em = String(fin.email).trim().toLowerCase();
-      const { since } = await accounts.signinFactsSettled(null, { withinMs: 0 });   // every sign-in account's folder, read now
+      const compared = (accounts.list().accounts || []).filter((x) => x.id !== req.params.id && oauthUsageAccount(x)).map((x) => x.id);
+      const { since } = await accounts.signinFactsNow(compared);   // the folders it compares, read now, bounded
       if (!accounts.get(req.params.id)) return res.json({ success: true, ...fin, merged: true, account: null, foldedElsewhere: true });
-      dupOf = (accounts.decisionList({ since }).accounts || []).find((x) =>
-        x.id !== req.params.id && oauthUsageAccount(x) && (!x.facts || x.facts.state === 'read')
+      const rowsNow = (accounts.decisionList({ since }).accounts || []).filter((x) => compared.includes(x.id));
+      dupOf = rowsNow.find((x) => (!x.facts || x.facts.state === 'read')
         && String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase() === em) || null;
+      // WHAT COULD NOT BE COMPARED IS SAID: a fold that could not be judged leaves two rows of one account
+      if (!dupOf) foldUnjudged = rowsNow.filter((x) => x.facts && x.facts.state !== 'read').map((x) => ({ id: x.id, name: x.name, why: x.facts.state === 'unreadable' ? (x.facts.reason || 'unreadable') : 'not-read' }));
     }
     // The wake is FINGERPRINT-GATED where the sweep is not: this route is
     // polled every 3 s for 5 minutes and the sweep is local file reads while
@@ -904,7 +910,7 @@ app.post('/api/accounts/subscription/:id/finalize', async (req, res) => {
         return res.json({ success: true, ...fin, merged: false, mergeBlocked: 'a session using one of these accounts is running — stop it to auto-merge the duplicate' });
       }
     }
-    res.json({ success: true, ...fin, ...adoptFirstSignin(cardRow, fin, req.params.id) });
+    res.json({ success: true, ...fin, ...(foldUnjudged && foldUnjudged.length ? { foldUnjudged } : {}), ...adoptFirstSignin(cardRow, fin, req.params.id) });
   }
   catch (e) { res.status(400).json({ error: e.message }); }
 });

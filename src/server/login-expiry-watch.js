@@ -291,7 +291,7 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
 
   /** ONE pass over every subscription account. Returns { emitted, resolved }
    *  (the suite asserts on this; production ignores it). */
-  function sweep() {
+  function sweep({ since } = {}) {   // `since`: the instant the timer's own settle confirmed from (round wldn7whag: passed through)
     const emitted = [], resolved = [];
     let rows = [];
     try { rows = accounts.list().accounts || []; } catch (e) { log('[login-expiry] roster read failed:', e.message); return { emitted, resolved }; }
@@ -307,7 +307,7 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
       let info = null;
       // THE DECISION ROAD (B-360d, 主开发 r1221 — the timer row): the kept facts confirmed within its bound (the timer awaited the
       // confirmation off the loop); null = not read / unreadable / not confirmed: NO notice and NO retraction this sweep
-      try { info = accounts.decisionLoginStateOf(a.id, t); } catch { info = null; }
+      try { info = accounts.decisionLoginStateOf(a.id, t, since != null ? { since } : {}); } catch { info = null; }
       if (!info) continue;
       const name = a.name || a.id;
       const exp = info.refreshExpiresAt ?? null;
@@ -406,9 +406,9 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
     if (timer) return;
     timer = setTimeout(function tick() {
       // the sign-in facts confirmed OFF the loop first (B-360d: awaited, each ask bounded by the file door's deadline), then the sweep
-      Promise.resolve().then(() => accounts.signinFactsSettled()).catch(() => null).then(() => {
+      Promise.resolve().then(() => accounts.signinFactsSettled()).catch(() => null).then((settled) => {
         if (!timer) return;   // stopped while the facts were confirmed
-        try { sweep(); } catch (e) { log('[login-expiry] sweep failed:', e.message); }
+        try { sweep({ since: settled && settled.since }); } catch (e) { log('[login-expiry] sweep failed:', e.message); }
         timer = setTimeout(tick, sweepMs);
         if (timer.unref) timer.unref();
       });

@@ -296,7 +296,13 @@ async function measureTick0(shape, { slowUs = 0, pre = false, due = false } = {}
       now: () => T4, rand: () => 0.5,   // B-403e: what §3 hands the tick — a count no clock or die can move
     });
     // B-360d: the folders' sign-in facts read and their push sent BEFORE the measured tick — the tick then confirms nothing new and
-    // its count is its own (a push landing inside the tick's await added a list's own reads to one shape's count, one zone only)
+    // its count is its own (a push landing inside the tick's await added a list's own reads to one shape's count, one zone only).
+    // THE REVERTED COPY'S MOVING COUNTS (37180 / 35751, the DUE tick 9843 / 4565 — round wldn7whag's (13)), the cause READ: this
+    // world's store makes its OWN one-worker file door, and its settle SENT every folder's calls at once; a SafeFs call's deadline
+    // starts when it is sent (src/safe-fs.js _send), so on a loaded machine the last ones in the worker's queue ended «timed out»
+    // — those rows unreadable, the tick deciding nothing for them: fewer calls, more often in the longer reverted worlds. The
+    // product's cure is the keeper's own (it reads at most two folders at a time); the reader's other candidate (a push or the
+    // group memo landing inside the counting window) is closed by this settle + wait. The reverted copy stays judged by its bounds.
     await w.am.signinFactsSettled(); await new Promise((r) => setTimeout(r, 150));
     calls = 0; gap = 0; last = performance.now();
     const t0 = performance.now(); const p = loop.tick(); syncMs = performance.now() - t0;

@@ -189,7 +189,8 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   const root = mkd(`vs-probelog-why-${process.pid}-`), dataDir = path.join(root, 'data');
   const am = new AccountManager({ dataDir });
   // B-360d: the ⟳ door decides on the DECISION road's row (decisionRowOf); this world stubs a row's facts through am.list, so its
-  // decision row is read through that same (stubbed) list, on the decision road
+  // decision row is read through that same (stubbed) list, on the decision road — the REAL accessor (decisionRowOf, _decideSinceOf,
+  // signinFacts / signinFactsSettled / signinFactsNow) is judged by scripts/test-accounts-list-reads.mjs ⑤ ⑦ ⑧, not here
   am.decisionRowOf = (rid, o = {}) => { const was = am._decideSince; am._decideSince = am._decideSinceOf(o); try { return (am.list().accounts || []).find((x) => x.id === rid) || null; } finally { am._decideSince = was; } };
   const id = am.createSubscription({ name: 'Why Acct' }).id;
   fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 29 * 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
