@@ -661,13 +661,14 @@ console.log('— ⑦b B-e7c0 ON A PAIRED MACHINE (r723): the merge made ON the d
     const out = { diffs: [], withPerm: 0, denyKept: 0, denyHad: 0, n: 0 };
     for (let k = 0; k < 60; k++) {
       const person = {};
-      if (rnd(4)) person.permissions = { ...(rnd(2) ? { deny: [pick(['Bash(rm -rf:*)', 'Read(./.env)', 'WebFetch'])] } : {}), ...(rnd(2) ? { allow: [pick(['Read', 'Bash(git status:*)', 'Bash(vibespace-msg:*)'])] } : {}), ...(rnd(2) ? { ask: ['Bash(git push:*)'] } : {}), ...(rnd(3) ? {} : { defaultMode: pick(['plan', 'acceptEdits']) }) };
+      if (rnd(4)) person.permissions = { ...(rnd(2) ? { deny: rnd(8) ? [pick(['Bash(rm -rf:*)', 'Read(./.env)', 'WebFetch'])] : 'Bash(rm -rf:*)' } : {}), ...(rnd(2) ? { allow: [pick(['Read', 'Bash(git status:*)', 'Bash(vibespace-msg:*)'])] } : {}), ...(rnd(2) ? { ask: ['Bash(git push:*)'] } : {}), ...(rnd(3) ? {} : { defaultMode: pick(['plan', 'acceptEdits']) }) };
       if (rnd(2)) person.hooks = { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: `echo ${k}` }] }] };
       if (rnd(2)) person.env = { MINE: String(k), ...(rnd(2) ? { ANTHROPIC_BASE_URL: 'https://x.example' } : {}) };
       if (rnd(3) === 0) person.outputStyle = 'Explanatory';
+      if (rnd(3) === 0) person.autoContinueAtUsageLimit = !!rnd(2);   // round wsyj38hew (a): the person's own stated value stands on both roads
       const text = JSON.stringify(person);
       const opts = { cwd: '/home/u/proj', mode: pick(['chat', 'terminal']), neutralizeKeyHelper: true, keyHelperNamed: pick([true, null]), extraArgs: ['--settings', '/home/u/my.json'],
-        settings: { allowAgentTools: rnd(5) !== 0, ...(rnd(3) === 0 ? { outputStyle: 'Concise' } : {}) }, permissionMode: pick(['default', 'acceptEdits', 'plan', undefined]) };
+        settings: { allowAgentTools: rnd(5) !== 0, ...(rnd(3) === 0 ? { outputStyle: 'Concise' } : {}), ...(rnd(4) === 0 ? { autoContinueAtUsageLimit: true } : {}) }, permissionMode: pick(['default', 'acceptEdits', 'plan', undefined]) };
       const local = BP.settingsLayerOf(adp.buildSessionArgs({ ...opts, ownSettings: BP.ownSettingsOf(text).settings }).args);
       const layer = BP.settingsLayerOf(adp.buildSessionArgs(opts).args);
       const dev = merge({ ownText: text, layer, row: CLAUDE_CREDS.keyHelper }), dj = dev.ok ? JSON.parse(dev.json) : null;
@@ -675,14 +676,22 @@ console.log('— ⑦b B-e7c0 ON A PAIRED MACHINE (r723): the merge made ON the d
       if (canon(local) !== canon(dj)) out.diffs.push({ k, person, local, device: dj });
       if (layer && layer.permissions) out.withPerm++;
       if (person.permissions && person.permissions.deny) { out.denyHad++; if (dj && dj.permissions && canon(dj.permissions.deny) === canon(person.permissions.deny)) out.denyKept++; }
+      if ('autoContinueAtUsageLimit' in person) { out.acHad = (out.acHad || 0) + 1; if (dj && dj.autoContinueAtUsageLimit === person.autoContinueAtUsageLimit) out.acKept = (out.acKept || 0) + 1; }
     }
     return out;
   };
   const par = parity(BP.deviceMergeOf), parOld = parity(spread.deviceMergeOf);
-  console.log(`    (parity over ${par.n} generated starts: ${par.diffs.length} differ · layers carrying the agent's permissions: ${par.withPerm} · the person's deny kept ${par.denyKept} of ${par.denyHad} · the top-level spread: ${parOld.diffs.length} differ, deny kept ${parOld.denyKept} of ${parOld.denyHad})`);
-  ok(par.diffs.length === 0 && par.withPerm >= 20 && par.denyHad >= 10 && par.denyKept === par.denyHad,
+  console.log(`    (parity over ${par.n} generated starts: ${par.diffs.length} differ · layers carrying the agent's permissions: ${par.withPerm} · the person's deny kept ${par.denyKept} of ${par.denyHad} · the person's automatic-continue word kept ${par.acKept || 0} of ${par.acHad || 0} · the top-level spread: ${parOld.diffs.length} differ, deny kept ${parOld.denyKept} of ${parOld.denyHad})`);
+  ok(par.diffs.length === 0 && par.withPerm >= 20 && par.denyHad >= 10 && par.denyKept === par.denyHad && (par.acHad || 0) >= 8 && par.acKept === par.acHad,
     '⑦b THE ONE MERGE RULE: over 60 generated starts the REAL adapter\'s merge on this machine and a paired machine\'s merge of the set-aside layer are EQUAL — the person\'s deny / ask / allow rules, hooks and default mode kept, the agent\'s own allow rules added (the layer carries them on most starts)', par.diffs.slice(0, 2));
   ok(parOld.diffs.length > 0 && parOld.denyKept < parOld.denyHad, '⑦b RED CONTROL (the device merge as a top-level spread — the line round wgn4g2rf7 refused): the two roads differ and the person\'s deny is LOST where the layer carries the agent\'s permissions', { differ: parOld.diffs.length, denyKept: parOld.denyKept, denyHad: parOld.denyHad });
+  // round wsyj38hew's smalls, PURE: (a) the person's stated automatic-continue word stands; (b) a person's rule value of another kind
+  // is kept as it is (the hub's list not merged into it), never an empty list
+  const ml = BP.mergeLayer ? BP.mergeLayer : require(path.join(REPO, 'src/settings-merge.js')).mergeLayer;
+  const sm = ml({ autoContinueAtUsageLimit: true, permissions: { deny: 'Bash(rm:*)', allow: ['Read'] }, hooks: { Stop: 'echo x' } }, { autoContinueAtUsageLimit: false, permissions: { allow: ['Bash(vibespace-msg:*)'], deny: ['X'] }, hooks: { Stop: [{ type: 'command' }] }, apiKeyHelper: '' });
+  console.log(`    (the smalls' merge: ${JSON.stringify(sm)})`);
+  ok(sm.autoContinueAtUsageLimit === true && sm.permissions.deny === 'Bash(rm:*)' && JSON.stringify(sm.permissions.allow) === JSON.stringify(['Read', 'Bash(vibespace-msg:*)']) && sm.hooks.Stop === 'echo x' && sm.apiKeyHelper === '',
+    '⑦b PURE mergeLayer: the person\'s own automatic-continue word stands; a rule value or a hooks event of another kind (a string) is KEPT as it is, the hub\'s list not merged into it — never an empty list in silence; the hub\'s other keys win', sm);
   // THE HUB'S ONE ASK (src/server/settings-merge-device.js) over stand-in agents
   const ASK = require(path.join(REPO, 'src/server/settings-merge-device.js'));
   const hostsOf = (dm) => ({ deviceBounded: async () => dm });

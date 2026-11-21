@@ -1588,7 +1588,13 @@ const SETTINGS_DIR = path.join(STATE, 'settings');
 const mergedState = async (sid) => {
   const pm = pipeSessions._meta(sid);
   if (pm) return pm.exited !== undefined || !pipeSessions._childAlive(pm) ? 'ended' : 'alive';
-  try { const km = JSON.parse(await fs.promises.readFile(path.join(process.env.VIBESPACE_KEEPER_DIR || path.join(os.homedir(), '.vibespace', 'run'), sid + '.json'), 'utf8')); return km && km.exited !== undefined ? 'ended' : 'alive'; } catch { return 'unknown'; }
+  try {
+    const km = JSON.parse(await fs.promises.readFile(path.join(process.env.VIBESPACE_KEEPER_DIR || path.join(os.homedir(), '.vibespace', 'run'), sid + '.json'), 'utf8'));
+    if (!km || typeof km !== 'object') return 'unknown';
+    if (km.exited !== undefined) return 'ended';
+    // alive only while its keeper IS alive (its recorded birth); a keeper that died without writing «exited» (a kill, a reboot) is unknown — aged out
+    return Number(km.keeperPid) > 1 && km.keeperStart && pidStartTime(Number(km.keeperPid)) === km.keeperStart ? 'alive' : 'unknown';
+  } catch { return 'unknown'; }
 };
 const sweepSettings = () => { machineProbes.sweepMergedSettings(SETTINGS_DIR, { stateOf: mergedState }).catch(() => { }); };
 const _pipeSweep = setInterval(() => { try { pipeSessions.sweep(); } catch { } sweepSettings(); }, 3600000);

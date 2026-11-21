@@ -50,23 +50,37 @@ function layerRefusal(layer) {
 /** THE ONE MERGE RULE of a person's settings (`base`) and a layer the hub adds (`layer`), on BOTH machines' roads (主开发 r895, the
  *  must of round wgn4g2rf7: a top-level spread let the layer's `permissions` — the agent's own allow rules, on by default — replace
  *  the person's deny / ask / allow rules): the person's rule lists (permissions.allow / ask / deny), their hooks and their env names
- *  SURVIVE — the layer's entries are ADDED after them, none twice (an env name both carry: the layer's); the person's other
- *  permission keys (their default mode) stand; any OTHER
+ *  SURVIVE — the layer's entries are ADDED after them, none twice (an env name both carry: the layer's); a person's value of
+ *  another kind (a string where a list is read) is KEPT as it is; the person's other permission keys (their default mode) and
+ *  the words the person's file keeps when it states them (PERSON_STANDS: the automatic continue) stand; any OTHER
  *  key of the layer wins (the hub's billing and helper names: apiKeyHelper, the output style, the statusline …). The adapter's
  *  own merge on this machine (src/adapters/claude-code.js mergeSettings) is this function; the device merge below is too. PURE. */
 const RULE_LISTS = Object.freeze(['allow', 'ask', 'deny']);
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
-const unionOf = (a, b) => { const out = Array.isArray(a) ? a.slice() : []; for (const x of (Array.isArray(b) ? b : [])) if (!out.some((y) => JSON.stringify(y) === JSON.stringify(x))) out.push(x); return out; };
+// (linear: a Set of the entries' spellings — never a scan of the person's list per entry on the hub's loop)
+const unionOf = (a, b) => {
+  const out = Array.isArray(a) ? a.slice() : [], seen = new Set(out.map((x) => JSON.stringify(x)));
+  for (const x of (Array.isArray(b) ? b : [])) { const k = JSON.stringify(x); if (!seen.has(k)) { seen.add(k); out.push(x); } }
+  return out;
+};
+// the keys whose value the PERSON's file keeps when it states one (this machine's adapter adds them only where the person's file is
+// silent — src/adapters/claude-code.js: the automatic continue at a usage limit); on a paired machine the layer carries the default
+const PERSON_STANDS = Object.freeze(['autoContinueAtUsageLimit']);
 function mergeLayer(base, layer) {
   const out = isObj(base) ? { ...base } : {};
   for (const [k, v] of Object.entries(isObj(layer) ? layer : {})) {
+    if (PERSON_STANDS.includes(k) && Object.prototype.hasOwnProperty.call(out, k)) continue;   // the person's own stated value stands
     if (k === 'permissions' && isObj(v) && isObj(out.permissions)) {
+      // the person's other permission words stand over the layer's (no patch sets one today — a later patch that needs to win names it here)
       const mine = out.permissions, p = { ...v, ...mine };
-      for (const r of RULE_LISTS) if (r in mine || r in v) p[r] = unionOf(mine[r], v[r]);
+      for (const r of RULE_LISTS) {
+        if (r in mine && !Array.isArray(mine[r])) p[r] = mine[r];   // a person's value of another kind is KEPT as it is (the CLI judges it) — never an empty list in silence
+        else if (r in mine || r in v) p[r] = unionOf(mine[r], v[r]);
+      }
       out.permissions = p;
     } else if (k === 'hooks' && isObj(v) && isObj(out.hooks)) {
       const h = { ...out.hooks };
-      for (const [ev, list] of Object.entries(v)) h[ev] = unionOf(h[ev], list);
+      for (const [ev, list] of Object.entries(v)) h[ev] = ev in h && !Array.isArray(h[ev]) ? h[ev] : unionOf(h[ev], list);
       out.hooks = h;
     } else if (k === 'env' && isObj(v) && isObj(out.env)) out.env = { ...out.env, ...v };   // the person's own names kept; the hub's win where both name one
     else out[k] = v;
