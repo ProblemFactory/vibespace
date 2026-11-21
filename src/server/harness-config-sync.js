@@ -82,7 +82,7 @@ function accessorsFor({ serverSetting, harnesses }) {
   return { harnessSetting, harnessDeclares, harnessSpawnSettings };
 }
 
-function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hookRegistrationSafe = () => true, ownerWriteRefusal = null, refuseOwnerWrite = null, rootRecovery = null, log = console.log, warn = console.warn, home = null }) {
+function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hookRegistrationSafe = () => true, ownerWriteRefusal = null, refuseOwnerWrite = null, rootRecovery = null, log = console.log, warn = console.warn, home = null, helperPath = null, starter = null, hooksWanted = () => false, runner = null }) {
   // THE ROOT VERDICT (src/server-root.js, read by agent-tool-generators): the
   // refusal object when this server must not write the owner's CLI config.
   // Without the server's verdict (tests, tooling) an unsafe flag still refuses.
@@ -122,6 +122,22 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
       if (bad != null) warn(`[cli-config] ${h.id}.${row.key} = ${JSON.stringify(bad)} is not one of ${row.options.map((o) => JSON.stringify(o.value)).join('|')} — the default ${JSON.stringify(row.default)} rides instead (the Settings window only offers the listed values)`);
     }
   }
+  // B-ddf3 unit 2 line 1 (lane bl-scratch, the coordinator's r1404 / r1407): THIS MACHINE IS SERVED BY THE SHIPPED HELPER,
+  // started through the starter (src/server/cli-config-runner.js) — the same file every paired machine runs; nothing of the
+  // CLI's config is written by the hub's own process any more, and there is no in-process fallback (a failed or late landing
+  // is said by name). ONE run writes our hook entries (when `hooksWanted()`) AND the managed keys.
+  const cliRunner = runner || (helperPath ? require('./cli-config-runner.js').createCliConfigRunner({ starter: starter || require('./child-starter.js').childStarter(), helperPath, home, journal: log, warn }) : null);
+  /** the plan for THIS machine: the managed keys, with our hook entries only when they are wanted (integration on, no opt-out) */
+  function planFor({ hooks = false } = {}) {
+    const plan = cliConfigPlan();
+    if (!hooks) for (const f of plan.files || []) delete f.hooks;
+    return plan;
+  }
+  /** THE ONE WRITE ROAD of this machine's CLI config → Promise<landing> ({ ok, receipts, created, why } | a refusal) */
+  function applyThisMachine({ reason = 'apply', hooks = hooksWanted(), strip = false } = {}) {
+    if (!cliRunner) return Promise.resolve({ ok: false, receipts: [], created: [], why: 'no helper road on this server (no helper path given): nothing written' });
+    return cliRunner.apply(() => encodePlan(planFor({ hooks: strip ? false : hooks })), reason, { uninstall: strip });
+  }
   let heldSkipped = false;
   function syncCliConfig({ reason = 'boot' } = {}) {
     // B-225b (round wyzvr7567's MUST 2 — a WRITE TO A PERSON'S OWN FILE takes its strict side): while the SETTINGS are held no
@@ -129,22 +145,23 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     let held = null;
     try { held = serverSetting(Symbol.for('vibespace.settings-held')) || null; } catch { held = null; }
     heldSkipped = !!held;   // (主开发 r552: a sync the hold skipped is OWED — the lift replays it, whatever its rows say)
-    if (held) { log(`[cli-config] skipped (${reason}): the settings could not be read (${held.kind}${held.code ? ', ' + held.code : ''}) — no CLI config is written until they read`); return { skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }; }
+    if (held) { log(`[cli-config] skipped (${reason}): the settings could not be read (${held.kind}${held.code ? ', ' + held.code : ''}) — no CLI config is written until they read`); return Promise.resolve({ skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }); }
     warnRefusedValues();
     // ONE journal line per boot for every refused writer (refuseOwnerWrite
     // latches it); without the server's verdict, this module says it itself.
     const refused = refusalNow();
-    if (refused) { if (typeof refuseOwnerWrite === 'function') refuseOwnerWrite(); else log(`[cli-config] skipped (${reason}): ${refused.why}`); return { skipped: true, refused }; }
-    const plan = cliConfigPlan();
-    let r;
-    try { r = applyConfigPlan(plan, { home }); } catch (e) { warn(`[cli-config] failed (${reason}): ${e.message}`); return { error: e.message }; }
-    lastWrite = { at: Date.now(), reason, receipts: r.receipts, files: r.files };
-    for (const f of r.files || []) if (f.created) log(`[cli-config] created ~/${f.rel} (the CLI had never written one) (${reason})`);
-    for (const x of r.receipts) {
-      if (x.state === 'applied') log(`[cli-config] ${x.harness}.${x.key}: ${x.path} = ${JSON.stringify(x.want)} written to ~/${x.rel} (${reason})`);
-      else if (x.state !== 'unchanged') warn(`[cli-config] ${x.harness}.${x.key}: not applied to ~/${x.rel} — ${x.state}${x.reason ? ': ' + x.reason : ''}`);
-    }
-    return r;
+    if (refused) { if (typeof refuseOwnerWrite === 'function') refuseOwnerWrite(); else log(`[cli-config] skipped (${reason}): ${refused.why}`); return Promise.resolve({ skipped: true, refused }); }
+    // → Promise: the landing of the helper's run on this machine (one in flight, the newest waiting) — never an in-process write
+    return applyThisMachine({ reason }).then((r) => {
+      if (!r.ok) { warn(`[cli-config] failed (${reason}): ${r.why}`); return { error: r.why, receipts: r.receipts || [], files: [] }; }
+      const files = (r.created || []).map((c) => ({ harness: c.harness, rel: c.rel, created: true }));
+      lastWrite = { at: r.at, reason, receipts: r.receipts, files };
+      for (const x of r.receipts) {
+        if (x.state === 'applied') log(`[cli-config] ${x.harness}.${x.key} = ${JSON.stringify(x.want)} written on this machine (${reason})`);
+        else if (x.state !== 'unchanged') warn(`[cli-config] ${x.harness}.${x.key}: not applied on this machine — ${x.state}${x.reason ? ': ' + x.reason : ''}`);
+      }
+      return { receipts: r.receipts, files, landing: r };
+    });
   }
   /** Fresh receipts for the UI: the plan's managed keys read off disk NOW, plus
    *  the last in-memory local write (age shown as "written N minutes ago"). */
@@ -173,8 +190,10 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
   /** The settings-write diff hook (persistence.js onSettingsWrite). */
   function onSettingsWrite(next, prev) {
     const n = next || {}, p = prev || {};
-    if (heldSkipped) syncCliConfig({ reason: 'the settings read again' });   // the lift's own replay: rows at their defaults differ from no «before»
-    else if (cliConfigKeys().some((k) => n[k] !== p[k])) syncCliConfig({ reason: 'settings change' });
+    // (b) the landing is RETURNED: the settings write's answer waits for it (or says by name that it did not land)
+    let landing = null;
+    if (heldSkipped) landing = syncCliConfig({ reason: 'the settings read again' });   // the lift's own replay: rows at their defaults differ from no «before»
+    else if (cliConfigKeys().some((k) => n[k] !== p[k])) landing = syncCliConfig({ reason: 'settings change' });
     for (const { harness, row, path } of liveRows()) {
       if (n[path] === p[path]) continue;
       const value = coerce(row, n[path]);
@@ -187,6 +206,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
         } catch (e) { warn(`[${row.key}] ${sid}: ${e.message}`); }
       }
     }
+    return landing;
   }
   /** Contributed (non-built-in) harnesses' tables for /api/home so the client
    *  can derive their Settings sections (design §7). */
@@ -194,7 +214,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     return harnesses.list().filter((h) => !harnesses.isBuiltin(h.id) && h.settings).map((h) => ({ id: h.id, settings: h.settings }));
   }
 
-  return { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigKeys, cliConfigPlan, cliConfigPlanB64, syncCliConfig, cliConfigStatus, onSettingsWrite, liveRows, contributedTables, HARNESS_SETTINGS };
+  return { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigKeys, cliConfigPlan, cliConfigPlanB64, syncCliConfig, applyThisMachine, cliRunner, cliConfigStatus, onSettingsWrite, liveRows, contributedTables, HARNESS_SETTINGS };
 }
 
 module.exports = { create, configPlanSpecs, accessorsFor };
