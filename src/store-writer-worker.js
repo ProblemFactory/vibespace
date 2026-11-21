@@ -119,14 +119,15 @@ function rewriteJob(m, fs) {
   if (m.mode != null) { try { fs.chmodSync(m.tmp, m.mode); } catch { /* a filesystem without modes */ } }
   fs.renameSync(m.tmp, m.file);   // the commit point: the old whole file or the new one
   const UNSYNCABLE = ['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'EISDIR', 'EPERM', 'EACCES'];   // a storage that refuses a directory's fsync (some FUSE / network mounts)
-  let dfd = null;
-  try { dfd = fs.openSync(path.dirname(m.file), 'r'); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) throw e; }
+  // a failure from here on comes AFTER the rename: the file IS rewritten (its lines in it) — said by its own code, ERENAMEDNOSYNC,
+  // never as a failed rewrite (主开发 r915 2)
+  let after = null, dfd = null;
+  try { dfd = fs.openSync(path.dirname(m.file), 'r'); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) after = e; }
   if (dfd != null) {
-    let syncErr = null;
-    try { fs.fsyncSync(dfd); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) syncErr = e; }
-    fs.closeSync(dfd);   // its failure is the job's
-    if (syncErr) throw syncErr;
+    try { fs.fsyncSync(dfd); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) after = e; }
+    try { fs.closeSync(dfd); } catch (e) { if (!after) after = e; }
   }
+  if (after) throw Object.assign(new Error(`the rewrite landed (renamed over the file); its directory's fsync did not: ${(after && (after.code || after.message)) || after}`), { code: 'ERENAMEDNOSYNC' });
 }
 /** ONE job. A whole-file write: temp, every byte, fsync (B-9275), close (its error is the write's), rename — NOTHING is renamed
  *  over the store unless every byte was written, synced and the temp closed without error. An APPEND (the acts journal): every byte,
@@ -134,6 +135,7 @@ function rewriteJob(m, fs) {
 function writeJob(m, fs = FS) {
   if (m.rewrite) return rewriteJob(m, fs);
   if (m.append) {
+    sweepTemps(fs, m.file);   // row B-360d: a rewrite killed mid-copy left its temp beside an APPEND store — the first append of the file in this process removes another process's
     // the ONE open of an append (made again after a ring's rotation); a missing parent directory is made here, on the writer's
     // thread, ONLY for a store that asks (`m.makeDir` — B-48a4: the hub's audit rings, whose old main-thread code made it per line)
     const openA = () => {

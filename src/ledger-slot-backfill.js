@@ -172,7 +172,7 @@ function readOtelStash(historyDir) {
   let rows = 0, fd = null;
   try { fd = fs.openSync(path.join(historyDir, 'otel-truth.ndjson'), 'r'); } catch (e) { if (e && e.code === 'ENOENT') return { byRid, bySid, rows }; throw e; }
   try {
-    eachLineSync(fd, (buf, a, nl) => {
+    const st = eachLineSync(fd, (buf, a, nl) => {
       let r; try { r = JSON.parse(buf.toString('utf8', a, nl)); } catch { return; }
       if (!r || !r.acctKnown || !r.rid) return;
       rows++;
@@ -180,6 +180,7 @@ function readOtelStash(historyDir) {
       if (!byRid.has(r.rid)) byRid.set(r.rid, { acct, sid: r.sid || null, ts: Number(r.ts) || 0 });
       if (r.sid) { const l = bySid.get(r.sid) || []; l.push({ acct, ts: Number(r.ts) || 0 }); bySid.set(r.sid, l); }
     }, { fs });
+    if (st.long) console.warn(`[migrate] the OTel stash holds ${st.long} line(s) longer than a read — skipped whole (no record of ours is that long)`);
   } finally { try { fs.closeSync(fd); } catch (e) { console.warn(`[migrate] the OTel stash's descriptor did not close (${e && e.message}) — its rows were read`); } }
   return { byRid, bySid, rows };
 }

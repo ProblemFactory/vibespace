@@ -21,7 +21,6 @@
 // VS_LONG_BYTES (default 540 000 000; 0 skips part 2, said).
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { checker } from './lib/check.mjs';
@@ -32,7 +31,13 @@ const { ok, report } = checker();
 const num = (v, d) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const TARGET = num(process.env.VS_STASH_BYTES, 480e6), OLD_SHARE = num(process.env.VS_STASH_OLD_SHARE, 0.266), LONG = num(process.env.VS_LONG_BYTES, 540e6);
 const DAY = 86400e3, NOW = Date.now(), CAP = 60000, UNKNOWN_EVERY = 1000, V8_LONGEST = 536870888;
-const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-otel-replay-'));
+// THE PLACED FILES LIVE ON DISK (主开发 r915's MUST): the scratch roots' DISK one (src/fixture-guard.js TMP_ROOTS[1], /var/tmp) —
+// never the system temp folder, which on the hub box is memory — and are removed at EVERY exit: the end, a red, a throw, a signal
+const DISK = require('../src/fixture-guard.js').TMP_ROOTS[1];   // relative to this file: the scratch roots' second, the disk one
+const ROOT = fs.mkdtempSync(path.join(DISK, 'vs-otel-replay-'));
+const endRoot = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch (e) { process.stderr.write(`the scratch ${ROOT} could not be removed: ${e.message}\n`); } };
+process.on('exit', endRoot);
+for (const [sig, n] of [['SIGINT', 2], ['SIGTERM', 15], ['SIGHUP', 1]]) process.on(sig, () => { endRoot(); process.exit(128 + n); });
 const say = (x) => console.log('  · ' + x);
 const mib = (b) => (b / 1048576).toFixed(1) + ' MiB';
 const ORGS = [0, 1, 2, 3].map((k) => '0b5e7d20-0000-4000-8000-0000000000' + String(k).padStart(2, '0'));

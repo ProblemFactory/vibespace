@@ -208,26 +208,33 @@ const PAYLOAD = (recs) => ({
   await ingest3.replayed;
   ok(ingest3.stats().rids > 0 && (await ingest3.observedOrgForRid('req_011TESTTRUTH000000000001')) === 'sub-true', 'B-1319: …its replay fills the map by itself (stats, which never finishes it, sees the rows)');
   const stash3 = path.join(dir, 'usage-history', 'otel-truth.ndjson'), big = JSON.stringify({ rid: 'req_pad', ts: Date.now(), acct: 'sub-true', acctKnown: true, pad: 'p'.repeat(2000) }) + '\n';
-  fs.appendFileSync(stash3, big.repeat(Math.ceil(12.2 * 1048576 / big.length)));
-  // row B-360d (主开发 r738 Q1): THE KEEP RULE FOLLOWS THE STASH'S READERS — a trim only once the migrations' ledger records the
-  // ledger backfill (it reads every old row) as run
+  const oldBig = JSON.stringify({ rid: 'req_oldpad', ts: Date.now() - 40 * 86400e3, acct: 'sub-true', acctKnown: true, pad: 'o'.repeat(2000) }) + '\n';
+  // row B-360d: the stash past FILE_MAX — the posts' rows, ~6.2 MB of fresh rows and ~6.6 MB of rows past the 30-day horizon
+  fs.appendFileSync(stash3, big.repeat(Math.ceil(6.2 * 1048576 / big.length)) + oldBig.repeat(Math.ceil(6.6 * 1048576 / oldBig.length)));
   const ledger3 = path.join(dir, 'migrations.json'), ran3 = JSON.stringify({ applied: { '2026-09-backfill-ledger-by-slot': Date.now() - 86400e3 } });
-  fs.writeFileSync(ledger3, ran3);
-  const st0 = fs.statSync(stash3); await mk3().replayed; await new Promise((r) => setTimeout(r, 200));
-  ok(fs.statSync(stash3).ino === st0.ino && fs.statSync(stash3).size === st0.size, 'B-1319: a 12 MB+ stash with nothing to trim is NOT rewritten (it used to be, whole, at every boot)');
-  fs.appendFileSync(stash3, JSON.stringify({ rid: 'req_old', ts: Date.now() - 40 * 86400e3, acct: 'sub-true', acctKnown: true }) + '\n');
-  await mk3().replayed; for (let k = 0; k < 50 && fs.statSync(stash3).ino === st0.ino; k++) await new Promise((r) => setTimeout(r, 50));
-  ok(fs.statSync(stash3).ino !== st0.ino && !fs.readFileSync(stash3, 'utf8').includes('req_old') && fs.readFileSync(stash3, 'utf8').includes('req_011TESTTRUTH000000000001'), 'B-1319: …one past the 30-day horizon is trimmed — the rewrite lands off the loop (a new file renamed in), the fresh rows kept');
-  { // WHERE THE MIGRATION IS NOT RECORDED AS RUN the stash is kept WHOLE, said once a start — never the 30-day cut before it read its rows
-    fs.unlinkSync(ledger3);
-    fs.appendFileSync(stash3, JSON.stringify({ rid: 'req_old2', ts: Date.now() - 40 * 86400e3, acct: 'sub-true', acctKnown: true }) + '\n');
-    const st1 = fs.statSync(stash3), said = [], log0 = console.log; console.log = (...a) => { said.push(a.join(' ')); };
-    const SWk = require(REPO + '/src/store-writer.js').storeWriter(), dzk = SWk.dirty; let owedK = false;
-    SWk.dirty = function (f, o) { if (o && o.name === 'otel-truth.write') owedK = true; return dzk.call(this, f, o); };   // a trim owed to the writer = a rewrite on its way
+  const SWk = require(REPO + '/src/store-writer.js').storeWriter();
+  /** one start over `dir`: whether a trim was owed to the writer, and what the ingest said */
+  const start3 = async () => {
+    const said = [], log0 = console.log, dzk = SWk.dirty; let owed = false;
+    console.log = (...a) => { said.push(a.join(' ')); };
+    SWk.dirty = function (f, o) { if (o && o.name === 'otel-truth.write') owed = true; return dzk.call(this, f, o); };   // a trim owed = a rewrite on its way
     try { await mk3().replayed; } finally { console.log = log0; SWk.dirty = dzk; }
-    ok(!owedK && fs.statSync(stash3).ino === st1.ino && fs.statSync(stash3).size === st1.size && fs.readFileSync(stash3, 'utf8').includes('req_old2') && said.filter((l) => l.includes('kept WHOLE')).length === 1,
-      'row B-360d: the ledger backfill migration NOT recorded as run ⇒ a stash with a line past the horizon is kept WHOLE (that migration reads every old row), said once', said.join(' | '));
-    fs.writeFileSync(ledger3, ran3);
+    return { owed, said };
+  };
+  { // (1) THE KEEP RULE FOLLOWS THE STASH'S READERS (主开发 r738 Q1): the ledger backfill not recorded as run ⇒ kept WHOLE, said once
+    const st1 = fs.statSync(stash3), k = await start3();
+    ok(!k.owed && fs.statSync(stash3).ino === st1.ino && fs.statSync(stash3).size === st1.size && fs.readFileSync(stash3, 'utf8').includes('req_oldpad') && k.said.filter((l) => l.includes('kept WHOLE')).length === 1,
+      'row B-360d: the ledger backfill migration NOT recorded as run ⇒ a stash with rows past the horizon is kept WHOLE (that migration reads every old row), said once', k.said.join(' | '));
+  }
+  // (2) recorded ⇒ the rows past the horizon, MORE than what it keeps, are trimmed by the stash's writer: a new file renamed in
+  fs.writeFileSync(ledger3, ran3);
+  const st0 = fs.statSync(stash3); await mk3().replayed; for (let k = 0; k < 50 && fs.statSync(stash3).ino === st0.ino; k++) await new Promise((r) => setTimeout(r, 50));
+  ok(fs.statSync(stash3).ino !== st0.ino && !fs.readFileSync(stash3, 'utf8').includes('req_oldpad') && fs.readFileSync(stash3, 'utf8').includes('req_011TESTTRUTH000000000001') && fs.readFileSync(stash3, 'utf8').includes('req_pad'), 'B-1319 / B-360d: rows past the 30-day horizon — more than what it keeps — are trimmed by the stash\'s writer (a new file renamed in), the fresh rows kept');
+  { // (3) THE THRESHOLD (主开发 r915 1; B-1319's «nothing to trim» is its case of 0): a 12 MB+ stash whose droppable rows are fewer than
+    // what it keeps is NOT rewritten — a start then reads at most about twice the kept set, never a rewrite at every start
+    fs.appendFileSync(stash3, big.repeat(Math.ceil(6.5 * 1048576 / big.length)) + JSON.stringify({ rid: 'req_old', ts: Date.now() - 40 * 86400e3, acct: 'sub-true', acctKnown: true }) + '\n');
+    const st2 = fs.statSync(stash3), k = await start3();
+    ok(st2.size > 12 * 1048576 && !k.owed && fs.statSync(stash3).ino === st2.ino && fs.statSync(stash3).size === st2.size && fs.readFileSync(stash3, 'utf8').includes('req_old"'), `B-1319 / B-360d: a ${st2.size}-byte stash with one row past the horizon (it would drop less than it keeps) is NOT rewritten`, k.said.join(' | '));
   }
 
   // lane ci-351-reds — THE REPLAY IN TIME SLICES IS THE SAME REPLAY. Its 20 000-line slice took 31 ms on the measured boot
@@ -242,7 +249,7 @@ const PAYLOAD = (recs) => ({
     const OnePass = mutantCopies('otel-truth-slice', REPO).load('src/server/otel-ingest.js', editAnchor(oisrc, ONE, () => 'const STASH_READ = { readBytes: 64 * 1048576, maxLine: 64 * 1048576, sliceMs: Infinity, turn: () => Promise.resolve() };', "src/server/otel-ingest.js"), 'one-pass');   // B-0d3e: its anchor judged by name
     const now = Date.now(), rows = [];
     for (let k = 0; k < 90000; k++) {
-      const old = k % 7 === 3, known = k % 5 !== 1;
+      const old = k % 7 < 4, known = k % 5 !== 1;   // row B-360d: most of it past the horizon — the trim drops more than it keeps (the threshold, r915)
       rows.push(JSON.stringify({ rid: `req_slice${String(k).padStart(6, '0')}`, ts: old ? now - 40 * 86400e3 : now - k * 1000, acct: known ? `sub-${k % 3}` : null, acctKnown: known, pad: 'q'.repeat(90) }));
       if (k === 4000) rows.push(''); if (k === 9000) rows.push('{"rid":"req_torn","ts":');
     }
@@ -475,6 +482,14 @@ const PAYLOAD = (recs) => ({
   const code = (f) => read(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   ok(!/setTruthLookup\s*\(/.test(code('server.js')), 'server.js EXECUTES no setTruthLookup call at all — the OTel map may never key an attribution again (it names the SPAWN-time identity)');
   ok(!/\btruthLookup\b/.test(code('src/server/otel-ingest.js')) && /observedOrgForRid\(rid\)/.test(oi0), 'the ingest exports the map under a name that says what it is (observedOrgForRid), so a re-wire cannot be a copy-paste');
+  { // row B-360d (moved from the heavy test-otel-replay-slices, r915's round): the source census, on every build
+    const strip = (t) => t.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l.replace(/(^|\s)\/\/.*$/, '$1'))).join('\n');
+    const SYNC = /\bfs\.(?:readFileSync|readSync|existsSync|statSync|renameSync)\(\s*file\b|\bfinishReplay\b/g;
+    const cur = strip(fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8')), rel = strip(fs.readFileSync(path.join(REPO, 'scripts/fixtures/otel-replay/otel-ingest-944de13f9.js.frozen'), 'utf8'));
+    ok(!(cur.match(SYNC) || []).length && (rel.match(SYNC) || []).length >= 4, `row B-360d: no synchronous read of the stash left in the ingest (the release frozen beside it had ${(rel.match(SYNC) || []).length}: finishReplay, its existsSync + readFileSync, the trim's statSync + renameSync)`, cur.match(SYNC));
+    const ID = '2026-09-backfill-ledger-by-slot', MIG = fs.readFileSync(path.join(REPO, 'src/server/migrations.js'), 'utf8'), at = MIG.indexOf(`id: '${ID}'`), row = at < 0 ? '' : MIG.slice(at, MIG.indexOf('const rep = backfillLedgerBySlot(', at) + 1);
+    ok(at > 0 && row.length > 1 && !/\btry\s*\{/.test(row.slice(row.indexOf('run() {'))) && cur.includes(`const BACKFILL_ID = '${ID}';`), 'row B-360d: the hub\'s backfill row runs the backfill with no catch of its own (a failed read reaches the runner), and the ingest\'s keep rule names that migration');
+  }
   const oi = read('src/server/otel-ingest.js');
   ok(/registerRoutes\(app\)\s*\{[\s\S]*?\/otel\/v1\/logs[\s\S]*?\/otel\/v1\/metrics[\s\S]*?\/otel\/v1\/traces/.test(oi), 'the module registers all three OTLP signals itself');
   // arrival counters (2.367.1): "the CLI exported nothing" and "we dropped what

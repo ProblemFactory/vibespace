@@ -42,10 +42,13 @@
 //      observed org into attribution.ndjson, i.e. taught every non-rid
 //      consumer the same wrong answer permanently. Now the disagreement is
 //      COUNTED and LOGGED (noteDisagreement) and nothing else.
-//   ③ raw append-only stash (data/usage-history/otel-truth.ndjson) — models
-//      re-derivable offline forever, same principle as the anchors store.
-//      UNCHANGED: the observation is still worth keeping, it is simply not
-//      the key. Each row records the walk's slot beside the label
+//   ③ raw append-only stash (data/usage-history/otel-truth.ndjson) — the
+//      observation is still worth keeping, it is simply not the key. WHAT IS
+//      KEPT (row B-360d, 主开发 r738): until the migrations' ledger records the
+//      ledger backfill as run, the WHOLE file (that migration reads every old
+//      row); once recorded, the newest 60 000 known-org lines inside 30 days
+//      (~2.4 days at the owner's ~25 000 lines a day) and every unknown-org
+//      line inside 30 days — an older request is no longer in it. Each row records the walk's slot beside the label
 //      (`labelMatchesSlot` since 2026-09-30; rows before that say `agreed`).
 //   ④ observedOrgFor(sid) — the corroboration query — RETIRED 2026-09-30
 //      with the engine's corroborateReading(): the label corroborates nothing.
@@ -61,7 +64,7 @@ const { parseOtlpLogs } = require('../otel-truth.js');
 const { eachLine } = require('../ndjson-lines.js'); // row B-360d: the spill and the stash read by their lines in bounded reads (one descriptor each)
 const { spawnOf } = require('../harnesses'); // the spawn.otelExport row: whose accounts OTel can name
 
-const MAX_TRUTH = 60000;      // in-memory rid map cap (~a week of heavy storms)
+const MAX_TRUTH = 60000;      // in-memory rid map cap — and the stash's kept known lines once the backfill ran: ~2.4 days at the owner's ~25 000 lines a day (r738)
 const FILE_MAX = 12 * 1024 * 1024; // boot-time trim threshold for the stash
 const KEEP_MS = 30 * 86400e3; // trim horizon
 // row B-360d (主开发 r713 / r725 / r738): ONE read of the spill or the stash is at most READ_BYTES (src/ndjson-lines.js — a line
@@ -141,7 +144,10 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     return { rewrite: { ranges: trim.ranges, size: trim.size }, then: text, as: 'otel-truth.write' };
   };
   const stashWritten = (ok, err) => {
-    const w = stashWriting, t = trimWriting; stashWriting = null; trimWriting = null;
+    const w = stashWriting; let t = trimWriting; stashWriting = null; trimWriting = null;
+    // THE REWRITE LANDED, ITS DIRECTORY'S FSYNC DID NOT (主开发 r915 2): the trimmed file is in place and holds this job's lines — told
+    // apart from a failed trim (never «stays whole»), its lines never owed again
+    if (!ok && t && err && err.code === 'ERENAMEDNOSYNC') { console.warn(`[otel] the stash trimmed by its writer: ${t.size} → ${t.kept} bytes (+ this start's appends) — ${t.what}; but its directory's fsync failed (${err.message || err.code}): a power cut may bring the old file back`); ok = true; t = null; }
     if (t) {
       if (ok) console.log(`[otel] the stash trimmed by its writer: ${t.size} → ${t.kept} bytes (+ this start's appends) — ${t.what}`);
       else { trimFailed = true; console.warn(`[otel] the stash's trim FAILED (${(err && (err.code || err.message)) || 'an error'}) — the stash stays whole as it was; the next start trims it`); }
@@ -237,7 +243,10 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     if (ran && rows === 0 && oldestKnown < BACKFILL_LAW_MS) { console.log(`[otel] the stash is kept WHOLE (${st.bytes} bytes): the migration ${BACKFILL_ID} is recorded as run with 0 rows, yet the stash holds known rows from before 2026-09-07 (the oldest of ${new Date(oldestKnown).toISOString()}) — it never read them`); return; }
     if (!ran) { console.log(`[otel] the stash is kept WHOLE (${st.bytes} bytes): the migration ${BACKFILL_ID} is not recorded as run in data/migrations.json — it reads every old row; once it has run, the trim keeps the newest ${MAX_TRUTH} known lines inside 30 days`); return; }
     const { ranges, kept } = keptRanges();
-    if (kept === st.bytes) return;   // the kept lines ARE the file: nothing to write
+    // A TRIM IS OWED ONLY WHEN IT DROPS AT LEAST WHAT IT KEEPS (主开发 r915 1): the count rule keeps ~28 MB, over FILE_MAX — without
+    // this every start after the first trim would rewrite the whole kept stash on the writer's one thread (~100 ms on a fast disk,
+    // seconds on a slow data folder, every other store's write behind it); with it a start reads at most about twice the kept set
+    if (st.bytes - kept < kept) return;
     trimOwed = { ranges, size: st.bytes, kept, what: `kept the newest ${Math.min(ringN, MAX_TRUTH)} known lines inside 30 days and ${unknownN} unknown-org ones` };
     W().dirty(file, { name: 'otel-truth.write', produce: produceStash, onWritten: stashWritten, allowEmpty: true, urgent: true });   // at once, as the release's own write was (no pace to wait: a start's one rewrite)
   };
@@ -271,6 +280,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     // a stash whose last byte is not a newline (a torn tail, or a line too long to read), or one whose read failed: the first append
     // starts on a new line, never glued to it
     if (fh && (!st || (st.bytes > 0 && st.last !== 10))) stashTorn = true;
+    if (st && st.long) console.warn(`[otel] the stash holds ${st.long} line(s) longer than ${READ_BYTES} bytes — skipped whole (no record of ours is that long), and not kept by a trim`);
     if (st) oweTrim(st, await backfillRan());   // before the drain: the waiting posts' lines ride the trim's own job
     ring = null; unknownAt = null;
     replay.done = true;
@@ -396,7 +406,8 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
       arrivals.kept += out.kept || 0;
       for (const [k, n] of Object.entries(out.seen || {})) arrivals.events[k] = (arrivals.events[k] || 0) + n;
       // the chain's cure (as if a must): THE STASH IS ON DISK BEFORE ITS ANSWER, as the release had it — a 200 tells the exporter
-      // never to send these rows again, and they are what the ledger's backfill and a billing question are answered from. The
+      // never to send these rows again, and they are the stash's record of the request (the backfill's, before it ran; then the
+      // count rule's newest 60 000 known lines — B-360d). The
       // post's lines (and any a failed write still owes: a resend of a post told to retry) go by the store writer's URGENT road —
       // the loop never waits (a promise), the wait bounded (STASH_DURABLE_MS); a write that did not land in time answers 503
       // «retry» (the exporter sends the post again; a known org's rid is never stashed twice — an unknown org's row may be, and its
