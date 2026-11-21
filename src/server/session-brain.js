@@ -25,7 +25,7 @@ const { noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest } = r
 // until a turn starts in its sight (as-if-must (1)): a gap can never leave the previous turn's «you» standing.
 const TURN_SEEN_MAX = 600;   // the reader's should: the same bound as sbSeenFirst's SB_SEEN_MAX (a feed lagging past it is caught by the order rule below)
 function turnStateOf(session) {
-  return session._turnOpen || (session._turnOpen = { live: null, cmd: null, first: null, waitCmd: null, persons: new Set(), launched: new Map(), bgLive: [], cmdRecs: new Map(), seen: new Set(), feedAt: {}, resultAt: 0, opened: new Set() });
+  return session._turnOpen || (session._turnOpen = { live: null, cmd: null, first: null, waitCmd: null, persons: new Set(), launched: new Map(), bgLive: [], cmdRecs: new Map(), seen: new Set(), feedAt: {}, resultAt: 0, opened: new Set(), firstFromDevice: false });
 }
 /** A record's identity for the once-per-record rule: the CLI's own uuid, or the wrapper's stamp of a frame (it has none). */
 function turnKeyOf(msg) {
@@ -113,7 +113,10 @@ function noteTurnOpener(session, msg, feed = 'parse') {
     const cmd = st.cmd;
     st.cmd = null; st.first = null; st.waitCmd = null;
     const names = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String) : [];
-    if (names.some((u) => st.persons.has(u)) || (cmd && st.persons.has(cmd))) { setTurnBy(session, { by: 'person', source: 'frame-stamp' }); return; }
+    // B-3336 THE BELT (主开发 r794): an init the DEVICE feed delivered first never reads as the person's — the device copy is the one
+    // a parse gap leaves, and its turn may not be the one the person's stamp named («not recorded», its source said); the parse-taken path is unchanged
+    st.firstFromDevice = feed === 'device';
+    if (names.some((u) => st.persons.has(u)) || (cmd && st.persons.has(cmd))) { setTurnBy(session, st.firstFromDevice ? { by: 'unrecorded', source: 'device-init' } : { by: 'person', source: 'frame-stamp' }); return; }
     const fact = setTurnBy(session, { by: 'unrecorded', source: 'pending' });
     if (cmd && !session.host) { if (st.cmdRecs.has(cmd)) byVerdict(session, fact, st.cmdRecs.get(cmd), st.cmdRecs.get(cmd) ? 'cli-record' : 'no-record'); else st.waitCmd = { cmd, fact }; return; }
     st.first = fact;
@@ -123,7 +126,9 @@ function noteTurnOpener(session, msg, feed = 'parse') {
     const c = msg.message && msg.message.content;
     if (msg.type === 'user' && Array.isArray(c) && c.some((b) => b && b.type === 'tool_result')) return;
     const fact = st.first; st.first = null;
-    if (msg.type === 'user') byRecord(session, fact, msg, typeof msg.uuid === 'string' && st.persons.has(msg.uuid));
+    const stamped = msg.type === 'user' && typeof msg.uuid === 'string' && st.persons.has(msg.uuid);
+    if (stamped && st.firstFromDevice) { byVerdict(session, fact, { by: 'unrecorded' }, 'device-init'); return; }   // the belt: after a device-taken init no stamp makes it the person's — and the fact says so
+    if (msg.type === 'user') byRecord(session, fact, msg, stamped);
     else byRecord(session, fact, null, false);   // the model spoke first: nothing in the turn said who opened it
     return;
   }
@@ -271,6 +276,7 @@ function noteConvFacts(session, msg) {
   try { CONV_FACTS.factsStep(session._convFacts, msg, Date.now()); } catch { }
 }
 function claudeSideEffects(session, sid, msg) {
+  let openerFed = false;   // B-3336 (the parse's twin): a consumer that throws before the opener's call never costs the opener its record
   try {
     noteConvFacts(session, msg); // lane conversation-facts: the device stream's records count too (first writer wins)
     // the stream clock sees every record of THIS feed too (lane-hot-switch):
@@ -334,7 +340,7 @@ function claudeSideEffects(session, sid, msg) {
     if (msg.type === 'system' && msg.subtype === 'code_change_published') notePublishedChange(session, sid, msg);
     if (msg.type === 'system' && msg.subtype === 'session_title_changed') noteSessionTitle(session, sid, msg); // lane session-title-record
     if (msg.type === 'system' && msg.subtype === 'session_writes_lost') noteWritesLost(session, sid, msg); // lane cli-2-1-319-records r2
-    try { noteTurnOpener(session, msg, 'device'); } catch { }   // B-d868: who started the turn — the ONE opener, fed the records the parse has not seen
+    openerFed = true; try { noteTurnOpener(session, msg, 'device'); } catch { }   // B-d868: who started the turn — the ONE opener, fed the records the parse has not seen
     // lane artifacts-model: the deliverable rows — the parse makes the SAME call (the row moves once per call id)
     if (msg.type === 'assistant' || msg.type === 'user') { try { require('./artifact-registry.js').observe(session, msg); } catch { } } // lane artifacts-handover: + a helper's end
     // todo/task families mirror the parse's exact consumption (lines above):
@@ -351,7 +357,10 @@ function claudeSideEffects(session, sid, msg) {
         } catch { }
       }
     }
-  } catch (e) { console.warn('[session-brain] device side-effects failed:', e.message); }
+  } catch (e) {
+    if (!openerFed) { try { noteTurnOpener(session, msg, 'device'); } catch { } }   // B-3336: handed once, past the consumer that threw
+    console.warn('[session-brain] device side-effects failed:', e.message);
+  }
 }
   return { sbSeenFirst, claudeSideEffects, noteTurnFeed, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost, noteConvFacts };
 }

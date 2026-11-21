@@ -532,10 +532,10 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
         const line = lineBuf.substring(0, nlIdx).replace(/\r/g, '').trim().replace(DTACH_CLEAR_PREAMBLE, '').trim();
         lineBuf = lineBuf.substring(nlIdx + 1);
         if (!line) continue;
-        let parsed = false;
+        let parsed = false, parsedMsg = null, openerFed = false;   // B-3336 (主开发 r794): the record the parse owes the turn opener, and whether it was handed
         try {
           const msg = JSON.parse(line);
-          parsed = true;
+          parsed = true; parsedMsg = msg;
           // EVERY record shows its stamp to the stream clock FIRST (lane-hot-
           // switch): the live-fact consumers below ask the engine whether a
           // record is a backlog's before they act on it.
@@ -1326,7 +1326,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // runs the per-turn pool eval, arms/disarms — one owner.
           if (msg.type === 'command_lifecycle' && msg.state === 'started' && typeof msg.command_uuid === 'string' && msg.command_uuid && !session.host) peerCommandCard(msg.command_uuid);
           // B-d868: who started the turn — every record the parse sees feeds the ONE opener (the device stream feeds it the rest)
-          try { TO.noteTurnOpener(session, msg, 'parse'); } catch { }
+          openerFed = true; try { TO.noteTurnOpener(session, msg, 'parse'); } catch { }
           // B-02a3 (the third read): an INTERRUPTED turn's result (the real 2.1.312: terminal_reason aborted_tools / aborted_streaming) opens
           // the Stop window whoever stopped it — the hub's own Stop, or a person's terminal writing the interrupt straight to the wrapper
           if (msg.type === 'result' && typeof msg.terminal_reason === 'string' && msg.terminal_reason.startsWith('aborted') && !session._stopAskedAt) session._stopAskedAt = Date.now();
@@ -1538,6 +1538,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // A dropped RECORD is never silent (round 3): a line that looks like
           // JSON but does not parse, or a record whose handling threw, is
           // logged + counted; plain non-JSON noise stays raw output as before.
+          // B-3336 (主开发 r794): a consumer that threw between the parse and the opener's call never costs the opener its record — handed here, once
+          // (not a command_lifecycle: its opener fact waits on the transcript lookup the same skipped stretch would have started)
+          if (parsedMsg && !openerFed && parsedMsg.type !== 'command_lifecycle') { try { TO.noteTurnOpener(session, parsedMsg, 'parse'); } catch { } }
           if (parsed || LOOKS_LIKE_RECORD.test(line)) noteDroppedLine(session, id, parsed ? 'cli-line-handler-error' : 'cli-unparsable-line', line, e);
           // Non-JSON line (e.g. dtach noise) — send as raw output
           broadcastToSession(session, id, { type: 'output', sessionId: id, data: line + '\n' });

@@ -336,7 +336,7 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   const SBsrc = fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8');
   ok('B-d868: ONE opener for both feeds — the parse feeds session-brain\'s noteTurnOpener (and its attach resets it), the device feed\'s claudeSideEffects feeds the same; the lookups keep a VERDICT; one transcript lookup in the parse',
     CSsrc.includes("try { TO.noteTurnOpener(session, msg, 'parse'); } catch { }") && CSsrc.includes("try { require('../session-brain.js').noteTurnAttach(session); } catch { }") && CSsrc.includes('TO.noteTurnCmdRecord(session, cmdUuid, rec);')
-    && !/personUuids|noteTurnInit|turnOpen\./.test(CSsrc) && SBsrc.includes("    try { noteTurnOpener(session, msg, 'device'); } catch { }") && SBsrc.includes('  st.cmdRecs.set(cmdUuid, v);') && (CSsrc.match(/findSessionJsonlPath\(/g) || []).length === 1);
+    && !/personUuids|noteTurnInit|turnOpen\./.test(CSsrc) && SBsrc.includes("    openerFed = true; try { noteTurnOpener(session, msg, 'device'); } catch { }") && SBsrc.includes('  st.cmdRecs.set(cmdUuid, v);') && (CSsrc.match(/findSessionJsonlPath\(/g) || []).length === 1);
   // PARITY, record for record: the same stream through the parse alone, the device feed alone, and the two interleaved (each
   // record first through one feed, then the other — the opener takes it once)
   const SB = require(path.join(REPO, 'src/server/session-brain.js'));
@@ -370,8 +370,12 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
     if (i % 2) { dev(); viaMix.p.data(J(r)); } else { viaMix.p.data(J(r)); dev(); }
     fM.push(facts(viaMix.s));
   });
-  ok(`B-d868 PARITY (as-if-must (2)): the same stream through the parse alone, the device feed alone and both interleaved gives the same opener record for record (${fP.join(' · ')})`,
-    JSON.stringify(fP) === JSON.stringify(fD) && JSON.stringify(fP) === JSON.stringify(fM) && fP[1].startsWith('person|') && fP[5].startsWith('unrecorded|') && fP[7].startsWith('task|') && fP[12].startsWith('unrecorded|') && fP[15].startsWith('person|'), JSON.stringify({ fP, fD, fM }));
+  // (B-3336's belt, 主开发 r794: an init the DEVICE took first never reads as the person's — in the device-alone feed every init is
+  // the device's, and in this interleaving both person inits come device-first: there «person» reads «unrecorded», every other fact agrees)
+  const beltOf = (x) => x.replace(/person/g, 'unrecorded');
+  ok(`B-d868 PARITY (as-if-must (2), restated to B-3336's belt): the same stream through the parse alone, the device feed alone and both interleaved gives the same opener record for record — but a device-taken init never the person's (${fP.join(' · ')})`,
+    JSON.stringify(fD) === JSON.stringify(fP.map(beltOf)) && JSON.stringify(fM) === JSON.stringify(fP.map(beltOf)) && fP[1].startsWith('person|') && fP[5].startsWith('unrecorded|') && fP[7].startsWith('task|') && fP[12].startsWith('unrecorded|') && fP[15].startsWith('person|')
+      && !fD.some((x) => x.includes('person')) && viaDev._turnBy.source === 'device-init', JSON.stringify({ fP, fD, fM, devSource: viaDev._turnBy.source }));
   const brainCopy = (src, name) => MU.load('src/server/session-brain.js', src, name);
   // 主开发's as-if-must (12:09Z): A LATE BACKLOG FROM THE DEVICE FEED NEVER TAKES AN OLD TURN'S START AGAIN. (a) the stream's own
   // order: an init or a result from a feed that is BEHIND the last result this session saw opens and ends nothing; (b) an init
@@ -416,11 +420,11 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   const fromFsKey = "rec.uuid || (rec.type === 'frame_stamp' && rec.cli_uuid ? 'fs:' + rec.cli_uuid : ((rec.requestId";
   if (anchor(SBsrc, fromOrder, 'B-d868 the stream\'s order')) {
     const x = backlogA(brainCopy(SBsrc.replace(fromOrder, ''), 'no-order'));
-    ok(`CONTROL (B-d868): the copy without the stream's order lets the backlog's old init say «${x._turnBy.by}» for the turn running now — the leg goes red`, x._turnBy.by === 'person');
+    ok(`CONTROL (B-d868): the copy without the stream's order lets the backlog's old init take the turn running now («${x._turnBy.by}», ${x._turnBy.source} — B-3336's belt keeps a device-taken init from the person) — the leg goes red`, x._turnBy.by !== 'task' && x._turnBy.source === 'device-init' && x._turnLive === true, JSON.stringify(x._turnBy));
   }
   if (anchor(SBsrc, fromOpened, 'B-d868 an init opens once')) {
     const x = backlogB(brainCopy(SBsrc.replace(fromOpened, ''), 'no-opened'));
-    ok(`CONTROL (B-d868): the copy that forgets the inits it opened lets an unstamped replay say «${x._turnBy.by}» — the leg goes red`, x._turnBy.by === 'person');
+    ok(`CONTROL (B-d868): the copy that forgets the inits it opened lets an unstamped replay take the turn running now («${x._turnBy.by}», ${x._turnBy.source} — B-3336's belt keeps a device-taken init from the person) — the leg goes red`, x._turnBy.by !== 'task' && x._turnBy.source === 'device-init' && x._turnLive === true, JSON.stringify(x._turnBy));
   }
   if (anchor(SBsrc, fromSeen, 'B-d868 the once-gate')) {
     const x = dupResult(brainCopy(SBsrc.replace(fromSeen, '  if (key) { if (false) return;'), 'no-once'));
@@ -467,6 +471,183 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   if (anchor(devLine, fromFeed, 'B-d868 the device position noted before its gate')) {
     const g0 = gapRun(devLine.replace(fromFeed, ''));
     ok(`CONTROL (B-d868 cure 3): server.js's device line without the position (the tip before this cure) drops the result and the init the device alone supplied — the previous «${g0.after.by}» stands, live ${g0.after.live}`, g0.after.by === 'person' && g0.after.live === true, JSON.stringify(g0));
+  }
+  // B-3336 (主开发 r794, the panel's ruling): a stream sequence is the design for the day a paired machine's conversation may start a
+  // turn by a press; TODAY that press refuses every such conversation, so the unit proves today's opener: THE BELT, THE PARSE'S
+  // HAND-OVER past a throwing consumer, A FUZZ of both feeds, and THE COUPLING PIN. Every leg prints the facts it judges.
+  const { anchored } = await import('./scratch.mjs');
+  // 1. THE BELT — an init the DEVICE feed delivered first never reads as the person's («unrecorded», source device-init)
+  const beltRun = (M) => {
+    const sx = { name: 'belt', backend: 'claude', host: 'h-belt' }; M.noteTurnAttach(sx);
+    const K = (k) => 'b3336000-0000-4000-8000-0000000009' + k;
+    const now = () => ({ by: sx._turnBy.by, source: sx._turnBy.source, live: sx._turnLive });
+    M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('p1') }, 'parse');   // the person's frame (the hub-side wrapper's stamp: the parse only)
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i1'), user_message_uuids: [K('p1')] }, 'device');   // the device's copy first
+    const first = now();
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i1'), user_message_uuids: [K('p1')] }, 'parse');   // the parse's: a copy
+    const copy = now();
+    M.noteTurnOpener(sx, { type: 'result', uuid: K('r1') }, 'device');
+    M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('u2') }, 'parse');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i2') }, 'device');   // names nothing: the turn's first record decides…
+    M.noteTurnOpener(sx, { type: 'user', uuid: K('u2'), message: { role: 'user', content: 'go on' } }, 'device');   // …and its stamp is the person's
+    const second = now();
+    M.noteTurnOpener(sx, { type: 'result', uuid: K('r2') }, 'parse');
+    M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('p3') }, 'parse');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i3'), user_message_uuids: [K('p3')] }, 'parse');   // the parse-taken path, unchanged
+    return { first, copy, second, third: now() };
+  };
+  const belt = beltRun(SB);
+  console.log('  B-3336 belt (the facts judged): ' + JSON.stringify(belt));
+  ok(`B-3336 THE BELT: an init the device delivered first, with the person's stamp present, reads «${belt.first.by}» (${belt.first.source}) — never the person's; its later parse copy changes nothing (${belt.copy.source})`,
+    belt.first.by === 'unrecorded' && belt.first.source === 'device-init' && belt.first.live === true && belt.copy.source === 'device-init', JSON.stringify(belt));
+  ok(`B-3336 THE BELT, the turn's first record: after a device-taken init that names nothing, a user record carrying the person's stamp still never makes it the person's («${belt.second.by}»)`,
+    belt.second.by === 'unrecorded' && belt.second.source === 'device-init' && belt.second.live === true, JSON.stringify(belt.second));
+  ok(`B-3336 the parse-taken path is unchanged: the parse's init with the person's stamp reads the person («${belt.third.by}», ${belt.third.source})`,
+    belt.third.by === 'person' && belt.third.source === 'frame-stamp', JSON.stringify(belt.third));
+  {
+    const b0 = beltRun(brainCopy(anchored(SBsrc, "    st.firstFromDevice = feed === 'device';", "    st.firstFromDevice = false;", 'B-3336 the belt'), 'no-belt'));
+    ok(`CONTROL (B-3336): the copy without the belt reads the device-taken init as the person's («${b0.first.by}») and the stamped first record too («${b0.second.by}») — the legs go red`, b0.first.by === 'person' && b0.second.by === 'person', JSON.stringify(b0));
+  }
+  // 2. THE PARSE HANDS EVERY RECORD TO THE OPENER — a consumer that throws between the parse and the opener's call (a placed throw)
+  //    never costs the opener its record: the catch hands it, once
+  const parseRun = (cons) => {
+    const B = SB.create({ engine: {}, applyTaskToolUpdate() { }, updateSessionTodos() { } });
+    const { attach: attachP } = cons.create({ activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'command_lifecycle']), _seenStreamTypes: new Set(),
+      USAGE_SCANNER_PATH: path.join(tmp, 'none'), checkClaudeGoalStatus() { }, noteModelSeen() { }, sbSeenFirst: (sx2, m2) => B.sbSeenFirst(sx2, m2), hosts: null, usageHistory: null, pagesRef: { current: null } });
+    const gid = 'w-thr-' + Math.random().toString(36).slice(2, 6), cid = 'c1d00000-0000-4000-8000-' + String(++n).padStart(12, '0');
+    const sx = { mode: 'chat', backend: 'claude', name: gid, cwd: CWD, claudeSessionId: cid, backendSessionId: cid, sockName: 'cw-' + gid, buffer: '', createdAt: Date.now() };
+    sx._normalizer = createMessageManager('claude', gid); activeSessions.set(gid, sx); const px = fakePty(); attachP(sx, gid, px, helpers);
+    const T = (k) => 'b3336000-0000-4000-8000-0000000010' + k;
+    try {
+      px.data(J({ type: 'frame_stamp', cli_uuid: T('p0') })); px.data(J({ type: 'system', subtype: 'init', uuid: T('i0'), user_message_uuids: [T('p0')] }));
+      const before = { by: sx._turnBy.by, live: sx._turnLive };
+      px.data(J({ type: 'result', uuid: T('r0'), subtype: 'success', __placedThrow: true }));   // its handling throws before the opener's call
+      return { before, after: { by: sx._turnBy.by, source: sx._turnBy.source, live: sx._turnLive } };
+    } finally { activeSessions.delete(gid); }
+  };
+  {
+    const placeThrow = (src) => anchored(src, '          parsed = true; parsedMsg = msg;\n', "          parsed = true; parsedMsg = msg;\n          if (msg.__placedThrow) throw new Error('a placed throw (B-3336 leg)');\n", 'B-3336 the placed throw');
+    const pt = parseRun(require(MU.write('src/server/stdout/claude-stream-json.js', placeThrow(CSsrc), 'placed-throw')));
+    console.log('  B-3336 placed throw (the facts judged): ' + JSON.stringify(pt));
+    ok(`B-3336 THE PARSE'S HAND-OVER: a result whose handling THREW before the opener's call still ends the turn (live ${pt.before.live} → ${pt.after.live}, ${pt.after.source})`,
+      pt.before.by === 'person' && pt.before.live === true && pt.after.live === false && pt.after.source === 'turn-ended', JSON.stringify(pt));
+    const noGuard = anchored(placeThrow(CSsrc), "          if (parsedMsg && !openerFed && parsedMsg.type !== 'command_lifecycle') { try { TO.noteTurnOpener(session, parsedMsg, 'parse'); } catch { } }\n", '', 'B-3336 the catch hands the record');
+    const p0 = parseRun(require(MU.write('src/server/stdout/claude-stream-json.js', noGuard, 'placed-throw-no-guard')));
+    ok(`CONTROL (B-3336): the same placed throw in the copy without the catch's hand-over — the opener never hears the result: live ${p0.after.live}`, p0.after.live === true, JSON.stringify(p0));
+  }
+  {   // …and the DEVICE feed's twin (claudeSideEffects): a consumer that throws before its opener's call never costs the opener the record
+    const placeDev = (src) => anchored(src, '    noteConvFacts(session, msg); // lane conversation-facts', "    if (msg.__placedThrow) throw new Error('a placed throw (B-3336 device leg)');\n    noteConvFacts(session, msg); // lane conversation-facts", 'B-3336 the device placed throw');
+    const devThrow = (M) => {
+      const B = M.create({ engine: {}, applyTaskToolUpdate() { }, updateSessionTodos() { } });
+      const sx = { name: 'dev-thr', backend: 'claude', host: 'h-thr' }; M.noteTurnAttach(sx);
+      const D = (k) => 'b3336000-0000-4000-8000-0000000011' + k;
+      B.claudeSideEffects(sx, 'dev-thr', { type: 'system', subtype: 'init', uuid: D('i0'), session_id: 'x' });
+      const before = { by: sx._turnBy.by, source: sx._turnBy.source, live: sx._turnLive };
+      const warn = console.warn; let said = ''; console.warn = (...a) => { said += a.join(' '); };
+      try { B.claudeSideEffects(sx, 'dev-thr', { type: 'result', uuid: D('r0'), subtype: 'success', __placedThrow: true }); } finally { console.warn = warn; }
+      return { before, after: { by: sx._turnBy.by, source: sx._turnBy.source, live: sx._turnLive }, said };
+    };
+    const dt = devThrow(brainCopy(placeDev(SBsrc), 'device-placed-throw'));
+    console.log('  B-3336 device placed throw (the facts judged): ' + JSON.stringify(dt));
+    ok(`B-3336 THE DEVICE FEED'S HAND-OVER: a result whose device handling THREW before the opener's call still ends the turn (live ${dt.before.live} → ${dt.after.live}, ${dt.after.source}) and the failure is still said`,
+      dt.before.live === true && dt.after.live === false && dt.after.source === 'turn-ended' && /device side-effects failed: a placed throw/.test(dt.said), JSON.stringify(dt));
+    const d0 = devThrow(brainCopy(anchored(placeDev(SBsrc), "    if (!openerFed) { try { noteTurnOpener(session, msg, 'device'); } catch { } }", '', 'B-3336 the device catch hands the record'), 'device-placed-throw-no-guard'));
+    ok(`CONTROL (B-3336): the same placed throw in the copy without the device catch's hand-over — the opener never hears the result: live ${d0.after.live}`, d0.after.live === true, JSON.stringify(d0));
+  }
+  // 3. A FUZZ OF TODAY'S OPENER (kept from the unnumbered half of unit one): both feeds deliver the whole stream in random
+  //    interleavings, each in its own order — the device feed WITHOUT the wrapper's own stamps (they reach the parse only). At EVERY
+  //    point both feeds stand level (each has delivered records 0..m) the opener holds today's parse-alone's state after record m —
+  //    but a person's turn whose init the device took first: never the person's (the belt), its source said — and a background task
+  //    it launched is the turn's «unrecorded» for as long as it runs
+  const fuzzSeq = [...seq, { type: 'result', uuid: V('18'), subtype: 'success', session_id: 'x' },
+    { type: 'frame_stamp', msg_id: 'web-p4', cli_uuid: V('21') }, { type: 'system', subtype: 'init', uuid: V('22'), session_id: 'x' }, { type: 'user', uuid: V('21'), message: { role: 'user', content: 'go on' } },   // an init that names nothing: its first record — the person's stamped user record — decides
+    { type: 'assistant', uuid: V('23'), message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } }, { type: 'result', uuid: V('24'), subtype: 'success', session_id: 'x' },
+    { type: 'frame_stamp', msg_id: 'web-p3', cli_uuid: V('19') }, { type: 'system', subtype: 'init', uuid: V('20'), session_id: 'x', user_message_uuids: [V('19')] }];
+  const factOf = (sx) => ({ by: sx._turnBy.by, source: sx._turnBy.source, live: sx._turnLive, bg: JSON.stringify(sx._turnByBackground || []) });
+  const want = (() => { const alone = { name: 'fz-alone', backend: 'claude', host: 'h-fz' }; SB.noteTurnAttach(alone); return fuzzSeq.map((r) => { SB.noteTurnOpener(alone, r, 'parse'); return factOf(alone); }); })();   // TODAY's opener, the parse alone, after each record
+  const DEV_FIRST_SOURCES = ['device-init', 'pending', 'no-record', 'cli-record'];   // the belt's (the stamp parsed first) · the stamp not parsed yet: no record decided / the model spoke first / the user record unstamped then
+  const fuzz = (M) => {
+    let seed = 0x3336;
+    const rnd = () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const L = fuzzSeq.length, devSkips = (x) => x < L && fuzzSeq[x].type === 'frame_stamp';
+    let runs = 0, points = 0; const devFirst = {}; const bad = [];
+    for (let k = 0; k < 300; k++) {
+      const sx = { name: 'fz-' + k, backend: 'claude', host: 'h-fz' }; M.noteTurnAttach(sx);
+      let i = 0, j = 0, devPerson = false, bgBelted = false; const judged = new Set();
+      while (i < L || j < L) {
+        if (i === j && i > 0 && !judged.has(i)) {   // level: records 0..i-1 delivered by both (judged before the device skips a stamp: a turn's end is a level point too)
+          judged.add(i);
+          points++;
+          const w = want[i - 1], got = factOf(sx), g = JSON.stringify(got);
+          const wm = { ...w, by: w.by === 'person' ? 'unrecorded' : w.by, bg: w.bg.replace(/person/g, 'unrecorded') };
+          const fine = devPerson && w.by === 'person' ? got.by === 'unrecorded' && DEV_FIRST_SOURCES.includes(got.source) && got.live === w.live && got.bg === wm.bg : g === JSON.stringify(bgBelted ? { ...w, bg: wm.bg } : w);
+          if (devPerson && w.by === 'person') devFirst[got.source] = (devFirst[got.source] || 0) + 1;
+          if (!fine) bad.push({ k, at: i - 1, got, want: w });
+        }
+        if (devSkips(j)) { j++; continue; }   // the device feed never carries the wrapper's own records
+        const takeParse = j >= L || (i < L && rnd() < 0.5);
+        const at = takeParse ? i : j, r = fuzzSeq[at];
+        const first = takeParse ? i >= j : j >= i;   // this feed is the first to deliver record `at`
+        if (r.type === 'system' && r.subtype === 'init' && first) devPerson = !takeParse;
+        if (r.type === 'system' && r.subtype === 'task_started' && first && devPerson && want[at].by === 'person') bgBelted = true;   // launched inside a device-first person turn
+        M.noteTurnOpener(sx, r, takeParse ? 'parse' : 'device');
+        if (takeParse) i++; else j++;
+      }
+      { points++; const w = want[L - 1], got = factOf(sx), wbg = bgBelted ? w.bg.replace(/person/g, 'unrecorded') : w.bg;   // the end: both feeds have delivered all
+        const fine = devPerson && w.by === 'person' ? got.by === 'unrecorded' && DEV_FIRST_SOURCES.includes(got.source) && got.live === w.live && got.bg === wbg : JSON.stringify(got) === JSON.stringify({ ...w, bg: wbg });
+        if (devPerson && w.by === 'person') devFirst[got.source] = (devFirst[got.source] || 0) + 1; if (!fine) bad.push({ k, at: L - 1, got, want: w }); }
+      runs++;
+    }
+    return { runs, points, devFirst, bad };
+  };
+  {
+    const fz = fuzz(SB), nDev = Object.values(fz.devFirst).reduce((x, y) => x + y, 0);
+    console.log(`  B-3336 fuzz (the facts judged): ${fz.runs} interleavings, ${fz.points} level points judged against today's parse alone, ${nDev} inside a device-first person turn (by source: ${JSON.stringify(fz.devFirst)}), ${fz.bad.length} mismatches${fz.bad.length ? ' — ' + JSON.stringify(fz.bad.slice(0, 2)) : ''}`);
+    ok(`B-3336 THE FUZZ: ${fz.runs} random interleavings of both whole feeds; at each of ${fz.points} level points the opener holds today's parse-alone's state — inside a device-first person turn (${nDev}) never the person's, its source said; ${fz.bad.length} mismatches`,
+      fz.runs === 300 && fz.points > 2 * fz.runs && fz.bad.length === 0 && nDev > 0 && nDev < fz.points && (fz.devFirst['device-init'] || 0) > 0, JSON.stringify(fz.bad.slice(0, 3)));
+    // the fuzz CAN fail: the copy without the once-memory (a late copy from the other feed counts again) is judged against the same parse alone
+    const f0 = fuzz(brainCopy(anchored(SBsrc, 'if (st.seen.has(key)) return; ', '', 'B-3336 fuzz: the once-memory'), 'fuzz-no-once'));
+    console.log(`  B-3336 fuzz control (the facts judged): ${f0.bad.length} mismatches${f0.bad.length ? ' — first ' + JSON.stringify(f0.bad[0]) : ''}`);
+    ok(`CONTROL (B-3336): the copy without the once-memory — the fuzz names mismatches at its level points (${f0.bad.length})`, f0.bad.length > 0, JSON.stringify(f0.bad.slice(0, 1)));
+  }
+  // 4. THE COUPLING PIN — the group hand-over press refuses a conversation on another machine (the ONLY road with two feeds) WITH ITS
+  //    REASON, and that refusal is lifted only together with a stream sequence; the readers of the turn-live flag are a NAMED list,
+  //    and those that can start a turn are named apart: a new reader is red by name
+  {
+    const SH = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf8');
+    const refusal = "    if (s.host) return { ok: false, code: 'not_steerable', error: 'this conversation runs on another machine — the group messages ride its next turn' };";
+    const hb0 = SH.indexOf('  async function handOverGroups('), hb1 = hb0 >= 0 ? SH.indexOf('\n  }\n', hb0) : -1, hog = hb0 >= 0 && hb1 > hb0 ? SH.slice(hb0, hb1 + 4) : '';   // the press's body, to its own closing brace
+    ok('B-3336 COUPLING: the group hand-over press (handOverGroups) refuses every conversation on another machine by name, BEFORE its spend gate — and its line says it is lifted only together with a stream sequence (row B-3336\'s design (B))',
+      hog.length > 500 && hog.length < 12000 && hog.includes('groupInflight.delete(cid)') && SH.split(refusal).length === 2 && hog.includes(refusal) && hog.includes('spendGuard.authorize(') && hog.indexOf(refusal) < hog.indexOf('spendGuard.authorize(') && /B-3336 COUPLING[^\n]*lifted ONLY together with a stream sequence/.test(SH), { bodyBytes: hog.length, inBody: hog.includes(refusal), refusalAt: hog.indexOf(refusal), gateAt: hog.indexOf('spendGuard.authorize(') });
+    const TURN_LIVE_READERS = Object.freeze({   // file → [reads, can it start a turn, what]
+      'src/server/user-input.js': [1, true, 'the group hand-over (not_mid_turn) — behind the press\'s remote refusal'],
+      'src/adapters/claude-code.js': [1, false, 'a Stop\'s settle stamp (_stopAskedAt) — a label, never a turn'],
+    });
+    // a read: `x._turnLive` / `x?._turnLive` / `x['_turnLive']` / a destructuring `{ _turnLive } =` — never `this.` (message-manager's own field) and never an assignment; a `//` comment is dropped (not one inside a string's `://`)
+    const readsIn = (l) => { const c = l.replace(/(^|[^:'"\\])\/\/.*$/, '$1'); let k = 0; for (const m of c.matchAll(/(\w+)\s*(?:\?\.|\.)\s*_turnLive\b(\s*=(?!=))?/g)) if (m[1] !== 'this' && !m[2]) k++; k += (c.match(/\[\s*['"]_turnLive['"]\s*\]/g) || []).length; k += (c.match(/\{[^}]*\b_turnLive\b[^}]*\}\s*=[^=]/g) || []).length; return k; };
+    const readersOf = (texts) => { const out = {}; for (const [f, t] of Object.entries(texts)) { if (!t.includes('_turnLive')) continue; for (const l of t.split('\n')) { const k = readsIn(l); if (k) out[f] = (out[f] || 0) + k; } } return out; };
+    const srcFiles = ['server.js', ...fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => 'src/' + String(f).split(path.sep).join('/')).filter((f) => f.endsWith('.js'))];
+    const texts = Object.fromEntries(srcFiles.map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]));
+    const judgeReaders = (found) => [...Object.keys(found).filter((f) => !TURN_LIVE_READERS[f]).map((f) => `${f}: ${found[f]} read(s) of the turn-live flag — a NEW reader: name it in TURN_LIVE_READERS, and say whether it can start a turn`),
+      ...Object.entries(TURN_LIVE_READERS).filter(([f, [k]]) => (found[f] || 0) !== k).map(([f, [k]]) => `${f}: ${found[f] || 0} read(s), the list says ${k}`)];
+    const found = readersOf(texts), wrong = judgeReaders(found);
+    console.log('  B-3336 turn-live readers (the facts judged): ' + JSON.stringify(found));
+    ok(`B-3336 COUPLING: the readers of the turn-live flag are the named list (${Object.entries(TURN_LIVE_READERS).map(([f, [, st, w]]) => `${f.split('/').pop()} — ${st ? 'CAN START A TURN' : 'a label'}: ${w}`).join('; ')})`, wrong.length === 0 && srcFiles.length > 100, wrong);
+    ok('B-3336 COUPLING: the readers that can start a turn are exactly the group hand-over — the one behind the remote refusal', JSON.stringify(Object.entries(TURN_LIVE_READERS).filter(([, [, st]]) => st).map(([f]) => f)) === '["src/server/user-input.js"]'
+      && /if \(session\._turnLive !== true\) return \{ ok: false, code: 'not_mid_turn'/.test(texts['src/server/user-input.js'] || ''), 'the starting reader moved');
+    const planted = judgeReaders(readersOf({ ...texts, 'src/server/zz-new-reader.js': "function go(session) { if (session?._turnLive) startTurn(session); const url = 'http://x'; if (session['_turnLive']) go2(); const { _turnLive } = session; }\n" }));
+    ok('CONTROL (B-3336): a planted NEW reader of the turn-live flag is red BY NAME — the shapes counted besides `.` (`?.`, a bracket, a one-line destructuring, after a `://` string)', planted.some((w) => /zz-new-reader\.js: 3 read\(s\) of the turn-live flag — a NEW reader/.test(w)), planted);
+    // …and the turn-starting reader has ONE caller: the press — a second caller of the group hand-over origin would pass by the remote refusal
+    const callersOf = (texts) => Object.entries(texts).flatMap(([f, t]) => (t.match(/origin:\s*'group-handover'/g) || []).map(() => f));
+    const cal = callersOf(texts);
+    ok(`B-3336 COUPLING: the group hand-over origin has ONE caller, the press behind the remote refusal (${cal.join(', ')})`, JSON.stringify(cal) === '["src/server/stash-handover.js"]' && hog.includes("origin: 'group-handover'"), cal);
+    const cal2 = callersOf({ ...texts, 'src/server/zz-second-caller.js': "send(id, text, { origin: 'group-handover', steer: true });\n" });
+    ok('CONTROL (B-3336): a planted second caller of the group hand-over origin is named', cal2.includes('src/server/zz-second-caller.js'), cal2);
+    // the parse's hand-over is ONCE: the flag set right before the opener's call, the catch guarded by it
+    const CSt = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8');
+    const oncePin = (t) => /openerFed = true; try \{ TO\.noteTurnOpener\(session, msg, 'parse'\); \} catch \{ \}/.test(t) && /if \(parsedMsg && !openerFed && parsedMsg\.type !== 'command_lifecycle'\) \{ try \{ TO\.noteTurnOpener\(session, parsedMsg, 'parse'\); \} catch \{ \} \}/.test(t);
+    ok('B-3336 the parse\'s hand-over is ONCE: `openerFed` is set right before the opener\'s call, and the catch hands a record only when it was not (never a command_lifecycle, whose fact waits on the skipped lookup)', oncePin(CSt), 'the hand-over\'s once-flag moved');
+    ok('CONTROL (B-3336): the copy whose catch is not guarded by the once-flag fails the pin', !oncePin(anchored(CSt, 'if (parsedMsg && !openerFed && ', 'if (parsedMsg && ', 'B-3336 the once-flag')), 'the pin did not see the plant');
   }
   // (as-if-must (1)) AFTER A RE-ATTACH THE OPENER IS UNKNOWN until a turn starts in its sight: the person's turn, then a fresh
   // attach of the SAME session (a dead bridge healed, a parse gap) — never the previous «you»
