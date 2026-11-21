@@ -194,7 +194,10 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const overLines = (added, n, listed, items, say) => added.map((f) => `${f}: ${n[f]} > ${listed[f] || 0} — ${items[f].map(say).join(' · ')}`);
   const sayOver = (lines, log = console.log) => { for (const l of lines) log('      ' + l); };
   const j = judge(per, LISTED);
-  ok(total > 1000 && Object.keys(per).length > 200, `${total} unanchored control edits in ${Object.keys(per).length} scripts (non-vacuous: the walk reads the tree)`);
+  // non-vacuous BY THE LIST, never by a fixed number (B-0d3e's fall lowers both): a walk that read nothing would make every listed
+  // file «fall» in silence, so the live count must hold at least half of what the list holds, in at least half of its files
+  const listedSum = Object.values(LISTED).reduce((a, b) => a + b, 0), listedFiles = Object.keys(LISTED).length;
+  ok(total * 2 >= listedSum && Object.keys(per).length * 2 >= listedFiles, `${total} unanchored control edits in ${Object.keys(per).length} scripts — at least half of the list's ${listedSum} in ${listedFiles} (non-vacuous: the walk reads the tree)`);
   const overE = overLines(j.added, per, LISTED, EDITS, (e) => `line ${e.line} ${e.text}`);
   ok(!overE.length, `the unanchored control edits never rise without a row's id beside it (the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(LISTED).length} files)${overE.length ? ` — ${overE.length} file(s) over their count, EVERY ONE on its own line below with all its edits: build the new edit with anchored() from scripts/scratch.mjs, or raise the file's count under YOUR backlog row's id in scripts/fixtures/unanchored-controls.json «rows» (a plain number is refused)` : ''}`);
   sayOver(overE);

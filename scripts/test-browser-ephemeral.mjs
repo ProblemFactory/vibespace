@@ -2080,7 +2080,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     // r5: the new layer (a lost, unhealed browser is REFUSED `browser_closed` by name — MINOR 2) is stripped from this r4
     // control, else the refusal alone answers the attach and the control would prove nothing about the heal
     const LB = '    if (rec.browserLost) { const p = profile(profileId); return {';
-    const noHeal = (src) => src.replace(HB, HB + '    return Promise.resolve(null);\n').replace(LB, '    if (false) { const p = profile(profileId); return {');
+    const noHeal = (src) => editAnchor(editAnchor(src, HB, HB + '    return Promise.resolve(null);\n', "src/server/browser-keeper.js"), LB, '    if (false) { const p = profile(profileId); return {', "src/server/browser-keeper.js");   // its includes() guard below sees a gone anchor, editAnchor a doubled one
     if (k6src.includes(HB) && k6src.includes(LB)) {
       const ch = await healLeg(M6.load('src/server/browser-keeper.js', noHeal(k6src), 'no-heal'), 'ctl-heal', { via: 'tick' });
       ok(!ch.threw && ch.count === 0 && ch.state === 'ready' && String(ch.cdp3 || '').endsWith('-' + ch.c1), `⑥ r4 MAJOR 1 CONTROL: a keeper copy with no heal leaves ${ch.count} chromes after the leased tick, the record \`${ch.state}\`, and the lease's next /resolve carries the DEAD url (…-${String(ch.cdp3).split('-').pop()}) — the heal legs can go red`, ch);

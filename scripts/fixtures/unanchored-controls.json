@@ -36,7 +36,6 @@
     "test-browser-disk.mjs": 3,
     "test-browser-display.mjs": 11,
     "test-browser-env.mjs": 4,
-    "test-browser-ephemeral.mjs": 2,
     "test-browser-fact.mjs": 9,
     "test-browser-keeper.mjs": 5,
     "test-browser-live-input.mjs": 1,

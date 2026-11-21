@@ -719,14 +719,14 @@ function pureWalk(Hm, seed, steps) {
   const haSrc = read('src/helper-ask.js');
   const MUTANTS = [
     { tag: 'write-twice', why: 'a transition writing stdin from `allowed`', needle: "    'press-allow': X('allowed', 'refuse'), 'press-deny': X('allowed', 'refuse'),\n", patch: "    'press-allow': X('allowed', 'write-stdin'), 'press-deny': X('allowed', 'write-stdin'),\n", red: (c, w) => c.writesOutsideAsked.length === 2 && w.violations.some((x) => /written twice/.test(x)) },
-    { tag: 'no-override', why: 'a withdrawal that does not override our answer (r2 C1 undone)', needle: "    withdraw: X('cancelled', 'redraw'),\n", patch: "    withdraw: X('allowed'),\n", red: (c) => c.withdrawNotOverriding.length === 1 && /allowed\/withdraw/.test(c.withdrawNotOverriding[0]) },
+    { tag: 'no-override', why: 'a withdrawal that does not override our answer (r2 C1 undone)', needle: "    withdraw: X('cancelled', 'redraw'),\n", mode: 'first', patch: "    withdraw: X('allowed'),\n", red: (c) => c.withdrawNotOverriding.length === 1 && /allowed\/withdraw/.test(c.withdrawNotOverriding[0]) },
     { tag: 'back-to-asked', why: 'a record re-opening a cancelled ask', needle: "    'record-allow': X('cancelled'), 'record-deny': X('cancelled'),\n", patch: "    'record-allow': X('asked', 'redraw'), 'record-deny': X('cancelled'),\n", red: (c, w) => c.backToAsked.length === 1 && w.violations.some((x) => /back to asked/.test(x)) },
     { tag: 'dead-write', why: 'a dead parent\'s ask writing stdin', needle: "    'press-allow': X('parent-ended', 'refuse'), 'press-deny': X('parent-ended', 'refuse'),\n", patch: "    'press-allow': X('parent-ended', 'write-stdin'), 'press-deny': X('parent-ended', 'refuse'),\n", red: (c, w) => c.deadWrites.length === 1 && c.pressNotRefused.length === 1 && w.violations.some((x) => /dead write/.test(x)) },
     { tag: 'item-kept', why: 'a withdrawal that leaves the For-you item open (the twin-item class: an item outliving its ask)', needle: "    withdraw: X('cancelled', ...SETTLE),\n", patch: "    withdraw: X('cancelled', 'redraw'),\n", red: (c, w) => c.resolveMismatch.length === 1 && w.violations.some((x) => /item open while cancelled/.test(x)) },
   ];
   for (const m of MUTANTS) {
     check(`⑪ the patch site exists (${m.tag})`, haSrc.includes(m.needle));
-    const Hm = M11.load('src/helper-ask.js', editAnchor(haSrc, m.needle, m.patch, "src/helper-ask.js"), m.tag);
+    const Hm = M11.load('src/helper-ask.js', editAnchor(haSrc, m.needle, m.patch, "src/helper-ask.js", m.mode), m.tag);
     const c = tableCensus(Hm); const w = pureWalk(Hm, 777, 3000);
     check(`⑪ MUTANT ${m.tag} (${m.why}): the census names the cell and the walk goes red`, !c.clean && m.red(c, w), { census: Object.fromEntries(Object.entries(c).filter(([, v]) => Array.isArray(v) && v.length)), violations: w.violations.slice(0, 3) });
   }
