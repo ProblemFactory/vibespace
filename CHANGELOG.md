@@ -4,6 +4,19 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.416 — 2026-11-21
 
+### Added
+- The Vault window shows which background jobs use each secret, with ✕ to take it back; a job's card names its secrets and what it waits for.
+- Deleting a secret in the Vault window stops the background jobs that use it; locking the vault does not stop them.
+- A background job that needs a stored secret now asks you once in For you: Allow (with your second password) starts it, Deny refuses it.
+
+### Changed
+- The chat window's status bar is arranged by what you need: one row on a wide window, the same two rows on a narrow one, nothing hidden behind «⋯».
+- The model and its thinking level are one button, tasks and workflows one «Background work» button, and rarely changed settings sit in «Conversation settings».
+- The Context button holds the cache, the token total, the turn time and the spend; the spend shows on the button only when you are billed per use.
+- The status bar shows names instead of raw ids: the model as «Fable 1M», the thinking level as «Ultra», the permission mode as «Allow all».
+- A tool that did not start is listed in Session Properties and ⚙ Diagnostics, and on a phone or tablet the search button sits in the top bar.
+- On a tablet held upright, when its top bar is full, search moves into the bar's «⋯» menu as «Search this conversation».
+
 ### Fixed
 - When a Channels file cannot be read, the sidebar shows a warning and the panel says what is paused; nothing is fetched, sent or written over until it reads.
 - A damaged Channels file now waits in For you with «Start it empty»: its bytes are kept under a dated name, never deleted.
@@ -47,19 +60,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A pooled Codex conversation whose account cannot be named no longer has its usage counted against the pool's current account.
 - The hub no longer pauses while it checks folder mounts or reconnects a storage that went down; an unanswered check says so instead of «no permission».
 - A storage folder that cannot be read is no longer mounted over, and files that may have been moved aside before a reconnect are listed in For you.
-
-### Changed
-- The chat window's status bar is arranged by what you need: one row on a wide window, the same two rows on a narrow one, nothing hidden behind «⋯».
-- The model and its thinking level are one button, tasks and workflows one «Background work» button, and rarely changed settings sit in «Conversation settings».
-- The Context button holds the cache, the token total, the turn time and the spend; the spend shows on the button only when you are billed per use.
-- The status bar shows names instead of raw ids: the model as «Fable 1M», the thinking level as «Ultra», the permission mode as «Allow all».
-- A tool that did not start is listed in Session Properties and ⚙ Diagnostics, and on a phone or tablet the search button sits in the top bar.
-- On a tablet held upright, when its top bar is full, search moves into the bar's «⋯» menu as «Search this conversation».
-
-### Added
-- The Vault window shows which background jobs use each secret, with ✕ to take it back; a job's card names its secrets and what it waits for.
-- Deleting a secret in the Vault window stops the background jobs that use it; locking the vault does not stop them.
-- A background job that needs a stored secret now asks you once in For you: Allow (with your second password) starts it, Deny refuses it.
 
 ## 2.369.415 — 2026-11-21
 
