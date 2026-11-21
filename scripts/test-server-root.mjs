@@ -536,7 +536,7 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
       let found = null;
       (function walk(n) {
         if (found) return;
-        if (isTurn(n)) { let inner = null; (function w2(m) { if (inner) return; if (m !== n && isTurn(m)) { inner = m; return; } kids(m).forEach(w2); })(n.arguments[0].body); if (inner && callsIn(n.arguments[0].body, inner).includes('restoreSessions')) { found = { restore: callsIn(n.arguments[0].body, inner), last: callsIn(inner.arguments[0].body, null) }; return; } }
+        if (isTurn(n)) { let inner = null; (function w2(m) { if (inner) return; if (m !== n && isTurn(m)) { inner = m; return; } kids(m).forEach(w2); })(n.arguments[0].body); if (inner && callsIn(n.arguments[0].body, inner).includes('restoreSessions')) { found = { restore: callsIn(n.arguments[0].body, inner), last: callsIn(inner.arguments[0].body, null), lastNode: inner.arguments[0].body }; return; } }
         kids(n).forEach(walk);
       })(ast);
       return found;
@@ -544,6 +544,12 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
     const LAST = ['configure', 'initAfterListen', 'afterListen', 'bootEngineDistribution', 'bootRestored', 'warmSessions', '→bootSessionsIndexed', 'arm'];
     const T = turnsOf(srv8), lostT = T ? LAST.filter((k) => !T.last.includes(k)) : LAST;
     console.log(`  (the parsed listen step: the restore turn calls ${T ? T.restore.filter(Boolean).join(', ') : '—'}; the LAST turn calls ${T ? T.last.filter(Boolean).join(', ') : '—'})`);
+    // r980 (the narrow round wd0silov9's small): EACH of those calls is made ONCE, and the three boot timers keep their delays
+    const onceT = T ? LAST.map((k) => [k, T.last.filter((x) => x === k).length]) : [];
+    const timersT = []; if (T) (function walk(n) { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name === 'setTimeout' && n.arguments[0] && /Function/.test(n.arguments[0].type) && n.arguments[1] && n.arguments[1].type === 'Literal') { const inner = n.arguments[0].body.type === 'CallExpression' ? nameOfC(n.arguments[0].body.callee) : null; timersT.push(`${inner}@${n.arguments[1].value}`); } kids(n).forEach(walk); })(T.lastNode);
+    console.log(`  (the last turn's calls, each counted: ${onceT.map(([k, c]) => `${k}×${c}`).join(' ')}; its timers: ${timersT.join(', ') || 'none'})`);
+    ok(onceT.length === LAST.length && onceT.every(([, c]) => c === 1) && ['initAfterListen@1500', 'afterListen@2500', 'bootEngineDistribution@4000'].every((x) => timersT.includes(x)),
+      'B-1425 r980: each call of the last turn is made ONCE, and the three boot timers keep the release\'s delays (jobs 1.5 s, apps 2.5 s, the engine distribution 4 s)', { onceT, timersT });
     ok(!!T && T.restore.includes('restoreSessions') && !lostT.length, 'B-1425 r872: the listen step\'s LAST turn CALLS, as code (the parsed tree, never the text), the index\'s configure, the three boot timers\' callees, bootRestored, the first sessions sweep (bootSessionsIndexed at its end) and bootPhase.arm — and the turn before it calls restoreSessions', lostT);
     // RED CONTROL: the cure's first note put back where it stood (mid-line, after the index wait's catch) — the calls after it are LOST, by name
     const anchorT = "}).catch((e) => console.warn('[local-index] not started: ' + (e && e.message)));";
