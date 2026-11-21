@@ -638,7 +638,8 @@ else await (async () => {
         if (wpx === 1280) {
           // r943 THE LAW, whatever face the machine draws zh with: a PLANTED WIDE FACE (every CJK glyph a quarter wider, by the row's
           // own letter-spacing) — the fit measures the text as drawn, so where there is room the front's chip is still whole; CONTROL:
-          // a face so wide the room is gone — the chip cannot be whole there (the fold says it), so this judge can go red
+          // the same face with NO ROOM, made by a planted end-button width it reads back (r1571, below) — the chip cannot be whole there
+          // (the fold says it), so this judge can go red
           const plant = async (em) => ev(`let st = document.getElementById('r943-face'); if (!st) { st = document.createElement('style'); st.id = 'r943-face'; document.head.appendChild(st); } st.textContent = ${JSON.stringify('')} + (${em} ? '.browser-live-tabrow, .browser-live-tabrow * { letter-spacing: ${em}em !important; }' : ''); window.dispatchEvent(new Event('resize')); return true;`);
           // r1100 + r1111: each plant is fed and proves a frame came after it, then WAITS FOR WHAT IT PLANTED TO SETTLE (the end button
           // grows into a new spacing over its 0.15 s transition), then asks for ITS face's state (bounded 5 s) with a mark: the
@@ -649,11 +650,29 @@ else await (async () => {
           const wide = wA && wA.r;
           console.log(`    ⑨ the row at 1280 px under a planted WIDE face (letter-spacing 0.25em; ${facePlace(frA, wA, sdA)}): ${S(wide)}`);
           judged(wA, frA, 'r943: under a planted WIDER zh face (0.25em more per glyph) at 1280 px there is still room — the front\'s own chip, whole inside the list, and this view\'s own chip unclipped (the fit measures the text as drawn)', (r) => !!(r.chip && r.chip.here === '在此窗口最前面' && r.chip.whole && r.own && r.own.scroll <= r.own.client + 1), 5000, sdA);
-          await plant(6); const frB = await feedRun({ ...base, front: frontE }); const sdB = await ev(settledJs(3000));
+          // r1571 (the side run 44953729818's hosted red, twice — heavy 3/7): «no room» was made by a FACE (letter-spacing 6em), so by a
+          // font's metrics. Every chip is capped at 240 px (style.css .browser-live-tabchip max-width) and the fit measures each by its
+          // offsetWidth, so a wide face takes the room only where the end button and the other chips grow enough on that machine's
+          // fonts: on the runner they did not (the front's chip 240 px and whole, nothing folded; this view's own chip scrolled 1185
+          // over 238), and the CONTROL was red with no fault in the product. NOW «no room» is A FACT IT SETS AND READS BACK: under the
+          // same 0.25em face it measures the row (its width, the dividers, the end button) and the front's own chip, plants the end
+          // button's width (the fit reads it as endPx) so the room left is 40 px less than that chip, and reads the room back BEFORE it
+          // judges. A premise that did not form is red BY NAME as the premise — the fold is then not judged at all.
+          const roomOf = `const rw = L().el().querySelector('.browser-live-tabrow'), list = rw && rw.querySelector('.browser-live-tabrow-list'), q = rw && rw.querySelector('.browser-live-tabrow-quit'), fc = rw && rw.querySelector('.browser-live-tabchip.front-foreign');
+            const divPx = list ? [...list.children].filter((c) => !c.dataset.target && c.offsetParent).reduce((a, c) => a + c.offsetWidth + 3, 0) : 0, endPx = q && q.offsetParent ? q.offsetWidth + 6 : 0;
+            return { rowW: rw ? rw.clientWidth : null, divPx, endW: q && q.offsetParent ? q.offsetWidth : null, frontW: fc && fc.offsetParent ? fc.offsetWidth + 3 : null, room: rw ? rw.clientWidth - 12 - divPx - endPx : null };`;
+          const noRoom = async (px) => ev(`let st = document.getElementById('r943-room'); if (!st) { st = document.createElement('style'); st.id = 'r943-room'; document.head.appendChild(st); } st.textContent = ${px ? JSON.stringify(`.browser-live-tabrow > .browser-live-tabrow-quit { min-width: ${px}px !important; transition: none !important; }`) : "''"}; ${FRAMES(3000)} const room = (() => { ${roomOf} })(); return { ...room, fed: true, error: null, frames: fr, visibility: document.visibilityState };`);
+          const r0 = await ev(roomOf);
+          const endMin = r0 && r0.rowW != null && r0.frontW != null && r0.endW != null ? Math.max(r0.endW + 1, Math.round(r0.rowW - 12 - r0.divPx - 6 - (r0.frontW - 40))) : null;
+          const frB = endMin != null ? await noRoom(endMin) : { fed: false, error: 'the row, its end button or the front\'s chip was not drawn to measure', frames: 0, visibility: null };
+          const sdB = await ev(settledJs(3000));
+          const premise = !!(frB.fed && r0.frontW && frB.room != null && frB.room < r0.frontW && Math.abs(frB.rowW - r0.rowW) <= 1);
+          ok(premise, `r943 CONTROL's PREMISE — no room, by a fact it set and read back: the end button planted at ${endMin} px (it was ${r0 && r0.endW}) leaves ${frB.room} px of the row for the front's chip of ${r0 && r0.frontW} px (the row ${r0 && r0.rowW} → ${frB.rowW} px)${premise ? '' : ' — THE PREMISE DID NOT FORM: the control below is not judged, so this is no verdict on the fold'}`, S({ r0, after: frB }));
           const wB = await ev(untilJs(rowAt, "r.more && r.more.marked && !(r.chip && r.chip.whole)", 5000));
           const huge = wB && wB.r;
-          console.log(`    ⑨ the row at 1280 px under a CONTROL face with no room (letter-spacing 6em; ${facePlace(frB, wB, sdB)}): ${S(huge)}`);
-          judged(wB, frB, 'r943 CONTROL: a face so wide there is no room — the front\'s chip is not whole inside the list (the judge above would read red) and the fold names it in words', (r) => !(r.chip && r.chip.whole) && !!(r.more && r.more.marked && r.more.tip.includes('企业助手 的标签页在此窗口最前面')), 5000, sdB);
+          console.log(`    ⑨ the row at 1280 px with NO ROOM (the end button planted at ${endMin} px, ${frB.room} px left for a ${r0 && r0.frontW} px chip; ${facePlace(frB, wB, sdB)}): ${S(huge)}`);
+          if (premise) judged(wB, frB, 'r943 CONTROL: no room (a fact set and read back) — the front\'s chip is not whole inside the list (the judge above would read red) and the fold names it in words', (r) => !(r.chip && r.chip.whole) && !!(r.more && r.more.marked && r.more.tip.includes('企业助手 的标签页在此窗口最前面')), 5000, sdB);
+          await noRoom(0);
           await plant(0); const frR = await feedRun({ ...base, front: frontE }); const sdR = await ev(settledJs(3000));
           const wR = await ev(untilJs(rowAt, "r.chip && r.chip.id === 'E' && r.chip.here && r.chip.whole", 5000));
           judged(wR, frR, 'r1111: the face put back, the row is fitted back — the front\'s own chip whole inside the list', (r) => !!(r.chip && r.chip.here === '在此窗口最前面' && r.chip.whole), 5000, sdR);
