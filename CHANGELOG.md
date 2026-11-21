@@ -70,6 +70,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Beside the conversation list on a tablet-sized screen, the state in the top bar now shows whole or as a coloured dot, never cut.
 - In a stopped conversation on a paired machine, VibeSpace's own continue after a usage limit no longer shows as a message you typed, once its agent updates.
 - When a resume or fork starts a new conversation, the first message VibeSpace sends into it is no longer shown as one you typed.
+- OpenCode's own terminals and conversations now start below VibeSpace's CPU priority, as other conversations do.
+- On an ssh machine whose agent names its nice program, conversations and terminals now start below that agent's CPU priority.
 
 ## 2.369.415 — 2026-11-21
 
