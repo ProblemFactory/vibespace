@@ -1807,9 +1807,28 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // Server-side change hook (2.190.0): the ONLY settings key with a server
     // side effect is the Integration master switch — everything else is read
     // lazily via readSettings. Never let a callback failure break the write.
-    try { onSettingsWrite?.(data, prev); } catch (e) { console.warn('[settings] change callback failed:', e.message); }
+    try { _landing = onSettingsWrite?.(data, prev) || null; } catch (e) { _landing = null; console.warn('[settings] change callback failed:', e.message); }
     try { require('../server/spend-guard.js').noteLimitsWritten(spendOf(prev), spend); } catch { }   // B-0a33 (2): waiting frames re-judged at once
     return spend;
+  }
+  // B-ddf3 unit 2 line 1 (the coordinator's r1407 (b)): a write that moves a CLI-config row (or the Integration switch) is
+  // answered at the LANDING of the shipped helper's run on this machine — or told BY NAME that it did not land (refused,
+  // failed, or still writing past the bound: the landing still comes and is journalled). Never «applied» before it.
+  let _landing = null;
+  const LANDING_BOUND_MS = 10000;
+  function answerAtLanding(res, body) {
+    const p = _landing; _landing = null;
+    if (!p || typeof p.then !== 'function') return res.json(body);
+    let done = false;
+    const say = (cliConfig) => { if (done) return; done = true; clearTimeout(t); res.json({ ...body, cliConfig }); };
+    const t = setTimeout(() => say({ landed: false, why: `the CLI config has not landed on this machine within ${LANDING_BOUND_MS / 1000} s (still writing)` }), LANDING_BOUND_MS);
+    t.unref?.();
+    p.then((r) => {
+      if (!r) return say({ landed: true });
+      if (r.skipped) return say({ landed: false, why: r.refused ? (r.refused.line || r.refused.why || 'refused on this server') : r.settingsHeld ? 'the settings are held' : 'skipped' });
+      const failed = r.error || (r.landing && r.landing.ok === false && r.landing.why) || Object.entries(r).filter(([, v]) => v && v.ok === false).map(([k, v]) => `${k}: ${v.error}`).join('; ');
+      say(failed ? { landed: false, why: String(failed) } : { landed: true });
+    }, (e) => say({ landed: false, why: (e && e.message) || String(e) }));
   }
 
   // Server-side settings accessor: /api/settings persists HERE
@@ -1924,7 +1943,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // `budgetLimits(serverSetting)` over this very cache on its next check (a clamp at CAP_MAX included), so the Settings
     // row says the live number, not the typed one; r2: the broadcast carries the same `spend` (writeSettings)
     const spend = writeSettings(data);
-    res.json({ success: true, ...(spend ? { spend } : {}), ...(refused ? { refused } : {}) });
+    answerAtLanding(res, { success: true, ...(spend ? { spend } : {}), ...(refused ? { refused } : {}) });
   });
 
   router.patch('/api/settings', (req, res) => {
@@ -1938,7 +1957,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (refuseEngineRows(req, res, merged)) return; // lane engine-spi-egress L1b (V3) — r2: the file the patch would leave
     if (refuseSpendRows(req, res, merged)) return; // lane setting-doors pick 0: the spending rows are the owner's press
     writeSettings(merged);
-    res.json({ success: true, ...(refused ? { refused } : {}) });
+    answerAtLanding(res, { success: true, ...(refused ? { refused } : {}) });
   });
 
   // ── Config export / import (whole-instance transfer) ──

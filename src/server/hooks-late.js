@@ -63,8 +63,8 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
       if (typeof rootFactsNow === 'function') await rootFactsNow();   // B-1425: the root's true facts first (off the loop, bounded)
       if (!hookRegistrationSafe()) return res.status(409).json({ error: 'This server runs from a temporary directory and never writes the real CLI config.', code: 'unsafe_root' });
       let hooks = null;
-      try { if (integrationEnabled()) hooks = ensureAgentHooks({ auto: true }); } catch (e) { hooks = { error: e.message }; }
-      const cfg = harnessConfig.syncCliConfig({ reason: 'Apply' });
+      try { if (integrationEnabled()) hooks = await ensureAgentHooks({ auto: true }); } catch (e) { hooks = { error: e.message }; }
+      const cfg = await harnessConfig.syncCliConfig({ reason: 'Apply' });
       // B-225b (主开发 r552 — a person's refused act is SAID at the press): while the SETTINGS are held both writers skip and write
       // nothing; the door answers the hold BY NAME (the store's unread refusal with the held fact), never «applied» over nothing
       const heldOf = (x) => (x && x.skipped && x.settingsHeld ? x.settingsHeld : null), held = heldOf(hooks) || heldOf(cfg);

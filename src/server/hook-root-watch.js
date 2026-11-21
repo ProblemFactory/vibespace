@@ -66,12 +66,14 @@ function create({ dataDir, ensureAgentHooks, rootRecovery, ownerWriteRefusal, fa
     }
     return { said: false };
   }
+  // → Promise (B-ddf3 unit 2 line 1: the registration runs through the shipped helper and lands later)
   function sync() {
-    const r = ensureAgentHooks({ auto: true });
-    if (r && r.refused && r.refused.kind === 'unknown') unknown(r.refused);
-    else if (r && r.skipped && r.settingsHeld) arm();   // B-225b (主开发 r552): a skip while the settings are held registered NOTHING — no recovery said, read again (the backoff)
-    else if (r && !r.refused) recovered();
-    return r;
+    return Promise.resolve(ensureAgentHooks({ auto: true })).then((r) => {
+      if (r && r.refused && r.refused.kind === 'unknown') unknown(r.refused);
+      else if (r && r.skipped && r.settingsHeld) arm();   // B-225b (主开发 r552): a skip while the settings are held registered NOTHING — no recovery said, read again (the backoff)
+      else if (r && !r.refused && !Object.values(r).some((x) => x && x.ok === false)) recovered();   // a registration that did not land is no recovery
+      return r;
+    });
   }
   function probeMayRun() {
     const r = typeof ownerWriteRefusal === 'function' ? ownerWriteRefusal() : null;

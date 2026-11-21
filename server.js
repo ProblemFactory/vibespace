@@ -431,7 +431,7 @@ const {
   createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
   ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery, rootFactsNow, onRootLanded, // B-1425: the root facts a caller that can wait awaits
   agentHooksStatus, HOOK_OPTOUT_FILE,
-} = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT, onHookFileCreated: (ev) => hooksLate.noteCreated(ev) });
+} = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT, onHookFileCreated: (ev) => hooksLate.noteCreated(ev), applyThisMachine: (o) => harnessConfig.applyThisMachine(o) }); // B-ddf3 u2 line 1: this machine's hooks through the shipped helper
 // ── Harness settings (src/server/harness-config-sync.js; docs/design-harness-settings.zh.md) ──
 // THE typed accessors over the descriptor-declared tables (harnessSetting /
 // harnessDeclares / harnessSpawnSettings — threaded to ws-create and the pool
@@ -440,7 +440,7 @@ const {
 // install/prelude/dial sites in hosts.js and ws-create.js).
 const harnessConfig = require('./src/server/harness-config-sync.js').create({
   serverSetting: (...a) => serverSetting(...a), harnesses: require('./src/harnesses'), adapterRegistry, activeSessions, hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery,
-  log: (...a) => console.log(...a), warn: (...a) => console.warn(...a),
+  log: (...a) => console.log(...a), warn: (...a) => console.warn(...a), helperPath: path.join(__dirname, 'data', 'bin', 'vibespace-hook-register.mjs'), hooksWanted: () => integrationEnabled() && !fs.existsSync(HOOK_OPTOUT_FILE), // B-ddf3 u2 line 1: THIS machine served by the shipped helper through the starter (no in-process write)
 }); require('./src/server/conversation-ops.js').provide({ keepEnded, endFactsBefore }); // lane end-obeys-verdict: TERMINATE SAYS WHO — the ended record, written around the kill body
 const { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64 } = harnessConfig;
 // Generic operator-visible notice channel (2.226.0, user directive "不要静默
@@ -480,10 +480,10 @@ function checkAgentHookHealth() {
       if (!info.fileExists || info.parseError) continue; // that CLI isn't set up here / unreadable
       if (info.stale || !info.installed || scriptMissing) {
         global.__vsEvent?.('agent-hook-broken', `${key}${info.stale ? '/stale' : ''}${!info.installed ? '/missing-entry' : ''}${scriptMissing ? '/script-missing' : ''}`);
-        const healed = ensureAgentHooks({ auto: true }); // self-heal the registration in place (B-225b r552: while the settings are held it SKIPS — nothing repaired, nothing said)
-        if (!(healed && healed.skipped) && !hookRootWatch.saidRecoveryInstead(info, scriptMissing)) serverNotice(`hook-health-${key}`, // verify r2 ①: a root never registered because it could not be read is a recovery, not "broken and repaired"
+        Promise.resolve(ensureAgentHooks({ auto: true })).then((healed) => { // self-heal the registration in place, through the shipped helper (B-ddf3 u2 line 1) (B-225b r552: while the settings are held it SKIPS — nothing repaired, nothing said)
+        if (!(healed && healed.skipped) && !(healed && healed[key] && healed[key].ok === false) && !hookRootWatch.saidRecoveryInstead(info, scriptMissing)) serverNotice(`hook-health-${key}`, // verify r2 ①: a root never registered because it could not be read is a recovery, not "broken and repaired"
           `VibeSpace's ${key} agent-hook registration was broken (stale or missing path) and has been repaired — CLI sessions already running pick the fix up only after they restart or compact.`,
-          { level: 2 });
+          { level: 2 }); });
       }
     }
   } catch (e) { console.warn('[hook-health] probe failed:', e.message); }
@@ -567,9 +567,9 @@ function integrationEnabled() {
 const hookRootWatch = require('./src/server/hook-root-watch.js').create({ dataDir: path.join(__dirname, 'data'), ensureAgentHooks, rootRecovery, ownerWriteRefusal, factsNow: rootFactsNow, integrationEnabled: () => integrationEnabled(), serverNotice: (...a) => serverNotice(...a) });
 function syncHookRegistration() {
   try {
-    if (integrationEnabled()) hookRootWatch.sync(); // the unknown ⇒ the notice once per cause + the backoff re-judge; ok ⇒ the recovery said once // verify r1 (hook-root-guard): an UNJUDGEABLE root (a read error on .git) is said to the OWNER, not only the journal; every writer re-reads, the probe heals + notifies
-    else stripAgentHookEntries();
-  } catch (e) { console.warn('[integration] hook registration sync failed:', e.message); }
+    if (integrationEnabled()) return hookRootWatch.sync(); // the unknown ⇒ the notice once per cause + the backoff re-judge; ok ⇒ the recovery said once // verify r1 (hook-root-guard): an UNJUDGEABLE root (a read error on .git) is said to the OWNER, not only the journal; every writer re-reads, the probe heals + notifies
+    else return stripAgentHookEntries();
+  } catch (e) { console.warn('[integration] hook registration sync failed:', e.message); return null; }
 }
 
 syncStores.drafts = new SyncStore('drafts', path.join(__dirname, 'data', 'drafts.json'), wss);
@@ -586,7 +586,7 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
   onSettingsWrite: (next, prev) => {
     const was = (prev || {})['agents.vibespaceIntegration'] !== false;
     const now = (next || {})['agents.vibespaceIntegration'] !== false;
-    if (was !== now) rootFactsNow().then(syncHookRegistration).catch((e) => console.warn('[integration] hook registration sync failed:', e && e.message));   // B-1425: the switch's sync waits for the root facts (off the loop)
+    const toggled = was !== now ? rootFactsNow().then(syncHookRegistration).catch((e) => { console.warn('[integration] hook registration sync failed:', e && e.message); return null; }) : null;   // B-1425: the switch's sync waits for the root facts (off the loop); B-ddf3 u2 (b): the switch's own write rides back too
     // Harness settings (design-harness-settings §5): a cli-config row changed ⇒
     // re-apply the plan on this machine; a spawn row with a `live` verb changed
     // (claude disableModelFallback → formatSetFallbackPolicy: apply_flag_settings
@@ -595,7 +595,7 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
     // verb goes to every running chat session whose ADAPTER has it. Sessions
     // spawned after the flip get it at spawn instead.
     try { settingHolds.noteSettingsWrite(next, prev); } catch { } // lane setting-doors pick 2 (law B): a hand write of a held row ends its hold HERE, the moment it lands (before the wiring exists there is no hold)
-    harnessConfig.onSettingsWrite(next, prev); try { plugins.onSettingsWrite(next, prev); } catch { } // lane plugin-settings-p0: a plugin row that re-applies (frp relay fields, Tailscale mode) moved ⇒ that plugin re-applies (before the plugin wiring exists nothing can have changed)
+    const landing = harnessConfig.onSettingsWrite(next, prev); try { plugins.onSettingsWrite(next, prev); } catch { } return (landing || toggled) ? Promise.all([toggled, landing]).then(([t, l]) => l || (t && typeof t === 'object' && !('ok' in t) ? { receipts: [], files: [] } : t)) : null; // B-ddf3 u2 line 1 (b): the CLI config's landing rides back to the settings write's answer // lane plugin-settings-p0: a plugin row that re-applies (frp relay fields, Tailscale mode) moved ⇒ that plugin re-applies (before the plugin wiring exists nothing can have changed)
   } });
 app.use(persistenceRouter);
 // ── Agent-hook boot registration (deferred from the hook-machinery block so
@@ -955,15 +955,15 @@ app.post('/api/agent-hooks/install', async (req, res) => { try {   // B-1425: an
   // right back — refuse with guidance instead of silently contradicting.
   { const sh = typeof persistenceRouter.settingsHeld === 'function' ? persistenceRouter.settingsHeld() : null; if (sh) return res.status(503).json({ error: `the settings could not be read (${sh.kind}${sh.code ? ', ' + sh.code : ''}) — the hooks were not installed; nothing was written`, code: 'store_unread', held: sh }); } if (!integrationEnabled()) return res.status(400).json({ error: 'VibeSpace integration is disabled (Settings → Integration → master switch). Enable it first.' });   // B-225b r552: the HOLD answered by name first (its strict side reads the switch OFF)
   await rootFactsNow(); createHookHelper(); // B-1425: the verdict on the root's true facts; regenerate the script too (repair path)
-  const results = ensureAgentHooks({ auto: false }); // explicit → clears any opt-out
+  const results = await ensureAgentHooks({ auto: false }); // explicit → clears any opt-out (B-ddf3 u2 line 1: through the shipped helper, answered at its landing)
   // A worktree / temp server refuses BY NAME (src/server-root.js) — never "installed"
   if (results.refused) return res.status(409).json({ error: results.refused.line, refused: results.refused, status: agentHooksStatus() }); if (results.skipped && results.settingsHeld) return res.status(503).json({ error: 'the settings could not be read — the hooks were not installed; nothing was written', code: 'store_unread', held: { file: 'settings.json', kind: results.settingsHeld.kind, code: results.settingsHeld.code || null, since: null, rung: 'said' } });
-  res.json({ success: true, results, status: agentHooksStatus() });
+  const bad = Object.entries(results || {}).filter(([, v]) => v && v.ok === false); res.json({ success: !bad.length, results, ...(bad.length ? { error: bad.map(([k, v]) => `${k}: ${v.error}`).join('; ') } : {}), status: agentHooksStatus() });
 } catch (e) { if (!res.headersSent) res.status(500).json({ error: String((e && e.message) || e) }); } });
 hooksLate.registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe, rootFactsNow }); // POST /api/cli-config/apply — the missing-file chip's "Apply" (human-triggered): the boot registration + CLI-config plan on demand (lane hooks-create)
 app.post('/api/agent-hooks/uninstall', async (req, res) => { try {
-  await rootFactsNow(); removeAgentHooks();
-  res.json({ success: true, status: agentHooksStatus() });
+  await rootFactsNow(); const landing = await removeAgentHooks(); // B-ddf3 u2: the removal through the shipped helper, answered at its landing, a failure by name
+  res.json({ success: !(landing && landing.ok === false), ...(landing && landing.ok === false ? { error: `the removal did not land: ${landing.why}` } : {}), status: agentHooksStatus() });
 } catch (e) { res.status(500).json({ error: String((e && e.message) || e) }); } });
 
 // ── Hosts (the MACHINE registry — ssh hosts AND dial-out devices, B-f3e8) ──
