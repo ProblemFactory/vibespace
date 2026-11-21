@@ -231,9 +231,13 @@ async function endListed({ rows, mark, keep = [], still = stillLeft, end = null,
  *  processes live — END_ROWS rows a press (each its pid / start / name only; the rest answered back unread, so the hub keeps them
  *  listed for the next press), the mark the conversation's own, the agent's own tree, its desktop apps and the
  *  conversation's recorded chain held out (no pid in its records = the chain not known: nothing is ended, own-unknown — as the
- *  read names nothing then); then endListed */
+ *  read names nothing then); then endListed. THE RECORDS READ IS INSIDE THE PRESS'S ONE DEADLINE (主开发 r1056 1): raced against it
+ *  as the read op races its own walk — past it every row is answered back unread (listed for another press); and ONE such read
+ *  at a time: a press that finds the last one still out (a home on a hung mount) starts none, so presses never pile stuck pool
+ *  threads up (the agent's file pool serves every conversation of that machine) */
 const END_ROWS = 64;
-async function endLeftOp(msg, { procRoot = '/proc', keep = [], records = [], end = null } = {}) {
+let recordsOut = null;   // the press's records read still running (one at a time)
+async function endLeftOp(msg, { procRoot = '/proc', keep = [], records = [], end = null, pressMs = PRESS_MS, recordsOf = recordPidsOf } = {}) {
   const mark = msg && msg.mark;
   if (typeof mark !== 'string' || !MARK_RE.test(mark)) return { ok: false, reason: 'no-mark' };
   const valid = (Array.isArray(msg.rows) ? msg.rows : []).slice(0, 4096)
@@ -241,9 +245,17 @@ async function endLeftOp(msg, { procRoot = '/proc', keep = [], records = [], end
     .filter((x) => Number.isInteger(x.pid) && x.pid > 1 && Number.isFinite(x.start));
   if (!valid.length) return { ok: false, reason: 'nothing-listed' };
   const rows = valid.slice(0, END_ROWS), over = valid.slice(END_ROWS);   // past the bound: not judged this press — answered back, still listed
-  const own = (await recordPidsOf(records)).map((x) => x.pid);
+  const t0 = Date.now();
+  const allBack = () => { const back = valid.map(({ pid, start, comm }) => ({ pid, start, comm })); return { ok: true, ended: [], still: [], gone: 0, held: 0, unread: back.length, unreadRows: back }; };
+  if (recordsOut) return allBack();   // the last press's records read is still out: no second one
+  let named = null;
+  const work = Promise.resolve().then(() => recordsOf(records)).then((l) => { named = Array.isArray(l) ? l : []; }, () => { named = []; });
+  recordsOut = work;
+  work.then(() => { if (recordsOut === work) recordsOut = null; });
+  if (!(await raced(work, timeLeft(t0, pressMs)))) return allBack();   // not read inside the press's bound: nothing is judged, all stay listed
+  const own = named.map((x) => x.pid);
   if (!own.length) return { ok: false, reason: 'own-unknown' };
-  const r = await endListed({ rows, mark, keep: [process.pid, ...pidsOf(keep), ...own], procRoot, end });
+  const r = await endListed({ rows, mark, keep: [process.pid, ...pidsOf(keep), ...own], procRoot, end, pressMs: timeLeft(t0, pressMs) });
   const back = r.unreadRows.concat(over).map(({ pid, start, comm }) => ({ pid, start, comm }));
   return { ok: true, ended: r.ended, still: r.still, gone: r.gone, held: r.held, unread: back.length, unreadRows: back };
 }

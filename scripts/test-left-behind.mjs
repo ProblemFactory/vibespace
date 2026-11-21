@@ -232,21 +232,23 @@ console.log('— ③ the hub\'s one read after a settled Stop');
 console.log('— ④ real processes and the End door');
 {
   const id = `sess-lb-${process.pid}`, mark = `CLAUDE_WEBUI_SESSION_ID=${id}`;
+  // this leg's REAL processes are HELD by the identity their own parent read while it still held them (pid + start time from /proc,
+  // the boot's id) and ended at the end through proc-identity signalIdentity — judged again at the signal (主开发 r1056 3: never a
+  // pid and a name read back)
   const live = [];
+  const held = (line) => { const [pid, starttime] = String(line).trim().split(' ').map(Number); live.push({ pid, starttime, bootId: PI.bootIdOf() }); return pid; };
   // a REAL leftover is RE-PARENTED (the CLI kills its group and every linked descendant): a double fork — the middle process
   // starts a detached grandchild, prints its pid and exits, so the grandchild is nobody's child here
   const run = (env) => {
-    const pid = Number(String(execFileSync(process.execPath, ['-e', "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore', env: process.env }); c.unref(); console.log(c.pid);"], { env: { PATH: process.env.PATH, ...env } })).trim());
-    live.push(pid); return pid;
+    return held(execFileSync(process.execPath, ['-e', "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore', env: process.env }); c.unref(); const s = require('fs').readFileSync('/proc/' + c.pid + '/stat', 'utf8'); console.log(c.pid + ' ' + s.slice(s.lastIndexOf(')') + 2).split(' ')[19]);"], { env: { PATH: process.env.PATH, ...env } }));
   };
   // a hub JOB: a holder re-parented away from this process (only the job's record holds it), whose child carries the mark
   const runJob = async () => {
     const file = path.join(ROOT, 'job-child.pid');
-    const holderCode = "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { env: { ...process.env, CLAUDE_WEBUI_SESSION_ID: process.argv[1] }, stdio: 'ignore' }); require('fs').writeFileSync(process.argv[2], String(c.pid)); setTimeout(() => {}, 30000);";
-    const holder = Number(String(execFileSync(process.execPath, ['-e', `const c = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(holderCode)}, ${JSON.stringify(id)}, ${JSON.stringify(file)}], { detached: true, stdio: 'ignore' }); c.unref(); console.log(c.pid);`], { env: { PATH: process.env.PATH } })).trim());
-    live.push(holder);
-    for (let k = 0; k < 100 && !fs.existsSync(file); k++) await sleep(20);
-    const child = Number(fs.readFileSync(file, 'utf8')); live.push(child);
+    const holderCode = "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { env: { ...process.env, CLAUDE_WEBUI_SESSION_ID: process.argv[1] }, stdio: 'ignore' }); const s = require('fs').readFileSync('/proc/' + c.pid + '/stat', 'utf8'); require('fs').writeFileSync(process.argv[2], c.pid + ' ' + s.slice(s.lastIndexOf(')') + 2).split(' ')[19]); setTimeout(() => {}, 30000);";
+    const holder = held(execFileSync(process.execPath, ['-e', `const c = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(holderCode)}, ${JSON.stringify(id)}, ${JSON.stringify(file)}], { detached: true, stdio: 'ignore' }); c.unref(); const s = require('fs').readFileSync('/proc/' + c.pid + '/stat', 'utf8'); console.log(c.pid + ' ' + s.slice(s.lastIndexOf(')') + 2).split(' ')[19]);`], { env: { PATH: process.env.PATH } }));
+    for (let k = 0; k < 100 && !(fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes(' ')); k++) await sleep(20);
+    const child = held(fs.readFileSync(file, 'utf8'));
     return { holder, child };
   };
   const alive = (p) => { try { process.kill(p, 0); return true; } catch { return false; } };
@@ -310,7 +312,7 @@ console.log('— ④ real processes and the End door');
   } finally {
     off();
     for (const f of fifos) release(f);
-    for (const p of live) { try { if (fs.readFileSync(`/proc/${p}/cmdline`, 'utf8').includes('setTimeout')) process.kill(p, 'SIGKILL'); } catch { } }
+    for (const ident of live) PI.signalIdentity(ident, 'SIGKILL');
   }
 }
 
@@ -393,6 +395,7 @@ console.log('— ⑦ the End door on a paired machine (B-69a7 remainder (b)): th
     '⑦ a second press asks for the row still listed only; nobody named on the page = the house\'s own subject (human:local); nothing left ⇒ the list and the kept line are gone', { p2, asked });
   const fresh = () => ({ host: 'h-2', keeperSid: 'k-7', _leftBehind: [{ at: 5, mark: MARK, rows: [{ pid: ROW.pid, start: ROW.start, comm: ROW.comm }] }] });
   const thrown = (code) => dmOf(() => { throw Object.assign(new Error('refused'), code ? { code } : {}); });
+  const thrownAt = (o) => dmOf(() => { throw Object.assign(new Error('not sent'), o); });
   const lookupThrows = (code) => ({ deviceBounded: async () => { throw Object.assign(new Error('no link'), code ? { code } : {}); } });
   const cases = [
     ['no client for the machine now', hostsOf(null), 'unreachable', true],
@@ -403,6 +406,9 @@ console.log('— ⑦ the End door on a paired machine (B-69a7 remainder (b)): th
     ['a client without the method', hostsOf({}), 'paired-machine', false],
     ['the machine\'s own allow list (its run flag off)', hostsOf(thrown('op-not-allowed')), 'machine-refused', true],
     ['no answer in time', hostsOf(thrown(null)), 'press-failed', true],
+    ['never sent: no connect (stage connect — 主开发 r1056 2)', hostsOf(thrownAt({ stage: 'connect' })), 'unreachable', true],
+    ['never sent: the hub\'s own act gate (stage gate)', hostsOf(thrownAt({ code: 'hub_act_denied', stage: 'gate' })), 'machine-refused', true],
+    ['never sent: the presser\'s name refused at the send point', hostsOf(thrownAt({ code: 'act_without_by', stage: 'gate' })), 'not-the-person', true],
     ['the agent no longer knows the conversation\'s own chain', hostsOf(dmOf({ ok: false, reason: 'own-unknown' })), 'own-unknown', false],
     ['the agent found no row to judge', hostsOf(dmOf({ ok: false, reason: 'nothing-listed' })), 'nothing-listed', false],
   ];
@@ -437,6 +443,24 @@ console.log('— ⑦ the End door on a paired machine (B-69a7 remainder (b)): th
   const ownRec = record({ keeperPid: 9401 });
   const ownOp = await LB.endLeftOp({ mark: MARK, rows: [opRows[0]] }, { procRoot: OPROC, records: [ownRec], end: fakeEnd });
   ok(ownOp.ok && ownOp.held === 1 && ownOp.ended.length === 0, '⑦ the device op holds the conversation\'s own chain known by the agent\'s records (a keeper\'s pid is never ended)', ownOp);
+  // THE RECORDS READ INSIDE THE PRESS'S DEADLINE (主开发 r1056 1): a PLACED STALL in the read of the conversation's records (a home
+  // on a hung mount) — the press answers every row back unread (still listed), a second press while it is out starts no second read
+  // (no pile of stuck pool threads), and once it returns the next press reads again and ends what is proven
+  const stall = () => { let calls = 0, release = null; const f = () => { calls++; return new Promise((r) => { release = () => r([{ pid: 9499, birth: null }]); }); }; return { f, calls: () => calls, release: () => release && release() }; };
+  const st = stall();
+  const sT1 = await LB.endLeftOp({ mark: MARK, rows: [opRows[0]] }, { procRoot: OPROC, records: [rec0], end: fakeEnd, pressMs: 50, recordsOf: st.f });
+  const sT2 = await LB.endLeftOp({ mark: MARK, rows: [opRows[0]] }, { procRoot: OPROC, records: [rec0], end: fakeEnd, pressMs: 50, recordsOf: st.f });
+  const before = ended.length;
+  st.release(); await new Promise((r) => setImmediate(r));
+  const sT3 = await LB.endLeftOp({ mark: MARK, rows: [opRows[0]] }, { procRoot: OPROC, records: [rec0], end: fakeEnd });
+  ok(sT1.ok && sT1.unread === 1 && sT1.unreadRows[0].pid === 9401 && sT1.ended.length === 0 && sT2.ok && sT2.unread === 1 && st.calls() === 1 && before === ended.length - 1 && sT3.ok && sT3.ended.join() === 'node',
+    '⑦ a stalled records read: the press answers its rows back unread inside its bound, a second press starts no second read (one at a time), and after the read returns the next press ends what is proven', { sT1, sT2, calls: st.calls(), sT3 });
+  const noOne = M.load('src/left-behind.js', anchored(SRC, "  if (recordsOut) return allBack();   // the last press's records read is still out: no second one\n", '', 'B-69a7 (b) one records read at a time'), 'nooneread');
+  const sm = stall();
+  await noOne.endLeftOp({ mark: MARK, rows: [opRows[0]] }, { procRoot: OPROC, records: [rec0], end: fakeEnd, pressMs: 50, recordsOf: sm.f });
+  await noOne.endLeftOp({ mark: MARK, rows: [opRows[0]] }, { procRoot: OPROC, records: [rec0], end: fakeEnd, pressMs: 50, recordsOf: sm.f });
+  ok(sm.calls() === 2, '⑦ RED CONTROL (no one-at-a-time guard): a second press while the first read is stuck starts a second read (another stuck pool thread)', sm.calls());
+  sm.release();
   // RED CONTROLS: the door rule without canEnd; the agent's unread rows taken as they came
   const DSRC = fs.readFileSync(path.join(REPO, 'src/server/left-behind-door.js'), 'utf8');
   const noCan = M.load('src/server/left-behind-door.js', anchored(DSRC, ' && (!session.host || (r && r.canEnd === true))', '', 'B-69a7 (b) the canEnd door rule'), 'nocanend');

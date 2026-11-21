@@ -12,10 +12,21 @@ import { endDaemonsAndWait, DAEMON_ROOT_ENV, DAEMON_ARGV, DAEMON_COMM } from './
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+// B-69a7 (主开发 r1056 3): the left-behind legs' DETACHED GRANDCHILDREN (a stand-in for what a tool leaves behind) are HELD by the
+// identity their own parent read while it still held them (pid + start time from /proc, the boot's id), and ended at the leg's end
+// through src/proc-identity.js signalIdentity — judged again at the signal — never by a pid and a name read back
+const PI = require(REPO + '/src/proc-identity.js');
+const HELD_KIDS = [];
+const detachedHeld = (sid) => {
+  const [pid, starttime] = String(execFileSync(process.execPath, ['-e', "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore', env: process.env }); c.unref(); const s = require('fs').readFileSync('/proc/' + c.pid + '/stat', 'utf8'); console.log(c.pid + ' ' + s.slice(s.lastIndexOf(')') + 2).split(' ')[19]);"], { env: { PATH: process.env.PATH, CLAUDE_WEBUI_SESSION_ID: sid } })).trim().split(' ').map(Number);
+  HELD_KIDS.push({ pid, starttime, bootId: PI.bootIdOf() });
+  return pid;
+};
+const endHeldKids = () => { for (const id of HELD_KIDS.splice(0)) PI.signalIdentity(id, 'SIGKILL'); };
 
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
@@ -104,13 +115,11 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
 {
   ok(conn.info?.capabilities?.includes?.('left-behind'), 'daemon advertises the left-behind capability');
   const lbSid = `lb-op-${process.pid}`, lbMark = `CLAUDE_WEBUI_SESSION_ID=${lbSid}`;
-  const { execFileSync } = await import('node:child_process');
-  const detachedMarked = () => Number(String(execFileSync(process.execPath, ['-e', "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore', env: process.env }); c.unref(); console.log(c.pid);"], { env: { PATH: process.env.PATH, CLAUDE_WEBUI_SESSION_ID: lbSid } })).trim());
-  const lbLive = [];
+  const detachedMarked = () => detachedHeld(lbSid);
   try {
-    const keeper = detachedMarked(); lbLive.push(keeper);
-    const leftover = detachedMarked(); lbLive.push(leftover);
-    const attach = detachedMarked(); lbLive.push(attach);   // a reconnect's attach client: known by the keeper's `.attach` record only
+    const keeper = detachedMarked();
+    const leftover = detachedMarked();
+    const attach = detachedMarked();   // a reconnect's attach client: known by the keeper's `.attach` record only
     fs.mkdirSync(path.join(home, '.vibespace', 'run'), { recursive: true });
     fs.writeFileSync(path.join(home, '.vibespace', 'run', lbSid + '.json'), JSON.stringify({ keeperPid: keeper }));
     fs.writeFileSync(path.join(home, '.vibespace', 'run', lbSid + '.attach'), JSON.stringify({ pid: attach }));
@@ -119,7 +128,7 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
     ok(t.left.every((x) => JSON.stringify(Object.keys(x).sort()) === '["comm","pid","start","startedAt"]'), 'the op\'s rows carry pid, command name and start time only');
     const u = await dm.leftBehind({ mark: lbMark, ageMs: 5000 });
     ok(u.unread === 'own-unknown' && Array.isArray(u.left) && u.left.length === 0, 'with no keeper sid the device knows no chain of the conversation: own-unknown, nothing named');
-  } finally { for (const p of lbLive) { try { if (fs.readFileSync(`/proc/${p}/cmdline`, 'utf8').includes('setTimeout')) process.kill(p, 'SIGKILL'); } catch { } } }
+  } finally { endHeldKids(); }
 }
 
 // 4e. B-69a7 (b): THE END DOOR ON A PAIRED MACHINE — a person's press is the agent's own act (op left-behind-end), driven through the
@@ -130,15 +139,13 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
 {
   ok(conn.info?.capabilities?.includes?.('left-behind-end'), 'daemon advertises the left-behind-end capability');
   const sid = `lb-end-${process.pid}`, mark = `CLAUDE_WEBUI_SESSION_ID=${sid}`;
-  const { execFileSync } = await import('node:child_process');
-  const spawnMarked = () => Number(String(execFileSync(process.execPath, ['-e', "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore', env: process.env }); c.unref(); console.log(c.pid);"], { env: { PATH: process.env.PATH, CLAUDE_WEBUI_SESSION_ID: sid } })).trim());
+  const spawnMarked = () => detachedHeld(sid);
   const statOf = (p) => { try { return fs.readFileSync(`/proc/${p}/stat`, 'utf8').split(') ').pop().split(' '); } catch { return null; } };
   const alive = (p) => { const s = statOf(p); return !!s && s[0] !== 'Z'; };
-  const live = [];
   try {
-    const keeper = spawnMarked(); live.push(keeper);
-    const leftover = spawnMarked(); live.push(leftover);
-    const reused = spawnMarked(); live.push(reused);
+    const keeper = spawnMarked();
+    const leftover = spawnMarked();
+    const reused = spawnMarked();
     fs.mkdirSync(path.join(home, '.vibespace', 'run'), { recursive: true });
     fs.writeFileSync(path.join(home, '.vibespace', 'run', sid + '.json'), JSON.stringify({ keeperPid: keeper }));
     const t = await dm.leftBehind({ mark, ageMs: 5000, sid });
@@ -151,7 +158,7 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
     const nm = await dm.leftBehindEnd({ mark: 'PATH=/usr/bin', rows: [rows[1]], sid, by: 'human:test' });
     const blind = await dm.leftBehindEnd({ mark, rows: [{ ...rows[1], start: Number((statOf(reused) || [])[19]) }], by: 'human:test' });
     ok(nm.ok === false && nm.reason === 'no-mark' && blind.ok === false && blind.reason === 'own-unknown' && alive(reused) && alive(keeper), 'the op refuses any variable but a conversation\'s mark, and with no keeper sid (the chain not known) it ends nothing — even a row whose start is right');
-  } finally { for (const p of live) { try { if (fs.readFileSync(`/proc/${p}/cmdline`, 'utf8').includes('setTimeout')) process.kill(p, 'SIGKILL'); } catch { } } }
+  } finally { endHeldKids(); }
 }
 
 // 4c. B-460d's remainder (主开发 r486 / r494): A PAIRED MACHINE'S CONVERSATION STARTS BELOW ITS MACHINE'S AGENT — this REAL agent

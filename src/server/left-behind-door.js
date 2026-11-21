@@ -120,8 +120,9 @@ async function endLeft(session, { by = null, at = null, end = PI.endTree, still 
       // its own records held out), asked only of an agent that names it. Every way it does not happen keeps the list and is said by
       // name: the machine not reachable now (unreachable), the hub's machines list held (hosts-unread), an agent without the op
       // (paired-machine — the list dropped: the page drops its door), the machine's own allow list (machine-refused: its `run` flag
-      // off), the agent no longer knowing the conversation's own chain (own-unknown — dropped too), anything else, a link lost
-      // mid-press included (press-failed: it may have ended some). END_ROWS rows a press; the rest stay listed for the next one
+      // off — or the hub's own act gate: stage 'gate'), a presser's name the send point refuses (not-the-person), no connect
+      // (stage 'connect': unreachable), the agent no longer knowing the conversation's own chain (own-unknown — dropped too),
+      // anything else, a link lost mid-press included (press-failed: it may have ended some). END_ROWS rows a press; the rest stay listed
       const sid = typeof session.keeperSid === 'string' && /^[\w-]+$/.test(session.keeperSid) ? session.keeperSid : null;
       let dm = null, held = null;
       try { dm = hosts && typeof hosts.deviceBounded === 'function' ? await hosts.deviceBounded(session.host, LB.PRESS_MS * 2) : null; } catch (e) { dm = null; held = e && e.code === 'hosts-unread' ? 'hosts-unread' : null; }
@@ -130,7 +131,11 @@ async function endLeft(session, { by = null, at = null, end = PI.endTree, still 
       const ask = lb.rows.slice(0, LB.END_ROWS), rest = lb.rows.slice(LB.END_ROWS);
       let a;
       try { a = await dm.leftBehindEnd({ mark: lb.mark, rows: ask, sid, by: (by && by.actBy) || 'human:local' }); }
-      catch (e) { const c = e && e.code, old = c === 'host_needs_daemon'; setList(old ? [] : lb.rows); return { ok: false, reason: old ? 'paired-machine' : c === 'op-not-allowed' ? 'machine-refused' : 'press-failed' }; }
+      catch (e) {   // a press that never travelled says so by its own name (nothing was sent, nothing ended) — 主开发 r1056 2
+        const c = e && e.code, st = e && e.stage, old = c === 'host_needs_daemon';
+        setList(old ? [] : lb.rows);
+        return { ok: false, reason: old ? 'paired-machine' : c === 'op-not-allowed' ? 'machine-refused' : c === 'act_without_by' ? 'not-the-person' : st === 'connect' ? 'unreachable' : st === 'gate' ? 'machine-refused' : 'press-failed' };
+      }
       if (!a || a.ok !== true) { const why = a && a.reason === 'own-unknown' ? 'own-unknown' : a && (a.reason === 'nothing-listed' || a.reason === 'no-mark') ? 'nothing-listed' : 'press-failed'; setList(why === 'press-failed' ? lb.rows : []); return { ok: false, reason: why }; }
       const back = (Array.isArray(a.unreadRows) ? a.unreadRows.filter((x) => ask.some((y) => Number(y.pid) === Number(x.pid) && Number(y.start) === Number(x.start))) : []).concat(rest);
       r = { ended: Array.isArray(a.ended) ? a.ended.map(String) : [], still: Array.isArray(a.still) ? a.still.map(String) : [], gone: Number(a.gone) || 0, held: Number(a.held) || 0, unread: back.length, unreadRows: back };
