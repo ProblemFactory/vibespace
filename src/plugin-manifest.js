@@ -341,6 +341,19 @@ function validateManifest(raw, { hostVersion = null, folderName = null, homeDir 
       else if (!m.capabilities.server.net.includes(host)) m.capabilities.server.net.push(host);
     });
   }
+  // B-9584 U2a (the custom kernel's plugin 0.2.3, 主开发 r771): `capabilities.browserEngine` — the words an ENGINE plugin STATES its
+  // launch reads (today one: src/browser-engines.js ENVIRONMENT_WORD). Plain words, bounded, an unknown word kept as a word and never
+  // trusted as more; a malformed entry dropped with a warning. KEPT ONLY WHEN DECLARED: an undeclaring manifest normalizes as before,
+  // byte for byte, so its capabilitiesHash (and its consent) is the same
+  if (cap.browserEngine !== undefined) {
+    if (!Array.isArray(cap.browserEngine)) warnings.push('capabilities.browserEngine must be a list of words — ignored');
+    else {
+      const words = [];
+      cap.browserEngine.slice(0, MAX_LIST).forEach((w, i) => { if (typeof w === 'string' && /^[a-z][a-z0-9-]{0,39}$/.test(w)) { if (!words.includes(w)) words.push(w); } else warnings.push(`capabilities.browserEngine[${i}] is not a plain word — ignored`); });
+      if (cap.browserEngine.length > MAX_LIST) warnings.push(`capabilities.browserEngine: only the first ${MAX_LIST} words are read`);
+      m.capabilities.browserEngine = words;
+    }
+  }
   if ((m.capabilities.server.fs.read.length || m.capabilities.server.fs.write.length || m.capabilities.server.childProcess || m.capabilities.server.net.length) && !m.server) warnings.push('capabilities.server declared but server: false — nothing runs server-side, so they grant nothing');
   if (cap.client !== undefined && cap.client !== m.client) warnings.push(`capabilities.client "${cap.client}" ignored — the client tier is the manifest's "client" field (${m.client})`);
   return { ok: errors.length === 0, errors, warnings, manifest: errors.length ? null : m };

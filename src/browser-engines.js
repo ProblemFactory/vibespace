@@ -25,7 +25,30 @@
  */
 const V = require('./browser-verbs.js'); // lane engine-args-string: the driver's `args` — its ONE writer + the keeper ∪ engine merge (PURE → PURE)
 /** Every refusal of an engine — a closed set merged into src/browser-builds.js BUILD_CODES (the routes' STATUS: 409). */
-const ENGINE_CODES = Object.freeze(['browser_engine_missing', 'browser_engine_kernel_missing', 'browser_engine_not_executable', 'browser_engine_protocol', 'browser_engine_unanswered', 'browser_engine_env']);
+const ENGINE_CODES = Object.freeze(['browser_engine_missing', 'browser_engine_kernel_missing', 'browser_engine_not_executable', 'browser_engine_protocol', 'browser_engine_unanswered', 'browser_engine_env',
+  'browser_engine_environment_unread', 'browser_engine_location_unsupported', 'browser_engine_environment_refused']);   // B-9584 U2a: a profile's own environment
+/** B-9584 U2a — A PROFILE'S OWN ENVIRONMENT ON AN ENGINE (the custom kernel conversation's two names, 主开发 r771; each name lives HERE
+ *  only). ENVIRONMENT_WORD: the word an engine plugin STATES in its manifest (`capabilities.browserEngine`, kept by
+ *  src/plugin-manifest.js) when its launch reads the profile's `environment` — a profile that sets anything starts on an engine
+ *  ONLY when it states it (never «applied» on silence: r745 (b)). APPLIED_ECHO: the launch reply's echo of what the browser really
+ *  got — { timezone: a zone | null, language: a tag | null, location: 'machine' | 'fixed' | 'blocked' }; a reply without it, for a
+ *  profile that set something, is «not confirmed», never «applied». */
+const ENVIRONMENT_WORD = 'environment';
+const APPLIED_ECHO = 'appliedEnvironment';
+const APPLIED_LOCATIONS = Object.freeze(['machine', 'fixed', 'blocked']);
+/** Does this manifest's `capabilities` STATE that the engine reads a profile's environment? */
+function statesEnvironment(capabilities) {
+  const w = capabilities && typeof capabilities === 'object' ? capabilities.browserEngine : null;
+  return Array.isArray(w) && w.includes(ENVIRONMENT_WORD);
+}
+/** The launch reply's echo, judged: absent ⇒ null; of its shape ⇒ the echo; of another shape ⇒ `false` (the verdict refuses it). */
+function appliedEchoOf(body) {
+  if (!body || typeof body !== 'object' || body[APPLIED_ECHO] === undefined || body[APPLIED_ECHO] === null) return null;
+  const e = body[APPLIED_ECHO];
+  const str = (v) => v === null || (typeof v === 'string' && v.length > 0 && v.length <= 64 && !/[\0\n\r]/.test(v));
+  if (!e || typeof e !== 'object' || Array.isArray(e) || !str(e.timezone) || !str(e.language) || !APPLIED_LOCATIONS.includes(e.location)) return false;
+  return { timezone: e.timezone, language: e.language, location: e.location };
+}
 /** The protocol this VibeSpace speaks (the kernel's `VibeSpace.getVersion` answers the same number). */
 const PROTOCOL = 1;
 /** The env keys an engine's launch answer may set on the browser's process — today NONE (a key outside ⇒ refused by name). */
@@ -269,6 +292,11 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
   }
   if (verb === 'launchOptions') {
     if (status === 409 && isObj(body) && body.code === 'no_binary') return bad('browser_engine_kernel_missing', 'has no kernel installed on this computer (its launch answered no_binary)');
+    // B-9584 U2a (主开发 r745 (a)): the kernel's own refusals of a profile's environment, RELAYED BY NAME — its build that cannot apply
+    // or block a place (409 location_unsupported_by_kernel), and a value it refuses (400 bad_environment / bad_timezone /
+    // bad_language / bad_location: the hub judged the same rules first, so this is said, never started with another value)
+    if (status === 409 && isObj(body) && body.code === 'location_unsupported_by_kernel') return bad('browser_engine_location_unsupported', 'cannot set or block the location in this browser build yet — the kernel update brings it; set the location to «This machine\'s» to start this profile now');
+    if (status === 400 && isObj(body) && ['bad_environment', 'bad_timezone', 'bad_language', 'bad_location'].includes(body.code)) return { ...bad('browser_engine_environment_refused', `refused this profile's environment (${clip(body.code, 40)}${typeof body.error === 'string' && body.error ? `: ${clip(body.error, 160)}` : ''})`), failed: { status: 400, code: clip(body.code, 40) } };
     { const f = status === 200 ? null : failedAs('launch options'); if (f) return f; }
     if (status !== 200 || !isObj(body)) return bad('browser_engine_protocol', `answered its launch options with ${status === 200 ? 'no JSON object' : 'HTTP ' + (status || '?')}`);
     const exe = body.executablePath;
@@ -293,7 +321,9 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
     if (!isObj(env) || Object.values(env).some((v) => typeof v !== 'string')) return bad('browser_engine_protocol', 'named a launch env of another shape (string values)');
     const extra = Object.keys(env).filter((k) => !ENGINE_ENV_KEYS.includes(k));
     if (extra.length) return bad('browser_engine_env', `asked to set ${extra.slice(0, 8).map((k) => clip(k, 40)).join(', ')} on its browser's environment — an engine sets ${ENGINE_ENV_KEYS.length ? 'only ' + ENGINE_ENV_KEYS.join(', ') : 'no environment variable'} (the values were not read)`);
-    return { ok: true, launch: { executablePath: exe, args: args.slice(), env: { ...env } } };
+    const echo = appliedEchoOf(body);   // B-9584 U2a: what the browser really got (absent ⇒ null: «not confirmed»)
+    if (echo === false) return bad('browser_engine_protocol', `answered an ${APPLIED_ECHO} of another shape (timezone and language a name or null, location one of ${APPLIED_LOCATIONS.join(' / ')})`);
+    return { ok: true, launch: { executablePath: exe, args: args.slice(), env: { ...env }, ...(echo ? { applied: echo } : {}) } };
   }
   return bad('browser_engine_protocol', `was asked an unknown verb ${clip(verb, 40)}`);
 }
@@ -395,6 +425,7 @@ function defaultEngineOf({ own = undefined, fleet = null } = {}) {
 }
 
 module.exports = { ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE, OWN_ARG_RE, ENGINE_FEATURES, EGRESS_FEATURE, EGRESS_ROW_KEY,
+  ENVIRONMENT_WORD, APPLIED_ECHO, APPLIED_LOCATIONS, statesEnvironment, appliedEchoOf,   // B-9584 U2a
   platformOf, engineWords, engineAnswerVerdict, kernelLiveVerdict, KERNEL_FEATURES, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineArgs, engineLaunchEnv, engineWrapperText, choiceOfDefault, isDefaultEngineValue, defaultEngineOf,
   egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs, PROXY_UDP_ARG, PROXY_UDP_RE,
   BINARY_ROW_KEY, binaryRowOf, binaryRowPath, ENGINE_OWNER_ROW_RE, engineSourceOf, programMagicOk, userBinaryVerdict, // lane engine-spi-egress L1b

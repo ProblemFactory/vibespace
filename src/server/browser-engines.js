@@ -58,6 +58,15 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
     return [...manifestRows(), ...builtinRows()].filter((r) => !seen.has(r.id) && seen.add(r.id));
   }
   function rows() { return tableRows().map(({ own, settings, ...r }) => r); }
+  /** B-9584 U2a: does the engine `id` STATE that its launch reads a profile's environment (its manifest's capabilities.browserEngine
+   *  holds src/browser-engines.js ENVIRONMENT_WORD)? A built-in engine, an engine not in the table, a list that cannot be read: no. */
+  function statesEnvironment(id) {
+    const l = L();
+    let list = [];
+    try { list = l && typeof l.list === 'function' ? l.list() : []; } catch { return false; }
+    const p = list.find((x) => x && String(x.id) === String(id) && x.valid && x.enabled && x.trusted && x.contributes && x.contributes.browserEngine === true);
+    return !!p && BE.statesEnvironment(p.capabilities);
+  }
   async function askManifest(row, verb, input) {
     const v = BE.ENGINE_VERBS[verb];
     const l = L();
@@ -145,7 +154,7 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
     if (lo.ok && input.binaryPath && lo.launch.executablePath !== input.binaryPath) return { ok: false, code: 'browser_engine_protocol', error: `${BE.engineWords(pv)} answered its launch with another program than the one VibeSpace resolved for it — it must start the path it is handed` };
     return lo;
   }
-  return { rows, providerFor, probe, launchOptions, kernelPath, sourceOf, binaryPathOf, tag };
+  return { rows, providerFor, probe, launchOptions, kernelPath, sourceOf, binaryPathOf, tag, statesEnvironment };
 }
 /** A GET's query values are strings (express parses them so) — the probe input as one. */
 function stringQuery(o) { const q = {}; for (const [k, v] of Object.entries(o || {})) if (v != null && v !== '') q[k] = String(v); return q; }

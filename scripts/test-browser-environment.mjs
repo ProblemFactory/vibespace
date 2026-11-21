@@ -129,7 +129,7 @@ function legs(M) {
     ['Automatic language, NO exit ⇒ SAID «no_exit»', { language: { mode: 'auto' } }, null, 'language', 'machine', undefined, 'no_exit'],
     ['a language set ⇒ told as set', { language: { mode: 'value', value: 'fr-FR' } }, null, 'language', 'value', 'fr-FR', null],
     ['a place set ⇒ the hand-over carries its latitude and longitude ONLY', { location: { mode: 'value', value: { latitude: 35.68, longitude: 139.76 } } }, null, 'location', 'value', { latitude: 35.68, longitude: 139.76 }, null],
-    ['location blocked ⇒ nothing in the hand-over (it has no form for it)', { location: { mode: 'block' } }, null, 'location', 'block', undefined, null],
+    ['location blocked ⇒ the hand-over\'s own word «blocked» (主开发 r745: the kernel\'s form)', { location: { mode: 'block' } }, null, 'location', 'block', 'blocked', null],
   ];
   for (const [what, env, exit, key, from, told, said] of CASES) {
     const res = R(env, exit), s = at(res, key);
@@ -137,7 +137,7 @@ function legs(M) {
   }
   // ⑤ geolocation: what the hand-over has no form for (a place's accuracy, blocked) — the protocol road's
   const gp = R({ location: { mode: 'value', value: { latitude: 35.68, longitude: 139.76 } } }), gpa = R({ location: { mode: 'value', value: { latitude: 1, longitude: 2, accuracy: 20 } } }), gb = R({ location: { mode: 'block' } });
-  leg('⑤ geolocation: a place with the stated 100 m, a place with its own accuracy, blocked — and blocked alone hands nothing (told null)', J(gp.geolocation) === J({ kind: 'place', latitude: 35.68, longitude: 139.76, accuracy: 100 }) && J(gpa.geolocation) === J({ kind: 'place', latitude: 1, longitude: 2, accuracy: 20 }) && J(gb.geolocation) === J({ kind: 'blocked' }) && gb.told === null && !('accuracy' in (gpa.told || {}).location), { gp: gp.geolocation, gpa: gpa.geolocation, gb });
+  leg('⑤ geolocation: a place with the stated 100 m, a place with its own accuracy, blocked — and the hand-over carries blocked as its word, never an accuracy', J(gp.geolocation) === J({ kind: 'place', latitude: 35.68, longitude: 139.76, accuracy: 100 }) && J(gpa.geolocation) === J({ kind: 'place', latitude: 1, longitude: 2, accuracy: 20 }) && J(gb.geolocation) === J({ kind: 'blocked' }) && J(gb.told) === J({ location: 'blocked' }) && !('accuracy' in (gpa.told || {}).location), { gp: gp.geolocation, gpa: gpa.geolocation, gb });
   // ⑤ «SAYS SO» AT THE START (主开发 r617): every choice the start cannot follow is listed for the start road to say
   const pr = R({ timezone: { mode: 'auto' }, language: { mode: 'auto' } }, null), fine = R({ timezone: { mode: 'auto' }, language: { mode: 'auto' } }, M.keptExitOf(tokyo));
   const stale = R({ timezone: { mode: 'value', value: 'Mars/Olympus' } });
@@ -175,7 +175,7 @@ function lawOf(M, seeds = [7, 41, 9584], n = 400) {
       for (const s of res.settings) {
         const inTold = s.key in told;
         if (inTold) facts.told++;
-        if (inTold !== (s.from === 'value' || s.from === 'exit')) bad('T: in the hand-over ⇔ a value or an Automatic followed');
+        if (inTold !== (s.from === 'value' || s.from === 'exit' || s.from === 'block')) bad('T: in the hand-over ⇔ a value, an Automatic followed, or blocked (its word)');
         if (s.key === 'location' && (res.geolocation !== null) !== (s.from === 'value' || s.from === 'block')) bad('G: geolocation ⇔ a place or blocked');
         if (s.from === 'exit') { facts.fromExit++; if (!exit || s.mode !== 'auto') bad('X: a value «from the exit» only from Automatic over a KEPT exit'); }
         if (s.said !== null) { facts.said++; if (s.from !== 'machine' || inTold) bad('S: a choice not followed is never told — it is never guessed'); }

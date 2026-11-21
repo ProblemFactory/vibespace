@@ -428,6 +428,10 @@ export function buildRefusalWords(r, t) {
     case 'browser_engine_protocol': return t(i18nKey('That engine speaks another version of the engine protocol — update the plugin or VibeSpace.'));
     case 'browser_engine_unanswered': return t(i18nKey("That engine's plugin did not answer — restart the plugin, then try again."));
     case 'browser_engine_env': return t(i18nKey('That engine asked to set environment variables VibeSpace does not allow.'));
+    // B-9584 U2a: a profile's own environment on an engine
+    case 'browser_engine_environment_unread': return t(i18nKey("This browser engine does not say it reads a profile's time zone, language and location — update the browser plugin. The start is refused so the browser never runs in another time zone than the profile says."));
+    case 'browser_engine_location_unsupported': return t(i18nKey("This browser build cannot set or block the location yet — the kernel update brings it. Set the location to «This machine's» to start it now."));
+    case 'browser_engine_environment_refused': return t(i18nKey("The browser engine refused this profile's time zone, language or location."));
     case 'engine_kernel_landing': return t(i18nKey('The browser kernel is being replaced — try again in a moment.')); // lane fleet-plugin-catalog r5: a start refused beside a half-landed kernel
     default: return null;
   }

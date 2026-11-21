@@ -36,7 +36,7 @@ import { execFileSync } from 'node:child_process'; // lane engine-args-string r2
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies, keeperWithInstalls } from './mutant-copy.mjs';
-import { scratch, deadPort } from './scratch.mjs';
+import { scratch, deadPort, anchored } from './scratch.mjs';
 import { writeFakeAgentBrowser } from './fixtures/fake-agent-browser.mjs';
 const DEAD_CDP = await deadPort(); // the stub's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
@@ -1903,6 +1903,79 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
       'B-a470 (the real sandbox): the plugin\'s own ERR_ACCESS_DENIED is quoted — its code, Node\'s message, the loader\'s denied words and the hint — never the generic protocol sentence', prBad.error);
     badS.ldrS.shutdown();
   }
+}
+
+// ═══ ⑦e B-9584 U2a — A PROFILE'S OWN ENVIRONMENT ON AN ENGINE (主开发 r745 / r771; the kernel conversation's two names) ═══════
+// src/plugin-manifest.js keeps `capabilities.browserEngine` (only when declared); src/browser-engines.js's word (ENVIRONMENT_WORD),
+// the echo (APPLIED_ECHO) and the kernel's refusals relayed by name; the REAL keeper over a WRAPPED engine table (the fixture's
+// real one beside it: the leg sets the engine's stated word and its answer, and sees every hand-over).
+console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — the declared word kept, the hand-over beside the exit, the kernel\'s refusals by name, the echo; a profile that sets nothing is the release\'s');
+{
+  const J = JSON.stringify;
+  const ENVm = require('../src/browser-environment.js');
+  const PMf = require('../src/plugin-manifest.js');
+  const raw0 = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin/vibespace-plugin.json'), 'utf8'));
+  const vm = (caps) => PMf.validateManifest({ ...raw0, capabilities: caps }, { hostVersion: '2.369.356', folderName: raw0.id });
+  const m0 = vm({ server: { childProcess: true } }), m1 = vm({ server: { childProcess: true }, browserEngine: ['environment', 'later-word', 'environment', 7, 'Bad Word'] });
+  ok(m0.ok && J(m0.manifest.capabilities) === J({ server: { fs: { read: [], write: [] }, childProcess: true, net: [] } }) && !ENGN.statesEnvironment(m0.manifest.capabilities),
+    '⑦e ① a manifest that declares no browserEngine normalizes as before — no key added (its consent hash is the same), and states nothing', m0.manifest && m0.manifest.capabilities);
+  ok(m1.ok && J(m1.manifest.capabilities.browserEngine) === J(['environment', 'later-word']) && m1.warnings.filter((w) => /browserEngine\[\d\] is not a plain word/.test(w)).length === 2 && ENGN.statesEnvironment(m1.manifest.capabilities) && PMf.capabilitiesHash(m1.manifest) !== PMf.capabilitiesHash(m0.manifest),
+    '⑦e ① a declaring manifest keeps its plain words (an unknown one as a word, a repeat once, two malformed ones dropped with a warning each); statesEnvironment reads the one word; the declaration is part of its consent', m1);
+  const lv2 = (body, status = 200) => ENGN.engineAnswerVerdict('launchOptions', { status, body }, { id: EID, label: 'Kernel' });
+  const okBody = { executablePath: '/k/chrome', args: ['--x=1'], env: {} };
+  const a409 = lv2({ code: 'location_unsupported_by_kernel', error: 'vs1' }, 409), a400 = lv2({ code: 'bad_timezone', error: 'an offset' }, 400);
+  ok(a409.code === 'browser_engine_location_unsupported' && /kernel update/.test(a409.error) && a400.code === 'browser_engine_environment_refused' && /bad_timezone/.test(a400.error) && !!a400.failed && a400.failed.code === 'bad_timezone',
+    '⑦e ② the kernel\'s refusals of the environment come back BY NAME: 409 location_unsupported_by_kernel ⇒ browser_engine_location_unsupported (the kernel update named); 400 bad_timezone ⇒ browser_engine_environment_refused with its code', { a409, a400 });
+  const echo = lv2({ ...okBody, appliedEnvironment: { timezone: 'Asia/Tokyo', language: 'ja-JP', location: 'blocked' } }), none = lv2(okBody), odd = lv2({ ...okBody, appliedEnvironment: { timezone: 'Asia/Tokyo', language: 'ja-JP', location: 'somewhere' } });
+  ok(echo.ok && J(echo.launch.applied) === J({ timezone: 'Asia/Tokyo', language: 'ja-JP', location: 'blocked' }) && none.ok && !('applied' in none.launch) && !odd.ok && odd.code === 'browser_engine_protocol',
+    '⑦e ② the echo: of its shape kept as `applied`; absent ⇒ none (the start says «not confirmed»); of another shape ⇒ refused by name', { echo: echo.launch, odd });
+  const seen = []; let states = true, answer = null;
+  const ENGW = { ...ENGR, statesEnvironment: () => states, launchOptions: async (id, input) => { seen.push(input); return answer ? answer(id, input) : ENGR.launchOptions(id, input); } };
+  const roadOf = async (Kmod, tag) => {
+    const kv = mkKeeper(path.join(ROOT, `data-eng-env-${tag}`), { engines: ENGW, serverSetting: (k) => settingsE[k], fleetFacts: () => fleetE, liveKeys: () => new Set([KEY_A, KEY_E]) }, Kmod);
+    const efv = await kv.engineFactOf(EID);
+    const pv1 = kv.createProfile({ label: `Kernel env ${tag}`, browser: { kind: 'plugin', id: EID } }, { engine: efv });
+    const prof = () => kv._reg().profiles.find((x) => x && x.id === pv1.id);
+    const out = {};
+    states = true; answer = null;
+    await kv.start(pv1.id, { why: 'test' });
+    out.in0 = seen.at(-1); out.rec0 = kv._reg().browsers[pv1.id] || {};
+    await kv.stop(pv1.id, { why: 'user' });
+    prof().environment = ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Tokyo' }, location: { mode: 'block' } }).value;   // a stand-in for the store writer (U3's dialog)
+    answer = async (id, input) => { const r = await ENGR.launchOptions(id, input); return r.ok ? { ...r, launch: { ...r.launch, applied: { timezone: 'Asia/Tokyo', language: null, location: 'blocked' } } } : r; };
+    await kv.start(pv1.id, { why: 'test' });
+    out.in1 = seen.at(-1); out.rec1 = kv._reg().browsers[pv1.id].environment;
+    await kv.stop(pv1.id, { why: 'user' });
+    answer = null;
+    await kv.start(pv1.id, { why: 'test' });
+    out.rec2 = kv._reg().browsers[pv1.id].environment;
+    await kv.stop(pv1.id, { why: 'user' });
+    const t0e = todos.length;
+    answer = async () => ({ ok: false, code: 'browser_engine_location_unsupported', error: 'Kernel cannot set or block the location in this browser build yet — the kernel update brings it' });
+    out.ed = await thr(() => kv.start(pv1.id, { why: 'test' })); out.marked = !!prof().buildMissing; out.todos = todos.length - t0e;
+    answer = null; states = false;
+    const n0 = seen.length;
+    out.ee = await thr(() => kv.start(pv1.id, { why: 'test' })); out.asked = seen.length - n0;
+    if (!out.ee) await kv.stop(pv1.id, { why: 'user' });
+    states = true;
+    return out;
+  };
+  const r = await roadOf(K, 'real');
+  ok(!!r.in0 && !('environment' in r.in0) && !('environment' in r.rec0), '⑦e ③ a profile that sets NOTHING: the hand-over carries no `environment` key and the browser record none — the release\'s start', r.in0);
+  ok(!!r.in1 && J(r.in1.environment) === J({ timezone: 'Asia/Tokyo', location: 'blocked' }) && !!r.rec1 && r.rec1.confirmed === true && J(r.rec1.applied) === J({ timezone: 'Asia/Tokyo', language: null, location: 'blocked' }) && J(r.rec1.unfollowed) === J([]),
+    '⑦e ③ a profile that sets a zone and blocks the place, on an engine that states the word: `environment` rides the hand-over beside the exit («blocked» its own word) and the record keeps the echo, confirmed', { in1: r.in1 && r.in1.environment, rec1: r.rec1 });
+  ok(!!r.rec2 && r.rec2.confirmed === false && r.rec2.applied === null, '⑦e ③ the same start with no echo in the answer ⇒ recorded NOT CONFIRMED (applied null), never applied', r.rec2);
+  ok(!!r.ed && r.ed.code === 'browser_engine_location_unsupported' && !r.marked && r.todos === 0, '⑦e ③ the kernel\'s 409 relayed: the start is refused by name (browser_engine_location_unsupported) — no build marked missing, no For-you item of a build', { code: r.ed && r.ed.code, marked: r.marked, todos: r.todos });
+  ok(!!r.ee && r.ee.code === 'browser_engine_environment_unread' && /update the browser plugin/.test(String(r.ee.message)) && r.asked === 0, '⑦e ③ an engine that does not STATE the word: a profile that sets something is refused by name BEFORE its launch is asked — never a browser in another zone than it says', { code: r.ee && r.ee.code, asked: r.asked });
+  // REDs: the keeper with each rule taken back (anchored, THE one door for a red control's edit)
+  const MUTe = mutantCopies('envm-builds', REPO);
+  const ksE = read('src/server/browser-keeper.js');
+  const Kno = MUTe.load('src/server/browser-keeper.js', anchored(ksE, "    if (p.environment && !(typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id))) throw namedError('browser_engine_environment_unread',", "    if (false) throw namedError('browser_engine_environment_unread',", '⑦e RED unread'), 'env-unread-off');
+  const rn = await roadOf(Kno, 'red-unread');
+  ok(!rn.ee && rn.asked === 1, '⑦e RED — the keeper without the stated-word check: the start ASKS the launch of an engine that does not read the environment (a browser in the machine\'s own zone)', { ee: rn.ee && rn.ee.code, asked: rn.asked });
+  const Kal = MUTe.load('src/server/browser-keeper.js', anchored(ksE, '...(envR.told ? { environment: envR.told } : {})', 'environment: envR.told', '⑦e RED always'), 'env-always');
+  const ra = await roadOf(Kal, 'red-always');
+  ok(!!ra.in0 && 'environment' in ra.in0, '⑦e RED — the keeper that always hands `environment`: an untouched profile\'s hand-over carries the key (the kernel would read it as ruling all three)', ra.in0);
 }
 
 // ═══ ⑧ lane engine-distribution: THE KERNEL DOWNLOADED (design-custom-browser-plugin §5.3 as built) ═══════════════════════

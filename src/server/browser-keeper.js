@@ -86,6 +86,7 @@ const DSP = require('../browser-display.js'); // lane headless-fallback: headed 
 const HC = require('../hidden-chars.js'); // lane browser-propose: a proposal card's words carry no character that is not drawn (THE one set)
 const KB = require('../browser-kept.js'); // lane browser-resume (§3.9): the conversation's KEPT browser — tabs, D2's restore kind (PURE)
 const BB = require('../browser-builds.js');
+const ENV = require('../browser-environment.js'); // B-9584: a profile's own environment — the contract (U1): one resolve per start
 const ENG = require('../browser-engines.js'); // lane engine-plugin: PURE — an engine plugin's verdicts, its launch env view, the default policy
 const BE = require('../browser-stderr.js'); // lane browser-stderr-pipe: the quiet log switches + the stderr-pipe-full verdict
 const CL = require('../browser-clone.js'); // lane browser-profile-clone (B-9669): New profile… copied from a stopped profile — the PURE tables + verdict
@@ -1612,15 +1613,26 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id, ...(v.failed ? { failed: v.failed } : {}) }); }
     // the exit check (the owner 2026-11-17): the profile's KEPT exit rides resolve-launch as `egress` {publicIp, country, timezone,
     // checkedAt, source} — the names settled with the plugin's conversation; absent when none is kept. NO request is made here.
-    const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}), ...(p.egress && typeof p.egress === 'object' ? { egress: egressHandOf(p.egress) } : {}) });
-    if (!lo.ok) { if (lo.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, lo, engine); throw namedError(lo.code, lo.error, { engine: c.id, ...(lo.failed ? { failed: lo.failed } : {}) }); }
+    // B-9584 U2a (主开发 r745 / r771): A PROFILE'S OWN ENVIRONMENT on an engine — resolved ONCE (src/browser-environment.js, the
+    // contract) and handed beside the exit as the hand-over's own object (`environment`; absent for a profile that sets nothing: its
+    // body is the release's, byte for byte). A profile that SETS anything starts on an engine only when the engine STATES that it
+    // reads it (its manifest's capabilities.browserEngine) — else refused by name BEFORE anything starts: never a browser in
+    // another time zone than the profile says
+    const envR = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p));
+    if (p.environment && !(typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id))) throw namedError('browser_engine_environment_unread', `${String(engine.label || c.id).slice(0, 80)} does not state that it reads a profile's time zone, language and location — update the browser plugin; this profile's start is refused, never run in another time zone than the profile says`, { engine: c.id });
+    const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}), ...(p.egress && typeof p.egress === 'object' ? { egress: egressHandOf(p.egress) } : {}), ...(envR.told ? { environment: envR.told } : {}) });
+    // a refusal of the profile's ENVIRONMENT is no missing build (no mark, no For-you item of a build): said by its own name
+    if (!lo.ok) { if (!['browser_engine_unanswered', 'browser_engine_location_unsupported', 'browser_engine_environment_refused'].includes(lo.code)) noteBuildMissing(p, c, lo, engine); throw namedError(lo.code, lo.error, { engine: c.id, ...(lo.failed ? { failed: lo.failed } : {}) }); }
     if (p.buildMissing) { delete p.buildMissing; dirty = true; log.log?.(`[browser] ${p.id} "${p.label}": ${BB.buildWords(c)} answers again`); } // the engine by its id (its label is the plugin's text)
     // lane engine-spi-egress: an engine that must stay inside a list is WRAPPED — THIS profile's allowlisting proxy (the keeper's,
     // its list = the engine's reserved row, read per request); one that cannot listen refuses the launch by name (egress_proxy_missing)
     const pv = B.proxyLaunchVerdict(p);   // B-8b87: judged at the start (refused there); here its proxy joins the engine's egress pair
     const pproxy = pv.ok && pv.proxy ? { scheme: pv.proxy.scheme, host: pv.proxy.host, port: pv.proxy.port, credential: pv.proxy.credential || '' } : null;
     const egress = engine.egress || pproxy ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || '', ...(engine.egress ? { setting: engine.egress.setting, fallback: engine.egress.default } : {}), ...(pproxy ? { proxy: pproxy } : {}) }) : null;
-    return { executablePath: lo.launch.executablePath, args: lo.launch.args, env: lo.launch.env, egress, engine: { id: c.id, version: v.version, label: engine.label || null } };
+    // B-9584 U2a: what the start SAYS — the engine's echo of what the browser really got (none ⇒ «not confirmed», never «applied»)
+    // and every choice it could not follow (U1's `unfollowed`); nothing for a profile that sets nothing
+    const environment = p.environment ? { applied: lo.launch.applied || null, confirmed: !!lo.launch.applied, unfollowed: envR.unfollowed } : null;
+    return { executablePath: lo.launch.executablePath, args: lo.launch.args, env: lo.launch.env, egress, engine: { id: c.id, version: v.version, label: engine.label || null }, ...(environment ? { environment } : {}) };
   }
   /** What a launch RECORDS it was asked to run (`rec.browserChoice`): the choice, + an engine's version (the probe's fact). */
   const recordedChoice = (p, be) => (p.browser ? { ...BB.choiceView(p.browser), ...(be && be.engine ? { version: be.engine.version } : {}) } : { kind: 'default' });
@@ -3559,7 +3571,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (prev && prev.quietLog) rec.quietLog = true; // B-1789 cure: …and with its launch's quiet log switches — a server restart ADOPTS it with the keeper's file it launched under (no stamp ⇒ none: a daemon from before the cure); a fresh launch below stamps it
       { const lh = launchHostsFor(prev, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prev && prev.host ? prev.host : lh[lh.length - 1]; } } // verify r4 (S26b): a retired record's directory still knows
       rec.egress = engineLaunch && engineLaunch.egress ? egressRecordOf(profileId) : null; // lane engine-spi-egress r2: the port the launch view names
-      if (engineLaunch) { const ew = engineProgramOf(p, engineLaunch); rec.engineView = { executablePath: ew.program, args: ew.args, ...(engineLaunch.egress ? { wrapped: true } : {}) }; rec.browserChoice = recordedChoice(p, engineLaunch); } // lane engine-args-string r2: the program = the keeper's wrapper (the engine's switches ride it whole); lane engine-spi-egress r2: a WRAPPED launch's proxy switches ride it too, last — `wrapped` = its config keeps no proxy switch of the base file
+      if (engineLaunch) { const ew = engineProgramOf(p, engineLaunch); rec.engineView = { executablePath: ew.program, args: ew.args, ...(engineLaunch.egress ? { wrapped: true } : {}) }; rec.browserChoice = recordedChoice(p, engineLaunch); if (engineLaunch.environment) rec.environment = engineLaunch.environment; } // B-9584 U2a: what this start says of the profile's environment · lane engine-args-string r2: the program = the keeper's wrapper (the engine's switches ride it whole); lane engine-spi-egress r2: a WRAPPED launch's proxy switches ride it too, last — `wrapped` = its config keeps no proxy switch of the base file
       reg.browsers[profileId] = rec;
       commit();
       if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } } // r2 M1: a dead daemon's browser is ended first
@@ -4986,7 +4998,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       rec.mark = p.id; // r4 (MAJOR 2): the launch carries this profile's MARK (machine-<id>.json); every later keeper call keeps that file
       rec.holdDialogs = true; // lane browser-stuck: …and holds page dialogs (noAutoDialog) from this launch on
       rec.launchFlags = !!prow.launchFlags && (argvPrefix.length > 0 || Object.keys(providerEnv).length > 0); // r4: a provider's own launch flags (its env pair; the row's `launchFlags`) — a heal never relaunches it. lane browser-admin 2a: a chromium build pin is NOT one — the heal's `get cdp-url` carries rec.launchEnv (the executable included), so it relaunches the SAME build
-      rec.browserChoice = recordedChoice(p, buildEnv); // what this launch was asked to run (the running build is `cdpBrowser`, the browser's own answer; lane engine-plugin: + an engine's version)
+      rec.browserChoice = recordedChoice(p, buildEnv); if (buildEnv && buildEnv.environment) rec.environment = buildEnv.environment; // B-9584 U2a (only when there is something to say: an untouched profile's record is the release's): the start's word on the profile's environment (an engine's echo, its unfollowed list) · what this launch was asked to run (the running build is `cdpBrowser`, the browser's own answer; lane engine-plugin: + an engine's version)
       const stamp0 = F.dirLaunchStamp(p.dir); // r5 MAJOR 1 (iii): the directory before this launch
       rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
       cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now
@@ -5294,6 +5306,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     stampLaunchHost(rec, prevRec, p.dir || null); // lane profile-lock-roll (L1): THIS machine's name on the record
     rec.mark = p.id; rec.holdDialogs = true; rec.automationFlag = true; rec.quietLog = true; // the argv carries the mark, AutomationControlled and the quiet switches
     rec.browserChoice = recordedChoice(p, engineLaunch);
+    if (engineLaunch && engineLaunch.environment) rec.environment = engineLaunch.environment; // B-9584 U2a
     rec.launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' };
     rec.cli = await cliNow(); // the CLI every later call of this browser runs (it attaches; it never launches)
     cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now

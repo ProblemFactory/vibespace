@@ -17,11 +17,12 @@
  *                                       only this moves)
  *   · resolveEnvironment(env, exit)   — what each setting IS now → { settings, told, geolocation, unfollowed }:
  *       told        — THE HAND-OVER'S OWN OBJECT, as the engine plugin takes it beside the exit: { timezone?, language?,
- *                     location?: { latitude, longitude } }, a «this machine's» setting ABSENT; NULL when nothing is told (主开发
+ *                     location?: { latitude, longitude } | 'blocked' (r745: the kernel's word for blocked) }, a «this machine's»
+ *                     setting ABSENT; NULL when nothing is told (主开发
  *                     r617: an untouched profile hands NOTHING — the kernel treats a present object as ruling all three)
- *       geolocation — what the hand-over has NO form for: a place's accuracy (the person's, else PLACE_ACCURACY_M) and «blocked».
- *                     They ride the browser's own protocol road (a geolocation override with its accuracy; the geolocation
- *                     permission denied), never the resolve-launch object: { kind: 'place', latitude, longitude, accuracy } |
+ *       geolocation — the browser's own protocol road for a place and for «blocked» (the stock browser, which has no launch switch
+ *                     for either: a geolocation override with its accuracy — the person's, else PLACE_ACCURACY_M —, or the
+ *                     geolocation permission denied); an accuracy is never in the resolve-launch object: { kind: 'place', latitude, longitude, accuracy } |
  *                     { kind: 'blocked' } | null
  *       unfollowed  — 主开发 r617: «SAYS SO» AT THE START — every setting the person chose that this start cannot follow (an
  *                     Automatic with nothing to follow, a kept value the runtime no longer accepts): [{ key, mode, said }]. The
@@ -159,6 +160,7 @@ function resolveEnvironment(environment, exit = null) {
     else if (mode === MODES.AUTO) { const a = row.auto(exit); r = 'value' in a ? { from: 'exit', value: a.value } : { from: 'machine', value: null, said: a.none }; }
     else r = { from: 'machine', value: null };
     if (r.from === 'value' || r.from === 'exit') told[row.key] = row.key === 'location' ? { latitude: r.value.latitude, longitude: r.value.longitude } : r.value;
+    if (r.from === 'block') told[row.key] = 'blocked';   // B-9584 U2a (主开发 r745): the kernel's hand-over now has a form for it — the word
     if (row.key === 'location' && (r.from === 'value' || r.from === 'exit')) geolocation = { kind: 'place', latitude: r.value.latitude, longitude: r.value.longitude, accuracy: r.value.accuracy != null ? r.value.accuracy : PLACE_ACCURACY_M };
     if (row.key === 'location' && r.from === 'block') geolocation = { kind: 'blocked' };
     if (r.said) unfollowed.push({ key: row.key, mode, said: r.said });
