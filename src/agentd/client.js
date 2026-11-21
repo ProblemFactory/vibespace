@@ -1220,6 +1220,10 @@ class DeviceManager {
   // B-5278 unit 2 (find 1): what the device's list left out (the folders past its bound) is said ONCE for this machine (this
   // DeviceManager's life), on either road — the snapshot's and the claims'
   _saidDiscoLeft(r) {
+    // B-5278 unit 2, part 3: the lock files and open codex rollouts past their bounds, each said ONCE too
+    const L = (r && r.left) || {}, nl = Number(L.locks) || 0, nc = Number(L.codexOpen) || 0;
+    if (nl > 0 && !this._discoLocksLeftSaid) { this._discoLocksLeftSaid = true; try { this._log(`[discovery] ${this._machineName() || 'the machine'}: ${nl} running-session lock file(s) left out of its list (more than 1000 live, or one over 64 KiB)`); } catch { } }
+    if (nc > 0 && !this._discoCodexLeftSaid) { this._discoCodexLeftSaid = true; try { this._log(`[discovery] ${this._machineName() || 'the machine'}: ${nc} open codex rollout(s) left out of its list (more than 1000)`); } catch { } }
     const n = r && r.left && Number(r.left.folders);
     if (n > 0 && !this._discoLeftSaid) { this._discoLeftSaid = true; try { this._log(`[discovery] ${this._machineName() || 'the machine'}: ${n} of its project folders left out of its list (it has more than its bound; the most recently changed are listed)`); } catch { } }
   }

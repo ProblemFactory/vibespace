@@ -925,6 +925,27 @@ function synthesizeDiscoveryLines(snap) {
   return lines.join('\n');
 }
 
+// B-5278 unit 2, its third part (r1044: the agent's parse of a big reply on its own loop): THE REPLY IS BOUNDED BY CONSTRUCTION, so
+// its parse (snapshotChildVerdict) and its re-serialization (the reply line) on the agent's loop are bounded too. Measured on the test
+// machine at load 44 (probe run e02fea655-20261121054147-box): a 4 MiB answer = parse 15 ms, reply 41 ms, the claims road 93 ms; the
+// old 64 MiB bound = 192 / 612 / 936 ms. The rows are bounded where they are made: the newest 200 conversations (60 with head facts),
+// 100 codex rollouts (30 with head facts), 200 real paths — and now at most DISCOVERY_LOCKS_MAX live locks of at most
+// DISCOVERY_LOCK_FILE_MAX each, and DISCOVERY_CODEX_OPEN_MAX open rollouts. What is left out is counted (`left`) and said once by the
+// hub. A child's answer past DISCOVERY_CHILD_MAX_BYTES is refused by name (discovery-too-large): the kept snapshot answers.
+const DISCOVERY_LOCKS_MAX = 1000, DISCOVERY_LOCK_FILE_MAX = 64 * 1024, DISCOVERY_CODEX_OPEN_MAX = 1000, DISCOVERY_CHILD_MAX_BYTES = 16 * 1024 * 1024;
+/** PURE: which lock files a snapshot reads — none over fileMax bytes, the newest first, at most max of them → { take: [entry], left } */
+function pickLockFiles(entries, { max = DISCOVERY_LOCKS_MAX, fileMax = DISCOVERY_LOCK_FILE_MAX } = {}) {
+  const fit = []; let left = 0;
+  for (const e of Array.isArray(entries) ? entries : []) {
+    if (!e || typeof e.name !== 'string') continue;
+    if (!(Number(e.size) <= fileMax)) { left++; continue; }
+    fit.push(e);
+  }
+  fit.sort((a, b) => (Number(b.mtimeMs) || 0) - (Number(a.mtimeMs) || 0));
+  if (fit.length > max) left += fit.length - max;
+  return { take: fit.slice(0, max), left };
+}
+
 // B-5278 unit 2 (the coordinator's r849, THE LAW): A DISCOVERY WALK NEVER RUNS ON THE DEVICE AGENT's LOOP. The walk runs in a
 // CHILD (a slow or network home never holds the agent); the release fell back to the SAME walk INLINE on any end of that
 // child — its bound's kill among them — so on a slow home every conversation of that machine stalled for the whole walk, at
@@ -938,7 +959,7 @@ function snapshotChildVerdict(err, stdout) {
   }
   if (err.spawnFailed || (typeof err.code === 'string' && /^E[A-Z0-9]+$/.test(err.code) && err.syscall !== undefined)) return { error: `the discovery walk could not start (${err.code || 'spawn'})`, code: 'discovery-child-unstarted' };
   // (r908 (4)) a child ended for TOO MUCH OUTPUT is said as that (Node kills it at its buffer — a kill, not its time bound)
-  if (err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return { error: 'the discovery walk answered more than its bound (64 MiB)', code: 'discovery-too-large' };
+  if (err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return { error: `the discovery walk answered more than its bound (${DISCOVERY_CHILD_MAX_BYTES / 1024 / 1024} MiB)`, code: 'discovery-too-large' };
   if (err.killed || err.signal) return { error: `the discovery walk did not finish (${err.signal || 'killed'} at its bound)`, code: 'discovery-timeout' };
   return { error: `the discovery walk failed (${String((err && err.message) || err).split('\n')[0].slice(0, 160)})`, code: 'discovery-child-failed' };
 }
@@ -984,6 +1005,7 @@ async function snapshotReply({ runChild, kept, now = Date.now, answerBy = DISCOV
 
 module.exports = {
   snapshotChildVerdict, snapshotReply, DISCOVERY_ANSWER_MS, DISCOVERY_STUCK_MS,
+  pickLockFiles, DISCOVERY_LOCKS_MAX, DISCOVERY_LOCK_FILE_MAX, DISCOVERY_CODEX_OPEN_MAX, DISCOVERY_CHILD_MAX_BYTES, // B-5278 unit 2, part 3
   cwdsToResolve, realCwdsOf, // B-16d7: one list for both roads, the device's bounded resolver
   extractTailIds, nameFromUserRecord, nameFromUserLine, nameFromText, titleFromRecord, titleFromText, titleLinesOf, TITLE_NEEDLE, TITLE_HEAD_BYTES, TITLE_TAIL_BYTES, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, NAME_MAX,
   // S3 (codex facts + zstd rollouts)

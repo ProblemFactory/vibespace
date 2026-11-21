@@ -28,7 +28,7 @@ const CAPS = Object.freeze({
   'desktop-apps-list': 2 * MiB,    // 500 rows × (a 200-unit name + a 1000-unit launch line, 3 bytes a unit at worst) + fields ≈ 1.75 MiB
                                    // — the tightest margin: the suite computes it from installed-apps' and the run door's bounds
   // the producers with NO bound of their own: the line for now (row B-5278 bounds each producer)
-  'discovery-snapshot': LINE_MAX,  // its child is capped at 64 MiB, its inline fallback has no total bound (locks, codexOpen)
+  'discovery-snapshot': LINE_MAX,  // its child is capped at 16 MiB and its rows at their producer (B-5278 unit 2, part 3: discovery-facts)
   'discovery-claims': LINE_MAX,    // rows of the same snapshot
   'quota-refresh': LINE_MAX,       // `passive`: every usage-cache file, no count or size cap
   'pool-orders': LINE_MAX,         // `events`: the whole pool-orders log until the hub acks

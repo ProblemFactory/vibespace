@@ -175,6 +175,11 @@ const USAGE_HARVEST_LIMITS = Object.freeze({ maxBuffer: 128 * 1024 * 1024, timeo
 // reply when it gave one (a walk that ran out of time — never «unreachable» for a machine that answered), else unreachable
 const lastKnownRows = (sessions, at, deviceWhy) => sessions.map((s) => ({ ...s, stale: true, staleAt: s.staleAt || at, staleWhy: deviceWhy || undefined }));
 const discoveryCodeOf = (e) => (e && typeof e.code === 'string' && /^discovery-/.test(e.code) ? e.code : null);
+// B-5278 unit 2, its third part (r1044): a device that said its walk is STILL RUNNING (or ran out of its bound, or answered more
+// than its bound) is not walked again — its snapshot ask would join the same walk, and the ssh rung would walk the same slow home a
+// second time while the first walks on. The hub goes to its last list with the device's reason at once. A child that failed or
+// could not start is another matter: the ssh rung's shell walk is a different road, and it is still tried.
+const NO_SECOND_WALK = new Set(['discovery-slow', 'discovery-timeout', 'discovery-too-large']);
 const staleSessions = (sessions, stale) => { const at = Date.now() - Math.max(0, Number(stale && stale.ageMs) || 0); return sessions.map((x) => ({ ...x, stale: true, staleAt: at, staleWhy: (stale && stale.why) || undefined })); };
 const usageScanBound = (L) => ({ maxBytes: Math.floor(L.maxBuffer / 2), maxMs: Math.floor(L.timeoutMs / 3) });
 // …and a harvest that failed backs off: 1 min, doubling, at most 30 min (a forced harvest — the owner's own ask — goes)
@@ -3691,11 +3696,13 @@ ${codexOpenRolloutsShell()}
             if (!claimed.some((s) => s && s.stale)) this._persistDiscovery(id, claimed);   // an OLD list is never kept as the last-known one
             return claimed;
           }
+          if (NO_SECOND_WALK.has(deviceWhy)) throw deviceErr;   // (r1044) the snapshot ask would join the same walk
           const snap = await deadline(dm.discoverySnapshot(), 12000, 'device-discovery');
           out = synthesizeDiscoveryLines(snap); // shared with the device's own discovery.v2 chain
           snapStale = snap && snap.stale ? snap.stale : null;
         } catch (e2) { out = null; if (discoveryCodeOf(e2)) { deviceWhy = discoveryCodeOf(e2); deviceErr = e2; } /* legacy fallback below */ }
       }
+      if (out == null && NO_SECOND_WALK.has(deviceWhy)) throw deviceErr;   // (r1044) never a second walk of the same home
       if (out == null) out = await this._ssh(h, script, { timeoutMs: 20000 });
     } catch (e) {
       // Host unreachable — serve LAST-KNOWN (expired memory cache, else the
@@ -3969,4 +3976,4 @@ HostManager.prototype.bootstrap = function (id, onEvent) {
   });
 };
 
-module.exports = { HostManager, lastKnownRows, staleSessions, USAGE_HARVEST_LIMITS, usageScanBound, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody, parseSshG, configVerdict, sshRecordRefusal, sshPortOf, dialRootOk, dialRootOf };
+module.exports = { HostManager, lastKnownRows, staleSessions, NO_SECOND_WALK, USAGE_HARVEST_LIMITS, usageScanBound, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody, parseSshG, configVerdict, sshRecordRefusal, sshPortOf, dialRootOk, dialRootOf };

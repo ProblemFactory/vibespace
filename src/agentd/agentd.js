@@ -191,7 +191,7 @@ const fs = require('fs');
 // scan on its own loop — the exact stall the child exists to prevent.
 const os = require('os');
 const path = require('path');
-const { extractTailIds, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, titleLinesOf, TITLE_HEAD_BYTES, TITLE_TAIL_BYTES } = require('./../discovery-facts.js');
+const { extractTailIds, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, titleLinesOf, TITLE_HEAD_BYTES, TITLE_TAIL_BYTES, pickLockFiles, DISCOVERY_LOCK_FILE_MAX, DISCOVERY_CODEX_OPEN_MAX, DISCOVERY_CHILD_MAX_BYTES } = require('./../discovery-facts.js');
 const machineProbes = require('./../machine-probes.js');
 const PI = require('./../proc-identity.js'); // B-1cc6: a pid is never an identity
 const { ClaudeCodeAdapter: { parseLimitBanner } } = require('./../adapters/claude-code.js');
@@ -229,11 +229,20 @@ function getTranscriptService() {
 // time moves when a transcript is made in it) and the number left out is said (`left.folders`, the hub's journal).
 const DISCOVERY_FOLDERS_MAX = 5000;
 const discoveryKept = { snap: null, at: 0 };   // B-5278 unit 2 (r849): the last snapshot a child answered, and when
+// B-5278 unit 2, part 3: a file's text, or null when it holds more than max bytes (it is never read past max + 1)
+function readAtMost(p, max) {
+  const fd = fs.openSync(p, 'r');
+  try { const b = Buffer.alloc(max + 1); const n = fs.readSync(fd, b, 0, max + 1, 0); return n > max ? null : b.subarray(0, n).toString('utf-8'); }
+  finally { fs.closeSync(fd); }
+}
 function computeDiscoverySnapshot() {
   const home = os.homedir();
   const locks = [];
+  let locksLeft = 0;
   try {
-    for (const f of fs.readdirSync(path.join(home, '.claude', 'sessions'))) {
+    const sdir = path.join(home, '.claude', 'sessions');
+    const live = [];
+    for (const f of fs.readdirSync(sdir)) {
       if (!f.endsWith('.json')) continue;
       const pid = Number(f.slice(0, -5));
       let alive = false; try { process.kill(pid, 0); alive = true; } catch { }
@@ -242,7 +251,15 @@ function computeDiscoverySnapshot() {
       // a recycled pid surface a phantom "running" session — the hole
       // the LOCAL sweep closed years ago and this snapshot never had.
       if (!pidLooksClaude(pid)) continue;
-      try { locks.push({ pid, ...JSON.parse(fs.readFileSync(path.join(home, '.claude', 'sessions', f), 'utf-8')) }); } catch { }
+      try { const st = fs.statSync(path.join(sdir, f)); live.push({ name: f, pid, size: st.size, mtimeMs: st.mtimeMs }); } catch { }
+    }
+    // B-5278 unit 2, part 3: at most DISCOVERY_LOCKS_MAX live locks, none over DISCOVERY_LOCK_FILE_MAX — read within that bound
+    const pick = pickLockFiles(live);
+    locksLeft = pick.left;
+    for (const e of pick.take) {
+      const text = readAtMost(path.join(sdir, e.name), DISCOVERY_LOCK_FILE_MAX);
+      if (text == null) { locksLeft++; continue; }
+      try { locks.push({ pid: e.pid, ...JSON.parse(text) }); } catch { }
     }
   } catch { }
   const jsonls = [];
@@ -344,8 +361,11 @@ function computeDiscoverySnapshot() {
     });
     // CO facts: rollouts held open by a codex process on this device = RUNNING threads
     var codexOpen = []; try { codexOpen = listOpenCodexRolloutPaths({ sessionsDir: croot }); } catch { codexOpen = []; }
+    // B-5278 unit 2, part 3: at most DISCOVERY_CODEX_OPEN_MAX open rollouts (running threads); the rest counted
+    if (Array.isArray(codexOpen) && codexOpen.length > DISCOVERY_CODEX_OPEN_MAX) { var codexOpenLeft = codexOpen.length - DISCOVERY_CODEX_OPEN_MAX; codexOpen = codexOpen.slice(0, DISCOVERY_CODEX_OPEN_MAX); }
   } catch { }
-  return { locks, jsonls: top, codexRollouts, codexOpen: codexOpen || [], ...(foldersLeft ? { left: { folders: foldersLeft } } : {}) };
+  const left = { ...(foldersLeft ? { folders: foldersLeft } : {}), ...(locksLeft ? { locks: locksLeft } : {}), ...(typeof codexOpenLeft === 'number' && codexOpenLeft ? { codexOpen: codexOpenLeft } : {}) };
+  return { locks, jsonls: top, codexRollouts, codexOpen: codexOpen || [], ...(Object.keys(left).length ? { left } : {}) };
 }
 if (process.argv.includes('--discovery-snapshot-child')) {
   (async () => {
@@ -2202,7 +2222,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               // its age said, or that end by name (discovery-facts snapshotReply)
               const r = await require('./../discovery-facts.js').snapshotReply({ kept: discoveryKept, runChild: (cb) => {
                 const { execFile } = require('child_process');
-                return execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);
+                return execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: DISCOVERY_CHILD_MAX_BYTES, env: spawnEnv() }, cb);
               }, log });
               if (r.error) { mux.control({ op: 'discovery-result', id: msg.id, error: r.error, code: r.code }); return; }
               snap = r.snap; stale = r.stale || null;
@@ -2228,7 +2248,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               // its age said, or that end by name (discovery-facts snapshotReply)
               const r = await require('./../discovery-facts.js').snapshotReply({ kept: discoveryKept, runChild: (cb) => {
                 const { execFile } = require('child_process');
-                return execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);
+                return execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: DISCOVERY_CHILD_MAX_BYTES, env: spawnEnv() }, cb);
               }, log });
               if (r.error) { mux.control({ op: 'discovery-result', id: msg.id, error: r.error, code: r.code }); return; }
               snap = r.snap; stale = r.stale || null;

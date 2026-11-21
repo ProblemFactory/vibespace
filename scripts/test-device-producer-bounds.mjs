@@ -26,6 +26,12 @@
 //     today's five), a re-scan keeps its code and the «Discovery failed» row says the code — the workbench's REAL methods on a
 //     bare class (RED: the loading step that drops it, in a copy) — and the dirty push END TO END: server.js's own wiring, a
 //     HostManager answering rows, the page's own handler over a map holding a list (RED: the release's d?.sessions).
+//   ⑧ the next part (r1044): a device that said «still walking» (or ran out of its bound, or answered too much) is never walked a
+//     second time — no snapshot ask joining the same walk, no ssh walk of the same home; a failed child still tries the other roads
+//     (RED: the release's rungs, in a copy).
+//   ⑨ the next part (r1044): the reply bounded BY CONSTRUCTION (so its parse and its reply on the agent's loop are): at most 1000
+//     live locks of at most 64 KiB, the newest — the agent's REAL child on 1003 fixture locks (RED: the release's loop reads every
+//     one whole); at most 1000 open codex rollouts; the child's answer at 16 MiB; each kind left out said once by the hub.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -390,6 +396,78 @@ console.log('⑦ r1044, the follow: the door\'s default, a re-scan keeps its cod
     if (hadDoc) { } else delete globalThis.document;
     globalThis.fetch = hadFetch;
   }
+}
+
+console.log('⑧ r1044, the next part: a device that said its walk is still running is never walked a second time (no snapshot ask joining it, no ssh walk of the same home)');
+{
+  const { HostManager, NO_SECOND_WALK } = require('../src/hosts.js');
+  const refuse = (code) => () => Promise.reject(Object.assign(new Error(`the device refused (${code})`), { code }));
+  const road = async (HM, code) => {
+    const m = new HM({ dataDir: fs.mkdtempSync(path.join(tmp, 'walk2-')) });
+    m._state.hosts.push({ id: 'hW', name: 'gpu-a', transport: 'dial' });
+    const asked = { claims: 0, snapshot: 0, ssh: 0 };
+    m.deviceBounded = async () => ({ connect: async () => ({ info: { capabilities: ['discovery-claims'] } }),
+      discoveryClaims: () => { asked.claims++; return refuse(code)(); }, discoverySnapshot: () => { asked.snapshot++; return refuse(code)(); } });
+    m._ssh = async () => { asked.ssh++; throw new Error('ssh: connect to host gpu-a port 22: Connection timed out'); };
+    m._discoveryCache.set('hW', { at: 5000, sessions: [{ sessionId: 's1' }] });
+    let rows = null, err = null;
+    try { rows = await m.discoverSessions('hW', { ttlMs: 0 }); } catch (e) { err = e; }
+    return { ...asked, why: rows && rows[0].staleWhy, err: err && err.message };
+  };
+  for (const code of ['discovery-slow', 'discovery-timeout', 'discovery-too-large']) {
+    const r = await road(HostManager, code);
+    ok(NO_SECOND_WALK.has(code) && r.claims === 1 && r.snapshot === 0 && r.ssh === 0 && r.why === code,
+      `the device answered «${code}»: one ask, then the hub's last list with that reason at once — no snapshot ask joining the same walk, no ssh walk of the same home (${JSON.stringify(r)})`);
+  }
+  for (const code of ['discovery-child-failed', 'discovery-child-unstarted']) {
+    const r = await road(HostManager, code);
+    ok(!NO_SECOND_WALK.has(code) && r.snapshot === 1 && r.ssh === 1 && r.why === code,
+      `…a child that failed or could not start («${code}»): the other roads are still tried — the snapshot ask and the ssh rung's shell walk (${JSON.stringify(r)})`);
+  }
+  const HSRC3 = read('src/hosts.js');
+  const Twice = M.load('src/hosts.js', anchored(anchored(HSRC3, "          if (NO_SECOND_WALK.has(deviceWhy)) throw deviceErr;   // (r1044) the snapshot ask would join the same walk\n", '', 'second-walk-snapshot'), "      if (out == null && NO_SECOND_WALK.has(deviceWhy)) throw deviceErr;   // (r1044) never a second walk of the same home\n", '', 'second-walk-ssh'), 'second-walk');
+  const red = await road(Twice.HostManager, 'discovery-slow');
+  ok(red.snapshot === 1 && red.ssh === 1, `CONTROL (the release's rungs, in a copy): after «still walking» the hub asks the same walk again and walks the same home over ssh (${JSON.stringify(red)}) — RED`);
+}
+
+console.log('⑨ the next part (r1044): the agent\'s reply is bounded BY CONSTRUCTION, so its parse and its re-serialization on the agent\'s loop are bounded — the live locks and the open codex rollouts at their producer, the child\'s answer at 16 MiB');
+{
+  const DF = require('../src/discovery-facts.js');
+  // the PURE picker: none over 64 KiB, the newest first, at most 1000
+  const ents = Array.from({ length: 1003 }, (_, i) => ({ name: `${100000 + i}.json`, size: i === 7 ? 70 * 1024 : 180, mtimeMs: 1000 + i }));
+  const pk = DF.pickLockFiles(ents);
+  ok(DF.DISCOVERY_LOCKS_MAX === 1000 && DF.DISCOVERY_LOCK_FILE_MAX === 64 * 1024 && pk.take.length === 1000 && pk.left === 3 && !pk.take.some((e) => e.size > 64 * 1024) && pk.take[0].mtimeMs === 2002,
+    `the lock files a snapshot reads: none over 64 KiB, the newest first, at most 1000 — 1003 live (one of 70 KiB) ⇒ ${pk.take.length} read, ${pk.left} left out and counted`);
+  // THE AGENT's REAL CHILD on a fixture home of 1003 lock files (a copy that only waives liveness and the claude-process check,
+  // which no fixture can meet — every other line is the tree's): the bounds hold where the rows are made
+  const h = homeOf('f9'), S = path.join(h, '.claude', 'sessions');
+  fs.mkdirSync(S, { recursive: true });
+  for (let i = 0; i < 1003; i++) {
+    const f = path.join(S, `${200000 + i}.json`);
+    fs.writeFileSync(f, i === 7 ? JSON.stringify({ sessionId: sidOf(i), cwd: '/w', pad: 'x'.repeat(70 * 1024) }) : JSON.stringify({ sessionId: sidOf(i), cwd: `/home/u/p${i}`, startedAt: 1700000000000 + i }));
+    fs.utimesSync(f, 1700000000 + i, 1700000000 + i);
+  }
+  const waive = (src, tag) => anchored(anchored(src, '      let alive = false; try { process.kill(pid, 0); alive = true; } catch { }\n', '      let alive = true;\n', tag + '-alive'), '      if (!pidLooksClaude(pid)) continue;\n', '', tag + '-claude');
+  const tree = snapshotOf(M.write('src/agentd/agentd.js', waive(AGSRC, 'locks-bounded'), 'locks-bounded'), h);
+  const relLoop = "      try { locks.push({ pid, ...JSON.parse(fs.readFileSync(path.join(home, '.claude', 'sessions', f), 'utf-8')) }); } catch { }\n    }\n  } catch { }\n";   // the release's lock loop, quoted (stale-pins: kept)
+  const AG_REL = anchored(AGSRC, /  const locks = \[\];\n  let locksLeft = 0;\n[\s\S]*?\n  } catch \{ \}\n(?=  const jsonls = \[\];)/, "  const locks = [];\n  let locksLeft = 0;\n  try {\n    for (const f of fs.readdirSync(path.join(home, '.claude', 'sessions'))) {\n      if (!f.endsWith('.json')) continue;\n      const pid = Number(f.slice(0, -5));\n      let alive = false; try { process.kill(pid, 0); alive = true; } catch { }\n      if (!alive) continue;\n      if (!pidLooksClaude(pid)) continue;\n" + relLoop, 'release-locks');
+  const rel = snapshotOf(M.write('src/agentd/agentd.js', waive(AG_REL, 'release-locks'), 'release-locks-waived'), h);
+  const tl = tree.snap && tree.snap.locks, rl = rel.snap && rel.snap.locks;
+  ok(tree.code === 0 && tl && tl.length === 1000 && tree.snap.left && tree.snap.left.locks === 3 && !tl.some((l) => l.pad) && tl.some((l) => l.sessionId === sidOf(1002)),
+    `the agent's own child: ${tl && tl.length} locks, the newest; the 70 KiB file and the two oldest left out and counted (left.locks ${tree.snap && tree.snap.left && tree.snap.left.locks}) — ${tree.err}`);
+  ok(rel.code === 0 && rl && rl.length === 1003 && rl.some((l) => l.pad), `CONTROL (the release's lock loop, in a copy): every lock read whole — ${rl && rl.length}, the 70 KiB one among them, nothing counted — RED`);
+  // the open codex rollouts and the child's answer: their bounds, wired
+  const n = (t) => AGSRC.split(t).length - 1;
+  ok(DF.DISCOVERY_CODEX_OPEN_MAX === 1000 && DF.DISCOVERY_CHILD_MAX_BYTES === 16 * 1024 * 1024 && n('codexOpen = codexOpen.slice(0, DISCOVERY_CODEX_OPEN_MAX)') === 1 && n('maxBuffer: DISCOVERY_CHILD_MAX_BYTES, env: spawnEnv() }, cb);') === 2 && n('maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);') === 0   // an absence check (stale-pins: kept)
+    && /more than its bound \(16 MiB\)/.test(DF.snapshotChildVerdict({ code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' }, '').error),
+    'the open codex rollouts at most 1000 (the rest counted); both discovery children answer within 16 MiB (it was 64), and past it the walk is refused by name — the kept snapshot answers');
+  // the hub says what was left out, each kind ONCE
+  const { DeviceManager } = require('../src/agentd/client.js');
+  const D9 = new DeviceManager({ dataDir: path.join(tmp, 'dm9'), bundlePath: path.join(tmp, 'none9.js'), version: '1.0.0', machine: 'box-1', transport: { kind: 'stream', hostToken: () => 'x', getStream: () => null } });
+  const logs9 = []; D9._log = (l) => logs9.push(String(l));
+  D9._request = async () => ({ locks: [], jsonls: [], left: { locks: 3, codexOpen: 2 } });
+  await D9.discoverySnapshot(); await D9.discoverySnapshot();
+  ok(logs9.filter((l) => /lock file\(s\) left out/.test(l)).length === 1 && logs9.filter((l) => /open codex rollout\(s\) left out/.test(l)).length === 1, 'the hub says each kind left out ONCE (lock files, open codex rollouts)', logs9);
 }
 
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);
