@@ -2005,6 +2005,126 @@ console.log('\n§2r no real agent CLI on the hosted runner but the legs sanction
     ok(neg.out.length === 0, '…and passes a QUOTED value and a block scalar\'s line that hold «: » (YAML reads both)', neg.out.join(' | '));
   }
 }
+
+// ── §2q THE ONE SUITE-BUILT CLIENT BUNDLE (主开发 r1291 / r1305, row B-1217, lane bl-tests-a, 2026-11-21 — the hotfix's hosted run
+// 44903979657: test-chat-needs-card-chrome built its mutants UNMINIFIED and fed each to the page as one base64 body through the
+// debugging door; on a slow shard the page took over 30 s to take it in). A suite's changed src/client.js is built by
+// scripts/client-bundle.mjs (buildClientBundle / buildClientBundleApi): the product's own options, read through symbolicate's ONE
+// parser of package.json's client step. THE CENSUS (ownClientBuilds over every tracked scripts/ file): a file that builds
+// src/client.js its own way is RED BY NAME unless it is a named row — the tools and the fixture each with its reason, and the
+// suites whose OWN scratch hub serves the built client by the product's route (the slow-intake fault does not apply there:
+// 主开发 r1305 — ONE closed debt list, it only shrinks: a row whose file no longer builds its own way is stale and red). No file of
+// any row may fulfil a /bundle.js through the debugging door with an own-way build.
+console.log('\n§2q one suite-built client bundle: a suite builds src/client.js as the product does, through scripts/client-bundle.mjs — every other way is a named row');
+{
+  const CB = await import('./client-bundle.mjs');
+  const TOOLS = {
+    'scripts/ci.mjs': 'reachContext READS the client step out of package.json (a regex literal naming esbuild + src/client.js); it builds nothing',
+    'scripts/symbolicate.mjs': 'THE parser of the client step (clientBuildOptions — the helper reads the product through it) and an in-memory rebuild of the served bundle to map a stack, byte-identical by construction',
+    'scripts/dbg-comm-surfaces.mjs': 'a debugging script, in no tier (it is never a gate) — built by hand when a lane looks at a page',
+    'scripts/dbg-huge-paging.mjs': 'a debugging script, in no tier (it is never a gate) — built by hand when a lane looks at a page',
+  };
+  const FIXTURE = {
+    'scripts/test-incident-recorder.mjs': 'builds a two-file FIXTURE client with the product\'s own options (symbolicate.clientBuildOptions) plus an external source map — the symbolication proof; it loads no page',
+  };
+  // the suites whose own scratch hub serves the client they built (public/bundle.js by the hub's route) — CLOSED (主开发 r1305)
+  const HUB_ROAD = new Set([
+    "scripts/test-ax-budget.mjs",
+    "scripts/test-boot-reload-ready.mjs",
+    "scripts/test-browser-live-input.mjs",
+    "scripts/test-browser-live.mjs",
+    "scripts/test-browser-profiles-ui.mjs",
+    "scripts/test-browser-replay-ui.mjs",
+    "scripts/test-browser-switcher-ui.mjs",
+    "scripts/test-browser-who-ui.mjs",
+    "scripts/test-cache-warmth-chrome.mjs",
+    "scripts/test-card-list-indent-chrome.mjs",
+    "scripts/test-channel-lark-threads-ui.mjs",
+    "scripts/test-channel-names-ui.mjs",
+    "scripts/test-channel-revisions-ui.mjs",
+    "scripts/test-channel-threads-ui.mjs",
+    "scripts/test-channel-window-render.mjs",
+    "scripts/test-channels-aggregate-ui.mjs",
+    "scripts/test-channels-e2e.mjs",
+    "scripts/test-channels-groups-e2e.mjs",
+    "scripts/test-channels-list-polish-ui.mjs",
+    "scripts/test-channels-panel-redraw.mjs",
+    "scripts/test-chat-paging.mjs",
+    "scripts/test-chat-send-landing.mjs",
+    "scripts/test-claude-steer-chrome.mjs",
+    "scripts/test-claude-wrapper-queue.mjs",
+    "scripts/test-cli-missing-chrome.mjs",
+    "scripts/test-connection-notice-chrome.mjs",
+    "scripts/test-connection-notice-slowlink-chrome.mjs",
+    "scripts/test-desktop-move.mjs",
+    "scripts/test-desktop-resume-paging.mjs",
+    "scripts/test-desktop-xpra-window-scale.mjs",
+    "scripts/test-desktop-xpra-window-seamless.mjs",
+    "scripts/test-dialog-yield-chrome.mjs",
+    "scripts/test-exit-hop-chrome.mjs",
+    "scripts/test-exit-late-chrome.mjs",
+    "scripts/test-exit-slow-chrome.mjs",
+    "scripts/test-feed-miss-ui.mjs",
+    "scripts/test-global-search-ui.mjs",
+    "scripts/test-integrations-ui.mjs",
+    "scripts/test-midturn-order-chrome.mjs",
+    "scripts/test-minimap-jump.mjs",
+    "scripts/test-mobile-back-chrome.mjs",
+    "scripts/test-new-session-dialog.mjs",
+    "scripts/test-pair-dialog-polish.mjs",
+    "scripts/test-phone-desktop-sync.mjs",
+    "scripts/test-phone-refusal-wrap-chrome.mjs",
+    "scripts/test-phone-resume-keeps-layout-ui.mjs",
+    "scripts/test-phone-titlebar-ui.mjs",
+    "scripts/test-plugin-consent-chrome.mjs",
+    "scripts/test-popover-frame-close.mjs",
+    "scripts/test-queue-steer.mjs",
+    "scripts/test-reach-model.mjs",
+    "scripts/test-reattach-stagger-ui.mjs",
+    "scripts/test-reconnect-storm.mjs",
+    "scripts/test-record-clear-client.mjs",
+    "scripts/test-resume-pages-follow-chrome.mjs",
+    "scripts/test-session-title-ui.mjs",
+    "scripts/test-slack-search-chrome.mjs",
+    "scripts/test-split-restore-hidden.mjs",
+    "scripts/test-stage-overlap.mjs",
+    "scripts/test-tab-close-confirm-ui.mjs",
+    "scripts/test-taskbar-group-ui.mjs",
+    "scripts/test-tasks-mirror-race.mjs",
+    "scripts/test-title-chips-ui.mjs",
+    "scripts/test-toolbar-fold-ui.mjs",
+    "scripts/test-tray-voice-phone.mjs",
+    "scripts/test-vault-chrome.mjs",
+    "scripts/test-window-reveal-desktop-ui.mjs"
+  ]);
+  // (the helper itself, and THIS suite — its own planted shapes below — are not read)
+  const files = String(git(REPO, ['ls-files', 'scripts'])).split('\n').filter((f) => /\.(mjs|cjs|js)$/.test(f) && f !== 'scripts/client-bundle.mjs' && f !== 'scripts/test-ci-gate.mjs');
+  const own = new Map(files.map((f) => [f, CB.ownClientBuilds(fs.readFileSync(path.join(REPO, f), 'utf8'))]).filter(([, h]) => h.length));
+  const named = (f) => !!(TOOLS[f] || FIXTURE[f] || HUB_ROAD.has(f));
+  const unnamed = [...own.keys()].filter((f) => !named(f)).map((f) => `${f}:${own.get(f).map((h) => h.line).join(',')}`);
+  const stale = [...Object.keys(TOOLS), ...Object.keys(FIXTURE), ...HUB_ROAD].filter((f) => !own.has(f));
+  const door = [...own.keys()].filter((f) => { const L = fs.readFileSync(path.join(REPO, f), 'utf8').split('\n'); return L.some((l, i) => /Fetch\.fulfillRequest/.test(l) && /bundle\.js/.test(L.slice(Math.max(0, i - 3), i + 2).join(' '))); });
+  console.log(`  · ${own.size} file(s) build src/client.js their own way: ${Object.keys(TOOLS).length} tools, ${Object.keys(FIXTURE).length} fixture, ${HUB_ROAD.size} on their hub's road (closed); every door-served bundle goes through the helper`);
+  ok(!unnamed.length, `every file that builds src/client.js its own way is a NAMED row — none new${unnamed.length ? ' — NOT NAMED (build through scripts/client-bundle.mjs, or name its row with its reason): ' + unnamed.join(' ') : ''}`);
+  ok(!stale.length, `no named row is stale (its file still builds its own way; the closed list only shrinks)${stale.length ? ' — STALE: ' + stale.join(' ') : ''}`);
+  ok(!door.length, `no own-way build is fed to a page through the debugging door (Fetch.fulfillRequest of /bundle.js)${door.length ? ' — ' + door.join(' ') : ''}`);
+  // the helper: the product's own options, through the one parser
+  const args = CB.productClientArgs(REPO);
+  ok(args[0] === 'src/client.js' && args.includes('--minify') && args.includes('--bundle') && !args.some((a) => a.startsWith('--outfile')), `the helper builds with the product's own client step (${args.join(' ')}) — minified, its outfile left out`);
+  // the census over planted shapes, and its CONTROL: a planted suite building its own way is found (red by name)
+  const shapes = {
+    cli: "execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=m.js --format=iife`, { cwd: MUT });",
+    argv: "execFileSync(ESBUILD, ['src/client.js', '--bundle', '--outfile=public/bundle.js'], { cwd: wt });",
+    api: "await esbuild.build({ entryPoints: [path.join(wt, 'src/client.js')], bundle: true });",
+    helper: "buildClientBundle({ repo, root: MUT, outFile: path.join(MUT, 'm.js') }); // src/client.js esbuild",
+    comment: '// esbuild src/client.js --bundle (a comment)',
+  };
+  const seen = Object.fromEntries(Object.entries(shapes).map(([k, v]) => [k, CB.ownClientBuilds(v).map((h) => h.how).join()]));
+  ok(seen.cli === 'cli' && seen.argv === 'argv' && seen.api === 'api' && seen.helper === '' && seen.comment === '', `the census reads the three own ways (command line, argv, the JS API) and never the helper or a comment (${JSON.stringify(seen)})`);
+  const planted = 'scripts/test-planted-own-build.mjs';
+  const unnamedP = [planted].filter((f) => CB.ownClientBuilds(shapes.cli).length && !named(f));
+  ok(unnamedP.length === 1, `CONTROL: a planted suite building src/client.js its own way is NOT NAMED — the census would name it red (${unnamedP.join(' ') || 'not found'})`);
+}
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }

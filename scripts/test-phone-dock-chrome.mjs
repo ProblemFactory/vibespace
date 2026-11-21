@@ -24,6 +24,7 @@ import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
+import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -187,7 +188,9 @@ async function connect(target) {
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: mouse ? 'hover' : 'none' }, { name: 'pointer', value: mouse ? 'fine' : 'coarse' }] });
   };
   const load = async () => {
-    await loadPage(cdp, ORIGIN + '/');   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
+    const lp = await loadPage(cdp, ORIGIN + '/');   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
+    // (主开发 r1291) a load of a suite-built bundle PRINTS its time and its asks, so the margin shows on a green run
+    if (mutant?.bundle) console.log(`  · a mutant load (the suite's own ${mutant.bundle.length}-byte bundle): the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
     await waitFor(`!document.getElementById('loading-screen')`, 15000); await sleep(900);
   };
   const tapAt = async (x, y) => {
@@ -218,7 +221,7 @@ try {
     s = s.replace(from, to);
   }
   fs.writeFileSync(f, s);
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT6 });
+  buildClientBundle({ repo, root: MUT6, outFile: path.join(MUT6, 'bundle-mut.js') });
   DOCK_BUNDLE = fs.readFileSync(path.join(MUT6, 'bundle-mut.js'));
 } catch (e) { DOCK_ERR = String(e && e.message || e).split('\n')[0]; }
 

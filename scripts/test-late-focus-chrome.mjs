@@ -25,6 +25,7 @@ import { createRequire } from 'node:module';
 import { freePorts, ONBOARDED_SOURCE, vncEnv, stillPresser, CHROME_STORE, CHROME_QUIET, fixtureSid } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';   // THE suites' one hub boot (test-architecture §57c)
 import { checker } from './lib/check.mjs';
+import { buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // ⑤ writes a transcript (under the scratch HOME): the real ~/.claude/projects must gain no fixture entry (test-fixture-isolation)
@@ -77,7 +78,7 @@ if (LAW_OUT) fs.writeFileSync(KY2, ky2.replace(LAW_LINE, ''));
 let LAW_BUILT = false;
 if (LAW_OUT) {
   try {
-    require(path.join(repo, 'node_modules/esbuild')).buildSync({ entryPoints: [path.join(wt2, 'src/client.js')], bundle: true, outfile: path.join(wt2, 'public/bundle.js'), format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, logLevel: 'silent' });
+    await buildClientBundleApi({ repo, entry: path.join(wt2, 'src/client.js'), outFile: path.join(wt2, 'public/bundle.js'), unminified: 'the leg reads the BUILT text: lateFocusTakes there, the planted line gone' });   // 主开发 r1291: the product's own options through the one helper (test-ci-gate §2q)
     const built = fs.readFileSync(path.join(wt2, 'public/bundle.js'), 'utf8');
     LAW_BUILT = built.includes('lateFocusTakes') && !built.includes('!handed && field');
   } catch (e) { console.error(`  · the law-out bundle did not build: ${String(e.message || e).slice(0, 300)}`); }

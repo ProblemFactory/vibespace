@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, vncEnv, endRootedProcesses, CHROME_QUIET } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
+import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -64,7 +65,7 @@ fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
   const sub = (rel, from, to) => { const f = path.join(MUT, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`mutant anchor ${rel}: ${from.slice(0, 60)}`); fs.writeFileSync(f, s.replace(from, to)); };
   sub('src/lib/vault-unlock.js', "if (!vaultSetupAsk({ facts, snoozedUntil, now: Date.now() })) return;", "if (!facts || facts.state !== 'not_set_up' || snoozedUntil > Date.now()) return;");
   sub('src/lib/app.js', "this._nsFolderOpen(cwd || '');", "if (cwd) this._nsFolderOpen(cwd);"); // lane new-session-group-folder-link: every open goes through folderOnOpen now — the base set the field only when a cwd came
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT });
+  buildClientBundle({ repo, root: MUT, outFile: path.join(MUT, 'bundle-mut.js') });
 }
 const MUT_BUNDLE = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));
 // ⑪'s red control — THIS source with ONE change taken back: the tour's first draw no longer waits for /api/home (today's order)
@@ -75,7 +76,7 @@ const MUT_BUNDLE = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));
   const f = path.join(MUT2, 'src/lib/app.js'), s = fs.readFileSync(f, 'utf8'), from = "const known = await Promise.race([this._homeFacts, new Promise((r) => setTimeout(() => r(false), 3000))]);";
   if (s.split(from).length !== 2) throw new Error('⑪ mutant anchor gone: ' + from.slice(0, 60));
   fs.writeFileSync(f, s.replace(from, 'const known = true;'));
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut2.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT2 });
+  buildClientBundle({ repo, root: MUT2, outFile: path.join(MUT2, 'bundle-mut2.js') });
 }
 const MUT2_BUNDLE = fs.readFileSync(path.join(MUT2, 'bundle-mut2.js'));
 

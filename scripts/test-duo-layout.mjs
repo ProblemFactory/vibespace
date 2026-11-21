@@ -66,6 +66,7 @@ import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_QUIET } from './sc
 import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
+import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -116,7 +117,7 @@ process.stdin.on('end', () => process.exit(0));
   sub('src/lib/chat-input.js', '    if (isTouchDevice()) return;\n', ''); // slice 1: the base focused the composer on touch too
   sub('src/viewport-class.js', "  if (coarse) return w < VC_COARSE_REGULAR_MIN ? 'compact' : w < VC_COARSE_DESKTOP_MIN ? 'regular' : 'desktop';\n", ''); // slice 2: the base had no regular class
   sub('src/lib/app.js', 'this._foldLadder = installFoldLadder(this);', 'this._foldLadder = null;'); // slice 4: the base read no posture
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT });
+  buildClientBundle({ repo, root: MUT, outFile: path.join(MUT, 'bundle-mut.js') });
 }
 const MUT_BUNDLE = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));
 // ── ⑨'s RED CONTROL bundle (lane desktop-switch-phone): THIS source with the base's no-door rules put back — no Desktops
@@ -130,7 +131,7 @@ const MUT_BUNDLE = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));
   sub('src/lib/mobile-nav.js', 'this.desktopsBtn = this._buildDesktopsDoor();', 'this.desktopsBtn = null;');
   sub('src/lib/mobile-nav.js', 'this._titleEl.onclick = () => this._showWindowSwitcher();', "this._titleEl.onclick = () => { if (app.viewportClass?.() !== 'regular') this._showWindowSwitcher(); };");
   sub('src/lib/mobile-nav.js', "      if (app.viewportClass?.() !== 'regular' || getComputedStyle(document.getElementById('mobile-nav')).flexDirection !== 'column') return;\n", '      return;\n');
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-door.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: D });
+  buildClientBundle({ repo, root: D, outFile: path.join(D, 'bundle-door.js') });
 }
 const DOOR_BUNDLE = fs.readFileSync(path.join(MUT, 'door', 'bundle-door.js'));
 
@@ -206,7 +207,9 @@ const attachOne = async () => {
   await sleep(1200);
 };
 const load = async () => {
-  await loadPage(cdp, ORIGIN + '/');   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
+  const lp = await loadPage(cdp, ORIGIN + '/');   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
+  // (主开发 r1291) a load of a suite-built bundle PRINTS its time and its asks, so the margin shows on a green run
+  if (mutantOn) console.log(`  · a mutant load (the suite's own bundle): the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
   await waitFor(`!document.getElementById('loading-screen')`, 15000); await sleep(800);
 };
 /** The class a viewport this wide is (the suite's own copy of the lines it tests: a finger 640–1023 px = regular). */

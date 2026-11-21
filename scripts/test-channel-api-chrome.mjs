@@ -39,6 +39,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
+import { loadPage } from './cdp-page-load.mjs';
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -60,7 +62,7 @@ fs.chmodSync(chromeRun, 0o700);
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin', 'scripts/fixtures']) fs.cpSync(path.join(repo, f), path.join(wt, f), { recursive: true });
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.writeFileSync(path.join(wt, 'src/lib/build-version.js'), `export const BUILD_VERSION = ${JSON.stringify(require(path.join(repo, 'package.json')).version)};\n`);
-const build = (out) => execSync(`npx esbuild src/client.js --bundle --outfile=${out} --format=iife --platform=browser --target=es2020 --loader:.css=css`, { cwd: wt, stdio: 'ignore' });
+const build = (out) => buildClientBundle({ repo, root: wt, outFile: path.join(wt, out) });
 // THE CONTROL BUNDLE first: the card's Approve answers without the frozen digest it was drawn from
 const CV = path.join(wt, 'src/lib/channel-api-card-view.js'), cvSrc = fs.readFileSync(CV, 'utf-8');
 const APPROVE = "answerApiProposal(m.id, 'approve', { shown: rec.digest })";
@@ -180,7 +182,11 @@ async function newPage({ lang = 'zh', width = 1400, height = 1000, control = fal
   };
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try{localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)})}catch{};window.__answers=[];const __f=window.fetch;window.fetch=async(...a)=>{const r=await __f(...a);try{const u=String(a[0]&&a[0].url||a[0]);if(/\\/api\\/channels\\/api\\/proposals\\//.test(u))window.__answers.push({u,status:r.status})}catch{};return r};` });
-  await cdp('Page.navigate', { url: `${BASE}/` });
+  // (主开发 r1291) THE ONE PAGE LOAD (scripts/cdp-page-load.mjs): the wait is tied to this navigation's document; a load of the
+  // suite-built CONTROL bundle prints its time and its asks (the stronger wait below — the window manager and the sidebar — stays)
+  const call = async (method, params) => { const m = await cdp(method, params); if (m && m.error) throw new Error(`${method}: ${m.error.message}`); return m && m.result; };
+  const lp = await loadPage(call, `${BASE}/`, { who: 'test-channel-api-chrome' });
+  if (control) console.log(`  · a mutant load (the suite's own CONTROL bundle): the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
   const loaded = await until(() => evaljs('!!(window.app && window.app.wm && window.app.sidebar)'), 40000);
   const shot = async (file, sel) => {
     const box = sel ? await evaljs(`(async () => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); for (let i = 0; i < 100; i++) { await new Promise((q) => setTimeout(q, 200)); const b = e.getBoundingClientRect(), hit = document.elementFromPoint(Math.round(b.left + b.width / 2), Math.round(b.top + Math.min(b.height, innerHeight) / 2)); if (hit && e.contains(hit)) break; } const r = e.getBoundingClientRect(); return { x: Math.max(0, r.x), y: Math.max(0, r.y), width: Math.min(r.width, innerWidth), height: Math.min(r.height, innerHeight) }; })()`) : null;

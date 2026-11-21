@@ -35,6 +35,7 @@ import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_QUIET } from './sc
 import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
+import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -96,7 +97,7 @@ try {
   sub('src/lib/user-todos-actions.js', '  const optionsFor = (i) => askOptions(i, detailOf(i));', '  const optionsFor = (i) => (i && Array.isArray(i.options) ? i.options : []);'); // P2-3: the base drew explicit options only
   sub('src/lib/user-todos-actions.js', "    if (ok) showToast(status === 'done' ? t('Marked done') : t('Dismissed'), { duration: 6000, actions: [{ label: t('Undo'), run: () => setStatus(id, 'open') }] });\n", ''); // P3-2: the base decided with no toast
   sub('src/lib/user-todos-panel.js', "        if (reloaded && homeWas !== '1' && app.wm?.activeWindowId) return;\n", ''); // the base's boot: the page takes the screen on every reload
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT });
+  buildClientBundle({ repo, root: MUT, outFile: path.join(MUT, 'bundle-mut.js') });
   MUT_BUNDLE = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));
   // the touch scale (the owner, 2026-10-25): the stylesheet without its block = the base's sizes on a touch screen
   const css = fs.readFileSync(path.join(repo, 'public/style.css'), 'utf8');
@@ -120,7 +121,7 @@ try {
   sub('src/ask-options.js', "  if (s.length > SHORT_MAX || !/[?？]/.test(String(question || '') + s)) return []; // a one-line sentence is no choice\n", '');
   sub('src/lib/user-todos-panel.js', "if (expand && !item.classList.contains('ut-item-resolved') && !e.target.closest('.ut-sess')", "if (expand && !e.target.closest('.ut-sess')"); // a resolved row's click opens nothing
   sub('src/lib/user-todos-row.js', 'const go = (notice || entry.band) && rowDoor ? `', 'const go = resolved ? \'\' : (notice || entry.band) && rowDoor ? `'); // …and has no door (either door: a row's declared one — lane ui-needs-a-button pick 6 — or the conversation's)
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT2 });
+  buildClientBundle({ repo, root: MUT2, outFile: path.join(MUT2, 'bundle-mut.js') });
   R2_BUNDLE = fs.readFileSync(path.join(MUT2, 'bundle-mut.js'));
   let css = fs.readFileSync(path.join(repo, 'public/style.css'), 'utf8');
   const cut = (from, to) => { if (css.split(from).length !== 2) throw new Error(`mutant anchor public/style.css: ${from.slice(0, 60)}`); css = css.replace(from, to); };
@@ -187,7 +188,9 @@ async function connect(target) {
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: mouse ? 'hover' : 'none' }, { name: 'pointer', value: mouse ? 'fine' : 'coarse' }] });
   };
   const load = async () => {
-    await loadPage(cdp, ORIGIN + '/');   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
+    const lp = await loadPage(cdp, ORIGIN + '/');   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
+    // (主开发 r1291) a load of a suite-built bundle PRINTS its time and its asks, so the margin shows on a green run
+    if (mutant?.bundle) console.log(`  · a mutant load (the suite's own ${mutant.bundle.length}-byte bundle): the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
     await waitFor(`!document.getElementById('loading-screen')`, 15000); await sleep(900);
   };
   const tapAt = async (x, y) => {

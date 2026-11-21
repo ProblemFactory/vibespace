@@ -78,6 +78,7 @@ import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // 
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import * as SCR from './scratch.mjs';   // the runner's fontconfig helpers where this tree has them (2.369.358+)
 import { armWatchdog } from './suite-watchdog.mjs';
+import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -190,7 +191,7 @@ function mutantBundle(dir, cuts) {
   execSync(`cp -r ${repo}/src ${dir}/src`);
   fs.symlinkSync(path.join(repo, 'node_modules'), path.join(dir, 'node_modules'));
   for (const [rel, from, to] of cuts) { const f = path.join(dir, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`mutant anchor ${rel}: ${from.slice(0, 60)}`); fs.writeFileSync(f, s.replace(from, to)); }
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify --log-level=error`, { cwd: dir });   // the PRODUCT's flags (package.json build): a minified mutant boots at the real bundle's cost (主开发 2026-11-20 08:02Z)
+  buildClientBundle({ repo, root: dir, outFile: path.join(dir, 'bundle-mut.js') });   // the PRODUCT's flags (package.json build): a minified mutant boots at the real bundle's cost (主开发 2026-11-20 08:02Z)
   return fs.readFileSync(path.join(dir, 'bundle-mut.js'));
 }
 let NO_CARD = null, NO_CARD_ERR = '', NO_STAMP = null, NO_STAMP_ERR = '';

@@ -25,6 +25,8 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, relayBroadcastJs, CHROME_QUIET } from './scratch.mjs';
+import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
+import { loadPage } from './cdp-page-load.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -83,7 +85,7 @@ else await (async () => {
   const version = JSON.parse(fs.readFileSync(path.join(wt, 'package.json'), 'utf8')).version;
   fs.writeFileSync(path.join(wt, 'src/lib/build-version.js'), `export const BUILD_VERSION = ${J(version)};\n`);
   const esbuild = require('esbuild');
-  await esbuild.build({ entryPoints: [path.join(wt, 'src/client.js')], bundle: true, outfile: path.join(wt, 'public/bundle.js'), format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, minify: true, logLevel: 'silent' });
+  await buildClientBundleApi({ repo, entry: path.join(wt, 'src/client.js'), outFile: path.join(wt, 'public/bundle.js') });
   ok(fs.statSync(path.join(wt, 'public/bundle.js')).size > 500000, 'the worktree built its own bundle (esbuild JS API)');
 
   const dir = (n) => { const d = path.join(ROOT, 'files', n); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, n + '.txt'), n); return d; };
@@ -133,7 +135,8 @@ else await (async () => {
     else await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
     const X = { send, ev, close: () => { try { sock.close(); } catch { } }, on: (f) => { hear.add(f); return () => hear.delete(f); } };
     X.boot = async () => {
-      await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+      // (主开发 r1291) THE ONE PAGE LOAD (scripts/cdp-page-load.mjs): tied to this navigation's document; every boot — a suite-built bundle's too — prints its time and asks
+      const lp = await loadPage(send, `http://127.0.0.1:${PORT}/`, { who: 'test-layout-placeholder-ui boot' }); console.log(`  · a boot: the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
       const up = await until(async () => { try { return await ev('!!(window.app && window.app.desktopManager && window.app.desktopManager.activeDesktopId)'); } catch { return false; } }, 30000, 200);
       if (up) await ev('window.app.ready');
       return up;
@@ -393,7 +396,7 @@ else await (async () => {
       let mutSF = SF, mutAP = AP; for (const [src, from, to] of back) { if (src === SF) mutSF = mutSF.replace(from, to); else mutAP = mutAP.replace(from, to); }
       const MUTD = path.join(ROOT, tag); fs.cpSync(path.join(wt, 'src'), path.join(MUTD, 'src'), { recursive: true });
       fs.writeFileSync(path.join(MUTD, 'src/lib/setup-flows.js'), mutSF); fs.writeFileSync(path.join(MUTD, 'src/lib/app.js'), mutAP);
-      await esbuild.build({ entryPoints: [path.join(MUTD, 'src/client.js')], bundle: true, outfile: path.join(MUTD, 'bundle.js'), format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, minify: true, logLevel: 'silent', nodePaths: [path.join(repo, 'node_modules')] });
+      await buildClientBundleApi({ repo, entry: path.join(MUTD, 'src/client.js'), outFile: path.join(MUTD, 'bundle.js'), nodePaths: [path.join(repo, 'node_modules')] });
       const MB = fs.readFileSync(path.join(MUTD, 'bundle.js')).toString('base64');
       const offB = P1.on((m) => { if (m.method === 'Fetch.requestPaused' && /bundle\.js/.test(m.params.request.url)) P1.send('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }], body: MB }).catch(() => { }); });
       await P1.send('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }] });

@@ -56,6 +56,8 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, freePorts, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, deadPort, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
+import { loadPage } from './cdp-page-load.mjs';
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const VNC_ENV = await vncEnv(); // never the machine-global :7/5901 (test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -141,7 +143,7 @@ else await (async () => {
   // the page legs judge THIS source, never the bundle that happened to be on disk (the desktop-move precedent)
   fs.writeFileSync(path.join(wt, 'src/lib/build-version.js'), `export const BUILD_VERSION = ${J(JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).version)};\n`);
   const ESBUILD = path.join(repo, 'node_modules', '.bin', 'esbuild');
-  execFileSync(ESBUILD, ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wt, stdio: 'pipe' });
+  buildClientBundle({ repo, root: wt, outFile: path.join(wt, 'public/bundle.js') });
   if (!fs.existsSync(path.join(wt, 'public/novnc.js'))) execFileSync(ESBUILD, ['node_modules/@novnc/novnc/core/rfb.js', '--bundle', '--outfile=public/novnc.js', '--format=esm', '--platform=browser', '--target=es2022', '--minify'], { cwd: wt, stdio: 'pipe' });
   fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
   const pngPath = path.join(ROOT, 'drj.png'); fs.writeFileSync(pngPath, PNG);
@@ -261,7 +263,8 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     return boot();
   };
   const boot = async () => {
-    await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+    // (主开发 r1291) THE ONE PAGE LOAD (scripts/cdp-page-load.mjs): tied to this navigation's document; every boot — a suite-built bundle's too — prints its time and asks
+    const lp = await loadPage(cdp, `http://127.0.0.1:${PORT}/`, { who: 'test-window-drag-ui boot' }); console.log(`  · a boot: the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
     const upOk = await until(async () => { try { return await ev('!!(window.app && window.app.wm && window.app.ready)'); } catch { return false; } }, 30000, 200);
     if (upOk) { await ev('window.app.ready'); await sleep(1500); }
     await ev(`(() => { window.__drj = {
@@ -576,9 +579,9 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
         const esbuild = require('esbuild');
         // overlay the three files with the control TEXT (its relative imports resolve from wt/src/lib — resolveDir —, so no
         // copy is written into the tree; §51 holds by construction) and bundle the client on it
-        const built = await esbuild.build({ entryPoints: [path.join(wt, 'src/client.js')], bundle: true, write: false, format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, minify: false, logLevel: 'silent',
+        const built = await buildClientBundleApi({ repo, entry: path.join(wt, 'src/client.js'),
           plugins: [{ name: 'drj-control', setup(b) { b.onLoad({ filter: /src\/lib\/(drag-feed|window|tab-group)\.js$/ }, (a) => ({ contents: overlay[path.basename(a.path)], loader: 'js', resolveDir: path.join(wt, 'src/lib') })); } }] });
-        const ctlBundle = Buffer.from(built.outputFiles[0].contents).toString('base64');
+        const ctlBundle = built.buf.toString('base64');
         ok(ctlBundle.length > 1000, 'the CONTROL bundle built (drag-feed.js / window.js / tab-group.js overlaid with the pre-fix feed)');
         await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/bundle.js*', requestStage: 'Request' }] });
         onPaused = (p) => { cdp('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }, { name: 'Cache-Control', value: 'no-store' }], body: ctlBundle }).catch(() => { }); };
@@ -605,9 +608,9 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
       else {
         const tgOnTab = tgFixed.replace(CAP_LINE, 'const capEl = tabEl; /* control: the tab element */');
         const esbuild = require('esbuild');
-        const built = await esbuild.build({ entryPoints: [path.join(wt, 'src/client.js')], bundle: true, write: false, format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, minify: false, logLevel: 'silent',
+        const built = await buildClientBundleApi({ repo, entry: path.join(wt, 'src/client.js'),
           plugins: [{ name: 'drj-c2', setup(b) { b.onLoad({ filter: /src\/lib\/tab-group\.js$/ }, () => ({ contents: tgOnTab, loader: 'js', resolveDir: path.join(wt, 'src/lib') })); } }] });
-        const c2Bundle = Buffer.from(built.outputFiles[0].contents).toString('base64');
+        const c2Bundle = built.buf.toString('base64');
         await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/bundle.js*', requestStage: 'Request' }] });
         onPaused = (p) => { cdp('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }, { name: 'Cache-Control', value: 'no-store' }], body: c2Bundle }).catch(() => { }); };
         if (ok(await bootAt({ scale: 100, dpr: 1 }), 'the page rebooted on the C2 bundle (capture on the tab element)')) {

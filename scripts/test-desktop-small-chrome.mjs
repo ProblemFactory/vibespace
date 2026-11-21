@@ -110,6 +110,7 @@ import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedPro
 import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1125)
 import { loadPage } from './cdp-page-load.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
+import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -190,7 +191,7 @@ const MUTANT = {};
   // P2-3: the base's bottom anchor (no top clamp)
   sub('src/lib/taskbar.js', "  return showContextMenu(x, y, menuItems, 'taskbar-context-menu', { up: y > window.innerHeight / 2 });", "  const menu = showContextMenu(x, y, menuItems, 'taskbar-context-menu');\n  if (y > window.innerHeight / 2) { menu.style.top = ''; menu.style.bottom = (window.innerHeight - y + 4) + 'px'; }\n  return menu;");
   // P2-4 (the strip's step two): the base's ONE row is chat.css's (nowrap) — MUTANT.chat below
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT });
+  buildClientBundle({ repo, root: MUT, outFile: path.join(MUT, 'bundle-mut.js') });
   MUTANT.bundle = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));
   const css = (rel, pairs) => { let s = fs.readFileSync(path.join(repo, rel), 'utf8'); for (const [from, to] of pairs) { if (s.split(from).length !== 2) throw new Error(`mutant css anchor ${rel}: ${from.slice(0, 70)}`); s = s.replace(from, to); } return Buffer.from(s); };
   MUTANT.style = css('public/style.css', [['max-width: 200px; min-width: 90px; overflow: hidden;', 'max-width: 200px; min-width: 60px; overflow: hidden;']]);
@@ -215,7 +216,7 @@ const MUTANT2 = {};
     "    const above = r.top - pr.height - 4;\n    pop.style.left = (Math.max(4, Math.min(r.right - pr.width, window.innerWidth - pr.width - 4)) / Z) + 'px';\n    pop.style.top = ((above >= 4 ? above : r.bottom + 4) / Z) + 'px';");
   // ③ no resize release
   sub('src/lib/window.js', '          if (resized) this._keepReachable(win, dir);', '          // no resize release');
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT2 });
+  buildClientBundle({ repo, root: MUT2, outFile: path.join(MUT2, 'bundle-mut.js') });
   MUTANT2.bundle = fs.readFileSync(path.join(MUT2, 'bundle-mut.js'));
 }
 
@@ -241,7 +242,7 @@ const MUTANT3 = {};
   sub(DM, '    if (!this._desktops.some((d) => d.id === deskId)) {', '    if (false) {');
   // ④ every act brings the list back, a cancelled Rename… too
   sub(DM, 'Promise.resolve(p).then((r) => { if (r !== false) after?.(); });', 'Promise.resolve(p).then(() => after?.());');
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT3 });
+  buildClientBundle({ repo, root: MUT3, outFile: path.join(MUT3, 'bundle-mut.js') });
   MUTANT3.bundle = fs.readFileSync(path.join(MUT3, 'bundle-mut.js'));
 }
 
@@ -256,7 +257,7 @@ const MUTANT4 = {};
   // ① an open list is never told of a remote change; a desk menu leaves every shut door out, a gone desktop's too
   sub('src/lib/desktop-manager.js', '    if (JSON.stringify(this._desktops.map((d) => [d.id, d.name])) === before) return;\n', '    return;\n');
   sub('src/desktop-switch.js', "draw: form === 'item' && !enabled && !phone && i >= 0 ? 'off' : form", "draw: form === 'item' && !enabled && !phone ? 'off' : form");
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT4 });
+  buildClientBundle({ repo, root: MUT4, outFile: path.join(MUT4, 'bundle-mut.js') });
   MUTANT4.bundle = fs.readFileSync(path.join(MUT4, 'bundle-mut.js'));
 }
 
@@ -271,7 +272,7 @@ const MUTANT5 = {};
   // the open placed by showContextMenu alone (before its rows' words); the patch lifts the list by its overflow, by hand
   sub('src/lib/desktop-manager.js', '    this._placeList(menu); // its words painted', '    // its words painted');
   sub('src/lib/desktop-manager.js', '      this._placeList(menu, stood); //', "      const b = menu.getBoundingClientRect(), Z = uiScale();\n      if (b.bottom > window.innerHeight - 4) menu.style.top = (parseFloat(menu.style.top) - (b.bottom - (window.innerHeight - 4)) / Z) + 'px';\n      if (b.right > window.innerWidth - 4) menu.style.left = Math.max(4 / Z, parseFloat(menu.style.left) - (b.right - (window.innerWidth - 4)) / Z) + 'px';\n      void stood; //");
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT5 });
+  buildClientBundle({ repo, root: MUT5, outFile: path.join(MUT5, 'bundle-mut.js') });
   MUTANT5.bundle = fs.readFileSync(path.join(MUT5, 'bundle-mut.js'));
 }
 
@@ -287,7 +288,7 @@ const MUTANT6 = {};
   sub('src/lib/desktop-manager.js', '    const Z = uiScale(), s = menu.scrollTop; // the offset it shows', '    const Z = uiScale(); //');
   sub('src/lib/desktop-manager.js', ', keep: stood.height, scrolled: s * k });', ', keep: stood.height });');
   sub('src/lib/desktop-manager.js', '    if (at.scroll != null) menu.scrollTop = at.scroll / k; //', '    //');
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT6 });
+  buildClientBundle({ repo, root: MUT6, outFile: path.join(MUT6, 'bundle-mut.js') });
   MUTANT6.bundle = fs.readFileSync(path.join(MUT6, 'bundle-mut.js'));
 }
 
@@ -304,7 +305,7 @@ const MUTANT7 = {};
   sub('src/lib/utils.js', "function _placeToastStackNow() {\n  const stack = document.getElementById('global-toasts');\n", "function _placeToastStackNow() {\n  const stack = document.getElementById('global-toasts');\n  if (stack && stack.style.visibility === 'hidden') stack.style.visibility = '';\n");
   sub('src/lib/utils.js', "  if (fy && !_toastPanelSize && typeof ResizeObserver === 'function') { _toastPanelSize = new ResizeObserver(_queueToastPlace); _toastPanelSize.observe(fy); }\n", '');
   sub('src/lib/utils.js', '  if (panel.right + gap + rect.width <= vw) return { left: (panel.right + gap) / (scale || 1) };\n', '');
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT7 });
+  buildClientBundle({ repo, root: MUT7, outFile: path.join(MUT7, 'bundle-mut.js') });
   MUTANT7.bundle = fs.readFileSync(path.join(MUT7, 'bundle-mut.js'));
 }
 
@@ -442,7 +443,9 @@ const device = async (w, h) => {
 };
 const load = async (w, h) => {
   await device(w, h);
-  await loadPage(cdp, ORIGIN + '/');   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
+  const lp = await loadPage(cdp, ORIGIN + '/');   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
+  // (主开发 r1291) a load of a suite-built bundle PRINTS its time and its asks, so the margin shows on a green run
+  if (mutantOn) console.log(`  · a mutant load (the suite's own bundle): the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
   await waitFor(`!document.getElementById('loading-screen')`, 15000); await sleep(900);
 };
 const sessions = await (async () => {

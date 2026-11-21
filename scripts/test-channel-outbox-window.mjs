@@ -50,6 +50,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
+import { loadPage } from './cdp-page-load.mjs';
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -71,7 +73,7 @@ fs.chmodSync(chromeRun, 0o700);
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) fs.cpSync(path.join(repo, f), path.join(wt, f), { recursive: true });
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.writeFileSync(path.join(wt, 'src/lib/build-version.js'), `export const BUILD_VERSION = ${JSON.stringify(require(path.join(repo, 'package.json')).version)};\n`);
-const build = (out) => execSync(`npx esbuild src/client.js --bundle --outfile=${out} --format=iife --platform=browser --target=es2020 --loader:.css=css`, { cwd: wt, stdio: 'ignore' });
+const build = (out) => buildClientBundle({ repo, root: wt, outFile: path.join(wt, out) });
 // THE CONTROL BUNDLE + STYLE first — the base's shape: the API section BESIDE the list, drawing itself outside the census
 const OBX = path.join(wt, 'src/lib/channel-outbox.js'), obxSrc = fs.readFileSync(OBX, 'utf-8');
 const MOUNT = "  const apiSec = apiOutboxSection(app, { onRecords: (recs) => { apiCards = recs; draw(last); }, onAll });\n";
@@ -211,7 +213,11 @@ async function newPage({ control = false, outbox = OUTBOX, api = APIS, lang = 'z
   };
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try{localStorage.setItem('vibespace.lang',${JSON.stringify(lang)})}catch{}` });
-  await cdp('Page.navigate', { url: `${BASE}/` });
+  // (主开发 r1291) THE ONE PAGE LOAD (scripts/cdp-page-load.mjs): the wait is tied to this navigation's document; a load of the
+  // suite-built CONTROL bundle prints its time and its asks (the stronger wait below — the window manager and the sidebar — stays)
+  const call = async (method, params) => { const m = await cdp(method, params); if (m && m.error) throw new Error(`${method}: ${m.error.message}`); return m && m.result; };
+  const lp = await loadPage(call, `${BASE}/`, { who: 'test-channel-outbox-window' });
+  if (control) console.log(`  · a mutant load (the suite's own CONTROL bundle): the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
   const loaded = await until(() => evaljs("!!(window.app && window.app.wm && window.app.sidebar) && (() => { const l = document.getElementById('loading-screen'); return !l || !l.isConnected || getComputedStyle(l).display === 'none' || Number(getComputedStyle(l).opacity) === 0; })()"), 40000);
   const shot = async (file) => {
     const box = await evaljs(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'channel-outbox'); if (!w) return null; const r = w.element.getBoundingClientRect(); return { x: Math.max(0, r.x), y: Math.max(0, r.y), width: Math.min(r.width, innerWidth), height: Math.min(r.height, innerHeight) }; })()`);

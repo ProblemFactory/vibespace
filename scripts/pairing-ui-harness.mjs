@@ -13,6 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, realClicker, pageSceneSource, CHROME_QUIET } from './scratch.mjs';
+import { buildClientBundleApi } from './client-bundle.mjs';
+import { loadPage } from './cdp-page-load.mjs';
 export { sceneWords } from './scratch.mjs';   // a suite prints a page's scene (pageSceneSource) in the door's words
 const require = createRequire(import.meta.url);
 export const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -185,8 +187,8 @@ process.stdin.on('end', () => process.exit(0));
     if (mobile) await P.cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
     await P.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // the census's own spelling (test-architecture §47 reads this module before a suite that imports it)
     await P.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); } catch {}` });
-    await P.cdp('Page.navigate', { url: `${BASE}/` });
-    await P.waitApp();
+    // (主开发 r1291) THE ONE PAGE LOAD (scripts/cdp-page-load.mjs): tied to this navigation's document; every boot — a suite-built bundle's too — prints its time and asks
+    const lp = await loadPage(P.cdp, `${BASE}/`, { who: 'pairing-ui-harness' }); console.log(`  · a boot: the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
     await sleep(700);
     return P;
   }
@@ -318,8 +320,7 @@ export async function buildPatchedBundle(M, rel, patchedSrc, tag = 'ctl') {
   const orig = path.join(REPO, rel);
   const copy = path.join(M.dir, `${path.basename(rel, '.js')}-${tag}-${process.pid}.js`);
   fs.writeFileSync(copy, patchedSrc); M.files.push(copy);
-  const r = await esbuild.build({
-    entryPoints: [path.join(REPO, 'src/client.js')], bundle: true, write: false, minify: true, format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, logLevel: 'silent',
+  const r = await buildClientBundleApi({ repo: REPO,   // 主开发 r1291: the product's own build (package.json), its control by the plugin
     plugins: [{ name: 'vs-control', setup(b) {
       b.onResolve({ filter: /.*/ }, (a) => {
         if (a.importer === copy && a.path.startsWith('.')) return { path: path.resolve(path.dirname(orig), a.path) };
@@ -331,5 +332,5 @@ export async function buildPatchedBundle(M, rel, patchedSrc, tag = 'ctl') {
       });
     } }],
   });
-  return r.outputFiles[0].text;
+  return r.buf.toString('utf8');
 }
