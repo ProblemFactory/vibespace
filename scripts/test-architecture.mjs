@@ -25,7 +25,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import { format as formatArgs } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
-import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, reachesScratch, lateLoads, envCensus, outsideReaders, OUTSIDE_ROW, SELF_LOOKUP, KIT_HANDED } from './hub-home-census.mjs';   // §57 + §113: the one reader of a server.js spawn
+import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, reachesScratch, lateLoads, envCensus, outsideReaders, OUTSIDE_ROW, SELF_LOOKUP, KIT_HANDED, KIT_HANDED_READ, kitNamesOf } from './hub-home-census.mjs';   // §57 + §113: the one reader of a server.js spawn
 import { trackedFiles } from './tracked-files.mjs';   // lane grants-unify: §97 (b) lists src via git ls-files
 import * as acorn from 'acorn';   // lane grants-unify (verify F3): §97 (a) judges each reader's function body, not its lines
 import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';
@@ -8504,16 +8504,13 @@ await section(async () => {
   const missing = envc.knobs.filter((n) => !knobsFile.includes(n)), stale = knobsFile.filter((n) => !envc.knobs.includes(n));
   ok(missing.length === 0 && stale.length === 0 && envc.unread.length === 0 && HVm.ENV_ROWS.length >= 10 && HVm.ENV_NOT.length >= 10,
     `§113 THE ENVIRONMENT IS BUILT, its table held both ways: every name a suite reads is carried (${HVm.ENV_ROWS.length} rows), not carried by name (${HVm.ENV_NOT.length}), set first, or one of the ${knobsFile.length} suites' own knobs (scripts/suite-env-knobs.json, derived) — and every row is read or names its program${missing.length ? ' — NEW knobs (regenerate the list or give each a row): ' + missing.join(', ') : ''}${stale.length ? ' — STALE knobs: ' + stale.join(', ') : ''}${envc.unread.length ? ' — rows nothing reads: ' + envc.unread.join(', ') : ''}`);
-  // (e5) EVERY NAME THE RUNNER, THE WORKFLOW FILE OR THE KIT HANDS A SUITE IS A ROW OR A NAMED NOT (主开发 r1083 cure 1): read as
-  // DATA — the runner's own assignments (scripts/ci.mjs: `env.N =` / `out.N =`, and the keys of an env it builds over laneEnv /
-  // env), the workflow files' env blocks (workflow and job level, and each step that RUNS a suite: `node scripts/…`), and the kit's
-  // names (outside the tree: hub-home-census.mjs KIT_HANDED). HOME and PATH are the re-home's own (built). A name in none is red.
+  // (e5) EVERY NAME THE RUNNER, THE WORKFLOW FILE OR THE KIT HANDS A SUITE IS A ROW OR A NAMED NOT (主开发 r1083 cure 1; r1139's
+  // shape). THE RUNNER: its HANDED ENV is judged where it hands it — scripts/ci.mjs runSuiteAsync refuses a suite by name when a
+  // name it ADDED to what it was started with is neither (src/home-verdict.js unruledNames; test-home-verdict drives the three
+  // forms) — never its source's forms, which do not converge. THE WORKFLOW (read as data: workflow / job env, each step that RUNS
+  // a suite, and every `echo "N=…" >> $GITHUB_ENV`, which reaches every later step) and THE KIT (outside the tree: KIT_HANDED, a
+  // hand list held to the kit's own files where they can be read) are read here. HOME and PATH are the re-home's own (built).
   const handed113 = new Map(), addH = (n, at) => { if (!handed113.has(n)) handed113.set(n, at); };
-  read('scripts/ci.mjs').split('\n').forEach((l, i) => {
-    const c = l.replace(/(^|\s)\/\/.*$/, '');
-    for (const m of c.matchAll(/\b(?:env|out)\.([A-Z][A-Z0-9_]+)\s*=(?!=)/g)) addH(m[1], `scripts/ci.mjs:${i + 1}`);
-    if (/\{\s*\.\.\.(?:laneEnv\(|env\b)/.test(c)) for (const m of c.matchAll(/[{,]\s*([A-Z][A-Z0-9_]{2,})\s*:/g)) addH(m[1], `scripts/ci.mjs:${i + 1}`);
-  });
   const wfNames = (text, file) => {
     const L = text.split('\n'), ind = (x) => x.length - x.trimStart().length, out = [];
     L.forEach((l, i) => {
@@ -8526,17 +8523,27 @@ await section(async () => {
       }
       for (let k = i + 1; k < L.length && (L[k].trim() === '' || ind(L[k]) > e); k++) { const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/.exec(L[k]); if (m) out.push([m[1], `${file}:${k + 1}`]); }
     });
+    L.forEach((l, i) => { for (const m of l.matchAll(/\becho\s+["']?([A-Z_][A-Z0-9_]*)=[^\n]*>>\s*["']?\$\{?GITHUB_ENV\b/g)) out.push([m[1], `${file}:${i + 1}`]); });   // a job-wide write
     return out;
   };
   for (const wf of fs.readdirSync(path.join(REPO, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) for (const [n, at] of wfNames(read(`.github/workflows/${wf}`), `.github/workflows/${wf}`)) addH(n, at);
   for (const n of KIT_HANDED) addH(n, 'the kit (hub-home-census.mjs KIT_HANDED)');
+  // the kit's hand list, held to the kit's own files where this run can read them (VS_KIT_DIR), else said with its date
+  const kitDir = process.env.VS_KIT_DIR || '';
+  const kitTexts = kitDir ? KIT_HANDED_READ.files.map((f) => { try { return fs.readFileSync(path.join(kitDir, f), 'utf8'); } catch { return null; } }) : [];
+  if (kitTexts.length && kitTexts.every((t) => t !== null)) {
+    const fromKit = [...new Set(kitTexts.flatMap((t) => kitNamesOf(t)))].sort(), listed = [...KIT_HANDED].sort();
+    ok(JSON.stringify(fromKit) === JSON.stringify(listed), `§113 (e5) the kit's hand list equals what the kit's own files hand (${KIT_HANDED_READ.files.join(' + ')} under VS_KIT_DIR)${JSON.stringify(fromKit) === JSON.stringify(listed) ? '' : ` — STALE: the files hand ${fromKit.filter((n) => !listed.includes(n)).join(', ') || 'nothing new'}, the list holds ${listed.filter((n) => !fromKit.includes(n)).join(', ') || 'nothing more'}`}`);
+  } else console.log(`  · §113 (e5) the kit's hand list (KIT_HANDED, ${KIT_HANDED.length} names) was read ${KIT_HANDED_READ.on} from the kit's ${KIT_HANDED_READ.files.join(' + ')} — the kit is outside the tree and its files are not readable here (VS_KIT_DIR unset), so the list can be stale`);
   const ruled113 = (n, HVx = HVm) => ['HOME', 'PATH'].includes(n) || HVx.ENV_ROWS.some((r) => r.name === n || (r.prefix && n.startsWith(r.prefix))) || HVx.ENV_NOT.some((r) => r.name === n);
   const unruled113 = [...handed113].filter(([n]) => !ruled113(n));
   ok(handed113.size >= 10 && handed113.has('VIBESPACE_SUITE_EGRESS_FILE') && handed113.has('VIBESPACE_CI_OAT') && !unruled113.length,
     `§113 (e5) every name the runner, the workflow file or the kit hands a suite is a row (carried) or a named NOT (${handed113.size} names: ${[...handed113.keys()].sort().join(', ')})${unruled113.length ? ' — RED: ' + unruled113.map(([n, at]) => `${n} (${at})`).join(', ') + ' is neither: give it a row or a named NOT with its reason' : ''}`);
-  const wfCtl = wfNames("jobs:\n  a:\n    steps:\n      - name: gh\n        env:\n          GH_ONLY: x\n        run: install-gh\n      - run: node scripts/ci.mjs --fast\n        env:\n          SUITE_NEW: y\n", 'ctl.yml').map(([n]) => n);
-  ok(wfCtl.join() === 'SUITE_NEW' && !ruled113('VIBESPACE_NEW_HANDED') && ruled113('VIBESPACE_SUITE_EGRESS_FILE') && ruled113('VIBESPACE_CI_LANES'),
-    '§113 (e5) CONTROL: a step that runs a suite hands its env, a step that does not hands none; a handed name in no row and no named NOT is red by name');
+  const wfCtl = wfNames("jobs:\n  a:\n    steps:\n      - name: gh\n        env:\n          GH_ONLY: x\n        run: install-gh\n      - name: name it\n        run: echo \"BY_GITHUB_ENV=$(command -v x)\" >> \"$GITHUB_ENV\"\n      - run: node scripts/ci.mjs --fast\n        env:\n          SUITE_NEW: y\n", 'ctl.yml').map(([n]) => n).sort();
+  ok(wfCtl.join() === 'BY_GITHUB_ENV,SUITE_NEW' && !ruled113('VIBESPACE_NEW_HANDED') && ruled113('VIBESPACE_SUITE_EGRESS_FILE') && ruled113('VIBESPACE_CI_LANES') && ruled113('VIBESPACE_CI_RUN') && ruled113('VS_CLAUDE_BIN'),
+    '§113 (e5) CONTROL: a step that runs a suite hands its env, a step that does not hands none, a $GITHUB_ENV write reaches every later step; a handed name in no row and no named NOT is red by name');
+  ok(JSON.stringify(kitNamesOf("const env = { ...base, VS_NO_REAL_CLI: '1' };\nexport VIBESPACE_CI_LANES=4\nenv.VIBESPACE_SUITE_EGRESS_FILE = f;\nNODE_MAJOR=24")) === JSON.stringify(['VIBESPACE_CI_LANES', 'VIBESPACE_SUITE_EGRESS_FILE', 'VS_NO_REAL_CLI']),
+    '§113 (e5) CONTROL: the kit reader takes an object key, an export and an env assignment of the house names (a shell variable outside them is no env name)');
   // (c5) A SUITE REACHES A REAL PROGRAM AFTER THE RE-HOME ONLY THROUGH A NAMED ALLOW ROW (主开发 r1083 cure 2): every suite that
   // looks a vendor program up — §50's REAL_CLI shape, read from this file, or a PATH walk / VS_<CLI>_BIN read — is an allow row
   // (and then goes through the accessor, never its own lookup) or a named self-lookup (hub-home-census.mjs SELF_LOOKUP), both ways

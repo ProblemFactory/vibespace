@@ -301,8 +301,8 @@ export const NOT_REHOMED = Object.freeze([
   Object.freeze({ file: 'ci.mjs', why: "the TIER RUNNER: each suite re-homes itself from the env it hands; its own `gh api` runs on the account's gh sign-in and its usage-index sweep reads ~/.vibespace/db on purpose" }),
   Object.freeze({ file: 'probe-claude-stdout.mjs', why: "the owner's ONE real turn on the owner's own login, by hand — the stdout registry's wire probe" }),
   Object.freeze({ file: 'measure-tier3.mjs', why: "its §12.36 leg finds the stock Chrome in the person's own agent-browser install, on purpose, by hand" }),
-  // 主开发 r1083 (should): the REMOTE tier's driver ships a snapshot and runs ITS ci.mjs over ssh — the suites re-home themselves there
-  Object.freeze({ file: 'ci-remote.mjs', why: "the REMOTE tier's driver: it ships a snapshot to the test machine and runs that snapshot's ci.mjs over ssh, whose suites re-home themselves there; its own git, rsync and ssh run on the account's own config and agent, on purpose" }),
+  // 主开发 r1083 / r1139: the REMOTE tier's driver ships a snapshot and runs ITS ci.mjs over ssh
+  Object.freeze({ file: 'ci-remote.mjs', why: "the REMOTE tier's driver: it ships a snapshot to the test machine and runs that snapshot's ci.mjs over ssh; the suites run there under the machine's lane homes (temp folders), so they are never re-homed; its own git, rsync and ssh run on the account's own config and agent, on purpose" }),
   // the by-hand browser measurements (主开发 02:28Z cure 6): re-homed, they no longer found the person's driver and SKIPPED in silence
   ...['measure-browser-windows.mjs', 'measure-dialog-hold.mjs', 'measure-held-enable.mjs', 'measure-hidden-window-cpu.mjs', 'measure-input-receipts.mjs', 'measure-navigation-loop.mjs', 'measure-shared-profile-freeze.mjs'].map((file) => Object.freeze({ file, why: BY_HAND_BROWSER })),
 ]);
@@ -507,6 +507,21 @@ export function handedCli(cli) {
 export function handedCliCandidates(cli) {
   if (!isRowCaller(ME, REAL_CLI_ALLOW)) throw new Error(`handedCliCandidates(): ${path.basename(process.argv[1] || '')} is not a row of REAL_CLI_ALLOW (scripts/scratch.mjs) as a file of this checkout`);
   return cliCandidatesOf(cli, HANDED);
+}
+/** Where the RUN NAMES its real `cli` (主开发 r1139): the HANDED `VS_<CLI>_BIN` — the workflow sets it where it installs the
+ *  program — or null. Never a PATH candidate (a candidate is where a program MAY be). A row only. */
+export function handedCliNamed(cli) {
+  if (!isRowCaller(ME, REAL_CLI_ALLOW)) throw new Error(`handedCliNamed(): ${path.basename(process.argv[1] || '')} is not a row of REAL_CLI_ALLOW (scripts/scratch.mjs) as a file of this checkout`);
+  return HANDED[`VS_${String(cli).toUpperCase().replace(/-/g, '_')}_BIN`] || null;   // the key as HANDED spells it
+}
+/** PURE — a FENCED real-program leg's verdict (主开发 r1083 / r1139), ONE for every fenced suite: the lanes' switch (VS_NO_REAL_CLI)
+ *  ⇒ a counted skip; a usable program ⇒ run; the run NAMES its program (the handed variable) and it is not there ⇒ RED; not
+ *  named and not found ⇒ a counted skip said by name. Never a pass for a leg that did not run. */
+export function fencedVerdict({ off = false, named = null, found = null } = {}) {
+  if (off) return { act: 'skip', why: 'VS_NO_REAL_CLI=1 — the real program is not run here' };
+  if (found) return { act: 'run', why: '' };
+  if (named) return { act: 'red', why: `the run NAMES its program (${named}) and no usable binary is there` };
+  return { act: 'skip', why: 'the run names no program (no handed VS_<CLI>_BIN) and none is found by the handed env' };
 }
 /** PURE: where a REAL `cli` may be, by a handed env `{ HOME, PATH, VS_<CLI>_BIN }`. */
 export function cliCandidatesOf(cli, handed) {

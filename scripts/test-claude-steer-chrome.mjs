@@ -51,7 +51,7 @@ import http from 'node:http';
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, runnerFontEnv, realClicker, stopWrapper, CHROME_STORE, CHROME_QUIET, handedCliCandidates } from './scratch.mjs';
+import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, runnerFontEnv, realClicker, stopWrapper, CHROME_STORE, CHROME_QUIET, handedCliCandidates, handedCliNamed, fencedVerdict } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -683,7 +683,7 @@ const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1';
 // B-ba47 pick B: the HANDED env's candidates — this suite is a row of scratch.mjs REAL_CLI_ALLOW (a suite handed a non-temp
 // home runs re-homed, so its own PATH / HOME no longer name the person's CLI; test-architecture §113)
 const claudeCands = NO_REAL_CLI ? [] : handedCliCandidates('claude');
-const claudeSaid = claudeCands[0] || null;   // the HANDED VS_CLAUDE_BIN: the run SAYS where its claude is (主开发 r1083 cure 2)
+const claudeNamed = NO_REAL_CLI ? null : handedCliNamed('claude');   // the run NAMES its claude only by the handed VS_CLAUDE_BIN (r1139)
 const claudeBin = NO_REAL_CLI ? null : (() => {
   for (const c of claudeCands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile() && fs.statSync(real).size > 10 * 1048576) return real; } catch { } }
   return null;
@@ -691,6 +691,7 @@ const claudeBin = NO_REAL_CLI ? null : (() => {
 // the checks the real CLI would have run, counted off this file's own block — a skip says its leg count, never a pass
 const legsOf = (marker) => { const t = fs.readFileSync(new URL(import.meta.url), 'utf8'), i = t.indexOf(marker), j = t.indexOf('else {', i) + 6; let d = 1, k = j; while (d && k < t.length) { const c = t[k++]; if (c === '{') d++; else if (c === '}') d--; } return (t.slice(j, k).match(/(?<![\w.])ok\(/g) || []).length; };
 const skips = [];
+const fenced = fencedVerdict({ off: NO_REAL_CLI, named: claudeNamed, found: claudeBin });   // ONE verdict for both fenced suites (scripts/scratch.mjs)
 /** The mock (R0's): a main-loop request (its tools name Bash) whose last user message holds `TOOL-<n>S` answers ONE Bash
  *  `sleep <n>`; one that carries a tool_result answers text; anything else answers text at once. Every main request is
  *  logged with the FLAT text of its last user message (tool_result content included) and every mark in the request. */
@@ -956,8 +957,8 @@ async function realLateC(at) {
   };
   await r.end(); return out;
 }
-if (!claudeBin && claudeSaid) ok(false, `§A the run NAMES its claude (${claudeSaid}) and it is not a usable binary there — a fenced leg is RED, never a skip (主开发 r1083)`);
-else if (!claudeBin) { const n = legsOf("else if (!claudeBin) { const n = legsOf"); skip(`§A (${n} checks)`, `${NO_REAL_CLI ? 'VS_NO_REAL_CLI=1 — the real claude is not run here' : 'no claude binary by the handed env ($VS_CLAUDE_BIN, PATH, ~/.local/bin/claude)'} — the stand-in legs below still run`); skips.push(`§A: ${n} checks`); }
+if (fenced.act === 'red') ok(false, `§A ${fenced.why} — a fenced leg is RED, never a skip (主开发 r1139)`);
+else if (fenced.act === 'skip') { const n = legsOf("else if (fenced.act === 'skip') { const n = legsOf"); skip(`§A (${n} checks)`, `${fenced.why} — the stand-in legs below still run`); skips.push(`§A: ${n} checks`); }
 else {
   console.log(`  (claude ${(() => { try { return execFileSync(claudeBin, ['--version'], { encoding: 'utf8', timeout: 20000, env: { HOME: os.tmpdir(), PATH: '/usr/bin:/bin' } }).trim(); } catch { return '?'; } })()})`);
   const [lands, stops, rl0, rlRes, rlSet, rl20, rl45, rride] = await Promise.all([

@@ -751,5 +751,46 @@ console.log('— the runner\'s egress file reaches a re-homed suite\'s forked ch
     'CONTROL: the same suite through a home-verdict.js without the row loses the file at the re-home — its child records nothing while the parent\'s sentinel stays', { j: ctl.j, lines: ctl.lines.slice(0, 4), err: ctl.err });
 }
 
+// ── THE HANDED ENV IS JUDGED, NOT THE SOURCE (主开发 r1139) ─────────────────────────────────────────────────────────────────
+// scripts/ci.mjs judges the env it hands a suite at the ONE place it starts one (runSuiteAsync): every name it ADDED to what it
+// was itself started with is a row or a named NOT, or the suite is refused by name. However the name was added — the shared
+// object (as markCiRun sets the run's id on GIT_ENV), a computed name, a helper — the judge reads the env itself. RED: the tip's
+// source reader (the census of assignment forms) finds none of the three.
+console.log('— the handed env, judged (B-ba47 pick B, r1139): a name the runner added by any road is a row, a named NOT, or a refusal');
+{
+  const STARTED = { PATH: '/usr/bin:/bin', HOME: '/home/u', LANG: 'C.UTF-8', CI: 'true' };
+  const viaShared = (() => { const e = { ...STARTED }; const shared = e; shared.VIBESPACE_FORM_SHARED = 'x'; return e; })();
+  const viaComputed = (() => { const part = ['FORM', 'COMPUTED'].join('_'); return { ...STARTED, [`VIBESPACE_${part}`]: 'x' }; })();
+  const viaHelper = (() => { const add = (o, k, v) => { o[k] = v; return o; }; return add({ ...STARTED }, 'VIBESPACE_FORM_HELPER', 'x'); })();
+  const named = [['the shared object', viaShared, 'VIBESPACE_FORM_SHARED'], ['a computed name', viaComputed, 'VIBESPACE_FORM_COMPUTED'], ['a helper', viaHelper, 'VIBESPACE_FORM_HELPER']]
+    .map(([form, env, n]) => ({ form, n, got: HV.unruledNames(env, STARTED) }));
+  ok(named.every((x) => x.got.join() === x.n), `a name ADDED through each of three forms — ${named.map((x) => x.form).join(', ')} — is red BY NAME (${named.map((x) => x.got.join(',')).join(' · ')})`, named);
+  const ruled = HV.unruledNames({ ...STARTED, HOME: '/tmp/vs-lane-1/home', XDG_RUNTIME_DIR: '/tmp/r', VIBESPACE_CI_RUN: 'ci-fast-pid1@2', VIBESPACE_SUITE_BUDGET_MS: '9', VIBESPACE_SUITE_EGRESS_FILE: '/tmp/e', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/b' }, STARTED);
+  ok(ruled.length === 0, 'what the runner adds today is ruled: the lane home and runtime folder, the run\'s id (a row), the budget and the egress file (rows), the lane\'s bus (a named NOT)', ruled);
+  // RED: the tip's reader — the assignment forms the census matched — over the three forms' own spelling finds none of them
+  const tipReader = (src) => { const out = []; for (const l of src.split('\n')) { for (const m of l.matchAll(/\b(?:env|out)\.([A-Z][A-Z0-9_]+)\s*=(?!=)/g)) out.push(m[1]); if (/\{\s*\.\.\.(?:laneEnv\(|env\b)/.test(l)) for (const m of l.matchAll(/[{,]\s*([A-Z][A-Z0-9_]{2,})\s*:/g)) out.push(m[1]); } return out; };
+  const forms = "GIT_ENV.VIBESPACE_CI_RUN = id;\nconst part = ['FORM', 'COMPUTED'].join('_'); const e2 = { ...base, [`VIBESPACE_${part}`]: 'x' };\nadd(env, 'VIBESPACE_FORM_HELPER', 'x');";
+  ok(tipReader(forms).length === 0 && tipReader('env.VIBESPACE_SEEN = 1;').join() === 'VIBESPACE_SEEN',
+    'RED CONTROL: the tip\'s source reader finds NONE of the three forms (the run\'s id on the shared object among them) — while it sees the plain one', tipReader(forms));
+  // the wiring: the runner judges the env it hands, before the spawn, and refuses by name
+  const CI = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8');
+  const at = CI.indexOf('export function runSuiteAsync('), judge = CI.indexOf('HANDED_JUDGE.unruledNames(env, STARTED_ENV)', at), spawnAt = CI.indexOf('child = spawn(process.execPath', at);
+  ok(at > 0 && judge > at && spawnAt > judge && /REFUSED \(0ms\)/.test(CI.slice(judge, spawnAt)) && /const STARTED_ENV = Object\.freeze\(\{ \.\.\.process\.env \}\);/.test(CI),
+    'scripts/ci.mjs judges the env it hands at runSuiteAsync — its started env frozen at load — and refuses the suite by name before it is spawned');
+}
+
+// ── A FENCED LEG'S VERDICT: named only by the handed variable (主开发 r1139) ───────────────────────────────────────────────────
+console.log('— a fenced real-program leg: the switch, a usable program, named and missing, not named and missing');
+{
+  const v = (o) => SM.fencedVerdict(o).act;
+  ok(v({ off: true, named: '/opt/claude', found: '/opt/claude' }) === 'skip' && v({ off: false, named: null, found: '/usr/local/bin/claude' }) === 'run'
+    && v({ off: false, named: '/opt/ci/bin/claude', found: null }) === 'red' && v({ off: false, named: null, found: null }) === 'skip',
+    'the lanes\' switch ⇒ a counted skip; a usable program ⇒ run; NAMED (the handed VS_<CLI>_BIN) and not found ⇒ RED; not named and not found ⇒ the counted skip said by name');
+  ok(/handed VS_<CLI>_BIN/.test(SM.fencedVerdict({}).why) && /NAMES its program \(\/x\)/.test(SM.fencedVerdict({ named: '/x' }).why), 'each verdict says why by name');
+  const both = ['test-claude-steer-chrome.mjs', 'test-claude-wrapper-queue.mjs'].map((f) => fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'));
+  ok(both.every((t) => /fencedVerdict\(\{ off: NO_REAL_CLI, named: claudeNamed, found: claudeBin \}\)/.test(t) && /handedCliNamed\('claude'\)/.test(t) && !/claudeCands\[0\]/.test(t)),
+    'both fenced suites take the ONE verdict, with the program named only by handedCliNamed (never the first candidate)');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -247,6 +247,11 @@ jobs:
       - name: Install claude CLI
         run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code
         timeout-minutes: 5
+      # B-ba47 pick B (the coordinator's r1139): the run NAMES the claude it installed, by the handed VS_CLAUDE_BIN — the fenced
+      # legs (test-claude-steer-chrome §A, test-claude-wrapper-queue §A) that do not find a NAMED program are RED, never a skip
+      - name: Name the installed claude
+        run: echo "VS_CLAUDE_BIN=$(command -v claude)" >> "$GITHUB_ENV"
+        timeout-minutes: 1
       # the ONE npm door (see the fast job): installs retried, suites never
       - name: npm ci (3 attempts on a registry blip)
         run: bash scripts/ci-npm.sh ci

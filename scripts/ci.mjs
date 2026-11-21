@@ -210,6 +210,12 @@ const repo = path.resolve(path.dirname(HERE), '..');
 // launched from a git hook, so EVERY git it runs gets the sanitized
 // environment — a hook exports GIT_DIR/GIT_INDEX_FILE and the heavy tier runs
 // `git worktree add` (scripts/git-env.mjs has the full essay).
+// THE HANDED ENV IS JUDGED, NOT THE SOURCE (B-ba47 pick B, 主开发 r1139): what this runner was itself STARTED with. At the
+// ONE place it hands a suite its env (runSuiteAsync), every name it ADDED to this — by any road: the shared object, a computed
+// name, a helper — is a row or a named NOT of src/home-verdict.js, or the suite is REFUSED by name (a re-homed suite would
+// drop the name in silence: the hosted runner, the push hook, the cut). HOME and PATH are the re-home's own.
+const STARTED_ENV = Object.freeze({ ...process.env });
+const HANDED_JUDGE = createRequire(import.meta.url)('../src/home-verdict.js');   // PURE (no I/O at load)
 const GIT_ENV = gitEnvFrom(process.env);
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -2856,6 +2862,11 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       // unread ON PURPOSE = an EMPTY value, never an absent one: the reader in a suite that runs this one (test-ci-gate's plants)
       // leaves a child whose env names another file, or none on purpose, to that runner (egress-sampler.cjs carry())
       env.VIBESPACE_SUITE_EGRESS_FILE = egressOn ? egressFile : '';
+      const unruled = HANDED_JUDGE.unruledNames(env, STARTED_ENV);   // the env this suite IS handed, judged (r1139)
+      if (unruled.length) {
+        resolve({ ok: false, ms: 0, killedFromOutside: false, lines: [`\n✗ ${s.name} REFUSED (0ms) ${tag} — the runner hands it ${unruled.join(', ')}: no row and no named NOT in src/home-verdict.js (a re-homed suite would drop ${unruled.length > 1 ? 'them' : 'it'} in silence) — give each a row or a named NOT with its reason`] });
+        return;
+      }
       child = spawn(process.execPath, [...hr.argv, ...(egressOn ? egressArgv() : []), path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env });
     } catch (e) {
       resolve({ ok: false, ms: 0, killedFromOutside: false, lines: [`\n✗ ${s.name} FAILED (0ms, ${e.code || e.message}) ${tag}`] });

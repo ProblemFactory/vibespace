@@ -434,8 +434,20 @@ export const SELF_LOOKUP = Object.freeze({
   'test-toolbar-fold-ui.mjs': 'claude, codex — a HIDE row: its hub\u2019s PATH drops the folders holding them',
   'test-vendor-whitelist.mjs': 'the shipped oracles — (b) the live re-measurement under strace; re-homed, it says by name that it did not run',
 });
-/** THE NAMES THE KIT HANDS ITS SUITES (the test machines' kit is outside the tree: testbox/remote/runner.mjs and heavy-run.sh,
- *  read by fixed string 2026-11-21 for 主开发 r1083 cure 1) — test-architecture §113 holds each as a row or a named NOT. */
+/** THE NAMES THE KIT HANDS ITS SUITES (主开发 r1083 cure 1) — test-architecture §113 holds each as a row or a named NOT. The kit
+ *  is OUTSIDE the tree, so this is a HAND LIST, read once (KIT_HANDED_READ) and able to go STALE: where the census can read the
+ *  kit's own files (VS_KIT_DIR, the kit's folder), it re-reads them with kitNamesOf and holds the list to them both ways;
+ *  elsewhere it says the dated line (主开发 r1139). */
+export const KIT_HANDED_READ = Object.freeze({ on: '2026-11-21', files: Object.freeze(['remote/runner.mjs', 'remote/heavy-run.sh']) });
+/** PURE: the env names a kit file hands — `env.N =` / `['N'] =`, a shell `N=` / `export N=`, a `{ N: }` key — of the names a suite's
+ *  env is made of (the house prefixes and the session's own words). */
+export function kitNamesOf(text) {
+  const out = new Set();
+  for (const m of String(text || '').matchAll(/(?:\benv\.|\[')([A-Z][A-Z0-9_]{2,})'?\]?\s*=(?!=)|(?:^|[\s;{,])(?:export\s+)?((?:VIBESPACE|VS|TZ|LANG|HOME|XDG|TMPDIR|PATH)[A-Z0-9_]*)=(?!=)|[{,]\s*((?:VIBESPACE|VS|TZ|LANG|HOME|XDG|TMPDIR|PATH)[A-Z0-9_]*)\s*:/gm)) {
+    const n = m[1] || m[2] || m[3]; if (n) out.add(n);
+  }
+  return [...out].sort();
+}
 export const KIT_HANDED = Object.freeze(['HOME', 'LANG', 'PATH', 'TZ', 'TMPDIR', 'XDG_RUNTIME_DIR', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_SUITE_EGRESS_FILE',
   'VS_NO_REAL_CLI', 'VIBESPACE_CI_DIR_SWEEP', 'VIBESPACE_CI_LANES', 'VIBESPACE_CI_LANE_ROOT', 'VIBESPACE_CI_REMOTE_RUN']);
 export const OUTSIDE_ROW = Object.freeze({ max: 194, why: 'in-process suites / debug scripts with no path to scratch.mjs that load a home-reading product module or read the home themselves — restated 153 → 194 by the wider loader reader (any string literal naming src/<x>.js or server.js, 主开发 17:06Z BOUNDARY-4): pick C gives them the import; the count may only fall; a NEW one takes the import (scratch.mjs first)' });

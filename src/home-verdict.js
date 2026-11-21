@@ -193,6 +193,7 @@ const ENV_ROWS = Object.freeze([
   R('VIBESPACE_SUITE_HANG_REPORT', 'path', "where the tier runner asks a suite's hang report to go — a path, judged three ways"),
   // the re-land's census (主开发 r1083 cure 1: every name the runner, the workflow file or the kit hands a suite is a row or a named NOT)
   R('VIBESPACE_SUITE_EGRESS_FILE', 'path', "where the tier runner's egress sampler writes a suite's sockets (B-9dd0): a fork()ed child and a Worker carry the sampler by its --require and the file by this name — a path, judged three ways"),
+  R('VIBESPACE_CI_RUN', 'word', "the gate run's own id (scripts/ci.mjs markCiRun): a suite's run records carry it (scripts/scratch-run.mjs stampScratchRun), so the reaper reads the right owner"),
   R('VIBESPACE_CI_SCRATCH_ROOTS', 'paths', "the gate's configured scratch roots (scripts/scratch-run.mjs SCRATCH_ROOTS_ENV): a suite's own stamp and the reaper's judgment read them — a list, carried whole or not at all"),
   // THE PROCESS MARKS (B-ba47's follow-up, 主开发 r863 MUST 2): ids, no route and no credential — how the person's Stop and a
   // job's stop find what a suite's children left behind; the scratch import keeps them, so the built env carries them too
@@ -217,6 +218,12 @@ const ENV_NOT = Object.freeze([
   ...['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'NVM_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'CODEX_API_KEY'].map(N("the person's agent CLIs: their folders, their sign-ins", "the person's agent CLIs", (n) => (['ANTHROPIC_AUTH_TOKEN', 'CODEX_API_KEY'].includes(n) ? 'the agent CLIs' : null))),
 ]);
 const notRow = (k, not = ENV_NOT) => not.find((x) => x.name === k) || null;
+/** THE HANDED ENV, JUDGED (B-ba47 pick B, 主开发 r1139 — never the source's forms): every name of `env` that is NOT in
+ *  `started` (what the handing process was itself started with) — a name it ADDED, by whatever road — and that is neither a
+ *  row nor a named NOT. HOME and PATH are the re-home's own (built). Sorted. */
+function unruledNames(env = {}, started = {}, { rows = ENV_ROWS, not = ENV_NOT } = {}) {
+  return Object.keys(env || {}).filter((k) => !Object.prototype.hasOwnProperty.call(started || {}, k) && k !== 'HOME' && k !== 'PATH' && !rowOf(k, rows) && !notRow(k, not)).sort();
+}
 const rowOf = (k, rows = ENV_ROWS) => rows.find((x) => x.name === k) || rows.filter((x) => x.prefix && k.startsWith(x.prefix)).sort((a, b) => b.prefix.length - a.prefix.length)[0] || null;
 /** THE THREE WAYS (主开发 01:18Z / 01:23Z): the absolute path `p` lands where the kernel walks it (going ON past a missing
  *  part), where a program that folds parent steps by spelling lands it, and its PARENT folder (where a write in it lands)
@@ -296,4 +303,4 @@ function rehomeEnv(env, { oldHome, oldHomes = [], newHome, binDir, platform = 'l
   return { env: out, carried: carried.sort(), notCarriedNames, dropped: notCarriedNames.map((x) => x.name), notCarried, pathDropped: notCarried.length, handedPath: handedPath.filter(Boolean), binDir: bin, unset, own: own.sort(), ownPath };
 }
 
-module.exports = { XDG_BASE, SYSTEM_PATHS, TOOL_ROWS, AGENT_CLIS, ENV_ROWS, ENV_NOT, SHAPES, tempRootOf, suiteRehome, hubRehome, cleanPath, walk, noLinks, homeKeys, judgePath, binLinks, rehomeEnv };
+module.exports = { XDG_BASE, SYSTEM_PATHS, TOOL_ROWS, AGENT_CLIS, ENV_ROWS, ENV_NOT, SHAPES, unruledNames, tempRootOf, suiteRehome, hubRehome, cleanPath, walk, noLinks, homeKeys, judgePath, binLinks, rehomeEnv };
