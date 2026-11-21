@@ -63,6 +63,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { frontState, becameFront, frontShot, bringTab } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1354)
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const VNC_ENV = await vncEnv();
 const require = createRequire(import.meta.url);
 
@@ -1163,7 +1164,7 @@ console.log('(u) a file by itself from the reply box; a proposal carrying a file
     const s = await pg.cdp('DOM.setFileInputFiles', { files: [file], objectId: oid });
     return !s.error;
   };
-  const until = async (pg, expr, fn, n = 80) => { let v = null; for (let i = 0; i < n; i++) { v = await pg.evaljs(expr); if (fn(v)) break; await sleep(100); } return v; };
+  const until = async (pg, expr, fn, n = 80) => { let v = null; for (let i = 0; i < n; i++) { v = await pg.evaljs(expr); if (fn(v)) break; await sleep(100); } return fn(v) ? v : markTimedOut(v, n * 100, 'until (its test)'); };   // a wait that runs out says so (r1372; test-ci-gate §2p)
   const legs = async (pg, label, press, { approve = false, maximize = false } = {}) => {
     // ① the ops room (send as you): a file by itself
     const tf = `files-${label}`;
