@@ -25,6 +25,15 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { WebSocketServer, WebSocket } = require(path.join(REPO, 'node_modules/ws'));
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const quiet = { log: () => { }, warn: () => { } };
 
@@ -158,7 +167,7 @@ try {
     const from = '      for (const [e, f] of listeners) httpsServer.on(e, f);\n';
     ok(src.includes(from), 'the control\'s anchor is in the module');
     const cp = path.join(DIR, 'tls-control.js');
-    fs.writeFileSync(cp, src.replace(from, '').replace("require('../tls-plan.js')", JSON.stringify(path.join(REPO, 'src/tls-plan.js')).replace(/^/, 'require(') + ')'));
+    fs.writeFileSync(cp, editAnchor(editAnchor(src, from, '', "src/server/tls.js"), "require('../tls-plan.js')", JSON.stringify(path.join(REPO, 'src/tls-plan.js')).replace(/^/, 'require(') + ')', "src/server/tls.js"));
     const M = require(cp);
     const r5 = rig(M, { env: {}, dataDir: path.join(DIR, 'd5'), run: mkRun({ listed: true }).run });
     const p5 = await listen(r5.hub); closers.push(r5.hub.front);
@@ -221,7 +230,7 @@ try {
     const from = 'function acceptAs(server, socket) {\n';
     ok(src.includes(from), 'the control\'s anchor is in the module');
     const cp = path.join(DIR, 'tls-control-bare.js');
-    fs.writeFileSync(cp, src.replace(from, from + '  return; // CONTROL: the bare front\n').replace("require('../tls-plan.js')", JSON.stringify(path.join(REPO, 'src/tls-plan.js')).replace(/^/, 'require(') + ')'));
+    fs.writeFileSync(cp, editAnchor(editAnchor(src, from, from + '  return; // CONTROL: the bare front\n', "src/server/tls.js"), "require('../tls-plan.js')", JSON.stringify(path.join(REPO, 'src/tls-plan.js')).replace(/^/, 'require(') + ')', "src/server/tls.js"));
     const bare = await order(require(cp));
     ok(bare.seen !== plain.seen && bare.seen.startsWith('push,answer') && Math.min(...bare.ms) >= 30, `CONTROL the bare front (Nagle on): the body waits for the delayed ACK, the push overtakes the answer — RED (${bare.seen}; ${bare.ms.join('/')} ms)`);
   }

@@ -32,6 +32,15 @@ const ok = (name, cond, detail) => {
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const T = require(path.join(REPO, 'src/voice-teach.js'));
 const VM = require(path.join(REPO, 'src/voice-model.js'));
 const ENGINE = path.join(REPO, 'src/server/voice-teach-engine.js');
@@ -216,8 +225,8 @@ console.log('③ RED controls (schedule copies)');
     const a1 = "  return { ...none, propose: top.map((c) => c.term), pick: top.filter((c) => c.pick).map((c) => c.term), below: rest.slice(top.length).map((c) => [c.term, Number(c.seen) || 0]), why: null };";
     const a2 = "  if (!last || last.declined) return { act: 'preview', why: null };";
     ok('CONTROL anchors apply once each', src.split(a1).length === 2 && src.split(a2).length === 2);
-    fs.writeFileSync(path.join(dir, 'm1.js'), src.replace(a1, "  return { ...none, auto: top.map((c) => c.term), why: null };"));
-    fs.writeFileSync(path.join(dir, 'm2.js'), src.replace(a2, "  if (!last || last.declined) return { act: 'send', why: null };"));
+    fs.writeFileSync(path.join(dir, 'm1.js'), editAnchor(src, a1, "  return { ...none, auto: top.map((c) => c.term), why: null };", "src/voice-teach.js"));
+    fs.writeFileSync(path.join(dir, 'm2.js'), editAnchor(src, a2, "  if (!last || last.declined) return { act: 'send', why: null };", "src/voice-teach.js"));
     const m1 = require(path.join(dir, 'm1.js')), m2 = require(path.join(dir, 'm2.js'));
     const r1 = rig(ENGINE, { settings: { teach: true }, model: m1 });
     const o1 = await r1.E.seen(seenArgs());

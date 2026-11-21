@@ -50,6 +50,15 @@ const DOOR = require(path.join(REPO, 'src/server/vault-run-door.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const ROOT = scratch('vault-routes');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 const PW = 'second password for the routes';
@@ -737,7 +746,7 @@ console.log('⑭ A SLOW DOOR NAMES ITSELF (lane vault-slow-load): one line above
   vS.unlock = async (...a) => { await new Promise((r) => setTimeout(r, 320)); return realUnlock(...a); };   // the door is the subject: an engine 320 ms slow
   const MUT = path.join(ROOT, 'vault-routes-untimed.js');
   const src = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8');
-  const untimed = src.replace(/\n  app\.use\(\['\/api\/vault', '\/api\/agent\/vault'\][\s\S]*?\n  \}\);/, '');
+  const untimed = editAnchor(src, /\n  app\.use\(\['\/api\/vault', '\/api\/agent\/vault'\][\s\S]*?\n  \}\);/, '', "src/routes/vault.js");
   ok(untimed !== src, 'CONTROL premise: the timer is cut out of the copy');
   fs.writeFileSync(MUT, at('src/routes/vault.js')(untimed));
   const drive = async (mod, opts = {}) => {

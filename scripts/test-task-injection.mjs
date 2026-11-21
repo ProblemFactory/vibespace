@@ -40,6 +40,15 @@ function ok(cond, name, extra) {
   failed++;
   console.log(`  ✗ ${name}${extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : ''}`);
 }
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const W = require('../src/when-words.js');
 const TW = require('../src/tray-words.js');
@@ -345,9 +354,9 @@ console.log('§10 RED CONTROLS — the pre-fix renders fail the judges above');
   SET['instance.timezone'] = 'America/Los_Angeles';
   const M = mutantCopies('task-injection', REPO);
   const tg = read('src/task-groups.js');
-  const pre = tg.replace('  _tsShort(ms, now = null) { return OF.when(ms, { now }); }', "  _tsShort(ms) { return new Date(ms).toISOString().slice(0, 16).replace('T', ' '); }")
-    .replace('      `- Updated: ${ts(t.updatedAt)}`,', '      `- Updated: ${ts(t.updatedAt)} UTC`,')
-    .replace(' The state below is shared across ALL sessions of this group. ${OF.zoneSentence(now)}`,', ' The state below is shared across ALL sessions of this group.`,');
+  const pre = editAnchor(editAnchor(editAnchor(tg, '  _tsShort(ms, now = null) { return OF.when(ms, { now }); }', "  _tsShort(ms) { return new Date(ms).toISOString().slice(0, 16).replace('T', ' '); }", "src/task-groups.js"),
+    '      `- Updated: ${ts(t.updatedAt)}`,', '      `- Updated: ${ts(t.updatedAt)} UTC`,', "src/task-groups.js"),
+    ' The state below is shared across ALL sessions of this group. ${OF.zoneSentence(now)}`,', ' The state below is shared across ALL sessions of this group.`,', "src/task-groups.js");
   ok(pre !== tg && (pre.match(/OF\.zoneSentence/g) || []).length === (tg.match(/OF\.zoneSentence/g) || []).length - 1, '(the patch applied: the pre-fix formatter, the « UTC» Updated line, no sentence)');
   const { TaskGroupManager: PreTG } = M.load('src/task-groups.js', pre, 'pre-utc');
   const b = mk(PreTG, 'Fleet');

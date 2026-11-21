@@ -58,6 +58,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const acorn = require('acorn');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(path.join(dir, d.name)) : d.name.endsWith('.js') ? [path.join(dir, d.name)] : []));
 const tree = new Map(walk(path.join(REPO, 'src')).filter((f) => !f.includes(`${path.sep}lib${path.sep}i18n-`)).map((f) => [path.relative(REPO, f), fs.readFileSync(f, 'utf8')]));
@@ -798,7 +807,7 @@ console.log('⑩ THE AGY LOGIN FILE (lane agy-subagent-cards): the subagent read
   // RED: the ONE gate (src/agy-store-fs.js) as a copy that follows links — the wrapper (unchanged) and the hub both leak
   const gate = read('src/agy-store-fs.js');
   const cut1 = "      if (fs.realpathSync(abs) !== want) { log(`store ${why} refused (a link in the store): ${rel}`); return null; }\n", cut2 = ' | (fs.constants.O_NOFOLLOW || 0)';
-  fs.writeFileSync(path.join(ROOT10, 'src', 'agy-store-fs.js'), gate.replace(cut1, '').replace(cut2, ''));
+  fs.writeFileSync(path.join(ROOT10, 'src', 'agy-store-fs.js'), editAnchor(editAnchor(gate, cut1, '', "src/agy-store-fs.js"), cut2, '', "src/agy-store-fs.js", 'first'));
   const mutated = path.join(ROOT10, 'data', 'bin', 'agy-wrapper.js');
   fs.copyFileSync(path.join(REPO, 'data/bin/agy-wrapper.js'), mutated);
   const red = await run('red', mutated);
@@ -939,7 +948,7 @@ console.log('⑫ lane browser-login (r22 pivot): A WEB LOGIN IS A VAULT ENTRY, I
       'THE USE LAW: every fill is ONE vault-use line through the engine\'s noteUse (the entry, door browser-login, the conversation, the purpose, outcome filled/generated-and-filled, a receipt — the closed key set), never a password', lines.map((l) => [l.entry, l.purpose, l.outcome]));
     // MUTANT: a watch copy that answers the value, a route copy that passes the answer on
     const dsrc = read('src/server/browser-dialogs.js'), rsrc = read('src/routes/browser.js');
-    const leakD = dsrc.replace("        resolved.value = '';\n", '').replace('      receipt,\n    };', '      value: resolved.value,\n      receipt,\n    };');
+    const leakD = editAnchor(editAnchor(dsrc, "        resolved.value = '';\n", '', "src/server/browser-dialogs.js"), '      receipt,\n    };', '      value: resolved.value,\n      receipt,\n    };', "src/server/browser-dialogs.js");
     const leakR = rsrc.replace("    res.json({\n      ok: true,\n      entry: r.entry,", "    res.json({\n      ...r,\n      ok: true,\n      entry: r.entry,");
     ok(leakD !== dsrc && leakR !== rsrc, 'the two mutation anchors are found (the watch\'s answer, the route\'s named fields)');
     const DL = MUT.load('src/server/browser-dialogs.js', leakD, 'leakwatch');

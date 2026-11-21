@@ -20,6 +20,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
 const MM = require(path.join(REPO, 'src/message-manager.js'));
@@ -421,7 +430,7 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
   ok('the three patch sites exist (a control is meaningful only if its line does)', mmSrc.includes(handled) && mmSrc.includes(branch) && mmSrc.includes(fold));
   const live = (MMx, recs) => { const x = new MMx.MessageManager('test-stop-ctl'); recs.forEach((r) => x.processLive(r)); return x; };
   const hist = (MMx, recs) => { const x = new MMx.MessageManager('test-stop-ctl-h'); x.convertHistory(recs); return x; };
-  const noHandle = require(M.write('src/message-manager.js', mmSrc.replace(handled, '').replace(branch, '    if (false) {'), 'no-handler'));
+  const noHandle = require(M.write('src/message-manager.js', editAnchor(editAnchor(mmSrc, handled, '', "src/message-manager.js"), branch, '    if (false) {', "src/message-manager.js"), 'no-handler'));
   const a = live(noHandle, [stAsk('m0'), stNotice('m1')]);
   ok('CONTROL: without the handler the notice is the red Unknown-event card again (the owner\'s report)', cards(a).length === 1 && cards(a)[0].content[0].name === 'informational' && stops(a).length === 0, a.messages.map((m) => m.noticeKind));
   const noFold = require(M.write('src/message-manager.js', mmSrc.replace(fold, '        if (false) {'), 'no-fold'));

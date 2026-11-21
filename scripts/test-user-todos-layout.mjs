@@ -38,6 +38,15 @@ process.env.TZ = 'America/Los_Angeles';
 const { openLayout, nextLayout, entriesFor } = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), `${m} (${JSON.stringify(a)})`);
 const css0 = () => fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
 const it = (id, sessionKey, extra = {}) => ({ id, sessionKey, text: id, urgency: 'normal', createdAt: 1, ...extra });
@@ -1244,8 +1253,8 @@ console.log('lane-pairing naive-user N-ask: an exit ask\'s Allow / Deny are thei
     ok(!done.inBar && !done.ownLine, 'an exit item without an askId (nothing left to answer) draws no Allow / Deny', done);
     // CONTROL: the pre-fix renderer (the two buttons back in actionBtnHtml, the answer line gone)
     const src = fs.readFileSync(path.join(ROOT, REL), 'utf8');
-    const pre = src.replace("  ? `<button class=\"ut-act ut-action-reset\" aria-label=\"${escHtml(t('Use a reset credit…'))}\" data-label=\"${escHtml(t('Use a reset credit…'))}\">${UI_ICONS.refresh || ''}</button>` : '');", "  ? `<button class=\"ut-act ut-action-reset\" aria-label=\"${escHtml(t('Use a reset credit…'))}\" data-label=\"${escHtml(t('Use a reset credit…'))}\">${UI_ICONS.refresh || ''}</button>` : i && i.action && i.action.type === 'exit-run-ask' && i.action.askId ? `<button type=\"button\" class=\"ut-act ut-action-exit ut-exit-allow\" data-answer=\"allow\">${escHtml(t('Allow'))}</button><button type=\"button\" class=\"ut-act ut-action-exit ut-exit-deny\" data-answer=\"deny\">${escHtml(t('Deny'))}</button>` : '');")
-      .replace("    + (i.action.askId ? `<div class=\"ut-exit-answer\">", "    + (false ? `<div class=\"ut-exit-answer\">");
+    const pre = editAnchor(editAnchor(src, "  ? `<button class=\"ut-act ut-action-reset\" aria-label=\"${escHtml(t('Use a reset credit…'))}\" data-label=\"${escHtml(t('Use a reset credit…'))}\">${UI_ICONS.refresh || ''}</button>` : '');", "  ? `<button class=\"ut-act ut-action-reset\" aria-label=\"${escHtml(t('Use a reset credit…'))}\" data-label=\"${escHtml(t('Use a reset credit…'))}\">${UI_ICONS.refresh || ''}</button>` : i && i.action && i.action.type === 'exit-run-ask' && i.action.askId ? `<button type=\"button\" class=\"ut-act ut-action-exit ut-exit-allow\" data-answer=\"allow\">${escHtml(t('Allow'))}</button><button type=\"button\" class=\"ut-act ut-action-exit ut-exit-deny\" data-answer=\"deny\">${escHtml(t('Deny'))}</button>` : '');", "src/lib/user-todos-row.js"),
+      "    + (i.action.askId ? `<div class=\"ut-exit-answer\">", "    + (false ? `<div class=\"ut-exit-answer\">", "src/lib/user-todos-row.js");
     ok(pre !== src && pre.split('ut-exit-allow').length === 3, 'CONTROL (N-ask): the patch applies (both halves)');
     const M = mutantCopies('utrow', ROOT);
     const Rp = await import(pathToFileURL(M.write(REL, pre, 'prefix')).href);
@@ -1269,7 +1278,7 @@ console.log('lane-pairing naive-user N-ask: an exit ask\'s Allow / Deny are thei
     const rule = (cssSrc.match(/\n\.ut-exit-cmd \{[^}]*\}/) || [''])[0];
     ok(/white-space: pre-wrap/.test(rule) && !/max-height|overflow(-[xy])?:/.test(rule.replace(/\/\*[\s\S]*?\*\//g, '')), 'F4: the box keeps line breaks and shows ALL of the command — no max-height, no overflow rule (pre-fix: 4.5em, overflow hidden; an inner scroll box hides the rest behind a macOS overlay scrollbar)', rule);
     // CONTROL (F4): the pre-fix renderer (action.cmd in a clipped div, the detail folded below)
-    const preF4 = src.replace("  ? `<pre class=\"ut-exit-cmd\">${escHtml(exitCmdOf(i))}</pre>`", "  ? `<div class=\"ut-exit-cmd\">${escHtml(String(i.action.cmd || ''))}</div>`").replace("const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ?", 'const detailHtml = detail ?');
+    const preF4 = editAnchor(editAnchor(src, "  ? `<pre class=\"ut-exit-cmd\">${escHtml(exitCmdOf(i))}</pre>`", "  ? `<div class=\"ut-exit-cmd\">${escHtml(String(i.action.cmd || ''))}</div>`", "src/lib/user-todos-row.js"), "const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ?", 'const detailHtml = detail ?', "src/lib/user-todos-row.js");
     ok(preF4 !== src && preF4.split('String(i.action.cmd || \'\')').length === 2, 'CONTROL (F4): the patch applies (both halves)');
     const Rf4 = await import(pathToFileURL(M.write(REL, preF4, 'prefixf4')).href);
     const hP = Rf4.renderRow(long, ctxD).innerHTML;
@@ -1825,7 +1834,7 @@ console.log('㉔ A BUTTON NAMED FOR AN ACTION PERFORMS IT (lane controls-that-li
     ok(vDone.grant === null, 'a cleared grant item draws no grant button (its words are gone; nothing to read before a press)');
     const src = fs.readFileSync(path.join(ROOT, REL), 'utf8');
     // int346: lane vault-paste-request's `+ secretAskHtml(i, t, detail)` follows the grant's call on the same line — the patch drops the call alone
-    const pre = src.replace('aria-label="${escHtml(optionWords(o, t))}" title="${escHtml(optionWords(o, t))}"', 'aria-label="${escHtml(o)}" title="${escHtml(o)}"').replace(' + grantAskHtml(i, t)', ''); // the pill NAMED by its raw label (pick 0: its face is its words either way)
+    const pre = editAnchor(editAnchor(src, 'aria-label="${escHtml(optionWords(o, t))}" title="${escHtml(optionWords(o, t))}"', 'aria-label="${escHtml(o)}" title="${escHtml(o)}"', "src/lib/user-todos-row.js"), ' + grantAskHtml(i, t)', '', "src/lib/user-todos-row.js"); // the pill NAMED by its raw label (pick 0: its face is its words either way)
     ok(pre !== src && pre.split('grantAskHtml(i, t)').length === 1, 'CONTROL: the patch applies (the raw chip label, no grant button — the 2.369.344 row)');
     const M = mutantCopies('utgrant', ROOT);
     const Rp = await import(pathToFileURL(M.write(REL, pre, 'prefix')).href);
@@ -2388,7 +2397,7 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
     const R = await import(pathToFileURL(path.join(ROOT, REL)).href);
     const g = await tick(R);
     const src = fs.readFileSync(path.join(ROOT, REL), 'utf8');
-    const pre = src.replace(".replace(/<span class=\"ut-(age|exp)\">[^<]*<\\/span>/g, '<span class=\"ut-$1\"></span>');", ';');
+    const pre = editAnchor(src, ".replace(/<span class=\"ut-(age|exp)\">[^<]*<\\/span>/g, '<span class=\"ut-$1\"></span>');", ';', "src/lib/user-todos-row.js");
     const Rp = await import(pathToFileURL(mutantCopies('utrow14', ROOT).write(REL, pre, 'agesig')).href);
     const gm = await tick(Rp);
     ok(g.rebuilt === 0 && /^3min ago/.test(g.age), `RED-able (r14 — 5b4b36649: the signature carried the age, «3min ago» rebuilt the row and its buttons): a minute on, the SAME row — no rebuild (${g.rebuilt} innerHTML writes), its age written in place («${g.age}»); the buttons are the nodes the press arm stamped`, g);

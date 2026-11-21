@@ -72,6 +72,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const R = (rel) => require(path.join(REPO, rel));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const VE = R('src/server/vault-engine.js');
 const DOOR = R('src/server/vault-run-door.js');
@@ -1480,7 +1489,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     // the OFF half takes BOTH guards away: the first-end guard AND the list's «an OFF after the approval is the owner's news» —
     // either alone keeps the OFF from reading as «ran out» (the restack's tb run showed the one-guard mutant listing nothing there)
     const f0 = " && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && (offAt.get(e.id) || 0) >= e.grantAt)";
-    const mf2 = SRCf.split(g0).length === 2 && SRCf.split(f0).length === 2 ? M.load('src/server/vault-run-door.js', anchored(SRCf.replace(g0, '').replace(f0, ''), "      if (offAt.has(id) && (offAt.get(id) || 0) >= (Number(g.at) || 0)) continue;", '', 'test-vault-run B-a14b: no OFF skip at the record'), 'firstend-off') : null;   // B-a14b: the OFF after the approval is skipped at the RECORD too now — the third guard taken away with the two
+    const mf2 = SRCf.split(g0).length === 2 && SRCf.split(f0).length === 2 ? M.load('src/server/vault-run-door.js', anchored(editAnchor(editAnchor(SRCf, g0, '', "src/server/vault-run-door.js"), f0, '', "src/server/vault-run-door.js"), "      if (offAt.has(id) && (offAt.get(id) || 0) >= (Number(g.at) || 0)) continue;", '', 'test-vault-run B-a14b: no OFF skip at the record'), 'firstend-off') : null;   // B-a14b: the OFF after the approval is skipped at the RECORD too now — the third guard taken away with the two
     const fr2 = mf2 ? await firstEnd(mf2) : null;
     ok(!!(mf2 && fr2 && fr2.offList === 1), 'RED control: no first-end guard AND no «an OFF after the approval» filter ⇒ the timer\'s «its 8 hours ran out» is listed over the owner\'s OFF', fr2);
     // B-a14b (主开发 r542) 1: a ONCE-grant a run SPENT and still runs on when its 8 hours end ⇒ its end is «used» (the run took it),
