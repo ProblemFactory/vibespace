@@ -25,7 +25,7 @@
 //     src/interface/relay.js DECLARED, by name — or the same refusal by Node; the door class at the interface's end equals
 //     the hub's; a head inside a body opens no channel; the interface answers after every case. RED CONTROLS: a forwarder
 //     that joins duplicate lines; one that re-encodes the target; the channel socket left to Node's Expect flush (UTF-8).
-//   ⑧ EVERY CLOCK ON A PAGE SOCKET IS THE INTERFACE'S (leg 8, its framing half): each named clock is no shorter than the
+//   ⑧ (MOVED to scripts/test-interface-backpressure.mjs ④ with law 8's other legs) EVERY CLOCK ON A PAGE SOCKET IS THE INTERFACE'S: each named clock is no shorter than the
 //     plain form's, and each fires in its own case — a silent head, a slow body, an idle kept-alive connection, a head over
 //     the size bound, an upgraded socket whose channel ended; three poll-period requests of one tab ride ONE accept; a reset
 //     inside an upgrade head leaves the interface answering. RED CONTROL: the page server never told it listens ⇒ the head
@@ -216,21 +216,21 @@ console.log('— ③ IN REQUEST ORDER, AND NOTHING LEFT');
     s3.destroy(); await P3.close(); return r;
   }
   /** pipelined requests the hub holds, then the page resets: the queued answers' channels go too (r1057 item 4) */
-  async function pipelinedReset(relayMod) {
+  async function pipelinedReset(relayMod, waitMs = 2000) {
     const P5 = await pair(() => { }, { relayMod });   // a hub that answers nothing
     const s5 = await rawPage(P5.port);
     s5.write(Array.from({ length: 4 }, (_, i) => `GET /hold${i} HTTP/1.1\r\nHost: hub.example\r\n\r\n`).join(''));
     await until(() => P5.iface.stats().channels === 4 && P5.party.router.size === 4, 2000);
     const before = { channels: P5.iface.stats().channels, router: P5.party.router.size };
     s5.resetAndDestroy();
-    await until(() => P5.iface.stats().channels === 0 && P5.party.router.size === 0, 2000);
+    await until(() => P5.iface.stats().channels === 0 && P5.party.router.size === 0, waitMs);
     const r = { before, channels: P5.iface.stats().channels, router: P5.party.router.size }; await P5.close(); return r;
   }
   const pr = await pipelinedReset();
   ok(pr.before.channels === 4 && pr.channels === 0 && pr.router === 0, `four pipelined requests the hub holds, then the page resets: ${pr.before.channels} channels → ${pr.channels} in the interface, ${pr.router} in the hub's router (the three waiting their turn go with the first)`, pr);
   // (measured on the first run: Node closes a pipelined response that waits its turn when its page socket goes, so the response's own close is the one road)
   const GONE = '    const gone = () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } };';
-  const prRed = await pipelinedReset(mutant('src/interface/relay.js', GONE, '    const gone = () => { };'));
+  const prRed = await pipelinedReset(mutant('src/interface/relay.js', GONE, '    const gone = () => { };'), 200);   // read at once: nothing ends them
   ok(prRed.channels >= 4, `RED CONTROL — a response's close ends nothing: ${prRed.channels} channels of the four stay behind`, prRed);
   /** the late close of an OLD link's channel never empties the NEW link's entry of the same number (r1057 item 3) */
   const lateClose = (mod) => {
@@ -438,10 +438,14 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
     else if (bodyKind === 'chunked+trailers') { framing = 'Transfer-Encoding: chunked\r\nTrailer: X-Sum\r\n'; body = `${payload.length.toString(16)}\r\n${payload}\r\n0\r\nX-Sum: ${digest(payload)}\r\n\r\n`; }
     else if (bodyKind === 'both') { framing = `Content-Length: ${payload.length}\r\nTransfer-Encoding: chunked\r\n`; body = `${payload.length.toString(16)}\r\n${payload}\r\n0\r\n\r\n`; }
     else if (bodyKind === 'expect') { framing = `Expect: 100-continue\r\nContent-Length: ${payload.length}\r\n`; body = payload; }
-    const secure = F ? false : rnd2() < 0.15, keep = F ? false : !old && !up && rnd2() < 0.25;   // the arms: an encrypted page; a kept-alive connection with a SECOND request
     const tokens = F ? F.tokens : rnd() < 0.3;
-    const conn = up ? 'Connection: Upgrade\r\nUpgrade: websocket\r\n' : `${tokens ? 'Connection: keep-alive, X-Token\r\nX-Token: 1\r\n' : ''}${keep ? '' : 'Connection: close\r\n'}`;
     const host = F ? F.host : rnd() < 0.05 ? '' : 'Host: hub.example\r\n';
+    const hostless0 = old && !host && !hs.some(([k]) => k.toLowerCase() === 'host');
+    // the arms (a second stream): an encrypted page; a kept-alive connection with a SECOND request (an HTTP/1.0 page keeps it by
+    // saying keep-alive, which also means a 1.0 head never says keep-alive AND close: Node keeps a 1.0 connection on the token)
+    const secure = F ? false : rnd2() < 0.15, keep = F ? false : !up && !hostless0 && rnd2() < 0.25;
+    const tokenLine = old ? 'Connection: X-Token\r\nX-Token: 1\r\n' : 'Connection: keep-alive, X-Token\r\nX-Token: 1\r\n';
+    const conn = up ? 'Connection: Upgrade\r\nUpgrade: websocket\r\n' : `${tokens ? tokenLine : ''}${keep ? (old ? 'Connection: keep-alive\r\n' : '') : 'Connection: close\r\n'}`;
     const bytes = `${method} ${target} HTTP/1.${old ? 0 : 1}\r\n${host}X-Answer: ${answer}\r\n${hs.map(([k, v]) => `${k}: ${v}\r\n`).join('')}${pad}${framing}${conn}\r\n${body}` + (keep ? SECOND : '');
     const methods = keep ? [method, 'GET'] : [method];
     const hostless = old && !host && !hs.some(([k]) => k.toLowerCase() === 'host');   // DECLARED.oldHostless: the hub reads it as HTTP/1.1 with no Host
@@ -453,7 +457,7 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
     if (secure && sb.length) arms.tls++; if (keep && sb.length > 1) arms.kept++;
     const clsSame = hubSeen.slice(h0).every((x, j) => x.cls === ifaceCls[c0 + j]);
     const opened = P.iface.stats().opened - o0;
-    if (bodyKind === 'inner-head') { inner++; if (opened === sb.length && sb.length <= 1) innerOpened++; }
+    if (bodyKind === 'inner-head') { inner++; if (opened === sb.length && sb.length <= methods.length) innerOpened++; }   // one open line a head the page sent (two with the kept arm), never one for the head inside the body
     const same = hostless ? /^HTTP\/1\.1 400 /.test((vb[0] || {}).status) && sb.length === 0 && !b.timedOut   // the declared refusal, by Node at the hub
       : JSON.stringify(va) === JSON.stringify(vb) && JSON.stringify(sa) === JSON.stringify(sb) && clsSame && !a.timedOut && !b.timedOut && opened === sb.length;
     const met = (k) => { declaredSeen[k] = (declaredSeen[k] || 0) + 1; };
@@ -462,7 +466,7 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
     if (chunked && sb.length) met('chunks');
     if (answer === '1xx' && sb.length) met('informational');
     const key = `${((va[0] || {}).status || '(nothing)').split(' ').slice(0, 2).join(' ')}`; tally[key] = (tally[key] || 0) + 1;
-    if (!same) diffs.push({ i, secure, keep, bytes: bytes.slice(0, 260), plain: { view: va, seen: sa, timedOut: a.timedOut }, through: { view: vb, seen: sb, timedOut: b.timedOut, opened, cls: ifaceCls.slice(c0) } });
+    if (!same) diffs.push({ i, secure, keep, plainText: a.text.slice(0, 420), throughText: b.text.slice(0, 420), bytes: bytes.slice(0, 260), plain: { view: va, seen: sa, timedOut: a.timedOut }, through: { view: vb, seen: sb, timedOut: b.timedOut, opened, cls: ifaceCls.slice(c0) } });
     if ((await get(P.port, '/alive')).status === 200) alive++;
   }
   console.log(`    the seed ${SEED} (FRAMING_SEED replays another) · ${N} requests · their answers: ${Object.entries(tally).map(([k, v]) => `${k} ×${v}`).join(' · ')} · declared cases met: ${JSON.stringify(declaredSeen)} · the arms met: ${arms.tls} encrypted pages, ${arms.kept} kept-alive connections answered twice`);
@@ -494,58 +498,6 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
   ok(exp.differs, `RED CONTROL — the channel socket left to Node's Expect flush (no latin1): an Expect head's byte above 0x7f reaches the hub re-encoded as UTF-8 (${JSON.stringify(exp.plain && exp.plain[1][3])} → ${JSON.stringify(exp.through && exp.through[1][3])})`, exp);
   ok(enc.differs, `RED CONTROL — a forwarder that re-encodes the target: the differential differs on /p%7Eq/caf%C3%A9 (${JSON.stringify(enc.plain && enc.plain[0])} → ${JSON.stringify(enc.through && enc.through[0])})`, enc);
   await P.close(); plain.close(); plainTls.close();
-}
-
-lap('⑧ ');
-console.log('— ⑧ EVERY CLOCK ON A PAGE SOCKET IS THE INTERFACE\'S, named, and each fires in its own case');
-{
-  const names = { PAGE_HEAD_MS: FRONT.PAGE_HEAD_MS, PAGE_REQUEST_MS: FRONT.PAGE_REQUEST_MS, PAGE_IDLE_MS: FRONT.PAGE_IDLE_MS, PAGE_MAX_HEAD: FRONT.PAGE_MAX_HEAD, PAGE_CHECK_MS: FRONT.PAGE_CHECK_MS };
-  const plainForm = http.createServer();
-  ok(FRONT.PAGE_HEAD_MS >= plainForm.headersTimeout && FRONT.PAGE_REQUEST_MS >= plainForm.requestTimeout && FRONT.PAGE_IDLE_MS >= plainForm.keepAliveTimeout && FRONT.PAGE_MAX_HEAD >= http.maxHeaderSize && FRONT.PAGE_CHECK_MS <= plainForm.connectionsCheckingInterval,
-    `the named clocks ${JSON.stringify(names)} are no shorter than the plain form's (${plainForm.headersTimeout} / ${plainForm.requestTimeout} / ${plainForm.keepAliveTimeout} ms, ${http.maxHeaderSize} B; looked at every ${plainForm.connectionsCheckingInterval} ms)`);
-  plainForm.close();
-  const CLOCKS = { headMs: 150, requestMs: 300, idleMs: 150, maxHead: 2048, checkMs: 25 };   // short ones handed to the page server, each fired below
-  const firstLine = (s) => s.got.toString().split('\r\n')[0] || (s.ended ? '(closed)' : '(open)');
-  async function silentHead(frontMod) {
-    const P = await pair((req, res) => res.end('ok'), { clocks: CLOCKS, frontMod });
-    const s = await rawPage(P.port); s.write('GET / HTTP/1.1\r\nHost: hub.example\r\n');
-    await until(() => s.ended, 5 * CLOCKS.headMs);
-    const r = { line: firstLine(s), ended: s.ended, opened: P.iface.stats().opened }; s.destroy(); await P.close(); return r;
-  }
-  const head = await silentHead();
-  const P = await pair((req, res) => { req.on('data', () => { }); req.on('end', () => res.end('ok')); }, { clocks: CLOCKS });
-  const slow = await rawPage(P.port); slow.write('POST / HTTP/1.1\r\nHost: hub.example\r\nContent-Length: 100\r\n\r\nabc');
-  await until(() => slow.ended, 2500);
-  const idle = await rawPage(P.port); idle.write('GET / HTTP/1.1\r\nHost: hub.example\r\n\r\n');
-  await until(() => idle.got.includes('ok'), 1000); const answered = idle.got.length; await until(() => idle.ended, 3000);
-  const big = await rawPage(P.port); big.write(`GET / HTTP/1.1\r\nHost: hub.example\r\nX-Big: ${'b'.repeat(4096)}\r\n\r\n`);
-  await until(() => big.ended, 2000);
-  console.log(`    a silent head: «${head.line}» · a slow body: «${firstLine(slow)}» · an idle kept-alive connection: ${idle.ended ? 'closed by the interface, nothing more sent' : 'still open'} · a head over the bound: «${firstLine(big)}»`);
-  ok(/^HTTP\/1\.1 408/.test(head.line) && head.opened === 0, `the head's clock (${CLOCKS.headMs} ms here): Node's 408, no channel opened`, head);
-  ok(/^HTTP\/1\.1 408/.test(firstLine(slow)), `the whole request's clock (${CLOCKS.requestMs} ms here): a body that never comes whole is answered Node's 408`);
-  ok(idle.ended && idle.got.length === answered && /\r\nConnection: keep-alive\r\n/i.test(idle.got.toString()), `the idle clock (${CLOCKS.idleMs} ms here): a kept-alive connection (its answer said keep-alive) that sends nothing more is closed by the interface, with no byte more written`);
-  ok(/^HTTP\/1\.1 431/.test(firstLine(big)), `the head's size (${CLOCKS.maxHead} B here): Node's 431`);
-  // three poll-period requests of one tab ride ONE accept
-  let accepts = 0; const agent = new http.Agent({ keepAlive: true, maxSockets: 1 }); const cc = agent.createConnection.bind(agent); agent.createConnection = (...a) => { accepts++; return cc(...a); };
-  const before = P.iface.stats().opened;
-  for (let i = 0; i < 3; i++) { await get(P.port, `/poll${i}`, { agent }); await sleep(40); }
-  agent.destroy();
-  ok(P.iface.stats().opened - before === 3 && accepts === 1, `three poll-period requests of one tab: ${P.iface.stats().opened - before} channels over ${accepts} accept`);
-  // a reset inside an upgrade head leaves the interface answering
-  const rs = await rawPage(P.port); rs.write('GET /ws HTTP/1.1\r\nHost: hub.example\r\nConnection: Upg'); await sleep(20); rs.resetAndDestroy(); await sleep(30);
-  ok((await get(P.port, '/after')).status === 200, 'a reset inside an upgrade head: the interface answers the next page');
-  await P.close();
-  // an upgraded socket never outlives its channel
-  const P2 = await pair((req, res) => res.end('x'));
-  P2.hub.on('upgrade', (req, socket) => { socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: Upgrade\r\n\r\n'); setTimeout(() => socket.destroy(), 80); });
-  const up = await rawPage(P2.port); up.write('GET /ws HTTP/1.1\r\nHost: hub.example\r\nConnection: Upgrade\r\nUpgrade: x\r\n\r\n');
-  await until(() => up.ended, 3000);
-  ok(/^HTTP\/1\.1 101/.test(firstLine(up)) && up.ended && P2.iface.stats().channels === 0, `an upgraded socket whose channel ended is closed with it («${firstLine(up)}», then closed: ${up.ended})`);
-  await P2.close();
-  // RED CONTROL: the page server never told it listens ⇒ Node never looks at the head and request clocks
-  const deaf = mutant('src/interface/front.js', "  pages.emit('listening');\n", '');
-  const red = await silentHead(deaf);
-  ok(!red.ended, `RED CONTROL — the page server never told it listens: the silent head is still open after five times its clock («${red.line}»)`, red);
 }
 
 lap('⑨ ');

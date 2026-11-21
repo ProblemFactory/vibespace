@@ -32,6 +32,9 @@ const PAGE_REQUEST_MS = 300000; // a whole request, head and body, in this long 
 const PAGE_IDLE_MS = 5000;      // a kept-alive page connection idle this long between requests is closed (the plain form's keepAliveTimeout)
 const PAGE_MAX_HEAD = 16384;    // a head larger than this is refused with Node's 431 (the plain form's: Node's maxHeaderSize)
 const PAGE_CHECK_MS = 30000;    // how often Node looks for a head or a request past its clock (the plain form's: Node's connectionsCheckingInterval)
+const REFUSAL_LINGER_MS = 2000; // a head Node refuses: its page socket goes once the refusal is written, or after this long (the plain form destroys at once)
+/** Node's own words for a head it refuses (lib/_http_server.js socketOnError, the same on 22 and 24): its code by the parser's */
+const REFUSED = { HPE_HEADER_OVERFLOW: 431, HPE_CHUNK_EXTENSIONS_OVERFLOW: 413, ERR_HTTP_REQUEST_TIMEOUT: 408 };
 const FACTS = Symbol('page facts');   // what this process alone knows of a page socket: { secure, addr, port }
 
 /** the options a page socket gets here — the ONE place (the law's leg reads it) */
@@ -58,6 +61,16 @@ function create({ onExchange, onUpgrade, firstByteMs: fb, handshakeMs: hb, clock
   pages.on('request', (req, res) => onExchange(req, res, factsOf(req)));
   pages.on('checkContinue', (req, res) => onExchange(req, res, factsOf(req)));   // Expect: 100-continue goes to the owner, whose 100 (or answer) comes back
   pages.on('upgrade', (req, socket, head) => onUpgrade(req, socket, head, factsOf(req)));
+  // A HEAD NODE REFUSES (a bad head, one over the bound, a clock run out) is answered with Node's own words, as the plain form
+  // answers it. But the page socket goes only once they are WRITTEN: Node's default destroys at once, and a TLS page's socket
+  // rides a JS stream (its first byte was read here to choose TLS), so the refusal was still on its way and the page got
+  // nothing (test-interface-framing ⑥ found it on a TLS head over the bound).
+  pages.on('clientError', (err, socket) => {
+    if (!socket.writable || (socket._httpMessage && socket._httpMessage._headerSent)) { socket.destroy(); return; }   // Node's own test: an answer under way is never corrupted
+    const code = REFUSED[err && err.code] || 400;
+    const t = setTimeout(() => socket.destroy(), REFUSAL_LINGER_MS); t.unref?.();
+    socket.end(`HTTP/1.1 ${code} ${http.STATUS_CODES[code]}\r\nConnection: close\r\n\r\n`, 'ascii', () => { clearTimeout(t); socket.destroy(); });
+  });
   const onPage = (socket, facts) => { socket[FACTS] = facts; pages.emit('connection', socket); };
   let tlsServer = null, live = false, acceptErrors = 0, lastAcceptError = null;
   const sockets = new Set();   // every accepted socket until it closes — a close of the listener ends them (a half-open page never holds it)
@@ -100,4 +113,4 @@ function create({ onExchange, onUpgrade, firstByteMs: fb, handshakeMs: hb, clock
   return { server, pages, useCertificate, close, serving: () => live, acceptErrors: () => ({ count: acceptErrors, last: lastAcceptError }) };
 }
 
-module.exports = { create, pageSocket, FIRST_BYTE_MS, HANDSHAKE_MS, PAGE_HEAD_MS, PAGE_REQUEST_MS, PAGE_IDLE_MS, PAGE_MAX_HEAD, PAGE_CHECK_MS };
+module.exports = { create, pageSocket, FIRST_BYTE_MS, HANDSHAKE_MS, PAGE_HEAD_MS, PAGE_REQUEST_MS, PAGE_IDLE_MS, PAGE_MAX_HEAD, PAGE_CHECK_MS, REFUSAL_LINGER_MS };
