@@ -47,6 +47,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, vncEnv, endRootedProcesses, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -223,9 +224,7 @@ const settle = async (id, ms = 10000) => {
   }
   // A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): a picture that never held still is SAID here, right above the judge
   // that reads it, and answered MARKED — so its red reads «the state never came», never a verdict on the product
-  const m = await ev(MEAS(id));
-  console.log(`    (settle: the picture of ${id} did not hold still for 1.5 s within ${ms / 1000} s — THE STATE NEVER CAME; its last read ${JSON.stringify(m && { win: m.win, pic: m.pic }).slice(0, 200)})`);
-  return { ...(m || {}), timedOut: `the picture did not hold still for 1.5 s within ${ms / 1000} s` };
+  return markTimedOut(await ev(MEAS(id)), ms, `settle (the picture of ${id} held still for 1.5 s)`);   // a null (the window gone) stays a null
 };
 const ensureActive = async (id) => {
   const seat = () => ev(`(() => { const w = ${FIND(id)}; if (!w) return null; const s = w._desktopSeats || {}; return { known: !!s.known, active: s.active, pane: w._desktopPaneKey }; })()`);

@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser, CHROME_QUIET } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
+import { markTimedOut, never } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));
@@ -182,8 +183,7 @@ const toasts = () => evalJs(`[...document.querySelectorAll('.global-toast, .toas
 const menuLabels = () => evalJs(`[...document.querySelectorAll('.context-menu')].filter(${VISIBLE}).pop() ? [...[...document.querySelectorAll('.context-menu')].filter(${VISIBLE}).pop().querySelectorAll('.context-menu-item, [role=menuitem], .ctx-item')].map((i) => i.textContent.trim()).filter(Boolean) : []`);
 // A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): the open menu's labels, MARKED when no menu came — the judge says
 // that by name («the state never came»), never «the menu says something else»
-const menuWhenUp = async (tries) => { for (let i = 0; i < tries; i++) { const l = await menuLabels(); if (l.length) return l; await sleep(100); } return Object.assign(await menuLabels(), { timedOut: `no menu came in ${(tries * 100) / 1000} s` }); };
-const never = (got) => (got && got.timedOut ? ` — THE STATE NEVER CAME: ${got.timedOut}, so this red is that, not a verdict on the product` : '');
+const menuWhenUp = async (tries) => { for (let i = 0; i < tries; i++) { const l = await menuLabels(); if (l.length) return l; await sleep(100); } return markTimedOut(await menuLabels(), tries * 100, 'menuWhenUp (a menu open)'); };
 
 try {
   console.log('① a scratch hub of this tree, the page in zh: three live conversations, two ended ones, two desktops');

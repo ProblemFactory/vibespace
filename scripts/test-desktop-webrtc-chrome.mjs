@@ -114,6 +114,7 @@ import { writeFakeFfmpeg, factsLine, calibrationFrame } from './fixtures/stream/
 import { writeFakeWgc, writeFakeCsc } from './fixtures/stream/window-fakes.mjs';
 import { writeFakeMic, winFacts, toneRatio, writeFakeDecoder, pcmPages, realFfmpeg } from './fixtures/stream/mic-fakes.mjs'; // lane stream-mic-road ⑰: the machine's microphone, a fake sink
 import { writeFakeEncoder, hasOpusFfmpeg } from './fixtures/stream/sound-fakes.mjs'; // lane speaker-passthrough-v1 ⑳: a box without ffmpeg (the Actions runner) encodes with the fake
+import { markTimedOut, never } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -409,8 +410,7 @@ const sessions = async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/d
 const linesSince = (n) => psLines().slice(n);
 // A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): the input lines that came, MARKED when the awaited one never did —
 // its caller's judge says that by name («the state never came»), never a verdict on the product
-const linesUntil = async (n0, want, tries) => { for (let i = 0; i < tries; i++) { const l = linesSince(n0); if (l.includes(want)) return l; await sleep(100); } return Object.assign(linesSince(n0), { timedOut: `«${want}» never came in ${(tries * 100) / 1000} s` }); };
-const never = (got) => (got && got.timedOut ? ` — THE STATE NEVER CAME: ${got.timedOut}, so this red is that, not a verdict on the product` : '');
+const linesUntil = async (n0, want, tries) => { for (let i = 0; i < tries; i++) { const l = linesSince(n0); if (l.includes(want)) return l; await sleep(100); } return markTimedOut(linesSince(n0), tries * 100, `linesUntil «${want}»`); };
 // ⑦: the firewall notice's copy button — where it is (ahead of the numbers? wholly inside the strip's visible box? the topmost
 // element at its centre?), then a click at its centre with the page's clipboard stubbed
 const FW_RULE = `netsh advfirewall firewall add rule name="VibeSpace agent" dir=in action=allow program="${NODE_EXE}" protocol=UDP`;

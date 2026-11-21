@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser, CHROME_STORE, relayBroadcastJs, CHROME_QUIET } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
+import { markTimedOut, never } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));
@@ -104,8 +105,7 @@ const focusOf = (key) => evalJs(`(() => { const rows = [...document.querySelecto
   return { found: true, inView: r.height > 0 && r.top >= s.top - 1 && r.bottom <= s.bottom + 1, marked: row.classList.contains('settings-row-focus'), section: sec ? sec.dataset.category : null, sections: others, windows: document.querySelectorAll('.settings-content').length, advSwitch: localStorage.getItem('vibespace.settingsAdvanced') }; })()`);
 // A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): the row's focus facts, MARKED when its row never came into view — the
 // judge says that by name, never «the row is not marked» as a verdict on the product
-const focusWhenIn = async (key) => { for (let i = 0; i < 40; i++) { const f = await focusOf(key); if (f.found && f.inView) return f; await sleep(150); } return { ...(await focusOf(key)), timedOut: `its row was not found in view in ${(40 * 150) / 1000} s` }; };
-const never = (got) => (got && got.timedOut ? ` — THE STATE NEVER CAME: ${got.timedOut}, so this red is that, not a verdict on the product` : '');
+const focusWhenIn = async (key) => { for (let i = 0; i < 40; i++) { const f = await focusOf(key); if (f.found && f.inView) return f; await sleep(150); } return markTimedOut(await focusOf(key), 40 * 150, 'focusWhenIn (its row found in view)'); };
 const shot = async (name) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, `${name}.png`), Buffer.from(r.data, 'base64')); console.log(`    · picture ${path.join(SHOTS, name + '.png')}`); };
 const ask = (args, token) => new Promise((resolve) => { const c = spawn(process.execPath, [path.join(wt, 'data', 'bin', 'vibespace-ask'), ...args], { env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: token } }); let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); c.on('close', (code) => resolve({ code, out })); });
 

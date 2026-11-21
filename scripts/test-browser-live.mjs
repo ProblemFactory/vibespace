@@ -104,6 +104,7 @@ import { createRequire } from 'node:module';
 import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { gitEnvFrom } from './git-env.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -2164,7 +2165,7 @@ await (async () => {
       const opened2 = await evaluate(`(() => { const w = window.app.openBrowserLive({ sessionId: ${JSON.stringify(created.sessionId)} }); w.gridBounds = null; return !!(w && w._browserLive); })()`);
       ok(opened2, `⑤ ${shape.name}: the live view opened`);
       const q = (js) => evaluate(`(() => { const w = [...window.app.wm.windows.values()].filter((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === ${JSON.stringify(created.sessionId)})[0]; const L = w && w._browserLive; ${js} })()`);
-      const live = await (async () => { for (let i = 0; i < 150; i++) { const st = await q('const g = L && L.geometry(); return L ? { frames: L.state().frames, nat: L.img().naturalWidth, src: g && g.source } : null'); if (st && st.frames >= 1 && st.nat > 0 && st.src === 'page') return st; await sleep(200); } return { ...(await q('const g = L && L.geometry(); return L ? { frames: L.state().frames, nat: L.img().naturalWidth, src: g && g.source, err: L.state().error } : null')), timedOut: 'no frame of the page came in 30 s' }; })();   // a wait that runs out says so (主开发 r1141; test-ci-gate §2p)
+      const live = await (async () => { for (let i = 0; i < 150; i++) { const st = await q('const g = L && L.geometry(); return L ? { frames: L.state().frames, nat: L.img().naturalWidth, src: g && g.source } : null'); if (st && st.frames >= 1 && st.nat > 0 && st.src === 'page') return st; await sleep(200); } return markTimedOut(await q('const g = L && L.geometry(); return L ? { frames: L.state().frames, nat: L.img().naturalWidth, src: g && g.source, err: L.state().error } : null'), 150 * 200, '⑤ the frames of the page'); })();   // a wait that runs out says so (主开发 r1141; test-ci-gate §2p)
       if (!ok(live && live.frames >= 1 && live.src === 'page', `⑤ ${shape.name}: frames drawn and the page's own viewport read (geometry source "${live && live.src}")${live && live.timedOut ? ` — THE STATE NEVER CAME: ${live.timedOut}, so this red is that, not a verdict on the product` : ''}`, JSON.stringify(live))) continue;
       const geo0 = await q('return { g: L.geometry(), claim: L.frameClaim() }');
       ok(Math.abs(geo0.g.cssW - truth.w) <= 1 && Math.abs(geo0.g.cssH - truth.h) <= 1, `⑤ ${shape.name}: the view's page size ${Math.round(geo0.g.cssW)}×${Math.round(geo0.g.cssH)} IS the page's (${truth.w}×${truth.h}); the picture is ${geo0.g.picW}×${geo0.g.picH}; the stream's metadata claims ${geo0.claim && geo0.claim.width}×${geo0.claim && geo0.claim.height}`);

@@ -40,6 +40,7 @@ import { createRequire } from 'node:module';
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 // lane grants-unify: a conversation's OWN reach rows (its access, the owner's, approved requests) are rows of THE grants store —
 // read back through the engine's reach view (the account's and a rule's derived rows left out)
 const ownRows = (eng, key) => (eng.reachView(eng.store.index.peek(key)) || { entries: [] }).entries.filter((g) => g.scope && g.scope.kind === 'conversation' && !g.derived);
@@ -2178,9 +2179,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
     for (let i = 0; i < 40; i++) { const st = eng.oauthStatus(flow.flowId); if (st.done) return st; await sleep(10); }
     // A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): a flow that never finished is MARKED and said here, so a later
     // red reads «the sign-in never finished», never a verdict on what came after it
-    const last = eng.oauthStatus(flow.flowId);
-    console.log(`    (land: the sign-in flow did not finish in 0.4 s — THE STATE NEVER CAME; its last status ${JSON.stringify(last).slice(0, 200)})`);
-    return { ...last, timedOut: 'the sign-in flow did not finish in 0.4 s' };
+    return markTimedOut(eng.oauthStatus(flow.flowId), 40 * 10, 'land (the sign-in flow finished)');
   };
   // (b) the engine's list, per TYPE (Gmail borrows Google clients; Lark borrows none)
   const lm = eng.mountClientsFor('gmail');

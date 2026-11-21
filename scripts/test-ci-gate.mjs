@@ -1588,11 +1588,22 @@ console.log('\n§2p a wait that runs out says so: no heavy suite returns its las
   const POLL = (body) => `const sleep = (ms) => new Promise((r) => setTimeout(r, ms));\nconst settle = async () => { let r = null; for (let i = 0; i < 40; i++) { r = await read(); if (${'r.more && r.more.marked'}) return r; await sleep(25); } ${body} };`;
   const PAGE = (body) => "await ev(`const read = () => ({ more: document.querySelector('.m') }); for (let i = 0; i < 200; i++) { const r = read(); if (${cond}) return r; await new Promise((q) => setTimeout(q, 25)); } " + body + "`);";
   const NAMED = { 'its last read, returned': POLL('return r;'), 'one more read, returned': POLL('return read();'), 'in page code, one more read': PAGE('return read();') };
-  const NOT = { 'a timed-out mark': POLL('return { ...r, timedOut: true };'), 'a null when it runs out': POLL('return null;'), 'its test IS its read': 'const until = async (f) => { for (let i = 0; i < 9; i++) { const v = await f(); if (v) return v; await sleep(9); } return f(); };', 'in page code, a timed-out mark': PAGE('return { timedOut: true, last: read() };') };
+  const NOT = { 'the one mark (markTimedOut)': POLL("return markTimedOut(r, 40 * 25, 'settle');"), 'a timed-out mark': POLL('return { ...r, timedOut: true };'), 'a null when it runs out': POLL('return null;'), 'its test IS its read': 'const until = async (f) => { for (let i = 0; i < 9; i++) { const v = await f(); if (v) return v; await sleep(9); } return f(); };', 'in page code, a timed-out mark': PAGE('return { timedOut: true, last: read() };') };
   const seen = (o) => Object.entries(o).map(([k, v]) => [k, lastReadWaits(v, acorn).filter((y) => !y.error).length]);
   const sN = seen(NAMED), sX = seen(NOT);
   ok(sN.every(([, n]) => n === 1), `CONTROLS: the shape, planted, is NAMED (${sN.map(([k, n]) => `${k}: ${n}`).join(' · ')})`);
   ok(sX.every(([, n]) => n === 0), `CONTROLS: its cures and look-alikes are NOT named (${sX.map(([k, n]) => `${k}: ${n}`).join(' · ')})`);
+  // THE ONE MARK (scripts/lib/timed-out.mjs, 主开发 r1197): a wait that runs out answers its read with its TRUTHINESS KEPT — a null stays
+  // a null and an undefined an undefined (a judge reading «nothing there» never goes green over a state that never came), a number or a
+  // string stays itself, a list or an object carries `timedOut` beside its fields — and the state that never came is said on a line
+  {
+    const TO = await import('./lib/timed-out.mjs');
+    const said = [], say = (m) => said.push(m);
+    const cases = [['a null', null], ['an undefined', undefined], ['a number', 0], ['a string', 'x'], ['a list', []], ['an object', { a: 1 }]];
+    const got = cases.map(([k, v]) => { const r = TO.markTimedOut(v, 1500, 'the probe', { say }); return [k, Boolean(v) === Boolean(r) && (v && typeof v === 'object' ? r === v && /^the probe: the state it waits for did not come in 1\.5 s$/.test(r.timedOut) && r.a === v.a : r === v)]; });
+    ok(got.every(([, y]) => y) && said.length === cases.length && said.every((m) => /^    \(the probe: the state it waits for did not come in 1\.5 s .*its last read /.test(m)) && TO.never(null) === '' && /THE STATE NEVER CAME: the probe: /.test(TO.never(TO.markTimedOut({}, 1500, 'the probe', { say }))),
+      `the ONE mark (scripts/lib/timed-out.mjs): each read keeps its truthiness and carries the mark where it can — ${got.map(([k, y]) => `${k} ${y ? 'kept' : 'BROKEN'}`).join(' · ')}; every one said on its own line; never() names it`, { got, said });
+  }
   console.log(`  (§2p read ${heavy.length} heavy suites in ${Date.now() - t0} ms)`);
 }
 } finally {

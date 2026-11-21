@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser, ownerPageHeaders, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
+import { markTimedOut, never } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));
@@ -131,8 +132,7 @@ const boxOf = (sel) => evalJs(`(() => { const b = [...document.querySelectorAll(
 
 // A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): the box's facts, MARKED when the state it waits for never came — its
 // judge says that by name («the state never came»), never a verdict on the product
-const boxWhen = async (sel, test, what) => { for (let i = 0; i < 40; i++) { const b = await boxOf(sel); if (b && test(b)) return b; await sleep(150); } return { ...(await boxOf(sel)), timedOut: `${what} in 6 s` }; };
-const never = (got) => (got && got.timedOut ? ` — THE STATE NEVER CAME: ${got.timedOut}, so this red is that, not a verdict on the product` : '');
+const boxWhen = async (sel, test, what) => { for (let i = 0; i < 40; i++) { const b = await boxOf(sel); if (b && test(b)) return b; await sleep(150); } return markTimedOut(await boxOf(sel), 40 * 150, what); };
 try {
   console.log('① a scratch hub of this tree (sign-in off), a live conversation, the page in zh');
   await cdp('Page.enable'); await cdp('Runtime.enable');

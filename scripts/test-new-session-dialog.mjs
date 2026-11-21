@@ -94,6 +94,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, realClicker, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
+import { markTimedOut, never } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for the server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -263,8 +264,7 @@ const stdinFrames = () => (fs.existsSync(STDIN_LOG) ? fs.readFileSync(STDIN_LOG,
 const responsesFor = (rid) => stdinFrames().filter((m) => m.type === 'control_response' && m.response?.request_id === rid);
 // A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): the stub's answers to a request, MARKED when none came — its judges say
 // that by name («the state never came»), never «the CLI got the wrong answer» as a verdict on the product
-const responsesWhen = async (rid) => { for (let i = 0; i < 50; i++) { const r = responsesFor(rid); if (r.length) return r; await sleep(100); } return Object.assign(responsesFor(rid), { timedOut: `no answer to ${rid} came in 5 s` }); };
-const never = (got) => (got && got.timedOut ? ` — THE STATE NEVER CAME: ${got.timedOut}, so this red is that, not a verdict on the product` : '');
+const responsesWhen = async (rid) => { for (let i = 0; i < 50; i++) { const r = responsesFor(rid); if (r.length) return r; await sleep(100); } return markTimedOut(responsesFor(rid), 50 * 100, `responsesWhen (an answer to ${rid})`); };
 const argvFiles = () => fs.readdirSync(stubDir).filter((f) => f.startsWith('argv-')).map((f) => ({ f, t: fs.statSync(path.join(stubDir, f)).mtimeMs, argv: JSON.parse(fs.readFileSync(path.join(stubDir, f), 'utf8')) })).sort((a, b) => a.t - b.t);
 const settingsOfArgv = (argv) => { const i = argv.indexOf('--settings'); if (i < 0) return null; try { return JSON.parse(argv[i + 1]); } catch { return 'unparseable'; } };
 
