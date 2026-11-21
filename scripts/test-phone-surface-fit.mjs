@@ -18,6 +18,7 @@
 // out · a file-worded excuse not listed by name · a listed name that is opened now · a ratchet row for a surface with no
 // opener · a ratchet higher than the run (a cure the table still lists) · an opener for a key that is gone · an opener whose
 // function was renamed away.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

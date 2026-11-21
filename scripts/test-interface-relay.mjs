@@ -38,6 +38,7 @@
 //     page under back-pressure no byte waits there when its end is read — the end is read only after the last read drained). (A link without closeAfterQueue is
 //     refused by the channel sockets themselves: src/agentd/chan-socket.js, scripts/test-chan-socket.mjs.)
 // in-process; a scratch dir under os.tmpdir(); a throwaway self-signed pair made with openssl.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import crypto from 'node:crypto';

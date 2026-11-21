@@ -16,6 +16,7 @@
 //   ③ THE GATE FAILS CLOSED: the classes that pass without a cookie are NAMED (door, open, login); a planted sixth class is
 //     refused by name (500 «unclassed»), sign-in on and off. RED CONTROL: the gate as B3a left it ⇒ the sixth is let in.
 // in-process; a scratch dir under os.tmpdir().
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -16,6 +16,7 @@
 //   ③ the shipped road (fs.promises): the same hold holds nothing — no gap past the law, the ping answered inside it; a caller
 //      that waits gets the NAMED late fact at the deadline; LAW 1 under the real hold: three asks later, ONE read was started; the
 //      writer releases it, the read comes back, and only then may the next one start
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import { spawn, execFileSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';

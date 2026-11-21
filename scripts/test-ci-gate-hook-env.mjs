@@ -6,6 +6,7 @@
 // and every refusal it adds — no node, a root that is a link, writable by others, not one's own or unwritable, a folder holding
 // more, a manager's shim, a folder made before npm came, a tier path without the bound's timeout — is DRIVEN and goes red for its
 // own reason when cut · §B the push's own ALL GREEN line counts a by-name skip (r1037).
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO, GIT_ENV, ok, tmpDirs, mktmp, commit, hookRig, report } from './ci-gate-kit.mjs';

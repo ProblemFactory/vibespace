@@ -18,6 +18,7 @@
 //      or NAMED: file by file with its count, and in the window, chat and terminal code by its words with how many times; a new one, a
 //      changed count or a row no call carries is red BY NAME; the door's sites stand by their words; RED CONTROLS plant each kind
 // The heavy twin: scripts/test-late-focus-chrome.mjs (a real page: a window opened, another clicked while it opens, typed).
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

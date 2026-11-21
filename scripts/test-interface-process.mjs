@@ -23,6 +23,7 @@
 //     /tmp's own 1777) is a bad start by name (exit 2), and the file at the link's path is never touched; a folder another
 //     account owns is refused too; 700 starts as before. RED CONTROL: the check cut ⇒ it starts on a folder every account can write.
 // in-process; a scratch dir under os.tmpdir().
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -25,6 +25,7 @@
 //   RED CONTROL of ①: the release's reading (an unreadable file taken as «no sign-in») — the page is served with no
 //   sign-in, and a generated password is then written over the file.
 // in-process; a scratch dir under os.tmpdir().
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

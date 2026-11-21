@@ -12,6 +12,7 @@
 //   ⑥ THE FACES (src/lib/strip-faces.js, the cure of 644a67ec2's MUST 4): a known value wears its label, a value its harness
 //      does not declare wears its raw spelling — never a guessed face (the adversarial read's cases, each a row)
 // PURE + source text only — no DOM, no clock.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);

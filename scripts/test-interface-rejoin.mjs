@@ -21,6 +21,7 @@
 //     or reply call's whole argument carries one. RED CONTROLS: a log through a renamed holder across two lines, and the
 //     whole admit line logged in main.js — each missed by the word census, found by the holder's.
 // in-process; a scratch dir under os.tmpdir(); a throwaway self-signed pair made with openssl.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

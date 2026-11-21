@@ -18,6 +18,7 @@
 //     a reset inside an upgrade head leaves the interface answering; a TLS page whose head Node refuses gets Node's words.
 //     RED CONTROLS: the refusal left to Node's default (the TLS page gets nothing); the page server never told it listens.
 // in-process; a scratch dir under os.tmpdir(); a throwaway self-signed pair made with openssl.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
