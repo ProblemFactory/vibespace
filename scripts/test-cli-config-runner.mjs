@@ -177,6 +177,12 @@ async function answerLegs(A) {
   ok(a.none && a.none.success === true && !('cliConfig' in a.none), 'no CLI-config row moved → the plain answer', a.none);
   ok(a.before === null && a.landed && a.landed.cliConfig && a.landed.cliConfig.landed === true, 'a moved row: NO answer before the landing, then «landed»', a);
   ok(a.failed.cliConfig.landed === false && /exited 1/.test(a.failed.cliConfig.why) && a.refused.cliConfig.landed === false && /a worktree/.test(a.refused.cliConfig.why), 'a failed or refused landing is told by name', a);
+  const NL = A.notLanded;
+  const nl = { switchOn: NL([{ claude: { ok: true }, codex: { ok: false, missing: 'no-dir', error: '~/.codex not found' } }, null]), regFailed: NL([{ claude: { ok: false, error: 'the starter did not answer' } }, { receipts: [], files: [] }]),
+    removalFailed: NL([{ at: 1, ok: false, why: 'the helper exited 1' }, null]), optedOut: NL([{ optedOut: true }, null]), removed: NL([{ at: 1, ok: true, receipts: [], created: [] }, null]) };
+  ok(nl.switchOn === null && nl.regFailed === 'claude: the starter did not answer' && nl.removalFailed === 'the helper exited 1' && nl.optedOut === null && nl.removed === null,
+    'the Integration switch\'s own answer is read too: a failed registration or removal is told by name; a CLI that has not run on this machine (no-dir) and an opt-out are no failure', nl);
+  ok(/return \(landing \|\| toggled\) \? Promise\.all\(\[toggled, landing\]\) : null;/.test(src('server.js')), 'WIRING: the settings write hands back both — the switch\'s registration and the rows\' landing');
   ok(a.pending === null && a.past && a.past.cliConfig.landed === false && /has not landed on this machine within 10 s \(still writing\)/.test(a.past.cliConfig.why), 'past the bound: told «still writing», by name — never «applied»', a);
   const M = require(MC.write(ANSWER_REL, anchored(src(ANSWER_REL), "  if (!landing || typeof landing.then !== 'function') return res.json(body);", '  return res.json(body);', 'an answer that never waits'), 'no-wait-answer'));
   const am = await answerLegs(M);
