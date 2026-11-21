@@ -45,6 +45,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Reopening a chat that has not changed no longer recounts its background tasks and task list, which held VibeSpace up to 0.25 s a window.
 - A folder you type into an automation key's folder picker before its list loads is no longer replaced by the list's folder, which the key then got instead.
 - A pooled Codex conversation whose account cannot be named no longer has its usage counted against the pool's current account.
+- The hub no longer pauses while it checks folder mounts or reconnects a storage that went down; an unanswered check says so instead of «no permission».
 
 ### Changed
 - The chat window's status bar is arranged by what you need: one row on a wide window, the same two rows on a narrow one, nothing hidden behind «⋯».
