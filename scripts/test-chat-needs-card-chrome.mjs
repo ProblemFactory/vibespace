@@ -62,6 +62,7 @@ import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 import { chatNeedsKit, loadDesk } from './chat-needs-kit.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -580,7 +581,7 @@ try {
   console.log('⑥ THE ACCORDION: six open items ⇒ ONE open card + five folded rows (375 touch, 1280 mouse); a tap opens one in place');
   say('six at once do:q1 do:q2 do:q3 do:q4 do:q5 do:q6');
   const STRESS = /^Stress question \d+:/;
-  const stress = async (n) => { const t0 = Date.now(); let o = []; while (Date.now() - t0 < 30000) { o = (await api()).open.filter((i) => STRESS.test(i.text)); if (o.length >= n) break; await sleep(200); } return o.sort((a, b) => a.createdAt - b.createdAt); };
+  const stress = async (n) => { const t0 = Date.now(); let o = []; while (Date.now() - t0 < 30000) { o = (await api()).open.filter((i) => STRESS.test(i.text)); if (o.length >= n) break; await sleep(200); } return (o.length >= n ? o : markTimedOut(o, 30000, `stress (${n} stress questions open)`)).sort((a, b) => a.createdAt - b.createdAt); };   // a wait that runs out says so (r1372; test-ci-gate §2p)
   const six = await stress(6);
   await logHas(/### q6 rc=/, 20000);
   check('setup: ONE agent turn ran vibespace-ask six times — six open questions of this conversation', six.length === 6 && six.every((i) => i.sessionKey === ask.sessionKey), six.map((i) => i.text));
