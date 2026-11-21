@@ -24,7 +24,7 @@
  *     are stripped from anything returned to a caller that might reach a
  *     browser; the ws-create bridge asks for them through `openPtyBridge`.
  */
-const { runOpencodeOp, OPENCODE_OP_NAMES } = require('../opencode-remote');
+const { runOpencodeOp, OPENCODE_OP_NAMES, boundRead } = require('../opencode-remote');
 const { messagesToAcpRecords, facts: localFacts } = require('../opencode-serve');
 
 /** Ops that only work where the SERVER can reach the serve's loopback ws.
@@ -67,7 +67,7 @@ function create({ app = null, hosts = null, facts = null, broadcast = null, log 
     const r = await call(hostId, 'read', { id });
     if (Array.isArray(r?.records)) return { session: r.session || null, records: r.records };
     // ssh rung: raw v1 messages → the SHARED synthesis, here, once
-    return { session: r?.session || null, records: messagesToAcpRecords(Array.isArray(r?.messages) ? r.messages : [], r?.session || {}) };
+    return boundRead(r?.session || null, messagesToAcpRecords(Array.isArray(r?.messages) ? r.messages : [], r?.session || {}));   // B-5278: the same bound as the other rungs
   }
 
   /** The pty bridge payload — url + auth INCLUDED. Only ws-create calls this,

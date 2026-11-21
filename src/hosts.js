@@ -158,14 +158,24 @@ function remoteUsageBearer(o, whose) {
  *  shape an agent's quota-refresh reply carries ({<file stem>: <reading with fetchedAt>}). Read only for an agent OLDER than
  *  the usage bearer law once the law refused its login (asked, that agent would send the token itself): file reads, no
  *  token read, nothing sent; bounded (PASSIVE_PEEK_FILES files, each cut at PASSIVE_PEEK_BYTES). */
-const PASSIVE_PEEK_FILES = 64, PASSIVE_PEEK_BYTES = 65536, PASSIVE_PEEK_MARK = '@@vs-passive@@';
-const PASSIVE_PEEK_SH = 'd="$HOME/.vibespace/usage-cache"; n=0; for f in "$d"/*.json; do [ -f "$f" ] || continue; b=${f##*/}; '
-  + 'case "$b" in __models__*) continue;; esac; n=$((n+1)); [ "$n" -gt ' + PASSIVE_PEEK_FILES + ' ] && break; '
-  + "printf '\\n" + PASSIVE_PEEK_MARK + " %s\\n' \"$b\"; head -c " + PASSIVE_PEEK_BYTES + ' "$f"; done; true';
+// B-5278 unit 2 (r1135): THE PASSIVE READINGS ARE ONE RULE on both roads — the device's readPassive (agentd.js) and this twin
+// (held equal by test-device-producer-bounds' parity leg): the first AC.PASSIVE_FILES_MAX names in byte order (a name
+// `[\w.-]{1,120}.json`, never __models__), each within AC.PASSIVE_FILE_MAX; a file over it, or an entry that is not a readable file,
+// counted; the count printed after the readings
+const PASSIVE_PEEK_FILES = AC.PASSIVE_FILES_MAX, PASSIVE_PEEK_BYTES = AC.PASSIVE_FILE_MAX, PASSIVE_PEEK_MARK = '@@vs-passive@@', PASSIVE_PEEK_LEFT = '@@vs-passive-left@@';
+const PASSIVE_PEEK_SH = 'cd "$HOME/.vibespace/usage-cache" 2>/dev/null || exit 0; LC_ALL=C ls -1A 2>/dev/null | { n=0; left=0; while IFS= read -r b; do '
+  + 'case "$b" in *.json) ;; *) continue;; esac; case "$b" in __models__*) continue;; esac; case "${b%.json}" in "" | *[!A-Za-z0-9_.-]*) continue;; esac; [ ${#b} -le 125 ] || continue; '
+  + 'n=$((n+1)); if [ "$n" -gt ' + PASSIVE_PEEK_FILES + ' ]; then left=$((left+1)); continue; fi; '
+  + 'if [ ! -f "$b" ] || [ ! -r "$b" ]; then left=$((left+1)); continue; fi; s=$(wc -c < "$b" 2>/dev/null) || { left=$((left+1)); continue; }; s=$((s+0)); '
+  + 'if [ "$s" -gt ' + PASSIVE_PEEK_BYTES + ' ]; then left=$((left+1)); continue; fi; '
+  + "printf '\\n" + PASSIVE_PEEK_MARK + " %s\\n' \"$b\"; cat \"$b\"; done; printf '\\n" + PASSIVE_PEEK_LEFT + " %s\\n' \"$left\"; }; true";
 /** PURE: the peek's output → {<stem>: reading} (a file that is not a reading with fetchedAt is left out, as the agent leaves it). */
+/** (r1135) the twin's own count of what it left out (the line after the readings) */
+function passiveLeftOfPeek(raw) { const s = String(raw || ''), i = s.lastIndexOf('\n' + PASSIVE_PEEK_LEFT + ' '); return i < 0 ? 0 : Math.max(0, parseInt(s.slice(i + PASSIVE_PEEK_LEFT.length + 2), 10) || 0); }
 function passiveOfPeek(raw) {
   const out = {};
-  for (const part of String(raw || '').split('\n' + PASSIVE_PEEK_MARK + ' ').slice(1)) {
+  const s0 = String(raw || ''), li = s0.lastIndexOf('\n' + PASSIVE_PEEK_LEFT + ' '), body = li < 0 ? s0 : s0.slice(0, li);
+  for (const part of body.split('\n' + PASSIVE_PEEK_MARK + ' ').slice(1)) {
     const nl = part.indexOf('\n');
     const name = nl > 0 ? part.slice(0, nl) : '';
     if (!/^[\w.-]{1,120}\.json$/.test(name) || name.startsWith('__models__')) continue;
@@ -3570,7 +3580,9 @@ class HostManager {
    *  law, which the ⟳ never asks once the law refused its login: the person keeps the reading that cost nothing. */
   async readRemotePassiveUsage(id) {
     const h = this.get(id);
-    return passiveOfPeek(await this._hostShell(h, PASSIVE_PEEK_SH, { timeoutMs: 10000 }));
+    const raw = await this._hostShell(h, PASSIVE_PEEK_SH, { timeoutMs: 10000 }), left = passiveLeftOfPeek(raw);
+    if (left > 0) { if (!this._passiveLeftSaid) this._passiveLeftSaid = new Set(); if (!this._passiveLeftSaid.has(id)) { this._passiveLeftSaid.add(id); console.warn(`[bounds] ${h.name}: ${left} passive usage reading(s) left out (more than ${PASSIVE_PEEK_FILES} files, or one over ${PASSIVE_PEEK_BYTES / 1024} KiB)`); } }
+    return passiveOfPeek(raw);
   }
 
   // ── Remote session discovery (lock-first, same algorithm as local) ──
@@ -4094,4 +4106,4 @@ HostManager.prototype.bootstrap = function (id, onEvent) {
   });
 };
 
-module.exports = { HostManager, lastKnownRows, staleSessions, NO_SECOND_WALK, USAGE_HARVEST_LIMITS, usageScanBound, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody, parseSshG, configVerdict, sshRecordRefusal, sshPortOf, dialRootOk, dialRootOf };
+module.exports = { HostManager, lastKnownRows, staleSessions, NO_SECOND_WALK, PASSIVE_PEEK_SH, passiveOfPeek, passiveLeftOfPeek, USAGE_HARVEST_LIMITS, usageScanBound, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody, parseSshG, configVerdict, sshRecordRefusal, sshPortOf, dialRootOk, dialRootOf };

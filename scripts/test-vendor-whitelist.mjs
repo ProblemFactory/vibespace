@@ -510,7 +510,7 @@ for (const [rel, a] of Object.entries(ALLOW)) {
   // `if (bearerOk) {`; nothing thrown between the law and the passive cache (a refusal by throw dropped the hub's only road for it)
   const bearerOrder = (t) => {
     const b = t.slice(t.indexOf("msg.op === 'quota-refresh'"), t.indexOf("msg.op === 'probe-cli'"));
-    const law = b.indexOf('const bearerOk = !!oauth.refreshToken;'), gate = b.indexOf('if (bearerOk) {'), stamp = b.indexOf('_quotaAt.set(credsPath, Date.now())'), host = b.indexOf('api.anthropic.com'), pass = b.indexOf('const passive = {};');
+    const law = b.indexOf('const bearerOk = !!oauth.refreshToken;'), gate = b.indexOf('if (bearerOk) {'), stamp = b.indexOf('_quotaAt.set(credsPath, Date.now())'), host = b.indexOf('api.anthropic.com'), pass = b.indexOf('const { passive, left: passiveLeft } = readPassive(');   // B-5278 (r1135): the passive read is one function now
     return law > 0 && law < gate && gate < stamp && stamp < host && host < pass && !/\bthrow\b/.test(b.slice(law, pass));
   };
   ok(bearerOrder(text), 'agentd quota-refresh (B-5e0d): the bearer law decided before the throttle stamp and the vendor host, both inside `if (bearerOk) {`, nothing thrown between the law and the passive cache');

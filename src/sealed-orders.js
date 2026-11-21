@@ -102,4 +102,25 @@ function appendVerdict(text, line) {
   return { ok: true, lead };
 }
 
-module.exports = { providerAware, recordedProviderOf, deviceFallback, orderProviderFields, reportOf, POOL_LOG_EVENTS_MAX, POOL_LOG_BYTES_MAX, appendVerdict };
+/** PURE (r1135): THE REPORT's HEAD — at most `max` records from the start of `text`, every complete line before the last of them
+ *  consumed (a torn one counted), and what waits past it counted (`more`). `bytes` is where the consumed lines end (UTF-8 bytes):
+ *  the hub's ack removes exactly those. A last line with no newline is never consumed (a write in flight; the next append closes it). */
+function reportHead(text, max = POOL_LOG_EVENTS_MAX) {
+  const t = String(text || ''), events = [];
+  let torn = 0, more = 0, at = 0, end = 0;
+  for (;;) {
+    const nl = t.indexOf('\n', at);
+    if (nl < 0) break;
+    const line = t.slice(at, nl);
+    if (line.trim()) {
+      if (events.length >= max) { more++; at = nl + 1; continue; }
+      let ev = null; try { ev = JSON.parse(line); } catch { ev = null; }
+      if (ev && typeof ev === 'object') events.push(ev); else torn++;
+    }
+    if (!more) end = nl + 1;
+    at = nl + 1;
+  }
+  return { events, torn, more, bytes: Buffer.byteLength(t.slice(0, end)) };
+}
+
+module.exports = { providerAware, recordedProviderOf, deviceFallback, orderProviderFields, reportOf, POOL_LOG_EVENTS_MAX, POOL_LOG_BYTES_MAX, appendVerdict, reportHead };

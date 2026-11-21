@@ -1261,8 +1261,12 @@ class DeviceManager {
     if (!conn.info?.capabilities?.includes?.('pool-orders')) throw new Error('daemon lacks pool-orders (capabilities gate)');
     const r = await this._request({ op: 'pool-orders', orders, timeoutMs: 15000, by });
     if (r?.error) throw new Error(r.error);
-    if (Number(r?.eventsDropped) > 0 || r?.eventsCut) this._saidLeftOnce('pool', `the pool's report ${r.eventsCut ? 'was read to its bound only' : ''}${r.eventsCut && Number(r.eventsDropped) > 0 ? ', and ' : ''}${Number(r.eventsDropped) > 0 ? `${Number(r.eventsDropped)} switch record(s) were not written (more than 2000, or 1 MiB)` : ''}`);
-    if (r?.events?.length && this._onPoolOrdersExecuted) this._onPoolOrdersExecuted(r.events);
+    // B-5278 (the last piece, r1135): what the report could not carry is said once — records not written (eventsDropped), records
+    // waiting past its head for the next report (eventsMore, eventsCut), torn lines (eventsTorn); a report with any of them but no
+    // record is acked too, so the agent removes exactly what it answered
+    const nD = Number(r?.eventsDropped) || 0, nM = Number(r?.eventsMore) || 0, nT = Number(r?.eventsTorn) || 0;
+    if (nD > 0 || nM > 0 || r?.eventsCut) this._saidLeftOnce('pool', [nD > 0 ? `${nD} switch record(s) were not written (more than 2000, or 1 MiB)` : '', nM > 0 || r?.eventsCut ? `${nM > 0 ? nM + ' record(s)' : 'records'} wait past the head of the pool's report for its next read` : ''].filter(Boolean).join('; '));
+    if ((r?.events?.length || nD > 0 || nT > 0) && this._onPoolOrdersExecuted) this._onPoolOrdersExecuted(r.events || []);
     return r?.events || [];
   }
   ackPoolOrdersLog() { try { this._conn?.mux?.control({ op: 'pool-orders-log-ack' }); } catch { } }

@@ -35,6 +35,11 @@
 //   ⑩ the unit's last piece: the pool's report bounded at its write (the agent's own appendOrderEvent / pendingReport run on
 //     temp files), the passive readings at the ssh twin's bound, the held logins at 500 folders and a 320-unit email (the device's
 //     real credsFacts on a fixture home), the caps lowered only for an agent that says producer-bounds (one picker).
+//   ⑪ part 5: opencode-serve's read keeps the session record and the newest records within 32 MiB (truncated / total / kept),
+//     status at most 2000 — the device's real op table on a 35 MiB conversation (RED: the release's read), every rung the same bound.
+//   ⑫ r1135: the pool's report answers its head and counts what waits; the ack removes only what was read (RED: the whole-file
+//     ack); a counts-only report is acked; the passive readings one rule — the device's readPassive and the twin's shell on one
+//     fixture home, the same readings, order and count (RED: the release's twin).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -210,7 +215,7 @@ console.log('⑤ find 2: the pool\'s report is read line by line — one torn li
   const before = RelS.reportOf(text), after = SO.reportOf(text);
   ok(before.events.length === 0, `THE FAULT, on the release's parse (a copy): one torn line (a crash mid-append) among three whole ones ⇒ ${before.events.length} events reported — the hub acks nothing, the torn line stays, every later report hidden`);
   ok(after.events.length === 3 && after.torn === 1 && after.events.map((e) => e.to).join() === 'a,b,c', `the tree's parse: the three whole switches reported (${after.events.map((e) => e.to).join()}), the torn line left out and counted (${after.torn})`);
-  ok(AGSRC.includes('      const r = SO.reportOf(text);\n      if (r.torn && !this._tornSaid)'), 'the agent reads its pool report through that parse (within its bound: ⑩), and says a torn line once');
+  ok(AGSRC.includes('      const r = SO.reportHead(text);\n      if (r.torn && !this._tornSaid)') && SO.reportHead(text).torn === 1 && SO.reportHead(text).events.length === 3, 'the agent reads its pool report line by line (its head within its bound: ⑩ / ⑫), and says a torn line once');
 }
 
 console.log('⑥ r951, THE LAW of item 4: a machine that replied is never called unreachable ANYWHERE its list is drawn; the device\'s own reply is remembered through the hub\'s fallback and said');
@@ -332,7 +337,7 @@ console.log('⑥ r951, THE LAW of item 4: a machine that replied is never called
   // SMALL (3): the agent's pool append never glues its record to a torn last line (its own function, run on a temp file)
   const SO = require('../src/sealed-orders.js');
   const fnSrc = (name) => { const a = AGSRC.indexOf('function ' + name + '('), b = AGSRC.indexOf('\n}\n', a); return a >= 0 && b > a ? AGSRC.slice(a, b + 2) : ''; };
-  const APPEND = fnSrc('readAtMost') + fnSrc('appendOrderEvent') + 'return appendOrderEvent(ev);';
+  const APPEND = fnSrc('readAtMost') + fnSrc('readDropped') + fnSrc('writeDropped') + fnSrc('appendOrderEvent') + 'return appendOrderEvent(ev);';
   const appendWith = (code, seed) => { const d = fs.mkdtempSync(path.join(tmp, 'pool-')), f = path.join(d, 'pool-orders-log.ndjson'), dr = path.join(d, 'pool-orders-dropped'); fs.writeFileSync(f, seed); new Function('fs', 'ORDERS_LOG', 'ORDERS_DROPPED', 'SO', 'log', 'ev', code)(fs, f, dr, SO, () => { }, { ts: 3, poolId: 'p1', to: 'b' }); return { ...SO.reportOf(fs.readFileSync(f, 'utf8')), dropped: fs.existsSync(dr) ? Number(fs.readFileSync(dr, 'utf8')) : 0 }; };
   const TORN = JSON.stringify({ ts: 1, poolId: 'p1', to: 'a' }) + '\n{"ts":2,"poolId":"p1","to":';
   const now3 = appendWith(APPEND, TORN), rel3 = appendWith("try { fs.appendFileSync(ORDERS_LOG, JSON.stringify(ev) + '\\n'); } catch { }", TORN);   // the release's line, quoted (stale-pins: kept)
@@ -518,9 +523,9 @@ console.log('⑩ the unit\'s last piece: the other producers bounded by construc
     const d = fs.mkdtempSync(path.join(tmp, 'pool10-')), f = path.join(d, 'pool-orders-log.ndjson'), dr = path.join(d, 'pool-orders-dropped');
     if (seed != null) fs.writeFileSync(f, seed);
     const deps = ['fs', 'ORDERS_LOG', 'ORDERS_DROPPED', 'SO', 'log'], vals = [fs, f, dr, SO, () => { }];
-    const append = (ev) => new Function(...deps, 'ev', fnSrc('readAtMost') + fnSrc('appendOrderEvent') + 'return appendOrderEvent(ev);')(...vals, ev);
+    const append = (ev) => new Function(...deps, 'ev', fnSrc('readAtMost') + fnSrc('readDropped') + fnSrc('writeDropped') + fnSrc('appendOrderEvent') + 'return appendOrderEvent(ev);')(...vals, ev);
     const a = AGSRC.indexOf('  pendingReport() {'), b = AGSRC.indexOf('\n  },\n', a);
-    const report = () => new Function(...deps, fnSrc('readAtMost') + fnSrc('readHeadOf') + 'return ({' + AGSRC.slice(a, b + 4) + '}).pendingReport();')(...vals);
+    const report = () => new Function(...deps, fnSrc('readAtMost') + fnSrc('readHeadOf') + fnSrc('readDropped') + 'return ({' + AGSRC.slice(a, b + 4) + '}).pendingReport();')(...vals);
     return { append, report, size: () => (fs.existsSync(f) ? fs.statSync(f).size : 0) };
   };
   const ev = (i) => ({ ts: i, poolId: 'p1', sid: 's', banner: 'limit', from: '/home/u/.vibespace/subs/a', to: 'b', link: '/home/u/.claude' });
@@ -532,14 +537,14 @@ console.log('⑩ the unit\'s last piece: the other producers bounded by construc
   ok(w2 === false && p2.size() === big.length && r2.cut === true && r2.dropped === 1, 'an older agent\'s report past its bound: never read past it, nothing appended to it, the record counted; its report read to the bound only (cut)');
   const p3 = pool(null), w3 = p3.append(ev(1)), r3 = p3.report();
   ok(w3 === true && r3.events.length === 1 && !r3.dropped && !r3.cut, 'no report yet: the first record is written and reported');
-  ok(AGSRC.includes("...(rep.dropped ? { eventsDropped: rep.dropped } : {}), ...(rep.cut ? { eventsCut: true } : {}) });") && AGSRC.includes("try { fs.rmSync(ORDERS_DROPPED, { force: true }); } catch { }"), 'the reply carries what was not written (eventsDropped) or cut; the hub\'s ack clears both');
+  ok(AGSRC.includes("...(rep.dropped ? { eventsDropped: rep.dropped } : {}), ...(rep.cut ? { eventsCut: true } : {}), ...(rep.more ? { eventsMore: rep.more } : {}), ...(rep.torn ? { eventsTorn: rep.torn } : {}) });"), 'the reply carries what was not written (eventsDropped), what waits (eventsMore / eventsCut) and torn lines; the hub\'s ack removes what was answered (⑫)');
   // THE PASSIVE READINGS: the ssh twin's own bound, one picker
   const names = [...Array.from({ length: 70 }, (_, i) => `sub-${String(i).padStart(3, '0')}.json`), '__models__x.json', 'notes.txt', '__global__.json'];
   const pk = AC.passivePick(names), HS10 = read('src/hosts.js');
   ok(pk.take.length === 64 && pk.left === 7 && pk.take[0] === '__global__.json' && !pk.take.some((n) => n.startsWith('__models__') || !n.endsWith('.json'))
-    && /const PASSIVE_PEEK_FILES = 64, PASSIVE_PEEK_BYTES = 65536,/.test(HS10) && AC.PASSIVE_FILES_MAX === 64 && AC.PASSIVE_FILE_MAX === 65536,
+    && /const PASSIVE_PEEK_FILES = AC\.PASSIVE_FILES_MAX, PASSIVE_PEEK_BYTES = AC\.PASSIVE_FILE_MAX,/.test(HS10) && AC.PASSIVE_FILES_MAX === 64 && AC.PASSIVE_FILE_MAX === 65536,
     `the passive readings an agent answers: the first 64 by name, none over 64 KiB — the ssh twin's own bound (hosts.js PASSIVE_PEEK_*), 72 files ⇒ ${pk.take.length} read, ${pk.left} counted`);
-  ok(AGSRC.includes("const ACq = require('./answer-caps.js'), pick = ACq.passivePick(fs.readdirSync(cdir));") && AGSRC.includes("text = readAtMost(path.join(cdir, f), ACq.PASSIVE_FILE_MAX);") && AGSRC.includes('...(passiveLeft ? { passiveLeft } : {})'),
+  ok(AGSRC.includes("const ACp = require('./answer-caps.js'), passive = {};") && AGSRC.includes("text = readAtMost(path.join(cdir, f), ACp.PASSIVE_FILE_MAX);") && AGSRC.includes('...(passiveLeft ? { passiveLeft } : {})'),
     'the agent reads them through that picker and a bounded read, and says what it left out (passiveLeft)');
   // THE HELD LOGINS (probe-creds): the device's real credsFacts in a child, on a fixture home of 502 folders and one long email
   const h10 = homeOf('f10'), SUBS = path.join(h10, '.vibespace', 'subs');
@@ -550,14 +555,109 @@ console.log('⑩ the unit\'s last piece: the other producers bounded by construc
   ok(cf && cf.n === 499 && cf.left === 2 && cf.long === null && cf.last === 'acct-499', `the held logins the device answers: at most 500 folders by name (502 ⇒ ${cf && cf.left} counted), an email over 320 units none (${cf && cf.long}) — ${String(cr.stderr || '').slice(0, 200)}`, cf);
   // THE CAPS: lowered only for an agent that says producer-bounds; each row at or under the release's; the agent says it
   const B = AC.BOUNDED_CAPS, rowsB = Object.keys(B);
-  ok(rowsB.length === 6 && rowsB.every((op) => Object.prototype.hasOwnProperty.call(AC.CAPS, op) && B[op] <= AC.CAPS[op]) && !Object.prototype.hasOwnProperty.call(B, 'opencode-serve'),
-    `the lowered table: ${rowsB.map((op) => `${op} ${AC.sizeOf(B[op])}`).join(', ')} — every row in the release's table and at or under it (opencode-serve keeps its row until its own part)`);
+  ok(rowsB.length === 7 && rowsB.every((op) => Object.prototype.hasOwnProperty.call(AC.CAPS, op) && B[op] <= AC.CAPS[op]) && Object.prototype.hasOwnProperty.call(B, 'opencode-serve'),
+    `the lowered table: ${rowsB.map((op) => `${op} ${AC.sizeOf(B[op])}`).join(', ')} — every row in the release's table and at or under it (opencode-serve's since part 5: ⑪)`);
   ok(AC.capOf('quota-refresh', ['probe', AC.PRODUCER_BOUNDS]) === 8 * AC.MiB && AC.capOf('quota-refresh', ['probe']) === AC.CAPS['quota-refresh'] && AC.capOf('quota-refresh') === AC.CAPS['quota-refresh'] && AC.capOf('fs-op', [AC.PRODUCER_BOUNDS]) === AC.CAPS['fs-op'],
     'ONE picker: an agent saying producer-bounds gets the lowered row; an older agent (or none said) keeps the release\'s row; an op with no lowered row keeps its own');
   ok(B['discovery-snapshot'] >= require('../src/discovery-facts.js').DISCOVERY_CHILD_MAX_BYTES + 1024 * 1024 && B['pool-orders'] >= SO.POOL_LOG_BYTES_MAX * 1.5 && B['quota-refresh'] >= AC.PASSIVE_FILES_MAX * AC.PASSIVE_FILE_MAX + 2 * 262144 * 6,
     'each lowered row sits above its producer\'s own bound (the discovery child, the pool\'s report escaped, the passive readings + two vendor bodies escaped)');
   ok(/'answer-bounds' \/\*[^*]*\*\/, 'producer-bounds' \/\*/.test(AGSRC) && read('src/agentd/client.js').includes('const cap = AC.capOf(payload.op, conn.info && conn.info.capabilities);'),
     'the agent says producer-bounds in its hello; the hub picks the cap by what this agent said');
+}
+
+console.log('⑪ part 5: a conversation\'s read and the status list are bounded where they are made, the same for every rung (opencode-serve)');
+{
+  const OR = require('../src/opencode-remote.js');
+  // THE PURE BOUND: the session record and the newest records that fit
+  const rec = (i, n) => ({ ts: String(i), type: 'acp', kind: 'update', update: { text: 'x'.repeat(n) } });
+  const SESSION = { ts: '0', type: 'acp', kind: 'session', sessionId: 'ses_a1' };
+  const small = OR.boundRead({ id: 'ses_a1' }, [SESSION, rec(1, 10), rec(2, 10)]);
+  const cut = OR.boundRead({ id: 'ses_a1' }, [SESSION, ...Array.from({ length: 10 }, (_, i) => rec(i + 1, 1000))], 4000);
+  ok(small.records.length === 3 && !('truncated' in small) && cut.truncated === true && cut.total === 10 && cut.kept === 3 && cut.records[0] === SESSION && cut.records[cut.records.length - 1].ts === '10',
+    `a read that fits answers as before (no new key); one that does not keeps the session record and the NEWEST that fit, and says so (truncated, total ${cut.total}, kept ${cut.kept})`);
+  // THE DEVICE's OP, the real table: a 35 MiB conversation (35 records of 1 MiB) answers within READ_MAX
+  const big = [SESSION, ...Array.from({ length: 35 }, (_, i) => rec(i + 1, 1024 * 1024))];
+  const facts = { readConversation: async () => ({ session: { id: 'ses_a1' }, records: big }), statusMap: async () => Object.fromEntries(Array.from({ length: 2005 }, (_, i) => [`ses_${i}`, { type: 'idle' }])) };
+  const rd = await OR.runOpencodeOp(facts, 'read', { id: 'ses_a1' });
+  const bytes = rd.records.reduce((a, r) => a + Buffer.byteLength(JSON.stringify(r)) + 1, 0);
+  ok(OR.READ_MAX === 32 * 1024 * 1024 && rd.truncated === true && rd.total === 35 && rd.kept < 35 && bytes <= OR.READ_MAX && rd.records[0] === SESSION && rd.records[rd.records.length - 1].ts === '35',
+    `the device's read of a 35 MiB conversation: the session record + the newest ${rd.kept} of ${rd.total} (${(bytes / 1048576).toFixed(1)} MiB ≤ 32 MiB), said truncated`);
+  const st = await OR.runOpencodeOp(facts, 'status', {});
+  ok(OR.STATUS_MAX === 2000 && Object.keys(st.statuses).length === 2000 && st.truncated === true && st.total === 2005, 'the status list: at most 2000 entries, the rest said (truncated, total)');
+  const ORSRC = read('src/opencode-remote.js');
+  const Rel = M.load('src/opencode-remote.js', anchored(ORSRC, '    result: (v) => boundRead(v?.session || null, v?.records),   // B-5278: the newest records within READ_MAX\n', '    result: (v) => ({ session: v?.session || null, records: Array.isArray(v?.records) ? v.records : [] }),\n', 'release-read'), 'release-read');   // the release's normaliser, quoted (stale-pins: kept)
+  const rr = await Rel.runOpencodeOp(facts, 'read', { id: 'ses_a1' });
+  ok(rr.records.length === 36 && !rr.truncated, `CONTROL (the release's read, in a copy): the whole 35 MiB conversation in one answer (${rr.records.length} records) — RED`);
+  // every rung the same: the hub's synthesis of the ssh rung's raw payload goes through the same bound; the device's row lowered
+  const AC11 = require('../src/agentd/answer-caps.js');
+  ok(read('src/server/opencode-access.js').includes('return boundRead(r?.session || null, messagesToAcpRecords(') && AC11.BOUNDED_CAPS['opencode-serve'] === 40 * AC11.MiB && AC11.BOUNDED_CAPS['opencode-serve'] >= OR.READ_MAX * 1.2,
+    'the hub\'s synthesis of the ssh rung\'s payload takes the same bound; the op\'s lowered row (40 MiB) sits above READ_MAX and its envelope');
+}
+
+console.log('⑫ r1135 (into part 5): the pool\'s report answers its HEAD and counts what waits; the ack removes ONLY what was read; the passive readings are ONE rule on both roads');
+{
+  const SO = require('../src/sealed-orders.js'), H12 = require('../src/hosts.js');
+  const fnSrc = (name) => { const a = AGSRC.indexOf('function ' + name + '('), b = AGSRC.indexOf('\n}\n', a); return a >= 0 && b > a ? AGSRC.slice(a, b + 2) : ''; };
+  const method = (name, src = AGSRC) => { const a = src.indexOf('  ' + name + '() {'), b = src.indexOf('\n  },\n', a); return a >= 0 && b > a ? src.slice(a, b + 5) + '\n' : ''; };
+  const FNS = fnSrc('readAtMost') + fnSrc('readHeadOf') + fnSrc('readDropped') + fnSrc('writeDropped') + fnSrc('dropReportHead') + fnSrc('appendOrderEvent');
+  const agentPool = (seed, { clear = method('clearReport') } = {}) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'pool12-')), f = path.join(d, 'pool-orders-log.ndjson'), dr = path.join(d, 'pool-orders-dropped');
+    if (seed != null) fs.writeFileSync(f, seed);
+    const so = new Function('fs', 'ORDERS_LOG', 'ORDERS_DROPPED', 'SO', 'log', FNS + 'return ({ appendOrderEvent, writeDropped, readDropped, obj: {' + method('pendingReport') + clear + '} });')(fs, f, dr, SO, () => { });
+    return { ...so, lines: () => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).length : 0) };
+  };
+  const ev = (i) => JSON.stringify({ ts: i, poolId: 'p1', sid: 's', banner: 'limit', from: '/a', to: 'b', link: '/l' });
+  // 1. THE HEAD, and what waits past it counted: an older report of 2005 records, under the size bound
+  const P = agentPool(Array.from({ length: 2005 }, (_, i) => ev(i)).join('\n') + '\n');
+  const r1 = P.obj.pendingReport();
+  P.obj.clearReport();
+  const r2 = P.obj.pendingReport();
+  ok(r1.events.length === 2000 && r1.more === 5 && r2.events.length === 5 && r2.events[0].ts === 2000 && P.lines() === 5,
+    `a report of 2005 records answers its head (${r1.events.length}) and counts what waits (${r1.more}); after the ack the 5 are the next report, never deleted unsaid`);
+  // 2. THE ACK REMOVES ONLY WHAT WAS READ — a record appended meanwhile, and the dropped count, stay
+  const Q = agentPool(ev(1) + '\n' + ev(2) + '\n');
+  Q.writeDropped(3);
+  const q1 = Q.obj.pendingReport();
+  Q.appendOrderEvent({ ts: 77, poolId: 'p1', to: 'z' });
+  Q.writeDropped(Q.readDropped() + 2);
+  Q.obj.clearReport();
+  const q2 = Q.obj.pendingReport();
+  ok(q1.events.length === 2 && q1.dropped === 3 && q2.events.length === 1 && q2.events[0].ts === 77 && q2.dropped === 2,
+    `the ack removes exactly what was answered: the record written after the report stays (${q2.events.map((e) => e.ts)}), and the dropped count keeps the ${q2.dropped} counted since`);
+  const RELEASE_CLEAR = "  clearReport() { try { fs.rmSync(ORDERS_LOG, { force: true }); } catch { } try { fs.rmSync(ORDERS_DROPPED, { force: true }); } catch { } },\n";   // the last piece's ack, quoted (stale-pins: kept)
+  const R = agentPool(ev(1) + '\n', { clear: RELEASE_CLEAR });
+  R.obj.pendingReport(); R.appendOrderEvent({ ts: 77, poolId: 'p1', to: 'z' }); R.obj.clearReport();
+  ok(R.obj.pendingReport().events.length === 0, 'CONTROL (the ack that deletes the whole report, in a copy): the record written after the report is lost unsaid — RED');
+  // …and a report that carries only a dropped count (or torn lines) is acked too: the client hands it to the engine
+  const { DeviceManager } = require('../src/agentd/client.js');
+  const D12 = new DeviceManager({ dataDir: path.join(tmp, 'dm12'), bundlePath: path.join(tmp, 'none12.js'), version: '1.0.0', machine: 'box-1', transport: { kind: 'stream', hostToken: () => 'x', getStream: () => null } });
+  D12._log = () => { }; D12.connect = async () => ({ info: { capabilities: ['pool-orders'] } });
+  D12._request = async () => ({ op: 'pool-orders-ok', events: [], eventsDropped: 3 });
+  let acked = 0; await D12.poolOrders({}, () => { acked++; });
+  ok(acked === 1, 'a report with a dropped count and no record reaches the engine, which acks it (its counter never stands for ever)');
+  // 3. THE PASSIVE READINGS, ONE RULE ON BOTH ROADS — the device's readPassive and the ssh twin's shell, on one fixture home
+  const h = homeOf('f12'), C = path.join(h, '.vibespace', 'usage-cache');
+  fs.mkdirSync(C, { recursive: true });
+  const reading = (n) => JSON.stringify({ fetchedAt: 1700000000000 + n, five_hour: { utilization: n } });
+  for (let i = 0; i < 70; i++) fs.writeFileSync(path.join(C, `sub-${String(i).padStart(3, '0')}.json`), reading(i));
+  fs.writeFileSync(path.join(C, '__global__.json'), reading(999));
+  fs.writeFileSync(path.join(C, '__models__a.json'), reading(1));
+  fs.writeFileSync(path.join(C, 'big.json'), JSON.stringify({ fetchedAt: 1, pad: 'x'.repeat(70 * 1024) }));
+  fs.mkdirSync(path.join(C, 'dir.json'));
+  fs.writeFileSync(path.join(C, 'we ird.json'), reading(2));
+  fs.writeFileSync(path.join(C, 'notes.txt'), 'x');
+  const agentReq = createRequire(path.join(REPO, 'src/agentd/agentd.js'));
+  const device = new Function('fs', 'path', 'require', 'cdir', fnSrc('readAtMost') + fnSrc('readPassive') + 'return readPassive(cdir);')(fs, path, agentReq, C);
+  const twinOf = (script) => { const r = spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { HOME: h, PATH: '/usr/bin:/bin' }, timeout: 20000 }); return { passive: H12.passiveOfPeek(r.stdout), left: H12.passiveLeftOfPeek(r.stdout), err: String(r.stderr || '').slice(0, 200) }; };
+  const twin = twinOf(H12.PASSIVE_PEEK_SH);
+  const keysD = Object.keys(device.passive), keysT = Object.keys(twin.passive);
+  ok(keysD.length === 62 && JSON.stringify(keysD) === JSON.stringify(keysT) && device.left === 11 && twin.left === 11 && keysD[0] === '__global__' && !keysD.includes('big') && !keysD.includes('we ird'),
+    `the device and its ssh twin, one fixture home of 76 entries: the same ${keysD.length} readings in the same order, the same count left out (${device.left} / ${twin.left}: past 64, the 70 KiB file, the folder) — ${twin.err}`, { keysD: keysD.slice(0, 4), keysT: keysT.slice(0, 4) });
+  const RELEASE_TWIN = 'd="$HOME/.vibespace/usage-cache"; n=0; for f in "$d"/*.json; do [ -f "$f" ] || continue; b=${f##*/}; case "$b" in __models__*) continue;; esac; n=$((n+1)); [ "$n" -gt 64 ] && break; printf \'\\n@@vs-passive@@ %s\\n\' "$b"; head -c 65536 "$f"; done; true';   // the release's twin, quoted (stale-pins: kept)
+  const rel = twinOf(RELEASE_TWIN);
+  ok(rel.left === 0 && (JSON.stringify(Object.keys(rel.passive)) !== JSON.stringify(keysD) || rel.left !== device.left), `CONTROL (the release's twin script): it counts nothing left out (${rel.left}) where the device counts ${device.left} — the two roads disagree — RED`);
+  ok(AGSRC.includes("const { passive, left: passiveLeft } = readPassive(path.join(home, '.vibespace', 'usage-cache'));") && fnSrc('writeDropped').includes("fs.renameSync(tmp, ORDERS_DROPPED);"),
+    'the agent\'s quota answer reads through that one function; the dropped counter is written whole or not at all (temp + rename)');
 }
 
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);

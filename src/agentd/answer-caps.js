@@ -57,15 +57,16 @@ const BOUNDED_CAPS = Object.freeze({
   'discovery-claims': 20 * MiB,    // rows of that same bounded snapshot
   'quota-refresh': 8 * MiB,        // passive ≤ PASSIVE_FILES_MAX × PASSIVE_FILE_MAX = 4 MiB + two vendor bodies (< 256 Ki units each), escaped
   'pool-orders': 2 * MiB,          // the log ≤ 2000 events / 1 MiB at its write (sealed-orders POOL_LOG_*), escaped
-  'probe-creds': SMALL,            // ≤ 500 folders × (a 255-byte name + a 320-unit email + an 80-unit attempt) ≈ 0.4 MB
+  'probe-creds': SMALL,            // ≤ 500 folders × (a 255-byte name riding THREE times — hostSubs, its login status, its email — + a 320-unit email + an 80-unit attempt + fields) ≈ 0.6 MB
   'desktop-serve': 8 * MiB,        // its code's own bounds: 56 records, 300 witness rows, the catalog (the inventory's §6)
+  'opencode-serve': 40 * MiB,      // read: the newest records within 32 MiB (opencode-remote READ_MAX) + the session record, escaped; status ≤ 2000 entries
 });
 // the passive usage readings an agent answers (quota-refresh `passive`): the ssh twin's own bound (hosts.js PASSIVE_PEEK_*) —
 // the first PASSIVE_FILES_MAX by name, none over PASSIVE_FILE_MAX; the rest counted (`passiveLeft`)
 const PASSIVE_FILES_MAX = 64, PASSIVE_FILE_MAX = 64 * 1024;
 /** PURE: which usage-cache files a passive reading reads → { take: [name], left } (the readings and their order: the twin's) */
 function passivePick(names) {
-  const ok = (Array.isArray(names) ? names : []).filter((f) => typeof f === 'string' && f.endsWith('.json') && !f.startsWith('__models__')).sort();
+  const ok = (Array.isArray(names) ? names : []).filter((f) => typeof f === 'string' && /^[\w.-]{1,120}\.json$/.test(f) && !f.startsWith('__models__')).sort();   // (r1135) the twin's own name rule
   return { take: ok.slice(0, PASSIVE_FILES_MAX), left: Math.max(0, ok.length - PASSIVE_FILES_MAX) };
 }
 /** the cap of an op's answer in bytes (an op with no row: the line itself — the census keeps that set empty); an agent that says

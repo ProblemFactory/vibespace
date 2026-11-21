@@ -248,6 +248,21 @@ function readHeadOf(p, max) {
   try { const b = Buffer.alloc(max); const n = fs.readSync(fd, b, 0, max, 0); return b.subarray(0, n).toString('utf-8'); }
   finally { fs.closeSync(fd); }
 }
+// B-5278 unit 2 (r1135, THE PASSIVE READINGS ARE ONE RULE on both roads — the ssh twin is hosts.js PASSIVE_PEEK_SH, held equal by
+// the parity leg): the first PASSIVE_FILES_MAX names by code unit (answer-caps passivePick), each read within PASSIVE_FILE_MAX; a
+// file over it, or one that is not a readable file, counted; a reading gone since the listing not counted
+function readPassive(cdir) {
+  const ACp = require('./answer-caps.js'), passive = {};
+  let names = []; try { names = fs.readdirSync(cdir); } catch { return { passive, left: 0 }; }
+  const pick = ACp.passivePick(names);
+  let left = pick.left;
+  for (const f of pick.take) {
+    let text = null; try { text = readAtMost(path.join(cdir, f), ACp.PASSIVE_FILE_MAX); } catch (err) { if (!err || err.code !== 'ENOENT') left++; continue; }
+    if (text == null) { left++; continue; }
+    try { const j = JSON.parse(text); if (j && j.fetchedAt) passive[f.slice(0, -5)] = j; } catch { }
+  }
+  return { passive, left };
+}
 function computeDiscoverySnapshot() {
   const home = os.homedir();
   const locks = [];
@@ -1285,14 +1300,34 @@ const ORDERS_DROPPED = path.join(STATE, 'pool-orders-dropped');   // B-5278 unit
 // B-5278 unit 2, the last piece: one switch's record into the pool's report — within its bound (sealed-orders POOL_LOG_*: a record
 // past it is counted in ORDERS_DROPPED and said with the report), never glued to a torn last line (find 2's follow), and the
 // report is never read past its bound
+// (r1135) the records past the report's bound, counted — written whole or not at all (temp + rename)
+function readDropped() { try { return Number(fs.readFileSync(ORDERS_DROPPED, 'utf-8')) || 0; } catch (e) { if (!e || e.code !== 'ENOENT') log('sealed-orders: the dropped count could not be read: ' + e.message); return 0; } }
+function writeDropped(n) {
+  if (!(n > 0)) { fs.rmSync(ORDERS_DROPPED, { force: true }); return; }
+  const tmp = ORDERS_DROPPED + '.tmp';
+  fs.writeFileSync(tmp, String(n));
+  fs.renameSync(tmp, ORDERS_DROPPED);
+}
+// (r1135) THE ACK REMOVES ONLY WHAT WAS READ: the report's first `bytes` go, every record after them stays (a record appended
+// meanwhile, and what waited past the reported head) — copied whole into a temp file, renamed over the report
+function dropReportHead(bytes) {
+  const st = fs.statSync(ORDERS_LOG);
+  if (st.size <= bytes) { fs.rmSync(ORDERS_LOG, { force: true }); return; }
+  const tmp = ORDERS_LOG + '.tmp', src = fs.openSync(ORDERS_LOG, 'r');
+  try {
+    const dst = fs.openSync(tmp, 'w');
+    try { const b = Buffer.alloc(64 * 1024); let pos = bytes; for (;;) { const n = fs.readSync(src, b, 0, b.length, pos); if (n <= 0) break; fs.writeSync(dst, b, 0, n); pos += n; } }
+    finally { fs.closeSync(dst); }
+  } finally { fs.closeSync(src); }
+  fs.renameSync(tmp, ORDERS_LOG);
+}
 function appendOrderEvent(ev) {
   const line = JSON.stringify(ev) + '\n';
   let text = '';
   try { text = readAtMost(ORDERS_LOG, SO.POOL_LOG_BYTES_MAX); } catch (e) { if (!e || e.code !== 'ENOENT') { text = null; log(`sealed-orders: the pool's report could not be read (${(e && e.code) || e}): this record is counted, not written`); } }
   const v = SO.appendVerdict(text, line);
   if (!v.ok) {
-    let n = 0; try { n = Number(fs.readFileSync(ORDERS_DROPPED, 'utf-8')) || 0; } catch (e) { if (!e || e.code !== 'ENOENT') log('sealed-orders: the dropped count could not be read: ' + e.message); }
-    fs.writeFileSync(ORDERS_DROPPED, String(n + 1));
+    writeDropped(readDropped() + 1);
     return false;
   }
   fs.appendFileSync(ORDERS_LOG, v.lead + line);
@@ -1409,18 +1444,30 @@ const sealedOrders = {
   },
   // B-5278 unit 2 (find 2): read line by line (sealed-orders.js reportOf) — a torn line is left out and said, never every report hidden
   // (the last piece) read within the report's bound: an older agent's report past it is read to its bound only (`cut`); the
-  // records not written are counted (`dropped`)
+  // records not written are counted (`dropped`). (r1135) Only the report's HEAD is answered (at most POOL_LOG_EVENTS_MAX
+  // records; what waits past it is counted, `more`, and stays for the next report), and the ack removes exactly what was
+  // answered: its bytes and its dropped count
   pendingReport() {
-    let dropped = 0; try { dropped = Number(fs.readFileSync(ORDERS_DROPPED, 'utf-8')) || 0; } catch { }
+    const dropped = readDropped();
     try {
       let text = readAtMost(ORDERS_LOG, SO.POOL_LOG_BYTES_MAX), cut = false;
       if (text == null) { text = readHeadOf(ORDERS_LOG, SO.POOL_LOG_BYTES_MAX); cut = true; }
-      const r = SO.reportOf(text);
+      const r = SO.reportHead(text);
       if (r.torn && !this._tornSaid) { this._tornSaid = true; log(`sealed-orders: ${r.torn} torn line(s) in the pool's report left out`); }
-      return { events: r.events.slice(0, SO.POOL_LOG_EVENTS_MAX), dropped, cut };
-    } catch { return { events: [], dropped, cut: false }; }
+      this._reported = { bytes: r.bytes, dropped };
+      return { events: r.events, dropped, cut, more: r.more, torn: r.torn };
+    } catch (e) {
+      if (e && e.code !== 'ENOENT') log('sealed-orders: the pool\'s report could not be read: ' + e.message);
+      this._reported = { bytes: 0, dropped };
+      return { events: [], dropped, cut: false, more: 0, torn: 0 };
+    }
   },
-  clearReport() { try { fs.rmSync(ORDERS_LOG, { force: true }); } catch { } try { fs.rmSync(ORDERS_DROPPED, { force: true }); } catch { } },
+  clearReport() {
+    const rep = this._reported; this._reported = null;
+    if (!rep) return;   // an ack with nothing answered before it removes nothing
+    if (rep.bytes > 0) { try { dropReportHead(rep.bytes); } catch (e) { if (!e || e.code !== 'ENOENT') log('sealed-orders: the reported head was not removed: ' + e.message); } }
+    if (rep.dropped > 0) { try { writeDropped(readDropped() - rep.dropped); } catch (e) { log('sealed-orders: the dropped count was not lowered: ' + e.message); } }
+  },
 };
 sealedOrders.load();
 const pipeSessions = {
@@ -2541,7 +2588,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // executions from a server-down window ride the reply — pushing at
           // hello RACED the client's control-routing installation (observed)
           const rep = sealedOrders.pendingReport();   // B-5278 unit 2: bounded; what was not written, or cut, said with it
-          mux.control({ op: 'pool-orders-ok', id: msg.id, events: rep.events, ...(rep.dropped ? { eventsDropped: rep.dropped } : {}), ...(rep.cut ? { eventsCut: true } : {}) });
+          mux.control({ op: 'pool-orders-ok', id: msg.id, events: rep.events, ...(rep.dropped ? { eventsDropped: rep.dropped } : {}), ...(rep.cut ? { eventsCut: true } : {}), ...(rep.more ? { eventsMore: rep.more } : {}), ...(rep.torn ? { eventsTorn: rep.torn } : {}) });
         } catch (e) { mux.control({ op: 'pool-orders-ok', id: msg.id, error: e.message }); }
         return;
       }
@@ -2923,19 +2970,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             // zero extra vendor calls. The server merges fetchedAt-guarded.
             // B-5278 unit 2, the last piece: the ssh twin's own bound (answer-caps passivePick: the first 64 by name, none over
             // 64 KiB, read through a bounded read); what was left out is counted (`passiveLeft`)
-            const passive = {};
-            let passiveLeft = 0;
-            try {
-              const cdir = path.join(home, '.vibespace', 'usage-cache');
-              const ACq = require('./answer-caps.js'), pick = ACq.passivePick(fs.readdirSync(cdir));
-              passiveLeft = pick.left;
-              for (const f of pick.take) {
-                // (r1082's law, here too) one file that cannot be read costs no other its read; a reading gone since the listing is not left out
-                let text = null; try { text = readAtMost(path.join(cdir, f), ACq.PASSIVE_FILE_MAX); } catch (err) { if (!err || err.code !== 'ENOENT') passiveLeft++; continue; }
-                if (text == null) { passiveLeft++; continue; }
-                try { const j = JSON.parse(text); if (j && j.fetchedAt) passive[f.slice(0, -5)] = j; } catch { }
-              }
-            } catch { }
+            const { passive, left: passiveLeft } = readPassive(path.join(home, '.vibespace', 'usage-cache'));   // B-5278 (r1135): the twin's one rule
             mux.control({ op: 'quota-result', id: msg.id, usage, roles, passive, ...(passiveLeft ? { passiveLeft } : {}), ...(bearerOk ? {} : { refused: 'long-lived' }) });
           } catch (e) { mux.control({ op: 'quota-result', id: msg.id, error: e.message, ...(e.refused ? { refused: e.refused } : {}) }); }
         })();

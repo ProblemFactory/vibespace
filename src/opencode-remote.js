@@ -29,6 +29,34 @@
 /** op name → { member, required[], build(params) → args[], result(v) → json }
  *  `member` is the facts method; `build` maps the wire params onto its
  *  arguments; `result` normalises the return so all three rungs agree. */
+// B-5278 unit 2, part 5: A CONVERSATION's READ AND THE STATUS LIST ARE BOUNDED where they are made, the same for every rung
+// (the device's op, the local rung, and the hub's synthesis of the ssh rung's raw payload). A read keeps the conversation's
+// session record (records[0]) and the NEWEST records whose serialized size fits READ_MAX; when older ones are dropped it says so
+// (truncated, total, kept) — a reader must show that older history is not shown. The status list keeps at most STATUS_MAX entries.
+const READ_MAX = 32 * 1024 * 1024, STATUS_MAX = 2000;
+/** PURE: {session, records} within READ_MAX → the same, plus {truncated, total, kept} when the oldest were dropped */
+function boundRead(session, records, max = READ_MAX) {
+  const all = Array.isArray(records) ? records : [];
+  if (!all.length) return { session: session || null, records: all };
+  const head = all[0] && all[0].kind === 'session' ? 1 : 0;
+  let size = head ? Buffer.byteLength(JSON.stringify(all[0])) + 1 : 0, from = all.length;
+  for (let i = all.length - 1; i >= head; i--) {
+    const n = Buffer.byteLength(JSON.stringify(all[i])) + 1;
+    if (size + n > max) break;
+    size += n; from = i;
+  }
+  if (from === head) return { session: session || null, records: all };
+  const kept = all.length - from;
+  return { session: session || null, records: [...all.slice(0, head), ...all.slice(from)], truncated: true, total: all.length - head, kept };
+}
+/** PURE: the status map, at most STATUS_MAX entries (truncated when more) */
+function boundStatus(v, max = STATUS_MAX) {
+  const m = v && typeof v === 'object' ? v : {}, keys = Object.keys(m);
+  if (keys.length <= max) return { statuses: m };
+  const out = {}; for (const k of keys.slice(0, max)) out[k] = m[k];
+  return { statuses: out, truncated: true, total: keys.length };
+}
+
 const OPENCODE_OPS = {
   state: {
     member: 'state', required: [], build: () => [],
@@ -43,7 +71,7 @@ const OPENCODE_OPS = {
     member: 'readConversation', required: ['id'], build: (p) => [String(p.id), {}],
     // the records ARE the payload (the reader replays them); messages are dropped
     // on the wire — they are the same facts, twice, and the big half
-    result: (v) => ({ session: v?.session || null, records: Array.isArray(v?.records) ? v.records : [] }),
+    result: (v) => boundRead(v?.session || null, v?.records),   // B-5278: the newest records within READ_MAX
   },
   revert: {
     member: 'revertTo', required: ['id', 'messageID'],
@@ -83,7 +111,7 @@ const OPENCODE_OPS = {
   },
   status: {
     member: 'statusMap', required: [], build: () => [{}],
-    result: (v) => ({ statuses: v && typeof v === 'object' ? v : {} }),
+    result: (v) => boundStatus(v),   // B-5278: at most STATUS_MAX entries
   },
 };
 
@@ -118,4 +146,4 @@ async function runOpencodeOp(facts, op, params = {}) {
   return def.result(out);
 }
 
-module.exports = { OPENCODE_OPS, OPENCODE_OP_NAMES, checkOpParams, runOpencodeOp };
+module.exports = { OPENCODE_OPS, OPENCODE_OP_NAMES, checkOpParams, runOpencodeOp, boundRead, boundStatus, READ_MAX, STATUS_MAX };
