@@ -193,20 +193,25 @@ if (refusal) {
 let logFd = fs.openSync(logPath, 'a');
 let logSize = fs.fstatSync(logFd).size;
 let held = null; // a gated rung's words before its proof (THE MEMORY BOUND): the job's log gets them only once the job runs
+let logOwed = null;   // B-15ac follow (主开发 r831): a failed close's sentence not yet in the log (its reopen threw) — written at the next open
+/** the job's log descriptor: reopened when it has none (a rotation's reopen that threw); an owed close sentence written first.
+ *  Every direct write of the wrapper's own lines (the stop, the exit) asks it — none goes nowhere while the log has no number */
+function logOpen() {
+  if (logFd === null) { logFd = fs.openSync(logPath, 'a'); logSize = fs.fstatSync(logFd).size; }
+  if (logOwed) { const b = Buffer.from(`[job-wrapper] ${logOwed}\n`); logOwed = null; fs.writeSync(logFd, b); logSize += b.length; }
+  return logFd;
+}
 function writeLog(buf) {
   if (held) { held.push(buf); return; }
   try {
-    let said = null;
     if (logFd !== null && logSize + buf.length > logCap) { // rotate: keep ONE previous generation; never unlink the live fd's file
       // B-15ac: the number is FORGOTTEN in the statement that closes it — a reopen that throws leaves NO number, never a closed one
-      // the next write would go through (another file's by then); a failed close is SAID in the job's log (its new generation)
-      logFd = closeWritten(logFd, "the job's log (its rotation)", (l) => { said = l; });
+      // the next write would go through (another file's by then); a failed close is SAID in the job's log (owed until a reopen lands)
+      logFd = closeWritten(logFd, "the job's log (its rotation)", (l) => { logOwed = l; });
       try { fs.renameSync(logPath, logPath + '.1'); } catch { }
-      logSize = 0;
+      logFd = fs.openSync(logPath, 'a'); logSize = 0;   // (a rotation counts from 0, as the release did: a rename that failed never rotates every chunk)
     }
-    if (logFd === null) { logFd = fs.openSync(logPath, 'a'); logSize = fs.fstatSync(logFd).size; }
-    if (said) { const b = Buffer.from(`[job-wrapper] ${said}\n`); fs.writeSync(logFd, b); logSize += b.length; }
-    fs.writeSync(logFd, buf); logSize += buf.length;
+    fs.writeSync(logOpen(), buf); logSize += buf.length;
   } catch { }
 }
 
@@ -731,7 +736,7 @@ const mainLive = () => !!child && !exited && child.exitCode === null && child.si
 const HUB_MAIN_WORDS = 'this job is the running VibeSpace: it is not stopped here';
 const mainKept = () => { if (!mainLive()) return false; const k = keptTest(); return !!(k && k(child.pid)); };
 let mainKeptSaid = 0, refusedAt = 0;
-const sayMainKept = (sig) => { if (mainKeptSaid++) return; try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] stop: ${sig} refused — ${HUB_MAIN_WORDS} (its main process is the VibeSpace hub, started as this job)\n`)); } catch { } };
+const sayMainKept = (sig) => { if (mainKeptSaid++) return; try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] stop: ${sig} refused — ${HUB_MAIN_WORDS} (its main process is the VibeSpace hub, started as this job)\n`)); } catch { } };
 const killMain = () => { if (mainKept()) { sayMainKept('SIGKILL'); return false; } try { child.kill('SIGKILL'); return true; } catch { return false; } };
 const termMain = (p, sig) => { if (termed.has(termKey(p)) || !mainLive()) return false; if (mainKept()) { sayMainKept(sig); return false; } termed.set(termKey(p), { at: Date.now(), pass: 'stop' }); try { process.kill(child.pid, sig); return true; } catch { return false; } };
 // round 10: the manager's kill of the scope is a delivery too — recorded, once per stop step (r9 sent a natural end's leftovers
@@ -780,7 +785,7 @@ function onStop(sig, at, by) {
       : by === 'alone-hub' ? 'the VibeSpace hub runs in its process group (started inside the job) — the engine signalled the wrapper alone; the wrapper signals the job\'s processes, once'
       : by === 'alone' ? "the engine's stop reached the wrapper alone, already stopping what its job left — the wrapper signals the rest, once"
         : 'a signal to the wrapper alone — the wrapper signals its group';
-  try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] stop: ${sig} — ${stopMs / 1000} s to end (${who}${mainBy === 'ended' ? '; its main process had already ended' : ''})\n`)); } catch { }
+  try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] stop: ${sig} — ${stopMs / 1000} s to end (${who}${mainBy === 'ended' ? '; its main process had already ended' : ''})\n`)); } catch { }
   for (const p of rows) termOnce(p); // what the engine's signal did not reach — every member, for a stop not the engine's
   // B-c134: the tree's members outside our group — not the main (its own road above), each once (the table); the drain takes the rest
   // the engine's intent carries the tree it read BEFORE its signal (ours here may come after the main's children were re-parented)
@@ -791,8 +796,8 @@ function onStop(sig, at, by) {
   let treeHeard = 0;
   for (const r of stopTree) if (termOnce(r)) treeHeard++;
   const treeCut = tree.cut || fromIntent.cut;
-  if (tree.pruned) { try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] stop: its tree walk left alone ${tree.pruned} process${tree.pruned === 1 ? '' : 'es'} it does not own (the hub's, another job's or conversation's)\n`)); } catch { } }   // B-c134 cure 2: said, as the engine's walk says it
-  if (stopTree.length || treeCut) { try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] stop: ${stopTree.length} process${stopTree.length === 1 ? '' : 'es'} it started outside its group (${[...new Set(stopTree.map((r) => r[3]))].join(', ') || '—'}) hear${stopTree.length === 1 ? 's' : ''} it from the wrapper${treeHeard < stopTree.length ? ` (${stopTree.length - treeHeard} could not be signalled: gone, or not ours)` : ''}${treeCut ? '; its process tree was read only in part — what it started may be left' : ''}\n`)); } catch { } }
+  if (tree.pruned) { try { fs.writeSync(logOpen(), Buffer.from(`[job-wrapper] stop: its tree walk left alone ${tree.pruned} process${tree.pruned === 1 ? '' : 'es'} it does not own (the hub's, another job's or conversation's)\n`)); } catch { } }   // B-c134 cure 2: said, as the engine's walk says it
+  if (stopTree.length || treeCut) { try { fs.writeSync(logOpen(), Buffer.from(`[job-wrapper] stop: ${stopTree.length} process${stopTree.length === 1 ? '' : 'es'} it started outside its group (${[...new Set(stopTree.map((r) => r[3]))].join(', ') || '—'}) hear${stopTree.length === 1 ? 's' : ''} it from the wrapper${treeHeard < stopTree.length ? ` (${stopTree.length - treeHeard} could not be signalled: gone, or not ours)` : ''}${treeCut ? '; its process tree was read only in part — what it started may be left' : ''}\n`)); } catch { } }
   if (scoped() && !listed) scopeTerm(sig);
   const on = mainBy === 'engine' || mainBy === 'wrapper' ? ` on ${sig}` : ''; // «did not end on SIGTERM» only when one reached it
   const left = Math.max(0, at + stopMs - Date.now());
@@ -878,7 +883,7 @@ function sayKept(n, what, unread = false) {
   if (keptSaid) return; keptSaid = true;
   // small 2: a list that cannot be read ends nothing — said so, never «ended one by one»
   const how = unread ? 'and its list could not be read: nothing of it was ended — what the job started may still run' : 'so the scope is never killed whole: the job\'s own processes are ended one by one, the hub\'s left alone';
-  try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] ${what}: its scope holds ${n} process${n === 1 ? '' : 'es'} no stop of this job ends — the VibeSpace hub started inside this job, or what it runs — ${how}\n`)); } catch { }
+  try { fs.writeSync(logOpen(), Buffer.from(`[job-wrapper] ${what}: its scope holds ${n} process${n === 1 ? '' : 'es'} no stop of this job ends — the VibeSpace hub started inside this job, or what it runs — ${how}\n`)); } catch { }
 }
 /** B-c134: the tree the engine read before its signal, from its intent — rows [pid, start, pgid, comm] (each proven again at the act) */
 function intentTree() {
@@ -973,7 +978,7 @@ function escapedOf() { // started after us, outside our group, carrying the job'
 async function drainGroup() {
   const left = groupLeft();
   const out = escapedOf(), mine = keeps && stopping; // a service STOPPED: what it kept is its own, stopped with it — outside its group too
-  if (out.cut) { try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] stop: its scan for what left its group read only part of the processes (past 250 ms) — what it did not read may be left running\n`)); } catch { } }   // B-7ca1 (its round's should 5): a cut scan is said, as the engine's
+  if (out.cut) { try { fs.writeSync(logOpen(), Buffer.from(`[job-wrapper] stop: its scan for what left its group read only part of the processes (past 250 ms) — what it did not read may be left running\n`)); } catch { } }   // B-7ca1 (its round's should 5): a cut scan is said, as the engine's
   // B-7ca1 (the group rung — no scope: a container, a pod): a TASK's stop ends what carries its mark outside its group too — a child that
   // made its own group (setsid, the timeout program) and was re-parented before the stop is neither in the group nor under the tree the
   // stop read; by identity (pid + start), never one that started before us, never a hub started inside the job (keptTest)
@@ -1054,7 +1059,7 @@ async function ended(code, signal) {
     : memory.cause === 'oom' ? ` — killed: out of memory (${memory.how})` : '';
   const end = (drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '') + (drained.scopeUnread ? ` — its scope's list could not be read${typeof drained.scopeUnread === 'string' ? ` (${drained.scopeUnread})` : ''}: what it started may still run` : '');
   if (VAL) { const f = flushMask(); if (f.length) writeLog(f); } // …and what came on the pipes after the exit event, masked
-  try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
+  try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
   writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty, ...(drained.scopeUnread ? { scopeUnread: drained.scopeUnread } : {}) } : {}) });
   process.exit(code === null ? 143 : code);
 }
@@ -1066,13 +1071,13 @@ async function ended(code, signal) {
 // exits, and only that exit closes the fd: the hub, seeing the channel close with no ACK, reads the code it names
 function notStarted(why, code = 'values_unreadable') {
   const line = `[job-wrapper] refused: ${why} — the job was not started\n`;
-  try { fs.writeSync(logFd, Buffer.from(line)); } catch { }
+  try { fs.writeSync(logOpen(), Buffer.from(line)); } catch { }
   try { process.stderr.write(line); } catch { }
   writeExit({ code: 2, signal: null, endedAt: Date.now(), refused: code });
   process.exit(2);
 }
 function stoppedBefore() { // stopped while its values were on their way: it never ran
-  try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] stopped (${stopping}) before the job started\n`)); } catch { }
+  try { fs.writeSync(logOpen(), Buffer.from(`[job-wrapper] stopped (${stopping}) before the job started\n`)); } catch { }
   writeExit({ code: null, signal: stopping, endedAt: Date.now(), stop: stopping, stopBy });
   process.exit(143);
 }

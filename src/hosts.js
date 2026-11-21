@@ -2466,7 +2466,7 @@ class HostManager {
    *  is impossible), never splices. Extracted as a method so a test can neuter
    *  it and show the pre-fix doubling. */
   _appendDeltaAt(cachePath, offset, buf) {
-    let fd;
+    let fd, closeFailed = false;   // B-15ac follow (主开发 r831): a failed close is NO landing — false, so the caller reads the whole file again
     try {
       try { fd = fs.openSync(cachePath, 'r+'); } catch { return false; }     // no prefix to grow — whole refetch
       if (fs.fstatSync(fd).size !== offset) return false;                    // the slot moved under the delta
@@ -2478,8 +2478,8 @@ class HostManager {
         if (!(n > 0)) throw new Error(`short cache write at ${offset + off}`);
         off += n;
       }
-      return true;
-    } finally { fd = FC.closeWritten(fd, `the hosts delta (${path.basename(cachePath)})`, (l) => console.warn(`[hosts] ${l}`)); }   // B-15ac: said, never swallowed
+    } finally { fd = FC.closeWritten(fd, `the hosts delta (${path.basename(cachePath)})`, (l) => { closeFailed = true; console.warn(`[hosts] ${l}`); }); }   // B-15ac: said, never swallowed
+    return !closeFailed;
   }
   /** TERMINAL vs DEGRADABLE (B-7638 round 5). The data-plane rung's catch means
    *  "this transport did not work — try the other one", and that is right for

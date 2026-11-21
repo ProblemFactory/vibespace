@@ -34,7 +34,8 @@
 // close / open destructured from fs and called bare, and fs.close on an alias outside FSLIKE (none in src, server.js or data/bin).
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import http from 'node:http';
 import { createRequire } from 'node:module';
 import { checker } from './lib/check.mjs';
 import { gitEnvFrom } from './git-env.mjs';
@@ -433,12 +434,12 @@ console.log('⑤ a close of a written file says a failed close once (its code, w
   // THE SITES go through it (pins): the hub's two, the three wrappers' overwrite, the job's log rotation (its number forgotten), the CLI
   const P = (f, re) => re.test(FILES[f] || '');
   const sites = {
-    hosts: P('src/hosts.js', /\} finally \{ fd = FC\.closeWritten\(fd, `the hosts delta \(\$\{path\.basename\(cachePath\)\}\)`, \(l\) => console\.warn\(`\[hosts\] \$\{l\}`\)\); \}/),
+    hosts: P('src/hosts.js', /\} finally \{ fd = FC\.closeWritten\(fd, `the hosts delta \(\$\{path\.basename\(cachePath\)\}\)`, \(l\) => \{ closeFailed = true; console\.warn\(`\[hosts\] \$\{l\}`\); \}\); \}[^\n]*\n\s*return !closeFailed;/),
     channels: P('src/channel-store.js', /journalFd = FC\.closeWritten\(journalFd, 'the channels journal', \(l\) => warn\(`\[channels\] \$\{l\}`\)\);/),
     chat: P('data/bin/chat-wrapper.js', /\} finally \{ fd = closeWritten\(fd, `\$\{path\.basename\(file\)\} \(rewritten in place\)`, log\); \}/),
     codex: P('data/bin/codex-chat-wrapper.js', /\} finally \{ fd = closeWritten\(fd, `\$\{path\.basename\(file\)\} \(rewritten in place\)`, log\); \}/),
     pty: P('data/bin/pty-wrapper.js', /\} finally \{ fd = closeWritten\(fd, `\$\{path\.basename\(file\)\} \(rewritten in place\)`, log\); \}/),
-    job: P('data/bin/job-wrapper.js', /logFd = closeWritten\(logFd, "the job's log \(its rotation\)", \(l\) => \{ said = l; \}\);[\s\S]{0,200}if \(logFd === null\) \{ logFd = fs\.openSync\(logPath, 'a'\);/) && !/fs\.closeSync\(logFd\)/.test(FILES['data/bin/job-wrapper.js'] || ''),
+    job: P('data/bin/job-wrapper.js', /logFd = closeWritten\(logFd, "the job's log \(its rotation\)", \(l\) => \{ logOwed = l; \}\);/) && !/fs\.closeSync\(logFd\)/.test(FILES['data/bin/job-wrapper.js'] || '') && !/fs\.writeSync\(logFd, /.test((FILES['data/bin/job-wrapper.js'] || '').replace(/function logOpen\(\) \{[\s\S]*?\n\}\n/, '')),
     cli: P('data/bin/vibespace-channels', /if \(fh\) fh = await closeWrittenHandle\(fh, 'the attachment being saved', \(w\) => \{ closeSaid = w; \}\);\n\s*if \(closeSaid\) console\.error\(`vibespace-channels: \$\{closeSaid\}`\);/),
   };
   ok(Object.values(sites).every(Boolean), '⑤ THE SITES go through the helper: the hosts delta, the channels journal, the chat / codex / pty wrappers\' overwrite in place (their own log), the job\'s log rotation (the number forgotten — a reopen that throws leaves none, never a closed one), the channels CLI\'s attachment (pins)', sites);
@@ -452,11 +453,95 @@ console.log('⑤ a close of a written file says a failed close once (its code, w
     return { landed: r.r, closes: r.n, said: warns.filter((l) => /^\[hosts\] the hosts delta \(cache\.jsonl\): the file could not be closed \(EIO\)/.test(l)).length };
   };
   const ds = deltaScene(HostManager, 'real');
-  ok(ds.landed === true && ds.closes === 1 && ds.said === 1, '⑤ the hosts delta, driven: its close refused (placed) is SAID once in the hub\'s journal by its name — the delta\'s answer unchanged, closed once', ds);
+  ok(ds.landed === false && ds.closes === 1 && ds.said === 1, '⑤ the hosts delta, driven: its close refused (placed) is SAID once in the hub\'s journal by its name, and it answers FALSE (no landing — its caller reads the whole file again: round wrm8730fx), closed once', ds);
   const HSRC = FILES['src/hosts.js'];
   const XH = mutantCopies('fdc-delta-swallow', REPO).load('src/hosts.js', anchored(HSRC, /\} finally \{ fd = FC\.closeWritten\(fd, `the hosts delta[^\n]*\n/, '} finally { if (fd !== undefined) { try { fs.closeSync(fd); } catch { } } }   // MUTANT: the old swallow\n', 'delta-swallow'), 'delta-swallow').HostManager;
   const xd = deltaScene(XH, 'red');
   ok(xd.landed === true && xd.said === 0, 'CONTROL (the hosts delta\'s old swallow, in a copy): its close refused and NOTHING said — red', xd);
+}
+
+// ── ⑤b ITS FOLLOW (round wrm8730fx, 主开发 r831): every road a PLACED close failure, never only a pin on its text — the channels
+// journal (a real store), a wrapper's in-place rewrite and the job log's rotation (each built from its own file's text), the channels
+// CLI's attachment (the real CLI, a child, its FileHandle's close refused by a preload). REDs (in copies): each road's old line.
+console.log('⑤b every close road, driven: the channels journal, a wrapper\'s rewrite in place, the job log\'s rotation with a reopen that throws, the CLI\'s attachment');
+{
+  const FCm = require(path.join(REPO, 'src/fd-close.js'));
+  const eio = () => Object.assign(new Error('EIO: a stand-in refused close'), { code: 'EIO' });
+  const placed = (fn, refuse = () => true) => { const cs = fs.closeSync; let n = 0; fs.closeSync = function (fd, ...a) { if (refuse(fd)) { n++; throw eio(); } return cs.call(this, fd, ...a); }; try { return { r: fn(), n }; } finally { fs.closeSync = cs; } };
+  // THE CHANNELS JOURNAL: a real store, one stamp (the journal opens), its close refused for the journal's descriptor only
+  const CSREL = 'src/channel-store.js';
+  const journalScene = async (CS, tag) => {
+    const d = scratchDir('fdc-journal-' + tag); const warns = [];
+    const st = CS.createChannelStore({ dir: d, log: { warn: (...a) => warns.push(a.join(' ')), log() { } } });
+    await st.index.update(() => { st.index.entry('acct', 'c1', { create: true }); });
+    st.stamps.set('acct/c1', { lastPollAt: 1000 });
+    const jl = st.stamps.log;
+    const r = placed(() => st.close(), (fd) => { try { return fs.readlinkSync(`/proc/self/fd/${fd}`) === jl; } catch { return false; } });
+    return { refused: r.n, said: warns.filter((l) => /\[channels\] the channels journal: the file could not be closed \(EIO\) — what was written may not be on disk/.test(l)).length };
+  };
+  const js = await journalScene(require(path.join(REPO, CSREL)), 'real');
+  ok(js.refused === 1 && js.said === 1, '⑤b the channels journal, driven (a real store): its close refused (placed) is SAID once in the hub\'s journal by its name', js);
+  const XJ = mutantCopies('fdc-journal-swallow', REPO).load(CSREL, anchored(FILES[CSREL], /^ {4}journalFd = FC\.closeWritten\(journalFd, 'the channels journal'[^\n]*\n/m, '    if (journalFd !== null) { try { fs.closeSync(journalFd); } catch { } journalFd = null; }   // MUTANT: the old swallow\n', 'journal-swallow'), 'journal-swallow');
+  const xj = await journalScene(XJ, 'red');
+  ok(xj.refused === 1 && xj.said === 0, 'CONTROL (the journal\'s old swallow, in a copy): its close refused and NOTHING said — red', xj);
+  // A WRAPPER'S REWRITE IN PLACE (pty-wrapper's overwriteIfPresent, built from its own text): the session meta it rewrites
+  const owOf = (src) => { const a = src.indexOf('function overwriteIfPresent('), b = src.indexOf('\n}\n', a) + 3; return new Function('fs', 'path', 'closeWritten', 'log', `${src.slice(a, b)}\nreturn overwriteIfPresent;`); };   // eslint-disable-line no-new-func
+  const owScene = (src, tag) => {
+    const d = scratchDir('fdc-overwrite-' + tag); const f = path.join(d, 'sess-1.meta.json'); fs.writeFileSync(f, '{"old":"a longer old meta"}');
+    const logs = []; const fn = owOf(src)(fs, path, FCm.closeWritten, (m) => logs.push(m));
+    const r = placed(() => fn(f, '{"new":1}', { pad: true }));
+    return { refused: r.n, said: logs.filter((l) => /^sess-1\.meta\.json \(rewritten in place\): the file could not be closed \(EIO\)/.test(l)).length, bytes: fs.readFileSync(f, 'utf8').trim() };
+  };
+  const PTY = FILES['data/bin/pty-wrapper.js'];
+  const ow = owScene(PTY, 'real');
+  ok(ow.refused === 1 && ow.said === 1 && ow.bytes === '{"new":1}', '⑤b a wrapper\'s rewrite in place (pty-wrapper overwriteIfPresent, from its own text): its close refused (placed) is SAID once in the wrapper\'s own log, the meta rewritten', ow);
+  const xow = owScene(PTY.replace(/\} finally \{ fd = closeWritten\(fd, `\$\{path\.basename\(file\)\} \(rewritten in place\)`, log\); \}[^\n]*/, '} finally { try { fs.closeSync(fd); } catch {} }'), 'red');
+  ok(xow.refused === 1 && xow.said === 0, 'CONTROL (the wrapper\'s old swallow, in its text): its close refused and NOTHING said — red', xow);
+  // THE JOB LOG'S ROTATION (job-wrapper's logOpen + writeLog, from its own text): the close refused AND the reopen throws — the
+  // sentence is OWED and written at the next open, the number never a closed one
+  const rotOf = (src, logPath, logCap) => {
+    const a = src.indexOf('let logOwed = null;'), b = src.indexOf('\n}\n', src.indexOf('function writeLog(buf) {')) + 3;
+    return new Function('fs', 'closeWritten', 'logPath', 'logCap', `let logFd = fs.openSync(logPath, 'a'); let logSize = fs.fstatSync(logFd).size; let held = null;\n${src.slice(a, b)}\nreturn { writeLog, fd: () => logFd };`)(fs, FCm.closeWritten, logPath, logCap);   // eslint-disable-line no-new-func
+  };
+  const rotScene = (src, tag) => {
+    const d = scratchDir('fdc-rotation-' + tag); const lp = path.join(d, 'job.log');
+    const J = rotOf(src, lp, 10);
+    J.writeLog(Buffer.from('first-8\n'));
+    const os = fs.openSync; let refusedOpen = 0;
+    fs.openSync = function (f, ...a) { if (String(f) === lp && !refusedOpen) { refusedOpen++; throw Object.assign(new Error('EMFILE: a stand-in'), { code: 'EMFILE' }); } return os.call(this, f, ...a); };
+    let r; try { r = placed(() => J.writeLog(Buffer.from('second8\n'))); } finally { fs.openSync = os; }
+    const afterFd = J.fd();
+    J.writeLog(Buffer.from('third\n'));
+    const text = fs.readFileSync(lp, 'utf8');
+    return { refusedClose: r.n, refusedOpen, noNumber: afterFd === null, said: /\[job-wrapper\] the job's log \(its rotation\): the file could not be closed \(EIO\) — what was written may not be on disk/.test(text), third: text.includes('third'), rotated: fs.existsSync(lp + '.1') };
+  };
+  const JW = FILES['data/bin/job-wrapper.js'];
+  const rs = rotScene(JW, 'real');
+  ok(rs.refusedClose === 1 && rs.refusedOpen === 1 && rs.noNumber && rs.said && rs.third && rs.rotated,
+    '⑤b the job log\'s rotation (from its own text): its close refused AND its reopen throwing leave NO number (never a closed one); the next write reopens and the owed sentence is in the log before its line', rs);
+  const xrs = rotScene(JW.replace('logFd = closeWritten(logFd, "the job\'s log (its rotation)", (l) => { logOwed = l; });', 'logFd = closeWritten(logFd, "the job\'s log (its rotation)", () => { });'), 'red');
+  ok(xrs.refusedClose === 1 && xrs.noNumber && !xrs.said && xrs.third, 'CONTROL (the sentence dropped with the failed reopen, in its text): the log never says the close failed — red', xrs);
+  // THE CHANNELS CLI'S ATTACHMENT (the real CLI, a child): its FileHandle's close refused (a preload) — said, closed ONCE
+  const cliScene = async (cliPath, tag) => {
+    const d = scratchDir('fdc-cli-' + tag); const out = path.join(d, 'got.bin'), count = path.join(d, 'closes.txt'), pre = path.join(d, 'pre.cjs');
+    fs.writeFileSync(pre, `const fs = require('fs'); const fsp = fs.promises; const open = fsp.open; let n = 0; process.on('exit', () => { try { fs.writeFileSync(${JSON.stringify(count)}, String(n)); } catch { } });
+fsp.open = async (...a) => { const h = await open.apply(fsp, a); if (String(a[0]).includes('.vibespace-attachment-')) { const c = h.close.bind(h); h.close = async () => { n++; await c(); throw Object.assign(new Error('EIO: a stand-in refused close'), { code: 'EIO' }); }; } return h; };\n`);
+    const body = Buffer.from('attachment bytes\n');
+    const srv = http.createServer((req, res) => { req.resume(); res.writeHead(200, { 'content-length': body.length, 'x-vibespace-attachment': encodeURIComponent(JSON.stringify({ mime: 'application/octet-stream', from: 'a stand-in', conversation: { title: 'a stand-in' } })) }); res.end(body); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const env = { PATH: process.env.PATH, HOME: d, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: 'vst_x' };
+    const r = await new Promise((resolve) => { const ch = spawn(process.execPath, ['-r', pre, cliPath, 'attachment', 'acc/c1', 'm1', 'a1', '--out', out], { env }); let err = ''; ch.stderr.on('data', (x) => { err += x; }); ch.on('close', (code) => resolve({ code, err })); });
+    srv.close();
+    let closes = -1; try { closes = Number(fs.readFileSync(count, 'utf8')); } catch { }
+    return { code: r.code, closes, said: /EIO: a stand-in refused close/.test(r.err), kept: fs.existsSync(out), err: r.err.slice(0, 300) };
+  };
+  const cl = await cliScene(path.join(REPO, 'data/bin/vibespace-channels'), 'real');
+  ok(cl.code === 1 && cl.closes === 1 && cl.said && !cl.kept, '⑤b the channels CLI\'s attachment (the real CLI, a child): its close refused is SAID and the command exits 1, nothing kept — the handle forgotten BEFORE the awaited close, so it is closed ONCE', cl);
+  { const d = scratchDir('fdc-cli-red-bin'); const cli = path.join(d, 'vibespace-channels');
+    fs.writeFileSync(cli, anchored(FILES['data/bin/vibespace-channels'], /^ {6}\{ const h = fh; fh = null; await h\.close\(\); \}[^\n]*\n/m, '      await fh.close(); fh = null;   // MUTANT: the release\'s order\n', 'cli-order'));
+    for (const [from, to] of [['src/cli-call.js', 'cli-call.js'], ['src/agent-cli-text.js', 'agent-cli-text.js'], ['src/fd-close.js', 'fd-close.js']]) fs.copyFileSync(path.join(REPO, from), path.join(d, to));
+    const xcl = await cliScene(cli, 'red');
+    ok(xcl.code === 1 && xcl.closes === 2, 'CONTROL (the release\'s order — the handle forgotten only AFTER its awaited close, in a copy): the catch closes it a SECOND time — red', xcl); }
 }
 
 report();
