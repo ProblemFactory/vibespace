@@ -16008,7 +16008,7 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
 - **The edit (insertions only):**
   - The guard is the census's own `if (typeof c !== 'boolean') throw new TypeError(…)`, placed right after the body's `{` ON THE OPENING LINE, so no line moves.
   - An arrow with an EXPRESSION body gets a block made of it, on the same lines: `=> { <guard> return (<the expression>); }`.
-  - In every call, each operand of an && / || chain (and each branch of a ?:) that is not a boolean BY ITS OPERATOR (true / false, `!`, a comparison, instanceof / in) goes through THE GUARDED COERCION of the shared checker, `verdictOf( … )` (scripts/lib/check.mjs), imported on the file's last code line (an import is hoisted: no line moves). So a comparison never stands under a wrap, which the wall-clock census reads a bound through.
+  - In every call, each operand of an && / || chain (and each branch of a ?:) that is not a boolean BY ITS OPERATOR (true / false, `!`, a comparison, instanceof / in) goes through THE GUARDED COERCION of the shared checker, `verdictOf( … )` (scripts/lib/check.mjs), imported on the file's last code line (an import is hoisted: no line moves). So a comparison never stands under a wrap, which the wall-clock census reads a bound through. A comma expression is wrapped WITH its parentheses (`verdictOf((a, b))`: inside them it would be two arguments).
   - THE ROW'S CLASS STAYS VISIBLE (the coordinator's r1347): never a plain `!!( … )`, which would turn every vacuous leg of the tree into a `true` the guard accepts for good. With `verdictOf`, a PROMISE or a FUNCTION handed as a verdict FAILS, red by name: a line names the suite and the kind, and the helper's own ✗ names the leg. So the applied tree's first run LISTS the vacuous legs it held, each to be cured or named before the apply is taken. Any other value coerces exactly as `!!` would (a match, a length, a string): coerced, not audited.
   - A call inside another call's condition composes.
 - **When a wrap is exact:** a helper is guarded only if its body asks its condition TRUE OR FALSE: an if / while / ?: test, a `!`, or an && / || in a test or a statement. A helper that hands its condition back is guarded only where every call reads the value as true or false. A condition a guarded call wraps counts as read so, which is the same reading a second run makes; both rules form one fixpoint over the guarded set. There, a call passes exactly when it passed before, and the guard never throws on a call that was there.
@@ -16020,7 +16020,7 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
   - a name declared twice in one scope;
   - a file with a direct eval or a `with` statement;
   - a body that uses its condition as more than true or false (`c === true`, `typeof c`, printed, stored, passed on, `c ?? x`, or a function helper's own `arguments`);
-  - a file that already names another `verdictOf`;
+  - a file that binds both `verdictOf` and `verdictOfGuard` (a file that binds its own `verdictOf` imports the coercion AS `verdictOfGuard`; only the name a file imports from the shared checker counts as a coercion there, never a person's own function of that name);
   - a call with no condition argument, or by spread;
   - a call that hands it a STRING where the condition goes (whole or joined with `+`), or holds a condition in its name slot: a swap, so cure the call first;
   - a call of it inside another call's name argument.

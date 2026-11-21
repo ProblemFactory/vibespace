@@ -206,7 +206,7 @@ export function bindingsOf(ast, names) {
 // A nested function that binds the same name is another variable; one that reads it is judged the same way (a return there is
 // a value).
 const isStmt = (c) => /(?:Statement|Declaration)$/.test(c.type) || c.type === 'StaticBlock';
-export function condUse(fn, name, wrapped = null) {
+export function condUse(fn, name, wrapped = null, coerce = VERDICT) {
   let value = null, hands = false, ownArgs = fn.type !== 'ArrowFunctionExpression';   // a function's own `arguments` reads its condition unseen
   const seen = (n, pos) => { if (pos === 'return') hands = true; else if (pos === 'value' && !value) value = n; };
   function expr(n, pos, nested) {
@@ -219,7 +219,7 @@ export function condUse(fn, name, wrapped = null) {
       case 'ConditionalExpression': expr(n.test, 'test', nested); expr(n.consequent, pos, nested); return expr(n.alternate, pos, nested);
       case 'SequenceExpression': n.expressions.forEach((x, i) => expr(x, i === n.expressions.length - 1 ? pos : 'discard', nested)); return;
       case 'CallExpression':
-        if (isCoercion(n)) return expr(n.arguments[0], 'test', nested);
+        if (isCoercion(n, coerce)) return expr(n.arguments[0], 'test', nested);
         // the condition of a call the tool guards is read as true or false once wrapped (the same reading a second run makes)
         if (wrapped && n.arguments.some((a) => wrapped(n, a))) { expr(n.callee, 'value', nested); for (const a of n.arguments) expr(a, wrapped(n, a) ? 'test' : 'value', nested); return; }
         break;
@@ -259,7 +259,7 @@ export function condUse(fn, name, wrapped = null) {
 // where a call's value goes: 'discard' (a statement), 'test' (read as true or false — under a `!`, an if, or as the condition
 // of a call the tool guards: `wrapped`) or 'value'
 export function parentsOf(ast) { const p = new Map(); const v = (n) => eachKid(n, (c) => { p.set(c, n); v(c); }); v(ast); return p; }
-export function callPos(node, parent, wrapped = null) {
+export function callPos(node, parent, wrapped = null, coerce = VERDICT) {
   let n = node;
   for (;;) {
     const p = parent.get(n);
@@ -272,8 +272,8 @@ export function callPos(node, parent, wrapped = null) {
       case 'ForStatement': return p.test === n ? 'test' : p.update === n || p.init === n ? 'discard' : 'value';
       case 'ConditionalExpression': if (p.test === n) return 'test'; n = p; continue;
       case 'SequenceExpression': if (p.expressions[p.expressions.length - 1] !== n) return 'discard'; n = p; continue;
-      case 'LogicalExpression': { if (p.operator === '??') return 'value'; const up = callPos(p, parent, wrapped); return up === 'test' ? 'test' : up === 'discard' ? (p.left === n ? 'test' : 'discard') : 'value'; }
-      case 'CallExpression': return isCoercion(p) || (wrapped && wrapped(p, n)) ? 'test' : 'value';
+      case 'LogicalExpression': { if (p.operator === '??') return 'value'; const up = callPos(p, parent, wrapped, coerce); return up === 'test' ? 'test' : up === 'discard' ? (p.left === n ? 'test' : 'discard') : 'value'; }
+      case 'CallExpression': return isCoercion(p, coerce) || (wrapped && wrapped(p, n)) ? 'test' : 'value';
       default: return 'value';
     }
   }
@@ -283,20 +283,42 @@ export function callPos(node, parent, wrapped = null) {
 // THE WRAP (the coordinator's r1347): scripts/lib/check.mjs verdictOf — the GUARDED coercion, never a plain `!!( … )`: a
 // thenable or a function handed as a verdict fails red by name, any other value coerces as !!value. Its import goes on the
 // file's last code line (an import is hoisted: no line moves); `Boolean(x)` and `verdictOf(x)` are booleans by their call.
-export const VERDICT = 'verdictOf';
-const isCoercion = (n) => !!n && n.type === 'CallExpression' && n.callee.type === 'Identifier' && (n.callee.name === VERDICT || n.callee.name === 'Boolean') && n.arguments.length === 1 && n.arguments[0].type !== 'SpreadElement';
-export const importText = (file = '', after = '') => `${after === ';' ? ' ' : ';'}import { ${VERDICT} } from '${String(file).startsWith('lib/') ? './check.mjs' : './lib/check.mjs'}';`;
+// A file that binds its own `verdictOf` imports it as VERDICT_ALIAS; only the name a file imports from the shared checker (or
+// `Boolean`) is a coercion there — never a person's own function of that name.
+export const VERDICT = 'verdictOf', VERDICT_ALIAS = 'verdictOfGuard';
+const isCoercion = (n, name = VERDICT) => !!n && n.type === 'CallExpression' && n.callee.type === 'Identifier' && (n.callee.name === 'Boolean' || (!!name && n.callee.name === name)) && n.arguments.length === 1 && n.arguments[0].type !== 'SpreadElement';
+export const importText = (file = '', after = '', name = VERDICT) => `${after === ';' ? ' ' : ';'}import { ${name === VERDICT ? VERDICT : `${VERDICT} as ${name}`} } from '${String(file).startsWith('lib/') ? './check.mjs' : './lib/check.mjs'}';`;
+// every name the file BINDS anywhere (declarations, parameters, imports, catch parameters, class / function names)
+export function declaredNames(ast) {
+  const out = new Set();
+  const visit = (n) => {
+    const t = n.type;
+    if (t === 'VariableDeclarator') for (const id of patternIds(n.id)) out.add(id.name);
+    else if (FN.has(t)) { if (n.id) out.add(n.id.name); for (const p of n.params) for (const id of patternIds(p)) out.add(id.name); }
+    else if ((t === 'ClassDeclaration' || t === 'ClassExpression') && n.id) out.add(n.id.name);
+    else if (t === 'CatchClause' && n.param) for (const id of patternIds(n.param)) out.add(id.name);
+    else if (t === 'ImportSpecifier' || t === 'ImportDefaultSpecifier' || t === 'ImportNamespaceSpecifier') out.add(n.local.name);
+    eachKid(n, visit);
+  };
+  visit(ast);
+  return out;
+}
+// the shared checker's coercion this file imports already (an earlier run's), as { local } — or null
+export function ourImport(ast) {
+  for (const n of ast.body) if (n.type === 'ImportDeclaration' && /(?:^|\/)check\.mjs$/.test(String(n.source.value))) for (const x of n.specifiers) if (x.type === 'ImportSpecifier' && x.imported.name === VERDICT) return { local: x.local.name };
+  return null;
+}
 const CMP = new Set(['==', '!=', '===', '!==', '<', '<=', '>', '>=', 'instanceof', 'in']);
-export function boolByNode(n) {
+export function boolByNode(n, name = VERDICT) {
   switch (n && n.type) {
     case 'Literal': return typeof n.value === 'boolean';
     case 'UnaryExpression': return n.operator === '!' || n.operator === 'delete';
     case 'BinaryExpression': return CMP.has(n.operator);
-    case 'LogicalExpression': return n.operator !== '??' && boolByNode(n.left) && boolByNode(n.right);
-    case 'ConditionalExpression': return boolByNode(n.consequent) && boolByNode(n.alternate);
-    case 'ParenthesizedExpression': return boolByNode(n.expression);
-    case 'SequenceExpression': return boolByNode(n.expressions[n.expressions.length - 1]);
-    case 'CallExpression': return isCoercion(n);
+    case 'LogicalExpression': return n.operator !== '??' && boolByNode(n.left, name) && boolByNode(n.right, name);
+    case 'ConditionalExpression': return boolByNode(n.consequent, name) && boolByNode(n.alternate, name);
+    case 'ParenthesizedExpression': return boolByNode(n.expression, name);
+    case 'SequenceExpression': return boolByNode(n.expressions[n.expressions.length - 1], name);
+    case 'CallExpression': return isCoercion(n, name);
     default: return false;
   }
 }
@@ -314,11 +336,12 @@ export function stringByNode(n) {
 // where the coercion goes so that a condition is a boolean by its operator, as true or as false as it was: around each operand of
 // an && / || chain and each branch of a ?: that is not one — so a comparison never stands under a `!` (the wall-clock census
 // reads a bound through it), and the wrap is the smallest
-export function wrapsOf(n) {
-  if (boolByNode(n)) return [];
-  if (n.type === 'ParenthesizedExpression') return wrapsOf(n.expression);
-  if (n.type === 'LogicalExpression' && n.operator !== '??') return [...wrapsOf(n.left), ...wrapsOf(n.right)];
-  if (n.type === 'ConditionalExpression') return [...wrapsOf(n.consequent), ...wrapsOf(n.alternate)];
+export function wrapsOf(n, name = VERDICT) {
+  if (boolByNode(n, name)) return [];
+  // a comma expression is wrapped WITH its parentheses: `verdictOf(a, b)` would be two arguments
+  if (n.type === 'ParenthesizedExpression') return n.expression.type === 'SequenceExpression' ? [[n.start, n.end]] : wrapsOf(n.expression, name);
+  if (n.type === 'LogicalExpression' && n.operator !== '??') return [...wrapsOf(n.left, name), ...wrapsOf(n.right, name)];
+  if (n.type === 'ConditionalExpression') return [...wrapsOf(n.consequent, name), ...wrapsOf(n.alternate, name)];
   return [[n.start, n.end]];
 }
 export function guardText(name, condP) {
@@ -343,6 +366,10 @@ export function planFile(src, { C, acorn, file = '' }) {
   let B;
   try { B = bindingsOf(code.ast, new Set(inCode.map((d) => d.name))); } catch (e) { res.skipped = `the scope walk stopped (${String(e.message).slice(0, 60)})`; return res; }
   const text = (n) => src.slice(n.start, n.end), lineAt = lineIndex(src), left = new Map();
+  // THE FILE'S COERCION NAME: the one an earlier run imported, else verdictOf, else (the file binds its own) the alias
+  const ours = ourImport(code.ast), bound = declaredNames(code.ast);
+  const coerce = ours ? ours.local : !bound.has(VERDICT) ? VERDICT : !bound.has(VERDICT_ALIAS) ? VERDICT_ALIAS : null;
+  res.coerce = coerce;
   let parent = null;
   const parents = () => parent || (parent = parentsOf(code.ast));
   let targets = [];
@@ -350,6 +377,7 @@ export function planFile(src, { C, acorn, file = '' }) {
     const b = B.at.get(d.at), slot = d.order === 'cond-first' ? 0 : 1, nameSlot = 1 - slot;
     const leave = (kind, where = '') => left.set(d, [kind, where]);
     if (B.dynamic) { leave(`the file holds ${B.dynamic}: a call can reach the helper unseen`); continue; }
+    if (!coerce) { leave(`the file binds both ${VERDICT} and ${VERDICT_ALIAS}: no name is free for the coercion`); continue; }
     if (!b || !b.fn) { leave('the census reads a helper where the parser binds no function'); continue; }
     if (b.expr) { leave('a named function expression: its calls go through another binding'); continue; }
     if (b.twice) { leave('its name is declared twice in one scope'); continue; }
@@ -363,7 +391,7 @@ export function planFile(src, { C, acorn, file = '' }) {
     if (bad) { leave('a call with no condition argument, or by spread', ` (line ${lineAt(bad.node.start)})`); continue; }
     const swap = mine.find((c) => stringByNode(c.node.arguments[slot]));
     if (swap) { leave('a call hands it a string where the condition goes — the swap the guard exists for: cure the call first', ` (line ${lineAt(swap.node.start)})`); continue; }
-    const named = mine.find((c) => c.node.arguments[nameSlot] && boolByNode(c.node.arguments[nameSlot]) && !boolByNode(c.node.arguments[slot]));
+    const named = mine.find((c) => c.node.arguments[nameSlot] && boolByNode(c.node.arguments[nameSlot], coerce) && !boolByNode(c.node.arguments[slot], coerce));
     if (named) { leave('a call holds a condition in its NAME slot — a swap: cure the call first', ` (line ${lineAt(named.node.start)})`); continue; }
     targets.push({ d, b, slot, nameSlot, p, mine });
   }
@@ -377,9 +405,9 @@ export function planFile(src, { C, acorn, file = '' }) {
     const wrapped = (call, arg) => { const s = slots.get(callBind.get(call)); return s !== undefined && call.arguments[s] === arg; };
     const out = new Map();
     for (const t of targets) {
-      const u = condUse(t.b.fn, t.p.name, wrapped);
+      const u = condUse(t.b.fn, t.p.name, wrapped, coerce);
       if (u.value) { out.set(t, ['it uses its condition as more than true or false — a wrap would change what it sees', ` (line ${lineAt(u.value.start)})`]); continue; }
-      if (u.hands) { const read = t.mine.find((c) => callPos(c.node, parents(), wrapped) === 'value'); if (read) out.set(t, ['it hands its condition back, and a call reads the value', ` (line ${lineAt(read.node.start)})`]); }
+      if (u.hands) { const read = t.mine.find((c) => callPos(c.node, parents(), wrapped, coerce) === 'value'); if (read) out.set(t, ['it hands its condition back, and a call reads the value', ` (line ${lineAt(read.node.start)})`]); }
     }
     // a wrap may not land in a NAME argument (a call of a guarded helper inside another call's name): both helpers are left
     if (!out.size) {
@@ -389,7 +417,7 @@ export function planFile(src, { C, acorn, file = '' }) {
         const depth = new Int32Array(src.length + 1);
         for (const [s, e] of names) { depth[s]++; depth[e]--; }
         for (let k = 1; k <= src.length; k++) depth[k] += depth[k - 1];
-        for (const t of targets) for (const c of t.mine) for (const [s] of wrapsOf(c.node.arguments[t.slot])) if (depth[s] > 0) {
+        for (const t of targets) for (const c of t.mine) for (const [s] of wrapsOf(c.node.arguments[t.slot], coerce)) if (depth[s] > 0) {
           const outer = names.find(([ns, ne]) => s >= ns && s < ne), why = ["a call of it stands inside another call's NAME argument, or holds one there", ''];
           if (!out.has(t)) out.set(t, [why[0], ` (line ${lineAt(c.node.start)})`]);
           if (outer && !out.has(outer[2])) out.set(outer[2], [why[0], ` (line ${lineAt(outer[3].node.start)})`]);
@@ -415,9 +443,9 @@ export function planFile(src, { C, acorn, file = '' }) {
     res.guards.push({ name: d.name, at: d.at, line: d.line, order: d.order, shape, condP: p.name });
     for (const c of t.mine) {
       res.calls.all++;
-      const a = c.node.arguments, cond = a[slot], ws = wrapsOf(cond);
+      const a = c.node.arguments, cond = a[slot], ws = wrapsOf(cond, coerce);
       if (!ws.length) { res.calls.boolean++; continue; }
-      for (const [s, e] of ws) { res.edits.push({ at: s, len: 0, text: `${VERDICT}(`, kind: 'wrap-open', pair: e }); res.edits.push({ at: e, len: 0, text: ')', kind: 'wrap-close', pair: s }); }
+      for (const [s, e] of ws) { res.edits.push({ at: s, len: 0, text: `${coerce}(`, kind: 'wrap-open', pair: e }); res.edits.push({ at: e, len: 0, text: ')', kind: 'wrap-close', pair: s }); }
       const nameArg = a[nameSlot] || null;
       res.checks.push({ callee: c.node.callee.start, slot, nameSlot, condStart: cond.start, condEnd: cond.end, cond: text(cond), name: nameArg ? text(nameArg) : null, nameStart: nameArg ? nameArg.start : -1, nameEnd: nameArg ? nameArg.end : -1 });
       res.calls.wrapped++;
@@ -425,12 +453,9 @@ export function planFile(src, { C, acorn, file = '' }) {
     }
   }
   // the coercion's import, once, on the file's last code line (hoisted: no line moves) — or the one an earlier run put there
-  if (res.edits.some((e) => e.kind === 'wrap-open')) {
-    const body = code.ast.body, has = body.some((n) => n.type === 'ImportDeclaration' && /(?:^|\/)check\.mjs$/.test(String(n.source.value)) && n.specifiers.some((x) => x.type === 'ImportSpecifier' && x.imported.name === VERDICT && x.local.name === VERDICT));
-    if (!has && new RegExp(`\\b${VERDICT}\\b`).test(src)) {   // the file names another verdictOf: every helper of it is left
-      for (const g of res.guards) left.set(inCode.find((d) => d.at === g.at), [`the file already names another ${VERDICT}`, '']);
-      res.edits = []; res.guards = []; res.checks = []; res.wraps = []; res.calls = { all: 0, wrapped: 0, boolean: 0 };
-    } else if (!has && body.length) { const end = body[body.length - 1].end; res.edits.push({ at: end, len: 0, text: importText(file, src[end - 1]), kind: 'import' }); }
+  if (!ours && res.edits.some((e) => e.kind === 'wrap-open') && code.ast.body.length) {
+    const end = code.ast.body[code.ast.body.length - 1].end;
+    res.edits.push({ at: end, len: 0, text: importText(file, src[end - 1], coerce), kind: 'import' });
   }
   for (const [d, [kind, where]] of left) res.left.push({ name: d.name, line: d.line, kind, why: kind + where });
   res.left.sort((x, y) => x.line - y.line);
@@ -480,7 +505,7 @@ export function selfCheck(src, out, plan, { C, acorn, W = null }) {
     if (!c) { why.push(`a wrapped call does not read back at line ${L(k.callee)}`); continue; }
     const got = (j) => (j < a.length ? out.slice(a[j].start, a[j].end) : null);
     if (got(k.slot) !== within(k.condStart, k.condEnd)) why.push(`a condition did not read back as planned at line ${L(k.condStart)}: ${String(got(k.slot)).slice(0, 60)}`);
-    else if (!boolByNode(a[k.slot])) why.push(`a condition is still no boolean by its operator at line ${L(k.condStart)}`);
+    else if (!boolByNode(a[k.slot], plan.coerce || VERDICT)) why.push(`a condition is still no boolean by its operator at line ${L(k.condStart)}`);
     if (k.nameStart >= 0 && upTo(k.nameEnd) > from(k.nameStart)) why.push(`an edit inside a NAME argument at line ${L(k.nameStart)}`);
     if (got(k.nameSlot) !== k.name) why.push(`a NAME argument changed at line ${L(k.callee)}: «${String(k.name).slice(0, 50)}» → «${String(got(k.nameSlot)).slice(0, 50)}»`);
   }
@@ -497,7 +522,7 @@ export function selfCheck(src, out, plan, { C, acorn, W = null }) {
     else if (guarded.has(d.at) ? !x.guarded : x.guarded !== d.guarded) why.push(`the census reads ${d.name} at line ${d.line} as ${x.guarded ? '' : 'un'}guarded`);
   });
   if (C.swappedCalls(out, after).length > C.swappedCalls(src, before).length) why.push('the census reads a swapped call the file did not hold');
-  if (es.some((e) => e.kind === 'wrap-open') && !back.ast.body.some((n) => n.type === 'ImportDeclaration' && n.specifiers.some((x) => x.type === 'ImportSpecifier' && x.imported.name === VERDICT && x.local.name === VERDICT) && /(?:^|\/)check\.mjs$/.test(String(n.source.value)))) why.push(`a wrapped file does not import ${VERDICT} from the shared checker`);
+  if (es.some((e) => e.kind === 'wrap-open') && ((ourImport(back.ast) || {}).local || null) !== (plan.coerce || VERDICT)) why.push(`a wrapped file does not import the shared checker's ${VERDICT}${plan.coerce && plan.coerce !== VERDICT ? ' as ' + plan.coerce : ''}`);
   // (only where a wrap holds a comparison: a top-level one stays outside every wrap by wrapsOf)
   const cmp = (t) => /[<>]/.test(t.replace(/=>/g, ''));
   if (W && es.some((e) => e.kind === 'wrap-open' && cmp(src.slice(e.at, e.pair)))) {
@@ -528,7 +553,7 @@ export async function runTree(repo, { apply = false, list = false, log = (l) => 
   const dir = path.join(repo, 'scripts');
   // the file set §7b reads (scripts/*.mjs and scripts/lib/*.mjs) — scripts/lib/check.mjs read and counted, never a target
   const files = [...fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')), ...fs.readdirSync(path.join(dir, 'lib')).filter((f) => f.endsWith('.mjs')).map((f) => 'lib/' + f)].sort();
-  const T = { files: files.length, edited: 0, guards: 0, unread: [], pieces: 0, byShape: {}, left: {}, plants: 0, plantFiles: 0, calls: { all: 0, wrapped: 0, boolean: 0 }, skipped: [], failed: [], writes: [], before: 0, after: 0, second: { guards: 0, wraps: 0, files: [] } };
+  const T = { files: files.length, edited: 0, guards: 0, unread: [], pieces: 0, aliased: [], byShape: {}, left: {}, plants: 0, plantFiles: 0, calls: { all: 0, wrapped: 0, boolean: 0 }, skipped: [], failed: [], writes: [], before: 0, after: 0, second: { guards: 0, wraps: 0, files: [] } };
   const counts = {}, unguarded = (s) => C.helperDefs(s).filter((d) => d.order !== 'unknown' && !d.guarded).length;
   for (const f of files) {
     const p = path.join(dir, f), src = fs.readFileSync(p, 'utf8');
@@ -547,6 +572,7 @@ export async function runTree(repo, { apply = false, list = false, log = (l) => 
         for (const g of plan.guards) T.byShape[g.shape] = (T.byShape[g.shape] || 0) + 1;
         for (const k of Object.keys(T.calls)) T.calls[k] += plan.calls[k];
         for (const w of plan.wraps) T.pieces += w.pieces;
+        if (plan.coerce && plan.coerce !== VERDICT && plan.edits.some((e) => e.kind === 'import')) T.aliased.push(f);
         if (list) { for (const g of plan.guards) log(`    guard  ${f} line ${g.line} ${g.name} (${g.order}, ${g.shape})`); for (const w of plan.wraps) log(`    wrap   ${f} line ${w.line} ${w.name}(${w.cond} …) — ${VERDICT}( … ) around ${w.pieces} operand(s)`); }
         if (apply) T.writes.push([p, out]);
         now = out;
@@ -580,6 +606,7 @@ export async function runTree(repo, { apply = false, list = false, log = (l) => 
   log(`  the census (test-ci-gate-tiers §7b, that file aside) reads ${T.before} unguarded helpers before, ${T.after} after`);
   log(`  guarded, but its order no longer read by the census (counted neither way): ${T.unread.length}${T.unread.length ? ' — ' + T.unread.slice(0, 4).map((x) => x.replace(/ once guarded.*$/, '')).join(' | ') : ''}`);
   log(`  their calls: ${T.calls.all} — wrapped ${VERDICT}( … ) in place ${T.calls.wrapped} (around ${T.pieces} operands: a promise or a function there now FAILS, red by name; any other value as !! would) · a boolean by its operator, untouched ${T.calls.boolean}`);
+  log(`  imported as ${VERDICT_ALIAS} where the file binds its own ${VERDICT}: ${T.aliased.length}${T.aliased.length ? ' — ' + T.aliased.slice(0, 8).join(', ') : ''}`);
   log(`  LEFT BY RULE: ${n(T.left)}`);
   log(`  PLANTS (the census reads a helper in a string, a template's text, a regex or a comment — not code, never edited): ${T.plants} in ${T.plantFiles} files`);
   log(`  files the parser could not read: ${T.skipped.length}${T.skipped.length ? ' — ' + T.skipped.slice(0, 6).join(' | ') : ''}`);

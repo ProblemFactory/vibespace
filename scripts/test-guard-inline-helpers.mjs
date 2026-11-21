@@ -108,6 +108,8 @@ const FIX = {
   nestedHands: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', K + ' ck = (c, n) => { if (c) pass++; else fail++; return c; };', "ok(ck(1, 'in') && 2, 'out');"),
   clock: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const t0 = performance.now(); const r = { done: true };', "ok(r.done && performance.now() - t0 >= 0, 'a lower bound in a chain');"),
   vacuous: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "ok(Promise.resolve(false), 'a promise handed as a verdict');", "ok(() => false, 'a function handed as a verdict');", "ok(/a/.exec('a'), 'a match object');", "ok('ab'.length, 'a length');"),
+  comma: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "ok((extra.push(1), extra.length), 'a comma expression');"),
+  aliased: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const verdictOf = (x) => x * 2;', "ok(verdictOf(1), 'its own verdictOf is no coercion');", "ok(2, 'a value');"),
   opensWithTest: lines(HEAD, K + ' ok = (c, n) => {c ? pass++ : fail++;};', "ok(extra.length, 'a value');", "ok(pass === 0, 'a comparison');"),
 };
 const LEFT = {
@@ -124,17 +126,18 @@ const LEFT = {
   evalFile: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'eval("ok(1, \'x\')");'), /^the file holds a direct eval/],
   nameCond: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "const label = 'x';", 'ok(label, 1 === 1);'), /^a call holds a condition in its NAME slot/],
   argumentsUse: [lines(HEAD, F + ' check(n, c) { if (!c) fail++; else pass++; extra.push(arguments[1]); }', "check('a value', 3);"), /^it uses its condition as more than true or false/],
-  collision: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const verdictOf = (x) => x;', "ok(verdictOf(1), 'its own');", "ok(2, 'a value');"), /^the file already names another verdictOf/],
+  collision: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const verdictOf = (x) => x;', 'const verdictOfGuard = (x) => x;', "ok(2, 'a value');"), /^the file binds both verdictOf and verdictOfGuard/],
   nestedInName: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "ok(1, 'outer ' + ok(2, 'inner'));"), /^a call of it stands inside another call's NAME argument/],
 };
-const RUNNABLE = ['arrowBlock', 'functionNameFirst', 'arrowExpression', 'scope', 'plants', 'opensWithTest', 'twoHelpers', 'handsBack', 'nestedHands', 'clock'];
+const RUNNABLE = ['arrowBlock', 'functionNameFirst', 'arrowExpression', 'scope', 'plants', 'opensWithTest', 'twoHelpers', 'handsBack', 'nestedHands', 'clock', 'comma', 'aliased'];
 const NAME_SLOT = { ok: 1, check: 0, ck: 1, leg: 0 };
 const LATER = (applied) => applied + '\n' + lines(K + ' check = (c, n) => { if (!c) fail++; else pass++; };', "check(pass, 'a new helper at a later tip');");
 // a fixture run: its tally (or why it threw) — the fixtures are this file's own texts
-const IMPORT_RE = /[ ;]import \{ verdictOf \} from '\.\/(?:lib\/)?check\.mjs';/;
+const IMPORT_RE = /[ ;]import \{ verdictOf(?: as verdictOfGuard)? \} from '\.\/(?:lib\/)?check\.mjs';/;
 const run = (text) => {
-  const t = text.replace(IMPORT_RE, ''), own = /\b(?:const|let|var|function) verdictOf\b/.test(t);   // a fixture with its own verdictOf keeps it
-  try { return JSON.stringify(new Function(...(own ? [] : ['verdictOf']), t + '\nreturn { pass, fail, extra };')(...(own ? [] : [C.verdictOf]))); } catch (e) { return 'THREW ' + String((e && e.message) || e).slice(0, 140); }
+  // the coercion in scope under each name the fixture does not bind itself (its import taken off: new Function holds none)
+  const t = text.replace(IMPORT_RE, ''), names = ['verdictOf', 'verdictOfGuard'].filter((n) => !new RegExp(`\\b(?:const|let|var|function) ${n}\\b`).test(t));
+  try { return JSON.stringify(new Function(...names, t + '\nreturn { pass, fail, extra };')(...names.map(() => C.verdictOf))); } catch (e) { return 'THREW ' + String((e && e.message) || e).slice(0, 140); }
 };
 const nl = (s) => s.split('\n').length;
 const callsOf = (text) => { const out = [], ast = acorn.parse(text, G0.PARSE_OPTS); const v = (n) => { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name in NAME_SLOT) out.push(n); for (const k in n) { const x = n[k]; if (x && typeof x === 'object' && k !== 'loc') (Array.isArray(x) ? x : [x]).forEach((y) => y && typeof y.type === 'string' && v(y)); } }; v(ast); return out.sort((a, b) => a.start - b.start); };
@@ -157,6 +160,8 @@ function verdicts(G, only = null) {
       [at('arrowExpression', 3), K + ' leg = (n, c) => { ' + G0.guardText('leg', 'c') + ' return ((c ? (pass++, true) : (fail++, false))); };'],
       [at('twoHelpers', 4), "ok(verdictOf(check('in', verdictOf(1))) && verdictOf(2), 'out');"], [at('clock', 4), "ok(verdictOf(r.done) && performance.now() - t0 >= 0, 'a lower bound in a chain');"],
       [at('handsBack', 4), "if (!ok(verdictOf(pass), 'a test')) extra.push('failed');"],
+      [at('comma', 3), "ok(verdictOf((extra.push(1), extra.length)), 'a comma expression');"],
+      [at('aliased', 4), "ok(verdictOfGuard(verdictOf(1)), 'its own verdictOf is no coercion');"], [R.aliased.o.split('\n')[4], "ok(verdictOfGuard(2), 'a value'); import { verdictOf as verdictOfGuard } from './lib/check.mjs';"],
       [at('scope', 3), F + " inner(ok) { return ok(5, 'not ours: a parameter'); }"], [at('scope', 5), '{ ' + K + ' ok = (a, b) => a * b; extra.push(ok(6, 7)); }'], [at('scope', 6), "ok(verdictOf(pass + 1), 'ours');"],
     ];
     // the coercion's import: once, on the LAST line of every fixture with a wrap (no line moves); none where nothing is wrapped
@@ -315,8 +320,9 @@ const REDS = [
   ['inside', "the self-check's span test out", 'if (code.ok) for (const e of es) if (code.inside(e.at))', 'if (false) for (const e of es) if (code.inside(e.at))'],
   ['twice', 'a guard the census cannot read (the value-use rule out too: it would leave such a helper, not guard it again)', "${condP} !== 'boolean') throw new TypeError(", "${condP} !== 'boolean') console.error(", VALUE_RULE_OUT],
   ['later', 'targets that ignore «guarded» (the value-use rule out too: the guard\'s own typeof would leave the old helper)', "const judged = C.helperDefs(src).filter((d) => d.order !== 'unknown' && !d.guarded);", "const judged = C.helperDefs(src).filter((d) => d.order !== 'unknown');", VALUE_RULE_OUT],
-  ['behaviour', '`!(` for the coercion', "text: `${VERDICT}(`, kind: 'wrap-open'", "text: '!(', kind: 'wrap-open'"],
-  ['vacuous', 'a plain `!!(` for the coercion (every vacuous leg invisible)', "text: `${VERDICT}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"],
+  ['behaviour', '`!(` for the coercion', "text: `${coerce}(`, kind: 'wrap-open'", "text: '!(', kind: 'wrap-open'"],
+  ['vacuous', 'a plain `!!(` for the coercion (every vacuous leg invisible)', "text: `${coerce}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"],
+  ['selfCheck', 'a comma expression wrapped inside its parentheses (two arguments)', "n.expression.type === 'SequenceExpression' ? [[n.start, n.end]] : wrapsOf(n.expression, name)", 'wrapsOf(n.expression, name)'],
   ['left', 'the arguments rule out', "else if (n.name === 'arguments' && ownArgs) seen(n, 'value');", ''],
   ['behaviour', 'an expression block without its return', 'text: `{ ${guard} return (`', 'text: `{ ${guard} (`'],
   ['left', 'the handed-on rule out', 'if (handed) { leave(', 'if (false) { leave('],
