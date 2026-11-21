@@ -224,7 +224,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
     return out;
   };
   const RELEASE_READ = "((f) => { const fs = require('fs'); let text = ''; try { const st = fs.statSync(f); const fd = fs.openSync(f, 'r'); const n = Math.min(st.size, 8 * 1024 * 1024); const buf = Buffer.alloc(n); fs.readSync(fd, buf, 0, n, st.size - n); fs.closeSync(fd); text = buf.toString('utf8'); } catch { return []; } const out = []; for (const line of text.split('\\n')) { if (!line.trim()) continue; try { out.push(JSON.parse(line)); } catch { } } return out; })(file)";
-  const PAGER = "await require('../adapters/codex.js').readJsonlBoundedParsedPagedAsync(file, { tailOnly: false, slot: 'helper', onFail: (w) => { why = w; } })";
+  const PAGER = "await require('../adapters/codex.js').readJsonlBoundedParsedPagedAsync(file, { tailOnly: false, slot: 'helper', note: false, onFail: (w) => { why = w; } })";   // row B-422c follow: + note: false (its refusals carry no history weight)
   const MR = M.load('src/server/artifact-registry.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), PAGER, RELEASE_READ, 'the release\'s main-thread reader'), 'releaseread');
   const PAD = 'p'.repeat(3900), MB = 1048576;
   // a helper transcript of `mb` MB: padding records, a Write at each `writes[i].atMb` (Infinity = after the last padding), `extra` lines verbatim
@@ -339,7 +339,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
     const recs = await person, st1 = C.pagedReadStats();
     return { records: recs && recs.length, gone: st1.gone - st0.gone, oneShot: st1.oneShot - st0.oneShot, row: !!rows(s)[':' + CWD + '/beside/' + aid + '.md'] };
   };
-  const MP = M.load('src/server/artifact-registry.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), "{ tailOnly: false, slot: 'helper', onFail: (w) => { why = w; } }", /* stale-pins: kept — the control's PLANT (a helper read in the history slot), not a pin */ "{ tailOnly: false, onFail: (w) => { why = w; } }", 'a helper read without its slot'), 'noslot');
+  const MP = M.load('src/server/artifact-registry.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), "{ tailOnly: false, slot: 'helper', note: false, onFail: (w) => { why = w; } }", /* stale-pins: kept — the control's PLANT (a helper read in the history slot), not a pin */ "{ tailOnly: false, note: false, onFail: (w) => { why = w; } }", 'a helper read without its slot'), 'noslot');
   const bOwn = await beside(REG, 'a10'), bShared = await beside(MP, 'a11');
   REG.configure({ activeSessions: () => new Map(), log: quiet }); // the copy's configure pointed the rebuild's helper seam at itself — the real one again
   ok(bOwn.records === 3000 && bOwn.gone === 0 && bOwn.oneShot === 0 && bOwn.row && bShared.gone >= 1 && bShared.row,
