@@ -22,8 +22,14 @@ Requests (one JSON object on stdin):
   {"op":"probe"}
   {"op":"apps"}
   {"op":"snapshot","pids":[…],"budget":600,"callTimeoutMs":800,"maxDepth":40,"text":true}
+  {"op":"snapshot", …, "root":{"pid":N,"path":[…],"expect":{"role":"…","name":"…"}}}
+                                                   B-4be3: ONE subtree — the walk starts at that node (re-resolved by
+                                                   its path, ref_stale when it is no longer the one named), the same
+                                                   budget and depth spent below it; paths stay absolute
   {"op":"act","pid":N,"path":[…],"expect":{"role":"…","name":"…"},
-   "verb":"do_action"|"set_text"|"insert_text"|"read","action":"click"|0,"text":"…"}
+   "verb":"do_action"|"set_text"|"insert_text"|"read"|"text","action":"click"|0,"text":"…","maxBytes":N}
+                                                   B-4be3: verb "text" = ONE node's whole text (its Text interface)
+                                                   and whole name, each bounded by maxBytes (UTF-8), the cut said
   {"op":"focused","pids":[…]}                      the node holding keyboard focus (type's default target)
   {"op":"screenshot","out":"/p.png","bounds":{x,y,w,h}}   pixels of the DISPLAY in the env (the fallback)
   {"op":"windowshot","out":"/p.png","origin":{x,y},"w":W,"h":H,"windows":[{id,x,y,w,h}]}
@@ -127,6 +133,17 @@ def actions_of(acc):
         return None
 
 
+# B-4be3 (主开发 r1179, ALSO CURED): A HIDDEN TEXT IS NEVER READ THROUGH THE TREE — by the toolkit's OWN word only: the
+# tree's hidden-text role (AT-SPI's ROLE_PASSWORD_TEXT, spelled "password text"). Such a node carries NO text in a
+# snapshot and the whole-text verb refuses it by name, here in the ONE place both roads ask. No word list over names (a
+# list cannot hold and takes clear fields away); AT-SPI's state set names no protected-text state to honour beside it.
+HIDDEN_TEXT_ROLES = ("password text",)
+
+
+def text_hidden(role):
+    return role in HIDDEN_TEXT_ROLES
+
+
 def text_of(acc, cap=200):
     t = text_iface(acc)
     if t is None:
@@ -168,15 +185,18 @@ def op_apps(req):
     return {"ok": True, "v": REPLY_VERSION, "apps": apps}
 
 
-def walk(app, budget, max_depth, want_text, deadline):
-    """Breadth-first over ONE application. Every accessor is wrapped; a node
-    whose children cannot be read is reported in `unreadable` and its subtree
-    is skipped — the budget is the only thing that ends a traversal early."""
+def walk(app, budget, max_depth, want_text, deadline, base_path=None):
+    """Breadth-first over ONE application — or, B-4be3, over ONE subtree: `app`
+    is then the subtree's root node and `base_path` its path from the
+    application, so every node's path stays absolute (an act re-resolves it).
+    Every accessor is wrapped; a node whose children cannot be read is reported
+    in `unreadable` and its subtree is skipped — the budget is the only thing
+    that ends a traversal early."""
     nodes = []
     unreadable = []
     census = {"nodes": 0, "component": 0, "action": 0, "editableText": 0, "text": 0, "buttons": 0, "buttonsWithAction": 0,
               "byRole": {}, "actionNames": {}}
-    queue = [(app, [], 0, None)]
+    queue = [(app, list(base_path or []), 0, None)]
     truncated = False
     while queue:
         if len(nodes) >= budget:
@@ -203,9 +223,12 @@ def walk(app, budget, max_depth, want_text, deadline):
             node["actions"] = acts
         node["editable"] = "EditableText" in ifaces
         if want_text and "Text" in ifaces:
-            tx = text_of(acc)
-            if tx:
-                node["text"] = tx
+            if text_hidden(role):
+                node["textHidden"] = True    # B-4be3: the tree's hidden-text role — its text is never read
+            else:
+                tx = text_of(acc)
+                if tx:
+                    node["text"] = tx
         st = state_names(acc)
         if st:
             node["states"] = st
@@ -257,9 +280,28 @@ def op_snapshot(req):
     deadline = t0 + wall_ms / 1000.0
     apps = desktop_apps()
     mine = [a for a in apps if a["pid"] in pids] if pids else apps
+    root = req.get("root") or None
+    root_view = None
+    if root:
+        # B-4be3: ONE subtree, named by the last snapshot's ref — re-resolved by its path and checked to be the same node
+        # (role + name, as an act is), so a moved page never hands back a different subtree under an old ref
+        rpid = int(root.get("pid"))
+        rpath = [int(x) for x in (root.get("path") or [])]
+        if pids and rpid not in pids:
+            return {"ok": False, "code": "ref_unknown", "why": "the subtree's application (pid %d) is not one of this window's" % rpid}
+        acc, err = resolve_path(rpid, rpath)
+        if err:
+            return err
+        rrole = role_name(acc)
+        rname = safe(lambda: acc.get_name(), "") or ""
+        expect = root.get("expect") or {}
+        if expect and ((expect.get("role") and expect["role"] != rrole) or (expect.get("name") is not None and expect["name"] != rname)):
+            return {"ok": False, "code": "ref_stale", "why": "the node at that path is now %r %r, the ref named %r %r — take a new snapshot" % (rrole, rname, expect.get("role"), expect.get("name"))}
+        mine = [{"pid": rpid, "name": next((a["name"] for a in apps if a["pid"] == rpid), ""), "acc": acc, "path": rpath}]
+        root_view = {"pid": rpid, "path": rpath, "role": rrole, "name": rname[:200]}
     all_nodes, unread, census, trunc = [], [], None, False
     for a in mine:
-        n, c, u, t = walk(a["acc"], budget - len(all_nodes), max_depth, want_text, deadline)
+        n, c, u, t = walk(a["acc"], budget - len(all_nodes), max_depth, want_text, deadline, a.get("path"))
         # re-number refs so they stay unique across applications
         base = len(all_nodes)
         remap = {}
@@ -292,7 +334,7 @@ def op_snapshot(req):
     ms = round((time.time() - t0) * 1000, 1)
     if census is None:
         census = {"nodes": 0, "component": 0, "action": 0, "editableText": 0, "text": 0, "buttons": 0, "buttonsWithAction": 0, "byRole": {}, "actionNames": {}}
-    return {"ok": True, "v": REPLY_VERSION, "apps": [{"pid": a["pid"], "name": a["name"]} for a in mine], "nodes": all_nodes,
+    return {"ok": True, "v": REPLY_VERSION, "apps": [{"pid": a["pid"], "name": a["name"]} for a in mine], "nodes": all_nodes, "root": root_view,
             "census": census, "unreadable": unread, "truncated": trunc, "budget": budget, "callTimeoutMs": call_ms,
             "ms": ms, "nodesPerSec": round(len(all_nodes) / (ms / 1000.0), 0) if ms > 0 else None}
 
@@ -364,8 +406,38 @@ def op_act(req):
         if ok is None:
             return {"ok": False, "code": "action_failed", "why": "%s did not answer within %d ms" % (verb, call_ms)}
         return {"ok": bool(ok), "code": None if ok else "action_refused", "did": {"verb": verb, "chars": len(text), "role": role, "name": name}, "ms": round((time.time() - t0) * 1000, 1)}
+    if verb == "text" and text_hidden(role):
+        return {"ok": False, "code": "text_hidden", "why": "%s %r is the tree's hidden-text role (a password field) — its text is never read through the tree" % (role, name)}
+    if verb == "text":
+        # B-4be3: ONE node's WHOLE text, on request — its Text interface (an entry's whole value, an address bar's whole
+        # address) and its whole accessible name, each bounded by maxBytes of UTF-8 (the default 64 KiB, 256 KiB at most);
+        # what was cut is SAID: the bound, the characters there were, the bytes handed back
+        cap = max(1, min(262144, int(req.get("maxBytes") or 65536)))
+
+        def bounded(s):
+            b = (s or "").encode("utf-8")
+            if len(b) <= cap:
+                return s or "", False
+            return b[:cap].decode("utf-8", "ignore"), True
+        whole_name = safe(lambda: acc.get_name(), "") or ""
+        nm, name_cut = bounded(whole_name)
+        tx, text_cut, chars = None, False, None
+        if "Text" in ifaces:
+            t = text_iface(acc)
+            n = safe(lambda: Atspi.Text.get_character_count(t), None) if t is not None else None
+            if n is None:
+                return {"ok": False, "code": "action_failed", "why": "%s %r: the text's length did not answer within %d ms" % (role, name, call_ms)}
+            chars = n
+            got = safe(lambda: Atspi.Text.get_text(t, 0, min(n, cap)), None) if n > 0 else ""
+            if got is None:
+                return {"ok": False, "code": "action_failed", "why": "%s %r: the text did not answer within %d ms" % (role, name, call_ms)}
+            tx, text_cut = bounded(got)
+            text_cut = text_cut or n > cap
+        return {"ok": True, "did": {"verb": "text", "role": role, "name": nm, "nameChars": len(whole_name), "nameCut": name_cut, "text": tx,
+                                    "chars": chars, "bytes": len((tx or "").encode("utf-8")), "maxBytes": cap, "cut": text_cut},
+                "ms": round((time.time() - t0) * 1000, 1)}
     if verb == "read":
-        return {"ok": True, "did": {"verb": "read", "role": role, "name": name, "iface": ifaces, "text": text_of(acc, 2000), "actions": actions_of(acc), "states": state_names(acc)}}
+        return {"ok": True, "did": {"verb": "read", "role": role, "name": name, "iface": ifaces, "text": None if text_hidden(role) else text_of(acc, 2000), "actions": actions_of(acc), "states": state_names(acc)}}
     if verb == "focus":
         if "Component" not in ifaces:
             return {"ok": False, "code": "action_refused", "why": "%s %r exports no Component interface — it cannot take keyboard focus through the tree" % (role, name)}

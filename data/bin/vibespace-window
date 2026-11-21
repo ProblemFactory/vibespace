@@ -77,8 +77,15 @@ const USAGE = `vibespace-window — act on a native window through its accessibi
                                                  user shared is the user's to set; a browser with no tree stays pixels)
   vibespace-window stop <handle>                 stop YOUR desktop browser (opened by \`vibespace-browser new … --backend desktop-app\`;
                                                  it also ends with your conversation) — any other window is the user's to stop
-  vibespace-window snapshot <handle> [--budget N] [--no-text] [--json]
-                                                 THE accessibility tree: @ref role "name" [actions] (x,y wxh) states — refs are per snapshot
+  vibespace-window snapshot <handle> [--budget N] [--no-text] [--under @e7] [--json]
+                                                 THE accessibility tree: @ref role "name" [actions] (x,y wxh) states — refs are per snapshot;
+                                                 --under @e7 reads ONE subtree (that node and below, the same budget spent there): a large
+                                                 or growing page read part by part. Its refs REPLACE the last snapshot's — every older ref
+                                                 is gone (ref_unknown); a plain snapshot reads the whole window again
+  vibespace-window text <handle> @e7 [--max-bytes N]
+                                                 ONE node's WHOLE text (a snapshot cuts it: 200 characters, 80 printed) and its whole name,
+                                                 at most N bytes (default 65536, at most 262144) — the cut is said. A password field
+                                                 (the tree's hidden-text role) is never read: text_hidden
   vibespace-window screenshot <handle> [--out <file.png>]
                                                  the app's other windows the image does not show are NAMED under it, each with ITS OWN handle <handle>.w<hex>:
                                                  screenshot / click --at / type / key / scroll on that handle act on THAT window (window_gone, window_list_unreadable, window_subject_pixels, window_subject_shared)
@@ -129,7 +136,8 @@ function printRefusal(r, status) {
   console.error(`${r.error || `HTTP ${status}`}${r.code ? ` [${r.code}]` : ''}`);
   if (r.code === 'node_has_no_action') console.error('  the tree road is closed for this node; --at x,y is a point click (audited as such) — decide, do not assume');
   else if (r.code === 'no_injection_backend' && Array.isArray(r.backends)) for (const b of r.backends) console.error(`  ${b.backend}: ${b.available === true ? (b.wired ? 'available' : 'present, not wired') : b.available === 'consent' ? 'needs the user\'s consent, not wired' : 'unavailable'}${b.why ? ' — ' + b.why : ''}`);
-  else if (r.code === 'ref_stale' || r.code === 'ref_unknown') console.error('  refs are minted per snapshot: `vibespace-window snapshot <handle>` again, then use the new ref');
+  else if (r.code === 'ref_stale' || r.code === 'ref_unknown') console.error('  refs are minted per snapshot (a --under subtree replaces them too): `vibespace-window snapshot <handle>` again, then use the new ref');
+  else if (r.code === 'text_hidden') console.error('  a password field\'s text is never read through the tree (B-4be3) — nothing to retry');
   else if (r.code === 'window_leased') console.error('  one holder per window; ask the user, or open your own (`vibespace-window open <app>`)');
   else if (r.code === 'window_paused') console.error(`  the user is driving this window${r.takenAt ? ` (since ${new Date(r.takenAt).toISOString()})` : ''}; do NOT retry in a loop — the handback is announced into your conversation; snapshot again when it comes`);
   else if (r.code === 'not_attached') console.error('  `vibespace-window attach <handle>` first');
@@ -272,7 +280,7 @@ function printNode(n) {
   const b = n.bounds ? ` (${n.bounds.x},${n.bounds.y} ${n.bounds.w}x${n.bounds.h})` : '';
   const acts = n.actions && n.actions.length ? ` [${n.actions.join(' ')}]` : '';
   const st = n.states && n.states.length ? ` {${n.states.join(' ')}}` : '';
-  const tx = n.text ? ` text=${JSON.stringify(n.text.length > 80 ? n.text.slice(0, 80) + '…' : n.text)}` : '';
+  const tx = n.textHidden ? ' text=(hidden: a password field)' : n.text ? ` text=${JSON.stringify(n.text.length > 80 ? n.text.slice(0, 80) + '…' : n.text)}` : '';   // B-4be3: the whole text is `text <h> @ref`
   console.log(`${'  '.repeat(Math.min(n.depth || 0, 12))}${n.ref} ${n.role}${n.name ? ' ' + JSON.stringify(n.name) : ''}${n.editable ? ' editable' : ''}${acts}${b}${st}${tx}`);
 }
 
@@ -353,9 +361,10 @@ function printNode(n) {
   }
 
   if (verb === 'snapshot') {
-    const h = handleArg('vibespace-window snapshot <handle> [--budget N] [--no-text] [--json]');
-    const r = await call('POST', '/api/agent/window/snapshot', { handle: h, budget: flag('--budget') ? Number(flag('--budget')) : undefined, text: !has('--no-text') });
+    const h = handleArg('vibespace-window snapshot <handle> [--budget N] [--no-text] [--under @e7] [--json]');
+    const r = await call('POST', '/api/agent/window/snapshot', { handle: h, budget: flag('--budget') ? Number(flag('--budget')) : undefined, text: !has('--no-text'), under: flag('--under') || undefined });
     if (json) { console.log(JSON.stringify(r, null, 2)); return; }
+    if (r.subtree) console.log(r.subtree.note);   // B-4be3: a subtree's refs replace the last snapshot's — said first
     if (r.empty) { console.log(r.empty); return; }
     if (r.head) console.log(r.head); // lane window-dialog-member: a dialog the app opened is named first
     for (const n of r.nodes) printNode(n);
@@ -385,6 +394,20 @@ function printNode(n) {
     return;
   }
 
+  // B-4be3: ONE node's whole text (the snapshot cuts it), bounded by bytes, the cut said — a read, nothing injected
+  if (verb === 'text') {
+    const h = handleArg('vibespace-window text <handle> @e7 [--max-bytes N]');
+    const ref = args.slice(2).find((a) => a.startsWith('@'));
+    if (!ref) usageOf('vibespace-window text <handle> @e7 [--max-bytes N]');
+    const r = await call('POST', '/api/agent/window/act', { handle: h, verb: 'text', ref, maxBytes: flag('--max-bytes') ? Number(flag('--max-bytes')) : undefined });
+    if (json) { console.log(JSON.stringify(r, null, 2)); return; }
+    const d = r.did || {};
+    console.log(`${d.ref} ${d.role}${d.name ? ' ' + JSON.stringify(d.name) : ''}${d.nameCut ? ` (name cut at ${d.maxBytes} bytes of ${d.nameChars} characters)` : ''}`);
+    if (d.text == null) { console.log('— no text interface on this node (its name above is all it says)'); return; }
+    process.stdout.write(d.text + (d.text.endsWith('\n') ? '' : '\n'));
+    console.log(`— ${d.bytes} bytes${d.chars != null ? ` of ${d.chars} characters` : ''}${d.cut ? ` — CUT at the ${d.maxBytes}-byte bound (--max-bytes N up to 262144)` : ' — whole'}`);
+    return;
+  }
   if (verb === 'click') {
     const h = handleArg('vibespace-window click <handle> @e7 [--action <name>] | click <handle> --at <x>,<y> [--button n]');
     const ref = args.slice(2).find((a) => a.startsWith('@'));

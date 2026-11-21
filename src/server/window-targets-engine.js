@@ -1246,29 +1246,40 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
 
   // ── snapshot ──
-  async function snapshot(handle, facts, { budget, text = true } = {}) {
+  async function snapshot(handle, facts, { budget, text = true, under = null } = {}) {
     await subjectDoor(handle, facts, 'snapshot', { subjectVerb: true, tree: true }); // B-dbb4 (r946): the one door — a tree verb on a window's handle is refused
     const { rec, lease } = requireLease(handle, facts, 'snapshot');
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: rec.origin || ORIGIN };
     gateMode(rec, lease, 'snapshot', false, who); // lane E (D7): an explicit pixel share refuses the tree by name; auto snapshots AS the probe
     const pids = pidsOf(rec);
-    const r = await wt.snapshotTarget({ pids, budget, text, env: WT.treeEnvOf(rec, env()), ...helperOpts() });
+    // B-4be3: ONE SUBTREE by a ref of the last snapshot — the same door (lease, mode, re-check, audit), the same budget spent
+    // below that node; its refs continue above the last table's and REPLACE it (an older ref is gone: ref_unknown by name)
+    let root = null, refBase = 0;
+    if (under != null && under !== '') {
+      if (!lease.refs) throw namedError('ref_unknown', `no snapshot yet on ${rec.id} — \`vibespace-window snapshot ${rec.id}\` mints the refs a subtree is named by`);
+      const rr = wt.resolveRef(lease.refs, under);
+      if (!rr.ok) throw namedError(rr.code, rr.why);
+      root = rr.entry;
+      for (const k of lease.refs.keys()) { const n = Number(String(k).slice(2)); if (n > refBase) refBase = n; }
+    }
+    const r = await wt.snapshotTarget({ pids, budget, text, ...(root ? { root, refBase } : {}), env: WT.treeEnvOf(rec, env()), ...helperOpts() });
     const held = stillHeld(rec, facts, 'snapshot'); // lane E verify: a revoke during the traversal ⇒ the tree is never handed over
     // mirror red on 2.369.181: under `auto` the snapshot IS the probe, and a tree this machine cannot read — for ANY reason
     // (no python3, no gi binding, no bus, a helper that died or hung) — resolves to pixels like a window with no tree:
     // ONE code (mode_pixels), the reason it saw named beside it. The helper's own code used to leak through here, so
     // the refusal named the machine (python3_missing / a11y_unavailable / helper_error), not the window's road.
-    if (!r.ok && rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto' && WT.treeUnreachable(r)) {
+    if (!r.ok && !root && rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto' && WT.treeUnreachable(r)) {
       const v = R.resolveMode({ mode: 'auto', probe: { a11yOk: false, reason: `${r.code}: ${r.why}` } });
       setResolution(rec.id, v);
       audit({ ...who, verb: 'snapshot', by: 'mode', ok: false, code: 'mode_pixels', mode: 'auto', reason: r.code });
       throw namedError('mode_pixels', `${v.why}: read it with screenshot, act with click --at x,y / type / key / scroll`, { mode: 'auto', resolvedMode: 'pixels', reason: { code: r.code, why: r.why } });
     }
-    if (!r.ok) { audit({ ...who, verb: 'snapshot', by: 'tree', ok: false, code: r.code }); throw namedError(r.code, r.why, { helper: true }); }
+    if (!r.ok) { audit({ ...who, verb: 'snapshot', by: 'tree', ok: false, code: r.code, ...(root ? { under: root.ref } : {}) }); throw namedError(r.code, r.why, { helper: true }); }
     const s = r.snapshot;
     // lane E (D7): under `auto` every snapshot re-probes — a tree that answers resolves to tree; none (xterm), or a closed one
-    // (Chrome without its switch: frames only) resolves to pixels and the snapshot is refused with that reason
-    if (rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto') {
+    // (Chrome without its switch: frames only) resolves to pixels and the snapshot is refused with that reason. B-4be3: a
+    // SUBTREE read never re-probes — the probe judges the whole window's tree, and a subtree's few nodes are not that
+    if (!root && rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto') {
       const v = R.resolveMode({ mode: 'auto', probe: { a11yOk: true, nodes: s.nodes.length, usable: R.usableNodes(s.nodes) } });
       setResolution(rec.id, v);
       if (v.mode === 'pixels') {
@@ -1279,8 +1290,11 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // lane window-dialog-member: a SHOWING dialog is named first — the head line, its subtree listed before the rest (refs unchanged)
     const dl = WT.dialogFirst(s.nodes);
     held.refs = r.refs; held.snapshotAt = now(); held.dialog = dl.dialog;
-    audit({ ...who, verb: 'snapshot', by: 'tree', ok: true, nodes: s.census.nodes, unreadable: s.unreadable.length, ...(dl.dialog ? { dialog: dl.dialog.ref } : {}) });
-    return { handle: rec.id, label: rec.label, origin: rec.origin || ORIGIN, yourDesktop: rec.origin === 'desktop', apps: s.apps, nodes: dl.nodes.map(wt.nodeView), census: s.census,
+    audit({ ...who, verb: 'snapshot', by: 'tree', ok: true, nodes: s.census.nodes, unreadable: s.unreadable.length, ...(dl.dialog ? { dialog: dl.dialog.ref } : {}), ...(root ? { under: root.ref } : {}) });
+    // B-4be3: the subtree's answer SAYS that every older ref is gone, and the one-line recipe back to the whole window
+    const subtree = root ? { of: root.ref, role: root.role, name: root.name, refs: s.nodes.length ? `${s.nodes[0].ref}–${s.nodes[s.nodes.length - 1].ref}` : null,
+      note: `a subtree of ${root.ref} (${root.role}${root.name ? ' ' + JSON.stringify(root.name) : ''}): these refs REPLACE the last snapshot's — every older ref is gone (acting on one is refused ref_unknown); \`vibespace-window snapshot ${rec.id}\` reads the whole window again` } : null;
+    return { handle: rec.id, label: rec.label, origin: rec.origin || ORIGIN, yourDesktop: rec.origin === 'desktop', apps: s.apps, nodes: dl.nodes.map(wt.nodeView), census: s.census, subtree,
       dialog: dl.dialog ? { ref: dl.dialog.ref, role: dl.dialog.role, name: dl.dialog.name, field: dl.dialog.field } : null, head: WT.dialogHead(dl.dialog), unreadable: s.unreadable, truncated: s.truncated, budget: s.budget, callTimeoutMs: s.callTimeoutMs, ms: s.ms, nodesPerSec: s.nodesPerSec,
       ...(rec.origin !== 'desktop' ? { mode: modeInfo(rec.id) } : {}),
       empty: s.nodes.length === 0 ? `no application of ${rec.label} is on the accessibility bus yet (pids ${pids.join(',')}) — it may still be starting, or its toolkit exports no tree` : null };
@@ -1345,7 +1359,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // accessibility stack can do, so ref_unknown is answered HERE, before the auto probe spawns anything. It used to
     // follow the probe: mode_pixels on a box whose tree is unreachable, ref_unknown on one with the fixture's bus — the
     // code named the machine, not the call. (Re-read after the probe by refEntry() below: a snapshot may land meanwhile.)
-    if (body.ref && (verb === 'click' || verb === 'type')) refEntry(); // PRECONDITION-BEFORE-PROBE
+    if (body.ref && (verb === 'click' || verb === 'type' || verb === 'text')) refEntry(); // PRECONDITION-BEFORE-PROBE
     if (mg.probe) { await ensureResolved(rec); stillHeld(rec, facts, verb); mg = gateMode(rec, lease, verb, !!body.ref, who); }
     const fromHelper = (r, line) => {
       if (!r.ok) {
@@ -1357,6 +1371,16 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       return r;
     };
 
+    // B-4be3: ONE node's WHOLE text — a tree READ through the act door (the same lease, mode table, takeover and re-check;
+    // nothing injected), bounded by bytes, the cut said; the audit names the node and the bytes, never the text
+    if (verb === 'text') {
+      if (!body.ref) throw namedError('bad-request', 'text needs a ref (@e7) — one node of the last snapshot');
+      const e = refEntry();
+      held();
+      const r = await wt.actOnNode({ entry: e, verb: 'text', maxBytes: body.maxBytes, env: base, ...helperOpts() });
+      fromHelper(r, { verb: 'text', by: 'node', node: nodeLine(e), ...(r.ok && r.did ? { bytes: r.did.bytes, cut: !!r.did.cut } : {}) });
+      return { ok: true, handle: rec.id, did: { ...r.did, verb: 'text', by: 'node', ref: e.ref }, ms: r.ms };
+    }
     if (verb === 'click' && body.ref) {
       const e = refEntry();
       // THE LAW: a node without Action is refused HERE, before any backend is consulted — never a coordinate click in disguise

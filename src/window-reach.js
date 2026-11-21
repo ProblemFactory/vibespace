@@ -366,8 +366,9 @@ function resolveMode({ mode = 'auto', probe = null } = {}) {
   if (!usable) return { mode: 'pixels', why: `its accessibility tree is closed (${nodes} node${nodes === 1 ? '' : 's'}, none you can act on) — pixel mode` };
   return { mode: 'tree', why: `its accessibility tree answers (${usable} node${usable === 1 ? '' : 's'} you can act on) — tree mode` };
 }
-/** The tree verbs — refused in pixel mode. `click`/`type` are tree verbs only when they name a @ref. */
-const TREE_VERBS = Object.freeze(['snapshot']);
+/** The tree verbs — refused in pixel mode. `click`/`type` are tree verbs only when they name a @ref. B-4be3: `text` (one
+ *  node's whole text) reads the tree as `snapshot` does — the same door. */
+const TREE_VERBS = Object.freeze(['snapshot', 'text']);
 /**
  * THE MODE TABLE (D7): may this verb run under this share? `mode` = the share's, `resolved` = auto's resolution
  * ('tree' | 'pixels' | null = not probed yet). → `{ ok, code, why, probe }` — `probe:true` = the verb is allowed AS

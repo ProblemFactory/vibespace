@@ -69,6 +69,8 @@ const HELPER_PATH = path.join(__dirname, HELPER_FILE);
 const TRAVERSAL_LIMITS = Object.freeze({
   NODE_BUDGET: 600, SNAPSHOT_MAX_BUDGET: 3000, CALL_TIMEOUT_MS: 800, WALL_MS: 20000, ACT_WALL_MS: 8000, PROBE_MEMO_MS: 60000,
   HELPER_STDOUT_MAX: 16 * 1024 * 1024, MAX_DEPTH: 40,
+  // B-4be3: ONE node's whole text (`vibespace-window text`) — bounded by UTF-8 bytes: the default, and the most it may ask for
+  TEXT_MAX_BYTES: 64 * 1024, TEXT_MAX_BYTES_CAP: 256 * 1024,
 });
 
 /** Every code this module can answer with (routes map them to statuses; the
@@ -78,6 +80,7 @@ const REFUSALS = Object.freeze([
   'node_has_no_action', 'node_not_editable', 'action_unknown', 'action_failed', 'action_refused', 'ref_stale', 'ref_unreadable', 'ref_unknown', 'app_gone',
   'no_injection_backend', 'bad_chord', 'bad-request', 'screenshot_unavailable', 'screenshot_failed', 'inject_failed',
   'no_utf8_locale', // lane E verify r3 (F3): a non-ASCII text typed as keys, and no UTF-8 locale loads for xdotool here
+  'text_hidden', // B-4be3: the tree's hidden-text role (a password field) — its text is never read through the tree
 ]);
 const refuse = (code, why, extra = {}) => {
   if (!REFUSALS.includes(code)) throw new Error(`window-targets: unknown refusal code ${code}`);
@@ -335,22 +338,37 @@ function targetRows(apps, { a11yApps = [], sessionPids = null } = {}) {
  *  `@eN` refs minted in visit order, the interface CENSUS the design asks every
  *  snapshot to report (§12.30: 66/503 and 6/43 are one desktop's numbers),
  *  the unreadable subtrees and the timing. */
-async function snapshotTarget({ pids, budget = TRAVERSAL_LIMITS.NODE_BUDGET, callTimeoutMs = TRAVERSAL_LIMITS.CALL_TIMEOUT_MS, wallMs = TRAVERSAL_LIMITS.WALL_MS, text = true, maxDepth = TRAVERSAL_LIMITS.MAX_DEPTH, env = process.env, ...rest } = {}) {
+async function snapshotTarget({ pids, budget = TRAVERSAL_LIMITS.NODE_BUDGET, callTimeoutMs = TRAVERSAL_LIMITS.CALL_TIMEOUT_MS, wallMs = TRAVERSAL_LIMITS.WALL_MS, text = true, maxDepth = TRAVERSAL_LIMITS.MAX_DEPTH, root = null, refBase = 0, env = process.env, ...rest } = {}) {
   const b = Math.max(1, Math.min(TRAVERSAL_LIMITS.SNAPSHOT_MAX_BUDGET, Number(budget) || TRAVERSAL_LIMITS.NODE_BUDGET));
-  const r = await runHelper({ op: 'snapshot', pids: (pids || []).map(Number), budget: b, callTimeoutMs, wallMs: Math.max(1000, wallMs - 500), maxDepth, text: !!text }, { env, wallMs, ...rest });
+  // B-4be3: `root` = ONE subtree (a ref entry of the last snapshot: its pid, path, role and name) — the same budget spent below it
+  const rootReq = root && Number.isInteger(root.pid) && Array.isArray(root.path) ? { pid: root.pid, path: root.path, expect: { role: root.role, name: root.name } } : null;
+  const r = await runHelper({ op: 'snapshot', pids: (pids || []).map(Number), budget: b, callTimeoutMs, wallMs: Math.max(1000, wallMs - 500), maxDepth, text: !!text, ...(rootReq ? { root: rootReq } : {}) }, { env, wallMs, ...rest });
   if (!r.ok) return r;
+  // B-4be3: a SUBTREE's refs continue ABOVE the previous table's highest (`refBase`), so no older ref can name one of its
+  // nodes — an older ref is simply gone (ref_unknown by name), never silently a different node
+  if (Number.isInteger(refBase) && refBase > 0) {
+    const shift = (ref) => (typeof ref === 'string' && /^@e\d+$/.test(ref) ? '@e' + (Number(ref.slice(2)) + refBase) : ref);
+    for (const n of r.nodes || []) { n.ref = shift(n.ref); if (n.parent) n.parent = shift(n.parent); }
+    for (const u of r.unreadable || []) if (u && u.ref) u.ref = shift(u.ref);
+  }
   return { ok: true, snapshot: r, refs: refTableOf(r) };
 }
 
 /** Act on ONE node the last snapshot named. `verb` ∈ do_action | set_text |
  *  insert_text | read; the helper re-resolves the recorded path and refuses
  *  `ref_stale` when the node there is no longer the one the ref named. */
-async function actOnNode({ entry, verb, action = null, text = '', callTimeoutMs = TRAVERSAL_LIMITS.CALL_TIMEOUT_MS, wallMs = TRAVERSAL_LIMITS.ACT_WALL_MS, env = process.env, ...rest } = {}) {
+async function actOnNode({ entry, verb, action = null, text = '', maxBytes = null, callTimeoutMs = TRAVERSAL_LIMITS.CALL_TIMEOUT_MS, wallMs = TRAVERSAL_LIMITS.ACT_WALL_MS, env = process.env, ...rest } = {}) {
   if (!entry || !Number.isInteger(entry.pid) || !Array.isArray(entry.path)) return refuse('bad-request', 'actOnNode needs a ref entry (pid + path)');
   const req = { op: 'act', pid: entry.pid, path: entry.path, expect: { role: entry.role, name: entry.name }, verb, callTimeoutMs };
   if (verb === 'do_action') req.action = action == null ? 0 : action;
   if (verb === 'set_text' || verb === 'insert_text') req.text = String(text);
+  if (verb === 'text') req.maxBytes = textBoundOf(maxBytes);   // B-4be3: ONE node's whole text, bounded
   return runHelper(req, { env, wallMs, ...rest });
+}
+/** B-4be3: the whole-text read's byte bound — the asked one within [1, TEXT_MAX_BYTES_CAP], else the default. */
+function textBoundOf(maxBytes) {
+  const n = Math.floor(Number(maxBytes));
+  return Number.isFinite(n) && n > 0 ? Math.min(TRAVERSAL_LIMITS.TEXT_MAX_BYTES_CAP, n) : TRAVERSAL_LIMITS.TEXT_MAX_BYTES;
 }
 
 /** The node holding keyboard focus in `pids` (the `type` verb's target when no
@@ -682,6 +700,7 @@ function nodeView(n) {
   if (n.actions) v.actions = n.actions;
   if (n.editable) v.editable = true;
   if (n.text != null && n.text !== '' && n.text !== n.name) v.text = n.text;
+  if (n.textHidden) v.textHidden = true;   // B-4be3: the tree's hidden-text role — no text, said
   const st = (n.states || []).filter((s) => ['focused', 'checked', 'selected', 'expanded', 'pressed', 'editable', 'focusable', 'visible', 'showing'].includes(s));
   if (st.length) v.states = st;
   return v;
@@ -693,7 +712,7 @@ module.exports = {
   // mirror red on 2.369.181: the failures that mean "no tree here" (an auto share folds them into mode_pixels)
   TREE_UNREACHABLE, treeUnreachable,
   runHelper, probeA11y, probeInputBackends, probeScreenCastPortal, resetProbeMemo, envKeyOf,
-  verbVerdicts, parseChord, pickAction, ACTION_PREFERENCE, NEVER_BY_DEFAULT, NAMED_KEYS, refTableOf, resolveRef, targetRows, nodeView,
+  verbVerdicts, parseChord, pickAction, ACTION_PREFERENCE, NEVER_BY_DEFAULT, NAMED_KEYS, refTableOf, resolveRef, targetRows, nodeView, textBoundOf,
   snapshotTarget, actOnNode, focusedNode, screenshotDisplay, injectKey, injectClick,
   // lane E (D7): the pixel road
   CLICK_BUTTONS, SCROLL_BUTTONS, SCROLL_MAX, TYPE_MAX, injectScroll, injectType, xdoStderr, XDO_STDERR_KNOWN, displayGeometry, windowShot, focusNode,

@@ -80,7 +80,7 @@ const REGISTRY = [
   { id: 'chromium', label: 'Chromium', exec: 'chromium', browser: 'chromium', category: 'browser', available: true },
   { id: 'gedit', label: 'gedit', exec: 'gedit', available: true },
 ];
-function world(ENG, sub, { onLaunch = null, clock = null, profileFails = false, dataDir = null, wt = null } = {}) {
+function world(ENG, sub, { onLaunch = null, clock = null, profileFails = false, dataDir = null, wt = null, helper = null } = {}) {
   const dir = scratch('da-rung-' + sub); fs.mkdirSync(dir, { recursive: true });
   process.on('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } });
   const sessions = new Map([['w-A', SESS_A], ['w-B', SESS_B]]);
@@ -106,7 +106,7 @@ function world(ENG, sub, { onLaunch = null, clock = null, profileFails = false, 
     // the Scale ▸ relaunch as src/desktop-serve.js runs it: the successor first (the agent's rung carried in its opts), the old exited + replacedBy
     relaunch: async (id) => { const old = records.get(id); const next = await keeper.launch({ appId: old.appId, url: old.url || undefined, keepProfile: old.keepProfile }, old.origin === 'agent-browser' ? { origin: old.origin, by: old.by, label: old.label, id: `${id}-r` } : { id: `${id}-r` }); records.set(id, { ...records.get(id), state: 'exited', stoppedBy: 'relaunch', replacedBy: next.id }); return { app: next }; },
   };
-  const engine = ENG.create({ keeper, dataDir: dataDir || path.join(dir, 'data'), env: () => ({}), activeSessions: sessions, broadcast: (m) => sent.push(m), bins: { xdotool: null, gdbus: null }, log: { warn() { }, log() { } }, procExe: () => null, ...(clock ? { now: () => clock.t } : {}), ...(wt ? { wt } : {}) });
+  const engine = ENG.create({ keeper, dataDir: dataDir || path.join(dir, 'data'), env: () => ({}), activeSessions: sessions, broadcast: (m) => sent.push(m), bins: { xdotool: null, gdbus: null }, log: { warn() { }, log() { } }, procExe: () => null, ...(clock ? { now: () => clock.t } : {}), ...(wt ? { wt } : {}), ...(helper ? { helper, python: process.execPath } : {}) });
   return { dir, sessions, records, launches, stops, sent, inputs, engine, keeper, fA: engine.factsForToken('vsst_A'), fB: engine.factsForToken('vsst_B') };
 }
 let retireOk = null; // the D6 retire table (defined in ②, re-run on a patched copy in the controls)
@@ -540,6 +540,158 @@ console.log('CONTROLS (patched copies)');
   { const M = mutE('e2c-anyone', "    if (!rec.by || rec.by.sessionId !== facts.sessionId) throw namedError('not_your_window',", "    if (false) throw namedError('not_your_window',"); ok(!(await e2cChecks(M, B, 'mut-e2c-anyone')).nonOpenerRefused, 'CONTROL e2c (b): a non-opener allowed to set the mode ⇒ the verb\'s permission leg goes RED'); }
   { const bp = read('src/browser-profiles.js'); const line = "const NOT_YET_FLAGS = Object.freeze({});"; assert1(bp.includes(line), 'e2c control (c) planted'); const Bm = MUT.load('src/browser-profiles.js', bp.replace(line, "const NOT_YET_FLAGS = Object.freeze({ mode: 'E2c (the interaction mode)' });"), 'e2c-not-yet'); ok(!(await e2cChecks(ENGINE, Bm, 'mut-e2c-notyet')).door, 'CONTROL e2c (c): --mode still refused not_yet ⇒ the door leg goes RED'); }
   for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 22, label: 'desktop-app-rung' })) ok(x.pass, x.name, x.detail);
+}
+
+// ── ⑨ B-4be3 (主开发 r1165 / r1176 / r1179): a LARGE page read PART BY PART — ONE subtree by its ref, ONE node's WHOLE
+// text (byte-bounded, the cut said), and a hidden text never read through the tree. The reporter's scene: a desktop-app
+// browser window whose table outgrows the 3000-node budget, an address bar whose address the snapshot cuts.
+console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text rule');
+{
+  const { spawnSync } = require('node:child_process');
+  const J = JSON.stringify;
+  const dir = scratch('b4be3'); fs.mkdirSync(dir, { recursive: true });
+  process.on('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } });
+  // (A) THE ENGINE'S DOOR over a stand-in helper (node): it logs every request and answers a small page —
+  // a table of rows (no actions), a button (an action: the whole tree resolves to tree mode), an address entry
+  const log = path.join(dir, 'helper.log');
+  const helper = path.join(dir, 'fake-helper.js');
+  fs.writeFileSync(helper, `
+    const fs = require('fs');
+    let s = ''; process.stdin.on('data', (d) => { s += d; }); process.stdin.on('end', () => {
+      const req = JSON.parse(s); fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(req) + '\\n');
+      const pid = (req.pids && req.pids[0]) || req.pid || 4242;
+      const nd = (ref, p, role, name, extra) => ({ ref, pid, path: p, role, name, depth: p.length, iface: [], ...extra });
+      const census = (n) => ({ nodes: n, component: 0, action: 1, editableText: 1, text: 1, buttons: 1, buttonsWithAction: 1, byRole: {}, actionNames: { press: 1 } });
+      let out;
+      if (req.op === 'snapshot' && req.root) {
+        const r = req.root.path;   // ONE subtree: the table and its rows — cells only, nothing to act on
+        const nodes = [nd('@e1', r, 'table', 'Expenses'), nd('@e2', r.concat(0), 'table row', 'row 1', { parent: '@e1' }), nd('@e3', r.concat(1), 'table row', 'row 2', { parent: '@e1' }), nd('@e4', r.concat(0, 0), 'table cell', 'Taxi', { parent: '@e2' })];
+        out = { ok: true, apps: [{ pid, name: 'Chromium' }], nodes, root: { pid, path: r, role: 'table', name: 'Expenses' }, census: census(4), unreadable: [], truncated: false, budget: req.budget, callTimeoutMs: 800, ms: 1 };
+      } else if (req.op === 'snapshot') {
+        const nodes = [nd('@e1', [], 'application', 'Chromium'), nd('@e2', [0], 'frame', 'Reimbursements', { parent: '@e1' }), nd('@e3', [0, 0], 'table', 'Expenses', { parent: '@e2' }),
+          nd('@e4', [0, 1], 'push button', 'Submit', { parent: '@e2', actions: ['press'] }), nd('@e5', [0, 2], 'entry', 'Address and search bar', { parent: '@e2', editable: true, text: 'https://example.test/report?id=1' })];
+        out = { ok: true, apps: [{ pid, name: 'Chromium' }], nodes, census: census(5), unreadable: [], truncated: false, budget: req.budget, callTimeoutMs: 800, ms: 1 };
+      } else if (req.op === 'act' && req.verb === 'text') {
+        const whole = 'https://example.test/report?id=1&' + 'q'.repeat(90000);
+        const t = whole.slice(0, req.maxBytes);
+        out = { ok: true, did: { verb: 'text', role: req.expect.role, name: req.expect.name, nameChars: req.expect.name.length, nameCut: false, text: t, chars: whole.length, bytes: Buffer.byteLength(t), maxBytes: req.maxBytes, cut: t.length < whole.length }, ms: 1 };
+      } else if (req.op === 'act') out = { ok: true, did: { verb: req.verb, role: req.expect.role, name: req.expect.name } };
+      else if (req.op === 'probe') out = { ok: true, apps: 1, sessionBus: true };
+      else out = { ok: false, code: 'bad-request', why: 'unknown op' };
+      process.stdout.write(JSON.stringify(out) + '\\n');
+    });`);
+  const reqs = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  const caught = async (fn) => { try { return { ok: true, v: await fn() }; } catch (e) { return { ok: false, e }; } };
+  /** The door's checks, re-run by each control → the facts each leg reads. */
+  async function doorChecks(ENG, sub) {
+    fs.rmSync(log, { force: true });
+    const W = world(ENG, sub, { helper });
+    const r0 = await W.engine.openAgentBrowser(doorOf(), W.fA);
+    W.engine.setShareMode(r0.handle, 'auto');
+    const whole = await W.engine.snapshot(r0.handle, W.fA, {});
+    const F = world(ENG, sub + '-fresh', { helper }); const rF = await F.engine.openAgentBrowser(doorOf(), F.fA);
+    const noSnapFirst = await caught(() => F.engine.snapshot(rF.handle, F.fA, { under: '@e3' }));
+    const sub1 = await caught(() => W.engine.snapshot(r0.handle, W.fA, { under: '@e3' }));
+    const subReq = reqs().filter((q) => q.op === 'snapshot' && q.root).pop() || null;
+    const old = await caught(() => W.engine.act(r0.handle, W.fA, { verb: 'text', ref: '@e3' }));   // the table's OLD ref (a subtree minted from @e1 would hold an @e3 too)
+    const again = await W.engine.snapshot(r0.handle, W.fA, {});
+    const tx = await caught(() => W.engine.act(r0.handle, W.fA, { verb: 'text', ref: '@e5' }));
+    const txReq = reqs().filter((q) => q.op === 'act' && q.verb === 'text').pop() || null;
+    const big = await caught(() => W.engine.act(r0.handle, W.fA, { verb: 'text', ref: '@e5', maxBytes: 999999 }));
+    const bigReq = reqs().filter((q) => q.op === 'act' && q.verb === 'text').pop() || null;
+    const audit = fs.readFileSync(path.join(W.dir, 'data', ENGINE.AUDIT_FILE), 'utf8');
+    W.engine.setShareMode(r0.handle, 'pixels');
+    const px = await caught(() => W.engine.act(r0.handle, W.fA, { verb: 'text', ref: '@e5' }));
+    return { W, whole, noSnapFirst, sub1, subReq, old, again, tx, txReq, big, bigReq, audit, px };
+  }
+  const D = await doorChecks(ENGINE, 'b4be3-real');
+  const s1 = D.sub1.ok ? D.sub1.v : null;
+  ok(D.whole.nodes.length === 5 && !D.whole.subtree, 'SETUP: the whole window\'s snapshot (5 nodes, refs @e1–@e5, no subtree line)', D.whole.nodes.map((n) => n.ref));
+  ok(!D.noSnapFirst.ok && D.noSnapFirst.e.code === 'ref_unknown', 'a subtree before any snapshot is refused ref_unknown by name (the refs it is named by do not exist yet)', D.noSnapFirst.e && D.noSnapFirst.e.code);
+  ok(!!(D.subReq && D.subReq.root && D.subReq.root.pid === 4242 && J(D.subReq.root.path) === '[0,0]' && D.subReq.root.expect.role === 'table' && D.subReq.root.expect.name === 'Expenses'), 'THE SUBTREE: the helper is handed the ref\'s node — its pid, path, role and name (the same budget, spent below it)', D.subReq && D.subReq.root);
+  ok(!!(s1 && s1.subtree && s1.subtree.of === '@e3' && /REPLACE the last snapshot's — every older ref is gone/.test(s1.subtree.note) && /`vibespace-window snapshot da-1` reads the whole window again/.test(s1.subtree.note)), 'THE SUBTREE\'S ANSWER says its refs REPLACE the last snapshot\'s, every older ref is gone, and the one-line road back to the whole window', s1 && s1.subtree);
+  ok(!!(s1 && s1.nodes.map((n) => n.ref).join() === '@e6,@e7,@e8,@e9' && s1.subtree.refs === '@e6–@e9'), 'its refs are numbered ABOVE the last table\'s (@e6–@e9), so no older ref can name one of its nodes', s1 && s1.nodes.map((n) => n.ref));
+  ok(!D.old.ok && D.old.e.code === 'ref_unknown', 'an OLDER ref (@e3) after a subtree read is gone: refused ref_unknown by name — never a different node', D.old.ok ? D.old.v : D.old.e.code);
+  ok(D.sub1.ok, 'THE AUTO MODE IS NOT RE-PROBED by a subtree read (its cells have nothing to act on; the whole window resolved to tree)', D.sub1.ok ? null : D.sub1.e.code);
+  ok(D.tx.ok && D.txReq && D.txReq.maxBytes === 65536 && D.tx.v.did.cut === true && D.tx.v.did.bytes === 65536 && D.tx.v.did.chars > 65536, 'THE WHOLE TEXT: one node\'s text through the act door, 64 KiB by default, the cut SAID (bytes, of how many characters)', D.txReq && { maxBytes: D.txReq.maxBytes, did: D.tx.ok && { bytes: D.tx.v.did.bytes, chars: D.tx.v.did.chars, cut: D.tx.v.did.cut } });
+  ok(D.big.ok && D.bigReq && D.bigReq.maxBytes === 262144, 'an asked bound past the cap is held to 256 KiB', D.bigReq && D.bigReq.maxBytes);
+  ok(!/q{50}/.test(D.audit) && /"verb":"text"[^\n]*"bytes":65536[^\n]*"cut":true/.test(D.audit), 'the audit names the node and the bytes, NEVER the text', D.audit.split('\n').filter((l) => l.includes('"text"')).slice(-1)[0]);
+  ok(!D.px.ok && D.px.e.code === 'mode_pixels', 'a pixel share refuses the whole-text read by name (a tree read, the same door as snapshot)', D.px.ok ? 'read' : D.px.e.code);
+  // CONTROLS (RED): refs minted from @e1 again (no base) — an older ref silently names a subtree node; the subtree re-probing
+  // the auto mode — a page's table refused mode_pixels; the audit carrying the text
+  const esrc = read(ENGINE_REL);
+  const mutEng = (tag, from, to) => { assert1(esrc.includes(from), `B-4be3 control ${tag} planted`); return MUT.load(ENGINE_REL, esrc.replace(from, to), tag); };
+  { const D2 = await doorChecks(mutEng('b4be3-nobase', "...(root ? { root, refBase } : {})", "...(root ? { root } : {})"), 'b4be3-nobase'); ok(D2.old.ok && D2.old.v.did.name === 'row 2', 'CONTROL (refs from @e1 again): the older ref @e3 silently reads a node of the subtree (row 2, not the table) — the leg above can fail', D2.old.ok ? D2.old.v.did : D2.old.e.code); }
+  { const D3 = await doorChecks(mutEng('b4be3-reprobe', "if (!root && rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto') {", "if (rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto') {"), 'b4be3-reprobe'); ok(!D3.sub1.ok && D3.sub1.e.code === 'mode_pixels', 'CONTROL (the subtree re-probes the auto mode): a table of cells is refused mode_pixels', D3.sub1.ok ? 'read' : D3.sub1.e.code); }   // stale-pins: kept (the control puts the old text back)
+  { const D4 = await doorChecks(mutEng('b4be3-audit', "...(r.ok && r.did ? { bytes: r.did.bytes, cut: !!r.did.cut } : {})", "...(r.ok && r.did ? { bytes: r.did.bytes, cut: !!r.did.cut, text: r.did.text } : {})"), 'b4be3-audit'); ok(/q{50}/.test(D4.audit), 'CONTROL (the audit carries the text): the text is in the audit file — the leg above can fail'); }
+  { const Rm = MUT.load('src/window-reach.js', read('src/window-reach.js').replace("const TREE_VERBS = Object.freeze(['snapshot', 'text']);", "const TREE_VERBS = Object.freeze(['snapshot']);"), 'b4be3-reach');   // stale-pins: kept (the control puts the old text back)
+    const real = require(path.join(REPO, 'src/window-reach.js')).verbGate({ mode: 'pixels', verb: 'text', hasRef: true }), mut = Rm.verbGate({ mode: 'pixels', verb: 'text', hasRef: true });
+    ok(!real.ok && real.code === 'mode_pixels' && mut.ok, 'CONTROL (text not a tree verb in the mode table): a pixel share lets the tree read through — the mode table is what refuses it', { real, mut }); }
+  // (B) THE REAL HELPER (python) against a stand-in `gi` — the walk from a root path, the byte bound, the hidden-text rule.
+  const py = spawnSync('python3', ['-c', 'print(1)'], { encoding: 'utf8' });
+  ok(py.status === 0, 'SETUP: python3 runs here (the helper is python)', py.error ? String(py.error) : py.stderr);
+  const giDir = path.join(dir, 'gi-standin'), repoDir = path.join(giDir, 'gi', 'repository');
+  fs.mkdirSync(repoDir, { recursive: true });
+  fs.writeFileSync(path.join(giDir, 'gi', '__init__.py'), 'def require_version(*a, **k):\n    return None\n');
+  fs.writeFileSync(path.join(repoDir, '__init__.py'), 'from . import Atspi\n');
+  fs.writeFileSync(path.join(repoDir, 'Atspi.py'), [
+    'import json, os',
+    'TREE = json.load(open(os.environ["VS_FAKE_ATSPI_TREE"]))',
+    'class CoordType:', '    SCREEN = 0',
+    'def set_timeout(a, b):', '    return None',
+    'class _Acc:',
+    '    def __init__(self, d): self.d = d',
+    '    def get_name(self): return self.d.get("name", "")',
+    '    def get_role_name(self): return self.d.get("role", "unknown")',
+    '    def get_interfaces(self): return list(self.d.get("ifaces", []))',
+    '    def get_child_count(self): return len(self.d.get("children", []))',
+    '    def get_child_at_index(self, i): return _Acc(self.d["children"][i])',
+    '    def get_process_id(self): return self.d.get("pid")',
+    '    def get_text_iface(self): return self if "Text" in self.d.get("ifaces", []) else None',
+    'class Text:',
+    '    @staticmethod',
+    '    def get_character_count(t): return len(t.d.get("text", ""))',
+    '    @staticmethod',
+    '    def get_text(t, a, b): return t.d.get("text", "")[a:b]',
+    'def get_desktop(i): return _Acc({"children": TREE["apps"]})',
+  ].join('\n') + '\n');
+  const SECRET = ['hun', 'ter', '2-', 'not-a-real-one'].join('');   // invented; built so no literal reads as a credential
+  const LONG = 'https://example.test/report?id=1&' + 'é'.repeat(40000);   // 2 bytes a character past the prefix
+  const tree = { apps: [{ pid: 4242, name: 'Chromium', role: 'application', children: [
+    { role: 'frame', name: 'Reimbursements', children: [
+      { role: 'table', name: 'Expenses', children: [1, 2, 3, 4, 5].map((i) => ({ role: 'table row', name: 'row ' + i, children: [{ role: 'table cell', name: 'cell ' + i, ifaces: ['Text'], text: 'amount ' + i }] })) },
+      { role: 'entry', name: 'Address and search bar', ifaces: ['Text', 'EditableText'], text: LONG },
+      { role: 'password text', name: 'Password', ifaces: ['Text', 'EditableText'], text: SECRET },
+    ] }] }] };
+  const treeFile = path.join(dir, 'tree.json'); fs.writeFileSync(treeFile, J(tree));
+  const runPy = (helperFile, req) => { const r = spawnSync('python3', ['-I', helperFile], { input: J(req), encoding: 'utf8', env: { PATH: process.env.PATH, PYTHONPATH: giDir, VS_FAKE_ATSPI_TREE: treeFile } }); try { return JSON.parse(r.stdout.trim().split('\n').pop()); } catch { return { ok: false, code: 'unparsed', why: (r.stdout || '') + (r.stderr || '') }; } };
+  // the -I flag drops PYTHONPATH, so the stand-in rides a copy of the helper beside a path insert (the helper itself unchanged)
+  const asRun = (src, tag) => { const f = path.join(dir, `helper-${tag}.py`); fs.writeFileSync(f, `import sys\nsys.path.insert(0, ${J(giDir)})\n` + src); return f; };
+  const HSRC = read('src/window-targets-helper.py');
+  /** The helper's checks, re-run by each control. */
+  const helperChecks = (src, tag) => {
+    const f = asRun(src, tag);
+    const whole = runPy(f, { op: 'snapshot', pids: [4242], budget: 600 });
+    const sub = runPy(f, { op: 'snapshot', pids: [4242], budget: 4, root: { pid: 4242, path: [0, 0], expect: { role: 'table', name: 'Expenses' } } });
+    const stale = runPy(f, { op: 'snapshot', pids: [4242], budget: 600, root: { pid: 4242, path: [0, 0], expect: { role: 'table', name: 'Invoices' } } });
+    const tx = runPy(f, { op: 'act', pid: 4242, path: [0, 1], expect: { role: 'entry', name: 'Address and search bar' }, verb: 'text', maxBytes: 1000 });
+    const hid = runPy(f, { op: 'act', pid: 4242, path: [0, 2], expect: { role: 'password text', name: 'Password' }, verb: 'text', maxBytes: 1000 });
+    return { whole, sub, stale, tx, hid };
+  };
+  const P = helperChecks(HSRC, 'real');
+  const pw = (P.whole.nodes || []).find((n) => n.role === 'password text');
+  ok(P.whole.ok && (P.whole.nodes || []).length === 15, 'SETUP: the real helper walks the stand-in tree (15 nodes)', P.whole.ok ? P.whole.nodes.length : P.whole);
+  ok(P.sub.ok && P.sub.nodes.length === 4 && J(P.sub.nodes.map((n) => n.path)) === '[[0,0],[0,0,0],[0,0,1],[0,0,2]]' && P.sub.truncated === true && P.sub.root && P.sub.root.role === 'table', 'THE HELPER\'S SUBTREE: the walk starts at the root path, paths stay ABSOLUTE (an act re-resolves them), the budget (4) is spent below that node and the truncation said', P.sub.ok ? P.sub.nodes.map((n) => n.path) : P.sub);
+  ok(!P.stale.ok && P.stale.code === 'ref_stale', 'a subtree whose node at that path is no longer the one named is refused ref_stale (as an act is)', P.stale);
+  const enc = (P.tx.ok && P.tx.did.text) ? Buffer.byteLength(P.tx.did.text) : -1;
+  ok(P.tx.ok && P.tx.did.cut === true && P.tx.did.bytes === enc && enc <= 1000 && enc >= 998 && P.tx.did.chars === LONG.length && P.tx.did.text.startsWith('https://example.test/report?id=1&'), 'THE HELPER\'S WHOLE TEXT: bounded by BYTES (1000 asked; a 2-byte character never split), the characters there were said, the cut said', P.tx.ok ? { bytes: P.tx.did.bytes, chars: P.tx.did.chars, cut: P.tx.did.cut } : P.tx);
+  ok(!!pw && pw.textHidden === true && pw.text === undefined && !J(P.whole).includes(SECRET), 'THE HIDDEN-TEXT RULE (ALSO CURED): a password field (the tree\'s hidden-text role) carries NO text in the snapshot, said by textHidden', pw);
+  ok(!P.hid.ok && P.hid.code === 'text_hidden' && !J(P.hid).includes(SECRET), '…and the whole-text verb refuses it by name, text_hidden — the value never leaves the helper', P.hid);
+  // CONTROLS (RED), each a copy of the helper with ONE edit
+  const plantH = (from, to, tag) => { assert1(HSRC.includes(from), `B-4be3 helper control ${tag} planted`); return helperChecks(HSRC.replace(from, to), tag); };
+  { const C = plantH('    queue = [(app, list(base_path or []), 0, None)]', '    queue = [(app, [], 0, None)]', 'relpath'); ok(C.sub.ok && J(C.sub.nodes.map((n) => n.path)) !== '[[0,0],[0,0,0],[0,0,1],[0,0,2]]', 'CONTROL (paths relative to the subtree): an act would re-resolve the wrong node — the leg above can fail', C.sub.ok && C.sub.nodes.map((n) => n.path)); }   // stale-pins: kept (the control puts the old text back)
+  { const C = plantH('            return b[:cap].decode("utf-8", "ignore"), True', '            return s, True', 'nobound'); ok(C.tx.ok && Buffer.byteLength(C.tx.did.text) > 1000, 'CONTROL (the bound not applied): the whole value comes back past the asked bytes'); }
+  { const C = plantH('HIDDEN_TEXT_ROLES = ("password text",)', 'HIDDEN_TEXT_ROLES = ()', 'nohide'); ok(J(C.whole).includes(SECRET) && C.hid.ok && J(C.hid).includes(SECRET), 'CONTROL (no hidden-text rule — r1179\'s find): the snapshot AND the text verb hand the password field\'s value out'); }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

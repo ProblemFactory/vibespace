@@ -20,8 +20,9 @@
  *   POST /api/agent/window/detach    {handle}
  *   POST /api/agent/window/stop      {handle}      lane e2a r3: the OPENER stops its own desktop browser (`--backend desktop-app`);
  *                                                  any other window ⇒ 403 not_your_browser (the user stops it from Desktop apps)
- *   POST /api/agent/window/snapshot  {handle, budget?, text?}
- *   POST /api/agent/window/act       {handle, verb: click|type|key|scroll, ref?, at?, text?, replace?, chord?, action?, button?, direction?, by?}
+ *   POST /api/agent/window/snapshot  {handle, budget?, text?, under?}   B-4be3: `under` = ONE subtree by a ref of the last snapshot
+ *   POST /api/agent/window/act       {handle, verb: click|type|key|scroll|text, ref?, at?, text?, replace?, chord?, action?, button?, direction?, by?, maxBytes?}
+ *                                                  (B-4be3: verb text = ONE node's whole text, maxBytes-bounded; a hidden-text node ⇒ 409 text_hidden)
  *                                                  (lane E verify r2: an injection the user's takeover / a revoke cut short answers
  *                                                  409 window_paused / 403 not_exposed WITH `did: {partial: true}`; a Task Group
  *                                                  store that cannot be read ⇒ 503 reach_unreadable, the lease kept)
@@ -67,7 +68,7 @@ function refuseHost(req, res) {
 const STATUS = {
   'not-found': 404, not_attached: 404, ref_unknown: 404, app_gone: 404,
   'bad-request': 400, bad_chord: 400, action_unknown: 400, 'unsupported-host': 400, 'exec-not-found': 400, 'cwd-missing': 400, 'needs-wayland': 400,
-  window_leased: 409, window_paused: 409, node_has_no_action: 409, node_not_editable: 409, no_focused_node: 409, ref_stale: 409, no_injection_backend: 409, action_refused: 409, cap: 409, 'no-backend': 409, 'backend-not-wired': 409, 'no-display': 409,
+  window_leased: 409, window_paused: 409, node_has_no_action: 409, node_not_editable: 409, no_focused_node: 409, ref_stale: 409, text_hidden: 409, no_injection_backend: 409, action_refused: 409, cap: 409, 'no-backend': 409, 'backend-not-wired': 409, 'no-display': 409,
   a11y_unavailable: 503, helper_missing: 503, python3_missing: 503, screenshot_unavailable: 503,
   no_utf8_locale: 503, // lane E verify r3 (F3): a non-ASCII text typed as keys, and no UTF-8 locale loads here — nothing was typed
   helper_timeout: 504, helper_error: 502, action_failed: 502, ref_unreadable: 502, inject_failed: 502, screenshot_failed: 502,
@@ -182,7 +183,7 @@ router.post('/api/agent/window/snapshot', async (req, res) => {
   const f = agentFacts(req, res, engine); if (!f) return;
   const h = handleOf(req, res); if (!h) return;
   const mh = machineOf(h, res); if (mh === false) return;
-  try { res.json(mh ? mh.snapshot(h, f) : await engine.snapshot(h, f, { budget: req.body?.budget, text: req.body?.text !== false })); } catch (e) { fail(res, e); }
+  try { res.json(mh ? mh.snapshot(h, f) : await engine.snapshot(h, f, { budget: req.body?.budget, text: req.body?.text !== false, under: req.body?.under ?? null })); } catch (e) { fail(res, e); }   // B-4be3: `under` = ONE subtree by a ref
 });
 router.post('/api/agent/window/act', async (req, res) => {
   if (refuseHost(req, res)) return;
