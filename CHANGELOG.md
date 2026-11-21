@@ -14,6 +14,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Manage agents: long-lived token notes name the menu item to use; an account whose token expired offers «Long-lived token (expired)…» where it is refused.
 - When VibeSpace stops starting a browser, its live window shows «Agent browser…» right beside the message, instead of a menu path.
 - Settings: the Local diagnostics row offers «Diagnostics report…» and the Customize mode rows offer «Customize UI…» on the row itself, instead of a menu path.
+- A conversation can now use its own vault entry together with one you shared with it in the same command; that command was refused before.
 
 ## 2.369.415 — 2026-11-21
 
