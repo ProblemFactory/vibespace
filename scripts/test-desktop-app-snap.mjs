@@ -51,6 +51,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, vncEnv, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): a read whose state never came is SAID on its own line, right above the
+// judge that reads it, and MARKED (an object or a list carries `timedOut`) — so its red reads that, never a verdict on the product
+const markTimedOut = (v, ms, what) => { console.log(`    (${what}: the state it waits for did not come in ${ms / 1000} s (a wait that expects nothing ends so too); its last read ${JSON.stringify(v === undefined ? null : v).slice(0, 160)})`); return v && typeof v === 'object' ? Object.assign(v, { timedOut: `the state never came in ${ms / 1000} s` }) : v; };
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -246,7 +249,7 @@ const settle = async (id) => {
     const key = m && m.main ? JSON.stringify([m.win.x, m.win.y, m.win.w, m.win.h, m.main, m.pane.w, m.pane.h, m.stage]) : 'x';
     if (key !== last) { last = key; since = Date.now(); } else if (Date.now() - since >= 1500) return m;
   }
-  return P.evalJs(MEAS(id));
+  return markTimedOut(await P.evalJs(MEAS(id)), 10000, 'settle (the picture held still)');
 };
 const ACTS = ['rest', 'grid13', 'right', 'left', 'top', 'bottom', 'grid22', 'max', 'restore', 'w700'];
 /** r2 — the verifier's flows (a box the window manager kept ITSELF through a minimize / a maximize while the sidebar
