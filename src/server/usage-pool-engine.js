@@ -1620,14 +1620,14 @@ function apiWitnessEligibility(session, slot, key) {
 // line with the counts, and the established-window memo is dropped so the
 // guard reads the repaired sidecars at once.
 function repairIdentityAnchors(why = 'boot', { since } = {}) {
+  let list = [];   // B-6a92 r7: in scope for the finally's warm (read below, on the decision road)
   try {
     const { repairSidecarsByApiPhase } = require('../reading-repair.js');
     // the identity keys it decides read the DECISION road (B-360d, round wldn7whag): its callers await the sign-in facts' settle and
     // hand its `since`; a row not confirmed carries no email — the repair fails toward «not repaired» (the hourly run repairs)
-    const list = (accounts.decisionList && accounts.decisionList(since != null ? { since } : {}).accounts) || [];
+    list = (accounts.decisionList && accounts.decisionList(since != null ? { since } : {}).accounts) || [];
     const rep = repairSidecarsByApiPhase({ dataDir: path.join(rootDir, 'data'), accounts: list, id: 'identity-repair:' + why });
     _ownWin = null; _ownWinAt = 0;
-    rep.warmed = warmHeldWindows(list);   // B-6a92 r6: the held facts in memory, off the poll (after the repair's own rewrites)
     const c = rep.counts || {};
     const changed = !!(c.restamped || c.replaced || c.emptied || c.stripped || c.readmitted || c.stamped);
     // the STANDING run (hourly, final verifier: a moved window must not wait
@@ -1638,6 +1638,8 @@ function repairIdentityAnchors(why = 'boot', { since } = {}) {
     rep.changed = changed;
     return rep;
   } catch (e) { console.warn('[usage] identity repair failed:', e.message); return { error: e.message, counts: null, identities: [] }; }
+  // B-6a92 r6/r7: the held facts in memory, off the poll — after the repair's own rewrites, and even when the repair failed
+  finally { try { warmHeldWindows(list); } catch { } }
 }
 /** The identity GROUP a cache key belongs to, as ONE representative — an
  *  org-merged login spans '__global__' + the named sub and must never read as
@@ -6823,13 +6825,14 @@ function answeringLogin(idv) {
   const has = (x) => x && (x.orgUuid || x.email);
   return has(idv && idv.panel) ? { orgUuid: idv.panel.orgUuid || null, email: idv.panel.email || null } : has(idv && idv.expected) ? { orgUuid: idv.expected.orgUuid || null, email: idv.expected.email || null } : null;
 }
-/** Two logins the same account? true / false / null (cannot be told). The organisation's id, refined by the e-mail where both
- *  sides know it (one Team org holds several people's accounts); else the e-mail. Never printed. */
+/** Two logins the same account? true / false / null (cannot be told). The organisation's id: different ⇒ false; the same ⇒
+ *  the e-mail decides, and without it on both sides nothing is told (one Team org holds several people's accounts); else the
+ *  e-mail alone. Never printed. */
 function sameLogin(a, b) {
   const low = (v) => (v == null || v === '' ? null : String(v).toLowerCase());
   if (!a || !b) return null;
   const ao = low(a.orgUuid), bo = low(b.orgUuid), ae = low(a.email), be = low(b.email);
-  if (ao && bo) return ao !== bo ? false : (ae && be ? ae === be : true);
+  if (ao && bo) return ao !== bo ? false : (ae && be ? ae === be : null);   // r7: one org, an address missing on a side ⇒ cannot be told
   if (ae && be) return ae === be;
   return null;
 }
@@ -6858,14 +6861,24 @@ function liftHeldWindow(key, idv) {
     // nothing written, the caller says the folder is signed in as that account; either side unknown ⇒ nothing is proven, no lift.
     // Compared in memory by the organisation's id (refined by the e-mail where both sides know it: one Team org holds several
     // people), else the e-mail — never printed.
-    const ans = answeringLogin(idv), seen = [];
+    // r7 (主开发 r848): every held name's login through THE ONE READER (probeLog.loginOfAccount) — the hub's own login ('__global__')
+    // from the home's file, any other name from its pool folder; never a folder read by hand here
+    const ans = answeringLogin(idv), unread = [], incomparable = [];
     for (const n of h.names) {
-      const same = sameLogin(ans, (() => { try { return probeLog.machineOauthAccount(accounts.subDir(n)); } catch { return null; } })());
-      if (same === true) return onHeld ? { refused: 'signed-in-as', names: [n] } : false;
-      seen.push(same);
+      const theirs = (() => { try { return probeLog.loginOfAccount(n, { accounts }); } catch { return null; } })();
+      const same = sameLogin(ans, theirs);
+      // the identity proof is in hand and the answering login IS this held account's: refused on every road, the held window's
+      // or not (r7, a small: a verified panel on a moved window would otherwise write that account's numbers on the row)
+      if (same === true) return { refused: 'signed-in-as', names: [n] };
+      if (same === null) (theirs ? incomparable : unread).push(n);
     }
-    // (a panel VERIFIED on the row's own window is written as it always was; only its lift of the hold waits for the proof)
-    if (seen.some((x) => x !== false)) return onHeld ? { refused: 'identity-unknown', names: h.names.slice() } : false;
+    // nothing proven: on the held window no lift and nothing written, said by WHICH side could not be told; a panel VERIFIED on
+    // the row's own window is written as it always was (only its lift of the hold waits for the proof)
+    if (unread.length || incomparable.length) {
+      if (!onHeld) return false;
+      const why = !ans ? 'answer-unnamed' : unread.length ? 'held-unread' : 'incomparable';
+      return { refused: 'identity-unknown', why, names: why === 'held-unread' ? unread : why === 'incomparable' ? incomparable : h.names.slice() };
+    }
     const now = Date.now();
     if (onHeld) {
       const scoped = {};
@@ -6877,7 +6890,13 @@ function liftHeldWindow(key, idv) {
       // on the held phase beside a standing hold would let the guard write that window's readings on the row)
       const raw0 = readApiWitnessFile(key);
       if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { sevenDay, scoped, at: now, sessionId: null, source: 'own-panel', n: 1, ring: [], ringAt: now })) return false;
-      if (!windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer)) { if (raw0) usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), raw0); return false; }
+      if (!windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer)) {
+        // r7 (a small): put back what was there — or, when the first read was empty, at least the hold memory still holds — and say
+        // a failed put-back once (memory keeps the hold; the next start's warm reads the disk)
+        const back = raw0 || { sevenDay: null, scoped: {}, at: h.at, sessionId: null, source: null, ring: [], foreign: { names: h.names.slice(), phase: h.phase, at: h.at } };
+        if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), back)) console.warn(`[usage] window hold: ${nameOf(key)}'s stamp could not be written and its witness could not be put back — the hold stands in memory only until the next start`);
+        return false;
+      }
       try { oatIdentity.onReanchor(key, { window: stamp, source: 'own-panel', independent: producer === 'login' }); } catch { }
     } else {
       const { foreign: _f, ...rest } = readApiWitnessFile(key) || {};

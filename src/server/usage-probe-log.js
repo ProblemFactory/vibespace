@@ -74,4 +74,18 @@ function readProbeLog(dataDir, { limit = 200, key = null, rung = null } = {}) {
   return sel.slice(Math.max(0, sel.length - Math.max(1, limit | 0)));
 }
 
-module.exports = { appendProbeLog, readProbeLog, machineOauthAccount, clip, FILE, MAX_BYTES, RAW_CAP, ERR_CAP };
+/** THE LOGIN OF AN ACCOUNT NAME — ONE reader (B-6a92 r7, 主开发 r848): the hub's own login ('__global__') is the home's
+ *  `.claude.json`; any other name is its pool folder's (`dir` when the caller already derived it once — the panel's credsDir —
+ *  else `accounts.subDir(name)`); a name with neither (a host's key, a gone row) → null. Every site that reads a login by a
+ *  name for an identity verdict asks this (the panel's expected identity, the held row's door, the token's whose-is-it); a
+ *  census in test-reading-truth pins every `machineOauthAccount(` call (a planted second reader is red by name).
+ *  → {email, orgUuid, orgName} | null — the values stay in memory: no caller prints them */
+function loginOfAccount(name, { accounts = null, dir = null } = {}) {
+  if (name === '__global__') return machineOauthAccount();
+  if (typeof name !== 'string' || !name) return null;
+  let d = dir;
+  if (!d && accounts && typeof accounts.subDir === 'function') { try { d = accounts.subDir(name); } catch { d = null; } }
+  return d ? machineOauthAccount(d) : null;
+}
+
+module.exports = { appendProbeLog, readProbeLog, machineOauthAccount, loginOfAccount, clip, FILE, MAX_BYTES, RAW_CAP, ERR_CAP };

@@ -453,7 +453,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
 {
   const WS = require(path.join(REPO, 'src/window-stamp.js'));
   const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
-  const held = (engMod = realEng, { ownReading = true, again = null, ro = null, cli = null, logins = null, routesMod = null } = {}) => {
+  const held = (engMod = realEng, { ownReading = true, again = null, ro = null, cli = null, logins = null, routesMod = null, withGlobal = false } = {}) => {
     // `again`: the same data folder and accounts under a FRESH engine (a restart: no in-memory window cache)
     const root = again ? again.root : endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'rtruth-held-')));
     const dataDir = path.join(root, 'data');
@@ -466,10 +466,17 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
     const nowS = Math.floor(Date.now() / 1000), RV = again ? again.RV : nowS + 2 * 86400, RO = again ? again.RO : (ro || nowS + 5 * 86400), RX = again ? again.RX : nowS + 3 * 86400 + 11 * 3600;
     if (!again && ownReading) fs.writeFileSync(path.join(cacheDir, V + '.json'), J({ fetchedAt: Date.now() - 3600e3, source: 'cli-usage', sevenDay: { utilization: 0.2, resetsAt: RV } }));   // Vela's OWN last reading
-    fs.writeFileSync(path.join(cacheDir, O + '.json'), J({ fetchedAt: Date.now() - 60000, source: 'cli-usage', sevenDay: { utilization: 0.81, resetsAt: RO } }));
-    if (!again) for (const [id, r] of [[V, RV], [O, RO]]) fs.writeFileSync(path.join(cacheDir, readingLag.windowSidecarName(id)), J({ at: Date.now(), source: 'on-demand', sevenDay: r }));
+    // r7 `withGlobal`: the HUB'S OWN LOGIN ('__global__', a cache file and its stamp like any other) holds the window Orin held, and
+    // Orin moves to a window of its own — the held name is then the hub's own login
+    const RZ = nowS + 6 * 86400 + 5 * 3600, ROo = withGlobal && !again ? RZ : RO;
+    fs.writeFileSync(path.join(cacheDir, O + '.json'), J({ fetchedAt: Date.now() - 60000, source: 'cli-usage', sevenDay: { utilization: 0.81, resetsAt: ROo } }));
+    if (withGlobal && !again) {
+      fs.writeFileSync(path.join(cacheDir, '__global__.json'), J({ fetchedAt: Date.now() - 60000, source: 'cli-usage', sevenDay: { utilization: 0.81, resetsAt: RO } }));
+      fs.writeFileSync(path.join(cacheDir, readingLag.windowSidecarName('__global__')), J({ at: Date.now(), source: 'on-demand', sevenDay: RO }));
+    }
+    if (!again) for (const [id, r] of [[V, RV], [O, ROo]]) fs.writeFileSync(path.join(cacheDir, readingLag.windowSidecarName(id)), J({ at: Date.now(), source: 'on-demand', sevenDay: r }));
     // r5: each row's API witness established on its own window, as a row that has read before holds it (the panel's door judges against it)
-    if (!again) for (const [id, r] of [[V, RV], [O, RO]]) fs.writeFileSync(path.join(cacheDir, readingLag.apiWindowSidecarName(id)), J({ sevenDay: r, scoped: {}, at: Date.now() - 7200e3, sessionId: null, source: 'rate-limit-events', n: 3, ring: [] }));
+    if (!again) for (const [id, r] of [[V, RV], [O, ROo]]) fs.writeFileSync(path.join(cacheDir, readingLag.apiWindowSidecarName(id)), J({ sevenDay: r, scoped: {}, at: Date.now() - 7200e3, sessionId: null, source: 'rate-limit-events', n: 3, ring: [] }));
     const sessions = new Map();
     const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
     const eng = engMod.create({ app, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { },
@@ -566,7 +573,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const roP = hourAt(5 * 86400), tP = panelText(roP, 12);
   const parsedP = parseCliUsageText(tP);
   ok('B-6a92 SETUP: the stand-in panel parses to the held window exactly', !!(parsedP && parsedP.sevenDay && parsedP.sevenDay.resetsAt === roP), parsedP);
-  const ORIN = { email: 'orin@example.test', org: 'org-orin-0001' }, VELA = { email: 'vela@example.test', org: 'org-vela-0001' };   // invented
+  const ORIN = { email: 'mail-orin-0001', org: 'org-orin-0001' }, VELA = { email: 'mail-vela-0001', org: 'org-vela-0001' };   // invented
   const binHeld = standIn('claude-panel-held.sh', tP);
   const P = held(realEng, { ro: roP, cli: binHeld, logins: { V: VELA, O: ORIN } });   // each folder holds its OWN account's login
   await run6(P);
@@ -593,9 +600,9 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const sr = await hush(() => S.api.refreshViaCliPanel(S.V));
   const sv = S.api.panelVerdictFor(S.V) || {}, sSt = S.stamp() || {}, sOwn = S.own() || {}, sWit = S.wit() || {}, sWu = sideOf(S.usage(), S.V);
   ok('B-6a92 THE DOOR, Vela\'s folder signed in as Orin (the must): no lift and nothing written — Vela\'s stamp, its file, the sidecar\'s name and the row\'s words all stand', sr.v === false && sSt.sevenDay === S.RV && !!(sOwn.sevenDay && sOwn.sevenDay.utilization === 0.2 && sOwn.sevenDay.resetsAt === S.RV) && !!(sWit.foreign && sWit.foreign.names[0] === S.O) && !!(sWu && sWu.otherNames[0] === 'Orin'), { v: sr.v, sSt, own: sOwn.sevenDay, foreign: sWit.foreign, sWu });
-  ok('B-6a92 …and the words say what is true — Vela\'s sign-in folder is signed in as Orin, sign Vela in again — never an address', /Vela's sign-in folder is signed in as Orin/.test(String(sv.why)) && /sign Vela in again/.test(String(sv.why)) && !String(sv.why).includes('@'), sv.why);
+  ok('B-6a92 …and the words say what is true — Vela\'s sign-in folder is signed in as Orin, sign Vela in again — no identity value', /Vela's sign-in folder is signed in as Orin/.test(String(sv.why)) && /sign Vela in again/.test(String(sv.why)) && !/mail-|org-[a-z]+-0001/.test(String(sv.why)), sv.why);
   // RED CONTROL: today's lift (r5: the identity check removed) — the folder signed in as Orin lifts the hold: Vela stamped on Orin's window, Orin's numbers on Vela
-  const IDA = "    const ans = answeringLogin(idv), seen = [];\n", IDB = "    if (seen.some((x) => x !== false)) return onHeld ? { refused: 'identity-unknown', names: h.names.slice() } : false;\n";
+  const IDA = "    const ans = answeringLogin(idv), unread = [], incomparable = [];\n", IDB = "      return { refused: 'identity-unknown', why, names: why === 'held-unread' ? unread : why === 'incomparable' ? incomparable : h.names.slice() };\n    }\n";
   const ia = esrc.indexOf(IDA), ib = esrc.indexOf(IDB);
   const mLift = ia > 0 && ib > ia ? require(MUT.write(ENG, esrc.slice(0, ia) + esrc.slice(ib + IDB.length), 'b6a92-r5-lift')) : null;
   const SR = mLift ? held(mLift, { ro: roP, cli: binHeld, logins: { V: ORIN, O: ORIN } }) : null;
@@ -608,7 +615,68 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   await run6(U);
   const ur = await hush(() => U.api.refreshViaCliPanel(U.V));
   const uv = U.api.panelVerdictFor(U.V) || {}, uSt = U.stamp() || {};
-  ok('B-6a92 THE DOOR, the answering login cannot be told: no lift, nothing written, and the words say whose login answered cannot be told', ur.v === false && uSt.sevenDay === U.RV && !!sideOf(U.usage(), U.V) && /whose login answered cannot be told/.test(String(uv.why)), { v: ur.v, uSt, why: uv.why });
+  ok('B-6a92 THE DOOR, the answering login cannot be told (Vela\'s folder names no login): no lift, nothing written, and the words say so — signing Vela in again settles it', ur.v === false && uSt.sevenDay === U.RV && !!sideOf(U.usage(), U.V) && /Vela's sign-in folder names no login to tell it from Orin/.test(String(uv.why)), { v: ur.v, uSt, why: uv.why });
+  // r7 (主开发 r848 item 3): BOTH folders name a login but the two cannot be compared (one an organisation only, the other an address
+  // only) — no lift, nothing written, and the words say exactly that, never «names no login»
+  const I = held(realEng, { ro: roP, cli: binHeld, logins: { V: { org: 'org-vela-0001' }, O: { email: 'mail-orin-0001' } } });
+  await run6(I);
+  const ir = await hush(() => I.api.refreshViaCliPanel(I.V));
+  const iv = I.api.panelVerdictFor(I.V) || {};
+  ok('B-6a92 THE DOOR, two logins that cannot be compared: no lift, nothing written, and the words say both folders name a login but cannot be told apart', ir.v === false && (I.stamp() || {}).sevenDay === I.RV && /both sign-in folders name a login, but the two cannot be told apart/.test(String(iv.why)) && !/names no login/.test(String(iv.why)) && !/mail-|org-[a-z]+-0001/.test(String(iv.why)), { v: ir.v, why: iv.why });
+  // r7 (主开发 r848, THE MUST): THE HELD NAME IS THE HUB'S OWN LOGIN — its login read through THE ONE READER from the home's file (a
+  // seeded stand-in home for the call; restored after). An honest Vela lifts the hold; Vela's folder signed in as the hub's own
+  // login is refused by name (its label: this machine's own login)
+  const GLOBAL = { email: 'mail-cli-0001', org: 'org-cli-0001' };   // invented
+  const withHome = async (who, fn) => {
+    const h0 = process.env.HOME, home = fs.mkdtempSync(path.join(binDir, 'home-'));
+    if (who) fs.writeFileSync(path.join(home, '.claude.json'), J({ oauthAccount: { emailAddress: who.email, organizationUuid: who.org } }), { mode: 0o600 });
+    process.env.HOME = home;
+    try { return await fn(); } finally { process.env.HOME = h0; }
+  };
+  const GH = held(realEng, { ro: roP, cli: binHeld, logins: { V: VELA, O: ORIN }, withGlobal: true });
+  await run6(GH);
+  const ghNames = ((GH.wit() || {}).foreign || {}).names || [];
+  ok('B-6a92 SETUP: the hold names the hub\'s own login (its window stamp is among the established windows)', ghNames.includes('__global__') && !ghNames.includes(GH.O), ghNames);
+  const ghr = await withHome(GLOBAL, () => hush(() => GH.api.refreshViaCliPanel(GH.V)));
+  ok('B-6a92 THE DOOR, the held name the hub\'s own login, Vela honestly signed in: the hold lifts (stamped by its own read, the hold ended, the panel written)', ghr.v === true && (GH.stamp() || {}).sevenDay === roP && !sideOf(GH.usage(), GH.V), { v: ghr.v, st: GH.stamp(), why: (GH.api.panelVerdictFor(GH.V) || {}).why });
+  const GS = held(realEng, { ro: roP, cli: binHeld, logins: { V: GLOBAL, O: ORIN }, withGlobal: true });
+  await run6(GS);
+  const gsr = await withHome(GLOBAL, () => hush(() => GS.api.refreshViaCliPanel(GS.V)));
+  const gsWhy = String((GS.api.panelVerdictFor(GS.V) || {}).why);
+  ok('B-6a92 THE DOOR, Vela\'s folder signed in as the hub\'s own login: refused by name — nothing written, the hold stands, the words name «this machine\'s own login (CLI login)», no identity value', gsr.v === false && (GS.stamp() || {}).sevenDay === GS.RV && !!sideOf(GS.usage(), GS.V) && /Vela's sign-in folder is signed in as this machine's own login \(CLI login\)/.test(gsWhy) && !/mail-|org-[a-z]+-0001/.test(gsWhy), { v: gsr.v, why: gsWhy });
+  // RED CONTROL: the folder-only read (r6's form: every held name from its pool folder) — the hub's own login has none, so the
+  // honest Vela is refused «cannot be read» for good
+  const ONE = "      const theirs = (() => { try { return probeLog.loginOfAccount(n, { accounts }); } catch { return null; } })();";
+  const FOLDER = "      const theirs = (() => { try { return probeLog.machineOauthAccount(accounts.subDir(n)); } catch { return null; } })();";
+  const mFolder = esrc.includes(ONE) ? require(MUT.write(ENG, esrc.split(ONE).join(FOLDER), 'b6a92-folder-only')) : null;
+  const GR2 = mFolder ? held(mFolder, { ro: roP, cli: binHeld, logins: { V: VELA, O: ORIN }, withGlobal: true }) : null;
+  if (GR2) await run6(GR2);
+  const gr2 = GR2 ? await withHome(GLOBAL, () => hush(() => GR2.api.refreshViaCliPanel(GR2.V))) : { v: null };
+  const gr2Why = GR2 ? String((GR2.api.panelVerdictFor(GR2.V) || {}).why) : '';
+  ok('B-6a92 RED CONTROL (the folder-only read): the honest Vela is refused, its partner\'s login «cannot be read» — the door shut for good', !!GR2 && gr2.v === false && /cannot be read on this hub/.test(gr2Why), { v: gr2.v, why: gr2Why });
+  // THE ONE READER, PINNED (主开发 r848 item 1): every `machineOauthAccount(` call in the tree is the one reader's own, the machine's
+  // own login around the probe, the probe's isolated folder or the mint's scratch folders — and the three identity sites ask the one
+  // reader. A planted second reader (r6's form of the door's read) is red BY NAME
+  const SRC = path.join(REPO, 'src');
+  const jsFiles = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'node_modules' ? [] : jsFiles(path.join(d, e.name))) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
+  const LOGIN_ROWS = { 'src/server/usage-probe-log.js': ['', 'd'], 'src/usage-routes.js': ['', 'probeConfigDir'], 'src/server/oat-mint.js': ['d'] };   // the one reader (home, folder) · the machine's own around the probe, its isolated folder · the mint's scratch folders
+  const loginCensus = (swap = {}) => {
+    const red = [];
+    for (const f of [...jsFiles(SRC), path.join(REPO, 'server.js')]) {
+      const rel = path.relative(REPO, f).split(path.sep).join('/');
+      const text = swap[rel] != null ? swap[rel] : read(rel);
+      for (const line of text.split('\n')) {
+        const t = line.trim(); if (t.startsWith('//') || t.startsWith('*') || /function machineOauthAccount\(/.test(line)) continue;
+        for (const m of line.matchAll(/machineOauthAccount\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) { const arg = m[1].trim(); if (!(LOGIN_ROWS[rel] || []).includes(arg)) red.push(`${rel} › ${arg || '(none)'}`); }
+      }
+    }
+    return red;
+  };
+  const lc = loginCensus();
+  const usesOne = /const expected = probeLog\.loginOfAccount\(isGlobal \? '__global__' : key, \{ dir: credsDir \}\);/.test(read('src/usage-routes.js')) && esrc.includes(ONE) && /own = loginOfAccount\(id, \{ accounts \}\);/.test(read('src/server/oat-mint.js'));
+  ok('B-6a92 THE ONE READER: every machineOauthAccount( call is a rowed one (the reader itself, the machine around the probe, the probe folder, the mint folders), and the three identity sites ask loginOfAccount', lc.length === 0 && usesOne, { lc, usesOne });
+  const planted = loginCensus({ [ENG]: esrc.split(ONE).join(FOLDER) });
+  ok('B-6a92 RED CONTROL (the census): a planted second reader (a held name read from its pool folder by hand) is red BY NAME', planted.length === 1 && planted[0] === 'src/server/usage-pool-engine.js › accounts.subDir(n)', planted);
   // …a held row's panel answering a THIRD window is refused (nothing written, the hold stands), and its words say what is true
   const Q = held(realEng, { cli: standIn('claude-panel-third.sh', panelText(hourAt(3 * 86400 + 11 * 3600), 7)) });
   await run6(Q);

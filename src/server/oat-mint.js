@@ -47,7 +47,7 @@ const { mintStep, initialMintParse, publicMint, codeVerdict, identityVerdict, mi
 // the raw screen (lane signin-card-real-screen) freezes BEFORE the token's success screen — the token's one road holds
 const RAW_STOP_RE = /token created successfully|your\s+oauth\s+token|sk-ant-/i;
 const RAW_AFTER_MS = 4000; // the owner's N — the sign-in card's (src/signin-model.js RAW_AFTER_MS)
-const { machineOauthAccount } = require('./usage-probe-log.js');
+const { machineOauthAccount, loginOfAccount } = require('./usage-probe-log.js');
 const readingLag = require('../reading-lag.js');
 const { anchorFromProbe, anchorWriteVerdict, probeAgainstAnchor, identityWindows, isIdentityAnchor } = require('../oat-identity-model.js');
 const OM = require('../owner-mark.js');   // r1213: the scratch folder's owner mark — the start sweep removes only a marked folder whose owner is gone
@@ -105,7 +105,7 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   // the email declared / confirmed on the row
   const rowIdentity = (id) => {
     const a = accounts.get(id); if (!a) return null;
-    let own = null; try { own = machineOauthAccount(accounts.subDir(id)); } catch { }
+    let own = null; try { own = loginOfAccount(id, { accounts }); } catch { }   // THE login of this name (B-6a92 r7: the one reader)
     const email = (own && own.email) || a.email || null, orgUuid = (own && own.orgUuid) || null;
     return email || orgUuid ? { email, orgUuid } : null;
   };
