@@ -25,7 +25,7 @@ const { noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest } = r
 // until a turn starts in its sight (as-if-must (1)): a gap can never leave the previous turn's «you» standing.
 const TURN_SEEN_MAX = 600;   // the reader's should: the same bound as sbSeenFirst's SB_SEEN_MAX (a feed lagging past it is caught by the order rule below)
 function turnStateOf(session) {
-  return session._turnOpen || (session._turnOpen = { live: null, cmd: null, first: null, waitCmd: null, persons: new Set(), launched: new Map(), bgLive: [], cmdRecs: new Map(), seen: new Set(), feedAt: {}, resultAt: 0, opened: new Set(), firstFromDevice: false });
+  return session._turnOpen || (session._turnOpen = { live: null, cmd: null, first: null, waitCmd: null, persons: new Set(), launched: new Map(), bgLive: [], cmdRecs: new Map(), seen: new Set(), feedAt: {}, resultAt: 0, opened: new Set(), firstFromDevice: false, belt: null, belted: new Map() });
 }
 /** A record's identity for the once-per-record rule: the CLI's own uuid, or the wrapper's stamp of a frame (it has none). */
 function turnKeyOf(msg) {
@@ -82,12 +82,37 @@ function noteTurnFeed(session, msg, feed) {
   const st = turnStateOf(session);
   if (ts > (st.feedAt[feed] || 0)) st.feedAt[feed] = ts;
 }
-/** Feed ONE record (`feed`: 'parse' | 'device'). A record without an identity is taken from the parse only. */
+/** Feed ONE record (`feed`: 'parse' | 'device'). A record without an identity is taken from the parse only. A throw inside the
+ *  opener is SAID (once per session, then counted in `session._turnOpenerFaults`) — never left to its callers' empty catches. */
 function noteTurnOpener(session, msg, feed = 'parse') {
+  try { takeTurnRecord(session, msg, feed); } catch (e) {
+    if (!session || typeof session !== 'object') return;
+    session._turnOpenerFaults = (session._turnOpenerFaults || 0) + 1;
+    if (session._turnOpenerFaults === 1) console.warn(`[session-brain] the turn opener failed on a ${(msg && msg.type) || '?'} record (${feed}): ${(e && e.message) || e} — said once per session, counted in _turnOpenerFaults`);
+  }
+}
+// B-3336 (主开发 r847): the parse's own copy of an init a DEVICE-first take opened (its belt record `b`). While that turn still
+// stands, the turn is decided exactly as the parse alone decides it: the stamp the init names (or its command's), else the first
+// record's stamp. Whether it stands or has ended, the background tasks launched under the belt's «unrecorded» are keyed as the parse
+// alone keys them (they outlive their turn). A turn whose init the parse never brings keeps the belt (unrecorded, device-init).
+function parseCopyOfOpening(session, st, msg, b) {
+  st.belted.delete(b.key);
+  const standing = st.belt === b && st.live === true;
+  if (standing) { st.firstFromDevice = false; st.belt = null; }
+  const held = (u) => typeof u === 'string' && st.persons.has(u);
+  const names = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String) : [];
+  const byInit = names.some(held) || held(b.cmd);
+  if (!byInit && !(b.firstRec && b.firstRec.type === 'user' && held(b.firstRec.uuid))) return;
+  if (standing) { if (byInit) { st.first = null; st.waitCmd = null; } byVerdict(session, session._turnBy, { by: 'person' }, 'frame-stamp'); }
+  for (const t of b.tasks) if ((byInit || t.afterFirst) && st.launched.has(t.k)) st.launched.set(t.k, 'person');
+  sayBackground(session, st);
+}
+function takeTurnRecord(session, msg, feed) {
   if (!session || !msg || typeof msg !== 'object') return;
   const st = turnStateOf(session);
   noteTurnFeed(session, msg, feed);   // where this feed has reached — before the once-gate (the device path notes it before ITS gate too)
   const key = turnKeyOf(msg);
+  if (key && feed === 'parse' && msg.type === 'system' && msg.subtype === 'init' && st.belted.has(key)) { parseCopyOfOpening(session, st, msg, st.belted.get(key)); return; }   // before the once-gate drops it
   if (key) { if (st.seen.has(key)) return; st.seen.add(key); if (st.seen.size > TURN_SEEN_MAX) st.seen.delete(st.seen.values().next().value); }
   else if (feed !== 'parse') return;
   if (msg.type === 'frame_stamp' && typeof msg.cli_uuid === 'string' && msg.cli_uuid) { st.persons.add(msg.cli_uuid); if (st.persons.size > 64) st.persons.delete(st.persons.values().next().value); return; }
@@ -95,7 +120,10 @@ function noteTurnOpener(session, msg, feed = 'parse') {
   if (msg.type === 'command_lifecycle' && msg.state === 'started' && typeof msg.command_uuid === 'string' && msg.command_uuid) { if (st.live === false) st.cmd = msg.command_uuid; return; }
   if (msg.type === 'system' && msg.subtype === 'task_started' && msg.task_id != null) {
     const k = String(msg.task_id).slice(0, 64);
-    if (!st.launched.has(k)) { st.launched.set(k, st.live === true ? openerKeyOf(session._turnBy) : 'unrecorded'); if (st.launched.size > 200) st.launched.delete(st.launched.keys().next().value); }
+    if (!st.launched.has(k)) {
+      st.launched.set(k, st.live === true ? openerKeyOf(session._turnBy) : 'unrecorded'); if (st.launched.size > 200) st.launched.delete(st.launched.keys().next().value);
+      if (st.live === true && st.belt) { st.belt.tasks.push({ k, afterFirst: !st.first }); if (st.belt.tasks.length > 200) st.belt.tasks.shift(); }   // keyed under the belt: the parse's copy of the init re-keys it (the newest 200, as `launched` keeps)
+    }
     if (st.bgLive.includes(k)) sayBackground(session, st);
     return;
   }
@@ -113,9 +141,12 @@ function noteTurnOpener(session, msg, feed = 'parse') {
     const cmd = st.cmd;
     st.cmd = null; st.first = null; st.waitCmd = null;
     const names = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String) : [];
-    // B-3336 THE BELT (主开发 r794): an init the DEVICE feed delivered first never reads as the person's — the device copy is the one
-    // a parse gap leaves, and its turn may not be the one the person's stamp named («not recorded», its source said); the parse-taken path is unchanged
+    // B-3336 THE BELT (主开发 r794, restated r847): an init the PARSE NEVER BRINGS never reads as the person's — the device copy is the
+    // one a parse gap leaves, and its turn may not be the one the person's stamp named («not recorded», its source said). A device-first
+    // init holds the belt only UNTIL the parse's own copy of it arrives (parseCopyOfOpening); the parse-taken path is unchanged
     st.firstFromDevice = feed === 'device';
+    st.belt = st.firstFromDevice && key ? { key, cmd, firstRec: null, tasks: [] } : null;   // what the parse's copy needs to decide it
+    if (st.belt) { st.belted.set(key, st.belt); if (st.belted.size > 16) st.belted.delete(st.belted.keys().next().value); }
     if (names.some((u) => st.persons.has(u)) || (cmd && st.persons.has(cmd))) { setTurnBy(session, st.firstFromDevice ? { by: 'unrecorded', source: 'device-init' } : { by: 'person', source: 'frame-stamp' }); return; }
     const fact = setTurnBy(session, { by: 'unrecorded', source: 'pending' });
     if (cmd && !session.host) { if (st.cmdRecs.has(cmd)) byVerdict(session, fact, st.cmdRecs.get(cmd), st.cmdRecs.get(cmd) ? 'cli-record' : 'no-record'); else st.waitCmd = { cmd, fact }; return; }
@@ -125,9 +156,9 @@ function noteTurnOpener(session, msg, feed = 'parse') {
   if ((msg.type === 'user' || msg.type === 'assistant') && st.first) {
     const c = msg.message && msg.message.content;
     if (msg.type === 'user' && Array.isArray(c) && c.some((b) => b && b.type === 'tool_result')) return;
-    const fact = st.first; st.first = null;
+    const fact = st.first; st.first = null; if (st.belt) st.belt.firstRec = { type: msg.type, uuid: typeof msg.uuid === 'string' ? msg.uuid : null };
     const stamped = msg.type === 'user' && typeof msg.uuid === 'string' && st.persons.has(msg.uuid);
-    if (stamped && st.firstFromDevice) { byVerdict(session, fact, { by: 'unrecorded' }, 'device-init'); return; }   // the belt: after a device-taken init no stamp makes it the person's — and the fact says so
+    if (stamped && st.firstFromDevice) { byVerdict(session, fact, { by: 'unrecorded' }, 'device-init'); return; }   // the belt: after a device-taken init no stamp makes it the person's until the parse brings that init — and the fact says so
     if (msg.type === 'user') byRecord(session, fact, msg, stamped);
     else byRecord(session, fact, null, false);   // the model spoke first: nothing in the turn said who opened it
     return;
@@ -135,6 +166,7 @@ function noteTurnOpener(session, msg, feed = 'parse') {
   if (msg.type === 'result') {
     st.resultAt = Math.max(st.resultAt, st.feedAt[feed] || 0);   // where the stream stood when this turn ended
     st.live = false; session._turnLive = false; st.cmd = null; st.first = null; st.waitCmd = null;
+    st.firstFromDevice = false; st.belt = null;   // the turn is over: a later parse copy of its init re-keys only its helpers (st.belted)
     setTurnBy(session, { by: 'unrecorded', source: 'turn-ended' });
   }
 }

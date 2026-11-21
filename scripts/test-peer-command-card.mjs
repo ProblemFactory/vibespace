@@ -370,11 +370,12 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
     if (i % 2) { dev(); viaMix.p.data(J(r)); } else { viaMix.p.data(J(r)); dev(); }
     fM.push(facts(viaMix.s));
   });
-  // (B-3336's belt, 主开发 r794: an init the DEVICE took first never reads as the person's — in the device-alone feed every init is
-  // the device's, and in this interleaving both person inits come device-first: there «person» reads «unrecorded», every other fact agrees)
+  // (B-3336's belt, 主开发 r794 restated r847: an init the PARSE NEVER BRINGS never reads as the person's — in the device-alone feed no
+  // init has a parse copy: there «person» reads «unrecorded»; in this interleaving both person inits come device-first and the parse's
+  // copy follows: the turn is decided exactly as the parse alone decides it)
   const beltOf = (x) => x.replace(/person/g, 'unrecorded');
-  ok(`B-d868 PARITY (as-if-must (2), restated to B-3336's belt): the same stream through the parse alone, the device feed alone and both interleaved gives the same opener record for record — but a device-taken init never the person's (${fP.join(' · ')})`,
-    JSON.stringify(fD) === JSON.stringify(fP.map(beltOf)) && JSON.stringify(fM) === JSON.stringify(fP.map(beltOf)) && fP[1].startsWith('person|') && fP[5].startsWith('unrecorded|') && fP[7].startsWith('task|') && fP[12].startsWith('unrecorded|') && fP[15].startsWith('person|')
+  ok(`B-d868 PARITY (as-if-must (2), restated to B-3336's belt): the same stream through the parse alone and both interleaved gives the same opener record for record; the device feed alone the same — but an init the parse never brings never the person's (${fP.join(' · ')})`,
+    JSON.stringify(fD) === JSON.stringify(fP.map(beltOf)) && JSON.stringify(fM) === JSON.stringify(fP) && fP[1].startsWith('person|') && fP[5].startsWith('unrecorded|') && fP[7].startsWith('task|') && fP[12].startsWith('unrecorded|') && fP[15].startsWith('person|')
       && !fD.some((x) => x.includes('person')) && viaDev._turnBy.source === 'device-init', JSON.stringify({ fP, fD, fM, devSource: viaDev._turnBy.source }));
   const brainCopy = (src, name) => MU.load('src/server/session-brain.js', src, name);
   // 主开发's as-if-must (12:09Z): A LATE BACKLOG FROM THE DEVICE FEED NEVER TAKES AN OLD TURN'S START AGAIN. (a) the stream's own
@@ -476,37 +477,132 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   // turn by a press; TODAY that press refuses every such conversation, so the unit proves today's opener: THE BELT, THE PARSE'S
   // HAND-OVER past a throwing consumer, A FUZZ of both feeds, and THE COUPLING PIN. Every leg prints the facts it judges.
   const { anchored } = await import('./scratch.mjs');
-  // 1. THE BELT — an init the DEVICE feed delivered first never reads as the person's («unrecorded», source device-init)
+  // 1. THE BELT (r794, restated r847) — an init the PARSE NEVER BRINGS never reads as the person's («unrecorded», source device-init);
+  //    a device-first init holds it only UNTIL the parse's own copy of that init arrives: then the turn is decided as the parse alone
   const beltRun = (M) => {
     const sx = { name: 'belt', backend: 'claude', host: 'h-belt' }; M.noteTurnAttach(sx);
     const K = (k) => 'b3336000-0000-4000-8000-0000000009' + k;
-    const now = () => ({ by: sx._turnBy.by, source: sx._turnBy.source, live: sx._turnLive });
-    M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('p1') }, 'parse');   // the person's frame (the hub-side wrapper's stamp: the parse only)
-    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i1'), user_message_uuids: [K('p1')] }, 'device');   // the device's copy first
+    const now = () => ({ by: sx._turnBy.by, source: sx._turnBy.source, live: sx._turnLive, bg: JSON.stringify(sx._turnByBackground || []) });
+    // (a) the init road, the ordinary race: the person's frame (the hub-side wrapper's stamp: the parse only), the device's init first…
+    M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('p1') }, 'parse');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i1'), user_message_uuids: [K('p1')] }, 'device');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'task_started', uuid: K('t1'), task_id: 'bg-belt', tool_use_id: 'toolu_b', is_backgrounded: true, task_type: 'local_agent' }, 'device');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'background_tasks_changed', uuid: K('t2'), tasks: [{ task_id: 'bg-belt', task_type: 'local_agent' }] }, 'device');
     const first = now();
-    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i1'), user_message_uuids: [K('p1')] }, 'parse');   // the parse's: a copy
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i1'), user_message_uuids: [K('p1')] }, 'parse');   // …then the parse's own copy
     const copy = now();
     M.noteTurnOpener(sx, { type: 'result', uuid: K('r1') }, 'device');
+    // (b) the first-record road: an init that names nothing, its first record the person's stamped user record — the device's both first
     M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('u2') }, 'parse');
-    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i2') }, 'device');   // names nothing: the turn's first record decides…
-    M.noteTurnOpener(sx, { type: 'user', uuid: K('u2'), message: { role: 'user', content: 'go on' } }, 'device');   // …and its stamp is the person's
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i2') }, 'device');
+    M.noteTurnOpener(sx, { type: 'user', uuid: K('u2'), message: { role: 'user', content: 'go on' } }, 'device');
     const second = now();
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i2') }, 'parse');   // the parse's copy of that init
+    const secondCopy = now();
     M.noteTurnOpener(sx, { type: 'result', uuid: K('r2') }, 'parse');
+    // (c) an init the parse NEVER brings (a parse gap): the person's stamp held, the device's init alone — the turn runs on, then ends
     M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('p3') }, 'parse');
-    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i3'), user_message_uuids: [K('p3')] }, 'parse');   // the parse-taken path, unchanged
-    return { first, copy, second, third: now() };
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i3'), user_message_uuids: [K('p3')] }, 'device');
+    M.noteTurnOpener(sx, { type: 'assistant', uuid: K('a3'), message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } }, 'device');
+    const gapTurn = now();
+    M.noteTurnOpener(sx, { type: 'result', uuid: K('r3') }, 'device');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i3'), user_message_uuids: [K('p3')] }, 'parse');   // a copy AFTER the turn's end decides nothing
+    const late = now();
+    // (d) the parse-taken path, unchanged
+    M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('p4') }, 'parse');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i4'), user_message_uuids: [K('p4')] }, 'parse');
+    const third = now();
+    M.noteTurnOpener(sx, { type: 'result', uuid: K('r4') }, 'parse');
+    // (e) the device delivers a whole person's turn — its init, a helper's start, its end — before the parse's copy of the init: the
+    //     turn stays ended, and the helper still running is keyed as the parse alone keys it
+    M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('p5') }, 'parse');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i5'), user_message_uuids: [K('p5')] }, 'device');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'task_started', uuid: K('t5'), task_id: 'bg-belt5', tool_use_id: 'toolu_b5', is_backgrounded: true, task_type: 'local_agent' }, 'device');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'background_tasks_changed', uuid: K('t6'), tasks: [{ task_id: 'bg-belt5', task_type: 'local_agent' }] }, 'device');
+    M.noteTurnOpener(sx, { type: 'result', uuid: K('r5') }, 'device');
+    const ended = now();
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i5'), user_message_uuids: [K('p5')] }, 'parse');
+    const endedCopy = now();
+    const task = (id, u) => ({ type: 'system', subtype: 'task_started', uuid: K(u), task_id: id, tool_use_id: 'toolu_' + id, is_backgrounded: true, task_type: 'local_agent' });
+    const bgSet = (u, ids) => ({ type: 'system', subtype: 'background_tasks_changed', uuid: K(u), tasks: ids.map((id) => ({ task_id: id, task_type: 'local_agent' })) });
+    // (f) the command road: the person's command started between turns, the device's command record, init (naming nothing) and a
+    //     helper all before the parse's stamp of that command and its copy of the init — the stamp the command names decides
+    M.noteTurnOpener(sx, { type: 'command_lifecycle', state: 'started', uuid: K('l6'), command_uuid: K('c6') }, 'device');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i6') }, 'device');
+    M.noteTurnOpener(sx, task('bg-c6', 't7'), 'device'); M.noteTurnOpener(sx, bgSet('t8', ['bg-c6']), 'device');
+    M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('c6') }, 'parse');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i6') }, 'parse');
+    const cmdCopy = now();
+    M.noteTurnOpener(sx, { type: 'result', uuid: K('r6') }, 'device');
+    // (g) the first-record road with a helper on each side of the first record: the device's init, helper A, the person's user record
+    //     (its stamp not parsed yet), helper B; then the parse's stamp and copy — A was launched before anyone knew (the parse alone keys
+    //     it «unrecorded» too), B after the person's record (the person's)
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i7') }, 'device');
+    M.noteTurnOpener(sx, task('bg-a7', 't9'), 'device');
+    M.noteTurnOpener(sx, { type: 'user', uuid: K('u7'), message: { role: 'user', content: 'go on' } }, 'device');
+    M.noteTurnOpener(sx, task('bg-b7', 'ta'), 'device'); M.noteTurnOpener(sx, bgSet('tb', ['bg-a7', 'bg-b7']), 'device');
+    const firstRec = now();
+    M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('u7') }, 'parse');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i7') }, 'parse');
+    const firstRecCopy = now();
+    M.noteTurnOpener(sx, { type: 'result', uuid: K('r7') }, 'device');
+    // (h) an OLD copy decides only its own turn: a person's turn the device opened and ended, then a task notification's turn the device
+    //     opened — the parse's late copy of the person's init arrives while the newer turn stands: the newer turn keeps its own opener
+    M.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: K('p8') }, 'parse');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i8'), user_message_uuids: [K('p8')] }, 'device');
+    M.noteTurnOpener(sx, { type: 'result', uuid: K('r8') }, 'device');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i9') }, 'device');
+    M.noteTurnOpener(sx, { type: 'user', uuid: K('u9'), origin: { kind: 'task-notification' }, message: { role: 'user', content: '<task-notification>done</task-notification>' } }, 'device');
+    M.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: K('i8'), user_message_uuids: [K('p8')] }, 'parse');
+    return { first, copy, second, secondCopy, gapTurn, late, third, ended, endedCopy, cmdCopy, firstRec, firstRecCopy, oldCopy: now() };
   };
   const belt = beltRun(SB);
   console.log('  B-3336 belt (the facts judged): ' + JSON.stringify(belt));
-  ok(`B-3336 THE BELT: an init the device delivered first, with the person's stamp present, reads «${belt.first.by}» (${belt.first.source}) — never the person's; its later parse copy changes nothing (${belt.copy.source})`,
-    belt.first.by === 'unrecorded' && belt.first.source === 'device-init' && belt.first.live === true && belt.copy.source === 'device-init', JSON.stringify(belt));
-  ok(`B-3336 THE BELT, the turn's first record: after a device-taken init that names nothing, a user record carrying the person's stamp still never makes it the person's («${belt.second.by}»)`,
-    belt.second.by === 'unrecorded' && belt.second.source === 'device-init' && belt.second.live === true, JSON.stringify(belt.second));
+  ok(`B-3336 THE BELT, the ordinary race: the device's init first (the person's stamp held) reads «${belt.first.by}» (${belt.first.source}) only until the parse's own copy arrives — then «${belt.copy.by}» (${belt.copy.source}), and the helper it launched under the belt is the person's (${belt.copy.bg})`,
+    belt.first.by === 'unrecorded' && belt.first.source === 'device-init' && belt.first.live === true && belt.first.bg === '["unrecorded"]'
+      && belt.copy.by === 'person' && belt.copy.source === 'frame-stamp' && belt.copy.live === true && belt.copy.bg === '["person"]', JSON.stringify(belt));
+  ok(`B-3336 THE BELT, the turn's first record: after a device-first init that names nothing, the person's stamped user record reads «${belt.second.by}» (${belt.second.source}) until the parse's copy of the init — then «${belt.secondCopy.by}» (${belt.secondCopy.source})`,
+    belt.second.by === 'unrecorded' && belt.second.source === 'device-init' && belt.second.live === true && belt.secondCopy.by === 'person' && belt.secondCopy.source === 'frame-stamp', JSON.stringify({ second: belt.second, secondCopy: belt.secondCopy }));
+  ok(`B-3336 THE BELT, an init the parse never brings: the turn reads «${belt.gapTurn.by}» (${belt.gapTurn.source}) for as long as it runs; a copy after its end decides nothing (${belt.late.source})`,
+    belt.gapTurn.by === 'unrecorded' && belt.gapTurn.source === 'device-init' && belt.gapTurn.live === true && belt.late.source === 'turn-ended' && belt.late.live === false, JSON.stringify({ gapTurn: belt.gapTurn, late: belt.late }));
   ok(`B-3336 the parse-taken path is unchanged: the parse's init with the person's stamp reads the person («${belt.third.by}», ${belt.third.source})`,
     belt.third.by === 'person' && belt.third.source === 'frame-stamp', JSON.stringify(belt.third));
+  ok(`B-3336 THE BELT, the command road: a device-first init that consumed the person's command reads «${belt.cmdCopy.by}» (${belt.cmdCopy.source}) once the parse brings the command's stamp and the init's copy, its helper ${belt.cmdCopy.bg}`,
+    belt.cmdCopy.by === 'person' && belt.cmdCopy.source === 'frame-stamp' && belt.cmdCopy.live === true && belt.cmdCopy.bg === '["person"]', JSON.stringify(belt.cmdCopy));
+  ok(`B-3336 THE BELT, a helper on each side of the first record: before the copy «${belt.firstRec.by}» (${belt.firstRec.source}) ${belt.firstRec.bg}; after it «${belt.firstRecCopy.by}» (${belt.firstRecCopy.source}) ${belt.firstRecCopy.bg} — the helper launched before the person's record stays «unrecorded», as the parse alone keys it`,
+    belt.firstRec.by === 'unrecorded' && belt.firstRec.bg === '["unrecorded"]' && belt.firstRecCopy.by === 'person' && belt.firstRecCopy.source === 'frame-stamp' && belt.firstRecCopy.bg === '["unrecorded","person"]', JSON.stringify({ firstRec: belt.firstRec, firstRecCopy: belt.firstRecCopy }));
+  ok(`B-3336 THE BELT, an old copy decides only its own turn: the parse's late copy of an ended person's turn leaves the newer turn «${belt.oldCopy.by}» (${belt.oldCopy.source}), live ${belt.oldCopy.live}`,
+    belt.oldCopy.by === 'task' && belt.oldCopy.source === 'cli-record' && belt.oldCopy.live === true, JSON.stringify(belt.oldCopy));
+  ok(`B-3336 THE BELT, a whole turn the device delivered before the parse's copy of its init: the turn stays ended (${belt.endedCopy.source}), its helper still running is keyed as the parse alone keys it (${belt.ended.bg} → ${belt.endedCopy.bg})`,
+    belt.ended.source === 'turn-ended' && belt.ended.bg === '["unrecorded"]' && belt.endedCopy.source === 'turn-ended' && belt.endedCopy.live === false && belt.endedCopy.bg === '["person"]', JSON.stringify({ ended: belt.ended, endedCopy: belt.endedCopy }));
+  const noUpgrade = (src) => anchored(src, "  if (key && feed === 'parse' && msg.type === 'system' && msg.subtype === 'init' && st.belted.has(key)) ", "  if (false && key && feed === 'parse' && msg.type === 'system' && msg.subtype === 'init' && st.belted.has(key)) ", 'B-3336 the parse\'s copy of the opening init');
   {
     const b0 = beltRun(brainCopy(anchored(SBsrc, "    st.firstFromDevice = feed === 'device';", "    st.firstFromDevice = false;", 'B-3336 the belt'), 'no-belt'));
-    ok(`CONTROL (B-3336): the copy without the belt reads the device-taken init as the person's («${b0.first.by}») and the stamped first record too («${b0.second.by}») — the legs go red`, b0.first.by === 'person' && b0.second.by === 'person', JSON.stringify(b0));
+    ok(`CONTROL (B-3336): the copy without the belt reads an init the parse never brings as the person's («${b0.gapTurn.by}») — the leg goes red`, b0.gapTurn.by === 'person', JSON.stringify(b0.gapTurn));
+    const b1 = beltRun(brainCopy(noUpgrade(SBsrc), 'no-upgrade'));
+    const b2 = beltRun(brainCopy(anchored(SBsrc, '  const byInit = names.some(held) || held(b.cmd);', '  const byInit = names.some(held);', 'B-3336 the command\'s stamp'), 'no-cmd-stamp'));
+    ok(`CONTROL (B-3336): the copy that forgets the command's stamp leaves the command road «${b2.cmdCopy.by}» ${b2.cmdCopy.bg} — the leg goes red`, b2.cmdCopy.by === 'unrecorded' && b2.cmdCopy.bg === '["unrecorded"]', JSON.stringify(b2.cmdCopy));
+    const b3 = beltRun(brainCopy(anchored(SBsrc, 'afterFirst: !st.first', 'afterFirst: true', 'B-3336 a helper before the first record'), 'all-after-first'));
+    ok(`CONTROL (B-3336): the copy that keys every helper as after the first record calls the helper launched before the person's record the person's (${b3.firstRecCopy.bg}) — a false «you», the leg goes red`, b3.firstRecCopy.bg === '["person"]', JSON.stringify(b3.firstRecCopy));
+    const b4 = beltRun(brainCopy(anchored(SBsrc, '  const standing = st.belt === b && st.live === true;', '  const standing = st.live === true;', 'B-3336 the copy\'s own turn'), 'any-standing'));
+    ok(`CONTROL (B-3336): the copy whose old copy decides whatever turn is live renames the newer turn «${b4.oldCopy.by}» — the leg goes red`, b4.oldCopy.by === 'person', JSON.stringify(b4.oldCopy));
+    ok(`CONTROL (B-3336, r847): the copy without the parse copy's decision keeps the person's own turn «${b1.copy.by}» (${b1.copy.source}) after the parse's copy, its first-record turn «${b1.secondCopy.by}» and an ended turn's helper ${b1.endedCopy.bg} — the legs go red`, b1.copy.by === 'unrecorded' && b1.copy.bg === '["unrecorded"]' && b1.secondCopy.by === 'unrecorded' && b1.endedCopy.bg === '["unrecorded"]', JSON.stringify({ copy: b1.copy, secondCopy: b1.secondCopy, endedCopy: b1.endedCopy }));
+  }
+  {   // a throw INSIDE the opener is said once per session and counted — its callers' empty catches never see it
+    const placeIn = (src) => anchored(src, 'function takeTurnRecord(session, msg, feed) {\n', "function takeTurnRecord(session, msg, feed) {\n  if (msg && msg.__openerThrow) throw new Error('a placed throw inside the opener (B-3336 leg)');\n", 'B-3336 the opener\'s own throw');
+    const inside = (M) => {
+      const sx = { name: 'op-thr', backend: 'claude' }; M.noteTurnAttach(sx);
+      const warn = console.warn; let said = [], escaped = null;
+      console.warn = (...a) => { said.push(a.join(' ')); };
+      try { for (let i = 0; i < 3; i++) M.noteTurnOpener(sx, { type: 'result', uuid: 'op-thr-' + i, __openerThrow: true }, i % 2 ? 'device' : 'parse'); } catch (e) { escaped = e.message; } finally { console.warn = warn; }
+      return { said, escaped, faults: sx._turnOpenerFaults || 0 };
+    };
+    const it = inside(brainCopy(placeIn(SBsrc), 'opener-throw'));
+    console.log('  B-3336 the opener\'s own throw (the facts judged): ' + JSON.stringify(it));
+    ok(`B-3336: a throw inside the opener is SAID once per session (${it.said.length} line) and counted (${it.faults}) — nothing escapes to its callers' empty catches`,
+      it.escaped === null && it.faults === 3 && it.said.length === 1 && /the turn opener failed on a result record \(parse\): a placed throw inside the opener/.test(it.said[0]), JSON.stringify(it));
+    const i0 = inside(brainCopy(anchored(placeIn(SBsrc), '    if (session._turnOpenerFaults === 1) console.warn(', '    if (false) console.warn(', 'B-3336 the opener says its fault'), 'opener-throw-unsaid'));
+    ok(`CONTROL (B-3336): the copy whose opener does not say its fault leaves it unsaid (${i0.said.length} lines) — the leg goes red`, i0.said.length === 0 && i0.escaped === null, JSON.stringify(i0));
   }
   // 2. THE PARSE HANDS EVERY RECORD TO THE OPENER — a consumer that throws between the parse and the opener's call (a placed throw)
   //    never costs the opener its record: the catch hands it, once
@@ -556,59 +652,51 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   }
   // 3. A FUZZ OF TODAY'S OPENER (kept from the unnumbered half of unit one): both feeds deliver the whole stream in random
   //    interleavings, each in its own order — the device feed WITHOUT the wrapper's own stamps (they reach the parse only). At EVERY
-  //    point both feeds stand level (each has delivered records 0..m) the opener holds today's parse-alone's state after record m —
-  //    but a person's turn whose init the device took first: never the person's (the belt), its source said — and a background task
-  //    it launched is the turn's «unrecorded» for as long as it runs
+  //    point both feeds stand level (each has delivered records 0..m — so the parse has brought every init up to m) the opener holds
+  //    EXACTLY today's parse-alone state after record m (r847: no person→unrecorded allowance there; the device winning the race is
+  //    the ordinary case)
   const fuzzSeq = [...seq, { type: 'result', uuid: V('18'), subtype: 'success', session_id: 'x' },
     { type: 'frame_stamp', msg_id: 'web-p4', cli_uuid: V('21') }, { type: 'system', subtype: 'init', uuid: V('22'), session_id: 'x' }, { type: 'user', uuid: V('21'), message: { role: 'user', content: 'go on' } },   // an init that names nothing: its first record — the person's stamped user record — decides
     { type: 'assistant', uuid: V('23'), message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } }, { type: 'result', uuid: V('24'), subtype: 'success', session_id: 'x' },
     { type: 'frame_stamp', msg_id: 'web-p3', cli_uuid: V('19') }, { type: 'system', subtype: 'init', uuid: V('20'), session_id: 'x', user_message_uuids: [V('19')] }];
   const factOf = (sx) => ({ by: sx._turnBy.by, source: sx._turnBy.source, live: sx._turnLive, bg: JSON.stringify(sx._turnByBackground || []) });
-  const want = (() => { const alone = { name: 'fz-alone', backend: 'claude', host: 'h-fz' }; SB.noteTurnAttach(alone); return fuzzSeq.map((r) => { SB.noteTurnOpener(alone, r, 'parse'); return factOf(alone); }); })();   // TODAY's opener, the parse alone, after each record
-  const DEV_FIRST_SOURCES = ['device-init', 'pending', 'no-record', 'cli-record'];   // the belt's (the stamp parsed first) · the stamp not parsed yet: no record decided / the model spoke first / the user record unstamped then
+  const want = (() => { const alone = { name: 'fz-alone', backend: 'claude', host: 'h-fz' }; SB.noteTurnAttach(alone); return fuzzSeq.map((r) => { SB.noteTurnOpener(alone, r, 'parse'); return JSON.stringify(factOf(alone)); }); })();   // TODAY's opener, the parse alone, after each record
   const fuzz = (M) => {
     let seed = 0x3336;
     const rnd = () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
     const L = fuzzSeq.length, devSkips = (x) => x < L && fuzzSeq[x].type === 'frame_stamp';
-    let runs = 0, points = 0; const devFirst = {}; const bad = [];
+    let runs = 0, points = 0, devFirstPoints = 0, devFirstPersonPoints = 0, beltSeen = 0; const bad = [];
     for (let k = 0; k < 300; k++) {
       const sx = { name: 'fz-' + k, backend: 'claude', host: 'h-fz' }; M.noteTurnAttach(sx);
-      let i = 0, j = 0, devPerson = false, bgBelted = false; const judged = new Set();
+      let i = 0, j = 0, devFirst = false;
+      const judge = (m) => { points++; const g = JSON.stringify(factOf(sx)); if (devFirst) { devFirstPoints++; if (want[m].includes('"by":"person"')) devFirstPersonPoints++; } if (g !== want[m]) bad.push({ k, at: m, got: g, want: want[m] }); };
       while (i < L || j < L) {
-        if (i === j && i > 0 && !judged.has(i)) {   // level: records 0..i-1 delivered by both (judged before the device skips a stamp: a turn's end is a level point too)
-          judged.add(i);
-          points++;
-          const w = want[i - 1], got = factOf(sx), g = JSON.stringify(got);
-          const wm = { ...w, by: w.by === 'person' ? 'unrecorded' : w.by, bg: w.bg.replace(/person/g, 'unrecorded') };
-          const fine = devPerson && w.by === 'person' ? got.by === 'unrecorded' && DEV_FIRST_SOURCES.includes(got.source) && got.live === w.live && got.bg === wm.bg : g === JSON.stringify(bgBelted ? { ...w, bg: wm.bg } : w);
-          if (devPerson && w.by === 'person') devFirst[got.source] = (devFirst[got.source] || 0) + 1;
-          if (!fine) bad.push({ k, at: i - 1, got, want: w });
-        }
+        if (i === j && i > 0) judge(i - 1);   // level: records 0..i-1 delivered by both (judged before the device skips a stamp: a turn's end is a level point too)
         if (devSkips(j)) { j++; continue; }   // the device feed never carries the wrapper's own records
         const takeParse = j >= L || (i < L && rnd() < 0.5);
         const at = takeParse ? i : j, r = fuzzSeq[at];
-        const first = takeParse ? i >= j : j >= i;   // this feed is the first to deliver record `at`
-        if (r.type === 'system' && r.subtype === 'init' && first) devPerson = !takeParse;
-        if (r.type === 'system' && r.subtype === 'task_started' && first && devPerson && want[at].by === 'person') bgBelted = true;   // launched inside a device-first person turn
+        if (r.type === 'system' && r.subtype === 'init' && (takeParse ? i >= j : j >= i)) devFirst = !takeParse;   // which feed delivered this init first
         M.noteTurnOpener(sx, r, takeParse ? 'parse' : 'device');
+        if (!takeParse && devFirst && sx._turnBy.source === 'device-init') beltSeen++;   // the belt held, between the device's init and the parse's copy
         if (takeParse) i++; else j++;
       }
-      { points++; const w = want[L - 1], got = factOf(sx), wbg = bgBelted ? w.bg.replace(/person/g, 'unrecorded') : w.bg;   // the end: both feeds have delivered all
-        const fine = devPerson && w.by === 'person' ? got.by === 'unrecorded' && DEV_FIRST_SOURCES.includes(got.source) && got.live === w.live && got.bg === wbg : JSON.stringify(got) === JSON.stringify({ ...w, bg: wbg });
-        if (devPerson && w.by === 'person') devFirst[got.source] = (devFirst[got.source] || 0) + 1; if (!fine) bad.push({ k, at: L - 1, got, want: w }); }
+      judge(L - 1);   // the end: both feeds have delivered all
       runs++;
     }
-    return { runs, points, devFirst, bad };
+    return { runs, points, devFirstPoints, devFirstPersonPoints, beltSeen, bad };
   };
   {
-    const fz = fuzz(SB), nDev = Object.values(fz.devFirst).reduce((x, y) => x + y, 0);
-    console.log(`  B-3336 fuzz (the facts judged): ${fz.runs} interleavings, ${fz.points} level points judged against today's parse alone, ${nDev} inside a device-first person turn (by source: ${JSON.stringify(fz.devFirst)}), ${fz.bad.length} mismatches${fz.bad.length ? ' — ' + JSON.stringify(fz.bad.slice(0, 2)) : ''}`);
-    ok(`B-3336 THE FUZZ: ${fz.runs} random interleavings of both whole feeds; at each of ${fz.points} level points the opener holds today's parse-alone's state — inside a device-first person turn (${nDev}) never the person's, its source said; ${fz.bad.length} mismatches`,
-      fz.runs === 300 && fz.points > 2 * fz.runs && fz.bad.length === 0 && nDev > 0 && nDev < fz.points && (fz.devFirst['device-init'] || 0) > 0, JSON.stringify(fz.bad.slice(0, 3)));
-    // the fuzz CAN fail: the copy without the once-memory (a late copy from the other feed counts again) is judged against the same parse alone
+    const fz = fuzz(SB);
+    console.log(`  B-3336 fuzz (the facts judged): ${fz.runs} interleavings, ${fz.points} level points judged EXACTLY against today's parse alone — ${fz.devFirstPoints} inside a turn whose init the device delivered first (${fz.devFirstPersonPoints} of them a person's turn), the belt seen holding ${fz.beltSeen} times between the device's init and the parse's copy; ${fz.bad.length} mismatches${fz.bad.length ? ' — ' + JSON.stringify(fz.bad.slice(0, 2)) : ''}`);
+    ok(`B-3336 THE FUZZ: ${fz.runs} random interleavings of both whole feeds; at each of ${fz.points} level points the opener holds EXACTLY today's parse-alone state — ${fz.devFirstPersonPoints} of them inside a person's turn whose init the device won the race for; ${fz.bad.length} mismatches`,
+      fz.runs === 300 && fz.points > 2 * fz.runs && fz.bad.length === 0 && fz.devFirstPersonPoints > 0 && fz.beltSeen > 0, JSON.stringify(fz.bad.slice(0, 3)));
+    // the fuzz CAN fail: the copy without the once-memory (a late copy from the other feed counts again) and the copy without the parse
+    // copy's decision (r847's regression: the device winning the race keeps a person's turn «not recorded»), each judged against the same parse alone
     const f0 = fuzz(brainCopy(anchored(SBsrc, 'if (st.seen.has(key)) return; ', '', 'B-3336 fuzz: the once-memory'), 'fuzz-no-once'));
-    console.log(`  B-3336 fuzz control (the facts judged): ${f0.bad.length} mismatches${f0.bad.length ? ' — first ' + JSON.stringify(f0.bad[0]) : ''}`);
+    const f1 = fuzz(brainCopy(noUpgrade(SBsrc), 'fuzz-no-upgrade'));
+    console.log(`  B-3336 fuzz controls (the facts judged): without the once-memory ${f0.bad.length} mismatches${f0.bad.length ? ' — first ' + JSON.stringify(f0.bad[0]) : ''}; without the parse copy's decision ${f1.bad.length}${f1.bad.length ? ' — first ' + JSON.stringify(f1.bad[0]) : ''}`);
     ok(`CONTROL (B-3336): the copy without the once-memory — the fuzz names mismatches at its level points (${f0.bad.length})`, f0.bad.length > 0, JSON.stringify(f0.bad.slice(0, 1)));
+    ok(`CONTROL (B-3336, r847): the copy without the parse copy's decision — the fuzz names mismatches at its level points (${f1.bad.length}): a person's turn the device won the race for left «not recorded»`, f1.bad.length > 0 && f1.bad.some((x) => x.want.includes('"by":"person"') && x.got.includes('"by":"unrecorded"')), JSON.stringify(f1.bad.slice(0, 1)));
   }
   // 4. THE COUPLING PIN — the group hand-over press refuses a conversation on another machine (the ONLY road with two feeds) WITH ITS
   //    REASON, and that refusal is lifted only together with a stream sequence; the readers of the turn-live flag are a NAMED list,
@@ -616,9 +704,16 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   {
     const SH = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf8');
     const refusal = "    if (s.host) return { ok: false, code: 'not_steerable', error: 'this conversation runs on another machine — the group messages ride its next turn' };";
-    const hb0 = SH.indexOf('  async function handOverGroups('), hb1 = hb0 >= 0 ? SH.indexOf('\n  }\n', hb0) : -1, hog = hb0 >= 0 && hb1 > hb0 ? SH.slice(hb0, hb1 + 4) : '';   // the press's body, to its own closing brace
+    const fnNamed = (node, name) => {   // the press's own function node, by the parser (a re-indent or a reflow moves nothing)
+      if (!node || typeof node.type !== 'string') return null;
+      if (node.type === 'FunctionDeclaration' && node.id && node.id.name === name) return node;
+      for (const v of Object.values(node)) for (const c of (Array.isArray(v) ? v : [v])) { if (c && typeof c === 'object' && typeof c.type === 'string') { const r = fnNamed(c, name); if (r) return r; } }
+      return null;
+    };
+    const hogNode = fnNamed(require(path.join(REPO, 'node_modules/acorn')).parse(SH, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true }), 'handOverGroups');
+    const hog = hogNode ? SH.slice(hogNode.start, hogNode.end) : '';
     ok('B-3336 COUPLING: the group hand-over press (handOverGroups) refuses every conversation on another machine by name, BEFORE its spend gate — and its line says it is lifted only together with a stream sequence (row B-3336\'s design (B))',
-      hog.length > 500 && hog.length < 12000 && hog.includes('groupInflight.delete(cid)') && SH.split(refusal).length === 2 && hog.includes(refusal) && hog.includes('spendGuard.authorize(') && hog.indexOf(refusal) < hog.indexOf('spendGuard.authorize(') && /B-3336 COUPLING[^\n]*lifted ONLY together with a stream sequence/.test(SH), { bodyBytes: hog.length, inBody: hog.includes(refusal), refusalAt: hog.indexOf(refusal), gateAt: hog.indexOf('spendGuard.authorize(') });
+      hog.length > 500 && SH.split(refusal).length === 2 && hog.includes(refusal) && hog.includes('spendGuard.authorize(') && hog.indexOf(refusal) < hog.indexOf('spendGuard.authorize(') && /B-3336 COUPLING[^\n]*lifted ONLY together with a stream sequence/.test(SH), { bodyBytes: hog.length, inBody: hog.includes(refusal), refusalAt: hog.indexOf(refusal), gateAt: hog.indexOf('spendGuard.authorize(') });
     const TURN_LIVE_READERS = Object.freeze({   // file → [reads, can it start a turn, what]
       'src/server/user-input.js': [1, true, 'the group hand-over (not_mid_turn) — behind the press\'s remote refusal'],
       'src/adapters/claude-code.js': [1, false, 'a Stop\'s settle stamp (_stopAskedAt) — a label, never a turn'],
