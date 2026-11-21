@@ -108,6 +108,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
               changed = true;
               try { deliverRef?.noteAttached?.(session); } catch (e) { console.warn(`[deliver] ${id}: queue re-ask failed: ${e.message}`); }   // the id is known now (queued-is-not-woke)
             }
+            if (msg.sessionId) require('../sent-record.js').adoptFor(session);   // B-9a2e part 2: an id report (new or the same) — the sends made before the first one follow it
             if (msg.cwd && session.cwd !== msg.cwd) { session.cwd = msg.cwd; changed = true; }
             if (changed && session.sockName) {
               writeSessionMeta(session.sockName, {

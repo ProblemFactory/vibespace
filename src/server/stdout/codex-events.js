@@ -118,6 +118,7 @@ function create({ engine, deliverRef, permissionRulesRef }) {
             session.claudeSessionId = null;
             changed = true;
           }
+          if (nextThreadId) require('../sent-record.js').adoptFor(session);   // B-9a2e part 2: an id report (new or the same) — the sends made before the first one follow it
           if (nextThreadName && session.name !== nextThreadName) {
             session.name = nextThreadName;
             changed = true;

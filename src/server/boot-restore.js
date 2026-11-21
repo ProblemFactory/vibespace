@@ -960,6 +960,7 @@ function restoreSessions() {
     }
     session._restoreBuf = restoreBuf;   // B-cd4b: the read's end, for its attach's catch-up (cleared once attached)
     activeSessions.set(id, session);
+    require('./sent-record.js').restoredFor(session);   // B-9a2e part 2: its id was reported before the restart (unless it may still change)
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
     session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; Object.assign(session, require('./model-ask.js').hydratedFacts(meta)); session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
     session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts
@@ -1064,6 +1065,7 @@ function restoreSessions() {
           if (matched && (Number(matched.startedAt) || 0) > (s.createdAt || 0) - 5000) {
             s.backendSessionId = matched.backendSessionId || matched.sessionId || null;
             s.claudeSessionId = null;
+            require('./sent-record.js').adoptFor(s);   // B-9a2e part 2: an id report — a send made before the thread was matched follows it
             if (matched.name) s.name = matched.name;
             if (matched.cwd) s.cwd = matched.cwd;
             if (s.backendSessionId && s.sockName) {
@@ -1162,6 +1164,7 @@ function restoreAgentdPipeSessions() {
       // twin that dropped the liveness stamp — B-ae4b)
       const shim = pipePtyShim(h);
       activeSessions.set(id, session); oweRestoredPin(session);
+      require('./sent-record.js').restoredFor(session);   // B-9a2e part 2: its id was reported before the restart (unless it may still change)
       session._webuiId = id;
       setupSessionPty(session, id, shim);
       broadcastActiveSessions();   // lane human-cli (test-architecture §104): a re-opened pipe session reaches the list's ONE notify point — the web and the person's index learn it now, not at the next unrelated broadcast
@@ -1273,6 +1276,7 @@ async function readoptOrphanKeeperSessions() {
     try { session._normalizer.seedCost(costSeedOf(meta.costKept, '')); } catch { } // 2.369.402: the kept cost fold (no buffer here)
     session._normalizer.onOp((op) => broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op }));
     activeSessions.set(id, session); oweRestoredPin(session);
+    require('./sent-record.js').restoredFor(session);   // B-9a2e part 2: its id was reported before the restart (unless it may still change)
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
     session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; Object.assign(session, require('./model-ask.js').hydratedFacts(meta)); session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
     session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts

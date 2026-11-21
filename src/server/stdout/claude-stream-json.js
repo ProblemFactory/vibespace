@@ -644,6 +644,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             }
             broadcastActiveSessions();
           }
+          // B-9a2e part 2: an id report — the line names the id this session writes into (adopted just above, or the same): the
+          // sends made before the first one follow it (a vetoed different id reports nothing)
+          if (typeof msg.session_id === 'string' && msg.session_id && msg.session_id === session.backendSessionId) require('../sent-record.js').adoptFor(session);
 
           // Billing identity TRUTH: the init record's apiKeySource is the
           // CLI's own statement of what auth it resolved — 'none'=subscription

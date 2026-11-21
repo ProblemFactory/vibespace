@@ -439,7 +439,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   // THE CONTINUE'S OWN RECORD (B-3d90 item 2): every continue this core delivers — the single one and the batch's — is noted
   // through this ONE writer, so a rebuild still says VibeSpace sent it (test-message-origin: one writer per send door). Each send
   // site keeps its own `sendToSession(` call: the spend census judges a continue site where it stands, beside its gate
-  const sentNoted = (s2, text, sent) => { if (sent) require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(s2), text, kind: 'auto-resume' }); return sent; };
+  const sentNoted = (s2, text, sent) => { if (sent) require('./sent-record.js').noteFor(s2, { text, kind: 'auto-resume' }); return sent; };
   const gateHeld = new Map();   // id → the token of the bulk resume's hold on an abandoned gate (only THAT hold frees _arFiring — U2 cure's should)
   const wfPending = new Map();   // id → when ITS ARM's read started (the arm's own bookkeeping: never two reads for one live arm; said once)
   const wfOut = new Set();       // every read still OUT — the cap's count (U3 cure 3: a read that has not returned stays counted until it returns, its arm gone or not)

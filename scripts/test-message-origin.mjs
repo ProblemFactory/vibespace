@@ -530,14 +530,14 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
     ok('B-9a2e\'s headline: a codex huge-session list, its rollout scanned with the conversation\'s rows, lists the continue as VibeSpace\'s; without them as the person\'s (today)', cPlain.length === 1 && !cPlain[0].other && cHanded.length === 1 && cHanded[0].other === 'auto-resume', { cPlain, cHanded });
     ok('bound 4: the transcript worker hands the rows through (payload.sent), never a store', /scanJsonlUserTurns\(payload\.fp, payload\.backend, payload\.sent \|\| null\)/.test(read('src/transcript-worker.js')) && !/sent-record/.test(read('src/transcript-worker.js')) && !/sent-record/.test(read('src/search-index-worker.js')) && !/sent-record/.test(read('src/transcript-service.js')));
     const writers = [];
-    const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walk(rel); else if (e.name.endsWith('.js')) { const n = (read(rel).match(/(?:\bSENT|require\('\.\/sent-record\.js'\))\.note\(/g) || []).length; if (n) writers.push(`${rel}:${n}`); } } };
+    const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walk(rel); else if (e.name.endsWith('.js')) { const n = (read(rel).match(/(?:\bSENT|require\('\.\/sent-record\.js'\))\.note(?:For)?\(/g) || []).length; if (n) writers.push(`${rel}:${n}`); } } };
     walk('src');
     ok(`bound 2: the record has exactly its three writers — the typed door, the auto-resume continue, the rpc-queue road (${writers.join(', ')})`, writers.join() === 'src/server/auto-resume.js:1,src/server/conversation-deliver.js:1,src/server/user-input.js:1', writers);
   }
   // the send doors (bound 2): only VibeSpace's own — the typed door, the auto-resume continue, the rpc-queue road's peer frame
   const ui = read('src/server/user-input.js'), ar = read('src/server/auto-resume.js'), cd = read('src/server/conversation-deliver.js');
   ok('bound 2: the three send doors note their own sends (typed / dispatch / a group hand-over\'s peer frame at the typed door — B-02a3 at the 2.369.412 restack, auto-resume, peer) — and nothing else writes the record',
-    /SENT\.note\(\{ conv: SENT\.convOf\(session\), text: wordsOfFrame\(text\), kind: handing \? 'peer' : human \? 'typed' : 'dispatch' \}\);/.test(ui) && /kind: 'auto-resume' \}\); return sent; \}/.test(ar) && /kind: kind === 'notification' \? 'notice' : 'peer' \}\);/.test(cd));
+    /SENT\.noteFor\(session, \{ text: wordsOfFrame\(text\), kind: handing \? 'peer' : human \? 'typed' : 'dispatch' \}\);/.test(ui) && /noteFor\(s2, \{ text, kind: 'auto-resume' \}\); return sent; \}/.test(ar) && /noteFor\(rpc\.s, \{ text, kind: kind === 'notification' \? 'notice' : 'peer' \}\);/.test(cd));   // B-9a2e part 2: through the session (its id may be adopted later); the id reports move a session's own rows and keep links (§5c) — no other door notes a send
   // B-9a2e — THE TWO REMAINDERS (主开发 r1119; the 11-17 cure's own read left them). PART 1: a stopped conversation read ON ITS
   // PAIRED MACHINE — the device has no record, so the hub hands each transcript op {id: rows} through THE ONE HELPER
   // (sent-provenance sentFor) behind the device's 'sent-rows' capability; the device holds them for that op (hand → release).
@@ -629,6 +629,132 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
       /'peer-post-wait' \/\*[^*]*\*\/, 'sent-rows' \/\* B-9a2e[^*]*\*\/, 'stream-offer',/.test(AG) && /sentMark = SPd\.unhandedMark\(\);\n {12}release = SPd\.hand\(msg\.params\?\.sent\);\n {12}let result;\n {12}if \(m === 'page'\)/.test(AG)
       && /else throw new Error\('unknown transcript method: ' \+ m\);\n {12}release\(\);\n {12}const unhanded = msg\.params && msg\.params\.sent \? SPd\.unhandedSince\(sentMark\) : \[\];\n/.test(AG)
       && /sending: buf\.length, \.\.\.\(unhanded\.length \? \{ unhanded \} : \{\}\) \}\);/.test(AG) && /\} catch \(e\) \{ release\(\); mux\.control\(\{ op: 'fs-result', id: msg\.id, error: e\.message \}\); \}/.test(AG));
+  }
+  // B-9a2e PART 2 — A SESSION'S OWN SENDS FOLLOW ITS ID: the rows a session noted BEFORE its first id report move to the id it
+  // reports (a send before any id is held, then filed); a later report moves nothing (a mid-life fork's earlier sends stay with the
+  // old id); every report keeps the ids the session came from as the new id's links (the helper of part 1 hands their rows too)
+  console.log('§5c B-9a2e part 2: a session\'s sends follow the id it reports first');
+  {
+    const SR_REL = 'src/server/sent-record.js', SR_SRC = read(SR_REL);
+    const run = (SRmod) => {
+      const writes = [];
+      SRmod.install({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => { if (o && o.name === SRmod.STORE_NAME) writes.push(o.produce()); } }, readFile: none, now: () => T0 });
+      try {
+        const kinds = (c) => (SRmod.rowsFor(c) || []).map((r) => r.k);
+        // (a) a resume that minted a new id: VibeSpace's continue noted under the old id before the first report; another session's row stays
+        const s = { backendSessionId: 'th-old' }, other = { backendSessionId: 'th-old' };
+        SRmod.adoptFor(other); SRmod.noteFor(other, { text: 'a send of another session', kind: 'typed', at: T0 - 60000 });
+        SRmod.noteFor(s, { text: CONT, kind: 'auto-resume', at: T0 });
+        s.forkedFrom = ['th-old']; s.backendSessionId = 'th-new';   // what the road does (codex-events / claude-stream-json / acp-events)
+        const moved = SRmod.adoptFor(s), again = SRmod.adoptFor(s);
+        // (b) a brand-new conversation: a send before ANY id is held (its row, never the words), then filed at the first report in its instant's place
+        const fresh = {};
+        const heldNow = SRmod.noteFor(fresh, { text: 'hello there', kind: 'typed', at: T0 - 1000 });
+        fresh.backendSessionId = 'th-fresh';
+        SRmod.noteFor(fresh, { text: 'and a second line', kind: 'dispatch', at: T0 });
+        const movedFresh = SRmod.adoptFor(fresh);
+        // (c) the reader's case — a MID-LIFE fork: the id reported (confirmed), a send, then a fork to a new id
+        const live = { backendSessionId: 'th-x' };
+        SRmod.adoptFor(live); SRmod.noteFor(live, { text: 'before the fork', kind: 'typed', at: T0 });
+        live.forkedFrom = ['th-x']; live.backendSessionId = 'th-y';
+        const movedMid = SRmod.adoptFor(live);
+        const last = writes.length ? JSON.parse(writes[writes.length - 1]) : null;
+        return { moved, again, heldNow, movedFresh, movedMid, old: kinds('th-old'), nw: kinds('th-new'), fr: kinds('th-fresh'), frAt: (SRmod.rowsFor('th-fresh') || []).map((r) => r.at - T0), x: kinds('th-x'), y: SRmod.rowsFor('th-y'),
+          kindNew: SP.kindFor({ conv: 'th-new', at: T0 + 20000, text: CONT }), kindOld: SP.kindFor({ conv: 'th-old', at: T0 + 20000, text: CONT }),
+          ids: SP.idsFor('th-y'), idsNew: SP.idsFor('th-new'), from: last && last.from, last: writes.length ? writes[writes.length - 1] : null };
+      } finally { SRmod.install(null); }
+    };
+    const a2 = run(SR);
+    ok('PART 2: the first send after a resume that minted a new id is FILED UNDER THE NEW ID at the session\'s first id report — the continue reads as VibeSpace\'s in the new conversation, the old one keeps only its own rows (another session\'s row stays); the same id reported again does nothing',
+      a2.moved === 1 && a2.again === 0 && JSON.stringify(a2.nw) === '["auto-resume"]' && JSON.stringify(a2.old) === '["typed"]' && a2.kindNew === 'auto-resume' && a2.kindOld === null, a2);
+    ok('…a send made before the session had ANY id is held as its row, then filed under the id it reports, in its instant\'s place (never lost)', a2.heldNow === null && a2.movedFresh === 1 && JSON.stringify(a2.fr) === '["typed","dispatch"]' && JSON.stringify(a2.frAt) === '[-1000,0]', a2);
+    ok('…a MID-LIFE fork (the id reported, a send, then a new id): the send stays with the conversation it went to — nothing moves after the first report', a2.movedMid === 0 && JSON.stringify(a2.x) === '["typed"]' && a2.y === null, a2);
+    ok('…each report keeps the ids the session came from as the new id\'s links — on disk (the record\'s `from`, never words) and in the helper\'s ids: a stopped fork read on its paired machine is handed its parent\'s rows too',
+      JSON.stringify(a2.from) === '{"th-new":["th-old"],"th-y":["th-x"]}' && JSON.stringify(a2.ids) === '["th-y","th-x"]' && JSON.stringify(a2.idsNew) === '["th-new","th-old"]', a2);
+    // the record read back: the links come back with the rows; a v1 record without `from` reads as before
+    {
+      const R2 = SR.create({ dataDir: '/sent-record-suite', writer: { dirty: () => { } }, readFile: () => a2.last });
+      const R1 = SR.create({ dataDir: '/sent-record-suite', writer: { dirty: () => { } }, readFile: () => JSON.stringify({ v: 1, byConv: { 'th-a': [SP.rowOf(CONT, 'typed', T0)] } }) });
+      ok('…the record read back keeps the links (and only well-formed ones); a record with no `from` reads as before', JSON.stringify(R2.fromOf('th-y')) === '["th-x"]' && R2.rowsFor('th-new').length === 1 && R1.fromOf('th-a') === null && R1.rowsFor('th-a').length === 1 && !R1.isUnread(), { y: R2.fromOf('th-y') });
+    }
+    // the move keeps the old conversation's place in the eviction order (the readers' nit): it did not send anything
+    {
+      let txt = '';
+      const st = SR.create({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => { txt = o.produce(); } }, readFile: none, now: () => T0 });
+      const ra = st.note({ conv: 'th-a', text: 'one', kind: 'typed' }); st.note({ conv: 'th-a', text: 'two', kind: 'typed' }); st.note({ conv: 'th-b', text: 'three', kind: 'typed' });
+      const ra2 = st.rowsFor('th-a')[1];
+      const mv = st.move('th-a', 'th-c', [ra2]);
+      ok('…a move takes only the named rows (by identity) and leaves the old conversation where it was in the eviction order', mv === 1 && JSON.stringify(Object.keys(JSON.parse(txt).byConv)) === '["th-a","th-b","th-c"]' && st.rowsFor('th-a').length === 1 && st.rowsFor('th-a')[0] === ra, txt);
+    }
+    // CONTROLS — each on a copy of the record with one named line changed
+    let SRx = null, whyx = null, SRe = null, whye = null;
+    try { SRx = MUTC.load(SR_REL, anchored(SR_SRC, '      for (const [from, rows] of byFrom) { n += installed.move(from, to, rows); olds.push(from); }\n', '', 'the adoption without the move'), 'b9a2e-nomove'); } catch (e) { whyx = e.message; }
+    try { SRe = MUTC.load(SR_REL, anchored(anchored(SR_SRC, '    const first = !reported.has(session);\n', '    const first = true;\n', 'every report moves'), '  if (row && !reported.has(session)) {', '  if (row) {', 'every row is remembered'), 'b9a2e-everyreport'); } catch (e) { whye = e.message; }
+    const x2 = SRx ? run(SRx) : null, e2 = SRe ? run(SRe) : null;
+    ok('CONTROL (the report that moves nothing — the record before this unit): the continue stays under the OLD id, the new conversation reads it as the person\'s — the leg goes RED', !!x2 && JSON.stringify(x2.old) === '["typed","auto-resume"]' && x2.kindNew === null, x2 || whyx);
+    ok('CONTROL (every row the session noted moves at every new id — the first cut of this unit, the read\'s finding): the mid-life fork takes the send that went to the old conversation — the leg goes RED', !!e2 && e2.movedMid === 1 && !!e2.y && e2.y.length === 1 && JSON.stringify(e2.x) === '[]', e2 || whye);
+    // A BORROWED ID IS NO REPORT (the read's MUST): a codex fork still carries its source's id and its wrapper may echo it before the
+    // fork answers (set-permission-mode skips the ready gate); the fork's own id is its first report. And THE BOOT: a session it
+    // restored was reported before the restart (a mid-life change later moves nothing) — unless its id may still change: a claude
+    // resume whose first id line has not come gets its own rows since its spawn back as remembered
+    const runB = (SRmod) => {
+      SRmod.install({ dataDir: '/sent-record-suite', writer: { dirty: () => { } }, readFile: none, now: () => T0 });
+      try {
+        const kinds = (c) => (SRmod.rowsFor(c) || []).map((r) => r.k);
+        const parent = { backendSessionId: 'th-src' }; SRmod.adoptFor(parent);
+        const fork = { backendSessionId: 'th-src', _forkRequested: true };   // as a live fork is (no source field: liveForkPending reads its forkedFrom)
+        SRmod.noteFor(fork, { text: CONT, kind: 'auto-resume', at: T0 });
+        SRmod.noteFor(parent, { text: 'the parent goes on', kind: 'typed', at: T0 + 1000 });
+        const echo = SRmod.adoptFor(fork);   // the wrapper echoes the borrowed id
+        fork.forkedFrom = ['th-src']; fork.backendSessionId = 'th-fk';   // codex-events: the fork's own id
+        const own = SRmod.adoptFor(fork);
+        const rest = { backendSessionId: 'th-r1' };   // RESTORED: its id read from its meta
+        const restN = SRmod.restoredFor(rest);
+        SRmod.noteFor(rest, { text: 'after the restart', kind: 'typed', at: T0 });
+        rest.forkedFrom = ['th-r1']; rest.backendSessionId = 'th-r2';
+        const restMoved = SRmod.adoptFor(rest);
+        // a claude resume restored before its first id line: one row of its id from before its spawn, one since (the earlier hub life's)
+        SRmod.noteFor({ backendSessionId: 'th-rs' }, { text: 'long before', kind: 'typed', at: T0 - 60000 });
+        SRmod.noteFor({ backendSessionId: 'th-rs' }, { text: CONT, kind: 'auto-resume', at: T0 });
+        const res = { backendSessionId: 'th-rs', _resumeSpawn: true, _sawFirstId: false, createdAt: T0 - 5000 };
+        const seeded = SRmod.restoredFor(res);
+        res._sawFirstId = true; res.forkedFrom = ['th-rs']; res.backendSessionId = 'th-rn';   // claude-stream-json: the implicit fork's first line
+        const resMoved = SRmod.adoptFor(res);
+        return { echo, own, src: kinds('th-src'), fk: kinds('th-fk'), restN, restMoved, r1: kinds('th-r1'), r2: SRmod.rowsFor('th-r2'), seeded, resMoved, rs: kinds('th-rs'), rn: kinds('th-rn') };
+      } finally { SRmod.install(null); }
+    };
+    const b2 = runB(SR);
+    ok('…a fork still carrying its source\'s id: an echo of that BORROWED id is no report — at the fork\'s own id its continue moves there (the parent\'s own send stays)',
+      b2.echo === 0 && b2.own === 1 && JSON.stringify(b2.fk) === '["auto-resume"]' && JSON.stringify(b2.src) === '["typed"]', b2);
+    ok('…a session the boot RESTORED was reported before the restart: a later new id moves nothing; a claude resume restored before its first id line gets its rows since its spawn back (the older one stays) and they move at that line',
+      b2.restN === 0 && b2.restMoved === 0 && JSON.stringify(b2.r1) === '["typed"]' && b2.r2 === null && b2.seeded === 1 && b2.resMoved === 1 && JSON.stringify(b2.rs) === '["typed"]' && JSON.stringify(b2.rn) === '["auto-resume"]', b2);
+    let SRb = null, whyb = null, SRr = null, whyr = null;
+    try { SRb = MUTC.load(SR_REL, anchored(SR_SRC, '    if (borrowed(session)) return 0;\n', '', 'a borrowed id reports'), 'b9a2e-borrowed'); } catch (e) { whyb = e.message; }
+    try { SRr = MUTC.load(SR_REL, anchored(SR_SRC, '    reported.set(session, to);\n    return 0;\n  } catch { return 0; }\n}', '    return 0;\n  } catch { return 0; }\n}', 'the boot marks nothing'), 'b9a2e-restored'); } catch (e) { whyr = e.message; }
+    const bb = SRb ? runB(SRb) : null, br = SRr ? runB(SRr) : null;
+    ok('CONTROL (the borrowed id counted as the first report): the fork\'s continue stays under its SOURCE\'s id — the leg goes RED', !!bb && bb.own === 0 && JSON.stringify(bb.src) === '["auto-resume","typed"]' && JSON.stringify(bb.fk) === '[]', bb || whyb);
+    ok('CONTROL (the boot marks nothing — the read\'s should): the restored session\'s send moves to a later id — the leg goes RED', !!br && br.restMoved === 1 && JSON.stringify(br.r1) === '[]', br || whyr);
+    // EACH ROAD REPORTS THE ID IT SET (the read's should): in every road's file the report comes AFTER the id's assignment — a call
+    // moved above it would report the OLD id first. CONTROL: codex-events with its call moved above the assignment
+    const ROADS = ['src/server/stdout/codex-events.js', 'src/server/stdout/claude-stream-json.js', 'src/server/stdout/acp-events.js', 'src/ws-create.js', 'src/server/boot-restore.js', 'src/claude-lock-capture.js'];
+    const afterSet = (t) => { const a = t.indexOf('.backendSessionId = '), r = t.indexOf("sent-record.js').adoptFor("); return a >= 0 && r > a; };
+    const CE = read('src/server/stdout/codex-events.js');
+    const CEup = CE.replace("          if (nextThreadId) require('../sent-record.js').adoptFor(session);", '').replace('          if (nextThreadId && session.backendSessionId !== nextThreadId) {', "          if (nextThreadId) require('../sent-record.js').adoptFor(session);\n          if (nextThreadId && session.backendSessionId !== nextThreadId) {");
+    ok(`…every road reports AFTER it set the id (${ROADS.length} roads); CONTROL: codex-events with its report moved above the assignment is caught`, ROADS.every((f) => afterSet(read(f))) && CEup !== CE && !afterSet(CEup), ROADS.filter((f) => !afterSet(read(f))));
+    // the boot's registrations (a census): every restored session boot-restore registers is marked at once
+    const BR = read('src/server/boot-restore.js');
+    const regs = (BR.match(/activeSessions\.set\(id, session\);/g) || []).length;
+    const marked = (BR.match(/activeSessions\.set\(id, session\);(?: oweRestoredPin\(session\);)?\n *require\('\.\/sent-record\.js'\)\.restoredFor\(session\);/g) || []).length;
+    ok(`…every session the boot registers is marked by restoredFor right after its registration (${marked} of ${regs})`, regs === 3 && marked === 3, { regs, marked });
+    // THE ID REPORTS — a census: every assignment of a session's id in src/, by file, with its verdict. A file of the hub's that sets
+    // a live session's id reports it to the record (adoptFor) as many times as it sets it; a new road is named here
+    const assigns = [], reports = [];
+    const walkI = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walkI(rel); else if (e.name.endsWith('.js')) { const t = read(rel); const a = (t.match(/\.backendSessionId = /g) || []).length, r = (t.match(/sent-record\.js'\)\.adoptFor\(/g) || []).length; if (a) assigns.push(`${rel}:${a}`); if (r) reports.push(`${rel}:${r}`); } } };
+    walkI('src');
+    const NOT_A_LIVE_SESSION = { 'src/lib/layout.js:4': 'the page\'s own copy of a conversation (its window layout), never a live session' };
+    const live2 = assigns.filter((x) => !NOT_A_LIVE_SESSION[x]);
+    ok(`…every road that sets a live session's id reports it (${reports.join(', ')}): codex's thread id, claude's id line, ACP's session id, the lock capture (both its callers), the codex thread match at create and at boot — the page's own copies named (${Object.keys(NOT_A_LIVE_SESSION).join(', ')})`,
+      live2.join() === reports.join() && reports.join() === 'src/claude-lock-capture.js:1,src/server/boot-restore.js:1,src/server/stdout/acp-events.js:1,src/server/stdout/claude-stream-json.js:1,src/server/stdout/codex-events.js:1,src/ws-create.js:1' && assigns.length === live2.length + 1, { assigns, reports });
   }
 }
 

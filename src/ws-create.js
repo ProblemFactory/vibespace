@@ -2081,6 +2081,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 session._captureReservedThreadId = matched.backendSessionId || matched.sessionId || null;
                 session.backendSessionId = matched.backendSessionId || matched.sessionId || session.backendSessionId;
                 session.claudeSessionId = null;
+                require('./server/sent-record.js').adoptFor(session);   // B-9a2e part 2: an id report — a send made before the thread was matched follows it
                 if (matched.name) session.name = matched.name;
                 if (matched.cwd) session.cwd = matched.cwd;
                 if (matched.sourceKind) session.sourceKind = matched.sourceKind;

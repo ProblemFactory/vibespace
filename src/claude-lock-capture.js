@@ -295,6 +295,7 @@ function adoptCapturedId(session, sessionId) {
   session.claudeSessionId = sessionId;
   session.backendSessionId = sessionId;
   if (session._forkRequested) session._forkRequested = false;
+  require('./server/sent-record.js').adoptFor(session);   // B-9a2e part 2: an id report (both callers: the create's capture, the boot's) — the sends made before the first one follow it
   return {
     backendSessionId: sessionId,
     claudeSessionId: sessionId,

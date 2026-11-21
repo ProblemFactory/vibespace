@@ -2137,7 +2137,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         if (queuedFull) return { ok: false, lane: 'rpc-queue', kind, refused: 'queued-full', reason: queuedFull };
         try {
           rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.channel ? { channel: opts.channel } : {}), ...(opts.group ? { group: opts.group } : {}) }) + '\n');
-          require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(rpc.s), text, kind: kind === 'notification' ? 'notice' : 'peer' });   // B-9a2e: the rpc-queue road's own record (a codex rollout keeps no peer mark) — VibeSpace's own notice is a notice, never a peer's frame   // `group`: the wrapper's marker carries it (lane group-report-card) — an older wrapper ignores it and draws the fromName card
+          require('./sent-record.js').noteFor(rpc.s, { text, kind: kind === 'notification' ? 'notice' : 'peer' });   // B-9a2e: the rpc-queue road's own record (a codex rollout keeps no peer mark) — VibeSpace's own notice is a notice, never a peer's frame   // `group`: the wrapper's marker carries it (lane group-report-card) — an older wrapper ignores it and draws the fromName card
           // EVERY frame joins the settle queue, charged or not — the wrapper
           // answers in write order, so a queue holding only the predicted-free
           // ones would hand this frame's answer to the next frame's entry.

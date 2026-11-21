@@ -87,7 +87,7 @@ fs.writeFileSync(path.join(cxDir, `rollout-2026-08-10T12-00-00-${TID}.jsonl`), c
 // same records under another id, for the control), a codex native fork of it (Y, Y2: a Referenced fork — its read PREPENDS X's
 // records, so X's id is consulted too) and a claude one (C, C2). The rows are the hub's (installed below); the agent has none.
 const SR_CONT = 'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.';
-const SR = { X: 'cccccccc-1111-2222-3333-000000000001', X2: 'cccccccc-1111-2222-3333-000000000002', Y: 'cccccccc-1111-2222-3333-000000000003', Y2: 'cccccccc-1111-2222-3333-000000000004', C: 'eeeeeeee-1111-2222-3333-000000000001', C2: 'eeeeeeee-1111-2222-3333-000000000002' };
+const SR = { X: 'cccccccc-1111-2222-3333-000000000001', X2: 'cccccccc-1111-2222-3333-000000000002', Y: 'cccccccc-1111-2222-3333-000000000003', Y2: 'cccccccc-1111-2222-3333-000000000004', Y3: 'cccccccc-1111-2222-3333-000000000005', C: 'eeeeeeee-1111-2222-3333-000000000001', C2: 'eeeeeeee-1111-2222-3333-000000000002' };
 const srAt = Date.UTC(2026, 7, 10, 12, 0, 30);   // the continue's send; its record lands 2 s later (inside the match window)
 const srTs = (s) => new Date(srAt + s * 1000).toISOString();
 const srLines = (recs) => recs.map((r) => JSON.stringify(r)).join('\n') + '\n';
@@ -97,7 +97,7 @@ for (const id of [SR.X, SR.X2]) fs.writeFileSync(path.join(cxDir, `rollout-2026-
   { timestamp: srTs(2), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: SR_CONT }] } },
   { timestamp: srTs(3), type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'continuing 继续' }], id: 'item_sr_' + id.slice(-1) } },
 ]));
-for (const id of [SR.Y, SR.Y2]) fs.writeFileSync(path.join(cxDir, `rollout-2026-08-10T12-01-00-${id}.jsonl`), srLines([
+for (const id of [SR.Y, SR.Y2, SR.Y3]) fs.writeFileSync(path.join(cxDir, `rollout-2026-08-10T12-01-00-${id}.jsonl`), srLines([
   { timestamp: srTs(30), type: 'session_meta', payload: { id, cwd: CWD, forked_from_id: SR.X, forked_from_ordinal_exclusive: 99 } },
   { timestamp: srTs(31), type: 'turn_context', payload: { model: 'gpt-5.6', cwd: CWD } },
   { timestamp: srTs(32), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'the fork asks 世界' }] } },
@@ -304,6 +304,28 @@ ok(missing.hasFile === false && missing.gap === null, 'missing transcript answer
     const bareC2 = await bareOf(ref(SR.C2, 'claude'), 'page');
     ok(!bareC2.includes('auto-resume') && bareC2.includes('"typed":true'), 'B-9a2e CONTROL (claude): the op without the rows — the continue reads as typed by the person');
   } finally { SP.setSource(null); }
+}
+// B-9a2e part 2 — THE LINK A FORK'S ADOPTION KEPT: a stopped fork VibeSpace made (Y3, of X), read on the paired machine with only
+// its own id given — the hub's real record (src/server/sent-record.js) names the parent through the link the fork's first id report
+// kept, so the agent is handed X's rows too: byte-identical to the hub's own read, the parent's continue VibeSpace's on both
+{
+  const SP = require(REPO + '/src/sent-provenance.js');
+  const SRmod = require(REPO + '/src/server/sent-record.js');
+  SRmod.install({ dataDir, writer: { dirty: () => { } }, readFile: () => { throw Object.assign(new Error('no record yet'), { code: 'ENOENT' }); }, now: () => srAt });
+  try {
+    const parent = { backend: 'codex', backendSessionId: SR.X };
+    SRmod.adoptFor(parent);   // the parent's id reported, then VibeSpace's continue sent into it
+    SRmod.noteFor(parent, { text: SR_CONT, kind: 'auto-resume', at: srAt });
+    const fork = { backend: 'codex', backendSessionId: SR.X };   // a fork spawned from the parent's id; its road records where it came from and adopts the new one (codex-events)
+    fork.forkedFrom = [SR.X]; fork.backendSessionId = SR.Y3;
+    SRmod.adoptFor(fork);
+    const yref = { backend: 'codex', sessionId: SR.Y3, cwd: CWD };
+    const hub = J(await svc.page(yref, {}));
+    const sent = SP.sentFor(SR.Y3);
+    const dev = J(await dm.transcriptOp('page', yref, { sent }));
+    ok(Object.keys(sent).join() === SR.X && dev === hub && hub.includes('auto-resume'), 'B-9a2e part 2: a stopped fork VibeSpace made, read on its paired machine with only its own id given — the link its adoption kept hands the parent\'s rows: BYTE-IDENTICAL to the hub\'s read, the parent\'s continue VibeSpace\'s on both');
+    if (dev !== hub) console.error('    diff ' + firstDiff(hub, dev));
+  } finally { SRmod.install(null); }
 }
 
 os.homedir = origHomedir;

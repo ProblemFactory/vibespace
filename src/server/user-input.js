@@ -223,7 +223,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
       log(`[${sessionId}] chat-input write failed (${origin}): ${e.message}`);
       return { ok: false, code: 'send_failed', error: 'the session did not accept the message: ' + e.message };
     }
-    SENT.note({ conv: SENT.convOf(session), text: wordsOfFrame(text), kind: handing ? 'peer' : human ? 'typed' : 'dispatch' });   // B-9a2e: the typed door's own record — a rebuild tells the person's words from a machine's (B-02a3 at the restack: a group hand-over's frame carries other sessions' words — `peer`, never the person's `typed`)
+    SENT.noteFor(session, { text: wordsOfFrame(text), kind: handing ? 'peer' : human ? 'typed' : 'dispatch' });   // B-9a2e: the typed door's own record — a rebuild tells the person's words from a machine's (B-02a3 at the restack: a group hand-over's frame carries other sessions' words — `peer`, never the person's `typed`)
     if (userMsg && !handing) {   // B-02a3: a group hand-over draws no record of its own — the groups engine's cards do, once it was handed
       // verify r1 ① (lane worker-dispatch): the live record of a frame an AGENT typed carries who typed it — the
       // owner's viewers and the buffer replay see `origin {kind:'dispatch', name}`, never a user turn of their own
