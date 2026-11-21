@@ -221,7 +221,8 @@ console.log('\n§2 tier hygiene');
   // Its move onto the train 30b4e5093 (主开发 r1503): the train's 11 rows under its 12 + this unit's 3 = 14 — both sides' debts kept
   // int361 at the block 2.369.416's pick of line 171 (lane bl-release's false rows, 主开发 r1617): 14 → 16, the TRUE count of named debts on
   // the train with that line's two (test-ci-gate, test-store-write-census rows made true) — by arithmetic, every side's note kept
-  ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overRows.length <= 16,
+  // and at line 241's pick (lane artifacts-by-intent's leak-census row, 6.6 → 11.9 s RAW with its named debt B-b664, 主开发 r1627): 16 → 17
+  ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overRows.length <= 17,
     `the over-list == the fast rows ≥ 10 s by their stated time (${overRows.length}: ${overRows.join(', ') || 'none'}) — no silent slow row, no paid debt kept`);
   for (const s of fast.filter((x) => x.over !== undefined)) console.log(`      over · ${s.name} · ${(fastRuleFindings(s, '').measuredMs / 1000).toFixed(1)} s · ${s.over}`);
   // MEASURED AGAINST STATED (B-eedd): the rule above judges the STATED time, so a whole green tier records its readings
