@@ -691,7 +691,7 @@ function create({
     if (r && r.ok && r.queued) { await markQueued(gid, member, rep.upTo, { since: r.since }); return { ok: true, queued: true, since: Number.isFinite(r.since) ? r.since : null, lane: r.lane || null }; }   // law 1: waiting, not woke
     if (r && r.ok) { await markReported(gid, member, rep.upTo); return { ok: true, lane: r.lane || null, ...(r.intoTurn ? { intoTurn: true } : {}) }; }
     (log.info || log.log || (() => {})).call(log, `[groups] wake of ${member.slice(0, 8)} in ${gid} (${why}) not delivered: ${(r && r.reason) || 'refused'} — it rides that member's next report`);
-    return { ok: false, reason: (r && r.reason) || 'undelivered', refused: (r && r.refused) || null, ...(r && r.notRunning ? { notRunning: true, cardText: wcText } : {}) };
+    return { ok: false, reason: (r && r.reason) || 'undelivered', refused: (r && r.refused) || null, ...(r && r.unreachable ? { unreachable: true } : {}), ...(r && r.notRunning ? { notRunning: true, cardText: wcText } : {}) };
   }
   /** A WAKE OF A STOPPED MEMBER (the manager design's piece 7): the ladder answered «not running». A wake that names this
    *  member ALONE (an agent's `send --wake` into a pair, an @name of one member, a dispatch) is OWED: the conversation goes
@@ -1026,7 +1026,7 @@ function create({
         // piece 7: a stopped member a wake names alone is OWED a resume — its pace slot is KEPT (the owed wake is the billed
         // turn) and the sender holds «being resumed» (`parked`: the CLI's «held (not billed yet)» line)
         const owe = r.notRunning ? endedWakeOf(g, m, rec, v.why, r.cardText) : null;
-        if (owe && owe.parked) { refused.push({ member: m, name, why: v.why, reason: DW.senderWords('owed'), refused: 'ended', parked: true, owed: true }); continue; }
+        if (owe && owe.parked) { refused.push({ member: m, name, why: v.why, reason: DW.senderWords(r.unreachable ? 'unreachable' : 'owed'), refused: r.unreachable ? 'unreachable' : 'ended', parked: true, owed: true }); continue; }   // B-2566's remainder: a machine that cannot be reached is never «ended»
         // not billed ⇒ the pace slot goes back (r2: a refused wake used to
         // floor the next legitimate one with words that said a turn was billed)
         if (typeof mayWake === 'function' && typeof mayWake.refund === 'function') { try { mayWake.refund(m); } catch { } }

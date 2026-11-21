@@ -179,6 +179,7 @@ function senderWords(outcome, { why = '', count = 0 } = {}) {
   switch (outcome) {
     case 'resuming': return 'the conversation was ended — it is being resumed and gets this as a turn';
     case 'owed': return 'the conversation was ended — if a restart ended it, it is resumed and gets this as a turn; if it was ended on purpose, this waits for its next turn';
+    case 'unreachable': return 'the machine this conversation runs on cannot be reached — this is kept and goes out when it replies';   // B-2566's remainder
     case 'refused': return `the conversation was ended — it was not resumed (${why || 'refused'}); this waits for its next turn`;
     case 'failed': return `the conversation was ended — the resume failed (${why || 'unknown'}); this waits for its next turn`;
     case 'fan_out': return `${Number(count) || 0} member(s) are ended; this rides their next turn`;

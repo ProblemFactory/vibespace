@@ -1085,6 +1085,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     const waiting = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && x.waitsReadopt && !aside(x));   // …unless it runs again first (a person resumed it): then that is its answer too
     if (!ends.length && !waiting.length) return;
     if (hostsHeld() && !localSessionFor(cid) && ownerHostOf(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 30e3; writeRetrySoon(); scheduleRetry(); return; }   // B-95fc U1: a held list ENDS NOTHING (bl-jobs: never «running» with nobody to carry it) — asked again after the read
+    // B-2566's remainder: a machine that cannot be reached KEEPS what it is owed, in order — asked again in a minute, never resumed
+    // there while it is away (a resume of a closed laptop's conversation only fails); its reply ends this hold
+    if (!localSessionFor(cid) && unreachableOf(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 60e3; writeRetrySoon(); scheduleRetry(); return; }
     if (liveForWake(cid)) { for (const e of [...ends, ...waiting]) endEnded(e, { outcome: 'running', why: 'it runs again — its next turn carries the words' }); return; }
     if (!ends.length) return;
     if (!endedHook) return;   // the line is not wired yet (the boot): registerEndedWake schedules the attempt again
@@ -1708,6 +1711,40 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   const REMOTE_ENDED_MS = 10 * 60e3;
   const remoteEnded = new Map();
   const isRemoteEnded = (cid) => { const e = remoteEnded.get(cid); if (!e) return false; if (clock.now() - e.at < REMOTE_ENDED_MS) return true; remoteEnded.delete(cid); return false; };
+  // B-2566's remainder (主开发 r1147 / r1149) — A PAIRED MACHINE THAT CANNOT BE REACHED is not «live» either: the remote rung's
+  // bounded connect got no handle (nothing was posted) AND the machines list's own classifier (hosts.linkState — never a probe)
+  // calls it 'offline'. Fresh for the bound an ended reply has; a post that lands, or a link that comes back, clears it. A machine
+  // the list knows nothing of ('unknown': an ssh host with no facts) is never marked — no evidence is not evidence. hid → {at: the
+  // newest evidence, since: when it fell silent (the dial facts' lastDisconnectAt when the list kept one, else the first miss)}
+  const unreachable = new Map();
+  // a HELD machines list cannot say (its linkState answers 'offline' for the pool's dark-source defense): unknown here — a held list
+  // marks nothing and keeps a mark only for its bound (the hold's own rule: a remote owner is «unknown», never ended)
+  const linkOf = (hid) => { if (hostsHeld()) return 'unknown'; try { const h = getHosts?.(); return h && typeof h.linkState === 'function' ? h.linkState(hid) : 'unknown'; } catch { return 'unknown'; } };
+  const silentSinceOf = (hid) => { try { const d = getHosts?.()?.get?.(hid)?.dial; const off = Number(d && d.lastDisconnectAt) || 0; return off > (Number(d && d.lastConnectAt) || 0) ? off : 0; } catch { return 0; } };
+  function markUnreachable(hid) {
+    if (!hid || linkOf(hid) !== 'offline') return null;
+    const now = clock.now(), was = unreachable.get(hid), off = silentSinceOf(hid);
+    const e = { at: now, since: off || (was ? was.since : now) };
+    unreachable.delete(hid); unreachable.set(hid, e);
+    if (unreachable.size > 200) unreachable.delete(unreachable.keys().next().value);
+    return e;
+  }
+  // the bound an ended reply has holds while the list can no longer say; while it still calls the machine offline the mark stands —
+  // an owed wake held overnight is kept until the machine replies (never ended «running» ten minutes after the last miss)
+  function hostUnreachable(hid) {
+    const e = hid ? unreachable.get(hid) : null;
+    if (!e) return null;
+    const link = linkOf(hid);
+    if (link === 'online') { unreachable.delete(hid); return null; }   // the link came back
+    if (clock.now() - e.at < REMOTE_ENDED_MS || link === 'offline') return e;
+    unreachable.delete(hid); return null;
+  }
+  /** → {hostId, since} while this conversation's machine cannot be reached (fresh evidence), else null — the park's «live» reads it */
+  function unreachableOf(cid) {
+    if (!cid || localSessionFor(cid)) return null;
+    const hid = ownerHostOf(cid), e = hostUnreachable(hid);
+    return e ? { hostId: hid, since: e.since } : null;
+  }
   const saidOlder = new Set();
   // B-95fc follow-up (主开发 r491): a machine whose conversations' registry cannot be read is said ONCE a machine in the journal (unknown, by name)
   const saidUnread = new Set();
@@ -1728,8 +1765,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   }
   /** a HELD machines list (hosts.json not read): who owns a remote conversation is unknown — nothing is parked, nothing is ended */
   const hostsHeld = () => { try { const h = getHosts?.(); return !!(h && typeof h.held === 'function' && h.held()); } catch { return false; } };
-  /** the park's «live» for an owed wake: a session here, or a machine that may carry it — unless that machine said it ended there */
-  const liveForWake = (cid) => !!localSessionFor(cid) || (peerReachable(cid) && !isRemoteEnded(cid));
+  /** the park's «live» for an owed wake: a session here, or a machine that may carry it — unless that machine said it ended there,
+   *  or cannot be reached (B-2566's remainder: the rung found no handle and the machines list calls it offline) */
+  const liveForWake = (cid) => !!localSessionFor(cid) || (peerReachable(cid) && !isRemoteEnded(cid) && !unreachableOf(cid));   // B-2566: nor one its machine cannot be reached
 
   // rung 2 helper: which registered machine owns this conversation? null =
   // local/unknown (the local rung already ran by the time this is asked).
@@ -2175,7 +2213,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           // posts once; one authorization and one charge either way, and a wait that ran out charges nothing (undo2, the ladder's finally)
           const waitMs = Number.isFinite(opts.inboxWaitMs) && opts.inboxWaitMs > 0 ? opts.inboxWaitMs : 0;
           const r = await dm.peerPost({ cid, text, by: require('../device-acts.js').validBy(opts.by) ? opts.by : require('../device-acts.js').bySystem(spendReason), ...(waitMs ? { waitMs } : {}) });
-          if (r && r.ok) remoteEnded.delete(cid);   // B-95fc U1: it runs there again
+          if (r && r.ok) { remoteEnded.delete(cid); unreachable.delete(hid); }   // B-95fc U1: it runs there again (B-2566: and its machine answers)
           if (r && r.ok) { spent(); cardOk(); return { ok: true, lane: 'remote-message', kind, peerName: r.peerName || null, hostId: hid, ...(Number.isFinite(r.waited) ? { waited: r.waited } : {}) }; }
           undo2();
           if (r && r.code === 'inbox_not_open') return { ok: false, lane: 'remote-message', hostId: hid, code: 'inbox_not_open', reason: String(r.reason || 'its inbox did not open on that machine') };
@@ -2192,6 +2230,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           // answer — the hub's own request timeout, a link lost — may have been posted by the device: `unanswered` says so to its
           // caller; never a capability gate, a policy refusal or an error the device ANSWERED (nothing was posted: round w8g2bt5bs)
           const unanswered = !!undo2 && !!e && (e.code === 'link_lost' || e.message === 'peer-post timeout');
+          // B-2566's remainder: no handle at all (nothing posted) on a machine the list calls offline — UNREACHABLE: typed «not running»
+          // (the park keeps what is owed and holds it until the machine replies), its own word beside it (never an ended conversation)
+          const away = !undo2 ? markUnreachable(hid) : null;
+          if (away) return { ok: false, lane: 'remote-message', hostId: hid, reason: e.message, notRunning: true, unreachable: true, since: away.since };
           return { ok: false, lane: 'remote-message', hostId: hid, reason: e.message, ...(unanswered ? { unanswered: true } : {}) };
         }
       }
@@ -2254,7 +2296,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   }
 
   return {
-    deliverToConversation, peerReachable, liveForWake, stashFor, stashSlot, slotHolders, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
+    deliverToConversation, peerReachable, liveForWake, unreachableOf, machineUnreachable: (hid) => !!hostUnreachable(hid), machineNameOf: (hid) => { try { const h = getHosts?.()?.get?.(hid); return String((h && (h.name || h.id)) || hid || '').slice(0, 80); } catch { return String(hid || '').slice(0, 80); } }, stashFor, stashSlot, slotHolders, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
     stashEntries, stashKeptCount, heldWhyOf, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer

@@ -181,13 +181,14 @@ const GONE_LIST = new Set(['ENOENT', 'ENOTDIR', 'ENODEV']);
 const pause = (ms) => new Promise((res) => setTimeout(res, ms));
 // B-6721: the held kinds a stash entry is OWED A WAKE for (wakeOwed): the conversation was NOT RUNNING, or the 30 s floor held it —
 // never 'not-reachable' (an agent alive that did not take it: the retry park's bound already spent; its may-have-landed copies too)
-const WAKE_OWED_KINDS = ['not-running', 'rate-floor'];
+const WAKE_OWED_KINDS = ['not-running', 'rate-floor', 'machine-away'];   // B-2566's remainder: a paired machine that cannot be reached — handed over once it replies
 /** the typed held record for a stash entry, from the ladder's own answer */
 function heldOf(r, reason) {
   const kind = M.heldKind(r, reason);
   const out = { kind };
   if (r && r.phase) out.phase = String(r.phase);                       // lane notify-retry: the attempt's facts ride the held record
   if (r && (r.busy === true || r.busy === false)) out.busy = r.busy;
+  if (kind === 'machine-away' && r) { if (r.hostId) out.hostId = String(r.hostId).slice(0, 80); if (Number(r.since) > 0) out.since = Number(r.since); }   // B-2566: whose machine, silent since when
   if (kind === 'spend-cap' && r) {
     if (r.why) out.why = String(r.why);
     if (r.identity && (r.identity.name || r.identity.key)) out.identity = String(r.identity.name || r.identity.key);
@@ -1427,6 +1428,7 @@ class JobManager {
       : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
     Promise.resolve(deliver).then((r) => {
       if (r && r.ok) {
+        if (r.hostId) this._machineAwaySettle();   // B-2566's remainder: a delivery landed on a paired machine — it replies
         if (!subscriber) job.lastNotify = { ts: now(), lane: r.lane || 'message', ok: true, to: r.peerName || null };
         this._notifyLogPush(job, { lane: r.lane || 'message', ok: true, to: r.peerName || null, ...(subscriber ? { sub: true } : {}) });
       } else if (r && r.parked === true) {
@@ -1438,7 +1440,8 @@ class JobManager {
       } else {
         this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber, held: heldOf(r, (r && r.reason) || 'unreachable'), mark });
         if (r && r.notRunning === true) this._oweWake(cid, job, ev, { subscriber });   // the manager design's piece 7: the words are stashed (durable) FIRST
-        if (r && r.notRunning === true && !subscriber) this._awayFailure(cid, job, ev, this._lastStashed(cid, job));   // B-2566: …and a FAILURE reaches a person by name
+        if (r && r.notRunning === true && r.unreachable !== true && !subscriber) this._awayFailure(cid, job, ev, this._lastStashed(cid, job));   // B-2566: …and a FAILURE reaches a person by name
+        if (r && r.unreachable === true) this._machineAway(r.hostId);   // B-2566's remainder: ONE item a machine an outage, never one a job (主开发 r1149)
         this._save();   // the moved2 census (its jobs pass): a copy STASHED after its delivery failed is that notice's only copy — urgent, never the paced tick
       }
       this._dirty = true;
@@ -1626,6 +1629,7 @@ class JobManager {
     const carried = ev.away && typeof ev.away === 'object' ? ev.away : null;   // a park's fall: the facts of ITS run (the schedule may have fired again)
     if (!carried && job.state !== 'failed') return null;
     if (typeof this.d.resolveAwayFailed !== 'function') return null;   // r537: filed only where its close is wired (the product's wiring) — never an item nobody closes
+    if (typeof this.d.ownerUnreachable === 'function' && this.d.ownerUnreachable(cid)) return null;   // B-2566's remainder (r1149 bound 1): a machine that cannot be reached files no item a job — its machine's one item says what waits
     if (this._ownerLive(cid)) return null;   // round wem0s6k1d MUST 1 + 主开发 r537: THE ONE VERDICT, the park's own «live» (_ownerLive), at every road that files or renews
     const rec = (job.cronParent && this.jobs.get(job.cronParent)) || job;
     const run = (job.runs && job.runs[job.runs.length - 1]) || {}, f = carried || M.awayFactsOf(job);
@@ -1647,6 +1651,40 @@ class JobManager {
    *  liveForWake: a session here, or a machine that may carry it unless that machine said it ended there), else the reach (an engine
    *  wired without it). The floor's owed wake and the away failure ask it; a remote owner its machine said ended is not live for either */
   _ownerLive(cid) { const liveOf = this.d.liveForWake || this.d.peerReachable; return !!(liveOf && liveOf(cid)); }
+  /** B-2566's remainder (主开发 r1147 / r1149): WHAT WAITS FOR A PAIRED MACHINE THAT CANNOT BE REACHED — ONE For-you item a machine
+   *  an outage, never one a conversation, a job or a retry. Filed only once the machine has been silent M.MACHINE_AWAY_GRACE_MS
+   *  and something owed failed to go out after that (a laptop shut for lunch says nothing); its count grows in place while it is
+   *  open (a person's close stands for the outage — the wiring); it goes by itself when nothing waits for that machine any more */
+  _machineAway(hid) {
+    if (!hid || typeof this.d.noticeMachineAway !== 'function') return null;
+    const w = this._machineAwayOwed(hid);
+    if (!w.n || now() - w.since < M.MACHINE_AWAY_GRACE_MS) return null;
+    (this._machineAwaySaid || (this._machineAwaySaid = new Set())).add(hid);
+    try { return this.d.noticeMachineAway({ hid, n: w.n, convs: w.convs, since: w.since }) || null; }
+    catch (e) { this.d.log(`[jobs] ${hid}: the «results wait for a machine» For-you item was not filed — ${e && e.message}`); return null; }
+  }
+  /** the notices owed to the conversations of machine `hid` while it cannot be reached → {n, convs, since: when it fell silent} */
+  _machineAwayOwed(hid) {
+    let n = 0, since = Infinity; const convs = new Set();
+    for (const [cid, q] of this.pendingNotifs) for (const e of q || []) {
+      if (!e || !e.held || e.held.kind !== 'machine-away' || e.held.hostId !== hid || e.held.maybeDelivered) continue;
+      n++; convs.add(cid); since = Math.min(since, Number(e.held.since) || Number(e.ts) || now());
+    }
+    return { n, convs: convs.size, since: Number.isFinite(since) ? since : now() };
+  }
+  /** a machine's item is over when its machine REPLIES (the ladder's verdict) or nothing owed waits for it (handed over, drained):
+   *  asked of every machine this run filed for, and once a run of the items an earlier run left open (the store's own list) */
+  _machineAwaySettle() {
+    if (typeof this.d.resolveMachineAway !== 'function') return;
+    const said = this._machineAwaySaid || (this._machineAwaySaid = new Set());
+    if (!this._machineAwayLooked) { this._machineAwayLooked = true; try { for (const hid of (typeof this.d.machineAwayOpen === 'function' && this.d.machineAwayOpen()) || []) said.add(hid); } catch { } }
+    for (const hid of [...said]) {
+      const back = typeof this.d.machineUnreachable === 'function' && !this.d.machineUnreachable(hid);
+      if (!back && this._machineAwayOwed(hid).n) continue;
+      said.delete(hid);
+      try { this.d.resolveMachineAway(hid); } catch (e) { this.d.log(`[jobs] ${hid}: the «results wait for a machine» For-you item was not closed — ${e && e.message}`); }
+    }
+  }
   /** B-2566: the stash entry this engine just pushed for (cid, job) — the newest, or null */
   _lastStashed(cid, job) { const q = this.pendingNotifs.get(cid) || []; const e = q[q.length - 1]; return e && job && e.jobId === job.id ? e : null; }
   /** B-2566: is an away episode open for this job (a cron's: its schedule's) and this owner conversation? */
@@ -2059,6 +2097,7 @@ class JobManager {
     this._notifsChanged(cid, { drained: cid });   // the ONE entry point: the drain's own frame + the stash fact
     this._awaySettled(cid, q);   // B-2566: the owner received them — an away failure's item is over
     this.wakeSettled(cid);   // B-6721: what was owed a wake left the stash (a hand-over, the person's prompt) — For you's line about it goes
+    this._machineAwaySettle();   // B-2566's remainder: nothing waits for a machine any more — its item goes by itself
     return q;
   }
   /** B-6721 (fb-708fa798a0: a one-shot fired while its conversation was not running — stashed at 08:30, the conversation was

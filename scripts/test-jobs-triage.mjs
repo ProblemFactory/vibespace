@@ -1447,14 +1447,21 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
   // «live» (liveForWake) = a session here, or a reachable machine that has not said it ended — any other conversation is NOT RUNNING
   const rig = (name, wiringMod = wiring) => {
     const dir = mkDir(name), todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 }), logs = [], live = new Set(), local = new Set(), ended = new Set(), metas = [];
+    // B-2566's remainder: `down` = a conversation on a paired machine (cid → its host id); `hostsDown` = a machine that cannot be reached
+    // (host id → since when it is silent) — the ladder's verdict as conversation-deliver answers it (its connect missed, the list says offline)
+    const down = new Map(), hostsDown = new Map();
+    const away = (cid) => { const h = down.get(cid); return h && hostsDown.has(h) ? { hostId: h, since: hostsDown.get(h) } : null; };
     const W = wiringMod.create({ app: fakeApp().app, dataDir: dir, broadcastAll: () => { }, userTodos: todos, log: (...a) => logs.push(a.join(' ')), serverSetting: () => undefined, taskGroups: null, activeSessions: new Map(),
       deliver: {
         peerReachable: (cid) => live.has(cid),
-        liveForWake: (cid) => local.has(cid) || (live.has(cid) && !ended.has(cid)),
-        deliverToConversation: async (cid, text, opts) => { if (opts && opts.retry) metas.push({ cid, meta: opts.retry.meta }); return ended.has(cid) ? { ok: false, lane: 'remote-message', hostId: 'h-paired', reason: 'no live inbox for this conversation on that machine', notRunning: true, remoteEnded: true } : live.has(cid) ? { ok: true, lane: 'message' } : local.has(cid) ? { ok: false, parked: true, reason: 'busy', phase: 'mid-turn', busy: true } : AWAY; },
+        liveForWake: (cid) => !away(cid) && (local.has(cid) || (live.has(cid) && !ended.has(cid))),
+        unreachableOf: (cid) => away(cid),
+        machineUnreachable: (hid) => hostsDown.has(hid),
+        machineNameOf: (hid) => (hid === 'h-b' ? 'laptop-b' : String(hid)),
+        deliverToConversation: async (cid, text, opts) => { if (opts && opts.retry) metas.push({ cid, meta: opts.retry.meta }); const u = away(cid); if (u) return { ok: false, lane: 'remote-message', hostId: u.hostId, reason: 'the machine did not answer within 6000 ms', notRunning: true, unreachable: true, since: u.since }; if (down.has(cid)) return { ok: true, lane: 'remote-message', hostId: down.get(cid) }; return ended.has(cid) ? { ok: false, lane: 'remote-message', hostId: 'h-paired', reason: 'no live inbox for this conversation on that machine', notRunning: true, remoteEnded: true } : live.has(cid) ? { ok: true, lane: 'message' } : local.has(cid) ? { ok: false, parked: true, reason: 'busy', phase: 'mid-turn', busy: true } : AWAY; },
       } });
     W.initAfterListen();
-    return { W, jm: W.jm, todos, logs, live, local, ended, metas, stop: () => { W.shutdown?.(); todos.stop(); } };
+    return { W, jm: W.jm, todos, logs, live, local, ended, metas, down, hostsDown, stop: () => { W.shutdown?.(); todos.stop(); } };
   };
   const owner = (cid) => ({ conversation: { backend: 'claude', id: cid }, sessionId: 's-' + cid, sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] });
   const task = (R, id, name, cid, extra = {}) => { const j = { id, kind: 'task', name, note: '', state: 'failed', desiredUp: false, owner: owner(cid), access: { view: 'group', control: 'session' }, runs: [{ startedAt: Date.now() - 60e3, endedAt: Date.now(), exit: 1, cause: 'error', lastLine: 'Error: frame 7 failed to render' }], notifyLog: [], ...extra }; R.jm.jobs.set(id, j); return j; };
@@ -1681,7 +1688,7 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     finally { if (keepW) require.cache[WIRING_PATH] = keepW; else delete require.cache[WIRING_PATH]; if (keepJ) require.cache[JOBS_PATH] = keepJ; else delete require.cache[JOBS_PATH]; }
   };
   {
-    const R1 = rig('away-red-hook', wiringWith(anchored(JSRC, "        if (r && r.notRunning === true && !subscriber) this._awayFailure(cid, job, ev, this._lastStashed(cid, job));   // B-2566: …and a FAILURE reaches a person by name\n", '', 'b2566-no-hook'), 'b2566-no-hook'));
+    const R1 = rig('away-red-hook', wiringWith(anchored(JSRC, "        if (r && r.notRunning === true && r.unreachable !== true && !subscriber) this._awayFailure(cid, job, ev, this._lastStashed(cid, job));   // B-2566: …and a FAILURE reaches a person by name\n", '', 'b2566-no-hook'), 'b2566-no-hook'));
     const x = task(R1, 'jb-red-1', 'render-7', A);
     failOf(R1, x);
     await settle(() => (x.notifyLog || []).some((l) => l.lane === 'stash'));
@@ -1770,6 +1777,108 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     R6.jm.drainNotifs(Q);
     okP(awayItems(R6, Q)[0].status === 'open' && !q.awayFail, 'RED CONTROL: the drain\'s close removed (a copy of the engine) ⇒ the item stays OPEN after the owner received its notice — the drain leg would be red', { status: awayItems(R6, Q)[0].status });
     R6.stop();
+  }
+
+  // ── B-2566's REMAINDER (主开发 r1147 / r1149): A PAIRED MACHINE THAT CANNOT BE REACHED. ONE For-you item a MACHINE an outage — never one
+  //    a conversation, a job or a retry; only once it has been silent an hour (JM_MODEL.MACHINE_AWAY_GRACE_MS) AND something owed failed
+  //    to go out after that; its count grows in place; a person's close stands for the outage; it goes by itself when the machine replies
+  //    or nothing waits for it any more. The park's own «live» reads the same verdict (the rig's liveForWake) ──
+  const machineItems = (R, hid = 'h-b') => { const s = R.todos.snapshot(); return [...s.open, ...s.resolved].filter((i) => i.itemKey === `jobs-machine-away:${hid}`); };
+  const HOUR = 3600e3, owedAway = (R, c) => (R.jm.pendingNotifs.get(c) || []).filter((n) => n.held && n.held.kind === 'machine-away').length;
+  const nudge = (R, c) => R.jm._notifyRate.delete(c);   // a minute apart in life: never the 30 s floor
+  {
+    // THE NUMBER (r1149 bound 2), a night replayed: laptop B silent for two hours; three of its conversations own jobs — an hourly schedule
+    // failing every fire (its words differ by the hour: never the duplicate window), a nightly --notify-ok report, a build started at 21:30
+    const R = rig('machine-night'), C1 = cidOf(0xf001), C2 = cidOf(0xf002), C3 = cidOf(0xf003), since = Date.now() - 2 * HOUR;
+    for (const c of [C1, C2, C3]) R.down.set(c, 'h-b');
+    R.hostsDown.set('h-b', since);
+    const cron = schedule(R, 'jb-n-cron', 'sync-hourly', C1), child = task(R, 'jb-n-cron-run', 'sync-hourly run', C1, { cronParent: cron.id });
+    const report = task(R, 'jb-n-report', 'nightly-report', C2, { state: 'done' }), build = task(R, 'jb-n-build', 'build', C3, { state: 'done' });
+    for (let h = 0; h < 10; h++) { nudge(R, C1); failOf(R, child, `failed exit=1 error (1m) — fire ${h}`); }
+    nudge(R, C2); failOf(R, report, 'done exit=0 (4m)');
+    nudge(R, C3); failOf(R, build, 'done exit=0 (38m)');
+    await settle(() => { const x = machineItems(R)[0]; return !!x && x.i18n.text.params.n === '12'; });
+    const m = machineItems(R), perJob = [C1, C2, C3].flatMap((c) => awayItems(R, c)), waits = [C1, C2, C3].map((c) => R.jm.sayWakeWaiting(c)), owed = [C1, C2, C3].map((c) => owedAway(R, c));
+    const p = m[0] && m[0].i18n.text.params;
+    okP(m.length === 1 && m[0].status === 'open' && m[0].sessionKey === 'jobs' && m[0].hostId === 'h-b' && p.n === '12' && p.convs === '3' && p.machine === 'laptop-b' && p.since && p.since.at === since
+        && perJob.length === 0 && waits.every((x) => x === null) && owed.join() === '10,1,1' && JM_MODEL.MACHINE_AWAY_GRACE_MS === HOUR,
+      'THE NUMBER, a night replayed: laptop B silent two hours, 12 results for its 3 conversations (10 hourly failures, a report, a build) ⇒ ONE item for the machine — no item a job, none a conversation («notices wait» says nothing)',
+      { items: m.length, text: m[0] && m[0].text, params: p, perJobItems: perJob.length, noticesWait: waits, owedByConversation: owed, graceMs: JM_MODEL.MACHINE_AWAY_GRACE_MS });
+    const detail = m[0] && m[0].i18n.detail && m[0].i18n.detail[0];
+    okP(!!detail && /open \{machine\}/.test(detail.key) && /nothing is lost or billed/.test(detail.key) && detail.params.machine === 'laptop-b' && !m[0].action,
+      'its words say what waits, why, and what a person can do — open the machine; nothing to press (no action: a button cannot open a laptop)', { detail, action: m[0] && m[0].action || null });
+    // the count grows IN PLACE
+    const id0 = m[0].id;
+    nudge(R, C3); failOf(R, build, 'done exit=0 (39m) — rebuilt');
+    await settle(() => machineItems(R)[0].i18n.text.params.n === '13');
+    const grown = machineItems(R);
+    okP(grown.length === 1 && grown[0].id === id0 && grown[0].status === 'open' && grown[0].i18n.text.params.n === '13',
+      'one more result ⇒ the SAME item, its count 13 (in place — never a second item)', { items: grown.length, sameId: grown[0].id === id0, n: grown[0].i18n.text.params.n });
+    // a person's close stands for the outage
+    R.todos.setStatus(id0, 'dismissed');
+    nudge(R, C2); failOf(R, report, 'done exit=0 (5m) — again');
+    await settle(() => owedAway(R, C2) === 2);
+    const kept = machineItems(R);
+    okP(kept.length === 1 && kept[0].status === 'dismissed',
+      'a person\'s close stands for the outage: a later result does not reopen it', { status: kept[0].status, owedC2: owedAway(R, C2) });
+    // a NEW outage (silent again after a reply) files again — the item was filed in the outage before (its filing instant moved back
+    // there: the store keeps no clock of its own to step), the new silence began after it
+    R.todos._state.items.find((i) => i.id === id0).createdAt = Date.now() - 3 * HOUR;
+    R.hostsDown.set('h-b', Date.now() - 90 * 60e3);
+    nudge(R, C2); failOf(R, report, 'done exit=0 (6m) — the next night');
+    await settle(() => machineItems(R)[0].status === 'open');
+    okP(machineItems(R).length === 1 && machineItems(R)[0].status === 'open', '…and the NEXT outage (silent since a later instant) files it again — one item a machine an outage', { status: machineItems(R)[0].status });
+    R.stop();
+  }
+  {
+    // the grace: a laptop shut for ten minutes says nothing — RED CONTROL: the grace removed (a copy of the engine) ⇒ it files at once
+    const R = rig('machine-grace'), G = cidOf(0xf101);
+    R.down.set(G, 'h-b'); R.hostsDown.set('h-b', Date.now() - 10 * 60e3);
+    const g = task(R, 'jb-g', 'render-g', G);
+    failOf(R, g);
+    await settle(() => owedAway(R, G) === 1);
+    const quiet = machineItems(R).length;
+    const RG = rig('machine-grace-red', wiringWith(anchored(JSRC, '    if (!w.n || now() - w.since < M.MACHINE_AWAY_GRACE_MS) return null;', '    if (!w.n) return null;', 'b2566r-no-grace'), 'b2566r-no-grace'));
+    RG.down.set(G, 'h-b'); RG.hostsDown.set('h-b', Date.now() - 10 * 60e3);
+    const gr = task(RG, 'jb-g', 'render-g', G);
+    failOf(RG, gr);
+    await settle(() => machineItems(RG).length === 1);
+    okP(quiet === 0 && owedAway(R, G) === 1 && machineItems(RG).length === 1,
+      'THE GRACE: silent ten minutes ⇒ the result is kept (owed, machine-away) and NO item; RED CONTROL: the grace removed ⇒ an item at once', { itemsInGrace: quiet, owed: owedAway(R, G), redCopyItems: machineItems(RG).length });
+    R.stop(); RG.stop();
+  }
+  {
+    // bound 1: no item a JOB for an unreachable owner — RED CONTROL: both guards removed (a copy of the engine) ⇒ the per-job item comes back
+    const R = rig('machine-perjob-red', wiringWith(anchored(anchored(JSRC,
+      "        if (r && r.notRunning === true && r.unreachable !== true && !subscriber) this._awayFailure(", "        if (r && r.notRunning === true && !subscriber) this._awayFailure(", 'b2566r-hook'),   // stale-pins: kept (the red copy's text: the hook as it read before the guard)
+      "    if (typeof this.d.ownerUnreachable === 'function' && this.d.ownerUnreachable(cid)) return null;", '', 'b2566r-verdict'), 'b2566r-perjob'));
+    const U = cidOf(0xf201); R.down.set(U, 'h-b'); R.hostsDown.set('h-b', Date.now() - 2 * HOUR);
+    const u = task(R, 'jb-u', 'render-u', U);
+    failOf(R, u);
+    await settle(() => awayItems(R, U).length === 1);
+    okP(awayItems(R, U).length === 1, 'RED CONTROL: the two guards removed (a copy of the engine) ⇒ an unreachable owner gets an item a JOB again — the number leg would be red', { perJob: awayItems(R, U).map((i) => i.jobId) });
+    R.stop();
+  }
+  {
+    // it goes BY ITSELF — when nothing waits for the machine any more (the results went out), and when the machine replies
+    const R = rig('machine-settle'), S1 = cidOf(0xf301), S2 = cidOf(0xf302), since = Date.now() - 2 * HOUR;
+    R.down.set(S1, 'h-b'); R.down.set(S2, 'h-b'); R.hostsDown.set('h-b', since);
+    const a = task(R, 'jb-s1', 'render-s1', S1);
+    failOf(R, a);
+    await settle(() => machineItems(R).length === 1);
+    R.jm.drainNotifs(S1);
+    const gone = machineItems(R)[0];
+    okP(gone.status === 'done' && gone.resolvedBy === 'agent' && owedAway(R, S1) === 0, 'nothing waits for the machine any more (its results went out) ⇒ the item goes by itself (done, by the agent)', { status: gone.status, by: gone.resolvedBy });
+    R.hostsDown.set('h-b', since + 60e3);
+    const b = task(R, 'jb-s2', 'render-s2', S2);
+    nudge(R, S2); failOf(R, b);
+    await settle(() => machineItems(R)[0].status === 'open');
+    R.hostsDown.delete('h-b');   // the machine replies — a delivery lands there (S1's next result)
+    nudge(R, S1); failOf(R, a, 'failed exit=3 error (1m)');
+    await settle(() => machineItems(R)[0].status === 'done');
+    okP(machineItems(R)[0].status === 'done' && owedAway(R, S2) === 1,
+      '…and when the machine REPLIES (a delivery lands on it) the item goes, even while one result still waits for a conversation there (its own road carries it)', { status: machineItems(R)[0].status, stillOwedS2: owedAway(R, S2) });
+    R.stop();
   }
 }
 

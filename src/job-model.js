@@ -1111,6 +1111,7 @@ function legacyCopyFact(text, jobId) {
 const NOTIF_TAIL = Object.freeze({
   'not-running': 'These arrived while this conversation was not running.',
   'not-reachable': 'The agent did not accept these when they arrived (busy or unreachable) — delivered now.',
+  'machine-away': 'These arrived while the machine this conversation runs on could not be reached — delivered now that it replies.',
   'retrying': 'These were waiting for a retry — delivered now.',
   'rate-floor': 'These were paced by the 30 s per-conversation floor.',
   'spend-cap': 'These were held by the spending ceiling for turns nobody typed.',
@@ -1290,12 +1291,16 @@ function lastLineOf(text, max = 200) {
 // 'retrying' = parked in the ladder's retry park (the fact's kind, never a stash entry's).
 // lane bl-windows (the Task Groups store held unread): 'groups-unread' = a line only a Task Group could prove, held while the store
 // cannot be read — its own kind and words (never «not running»), judged when the store reads
-const HELD_KINDS = ['spend-cap', 'rate-floor', 'not-reachable', 'not-running', 'retrying', 'off', 'wrapper-no-steer', 'groups-unread'];
+const HELD_KINDS = ['spend-cap', 'rate-floor', 'not-reachable', 'not-running', 'retrying', 'off', 'wrapper-no-steer', 'groups-unread', 'machine-away'];
+/** B-2566's remainder (主开发 r1149, the number 10:45Z): the For-you item for a paired machine that cannot be reached waits this long
+ *  after it fell silent — a laptop shut for lunch says nothing; a night says it once */
+const MACHINE_AWAY_GRACE_MS = 60 * 60 * 1000;
 /** PURE. Type a stash reason from the ladder's own answer + the engine's text. */
 function heldKind(r, reason) {
   if (r && r.refused === 'spend') return 'spend-cap';
   if (r && r.refused === 'wrapper-no-steer') return 'wrapper-no-steer';
   if (r && r.parked === true) return 'retrying';
+  if (r && r.unreachable === true) return 'machine-away';   // B-2566's remainder: its machine cannot be reached — never «not running» (no item a conversation)
   if (r && r.notRunning === true) return 'not-running';
   const s = String((r && r.reason) || reason || '');
   if (/^rate floor/.test(s)) return 'rate-floor';
@@ -1376,7 +1381,7 @@ module.exports = { jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY,
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,
   validateFilter, filterMatches,
   ONE_SHOT_TERMINAL, ATTENTION_FAILED, ACK_LANES, RETIRED_ACK_LANES, isOneShot, isTerminalOneShot, terminalAt, ackState, attentionOf, agentReadAcks, archiveVerdict, lastLineOf,
-  HELD_KINDS, heldKind, heldDigest, NOTIF_TAIL, notifTailSentence,
+  HELD_KINDS, heldKind, heldDigest, NOTIF_TAIL, notifTailSentence, MACHINE_AWAY_GRACE_MS,
   vetSpec, jobCommandParts, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,

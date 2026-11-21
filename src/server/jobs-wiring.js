@@ -145,6 +145,35 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       for (const id of ids) { try { userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log('[jobs] For-you resolve failed:', e.message); } }
       return ids.length;
     },
+    // B-2566's remainder (主开发 r1147 / r1149): WHAT WAITS FOR A PAIRED MACHINE THAT CANNOT BE REACHED — ONE For-you item a machine
+    // (its own itemKey), never one a conversation or a job; its count grows in place while it is open. A person's close stands for the
+    // outage: an item a person closed after this outage began (createdAt ≥ since) is kept closed. The words say what waits, why, and what a person
+    // can do — open the machine; nothing to press (no button opens a laptop). Closed by the agent when the machine replies.
+    noticeMachineAway: function noticeMachineAway({ hid, n, convs, since }) {
+      if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => jm._machineAway(hid), 'the «results wait for a machine» item'); return null; }
+      const key = `jobs-machine-away:${hid}`;
+      const had = userTodos.idsWhere((i) => i.itemKey === key).map((id) => userTodos.get(id)).filter(Boolean);
+      if (had.some((i) => i.status !== 'open' && i.resolvedBy !== 'agent' && !i.clearedAt && Number(i.createdAt) >= Number(since))) return null;   // a PERSON closed it this outage: kept closed (the agent's own close is no answer)
+      const machine = (() => { try { return deliver.machineNameOf(hid); } catch { return String(hid); } })();
+      const it = userTodos.add('jobs', {
+        origin: 'jobs', kind: 'notice', urgency: 'normal', by: 'agent', filerKey: forYouKey, itemKey: key, hostId: hid, sessionName: 'Background Work',
+        i18n: {
+          text: { key: '{n} Background Work result(s) wait for {convs} conversation(s) on {machine} — it has been silent since {since}', params: { n: String(n), convs: String(convs), machine, since: { at: Number(since) } } },
+          detail: [{ key: 'They are kept in order and go out by themselves when {machine} replies — nothing is lost or billed meanwhile. To let them through, open {machine} and keep VibeSpace’s device agent running there.', params: { machine } }],
+        },
+      });
+      return (it && it.id) || null;
+    },
+    resolveMachineAway: function resolveMachineAway(hid) {
+      if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => resolveMachineAway(hid), 'the «results wait for a machine» item\'s close'); return 0; }
+      const ids = userTodos.idsWhere((i) => i.itemKey === `jobs-machine-away:${hid}` && i.status === 'open');
+      for (const id of ids) { try { userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log('[jobs] For-you resolve failed:', e.message); } }
+      return ids.length;
+    },
+    /** the machines an open «results wait» item names (an earlier run's too) — the engine asks once a run */
+    machineAwayOpen: () => { if (userTodos.isHeldUnread?.()) return []; return userTodos.idsWhere((i) => typeof i.itemKey === 'string' && i.itemKey.startsWith('jobs-machine-away:') && i.status === 'open').map((id) => String((userTodos.get(id) || {}).itemKey || '').slice('jobs-machine-away:'.length)).filter(Boolean); },
+    ownerUnreachable: (cid) => { try { return deliver.unreachableOf(cid); } catch { return null; } },   // B-2566's remainder: the ladder's own verdict
+    machineUnreachable: (hid) => { try { return deliver.machineUnreachable(hid); } catch { return false; } },
     log, getTelemetry, // optional: an archive write failure names itself (jobs-archive-write-failed)
     // B-44f3: For you held unread — the close is refused by name; it runs again at the read (the ask's item never reopens over an answered panel)
     resolveJobAsk: (jobId, opts) => { try { return userTodos.resolveByJob(jobId, opts); } catch (e) { if (e && e.code === 'todos-unread' && typeof userTodos.whenRead === 'function') { userTodos.whenRead(() => { try { userTodos.resolveByJob(jobId, opts); } catch (e2) { log('[jobs] inbox resolve failed at the read:', e2.message); } }, "a job's answered ask"); log(`[jobs] ${jobId}: its For-you ask closes once For you reads its list`); return 0; } log('[jobs] inbox resolve failed:', e.message); return 0; } },

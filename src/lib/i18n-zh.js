@@ -15028,4 +15028,9 @@ export default {
   "This conversation runs on a third-party provider's model. The agent's program prices it with its own table, which does not know this provider's prices, so its figure is not shown here. Usage prices this conversation's tokens with your price table — and says there which part has no price row yet.": "此对话运行在第三方提供方的模型上。智能体的程序用它自己的价格表估算费用，而那张表不知道这个提供方的价格，所以这里不显示它的金额。「用量」会按你的价格表为此对话的 token 计价——并在那里注明哪一部分还没有价格行。",
   "These models of a third-party provider match no row, so their cost is unknown and every total leaves them out. Enter that provider's own rates (USD per million tokens): the row is that provider's only — the same model on another account keeps its own price — and it re-prices this model's past usage too, since costs are computed when they are read.": "这些第三方提供方的模型没有匹配任何价格行，所以它们的费用未知，每个合计都未计入它们。请填入该提供方自己的单价（美元 / 百万 token）：这一行只属于该提供方——同一模型在其他账号上仍按它自己的价格——而且它也会重新计算这个模型过去的用量，因为费用是在读取时计算的。",
   "Add a price for {model}: «{value}» is not a rate — enter a number from 0 up to {max} (USD per million tokens)": "为 {model} 添加价格：「{value}」不是单价——请填入 0 到 {max} 之间的数字（美元 / 百万 token）",
+  // B-2566's remainder: what waits for a paired machine that cannot be reached (its For-you item, the hand-over card, the panel)
+  "{n} Background Work result(s) wait for {convs} conversation(s) on {machine} — it has been silent since {since}": "{n} 条后台工作结果在等{machine}上的 {convs} 个对话——它从{since}起没有回应",
+  "They are kept in order and go out by themselves when {machine} replies — nothing is lost or billed meanwhile. To let them through, open {machine} and keep VibeSpace’s device agent running there.": "它们按顺序保留，{machine}回应后会自动发出——期间不会丢失，也不计费。要让它们发出，请打开{machine}，并让 VibeSpace 的设备代理在那里保持运行。",
+  "they arrived while the machine this conversation runs on could not be reached — delivered now that it replies": "它们到达时，这个对话所在的机器连不上——机器已回应，现在送达",
+  "the machine this conversation runs on cannot be reached; delivered when it replies": "这个对话所在的机器连不上；机器回应后送达",
 };

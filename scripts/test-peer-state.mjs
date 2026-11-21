@@ -63,14 +63,17 @@ console.log('① the shared lookup: a CLI still starting');
 }
 
 /** the rig: the REAL ladder + park; a stand-in machine (its peerPost misses, its peerState says what it says) and machines list */
-function rig(name, { state = { live: false, inbox: false }, held = () => false, mod = DELIVER, post = null, owner = () => 'h-1', hello = null } = {}) {
+function rig(name, { state = { live: false, inbox: false }, held = () => false, mod = DELIVER, post = null, owner = () => 'h-1', hello = null, connect = null, link = null, dial = null } = {}) {
   const dataDir = path.join(ROOT, name); fs.mkdirSync(dataDir, { recursive: true });
   const c = { now: 1_790_000_000_000, timers: [] };
   const retryClock = { now: () => c.now, setTimeout: (fn, ms) => { const t = { at: c.now + Math.max(0, ms), fn }; c.timers.push(t); return t; }, clearTimeout: (t) => { const i = c.timers.indexOf(t); if (i >= 0) c.timers.splice(i, 1); } };
   const R = { c, asked: 0, posts: 0, wakes: [], logs: [], hooked: [], spend: { auth: 0, note: 0, release: 0 }, sent: [] };
   const dm = { peerPost: async (a) => { R.posts++; R.sent.push(a); return post ? post(a) : { ok: false, reason: NO_INBOX }; }, peerState: typeof state === 'function' ? state : async () => { R.asked++; return state; } };
   if (hello) dm.helloInfo = () => ({ capabilities: hello });
-  const hosts = { deviceBounded: async () => dm, device: async () => dm, get: () => ({ id: 'h-1', name: 'box-p' }), held };
+  // B-2566's remainder: `connect` = the bounded connect (it may throw: the machine did not answer), `link` = the list's own classifier
+  // (hosts.linkState: never a probe), `dial` = the host record's dial facts (when it was last connected / disconnected)
+  const hosts = { deviceBounded: connect || (async () => dm), device: async () => dm, get: () => ({ id: 'h-1', name: 'box-p', ...(dial ? { dial: dial() } : {}) }), held, ...(link ? { linkState: (id) => link(id) } : {}) };
+  R.dm = dm;
   const sessions = new Map();
   R.deliver = mod.create({
     dataDir, activeSessions: sessions, serverSetting: () => undefined, retryClock, log: (...a) => R.logs.push(a.join(' ')), renderBatch: AR.renderMsgStash,
@@ -338,7 +341,7 @@ console.log('⑪ the ten-minute memory of «ended there»: a post that lands cle
   const g = await life(DELIVER);
   ok(g.afterPost.live === true && g.afterPost.parked === false && g.before.parked === true && g.afterTtl.live === true && g.afterTtl.parked === false,
     'a post that LANDS clears «ended there» (it runs again: live); unlanded, the memory parks a wake, and past ten minutes it is forgotten (live again — the machine is asked anew)', g);
-  const KEEP = mutantCopies('peer-state-memory-kept', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "          if (r && r.ok) remoteEnded.delete(cid);   // B-95fc U1: it runs there again\n", '', 'landed-post-keeps-ended'), 'landed-post-keeps-ended');
+  const KEEP = mutantCopies('peer-state-memory-kept', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "          if (r && r.ok) { remoteEnded.delete(cid); unreachable.delete(hid); }   // B-95fc U1: it runs there again (B-2566: and its machine answers)\n", "          if (r && r.ok) { unreachable.delete(hid); }\n", 'landed-post-keeps-ended'), 'landed-post-keeps-ended');
   const gr = await life(KEEP);
   ok(gr.afterPost.live !== true, '⑪ RED CONTROL: a landed post that does not clear the memory — a conversation running again there still reads «ended»', gr.afterPost);
 }
@@ -406,6 +409,78 @@ console.log('⑬ an UNREADABLE registry is said BY NAME: the wait stops at its f
   ok(RR.logs.filter((l) => /could not read its conversations' registry/.test(l)).length === 2, '⑬ RED CONTROL: said at every delivery — the journal floods for one machine', {});
   const WSRC = fs.readFileSync(path.join(REPO, 'src/server/delivery-wake.js'), 'utf8');
   ok(WSRC.includes("if (ho && ho.code === 'registry_unread') {") && WSRC.includes("but its machine could not read its conversations' registry — the message waits for its next turn"), 'the wake line words the machine\'s unreadable registry as its own line (source pin)');
+}
+
+
+console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED — not «live»; the park keeps what is owed, in order, until it replies');
+{
+  // the bounded connect got no handle AND the machines list calls the machine offline ⇒ UNREACHABLE: typed «not running» with its own
+  // word beside it, silent since the dial facts' lastDisconnectAt; the park's «live» reads it; the owed wake is HELD — never resumed
+  // there while the machine is away, never ended «running» with nobody to carry the words — and it goes at the machine's reply
+  const X = CID(140), box = { up: false, link: 'offline' };
+  const run = async (mod) => {
+    const R = rig('unreachable-' + Math.random().toString(36).slice(2, 7), { mod, link: () => box.link, connect: async () => { if (box.up) return R.dm; throw Object.assign(new Error('the machine did not answer within 6000 ms'), { code: 'connect_timeout' }); },
+      dial: () => ({ lastConnectAt: R.c.now - 5 * 3600e3, lastDisconnectAt: R.c.now - 2 * 3600e3 }) });
+    box.up = false; box.link = 'offline';
+    const { r, p } = await R.result(X, 'nightly report finished');
+    const live0 = R.deliver.liveForWake(X), u0 = R.deliver.unreachableOf ? R.deliver.unreachableOf(X) : null;
+    await R.fire(); await R.fire();
+    const held = { owed: R.deliver.endedEntries(X).length, hooked: R.hooked.length, running: R.wakes.filter((w) => w.cid === X && w.outcome === 'running').length };
+    R.c.now += 11 * 60e3;   // past the bound an ended reply has — the list still says offline
+    const live11 = R.deliver.liveForWake(X);
+    await R.fire();
+    const night = { owed: R.deliver.endedEntries(X).length, hooked: R.hooked.length };
+    box.link = 'online';   // the machine replies: its link is back
+    const back = { live: R.deliver.liveForWake(X), u: R.deliver.unreachableOf ? R.deliver.unreachableOf(X) : null };
+    await R.fire(); await R.fire();
+    const after = { owed: R.deliver.endedEntries(X).length, running: R.wakes.filter((w) => w.cid === X && w.outcome === 'running').length };
+    return { r, p, live0, u0, held, live11, night, back, after, posts: R.posts, spend: R.spend };
+  };
+  const g = await run(DELIVER);
+  ok(g.r && g.r.ok === false && g.r.notRunning === true && g.r.unreachable === true && g.r.hostId === 'h-1' && g.u0 && g.u0.hostId === 'h-1' && g.r.since === g.u0.since && g.live0 === false && g.p && g.p.parked === true && g.posts === 0,
+    'no handle + the list says offline ⇒ UNREACHABLE: typed «not running» with its own word, silent since the dial facts\' disconnect; the park\'s «live» is false and ONE wake is owed; nothing posted', { r: g.r, unreachableOf: g.u0, live: g.live0, parked: g.p });
+  ok(g.held.owed === 1 && g.held.hooked === 0 && g.held.running === 0 && g.live11 === false && g.night.owed === 1 && g.night.hooked === 0,
+    'the owed wake is HELD while it is away — never handed to the resume line (a closed laptop\'s conversation only fails to resume), never ended «running»; past the ten-minute bound too, while the list still says offline (a night)', { held: g.held, liveAfter11min: g.live11, night: g.night });
+  ok(g.back.live === true && g.back.u === null && g.after.owed === 0 && g.after.running === 1 && g.spend.note === 0,
+    '…and at the machine\'s REPLY (its link back) it is live again: the owed wake ends «running» (its next turn and the hand-over carry the words) — nothing billed while it was away', { back: g.back, after: g.after, spend: g.spend });
+  const NOHOLDU = mutantCopies('peer-state-unreachable-resumed', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "    if (!localSessionFor(cid) && unreachableOf(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 60e3; writeRetrySoon(); scheduleRetry(); return; }", '', 'unreachable-not-held'), 'unreachable-not-held');
+  const gr = await run(NOHOLDU);
+  ok(gr.held.hooked === 1, '⑭ RED CONTROL: the hold removed (a copy of the ladder) ⇒ the owed wake goes to the resume line while the machine is away', { held: gr.held });
+}
+{
+  // a machine the list knows NOTHING of ('unknown': an ssh host with no facts) is never marked — today's road (an untyped miss); and a
+  // post that lands clears the mark though the list still says offline (the list lags; the machine answered)
+  const Y = CID(141), box = { up: false, link: 'unknown' };
+  const R = rig('unreachable-unknown', { link: () => box.link, connect: async () => { if (box.up) return R.dm; throw new Error('the machine did not answer within 6000 ms'); }, post: () => ({ ok: true, peerName: 'p' }) });
+  const r1 = await R.deliver.deliverToConversation(Y, 'x', { kind: 'notification', spendReason: 'job-notification' });
+  ok(r1.ok === false && !r1.unreachable && !r1.notRunning && R.deliver.unreachableOf(Y) === null && R.deliver.liveForWake(Y) === true,
+    'the list says UNKNOWN (no facts): never marked — the miss stays untyped, the conversation «live» as today (no evidence is not evidence)', { r1, live: R.deliver.liveForWake(Y) });
+  box.link = 'offline';
+  const r2 = await R.deliver.deliverToConversation(Y, 'x', { kind: 'notification', spendReason: 'job-notification' });
+  box.up = true;
+  const r3 = await R.deliver.deliverToConversation(Y, 'y', { kind: 'notification', spendReason: 'job-notification' });
+  ok(r2.unreachable === true && r3.ok === true && R.deliver.unreachableOf(Y) === null && R.deliver.liveForWake(Y) === true,
+    'a post that LANDS clears the mark while the list still says offline (the machine answered; the list lags)', { r2: { unreachable: r2.unreachable }, r3: { ok: r3.ok }, after: R.deliver.unreachableOf(Y) });
+  box.up = false; box.link = 'offline';
+  await R.deliver.deliverToConversation(Y, 'z', { kind: 'notification', spendReason: 'job-notification' });
+  R.c.now += 11 * 60e3; box.link = 'unknown';
+  ok(R.deliver.unreachableOf(Y) === null, 'past the bound, once the list can no longer say (unknown), the mark goes — the bound an ended reply has', { after: R.deliver.unreachableOf(Y) });
+}
+
+{
+  // a HELD machines list cannot say — its linkState answers 'offline' on purpose (the pool's dark-source defense): NOTHING is marked
+  // (the hold's own rule: a remote owner is «unknown», never ended) — RED CONTROL: the hold's word removed from the link's reader
+  const Z = CID(142);
+  const held = async (mod) => {
+    const R = rig('unreachable-held-' + Math.random().toString(36).slice(2, 7), { mod, held: () => true, link: () => 'offline', connect: async () => { throw new Error('the machines list is held — read again'); } });
+    const r = await R.deliver.deliverToConversation(Z, 'x', { kind: 'notification', spendReason: 'job-notification' });
+    return { unreachable: !!(r && r.unreachable), mark: R.deliver.unreachableOf(Z) };
+  };
+  const h = await held(DELIVER);
+  ok(h.unreachable === false && h.mark === null, 'a HELD machines list (its linkState says offline for the pool\'s defense) marks NOTHING — unknown, never unreachable', h);
+  const HELDMARK = mutantCopies('peer-state-held-marks', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "  const linkOf = (hid) => { if (hostsHeld()) return 'unknown'; try {", "  const linkOf = (hid) => { try {", 'held-reads-offline'), 'held-reads-offline');
+  const hr = await held(HELDMARK);
+  ok(hr.unreachable === true, '⑭ RED CONTROL: the hold\'s word removed from the link\'s reader ⇒ a held list marks every paired machine unreachable', hr);
 }
 
 report();
