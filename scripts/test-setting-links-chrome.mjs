@@ -102,6 +102,10 @@ const focusOf = (key) => evalJs(`(() => { const rows = [...document.querySelecto
   const sc = row.closest('.settings-content'); const r = row.getBoundingClientRect(), s = sc ? sc.getBoundingClientRect() : { top: 0, bottom: innerHeight };
   const sec = row.closest('.settings-section'); const others = sc ? [...sc.querySelectorAll('.settings-section')].filter((x) => x.getBoundingClientRect().height > 0).map((x) => x.dataset.category) : [];
   return { found: true, inView: r.height > 0 && r.top >= s.top - 1 && r.bottom <= s.bottom + 1, marked: row.classList.contains('settings-row-focus'), section: sec ? sec.dataset.category : null, sections: others, windows: document.querySelectorAll('.settings-content').length, advSwitch: localStorage.getItem('vibespace.settingsAdvanced') }; })()`);
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): the row's focus facts, MARKED when its row never came into view — the
+// judge says that by name, never «the row is not marked» as a verdict on the product
+const focusWhenIn = async (key) => { for (let i = 0; i < 40; i++) { const f = await focusOf(key); if (f.found && f.inView) return f; await sleep(150); } return { ...(await focusOf(key)), timedOut: `its row was not found in view in ${(40 * 150) / 1000} s` }; };
+const never = (got) => (got && got.timedOut ? ` — THE STATE NEVER CAME: ${got.timedOut}, so this red is that, not a verdict on the product` : '');
 const shot = async (name) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, `${name}.png`), Buffer.from(r.data, 'base64')); console.log(`    · picture ${path.join(SHOTS, name + '.png')}`); };
 const ask = (args, token) => new Promise((resolve) => { const c = spawn(process.execPath, [path.join(wt, 'data', 'bin', 'vibespace-ask'), ...args], { env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: token } }); let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); c.on('close', (code) => resolve({ code, out })); });
 
@@ -139,8 +143,8 @@ try {
   check('the detail draws its links too', !!(await until(`!!document.querySelector(${JSON.stringify(d1Link)})`, { timeout: 8000 })));
   const b0 = settingsBytes();
   check('a real press on the ceiling\'s link', (await press(d1Link)) === true);
-  const fo1 = await (async () => { for (let i = 0; i < 40; i++) { const f = await focusOf(K1); if (f.found && f.inView) return f; await sleep(150); } return focusOf(K1); })();
-  check('Settings opens ON THAT ROW: its section in view, the row in view and marked', fo1.found && fo1.inView && fo1.marked && fo1.windows === 1, fo1);
+  const fo1 = await focusWhenIn(K1);
+  check('Settings opens ON THAT ROW: its section in view, the row in view and marked' + never(fo1), fo1.found && fo1.inView && fo1.marked && fo1.windows === 1, fo1);
   await shot('zh-settings-row');
   check('THE SETTINGS FILE IS BYTE FOR BYTE THE SAME after the press (a link opens, it never writes)', sameBytes(b0, settingsBytes()));
   await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (!p || p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`);
@@ -148,8 +152,8 @@ try {
   const dLink = `#user-todos-popup .ut-item .ut-detail .fy-link[data-fy="setting"][data-ref="${K2}"]`;
   check('the detail\'s second link is a link too', !!(await until(`!!document.querySelector(${JSON.stringify(dLink)})`, { timeout: 8000 })));
   check('a real press on it', (await press(dLink)) === true);
-  const fo2 = await (async () => { for (let i = 0; i < 40; i++) { const f = await focusOf(K2); if (f.found && f.inView) return f; await sleep(150); } return focusOf(K2); })();
-  check('with Settings already open it MOVES there (one window): an ADVANCED row revealed for this open, the per-device switch untouched', fo2.found && fo2.inView && fo2.marked && fo2.windows === 1 && fo2.advSwitch === null, fo2);
+  const fo2 = await focusWhenIn(K2);
+  check('with Settings already open it MOVES there (one window): an ADVANCED row revealed for this open, the per-device switch untouched' + never(fo2), fo2.found && fo2.inView && fo2.marked && fo2.windows === 1 && fo2.advSwitch === null, fo2);
   check('still not a byte written', sameBytes(b0, settingsBytes()));
 
   console.log('③ the chat: an agent\'s message carries the link; a press opens the row of ANOTHER section');
@@ -159,8 +163,8 @@ try {
   check('the agent\'s answer draws `vibespace://settings/chat.uploadDir` as a link (its full stop outside)', !!(await until(`!!document.querySelector(${JSON.stringify(cLink)})`, { timeout: 20000 })));
   await shot('zh-chat-link');
   check('a real press on it', (await press(cLink)) === true);
-  const fo3 = await (async () => { for (let i = 0; i < 40; i++) { const f = await focusOf(K3); if (f.found && f.inView) return f; await sleep(150); } return focusOf(K3); })();
-  check('Settings moves to the Chat section\'s row', fo3.found && fo3.inView && fo3.marked && fo3.windows === 1, fo3);
+  const fo3 = await focusWhenIn(K3);
+  check('Settings moves to the Chat section\'s row' + never(fo3), fo3.found && fo3.inView && fo3.marked && fo3.windows === 1, fo3);
   check('not a byte written', sameBytes(b0, settingsBytes()));
 
   console.log('④ a notice: the server\'s notice frame, fed to the page\'s own handler, draws the link as a button');
@@ -168,8 +172,8 @@ try {
   const tLink = `.global-toast-setting[data-setting="${K1}"]`;
   check('the toast carries the link as a button', !!(await until(`!!document.querySelector(${JSON.stringify(tLink)})`, { timeout: 8000 })));
   check('a real press on it', (await press(tLink)) === true);
-  const fo4 = await (async () => { for (let i = 0; i < 40; i++) { const f = await focusOf(K1); if (f.found && f.inView) return f; await sleep(150); } return focusOf(K1); })();
-  check('Settings moves back to the ceiling\'s row', fo4.found && fo4.inView && fo4.marked && fo4.windows === 1, fo4);
+  const fo4 = await focusWhenIn(K1);
+  check('Settings moves back to the ceiling\'s row' + never(fo4), fo4.found && fo4.inView && fo4.marked && fo4.windows === 1, fo4);
   check('not a byte written', sameBytes(b0, settingsBytes()));
 
   console.log('⑤ the phone (390 px): the tray sheet\'s link opens the one-section view on the row');
@@ -191,8 +195,8 @@ try {
   const firstLine = (sel) => `(() => { const l = [...document.querySelectorAll(${JSON.stringify(sel)})].filter(${VISIBLE}).pop(); if (!l) return false; const r = l.getClientRects()[0]; if (!r || !(r.width > 0)) return false; const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!h && (h === l || l.contains(h)); })()`;
   check('the link\'s first line is on screen and under its press point (the state the press waits for)', !!(await until(firstLine(qLink), { timeout: 8000 })), await evalJs(`(() => { const l = [...document.querySelectorAll(${JSON.stringify(qLink)})].pop(); return l ? { rects: l.getClientRects().length } : null; })()`));
   check('a tap on the link', (await press(qLink, { touch: true })) === true);
-  const fo5 = await (async () => { for (let i = 0; i < 40; i++) { const f = await focusOf(K1); if (f.found && f.inView) return f; await sleep(150); } return focusOf(K1); })();
-  check('on the phone: the row in view, marked, its section ALONE (the one-section view)', fo5.found && fo5.inView && fo5.marked && fo5.sections.length === 1 && fo5.sections[0] === fo5.section, fo5);
+  const fo5 = await focusWhenIn(K1);
+  check('on the phone: the row in view, marked, its section ALONE (the one-section view)' + never(fo5), fo5.found && fo5.inView && fo5.marked && fo5.sections.length === 1 && fo5.sections[0] === fo5.section, fo5);
   await shot('zh-phone-settings-row');
   check('not a byte written, after every press', sameBytes(b0, settingsBytes()));
   // RED CONTROL: the same press on a link that is truly absent (no row carries it) presses nothing — the leg above fails without its link
