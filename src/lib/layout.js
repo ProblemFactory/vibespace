@@ -480,8 +480,7 @@ class LayoutManager {
         // ONLY because a window of its own shows that conversation, unlisted, takes that window — re-keyed (its view, composer and draft
         // stand; the rows below place it like any window the record lists); under a held act the window stands in the row's place
         const shownBy = this.app.desktopManager?.takeRowsShown?.(this.app.desktopManager?.activeDesktopId, state, {
-          held: (w) => heldChain.has(String(w.id)) || this.actHeld(w._movedAt, receivedAt, w) || this.actHeld(w._boundsAt, receivedAt, w) || this.actHeld(w._chainAt, receivedAt, w),
-          rowHeld: (id) => heldIds.includes(id) });
+          held: (w) => this.heldActOf(w, receivedAt, state), rowHeld: (id) => heldIds.includes(id) });
         standing = new Set((shownBy?.stands || []).map(([w]) => String(w)));
         // A COPY THIS PAGE CANNOT BUILD IS A GHOST FROM THE MOMENT THE RECORD NAMES IT (r5 O): a row whose conversation this page
         // already shows in another window is never built here (its open would raise that other window) — nor waited for
@@ -860,6 +859,15 @@ class LayoutManager {
    *  save (r3 ③) then wrote the peer's box back as the user's; a peer saving every 400 ms undid every act here.
    *  Bounded by ACT_HOLD_MS like every held witness (§6b guard 2: an idle page holds nothing over the server; the
    *  act's real time is never fabricated). */
+  /** THE ONE HELD-ACT PREDICATE for a window a record would take over (B-1d87's follow, r1377 (2) — the apply's re-key and the refusal
+   *  road's, which had two copies; the refusal road missed the held tab act): a tab act no record of `state` agreed with yet
+   *  (_heldChainIds), or a move, a resize or a chain act held over a record received at `receivedAt` (actHeld) */
+  heldActOf(win, receivedAt, state) {
+    if (!win) return false;
+    if (state && this._heldChainIds(state).includes(String(win.id))) return true;
+    return [win._movedAt, win._boundsAt, win._chainAt].some((t) => this.actHeld(t, receivedAt, win));
+  }
+
   actHeld(t, receivedAt, win = null) {
     if (!(t > 0) || Date.now() - t > ACT_HOLD_MS) return false;
     return t >= receivedAt || t > (win ? this._carriedAt(win._desktopId) : (this._movesSentAt || 0));

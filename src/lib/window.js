@@ -1977,6 +1977,7 @@ class WindowManager {
     win.id = newId;
     this.windows.set(newId, win);
     if (this.activeWindowId === oldId) this.activeWindowId = newId; // the focused window keeps the focus under its new id (B-1d87: a person typing in it)
+    this._app?._rekeyResumeMark?.(oldId, newId); // …and a resume's fence mark on it follows it (B-1d87's follow, r1377 (3))
     const c = win._tabChain;
     if (c) {
       const sw = (l) => { if (Array.isArray(l)) l.forEach((m, i) => { if (m === oldId) l[i] = newId; }); }; // in place: every member holds this chain

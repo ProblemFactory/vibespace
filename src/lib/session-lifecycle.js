@@ -1249,8 +1249,18 @@ export function installSessionLifecycle(App, ctx = {}) {
     if (winId == null) return;
     const id = String(winId), m = (this._resumeMarks ??= new Map());
     m.set(id, (m.get(id) || 0) + 1);
-    queueMicrotask(() => { const n = (m.get(id) || 1) - 1; if (n > 0) m.set(id, n); else m.delete(id); });
+    queueMicrotask(() => { const k = this._resumeKeyOf?.(id) ?? id; const n = (m.get(k) || 1) - 1; if (n > 0) m.set(k, n); else m.delete(k); });
   },
+  /** B-1d87's follow (r1377 (3)): a window RE-KEYED while a resume's turn holds its mark (window.js rekeyWindow — a record taken over
+   *  the page's own window) keeps the mark under its new id; the mark's own microtask follows it (`_resumeMoved`, for this task) */
+  _rekeyResumeMark(from, to) {
+    const m = this._resumeMarks, a = String(from), b = String(to);
+    if (!m || !m.has(a)) return;
+    m.set(b, (m.get(b) || 0) + m.get(a)); m.delete(a);
+    (this._resumeMoved ??= new Map()).set(a, b);
+    queueMicrotask(() => { if (this._resumeMoved?.get(a) === b) this._resumeMoved.delete(a); });
+  },
+  _resumeKeyOf(id) { let k = String(id); for (let i = 0; i < 8 && this._resumeMoved?.has(k); i++) k = this._resumeMoved.get(k); return k; },
   _closeFenced(winId, how) {
     if ((this._fenceOpen || 0) > 0 || winId == null || !this._resumeMarks?.has(String(winId))) return false;
     this._fenceSays(String(winId), how, 'the window is in a resume\u2019s turn — only its re-opening (_reopenWin) or a second view\u2019s close (_closeSecondView) closes it');

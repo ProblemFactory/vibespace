@@ -554,7 +554,7 @@ export class DesktopManager {
     // never its own z (phone-arrangement-verify F2: the reconciled re-send wrote the phone's z, a desktop's reload restacked)
     // THE PAGE'S WINDOW STANDS (B-1d87): the record a refusal kept is taken over this page's windows like an applied one — a row it
     // cannot build only because a window of its own shows that conversation takes that window (re-keyed), or the window stands in its place
-    if (d === this._activeId) this.takeRowsShown(d, rec, { held: (w) => ['_movedAt', '_boundsAt', '_chainAt'].some((k) => !!lm.actHeld?.(w[k], Date.now(), w)), rowHeld: (id) => (lm.heldCloseIds?.() || []).includes(id) });
+    if (d === this._activeId) this.takeRowsShown(d, rec, { held: (w) => !!lm.heldActOf?.(w, Date.now(), rec), rowHeld: (id) => (lm.heldCloseIds?.() || []).includes(id) }); // THE ONE held-act predicate (r1377 (2))
     this._setRecord(d, mergeDesktopRecord({ record: rec, built: this.captureBuilt(d, rec), remove: lm.heldCloseIds?.() || [] }));
     if (this._standsNow?.get(d)?.length) this._setRecord(d, this._standsInto(d, this._savedStates.get(d))); // …a window standing in a row's place (B-1d87)
     this.noteWire(d, rec);
@@ -710,22 +710,27 @@ export class DesktopManager {
    *  places it like any window it lists). Under a held act of that window (`held(w)`: a move, a resize, a chain act no save carried)
    *  it STANDS under its own id in the row's place instead (noteStands — the record read so, its next write carrying it; the other page
    *  takes that id). A row this page closed and no save has carried (`rowHeld`) is left as today. One window for one row.
-   *  WHICH ID WINS when two pages each opened the conversation: the HUB's order — the staleness gate (§6b guard 11) accepts only a write
-   *  made from the newest record of the desktop; the other page's write is refused and that page takes the kept record on the refusal
-   *  road (this method too) — so every page takes the id of the first record the hub accepted, never a swap.
+   *  WHICH ID WINS when two pages each opened the conversation: the HUB's order where it judges — the staleness gate (§6b guard 11)
+   *  accepts only a write made from the newest record of the desktop, the other page's write is refused and that page takes the kept
+   *  record on the refusal road (this method too). Where the hub judges NOTHING (B-1d87's follow, r1377 (1): a desktop with no stored
+   *  record yet, a write with no base — both pages' first writes stand), A RULE BOTH PAGES COMPUTE ALIKE: a page whose own window is
+   *  already on the wire (it sent it — both pages wrote their own) keeps its own id when it is the smaller (plain string order) and
+   *  STANDS in the row's place (its next write carries it), and re-keys onto the row's when that one is the smaller; a window never
+   *  sent re-keys. Never a swap, one id on every page.
    *  → { rekeyed: [[from, to]], stands: [[win, row]] } */
   takeRowsShown(desk, state, { held = () => false, rowHeld = () => false } = {}) {
     const out = { rekeyed: [], stands: [] }, wm = this.app.wm;
     if (!desk || desk !== this._activeId || desk === '__stage__' || this.app.stage?.isActive || !state || !Array.isArray(state.windows)) return out;
-    const taken = new Set();
+    const taken = new Set(), census = this._shownCensus(); // ONE census a call (a re-keyed window's row is listed: it is never asked again)
     for (const row of state.windows) {
       const id = row ? rowId(row) : null;
       if (!id || wm.windows.has(id) || rowHeld(id)) continue;
-      const w = this.showerFor(row, state, taken);
+      const w = this.showerFor(row, state, taken, census);
       if (!w) continue;
       const was = String(w.id);
       taken.add(was);
-      if (!held(w) && wm.rekeyWindow(was, id, { inChain: true })) {
+      const mineWins = this.wireListed(desk, was) && was < id; // the tie where the hub judged nothing: both pages wrote their own (above)
+      if (!held(w) && !mineWins && wm.rekeyWindow(was, id, { inChain: true })) {
         taken.add(id);
         if (this.wireListed(desk, was)) this._noteDeparted(was, 'replaced', id); // the hub held it: its drop is explained
         this._buildAttempts.delete(id);
@@ -742,8 +747,8 @@ export class DesktopManager {
    *  conversation (THE census, _shownCensus: the session the row's own door attaches) — when `state` does NOT list that window.
    *  `taken` = windows already standing for a row (one window for one row). null = none: the row is no copy, or its window is listed
    *  too (two rows of one conversation in one record: today's dedup world, untouched). */
-  showerFor(row, state, taken = null) {
-    const census = this._shownCensus(), sid = doorSessionOf(row, census.live);
+  showerFor(row, state, taken = null, census = this._shownCensus()) {
+    const sid = doorSessionOf(row, census.live);
     const id = sid ? census.shows.get(sid) : null;
     if (!id || id === rowId(row) || (taken && taken.has(id))) return null;
     const w = this.app.wm.windows.get(id);
@@ -751,7 +756,8 @@ export class DesktopManager {
     if (windowIds(state).includes(id)) return null;
     return w;
   }
-  /** B-1d87: window `winId` STANDS under its own id in the place of the record's row `rowId` (no re-key: a held act) — read once */
+  /** B-1d87: window `winId` STANDS under its own id in the place of the record's row `rowId` (no re-key: a held act, or its own id wins
+   *  the tie) — read once */
   noteStands(desk, winId, rowId) { const m = this._standsNow || (this._standsNow = new Map()); if (!m.has(desk)) m.set(desk, []); m.get(desk).push([String(winId), String(rowId)]); }
   _takeStands(desk) { const l = this._standsNow?.get(desk); if (l) this._standsNow.delete(desk); return l || []; }
   /** `state` with each window standing for a row (noteStands) in that row's place and seat — the row leaves with evidence
