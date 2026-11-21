@@ -143,6 +143,8 @@ const STAND_INS = {
   linkTokenFor: () => 'link-token-stand-in',   // a function, as the hub's (a road gated on it mounts); no world session has a link
   linkSignFor: () => ({ sigH: 'link-sign-stand-in' }), hubPubFor: () => null,   // lane lg-remote-hardening: the attach child's hub signature (no world session has a link)
   onVaultWait: () => {}, auditLink: () => {},
+  // lane vault-job-approval: a Background job's approval card's answer and its ✕ (person-only roads) — an object as the hub's, so they mount; no job here
+  jobAsks: { answer: () => ({ ok: false, code: 'ask_closed', error: 'no such approval card' }), revoke: () => ({ ok: false, code: 'not_approved', error: 'no job in the world' }) },
   // B-8b87: a browser proxy's logins (names only here) and the keeper's «Move the password to the vault» — objects/functions as the hub's, so their person-only roads mount
   proxyLogins: { names: () => [], save: () => ({ ok: false, code: 'vault_locked', error: 'the vault is locked' }), remove: () => ({ ok: true }) }, proxyMove: () => ({ ok: false, code: 'unavailable', error: 'no keeper in the world' }),
 };

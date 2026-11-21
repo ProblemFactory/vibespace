@@ -212,8 +212,9 @@ app.locals.settingHolds = settingHolds;   // the agent's ask route judges a last
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
   proxyLogins: browserProxyLogins, proxyMove: (id) => { const k = require('./browser-keeper.js').keeper(); return k && typeof k.moveProxyPassword === 'function' ? k.moveProxyPassword(id) : { ok: false, code: 'unavailable', error: 'the browser keeper is not running on this server' }; },   // B-8b87
-  logins: browserLogins, jobAsks: vaultJob,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)   // lane vault-job-approval: a Background job's approval card's answer
+  logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)
   jobSecrets: vaultJobSecrets,   // B-ef1b: the retired job-secrets notice's buttons (a person's door)
+  jobAsks: vaultJob,   // lane vault-job-approval: a Background job's approval card's answer and its ✕ (a person's doors)
   linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who),
   // lane lg-remote-hardening (D3 half b): the attach child's hub signature — laws 1 + 2 in host-tokens.js signForMachine
   linkSignFor: (hostKey, devPub, nonceD) => { const h = vaultHostOf(hostKey); const r = hostTokens.signForMachine(h, devPub, nonceD); try { if (h && hosts.noteDeviceKey(h.id, 'hub-pinned', {})) bcastAll({ type: 'hosts-updated' }); } catch { } return r; }, // this signature is what pins the hub on that device (law 3: recorded at once)

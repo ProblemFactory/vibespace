@@ -232,7 +232,7 @@ async function legApproval() {
   const job = W.jm.jobs.get(r.job.id);
   row(job.state === 'waiting' && job.waitFor === 'approval' && job.runs.length === 0, 'a value the hub MINTED waits for the owner\'s approval (no run)');
   const st = W.jm.start(job), words = String(st.after || '');
-  row(st.ok && st.state === 'waiting' && st.waitFor === 'approval' && job.runs.length === 0 && /ONE card per entry asks the user in their For-you tray/.test(words) && /starts by itself once they allow it/.test(words) && /vibespace-vault put/.test(words) && !/later VibeSpace update/.test(words), 'round 2 + lane vault-job-approval: start() of the waiting task answers its wait in the words of now — the card in the user\'s tray, what each answer does, and the door that needs none (an entry the agent puts)', st);
+  row(st.ok && st.state === 'waiting' && st.waitFor === 'approval' && job.runs.length === 0 && /ONE card per entry asks the user in their For-you tray/.test(words) && /starts by itself once they allow it/.test(words) && /vibespace-vault put/.test(words) && !/later VibeSpace update/.test(words), 'round 2 + lane vault-job-approval: start() of the waiting task answers its wait in the words of now — the card in the user\'s tray, what each answer does, and the door that needs none (an entry the agent puts)', st);   // stale-pins: kept (an absence check: L1a's words must be gone)
   W.grants.set('vault-job', 'secrets:agent:conv-a/tok#secret', { to: [{ kind: 'conversation', key: 'conv-a', jobs: [job.id] }] }, 'test');
   await W.until(() => W.got().length === 1 && job.state === 'done');
   const minted = W.vault.secretGet('agent:conv-a/tok').value.toString();
@@ -274,6 +274,7 @@ async function legCard(doorSrc = null) {
   row((W.got()[0] || {}).v === minted && job.runs.length === 1, 'the waiting job starts BY ITSELF at the allow (the row\'s change) — with the minted value', { runs: job.runs.length });
   const au = jobLines(W).filter((l) => l.includes(`"askId":"${a.askId}"`));
   row(au.filter((l) => l.includes('"op":"ask"')).length === 1 && au.filter((l) => l.includes('"op":"allow"')).length === 1 && formsAbsent(jobLines(W).join('\n'), minted), 'exactly ONE vault-job audit line for its ask (three re-judges wrote none) and ONE for its allow — ids and references, never the value', au.length);
+  rows[rows.length - 1].push(jobLines(W).filter((l) => l.includes(`"askId":"${a.askId}"`)));   // the lines it judged — printed green or red (2.369.413 lesson b)
   const again = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
   row(!again.ok && again.code === 'ask_settled', 'answered again ⇒ ask_settled (nothing changes)', again);
   W.end();
@@ -290,6 +291,7 @@ async function legDeny(doorSrc = null) {
   rows.state = job.state;
   row(d.ok && d.outcome === 'denied' && job.state === 'failed' && job.desiredUp === false && job.runs.length === 0 && res.resolvedBy === 'denied' && W.journal.some((l) => l.includes(`${job.id} refused to run (vault-denied)`) && l.includes('vault_denied')) && W.grants.rowsFor('vault-job', a.entry).length === 0 && jobLines(W).some((l) => l.includes('"op":"deny"')),
     '拒绝 is a click: the job is REFUSED by name (vault_denied, said once) and never started; the card closed «denied»; nothing written; its audit line', { d, state: job.state, by: res.resolvedBy });
+  rows[rows.length - 1].push([...W.journal.filter((l) => l.includes(job.id) && l.includes('refused')), ...jobLines(W).filter((l) => l.includes('"op":"deny"'))]);   // the lines it judged — printed green or red (2.369.413 lesson b)
   const r2 = W.create({ kind: 'task', name: 'deny2' }), j2 = W.jm.jobs.get(r2.job && r2.job.id);
   row(!!j2 && j2.state === 'failed' && /less than 10 minutes ago/.test(String(r2.error)) && cards(W).length === 0, 'the same conversation × entry within 10 minutes of a Deny: the next job is refused by name (ask_quiet) — no new card', { err: r2.error, state: j2 && j2.state, n: cards(W).length });
   W.end();
@@ -307,6 +309,7 @@ async function legCaps(doorSrc = null) {
   W.jm.rm(first);
   const late = W.door.answer(fa.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
   row(resolvedOf(W, fa.askId).resolvedBy === 'ask-over' && cards(W).length === 3 && !late.ok && late.code === 'ask_settled' && W.grants.rowsFor('vault-job', fa.entry).length === 0 && jobLines(W).some((l) => l.includes('"op":"over"') && l.includes(fa.askId)), 'a waiting job REMOVED ⇒ its card closes (ask-over) — never an orphan card; a late 允许 writes nothing', { by: resolvedOf(W, fa.askId).resolvedBy, late });
+  rows[rows.length - 1].push(jobLines(W).filter((l) => l.includes(fa.askId)));   // the lines it judged — printed green or red (2.369.413 lesson b)
   const second = W.jm.jobs.get(made[1].job.id), sa = ((cards(W).find((i) => i.action.jobId === second.id)) || {}).action || {};
   W.jm.stop(second);
   row(resolvedOf(W, sa.askId).resolvedBy === 'ask-over' && cards(W).length === 2 && second.state !== 'waiting', 'a waiting job STOPPED ⇒ its card closes (ask-over) — its next start asks again', { by: resolvedOf(W, sa.askId).resolvedBy, state: second.state });
@@ -378,6 +381,7 @@ async function legDenyVaultWait(jobs = null) {
   const d = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
   rows.state = job.state;
   row(before === 'vault' && d.ok && job.state === 'failed' && job.desiredUp === false && W.journal.some((l) => l.includes(`${job.id} refused to run (vault-denied)`)), 'a Deny after the wait turned into a VAULT wait (a locked boot\'s re-judge) still REFUSES the job by name — never a card closed «denied» over a job that waits on', { before, d, state: job.state });
+  rows[rows.length - 1].push(W.journal.filter((l) => l.includes(job.id) && l.includes('refused')));   // the lines it judged — printed green or red (2.369.413 lesson b)
   W.end();
   return rows;
 }
@@ -431,6 +435,7 @@ async function legRevoke(doorSrc = null) {
   row(up && rv.ok && rv.outcome === 'revoked' && rv.stopped === true && W.grants.rowsFor('vault-job', a.entry).length === 0 && job.desiredUp === false && !['up', 'starting'].includes(job.state),
     'REVOKE = STOP: the ✕ takes the job out of the entry\'s row (no member left — the row gone) and STOPS it at once (desiredUp false: no restart)', { up, rv, state: job.state, desired: job.desiredUp });
   row(notes.length === 1 && notes[0].cid === 'conv-a' && /a value it read cannot be taken back/.test(notes[0].text) && notes[0].text.length <= 400 && jobLines(W).some((l) => l.includes('"op":"revoke"')), 'ONE notice to the owner conversation (the user took it back, the job stopped, a value already read cannot be taken back) and its vault-job audit line', W.told.slice(t0));
+  rows[rows.length - 1].push(jobLines(W).filter((l) => l.includes('"op":"revoke"')));   // the lines it judged — printed green or red (2.369.413 lesson b)
   const st = W.jm.start(job);
   row(st.ok && st.state === 'waiting' && st.waitFor === 'approval' && cards(W).filter((i) => i.action.jobId === job.id).length === 1, 'its next start ASKS AGAIN: waiting for approval, ONE new card', st);
   const again = W.door.revoke(a.entry, job.id, { by: 'user' });
@@ -470,6 +475,7 @@ async function legGone() {
   W.jm.clearJobs([j2.id], { by: 'owner' });
   row(JSON.stringify(before) === JSON.stringify([j1.id, j2.id]) && JSON.stringify(afterRm) === JSON.stringify([j2.id]) && W.grants.rowsFor('vault-job', a.entry).length === 0 && jobLines(W).filter((l) => l.includes('"op":"gone"')).length === 2,
     'a job REMOVED takes its id out of the row; a job whose content is CLEARED too (its next start asks again) — the last one out, the row is gone', { before, afterRm, left: W.grants.rowsFor('vault-job', a.entry) });
+  rows[rows.length - 1].push(jobLines(W).filter((l) => l.includes('"op":"gone"')));   // the lines it judged — printed green or red (2.369.413 lesson b)
   W.end();
   return rows;
 }
@@ -589,6 +595,7 @@ async function legRmNoRefile() {
   W.jm.rm(job);
   row(waits && cards(W).filter((i) => i.action.jobId === job.id).length === 0 && W.grants.rowsFor('vault-job', first.entry).length === 0 && jobLines(W).filter((l) => l.includes('"op":"ask"') && l.includes(job.id)).length === 2,
     'a job REMOVED while approved on one entry and waiting on another leaves NO open card — its id leaves the row after it left the registry, so nothing re-judges it and no card is filed again', { waits, open: cards(W).filter((i) => i.action.jobId === job.id).length });
+  rows[rows.length - 1].push(jobLines(W).filter((l) => l.includes('"op":"ask"') && l.includes(job.id)));   // the lines it judged — printed green or red (2.369.413 lesson b)
   W.end();
   return rows;
 }
@@ -808,7 +815,8 @@ const [cronCard, denyWait, capJobs, ownGone, denyWaitMut, capJobsMut] = await Pr
 const MUT_REVOKE = dmut("try { stopped = !!(jm && jm.vaultRevoked(j, VJ.stopWords('revoked', entryLabelOf(VJ.entryOfRow(id))))); } catch (e) {", 'try { stopped = false; } catch (e) {');
 const MUT_GONE = dmut('try { if (jm.vaultEntryGone(job.id, words)) n++; }', 'try { void words; }');
 const MUT_LOCK = dmut('  const bindJobs = (engine) => { jm = engine || null; };', '  const bindJobs = (engine) => { jm = engine || null; try { vault.onLock(() => { for (const j of [...jm.jobs.values()]) if (VJ.refsOf(j).length) jm.stop(j); }); } catch { } };');
-const MUT_PASTE = (() => { const at = '    if (vaultJob) { try { vaultJob.entryGone(rowId, { label }); }'; return PASTE_SRC.split(at).length === 2 ? PASTE_SRC.replace(at, '    if (false) { try { vaultJob.entryGone(rowId, { label }); }') : null; })();
+const pmut = (from, to) => { try { return swap(PASTE_SRC, from, to); } catch { return null; } };   // a copy of the paste door — its anchor gone ⇒ null, the control RED by name
+const MUT_PASTE = pmut('    if (vaultJob) { try { vaultJob.entryGone(rowId, { label }); }', '    if (false) { try { vaultJob.entryGone(rowId, { label }); }');
 const [revoke, gone, jgone, lockRuns, pdel, revokeMut, goneMut, lockMut, pdelMut] = await Promise.all([legRevoke(), legEntryGone(), legGone(), legLockRuns(), legPasteDelete(),
   MUT_REVOKE ? legRevoke(MUT_REVOKE) : {}, MUT_GONE ? legEntryGone(MUT_GONE) : {}, MUT_LOCK ? legLockRuns(MUT_LOCK) : {}, MUT_PASTE ? legPasteDelete(MUT_PASTE) : {}]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
@@ -816,7 +824,7 @@ const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
-const print = (title, rows) => { console.log(title); for (const [c, n, e] of rows) ok(c, n, e); };
+const print = (title, rows) => { console.log(title); for (const [c, n, e, judged] of rows) { ok(c, n, e); if (Array.isArray(judged)) { console.log(`      judged (${judged.length} line(s)):`); for (const l of judged.slice(0, 12)) console.log('        ' + String(l).slice(0, 240)); } } };   // a leg that judges journal / audit lines prints them
 print('① HANDED, NEVER LEFT LYING', handed);
 print('② LOCKED = WAIT', locked);
 print('③ THE CRASH LOOP', crash);

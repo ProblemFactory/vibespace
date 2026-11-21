@@ -1199,9 +1199,11 @@ console.log('lane vault-job-approval (L2): a Background job\'s approval card is 
     const FAP = path.join(ROOT, 'src/foryou-actions.js'), src = fs.readFileSync(FAP, 'utf8');
     const AT = "  if (item && item.action && item.action.type === 'vault-job-ask') return jobCardOf(item, { t });";
     const Mod = (await import('node:module')).default, m = new Mod(FAP, null);
-    let copy = null;
-    if (src.split(AT).length === 2) { m.filename = FAP; m.paths = Mod._nodeModulePaths(path.dirname(FAP)); m._compile(src.replace(AT, ''), FAP); copy = m.exports; }
-    ok(!!copy && copy.runCardOf(item, { t: tr(null) }) === null, 'CONTROL — the job card\'s dispatch removed: no card model (the row would draw the server\'s prose) — RED on the copy', copy ? 'the copy drew a card' : 'the copy could not be built (its anchor is missing)');
+    let copy = null, copyWhy = null;
+    // the anchor cut ONCE or the control fails BY NAME (its line moved ⇒ «ANCHOR GONE …», never a copy that built nothing)
+    const cutOnce = (s, at, name) => { const n = s.split(at).length - 1; if (n !== 1) throw new Error(`ANCHOR ${n ? `NOT UNIQUE (${n})` : 'GONE'} «${name}»: ${at.slice(0, 80)}`); return s.split(at).join(''); };
+    try { const cut = cutOnce(src, AT, 'the job card\'s dispatch'); m.filename = FAP; m.paths = Mod._nodeModulePaths(path.dirname(FAP)); m._compile(cut, FAP); copy = m.exports; } catch (e) { copyWhy = e.message; }
+    ok(!!copy && copy.runCardOf(item, { t: tr(null) }) === null, 'CONTROL — the job card\'s dispatch removed: no card model (the row would draw the server\'s prose) — RED on the copy', copy ? 'the copy drew a card' : copyWhy);
   } finally { try { if (todos) todos.stop(); } catch { } fs.rmSync(dir, { recursive: true, force: true }); for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }
 console.log('lane-pairing naive-user N-ask: an exit ask\'s Allow / Deny are their own line, never in the hover-dimmed action bar');

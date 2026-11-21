@@ -552,7 +552,8 @@ const hit0 = hit, PAGE0 = PAGE;
     // MUTANT: the answer route WITHOUT person() ⇒ a bearer's answer reaches the door — RED on the copy
     const Mod = require('module'), rf = path.join(REPO, 'src/routes/vault.js'), rsrc = fs.readFileSync(rf, 'utf8');
     const PERSON_AT = "if (jobAsks) app.post('/api/vault/job/asks/:askId', person((req) => {";
-    const rcut = rsrc.split(PERSON_AT).length === 2 ? rsrc.replace(PERSON_AT, "if (jobAsks) app.post('/api/vault/job/asks/:askId', ((fn) => async (req, res) => res.json(await fn(req)))((req) => {") : null;
+    let rcut = null, rcutWhy = null;   // the copy through the ONE anchored door: its anchor gone ⇒ the control is RED by name (rcutWhy)
+    try { rcut = anchored(rsrc, PERSON_AT, "if (jobAsks) app.post('/api/vault/job/asks/:askId', ((fn) => async (req, res) => res.json(await fn(req)))((req) => {", 'the job answer route without person()'); } catch (e) { rcutWhy = e.message; }
     let mutHit = null;
     if (rcut) {
       const rm = new Mod(rf); rm.filename = rf; rm.paths = Mod._nodeModulePaths(path.dirname(rf)); rm._compile(rcut, rf);
@@ -564,7 +565,7 @@ const hit0 = hit, PAGE0 = PAGE;
       mutHit = stub.calls.length;
       srvM.close();
     }
-    ok(mutHit === 1, 'CONTROL — the job card\'s answer route without person(): a session bearer\'s 允许 REACHES the door — RED on the copy', rcut ? { mutHit } : 'the copy could not be built (its anchor is missing)');
+    ok(mutHit === 1, 'CONTROL — the job card\'s answer route without person(): a session bearer\'s 允许 REACHES the door — RED on the copy', rcut ? { mutHit } : rcutWhy);
     // decision ④: the ✕ (take a job's use of an entry back — it STOPS the job) is a person's click too; a bearer never takes it back
     const RV = { entry: 'secrets:secret:k1#secret', job: 'jb-0000aaaa' };
     const rvB = await hit('/api/vault/job/revoke', { headers: { ...PAGE, ...B }, body: RV });
