@@ -725,7 +725,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
       const out = [], startsOut = [];
       let token = null, total = Infinity, start = 0, gone = false, head = null;
       while (start < total) {
-        const r = await pool.call('boundedParsedPage', { fp, tailOnly, start, count: page, maxBytes: PAGE_BYTES, capMb: HISTORY_SOFT_CHECK ? HISTORY_HEAP_MB : 0, ...(token ? { token } : {}), ...(slot ? { slot } : {}), ...(entry ? { entry: true } : {}), ...(dropSubagent ? { dropSubagent: true } : {}) });
+        const r = await pool.call('boundedParsedPage', { fp, tailOnly, start, count: page, maxBytes: PAGE_BYTES, capMb: HISTORY_SOFT_CHECK && !pool.inPlace ? HISTORY_HEAP_MB : 0, ...(token ? { token } : {}), ...(slot ? { slot } : {}), ...(entry ? { entry: true } : {}), ...(dropSubagent ? { dropSubagent: true } : {}) });
         if (!r || r.gone) { gone = true; _pagedStats.gone++; why = 'its snapshot was gone twice (another read replaced it)'; break; }
         _pagedStats.pages++;
         token = r.token; total = r.total;

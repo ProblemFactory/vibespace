@@ -409,7 +409,7 @@ console.log('— ⑪b B-299b A1: the cards off the hub\'s loop');
     'every road a reader is built on draws THE CARD: the descriptor\'s warm with the live session, and a FRESH reader with no session (View History; the history page of a stopped conversation — its spawn found in the kept transcript); RED: the A1 descriptor (cards warmed only for a live session) ⇒ none', { desc: viaDesc.length, view: viaView.length, red: viewRed.length });
   ok(scanSame && scanN === 2, `the warm's spawn scan (no records built): the same rows as the history's records — the kept steps alone (${scanN}: a planner step with two calls, the spawn the SECOND) and with the ring`);
   const wsSrc = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'), tsSrc = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8');
-  ok(wsSrc.includes('await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host, session, attach: true })') && tsSrc.includes('{ remote: !!r.host, ...(live ? { session: live } : {}) }'),
+  ok(wsSrc.includes('await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host, session, attach: true, bulk: bulkRead })') && tsSrc.includes('{ remote: !!r.host, ...(live ? { session: live } : {}) }'),
     'the callers hand the warm the session it reads the cards for: ws-handler\'s attach its live session, transcript-service\'s history read the live one when there is one');
   // the cure (the chain's read, small): an ATTACH of a conversation with no late road (no acp-events pipeline — a restored one)
   // waits the LIVE bound for its cards before its first answer, never the history page's; RED: cadb07780's descriptor (no attach)

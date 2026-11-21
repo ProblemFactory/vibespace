@@ -594,7 +594,12 @@ function jsonlCacheClear() { _jsonlCache.clear(); _jsonlResident = 0; }
 // back a page at a time, the loop free between pages); what the warm caches is the SAME entry. ONE warm's pages at a time, in the
 // worker's own slot ('warm'): the worker keeps one snapshot a slot, so a second warm's first page would cut the first's; a person's
 // history read ('') and a helper's ('helper') keep their own snapshots beside it
-let _warmLine = Promise.resolve();
+// ITS FOLLOW (主开发 r935): A PERSON'S OWN ACT FIRST. A warm asked for by a person's own act — an attach the person made, the history
+// view of a conversation the person opened: every warm but a bulk resume's — is served before every warm of a bulk resume (the first
+// attach of a conversation a paced «Resume all» created, `bulk: true`) that has not started; a warm in flight finishes. Within each
+// class first come first served; a person's ask for a file whose bulk warm still waits moves that warm into the person's line. The
+// line is let go in a finally: a warm that rejects (its worker dead, its read refused) never holds the warms behind it.
+const _warmQ = { person: [], bulk: [], busy: false };
 // its fresh read's MUSTs: ONE warm in flight a file — a second asker (an attach's task-state warm gives up at 10 s, then its transcript
 // warm asks again) joins it, never a second whole read; a warm whose turn comes after the cache was filled for the same file (another
 // road) reads nothing; the read's time is taken from its turn in the line, never the wait before it; a warm that leaves the paged
@@ -609,13 +614,23 @@ async function warmTurn(fp, fresh) {
   const r = await readJsonlBoundedParsedPagedAsync(fp, { entry: true, dropSubagent: true, slot: 'warm', onFail: warmLeft });
   return r ? { ...r, t0 } : r;
 }
-function warmPaged(fp, { fresh = null } = {}) {
-  const run = _warmLine.then(() => warmTurn(fp, fresh));
-  _warmLine = run.then(() => { }, () => { });
-  return run;
+function pumpWarm() {
+  if (_warmQ.busy) return;
+  const job = _warmQ.person.shift() || _warmQ.bulk.shift();
+  if (!job) return;
+  _warmQ.busy = true;
+  Promise.resolve().then(() => warmTurn(job.fp, job.fresh)).then(job.resolve, job.reject).finally(() => { _warmQ.busy = false; pumpWarm(); });
 }
-async function warmSessionJsonlAsync(claudeSessionId, cwd) {
+function warmPaged(fp, { fresh = null, bulk = false } = {}) {
+  let job = null;
+  const p = new Promise((resolve, reject) => { job = { fp, fresh, resolve, reject, bulk: !!bulk }; (job.bulk ? _warmQ.bulk : _warmQ.person).push(job); });
+  pumpWarm();
+  return { p, job };
+}
+const promoteWarm = (job) => { if (!job || !job.bulk) return; const i = _warmQ.bulk.indexOf(job); if (i < 0) return; _warmQ.bulk.splice(i, 1); job.bulk = false; _warmQ.person.push(job); };
+async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
   let tasks = null;
+  const bulk = !!(opts && opts.bulk === true);   // r935: a bulk resume's first attach (ws-handler `_bulkRead`); every other ask is a person's
   try {
     const fp = findSessionJsonlPath(claudeSessionId, cwd);
     if (!fp) return false;
@@ -634,20 +649,26 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd) {
         return true;
       }
     }
-    let p = _warmInFlight.get(fp);   // one warm in flight a file: a second asker joins it (above)
-    if (!p) {
+    let w = _warmInFlight.get(fp);   // one warm in flight a file: a second asker joins it (above)
+    if (w) { if (!bulk) promoteWarm(w.job); }   // r935: a person's ask for a file a bulk warm waits for moves it into the person's line
+    else {
       const fresh = () => { const c = _jsonlCache.get(claudeSessionId); return !!c && c.mtimeMs === stat.mtimeMs && c.size === stat.size && c.ino === stat.ino; };
-      p = (async () => {
-        const r = await warmPaged(fp, { fresh });   // B-cd4b unit 2: the entry in pages (above)
+      w = { job: null, p: null };
+      w.p = (async () => {
+        const q = warmPaged(fp, { fresh, bulk }); w.job = q.job;   // B-cd4b unit 2: the entry in pages (above)
+        const r = await q.p;
         if (r && r.fresh) return true;   // filled meanwhile: this turn read nothing
         if (!r || !r.entry) return false; // worker unavailable — sync path will parse inline
         _stampJsonlParse(r.bytes, performance.now() - (r.t0 || performance.now()));
-        _jsonlCachePut(claudeSessionId, r.entry);
+        // r935 (a): never over a NEWER entry of the same file (the same inode, a size at least the warm's: the sync road or the inline
+        // append put it while this warm waited in the line) — the put is skipped, the newer entry stays
+        const c = _jsonlCache.get(claudeSessionId);
+        if (!(c && r.entry && c.ino != null && c.ino === r.entry.ino && (c.size || 0) >= (r.entry.size || 0))) _jsonlCachePut(claudeSessionId, r.entry);
         return true;
-      })().finally(() => { if (_warmInFlight.get(fp) === p) _warmInFlight.delete(fp); });
-      _warmInFlight.set(fp, p);
+      })().finally(() => { if (_warmInFlight.get(fp) === w) _warmInFlight.delete(fp); });
+      _warmInFlight.set(fp, w);
     }
-    return await p;
+    return await w.p;
   } catch { return false; } finally { if (tasks) await tasks; }
 }
 

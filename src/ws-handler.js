@@ -263,7 +263,7 @@ async function warmTaskStateFor(session) {
   try {
     const wts = harnessOf(session.backend || 'claude').store?.warmTaskState;
     if (!wts) return;
-    await Promise.race([Promise.resolve().then(() => wts(session.claudeSessionId || session.backendSessionId, session.cwd)).catch(() => { }), new Promise((r) => { t = setTimeout(r, ATTACH_TASK_WARM_MS); })]);
+    await Promise.race([Promise.resolve().then(() => wts(session.claudeSessionId || session.backendSessionId, session.cwd, { bulk: !!session._bulkRead })).catch(() => { }), new Promise((r) => { t = setTimeout(r, ATTACH_TASK_WARM_MS); })]);   // r935: a bulk resume's first attach warms in the bulk line
   } catch { } finally { if (t) clearTimeout(t); }
 }
 
@@ -1658,7 +1658,7 @@ function registerWsHandler(wss, ctx) {
                   try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: p ? { done: p.done, total: p.total } : null, queued: !p })); } catch { }
                 }, ATTACH_ACK_MS);
                 try {
-                  try { const warm = harnessOf(session.backend || 'claude').store?.warmTranscript; if (warm) await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host, session, attach: true }); } catch {} // lane agy-harness-fixes: + the session (agy reads its account's transcript); attach: an ATTACH waits the live bound for agy's cards, never the history page's (the agy chain's cure)
+                  try { const warm = harnessOf(session.backend || 'claude').store?.warmTranscript; if (warm) await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host, session, attach: true, bulk: bulkRead }); } catch {} // lane agy-harness-fixes: + the session (agy reads its account's transcript); attach: an ATTACH waits the live bound for agy's cards, never the history page's (the agy chain's cure)
                   // lane resume-all-paced (L2): a store that can read its records OFF the loop does so first (codex: the parse in the
                   // transcript worker, the merge in slices — measured 380–880 ms of one sync hold per 120 MB rollout); raw() then reads it.
                   // L3: its turn in the hub's line — a person's window first, the first attach of a bulk resume's conversation after them

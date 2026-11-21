@@ -75,7 +75,7 @@ try {
   const pagesG = g.ops.filter((o) => o === 'boundedParsedPage').length, tailG = g.ops.filter((o) => o === 'jsonlTail').length;
   ok(g.r === true && pagesG >= 3 && tailG === 0 && isDeepStrictEqual(msgs, want),
     `the warm asks the pager (${pagesG} pages, ${tailG} one-shot reply) and caches the SAME records (${msgs.length}) — the sync parse after it is a hit, equal`);
-  const oneShotSrc = anchored(ssSrc, '        const r = await warmPaged(fp, { fresh });', "        const r = await require('./adapters/codex').readJsonlTailAsync(fp, { dropSubagent: true });", 'warm-one-shot');
+  const oneShotSrc = anchored(anchored(ssSrc, '        const q = warmPaged(fp, { fresh, bulk }); w.job = q.job;', '        ', 'warm-one-shot-unqueued'), '        const r = await q.p;', "        const r = await require('./adapters/codex').readJsonlTailAsync(fp, { dropSubagent: true });", 'warm-one-shot');
   const SR = require(M.write('src/session-store.js', oneShotSrc, 'warm-one-shot'));
   const rr = await warmOf(SR, 'a0b10000-0000-4000-8000-00000000c4d3');
   ok(rr.ops.filter((o) => o === 'jsonlTail').length === 1 && rr.ops.filter((o) => o === 'boundedParsedPage').length === 0,
@@ -95,7 +95,7 @@ try {
   const two = async (SM) => { const s0 = stats(); const sids = ['a0b10000-0000-4000-8000-00000000c4e1', 'a0b10000-0000-4000-8000-00000000c4e2']; for (const sid of sids) fs.copyFileSync(sid.endsWith('1') ? FX['past the tail bound (its seam)'] : hist, path.join(PROJ, sid + '.jsonl')); SM.jsonlCacheClear?.(); const r = await Promise.all(sids.map((sid) => SM.warmSessionJsonlAsync(sid, CWD))); return { r, gone: stats().gone - s0.gone }; };
   const g4 = await two(S);
   ok(g4.r.every((x) => x === true) && g4.gone === 0, `two warms at once: both read through their pages, nothing gone (${g4.gone})`);
-  const noLine = anchored(ssSrc, '  const run = _warmLine.then(() => warmTurn(fp, fresh));', '  const run = warmTurn(fp, fresh);', 'warm-no-line');
+  const noLine = anchored(ssSrc, '  if (_warmQ.busy) return;\n', '', 'warm-no-line');
   const g4r = await two(require(M.write('src/session-store.js', noLine, 'warm-no-line')));
   ok(g4r.gone > 0, `RED: the line taken away — the second warm's first page cuts the first's snapshot (${g4r.gone} gone)`);
 
@@ -112,7 +112,7 @@ try {
       const r = await Promise.all([[A, 'A'], [B, 'B'], [A, "A'"]].map(([sid, n]) => SM.warmSessionJsonlAsync(sid, CWD).then((x) => { done.push(n); return x; })));
       return { r, done: done.join(), reads: stats().reads - s0.reads };
     };
-    const noJoin = anchored(ssSrc, '    let p = _warmInFlight.get(fp);', '    let p = null;', 'warm-no-join');
+    const noJoin = anchored(ssSrc, '    let w = _warmInFlight.get(fp);', '    let w = null;', 'warm-no-join');
     const noFresh = anchored(noJoin, '  if (fresh && fresh()) return { fresh: true };', '  if (false) return { fresh: true };', 'warm-no-fresh');
     const SJ = require(M.write('src/session-store.js', noJoin, 'warm-no-join')), SF = require(M.write('src/session-store.js', noFresh, 'warm-no-fresh'));
     const g5 = await order5(S), r5 = await order5(SJ);
@@ -139,6 +139,53 @@ try {
     ok(!!h6.r && isDeepStrictEqual(h6.r.entry, want6) && h6.said.length === 1 && /heap bound[\s\S]*the entry read in one piece on the general pool/.test(h6.said[0]),
       `refused by the heap bound: the same entry, read in one piece on the general pool, and said («${h6.said[0] || 'nothing said'}»)`, h6.said);
     ok(h6r.r === null, 'RED: the heap bound answered null — the warm returned false and the conversation was parsed on the loop', h6r.said);
+  }
+
+  console.log('— ⑦ A PERSON\'S OWN ACT FIRST (its follow, 主开发 r935): a person\'s warm runs before every bulk warm not yet started');
+  {
+    // three bulk warms (a paced «Resume all»'s first attaches, `bulk: true`), then a person's: the first bulk warm is in flight and
+    // finishes, the person's runs SECOND; a person's ask for a file whose bulk warm still waits moves that warm up. Each warm's read
+    // is seen at the pager (its start, in order). RED: first come first served (one line for all) ⇒ the person's runs last; RED: no
+    // move ⇒ the file the person asked for waits its bulk turn
+    const small = FX['one under a page'];
+    const order7 = async (SM, asks) => {
+      for (const [sid] of asks) fs.copyFileSync(small, path.join(PROJ, sid + '.jsonl'));
+      SM.jsonlCacheClear?.(); const seen = [], real = codex.readJsonlBoundedParsedPagedAsync;
+      codex.readJsonlBoundedParsedPagedAsync = function (fp, o) { seen.push(path.basename(fp, '.jsonl')); return real.call(this, fp, o); };
+      try { const r = await Promise.all(asks.map(([sid, bulk]) => SM.warmSessionJsonlAsync(sid, CWD, bulk ? { bulk: true } : null))); return { r, order: seen.map((x) => asks.findIndex(([y]) => y === x)).join() }; }
+      finally { codex.readJsonlBoundedParsedPagedAsync = real; }
+    };
+    const B = (k) => `a0b10000-0000-4000-8000-0000000c7${k}`;
+    const P4 = [[B('b01'), true], [B('b02'), true], [B('b03'), true], [B('d01'), false]];   // hex ids only (a well-formed conversation id)
+    const UP = [[B('e01'), true], [B('e02'), true], [B('e03'), true], [B('e03'), false]];
+    const g7 = await order7(S, P4), u7 = await order7(S, UP);
+    const fcfs = require(M.write('src/session-store.js', anchored(ssSrc, '(job.bulk ? _warmQ.bulk : _warmQ.person).push(job);', '_warmQ.bulk.push(job);', 'warm-fcfs'), 'warm-fcfs'));
+    const noUp = require(M.write('src/session-store.js', anchored(ssSrc, '    if (w) { if (!bulk) promoteWarm(w.job); }', '    if (w) { }', 'warm-no-promote'), 'warm-no-promote'));
+    const r7 = await order7(fcfs, P4.map(([x, b]) => [x.replace('c7', 'c8'), b])), ru7 = await order7(noUp, UP.map(([x, b]) => [x.replace('c7', 'c8'), b]));
+    ok(g7.r.every((x) => x === true) && g7.order === '0,3,1,2' && u7.r.every((x) => x === true) && u7.order === '0,2,1',
+      `three bulk warms then a person's: the bulk one in flight finishes, the person's runs second (${g7.order}); a person's ask for a file whose bulk warm waits moves it up (${u7.order})`, { g7, u7 });
+    ok(r7.order === '0,1,2,3' && ru7.order === '0,1,2', `RED: first come first served ⇒ the person's runs last (${r7.order}); RED: no move ⇒ the asked file waits its bulk turn (${ru7.order})`, { r7, ru7 });
+  }
+
+  console.log('— ⑧ THE LINE IS LET GO when a warm rejects (its worker dead mid-pages, its read refused): the warm behind it runs');
+  {
+    const small = FX['one under a page'];
+    const rej = async (SM, tag) => {
+      const A = `a0b10000-0000-4000-8000-00000000c9${tag}1`, Bb = `a0b10000-0000-4000-8000-00000000c9${tag}2`;
+      for (const sid of [A, Bb]) fs.copyFileSync(small, path.join(PROJ, sid + '.jsonl'));
+      SM.jsonlCacheClear?.(); const real = codex.readJsonlBoundedParsedPagedAsync; let n = 0;
+      codex.readJsonlBoundedParsedPagedAsync = function (fp, o) { if (!n++) return Promise.reject(new Error('planted: the worker died mid-pages')); return real.call(this, fp, o); };
+      try {
+        let rb = null; const pa = SM.warmSessionJsonlAsync(A, CWD), pb = SM.warmSessionJsonlAsync(Bb, CWD); pb.then((v) => { rb = v; });
+        const ra = await pa; const tEnd = Date.now() + 1500; while (rb === null && Date.now() < tEnd) await new Promise((r) => setTimeout(r, 5));
+        return { ra, rb };
+      } finally { codex.readJsonlBoundedParsedPagedAsync = real; }
+    };
+    const g8 = await rej(S, 'a');
+    const held = require(M.write('src/session-store.js', anchored(ssSrc, 'Promise.resolve().then(() => warmTurn(job.fp, job.fresh)).then(job.resolve, job.reject).finally(() => { _warmQ.busy = false; pumpWarm(); });', 'Promise.resolve().then(() => warmTurn(job.fp, job.fresh)).then((v) => { job.resolve(v); _warmQ.busy = false; pumpWarm(); }, job.reject);', 'warm-held-on-reject'), 'warm-held-on-reject'));
+    const r8 = await rej(held, 'b');
+    ok(g8.ra === false && g8.rb === true, `a warm whose read rejects answers false (its caller reads the old road) and the warm behind it runs (${g8.rb})`, g8);
+    ok(r8.ra === false && r8.rb === null, 'RED: the line let go only on success ⇒ the warm behind a rejected one never runs', r8);
   }
 } catch (e) { fail++; console.log('  ✗ threw: ' + ((e && e.stack) || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
