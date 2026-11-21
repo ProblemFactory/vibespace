@@ -9,7 +9,7 @@
  * keeper sid names its record there). THE TURN'S START is the later of the hub's input stamps and the instant the CLI's own
  * init opened the turn (session-brain `_turnBy.at`); neither known ⇒ «could not be read». Said ONCE in the conversation (a meta
  * line); nothing said when nothing is left; «could not be read» is said once per conversation and reason, never at every Stop.
- * THE END DOOR (this machine only — on a paired machine ending is a device act, a later unit): a PERSON's press (the owner's page
+ * THE END DOOR (this machine; a paired machine's agent runs the same press as its act left-behind-end — B-69a7 (b)): a PERSON's press (the owner's page
  * verdict at the socket's handshake, ws-handler `_personPage` — anything else refused by name) on ONE said line (its `at`; a
  * later Stop never replaces an earlier line's list), each listed pid read AGAIN at the press with the scan's own bound (the same
  * start time, not under anything the hub holds NOW, still this conversation's mark and no job's), then src/proc-identity.js
@@ -23,7 +23,6 @@ const PI = require('../proc-identity.js');
 const { turnStartOf } = require('../stop-nudge.js');
 
 const LISTS = 4;   // the End lists a conversation keeps (one per said line, newest last)
-const PRESS_MS = 1500;   // ONE deadline for a whole press's re-checks (each row gets what is left; past it a row answers «unread»)
 const BUFFERS = path.join(__dirname, '..', '..', 'data', 'session-buffers');   // the wrapper's own meta (server.js BUFFERS_DIR)
 const SAID = new WeakMap();   // conversation → the «could not be read» reasons already said to it
 const PRESSING = new WeakMap();   // conversation → the lines (`at`) whose press is running now
@@ -77,7 +76,8 @@ async function afterStop(session, id, { broadcastToSession, hosts = null, read =
   const said = fresh(session, [(r && r.unread) || (r && r.scan && r.scan.cut ? 'cut' : null), n > 0 ? 'unreadable' : null], left.length + kept.length + jobs.length > 0);
   const unread = said.find((x) => x !== 'unreadable') || null, unreadable = said.includes('unreadable') ? n : 0;
   if (!left.length && !kept.length && !jobs.length && !unread && !unreadable) return null;
-  const at = now(), door = !session.host && left.length > 0 && !(r && r.unread);
+  // the door: this machine; a paired machine whose agent says it ends a press's rows (canEnd — B-69a7 (b)); never on a read that says it could not
+  const at = now(), door = left.length > 0 && !(r && r.unread) && (!session.host || (r && r.canEnd === true));
   if (door) {
     const lists = (Array.isArray(session._leftBehind) ? session._leftBehind : []).concat([{ at, mark, rows: left.map((x) => ({ pid: x.pid, start: x.start, comm: x.comm })) }]);
     session._leftBehind = lists.slice(-LISTS);
@@ -98,10 +98,9 @@ function linesOf(session) {
 }
 
 /** THE END DOOR: a person's press on the line said at `at` → {ok, ended: [comm], still: [comm], gone: n, unread: n} | {ok: false, reason} */
-async function endLeft(session, { by = null, at = null, end = PI.endTree, still = LB.stillLeft, graceMs = 3000 } = {}) {
+async function endLeft(session, { by = null, at = null, end = PI.endTree, still = LB.stillLeft, graceMs = 3000, hosts = null } = {}) {
   if (!by || by.kind !== 'human') return { ok: false, reason: 'not-the-person' };
   if (!session) return { ok: false, reason: 'stopped' };
-  if (session.host) return { ok: false, reason: 'paired-machine' };
   const lists = Array.isArray(session._leftBehind) ? session._leftBehind : [];
   const lb = lists.find((l) => l && Number(l.at) === Number(at)) || null;
   if (!lb || !Array.isArray(lb.rows) || !lb.rows.length) return { ok: false, reason: 'nothing-listed' };
@@ -115,21 +114,34 @@ async function endLeft(session, { by = null, at = null, end = PI.endTree, still 
   if (running.has(lb.at)) return { ok: false, reason: 'already-pressed' };   // one press at a time on a line, said
   running.add(lb.at);
   try {
-    const own = [...recordedOf(session), ...ptyOf(session)];
-    const keep = PI.keptOut(own).concat(own.map((p) => [p, 0]));   // what the hub holds NOW, and the conversation's own
-    const members = [], unread = [], t0 = Date.now();
-    let gone = 0, held = 0;
-    for (const row of lb.rows) {
-      const rest = PRESS_MS - (Date.now() - t0);
-      const v = !(Number(row.pid) > 1 && Number(row.pid) !== process.pid) ? 'gone' : rest > 0 ? await still(row, lb.mark, { keep, maxMs: rest }) : 'unread';
-      if (v && typeof v === 'object') members.push({ ...v, bootId: PI.bootIdOf ? PI.bootIdOf() : undefined });
-      else if (v === 'unread') unread.push(row); else if (v === 'held') held++; else gone++;
+    let r;
+    if (session.host) {
+      // B-69a7 (b): ON A PAIRED MACHINE the press is a device act its own agent runs (op left-behind-end: the same endListed there,
+      // its own records held out), asked only of an agent that names it. Every way it does not happen keeps the list and is said by
+      // name: the machine not reachable now (unreachable), the hub's machines list held (hosts-unread), an agent without the op
+      // (paired-machine — the list dropped: the page drops its door), the machine's own allow list (machine-refused: its `run` flag
+      // off), the agent no longer knowing the conversation's own chain (own-unknown — dropped too), anything else, a link lost
+      // mid-press included (press-failed: it may have ended some). END_ROWS rows a press; the rest stay listed for the next one
+      const sid = typeof session.keeperSid === 'string' && /^[\w-]+$/.test(session.keeperSid) ? session.keeperSid : null;
+      let dm = null, held = null;
+      try { dm = hosts && typeof hosts.deviceBounded === 'function' ? await hosts.deviceBounded(session.host, LB.PRESS_MS * 2) : null; } catch (e) { dm = null; held = e && e.code === 'hosts-unread' ? 'hosts-unread' : null; }
+      if (!dm) { setList(lb.rows); return { ok: false, reason: held || 'unreachable' }; }
+      if (typeof dm.leftBehindEnd !== 'function') { setList([]); return { ok: false, reason: 'paired-machine' }; }
+      const ask = lb.rows.slice(0, LB.END_ROWS), rest = lb.rows.slice(LB.END_ROWS);
+      let a;
+      try { a = await dm.leftBehindEnd({ mark: lb.mark, rows: ask, sid, by: (by && by.actBy) || 'human:local' }); }
+      catch (e) { const c = e && e.code, old = c === 'host_needs_daemon'; setList(old ? [] : lb.rows); return { ok: false, reason: old ? 'paired-machine' : c === 'op-not-allowed' ? 'machine-refused' : 'press-failed' }; }
+      if (!a || a.ok !== true) { const why = a && a.reason === 'own-unknown' ? 'own-unknown' : a && (a.reason === 'nothing-listed' || a.reason === 'no-mark') ? 'nothing-listed' : 'press-failed'; setList(why === 'press-failed' ? lb.rows : []); return { ok: false, reason: why }; }
+      const back = (Array.isArray(a.unreadRows) ? a.unreadRows.filter((x) => ask.some((y) => Number(y.pid) === Number(x.pid) && Number(y.start) === Number(x.start))) : []).concat(rest);
+      r = { ended: Array.isArray(a.ended) ? a.ended.map(String) : [], still: Array.isArray(a.still) ? a.still.map(String) : [], gone: Number(a.gone) || 0, held: Number(a.held) || 0, unread: back.length, unreadRows: back };
+    } else {
+      const own = [...recordedOf(session), ...ptyOf(session)];
+      const keep = PI.keptOut(own).concat(own.map((p) => [p, 0]));   // what the hub holds NOW, and the conversation's own
+      r = await LB.endListed({ rows: lb.rows, mark: lb.mark, keep, still, end, graceMs });   // THE PRESS's one implementation (the device runs it too)
     }
-    const r = members.length ? await end(members, { graceMs }) : { ended: [], left: [], stale: 0 };
-    const names = (l) => (Array.isArray(l) ? l : []).map((x) => (x && typeof x === 'object' ? x.comm : x)).filter(Boolean).map(String);
-    setList(unread.length ? unread : []);   // what could not be read again stays listed for another press
-    if (!unread.length && Array.isArray(session._leftBehindLines)) session._leftBehindLines = session._leftBehindLines.filter((d) => Number(d.at) !== Number(lb.at));   // (d) nothing left of it to tell a reload
-    return { ok: true, ended: names(r.ended), still: names(r.left), gone: gone + (Number(r.stale) || 0), held, unread: unread.length };
+    setList(r.unreadRows.length ? r.unreadRows : []);   // what could not be read again stays listed for another press
+    if (!r.unreadRows.length && Array.isArray(session._leftBehindLines)) session._leftBehindLines = session._leftBehindLines.filter((d) => Number(d.at) !== Number(lb.at));   // (d) nothing left of it to tell a reload
+    return { ok: true, ended: r.ended, still: r.still, gone: r.gone, held: r.held, unread: r.unread };
   } catch {
     setList(lb.rows);   // a press that did not finish vouches for nothing: the list is kept (a second press re-checks every row), said
     return { ok: false, reason: 'press-failed' };

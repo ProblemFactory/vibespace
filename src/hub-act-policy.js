@@ -42,7 +42,7 @@ const WAY_OUT = 'the user can change it under "Who can use it" on the machine ro
 // THE KIND of an act: its op family (src/device-acts.js keyOf spelling). An act op without a row is `run` (fail closed:
 // the strongest words on the card).
 const KIND_OF = Object.freeze({
-  'run-cmd': 'run', 'run-stream': 'run', 'pool-orders': 'run',
+  'run-cmd': 'run', 'run-stream': 'run', 'pool-orders': 'run', 'left-behind-end': 'run' /* B-69a7 (b) */,
   'fs-op:write': 'files', 'fs-op:rm': 'files', 'fs-op:rename': 'files', 'fs-op:mkdir': 'files', 'fs-op:copy': 'files', 'fs-op:move': 'files', 'fs-op:write-stream': 'files',
   'place-secret': 'files', 'design-fs:write-user': 'files', 'settings-merge': 'files' /* B-e7c0: the person's settings file merged on the device */,
   'input-events': 'input', 'desktop-grab': 'input', 'desktop-input': 'input', 'window-pin': 'input', 'settings-open': 'input', 'peer-post': 'input',

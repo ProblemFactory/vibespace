@@ -1,6 +1,6 @@
 import { workflowNameFromAck, shortWorkflowName } from '../workflow-name.js';
 import { quietOpenVerdict, teachVerdict, TAUGHT_KEY } from './artifact-auto-open.js'; // lane artifacts-auto-open-quiet: the doc's automatic open is quiet
-import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu, onOutsidePress } from './utils.js';
+import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu, onOutsidePress, hostsHeldWords } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
 import { turnWaitStep, turnSeq } from '../desktop-switch.js'; // lane phone-take-photo r2/r3 (主开发 ①): the finished turn's mark, the same on every client, ended by the turn sequence (PURE)
 import { metric, track } from './telemetry-client.js';
@@ -7106,7 +7106,7 @@ class ChatView {
   }
 
   /** B-69a7: the line a settled Stop's read says (src/server/left-behind-door.js) — what this turn's command tool left running, what
-   *  the CLI keeps on purpose (named, never offered for ending), or that it could not be read; «End them» only on THIS machine */
+   *  the CLI keeps on purpose (named, never offered for ending), or that it could not be read; «End them» on this machine and on a paired one whose agent says canEnd (B-69a7 (b)) */
   _sayLeftBehind(d) {
     const left = Array.isArray(d.left) ? d.left : [], kept = Array.isArray(d.kept) ? d.kept : [], jobs = Array.isArray(d.jobs) ? d.jobs : [];
     const names = (l) => [...new Set(l.map((x) => String((x && x.comm) || '?')))].slice(0, 6).join(', ');
@@ -7146,10 +7146,10 @@ class ChatView {
   _endLeftBehind(btn, words, at) {
     btn.disabled = true;
     const reqId = 'lb-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const why = { 'not-the-person': t('Only a press on this page can end them'), 'paired-machine': t('Ending them on a paired machine is not offered yet'), 'nothing-listed': t('Nothing is listed to end any more'), stopped: t('Nothing is listed to end any more'), 'press-failed': t('Ending them did not finish — press again to check what still runs'), 'already-pressed': t('Already ending them') };
+    const why = { 'not-the-person': t('Only a press on this page can end them'), 'paired-machine': t('That machine\'s agent cannot end them — update the agent there'), unreachable: t('That machine cannot be reached now — nothing was ended; press again'), 'hosts-unread': hostsHeldWords(), 'own-unknown': t('That machine no longer knows this conversation\'s own processes — nothing was ended'), 'machine-refused': t('That machine\'s own settings do not let VibeSpace end processes there — nothing was ended'), 'nothing-listed': t('Nothing is listed to end any more'), stopped: t('Nothing is listed to end any more'), 'press-failed': t('Ending them did not finish — press again to check what still runs'), 'already-pressed': t('Already ending them') };
     this.ws.request({ type: 'end-left-behind', sessionId: this.sessionId, reqId, at }, (m) => {
       if (!m || m.type !== 'end-left-behind-result' || m.sessionId !== this.sessionId || m.reqId !== reqId) return false;
-      const again = (m.ok && m.unread > 0) || (!m.ok && (m.reason === 'press-failed' || m.reason === 'already-pressed'));   // the list is still there
+      const again = (m.ok && m.unread > 0) || (!m.ok && (m.reason === 'press-failed' || m.reason === 'already-pressed' || m.reason === 'unreachable' || m.reason === 'machine-refused' || m.reason === 'hosts-unread'));   // the list is still there
       if (again) btn.disabled = false; else btn.remove();
       const said = [];
       if (!m.ok) said.push(why[m.reason] || t('Nothing is listed to end any more'));

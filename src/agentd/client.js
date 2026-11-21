@@ -590,7 +590,7 @@ class DeviceManager {
             const prevControl = mux.onControl;
             mux.onControl = (m, bytes) => {
               if (m.op === 'line-refused') { this._lineRefused(m); return; }   // lane lg-remote-hardening (D8): a push the agent refused by name
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'left-behind-result' /* B-69a7 */ || m.op === 'settings-merge-result' /* B-e7c0 */ || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'stream-mic-result' || m.op === 'stream-audio-result' || m.op === 'peer-post-result' || m.op === 'peer-state-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'left-behind-result' /* B-69a7 */ || m.op === 'settings-merge-result' /* B-e7c0 */ || m.op === 'left-behind-end-result' /* B-69a7 (b) */ || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'stream-mic-result' || m.op === 'stream-audio-result' || m.op === 'peer-post-result' || m.op === 'peer-state-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m, bytes); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -1741,6 +1741,16 @@ class DeviceManager {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('settings-merge')) { const e = new Error('daemon lacks settings-merge (capabilities gate)'); e.code = 'host_needs_daemon'; throw e; }
     const r = await this._request({ op: 'settings-merge', sid, cwd, ownFile, layer, by, timeoutMs });
+    if (r.error) { const e = new Error(r.error); if (r.code) e.code = r.code; throw e; }
+    const { id, op, ...rest } = r;
+    return rest;
+  }
+  /** B-69a7 (b): a PERSON's press on a paired machine's left-behind line — ended THERE by its agent (each row re-proven, the pid alone
+   *  signalled) → {ok, ended, still, gone, held, unread, unreadRows} | {ok: false, reason} — asked only of an agent that names it */
+  async leftBehindEnd({ mark, rows, sid = null, by } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('left-behind-end')) { const e = new Error('daemon lacks left-behind-end (capabilities gate)'); e.code = 'host_needs_daemon'; throw e; }
+    const r = await this._request({ op: 'left-behind-end', mark, rows, sid, by, timeoutMs: 10000 });   // the press's re-check + grace ≈ 6 s; the hub's whole wait (connect 3 s + this) stays inside the page's 15 s
     if (r.error) { const e = new Error(r.error); if (r.code) e.code = r.code; throw e; }
     const { id, op, ...rest } = r;
     return rest;

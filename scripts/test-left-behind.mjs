@@ -13,6 +13,12 @@
 //   ④ REAL processes + the End door: found and ended by a person's press on its line; another conversation's never found; a hub
 //      job's child with the same mark never named nor ended; a reused pid never signalled; the press re-checked with the scan's
 //      bound (a stuck one stays listed and is said); a failed press is said and keeps its list; one press at a time on a line
+//   ⑤ the line after a press: the latest outcome in place · ⑥ a reload draws the line again (the hub keeps what it said)
+//   ⑦ THE END DOOR ON A PAIRED MACHINE (B-69a7 remainder (b)): a door only where that machine's agent says it ends a press's rows
+//      (canEnd); the press is that agent's own act (op left-behind-end) with the line's rows, the conversation's keeper sid and
+//      who pressed; what it could not read again stays listed (its own rows only); every way the press does not happen keeps the
+//      list and is said by name (unreachable · paired-machine = an agent without the op · machine-refused = its own allow list)
+//      and the device op itself = the hub's own press (endListed) over a stand-in /proc: rows bounded, the mark the only key
 //   RED CONTROLS (anchored mutants): no mark filter, no held exclusion, no marked-ancestor walk, no own-chain law, no start check
 import fs from 'node:fs';
 import path from 'node:path';
@@ -218,7 +224,7 @@ console.log('— ③ the hub\'s one read after a settled Stop');
   said.length = 0;
   let askedRemote = null;
   const remote = await DOOR.afterStop(sess({ host: 'h-2', keeperSid: 'k-7' }), 'sess-lb-1', { broadcastToSession: bcast, now, hosts: { get: () => ({ name: 'Studio Mac' }), deviceBounded: async () => ({ leftBehind: async (o) => { askedRemote = o; return { left: [{ pid: 4242, comm: 'node', start: 1 }], kept: [], scan: { cut: false } }; } }) } });
-  ok(!!remote && remote.machine === 'Studio Mac' && remote.door === false && remote.left[0].pid === 4242 && !!askedRemote && askedRemote.sid === 'k-7' && askedRemote.mark === MARK, '③ a paired machine: read through its agent\'s op (the keeper sid names the chain\'s record there), named with the machine, and NO door yet', remote);
+  ok(!!remote && remote.machine === 'Studio Mac' && remote.door === false && remote.left[0].pid === 4242 && !!askedRemote && askedRemote.sid === 'k-7' && askedRemote.mark === MARK, '③ a paired machine: read through its agent\'s op (the keeper sid names the chain\'s record there), named with the machine, and NO door from an agent that does not say it ends a press\'s rows (no canEnd)', remote);
   const old = await DOOR.afterStop(sess({ host: 'h-2' }), 'sess-lb-1', { broadcastToSession: bcast, now, hosts: { get: () => null, deviceBounded: async () => ({}) } });
   ok(!!old && old.unread === 'no-agent-op', '③ an agent without the op ⇒ said as unreadable («no-agent-op»), never asked anything else', old);
 }
@@ -261,9 +267,9 @@ console.log('— ④ real processes and the End door');
     ok(rh.left.some((x) => x.pid === job.child), '④ RED CONTROL (no hub-held exclusion): the real job\'s child IS named', ids(rh.left));
     const session = { _leftBehind: [{ at: 7, mark, rows: [row(mine)] }] };
     const refused = await DOOR.endLeft(session, { by: null, at: 7 });
-    const paired = await DOOR.endLeft({ host: 'h-2', _leftBehind: session._leftBehind }, { by: { kind: 'human' }, at: 7 });
+    const paired = await DOOR.endLeft({ host: 'h-2', _leftBehind: session._leftBehind }, { by: { kind: 'human' }, at: 7 });   // no machines given: not reachable
     const wrongLine = await DOOR.endLeft(session, { by: { kind: 'human' }, at: 8 });
-    ok(refused.reason === 'not-the-person' && paired.reason === 'paired-machine' && wrongLine.reason === 'nothing-listed' && session._leftBehind.length === 1, '④ a press that is not a person\'s is refused by name (not-the-person); on a paired machine there is no door yet (paired-machine); a line with no list here ends nothing', { refused, paired, wrongLine });
+    ok(refused.reason === 'not-the-person' && paired.reason === 'unreachable' && wrongLine.reason === 'nothing-listed' && session._leftBehind.length === 1, '④ a press that is not a person\'s is refused by name (not-the-person); a paired machine this hub cannot reach ends nothing here (unreachable); a line with no list here ends nothing', { refused, paired, wrongLine });
     const heldPress = await DOOR.endLeft({ _leftBehind: [{ at: 9, mark, rows: [row(job.child)] }] }, { by: { kind: 'human' }, at: 9, graceMs: 200 });
     ok(heldPress.ok && heldPress.held === 1 && heldPress.gone === 0 && heldPress.ended.length === 0 && alive(job.child), '④ a listed pid the hub holds AT THE PRESS (a job\'s) is never signalled — the held fence is applied again, and it is said as held, never «already ended»', heldPress);
     const reused = await DOOR.endLeft({ _leftBehind: [{ at: 1, mark, rows: [{ pid: mine, start: 1, comm: 'node' }] }] }, { by: { kind: 'human' }, at: 1, graceMs: 200 });
@@ -345,13 +351,102 @@ console.log('— ⑥ a reload draws the line again (B-69a7 remainder (d)): the h
   const paired = { backend: 'claude', host: 'h-2', _userInputAt: NOW - TURN_AGE };
   await DOOR.afterStop(paired, 'sess-lb-1', { broadcastToSession: bcast, now: () => NOW, hosts: { get: () => ({ name: 'Studio Mac' }), deviceBounded: async () => ({ leftBehind: async () => ({ left: [{ pid: 4242, comm: 'node', start: 1 }], kept: [], scan: { cut: false } }) }) } });
   const lp = DOOR.linesOf(paired);
-  ok(lp.length === 1 && lp[0].door === false && lp[0].machine === 'Studio Mac', '⑥ a paired machine\'s line is kept too — named with its machine, no door', lp);
+  ok(lp.length === 1 && lp[0].door === false && lp[0].machine === 'Studio Mac', '⑥ a paired machine\'s line is kept too — named with its machine (no door: this agent does not say canEnd)', lp);
   // the attach and the page (source: the payload names it; the page draws it after the history, again only when its element is gone)
   const WH = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'), CV = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
   const draws = CV.split("if (Array.isArray(meta.leftBehind)) for (const d of meta.leftBehind) this._sayLeftBehind(d || {});").length - 1;
   ok(WH.includes("leftBehind: (() => { try { return require('./server/left-behind-door.js').linesOf(session); } catch { return []; } })(),") && draws === 2
     && CV.includes('const had = d.at ? seen.get(d.at) : null;') && CV.includes('if (had && had.isConnected) return;'),
     '⑥ the chat attach carries linesOf(session); the page draws them after the history on BOTH of its roads (the identical slab and the full one) and a line again only when its element is gone', { draws });
+}
+
+console.log('— ⑦ the End door on a paired machine (B-69a7 remainder (b)): the press is that machine\'s own act');
+{
+  const said = [];
+  const bcast = (s, id, m) => said.push(m);
+  const ROW = { pid: 4242, comm: 'node', start: 1 }, ROW2 = { pid: 4243, comm: 'python3', start: 2 };
+  const reader = (extra) => ({ get: () => ({ name: 'Studio Mac' }), deviceBounded: async () => ({ leftBehind: async () => ({ left: [{ ...ROW, startedAt: 1 }, { ...ROW2, startedAt: 2 }], kept: [], scan: { cut: false }, ...extra }) }) });
+  const ps = { backend: 'claude', host: 'h-2', keeperSid: 'k-7', _userInputAt: NOW - TURN_AGE };
+  const d = await DOOR.afterStop(ps, 'sess-lb-1', { broadcastToSession: bcast, now: () => NOW, hosts: reader({ canEnd: true }) });
+  const listed = (s) => JSON.stringify(((s._leftBehind || [])[0] || { rows: [] }).rows);
+  console.log(`    (the line: ${JSON.stringify(d)} · its list: ${listed(ps)})`);
+  ok(!!d && d.door === true && d.machine === 'Studio Mac' && listed(ps) === JSON.stringify([ROW, ROW2].map(({ pid, start, comm }) => ({ pid, start, comm }))) && DOOR.linesOf(ps)[0].door === true,
+    '⑦ an agent that says it ends a press\'s rows (canEnd): the paired machine\'s line has its door and its End list (pid, start, name only)', d);
+  const ps2 = { backend: 'claude', host: 'h-2', _userInputAt: NOW - TURN_AGE };
+  const cut = await DOOR.afterStop(ps2, 'sess-lb-1', { broadcastToSession: bcast, now: () => NOW, hosts: reader({ canEnd: true, scan: { cut: true } }) });
+  ok(!!cut && cut.door === true && cut.unread === 'cut' && ps2._leftBehind.length === 1, '⑦ a read cut at its bound (the real shape: scan.cut) says so beside its rows and keeps its door, as on this machine — every row is proven again at the press', cut);
+  const ps3 = { backend: 'claude', host: 'h-2', _userInputAt: NOW - TURN_AGE };
+  const refusing = await DOOR.afterStop(ps3, 'sess-lb-1', { broadcastToSession: bcast, now: () => NOW, hosts: reader({ canEnd: false }) });
+  const opNo = await LB.leftBehindOp({ mark: MARK, ageMs: TURN_AGE }, { procRoot: root, records: [record({ keeperPid: 9300 }), ATT], canEnd: false });
+  const opYes = await LB.leftBehindOp({ mark: MARK, ageMs: TURN_AGE }, { procRoot: root, records: [record({ keeperPid: 9300 }), ATT] });
+  ok(!!refusing && refusing.door === false && !ps3._leftBehind && opNo.canEnd === false && opYes.canEnd === true, '⑦ an agent whose own allow list refuses the act says canEnd: false (agentd asks its policy verdict for left-behind-end) — no door is drawn for a press it would refuse', { refusing, opNo: opNo.canEnd, opYes: opYes.canEnd });
+  let asked = null, waited = null;
+  const dmOf = (answer) => ({ leftBehindEnd: async (o) => { asked = o; return typeof answer === 'function' ? answer(o) : answer; } });
+  const hostsOf = (dm) => ({ deviceBounded: async (h, ms) => { waited = [h, ms]; return dm; } });
+  const p1 = await DOOR.endLeft(ps, { by: { kind: 'human', actBy: 'human:tester' }, at: NOW, hosts: hostsOf(dmOf({ ok: true, ended: ['node'], still: [], gone: 0, held: 0, unread: 2, unreadRows: [{ ...ROW2 }, { pid: 777, start: 9, comm: 'bash' }] })) });
+  console.log(`    (the press: ${JSON.stringify(p1)} · asked ${JSON.stringify(asked)} · waited ${JSON.stringify(waited)})`);
+  ok(p1.ok && p1.ended.join() === 'node' && p1.unread === 1 && !!asked && JSON.stringify(asked.rows) === JSON.stringify([ROW, ROW2].map(({ pid, start, comm }) => ({ pid, start, comm }))) && asked.mark === MARK && asked.sid === 'k-7' && asked.by === 'human:tester'
+    && JSON.stringify(waited) === JSON.stringify(['h-2', LB.PRESS_MS * 2]) && listed(ps) === JSON.stringify([ROW2]) && DOOR.linesOf(ps)[0].door === true,
+    '⑦ THE PRESS on a paired machine = ONE act of its agent (left-behind-end) with the line\'s rows, the conversation\'s mark, its keeper sid and who pressed; what the agent could not read again stays listed — its OWN rows only (a row the line never named is dropped), the door kept', { p1, asked });
+  const p2 = await DOOR.endLeft(ps, { by: { kind: 'human' }, at: NOW, hosts: hostsOf(dmOf({ ok: true, ended: ['python3'], still: [], gone: 0, held: 0, unread: 0, unreadRows: [] })) });
+  ok(p2.ok && asked.rows.length === 1 && asked.rows[0].pid === ROW2.pid && asked.by === 'human:local' && !ps._leftBehind && DOOR.linesOf(ps).length === 0,
+    '⑦ a second press asks for the row still listed only; nobody named on the page = the house\'s own subject (human:local); nothing left ⇒ the list and the kept line are gone', { p2, asked });
+  const fresh = () => ({ host: 'h-2', keeperSid: 'k-7', _leftBehind: [{ at: 5, mark: MARK, rows: [{ pid: ROW.pid, start: ROW.start, comm: ROW.comm }] }] });
+  const thrown = (code) => dmOf(() => { throw Object.assign(new Error('refused'), code ? { code } : {}); });
+  const lookupThrows = (code) => ({ deviceBounded: async () => { throw Object.assign(new Error('no link'), code ? { code } : {}); } });
+  const cases = [
+    ['no client for the machine now', hostsOf(null), 'unreachable', true],
+    ['the link does not answer in time (the real lookup throws)', lookupThrows(null), 'unreachable', true],
+    ['the hub\'s machines list held (B-f276: worded by its code, never «unreachable»)', lookupThrows('hosts-unread'), 'hosts-unread', true],
+    ['the link lost mid-press (it may have ended some: «did not finish»)', hostsOf(thrown('link_lost')), 'press-failed', true],
+    ['an agent without the op (the client\'s capability gate — the page drops its door)', hostsOf(thrown('host_needs_daemon')), 'paired-machine', false],
+    ['a client without the method', hostsOf({}), 'paired-machine', false],
+    ['the machine\'s own allow list (its run flag off)', hostsOf(thrown('op-not-allowed')), 'machine-refused', true],
+    ['no answer in time', hostsOf(thrown(null)), 'press-failed', true],
+    ['the agent no longer knows the conversation\'s own chain', hostsOf(dmOf({ ok: false, reason: 'own-unknown' })), 'own-unknown', false],
+    ['the agent found no row to judge', hostsOf(dmOf({ ok: false, reason: 'nothing-listed' })), 'nothing-listed', false],
+  ];
+  const got = [];
+  for (const [name, h, want, keep] of cases) { const s = fresh(); const r = await DOOR.endLeft(s, { by: { kind: 'human' }, at: 5, hosts: h }); got.push({ name, reason: r.reason, kept: !!(s._leftBehind && s._leftBehind[0].rows.length === 1), want, keep }); }
+  ok(got.every((g) => g.reason === g.want && g.kept === g.keep), `⑦ every way a paired press does not happen is said by name; the list is kept where another press can help, dropped where it cannot (an agent without the op, the chain no longer known, nothing listed): ${got.map((g) => `${g.name} → ${g.reason}${g.kept ? ' (kept)' : ''}`).join(' · ')}`, got);
+  // THE BOUND A PRESS (round MAJOR): at most END_ROWS rows go to the agent; the rest stay listed for the next press — never lost
+  const big = Array.from({ length: LB.END_ROWS + 6 }, (_, k) => ({ pid: 30000 + k, start: 1, comm: 'w' }));
+  const sBig = { host: 'h-2', keeperSid: 'k-7', _leftBehind: [{ at: 6, mark: MARK, rows: big }], _leftBehindLines: [{ at: 6, door: true, left: [] }] };
+  const pBig = await DOOR.endLeft(sBig, { by: { kind: 'human' }, at: 6, hosts: hostsOf(dmOf((o) => ({ ok: true, ended: o.rows.map((x) => x.comm), still: [], gone: 0, held: 0, unread: 0, unreadRows: [] }))) });
+  ok(LB.END_ROWS === 64 && asked.rows.length === 64 && pBig.ok && pBig.ended.length === 64 && pBig.unread === 6 && sBig._leftBehind[0].rows.length === 6 && sBig._leftBehind[0].rows[0].pid === 30064 && DOOR.linesOf(sBig)[0].door === true,
+    '⑦ a list longer than END_ROWS: the press asks for the first 64, the six past them stay listed (said as «press again»), the line and its door kept', { asked: asked.rows.length, pBig, left: sBig._leftBehind[0].rows.length });
+  // the device op itself over a stand-in /proc: the hub's own press (endListed) — the mark the only key, rows bounded, its own records held
+  const ended = [];
+  const fakeEnd = async (m) => { ended.push(...m.map((x) => x.pid)); return { ended: m, left: [], stale: 0 }; };
+  const OPROC = fakeProc([{ pid: 9401, comm: 'node', start: AFTER, ppid: 1, env: [MARK] }, { pid: 9402, comm: 'node', start: AFTER, ppid: 1, env: [OTHER] }, { pid: 9403, comm: 'keeper', start: AFTER, ppid: 1, env: [MARK] }]);
+  const opRows = [{ pid: 9401, start: AFTER, comm: 'node' }, { pid: 9402, start: AFTER, comm: 'node' }, { pid: 9403, start: AFTER, comm: 'keeper' }, { pid: 9401, start: AFTER + 1, comm: 'node' }];
+  const viaOp = await LB.endListed({ rows: opRows, mark: MARK, keep: [9403], procRoot: OPROC, end: fakeEnd });
+  ok(ended.join() === '9401' && viaOp.ended.join() === 'node' && viaOp.gone === 2 && viaOp.held === 1 && viaOp.unread === 0,
+    '⑦ the press\'s ONE implementation (endListed, run by the agent): only the row still carrying this conversation\'s mark with its own start is ended; another conversation\'s and a reused pid are «already ended», a held one is held', viaOp);
+  const noMark = await LB.endLeftOp({ mark: 'PATH=/usr/bin', rows: opRows }, { procRoot: OPROC, end: fakeEnd });
+  const none = await LB.endLeftOp({ mark: MARK, rows: [{ pid: 1, start: 0 }, { pid: 'x', start: 1 }] }, { procRoot: OPROC, end: fakeEnd });
+  const many = Array.from({ length: 70 }, (_, k) => ({ pid: 20000 + k, start: 1, comm: 'n' }));
+  const rec0 = record({ keeperPid: 9499 });
+  const bounded = await LB.endLeftOp({ mark: MARK, rows: many }, { procRoot: OPROC, records: [rec0], end: fakeEnd });
+  const blind = await LB.endLeftOp({ mark: MARK, rows: [opRows[0]] }, { procRoot: OPROC, end: fakeEnd });
+  const deadRec = path.join(ROOT, 'no-such-record.json');
+  const blind2 = await LB.endLeftOp({ mark: MARK, rows: [opRows[0]] }, { procRoot: OPROC, records: [deadRec, record({ note: 'no pid' })], end: fakeEnd });
+  ok(blind2.ok === false && blind2.reason === 'own-unknown', '⑦ records that name no pid (missing, or no pid field — a keeper gone) = the chain not known: own-unknown, nothing ended (the hub always sends a sid: the files are what is judged)', blind2);
+  ok(noMark.ok === false && noMark.reason === 'no-mark' && none.ok === false && none.reason === 'nothing-listed' && bounded.ok && bounded.gone === 64 && bounded.unread === 6 && bounded.unreadRows.length === 6 && bounded.unreadRows[0].pid === 20064 && blind.ok === false && blind.reason === 'own-unknown' && ended.join() === '9401',
+    '⑦ the device op refuses any variable but a conversation\'s mark (no-mark), rows that name no process (nothing-listed) and a press with no record of the conversation\'s own chain (own-unknown: nothing ended); it judges at most 64 rows a press and answers the rest back unread (the hub keeps them listed)', { noMark, none, bounded: [bounded.gone, bounded.unread], blind });
+  const ownRec = record({ keeperPid: 9401 });
+  const ownOp = await LB.endLeftOp({ mark: MARK, rows: [opRows[0]] }, { procRoot: OPROC, records: [ownRec], end: fakeEnd });
+  ok(ownOp.ok && ownOp.held === 1 && ownOp.ended.length === 0, '⑦ the device op holds the conversation\'s own chain known by the agent\'s records (a keeper\'s pid is never ended)', ownOp);
+  // RED CONTROLS: the door rule without canEnd; the agent's unread rows taken as they came
+  const DSRC = fs.readFileSync(path.join(REPO, 'src/server/left-behind-door.js'), 'utf8');
+  const noCan = M.load('src/server/left-behind-door.js', anchored(DSRC, ' && (!session.host || (r && r.canEnd === true))', '', 'B-69a7 (b) the canEnd door rule'), 'nocanend');
+  const pOld = { backend: 'claude', host: 'h-2', _userInputAt: NOW - TURN_AGE };
+  const dOld = await noCan.afterStop(pOld, 'sess-lb-1', { broadcastToSession: bcast, now: () => NOW, hosts: reader({}) });
+  ok(!!dOld && dOld.door === true, '⑦ RED CONTROL (no canEnd in the door rule): an agent that cannot end them gets a door', dOld);
+  const noOwn = M.load('src/server/left-behind-door.js', anchored(DSRC, 'a.unreadRows.filter((x) => ask.some((y) => Number(y.pid) === Number(x.pid) && Number(y.start) === Number(x.start)))', 'a.unreadRows', 'B-69a7 (b) own rows only'), 'noownrows');
+  const sOwn = fresh();
+  await noOwn.endLeft(sOwn, { by: { kind: 'human' }, at: 5, hosts: hostsOf(dmOf({ ok: true, ended: [], still: [], gone: 0, held: 0, unread: 1, unreadRows: [{ pid: 777, start: 9, comm: 'bash' }] })) });
+  ok(listed(sOwn).includes('777'), '⑦ RED CONTROL (the agent\'s unread rows taken as they came): a row the line never named is listed for the next press', listed(sOwn));
 }
 
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }

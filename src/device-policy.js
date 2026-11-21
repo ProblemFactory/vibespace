@@ -47,7 +47,7 @@ const FLAG_OF = Object.freeze({
   'desktop-serve:launch': 'run', 'desktop-serve:relaunch': 'run', 'desktop-serve:fit': 'run', 'desktop-serve:keep-alive': 'run',
   'desktop-serve:pin': 'run', 'desktop-serve:app-unstage': 'run', 'desktop-serve:app-forget': 'run', 'desktop-serve:app-adopt-drift': 'run',
   // ── act layer ──
-  'run-cmd': 'run', 'run-stream': 'run',
+  'run-cmd': 'run', 'run-stream': 'run', 'left-behind-end': 'run',   // B-69a7 (b): processes signalled on the device
   'place-secret': 'files', 'serve-folder': 'files', 'settings-merge': 'files',   // B-e7c0: a file written on the device
   'fs-op:write': 'files', 'fs-op:rm': 'files', 'fs-op:rename': 'files', 'fs-op:mkdir': 'files', 'fs-op:copy': 'files',
   'fs-op:move': 'files', 'fs-op:write-stream': 'files', 'design-fs:write-user': 'files',

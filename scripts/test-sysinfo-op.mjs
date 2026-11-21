@@ -122,6 +122,38 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
   } finally { for (const p of lbLive) { try { if (fs.readFileSync(`/proc/${p}/cmdline`, 'utf8').includes('setTimeout')) process.kill(p, 'SIGKILL'); } catch { } } }
 }
 
+// 4e. B-69a7 (b): THE END DOOR ON A PAIRED MACHINE — a person's press is the agent's own act (op left-behind-end), driven through the
+// hub's DeviceManager against the REAL agent: the leftover its read named is ended THERE (its pid alone, after its start time and
+// the conversation's mark are read again); a row whose start is not the process's own (a reused pid) is never signalled; the
+// keeper's recorded process is held even when a row names it; no keeper sid = the chain not known: nothing ended. It reads process
+// facts (Linux /proc).
+{
+  ok(conn.info?.capabilities?.includes?.('left-behind-end'), 'daemon advertises the left-behind-end capability');
+  const sid = `lb-end-${process.pid}`, mark = `CLAUDE_WEBUI_SESSION_ID=${sid}`;
+  const { execFileSync } = await import('node:child_process');
+  const spawnMarked = () => Number(String(execFileSync(process.execPath, ['-e', "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore', env: process.env }); c.unref(); console.log(c.pid);"], { env: { PATH: process.env.PATH, CLAUDE_WEBUI_SESSION_ID: sid } })).trim());
+  const statOf = (p) => { try { return fs.readFileSync(`/proc/${p}/stat`, 'utf8').split(') ').pop().split(' '); } catch { return null; } };
+  const alive = (p) => { const s = statOf(p); return !!s && s[0] !== 'Z'; };
+  const live = [];
+  try {
+    const keeper = spawnMarked(); live.push(keeper);
+    const leftover = spawnMarked(); live.push(leftover);
+    const reused = spawnMarked(); live.push(reused);
+    fs.mkdirSync(path.join(home, '.vibespace', 'run'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.vibespace', 'run', sid + '.json'), JSON.stringify({ keeperPid: keeper }));
+    const t = await dm.leftBehind({ mark, ageMs: 5000, sid });
+    const named = (p) => (Array.isArray(t.left) ? t.left : []).find((x) => x.pid === p);
+    ok(t.canEnd === true && !!named(leftover) && !!named(reused) && !named(keeper), `the read says this agent ends a press's rows (canEnd) and names both leftovers, never the keeper (${JSON.stringify((t.left || []).map((x) => x.pid))})`);
+    const rows = [named(leftover) || { pid: leftover, start: 0 }, { ...(named(reused) || { pid: reused, start: 0 }), start: Number((named(reused) || {}).start) + 1 }, { pid: keeper, start: Number((statOf(keeper) || [])[19]), comm: 'node' }].map(({ pid, start, comm }) => ({ pid, start, comm }));
+    const e = await dm.leftBehindEnd({ mark, rows, sid, by: 'human:test' });
+    console.log(`    (the press there: ${JSON.stringify(e)} · leftover ${alive(leftover) ? 'RUNS' : 'gone'} · reused ${alive(reused) ? 'runs' : 'GONE'} · keeper ${alive(keeper) ? 'runs' : 'GONE'})`);
+    ok(e.ok === true && e.ended.length === 1 && e.gone === 1 && e.held === 1 && !alive(leftover) && alive(reused) && alive(keeper), 'left-behind-end ends the listed leftover ON the machine (its reply routed by id); a reused pid (another start) is never signalled; the keeper\'s recorded process is held');
+    const nm = await dm.leftBehindEnd({ mark: 'PATH=/usr/bin', rows: [rows[1]], sid, by: 'human:test' });
+    const blind = await dm.leftBehindEnd({ mark, rows: [{ ...rows[1], start: Number((statOf(reused) || [])[19]) }], by: 'human:test' });
+    ok(nm.ok === false && nm.reason === 'no-mark' && blind.ok === false && blind.reason === 'own-unknown' && alive(reused) && alive(keeper), 'the op refuses any variable but a conversation\'s mark, and with no keeper sid (the chain not known) it ends nothing — even a row whose start is right');
+  } finally { for (const p of live) { try { if (fs.readFileSync(`/proc/${p}/cmdline`, 'utf8').includes('setTimeout')) process.kill(p, 'SIGKILL'); } catch { } } }
+}
+
 // 4c. B-460d's remainder (主开发 r486 / r494): A PAIRED MACHINE'S CONVERSATION STARTS BELOW ITS MACHINE'S AGENT — this REAL agent
 // (the built bundle) is the stand-in paired machine. Its hello names its own nice program (the shared look, src/nice-program.js);
 // the dial road's spec (src/spawn/line.js withPriority + src/server/spawn-priority.js devicePriorityFor — the SAME verdict the

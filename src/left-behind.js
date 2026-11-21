@@ -1,7 +1,8 @@
 'use strict';
 /**
  * WHAT A STOPPED TURN'S COMMAND TOOL LEFT RUNNING (B-69a7, lane lg-rewind 2026-11-19; 主开发's rulings 09:50Z + round wz421di05)
- * — a FACT ABOUT A MACHINE, read where it lives: this machine (the hub) and a paired one (the device agent's READ-ONLY op
+ * — a FACT ABOUT A MACHINE, read where it lives: this machine (the hub) and a paired one (the device agent's READ-ONLY op; a
+ *   person's press there is that agent's act left-behind-end, the same endListed — B-69a7 (b)
  * 'left-behind'), ONE implementation. MEASURED (claude 2.1.322, read as bytes): at a Stop the CLI kills the command's whole
  * process GROUP and every descendant linked to it by parent (SIGKILL) — what survives was RE-PARENTED away first (a double
  * fork, `setsid … &`). So the read is not «the tree below the CLI» but THE CONVERSATION'S OWN ENV MARK:
@@ -205,12 +206,53 @@ async function stillLeft({ pid, start }, mark, { procRoot = '/proc', keep = [], 
   closed = true;
   return v;
 }
+/** THE PRESS's ONE IMPLEMENTATION (B-69a7 remainder (b) — this machine's door and a paired machine's agent run it): each listed row
+ *  re-proven (stillLeft: the same start time, not under anything held NOW, still the conversation's mark and no job's) under ONE
+ *  deadline, then the proven ones ended by src/proc-identity.js endTree (the pid alone — never a group — judged again at the
+ *  signal, SIGTERM then SIGKILL) → {ended, still, gone, held, unread, unreadRows} */
+const PRESS_MS = 1500;
+async function endListed({ rows, mark, keep = [], still = stillLeft, end = null, graceMs = 3000, pressMs = PRESS_MS, procRoot = '/proc' } = {}) {
+  const PI = require('./proc-identity.js');
+  const doEnd = end || ((m, o) => PI.endTree(m, o));
+  const members = [], unread = [], t0 = Date.now();
+  let gone = 0, held = 0;
+  for (const row of (Array.isArray(rows) ? rows : [])) {
+    const rest = pressMs - (Date.now() - t0);
+    const mine = Number(row && row.pid) > 1 && Number(row.pid) !== process.pid && Number(row.pid) !== process.ppid;   // the presser itself and its own parent (the read never names it: its `parent`) — that pid alone, never what it adopted
+    const v = !mine ? 'gone' : rest > 0 ? await still(row, mark, { keep, maxMs: rest, procRoot }) : 'unread';
+    if (v && typeof v === 'object') members.push({ ...v, bootId: PI.bootIdOf ? PI.bootIdOf() : undefined });
+    else if (v === 'unread') unread.push(row); else if (v === 'held') held++; else gone++;
+  }
+  const r = members.length ? await doEnd(members, { graceMs }) : { ended: [], left: [], stale: 0 };
+  const names = (l) => (Array.isArray(l) ? l : []).map((x) => (x && typeof x === 'object' ? x.comm : x)).filter(Boolean).map(String);
+  return { ended: names(r.ended), still: names(r.left), gone: gone + (Number(r.stale) || 0), held, unread: unread.length, unreadRows: unread };
+}
+/** the device agent's END op (agentd 'left-behind-end', B-69a7 (b)): a person's press on a paired machine's line, run where the
+ *  processes live — END_ROWS rows a press (each its pid / start / name only; the rest answered back unread, so the hub keeps them
+ *  listed for the next press), the mark the conversation's own, the agent's own tree, its desktop apps and the
+ *  conversation's recorded chain held out (no pid in its records = the chain not known: nothing is ended, own-unknown — as the
+ *  read names nothing then); then endListed */
+const END_ROWS = 64;
+async function endLeftOp(msg, { procRoot = '/proc', keep = [], records = [], end = null } = {}) {
+  const mark = msg && msg.mark;
+  if (typeof mark !== 'string' || !MARK_RE.test(mark)) return { ok: false, reason: 'no-mark' };
+  const valid = (Array.isArray(msg.rows) ? msg.rows : []).slice(0, 4096)
+    .map((x) => ({ pid: Number(x && x.pid), start: Number(x && x.start), comm: String((x && x.comm) || '').slice(0, 32) }))
+    .filter((x) => Number.isInteger(x.pid) && x.pid > 1 && Number.isFinite(x.start));
+  if (!valid.length) return { ok: false, reason: 'nothing-listed' };
+  const rows = valid.slice(0, END_ROWS), over = valid.slice(END_ROWS);   // past the bound: not judged this press — answered back, still listed
+  const own = (await recordPidsOf(records)).map((x) => x.pid);
+  if (!own.length) return { ok: false, reason: 'own-unknown' };
+  const r = await endListed({ rows, mark, keep: [process.pid, ...pidsOf(keep), ...own], procRoot, end });
+  const back = r.unreadRows.concat(over).map(({ pid, start, comm }) => ({ pid, start, comm }));
+  return { ok: true, ended: r.ended, still: r.still, gone: r.gone, held: r.held, unread: back.length, unreadRows: back };
+}
 /** the device agent's READ-ONLY op (agentd 'left-behind'): the same read on the machine where the facts live — the agent's own
  *  tree and its own records (`keep`: its desktop apps) held out; the conversation's chain known by the agent's own record
  *  files for `msg.sid` (`records`: the keeper's meta, the pipe session's meta) */
-async function leftBehindOp(msg, { procRoot = '/proc', keep = [], records = [] } = {}) {
+async function leftBehindOp(msg, { procRoot = '/proc', keep = [], records = [], canEnd = true } = {}) {
   const r = await leftBehind({ mark: msg && msg.mark, ageMs: msg && msg.ageMs, keep: [process.pid, ...pidsOf(keep)], records, procRoot });
   const pick = (x) => Object.fromEntries(ROW_KEYS.map((k) => [k, x[k]]));
-  return { left: r.left.map(pick), kept: r.kept.map(pick), jobs: r.jobs.map(pick), scan: r.scan, ...(r.unread ? { unread: r.unread } : {}) };
+  return { left: r.left.map(pick), kept: r.kept.map(pick), jobs: r.jobs.map(pick), scan: r.scan, canEnd: canEnd !== false /* B-69a7 (b): this agent ends a press's rows (op left-behind-end) — false when its own allow list refuses that act */, ...(r.unread ? { unread: r.unread } : {}) };
 }
-module.exports = { leftBehind, leftBehindOp, stillLeft, statOf, nameOf, recordPidsOf, ROW_KEYS, HZ, MARK_RE, ENV_SLOTS, envSlotsBusy: () => envBusy, envSlotsWaiting: () => envQueue.length };
+module.exports = { leftBehind, leftBehindOp, endListed, endLeftOp, PRESS_MS, END_ROWS, stillLeft, statOf, nameOf, recordPidsOf, ROW_KEYS, HZ, MARK_RE, ENV_SLOTS, envSlotsBusy: () => envBusy, envSlotsWaiting: () => envQueue.length };

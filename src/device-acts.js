@@ -82,6 +82,7 @@ const TABLE = Object.freeze({
   // ── act ──
   'run-cmd': 'act', 'run-stream': 'act', 'place-secret': 'act', 'input-events': 'act',
   'settings-merge': 'act',   // B-e7c0: a subscription pick's merge of the person's own settings file, written on the device (0600)
+  'left-behind-end': 'act',   // B-69a7 (b): a person's press ends the processes a stopped turn left on that machine
   'tcp-connect': 'act', 'serve-socks': 'act', 'serve-folder': 'act',
   'fs-op:write': 'act', 'fs-op:rm': 'act', 'fs-op:rename': 'act', 'fs-op:mkdir': 'act', 'fs-op:copy': 'act', 'fs-op:move': 'act', 'fs-op:write-stream': 'act',
   'design-fs:write-user': 'act',
@@ -101,7 +102,7 @@ const LOOPBACK_RE = /^(?:127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1|localhost|::ffff:127
 const CLIENT_ACT_METHODS = Object.freeze(['runCmd', 'runShell', 'runStream', 'fsWrite', 'fsRename', 'fsMkdir', 'fsRm', 'fsCopy', 'fsMove', 'fsWriteStream',
   'placeSecret', 'inputEvents', 'tcpForward', 'serveSocks', 'serveFolder', 'desktopServe', 'browserServe', 'designFs', 'peerPost', 'poolOrders', 'settingsOpen', 'windowPin',
   'desktopGrab', 'desktopInput', // int315: lane desktop-handover's two (.313)
-  'streamMic', 'settingsMerge']); // B-e7c0: the person's settings file merged on the device (an act) · lane stream-mic-road: its `default` action changes the machine's default microphone
+  'streamMic', 'settingsMerge', 'leftBehindEnd']); // B-e7c0: the person's settings file merged on the device (an act) · B-69a7 (b): a press on a paired machine's left-behind line · lane stream-mic-road: its `default` action changes the machine's default microphone
 const HOST_ARG_METHODS = Object.freeze({ tcpForward: 1 }); // method → the index of the argument that makes it an act
 
 /** The table key of a request payload. */
@@ -160,6 +161,7 @@ function summaryOf(p) {
     case 'run-stream': return clean(argvOf(x.cmd, x.args) + (x.cwd ? ` (in ${x.cwd})` : '')) + (x.stdin64 ? ` · stdin ${size(b64len(x.stdin64))}` : '');
     case 'place-secret': return clean(`${x.path} · ${size(b64len(x.data))}`);
     case 'settings-merge': return clean(`${String(x.sid || '').slice(0, 64)} · ${String(x.ownFile || '').slice(0, 120)} · layer ${size((() => { try { return Buffer.byteLength(JSON.stringify(x.layer || {})); } catch { return 0; } })())}`);
+    case 'left-behind-end': return clean(`${(Array.isArray(x.rows) ? x.rows : []).length} process(es): ${(Array.isArray(x.rows) ? x.rows : []).slice(0, 8).map((r) => `${String((r && r.comm) || '?').slice(0, 32)} ${Number(r && r.pid) || 0}`).join(', ')}`);
     case 'input-events': {
       const ev = Array.isArray(x.events) ? x.events : [];
       const keys = ev.filter((e) => e && /key|text|type/i.test(String(e.t || e.type || e.kind || ''))).length;

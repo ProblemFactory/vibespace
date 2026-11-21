@@ -35,7 +35,7 @@ const ACT_WORDS = {
   'desktop-apps-list': 'List its apps', 'discovery-snapshot': 'Read its conversations', 'discovery-claims': 'Read its conversations', 'discovery-watch': 'Read its conversations',
   'session-events-watch': 'Read its conversations', 'usage-scan': 'Read usage', 'usage-events-watch': 'Read usage', 'usage-events-ack': 'Read usage', 'pool-orders-log-ack': 'Read usage',
   'stream-offer': 'Stream its screen', 'stream-answer': 'Stream its screen', 'stream-stop': 'Stream its screen', 'stream-stats': 'Stream its screen', 'stream-windows': 'Stream its screen',
-  'stream-audio': 'Stream its screen', 'window-track': 'Stream its screen', 'window-untrack': 'Stream its screen', 'proc-list': 'Read system information', 'left-behind': 'Read system information',
+  'stream-audio': 'Stream its screen', 'window-track': 'Stream its screen', 'window-untrack': 'Stream its screen', 'proc-list': 'Read system information', 'left-behind': 'Read system information', 'left-behind-end': 'End processes a stopped turn left running',
   'dial-status': 'Read system information', 'probe-cli': 'Read system information', 'probe-creds': 'Read system information', 'ping-info': 'Read system information',
   'ok': 'Read system information', 'transcript-op': 'Read its conversations', 'peer-state': 'Read its conversations', 'quota-refresh': 'Read usage', 'tcp-connect:loopback': 'Connect to a port', 'fs-op:stat': 'Read files',
   'fs-op:list': 'Read files', 'fs-op:read-range': 'Read files', 'fs-op:home': 'Read files', 'fs-op:du': 'Read files', 'design-fs:read': 'Read files', 'design-fs:meta': 'Read files',
