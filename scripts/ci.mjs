@@ -3912,13 +3912,16 @@ export function acquireMachineLock(lockPath, { waitMs, sha, onWait, onGiveBack, 
  *  - A GREEN speaks for ONE commit, and only when it is readable and its name and its field name the SAME commit; otherwise it
  *    covers nothing.
  *  A name or a field names the commit master's resolution gives it (`git cat-file -e <x>^{commit}`, then ancestry): a shorter
- *  string counts only if git resolves it to exactly one commit (resolveShortNames — a tag peels to its commit); a full 40-hex sha
+ *  string counts only if git resolves it to exactly one commit (resolveShortNames — a tag peels to its commit) BY THE QUESTION
+ *  master's ancestry asked: `merge-base` resolves a name with no hint of its type, so a name a commit shares with a blob or a tree
+ *  names NONE there; `<x>^{commit}` alone asks with a commit hint and picks the commit — a green named so cleared what master
+ *  blocked (found on real git, test-ci-heavy-verdict §7d) — so the reader asks `<x>^{object}^{commit}`: the plain name, peeled; a full 40-hex sha
  *  is itself with no git asked, unless the object is a TAG, which peels the same way (peelFullNames, ONE batched process) — so a
  *  full tag-object name and a short one name the same commit. Anything else names none. Commits — never names — are compared
  *  everywhere: the gate's same-commit test, the writer's existing verdict, «already green», prune's grouping. */
 export function resolveShortNames(repoRoot, names) {
   const out = new Map();
-  for (const n of names) out.set(n, gitIn(repoRoot, ['rev-parse', '--verify', '-q', '--end-of-options', `${n}^{commit}`]) || null);   // one commit, or none (a record's text is never an option)
+  for (const n of names) out.set(n, gitIn(repoRoot, ['rev-parse', '--verify', '-q', '--end-of-options', `${n}^{object}^{commit}`]) || null);   // one commit, or none (a record's text is never an option)
   return out;
 }
 /** Full 40-hex names → the commit each names: itself, or a TAG's commit (one batch-check; a tag then one rev-parse). Unknown = itself. */
