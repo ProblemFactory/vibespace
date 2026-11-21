@@ -2666,7 +2666,13 @@ export function pruneFailLogs(dir, keep = FAIL_LOGS_KEEP) {
 // green row's tail («· SKIP k: first reason»).
 export const SKIP_LINE = /^\s*(?:[⊘·○⚠…•✓*~+\-—–]\s*)?(?:(?:[^\sA-Za-z("'«`]\S{0,3}|\([a-z0-9]{1,3}\))\s+)?SKIP(?:PED)?(?![\w-])/;
 export const SKIP_PHRASE = /(?<![\w\-«"'`(])SKIP(?:PED)?(?:\s+(?:BY NAME|by name))?\s*[:—–]|(?<![\w\-«"'`(])SKIPPED\s*$/;
-export const isSkipLine = (line) => SKIP_LINE.test(line) || SKIP_PHRASE.test(line);
+// A QUOTED WORD IS DATA (主开发 r907, 2026-11-21): a line that QUOTES «… SKIP …» is not the suite's own skip — the integrator's box
+// tier counted «2 skipped legs» for test-ci-heavy-verdict, a suite in which every leg ran: its passedCountOf table prints
+// «ALL PASS (91; 52 red controls SKIPPED — not in this clone)» and its census of the tree's closings names the word. A skip
+// is not a green, so a skip count must be exact: the «…» spans leave the line before it is judged (no printed literal of
+// the tree changes class by it — measured over test-ci-gate-tiers §8h's walk)
+export const quotedOut = (line) => String(line).replace(/«[^«»]*»/g, '«»');
+export const isSkipLine = (line) => { const l = quotedOut(line); return SKIP_LINE.test(l) || SKIP_PHRASE.test(l); };
 export function skipsOf(...texts) {
   let n = 0, first = '';
   for (const t of texts) {

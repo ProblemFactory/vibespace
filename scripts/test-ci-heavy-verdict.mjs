@@ -762,7 +762,7 @@ const OLD_READER_SRC = (SRC.slice(0, UNION_AT) + OLD_BLOCK + SRC.slice(UNION_END
   const tree = said(path.join(REPO, 'scripts'));
   const pl = scratch('b737b-plant'); fs.writeFileSync(path.join(pl, 'test-zz-own-words.mjs'), "console.log('\\nnothing ran here: the tool is absent');\n");
   const plant = said(pl);
-  console.log(`    B-737b the tree's own «nothing ran» closings without SKIP: ${tree.length ? tree.join(' · ') : 'none'} · the planted one: ${plant.join(' · ') || 'NOT FOUND'}`);
+  console.log(`    B-737b the tree's own «nothing ran» closings without «SKIP»: ${tree.length ? tree.join(' · ') : 'none'} · the planted one: ${plant.join(' · ') || 'NOT FOUND'}`);
   ok(tree.length === 0 && plant.length === 1, 'B-737b: no suite of the tree closes on its own «nothing ran» words without SKIP (the reader would miss it); CONTROL: a planted one is found by name', { tree, plant }); }
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6, label: '§5 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 

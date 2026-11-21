@@ -1032,6 +1032,23 @@ console.log('\n§8h a green suite\'s SKIP lines are counted on its row and named
       ok(!lower.length, `…and no lowercase «— skipping …» line is left uncounted (a skip says «· SKIP <leg>: <why>»)${lower.length ? ` — ${lower.slice(0, 12).join(' | ')}` : ''}`);
     }
   }
+  // r907 (主开发 2026-11-21) — A QUOTED WORD IS DATA: the integrator's box tier counted «2 skipped legs» for test-ci-heavy-verdict,
+  // a suite in which every leg ran — its two printed lines that QUOTE the word (its passedCountOf table, its census of the tree's
+  // «nothing ran» closings, both as printed at 2.369.414). Today's counter counts them; the cure counts its own skip lines only
+  {
+    const TABLE = "    B-737b passedCountOf: «ALL PASS (0, 1 skipped)» → 0 · «ALL PASS (197 passed, 0 failed, 1 skipped)» → 197 · «ALL PASS (91; 52 red controls SKIPPED — not in this clone)» → 91 · «PASS — 0 passed, 0 failed» → 0";
+    const SAID_THEN = "    B-737b the tree's own «nothing ran» closings without SKIP: none · the planted one: scratch/test-zz-own-words.mjs";   // as printed at 2.369.414
+    const SAID_NOW = SAID_THEN.replace('without SKIP:', 'without «SKIP»:');   // the suite's words now quote it (test-ci-heavy-verdict)
+    const OWN = ['  ⊘ SKIP the second leg — no peer here', '  – corpus smoke SKIPPED: no rollouts on this machine'];
+    const release = (l) => ci.SKIP_LINE.test(l) || ci.SKIP_PHRASE.test(l);   // 2.369.414's isSkipLine, verbatim
+    const said = fs.readFileSync(path.join(REPO, 'scripts', 'test-ci-heavy-verdict.mjs'), 'utf-8');
+    const both = ci.skipsOf([TABLE, SAID_NOW, ...OWN].join('\n'));
+    ok(ci.skipsOf([TABLE, SAID_NOW].join('\n')) === null && both && both.n === 2 && ci.quotedOut('a «SKIP: x» b') === 'a «» b'
+      && said.includes('closings without «SKIP»: ${tree.length') && !said.includes('closings without SKIP:'),
+      `r907: test-ci-heavy-verdict's two lines that QUOTE the word count 0 (the counter drops «…» spans; the suite's own sentence quotes «SKIP»), its own skip lines beside them still count (2)`, both);
+    ok([TABLE, SAID_THEN].filter(release).length === 2 && release(TABLE) && !ci.isSkipLine(TABLE),
+      `r907 CONTROL: the release's counter (SKIP_LINE || SKIP_PHRASE over the line as it is) counts BOTH lines as printed at 2.369.414 — the «2 skipped legs» the integrator read; the table's quote is the counter's to drop`, [TABLE, SAID_THEN].filter(release));
+  }
   // the CONTROL: ci.mjs with today's last-line rule — the mid-output SKIP vanishes from the row, nothing is named or kept
   const M = mutantCopies('ci-skiplegs', REPO);
   const src = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
