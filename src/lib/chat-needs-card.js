@@ -1015,6 +1015,9 @@ export class NeedsCards {
         if (!el) return;
         const d = el.getBoundingClientRect().top - b.top;
         if (Math.abs(d) >= 1) { view._traceExpect?.('needsPutBack'); view._messageList.scrollTop += d; }
+        // B-43f3: …and HELD there while the rebuilt window's heights resolve (a row above the reading place measured late moved the
+        // reader off the record after this one shot: «at 121 where they read it at 63»); the person's own act lets go at once
+        view._holdReaderTop?.(el, b.top, { stop: gone });
       } }));
     };
     const now = here();

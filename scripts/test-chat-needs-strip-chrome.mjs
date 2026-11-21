@@ -569,6 +569,38 @@ try {
       const e1 = await A.evalJs(READ16), at1 = await A.evalJs(`(() => { const v = ${VIEW}, l = v._messageList, m = [...l.querySelectorAll(':scope > .chat-msg')].find((x) => x.dataset.msgId === ${J(e0.id)}); return m ? Math.round(m.getBoundingClientRect().top) : null; })()`), t2 = await toasts16(), rd2 = await r16();
       await A.shot('desktop-1280-r4-failed-show-reader.png');
       check(`(d2) (RED on b3fef024: left at records 0–50) a reader mid-history (records ${e0.ws}–${e0.we}, reading ${e0.id} at ${e0.top}) presses q81 (hidden): put back at the record they were reading — ${e0.id} at ${at1} (records ${e1.ws}–${e1.we}), not pinned (${rd2.join(' → ')})`, !!e0.id && rd2.includes('landed:' + ids[0] + '=null') && at1 != null && Math.abs(at1 - e0.top) <= 4 && e1.ws > 0 && !e1.pinned && /not drawn in this chat/.test(t2), { e0, e1, at1, t2, rd2 });
+      // (d3) / (d4) B-43f3 — THE RACE, NAMED AND PLACED (the hosted red of 2026-11-07: the reader put back at 121 where they read
+      //     at 63): the put-back's anchor is ONE shot measured in the rebuild's own task, and a row ABOVE the reading place whose height
+      //     resolves late (content-visibility's off-screen estimate replaced by its real size) moves the reader after it. A stand-in
+      //     row grows 58 px, held on either side of the anchor: BEFORE it (the shot sees it) and AFTER it (only a hold keeps the place).
+      //     The growth is one the BROWSER DOES NOT ANCHOR (the list's own overflow-anchor off for the scene — the hosted red's change was
+      //     not anchored; a plain padding change otherwise is: the first read of this leg measured 0 px with the hold taken out)
+      const putBackScene = async (order, { holdOut = false } = {}) => {
+        await choose(ids[1], 82); await sleep(3000);
+        const p0 = await A.evalJs(READ16);
+        await A.evalJs(`(() => { const v = ${VIEW}; window.__d3 = { order: ${J(order)}, calls: 0, grown: false, read: ${J(p0.id)}, holdOut: ${holdOut ? 'true' : 'false'} };
+          if (window.__d3.holdOut) v._holdReaderTop = undefined;   // THE CURE TAKEN OUT (the red control): the one shot alone
+          v._messageList.style.overflowAnchor = 'none';             // a height change the browser does not anchor (see above)
+          const grow = () => { const el = v._elements.get(window.__d3.read); let p = el && el.previousElementSibling; while (p && !(p.classList && p.classList.contains('chat-msg'))) p = p.previousElementSibling; if (p) { p.style.paddingTop = '58px'; p.dataset.d3grown = '1'; window.__d3.grown = true; } };
+          const j0 = v.jumpToIndex; window.__d3.j0 = j0;
+          v.jumpToIndex = function (idx, opts = {}) { window.__d3.calls++; if (window.__d3.calls !== 2 || !opts.land) return j0.call(this, idx, opts);   // the 2nd jump is the put-back's
+            if (window.__d3.order === 'before') { const land0 = opts.land; return j0.call(this, idx, { ...opts, land: (el) => { grow(); land0(el); } }); }
+            return j0.call(this, idx, opts).then((r) => { grow(); return r; }); };   // after: the row grows once the anchor was taken
+          return 1; })()`);
+        await A.evalJs('(window.__r16 = [], 1)');
+        await pick(ids[0]);
+        await wait16(new RegExp('^landed:' + ids[0] + '='), 15000); await sleep(2500);
+        const p1 = await A.evalJs(`(() => { const l = ${VIEW}._messageList, m = [...l.querySelectorAll(':scope > .chat-msg')].find((x) => x.dataset.msgId === ${J(p0.id)}); return { at: m ? Math.round(m.getBoundingClientRect().top) : null, calls: window.__d3.calls, grown: window.__d3.grown }; })()`);
+        const rd = await r16();
+        await A.evalJs(`(() => { const v = ${VIEW}; v.jumpToIndex = window.__d3.j0; if (window.__d3.holdOut) delete v._holdReaderTop; v._messageList.style.overflowAnchor = ''; document.querySelectorAll('[data-d3grown]').forEach((x) => { x.style.paddingTop = ''; delete x.dataset.d3grown; }); return 1; })()`);
+        return { p0, p1, rd, moved: p1.at != null && p0.top != null ? p1.at - p0.top : null };
+      };
+      const pbB = await putBackScene('before');
+      check(`(d3) B-43f3: a row ABOVE the reading place grows 58 px BEFORE the put-back's anchor (held inside the rebuild): the reader put back at the record they were reading — ${pbB.p0.id} at ${pbB.p1.at} (read at ${pbB.p0.top})`, pbB.p1.grown && pbB.p1.calls >= 2 && pbB.moved != null && Math.abs(pbB.moved) <= 4 && pbB.rd.includes('landed:' + ids[0] + '=null'), pbB);
+      const pbA = await putBackScene('after');
+      check(`(d4) B-43f3: the same row grows AFTER the put-back's anchor (held until the anchor was taken — the hosted red's order): the reader is HELD at the record they were reading while the heights resolve — ${pbA.p0.id} at ${pbA.p1.at} (read at ${pbA.p0.top})`, pbA.p1.grown && pbA.p1.calls >= 2 && pbA.moved != null && Math.abs(pbA.moved) <= 4 && pbA.rd.includes('landed:' + ids[0] + '=null'), pbA);
+      const pbR = await putBackScene('after', { holdOut: true });
+      check(`(d4) RED CONTROL: the same order with the hold taken out (the one shot alone, as on the release) — the reader is MOVED off the record they were reading, ${pbR.moved} px (the hosted red moved it +58; with nothing anchoring the rows' own late heights move it too): the leg reads where the reader went and can fail`, pbR.p1.grown && pbR.p1.calls >= 2 && pbR.moved != null && Math.abs(pbR.moved) >= 40, pbR);
       await A.evalJs(`(() => { document.getElementById('hide16')?.remove(); return 1; })()`);
       await TAIL16(null);
     }

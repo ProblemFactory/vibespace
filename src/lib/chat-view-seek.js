@@ -155,6 +155,29 @@ export function installChatSeek(ChatView) {
     }
   },
 
+    /** B-43f3 — A READER PUT BACK STAYS PUT: hold `el` at the viewport's `top` while the rebuilt window's heights resolve (the
+     *  rows above the reading place: content-visibility's off-screen estimates replaced by their real sizes, a late-measured row —
+     *  for about a second after a rebuild), as a jump holds its target (_scrollElStable's twelve frames and its 180/400/750 ms
+     *  re-anchors) — never centred. `stop()` true (the person acted, a newer landing) lets go at once. A scroll written here is the
+     *  landing's own (its guard and its expected write), never the reader's */
+    _holdReaderTop(el, top, { stop = null } = {}) {
+    if (!el || !el.isConnected || !Number.isFinite(top)) return;
+    const list = this._messageList;
+    this._programmaticScroll = true;
+    clearTimeout(this._jumpGuardTimer);
+    this._jumpGuardTimer = setTimeout(() => { this._programmaticScroll = false; }, 1100);
+    const hold = () => {
+      if (!el.isConnected || (stop && stop())) return false;
+      const d = el.getBoundingClientRect().top - top;
+      if (Math.abs(d) >= 1) { this._traceExpect?.('needsPutBack'); list.scrollTop += d; }
+      return true;
+    };
+    let n = 0;
+    const step = () => { if (hold() && ++n < 12) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+    for (const d of [180, 400, 750]) setTimeout(hold, d);
+  },
+
     _maybeSeekEarlier() {
     if (!this._gapMinimapActive) return;
     const s = this._seekSentinel;
