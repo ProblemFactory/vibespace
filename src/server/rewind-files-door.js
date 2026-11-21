@@ -144,6 +144,9 @@ function factsOf(session, msgId, by) {
 const wholeOf = (session) => !!session && session._historyLoaded === true && !!session._normalizer && session._normalizer.recordsFromStart === true;
 /** the conversation's CLI version as its init said it (cli-caps' spelling) — null when none was said */
 const cliOf = (session) => { const n = session && session._normalizer; try { return cliVersionOf(n && typeof n._harnessVersion === 'function' ? n._harnessVersion() : null); } catch { return null; } };
+/** the conversation's OWN init's skills (r1332 (6): a name there is a helper whatever the table says) — as the init said them
+ *  (the judge fails closed on a shape it cannot read); null when none was said */
+const skillsOf = (session) => { const n = session && session._normalizer, fr = n && n._initFrame; return fr && fr.skills != null ? fr.skills : null; };
 /** what the confirm drew, in the shape the press compares (a page's malformed frame is no draw: changed-since, never a throw) */
 const drawnOk = (d) => !!d && Array.isArray(d.files) && d.files.every((x) => typeof x === 'string') && Array.isArray(d.judged) && d.judged.every((x) => !!x && typeof x.path === 'string' && typeof x.state === 'string');
 
@@ -154,7 +157,7 @@ async function judgeOf(session, f, { hosts = null, stat = null, dryMs = DRY_MS }
   const dry = F.filesAnswerOf(ask.answer, { dryRun: true });
   if (!dry.ok || !dry.filesKnown || !dry.files.length) return { dry, judged: [] };
   const mtimes = await timesOf(session, dry.files, { hosts, stat });
-  const judged = F.changedAfterOf(dry.files, { mtimes, edits: F.editsFromMessages(f.messages, { targetId: f.msg.id, whole: wholeOf(session), cli: cliOf(session) }) });   // r1307: the table read only for its program
+  const judged = F.changedAfterOf(dry.files, { mtimes, edits: F.editsFromMessages(f.messages, { targetId: f.msg.id, whole: wholeOf(session), cli: cliOf(session), skills: skillsOf(session) }) });   // r1307: the table read only for its program; r1332 (6): its own skills
   return { dry, judged };
 }
 

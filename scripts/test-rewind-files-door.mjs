@@ -56,7 +56,7 @@ const REC = {
   res: (uuid, id, sec, err) => ({ type: 'user', uuid, timestamp: iso(sec), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok', ...(err ? { is_error: true } : {}) }] } }),
   said: (text, uuid) => ({ type: 'assistant', uuid, message: { id: 'msg_' + uuid.slice(-4), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text }] } }),
   result: () => ({ type: 'result', subtype: 'success', is_error: false, result: '', session_id: 's' }),
-  init: (v) => ({ type: 'system', subtype: 'init', session_id: 's', cwd: '/w', model: 'claude-sonnet-4-5', tools: [], claude_code_version: v }),
+  init: (v, skills) => ({ type: 'system', subtype: 'init', session_id: 's', cwd: '/w', model: 'claude-sonnet-4-5', tools: [], claude_code_version: v, ...(skills ? { skills } : {}) }),
   answer: (requestId, body) => ({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: body } }),
   empty: (requestId) => ({ type: 'control_response', response: { subtype: 'success', request_id: requestId } }),   // a success with no body
   error: (requestId, text) => ({ type: 'control_response', response: { subtype: 'error', request_id: requestId, error: text } }),
@@ -64,10 +64,10 @@ const REC = {
 const DRY = (files = ['/w/a.js']) => ({ canRewind: true, filesChanged: files, insertions: 2, deletions: 1 });
 /** a live conversation: the person's message (stamped), the agent's ONE Edit of a.js, its result; a scripted CLI answers each vsf- line.
  *  `whole`: born in this hub (src/ws-create.js marks its normalizer: every record seen); `cli`: the init's version (null: no init) */
-function conv({ answers = [], fact = true, host = null, whole = true, cli = F.READ_CLI } = {}) {   // a real conversation's init says its program
+function conv({ answers = [], fact = true, host = null, whole = true, cli = F.READ_CLI, skills = null } = {}) {   // a real conversation's init says its program
   const mm = createMessageManager('claude', 'rf-door-' + Math.random().toString(36).slice(2, 8));
   const ops = []; mm.onOp((o) => ops.push(o));
-  const recs = [...(cli ? [REC.init(cli)] : []), REC.send('fix a.js', 'm-1'), REC.stamp('m-1', U(1)), REC.use(U(2), 'toolu_1', 'Edit', { file_path: '/w/a.js' }), REC.res(U(3), 'toolu_1', 10), REC.said('done', U(4)), REC.result()];
+  const recs = [...(cli ? [REC.init(cli, skills)] : []), REC.send('fix a.js', 'm-1'), REC.stamp('m-1', U(1)), REC.use(U(2), 'toolu_1', 'Edit', { file_path: '/w/a.js' }), REC.res(U(3), 'toolu_1', 10), REC.said('done', U(4)), REC.result()];
   for (const r of recs) mm.processLive(r);
   if (whole) mm.recordsFromStart = true;
   const written = [], queue = [...answers];
@@ -322,6 +322,9 @@ console.log('— ⑥ whole records, the version');
   const o2 = await D.pressFiles({ session: v2.session, msgId: v2.pid, by: HUMAN, ...KA, choice: 'files', drawn: drawnUnread, stat: stat(MT) });
   const v3 = conv({ answers: [DRY()], cli: '2.1.399' }), v4 = conv({ answers: [DRY()], cli: null });
   const c3 = await D.filesConfirmOf({ session: v3.session, msgId: v3.pid, by: HUMAN, ...KA, stat: stat(MT) }), c4 = await D.filesConfirmOf({ session: v4.session, msgId: v4.pid, by: HUMAN, ...KA, stat: stat(MT) });
+  const v5 = conv({ answers: [DRY()], skills: ['Edit'] });
+  const c5 = await D.filesConfirmOf({ session: v5.session, msgId: v5.pid, by: HUMAN, ...KA, stat: stat(MT) });
+  ok(c5.ok && c5.files[0].why === 'helper-worked' && c5.default === 'conversation', '⑥ THE CONVERSATION\'S OWN SKILLS (r1332 (6)): its init lists a name among its skills — that name is a helper whatever the table says (here the edit tool itself): every file «could not be checked»', c5.files);
   ok([c3, c4].every((c) => c.ok && c.default === 'conversation' && c.files.length === 1 && c.files[0].why === 'version-unread'),
     '⑥ THE VERSION FROM THE INIT RECORD (r1307): a conversation whose init said 2.1.399, or no init at all — every file «could not be checked» (version-unread), «the conversation only» drawn', { c3, c4 });
   ok(o1.ok && o1.outcome.failed === 'files' && o1.outcome.maybePartial === false && o2.ok && o2.outcome.maybePartial === true,
