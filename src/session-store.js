@@ -663,7 +663,7 @@ const RETRY_WARM_MS = 2000;
 const NOT_LOADED = 'transcript_reader_restarting';
 const _fpOf = new Map();       // claudeSessionId → its transcript's path, as the last find answered (the storage's guard needs no find)
 const _reWarmAt = new Map();   // claudeSessionId → when the parse may ask the warm again
-const FP_OF_MAX = 4096;
+const FP_OF_MAX = 8192;
 const knowFp = (id, fp) => { _fpOf.delete(id); _fpOf.set(id, fp); while (_fpOf.size > FP_OF_MAX) _fpOf.delete(_fpOf.keys().next().value); };
 const notLoadedList = () => Object.assign([], { notLoaded: NOT_LOADED });
 const C = () => require('./adapters/codex');   // lazily (the adapter requires nothing of this module at load)
@@ -711,9 +711,26 @@ function warmPaged(fp, { fresh = null, bulk = false } = {}) {
   return { p, job };
 }
 const promoteWarm = (job) => { if (!job || !job.bulk) return; const i = _warmQ.bulk.indexOf(job); if (i < 0) return; _warmQ.bulk.splice(i, 1); job.bulk = false; _warmQ.person.push(job); };
-async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
+// ONE WARM A SESSION AT A TIME: a second ask while one is in flight joins it (the parse's 2 s re-warm, an attach, a page) — never a
+// second history read of the same file sent to the pool (the whole-state read: unjoined re-warms queued reads whose deadlines ended
+// workers)
+// (B-cd4b unit 2's _warmInFlight joins ONE warm A FILE inside warmOnce; this joins one a SESSION around it.) A person's ask never
+// waits behind a BULK one of the same session: it goes on into warmOnce, whose per-file join promotes that read (r935), no second read
+const _warmOfSession = new Map();   // session key → { p, bulk }
+function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
+  const k = claudeSessionId + '\u0000' + (cwd || ''), bulk = !!(opts && opts.bulk === true);
+  const was = _warmOfSession.get(k);
+  if (was && (bulk || !was.bulk)) return was.p;
+  const p = warmOnce(claudeSessionId, cwd, opts).then((ok) => { if (ok) _reWarmAt.delete(claudeSessionId); return ok; })   // a warm that read: the parse may ask again at once after a later refusal
+    .finally(() => { const cur = _warmOfSession.get(k); if (cur && cur.p === p) _warmOfSession.delete(k); });
+  _warmOfSession.set(k, { p, bulk });
+  return p;
+}
+/** the session's transcript path as memory knows it — the last find's, else its folder's (pure) — for the storage's guard */
+const knownPathOf = (id, cwd) => _fpOf.get(id) || (cwd ? transcriptPathOf(id, cwd) : null);
+async function warmOnce(claudeSessionId, cwd, opts = null) {
   const bulk = !!(opts && opts.bulk === true);   // r935: a bulk resume's first attach (ws-handler `_bulkRead`); every other ask is a person's
-  const known = _fpOf.get(claudeSessionId);
+  const known = knownPathOf(claudeSessionId, cwd);
   if (known && C().fileStorageHung(known)) {
     // the STORAGE hung under this transcript (a deadline, a hung path, a blocked mount — its record says so) — NO find and NO stat on
     // this loop: the pool alone is asked again (its path memory refuses at once while it remembers; then a worker tries, off the loop)
@@ -785,8 +802,8 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
 }
 
 function parseSessionJsonl(claudeSessionId, cwd) {
-  const known = _fpOf.get(claudeSessionId);
-  if (C().poolRefusing() || (known && C().fileRefused(known))) {
+  const known = knownPathOf(claudeSessionId, cwd);
+  if (C().poolRefusing() || (known && (C().fileRefused(known) || C().fileStorageHung(known)))) {
     // row B-422c: the pool refuses this file (or every call) — nothing of it is read on this loop
     const hung = !!known && C().fileStorageHung(known);
     if (!hung) {

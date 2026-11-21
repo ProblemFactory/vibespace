@@ -705,9 +705,16 @@ function _transcriptPoolGet() {
 // in-place road (a bundle with no worker script: its own loop, by design) is no pool failure.
 const READER_RESTARTING = 'the transcript reader is restarting — try again in a moment';
 const isPoolFailure = (e) => !!e && (e.status === 503 || e.code === 'heap_bound' || e.code === 'history_busy');
-const isStorageHung = (e) => !!e && (e.safeFsTimeout === true || e.code === 'path-hung' || e.code === 'storage-blocked');   // + a mount the door holds blocked (src/mount-door.js)
-function readerRefusal(e) {
-  return Object.assign(new Error(READER_RESTARTING), { code: 'transcript_reader_restarting', status: 503, why: (e && (e.code || e.message)) || 'no transcript pool on this process', storageHung: isStorageHung(e) });
+// THE STORAGE'S, said by the pool itself (unit 2's whole-state read): a deadline names the CALL that ran out it, not the file that
+// hung — the pool's own memory (B-23e5, keyed `fp` for this pool) remembers the op the worker was RUNNING; the history lane never
+// adds to it (its pages parse a snapshot). So a refusal is the storage's when its code says so (a path the memory refuses, a blocked
+// mount) or the memory remembers THIS file — a queued call's deadline blames nothing
+function poolRemembersHung(fp) { const p = _transcriptPool; try { return !!(fp && p && typeof p._hungOf === 'function' && p._hungOf({ fp }, 'jsonlTail', 0)); } catch { return false; } }
+// `ownCall`: the HISTORY LANE runs one call at a time (a waiting call is refused `history_busy`, never queued on a worker) — a deadline
+// there is the call's OWN, the storage's for the files it names (主开发 r1006: «a deadline … means the storage hangs»)
+const isStorageHung = (e, fp, { ownCall = false } = {}) => !!e && (e.code === 'path-hung' || e.code === 'storage-blocked' || (ownCall && e.safeFsTimeout === true) || poolRemembersHung(fp));   // + a mount the door holds blocked (src/mount-door.js)
+function readerRefusal(e, fp = null, opts = {}) {
+  return Object.assign(new Error(READER_RESTARTING), { code: 'transcript_reader_restarting', status: 503, why: (e && (e.code || e.message)) || 'no transcript pool on this process', storageHung: isStorageHung(e, fp, opts) });
 }
 /** one op through the transcript pool → its answer; a pool failure ⇒ the refusal by name, never a read on this loop */
 async function poolRead(op, payload, opts) {
@@ -717,11 +724,11 @@ async function poolRead(op, payload, opts) {
   let out;
   try { out = await pool.call(op, payload, opts); }
   catch (e) {
-    if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e); notePoolRefusing(e); noteFileRefusal(fp, r); throw r; }
-    poolAnswered(fp);   // the op's own error: a worker ran it — the pool answered for this file
+    if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e, fp); notePoolRefusing(e); noteFileRefusal(fp, r); throw r; }
+    poolAnswered(fp, op);   // the op's own error: a worker ran it — the pool answered
     throw e;
   }
-  poolAnswered(fp);
+  poolAnswered(fp, op);
   return out;
 }
 async function jsonlGapInfoAsync(fp) { return poolRead('gapInfo', { fp }); }
@@ -757,7 +764,7 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
  *  → the records (or, with `entry`, { entry, mode, bytes }), or null */
 async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false } = {}) {
   let refusal = null;   // the LAST pool failure on this road (a later op error clears it: then the op's failure is the answer)
-  const seen = (e) => { refusal = pool && !pool.inPlace && isPoolFailure(e) ? readerRefusal(e) : null; if (refusal) { notePoolRefusing(e); noteFileRefusal(fp, refusal); } };
+  const seen = (e, ownCall) => { refusal = pool && !pool.inPlace && isPoolFailure(e) ? readerRefusal(e, fp, { ownCall }) : null; if (refusal) { notePoolRefusing(e); noteFileRefusal(fp, refusal); } };   // ownCall: a page (the history lane's own call); the one-shot runs in the main pool
   const said = (why) => { _pagedStats.failed++; try { onFail?.(why, refusal); } catch { } return null; };
   const pool = _transcriptPoolGet();
   if (!pool) { refusal = readerRefusal(null); notePoolRefusing(refusal); noteFileRefusal(fp, refusal); return said('no transcript pool on this process'); }
@@ -776,11 +783,11 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
         if (entry && r.starts) for (const x of r.starts) startsOut.push(x);
         start = Number.isInteger(r.next) && r.next > start ? r.next : start + page;
       }
-      if (!gone && entry) { _pagedStats.reads++; poolAnswered(fp); return head ? { entry: { ...head.facts, messages: out, starts: startsOut }, mode: head.mode, bytes: head.bytes } : said('the paged entry came without its facts'); }
-      if (!gone) { _pagedStats.reads++; poolAnswered(fp); return out; }
+      if (!gone && entry) { _pagedStats.reads++; poolAnswered(fp, 'boundedParsedPage'); return head ? { entry: { ...head.facts, messages: out, starts: startsOut }, mode: head.mode, bytes: head.bytes } : said('the paged entry came without its facts'); }
+      if (!gone) { _pagedStats.reads++; poolAnswered(fp, 'boundedParsedPage'); return out; }
     } catch (e) {
       const code = e && e.code;
-      seen(e);
+      seen(e, true);
       if (code === 'heap_bound' && !entry) return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
       why = code === 'heap_bound' ? `the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}` : code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`;
       break;
@@ -792,9 +799,9 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
   // refuses BY NAME, thrown: the warm notes it), the records through the pool's own op (its failure seen: the refusal by name)
   if (entry) { const e1 = await readJsonlTailAsync(fp, { dropSubagent }); return e1 == null ? said(`${why}; then the one-shot read answered nothing`) : e1; }
   let r = null;
-  try { r = await pool.call('boundedParsed', { fp, tailOnly, dropSubagent: !!dropSubagent }); } catch (e) { seen(e); why = `${why}; then the one-shot read failed too (${(e && e.message) || e})`; return said(why); }
+  try { r = await pool.call('boundedParsed', { fp, tailOnly, dropSubagent: !!dropSubagent }); } catch (e) { seen(e, false); why = `${why}; then the one-shot read failed too (${(e && e.message) || e})`; return said(why); }
   if (r == null) return said(`${why}; then the one-shot read answered nothing`);
-  poolAnswered(fp);
+  poolAnswered(fp, 'boundedParsed');
   return r;
 }
 /** B-f3f9: a codex conversation's WHOLE history read, parsed and MERGED in the transcript worker's `history` lane (its fork
@@ -826,12 +833,12 @@ async function codexHistoryMergedPagedAsync({ files = [], liveBuffer = () => '' 
         for (let i = 0; i < r.records.length; i++) { records.push(r.records[i]); threads.push(r.tix[i] >= 0 ? r.tids[r.tix[i]] : ''); }
         start = Number.isInteger(r.next) && r.next > start ? r.next : start + page;
       }
-      if (!gone) { _mergedStats.reads++; for (const f of files || []) poolAnswered(f && f.fp); return { records, threads }; }   // unit 2: its answer forgives every file it named
+      if (!gone) { _mergedStats.reads++; for (const f of files || []) poolAnswered(f && f.fp, 'codexHistoryMergedPage'); return { records, threads }; }   // unit 2: its answer forgives every file it named
     } catch (e) {
       const code = e && e.code;
       // row B-422c unit 2: the merged call names its files in `files`, never `fp` — a POOL failure of it (a deadline above all: one of
       // them hung) is noted for EVERY file it names, so no file of it is read on the main process after a deadline
-      if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e); notePoolRefusing(e); for (const f of files || []) noteFileRefusal(f && f.fp, r); }
+      if (!pool.inPlace && isPoolFailure(e)) { notePoolRefusing(e); for (const f of files || []) noteFileRefusal(f && f.fp, readerRefusal(e, f && f.fp, { ownCall: true })); }   // the history lane's own call: its deadline names every file
       if (code === 'heap_bound') return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
       return said(code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`);
     }
@@ -854,13 +861,17 @@ let STAND_GAP_MS = 120000;         // a refusal STANDS while the file is refused
 const FILE_REFUSALS_MAX = 4096, FILE_REFUSALS_HUNG_MAX = 8192;  // the storage's records are kept past the first bound (never forgotten first)
 // THE POOL REFUSING EVERY CALL (closed, no worker, no idle one): a fact of the pool, not of one file — a parse of a session whose
 // file the pool was never asked about reads nothing on the loop either while it stands; any answer of the pool ends it
-const POOL_REFUSING_MS = 30000;
+const POOL_REFUSING_MS = 30000, HUNG_HOLD_MS = 30000;   // HUNG_HOLD_MS = the pool memory's first span (B-23e5 HUNG_MS)
 let _poolRefusedAt = 0;
 const POOL_WIDE = new Set(['no-worker', 'no-idle']);
 function notePoolRefusing(e) { if (!e || POOL_WIDE.has(e.code) || /safeFs closed/.test(String(e.message || '')) || e.why === 'no transcript pool on this process') _poolRefusedAt = Date.now(); }
-function poolAnswered(fp) { _poolRefusedAt = 0; forgiveFile(fp); }
-function poolRefusing() { return !!_poolRefusedAt && Date.now() - _poolRefusedAt <= POOL_REFUSING_MS; }
-const _fileRefusals = new Map();   // fp → { firstAt, lastAt, count, storageHung, why } — the pool's refusals of ONE file, standing
+// an answer of the pool ends «refusing every call»; only a HISTORY READ's answer forgives the file (a task scan or a gap read answered
+// on the other worker says nothing of whether its tail can be read: the whole-state read's MUST)
+const HISTORY_OPS = new Set(['jsonlTail', 'boundedParsed', 'boundedParsedPage', 'codexHistoryMergedPage']);
+function poolAnswered(fp, op) { _poolRefusedAt = 0; if (HISTORY_OPS.has(op)) forgiveFile(fp); }
+// the pool gone (its construction failed — retried, or given up after POOL_RETRY_MAX) refuses every call too, renewed by nothing
+function poolRefusing() { return _transcriptPool === false || (!!_poolRefusedAt && Date.now() - _poolRefusedAt <= POOL_REFUSING_MS); }
+const _fileRefusals = new Map();   // fp → { firstAt, lastAt, count, hungUntil, ownDeadline, why } — the pool's refusals of ONE file, standing
 const _slicedSaid = new Set();
 let _slicedChain = Promise.resolve(), _slicedParked = 0;
 const _slicedJoin = new Map();     // kind:fp → the read in flight (a second ask of the same file joins it)
@@ -868,35 +879,41 @@ function noteFileRefusal(fp, refusal) {
   if (!fp) return null;
   const now = Date.now();
   let rec = _fileRefusals.get(fp);
-  if (rec && !rec.storageHung && now - rec.lastAt > STAND_GAP_MS) { rec.firstAt = now; rec.count = 0; }   // not refused for a while: it starts over
+  if (rec && !rec.ownDeadline && now - rec.lastAt > STAND_GAP_MS) { rec.firstAt = now; rec.count = 0; }   // not refused for a while: it starts over
   if (rec) { _fileRefusals.delete(fp); _fileRefusals.set(fp, rec); }   // the NEWEST place: the bound goes to the files refused longest ago
   else {
-    rec = { firstAt: now, lastAt: now, count: 0, storageHung: false, why: '' };
+    rec = { firstAt: now, lastAt: now, count: 0, hungUntil: 0, ownDeadline: false, why: '' };
     _fileRefusals.set(fp, rec);
     if (_fileRefusals.size > FILE_REFUSALS_MAX) {   // the oldest record that is NOT the storage's goes first; past the second bound, the oldest
-      for (const [k, r] of _fileRefusals) if (!r.storageHung && k !== fp) { _fileRefusals.delete(k); break; }
+      for (const [k, r] of _fileRefusals) if (!r.ownDeadline && !(r.hungUntil > now) && k !== fp) { _fileRefusals.delete(k); break; }
       while (_fileRefusals.size > FILE_REFUSALS_HUNG_MAX) _fileRefusals.delete(_fileRefusals.keys().next().value);
     }
   }
   rec.lastAt = now; rec.count++;
   rec.why = (refusal && refusal.why) || rec.why || 'refused';
-  if (refusal && refusal.storageHung) rec.storageHung = true;
+  if (refusal && refusal.storageHung) rec.hungUntil = now + HUNG_HOLD_MS;   // the storage's — for the hold (the pool's own memory says longer itself)
   return rec;
 }
 const forgiveFile = (fp) => { if (fp) _fileRefusals.delete(fp); };   // the pool answered for it: the refusal no longer stands
 /** has the pool refused this file with no answer for it since (any pool answer for it forgives the record)? — memory only */
 function fileRefused(fp) { return !!(fp && _fileRefusals.get(fp)); }
 /** the storage's, as far as memory knows (its record, the mount door) — never a file call */
-function fileStorageHung(fp) { const r = fp && _fileRefusals.get(fp); if (r && r.storageHung) return true; try { return !!require('../mount-door').blocked(fp); } catch { return false; } }
+function fileStorageHung(fp) {
+  if (!fp) return false;
+  const r = _fileRefusals.get(fp);
+  if (r && (r.ownDeadline || r.hungUntil > Date.now())) return true;   // our own read's deadline (for the record's life); a refusal that named the storage (its hold)
+  if (poolRemembersHung(fp)) return true;   // the pool's memory (B-23e5): time-bounded by itself
+  try { return !!require('../mount-door').blocked(fp); } catch { return false; }
+}
 /** May this file's history be read on the main process now? → { ok, why } (never a file call: memory only) */
 function slicedRoadFor(fp) {
   const rec = fp && _fileRefusals.get(fp);
   if (!rec) return { ok: false, why: 'no refusal of it stands' };
-  if (rec.storageHung) return { ok: false, why: 'its storage hung (a deadline, a hung path or a blocked mount) — never tried here' };
+  if (fileStorageHung(fp)) return { ok: false, why: 'its storage hung (a deadline, a hung path or a blocked mount) — never tried here' };
   const stood = Date.now() - rec.firstAt;
   if (stood < SLICED_AFTER_MS) return { ok: false, why: `refused for ${Math.round(stood / 1000)} s — the main process reads it past ${SLICED_AFTER_MS / 1000} s` };
   let mp = false; try { mp = require('../mount-door').blocked(fp); } catch { mp = false; }
-  if (mp) { rec.storageHung = true; return { ok: false, why: 'its mount is blocked' }; }
+  if (mp) return { ok: false, why: 'its mount is blocked' };
   if (_transcriptPool && typeof _transcriptPool._hungOf === 'function' && _transcriptPool._hungOf({ fp }, 'jsonlTail', 0)) return { ok: false, why: 'the transcript pool remembers it hung' };   // patience 0: any entry AT OR ABOVE it refuses (every transcript entry is one)
   if (_slicedParked) return { ok: false, why: 'a read on the main process is still parked in a file that never answered' };
   return { ok: true, why: `the transcript reader refused it for ${Math.round(stood / 1000)} s (${rec.count} refusals: ${rec.why})` };
@@ -943,7 +960,7 @@ function _slicedTurn(kind, fp, read) {
     sayOnce(fp, `[transcript] ${path.basename(fp)}: ${road.why} — its history is read on the main process in bounded slices (row B-422c)`);
     try { return await read(); }
     catch (e) {
-      if (e && (e.storageHung || e.code === 'sliced_read_deadline')) (_fileRefusals.get(fp) || noteFileRefusal(fp, { why: e.message })).storageHung = true;   // a record evicted meanwhile is made again
+      if (e && (e.storageHung || e.code === 'sliced_read_deadline')) (_fileRefusals.get(fp) || noteFileRefusal(fp, { why: e.message })).ownDeadline = true;   // a record evicted meanwhile is made again
       sayOnce('failed:' + fp, `[transcript] ${path.basename(fp)}: the main process's read of its history failed (${(e && e.message) || e}) — «not loaded» (row B-422c)`);
       throw e;
     }

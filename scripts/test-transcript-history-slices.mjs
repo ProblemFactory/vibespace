@@ -235,8 +235,8 @@ console.log('⑤b the read note\'s two ends');
   const Ra = await road('⑤b(a) a parse of the grown file then', () => { const l = SS.parseSessionJsonl(sa, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
   await new Promise((res) => setImmediate(res));
   ok(Ra.reads.length === 0 && fail.calls.filter((o) => o === 'jsonlTail').length === 0, `${Ra.name}: no call of any kind on the transcript (${Ra.reads.length}), no warm asked (${fail.calls.length} pool calls) — the copy last read answered (${Ra.out && Ra.out.n} records)`, { reads: Ra.reads.slice(0, 4), calls: fail.calls, out: Ra.out });
-  // (b) THE POOL'S WORD ENDS IT: the pool answers again (the warm's task scan reaches it) — the note ends, the next parse of the
-  // grown file is the old road's (RED: the note kept, the stale copy answered «not loaded» on a healthy hub)
+  // (b) THE POOL ANSWERING AGAIN: a warm that reaches it, then the file grown — the parse answers the grown file WHOLE (its re-warm
+  // folds the append in, one stat shows the copy is the file): never a stale «not loaded» on a healthy hub
   const sb = sids[5], fb = claudeFp(sb);
   C._setTranscriptPoolForTest(fail);
   ok(await SS.warmSessionJsonlAsync(sb, cwd) === true, 'premise: a second history read on the main process');
@@ -245,7 +245,7 @@ console.log('⑤b the read note\'s two ends');
   const n0 = SS.parseSessionJsonl(sb, cwd).length;
   fs.appendFileSync(fb, '{"type":"user","uuid":"after","message":{"role":"user","content":"q"}}\n');
   const nb = SS.parseSessionJsonl(sb, cwd);
-  ok(!nb.notLoaded && nb.length === n0 + 1, `⑤b(b) the pool answered again ⇒ the read note ended: the grown file's parse is the old road's (${nb.length} records, untagged)`, { n0, n: nb.length, notLoaded: nb.notLoaded });
+  ok(!nb.notLoaded && nb.length === n0 + 1, `⑤b(b) the pool answering again: the grown file's parse answers it whole (${nb.length} records, untagged)`, { n0, n: nb.length, notLoaded: nb.notLoaded });
 }
 console.log('⑥ a deadline on the codex merged read');
 {
@@ -268,8 +268,8 @@ console.log('⑦ the record\'s bounds');
   const fpH = path.join(HOME, 'hung-first.jsonl');
   C._setTranscriptPoolForTest(stub('path-hung')); await ask(fpH);
   C._setTranscriptPoolForTest(stub('no-worker'));
-  for (let i = 0; i < 700; i++) await ask(path.join(HOME, `many-${i}.jsonl`));
-  ok(/storage hung/.test(C.slicedRoadFor(fpH).why) && C.slicedState().files <= 512 + 1, `⑦ the storage's record outlives the bound (700 records after it: ${C.slicedState().files} kept, it among them — «${C.slicedRoadFor(fpH).why}»)`, C.slicedState());
+  for (let i = 0; i < 4200; i++) await ask(path.join(HOME, `many-${i}.jsonl`));
+  ok(/storage hung/.test(C.slicedRoadFor(fpH).why) && C.slicedState().files <= 4096 + 1, `⑦ the storage's record outlives the bound (4200 records after it: ${C.slicedState().files} kept, it among them — «${C.slicedRoadFor(fpH).why}»)`, C.slicedState());
 }
 console.log('⑧ output identity on every small shape');
 {
