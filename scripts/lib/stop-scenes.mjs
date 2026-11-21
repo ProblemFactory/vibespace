@@ -12,7 +12,7 @@ const require = createRequire(path.join(ROOT, 'scripts', 'lib', 'stop-scenes.mjs
 const PI = require(path.join(ROOT, 'src/proc-identity.js'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 5000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await sleep(20); } return !!(await fn()); };
-const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAlone = false, before = null, ready = null, jobsMod = null, deps = {} } = {}) => {
+const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAlone = false, before = null, ready = null, jobsMod = null, deps = {}, refusal = null } = {}) => {
   const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true });
   fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), wrapperText);
   const marker = path.join(dd, 'queue.lock'), heard = path.join(dd, 'heard');
@@ -36,9 +36,13 @@ const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAl
   const pre = before ? before({ dd, stamp, tree, jm }) : null;
   const heldOut = !!stamp && PI.keptOut([]).some((x) => x[0] === Number(stamp.pid));   // the engine keeps its wrappers out of other stops' walks
   if (signalAlone) process.kill(Number(stamp.pid), 'SIGTERM'); else jm.stop(job, { force });
-  await until(async () => { await jm._sweep(); return ['interrupted', 'failed', 'done'].includes(job.state); }, 8000);
-  const kept = (m) => !!(pre && pre.keep && pre.keep.has(m.pid));   // what the scene expects to live on (never waited for)
-  await until(() => tree.filter((m) => !kept(m)).every((m) => PI.aliveIdentity(m) === false), 4000);
+  const logNow = () => { try { const run = job.runs[job.runs.length - 1]; return fs.readFileSync(path.join(dd, 'job-logs', job.id, String(run.startedAt), 'current.log'), 'utf8'); } catch { return ''; } };
+  if (refusal) await until(() => refusal.test(logNow()), 4000);   // B-2c5c r1263: a REFUSED stop is read by its line — the job runs on (never waited out)
+  else {
+    await until(async () => { await jm._sweep(); return ['interrupted', 'failed', 'done'].includes(job.state); }, 8000);
+    const kept = (m) => !!(pre && pre.keep && pre.keep.has(m.pid));   // what the scene expects to live on (never waited for)
+    await until(() => tree.filter((m) => !kept(m)).every((m) => PI.aliveIdentity(m) === false), 4000);
+  }
   const after = pre && pre.after ? await pre.after() : null;   // read before this scene ends what is left
   const left = tree.filter((m) => PI.aliveIdentity(m) === true);
   const free = spawnSync('flock', ['-n', marker, 'true']).status === 0;

@@ -12899,6 +12899,8 @@ export default {
   "your setting": "あなたの設定",
   "the cluster’s default": "クラスターの既定値",
   "the default": "既定値",
+  "Not restarted by itself: its main process was VibeSpace itself, and a restart would start a second one. Start it again if you mean to.": "自動では再起動しません：メインプロセスが VibeSpace 自身で、再起動すると 2 つ目が起動するためです。必要なら手動でもう一度起動してください。",
+  "This job runs VibeSpace itself: when VibeSpace and its conversations pass this memory bound, they all end together.": "このジョブは VibeSpace 自身を実行しています：VibeSpace とその会話がこのメモリ上限を超えると、すべて一緒に終了します。",
   "Memory bound": "メモリ上限",
   "unbounded": "上限なし",
   "from its next run": "次回の実行から",

@@ -222,15 +222,35 @@ const hubBefore = (expectEnded) => ({ dd }) => {
 };
 {
   const ddOf = (tag) => path.join(D, tag);
-  const hs = await jobScene(WRAP, 'job-hub', { argv: hubArgv(ddOf('job-hub')), signalAlone: true, before: hubBefore(false), ready: hubReady });
-  ok(/\[job-wrapper\] stop: its tree walk left alone 1 process it does not own/.test(hs.log), 'cure 2 (its reading): the wrapper\'s own line SAYS what its walk left alone (a stop it heard alone, no engine intent)', hs.log.split('\n').filter((l) => /job-wrapper\] stop/.test(l)));
-  ok(hs.after && hs.after.hub === 2 && hs.after.alive === 2 && hs.tree.some((m) => m.comm === 'timeout') && !hs.left.some((m) => m.comm === 'timeout'), 'the wrapper\'s own walk keeps out the HUB of data/server.pid — the stand-in hub and its child live on; the job\'s own timeout ended', { after: hs.after, left: names(hs.left) });
-  const KO = 'exclude: ko });';
+  // r1263 (b), THE ONE RECOGNISER: this job's main STARTED the hub of data/server.pid as its child (beside its own work) — it LEADS TO
+  // the hub (the hub's own parent chain reaches the job through it), so the stop it heard alone is REFUSED by the main door, by name,
+  // as the engine's main door answers the same shape; its walk never runs and nothing is signalled
+  const HP = path.join(ddOf('job-held'), 'held.pid');
+  const KO = 'exclude: ko });', NOKO = 'function keptOutHere() {\n';
+  // the three scenes are INDEPENDENT (their own folders, managers and processes): they run together — the suite's time is the slowest's
+  const [hs, hh, hc] = await Promise.all([
+    jobScene(WRAP, 'job-hub', { argv: hubArgv(ddOf('job-hub')), signalAlone: true, before: hubBefore(false), ready: hubReady, refusal: /stop: SIGTERM refused — this job is the running VibeSpace/ }),
+    jobScene(WRAP, 'job-held', { argv: ['sh', '-c', `setsid sleep 315 & echo $! > ${JSON.stringify(HP)}; timeout 316 sleep 316 & wait`], signalAlone: true,   // its own group: only the walk meets it
+    ready: (tree) => tree.some((m) => m.comm === 'timeout') && fs.existsSync(HP),
+    before: ({ jm }) => {
+      const id = PI.identityOf(Number(fs.readFileSync(HP, 'utf8').trim())); mine.push(id);
+      const job = [...jm.jobs.values()][0], run = job.runs[job.runs.length - 1];
+      fs.writeFileSync(path.join(jm._ctlDir(job, run.startedAt), 'stop.json'), JSON.stringify({ sig: 'SIGTERM', at: Date.now(), alone: true, keepOut: [[id.pid, id.starttime]] }));   // the engine's intent, as it writes it
+      return { keep: new Set([id.pid]), after: async () => ({ held: PI.aliveIdentity(id) === true }) };
+    } }),
+    WRAP.includes(KO) ? jobScene(anchored(WRAP.replace(KO, 'exclude: [] });   // MUTANT: keeps nothing out'), NOKO, 'function keptOutHere() { return [];   // MUTANT: keeps nothing out\n', 'b7ca1-keeps-nothing'), 'job-hub-mut', { argv: hubArgv(ddOf('job-hub-mut')), signalAlone: true, before: hubBefore(true), ready: hubReady }) : null,
+  ]);
+  ok(/\[job-wrapper\] stop: SIGTERM refused — this job is the running VibeSpace: it is not stopped here \(its main process is the VibeSpace hub, or what started it, as this job\)/.test(hs.log) && !/left alone/.test(hs.log),
+    'r1263 (b): a main that started the hub of data/server.pid as its child LEADS TO the hub — the stop it heard alone is refused by name (the main door, as the engine\'s), its walk never runs', hs.log.split('\n').filter((l) => /job-wrapper\] stop/.test(l)));
+  ok(hs.after && hs.after.hub === 2 && hs.after.alive === 2 && hs.left.some((m) => m.comm === 'timeout'), '…nothing is signalled: the stand-in hub, its child and the job\'s own work live on (a stop of VibeSpace itself ends them)', { after: hs.after, left: names(hs.left) });
+  // cure 2 (its reading): the wrapper's own line SAYS what its walk left alone — met where the ENGINE's stop reaches the wrapper ALONE
+  // (its intent, `alone`) naming a process under the job's main that it keeps out (a holder it holds); the main lives, so the wrapper's
+  // own walk meets it. The job's own timeout ended
+  ok(/\[job-wrapper\] stop: its tree walk left alone 1 process it does not own/.test(hh.log) && hh.after && hh.after.held === true && hh.tree.some((m) => m.comm === 'timeout') && !hh.left.some((m) => m.comm === 'timeout'),
+    'cure 2 (its reading): the wrapper\'s own line SAYS what its walk left alone (a process the engine keeps out, under the job\'s main, its stop reaching the wrapper alone) — it lives on; the job\'s own timeout ended', { said: hh.log.split('\n').filter((l) => /job-wrapper\] stop/.test(l)), after: hh.after, left: names(hh.left) });
   if (!WRAP.includes(KO)) ok(false, 'the anchor of the control «the wrapper keeps nothing out» is not in the source');
   else {
     // B-7ca1: the stand-in is node, kept by the walk's exclusion AND the keep test — «keeps nothing out» cuts every keep-out
-    const NOKO = 'function keptOutHere() {\n';
-    const hc = await jobScene(anchored(WRAP.replace(KO, 'exclude: [] });   // MUTANT: keeps nothing out'), NOKO, 'function keptOutHere() { return [];   // MUTANT: keeps nothing out\n', 'b7ca1-keeps-nothing'), 'job-hub-mut', { argv: hubArgv(ddOf('job-hub-mut')), signalAlone: true, before: hubBefore(true), ready: hubReady });
     ok(hc.after && hc.after.hub === 2 && hc.after.alive === 0 && !/left alone/.test(hc.log), 'CONTROL (the wrapper keeps nothing out): the stand-in hub and its child are ENDED by the job\'s stop — and nothing is said left alone', hc.after);
   }
 }
@@ -575,7 +595,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   const fs10 = { readFileSync: (f) => { const m = /^\/proc\/(\d+)\/cmdline$/.exec(f); if (!m || !PROC10[m[1]]) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return PROC10[m[1]][0]; },
     readlinkSync: (f) => { const m = /^\/proc\/(\d+)\/cwd$/.exec(f); if (!m || !PROC10[m[1]]) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return PROC10[m[1]][1]; } };
   const shapedOf = (src) => new Function('fs', 'path', 'CHECKOUT', 'SERVER_JS', 'nodeOrUnknown', `${fnOf(src, 'function hubShaped(pid) {')}\nreturn hubShaped;`)(fs10, path, D10, path.join(D10, 'server.js'), (p) => !(PROC10[p] && PROC10[p][2] === 'tail'));   // eslint-disable-line no-new-func
-  const keptOf = (src, shaped) => new Function('keptOutHere', 'hubShaped', 'nodeOrUnknown', 'keptByChain', 'process', `${fnOf(src, 'function keptTest() {')}\nreturn keptTest();`)(() => [[process.pid, 0]], shaped, () => true, PI10.keptByChain, { pid: wrap2.pid });   // eslint-disable-line no-new-func
+  const keptOf = (src, shaped) => new Function('keptOutHere', 'hubShaped', 'nodeOrUnknown', 'keptByChain', 'hubChain', 'process', `${fnOf(src, 'function keptTest() {')}\nreturn keptTest();`)(() => [[process.pid, 0]], shaped, () => true, PI10.keptByChain, PI10.hubChain, { pid: wrap2.pid });   // eslint-disable-line no-new-func
   PROC10[1007] = ['tail\0-f\0server.js\0', D10, 'tail'];   // its read (SHOULD 6): a tail of server.js in the checkout — not node
   const sh = shapedOf(W), shapes = { abs: sh(1001), rel: sh(1002), other: sh(1003), relElsewhere: sh(1004), shell: sh(1005), gone: sh(1006), tail: sh(1007) };
   const k2 = keptOf(W, () => false), wk = { job: job2 ? k2(job2) : null, hub: k2(process.pid), hubKid: k2(hubKid2.pid) };
@@ -597,7 +617,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   // — the job's own); nothing is signalled (process.kill and the handle's kill are recorders)
   stat(4500, 'node', 4100, 100); stat(4501, 'node', 4500, 101); stat(4502, 'node', 4500, 104); stat(4600, 'node', 4100, 102); stat(4601, 'sh', 4600, 103);
   PROC10[4501] = [`node\0${D10}/server.js\0`, '/']; PROC10[4502] = ['node\0.\0', D10]; PROC10[4601] = ['sh\0-c\0sleep 30\0', D10];   // 4502: a hub run as `node .` — known by its pid file only
-  const keptFor = (src, wrapperPid, ko) => new Function('keptOutHere', 'hubShaped', 'nodeOrUnknown', 'keptByChain', 'process', `${fnOf(src, 'function keptTest() {')}\nreturn keptTest;`)(() => ko, shapedOf(src), () => true, (p, k, o) => PI10.keptByChain(p, k, { ...o, procRoot: PR }), { pid: wrapperPid });   // eslint-disable-line no-new-func
+  const keptFor = (src, wrapperPid, ko) => new Function('keptOutHere', 'hubShaped', 'nodeOrUnknown', 'keptByChain', 'hubChain', 'process', `${fnOf(src, 'function keptTest() {')}\nreturn keptTest;`)(() => ko, shapedOf(src), () => true, (p, k, o) => PI10.keptByChain(p, k, { ...o, procRoot: PR }), (h, o) => PI10.hubChain(h, { ...o, procRoot: PR }), { pid: wrapperPid });   // eslint-disable-line no-new-func
   const DOOR0 = 'const HUB_MAIN_WORDS = ', DOOR1 = 'const termMain = (p, sig) => {';
   const doorOf = (src, mainPid, wrapperPid, ko = []) => {
     const calls = [], log = [];
@@ -693,7 +713,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   const wrongStart = mainOf(JM10, () => ({ ...wid, starttime: wid.starttime + 1 }), wid.pid)(), otherParent = mainOf(JM10, () => wid, process.pid)();
   const realParent = mainOf(JM10, () => parentId, undefined)(), realGrand = grandId ? mainOf(JM10, () => grandId, undefined)() : null, ourChild = mainOf(JM10, () => wid, undefined)();
   let latchStamp = parentId; const latched = mainOf(JM10, () => latchStamp, undefined), first = latched(); latchStamp = null; const after = latched();
-  const CHAIN = '    const yes = seam ? seam === Number(st.pid) && this._verifyAlive(st) : PI.keptByChain(process.ppid, new Map([[Number(st.pid), Number(st.starttime) || -1]]));';
+  const CHAIN = '    const yes = seam ? seam === Number(st.pid) && this._verifyAlive(st) : PI.hubChain(process.pid, { stop: Number(st.pid), stopStart: Number(st.starttime) || -1 }).reached;';   // r1263 (b): the one recogniser
   const JMchain = cut(CHAIN, '    const yes = seam ? seam === Number(st.pid) && this._verifyAlive(st) : Number(st.pid) === process.ppid && this._verifyAlive(st);', 'main-door-parent-only');
   const grandX = grandId ? mainOf(JMchain, () => grandId, undefined)() : null;
   ok(wrongStart === false && otherParent === false && realParent === true && (realGrand === true || grandId === null) && ourChild === false && first === true && after === true,
@@ -915,7 +935,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
     escScene(WRAP, 'esc-force-mut', { force: true, jobsMod: noMark }),
     escScene(WRAP, 'esc-force-jobmark', { force: true, jobsMod: jobMark }),
     launchScene(WRAP, 'esc-launcher'),
-    launchScene(anchored(WRAP, KA, "    if (kept && kept(e)) continue;   // MUTANT: no ancestors kept", 'b7ca1-ancestors-cut'), 'esc-launcher-mut'),
+    launchScene(anchored(anchored(WRAP, KA, "    if (kept && kept(e)) continue;   // MUTANT: no ancestors kept", 'b7ca1-ancestors-cut'), '  const hub = Number(all.hub) || 0, above = hub > 1 && keep.has(hub) ? hubChain(hub, { stop: process.pid }).pids : new Set();\n', '  const hub = 0, above = new Set();   // MUTANT: no ancestors kept (r1263: nor the keep test\'s chain)\n', 'b7ca1-ancestors-cut-2'), 'esc-launcher-mut'),
     escScene(oldCount, 'esc-count-mut')
   ]);   // B-d8f4's other scenes (no /proc, the fold, the deaf escapee, EPERM) and its engine legs run in scripts/test-stop-rung.mjs (this suite's fast bound)
   // B-d8f4 (7): the stop step names the tree's members outside its group it signalled (`timeout` and its `sleep`, in timeout's own group) —

@@ -2264,9 +2264,21 @@ class JobManager {
     // orphans this hub): this process's own parent chain reaches the run's wrapper by its identity (pid + start). A fast suite's stand-in
     // parent (`d.hubParentPid`) is the one hop it names, proven alive by the stamp
     const seam = Number(this.d.hubParentPid);
-    const yes = seam ? seam === Number(st.pid) && this._verifyAlive(st) : PI.keptByChain(process.ppid, new Map([[Number(st.pid), Number(st.starttime) || -1]]));
+    const yes = seam ? seam === Number(st.pid) && this._verifyAlive(st) : PI.hubChain(process.pid, { stop: Number(st.pid), stopStart: Number(st.starttime) || -1 }).reached;   // r1263 (b): THE ONE RECOGNISER (the wrapper's too)
     if (yes) { latch.add(run); if (!run.hubMain || run.hubMainAt !== this._bootAt) { run.hubMain = true; run.hubMainAt = this._bootAt; this._dirty = true; } }   // B-2c5c unit 2: kept on the run (jobs.json) — a later hub reads it after this one is gone
     return yes;
+  }
+  /** r1263 (a): ONE FACT, ONE ACCESSOR — «this run's main is the hub, or leads to it» (a launcher on the hub's own parent chain), from
+   *  whichever record exists: the wrapper's end record (exit.json `hubMain`, its latch) or the run's KEPT fact (`run.hubMain`, proven by
+   *  a hub's boot — the one record left when the wrapper was killed). EVERY road that ends, reaps, judges or replays a run reads it here
+   *  (test-job-hub-main's census: a reader of the exit record's fact alone is red by name) */
+  _hubMainOf(run, exit) { return !!((exit && exit.hubMain === true) || (run && run.hubMain === true)); }
+  /** r1263 MUST 1: a SERVICE whose run's main was the hub is never restarted by itself — not by its policy, not by a boot's replay: a
+   *  restart would start a second hub beside the one that runs. Not wanted up any more; said on its journal AND its card
+   *  (`hubMainDown`, cleared by the person's Start) */
+  _hubMainDown(job) {
+    job.state = 'down'; job.desiredUp = false; job.hubMainDown = now(); this._teardownPublish(job);
+    this._touch(job, { what: 'its main process was the VibeSpace hub — not restarted by itself: a restart would start a second hub beside the one that runs (start it again by hand if you mean to)' });
   }
   /** B-2c5c (THE MAIN DOOR): the refusal by name — said once a run and a road in the run's own log and the hub's; the job is not said
    *  stopped or ended (no stop asked, no grace, no kill step) */
@@ -2281,7 +2293,7 @@ class JobManager {
   /** B-2c5c, its readers' should (round wwa7r2uc1): a process UP this hub's own parent chain — its launcher (`./run.sh`, `npm start`)
    *  and what started it — is the hub's too: a reap after a killed wrapper SIGKILLed the launcher one by one (the hub left with no
    *  supervisor). Read up from our parent ONCE a pass (a live ancestor's pid is that process now) */
-  _hubAncestors() { const out = new Set(); for (let p = process.ppid, hop = 0; p > 1 && hop < 64 && !out.has(p); hop++) { out.add(p); p = PI.ppidOf(p) || 0; } return out; }   // 主开发 02:46Z: read ONCE a pass (it is the main loop), checked by membership
+  _hubAncestors() { const out = PI.hubChain(process.pid).pids; out.delete(process.pid); return out; }   // r1263 (b): the hub's own chain, THE ONE RECOGNISER (the wrapper's walks read the same)   // 主开发 02:46Z: read ONCE a pass (it is the main loop), checked by membership
   /** B-2c5c: does this hub live in `scope`? Its OWN cgroup (/proc/self/cgroup, read once a life — a process never changes its cgroup
    *  by itself; `d.hubCgroup` = a fast suite's) is the scope's or under it */
   async _hubInScope(scope) {
@@ -2444,7 +2456,7 @@ class JobManager {
     if (!scope || !scope.dir) return true;
     // B-2c5c unit 1: its MAIN WAS THE HUB (the wrapper's record) — what its scope holds is the hub's (its conversations, its helpers): never
     // reaped, whatever road asked (said once)
-    { const ex = this._readExit(job, run); if (ex && ex.hubMain === true) { if (!run._hubMainSaid) { run._hubMainSaid = true; this.d.log(`[jobs] ${job.id}: its main process was the VibeSpace hub — what is left in its scope is the hub's: not reaped`); } return true; } }
+    { const ex = this._readExit(job, run); if (this._hubMainOf(run, ex)) { if (!run._hubMainSaid) { run._hubMainSaid = true; this.d.log(`[jobs] ${job.id}: its main process was the VibeSpace hub — what is left in its scope is the hub's: not reaped`); } return true; } }
     const st = run._reap || (run._reap = {}); // this run's reap across its attempts (runtime only): the count it read, its kill
     // round 7: ONLY A WRAPPER PROVEN GONE — an unreadable stamp is no death (a LIVE service's scope was killed blind at a boot
     // that could not read its pid.json): deferred, said once with what could not be read; a wrapper alive after all reaps nothing
@@ -2738,7 +2750,7 @@ class JobManager {
     if (this._reapLater.has(run) || (this._reaping && this._reaping.has(run))) return true;
     if (this._reaped && this._reaped.has(run)) return false;
     const exit = this._readExit(job, run);
-    return !(exit && (exit.scopeEmpty === true || exit.hubMain === true));   // B-2c5c unit 1: what a hub-main run left is the hub's — nothing to wait for
+    return !((exit && exit.scopeEmpty === true) || this._hubMainOf(run, exit));   // B-2c5c unit 1 + r1263: what a hub-main run left is the hub's — nothing to wait for
   }
   /** true: the start may go; false: it may not (round 8 — a run that may still run, what it kept not proven ended), said */
   async _clearBefore(job, run, trigger) {
@@ -3450,7 +3462,7 @@ class JobManager {
         // 6: a reap past its read's bound is never dropped — it enqueues itself and every tick retries it (_reapScope)
         // B-2c5c unit 1: a run whose MAIN WAS THE HUB (exit.json `hubMain`) left the hub's own conversations and helpers in its scope —
         // never reaped (never this job's)
-        if (!(exit && (exit.scopeEmpty === true || exit.hubMain === true || (exit.left && exit.left.kept)))) this._reapScope(job, run).catch(() => { });
+        if (!((exit && (exit.scopeEmpty === true || (exit.left && exit.left.kept))) || this._hubMainOf(run, exit))) this._reapScope(job, run).catch(() => { });   // r1263: the kept fact too (a killed wrapper wrote no exit record)
         if (exit) { this._finalizeRun(job, run, exit, 'boot'); continue; }
         if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); continue; }
         // no live process, no exit record ⇒ died with the environment
@@ -3519,6 +3531,9 @@ class JobManager {
       if (v.why) run.memoryJudge = { why: v.why, jobAnonMb: v.jobAnonMb, anonMb: v.anonMb, fileMb: v.fileMb, usedMb: v.usedMb, limitMb: v.limitMb, ...(v.oomKills !== undefined ? { oomKills: v.oomKills } : {}) };
       if (!run.memoryBound) { const b = this._ctlJson(job, run, 'bound.json'); if (b) this._adoptBound(run, b); }
     }
+    // r1263 MUST 1: THE NEXT HUB'S BOOT reads the KEPT fact — a run whose main was the hub (its wrapper killed: no exit record) ended
+    // with that hub; a SERVICE is not replayed (a second hub beside this one), nothing is counted toward a park
+    if (job.kind === 'service' && this._hubMainOf(run, null)) { this._hubMainDown(job); return; }
     const mp = ends ? this._countEnd(job, v.cause) : null;
     if (v.cause === 'oom' && ends) {
       const said = `${M.memoryEndWhat(run)} — it held ${M.memoryWords(v.jobAnonMb)} of the instance's ${M.memoryWords(v.anonMb)} of anon memory (limit ${M.memoryWords(v.limitMb)})`;
@@ -3708,6 +3723,7 @@ class JobManager {
     if (!p) return null;
     delete job._press;
     job.desiredUp = p.was.desiredUp; job.supervise = p.was.supervise;
+    if (p.was.hubMainDown) job.hubMainDown = p.was.hubMainDown;   // B-2c5c r1263: the card's «not restarted by itself» comes back with the refused press
     this._touch(job); this._save();
     return p;
   }
@@ -3826,10 +3842,9 @@ class JobManager {
     // B-2c5c unit 2: A SERVICE WHOSE RUN'S MAIN WAS THE HUB is never restarted by itself — not by its policy, not by a boot's replay: a
     // restart would start a second hub beside the one that runs (it cannot bind its port and parks). Not wanted up any more, said; a
     // person's Start is theirs
-    const hubMainEnd = job.kind === 'service' && (exit.hubMain === true || run.hubMain === true);
+    const hubMainEnd = job.kind === 'service' && this._hubMainOf(run, exit);
     if (hubMainEnd) {
-      job.state = 'down'; job.desiredUp = false; this._teardownPublish(job);
-      this._touch(job, { what: 'its main process was the VibeSpace hub — not restarted by itself: a restart would start a second hub beside the one that runs (start it again by hand if you mean to)' });
+      this._hubMainDown(job);
     } else if (job.kind === 'service' && windowEnd) {
       job.state = 'down'; this._touch(job, { what: 'down (update_window: it started while VibeSpace was updating itself and never ran — the restarted server starts it again)' }); // never a crash of the supervisor's count: the boot replay starts a desiredUp service
     } else if (job.kind === 'service' && memPark && memPark.park) {
@@ -3956,7 +3971,7 @@ class JobManager {
         // round 4: a wrapper gone, its scope not — never an ended run still running (a service's KEPT processes excepted —
         // round 5, the ruling). Round 6: the run is judged from its exit record NOW and its reap goes on beside it (bounded; one
         // that does not finish enqueues itself — _reapScope); a restart waits for it (_startAfter)
-        if (!(exit.scopeEmpty === true || exit.hubMain === true || (exit.left && exit.left.kept))) this._reapScope(job, run).catch(() => { }); // measured empty: nothing to reap · B-2c5c unit 1: the hub's, never reaped
+        if (!(exit.scopeEmpty === true || (exit.left && exit.left.kept) || this._hubMainOf(run, exit))) this._reapScope(job, run).catch(() => { }); // measured empty: nothing to reap · B-2c5c unit 1: the hub's, never reaped
         this._finalizeRun(job, run, exit, 'sweep');
         continue;
       }
@@ -4673,8 +4688,9 @@ class JobManager {
     // r1033 (THE MUST): the record is made or joined only where the start GOES AHEAD — never before a return that answers
     // «already running», a vet's refusal or «stop it first» (a stale record would be undone, and its presser woken, by a later
     // automatic start's refusal); the snapshot is this press's state BEFORE its writes
-    const before = { desiredUp: job.desiredUp, supervise: job.supervise };
+    const before = { desiredUp: job.desiredUp, supervise: job.supervise, ...(job.hubMainDown ? { hubMainDown: job.hubMainDown } : {}) };   // B-2c5c r1263: the card's fact too
     const joinPress = () => { const pr = job._press || (job._press = { was: before, by: [] }); if (caller && !pr.by.some((c) => c === caller || (c.isUser && caller.isUser) || (c.conversationId && c.conversationId === caller.conversationId))) pr.by.push(caller); };
+    delete job.hubMainDown;   // B-2c5c r1263: the person's Start — the card's «not restarted by itself» is over (a refused start puts it back: _undoRefusedPress)
     job.desiredUp = true;
     job.supervise = { consecutiveFails: 0, parkedAt: null };
     // lane jobs-memory-bound: the owner acted — a cron parked for its child's out-of-memory ends counts its child afresh
@@ -5009,6 +5025,8 @@ class JobManager {
       ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); const own = job.kind === 'cron' && job.action && job.action.task ? job.action.task : job; return { memoryMb: m.mb, memoryAskedMb: m.askedMb !== undefined ? m.askedMb : m.mb, memorySource: m.source, memoryCap: m.cap || null, nodeHeap: (() => { const mh = M.memoryMbOf(own, this._memoryCtx({ hub: true })); return M.nodeHeapOf({ boundMb: mh.mb, source: mh.source, nodeOptions: ((own.cmd || {}).env || {}).NODE_OPTIONS }); })() }; })(), // B-d73c: the heap its Node gets — worked out from the SAME context as the spawn's flag (round wrpdo2eev 4: one number) · round 4: the NEXT run's (a live run's own rides its memoryBound.cap)
       memoryBound: run && run.memoryBound ? { ...run.memoryBound, words: M.boundWords(run.memoryBound) } : null, oomEnds: (job.supervise && job.supervise.oomEnds) || 0, // round 5: the record's words (an unbounded scope is never «0 MB»)
       parkedFor: (job.supervise && job.supervise.parkedAt && job.supervise.parkedFor) || null,
+      // r1263: what the card says of a hub-main job — a service not restarted by itself, and (4c) a hub that runs under this job's bound
+      hubMainDown: !!job.hubMainDown, runsHub: !!(run && !run.endedAt && this._hubMainOf(run, null)),
       run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '', ...(run.left ? { left: { n: run.left.n, kept: !!run.left.kept, force: !!run.left.force, cleared: run.left.cleared || 0, gone: run.left.gone || 0, escaped: run.left.escaped || 0, outside: run.left.outside || 0, short: run.left.short || 0 } } : {}), ...(M.runEndWords(run) ? { endWords: M.runEndWords(run) } : {}) } : null, // round 5: what it left running / the kill we made
       runsCount: (job.runs || []).length,
       // triage (§13): the server computes the acknowledgement over the FULL

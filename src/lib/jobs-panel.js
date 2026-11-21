@@ -326,9 +326,15 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
   // a FAILED row says why (rule 4): the exit code rides stateLine, the last
   // non-empty log line is the actionable fact — shown in the compact rail too
   const lastLine = ['failed', 'missed', 'interrupted'].includes(j.state) && j.run && j.run.lastLine ? j.run.lastLine : '';
-  if (!compact || j.progress || lastLine) {
+  // B-2c5c (r1263): a job whose main is (or was) VibeSpace itself says so on its card, compact too — a service no longer wanted up
+  // because a restart would start a second VibeSpace, and (4c) a VibeSpace running under this job's memory bound (it ends WITH its
+  // conversations when it passes the bound)
+  const hubNote = j.hubMainDown && j.state === 'down' && !j.desiredUp ? t('Not restarted by itself: its main process was VibeSpace itself, and a restart would start a second one. Start it again if you mean to.')
+    : j.runsHub && /^\d/.test(memoryChip(j, t) || '') ? t('This job runs VibeSpace itself: when VibeSpace and its conversations pass this memory bound, they all end together.') : '';
+  if (!compact || j.progress || lastLine || hubNote) {
     const l2 = document.createElement('div'); l2.className = 'jobs-card-l2';
     if (lastLine) { const ll = document.createElement('span'); ll.className = 'jobs-lastline'; ll.textContent = lastLine; ll.title = lastLine; l2.appendChild(ll); }
+    if (hubNote) { const hn = document.createElement('span'); hn.className = 'jobs-note'; hn.textContent = hubNote; l2.appendChild(hn); }
     if (j.progress) { const pg = document.createElement('span'); pg.className = 'jobs-chip jobs-chip-prog'; pg.textContent = j.progress; l2.appendChild(pg); }
     if (j.runsCount > 1) { const rc = document.createElement('span'); rc.className = 'jobs-chip'; rc.textContent = '×' + j.runsCount; l2.appendChild(rc); }
     for (const p of j.ports || []) { const c = document.createElement('span'); c.className = 'jobs-chip'; c.textContent = ':' + p; l2.appendChild(c); }

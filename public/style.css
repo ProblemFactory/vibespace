@@ -6728,6 +6728,7 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 .jobs-group-bad { color: var(--red); border-color: var(--red); }
 .jobs-group-seen { color: var(--text-dim); }
 .jobs-lastline { font-family: monospace; font-size: 10px; color: var(--red); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.jobs-note { font-size: 10px; color: var(--yellow); white-space: normal; max-width: 100%; }
 .jobs-card-archived { opacity: .75; }
 .jobs-archived-toggle { margin-top: 6px; }
 .jobs-summary-held { color: var(--yellow); }

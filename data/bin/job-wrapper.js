@@ -723,6 +723,27 @@ function keptByChain(pid, keep, { procRoot = '/proc', maxHops = 64, stop = null,
   }
   return false;
 }
+/** B-2c5c (r1263 (b)): THE ONE RECOGNISER of «this run's main is the hub, or leads to it» — the engine's and the wrapper's, one text.
+ *  The HUB'S OWN parent chain, read up from `hub` (the hub itself first): `pids` = every process on it until `stop` (the run's
+ *  wrapper; never in it) or pid 1 — the hub and the launcher(s) it runs under (`./run.sh`, `npm start`: the hub's own supervisor,
+ *  never a stop's to end); `reached` = the chain met `stop` (by its start, when `stopStart` is given): the run's main IS the hub or
+ *  a launcher of it. The engine reads it from itself (process.pid), the wrapper from the hub of its <data>/server.pid. A link that
+ *  cannot be read ends the walk (not reached) */
+function hubChain(hub, { procRoot = '/proc', maxHops = 64, stop = 0, stopStart = 0 } = {}) {
+  const pids = new Set();
+  let p = Number(hub);
+  for (let hop = 0; hop <= maxHops && p > 1; hop++) {
+    let st = '';
+    try { st = fs.readFileSync(`${procRoot}/${p}/stat`, 'utf8'); } catch { return { pids, reached: false }; }
+    const e = st.lastIndexOf(')');
+    if (e < 0) return { pids, reached: false };
+    const r = st.slice(e + 2).split(' ');
+    if (Number(stop) > 1 && p === Number(stop)) return { pids, reached: !stopStart || Number(stopStart) === Number(r[19]) };
+    pids.add(p);
+    p = Number(r[1]);
+  }
+  return { pids, reached: false };
+}
 // ── SHIPPED TWIN (B-c134) END ──
 // B-c134 A STOP ENDS THE WHOLE TREE IT STARTED: the tree under this wrapper, read at the stop BEFORE its first signal — the members
 // outside our group (setsid, the timeout program, a `systemd-run --scope … env -i`) hear the stop from us through the ONE table,
@@ -759,9 +780,16 @@ const armHubLatch = () => {
   hubLatchTimer = setTimeout(tick, HUB_LATCH.firstMs); hubLatchTimer.unref?.();
 };
 let mainKeptSaid = 0, refusedAt = 0;
-const sayMainKept = (sig) => { if (mainKeptSaid++) return; try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] stop: ${sig} refused — ${HUB_MAIN_WORDS} (its main process is the VibeSpace hub, started as this job)\n`)); } catch { } };
+const sayMainKept = (sig) => { if (mainKeptSaid++) return; try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] stop: ${sig} refused — ${HUB_MAIN_WORDS} (its main process is the VibeSpace hub, or what started it, as this job)\n`)); } catch { } };
 let hubLeftSaid = 0;
-const sayHubLeft = (sig) => { if (hubLeftSaid++) return; try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] stop: ${sig} refused — its main process was the VibeSpace hub and has ended: what is left is the hub's (its conversations and helpers), never this job's to stop\n`)); } catch { } };
+// r1263 small: the words are TRUE — a main that still runs, no longer recognised (its <data>/server.pid rewritten, a clock step), is
+// never said «ended»
+const sayHubLeft = (sig) => {
+  if (hubLeftSaid++) return;
+  const what = mainLive() ? `its main process was the VibeSpace hub (or what started it) and still runs, though it is no longer recognised as the hub (its <data>/server.pid changed): nothing of it is this job's to stop — stop VibeSpace itself to end it`
+    : `its main process was the VibeSpace hub (or what started it) and has ended: what is left is the hub's (its conversations and helpers), never this job's to stop`;
+  try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] stop: ${sig} refused — ${what}\n`)); } catch { }
+};
 const killMain = () => { if (mainKept()) { sayMainKept('SIGKILL'); return false; } try { child.kill('SIGKILL'); return true; } catch { return false; } };
 const termMain = (p, sig) => { if (termed.has(termKey(p)) || !mainLive()) return false; if (mainKept()) { sayMainKept(sig); return false; } const rec = { at: Date.now(), pass: 'stop' }; termed.set(termKey(p), rec); try { process.kill(child.pid, sig); rec.ok = true; return true; } catch { return false; } };   // B-d8f4 (主开发 r1045): every writer of the table says whether its signal landed
 // round 10: the manager's kill of the scope is a delivery too — recorded, once per stop step (r9 sent a natural end's leftovers
@@ -856,6 +884,7 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => {
 function keptOutHere() {
   const out = [];
   try { const f = path.join(__dirname, '..', 'server.pid'), p = Number(String(fs.readFileSync(f, 'utf8')).trim()); if (p > 1 && p !== process.pid && (startedBy(p, fs.statSync(f).mtimeMs) || hubShaped(p))) out.push([p, 0]); } catch { }   // small 1: a STALE file's pid is no hub (one with a hub's argv is: the clock may have stepped)
+  out.hub = out.length ? out[0][0] : 0;   // r1263 (b): WHICH root is the hub of <data>/server.pid — the chain above IT is the hub's own (a conversation holder's is not)
   try { const s = JSON.parse(fs.readFileSync(path.join(ctlDir, 'stop.json'), 'utf8')); if (Array.isArray(s.keepOut)) for (const x of s.keepOut.slice(0, 512)) if (Array.isArray(x) && Number(x[0]) > 1) out.push([Number(x[0]), Number(x[1]) || 0]); } catch { }
   return out;
 }
@@ -878,9 +907,14 @@ function keptTest() {
   const shaped = new Map(), isHub = (p) => { if (!shaped.has(p)) shaped.set(p, hubShaped(p)); return shaped.get(p); };
   // its read r2 (R3): the server.pid root (start 0) is dropped only when it is PROVEN not a hub — not node at all (a recycled pid); a
   // hub run as pm2 / `node .` / a relative path keeps it
-  const ko = keptOutHere().filter(([p, st]) => st || isHub(Number(p)) || nodeOrUnknown(Number(p)));
+  const all = keptOutHere(), ko = all.filter(([p, st]) => st || isHub(Number(p)) || nodeOrUnknown(Number(p)));
   const keep = new Map(ko.map(([p, st]) => [Number(p), Number(st) || 0])), memo = new Map(), stop = new Set([process.pid]);
-  return (pid) => { const p = Number(pid); if (!memo.has(p)) memo.set(p, keptByChain(p, keep, { stop, isRoot: isHub })); return memo.get(p); };
+  // r1263 (b), THE ONE RECOGNISER (the engine reads the same chain from itself — hubChain, the shipped twin): ABOVE the hub of
+  // <data>/server.pid, its own parent chain up to this wrapper — the launcher the hub runs under (`npm start`, a start script: the
+  // job's main when it started the hub as its child, or one backgrounded beside the main) is the hub's own supervisor: never a
+  // stop's, never a drain's. A main on that chain IS «the hub» for the latch and the main door (mainKept)
+  const hub = Number(all.hub) || 0, above = hub > 1 && keep.has(hub) ? hubChain(hub, { stop: process.pid }).pids : new Set();
+  return (pid) => { const p = Number(pid); if (!memo.has(p)) memo.set(p, keptByChain(p, keep, { stop, isRoot: isHub }) || above.has(p)); return memo.get(p); };
 }
 /** B-2c5c r1 (M4): a process that IS a VibeSpace hub of this checkout — `node …/server.js` by its argv (the checkout's own path, or
  *  `server.js` run from the checkout as its cwd). The wrapper lives at <checkout>/data/bin */
@@ -983,9 +1017,9 @@ const stopEsc = new Map();   // B-7ca1: this run's escapees the STOP STEP signal
 /** B-7ca1 (its read r2, S1): the PARENT CHAIN above each kept-out root — a hub's launcher (a task that restarted the hub with
  *  `(setsid ./run.sh &)`: run.sh carries the run's mark, re-parented, not under the hub) is never an escapee; as the engine's
  *  _hubAncestors, bounded (64 hops) */
-function keptAncestors() {
+function keptAncestors() {   // r1263 (b): read through THE ONE RECOGNISER (hubChain, the shipped twin) — keptTest's walks read the same chain
   const out = new Set();
-  for (const [root] of keptOutHere()) for (let p = Number((statOf(root) || [])[1]) || 0, hop = 0; p > 1 && hop < 64 && !out.has(p); hop++) { out.add(p); p = Number((statOf(p) || [])[1]) || 0; }
+  for (const [root] of keptOutHere()) for (const q of hubChain(Number(root)).pids) if (q !== Number(root)) out.add(q);
   return out;
 }
 function escapedOf() { // started after us, outside our group, carrying the job's mark — never us (our own env carries it too); bounded (B-7ca1: it runs at every stop)

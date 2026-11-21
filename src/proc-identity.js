@@ -284,6 +284,27 @@ function keptByChain(pid, keep, { procRoot = '/proc', maxHops = 64, stop = null,
   }
   return false;
 }
+/** B-2c5c (r1263 (b)): THE ONE RECOGNISER of «this run's main is the hub, or leads to it» — the engine's and the wrapper's, one text.
+ *  The HUB'S OWN parent chain, read up from `hub` (the hub itself first): `pids` = every process on it until `stop` (the run's
+ *  wrapper; never in it) or pid 1 — the hub and the launcher(s) it runs under (`./run.sh`, `npm start`: the hub's own supervisor,
+ *  never a stop's to end); `reached` = the chain met `stop` (by its start, when `stopStart` is given): the run's main IS the hub or
+ *  a launcher of it. The engine reads it from itself (process.pid), the wrapper from the hub of its <data>/server.pid. A link that
+ *  cannot be read ends the walk (not reached) */
+function hubChain(hub, { procRoot = '/proc', maxHops = 64, stop = 0, stopStart = 0 } = {}) {
+  const pids = new Set();
+  let p = Number(hub);
+  for (let hop = 0; hop <= maxHops && p > 1; hop++) {
+    let st = '';
+    try { st = fs.readFileSync(`${procRoot}/${p}/stat`, 'utf8'); } catch { return { pids, reached: false }; }
+    const e = st.lastIndexOf(')');
+    if (e < 0) return { pids, reached: false };
+    const r = st.slice(e + 2).split(' ');
+    if (Number(stop) > 1 && p === Number(stop)) return { pids, reached: !stopStart || Number(stopStart) === Number(r[19]) };
+    pids.add(p);
+    p = Number(r[1]);
+  }
+  return { pids, reached: false };
+}
 // ── SHIPPED TWIN (B-c134) END ──
 /** WHAT NO STOP OWNS (B-c134 cure, MUST A — the kill law: a stop never reaches the hub's own subtree). Each road that HOLDS a
  *  process names it here by the identity it already holds — the conversations' holders (ws-handler), the jobs' wrappers (the jobs
@@ -482,7 +503,7 @@ function birthReading(pid, { start = '', boot = '' } = {}, opts) {
 }
 
 module.exports = {
-  childTreeOf, keptByChain, treeOf, endTree, treeLine, treeNotice, TREE_NOTICE, keepOut, keptOut,
+  childTreeOf, keptByChain, hubChain, treeOf, endTree, treeLine, treeNotice, TREE_NOTICE, keepOut, keptOut,
   PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
   hasProc, bootIdOf, starttimeOf, stateOf, pgidOf, ppidOf, statOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
   bootToken, tokenVerdict, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
