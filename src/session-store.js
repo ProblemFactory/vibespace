@@ -819,6 +819,19 @@ function parseSessionJsonl(claudeSessionId, cwd) {
     if (!hung && known) {
       let st = null; try { st = fs.statSync(known); } catch { st = null; }
       if (st && st.mtimeMs === kept.mtimeMs && st.size === kept.size && st.ino === kept.ino) { _jsonlUsed.set(kept, Date.now()); return kept.messages; }   // the copy IS the file: loaded
+      // the file merely GREW past the copy, within the warm's inline bound (≤ WARM_INLINE_APPEND_MAX): folded in here as the warm does
+      // with the pool up — a bounded read of the appended bytes, never the whole file — so a growing conversation never flickers
+      // «not loaded» between two warms
+      if (st && kept.incr && st.ino === kept.ino && st.size > kept.size && st.size - kept.spanEnd <= WARM_INLINE_APPEND_MAX) {
+        const t0 = performance.now();
+        let r = null; try { r = readJsonlTail(known, kept, { dropSubagent: true, stat: st, appendOnly: true }); } catch { r = null; }
+        if (r && r.entry) {
+          if (r.mode === 'append') carryPosFrom(r.entry, kept);
+          _stampJsonlParse(r.bytes, performance.now() - t0);
+          _jsonlCachePut(claudeSessionId, r.entry);
+          return r.entry.messages;
+        }
+      }
     }
     return taggedKeptOf(kept.messages);   // BEHIND the file (or its storage hung): a copy of its list, tagged — never the cache's own array
   }

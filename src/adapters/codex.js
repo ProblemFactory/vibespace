@@ -870,7 +870,7 @@ function notePoolRefusing(e) { if (!e || POOL_WIDE.has(e.code) || /safeFs closed
 const HISTORY_OPS = new Set(['jsonlTail', 'boundedParsed', 'boundedParsedPage', 'codexHistoryMergedPage']);
 function poolAnswered(fp, op) { _poolRefusedAt = 0; if (HISTORY_OPS.has(op)) forgiveFile(fp); }
 // the pool gone (its construction failed — retried, or given up after POOL_RETRY_MAX) refuses every call too, renewed by nothing
-function poolRefusing() { return _transcriptPool === false || (!!_poolRefusedAt && Date.now() - _poolRefusedAt <= POOL_REFUSING_MS); }
+function poolRefusing() { return _transcriptPool === false || !!(_transcriptPool && _transcriptPool._closed) || (!!_poolRefusedAt && Date.now() - _poolRefusedAt <= POOL_REFUSING_MS); }   // + a pool closed for good: no call needed to say so
 const _fileRefusals = new Map();   // fp → { firstAt, lastAt, count, hungUntil, ownDeadline, why } — the pool's refusals of ONE file, standing
 const _slicedSaid = new Set();
 let _slicedChain = Promise.resolve(), _slicedParked = 0;

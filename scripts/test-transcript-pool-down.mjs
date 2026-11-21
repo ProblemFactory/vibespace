@@ -255,6 +255,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   ok(t1 === t2 && t1.notLoaded === 'transcript_reader_restarting' && t1.length === 1000, `the kept copy's tagged twin is ONE per cache entry (the same list twice: the merge memo hits; ${t1.length} records, tagged)`, { same: t1 === t2, n: t1.length, notLoaded: t1.notLoaded });
   // (1) A REFUSAL OF ANOTHER KIND NEVER UNHANGS THE STORAGE'S HOLD: a hung path, then «no worker» for the same file — the parse
   // asks no warm while the hold stands
+  await SS0.warmSessionJsonlAsync(sid, cwd);   // SETTLED: a re-warm the last parse asked (under the stand-in before) ends first — warms of one session join
   const H1 = refusing({ status: 503, code: 'path-hung' }); C._setTranscriptPoolForTest(H1);
   fs.writeFileSync(claudeFp, lines.slice(0, 700).join('\n') + '\n');
   await SS0.warmSessionJsonlAsync(sid, cwd);   // the storage's: the file's record holds it
@@ -278,6 +279,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   const Rt = await road('(3) a parse after the tail was refused and the task scan answered after it', () => { const l = SS0.parseSessionJsonl(sid, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
   ok(split.calls.includes('taskLines') && content(Rt).length === 0 && Rt.out && Rt.out.notLoaded === 'transcript_reader_restarting', `${Rt.name}: nothing read on the loop (${content(Rt).length}) — «not loaded» (the copy behind the file)`, { out: Rt.out, calls: split.calls });
   // (4) THE HUNG RETRY THAT READS stamps its parse and warms the task scan beside it, as the normal road
+  await SS0.warmSessionJsonlAsync(sid, cwd);   // SETTLED (the parse above asked a re-warm)
   C._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' })); await SS0.warmSessionJsonlAsync(sid, cwd);   // the storage's
   fs.writeFileSync(claudeFp, lines.slice(0, 500).join('\n') + '\n');
   const U = up(), metrics = [], metricWas = global.__vsMetric;
