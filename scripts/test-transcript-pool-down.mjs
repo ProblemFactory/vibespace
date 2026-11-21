@@ -245,7 +245,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   ok(w1 === w2 && askedTails === 1 && o1 === true && o2 === true, `two warms of one session at once are ONE (the same read: ${askedTails} tail read asked of the pool)`, { same: w1 === w2, askedTails });
   // A LATE REFUSAL NEVER HIDES A CURRENT COPY: the file read (the cache IS the file), then a refusal of it lands — the parse reads
   // nothing on the loop and answers the copy LOADED (one stat shows it is the file)
-  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); try { await C.jsonlGapInfoAsync(claudeFp); } catch { }
+  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); try { await C.readJsonlTailAsync(claudeFp, { dropSubagent: true }); } catch { }   // a HISTORY read refused (a gap read's refusal says nothing of the tail)
   const Rl = await road('a parse after a late refusal of a file the cache holds whole', () => { const l = SS0.parseSessionJsonl(sid, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
   ok(Rl.out && !Rl.out.notLoaded && Rl.out.n === 1000 && content(Rl).length === 0, `${Rl.name}: LOADED (${Rl.out && Rl.out.n} records), nothing read on the loop (${content(Rl).length})`, { out: Rl.out, reads: Rl.reads.slice(0, 4) });
   // ONE TAGGED TWIN per kept entry (the merge memo keys on the array): two parses under one note answer the SAME list

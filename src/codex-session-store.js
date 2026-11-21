@@ -695,6 +695,12 @@ async function parseCodexSessionJsonlAsync(threadId, { fp: known } = {}) {
   let why = 'its rollout was not found (the thread/read copy is read)';
   if (fp) {
     let refusal = null;
+    // row B-422c: a rollout the memory calls the STORAGE's (a deadline, a hung path, a blocked mount) — nothing tried there: no pool
+    // call, no read, «not loaded yet» (the next attach asks again once a history read answered for it)
+    if (require('./adapters/codex').fileStorageHung(fp)) {
+      noteNotLoadedOnce(threadId, 'its storage hung (a deadline, a hung path or a blocked mount)');
+      return Object.assign([], { notLoaded: NOT_LOADED, why: 'its storage hung', storageHung: true });
+    }
     try {
       const { readJsonlBoundedParsedPagedAsync } = require('./adapters/codex');
       const r = await readJsonlBoundedParsedPagedAsync(fp, { tailOnly: true, onFail: (w, refused) => { why = w; refusal = refused || null; } });   // in pages: the loop free between them
@@ -835,7 +841,9 @@ class CodexSessionMessages {
           this._all = got.records;
           return this._all;
         }
-        for (const [id, fp] of fps) if (fp) fps.delete(id);   // a file the worker failed on may have moved (compressed to .zst): looked up again (its kept path)
+        // a file the worker failed on may have moved (compressed to .zst): looked up again (its kept path) — never one the memory calls
+        // the storage's (row B-422c: its find would stat the dead storage on this loop; its path stays, its read answers «not loaded»)
+        { const C = require('./adapters/codex'); for (const [id, fp] of fps) if (fp && !C.fileStorageHung(fp)) fps.delete(id); }
       }
       let history = [], notLoaded = null;
       for (const { id: forkId, untilOrdinal } of ancestry) {

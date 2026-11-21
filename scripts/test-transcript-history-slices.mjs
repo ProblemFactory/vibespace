@@ -258,7 +258,7 @@ console.log('⑥ a deadline on the codex merged read');
 console.log('⑦ the record\'s bounds');
 {
   const stub = (code) => ({ call() { return Promise.reject(Object.assign(new Error('a stand-in refusal'), { status: 503, code })); } });
-  const ask = async (fp) => { try { await C.jsonlGapInfoAsync(fp); } catch { } };
+  const ask = async (fp) => { try { await C.readJsonlTailAsync(fp, { dropSubagent: true }); } catch { } };   // a HISTORY read refused: it notes the file
   C._setSlicedForTest({ afterMs: 60, standGapMs: 40 });
   C._setTranscriptPoolForTest(stub('no-worker'));
   const fpS = path.join(HOME, 'stand.jsonl');
@@ -294,7 +294,7 @@ console.log('⑧ output identity on every small shape');
   for (const [name, text] of Object.entries(SHAPES)) {
     const fp = path.join(dir, `shape-${i++}.jsonl`);
     fs.writeFileSync(fp, text);
-    try { await C.jsonlGapInfoAsync(fp); } catch { }   // its refusal stands (the stated time 0)
+    try { await C.readJsonlTailAsync(fp, { dropSubagent: true }); } catch { }   // its refusal stands (the stated time 0)
     const want = C.readJsonlTail(fp, null, { dropSubagent: true, warnLarge: false }).entry, got = (await C.readJsonlTailSliced(fp, { dropSubagent: true })).entry;
     const fields = ['mtimeMs', 'size', 'ino', 'dev', 'spanStart', 'spanEnd', 'partial', 'headProbe', 'tailProbe', 'incr'];
     const wantC = C.parseCodexSessionJsonl('shape', { fp }), gotC = await C.readCodexRolloutSliced(fp);
@@ -311,7 +311,7 @@ console.log('⑨ the read\'s own deadline (a FIFO whose open never answers)');
   if (made) {
     C._setSlicedForTest({ afterMs: 0, deadlineMs: 300 });
     C._setTranscriptPoolForTest({ call() { return Promise.reject(Object.assign(new Error('a stand-in refusal'), { status: 503, code: 'no-worker' })); } });
-    try { await C.jsonlGapInfoAsync(claudeFp(sids[2])); } catch { }   // another file whose refusal stands (⑦'s records pushed the old one out)
+    try { await C.readJsonlTailAsync(claudeFp(sids[2]), { dropSubagent: true }); } catch { }   // another file whose refusal stands (⑦'s records pushed the old one out)
     const Rd = await road('⑨ the warm of a file that never answers', () => SS.warmSessionJsonlAsync(sid, cwd));
     const st = C.slicedState(), other = C.slicedRoadFor(claudeFp(sids[2]));
     ok(Rd.out === false && Rd.longest < LAW_MS && st.parked === 1 && !C.slicedRoadFor(fifo).ok && /storage hung/.test(C.slicedRoadFor(fifo).why) && !other.ok && /parked/.test(other.why),
