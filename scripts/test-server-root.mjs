@@ -659,6 +659,13 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
   }
   const rf = fs.readFileSync(path.join(REPO, 'src/server/root-facts.js'), 'utf8');
   ok(!/['"`]data['"`]|dataDir/.test(rf), 'r1278 THE LAW — the one test reads the root\'s .git alone: no data folder (a slow or silent mount there answers nothing it asks)');
+  // shape H on the root (主开发 r1597): the boot's read of the hub's own tree has ONE asker — every conversation's root is read by the
+  // ORCH's own reader, off the loop (B-1425), never by this synchronous one
+  const askers = [], RF_REQ = /require\(\s*['"](?:\.{1,2}\/)+(?:server\/)?root-facts(?:\.js)?['"]\s*\)/;
+  const walkSrc = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) walkSrc(r); else if (/\.c?js$/.test(e.name) && RF_REQ.test(read(r))) askers.push(r); } };
+  walkSrc('src'); if (/root-facts/.test(srv)) askers.push('server.js');
+  ok(askers.join() === 'src/server/throwaway-root.js' && !/root-facts/.test(gen) && RF_REQ.test("const { readRootFacts } = require('./root-facts');") && !RF_REQ.test("require('./root-facts-x')"),
+    'shape H on the root: only the boot\'s one test (src/server/throwaway-root.js) asks root-facts.js — the ORCH reads every conversation\'s root with its own asynchronous reader (B-1425)', askers);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
