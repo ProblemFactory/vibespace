@@ -26,6 +26,7 @@
  */
 const http = require('http');
 const fsp = require('fs').promises;
+const PD = require('../path-dot-segment.js'); // r1317: a path with a dot segment is never a door — the auth layer's and the push mount's door's verdict
 
 const AGENT_PREFIX = '/api/agent/';
 // unit 6's cure: /api/home is no tunnel road (the `vibespace` CLI asks the hub on its OWN box, by the local index's port),
@@ -35,9 +36,9 @@ const EXACT = new Set(['/api/editor/open']);
 function allowed(url) {
   const raw = String(url == null ? '' : url);
   const p = raw.split('?')[0];
-  if (!p.startsWith('/') || /\\|%2e|%5c|\/\.\.?(?:\/|$)|\/\//i.test(p)) return false;
+  if (!p.startsWith('/') || /\\|%2e|%5c|\/\//i.test(p) || PD.dotSegment(p)) return false; // a dot segment, raw or once decoded: the shared verdict
   let dec; try { dec = decodeURIComponent(p); } catch { return false; }
-  if (/\/\.\.?(?:\/|$)|\/\//.test(dec)) return false; // an encoded slash that makes a dot segment or a doubled slash
+  if (/\/\//.test(dec)) return false; // an encoded slash that makes a doubled slash
   if (EXACT.has(p)) return true;
   return p.startsWith(AGENT_PREFIX); // after the literal prefix an encoded slash is a name's own (a job name): it moves no route
 }

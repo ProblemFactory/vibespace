@@ -2859,6 +2859,7 @@ export default {
   "OneDrive drive lookup returned no drive id": "查找 OneDrive 网盘时没有返回网盘 id",
   "this pull mount was removed while it was being mounted — nothing of it stays mounted": "这个拉取挂载在挂载过程中被移除了——它没有任何部分保持挂载",
   "device unreachable — its daemon is not dialed in": "设备无法访问——它的守护进程没有连入",
+  "push mount not started: this hub could not open the mount’s own door — restart the hub, then try again": "推送挂载未启动：此 hub 无法打开该挂载专用的入口——请重启 hub 后重试",
   "no path for the remote to reach this instance — the device tunnel needs the machine daemon link; otherwise set agentd.publicUrl (Settings) or deploy with VIBESPACE_PUBLIC_URL": "远端没有路径可以访问此实例——设备隧道需要机器守护进程的连接；否则请设置 agentd.publicUrl（设置）或用 VIBESPACE_PUBLIC_URL 部署",
   "rclone install on the device failed: {detail}": "在设备上安装 rclone 失败：{detail}",
   "rclone install on host failed: {detail}": "在主机上安装 rclone 失败：{detail}",

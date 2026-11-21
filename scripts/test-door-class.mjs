@@ -10,7 +10,9 @@
 //     encoded slash, dot segments, near-miss names) × 8 methods × the Origin header three ways, then 4000 SEEDED over
 //     Sec-Fetch-Site, the forwarded headers, TLS on / off, sign-in on / off, three cookies and WebSocket handshakes (the seed
 //     printed; DOOR_CORPUS_SEED replays another) — through MASTER's gate (src/auth.js middleware() frozen from 22353751e:
-//     scripts/fixtures/auth-middleware-before-b3a.cjs) and TODAY's: every answer the same; per base its answers and a digest
+//     scripts/fixtures/auth-middleware-before-b3a.cjs) and TODAY's: every answer the same — but ONE LAW added since (B-7f0b r1317,
+//     src/path-dot-segment.js): a path with a dot segment is never a door, refused by name (400 path_dot_segment) where master
+//     let it through or refused it otherwise; per base its answers and a digest
 //     printed. RED CONTROL 1: one door line cut from a copy ⇒ differs on that door only. RED CONTROL 2, THE ORDER: the
 //     same-origin verdict moved above the doors in a copy ⇒ differs on every cross-site request to a door, and nowhere else.
 //   ③ THE GATE FAILS CLOSED: the classes that pass without a cookie are NAMED (door, open, login); a planted sixth class is
@@ -101,6 +103,9 @@ function through(mw, r, cookie) {
   try { mw(req, res, () => { out.next = true; }); } catch (e) { out.threw = String(e && e.message); }
   return out;
 }
+// B-7f0b (r1317): the one answer that is not master's — a path with a dot segment (raw, %2e / %2f / %5c) is refused by name
+const PD = require(path.join(REPO, 'src/path-dot-segment.js'));
+const expectOf = (r, master) => (PD.dotSegment(r.path) ? { next: false, status: 400, location: null, body: PD.refusal().body } : master);
 const quietly = (f) => { const w = console.warn; console.warn = () => { }; try { return f(); } finally { console.warn = w; } };
 const said = (o) => (o.next ? 'next' : o.status + (o.location ? ' → ' + o.location : ''));
 const tagOf = (r) => `${r.method} ${r.path} ${JSON.stringify(r.headers)}${r.encrypted ? ' tls' : ''} · sign-in ${r.on ? 'on' : 'off'} · ${r.cookie}`;
@@ -112,14 +117,16 @@ function judge(AuthClass, name) {
     gates[on] = { now: auth.middleware(), then: before(AuthClass).call(auth), cookie: { 'no cookie': null, 'a valid cookie': on ? auth.issueToken('test-door-class') : null, 'a stale cookie': 'stale-token-never-issued-0000' } };
   }
   const diff = [], byBase = new Map(), h = crypto.createHash('sha256');
+  let dotted = 0;
   for (const r of CORPUS) {
     const g = gates[r.on], cookie = g.cookie[r.cookie];
     const a = quietly(() => through(g.then, r, cookie)), b = quietly(() => through(g.now, r, cookie));
     h.update(tagOf(r) + ' = ' + said(b) + '\n');
     const tally = byBase.get(r.base) || {}; tally[said(b)] = (tally[said(b)] || 0) + 1; byBase.set(r.base, tally);
-    if (JSON.stringify(a) !== JSON.stringify(b)) diff.push({ r, master: a, now: b });
+    const want = expectOf(r, a); if (want !== a) dotted++;
+    if (JSON.stringify(want) !== JSON.stringify(b)) diff.push({ r, master: want, now: b });
   }
-  return { n: CORPUS.length, diff, byBase, digest: h.digest('hex').slice(0, 16) };
+  return { n: CORPUS.length, diff, byBase, digest: h.digest('hex').slice(0, 16), dotted };
 }
 {
   const law = judge(Auth, 'law');
@@ -127,6 +134,7 @@ function judge(AuthClass, name) {
   for (const [base, tally] of law.byBase) console.log(`    ${base} and its variants: ${Object.entries(tally).map(([k, v]) => `${k} ×${v}`).join(' · ')}`);
   for (const d of law.diff.slice(0, 20)) console.log(`    DIFFERS ${tagOf(d.r)}: master ${said(d.master)}, now ${said(d.now)}`);
   ok(law.n > 10000 && law.diff.length === 0, `${law.n} generated requests (${BASES.length} bases × their variants × ${METHODS.length} methods × the Origin header three ways, then ${4000} seeded over Sec-Fetch-Site, the forwarded headers, TLS, sign-in off, three cookies and WebSocket handshakes): today's gate answers every one as master's did — ${law.diff.length} differ`, law.diff.slice(0, 3).map((d) => ({ tag: tagOf(d.r), master: said(d.master), now: said(d.now) })));
+  ok(law.dotted > 100, `the dot-segment law (B-7f0b r1317) meets the corpus: ${law.dotted} of its requests carry a dot segment (its «/../api/home» and «/x/..» variants), each refused by name (400 path_dot_segment) — the only answers that are not master's`);
   // every request of the corpus, classed as the gate classes it (sign-in on or off, TLS or not): each of the five kinds is met
   const kinds = new Map();
   for (const r of CORPUS) { const k = D.doorClassOf({ method: r.method, path: r.path, headers: { host: OWN, ...r.headers }, encrypted: r.encrypted }, { enabled: r.on }).kind; kinds.set(k, (kinds.get(k) || 0) + 1); }

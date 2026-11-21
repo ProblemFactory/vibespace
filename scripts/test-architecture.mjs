@@ -276,6 +276,7 @@ const PURE = new Set(['src/provider-ids.js' /* B-d578 P1-b (lane lg-providers): 
   // bundle it and the rule is unit-provable in one place.
   'src/spend-authorizer.js',
   'src/rewind-ops.js', // claude tombstone / codex thread_rolled_back → ONE 'rewound' meta op; index-stable marking, no I/O
+  'src/path-dot-segment.js', // B-7f0b (r1317): a path with a dot segment is never a door — the auth layer, the push mount's door and the agent door ask ONE verdict; imports nothing
   'src/rewind-door.js', // B-437e: the rewind door — the verdict (refusal by name), the plan (the cut before the target), the harness's answer; imports only rewind-cut (PURE → PURE)
   'src/rewind-cut.js', // B-437e: the cut a rewind makes + the person rule + the request prefix — the part the normalizer (and so the device agent) carries; imports nothing
   // THE FRESH-WINDOW EDGE (2026-09-08): does a normalized quota reading say the
@@ -5564,7 +5565,7 @@ await section(async () => {
     'src/server/browser-stream.js': 2, // a dispatcher target: handleUpgrade (+ its wss) reached only through server.js's dispatcher
     'src/server/desktop-stream.js': 2, // a dispatcher target
     'src/server/path-mounts.js': 1, // a dispatcher target
-    'src/server/mount-door.js': 1, // B-7f0b (r1220 (1)): a push mount's OWN loopback listener (127.0.0.1:<the system's port>) — not the hub's port; its accept errors said, no upgrade listener
+    'src/server/push-mount-door.js': 1, // B-7f0b (r1220 (1)): a push mount's OWN loopback listener (127.0.0.1:<the system's port>) — not the hub's port; its accept errors said, no upgrade listener
     'src/server/agent-listener.js': 1, // its OWN loopback listener (the reverse tunnel's door, 127.0.0.1:<its own port>) — not the hub's port; its accept errors said, no upgrade listener
   };
   const sites = (text) => strip(text).split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => SITE.test(l));

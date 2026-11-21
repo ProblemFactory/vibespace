@@ -19,6 +19,7 @@ const WORDS = Object.freeze({
   // ── pull mounts and machine-mount refusals (src/machine-mounts.js) ──
   mount_removed: i18nKey('this pull mount was removed while it was being mounted — nothing of it stays mounted'),
   device_unreachable: i18nKey('device unreachable — its daemon is not dialed in'),
+  mount_door_unavailable: i18nKey('push mount not started: this hub could not open the mount’s own door — restart the hub, then try again'),   // B-7f0b r1317 (5)
   no_dav_path: i18nKey('no path for the remote to reach this instance — the device tunnel needs the machine daemon link; otherwise set agentd.publicUrl (Settings) or deploy with VIBESPACE_PUBLIC_URL'),
   rclone_install_device_failed: i18nKey('rclone install on the device failed: {detail}'),
   rclone_install_host_failed: i18nKey('rclone install on host failed: {detail}'),

@@ -40,6 +40,7 @@ const { doorClassOf } = require('./door.js');   // THE DOOR CLASS: one pure func
 /** the classes the gate lets through WITHOUT a cookie — named, so the gate FAILS CLOSED: a class nobody named here (a sixth one
  *  added to the door class later, a typo) is refused by name, never let in by default (B3a's round wtyy237tl) */
 const PASSES = Object.freeze(new Set(['door', 'open', 'login']));
+const PD = require('./path-dot-segment.js'); // PURE (r1317): a path with a dot segment is never a door
 const { replaceShredding } = require('./secret-file.js');
 
 const TOKEN_COOKIE = 'vs_token';
@@ -364,6 +365,12 @@ class Auth {
         if (this.shut) return refuseHeld(this._held, req, res, { page: (req.method === 'GET' || req.method === 'HEAD') && routeKey(p) === '/login' });
         if (LOCAL_ROAD.has(routeKey(p))) return refuseHeld(this._held, req, res, { sso: true });   // single sign-on still guards: the local password road stays refused
       }
+      // ── A PATH WITH A DOT SEGMENT IS NEVER A DOOR (lane lg-remote-hardening, B-7f0b r1317): the public files' handler runs
+      // after this gate and resolves one away — /dav/../index.html, its escaped spellings, rode a door's prefix past the sign-in
+      // check to the app's own files. A browser never sends one; refused by name before anything (src/path-dot-segment.js).
+      // Judged on the WHOLE request line on purpose (originalUrl): a copy of this gate under a mounted router keeps judging what
+      // the files' handler and the routes will read, never a path cut at its mount point ──
+      if (PD.dotSegment(req.originalUrl || req.url)) { const r = PD.refusal(); return res.status(r.status).json(r.body); }
       // THE DOOR CLASS (src/door.js — the lines that stood here, lifted verbatim): a door, a cross-site refusal, the open
       // instance, the login flow — or a page, which the owner's cookie decides below
       const d = doorClassOf({ method: req.method, path: req.path, headers: req.headers, encrypted: !!(req.socket && req.socket.encrypted) }, { enabled: this.enabled });

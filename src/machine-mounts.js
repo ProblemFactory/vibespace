@@ -26,7 +26,7 @@ const path = require('path');
 const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
 const { execFile } = require('child_process');   // (B-323e: its two probe children — ls, realpath — ride THE STARTER)
 const PI = require('./proc-identity.js');   // B-323e: a probe child's end the hub may never hear, asked of /proc by its pid
-const MD = require('./server/mount-door.js'); // B-7f0b (r1220): a push mount's tunnel ends at its OWN door (that mount's /dav, its own pass), never the hub's whole web port
+const MD = require('./server/push-mount-door.js'); // B-7f0b (r1220): a push mount's tunnel ends at its OWN door (that mount's /dav, its own pass), never the hub's whole web port
 const MW = require('./mount-error-words.js'); // B-af94: every refusal and row words BY CODE — the page words them in its language
 const DM = require('./device-mount'); // the pull chain (B-fcc7: read at each call — test-pull-refresh §15 drives the manager over a stub chain)
 // cure 4 (the readers' should): a pull the person REMOVED while the mount it was asked for waited is refused to the caller
@@ -138,7 +138,7 @@ class MachineMounts {
     this.rcloneBin = rcloneBin || (() => 'rclone');
     this.broadcast = broadcast || (() => {});
     this.log = log || (() => {});
-    this._doors = new Map();   // B-7f0b: a push mount's id → its own door (src/server/mount-door.js)
+    this._doors = new Map();   // B-7f0b: a push mount's id → the PROMISE of its own door (src/server/push-mount-door.js; r1317 (2): kept while it opens, so two re-owns share one)
     this._file = path.join(dataDir, 'machine-mounts.json');
     let read;
     try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
@@ -338,7 +338,7 @@ class MachineMounts {
         door = await MD.open({ tokens: this.mountTokens, log: this.log });
         const { port } = await dm.reverseForward({ port: wantPort || 0, connectLocal: () => net.connect(door.port, '127.0.0.1') });
         return { base: `http://127.0.0.1:${port}`, tunnelPort: port, door };
-      } catch (e) { if (door) await door.close(); if (e && e.code === 'mount_door_unavailable') throw e; if (dial) throw MW.refusal('device_unreachable'); /* ssh → public fallback below */ }
+      } catch (e) { if (door) await door.close(); if (e && e.code === 'mount_door_unavailable') throw MW.refusal('mount_door_unavailable'); /* r1317 (5): words a page can show */ if (dial) throw MW.refusal('device_unreachable'); /* ssh → public fallback below */ }
     }
     const pub = this.publicUrl() || publicUrlFallback;
     if (pub) return { base: String(pub).replace(/\/$/, ''), tunnelPort: null };
@@ -588,7 +588,7 @@ class MachineMounts {
     const rec = { id, dir: 'push', hostId, folder: abs, mountpoint: mp, mode, os: osKind, method, tokenId: shareTokenId, tunnelPort, mountedAt: Date.now() };
     if (tunnelPort) this._pushTunnelOwned.add(id);
     this._state.mounts.push(rec);
-    if (door) (this._doors || (this._doors = new Map())).set(id, door);
+    if (door) (this._doors || (this._doors = new Map())).set(id, Promise.resolve(door));
     this._save(); this._notify();
     return { id, mountpoint: mp, os: osKind, method, via: tunnelPort ? 'tunnel' : 'public' };
     } catch (e) {
@@ -603,10 +603,23 @@ class MachineMounts {
 
   /** B-7f0b (r1220): a push mount's own door (opened once, bound to the mount's own pass) — a re-own at boot or by the health
    *  sweep re-points the device's tunnel at it: an existing mount moves off the hub's whole port at its next re-attach */
-  async _doorOf(rec) {
-    if (!this._doors) this._doors = new Map();
-    let d = this._doors.get(rec.id);
-    if (!d) { d = await MD.open({ tokens: this.mountTokens, tokenId: rec.tokenId, log: this.log }); this._doors.set(rec.id, d); }
+  /** r1382 (1): is this record still a mount (an unmount may land while a re-own's door is opening)? */
+  _stillMounted(id) { return !!(this._state && this._state.mounts.some((m) => m.id === id)); }
+
+  _doorOf(rec) {
+    const doors = this._doors || (this._doors = new Map());
+    let d = doors.get(rec.id);
+    if (!d) {
+      // r1317 (4): a record with no pass id gets a door that serves no pass (401 to every request) — said once, never in silence
+      if (!rec.tokenId && !(this._noPassSaid || (this._noPassSaid = new Set())).has(rec.id)) {
+        this._noPassSaid.add(rec.id);
+        this.log(`push mount ${rec.id} on ${rec.hostId}: its record names no pass, so its door answers every request 401 — remove it and push the folder again`);
+      }
+      // r1317 (2): the PENDING open is kept, so a second re-own at once (the link's heal and the health sweep) shares it
+      d = MD.open({ tokens: this.mountTokens, tokenId: rec.tokenId, log: this.log });
+      doors.set(rec.id, d);
+      d.catch(() => { if (doors.get(rec.id) === d) doors.delete(rec.id); });   // a door that could not open is asked anew next time
+    }
     return d;
   }
 
@@ -622,7 +635,7 @@ class MachineMounts {
       }
     } catch { }
     try { this.mountTokens.revoke?.(rec.tokenId); } catch { }
-    { const door = this._doors && this._doors.get(rec.id); if (door) { this._doors.delete(rec.id); try { await door.close(); } catch { } } }   // B-7f0b: its door goes with it
+    { const opening = this._doors && this._doors.get(rec.id); if (opening) { this._doors.delete(rec.id); try { await (await opening).close(); } catch { } } }   // B-7f0b: its door goes with it (its connections too)
     if (rec.tunnelPort) { // release the device-side listener (best-effort)
       try { const dm = await this.hosts.deviceBounded(rec.hostId); await dm.reverseUnforward(rec.tunnelPort); } catch { }
     }
@@ -1023,8 +1036,10 @@ class MachineMounts {
         if (!lp) continue;
         const net = require('net');
         this.hosts.deviceBounded(hostId, 8000)
-          .then((dm) => this._doorOf(rec).then((door) => dm.reverseForward({ port: rec.tunnelPort, connectLocal: () => net.connect(door.port, '127.0.0.1') })))   // B-7f0b: re-pointed at its own door
-          .then(() => { this._pushTunnelOwned.add(rec.id); this._pushRetryAt.delete(rec.id); })
+          .then((dm) => this._doorOf(rec).then((door) => (this._stillMounted(rec.id)   // r1382 (1): removed while its door opened ⇒ no forward toward a closed door
+            ? dm.reverseForward({ port: rec.tunnelPort, connectLocal: () => net.connect(door.port, '127.0.0.1') }).then(() => true)   // B-7f0b: re-pointed at its own door
+            : false)))
+          .then((owned) => { if (!owned) return; this._pushTunnelOwned.add(rec.id); this._pushRetryAt.delete(rec.id); })
           .catch((e) => {
             // clear ownership + backoff so the health sweep retries promptly —
             // a single failed re-own must not strand the tunnel (review finding)
@@ -1340,10 +1355,12 @@ class MachineMounts {
             const net = require('net');
             try {
               const door = await this._doorOf(rec);
-              await dm.reverseForward({ port: rec.tunnelPort, connectLocal: () => net.connect(door.port, '127.0.0.1') });   // B-7f0b: re-pointed at its own door
-              this._pushTunnelOwned.add(rec.id);
-              this._pushRetryAt.delete(rec.id);
-              this.log(`push tunnel re-owned (:${rec.tunnelPort}) on ${rec.hostId}`);
+              if (this._stillMounted(rec.id)) {   // r1382 (1): removed while its door opened ⇒ no forward toward a closed door
+                await dm.reverseForward({ port: rec.tunnelPort, connectLocal: () => net.connect(door.port, '127.0.0.1') });   // B-7f0b: re-pointed at its own door
+                this._pushTunnelOwned.add(rec.id);
+                this._pushRetryAt.delete(rec.id);
+                this.log(`push tunnel re-owned (:${rec.tunnelPort}) on ${rec.hostId}`);
+              }
             } catch (e) { this.log(`push tunnel re-own failed (:${rec.tunnelPort}): ${e.message}`); }
           }
         }

@@ -2859,6 +2859,7 @@ export default {
   "OneDrive drive lookup returned no drive id": "OneDrive のドライブ検索でドライブ ID が返りませんでした",
   "this pull mount was removed while it was being mounted — nothing of it stays mounted": "このプルマウントはマウント中に削除されました — どの部分もマウントされたままにはなっていません",
   "device unreachable — its daemon is not dialed in": "デバイスに到達できません — デーモンが接続していません",
+  "push mount not started: this hub could not open the mount’s own door — restart the hub, then try again": "プッシュマウントを開始できません：この hub はマウント専用の入口を開けませんでした — hub を再起動してから再試行してください",
   "no path for the remote to reach this instance — the device tunnel needs the machine daemon link; otherwise set agentd.publicUrl (Settings) or deploy with VIBESPACE_PUBLIC_URL": "リモートからこのインスタンスに届く経路がありません — デバイストンネルにはマシンのデーモン接続が必要です。そうでなければ agentd.publicUrl（設定）を設定するか、VIBESPACE_PUBLIC_URL を付けてデプロイしてください",
   "rclone install on the device failed: {detail}": "デバイスへの rclone のインストールに失敗しました: {detail}",
   "rclone install on host failed: {detail}": "ホストへの rclone のインストールに失敗しました: {detail}",

@@ -423,7 +423,9 @@ console.log('⑧ 「其他密钥或密码…」 — a free entry the owner adds 
   const del = await S.hit(`/api/vault/secrets/${add.json.entry.slice(7)}`, { method: 'DELETE' });
   ok(del.status === 200 && !W.vault.secretNames().some((x) => x.name === add.json.entry), 'delete ⇒ 200, the entry is gone', del.json);
   ok((await S.hit(`/api/vault/secrets/${add.json.entry.slice(7)}`, { method: 'DELETE' })).status === 404, 'delete again ⇒ 404');
-  ok((await S.hit('/api/vault/secrets/..%2Fhost%3Ax', { method: 'DELETE' })).status === 404 && (await S.hit(`/api/vault/secrets/${add.json.entry.slice(7)}`, { method: 'DELETE', headers: { ...S.PAGE, authorization: 'Bearer ' + W.SESSION_TOKEN } })).status === 403, 'another entry\'s name never reaches the drop; a bearer ⇒ 403');
+  // B-7f0b (r1317): an escaped «../» is a dot segment — the sign-in gate refuses it by name before any route (it never reaches the drop)
+  const dotted = await S.hit('/api/vault/secrets/..%2Fhost%3Ax', { method: 'DELETE' });
+  ok(dotted.status === 400 && dotted.json && dotted.json.code === 'path_dot_segment' && (await S.hit(`/api/vault/secrets/${add.json.entry.slice(7)}`, { method: 'DELETE', headers: { ...S.PAGE, authorization: 'Bearer ' + W.SESSION_TOKEN } })).status === 403, 'another entry\'s name never reaches the drop (an escaped «../»: refused by name at the sign-in gate); a bearer ⇒ 403');
 }
 
 console.log('⑧b B-3fb5 — an agent\'s OWN entry has its 删除 (the person\'s door; who may use it goes first)');
@@ -447,9 +449,11 @@ async function agentDrop(w, s, name) {
   ok(lines.length === 1 && lines[0].includes(name) && lines[0].includes('"by":"user"') && lines[0].includes('"who":') && !lines[0].includes('"who":"sign-in-off"') && lines[0].includes(`"why":"${name}"`), 'ONE audit line — the entry\'s name, who pressed and from where (never a value)', lines);
   ok((await S.hit(a.door.path, { method: 'DELETE' })).status === 404, 'delete again ⇒ 404 entry_unknown_id');
   const free = await S.hit('/api/vault/secrets', { body: { label: 'a free one', value: ['v', 'b3fb5'].join('-') } });
-  const notAgent = [await S.hit(`/api/vault/agent-secrets/${encodeURIComponent(free.json.entry)}`, { method: 'DELETE' }), await S.hit('/api/vault/agent-secrets/host%3Ax', { method: 'DELETE' }), await S.hit(`/api/vault/agent-secrets/${encodeURIComponent('agent:cid-asker-1/../x')}`, { method: 'DELETE' })];
-  ok(free.status === 200 && notAgent.every((r) => r.status === 404 && r.json.code === 'entry_unknown_id') && W.vault.secretNames().some((x) => x.name === free.json.entry),
-    'another kind\'s name (a free entry, a machine\'s link, a path) never reaches the drop through this door — 404 by name, the free entry stays', notAgent.map((r) => r.status));
+  const notAgent = [await S.hit(`/api/vault/agent-secrets/${encodeURIComponent(free.json.entry)}`, { method: 'DELETE' }), await S.hit('/api/vault/agent-secrets/host%3Ax', { method: 'DELETE' })];
+  // B-7f0b (r1317): a name carrying «/../» is a dot segment once decoded — the sign-in gate refuses it by name before any route
+  const pathName = await S.hit(`/api/vault/agent-secrets/${encodeURIComponent('agent:cid-asker-1/../x')}`, { method: 'DELETE' });
+  ok(free.status === 200 && notAgent.every((r) => r.status === 404 && r.json.code === 'entry_unknown_id') && pathName.status === 400 && pathName.json && pathName.json.code === 'path_dot_segment' && W.vault.secretNames().some((x) => x.name === free.json.entry),
+    'another kind\'s name (a free entry, a machine\'s link) never reaches the drop through this door — 404 by name; a path (…/../…) is refused at the sign-in gate by name; the free entry stays', [...notAgent, pathName].map((r) => r.status));
   // the read's should (r1): what the hub REMEMBERS by the entry's id goes with it — a host pass the owner gave the old value,
   // a late «allow once» over a run that named it, an open proposal of its words — so a value minted later under the name
   // meets its card again (another entry's pass stays)
