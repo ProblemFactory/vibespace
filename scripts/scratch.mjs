@@ -55,6 +55,17 @@ export const CHROME_STORE = Object.freeze(['--password-store=basic', '--use-mock
 // --disable-features here: a suite that passes its own would lose one of the two lists (Chrome keeps the last switch).
 // scripts/chrome-store-census.mjs + test-architecture §47c: a Chrome launch without it is red.
 export const CHROME_QUIET = Object.freeze(['--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings', '--disable-domain-reliability', '--metrics-recording-only', '--no-first-run', '--no-default-browser-check']);
+// B-9dd0's remainder (2) (主开发 r1134): THE BELT, for a Chrome whose page must reach only the suite's OWN targets — a dead proxy
+// (127.0.0.1:9; Chrome never proxies the loopback) bypassed only for `own`, and a resolver that answers every NAME «not found»
+// but the loopback's and `own`'s. `own` = the suite's own targets past the loopback (test-https-hub-chrome: the box's LAN address
+// its hub serves on). BELT_REACH_JS = the page-side proof: a vendor's name and a TEST-NET address are each REFUSED (an opaque
+// no-cors fetch resolves only when something answered), within 5 s — evaluated on a page with NO app CSP (the blank page Chrome
+// opens on): the app's report-only policy reports the probe's own fetches, and a suite fails on a CSP report.
+export const chromeBelt = (own = []) => {
+  const list = [...new Set([...own].map((h) => String(h || '')).filter(Boolean))];
+  return Object.freeze(['--proxy-server=http://127.0.0.1:9', ...(list.length ? [`--proxy-bypass-list=${list.join(';')}`] : []), `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE [::1], EXCLUDE localhost${list.map((h) => `, EXCLUDE ${h}`).join('')}`]);
+};
+export const BELT_REACH_JS = `Promise.all(['https://vendor.example/', 'https://192.0.2.1/'].map((u) => Promise.race([fetch(u, { mode: 'no-cors', cache: 'no-store' }).then(() => u + ' reached', () => u + ' refused'), new Promise((r) => setTimeout(() => r(u + ' timed out'), 5000))])))`;
 /** THE ONE RELAY of a server broadcast to a page (主开发 2026-11-20 04:54Z, lane bl-tests-chrome — 2.369.413's fourth hosted run:
  *  test-channel-window-render ⑫c walked the page's LIVE handler list and skipped the open picker's handler, right after a stale
  *  one that took itself out). Page-side JS source that hands ONE message object to every global handler over a SNAPSHOT of the

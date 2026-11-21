@@ -43,7 +43,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, CHROME_QUIET } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, CHROME_QUIET, chromeBelt, BELT_REACH_JS } from './scratch.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 
 const require = createRequire(import.meta.url);
@@ -110,7 +110,7 @@ check('the tree\'s server answers', up);
 if (!up) process.exit(1);
 
 const CDP_PORT = await freePort();
-chrome = spawn(CHROME, [...CHROME_QUIET, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars',
+chrome = spawn(CHROME, [...CHROME_QUIET, ...chromeBelt(), '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars',
   '--password-store=basic', '--disable-background-timer-throttling', `--user-data-dir=${path.join(ROOT, 'chrome')}`, 'about:blank'],
 { stdio: 'ignore', env: { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun, DISPLAY: '' } });
 const WebSocket = require('ws');
@@ -146,6 +146,9 @@ await cdp('Runtime.enable'); await cdp('Page.enable');
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'zh'); localStorage.setItem('vibespace.uiScale', '100'); } catch {}" });
 await cdp('Emulation.setDeviceMetricsOverride', { width: 1000, height: 600, deviceScaleFactor: 1, mobile: false });
+// B-9dd0's remainder (2): THE BELT, proved from the blank page Chrome opened on (no app page yet: the app's report-only CSP
+// would report the probe's own fetches) — past the loopback nothing answers; the hub's page on the loopback loads next
+{ const reach = await evalJs(BELT_REACH_JS).catch((e) => [String(e && e.message)]); check('B-9dd0: Chrome\'s belt — a vendor\'s name and a TEST-NET address are each REFUSED (a dead proxy, a resolver that finds no name)', Array.isArray(reach) && reach.length === 2 && reach.every((x) => / refused$/.test(x)), reach); }
 await cdp('Page.navigate', { url: origin + '/' });
 await evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 40000) return rej(new Error("no app after 40s")); setTimeout(w, 200); })(); })');
 await waitFor(`!document.getElementById('loading-screen')`, 30000);

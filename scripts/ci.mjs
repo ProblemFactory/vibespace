@@ -2788,7 +2788,7 @@ export const egressWords = (rows) => rows.map((r) => `${r.host}:${r.port} ×${r.
 // result carries when the count itself failed
 export const EGRESS_LOST_MARK = '[egress-sampler] LOST';
 export const EGRESS_UNLOADED = '(the reader did not load)', EGRESS_LOST = '(a host line was lost)';
-export const EGRESS_NOT_WATCHED = 'not watched: a child started without the reader, a bare DNS ask, UDP, a name ending «.localhost» (taken as the loopback)';
+export const EGRESS_NOT_WATCHED = 'not watched: a child that is not the running node (Chrome, a shell command, a stand-in) or one given its own node flags or another reader\'s file, a bare DNS ask, UDP, a name ending «.localhost» (taken as the loopback)';
 // ONE private folder per runner process (mkdtemp: never a predictable name another user could hold), removed at its exit
 let EGRESS_DIR = null;
 const egressFileFor = (name, lane) => {
@@ -2808,10 +2808,13 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
     let child;
     let egressOn = false, egressFile = '';   // B-9dd0: made inside the guard below — a folder that cannot be made is this row's red, never the runner's crash
     try {
-      egressOn = !!egress && s.tier === 'fast' && egressArgv().length > 0; egressFile = egressOn ? egressFileFor(s.name, lane) : '';
+      // B-9dd0's remainder (主开发 r1134): every row is read, the heavy tier too (its own process and, through the reader, its node children)
+      egressOn = !!egress && egressArgv().length > 0; egressFile = egressOn ? egressFileFor(s.name, lane) : '';
       const env = { ...laneEnv(lane), VIBESPACE_SUITE_BUDGET_MS: String(budgetFor(s)) };
       if (hr.armed) env.VIBESPACE_SUITE_HANG_REPORT = hr.file; else delete env.VIBESPACE_SUITE_HANG_REPORT; // never an outer run's file
-      if (egressOn) env.VIBESPACE_SUITE_EGRESS_FILE = egressFile; else delete env.VIBESPACE_SUITE_EGRESS_FILE;
+      // unread ON PURPOSE = an EMPTY value, never an absent one: the reader in a suite that runs this one (test-ci-gate's plants)
+      // leaves a child whose env names another file, or none on purpose, to that runner (egress-sampler.cjs carry())
+      env.VIBESPACE_SUITE_EGRESS_FILE = egressOn ? egressFile : '';
       child = spawn(process.execPath, [...hr.argv, ...(egressOn ? egressArgv() : []), path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env });
     } catch (e) {
       resolve({ ok: false, ms: 0, killedFromOutside: false, lines: [`\n✗ ${s.name} FAILED (0ms, ${e.code || e.message}) ${tag}`] });

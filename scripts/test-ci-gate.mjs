@@ -1009,7 +1009,8 @@ console.log('\n§2n B-9dd0: a fast suite\'s sockets past the loopback are a red 
   okd(refused.ok && !refused.egress, 'THE MUST (r321): a name the suite\'s OWN lookup refuses never left the box — not counted, the row stays green (test-tailnet-browsers\' shape)', refused.lines[0]);
   okd(loop.ok && !loop.egress, 'a suite that reached only the loopback stays green', loop.lines[0]);
   okd(stand.ok && !stand.egress, 'a vendor\'s NAME the suite\'s own lookup maps to the loopback (its stand-in) stays green — the address the lookup answers is judged', stand.lines[0]);
-  okd(offV.ok && offL.ok && heavyV.ok, 'CONTROL: the same planted suites WITHOUT the reader (egress: false), and as a heavy row (the heavy tier is unit 2\'s), stay green — the red is the reader\'s', `${offV.lines[0]} | ${offL.lines[0]} | ${heavyV.lines[0]}`);
+  okd(offV.ok && offL.ok, 'CONTROL: the same planted suites WITHOUT the reader (egress: false) stay green — the red is the reader\'s', `${offV.lines[0]} | ${offL.lines[0]}`);
+  okd(!heavyV.ok && /: vendor\.example=192\.0\.2\.1:443 ×1/.test(heavyV.lines[0]), 'B-9dd0\'s remainder: a HEAVY row is read the same way (its own process; the heavy tier was unread until now)', heavyV.lines[0]);
   okd(!unl.ok && /its egress reader did not load/.test(unl.lines[0]), 'a suite whose egress file lost the sampler\'s sentinel is RED by name (the reader did not load: its sockets were never counted)', unl.lines[0]);
   okd(!lost.ok && /its egress reader LOST 1 host line/.test(lost.lines[0]) && lost.egress.some((x) => x.host === CI.EGRESS_LOST), 'a host line the sampler could not WRITE (its file gone after the sentinel) is a RED row — never a green whose count went missing', lost.lines[0]);
   okd(!failed.ok && Array.isArray(failed.egress) && failed.egress.some((x) => x.host === '192.0.2.1') && /: 192\.0\.2\.1:443 ×1/.test(failed.lines[0]), 'a suite that FAILED and dialed past the loopback keeps its hosts in the result and its ✗ line', failed.lines[0]);
@@ -1043,6 +1044,48 @@ console.log('\n§2n B-9dd0: a fast suite\'s sockets past the loopback are a red 
   console.log(`      the loopback table: ${LB.length} loopback, ${NOT.length} past it — ${lbBad.length ? lbBad.join('; ') : 'each as written'}`);
   okd(!lbBad.length, 'the loopback table: 127/8 literals, ::1 (both spellings), the v4-mapped 127 forms, localhost and *.localhost, 0.0.0.0 and :: — and never a NAME that merely begins «127.» or a mapped address past it', lbBad.join('; '));
   okd(S.LOST_MARK === CI.EGRESS_LOST_MARK, 'the lost marker is ONE spelling: the sampler\'s LOST_MARK is the runner\'s EGRESS_LOST_MARK', `${S.LOST_MARK} | ${CI.EGRESS_LOST_MARK}`);
+  // ── B-9dd0's remainder (主开发 r1134): A NODE CHILD IS READ TOO — and the box's own addresses never leave the box ──
+  // each child dials 192.0.2.1 (TEST-NET-1) on its own port, the socket destroyed in the same tick (no packet; as the literal plant)
+  const DIAL = (port) => `const s = require('net').connect({ host: '192.0.2.1', port: ${port} }); s.on('error', () => {}); s.destroy(); if (process.disconnect) process.disconnect();`;
+  const J = JSON.stringify;
+  plant('test-planted-child', `import { spawn } from 'node:child_process';\nconst c = spawn(process.execPath, ['-e', ${J(DIAL(443))}], { stdio: 'ignore' });\nc.on('exit', () => { ${PASS} });`);
+  plant('test-planted-child-sync', `import { execFileSync } from 'node:child_process';\nexecFileSync(process.execPath, ['-e', ${J(DIAL(444))}], { env: { PATH: process.env.PATH }, stdio: 'ignore' });\n${PASS}`);
+  plant('test-planted-grandchild', `import { spawnSync } from 'node:child_process';\nspawnSync(process.execPath, ['-e', ${J(`require('child_process').spawnSync(process.execPath, ['-e', ${J(DIAL(445))}], { stdio: 'ignore' });`)}], { stdio: 'ignore' });\n${PASS}`);
+  plant('test-planted-child-unread', `import { spawnSync } from 'node:child_process';\nspawnSync(process.execPath, ['-e', ${J(DIAL(446))}], { env: { ...process.env, VIBESPACE_SUITE_EGRESS_FILE: '' }, stdio: 'ignore' });\n${PASS}`);
+  const dialFile = path.join(root, 'scripts', 'planted-dial.cjs');
+  fs.writeFileSync(dialFile, DIAL(447) + '\n');
+  plant('test-planted-fork-own', `import { fork } from 'node:child_process';\nconst c = fork(${J(dialFile)}, [], { execArgv: [], stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });\nc.on('exit', () => { ${PASS} });`);
+  const [kid, kidSync, grand, kidUnread, forkOwn] = await Promise.all([F('test-planted-child', 11), F('test-planted-child-sync', 12), F('test-planted-grandchild', 13), F('test-planted-child-unread', 14), F('test-planted-fork-own', 15)]);
+  for (const [n, r] of [['a child (spawn)', kid], ['a child (execFileSync, a scrubbed env)', kidSync], ['a grandchild (spawnSync twice)', grand], ['a child unread on purpose (its env names an empty file)', kidUnread], ['a fork with its own execArgv []', forkOwn]]) said(n, r);
+  okd(!kid.ok && /: 192\.0\.2\.1:443 ×1/.test(kid.lines[0]), 'a node CHILD the suite spawns is read too: its dial past the loopback is the SUITE\'s red row, by host', kid.lines[0]);
+  okd(!kidSync.ok && /: 192\.0\.2\.1:444 ×1/.test(kidSync.lines[0]), '…a SYNC child given a SCRUBBED env too (the shim names the file; nothing is added to the child\'s env)', kidSync.lines[0]);
+  okd(!grand.ok && /: 192\.0\.2\.1:445 ×1/.test(grand.lines[0]), '…and a GRANDCHILD (the child\'s own children are read the same way, down the tree)', grand.lines[0]);
+  okd(kidUnread.ok && !kidUnread.egress && forkOwn.ok && !forkOwn.egress, 'LEFT ALONE: a child whose env names an EMPTY egress file (a runner running it unread on purpose — test-ci-gate\'s own plants) and a fork that names its OWN node flags (an isolated measure) are not read', `${kidUnread.lines[0]} | ${forkOwn.lines[0]}`);
+  // RED CONTROL: a COPY of the reader without its child hook leaves the same child unread — the child legs above would be RED
+  const noKids = path.join(root, 'egress-sampler-no-children.cjs'), fk = path.join(root, 'egress-no-children.ndjson');
+  const SRC = fs.readFileSync(CI.EGRESS_SAMPLER, 'utf8');
+  okd(SRC.split('\ninstallChildren();\n').length === 2, 'CONTROL anchor: the reader installs its child hook once');
+  fs.writeFileSync(noKids, SRC.replace('\ninstallChildren();\n', '\n'));
+  spawnSync(process.execPath, ['--require', noKids, path.join(root, 'scripts', 'test-planted-child.mjs')], { env: { ...process.env, VIBESPACE_SUITE_EGRESS_FILE: fk }, stdio: 'ignore', timeout: 8000 });
+  const nk = CI.egressOf(fk);
+  okd(nk.loaded && nk.length === 0, 'CONTROL: a reader without its child hook counts NOTHING of the same child\'s dial (the release\'s road)', JSON.stringify({ loaded: nk.loaded, rows: CI.egressWords(nk) }));
+  // NODE_BIN: the RUNNING node only — a stand-in `node` (a shell script answering by its first word: the first gate's red in
+  // test-node-runtime / test-update-road) and a bare name that is not on the PATH are left alone
+  const sbin = path.join(root, 'standin-bin'); fs.mkdirSync(sbin, { recursive: true }); fs.writeFileSync(path.join(sbin, 'node'), '#!/bin/sh\necho stand-in\n', { mode: 0o755 });
+  const nb = [S.NODE_BIN(process.execPath), S.NODE_BIN('node', { envPath: path.dirname(process.execPath) }), S.NODE_BIN(path.join(sbin, 'node')), S.NODE_BIN('node', { envPath: sbin }), S.NODE_BIN('node', { envPath: '/nonexistent' }), S.NODE_BIN('/bin/sh')];
+  okd(JSON.stringify(nb) === '[true,true,false,false,false,false]', 'NODE_BIN: the running node by its path or by a bare `node` first on the child\'s PATH — never a stand-in named node, a name off the PATH, or another program', JSON.stringify(nb));
+  // carry(): the argv a node child is started with (PURE)
+  const ct = [
+    [S.carry(['/n', 'a.js'], { file: 'F', shim: 'SH' }), '/n --require SH a.js'], [S.carry(['/n', 'a.js'], { file: 'F', shim: 'SH', envFile: 'F' }), '/n --require SH a.js'],
+    [S.carry(['/n', 'a.js'], { file: 'F', shim: 'SH', envFile: 'G' }), null], [S.carry(['/n', 'a.js'], { file: 'F', shim: 'SH', envFile: '' }), null],
+    [S.carry(['/n', '--require', 'SH', 'a.js'], { file: 'F', shim: 'SH' }), null], [S.carry(['/n', '--permission', 'a.js'], { file: 'F', shim: 'SH' }), null], [S.carry(['/n', 'a.js'], { file: '', shim: 'SH' }), null],
+  ];
+  const cBad = ct.filter(([got, want]) => (got ? got.join(' ') : null) !== want).map(([got, want]) => `${got ? got.join(' ') : null} (want ${want})`);
+  okd(!cBad.length, 'carry(): the shim right after the binary — or the child LEFT ALONE: another reader\'s file or an empty one, a reader already on its argv, the permission model, no file of its own', cBad.join('; '));
+  // THE BOX'S OWN ADDRESSES: judged as the loopback (a planted own set: the PURE form), literal or answered
+  const OWN = new Set(['192.0.2.9']);
+  const ob = [S.verdict({ host: '192.0.2.9', o: null }, OWN), S.verdict({ host: '192.0.2.1', o: null }, OWN), S.answered(null, '192.0.2.9', OWN), S.answered(null, [{ address: '192.0.2.9' }, { address: '192.0.2.1' }], OWN), S.LOCAL('[192.0.2.9]', OWN)];
+  okd(ob[0] === 'skip' && ob[1] === 'count' && ob[2] === null && ob[3] === '192.0.2.1' && ob[4] === true, 'the box\'s OWN address never leaves the box: a literal of one is skipped, an answer of one is not counted — any other address is', JSON.stringify(ob));
 }
 // ── §2j A SUITE READS NO HISTORY MASTER DOES NOT HAVE (B-4291, lane int361, 2.369.369: test-stash-strip's r5 leg read
 // `git show 280ccd2e:…` — a LANE-BRANCH commit only the production repo had — so the push gate alone ran the leg, red at four
