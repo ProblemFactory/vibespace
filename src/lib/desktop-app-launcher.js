@@ -1439,7 +1439,7 @@ export async function showLaunchDialog(app, opts = {}) {
       runBtn.dataset.judging = '1';
       let v = null; try { v = await cwdPf.commit(); } finally { delete runBtn.dataset.judging; }
       if (!live() || host !== asked) return;   // the dialog closed, or another machine was picked, while the folder was judged: that press is over
-      if (!v) { const w = cwdPf.verdict()?.text; if (w) showToast(w, { type: 'error' }); focusQuiet(cwdIn); return; }
+      if (!v) { const vd = cwdPf.verdict(); if (vd?.text) showToast(vd.text, vd.status === 'pending' ? {} : { type: 'error' }); focusQuiet(cwdIn); return; }   // r1279 c: «Asking the machine…» is information
       cwd = v.path;
     }
     const exec = execIn.value.trim();   // read AFTER the folder's judge: what the person sees when Run takes

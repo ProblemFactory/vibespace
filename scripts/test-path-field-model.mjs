@@ -472,17 +472,28 @@ console.log('\n── ⑤ the field\'s value · the doors take the press\'s answ
   // settle, a failed create and the consent taken off each take the value back
   const valueWiring = (w) => ({
     reads: w.includes('value: () => valueFor(st.committed, tickKeyNow(), st.valueAt),'),
-    noted: (() => { const cm = bodyOf(w, 'function committed(e) {'); const x = cm.indexOf('o.onCommit?.(info)'), y = cm.indexOf('st.valueAt = { keys: [tickKeyNow(keyText(e.key)), tickKeyNow()], voided: false }'); return x >= 0 && y > x; })(),
+    noted: (() => { const cm = bodyOf(w, 'function committed(e) {'); const x = cm.indexOf('o.onCommit?.(info)'), y = cm.indexOf('st.valueAt = valueAtAfter(st.valueAt, { info, keys: [tickKeyNow(keyText(e.key)), tickKeyNow()] })'); return x >= 0 && y > x; })(),
     settle: /if \(r\.effects\.some\(\(e\) => e\.do === 'settle'\)\) st\.valueAt = \{ \.\.\.\(st\.valueAt \|\| \{\}\), voided: true \};/.test(w),
     failedCreate: /if \(!r \|\| r\.error\) \{ if \(st\.valueAt\) st\.valueAt = \{ \.\.\.st\.valueAt, voided: true \}; fire\(\{ type: 'ensureFailed'/.test(w),
     untick: /const giveTick = \(on, text = textNow\(\)\) => \{[^\n]*if \(!st\.tick && st\.committed && st\.committed\.create && st\.valueAt\) st\.valueAt = \{ \.\.\.st\.valueAt, voided: true \};/.test(w),
-    noTarget: bodyOf(w, 'function committed(e) {').includes("else if (e.as !== 'empty' && st.valueAt) st.valueAt = { ...st.valueAt, voided: true };"),
+    noTarget: bodyOf(w, 'function committed(e) {').includes("else if (e.as !== 'empty') st.valueAt = valueAtAfter(st.valueAt, { as: e.as });"),
   });
   const vw = valueWiring(WIRE);
   ok('⑤ WIRED: value() is valueFor over the path\'s key NOW; the keys are noted after the door\'s onCommit; a press answered «nothing», a failed create and the consent taken off take it back', Object.values(vw).every(Boolean), vw);
   const vw0 = valueWiring(anchored(WIRE, 'value: () => valueFor(st.committed, tickKeyNow(), st.valueAt),', 'value: () => st.committed,', 'B-5736 the old value'));   // stale-pins: kept (the old line, planted by its RED)
   ok('⑤ RED CONTROL: the old value() (the last committed folder, whatever the box says) — the pin goes red', !vw0.reads, vw0);
-  const vw1 = valueWiring(anchored(WIRE, "    else if (e.as !== 'empty' && st.valueAt) st.valueAt = { ...st.valueAt, voided: true };", '', 'B-5736 r1218 4 the commit whose target no longer takes'));
+  const vw1 = valueWiring(anchored(WIRE, "    else if (e.as !== 'empty') st.valueAt = valueAtAfter(st.valueAt, { as: e.as });", '', 'B-5736 r1218 4 the commit whose target no longer takes'));
+  // r1279 b: the take-back decided PURE — valueAtAfter at the model's «commit»: took / an empty box / a target that no longer takes
+  const at0 = { keys: [K('~/work/a')], voided: false };
+  const vrows = [
+    ['a commit that took gives the value its keys', P.valueAtAfter(at0, { info: C, keys: [K('~/work/b')] }), { keys: [K('~/work/b')], voided: false }],
+    ['an empty box has no value', P.valueAtAfter(at0, { as: 'empty' }), null],
+    ['THE MODEL SAID «COMMIT» BUT THE TARGET NO LONGER TAKES (the press heard nothing): the value is taken back', P.valueAtAfter(at0, { as: 'ok' }), { keys: [K('~/work/a')], voided: true }],
+    ['…and with nothing held before, nothing', P.valueAtAfter(null, { as: 'create' }), null],
+  ];
+  for (const [what, got, want] of vrows) ok(`⑤ valueAtAfter: ${what}`, JSON.stringify(got) === JSON.stringify(want), { got });
+  const keepsIt = load(anchored(SRC, '  return at ? { ...at, voided: true } : null;', '  return at;', 'r1279 b the take-back'));
+  ok('⑤ RED CONTROL (r1279 b): the copy that keeps the value when the target no longer takes — the old folder still answers', JSON.stringify(keepsIt.valueAtAfter(at0, { as: 'ok' })) === JSON.stringify(at0));
   ok('⑤ RED CONTROL (r1218 4): the copy whose «commit» with no target keeps the value — the pin goes red', !vw1.noTarget, vw1);
   // THE DOORS: the folder from the press's own answer (commit()'s info, or onCommit's), never the box's text
   const DOORS = [
@@ -491,7 +502,7 @@ console.log('\n── ⑤ the field\'s value · the doors take the press\'s answ
     ['src/lib/mounts-dialog.js', 'the mounts dialog (Save)', [/const v = await pf\.commit\(\);[\s\S]{0,200}took\[k\] = v\.path;/, /\[k, k in took \? took\[k\] : el\.value\.trim\(\)\]/], [/\.map\(\(\[k, el\]\) => \[k, el\.value\.trim\(\)\]\)/]],   // stale-pins: kept (a deliberate absence check: the raw read must stay gone)
     ['src/lib/task-detail.js', 'Task Detail (the export / import file; the context rows act in onCommit)', [/const v = await repoPf\.commit\(\); if \(!v\) \{[^\n]*return null; \} return v; \};/, /const p = v\.path;[\s\S]{0,400}\/export`/, /onCommit: \(info\) => bind\.onCommit\(info\)/], [/v \? v\.path : repoInput\.value/]],   // stale-pins: kept (a deliberate absence check: the raw read must stay gone)
     ['src/lib/file-explorer.js', 'the Files window (acts in onCommit)', [/this\._pathField = pathField\(this\.pathInput, \{[\s\S]{0,600}onCommit/], []],
-    ['src/lib/desktop-app-launcher.js', 'the desktop launcher (Run)', [/v = await cwdPf\.commit\(\);[\s\S]{0,400}cwd = v\.path;/, /if \(!live\(\) \|\| host !== asked\) return;/], [/cwdIn\.value\.trim\(\) \|\| undefined/, /cwd: cwdIn\.value/]],   // stale-pins: kept (a deliberate absence check: the raw read must stay gone)
+    ['src/lib/desktop-app-launcher.js', 'the desktop launcher (Run)', [/v = await cwdPf\.commit\(\);[\s\S]{0,700}cwd = v\.path;/, /if \(!live\(\) \|\| host !== asked\) return;/], [/cwdIn\.value\.trim\(\) \|\| undefined/, /cwd: cwdIn\.value/]],   // stale-pins: kept (a deliberate absence check: the raw read must stay gone)
   ];
   const doorVerdicts = (read) => DOORS.map(([f, door, must, never]) => { const src = read(f); const miss = must.filter((re) => !re.test(src)).length, raw = never.filter((re) => re.test(src)).length; return { door, ok: miss === 0 && raw === 0, miss, raw }; });
   const readSrc = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -499,7 +510,7 @@ console.log('\n── ⑤ the field\'s value · the doors take the press\'s answ
   ok(`⑤ THE DOORS take the folder from their press's own answer, never the box (${dv.map((d) => d.door).join(' · ')})`, dv.every((d) => d.ok), dv.filter((d) => !d.ok));
   const planted = doorVerdicts((f) => f === 'src/lib/desktop-app-launcher.js' ? anchored(readSrc(f), '    launch({ exec, args, cwd }, { exec, args, cwd: cwd || null });', '    launch({ exec, args, cwd: cwdIn.value.trim() || undefined }, { exec, args, cwd: cwd || null });', 'B-5736 a raw read planted in the launcher') : readSrc(f));   // stale-pins: kept (the old raw read, planted by its RED)
   ok('⑤ RED CONTROL: a raw box read planted in the launcher\'s Run — the door is named', planted.filter((d) => !d.ok).map((d) => d.door).join() === 'the desktop launcher (Run)', planted.filter((d) => !d.ok));
-  const oldExport = doorVerdicts((f) => f === 'src/lib/task-detail.js' ? anchored(readSrc(f), "if (!v) { const w = repoPf.verdict()?.text; if (w) showToast(w, { type: 'error' }); return null; } return v; };", 'return v ? v : { path: repoInput.value.trim() }; };', 'B-5736 the export\'s old fallback') : readSrc(f));   // stale-pins: kept (the old line, planted by its RED)
+  const oldExport = doorVerdicts((f) => f === 'src/lib/task-detail.js' ? anchored(readSrc(f), "if (!v) { const vd = repoPf.verdict(); if (vd?.text) showToast(vd.text, vd.status === 'pending' ? {} : { type: 'error' }); return null; } return v; };", 'return v ? v : { path: repoInput.value.trim() }; };', 'B-5736 the export\'s old fallback') : readSrc(f));   // stale-pins: kept (the old line, planted by its RED)
   ok('⑤ RED CONTROL: Task Detail\'s old export fallback (the box\'s raw text after a press with nothing) — the door is named', oldExport.filter((d) => !d.ok).map((d) => d.door).join().startsWith('Task Detail'), oldExport.filter((d) => !d.ok));
   // r1218 (the narrow round's follow): THE PRODUCT'S OWN SUGGESTION IS MEANT; ONE guard for Run; Import's own words; the Save re-check
   const TD = readSrc('src/lib/task-detail.js'), LA = readSrc('src/lib/desktop-app-launcher.js'), MD = readSrc('src/lib/mounts-dialog.js');
@@ -522,9 +533,14 @@ console.log('\n── ⑤ the field\'s value · the doors take the press\'s answ
   const guardPin = (la) => { const run = la.slice(la.indexOf('  runBtn.onclick = async () => {'), la.indexOf('  execIn.addEventListener(\'keydown\'')); const g = run.indexOf("if (runBtn.dataset.judging) { showToast(t('Asking the machine…')); return; }"); return g > 0 && g < run.indexOf('execIn.value.trim()') && g < run.indexOf('if (cwdIn.value.trim())') && (run.match(/runBtn\.dataset\.judging\)/g) || []).length === 1; };
   ok('⑤ r1218 2: ONE guard for Run, before the boxes are read — a press while the folder is judged says so, whatever the folder box holds', guardPin(LA));
   ok('⑤ RED CONTROL (r1218 2): the guard back inside the folder branch (an emptied box launches at once) — the pin goes red', !guardPin(anchored(anchored(LA, "    if (runBtn.dataset.judging) { showToast(t('Asking the machine…')); return; }\n", '', 'B-5736 r1218 2 the guard'), '      const asked = host;', '      if (runBtn.dataset.judging) return;\n      const asked = host;', 'B-5736 r1218 2 the old guard')));   // stale-pins: kept (the old guard, planted by its RED)
-  const recheckPin = (md) => /for \(const k of Object\.keys\(took\)\) \{\n        const pf = inputs\[k\]\._pathField;\n        if \(!inputs\[k\]\.value\.trim\(\)\) \{ delete took\[k\]; continue; \}[^\n]*\n        if \(pf\.value\(\)\) continue;\n        const v = await pf\.commit\(\);/.test(md) && md.indexOf('if (pf.value()) continue;') < md.indexOf('const vals = Object.fromEntries(');
+  const recheckPin = (md) => /for \(const \[k, el\] of Object\.entries\(inputs\)\) \{[^\n]*\n        const pf = el\._pathField;\n        if \(!pf \|\| !pf\.el\.isConnected \|\| pf\.el\.offsetParent === null\) continue;\n        if \(!el\.value\.trim\(\)\) \{ delete took\[k\]; continue; \}[^\n]*\n        if \(k in took && pf\.value\(\)\) continue;\n        const v = await pf\.commit\(\);/.test(md) && md.indexOf('if (k in took && pf.value()) continue;') < md.indexOf('const vals = Object.fromEntries(');
   ok('⑤ r1218 5: the mounts dialog\'s Save asks again, once, every field whose box moved while a later press was judged (its value is nothing) — before it saves', recheckPin(MD));
-  ok('⑤ RED CONTROL (r1218 5): the Save without its re-check — the pin goes red', !recheckPin(anchored(MD, '        if (pf.value()) continue;\n', '        continue;\n', 'B-5736 r1218 5 the re-check')));
+  ok('⑤ RED CONTROL (r1218 5): the Save without its re-check — the pin goes red', !recheckPin(anchored(MD, '        if (k in took && pf.value()) continue;\n', '        continue;\n', 'B-5736 r1218 5 the re-check')));
+  ok('⑤ RED CONTROL (r1279 a): the re-check over the fields taken at the first pass only (one empty then and typed into later goes unjudged) — the pin goes red', !recheckPin(anchored(MD, '        if (k in took && pf.value()) continue;\n', '        if (!(k in took) || pf.value()) continue;\n', 'r1279 a every visible field')));
+  // r1279 THE MUST: a refused export SAYS its error — the branch is code (a line comment once swallowed it, unseen by any gate)
+  const errPin = (td) => /repoPf\.refresh\(\); \}[^\n]*\n\s*else showToast\(d\.code === 'TASK_GROUPS_UNREAD'/.test(td) && !/\/\/[^\n]*else showToast\(/.test(td);
+  ok('⑤ r1279 THE MUST: Export\'s error branch is CODE — a refused export says its error (no line comment holds an «else showToast(»)', errPin(TD));
+  ok('⑤ RED CONTROL (r1279): fa688554e\'s line — the else branch inside the success arm\'s comment — the pin goes red', !errPin(anchored(TD, '   // r1279: a refused export SAYS its error (a comment once swallowed this branch)', '', 'r1279 its note').replace(/\n\s*else showToast\(d\.code === 'TASK_GROUPS_UNREAD'/, " else showToast(d.code === 'TASK_GROUPS_UNREAD'")));
   // every file under src/ that builds a field is a door of the table: the walk FINDS the six (it can fail), a planted text is named
   const builds = (text) => /\bpathField\(/.test(text.replace(/^\s*import\s[^\n]*\n/gm, ''));
   const walkSrc = (extra = {}) => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walk(rel); else if (/\.js$/.test(e.name) && rel !== 'src/lib/path-field.js' && builds(readSrc(rel))) out.push(rel); } }; walk('src'); for (const [f, text] of Object.entries(extra)) if (builds(text)) out.push(f); return out; };

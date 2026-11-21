@@ -39,7 +39,7 @@ import { folderChips } from '../day-one.js';
 import { loadHomeFolders, paintFolderChips } from './folder-chips.js';
 // B-08d5 (the coordinator's ruling 2026-11-19 22:19Z): the field's ask-and-answer logic is a PURE MODEL — this file turns what happens into
 // its events and performs its effects; no verdict is decided here
-import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, askedOf, lateOf, replyKind, UNSETTLED, tickKey, tickHolds, valueFor } from '../path-field-model.js';
+import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, askedOf, lateOf, replyKind, UNSETTLED, tickKey, tickHolds, valueFor, valueAtAfter } from '../path-field-model.js';
 import { rankCandidates, groupOn, mergeListing, missingVerdict, isExcludedPath, toTilde, fromTilde, parentOf, baseName, HOST_ROW, nameChips, textCandidates, isPathText } from '../path-candidates.js';
 
 const DEBOUNCE_MS = 110;
@@ -706,17 +706,17 @@ export function pathField(input, opts = {}) {
   /* the model said «commit»: the info from the ranking's verdict for the text */
   function committed(e) {
     const how = e.how; let info = null;
-    if (e.as === 'empty') { st.committed = null; st.valueAt = null; }
+    if (e.as === 'empty') { st.committed = null; st.valueAt = valueAtAfter(st.valueAt, { as: 'empty' }); }
     else {
       const x = target();
       if (e.as === 'ok' && x.ok) { const r = x.r; info = infoOf(r.path, { isFile: !!r.file, via: { base: r.base, relative: !!r.relative, kind: how === 'picker' ? 'picker' : how === 'pick' ? 'pick' : r.kind, alias: '' }, how }); }
       else if (e.as === 'create' && x.missing) info = infoOf(x.path, { exists: false, create: true, isFile: kind === 'file', via: { base: x.base, relative: !!(x.base && x.base !== 'home' && x.base !== 'abs'), kind: how === 'pick' ? 'pick' : 'exact', alias: '' }, how });
     }
     if (info) { st.committed = info; paint(); }
-    else if (e.as !== 'empty' && st.valueAt) st.valueAt = { ...st.valueAt, voided: true };   // B-5736 (r1218 4): the model said «commit» but the target no longer takes — no value either
+    else if (e.as !== 'empty') st.valueAt = valueAtAfter(st.valueAt, { as: e.as });   // B-5736 (r1218 4): the model said «commit» but the target no longer takes — no value either (PURE valueAtAfter)
     answer(e.doors, info);   // B-225c: the presses hear their own outcome FIRST — an onCommit that destroys the field never turns it into «nothing»
     if (info) try { o.onCommit?.(info); } catch (err) { console.warn('[path-field] onCommit', err); }
-    if (info && st.committed === info) st.valueAt = { keys: [tickKeyNow(keyText(e.key)), tickKeyNow()], voided: false };   // B-5736: the PATH's key of the press, and of the box as its door's onCommit left it (an absolute text's bases are not in it: the same folder under any Task Group)
+    if (info && st.committed === info) st.valueAt = valueAtAfter(st.valueAt, { info, keys: [tickKeyNow(keyText(e.key)), tickKeyNow()] });   // B-5736: the PATH's key of the press, and of the box as its door's onCommit left it (an absolute text's bases are not in it: the same folder under any Task Group)
   }
   function set(text, { commit: c = true, how = 'set', derived = null } = {}) {
     if (st.destroyed) return Promise.resolve(null);   // B-225c: a dead field takes no text and makes no door (the model hears nothing after «destroyed»: it would never be answered)

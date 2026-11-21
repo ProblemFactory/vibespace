@@ -320,9 +320,16 @@ function tickHolds(tick, cur) { return !!(tick && tick.on && tick.key === cur); 
    into the box), and nothing since took it back: a press ended with nothing (refused, owed, dropped, moved, quiet), a create that failed,
    the «create» consent taken off. A box, a machine or a Task Group moved by any road answers nothing: never the last folder under another
    key. `at` = { keys: [the press's key, the key right after its onCommit], voided } */
+/* what the value's mark becomes at the model's «commit» effect (PURE, r1279 b): a commit that took gives it its keys back; an empty box
+   has no value; a commit the model called fine whose target no longer takes (the press heard nothing) takes it back */
+function valueAtAfter(at, { info = null, as = 'ok', keys = [] } = {}) {
+  if (info) return { keys: keys.slice(), voided: false };
+  if (as === 'empty') return null;
+  return at ? { ...at, voided: true } : null;
+}
 function valueFor(committed, cur, at = null) {
   if (!committed || typeof committed !== 'object' || !at || at.voided) return null;
   return Array.isArray(at.keys) && at.keys.includes(String(cur == null ? '' : cur)) ? committed : null;
 }
 
-module.exports = { init, step, view, keyOf, textOf, sameAsk, tickKey, tickHolds, valueFor, missingGate, homeReader, askedOf, lateOf, replyKind, PARTIAL_REPLIES, UNSETTLED, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };
+module.exports = { init, step, view, keyOf, textOf, sameAsk, tickKey, tickHolds, valueFor, valueAtAfter, missingGate, homeReader, askedOf, lateOf, replyKind, PARTIAL_REPLIES, UNSETTLED, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };

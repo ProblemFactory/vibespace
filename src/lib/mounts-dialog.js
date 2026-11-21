@@ -303,12 +303,13 @@ export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
       }
       // r1218 5: a box edited while a later field's press was judged no longer shows the path its press took — its value is nothing
       // then (B-5736): asked again, once; one that still does not take is said, nothing saved
-      for (const k of Object.keys(took)) {
-        const pf = inputs[k]._pathField;
-        if (!inputs[k].value.trim()) { delete took[k]; continue; }   // emptied meanwhile: nothing to take, as the first pass
-        if (pf.value()) continue;
+      for (const [k, el] of Object.entries(inputs)) {   // r1279 a: EVERY visible path field — one empty at the first pass and typed into later is judged too
+        const pf = el._pathField;
+        if (!pf || !pf.el.isConnected || pf.el.offsetParent === null) continue;
+        if (!el.value.trim()) { delete took[k]; continue; }   // empty (or emptied meanwhile): nothing to take, as the first pass
+        if (k in took && pf.value()) continue;
         const v = await pf.commit();
-        if (!v || !(await pf.ensure())) { err.textContent = pf.verdict().text; submit.disabled = false; inputs[k].focus(); return; }
+        if (!v || !(await pf.ensure())) { err.textContent = pf.verdict().text; submit.disabled = false; el.focus(); return; }
         took[k] = v.path;
       }
       const vals = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, k in took ? took[k] : el.value.trim()]));

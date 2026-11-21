@@ -266,6 +266,17 @@ try {
     const said = await until(() => D.ev(`(() => { const t = window.__toastTexts(); return t.length > ${before} && t.slice(${before}).some((x) => /未生效/.test(x)) ? t.slice(${before}) : null; })()`), 8000, 100);
     console.log('  B-5736 follow, a typed missing path (the facts judged): ' + JSON.stringify({ said, written: fs.existsSync(typed) }));
     check('B-5736 follow: a missing path the person TYPED keeps the tick rule — refused with the field\'s words (未生效 …), nothing written', !!said && !fs.existsSync(typed), { said, written: fs.existsSync(typed) });
+    // r1279 THE MUST: a REFUSED export SAYS its error — the hub's refusal answered by a page-side stand-in (400), the field's commit fine
+    // (the file the first press wrote). (RED: fa688554e — a line comment swallowed the error branch: no words at all)
+    await typeInto(D, `JS:${expRow}.querySelector('input.task-detail-input')`, pre);
+    await blurAway(D, ir.id);
+    await D.ev(`(() => { const f0 = window.fetch; window.__b5736x = f0; window.fetch = (u, o) => (/\\/api\\/tasks\\/[^/]+\\/export$/.test(String(u)) && o && o.method === 'POST' ? Promise.resolve(new Response(JSON.stringify({ error: 'stand-in: the export was refused (B-5736 leg)' }), { status: 400, headers: { 'Content-Type': 'application/json' } })) : f0(u, o)); return true; })()`);
+    const nRef = ((await D.ev('window.__toastTexts()')) || []).length;
+    await press(D, exportBtn);
+    const refusedSaid = await until(() => D.ev(`(() => { const t = window.__toastTexts().slice(${nRef}); return t.find((x) => /the export was refused/.test(x)) || null; })()`), 8000, 100);
+    await D.ev(`(() => { if (window.__b5736x) { window.fetch = window.__b5736x; delete window.__b5736x; } return true; })()`);
+    console.log('  B-5736 follow, a refused export (the facts judged): ' + JSON.stringify({ refusedSaid }));
+    check('B-5736 follow (r1279): a REFUSED export says the hub\'s error — never silence', !!refusedSaid, refusedSaid);
   }
 
   // Backlog — the full viewer, its box saves on blur

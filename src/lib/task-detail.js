@@ -838,7 +838,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     const repoPf = pathField(repoInput, { kind: 'file', create: 'ask', id: 'task-export-file', createWhen: t('Create this file when exporting'), suggests: repoInput.value });
     // the field's resolution (a relative one too) — B-5736: one that does not take is said under the field and nothing is sent: never the
     // box's raw text (it skipped the field's judge and its «create» tick)
-    const repoAnswer = async () => { if (!repoInput.value.trim()) return ''; const v = await repoPf.commit(); if (!v) { const w = repoPf.verdict()?.text; if (w) showToast(w, { type: 'error' }); return null; } return v; };
+    const repoAnswer = async () => { if (!repoInput.value.trim()) return ''; const v = await repoPf.commit(); if (!v) { const vd = repoPf.verdict(); if (vd?.text) showToast(vd.text, vd.status === 'pending' ? {} : { type: 'error' }); return null; } return v; };   // r1279 c: «Asking the machine…» is information
     const exportBtn = document.createElement('button'); exportBtn.className = 'task-detail-btn'; exportBtn.textContent = t('Export');
     exportBtn.onclick = async () => {
       const v = await repoAnswer();
@@ -848,7 +848,8 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       try {
         const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
         const d = await res.json().catch(() => ({}));
-        if (res.ok) { showToast(t('Exported to {path}', { path: d.path })); repoPf.refresh(); }   // the file is there now: the field's «absent» answer is stale (an Import next is asked again, never refused on it) else showToast(d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Export failed')), { type: 'error' });   // THE STORE HELD UNREAD: the page's own words
+        if (res.ok) { showToast(t('Exported to {path}', { path: d.path })); repoPf.refresh(); }   // the file is there now: the field's «absent» answer is stale (an Import next is asked again, never refused on it)
+        else showToast(d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Export failed')), { type: 'error' });   // THE STORE HELD UNREAD: the page's own words   // r1279: a refused export SAYS its error (a comment once swallowed this branch)
       } catch { showToast(t('Export failed — server unreachable'), { type: 'error' }); }
     };
     const importBtn = document.createElement('button'); importBtn.className = 'task-detail-btn'; importBtn.textContent = t('Import');
