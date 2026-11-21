@@ -32,6 +32,15 @@ const MUT = mutantCopies('office-open', repo);
 const T0 = Date.now();
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // ── the fixtures: a served catalog as a machine answers it (the shape desktop-serve's registry() spreads) ──
@@ -434,7 +443,7 @@ console.log('§installs a NEW installable is ONE registration line of src/instal
   // the control: the OLD lookup (absent/xpra ⇒ the xpra plan, else the office spec table) restored — the fake member is refused (red)
   const NEW = "  return typeof row.plan === 'function' ? row.plan(f) : S.packageInstallPlan(f, row.spec);";
   ok(ISRC.includes(NEW), '§installs control anchor: the lookup asks the row');
-  const Iold = MUT.load('src/installs.js', ISRC.replace(ANCHOR, ANCHOR + LINE).replace(NEW, "  if (w === 'xpra') return M.xpraInstallPlan(f);\n  const spec = O.installSpecFor(w);\n  if (!spec) return { ok: false, code: 'bad-request', error: 'unknown install' };\n  return S.packageInstallPlan(f, spec);"), 'old-lookup');
+  const Iold = MUT.load('src/installs.js', editAnchor(editAnchor(ISRC, ANCHOR, ANCHOR + LINE, "src/installs.js"), NEW, "  if (w === 'xpra') return M.xpraInstallPlan(f);\n  const spec = O.installSpecFor(w);\n  if (!spec) return { ok: false, code: 'bad-request', error: 'unknown install' };\n  return S.packageInstallPlan(f, spec);", "src/installs.js"), 'old-lookup');
   ok(Iold.installPlanFor('acme', fx).code === 'bad-request', '§installs CONTROL: with the old id lookup the fake installable is refused bad-request (the row is what plans it)');
 }
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 11 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));

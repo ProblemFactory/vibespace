@@ -33,6 +33,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const CLI = path.join(REPO, 'data/bin/vibespace-msg');
 const ROOT = scratch('msg-cli-groups');
@@ -761,7 +770,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     const RPC = "        if (addressableId(s) !== cid) continue;   // verify r6: a pending fork (its parent's id) is never the wrapper this frame is written into";
     const LOC = "      for (const [, s] of activeSessions) if (addressableId(s) === cid) return s;";
     ok(dlsrc.split(RPC).length === 2 && dlsrc.split(LOC).length === 2 && !/\(s\.backendSessionId \|\| s\.claudeSessionId\) (!==|===) cid/.test(dlsrc), 'the ladder reads every "which session carries this conversation" through addressableId (rung 1.5, the charged identity — rung 0, the channel socket, was removed in B-df40) — no raw read remains');
-    const DLc = M6.load('src/server/conversation-deliver.js', dlsrc.replace(RPC, "        if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;").replace(LOC, "      for (const [, s] of activeSessions) if ((s.backendSessionId || s.claudeSessionId) === cid) return s;"), 'ladder-raw');
+    const DLc = M6.load('src/server/conversation-deliver.js', editAnchor(editAnchor(dlsrc, RPC, "        if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;", "src/server/conversation-deliver.js"), LOC, "      for (const [, s] of activeSessions) if ((s.backendSessionId || s.claudeSessionId) === cid) return s;", "src/server/conversation-deliver.js"), 'ladder-raw');
     const lcC = await ladderLeg(DLc, 'r6-ladder-codex-ctl', { shape: 'codex' });
     ok(lcC.ok && lcC.lane === 'rpc-queue' && lcC.forkFrames === 1 && lcC.charged.includes('slot-FORK'), `CONTROL: with the raw lookups the parent's frame is written into the FORK's wrapper and charged to the fork's slot (${JSON.stringify(lcC)}) — the leg would go red`);
     const lkC = await ladderLeg(DLc, 'r6-ladder-claude-ctl', { shape: 'claude' });
@@ -925,13 +934,13 @@ console.log('§3 the words');
   // NEGATIVE CONTROL: a patched copy of the teaching without the line (lane cli-registry: the line is the msg row's, in
   // src/agent-cli-registry.js; a task-groups copy requires the patched registry)
   const src = fs.readFileSync(path.join(REPO, 'src/agent-cli-registry.js'), 'utf-8');
-  const patched = src.replace(/(\n\s*)sessionStart: \(\) => 'Other agents: `vibespace-msg send[^\n]*/, '$1sessionStart: null,');
+  const patched = editAnchor(src, /(\n\s*)sessionStart: \(\) => 'Other agents: `vibespace-msg send[^\n]*/, '$1sessionStart: null,', "src/agent-cli-registry.js");
   ok(patched !== src, 'CONTROL setup: the patch removed the line from a copy');
   const tmpReg = path.join(ROOT, 'agent-cli-registry.patched.cjs');
   fs.writeFileSync(tmpReg, patched);
   const tgSrc = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf-8');
   const tmp = path.join(ROOT, 'task-groups.patched.cjs');
-  fs.writeFileSync(tmp, tgSrc.replace("require('./agent-cli-registry.js')", `require(${JSON.stringify(tmpReg)})`).replace(/require\((['"])\.\//g, `require($1${path.join(REPO, 'src')}/`));
+  fs.writeFileSync(tmp, editAnchor(tgSrc, "require('./agent-cli-registry.js')", `require(${JSON.stringify(tmpReg)})`, "src/task-groups.js").replace(/require\((['"])\.\//g, `require($1${path.join(REPO, 'src')}/`));
   const P = require(tmp);
   ok(judge((P.TaskGroupManager || P).prototype._toolsSectionParts.call({}, '', false)).length === 0, 'NEGATIVE CONTROL: the same judge finds NO pointer in the patched copy');
   // the whole baseline intro (no-task sessions) still under the inline cap

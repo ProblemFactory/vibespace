@@ -13,6 +13,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MP = require(path.join(ROOT, 'src/memory-pressure.js'));
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; } else { fail++; console.log('  ✗ ' + m); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const G = 2 ** 30;
 
 console.log('① the episode (on ≥ 90 %, off < 80 %, ONE open per episode, self-resolve)');
@@ -27,7 +36,7 @@ ok(MP.pressureStep(null, { used: 5, limit: 0 }).open === false, 'a sample withou
 ok(drive(MP.pressureStep, [95]).st.episode === 1 && drive(MP.pressureStep, [95, 70, 95]).st.episode === 2, 'episodes are counted');
 // CONTROL: a patched copy that files per sample over the line must read RED by the same judge
 const src = fs.readFileSync(path.join(ROOT, 'src/memory-pressure.js'), 'utf8');
-const mutSrc = src.replace('if (!s.on && pct >= ON_PCT)', 'if (pct >= ON_PCT)');
+const mutSrc = editAnchor(src, 'if (!s.on && pct >= ON_PCT)', 'if (pct >= ON_PCT)', "src/memory-pressure.js");
 ok(mutSrc !== src, 'control: the patch applied');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-mp-'));
 try {

@@ -34,6 +34,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const NR = require(path.join(REPO, 'src/node-runtime.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (typeof n !== 'string') throw new Error('ok(cond, name, extra?)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 if (process.platform === 'win32') { console.log('SKIP — the stub release is a POSIX tar.gz (the win32 .zip road is the same code with tar -xf)'); process.exit(0); }
 const ROOT = scratchDir('node-runtime');
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
@@ -110,8 +119,8 @@ try {
   ok(!p0.ok && p0.code === 'no-table-row' && hits.length === h0 && link(R1) === 'node-v22.23.4', 'a version THIS repo names no line for ⇒ refused (no-table-row) before ANY request to the mirror', p0);
   const M0 = mutantCopies('noderuntime-table', REPO);
   const NSRC = fs.readFileSync(path.join(REPO, 'src/node-runtime.js'), 'utf8');
-  const noTable = NSRC.replace("  const named = RF.archiveSha(wanted, art.file, archives);\n  if (!named) return { ok: false, code: 'no-table-row', error: `src/runtime-floor.js names no sha256 for ${art.file} — never provisioned (the mirror can serve only the bytes this repo names)` };\n", '')
-    .replace(/    if \(want !== named\) throw refusal\('sums-disagree'[^\n]*\n/, '').replace('    if (got.sha256 !== named) throw', '    if (got.sha256 !== want) throw');
+  const noTable = editAnchor(editAnchor(editAnchor(NSRC, "  const named = RF.archiveSha(wanted, art.file, archives);\n  if (!named) return { ok: false, code: 'no-table-row', error: `src/runtime-floor.js names no sha256 for ${art.file} — never provisioned (the mirror can serve only the bytes this repo names)` };\n", '', "src/node-runtime.js"),
+    /    if \(want !== named\) throw refusal\('sums-disagree'[^\n]*\n/, '', "src/node-runtime.js"), '    if (got.sha256 !== named) throw', '    if (got.sha256 !== want) throw', "src/node-runtime.js");
   const R4 = path.join(ROOT, 'inst4', 'data');
   const redT = await M0.load('src/node-runtime.js', noTable, 'notable').provision('v22.23.9', { archives: FX(), root: R4, mirror: MIRROR });
   ok(noTable !== NSRC && redT.ok && link(R4) === 'node-v22.23.9', 'RED: a copy without the table check provisions the version this repo never named — the rule above can go red', redT);

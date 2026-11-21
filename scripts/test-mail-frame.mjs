@@ -47,6 +47,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = JSON.stringify;
 const MF = require(path.join(REPO, 'src/mail-frame.js'));
 // THE COST YARDSTICK (lane mirror-flake-hardening): a BENIGN mail at MAX_HTML_BYTES (tags, a link, words) — the walk a real
@@ -328,7 +337,7 @@ console.log('⑨ controls: patched copies (outside the tree)');
   const m1 = M.load('src/mail-frame.js', keepAll, 'keep-every-attr');
   const b1 = runCorpus(m1);
   ok(keepAll !== src && b1.some((b) => /on\* attribute/.test(b)), `CONTROL: a sanitizer that keeps every attribute is RED on the corpus (${b1.length} mails)`, b1.slice(0, 2).join(' | '));
-  const scriptOk = src.replace("const RAW_TEXT = Object.freeze(['script', ", "const RAW_TEXT = Object.freeze([").replace("const DROP_TAGS = Object.freeze(['script', ", "const DROP_TAGS = Object.freeze([").replace("const ALLOWED_TAGS = Object.freeze(['a', ", "const ALLOWED_TAGS = Object.freeze(['script', 'a', ");
+  const scriptOk = editAnchor(editAnchor(editAnchor(src, "const RAW_TEXT = Object.freeze(['script', ", "const RAW_TEXT = Object.freeze([", "src/mail-frame.js"), "const DROP_TAGS = Object.freeze(['script', ", "const DROP_TAGS = Object.freeze([", "src/mail-frame.js"), "const ALLOWED_TAGS = Object.freeze(['a', ", "const ALLOWED_TAGS = Object.freeze(['script', 'a', ", "src/mail-frame.js");
   const m2 = M.load('src/mail-frame.js', scriptOk, 'script-through');
   const b2 = runCorpus(m2);
   ok(scriptOk !== src && b2.some((b) => /a <script/.test(b)), `CONTROL: a sanitizer that lets <script> through is RED on the corpus (${b2.length} mails)`, b2.slice(0, 2).join(' | '));

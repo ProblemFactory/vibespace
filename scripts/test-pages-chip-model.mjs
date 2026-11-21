@@ -16,6 +16,15 @@ import { scratchDir } from './scratch.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const MODEL = path.join(repo, 'src/lib/pages-chip-model.js');
 const M = await import(pathToFileURL(MODEL).href);
 const zh = (await import(pathToFileURL(path.join(repo, 'src/lib/i18n-zh.js')).href)).default;
@@ -121,7 +130,7 @@ console.log('— ④ CONTROL: a model copy that mixes the groups');
 {
   const src = fs.readFileSync(MODEL, 'utf8');
   const line = "rows: ownRows }, { key: 'shown', label: t('Shown here'), rows: shownRows }";
-  const mixed = src.replace(line, "rows: ownRows.concat(shownRows) }, { key: 'shown', label: t('Shown here'), rows: [] }");
+  const mixed = editAnchor(src, line, "rows: ownRows.concat(shownRows) }, { key: 'shown', label: t('Shown here'), rows: [] }", "src/lib/pages-chip-model.js");
   ok(mixed !== src, '④ the patch landed');
   const dir = scratchDir('pages-chip-model');
   try {

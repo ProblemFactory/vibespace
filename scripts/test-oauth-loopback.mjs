@@ -28,6 +28,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // r349 (主开发): a wait is for WHAT HAPPENED — bounded, and it says what never came (then the leg's own judgement reads the state)
 const until = async (pred, ms, what) => { const t0 = Date.now(); for (;;) { const v = await pred(); if (v) return v; if (Date.now() - t0 > ms) { console.log(`  … waited ${ms} ms for ${what} — it never came`); return null; } await sleep(5); } };
@@ -345,7 +354,7 @@ console.log('\n⑦ a flow\'s end is the end of what it held (verify r3)');
     const A = '    if (!st.exchanging) forget(st);\n', B = '      const cb = forget(st);   // verify r3: the exchange has returned — its closure (the client secret) is dropped here; r4: `onDone` with it\n';
     ok(src.split(A).length === 2 && src.split(B).length === 2, 'CONTROL setup: the two release lines are present once');
     const M = mutantCopies('oauth-loopback', REPO);
-    const olm = mkFlows(require(M.write('src/oauth-loopback.js', src.replace(A, '').replace(B, '      const cb = st.onDone;\n'), 'no-forget')));
+    const olm = mkFlows(require(M.write('src/oauth-loopback.js', editAnchor(editAnchor(src, A, '', "src/oauth-loopback.js"), B, '      const cb = st.onDone;\n', "src/oauth-loopback.js"), 'no-forget')));
     const r = await drive(olm);
     ok(r.collected.size === 0, `CONTROL: a copy without the release keeps every closure after gc (${r.collected.size} collected) — the release check above would be red`);
     olm.stopAll();

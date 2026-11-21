@@ -44,6 +44,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof n} — the arguments are swapped`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 1500) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const M = require(path.join(REPO, 'src/may-use-model.js'));
 const MU = require(path.join(REPO, 'src/server/may-use.js'));
 const GS = require(path.join(REPO, 'src/server/grants-store.js'));
@@ -232,7 +241,7 @@ console.log('— ⑧ THE FORM\'S ROWS, BYTE FOR BYTE: the shared renderers draw 
   const quoted = (names) => names.map((n) => tt('“{name}”', { name: n })).join(', ');
   const base = require(path.join(REPO, 'scripts/fixtures/may-use/form-rows-2.369.407.cjs'))(esc, tt, quoted);
   const src = fs.readFileSync(path.join(REPO, 'src/lib/may-use-rows.js'), 'utf8');
-  const body = src.replace(/^import [^\n]*\n/gm, '').replace(/^export (const|function) /gm, '$1 ');
+  const body = editAnchor(src.replace(/^import [^\n]*\n/gm, ''), /^export (const|function) /gm, '$1 ', "src/lib/may-use-rows.js");
   ok(!/^import |^export /m.test(body), '⑧ (the module read as plain functions)');
   const now = new Function('escHtml', 't', body + '\nreturn { doorBtn, provRow, accLine, grantedAccountHtml, tickAccountHtml };')(esc, tt);
   const RES = [

@@ -33,6 +33,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const MI = require(path.join(REPO, 'src/mac-helper-identity.js'));
 const SIG = require(path.join(REPO, 'src/agentd-signature.js'));
@@ -182,17 +191,17 @@ console.log('— ⑦ the argvs and the release script —');
 console.log('— ⑧ RED controls: patched copies of the module —');
 {
   ok(load(SRC_TEXT).identityVerdict(MI.parseCodesignInfo(CS.developerId({ team: CS.OTHER_TEAM })), { teamIds: PIN }).kind === 'other', 'the clean copy refuses another team (the control\'s baseline)');
-  const noTeam = SRC_TEXT.replace("if (!pins.includes(team)) return { kind: 'other'", "if (false) return { kind: 'other'");
+  const noTeam = editAnchor(SRC_TEXT, "if (!pins.includes(team)) return { kind: 'other'", "if (false) return { kind: 'other'", "src/mac-helper-identity.js");
   ok(noTeam !== SRC_TEXT && load(noTeam).identityVerdict(MI.parseCodesignInfo(CS.developerId({ team: CS.OTHER_TEAM })), { teamIds: PIN }).kind === 'developer-id', 'RED: with the Team ID check dropped, ANOTHER team\'s Developer ID signature passes as ours — the check is what bites');
-  const noAdhoc = SRC_TEXT.replace("if (pins.length) return refuse(`the pushed helper is ad-hoc signed", "if (false) return refuse(`the pushed helper is ad-hoc signed");
+  const noAdhoc = editAnchor(SRC_TEXT, "if (pins.length) return refuse(`the pushed helper is ad-hoc signed", "if (false) return refuse(`the pushed helper is ad-hoc signed", "src/mac-helper-identity.js");
   ok(noAdhoc !== SRC_TEXT && load(noAdhoc).swapVerdict({ incoming: { version: 'v', identity: { kind: 'adhoc' } }, teamIds: PIN }).take === true, 'RED: with the pinned-adhoc refusal dropped, an ad-hoc push is taken under a pin — the refusal is what bites');
-  const noIdent = SRC_TEXT.replace("if (base.identifier !== identifier) return { kind: 'other'", "if (false) return { kind: 'other'");
+  const noIdent = editAnchor(SRC_TEXT, "if (base.identifier !== identifier) return { kind: 'other'", "if (false) return { kind: 'other'", "src/mac-helper-identity.js");
   ok(noIdent !== SRC_TEXT && load(noIdent).identityVerdict(MI.parseCodesignInfo(CS.developerId({ identifier: 'com.example.other' })), { teamIds: PIN }).kind === 'developer-id', 'RED: with the identifier check dropped, a foreign identifier by our team passes — the check is what bites');
 }
 
 console.log('— ⑨ ROUND 2: the pin mutant over the REAL shapes —');
 {
-  const pinned = SRC_TEXT.replace('HELPER_TEAM_IDS = Object.freeze([])', `HELPER_TEAM_IDS = Object.freeze([${JSON.stringify(CS.CHROME_TEAM)}])`);
+  const pinned = editAnchor(SRC_TEXT, 'HELPER_TEAM_IDS = Object.freeze([])', `HELPER_TEAM_IDS = Object.freeze([${JSON.stringify(CS.CHROME_TEAM)}])`, "src/mac-helper-identity.js");
   const P = load(pinned);
   ok(pinned !== SRC_TEXT && same([...P.HELPER_TEAM_IDS], [CS.CHROME_TEAM]) && Object.isFrozen(P.HELPER_TEAM_IDS), 'a copy of the module with HELPER_TEAM_IDS = [EQHXZ8M8AV] — the shape of the pin commit (the owner\'s Team ID will stand there)');
   const chromeShape = P.identityVerdict(P.parseCodesignInfo(CS.developerId({ team: CS.CHROME_TEAM, name: 'Google LLC' })));
@@ -232,7 +241,7 @@ console.log('— ⑩ ROUND 2: codesign -dr - parsed as its own shape —');
   const iGate = idf.indexOf("if (id.kind !== 'developer-id') return id;"), iParse = idf.indexOf('MI.parseDesignatedRequirement('), iJudge = idf.indexOf('MI.requirementVerdict(');
   ok(iGate > 0 && iParse > iGate && iJudge > iParse && /requirement: req\.designated/.test(idf) && /kind: 'other'/.test(idf) && !/MI\.designatedRequirement\(/.test(sm.slice(sm.indexOf('function ensure()'))), 'the agent asks `-dr -` only after a developer-id verdict, judges it with requirementVerdict (a refusal is `other` ⇒ helper_unsigned) and records the requirement it READ — ensure() no longer assumes one');
   // RED control: the equality dropped ⇒ another team's requirement passes as ours
-  const noEq = SRC_TEXT.replace('if (sameRequirement(req.designated, expect)) return null; // by meaning: the dumper\'s quoting is not a difference', 'return null;');
+  const noEq = editAnchor(SRC_TEXT, 'if (sameRequirement(req.designated, expect)) return null; // by meaning: the dumper\'s quoting is not a difference', 'return null;', "src/mac-helper-identity.js");
   ok(noEq !== SRC_TEXT && load(noEq).requirementVerdict(ours, { teamId: CS.OTHER_TEAM }) === null && MI.requirementVerdict(ours, { teamId: CS.OTHER_TEAM }) !== null, 'RED: with the text equality dropped, a requirement naming ANOTHER team passes as ours — the comparison is what bites');
 }
 
@@ -248,7 +257,7 @@ console.log('— ⑪ ROUND 3: a digit-first Team ID — the dumper quotes it; th
   // RED controls — a bytes-only compare refuses the bare form of a digit-first team as «extra clauses»; round 2's bare emission + bytes-only
   // compare refuses what codesign actually prints for such a team: a0d876c5f's defect, by name
   const EQ = 'if (sameRequirement(req.designated, expect)) return null; // by meaning: the dumper\'s quoting is not a difference';
-  const bytesOnly = SRC_TEXT.replace(EQ, 'if (req.designated === expect) return null;');
+  const bytesOnly = editAnchor(SRC_TEXT, EQ, 'if (req.designated === expect) return null;', "src/mac-helper-identity.js");
   const round2 = bytesOnly.replace('certificate leaf[subject.OU] = ${ouText(teamId)}`;', 'certificate leaf[subject.OU] = ${teamId}`;');
   ok(SRC_TEXT.includes(EQ) && bytesOnly !== SRC_TEXT && /extra clauses/.test(load(bytesOnly).requirementVerdict(db, { teamId: CS.DIGIT_TEAM }) || '') && load(bytesOnly).requirementVerdict(dq, { teamId: CS.DIGIT_TEAM }) === null, 'RED: a bytes-only compare refuses the BARE form of a digit-first team as «extra clauses» — the tokens are what bite');
   ok(round2 !== bytesOnly && /extra clauses/.test(load(round2).requirementVerdict(dq, { teamId: CS.DIGIT_TEAM }) || '') && / = 0VSTEAM002$/.test(load(round2).designatedRequirement({ teamId: CS.DIGIT_TEAM })) && load(round2).requirementVerdict(MI.parseDesignatedRequirement(CS.designated({ team: CS.TEAM })), { teamId: CS.TEAM }) === null, 'RED (a0d876c5f): round 2\'s bare emission + bytes-only compare refuses what the dumper prints for a digit-first team (and still passes a letter-first one — the one capture it generalised from)');
