@@ -1953,6 +1953,9 @@ export default {
   "By event": "按事件",
   "By version": "按版本",
   "Could not load diagnostics": "诊断数据加载失败",
+  "The Diagnostics report could not be read just now.": "诊断报告暂时读不出来。",   // B-360d r887
+  "Wait a moment and open it again.": "请稍等片刻再打开一次。",
+  "The fleet's telemetry could not be read just now — open the report again in a moment.": "机群的遥测数据暂时读不出来——稍后再打开一次报告。",
   "Release gate — heavy tier": "发布门 — 重量级层",
   "Suites too slow for the pre-push gate (headless chrome, real servers, real CLIs). A RED run blocks the next push until a newer green run clears it — run npm run ci:status for the ancestry verdict.": "对 push 前的门来说太慢的套件（无头 Chrome、真实服务器、真实 CLI）。RED 的一次运行会挡住下一次 push，直到更新的绿色运行把它解除——祖先关系的判定请跑 npm run ci:status。",
   "commit": "提交",

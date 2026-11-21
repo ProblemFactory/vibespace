@@ -4,6 +4,7 @@ import { TerminalSession } from './terminal.js';
 import { t, tc } from './i18n.js';
 import { stampAt as when, clockOf, span } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: a refusal toast's door
+import { reportRefusal, fleetRefusal } from './diagnostics-answer.js'; // B-360d r887: a report's answer that is no report is said, never drawn
 import { techFoldHtml } from './plain-words.js'; // lane ui-plain-words: the report's instance and data folder fold
 import { sessionDisplayName } from '../session-name.js'; // THE name ladder — a drift-ledger row names its conversation (lane record-oracle-2-1-296)
 import * as chanCaps from '../channel-caps.js'; // lane channel-row-notices: a parked push lane's whole sentence (the row says one line)
@@ -646,7 +647,10 @@ export function installSetupFlows(App) {
       fetchJson('/api/channels?scope=accounts'), // lane channel-row-notices: the accounts whose push lane is parked or demoted
       fetchJson('/api/loop-holds'), // lane hub-loop-stalls: what held the main loop since start (src/server/loop-holds.js)
     ]);
-    if (!d) { showToast(t('Could not load diagnostics'), { type: 'error' }); return; }
+    // B-360d r887 (THE MUST): an answer that is no report — nothing came back, or the route's refusal (its files did not answer in
+    // time) — is SAID with what to do, never drawn as a clean report (src/lib/diagnostics-answer.js)
+    const refused = reportRefusal(d);
+    if (refused) { showToast(`${refused.why ? t('The Diagnostics report could not be read just now.') : t('Could not load diagnostics')} ${t('Wait a moment and open it again.')}${refused.why ? ` (${refused.why})` : ''}`, { type: 'error' }); return; }
     const esc = escHtml;
     const kv = (obj) => Object.entries(obj || {}).map(([k, v]) =>
       `<tr><td>${esc(k)}</td><td class="n">${v}</td></tr>`).join('') || `<tr><td colspan="2" class="dim">${esc(t('No data'))}</td></tr>`;
@@ -850,8 +854,11 @@ export function installSetupFlows(App) {
       <table><tr><td class="dim">${esc(t('commit'))}</td><td class="dim">${esc(t('result'))}</td><td class="n dim">${esc(t('duration'))}</td><td class="dim">${esc(t('finished'))}</td><td class="dim">${esc(t('detail'))}</td></tr>${rows}</table>`;
     })()}
     ${(() => {
-      // Fleet section: only on a collector instance that has received batches.
-      if (!c || !c.collector || !Object.keys(c.instances || {}).length) return '';
+      // Fleet section: only on a collector instance that has received batches. B-360d r887: a fleet read that failed says so in ONE
+      // line — never a block gone without a word (src/lib/diagnostics-answer.js)
+      const fr = fleetRefusal(c);
+      if (fr) return fr.say ? `<h2>${esc(t('Fleet (central collector)'))}</h2><p class="dim">${esc(t('The fleet\'s telemetry could not be read just now — open the report again in a moment.'))}${fr.why ? ` <span class="faint">(${esc(fr.why)})</span>` : ''}</p>` : '';
+      if (!c.collector || !Object.keys(c.instances || {}).length) return '';
       const rows = Object.entries(c.instances).map(([id, g]) =>
         `<tr><td>${esc(id)}</td><td class="n">${g.total}</td><td class="n">${g.errors}</td><td>${esc(Object.keys(g.versions || {}).join(', '))}</td><td class="dim">${when(g.lastTs)}</td></tr>`).join('');
       const ferrs = (c.errors || []).map((e) =>

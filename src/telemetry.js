@@ -16,15 +16,18 @@ const { timedSync } = require('./timed-sync.js'); // PURE: the store-read clock 
 const { isBrowserNote } = require('./browser-notes.js'); // B-402f: the browser's ResizeObserver loop note — never an error group (older pages sent it as one)
 
 class Telemetry {
-  constructor({ dataDir, version, getForwardUrl, getForwardToken, summaryTimeoutMs = 0 }) {
+  constructor({ dataDir, version, getForwardUrl, getForwardToken, summaryTimeoutMs = 0, summaryReadMs = 0, summaryPool: pool = null }) {
     this.dir = path.join(dataDir, 'telemetry');
     this.version = version;
     this._getForwardUrl = getForwardUrl || (() => '');
     this._getForwardToken = getForwardToken || (() => '');
     this._buf = [];
     this._flushTimer = null;
-    this._asks = new Map();   // B-360d unit 2: the summary asks in flight, one a window
-    this._summaryMs = Number(summaryTimeoutMs) > 0 ? Number(summaryTimeoutMs) : SUMMARY_TIMEOUT_MS;   // the worker's deadline (a suite places a short one)
+    this._asks = new Map();   // B-360d unit 2: the summary READS in flight, one a window (each keyed by its summary AND its days)
+    this._kept = new Map();   // B-360d r887 (5): a read that outlived every ask's reply, kept for the next ask (KEPT_MS)
+    this._summaryMs = Number(summaryTimeoutMs) > 0 ? Number(summaryTimeoutMs) : SUMMARY_TIMEOUT_MS;   // an ASK's reply deadline (a suite places a short one)
+    this._readMs = Number(summaryReadMs) > 0 ? Number(summaryReadMs) : SUMMARY_READ_MS;   // the READ's own (the worker's) deadline
+    this._pool = pool;   // a suite hands its own pool (a short hung-path memory); the product's is the module's
     try { fs.mkdirSync(this.dir, { recursive: true }); } catch {}
   }
 
@@ -132,21 +135,37 @@ class Telemetry {
   // ── THE TWO SUMMARIES OFF THE LOOP (B-360d unit 2, lane bl-keys-misc — the owner's hub on 2.369.413: ONE loop hold of 5.7 s at
   //    the Diagnostics report's read, the folder listed and up to three monthly files read and parsed line by line on the data
   //    folder's mount). The listing, the reads and the summing run in the «telemetry-summary» worker (src/telemetry-summary-worker.js
-  //    on a pool of one, a deadline: SUMMARY_TIMEOUT_MS); the answer is the same object as before, field for field (the PURE
-  //    summarizeEvents / summarizeCentral, moved verbatim). ONE IN FLIGHT a window: a second ask meanwhile waits for the same
-  //    answer. → a Promise; a worker that does not answer in time rejects 503 (the route says it). ──
+  //    on a pool of one); the answer is the same object as before, field for field (the PURE summarizeEvents / summarizeCentral,
+  //    moved verbatim). ONE READ IN FLIGHT a window: a second ask meanwhile waits for the same answer. → a Promise.
+  //    r887: TWO DEADLINES. An ASK's reply ends at SUMMARY_TIMEOUT_MS (503 «still-reading»: the route says it, the page says «wait a
+  //    moment and open it again»); the READ goes on to its own SUMMARY_READ_MS — a slow disk that is alive finishes it, and an answer
+  //    no ask was left to take is KEPT (KEPT_MS) for the next ask. A read past its own deadline ends its worker (503): the pool then
+  //    refuses that folder by name for its bounded time (SafeFs's hung-path memory reads `path`), never one more thread a press. ──
   summary({ days = 14, now = Date.now() } = {}) {
-    return this._offLoop('telemetrySummary', { dir: this.dir, days, now }).then((r) => ({ ...r, instance: this._instanceId() }));
+    return this._offLoop('telemetrySummary', { path: this.dir, days, now }).then((r) => ({ ...r, instance: this._instanceId() }));
   }
   centralSummary({ days = 14, now = Date.now() } = {}) {   // the fleet aggregate: per-instance totals + errors over the central-* shards
-    return this._offLoop('centralSummary', { dir: this.dir, days, now });
+    return this._offLoop('centralSummary', { path: this.dir, days, now });
   }
   _offLoop(op, payload) {
-    const k = `${op}|${payload.days}`, was = this._asks.get(k);
-    if (was) return was;
-    const p = summaryPool().call(op, payload, { timeoutMs: this._summaryMs }).finally(() => { if (this._asks.get(k) === p) this._asks.delete(k); });
-    this._asks.set(k, p);
-    return p;
+    const k = `${op}|${payload.days}`;
+    const kept = this._kept.get(k);
+    if (kept) { this._kept.delete(k); if (Date.now() - kept.at < KEPT_MS) return Promise.resolve(kept.value); }
+    let read = this._asks.get(k);
+    if (!read) {
+      const r = read = { waiting: 0, p: (this._pool || summaryPool()).call(op, payload, { timeoutMs: this._readMs }) };
+      const done = () => { if (this._asks.get(k) === r) this._asks.delete(k); };
+      r.p.then((value) => { done(); if (!r.waiting) this._kept.set(k, { at: Date.now(), value }); }, done);   // no ask left to take it: kept
+      this._asks.set(k, r);
+    }
+    const r = read;
+    r.waiting++;
+    let timer = null;
+    const reply = new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(Object.assign(new Error(`still being read — more than ${(this._summaryMs / 1000).toFixed(this._summaryMs < 10000 ? 1 : 0)} s so far`), { status: 503, code: 'still-reading' })), this._summaryMs);
+      if (timer.unref) timer.unref();
+    });
+    return Promise.race([r.p, reply]).finally(() => { clearTimeout(timer); r.waiting--; });
   }
 
   _instanceId() {
@@ -326,12 +345,14 @@ function summarizeCentral(texts, { days = 14, now = Date.now() } = {}) {
 
 /** the newest monthly shards of a kind in the telemetry folder, in name order (the worker's listing: `events-` / `central-`) */
 const SHARD_RE = Object.freeze({ events: /^events-\d{4}-\d{2}\.ndjson$/, central: /^central-\d{4}-\d{2}\.ndjson$/ });
-const SUMMARY_TIMEOUT_MS = 20000;   // a report that has not answered in 20 s is said (503); the worker that hung is ended and replaced
+const SUMMARY_TIMEOUT_MS = 20000;   // an ask not answered in 20 s is said (503 still-reading); its read goes on
+const SUMMARY_READ_MS = 120000;     // B-360d r887: a read that has not answered in 2 min ends its worker (503); the folder is refused by name a while
+const KEPT_MS = 120000;             // B-360d r887: a read that answered after every ask had gone is kept this long for the next ask
 let _summaryPool = null;
 function summaryPool() {
   if (_summaryPool) return _summaryPool;
   const { SafeFs } = require('./safe-fs.js');
-  _summaryPool = new SafeFs({ workerPath: path.join(__dirname, 'telemetry-summary-worker.js'), name: 'telemetry-summary', poolSize: 1, timeouts: { default: SUMMARY_TIMEOUT_MS } });
+  _summaryPool = new SafeFs({ workerPath: path.join(__dirname, 'telemetry-summary-worker.js'), name: 'telemetry-summary', poolSize: 1, timeouts: { default: SUMMARY_READ_MS } });
   return _summaryPool;
 }
 
@@ -347,4 +368,4 @@ function collectorVerdict(authorization, token) {
   return { ok: true };
 }
 
-module.exports = { Telemetry, collectorVerdict, summarizeEvents, summarizeCentral, SHARD_RE, SUMMARY_TIMEOUT_MS };
+module.exports = { Telemetry, collectorVerdict, summarizeEvents, summarizeCentral, SHARD_RE, SUMMARY_TIMEOUT_MS, SUMMARY_READ_MS, KEPT_MS };

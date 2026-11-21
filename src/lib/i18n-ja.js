@@ -1953,6 +1953,9 @@ export default {
   "By event": "イベント別",
   "By version": "バージョン別",
   "Could not load diagnostics": "診断データを読み込めませんでした",
+  "The Diagnostics report could not be read just now.": "診断レポートを今は読み込めませんでした。",   // B-360d r887
+  "Wait a moment and open it again.": "少し待ってからもう一度開いてください。",
+  "The fleet's telemetry could not be read just now — open the report again in a moment.": "フリートのテレメトリーを今は読み込めませんでした。少ししてからレポートをもう一度開いてください。",
   "Release gate — heavy tier": "リリースゲート — ヘビー層",
   "Suites too slow for the pre-push gate (headless chrome, real servers, real CLIs). A RED run blocks the next push until a newer green run clears it — run npm run ci:status for the ancestry verdict.": "push 前のゲートには遅すぎるスイート（ヘッドレス Chrome、実サーバー、実 CLI）。RED の実行は、より新しい green の実行が解除するまで次の push をブロックします — 祖先関係の判定は npm run ci:status で。",
   "commit": "コミット",

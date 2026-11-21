@@ -21,7 +21,7 @@ function shardsOf(dir, re) {
 
 function runOp(op, payload = {}) {
   const T = require('./telemetry.js');
-  const { dir, days, now } = payload;
+  const { path: dir, days, now } = payload;   // r887: the folder rides as `path` — the pool's mount door and hung-path memory read it
   switch (op) {
     case 'telemetrySummary': return { result: T.summarizeEvents(shardsOf(dir, T.SHARD_RE.events), { days, now }) };
     case 'centralSummary': return { result: T.summarizeCentral(shardsOf(dir, T.SHARD_RE.central), { days, now }) };
