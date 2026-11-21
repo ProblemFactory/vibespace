@@ -268,16 +268,17 @@ try {
   if (LS) {
     const fifoX = path.join(tmp, 'exit.fifo'); execFileSync('mkfifo', [fifoX]);
     const blockF = path.join(tmp, 'block-child.cjs');
-    fs.writeFileSync(blockF, `const fs = require('fs'); fs.openSync(${JSON.stringify(fifoX)}, 'r'); process.stdout.write(JSON.stringify({ removed: 0, more: false }) + '\\n');\n`);   // B-323e: a one-batch child, blocked at its start
+    const markX = path.join(tmp, 'exit-child-at-fifo');   // r1283 (7): the child's own mark, written just before it opens the FIFO
+    fs.writeFileSync(blockF, `const fs = require('fs'); fs.writeFileSync(${JSON.stringify(markX)}, String(process.pid)); fs.openSync(${JSON.stringify(fifoX)}, 'r'); process.stdout.write(JSON.stringify({ removed: 0, more: false }) + '\\n');\n`);   // B-323e: a one-batch child, blocked at its start
     const hubF = path.join(tmp, 'exiting-hub.cjs');
-    fs.writeFileSync(hubF, `const LS = require(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep.js'))}); const R = LS.createRemover({ logsDir: ${JSON.stringify(path.join(tmp, 'exit-logs'))}, workerPath: ${JSON.stringify(blockF)} });\nR.sweep({ keep: {}, cutoff: 0, max: 1 }); setTimeout(() => { R.stop(); const t = Date.now(); process.on('exit', () => process.stderr.write('EXIT ' + (Date.now() - t) + '\\n')); process.exit(0); }, 400);\n`);
+    fs.writeFileSync(hubF, `const LS = require(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep.js'))}); const R = LS.createRemover({ logsDir: ${JSON.stringify(path.join(tmp, 'exit-logs'))}, workerPath: ${JSON.stringify(blockF)} });\nR.sweep({ keep: {}, cutoff: 0, max: 1 }); const fs = require('fs'); const w = setInterval(() => { if (!fs.existsSync(${JSON.stringify(markX)})) return; clearInterval(w); setTimeout(() => { R.stop(); const t = Date.now(); process.on('exit', () => process.stderr.write('EXIT ' + (Date.now() - t) + '\\n')); process.exit(0); }, 50); }, 10);   // r1283 (7): it stops once its child is AT the FIFO (its mark), never after a fixed wait\n`);
     const t0 = Date.now();
     const r = await new Promise((resolve) => { const c = spawn(process.execPath, [hubF], { stdio: ['ignore', 'ignore', 'pipe'] }); let err = ''; c.stderr.on('data', (d) => { err += d; }); const k = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 6000); c.on('exit', (code, sig) => { clearTimeout(k); resolve({ code, sig, err, ms: Date.now() - t0 }); }); });
     // B-323e (the fresh read's weak leg): the hub's exit closes the starter's pipe and the starter ends the children it holds — no
     // reader is left on the FIFO (ENXIO); one still there is released here and the leg says so
     await sleep(300);
     let readerLeft = null; try { const fd = fs.openSync(fifoX, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.closeSync(fd); readerLeft = true; } catch (e) { readerLeft = e && e.code === 'ENXIO' ? false : null; }
-    ok(readerLeft === false, `B-323e: …and the starter ended the child blocked in its storage call once the hub's pipe closed (no reader left on its FIFO${readerLeft ? ' — ONE WAS: it outlived its hub' : ''})`);
+    ok(fs.existsSync(markX) && readerLeft === false, `B-323e: …and the starter ended the child blocked in its storage call once the hub's pipe closed (it reached the FIFO: ${fs.existsSync(markX)}; no reader left on its FIFO${readerLeft ? ' — ONE WAS: it outlived its hub' : ''})`);
     ok(r.code === 0 && !r.sig && /EXIT \d+/.test(r.err), `THE HUB'S EXIT NEVER WAITS FOR THE REMOVER: with its child blocked in a storage call, the process exits BY ITSELF (code ${r.code}${r.sig ? ', killed by the leg\'s 6 s backstop — it waited' : ''}; a thread there holds the exit until the backstop)`);
   }
 
@@ -1004,14 +1005,7 @@ try {
     ok(answered, 'the For-you store\'s whenWritten is answered when its flush finds memory unchanged (a «said» never waits for an unrelated later write)');
     try { U.stop && U.stop(); } catch { }
   }
-  // NO CHILD IS KEPT between two batches (B-323e: one child a batch, started by the starter — the warm child and its linger are gone)
-  if (LS) {
-    const CSi = require(path.join(ROOT, 'src/server/child-starter.js'));
-    const R = LS.createRemover({ logsDir: path.join(tmp, 'idle-nowhere') });
-    const w = await R.whole(['jb-1d1e0001']); await R.settled();
-    ok(w && !w.error && !R.busy() && CSi.childStarter().stats().pending === 0, 'NO CHILD IS PARKED between two batches: once its batch is answered the starter holds no child of the remover (one child a batch)', CSi.childStarter().stats());
-    R.stop();
-  }
+  // (B-323e: the IDLE leg is gone — no warm child exists to linger; r1283 (7): its «nothing pending» check could not fail)
 
 
   // ── §8 THE SMALL THINGS (round 3 §8) ───────────────────────────────────────────────────────────────────────────────────

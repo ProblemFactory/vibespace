@@ -153,7 +153,7 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
       wedgedT = null; if (wedged !== it) return;
       if (grace) { wedged = null; next(); return; }
       wedgedPast = true;
-      if (it.cutDone) it.cutDone({ partialUnknown: 'its child has not ended — its count stays in its file for the next start' });
+      if (it.cutDone) it.cutDone({ partialUnknown: 'its child has not ended — its count stays in its file for the next start', countLeft: it.msg.countName });
       next();
     }, wedgedMs);   // REF'D (≤ WEDGED_MS): a cut sweep's answer is owed until its child's end or the hold — an answer owed keeps the loop, as a batch in flight does
   };
@@ -168,11 +168,13 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     next();
   };
   /** a cut sweep's count, read once its child has ended (a `count` batch, first in the queue) */
-  const countSoon = (it) => { if (it.cutDone && !it.cutDone.done() && !stopped) queue.unshift({ internal: true, msg: { op: 'count', dir: it.msg.orphanDir, name: it.msg.countName, seq: ++seq }, resolve: (a) => it.cutDone(a && a.count ? { partial: a.count, countFile: it.msg.countName } : { partialUnknown: (a && (a.why || a.error)) || 'its count could not be read' }) }); };
+  const countSoon = (it) => { if (it.cutDone && !it.cutDone.done() && !stopped) queue.unshift({ internal: true, msg: { op: 'count', dir: it.msg.orphanDir, name: it.msg.countName, seq: ++seq }, resolve: (a) => it.cutDone(a && a.count ? { partial: a.count, countFile: it.msg.countName } : { partialUnknown: (a && (a.why || a.error)) || 'its count could not be read', countLeft: it.msg.countName }) }); };
   // the fresh read's find 2: a starter that fails while a killed child is awaited never says that child's end — at the next ask
   // the child is judged by the identity read at its timeout (gone, a zombie, another process under its pid = ended; /proc
   // unreadable = still awaited, the safe side)
-  const endedUnheard = (it) => { const k = it && it.killed; if (!k || !k.pid) return false; const s = PI.statOf(k.pid); return s === null || (!!s && (s[0] === 'Z' || (k.start != null && s[1] !== k.start))); };
+  // r1283 (1): NO /proc IS NO EVIDENCE — a machine with none (macOS) reads every pid as gone; there the starter's late exit is the only release
+  const procOpts = procRoot != null ? { procRoot } : undefined;
+  const endedUnheard = (it) => { const k = it && it.killed; if (!k || !k.pid) return false; if (!PI.hasProc(procOpts)) return false; const s = PI.statOf(k.pid, procOpts); return s === null || (!!s && (s[0] === 'Z' || (k.start != null && s[1] !== k.start))); };
   const fail = (it, error, { timedOut = false, unknown = false, ended = false } = {}) => {
     if (cur !== it) return; cur = null;
     if (timedOut && !it.ended) wedge(it, false); else if (unknown) wedge(it, true);
@@ -184,7 +186,7 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     if (requeued) queue.unshift(it);
     else if (it.msg.op === 'sweep' && (timedOut || unknown || ended)) {   // a child that RAN: what it removed is in its count file
       it.cutDone = once((x) => it.resolve({ error, ...x }));
-      if (unknown || !it.msg.countName) it.cutDone({ partialUnknown: unknown ? 'the starter could not say — its count stays in its file for the next start' : 'it kept no count file' });
+      if (unknown || !it.msg.countName) it.cutDone({ partialUnknown: unknown ? 'the starter could not say — its count stays in its file for the next start' : 'it kept no count file', ...(unknown && it.msg.countName ? { countLeft: it.msg.countName } : {}) });
       else if (ended || it.ended) countSoon(it);   // the fresh read's find 4: it has ENDED (no answer, a crash, its heap) — its count is read now, never «nothing removed»
     } else it.resolve({ error });
     next();
@@ -215,7 +217,7 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
       if (cur !== it) return { notStarted: true, error: 'stopped' };   // a stop meanwhile: nothing is started (its file goes with the next sweep)
       tail = [it.msg.op, '--request', name];
     }
-    return run(process.execPath, ['--max-old-space-size=96', workerPath, logsDir, String(process.pid), '--once', ...tail], { timeoutMs: Math.max(1, tmo - (Date.now() - t0)), capture: true, maxBuffer: ANSWER_MAX, wholeEnv: true, env: { PATH: process.env.PATH || '/usr/bin:/bin' }, onTimeout: (pid) => { it.killed = { pid: Number(pid) || 0, start: pid ? ((PI.statOf(pid) || [])[1] || null) : null }; }, onLateExit: () => lateExit(it) });
+    return run(process.execPath, ['--max-old-space-size=96', workerPath, logsDir, String(process.pid), '--once', ...tail], { timeoutMs: Math.max(1, tmo - (Date.now() - t0)), capture: true, maxBuffer: ANSWER_MAX, wholeEnv: true, env: { PATH: process.env.PATH || '/usr/bin:/bin' }, onTimeout: (pid) => { it.killed = { pid: Number(pid) || 0, start: pid ? ((PI.statOf(pid, procOpts) || [])[1] || null) : null }; }, onLateExit: () => lateExit(it) });
   }
   /** the child's ONE answer: the last line of its stdout, an object — else null */
   const answerOf = (out) => { const ls = String(out || '').split('\n').filter(Boolean); let a = null; try { a = JSON.parse(ls[ls.length - 1]); } catch { } return a && typeof a === 'object' && !Array.isArray(a) ? a : null; };
@@ -273,7 +275,7 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     // It returns nothing to count (round 4 §3's count now rides that file)
     stop() {
       stopped = true; if (wedgedT) { clearTimeout(wedgedT); wedgedT = null; }
-      const w = wedged; if (w && w.cutDone) w.cutDone({ partialUnknown: 'stopped — its count stays in its file for the next start' });
+      const w = wedged; if (w && w.cutDone) w.cutDone({ partialUnknown: 'stopped — its count stays in its file for the next start', countLeft: w.msg.countName });
       const it = cur; cur = null; if (it) it.resolve({ error: 'stopped' });
       next(); return null;
     },

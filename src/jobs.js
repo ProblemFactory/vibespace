@@ -4078,8 +4078,12 @@ class JobManager {
       if (ans) this._logsLastErr = ans.error;
       const cuF = this._logsState && this._logsState.catchUp;   // a STOP's count went into the record at the stop (round 4 §3: `_logsStop`)
       if (cuF && part && ans.error !== 'stopped') { cuF.removed += part.removed; cuF.entries += part.entries || 0; cuF.jobDirs = (cuF.jobDirs || 0) + (part.jobDirs || 0); }
-      if (part && ans.countFile && this._logsState) { const oc = this._logsState.orphansCounted || (this._logsState.orphansCounted = []); if (!oc.includes(ans.countFile)) oc.push(ans.countFile); }   // B-323e: counted ONCE — its name beside its count
-      if (part && ((cuF && ans.error !== 'stopped') || ans.countFile)) this._logsSave();
+      // B-323e: a count file the hub READ — a cut's (its count above) or an answer's (an error before the walk: zero) — is counted HERE,
+      // its name beside its count; one it could not read (a child held or unknown) is named as CUT for the next start's words (r1283 (5))
+      const stF = this._logsState; let dirty = !!(cuF && part && ans.error !== 'stopped');
+      if (stF && ans.countFile && !ans.partialUnknown) { const oc = stF.orphansCounted || (stF.orphansCounted = []); if (!oc.includes(ans.countFile)) { oc.push(ans.countFile); dirty = true; } }
+      if (stF && ans.countLeft) { const cl = stF.cutLeft || (stF.cutLeft = []); if (!cl.includes(ans.countLeft)) { cl.push(ans.countLeft); if (cl.length > 50) cl.shift(); dirty = true; } }
+      if (dirty) this._logsSave();
       if (cuF) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS, cfg.restFactor * cfg.timeoutMs));   // a failed or cut pass RESTS (≥ 5 min, ≥ 10× its timeout); an open catch-up never stalls
       return ans;
     }
@@ -4090,6 +4094,7 @@ class JobManager {
       this._logsHeldSaid = ''; this._logsState.heldNow = []; this._logsSave();
     }
     const st = this._logsState;
+    if (ans.countFile && !st.orphansCounted.includes(ans.countFile)) st.orphansCounted.push(ans.countFile);   // B-323e (r1283 (2)): its count file counted HERE — its name in the SAME save as its count (the catch-up's opening one too)
     let opened = false;
     if (!st.catchUp && ans.more) { // more than one pass owes: THE CATCH-UP opens — said once, with its count
       // round 4 §3: it opens WITH its first pass in it — the record made durable before the start line already counts what that pass
@@ -4106,7 +4111,6 @@ class JobManager {
     if (cu) { if (!opened) { cu.removed += ans.removed; cu.entries += ans.entries; cu.jobDirs = (cu.jobDirs || 0) + (ans.jobDirs || 0); cu.passes++; } }   // the opening pass is in the record already
     else if (ans.removed >= LOGS_SAY_AT_ONCE) sayNow.push(LS.words.pass(ans));   // B-323e (the fresh read's find 7): said once the record holding it is ON DISK — a kill between never says it twice
     else if (ans.removed) { const d = st.day || (st.day = { day: today, removed: 0, entries: 0, passes: 0 }); d.removed += ans.removed; d.entries += ans.entries || 0; d.passes++; }
-    if (ans.countFile && !st.orphansCounted.includes(ans.countFile)) st.orphansCounted.push(ans.countFile);   // B-323e: its count file is counted HERE — its name in the same record as its count
     st.last = { at, why, removed: ans.removed, entries: ans.entries, more: !!ans.more, ms: ans.ms };
     if (cu && !ans.more) { sayNow.push(LS.words.done({ ...cu, kept: ans.keptOld || 0 })); st.catchUp = null; } // …and once when it is done, with its total (the last, complete pass's «kept»)
     this._logsSave();
@@ -4182,6 +4186,7 @@ class JobManager {
       last: r && r.last && typeof r.last === 'object' ? r.last : null, heldSaid: Array.isArray(r && r.heldSaid) ? r.heldSaid.filter((x) => typeof x === 'string').slice(-100) : [],
       owed: Array.isArray(r && r.owed) ? r.owed.filter((x) => typeof x === 'string' && LS.JOB_NAME.test(x)).slice(-LOGS_OWED_MAX) : [], heldNow: Array.isArray(r && r.heldNow) ? r.heldNow.filter((x) => typeof x === 'string').slice(0, 20) : [],
       orphansCounted: Array.isArray(r && r.orphansCounted) ? r.orphansCounted.filter((x) => typeof x === 'string').slice(-50) : [],
+      cutLeft: Array.isArray(r && r.cutLeft) ? r.cutLeft.filter((x) => typeof x === 'string').slice(-50) : [],   // B-323e (r1283 (5)): count files a cut left unread
       day: r && r.day && typeof r.day === 'object' && /^\d{4}-\d{2}-\d{2}$/.test(String(r.day.day)) && ['removed', 'entries', 'passes'].every((k) => fin(r.day[k])) ? { ...r.day } : null };   // B-c330: the day's folded counts
     for (const id of this._logsState.owed) this._logsOwed.add(id);   // what an earlier process owed survives its restart
   }
@@ -4196,6 +4201,7 @@ class JobManager {
       this._logsStateErr = a && a.error ? { error: a.error, code: a.code || 'unreadable' } : null;   // round 4 §3: the cause, said by the pass
       if (a && a.recordSetAside) this.d.log(`[jobs] job-logs: the catch-up record did not parse — set aside as ${a.recordSetAside}; a fresh one is started`);
       for (const n of (a && a.cutCounts) || []) this.d.log(`[jobs] job-logs: an orphaned remover's count file was cut while it was written (${n}) — its count is lost; forgotten`);
+      for (const n of (a && a.cutBeside) || []) this.d.log(`[jobs] job-logs: the last write of a remover's count file was cut (${n}) — its count (${n.replace(/\.tmp$/, '')}) stands and may be short by one; the cut write forgotten`);   // r1283 (5)
       for (const n of (a && a.badCounts) || []) this.d.log(`[jobs] job-logs: ${n} does not hold a remover's count (not counted) — forgotten`);
       if (this._logsState === null && a && !a.error) { this._logsAdopt(a.state); return this._logsOrphans(a.orphans || []); }
       this._logsMergeSaid();
@@ -4206,13 +4212,17 @@ class JobManager {
   async _logsOrphans(orphans) {
     const st = this._logsState; if (!st) return;
     st.orphansCounted = (st.orphansCounted || []).filter((n) => orphans.some((o) => o.name === n));   // a name whose file is gone is done
-    let grew = false;
+    let grew = false; const cutLeft = new Set(st.cutLeft || []);
     for (const o of orphans) {
       if (st.orphansCounted.includes(o.name)) continue;
       if (st.catchUp) { st.catchUp.removed += o.removed; st.catchUp.entries += o.entries; st.catchUp.jobDirs = (st.catchUp.jobDirs || 0) + o.jobDirs; }
-      this.d.log(`[jobs] job-logs: a remover whose hub ended removed ${o.removed} run dir(s) before it stopped — ${st.catchUp ? 'counted in the catch-up' : 'said here'}`);
+      // r1283 (5): its OWN words — a pass that finished before its record was written (its file says done), a batch cut past its bound
+      // whose child had not ended (named as cut in the record), else its hub ended; a count of zero is said by nobody
+      const who = o.done ? 'a clean-up pass that finished before its record was written' : cutLeft.has(o.name) ? 'a clean-up batch cut past its bound (its child had not ended)' : 'a remover whose hub ended';
+      if (o.removed > 0) this.d.log(`[jobs] job-logs: ${who} removed ${o.removed} run dir(s)${o.done ? '' : ' before it stopped'} — ${st.catchUp ? 'counted in the catch-up' : 'said here'}`);
       st.orphansCounted.push(o.name); grew = true;
     }
+    if ((st.cutLeft || []).length) { st.cutLeft = []; grew = true; }   // every file left by a cut is counted above (or is gone)
     this._logsMergeSaid();
     if (grew) { this._logsSave(); await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { }); }
     const done = orphans.map((o) => o.name).filter((n) => st.orphansCounted.includes(n));

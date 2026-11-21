@@ -145,8 +145,8 @@ try {
     const { a: cut, gone } = await cutOf(slowOf(WORKER, 3));
     ok(cut.error && /no answer in/.test(cut.error) && cut.partial && cut.partial.removed >= 1 && cut.partial.removed <= gone && gone - cut.partial.removed <= 1, `the REAL remover cut at its bound answers what it removed, read from its count file once its child ended — ${cut.partial && cut.partial.removed} said, ${gone} gone (a kill between a removal and its write may lag one)`, cut);
     ok(cut.countFile && has(D3, cut.countFile) && !has(D3, cut.countFile + '.tmp'), 'the count read is READ ONLY: the file stays until the record that counts it is on disk and a later batch forgets it');
-    const WRITE = '  if (!countFile) return;\n  try { fs.writeFileSync(countFile + \'.tmp\'';
-    const noCount = MC.write('src/job-logs-sweep-worker.js', anchored(WKsrc, WRITE, '  return;\n  try { fs.writeFileSync(countFile + \'.tmp\'', 'red-no-count'), 'red-no-count');
+    const WRITE = '  if (!countFile) return false;\n  try { fs.writeFileSync(countFile + \'.tmp\'';
+    const noCount = MC.write('src/job-logs-sweep-worker.js', anchored(WKsrc, WRITE, '  return false;\n  try { fs.writeFileSync(countFile + \'.tmp\'', 'red-no-count'), 'red-no-count');
     const { a: cutR } = await cutOf(slowOf(noCount, 3));
     ok(cutR.error && !cutR.partial && /missing/.test(cutR.partialUnknown || ''), 'RED: a child that keeps no count — the cut pass\'s count is «unknown» (and never «nothing removed»)', cutR);
     // every way a count file can be missing or torn, the REAL count read (a stand-in only for the cut child)
@@ -236,7 +236,7 @@ try {
     for (const id of ['jb-0e1a0006', 'jb-0e1a0007', 'jb-0e1a0008', 'jb-0e1a0009']) seedRun(L6, id, B);
     const direct = (hub, id, wp = WORKER, once = true) => S0.run(process.execPath, [wp, L6, String(hub), ...(once ? ['--once', 'whole', '--names', id] : [])], { timeoutMs: 10000, capture: true, wholeEnv: true, env: PATH_ONLY });
     const wrong = await direct(process.ppid, 'jb-0e1a0006'), right = await direct(process.pid, 'jb-0e1a0007'), bare = await direct(process.pid, 'jb-0e1a0009', WORKER, false);
-    ok(wrong.code === 0 && !String(wrong.stdout).trim() && has(L6, 'jb-0e1a0006'), 'a child handed a pid that is neither its parent nor its parent\'s parent refuses its batch (nothing read, nothing removed, no answer)', wrong);
+    ok(wrong.code === 0 && /refused by its parent check/.test(String(wrong.stdout)) && has(L6, 'jb-0e1a0006'), 'a child handed a pid that is neither its parent nor its parent\'s parent refuses its batch (nothing read, nothing removed; its one line names the door — r1283 (4))', wrong);
     ok(right.code === 0 && /"gone":\["jb-0e1a0007"\]/.test(right.stdout) && !has(L6, 'jb-0e1a0007'), 'the same batch, handed the hub\'s own pid (the starter\'s parent), runs', right);
     ok(bare.code !== 0 && /runs only as the one-batch child/.test(bare.stderr) && has(L6, 'jb-0e1a0009'), 'the worker THROWS without --once (never in the hub\'s own process)', { code: bare.code });
     const BORN = 'const bornOfHub = HUB > 1 && BORN > 1 && (BORN === HUB || parentOf(BORN) === HUB);';
@@ -274,7 +274,7 @@ try {
       const gone = 40 - runsOf(L9, 'jb-0ld00009').length;
       const logs10 = [], J10 = engineAt(D9, logs10, { max: 20 });
       const p10 = await J10.sweepLogs({ why: 'boot' }); await J10.logsSettled(); J10.shutdown();
-      const m = logs10.map((l) => /a remover whose hub ended removed (\d+) run dir\(s\) before it stopped/.exec(l)).find(Boolean);
+      const m = logs10.map((l) => /(?:a remover whose hub ended|a clean-up pass that finished before its record was written) removed (\d+) run dir\(s\)/.exec(l)).find(Boolean);   // r1283 (5): a batch that finished after the stop says so
       return { mid, gone, said: m ? Number(m[1]) : null, left: fs.readdirSync(D9).filter((n) => n.startsWith(LS.ORPHAN_PREFIX) && n !== (p10 && p10.countFile)) };   // the next engine's own pass keeps ITS count file until its next pass
     };
     const sc = await stopScene(slowOf(WORKER, 5), 'real');

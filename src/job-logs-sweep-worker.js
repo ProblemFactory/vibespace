@@ -67,10 +67,12 @@ const hubGone = () => !bornOfHub || process.ppid !== BORN;
 // B-323e: THIS sweep's COUNT FILE (`<ORPHAN_PREFIX><the remover>-<seq>.json` in the data dir, its name the hub's): rewritten by temp +
 // rename after EVERY removal, never removed here — whatever ends this child (its answer, its bound, its hub's end, a stop), what it
 // removed is on disk; the hub counts it ONCE (its name kept in the record beside its count) and a later batch forgets it
+// r1283 (3): written at the child's START (a zero), so a missing file is a real loss, never a pass that removed nothing; r1283 (5):
+// rewritten with `done` at its normal end, so the next start tells a pass that FINISHED from one whose hub ended
 let countFile = null;
-function countWrite(out) {
-  if (!countFile) return;
-  try { fs.writeFileSync(countFile + '.tmp', JSON.stringify({ removed: out.removed, entries: out.entries, jobDirs: out.jobDirs, at: Date.now() })); fs.renameSync(countFile + '.tmp', countFile); out.countFile = path.basename(countFile); } catch { }
+function countWrite(out, done = false) {
+  if (!countFile) return false;
+  try { fs.writeFileSync(countFile + '.tmp', JSON.stringify({ removed: out.removed, entries: out.entries, jobDirs: out.jobDirs, at: Date.now(), ...(done ? { done: true } : {}) })); fs.renameSync(countFile + '.tmp', countFile); out.countFile = path.basename(countFile); return true; } catch { return false; }
 }
 /** the hub ended mid-batch (or it was never this child's): stop now — what this batch removed is in its count file already */
 function orphaned() { process.exit(0); }
@@ -192,7 +194,15 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
   let jobs; try { jobs = fs.readdirSync(logsDir, { withFileTypes: true }); } catch (e) { if (e.code !== 'ENOENT') out.error = e.message; out.ms = Date.now() - t0; return out; }
   walk: for (const je of jobs) {
     // B-323e: a request file left by a batch whose child never read it (its start failed, its write was cut) goes with this walk
-    if (!je.isDirectory() || !S.JOB_NAME.test(je.name)) { if (je.name.startsWith(S.REQUEST_PREFIX)) { try { fs.unlinkSync(path.join(logsDir, je.name)); } catch { } } continue; }
+    // r1283 (6): only its OWN remover's, or one older than a batch's bound — never another engine's request not yet read
+    if (!je.isDirectory() || !S.JOB_NAME.test(je.name)) {
+      if (je.name.startsWith(S.REQUEST_PREFIX)) {
+        const rp = path.join(logsDir, je.name), own = !!myRequests && je.name.startsWith(myRequests);
+        let old = false; if (!own) { const rs = lst(rp); old = !!rs && rs.mtimeMs < Date.now() - S.BATCH_TIMEOUT_MS; }
+        if (own || old) { try { fs.unlinkSync(rp); } catch { } }
+      }
+      continue;
+    }
     const id = je.name, jobDir = path.join(logsDir, id);
     if (!named.has(id)) out.unnamedJobs++;
     let ents; try { ents = fs.readdirSync(jobDir, { withFileTypes: true }); } catch { continue; }
@@ -252,17 +262,17 @@ function stateOf({ stateFile, orphanDir: od = null }) {
   let st = null, recordSetAside = null, raw = null;
   try { raw = fs.readFileSync(stateFile, 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') return { error: `the catch-up record could not be read: ${(e && (e.code || e.message)) || e}`, code: String((e && (e.code || e.message)) || e).slice(0, 60) }; }
   if (raw != null) { try { st = JSON.parse(raw); } catch { const to = `${stateFile}.corrupt-${Date.now()}`; try { fs.renameSync(stateFile, to); recordSetAside = path.basename(to); } catch (re) { return { error: `the catch-up record did not parse and could not be set aside: ${(re && re.code) || re}`, code: `did not parse; set-aside refused: ${String((re && re.code) || re).slice(0, 30)}` }; } } }
-  const orphans = [], cutCounts = [], badCounts = [];
+  const orphans = [], cutCounts = [], cutBeside = [], badCounts = [];
   if (od) { let all = []; try { all = fs.readdirSync(od).filter((n) => n.startsWith(S.ORPHAN_PREFIX)); } catch { }
     for (const n of all) {
-      if (n.endsWith('.json.tmp')) { try { fs.unlinkSync(path.join(od, n)); cutCounts.push(n); } catch { } continue; }   // a write cut by a death: no count in it
+      if (n.endsWith('.json.tmp')) { try { fs.unlinkSync(path.join(od, n)); (all.includes(n.slice(0, -4)) ? cutBeside : cutCounts).push(n); } catch { } continue; }   // r1283 (5): its file beside it stands (short by one at most)   // a write cut by a death: no count in it
       if (!n.endsWith('.json')) continue;
       let o = null; const rd = bounded(path.join(od, n), S.COUNT_MAX); try { o = rd.why ? null : JSON.parse(rd.text); } catch { }   // B-323e: read with its bound
       const c = countsOf(o);
       if (!c) { try { fs.unlinkSync(path.join(od, n)); badCounts.push(n); } catch { } continue; }
-      orphans.push({ name: n, ...c });
+      orphans.push({ name: n, ...c, ...(o.done === true ? { done: true } : {}) });
     } }
-  return { state: st && typeof st === 'object' ? st : null, orphans, recordSetAside, cutCounts, badCounts };
+  return { state: st && typeof st === 'object' ? st : null, orphans, recordSetAside, cutCounts, cutBeside, badCounts };
 }
 /** an orphan's files, once the record that counted them is on disk — only names of that prefix, in that dir */
 function forget({ dir, names = [] }) {
@@ -287,10 +297,12 @@ function countOf({ dir, name }) {
 }
 /** B-323e: THE BATCH — its job folder names in the arguments (a whole-dir batch), or the remover's own REQUEST FILE in the logs
  *  folder (every other batch): read with its bound and REMOVED here, read or not */
+let myRequests = null;   // r1283 (6): `<REQUEST_PREFIX><its remover>-` — this remover's own request files
 function batchOf([op, how, ...rest]) {
   if (!S.OPS.includes(op)) return { error: 'its batch names no op' };
   if (op === 'whole' && how === '--names') return { op, ids: rest.filter((n) => S.JOB_NAME.test(n)) };
   if (how !== '--request' || rest.length !== 1 || !S.REQUEST_NAME.test(rest[0])) return { error: 'its batch could not be read' };
+  const own = /^(\.jobs-remover-request-[0-9a-z]{1,40}-)\d{1,12}\.json$/.exec(rest[0]); myRequests = own ? own[1] : null;
   const f = path.join(logsDir, rest[0]), rd = bounded(f, S.REQUEST_MAX);
   try { fs.unlinkSync(f); } catch { }
   if (rd.why) return { error: `its request file: ${rd.why}` };
@@ -299,13 +311,16 @@ function batchOf([op, how, ...rest]) {
 }
 
 // THE ONE BATCH (B-323e): refused before anything is read when its hub is gone (round 3 §4), its answer ONE line on stdout
-if (hubGone()) orphaned();
+// r1283 (4): a refusal by the parent check names its door in its one line (a machine whose `ps` fails would say only «no answer»)
+if (hubGone()) { if (!bornOfHub) { try { fs.writeSync(1, JSON.stringify({ error: 'refused by its parent check: its parent is neither the hub nor a process the hub started' }) + '\n'); } catch { } } orphaned(); }
 let msg; try { msg = batchOf(process.argv.slice(5)); } catch (e) { msg = { error: `its batch could not be read: ${(e && (e.code || e.message)) || e}` }; }
 procRoot = typeof msg.procRoot === 'string' ? msg.procRoot : '/proc';   // a suite may point it elsewhere
 countFile = msg.op === 'sweep' && typeof msg.orphanDir === 'string' && typeof msg.countName === 'string' && S.COUNT_NAME.test(msg.countName) ? path.join(msg.orphanDir, msg.countName) : null;
+const countAtStart = countWrite({ removed: 0, entries: 0, jobDirs: 0 });   // r1283 (3)
 {
   let out;
   try { out = msg.error ? { error: msg.error } : msg.op === 'whole' ? whole(msg) : msg.op === 'sweep' ? sweep(msg) : msg.op === 'state' ? stateOf(msg) : msg.op === 'forget' ? forget(msg) : msg.op === 'note' ? note(msg) : msg.op === 'count' ? countOf(msg) : { error: 'unknown op' }; }
   catch (e) { out = { error: (e && e.message) || String(e) }; }
+  if (countAtStart && out && Number.isInteger(out.removed)) countWrite(out, true);   // r1283 (5): its end marked (a sweep that threw leaves its file unnamed: the next start counts it)
   try { process.stdout.write(JSON.stringify(out) + '\n'); } catch { }
 }
