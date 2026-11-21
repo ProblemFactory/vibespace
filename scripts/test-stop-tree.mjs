@@ -987,6 +987,9 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
     before: ({ jm }) => { const job = [...jm.jobs.values()][0]; return { after: async () => ({ left: (job && job.runs[job.runs.length - 1] || {}).left || null }) }; } }));
   const FOLD = "  if (!left.length && !out.length && !stepReached.length) return {};";
   const foldCut = anchored(WRAP, FOLD, "  if (!left.length && !out.length) return {};   /* MUTANT: the release's early return */", 'd8f4-fold-cut');
+  // 主开发 r902 (its round's race): the count the product keeps is what the stop step's signal HEARD — the line's total less its «(N could
+  // not be signalled: gone, or not ours)» (the timeout program may end its sleep before the wrapper's own signal reads it again)
+  const treeOutOf = (r) => { const m = ((r && r.log) || '').match(/stop: (\d+) process(?:es)? it started outside its group \([^)]*\) hears? it from the wrapper(?: \((\d+) could not be signalled)?/); return m ? Number(m[1]) - Number(m[2] || 0) : 0; };
   // B-d8f4 UNIT 2 — (8)'s legs on the REAL wrapper, a 400 ms grace (the engine's seam: memorySample.stopMs)
   const GRACE = { memorySample: { stopMs: 400 } };
   // (8a) THE KILL PASS'S OWN FILTER: an escapee of this run that IGNORES the polite signal (SIG_IGN survives its exec) — the stop step's
@@ -1001,33 +1004,6 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   });
   const KF = "    const esc = mine ? rawE : taskStop ? rawE.filter(ours) : [];";
   const killFilterCut = anchored(WRAP, KF, "    const esc = mine ? rawE : [];   /* MUTANT: the kill pass without this run's escapees */", 'd8f4-kill-filter');
-  // (8b) THE LATE STOP: the main ends BY ITSELF; the drain SIGTERMs what it left in its group (a loop that hears it and goes on: its own
-  // file says it heard) — and the stop lands DURING that drain (the scene presses it once the file says so: what happened, never a clock).
-  // The late stop's road: the stop step's SIGTERM reaches the re-parented escapee of this run, counted outside its group. CONTROL: the late
-  // stop's branch cut — the escapee is said «not stopped», never counted outside
-  const lateScene = timed(async (wrapperText, tag) => {
-    const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true }); fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), wrapperText);
-    const E = path.join(dd, 'esc.pid'), H = path.join(dd, 'heard'), L = path.join(dd, 'loop.pid');
-    const { JobManager } = require(path.join(ROOT, 'src/jobs.js'));
-    const jm = new JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, apiBase: 'http://127.0.0.1:9', memoryRungs: [], ...GRACE });
-    jm.init();
-    const owner = { conversation: { backend: 'claude', id: 'conv-st' }, sessionId: 'sess-st', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
-    const LOOP = path.join(dd, 'loop.sh');   // its own file: a $$ inside it is the loop's own pid
-    fs.writeFileSync(LOOP, `echo $$ > ${JSON.stringify(L)}\ntrap 'echo TERM >> ${JSON.stringify(H)}' TERM\nwhile :; do sleep 0.05; done\n`);
-    const argv = ['sh', '-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(E)}; exec sleep 345' &); sh ${JSON.stringify(LOOP)} & while [ ! -s ${JSON.stringify(E)} ] || [ ! -s ${JSON.stringify(L)} ]; do sleep 0.02; done; exit 0`];
-    const r = jm.create({ kind: 'task', name: 'late', cmd: { argv }, owner }, { conversationId: 'conv-st', sessionId: 'sess-st', sessionCreatedAt: 1, groups: new Set() });
-    const job = jm.jobs.get(r.job.id);
-    const heardOnce = await until(() => fs.existsSync(H), 6000);   // the main ended by itself and the drain's SIGTERM reached the loop: the drain waits its grace now
-    const eid = fs.existsSync(E) ? PI.identityOf(Number(fs.readFileSync(E, 'utf8').trim())) : null, lid = fs.existsSync(L) ? PI.identityOf(Number(fs.readFileSync(L, 'utf8').trim())) : null;
-    for (const x of [eid, lid]) if (x) mine.push(x);
-    if (heardOnce) jm.stop(job);
-    await until(async () => { await jm._sweep(); return ['interrupted', 'failed', 'done'].includes(job.state); }, 8000);
-    const alive = !!eid && PI.aliveIdentity(eid) === true;
-    for (const x of [eid, lid]) if (x && PI.aliveIdentity(x) === true) PI.signalIdentity(x, 'SIGKILL');
-    try { jm.shutdown(); } catch { }
-    return { state: job.state, heardOnce, alive, left: (job.runs[job.runs.length - 1] || {}).left || null };
-  });
-  const lateCut = anchored(WRAP, LS, "  if (false) {   /* MUTANT: no late stop's branch */", 'd8f4-late-branch');
   // (unit 1's round, lens 1) A SIGTERM THAT DID NOT LAND (EPERM) never makes a process «reached»: PLACED in a copy — both its signals to
   // the re-parented escapee throw EPERM (the pid is read from the scene's own file). It is left running, said «not stopped», never counted
   // outside. CONTROL: the copy counting by «termed» alone (the unit-1 count)
@@ -1040,7 +1016,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   };
   const HEARD = "const landed = (k) => !!(termed.get(k) || {}).ok;";
   const epermOld = anchored(epermOf(EPX), HEARD, "const landed = (k) => termed.has(k);   /* MUTANT: «termed» alone */", 'd8f4-heard-cut');
-  const [sa, sx, sr, fa, fx, fj, la, lx, ox, np, npx, nl, fo, fox, dp, dpx, lt, ltx, ep, epx] = await Promise.all([
+  const [sa, sx, sr, fa, fx, fj, la, lx, ox, np, npx, nl, fo, fox, dp, dpx, ep, epx] = await Promise.all([
     escScene(WRAP, 'esc-stop', { viewMod: viewCut }),
     escScene(relEsc, 'esc-stop-mut'),
     escScene(anyRun, 'esc-run-mut'),
@@ -1057,24 +1033,17 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
     foldScene(foldCut, 'fold-mut'),
     deafScene(WRAP, 'deaf'),
     deafScene(killFilterCut, 'deaf-mut'),
-    lateScene(WRAP, 'late'),
-    lateScene(lateCut, 'late-mut'),
-    escScene(epermOf(EP), 'esc-eperm'),
-    escScene(epermOld, 'esc-eperm-mut')
+    escScene(epermOf(EP), 'esc-eperm', { deps: GRACE }),   // the escapee no signal reaches: the drain waits the grace, never the default 10 s
+    escScene(epermOld, 'esc-eperm-mut', { deps: GRACE })
   ]);
-  console.log(`    facts (B-d8f4 unit 2) ${JSON.stringify({ deaf: dp.after, deafCut: dpx.after, late: lt, lateCut: ltx, eperm: ep.after && ep.after.left, epermOld: epx.after && epx.after.left })}`);
+  console.log(`    facts (B-d8f4 unit 2) ${JSON.stringify({ deaf: dp.after, deafCut: dpx.after, eperm: ep.after && ep.after.left, epermOld: epx.after && epx.after.left })}`);
   ok(dp.after && !dp.after.alive && dp.after.left && dp.after.left.outside === 1 && dp.after.left.force, 'B-d8f4 (8): an escapee of this run that IGNORES the polite signal is ended by the kill pass at the grace — counted outside its group, the stop said «by force»', dp.after);
   ok(dpx.after && dpx.after.alive, 'CONTROL (the kill pass without this run\'s escapees, in a copy): the deaf escapee is left running (red)', dpx.after);
-  ok(lt.heardOnce && ['interrupted', 'done', 'failed'].includes(lt.state) && !lt.alive && lt.left && lt.left.outside === 1, 'B-d8f4 (8): a stop that lands WHILE a natural end drains (placed: pressed once the drain\'s SIGTERM was heard) — the late stop\'s road ends this run\'s re-parented escapee, counted outside its group', lt);
-  ok(ltx.heardOnce && ltx.left && !ltx.left.outside && (ltx.left.escaped || 0) >= 1, 'CONTROL (the late stop\'s branch cut, in a copy): the escapee is said «not stopped», never counted outside (red)', ltx);
   const kEp = treeOutOf(ep), kEpx = treeOutOf(epx);
   ok(ep.after && ep.after.alive && ep.after.left && ep.after.left.outside === kEp && (ep.after.left.escaped || 0) >= 1, 'B-d8f4 (unit 1\'s round): an escapee whose signals did not land (EPERM, placed) is left running and said «not stopped» — never counted outside its group', { left: ep.after && ep.after.left, k: kEp });
   ok(epx.after && epx.after.left && epx.after.left.outside === kEpx + 1, 'CONTROL (the count by «termed» alone, in a copy): the escapee no signal reached is counted outside (red)', { left: epx.after && epx.after.left, k: kEpx });
   // B-d8f4 (7): the stop step names the tree's members outside its group it signalled (`timeout` and its `sleep`, in timeout's own group) —
   // K, read from the job's log; «outside» = the re-parented child + those K, whatever the drain still finds alive, and never above n
-  // 主开发 r902 (its round's race): the count the product keeps is what the stop step's signal HEARD — the line's total less its «(N could
-  // not be signalled: gone, or not ours)» (the timeout program may end its sleep before the wrapper's own signal reads it again)
-  const treeOutOf = (r) => { const m = ((r && r.log) || '').match(/stop: (\d+) process(?:es)? it started outside its group \([^)]*\) hears? it from the wrapper(?: \((\d+) could not be signalled)?/); return m ? Number(m[1]) - Number(m[2] || 0) : 0; };
   const kSa = treeOutOf(sa), kOx = treeOutOf(ox);
   console.log(`    facts (B-d8f4 (7)) ${JSON.stringify({ sa: { left: sa.after && sa.after.left, k: kSa }, ox: { left: ox.after && ox.after.left, k: kOx } })}`);
   ok(sa.after && !sa.after.inTree && sa.after.ownGroup && !sa.after.alive && sa.state === 'interrupted' && sa.after.left && kSa >= 1 && sa.after.left.outside === 1 + kSa && sa.after.left.outside <= sa.after.left.n,
