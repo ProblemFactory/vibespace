@@ -1483,7 +1483,6 @@ console.log('\n§2o a picture is of the page in front: every script that opens a
     'scripts/test-browser-who-ui.mjs': ['REAL', 'after p1.front() at the 1280 dialog, p2.shot «08-zh-dialog-360» and «10-<lang>-dialog-notes-360» capture p2 behind p1', "await p2.shot('08-zh-dialog-360', DLG);"],
     'scripts/test-desktop-small-chrome.mjs': ['REAL', 'secondClient() opens a second page (in front) and keeps it open: every later shot() captures the main page behind it', 'const c2 = red ? null : await secondClient();'],
     'scripts/test-mobile-gaps.mjs': ['REAL', "desk.userInput() brings the desktop page to the front, then shot «settings-nav-phone.png» captures the phone page behind it", "await shot('settings-nav-phone.png');"],
-    'scripts/test-wake-approve-card-chrome.mjs': ['REAL', '② opens page B with Target.createTarget (B in front), then A.shot «after-two-cards-1280.png» captures A before any A.front()', "await A.shot('after-two-cards-1280.png');"],
     'scripts/measure-browser-windows.mjs': ['front', 'a measurement script, not a suite: it times a capture of a background tab ON PURPOSE (its own step list)', "Page.captureScreenshot's time on a background tab"],
     'scripts/test-app-display-secrets-chrome.mjs': ['front', 'it captures the tab it has just created (Target.createTarget, then that session\'s capture): the newest, in front', 'const { targetId } = (await b.send(\'Target.createTarget\', { url: `file://${tmp}/menu.html` })).result;'],
     'scripts/test-browser-human-ui.mjs': ['front', OWN_WINDOW, 'newWindow: true'],
@@ -1517,7 +1516,7 @@ console.log('\n§2o a picture is of the page in front: every script that opens a
   const real = Object.entries(VERDICTS).filter(([, [v]]) => v === 'REAL');
   // THE RATCHET (主开发 r1125): the REAL list may only SHRINK — a script newly read as REAL is red by name that day (never a row
   // added to pass), and a cured one leaves BOTH this list and its verdict in its cure's own commit (its picture through frontShot)
-  const REAL_RATCHET = ['scripts/test-wake-approve-card-chrome.mjs', 'scripts/test-browser-who-ui.mjs', 'scripts/test-mobile-gaps.mjs', 'scripts/test-desktop-small-chrome.mjs'];
+  const REAL_RATCHET = ['scripts/test-browser-who-ui.mjs', 'scripts/test-mobile-gaps.mjs', 'scripts/test-desktop-small-chrome.mjs'];
   const grown = real.filter(([k]) => !REAL_RATCHET.includes(k)).map(([k]) => k), leftOver = REAL_RATCHET.filter((k) => !(VERDICTS[k] && VERDICTS[k][0] === 'REAL'));
   ok(grown.length === 0 && leftOver.length === 0, `…the REAL list is a RATCHET (${REAL_RATCHET.length} today; it only shrinks)${grown.length ? ' — NEW REAL, red by name (bring its page to the front with frontShot): ' + grown.join(', ') : ''}${leftOver.length ? ' — CURED but still on the ratchet (take it off in the cure\'s commit): ' + leftOver.join(', ') : ''}`);
   ok(files.length > 300 && unread.length === 0, `every script that opens a second page and captures with no bring-to-front at its capture is READ — ${files.length} scripts walked, ${named.size} named, ${named.size - unread.length} with a verdict${unread.length ? ' — NOT READ (read it: a verdict below, or bring its page to the front): ' + unread.join(' · ') : ''}`);

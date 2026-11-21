@@ -74,6 +74,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1125)
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import * as SCR from './scratch.mjs';   // the runner's fontconfig helpers where this tree has them (2.369.358+)
 import { armWatchdog } from './suite-watchdog.mjs';
@@ -259,6 +260,10 @@ const WebSocket = require('ws');
 let seq = 0; let mutant = null;
 const pageErrors = [];
 const WS_SEEN = [];   // round 3: every WebSocket frame a page saw, received AND sent (the wire assert of a pasted value)
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1125; test-ci-gate §2o): ONE front state for the suite's pages — the page connected last
+// is in front (the launch's first tab, then the tab Target.createTarget opened), front() moves it; every picture goes through
+// frontShot (its page brought to the front only when it is not there, bounded, one retry said, the front handed back). (② opens page B with Target.createTarget, then A's picture after-two-cards.)
+const FS = frontState();
 async function connect(target, NAME = 'A') {
   const sock = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => sock.on('open', r));
@@ -327,7 +332,9 @@ async function connect(target, NAME = 'A') {
     console.log(`    boot ${NAME} (${served}): app ready in ${readyMs} ms, the loading screen gone at ${Date.now() - t0} ms — phases (ms after the navigate): ${phases()} · app ready +${readyMs} · bundle ${bundleState}`);
     await sleep(900);
   };
-  const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
+  const key = target.id || target.targetId || target.webSocketDebuggerUrl, bring = () => cdp('Page.bringToFront');
+  becameFront(FS, key, bring);
+  const shot = async (name) => { try { const r = await frontShot(FS, key, bring, () => cdp('Page.captureScreenshot', { format: 'png' }), { name: `the picture ${name}` }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
   // A REAL PRESS = measure and press as ONE act (scratch.mjs realClicker's shape — 2.369.358): the target measured WHERE IT
   // STANDS (scrolled only when it is not wholly in view — a press that scrolls its own target moves it under the pointer, and
   // the press arm rightly refuses that: measured here, a second 'center' scroll moved a centred Approve by 40 px), the pointer
@@ -347,7 +354,7 @@ async function connect(target, NAME = 'A') {
     const toast = await evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).join(' | ')`);
     return { pressed, toast, miss, before, after };
   };
-  return { cdp, evalJs, waitFor, device, load, shot, realClick, restThenPress, front: () => cdp('Page.bringToFront'), close: () => { try { sock.close(); } catch { } } };
+  return { cdp, evalJs, waitFor, device, load, shot, realClick, restThenPress, front: async () => { await bring(); becameFront(FS, key, bring); }, close: () => { try { sock.close(); } catch { } } };
 }
 
 const targets = async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).filter((x) => x.type === 'page');
