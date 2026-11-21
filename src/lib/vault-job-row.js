@@ -19,6 +19,8 @@ export async function takeBackJob(entry, job, name, refresh) {   // + the job ca
   if (!ok) return;
   const r = await fetchJson('/api/vault/job/revoke', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entry, job }) });
   if (r && r.ok) { showToast(r.stopped ? t('Taken back — the job is stopped') : t('Taken back — its next start asks you again')); if (typeof refresh === 'function') refresh(); return; }
+  // the approvals' store unreadable (主开发 r850 item 4): the job DID stop and nothing was written — said in the person's language, never the bare code
+  if (r && r.code === 'store_unreadable') { showToast(r.stopped ? t('The job is stopped — but the approvals could not be read, so nothing was written; its next start asks you again') : t('The approvals could not be read — nothing was written; try again in a moment'), { type: 'warn', duration: 9000 }); if (typeof refresh === 'function') refresh(); return; }
   showToast((r && r.error) || t('server unreachable'), { type: 'error' });
 }
 /** The row's job chips → { box } (empty box when the row has none) */

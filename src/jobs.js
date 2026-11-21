@@ -2804,7 +2804,7 @@ class JobManager {
   /** lane vault-job-approval (L1b): the person DENIED a job's use of an entry on its card (or the card closed unanswered) — the
    *  waiting job is refused by name (a scheduled run's: its cron too — the approval is the cron's); a later start asks again.
    *  `v` = the door's refusal ({code, words, key}). → whether a waiting job was refused */
-  vaultRefused(jobId, v) {
+  vaultRefused(jobId, v, trigger = 'vault-denied') {   // `trigger`: 'vault-card-unfiled' when the card could not be filed as its file facts landed (the door)
     if (this.readOnly) return false;
     const job = this.jobs.get(String(jobId || ''));
     if (!job) return false;
@@ -2813,13 +2813,13 @@ class JobManager {
     const v0 = v || { code: 'vault_denied' };
     if (job.kind === 'cron') {
       const run = [...this.jobs.values()].find((k) => k.cronParent === job.id && k.state === 'waiting') || null;
-      if (run) { this._vaultRefuse(run, v0, 'vault-denied'); return true; }
+      if (run) { this._vaultRefuse(run, v0, trigger); return true; }
       if (job.state === 'failed' || job.desiredUp === false) return false;
-      this._vaultRefuse(job, v0, 'vault-denied');
+      this._vaultRefuse(job, v0, trigger);
       return true;
     }
     if (job.state !== 'waiting') return false;
-    this._vaultRefuse(job, v0, 'vault-denied');
+    this._vaultRefuse(job, v0, trigger);
     return true;
   }
   /** lane vault-job-approval (decision ④ — REVOKE = STOP): the person took back a job's use of an entry (its ✕) — a job that is

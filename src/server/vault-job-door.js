@@ -53,19 +53,40 @@ const SS = require('../secret-shapes.js');   // the card's command, folder and p
 // mode bits (the run door's rule, its round 12): root owns every component of the real path, none group/other-writable. Read
 // once per card filed (never per spawn); a path that does not resolve — or one on a storage mount the liveness sweep blocked
 // (src/mount-door.js: never stat'ed, B-afc4) — is said as typed and counted writable.
+// OFF THE LOOP, BOUNDED (主开发 r850 item 2 — the three readers of round w6tezed7d: the paths are an agent's, a job's folder is
+// usually on the workspace mount, and the blocked mark does not cover a mount that is slow or newly hung): every stat / realpath
+// goes through fs.promises (the threadpool) and races the card's ONE deadline (FACTS_MS); a fact not read by then is said
+// «could not be read» and counted as one an agent can change (fail closed). A read past its deadline still holds its thread: while
+// one is (`state.stuck`), a new card's facts are not read at all — each is «could not be read» at once (one hung mount holds no
+// more threads than the reads it already took).
 const DOOR = require('../mount-door.js');
-const rootOwned = (p) => { if (DOOR.blocked(p)) return false; try { const st = fs.statSync(p); return st.uid === 0 && (st.mode & 0o022) === 0; } catch { return false; } };
-const chainRootOwned = (p) => { const parts = String(p).split('/'); let cur = ''; for (let i = 1; i < parts.length; i++) { cur += '/' + parts[i]; if (!rootOwned(cur)) return false; } return true; };
-const realOf = (p) => { if (DOOR.blocked(p)) return null; try { return fs.realpathSync(p); } catch { return null; } };
-const isFile = (p) => { if (DOOR.blocked(p)) return false; try { return fs.statSync(p).isFile(); } catch { return false; } };
-function programOf(cmd = {}) {
+const FACTS_MS = 2000;
+const LATE = Symbol('late');
+async function programFacts(cmd = {}, { fsp = fs.promises, ms = FACTS_MS, state = { stuck: 0 } } = {}) {
+  const deadline = Date.now() + ms;
+  const call = async (fn, p) => {
+    if (DOOR.blocked(p)) return {};   // a mount the sweep found dead: never touched
+    const left = deadline - Date.now();
+    if (left <= 0 || state.stuck > 0) throw LATE;
+    const raw = Promise.resolve().then(() => fn(p));
+    let t = null;
+    const r = await Promise.race([raw.then((v) => ({ v }), () => ({})), new Promise((res) => { t = setTimeout(() => res(LATE), left); if (t.unref) t.unref(); })]);
+    clearTimeout(t);
+    if (r === LATE) { state.stuck++; raw.then(() => { state.stuck--; }, () => { state.stuck--; }); throw LATE; }
+    return r;
+  };
+  const rootOwned = async (p) => { const r = await call((x) => fsp.stat(x), p); return !!(r.v && r.v.uid === 0 && (r.v.mode & 0o022) === 0); };
+  const chainRootOwned = async (p) => { const parts = String(p).split('/'); let cur = ''; for (let i = 1; i < parts.length; i++) { cur += '/' + parts[i]; if (!(await rootOwned(cur))) return false; } return true; };
+  const realOf = async (p) => (await call((x) => fsp.realpath(x), p)).v || null;
+  const isFile = async (p) => { const r = await call((x) => fsp.stat(x), p); return !!(r.v && r.v.isFile()); };
+  const late = (e) => { if (e !== LATE) throw e; return true; };
   const argv = Array.isArray(cmd.argv) ? cmd.argv.map(String) : [];
   const cwd = typeof cmd.cwd === 'string' && cmd.cwd ? cmd.cwd : '/';
   const PATH = cmd.env && typeof cmd.env.PATH === 'string' ? cmd.env.PATH : String(process.env.PATH || '');
-  const find = (n) => {
+  const find = async (n) => {
     if (!n) return null;
     if (n.includes('/')) return realOf(path.resolve(cwd, n));
-    for (const d of PATH.split(':').filter(Boolean)) { const r = realOf(path.join(path.resolve(cwd, d), n)); if (r && isFile(r)) return r; }
+    for (const d of PATH.split(':').filter(Boolean)) { const r = await realOf(path.join(path.resolve(cwd, d), n)); if (r && await isFile(r)) return r; }
     return null;
   };
   // a WRAPPER runs the program (`timeout 3600 python3 bot.py`, `nohup`, `nice -n 5`, `env A=1 …` — the second adversarial read):
@@ -78,7 +99,8 @@ function programOf(cmd = {}) {
     while (at < argv.length && (/^-/.test(argv[at]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[at]) || /^\d+(\.\d+)?[smhd]?$/.test(argv[at]))) at++;
   }
   if (at > 0 && at < argv.length) argv.splice(0, at);
-  const real = find(argv[0]);
+  let real = null, unread = false, writable = true;
+  try { real = await find(argv[0]); if (real) writable = !(await chainRootOwned(real)); } catch (e) { unread = late(e); writable = true; }
   const tool = VR.toolNameOf(argv[0] || '', real).replace(/[\d.]+$/, '');
   let script = null;
   if (VR.INTERPRETERS.includes(tool) || VR.SHELLS.includes(tool)) {
@@ -91,13 +113,14 @@ function programOf(cmd = {}) {
       if (CODE.has(a)) break;
       if (VALUE.has(a)) { i++; continue; }
       if (!a || a.startsWith('-')) continue;
-      const r = realOf(path.resolve(cwd, a));
-      if (r && isFile(r)) script = { path: r, writable: !chainRootOwned(r) };
+      const cand = path.resolve(cwd, a);
+      let r = null;
+      try { r = await realOf(cand); if (r && await isFile(r)) script = { path: r, writable: !(await chainRootOwned(r)) }; } catch (e) { late(e); script = { path: r || cand, writable: true, unread: true }; }
       break;
     }
   }
   const mask = (s) => SS.redactSecrets(String(s)).text;
-  return { program: { path: mask(real || String(argv[0] || '')), writable: !(real && chainRootOwned(real)) }, script: script ? { ...script, path: mask(script.path) } : null, folder: mask(cwd), command: mask(whole.map((a) => (a === '' || /[\s'"\\$`]/.test(a) ? JSON.stringify(a) : a)).join(' ')) };
+  return { program: { path: mask(real || String(argv[0] || '')), writable, ...(unread ? { unread: true } : {}) }, script: script ? { ...script, path: mask(script.path) } : null, folder: mask(cwd), command: mask(whole.map((a) => (a === '' || /[\s'"\\$`]/.test(a) ? JSON.stringify(a) : a)).join(' ')) };
 }
 
 /**
@@ -105,7 +128,7 @@ function programOf(cmd = {}) {
  * @param {object} o.vault    src/server/vault-engine.js (state, secretNames, secretGet, noteUse, blocked, onUnlock)
  * @param {() => object} [o.grants]  the grants store (src/server/grants-store.js — rowsFor, onChange), read at call time
  */
-function create({ vault, grants = () => null, log = () => { }, userTodos = null, nameOf = () => null, now = () => Date.now() } = {}) {
+function create({ vault, grants = () => null, log = () => { }, userTodos = null, nameOf = () => null, now = () => Date.now(), fsp = fs.promises, factsMs = FACTS_MS } = {}) {
   const stateOf = () => { try { return vault.state(); } catch { return 'locked'; } };
   const store = () => { try { return grants(); } catch { return null; } };
   /** a stored secret of the vault (the secrets store: a free entry, an agent's) → { prov } | null */
@@ -232,8 +255,9 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
       const ref = VR.parseRef(r.ref);
       if (ref && !need.some((x) => x.id === ref.id)) need.push({ name: r.name, ref: ref.ref, id: ref.id, entry: ref.entry });   // ONE card per job × ENTRY (two NAMEs on one entry: one card)
     }
-    const open = [...asks.values()];
-    const fresh = need.filter((r) => !open.some((q) => q.jobId === jobId && q.entry === r.id));
+    const open = [...asks.values()], pending = [...pend.values()];
+    // a job × entry whose card is open, or whose facts are being read for its card (`pend`), is never asked twice
+    const fresh = need.filter((r) => !open.some((q) => q.jobId === jobId && q.entry === r.id) && !pend.has(`${jobId}\n${r.id}`));
     if (!fresh.length) return { ok: true, filed: 0 };
     if (fresh.some((r) => r.id.length > 200 || r.ref.length > 200)) { log(`[vault-job] ${jobId}: an entry reference past the tray's 200-character field — its card is not filed`); return named('ask_unfiled'); }   // the store cuts an action's field at 200 (src/user-todos.js normalizeAction): a cut id would approve another entry
     const t = now();
@@ -242,17 +266,40 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     // THE CAPS COUNT JOBS (the adversarial read: by cards, a job with five entries could never start): 4 jobs waiting on cards per
     // conversation, 64 on the hub — this job's own open cards count it once
     const jobsOf = (list) => new Set(list.map((q) => q.jobId));
-    const mine = jobsOf(open.filter((q) => q.conv === conv)), all = jobsOf(open);
+    const mine = jobsOf([...open, ...pending].filter((q) => q.conv === conv)), all = jobsOf([...open, ...pending]);   // a card being filed counts as one filed
     if (!mine.has(jobId) && mine.size + 1 > VJ.ASKS_PER_CONV) return named('too_many_asks');
     if (!all.has(jobId) && all.size + 1 > VJ.ASKS_MAX) return named('too_many_asks_hub');
     const parent = job.cronParent && jm ? jm.jobs.get(job.cronParent) || null : null;
     const head = parent || job;
     const cmd = (parent && parent.action && parent.action.task && parent.action.task.cmd) || job.cmd || {};
-    const p = programOf(cmd), who = whoOf(conv);
+    const who = whoOf(conv);
     let label = jobId;   // §93: a job's name reaches a person only through the engine's ONE accessor (labelOf — belted), never raw
     try { if (jm && typeof jm.labelOf === 'function') label = jm.labelOf(head) || jobId; } catch { }
+    // THE CARD IS FILED WHEN ITS FILE FACTS LAND (主开发 r850 item 2): the job waits meanwhile, its job × entries reserved; at the
+    // landing it is judged again (still this engine's, still waiting for an approval) and a card that cannot be filed then refuses
+    // it by name, as a refusal here would have
+    const keys = fresh.map((r) => `${jobId}\n${r.id}`);
+    for (const [i, r] of fresh.entries()) pend.set(keys[i], { jobId, conv, entry: r.id });
+    const work = programFacts(cmd, { fsp, ms: factsMs, state: readState })
+      .then((p) => fileCards({ job, jobId, o, conv, who, label, head, fresh, p }))
+      .catch((e) => { log(`[vault-job] the approval card of ${jobId} could not be filed (${(e && e.message) || e})`); refuseLater(jobId, named('ask_unfiled')); })
+      .finally(() => { for (const k of keys) pend.delete(k); });
+    inflight.add(work); work.finally(() => inflight.delete(work));
+    return { ok: true, filed: 0, reading: fresh.length };
+  }
+  const pend = new Map();   // `${jobId}\n${entry id}` → { jobId, conv, entry } — a card whose file facts are being read
+  const inflight = new Set(), readState = { stuck: 0 };
+  /** → a promise that resolves once no card's file facts are being read (the suites wait on it — never a fixed sleep) */
+  function factsLanded() { return inflight.size ? Promise.allSettled([...inflight]).then(() => factsLanded()) : Promise.resolve(); }
+  const refuseLater = (jobId, v) => { try { if (jm && typeof jm.vaultRefused === 'function') jm.vaultRefused(jobId, v, 'vault-card-unfiled'); } catch (e) { log(`[vault-job] ${jobId}: its card could not be filed and the job could not be refused (${(e && e.message) || e})`); } };
+  function fileCards({ job, jobId, o, conv, who, label, head, fresh, p }) {
+    const now0 = jm ? jm.jobs.get(job.id) : job;
+    if (jm && (now0 !== job || job.state !== 'waiting' || job.waitFor !== 'approval')) return;   // it left its wait meanwhile (started, stopped, removed)
+    if (userTodos.isHeldUnread?.()) return void ask(job, { missing: fresh.map((r) => r.name) });   // held meanwhile: the held road (the job waits, judged at the read)
+    index();
     let filed = 0;
     for (const r of fresh) {
+      if ([...asks.values()].some((q) => q.jobId === jobId && q.entry === r.id)) continue;
       const askId = `vj-${crypto.randomBytes(8).toString('hex')}`;
       const card = VJ.askCardOf({ who, job: { id: jobId, label, kind: head.kind, restart: head.restart }, entry: { id: r.id, ref: r.ref, name: r.name, label: entryLabelOf(r.entry) }, ...p });
       let it = null;
@@ -263,12 +310,11 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
           action: { type: 'vault-job-ask', askId, jobId, entry: r.id, ref: r.ref, name: r.name, conv },   // = VJ.ASK_TYPE (spelled for the approval census's grep) — ids and references only
         });
       } catch (e) { log(`[vault-job] the approval card of ${jobId} could not be filed (${(e && e.message) || e})`); }
-      if (!it || !it.id) return filed ? { ok: true, filed } : named('ask_unfiled');
+      if (!it || !it.id) { if (!filed) refuseLater(jobId, named('ask_unfiled')); return; }
       asks.set(askId, { askId, todoId: it.id, jobId, entry: r.id, ref: r.ref, name: r.name, conv });
       audit({ op: 'ask', job: jobId, entry: r.ref, conv, askId });
       filed++;
     }
-    return { ok: true, filed };
   }
 
   /** THE PERSON ANSWERS a card (src/routes/vault.js — `person`: a bearer never reaches here). allow ⇒ `reauthed` (this page's
@@ -466,16 +512,20 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
    *  vault-job row approves THIS job on it (the card's ✕ takes that back; a value the conversation put needs none — no ✕) */
   function usesOf(job) {
     const jid = VJ.askJobIdOf(job);
-    return VJ.refsOf(job).map((x) => {
+    const refs = VJ.refsOf(job);
+    if (refs.length) index();
+    const open = [...asks.values()].filter((q) => q.jobId === jid);
+    return refs.map((x) => {
       const p = VR.parseRef(x.ref);
       const row = p ? rowsFor(p.id)[0] || null : null;
       const approved = (Array.isArray(row && row.to) ? row.to : []).some((m) => m && Array.isArray(m.jobs) && m.jobs.map(String).includes(jid));
-      return { name: x.name, ref: x.ref, id: p ? p.id : null, label: p ? entryLabelOf(p.entry) : x.ref, approved };
+      const q = p ? open.find((c) => c.entry === p.id) : null;   // its OPEN approval card (the job card's «Open For you» opens THAT item — 主开发 r850 item 4)
+      return { name: x.name, ref: x.ref, id: p ? p.id : null, label: p ? entryLabelOf(p.entry) : x.ref, approved, ...(q ? { card: q.todoId } : {}) };
     });
   }
 
   const bindJobs = (engine) => { jm = engine || null; };
-  return { gate, payload, noteUses, blocked, onChange, ask, answer, askOver, revoke, dropRow, entryGone, jobGone, rowFacts, usesOf, bindJobs };
+  return { gate, payload, noteUses, blocked, onChange, ask, answer, askOver, revoke, dropRow, entryGone, jobGone, rowFacts, usesOf, bindJobs, factsLanded };
 }
 
-module.exports = { create };
+module.exports = { create, programFacts, FACTS_MS };

@@ -1176,6 +1176,7 @@ console.log('lane vault-job-approval (L2): a Background job\'s approval card is 
     fs.writeFileSync(path.join(dir, 'bot.js'), '// a scratch script\n');
     const job = { id: 'jb-0000aaaa', kind: 'service', owner: { conversation: { id: 'conv-a' } }, cmd: { argv: [process.execPath, path.join(dir, 'bot.js'), '--port', '8080'], cwd: dir }, vault: [{ name: 'TG_TOKEN', ref: 'vault://secrets/secret:k1/secret' }] };
     const asked = door.ask(job, { missing: ['TG_TOKEN'] });
+    await door.factsLanded();   // the card is filed when its file facts land (read off the loop)
     const item = todos._state.items.find((i) => i.action && i.action.type === 'vault-job-ask');
     const tr = (D) => (x, p) => { const s = D && typeof D[x] === 'string' ? D[x] : x; return p ? s.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s; };
     const ctx = (t) => ({ t, wordsOf: (i) => i.text, detailOf: (i) => i.detail || '', nameFor: () => 'Chat A', replyState: () => ({ show: false }) });
@@ -1195,6 +1196,16 @@ console.log('lane vault-job-approval (L2): a Background job\'s approval card is 
     const strip = item ? R.runFactsHtml(item, tr(null), { strip: true }) : '';
     ok(/data-fact="secret"/.test(strip) && strip.includes('secret:k1') && /data-fact="program"/.test(strip) && strip.includes('bot.js') && strip.includes('An agent can change this script.') && /data-fact="hosts"/.test(strip) && answersOf(strip).join() === 'allow,deny',
       'the DOCK\'s strip of the card names the secret and the program (and that an agent can change its script) beside «Sends to: unknown» and 允许 / 拒绝', strip.slice(0, 600));
+    // round w6tezed7d: a HOSTILE job name and command (markup, quotes, a reordering character) drawn through the same renderer — text, never markup
+    const HN = '<img src=x onerror=alert(1)>"\'«x»\u202Ebad';
+    const hj = { id: 'jb-0000bbbb', kind: 'service', state: 'waiting', waitFor: 'approval', owner: { conversation: { id: 'conv-a' } }, cmd: { argv: [process.execPath, path.join(dir, 'bot.js'), '<b>bold</b>', '"; rm -rf / #'], cwd: dir }, vault: [{ name: 'TG_TOKEN', ref: job.vault[0].ref }] };
+    door.bindJobs({ jobs: new Map([[hj.id, hj]]), labelOf: () => HN, vaultRefused() { } });
+    door.ask(hj, { missing: ['TG_TOKEN'] });
+    await door.factsLanded();
+    const hItem = todos._state.items.find((i) => i.action && i.action.type === 'vault-job-ask' && i.action.jobId === hj.id);
+    const hHtml = hItem ? R.renderRow({ item: hItem }, ctx(tr(null))).innerHTML : '';
+    ok(!!hItem && !/<img\b/.test(hHtml) && !/<b>bold/.test(hHtml) && hHtml.includes('&lt;img src=x onerror=alert(1)&gt;') && hHtml.includes('&lt;b&gt;bold&lt;/b&gt;') && hHtml.includes('⟦U+202E⟧') && !hHtml.includes('\u202E'),
+      'a HOSTILE job name and command on the card (markup, quotes, U+202E) are drawn as TEXT — escaped by the row renderer, the reordering character shown as ⟦U+202E⟧, never markup', { filed: !!hItem, html: hHtml.slice(0, 700) });
     // RED CONTROL: the dispatch removed (a copy of foryou-actions compiled at its real path) ⇒ no card model: the row falls back to the prose
     const FAP = path.join(ROOT, 'src/foryou-actions.js'), src = fs.readFileSync(FAP, 'utf8');
     const AT = "  if (item && item.action && item.action.type === 'vault-job-ask') return jobCardOf(item, { t });";

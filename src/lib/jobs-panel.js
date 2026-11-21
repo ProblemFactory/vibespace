@@ -391,7 +391,8 @@ function vaultLine(app, j, { compact = false } = {}) {
     w.textContent = waits === 'vault' ? t('waiting for the vault to be unlocked') : t('waiting for your approval — its card is in For you');
     const b = document.createElement('button'); b.type = 'button'; b.className = 'jobs-btn jobs-vault-door';
     b.textContent = waits === 'vault' ? t('Unlock…') : t('Open For you');
-    b.onclick = (ev) => { ev.stopPropagation(); if (waits === 'vault') showUnlock({ opener: 'person' }); else if (app && typeof app.openInbox === 'function') app.openInbox({}); };
+    const card = (uses.find((x) => typeof x.card === 'string' && x.card) || {}).card;   // THE card (主开发 r850 item 4: «Open For you» opens the job's own item, never the whole tray)
+    b.onclick = (ev) => { ev.stopPropagation(); if (waits === 'vault') showUnlock({ opener: 'person' }); else if (app && typeof app.openInbox === 'function') app.openInbox(card ? { itemId: card } : {}); };
     row.append(w, b);
   }
   return row;

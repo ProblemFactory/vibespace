@@ -52,6 +52,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';   // (mutant-copy.mjs imports scratch.mjs already — nothing new is loaded)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
@@ -528,6 +529,25 @@ console.log('§6c negative control: replyVerdict without the exit_ask rung');
   const v = Mut.replyVerdict({ item: { id: 'ut-aaaaaaaaaa', sessionKey: 'claude:sid', text: 'q', action: { type: 'exit-run-ask', askId: 'c'.repeat(32) } }, session: { live: true, mode: 'chat', remoteState: null } });
   ok(v.ok === true, '§6c CONTROL: without the rung an exit ask is offered a typed reply (the F5 symptom: "yes" resolved the item and DENIED the command) — the §2/§4c legs go red', v);
   for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6c ' })) ok(row.pass, row.name, row.detail);
+}
+
+// ── §6d lane vault-job-approval (round w6tezed7d): a Background job's approval card carries its jobId (the Clear content cascade)
+// and is answered by ITS OWN buttons — the answer rung comes before the job rung ──
+console.log('§6d a Background job\'s approval card (jobId + vault-job-ask) ⇒ exit_ask, never job_item');
+{
+  const rel = 'src/inbox-reply.js';
+  const src = read(rel);
+  const card = { id: 'ut-bbbbbbbbbb', sessionKey: 'claude:sid', text: 'q', jobId: 'jb-0000aaaa', action: { type: 'vault-job-ask', askId: 'vj-' + '0'.repeat(16), jobId: 'jb-0000aaaa' } };
+  const live = { live: true, mode: 'chat', remoteState: null };
+  const r0 = R.replyVerdict({ item: card, session: live });
+  ok(R.ANSWER_ACTION_TYPES.includes('vault-job-ask') && r0.code === 'exit_ask' && /Allow or Deny/.test(String(r0.why)), '§6d: a vault job card (jobId + vault-job-ask) ⇒ exit_ask «Answer it with Allow or Deny» — never «answer it in the job panel»', r0);
+  const MUT = mutantCopies('inbox-reply-jobcard', REPO);
+  const RUNG = "  if (it.action && typeof it.action === 'object' && ANSWER_ACTION_TYPES.includes(it.action.type)) return no('exit_ask');\n", JOBR = "  if (it.jobId) return no('job_item');\n";
+  let Mut = null, why = null;
+  try { Mut = MUT.load(rel, anchored(anchored(src, JOBR, '', 'the job rung lifted'), RUNG, JOBR + RUNG, 'the job rung above the answer rung'), 'job-rung-first'); } catch (e) { why = e.message; }
+  const r1 = Mut ? Mut.replyVerdict({ item: card, session: live }) : null;
+  ok(!!r1 && r1.code === 'job_item', '§6d CONTROL — the release\'s order (the job rung first): the card says job_item — RED on the copy', r1 || why);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6d ' })) ok(row.pass, row.name, row.detail);
 }
 
 // ── §7 chunk 4: setStatusMany + POST /api/user-todos/resolve-many ─────────────

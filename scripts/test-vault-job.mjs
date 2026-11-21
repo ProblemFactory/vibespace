@@ -254,6 +254,7 @@ async function legCard(doorSrc = null) {
   W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
   const minted = W.vault.secretGet('agent:conv-a/tok').value.toString();
   const job = W.jm.jobs.get(W.create({}).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const c0 = cards(W), it = c0[0] || {}, a = it.action || {}, f = it.facts || {};
   rows.first = { job, a };
   row(job.state === 'waiting' && job.waitFor === 'approval' && c0.length === 1 && VJ.ASK_ID_RE.test(String(a.askId)) && a.jobId === job.id && a.entry === 'secrets:agent:conv-a/tok#secret' && a.name === 'TOK' && a.conv === 'conv-a' && it.sessionKey === 'claude:conv-a' && !it.expiresAt && it.sessionName === 'Chat A' && it.jobId === job.id,
@@ -262,15 +263,19 @@ async function legCard(doorSrc = null) {
     'its facts: the job and its kind, the fd it reads ($TOK_FD), the program\'s and the script\'s real paths and that an agent can change them (plain facts), the folder, the command, the destination unknown', f);
   row(!JSON.stringify(W.todos.snapshot()).includes(minted) && formsAbsent(JSON.stringify(W.todos.snapshot()), minted) && W.walk(W.dd).every((t) => !t.includes(minted)), 'the card, the For-you store and every file of the data dir hold no spelling of the value (the card is an accident road)');
   W.jm.vaultChanged('vault-approved'); W.jm.start(job); W.jm.vaultChanged('vault-unlocked');
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   rows.rejudge = cards(W).length;
   row(cards(W).length === 1 && job.state === 'waiting', 'every re-judge of the waiting job (an approval change, a start, an unlock) files NO second card — one per job × entry', cards(W).length);
   const no = W.door.answer(a.askId, { answer: 'allow', reauthed: false, by: 'user', person: true });
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(!no.ok && no.code === 'reveal_needs_password' && W.grants.rowsFor('vault-job', a.entry).length === 0 && job.state === 'waiting' && cards(W).length === 1, '允许 WITHOUT this page\'s 验证是你 writes nothing (reveal_needs_password) — the job waits, the card stays', no);
   rows.unauthed = no;
   const bad = W.door.answer(a.askId, { answer: 'always', reauthed: true });
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(!bad.ok && bad.code === 'bad_job_answer' && cards(W).length === 1, 'an answer that is neither allow nor deny is refused by name, nothing written', bad);
   const yes = W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
   await W.until(() => W.got().length === 1 && job.state === 'done');
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const gr = W.grants.rowsFor('vault-job', a.entry)[0] || {}, m = (gr.to || [])[0] || {}, res = resolvedOf(W, a.askId);
   row(yes.ok && yes.outcome === 'allowed' && (gr.to || []).length === 1 && m.kind === 'conversation' && m.key === 'conv-a' && JSON.stringify(m.jobs) === JSON.stringify([job.id]) && res.resolvedBy === 'allowed' && res.resolvedFact && res.resolvedFact.decidedBy === 'person' && cards(W).length === 0,
     '允许 WITH 验证是你: ONE member (the owner conversation, jobs [this job]) through the grants store\'s ONE writer; the card closed «allowed», the person\'s mark on it', { yes, to: gr.to, by: res.resolvedBy });
@@ -288,14 +293,17 @@ async function legDeny(doorSrc = null) {
   const W = await world('deny', { doorSrc });
   W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
   const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never' }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const a = (cards(W)[0] || {}).action || {};
   const d = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const res = resolvedOf(W, a.askId);
   rows.state = job.state;
   row(d.ok && d.outcome === 'denied' && job.state === 'failed' && job.desiredUp === false && job.runs.length === 0 && res.resolvedBy === 'denied' && W.journal.some((l) => l.includes(`${job.id} refused to run (vault-denied)`) && l.includes('vault_denied')) && W.grants.rowsFor('vault-job', a.entry).length === 0 && jobLines(W).some((l) => l.includes('"op":"deny"')),
     '拒绝 is a click: the job is REFUSED by name (vault_denied, said once) and never started; the card closed «denied»; nothing written; its audit line', { d, state: job.state, by: res.resolvedBy });
   rows[rows.length - 1].push([...W.journal.filter((l) => l.includes(job.id) && l.includes('refused')), ...jobLines(W).filter((l) => l.includes('"op":"deny"'))]);   // the lines it judged — printed green or red (2.369.413 lesson b)
   const r2 = W.create({ kind: 'task', name: 'deny2' }), j2 = W.jm.jobs.get(r2.job && r2.job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(!!j2 && j2.state === 'failed' && /less than 10 minutes ago/.test(String(r2.error)) && cards(W).length === 0, 'the same conversation × entry within 10 minutes of a Deny: the next job is refused by name (ask_quiet) — no new card', { err: r2.error, state: j2 && j2.state, n: cards(W).length });
   W.end();
   return rows;
@@ -306,25 +314,33 @@ async function legCaps(doorSrc = null) {
   W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
   const made = []; for (let i = 0; i < 5; i++) made.push(W.create({ name: `cap${i}` }));
   const states = made.map((r) => (W.jm.jobs.get(r.job && r.job.id) || {}).state);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   rows.n = cards(W).length;
   row(cards(W).length === 4 && states.slice(0, 4).every((s) => s === 'waiting') && states[4] === 'failed' && /Background Work jobs waiting for the user's approval/.test(String(made[4].error)), 'FOUR open cards per conversation: the fifth job is refused by name (too_many_asks) — never a silent wait', { n: cards(W).length, states, err: made[4].error });
   const first = W.jm.jobs.get(made[0].job.id), fa = ((cards(W).find((i) => i.action.jobId === first.id)) || {}).action || {};
   W.jm.rm(first);
   const overAt = await W.untilMs(() => resolvedOf(W, fa.askId).resolvedBy === 'ask-over', 8000);   // the card closes at the removal's LANDING (it rides it)
   const late = W.door.answer(fa.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(overAt.ok && resolvedOf(W, fa.askId).resolvedBy === 'ask-over' && cards(W).length === 3 && !late.ok && late.code === 'ask_settled' && W.grants.rowsFor('vault-job', fa.entry).length === 0 && jobLines(W).some((l) => l.includes('"op":"over"') && l.includes(fa.askId)), 'a waiting job REMOVED ⇒ its card closes (ask-over) — never an orphan card; a late 允许 writes nothing', { by: resolvedOf(W, fa.askId).resolvedBy, late });
   rows[rows.length - 1].push(jobLines(W).filter((l) => l.includes(fa.askId)));   // the lines it judged — printed green or red (2.369.413 lesson b)
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const second = W.jm.jobs.get(made[1].job.id), sa = ((cards(W).find((i) => i.action.jobId === second.id)) || {}).action || {};
   W.jm.stop(second);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(resolvedOf(W, sa.askId).resolvedBy === 'ask-over' && cards(W).length === 2 && second.state !== 'waiting', 'a waiting job STOPPED ⇒ its card closes (ask-over) — its next start asks again', { by: resolvedOf(W, sa.askId).resolvedBy, state: second.state });
   W.jm.start(second);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(cards(W).filter((i) => i.action.jobId === second.id).length === 1 && second.state === 'waiting', '…and it does: start() files ONE new card');
   const D = doorOf(doorSrc).create({ vault: W.vault, grants: () => W.grants, userTodos: W.todos });   // the hub's bound, over the same store
   const fake = (i) => ({ id: `jb-${(0x10000000 + i).toString(16)}`, kind: 'task', owner: { conversation: { id: `conv-h${Math.floor(i / 4)}` } }, vault: [{ name: 'TOK', ref: `vault://agent:conv-h${Math.floor(i / 4)}/tok` }] });
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const open0 = cards(W).length, room = VJ.ASKS_MAX - open0, got = [];
   for (let i = 0; i < room; i++) got.push(D.ask(fake(i), { missing: ['TOK'] }));
-  const over = D.ask(fake(room), { missing: ['TOK'] });
-  row(got.every((x) => x.ok && x.filed === 1) && cards(W).length === VJ.ASKS_MAX && !over.ok && over.code === 'too_many_asks_hub', `${VJ.ASKS_MAX} open cards on the hub: the next is refused by name (too_many_asks_hub)`, { open0, n: cards(W).length, code: over.code });
+  const over = D.ask(fake(room), { missing: ['TOK'] });   // refused at once: a card being filed counts as one filed
+  await D.factsLanded();
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
+  row(got.every((x) => x.ok && x.reading === 1) && cards(W).length === VJ.ASKS_MAX && !over.ok && over.code === 'too_many_asks_hub', `${VJ.ASKS_MAX} open cards on the hub: the next is refused by name (too_many_asks_hub)`, { open0, n: cards(W).length, code: over.code });
   W.end();
   return rows;
 }
@@ -334,9 +350,11 @@ async function legCardRestart() {
   W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
   const minted = W.vault.secretGet('agent:conv-a/tok').value.toString();
   const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never' }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const a = (cards(W)[0] || {}).action || {};
   W.end();
   const W2 = await world('crst', { dataDir: W.dd, vault: W.vault, grants: W.grants });
+  await W2.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const j2 = W2.jm.jobs.get(job.id), n = cards(W2).length;
   const yes = W2.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
   await W2.until(() => W2.got().length === 1);
@@ -355,6 +373,7 @@ async function legCronCard() {
   const c1 = mk('cron-allow');
   W.jm._fireCron(c1, 'test');
   const k1 = runsOf(c1)[0];
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const mine = cards(W).filter((i) => i.action.jobId === c1.id), a1 = (mine[0] || {}).action || {};
   row(!!k1 && k1.state === 'waiting' && k1.waitFor === 'approval' && mine.length === 1 && !cards(W).some((i) => i.action.jobId === k1.id), 'a SCHEDULED run that waits files ONE card — for its CRON (the approval is the schedule\'s: every fire reads it), never one per run', { k1: k1 && k1.state, n: mine.length });
   const y = W.door.answer(a1.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
@@ -364,9 +383,11 @@ async function legCronCard() {
   const runs0 = runsOf(c1).reduce((n, k) => n + (k.runs || []).length, 0), got0 = W.got().length;
   W.jm._fireCron(c1, 'test');   // a cron's fires may reuse its run record — counted by RUNS, never by child records
   const fired = await W.untilMs(() => W.got().length > got0 && runsOf(c1).reduce((n, k) => n + (k.runs || []).length, 0) > runs0 && runsOf(c1).every((k) => k.state !== 'waiting'), 4000);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(fired.ok && cards(W).filter((i) => i.action.jobId === c1.id).length === 0, '…and its next fire runs at once — no card (every fire reads the cron\'s approval)', { fired, runs0, got: W.got().length, states: runsOf(c1).map((k) => k.state) });
   const c2 = mk('cron-deny');
   W.jm._fireCron(c2, 'test');
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const k2 = runsOf(c2)[0], a2 = ((cards(W).find((i) => i.action.jobId === c2.id)) || {}).action || {};
   const d = W.door.answer(a2.askId, { answer: 'deny', by: 'user', person: true });
   row(d.ok && c2.state === 'failed' && c2.desiredUp === false && c2.nextFireAt == null && !!k2 && k2.state === 'failed', '拒绝 on a cron\'s card refuses the SCHEDULE whole (no next fire) and its waiting run', { d, c2: c2.state, k2: k2 && k2.state });
@@ -378,6 +399,7 @@ async function legDenyVaultWait(jobs = null) {
   const W = await world(jobs ? 'dlockm' : 'dlock', { jobs });
   W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
   const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never', name: 'dlock' }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const a = ((cards(W).find((i) => i.action.jobId === job.id)) || {}).action || {};
   W.vault.lock('door');
   W.jm.start(job);   // a re-judge while locked (a boot's replay reads the same): the approval wait is now a VAULT wait — its card still open
@@ -396,8 +418,10 @@ async function legCapJobs(doorSrc = null) {
   W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
   const five = W.jm.jobs.get(W.create({ name: 'five', vault: [1, 2, 3, 4, 5].map((i) => `K${i}=vault://agent:conv-a/t${i}`) }).job.id);
   rows.state = five.state;
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(five.state === 'waiting' && five.waitFor === 'approval' && cards(W).filter((i) => i.action.jobId === five.id).length === 5, 'a job with FIVE entries to approve WAITS on five cards — the cap counts JOBS (four per conversation), so a job with many values can still start', { state: five.state, n: cards(W).length });
   const two = W.jm.jobs.get(W.create({ name: 'two', vault: ['A=vault://agent:conv-a/tok', 'B=vault://agent:conv-a/tok'] }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(two.state === 'waiting' && cards(W).filter((i) => i.action.jobId === two.id).length === 1, 'two NAMEs on ONE entry: one card (one per job × entry)', cards(W).filter((i) => i.action.jobId === two.id).length);
   W.end();
   return rows;
@@ -408,12 +432,15 @@ async function legOwnAndGone() {
   W.put(SENT('own')); W.release();
   const own = W.jm.jobs.get(W.create({ name: 'own' }).job.id);
   await W.untilMs(() => own.state === 'done', 4000);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(own.state === 'done' && cards(W).length === 0, 'a value the conversation PUT itself files NO card — the job just runs', { state: own.state, n: cards(W).length });
   W.vault.agentMint('agent:conv-a/m1', { length: 32 });
   const job = W.jm.jobs.get(W.create({ name: 'gone', vault: ['TOK=vault://agent:conv-a/m1'] }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const a = ((cards(W).find((i) => i.action.jobId === job.id)) || {}).action || {};
   W.vault.secretDrop('agent:conv-a/m1');   // the entry deleted while its card is open
   const y = W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(!y.ok && y.code === 'entry_unknown' && W.grants.rowsFor('vault-job', a.entry).length === 0 && resolvedOf(W, a.askId).resolvedBy === 'ask-over', '允许 on the card of an entry DELETED meanwhile writes nothing (entry_unknown — a later entry of that name never inherits it) and the card closes', { y, by: resolvedOf(W, a.askId).resolvedBy });
   W.end();
   return rows;
@@ -421,6 +448,7 @@ async function legOwnAndGone() {
 // ── ⑩ TAKEN BACK = STOPPED, A LOCK STOPS NOTHING (lane vault-job-approval — the owner's decisions ④ ③) ────────────────────────
 async function approvedService(W, name) {   // a service the owner approved, running and holding its value
   const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never', name }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const a = ((cards(W).find((i) => i.action.jobId === job.id)) || {}).action || {};
   const y = W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
   const up = await W.untilMs(() => W.got().length >= 1 && job.state === 'up', 4000);
@@ -441,6 +469,7 @@ async function legRevoke(doorSrc = null) {
   row(notes.length === 1 && notes[0].cid === 'conv-a' && /a value it read cannot be taken back/.test(notes[0].text) && notes[0].text.length <= 400 && jobLines(W).some((l) => l.includes('"op":"revoke"')), 'ONE notice to the owner conversation (the user took it back, the job stopped, a value already read cannot be taken back) and its vault-job audit line', W.told.slice(t0));
   rows[rows.length - 1].push(jobLines(W).filter((l) => l.includes('"op":"revoke"')));   // the lines it judged — printed green or red (2.369.413 lesson b)
   const st = W.jm.start(job);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(st.ok && st.state === 'waiting' && st.waitFor === 'approval' && cards(W).filter((i) => i.action.jobId === job.id).length === 1, 'its next start ASKS AGAIN: waiting for approval, ONE new card', st);
   const again = W.door.revoke(a.entry, job.id, { by: 'user' });
   row(!again.ok && again.code === 'not_approved', 'a ✕ on a job no longer approved ⇒ not_approved, nothing written', again);
@@ -453,6 +482,7 @@ async function legEntryGone(doorSrc = null) {
   W.vault.agentMint('agent:conv-a/tok', { length: 32 });
   const { job, a, ok: up } = await approvedService(W, 'gone');
   const j2 = W.jm.jobs.get(W.create({ name: 'gone2' }).job.id);   // a second job naming the entry, still waiting for its approval
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const c2 = cards(W).filter((i) => i.action.jobId === j2.id).length;
   const t0 = W.told.length;
   const d = W.door.dropRow(a.entry, { by: 'user' });
@@ -460,6 +490,7 @@ async function legEntryGone(doorSrc = null) {
   const n = W.door.entryGone(a.entry, { label: 'tok' });
   await W.untilMs(() => job.state !== 'up' && job.state !== 'starting', 3000);
   rows.desired = job.desiredUp;
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(up && c2 === 1 && d.ok && JSON.stringify(d.jobs) === JSON.stringify([job.id]) && W.grants.rowsFor('vault-job', a.entry).length === 0 && n === 2 && job.desiredUp === false && !['up', 'starting'].includes(job.state) && j2.state === 'failed' && cards(W).filter((i) => i.action.jobId === j2.id).length === 0,
     'AN ENTRY DELETED: its row goes FIRST (naming the approved job), then every job naming the entry stops — the running one stopped (desiredUp false), the waiting one refused by name (entry_unknown), its card closed', { up, c2, d, n, state: job.state, j2: j2.state });
   row(W.told.slice(t0).filter((x) => /deleted its vault entry/.test(x.text)).length === 1, 'ONE notice to the running job\'s owner conversation (the waiting one\'s refusal is its own words)', W.told.slice(t0));
@@ -470,7 +501,7 @@ async function legGone() {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
   const W = await world('jgone');
   W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
-  const mk = async (name) => { const j = W.jm.jobs.get(W.create({ name }).job.id); const a = ((cards(W).find((i) => i.action.jobId === j.id)) || {}).action || {}; W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true }); await W.untilMs(() => j.state === 'done', 4000); return { j, a }; };
+  const mk = async (name) => { const j = W.jm.jobs.get(W.create({ name }).job.id); await W.door.factsLanded(); const a = ((cards(W).find((i) => i.action.jobId === j.id)) || {}).action || {}; W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true }); await W.untilMs(() => j.state === 'done', 4000); return { j, a }; };
   const { j: j1, a } = await mk('g1'), { j: j2 } = await mk('g2');
   const jobsOf = () => (((W.grants.rowsFor('vault-job', a.entry)[0] || {}).to || [])[0] || {}).jobs || [];
   const before = jobsOf().slice();
@@ -508,6 +539,7 @@ async function legPasteDelete(pasteSrc = null) {
   const S = SENT('pdel');
   const add = paste.addEntry({ label: 'Bot token', kind: 'api-key', value: S, by: 'user' });
   const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never', name: 'pdel', vault: [`TOK=${add.ref}`] }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const a = ((cards(W).find((i) => i.action.jobId === job.id)) || {}).action || {};
   W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
   const up = await W.untilMs(() => W.got().length >= 1 && job.state === 'up', 4000);
@@ -547,17 +579,161 @@ async function legHeld(doorSrc = null) {
   W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
   const job = W.jm.jobs.get(W.create({ name: 'held' }).job.id);
   const settled = await W.untilMs(() => job.state === 'failed' || (job.state === 'waiting' && job.waitFor === 'approval'), 8000);
+  await W.door.factsLanded();   // a card being filed lands first (the control's copy files over the held tray THEN — and is refused)
   rows.state = job.state;
   if (doorSrc) { W.end(); return rows; }
   const held = W.todos.isHeldUnread();
   const ans = W.door.answer('vj-' + '0'.repeat(16), { answer: 'allow', reauthed: true, by: 'user', person: true });
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(held && settled.ok && job.state === 'waiting' && job.waitFor === 'approval' && cards(W).length === 0 && ans.code === 'todos-unread' && /For you cannot read its saved list/.test(String(ans.words || '')),
     'FOR YOU HELD UNREAD (B-44f3): the job WAITS for its approval (never refused for it), no card is filed over an unread list, and a card\'s answer is refused BY NAME (todos-unread, the store\'s own words)', { held, settled, state: job.state, waitFor: job.waitFor, ans });
   const f = path.join(W.dd, 'user-todos.json'); fs.rmdirSync(f); fs.writeFileSync(f, JSON.stringify({ items: [] }));
   const lifted = await W.todos.readAgain();
   const filed = await W.untilMs(() => cards(W).filter((i) => i.action.jobId === job.id).length === 1, 8000);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(lifted === true && filed.ok && job.state === 'waiting' && job.waitFor === 'approval', 'at the READ the waiting job is judged again and its ONE card is filed (against the file\'s open items)', { lifted, filed, state: job.state, cards: cards(W).length });
   W.end();
+  return rows;
+}
+// ── ⑫ THE FOLLOW (主开发 r850 — round w6tezed7d): the card's file facts OFF THE LOOP, bounded; legs for laws that had none ──────
+const STALL_MS = 1500, BOUND_MS = 400, HOLD_MS = 350;
+// a PLACED stall: every async read answers after STALL_MS (a slow / newly hung mount); a synchronous read is HELD HOLD_MS on the
+// loop's own thread (Atomics.wait — no CPU spent) and counted — the real door makes none
+const stallFs = () => {
+  let sync = 0, answered = 0;
+  const fake = { uid: 0, mode: 0o40755, isFile: () => true };
+  const later = (v) => new Promise((r) => setTimeout(() => { answered++; r(v); }, STALL_MS));   // `answered`: how many stalled reads have answered (an event, never a clock)
+  const hold = () => { sync++; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, HOLD_MS); };
+  return { fsp: { stat: () => later(fake), realpath: (p) => later(p), statSync: () => { hold(); return fake; }, realpathSync: (p) => { hold(); return p; } }, syncCalls: () => sync, answered: () => answered };
+};
+async function legFactsOffLoop(doorSrc = null) {
+  const D = doorOf(doorSrc), st = stallFs();
+  let last = performance.now(), gap = 0;
+  const iv = setInterval(() => { const t = performance.now(); gap = Math.max(gap, t - last); last = t; }, 5);   // the loop's turns, while the read runs
+  const t0 = performance.now();
+  const p = await D.programFacts({ argv: [process.execPath, '/srv/stalled/bot.js'], cwd: '/srv/stalled' }, { fsp: st.fsp, ms: BOUND_MS, state: { stuck: 0 } });
+  const answeredThen = st.answered();   // the facts came back BEFORE any stalled read answered ⇔ the bound ended the read
+  const took = Math.round(performance.now() - t0);
+  clearInterval(iv);
+  return { p, took, gap: Math.round(gap), sync: st.syncCalls(), answeredThen };
+}
+async function legFactsCard() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('fcard');
+  const st = stallFs();
+  const D = doorOf(null).create({ vault: W.vault, grants: () => W.grants, userTodos: W.todos, fsp: st.fsp, factsMs: BOUND_MS });
+  const fake = { id: 'jb-1f000001', kind: 'task', owner: { conversation: { id: 'conv-a' } }, cmd: { argv: [process.execPath, '/srv/stalled/bot.js'], cwd: '/srv/stalled' }, vault: [{ name: 'TOK', ref: 'vault://agent:conv-a/tok' }] };
+  const t0 = performance.now();
+  const a = D.ask(fake, { missing: ['TOK'] });
+  const before = cards(W).filter((i) => i.action.jobId === fake.id).length;
+  const again = D.ask(fake, { missing: ['TOK'] });   // a re-judge while its facts are read: nothing read or filed twice
+  await D.factsLanded();
+  const answeredThen = st.answered(), took = Math.round(performance.now() - t0);   // filed before any stalled read answered ⇔ at the bound
+  const mine = cards(W).filter((i) => i.action.jobId === fake.id), c = mine[0] || {}, f = c.facts || {};
+  row(a.ok && a.reading === 1 && before === 0 && again.ok && !again.reading && mine.length === 1 && f.program && f.program.unread === true && f.program.writable === true && f.script && f.script.unread === true && /could not be read in time/.test(String(c.detail || '')) && answeredThen === 0,
+    'THE CARD IS FILED WHEN ITS FILE FACTS LAND (主开发 r850 item 2): ask answers at once (reading 1, no card yet), a re-judge meanwhile reads nothing twice, and at the BOUND (never the stall\'s end) ONE card says its program\'s and script\'s facts «could not be read in time», counted as ones an agent can change', { a, before, again, answeredThen, took, program: f.program, script: f.script, cards: mine.length });
+  W.end();
+  return rows;
+}
+async function legWrapperSkip() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const D = doorOf(null);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `${PREFIX}wrap-`)); ROOTS.add(dir);
+  const script = path.join(dir, 'bot.js'); fs.writeFileSync(script, '// a scratch script\n');
+  const node = fs.realpathSync(process.execPath), real = fs.realpathSync(script);
+  const cases = [['timeout', '3600'], ['nohup'], ['nice', '-n', '5'], ['env', 'A=1', 'B=2'], ['timeout', '--signal=KILL', '30s', 'nice', '-n', '5'], []];
+  const got = [];
+  for (const pre of cases) { const p = await D.programFacts({ argv: [...pre, process.execPath, script, '--poll', '60'], cwd: dir }); got.push({ pre: pre.join(' ') || '(none)', program: p.program.path, script: p.script && p.script.path, command: p.command, unread: !!p.program.unread }); }
+  row(got.every((g) => g.program === node && g.script === real && g.command.endsWith('bot.js --poll 60') && !g.unread) && got.slice(0, -1).every((g) => g.command.startsWith(g.pre.split(' ')[0] + ' ')),
+    'THE WRAPPERS IN FRONT (round w6tezed7d): `timeout 3600`, `nohup`, `nice -n 5`, `env A=1 B=2` and two wrappers in a row in front — the card names the program it RUNS (node\'s real path) and its script, the command shown whole', got);
+  return rows;
+}
+async function legClosedElsewhere(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(doorSrc ? 'closem' : 'close', { doorSrc });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never', name: 'closed' }).job.id);
+  await W.door.factsLanded();
+  const c = cards(W).find((i) => i.action.jobId === job.id) || {};
+  // a GENERIC close (a tray ✕, «Mark all seen», a script) is refused by the store itself (a decision row's own verbs only) — the card
+  // and its wait stay; its END (`ask-over`, one of the row's ends) written by ANOTHER road — never this door's settle — is the law's case
+  let generic = null;
+  try { if (c.id) W.todos.setStatus(c.id, 'done', 'user'); } catch (e) { generic = e && e.code; }
+  const keptOpen = !!c.id && cards(W).some((i) => i.id === c.id) && job.state === 'waiting';
+  try { if (c.id) W.todos.setStatus(c.id, 'done', 'ask-over'); } catch (e) { rows.closeErr = e && e.message; }
+  const ended = await W.untilMs(() => job.state !== 'waiting', doorSrc ? 2000 : 8000);
+  rows.state = job.state;
+  if (doorSrc) { W.end(); return rows; }
+  const entry = (c.action || {}).entry, askId = (c.action || {}).askId;
+  row(generic === 'decision_row' && keptOpen, 'a GENERIC close of the card (a tray ✕) is refused by the store by name (decision_row) — the card and its job\'s wait stay', { generic, keptOpen });
+  row(!!c.id && ended.ok && job.state === 'failed' && job.desiredUp === false && W.grants.rowsFor('vault-job', entry).length === 0 && W.journal.some((l) => l.includes(`${job.id} refused to run`) && l.includes('ask_closed')) && jobLines(W).some((l) => l.includes('"op":"over"') && l.includes(askId)),
+    'A CARD ENDED THROUGH ANOTHER ROAD (its `ask-over` written to the store, never this door\'s settle): its job is REFUSED by name (ask_closed) and NOTHING is approved — never a job waiting for ever with no card', { filed: !!c.id, ended, state: job.state, closeErr: rows.closeErr });
+  rows[rows.length - 1].push([...jobLines(W).filter((l) => askId && l.includes(askId)), ...W.journal.filter((l) => l.includes(job.id) && l.includes('refused'))]);   // the lines it judged
+  W.end();
+  return rows;
+}
+async function legRestartRevoke() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('rrev');
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 });
+  const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'always', name: 'rrev' }).job.id);
+  await W.door.factsLanded();
+  const a = ((cards(W).find((i) => i.action.jobId === job.id)) || {}).action || {};
+  W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
+  const up = await W.untilMs(() => W.got().length >= 1 && job.state === 'up', 8000);
+  const rv = W.door.revoke(a.entry, job.id, { by: 'user' });
+  const down = await W.untilMs(() => !['up', 'starting'].includes(job.state), 8000);
+  const runs0 = job.runs.length;
+  { const r = require('../src/store-writer.js').storeWriter().flushSync([W.jm.file, W.jm.notifsFile]); if (r.deferred || (r.left && r.left.length)) throw new Error(`the revoke did not land before the restart point: ${JSON.stringify(r)}`); }
+  W.end();
+  // A HUB RESTART: a NEW engine (and a new door) over the same data folder and the same grants store
+  const B = await world('rrev2', { dataDir: W.dd, vault: W.vault, grants: W.grants });
+  const jb = B.jm.jobs.get(job.id), t0 = Date.now(), WAIT = M.SUPERVISE.backoffBaseMs + 1500;
+  // past the supervisor's back-off with the new engine's sweeps — a restart would have started by then (a new run is what happened, or the time is)
+  const past = await B.untilMs(() => (jb && jb.runs.length > runs0) || Date.now() - t0 >= WAIT, WAIT + 4000);
+  row(up.ok && rv.ok && rv.stopped === true && down.ok && past.ok && !!jb && jb.desiredUp === false && jb.runs.length === runs0 && !['up', 'starting'].includes(jb.state) && B.grants.rowsFor('vault-job', a.entry).length === 0,
+    'TAKEN BACK, THEN A HUB RESTART (a new engine over the same data folder): the restart:always service does NOT start on the old approval — no new run after the supervisor\'s back-off', { up, rv, down, past, state: jb && jb.state, desiredUp: jb && jb.desiredUp, runs: [runs0, jb && jb.runs.length] });
+  const st = jb ? B.jm.start(jb) : {};
+  await B.door.factsLanded();
+  row(st.ok && st.state === 'waiting' && st.waitFor === 'approval' && cards(B).filter((i) => i.action.jobId === job.id).length === 1, '…and a start asks AGAIN — a fresh card (the old approval is gone)', { st: { ok: st.ok, state: st.state, waitFor: st.waitFor }, cards: cards(B).filter((i) => i.action.jobId === job.id).length });
+  B.release(); B.end();
+  return rows;
+}
+async function legSmalls() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  // (1) a ✕ over an UNREADABLE grants store (its fail-closed row): the job still STOPS, the answer says so — nothing written
+  const W = await world('small');
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 });
+  const { job, a, ok: up } = await approvedService(W, 'small');
+  const bad = { rowsFor: () => [{ door: 'vault-job', resource: a.entry, to: null }], onChange() { } };
+  const D = doorOf(null).create({ vault: W.vault, grants: () => bad, userTodos: W.todos }); D.bindJobs(W.jm);
+  const r = D.revoke(a.entry, job.id, { by: 'user' });
+  const stopped = await W.untilMs(() => !['up', 'starting'].includes(job.state), 6000);
+  row(up && r.ok === false && r.code === 'store_unreadable' && r.stopped === true && /nothing was written/.test(String(r.error)) && stopped.ok && job.desiredUp === false && W.grants.rowsFor('vault-job', a.entry).length === 1,
+    'A ✕ OVER AN UNREADABLE APPROVALS STORE: the job is STOPPED all the same, the answer says store_unreadable with «nothing was written» (the page words it — vault-job-row.js)', { up, r, stopped, desiredUp: job.desiredUp });
+  W.release(); W.end();
+  // (2) the delete's job row cannot be written ⇒ the delete is REFUSED by name, the entry kept
+  const W2 = await world('small2');
+  const P2 = pasteOf(null).create({ vault: W2.vault, userTodos: W2.todos, vaultJob: { dropRow: () => ({ ok: false, code: 'not_written' }), entryGone() { throw new Error('never reached'); } }, log: () => { } });
+  const e2 = P2.addEntry({ label: 'Kept key', kind: 'api-key', value: SENT('small2'), by: 'user' });
+  const d2 = P2.dropEntry(String(e2.entry || '').replace(/^secret:/, ''), { by: 'user' });
+  row(e2.ok && !d2.ok && d2.code === 'store_failed' && (W2.vault.secretNames() || []).some((s) => s && s.name === e2.entry), 'a delete whose Background-job row cannot be written is REFUSED (store_failed) and the entry is kept — never an entry gone with its approvals dangling', { e2: e2.ok, d2 });
+  W2.end();
+  // (3) the secret's drop fails AFTER its job row went ⇒ its jobs stop as TAKEN BACK (they would run on with no approval)
+  const W3 = await world('small3');
+  const v3 = Object.create(W3.vault); v3.secretDrop = () => ({ ok: false });
+  const P3 = pasteOf(null).create({ vault: v3, userTodos: W3.todos, vaultJob: W3.door, log: () => { } });
+  const e3 = pasteOf(null).create({ vault: W3.vault, userTodos: W3.todos, vaultJob: W3.door, log: () => { } }).addEntry({ label: 'Bot token', kind: 'api-key', value: SENT('small3'), by: 'user' });
+  const job3 = W3.jm.jobs.get(W3.create({ kind: 'service', restart: 'never', name: 'small3', vault: [`TOK=${e3.ref}`] }).job.id);
+  await W3.door.factsLanded();
+  const a3 = ((cards(W3).find((i) => i.action.jobId === job3.id)) || {}).action || {};
+  W3.door.answer(a3.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
+  const up3 = await W3.untilMs(() => W3.got().length >= 1 && job3.state === 'up', 8000);
+  const d3 = P3.dropEntry(String(e3.entry || '').replace(/^secret:/, ''), { by: 'user' });
+  const s3 = await W3.untilMs(() => !['up', 'starting'].includes(job3.state), 6000);
+  row(e3.ok && up3.ok && !d3.ok && d3.code === 'store_failed' && s3.ok && job3.desiredUp === false && W3.grants.rowsFor('vault-job', a3.entry).length === 0 && W3.told.some((x) => /took back its vault entry/.test(x.text)),
+    'the secret\'s drop FAILS after its job row went: the delete is refused (store_failed) and the job is STOPPED as taken back — never running on with no approval', { e3: e3.ok, up3, d3, s3, desiredUp: job3.desiredUp });
+  W3.release(); W3.end();
   return rows;
 }
 // ── ⑪ WHAT THE OWNER SEES (lane vault-job-approval L2): the Vault row's jobs, a job's uses, its starts counted ────────────────
@@ -619,6 +795,7 @@ async function legCronRevoke() {
   const r = W.jm.create({ kind: 'cron', name: 'crvk', schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task }, owner: { conversation: { id: 'conv-a' }, sessionId: 'w-a', createdBy: 'agent', groupsSnapshot: [] } }, { conversationId: 'conv-a', groups: new Set() });
   const cron = W.jm.jobs.get(r.job && r.job.id);
   W.jm._fireCron(cron, 'test');
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const a = ((cards(W).find((i) => i.action.jobId === cron.id)) || {}).action || {};
   W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
   const child = [...W.jm.jobs.values()].find((j) => j.cronParent === cron.id);
@@ -636,11 +813,13 @@ async function legRmNoRefile() {
   const W = await world('rmref');
   W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.vault.agentMint('agent:conv-a/t2', { length: 32 }); W.release();
   const job = W.jm.jobs.get(W.create({ name: 'two-entries', vault: ['TOK=vault://agent:conv-a/tok', 'T2=vault://agent:conv-a/t2'] }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const first = ((cards(W).find((i) => i.action.jobId === job.id && i.action.name === 'TOK')) || {}).action || {};
   W.door.answer(first.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });   // approved on one entry, still waiting on the other
   const waits = job.state === 'waiting' && job.waitFor === 'approval';
   W.jm.rm(job);
   const landed = await W.untilMs(() => cards(W).filter((i) => i.action.jobId === job.id).length === 0 && W.grants.rowsFor('vault-job', first.entry).length === 0, 8000);   // at the removal's LANDING
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(waits && landed.ok && cards(W).filter((i) => i.action.jobId === job.id).length === 0 && W.grants.rowsFor('vault-job', first.entry).length === 0 && jobLines(W).filter((l) => l.includes('"op":"ask"') && l.includes(job.id)).length === 2,
     'a job REMOVED while approved on one entry and waiting on another leaves NO open card — its id leaves the row after it left the registry, so nothing re-judges it and no card is filed again', { waits, landed, open: cards(W).filter((i) => i.action.jobId === job.id).length });
   rows[rows.length - 1].push(jobLines(W).filter((l) => l.includes('"op":"ask"') && l.includes(job.id)));   // the lines it judged — printed green or red (2.369.413 lesson b)
@@ -652,6 +831,7 @@ async function legArchivePrune() {
   const W = await world('arch');
   W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
   const job = W.jm.jobs.get(W.create({ name: 'one-shot' }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const a = ((cards(W).find((i) => i.action.jobId === job.id)) || {}).action || {};
   W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
   // each wait for WHAT HAPPENED, its outcome in the row (the first gate on the moved tip: 4 s bounds at load 67 — the run not yet
@@ -664,6 +844,7 @@ async function legArchivePrune() {
   row(done.ok && exited.ok && named0 === JSON.stringify([job.id]) && (sw.archived || []).includes(job.id) && W.grants.rowsFor('vault-job', a.entry).length === 0, 'an ARCHIVED one-shot runs no more — its approval leaves the row (it never holds one of the member\'s 64 places for ever)', { done, exited, state: job.state, verdict, named0, sw });
   W.grants.set('vault-job', a.entry, { to: [{ kind: 'conversation', key: 'conv-a', jobs: ['jb-deadbeef'] }] }, 'test');   // an id an older version left behind
   const j2 = W.jm.jobs.get(W.create({ name: 'next' }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const a2 = ((cards(W).find((i) => i.action.jobId === j2.id)) || {}).action || {};
   W.door.answer(a2.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
   const now2 = (((W.grants.rowsFor('vault-job', a.entry)[0] || {}).to || [])[0] || {}).jobs || [];
@@ -852,13 +1033,13 @@ const [handed, locked, crash, boot, bootMut, approval, noMasker, noMaskerMut, wi
 // lane vault-job-approval: the card's legs and their mutants (each a copy of the door compiled at its real path)
 const dmut = (from, to) => { try { return swap(DOOR_SRC, from, to); } catch { return null; } };
 const MUT_REAUTH = dmut("    if (reauthed !== true) return named('reveal_needs_password');\n", '');
-const MUT_DEDUPE = dmut('const fresh = need.filter((r) => !open.some((q) => q.jobId === jobId && q.entry === r.id));', 'const fresh = need;');
+const MUT_DEDUPE = (() => { try { return swap(swap(DOOR_SRC, 'const fresh = need.filter((r) => !open.some((q) => q.jobId === jobId && q.entry === r.id) && !pend.has(`${jobId}\\n${r.id}`));', 'const fresh = need;'), '      if ([...asks.values()].some((q) => q.jobId === jobId && q.entry === r.id)) continue;\n', ''); } catch { return null; } })();   // both open-card checks cut (the ask\'s and the landing\'s)
 const MUT_DENY = dmut("try { jm.vaultRefused(q.jobId, named('vault_denied', { key: q.name })); }", 'try { void q; }');
 const MUT_CAP = dmut("    if (!mine.has(jobId) && mine.size + 1 > VJ.ASKS_PER_CONV) return named('too_many_asks');\n", '');
 const [card, deny, caps, cardRestart, cardMutReauth, cardMutDedupe, denyMut, capsMut] = await Promise.all([legCard(), legDeny(), legCaps(), legCardRestart(),
   MUT_REAUTH ? legCard(MUT_REAUTH) : {}, MUT_DEDUPE ? legCard(MUT_DEDUPE) : {}, MUT_DENY ? legDeny(MUT_DENY) : {}, MUT_CAP ? legCaps(MUT_CAP) : {}]);
 // ⑨c: the cures and their mutants — a Deny that refuses an APPROVAL wait only (r1's engine), a cap that counts CARDS (r1's door)
-const MUT_DENYWAIT = (() => { try { return swap(JOBS_SRC, "    if (job.state !== 'waiting') return false;\n    this._vaultRefuse(job, v0, 'vault-denied');", "    if (job.state !== 'waiting' || job.waitFor !== 'approval') return false;\n    this._vaultRefuse(job, v0, 'vault-denied');"); } catch { return null; } })();
+const MUT_DENYWAIT = (() => { try { return swap(JOBS_SRC, "    if (job.state !== 'waiting') return false;\n    this._vaultRefuse(job, v0, trigger);", "    if (job.state !== 'waiting' || job.waitFor !== 'approval') return false;\n    this._vaultRefuse(job, v0, trigger);"); } catch { return null; } })();
 const MUT_CAPCARDS = dmut("    if (!mine.has(jobId) && mine.size + 1 > VJ.ASKS_PER_CONV) return named('too_many_asks');", "    if (open.filter((q) => q.conv === conv).length + fresh.length > VJ.ASKS_PER_CONV) return named('too_many_asks');");
 const [cronCard, denyWait, capJobs, ownGone, denyWaitMut, capJobsMut] = await Promise.all([legCronCard(), legDenyVaultWait(), legCapJobs(), legOwnAndGone(),
   MUT_DENYWAIT ? legDenyVaultWait(MUT_DENYWAIT) : {}, MUT_CAPCARDS ? legCapJobs(MUT_CAPCARDS) : {}]);
@@ -871,8 +1052,15 @@ const MUT_PASTE = pmut('    if (vaultJob) { try { vaultJob.entryGone(rowId, { la
 const MUT_AGENT_DEL = pmut('    if (vaultJob) { try { vaultJob.entryGone(id, { label }); }', '    if (false) { try { vaultJob.entryGone(id, { label }); }');
 const [revoke, gone, jgone, lockRuns, pdel, adel, revokeMut, goneMut, lockMut, pdelMut, adelMut] = await Promise.all([legRevoke(), legEntryGone(), legGone(), legLockRuns(), legPasteDelete(), legAgentDelete(),
   MUT_REVOKE ? legRevoke(MUT_REVOKE) : {}, MUT_GONE ? legEntryGone(MUT_GONE) : {}, MUT_LOCK ? legLockRuns(MUT_LOCK) : {}, MUT_PASTE ? legPasteDelete(MUT_PASTE) : {}, MUT_AGENT_DEL ? legAgentDelete(MUT_AGENT_DEL) : {}]);
-const MUT_HELD = dmut('    if (userTodos.isHeldUnread?.()) {\n', '    if (false) {\n');   // ⑩d's control: the door files over a held tray
+const MUT_HELD = (() => { try { return swap(swap(DOOR_SRC, '    if (userTodos.isHeldUnread?.()) {\n', '    if (false) {\n'), '    if (userTodos.isHeldUnread?.()) return void ask(', '    if (false) return void ask('); } catch { return null; } })();   // ⑩d's control: the door files over a held tray (both held branches cut)
 const [held, heldMut] = await Promise.all([legHeld(), MUT_HELD ? legHeld(MUT_HELD) : {}]);
+// ⑫'s runs and controls: the bound removed (the card waits for the stall) · the read made SYNCHRONOUS (the loop held) · the listener of
+// another door's close removed (the job waits for ever with no card)
+const MUT_NOBOUND = dmut('t = setTimeout(() => res(LATE), left);', 't = setTimeout(() => res(LATE), left + 60e3);');
+const MUT_SYNCREAD = dmut('const realOf = async (p) => (await call((x) => fsp.realpath(x), p)).v || null;', 'const realOf = async (p) => fsp.realpathSync(p);');
+const MUT_ONSTATUS = dmut("  if (userTodos && typeof userTodos.onStatus === 'function') {\n", '  if (false) {\n');
+const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
+  legFactsCard(), legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls()]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
@@ -909,6 +1097,15 @@ ok(!!MUT_LOCK && lockMut.desired === false, 'CONTROL — a lock that stops the j
 print('⑩c THE SECOND READ\'S CURES — a schedule\'s revoke stops its running run, rm files nothing again, an archived job leaves the row, an allow prunes', [...cronRevoke, ...rmNoRefile, ...archivePrune]);
 print('⑩d FOR YOU HELD UNREAD (B-44f3) — the job waits, the answer is refused by name, the card is filed at the read', held);
 ok(!!MUT_HELD && heldMut.state === 'failed', 'CONTROL — the door filing over a held tray (its held branch removed): the add is refused, the job is FAILED for it — RED on the copy', MUT_HELD ? heldMut.state : 'the copy could not be built (its anchor is missing)');
+console.log('⑫ THE FOLLOW (主开发 r850 — round w6tezed7d)');
+{ const o = offLoop || {}, p = o.p || {};
+  ok(p.program && p.program.unread === true && p.script && p.script.unread === true && o.sync === 0 && o.answeredThen === 0,
+    'THE CARD\'S FILE FACTS OFF THE LOOP: a PLACED stall in every read — the facts come back at the BOUND, before any stalled read answered, with NO synchronous read on the loop\'s thread, and the facts it could not read are said «could not be read» (program and script)', { answeredThen: o.answeredThen, sync: o.sync, program: p.program, script: p.script });
+  console.log(`      judged: stalled reads answered when the facts came back ${o.answeredThen} · synchronous reads ${o.sync} (said, not judged: took ${o.took} ms, the loop's longest gap ${o.gap} ms)`); }
+ok(!!MUT_NOBOUND && !!offNoBound && offNoBound.answeredThen > 0, 'CONTROL — the bound removed: the facts come back only after the stall itself answered — RED on the copy', MUT_NOBOUND ? offNoBound && { answeredThen: offNoBound.answeredThen, took: offNoBound.took } : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_SYNCREAD && !!offSync && offSync.sync > 0, 'CONTROL — the read made SYNCHRONOUS: the placed stall is read on the loop\'s own thread (each a held turn) — RED on the copy', MUT_SYNCREAD ? offSync && { sync: offSync.sync, gap: offSync.gap } : 'the copy could not be built (its anchor is missing)');
+print('⑫b THE CARD AT ITS LANDING · THE WRAPPERS IN FRONT · A CARD CLOSED ELSEWHERE · A RESTART AFTER A TAKE-BACK · THE SMALLS', [...factsCard, ...wrapSkip, ...closedElse, ...restartRevoke, ...smalls]);
+ok(!!MUT_ONSTATUS && closedMut.state === 'waiting', 'CONTROL — another door\'s close not heard (the store\'s listener removed): the job waits for ever with no card — RED on the copy', MUT_ONSTATUS ? closedMut.state : 'the copy could not be built (its anchor is missing)');
 print('⑪ WHAT THE OWNER SEES (L2) — the Vault row\'s jobs, a job\'s uses, the starts counted, the chips', [...surfaces, ...chips]);
 ok(!!MUT_STARTS && surfacesMut.starts === 0, 'CONTROL — the Vault row\'s starts never counted (the door\'s tally removed): «started 0×» for a job that started — RED on the copy', MUT_STARTS ? surfacesMut.starts : 'the copy could not be built (its anchor is missing)');
 console.log('⑦ MUTANTS');

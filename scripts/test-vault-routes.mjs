@@ -574,6 +574,22 @@ const hit0 = hit, PAGE0 = PAGE;
     const rvP = await hit('/api/vault/job/revoke', { body: RV });
     ok(rvB.status === 403 && rvB.json.code === 'human_only' && rvJ.status === 403 && rvJ.json.code === 'human_only' && r0 === 0 && rvP.status === 200 && rvP.json.outcome === 'revoked' && jobAsks.revokes.length === 1 && jobAsks.revokes[0].entry === RV.entry && jobAsks.revokes[0].job === RV.job && jobAsks.revokes[0].by === 'user',
       'the ✕ on a job\'s vault use (POST /api/vault/job/revoke): a session bearer and a job token are refused human_only; a person\'s click reaches the door with the entry and the job', [rvB.json.code, rvJ.json.code, jobAsks.revokes]);
+    // MUTANT (round w6tezed7d): the TAKE-BACK route without person() ⇒ a bearer's ✕ reaches the door — its own control, RED on the copy
+    const REVOKE_AT = "if (jobAsks) app.post('/api/vault/job/revoke', person((req) => {";
+    let vcut = null, vcutWhy = null;
+    try { vcut = anchored(rsrc, REVOKE_AT, "if (jobAsks) app.post('/api/vault/job/revoke', ((fn) => async (req, res) => res.json(await fn(req)))((req) => {", 'the take-back route without person()'); } catch (e) { vcutWhy = e.message; }
+    let revHit = null;
+    if (vcut) {
+      const rm = new Mod(rf); rm.filename = rf; rm.paths = Mod._nodeModulePaths(path.dirname(rf)); rm._compile(vcut, rf);
+      const stub = { calls: [], revoke(entry, job, o) { this.calls.push({ entry, job, ...o }); return { ok: true, outcome: 'revoked', job, stopped: true }; } };
+      const appM = express(); appM.use(auth.middleware()); appM.use(express.json());
+      rm.exports.registerVaultRoutes(appM, { vault: vault2, activeSessions: sessions2, getJobs: () => null, contents, run: runDoor, jobAsks: stub });
+      const srvM = await new Promise((r) => { const x = appM.listen(0, '127.0.0.1', () => r(x)); });
+      await hit0('/api/vault/job/revoke', { headers: { ...PAGE0, origin: `http://127.0.0.1:${srvM.address().port}`, ...B }, body: RV, port: srvM.address().port });
+      revHit = stub.calls.length;
+      srvM.close();
+    }
+    ok(revHit === 1, 'CONTROL — the take-back route without person(): a session bearer\'s ✕ REACHES the door — RED on the copy', vcut ? { revHit } : vcutWhy);
   }
   const prG = hit('/api/agent/vault/run', { headers: B, body: { args: ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/z'], cwd: WORK } });
   const cardG = await waitCard();

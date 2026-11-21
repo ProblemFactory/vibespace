@@ -264,8 +264,8 @@ function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null
   const f = {
     v: 1, who: cardClip(who).slice(0, 80), job: { id: String(job.id || ''), name: cardClip(job.label || job.id || ''), kind, ...(restart ? { restart } : {}) },   // who '' = unknown (the client says «a conversation» in its language)   // `label` = the engine's belted name (labelOf — §93), never the record's raw one
     entry: { label: cardClip(entry.label || entry.id || ''), ref: cardClip(entry.ref || ''), var: `${entry.name || ''}_FD` },
-    program: { path: cardClip(program.path || ''), writable: program.writable === true },
-    ...(script && script.path ? { script: { path: cardClip(script.path), writable: script.writable === true } } : {}),
+    program: { path: cardClip(program.path || ''), writable: program.writable === true, ...(program.unread === true ? { unread: true } : {}) },   // unread: its file facts were not read in time (counted writable)
+    ...(script && script.path ? { script: { path: cardClip(script.path), writable: script.writable === true, ...(script.unread === true ? { unread: true } : {}) } } : {}),
     folder: cardClip(folder), command: cardClip(command), dest: 'unknown', lock: 'runs-on',
   };
   // ≤ 12 lines whatever the facts (the store keeps an item's first 12 i18n lines — src/user-todos.js normalizeI18n): «an agent
@@ -275,8 +275,10 @@ function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null
     { key: KIND_LINES[kindKeyOf(kind, restart)] },
     { key: i18nKey('Secret: {label} — {ref}'), params: { label: f.entry.label, ref: f.entry.ref } },
     { key: i18nKey('The program reads it once from the descriptor ${var} names — never from its environment, its command line or a file.'), params: { var: f.entry.var } },
-    f.program.writable ? { key: i18nKey('Program: {path} — an agent can change this program.'), params: { path: f.program.path } } : { key: i18nKey('Program: {path}'), params: { path: f.program.path } },
-    ...(f.script ? [f.script.writable ? { key: i18nKey('Script: {path} — an agent can change this script.'), params: { path: f.script.path } } : { key: i18nKey('Script: {path}'), params: { path: f.script.path } }] : []),
+    f.program.unread ? { key: i18nKey('Program: {path} — its file facts could not be read in time; counted as one an agent can change.'), params: { path: f.program.path } }
+      : f.program.writable ? { key: i18nKey('Program: {path} — an agent can change this program.'), params: { path: f.program.path } } : { key: i18nKey('Program: {path}'), params: { path: f.program.path } },
+    ...(f.script ? [f.script.unread ? { key: i18nKey('Script: {path} — its file facts could not be read in time; counted as one an agent can change.'), params: { path: f.script.path } }
+      : f.script.writable ? { key: i18nKey('Script: {path} — an agent can change this script.'), params: { path: f.script.path } } : { key: i18nKey('Script: {path}'), params: { path: f.script.path } }] : []),
     { key: i18nKey('Folder: {folder}'), params: { folder: f.folder } },
     { key: i18nKey('Command: {command}'), params: { command: f.command } },
     { key: i18nKey('Where it sends the secret: unknown — VibeSpace cannot read where a program connects.') },
