@@ -541,7 +541,7 @@ function create(engineCtx) {
     return ACL.effective(ctx, target, grantsOfConversation(en, target));
   }
   // A CONVERSATION'S REACH IS A LOOKUP (lane grants-read-is-a-lookup, 主开发 2026-11-16 — the prompt hook's reach count walked
-  // every conversation, each a grant read: 197 110 reads, 2.5 M normalisations a walk on the owner's hub). A conversation no
+  // every conversation, each a grant read: one read a conversation, millions of normalisations a walk on the owner's hub). A conversation no
   // reach row of its own names and no rule's row derives a grant on reaches EXACTLY what its ACCOUNT's rows reach — `effective`
   // over the same grants (its own list and its derived list are empty) — so that answer is judged ONCE per (asker, account,
   // generation of the rows: CG.generation moves at every channel row's change) and every such conversation reads it. A
@@ -560,23 +560,40 @@ function create(engineCtx) {
    *  back every WALK_STEP conversations scanned — a count, never a clock (≈ 75 ms of a search's scan at the owner's size). */
   const WALK_STEP = 50000;
   /** ONE WALK'S READER of reach (lane grants-read-is-a-lookup — L3: a walk over every conversation stays one bounded loop
-   *  turn at the owner's 197 110): what is the same for the whole walk WHILE THE ROWS ARE — the conversations a row of their
+   *  turn at the owner's order of sizes, about two hundred thousand): what is the same for the whole walk WHILE THE ROWS ARE — the conversations a row of their
    *  own names, whether a rule holds a row, each account's own answer — is judged once per generation of the rows, asked at
    *  every conversation (a walk that awaits reads a change at once), so a conversation costs the generation, a Set and a
    *  Map lookup; one a row decides (or an account whose module answers by msg-acl) is asked reachFor, as before. The walk's
-   *  callers read the answer, never change it (one object per account, shared). */
+   *  callers read the answer, never change it (one object per account, shared).
+   *  WHEN A RULE HOLDS A REACH ROW (B-360d, 主开发 r1223 — one rule's access as a reach row sent EVERY conversation of EVERY
+   *  account the row way: three resource keys built and probed twice, the rules re-read and filtered, per conversation: 500–740 ms
+   *  a walk at the owner's order of sizes): the rules whose id holds a row are read ONCE PER ACCOUNT for one synchronous run (nothing
+   *  inside a run writes the index's rules; a walk that awaits reads them again after the await). A conversation of an account
+   *  none of them belongs to, or that none of them matches, reaches its ACCOUNT's answer — what reachFor answered it (its own
+   *  list and its derived list are empty); one a rule matches is asked reachFor, as before. */
   function reachWalkOf(ctx) {
     if (!ctx || ctx.kind === 'user') return (rec, en) => reachFor(ctx, rec, en);
-    let gen = NaN, own = null, rules = false;
+    let gen = NaN, own = null, ruleIds = null, ruled = null;
     const acct = new Map(), msgAcl = new Map();
+    // adapterId → the rules of that account whose id holds a reach row (derivesFromRule's own filter), for ONE synchronous run
+    const ruledOf = (adapterId) => {
+      if (!ruled) { const mine = ruled = new Map(); queueMicrotask(() => { if (ruled === mine) ruled = null; }); }
+      let ps = ruled.get(adapterId);
+      if (!ps) { ps = rawPatternsOf(adapterId).filter((pa) => pa && pa.pattern && ruleIds.has(String(pa.id))); ruled.set(adapterId, ps); }
+      return ps;
+    };
     return (rec, en) => {
       // A WALK KEEPS NOTHING ACROSS A CHANGE OF THE ROWS (主开发's G1 — a search awaits between accounts and gives the loop back
       // every WALK_STEP): each conversation asks the rows' generation, and a moved one re-reads what the walk keeps
       const g = CG.generation();
-      if (g !== gen) { gen = g; own = CG.ownConversationKeys(); rules = CG.ruleIdsWithRows().size > 0; acct.clear(); }
+      if (g !== gen) { gen = g; own = CG.ownConversationKeys(); ruleIds = CG.ruleIdsWithRows(); ruled = null; acct.clear(); }
       let m = msgAcl.get(rec.id);
       if (m === undefined) { m = msgAclAdapter(rec); msgAcl.set(rec.id, m); }
-      if (m || rules || own.has(en.key)) return reachFor(ctx, rec, en);
+      if (m || own.has(en.key)) return reachFor(ctx, rec, en);
+      if (ruleIds.size) {
+        const ps = ruledOf(en.adapterId);
+        if (ps.length) { const facts = convFacts(en); for (const pa of ps) if (F.matchConversation(pa.pattern, facts).hit) return reachFor(ctx, rec, en); }
+      }
       let v = acct.get(en.adapterId);
       if (!v) { v = accountReachOf(ctx, en.adapterId, gen); acct.set(en.adapterId, v); }
       return v;
@@ -1825,7 +1842,7 @@ function create(engineCtx) {
   // ── the agent-facing reads (§11) — reach FIRST, uniform not-found ────────
   const LIST_FOR_MAX = 200;   // design 008 S6: an agent's `list` names the newest 200 it may see; the rest is found by search
   /** THE NEWEST `max` OF EACH KIND (readable / directory-listed), kept as the walk offers them — never every candidate in an array
-   *  and never a sort of all of them (lane grants-read-is-a-lookup L3: an agent granted the owner's largest account sorted 173 306
+   *  and never a sort of all of them (lane grants-read-is-a-lookup L3: an agent granted the owner's largest account sorted all of its
    *  rows to list 200). The order is the full sort's — `lastAt` newest first, a tie in walk order (Array.prototype.sort is stable)
    *  — and `dropped` counts what each kind left out, so listFor's `more` / `moreRequestable` are what they were. A heap per kind
    *  whose root is the kept row listed last: O(n log max). */
@@ -3138,7 +3155,7 @@ function create(engineCtx) {
     mayUseFor,   // unit what-it-may-use
     policyFor, policyRequiresReview, authorityCapsFor, healP2, rotationsOf, filterFor, assignmentView, pendingOf, clearCarried, elidedTotal,
     statsView, wakeLatencyFor, accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets,
-    wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, inheritedOfSession, liveGroupsOf,
+    wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, reachWalkOf, groupsOfSession, inheritedOfSession, liveGroupsOf,
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,

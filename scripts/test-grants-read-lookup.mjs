@@ -4,9 +4,9 @@
 // (src/agent-routes.js channelsTaughtFor → channels-access reachCountFor) walked every channel conversation, each a grant read
 // that re-normalised every grant it judged and asked the grants store's forDir (path.resolve) five times. A grant is the
 // owner's boundary: the verdict is the same, and no change of a row is honoured later than before.
-//   ① COUNTS, never a clock, at the owner's real size — 主开发's counts, every id and title invented: 197 110 channel
-//     conversations on 8 accounts, 10 reach rows (8 account grains, 2 conversation grains, no except), 10 rules, 41 sessions
-//     (70efb5e10: 197 110 reads, 2.5 M normalisations, 1.0 M store lookups a walk) — a COUNTING COPY of src/grant-model.js is
+//   ① COUNTS, never a clock, at the owner's order of sizes — every id and title invented: about two hundred thousand channel
+//     conversations on a handful of accounts, about ten reach rows (account grains and two conversation grains, no except),
+//     ten rules, a few dozen sessions (70efb5e10: one read a conversation, millions of normalisations and store lookups a walk) — a COUNTING COPY of src/grant-model.js is
 //     compiled into the require cache in the real one's place (its source, one counter per function head; no file written)
 //   ② L3 (docs/kb-design-lessons.md §19): an async walk gives the loop back every 50 000 conversations scanned (a count); a
 //     list sorts what it lists, never every candidate
@@ -91,8 +91,8 @@ const agent = (id, groups = []) => ({ kind: 'agent', id, name: null, groups, msg
 
 // ═══ ① COUNTS AT THE OWNER'S SIZE ═══════════════════════════════════════════
 console.log('— ① the prompt hook\'s reach count and an agent\'s list at the owner\'s size: grant reads per walk, normalisations, store lookups');
-const SIZES = [173306, 20674, 1887, 747, 234, 146, 116, 0];
-const SESSIONS = Array.from({ length: 41 }, (_, i) => ({ cid: `cccccccc-0000-4000-8000-${String(i).padStart(12, '0')}`, groups: [`T-grp${i % 3}`] }));
+const SIZES = [170000, 20000, 2000, 750, 250, 150, 100, 0];   // the owner's order of sizes (B-360d r1379: no count of the owner's in the tree)
+const SESSIONS = Array.from({ length: 40 }, (_, i) => ({ cid: `cccccccc-0000-4000-8000-${String(i).padStart(12, '0')}`, groups: [`T-grp${i % 3}`] }));
 const W1 = await world('real', {
   accounts: SIZES, sessions: SESSIONS,
   rules: Array.from({ length: 10 }, (_, r) => ({ id: `pat${r}`, acct: r % 8, title: `ops-${r}` })),

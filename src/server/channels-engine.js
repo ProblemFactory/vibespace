@@ -9849,7 +9849,7 @@ function create(deps = {}) {
     mayUseFor,   // unit what-it-may-use (channels-access)
     policyFor, authorityCapsFor, healP2, rotationsOf, filterFor, assignmentView, pendingOf, clearCarried, elidedTotal, statsView, wakeLatencyFor,
     accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets, wakeEffOf,
-    storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, inheritedOfSession, liveGroupsOf, convFor,
+    storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, reachWalkOf, groupsOfSession, inheritedOfSession, liveGroupsOf, convFor,
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
@@ -10728,7 +10728,7 @@ function create(deps = {}) {
     // P4: reconcile / the boot sweep / the per-channel honesty switch
     reconcile: (id, o) => onProposal(id, () => reconcile(id, o)), sweepSending, sweepReplaces, releaseHeld, setSenderHonesty, honestyLineFor, deprecatedReceiptWakes,   // verify r2: two Check-outcome presses ask the adapter ONCE
     collectReceipt,   // lane channel-direct-send-sync: the drafting CLI reads a direct send's receipt inline (GET status?id&collect=1)
-    setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
+    setPolicy, policyFor, setReach, reachView, reachFor, reachWalkOf, request, decideRequest,
     expireWatchRequests, withdrawWatchRequest, reconcileAsks,   // lane bl-msg B-ae13: the asker takes its own wake request back; lane wake-approve-card r3: a wake ask's lifetime + the asks' boot reconcile (suites drive them)
     wakeHeldAt,   // lane wake-approve-card r4: does this grain hold a wake? (the routes ask it before EVERY grain write — wakeRefused)
     grainReadAt,   // r5: THE one reader of a grain (the access above it included; every stored row, active or inert) — «held» reads it
