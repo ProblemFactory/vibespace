@@ -777,9 +777,17 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
   // the oat's ACTS in accounts.js, by function: the modules THEY reach are the oat's closure (⑦) — each name must exist
   const OAT_ACT_FNS = ['_key', '_holdsCiphertext', '_enc', '_dec', 'setOat', 'clearOat', 'getOat', '_oatFact', 'noteCliVersion', '_oatFixture', 'oatFileCaps', 'syncOatFile', 'oatFileSettled', '_oatMemberLinked', '_syncOatFileNow', 'syncOatFiles', '_oatFileDoor', 'usageToken'];
   const parsed = new Map(), text8 = new Map(); // rel → the walk / the text of the file ON DISK (a planted override is walked fresh)
+  // B-fe02 (the census's cost): the files whose text ON DISK names a pattern are found ONCE per pattern for the whole suite — the
+  // disk does not change between the census's 17 calls, and a scan of every src file cost ~90 ms a call. An OVERRIDE's text is tested
+  // fresh at every call (below), so a planted line is never missed; the RED controls that plant one are the proof.
+  const disk8 = (rel) => { if (!text8.has(rel)) text8.set(rel, fs.readFileSync(path.join(REPO, rel), 'utf8')); return text8.get(rel); };
+  const named8 = new Map(); // String(pattern) → the src files whose DISK text it matches
   const census = (override = {}) => {
-    const read = (rel) => { if (rel in override) return override[rel]; if (!text8.has(rel)) text8.set(rel, fs.readFileSync(path.join(REPO, rel), 'utf8')); return text8.get(rel); };
-    const walkRel = (rel) => { if (rel in override) return walkOf(override[rel], rel); if (!parsed.has(rel)) parsed.set(rel, walkOf(read(rel), rel)); return parsed.get(rel); };
+    const read = (rel) => (rel in override ? override[rel] : disk8(rel));
+    // an override is walked ONCE per call (it is asked up to five times in one: the rows, the credential writers, the oat road, the
+    // private writers, the acts — a 190 KB accounts.js cost ~50 ms a walk); the files on disk keep their one walk for the suite
+    const walked8 = new Map();
+    const walkRel = (rel) => { if (rel in override) { if (!walked8.has(rel)) walked8.set(rel, walkOf(override[rel], rel)); return walked8.get(rel); } if (!parsed.has(rel)) parsed.set(rel, walkOf(read(rel), rel)); return parsed.get(rel); };
     const callsOfRel = (rel) => walkRel(rel).calls;
     const acc = callsOfRel('src/accounts.js').map((c) => `${c.fn} ${c.name}`).sort();
     const want = ACC_ROWS.slice().sort();
@@ -789,7 +797,11 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
     const matContent = matCalls.filter((c) => /^(openSync|open|writeFileSync|writeFile|writeSync|write|appendFileSync|appendFile|createWriteStream|copyFileSync|copyFile)$/.test(c.name)).map((c) => c.fn);
     const credWrites = [];
     // (a call's arguments are text of its file: a file that never names a credentials path cannot write one — parse only those)
-    const naming = (re) => srcFiles.filter((rel) => re.test(read(rel)));
+    const naming = (re) => {
+      if (!named8.has(String(re))) named8.set(String(re), new Set(srcFiles.filter((rel) => re.test(disk8(rel)))));
+      const onDisk8 = named8.get(String(re));
+      return srcFiles.filter((rel) => (rel in override ? re.test(override[rel]) : onDisk8.has(rel)));
+    };
     for (const rel of naming(/credentials\.json|subCredsPath\(|credsPath/)) for (const c of callsOfRel(rel)) if (/^(writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|copyFileSync|copyFile|cpSync|renameSync|rename|openSync|open|writePrivateFile|writePrivateFileAsync|linkSync|link|symlinkSync|symlink)$/.test(c.name) && /credentials\.json|subCredsPath\(|credsPath/.test(c.args) && !(/^renameSync$|^rename$/.test(c.name) && /^src\b/.test(c.args))) credWrites.push(`${rel} ${c.fn} ${c.name}`);
     // ④ (verify r1 F6: all three oat acts, not the writer alone) — their callers across src
     const oatRoad = naming(/writeCredentialFile|archiveCredentialFile|removeCredentialFile/).filter((rel) => rel !== 'src/account-material.js').flatMap((rel) => callsOfRel(rel).filter((c) => /^(writeCredentialFile|archiveCredentialFile|removeCredentialFile)$/.test(c.name)).map((c) => `${rel} ${c.fn} ${c.name}`)).sort();
