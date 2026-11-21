@@ -8,7 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): the kinds a governing file covers, for a restored session
-const { restoredTurnState } = require('../turn-state.js'); // PURE (lane parked-ask-stall): the ring's last turn-state record
+const { restoredStreaming } = require('../turn-state.js'); // PURE (lane parked-ask-stall): the ring's last turn-state record
 const pty = require('node-pty');
 const { createMessageManager } = require('../normalizers');
 const { costResume, resultsIn } = require('../cost-segments.js'); // PURE (2.369.402): the conversation's cost fold
@@ -920,12 +920,12 @@ function restoreSessions() {
       sockName: sockFile,
       socketPath,
       buffer: savedBuffer,
-      _isStreaming: wrapperStreaming,
-      // …and the harness's OWN last word on record in that ring (lane parked-ask-stall, a fleet pod):
-      // a turn parked on a permission ask restores as `requires_action` — waiting on the user, the
-      // session list's 'waiting' dot, the attach's turn state — not a bare sidecar `streaming:true`
-      // that every reader took for "thinking" (and the client's stall watchdog for a lost delivery)
-      ...restoredTurnState(savedBuffer),
+      // the harness's OWN last word on record in that ring (lane parked-ask-stall, a fleet pod): a turn
+      // parked on a permission ask restores as `requires_action` — waiting on the user, the session list's
+      // 'waiting' dot, the attach's turn state — not a bare sidecar `streaming:true` that every reader took
+      // for "thinking"; and (B-ba09) the streaming FLAG is that word's too — an idle ring restores NOT
+      // streaming whatever the derived sidecar says (the sidecar only for a CLI that never says a word)
+      ...restoredStreaming(savedBuffer, wrapperStreaming),
       _goal: wrapperGoal,
       _goalStatus: wrapperGoalStatus,
       _goalElapsed: wrapperGoalElapsed,

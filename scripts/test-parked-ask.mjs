@@ -71,8 +71,9 @@ async function attachFacts(root, buf) {
   const TF = require(path.join(root, 'src/server/turn-facts.js'));
   const { SessionMessages } = require(path.join(root, 'src/session-store.js'));
   const { rebuildHistory } = require(path.join(root, 'src/normalizers.js'));
-  // the restored session exactly as boot-restore builds it: sidecar streaming:true + the ring's turn state
-  const restored = { mode: 'chat', _isStreaming: true, ...TS.restoredTurnState(buf) };
+  // the restored session exactly as boot-restore builds it (B-ba09): the ring's turn state AND the flag it means; the
+  // sidecar's streaming:true is read only for a ring with no state word
+  const restored = { mode: 'chat', ...TS.restoredStreaming(buf, true) };
   const rec = TS.reconcileAttachStreaming({ turnStateSeen: restored._turnStateSeen === true, turnState: restored._turnState || null, isStreaming: true, sidecar: { streaming: true, ageMs: 9e6 } });
   const session = { backend: 'claude', cwd: path.join(REPO, '.no-such-cwd'), buffer: buf, mode: 'chat' };
   const sm = new SessionMessages(session, 'sess-53', {});
@@ -150,7 +151,9 @@ console.log('— ② the ring: a restored session\'s turn state');
   ok('an unknown state is never coerced (skipped, the earlier one stands)', TS.turnStateInRing('{"type":"system","subtype":"session_state_changed","state":"idle"}\n{"type":"system","subtype":"session_state_changed","state":"paused"}\n') === 'idle');
   ok('a torn last line is skipped', TS.turnStateInRing(ring() + '{"type":"system","subtype":"session_state_ch') === 'requires_action');
   const brSrc = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
-  ok('boot-restore spreads the ring\'s turn state onto the restored session beside the sidecar flag', /_isStreaming: wrapperStreaming,[\s\S]{0,600}\.\.\.restoredTurnState\(savedBuffer\),/.test(brSrc));
+  // B-ba09: the flag rides the same spread (the ring's word means it; the sidecar only without a word) — no `_isStreaming:` key of its own beside it
+  const brObj = brSrc.slice(brSrc.lastIndexOf('sockName: sockFile,', brSrc.indexOf('...restoredStreaming(')), brSrc.indexOf('_goalTokensUsed: wrapperGoalTokens,'));
+  ok('boot-restore spreads the ring\'s turn state AND its streaming flag onto the restored session (the sidecar flag only without a word)', /\.\.\.restoredStreaming\(savedBuffer, wrapperStreaming\),/.test(brObj) && !/_isStreaming:/.test(brObj), brObj.length);
 }
 
 console.log('— ③ the attach rebuild of a parked ask (the measured .buf shape)');

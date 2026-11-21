@@ -149,6 +149,18 @@ function restoredTurnState(ring) {
   const st = turnStateInRing(ring);
   return st ? { _turnStateSeen: true, _turnState: st } : {};
 }
+/** B-ba09 — A RESTORED SESSION'S STREAMING FLAG IS THE CLI'S LAST WORD: when the ring holds a state word, the flag is ITS effect
+ *  (turnStateEffect — the one function the live parse and the attach reconcile read); the wrapper sidecar's `streaming` only for a CLI
+ *  that never says one. The sidecar is DERIVED: true at any user record that is no `<local-command-` echo, false only at a result or a
+ *  compact boundary — after the last result a `/compact` command echo or the compaction summary leaves it TRUE while the CLI says idle;
+ *  seeded beside the ring's idle (the release), the restored conversation looked streaming until an attach reconciled it, and its stop
+ *  (and a pool move deferred to it) waited for someone to open the window. → {_isStreaming, _turnStateSeen?, _turnState?} */
+function restoredStreaming(ring, sidecarStreaming) {
+  const st = turnStateInRing(ring);
+  if (!st) return { _isStreaming: !!sidecarStreaming };
+  const eff = turnStateEffect(st);
+  return { _turnStateSeen: true, _turnState: st, _isStreaming: !!(eff && eff.streaming) };
+}
 
 /** Is the turn WAITING ON THE USER? The harness said `requires_action`, or an
  *  ask the user can answer is open here (a permission card, AskUserQuestion, a
@@ -239,7 +251,55 @@ function sendsRequest(msg) {
   const text = typeof c === 'string' ? c : (Array.isArray(c) ? c.map((b) => (b && b.text) || '').join('') : '');
   return !/^<local-command-/.test(text.trim());
 }
+// the CLI's reply to a LOCAL command, by its envelope: its KIND only (a send it ends, a record's kind) — never its words (the /model echo's one reader is src/model-echo.js)
+const LOCAL_REPLY = /^<local-command-stdout>/;
+const userTextOf = (msg) => { const c = msg && msg.message && msg.message.content; return (typeof c === 'string' ? c : (Array.isArray(c) ? c.map((b) => (b && b.text) || '').join('') : '')).trim(); };
+/** B-ba09 (B) — A SEND THE CLI ANSWERED WITHOUT A TURN ENDS AT ITS REPLY. A send raises the flag at once (src/server/user-input.js:
+ *  the request goes out now); under authority only the CLI's state word lowers it — but a LOCAL command (/cost, /model, /context…) is
+ *  answered by the CLI itself: a `<local-command-stdout>` record (the recorded reply shape) and NO state word (it never left idle), so
+ *  the flag stood up until an attach reconciled it, and a pool move deferred to the conversation's stop waited for that attach. Fires
+ *  ONLY on what was observed: authority, the CLI's last word idle, the flag up, a main-thread reply record. A CLI that says `running`
+ *  for such a command is not idle when the reply comes, so this never fires and the state word decides as before. */
+function sendEndsAtLocalReply(session, msg) {
+  if (!session || session._turnStateSeen !== true || session._turnState !== 'idle' || session._isStreaming !== true) return false;
+  if (!msg || msg.type !== 'user' || msg.parent_tool_use_id || msg.isSidechain) return false;
+  return LOCAL_REPLY.test(userTextOf(msg));
+}
+/** B-ba09 (C) — THE RECORDER: a record's KIND, never its content (no text, no name, no id — words of a closed shape only), so
+ *  the attach reconcile's journal line can say which three records stood before a flag it had to correct: the next such hub
+ *  journal is proof, not a digest. */
+const KIND_WORD = /^[a-z_]{1,40}$/;
+const kindWord = (v) => (typeof v === 'string' && KIND_WORD.test(v) ? v : 'other');
+function recordKind(msg) {
+  if (!msg || typeof msg !== 'object') return 'other';
+  const sub = msg.parent_tool_use_id || msg.isSidechain ? 'sub:' : '', type = kindWord(msg.type);
+  if (type === 'system') return `${sub}system/${kindWord(msg.subtype)}${msg.subtype === 'session_state_changed' && isTurnState(msg.state) ? ':' + msg.state : ''}`;
+  if (type === 'result') return `${sub}result${msg.subtype ? '/' + kindWord(msg.subtype) : ''}`;
+  if (type !== 'user') return sub + type;
+  const c = msg.message && msg.message.content, text = userTextOf(msg);
+  if (Array.isArray(c) && c.some((b) => b && b.type === 'tool_result')) return sub + 'user/tool-result';
+  if (LOCAL_REPLY.test(text)) return sub + 'user/local-reply';
+  if (/^<local-command-/.test(text)) return sub + 'user/local-note';
+  if (/^<command-name>/.test(text)) return sub + 'user/command';
+  if (msg.isCompactSummary) return sub + 'user/compact-summary';
+  return sub + (msg.isMeta ? 'user/meta' : 'user/prompt');
+}
+const KINDS_KEPT = 3;
+/** the parse's ONE writer of `session._lastKinds` (every parsed record, in order; the last KINDS_KEPT kept) */
+function noteRecordKind(session, msg) {
+  if (!session) return;
+  const k = Array.isArray(session._lastKinds) ? session._lastKinds : (session._lastKinds = []);
+  k.push(recordKind(msg));
+  if (k.length > KINDS_KEPT) k.splice(0, k.length - KINDS_KEPT);
+}
+/** the attach reconcile's ONE journal line (src/ws-handler.js): what it corrected, and the kinds of the records before it */
+function reconciledSay(sessionId, rec, turnState, kinds) {
+  const last = Array.isArray(kinds) && kinds.length ? kinds.map(kindWordOrKind).join(', ') : 'none seen by this process';
+  return `[session] ${sessionId}: streaming reconciled (${rec.action}${rec.staleAuthority ? `, the harness last said ${turnState}` : ''}) \u2192 ${rec.isStreaming} \u00b7 the last records: ${last}`;
+}
+const kindWordOrKind = (k) => (typeof k === 'string' && /^(?:sub:)?[a-z_]{1,40}(?:\/[a-z_-]{1,40})?(?::[a-z_]{1,20})?$/.test(k) ? k : 'other');
 
 module.exports = { TURN_STATES, isTurnState, turnStateEffect, reconcileAttachStreaming, SIDECAR_SETTLE_MS, AUTHORITATIVE_SETTLE_MS,
-  turnStateInRing, restoredTurnState, waitingOnUser, stallVerdict, STALL_SILENCE_MS, STALL_COOLDOWN_MS, STALL_MAX_REATTACH,
-  requestInFlight, noteTurnFlight, noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest };
+  turnStateInRing, restoredTurnState, restoredStreaming, waitingOnUser, stallVerdict, STALL_SILENCE_MS, STALL_COOLDOWN_MS, STALL_MAX_REATTACH,
+  requestInFlight, noteTurnFlight, noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest,
+  sendEndsAtLocalReply, recordKind, noteRecordKind, reconciledSay, KINDS_KEPT };

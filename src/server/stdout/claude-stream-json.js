@@ -42,7 +42,7 @@ const toldUuid = (u) => typeof u === 'string' && u !== '' && !/-0{11,}1?$/.test(
 const SUBAGENT_LAST_READ_MS = 3000;   // after a helper's end is told: the watch stays this long (a transcript written a moment later), then one more read
 const bypassAutoAllow = require('../../server/bypass-auto-allow'); // (spelled from src/ like every require here) lane bypass-no-prompts: under bypassPermissions a can_use_tool is answered at the door
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
-const { isTurnState, turnStateEffect, noteTurnFlight, noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest } = require('../../turn-state.js');
+const { isTurnState, turnStateEffect, noteTurnFlight, noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest, sendEndsAtLocalReply, noteRecordKind } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
 const { nextStampIn } = require('../../record-lateness.js'); // PURE: the late-record rule's look-ahead (lane-hot-switch)
 const { parseSetModelEcho } = require('../../model-echo.js'); // the ONE /model echo parser (shared with the status bar + card label)
@@ -543,6 +543,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // the dead-bridge CATCH-UP (lane-dead-bridge): while a heal's backlog drains, every record is counted through
           // the same late rule (src/server/bridge-watch.js armCatchUp) — the count and the card; the gate itself is the line above
           try { session._bridgeCatchUp?.note?.(msg); } catch { }
+          try { noteRecordKind(session, msg); } catch { } // B-ba09 (C): the last three record KINDS (never content), named by the attach reconcile's journal line
           // BREADCRUMB for CLI evolution (2.227.8): the claude stream gained
           // `tool_progress` and it silently rode the subagent branch for
           // weeks (2.227.7) — the SECOND time a new upstream record type
@@ -1144,6 +1145,11 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                 if (!authoritative) session._isStreaming = true;
                 (recordIsLate?.(session, msg) ? noteTurnFlight : noteRequestSent)(session, Date.now()); // the prompt's echo or a TOOL RESULT: a request goes out NOW — a backlog's record proves nothing about now (lane cache-warmth-tiles r4 — the device feed's twin)
                 newLabel = 'thinking...';
+              } else if (sendEndsAtLocalReply(session, msg)) {
+                // B-ba09 (B): a command the CLI answered by itself (its reply, no turn, no state word) ends the send that raised the flag.
+                // The flag and its flight fact only — NO pool stop: the idle word before the send was this conversation's stop, and a
+                // stop here (a late echo after a new prompt, before its running word) would force a pool re-decide as the prompt goes out
+                session._isStreaming = false; noteTurnFlight(session, Date.now()); newLabel = '';
               }
             } else if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain) {
               const blocks = msg.message?.content;

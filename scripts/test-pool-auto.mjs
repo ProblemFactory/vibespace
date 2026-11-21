@@ -1017,10 +1017,10 @@ await (async () => {
         const callers = files.filter((f) => !/src\/(turn-state|session-schema)\.js$/.test(f)); // the definitions and the field's schema note
         const calls = (name) => { const out = {}; for (const f of callers) { const n = fs.readFileSync(f, 'utf8').split('\n').filter((l) => new RegExp('\\b' + name + '\\b').test(l) && !/^\s*const \{[^}]*\} = require\(|^\s*\*|^\s*\/\//.test(l)).length; if (n) out[path.relative(path.resolve('.'), f)] = n; } return out; };
         const sentAt = calls('noteRequestSent'), flagAt = calls('noteTurnFlight');
-        ck('K2 WRITER CENSUS: `_turnStartedAt` is assigned only in turn-state.js; noteRequestSent at the send that starts a request (none in flight before it — r5), the continue, the parse (a new \'running\', a user record) and the device feed; noteTurnFlight at a mid-turn send, the parse (result, the state word), the attach reconcile, the exit',
+        ck('K2 WRITER CENSUS: `_turnStartedAt` is assigned only in turn-state.js; noteRequestSent at the send that starts a request (none in flight before it — r5), the continue, the parse (a new \'running\', a user record) and the device feed; noteTurnFlight at a mid-turn send, the parse (result, the state word, a local command\'s reply — B-ba09), the attach reconcile, the exit',
           JSON.stringify(assigns) === JSON.stringify(['src/turn-state.js'])
           && JSON.stringify(sentAt) === JSON.stringify({ 'src/server/session-brain.js': 1, 'src/server/stdout/claude-stream-json.js': 2, 'src/server/user-input.js': 1, 'server.js': 1 })
-          && JSON.stringify(flagAt) === JSON.stringify({ 'src/server/session-stdout.js': 1, 'src/server/stdout/claude-stream-json.js': 3, 'src/server/user-input.js': 1, 'src/ws-handler.js': 1 }),
+          && JSON.stringify(flagAt) === JSON.stringify({ 'src/server/session-stdout.js': 1, 'src/server/stdout/claude-stream-json.js': 4, 'src/server/user-input.js': 1, 'src/ws-handler.js': 1 }),
           JSON.stringify({ assigns, sentAt, flagAt }));
       }
       // ROUND 5 (L1): A SEND STARTS A REQUEST ONLY WHEN NONE WAS IN FLIGHT — a message sent WHILE a turn runs (the person's

@@ -18,7 +18,7 @@ const { cwdToProjectDir, findSessionJsonlPath } = require('./session-store');
 const { get: harnessOf, spawnOf, list: harnessList } = require('./harnesses'); // S3: store.warmTranscript per harness (claude parse-cache warm / codex thread/read fallback)
 const { capsOf } = require('./backend-caps');
 const ConversationOps = require('./server/conversation-ops.js'); // design q-046: the conversations' server-side ops (the ws case and the automation door share them)      // inputModes.queueVerbs / review / renameWriteback gates (never a backend-id branch)
-const { noteTurnFlight, reconcileAttachStreaming } = require('./turn-state'); // §2.5: ONE attach-time streaming decision, shared with the live consumer
+const { noteTurnFlight, reconciledSay, reconcileAttachStreaming } = require('./turn-state'); // §2.5: ONE attach-time streaming decision, shared with the live consumer
 const { pidsMatchingCmdline } = require('./cli-identity'); // THE process reader: the kill path's `pgrep -f` without the fork
 const PI = require('./proc-identity'); // the ssh kill compares the meta's recorded birth (vs_same_proc, B-5ee1)
 const { shrinkVerdict, windowIds, layerGate } = require('./lib/desktop-record.js'); // PURE (userW inc-mun7qjmw-iksh): the layout-sync shrink belt + the layer gate (design q-039 P1)
@@ -1748,7 +1748,7 @@ function registerWsHandler(wss, ctx) {
                   isStreaming: !!session._isStreaming, sidecar,
                 });
                 if (rec.action !== 'none') {
-                  console.log(`[session] ${data.sessionId}: streaming reconciled (${rec.action}${rec.staleAuthority ? `, the harness last said ${session._turnState}` : ''}) \u2192 ${rec.isStreaming}`);
+                  console.log(reconciledSay(data.sessionId, rec, session._turnState, session._lastKinds)); // B-ba09 (C): + the kinds of the last three records
                   session._isStreaming = rec.isStreaming;
                   if (rec.clearLabel) session._streamingLabel = '';
                   if (rec.staleAuthority) {
