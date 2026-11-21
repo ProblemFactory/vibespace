@@ -789,8 +789,9 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
           if (r2 && r2.entry) {
             _stampJsonlParse(r2.bytes, performance.now() - t1);
             _jsonlCachePut(claudeSessionId, r2.entry);
-            if (_historyRefused.get(claudeSessionId) === mine) _historyRefused.delete(claudeSessionId);
-            refusedNow = false;
+            // the note STAYS (the pool still refuses), marked: the parse answers this copy as LOADED while the file is what it read —
+            // a parse of a changed file asks the warm again (sliced again), never a read on this loop
+            mine.sliced = { mtimeMs: r2.entry.mtimeMs, size: r2.entry.size, ino: r2.entry.ino };
             return true;
           }
         } catch (e2) { mine.why = `${mine.why}; the main process's read failed too (${(e2 && e2.message) || e2})`; if (e2 && e2.storageHung) mine.storageHung = true; }
@@ -804,8 +805,13 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
 function parseSessionJsonl(claudeSessionId, cwd) {
   const refused = _historyRefused.get(claudeSessionId);
   if (refused) {   // row B-422c: the warm's read was refused — the kept copy or «not loaded yet», never a parse on the loop
-    if (!refused.storageHung && Date.now() >= refused.retryAt) { refused.retryAt = Date.now() + RETRY_WARM_MS; warmSessionJsonlAsync(claudeSessionId, cwd).catch(() => false); }
     const kept = _jsonlCache.get(claudeSessionId);
+    // unit 2: the main process READ it (the sliced road) and the file is still what it read ⇒ loaded (one stat, never a read)
+    if (refused.sliced && kept && Array.isArray(kept.messages) && kept.mtimeMs === refused.sliced.mtimeMs && kept.size === refused.sliced.size) {
+      let st = null; try { st = fs.statSync(refused.fp || findSessionJsonlPath(claudeSessionId, cwd)); } catch { st = null; }
+      if (st && st.mtimeMs === kept.mtimeMs && st.size === kept.size && st.ino === kept.ino) return kept.messages;
+    }
+    if (!refused.storageHung && Date.now() >= refused.retryAt) { refused.retryAt = Date.now() + RETRY_WARM_MS; warmSessionJsonlAsync(claudeSessionId, cwd).catch(() => false); }
     // the kept copy is BEHIND the file (the warm asked for a full read): a copy of its list, tagged — never the cache's own array
     return kept && Array.isArray(kept.messages) ? taggedKeptOf(kept.messages) : notLoadedList();
   }

@@ -433,14 +433,16 @@ function _parseJsonlLines(buf, base, dropSubagent) {
 }
 /** THE LINE PARSE, ONE IMPLEMENTATION (row B-422c unit 2): `_parseJsonlLines` runs it whole; the sliced road
  *  (`_stepSliced`) runs it a few hundred lines at a time with the loop free between — the same records, starts and end
- *  by construction. `step(n)` parses up to n '\n'-terminated lines → true once none is left; `finish()` parses the bytes
+ *  by construction. `step(n, maxBytes)` parses up to n '\n'-terminated lines (or until maxBytes are consumed) → true once none
+ *  is left; `finish()` parses the bytes
  *  after the last '\n' (reported apart, never consumed) and answers {records, starts, end, partial}. */
 function _jsonlLineStepper(buf, base, dropSubagent) {
   const records = [], starts = [];
   const keep = (msg) => !(dropSubagent && (msg.parent_tool_use_id || msg.isSidechain));
   let pos = 0;
   return {
-    step(n) {
+    step(n, maxBytes = Infinity) {
+      const from = pos;
       for (let i = 0; i < n; i++) {
         const nl = buf.indexOf(10, pos);
         if (nl === -1) return true;
@@ -449,6 +451,7 @@ function _jsonlLineStepper(buf, base, dropSubagent) {
           if (t) { try { const msg = JSON.parse(t); if (keep(msg)) { records.push(msg); starts.push(base + pos); } } catch { } }
         }
         pos = nl + 1;
+        if (pos - from >= maxBytes) return false;
       }
       return false;
     },
@@ -821,6 +824,9 @@ async function codexHistoryMergedPagedAsync({ files = [], liveBuffer = () => '' 
       if (!gone) { _mergedStats.reads++; return { records, threads }; }
     } catch (e) {
       const code = e && e.code;
+      // row B-422c unit 2: the merged call names its files in `files`, never `fp` — a POOL failure of it (a deadline above all: one of
+      // them hung) is noted for EVERY file it names, so no file of it is read on the main process after a deadline
+      if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e); for (const f of files || []) noteFileRefusal(f && f.fp, r); }
       if (code === 'heap_bound') return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
       return said(code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`);
     }
@@ -838,18 +844,30 @@ async function codexHistoryMergedPagedAsync({ files = [], liveBuffer = () => '' 
 // storage's) has not answered — at most one libuv thread parked in a dead file; a compressed rollout is never decompressed here
 // (the worker's). Said once a file in the journal. The four other roads never take it.
 let SLICED_AFTER_MS = 10000, SLICED_READ_DEADLINE_MS = 60000;
-const SLICE_MS = 8, SLICE_LINES = 256, ZSTD_MAGIC = 0xFD2FB528;
-const _fileRefusals = new Map();   // fp → { firstAt, count, storageHung, why } — the pool's refusals of ONE file, standing
+const SLICE_MS = 8, SLICE_LINES = 256, SLICE_BYTES = 1 << 20, ZSTD_MAGIC = 0xFD2FB528;
+let STAND_GAP_MS = 30000;          // a refusal STANDS while the file is refused again within 30 s; past that it starts over
+const FILE_REFUSALS_MAX = 512, FILE_REFUSALS_HUNG_MAX = 4096;   // the storage's records are kept past the first bound (never forgotten first)
+const _fileRefusals = new Map();   // fp → { firstAt, lastAt, count, storageHung, why } — the pool's refusals of ONE file, standing
 const _slicedSaid = new Set();
 let _slicedChain = Promise.resolve(), _slicedParked = 0;
 const _slicedJoin = new Map();     // kind:fp → the read in flight (a second ask of the same file joins it)
 function noteFileRefusal(fp, refusal) {
-  if (!fp) return;
+  if (!fp) return null;
+  const now = Date.now();
   let rec = _fileRefusals.get(fp);
-  if (!rec) { rec = { firstAt: Date.now(), count: 0, storageHung: false, why: '' }; _fileRefusals.set(fp, rec); while (_fileRefusals.size > 512) _fileRefusals.delete(_fileRefusals.keys().next().value); }
-  rec.count++;
+  if (rec && !rec.storageHung && now - rec.lastAt > STAND_GAP_MS) { rec.firstAt = now; rec.count = 0; }   // not refused for a while: it starts over
+  if (!rec) {
+    rec = { firstAt: now, lastAt: now, count: 0, storageHung: false, why: '' };
+    _fileRefusals.set(fp, rec);
+    if (_fileRefusals.size > FILE_REFUSALS_MAX) {   // the oldest record that is NOT the storage's goes first; past the second bound, the oldest
+      for (const [k, r] of _fileRefusals) if (!r.storageHung && k !== fp) { _fileRefusals.delete(k); break; }
+      while (_fileRefusals.size > FILE_REFUSALS_HUNG_MAX) _fileRefusals.delete(_fileRefusals.keys().next().value);
+    }
+  }
+  rec.lastAt = now; rec.count++;
   rec.why = (refusal && refusal.why) || rec.why || 'refused';
   if (refusal && refusal.storageHung) rec.storageHung = true;
+  return rec;
 }
 const forgiveFile = (fp) => { if (fp) _fileRefusals.delete(fp); };   // the pool answered for it: the refusal no longer stands
 /** May this file's history be read on the main process now? → { ok, why } (never a file call: memory only) */
@@ -861,7 +879,7 @@ function slicedRoadFor(fp) {
   if (stood < SLICED_AFTER_MS) return { ok: false, why: `refused for ${Math.round(stood / 1000)} s — the main process reads it past ${SLICED_AFTER_MS / 1000} s` };
   let mp = false; try { mp = require('../mount-door').blocked(fp); } catch { mp = false; }
   if (mp) { rec.storageHung = true; return { ok: false, why: 'its mount is blocked' }; }
-  if (_transcriptPool && typeof _transcriptPool._hungOf === 'function' && _transcriptPool._hungOf({ fp }, 'jsonlTail', SLICED_READ_DEADLINE_MS)) return { ok: false, why: 'the transcript pool remembers it hung' };
+  if (_transcriptPool && typeof _transcriptPool._hungOf === 'function' && _transcriptPool._hungOf({ fp }, 'jsonlTail', 0)) return { ok: false, why: 'the transcript pool remembers it hung' };   // patience 0: ANY entry for it refuses
   if (_slicedParked) return { ok: false, why: 'a read on the main process is still parked in a file that never answered' };
   return { ok: true, why: `the transcript reader refused it for ${Math.round(stood / 1000)} s (${rec.count} refusals: ${rec.why})` };
 }
@@ -891,7 +909,7 @@ async function _stepSliced(stepper) {
   for (;;) {
     const t0 = performance.now();
     let done = false;
-    do { done = stepper.step(SLICE_LINES); } while (!done && performance.now() - t0 < SLICE_MS);
+    do { done = stepper.step(SLICE_LINES, SLICE_BYTES); } while (!done && performance.now() - t0 < SLICE_MS);   // ≤ 256 lines or ≥ 1 MB a step, the clock after each
     if (done) return stepper.finish();
     await new Promise((r) => setImmediate(r));
   }
@@ -903,9 +921,14 @@ function _slicedTurn(kind, fp, read) {
   const run = async () => {
     const road = slicedRoadFor(fp);
     if (!road.ok) throw Object.assign(new Error(road.why), { code: 'sliced_refused' });
-    if (!_slicedSaid.has(fp)) { _slicedSaid.add(fp); if (_slicedSaid.size > 512) _slicedSaid.clear(); console.warn(`[transcript] ${path.basename(fp)}: ${road.why} — its history is read on the main process in bounded slices (row B-422c)`); }
+    const sayOnce = (key, line) => { if (_slicedSaid.has(key)) return; if (_slicedSaid.size > 512) _slicedSaid.clear(); _slicedSaid.add(key); console.warn(line); };
+    sayOnce(fp, `[transcript] ${path.basename(fp)}: ${road.why} — its history is read on the main process in bounded slices (row B-422c)`);
     try { return await read(); }
-    catch (e) { if (e && (e.storageHung || e.code === 'sliced_read_deadline')) { const rec = _fileRefusals.get(fp); if (rec) rec.storageHung = true; } throw e; }
+    catch (e) {
+      if (e && (e.storageHung || e.code === 'sliced_read_deadline')) (_fileRefusals.get(fp) || noteFileRefusal(fp, { why: e.message })).storageHung = true;   // a record evicted meanwhile is made again
+      sayOnce('failed:' + fp, `[transcript] ${path.basename(fp)}: the main process's read of its history failed (${(e && e.message) || e}) — «not loaded» (row B-422c)`);
+      throw e;
+    }
   };
   const turn = _slicedChain.then(run, run);
   _slicedChain = turn.then(() => { }, () => { });
@@ -947,7 +970,7 @@ function readCodexRolloutSliced(fp) {
   });
 }
 /** row B-422c unit 2's legs: the stated time and the read's deadline (ms; null = the product's), and the file records' state */
-function _setSlicedForTest({ afterMs = null, deadlineMs = null } = {}) { SLICED_AFTER_MS = afterMs == null ? 10000 : afterMs; SLICED_READ_DEADLINE_MS = deadlineMs == null ? 60000 : deadlineMs; }
+function _setSlicedForTest({ afterMs = null, deadlineMs = null, standGapMs = null } = {}) { SLICED_AFTER_MS = afterMs == null ? 10000 : afterMs; SLICED_READ_DEADLINE_MS = deadlineMs == null ? 60000 : deadlineMs; STAND_GAP_MS = standGapMs == null ? 30000 : standGapMs; }
 const slicedState = () => ({ files: _fileRefusals.size, parked: _slicedParked, said: _slicedSaid.size });
 
 /** Generic off-loop call (S3: codex discovery ops) → the worker's result. Row B-422c: `whenRefused(refusal)` is what a POOL

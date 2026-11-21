@@ -11,7 +11,12 @@
 //   ③ the STORAGE's refusal (a hung path): nothing read on the main process, ever (RED: a refusal of another kind reads it there).
 //   ④ the four other roads never take it (the gap read refuses by name; nothing opened).
 //   ⑤ said once a file in the journal.
-//   ⑥ THE READ'S OWN DEADLINE (a real FIFO: its open never answers): the file becomes the storage's, the parked read holds the one
+//   ⑥ a deadline on the codex MERGED read (it names its files in `files`, never `fp`): every file it names is the storage's — none
+//     is read on the main process after it (RED: the per-file «no worker» that follows would open it).
+//   ⑦ the record's bounds: a refusal STANDS only while asked again within the stated gap; the storage's records outlive the bound.
+//   ⑧ OUTPUT IDENTITY on every small shape (a few lines, no newline at all, a trailing partial line, CRLF, a BOM, invalid lines, a
+//     side-chain record, an empty file): the sliced entry = readJsonlTail's, the sliced records = parseCodexSessionJsonl's.
+//   ⑨ THE READ'S OWN DEADLINE (a real FIFO: its open never answers): the file becomes the storage's, the parked read holds the one
 //     place (no other file is read there meanwhile), and frees it when the file answers at last.
 // The placed transcripts are ~36 MB each (the tail bound is 32 MB): on disk under /var/tmp (src/fixture-guard.js TMP_ROOTS[1]),
 // never /tmp (RAM), removed at every exit and on every signal.
@@ -87,11 +92,15 @@ fs.mkdirSync(codexDir, { recursive: true });
     }
   } finally { fs.closeSync(out); }
 }
+const tid2 = '019b0000-2222-7222-8333-444444444444', tid3 = '019b0000-3333-7222-8333-444444444444';
+const codexFp2 = path.join(codexDir, `rollout-2026-11-21T00-00-01-${tid2}.jsonl`), codexFp3 = path.join(codexDir, `rollout-2026-11-21T00-00-02-${tid3}.jsonl`);
+for (const [fp, id] of [[codexFp2, tid2], [codexFp3, tid3]]) fs.writeFileSync(fp, [JSON.stringify({ type: 'session_meta', payload: { id, cwd, originator: 'codex_cli_rs', cli_version: '0.153.0' } }), '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}'].join('\n') + '\n');
 watched.push(projDir, path.join(HOME, '.codex'));
 console.log(`the placed transcripts: Claude ${fs.statSync(claudeFp(sids[0])).size} bytes, codex ${fs.statSync(codexFp).size} bytes (under ${HOME})`);
 
 const C = require(path.join(REPO, 'src/adapters/codex.js'));
 const CS = require(path.join(REPO, 'src/codex-session-store.js'));
+if (typeof C._setSlicedForTest !== 'function' || typeof C.readJsonlTailSliced !== 'function') { ok(false, 'premise: this tree has the histories\' sliced road (row B-422c unit 2) — it has not'); report(); process.exit(1); }
 const pool = C.transcriptPool();
 pool.close();   // THE POOL CLOSED FOR GOOD: every call refused
 let probe0 = null; try { await pool.call('gapInfo', { fp: claudeFp(sids[0]) }); } catch (e) { probe0 = e; }
@@ -139,7 +148,13 @@ console.log('① the Claude history, the pool closed for good');
   ok(fields.every((k) => a[k] === b[k]) && a.starts.length === b.starts.length && a.starts.every((v, i) => v === b.starts[i]) && same(a.messages, b.messages),
     `① its entry is the worker's, field for field (readJsonlTail's full read: ${a.messages.length} records, the span ${a.spanStart}…${a.spanEnd})`, { diff: fields.filter((k) => a[k] !== b[k]) });
   ok(syncMs >= LAW_MS, `① RED — the whole-file parse on the loop (the release's road, readJsonlTail): ONE turn of ${syncMs} ms ≥ ${LAW_MS} ms`, { syncMs });
+  // the read's note STAYS (the pool still refuses), marked: a parse with NO warm answers the loaded copy — one stat, never a read
+  const Rp = await road('① a parse after it, no warm (the pool still refusing)', () => { const l = SS.parseSessionJsonl(sid, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
+  ok(Rp.out && Rp.out.n === kept.length && !Rp.out.notLoaded && content(Rp).length === 0 && opens(Rp).length === 0, `${Rp.name}: LOADED, untagged — ${content(Rp).length} reads (a stat only)`, { out: Rp.out, reads: Rp.reads.slice(0, 4) });
+  const Rm = await road('① the reader\'s consumption of it (printed, not judged — the healthy road\'s cost too)', () => { const m = new SS.SessionMessages({ backend: 'claude', claudeSessionId: sid, cwd, buffer: '' }, sid, {}); m._ensureParsed(); return Array.isArray(m._all) ? m._all.length : null; });
+  void Rm;
 }
+SS.jsonlCacheClear();   // the next leg's memory: the 32 MB entry goes
 console.log('② the codex history, the pool closed for good');
 {
   const sess = { backend: 'codex', backendSessionId: tid, cwd, buffer: '' };
@@ -166,16 +181,81 @@ console.log('③ the storage\'s refusal, ④ the other roads, ⑤ said once');
   C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' }));
   const Rc = await road('③ the control: a refusal of another kind', () => SS.warmSessionJsonlAsync(sids[2], cwd));
   ok(Rc.out === true && opens(Rc).length >= 1, `${Rc.name}: read on the main process (${opens(Rc).length} open) — the RED the storage's guard keeps out`, { out: Rc.out });
-  const Rg = await road('④ the gap read of a file whose refusal stood', async () => { try { await C.jsonlGapInfoAsync(claudeFp(sids[0])); return 'answered'; } catch (e) { return e.code; } });
-  ok(Rg.out === 'transcript_reader_restarting' && opens(Rg).length === 0 && content(Rg).length === 0, `${Rg.name}: refused by name, nothing opened — the four other roads never take the sliced road`, { out: Rg.out });
+  // the codex history's storage guard: a hung path ⇒ «not loaded», nothing opened
+  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' }));
+  const Rch = await road('③ the codex history on a hung path', async () => { const m = new CS.CodexSessionMessages({ backend: 'codex', backendSessionId: tid2, cwd, buffer: '' }, tid2, {}); await m.rawAsync(); return m.notLoaded || null; });
+  ok(Rch.out === 'transcript_reader_restarting' && opens(Rch).length === 0, `${Rch.name}: «not loaded», nothing opened on the main process (${opens(Rch).length})`, { out: Rch.out });
+  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' }));
+  const roads = [['the gap read', () => C.jsonlGapInfoAsync(claudeFp(sids[0]))], ['the slab read', () => C.readJsonlLineRangeAsync(claudeFp(sids[0]), 1, 50)], ['the turn map', () => C.scanJsonlUserTurnsAsync(claudeFp(sids[0]), 'claude')]];
+  for (const [name, fn] of roads) {
+    const Rg = await road(`④ ${name} of a file whose refusal stood`, async () => { try { await fn(); return 'answered'; } catch (e) { return e.code; } });
+    ok(Rg.out === 'transcript_reader_restarting' && opens(Rg).length === 0 && content(Rg).length === 0, `${Rg.name}: refused by name, nothing opened — it never takes the sliced road`, { out: Rg.out });
+  }
+  const Rw = await road('④ the codex thread-metas walk', () => CS.collectCodexThreadMetasAsync());
+  ok(opens(Rw).length === 0 && content(Rw).length === 0, `${Rw.name}: nothing opened on the main process (its kept listing)`, { out: Rw.out === null ? null : typeof Rw.out });
   SS.jsonlCacheClear();
   C._setTranscriptPoolForTest(pool);
-  await SS.warmSessionJsonlAsync(sids[0], cwd);   // a second sliced read of the first file
+  const again = await SS.warmSessionJsonlAsync(sids[0], cwd);   // a second sliced read of the first file
   const lines = said.filter((l) => /read on the main process in bounded slices/.test(l));
   const perFile = (sid) => lines.filter((l) => l.includes(path.basename(claudeFp(sid)))).length;
-  ok(perFile(sids[0]) === 1 && perFile(sids[2]) === 1 && perFile(sids[1]) === 0, `⑤ said ONCE a file in the journal (the first file read twice: ${perFile(sids[0])} line; the hung one: ${perFile(sids[1])}): «${(lines[0] || '').slice(0, 160)}»`, lines.slice(0, 3));
+  ok(again === true && perFile(sids[0]) === 1 && perFile(sids[2]) === 1 && perFile(sids[1]) === 0, `⑤ said ONCE a file in the journal (the first file read again: ${again}, ${perFile(sids[0])} line; the hung one: ${perFile(sids[1])}): «${(lines[0] || '').slice(0, 160)}»`, lines.slice(0, 3));
+  SS.jsonlCacheClear();
 }
-console.log('⑥ the read\'s own deadline (a FIFO whose open never answers)');
+console.log('⑥ a deadline on the codex merged read');
+{
+  C._setSlicedForTest({ afterMs: 0 });
+  const mixed = { calls: [], call(op) { this.calls.push(op); return Promise.reject(Object.assign(new Error(op === 'codexHistoryMergedPage' ? 'Storage not responding (operation timed out).' : 'no worker'), op === 'codexHistoryMergedPage' ? { status: 503, safeFsTimeout: true, deadline: true } : { status: 503, code: 'no-worker' })); } };
+  C._setTranscriptPoolForTest(mixed);
+  const Rmd = await road('⑥ the codex history after its merged read ran out its deadline', async () => { const m = new CS.CodexSessionMessages({ backend: 'codex', backendSessionId: tid3, cwd, buffer: '' }, tid3, {}); await m.rawAsync(); return m.notLoaded || null; });
+  ok(mixed.calls.includes('codexHistoryMergedPage') && Rmd.out === 'transcript_reader_restarting' && opens(Rmd).length === 0 && /storage hung/.test(C.slicedRoadFor(codexFp3).why), `${Rmd.name}: every file it named is the storage's — the per-file «no worker» after it never opens one on the main process (${opens(Rmd).length} opens; «${C.slicedRoadFor(codexFp3).why}»)`, { out: Rmd.out, calls: mixed.calls.slice(0, 4) });
+}
+console.log('⑦ the record\'s bounds');
+{
+  const stub = (code) => ({ call() { return Promise.reject(Object.assign(new Error('a stand-in refusal'), { status: 503, code })); } });
+  const ask = async (fp) => { try { await C.jsonlGapInfoAsync(fp); } catch { } };
+  C._setSlicedForTest({ afterMs: 60, standGapMs: 40 });
+  C._setTranscriptPoolForTest(stub('no-worker'));
+  const fpS = path.join(HOME, 'stand.jsonl');
+  await ask(fpS); await sleep(90); await ask(fpS);
+  ok(!C.slicedRoadFor(fpS).ok && /refused for 0 s/.test(C.slicedRoadFor(fpS).why), `⑦ a refusal STANDS only while asked again within the stated gap: refused, 90 ms of silence, refused again ⇒ it starts over («${C.slicedRoadFor(fpS).why}»)`);
+  C._setSlicedForTest({ afterMs: 0 });
+  const fpH = path.join(HOME, 'hung-first.jsonl');
+  C._setTranscriptPoolForTest(stub('path-hung')); await ask(fpH);
+  C._setTranscriptPoolForTest(stub('no-worker'));
+  for (let i = 0; i < 700; i++) await ask(path.join(HOME, `many-${i}.jsonl`));
+  ok(/storage hung/.test(C.slicedRoadFor(fpH).why) && C.slicedState().files <= 512 + 1, `⑦ the storage's record outlives the bound (700 records after it: ${C.slicedState().files} kept, it among them — «${C.slicedRoadFor(fpH).why}»)`, C.slicedState());
+}
+console.log('⑧ output identity on every small shape');
+{
+  C._setSlicedForTest({ afterMs: 0 });
+  C._setTranscriptPoolForTest({ call() { return Promise.reject(Object.assign(new Error('a stand-in refusal'), { status: 503, code: 'no-worker' })); } });
+  const dir = path.join(HOME, 'shapes');
+  fs.mkdirSync(dir, { recursive: true });
+  const r = (k) => `{"type":"user","uuid":"s${k}","message":{"role":"user","content":"x${k} é"}}`;
+  const SHAPES = {
+    'a few lines': [r(1), r(2), r(3)].join('\n') + '\n',
+    'no newline at all': r(1),
+    'a trailing partial line': [r(1), r(2)].join('\n') + '\n' + r(3).slice(0, 20),
+    'a trailing whole line without its newline': [r(1), r(2), r(3)].join('\n'),
+    'CRLF': [r(1), r(2)].join('\r\n') + '\r\n',
+    'a BOM': '\uFEFF' + [r(1), r(2)].join('\n') + '\n',
+    'invalid lines': [r(1), '{broken', '', '   ', r(2), 'null', '[1,2]'].join('\n') + '\n',
+    'a side-chain record': [r(1), '{"type":"assistant","isSidechain":true,"uuid":"sc"}', '{"type":"user","parent_tool_use_id":"t1","uuid":"pt"}', r(2)].join('\n') + '\n',
+    'an empty file': '',
+  };
+  let i = 0;
+  for (const [name, text] of Object.entries(SHAPES)) {
+    const fp = path.join(dir, `shape-${i++}.jsonl`);
+    fs.writeFileSync(fp, text);
+    try { await C.jsonlGapInfoAsync(fp); } catch { }   // its refusal stands (the stated time 0)
+    const want = C.readJsonlTail(fp, null, { dropSubagent: true, warnLarge: false }).entry, got = (await C.readJsonlTailSliced(fp, { dropSubagent: true })).entry;
+    const fields = ['mtimeMs', 'size', 'ino', 'dev', 'spanStart', 'spanEnd', 'partial', 'headProbe', 'tailProbe', 'incr'];
+    const wantC = C.parseCodexSessionJsonl('shape', { fp }), gotC = await C.readCodexRolloutSliced(fp);
+    ok(fields.every((k) => want[k] === got[k]) && JSON.stringify(want.starts) === JSON.stringify(got.starts) && same(want.messages, got.messages) && same(wantC, gotC),
+      `⑧ ${name}: the sliced entry is readJsonlTail's (${want.messages.length} records) and the sliced records are parseCodexSessionJsonl's (${wantC.length})`, { diff: fields.filter((k) => want[k] !== got[k]), n: [want.messages.length, got.messages.length, wantC.length, gotC.length] });
+  }
+}
+console.log('⑨ the read\'s own deadline (a FIFO whose open never answers)');
 {
   const sid = sids[3], fifo = claudeFp(sid);
   fs.rmSync(fifo, { force: true });
@@ -184,14 +264,15 @@ console.log('⑥ the read\'s own deadline (a FIFO whose open never answers)');
   if (made) {
     C._setSlicedForTest({ afterMs: 0, deadlineMs: 300 });
     C._setTranscriptPoolForTest({ call() { return Promise.reject(Object.assign(new Error('a stand-in refusal'), { status: 503, code: 'no-worker' })); } });
-    const Rd = await road('⑥ the warm of a file that never answers', () => SS.warmSessionJsonlAsync(sid, cwd));
+    try { await C.jsonlGapInfoAsync(claudeFp(sids[2])); } catch { }   // another file whose refusal stands (⑦'s records pushed the old one out)
+    const Rd = await road('⑨ the warm of a file that never answers', () => SS.warmSessionJsonlAsync(sid, cwd));
     const st = C.slicedState(), other = C.slicedRoadFor(claudeFp(sids[2]));
     ok(Rd.out === false && Rd.longest < LAW_MS && st.parked === 1 && !C.slicedRoadFor(fifo).ok && /storage hung/.test(C.slicedRoadFor(fifo).why) && !other.ok && /parked/.test(other.why),
       `${Rd.name}: its read ran out its deadline — «not loaded», the file is the STORAGE's for good, the parked read holds the one place (another file: «${other.why}»)`, { out: Rd.out, st, why: C.slicedRoadFor(fifo).why });
     const w = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);   // the file answers at last: the parked open completes
     fs.closeSync(w);
     for (let i = 0; i < 100 && C.slicedState().parked; i++) await sleep(20);
-    ok(C.slicedState().parked === 0 && !C.slicedRoadFor(fifo).ok, `⑥ the parked read answered at last ⇒ its place is free (parked ${C.slicedState().parked}); the file stays the storage's`, C.slicedState());
+    ok(C.slicedState().parked === 0 && !C.slicedRoadFor(fifo).ok, `⑨ the parked read answered at last ⇒ its place is free (parked ${C.slicedState().parked}); the file stays the storage's`, C.slicedState());
   }
   C._setTranscriptPoolForTest(pool);
   C._setSlicedForTest({});
