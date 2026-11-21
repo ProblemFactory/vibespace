@@ -23,6 +23,7 @@ import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, relayBroadcastJs, CHROME_
 import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -275,7 +276,7 @@ try {
     const on = (d) => { let m = null; try { m = JSON.parse(String(d)); } catch { } if (m && m.type === 'created' && m.reqId === 'cn-' + tag) { hubWs.off('message', on); res(m.sessionId); } };
     hubWs.on('message', on); hubWs.send(J({ type: 'create', backend: 'claude', mode: 'chat', cwd: WORK, reqId: 'cn-' + tag })); setTimeout(() => { hubWs.off('message', on); res(null); }, 15000); });
   const sayTo = (sid, text) => hubWs.send(J({ type: 'chat-input', sessionId: sid, text }));
-  const byText = async (re, n, ms = 20000) => { const t0 = Date.now(); let o = []; while (Date.now() - t0 < ms) { o = (await api()).open.filter((i) => re.test(i.text)); if (o.length >= n) break; await sleep(200); } return o.sort((a, b) => a.createdAt - b.createdAt); };
+  const byText = async (re, n, ms = 20000) => { const t0 = Date.now(); let o = []; while (Date.now() - t0 < ms) { o = (await api()).open.filter((i) => re.test(i.text)); if (o.length >= n) break; await sleep(200); } return (o.length >= n ? o : markTimedOut(o, ms, `byText (${n} questions open)`)).sort((a, b) => a.createdAt - b.createdAt); };   // a wait that runs out says so (r1372; test-ci-gate §2p)
   const openOnly = (P, sid) => P.evalJs(`(() => { app.phoneHome?.hide?.(); for (const w of [...app.wm.windows.values()]) if (w.type === 'chat' && app.sessions.get(w.id)?.sessionId !== ${J(sid)}) app.wm.closeWindow(w.id); if (!${CHAT(sid)}) app.attachSession(${J(sid)}, 'round five', ${J(WORK)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
   const toConv = async (P, sid, ids, w, h, touch, max = !touch) => {
     await P.device(w, h, touch ? undefined : { mouse: true }); await P.load(); await openOnly(P, sid);
