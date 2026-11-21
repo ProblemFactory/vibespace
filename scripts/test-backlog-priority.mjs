@@ -55,7 +55,7 @@ const loadPatched = (rel, cuts) => {
   const src = fs.readFileSync(path.join(REPO, rel), 'utf8');
   let out = src;
   for (const [a, b] of cuts) { if (!out.includes(a)) throw new Error(`patch anchor missing in ${rel}: ${a.slice(0, 60)}`); out = out.split(a).join(b); }
-  out = out.replace(/require\('\.\/([^']+)'\)/g, (_, m) => `require(${JSON.stringify(path.join(REPO, path.dirname(rel), m))})`);
+  out = out.replace(/require\('(\.\.?\/[^']+)'\)/g, (_, m) => `require(${JSON.stringify(path.join(REPO, path.dirname(rel), m))})`);   // './x' and '../x' (B-0248 step 3: a copy of a src/server module)
   // bare package names resolve from the real tree's node_modules (builtins resolve to themselves)
   out = out.replace(/require\('([a-z@][^'.][^']*)'\)/g, (_, m) => `require(${JSON.stringify(require.resolve(m, { paths: [path.join(REPO, path.dirname(rel))] }))})`);
   const f = path.join(tmp, `patched-${patchN++}-${path.basename(rel)}`);
@@ -474,16 +474,15 @@ console.log('(7) Backlog tab');
   const rows = sel.sortBacklog(stored.map((b, i) => ({ ...b, _i: i })));
   check('tab order: high, then normal/low newest-first by priority, resolved last', rows.map((r) => r.text).join('|') === 'mid high|old normal|new low|done one', rows.map((r) => r.text).join('|'));
   check('every sorted row still names ITS store index (_i) — a write patches the right item', rows.every((r) => stored[r._i].id === r.id));
-  // the Priority submenu's write: patchItem(it._i, b => ({ ...b, priority })) over the WHOLE backlog, one update
+  // the Priority submenu's write: patchItem(it._i, b => ({ ...b, priority })) — ONE ROW by its id since B-0248 step 3 (the fields fn changed)
   const target = rows.find((r) => r.text === 'old normal');
-  const next = stored.map((b, j) => (j === target._i ? { ...b, priority: 'high' } : b));
-  const after = tasks.update(g7.id, { backlog: next }).backlog;
+  const after = tasks.update(g7.id, { backlogRow: { id: target.id, set: { priority: 'high' } } }).backlog;
   const moved = after.find((b) => b.id === target.id);
   check('the menu write stores the new priority on THAT item (by id), nothing else changes', moved.priority === 'high'
     && JSON.stringify(after.filter((b) => b.id !== target.id)) === JSON.stringify(stored.filter((b) => b.id !== target.id)), JSON.stringify(after));
   check('…and keeps its identity, claim and attribution', moved.text === 'old normal' && moved.addedBy === 'claude:aaa' && moved.claimedBy.join() === 'claude:aaa' && after.length === stored.length);
   check('after the write the tab re-sorts it among the highs (newest high first)', sel.sortBacklog(after).map((b) => b.text).slice(0, 2).join('|') === 'mid high|old normal');
-  const back = tasks.update(g7.id, { backlog: after.map((b) => (b.id === target.id ? { ...b, priority: 'normal' } : b)) }).backlog;
+  const back = tasks.update(g7.id, { backlogRow: { id: target.id, set: { priority: 'normal' } } }).backlog;
   check('choosing Normal writes normal (no chip)', back.find((b) => b.id === target.id).priority === 'normal');
 }
 {
@@ -491,11 +490,11 @@ console.log('(7) Backlog tab');
   const TL = strip(fs.readFileSync(path.join(REPO, 'src/lib/task-log.js'), 'utf8'));
   const CSS = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
   const pins = {
-    'task-log.js imports sortBacklog/normalizePriority/PRIORITIES from the pure module': (src) => /^import \{ PRIORITIES, normalizePriority, priorityMarker, sortBacklog \} from '\.\.\/backlog-select\.js';$/m.test(src),
+    'task-log.js imports sortBacklog/normalizePriority/PRIORITIES from the pure module': (src) => /^import \{ BACKLOG_ROW_FIELDS, PRIORITIES, normalizePriority, priorityMarker, sortBacklog \} from '\.\.\/backlog-select\.js';$/m.test(src),
     'the Backlog tab lists sortBacklog(items), filtered after': (src) => /const visible = sortBacklog\(items\)\.filter\(\(it\) =>/.test(src),
     'a chip per non-normal row: class bl-prio bl-prio-<p>, normal ⇒ no chip': (src) => /if \(n === 'normal'\) return null;/.test(src) && /c\.className = 'bl-prio bl-prio-' \+ n;/.test(src) && /const chip = prioChip\(it\.priority\);\n\s*if \(chip\) top\.appendChild\(chip\);/.test(src),
     'chip words: t(High) / t(Low) with t(High priority) / t(Low priority) titles': (src) => /high: t\('High'\), normal: t\('Normal'\), low: t\('Low'\)/.test(src) && /t\('High priority'\) : t\('Low priority'\)/.test(src),
-    'setPriority = ONE whole-backlog write through patchItem (no local mutation)': (src) => /patchItem\(it\._i, \(b\) => \(\{ \.\.\.b, priority: p \}\)\);/.test(src) && !/it\.priority\s*=[^=]/.test(src) && /const next = task\.backlog\.map\(\(b, j\) => \(j === idx \? fn\(\{ \.\.\.b \}\) : b\)\);\n\s*sidebar\._taskUpdate\(taskId, \{ backlog: next\.filter\(Boolean\) \}\);/.test(src),
+    'setPriority = ONE whole-backlog write through patchItem (no local mutation)': (src) => /patchItem\(it\._i, \(b\) => \(\{ \.\.\.b, priority: p \}\)\);/.test(src) && !/it\.priority\s*=[^=]/.test(src) && /for \(const k of BACKLOG_ROW_FIELDS\) if \(now\[k\] !== ref\[k\]\) set\[k\] = now\[k\] === undefined \? null : now\[k\];/.test(src) && /return tookRow\(await sidebar\._taskUpdate\(taskId, \{ backlogRow: row \}, \{ onRefused: rowGone\(was\) \}\)\);/.test(src),   // B-0248 step 3: the write is ONE ROW now (the fields fn changed, by the row's id)
     "the row's context menu carries a Priority submenu over PRIORITIES": (src) => /line\.addEventListener\('contextmenu'/.test(src) && /\{ label: t\('Priority'\), children: PRIORITIES\.map\(\(p\) => \(\{[^\n]*action: \(\) => setPriority\(it, p\) \}\)\) \}/.test(src),
     'Copy as Markdown exports the view order with the markers': (src) => /md = sortBacklog\(task\.backlog \|\| \[\]\)\n\s*\.filter\(/.test(src) && /\$\{priorityMarker\(it\.priority\) \? priorityMarker\(it\.priority\) \+ ' ' : ''\}\$\{it\.text\}/.test(src),
     'the ✎ editor has a Priority select and Save writes it': (src) => /prioLbl\.textContent = t\('Priority'\);/.test(src) && /b\.priority = ps\.value;/.test(src) && /form\.append\(ti, prioWrap, ta, btns\);/.test(src),
@@ -526,6 +525,141 @@ console.log('(7) Backlog tab');
   const ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const keys = ['Priority', 'High priority', 'Low priority', 'High', 'Normal', 'Low'];
   check('zh + ja carry every Backlog-priority key', keys.every((k) => zh.includes(`  "${k}": `) && ja.includes(`  "${k}": `)), keys.filter((k) => !zh.includes(`  "${k}": `) || !ja.includes(`  "${k}": `)).join(','));
+}
+
+console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
+// THE LOST CLAIM: the page sent its copy of the WHOLE list and the store took it — an agent's claim, row or close that landed after
+// that copy reached the page was written out of the store (the agent told «done»). Now a page writes ONE ROW by its id, applied to the
+// LIVE list (src/task-groups.js backlogWithRow), through the REAL route (src/server/task-groups-wiring.js mountRoutes on a fake app);
+// a whole list from a page older than the hub is refused by name — its add (the only id-less row a page sends) is taken as that row.
+{
+  const TGW = require('../src/server/task-groups-wiring.js');
+  const rts8 = {};
+  const app8 = { get: (p, h) => { rts8['GET ' + p] = h; }, post: (p, h) => { rts8['POST ' + p] = h; }, patch: (p, h) => { rts8['PATCH ' + p] = h; }, delete: (p, h) => { rts8['DELETE ' + p] = h; }, put() {}, use() {} };
+  TGW.mountRoutes({ app: app8, tasks, taskFanout: { mark: () => ({}) }, activeSessions: new Map(), sameToken: () => false, serverSetting: () => undefined, sessionStatusKey: () => '', spendGuard: null });
+  const patch8 = (id, body) => new Promise((resolve) => { let status = 200; try { rts8['PATCH /api/tasks/:id']({ params: { id }, body, headers: {} }, { status(x) { status = x; return this; }, json(o) { resolve({ status, body: o }); } }); } catch (e) { resolve({ status: 500, body: { error: e.message } }); } });
+  const scene = (title) => {
+    const g8 = tasks.create({ title, objective: 'obj', folders: [cwd], contextDir: path.join(tmp, 'ctx8-' + title) });
+    const seeded = tasks.update(g8.id, { backlog: [
+      { text: 'row one', status: 'open', addedAt: 10, addedBy: 'claude:pg', claimedBy: ['claude:pg'] },
+      { text: 'row two', status: 'open', addedAt: 20, addedBy: 'user', claimedBy: ['claude:bbb'] },
+    ] }).backlog;
+    const pageCopy = JSON.parse(JSON.stringify(seeded));   // what the page holds: the list as the last broadcast carried it
+    const [R1, R2] = seeded.map((b) => b.id);
+    // an AGENT acts after that copy reached the page — the agent route's own shape: its write built from the LIVE list in one handler
+    const agentAct = (fn) => tasks.update(g8.id, { backlog: fn(tasks.get(g8.id).backlog.map((b) => ({ ...b, claimedBy: [...(b.claimedBy || [])] }))) });
+    agentAct((l) => l.map((b) => ({ ...b, claimedBy: [...b.claimedBy, 'claude:agentA'] })));   // claims both rows
+    agentAct((l) => [...l, { text: 'agent parked', status: 'open', addedBy: 'claude:agentA', addedAt: 30, claimedBy: ['claude:agentA'] }]);
+    return { id: g8.id, pageCopy, R1, R2, live: () => tasks.get(g8.id).backlog };
+  };
+  const A = scene('rows');
+  const p1 = await patch8(A.id, { backlogRow: { id: A.R1, set: { priority: 'high' } } });
+  const p2 = await patch8(A.id, { backlogRow: { id: A.R2, unclaim: ['claude:bbb'] } });
+  const l1 = A.live(), r1 = l1.find((b) => b.id === A.R1), r2 = l1.find((b) => b.id === A.R2);
+  check('a row write\'s answer says the hub TOOK it as one row (backlogRows: a page newer than its hub tells an old hub\'s plain 200 apart)', p1.body.backlogRows === 1 && p2.body.backlogRows === 1, JSON.stringify(p1.body).slice(0, 200));
+  check('THE LOST CLAIM, cured: a page\'s ONE-ROW writes (R1\'s priority, R2\'s one unclaim) keep the agent\'s claims and its parked row that landed after the page\'s copy', p1.status === 200 && p2.status === 200 && r1.priority === 'high' && r1.claimedBy.includes('claude:agentA') && r2.claimedBy.join() === 'claude:agentA' && l1.some((b) => b.text === 'agent parked') && l1.length === 3, JSON.stringify({ p1: p1.status, p2: p2.status, l1 }));
+  // CONTROL (a copy of the ROUTE without its refusal — the release's road): the page's copy with the one field changed erases them
+  const B = scene('release');
+  const TGWx = loadPatched('src/server/task-groups-wiring.js', [["    if (req.body && req.body.backlog !== undefined) { const one = require('../task-groups.js').oldPageAdd(req.body);", "    if (false) { const one = require('../task-groups.js').oldPageAdd(req.body);"]]);
+  const rtsX = {}, appX = { get: (p, h) => { rtsX['GET ' + p] = h; }, post: (p, h) => { rtsX['POST ' + p] = h; }, patch: (p, h) => { rtsX['PATCH ' + p] = h; }, delete: (p, h) => { rtsX['DELETE ' + p] = h; }, put() {}, use() {} };
+  TGWx.mountRoutes({ app: appX, tasks, taskFanout: { mark: () => ({}) }, activeSessions: new Map(), sameToken: () => false, serverSetting: () => undefined, sessionStatusKey: () => '', spendGuard: null });
+  const lrA = await new Promise((resolve) => { let status = 200; rtsX['PATCH /api/tasks/:id']({ params: { id: B.id }, body: { backlog: B.pageCopy.map((b) => (b.id === B.R1 ? { ...b, priority: 'high' } : b)) }, headers: {} }, { status(x) { status = x; return this; }, json(o) { resolve({ status, body: o }); } }); });
+  const lr = B.live();
+  check('CONTROL (a copy of the route without its refusal — the release\'s road): the same press\'s whole list ERASES the agent\'s claims and its parked row (red)', lrA.status === 200 && !lr.some((b) => b.text === 'agent parked') && !lr.find((b) => b.id === B.R1).claimedBy.includes('claude:agentA'), JSON.stringify({ status: lrA.status, lr }));
+  // a page OLDER than the hub: that same whole-list body over the route ⇒ refused by name, nothing written
+  const before = JSON.stringify(A.live());
+  const w = await patch8(A.id, { backlog: A.pageCopy.map((b) => (b.id === A.R1 ? { ...b, priority: 'low' } : b)) });
+  check('a whole list from a page older than the hub is REFUSED (409 backlog_whole): its words name the one act that ends it (reload) and keep what was typed (copy it first); nothing written', w.status === 409 && w.body.code === 'backlog_whole' && /reload the page/.test(w.body.error) && /copy anything you typed/.test(w.body.error) && JSON.stringify(A.live()) === before, JSON.stringify(w));
+  // …but that old page's ADD (its copy + the one row it just cleared from its box) keeps the typed words, as that one row
+  const a = await patch8(A.id, { backlog: [...A.pageCopy, { text: 'typed on an old page', status: 'open', addedBy: 'user', addedAt: 40 }] });
+  const l2 = A.live(), typed = l2.find((b) => b.text === 'typed on an old page');
+  check('…an old page\'s ADD (its copy + one row without an id) is taken as THAT row: the typed words kept (a fresh id, no claim), the agent\'s claims and row untouched', a.status === 200 && !!typed && /^B-[0-9a-f]{4,8}$/.test(typed.id) && typed.claimedBy.length === 0 && l2.length === 4 && l2.find((b) => b.id === A.R1).claimedBy.includes('claude:agentA') && l2.some((b) => b.text === 'agent parked'), JSON.stringify({ a: a.status, l2 }));
+  // a row gone meanwhile (another window deleted it): refused by name, nothing written
+  const del = await patch8(A.id, { backlogRow: { id: A.R2, remove: true } });
+  const afterDel = JSON.stringify(A.live());
+  const gone = await patch8(A.id, { backlogRow: { id: A.R2, set: { priority: 'low' } } });
+  check('a row deleted meanwhile (another window) is refused BY NAME (409 backlog_row_gone, the row\'s id) — nothing written; the page says it by the row\'s text (pinned below)', del.status === 200 && !A.live().some((b) => b.id === A.R2) && gone.status === 409 && gone.body.code === 'backlog_row_gone' && gone.body.error.includes(A.R2) && JSON.stringify(A.live()) === afterDel, JSON.stringify(gone));
+  // a claim is never SET through a row; a row keeps its line; a page's add brings no id and no claim
+  const m1 = await patch8(A.id, { backlogRow: { id: A.R1, set: { claimedBy: [] } } });
+  const m2 = await patch8(A.id, { backlogRow: { id: A.R1, set: { text: '' } } });
+  let m3 = null; try { tasks.update(A.id, { backlogRow: { id: A.R1, set: { priority: 'low' } }, backlog: [] }); } catch (e) { m3 = e.code; }
+  check('a claim is never SET through a row (claimedBy refused, 400 backlog_row_bad), a row keeps its line, a write is one row OR the whole list — nothing written by any', m1.status === 400 && m1.body.code === 'backlog_row_bad' && m2.status === 400 && m2.body.code === 'backlog_row_bad' && m3 === 'backlog_row_bad' && JSON.stringify(A.live()) === afterDel, JSON.stringify({ m1, m2, m3 }));
+  // a close / reopen carries the status the press SAW: an agent's close meanwhile is refused, never written over (its «resolved by» kept)
+  tasks.update(A.id, { backlog: A.live().map((b) => (b.id === A.R1 ? { ...b, status: 'done', resolvedBy: 'claude:agentA', resolvedAt: 60 } : b)) });   // the agent closed R1
+  const mv = await patch8(A.id, { backlogRow: { id: A.R1, expect: { status: 'open' }, set: { status: 'done', resolvedBy: 'user', resolvedAt: 70 } } });
+  const r1c = A.live().find((b) => b.id === A.R1);
+  check('a close of a row an agent closed meanwhile is REFUSED by name (409 backlog_row_moved) — the agent\'s «resolved by» is kept', mv.status === 409 && mv.body.code === 'backlog_row_moved' && r1c.resolvedBy === 'claude:agentA' && r1c.resolvedAt === 60, JSON.stringify({ mv, r1c }));
+  const ok7 = await patch8(A.id, { backlogRow: { id: A.R1, expect: { status: 'done' }, set: { status: 'open', resolvedBy: null, resolvedAt: null } } });
+  const r1o = A.live().find((b) => b.id === A.R1);
+  check('…and a reopen of the status it saw is taken (resolvedBy / resolvedAt leave the row)', ok7.status === 200 && r1o.status === 'open' && r1o.resolvedBy === undefined && r1o.resolvedAt === undefined, JSON.stringify(r1o));
+  // a field is typed: a non-string line never deletes a row in silence; an add needs its line
+  const m4 = await patch8(A.id, { backlogRow: { id: A.R1, set: { text: false } } });
+  const m5 = await patch8(A.id, { backlogAdd: {} });
+  check('a row\'s fields are TYPED (set.text false, an add with no line: 400 backlog_row_bad) — never a row deleted or a no-op answered 200', m4.status === 400 && m4.body.code === 'backlog_row_bad' && m5.status === 400 && m5.body.code === 'backlog_row_bad' && A.live().some((b) => b.id === A.R1), JSON.stringify({ m4, m5 }));
+  // an add whose answer was lost, sent again with the same stamp (the page keeps it): taken ONCE
+  const tw = { text: 'sent twice', status: 'open', addedBy: 'user', addedAt: 80 };
+  const t1 = await patch8(A.id, { backlogAdd: tw }), t2 = await patch8(A.id, { backlogAdd: { ...tw } });
+  check('an add sent again with the same stamp (its first answer lost) is taken ONCE — no doubled row', t1.status === 200 && t2.status === 200 && A.live().filter((b) => b.text === 'sent twice').length === 1, JSON.stringify(A.live().filter((b) => b.text === 'sent twice')));
+  const ad = await patch8(A.id, { backlogAdd: { id: A.R1, text: 'second add', claimedBy: ['claude:x'], addedBy: 'user', addedAt: 50 } });
+  const sa = A.live().find((b) => b.text === 'second add');
+  check('a page\'s add (backlogAdd) brings no id and no claim: the store mints the id, nobody holds it', ad.status === 200 && !!sa && sa.id !== A.R1 && sa.claimedBy.length === 0 && A.live().filter((b) => b.id === A.R1).length === 1, JSON.stringify(sa));
+  // THE CENSUS (r1443 law (i)): every caller IN THE TREE of the page route that sends a whole list — the page (src/lib), the suites
+  // (scripts/*.mjs), the CLIs (data/bin): none. The automation verbs and the config import call the store, never this route. This
+  // suite's own legs send whole lists on purpose (the release's control, the old page) and are left out of it by name.
+  const WHOLE = /\bbacklog\s*:/;
+  const enclosingCall = (src, at) => { let d = 0, i = at; for (; i >= 0; i--) { const c = src[i]; if (c === ')') d++; else if (c === '(') { if (d === 0) break; d--; } } if (i < 0) return ''; let e = 0, j = i; for (; j < src.length; j++) { const c = src[j]; if (c === '(') e++; else if (c === ')' && --e === 0) break; } return src.slice(i, j + 1); };   // the call whose parentheses hold `at`
+  const callsOf = (src, head) => { const out = []; let i = src.indexOf(head); while (i >= 0) { if (i > 0 && /[\w$]/.test(src[i - 1])) { i = src.indexOf(head, i + 1); continue; } let d = 0, j = i + head.length - 1; for (; j < src.length; j++) { const c = src[j]; if (c === '(') d++; else if (c === ')' && --d === 0) break; } out.push(src.slice(i, j + 1)); i = src.indexOf(head, j); } return out; };   // a whole name only (`patch(` is never `dispatch(`)
+  const KEY = /[{,]\s*backlog\s*(?::|,|\})/;   // a `backlog` key, or its shorthand `{ backlog }`
+  const wholeSenders = (files) => {
+    const hits = [];
+    for (const [rel, text] of files) {
+      // the page: every call of _taskUpdate, and of a local wrapper that forwards to it (task-detail.js `patch = (p) => sidebar._taskUpdate(taskId, p)`)
+      const heads = ['_taskUpdate(', ...[...text.matchAll(/const (\w+) = \(\w+\) => sidebar\._taskUpdate\(/g)].map((m) => m[1] + '(')];
+      for (const h of heads) for (const call of callsOf(text, h)) if (WHOLE.test(call) || KEY.test(call)) hits.push(`${rel}: ${call.slice(0, 80)}`);
+      // a suite or CLI: every call that carries 'PATCH' to /api/tasks/ (the whole call, its body on any line), and every call of a wrapper
+      // defined over one (test-dialog-yield-chrome's `patchT(body)`); a store fixture's `backlog: []` is no PATCH and is not read
+      if (!rel.startsWith('src/lib/') && text.includes('/api/tasks/')) {
+        for (let at = text.search(/'PATCH'|"PATCH"/); at >= 0; at = (() => { const n = text.slice(at + 1).search(/'PATCH'|"PATCH"/); return n < 0 ? -1 : at + 1 + n; })()) {
+          const call = enclosingCall(text, at);
+          if (call.includes('/api/tasks/') && (WHOLE.test(call) || KEY.test(call))) hits.push(`${rel}: ${call.slice(0, 80)}`);
+        }
+        for (const m of text.matchAll(/const (\w+) = (?:async )?\([^)]*\) => [^\n]*/g)) if (m[0].includes('/api/tasks/') && /'PATCH'|"PATCH"/.test(m[0])) for (const call of callsOf(text, m[1] + '(')) if (WHOLE.test(call) || KEY.test(call)) hits.push(`${rel}: ${call.slice(0, 80)}`);
+      }
+    }
+    return hits;
+  };
+  const read = (dir, keep) => fs.readdirSync(path.join(REPO, dir)).filter(keep).map((f) => [`${dir}/${f}`, fs.readFileSync(path.join(REPO, dir, f), 'utf8')]);
+  const SELF = 'scripts/' + path.basename(fileURLToPath(import.meta.url));
+  const tree = [...read('src/lib', (f) => f.endsWith('.js')), ...read('scripts', (f) => f.endsWith('.mjs')).filter(([rel]) => rel !== SELF), ...read('data/bin', (f) => fs.statSync(path.join(REPO, 'data/bin', f)).isFile())];
+  const hits = wholeSenders(tree);
+  check(`THE CENSUS: no caller in the tree sends the page route a whole backlog (${tree.length} files: src/lib, scripts, data/bin)`, hits.length === 0 && tree.length > 100, hits.join(' | '));
+  const planted = wholeSenders([['src/lib/zz.js', "sidebar._taskUpdate(taskId, {\n  backlog: next.filter(Boolean) });"], ['src/lib/zw.js', "const patch = (p) => sidebar._taskUpdate(taskId, p);\npatch({ backlog });"], ['scripts/zz.mjs', "const patchT = (body) => fetch(`/api/tasks/${tid}`, { method: 'PATCH', body: J(body) });\nawait patchT({\n  backlog: [] });"]]);
+  check('CONTROL: the census catches a planted page call (over two lines), a wrapper\'s shorthand, and a suite PATCH through a wrapper with its body on another line', planted.length === 3, planted.join(' | '));
+  const plantedOk = wholeSenders([['scripts/zy.mjs', "const fixture = { 'T-1': { id: 'T-1', backlog: [], sessions: [] } };\nawait api('PATCH', `/api/tasks/${id}`, { color: '#61afef' });\nawait api('PATCH', `/api/tasks/${id}`, {\n  backlogAdd: { text: 'one row' } });"]]);
+  check('CONTROL: a store fixture\'s backlog key and a one-row PATCH (its body on the next line) are no whole-list sender', plantedOk.length === 0, plantedOk.join(' | '));
+  // the page's words (comments stripped): a gone row SAID by its text; the add box cleared only once the hub took the row
+  const TL8 = strip(fs.readFileSync(path.join(REPO, 'src/lib/task-log.js'), 'utf8'));
+  const pins8 = {
+    'a gone or moved row is SAID by its text, the call answered (no generic toast), at both row writes': (src) => /if \(!d \|\| \(d\.code !== 'backlog_row_gone' && d\.code !== 'backlog_row_moved'\)\) return false;/.test(src) && /t\('"\{text\}" is no longer in this group\\'s backlog — it was removed meanwhile; nothing was written', \{ text: clip80\(was\.text\) \}\)/.test(src) && (src.match(/\{ onRefused: rowGone\(was\) \}/g) || []).length === 2,
+    'the add box keeps what was typed until the hub took the row (the CURRENT boxes cleared)': (src) => /try \{ took = tookRow\(await sidebar\._taskUpdate\(taskId, \{ backlogAdd: item \}\)\); \} finally \{ state\.blAdding = false; \}\s*if \(!took\) return;/.test(src) && /if \(cur && cur\.value === typed\) cur\.value = '';/.test(src),
+    'an add sent again after a lost answer keeps its stamp': (src) => /const again = state\.blAddTry && state\.blAddTry\.typed === typed && state\.blAddTry\.detail === typedDetail;/.test(src) && /addedAt: state\.blAddTry\.addedAt \}/.test(src),
+    'what was typed survives a re-render: captured before every rebuild, put back after, a removed box is no press': (src) => /const render = \(\) => \{\n\s*captureBacklogDraft\(\);/.test(src) && /captureBacklogDraft\(\);\n\s*state\.rerendering = true; queueMicrotask\(\(\) => \{ state\.rerendering = false; \}\);\n\s*body\.innerHTML = '';\n\s*renderBacklog\(body\);/.test(src) && /if \(rowEl\) editForm\(it, rowEl, ed\);/.test(src) && /add\.addEventListener\('blur', \(e\) => \{ if \(!state\.rerendering &&/.test(src),
+    'the editor diffs against its OWN opening values; Save closes it only once the hub took it': (src) => /const opened = draft && draft\.opened \? draft\.opened : \{ text: ti\.value, detail: ta\.value, priority: ps\.value \};/.test(src) && /if \(took !== false\) \{ state\.blEdit = null; render\(\); \}/.test(src),
+    'a close / reopen carries the status the press saw; a hub that did not take a row is said': (src) => /if \(set\.status !== undefined\) row\.expect = \{ status: was\.status \|\| 'open' \};/.test(src) && /if \(data\.backlogRows\) return true;/.test(src),
+  };
+  for (const [name, fn] of Object.entries(pins8)) check(`pin: ${name}`, fn(TL8));
+  const cuts8 = [
+    ['a gone or moved row is SAID by its text, the call answered (no generic toast), at both row writes', ["{ onRefused: rowGone(was) }).then(tookRow);", '{}).then(tookRow);']],
+    ['the add box keeps what was typed until the hub took the row (the CURRENT boxes cleared)', ['if (!took) return;', '']],
+    ['an add sent again after a lost answer keeps its stamp', ['addedAt: state.blAddTry.addedAt }', 'addedAt: Date.now() }']],   // the cut writes the release's stamp back on purpose — stale-pins: kept
+    ['what was typed survives a re-render: captured before every rebuild, put back after, a removed box is no press', ['if (rowEl) editForm(it, rowEl, ed);', 'if (rowEl) {}']],
+    ['the editor diffs against its OWN opening values; Save closes it only once the hub took it', ['if (took !== false) { state.blEdit = null; render(); }', 'state.blEdit = null; render();']],
+    ['a close / reopen carries the status the press saw; a hub that did not take a row is said', ["if (set.status !== undefined) row.expect = { status: was.status || 'open' };", '']],
+  ];
+  for (const [name, [x, y]] of cuts8) { const bad = TL8.replace(x, y); check(`negative control: cutting "${x.slice(0, 40)}" fails the pin "${name.slice(0, 40)}…"`, bad !== TL8 && !pins8[name](bad)); }
+  const zh8 = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja8 = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const K8s = ['"{text}" is no longer in this group\'s backlog — it was removed meanwhile; nothing was written', '"{text}" was closed or reopened meanwhile by someone else — nothing was written; the list shows it now', 'This page is newer than VibeSpace — reload it once VibeSpace has restarted (nothing changed)', '"{text}" was removed from this group\'s backlog meanwhile — what you typed is in the add box', '"{text}" was removed from this group\'s backlog meanwhile', '"{text}" changed meanwhile and this view hides it now — your edit is kept until it shows again'].map((k) => '  ' + JSON.stringify(k) + ': ');
+  check('zh + ja carry the Backlog tab\'s six new sentences', K8s.every((k) => zh8.includes(k) && ja8.includes(k)), K8s.filter((k) => !zh8.includes(k) || !ja8.includes(k)).join(' | '));
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

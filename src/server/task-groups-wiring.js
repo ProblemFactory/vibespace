@@ -79,8 +79,15 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
     catch (e) { res.status(e.code === 'parents_owner_only' ? 403 : 400).json({ error: e.message, ...(require('../task-groups.js').PARENT_REFUSALS.includes(e.code) ? { code: e.code } : {}) }); }
   });
   app.patch('/api/tasks/:id', (req, res) => {
-    try { onDisk(res, { success: true, task: tasks.update(req.params.id, req.body || {}, { bearer: !!require('../write-origin.js').pressBearer(req.headers) }) }); }
-    catch (e) { res.status(e.message === 'task not found' ? 404 : e.code === 'except_unnamed' || e.code === 'parents_stale' ? 409 : e.code === 'parents_owner_only' ? 403 : 400).json({ error: e.message, ...(e.code === 'except_unnamed' || require('../task-groups.js').PARENT_REFUSALS.includes(e.code) ? { code: e.code } : {}), ...(e.code === 'parents_stale' && Array.isArray(e.parents) ? { parents: e.parents } : {}) }); }   // lane held-except-doors: a 除了 left out unnamed · the chain's cure (E): + the parent refusals' code
+    // B-0248 step 3 (r1436, the lost claim): a page's backlog change is ONE ROW (backlogRow / backlogAdd, src/task-groups.js backlogWithRow) —
+    // a whole list from a page's copy would write an agent's claim, row or close that landed after it OUT of the store: refused by name
+    // …but a page from before the update keeps what the person TYPED: its add (its copy + the one id-less row) is taken as that row
+    if (req.body && req.body.backlog !== undefined) { const one = require('../task-groups.js').oldPageAdd(req.body); if (!one) return res.status(409).json({ error: 'this page is older than the hub — copy anything you typed, then reload the page (nothing was written: a backlog change is now sent one row at a time)', code: 'backlog_whole' }); req.body = { backlogAdd: one }; }
+    // a row write's answer says the hub TOOK it as one row (`backlogRows`): a page newer than its hub (an older hub ignores the row keys
+    // and answers 200) tells the person so and keeps what was typed
+    const rowWrite = !!(req.body && (req.body.backlogRow !== undefined || req.body.backlogAdd !== undefined));
+    try { onDisk(res, { success: true, task: tasks.update(req.params.id, req.body || {}, { bearer: !!require('../write-origin.js').pressBearer(req.headers) }), ...(rowWrite ? { backlogRows: 1 } : {}) }); }
+    catch (e) { res.status(e.message === 'task not found' ? 404 : e.code === 'except_unnamed' || e.code === 'parents_stale' || e.code === 'backlog_row_gone' || e.code === 'backlog_row_moved' ? 409 : e.code === 'parents_owner_only' ? 403 : 400).json({ error: e.message, ...(e.code === 'except_unnamed' || require('../task-groups.js').PARENT_REFUSALS.includes(e.code) || require('../task-groups.js').BACKLOG_REFUSALS.includes(e.code) ? { code: e.code } : {}), ...(e.code === 'parents_stale' && Array.isArray(e.parents) ? { parents: e.parents } : {}) }); }   // lane held-except-doors: a 除了 left out unnamed · the chain's cure (E): + the parent refusals' code
   });
   app.delete('/api/tasks/:id', (req, res) => {
     try { tasks.remove(req.params.id); onDisk(res, { success: true }, { code: 'finishes-on-landing' }); }   // the moved2 cure 2: its Activity log and grant follow by themselves at the landing

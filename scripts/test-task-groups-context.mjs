@@ -572,33 +572,100 @@ console.log('— the bundle and the export —');
   const RideRm = mutantCopies('task-groups-ride', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, BASE_RM, TOUCH_RM + "    delete this._state.tasks[id];\n    require('./store-writer.js').ride(this._writer(), this._file, () => { if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true }); });   // MUTANT: the chain's reversed order\n", 'the removal cleans first'), 'rm-rides');
   const rmX = rmScene(RideRm.TaskGroupManager, 'red');
   ok('CONTROL (a copy whose cleanup rides the record\'s landing — the reversed order): the record lands, the step never runs, and a group made again under the same id INHERITS the old Activity log (red)', rmX.sameId && rmX.inherited, rmX);
-  // THE CENSUS CURE (the hunt's finding 3): the archived conversations' unbind is landed SYNCHRONOUSLY (under the writer's bound) and
-  // its FAILURE BRANCH STOPS THE BASELINE — a pass whose unbind the disk does not hold keeps its keys out of it; the next pass lands
-  // it. A conversation bound AGAIN meanwhile stays (the person's later act wins). RED (anchored): a copy without the failure branch
-  const archScene = (Mgr, tag, { rebind = false } = {}) => {
+  // THE CENSUS CURE (the hunt's finding 3), OFF THE LOOP SINCE B-0248 step 3 (r1436): the archived conversations' unbind is HANDED to
+  // the store writer — the pass waits on no synchronous flush — and THE BASELINE LAW STANDS: from the hand-off until the store says it
+  // holds the unbind (persisted() true), its keys stay OUT of the baseline; a failed landing keeps them out and the next pass hands it
+  // again; a landed one puts them back. A conversation bound AGAIN meanwhile stays (the person's later act wins).
+  // REDS (anchored): the release's synchronous landing (one flushSync in the pass) · a copy that never keeps the keys owed (in the
+  // baseline at the hand-off, before the store holds the unbind)
+  const tickA = () => new Promise((r) => setImmediate(r));
+  const archScene = async (Mgr, tag, { rebind = false } = {}) => {
     const d = path.join(root, 'u5-arch-' + tag); fs.mkdirSync(d, { recursive: true });
     const W = heldWriter(), st = { archivedSessions: [] };
+    const land = W.flushSync; let flushes = 0; W.flushSync = (...a) => { flushes++; return land(...a); };   // a flushSync on the main thread, counted
     const m = new Mgr({ dataDir: d, homeDir: home, writer: W, readUserState: () => st, isLiveKey: () => false });
-    const t = m.create({ title: 'u5 archive' }); m.bind(t.id, 'claude:arch1'); W.flushSync();
-    const disk = () => JSON.parse(fs.readFileSync(path.join(d, 'task-groups.json'), 'utf8')).tasks[t.id].sessions;
-    W.st.armed = true;
+    const t = m.create({ title: 'u5 archive' }); m.bind(t.id, 'claude:arch1'); land();
+    const file = path.join(d, 'task-groups.json');
+    const disk = () => JSON.parse(fs.readFileSync(file, 'utf8')).tasks[t.id].sessions;
+    const inBase = () => !!(m._archSeen && m._archSeen.has('claude:arch1'));
+    W.st.armed = true;   // the storage does not answer: a landing asked now answers false
+    flushes = 0;
     const first = m.noteArchived(['claude:arch1']);
-    const held = { first, member: disk().includes('claude:arch1'), inBaseline: !!(m._archSeen && m._archSeen.has('claude:arch1')) };
-    W.st.armed = false;
+    const pass = { first, flushes, member: disk().includes('claude:arch1'), owedAtPass: W.pending(file), inBaseline: inBase() };
+    await tickA();   // the landing answered (false: held)
+    const failed = { inBaselineAfterFail: inBase(), keptOwed: m._archOwed.has('claude:arch1') };
+    W.st.armed = false; land();   // the writer's thread writes the owed store (the stand-in writes only when asked)
     if (rebind) m.bind(t.id, 'claude:arch1');
-    m.noteArchived(['claude:arch1']);   // the next user-state write
-    // (the stand-in never lands by itself: only what the pass itself landed is on disk here)
-    return { ...held, memberAfter: disk().includes('claude:arch1'), memberInMemory: m.get(t.id).sessions.includes('claude:arch1'), owedAfter: W.pending(path.join(d, 'task-groups.json')), inBaselineAfter: !!(m._archSeen && m._archSeen.has('claude:arch1')) };
+    m.noteArchived(['claude:arch1']);   // the next user-state write: hands the landing again
+    await tickA();
+    return { ...pass, ...failed, flushesAll: flushes, memberAfter: disk().includes('claude:arch1'), memberInMemory: m.get(t.id).sessions.includes('claude:arch1'), owedAfter: W.pending(file), inBaselineAfter: inBase() };
   };
-  const ar = archScene(TaskGroupManager, 'real');
-  ok('FINDING 3: an archived conversation\'s unbind HELD past the bound keeps its key OUT of the baseline (never «done» for an unbind the disk does not hold)', Array.isArray(ar.first) && ar.first.length === 1 && ar.member && !ar.inBaseline, ar);
-  ok('…and the next pass lands it: the disk no longer holds the member, nothing owed, the key in the baseline', !ar.memberAfter && !ar.owedAfter && ar.inBaselineAfter, ar);
-  const arB = archScene(TaskGroupManager, 'rebind', { rebind: true });
+  const ar = await archScene(TaskGroupManager, 'real');
+  ok('B-0248 step 3: an archived conversation\'s unbind is HANDED to the store writer — the pass waits on no synchronous flush (0), the write owed, the member still on disk at the pass', Array.isArray(ar.first) && ar.first.length === 1 && ar.flushes === 0 && ar.owedAtPass && ar.member, ar);
+  ok('FINDING 3, kept: its key stays OUT of the baseline from the hand-off, and a landing that answers false keeps it owed (never «done» for an unbind the disk does not hold)', !ar.inBaseline && !ar.inBaselineAfterFail && ar.keptOwed, ar);
+  ok('…and once the store holds it, the next pass\'s landing puts the key back into the baseline: nothing owed, the member gone from the disk, still no synchronous flush', !ar.memberAfter && !ar.owedAfter && ar.inBaselineAfter && ar.flushesAll === 0, ar);
+  const arB = await archScene(TaskGroupManager, 'rebind', { rebind: true });
   ok('…a conversation bound AGAIN meanwhile stays a member (the owed unbind is not retried over the person\'s later act)', arB.memberInMemory && arB.inBaselineAfter, arB);
-  const FAIL_BR = "      else for (const k of due) this._archOwed.add(k);\n";
-  const NoBranch = mutantCopies('task-groups-arch', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, FAIL_BR, '', 'the unbind\'s failure branch stops the baseline'), 'arch-nobranch');
-  const arX = archScene(NoBranch.TaskGroupManager, 'red');
-  ok('CONTROL (a copy without the failure branch): the held unbind\'s key enters the baseline at once and the next pass lands nothing — the member is still on disk (red)', arX.inBaseline && arX.memberAfter, arX);
+  const ARCH_HAND = "    if (changed.length) { const gen = ++this._archGen; for (const k of due) this._archOwed.set(k, gen); }   // each key owed BY ITS UNBIND (a later one is a later generation)\n    if (this._archOwed.size) this._landArchived();\n";
+  const SyncLand = mutantCopies('task-groups-arch', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..'));
+  const ArchSync = SyncLand.load('src/task-groups.js', anchored(tgSrc, ARCH_HAND, "    if (changed.length || this._archOwed.size) {\n      const L = this._landNow('the archived conversations\\' unbind');\n      if (L.ok) this._archOwed.clear();\n      else for (const k of due) this._archOwed.set(k, 0);\n    }\n", 'the archive unbind handed to the writer'), 'arch-sync');   // the RELEASE's landing, written back on purpose (the red) — stale-pins: kept
+  const arS = await archScene(ArchSync.TaskGroupManager, 'red-sync');
+  ok('CONTROL (the release\'s landing, a copy): the pass flushes the whole store synchronously on the main thread (red)', arS.flushes >= 1, arS);
+  const ArchNoOwe = SyncLand.load('src/task-groups.js', anchored(tgSrc, ARCH_HAND, "    if (this._archOwed.size) this._landArchived();\n", 'the owed keys at the hand-off'), 'arch-noowe');
+  const arX = await archScene(ArchNoOwe.TaskGroupManager, 'red-noowe');
+  ok('CONTROL (a copy that never keeps the keys owed): the key enters the baseline at the hand-off, before the store holds the unbind (red)', arX.inBaseline, arX);
+  // THE READ'S CURES (B-0248 step 3): a landing settles the unbinds made BEFORE it (a key owed by its generation), passes meanwhile ask
+  // again AFTER it (one landing in flight), and a person's re-add through a whole members write wins as bind() does. A GATED writer: each
+  // durable() waits until the scene answers it (the writer's thread is slow); flushSync lands the bytes.
+  const gateWriter = () => {
+    const owed = new Map(), asks = [];
+    return { owed, asks, dirty: (f, o) => owed.set(f, o), pending: (f) => owed.has(f), durable: () => new Promise((r) => asks.push(r)),
+      flushSync: (files) => { for (const f of files || [...owed.keys()]) { const o = owed.get(f); if (o) { fs.writeFileSync(f, o.produce()); owed.delete(f); } } return { written: [], left: [], ms: 0 }; },
+      answer: (v) => { const r = asks.shift(); if (r) r(v); return !!r; } };
+  };
+  const gateScene = async (Mgr, tag) => {
+    const d = path.join(root, 'u5-gate-' + tag); fs.mkdirSync(d, { recursive: true });
+    const W = gateWriter(), st = { archivedSessions: [] };
+    const m = new Mgr({ dataDir: d, homeDir: home, writer: W, readUserState: () => st, isLiveKey: () => false });
+    const t = m.create({ title: 'u5 gate' }); m.bind(t.id, 'claude:g1'); W.flushSync();
+    const owedK = () => (m._archOwed && typeof m._archOwed.has === 'function' ? m._archOwed.has('claude:g1') : false);
+    const inBase = () => !!(m._archSeen && m._archSeen.has('claude:g1'));
+    const out = {};
+    // (a) two passes while ONE landing is in flight: one durable() asked (the second pass owes nothing new: the first landing covers it)
+    m.noteArchived(['claude:g1']); m.noteArchived(['claude:g1']);
+    out.asksDuring = W.asks.length;
+    W.flushSync(); W.answer(true); await tickA(); await tickA();
+    out.asksAfter = W.asks.length;
+    out.afterA = { owed: owedK(), inBase: inBase() };
+    // (b) a NEWER unbind of the same key while an older landing is in flight: the older landing never settles the newer one
+    m.bind(t.id, 'claude:g1'); m.noteArchived([]);            // bound again, then unarchived
+    m.noteArchived(['claude:g1']);                            // archived again: unbind 1 (its landing L1 asked)
+    m.bind(t.id, 'claude:g1'); m.noteArchived([]);            // bound again (L1 still in flight), unarchived
+    m.noteArchived(['claude:g1']);                            // archived again: unbind 2 (owed by a newer generation; asks after L1)
+    W.answer(true); await tickA(); await tickA();             // L1 answers true — for the older unbind
+    out.afterOld = { owed: owedK(), inBase: inBase() };
+    W.flushSync(); while (W.answer(true)) { await tickA(); await tickA(); }
+    out.afterNew = { owed: owedK(), inBase: inBase() };
+    // (c) a person writes the members WHOLE (PATCH sessions) while an unbind is owed: the re-add wins, the next pass leaves it a member
+    m.bind(t.id, 'claude:g1'); m.noteArchived([]); m.noteArchived(['claude:g1']);   // archived: unbind owed, its landing asked
+    m.update(t.id, { sessions: [...m.get(t.id).sessions, 'claude:g1'] });            // the person adds it back (the members list whole)
+    m.noteArchived(['claude:g1']);                                                   // the next user-state write, the old unbind's landing still in flight
+    W.flushSync(); while (W.answer(true)) { await tickA(); await tickA(); }
+    out.afterReadd = { member: m.get(t.id).sessions.includes('claude:g1'), owed: owedK() };
+    return out;
+  };
+  const gs = await gateScene(TaskGroupManager, 'real');
+  ok('two passes while one landing is in flight ask ONE durable() (the second owes nothing new); once it answers nothing is owed, nothing more is asked, and the key is in the baseline', gs.asksDuring === 1 && gs.asksAfter === 0 && !gs.afterA.owed && gs.afterA.inBase, gs);
+  ok('a NEWER unbind of the same key is not settled by the older landing (still owed, out of the baseline); its own landing settles it', gs.afterOld.owed && !gs.afterOld.inBase && !gs.afterNew.owed && gs.afterNew.inBase, gs);
+  ok('a person\'s re-add through a whole members write (PATCH sessions) wins over an owed unbind: still a member after the next pass', gs.afterReadd.member && !gs.afterReadd.owed, gs);
+  const SETTLE = "if (this._archOwed.get(k) === gen) { this._archOwed.delete(k); if (";
+  const ArchByName = SyncLand.load('src/task-groups.js', anchored(tgSrc, SETTLE, "if (this._archOwed.delete(k)) { if (", 'the landing settles by generation'), 'arch-byname');
+  const gsN = await gateScene(ArchByName.TaskGroupManager, 'red-byname');
+  ok('CONTROL (a copy that settles by NAME): the older landing takes the newer unbind\'s key out of the owed set while it is not on disk (red)', !gsN.afterOld.owed, gsN);
+  const REBOUND = "{ t.sessions = sanitizeStrArray(patch.sessions, 2000); this._archRebound(t.sessions); }";
+  const ArchNoRebound = SyncLand.load('src/task-groups.js', anchored(tgSrc, REBOUND, "t.sessions = sanitizeStrArray(patch.sessions, 2000);", 'a whole members write re-adds'), 'arch-norebound');
+  const gsR = await gateScene(ArchNoRebound.TaskGroupManager, 'red-norebound');
+  ok('CONTROL (a copy whose whole members write does not count as a re-add): the next pass unbinds the person\'s re-add again (red)', !gsR.afterReadd.member, gsR);
 }
 
 { const rEnd = require('../src/store-writer.js').storeWriter().flushSync(); if (rEnd.left && rEnd.left.length) ok('the store writer\'s owed writes land before the scratch root goes', false, rEnd.left); }   // lane lg-store-writes U5 (loud: the U4/U5 cure, should 6)

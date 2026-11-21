@@ -5,7 +5,7 @@ import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a li
 import { registerOpenAction } from './window-types.js';
 // the ONE backlog order every reader shares (PURE CJS, esbuild interop like
 // backend-caps): open by priority high → normal → low, newest first within one
-import { PRIORITIES, normalizePriority, priorityMarker, sortBacklog } from '../backlog-select.js';
+import { BACKLOG_ROW_FIELDS, PRIORITIES, normalizePriority, priorityMarker, sortBacklog } from '../backlog-select.js';
 // "Clear content…" (2026-09-28): the ONE confirm dialog + request path, and the cleared sentence's words
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js';
 import { touches, windowVerdict } from '../task-delta.js'; // PURE (lane task-group-fanout): does a tasks-updated delta concern this group
@@ -114,7 +114,24 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
   const fmtDay = (ts) => dateOf(ts, { full: true });   // page-time prints in the page's zone (app.js hands it pageZone at boot)
   const matches = (text) => !state.search || String(text || '').toLowerCase().includes(state.search.toLowerCase());
 
+  // B-0248 step 3 (r1443 (ii)/(iii)): WHAT THE PERSON TYPED on the Backlog tab survives a re-render. Every tasks-updated of this group (an
+  // agent's note, a claim) rebuilds the tab whole: the add box, an open editor and the caret are read here into `state` and put back
+  // by renderBacklog; a box removed by the rebuild is no press (`state.rerendering`: its blur saves nothing)
+  const captureBacklogDraft = () => {
+    const b = root.querySelector('.task-log-body');
+    if (!b || !b.querySelector('.task-log-addwrap')) return;   // not the Backlog tab's body: what state holds stays
+    const add = b.querySelector('.task-log-add'), addD = b.querySelector('.task-log-addwrap .task-log-edit-detail');
+    state.blAdd = { text: add ? add.value : '', detail: addD ? addD.value : '', open: !!(addD && !addD.classList.contains('hidden')) };
+    const form = b.querySelector('.task-log-edit[data-bl-id]');
+    const ti = form && form.querySelector('input'), ta = form && form.querySelector('textarea'), ps = form && form.querySelector('select');
+    if (form && state.blEdit && state.blEdit.id === form.dataset.blId) state.blEdit = { ...state.blEdit, ti: ti.value, ta: ta.value, ps: ps.value };
+    const act = document.activeElement, hit = [['add', add], ['addDetail', addD], ['ti', ti], ['ta', ta]].find(([, el]) => el && el === act);
+    state.blFocus = hit ? { where: hit[0], sel: typeof act.selectionStart === 'number' ? [act.selectionStart, act.selectionEnd] : null } : null;
+  };
+  const clip80 = (v) => { const x = String(v || ''); return x.length > 80 ? x.slice(0, 79) + '…' : x; };
   const render = () => {
+    captureBacklogDraft();
+    state.rerendering = true; queueMicrotask(() => { state.rerendering = false; });   // the rebuild below removes the boxes: their blur is no press
     task = sidebar._taskById(taskId);
     if (!task) {
       const v = windowVerdict(task, { loaded: sidebar._tasksLoaded, unread: sidebar._tasksUnread });   // THE STORE HELD UNREAD: a held mirror keeps the window
@@ -226,6 +243,8 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
 
     const renderBody = () => {
       if (state.tab === 'activity') { paintActivity(body, selBar); return; } // KEYED: rows patched in place, never rebuilt
+      captureBacklogDraft();
+      state.rerendering = true; queueMicrotask(() => { state.rerendering = false; });
       body.innerHTML = '';
       renderBacklog(body);
     };
@@ -531,11 +550,40 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
       && (matches(it.text) || matches(it.detail)));
     if (!visible.length && !items.length) { body.innerHTML = `<div class="empty-hint">${escHtml(t('Nothing parked — backlog holds non-immediate items: deferred decisions, future work'))}</div>`; }
 
-    const patchItem = (idx, fn) => {
-      const next = task.backlog.map((b, j) => (j === idx ? fn({ ...b }) : b));
-      sidebar._taskUpdate(taskId, { backlog: next.filter(Boolean) });
+    // B-0248 step 3 (r1436, the lost claim): a press writes ONE ROW, by its id — the fields `fn` changed on a copy of the row
+    // (null = the row deleted); never this page's copy of the whole list, which would write out an agent's claim, row or close
+    // that landed after it (the store applies the row to its LIVE list: src/task-groups.js backlogWithRow)
+    // r1443 (iii): a row gone (or closed / reopened) meanwhile is SAID by its text, never a silent refresh; the list is read again
+    // after it (what was typed survives that re-render: captureBacklogDraft)
+    const rowGone = (was) => (d) => {
+      if (!d || (d.code !== 'backlog_row_gone' && d.code !== 'backlog_row_moved')) return false;
+      showToast(d.code === 'backlog_row_gone' ? t('"{text}" is no longer in this group\'s backlog — it was removed meanwhile; nothing was written', { text: clip80(was.text) })
+        : t('"{text}" was closed or reopened meanwhile by someone else — nothing was written; the list shows it now', { text: clip80(was.text) }), { type: 'error' });
+      if (!sidebar._tasksFetching) sidebar._fetchTasks();
+      return true;
     };
-    // Priority: ONE whole-backlog write through the same persistence path; the
+    // the hub TOOK it as one row (`backlogRows` in its answer); a hub older than this page ignores a row and answers 200: said, never «done»
+    const tookRow = (data) => { if (!data) return false; if (data.backlogRows) return true; showToast(t('This page is newer than VibeSpace — reload it once VibeSpace has restarted (nothing changed)'), { type: 'error' }); return false; };
+    // → true (taken) · false (refused / not taken: what was typed stays) · null (nothing to send). `base` = what the fields were when the
+    // press began (the editor's own opening values: a box's own normalization is never sent as an edit); a close / reopen carries the
+    // status the press SAW (an agent's close meanwhile is refused, never written over)
+    const patchItem = async (idx, fn, base = null) => {
+      const was = (task.backlog || [])[idx];
+      if (!was || !was.id) return false;
+      const now = fn({ ...was });
+      const ref = base || was;
+      const row = { id: was.id };
+      if (!now) row.remove = true;
+      else {
+        const set = {};
+        for (const k of BACKLOG_ROW_FIELDS) if (now[k] !== ref[k]) set[k] = now[k] === undefined ? null : now[k];
+        if (!Object.keys(set).length) return null;
+        row.set = set;
+        if (set.status !== undefined) row.expect = { status: was.status || 'open' };
+      }
+      return tookRow(await sidebar._taskUpdate(taskId, { backlogRow: row }, { onRefused: rowGone(was) }));
+    };
+    // Priority: ONE row write through the same persistence path; the
     // store's tasks-updated broadcast repaints (never a local mutation).
     const PRIO_LABEL = () => ({ high: t('High'), normal: t('Normal'), low: t('Low') });
     const setPriority = (it, p) => {
@@ -575,15 +623,19 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     };
 
     // Inline editor: text input + detail textarea in place of the row.
-    const editForm = (it, replaceEl) => {
+    // `draft` (B-0248 step 3): an editor put back after a re-render — its typed values and the values it OPENED with
+    const editForm = (it, replaceEl, draft = null) => {
       const form = document.createElement('div');
       form.className = 'task-log-edit';
+      form.dataset.blId = it.id || '';
       const ti = document.createElement('input');
       ti.className = 'task-detail-input'; ti.value = it.text;
+      if (draft) ti.value = draft.ti;
       const ta = document.createElement('textarea');
       ta.className = 'task-log-edit-detail'; ta.rows = 5;
       ta.placeholder = t('Detail — context, options discussed, why it was deferred (optional)');
       ta.value = it.detail || '';
+      if (draft) ta.value = draft.ta;
       const prioWrap = document.createElement('label');
       prioWrap.className = 'task-log-edit-prio';
       const prioLbl = document.createElement('span');
@@ -593,26 +645,31 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
       for (const p of PRIORITIES) {
         const o = document.createElement('option');
         o.value = p; o.textContent = PRIO_LABEL()[p];
-        if (normalizePriority(it.priority) === p) o.selected = true;
+        if ((draft ? draft.ps : normalizePriority(it.priority)) === p) o.selected = true;
         ps.appendChild(o);
       }
       prioWrap.append(prioLbl, ps);
+      const opened = draft && draft.opened ? draft.opened : { text: ti.value, detail: ta.value, priority: ps.value };   // read back: the boxes' own form of the row
+      state.blEdit = { id: it.id, text: it.text, opened, ti: ti.value, ta: ta.value, ps: ps.value };
       const btns = document.createElement('div');
       btns.className = 'task-log-edit-btns';
       const save = document.createElement('button');
       save.className = 'btn-create'; save.textContent = t('Save');
-      save.onclick = () => {
+      save.onclick = async () => {
         const text = ti.value.trim();
         if (!text) return;
-        patchItem(it._i, (b) => { b.text = text; b.priority = ps.value; if (ta.value.trim()) b.detail = ta.value.trim(); else delete b.detail; return b; });
+        const base = { ...it, text: opened.text.trim(), priority: opened.priority };
+        if (opened.detail.trim()) base.detail = opened.detail.trim(); else delete base.detail;
+        const took = await patchItem(it._i, (b) => { b.text = text; b.priority = ps.value; if (ta.value.trim()) b.detail = ta.value.trim(); else delete b.detail; return b; }, base);
+        if (took !== false) { state.blEdit = null; render(); }   // taken (or nothing changed): closed; refused: it stays with what was typed
       };
       const cancel = document.createElement('button');
       cancel.className = 'task-detail-btn'; cancel.textContent = t('Cancel');
-      cancel.onclick = () => render();
+      cancel.onclick = () => { state.blEdit = null; render(); };
       btns.append(save, cancel);
       form.append(ti, prioWrap, ta, btns);
       replaceEl.replaceWith(form);
-      ti.focus();
+      if (!draft) ti.focus();
     };
 
     const addItemRow = (it) => {
@@ -620,6 +677,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
       const meta = STATUS_META()[it.status] || STATUS_META().open;
       const row = document.createElement(isExp ? 'details' : 'div');
       row.className = 'task-log-row task-log-bl' + (it.status !== 'open' ? ' resolved' : '') + (isExp ? ' task-log-exp' : '');
+      row.dataset.blId = it.id || '';
       const line = document.createElement(isExp ? 'summary' : 'div');
       line.className = 'task-log-blline';
       // TWO-ROW layout: top = status+id+text(+†)+actions; bottom = attribution
@@ -736,21 +794,60 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     dToggle.textContent = t('Add detail…'); // lane ui-plain-words task-groups-8: what the press does, not the log's † mark
     dToggle.title = t('Attach full context to the new item');
     dToggle.onclick = () => addDetail.classList.toggle('hidden');
-    const commit = (how) => {
-      if (!add.value.trim()) return;
-      const item = { text: add.value.trim(), status: 'open', addedBy: 'user', addedAt: Date.now() };
-      if (addDetail.value.trim()) item.detail = addDetail.value.trim();
-      sidebar._taskUpdate(taskId, { backlog: [...(task.backlog || []), item] });
-      add.value = ''; addDetail.value = '';
+    // B-0248 step 3 (r1443 (ii)): the boxes are cleared once the hub TOOK the row — a refused add keeps what was typed. One add in flight
+    // (state: a re-render meanwhile builds new boxes); the same words sent again after a lost answer carry the SAME stamp — the store
+    // takes the row once (backlogWithRow)
+    const commit = async (how) => {
+      if (state.blAdding || !add.value.trim()) return;
+      const typed = add.value, typedDetail = addDetail.value;
+      const again = state.blAddTry && state.blAddTry.typed === typed && state.blAddTry.detail === typedDetail;
+      state.blAddTry = { typed, detail: typedDetail, addedAt: again ? state.blAddTry.addedAt : Date.now() };
+      const item = { text: typed.trim(), status: 'open', addedBy: 'user', addedAt: state.blAddTry.addedAt };
+      if (typedDetail.trim()) item.detail = typedDetail.trim();
+      state.blAdding = true;
+      let took = false;
+      try { took = tookRow(await sidebar._taskUpdate(taskId, { backlogAdd: item })); } finally { state.blAdding = false; }   // one row, appended to the LIVE list
+      if (!took) return;
+      state.blAddTry = null;
+      const cur = root.querySelector('.task-log-add'), curD = root.querySelector('.task-log-addwrap .task-log-edit-detail');   // the CURRENT boxes
+      if (cur && cur.value === typed) cur.value = '';
+      if (curD && curD.value === typedDetail) curD.value = '';
+      if (state.blAdd) state.blAdd = { text: state.blAdd.text === typed ? '' : state.blAdd.text, detail: state.blAdd.detail === typedDetail ? '' : state.blAdd.detail, open: false };
       if (how === 'blur') showToast(t('Saved when you left the box — no Enter needed'));
     };
     // blur commits (lane task-group-context): leaving the box saves it like Enter; the detail box keeps it open while typed into
     add.addEventListener('keydown', (e) => { if (enterSubmits(e)) { e.preventDefault(); commit('enter'); } });
-    add.addEventListener('blur', (e) => { if (add.value.trim() && e.relatedTarget !== addDetail && e.relatedTarget !== dToggle) afterPointerUp(() => commit('blur')); });
-    addDetail.addEventListener('blur', (e) => { if (add.value.trim() && e.relatedTarget !== add && e.relatedTarget !== dToggle) afterPointerUp(() => commit('blur')); });
+    add.addEventListener('blur', (e) => { if (!state.rerendering && add.value.trim() && e.relatedTarget !== addDetail && e.relatedTarget !== dToggle) afterPointerUp(() => commit('blur')); });
+    addDetail.addEventListener('blur', (e) => { if (!state.rerendering && add.value.trim() && e.relatedTarget !== add && e.relatedTarget !== dToggle) afterPointerUp(() => commit('blur')); });
     addLine.append(add, dToggle);
     addWrap.append(addLine, addDetail);
     body.appendChild(addWrap);
+    // B-0248 step 3: what was typed comes back (captureBacklogDraft)
+    if (state.blAdd) { if (state.blAdd.text || state.blAdd.detail) { add.value = state.blAdd.text; addDetail.value = state.blAdd.detail; } if (state.blAdd.open) addDetail.classList.remove('hidden'); }
+    const ed = state.blEdit;
+    if (ed) {
+      const it = items.find((x) => x.id === ed.id), rowEl = it ? [...body.querySelectorAll('.task-log-bl')].find((el) => el.dataset.blId === ed.id) : null;
+      if (rowEl) editForm(it, rowEl, ed);
+      else if (!it) {
+        // the row was REMOVED meanwhile: SAID by its text (r1443 (iii)); what was typed into its editor goes to the add box when that is empty
+        state.blEdit = null;
+        const typedT = String(ed.ti || '').trim(), typedD = String(ed.ta || '');
+        const typed = !!ed.opened && (typedT !== ed.opened.text.trim() || typedD.trim() !== ed.opened.detail.trim());
+        const into = typed && !add.value.trim() && !addDetail.value.trim();
+        if (into) { add.value = typedT; addDetail.value = typedD; if (typedD.trim()) addDetail.classList.remove('hidden'); state.blAdd = { text: typedT, detail: typedD, open: !!typedD.trim() }; }
+        showToast(into ? t('"{text}" was removed from this group\'s backlog meanwhile — what you typed is in the add box', { text: clip80(ed.text) }) : t('"{text}" was removed from this group\'s backlog meanwhile', { text: clip80(ed.text) }), { type: 'error' });
+      } else if (state.blHiddenSaid !== ed.id) {
+        // still there, but this view's filter hides it now (closed or reopened meanwhile): the edit is KEPT until it shows again
+        state.blHiddenSaid = ed.id;
+        showToast(t('"{text}" changed meanwhile and this view hides it now — your edit is kept until it shows again', { text: clip80(ed.text) }));
+      }
+    }
+    const f = state.blFocus; state.blFocus = null;
+    if (f) {
+      const form = body.querySelector('.task-log-edit');
+      const el = f.where === 'add' ? add : f.where === 'addDetail' ? addDetail : form ? form.querySelector(f.where === 'ti' ? 'input' : 'textarea') : null;
+      if (el) { el.focus(); if (f.sel && typeof el.setSelectionRange === 'function') { try { el.setSelectionRange(f.sel[0], f.sel[1]); } catch { } } }
+    }
     wireChips(body);
   };
 
@@ -769,8 +866,8 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
         e.stopPropagation(); e.preventDefault();
         const idx = Number(el.dataset.bidx);
         const key = el.dataset.unclaim;
-        const next = (task.backlog || []).map((b, j) => (j === idx ? { ...b, claimedBy: (b.claimedBy || []).filter((k) => k !== key) } : b));
-        sidebar._taskUpdate(taskId, { backlog: next });
+        const was = (task.backlog || [])[idx];
+        if (was && was.id) sidebar._taskUpdate(taskId, { backlogRow: { id: was.id, unclaim: [key] } }, { onRefused: rowGone(was) }).then(tookRow);   // B-0248 step 3: this one claim leaves the LIVE row
       };
     });
   };

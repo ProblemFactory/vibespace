@@ -107,7 +107,7 @@ function memberSig(tasks) {
 // Backlog PRIORITY + the ownership-aware selection every READ uses (TASK.md,
 // the per-turn reminders, the show/backlog listing) — the store keeps every
 // item; which ones a read shows is decided there (2026-09-22).
-const { PRIORITIES: BACKLOG_PRIORITIES, normalizePriority, markedText, escapeItemText, unescapeItemText, sortBacklog, selectReminders, nudgeThreshold, backlogNudge, nudgeTextAll } = require('./backlog-select');
+const { BACKLOG_ROW_FIELDS, PRIORITIES: BACKLOG_PRIORITIES, normalizePriority, markedText, escapeItemText, unescapeItemText, sortBacklog, selectReminders, nudgeThreshold, backlogNudge, nudgeTextAll } = require('./backlog-select');
 // "Clear content…" (2026-09-28): the ONE definition of what a clear replaces and
 // who may do it — this store only holds the door (clearProgress below).
 const { applyClear } = require('./record-clear');
@@ -195,6 +195,65 @@ function mintBacklogId(taken) {
   do { id = 'B-' + crypto.randomBytes(2).toString('hex'); } while (taken.has(id));
   taken.add(id);
   return id;
+}
+// B-0248 step 3 (r1436, THE LOST CLAIM): A PAGE'S BACKLOG CHANGE IS ONE ROW, BY ITS ID, applied to the LIVE list. The page used to
+// send its copy of the WHOLE list, and the store took it: an agent's claim, row or close that landed after that copy reached the
+// page was written out of the store (the agent told «done»). `backlogRow: {id, expect?: {status}, set?: {text, detail, priority,
+// status, resolvedBy, resolvedAt}, unclaim?: [session key], remove?: true}` · `backlogAdd: row`. Each field is typed (a string; the
+// time a number): a field set to null or '' leaves the row — never its line (a row keeps its text). `expect.status` = the status the
+// press saw: a row closed or reopened meanwhile is refused (backlog_row_moved), never written over (an agent's close keeps its own
+// «resolved by»). An ADD is taken once: the same row again (its addedBy + addedAt + text — the page keeps the stamp of a try whose
+// answer was lost) adds nothing. A row gone meanwhile is refused BY NAME (backlog_row_gone), a malformed one too (backlog_row_bad):
+// nothing written. → the next list; the store's own normalization (ids, caps, statuses) runs on it as on any backlog write
+const BACKLOG_REFUSALS = Object.freeze(['backlog_row_gone', 'backlog_row_moved', 'backlog_row_bad', 'backlog_whole']);
+const BACKLOG_ROW_TYPES = Object.freeze({ text: 'string', detail: 'string', priority: 'string', status: 'string', resolvedBy: 'string', resolvedAt: 'number' });
+function backlogWithRow(list, { backlogRow, backlogAdd } = {}) {
+  const bad = (why) => Object.assign(new Error(`${why} — nothing was written`), { code: 'backlog_row_bad' });
+  const next = (Array.isArray(list) ? list : []).map((b) => ({ ...b, claimedBy: [...(Array.isArray(b.claimedBy) ? b.claimedBy : [])] }));
+  if (backlogRow !== undefined) {
+    const r = backlogRow;
+    if (!r || typeof r !== 'object' || typeof r.id !== 'string' || !BACKLOG_ID_RE.test(r.id)) throw bad("backlogRow names its row by the row's id (B-…)");
+    const i = next.findIndex((b) => b.id === r.id);
+    if (i < 0) throw Object.assign(new Error(`backlog row ${r.id} is no longer in this group (removed meanwhile) — nothing was written`), { code: 'backlog_row_gone', id: r.id });
+    if (r.expect !== undefined) {
+      if (!r.expect || typeof r.expect !== 'object' || typeof r.expect.status !== 'string') throw bad('backlogRow.expect names the status the press saw');
+      const live = next[i].status || 'open';
+      if (live !== r.expect.status) throw Object.assign(new Error(`backlog row ${r.id} is ${live} now (changed meanwhile) — nothing was written`), { code: 'backlog_row_moved', id: r.id, status: live });
+    }
+    if (r.remove === true) next.splice(i, 1);
+    else {
+      const b = next[i];
+      if (r.set !== undefined) {
+        if (!r.set || typeof r.set !== 'object' || Array.isArray(r.set)) throw bad('backlogRow.set is one object of fields');
+        for (const k of Object.keys(r.set)) if (!BACKLOG_ROW_FIELDS.includes(k)) throw bad(`backlogRow.set takes ${BACKLOG_ROW_FIELDS.join(', ')} — not «${String(k).slice(0, 40)}»`);
+        for (const k of BACKLOG_ROW_FIELDS) {
+          if (!Object.prototype.hasOwnProperty.call(r.set, k)) continue;
+          const v = r.set[k];
+          if (v === null || v === '') { if (k === 'text') throw bad('a backlog row keeps its line'); delete b[k]; continue; }
+          if (typeof v !== BACKLOG_ROW_TYPES[k] || (k === 'text' && !v.trim())) throw bad(`backlogRow.set.${k} is a ${BACKLOG_ROW_TYPES[k]}${k === 'text' ? ' with words' : ''}`);
+          b[k] = v;
+        }
+      }
+      if (r.unclaim !== undefined) { const gone = new Set(sanitizeStrArray(r.unclaim, 20)); b.claimedBy = b.claimedBy.filter((k) => !gone.has(k)); }
+    }
+  }
+  if (backlogAdd !== undefined) {
+    if (!backlogAdd || typeof backlogAdd !== 'object' || Array.isArray(backlogAdd)) throw bad('backlogAdd is one row');
+    if (typeof backlogAdd.text !== 'string' || !backlogAdd.text.trim()) throw bad('backlogAdd.text is the row\'s line (words)');
+    const { id: _id, claimedBy: _claims, ...row } = backlogAdd;   // a new row's id is the store's; nobody's claim rides a page's add
+    const sameAdd = (b) => Number(row.addedAt) > 0 && Number(b.addedAt) === Number(row.addedAt) && String(b.addedBy || '') === String(row.addedBy || '') && String(b.text || '') === row.text.trim().slice(0, CAPS.backlogItem);
+    if (!next.some(sameAdd)) next.push(row);   // a try whose answer was lost, sent again: taken once
+  }
+  return next;
+}
+/** B-0248 step 3 (r1443 (ii)): a page from BEFORE the update still sends its whole copy. Its ADD (the copy + ONE row without an id —
+ *  every stored row carries its id, so the only id-less row a page sends is the one the person just typed, and that page cleared its
+ *  box at the press) → that row, taken as one row (the typed words kept, the stale copy of the rest never written); any other
+ *  whole list → null (refused by name: reload) */
+function oldPageAdd(body) {
+  if (!body || typeof body !== 'object' || Object.keys(body).length !== 1 || !Array.isArray(body.backlog)) return null;
+  const fresh = body.backlog.filter((it) => it && typeof it === 'object' && !(typeof it.id === 'string' && BACKLOG_ID_RE.test(it.id)));
+  return fresh.length === 1 ? fresh[0] : null;
 }
 // ACTIVITY-LOG ENTRY IDS (2026-09-28, "Clear content…"): an entry used to be
 // {at, note, detail?, session} — addressable only by its millisecond (two
@@ -342,8 +401,9 @@ class TaskGroupManager {
     // `isLiveKey(key)` (server.js: a running conversation) keeps an archived one in its groups until it ends
     this._isLiveKey = typeof isLiveKey === 'function' ? isLiveKey : () => false;
     this._archLive = new Set();
-    this._archOwed = new Set();   // the census cure (finding 3): archived keys whose unbind is not on disk yet — kept OUT of the baseline
+    this._archOwed = new Map();   // the census cure (finding 3): archived keys whose unbind is not on disk yet — kept OUT of the baseline (B-0248 step 3: key → the generation of its unbind)
     this._archSeen = null;
+    this._archList = null; this._archLanding = false; this._archAgain = false; this._archGen = 0;   // B-0248 step 3: the last archive list, the owed unbind's one landing in flight (_landArchived), the owed keys' generation
     if (typeof readUserState === 'function') { try { const st = readUserState(); this._archSeen = new Set((st && Array.isArray(st.archivedSessions) ? st.archivedSessions : []).map(String)); } catch (e) { this._archSeen = e && e.code === 'store_unread' ? null : new Set(); } }   // B-225b: a HELD list is no list — its first read after the lift is taken as seen, nothing unbound on a guess
     // THE STORE HELD UNREAD: `unreadNotice` = { say(words) → a handle | null (the For-you door; null/throw = not up yet — said at
     // the next try), lift(handle) } (task-groups-wiring.js); `unreadRetry` = { firstMs, maxMs } of the read again (a suite's)
@@ -2884,6 +2944,11 @@ class TaskGroupManager {
     // the cure's cure (2): a whole-list write that names the list it READ (`parentsBase`, the ids joined by commas) is refused when the
     // list moved meanwhile — a second window's stale copy would write a removed parent back (the (A) class through a narrow door)
     if (patch.parents !== undefined && patch.parentsBase !== undefined && String(patch.parentsBase) !== (Array.isArray(t.parents) ? t.parents : []).join(',')) throw Object.assign(new Error('the parent groups changed meanwhile (another window) — nothing was written; the tab shows them as they are now'), { code: 'parents_stale', parents: Array.isArray(t.parents) ? [...t.parents] : [] });   // cure 3 (a): the answer carries the list as it is
+    // B-0248 step 3 (r1436): ONE ROW of the backlog (a page's change) is applied to the LIVE list (backlogWithRow), before any field moves
+    if (patch.backlogRow !== undefined || patch.backlogAdd !== undefined) {
+      if (patch.backlog !== undefined) throw Object.assign(new Error('a backlog write is the whole list or one row (backlogRow / backlogAdd), never both — nothing was written'), { code: 'backlog_row_bad' });
+      patch = { ...patch, backlog: backlogWithRow(t.backlog, patch) };
+    }
     if (patch.title !== undefined) {
       const clean = String(patch.title || '').trim().slice(0, CAPS.title);
       if (!clean) throw new Error('title required');
@@ -2895,7 +2960,7 @@ class TaskGroupManager {
     }
     if (patch.archived !== undefined) t.archived = !!patch.archived;
     if (patch.objective !== undefined) t.objective = String(patch.objective || '').slice(0, CAPS.objective);
-    if (patch.sessions !== undefined) t.sessions = sanitizeStrArray(patch.sessions, 2000);
+    if (patch.sessions !== undefined) { t.sessions = sanitizeStrArray(patch.sessions, 2000); this._archRebound(t.sessions); }
     // lane task-group-context: the table is written whole (`ctx`); the old fields still edit it, as the rows they mean
     // (folders = exactly these 自动发现会话 folders, contextDir = this 记笔记 folder / null = none)
     const ctxBefore = JSON.stringify(this._ctxRows(t));
@@ -3022,7 +3087,7 @@ class TaskGroupManager {
     if (!key) throw new Error('sessionKey required');
     // the census cure (finding 3): a conversation bound AGAIN after its archive stays — an unbind still owed for it is not retried
     // (it re-enters the baseline: the person's later act wins)
-    if (this._archOwed && this._archOwed.delete(key) && this._archSeen) this._archSeen.add(key);
+    this._archRebound([key]);
     if (!t.sessions.includes(key)) {
       t.sessions.push(key);
       t.updatedAt = Date.now();
@@ -3066,7 +3131,8 @@ class TaskGroupManager {
     if (this._unread) return []; // THE STORE HELD UNREAD: nothing consumed — the archive list is judged after the hold lifts
     const now = new Set((Array.isArray(list) ? list : []).map(String));
     const was = this._archSeen;
-    this._archSeen = now;
+    this._archList = now;              // B-0248 step 3: the list itself (a landing that answers later puts its keys back into the baseline only while it holds them)
+    this._archSeen = new Set(now);
     if (!was) return [];
     for (const k of now) if (!was.has(k)) this._archLive.add(k);
     const due = [];
@@ -3077,18 +3143,34 @@ class TaskGroupManager {
     }
     if (!due.length && !this._archOwed.size) return [];
     const changed = due.length ? this.unbindKeys(due).changed : [];
-    // lane lg-store-writes U5 (the move's hunt, D): the user-state file holding the archive list — THIS pass's baseline — is already
-    // written (synchronously, before this hook); the unbind is landed SYNCHRONOUSLY, under the writer's own bound (law D: never an
-    // unbounded hold of the main thread). THE FAILURE BRANCH STOPS THE BASELINE (the census cure, 主开发 2026-11-19 08:56Z — the hunt's
-    // finding 3): an unbind not on disk at the bound (held, failed, or deferred by the exit) keeps its keys OUT of the baseline — the
-    // next pass sees them as new again and lands again, until the disk holds it; never «done» for an unbind the disk does not hold.
-    if (changed.length || this._archOwed.size) {
-      const L = this._landNow('the archived conversations\' unbind');
-      if (L.ok) this._archOwed.clear();
-      else for (const k of due) this._archOwed.add(k);
-    }
-    for (const k of this._archOwed) this._archSeen.delete(k);
+    // B-0248 step 3 (r1436): THE UNBIND OFF THE LOOP. It is handed to the store writer (unbindKeys' save: an act, the writer's next
+    // writes) — never a synchronous flush of the whole store on the main thread (it was one: lane lg-store-writes U5's law D). THE
+    // BASELINE LAW STANDS (the census cure, 主开发 2026-11-19 08:56Z — the hunt's finding 3): from the hand-off until the store says it
+    // holds the unbind (persisted() true), its keys stay OUT of the baseline — a pass meanwhile sees them as new and hands the landing
+    // again; a landing that fails keeps them out; a landed one puts them back into the CURRENT baseline (a conversation bound again
+    // after it stays). The crash window: the user-state file (this pass's list) is written before this hook, so a kill before the
+    // writer's next write leaves the conversation a member — the same window as the synchronous landing had, now the writer's own.
+    if (changed.length) { const gen = ++this._archGen; for (const k of due) this._archOwed.set(k, gen); }   // each key owed BY ITS UNBIND (a later one is a later generation)
+    if (this._archOwed.size) this._landArchived();
+    for (const k of this._archOwed.keys()) this._archSeen.delete(k);
     return changed;
+  }
+  /** a conversation bound AGAIN (bind, a whole members write): an unbind still owed for it is not retried — it re-enters the baseline
+   *  (the census cure, finding 3: the person's later act wins; B-0248 step 3: every membership-adding road, not only bind) */
+  _archRebound(keys) { for (const k of keys || []) if (this._archOwed && this._archOwed.delete(k) && this._archSeen) this._archSeen.add(k); }
+  /** B-0248 step 3: the owed archive unbind's landing, asked of the store writer (persisted(): bounded, the loop never waits) — ONE
+   *  at a time, a pass meanwhile asks again after it. Landed ⇒ its keys leave the owed set and enter the current baseline while the
+   *  archive list still holds them (bind() takes a key out of the owed set itself: the person's later act wins) */
+  _landArchived() {
+    if (this._archLanding) { this._archAgain = true; return; }
+    const keys = [...this._archOwed];   // [key, generation]: a landing settles the unbinds made before it, never a later one of the same key
+    this._archLanding = true; this._archAgain = false;
+    const settle = (saved) => {
+      this._archLanding = false;
+      if (saved === true) for (const [k, gen] of keys) if (this._archOwed.get(k) === gen) { this._archOwed.delete(k); if (this._archList && this._archList.has(k) && this._archSeen) this._archSeen.add(k); }
+      if (this._archAgain && this._archOwed.size) this._landArchived();
+    };
+    this.persisted().then(settle, () => settle(false));
   }
 
   // User-visible progress note (P1: from the detail UI; P3: vibespace-task CLI).
@@ -3558,6 +3640,7 @@ class TaskGroupManager {
     // the deferred-save census (its Task Groups pass): the config import writes other stores (credentials, hosts, the password) right after
     // this section — the groups LAND first (bounded), as the release's synchronous save did
     if (n) {
+      for (const id of late) if (this._state.tasks[id]) this._archRebound(this._state.tasks[id].sessions);   // B-0248 step 3: an imported member is a person's act — an owed archive unbind of it is not retried
       this._save(); const L = this._landNow('a config import'); this._notify();
       // the census cure ((b)): the groups land before the import writes the other stores — not on disk at the bound ⇒ THROWS by name
       // (the import stops there and says so; the groups stay in memory and the writer lands them)
@@ -3568,4 +3651,4 @@ class TaskGroupManager {
 }
 
 // B-31d7: the item's line + detail caps, for the route that REFUSES past them before a write (never a silent clip)
-module.exports = { TaskGroupManager, PARENT_REFUSALS, MEMBER_RESULTS_MAX, DECIDE_BOUND_MS, BACKLOG_PRIORITIES, BACKLOG_CAPS: Object.freeze({ text: CAPS.backlogItem, detail: CAPS.detail }), CHANNELS_SECTION_LINES };
+module.exports = { TaskGroupManager, PARENT_REFUSALS, BACKLOG_REFUSALS, backlogWithRow, oldPageAdd, MEMBER_RESULTS_MAX, DECIDE_BOUND_MS, BACKLOG_PRIORITIES, BACKLOG_CAPS: Object.freeze({ text: CAPS.backlogItem, detail: CAPS.detail }), CHANNELS_SECTION_LINES };

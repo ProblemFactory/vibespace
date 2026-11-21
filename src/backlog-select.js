@@ -207,4 +207,8 @@ function nudgeTextAll(entries) {
   return hardClip(render(false, 1));
 }
 
-module.exports = { PRIORITIES, normalizePriority, priorityRank, priorityMarker, escapeItemText, unescapeItemText, markedText, sortBacklog, selectReminders, NUDGE_DEFAULT, NUDGE_STALE_DAYS, NUDGE_MAX_BYTES, nudgeThreshold, ownedOpen, backlogNudge, nudgeText, nudgeTextAll, utf8Bytes };
+// B-0248 step 3 (r1436): the fields ONE backlog row write may set (a page's press: src/lib/task-log.js; the store applies it to its
+// LIVE row: src/task-groups.js backlogWithRow) — one list for both ends
+const BACKLOG_ROW_FIELDS = Object.freeze(['text', 'detail', 'priority', 'status', 'resolvedBy', 'resolvedAt']);
+
+module.exports = { BACKLOG_ROW_FIELDS, PRIORITIES, normalizePriority, priorityRank, priorityMarker, escapeItemText, unescapeItemText, markedText, sortBacklog, selectReminders, NUDGE_DEFAULT, NUDGE_STALE_DAYS, NUDGE_MAX_BYTES, nudgeThreshold, ownedOpen, backlogNudge, nudgeText, nudgeTextAll, utf8Bytes };

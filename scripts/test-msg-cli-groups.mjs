@@ -538,7 +538,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
     const P = 'aaaaaaaa-1111-4000-8000-000000000021', T = 'bbbbbbbb-2222-4000-8000-000000000022';
     const rosterOf = (LCmod, ss) => () => { const out = []; for (const [id, s] of ss) { const cid = LCmod.addressableId(s); if (!cid) continue; out.push({ cid, name: s.name || null, groups: ['tg1'], webuiId: id, reachability: null }); } return out; };   // server.js's liveSessions shape, through the SAME predicate
-    async function targetLeg(ARmod, LCmod, name, { parentLive }) {
+    async function targetLeg(ARmod, LCmod, name, { parentLive, held = false }) {
       const dir = path.join(ROOT, name); fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
       const st = createChannelStore({ dir: path.join(dir, 'channels') });
       const ss = new Map([
@@ -552,7 +552,8 @@ console.log('§2 the routes over the REAL engine + store + ladder');
         emitPeerCard: () => {}, authorizeSpend: (req) => { asked.push(req.cid); return { ok: true, identity: { key: 'slot-1' } }; }, noteSpend: () => {}, releaseSpend: () => {} });
       let tt = Date.UTC(2026, 8, 27, 10, 0, 0);
       const ge = GE.create({ store: st, deliver: dl, broadcast: () => {}, now: () => (tt += 1000), roster: rosterOf(LCmod, ss), groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
-      const tasks = { groupsForSession: ({ initialGroupId }) => (initialGroupId ? [{ id: initialGroupId }] : []), _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => ({ externalVisibility: 'none' }) };
+      const tasks = { groupsForSession: ({ initialGroupId }) => (initialGroupId ? [{ id: initialGroupId }] : []), _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => ({ externalVisibility: 'none' }),
+        ...(held ? { unreadRefusal: (act) => `Task Groups: ${act} was refused — task-groups.json in VibeSpace's data folder could not be read (EIO) (a stand-in)` } : {}) };   // B-0248 step 3 (d): the store HELD unread
       const rts = {}; const ap = { get: (p, h) => { rts['GET ' + p] = h; }, post: (p, h) => { rts['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
       ARmod.setupAgentRoutes({ app: ap, activeSessions: ss, tasks,
         sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' }, userTodos: {}, sessionStatusKey: (x, id) => (x.claudeSessionId ? 'claude:' + x.claudeSessionId : 'webui:' + id), serverSetting: () => undefined,
@@ -565,11 +566,22 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       const groups = Object.values(st.groups.live().groups);
       try { dl.flush(); } catch {}
       st.close();
-      return { forkListed, toFork: `${s1.status}:${s1.body.code || 'ok'}`, toParent: `${s2.status}:${s2.body.code || 'ok'}`, pairHoldsParent: groups.some((g) => g.pair && (g.members || []).some((m) => m.member === P)), askedOnParent: asked.filter((x) => x === P).length };
+      return { forkListed, toFork: `${s1.status}:${s1.body.code || 'ok'}`, toForkWords: String(s1.body.error || ''), toParent: `${s2.status}:${s2.body.code || 'ok'}`, pairHoldsParent: groups.some((g) => g.pair && (g.members || []).some((m) => m.member === P)), askedOnParent: asked.filter((x) => x === P).length };
     }
     const dead = await targetLeg(AR, LC, 'r5-target-dead', { parentLive: false });
     ok(!dead.forkListed && dead.toFork === '404:unreachable' && !dead.pairHoldsParent && dead.askedOnParent === 0,
       `the parent NOT live: a pending fork is not a peer, a wake to it by name is \`unreachable\`, no pair under the parent's id, the authorizer never asked for the parent (${JSON.stringify(dead)})`);
+    // B-0248 step 3 (d, r1443): THE SAME MISS while the Task Groups store is HELD unread — reach is judged on the groups, and those are
+    // UNKNOWN then, never «no groups»: the held line by name (503 TASK_GROUPS_UNREAD), reach still closed (no pair, nobody asked).
+    // RED (anchored): a copy without the held line answers «outside your reach» (404 unreachable), the release's words
+    const heldL = await targetLeg(AR, LC, 'r5-target-held', { parentLive: false, held: true });
+    ok(heldL.toFork === '503:TASK_GROUPS_UNREAD' && /Task Groups: this message \(who it can reach is judged by Task Group\) was refused — task-groups\.json/.test(heldL.toForkWords) && !heldL.pairHoldsParent && heldL.askedOnParent === 0,
+      `a reach miss while the Task Groups store is held says the held line by name (503 TASK_GROUPS_UNREAD), never «outside your reach»; reach stays closed (${JSON.stringify(heldL)})`);
+    const arSrcH = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+    const { anchored } = await import('./scratch.mjs');   // already loaded by mutant-copy above: no new effect
+    const ARheldOff = M5.load('src/agent-routes.js', anchored(arSrcH, "  if (code === 'unreachable' && heldReach(res)) return;\n", '', 'the held reach line'), 'held-off');
+    const heldX = await targetLeg(ARheldOff, LC, 'r5-target-held-red', { parentLive: false, held: true });
+    ok(heldX.toFork === '404:unreachable', `CONTROL (a copy without the held line): the held store's miss reads «outside your reach» (404 unreachable — red) (${heldX.toFork})`);
     const live = await targetLeg(AR, LC, 'r5-target-live', { parentLive: true });
     ok(!live.forkListed && live.toFork === '404:unreachable' && live.toParent === '200:ok' && live.askedOnParent === 1,
       `the parent live: the fork is not a peer and the PARENT is reachable by id (it was \`ambiguous\` beside its pending fork) — its own wake is its own (${JSON.stringify(live)})`);

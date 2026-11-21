@@ -1879,9 +1879,13 @@ const groupsEngine = () => { try { const g = getGroups(); return g && typeof g.p
 convOps.provide({ groupsEngine }); // an automation's groups.invite reaches the same engine (the route hands its own `ge`)
 /** A refusal from the groups engine as an HTTP answer (its codes are the
  *  closed set in src/channel-groups.js + the engine's `unreachable`). */
+// B-0248 step 3 (d, r1443): a REACH refusal while the Task Groups store is HELD unread is not «outside your reach» — reach is judged
+// on the groups, and the groups are UNKNOWN then, never «no groups»: the held line by name (503 TASK_GROUPS_UNREAD); reach stays closed
+const heldReach = (res) => { const w = typeof tasks.unreadRefusal === 'function' ? tasks.unreadRefusal('this message (who it can reach is judged by Task Group)') : null; if (!w) return false; res.status(503).json({ error: w, code: 'TASK_GROUPS_UNREAD' }); return true; };
 const groupAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
+  if (code === 'unreachable' && heldReach(res)) return;
   const status = code === 'not-found' || code === 'unreachable' ? 404 : code === 'not-allowed' || code === 'not-member' || code === 'job-token' ? 403 : code === 'archived' || code === 'ended' || code === 'pair-group' || code === 'confirm-wakes' || code === 'not-chat' ? 409 : 400;
   return res.status(status).json(msgRefusalAnswer(r, code));   // verify r2 (lane peer-census): the sentence and the candidates through the belt (the door)
 };
@@ -2011,7 +2015,7 @@ app.post('/api/agent/msg/send', async (req, res) => {
   // merely-invisible target gets ONE uniform error (no existence oracle)
   const matches = _msgEndpoints(id).filter((ep) => ep.cid === to || (ep.t.name && ep.t.name === to));
   const reachable = matches.filter((ep) => msgAcl.canMessage(msgAcl.levelFor(ep, myGroups, _groupExtVis)));
-  if (!reachable.length) return res.status(404).json({ error: 'no messageable session by that name/id (not found, not visible to you, or visible-only) — vibespace-msg list shows your reach' });
+  if (!reachable.length) { if (heldReach(res)) return; return res.status(404).json({ error: 'no messageable session by that name/id (not found, not visible to you, or visible-only) — vibespace-msg list shows your reach' }); }
   if (reachable.length > 1) return res.status(400).json({ error: `ambiguous name — ${reachable.length} sessions match; use the conversation id from vibespace-msg list` });
   const target = reachable[0];
   if (target.cid === myCid) return res.status(400).json({ error: 'that is this session' });

@@ -410,7 +410,9 @@ export function installSidebarTasks(SidebarClass) {
         // engineer reading the report — NOTHING. Always name the status, and
         // leave a telemetry breadcrumb so it is diagnosable after the fact.
         if (data && data.code === 'TASK_GROUPS_UNREAD') { showToast(tr("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do."), { type: 'error' }); if (!this._tasksUnread) this._fetchTasks(); return null; }   // THE STORE HELD UNREAD: worded HERE, in the person's language (主开发 00:41Z (c)); the mirror learns the hold
-        if (typeof onRefused === 'function') { try { onRefused(data, res.status); } catch { } }   // a refusal that carries the store's state hands it on first
+        let said = false;
+        if (typeof onRefused === 'function') { try { said = onRefused(data, res.status) === true; } catch { } }   // a refusal that carries the store's state hands it on first
+        if (said) return null;   // B-0248 step 3: the caller SAID it in its own words (a backlog row gone: by its text)
         const detail = data.error || (raw && !raw.startsWith('<') ? raw.slice(0, 120) : '');
         showToast(`${tr('Task Group operation failed')} (HTTP ${res.status}${detail ? ' — ' + detail : ''})`, { type: 'error' });
         try { track('error', `task-api-${res.status}`, `${method} ${url}`); } catch { }
@@ -452,10 +454,10 @@ export function installSidebarTasks(SidebarClass) {
     if (data?.task) this._upsertTaskLocal(data.task);
     return data?.task || null;
   };
-  proto._taskUpdate = async function(id, patch) {
+  proto._taskUpdate = async function(id, patch, { onRefused = null } = {}) {   // B-0248 step 3: + the caller's own refusal words (true = said)
     // lane lg-group-parents (cure 3 (a)): a parents write refused as stale carries the store's list — the copy adopts it at once
     // (a missed broadcast never leaves every later press refused until the tab is reopened)
-    const data = await this._taskApi('PATCH', `/api/tasks/${encodeURIComponent(id)}`, patch, (d) => { if (d && d.code === 'parents_stale' && Array.isArray(d.parents) && (this._tasks || []).some((x) => x && x.id === id)) this._upsertTaskLocal({ id, parents: d.parents.map(String) }); });   // only a group the copy holds (never a partial record)
+    const data = await this._taskApi('PATCH', `/api/tasks/${encodeURIComponent(id)}`, patch, (d) => { if (d && d.code === 'parents_stale' && Array.isArray(d.parents) && (this._tasks || []).some((x) => x && x.id === id)) this._upsertTaskLocal({ id, parents: d.parents.map(String) }); return typeof onRefused === 'function' ? onRefused(d) : false; });   // only a group the copy holds (never a partial record)
     if (data?.task) this._upsertTaskLocal(data.task);
     return data;
   };

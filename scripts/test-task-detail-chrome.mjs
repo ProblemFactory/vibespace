@@ -113,7 +113,7 @@ try {
     { path: '~/work/drive', note: '公司云盘', tell: 'names' },
   ] })).task;
   await api('POST', `/api/tasks/${ir.id}/bind`, { sessionKey: 'claude:aaaaaaaa-1111-4000-8000-000000000001' });
-  await api('PATCH', `/api/tasks/${ir.id}`, { backlog: [{ text: '季度会前对齐数字口径', status: 'open', addedBy: 'user', addedAt: Date.now() }] });
+  await api('PATCH', `/api/tasks/${ir.id}`, { backlogAdd: { text: '季度会前对齐数字口径', status: 'open', addedBy: 'user', addedAt: Date.now() } });   // B-0248 step 3: a page's backlog change is one row
   check('setup: two groups through the API (the IR group with four rows, the company group sharing one row read-write)', !!ir && !!co && ir.ctx.length === 4);
 
   const ver = await until(async () => (await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).json(), 30000);

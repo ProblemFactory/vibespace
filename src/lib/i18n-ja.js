@@ -11995,6 +11995,12 @@ export default {
   "Changes save as you make them (a path row takes effect when you leave the box, or on Enter)": "変更はその場で保存されます（パスの行は欄を離れるか Enter で反映）", // lane task-group-context
   "tab::Activity log": "アクティビティ記録", // lane task-group-context
   "Saved when you left the box — no Enter needed": "欄を離れた時点で保存しました —— Enter は不要です", // lane task-group-context
+  "\"{text}\" is no longer in this group's backlog — it was removed meanwhile; nothing was written": "「{text}」はこのグループのバックログにもうありません——その間に削除されました。何も書き込まれていません", // B-0248 step 3: a backlog row gone meanwhile, said by its text
+  "\"{text}\" was closed or reopened meanwhile by someone else — nothing was written; the list shows it now": "「{text}」はその間にほかの人が閉じたか再び開きました——何も書き込まれていません。一覧は今の状態を示しています", // B-0248 step 3: the Backlog tab
+  "This page is newer than VibeSpace — reload it once VibeSpace has restarted (nothing changed)": "このページは VibeSpace より新しいです——VibeSpace の再起動後に再読み込みしてください（何も変わっていません）", // B-0248 step 3: the Backlog tab
+  "\"{text}\" was removed from this group's backlog meanwhile — what you typed is in the add box": "「{text}」はその間にこのグループのバックログから削除されました——入力した内容は追加欄にあります", // B-0248 step 3: the Backlog tab
+  "\"{text}\" was removed from this group's backlog meanwhile": "「{text}」はその間にこのグループのバックログから削除されました", // B-0248 step 3: the Backlog tab
+  "\"{text}\" changed meanwhile and this view hides it now — your edit is kept until it shows again": "「{text}」はその間に変わり、今の表示では隠れています——編集内容は再び表示されるまで保持されます", // B-0248 step 3: the Backlog tab
   "Context table budget per group (bytes)": "グループごとの Context 表の注入予算（バイト）", // lane task-group-context
   "How many bytes one Task Group's Context table may take in what a conversation is told. Rows are told in table order at the depth each one chose; a row that does not fit steps down (contents, then file names with key files, then file names, then only the path and note) and says so. The room the hook carries beside the tools and the standing instructions caps it too. 0 = only that room.": "一つのタスクグループの Context 表が、会話に伝える内容の中で何バイトまで使えるか。各行は表の順に、それぞれ選んだ深さで伝えます。入りきらない行は一段下げ（内容 → ファイル名 + 主要ファイルの内容 → ファイル名 → パスと説明だけ）、そのことを書き添えます。フックがツールの説明と常駐指示の横に運べる容量も上限になります。0 = その容量だけ。", // lane task-group-context
   "「{path}」 is too big to tell as 「{chosen}」 → told as 「{level}」 (the agent still knows where it is and what it is for)": "「{path}」は「{chosen}」で伝えるには大きすぎます → 「{level}」で伝えます（エージェントは場所と用途を引き続き知っています）", // lane task-group-context
