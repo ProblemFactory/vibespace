@@ -272,7 +272,7 @@ app.get('/api/usage-stats/rid-info', async (req, res) => {
 app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingView ? usageHistory.pricingView() : usageHistory.pricingTable() })); // the editor: the effective table + its sources (lane cli-update-needs-nothing)
 app.post('/api/usage-stats/pricing', (req, res) => {
   try { usageHistory.setPricing(req.body || {}); res.json({ success: true, pricing: usageHistory.pricingView ? usageHistory.pricingView() : usageHistory.pricingTable() }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-d578 P1-b follow: a refused rate says which (code rate-invalid)
 });
 // B-ba7d: the accounts list carries NO key tail (the owner's decision 2026-11-18); the person's read of the tails is POST
 // /api/accounts/tails (src/routes/account-tails.js — behind the person verdict)

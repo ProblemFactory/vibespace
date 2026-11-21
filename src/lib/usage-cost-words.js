@@ -56,21 +56,37 @@ export function keepUnpriced(rows, n, extra = 5) {
   return list;
 }
 
-/** The models of an answer whose price is unknown — the «Add a price» rows of the pricing editor: [{model, key, tokens}],
- *  most tokens first, ONE row per key (two spellings of one id write one key) and never an empty key (it would match
- *  every model). Read from the answer's model rows (a model row is one model id). */
+/** The models of an answer whose price is unknown — the «Add a price» rows of the pricing editor: [{model, key, acct, tokens}],
+ *  ONE row per (key, provider account) — the row is written as THAT provider account's own (r1131 item 2: the same id on a
+ *  first-party sign-in keeps its own price) — never an empty key (it would match every model). Read from the answer's model
+ *  rows: a model row's `unpricedBy` names the provider accounts that ran it at an unknown price (`tokens` is the model's
+ *  whole unknown part when one account ran it, else null — the answer does not split it). Most tokens first. */
 export function unpricedModels(data) {
   const rows = (data && data.groups && data.groups.model) || [];
   const byKey = new Map();
   for (const r of rows) {
-    if (!unpricedOf(r) || !r.key || r.key === 'unknown') continue;
+    if (!unpricedOf(r) || !r.key || r.key === 'unknown' || !Array.isArray(r.unpricedBy)) continue;
     const key = priceKeyOf(r.key);
     if (!key) continue;
-    const had = byKey.get(key);
-    if (had) had.tokens += Number(r.unpricedTokens) || 0;
-    else byKey.set(key, { model: String(r.key), key, tokens: Number(r.unpricedTokens) || 0 });
+    for (const acct of r.unpricedBy) {
+      if (typeof acct !== 'string' || !acct) continue;
+      const id = key + '\n' + acct, had = byKey.get(id), tokens = r.unpricedBy.length === 1 ? Number(r.unpricedTokens) || 0 : null;
+      if (had) had.tokens = had.tokens == null || tokens == null ? null : had.tokens + tokens;
+      else byKey.set(id, { model: String(r.key), key, acct, tokens });
+    }
   }
-  return [...byKey.values()].sort((a, b) => b.tokens - a.tokens);
+  return [...byKey.values()].sort((a, b) => (b.tokens || 0) - (a.tokens || 0));
+}
+
+/** THE RATE CHECK the page asks before Save (courtesy — the route refuses the same, src/catalog-pricing.js rateErrors): a
+ *  typed rate is a plain number at or above 0 and under `ceiling` (USD per million tokens). → null (good) | the reason. */
+export function rateProblem(text, ceiling = 1000) {
+  const s = String(text == null ? '' : text).trim();
+  if (!/^\d+(\.\d+)?$|^\.\d+$/.test(s)) return /^-/.test(s) ? 'negative' : 'not-a-number';
+  const v = Number(s);
+  if (!Number.isFinite(v)) return 'not-a-number';
+  if (v >= ceiling) return 'over-ceiling';
+  return null;
 }
 
 /** Which OTHER models of the answer a new row under `key` would price too (usage-history _tier: the LONGEST key a

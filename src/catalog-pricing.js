@@ -98,4 +98,30 @@ function catalogSkips(patchTiers, patchSources) {
   const src = patchSources && typeof patchSources === 'object' ? patchSources : {};
   return Object.keys(patchTiers || {}).filter((k) => src[k] && src[k].from === 'catalog').sort();
 }
-module.exports = { mergePricing, personTiers, catalogSkips, sameRates, fileTierOf, RATE_FIELDS };
+// A RATE A PERSON WRITES (B-d578 P1-b follow, the coordinator's r1131 item 1 — money): a plain number at or above 0 and under
+// RATE_CEILING (USD per million tokens; far above any published price) — anything else is REFUSED BY NAME and nothing is
+// written: a slip of the hand (a negative, a word, a 1e12) never becomes a free or an absurd price. The ROUTE is the gate
+// (setPricing asks this before it writes); the page asks the same courtesy first. Every row of a patch is read: a table row,
+// its `long` and `earlier` entries, and an account's own rows. → [sentences] (empty = good)
+const RATE_CEILING = 1000;
+function rateErrors(patch) {
+  const out = [];
+  const row = (where, r) => {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) { out.push(`${where}: not a price row`); return; }
+    for (const f of RATE_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(r, f)) continue;
+      const v = r[f];
+      if (typeof v !== 'number' || !Number.isFinite(v)) out.push(`${where}.${f}: not a number`);
+      else if (v < 0) out.push(`${where}.${f}: ${v} is below 0`);
+      else if (v >= RATE_CEILING) out.push(`${where}.${f}: ${v} is at or over the ceiling of ${RATE_CEILING} USD per million tokens`);
+    }
+    if (r.long != null) row(`${where}.long`, r.long);
+    if (Array.isArray(r.earlier)) r.earlier.forEach((e, i) => row(`${where}.earlier[${i}]`, e));
+  };
+  const tiers = patch && patch.tiers;
+  if (tiers && typeof tiers === 'object') for (const [k, r] of Object.entries(tiers)) row(`tiers.${k}`, r);
+  const accounts = patch && patch.accounts;
+  if (accounts && typeof accounts === 'object') for (const [id, cfg] of Object.entries(accounts)) if (cfg && typeof cfg === 'object' && cfg.tiers && typeof cfg.tiers === 'object') for (const [k, r] of Object.entries(cfg.tiers)) row(`accounts.${id}.tiers.${k}`, r);
+  return out;
+}
+module.exports = { mergePricing, personTiers, catalogSkips, sameRates, fileTierOf, RATE_FIELDS, RATE_CEILING, rateErrors };

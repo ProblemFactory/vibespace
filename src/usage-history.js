@@ -1081,7 +1081,9 @@ class UsageHistory {
   _rateFor(acct, tier, ts, prompt, model) {
     const ov = acct ? this._pricing.accounts?.[acct] : null;
     // an account's override of the row the model falls on WITHOUT the catalog shields THAT account's model (law B, lane cli-update-needs-nothing)
-    const ovRow = ov?.tiers ? (ov.tiers[tier] || (model != null && this._pricing.sources?.[tier]?.from === 'catalog' ? ov.tiers[this._fileTier(model)] : undefined)) : undefined;
+    let ovRow = ov?.tiers ? (ov.tiers[tier] || (model != null && this._pricing.sources?.[tier]?.from === 'catalog' ? ov.tiers[this._fileTier(model)] : undefined)) : undefined;
+    // a third-party provider's OWN row for this model (B-d578 P1-b follow, r1131 item 2): priced for that provider only
+    if (ov?.tiers && tier === '_default' && model != null && isThirdPartyAccount(acct)) { const k = this._acctTier(acct, model); if (k) ovRow = ov.tiers[k]; }
     const base = priceAt(ovRow || this._pricing.tiers[tier] || this._pricing.tiers._default, ts, prompt);
     const disc = ov && typeof ov.discount === 'number' ? Math.max(0, Math.min(0.99, ov.discount)) : 0;
     if (!disc) return base;
@@ -1094,7 +1096,7 @@ class UsageHistory {
   priceRowFor(model, { acct = null, ts = Date.now(), prompt = 0 } = {}) {
     const tier = this._tier(model);
     if (this.priceUnknown(model, acct, tier)) return null;   // B-d578 P1-b: a provider's model with no row HAS no price row (the bulk resume says «not priced»)
-    return { label: tier, ...this._rateFor(acct, tier, ts, prompt) };
+    return { label: tier, ...this._rateFor(acct, tier, ts, prompt, model) };
   }
   /** THE UNKNOWN PRICE (lane lg-providers, B-d578 P1-b — the law agreed 2026-11-21): a third-party provider's model
    *  (an account id `pv-…` that is not a built-in record) that NO row of the table matches, where the person's table
@@ -1105,7 +1107,22 @@ class UsageHistory {
   priceUnknown(model, acct, tier = this._tier(model)) {
     if (tier !== '_default' || !isThirdPartyAccount(acct)) return false;
     const ov = this._pricing.accounts && this._pricing.accounts[acct];
-    return !(ov && ov.tiers && ov.tiers._default);
+    return !(ov && ov.tiers && (ov.tiers._default || this._acctTier(acct, model)));
+  }
+  /** A THIRD-PARTY PROVIDER'S OWN ROW for a model (B-d578 P1-b follow, the coordinator's r1131 item 2): the longest key of
+   *  `accounts[<pv id>].tiers` (never `_default`) that the lower-cased model id contains — the matcher's own rule, on that
+   *  provider's rows only. «Add a price» writes there, so a person's row prices THAT provider's model and never re-prices
+   *  the same id on a first-party sign-in. Asked only where no table row matched (tier `_default`). → key | null */
+  _acctTier(acct, model) {
+    const ov = this._pricing.accounts && this._pricing.accounts[acct];
+    if (!ov || !ov.tiers) return null;
+    if (this._acctTierFor !== this._pricing) { this._acctTierFor = this._pricing; this._acctTierMemo = new Map(); }
+    const m = String(model || '').toLowerCase(), mk = acct + '\n' + m;
+    if (this._acctTierMemo.has(mk)) return this._acctTierMemo.get(mk);
+    let best = null;
+    for (const k of Object.keys(ov.tiers)) if (k !== '_default' && k && m.includes(k) && (!best || k.length > best.length)) best = k;
+    this._acctTierMemo.set(mk, best);
+    return best;
   }
   /** One request's price for a sum: its cost in USD, or null when its price is unknown (priceUnknown). The journal line
    *  is said on the MAIN thread only (a cold fold's worker is a fresh one each time: it would say it again every fold),
@@ -2317,6 +2334,9 @@ class UsageHistory {
       if (!dimMeta.host[hostKey]) dimMeta.host[hostKey] = { name: ev.aname || hostKey };
       if (!dimMeta.model) dimMeta.model = {};
       if (!dimMeta.model[keyOf.model]) dimMeta.model[keyOf.model] = { be: ev.be || 'claude' };
+      // B-d578 P1-b follow (r1131 item 2): WHICH provider accounts ran this model at an unknown price — the «Add a price»
+      // row is that account's own; present only when there is such a part (an answer with none is unchanged)
+      if (priced === null) { const mm = dimMeta.model[keyOf.model]; const by = mm.unpricedBy || (mm.unpricedBy = []); if (!by.includes(ev.acct)) by.push(ev.acct); }
       // Pool labels: the pseudo-account's display name (resolves even after the
       // pool re-points, since the pool id is stable).
       if (ev.pool) {
@@ -2401,6 +2421,9 @@ class UsageHistory {
   // UI editor can PATCH just one account's discount without resending everything.
   setPricing(patch) {
     if (!patch || typeof patch !== 'object') return this._pricing;
+    // B-d578 P1-b follow (r1131 item 1): a rate that is not a plain number at or above 0 and under the ceiling is REFUSED BY NAME — nothing written
+    const bad = CP.rateErrors(patch);
+    if (bad.length) throw Object.assign(new Error(`prices not saved — ${bad.slice(0, 3).join('; ')}${bad.length > 3 ? `; and ${bad.length - 3} more` : ''}`), { code: 'rate-invalid', fields: bad });
     const cur = this._pricingFile || this._pricing; // the table on disk — a catalog row is never written to pricing.json
     const next = { version: 2, tiers: { ...cur.tiers, ...CP.personTiers(patch.tiers, this._pricing, cur, patch.sources) }, accounts: { ...cur.accounts } };
     this._lastCatalogSkips = CP.catalogSkips(patch.tiers, patch.sources); // said to the importer (persistence's summary)

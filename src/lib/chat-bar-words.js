@@ -24,10 +24,10 @@ export function costChipWords(usd, basis, t, amountOf = (v) => (Number(v) || 0).
   // (page-time num: «$63,854.44» in the page's language); this module stays PURE and formats nothing itself
   const amount = '$' + amountOf(Number(usd) || 0);
   const what = t('An estimate of this conversation\'s usage at API prices, as the agent\'s program reports it.');
-  // A THIRD-PARTY PROVIDER (B-d578 P1-b): the agent's program prices its turns with ITS OWN table, which does not know
-  // the provider's prices — its figure is no bill of anyone's, so none is shown («price unknown»); Usage counts the
-  // tokens, and a price row the person adds there makes them a cost
-  if (basis === 'provider') return { text: t('This chat · price unknown'), title: t('This conversation runs on a third-party provider\'s model. The agent\'s program prices it with its own table, which does not know this provider\'s prices, so its figure is not shown here. Usage counts this conversation\'s tokens and prices them with your price table — a model with no price row is said there, and «Pricing…» adds one.'), tone: 'unknown' };
+  // A THIRD-PARTY PROVIDER (B-d578 P1-b + follow r1131): the agent's program prices its turns with ITS OWN table, which does
+  // not know the provider's prices — its figure is no bill of anyone's, so none is shown; the chip points to Usage, which
+  // prices the conversation with the person's table (true before and after a price row is added — the chip reads no ledger)
+  if (basis === 'provider') return { text: t('This chat · see Usage for its cost'), title: t('This conversation runs on a third-party provider\'s model. The agent\'s program prices it with its own table, which does not know this provider\'s prices, so its figure is not shown here. Usage prices this conversation\'s tokens with your price table — and says there which part has no price row yet.'), tone: 'unknown' };   // r1131 item 5: what is true whether or not a price was added
   if (basis === 'subscription') return { text: t('This chat ≈ {usd} · included in your subscription', { usd: amount }), title: what + ' ' + t('Your subscription covers it — nothing is billed per use.'), tone: 'quiet' };
   if (basis === 'api') return { text: t('This chat ≈ {usd} · billed per use (API key)', { usd: amount }), title: what + ' ' + t('This conversation runs on an API key, which is billed per use.'), tone: 'tier' };
   return { text: t('This chat ≈ {usd}', { usd: amount }), title: what + ' ' + t('Whether it is billed depends on the account this conversation runs on.'), tone: 'tier' };

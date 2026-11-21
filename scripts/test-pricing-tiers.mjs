@@ -411,6 +411,53 @@ try {
       uh7.setPricing({ accounts: { [PV]: { tiers: { _default: { input: 0.5, output: 1, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0.05 } } } } });
       ok(disc === true && uh7.priceUnknown(QWEN, PV) === false && !('unpricedRequests' in uh7.aggregate({}).totals), '…or that provider\'s OWN row (its account\'s _default); a discount alone leaves it unknown (a part off an unknown price is unknown)', { discountOnly: disc });
     }
+    // THE FOLLOW (r1131): THE PROVIDER ACCOUNT'S OWN ROW — «Add a price» writes accounts[<pv id>].tiers[<key>]: it prices that
+    // provider's model and never the same id on a first-party sign-in (item 2)
+    {
+      const d8 = scratch('pricing-unknown-own'); fs.mkdirSync(path.join(d8, 'usage-history'), { recursive: true });
+      fs.copyFileSync(shard, path.join(d8, 'usage-history', path.basename(shard)));
+      const uh8 = new UsageHistory({ dataDir: d8, homeDir: d8 });
+      const OWN = { input: 2, output: 8, cacheWrite5m: 2.5, cacheWrite1h: 4, cacheRead: 0.2 };
+      uh8.setPricing({ accounts: { [PV]: { tiers: { [QWEN]: OWN } } } });
+      const t8 = uh8.aggregate({}).totals;
+      const wantOwn = pricedUsd + unk.reduce((s, r) => s + (r.i * OWN.input + r.o * OWN.output + r.cw5 * OWN.cacheWrite5m + r.cr * OWN.cacheRead) / 1e6, 0);
+      const subRow = uh8.priceRowFor(QWEN, { acct: SUB }), pvRow = uh8.priceRowFor(QWEN, { acct: PV });
+      const subEv = { ...ROWS[0], acct: SUB, atype: 'subscription' };
+      ok(uh8.priceUnknown(QWEN, PV) === false && !('unpricedRequests' in t8) && Math.abs(t8.cost - wantOwn) < 1e-12 && pvRow && pvRow.input === OWN.input,
+        'the provider account\'s OWN row for the model (accounts[pv].tiers[key], what «Add a price» now writes) makes it a cost — that provider\'s rates', { cost: t8.cost, want: wantOwn });
+      const D = uh8._pricing.tiers._default, subDefault = (subEv.i * D.input + subEv.o * D.output + subEv.cw5 * D.cacheWrite5m + subEv.cw1 * D.cacheWrite1h + subEv.cr * D.cacheRead) / 1e6;
+      ok(subRow && subRow.label === '_default' && subRow.input === D.input && Math.abs(uh8._cost(subEv) - subDefault) < 1e-15,
+        '…and the SAME model id on a first-party sign-in keeps its own price (the table\'s _default, as before) — the row re-prices nothing else', { sub: subRow && [subRow.label, subRow.input] });
+      const keyOf2 = uh8._acctTier(PV, 'qwen3-coder-plus-0925'), none = uh8._acctTier(PV, 'deepseek-chat'), other = uh8._acctTier('pv-other', QWEN);
+      ok(keyOf2 === QWEN && none === null && other === null, '…the matcher\'s own rule on that provider\'s rows only (the longest key the id contains; another provider never borrows it)', { keyOf2, none, other });
+    }
+    // THE RATE LAW (item 1, money): a rate that is not a plain number at or above 0 and under the ceiling is REFUSED BY NAME at
+    // the route's own writer (setPricing — the gate) and nothing is written; the page's check is the same rule, first
+    {
+      const CPm = require(path.join(ROOT, 'src/catalog-pricing.js'));
+      const R5 = (o) => ({ input: 1, output: 2, cacheWrite5m: 1, cacheWrite1h: 1, cacheRead: 0.1, ...o });
+      const cases = { negative: { tiers: { m1: R5({ input: -3 }) } }, word: { tiers: { m1: R5({ output: 'abc' }) } }, absurd: { tiers: { m1: R5({ cacheRead: 1e12 }) } },
+        nan: { tiers: { m1: R5({ input: NaN }) } }, ownRow: { accounts: { [PV]: { tiers: { m1: R5({ output: -0.5 }) } } } }, nested: { tiers: { m1: R5({ long: { above: 1000, input: -1, output: 2 } }) } } };
+      const errs = Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, CPm.rateErrors(v)]));
+      console.log('    judged refusals: ' + JSON.stringify(errs));
+      ok(Object.values(errs).every((e) => e.length === 1) && /below 0/.test(errs.negative[0]) && /not a number/.test(errs.word[0]) && /ceiling of 1000/.test(errs.absurd[0]) && /not a number/.test(errs.nan[0]) && /^accounts\.pv-example-router\.tiers\.m1\.output/.test(errs.ownRow[0]) && /\.long\.input/.test(errs.nested[0]),
+        'rateErrors names each slip by its field: a negative, a word, an absurd 1e12, NaN, a provider account\'s own row, a nested long rate');
+      ok(CPm.rateErrors({ tiers: { m1: R5({}), free: R5({ input: 0, output: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0 }) }, accounts: { [PV]: { discount: 0.2 } } }).length === 0 && CPm.rateErrors({}).length === 0, '…and a good row, a free model\'s typed zeros and a discount alone pass');
+      const d9 = scratch('pricing-unknown-law'); fs.mkdirSync(path.join(d9, 'usage-history'), { recursive: true });
+      const uh9 = new UsageHistory({ dataDir: d9, homeDir: d9 });
+      const pf = path.join(d9, 'usage-history', 'pricing.json'), before = JSON.stringify(uh9.pricingTable());
+      const refused = Object.entries(cases).map(([k, v]) => { try { uh9.setPricing(v); return [k, 'WRITTEN']; } catch (e) { return [k, e.code]; } });
+      const onDisk = fs.existsSync(pf) ? fs.readFileSync(pf, 'utf8') : '';
+      ok(refused.every(([, c]) => c === 'rate-invalid') && JSON.stringify(uh9.pricingTable()) === before && !onDisk.includes('"m1"') && uh9._tier('m1') === '_default', 'setPricing (the route\'s writer — POST /api/usage-stats/pricing answers 400 with code rate-invalid) REFUSES every one by name and WRITES NOTHING (the table unchanged, no row m1 on disk)', refused);
+      const U3 = M6.load('src/usage-history.js', anchored(fs.readFileSync(path.join(ROOT, 'src/usage-history.js'), 'utf8'), "    const bad = CP.rateErrors(patch);\n", '    const bad = [];\n', 'the rate law'), 'no-rate-law');
+      const d10 = scratch('pricing-unknown-nolaw'); fs.mkdirSync(path.join(d10, 'usage-history'), { recursive: true });
+      const u10 = new U3.UsageHistory({ dataDir: d10, homeDir: d10 });
+      let wrote = null; try { u10.setPricing(cases.negative); wrote = u10._pricing.tiers.m1 && u10._pricing.tiers.m1.input; } catch (e) { wrote = 'refused ' + e.code; }
+      ok(wrote === -3, 'CONTROL (the release\'s writer, the check cut): the negative rate is WRITTEN (-3 per million) — the leg above is what refuses it', wrote);
+      const W2 = await import(path.join(ROOT, 'src/lib/usage-cost-words.js'));
+      const rp = ['-3', 'abc', '1e12', '5000', String(CPm.RATE_CEILING), '999.99', '0', '2.5', '.5', ''].map((v) => [v, W2.rateProblem(v)]);
+      ok(JSON.stringify(rp) === JSON.stringify([['-3', 'negative'], ['abc', 'not-a-number'], ['1e12', 'not-a-number'], ['5000', 'over-ceiling'], ['1000', 'over-ceiling'], ['999.99', null], ['0', null], ['2.5', null], ['.5', null], ['', 'not-a-number']]), 'the page asks the SAME rule first (rateProblem; its ceiling is the route\'s RATE_CEILING): a negative, a word, 1e12, over the ceiling refused; 0 (a free model) and a plain rate pass', rp);
+    }
     // THE RULE LOADS model-providers ONLY WHEN A pv- ID IS MET (the fold worker's heap — test-cache-bounds §30)
     {
       const { execFileSync } = await import('node:child_process');
@@ -429,9 +476,9 @@ try {
       ok(none.text === '$1.50' && none.note === null && !none.unknown, 'a row with every request priced reads as before («$1.50», no note)');
       ok(whole.text === `${fC(T.cost)} + unknown` && /^Leaves out \d+ tokens whose price is unknown/.test(whole.note) && whole.note.includes(String(T.unpricedTokens)), 'a mixed sum reads «$x + unknown» and its note says what it leaves out (the tokens)', whole);
       ok(allU.text === 'price unknown' && !/\$/.test(allU.text) && /^Price unknown: /.test(allU.note), 'a row whose every request is unknown reads «price unknown» — never «$0.00»', allU);
-      ok(JSON.stringify(W.unpricedModels(mem)) === JSON.stringify([{ model: QWEN, key: QWEN, tokens: qRow.unpricedTokens }]), 'the «Add a price» rows are the answer\'s unpriced models', W.unpricedModels(mem));
-      const two = { groups: { model: [{ key: 'GLM-4.6', unpricedRequests: 1, unpricedTokens: 10, requests: 1 }, { key: 'glm-4.6', unpricedRequests: 2, unpricedTokens: 30, requests: 2 }, { key: '   ', unpricedRequests: 1, unpricedTokens: 5, requests: 1 }, { key: 'unknown', unpricedRequests: 1, unpricedTokens: 5, requests: 1 }] } };
-      ok(JSON.stringify(W.unpricedModels(two)) === JSON.stringify([{ model: 'GLM-4.6', key: 'glm-4.6', tokens: 40 }]), '…ONE row per key (two spellings of one id write one key, their tokens added) and never an empty key (it would match every model) nor the nameless «unknown» row', W.unpricedModels(two));
+      ok(JSON.stringify(W.unpricedModels(mem)) === JSON.stringify([{ model: QWEN, key: QWEN, acct: PV, tokens: qRow.unpricedTokens }]) && JSON.stringify(qRow.unpricedBy) === JSON.stringify([PV]) && !('unpricedBy' in (g('model', 'claude-sonnet-5') || {})), 'the «Add a price» rows are the answer\'s unpriced models, each with the provider account that ran it (the model row\'s unpricedBy — on no priced model)', { rows: W.unpricedModels(mem), by: qRow.unpricedBy });
+      const two = { groups: { model: [{ key: 'GLM-4.6', unpricedRequests: 1, unpricedTokens: 10, requests: 1, unpricedBy: ['pv-a'] }, { key: 'glm-4.6', unpricedRequests: 2, unpricedTokens: 30, requests: 2, unpricedBy: ['pv-a'] }, { key: 'glm-4.6', unpricedRequests: 2, unpricedTokens: 30, requests: 2, unpricedBy: ['pv-a', 'pv-b'] }, { key: '   ', unpricedRequests: 1, unpricedTokens: 5, requests: 1, unpricedBy: ['pv-a'] }, { key: 'unknown', unpricedRequests: 1, unpricedTokens: 5, requests: 1, unpricedBy: ['pv-a'] }, { key: 'old-hub', unpricedRequests: 1, unpricedTokens: 5, requests: 1 }] } };
+      ok(JSON.stringify(W.unpricedModels(two)) === JSON.stringify([{ model: 'GLM-4.6', key: 'glm-4.6', acct: 'pv-a', tokens: null }, { model: 'glm-4.6', key: 'glm-4.6', acct: 'pv-b', tokens: null }]), '…ONE row per (key, provider account) — two spellings of one id write one key; a model two providers ran is a row for each, its tokens not split («—»); never an empty key nor the nameless «unknown» row, nor a row of an answer that names no account', W.unpricedModels(two));
       const MODELS6 = ['glm-4.6', 'glm-4.6-air', 'claude-sonnet-5', 'my-glm-4.6-fork'];
       ok(JSON.stringify(W.alsoPrices('glm-4.6', MODELS6, ['sonnet', 'opus'])) === JSON.stringify(['glm-4.6-air', 'my-glm-4.6-fork']) && JSON.stringify(W.alsoPrices('glm-4.6', MODELS6, ['sonnet'], ['glm-4.6-air'])) === JSON.stringify(['my-glm-4.6-fork']) && W.alsoPrices('glm-4.6', ['glm-4.6-pro-max'], ['glm-4.6-pro']).length === 0 && JSON.stringify(W.alsoPrices('glm-4.6', ['claude-glm-4.6-sonnet'], ['sonnet'])) === JSON.stringify(['claude-glm-4.6-sonnet']) && W.alsoPrices('', MODELS6, []).length === 0,
         'a new row says which OTHER models it would price too (the longest key a model contains wins): glm-4.6 also prices glm-4.6-air and my-glm-4.6-fork, unless one has its own (longer) row; never a model a LONGER key holds (glm-4.6-pro keeps glm-4.6-pro-max), while a shorter one loses it (sonnet loses claude-glm-4.6-sonnet — said); an empty key prices nothing here', W.alsoPrices('glm-4.6', MODELS6, ['sonnet', 'opus']));
@@ -444,38 +491,41 @@ try {
       const pvAuth = { source: 'api-other', name: 'Example', provider: true, accountId: PV };
       const chipW = CB.costChipWords(0.47, CB.costBasisOf(pvAuth), tEn);
       console.log('    judged chip: ' + JSON.stringify(chipW));
-      ok(CB.costBasisOf(pvAuth) === 'provider' && chipW.text === 'This chat · price unknown' && !/\$/.test(chipW.text + chipW.title) && chipW.tone === 'unknown', 'the chat bar: a provider conversation\'s chip says «price unknown» — never the agent program\'s own figure (its table does not know the provider\'s prices)', chipW);
+      ok(CB.costBasisOf(pvAuth) === 'provider' && chipW.text === 'This chat · see Usage for its cost' && !/\$/.test(chipW.text + chipW.title) && !/unknown/i.test(chipW.text + chipW.title) && chipW.tone === 'unknown', 'the chat bar: a provider conversation\'s chip shows no figure (the agent program\'s table does not know the provider\'s prices) and points to Usage — words true before and after a price row is added (r1131 item 5: no «unknown»; the chip reads no ledger)', chipW);
       ok(CB.costBasisOf({ source: 'api-other' }) === 'api' && /\$0\.47/.test(CB.costChipWords(0.47, 'api', tEn).text), 'CONTROL: an API key\'s conversation keeps its figure («billed per use»)');
       // every word a person reads, in zh and ja through the real dictionaries
       const lits = (rel) => [...fs.readFileSync(path.join(ROOT, rel), 'utf8').matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
-      const NEW = [...lits('src/lib/usage-cost-words.js'), 'This chat · price unknown', 'Third-party provider (billed by the provider)', 'Add a price — models with no price row', 'provider',
-        'This row also prices: {models}', '…and {n} more models with no price row — add these first, the rest show next', 'Add a price for {model}: enter all five rates — type 0 where the provider charges nothing',
-        'The row for {model} would also price {models} — give each its own row (the same rates are fine)', '% off (applies once the model has a price)',
-        "These models of a third-party provider match no row, so their cost is unknown and every total leaves them out. Enter the provider's own rates (USD per million tokens) to count them.",
-        "This conversation runs on a third-party provider's model. The agent's program prices it with its own table, which does not know this provider's prices, so its figure is not shown here. Usage counts this conversation's tokens and prices them with your price table — a model with no price row is said there, and «Pricing…» adds one."];
+      const CBK = ['This chat · see Usage for its cost', "This conversation runs on a third-party provider's model. The agent's program prices it with its own table, which does not know this provider's prices, so its figure is not shown here. Usage prices this conversation's tokens with your price table — and says there which part has no price row yet."];
+      const UWK = ['Third-party provider (billed by the provider)', 'Add a price — models with no price row', 'provider', 'This row also prices: {models}', '…and {n} more models with no price row — add these first, the rest show next', 'Add a price for {model}: enter all five rates — type 0 where the provider charges nothing',
+        'The row for {model} would also price {models} — give each its own row (the same rates are fine)', '% off (applies once the model has a price)', 'Add a price for {model}: «{value}» is not a rate — enter a number from 0 up to {max} (USD per million tokens)',
+        "These models of a third-party provider match no row, so their cost is unknown and every total leaves them out. Enter that provider's own rates (USD per million tokens): the row is that provider's only — the same model on another account keeps its own price — and it re-prices this model's past usage too, since costs are computed when they are read."];
+      const NEW = [...lits('src/lib/usage-cost-words.js'), ...CBK, ...UWK];
       const missing = NEW.filter((k) => !zh[k] || !ja[k]);
-      ok(NEW.length >= 16 && !missing.length, `every new word is in zh AND ja (${NEW.length} keys)`, missing);
+      ok(NEW.length >= 17 && !missing.length, `every new word is in zh AND ja (${NEW.length} keys)`, missing);
       const uwLits = lits('src/lib/usage-window.js');
-      ok(lits('src/lib/chat-bar-words.js').includes(NEW[NEW.length - 1]) && NEW.slice(-11, -1).filter((k) => k !== 'This chat · price unknown').every((k) => uwLits.includes(k)), '…and those keys are the very t() literals of the chat bar and the Usage window');
-      ok(/使用状況/.test(ja[NEW[NEW.length - 1]]) && !/使用量/.test(ja[NEW[NEW.length - 1]]) && /提供方/.test(zh.provider), '…the ja chip names the window by its own name (使用状況), the zh badge says 提供方 like every provider word');
+      ok(CBK.every((k) => lits('src/lib/chat-bar-words.js').includes(k)) && UWK.every((k) => uwLits.includes(k)), '…and those keys are the very t() literals of the chat bar and the Usage window', UWK.filter((k) => !uwLits.includes(k)));
+      ok(/使用状況/.test(ja[CBK[0]]) && /使用状況/.test(ja[CBK[1]]) && !/使用量/.test(ja[CBK[1]]) && /提供方/.test(zh.provider), '…the ja chip names the window by its own name (使用状況), the zh badge says 提供方 like every provider word');
     }
     // THE WIRING (each surface asks the one rule / the one words module)
     {
       const src = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
       const UW = src('src/lib/usage-window.js'), UD = src('src/lib/usage-dashboard.js'), CSB = src('src/lib/chat-status-bar.js'), SRV = src('server.js'), UIX = src('src/server/usage-index.js'), UIM = src('src/usage-index-model.js');
       const wires = {
-        'usage-window imports the words': UW.includes("import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices } from './usage-cost-words.js';"),
+        'usage-window imports the words': UW.includes("import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem } from './usage-cost-words.js';"),
         'the cost tile': UW.includes("tile(t('Est. API-equivalent cost'), escHtml(fmtRowCost(T)),"),
         'every bar row': UW.includes("const valStr = metric === 'cost' ? escHtml(fmtRowCost(r)) : fmtNum(r.totalTokens);"),
         'the trend note': UW.includes("const cw = metricKey === 'cost' ? costOfRow(d.totals || {}) : null;"),
         'the footer': UW.includes('(costOfRow(d.totals || {}).note ?'),
-        'the CSV column': UW.includes("'estCost', 'unpricedTokens'"),
         'the billing row': UW.includes("'provider': { label: () => t('Third-party provider (billed by the provider)')"),
-        'Add a price': UW.includes('const unpriced = unpricedModels(state.data).filter(m => !TIERS.includes(m.key));'),
+        'Add a price': UW.includes('const unpriced = unpricedModels(state.data).filter(m => !Object.prototype.hasOwnProperty.call(pricing.accounts?.[m.acct]?.tiers || {}, m.key));'),
+        'the row is the provider account\'s own': UW.includes('(w.tiers || (w.tiers = {}))[m.key] = Object.fromEntries(rec.inputs.map(([fk, el]) => [fk, Number(el.value)]));'),
+        'a bad rate is refused on the page': UW.includes("if (rec.bad) { showToast(t('Add a price for {model}: «{value}» is not a rate"),
+        'the CSV column only when unknown': UW.includes('const anyUnknown = unpricedOf(d.totals || {}) !== null;') && UW.includes("'estCost', ...(anyUnknown ? ['unpricedTokens'] : [])"),
+        'the route says which rate': src('src/server/account-usage-routes.js').includes('res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) });'),
         'a half row is refused': UW.includes("if (typed && typed < rec.inputs.length) { showToast(t('Add a price for {model}: enter all five rates"),
         'a row pricing another unpriced model is refused': UW.includes("const orphan = typed ? rec.also.filter("),
-        'the five rates or nothing': UW.includes('if (typed.length === inputs.length) edited.tiers[key] = '),
-        'the discount keeps the account\'s rows': UW.includes('? { ...rest, discount: Math.min(0.99, v / 100) } :'),
+        'the five rates or nothing': UW.includes('if (w && typed.length === rec.inputs.length && !rec.bad) '),
+        'the discount keeps the account\'s rows': UW.includes('if (Number.isFinite(v) && v > 0) w.discount = Math.min(0.99, v / 100); else delete w.discount;'),
         'the session table keeps it in view': UW.includes("const rows = state.metric === 'cost' ? keepUnpriced(d.groups.session, opts.limit || 12)"),
         'the grouped lists keep it in view': UW.includes("const list = metric === 'cost' ? keepUnpriced(rows, opts.limit || 10)"),
         'dashboard top-N keeps it': UD.includes("rows = first === 'cost' ? keepUnpriced(rows, panel.topN || 8)") && UD.includes("rows = m.key === 'cost' ? keepUnpriced(rows, panel.topN || 8)"),

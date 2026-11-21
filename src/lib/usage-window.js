@@ -11,7 +11,7 @@ import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { registerWindowType } from './window-types.js';
 import { ledgerNoteEl, ledgerLoadingOf } from './usage-ledger-note.js'; // B-9428 r4: a partial / as-of answer says so under the totals; ledger-boot-load follow-up: LOADING is a state
 import { tailOf } from './account-tails.js'; // B-ba7d: a usage row carries no key tail — the person's read does
-import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
+import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
 
 // Small vendor logo — accounts and models from BOTH CLIs mix in one dashboard,
 // so every such row/chip carries the backend brand to keep them apart.
@@ -495,6 +495,10 @@ function renderPricingEditor(state, rerender, reload) {
   const TIERS = Object.keys(pricing.tiers || {}).filter(k => k !== '_default');
   const FIELDS = [['input', t('Input')], ['output', t('Output')], ['cacheWrite5m', t('Cache write 5m')], ['cacheWrite1h', t('Cache write 1h')], ['cacheRead', t('Cache read')]];
   const edited = { tiers: {}, accounts: {} };
+  // ONE working copy per account (B-d578 P1-b follow): the discount field and «Add a price» (that provider account's own
+  // rows) edit the same object, so neither drops the other's typing; Save sends it whole (null when nothing is left)
+  const acctWork = new Map();
+  const workOf = (id) => { if (!acctWork.has(id)) { const c = pricing.accounts?.[id] || {}; acctWork.set(id, { ...c, ...(c.tiers ? { tiers: { ...c.tiers } } : {}) }); } return acctWork.get(id); };
 
   const note = document.createElement('div'); note.className = 'usage-note';
   note.innerHTML = escHtml(t('USD per million tokens. Default rates apply to every account (subscriptions bill as this API-equivalent reference). Give an API-key account a discount % or its own rates — different keys really do bill differently.'));
@@ -526,53 +530,56 @@ function renderPricingEditor(state, rerender, reload) {
   const scroll = document.createElement('div'); scroll.className = 'usage-price-scroll'; scroll.appendChild(tbl); // the table scrolls sideways on a phone (390 px): every column reachable
   tsec.appendChild(scroll); wrap.appendChild(tsec);
 
-  // ADD A PRICE (lane lg-providers, B-d578 P1-b): a third-party provider's model that no row matches has NO price — its
-  // tokens are counted, every total leaves them out and says so. Its row is added here, under the matcher's own spelling
-  // (priceKeyOf), and counts it from the next answer on. A row is written only with ALL FIVE rates (a blank is not a 0:
-  // type 0 where the provider charges nothing — a free model's row is a choice); an untouched row writes nothing; Save
-  // refuses a half-typed row by name. The key is the table's GLOBAL key (the longest key a model id contains wins), so a
-  // row that would ALSO price another model of this answer says so, and Save refuses it while that model is unpriced and
-  // has no row of its own.
-  const unpriced = unpricedModels(state.data).filter(m => !TIERS.includes(m.key));
-  const addRows = new Map();   // key → {model, inputs, also}
+  // ADD A PRICE (lane lg-providers, B-d578 P1-b + its follow, r1131): a third-party provider's model that no row matches has
+  // NO price — its tokens are counted, every total leaves them out and says so. Its row is written as THAT PROVIDER ACCOUNT'S
+  // OWN (`accounts[<pv id>].tiers[<key>]`, the key = the model id lower-cased — the matcher's own spelling), so it prices that
+  // provider's model and never the same id on another account; it re-prices that model's PAST usage too (costs are computed
+  // when read). A row is written only with ALL FIVE rates, each a plain number from 0 up to the ceiling (a blank is not a 0,
+  // a slip of the hand is no price: the route refuses the same — src/catalog-pricing.js rateErrors); a row that would also
+  // price another unpriced model of the same provider says so, and Save refuses it while that model has no row of its own.
+  const unpriced = unpricedModels(state.data).filter(m => !Object.prototype.hasOwnProperty.call(pricing.accounts?.[m.acct]?.tiers || {}, m.key));
+  const addRows = new Map();   // key + acct → {model, acct, key, inputs, also, bad}
+  const acctName = (id) => ((state.data?.groups?.account || []).find(r => r.key === id) || {}).name || id;
   if (unpriced.length) {
     const usec = document.createElement('div'); usec.className = 'usage-section usage-add-price';
     usec.innerHTML = `<div class="usage-section-title">${escHtml(t('Add a price — models with no price row'))}</div>`;
     const unote = document.createElement('div'); unote.className = 'usage-note';
-    unote.textContent = t('These models of a third-party provider match no row, so their cost is unknown and every total leaves them out. Enter the provider\'s own rates (USD per million tokens) to count them.');
+    unote.textContent = t('These models of a third-party provider match no row, so their cost is unknown and every total leaves them out. Enter that provider\'s own rates (USD per million tokens): the row is that provider\'s only — the same model on another account keeps its own price — and it re-prices this model\'s past usage too, since costs are computed when they are read.');
     usec.appendChild(unote);
     const utbl = document.createElement('table'); utbl.className = 'usage-price-tbl';
     utbl.innerHTML = `<tr><th>${escHtml(t('Model'))}</th>${FIELDS.map(f => `<th>${escHtml(f[1])}</th>`).join('')}<th>${escHtml(t('Tokens'))}</th></tr>`;
-    const allModels = (state.data?.groups?.model || []).map(r => r.key).filter(k => k && k !== 'unknown');
     const SHOWN = 20;
+    const recsOf = (acct) => [...addRows.values()].filter(r => r.acct === acct);
     for (const m of unpriced.slice(0, SHOWN)) {
-      const key = m.key;
-      const row = document.createElement('tr'); row.dataset.priceKey = key;
+      const id = m.key + '\n' + m.acct;
+      const row = document.createElement('tr'); row.dataset.priceKey = m.key; row.dataset.priceAccount = m.acct;
       const name = document.createElement('td'); name.textContent = m.model;
+      const who = document.createElement('div'); who.className = 'usage-note'; who.textContent = acctName(m.acct);
       const also = document.createElement('div'); also.className = 'usage-note usage-unpriced-note'; also.hidden = true;
-      name.appendChild(also); row.appendChild(name);
-      const inputs = [];
-      const rec = { model: m.model, inputs, also: [] };
-      addRows.set(key, rec);
-      const sync = () => {
-        const typed = inputs.filter(([, el]) => el.value !== '');
-        if (typed.length === inputs.length) edited.tiers[key] = Object.fromEntries(inputs.map(([fk, el]) => { const v = parseFloat(el.value); return [fk, Number.isFinite(v) && v >= 0 ? v : 0]; }));
-        else delete edited.tiers[key];
-        // which other models of this answer the row would price too (said under its name while anything is typed)
-        rec.also = typed.length ? alsoPrices(key, allModels, TIERS, [...addRows.keys()].filter(k => addRows.get(k).inputs.some(([, el]) => el.value !== ''))) : [];
+      name.append(who, also); row.appendChild(name);
+      const rec = { model: m.model, acct: m.acct, key: m.key, inputs: [], also: [], bad: null };
+      addRows.set(id, rec);
+      rec.sync = () => {
+        const typed = rec.inputs.filter(([, el]) => el.value !== '');
+        rec.bad = typed.map(([, el]) => ({ v: el.value, why: rateProblem(el.value) })).find(x => x.why) || null;
+        const w = typed.length ? workOf(m.acct) : acctWork.get(m.acct);   // an untouched row makes no working copy
+        if (w && typed.length === rec.inputs.length && !rec.bad) (w.tiers || (w.tiers = {}))[m.key] = Object.fromEntries(rec.inputs.map(([fk, el]) => [fk, Number(el.value)]));
+        else if (w && w.tiers) delete w.tiers[m.key];
+        // which other unpriced models of THIS provider the row would price too (said under its name while anything is typed)
+        const mine = recsOf(m.acct);
+        rec.also = typed.length ? alsoPrices(m.key, mine.map(r => r.model), Object.keys(pricing.accounts?.[m.acct]?.tiers || {}), mine.filter(r => r !== rec && r.inputs.some(([, el]) => el.value !== '')).map(r => r.key)) : [];
         also.hidden = !rec.also.length;
         also.textContent = rec.also.length ? t('This row also prices: {models}', { models: rec.also.join(', ') }) : '';
       };
       for (const [fk, fl] of FIELDS) {
         const td = document.createElement('td');
-        const inp = document.createElement('input'); inp.type = 'number'; inp.step = '0.01'; inp.min = '0'; inp.className = 'usage-price-inp'; inp.placeholder = '?';
+        const inp = document.createElement('input'); inp.type = 'number'; inp.step = '0.01'; inp.min = '0'; inp.max = '999.99'; inp.className = 'usage-price-inp'; inp.placeholder = '?';
         inp.setAttribute('aria-label', `${m.model} — ${fl}`);
-        inp.oninput = () => { for (const r2 of addRows.values()) r2.sync?.(); };
-        inputs.push([fk, inp]);
+        inp.oninput = () => { for (const r2 of addRows.values()) r2.sync(); };
+        rec.inputs.push([fk, inp]);
         td.appendChild(inp); row.appendChild(td);
       }
-      rec.sync = sync;
-      const tok = document.createElement('td'); tok.className = 'usage-price-src'; tok.textContent = fmtNum(m.tokens); row.appendChild(tok);
+      const tok = document.createElement('td'); tok.className = 'usage-price-src'; tok.textContent = m.tokens == null ? '—' : fmtNum(m.tokens); row.appendChild(tok);
       utbl.appendChild(row);
     }
     const uscroll = document.createElement('div'); uscroll.className = 'usage-price-scroll'; uscroll.appendChild(utbl);
@@ -597,9 +604,10 @@ function renderPricingEditor(state, rerender, reload) {
     suffix.textContent = a.type === 'provider' ? t('% off (applies once the model has a price)') : t('% off (subscriptions ignore this)');   // B-d578 P1-b: a part off an unknown price is unknown
     inp.oninput = () => {
       const v = parseFloat(inp.value);
-      // the account's OTHER settings (its own rows — a provider's `_default`) are kept: the discount is one field of it (B-d578 P1-b)
-      const rest = { ...cur }; delete rest.discount;
-      edited.accounts[a.key] = (Number.isFinite(v) && v > 0) ? { ...rest, discount: Math.min(0.99, v / 100) } : (Object.keys(rest).length ? rest : null); // null clears
+      // the account's OTHER settings (its own rows — a provider's, «Add a price») are kept: the discount is one field of the
+      // account's ONE working copy (B-d578 P1-b + follow); Save sends it whole, null when nothing is left
+      const w = workOf(a.key);
+      if (Number.isFinite(v) && v > 0) w.discount = Math.min(0.99, v / 100); else delete w.discount;
     };
     ctrl.append(inp, suffix); row.appendChild(ctrl); asec.appendChild(row);
   }
@@ -612,10 +620,12 @@ function renderPricingEditor(state, rerender, reload) {
     // is refused by name — the editor stays, the typing kept
     for (const rec of addRows.values()) {
       const typed = rec.inputs.filter(([, el]) => el.value !== '').length;
+      if (rec.bad) { showToast(t('Add a price for {model}: «{value}» is not a rate — enter a number from 0 up to {max} (USD per million tokens)', { model: rec.model, value: rec.bad.v, max: 999.99 }), { type: 'error' }); return; }
       if (typed && typed < rec.inputs.length) { showToast(t('Add a price for {model}: enter all five rates — type 0 where the provider charges nothing', { model: rec.model }), { type: 'error' }); return; }
-      const orphan = typed ? rec.also.filter(o => { const r2 = addRows.get(priceKeyOf(o)); return r2 && !r2.inputs.every(([, el]) => el.value !== ''); }) : [];
+      const orphan = typed ? rec.also.filter(o => { const r2 = addRows.get(priceKeyOf(o) + '\n' + rec.acct); return r2 && !r2.inputs.every(([, el]) => el.value !== ''); }) : [];
       if (orphan.length) { showToast(t('The row for {model} would also price {models} — give each its own row (the same rates are fine)', { model: rec.model, models: orphan.join(', ') }), { type: 'error' }); return; }
     }
+    for (const [id, w] of acctWork) { if (w.tiers && !Object.keys(w.tiers).length) delete w.tiers; edited.accounts[id] = Object.keys(w).length ? w : null; }
     save.disabled = true;
     const patch = {};
     if (Object.keys(edited.tiers).length) patch.tiers = edited.tiers;
@@ -962,13 +972,15 @@ function emptyLine() { const e = document.createElement('div'); e.className = 'u
 
 function exportCsv(d) {
   if (!d) return;
-  // estCost = the PRICED part; a row whose every request has an unknown price leaves it EMPTY (never 0), and
-  // unpricedTokens says what each row leaves out (B-d578 P1-b — a provider's model with no price row)
-  const lines = [['dimension', 'key', 'name', 'type', 'requests', 'sessions', 'input', 'cacheWrite', 'cacheRead', 'output', 'totalTokens', 'estCost', 'unpricedTokens'].join(',')];
+  // estCost = the PRICED part; a row whose every request has an unknown price leaves it EMPTY (never 0), and the
+  // unpricedTokens column says what each row leaves out (B-d578 P1-b — a provider's model with no price row) — the column
+  // is there ONLY when the answer has an unknown part: a hub with no provider exports exactly the release's file (r1131 item 4)
+  const anyUnknown = unpricedOf(d.totals || {}) !== null;
+  const lines = [['dimension', 'key', 'name', 'type', 'requests', 'sessions', 'input', 'cacheWrite', 'cacheRead', 'output', 'totalTokens', 'estCost', ...(anyUnknown ? ['unpricedTokens'] : [])].join(',')];
   for (const [dim, rows] of Object.entries(d.groups || {})) {
     for (const r of rows) {
       const u = unpricedOf(r);
-      lines.push([dim, csvq(r.key), csvq(r.name || ''), r.type || '', r.requests, r.sessions, r.input, r.cacheWrite, r.cacheRead, r.output, r.totalTokens, u && u.requests >= r.requests ? '' : r.cost.toFixed(4), u ? u.tokens : 0].join(','));
+      lines.push([dim, csvq(r.key), csvq(r.name || ''), r.type || '', r.requests, r.sessions, r.input, r.cacheWrite, r.cacheRead, r.output, r.totalTokens, u && u.requests >= r.requests ? '' : r.cost.toFixed(4), ...(anyUnknown ? [u ? u.tokens : 0] : [])].join(','));
     }
   }
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
