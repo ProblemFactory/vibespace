@@ -297,7 +297,7 @@ async function runCmd(rest) {
   if (d.stdout) process.stdout.write(d.stdout);
   if (d.stderr) process.stderr.write(d.stderr);
   const said = [];
-  if (d.scrubbed && d.scrubbed.withheld) said.push('scrubbing met its work bound — the output after the words is withheld (scrub_work_bound)');   // 主开发 r1216: the record's field, said (its hits count the withheld stretches too)
+  if (d.scrubbed && d.scrubbed.withheld) said.push(d.scrubbed.withheld === 'scrub_worker_gone' ? 'the scrubber stopped — the output after the words is withheld (scrub_worker_gone)' : 'scrubbing met its work bound — the output after the words is withheld (scrub_work_bound)');   // 主开发 r1216: the record's field, said (its hits count the withheld stretches too)
   else if (d.scrubbed && d.scrubbed.hits) said.push(`${d.scrubbed.hits} occurrence(s) of a stored secret blanked`);
   if (d.truncated) said.push('the output was cut at 2 MiB');
   if (d.timedOut) said.push('stopped at its timeout');

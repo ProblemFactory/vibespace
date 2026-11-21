@@ -51,7 +51,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort } from './scratch.mjs';
+import { scratch, freePort, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';   // lane browser-login: ⑫'s leaking watch / route copies (never src/)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -218,20 +218,24 @@ console.log('④ the agent side has no unlock');
   // THE RUN DOOR'S ANSWER (lane vault-run-door): every chunk of the child's stdout / stderr reaches `parts` only through the
   // run's scrubber, the tail at the end too; the answer's two streams are those VALUE-masked parts ONLY (round 21: not secret-shapes — a tool's own named field is not a secret) — nothing else.
   // Lane vault-scrub-forms: ONE scrubber per run (createRunMasker, both pipes in arrival order — one window): `parts` is
-  // written in ONE place, `handOn`, and `handOn` is handed only what that scrubber's push / end answer
-  const door = tree.get('src/server/vault-run-door.js') || '';
-  const scrubbedOnly = (t) => {
+  // written in ONE place, `handOn`, and `handOn` is handed only what that scrubber answers. Since lane lg-vault-file's scan off
+  // the loop (主开发 r1573) the scrubber is the run's WORKER: each read goes to it (`scrub.push(k, text)`), its replies come back
+  // through `scrub.onOut = handOn`, its end (or its loss, withheld by name) through `handOn(e)` in `scrub.end(cut).then((e) =>`;
+  // the worker builds its ONE masker from the values it is handed, over both pipes
+  const door = tree.get('src/server/vault-run-door.js') || '', scrubWorker = tree.get('src/server/vault-run-scrub-worker.js') || fs.readFileSync(path.join(REPO, 'src/server/vault-run-scrub-worker.js'), 'utf8');
+  const scrubbedOnly = (t, wk = scrubWorker) => {
     const writes = [...t.matchAll(/parts(?:\[k\]|\.out|\.err)\.push\([^;]*\);/g)].map((m) => m[0]);
     const handed = [...t.matchAll(/handOn\(([^;]*)\);/g)].map((m) => m[1]);
     return writes.join(' ') === 'parts.out.push(o.out); parts.err.push(o.err);'
       && /const handOn = \(o\) => \{ parts\.out\.push\(o\.out\); parts\.err\.push\(o\.err\); \};/.test(t)
-      && handed.length === 3 && handed.every((a) => /^scrub\.(push|end)\(/.test(a)) && /scrub = VR\.createRunMasker\(secrets, \['out', 'err'\]\)/.test(t)
+      && handed.length === 1 && handed[0] === 'e' && /scrub\.end\(cut\)\.then\(\(e\) => \{/.test(t) && /scrub\.onOut = handOn;/.test(t) && /if \(text\) scrub\.push\(k, text\);/.test(t)
+      && /m = VR\.createRunMasker\(msg\.secrets, \['out', 'err'\]/.test(wk)
       && /const outT = \{ text: parts\.out\.join\(''\), redacted: 0 \}, errT = \{ text: parts\.err\.join\(''\), redacted: 0 \};/.test(t)
       && /stdout: outT\.text, stderr: errT\.text/.test(t) && !/stdout: (?!outT\.text|utf8Head\(outT\.text\))/.test(t) && !/stderr: (?!errT\.text|utf8Head\(errT\.text\))/.test(t);
   };
   ok(scrubbedOnly(door), 'the run door hands the agent ONLY scrubbed text: each stream chunk enters its parts through the run\'s ONE scrubber (createRunMasker\'s push, the end\'s tail too — one place, handOn), the answer\'s stdout / stderr are those parts through secret-shapes — no other stdout / stderr field');
-  ok(!scrubbedOnly(door.replace('if (text) handOn(scrub.push(k, text));', 'if (text) parts[k].push(text);')) && !scrubbedOnly(door.replace('if (text) handOn(scrub.push(k, text));', "if (text) handOn({ out: k === 'out' ? text : '', err: k === 'err' ? text : '' });")),
-    'MUTANTS: a stream chunk handed on without the scrubber (straight into parts, or into handOn) ⇒ RED');
+  ok(!scrubbedOnly(door.replace('if (text) scrub.push(k, text);', 'if (text) parts[k].push(text);')) && !scrubbedOnly(door.replace('if (text) scrub.push(k, text);', "if (text) handOn({ out: k === 'out' ? text : '', err: k === 'err' ? text : '' });")) && !scrubbedOnly(door, scrubWorker.replace("m = VR.createRunMasker(msg.secrets, ['out', 'err']", "m = VR.createRunMasker([], ['out', 'err']")),
+    'MUTANTS: a stream chunk handed on without the scrubber (straight into parts, or into handOn), or a worker whose masker holds none of the run\'s values ⇒ RED');
   ok(!/vaultReveal|valueOf\(/.test(routes.slice(routes.indexOf("'/api/agent/vault/runnable'"), routes.indexOf("'/api/agent/vault/runnable'") + 700)), 'runnable answers names — it never asks a store for a value');
   // lane vault-mint-put (q-043 §9): + MINT / PUT — CREATE-only doors in the session's OWN namespace; neither reads a value
   // back (there is no agent reveal door; the owner reveals in the Vault window), and both refuse a locked vault by name.
@@ -675,18 +679,21 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     const otherRun = await call(portO, 'POST', '/api/agent/vault/run', { authorization: 'Bearer ' + TO.other }, { args: ['--env', `T=${ref}`, '--', process.execPath, '-e', PRINT], cwd: ROOT8 });
     ok(otherRun.status === 403 && /use_not_granted/.test(otherRun.body) && formsO.every((f) => !otherRun.body.includes(f)), '(c2) …another session\'s run of it ⇒ 403 use_not_granted, nothing read', otherRun.status);
     await new Promise((res) => srvO.close(res));
-    // THE CONTROL: the same run through a door copy whose scrubber masks nothing ⇒ the value IS in the answer (the 0 above is not vacuous)
-    const DR = path.join(REPO, 'src/server/vault-run-door.js'), drSrc = fs.readFileSync(DR, 'utf8');
-    const drMut = drSrc.replace("scrub = VR.createRunMasker(secrets, ['out', 'err']);", "scrub = VR.createRunMasker([], ['out', 'err']);");
-    const Mo = require('module'), mo = new Mo(DR, null); mo.filename = DR; mo.paths = Mo._nodeModulePaths(path.dirname(DR)); mo._compile(drMut, DR);
-    const runM = mo.exports.create({ dataDir: path.join(ROOT8, 'mut-run'), vault: eng8, userTodos: todosO, sources: { secrets: () => require(path.join(REPO, 'src/server/vault-contents.js')).secretSource({ vault: eng8 }) }, instanceKind: () => 'cluster', runRoot: () => ROOT8, log: () => {} });
+    // THE CONTROL: the same run through the door with a scrubber worker that masks nothing (its masker built over no value) ⇒ the
+    // value IS in the answer (the 0 above is not vacuous). The worker is planted beside the run root, its requires absolute
+    const WK = path.join(REPO, 'src/server/vault-run-scrub-worker.js'), wkSrc = fs.readFileSync(WK, 'utf8');
+    let wkMut = anchored(wkSrc, "m = VR.createRunMasker(msg.secrets, ['out', 'err']", "m = VR.createRunMasker([], ['out', 'err']", '(c2) a scrubber worker that masks nothing');
+    wkMut = anchored(wkMut, "require('../worker-memory.js')", `require(${JSON.stringify(path.join(REPO, 'src/worker-memory.js'))})`, '(c2) the planted worker reads the memory helper');
+    wkMut = anchored(wkMut, "require('../vault-run.js')", `require(${JSON.stringify(path.join(REPO, 'src/vault-run.js'))})`, '(c2) the planted worker reads the scrubber');
+    const wkFile = path.join(ROOT8, 'scrub-worker-masks-nothing.js'); fs.writeFileSync(wkFile, wkMut);
+    const runM = require(path.join(REPO, 'src/server/vault-run-door.js')).create({ dataDir: path.join(ROOT8, 'mut-run'), vault: eng8, userTodos: todosO, sources: { secrets: () => require(path.join(REPO, 'src/server/vault-contents.js')).secretSource({ vault: eng8 }) }, instanceKind: () => 'cluster', runRoot: () => ROOT8, log: () => {}, scrubWorkerFile: wkFile });
     fs.mkdirSync(path.join(ROOT8, 'mut-run'), { recursive: true });
     const appM = express8(); appM.use(express8.json());
     reg8(appM, { vault: eng8, activeSessions: sessO, getJobs: () => jobs8, run: runM });
     const srvM = await listen(appM);
     const ranM = await call(srvM.address().port, 'POST', '/api/agent/vault/run', { authorization: 'Bearer ' + TO.own }, { args: ['--env', `T=${ref}`, '--', process.execPath, '-e', PRINT], cwd: ROOT8 });
     await new Promise((res) => srvM.close(res));
-    ok(drMut !== drSrc && formsO.filter((f) => ranM.body.includes(f)).length >= 2, '(c2) CONTROL RED: a door copy whose scrubber masks nothing answers the owner conversation\'s run WITH the value — the leg above sees a value when one is there', { patched: drMut !== drSrc, hits: formsO.filter((f) => ranM.body.includes(f)).length });
+    ok(wkMut !== wkSrc && formsO.filter((f) => ranM.body.includes(f)).length >= 2, '(c2) CONTROL RED: the door with a scrubber worker that masks nothing answers the owner conversation\'s run WITH the value — the leg above sees a value when one is there', { patched: wkMut !== wkSrc, hits: formsO.filter((f) => ranM.body.includes(f)).length });
   }
 
   // (d) THE MUTANTS

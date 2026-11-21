@@ -132,6 +132,8 @@ const [mode, arg] = process.argv.slice(2);
   if (mode === 'nice') { process.stdin.on('data', () => {}); process.stdin.on('end', () => process.stdout.write('NICE ' + require('os').getPriority())); return; }   // B-7f18: the run's own niceness, read by itself once its stdin closed (the door writes it after the set)
   if (mode === 'json') { const v = process.env.T, b = Buffer.from(v); process.stdout.write('{"meta":{"rc":"ok"},"key":"deadbeefcafef00dba5eba11","use_auth":false,"site":"HQ","auth":"' + b.toString('base64') + '","raw":"' + v + '","ok":true}\\n'); return; }
   if (mode === 'split') { const v = process.env.T, h = v.length >> 1; process.stdout.write('<' + v.slice(0, h)); await sleep(40); process.stderr.write(v.slice(h) + '>\\n'); await sleep(40); process.stdout.write(' tail\\n'); return; }   // ONE value, half on each pipe
+  if (mode === 'drip') { for (let i = 0; i < 10; i++) { process.stdout.write('drip ' + i + (i === 4 ? ' ' + process.env.T : '') + '\\n'); await sleep(5); } return; }   // ten pieces 5 ms apart, the value in the fifth (THE BOUND ON SILENCE's lawful slow run)
+  if (mode === 'soft') { process.stdout.write('token=' + process.env.T + '\\n' + '=\\n'.repeat(150000) + 'done\\n'); return; }   // 300 KB of soft breaks after the value: the QP view holds them, each turn rescans the hold (THE SCAN OFF THE LOOP's costly output)
   if (mode === 'edge2') { process.stdout.write('x'.repeat(2 * 1024 * 1024 - 60) + [...process.env.T].map((c) => '&#' + c.codePointAt(0) + ';').join('') + 'y'.repeat(4096)); return; }   // a LONG new form across the 2 MiB cut
   if (mode === 'edge3') { process.stdout.write(Buffer.concat([Buffer.from('x'.repeat(2 * 1024 * 1024 - 40)), Buffer.from(process.env.T, 'utf16le'), Buffer.from('y'.repeat(4096))])); return; }
   let v;
@@ -230,7 +232,7 @@ const ROWS = {
 const sourceOf = (store) => ({ vaultRows: () => ROWS[store].map(({ v, ...r }) => r), vaultReveal: (e, f) => { const r = ROWS[store].find((x) => x.entry === e && x.field === f); return r ? r.v : null; } });
 const CALLER = { conversationId: 'conv-1', sessionKey: 'claude:conv-1', name: 'Lane X', cwd: null };
 let worldN = 0;
-async function world({ instance = 'local', killGraceMs = 400, askMs = null, lateMs = null, doorMod = DOOR, setup = true, pipeGraceMs = 300 } = {}) {
+async function world({ instance = 'local', killGraceMs = 400, askMs = null, lateMs = null, doorMod = DOOR, setup = true, pipeGraceMs = 300, doorExtra = {} } = {}) {   // doorExtra: the door's own seams (its scrubber worker's file, figures, silence bound)
   const dir = path.join(ROOT, 'w' + (++worldN)); const dataDir = path.join(dir, 'data'), work = path.join(dir, 'work'), runRoot = path.join(dir, 'run');
   for (const d of [dataDir, work, runRoot]) fs.mkdirSync(d, { recursive: true });
   const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {} }, idleTimer: false, register: false });
@@ -242,7 +244,7 @@ async function world({ instance = 'local', killGraceMs = 400, askMs = null, late
   const gone = new Set();
   const mk = (mod = doorMod, extra = {}) => mod.create({ dataDir, vault, userTodos, sources: Object.fromEntries(Object.keys(ROWS).map((s) => [s, () => sourceOf(s)])), instanceKind: () => instance,
     runRoot: () => runRoot, home: SUITE_HOME, tmpDir: SUITE_TMP, agentEnv: () => ({ ...SUITE_ENV, PATH: BIN + ':' + SUITE_ENV.PATH }), killGraceMs, pipeGraceMs, timers, liveOf: (cid) => !gone.has(cid), log: (m) => logs.push(String(m)), isRootOwned: isRootOwnedTest, ...extra });   // round 10: extra deps (a capturing spawnImpl, a PATH-with-a-writable-head agentEnv) for the spawn-env seal test
-  const door = mk();
+  const door = mk(doorMod, doorExtra);
   return { dir, dataDir, work, runRoot, vault, userTodos, door, logs, gone, mk, timerLog, caller: { ...CALLER, cwd: work } };
 }
 const cardsOf = (w) => (w.userTodos.snapshot().open || []).filter((i) => i.action && i.action.type === 'vault-run-ask');
@@ -961,21 +963,141 @@ async function auditClean(doorMod) {
 }
 // THE OWNER'S RECORD OF THE WORK BOUND (主开发 r1216): a run whose scrubbing met its work bound says so — ONE field, `withheld:
 // 'scrub_work_bound'`, on the audit line and in the answer. The door's own figure is out of a fast leg's reach (an ordinary output
-// never meets it), so a copy of the door plants a turn's figure of 64 steps on its one scrubber — its start otherwise the door's.
+// never meets it), so the door plants a turn's figure of 64 steps on its scrubber worker (its seam `scrubSteps`).
+const SRCD = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8'), SRCW = fs.readFileSync(path.join(REPO, 'src/server/vault-run-scrub-worker.js'), 'utf8');
+const doorCopy = (from, to, tag) => M.load('src/server/vault-run-door.js', (Array.isArray(from) ? from : [[from, to]]).reduce((t, [f, x], k) => anchored(t, f, x, `${tag} (${k + 1})`), SRCD), tag.replace(/\W+/g, '-'));   // one edit, or a list of [from, to] pairs
+const workerCopy = (from, to, tag) => M.write('src/server/vault-run-scrub-worker.js', anchored(SRCW, from, to, tag), tag.replace(/\W+/g, '-'));
+const SMALL = { scrubSteps: { push: 64, run: 1 << 30 } };
 {
-  const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-  const SMALL = ["scrub = VR.createRunMasker(secrets, ['out', 'err']);", "scrub = VR.createRunMasker(secrets, ['out', 'err'], { steps: { push: 64, run: 1 << 30 } });"];
-  const copyOf = (pairs, tag) => { let t = SRC, n = 0; for (const [f, to] of pairs) { n += SRC.split(f).length - 1 === 1 ? 1 : 0; t = t.replace(f, to); } return { hit: n === pairs.length, mod: n === pairs.length ? M.load('src/server/vault-run-door.js', t, tag) : null }; };
   const boundLeg = async (mod) => {
-    const wb = await world({ doorMod: mod }); openRow(wb);
+    const wb = await world({ doorMod: mod, doorExtra: SMALL }); openRow(wb);
     const { r } = await runAnswered(wb, ENV('env'));
     const ran = runLines(wb).find((x) => x.outcome === 'ran'), out = (r && (r.stdout || '') + (r.stderr || '')) || '';
-    return { ok: !!(r && r.ok), said: out.includes('(scrub_work_bound)]'), answer: r && r.scrubbed ? r.scrubbed.withheld : null, line: ran && ran.scrubbed ? ran.scrubbed.withheld : null, leaks: leaks(out, VALUE).length };
+    return { ok: !!(r && r.ok), said: out.includes('(scrub_work_bound)]'), answer: r && r.scrubbed ? r.scrubbed.withheld : null, line: ran && ran.scrubbed ? ran.scrubbed.withheld : null, leaks: leaks(out, VALUE).length, live: wb.door.scrubLive() };
   };
-  const small = copyOf([SMALL], 'smallbound'), rb = small.mod ? await boundLeg(small.mod) : null;
-  ok(small.hit && rb && rb.ok && rb.said && rb.answer === 'scrub_work_bound' && rb.line === 'scrub_work_bound' && rb.leaks === 0, 'THE OWNER\'S RECORD: a run whose scrubbing met its work bound (a planted figure) — the output says so by name, the answer and the audit line each carry `withheld: \'scrub_work_bound\'`, nothing of the value in the output', rb);
-  const gone = copyOf([SMALL, ["...(scrub.over ? { withheld: 'scrub_work_bound' } : {}) };", '};']], 'smallbound-nofield'), rg = gone.mod ? await boundLeg(gone.mod) : null;
-  ok(gone.hit && rg && rg.said && !rg.line && !rg.answer, 'MUTANT «the work bound not on the record»: the patch hits once and the leg goes RED — the output said the words, the audit line and the answer carry no `withheld`; the shipped door writes the one field', rg);
+  const rb = await boundLeg(DOOR);
+  ok(rb.ok && rb.said && rb.answer === 'scrub_work_bound' && rb.line === 'scrub_work_bound' && rb.leaks === 0 && rb.live === 0, 'THE OWNER\'S RECORD: a run whose scrubbing met its work bound (a planted figure) — the output says so by name, the answer and the audit line each carry `withheld: \'scrub_work_bound\'`, nothing of the value in the output', rb);
+  const rg = await boundLeg(doorCopy("...(e.lost ? { withheld: 'scrub_worker_gone' } : c.over ? { withheld: 'scrub_work_bound' } : {}) };", "...(e.lost ? { withheld: 'scrub_worker_gone' } : {}) };", 'the work bound not on the record'));
+  ok(rg.said && !rg.line && !rg.answer, 'MUTANT «the work bound not on the record»: the patch hits once and the leg goes RED — the output said the words, the audit line and the answer carry no `withheld`; the shipped door writes the one field', rg);
+}
+
+// THE SCAN OFF THE LOOP (lane lg-vault-file, 主开发 r1505 / r1573): ONE SCRUBBER WORKER A RUN — the masker never runs on the
+// hub's loop; a worker that dies or keeps silent past its bound withholds by name, never raw; one that cannot start refuses the run
+// before the child spawns; the bound is on silence, not on a lawful run's work; what is posted and not answered is bounded by the
+// run's output cap; the output is the loop masker's byte for byte; no worker outlives its run.
+{
+  const worlds = [];
+  const W = async (o = {}) => { const w = await world(o); openRow(w); worlds.push(w); return w; };
+  // (1) THE LOOP IS NOT HELD: a costly output (300 KB of soft breaks the QP view holds, each turn rescanning the hold, under a
+  // planted turn's figure of 2^27) — the main thread builds no masker and runs no scan; a 5 ms timer reads the loop's longest gap
+  const costly = async (doorMod) => {
+    const w = await W({ doorMod, doorExtra: { scrubSteps: { push: 2 ** 27, run: 2 ** 40 }, scrubSilenceMs: 120000 } });   // this leg judges the loop, not silence (the read's #13)
+    const real = VR.createRunMasker; let made = 0; VR.createRunMasker = (...a) => { made++; return real(...a); };
+    let last = performance.now(), gap = 0; const tick = setInterval(() => { const t = performance.now(); if (t - last > gap) gap = t - last; last = t; }, 5);
+    let r = null; try { ({ r } = await runAnswered(w, ENV('soft'))); } finally { clearInterval(tick); VR.createRunMasker = real; }
+    return { ok: !!(r && r.ok), made, gap: Math.round(gap), done: /done/.test((r && r.stdout) || ''), leaks: leaks(((r && r.stdout) || '') + ((r && r.stderr) || ''), VALUE).length };
+  };
+  const LOOP = "try { scrub = await Promise.resolve((() => { let mk = null; const sc = { onOut() { }, stats: { posted: 0, inflight: 0, maxInflight: 0, withheld: 0 }, give(sec) { mk = VR.createRunMasker(sec, ['out', 'err'], scrubSteps ? { steps: scrubSteps } : {}); }, push(k, t) { if (t) sc.onOut(mk.push(k, t)); }, end(cut) { const o = mk.end(cut); return Promise.resolve({ out: o.out, err: o.err, counts: { hits: mk.hits, bytes: mk.bytes, byForm: mk.byForm, over: mk.over, withheld: mk.withheld }, lost: false }); }, close() { } }; return sc; })()); }";
+  const loopDoor = doorCopy('try { scrub = await startScrub(); }', LOOP, 'the scan on the loop');
+  const c1 = await costly(DOOR), c0 = await costly(loopDoor);
+  console.log(`    judged — the loop while a costly output is scrubbed (300 KB of held soft breaks): in its worker the main thread built ${c1.made} masker(s), its longest gap ${c1.gap} ms; on the loop (the control) ${c0.made}, ${c0.gap} ms`);
+  ok(c1.ok && c1.done && c1.leaks === 0 && c1.made === 0 && c0.made === 1, `THE LOOP IS NOT HELD: the run's scrubber is its worker's — the main thread built no masker and ran no scan (${c1.made}; the scan on the loop builds ${c0.made}); the loop's longest gaps are printed above as a reading, never judged here (a fast suite holds no wall-clock bound); red control: «the scan on the loop» (the masker built on the main thread)`, { c1, c0 });
+  // (2) BYTE FOR BYTE: the run's worker against the masker on the loop, the same pieces on two pipes interleaved at seeded
+  // points — a run that ends on its own, one CUT, one past a planted turn's figure («over») — the output and every count
+  const rnd = ((seed) => () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; })(1573);
+  const b = Buffer.from(VALUE), spell = [VALUE, b.toString('base64'), b.toString('hex'), JSON.stringify({ k: VALUE }), encodeURIComponent(VALUE)];
+  const differ = [];
+  for (const [mode, steps] of [['end', null], ['cut', null], ['over', { push: 3000, run: 2 ** 40 }]]) {
+    const wd = await W({ doorExtra: steps ? { scrubSteps: steps } : {} });
+    for (let i = 0; i < 3; i++) {
+      let text = ''; for (let l = 0; l < 6; l++) text += rnd() < 0.5 ? `line ${l} ${'x'.repeat(Math.floor(rnd() * 60))}\n` : spell[Math.floor(rnd() * spell.length)] + '\n';
+      text += mode === 'cut' ? spell[Math.floor(rnd() * spell.length)].slice(0, 9) : '';
+      const pieces = []; for (let at = 0; at < text.length;) { const n = 1 + Math.floor(rnd() * 80); pieces.push([rnd() < 0.7 ? 'out' : 'err', text.slice(at, at + n)]); at += n; }
+      const secrets = [{ label: 'mounts/m1/secretKey', value: VALUE }];
+      const ref = VR.createRunMasker(secrets, ['out', 'err'], steps ? { steps } : {}), want = { out: '', err: '' };
+      for (const [k, t] of pieces) { const o = ref.push(k, t); want.out += o.out; want.err += o.err; }
+      { const o = ref.end(mode === 'cut'); want.out += o.out; want.err += o.err; }
+      const sc = await wd.door._startScrub(), got = { out: '', err: '' }; sc.give(secrets);
+      sc.onOut = (o) => { got.out += o.out; got.err += o.err; };
+      for (const [k, t] of pieces) sc.push(k, t);
+      const e = await sc.end(mode === 'cut'); got.out += e.out; got.err += e.err;
+      const wc = JSON.stringify({ hits: ref.hits, bytes: ref.bytes, byForm: ref.byForm, over: ref.over, withheld: ref.withheld }), gc = JSON.stringify(e.counts);
+      if (got.out !== want.out || got.err !== want.err || wc !== gc || (mode === 'over' && !ref.over)) differ.push({ mode, i, want: wc, got: gc, over: ref.over });   // the read's #17: «past the figure» is met, or the run is no proof of it
+    }
+  }
+  console.log(`    judged — the worker against the masker on the loop: 9 runs (3 ending on their own, 3 cut, 3 past a planted figure), ${differ.length} differ`);
+  ok(differ.length === 0, `BYTE FOR BYTE: the run's worker hands on what the masker on the loop hands on — the output and every count, ending on its own, at a cut and past the figure («over», met in each), two pipes interleaved: ${differ.length} of 9 differ; red control: «the worker drops the planted figures»`, differ.slice(0, 2));
+  {
+    const noSteps = workerCopy("msg.steps ? { steps: msg.steps } : {}", "{}", 'the worker drops the planted figures');
+    const wd = await W({ doorExtra: { scrubWorkerFile: noSteps, scrubSteps: { push: 3000, run: 2 ** 40 } } }), secrets = [{ label: 'mounts/m1/secretKey', value: VALUE }];
+    const text = Array.from({ length: 8 }, (_, l) => spell[l % spell.length] + '\n').join(''), ref = VR.createRunMasker(secrets, ['out', 'err'], { steps: { push: 3000, run: 2 ** 40 } }), want = { out: '', err: '' };
+    for (let at = 0; at < text.length; at += 40) { const o = ref.push(at % 80 ? 'err' : 'out', text.slice(at, at + 40)); want.out += o.out; want.err += o.err; }
+    { const o = ref.end(false); want.out += o.out; want.err += o.err; }
+    const sc = await wd.door._startScrub(), got = { out: '', err: '' }; sc.give(secrets); sc.onOut = (o) => { got.out += o.out; got.err += o.err; };
+    for (let at = 0; at < text.length; at += 40) sc.push(at % 80 ? 'err' : 'out', text.slice(at, at + 40));
+    const e = await sc.end(false); got.out += e.out; got.err += e.err;
+    ok(ref.over && (got.out !== want.out || got.err !== want.err || !!e.counts.over !== ref.over), 'MUTANT «the worker drops the planted figures»: the leg goes RED — the loop\'s masker went over its figure, the worker did not', { refOver: ref.over, workerOver: e.counts.over });
+  }
+  // (3) A LOST WORKER WITHHOLDS BY NAME: a worker that dies at its third piece; one that keeps silent from its third piece past a
+  // planted bound of 300 ms — the output after it under the cut's placeholder with the words, nothing of the value, the record's field
+  const lostLeg = async (doorMod, workerFile, silenceMs = 10000) => {
+    const w = await W({ doorMod, doorExtra: { scrubWorkerFile: workerFile, scrubSilenceMs: silenceMs } });
+    const { r } = await runAnswered(w, ENV('env'));
+    const ran = runLines(w).find((x) => x.outcome === 'ran'), out = (r && (r.stdout || '') + (r.stderr || '')) || '';
+    return { ok: !!(r && r.ok), said: out.includes('(scrub_worker_gone)]'), ph: out.includes('[vault:…]'), leaks: leaks(out, VALUE).length, answer: r && r.scrubbed ? r.scrubbed.withheld : null, line: ran && ran.scrubbed ? ran.scrubbed.withheld : null, live: w.door.scrubLive() };
+  };
+  const dies = workerCopy("if (msg.type === 'push') { const o = m.push(msg.stream, msg.text);", "if (msg.type === 'push') { if (msg.seq >= 3) process.exit(7); const o = m.push(msg.stream, msg.text);", 'the worker dies at its third piece');
+  const mute = workerCopy("if (msg.type === 'push') { const o = m.push(msg.stream, msg.text);", "if (msg.type === 'push') { if (msg.seq >= 3) return; const o = m.push(msg.stream, msg.text);", 'the worker keeps silent from its third piece');
+  const lostOk = (x) => x.ok && x.said && x.ph && x.leaks === 0 && x.answer === 'scrub_worker_gone' && x.line === 'scrub_worker_gone' && x.live === 0;
+  const buildFails = workerCopy("try { m = VR.createRunMasker(", "try { throw Object.assign(new Error('planted'), { code: 'planted' }); m = VR.createRunMasker(", 'the worker refuses its build');
+  const ld = await lostLeg(DOOR, dies), lm = await lostLeg(DOOR, mute, 300), lb = await lostLeg(DOOR, buildFails);
+  ok(lostOk(ld) && lostOk(lm) && lostOk(lb), 'A LOST WORKER WITHHOLDS BY NAME: a worker that died at its third piece, one silent past its bound from its third piece (its end answered while pieces were owed: a loss), and one whose build of the run\'s masker threw — the output after it under the cut\'s placeholder with «(scrub_worker_gone)», nothing of the value, the answer and the audit line `withheld: \'scrub_worker_gone\'`, no worker left; red control: «a lost worker answered as an empty end»', { ld, lm });
+  const silentDrop = doorCopy("const lossOut = () => ({ out: SCRUB_CUT_PH, err: SCRUB_GONE_WORDS, counts: { ...last, hits: last.hits + 1 }, lost: true });", "const lossOut = () => ({ out: '', err: '', counts: last, lost: false });", 'a lost worker answered as an empty end');
+  const lx = await lostLeg(silentDrop, dies);
+  ok(!lostOk(lx), 'MUTANT «a lost worker answered as an empty end»: the patch hits once and the leg goes RED — the stretch vanished unsaid, the record silent; the shipped door withholds it by name', lx);
+  const early = await lostLeg(doorCopy("if (msg.seq !== seq + 1 || answered !== seq) { lose('order'); return; }", "if (msg.seq !== seq + 1) { lose('order'); return; }", 'an end taken before every piece was answered'), mute, 300);
+  ok(!lostOk(early) && early.leaks > 0, `MUTANT «an end taken before every piece was answered»: the patch hits once and the leg goes RED — the silent worker's end was taken as the run's, and its held half value went out (${early.leaks} leak(s)); the shipped door counts it a loss`, early);
+  // (4) THE BOUND IS ON SILENCE, not on work: a worker that answers every piece 80 ms after the last (a lawful slow run, ten pieces,
+  // about 880 ms in all) under a bound of 600 ms is never withheld; red control: the bound armed once and never reset (a bound on the whole run)
+  const slow = workerCopy("if (msg.type === 'push') { const o = m.push(msg.stream, msg.text); parentPort.postMessage({ type: 'out', seq: msg.seq, out: o.out, err: o.err, counts: counts() }); return; }\n  if (msg.type === 'end') { const o = m.end(!!msg.cut); parentPort.postMessage({ type: 'end', seq: msg.seq, out: o.out, err: o.err, counts: counts() }); }",
+    "if (msg.type === 'push') { const o = m.push(msg.stream, msg.text), r = { type: 'out', seq: msg.seq, out: o.out, err: o.err, counts: counts() }; globalThis.q = (globalThis.q || Promise.resolve()).then(() => new Promise((ok) => setTimeout(ok, 80))).then(() => parentPort.postMessage(r)); return; }\n  if (msg.type === 'end') { const o = m.end(!!msg.cut), r = { type: 'end', seq: msg.seq, out: o.out, err: o.err, counts: counts() }; globalThis.q = (globalThis.q || Promise.resolve()).then(() => new Promise((ok) => setTimeout(ok, 80))).then(() => parentPort.postMessage(r)); }", 'the worker answers 80 ms after its last answer');
+  const slowLeg = async (doorMod) => { const w = await W({ doorMod, doorExtra: { scrubWorkerFile: slow, scrubSilenceMs: 600 } }); const { r } = await runAnswered(w, ENV('drip')); const out = (r && (r.stdout || '') + (r.stderr || '')) || ''; return { ok: !!(r && r.ok), lost: out.includes('(scrub_worker_gone)]'), masked: out.includes(PH1) }; };
+  const s1 = await slowLeg(DOOR), s0 = await slowLeg(doorCopy([["sc.onOut({ out: msg.out, err: msg.err }); arm(); return;", "sc.onOut({ out: msg.out, err: msg.err }); return;"], ["if (heard === at && owed()) lose(started ? 'silent' : 'start'); else arm();", "if (owed()) lose(started ? 'silent' : 'start'); else arm();"]], null, 'the bound armed once, never reset'));
+  ok(s1.ok && !s1.lost && s1.masked && s0.lost, `THE BOUND IS ON SILENCE, NOT ON WORK: a worker answering each of ten pieces 80 ms after the last (about 880 ms in all) under a bound of 600 ms is never withheld and masks the value; red control: «the bound armed once, never reset» withholds it`, { s1, s0 });
+  // (5) A WORKER THAT CANNOT START refuses the run by name before the child spawns (its build planted to fail; no worker file at all)
+  const refusedW = workerCopy("parentPort.postMessage({ type: 'ready' });", "parentPort.postMessage({ type: 'refused', code: 'planted' });", 'the worker refuses at its start');
+  const startLeg = async (workerFile) => { const w = await W({ doorExtra: { scrubWorkerFile: workerFile } }); const ranF = path.join(w.work, 'ran.txt'); const { r } = await runAnswered(w, ENV('ran', ranF)); const line = runLines(w).find((x) => x.outcome === 'spawn_failed'); return { code: r && r.code, why: r && r.why, spawned: fs.existsSync(ranF), line: !!line, live: w.door.scrubLive() }; };
+  const f1 = await startLeg(refusedW), f2 = await startLeg(path.join(M.dir, 'no-such-worker.js'));
+  ok([f1, f2].every((x) => x.code === 'spawn_failed' && /scrubber could not start/.test(String(x.why)) && !x.spawned && x.line && x.live === 0), 'A WORKER THAT CANNOT START refuses the run by name (spawn_failed: the scrubber could not start) before the child spawns — it refused at its start, or there is no worker file — and no worker is left', { f1, f2 });
+  // (6) WHAT IS POSTED AND NOT YET ANSWERED is bounded by the run's output cap: a 3 MiB flood
+  const holdAll = workerCopy("if (msg.type === 'push') { const o = m.push(msg.stream, msg.text); parentPort.postMessage({ type: 'out', seq: msg.seq, out: o.out, err: o.err, counts: counts() }); return; }\n  if (msg.type === 'end') {", "if (msg.type === 'push') { const o = m.push(msg.stream, msg.text); (globalThis.held = globalThis.held || []).push({ type: 'out', seq: msg.seq, out: o.out, err: o.err, counts: counts() }); return; }\n  if (msg.type === 'end') { for (const r of globalThis.held || []) parentPort.postMessage(r);", 'the worker holds every answer until the end');
+  const floodLeg = async (doorMod) => { const wf = await W({ doorMod, doorExtra: { scrubWorkerFile: holdAll } }); const big = await runAnswered(wf, ENV('big')); return { ok: !!(big.r && big.r.ok), truncated: !!(big.r && big.r.truncated), leaks: leaks(((big.r && big.r.stdout) || '').slice(-2000), VALUE).length, ...wf.door.lastScrubStats() }; };
+  const f6 = await floodLeg(DOOR), f60 = await floodLeg(doorCopy('const text = dec[k].write(b);', 'const text = dec[k].write(buf);', 'the read posted before the cap\'s cut'));
+  ok(f6.ok && f6.truncated && f6.leaks === 0 && f6.maxInflight > VR.OUTPUT_MAX_BYTES / 2 && f6.posted <= VR.OUTPUT_MAX_BYTES && f6.maxInflight <= VR.OUTPUT_MAX_BYTES && f60.posted > VR.OUTPUT_MAX_BYTES, `WHAT IS POSTED AND NOT ANSWERED IS BOUNDED BY THE RUN'S CAP: a 3 MiB flood to a worker that answers nothing until the end — ${f6.maxInflight} characters at most unanswered at once, ${f6.posted} posted in all (the cap ${VR.OUTPUT_MAX_BYTES} bytes); red control: «the read posted before the cap's cut» posts ${f60.posted}`, { f6, f60 });
+  // (7) NO WORKER OUTLIVES ITS RUN: twelve runs end to end, a lock mid-run, a gone caller, the hub's closeAll mid-run — and every world above
+  const wn = await W();
+  for (let i = 0; i < 12; i++) await runAnswered(wn, ENV('env'));
+  const held = async (pid) => { for (let k = 0; k < 500 && !(fs.existsSync(pid) && wn.door.running() === 1); k++) await sleep(10); };   // the child's pid AND the run in `runs` (the read's #16)
+  const tmo = await runAnswered(wn, ['--timeout', '1', '--env', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'sleep', path.join(wn.work, 'tmo.pid')]);
+  const tmoLine = runLines(wn).filter((x) => x.outcome === 'ran' && x.timedOut).pop();
+  const acG = new AbortController(), pidG = path.join(wn.work, 'gone.pid'), pg = wn.door.run({ caller: wn.caller, args: ENV('sleep', pidG), cwd: wn.work, signal: acG.signal });
+  { const cg = await waitCard(wn, 1500); if (cg && cg.status === 'open') wn.door.answer(cg.action.askId, { answer: 'once' }); }   // a new shape asks first: answered, so the child runs
+  await held(pidG); acG.abort(); const rgn = await pg;
+  const goneLine = runLines(wn).filter((x) => x.outcome === 'caller_gone').pop();
+  const pidL = path.join(wn.work, 'lock.pid'), pl = runAnswered(wn, ENV('hang', pidL)); await held(pidL);
+  const liveDuring = wn.door.scrubThreads(); wn.door.onLocked('test'); const rl = await (await pl).r;
+  const lockLine = runLines(wn).filter((x) => x.outcome === 'vault_locked').pop();
+  const pidC = path.join(wn.work, 'close.pid'), pc = runAnswered(wn, ENV('hang', pidC)); await held(pidC);
+  const liveClose = wn.door.scrubThreads(); wn.door.closeAll(); await (await pc).r;
+  const settle = async (ds) => { for (let k = 0; k < 200 && ds.some((x) => x.door.scrubThreads() > 0); k++) await sleep(10); return ds.map((x) => x.door.scrubThreads()); };   // a thread's 'exit' comes a few ms after terminate()
+  const lefts = await settle(worlds), fields = (l) => !!(l && l.scrubbed && ['hits', 'bytes', 'byForm'].every((k) => k in l.scrubbed));
+  ok(liveDuring === 1 && liveClose === 1 && lefts.every((n) => n === 0) && tmo.r && tmo.r.timedOut && rgn.code === 'caller_gone' && rl && rl.code === 'vault_locked' && fields(tmoLine) && fields(goneLine) && fields(lockLine), `NO WORKER OUTLIVES ITS RUN — its THREAD counted, made and exited: twelve runs, a timeout, a gone caller, a lock mid-run (each line keeps the record's fields), the hub's closeAll mid-run and every run above — ${lefts.reduce((n, x) => n + x, 0)} threads left over ${worlds.length} doors (one live during each held run); red control: «a worker stopped and never terminated»`, { liveDuring, liveClose, lefts, timeout: tmoLine && tmoLine.scrubbed, gone: goneLine && goneLine.scrubbed, lock: lockLine && lockLine.scrubbed });
+  {
+    const wl = await world({ doorMod: doorCopy('if (w) { scrubLive.delete(w); try { w.terminate(); } catch { } } };', 'if (w) { scrubLive.delete(w); } };', 'a worker stopped and never terminated') }); openRow(wl);
+    await runAnswered(wl, ENV('env'));
+    const [n] = await settle([wl]);
+    ok(n > 0, `MUTANT «a worker stopped and never terminated»: the leg goes RED — ${n} thread(s) left after its run (the door's own list forgot it; the thread count did not)`, n);
+  }
 }
 
 console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program on the card (the security review)');
@@ -1297,12 +1419,11 @@ console.log('⑦ MUTANTS — patched copies of the door, each RED on its leg');
   const r2 = m2.mod ? await auditClean(m2.mod) : null;
   ok(m2.n === 1 && r2 && r2.leaks.length > 0, `MUTANT «an audit line carrying a value» (the child's env on the line): the patch hits once and the leg goes RED (the oracle finds ${r2 && r2.leaks.join(', ')}); the shipped door writes none`, r2 && r2.leaks);
   // lane vault-scrub-forms: ONE scrubber per run — two (one per pipe, the shape before) let a split value by
-  const m3 = mutate("scrub = VR.createRunMasker(secrets, ['out', 'err'])", "scrub = ((a, b) => ({ push: (k, x) => (k === 'out' ? { out: a.push(x), err: '' } : { out: '', err: b.push(x) }), end: () => ({ out: a.end(), err: b.end() }), hits: 0, bytes: 0, byForm: {} }))(VR.createMasker(secrets), VR.createMasker(secrets))", 'twomasks');
-  let r3 = null;
-  if (m3.mod) { const w3 = await world({ doorMod: m3.mod }); openRow(w3); r3 = await splitLeg(w3); }
-  ok(m3.n === 1 && r3 && r3.lk.length > 0, `MUTANT «two scrubbers, one per pipe» (the pre-lane shape): the patch hits once and the split leg goes RED (the oracle finds ${r3 && r3.lk.join(', ')}); the shipped door's ONE scrubber masks it`, r3);
+  const twoW = workerCopy("m = VR.createRunMasker(msg.secrets, ['out', 'err'], msg.steps ? { steps: msg.steps } : {});", "m = ((a, b) => ({ push: (k, x) => (k === 'out' ? { out: a.push(x), err: '' } : { out: '', err: b.push(x) }), end: () => ({ out: a.end(), err: b.end() }), hits: 0, bytes: 0, byForm: {}, over: false, withheld: 0 }))(VR.createMasker(msg.secrets), VR.createMasker(msg.secrets));", 'two scrubbers one per pipe');
+  const w3 = await world({ doorExtra: { scrubWorkerFile: twoW } }); openRow(w3); const r3 = await splitLeg(w3);
+  ok(r3 && r3.lk.length > 0, `MUTANT «two scrubbers, one per pipe» (the pre-lane shape, in the run's worker): the split leg goes RED (the oracle finds ${r3 && r3.lk.join(', ')}); the shipped worker's ONE scrubber masks it`, r3);
   // a CUT keeps the held tail back: flushed, a long new form begun inside the bound would arrive in part
-  const m4 = mutate('handOn(scrub.end(cut));', 'handOn(scrub.end());', 'cutflush');   // round 21: dropping the cut arg flushes the held tail RAW (cut=false ⇒ no maskTail) and leaks the half value
+  const m4 = mutate('scrub.end(cut).then((e) => {', 'scrub.end().then((e) => {', 'cutflush');   // round 21: dropping the cut arg flushes the held tail RAW (cut=false ⇒ no maskTail) and leaks the half value
   let r4 = null;
   if (m4.mod) { const w4 = await world({ doorMod: m4.mod }); openRow(w4); const e = await runAnswered(w4, ENV('edge2')); const tl = (e.r.stdout || '').slice(-1200); r4 = { truncated: e.r.truncated, lk: leaks(tl, VALUE), head: tl.replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d)).includes(VALUE.slice(0, 6)) }; }
   ok(m4.n === 1 && r4 && r4.truncated && (r4.lk.length > 0 || r4.head), 'MUTANT «a cut flushes the held tail»: the patch hits once and the edge leg goes RED (the first characters of the value\'s entities arrive); the shipped door drops them', r4);
@@ -2499,12 +2620,14 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   // so 20 parallel own runs from one conversation spawn exactly RUNS_PER_CALLER (4) and the rest are too_many_runs by name (base:
   // the digest await sat between the cap check and runs.add, so all 20 saw callerRuns 0 and spawned).
   {
+    const realKill = process.kill; process.kill = function (pid, sig) { if (typeof pid === 'number' && pid < 0 && -pid >= 93000 && -pid < 96000) return true; return realKill.call(process, pid, sig); };   // the fakes' pids are not ours: the door's group kill at their end is caught here (lane lg-vault-file's read: a real group with that id would have died)
     let spawns = 0;
     const capSpawn = (cmd, args, opts) => { spawns++; const c = new EventEmitter(); c.pid = 93000 + spawns; c.stdout = new EventEmitter(); c.stdout.destroy = () => {}; c.stderr = new EventEmitter(); c.stderr.destroy = () => {}; c.stdin = null; setImmediate(() => { c.emit('exit', 0, null); c.emit('close', 0, null); }); return c; };
     const dCap = mkGh({ spawnImpl: capSpawn, agentEnv: () => ({ ...SUITE_ENV, HOME: SUITE_HOME, PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
     const runs20 = await Promise.all(Array.from({ length: 20 }, () => dCap.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work })));
     const ran = runs20.filter((r) => r.ok).length, capped = runs20.filter((r) => !r.ok && r.code === 'too_many_runs').length;
     ok(ran === 4 && capped === 16 && spawns === 4, 'round 14 (MAJOR, caps): 20 parallel own runs ⇒ exactly 4 spawn + 16 too_many_runs by name (the digest is taken before the cap check; no await to runs.add) — base spawned all 20', { ran, capped, spawns });
+    process.kill = realKill;
   }
 
   // LOCK-DURING-HASH RED (round 14 MAJOR): the vault locks WHILE the digest streams. On mine the door re-reads the state after the
@@ -2606,12 +2729,13 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
 
   // ── ROUND 15 ITEM 4 (MINOR): the PER-CALLER cap is checked BEFORE the hash — an over-cap call never hashes ──
   {
+    const realKill = process.kill; process.kill = function (pid, sig) { if (typeof pid === 'number' && pid < 0 && -pid >= 93000 && -pid < 96000) return true; return realKill.call(process, pid, sig); };   // the fakes' pids are not ours: the door's group kill at their end is caught here (lane lg-vault-file's read: a real group with that id would have died)
     let hashes = 0; const kids = [];
     const countingDigest = (fd) => { hashes++; return digestVouch(fd); };
     const holdSpawn = () => { const c = new EventEmitter(); c.pid = 95000 + kids.length; c.stdout = new EventEmitter(); c.stdout.destroy = () => {}; c.stderr = new EventEmitter(); c.stderr.destroy = () => {}; c.stdin = null; kids.push(c); return c; };   // never closes ⇒ the run stays in `runs`
     const dH = sw.mk(DOOR, { isRootOwned: REAL, toolDigest: countingDigest, toolSealed: sealedVouch, spawnImpl: holdSpawn, agentEnv: () => ({ ...SUITE_ENV, HOME: SUITE_HOME, PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
     const prime = Array.from({ length: 4 }, () => dH.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work }));
-    for (let i = 0; i < 20 && dH.running() < 4; i++) await new Promise((r) => setImmediate(r));
+    for (let i = 0; i < 300 && dH.running() < 4; i++) await sleep(10);   // each run waits for its scrubber worker before its child spawns (lane lg-vault-file, the scan off the loop): the four are in `runs` within milliseconds, not turns
     const primedHashes = hashes;   // the 4 priming runs share ONE memoised hash (same inode)
     hashes = 0;
     const over = await Promise.all(Array.from({ length: 20 }, () => dH.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work })));
@@ -2619,6 +2743,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
     ok(dH.running() === 4 && capped === 20 && hashes === 0 && primedHashes === 1, 'round 15 (MINOR 4): an over-cap conversation (4 held) ⇒ 20 parallel calls are too_many_runs BEFORE the hash — 0 digests of the 42 MB binary (base: all 20 hashed); the 4 priming runs shared ONE memoised hash', { running: dH.running(), capped, hashes, primedHashes });
     for (const c of kids) { c.emit('exit', 0, null); c.emit('close', 0, null); }   // release the held runs (finish ⇒ runs.delete + shred) so the process exits clean
     await Promise.all(prime);
+    process.kill = realKill;
   }
 
   // RUN B — own MINTED site-pw (--for api.example.com, a non-github host) ⇒ the door pins GH_HOST AND homes the credential to

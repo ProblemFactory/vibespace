@@ -108,6 +108,8 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const { Worker } = require('worker_threads');   // THE SCAN OFF THE LOOP (lane lg-vault-file, 主开发 r1505 / r1573): one scrubber worker a run
+const { trackWorker } = require('../worker-memory.js');   // the memory census: every worker of the server process answers its heap
 const { StringDecoder } = require('string_decoder');
 const VR = require('../vault-run.js');
 const VI = require('../vault-inventory.js');
@@ -182,6 +184,26 @@ const ARGS_MAX = 65536, CWD_MAX = 4096;      // the request's words (the review:
 const STORE_MAX = 1024 * 1024;               // data/vault-run.json read bounded (a FIFO / a huge file never stalls the hub)
 const KILL_GRACE_MS = 5000;
 const PIPE_GRACE_MS = 2000;                  // after the child's exit, a pipe a stray still holds is cut (the answer never waits on it)
+// THE SCAN OFF THE LOOP (lane lg-vault-file, 主开发 r1505 / r1573): a run's output is scrubbed in ONE WORKER A RUN
+// (src/server/vault-run-scrub-worker.js), never on the hub's main loop — the loop decodes a read, posts it and appends
+// what comes back, in order.
+// - THE BOUND IS ON SILENCE, not on a lawful run's work: a worker that owes a reply and gives none for SCRUB_SILENCE_MS is
+//   lost; every reply resets the clock, so a costly run that keeps answering works as long as its figures allow.
+// - WHAT IS POSTED AND NOT YET ANSWERED is bounded by the run's own output cap (VR.OUTPUT_MAX_BYTES: take() posts nothing
+//   past it), never by a queue that grows with a flood.
+// - A LOST WORKER (dead, or silent past the bound) WITHHOLDS: what it had not answered, and everything after, is under
+//   the cut's placeholder with SCRUB_GONE_WORDS by name, and the record says `withheld: 'scrub_worker_gone'`. Never raw,
+//   never a fallback to the loop.
+// - A worker that cannot start refuses the run by name (spawn_failed: the scrubber could not start) before the child spawns.
+// - No worker outlives its run: it is ended at its end on every road (ended, refused, timed out, the caller gone, the lock,
+//   the hub's exit through closeAll). The run's values are handed to it once (one message, before the child spawns) and go
+//   with it; the door's own copies live as long as the run's objects, as for the spawn (the values map until the end, the
+//   child's env), never longer.
+// - Its starts are counted with the runs against the caps (a burst never starts more workers than may run), and it runs at
+//   the hub's priority: the child is lowered (B-7f18), its scrubber is not — the scan is bounded by the run's figures.
+const SCRUB_SILENCE_MS = 10000;
+const SCRUB_WORKER_FILE = path.join(__dirname, 'vault-run-scrub-worker.js');
+const SCRUB_GONE_WORDS = '\n[vault: this stretch of the output is withheld — its scrubber stopped (scrub_worker_gone)]\n';
 const HEAD_MAX = 4096;               // bytes of a head on the audit line (the command, each stream)
 const DETAIL_MAX = 8000;             // the For-you store's detail bound — a card that would be cut is refused (what you approve is what runs)
 const SETTLED_MAX = 256;
@@ -393,6 +415,7 @@ function lowerRun(pid, by) {
 function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () => ({ ...process.env }), instanceKind = () => 'local', policy = () => null,
   liveOf = () => true, runRoot = () => process.env.XDG_RUNTIME_DIR || os.tmpdir(), home = os.homedir(), tmpDir = os.tmpdir(),
   now = () => Date.now(), log = () => {}, spawnImpl = spawn, killGraceMs = KILL_GRACE_MS, pipeGraceMs = PIPE_GRACE_MS,
+  scrubWorkerFile = SCRUB_WORKER_FILE, scrubSteps = null, scrubSilenceMs = SCRUB_SILENCE_MS,   // THE SCAN OFF THE LOOP: the worker, its planted figures and its silence bound (a suite's seams — the product keeps the file, the module's figures and 10 s)
   spawnPriority = () => null,   // B-7f18: () → src/server/spawn-priority.js priorityFor's answer (its `priority.by` = the step below the hub); none = the hub's own
   lowerImpl = lowerRun,   // B-7f18: the run's child set `by` below the hub (a suite's seam)
   timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes,
@@ -2026,7 +2049,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     try { process.kill(-child.pid, sig); } catch { try { child.kill(sig); } catch { } }
   }
   function stop(rec, why) {
-    if (rec.stopped) return;
+    if (rec.stopped || rec.done) return;   // THE SCAN OFF THE LOOP (the read's #6): a run that finished (its child reaped, its end awaited from the worker) is stopped no more
     rec.stopped = why;
     killGroup(rec, 'SIGTERM');
     rec.hard = timers.set(() => killGroup(rec, 'SIGKILL'), killGraceMs);
@@ -2079,6 +2102,90 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (row.runSeal.childEnv) Object.assign(out, row.runSeal.childEnv);   // gh's git child: GIT_CONFIG_GLOBAL=/dev/null, NOSYSTEM, no prompt
     return out;
   }
+  // THE SCAN OFF THE LOOP (主开发 r1505 / r1573): ONE WORKER A RUN — the masker runs there, fed the run's decoded pieces in
+  // order. startScrub() → a Promise of { refused: code } or the scrubber { give(secrets) (the run's values, once, before the
+  // child spawns), push(stream, text), end(cut) → Promise<{ out, err, counts, lost }>, close(), onOut (set by the run: what each
+  // reply hands on), stats }. Every worker of this door is in `scrubLive` until it ends.
+  const scrubLive = new Set();
+  const startingBy = new Map();   // conversation → its scrubber workers starting (counted with its runs against the caps)
+  let startingAll = 0, scrubMade = 0, scrubExited = 0;   // the threads themselves: made, and gone ('exit') — a worker never terminated stays counted
+  let lastScrub = null;   // the last ended run's scrubber counts: what it posted, the most it had posted and not yet had answered (a suite reads the bound)
+  const SCRUB_CUT_PH = VR.placeholderOf({ label: '…' });
+  function startScrub() {
+    return new Promise((resolveStart) => {
+      let w = null, started = false, ended = false, lost = null, endWait = null, timer = null, seq = 0, answered = 0, heard = 0, last = { hits: 0, bytes: 0, byForm: {}, over: false, withheld: 0 };
+      const st = { posted: 0, inflight: 0, maxInflight: 0, withheld: 0 }, sizes = [];   // the characters posted and not yet answered (the bound: the run's output cap)
+      const owed = () => !started || seq > answered || !!endWait;
+      const stop = () => { if (timer) { timers.clear(timer); timer = null; } if (w) { scrubLive.delete(w); try { w.terminate(); } catch { } } };
+      // THE BOUND IS ON SILENCE: armed while a reply is owed, reset by each reply. Its firing is judged one turn later (setImmediate:
+      // after the poll phase), so a reply the worker sent while the main loop itself stalled is read first (the read's #7)
+      const arm = () => {
+        if (timer) { timers.clear(timer); timer = null; }
+        if (!owed()) return;
+        const at = heard;
+        timer = timers.set(() => { timer = null; setImmediate(() => { if (heard === at && owed()) lose(started ? 'silent' : 'start'); else arm(); }); }, scrubSilenceMs);
+        timer?.unref?.();
+      };
+      const lossOut = () => ({ out: SCRUB_CUT_PH, err: SCRUB_GONE_WORDS, counts: { ...last, hits: last.hits + 1 }, lost: true });
+      const lose = (why) => {
+        if (ended || lost) return;
+        lost = why; stop();
+        if (!started) { started = true; log(`vault-run: the run's scrubber could not start (${why}) — the run is refused`); resolveStart({ refused: `scrubber_${why}` }); return; }
+        log(`vault-run: the run's scrubber stopped (${why}) — the output after it is withheld`);
+        if (endWait) { const f = endWait; endWait = null; ended = true; f(lossOut()); }
+      };
+      const post = (msg) => { try { w.postMessage(msg); return true; } catch { lose('post'); return false; } };
+      const sc = {
+        onOut: () => { },
+        give(secrets) { if (!lost && !ended) post({ type: 'secrets', secrets, ...(scrubSteps ? { steps: scrubSteps } : {}) }); },   // the run's values, ONCE: the worker builds its masker before it reads a piece
+        push(stream, text) {
+          if (!text) return;
+          if (lost || ended) { st.withheld += text.length; return; }
+          seq++; sizes.push(text.length); st.posted += text.length; st.inflight += text.length; if (st.inflight > st.maxInflight) st.maxInflight = st.inflight;
+          if (post({ type: 'push', seq, stream, text }) && !timer) arm();
+        },
+        end(cut) {
+          return new Promise((resolveEnd) => {
+            if (lost || ended) { ended = true; resolveEnd(lossOut()); return; }
+            endWait = resolveEnd;
+            if (post({ type: 'end', seq: seq + 1, cut: !!cut })) arm();
+          });
+        },
+        close() {
+          if (ended) return;
+          ended = true; stop();
+          if (!started) { started = true; resolveStart({ refused: 'scrubber_closed' }); }
+          if (endWait) { const f = endWait; endWait = null; f(lossOut()); }   // the read's #19: an end awaited is never left hanging
+        },
+        stats: st,
+      };
+      try { w = new Worker(scrubWorkerFile); }
+      catch (e) { resolveStart({ refused: `scrubber_${String((e && e.code) || 'start').slice(0, 40)}` }); return; }
+      trackWorker('vault-run-scrub', w);   // the memory census (src/worker-memory.js)
+      scrubLive.add(w); scrubMade++;
+      arm();   // its first reply (ready) is owed too
+      w.on('message', (msg) => {
+        if (msg && msg.ev === 'memory') return;   // the memory census's answer, not ours
+        if (!msg || ended || lost) return;
+        heard++;
+        if (msg.type === 'ready') { started = true; arm(); resolveStart(sc); return; }
+        if (msg.type === 'refused') { lose(`refused_${String(msg.code || 'error').slice(0, 40)}`); return; }
+        if (msg.counts) last = msg.counts;
+        if (msg.type === 'out') {
+          if (msg.seq !== answered + 1) { lose('order'); return; }   // the read's #4: the replies come in the order the pieces went, or the run is withheld
+          answered++; st.inflight -= sizes.shift() || 0; sc.onOut({ out: msg.out, err: msg.err }); arm(); return;
+        }
+        if (msg.type === 'end' && endWait) {
+          if (msg.seq !== seq + 1 || answered !== seq) { lose('order'); return; }   // an end before every piece was answered is a loss: its held text could be half a value (the gate's red at b161ec9d4)
+          const f = endWait; endWait = null; ended = true; stop(); f({ out: msg.out, err: msg.err, counts: last, lost: false });
+        }
+      });
+      w.on('error', () => lose('error'));
+      w.on('messageerror', () => lose('message'));
+      w.on('exit', () => { scrubExited++; scrubLive.delete(w); lose('exit'); });
+    });
+  }
+
   async function run({ caller = {}, args = [], cwd = null, signal = null } = {}) {
     const t0 = now();
     const by = { kind: caller.job ? 'job' : 'agent', key: caller.sessionKey || null, name: caller.name || null };
@@ -2414,13 +2521,27 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         if (verdict.ok) verdict = { ok: true, by: asked === 'always' ? (a.window ? 'window' : 'always') : 'once' };   // r7: the run the «Allow for 1 hour» press let through
       }
       if (!verdict.ok) { if (verdict.code === 'vault_locked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } } note(verdict.code, { ...head, askId }); return verdict; }
-      if (signal && signal.aborted) { giveBackLate(); note('caller_gone', head); return named('caller_gone'); }
-      if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) { giveBackLate(); return named('too_many_runs'); }
+      // THE SCAN OFF THE LOOP (主开发 r1573; the read's BLOCKER): the run's scrubber worker starts HERE, before the caller, the caps
+      // and the once-grant are asked — so no await sits between the cap check below and runs.add, and a refusal after it spends no
+      // grant. It starts without the values: spawnRun hands them over, once, right before the child spawns. One that cannot start
+      // refuses the run by name; a lock while it started (the epoch moved) refuses it as the lock
+      // the starts are counted with the runs (taken in the same tick as this check): a burst of calls never starts more workers than
+      // the caps let run — each start is let go after its await, whatever came of it, and the caps below are asked again
+      const sconv = caller.conversationId;
+      if ((startingBy.get(sconv) || 0) + callerRuns(sconv) >= RUNS_PER_CALLER || startingAll + runs.size >= RUNS_MAX) { giveBackLate(); return named('too_many_runs'); }
+      startingBy.set(sconv, (startingBy.get(sconv) || 0) + 1); startingAll++;
+      let scrub;
+      try { scrub = await startScrub(); } finally { const n = (startingBy.get(sconv) || 1) - 1; if (n > 0) startingBy.set(sconv, n); else startingBy.delete(sconv); startingAll--; }
+      if (scrub.refused) { giveBackLate(); if (signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); } note('spawn_failed', { ...head, why: `the scrubber (${scrub.refused})` }); return named('spawn_failed', { why: 'the scrubber could not start' }); }   // the caller gone first (the read's #22)
+      const unscrub = (r) => { scrub.close(); return r; };
+      if (lockGen !== lg0 || vaultState() !== 'unlocked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } note('vault_locked', head); return unscrub(named('vault_locked')); }
+      if (signal && signal.aborted) { giveBackLate(); note('caller_gone', head); return unscrub(named('caller_gone')); }
+      if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) { giveBackLate(); return unscrub(named('too_many_runs')); }
       // A ONCE-GRANT IS SPENT BEFORE THE RUN (a grant never runs twice): still the very row the verdict read — a lock, the switch
       // or another run of this conversation took it meanwhile ⇒ nothing runs
       const spent = [];
       for (const a of admitted) {
-        if (grants.get(a.pair) !== a.g || !(a.g.until > now())) { note('use_not_granted', head); return named('use_not_granted'); }
+        if (grants.get(a.pair) !== a.g || !(a.g.until > now())) { note('use_not_granted', head); return unscrub(named('use_not_granted')); }
         if (a.g.once) spent.push(a);
       }
       for (const a of spent) { grants.delete(a.pair); a.g.spent = true; a.g.spentAt = now(); noteEnded(a.g, 'used', a.g.spentAt); inFlight.add(a.g); }   // r1700 (1): the spend is written as its end «used» AT the spend, by the one writer of use ends — a restart while its run runs says the earlier truth (a burned run takes it back: restoreOnce)
@@ -2433,17 +2554,17 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const open = burned && lockGen === lg0 && vaultState() === 'unlocked', lockT = lockGen !== lg0 ? lockedAt : now();
       if (!burned) for (const a of spent) grantEnded(a.g, 'used'); else for (const a of spent) { const offT = offTimeOf(a.g); if (offT && (open || offT <= lockT)) grantEnded(a.g, 'revoked', offT); else if (!open) grantEnded(a.g, 'lock', lockT); else if (a.g.until > now()) { if (!a.g.endedBy) grants.set(a.pair, a.g); } }
       if (open) giveBackLate(); return r; };   // wake-approve-card r6 (int361 over vault-agent-own's lock epoch): a once-grant that RAN ends on its record («allowed once · ended HH:MM»); a burned one is restored (never across a lock)   // round 23: a BURNED refusal after the spend gives the late pass back too (nothing ran)
-      if (sealedTool && toolFd != null && !toolSealed(spec.tool, toolFd)) { note('tool_not_sealed', { ...head, tool: toolName, why: 'ownership changed between the hash and the spawn' }); return restoreOnce(named('tool_not_sealed', { tool: toolName, words: "the tool's ownership changed between the hub's check and the run — a root-owned program became writable before it could start, so it was not run; nothing ran" })); }   // round 15: tool_changed's one remaining case — a sealed tool whose fstat ownership moved before the exec; round 16 (MINOR): a refusal AFTER the spend restores the once-grant (nothing ran), and the words say THIS path's cause
+      if (sealedTool && toolFd != null && !toolSealed(spec.tool, toolFd)) { note('tool_not_sealed', { ...head, tool: toolName, why: 'ownership changed between the hash and the spawn' }); return restoreOnce(unscrub(named('tool_not_sealed', { tool: toolName, words: "the tool's ownership changed between the hub's check and the run — a root-owned program became writable before it could start, so it was not run; nothing ran" }))); }   // round 15: tool_changed's one remaining case — a sealed tool whose fstat ownership moved before the exec; round 16 (MINOR): a refusal AFTER the spend restores the once-grant (nothing ran), and the words say THIS path's cause
       fdHandedOff = true;
-      const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt, toolFd, closeTool, toolName });
+      const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt, toolFd, closeTool, toolName, scrub });
       const nextOf = (r) => (r && r.ok && recipe && (verdict.by === 'once' || verdict.by === 'late') ? { ...r, next: recipe.words } : r);   // lane vault-standing-request: a run the owner let through ONCE says the standing road
-      return out && typeof out.then === 'function' ? out.then(restoreOnce).then(nextOf) : nextOf(restoreOnce(out));
+      return out && typeof out.then === 'function' ? out.finally(() => scrub.close()).then(restoreOnce).then(nextOf) : nextOf(restoreOnce(unscrub(out)));   // THE SCAN OFF THE LOOP: the worker never outlives the run — every road out of spawnRun ends it (a no-op after its end)
     } finally {
       if (!fdHandedOff) closeTool();   // round 14: an early return before the hand-off releases the open tool fd
     }
   }
 
-  async function spawnRun({ caller, spec, head, verdict, askId, place, base, signal, t0, note, receipt, toolFd, closeTool, toolName }) {
+  async function spawnRun({ caller, spec, head, verdict, askId, place, base, signal, t0, note, receipt, toolFd, closeTool, toolName, scrub }) {
     // round 11: the sealed env is built HERE, at the spawn. The PATH is the set of root-owned realpaths computed ONCE at boot; if a
     // runSeal tool has no safe system dir to run from (a root hub, or git only under a writable prefix) the run is refused BY NAME.
     // round 14 (MAJOR): the SEAL's host comes ONLY from gh's ROUTING inputs — -R/--repo, --hostname, GH_HOST, a spec positional's
@@ -2476,15 +2597,17 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       values.set(r.ref, v);
     }
     const secrets = spec.refs.map((r) => ({ ref: r, value: values.get(r.ref) }));
-    let scrub;
-    try { scrub = VR.createRunMasker(secrets, ['out', 'err']); }   // ONE per run, both pipes in arrival order (one window); BEFORE any file holds a value (the review: a throw here leaked the folder)
-    catch (e) { values = null; note('spawn_failed', { ...head, why: `the scrubber (${(e && e.code) || 'error'})` }); closeTool(); return named('spawn_failed', { why: 'the scrubber could not be built' }); }
+    // ONE scrubber per run, both pipes in arrival order (one window) — IN ITS OWN WORKER (主开发 r1505 / r1573: THE SCAN OFF THE
+    // LOOP), started in run() before the caps; it gets the run's values HERE, once, BEFORE any file holds a value (the review: a
+    // throw here leaked the folder), and builds its masker before it reads the first piece (a build that throws there is a lost
+    // worker: the output withheld by name)
+    scrub.give(secrets);
     let dir = null;
     try {
       dir = fs.mkdtempSync(path.join(runRoot(), RUN_DIR_PREFIX)); fs.chmodSync(dir, 0o700);
       const ofd = fs.openSync(path.join(dir, OWNER_FILE), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
       try { const mb = Buffer.from(JSON.stringify(hubIdentity || { pid: process.pid })), wrote = fs.writeSync(ofd, mb); if (wrote !== mb.length) throw Object.assign(new Error(`the owner mark was written short (${wrote} of ${mb.length} bytes)`), { code: 'ESHORTMARK' }); } finally { fs.closeSync(ofd); }   // r1213 (b): a SHORT write is a failed mark — the run stops before any value file and its folder is shredded, as a thrown write is
-    } catch (e) { if (dir) shredDir(dir); values = null; note('spawn_failed', { ...head, why: `the run directory (${e.code || e.message})` }); closeTool(); return named('spawn_failed', { why: 'the run directory could not be made' }); }
+    } catch (e) { if (dir) shredDir(dir); scrub.close(); values = null; note('spawn_failed', { ...head, why: `the run directory (${e.code || e.message})` }); closeTool(); return named('spawn_failed', { why: 'the run directory could not be made' }); }
     const mark = path.basename(dir);
     const m = VR.materialize(spec, { valueOf: (ref) => values.get(ref), pathOf: (slot) => path.join(dir, `f${slot}`) });
     try {
@@ -2492,24 +2615,26 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         const fd = fs.openSync(f.path, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
         try { fs.writeSync(fd, f.content); } finally { fs.closeSync(fd); }
       }
-    } catch (e) { shredDir(dir); values = null; note('spawn_failed', { ...head, why: `a run file (${e.code || e.message})` }); closeTool(); return named('spawn_failed', { why: 'a run file could not be written' }); }
+    } catch (e) { shredDir(dir); scrub.close(); values = null; note('spawn_failed', { ...head, why: `a run file (${e.code || e.message})` }); closeTool(); return named('spawn_failed', { why: 'a run file could not be written' }); }
     return new Promise((resolve) => {
       const rec = { conv: caller.conversationId, name: caller.name || null, child: null, stopped: null, hard: null, timer: null, dir, mark, piped: false };
       const dec = { out: new StringDecoder('utf8'), err: new StringDecoder('utf8') };
       const parts = { out: [], err: [] };
       const handOn = (o) => { parts.out.push(o.out); parts.err.push(o.err); };   // what the run's scrubber hands on, each to the stream it came on
+      scrub.onOut = handOn;   // its worker's replies, in the order the reads were posted
       let got = 0, truncated = false, done = false, spawnError = null;
       const take = (k, buf) => {
-        if (truncated) return;
+        if (truncated || done) return;   // the read's #20: a read after the end is no piece
         let b = buf;
         if (got + b.length > VR.OUTPUT_MAX_BYTES) { b = b.subarray(0, VR.OUTPUT_MAX_BYTES - got); truncated = true; }
         got += b.length;
         const text = dec[k].write(b);
-        if (text) handOn(scrub.push(k, text));
+        if (text) scrub.push(k, text);   // posted to the run's worker; its answer comes back through onOut
       };
       const finish = (code, sig) => {
         if (done) return;
-        done = true;
+        done = true; rec.done = true;   // THE SCAN OFF THE LOOP (the read's #6): stop() is a no-op from here — the run's end is decided NOW, its line written when the worker answers
+        if (rec.offAbort) rec.offAbort();
         closeTool();   // round 13: the open tool fd (held from the hash through the exec) is released with the run
         runs.delete(rec);
         try { timers.clear(rec.timer); } catch { }
@@ -2523,25 +2648,30 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         // SCRUBBED — scrub.end(cut) masks every complete value in it and masks the one trailing partial-value prefix a cut can leave
         // (was: the tail dropped for good, so bytes vanished; a naive raw flush leaked the half value — the masker now does both)
         const cut = truncated || !!rec.stopped || rec.piped;   // + the pipes cut 2 s after the child's exit (the review)
-        for (const k of ['out', 'err']) handOn(scrub.push(k, dec[k].end()));
-        handOn(scrub.end(cut));
-        values = null;
-        const ms = now() - t0;
-        // round 21 (fb-93219e801a): the run's output scrubber is VALUE-based ONLY — createRunMasker (`scrub`) above masked the
-        // injected values and their encodings; the NAME-based secret-shapes rules (R2/R5/R6/R7/R8) do NOT run over a child's own
-        // output — a JSON field named `key`/`auth`/`token` the tool returns is the tool's data, not a secret (unless its VALUE is
-        // an injected value, which createRunMasker already caught), and the name-based bare-value rule SWALLOWS a one-line JSON
-        // (the owner's agent got 1008 bytes of «redacted» for a 10 KB response). The name-based belt is for text whose values are
-        // UNKNOWN (chat, logs, the group feed, the judge input), never a run's output. See kb-design-lessons, the vault-run row (THE TWO SCRUBBERS).
-        const outT = { text: parts.out.join(''), redacted: 0 }, errT = { text: parts.err.join(''), redacted: 0 };
-        const scrubbed = { hits: scrub.hits, bytes: scrub.bytes, byForm: Object.fromEntries(VR.FORMS.map((f) => [f, scrub.byForm[f] || 0]).filter(([, n]) => n)), ...(scrub.over ? { withheld: 'scrub_work_bound' } : {}) };   // 主开发 r1216: the owner's record says a run whose scrubbing met its work bound (the output after the words withheld) — ONE field, on the audit line and the answer
-        // the run's RECEIPT (minted at the run's start): the agent's answer, its audit line and each entry's use line carry the same one (design D1: a use + a receipt)
-        const line = { ...head, receipt, allowedBy: verdict.by, askId, exit: Number.isInteger(code) ? code : null, signal: sig || null, ms, timedOut: rec.stopped === 'timeout', truncated, tailDropped: false, strays, scrubbed, redacted: outT.redacted + errT.redacted, stdout: utf8Head(outT.text), stderr: utf8Head(errT.text) };
-        if (spawnError) { const { receipt: _r, ...noRun } = line; note('spawn_failed', { ...noRun, why: spawnError }); resolve(named('spawn_failed', { why: spawnError })); return; }   // no child ran: no receipt, no use
-        if (rec.stopped === 'lock') { note('vault_locked', { ...line, killed: true }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(named('vault_locked', { killed: true })); return; }
-        if (rec.stopped === 'gone') { note('caller_gone', { ...line, killed: true }); resolve(named('caller_gone')); return; }
-        note('ran', line);
-        resolve({ ok: true, exit: line.exit, signal: line.signal, timedOut: line.timedOut, truncated, ms, stdout: outT.text, stderr: errT.text, scrubbed: { hits: scrubbed.hits, bytes: scrubbed.bytes, ...(scrubbed.withheld ? { withheld: scrubbed.withheld } : {}) }, redacted: line.redacted, by: verdict.by, shapeId: head.shapeId, receipt });
+        const stoppedBy = rec.stopped, spawnErr = spawnError;   // the read's #6: what ended the run is what it was at its end, not when the worker answers
+        for (const k of ['out', 'err']) scrub.push(k, dec[k].end());
+        scrub.end(cut).then((e) => {   // THE SCAN OFF THE LOOP: the line and the answer wait for the worker's end (or its loss: withheld by name)
+          handOn(e);
+          lastScrub = { ...scrub.stats };
+          values = null;
+          const ms = now() - t0;
+          const c = e.counts;
+          // round 21 (fb-93219e801a): the run's output scrubber is VALUE-based ONLY — createRunMasker (`scrub`) above masked the
+          // injected values and their encodings; the NAME-based secret-shapes rules (R2/R5/R6/R7/R8) do NOT run over a child's own
+          // output — a JSON field named `key`/`auth`/`token` the tool returns is the tool's data, not a secret (unless its VALUE is
+          // an injected value, which createRunMasker already caught), and the name-based bare-value rule SWALLOWS a one-line JSON
+          // (the owner's agent got 1008 bytes of «redacted» for a 10 KB response). The name-based belt is for text whose values are
+          // UNKNOWN (chat, logs, the group feed, the judge input), never a run's output. See kb-design-lessons, the vault-run row (THE TWO SCRUBBERS).
+          const outT = { text: parts.out.join(''), redacted: 0 }, errT = { text: parts.err.join(''), redacted: 0 };
+          const scrubbed = { hits: c.hits, bytes: c.bytes, byForm: Object.fromEntries(VR.FORMS.map((f) => [f, c.byForm[f] || 0]).filter(([, n]) => n)), ...(e.lost ? { withheld: 'scrub_worker_gone' } : c.over ? { withheld: 'scrub_work_bound' } : {}) };   // the later fact first: a worker lost after its masker met the bound (the read's #10)   // 主开发 r1216: the owner's record says a run whose scrubbing met its work bound (the output after the words withheld) — ONE field, on the audit line and the answer
+          // the run's RECEIPT (minted at the run's start): the agent's answer, its audit line and each entry's use line carry the same one (design D1: a use + a receipt)
+          const line = { ...head, receipt, allowedBy: verdict.by, askId, exit: Number.isInteger(code) ? code : null, signal: sig || null, ms, timedOut: stoppedBy === 'timeout', truncated, tailDropped: false, strays, scrubbed, redacted: outT.redacted + errT.redacted, stdout: utf8Head(outT.text), stderr: utf8Head(errT.text) };
+          if (spawnErr) { const { receipt: _r, ...noRun } = line; note('spawn_failed', { ...noRun, why: spawnErr }); resolve(named('spawn_failed', { why: spawnErr })); return; }   // no child ran: no receipt, no use
+          if (stoppedBy === 'lock') { note('vault_locked', { ...line, killed: true }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(named('vault_locked', { killed: true })); return; }
+          if (stoppedBy === 'gone') { note('caller_gone', { ...line, killed: true }); resolve(named('caller_gone')); return; }
+          note('ran', line);
+          resolve({ ok: true, exit: line.exit, signal: line.signal, timedOut: line.timedOut, truncated, ms, stdout: outT.text, stderr: errT.text, scrubbed: { hits: scrubbed.hits, bytes: scrubbed.bytes, ...(scrubbed.withheld ? { withheld: scrubbed.withheld } : {}) }, redacted: line.redacted, by: verdict.by, shapeId: head.shapeId, receipt });
+        }).catch((x) => { log(`vault-run: the run's answer could not be written (${(x && x.message) || x})`); resolve(named('spawn_failed', { why: 'the run could not be answered' })); });   // the read's #9: never a run whose answer hangs
       };
       let child;
       try {
@@ -2573,7 +2703,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       child.on('exit', (code, sig) => { const t = timers.set(() => { if (done) return; rec.piped = true; try { child.stdout && child.stdout.destroy(); child.stderr && child.stderr.destroy(); } catch { } finish(code, sig); }, pipeGraceMs); t?.unref?.(); });
       rec.timer = timers.set(() => stop(rec, 'timeout'), spec.timeoutSec * 1000);
       rec.timer?.unref?.();
-      if (signal && typeof signal.addEventListener === 'function') { if (signal.aborted) stop(rec, 'gone'); else signal.addEventListener('abort', () => stop(rec, 'gone'), { once: true }); }
+      if (signal && typeof signal.addEventListener === 'function') { if (signal.aborted) stop(rec, 'gone'); else { const onAbort = () => stop(rec, 'gone'); signal.addEventListener('abort', onAbort, { once: true }); rec.offAbort = () => signal.removeEventListener('abort', onAbort); } }   // THE SCAN OFF THE LOOP (the read's #6): removed at finish
     });
   }
 
@@ -2641,13 +2771,13 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     return n;
   }
   /** The process ends: every child, its strays and its files with it (sync — an exit handler). */
-  function closeAll() { for (const rec of [...runs]) { killGroup(rec, 'SIGKILL'); endMarked(rec.mark); shredDir(rec.dir); } runs.clear(); }
+  function closeAll() { for (const rec of [...runs]) { killGroup(rec, 'SIGKILL'); endMarked(rec.mark); shredDir(rec.dir); } runs.clear(); for (const w of [...scrubLive]) { try { w.terminate(); } catch { } } scrubLive.clear(); }   // + every run's scrubber worker (no worker outlives the hub's door)
 
   // round 14 (MINOR): the sealed PATH and whether `git` lives on it are computed ONCE at the door's construction (a boot step,
   // bounded — the boot law < 250 ms), never on the event loop at the first spawn (r11 fixup 1; r13's lazy memo did it at spawn #1).
   try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
-  return { run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
+  return { scrubLive: () => scrubLive.size, scrubThreads: () => scrubMade - scrubExited, lastScrubStats: () => lastScrub, _startScrub: startScrub, run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet, _ended: endedGrants,
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce, _hostPasses: hostPasses };
 }
