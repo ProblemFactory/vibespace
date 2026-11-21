@@ -1440,8 +1440,29 @@ export function createPopover(anchor, className, opts = {}) {
   // Clamp to viewport after render so content is measured. Clamp math runs in
   // VIEWPORT space (pr + innerWidth agree), only the final write divides.
   const clamp = () => {
-    const pr = pop.getBoundingClientRect();
     const vw = window.innerWidth, vh = window.innerHeight;
+    // ITS WIDTH IS HELD TO THE SCREEN TOO (lane bl-phone-ui, the 390 census's first find — 主开发 r1198: the position was held,
+    // the width never: a popover wider than a 390 px phone started at 0 and still ran past the right edge). Measured where it
+    // has the screen's width (at the left pad — B-16ab (3)'s lesson for menus: at its anchor a fixed box is only as wide as
+    // the room right of it), a box wider than the screen less its two pads is capped there, and what still does not fit
+    // inside it (a row that never breaks) scrolls sideways IN the box, never off the screen; the clamps below then keep it
+    // inside. A box no wider than the screen less its pads gets no style, so nothing on a desk moves. (Its PLACE is the
+    // anchor's, as before: one near the right edge still narrows to the room there — a slide like menuPlace's would move
+    // desk popovers too.)
+    if (pop._heldW) { pop.style.maxWidth = pop._ownMaxW || ''; pop.style.overflowX = pop._ownOverflowX || ''; pop._heldW = false; }   // measured afresh each time (a rotation, a row grown)
+    const at = pop.style.left;
+    pop.style.left = (MENU_PAD / Z) + 'px';   // measured where it has the screen's width
+    const across = vw - 2 * MENU_PAD, natural = pop.getBoundingClientRect().width;
+    if (natural > across) {
+      pop._ownMaxW = pop.style.maxWidth; pop._ownOverflowX = pop.style.overflowX;   // what the caller wrote is put back when the box fits again
+      pop.style.maxWidth = (across / Z) + 'px';
+      pop.style.overflowX = 'auto';
+      const drawn = pop.getBoundingClientRect().width;   // its padding and border ride outside a content-box cap: take them off
+      if (drawn > across + 0.5) pop.style.maxWidth = (Math.max(0, 2 * across - drawn) / Z) + 'px';
+      pop._heldW = true;
+    }
+    pop.style.left = at;
+    const pr = pop.getBoundingClientRect();
     if (pr.right > vw) pop.style.left = (Math.max(0, vw - pr.width - 4) / Z) + 'px';
     if (pr.bottom > vh) pop.style.top = (Math.max(0, vh - pr.height - 4) / Z) + 'px';
     if (pr.left < 0) pop.style.left = '4px';

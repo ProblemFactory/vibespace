@@ -14,6 +14,11 @@
 //     MENU_PAD): the Agents dialog's «+ 添加账号…» rows opened from a button at x 205 (where the 11-13 picture had it) keep their
 //     natural width, every row on one line, 4 px off the screen's right edge; a menu wider than the screen is capped at the
 //     screen less its two pads. CONTROL: the helper as it measured before (at the point, squeezed by the edge) — flush on the edge
+//   ④ A POPOVER'S WIDTH IS HELD TO THE SCREEN TOO (src/lib/utils.js createPopover — lane bl-phone-ui, the 390 census's first find,
+//     主开发 r1198): a popover holding a row that never breaks (~2600 px of words), opened from an anchor at x 205, stands inside
+//     the screen 4 px off each edge and its words scroll sideways INSIDE it (never past the screen); a narrow one keeps its
+//     anchor's place and gets no style of the helper's; when the wide row is taken out the cap and the scroll are lifted and a
+//     max-width the caller wrote is put back. CONTROL: the helper without the hold — the wide box runs past the right edge
 // Requires google-chrome (SKIP without) and a built tree. Run: node scripts/test-fit-390-chrome.mjs [--font dejavu|box]
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -43,11 +48,14 @@ const BODY_NOW = '.dialog.agents-dialog .agents-dialog-body { min-width: min(380
 const ROSTER_NOW = '.dialog.agents-dialog .ob-backend.acct-roster { align-items: stretch; }';
 const MEASURE_NOW = "    pop.style.left = (MENU_PAD / Z) + 'px';\n";
 const CAP_NOW = "    if (at.maxW != null) pop.style.maxWidth = (at.maxW / Z) + 'px';\n";
-ok(CHAT.split(KIND_NOW).length === 2 && STYLE.split(BODY_NOW).length === 2 && STYLE.split(ROSTER_NOW).length === 2 && UTILS.split(MEASURE_NOW).length === 2 && UTILS.split(CAP_NOW).length === 2,
-  'the rules stand in the tree once each (chat.css\'s kind chip, style.css\'s dialog body and roster column, utils.js\'s measure + cap) — the controls take them out');
+// ④'s anchor: createPopover's hold, from its first line to its last (the control takes the whole hold out)
+const HOLD_FROM = "    if (pop._heldW) { pop.style.maxWidth = pop._ownMaxW || ''; pop.style.overflowX = pop._ownOverflowX || ''; pop._heldW = false; }", HOLD_TO = "    pop.style.left = at;\n";
+const holdAt = UTILS.indexOf(HOLD_FROM), HOLD_NOW = holdAt >= 0 && UTILS.indexOf(HOLD_TO, holdAt) > holdAt ? UTILS.slice(holdAt, UTILS.indexOf(HOLD_TO, holdAt) + HOLD_TO.length) : null;
+ok(CHAT.split(KIND_NOW).length === 2 && STYLE.split(BODY_NOW).length === 2 && STYLE.split(ROSTER_NOW).length === 2 && UTILS.split(MEASURE_NOW).length === 2 && UTILS.split(CAP_NOW).length === 2 && !!HOLD_NOW && UTILS.split(HOLD_NOW).length === 2,
+  'the rules stand in the tree once each (chat.css\'s kind chip, style.css\'s dialog body and roster column, utils.js\'s measure + cap, createPopover\'s hold) — the controls take them out');
 const CHAT_OLD = CHAT.replace(KIND_NOW, '.chat-artifact-kind { margin-left: auto; font-size: 0.85em; }');   // stale-pins: kept — the CONTROL plants the old rule back (its anchor, the rule now, is checked once above)
 const STYLE_OLD = STYLE.replace(BODY_NOW, '.dialog.agents-dialog .agents-dialog-body { min-width: 380px; }');   // stale-pins: kept — the CONTROL plants the old rule back (its anchor, the rule now, is checked once above)
-const UTILS_OLD = UTILS.replace(MEASURE_NOW, '').replace(CAP_NOW, '');
+const UTILS_OLD = UTILS.replace(MEASURE_NOW, '').replace(CAP_NOW, '').replace(HOLD_NOW || '\u0000', '');   // ③'s measure + cap and ④'s hold taken out
 const STYLE_NOROSTER = STYLE.replace(ROSTER_NOW, '');   // ②b's control: ONLY the roster's rule out (the body floor stays the cure's)
 
 // ── the page bundles: the real modules (a built tree; an unbuilt one gets a stub build-version.js) ──
@@ -57,8 +65,8 @@ const FONT_ENV = FONT === 'dejavu' ? runnerFontEnv(fontsDir) : {};
 const stubVersion = fs.existsSync(path.join(repo, 'src/lib/build-version.js')) ? [] : [{ name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, (a) => ({ path: a.path, namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'fit-390';", loader: 'js' })); } }];
 const oldUtils = { name: 'old-utils', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]utils\.js$/ }, () => ({ contents: UTILS_OLD, loader: 'js', resolveDir: path.dirname(UTILS_PATH) })); } };
 const ENTRY = `import { renderArtifactCard } from ${JSON.stringify(path.join(repo, 'src/lib/artifact-card.js'))};
-import { showContextMenu } from ${JSON.stringify(UTILS_PATH)};
-window.__card = renderArtifactCard; window.__menu = showContextMenu; window.__ready = true;`;
+import { showContextMenu, createPopover } from ${JSON.stringify(UTILS_PATH)};
+window.__card = renderArtifactCard; window.__menu = showContextMenu; window.__pop = createPopover; window.__ready = true;`;
 const build = (name, plugins = []) => esbuild.build({ stdin: { contents: ENTRY, resolveDir: repo, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(dir, name), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [...stubVersion, ...plugins] });
 await build('now.js');
 await build('old.js', [oldUtils]);
@@ -183,6 +191,35 @@ console.log('③ a pop-up at 390 — the screen bounds it with the usual margin 
   ok(A.gap >= 3.5 && A.left >= 3.5 && !A.multi.length, `the add-account menu keeps the usual margin: ${A.gap} px off the screen's right edge, its ${A.w} px natural width, every row on one line`, A);
   ok(W.left >= 3.5 && W.gap >= 3.5 && W.w <= 390 - 8 + 0.5, `a menu wider than the screen is capped at the screen less its two pads (${W.w} px, ${W.left} / ${W.gap} px off the edges)`, W);
   ok(B.gap < 1, `CONTROL: the helper as it measured before (at the point, squeezed by the edge) — the same menu ${B.gap} px off the edge, ${B.w} px wide (flush)`, B);
+  now.close(); was.close();
+}
+
+// ④ createPopover: a popover's width held to the screen (the 390 census's first find)
+const POP = (wide, own = '') => `(async () => {
+  document.querySelectorAll('.fit-pop, #fit-pop-anchor').forEach((e) => e.remove());
+  const a = document.createElement('button'); a.id = 'fit-pop-anchor'; a.style.cssText = 'position:fixed;left:205px;top:100px;width:24px;height:24px'; document.body.appendChild(a);
+  const p = window.__pop(a, 'fit-pop');
+  p.style.padding = '6px 8px'; p.style.border = '1px solid #888'; p.style.background = '#222'; p.style.color = '#eee'; p.style.fontSize = '14px';${own ? ` p.style.maxWidth = '${own}';` : ''}
+  const row = document.createElement('div'); row.className = 'fit-pop-row'; row.style.whiteSpace = 'nowrap';
+  row.textContent = ${wide ? JSON.stringify('一行永远不会断开的很长很长的文字：' + 'a-path-that-never-breaks/'.repeat(14)) : JSON.stringify('短的一行')}; p.appendChild(row);
+  const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 120))));
+  await frames();
+  const read = () => { const r = p.getBoundingClientRect(); return { left: Math.round(r.left * 10) / 10, right: Math.round(r.right * 10) / 10, w: Math.round(r.width * 10) / 10, maxW: p.style.maxWidth, ox: getComputedStyle(p).overflowX, scrolls: p.scrollWidth > p.clientWidth + 1, rowW: Math.round(row.scrollWidth) }; };   // rowW: the row's WORDS (its box is the popover's width)
+  const first = read();
+  row.textContent = '短的一行'; await frames();
+  return { first, shrunk: read(), vw: innerWidth };
+})()`;
+console.log('④ a popover at 390 — its width held to the screen too (createPopover)');
+{
+  const now = await page(), was = await page({ old: true });
+  const A = await now.ev(POP(true)), N = await now.ev(POP(false)), O = await now.ev(POP(true, '500px')), B = await was.ev(POP(true));
+  console.log(`      now: the wide popover ${A.first.left}–${A.first.right} (${A.first.w} px, its row ${A.first.rowW} px, max-width ${A.first.maxW || 'none'}) · shrunk: ${A.shrunk.w} px, max-width ${A.shrunk.maxW || 'none'} · the narrow one ${N.first.left}–${N.first.right} · without the hold: ${B.first.left}–${B.first.right}`);
+  ok(A.first.left >= 3.5 && A.first.right <= A.vw - 3.5 && A.first.rowW > A.vw, `a popover holding ${A.first.rowW} px of words that never break stands inside the screen, 4 px off each edge (${A.first.left}–${A.first.right} of ${A.vw})`, A);
+  ok(A.first.ox === 'auto' && A.first.scrolls, `its words scroll sideways INSIDE it (overflow-x ${A.first.ox}), never past the screen`, A.first);
+  ok(N.first.left === 205 && !N.first.maxW && N.first.ox === 'visible', `a narrow popover keeps its anchor's place (left ${N.first.left}) and gets no style of the helper's`, N);
+  ok(!A.shrunk.maxW && A.shrunk.ox === 'visible' && A.shrunk.w < 200, `its row shrunk, the cap and the scroll are lifted (max-width ${A.shrunk.maxW || 'none'}, overflow-x ${A.shrunk.ox}, ${A.shrunk.w} px)`, A.shrunk);
+  ok(O.first.right <= O.vw - 3.5 && O.shrunk.maxW === '500px', `a max-width the caller wrote (500px) is capped while the box is wider than the screen, then put back (${O.first.maxW} → ${O.shrunk.maxW})`, O);
+  ok(B.first.right > B.vw + 0.5, `CONTROL: the helper without the hold — the same popover runs past the screen's right edge (${B.first.left}–${B.first.right} of ${B.vw})`, B);
   now.close(); was.close();
 }
 
