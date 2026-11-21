@@ -35,17 +35,17 @@ import { createRequire } from 'module';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { anchored } from './scratch.mjs';
+import { armWatchdog } from './suite-watchdog.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-window-stamp-'));
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 let passed = 0, failed = 0;
-// ITS OWN DEADLINE (the coordinator's r471: a run that can hang is bounded by seconds, said by name): the REAL pool engine
-// arms timers that keep node alive, so this suite ends by process.exit — and if a leg never answers, this says which one
-// and exits red long before any runner's deadline
-let inLeg = 'the start';
-const DEADLINE_MS = 60e3;
-setTimeout(() => { console.log(`  ✗ DEADLINE: no answer within ${DEADLINE_MS / 1000} s — the suite was in «${inLeg}»`); process.exit(1); }, DEADLINE_MS).unref();
+// THE SHARED WATCHDOG (scripts/suite-watchdog.mjs — the coordinator's r742; r471's «bounded by seconds, said by name»): it fires
+// before the gate's budget, here capped at 60 s, names the leg it was in (handed with WD.section as each leg starts), its last
+// line and the hang digest, then ends the suite. The REAL pool engine arms timers that keep node alive, so the suite ends by
+// process.exit
+const WD = armWatchdog({ capMs: 60e3 });
 const say = console.log.bind(console);
 function ok(c, name, detail) { if (typeof c !== 'boolean') throw new TypeError(`ok(): the condition must be a boolean (${typeof c}) — «${name}»`); if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900)}`); } return !!c; }
 const quiet = async (fn) => { const o = console.log, w = console.warn, e = console.error; console.log = () => { }; console.warn = () => { }; console.error = () => { }; try { return await fn(); } finally { console.log = o; console.warn = w; console.error = e; } };
@@ -347,13 +347,13 @@ process.stdout.write(JSON.stringify({ engine, stated, lanes: q.lanesOfReading(rl
 };
 
 say('THIS TREE');
-for (const leg of ['one-order', 'file-stamp', 'reverse', 'field', 'money', 'refusal-kept', 'status-only', 'late-event']) { inLeg = leg; const r = await LEGS[leg](kitOf(REPO)); ok(r.ok, `${leg}: ${r.detail}`); }
-{ inLeg = '③ H'; const r = await LEGS['statusline-then-write'](kitOf(REPO), 'capture'); ok(r.ok, `③ H — a plain write after the statusline: ${r.detail}`); }
-{ inLeg = '③ banner shape'; const r = await LEGS['statusline-then-write'](kitOf(REPO), 'banner'); ok(r.ok, `③ the banner's write shape after the statusline: ${r.detail}`); }
-{ inLeg = '⑦ restart'; const r = await LEGS.restart(kitOf(REPO), { engine: true }); ok(r.ok, `⑦ restart: ${r.detail}`); }
+for (const leg of ['one-order', 'file-stamp', 'reverse', 'field', 'money', 'refusal-kept', 'status-only', 'late-event']) { WD.section(leg); const r = await LEGS[leg](kitOf(REPO)); ok(r.ok, `${leg}: ${r.detail}`); }
+{ WD.section('③ H'); const r = await LEGS['statusline-then-write'](kitOf(REPO), 'capture'); ok(r.ok, `③ H — a plain write after the statusline: ${r.detail}`); }
+{ WD.section('③ banner shape'); const r = await LEGS['statusline-then-write'](kitOf(REPO), 'banner'); ok(r.ok, `③ the banner's write shape after the statusline: ${r.detail}`); }
+{ WD.section('⑦ restart'); const r = await LEGS.restart(kitOf(REPO), { engine: true }); ok(r.ok, `⑦ restart: ${r.detail}`); }
 // ③ G — the REAL engine's 5h banner after the statusline (the reset-door suite's engineWorld, verbatim)
 {
-  inLeg = '③ G (the real engine)';
+  WD.section('③ G (the real engine)');
   const w = engineWorld(REPO, { def: 'B', fableA: 0.5 }), key = w.id.A, k = kitOf(REPO);
   fs.rmSync(path.join(w.cacheDir, key + '.json'), { force: true });
   await panel(k, w.cacheDir, key, NOW - 14 * H);
@@ -406,13 +406,13 @@ const MUTANTS = [
   ['marks-step-back', 'a refusal older than the window\'s reading still marks it (the release)', [['src/quota-model.js', '      if (laterInstant(w.measuredAt, t) !== t) return w;\n      moved = true;\n      return { ...w, refusedAt: laterInstant(w.refusedAt, t) };', '      moved = true;\n      return { ...w, refusedAt: t };']],
     ['late-event']],
 ];
-{ inLeg = '⑩ other-harness'; const B = kitOf(mutantTree('base-projection', MUTANTS.find((m) => m[0] === 'no-stamps')[2]));
+{ WD.section('⑩ other-harness'); const B = kitOf(mutantTree('base-projection', MUTANTS.find((m) => m[0] === 'no-stamps')[2]));
   const r = await LEGS['other-harness'](kitOf(REPO), { base: B }); ok(r.ok, `⑩ other-harness: ${r.detail}`); }
 for (const [tag, what, edits, legs] of MUTANTS) {
   say(`RED CONTROL — ${tag}: ${what}`);
   let M = null; try { M = mutantTree(tag, edits); } catch (e) { ok(false, `${tag}: its patch applies to this tree (an anchor no longer in the file is red, never a skip)`, e.message); continue; }
   const k = kitOf(M);
-  for (const leg of legs) { inLeg = `${tag} × ${leg}`; let r; try { r = await LEGS[leg](k); } catch (e) { r = { ok: true, threw: true, detail: 'threw: ' + e.message }; } ok(!r.ok && !r.threw, `${tag} is RED at ${leg}: ${r.detail}`); }
+  for (const leg of legs) { WD.section(`${tag} × ${leg}`); let r; try { r = await LEGS[leg](k); } catch (e) { r = { ok: true, threw: true, detail: 'threw: ' + e.message }; } ok(!r.ok && !r.threw, `${tag} is RED at ${leg}: ${r.detail}`); }
 }
 say(`\n${failed ? `${failed} FAILED (${passed} passed)` : `ALL PASS (${passed})`}`);
 process.exit(failed ? 1 : 0);
