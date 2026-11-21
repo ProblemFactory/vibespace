@@ -28,11 +28,7 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
   if (!start || typeof start.link !== 'string' || typeof start.secret !== 'string') return Promise.reject(new Error('join: the start line names no link or secret'));
   return new Promise((resolve, reject) => {
     const sock = connect(start.link);
-    let admitted = false, router = null;
-    const silent = setTimeout(() => {   // accepted, never answered: refused BY NAME, the link dropped
-      const e = new Error(`the interface never answered this party's hello within ${answerMs / 1000} s`); e.code = 'no-answer';
-      reject(e); try { mux.destroy(); } catch { }
-    }, answerMs);
+    let admitted = false, router = null, silent = null;
     const mux = new Mux(sock, {
       heartbeat: false, closeAfterQueue: true, maxControl: MAX_CONTROL,
       onControl: (m) => {
@@ -49,6 +45,10 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
       onDead: (why) => { clearTimeout(silent); router.dead(); if (!admitted) reject(new Error(`the link ended before the interface answered (${why})`)); else onDead(why); },
     });
     router = createChanSockets(mux);
+    silent = setTimeout(() => {   // accepted, never answered: refused BY NAME, the link dropped (declared after the mux it names)
+      const e = new Error(`the interface never answered this party's hello within ${answerMs / 1000} s`); e.code = 'no-answer';
+      reject(e); try { mux.destroy(); } catch { }
+    }, answerMs);
     sock.on('connect', () => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, party: start.party || 'hub', secret: start.secret }));
   });
 }

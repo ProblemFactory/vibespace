@@ -1,7 +1,7 @@
 'use strict';
 // THE INTERFACE AS ITS OWN PROCESS (the separation, M1 — lane B, piece B2b; lane readings' contract v1,
 // /var/tmp/vibespace-lanes/scf/cs/contract-A.md §2). The supervisor starts it with ONE inherited pipe that it NAMES in the
-// child's environment — VIBESPACE_START_FD=<n> (./start-pipe.js; 主开发 00:02Z, law 1 amended) — and writes, in newline JSON:
+// child's environment — VIBESPACE_START_FD=<n> (src/start-pipe.js, the reader the hub shares; 主开发 00:02Z, law 1 amended) — and writes, in newline JSON:
 //   {op:'start', party:'interface', secret, link}   — first: `link` is the unix socket the parties join (this process listens)
 //   {op:'admit', party, digest}                     — before that party starts; a later admit for the name REPLACES the
 //                                                     earlier, so the previous generation's secret is refused
@@ -9,7 +9,7 @@
 // THE START PIPE'S VALUES TRAVEL ONLY ON THE START PIPE AND IN MEMORY (主开发 21:43Z): never argv, never the environment, never a log
 // line, never an error text — this file prints the party's NAME and the link's path, nothing of a secret or a digest.
 // WITHOUT THE WORD it reads NO descriptor and ends by name (exit 2: it runs only under its supervisor). WITH IT, every bad
-// start ends by name in bounded time (exit 1): the word names no pipe / no line inside START_LINE_MS / the pipe ended first /
+// start ends by name in bounded time (exit 2, the hub's code for a bad start too): the word names no pipe / no line inside START_LINE_MS / the pipe ended first /
 // the first line is no interface start.
 // The hub's port: PORT / HOST with the hub's own defaults, `listenAt` — server.js's `process.env.PORT || 3456` and
 // `process.env.HOST || '0.0.0.0'` (one owner of the port: the interface, in the piped form, holds the port the hub would).
@@ -19,7 +19,7 @@
 const net = require('net');
 const fsp = require('fs').promises;
 const { create } = require('./index.js');
-const { START_WORD, openStart, firstLine, whyText } = require('./start-pipe.js');
+const { START_WORD, openStart, firstLine, whyText } = require('../start-pipe.js');
 
 /** where the interface listens: the hub's own defaults (server.js lines `const PORT = process.env.PORT || 3456;` and
  *  `const HOST = process.env.HOST || '0.0.0.0';` — scripts/test-interface-process.mjs ⑥ reads both) */
@@ -53,9 +53,9 @@ function main({ pipe = null, env = process.env, exit = (c) => process.exit(c), l
   (pipe ? firstLine(pipe, { ms: startMs }) : openStart({ env, ms: startMs })).then((s) => {
     if (s.word === false) return ends(`started without ${START_WORD}: it runs only under its supervisor, who names its start pipe`, 2);
     if (s.pipe) s.pipe.on('error', () => { });   // a read error on a pipe we are leaving is no second, unnamed end
-    if (s.why) return ends(whyText(s), 1);
+    if (s.why) return ends(whyText(s), 2);
     const m = s.first, input = s.pipe;
-    if (!(m && m.op === 'start' && m.party === 'interface' && typeof m.link === 'string')) return ends(whyText({ why: 'no-start' }), 1);
+    if (!(m && m.op === 'start' && m.party === 'interface' && typeof m.link === 'string')) return ends(whyText({ why: 'no-start' }), 2);
     start(m).catch((e) => { const why = `the interface could not start (${(e && e.code) || 'error'})`; try { log.error?.(`[interface] ${why} — it ends`); } catch { } readyReject(new Error(why)); stop(1); });   // said BY NAME (the link socket or the port refused)
     input.on('data', lines);
     input.on('end', () => stop(0));      // END OF FILE: the supervisor is gone

@@ -15,9 +15,9 @@
 //     secret nor the interface's own.
 //   ⑥ THE PORT IS THE HUB'S: with PORT / HOST unset the interface listens where server.js would (its own defaults read
 //     from server.js's text: 3456, every address). RED CONTROL: the pre-cure defaults (a random port on loopback).
-//   ⑦ THE START NAMES ITS PIPE (主开发 00:02Z, law 1 amended; src/interface/start-pipe.js): without VIBESPACE_START_FD the
+//   ⑦ THE START NAMES ITS PIPE (主开发 00:02Z, law 1 amended; src/start-pipe.js, shared with the hub): without VIBESPACE_START_FD the
 //     interface reads no descriptor and ends by name (exit 2); a first line that is no interface start, or a silent pipe,
-//     ends by name (exit 1) — the silent one inside its bound. (The bound's red control is test-hub-port ⑧'s: one reader.)
+//     ends by name (exit 2, a bad start's own status — 1 is a start that failed, 0 the supervisor gone) — the silent one inside its bound. (The bound's red control is test-hub-port ⑧'s: one reader.)
 // in-process; a scratch dir under os.tmpdir().
 import fs from 'node:fs';
 import os from 'node:os';
@@ -73,7 +73,7 @@ function graph(entry, srcOf = read) {
 {
   const g = graph('src/interface/main.js');
   const FORBIDDEN = /engine|vault|secret|store|normali[sz]er|message-manager|accounts|channel|auth\b|session/;
-  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/mux.js', 'src/interface/admission.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/main.js', 'src/interface/owners.js', 'src/interface/relay.js', 'src/interface/start-pipe.js', 'src/pairing-token.js']) && g.files.every((f) => !FORBIDDEN.test(f)) && g.builtins.every((b) => builtinModules.includes(b)),
+  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/mux.js', 'src/interface/admission.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/main.js', 'src/interface/owners.js', 'src/interface/relay.js', 'src/pairing-token.js', 'src/start-pipe.js']) && g.files.every((f) => !FORBIDDEN.test(f)) && g.builtins.every((b) => builtinModules.includes(b)),
     `the process's graph: ${g.files.join(', ')}; built-ins ${g.builtins.join(', ')} — no engine, vault, secret-box, store or normaliser module`, g);
   const planted = graph('src/interface/main.js', (rel) => (rel === 'src/interface/main.js' ? once(rel, "const { create } = require('./index.js');") + "\nrequire('../vault.js');\n" : read(rel)));
   ok(planted.files.includes('src/vault.js'), 'RED CONTROL — a planted require of the vault is caught in the graph', planted.files);
@@ -191,13 +191,13 @@ console.log('— ⑦ THE START NAMES ITS PIPE: no word ⇒ no descriptor read, i
   M.main({ pipe: hubLine, env: { PORT: '0', HOST: '127.0.0.1' }, exit: (c) => x2.push(c), log: said(l2) });
   hubLine.write(JSON.stringify({ op: 'start', party: 'hub', secret: 'not-a-secret', link: path.join(T, 'x.sock') }) + '\n');
   await until(() => x2.length, 2000);
-  ok(x2[0] === 1 && l2.some((l) => l.includes('first line is no start')), `a first line that is the HUB's start: exit(${x2[0]}) «${l2.join(' | ')}»`, { x2, l2 });
+  ok(x2[0] === 2 && l2.some((l) => l.includes('first line is no start')), `a first line that is the HUB's start: exit(${x2[0]}) «${l2.join(' | ')}»`, { x2, l2 });
   const SILENT_MS = 120;   // the bound this suite hands main() (the product's is START_LINE_MS, 5 s)
   const l3 = [], x3 = [], t0 = Date.now();
   M.main({ pipe: new PassThrough(), env: { PORT: '0', HOST: '127.0.0.1' }, exit: (c) => x3.push(c), log: said(l3), startMs: SILENT_MS });
   await until(() => x3.length, 2000);
   const took = Date.now() - t0;
-  ok(x3[0] === 1 && took >= SILENT_MS - 10 && took < 10 * SILENT_MS && l3.some((l) => l.includes('no line on the start pipe within 0.12 s')), `a SILENT start pipe: exit(${x3[0]}) after ${took} ms (the bound 120 ms) «${l3.join(' | ')}»`, { x3, l3 });
+  ok(x3[0] === 2 && took >= SILENT_MS - 10 && took < 10 * SILENT_MS && l3.some((l) => l.includes('no line on the start pipe within 0.12 s')), `a SILENT start pipe: exit(${x3[0]}) after ${took} ms (the bound 120 ms) «${l3.join(' | ')}»`, { x3, l3 });
 }
 
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);

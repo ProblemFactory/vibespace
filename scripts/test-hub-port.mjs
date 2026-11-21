@@ -32,6 +32,15 @@
 //     probes, and once (RED CONTROL: the mark cut ⇒ the later listen says it and ends again).
 //   ⑨ THE JOIN IS BOUNDED: an interface that accepts the link and never answers ⇒ the hub ends by name inside
 //     JOIN_ANSWER_MS. RED CONTROL: the bound cut ⇒ neither joined nor ended at four times the law's time.
+//   ⑩ A BAD START EXITS WITH ITS OWN STATUS (2), server.js's shutdown exits with it. RED CONTROL: the mark cut ⇒ 0.
+//   ⑪ THE START PIPE IS CLOSED BEFORE THE FIRST CHILD (主开发 r724, (A)): the hub reads its one line at server.js line 5 and
+//     CLOSES the descriptor there (Node cannot mark an inherited socket close-on-exec). BY MACHINE: server.js's own head, as
+//     written, runs in a child with a start pipe on fd 3; a child it then starts holds nothing that points to that pipe.
+//     MEASURED (Node 24): child_process with its default stdio and node-pty hand a child NO descriptor past its stdio, even
+//     one held open — so the road a held pipe can take is a spawner that passes descriptors through (stdio slot 3); every
+//     leg prints all three. RED CONTROL: the head with the claim cut ⇒ a pass-through child holds it. (⑧ holds the same of
+//     decide(): fd 3 closed, every kind of child clean — RED: the close cut; and the line's bound on a real descriptor —
+//     RED: the bound cut ⇒ killed.)
 // in-process, plus children on a real fd 3; a scratch dir under os.tmpdir().
 import fs from 'node:fs';
 import os from 'node:os';
@@ -47,6 +56,8 @@ const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 500) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** a wait for WHAT HAPPENED, with its own bound → whether it happened */
+const until = async (f, ms) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) return false; await sleep(5); } return true; };
 const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-hub-port-'));
 process.on('exit', () => { try { fs.rmSync(T, { recursive: true, force: true }); } catch { } });
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
@@ -68,7 +79,7 @@ async function bootThrough(mod, decision, { joinResult = 'ack', deathAfter = fal
   const log = { log: (l) => lines.push(String(l)), error: (l) => lines.push(String(l)) };
   const w = mod.wire(decision, { hub, server: {}, join, end: () => { calls.ended++; calls.endedAt = Date.now(); }, log });
   hub.listen(stubPort, '0.0.0.0', () => { calls.cb++; });
-  await sleep(settleMs);
+  if (joinWith) await until(() => calls.ended > 0 || calls.cb > 0, settleMs); else await sleep(settleMs);   // a real join: wait for the end or the boot callback, bounded
   if (deathAfter && dead) { dead('stream closed'); await sleep(10); }
   return { calls, lines, record: w.bound() };
 }
@@ -119,6 +130,15 @@ fs.fstatSync = function (fd, ...a) { if (fd === 3) fstat3++; return ofs.call(fs,
 const [mode, copy] = process.argv.slice(2);
 const FILE = ${JSON.stringify(path.join(REPO, 'src/server/hub-port.js'))};
 let HP; if (copy) { const m = new Module(FILE, null); m.filename = FILE; m.paths = Module._nodeModulePaths(require('path').dirname(FILE)); m._compile(fs.readFileSync(copy, 'utf8'), FILE); HP = m.exports; } else HP = require(FILE);
+const link3 = () => { try { return fs.readlinkSync('/proc/self/fd/3'); } catch { return null; } };
+const ptyKid = () => new Promise((res) => {   // a child started through node-pty (the hub's session holders), its descriptor table
+  let pty; try { pty = Module.createRequire(FILE)('node-pty'); } catch (e) { return res({ error: 'node-pty: ' + String(e && e.message).slice(0, 80) }); }
+  let out = '', t; try { t = pty.spawn(process.execPath, ['-e', 'const fs=require("fs");const o=[];for(const f of fs.readdirSync("/proc/self/fd")){try{o.push(fs.readlinkSync("/proc/self/fd/"+f))}catch{}}process.stdout.write(JSON.stringify({word:process.env.VIBESPACE_START_FD===undefined?"none":"seen",links:o}))'], { name: 'xterm', cols: 4000, rows: 20, env: { PATH: process.env.PATH } }); } catch (e) { return res({ error: 'spawn: ' + String(e && e.message).slice(0, 80) }); }
+  const bound = setTimeout(() => res({ error: 'no exit in 5 s' }), 5000);
+  t.onData((d) => { out += d; });
+  t.onExit(() => { clearTimeout(bound); const m = /\\{"word".*\\]\\}/.exec(out.replace(/\\r?\\n/g, '')); try { res(JSON.parse(m[0])); } catch { res({ error: 'unparsed', out: out.slice(0, 120) }); } });
+});
+const startLink = link3();   // what fd 3 points to BEFORE the decision (the start pipe, when one was passed)
 const t0 = Date.now();
 HP.decide({ ms: Number(process.env.PROBE_MS) || undefined }).then((d) => {
   const lines = []; let ended = 0, own = 0;
@@ -126,9 +146,13 @@ HP.decide({ ms: Number(process.env.PROBE_MS) || undefined }).then((d) => {
   HP.wire(d, { hub, server: {}, join: () => new Promise(() => { }), end: () => { ended++; }, log: { log: (l) => lines.push(String(l)), error: (l) => lines.push(String(l)) } });
   hub.listen(0, '0.0.0.0', () => { });
   const ms = Date.now() - t0, looked = fstat3;
-  const say = (rest) => { process.stdout.write(JSON.stringify({ form: d.form, why: d.why || null, fstat3: looked, rest, ended, own, lines, word: process.env.VIBESPACE_START_FD === undefined ? 'gone' : 'kept', kid, ms }) + '\\n'); setTimeout(() => process.exit(0), 20); };
+  const selfAfter = link3();
+  const say = (rest) => { process.stdout.write(JSON.stringify({ form: d.form, why: d.why || null, fstat3: looked, rest, ended, own, lines, word: process.env.VIBESPACE_START_FD === undefined ? 'gone' : 'kept', kid, ms, startLink, selfAfter, kidHolds: !!(kid && startLink && kid.links.includes(startLink)), pty: ptyFacts, ptyHolds: !!(ptyFacts && ptyFacts.links && startLink && ptyFacts.links.includes(startLink)), pass: passFacts && (passFacts.links ? { n: passFacts.links.length } : passFacts), passHolds: !!(passFacts && passFacts.links && startLink && passFacts.links.includes(startLink)) }) + '\\n'); setTimeout(() => process.exit(0), 20); };
+  let ptyFacts = null, passFacts = null;
   let kid = null;
-  if (mode === 'kid') kid = require('child_process').spawnSync(process.execPath, ['-e', 'process.stdout.write(process.env.VIBESPACE_START_FD === undefined ? "none" : "seen")'], { env: { ...process.env }, encoding: 'utf8' }).stdout;
+  if (mode === 'kid') { try { kid = JSON.parse(require('child_process').spawnSync(process.execPath, ['-e', 'const fs=require("fs");const o=[];for(const f of fs.readdirSync("/proc/self/fd")){try{o.push(fs.readlinkSync("/proc/self/fd/"+f))}catch{}}process.stdout.write(JSON.stringify({word:process.env.VIBESPACE_START_FD===undefined?"none":"seen",links:o}))'], { env: { ...process.env }, encoding: 'utf8' }).stdout); } catch { kid = null; } }   // a CHILD of the decided hub: its environment and its descriptor table
+  if (mode === 'kid') { try { const r = require('child_process').spawnSync(process.execPath, ['-e', 'const fs=require("fs");const o=[];for(const f of fs.readdirSync("/proc/self/fd")){try{o.push(fs.readlinkSync("/proc/self/fd/"+f))}catch{}}process.stdout.write(JSON.stringify({word:process.env.VIBESPACE_START_FD===undefined?"none":"seen",links:o}))'], { env: { PATH: process.env.PATH }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore', 3] }); passFacts = r.error ? { error: String(r.error.code || r.error.message) } : JSON.parse(r.stdout); } catch (e) { passFacts = { error: String(e && (e.code || e.message)) }; } }   // a spawner that PASSES descriptors through (stdio slot 3 = this process's fd 3)
+  if (mode === 'kid') return ptyKid().then((f) => { ptyFacts = f; say(null); });
   if (mode !== 'read3') return say(null);
   let said = false; const once = (v) => { if (!said) { said = true; say(v); } };   // what is STILL in the pipe, read after the decision
   setTimeout(() => once('timeout'), 1500);
@@ -138,19 +162,19 @@ HP.decide({ ms: Number(process.env.PROBE_MS) || undefined }).then((d) => {
 async function runProbe(args, { fd3 = false, env = {}, write = null, keepOpen = false, waitMs = 5000 } = {}) {
   const c = spawn(process.execPath, [probe8, ...args], { stdio: ['ignore', 'pipe', 'pipe', ...(fd3 ? ['pipe'] : [])], env: { PATH: process.env.PATH, ...env } });
   let out = '', err = ''; c.stdout.on('data', (b) => { out += b; }); c.stderr.on('data', (b) => { err += b; });
-  if (fd3) { if (write !== null) c.stdio[3].write(write); if (!keepOpen) c.stdio[3].end(); }
+  if (fd3) { c.stdio[3].on('error', () => { }); if (write !== null) c.stdio[3].write(write); if (!keepOpen) c.stdio[3].end(); }   // the child closes its end once it has read its line
   const t0 = Date.now();
   const code = await new Promise((r) => { const k = setTimeout(() => { c.kill('SIGKILL'); r('killed'); }, waitMs); c.once('exit', (x) => { clearTimeout(k); r(x); }); });
   if (fd3) { try { c.stdio[3].destroy(); } catch { } }
   let j = null; try { j = JSON.parse(out.trim().split('\n').pop()); } catch { }
   return { j, code, wall: Date.now() - t0, err: err.slice(0, 300) };
 }
-const SP = require(path.join(REPO, 'src/interface/start-pipe.js'));
-/** src/interface/start-pipe.js with ONE line swapped, under a hub-port.js that reads that copy */
+const SP = require(path.join(REPO, 'src/start-pipe.js'));
+/** src/start-pipe.js with ONE line swapped, under a hub-port.js that reads that copy */
 function overStartPipe(needle, into) {
-  const src = read('src/interface/start-pipe.js'); if (src.split(needle).length !== 2) throw new Error(`CONTROL needle not found exactly once: ${needle.slice(0, 80)}`);
-  globalThis.__vsStartPipe = compileAt('src/interface/start-pipe.js', src.replace(needle, into));
-  return compileAt('src/server/hub-port.js', read('src/server/hub-port.js').replace("require('../interface/start-pipe.js')", 'globalThis.__vsStartPipe'));
+  const src = read('src/start-pipe.js'); if (src.split(needle).length !== 2) throw new Error(`CONTROL needle not found exactly once: ${needle.slice(0, 80)}`);
+  globalThis.__vsStartPipe = compileAt('src/start-pipe.js', src.replace(needle, into));
+  return compileAt('src/server/hub-port.js', read('src/server/hub-port.js').replace("require('../start-pipe.js')", 'globalThis.__vsStartPipe'));
 }
 const endedOnly = (r) => r.calls.ended === 1 && r.calls.own.length === 0 && r.calls.join.length === 0 && r.calls.cb === 0;
 
@@ -162,10 +186,10 @@ console.log('— ④ NO WORD, NO LOOK: a hub nobody named a start pipe to is pla
   const want = crypto.createHash('sha256').update(LINE4).digest('hex');
   const law = await runProbe(['read3'], { fd3: true, write: LINE4 });
   ok(law.j && law.j.form === 'plain' && law.j.fstat3 === 0 && law.j.rest === want && law.j.own === 1, `no word, a pipe left on fd 3 carrying a hub's start line: ${law.j && law.j.form}; fd 3 looked at ${law.j && law.j.fstat3} times; the line still whole in the pipe: ${!!law.j && law.j.rest === want}; its own listener called ${law.j && law.j.own} time`, law);
-  const N4 = "  return (pipe ? firstLine(pipe, { ms }) : openStart({ env, taken, ms })).then((s) => {\n";
+  const N4 = "  return Promise.resolve(judge(env === process.env && claimed ? claimed : takeStart(env, ms)));\n";
   const src4 = read('src/server/hub-port.js'); if (src4.split(N4).length !== 2) throw new Error('CONTROL needle not found exactly once: decide');
   const looks = path.join(T, 'hub-port-looks.js');
-  fs.writeFileSync(looks, src4.replace(N4, "  return (pipe ? firstLine(pipe, { ms }) : openStart({ env: { ...env, VIBESPACE_START_FD: '3' }, taken: null, ms })).then((s) => {\n"));
+  fs.writeFileSync(looks, src4.replace(N4, "  return Promise.resolve(judge(takeStart({ ...env, VIBESPACE_START_FD: '3' }, ms)));\n"));
   const red = await runProbe(['read3', looks], { fd3: true, write: LINE4 });
   ok(red.j && (red.j.form !== 'plain' || red.j.fstat3 > 0 || red.j.rest !== want), `RED CONTROL — today's code (fd 3 looked at with no word): ${red.j && red.j.form}; fd 3 looked at ${red.j && red.j.fstat3} times; the line ${red.j && red.j.rest === want ? 'left' : 'TAKEN'} — a plain hub took itself for a piped one`, red);
 }
@@ -183,7 +207,7 @@ console.log('— ⑤ THE SECRET travels only on fd 3 and in memory');
   fs.writeFileSync(probe, `require(${JSON.stringify(path.join(REPO, 'src/server/hub-port.js'))}).decide().then((d) => { console.log('form ' + d.form + ' link ' + (d.start && d.start.link)); setTimeout(() => process.exit(0), 300); });\n`);
   const child = spawn(process.execPath, [probe], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH, VIBESPACE_START_FD: '3' } });
   let out = ''; child.stdout.on('data', (b) => { out += b; }); child.stderr.on('data', (b) => { out += b; });
-  child.stdio[3].write(JSON.stringify(START) + '\n');
+  child.stdio[3].on('error', () => { }); child.stdio[3].write(JSON.stringify(START) + '\n');
   await sleep(150);
   let argv = '', environ = '';
   try { argv = fs.readFileSync(`/proc/${child.pid}/cmdline`, 'utf8'); environ = fs.readFileSync(`/proc/${child.pid}/environ`, 'utf8'); } catch { }
@@ -218,6 +242,27 @@ async function pushes(mod, form) {
   ok(lost.pushed.length === 2 && lost.pushed[0].cert === 'C2', 'RED CONTROL — the waiting pair\'s push cut: the first certificate never reaches the interface (TLS is not served until a renewal)', lost);
 }
 
+console.log('— ⑥b THE CERTIFICATE SERVED BEFORE THE WIRING (the pair heavy\'s first real run: TLS through the interface was reset) — held, then pushed after the join');
+{
+  const SAME = 'let wired = null, earlyPem;\n';
+  const early = async (mod, waitMs) => {
+    const pushed = []; let release; const joined = new Promise((r) => { release = r; });
+    mod.certificate({ cert: 'C0', key: 'K0' });   // tls.js's loadSync: the last pair served at once, before the boot wires the form
+    const d = await mod.decide({ pipe: pipeWith(START) });
+    const hub = { listen: (port, host, cb) => { setImmediate(() => cb && cb()); return hub; } };
+    mod.wire(d, { hub, server: {}, join: () => joined.then(() => ({ mux: { control: (m) => pushed.push(m) } })), end: () => { }, log: { log() { }, error() { } } });
+    hub.listen(stubPort, '0.0.0.0', () => { }); release();
+    await until(() => pushed.length > 0, waitMs);
+    return pushed;
+  };
+  const law = await early(mutant(SAME, SAME), 2000);
+  ok(law.length === 1 && law[0].op === 'certificate' && law[0].cert === 'C0' && law[0].key === 'K0', `a pair served before the wiring reaches the interface once the hub has joined: ${JSON.stringify(law.map((m) => m.cert))}`, law);
+  const DROP = 'function certificate(pem) { if (wired) wired.pushCertificate(pem); else earlyPem = pem || null; }';
+  const red = await early(mutant(DROP, 'function certificate(pem) { if (wired) wired.pushCertificate(pem); }'), 300);
+  ok(red.length === 0, `RED CONTROL — the early pair dropped (B2b's hook: «if (hubPort) …»): the interface gets ${red.length} certificate(s), so every TLS page is reset`, red);
+  ok(/onCertificate: \(pem\) => require\('\.\/src\/server\/hub-port\.js'\)\.certificate\(pem\)/.test(read('server.js')), 'server.js hands tls.js the hold (hub-port.js certificate), not a hook that drops what comes before the wiring');
+}
+
 console.log('— ⑦ THE PLAIN FORM IS A DEBT WITH A COUNT (主开发\'s law 3): the hub\'s own listener is ONE seam, owed until the helper\'s count reaches its floor');
 /** THE DEBT'S JUDGEMENT: owed while hub boots outside the helper remain above the floor; at it, the words say B2c */
 const LISTENER_DEBT_FLOOR = 1;   // the boot helper's answer (lane chrome-157, 2026-11-17): the floor is 1 — test-update-road boots its own STUB server.js, which stays outside the helper; every real hub a suite runs is the helper's
@@ -245,8 +290,10 @@ console.log('— ⑧ WITH THE WORD, EVERY BAD START ENDS BY NAME IN BOUNDED TIME
 {
   const fileFd = fs.openSync(path.join(T, 'not-a-pipe'), 'w+');
   const dFile = await HP.decide({ env: { [SP.START_WORD]: String(fileFd) } });
+  let fileStillOpen = true; try { fs.fstatSync(fileFd); } catch { fileStillOpen = false; }
   const rFile = await bootThrough(HP, dFile);
-  fs.closeSync(fileFd);
+  if (fileStillOpen) { try { fs.closeSync(fileFd); } catch { } }
+  ok(!fileStillOpen, `the descriptor the word named (a file, fd ${fileFd}) is CLOSED by the decision too — no child inherits what the word named`);
   ok(dFile.why === 'not-a-pipe' && endedOnly(rFile) && rFile.lines.some((l) => l.includes(`the start pipe (fd ${fileFd}) named by VIBESPACE_START_FD is no pipe or socket`)), `the word naming a FILE: «${rFile.lines.join(' | ').slice(0, 150)}» — it ends, never its own listener, never a join`, { dFile, calls: rFile.calls });
   const words = [];
   for (const w of ['x', '1', '-3', '999']) { const d = await HP.decide({ env: { [SP.START_WORD]: w } }); const r = await bootThrough(HP, d); words.push([w, d.why, endedOnly(r), r.lines.join(' ')]); }
@@ -268,6 +315,11 @@ console.log('— ⑧ WITH THE WORD, EVERY BAD START ENDS BY NAME IN BOUNDED TIME
   ok(!settled, `RED CONTROL — the bound cut: a silent start pipe still waits after ${redWait} ms (a hub that never listens and never ends, and says nothing)`);
   const PROBE_BOUND = 150;   // handed to the child's reader (PROBE_MS)
   const real = await runProbe(['silent'], { fd3: true, keepOpen: true, env: { [SP.START_WORD]: '3', PROBE_MS: String(PROBE_BOUND) } });
+  const NB = "        if (Date.now() >= until) return { word: true, fd, why: 'no-line', ms };\n";
+  const srcB = read('src/server/hub-port.js'); if (srcB.split(NB).length !== 2) throw new Error('CONTROL needle not found exactly once: the sync bound');
+  const unbound = path.join(T, 'hub-port-unbound.js'); fs.writeFileSync(unbound, srcB.replace(NB, ''));
+  const hung = await runProbe(['silent', unbound], { fd3: true, keepOpen: true, env: { [SP.START_WORD]: '3', PROBE_MS: String(PROBE_BOUND) }, waitMs: Math.max(4 * (real.wall || 0), 1500) });
+  ok(hung.code === 'killed' && !hung.j, `RED CONTROL — the line's bound cut on a REAL descriptor: the child never decides and is killed at ${Math.max(4 * (real.wall || 0), 1500)} ms (a hub that never listens and never ends)`, { code: hung.code });
   ok(real.j && real.j.why === 'no-line' && real.j.ended === 1 && real.j.own === 0 && real.j.ms >= PROBE_BOUND - 10 && real.j.ms < 10 * PROBE_BOUND && real.j.lines.some((l) => l.includes('no line on the start pipe (fd 3) within 0.15 s')), `the WORD on a REAL fd 3 that nobody writes to: «${real.j ? real.j.lines.join(' | ') : real.err}» after ${real.j && real.j.ms} ms (the bound 150 ms)`, real);
   // THE WORD GOES NO FURTHER
   const e1 = { [SP.START_WORD]: '999', PATH: '/x' };
@@ -278,7 +330,15 @@ console.log('— ⑧ WITH THE WORD, EVERY BAD START ENDS BY NAME IN BOUNDED TIME
   ok(!(SP.START_WORD in e1) && e1.PATH === '/x', 'the word is read once and DELETED from the environment it came in');
   ok(SP.START_WORD in e2, 'RED CONTROL — the delete cut: the word stays in the environment, for every child to inherit');
   const kid = await runProbe(['kid'], { fd3: true, write: JSON.stringify(START) + '\n', env: { [SP.START_WORD]: '3' } });
-  ok(kid.j && kid.j.form === 'piped' && kid.j.word === 'gone' && kid.j.kid === 'none' && !JSON.stringify(kid).includes(SECRET), `a piped child: the word ${kid.j && kid.j.word} from its own environment, and ITS child (spawned with a copy of that environment) sees «${kid.j && kid.j.kid}»`, kid.j);
+  ok(kid.j && kid.j.form === 'piped' && kid.j.word === 'gone' && kid.j.kid && kid.j.kid.word === 'none' && !JSON.stringify(kid).includes(SECRET), `a piped child: the word ${kid.j && kid.j.word} from its own environment, and ITS child (spawned with a copy of that environment) sees «${kid.j && kid.j.kid}»`, kid.j);
+  ok(kid.j && /^socket:\[\d+\]$/.test(kid.j.startLink || '') && kid.j.selfAfter !== kid.j.startLink && kid.j.kid && kid.j.kid.links.length > 2 && !kid.j.kidHolds && !kid.j.ptyHolds && !kid.j.passHolds, `THE START PIPE IS CLOSED (the B2b cure 2): fd 3 pointed to ${kid.j && kid.j.startLink} before the decision and to ${kid.j && kid.j.selfAfter} after; a child_process child's ${kid.j && kid.j.kid ? kid.j.kid.links.length : 0} descriptors hold it: ${kid.j && kid.j.kidHolds}; a node-pty child's: ${kid.j && (kid.j.pty && kid.j.pty.links ? kid.j.ptyHolds + ' (' + kid.j.pty.links.length + ' read)' : JSON.stringify(kid.j.pty))}; a child of a spawner that passes fd 3 through: ${kid.j && kid.j.passHolds} (${JSON.stringify(kid.j && kid.j.pass)})`, kid.j && { startLink: kid.j.startLink, selfAfter: kid.j.selfAfter, kidLinks: kid.j.kid && kid.j.kid.links, pty: kid.j.pty });
+  const NC = '  } finally { try { sock.destroy(); } catch { } }   // THE CLOSE, on every road above\n';
+  const srcC = read('src/server/hub-port.js'); if (srcC.split(NC).length !== 2) throw new Error('CONTROL needle not found exactly once: the close');
+  const keptCopy = path.join(T, 'hub-port-kept.js'); fs.writeFileSync(keptCopy, srcC.replace(NC, '  } finally { }\n'));
+  const kidKept = await runProbe(['kid', keptCopy], { fd3: true, write: JSON.stringify(START) + '\n', env: { [SP.START_WORD]: '3' } });
+  // the MEASURED fact (Node 24, the test machines): child_process with its default stdio and node-pty hand a child no descriptor
+  // past its stdio, even one this process holds open; a spawner that passes descriptors through does. So the red is that road.
+  ok(kidKept.j && kidKept.j.passHolds === true, `RED CONTROL — the close cut (the pipe left open): a child of a spawner that passes fd 3 through holds it: ${kidKept.j && kidKept.j.passHolds}; (facts: child_process default ${kidKept.j && kidKept.j.kidHolds}, node-pty ${kidKept.j && kidKept.j.ptyHolds}) (${kidKept.j && kidKept.j.startLink})`, kidKept.j && { kidHolds: kidKept.j.kidHolds, ptyHolds: kidKept.j.ptyHolds, selfAfter: kidKept.j.selfAfter, pty: kidKept.j.pty, kidLinks: kidKept.j.kid && kidKept.j.kid.links });
   const carriers = (AE) => {
     const base = { PATH: '/usr/bin', HOME: '/h', [SP.START_WORD]: '3' };
     const outs = { agentEnv: AE.agentEnv(base), daemonEnv: AE.daemonEnv(base), serviceEnv: AE.serviceEnv(base) };
@@ -310,7 +370,7 @@ console.log('— ⑧ WITH THE WORD, EVERY BAD START ENDS BY NAME IN BOUNDED TIME
   const did = HP.endBadStart(bad, { end: () => be.push(1), log: { error: (l) => bl.push(String(l)) } });
   const after = await bootThrough(HP, bad);
   ok(did && be.length === 1 && bl.length === 1 && bl[0].includes('no line on the start pipe (fd 3) within 5 s') && after.calls.ended === 0 && after.lines.length === 0 && after.calls.own.length === 0 && after.calls.join.length === 0 && HP.endBadStart({ form: 'plain' }) === false, `a bad start ends on decide's answer: «${bl.join(' | ')}»; the boot's later listen says nothing more and ends nothing more (${after.calls.ended}); a plain start is no bad start`, { bl, after: after.calls });
-  const twice = mutant('  decision.ended = true;\n', '');
+  const twice = mutant('  decision.ended = true; badStart = true;\n', '  badStart = true;\n');
   const bad2 = { form: 'piped', start: null, why: 'no-line', fd: 3, ms: 5000 }, b2 = [];
   twice.endBadStart(bad2, { end: () => b2.push('end'), log: { error: () => b2.push('line') } });
   const after2 = await bootThrough(twice, bad2);
@@ -330,7 +390,7 @@ console.log('— ⑨ THE JOIN IS BOUNDED: an interface that accepts the link and
   const r = await bootThrough(HP, d, { joinWith: (o) => IP.join({ ...o, answerMs: JOIN_MS }), settleMs: 300 });
   const tookMs = (r.calls.endedAt || Date.now()) - t0;
   ok(r.calls.ended === 1 && r.calls.own.length === 0 && r.calls.cb === 0 && tookMs >= JOIN_MS - 10 && tookMs < 10 * JOIN_MS && r.lines.some((l) => l.includes("the interface never answered this party's hello within 0.12 s — this hub ends")), `accepted and never answered: «${r.lines.join(' | ')}» after ${tookMs} ms (the bound 120 ms) — never its own listener, no boot callback`, r.calls);
-  const N9 = '    const silent = setTimeout(() => {   // accepted, never answered: refused BY NAME, the link dropped\n';
+  const N9 = '    silent = setTimeout(() => {   // accepted, never answered: refused BY NAME, the link dropped (declared after the mux it names)\n';
   const src9 = read('src/server/interface-party.js'); if (src9.split(N9).length !== 2) throw new Error('CONTROL needle not found exactly once: the join bound');
   const IPx = compileAt('src/server/interface-party.js', src9.replace(N9, N9 + '      return;\n'));
   const redWait = Math.max(4 * tookMs, 480);
@@ -339,6 +399,68 @@ console.log('— ⑨ THE JOIN IS BOUNDED: an interface that accepts the link and
   for (const s of held) s.destroy();
   srv.close();
   await sleep(20);
+}
+
+console.log('— ⑩ A BAD START EXITS WITH ITS OWN STATUS (2 — never 0, a stop, nor 1, a crash): server.js\'s shutdown exits with it');
+{
+  const SAME = 'const EXIT_BAD_START = 2;\n';
+  const fresh = mutant(SAME, SAME);   // a fresh copy: no start judged yet
+  const before = fresh.exitStatus();
+  fresh.endBadStart({ form: 'piped', start: null, why: 'no-line', fd: 3, ms: 5000 }, { end: () => { }, log: { error() { } } });
+  const after = fresh.exitStatus();
+  const plain = mutant(SAME, SAME); plain.endBadStart({ form: 'plain' }, { end: () => { }, log: { error() { } } });
+  ok(before === 0 && after === 2 && fresh.EXIT_BAD_START === 2 && plain.exitStatus() === 0 && /process\.exit\(require\('\.\/src\/server\/hub-port\.js'\)\.exitStatus\(\)\)/.test(read('server.js')), `a stop exits ${before}; after a bad start ${after}; a plain start that ends nothing ${plain.exitStatus()}; server.js's shutdown exits with exitStatus()`);
+  const quiet = mutant('  decision.ended = true; badStart = true;\n', '  decision.ended = true;\n');   // stale-pins: kept (the red plants the line WITHOUT the exit mark)
+  quiet.endBadStart({ form: 'piped', start: null, why: 'no-line', fd: 3, ms: 5000 }, { end: () => { }, log: { error() { } } });
+  ok(quiet.exitStatus() === 0, `RED CONTROL — the mark cut: a bad start exits ${quiet.exitStatus()}, the code of a clean stop`);
+}
+
+console.log('— ⑪ THE PIPE IS CLOSED BEFORE THE FIRST CHILD, BY MACHINE: server.js\'s own head, as written, runs with a start pipe on fd 3; a child it then starts holds nothing that points to that pipe');
+{
+  // server.js's HEAD: its lines up to the first other require (the runtime boot, then the claim) — compiled AS server.js
+  // (its requires resolve in the tree; nothing is written into the tree), in a child whose fd 3 is a start pipe the suite
+  // holds; the head runs, then the child starts ONE child of its own, the way the boot's first probe does
+  const L = read('server.js').split('\n'), CLAIM = " require('./src/server/hub-port.js').claim();";
+  const cut = L.findIndex((l, i) => i > 0 && /\brequire\(/.test(l.replace(/\/\/.*$/, '').replace(CLAIM.trim(), '')));
+  const head = L.slice(0, cut).join('\n') + '\n';
+  const headFile = path.join(T, 'server-head.js'), noClaimFile = path.join(T, 'server-head-noclaim.js');
+  fs.writeFileSync(headFile, head); fs.writeFileSync(noClaimFile, head.replace(CLAIM, ''));
+  const probe11 = path.join(T, 'probe11.cjs');
+  fs.writeFileSync(probe11, `
+const fs = require('fs'), path = require('path'), cp = require('child_process'), Module = require('module');
+const FILE = ${JSON.stringify(path.join(REPO, 'server.js'))};
+const link = (f) => { try { return fs.readlinkSync('/proc/self/fd/' + f); } catch { return null; } };
+const before = link(3);
+const m = new Module(FILE, null); m.filename = FILE; m.paths = Module._nodeModulePaths(path.dirname(FILE));
+let err = null; try { m._compile(fs.readFileSync(process.argv[2], 'utf8'), FILE); } catch (e) { err = String(e && e.message).slice(0, 200); }
+const LIST = 'const fs=require("fs");const o=[];for(const f of fs.readdirSync("/proc/self/fd")){try{o.push(fs.readlinkSync("/proc/self/fd/"+f))}catch{}}process.stdout.write(JSON.stringify(o))';
+let links = []; try { links = JSON.parse(cp.spawnSync(process.execPath, ['-e', LIST], { encoding: 'utf8', env: { PATH: process.env.PATH } }).stdout); } catch { }
+let pass = null; try { const r = cp.spawnSync(process.execPath, ['-e', LIST], { encoding: 'utf8', env: { PATH: process.env.PATH }, stdio: ['ignore', 'pipe', 'ignore', 3] }); pass = r.error ? { error: String(r.error.code || r.error.message) } : { links: JSON.parse(r.stdout) }; } catch (e) { pass = { error: String(e && (e.code || e.message)) }; }   // a spawner that PASSES fd 3 through
+const ptyLinks = () => new Promise((res) => {   // a child started through node-pty (the hub's session holders)
+  let pty; try { pty = Module.createRequire(FILE)('node-pty'); } catch (e) { return res({ error: 'node-pty: ' + String(e && e.message).slice(0, 80) }); }
+  let out = '', t; try { t = pty.spawn(process.execPath, ['-e', 'const fs=require("fs");const o=[];for(const f of fs.readdirSync("/proc/self/fd")){try{o.push(fs.readlinkSync("/proc/self/fd/"+f))}catch{}}process.stdout.write("LINKS"+JSON.stringify(o)+"END")'], { name: 'xterm', cols: 4000, rows: 20, env: { PATH: process.env.PATH } }); } catch (e) { return res({ error: 'spawn: ' + String(e && e.message).slice(0, 80) }); }
+  const bound = setTimeout(() => res({ error: 'no exit in 5 s' }), 5000);
+  t.onData((d) => { out += d; });
+  t.onExit(() => { clearTimeout(bound); const flat = out.split('\\r').join('').split('\\n').join(''), a = flat.indexOf('LINKS'), b = flat.indexOf('END', a); try { res({ links: JSON.parse(flat.slice(a + 5, b)) }); } catch { res({ error: 'unparsed', out: flat.slice(0, 120) }); } });
+});
+ptyLinks().then((pf) => {
+  process.stdout.write('\\n' + JSON.stringify({ before, after: link(3), childHolds: !!before && links.includes(before), childLinks: links.length, pty: pf.links ? { n: pf.links.length } : pf, ptyHolds: !!(before && pf.links && pf.links.includes(before)), pass: pass && (pass.links ? { n: pass.links.length } : pass), passHolds: !!(before && pass && pass.links && pass.links.includes(before)), err, word: process.env.VIBESPACE_START_FD === undefined ? 'gone' : 'kept' }) + '\\n');
+  setTimeout(() => process.exit(0), 20);
+});
+`);
+  const runHead = async (file) => {
+    const c = spawn(process.execPath, [probe11, file], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH, VIBESPACE_START_FD: '3', NO_AUTO_UPDATE: '1', VIBESPACE_RUNTIME_REEXEC: '1' } });
+    let out = '', err = ''; c.stdout.on('data', (b) => { out += b; }); c.stderr.on('data', (b) => { err += b; });
+    c.stdio[3].on('error', () => { }); c.stdio[3].write(JSON.stringify(START) + '\n');
+    const code = await new Promise((r) => { const k = setTimeout(() => { c.kill('SIGKILL'); r('killed'); }, 10000); c.once('exit', (x) => { clearTimeout(k); r(x); }); });
+    try { c.stdio[3].destroy(); } catch { }
+    let j = null; try { j = JSON.parse(out.split('\n').filter((l) => l.startsWith('{') && l.includes('"childHolds"')).pop()); } catch { }   // the runtime boot says its own line on a later tick
+    return { j, code, leaked: out.includes(SECRET) || err.includes(SECRET), err: err.slice(0, 300) };
+  };
+  const law = await runHead(headFile);
+  ok(cut > 3 && law.j && !law.j.err && /^socket:\[\d+\]$/.test(law.j.before || '') && law.j.after !== law.j.before && law.j.word === 'gone' && law.j.childLinks > 2 && law.j.childHolds === false && law.j.ptyHolds === false && law.j.passHolds === false && !law.leaked, `server.js lines 1–${cut} as written: fd 3 was ${law.j && law.j.before}, after the head ${law.j && law.j.after}; a child_process child holds the start pipe: ${law.j && law.j.childHolds} (${law.j && law.j.childLinks} descriptors read); a node-pty child: ${law.j && law.j.ptyHolds} (${JSON.stringify(law.j && law.j.pty)}); a child of a spawner that passes fd 3 through: ${law.j && law.j.passHolds} (${JSON.stringify(law.j && law.j.pass)}); the word ${law.j && law.j.word}; no secret in its output`, law);
+  const red = await runHead(noClaimFile);
+  ok(red.j && red.j.passHolds === true, `RED CONTROL — the head with the claim cut (the pipe left open): a child of a spawner that passes fd 3 through holds it: ${red.j && red.j.passHolds}; (facts: child_process default ${red.j && red.j.childHolds}, node-pty ${red.j && red.j.ptyHolds}) (${red.j && red.j.before})`, red.j);
 }
 
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);

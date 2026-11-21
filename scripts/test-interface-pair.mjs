@@ -71,7 +71,7 @@ const iface = keep('interface', spawn(process.execPath, [path.join(wt, 'src/inte
 iface.stdio[3].write(JSON.stringify({ op: 'start', party: 'interface', secret: ifaceSecret, link }) + '\n' + JSON.stringify({ op: 'admit', party: 'hub', digest: hubDigest }) + '\n');
 await until(() => /listening on/.test(outs.get('interface')), 20000);
 const hub = keep('piped', spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...hubEnv(fakeHome), ...VNC_PAIR, PORT: String(IFACE_PORT), VIBESPACE_START_FD: '3' }, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }));
-hub.stdio[3].write(JSON.stringify({ op: 'start', party: 'hub', secret: hubSecret, link }) + '\n');
+hub.stdio[3].on('error', () => { }); hub.stdio[3].write(JSON.stringify({ op: 'start', party: 'hub', secret: hubSecret, link }) + '\n');   // the hub reads this ONE line at its line 5 and closes its end (the B2b cure 2)
 
 const record = (name) => { const m = [...outs.get(name).matchAll(/\[hub-port\] (\{[^\n]*\})/g)].pop(); try { return m ? JSON.parse(m[1]) : null; } catch { return null; } };
 const ready = (port, secure = false) => new Promise((resolve) => { const q = (secure ? https : http).get({ host: '127.0.0.1', port, path: '/api/home', agent: false, rejectUnauthorized: false, timeout: 3000 }, (r) => { r.resume(); resolve(r.statusCode > 0); }); q.on('error', () => resolve(false)); q.on('timeout', () => { q.destroy(); resolve(false); }); });

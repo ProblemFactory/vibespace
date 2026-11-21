@@ -23,6 +23,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
 
   function open(page, facts = {}) {
     if (!mux) { page.destroy(); return null; }   // no link: closed at once
+    if (!facts.addr) { page.destroy(); return null; }   // no address: the page is already gone, and is never stamped (src/agentd/chan-socket.js reads a null address as loopback)
     const m = mux, chan = next++;
     const p = { page, mux: m, owed: 0, ended: { page: false, owner: false } };
     pairs.set(chan, p); stats.opened++;

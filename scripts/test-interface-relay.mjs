@@ -216,8 +216,8 @@ async function syncCalls(I) {
   const law = await syncCalls();
   ok(law.ok && law.n === 0, `10 plain and 4 TLS exchanges, a certificate pushed and renewed, a 2 MB answer: ${law.n} synchronous fs / child_process / zlib calls`, law);
   const files = fs.readdirSync(path.join(REPO, 'src/interface')).filter((f) => f.endsWith('.js'));
-  const syncForms = files.flatMap((f) => [...read(`src/interface/${f}`).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1').matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `${f}: ${m[0]}`));
-  ok(JSON.stringify(files.sort()) === JSON.stringify(['admission.js', 'front.js', 'index.js', 'main.js', 'owners.js', 'relay.js', 'start-pipe.js']) && syncForms.length === 0, `and read statically: no …Sync name in src/interface's ${files.length} files (a reference taken at load is seen too)`, syncForms);
+  const syncForms = [...files.map((f) => `src/interface/${f}`), 'src/start-pipe.js'].flatMap((rel) => [...read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1').matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `${rel}: ${m[0]}`));   // + the reader the interface shares with the hub
+  ok(JSON.stringify(files.sort()) === JSON.stringify(['admission.js', 'front.js', 'index.js', 'main.js', 'owners.js', 'relay.js']) && syncForms.length === 0, `and read statically: no …Sync name in src/interface's ${files.length} files nor in src/start-pipe.js, the reader it shares (a reference taken at load is seen too)`, syncForms);
   const mutRelay = mutant('src/interface/relay.js', "      stats.toPage += buf.length;", "      stats.toPage += buf.length; require('fs').statSync(__filename);");
   const mut = await syncCalls(interfaceWith({ relay: mutRelay }));
   ok(mut.ok && mut.n > 0, `RED CONTROL — one stat planted on the relay's byte path: ${mut.n} counted`, mut);
@@ -574,6 +574,25 @@ async function midUpload(I, bound = null) {
   const RLY = 'src/interface/relay.js', CLOSE = "    page.on('close', () => { if (!p.ended.page) { p.ended.page = true; if (live()) m.closeChan(chan); } p.ended.owner = true; pairs.delete(chan); });";
   const leaks = await midUpload(interfaceWith({ relay: mutant(RLY, CLOSE, "    page.on('close', () => { p.ended.owner = true; pairs.delete(chan); });") }), Math.max(50, 4 * law.took));
   ok(leaks.routerSize >= 1, `RED CONTROL — the page's close sends no CLOSE: the hub's router keeps the channel as a sink for good (${leaks.routerSize})`, leaks);
+}
+
+console.log('— the B2b cure 2: a page with NO address is closed at once and never stamped (the far side reads a null address as loopback)');
+{
+  const { EventEmitter } = await import('node:events');
+  const run = (mod) => {
+    const sent = [], R = mod.create({ ownerOf: () => 'hub' });
+    R.attach({ control: (m) => sent.push(m), data: () => true, credit: () => { }, closeChan: () => { } });
+    const page = Object.assign(new EventEmitter(), { destroyed: false, destroy() { this.destroyed = true; }, pause() { }, resume() { } });
+    const chan = R.open(page, { secure: false, addr: null, port: null });
+    const kept = Object.assign(new EventEmitter(), { destroyed: false, destroy() { this.destroyed = true; }, pause() { }, resume() { } });
+    R.open(kept, { secure: false, addr: '203.0.113.7', port: 4100 });
+    return { chan, destroyed: page.destroyed, opens: sent.filter((m) => m && m.op === 'open').map((m) => m.stamp), kept: !kept.destroyed };
+  };
+  const law = run(require(path.join(REPO, 'src/interface/relay.js')));
+  ok(law.chan === null && law.destroyed && law.opens.length === 1 && law.opens[0].addr === '203.0.113.7' && law.kept, `a page whose address is unknown (already gone): closed, no open line; one with an address: stamped «${law.opens[0] && law.opens[0].addr}»`, law);
+  const G = "    if (!facts.addr) { page.destroy(); return null; }   // no address: the page is already gone, and is never stamped (src/agentd/chan-socket.js reads a null address as loopback)\n";
+  const red = run(mutant('src/interface/relay.js', G, ''));
+  ok(red.opens.length === 2 && red.opens.some((s) => s.addr === null), 'RED CONTROL — the guard cut: the unknown page is stamped with a null address (loopback on the far side)', red);
 }
 
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);
