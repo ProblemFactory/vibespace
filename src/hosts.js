@@ -25,6 +25,15 @@ const SOCK = require('./sock-path.js');   // B-3767 unit 2: THE folder verdict (
 const { REMOTE_PRELUDE, nodeFinder, agentNodeOf } = require('./remote-shell.js');
 // the hello a device's link holds, read from MEMORY (B-24e2's follow-up door helloInfo: status() also reads the socket's witness on
 // the loop); an older DeviceManager without it ⇒ status().info. B-b83c reads the agent's own node through it
+// B-99b9: the path field's two asks on another machine (hosts.dirSlice): the hub's own wait, the run's bound, the marks and holds
+const DIR_SLICE_WAIT_MS = 2000;      // the hub stops WAITING on its asks here and replies (its own race, never the run's timeout)
+const SLICE_TYPED_CAP = 4;          // typed folders one text asks at once (the bases' order): each is ONE shell there; past it, named unread
+const SLICE_RUN_MS = 6000;           // a run's own bound there (the device's runCmd / the ssh rung)
+const SLICE_DEADLINE_MS = 8000;      // a run that has not SETTLED by now never will (a shell stuck in the kernel): missed / hung
+const SLICE_HUNG_MS = 30e3;          // a typed folder that never landed: marked this long (the hub rung's PROBE_LATE_MS)
+const SLICE_HOLD_MS = 30e3;          // a rest that did not land holds the machine's rest this long, doubling on each miss in a row…
+const SLICE_HOLD_MAX_MS = 600e3;     // …up to this
+const LIST_FRESH_REMOTE_MS = 2000;   // a landed rest older than this is said LATE while a new one is out (the rung's LIST_FRESH_MS)
 const helloOf = (dm) => { try { return typeof dm.helloInfo === 'function' ? dm.helloInfo() : dm.status().info; } catch { return null; } };
 const { parseReceiptLines } = require('./harness-config'); // CFG| receipt lines from the shipped helper (design-harness-settings §6)
 const AC = require('./agentd/answer-caps.js'); // B-5278: a usage walk's dropped events said once; the device walk's harvest bound
@@ -1717,57 +1726,150 @@ class HostManager {
   }
 
   /** THE PATH FIELD ON THIS MACHINE (lane path-field — the owner's note ④: a remote machine gets the SAME recommendations,
-   *  computed for it). ONE sh round trip (src/dir-slice-script.js) lists / probes / indexes there — over the device link's
-   *  runCmd first (the ONLY road for a dial machine), the ssh rung otherwise — and PURE src/path-candidates.js
-   *  sliceListing builds the listing this machine's SafeFs answer builds. Paths come in that machine's `~/…` form (a
-   *  Task Group folder under this hub's home is probed at the same place under that machine's home). Kept per machine:
-   *  the folder index 60 s (refreshed behind an answer once stale) and the Mac's display names 10 min.
-   *  → { suggestions, listing, self, took, partial } */
-  async dirSlice(id, { text = '', bases = [], probe = [], q = '', kind = 'folder' } = {}, { by = 'system:hosts' } = {}) {
+   *  computed for it). ONE sh script (src/dir-slice-script.js) lists / probes / indexes there — over the device link's
+   *  runCmd first (the ONLY road for a dial machine), the ssh rung otherwise (plain sh, never the login prelude) — and PURE
+   *  src/path-candidates.js sliceListing builds the listing this machine's SafeFs answer builds. Paths come in that machine's
+   *  `~/…` form. Kept per machine: the folder index 60 s and the Mac's display names 10 min.
+   *  B-99b9 (主开发 r826, THE SMALLER SHAPE) — ONE HUNG SOURCE THERE NEVER COSTS A HEALTHY TYPED FOLDER ITS LISTING. TWO ASKS, the
+   *  state in THIS hub's memory, nothing written or detached there:
+   *  · R1, THE TYPED ASK: only the folders the text itself gives (sliceAsk's `typed`), its own short round trip beside R2; one
+   *    already in flight for the same folders is JOINED. The hub stops WAITING at about 2 s (its own race, never the run's
+   *    timeout); the run goes on to its own bound and a late landing is KEPT and served to the next ask (slow is not hung). A
+   *    typed folder is marked HUNG only when its run never landed by the run's own deadline — for 30 s (the rung's
+   *    PROBE_LATE_MS), covering text at or under it, with no new run then; the reply says when it is asked again.
+   *  · R2, THE REST (the bases, the home when it is not typed, the probes, the index, the names): ONE in flight a machine; the
+   *    last landed rest served, said late while one is out; a rest that does not land HOLDS that machine's rest 30 s, doubling
+   *    on each miss in a row up to 10 minutes, reset by a landing.
+   *  · `partial` is true EXACTLY when the typed folders have no landed result (not even a kept one); a late or held rest sets
+   *    rowsLate / rowsUnread (+ rowsHeld) / probesLate — the names the field words — and never `partial`.
+   *  → { suggestions, listing, self, took, partial, verdict?, rowsLate?, sourcesLate?, rowsUnread?, sourcesUnread?, rowsHeld?, heldFor?, probesLate? } */
+  async dirSlice(id, { text = '', bases = [], probe = [], q = '', kind = 'folder', waitMs } = {}, { by = 'system:hosts' } = {}) {
     const h = this.get(id);
     if (h && h.transport !== 'dial') await this.refuseUnreachable(id); // BY NAME, before any spawn (lane hub-dies-dead-ssh-host)
     const PC = require('./path-candidates.js');
     const DS = require('./dir-slice-script.js');
     const t0 = Date.now();
+    const now = () => (typeof this._now === 'function' ? this._now() : Date.now());   // the marks' and holds' clock (a suite hands its own)
     const files = kind === 'file';
     const norm = (v) => (Array.isArray(v) ? v : []).map(String).filter((p) => p && (p.startsWith('/') || p.startsWith('~'))).map((p) => (p.length > 1 ? p.replace(/\/+$/, '') : p));
     const baseList = norm(bases).slice(0, 12);
     const probes = [...new Set(norm(probe))].slice(0, 40);
+    const probeAs = new Map(); for (const p of (Array.isArray(probe) ? probe : []).map(String)) { const n = norm([p])[0]; if (n) probeAs.set(n, [...(probeAs.get(n) || []), p]); }   // the field's own strings
     const ask = PC.sliceAsk(text, baseList.map((p) => ({ path: p })));
     const fuzzy = String(q || '').trim();
-    const c = (this._sliceCache = this._sliceCache || new Map()).get(id) || { index: null, names: null, refreshing: null };
+    const c = (this._sliceCache = this._sliceCache || new Map()).get(id) || { index: null, names: null };
     this._sliceCache.set(id, c);
+    c.r1 = c.r1 || new Map(); c.hung = c.hung || new Map();
+    const r2 = c.r2 || (c.r2 = { p: null, raw: null, at: 0, miss: 0, heldUntil: 0, gen: 0, since: 0 });
+    const WAIT = Math.max(50, Math.min(5000, Number(waitMs) || DIR_SLICE_WAIT_MS));
+    const deadline = t0 + WAIT;
+    const sleepUntil = (ms) => new Promise((r) => { const tm = setTimeout(r, Math.max(0, ms - Date.now())); tm.unref?.(); });
+    const errs = [];
+    // B-99b9: a HANG is a run that never ended (its own bound killed it, or it printed no end) — never a refusal, an offline device or a
+    // connect failure: those are said as the machine's own words and never mark nor hold anything
+    const isHang = (e) => !!(e && (e.killed || e.code === 'ETIMEDOUT' || /time(d)? ?out|timeout/i.test(String(e.message || ''))));
     const run = async (script) => {
       if (h.transport === 'dial' || this.dataPlaneOn?.()) {
-        try { const dm = await this.deviceBounded(id, 4000); return String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 6000, by })).stdout || ''); }
-        catch (e) { if (h.transport === 'dial') throw e; /* ssh hosts fall through */ }
+        try { const dm = await this.deviceBounded(id, 4000); return String((await dm.runCmd('sh', ['-c', script], { timeoutMs: SLICE_RUN_MS, by })).stdout || ''); }
+        catch (e) { if (h.transport === 'dial' || isHang(e)) throw e; /* an ssh host's refused device road falls through — never a run that hung there */ }
       }
-      return String(await this._ssh(h, REMOTE_PRELUDE + script, { timeoutMs: 6000 }));
+      // B-99b9: plain sh there, NOT the login shell's prelude (the prelude itself stats the home)
+      return String(await this._ssh(h, `exec sh -c '${script.replace(/'/g, `'\\''`)}'`, { timeoutMs: SLICE_RUN_MS }));
     };
+    // ── R1, THE TYPED ASKS: ONE A TYPED FOLDER (主开发 r880), joined and marked per folder; at most SLICE_TYPED_CAP at once ──
+    const typedAll = ask.typed, typed = typedAll.slice(0, SLICE_TYPED_CAP), capped = typedAll.slice(SLICE_TYPED_CAP);
+    const hungOf = (p) => { for (const [hp, until] of c.hung) if (until > now() && (p === hp || p.startsWith(hp === '/' ? '/' : hp + '/'))) return { path: hp, until }; return null; };
+    const markHung = (list) => { for (const p of list) c.hung.set(p, now() + SLICE_HUNG_MS); if (c.hung.size > 64) for (const [k, u] of c.hung) if (u <= now()) c.hung.delete(k); };
+    const r1Of = (list) => {   // → its entry { raw (landed or kept), p (in flight), err } — JOINED when one is out for the same folders
+      const k = (files ? 'F' : 'D') + '\n' + list.join('\n');
+      let e = c.r1.get(k);
+      if (!e) {
+        e = { raw: null, at: 0, p: null, since: 0, gen: 0, err: null }; c.r1.set(k, e);
+        if (c.r1.size > 64) for (const [k2, e2] of c.r1) if (!e2.p) { c.r1.delete(k2); break; }   // never one still in flight
+      }
+      if (e.p && now() - e.since > SLICE_DEADLINE_MS) { e.p = null; e.gen++; markHung(list); }   // a run that never settled: its own deadline passed
+      if (!e.p && !list.some(hungOf)) {
+        const gen = ++e.gen; e.since = now(); e.err = null;
+        e.p = run(DS.sliceScript({ list, files })).then((out) => {
+          const r = DS.parseSlice(out);
+          if (e.gen === gen) { e.p = null; if (r.done) { e.raw = r; e.at = now(); } else markHung(list); }   // landed late or not: KEPT; never landed by the run's bound: hung
+          return r;
+        }, (err) => { if (e.gen === gen) { e.p = null; if (isHang(err)) markHung(list); else { e.err = err; errs.push(err); } } return null; });
+      }
+      return e;
+    };
+    const r1s = typed.map((p) => ({ p, hung: hungOf(p), e: null }));
+    for (const t of r1s) if (!t.hung) t.e = r1Of([t.p]);
+    // ── R2, THE REST ── (one in flight a machine; held after a miss, the hold doubling; the index refresh rides it)
     const fresh = (x, ms) => x && Date.now() - x.at < ms;
-    const wantIndex = !!fuzzy && !c.index;
+    const restList = ask.list.filter((p) => !typedAll.includes(p)).slice(0, 14);
+    const wantIndex = !!fuzzy && !fresh(c.index, 60e3);
     const wantNames = !fresh(c.names, 600e3);
-    const raw = DS.parseSlice(await run(DS.sliceScript({ list: ask.list.slice(0, 14), probes, files, index: wantIndex, names: wantNames })));
-    if (!raw.done && !raw.home) throw new Error('the machine did not answer the folder listing');
-    if (wantIndex) c.index = { at: Date.now(), dirs: raw.index.dirs, links: raw.index.links };
-    if (wantNames) c.names = { at: Date.now(), map: raw.localized };
-    /* the index is stale: answer from it, refresh behind (one at a time) */
-    if (fuzzy && c.index && !fresh(c.index, 60e3) && !c.refreshing) {
-      c.refreshing = run(DS.sliceScript({ list: [], index: true })).then((o) => { const r2 = DS.parseSlice(o); if (r2.done) c.index = { at: Date.now(), dirs: r2.index.dirs, links: r2.index.links }; })
-        .catch(() => {}).finally(() => { c.refreshing = null; });
+    const restWant = { list: restList, probes, index: wantIndex, names: wantNames };
+    const miss = () => { r2.miss++; r2.heldUntil = now() + Math.min(SLICE_HOLD_MAX_MS, SLICE_HOLD_MS * 2 ** (r2.miss - 1)); };
+    if (r2.p && now() - r2.since > SLICE_DEADLINE_MS) { r2.p = null; r2.gen++; miss(); }   // a rest that never settled: missed
+    if (!(r2.heldUntil > now()) && !r2.p && (restList.length || probes.length || wantIndex || wantNames)) {
+      const gen = ++r2.gen; r2.since = now(); const want = restWant;
+      r2.p = run(DS.sliceScript({ ...want, files })).then((out) => {
+        const r = DS.parseSlice(out);
+        if (r2.gen === gen) {
+          r2.p = null;
+          if (r.done) {
+            r2.raw = r; r2.at = now(); r2.miss = 0; r2.heldUntil = 0;
+            if (want.index) c.index = { at: Date.now(), dirs: r.index.dirs, links: r.index.links };   // a refresh that did not land keeps the old index
+            if (want.names) c.names = { at: Date.now(), map: r.localized };
+          } else miss();
+        }
+        return r;
+      }, (err) => { if (r2.gen === gen) { r2.p = null; if (isHang(err)) miss(); else errs.push(err); } return null; });
     }
-    /* exactly one folder starts with the typed last segment → list it too (the field shows what is inside; Tab goes in) */
+    // THE WAIT: the hub's own race, about 2 s for all of them (never a run's timeout)
+    await Promise.race([Promise.all([...r1s.map((t) => t.e && t.e.p), r2.p].filter(Boolean)), sleepUntil(deadline)]);
+    for (const t of r1s) if (!t.hung && t.e && !t.e.raw && !t.e.p) t.hung = hungOf(t.p);   // it ended unlanded within the wait
+    const landed = r1s.filter((t) => t.e && t.e.raw);
+    const r1Raws = landed.map((t) => t.e.raw);
+    /* exactly one folder starts with the typed last segment → list it too, on R1's road (never a mount point said by name only) */
     const tx = String(text || '');
     const last = /\s/.test(tx) || !tx.includes('/') ? '' : tx.slice(tx.lastIndexOf('/') + 1).toLowerCase();
-    if (last) {
+    let oneRaw = null;
+    if (last && r1Raws.length) {
       const one = [];
-      for (const d of raw.dirs) { const hits = (d.kids || []).filter((k) => !k.link && k.name.toLowerCase().startsWith(last)); if (hits.length === 1) one.push(d.path.replace(/\/$/, '') + '/' + hits[0].name); }
-      if (one.length) { const r2 = DS.parseSlice(await run(DS.sliceScript({ list: [...new Set(one)].slice(0, 4), files }))); raw.dirs.push(...r2.dirs); }
+      for (const r of r1Raws) for (const d of r.dirs) { const hits = (d.kids || []).filter((k) => !k.link && !k.mount && k.name.toLowerCase().startsWith(last)); if (hits.length === 1) one.push(d.path.replace(/\/$/, '') + '/' + hits[0].name); }
+      const oneList = [...new Set(one)].slice(0, 4);
+      if (oneList.length && !oneList.some(hungOf)) { const e1 = r1Of(oneList); if (e1.p) await Promise.race([e1.p, sleepUntil(deadline)]); oneRaw = e1.raw; }
     }
-    const homeRow = raw.dirs.find((d) => d.path === raw.home);
-    const self = { home: raw.home, roots: ((homeRow && homeRow.kids) || []).filter((k) => k.pkg === PC.SELF_PACKAGE).map((k) => raw.home + '/' + k.name) };
-    const listing = PC.sliceListing({ home: raw.home, machine: id, dirs: raw.dirs, probes: raw.probes, index: fuzzy && c.index ? c.index : null, mounts: raw.mounts, localized: (c.names && c.names.map) || {}, q: fuzzy });
-    return { suggestions: PC.legacySuggestions(listing, tx), listing, self, os: raw.os, took: Date.now() - t0, partial: !raw.done };
+    const held = r2.heldUntil > now();
+    const restRaw = r2.raw;
+    if (!r1Raws.length && !restRaw && errs.length) throw errs[0];   // the machine refused BY NAME and nothing is kept: said as the release said it
+    const home = (r1Raws[0] && r1Raws[0].home) || (restRaw && restRaw.home) || c.home || '';
+    if (home) c.home = home;
+    const typedAbs = new Set(r1Raws.flatMap((r) => r.dirs.map((d) => d.path)));
+    const dirs = [...r1Raws.flatMap((r) => r.dirs), ...(oneRaw ? oneRaw.dirs : []), ...(restRaw ? restRaw.dirs.filter((d) => !typedAbs.has(d.path)) : [])];
+    const homeRow = dirs.find((d) => d.path === home && Array.isArray(d.kids));
+    if (homeRow) c.selfRoots = (homeRow.kids || []).filter((k) => k.pkg === PC.SELF_PACKAGE).map((k) => home + '/' + k.name);
+    const self = { home, roots: c.selfRoots || [] };   // the last landed home row's: an unlanded one never offers the instance's own checkout
+    const mounts = (restRaw && restRaw.mounts) || (r1Raws[0] && r1Raws[0].mounts) || [];
+    const listing = PC.sliceListing({ home, machine: id, dirs, probes: restRaw ? restRaw.probes : [], index: fuzzy && c.index ? c.index : null, mounts, localized: (c.names && c.names.map) || {}, q: fuzzy });
+    // THE REPLY NAMES WHAT IT LACKS, with this machine's own rung's keys — worked out from what the landed rest COVERS (a rest asked for
+    // other folders, or joined, never passes for this ask's)
+    const abs = (p) => (p === '~' ? home : p.startsWith('~/') ? home + p.slice(1) : p);
+    const restDirs = new Set(restRaw ? restRaw.dirs.map((d) => d.path) : []), restProbes = new Set(restRaw ? restRaw.probes.map((x) => x.path) : []);
+    const restFresh = !!restRaw && now() - r2.at <= LIST_FRESH_REMOTE_MS;
+    const missList = restList.filter((p) => !home || !restDirs.has(abs(p)) || !restFresh), missProbes = probes.filter((p) => !home || !restProbes.has(abs(p)) || !restFresh);
+    const probeStrings = (xs) => xs.flatMap((p) => probeAs.get(p) || [p]);
+    const idxOut = !!fuzzy && !c.index;
+    const typedOut = r1s.filter((t) => !(t.e && t.e.raw)).map((t) => t.p);
+    const out = { suggestions: PC.legacySuggestions(listing, tx), listing, self, os: (r1Raws[0] && r1Raws[0].os) || (restRaw && restRaw.os) || '', took: Date.now() - t0,
+      partial: typed.length > 0 && !r1Raws.length };   // NONE of the typed folders has a landed result (not even a kept one)
+    if (typed.length && !r1Raws.length && r1s.every((t) => t.hung)) { const first = r1s.reduce((a, t) => (!a || t.hung.until < a.until ? t.hung : a), null); out.verdict = { kind: 'skipped', path: first.path, retryIn: Math.max(0, first.until - now()) }; }   // the field: «asked again in N s» — only when EVERY typed folder is hung
+    const lateList = [...(r1Raws.length ? typedOut : []), ...(held ? [] : missList)];   // not covered by the landed rest, or older than its freshness
+    if (held && (missList.length || missProbes.length)) Object.assign(out, { rowsUnread: true, sourcesUnread: missList, rowsHeld: true, heldFor: Math.max(0, r2.heldUntil - now()), ...(missProbes.length ? { probesLate: probeStrings(missProbes) } : {}) });
+    else if (!held && missProbes.length) out.probesLate = probeStrings(missProbes);   // never marked asked by the field (B-0f3d: never «known absent»)
+    if (lateList.length || idxOut) Object.assign(out, { rowsLate: true, sourcesLate: lateList });
+    if (capped.length) Object.assign(out, { rowsUnread: true, rowsCapped: SLICE_TYPED_CAP, sourcesUnread: [...(out.sourcesUnread || []), ...capped] });   // past the cap: named, never dropped
+    const named = errs.find((e) => e && e.code);
+    if (named && !out.error) Object.assign(out, { error: String(named.message || named).slice(0, 120), ...refusalBody(named) });   // a typed ask refused BY NAME is said, kept data or not
+    return out;
   }
 
   /** B-24e2: does the build `version` a conversation runs on this machine DECLARE the background signal — read by the machine of its OWN program file (shared

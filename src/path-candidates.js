@@ -353,6 +353,12 @@ function rankCandidates(query, o) {
       const dirChip = { key: 'dir', params: { relative: relative ? label : '' } };
       for (const k of pref) push({ path: k, sec: SEC.DIR, chip: dirChip, rule: last ? 'prefix' : 'list', hl: hlTail(k, last.length), ...meta(k), score: 3000 - k.length });
       for (const k of subs) push({ path: k, sec: SEC.DIR, chip: dirChip, rule: 'subseq', hl: hlSubseq(k, last, k.length - baseName(k).length), ...meta(k), score: 2000 - k.length });
+      /* B-99b9 (主开发 r880): another machine's UNCHECKED link under this parent — a row of its own, «a link to <target>, not checked»;
+         never a folder, never a check mark: the person's Enter commits the text and whatever refuses it says so where they pressed */
+      for (const [lp, tgt] of Object.entries(L.unchecked || {})) {
+        if (parentOf(lp) !== par || !baseName(lp).toLowerCase().startsWith(last) || !shown(lp)) continue;
+        push({ path: lp, sec: SEC.DIR, chip: { key: 'unchecked', params: { target: tgt, relative: relative ? label : '' } }, rule: last ? 'prefix' : 'list', hl: hlTail(lp, last.length), unchecked: true, score: 2900 - lp.length });
+      }
       /* a field that takes files lists the files too, after the folders */
       if (o.files) for (const f of (dirs[par].files || []).filter((x) => x.name.toLowerCase().startsWith(last) && (!x.name.startsWith('.') || last.startsWith('.')))) {
         const fp = (par === '~' ? '~/' : par === '/' ? '/' : par + '/') + f.name;
@@ -426,9 +432,12 @@ function fuzzyFilter(paths, q, { limit = 60, aliases = null } = {}) {
 function sliceListing({ home, machine = null, dirs = [], probes = [], index = null, mounts = [], localized = {}, q = '', limit = 60 } = {}) {
   const T = (p) => toTilde(home, stripSlash(p));
   const kid = (tp, name) => (tp === '~' ? '~/' + name : tp === '/' ? '/' + name : tp + '/' + name);
-  const out = { home: home || '', machine: machine || null, dirs: {}, links: {}, localized: {}, mounts: [], nondirs: {} };
+  const out = { home: home || '', machine: machine || null, dirs: {}, links: {}, localized: {}, mounts: [], nondirs: {}, unchecked: {} };
   const stub = (tp) => { if (!out.dirs[tp]) out.dirs[tp] = { stub: true }; return out.dirs[tp]; };
   const link = (from, to) => { const f = T(from); const t = T(to); if (!t || f === t) return; out.links[f] = t; stub(t); };
+  // B-99b9 (主开发 r880): a link another machine's script never TESTED (src/dir-slice-script.js: never followed) is UNCHECKED — kept with
+  // its written target as text, never a folder, never a stub, never a check mark (the person's Enter decides)
+  const unchecked = (from, to) => { const f = T(from); const t = T(to); if (t && f !== t) out.unchecked[f] = t; };
   for (const d of dirs || []) {
     if (!d || !d.exists || d.isDir === false || !Array.isArray(d.kids)) continue;
     const tp = T(d.path);
@@ -436,6 +445,7 @@ function sliceListing({ home, machine = null, dirs = [], probes = [], index = nu
     if (Array.isArray(d.files)) e.files = d.files.map((f) => ({ name: f.name, size: f.size, mtime: f.mtime }));
     for (const k of d.kids) {
       if (!k || !k.name) continue;
+      if (k.link != null && k.unchecked) { unchecked(kid(d.path, k.name), k.link); continue; }   // B-99b9: never tested — never a folder
       if (k.link != null) { link(kid(d.path, k.name), k.link); continue; }   // a link (its target may come from its own stat): never a kid row
       e.kids.push(k.name);
       const s2 = stub(kid(tp, k.name)); if (k.git) s2.git = true;
@@ -452,7 +462,7 @@ function sliceListing({ home, machine = null, dirs = [], probes = [], index = nu
     if (p.mtime) e.mtime = p.mtime;
   }
   if (index && Array.isArray(index.dirs)) {
-    for (const l of index.links || []) if (l && l.from && l.to) link(l.from, l.to);
+    for (const l of index.links || []) if (l && l.from && l.to) { if (l.unchecked) unchecked(l.from, l.to); else link(l.from, l.to); }
     const byTarget = {};
     for (const [f, t] of Object.entries(out.links)) (byTarget[t] = byTarget[t] || []).push({ text: baseName(f), from: { key: 'link', params: { link: f } } });
     const tl = index.dirs.map(T).concat(Object.keys(byTarget));
@@ -482,26 +492,30 @@ function mergeListing(into, slice) {
   Object.assign(L.links, slice.links || {});
   Object.assign(L.localized, slice.localized || {});
   L.nondirs = Object.assign(L.nondirs || {}, slice.nondirs || {});
+  L.unchecked = Object.assign(L.unchecked || {}, slice.unchecked || {});   // B-99b9
   for (const m of slice.mounts || []) if (!L.mounts.includes(m)) L.mounts.push(m);
   return L;
 }
 
 /** What the field asks a machine for one text (the hub lists / states exactly these): the folders to LIST (each base, the
  *  typed text's parent against each base — or the absolute parent — and the home) and whether to search the index.
- *  `bases` = [{ path }] in `~/…` form; → { list: ['~/…'], fuzzy: bool } */
+ *  `bases` = [{ path }] in `~/…` form; → { list: ['~/…'], fuzzy: bool, typed: ['~/…'] } — `typed` (B-99b9) = the folders the TEXT
+ *  itself gives (its parent: absolute, under ~, or against each base for a relative path), the home only when the typed parent
+ *  IS the home; another machine's hub asks these alone first (src/hosts.js dirSlice) */
 function sliceAsk(text, bases) {
   const q = String(text == null ? '' : text).trim();
-  const list = ['~'];
+  const list = ['~'], typed = [];
   const add = (p) => { if (p && !list.includes(p)) list.push(p); };
+  const give = (p) => { if (p && !typed.includes(p)) typed.push(p); add(p); };
   for (const b of bases || []) if (b && b.path) add(stripSlash(b.path));
   const pathLike = /^[~/.]/.test(q) || q.includes('/');
   if (q && pathLike && !/\s/.test(q)) {
     const dirPart = q.endsWith('/') ? q.replace(/\/+$/, '') : (q.includes('/') ? q.slice(0, q.lastIndexOf('/')) : '');
-    if (q.startsWith('/')) add(dirPart || '/');
-    else if (q.startsWith('~')) add(joinPath('~', dirPart.slice(1)));
-    else for (const b of bases || []) if (b && b.path) add(dirPart ? joinPath(b.path, dirPart) : stripSlash(b.path));
+    if (q.startsWith('/')) give(dirPart || '/');
+    else if (q.startsWith('~')) give(joinPath('~', dirPart.slice(1)));
+    else for (const b of bases || []) if (b && b.path) give(dirPart ? joinPath(b.path, dirPart) : stripSlash(b.path));
   }
-  return { list, fuzzy: !!q && !pathLike };
+  return { list, fuzzy: !!q && !pathLike, typed };
 }
 
 /** The old dir-complete answer out of a slice: the folders under the typed parent starting with the typed last segment

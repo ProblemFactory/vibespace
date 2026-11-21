@@ -251,5 +251,54 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
     'WIRING: the dial road\'s hook register (spawn/dial.js) and the tools status (hosts.js) hand VS_AGENT_NODE in the run\'s env with the agent\'s rung; the dial run carries that env; the scanner\'s fallback runs the agent\'s node first');
 }
 
+{ // B-99b9 — THE DRIFT GUARD of the path field's remote script (src/dir-slice-script.js: what the host rung runs on another machine —
+  // its TWO asks, the typed folders and the rest — and its reader). ONE implementation: one script builder, one reader; written for a
+  // plain POSIX sh — dash, busybox ash, bash as sh (macOS /bin/sh) — and nothing beyond them; run here under every one this machine has.
+  const DS = require('../src/dir-slice-script.js');
+  const rd = (f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os'), path = require('node:path');
+  const FULL = DS.sliceScript({ list: ['~', '/abs/x y', "~/it's"], probes: ['~/p'], files: true, index: true, names: true, skip: ['/mnt/z'] });
+  // (1) nothing beyond a plain POSIX sh (a fixed list of the forms bash or zsh have and it lacks; `[[:space:]]` is POSIX, `[[ ` is not)
+  const BEYOND = [[/(^|[\s;])\[\[\s/, '[[ … ]]'], [/(^|[\s;])function\s/, 'function'], [/(^|[\s;{])local\s/, 'local'], [/<\(/, 'process substitution'], [/\$'/, "$'…'"],
+    [/\$\{[A-Za-z_][A-Za-z_0-9]*\/\//, '${x//}'], [/=~/, '=~'], [/echo -e/, 'echo -e'], [/(^|[\s;])\(\(/, '(( ))'], [/(^|[\s;])source\s/, 'source'],
+    [/&>/, '&>'], [/\|&/, '|&'], [/(^|[\s;])(declare|typeset|pushd|popd|shopt|mapfile|readarray)\s/, 'a bash builtin'], [/[A-Za-z_]\w*=\(/, 'an array'], [/\$\{[A-Za-z_]\w*:[0-9]/, '${x:n}']];
+  const beyond = BEYOND.filter(([re]) => re.test(FULL)).map(([, n]) => n);
+  ok(!beyond.length, `B-99b9: the remote script uses nothing beyond a plain POSIX sh (none of ${BEYOND.length} bash / zsh forms)${beyond.length ? ' — found: ' + beyond.join(', ') : ''}`);
+  const LS1 = FULL.slice(FULL.indexOf('ls1() {'), FULL.indexOf('\n', FULL.indexOf('ls1() {')));
+  ok(LS1.indexOf('[ -L "$e" ]') > 0 && LS1.indexOf('[ -L "$e" ]') < LS1.indexOf('[ -e "$e" ]') && LS1.includes('p=${d%/}; for e in "$p"/*'),
+    'B-99b9: in the lister a LINK is asked about BEFORE any test that would follow it (`[ -L ]` before `[ -e ]`), and the children of / are /x (never //x)');
+  // (2) THE WRITER AND ITS READER, one set of rows: every row the script prints is one parseSlice reads, and every row it reads is printed
+  const SRC = rd('src/dir-slice-script.js');
+  const wrote = new Set([...FULL.matchAll(/(?:printf '|\\n|print ")([A-Za-z])\\t/g)].map((m) => m[1]));   // a printf's first row, a row after a \n in one format, an awk print's row
+  const reads = new Set([...SRC.slice(SRC.indexOf('function parseSlice')).matchAll(/case '([A-Za-z])':/g)].map((m) => m[1]));
+  ok(wrote.size >= 14 && [...wrote].every((t) => reads.has(t)) && [...reads].every((t) => wrote.has(t)) && FULL.endsWith('echo VS-SLICE-END'),
+    `B-99b9: the script's rows and its reader's are ONE set (${[...wrote].sort().join('')} = ${[...reads].sort().join('')}) and it ends with VS-SLICE-END`);
+  // (3) RUN under each shell this machine has: a folder listed with a kid; a BROKEN link listed by its target AS WRITTEN (never tested,
+  // never followed — the release dropped it after a test); a name holding a TAB never listed (it could fake a row); a probe stated
+  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rs99-'));
+  fs.mkdirSync(path.join(H, 'a', 'kid'), { recursive: true }); fs.mkdirSync(path.join(H, 'b')); fs.mkdirSync(path.join(H, 'a', 'bad\tname'));
+  fs.symlinkSync('../gone/nowhere', path.join(H, 'a', 'lnk'));
+  const script = DS.sliceScript({ list: ['~/a'], probes: ['~/b'] });
+  const have = (c) => spawnSync('sh', ['-c', `command -v ${c} >/dev/null 2>&1`]).status === 0;
+  const SHELLS = [['sh', ['sh']], ['dash', ['dash']], ['busybox sh', ['busybox', 'sh']], ['bash --posix', ['bash', '--posix']]].filter(([, a]) => have(a[0]) && (a[0] !== 'busybox' || spawnSync('busybox', ['sh', '-c', 'true']).status === 0));
+  const ran = SHELLS.map(([name, argv]) => {
+    const r = spawnSync(argv[0], [...argv.slice(1), '-c', script], { env: { HOME: H, PATH: '/usr/bin:/bin' }, encoding: 'utf8', timeout: 8000 });
+    const x = DS.parseSlice(String(r.stdout || '')), a = x.dirs.find((d) => d.path === path.join(H, 'a')) || { kids: [] };
+    const lnk = a.kids.find((k) => k.name === 'lnk');
+    return { name, ok: x.done && x.home === H && a.kids.some((k) => k.name === 'kid') && !!lnk && lnk.link === path.join(H, 'gone', 'nowhere') && !a.kids.some((k) => k.name.includes('\t')) && x.probes.some((p) => p.path === path.join(H, 'b') && p.exists), lnk: lnk && lnk.link };
+  });
+  fs.rmSync(H, { recursive: true, force: true });
+  ok(SHELLS.length >= 1 && ran.every((r) => r.ok), `B-99b9: the script under ${ran.map((r) => r.name).join(', ') || 'no shell'}: the folder listed, a broken link listed by its target as written (${JSON.stringify(ran.map((r) => r.lnk))}: never tested, never followed), a name with a tab not listed, the probe stated`);
+  const absent = ['dash', 'busybox sh', 'bash --posix'].filter((n) => !ran.some((r) => r.name === n));
+  if (absent.length) console.log(`  · not on this machine, so not run here: ${absent.join(', ')} (the forms they share are checked in (1))`);
+  // (4) THE HUB READS WHAT IT WROTE: both asks (the typed folders and the rest) are this one script, read by this one reader; the ssh
+  // rung runs it under plain sh, never the login prelude
+  const HS2 = rd('src/hosts.js');
+  ok(HS2.includes('e.p = run(DS.sliceScript({ list, files })).then((out) => {') && HS2.includes('r2.p = run(DS.sliceScript({ ...want, files })).then((out) => {') && (HS2.split('const r = DS.parseSlice(out);').length - 1) >= 2
+    && HS2.includes("return String(await this._ssh(h, `exec sh -c '${script.replace(/'/g, `'\\\\''`)}'`, { timeoutMs: SLICE_RUN_MS }));"),
+    'B-99b9 WIRING: the host rung writes both asks with the one script builder and reads both with the one reader; the ssh rung runs it under plain sh (no login prelude)');
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

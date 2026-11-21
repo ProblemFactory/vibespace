@@ -204,6 +204,7 @@ function whyText(w) {
     case 'name-same': return t('A folder of that name already exists');
     case 'absent': return t('Not on {host} · create?', p);
     case 'unsaid': return t('{host} did not answer for it', p);
+    case 'unchecked': return t('A link to {target} — not checked', p);   // B-99b9 (主开发 r880): another machine's link, never tested
     default: return '';
   }
 }
@@ -445,7 +446,7 @@ export function pathField(input, opts = {}) {
     if (d && d.listing) {
       mergeListing(W.L, d.listing);
       W.L.machine = h || null;
-      if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs);
+      if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs); if (d.listing.unchecked) Object.assign(W.L.unchecked = W.L.unchecked || {}, d.listing.unchecked);   // B-99b9
       if (d.self) W.self = d.self;
       // B-0f3d: only the probes SENT and answered in time are marked asked — a late one (a hung mount) is never «known absent» (a 新建
       // chip for a folder that may well be there); it is asked again later
@@ -453,12 +454,12 @@ export function pathField(input, opts = {}) {
       // B-d833 (r174, the (b) law): a probe this reply SENT that the machine did not answer (late, or its error) is UNSAID — its row says
       // so by the machine's name until a later reply answers it: never an unknown row with nothing out and nothing said
       W.unsaid = W.unsaid || new Map(); const late = lateOf(d);
-      for (const p of probe || []) { if (late.has(p)) W.unsaid.set(p, Date.now()); else if (W.L.dirs[p] || W.asked.has(p)) W.unsaid.delete(p); }
+      for (const p of probe || []) { if (late.has(p) && !(d && d.rowsHeld)) W.unsaid.set(p, Date.now()); else if (W.L.dirs[p] || W.asked.has(p)) W.unsaid.delete(p); }   // B-99b9: a HELD rest asked nothing — never «did not answer»
     }
     W.error = (d && d.error) || (d ? '' : t('the machine did not answer'));
     // B-d833 P8 + the ruling on M3: the rows' words (a source still out: «still looking»; one a dead folder's mark answered: «could not be
     // read») answer ONE text — the field's own ask sets them, a chip's probe never; they are read only for the text the box holds
-    if (key != null) W.rows = { key, late: !!(d && d.rowsLate), unread: !!(d && d.rowsUnread) };
+    if (key != null) W.rows = { key, late: !!(d && d.rowsLate), unread: !!(d && d.rowsUnread), held: !!(d && d.rowsHeld), capped: (d && Number(d.rowsCapped)) || 0 };   // B-99b9: another machine's rest HELD after a miss; the typed folders past the cap
     W.unreachable = (d && d.unreachable) || null;
   }
   /* the model's ask: the field's OWN text on its machine (one in flight — a newer one supersedes); its reply becomes the model's event */
@@ -570,7 +571,7 @@ export function pathField(input, opts = {}) {
     const m = model();
     if (!m.rows.length) {
       const W = world(hk());
-      return `<div class="pf-empty">${escHtml(W.unreachable && hk() ? unreachableWords(hk()) : W.error ? t('The machine did not answer: {err}', { err: W.error }) : m.mode === 'empty' ? t('No suggestions yet — type a path or a few letters.') : rowsNow().unread ? t('Some folders here could not be read — the machine did not answer for them') : rowsNow().late ? t('Still looking — this machine has not finished') : t('No matching folder.'))}</div>`;   // (B-d833 P8: rows not finished are never «no match»)
+      return `<div class="pf-empty">${escHtml(W.unreachable && hk() ? unreachableWords(hk()) : W.error ? t('The machine did not answer: {err}', { err: W.error }) : m.mode === 'empty' ? t('No suggestions yet — type a path or a few letters.') : rowsNow().held ? t('Suggestions from this machine are held for a while — it was slow to list them; the folder you type still works') : rowsNow().capped ? t('Only the first {n} folders this text names were asked', { n: String(rowsNow().capped) }) : rowsNow().unread ? t('Some folders here could not be read — the machine did not answer for them') : rowsNow().late ? t('Still looking — this machine has not finished') : t('No matching folder.'))}</div>`;   // (B-d833 P8: rows not finished are never «no match»)
     }
     let i = 0;
     const body = m.sections.map((s) => `<div class="pf-sec">${escHtml(secTitle(s))}${s.more ? `<span class="pf-more">${escHtml(t('{n} more', { n: s.more }))}</span>` : ''}</div>` + s.rows.map((r) => {
@@ -627,7 +628,7 @@ export function pathField(input, opts = {}) {
     } else if (!ew && model().rows.length) {
       h += `<div class="pf-res"><span class="pf-hint">${escHtml(isPhone() ? t('No path called «{text}» — press a suggestion above.', { text }) : t('No path called «{text}» — choose a suggestion with ↑↓, Enter picks it.', { text }))}</span></div>`;
     } else if (!ew && M.answer && M.answer.key === keyNow(text)) {
-      h += `<div class="pf-res"><span class="pf-hint">${escHtml(rowsNow().unread ? t('Some folders here could not be read — the machine did not answer for them') : rowsNow().late ? t('Still looking — this machine has not finished') : t('Nothing found — try other letters, or press the folder button.'))}</span></div>`;
+      h += `<div class="pf-res"><span class="pf-hint">${escHtml(rowsNow().held ? t('Suggestions from this machine are held for a while — it was slow to list them; the folder you type still works') : rowsNow().capped ? t('Only the first {n} folders this text names were asked', { n: String(rowsNow().capped) }) : rowsNow().unread ? t('Some folders here could not be read — the machine did not answer for them') : rowsNow().late ? t('Still looking — this machine has not finished') : t('Nothing found — try other letters, or press the folder button.'))}</span></div>`;
     }
     return h;
   }
@@ -715,7 +716,7 @@ export function pathField(input, opts = {}) {
       const go = () => gatedFetch((h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + `?path=&bases=${encodeURIComponent('[]')}&probe=${encodeURIComponent(JSON.stringify(want))}&q=&kind=folder`, { signal: st.probeCtl.signal }, { field: pickKey + ':chips', by: 'door' }).then((d) => {
         if (!d || !d.listing || st.destroyed) return;
         mergeListing(W.L, d.listing);
-        if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs);
+        if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs); if (d.listing.unchecked) Object.assign(W.L.unchecked = W.L.unchecked || {}, d.listing.unchecked);   // B-99b9
         if (d.self) W.self = d.self;
         W.asked = W.asked || new Map(); for (const p of askedOf(want, d)) W.asked.set(p, Date.now());   // B-0f3d: never a late probe
         paintChips();

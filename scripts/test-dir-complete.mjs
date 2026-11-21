@@ -454,7 +454,7 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
   // unknown row with no ask out: a probe the reply SENT and the machine did not answer (late, or its error) is UNSAID until a later reply
   // answers it; the field's own ask probes the unknown folders (a declared one too); the row says «{host} did not answer for it»
   const unsaidAfter = (src, d, seed) => { const W = { L: { dirs: {} }, ...(seed || {}) }; mergeOf(src)(W, 'h-mac', d, ['~/x', '~/y']); return [...((W.unsaid && W.unsaid.keys()) || [])].join(); };
-  const noSet = (src) => anchored(src, 'if (late.has(p)) W.unsaid.set(p, Date.now()); else ', 'if (false) W.unsaid.set(p, Date.now()); else ', 'nothing unsaid');
+  const noSet = (src) => anchored(src, 'if (late.has(p) && !(d && d.rowsHeld)) W.unsaid.set(p, Date.now()); else ', 'if (false) W.unsaid.set(p, Date.now()); else ', 'nothing unsaid');
   const noClear = (src) => anchored(src, ' else if (W.L.dirs[p] || W.asked.has(p)) W.unsaid.delete(p);', '', 'never cleared');
   const seeded = () => ({ unsaid: new Map([['~/x', 1]]) });
   ok('③d the field: a probe the reply SENT and the machine left LATE (~/x) or FAILED (~/y) is unsaid; an answered one is not — CONTROL the field that never marks it says nothing', unsaidAfter(PF, { listing: { dirs: {} }, probesLate: ['~/x'] }) === '~/x' && unsaidAfter(PF, { listing: { dirs: {} }, probesFailed: ['~/y'] }) === '~/y' && unsaidAfter(noSet(PF), { listing: { dirs: {} }, probesLate: ['~/x'] }) === '', [unsaidAfter(PF, { listing: { dirs: {} }, probesLate: ['~/x'] }), unsaidAfter(noSet(PF), { listing: { dirs: {} }, probesLate: ['~/x'] })]);
@@ -548,6 +548,148 @@ console.log('\n── ⑤ the host rung with a FAKE machine (the real HostManage
   ok('recentCounts: per folder, newest first, seconds scaled to ms', rc.length === 2 && rc[0].path === '/Users/me/Projects/website' && rc[0].count === 2 && rc[0].last === 1792500000 * 1000 && rc[1].count === 1, rc);
 }
 
+console.log('\n── ⑤b B-99b9: ONE HUNG SOURCE THERE never costs a healthy typed folder its listing — two asks, the state in the hub (the field\'s own road) ──');
+{
+  const DSS = require('../src/dir-slice-script.js');
+  const { HostManager } = require('../src/hosts.js');
+  const MH = path.join(TMP, 'fake99', 'home', 'me');
+  for (const d of ['work/healthy/inside', 'work/sub/kid2', 'net/a', 'net/inner', 'net/sub', 'dead/sub', 'slow/kid', 'slow2/kid', 'lost', 'tools', 'hop1x', 'b1/x', 'b2/x', 'b3/x', 'b4/x', 'b5/x', 'b6/x']) fs.mkdirSync(path.join(MH, d), { recursive: true });
+  fs.writeFileSync(path.join(MH, 'tools', 'deploy.sh'), '#!/bin/sh\n');
+  fs.writeFileSync(path.join(MH, 'net', 'package.json'), '{ "name": "vibespace" }');   // a test of the mount child would READ this (the release did)
+  fs.symlinkSync('../hop1', path.join(MH, 'work', 'two')); fs.symlinkSync('net/inner', path.join(MH, 'hop1'));   // a two-hop link into the stalled mount
+  fs.symlinkSync('../tools/deploy.sh', path.join(MH, 'work', 'deploy')); fs.symlinkSync('../nowhere/x', path.join(MH, 'work', 'gone'));   // a link to a FILE, a DANGLING link
+  const PL = path.join(TMP, 'planted99.pids'), NOSTALL = path.join(TMP, 'nostall99');
+  // THE PLACED STALL (never load): a process that IGNORES TERM and sleeps — the stand-in for one stuck in the kernel on a dead mount (no
+  // one can end it); its pid to a file, so the leg counts what stayed and ends exactly those. ~/net is planted as a MOUNT POINT of that
+  // machine (its table read, as the script reads it); everything under it, ~/dead and ~/lost stall; a fake grep stalls on the mount's
+  // package.json — reached ONLY by a test of the mount child, which the script must not make
+  const STALL = `{ [ -e "${NOSTALL}" ] || sh -c 'trap "" TERM; echo $$ >> "$VS_PL"; exec sleep 300'; }`;
+  const FB = path.join(TMP, 'fakebin99'); fs.mkdirSync(FB);
+  const realGrep = ['/usr/bin/grep', '/bin/grep'].find((p) => fs.existsSync(p));
+  fs.writeFileSync(path.join(FB, 'grep'), `#!/bin/sh\nfor a; do case "$a" in */net/package.json) ${STALL};; esac; done\nexec ${realGrep} "$@"\n`, { mode: 0o755 });
+  const OVR = `ls1() { case "$1" in "$H"/net|"$H"/net/*|"$H"/dead|"$H"/dead/*) ${STALL};; "$H"/slow|"$H"/slow2) sleep 0.3; ls1_real "$@";; *) ls1_real "$@";; esac; }\npr() { case "$1" in "$H"/net/*|"$H"/lost) ${STALL};; *) pr_real "$@";; esac; }\n`;
+  const INM = 'inm() { case "$NL$2$NL" in *"$NL$1$NL"*) return 0;; esac; return 1; }';
+  const plant = (script, { mount = true } = {}) => anchored(anchored(anchored(script, '\nls1() {', '\nls1_real() {', 'B-99b9 the lister renamed'), '\npr() {', '\npr_real() {', 'B-99b9 the prober renamed'),
+    INM, INM + (mount ? '\nMP="$MP$NL$H/net"' : '') + '\n' + OVR, 'B-99b9 the plant after the mount table');
+  const unwrap = (cmd) => { const m = /^exec sh -c '([\s\S]*)'$/.exec(cmd); return m ? m[1].split(`'\\''`).join("'") : cmd; };   // the ssh rung's plain-sh wrapper
+  const WAITT = 200, runs = [];
+  // the run's own bound there: 800 ms on the machine whose typed folders are SLOW (0.3 s: past the hub's 200 ms wait, inside the bound), 250 ms on
+  // the others (their stalls never end: a short bound keeps the suite short)
+  const runtOf = (id) => (id === 'h-99b' ? 800 : 250);
+  const shOf = (script, timeout) => new Promise((resolve, reject) => execFile('sh', ['-c', script], { env: { HOME: MH, PATH: `${FB}:/usr/bin:/bin`, VS_PL: PL }, timeout, maxBuffer: 8 << 20 }, (e, out) => (e ? reject(e) : resolve(out))));
+  const mkHm = (id) => {
+    const hm = new HostManager({ dataDir: path.join(TMP, 'hub-data-' + id) });
+    hm._state.hosts.push({ id, name: 'nas-' + id, host: id + '.example.test', user: 'me', port: 22, transport: 'ssh' });
+    hm.refuseUnreachable = async () => {};
+    hm._clock = 1_800_000_000_000; hm._now = () => hm._clock;
+    hm._ssh = (h, cmd) => { const sc = unwrap(cmd); runs.push({ id: h.id, sc, plain: cmd.startsWith("exec sh -c '") }); return shOf(plant(sc), runtOf(h.id)); };   // the run's own bound there
+    return hm;
+  };
+  const alive = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return !/^\d+ \(.*\) [ZX]/.test(st) && fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('sleep'); } catch { return false; } };
+  const planted = () => (fs.existsSync(PL) ? fs.readFileSync(PL, 'utf8').split('\n').filter(Boolean).map(Number) : []);
+  const stuck = async () => { await sleep(20); return planted().filter(alive).length; };
+  const until = async (cond, ms) => { const end = Date.now() + ms; while (!cond() && Date.now() < end) await sleep(20); return cond(); };   // the condition, not a clock
+  const listed = (a, dir, kid) => !!(a && a.listing && a.listing.dirs[dir] && (a.listing.dirs[dir].kids || []).includes(kid));
+  // THE FIELD'S OWN ROAD: the exit route GET /api/hosts/:id/dir-complete, its real handler (registered by exit-routes' own create)
+  const ER = require('../src/server/exit-routes.js'), routes = new Map();
+  const reg = (m) => (p, ...hs) => { if (typeof p === 'string' && hs.length) routes.set(m + ' ' + p, hs[hs.length - 1]); };
+  const any = () => new Proxy(function () {}, { get: (t, k) => (k === 'then' ? undefined : any()), apply: () => any() });
+  const HMS = new Map(); const hmOf = (id) => HMS.get(id) || (HMS.set(id, mkHm(id)), HMS.get(id));
+  const hostsP = new Proxy({}, { get: (t, k) => (k === 'dirSlice' ? (id, o, x) => hmOf(id).dirSlice(id, { ...o, waitMs: WAITT }, x) : (...a) => undefined) });
+  let roadErr = null;
+  try { ER.create({ app: new Proxy({ get: reg('GET'), post: reg('POST'), put: reg('PUT'), delete: reg('DELETE'), patch: reg('PATCH'), all: reg('ALL'), use: () => {}, locals: {} }, { get: (t, k) => (k in t ? t[k] : () => {}) }),
+    rootDir: TMP, AGENT_BIN_DIR: TMP, activeSessions: new Map(), auth: any(), wss: null, WS_OPEN: 1, bcastAll: () => {}, integrationEnabled: () => false, unpairDialDevice: () => {}, hosts: hostsP,
+    getExitProxy: () => null, getMounts: () => null, getPortForwards: () => null }); } catch (e) { roadErr = String((e && e.message) || e).slice(0, 200); }
+  const DC = routes.get('GET /api/hosts/:id/dir-complete');
+  const field = (id, text, bases = [], probe = []) => new Promise((resolve) => DC({ params: { id }, query: { path: text, bases: JSON.stringify(bases), probe: JSON.stringify(probe), q: '', kind: 'folder' }, headers: {} }, { json: resolve, status() { return this; } }));
+  ok('B-99b9 the field\'s own road: exit-routes\' real GET /api/hosts/:id/dir-complete handler (its create, a recording app)', !roadErr && typeof DC === 'function', roadErr);
+  try {
+    // 1. THE ROW'S SENTENCE: a healthy TYPED folder with a base and a probe on the placed stall — listed, NOT partial
+    const a1 = await field('h-99a', '~/work/healthy/', ['~/net/a'], ['~/lost']);
+    ok('B-99b9 THE ROW\'S SENTENCE: the healthy typed folder ~/work/healthy is LISTED and the reply is NOT partial while a base (~/net/a) and a probe (~/lost) hang there; the rest is said late (rowsLate, probesLate), never «did not answer»',
+      listed(a1, '~/work/healthy', 'inside') && a1.partial === false && a1.rowsLate === true && (a1.probesLate || []).includes('~/lost') && !a1.error && !a1.verdict, { partial: a1.partial, rowsLate: a1.rowsLate, probesLate: a1.probesLate, dirs: Object.keys((a1.listing || {}).dirs || {}), error: a1.error });
+    const PC2 = require('../src/path-candidates.js'), ask1 = PC2.sliceAsk('~/work/healthy/', [{ path: '~/net/a' }]);
+    const oneScript = plant(DSS.sliceScript({ list: ask1.list, probes: ['~/lost'] }));
+    const rel = await shOf(oneScript, 600).then((o) => ({ out: o }), (e) => ({ killed: !!(e && e.killed), out: String((e && e.stdout) || '') }));
+    ok('RED CONTROL: TODAY\'S ONE SCRIPT (the typed folder, the bases and the probes in one run) under the same stall never ends (killed at 600 ms, no VS-SLICE-END): the release\'s reply could not list the healthy folder',
+      rel.killed && !String(rel.out).includes('VS-SLICE-END'), { killed: rel.killed });
+    // 2. THE MOUNT CHILD BY NAME: the typed home lists ~/net (a planted mount point of that machine) by name only — never tested
+    const a2 = await field('h-99a', '~/');
+    ok('B-99b9 a mount point child of the typed home is listed BY NAME ONLY: the home listing lands (net and work in it), not partial — the mount\'s own package.json is never read',
+      listed(a2, '~', 'net') && listed(a2, '~', 'work') && a2.partial === false, { partial: a2.partial, kids: ((a2.listing || {}).dirs || {})['~'] });
+    const tested = await shOf(plant(DSS.sliceScript({ list: ['~'], files: false }), { mount: false }), 600).then(() => ({ killed: false }), (e) => ({ killed: !!(e && e.killed) }));
+    ok('RED CONTROL: the same home listing with ~/net NOT in the machine\'s mount table (so tested, as the release tested every child) stalls on that test', tested.killed, tested);
+    // 3. A LINK NEVER FOLLOWED: ~/work/two → ../hop1 → net/inner (into the stalled mount): the parent listing lands, the link by its target as written
+    const a3 = await field('h-99a', '~/work/');
+    const UC = (a3.listing || {}).unchecked || {}, LK = (a3.listing || {}).links || {}, D3 = (a3.listing || {}).dirs || {};
+    ok('B-99b9 (主开发 r880) a link to a FILE, a DANGLING link and a two-hop link INTO THE STALL: none tested, none followed, none hangs ~/work (it lands, not partial); each is UNCHECKED with its target as written — never a folder, never a stub of its target',
+      listed(a3, '~/work', 'healthy') && a3.partial === false && UC['~/work/two'] === '~/hop1' && UC['~/work/deploy'] === '~/tools/deploy.sh' && UC['~/work/gone'] === '~/nowhere/x'
+        && !LK['~/work/two'] && !LK['~/work/deploy'] && !D3['~/tools/deploy.sh'] && !D3['~/nowhere/x'] && !D3['~/hop1'], { partial: a3.partial, unchecked: UC, links: LK });
+    const PCr = require('../src/path-candidates.js');
+    const rows3 = PCr.rankCandidates('~/work/de', { listing: a3.listing, bases: [], machine: 'h-99a' }).sections.flatMap((x) => x.rows);
+    const dep = rows3.find((r) => r.path === '~/work/deploy');
+    ok('B-99b9 the unchecked link is a row of its own whose words say what it is («a link to ~/tools/deploy.sh — not checked»), never a folder row, never resolved (no check mark)',
+      !!dep && dep.unchecked === true && dep.chip && dep.chip.key === 'unchecked' && dep.chip.params.target === '~/tools/deploy.sh', dep);
+    const PCSRC = read('src/path-candidates.js'), MU = mutantCopies('dir-complete-unchecked', REPO);
+    const stubbed = MU.load('src/path-candidates.js', anchored(PCSRC, "      if (k.link != null && k.unchecked) { unchecked(kid(d.path, k.name), k.link); continue; }   // B-99b9: never tested — never a folder\n", '', 'B-99b9 the unchecked road cut'), 'unchecked-cut');
+    const L3r = stubbed.sliceListing({ home: MH, machine: 'h-99a', dirs: [{ path: path.join(MH, 'work'), exists: true, isDir: true, kids: [{ name: 'deploy', git: false, link: path.join(MH, 'tools', 'deploy.sh'), unchecked: true }] }] });
+    ok('RED CONTROL: the road that made every link a folder (the unchecked branch cut) STUBS the file link\'s target as a folder (~/tools/deploy.sh in the dirs)', !!L3r.dirs['~/tools/deploy.sh'] && L3r.links['~/work/deploy'] === '~/tools/deploy.sh', Object.keys(L3r.dirs));
+    // (M2) listing «/»: its children are /x (never //x), so the machine's own mount points directly under / are said by name only
+    const rootOut = await shOf(DSS.sliceScript({ list: ['/'] }), 8000);
+    const rootRow = DSS.parseSlice(rootOut).dirs.find((d) => d.path === '/') || { kids: [] };
+    ok('B-99b9 listing / on that machine: /proc (a mount point in its own table) is a child said by NAME ONLY (flagged `mount`), never tested — the children are /x, never //x', rootRow.kids.some((k) => k.name === 'proc' && k.mount === true), rootRow.kids.filter((k) => k.mount).map((k) => k.name));
+    // (M3) ONE TYPED ASK A TYPED FOLDER: a relative text against a healthy base and a dead one — the healthy one lands, NOT partial, the dead one said late
+    const a3c = await new Promise((resolve) => DC({ params: { id: 'h-99e' }, query: { path: 'sub/', bases: JSON.stringify(['~/work', '~/net']), probe: '[]', q: '', kind: 'folder' }, headers: {} }, { json: resolve, status() { return this; } }));
+    ok('B-99b9 (主开发 r880) ONE TYPED ASK A FOLDER: «sub/» against ~/work (healthy) and ~/net (dead) — ~/work/sub LISTED, NOT partial, ~/net/sub said late (sourcesLate), no skipped verdict',
+      listed(a3c, '~/work/sub', 'kid2') && a3c.partial === false && (a3c.sourcesLate || []).includes('~/net/sub') && !a3c.verdict, { partial: a3c.partial, late: a3c.sourcesLate, verdict: a3c.verdict });
+    // THE CAP: a text naming more typed folders than the cap asks the first SLICE_TYPED_CAP (the bases' order) and NAMES the rest unread
+    const a3d = await new Promise((resolve) => DC({ params: { id: 'h-99f' }, query: { path: 'x/', bases: JSON.stringify(['~/b1', '~/b2', '~/b3', '~/b4', '~/b5', '~/b6']), probe: '[]', q: '', kind: 'folder' }, headers: {} }, { json: resolve, status() { return this; } }));
+    const asked = runs.filter((r) => r.id === 'h-99f' && /ls1 "\$H"'\/b[0-9]\/x'/.test(r.sc)).length;
+    ok(`B-99b9 THE CAP: «x/» against six bases asks ${asked} typed folders (the cap 4, the bases' order) and NAMES the two past it unread (rowsCapped 4, sourcesUnread ~/b5/x ~/b6/x), never dropped`,
+      asked === 4 && a3d.rowsCapped === 4 && ['~/b5/x', '~/b6/x'].every((p) => (a3d.sourcesUnread || []).includes(p)), { asked, capped: a3d.rowsCapped, unread: a3d.sourcesUnread });
+    // 4. SLOW IS NOT HUNG: a typed folder that lists in 0.6 s (past the hub's wait) — partial, never marked; its landing KEPT for the next ask
+    const a4 = await field('h-99b', '~/slow/');
+    const e4 = () => [...(hmOf('h-99b')._sliceCache.get('h-99b').r1.values())].find((e) => e.raw && e.raw.dirs.some((d) => d.path.endsWith('/slow')));
+    await until(() => !!e4(), 3000);
+    const a4b = await field('h-99b', '~/slow/');
+    ok('B-99b9 SLOW IS NOT HUNG: past the hub\'s wait the first reply is partial (no landed result, no «asked again» mark); the run lands, and the next ask serves it — not partial',
+      a4.partial === true && !a4.verdict && listed(a4b, '~/slow', 'kid') && a4b.partial === false, { a4: [a4.partial, a4.verdict], a4b: a4b.partial });
+    // 5. TEN ASKS IN TWO SECONDS ARE ONE R1 (joined)
+    const n0 = runs.filter((r) => r.id === 'h-99b' && r.sc.includes("ls1 \"$H\"'/slow2'")).length;
+    await Promise.all(Array.from({ length: 10 }, (_, i) => sleep(i * 20).then(() => field('h-99b', '~/slow2/'))));
+    const n1 = runs.filter((r) => r.id === 'h-99b' && r.sc.includes("ls1 \"$H\"'/slow2'")).length;
+    ok(`B-99b9 ten asks for one typed folder within a second are ONE run there (${n1 - n0}): the run in flight is joined`, n1 - n0 === 1, { runs: n1 - n0 });
+    // 6. A TYPED FOLDER THAT IS ITSELF HUNG: marked only when its run never lands by the run's own bound; 30 s, text under it too, no new run
+    const deadRuns = () => runs.filter((r) => r.id === 'h-99c' && r.sc.includes("ls1 \"$H\"'/dead'")).length;
+    const s0 = await stuck();
+    await field('h-99c', '~/dead/');
+    await until(() => [...(hmOf('h-99c')._sliceCache.get('h-99c').hung.keys())].includes('~/dead'), 3000);
+    const a6 = await field('h-99c', '~/dead/'), a6b = await field('h-99c', '~/dead/sub/');
+    const s1 = await stuck();
+    hmOf('h-99c')._clock += 31e3; await field('h-99c', '~/dead/'); await until(() => deadRuns() >= 2, 2000); await sleep(runtOf('h-99c') + 100);
+    const s2 = await stuck();
+    ok(`B-99b9 a HUNG typed folder: marked once its run never landed (the run's own bound); the reply says «asked again in ${a6.verdict && Math.round(a6.verdict.retryIn / 1000)} s» for it AND for text under it, with NO new run in the 30 s (runs ${deadRuns()}); after the mark one more — ONE stuck process a 30 s window (${s1 - s0}, then ${s2 - s0})`,
+      a6.partial === true && a6.verdict && a6.verdict.kind === 'skipped' && a6.verdict.retryIn > 25e3 && a6b.verdict && a6b.verdict.kind === 'skipped' && s1 - s0 === 1 && s2 - s0 === 2 && deadRuns() === 2, { a6: a6.verdict, a6b: a6b.verdict, runs: deadRuns(), s: [s0, s1, s2] });
+    // 7. THE REST'S HOLD, DOUBLING: a rest that does not land holds that machine's rest 30 s, then 60 s, 120 s; a landing resets it — ONE stuck process a hold window
+    const H7 = hmOf('h-99d'), r2Of = () => H7._sliceCache.get('h-99d').r2;
+    const holdNext = async () => { await field('h-99d', '', ['~/net/a']); await until(() => !r2Of().p, 3000); const a = await field('h-99d', '', ['~/net/a']); return a; };
+    const t0s = await stuck();
+    const h1 = await holdNext(); H7._clock += 31e3; const h2 = await holdNext(); H7._clock += 61e3; const h3 = await holdNext();
+    const t1s = await stuck();
+    fs.writeFileSync(NOSTALL, '1'); H7._clock += 121e3; await field('h-99d', '', ['~/net/a']); await until(() => !r2Of().p, 3000); fs.rmSync(NOSTALL, { force: true });
+    const landedMiss = r2Of().miss; H7._clock += 1e3; const h4 = await holdNext();
+    ok(`B-99b9 THE REST'S HOLD: ${[h1, h2, h3, h4].map((a) => a.heldFor).join(' / ')} ms — 30 s, doubled to 60 s and 120 s on the misses in a row, back to 30 s after a landing; said «held» (rowsHeld), never partial; ONE stuck process a hold window (${t1s - t0s} for three)`,
+      [h1, h2, h3, h4].every((a) => a.rowsHeld === true && a.partial === false) && h1.heldFor === 30e3 && h2.heldFor === 60e3 && h3.heldFor === 120e3 && landedMiss === 0 && h4.heldFor === 30e3 && t1s - t0s === 3,
+      { held: [h1, h2, h3, h4].map((a) => [a.heldFor, a.rowsHeld, a.partial]), landedMiss, stuck: t1s - t0s });
+    ok('B-99b9 the ssh rung runs the script under PLAIN sh (`exec sh -c …`), never the login shell\'s prelude', runs.length > 0 && runs.every((r) => r.plain), runs.filter((r) => !r.plain).length);
+  } finally {
+    await sleep(80);
+    for (const pid of planted()) { if (alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } }   // this leg's own stalls, known by their pid file and their sleep
+    const end = Date.now() + 3000; while (planted().some(alive) && Date.now() < end) await sleep(30);
+    ok('B-99b9 the leg ends its own planted stalls (none left)', !planted().some(alive), planted().filter(alive));
+  }
+}
+
 console.log('\n── ⑦ a paired machine that CANNOT be reached: refused by name before any spawn, its stdin roads never an uncaught ──');
 {
   const BIN7 = path.join(TMP, 'deadbin'); fs.mkdirSync(BIN7);
@@ -608,7 +750,7 @@ console.log('\n── ⑥ wiring pins ──');
   ok('files.js: /api/dir-complete answers the slice for bases / q / probe / kind, locally (dir-slice) and over ?host= (R.fs.dirSlice)', /const sliced = req\.query\.bases != null \|\| req\.query\.q != null/.test(fsr) && /R\.fs\.dirSlice\(R\.host,/.test(fsr) && /dirSliceOf\(req\)\.slice\(/.test(fsr), null);
   ok('files.js: /api/home-folders drops the excluded folders (isExcludedPath over self)', /isExcludedPath\(f\.path, self \|\| \{ home, roots: \[\] \}\)/.test(fsr), null);
   ok('exit-routes.js: /api/hosts/:id/dir-complete → hosts.dirSlice; recent-cwds answers COUNTS', /hosts\.dirSlice\(req\.params\.id,/.test(ex) && /recent: require\('\.\.\/path-candidates\.js'\)\.recentCounts\(sessions\)/.test(ex), null);
-  ok('hosts.js: dirSlice runs ONE sh script (device runCmd first, the ssh rung otherwise) and sliceListing builds the answer', /async dirSlice\(id, \{ text = '', bases = \[\], probe = \[\], q = '', kind = 'folder' \} = \{\}/.test(hs) && /dm\.runCmd\('sh', \['-c', script\]/.test(hs) && /PC\.sliceListing\(\{ home: raw\.home, machine: id,/.test(hs), null);
+  ok('hosts.js: dirSlice runs ONE sh script (device runCmd first, the ssh rung otherwise) and sliceListing builds the answer', /async dirSlice\(id, \{ text = '', bases = \[\], probe = \[\], q = '', kind = 'folder', waitMs \} = \{\}/.test(hs) && /dm\.runCmd\('sh', \['-c', script\]/.test(hs) && /PC\.sliceListing\(\{ home, machine: id,/.test(hs), null);
   ok('SafeFs: dirSlice + dirIndex carry their deadlines (a stall is reclaimed, never answered on the loop)', /dirSlice: 15000, dirIndex: 15000/.test(sfsm), null);
 }
 
