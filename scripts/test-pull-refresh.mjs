@@ -836,11 +836,11 @@ try {
       check('§16b B-2ca0 follow-up: a record whose mount point was written THROUGH A LINK — a write at its REAL path (WebDAV\'s real-pathed target) is refused by the door\'s words, as one at the path as written', got.w?.id === 'mm-lk' && got.asWritten?.id === 'mm-lk' && /“Studio Mac” is offline/.test(got.words || ''), JSON.stringify({ w: got.w && got.w.id, words: got.words }));
       const SRC0 = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src');
       const src0 = fs.readFileSync(path.join(SRC0, 'machine-mounts.js'), 'utf8');
-      const anchor = "      const mp = this._pullFolders(m).find((x) => x !== '/' && (rp === x || rp.startsWith(x + '/')));   // a whole path segment (…/mac is not …/macbook)";
+      const anchor = "      const mp = this._pullFolders(m0).find((x) => x !== '/' && (rp === x || rp.startsWith(x + '/')));   // a whole path segment (…/mac is not …/macbook)";
       if (src0.split(anchor).length !== 2) check('§16b CONTROL: the shadowedBy anchor moved — update this suite', false);
       else {
         const Mod = require('module'), file = path.join(SRC0, 'machine-mounts.js'), mo = new Mod(file, null); mo.filename = file; mo.paths = Mod._nodeModulePaths(path.dirname(file));
-        mo._compile(src0.replace(anchor, "      const mp0 = path.resolve(m.mountpoint), mp = mp0 !== '/' && (rp === mp0 || rp.startsWith(mp0 + '/')) ? mp0 : null;"), file);
+        mo._compile(src0.replace(anchor, "      const mpW = path.resolve(m0.mountpoint), mp = mpW !== '/' && (rp === mpW || rp.startsWith(mpW + '/')) ? mpW : null;"), file);
         const mmC = new mo.exports.MachineMounts({ dataDir, hosts, rcloneBin: () => 'rclone', broadcast: () => { }, log: () => { } }); clearInterval(mmC._sweep);
         const c = run(mmC);
         check('§16b CONTROL (RED): the release\'s match (the mount point as written only) — a write at the real path is NOT refused (the PUT would land in the bare folder)', c.w === null && c.asWritten?.id === 'mm-lk', JSON.stringify({ w: c.w }));
@@ -925,7 +925,7 @@ try {
         check('§16 an UPLOAD into the bare folder is refused too (its multipart destDir, read after multer) — machine_offline, nothing written', up1.status === 503 && up1.body?.code === 'machine_offline' && !fs.existsSync(path.join(mpMac, 'up.txt')), JSON.stringify(up1).slice(0, 200));
       } else {
         console.log(`  · the upload's live drive needs multer's folder ${upDir || '(not found)'} writable — it is not on this machine; the route's order is pinned from its source`);
-        const iRef = fjU.indexOf("const pullUp = require('../machine-mounts.js').pullShadowOf(destRoot, { writer: true });"), iMk = fjU.indexOf("await sfs(req).call('mkdir', { path: destRoot });");
+        const iRef = fjU.indexOf("const pullUp = await require('../machine-mounts.js').pullShadowOfReal(destRoot, { writer: true });"), iMk = fjU.indexOf("await sfs(req).call('mkdir', { path: destRoot });");
         check('§16 an UPLOAD (source order, where multer\'s folder cannot be written here): the pull refusal comes BEFORE the route makes or writes anything, and its catch answers the refusal\'s own body', iRef > 0 && iMk > iRef && /res\.status\(err\.status \|\| 400\)\.json\(err\.pullBody \|\| \{ error: err\.message \}\)/.test(fjU), JSON.stringify({ iRef, iMk }));
       }
       const viaDir = await fetch(`${at}/api/no-such-route?dir=${encodeURIComponent(mpMac)}`), viaOld = await post('/api/rename', { oldPath: path.join(mpMac, 'x'), newPath: path.join(tmp, 'fcc7-out-x') }), viaDest = await post('/api/no-such-route', { destDir: path.join(mpMac, 'sub') });
@@ -974,8 +974,8 @@ try {
     const keyOf = (code) => (ops.match(new RegExp(`d\\.code === '${code}'\\) return t\\('([^']*)'`)) || [])[1];
     const same = (code) => { const e = enOf(code), k = keyOf(code); return !!e && !!k && e.replace(/\$\{s\.machine\}/g, '{machine}') === k && zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'); };
     check('§16 the client words machine_offline and machine_folder_down in the reader\'s language: its key = the server\'s English, a zh and a ja row each', same('machine_offline') && same('machine_folder_down'));
-    const iCloud = fj.indexOf('const shadow = mounts.shadowedBy?.(p);'), iPull = fj.search(/const pull = require\('\.\.\/machine-mounts\.js'\)\.pullShadowOf\(p, \{ writer \}\);\n\s+if \(pull\) return res\.status\(503\)\.json\(pullShadowBody\(pull\)\);/);
-    check('§16 wiring: the hub\'s dial wiring registers the ONE pull manager (server.js takes no line); the files router asks it in its own pass, after the cloud storages\' refusal', /require\('\.\.\/machine-mounts\.js'\)\.registerPullDoor\(getMachineMounts\);/.test(dp) && iCloud > 0 && iPull > iCloud && fj.split('pullShadowOf(').length === 3 && /pullShadowOf\(destRoot, \{ writer: true \}\)/.test(fj) && /onPullLive\(\(\) => \{ try \{ tasks\.syncAllContextMd\(\); \} catch \{ \} \}\)/.test(tgw));
+    const iCloud = fj.indexOf('const shadow = mounts.shadowedBy?.(p);'), iPull = fj.search(/const pull = await require\('\.\.\/machine-mounts\.js'\)\.pullShadowOfReal\(p, \{ writer \}\);\n\s+if \(pull\) return res\.status\(503\)\.json\(pullShadowBody\(pull\)\);/);
+    check('§16 wiring: the hub\'s dial wiring registers the ONE pull manager (server.js takes no line); the files router asks it in its own pass, after the cloud storages\' refusal', /require\('\.\.\/machine-mounts\.js'\)\.registerPullDoor\(getMachineMounts\);/.test(dp) && iCloud > 0 && iPull > iCloud && fj.split('pullShadowOfReal(').length === 3 && /pullShadowOfReal\(destRoot, \{ writer: true \}\)/.test(fj) && /onPullLive\(\(\) => \{ try \{ tasks\.syncAllContextMd\(\); \} catch \{ \} \}\)/.test(tgw));
   }
   console.log('§17 B-844b / B-6c4f: one folder holds one machine\'s folder — the same folder or a nested one refused by name; existing pairs held');
   {
@@ -1069,12 +1069,162 @@ try {
         else {
           const c3 = await scene(copy3(src3.replace(A3, "      if (!h || pair || (!writer && this._bare?.get(m.id) !== 'empty')) continue;")), 'pairs-02f6-ctl', SCENES.over);
           const c3w = c3.w(path.join(mpOuter, 'new.txt'));
-          const c4 = await scene(copy3(src3.replace(L3, '')), 'pairs-02f6-ctl2', SCENES.sameLink);
-          const c4w = c4.w(path.join(mpLink, 'x.txt'));
+          // (the remainder's tie answers a held record on ONE folder as its holder before the mapping — the mapping's own control is the
+          // NESTED pair written through a link)
+          const c4 = await scene(copy3(src3.replace(L3, '')), 'pairs-02f6-ctl2', SCENES.overLink);
+          const c4w = c4.w(path.join(outerLink, 'b', 'x.txt'));
           console.log('    B-02f6 controls, the facts judged: ' + JSON.stringify({ skipBack: { held: c3.held.get('mm-hout') && c3.held.get('mm-hout').kind, w: c3w }, mapCut: { held: c4.held.get('mm-hout') && c4.held.get('mm-hout').kind, w: c4w && c4w.id } }));
           check('CONTROL §17 B-02f6 (the release\'s skip): the outer record is held the same, and the write under its folder is answered by nothing — it would land in the bare folder (red)', c3.held.get('mm-hout')?.kind === 'over' && c3w === null);
-          check('CONTROL §17 B-02f6 (the live-pull check after the pick cut, the link mapping with it): a write by the held record\'s link into the LIVE holder is refused as held (red)', c4.held.get('mm-hout')?.kind === 'same' && c4w?.id === 'mm-hout');
+          check('CONTROL §17 B-02f6 (the live-pull check after the pick cut, the link mapping with it): a write by the held OUTER record\'s link into the LIVE inner pull is refused as held (red)', c4.held.get('mm-hout')?.kind === 'over' && c4w?.id === 'mm-hout');
         }
+        // ── B-02f6 REMAINDER (主开发 r1160 / r1178) ──
+        // (1) THE OUTER WHOSE REAL FOLDER NEVER RESOLVED: the outer written through a LINK, the pair check's child never answering for
+        // it (a stand-in), the inner LIVE — the outer is not held (compared as written). A write by the link INTO the live inner waits
+        // for the proof (the record's real folder — a stand-in, counted) and goes through; one beside it is refused as before; a
+        // reader never asks. RED: the release's door (the sync pullShadowOf) refuses that write machine_folder_down
+        const outerLink2 = path.join(base, 'outer-link-2'); if (!fs.existsSync(outerLink2)) fs.symlinkSync(mpOuter, outerLink2);   // the outer's folder written by ANOTHER link (an edit)
+        const realM = (q) => { let probe = path.resolve(q), rest = ''; for (;;) { try { return fs.realpathSync(probe) + rest; } catch { const up = path.dirname(probe); if (up === probe) return path.resolve(q); rest = '/' + path.basename(probe) + rest; probe = up; } } };
+        const sceneU = async (MM, name, recs, { proof = (q) => Promise.resolve(realM(q)) } = {}) => {
+          const dd = path.join(tmp, name); fs.mkdirSync(dd, { recursive: true }); fs.writeFileSync(path.join(dd, 'machine-mounts.json'), JSON.stringify({ mounts: recs }));
+          const m = new MM({ dataDir: dd, hosts, rcloneBin: () => 'rclone', broadcast: () => { }, log: (l) => said17.push(String(l)) }); clearInterval(m._sweep);
+          m._live.set('mm-hin', { teardown: async () => { }, mountpoint: recs[0].mountpoint, at: Date.now() });
+          m._realpath = (q, o = {}) => { try { o.onExit && o.onExit(); } catch { } return Promise.resolve(path.resolve(q) === outerLink || path.resolve(q) === outerLink2 ? null : realM(q)); };   // the pair check's child: no answer for the outer (either link)
+          const asked = []; m._proofRealpath = (q, o) => { asked.push(q); return proof(q, o); };
+          const held = await m._recheckPairs();
+          return { m, held, asked };
+        };
+        const u = await sceneU(MMx.MachineMounts, 'pairs-02f6r-unres', SCENES.overLink);
+        const inLink = path.join(outerLink, 'b', 'x.txt'), beside = path.join(outerLink, 'new.txt');
+        const syncIn = u.m.shadowedBy(inLink, { writer: true });
+        const pIn = await u.m.shadowedByReal(inLink, { writer: true }), pIn2 = await u.m.shadowedByReal(path.join(outerLink, 'b', 'y.txt'), { writer: true }), pBeside = await u.m.shadowedByReal(beside, { writer: true });
+        const pRead = await u.m.shadowedByReal(inLink), pLiveOwn = await u.m.shadowedByReal(path.join(mpB, 'z.txt'), { writer: true });
+        MMx.registerPullDoor(() => u.m); let doorIn = 'unset', doorSync = null; try { doorIn = await MMx.pullShadowOfReal(path.join(outerLink, 'b', 'sub', 'f.txt'), { writer: true }); doorSync = MMx.pullShadowOf(path.join(outerLink, 'b', 'sub', 'f.txt'), { writer: true }); } finally { MMx.registerPullDoor(null); }
+        console.log('    B-02f6 remainder (1), the facts judged: ' + JSON.stringify({ held: [...u.held.keys()], outerReal: u.m._realMp.get('mm-hout') || null, syncIn: syncIn && [syncIn.id, MMx.pullShadowBody(syncIn).code], pIn, pIn2, pBeside: pBeside && pBeside.id, pRead, pLiveOwn, doorIn, doorSync: doorSync && [doorSync.id, MMx.pullShadowBody(doorSync).code], proofAsked: u.asked.length }));
+        check('§17 B-02f6 remainder (1): the outer written through a LINK whose real folder never resolved is not held — a write by the link INTO the live inner pull goes through by the proof (the record\'s real folder, asked ONCE: the next writes keep its answer), one beside it is refused as before; a reader and a write under the live pull by its own spelling never ask; the files route and WebDAV ask the same door',
+          !u.held.has('mm-hout') && !u.m._realMp.has('mm-hout') && syncIn?.id === 'mm-hout' && pIn === null && pIn2 === null && pBeside?.id === 'mm-hout' && MMx.pullShadowBody(pBeside).code === 'machine_folder_down' && pRead === null && pLiveOwn === null && doorIn === null && u.asked.length === 1);
+        check('RED CONTROL §17 B-02f6 remainder (1): the release\'s door (the sync pullShadowOf) refuses that same write machine_folder_down', doorSync?.id === 'mm-hout' && MMx.pullShadowBody(doorSync).code === 'machine_folder_down', doorSync);
+        // (1)'s BOUNDS (r1178 (a)): a child that did not answer is kept as REFUSED for the stated time (no second child); the time past,
+        // it is asked again; at most PROOF_KIDS_MAX children in flight (a third record's ask meanwhile is refused at once, nothing kept;
+        // a second ask for a record in flight shares its child). (b): the proof's child is THE STARTER's (src/server/child-starter.js) —
+        // one real run through it here
+        const un = await sceneU(MMx.MachineMounts, 'pairs-02f6r-noans', SCENES.overLink, { proof: () => Promise.resolve(null) });
+        const n1 = await un.m.shadowedByReal(inLink, { writer: true }), n2 = await un.m.shadowedByReal(inLink, { writer: true }), nAsked = un.asked.length;
+        un.m._proofKeepMs = 0; const n3 = await un.m.shadowedByReal(inLink, { writer: true }), nAgain = un.asked.length;
+        const hangs = [], hg = await sceneU(MMx.MachineMounts, 'pairs-02f6r-fly', SCENES.overLink, { proof: () => new Promise((r) => hangs.push(r)) });
+        const f1 = hg.m._proofReal({ id: 'p1', mountpoint: '/x1' }), f1b = hg.m._proofReal({ id: 'p1', mountpoint: '/x1' }), f2 = hg.m._proofReal({ id: 'p2', mountpoint: '/x2' });
+        const f3 = await hg.m._proofReal({ id: 'p3', mountpoint: '/x3' }), inFly = hg.m._proofFly.size, flyAsked = hg.asked.length;
+        hangs.forEach((r) => r(null)); await Promise.all([f1, f1b, f2]);
+        const viaStarter = await MMx.starterRealpath(outerLink);
+        // 主开发 r1214 — THE SHAPE: a proof whose child did NOT answer inside its bound (timed out, or the starter's «unknown») is NEVER
+        // asked again for that record as it stands (refused as the release refused); a slow answer holds no slot. «Never again» ENDS
+        // where the truth can change: the record EDITED, ADDED AGAIN, REMOVED — and the pair check's own child learning the real folder
+        const slw = await sceneU(MMx.MachineMounts, 'pairs-02f6r-slow', SCENES.overLink, { proof: () => Promise.resolve({ real: null, slow: true }) });
+        const sw1 = await slw.m.shadowedByReal(inLink, { writer: true }), sa1 = slw.asked.length, sNever = slw.m._proofNever.has('mm-hout');
+        slw.m._proofKeepMs = 0; const sw2 = await slw.m.shadowedByReal(inLink, { writer: true }), sa2 = slw.asked.length, sFly = slw.m._proofFly.size;
+        const recH = slw.m._state.mounts.find((x) => x.id === 'mm-hout'); recH.mountpoint = outerLink2; const inLink2 = path.join(outerLink2, 'b', 'x.txt');
+        const sw3 = await slw.m.shadowedByReal(inLink2, { writer: true }), sa3 = slw.asked.length;   // END: its FOLDER edited — asked once more
+        await slw.m.mountPull('h2', { remotePath: '/out', mountpoint: outerLink2 }).catch(() => null);   // an Add that finds the SAME unchanged record (its mount refused «could not be checked»)
+        const sAddKept = slw.m._proofNever.has('mm-hout'), sw4 = await slw.m.shadowedByReal(inLink2, { writer: true }), sa4 = slw.asked.length;   // NOT an end: nothing changed (each press would double a wedged child)
+        await slw.m.unmount('mm-hout').catch(() => null); const sRmCleared = !slw.m._proofNever.has('mm-hout') && !slw.m._proofKept.has('mm-hout');   // END: removed
+        // END: the pair check's OWN child learns the real folder — the release's mapping answers, no proof child
+        const lrn = await sceneU(MMx.MachineMounts, 'pairs-02f6r-learn', SCENES.overLink, { proof: () => Promise.resolve({ real: null, slow: true }) });
+        const lw1 = await lrn.m.shadowedByReal(inLink, { writer: true });
+        lrn.m._realpath = (q, o = {}) => { try { o.onExit && o.onExit(); } catch { } return Promise.resolve(realM(q)); };   // the pair check's child answers now
+        const lHeld = await lrn.m._recheckPairs(), lSync = lrn.m.shadowedBy(inLink, { writer: true }), lw2 = await lrn.m.shadowedByReal(inLink, { writer: true }), lAsked = lrn.asked.length;
+        const kn = await sceneU(MMx.MachineMounts, 'pairs-02f6r-known', SCENES.overLink, { proof: () => Promise.resolve({ real: null, slow: true }) });
+        kn.m._realMp.set('mm-hout', realM(outerLink));   // learned, the pairs not checked again yet
+        const kw = await kn.m.shadowedByReal(inLink, { writer: true }), kwBeside = await kn.m.shadowedByReal(beside, { writer: true }), kAsked = kn.asked.length;
+        // r1214 (2): THE STARTER's answers sorted with NO late exit and no end of the child waited for — the shape holds whether or not the
+        // starter's own gap (a fault dropping a timed-out request) is cured (a stand-in starter answers each shape once)
+        const CSx = require('../src/server/child-starter.js'), prevS = CSx.childStarter(), shapes = [];
+        for (const r of [{ unknown: true }, { started: true, timedOut: true, code: null, stdout: '' }, { started: true, code: 0, stdout: '/the/real\n' }, { started: false, code: null, error: 'EAGAIN' }, 'throw']) {
+          CSx.setChildStarter({ run: async () => { if (r === 'throw') throw new Error('the starter threw'); return r; }, stats: () => ({}) }); try { shapes.push(await MMx.starterRealpath('/asked')); } finally { CSx.setChildStarter(prevS); }
+        }
+        console.log('    B-02f6 remainder (1), the shape (r1214): ' + JSON.stringify({ slow: { w1: sw1 && sw1.id, asked1: sa1, never: sNever, w2: sw2 && sw2.id, asked2: sa2, fly: sFly }, edited: { w3: sw3 && sw3.id, asked3: sa3 }, sameAdd: { kept: sAddKept, w4: sw4 && sw4.id, asked4: sa4 }, removed: sRmCleared, learned: { w1: lw1 && lw1.id, held: lHeld.get('mm-hout') && lHeld.get('mm-hout').kind, sync: lSync, door: lw2, asked: lAsked }, known: { w: kw, beside: kwBeside && kwBeside.id, asked: kAsked }, starterShapes: shapes }));
+        check('§17 B-02f6 remainder (1), r1214: a proof with NO answer inside its bound is never asked again for that record (the write refused machine_folder_down, as the release, even past the kept time; it holds no slot) — «never again» ENDS where the truth can change: the record\'s FOLDER edited is asked once more, REMOVED clears it; an Add that finds the same unchanged record ends nothing (no second child on a wedged folder)',
+          sw1?.id === 'mm-hout' && MMx.pullShadowBody(sw1).code === 'machine_folder_down' && sa1 === 1 && sNever && sw2?.id === 'mm-hout' && sa2 === 1 && sFly === 0 && sw3?.id === 'mm-hout' && sa3 === 2 && sAddKept && sw4?.id === 'mm-hout' && sa4 === 2 && sRmCleared);
+        check('§17 B-02f6 remainder (1), r1214: once the pair check\'s OWN child learns the real folder, the release\'s mapping answers — the write by the link into the live inner goes through (the outer now held, the sync door too), no proof child; learned before the pairs are checked again, the door maps with it (one beside still refused)',
+          lw1?.id === 'mm-hout' && lHeld.get('mm-hout')?.kind === 'over' && lSync === null && lw2 === null && lAsked === 1 && kw === null && kwBeside?.id === 'mm-hout' && kAsked === 0);
+        check('§17 B-02f6 remainder (1), r1214 (2): the starter\'s answers sorted by the answer alone — «unknown» and a timeout are SLOW (never asked again), a real line is the real folder, a start that failed and a throw are answers (kept their time: no child ran, no bound passed) — no late exit, no child\'s end waited for',
+          shapes.length === 5 && shapes[0].slow && !shapes[0].real && shapes[1].slow && !shapes[1].real && !shapes[2].slow && shapes[2].real === '/the/real' && !shapes[3].slow && shapes[3].real === null && !shapes[4].slow && shapes[4].real === null);
+        // the third read's catches: (i) an answer that lands after its record was REMOVED is no one's (nothing kept, no «never»); (ii) the asks
+        // in flight keyed by the record AS IT STANDS — an edit while asked gets its own child, the old answer dropped (latent today: no
+        // edit road — a false pass the day one exists); (iii) no proof while the pair check's OWN child for the record is alive; (iv) the
+        // kept time on the MONOTONIC clock (the wall clock stepped back an hour); (v) a THROW is an answer kept its time, not «never»
+        const hold = [], hd = await sceneU(MMx.MachineMounts, 'pairs-02f6r-drop', SCENES.overLink, { proof: () => new Promise((r) => hold.push(r)) });
+        const dAsk = hd.m.shadowedByReal(inLink, { writer: true }); await Promise.resolve(); await Promise.resolve();
+        await hd.m.unmount('mm-hout').catch(() => null); hold.forEach((r) => r({ real: null, slow: true })); const dRes = await dAsk;
+        const dropped = !hd.m._proofNever.has('mm-hout') && !hd.m._proofKept.has('mm-hout');
+        const hold2 = [], hed = await sceneU(MMx.MachineMounts, 'pairs-02f6r-edit', SCENES.overLink, { proof: () => new Promise((r) => hold2.push(r)) });
+        const eAsk1 = hed.m.shadowedByReal(inLink, { writer: true }); await Promise.resolve(); await Promise.resolve();
+        hed.m._state.mounts.find((x) => x.id === 'mm-hout').mountpoint = outerLink2;
+        const eAsk2 = hed.m.shadowedByReal(path.join(outerLink2, 'b', 'x.txt'), { writer: true }); await Promise.resolve(); await Promise.resolve();
+        const eAsked = hed.asked.length; hold2[0] && hold2[0]({ real: realM(outerLink), slow: false }); hold2[1] && hold2[1]({ real: null, slow: true });
+        const [e1, e2] = await Promise.all([eAsk1, eAsk2]);
+        const rk = await sceneU(MMx.MachineMounts, 'pairs-02f6r-kids', SCENES.overLink); rk.m._realKids = new Set(['mm-hout']);
+        const rkw = await rk.m.shadowedByReal(inLink, { writer: true }), rkAsked = rk.asked.length;
+        const mo = await sceneU(MMx.MachineMounts, 'pairs-02f6r-mono', SCENES.overLink); const mo1 = await mo.m.shadowedByReal(inLink, { writer: true });
+        const wall = Date.now; let mo2 = 'unset', moAsked = -1; try { Date.now = () => wall() - 3600e3; mo.m._proofKeepMs = 0; mo2 = await mo.m.shadowedByReal(inLink, { writer: true }); moAsked = mo.asked.length; } finally { Date.now = wall; }
+        const th = await sceneU(MMx.MachineMounts, 'pairs-02f6r-throw', SCENES.overLink, { proof: () => Promise.reject(new Error('no child ran')) });
+        const th1 = await th.m.shadowedByReal(inLink, { writer: true }), thNever = th.m._proofNever.has('mm-hout'); th.m._proofKeepMs = 0; const th2 = await th.m.shadowedByReal(inLink, { writer: true }), thAsked = th.asked.length;
+        console.log('    B-02f6 remainder (1), the third read: ' + JSON.stringify({ dropAfterRemove: { res: dRes && dRes.id, dropped }, editInFlight: { asked: eAsked, e1: e1 && e1.id, e2: e2 && e2.id, keptOld: hed.m._proofKept.has('mm-hout'), never: hed.m._proofNever.get('mm-hout') }, pairKidAlive: { w: rkw && rkw.id, asked: rkAsked }, monotonic: { mo1, mo2, asked: moAsked }, thrown: { th1: th1 && th1.id, never: thNever, th2: th2 && th2.id, asked: thAsked } }));
+        check('§17 B-02f6 remainder (1), the third read: an answer landing after its record was REMOVED is no one\'s (nothing kept); an EDIT while asked gets its own child and the old answer is dropped (the write by the new link refused, never passed by the old folder); no proof while the pair check\'s own child for the record is alive; the kept time on the monotonic clock (the wall clock an hour back: asked again); a THROW is kept its time, never «never again»',
+          dRes?.id === 'mm-hout' && dropped && eAsked === 2 && e1?.id === 'mm-hout' && e2?.id === 'mm-hout' && !hed.m._proofKept.has('mm-hout') && rkw?.id === 'mm-hout' && rkAsked === 0 && mo1 === null && mo2 === null && moAsked === 2 && th1?.id === 'mm-hout' && !thNever && th2?.id === 'mm-hout' && thAsked === 2);
+        const mmSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'machine-mounts.js'), 'utf8');
+        const srBody = (mmSrc.match(/async function starterRealpath\([^)]*\) \{\n([\s\S]*?)\n\}\n/) || [])[1] || '';
+        console.log('    B-02f6 remainder (1), its bounds: ' + JSON.stringify({ noAnswer: { n1: n1 && n1.id, n2: n2 && n2.id, asked: nAsked, afterTime: { n3: n3 && n3.id, asked: nAgain } }, inFlight: { max: MMx.PROOF_KIDS_MAX, third: f3, size: inFly, asked: flyAsked, shared: f1 === f1b }, keepMs: MMx.PROOF_KEEP_MS, proofMs: MMx.PROOF_MS, viaStarter, real: realM(outerLink) }));
+        check('§17 B-02f6 remainder (1), r1178 (a): a proof that ANSWERED no folder is kept as REFUSED its time (one child for two writes), asked again once its time has passed; at most ' + MMx.PROOF_KIDS_MAX + ' asks IN FLIGHT — a third record is refused at once, a second ask for one in flight shares its child',
+          n1?.id === 'mm-hout' && n2?.id === 'mm-hout' && nAsked === 1 && n3?.id === 'mm-hout' && nAgain === 2 && MMx.PROOF_KIDS_MAX === 2 && f3 === null && inFly === 2 && flyAsked === 2 && f1 === f1b && MMx.PROOF_KEEP_MS > 0 && MMx.PROOF_MS > 0);
+        check('§17 B-02f6 remainder (1), r1178 (b): the proof\'s child is THE STARTER\'s — `realpath -m` through childStarter().run, no spawn of its own; a real run answers the link\'s real folder',
+          /childStarter\(\)\.run\('realpath', \['-m', '--', lex\]/.test(srBody) && !/onLateExit|onTimeout/.test(srBody) && !/\bspawn\(/.test(srBody) && /\(this\._proofRealpath \|\| starterRealpath\)\(rec\.mountpoint\)\)/.test(mmSrc) && !/_proofStuck/.test(mmSrc) && viaStarter?.real === realM(outerLink) && viaStarter.slow === false, { viaStarter });
+        // the doors AWAIT it (r1178: a guard nobody awaits passes everything): every call of the writers' door in src/ is awaited —
+        // CONTROL: a planted call with no await is named
+        const ROOTX = path.join(path.dirname(new URL(import.meta.url).pathname), '..'), srcFiles = [];
+        const walkX = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, e.name); if (e.isDirectory()) { if (e.name !== 'node_modules') walkX(q); } else if (e.name.endsWith('.js')) srcFiles.push(q); } };
+        walkX(path.join(ROOTX, 'src'));
+        const callsOf = (text) => { const out = []; const re = /(?<!function |async )\b(pullShadowOfReal|shadowedByReal|pullRefusal)\(/g; let x; while ((x = re.exec(text))) out.push({ name: x[1], awaited: /await\s+(?:require\([^)]*\)\.|[\w$]+\.)?$/.test(text.slice(Math.max(0, x.index - 80), x.index)) }); return out; };
+        const calls = srcFiles.flatMap((f) => callsOf(fs.readFileSync(f, 'utf8')).map((c) => ({ ...c, file: path.relative(ROOTX, f) })));
+        // …and a WRITER on the sync door is a named one: the TASK.md writer (its isPathShadowed is a sync API — it skips there, and writes
+        // the file when a pull comes up or the group changes)
+        const SYNC_WRITERS = ['src/server/task-groups-wiring.js'];
+        const syncWriters = srcFiles.filter((f) => !f.endsWith(path.join('src', 'machine-mounts.js'))).flatMap((f) => (fs.readFileSync(f, 'utf8').match(/\bpullShadowOf\([^;]*?writer(?:: true)?\b/g) || []).map(() => path.relative(ROOTX, f)));
+        const unawaited = calls.filter((c) => !c.awaited), planted = callsOf("const pull = require('../machine-mounts.js').pullShadowOfReal(p, { writer: true });").filter((c) => !c.awaited);
+        console.log('    B-02f6 remainder, the writers\' door\'s callers: ' + JSON.stringify({ calls: calls.map((c) => `${c.file} ${c.name}${c.awaited ? '' : ' NOT AWAITED'}`), syncWriters }));
+        check('§17 B-02f6 remainder: every caller of the writers\' door awaits it — the files route\'s guard, its upload, WebDAV\'s PUT / MKCOL and the COPY-MOVE destination (' + calls.length + ' calls)',
+          unawaited.length === 0 && calls.filter((c) => c.file === 'src/routes/files.js' && c.name === 'pullShadowOfReal').length === 2 && calls.filter((c) => c.file === 'src/webdav.js' && c.name === 'pullRefusal').length === 2
+            && syncWriters.join() === SYNC_WRITERS.join(), { unawaited, syncWriters });
+        check('CONTROL §17 B-02f6 remainder: a planted call of the writers\' door with no await is named', planted.length === 1 && planted[0].name === 'pullShadowOfReal');
+        // (2) THE TIE: two records on ONE folder by a link (mm-hout held «same», mm-hin holds), the HOLDER DOWN: a write by the HELD
+        // row's spelling is the HOLDER's refusal (its machine, its code) — the same as by the holder's own spelling; a reader too (the
+        // holder's bare folder probed empty); the holder live: nothing refused. RED: the release names the held row
+        const t2 = await scene(MMx.MachineMounts, 'pairs-02f6r-tie', SCENES.sameLink);
+        t2.m._live.delete('mm-hin');   // the holder went down after the pair check
+        t2.m._bare = t2.m._bare || new Map();
+        const tw = t2.w(path.join(mpLink, 'x.txt')), twOwn = t2.w(path.join(mpA, 'x.txt')), tr0 = t2.r(path.join(mpLink, 'x.txt'));
+        t2.m._bare.set('mm-hin', 'empty'); const tr = t2.r(path.join(mpLink, 'x.txt')), trOwn = t2.r(path.join(mpA, 'x.txt'));
+        t2.m._live.set('mm-hin', { teardown: async () => { }, mountpoint: mpA, at: Date.now() }); const twLive = t2.w(path.join(mpLink, 'x.txt')), trLive = t2.r(path.join(mpLink, 'x.txt'));
+        const tb = tw ? MMx.pullShadowBody(tw) : null;
+        const TIE = "      if (tie && tie.kind === 'same') { const o = this._state.mounts.find((x) => x.id === tie.otherId && x.dir === 'pull'); if (o) { if (this._live.has(o.id)) return null; let known = false; try { this.hosts.get(o.hostId); known = true; } catch (e) { known = !!(e && e.code === 'hosts-unread'); } if (known) m = o; } }   // the read's catch: a holder whose machine is gone (its records kept, the pair not checked again yet) never answers — the held row's own hold does\n";
+        const TIE_UNGUARDED = "      if (tie && tie.kind === 'same') { const o = this._state.mounts.find((x) => x.id === tie.otherId && x.dir === 'pull'); if (o) { if (this._live.has(o.id)) return null; m = o; } }\n";   // stale-pins: kept — the control plants the unit's unguarded tie on purpose
+        let tc = null;
+        if (src3.split(TIE).length !== 2) check('§17 B-02f6 remainder CONTROL: the tie\'s line of shadowedBy moved — update this suite', false);
+        else { const c5 = await scene(copy3(src3.replace(TIE, '')), 'pairs-02f6r-tie-ctl', SCENES.sameLink); c5.m._live.delete('mm-hin'); tc = c5.w(path.join(mpLink, 'x.txt')); }
+        // the read's catch: the HOLDER's machine GONE (removed — its records kept as orphans until the pair is checked again): the held
+        // row's own hold answers, never nothing. RED: the tie unguarded (in a copy) lets the write land in the bare folder
+        const gone = await scene(MMx.MachineMounts, 'pairs-02f6r-gone', SCENES.sameLink); gone.m._live.delete('mm-hin');
+        const c6 = src3.split(TIE).length === 2 ? await scene(copy3(src3.replace(TIE, TIE_UNGUARDED)), 'pairs-02f6r-gone-ctl', SCENES.sameLink) : null;   // both pair checks with the machine still known
+        if (c6) c6.m._live.delete('mm-hin');
+        const keepH1 = HOSTS.h1; let gw = 'unset', gwc = 'unset';
+        try { delete HOSTS.h1; gw = gone.w(path.join(mpLink, 'x.txt')); if (c6) gwc = c6.w(path.join(mpLink, 'x.txt')); } finally { HOSTS.h1 = keepH1; }
+
+        const tcb = tc ? MMx.pullShadowBody(tc) : null;
+        console.log('    B-02f6 remainder (2), the facts judged: ' + JSON.stringify({ held: t2.held.get('mm-hout') && t2.held.get('mm-hout').kind, tw: tw && [tw.id, tb.code, tb.params.machine], twOwn: twOwn && twOwn.id, tr0, tr: tr && tr.id, trOwn: trOwn && trOwn.id, twLive, trLive, release: tc && [tc.id, tcb.code, tcb.params.machine] }));
+        check('§17 B-02f6 remainder (2): on ONE folder (a link), the holder DOWN — a write by the HELD row\'s spelling names the row that HOLDS (its machine, its own state: machine_folder_down), as by the holder\'s own spelling; a reader the same (the holder\'s bare folder probed empty); the holder live: nothing refused, read or write',
+          t2.held.get('mm-hout')?.kind === 'same' && tw?.id === 'mm-hin' && !tw.pairHeld && tb?.code === 'machine_folder_down' && tb.params.machine === 'Studio Mac' && twOwn?.id === 'mm-hin' && tr0 === null && tr?.id === 'mm-hin' && trOwn?.id === 'mm-hin' && twLive === null && trLive === null);
+        console.log('    B-02f6 remainder (2), the holder\'s machine gone: ' + JSON.stringify({ gw: gw && gw !== 'unset' ? [gw.id, MMx.pullShadowBody(gw).code] : gw, unguarded: gwc && gwc !== 'unset' ? gwc.id : gwc }));
+        check('§17 B-02f6 remainder (2), the read\'s catch: the HOLDER\'s machine gone (its records kept until the pair is checked again) — the held row\'s own hold answers the write (machine_folder_held), never nothing', gw?.id === 'mm-hout' && gw.pairHeld === true && MMx.pullShadowBody(gw).code === 'machine_folder_held');
+        check('RED CONTROL §17 B-02f6 remainder (2): the tie unguarded (in a copy) answers nothing — the write would land in the bare folder', gwc === null, gwc);
+        check('RED CONTROL §17 B-02f6 remainder (2): the release\'s rule (the tie\'s line cut, in a copy) names the HELD row — machine_folder_held, «Laptop»', tc?.id === 'mm-hout' && tc.pairHeld === true && tcb?.code === 'machine_folder_held' && tcb.params.machine === 'Laptop', tc);
       }
       released.length = 0; mountsAsked.length = 0;
       let threw = ''; try { await mm2._up(mm2._state.mounts.find((m) => m.id === 'mm-young')); } catch (e) { threw = String(e.code || '') + ' ' + e.message; }

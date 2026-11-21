@@ -54,6 +54,24 @@ function lsChild(mp, { names = false, ms = 8000 } = {}) {   // → ok: true / fa
   });
 }
 
+// B-02f6 remainder (1) (主开发 r1160 / r1178): the PROOF that a writer refused under a pull record whose real folder never resolved
+// would reach a LIVE pull through that record's link — the record's real folder by THE STARTER's child, its answer kept per record
+const PROOF_MS = 3000;          // the proof child's own bound (the starter answers `unknown` past it and its guard)
+const PROOF_KEEP_MS = 10000;    // its answer is kept for the record this long — a pass as much as a refusal (a writer in a loop starts no child a write)
+const PROOF_KIDS_MAX = 2;       // at most this many proof children IN FLIGHT (asked, not answered) — another ask meanwhile keeps its refusal, nothing kept
+/** A folder's REAL path by THE STARTER (src/server/child-starter.js): a writer in a loop drives the proof's road, and the hub's main
+ *  process starts no program on such a road (B-323e) — `realpath -m`, bounded PROOF_MS → { real (null: no answer), slow (NO answer
+ *  inside the bound: timed out, or the starter's «unknown») }. Nothing here waits on the child's end after its answer. */
+async function starterRealpath(p, { ms = PROOF_MS } = {}) {
+  const lex = path.resolve(String(p || '/'));
+  let r = null; try { r = await require('./server/child-starter').childStarter().run('realpath', ['-m', '--', lex], { timeoutMs: ms, capture: true, maxBuffer: 8192, envAdd: { PATH: process.env.PATH || '' } }); } catch { r = null; }
+  const slow = !!(r && (r.timedOut || r.unknown));   // a throw (no child ran, no bound passed) is an answer, not «slow»
+  const out = r && !slow && r.code === 0 ? String(r.stdout || '').replace(/\n$/, '') : '';
+  return { real: out.startsWith('/') ? out : null, slow };
+}
+/** The proof's record as it stands — its FOLDER (all realpath reads): an edit of it is another question («never again» ends there) */
+const proofSig = (rec) => rec.id + '\u0000' + path.resolve(String(rec.mountpoint || ''));
+
 /** B-844b: a folder's REAL path — symlinks resolved — by a child `realpath -m` (never node fs on a path that may be a mount
  *  point), bounded (6 s); a host without GNU realpath (the child refuses) takes the path as written (resolved); a child that did
  *  not ANSWER in time (a wedged FUSE target) is no answer — null, so the next check asks again (r5: never cached as written). */
@@ -780,6 +798,7 @@ class MachineMounts {
       this._pullErrorCodes?.delete(id);   // B-af94: and their code
       this._bare?.delete(id);
       this._held.delete(id);
+      this._proofKept?.delete(id); this._proofNever?.delete(id);   // B-02f6 remainder (r1214): «never again» ends with the record
     } else {
       await this._unmountPush(rec);
       this._pushTunnelOwned.delete(id);
@@ -983,21 +1002,26 @@ class MachineMounts {
     const rp = typeof p === 'string' ? p : '';
     if (!rp.startsWith('/')) return null;
     let best = null;
-    for (const m of this._state.mounts) {
-      if (m.dir !== 'pull' || typeof m.mountpoint !== 'string' || !m.mountpoint) continue;
-      const mp = this._pullFolders(m).find((x) => x !== '/' && (rp === x || rp.startsWith(x + '/')));   // a whole path segment (…/mac is not …/macbook)
+    for (const m0 of this._state.mounts) {
+      if (m0.dir !== 'pull' || typeof m0.mountpoint !== 'string' || !m0.mountpoint) continue;
+      const mp = this._pullFolders(m0).find((x) => x !== '/' && (rp === x || rp.startsWith(x + '/')));   // a whole path segment (…/mac is not …/macbook)
       if (!mp) continue;
-      if (this._live.has(m.id)) return null;
+      if (this._live.has(m0.id)) return null;
+      // B-02f6 remainder (2): a record HELD on ONE folder with its holder (by any spelling — a link, its real path) answers AS ITS
+      // HOLDER: the row that holds the folder is the one its state and its name come from, never the row whose spelling the path used
+      let m = m0;
+      const tie = this._held.get(m0.id) || null;
+      if (tie && tie.kind === 'same') { const o = this._state.mounts.find((x) => x.id === tie.otherId && x.dir === 'pull'); if (o) { if (this._live.has(o.id)) return null; let known = false; try { this.hosts.get(o.hostId); known = true; } catch (e) { known = !!(e && e.code === 'hosts-unread'); } if (known) m = o; } }   // the read's catch: a holder whose machine is gone (its records kept, the pair not checked again yet) never answers — the held row's own hold does
       // the B-f276 remainder meets B-fcc7: the MACHINES LIST held (hosts.json unread — `hostsHeld`, never «removed») — the record still
       // shadows its bare folder (named by its id), so a write there is refused by the hold's name. Another meaning, kept apart: a
       // PAIR-held record (`this._held`: two records on one folder — bl-machines-a) answers a WRITER only (B-02f6, below)
       let h = null; try { h = this.hosts.get(m.hostId); } catch (e) { h = e && e.code === 'hosts-unread' ? { id: m.hostId, name: m.hostId, hostsHeld: true } : null; }
       // B-02f6: a PAIR-held record (never mounted — its pair holds the place) answers a WRITER under its folder with its hold: the bare
       // folder there is THIS hub's disk, so a file written there never reached the machine and nothing said so. A READER lists the bare
-      // folder; under the holder's live mount point the holder answers (null above); on one folder the holder's own state wins (rank)
-      const pair = this._held.get(m.id) || null;
+      // folder; under the holder's live mount point the holder answers (null above); on one folder the holder answers (the tie, above)
+      const pair = m === m0 ? this._held.get(m.id) || null : null;   // the tie's holder answers by its own state (its own hold, if any, is its own row's)
       if (!h || (pair && !writer) || (!pair && !writer && this._bare?.get(m.id) !== 'empty')) continue;   // a READER: probed empty only (a folder with files of its own shows them); a WRITER: any folder not live (what it adds is hidden under the next mount, or blocks it)
-      if (!best || mp.length > best.mp.length || (mp.length === best.mp.length && best.pair && !pair)) best = { m, mp, h, pair };
+      if (!best || mp.length > best.mp.length) best = { m, mp, h, pair };   // the innermost answers; on ONE folder the tie above already made the holder answer
     }
     if (!best) return null;
     // B-02f6 (its read, a MUST): the path as asked may reach a LIVE pull through the LINK the held record was written with (its
@@ -1013,6 +1037,54 @@ class MachineMounts {
     if (best.h.hostsHeld) return { id: best.m.id, hostId: best.m.hostId, machine, name: machine, mountpoint: best.mp, hostsHeld: true, hostsHeldWords: (this.hosts && typeof this.hosts.unreadWords === 'function' && this.hosts.unreadWords()) || '', offline: false };
     if (best.pair) return { id: best.m.id, hostId: best.m.hostId, machine, name: machine, mountpoint: path.resolve(best.m.mountpoint), pairHeld: true, held: { code: best.pair.code, params: best.pair.params || {}, words: best.pair.words } };
     return { id: best.m.id, hostId: best.m.hostId, machine, name: machine, mountpoint: best.mp, offline: !this._online(best.m.hostId) };
+  }
+  /** B-02f6 remainder (1): a WRITER that shadowedBy refuses under a pull record whose REAL folder never resolved (the pair check
+   *  compares it as written, so it is not even held) — the asked path mapped onto that record's real folder, learned by THE
+   *  STARTER's child: under a LIVE pull's folder the write is the machine's, nothing refused. The answer is the RECORD's, kept
+   *  PROOF_KEEP_MS (a pass as much as a refusal; a child that did not answer = refused); at most PROOF_KIDS_MAX children in flight.
+   *  A write that passes never asks it. → shadowedBy's answer, or null */
+  async shadowedByReal(p, { writer = false } = {}) {
+    const s = this.shadowedBy(p, { writer });
+    if (!s || !writer || s.pairHeld) return s;   // a pair-held record maps its link itself (shadowedBy, B-02f6)
+    const rec = this._state.mounts.find((x) => x.id === s.id && x.dir === 'pull'), rp = typeof p === 'string' ? p : '';
+    if (!rec) return s;
+    const w = path.resolve(rec.mountpoint);
+    if (!(rp === w || rp.startsWith(w + '/'))) return s;
+    // r1214 (1): once the pair check's own child has LEARNED the real folder, that answer maps the path — no proof child at all
+    const real = this._realMp.has(rec.id) ? this._realMp.get(rec.id) : await this._proofReal(rec);
+    if (!real || real === w) return s;
+    const asReal = real + rp.slice(w.length);
+    return this._state.mounts.some((o) => o.dir === 'pull' && this._live.has(o.id) && this._pullFolders(o).some((x) => x !== '/' && (asReal === x || asReal.startsWith(x + '/')))) ? null : s;
+  }
+  /** The record's real folder for the proof (主开发 r1214). A child that did NOT answer inside its bound (timed out, or the starter's
+   *  «unknown») is NEVER asked again for that record as it stands — the writer is refused as the release refused (its words), and at
+   *  most one proof child a record can outlive its bound; «never again» ends when the record's FOLDER is edited (another proofSig) or
+   *  the record is removed (unmount clears it; an add after that is a new record), or when the pair check learns its real folder
+   *  (shadowedByReal maps with it). No proof while the pair check's OWN child for the record is alive (`_realKids`: never doubled).
+   *  Every other answer is kept PROOF_KEEP_MS on the monotonic clock, a pass as much as a refusal; PROOF_KIDS_MAX counts the asks IN
+   *  FLIGHT, keyed by the record as it stands. An answer that lands after its record was removed or edited is dropped — no mark
+   *  depends on the order of two events; nothing waits for a child's end after its answer. */
+  _proofReal(rec) {
+    const kept = (this._proofKept = this._proofKept || new Map()), fly = (this._proofFly = this._proofFly || new Map()), never = (this._proofNever = this._proofNever || new Map());
+    const sig = proofSig(rec), now = () => performance.now();
+    if (never.get(rec.id) === sig) return Promise.resolve(null);
+    const had = kept.get(rec.id);
+    if (had && had.sig === sig && now() - had.at < (this._proofKeepMs != null ? this._proofKeepMs : PROOF_KEEP_MS)) return Promise.resolve(had.real);
+    if (fly.has(sig)) return fly.get(sig);
+    if (this._realKids && this._realKids.has(rec.id)) return Promise.resolve(null);   // the pair check's own child for it still alive
+    if (fly.size >= PROOF_KIDS_MAX) return Promise.resolve(null);   // the bound: this ask keeps its refusal, nothing kept
+    const ask = Promise.resolve().then(() => (this._proofRealpath || starterRealpath)(rec.mountpoint)).catch(() => ({ real: null, slow: false })).then((v) => {
+      const o = v && typeof v === 'object' ? v : { real: v || null, slow: false };
+      fly.delete(sig);
+      const cur = this._state.mounts.find((x) => x.id === rec.id && x.dir === 'pull');
+      if (!cur || proofSig(cur) !== sig) return null;   // removed or edited while it was asked: its answer is no one's
+      if (o.slow) { never.set(rec.id, sig); kept.delete(rec.id); return null; }
+      kept.set(rec.id, { at: now(), real: o.real || null, sig });
+      if (kept.size > 256) kept.delete(kept.keys().next().value);
+      return o.real || null;
+    });
+    fly.set(sig, ask);
+    return ask;
   }
   /** B-fcc7 (read 5): a file under a pull folder that is not live was removed or moved out — probe that folder again now (its
    *  «not empty» verdict and words go once it is empty), never waiting for the sweep. */
@@ -1242,6 +1314,14 @@ function pullShadowOf(p, { writer = false } = {}) {
   try { const mm = _pullDoor(); return mm && typeof mm.shadowedBy === 'function' ? mm.shadowedBy(String(p), { writer }) || null : null; } catch { return null; }
 }
 
+/** B-02f6 remainder (1): the WRITERS' door — shadowedBy's answer, with the proof (MachineMounts#shadowedByReal) where a write would
+ *  be refused under a record whose real folder never resolved. ASYNC: every caller awaits it (a guard nobody awaits passes
+ *  everything — test-pull-refresh's census); never a throw. */
+async function pullShadowOfReal(p, { writer = false } = {}) {
+  if (!_pullDoor || !p) return null;
+  try { const mm = _pullDoor(); if (!mm) return null; if (typeof mm.shadowedByReal === 'function') return (await mm.shadowedByReal(String(p), { writer })) || null; return typeof mm.shadowedBy === 'function' ? mm.shadowedBy(String(p), { writer }) || null : null; } catch { return null; }
+}
+
 /** The row's state as a refusal's body — { error (the English for an agent), code, params } the client words (fsErrorText): the
  *  files route's and WebDAV's one spelling. */
 function pullShadowBody(s) {
@@ -1258,4 +1338,4 @@ function pullShadowBody(s) {
 /** A file under a pull folder was removed or moved out (MachineMounts#touched) — never a throw. */
 function pullTouched(p) { if (!_pullDoor || !p) return; try { const mm = _pullDoor(); if (mm && typeof mm.touched === 'function') mm.touched(String(p)); } catch { } }
 
-module.exports = { MachineMounts, registerPullDoor, pullShadowOf, pullTouched, onPullLive, pullShadowBody };
+module.exports = { MachineMounts, registerPullDoor, pullShadowOf, pullShadowOfReal, pullTouched, onPullLive, pullShadowBody, starterRealpath, PROOF_MS, PROOF_KEEP_MS, PROOF_KIDS_MAX };

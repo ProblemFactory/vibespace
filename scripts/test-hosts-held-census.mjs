@@ -223,6 +223,7 @@ console.log('§1 every caller of a lookup (get / list / findByDeviceId, and the 
     {"file": "src/ws-handler.js", "at": "const h = hosts.get(session.host);", "n": 1, "cls": "waits", "why": "Terminate of a remote conversation: said unconfirmed by name, the remote stop OWED and run at the read (whenRead) — H1", "bare": "the remote stop runs only when the list is READ (while held it is said and owed at the read, H1); a failed remote stop after that is best-effort, as the release"},
     // the move onto 418bc7210: the train's new callers since the cure's base (the meeting commit)
     {"file": "src/machine-mounts.js", "at": "try { h = this.hosts.get(m.hostId); } catch (e) { h = e && e.code === 'hosts-unread'", "n": 1, "cls": "refuses", "why": "shadowedBy (B-fcc7, the train): a held list is unknown, never «removed» — the record still shadows its bare folder (named by its id), so a write there is refused as the hold (hosts-unread, the moved chain's cure — never «offline»); a reader sees the shadow when probed empty"},
+    {"file": "src/machine-mounts.js", "at": "let known = false; try { this.hosts.get(o.hostId); known = true; } catch (e) { known = !!(e && e.code === 'hosts-unread'); }", "n": 1, "cls": "refuses", "why": "shadowedBy's tie (B-02f6's remainder): while the machines list is held the holder is still known (hosts-unread) — it answers for the held row by the LIST's hold under its own name (the row above refuses it); a holder whose machine is gone (no hold) never answers — the held row's own hold refuses the write"},
     {"file": "src/server/exit-routes.js", "at": "if (b.replaces) { try { old = hosts.get(String(b.replaces)); } catch { old = null; } }", "n": 1, "cls": "refuses", "why": "POST /api/hosts «Add it again with a key» (the train): the add itself refuses by name on the next line (hosts.add's first line) — nothing is replaced or removed", "bare": "the swallowed hold changes nothing: hosts.add refuses hosts-unread before any record is written, so no machine is replaced"},
     // 主开发 01:20Z (1): the callers of the methods that call get inside (device / deviceBounded / homeDir / the transcript fetches) — audit adv/hosts-callers-2.md
     {"file": "src/ctx-sync.js", "at": "const dm = await hosts.deviceBounded(hostId, connectMs);", "n": 1, "cls": "harmless", "why": "Cannot run while held: its only callers (task-groups-wiring scheduleCtxSync :165, the 60 s timer :175) take the host from hosts().get(), which throws, and skip. Nothing synced or written."},
@@ -791,19 +792,20 @@ console.log('§9 a REAL held HostManager behind a pull mount\'s shadow and the f
   // (a3) 主开发 19:21Z (the move's range check, wkazpjzcs): a PAIR-held record (two records on one folder — its holder answers) TOGETHER
   // with the held machines list — two meanings kept apart: the pair-held record is passed over though its machine cannot be read, and the
   // holder's row answers by the LIST's hold, under its own machine's name. B-02f6: a pair-held record now answers a WRITER under its
-  // folder with its pair's hold — on ONE folder the holder's own state wins (the rank's tie), which is what keeps this leg's answer
-  const PAIRSKIP = "      if (!best || mp.length > best.mp.length || (mp.length === best.mp.length && best.pair && !pair)) best = { m, mp, h, pair };";
-  ok(MSRC9.split(PAIRSKIP).length === 2, 'control setup: the shadow\'s holder-wins rank (one folder) is found once');
+  // folder with its pair's hold — on ONE folder a held record answers AS ITS HOLDER (B-02f6's remainder: the tie), which is what keeps
+  // this leg's answer
+  const PAIRSKIP = "      if (tie && tie.kind === 'same') { const o = this._state.mounts.find((x) => x.id === tie.otherId && x.dir === 'pull'); if (o) { if (this._live.has(o.id)) return null; let known = false; try { this.hosts.get(o.hostId); known = true; } catch (e) { known = !!(e && e.code === 'hosts-unread'); } if (known) m = o; } }";
+  ok(MSRC9.split(PAIRSKIP).length === 2, 'control setup: the shadow\'s tie (a held record on one folder answers as its holder) is found once');
   const pairShadow = (Mod) => {
     const M = Object.create(Mod.MachineMounts.prototype);
     Object.assign(M, { hosts: H, _state: { mounts: [{ id: 'mm-pb', dir: 'pull', hostId: 'h-0002', mountpoint: MP9 }, { id: 'mm-pa', dir: 'pull', hostId: 'h-0001', mountpoint: MP9 }] }, _live: new Map(), _realMp: new Map(), _held: new Map([['mm-pb', { kind: 'same', otherId: 'mm-pa', words: 'held' }]]), _bare: new Map() });
     return M.shadowedBy(path.join(MP9, 'notes.md'), { writer: true });
   };
   const ps = pairShadow(require(path.join(ROOT, 'src/machine-mounts.js')));
-  const psx = pairShadow(MJ.load('src/machine-mounts.js', anchored(MSRC9, PAIRSKIP, PAIRSKIP.replace(' || (mp.length === best.mp.length && best.pair && !pair)', ''), 'shadow-pairskip-cut'), 'shadow-pairskip-cut'));
+  const psx = pairShadow(MJ.load('src/machine-mounts.js', anchored(MSRC9, PAIRSKIP, '', 'shadow-pairskip-cut'), 'shadow-pairskip-cut'));
   const pb = ps ? bodyOf(MSRC9)(ps) : {};
   ok(!!ps && ps.id === 'mm-pa' && ps.hostsHeld === true && !ps.offline && pb.code === 'hosts-unread' && pb.error.startsWith('“h-0001”’s folder: '), 'a pair-held record beside the held machines list: the pair-held record is passed over (its holder answers) and the holder\'s row is refused by the LIST\'s hold, under its own machine — the two holds never mix', { ps, pb });
-  ok(!!psx && psx.id === 'mm-pb', 'CONTROL (the holder-wins rank cut, in a copy): the pair-held record answers for its holder\'s folder (another machine named) — RED', psx);
+  ok(!!psx && psx.id === 'mm-pb', 'CONTROL (the tie cut, in a copy): the pair-held record answers for its holder\'s folder (another machine named) — RED', psx);
   // (a2) the restack meets line 244: the PAIR check (two records on one folder) WAITS while the machines list is held — every record read
   // «gone» there and every pair hold was dropped; the current holds stand, judged once the list reads (keyed whenRead)
   const PAIRW = "    if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) {";
@@ -823,7 +825,7 @@ console.log('§9 a REAL held HostManager behind a pull mount\'s shadow and the f
   // list: the REAL handler, the REAL pull door (registerPullDoor) — 503 in the HOLD's words, nothing lands; CONTROL (the door's line cut,
   // in a copy of src/webdav.js): the MKCOL lands in the bare folder
   const WSRC9 = fs.readFileSync(path.join(ROOT, 'src/webdav.js'), 'utf8');
-  const DAVDOOR = "    if (req.method === 'PUT' || req.method === 'MKCOL') { const w = pullRefusal(target); if (w) return res.status(503).type('text/plain').send(w); }\n";
+  const DAVDOOR = "    if (req.method === 'PUT' || req.method === 'MKCOL') { const w = await pullRefusal(target); if (w) return res.status(503).type('text/plain').send(w); }\n";
   ok(WSRC9.split(DAVDOOR).length === 2, 'control setup: WebDAV\'s pull door is found once');
   fs.mkdirSync(MP9, { recursive: true });   // the bare folder (the pull is not mounted)
   const DR9 = fs.realpathSync(path.dirname(MP9)), DMP9 = path.join(DR9, 'box');   // the share's root as WebDAV's chroot sees it (a scratch dir under a link)

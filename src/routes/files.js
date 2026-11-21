@@ -164,8 +164,9 @@ router.use((req, res, next) => {
 // the row's state, as a code the client words in the reader's language (fsErrorText); its own pass, so it never waits on the
 // storage manager above. EVERY path the request names (its read 2: a copy, a move or a compress FROM the bare folder succeeded
 // empty when only its destination was asked) — a remote side (?host, srcHost, destHost) is not this machine's; an upload's
-// multipart destDir is read inside its route, so an upload is not refused here
-router.use((req, res, next) => {
+// multipart destDir is read inside its route, so an upload is not refused here. B-02f6 remainder: ASYNC — a writer refused under a
+// record whose real folder never resolved waits for the proof (pullShadowOfReal: the record's real folder by the starter, kept)
+router.use(async (req, res, next) => {
   const q = req.query || {}, b = req.body || {};
   if (q.host || b.host) return next();
   // what the request READS or takes away — a folder probed empty is refused (one holding files shows them, a stray can be
@@ -181,7 +182,7 @@ router.use((req, res, next) => {
     for (const raw of list) {
       if (typeof raw !== 'string' || !raw) continue;
       let p; try { p = safePath(raw); } catch { continue; }
-      const pull = require('../machine-mounts.js').pullShadowOf(p, { writer });
+      const pull = await require('../machine-mounts.js').pullShadowOfReal(p, { writer });
       if (pull) return res.status(503).json(pullShadowBody(pull));
     }
   }
@@ -685,7 +686,7 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
     if (keepWithConv && underTempRoot(destRoot, req.app.locals.chatTempRoots || TEMP_ROOTS())) { keptFrom = destRoot; destRoot = path.join(req.app.locals.chatAttachmentsRoot || ATTACH_ROOT, conv, 'files'); }   // road a: kept with the conversation (a gate's root: app.locals.chatAttachmentsRoot)
     // B-fcc7 (read 5): an upload ADDS to its folder — a machine's pull folder that is not mounted refuses it (its multipart destDir
     // is read only here, after multer: the router's pass above saw an empty body); the catch below lets the temp files go
-    const pullUp = require('../machine-mounts.js').pullShadowOf(destRoot, { writer: true });
+    const pullUp = await require('../machine-mounts.js').pullShadowOfReal(destRoot, { writer: true });   // B-02f6 remainder: the writers' door
     if (pullUp) throw Object.assign(new Error(pullShadowBody(pullUp).error), { status: 503, pullBody: pullShadowBody(pullUp) });
     // dest side may be a mount → all dest-touching fs ops go through SafeFs.
     // The multer temp files live in /tmp (fast, local) — their unlink stays fs.
