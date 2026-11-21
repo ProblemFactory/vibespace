@@ -106,6 +106,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1125)
 import { loadPage } from './cdp-page-load.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
@@ -352,7 +353,11 @@ const evalJs = async (expr) => {
 };
 const J = JSON.stringify;
 const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch { } await sleep(150); } try { return await evalJs(expr); } catch { return false; } };
-const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1125; test-ci-gate §2o): ONE front state — the launch's own tab is in front at each
+// startChrome, secondClient()'s tab (/json/new) comes in front of it and STAYS open; every picture of the main page goes through
+// frontShot (brought to the front only when it is not there, bounded, one retry said, the front handed back to the second client)
+const FS = frontState(), frontMain = () => cdp('Page.bringToFront');
+const shot = async (name) => { try { const r = await frontShot(FS, 'main', frontMain, () => cdp('Page.captureScreenshot', { format: 'png' }), { name: `the picture ${name}` }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
 /** one Chrome per font leg (CI hotfix .358): `dejavu` reads the scratch fontconfig, `box` the box's own; its own profile and CDP
  *  port; the page target's socket, the Fetch domain (the RED controls' bundles) and the returning-user script */
 const startChrome = async (font) => {
@@ -368,6 +373,7 @@ const startChrome = async (font) => {
   if (!target) return false;
   sock = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => sock.on('open', r)); sock.on('message', onCdp);
+  becameFront(FS, 'main', frontMain);   // the launch's own tab, in front
   await cdp('Runtime.enable'); await cdp('Page.enable');
   await cdp('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }, { urlPattern: '*style.css*', requestStage: 'Request' }, { urlPattern: '*chat.css*', requestStage: 'Request' }] });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
@@ -892,6 +898,7 @@ const legRedFont = async () => {
 const secondClient = async () => {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const s2 = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 16 * 1024 * 1024 }); await new Promise((r) => s2.on('open', r));
+  becameFront(FS, 'second:' + tg.id, () => call('Page.bringToFront'));   // /json/new put it in front of the main page
   let n = 0; const wait = new Map(); s2.on('message', (d) => { const m = JSON.parse(d); if (m.id && wait.has(m.id)) { wait.get(m.id)(m); wait.delete(m.id); } });
   const call = (method, params = {}) => new Promise((res) => { const id = ++n; wait.set(id, res); s2.send(JSON.stringify({ id, method, params })); });
   await call('Page.enable'); await call('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
@@ -899,7 +906,7 @@ const secondClient = async () => {
   await call('Page.navigate', { url: ORIGIN + '/' });
   const ev = async (expr) => { const m = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); return m.result && m.result.result ? m.result.result.value : undefined; };
   const until = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { const v = await ev(expr); if (v) return v; } catch { } await sleep(200); } return ev(expr).catch(() => null); };
-  return { ev, until, close: async () => { try { s2.close(); } catch { } try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tg.id}`); } catch { } } };
+  return { ev, until, close: async () => { if (FS.front && FS.front.key === 'second:' + tg.id) FS.front = null; try { s2.close(); } catch { } try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tg.id}`); } catch { } } };
 };
 const BTN_PARTS = `(() => { const b = document.querySelector('.desktop-switch-compact'); return b ? [...b.querySelectorAll('span')].map((x) => x.textContent.trim()).filter(Boolean).join(' ') : null; })()`;
 const rowOf = (k) => evalJs(`(() => { const id = (app.desktopManager.desktops[${k}] || {}).id; const r = id && document.querySelector('.desktop-switch-menu .context-menu-item[data-desktop-id="' + id + '"]'); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.left + Math.min(50, b.width / 3), y: b.top + b.height / 2 }; })()`);
