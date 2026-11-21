@@ -148,6 +148,14 @@ function legs(M) {
   // ⑦'s probe: the log view of a place
   const lv = M.environmentLogView({ timezone: { mode: 'value', value: 'Asia/Tokyo' }, location: { mode: 'value', value: { latitude: 35.6812, longitude: 139.7671 } } });
   leg('⑦ the log view: a zone by its choice and name, a place by its kind ONLY — no coordinate', J(lv) === J({ timezone: 'value:Asia/Tokyo', location: 'value' }) && !/35\.68|139\.76/.test(J(lv)), lv);
+  // U2b's helpers: the stock browser's own start (the box measure: TZ reaches Chrome; Chrome keeps a prior language)
+  const sl = M.stockLaunchOf(R({ timezone: { mode: 'value', value: 'Asia/Tokyo' }, language: { mode: 'value', value: 'ja-JP' } }), { languageTold: false, machineTag: 'en-US' });
+  const su = M.stockLaunchOf(R(null), { languageTold: false, machineTag: 'en-US' }), sb = M.stockLaunchOf(R({ timezone: { mode: 'value', value: 'UTC' } }), { languageTold: true, machineTag: 'en-US' });
+  leg('U2b the stock start: a zone and a language ⇒ two switches (one tag, comma-free) and TZ; untouched ⇒ nothing at all; a language once told and back at this machine\'s ⇒ the machine\'s tag stated',
+    J(sl) === J({ args: ['--lang=ja-JP', '--accept-lang=ja-JP'], env: { TZ: 'Asia/Tokyo' }, language: 'ja-JP', languageTold: true }) && J(su) === J({ args: [], env: {}, language: null, languageTold: false }) && J(sb.args) === J(['--lang=en-US', '--accept-lang=en-US']) && sb.languageTold === true, { sl, su, sb });
+  leg('U2b withEnvironmentArgs keeps the args\' shape (a list, the comma text, the newline text); nothing added ⇒ the same value',
+    J(M.withEnvironmentArgs(['--a'], ['--b'])) === J(['--a', '--b']) && M.withEnvironmentArgs('--a,--c', ['--b']) === '--a,--c,--b' && M.withEnvironmentArgs('--a\n--c', ['--b']) === '--a\n--c\n--b' && M.withEnvironmentArgs('--a', []) === '--a' && M.withEnvironmentArgs('', ['--b']) === '--b', null);
+  leg('U2b machineLanguageTag: a runtime locale judged by the language rule (en-US kept; a tag the kernel would refuse ⇒ null)', M.machineLanguageTag('en-US') === 'en-US' && M.machineLanguageTag('en-US-u-hc-h23') === null, null);
   return out;
 }
 

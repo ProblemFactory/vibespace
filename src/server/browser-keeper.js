@@ -1330,7 +1330,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // B-1789 cure: both files end their args with THE LAUNCH TAIL (B.launchTail — the quiet log switches, then the mark), the
     // switches only for a record launched with them (quietLogFor: its stamp)
     if (kind === 'ephemeral') cfg = B.generatedConfig({ userConfig: user || {}, projectConfig: null, pinnedDir: null, headed: h, mark: markOk, holdDialogs: hold, automationFlag: flag, quietLog: quietLogFor(kind, markOk) });
-    else { cfg = VERBS.sanctionedConfig({ user }).config; if (h !== null) cfg.headed = h; if (flag) cfg.args = B.withAutomationFlag(cfg.args, { on: true }); if (markOk) cfg.args = B.launchTail(cfg.args, markOk, { quiet: quietLogFor(kind, markOk) }); if (hold) cfg.noAutoDialog = true; }
+    else { cfg = VERBS.sanctionedConfig({ user }).config; if (h !== null) cfg.headed = h; if (flag) cfg.args = B.withAutomationFlag(cfg.args, { on: true }); if (markOk) cfg.args = B.launchTail(ENV.withEnvironmentArgs(cfg.args, envArgsFor(kind, markOk)), markOk, { quiet: quietLogFor(kind, markOk) }); if (hold) cfg.noAutoDialog = true; }
     { const a = VERBS.driverArgsText(cfg.args); if (!a.ok) { configSay(`args:${file}`, `the keeper's ${kind} browser config could not be written at ${file}: ${a.error} — its calls keep the CLI's own config search`); return null; } if (a.args !== cfg.args) cfg.args = a.args; } // lane engine-args-string: THE one writer of the driver's `args` (a list leaves as its one line)
     const text = JSON.stringify(cfg);
     const memoKey = kind + '|' + (markOk || '');
@@ -1565,6 +1565,25 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  label}}`. A timeout (browser_engine_unanswered) is refused by name and marks nothing (the next launch asks again). */
   const placeHolds = new Map(); // lane fleet-plugin-catalog r2 (N3): profile id → its start's hold on its engine's kernel place
   const dropPlaceHold = (pid) => { const r = placeHolds.get(pid); if (r) { placeHolds.delete(pid); try { r(); } catch { /* released */ } } };
+  /** B-9584 U2b: the STOCK browser's own start for the profile's environment — U1 resolved ONCE, its two language switches (one tag,
+   *  comma-free: the driver's one config line and the attach argv both carry them) and its TZ (the process's own variable — the box
+   *  measure: it reaches Chrome on the driver road). The store's mark `languageTold`: a profile ever started with a language STATES
+   *  the machine's own tag when it is back at «this machine's» (Chrome keeps a prior one in its Preferences). What the start says
+   *  (`environment`) only when there is something to say: an untouched profile's start and record are the release's. */
+  function stockEnvFor(p) {
+    const envR = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p));
+    const st = ENV.stockLaunchOf(envR, { languageTold: !!p.languageTold, machineTag: ENV.machineLanguageTag() });
+    // the mark rides the launch's OWN synchronous landing (commitSync before Chrome, both roads): on disk before the browser could keep a
+    // language — no deferred save of its own
+    if (st.languageTold && !p.languageTold) p.languageTold = true;
+    const says = !!p.environment || st.args.length > 0;
+    return { ...st, environment: says ? { applied: { timezone: st.env.TZ || null, language: st.language, location: 'machine' }, confirmed: true, by: 'stock', unfollowed: envR.unfollowed } : null };
+  }
+  /** B-9584 U2b: the switches a browser's LAUNCH was stamped with (`rec.envArgs`) — its config file carries them until its next launch. */
+  function envArgsFor(kind, mark) {
+    if (kind !== 'machine' || !mark) return [];
+    try { const r = reg.browsers[mark]; return r && Array.isArray(r.envArgs) ? r.envArgs : []; } catch { return []; }
+  }
   async function launchEngineOf(p, c) {
     // B-9584 U2a (主开发 r745 / r771): A PROFILE'S OWN ENVIRONMENT on an engine — resolved ONCE (src/browser-environment.js, the
     // contract) and handed beside the exit as the hand-over's own object (`environment`; absent for a profile that sets nothing: its
@@ -5007,12 +5026,14 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       rec.mark = p.id; // r4 (MAJOR 2): the launch carries this profile's MARK (machine-<id>.json); every later keeper call keeps that file
       rec.holdDialogs = true; // lane browser-stuck: …and holds page dialogs (noAutoDialog) from this launch on
       rec.launchFlags = !!prow.launchFlags && (argvPrefix.length > 0 || Object.keys(providerEnv).length > 0); // r4: a provider's own launch flags (its env pair; the row's `launchFlags`) — a heal never relaunches it. lane browser-admin 2a: a chromium build pin is NOT one — the heal's `get cdp-url` carries rec.launchEnv (the executable included), so it relaunches the SAME build
-      rec.browserChoice = recordedChoice(p, buildEnv); if (buildEnv && buildEnv.environment) rec.environment = buildEnv.environment; // B-9584 U2a (only when there is something to say: an untouched profile's record is the release's): the start's word on the profile's environment (an engine's echo, its unfollowed list) · what this launch was asked to run (the running build is `cdpBrowser`, the browser's own answer; lane engine-plugin: + an engine's version)
+      const stockEnv = buildEnv && buildEnv.engine ? null : stockEnvFor(p);   // B-9584 U2b: the stock browser's own environment (an engine's is its hand-over)
+      if (stockEnv && stockEnv.args.length) rec.envArgs = stockEnv.args; // stamped: the config file carries them until the next launch
+      rec.browserChoice = recordedChoice(p, buildEnv); if (buildEnv && buildEnv.environment) rec.environment = buildEnv.environment; if (stockEnv && stockEnv.environment) rec.environment = stockEnv.environment; // B-9584 U2a (only when there is something to say: an untouched profile's record is the release's): the start's word on the profile's environment (an engine's echo, its unfollowed list) · what this launch was asked to run (the running build is `cdpBrowser`, the browser's own answer; lane engine-plugin: + an engine's version)
       const stamp0 = F.dirLaunchStamp(p.dir); // r5 MAJOR 1 (iii): the directory before this launch
       rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
       cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now
       if (!commitSync()) throw failed('launch_not_on_disk', LAUNCH_NOT_ON_DISK);   // the census cure (finding 6): the stamped lineage on disk before Chrome
-      const r = await rt.launch(ns, { dir: p.dir, idleMs: 0, headed: headed0, extraEnv: { ...vendorEnv, ...providerEnv, ...rec.display.env }, argvPrefix });   // the .197 integration: the provider pair + the display fact's env (last: DISPLAY / XAUTHORITY are the machine's)
+      const r = await rt.launch(ns, { dir: p.dir, idleMs: 0, headed: headed0, extraEnv: { ...vendorEnv, ...providerEnv, ...(stockEnv ? stockEnv.env : {}), ...rec.display.env }, argvPrefix });   // the .197 integration: the provider pair + the display fact's env (last: DISPLAY / XAUTHORITY are the machine's)
       if (!r.ok) {
         const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
         // verify r2 (F1): the directory may have been taken between the verdict and this launch — the holder said by name
@@ -5319,6 +5340,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     rec.launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' };
     rec.cli = await cliNow(); // the CLI every later call of this browser runs (it attaches; it never launches)
     cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now
+    const stockEnv = engineLaunch ? null : stockEnvFor(p);   // B-9584 U2b: before the landing below, so the store's mark lands with it
     if (!commitSync()) throw await refused('launch_not_on_disk', LAUNCH_NOT_ON_DISK);   // the census cure (finding 6): the stamped lineage on disk before Chrome
     const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? ENG.engineArgs(engineLaunch) : []; // lane engine-plugin: the engine's own arguments, censused by the builder (lane engine-spi-egress: + the keeper's proxy arguments when wrapped)
     if (rec.tailnet && rec.tailnet.arg) engineArgs.push(rec.tailnet.arg);
@@ -5333,6 +5355,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // L1b r5: the switch-only rule on this road too (a bare -- puts the keeper's proxy pair after the end of switches)
     const nonSwitch = ENG.nonSwitchArgsOf(engineArgs);
     if (nonSwitch.length) throw await refused('browser_engine_protocol', `${engWho}'s launch: ${ENG.notSwitchWords(nonSwitch)}`, nonSwitch);
+    if (stockEnv) engineArgs.push(...stockEnv.args);   // B-9584 U2b: a stock start's language switches ride the argv, its TZ the env
+    if (stockEnv && stockEnv.environment) rec.environment = stockEnv.environment;
     const av = AT.attachArgv({ profileDir: p.dir, mark: B.keeperMarkArg(p.id), quiet: BE.QUIET_LOG_ARGS, extra: engineArgs });
     if (!av.ok) throw await refused(av.code, av.error, av.offending || []);
     // lane hotfix-attach-engine-args: a switch the ENGINE passed that this road forbids was dropped by the builder — SAID, never
@@ -5351,6 +5375,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (xenv.DISPLAY) env.DISPLAY = xenv.DISPLAY; else if (ds.display) env.DISPLAY = ds.display;
     if (xenv.XAUTHORITY) env.XAUTHORITY = xenv.XAUTHORITY;
     { const td = daemonTmp(); if (td) env.TMPDIR = td; }
+    if (stockEnv && stockEnv.env.TZ) env.TZ = stockEnv.env.TZ; // B-9584 U2b: the profile's own zone, the whole browser from its first page
     if (engineLaunch && engineLaunch.env) for (const k of ENG.ENGINE_ENV_KEYS) if (typeof engineLaunch.env[k] === 'string') env[k] = engineLaunch.env[k]; // lane engine-plugin: the whitelist only (none today)
     const r = await ATL.spawnChrome({ exe, argv: av.argv, env, profileDir: p.dir, logFile: path.join(dataDir, 'browser-env', 'attach', profileId + '.log') });
     if (!r.ok) {

@@ -2024,6 +2024,45 @@ console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — 
   ok(!!ra.in0 && 'environment' in ra.in0, '⑦e RED — the keeper that always hands `environment`: an untouched profile\'s hand-over carries the key (the kernel would read it as ruling all three)', ra.in0);
 }
 
+// ═══ ⑦f B-9584 U2b — THE STOCK BROWSER'S OWN LANGUAGE AND ZONE (the box measure: TZ reaches Chrome; Chrome keeps a prior language) ═══
+console.log('— ⑦f B-9584 U2b: the stock browser\'s own language and zone — two switches on its launch config, TZ in its env, «this machine\'s» STATED after a language was told; an untouched profile the release\'s');
+{
+  const J = JSON.stringify;
+  const ENVm = require('../src/browser-environment.js');
+  const lastLaunch = (id) => fake.launches().filter((l) => l.ns === 'vs-' + id).at(-1);
+  const argsOf = (l) => { const a = l && l.config && l.config.args; return Array.isArray(a) ? a.map(String) : String(a || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean); };
+  const stockRoad = async (Kmod, tag) => {
+    const kb2 = mkKeeper(path.join(ROOT, `data-stock-env-${tag}`), {}, Kmod);
+    const pa = kb2.createProfile({ label: `Stock env ${tag}` }), pu = kb2.createProfile({ label: `Stock untouched ${tag}` });
+    const profOf = (id) => kb2._reg().profiles.find((x) => x && x.id === id);
+    const o = {};
+    await kb2.start(pu.id, { why: 'test' }); o.lu = lastLaunch(pu.id); o.recU = kb2._reg().browsers[pu.id] || {}; o.markU = !!profOf(pu.id).languageTold;
+    await kb2.stop(pu.id, { why: 'user' });
+    profOf(pa.id).environment = ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Tokyo' }, language: { mode: 'value', value: 'ja-JP' } }).value;   // a stand-in for the store writer (U3)
+    await kb2.start(pa.id, { why: 'test' }); o.la1 = lastLaunch(pa.id); o.rec1 = kb2._reg().browsers[pa.id].environment; o.mark1 = profOf(pa.id).languageTold === true;
+    await kb2.stop(pa.id, { why: 'user' });
+    profOf(pa.id).environment = ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Tokyo' } }).value;   // the language back at «this machine's»
+    await kb2.start(pa.id, { why: 'test' }); o.la2 = lastLaunch(pa.id);
+    await kb2.stop(pa.id, { why: 'user' });
+    return o;
+  };
+  const s0 = await stockRoad(K, 'real'), mt = ENVm.machineLanguageTag();
+  ok(!!s0.lu && !argsOf(s0.lu).some((a) => /^--(?:accept-)?lang=/.test(a)) && s0.lu.tz === null && !('environment' in s0.recU) && !('envArgs' in s0.recU) && !s0.markU,
+    '⑦f ① an untouched stock profile: no language switch in its launch config, no TZ in its env, no environment or stamped switches on its record, no mark — the release\'s start', { args: argsOf(s0.lu), tz: s0.lu && s0.lu.tz });
+  const a1 = argsOf(s0.la1), mk = a1.findIndex((x) => x.startsWith('--vibespace-keeper='));
+  ok(a1.includes('--lang=ja-JP') && a1.includes('--accept-lang=ja-JP') && mk > a1.indexOf('--accept-lang=ja-JP') && s0.la1.tz === 'Asia/Tokyo' && !!s0.rec1 && s0.rec1.by === 'stock' && J(s0.rec1.applied) === J({ timezone: 'Asia/Tokyo', language: 'ja-JP', location: 'machine' }) && s0.mark1,
+    '⑦f ② a zone and a language set: --lang / --accept-lang ja-JP in the launch config (before the keeper\'s mark, the tail last), TZ=Asia/Tokyo in the browser\'s env, the record says it, the mark set', { a1, tz: s0.la1 && s0.la1.tz, rec: s0.rec1 });
+  ok(!!mt && argsOf(s0.la2).includes(`--lang=${mt}`) && argsOf(s0.la2).includes(`--accept-lang=${mt}`) && s0.la2.tz === 'Asia/Tokyo',
+    `⑦f ③ the language back at «this machine's» on a profile that had one: the machine's own tag (${mt}) STATED — Chrome would keep ja-JP from its Preferences`, argsOf(s0.la2));
+  const MUTs = mutantCopies('envs-builds', REPO), ksS = read('src/server/browser-keeper.js');
+  const Km = MUTs.load('src/server/browser-keeper.js', anchored(ksS, 'languageTold: !!p.languageTold, machineTag', 'languageTold: false, machineTag', '⑦f RED mark'), 'env-mark-off');
+  const sm = await stockRoad(Km, 'red-mark');
+  ok(!argsOf(sm.la2).some((a) => /^--lang=/.test(a)), '⑦f RED — the mark never read: the profile back at «this machine\'s» states NO language (Chrome keeps the old one)', argsOf(sm.la2));
+  const Kt = MUTs.load('src/server/browser-keeper.js', anchored(ksS, '...(stockEnv ? stockEnv.env : {}), ', '', '⑦f RED zone'), 'env-tz-off');
+  const st = await stockRoad(Kt, 'red-tz');
+  ok(st.la1 && st.la1.tz === null, '⑦f RED — the zone not handed to the driver\'s env: the browser runs in the machine\'s own zone', st.la1 && st.la1.tz);
+}
+
 // ═══ ⑧ lane engine-distribution: THE KERNEL DOWNLOADED (design-custom-browser-plugin §5.3 as built) ═══════════════════════
 // PURE src/engine-kernel.js (kernel.json, the plan, the tar entries + shape, the receipt, the version words) + the REAL
 // src/server/engine-distribution.js over the fixture engine (the real loader's IPC child, in the kernel side's v0.1.1 shape:

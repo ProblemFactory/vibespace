@@ -1861,6 +1861,7 @@ function agentProfileView(p, facts = {}, extra = {}) {
   // the exit check (the owner 2026-11-17): a profile's kept exit (public address, country, time zone) is the person's — and the
   // engine plugin's at its launch — never an agent's to read
   delete rest.egress; delete ex.egress;
+  delete rest.languageTold; delete ex.languageTold;   // B-9584 U2b: the store's own bookkeeping (a language was once told), never an agent's
   // B-8b87 (主开发 13:47Z): an agent needs a profile's proxy ADDRESS at most — never the login's NAME (it holds the user name) nor the
   // running browser's road (the person's card reads those)
   for (const k of ['proxyCredential', 'proxyLive', 'proxyLiveLogin']) { delete rest[k]; delete ex[k]; }

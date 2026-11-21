@@ -50,7 +50,7 @@ if (a === 'open' || tabNew) {
   if (!(s && alive(s.pid))) {
     if (fs.existsSync(path.join(st, prefix.exe ? 'fail-cloak' : 'fail-plain'))) { process.stderr.write('fake: the browser did not start\\n'); process.exit(1); }
     const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref();
-    s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, ...prefix, session: process.env.AGENT_BROWSER_SESSION || null, config: cfgOf(), version: MYV };
+    s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, ...prefix, session: process.env.AGENT_BROWSER_SESSION || null, config: cfgOf(), version: MYV, tz: process.env.TZ || null };   // B-9584 U2b: the zone its browser would get
     fs.writeFileSync(f, JSON.stringify(s));
     fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s }) + '\\n');
   }

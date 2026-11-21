@@ -169,6 +169,35 @@ function resolveEnvironment(environment, exit = null) {
   return { settings, told: Object.keys(told).length ? told : null, geolocation, unfollowed };
 }
 
+/** B-9584 U2b — THE STOCK BROWSER'S OWN START for a resolved environment (the box measure of 2026-11-21, int361 01:35Z / 03:27Z: TZ in the
+ *  driver's env reaches Chrome; Chrome keeps a prior --accept-lang in the profile's Preferences). → { args, env, language, languageTold }:
+ *  `args` = --lang=<tag> --accept-lang=<tag> — ONE tag (主开发 r726), comma-free, so the driver's one config line carries it whole;
+ *  `env` = { TZ: <zone> } — the browser process's own variable, the whole browser from its first page; `languageTold` = the store's
+ *  mark that a language was ever told: a profile back at «this machine's» then STATES the machine's own tag (`machineTag`), as the
+ *  kernel's launcher does, since Chrome would keep the old one. An untouched profile (told null, no mark) ⇒ nothing at all. */
+function stockLaunchOf(resolved, { languageTold = false, machineTag = null } = {}) {
+  const told = (resolved && resolved.told) || {};
+  const own = typeof told.language === 'string' ? told.language : null;
+  const lang = own || (languageTold && machineTag ? machineTag : null);
+  const args = lang ? [`--lang=${lang}`, `--accept-lang=${lang}`] : [];
+  const env = typeof told.timezone === 'string' ? { TZ: told.timezone } : {};
+  return { args, env, language: lang, languageTold: !!own || !!languageTold };
+}
+/** The machine's own language tag (the hub's runtime locale), judged by the same rule as a person's (null when it is not one). */
+function machineLanguageTag(locale = (() => { try { return Intl.DateTimeFormat().resolvedOptions().locale; } catch { return ''; } })()) {
+  const v = languageVerdict(locale);
+  return v.ok ? v.value : null;
+}
+/** A launch config's `args` (a list, or the driver's comma / newline text) with the environment's switches added — the shape kept. */
+function withEnvironmentArgs(args, extra = []) {
+  const add = (Array.isArray(extra) ? extra : []).map(String).filter(Boolean);
+  if (!add.length) return args;
+  if (Array.isArray(args)) return [...args, ...add];
+  if (typeof args !== 'string' || !args.trim()) return add.join(',');
+  const sep = args.includes('\n') ? '\n' : ',';
+  return [...args.split(/[,\n]/).map((x) => x.trim()).filter(Boolean), ...add].join(sep);
+}
+
 /** For a log or a journal line: each setting's choice — a place never by its coordinates (decision: a location is private). */
 function environmentLogView(environment) {
   const env = environment && typeof environment === 'object' ? environment : {};
@@ -181,4 +210,4 @@ function environmentLogView(environment) {
   return out;
 }
 
-module.exports = { MODES, PLACE_ACCURACY_M, KERNEL_TAG, LANGUAGE_ROWS, languageOfCountry, SETTINGS, SETTING_KEYS, environmentVerdict, keptExitOf, resolveEnvironment, environmentLogView, languageVerdict, placeVerdict, timezoneVerdict };
+module.exports = { stockLaunchOf, machineLanguageTag, withEnvironmentArgs, MODES, PLACE_ACCURACY_M, KERNEL_TAG, LANGUAGE_ROWS, languageOfCountry, SETTINGS, SETTING_KEYS, environmentVerdict, keptExitOf, resolveEnvironment, environmentLogView, languageVerdict, placeVerdict, timezoneVerdict };
