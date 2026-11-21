@@ -25,6 +25,15 @@ const require = createRequire(import.meta.url);
 const T0 = Date.now();
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const WP = require('../src/webhook-pair.js');
 const WA = require('../src/webhook-auth.js');
@@ -84,7 +93,7 @@ const MUT_FROM = '  const v = completionVerdict(input, deps);\n  if (!v.ok) retu
 const MUT_TO = '  deps.write(input.body);\n  const v = completionVerdict(input, deps);\n  if (!v.ok) return v;';
 const mm = new Module(path.join(repo, 'src', 'webhook-pair.mutant.js'));
 mm.filename = path.join(repo, 'src', 'webhook-pair.mutant.js'); mm.paths = Module._nodeModulePaths(path.join(repo, 'src'));
-mm._compile(src.replace(MUT_FROM, MUT_TO), mm.filename);
+mm._compile(editAnchor(src, MUT_FROM, MUT_TO, "src/webhook-pair.js"), mm.filename);
 writes.length = 0;
 runComplete(mm.exports, fb);
 ok(src.includes(MUT_FROM) && writes.length === 1, 'CONTROL: a mutant complete() that writes before the verdict writes on a REFUSED frame — the leg above turns RED');

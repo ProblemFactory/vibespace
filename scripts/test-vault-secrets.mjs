@@ -63,6 +63,15 @@ const PW = 'correct horse battery staple';
 const quiet = { log() {}, warn() {}, error() {} };
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const T0 = Date.now();
 let seq = 0;
 const dirOf = (tag) => { const d = path.join(ROOT, `${tag}-${++seq}`); fs.mkdirSync(d, { recursive: true }); return d; };
@@ -1122,7 +1131,7 @@ console.log('⑫ A FOLDER THAT WAITS IS NOT GONE (B-864f) — a session folder o
     const { mutantCopies } = await import('./mutant-copy.mjs');
     globalThis.__cwHosts = HOSTS;   // read by the mutant copy at its load
     const CSRC = fs.readFileSync(path.join(REPO, 'src/server/cwd-wait.js'), 'utf8'), from = 'busy: false, failed: false, sealed: true };';
-    const CWm = CSRC.split(from).length === 2 ? mutantCopies('vs-cwdwait', REPO).load('src/server/cwd-wait.js', CSRC.replace(from, "busy: false, failed: false, sealed: !!(HOSTS[r.hostId] && HOSTS[r.hostId].transport === 'dial') };").replace("'use strict';", "'use strict'; const HOSTS = globalThis.__cwHosts || {};"), 'dialonly') : null;
+    const CWm = CSRC.split(from).length === 2 ? mutantCopies('vs-cwdwait', REPO).load('src/server/cwd-wait.js', editAnchor(editAnchor(CSRC, from, "busy: false, failed: false, sealed: !!(HOSTS[r.hostId] && HOSTS[r.hostId].transport === 'dial') };", "src/server/cwd-wait.js"), "'use strict';", "'use strict'; const HOSTS = globalThis.__cwHosts || {};", "src/server/cwd-wait.js"), 'dialonly') : null;
     let mw = null;
     if (CWm) { CWm.register({ vault: v, mounts, getHosts: () => ({ get: (id) => HOSTS[id] || null }), getMachineMounts: () => ({ list: () => [{ id: 'p-ssh', dir: 'pull', hostId: 'h-ssh', mountpoint: sshPull, live: false }] }) }); mw = (CWm.verdict(at(sshPull, 'src'), { missing: false }) || { why: null }).why; }
     delete globalThis.__cwHosts;

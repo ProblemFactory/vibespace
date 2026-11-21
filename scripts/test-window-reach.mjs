@@ -53,6 +53,15 @@ const R = require('../src/window-reach.js');
 const MUT = mutantCopies('wreach', REPO);
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('§1 the closed sets');
@@ -541,7 +550,7 @@ console.log('§10 A PENDING FORK\'S KEY IS ITS PLACEHOLDER, NEVER ITS PARENT\'S 
   const K1 = "const keyOf = (s, id) => (addressableId(s) ? R.sessionKeyOf(s, id) : `webui:${id}`);";
   const K2 = "const keysOf = (s, id) => (addressableId(s) ? R.callerKeys(s, id) : [`webui:${id}`]);";
   ok(esrc.split(K1).length === 2 && esrc.split(K2).length === 2 && !/R\.sessionKeyOf\(s0?, /.test(esrc.replace(K1, '')) && !/R\.callerKeys\(s, /.test(esrc.replace(K2, '')), 'the engine spells every session key through the two fork-aware helpers (no raw R.sessionKeyOf / R.callerKeys call remains)');
-  const Ec = MUT.load('src/server/window-targets-engine.js', esrc.replace(K1, "const keyOf = (s, id) => R.sessionKeyOf(s, id);").replace(K2, "const keysOf = (s, id) => R.callerKeys(s, id);"), 'rawkey');
+  const Ec = MUT.load('src/server/window-targets-engine.js', editAnchor(editAnchor(esrc, K1, "const keyOf = (s, id) => R.sessionKeyOf(s, id);", "src/server/window-targets-engine.js"), K2, "const keysOf = (s, id) => R.callerKeys(s, id);", "src/server/window-targets-engine.js"), 'rawkey');
   const rc = await run(Ec, 'ctl');
   ok(rc.rowKey === P && rc.parentBefore === 'da-one' && rc.forkAfter === '' && /da-one/.test(rc.parentAfter) && /da-opened/.test(rc.parentAfter) && rc.openerKey === P && rc.parentAttach === null, `CONTROL: keyed raw, the row is the PARENT's key — the parent reaches the window (and attaches) AND the app the fork opened, the fork loses both at adoption (${JSON.stringify(rc)}) — the legs would go red`);
   for (const r0 of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 8 })) ok(r0.pass, '§10 tree: ' + r0.name, r0.pass ? undefined : r0.detail);

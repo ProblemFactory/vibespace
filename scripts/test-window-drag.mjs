@@ -44,6 +44,15 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const tick = () => new Promise((r) => setTimeout(r, 4));
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8');
@@ -519,7 +528,7 @@ console.log('§3 controls — patched copies outside the tree (scripts/mutant-co
     const dfUrl = pathToFileURL(dfPath).href;
     const tgPath = MUT.write('src/lib/tab-group.js', tgSrc0.replace("from './drag-feed.js'", `from ${JSON.stringify(dfUrl)}`), tag, { esm: true }); copies.push(tgPath);
     const tgUrl = pathToFileURL(tgPath).href;
-    const text = winSrc.replace("from './drag-feed.js'", `from ${JSON.stringify(dfUrl)}`).replace("from './tab-group.js'", `from ${JSON.stringify(tgUrl)}`);
+    const text = editAnchor(editAnchor(winSrc, "from './drag-feed.js'", `from ${JSON.stringify(dfUrl)}`, "src/lib/window.js"), "from './tab-group.js'", `from ${JSON.stringify(tgUrl)}`, "src/lib/window.js");
     if (!text.includes(dfUrl) || !text.includes(tgUrl)) throw new Error('the feed control copy of window.js did not take the patched feed / tab-group');
     const p = MUT.write('src/lib/window.js', text, tag, { esm: true }); copies.push(p);
     return (await import(pathToFileURL(p).href)).WindowManager;

@@ -29,6 +29,15 @@ class UsageHistory extends LedgerOf { constructor(o) { super(o); this.ledgerWind
 
 let pass = 0, fail = 0;
 const ok = (c, n, why) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (why ? ' — ' + why : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-'));
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-data-'));
@@ -637,8 +646,8 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     // the process's scratch dir, its relative requires re-bound to the real file
     const M = mutantCopies('walkpar', REPO);
     const src0 = fs.readFileSync(path.join(REPO, 'src/usage-walker.js'), 'utf-8');
-    const mutated = src0.replace("          onLine(line);\n          // the budget point: only here, after a WHOLE line is in the cursor\n          if ((meter.spent += nb) >= meter.budget) { meter.spent %= meter.budget; yield; }",
-      "          // the budget point: only here, after a WHOLE line is in the cursor\n          if ((meter.spent += nb) >= meter.budget) { meter.spent %= meter.budget; yield; continue; }\n          onLine(line);");
+    const mutated = editAnchor(src0, "          onLine(line);\n          // the budget point: only here, after a WHOLE line is in the cursor\n          if ((meter.spent += nb) >= meter.budget) { meter.spent %= meter.budget; yield; }",
+      "          // the budget point: only here, after a WHOLE line is in the cursor\n          if ((meter.spent += nb) >= meter.budget) { meter.spent %= meter.budget; yield; continue; }\n          onLine(line);", "src/usage-walker.js");
     ok(mutated !== src0, 'the control mutation applies to the shipped source (the budget point is where this suite expects it)');
     const { runUsageWalk: walkCtl } = M.load('src/usage-walker.js', mutated, 'budget-swallow');
     const cy = await walkCtl({ home: bHome, codexSessionsDir: cxRoot, cursors: {}, budgetBytes: 64 * 1024, onBudget: () => new Promise(setImmediate) });
@@ -1007,7 +1016,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   {
     const M = mutantCopies('walkpar-b6ded', REPO);
     const src0 = fs.readFileSync(path.join(REPO, 'src/usage-walker.js'), 'utf-8');
-    const mutated = src0.replace("      const cur = Object.assign({}, cursors[fp] || { offset: 0, lastRid: null }); // a copy: never the caller's entry (B-6ded)\n", "      const cur = cursors[fp] || { offset: 0, lastRid: null };\n");
+    const mutated = editAnchor(src0, "      const cur = Object.assign({}, cursors[fp] || { offset: 0, lastRid: null }); // a copy: never the caller's entry (B-6ded)\n", "      const cur = cursors[fp] || { offset: 0, lastRid: null };\n", "src/usage-walker.js");
     ok(mutated !== src0, 'the control mutation applies to the shipped source (the entry copy is where this suite expects it)');
     const { runUsageWalk: walkCtl } = M.load('src/usage-walker.js', mutated, 'b6ded-in-place');
     const mc = await modLegs(walkCtl, 'ctl');

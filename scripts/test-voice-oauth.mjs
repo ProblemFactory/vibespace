@@ -25,6 +25,15 @@ const ok = (name, cond, detail) => {
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const express = require(path.join(REPO, 'node_modules/express'));
 const DC = require(path.join(REPO, 'src/server/dropline-client.js'));
 const DO = require(path.join(REPO, 'src/server/dropline-oauth.js'));
@@ -208,7 +217,7 @@ try {
       for (const f of ['src/voice-model.js', 'src/assistant-note.js', 'src/notification-senders.js', 'src/inbox-reply-text.js']) fs.copyFileSync(path.join(REPO, f), path.join(mdir, f));
       const src = fs.readFileSync(path.join(REPO, 'src/server/dropline-client.js'), 'utf8');
       const anchor = '      try { tokens.write(next); }';
-      fs.writeFileSync(path.join(mdir, 'src/server/dropline-client.js'), src.replace(anchor, '      log.log?.(`[voice] refreshed ${JSON.stringify(next)}`);\n' + anchor));
+      fs.writeFileSync(path.join(mdir, 'src/server/dropline-client.js'), editAnchor(src, anchor, '      log.log?.(`[voice] refreshed ${JSON.stringify(next)}`);\n' + anchor, "src/server/dropline-client.js"));
       const m = await pairLeg(path.join(mdir, 'src/server/dropline-client.js'), 'pm.json');
       ok('CONTROL: a copy that logs the rotated pair leaks it ⇒ the check above is RED on it', src.split(anchor).length === 2 && m.rotated && m.leaked > 0, m);
     } finally { fs.rmSync(mdir, { recursive: true, force: true }); }

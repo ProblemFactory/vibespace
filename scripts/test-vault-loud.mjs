@@ -24,6 +24,15 @@ const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const L = R('src/vault-loud.js');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // the facts a page holds (src/server/vault-engine.js facts(): state, startedAt = the boot, lockedSince = the lock's moment)
 const BOOT = 1800000000000;
@@ -163,7 +172,7 @@ console.log('④ RED CONTROLS — the base, one each');
   const a1 = "    vault.onLock(() => { if (loud()) fileItem(null); });";
   const a2 = "kind: 'action', urgency: 'urgent', by: 'agent'";
   ok(src.includes(a1) && src.includes(a2), 'the mutants\' anchors are the lock-act filing and the item\'s kind');
-  const base = require(M.write('src/server/vault-hooks.js', src.replace(a1, '').replace(a2, "kind: 'notice', urgency: 'high', by: 'agent'"), 'base'));
+  const base = require(M.write('src/server/vault-hooks.js', editAnchor(editAnchor(src, a1, '', "src/server/vault-hooks.js"), a2, "kind: 'notice', urgency: 'high', by: 'agent'", "src/server/vault-hooks.js"), 'base'));
   const b = await itemLegs(base);
   ok(b.boot.length === 1 && b.boot[0].band === 0 && b.badge === 0, 'RED: the base\'s boot item is a NOTICE — band 0, the badge counts nothing', b.boot);
   ok(b.lockAct.length === 0, 'RED: the base files NOTHING at a lock act (the owner learned of it first at a refusal)', b.lockAct);

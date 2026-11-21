@@ -34,6 +34,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const VI = require(path.join(REPO, 'src/vault-inventory.js'));
 
 console.log('① PURE — src/vault-inventory.js');
@@ -331,7 +340,7 @@ console.log('③c HUB SECRETS — a link token refused BY NAME (int317)');
   ok(rl.length === 3 && rl.some((l) => l.who === 'me3' && l.ip === '10.0.0.7' && l.store === 'secrets' && l.entry === 'host:dial-dev9' && l.field === 'token'), 'AUDITED like the other refusals: vault-reveal-refused {who, ip, store, entry, field, code: not_revealable} — three', rl);
   // MUTANT: the collector without its by-name refusal ⇒ the source's own guard answers not_found — never not_revealable
   const src = fs.readFileSync(path.join(REPO, 'src/server/vault-contents.js'), 'utf8');
-  const cut = src.replace('if (!VI.revealableOf(ref.store, ref.entry)) {', 'if (false) {');
+  const cut = editAnchor(src, 'if (!VI.revealableOf(ref.store, ref.entry)) {', 'if (false) {', "src/server/vault-contents.js");
   const Mod = require('module'), mf = path.join(REPO, 'src/server/vault-contents.js');   // compiled in memory at the real path — nothing written under src/
   const mm2 = new Mod(mf); mm2.filename = mf; mm2.paths = Mod._nodeModulePaths(path.dirname(mf)); mm2._compile(cut, mf);
   {
@@ -528,7 +537,7 @@ console.log('⑨ AGENT-OWNED SECRETS — provenance rows (q-043 §9, lane vault-
   ok(rvMint.ok && rvMint.value.length === 24 && rvPut.ok && rvPut.value === 'sk-INVENTORY-PLANT-9911', 'the owner reveals the minted value (24 ch) AND the stored value through the window', [rvMint.ok, rvPut.ok]);
   // MUTANT: rowOf that drops provenance ⇒ the v2 chip would have nothing to show
   const src = fs.readFileSync(path.join(REPO, 'src/vault-inventory.js'), 'utf8');
-  const cut = src.replace("provenance: raw.provenance || null,   // lane vault-mint-put: agent entries carry it; the v2 window's chip reads it", 'provenance: null,');
+  const cut = editAnchor(src, "provenance: raw.provenance || null,   // lane vault-mint-put: agent entries carry it; the v2 window's chip reads it", 'provenance: null,', "src/vault-inventory.js");
   const Mod = require('module'), mf = path.join(REPO, 'src/vault-inventory.js');
   const mm = new Mod(mf); mm.filename = mf; mm.paths = Mod._nodeModulePaths(path.dirname(mf)); mm._compile(cut, mf);
   const mraw = mm.exports.secretRowOf({ name: 'agent:c/x', at: ac, prov: 'minted', actor: 'A' });
@@ -538,7 +547,7 @@ console.log('⑨ AGENT-OWNED SECRETS — provenance rows (q-043 §9, lane vault-
   // provenanceOf read `origin`, the agent row never had one); a mint's --for rides its provenance; an agent's own two-step seed
   // (`totp add`) is «stored by an agent» with its owner; «Kept by agents» says its rule
   ok(VI.provenanceOf(mintRow) === 'agent-mint' && VI.provenanceOf(putRow) === 'agent-put' && mintRow.origin === 'mint' && putRow.origin === 'put', 'the MINTED row\'s chip says «minted by an agent · never shown», the STORED row\'s «stored by an agent · it saw the value»', [VI.provenanceOf(mintRow), VI.provenanceOf(putRow)]);
-  const noOrigin = src.replace("origin: prov === 'minted' ? 'mint' : 'put', provenance:", 'provenance:');
+  const noOrigin = editAnchor(src, "origin: prov === 'minted' ? 'mint' : 'put', provenance:", 'provenance:', "src/vault-inventory.js");
   const mo = new Mod(mf); mo.filename = mf; mo.paths = Mod._nodeModulePaths(path.dirname(mf)); mo._compile(noOrigin, mf);
   ok(noOrigin !== src && mo.exports.provenanceOf(mo.exports.rowOf('secrets', mo.exports.secretRowOf({ name: 'agent:c/x', prov: 'stored' }))) === 'agent-mint', 'CONTROL RED: without the origin a PUT reads «minted · never shown» (the window lied about what the agent saw)');
   ea.agentMint('agent:conv-INV/site-pw', { length: 24, charset: 'alnum', actor: 'Build chat', forHost: 'api.example.com' });

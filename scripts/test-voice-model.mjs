@@ -33,6 +33,15 @@ const ok = (name, cond, detail) => {
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const VM = require(path.join(REPO, 'src/voice-model.js'));
 const L = VM.VOICE_LIMITS;
 const bytes = (o) => Buffer.byteLength(JSON.stringify(o));
@@ -135,7 +144,7 @@ const neverLeaks = (M) => { const c = M.dictationContext({ messages: NEVER, cwd:
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-model-'));
   try {
     for (const f of AN_CLOSURE) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, f));
-    fs.writeFileSync(path.join(dir, 'vm-sum.js'), src.replace(anchor, ''));
+    fs.writeFileSync(path.join(dir, 'vm-sum.js'), editAnchor(src, anchor, '', "src/voice-model.js"));
     ok('CONTROL: a copy without the summary skip lets the summary into all three ⇒ the check above is RED on it', src.split(anchor).length === 2 && sumLeaks(require(path.join(dir, 'vm-sum.js'))).leaked);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   // voice-verify F8 (low): a JWT and a fine-grained GitHub token are secret shapes too
@@ -198,7 +207,7 @@ console.log('④ the vendor contract');
   try {
     const src = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8');
     const anchor = '  for (const re of SECRET_RES) s = s.replace(re, \'\');';
-    fs.writeFileSync(path.join(dir, 'vm.js'), src.replace(anchor, '  // (mutant: the never-list scrub removed)'));
+    fs.writeFileSync(path.join(dir, 'vm.js'), editAnchor(src, anchor, '  // (mutant: the never-list scrub removed)', "src/voice-model.js"));
     const MM = require(path.join(dir, 'vm.js'));
     ok('CONTROL: a copy with the never-list scrub removed leaks the key into the context AND the terms ⇒ the two checks above are RED on it', src.split(anchor).length === 2 && LEAK_RE.test(MM.teachContextOf({ title: 't', messages: MS }).text));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -241,14 +250,14 @@ console.log('⑦ proposalCandidates — words a person SAYS (lane voice-teach-ca
     for (const [row, w] of Object.entries(ROWS)) {
       const anchor = `['${row}', (w`;
       const f = path.join(dir, `m-${row}.js`);
-      fs.writeFileSync(f, src.replace(anchor, `['${row}', () => false, (w`));
+      fs.writeFileSync(f, editAnchor(src, anchor, `['${row}', () => false, (w`, "src/voice-model.js"));
       const M = require(f);
       const has = (V) => V.proposalCandidates(said(w)).some((x) => x.term === w);
       ok(`census ${row}: rejects ${row === 'secret' ? 'an sk-ant-… key' : w} (first row to match) — RED on a copy without the row`, src.split(anchor).length === 2 && VM.exclusionOf(w) === row && !has(VM) && has(M));
     }
     // ids allowed: the old field-tail row put back (a copy) drops every *_id / *_token NAME the owner wants proposed
     const f = path.join(dir, 'm-field-tail.js');
-    fs.writeFileSync(f, src.replace("['secret', (w", "['field-tail', (w) => /_(?:id|token|key|secret|type|ts|at)$/i.test(w)],\n  ['secret', (w"));
+    fs.writeFileSync(f, editAnchor(src, "['secret', (w", "['field-tail', (w) => /_(?:id|token|key|secret|type|ts|at)$/i.test(w)],\n  ['secret', (w", "src/voice-model.js"));
     const old = require(f).proposalCandidates({ messages: LARK, cwd: '/w/lark' }).map((x) => x.term);
     ok('RED CONTROL: a copy with the old field-tail row proposes none of om_id / docx_token / user_access_token', !['om_id', 'docx_token', 'user_access_token'].some((w) => old.includes(w)) && old.length < terms.length, old);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -360,7 +369,7 @@ console.log('⑧ the evidence ledger (lane voice-dictionary-nag) — a dismissal
     const src = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8');
     const needle = '  return ledger ? evidenceRule(ranked, ledger) : ranked;';
     ok('the mutant\'s needle occurs exactly once', src.split(needle).length === 2);
-    fs.writeFileSync(path.join(dir, 'vm.js'), src.replace(needle, '  return ranked; // (mutant: only `known` is subtracted)'));
+    fs.writeFileSync(path.join(dir, 'vm.js'), editAnchor(src, needle, '  return ranked; // (mutant: only `known` is subtracted)', "src/voice-model.js"));
     const mut = replay(require(path.join(dir, 'vm.js')));
     ok(`CONTROL RED: the candidate rule that subtracts only \`known\` ⇒ CLAUDE.md in ${mut.n['CLAUDE.md']} items on the same fixture (> 1) — the check above fails on it`, mut.n['CLAUDE.md'] > 1, mut.n);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

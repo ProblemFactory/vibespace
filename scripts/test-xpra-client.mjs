@@ -29,6 +29,15 @@ const fileUrl = (p) => pathToFileURL(p).href;
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 3000, step = 10) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch {} if (v) return v; await sleep(step); } return null; };
@@ -160,7 +169,7 @@ console.log('§1 the PURE words (xpra-proto.js)');
     // CONTROL 2: the pre-lane keyActionFor fallback (the browser's keyCode as the X keycode) on a copy — keyCode 87 'w' leaves on 87
     const src = read('src/lib/xpra-proto.js'), own = '  const own = NAME_TO_KEYCODE[keyname];', fb = '  const keycode = own != null ? own : 0;';
     ok(src.split(own).length === 2 && src.split(fb).length === 2, 'CONTROL anchor: the keycode rule is two lines in xpra-proto.js');
-    const Pk = await import(pathToFileURL(MUTXC.write('src/lib/xpra-proto.js', src.replace(own, '  const own = undefined;').replace(fb, '  const keycode = own != null ? own : (Number(ev.keyCode) || 0);'), 'browserkeycode')).href);
+    const Pk = await import(pathToFileURL(MUTXC.write('src/lib/xpra-proto.js', editAnchor(editAnchor(src, own, '  const own = undefined;', "src/lib/xpra-proto.js"), fb, '  const keycode = own != null ? own : (Number(ev.keyCode) || 0);', "src/lib/xpra-proto.js"), 'browserkeycode')).href);
     ok(Pk.keyActionFor({ key: 'w', code: 'KeyW', keyCode: 87, mods: {} }).keycode === 87 && K('w', 'KeyW', 87).keycode === 25, 'CONTROL: with the browser keyCode as the X keycode, w leaves on 87 (stock KP_1 — Chrome code Numpad1); the shipped rule sends 25');
   }
   ok(caps.keymap.x11_keycodes instanceof Map && same(caps.keymap.x11_keycodes.get(10), ['1', 'exclam']) && same(caps.keymap.x11_keycodes.get(38), ['a', 'A']) && same(caps.keymap.x11_keycodes.get(50), ['Shift_L']) && caps.keymap.query_struct.rules === 'evdev' && caps.keymap.query_struct.layout === 'us', 'hello: the NATIVE keymap shape — x11_keycodes as a Map of integer keycodes with the shifted level, the modifiers on their own keycodes, a query_struct naming the base layout (the server PROGRAMS the X keymap from it; the keycodes-only shape is only translated onto `us`)');
@@ -1075,7 +1084,7 @@ console.log('§3e lane browser-uppercase-keys (a fleet user on a Mac, 2026-10-22
   const LEVEL = '  return { keyname, keyval, string, keycode, modifiers: typedModifiers(modifiers, string, keyname, keycode) };';
   const CAPSL = "  if (keyname === 'Caps_Lock') return null;";
   ok(psrc.split(LEVEL).length === 2 && psrc.split(CAPSL).length === 2, 'CONTROL anchor: the level rule and the Caps Lock line are each one line in xpra-proto.js');
-  const xp = MUTXC.write('src/lib/xpra-proto.js', psrc.replace(LEVEL, '  return { keyname, keyval, string, keycode, modifiers };').replace(CAPSL, '  void 0;'), 'typedlevel');
+  const xp = MUTXC.write('src/lib/xpra-proto.js', editAnchor(editAnchor(psrc, LEVEL, '  return { keyname, keyval, string, keycode, modifiers };', "src/lib/xpra-proto.js"), CAPSL, '  void 0;', "src/lib/xpra-proto.js"), 'typedlevel');
   const xc = MUTXC.write('src/lib/xpra-client.js', read('src/lib/xpra-client.js').replace("from './xpra-proto.js'", `from '${fileUrl(xp)}'`), 'typedlevel');
   const xv = MUTXC.write('src/lib/xpra-view.js', read('src/lib/xpra-view.js').replace("from './xpra-client.js'", `from '${fileUrl(xc)}'`).replace("from './xpra-proto.js'", `from '${fileUrl(xp)}'`), 'typedlevel');
   const V0 = await import(fileUrl(xv));
@@ -1441,7 +1450,7 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
   const srcC = read('src/lib/xpra-client.js');
   const f1 = "    if (isMain) setMain(win); // lane xpra-title-election: the ONE announce door (was mainWid + title + main + constraints inline)", f2 = "    emit('window', 'new', win);\n    if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }";
   ok(srcC.split(f1).length === 2 && srcC.split(f2).length === 2, 'the F3 order is spelled once (the control patches exactly it)');
-  const f3Mut = MUTXC.write('src/lib/xpra-client.js', srcC.replace(f1, "    if (isMain) { mainWid = wid; emit('title', win.title); }").replace(f2, "    emit('window', 'new', win);\n    if (isMain) { announceConstraints(); emit('main', win); } // pre-lane-D order\n    if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }"), 'f3');
+  const f3Mut = MUTXC.write('src/lib/xpra-client.js', editAnchor(editAnchor(srcC, f1, "    if (isMain) { mainWid = wid; emit('title', win.title); }", "src/lib/xpra-client.js"), f2, "    emit('window', 'new', win);\n    if (isMain) { announceConstraints(); emit('main', win); } // pre-lane-D order\n    if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }", "src/lib/xpra-client.js"), 'f3');
   const B = await runF3(await import(fileUrl(f3Mut)));
   ok(same(B.map.slice(2, 6), [0, 0, 924, 616]) && B.types.includes('configure-window') && B.types.indexOf('configure-window') < B.types.indexOf('map-window'), `CONTROL: the pre-lane-D order fits the pane of BEFORE the fold (600 tall: ${B.map.slice(2, 6)}, the minimum's scaled shape) and re-fits around its own map (${B.types.join(' → ')}) — the measured band`);
   A.c.close(); B.c.close();
@@ -1525,7 +1534,7 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
     const vsrc = read('src/lib/xpra-view.js');
     const from = '      for (const [x, y, mw, mh, dx, dy] of moves) { try { w.ctx.drawImage(src, x, y, mw, mh, x + dx, y + dy, mw, mh); } catch {} }';
     ok(vsrc.split(from).length === 2, 'the scroll move is spelled once (the control patches exactly it)');
-    const vm = MUTXC.write('src/lib/xpra-view.js', vsrc.replace(from, '      for (const [x, y, mw, mh, dx, dy] of moves) { try { w.ctx.drawImage(w.canvas, x, y, mw, mh, x + dx, y + dy, mw, mh); } catch {} } // pre-lane-D').replace("from './xpra-client.js'", `from '${fileUrl(path.join(repo, 'src/lib/xpra-client.js'))}'`), 'scroll');
+    const vm = MUTXC.write('src/lib/xpra-view.js', editAnchor(editAnchor(vsrc, from, '      for (const [x, y, mw, mh, dx, dy] of moves) { try { w.ctx.drawImage(w.canvas, x, y, mw, mh, x + dx, y + dy, mw, mh); } catch {} } // pre-lane-D', "src/lib/xpra-view.js"), "from './xpra-client.js'", `from '${fileUrl(path.join(repo, 'src/lib/xpra-client.js'))}'`, "src/lib/xpra-view.js"), 'scroll');
     const RC = await runPaint(await import(fileUrl(vm)));
     RC.w.feed(['draw', 3, 0, 0, 800, 600, 'scroll', [[0, 100, 800, 200, 0, -40], [0, 300, 800, 200, 0, -40]], 11, 0, {}]);
     await until(() => RC.w.sent('damage-sequence').length);
@@ -1614,7 +1623,7 @@ console.log('§8 lane app-fit-fixed (2026-10-03, the owner: WeChat\'s login in a
   const lone = "  const loneFixed = () => { const f = fixedWindow(); return f && f.kind !== 'main' ? f : null; };";
   const subj = "    const subject = main || [...windows.values()].filter((w) => w.kind === 'dialog' && !w.meta['transient-for']).sort((a, b) => (b.w * b.h - a.w * a.h) || (a.wid - b.wid))[0] || null;";
   ok(csrc.split(lone).length === 2 && csrc.split(subj).length === 2, 'CONTROL: the two lone-dialog levers are spelled once in xpra-client.js');
-  const cm = MUTXC.write('src/lib/xpra-client.js', csrc.replace(lone, '  const loneFixed = () => null; // pre-fix CONTROL').replace(subj, '    const subject = main; // pre-fix CONTROL'), 'fixed');
+  const cm = MUTXC.write('src/lib/xpra-client.js', editAnchor(editAnchor(csrc, lone, '  const loneFixed = () => null; // pre-fix CONTROL', "src/lib/xpra-client.js"), subj, '    const subject = main; // pre-fix CONTROL', "src/lib/xpra-client.js"), 'fixed');
   {
     const M = await runFixed(await import(cm));
     M.w.feed(['new-window', 9, 188, 0, 1420, 1356, INK]);
@@ -1747,7 +1756,7 @@ console.log('§9 design 016 S1 (lane app-guest-window, 2026-10-03 — WeChat\'s 
   const GUEST = "    else if (kind === 'main') { const m = windows.get(mainWid);";
   const FRONT = "    const f = P.frontOf(paneWindows(0));\n    const key = f ?"; // S2 (lane app-satellite-windows): the main pane's windows
   ok(gsrc.split(UNION).length === 2 && gsrc.split(GUEST).length === 2 && gsrc.split(FRONT).length === 2, 'CONTROL: the union, the guest placement and the front naming are each spelled once in xpra-client.js');
-  const gm = MUTXC.write('src/lib/xpra-client.js', gsrc.replace(UNION, '    const c = own; // pre-fix CONTROL: the main alone').replace(GUEST, '    else if (false /* pre-fix CONTROL */) { const m = windows.get(mainWid);').replace(FRONT, '    const f = mainWid ? windows.get(mainWid) : null; // pre-fix CONTROL: the title is always the main\'s\n    const key = f ?'), 'guest');
+  const gm = MUTXC.write('src/lib/xpra-client.js', editAnchor(editAnchor(editAnchor(gsrc, UNION, '    const c = own; // pre-fix CONTROL: the main alone', "src/lib/xpra-client.js"), GUEST, '    else if (false /* pre-fix CONTROL */) { const m = windows.get(mainWid);', "src/lib/xpra-client.js"), FRONT, '    const f = mainWid ? windows.get(mainWid) : null; // pre-fix CONTROL: the title is always the main\'s\n    const key = f ?', "src/lib/xpra-client.js"), 'guest');
   {
     const M = await runGuest(await import(gm));
     ok(same(M.ev.cons.map((h) => h && h['minimum-size']), [[840, 816]]), `CONTROL: pre-fix Moments' minimum enters nowhere — the constraints stay Weixin's 840×816, a 974-px pane cuts the 1120-px Moments (the owner's report) (${JSON.stringify(M.ev.cons)})`);
@@ -2020,7 +2029,7 @@ console.log('§late — a worker message delivered after close() is ignored (the
   const guard = "      if (worker !== w) return;\n";
   const post = "      if (m.c === 'r') { w.postMessage({ c: 'o', u: url }); return; }";
   ok(src.split(guard).length === 2 && src.split(post).length === 2, 'the instance guard and the bound postMessage are spelled once each (the control removes exactly them)');
-  const pre = src.replace(guard, '').replace(post, "      if (m.c === 'r') { worker.postMessage({ c: 'o', u: url }); return; }");
+  const pre = editAnchor(editAnchor(src, guard, '', "src/lib/xpra-client.js"), post, "      if (m.c === 'r') { worker.postMessage({ c: 'o', u: url }); return; }", "src/lib/xpra-client.js");
   const Cpre = await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', pre, 'late-prefix')).href);
   const control = await run(Cpre);
   ok(!!control.threw && /postMessage/.test(String(control.threw && control.threw.message)), `NEGATIVE CONTROL: the pre-fix handler throws on the late message (${control.threw ? control.threw.message : 'no throw'})`);
