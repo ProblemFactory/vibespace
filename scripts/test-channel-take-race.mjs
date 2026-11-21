@@ -11,6 +11,8 @@
 // reader sees, the census of its sites, must 2's law of order); ③ the family's finds in the engine — the in-flight row kept
 // (r432), one message one turn for one watcher (must 1), the stop after the digest's wait; ④ the hand-over's clear of the same
 // receiver's other rows at each of its three sites, only on a hand-over a restart keeps (must 3).
+// THE REMAINDER (主开发 r1194 — THE DOOR): ⑥ three chains, then a restart: a record handed to a receiver is never started for it
+// again, whatever row survives (the verdict reads the hand's own durable ledger); ⑦ the door keys the RECORD, never the vendor id.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -76,6 +78,11 @@ const pause = (ms) => new Promise((res) => setTimeout(res, ms));
 /** A wait for WHAT HAPPENED, bounded: → whether it did. */
 const waitFor = async (f, ms) => { const t0 = Date.now(); while (!f() && Date.now() - t0 < ms) await pause(15); return !!f(); };
 const src = engineSource(REPO);
+// B-1ca5's remainder — THE DOOR: markOf reads the conversation's durable ledger (the hand's own write) when the memory map holds
+// nothing, so a record handed to a receiver (or for a watcher) is never started for it again, whatever row survives. A control that
+// wants the release's SECOND start after a restart therefore cuts the door too: the clears are no longer the only guard
+const DOOR = '    return v === undefined ? ledgerMark(adapterId, convId, name, h) : markFrom(v);\n';
+const noDoor = (x) => anchored(x, DOOR, '    return markFrom(v);\n', 'no-door');
 
 console.log('① the take race: two chains, one ladder await, ONE start');
 {
@@ -217,9 +224,14 @@ console.log('① the take race: two chains, one ladder await, ONE start');
   ok(rs.atRead && rs.keptThen === 1 && rs.keptAfter === 0 && rs.startsBefore === 1 && rs.startsAfterRestart === 0 && rs.m8 === 1,
     `B-1ca5 follow-up: the digest's wait ran out and its row was KEPT (${rs.keptThen}); the group's start then handed m8 and cleared it in its own write (${rs.keptAfter}); after a RESTART nothing starts again (${rs.startsAfterRestart}) — m8 handed once`, J(rs));
   const RCV_CLEAR = '      if (ok || stashKept) clearForReceiver(e2, target.cid, hits, pk);   // B-1ca5 round w8ghfur9h: the same receiver\'s rows on other roads, in the same write\n';
-  const rsR = await restartLeg(MUT.load('src/server/channels-engine.js', anchored(anchored(src, KEPT_CLEAR, '', 'kept-row-never-learns'), RCV_CLEAR, '', 'receiver-rows-never-cleared'), 'kept-row-never-learns'), 'restart-red');
+  const rsR = await restartLeg(MUT.load('src/server/channels-engine.js', noDoor(anchored(anchored(src, KEPT_CLEAR, '', 'kept-row-never-learns'), RCV_CLEAR, '', 'receiver-rows-never-cleared')), 'kept-row-never-learns'), 'restart-red');
   console.log(`    starts (ladder calls) — the kept row never learns: before ${rsR.startsBefore}, after the restart ${rsR.startsAfterRestart}`);
   ok(rsR.keptAfter === 1 && rsR.startsAfterRestart === 1 && rsR.m8 === 2, `RED CONTROL: a kept row that never learns its message was handed — after the restart the digest starts m8 AGAIN: ${rsR.startsBefore} + ${rsR.startsAfterRestart} starts, m8 handed ${rsR.m8} times`, J(rsR));
+  // B-1ca5's remainder — THE DOOR ALONE: the same scene with both clears CUT but the door kept: the stale row survives the hand's
+  // write, and after the RESTART the verdict reads the ledger (handed to agent-1) and starts nothing — whatever row survived
+  const rsD = await restartLeg(MUT.load('src/server/channels-engine.js', anchored(anchored(src, KEPT_CLEAR, '', 'kept-row-never-learns'), RCV_CLEAR, '', 'receiver-rows-never-cleared'), 'door-alone'), 'restart-door-alone');
+  console.log(`    starts (ladder calls) — the clears cut, the door kept: before ${rsD.startsBefore}, after the restart ${rsD.startsAfterRestart} (the row survived the hand: ${rsD.keptAfter})`);
+  ok(rsD.keptAfter === 1 && rsD.startsAfterRestart === 0 && rsD.m8 === 1, `THE DOOR (B-1ca5's remainder): with both clears cut the stale row SURVIVES the hand (${rsD.keptAfter}), and after the restart the verdict reads the hand's own durable ledger — nothing starts again (${rsD.startsAfterRestart}); m8 handed once`, J(rsD));
   // B-1ca5 follow-up, the round's check (主开发 r362) — THE RESTART IN THE OTHER ORDER: the DIGEST hands m8 while the group's wake
   // waited past its bound and KEPT its row; the digest's own durable write clears that row (its ticket marked handed BEFORE the
   // write); after a RESTART the group's flush starts nothing (at 31388d007 the digest marked its ticket only after the write)
@@ -260,9 +272,9 @@ console.log('① the take race: two chains, one ladder await, ONE start');
   console.log(`    starts (ladder calls) — after the restart, the digest having handed m8: ${dr.startsAfterRestart} (m8 handed ${dr.m8} time(s))`);
   ok(dr.atRead && dr.keptThen === 1 && dr.keptAfter === 0 && dr.startsAfterRestart === 0 && dr.m8 === 1 && dr.m7 === 1 && dr.digestRowM7 === 0,
     `B-1ca5 follow-up, THE OTHER ORDER: the group's wake KEPT its m8 row past its wait (${dr.keptThen}); the DIGEST then handed m8 and cleared that row in its own write (${dr.keptAfter}); the group's wake handed m7 and cleared the digest's own m7 row (the same receiver, another road: ${dr.digestRowM7}); after a RESTART nothing starts (${dr.startsAfterRestart}) — m8 and m7 handed once each`, J(dr));
-  const drRcv = await digestRestartLeg(MUT.load('src/server/channels-engine.js', anchored(src, RCV_CLEAR, '', 'receiver-rows-never-cleared'), 'receiver-rows-never-cleared'), 'digest-restart-rcv-red');
+  const drRcv = await digestRestartLeg(MUT.load('src/server/channels-engine.js', noDoor(anchored(src, RCV_CLEAR, '', 'receiver-rows-never-cleared')), 'receiver-rows-never-cleared'), 'digest-restart-rcv-red');
   ok(drRcv.digestRowM7 === 1 && drRcv.m7 === 2, `RED CONTROL: a hand-over that leaves the same receiver's row on another road — the digest's m7 row survives the group's hand-over (${drRcv.digestRowM7}) and after the restart m7 is handed AGAIN: ${drRcv.m7} times`, J(drRcv));
-  const drR = await digestRestartLeg(MUT.load('src/server/channels-engine.js', anchored(src, DIGEST_KEPT_CLEAR, '', 'digest-kept-row-never-learns'), 'digest-kept-row-never-learns'), 'digest-restart-red');
+  const drR = await digestRestartLeg(MUT.load('src/server/channels-engine.js', noDoor(anchored(src, DIGEST_KEPT_CLEAR, '', 'digest-kept-row-never-learns')), 'digest-kept-row-never-learns'), 'digest-restart-red');
   console.log(`    starts (ladder calls) — the digest's kept rows never cleared: after the restart ${drR.startsAfterRestart} (m8 handed ${drR.m8} time(s))`);
   ok(drR.keptAfter === 1 && drR.startsAfterRestart === 1 && drR.m8 === 2, `RED CONTROL: the digest's kept row never learns (as at 31388d007, where its ticket said «handed» only after its write) — after the restart the group's flush hands m8 AGAIN: ${drR.m8} times`, J(drR));
 
@@ -611,7 +623,7 @@ console.log('④ THE HAND-OVER CLEARS THE SAME RECEIVER\'S OTHER ROWS — a cont
   const dc = await digestClearLeg(ENG, 'digest-clear');
   console.log(`    the group's digest handed m to agent-1: agent-1's own row ${dc.before.own} → ${dc.ownAfter}; after the restart ${dc.startsAfterRestart} start(s)`);
   ok(dc.before.own === 1 && dc.before.group === 1 && dc.group.ok && dc.ownAfter === 0 && dc.startsAfterRestart === 0, `THE DIGEST'S SITE: the group's digest handed m to agent-1 and its write dropped agent-1's own row for m (${dc.before.own} → ${dc.ownAfter}); after a RESTART nothing starts again (${dc.startsAfterRestart})`, J(dc));
-  const dcR = await digestClearLeg(MUT.load('src/server/channels-engine.js', anchored(src, DIGEST_RCV, '', 'digest-receiver-rows-never-cleared'), 'digest-receiver-rows-never-cleared'), 'digest-clear-red');
+  const dcR = await digestClearLeg(MUT.load('src/server/channels-engine.js', noDoor(anchored(src, DIGEST_RCV, '', 'digest-receiver-rows-never-cleared')), 'digest-receiver-rows-never-cleared'), 'digest-clear-red');
   ok(dcR.ownAfter === 1 && dcR.startsAfterRestart === 1, `RED CONTROL: the digest's hand-over that leaves the same receiver's row — after the restart agent-1's digest starts m AGAIN (${dcR.startsAfterRestart})`, J(dcR));
   const dm = await digestClearLeg(ENG, 'digest-clear-memory', { refused: true });
   ok(dm.group.stashed && dm.ownAfter === 1 && dm.startsAfterRestart === 1, `MUST 3 AT THE DIGEST: the group's digest refused and its stash held m «in memory only» — agent-1's own row STAYS (${dm.ownAfter}); after the restart m reaches agent-1 (${dm.startsAfterRestart} start)`, J(dm));
@@ -654,7 +666,7 @@ console.log('④ THE HAND-OVER CLEARS THE SAME RECEIVER\'S OTHER ROWS — a cont
   const sc = await stashClearLeg(ENG, 'stash-clear');
   console.log(`    the group's stash handed m to agent-1: agent-1's own row for m → ${sc.ownAfterStash}; after the restart ${sc.startsAfterRestart} start(s)`);
   ok(sc.wrote && sc.stashedM === 1 && sc.ownAfterStash === 0 && sc.startsAfterRestart === 0, `THE STASH'S SITE: the group's next-turn stash handed m to agent-1 and its write dropped agent-1's own row for m (${sc.ownAfterStash}); after a RESTART nothing starts again (${sc.startsAfterRestart})`, J(sc));
-  const scR = await stashClearLeg(MUT.load('src/server/channels-engine.js', anchored(src, STASH_RCV, 'if (false) clearForReceiver(e2, target.cid, fresh, pk);', 'stash-receiver-rows-never-cleared'), 'stash-receiver-rows-never-cleared'), 'stash-clear-red');
+  const scR = await stashClearLeg(MUT.load('src/server/channels-engine.js', noDoor(anchored(src, STASH_RCV, 'if (false) clearForReceiver(e2, target.cid, fresh, pk);', 'stash-receiver-rows-never-cleared')), 'stash-receiver-rows-never-cleared'), 'stash-clear-red');
   ok(scR.ownAfterStash === 1 && scR.startsAfterRestart === 1, `RED CONTROL: the stash's hand-over that leaves the same receiver's row — after the restart agent-1's digest starts m AGAIN (${scR.startsAfterRestart})`, J(scR));
   const sm = await stashClearLeg(ENG, 'stash-clear-memory', { memory: true });
   ok(sm.wrote && sm.stashedM === 1 && sm.ownAfterStash === 1 && sm.startsAfterRestart === 1, `MUST 3 AT THE STASH: the group's stash held m «in memory only» — agent-1's own row STAYS (${sm.ownAfterStash}); after the restart m reaches agent-1 (${sm.startsAfterRestart} start)`, J(sm));
@@ -710,6 +722,104 @@ console.log('⑤ round wig9owq5o — THE NEXT-TURN PENDING STASH KEEPS A ROW THE
     `round wig9owq5o MUST: the next-turn pending stash read «kept» for m (its holder in flight past the stash's bound) and its clear LEFT the row (${pk.rowKept}); the holder gave m back and the row was still there (${pk.rowAfterGiveBack}); G's next flush delivered m ONCE (${pk.delivered})`, J(pk));
   const pkR = await pendingKeptLeg(MUT.load('src/server/channels-engine.js', anchored(src, KEPT_PENDING, '', 'pending-clears-a-kept-row'), 'pending-clears-a-kept-row'), 'pending-kept-red');
   ok(pkR.rowKept === 0 && pkR.delivered === 0, `RED CONTROL: the pending stash's clear as it was — the KEPT row cleared (${pkR.rowKept}); the holder gave m back to a row that was gone: m delivered ${pkR.delivered} times — the watcher never hears of it`, J(pkR));
+}
+
+console.log('⑥ B-1ca5\'s REMAINDER — THREE CHAINS, THEN A RESTART: the door refuses the stale row, whatever chain left it');
+{
+  // agent-1's account digest (chain 1) takes m and sits in its ladder; the group G (agent-1 its one live member, a WAKE watcher)
+  // flushes its pending row (chain 2): it meets the take, waits its bound and KEEPS its row on chain 1's ticket; chain 1 is REFUSED
+  // (its stash refused too) and gives m back; the digest flushes again (chain 3) and HANDS m to agent-1 — G's own row (it names no
+  // member) is on no list chain 3 clears and SURVIVES. The hub restarts; G's pending flush: the door reads the hand's own ledger
+  // (m handed to agent-1) — zero more starts, each count printed. RED: the door cut — m starts for agent-1 a second time.
+  const pendFor = (w, r, pk, conv = OPS) => ((w.eng.store.index.live()[`${A}/${conv}`] || {}).pending || []).filter((p) => p && p.record && p.record.id === r.id && p.for === pk).length;
+  async function threeChainsLeg(ENGM, tag) {
+    let open = () => {}, entered = () => {}, waited = false, stashCalls = 0;
+    const gate1 = new Promise((r) => { open = r; }), in1 = new Promise((r) => { entered = r; });
+    const live = { 'agent-1': [] };
+    const dataDir = path.join(ROOT, tag);
+    const roster = () => [{ cid: 'agent-1', name: 'Worker', groups: live['agent-1'] }, { cid: 'agent-2', name: 'Other', groups: [] }];
+    const w = mkEngine(ENGM, dataDir, {
+      roster,
+      gate: (k) => (k === 0 ? (entered(), gate1) : null),
+      answer: (k) => (k === 0 ? { ok: false, reason: 'the spend cap is reached (planted)', refused: 'cap' } : null),
+      stashThrows: () => ++stashCalls === 1,   // the FIRST stash is the refused holder's: it gives m back, nothing kept for it
+      onTakeWait: () => { waited = true; },
+      heldBound: { takeWaitMs: 200 },
+    });
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, notify: 'digest', digestMinutes: 30 }] });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }] });
+    const m = w.tail(OPS).slice(-1)[0];
+    await w.eng.onFresh(w.recOf(), OPS, [m], { origin: 'test' });   // G has no live member yet: its row of m waits; the digest holds m too
+    live['agent-1'] = ['G'];
+    const first = w.eng.flushScope(A, 'account', null, 'agent:agent-1');   // CHAIN 1: the digest takes m, held in its ladder
+    await in1;
+    await w.eng.flushPending(A, OPS, { pk: 'group:G' });   // CHAIN 2: G's wake meets the take, waits, keeps its row on chain 1
+    if (w.eng.settleWakes) await w.eng.settleWakes();
+    const placed = waited, rowKept = pendFor(w, m, 'group:G');
+    open(); await first;   // chain 1 REFUSED (its stash refused too): it gives m back
+    if (w.eng.settleWakes) await w.eng.settleWakes();
+    await w.eng.flushScope(A, 'account', null, 'agent:agent-1');   // CHAIN 3: the digest takes m again and HANDS it to agent-1
+    if (w.eng.settleWakes) await w.eng.settleWakes();
+    const rowAfter3 = pendFor(w, m, 'group:G'), startsBefore = w.starts.length, handedBefore = recs(w, 'agent-1', m);
+    await w.eng.stop();
+    const w2 = mkEngine(ENGM, dataDir, { clock: w.clock, roster: () => [{ cid: 'agent-1', name: 'Worker', groups: ['G'] }, { cid: 'agent-2', name: 'Other', groups: [] }] });   // THE RESTART
+    await w2.eng.flushPending(A, OPS, { pk: 'group:G' });   // G's pending flush (as the boot's)
+    if (w2.eng.settleWakes) await w2.eng.settleWakes();
+    const out = { placed, rowKept, rowAfter3, startsBefore, handedBefore, startsAfterRestart: w2.starts.length, handed: recs(w2, 'agent-1', m), rowEnd: pendFor(w2, m, 'group:G') };
+    await w2.eng.stop();
+    return out;
+  }
+  const tc = await threeChainsLeg(ENG, 'three-chains');
+  console.log(`    G's row of m: kept on chain 1 ${tc.rowKept}, after chain 3 handed m ${tc.rowAfter3}; starts before the restart ${tc.startsBefore} (chain 1 refused, chain 3 handed), after it ${tc.startsAfterRestart}; m handed to agent-1 ${tc.handed} time(s); G's row at the end ${tc.rowEnd}`);
+  ok(tc.placed && tc.rowKept === 1 && tc.rowAfter3 === 1 && tc.startsBefore === 2 && tc.handedBefore === 1 && tc.startsAfterRestart === 0 && tc.handed === 1 && tc.rowEnd === 0,
+    `B-1ca5's REMAINDER — THREE CHAINS: G's row kept on chain 1 survives chain 3's hand (${tc.rowAfter3}, on no list it clears); after the RESTART the door reads the hand's ledger — ZERO more starts (${tc.startsAfterRestart}), m handed to agent-1 once, the stale row dropped at the door (${tc.rowEnd})`, J(tc));
+  const tcR = await threeChainsLeg(MUT.load('src/server/channels-engine.js', noDoor(src), 'three-chains-no-door'), 'three-chains-red');
+  console.log(`    the door cut: after the restart ${tcR.startsAfterRestart} start(s), m handed to agent-1 ${tcR.handed} time(s)`);
+  ok(tcR.rowAfter3 === 1 && tcR.startsAfterRestart === 1 && tcR.handed === 2, `RED CONTROL: the door cut (the memory map alone) — after the restart G's surviving row starts m for agent-1 a SECOND time (${tcR.startsAfterRestart} start, handed ${tcR.handed} times)`, J(tcR));
+  // the door's fact lives as long as a row that could start it again: the ledger's cap never drops a row whose message still has a
+  // pending row (PURE: channel-revisions.js capWokeRows) — RED: the cap as it was drops it with the oldest
+  const rows = Array.from({ length: 50 }, (_, i) => ({ vid: `v${i}`, cid: `c${i % 3}`, at: i }));
+  const kept = Rev.capWokeRows(rows, 40, new Set(['v0'])), plain = Rev.capWokeRows(rows, 40);
+  ok(kept.length === 40 && kept.some((r) => r.vid === 'v0') && !plain.some((r) => r.vid === 'v0'), `the ledger's cap keeps a row whose message still has a pending row (v0 kept, ${kept.length} rows) — RED: the cap as it was (no pending set) drops it with the oldest`);
+}
+
+console.log('⑦ B-1ca5\'s REMAINDER — THE DOOR KEYS THE RECORD: a stored copy that shares the vendor id is no record handed');
+{
+  // the memory map keys a mark by the RECORD id, and the door's durable half reads the same key (`rid`): a second record that
+  // carries the same vendor id (a stored copy, as test-channel-agent-watch parks thirty) is still delivered — RED: the door keyed
+  // on the vendor message refuses the copy (and the heavy suite's thirty with it)
+  const RID_DOOR = '    return rows.some((w) => w && w.door === 1 && w.rid === rid && (recv !== null ? w.cid === recv : w.pk === name)) ? { handed: true } : null;\n';
+  ok(src.split(RID_DOOR).length === 2, 'control setup: the door\'s ledger read (by the record id) is present once');
+  async function copyLeg(ENGM, tag) {
+    const live = { 'agent-1': [] };
+    const roster = () => [{ cid: 'agent-1', name: 'Worker', groups: live['agent-1'] }, { cid: 'agent-2', name: 'Other', groups: [] }];
+    const w = mkEngine(ENGM, path.join(ROOT, tag), { roster });
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }] });
+    const m = w.tail(OPS).slice(-1)[0];
+    const en = () => w.eng.store.index.live()[`${A}/${OPS}`] || {};
+    await w.eng.onFresh(w.recOf(), OPS, [m], { origin: 'test' });   // G has no live member yet: its row of m waits
+    const row = (en().pending || []).find((p) => p && p.record && p.record.id === m.id && p.for === 'group:G');
+    const parked = row ? JSON.parse(J(row)) : null;
+    live['agent-1'] = ['G'];
+    await w.eng.flushPending(A, OPS, { pk: 'group:G' });   // m HANDED to agent-1: the door's row names the record
+    if (w.eng.settleWakes) await w.eng.settleWakes();
+    const s1 = w.starts.length;
+    const doorRow = (en().wokeFor || []).filter((x) => x && x.door === 1 && x.rid === String(m.id) && x.cid === 'agent-1').length;
+    const copyId = `${m.id}-copy`;
+    if (parked) en().pending.push({ ...parked, record: { ...parked.record, id: copyId, text: 'a stored copy' } });   // same vendor id, another record
+    await w.eng.flushPending(A, OPS, { pk: 'group:G' });
+    if (w.eng.settleWakes) await w.eng.settleWakes();
+    const out = { parked: !!parked, s1, doorRow, starts: w.starts.length, copyLeft: (en().pending || []).filter((p) => p && p.record && p.record.id === copyId).length };
+    await w.eng.stop();
+    return out;
+  }
+  const cp = await copyLeg(ENG, 'door-copy');
+  console.log(`    starts: m handed ${cp.s1}, then the copy ${cp.starts - cp.s1} (the door's row of m: ${cp.doorRow}, the copy's row left ${cp.copyLeft})`);
+  ok(cp.parked && cp.s1 === 1 && cp.doorRow === 1 && cp.starts === 2 && cp.copyLeft === 0, `THE DOOR KEYS THE RECORD: m handed once (the door's row names it: ${cp.doorRow}); a stored copy sharing m's vendor id is ANOTHER record — it starts (${cp.starts - cp.s1}), its row gone`, J(cp));
+  const cpR = await copyLeg(MUT.load('src/server/channels-engine.js', anchored(src, RID_DOOR, '    return rows.some((w) => w && w.door === 1 && w.vid === Rev.wokeKeyOf(r.vendorId) && (recv !== null ? w.cid === recv : w.pk === name)) ? { handed: true } : null;\n', 'door-by-vendor-id'), 'door-by-vendor-id'), 'door-copy-red');
+  ok(cpR.s1 === 1 && cpR.starts === 1 && cpR.copyLeft === 0, `RED CONTROL: the door keyed on the vendor message — the copy is refused at the door (${cpR.starts - cpR.s1} starts), dropped though no card of it was ever handed`, J(cpR));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

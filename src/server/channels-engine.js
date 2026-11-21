@@ -6290,7 +6290,23 @@ function create(deps = {}) {
     if (!name) return null;
     const m = handed.get(`${adapterId}/${convId}\u0000${name}`);
     const id = h && h.record ? h.record.id : null;
-    return markFrom(m && id !== null && id !== undefined ? m.get(String(id)) : undefined);
+    const v = m && id !== null && id !== undefined ? m.get(String(id)) : undefined;
+    return v === undefined ? ledgerMark(adapterId, convId, name, h) : markFrom(v);
+  }
+  /** B-1ca5's remainder — THE DOOR'S DURABLE HALF: a record HANDED TO A RECEIVER IS NEVER STARTED FOR THAT RECEIVER (or that watcher)
+   *  AGAIN, WHATEVER ROW SURVIVES. When the memory map holds nothing for it (a restart; a mark forgotten past HANDED_PER), the
+   *  conversation's own ledger (`wokeFor`, written in the hand's one durable write) answers: a row of this RECORD (`rid`, the key the
+   *  memory map uses — a stored copy may share the vendor id) for this receiver (`→cid`) or this watcher ⇒ handed — the verdict says spent and the row is dropped at the door, whatever chain left it. */
+  function ledgerMark(adapterId, convId, name, h) {
+    const r = h && h.record;
+    const rid = r && r.id !== null && r.id !== undefined ? String(r.id).slice(0, 128) : null;   // the RECORD, as the memory map keys it
+    if (!rid) return null;
+    let en = null;
+    try { en = store.index.entry(adapterId, convId, { create: false }); } catch { en = null; }
+    const rows = en && Array.isArray(en.wokeFor) ? en.wokeFor : null;
+    if (!rows || !rows.length) return null;
+    const recv = name.startsWith('→') ? name.slice(1) : null;
+    return rows.some((w) => w && w.door === 1 && w.rid === rid && (recv !== null ? w.cid === recv : w.pk === name)) ? { handed: true } : null;
   }
   /** THE READ: every hit sorted by the verdict, under the watcher's name and (once known) the receiver's. With `take` (a
    *  ticket, or true for a new one) the hits it may deliver are TAKEN under both names IN THE SAME SYNCHRONOUS CALL — the
@@ -6971,16 +6987,22 @@ function create(deps = {}) {
    *  A row is keyed by the message's revision key (`Rev.wokeKeyOf` — the id the by-id recheck asks with, the same for
    *  every version); the bound is fair (`Rev.capWokeRows`). Census: scripts/test-channel-revisions.mjs ⑧. */
   const WOKE_FOR_MAX = 40;
-  function noteDelivered(en, hits, cid, t) {
+  function noteDelivered(en, hits, cid, t, pk = null, door = false) {
     if (!en || !cid) return;
-    const prev = Array.isArray(en.wokeFor) ? en.wokeFor.filter((w) => w && Number(w.at) > t - Rev.RECHECK_WOKE_MS) : [];
+    // B-1ca5's remainder (THE DOOR): the ledger row is the DURABLE fact «this record (`rid`) was handed to this receiver, for this watcher»
+    // the verdict reads after a restart (markOf → ledgerMark) — it names the watcher too, and a row whose message still has a pending
+    // row in this conversation is kept past the age and the cap (a row that could start it again outlives it never). `door` = a
+    // hand-over a restart KEEPS (billed, or a stash stored): only such a row is the door's fact — a stash «held in memory only» is
+    // forgotten by a restart, so its message must still reach the receiver after one (must 3)
+    const pend = new Set((Array.isArray(en.pending) ? en.pending : []).map((p) => (p && p.record ? Rev.wokeKeyOf(p.record.vendorId) : null)).filter(Boolean));
+    const prev = Array.isArray(en.wokeFor) ? en.wokeFor.filter((w) => w && (Number(w.at) > t - Rev.RECHECK_WOKE_MS || pend.has(w.vid))) : [];
     for (const h of hits || []) {
       const r = h && h.record;
       const vid = r ? Rev.wokeKeyOf(r.vendorId) : null;
       if (!vid) continue;
-      prev.push({ vid, cid: String(cid).slice(0, 128), at: t, msgAt: Number(r.at) || null, tk: r.threadKey ? String(r.threadKey).slice(0, 512) : null });
+      prev.push({ vid, cid: String(cid).slice(0, 128), ...(pk ? { pk: String(pk).slice(0, 256) } : {}), ...(door && r.id !== null && r.id !== undefined ? { door: 1, rid: String(r.id).slice(0, 128) } : {}), at: t, msgAt: Number(r.at) || null, tk: r.threadKey ? String(r.threadKey).slice(0, 512) : null });
     }
-    en.wokeFor = Rev.capWokeRows(prev, WOKE_FOR_MAX);
+    en.wokeFor = Rev.capWokeRows(prev, WOKE_FOR_MAX, pend);
   }
   const REV_NOTE_FROM = 'Channels · recalls';
   /** ONE next-turn note per (message, conversation a wake carried it to) when the message is recalled — the free lane
@@ -9042,7 +9064,7 @@ function create(deps = {}) {
     if (parked) { await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), parked); }, { durable: true }); notify([convId]); }
     // THE LEDGER DOOR — the free stash road (lane channel-recall-ledger, B-70d2): the hits reached this conversation, so a
     // later recall of one of them is noted here too (was: no row — a next-turn watch, the agent's default, heard nothing)
-    try { await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (e2) noteDelivered(e2, fresh, target.cid, now()); if (e2 && durableS) clearForReceiver(e2, target.cid, fresh, pk); }, { durable: true }); }
+    try { await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (e2) noteDelivered(e2, fresh, target.cid, now(), pk, !!durableS); if (e2 && durableS) clearForReceiver(e2, target.cid, fresh, pk); }, { durable: true }); }
     catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the woken-for ledger could not take the next-turn delivery for ${pk}: ${(err && err.message) || err}`); }
     log.log(`[channels] ${rec.id}/${convId}: ${fresh.length} hit(s) for ${pk} ride its next turn (next-turn notification, no wake)${parked ? ` — ${parked.hits.length} parked while nobody was live carried along` : ''}`);
     return { ok: true, stashed: true, next: true, cid: target.cid, n: fresh.length, ...(parked ? { carried: parked.hits.length } : {}), stored: st && st.stored };
@@ -9315,7 +9337,7 @@ function create(deps = {}) {
           clearCarried(e2, pk, h.eff, h.carried);
           e2.stats.wakes.push({ ...wk, n: h.carried.hits.length + h.carried.elided });   // B-43bc smalls: what THIS digest handed here (a record the receiver already had is left out — its row cleared, never counted)
           e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
-          noteDelivered(e2, h.carried.hits, target.cid, t);   // THE LEDGER DOOR — the digest road (lane channel-recall-engine-leg): EVERY conversation the digest carried (was: single-conversation wakes only — a recall after a digest said nothing)
+          noteDelivered(e2, h.carried.hits, target.cid, t, pk, !!(ok || stashKept));   // THE LEDGER DOOR — the digest road (lane channel-recall-engine-leg): EVERY conversation the digest carried (was: single-conversation wakes only — a recall after a digest said nothing)
           if (ok || stashKept) clearKept(e2, take, h.id);   // B-1ca5 follow-up (1): the rows waiters kept for this digest, in the same durable write — only on a hand-over a restart keeps (must 3)
           if (ok || stashKept) clearForReceiver(e2, target.cid, h.carried.hits, pk);   // B-1ca5 round w8ghfur9h: the same receiver's rows on other roads, in the same write (must 3: durable only)
         }
@@ -9752,7 +9774,7 @@ function create(deps = {}) {
       healP2(e2);
       e2.stats.wakes.push({ ...wk, id: resId });
       e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
-      if (ok || stashed) noteDelivered(e2, hits, target.cid, t);   // THE LEDGER DOOR — the wake road: billed, or refused and stashed (lane channel-record-revisions)
+      if (ok || stashed) noteDelivered(e2, hits, target.cid, t, pk, !!(ok || stashKept));   // THE LEDGER DOOR — the wake road: billed, or refused and stashed (lane channel-record-revisions)
       if (ok || stashKept) clearKept(e2, take, convId);   // B-1ca5 follow-up (1): the rows waiters kept for this start, in the same durable write — only on a hand-over a restart keeps (must 3)
       if (ok || stashKept) clearForReceiver(e2, target.cid, hits, pk);   // B-1ca5 round w8ghfur9h: the same receiver's rows on other roads, in the same write
       e2.stats.lastRefusal = null;

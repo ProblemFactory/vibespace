@@ -249,7 +249,7 @@ ok(J(g1.rows) === J(g1.want), 'the woken-for ledger of EVERY conversation the di
 ok(g1.notes.length === 2 && g1.notes.every(([cid]) => cid === 'agent-1') && g1.notes.some(([, x]) => /Ops room/.test(x)) && g1.notes.some(([, x]) => /Announcements/.test(x)), 'both recalls after the digest: ONE note each, to the conversation the digest woke, naming its room', J(g1.notes));
 {
   const src = engineSource(REPO);
-  const line = '          noteDelivered(e2, h.carried.hits, target.cid, t);';
+  const line = '          noteDelivered(e2, h.carried.hits, target.cid, t, pk, !!(ok || stashKept));';
   const cut = src.split('\n').filter((l) => !l.startsWith(line)).join('\n');
   const c3 = await digestLeg(MUT.load('src/server/channels-engine.js', cut, 'no-digest-ledger'), 'digest-c');
   ok(cut !== src && c3.delivered === 1 && c3.rows.every((r) => r === '') && c3.notes.length === 0, 'CONTROL: the digest without its ledger rows (the .262 engine) — delivered, recalled, and NOT ONE note', J({ rows: c3.rows, notes: c3.notes.length }));
@@ -311,7 +311,7 @@ ok(e1.second === 1 && e1.restart.asked && e1.restart.notes === 0, 'a re-check an
 legTable.push(['the free next-turn stash (stashHits)', e1.first.length]);
 { // RED CONTROL: the free stash without its door (= f57d1cbe9) — no row, so the recall tells nobody
   const src = engineSource(REPO);
-  const cut = src.replace('if (e2) noteDelivered(e2, fresh, target.cid, now());', 'if (e2) void e2;');
+  const cut = src.replace('if (e2) noteDelivered(e2, fresh, target.cid, now(), pk, !!durableS);', 'if (e2) void e2;');
   const c4 = await nextTurnLeg(MUT.load('src/server/channels-engine.js', cut, 'no-stash-door'), 'next-turn-c');
   ok(cut !== src && J(c4.blocks) === J(['agent-1']) && c4.rows.length === 0 && c4.first.length === 0 && c4.marked[0], 'CONTROL: the free stash without the ledger door (the base engine) — handed, recalled, marked, and NOT ONE note', J({ rows: c4.rows, notes: c4.first.length }));
 }
@@ -361,7 +361,7 @@ ok(J(k1.blocks) === J(['agent-2']) && k1.n === 40 && k1.per.a1 === 1 && k1.per.a
 ok(J(k1.notes) === J(['agent-1']), 'and the recall of the waking message is still noted to the conversation it woke', J(k1.notes));
 { // RED CONTROL: the newest-40 bound (the base door) pushes the wake's row out — its recall tells nobody
   const src = engineSource(REPO);
-  const cut = src.replace('    en.wokeFor = Rev.capWokeRows(prev, WOKE_FOR_MAX);\n', '    en.wokeFor = prev.slice(-WOKE_FOR_MAX);\n');
+  const cut = src.replace('    en.wokeFor = Rev.capWokeRows(prev, WOKE_FOR_MAX, pend);\n', '    en.wokeFor = prev.slice(-WOKE_FOR_MAX);\n');   // B-1ca5's remainder: the cap now protects rows whose message still has a pending row
   const c5 = await capLeg(MUT.load('src/server/channels-engine.js', cut, 'newest-40'), 'cap-c');
   ok(cut !== src && !c5.per.kept && c5.notes.length === 0, 'CONTROL: the newest-40 bound drops the older wake\'s row under the chatty watch — and its recall adds NO note', J({ per: c5.per, notes: c5.notes }));
 }
@@ -472,7 +472,7 @@ ok(!C0.red.length && C0.fns.includes('stashHits') && C0.fns.includes('wakeNow') 
   const planted = src.replace('  async function stashHits(', "  async function plantedRoad(cid, hits) { deliver.stashFor(cid, { source: 'channel', kind: 'notification', fromName: 'Channels · planted', text: String(hits.length) }); }\n  async function stashHits(");
   const p1 = ledgerCensus(censusFiles(planted));
   ok(planted !== src && p1.red.length === 1 && /plantedRoad hands over by stashFor/.test(p1.red[0]), 'CONTROL: a PLANTED road (a new stashFor with no door) is RED by name', J(p1.red));
-  const base = src.replace('if (e2) noteDelivered(e2, fresh, target.cid, now());', 'if (e2) void e2;');
+  const base = src.replace('if (e2) noteDelivered(e2, fresh, target.cid, now(), pk, !!durableS);', 'if (e2) void e2;');
   const p2 = ledgerCensus(censusFiles(base));
   ok(base !== src && p2.red.length === 1 && /stashHits hands over by stashFor/.test(p2.red[0]), 'CONTROL: the base engine\'s free stash (f57d1cbe9 — no door) is RED', J(p2.red));
   const p3 = ledgerCensus(censusFiles(), { ...NOT_A_ROAD, 'channels-engine.js › goneRoad': 'a road that no longer exists' });
@@ -854,7 +854,13 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
   const wt = await waitingLeg(ENG, 'mark-waiting');
   const OLDEST_FREE = "        for (const id of m.keys()) if (!wait.has(id) && typeof m.get(id) !== 'object') { victim = id; break; }   // the oldest record nothing waits for\n";
   ok(src.split(OLDEST_FREE).length === 2, 'control setup: the mark\'s choice of what nothing waits for is present once');
-  const wtR = await waitingLeg(MUT.load('src/server/channels-engine.js', src.replace(OLDEST_FREE, ''), 'oldest-forgotten'), 'mark-waiting-red');
+  // B-1ca5's remainder: THE DOOR reads the hand's durable ledger when the memory map forgot a mark — a control that wants the
+  // second hand-over cuts the door too; with the door kept, the forgotten mark is no second hand-over
+  const DOOR = '    return v === undefined ? ledgerMark(adapterId, convId, name, h) : markFrom(v);\n';
+  ok(src.split(DOOR).length === 2, 'control setup: the door (the ledger read for a mark the memory map does not hold) is present once');
+  const wtR = await waitingLeg(MUT.load('src/server/channels-engine.js', src.replace(OLDEST_FREE, '').replace(DOOR, '    return markFrom(v);\n'), 'oldest-forgotten'), 'mark-waiting-red');
+  const wtD = await waitingLeg(MUT.load('src/server/channels-engine.js', src.replace(OLDEST_FREE, ''), 'oldest-forgotten-door'), 'mark-waiting-door');
+  ok(wtD.m8 === 1, `THE DOOR (B-1ca5's remainder): even a mark forgotten whatever waits hands m8 ONCE — the ledger the hand wrote answers (${wtD.m8})`, J(wtD));
   ok(wt.m8 === 1 && wt.m7 === 1 && wt.warned === 0, `a mark of ONE record a name forgets m7, never m8 the group's pending row still holds — m8 handed ONCE (${wt.m8}), nothing waiting forgotten`, J(wt));
   ok(wtR.m8 === 2 && wtR.warned >= 1, `RED CONTROL: a mark that forgets its oldest whatever waits forgets m8 — the pending row hands it TWICE (${wtR.m8}), said as a warning`, J(wtR));
 

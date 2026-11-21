@@ -113,15 +113,19 @@ function wokeKeyOf(vid) { return vid === null || vid === undefined || vid === ''
 /** The ledger's bound, FAIR (lane channel-recall-ledger): over `max` rows, the conversation holding the most rows loses
  *  its oldest first — a chatty next-turn watch never pushes another conversation's rows out (was: the newest `max`
  *  rows, whoever they named). Ties go to the conversation whose rows came first. */
-function capWokeRows(rows, max) {
+function capWokeRows(rows, max, keep = null) {
   const out = (Array.isArray(rows) ? rows : []).filter(Boolean);
-  while (out.length > Math.max(0, max)) {
+  // B-1ca5's remainder (THE DOOR): a row whose message still has a pending row in that conversation (`keep`: its vendor ids) is the
+  // fact the restart's verdict reads («handed to this receiver / watcher») — never dropped while such a row lives; the bound holds
+  // for every other row (the kept ones are bounded by the pending rows' own cap)
+  const kept = (w) => !!keep && keep.has(w.vid);
+  while (out.filter((w) => !kept(w)).length > Math.max(0, max - out.filter(kept).length) && out.some((w) => !kept(w))) {
     const n = new Map();
-    for (const w of out) n.set(w.cid, (n.get(w.cid) || 0) + 1);
+    for (const w of out) if (!kept(w)) n.set(w.cid, (n.get(w.cid) || 0) + 1);
     let top = null;
     for (const [cid, k] of n) if (top === null || k > n.get(top)) top = cid;
     let i = -1;
-    for (let j = 0; j < out.length; j++) if (out[j].cid === top && (i < 0 || Number(out[j].at) < Number(out[i].at))) i = j;
+    for (let j = 0; j < out.length; j++) if (!kept(out[j]) && out[j].cid === top && (i < 0 || Number(out[j].at) < Number(out[i].at))) i = j;
     out.splice(i, 1);
   }
   return out;
