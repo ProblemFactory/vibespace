@@ -9,6 +9,9 @@
 //      chunks, one read for both knobs — the same answers as the sync reader (each knob the LAST turn_context that states it)
 //   ② ATTACH (ws-handler: the store's records, then rebuildHistory): the store's rawAsync (the parse in the transcript worker, the merge
 //      in slices) holds no turn past 250 ms — RED CONTROL: the master's path, the sync raw(), on the same rollout
+//      B-f3f9: THE CONVERSION ALONE (rebuildHistory: the merged records into chat history, the paced fold on the main thread) is
+//      its own window and holds no turn past 250 ms either, its costliest single record printed — RED CONTROL: the same fold with
+//      its yields cut (budgetMs Infinity, the unpaced convertHistory) over the same records holds ONE turn past it
 //   ③ the same records either way (the async and the sync reader), and the same messages after rebuildHistory
 //   ④ the wiring: the live attach awaits rawAsync before rebuildHistory; the read-only view's prepare() is it; the hooks are async
 //   ⑥ THE CURE ROUND (主开发 23:16Z), P1 — A RE-ATTACH IS AN ATTACH: a re-attach's fresh reader reads off the loop before its chat
@@ -116,11 +119,28 @@ for (let k = 0; k < 3; k++) {
 const med = rounds.map((r) => r.gap).sort((x, y) => x - y)[1];
 ok(med <= LAW_MS && rounds.every((r) => r.pages >= 5 && r.oneShot === 0 && r.reads === 1), `the off-loop read holds no loop turn past ${LAW_MS} ms — the median of three rounds ${med} ms (${rounds.map((r) => r.gap).join(' / ')}); each round read in PAGES (${rounds.map((r) => r.pages).join(' / ')} pages, no one-shot read)`, rounds);
 const sa0 = statsOf();
-const a = await during(async () => { smA = new S.CodexSessionMessages(A, 'w-a', { buffersDir }); await smA.rawAsync(); await rebuildHistory(A, 'w-a', smA.raw()); });
+// B-f3f9 (lane bl-loop-b): THE CONVERSION ALONE is judged too — the attach's two steps, each its own window: the read (rawAsync), then
+// the records into chat history (rebuildHistory: the paced fold, on the main thread). Measured first on this stand-in at the .414
+// train tip (Node 24): 68 301 records → 25 369 messages, its longest turn 45 ms over 600 ms, the costliest single record 1.6 ms,
+// its synchronous prefix 0.1 ms — it holds nothing: the fold's slices are the hold, the CPU (≈ the wall) is spread over them
+const CMM = require(path.join(REPO, 'src/codex-message-manager.js')).CodexMessageManager;
+const oProc = CMM.prototype._processRecord;
+let recMax = 0, recMaxKind = '';
+CMM.prototype._processRecord = function (record, emit) { const t = performance.now(); try { return oProc.call(this, record, emit); } finally { const d = performance.now() - t; if (d > recMax) { recMax = d; recMaxKind = (record && (record.type + (record.payload && record.payload.type ? '/' + record.payload.type : ''))) || '?'; } } };
+const a1 = await during(async () => { smA = new S.CodexSessionMessages(A, 'w-a', { buffersDir }); await smA.rawAsync(); });
+let convCpu = 0;
+const a2 = await during(async () => { const c0 = process.threadCpuUsage(); await rebuildHistory(A, 'w-a', smA.raw()); const c = process.threadCpuUsage(c0); convCpu = Math.round((c.user + c.system) / 1000); });
+CMM.prototype._processRecord = oProc;
+const a = { gap: Math.max(a1.gap, a2.gap), ms: a1.ms + a2.ms };
 const sa1 = statsOf();
 ok(a.gap <= LAW_MS && sa1.pages - sa0.pages >= 5 && sa1.oneShot === sa0.oneShot, `the attach (rawAsync — the parse in the transcript worker, the merge in slices — then rebuildHistory) holds no loop turn past ${LAW_MS} ms (worst ${a.gap} ms over ${a.ms} ms), its read in ${sa1.pages - sa0.pages} pages`);
-const b = await during(async () => { smB = new S.CodexSessionMessages(B, 'w-b', { buffersDir }); await rebuildHistory(B, 'w-b', smB.raw()); });
-ok(b.gap > LAW_MS, `RED CONTROL — the master's path (the sync raw()) on the same rollout holds the loop ${b.gap} ms in ONE turn (> ${LAW_MS} ms)`);
+ok(a2.gap <= LAW_MS && recMax <= LAW_MS, `B-f3f9 THE CONVERSION ALONE (rebuildHistory — the merged records into chat history, the paced fold on the main thread) holds no loop turn past ${LAW_MS} ms: worst ${a2.gap} ms over ${a2.ms} ms, main-thread CPU ${convCpu} ms in the fold's slices, the costliest single record ${recMax.toFixed(1)} ms (${recMaxKind}) — ${smA.raw().length} records → ${((A._normalizer && A._normalizer.messages) || []).length} messages`);
+const b1 = await during(async () => { smB = new S.CodexSessionMessages(B, 'w-b', { buffersDir }); smB.raw(); });
+ok(b1.gap > LAW_MS, `RED CONTROL — the master's path (the sync raw()) on the same rollout holds the loop ${b1.gap} ms in ONE turn (> ${LAW_MS} ms)`);
+// …and the conversion's own RED CONTROL: the same fold with its yields cut (budgetMs: Infinity — the unpaced convertHistory of
+// 2.369.15) over the same records: ONE turn past the law — the probe sees a conversion that holds (and ③ compares its messages)
+const b2 = await during(async () => { await rebuildHistory(B, 'w-b', smB.raw(), { budgetMs: Infinity }); });
+ok(b2.gap > LAW_MS, `RED CONTROL (B-f3f9) — the same conversion with its yields cut (budgetMs Infinity: the unpaced fold) holds the loop ${b2.gap} ms in ONE turn (> ${LAW_MS} ms) — the paced fold's ${a2.gap} ms is the slices, not a smaller job`);
 
 console.log('— ③ THE SAME RECORDS AND MESSAGES either way');
 {
