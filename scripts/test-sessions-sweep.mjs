@@ -31,6 +31,15 @@ let pass = 0, fail = 0, skips = 0;
 // the sweep's -cure (D): a leg that cannot run here is COUNTED as a skip, never a pass (the hosted mirror is a depth-one clone)
 const skip = (n) => { skips++; console.log('  - SKIP ' + n); };
 const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof n} — the arguments are swapped?`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // a HOME of N transcripts in the CLI's own form (the boot shape's records: cwd + user/assistant lines), set BEFORE the
 // stores load (session-store reads ~ at require) and before the pool's worker is built (it copies this env)
@@ -135,10 +144,10 @@ console.log('③b the held keys\' rows AS DISCOVERED, handed to the resume seam 
   const RET = 'return { buf, etag, count, held, heldDisc, onLoop: isMainThread, ms };', KEY = "discovered.get(`${h.backend || 'claude'}:${h.backendSessionId || h.sessionId}`)", FLD = 'accountId: r.accountId, ', REQ = "require('./sessions-assemble.js')";
   const M3 = mutantCopies('sessions-sweep-held', REPO);
   const now3 = await seam(require(path.join(REPO, 'src/sessions-sweep.js')));
-  const noDisc = await seam(M3.load('src/sessions-sweep.js', SW.replace(RET, 'return { buf, etag, count, held, onLoop: isMainThread, ms };'), 'no-heldDisc'));
-  const drift = await seam(M3.load('src/sessions-sweep.js', SW.replace(KEY, "discovered.get(`${h.backendSessionId || h.sessionId}`)"), 'key-drift'));
-  const asmNoAcct = M3.write('src/sessions-assemble.js', AS.replace(FLD, ''), 'no-account-field');
-  const noAcct = await seam(M3.load('src/sessions-sweep.js', SW.replace(REQ, `require(${JSON.stringify(asmNoAcct)})`), 'asm-no-account'));
+  const noDisc = await seam(M3.load('src/sessions-sweep.js', editAnchor(SW, RET, 'return { buf, etag, count, held, onLoop: isMainThread, ms };', "src/sessions-sweep.js"), 'no-heldDisc'));
+  const drift = await seam(M3.load('src/sessions-sweep.js', editAnchor(SW, KEY, "discovered.get(`${h.backendSessionId || h.sessionId}`)", "src/sessions-sweep.js"), 'key-drift'));
+  const asmNoAcct = M3.write('src/sessions-assemble.js', editAnchor(AS, FLD, '', "src/sessions-assemble.js"), 'no-account-field');
+  const noAcct = await seam(M3.load('src/sessions-sweep.js', editAnchor(SW, REQ, `require(${JSON.stringify(asmNoAcct)})`, "src/sessions-sweep.js"), 'asm-no-account'));
   ok([RET, KEY, FLD, REQ].every((x, i) => (i === 2 ? AS : SW).split(x).length === 2) && JSON.stringify(now3) === '{"accountId":"acc-own"}',
     `an account-bound row that names its own account, no kept copy: the seam over the sweep's rows answers it (${JSON.stringify(now3)})`, now3);
   ok(noDisc === null && drift === null && noAcct === null, `RED CONTROLS — no discovered rows handed (${JSON.stringify(noDisc)}), a drifted key (${JSON.stringify(drift)}), the kept fields without the account (${JSON.stringify(noAcct)}): the default login`, { noDisc, drift, noAcct });
@@ -157,7 +166,7 @@ console.log('③c the seam merges only the ASKED key\'s kept copies: one row bui
   };
   const SRC3 = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8'), NARROW = '  if (Array.isArray(kept)) { const ask = ';
   const now3 = await count(R);
-  const wide3 = await count(mutantCopies('sessions-sweep-narrow', REPO).load('src/routes/sessions.js', SRC3.replace(NARROW, '  if (false) { const ask = '), 'wide'));
+  const wide3 = await count(mutantCopies('sessions-sweep-narrow', REPO).load('src/routes/sessions.js', editAnchor(SRC3, NARROW, '  if (false) { const ask = ', "src/routes/sessions.js"), 'wide'));
   ok(SRC3.split(NARROW).length === 2 && JSON.stringify(now3.r) === '{"accountId":"acc-asked"}' && now3.n <= 1,
     `a resume asked with ${K + 1} kept copies (one its own): its account (${now3.r && now3.r.accountId}), ${now3.n} realpath on this thread`, now3);
   ok(JSON.stringify(wide3.r) === '{"accountId":"acc-asked"}' && wide3.n >= K, `RED CONTROL (every kept copy merged, the train's seam over the sweep's few rows): the same answer, ${wide3.n} realpaths on this thread — one per copy`, wide3);
@@ -210,7 +219,7 @@ console.log('⑤b the resume seam over the sweep\'s rows (B-a5a4 follow-up, met)
   };
   const M5 = mutantCopies('sessions-sweep-seam', REPO);
   const now5 = await seamOf(M5.load('src/routes/sessions.js', SRC, 'seam', { same: true }));
-  const was5 = await seamOf(M5.load('src/routes/sessions.js', SRC.replace(HAND, '_sweptStopped = out.held;'), 'seam-merged'));
+  const was5 = await seamOf(M5.load('src/routes/sessions.js', editAnchor(SRC, HAND, '_sweptStopped = out.held;', "src/routes/sessions.js"), 'seam-merged'));
   ok(SRC.split(HAND).length === 2 && now5.code === 200 && now5.r && now5.r.accountId === 'acc-now',
     `after the route's sweep (the worker's rows), a resume that states no account goes to the account the copy kept NOW names (${now5.r && now5.r.accountId}) — over the row as discovered, as the page's next merge does`, now5);
   ok(was5.r && was5.r.accountId === 'acc-then', `RED CONTROL (the sweep's MERGED rows handed to the seam): the older copy's account wins (${was5.r && was5.r.accountId}) — B-a5a4's own mutant answer`, was5);
@@ -279,7 +288,7 @@ ok(row8(sidL).status === 'live' && row8(sidT).status === 'tmux' && row8(sidT).tm
   const noId = bytesOf(await fullWalk(drop('claudeSessionId'))), noPid = bytesOf(await fullWalk(drop('_childPid')));
   const noKept = bytesOf(await fullWalk(liveTable), { ...sent, kept: [] });
   const asm = fs.readFileSync(path.join(REPO, 'src/sessions-assemble.js'), 'utf8'), SORT = 'sessions.sort((a, b) => b.startedAt - a.startedAt);';
-  const Arev = mutantCopies('sessions-sweep-rev', REPO).load('src/sessions-assemble.js', asm.replace(SORT, 'sessions.sort((a, b) => a.startedAt - b.startedAt);'), 'reversed');
+  const Arev = mutantCopies('sessions-sweep-rev', REPO).load('src/sessions-assemble.js', editAnchor(asm, SORT, 'sessions.sort((a, b) => a.startedAt - b.startedAt);', "src/sessions-assemble.js"), 'reversed');
   const rev = bytesOf(await fullWalk(liveTable), sent, Arev);
   const diff = [noId, noPid, noKept, rev].map((b) => Buffer.compare(b, ans8.bytes) !== 0);
   ok(asm.split(SORT).length === 2 && diff.every(Boolean), `RED CONTROLS against the route's bytes — the projection without the claude id ${diff[0]}, without the child pid ${diff[1]}; the kept stopped rows dropped ${diff[2]}; the sort reversed ${diff[3]} ⇒ each differs`);
@@ -370,8 +379,8 @@ ok(killed.inside && killed.failed && killed.rebuilt && closed.inside && closed.f
       'the Sessions tab DRAWS it: the workbench render (a desktop) and the column render (a phone) each wipe the list and the hub\'s line stands after the wipe; its Retry says «Retrying…» while a press runs (the door stays live); a clean answer clears it', { wb, col });
     const MCs = mutantCopies('sweep-cure-stale-line', REPO), CALL = /\n      this\._appendStaleHint\?\.\(\);[^\n]*/;
     const wbSrc = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-workbench.js'), 'utf8'), colSrc = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-column.js'), 'utf8');
-    const wbM = await import(MCs.write('src/lib/sidebar-workbench.js', wbSrc.replace(CALL, ''), 'r2-workbench', { esm: true }));
-    const colM = await import(MCs.write('src/lib/sidebar-column.js', colSrc.replace(CALL, ''), 'r2-column', { esm: true }));
+    const wbM = await import(MCs.write('src/lib/sidebar-workbench.js', editAnchor(wbSrc, CALL, '', "src/lib/sidebar-workbench.js"), 'r2-workbench', { esm: true }));
+    const colM = await import(MCs.write('src/lib/sidebar-column.js', editAnchor(colSrc, CALL, '', "src/lib/sidebar-column.js"), 'r2-column', { esm: true }));
     class R2 extends Sidebar { }
     wbM.installSidebarWorkbench(R2); colM.installSidebarColumn(R2);
     const rwb = drive(R2.prototype, 'workbench'), rcol = drive(R2.prototype, 'column');
@@ -392,7 +401,7 @@ ok(killed.inside && killed.failed && killed.rebuilt && closed.inside && closed.f
       return out.join(',');
     };
     const pNow = await pollDrive(Sidebar);
-    const { Sidebar: SbNoForce } = await import(MCs.write('src/lib/sidebar.js', sbSrc4.replace(FORCED, '/* no forced render */'), 'r4-no-forced', { esm: true }));
+    const { Sidebar: SbNoForce } = await import(MCs.write('src/lib/sidebar.js', editAnchor(sbSrc4, FORCED, '/* no forced render */', "src/lib/sidebar.js"), 'r4-no-forced', { esm: true }));
     const pWas = await pollDrive(SbNoForce);
     ok(sbSrc4.split(FORCED).length === 2 && pNow === '0,1,0,1' && pWas === '0,0,0,0',
       `THE POLL'S ROAD: the hub's stale answer forces the line's render when it appears and when it goes, not when only its count moves (${pNow}); RED the page without the forced render (${pWas})`);
@@ -412,14 +421,14 @@ ok(killed.inside && killed.failed && killed.rebuilt && closed.inside && closed.f
     };
     const tNow = tasksLine(Sidebar), pNow5 = await press(Sidebar);
     const tkSrc = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-tasks.js'), 'utf8'), TK = /\n    this\._appendStaleHint\?\.\(\);[^\n]*/;
-    const tkM = await import(MCs.write('src/lib/sidebar-tasks.js', tkSrc.replace(TK, ''), 'r5-tasks', { esm: true }));
+    const tkM = await import(MCs.write('src/lib/sidebar-tasks.js', editAnchor(tkSrc, TK, '', "src/lib/sidebar-tasks.js"), 'r5-tasks', { esm: true }));
     class T4 extends Sidebar { }
     tkM.installSidebarTasks(T4);
     const SETTLE = 'this._retrying = false; this._render(); }';
-    const { Sidebar: SbNoSettle } = await import(MCs.write('src/lib/sidebar.js', sbSrc4.replace(SETTLE, 'this._retrying = false; }'), 'r5-no-settle', { esm: true }));
+    const { Sidebar: SbNoSettle } = await import(MCs.write('src/lib/sidebar.js', editAnchor(sbSrc4, SETTLE, 'this._retrying = false; }', "src/lib/sidebar.js"), 'r5-no-settle', { esm: true }));
     const tWas = tasksLine(T4), pWas5 = await press(SbNoSettle);
     const GUARD1 = '    if (this._retrying) return;';
-    const { Sidebar: SbTwice } = await import(MCs.write('src/lib/sidebar.js', sbSrc4.replace(GUARD1, '    if (false) return;'), 'cure-two-presses', { esm: true }));
+    const { Sidebar: SbTwice } = await import(MCs.write('src/lib/sidebar.js', editAnchor(sbSrc4, GUARD1, '    if (false) return;', "src/lib/sidebar.js"), 'cure-two-presses', { esm: true }));
     const pTwice = await press(SbTwice);
     ok(sbSrc4.split(GUARD1).length === 2 && pNow5.fetches === 1 && pTwice.fetches === 2, `Retry pressed twice at once asks ONE rebuild (${pNow5.fetches}); RED the door without its one-press guard (${pTwice.fetches})`);
     const pz = Object.create(Sidebar.prototype); Object.assign(pz, { listEl: mkEl('div'), _pollFails: 0, app: {}, _hubStale: { ...STALE(), paused: true, why: 'discovery is paused (a storage mount is not answering)' } }); pz._appendStaleHint();
@@ -428,7 +437,7 @@ ok(killed.inside && killed.failed && killed.rebuilt && closed.inside && closed.f
     // the -cure's read (S2): a sweep still running past the bound, nothing failed — the line says it is still being rebuilt, and
     // offers no Retry (a press would only join the sweep in flight); RED: the door without its guards (the paused line's RED too)
     const RDOOR = "      if (!this._hubStale.paused && this._hubStale.running == null) row.append(' ', retry);";
-    const { Sidebar: SbDoor } = await import(MCs.write('src/lib/sidebar.js', sbSrc4.replace(RDOOR, () => "      row.append(' ', retry);"), 'cure2-door-always', { esm: true }));
+    const { Sidebar: SbDoor } = await import(MCs.write('src/lib/sidebar.js', editAnchor(sbSrc4, RDOOR, () => "      row.append(' ', retry);", "src/lib/sidebar.js"), 'cure2-door-always', { esm: true }));
     const lineFor = (Proto, extra) => { const s = Object.create(Proto.prototype); Object.assign(s, { listEl: mkEl('div'), _pollFails: 0, app: {}, _hubStale: { ...STALE(), ...extra } }); s._appendStaleHint(); const l = lineOf(s.listEl); return { line: !!l, door: !!l && (l.children || []).some((c) => c && c.tagName === 'button'), text: l ? String(((l.children || [])[0] || {}).textContent || '') : '' }; };
     const run = lineFor(Sidebar, { fails: 0, running: 20, why: 'a rebuild has run 20 s' }), runFailed = lineFor(Sidebar, { fails: 2, running: 3 }), runRed = lineFor(SbDoor, { fails: 0, running: 20 }), pzRed = lineFor(SbDoor, { paused: true });
     ok(sbSrc4.split(RDOOR).length === 2 && run.line && !run.door && /still being rebuilt/.test(run.text) && /could not rebuild/.test(runFailed.text) && !runFailed.door && runRed.door && pzRed.door,
@@ -471,7 +480,7 @@ parentPort.on('message', (m) => { if (!m || !m.op || !ops[m.op]) return; Promise
     `with a list in hand a poll got it while a held sweep still ran (its wait bounded); a lookup behind that sweep ended ITSELF (null) — the sweep finished in the same worker, never killed (the product's bound: POLL_WAIT_MS ${RF.POLL_WAIT_MS} ms, said in the route)`, { look: now.look, finished: now.finished, failed: now.failed });
   // RED: the release's pool form (no serial lane) — the lookup is sent INTO the busy worker and its deadline terminates it, the sweep with it
   const SERIAL = "serial: { busy: { message: 'the session list is being rebuilt — try again in a moment', code: 'sweep_busy' } }, ";
-  const RR = mutantCopies('sessions-sweep-noserial', REPO).load('src/routes/sessions.js', routeSrc.replace(SERIAL, ''), 'noserial');
+  const RR = mutantCopies('sessions-sweep-noserial', REPO).load('src/routes/sessions.js', editAnchor(routeSrc, SERIAL, '', "src/routes/sessions.js"), 'noserial');
   RR.setup(routeCtx());
   const was = await drive(RR, getQ(RR));
   ok(routeSrc.split(SERIAL).length === 2 && was.failed && !was.finished, `RED CONTROL — the release's pool form (no serial lane): the lookup's 150 ms deadline terminated the worker under the sweep (failed ${was.failed}, finished ${was.finished})`);
@@ -506,7 +515,7 @@ console.log('⑫ the chain\'s -cure (主开发 12:08Z): no walk on the loop afte
   // worker» once one of the pool's ran — never walked on this thread. RED: be3ac90af's predicate (none alive at this moment)
   const NW = 'noWorker: !this._ran && !this._workers.some((r) => r.alive)';
   const sfSrc = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8'), SFREQ = "const { SafeFs } = require('../safe-fs');";
-  const sfAlive = M12.write('src/safe-fs.js', sfSrc.replace(NW, () => 'noWorker: !this._workers.some((r) => r.alive)'), 'noworker-alive');
+  const sfAlive = M12.write('src/safe-fs.js', editAnchor(sfSrc, NW, () => 'noWorker: !this._workers.some((r) => r.alive)', "src/safe-fs.js"), 'noworker-alive');
   const second = async (src, tag) => {
     const Mod = M12.load('src/routes/sessions.js', src, tag, { same: TIP_TAGS.has(tag) });
     Mod._sweepTestSeam({ workerFile: HUNG, timeoutMs: 150, firstQueueMs: 60 }); Mod.setup(routeCtx());
@@ -533,7 +542,7 @@ console.log('⑫ the chain\'s -cure (主开发 12:08Z): no walk on the loop afte
     try { Mod.closeSweepPool(); } catch { }
     return out;
   };
-  const sfNever = M12.write('src/safe-fs.js', sfSrc.replace(NW, () => 'noWorker: false'), 'noworker-never');
+  const sfNever = M12.write('src/safe-fs.js', editAnchor(sfSrc, NW, () => 'noWorker: false', "src/safe-fs.js"), 'noworker-never');
   const now1c = await noWorkerRoad(routeSrc, 'no-worker'), was1c = await noWorkerRoad(routeSrc.replace(SFREQ, () => `const { SafeFs } = require(${JSON.stringify(sfNever)});`), 'no-worker-never');
   ok(now1c.code === 200 && now1c.rows > 0 && !now1c.ran && was1c.code === 500 && was1c.rows === 0,
     `(1c) a worker that cannot be created: no worker of the pool ever took a call ⇒ the first sweep runs on this thread once (${now1c.code}, ${now1c.rows} rows built here); RED (a wait that never says «no worker»): ${was1c.code}, no list at all`, { now1c, was1c });

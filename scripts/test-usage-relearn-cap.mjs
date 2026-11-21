@@ -76,7 +76,7 @@ console.log('§13 A FOLD OWNS WHAT IT FOLDS — past the live cap every identity
   for (const r of rs) ok(r.landed === r.ids && r.reads.every((n) => n <= 1) && r.reads.filter((n) => n === 1).length === r.ids - r.admitted && r.after.whole === 0 && r.after.tail === 0 && r.after.folds === 0 && r.after.sweepWhole === 0 && r.after.sweepMetaTail >= 1 && r.live <= r.cap && r.admitted < r.ids && r.maxOwn <= 1,
     `PAST THE CAP — ${r.name}: ${r.admitted} of ${r.ids} admitted (live ${r.live} ≤ cap ${r.cap} bytes); every identity landed (${r.landed}/${r.ids}), each read whole AT MOST ONCE after the epoch's prime (${r.reads.filter((n) => n === 1).length} not admitted: once each; ${r.admitted} admitted: from the cache — the prime read ${r.primeReads} files once), then 5 rounds of asks + estimates read nothing and fold nothing (${r.after.whole} whole, ${r.after.tail} tail, ${r.after.folds} folds), and after a sweep's append every estimate reads appended bytes only (${r.after.sweepWhole} whole, ${r.after.sweepMetaTail} meta tails); folds holding uncached lines at a time ≤ ${r.maxOwn} (the overdraft: one identity's lines, here ≤ ${r.biggest} file bytes)`, r);
   const M = mutantCopies('usage-relearn-stepped-noentry', REPO), src = read('src/usage-estimator.js'), from = "      f.file = lr ? lr.sig : this._sigNow(identityKey); f.nLines = lines.length; f.at = Date.now();";
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, "      f.file = this._lineCache.has(identityKey) ? (lr ? lr.sig : null) : 'no entry'; f.nLines = lines.length; f.at = Date.now();"), 'no-entry')) : null;
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, "      f.file = this._lineCache.has(identityKey) ? (lr ? lr.sig : null) : 'no entry'; f.nLines = lines.length; f.at = Date.now();", "src/usage-estimator.js"), 'no-entry')) : null;
   const R = EM ? fleet(EM.UsageEstimator, WORLDS[0][1], WORLDS[0][2]) : null;
   ok(!!R && (R.landed < R.ids || R.reads.some((n) => n > 1)), `RED: «no cache entry» read as moved (round 2) ⇒ ${R && R.landed} of ${R && R.ids} landed, whole reads ${R && R.reads.join('/')}, ${R && R.abandoned} folds abandoned`, R);
   const M2 = mutantCopies('usage-relearn-stepped-overdraft', REPO), from2 = "    if (!firstsWaiting && (cachedNow || (!own && (this._coldBytes || 0) < COLD_READ_TURN_BYTES))) f.open();";
@@ -105,7 +105,7 @@ console.log('§14 THE DIRTY MARK — rows that land with an invalidation mid-fol
   const r = await scene(null);
   ok(r.appended === 3 && r.stale && r.refold === 1, `THE DIRTY MARK: 3 rows through the real ingest road + the invalidate mid-fold ⇒ the landing is stale (${r.stale}) and the next ask folds again (${r.refold})`, r);
   const M = mutantCopies('usage-relearn-stepped-dirty', REPO), src = read('src/usage-estimator.js'), from = '        else { const stale = f.dirty || f.late();';
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '        else { const stale = f.late();'), 'no-dirty')) : null;
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '        else { const stale = f.late();', "src/usage-estimator.js"), 'no-dirty')) : null;
   const R = EM ? await scene(EM.UsageEstimator) : null;
   ok(!!R && !R.stale && R.refold === 0, `RED: the dirty mark ignored ⇒ the landing served fresh (${R && !R.stale}), the next ask folds nothing (${R && R.refold})`, R);
 }
@@ -130,7 +130,7 @@ console.log('§15 A LATE ROW OF ITS ACCOUNTS MID-FOLD (the hub\'s own sessions �
   const r = scene(null);
   ok(r.stale && r.refold === 1, `A LATE ROW mid-fold (sub-a, 3 h ago, no invalidation) ⇒ the landing is stale (${r.stale}) and the next ask folds again (${r.refold})`, r);
   const M = mutantCopies('usage-relearn-stepped-late', REPO), src = read('src/usage-estimator.js'), from = '        else { const stale = f.dirty || f.late();';
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '        else { const stale = f.dirty;'), 'no-late')) : null;
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '        else { const stale = f.dirty;', "src/usage-estimator.js"), 'no-late')) : null;
   const R = EM ? scene(EM.UsageEstimator) : null;
   ok(!!R && !R.stale && R.refold === 0, `RED: arrivals not read at the landing ⇒ the mixed landing served fresh (${R && !R.stale})`, R);
 }
@@ -151,7 +151,7 @@ console.log('§16 THE FAST PATH TRUSTS THE WHOLE SIGNATURE — a same-size rewri
   const r = scene(null);
   ok(r.sameSize && r.sameMtime && r.equal, `a same-size in-place rewrite with its mtime restored (size ${r.sameSize ? 'same' : 'moved'}, mtime ${r.sameMtime ? 'same' : 'moved'}) ⇒ the cached lines equal a fresh read (${r.equal}) — the ctime moved`, r);
   const M = mutantCopies('usage-relearn-stepped-sig', REPO), src = read('src/usage-estimator.js'), from = '    if (c && c.sig === sigOf(st)) {';
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '    if (c && c.mtimeMs === st.mtimeMs && c.size === st.size && c.ino === st.ino) {'), 'mtime-size-ino')) : null;
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '    if (c && c.mtimeMs === st.mtimeMs && c.size === st.size && c.ino === st.ino) {', "src/usage-estimator.js"), 'mtime-size-ino')) : null;
   const R = EM ? scene(EM.UsageEstimator) : null;
   ok(!!R && !R.equal, `RED: the fast path by mtime + size + inode (round 2) ⇒ the old lines kept (${R && !R.equal})`, R);
 }
@@ -179,7 +179,7 @@ console.log('§17 A FOLD THAT THREW, ITS RECORD REPAIRED — tried again at once
   const r = scene(null);
   ok(r.folds === 1 && r.landed && !r.failed, `the poison record repaired (a rewrite) + invalidate inside the backoff ⇒ folded at once (${r.folds}) and landed (${r.landed})`, r);
   const M = mutantCopies('usage-relearn-stepped-backoff', REPO), src = read('src/usage-estimator.js'), from = '    if (ff && Date.now() < ff.retryAt && ff.sig === this._sigNow(identityKey)) return null;';
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '    if (ff && Date.now() < ff.retryAt) return null;'), 'backoff-kept')) : null;
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '    if (ff && Date.now() < ff.retryAt) return null;', "src/usage-estimator.js"), 'backoff-kept')) : null;
   const R = EM ? scene(EM.UsageEstimator) : null;
   ok(!!R && R.folds === 0 && !R.landed, `RED: the backoff kept over a repaired file ⇒ ${R && R.folds} folds, the pre-throw rates served`, R);
 }
@@ -238,11 +238,11 @@ console.log('§19 NO DECISION ON A MIXED BASIS — a cold boot reads every membe
   const rr = boot(null, 0.1, { restart: true });
   ok(rr.mixed === 0 && !rr.firstRaw && rr.firstEst === OWNER.length && rr.seeded >= OWNER.length, `A RESTART: the last rates seeded from rates.json (${rr.seeded}) ⇒ the first decision reads every member ESTIMATED at once (${rr.firstEst} of ${OWNER.length}), never mixed — the hub does not forget`, rr);
   const M = mutantCopies('usage-relearn-stepped-basis', REPO), src = read('src/usage-estimator.js'), from = '  basisRaw(accountIds) {\n';
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '  basisRaw(accountIds) { return false;\n'), 'mixed')) : null;
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '  basisRaw(accountIds) { return false;\n', "src/usage-estimator.js"), 'mixed')) : null;
   const R = EM ? boot(EM.UsageEstimator, 0.1) : null;
   ok(!!R && R.mixed > 0, `RED: no basis rule ⇒ ${R && R.mixed} of ${R && R.passes} passes rank members on a MIXED basis (estimated beside raw)`, R);
   const M2 = mutantCopies('usage-relearn-stepped-noseed', REPO), from2 = '  _seedRates() {\n    this._seeded = true;\n';
-  const EM2 = src.includes(from2) ? require(M2.write('src/usage-estimator.js', src.replace(from2, '  _seedRates() {\n    this._seeded = true; return;\n'), 'no-seed')) : null;
+  const EM2 = src.includes(from2) ? require(M2.write('src/usage-estimator.js', editAnchor(src, from2, '  _seedRates() {\n    this._seeded = true; return;\n', "src/usage-estimator.js"), 'no-seed')) : null;
   const R2 = EM2 ? boot(EM2.UsageEstimator, 0.1, { restart: true }) : null;
   ok(!!R2 && R2.firstRaw && R2.firstEst < OWNER.length, `RED: rates.json not read back ⇒ a restart's first decision reads raw (${R2 && R2.firstRaw}), ${R2 && R2.firstEst} of ${OWNER.length} estimated — it forgot`, R2);
 }
@@ -263,7 +263,7 @@ console.log('§20 THE PINS THAT BITE — the rates past the cap; the 4 MB stop; 
   const pc = pastCap(null);
   ok(pc.length >= 2 && pc.every((x) => x.equal), `THE RATES PAST THE CAP: ${pc.length} identities the cache refused — each one's landed rates equal a synchronous fold over its own lines (${pc.map((x) => x.equal).join(' / ')})`, pc);
   const M = mutantCopies('usage-relearn-stepped-cacheonly', REPO), src = read('src/usage-estimator.js'), from = "      const lines = this.lines(identityKey), lr = this._lastRead && this._lastRead.key === identityKey ? this._lastRead : null;";
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, "      this.lines(identityKey); const lines = (this._lineCache.get(identityKey) || {}).lines || [], lr = this._lastRead && this._lastRead.key === identityKey ? this._lastRead : null;"), 'cache-only')) : null;
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, "      this.lines(identityKey); const lines = (this._lineCache.get(identityKey) || {}).lines || [], lr = this._lastRead && this._lastRead.key === identityKey ? this._lastRead : null;", "src/usage-estimator.js"), 'cache-only')) : null;
   const PR = EM ? pastCap(EM.UsageEstimator) : null;
   ok(!!PR && PR.some((x) => !x.equal), `RED: a fold that folds only what the cache holds ⇒ ${PR && PR.filter((x) => !x.equal).length} uncached identities' rates differ from the synchronous fold`, PR);
   // (2) THE 4 MB STOP: one handler asks 8 cold identities of ~1.5 MB — the files read whole in that turn stop past 4 MB (the first never deferred)
@@ -279,7 +279,7 @@ console.log('§20 THE PINS THAT BITE — the rates past the cap; the 4 MB stop; 
   const st = stop(null);
   ok(st.inTurn * st.file <= 4 * 1024 * 1024 + st.file && st.inTurn < st.ids && st.landed === st.ids, `THE 4 MB STOP: one handler asks ${st.ids} cold identities of ${(st.file / 1048576).toFixed(2)} MB — ${st.inTurn} read whole in that turn (${(st.bytesInTurn / 1048576).toFixed(1)} MB ≤ 4 MB + the first), the rest on the next turns; all ${st.landed} landed`, st);
   const M2 = mutantCopies('usage-relearn-stepped-nostop', REPO), from2 = 'const COLD_READ_TURN_BYTES = 4 * 1024 * 1024;';
-  const EM2 = src.includes(from2) ? require(M2.write('src/usage-estimator.js', src.replace(from2, 'const COLD_READ_TURN_BYTES = Infinity;'), 'no-stop')) : null;
+  const EM2 = src.includes(from2) ? require(M2.write('src/usage-estimator.js', editAnchor(src, from2, 'const COLD_READ_TURN_BYTES = Infinity;', "src/usage-estimator.js"), 'no-stop')) : null;
   const SR = EM2 ? stop(EM2.UsageEstimator) : null;
   ok(!!SR && SR.inTurn === SR.ids, `RED: the stop removed ⇒ the one handler reads all ${SR && SR.inTurn} files whole (${SR && (SR.bytesInTurn / 1048576).toFixed(1)} MB in one turn)`, SR);
   // (2b) round 5 (small): an identity the cache HOLDS, its file rewritten in place (same length, a changed byte), is a cold read too
@@ -298,7 +298,7 @@ console.log('§20 THE PINS THAT BITE — the rates past the cap; the 4 MB stop; 
   const rw = restop(null);
   ok(rw.cached === rw.ids && rw.inTurn * rw.file <= 4 * 1024 * 1024 + rw.file && rw.inTurn < rw.ids && rw.landed === rw.ids, `THE 4 MB STOP BINDS A REWRITE: ${rw.ids} identities the cache holds, each file (${(rw.file / 1048576).toFixed(2)} MB) rewritten in place ⇒ ${rw.inTurn} read whole in the one handler's turn (${(rw.inTurn * rw.file / 1048576).toFixed(1)} MB ≤ 4 MB + the first), the rest after; all ${rw.landed} landed fresh`, rw);
   const M2b = mutantCopies('usage-relearn-stepped-cachedopen', REPO), from2b = '    const cachedNow = this._readsNoFile(identityKey);';
-  const EM2b = src.includes(from2b) ? require(M2b.write('src/usage-estimator.js', src.replace(from2b, '    const cachedNow = this._lineCache.has(identityKey);'), 'cached-open')) : null;
+  const EM2b = src.includes(from2b) ? require(M2b.write('src/usage-estimator.js', editAnchor(src, from2b, '    const cachedNow = this._lineCache.has(identityKey);', "src/usage-estimator.js"), 'cached-open')) : null;
   const RW = EM2b ? restop(EM2b.UsageEstimator) : null;
   ok(!!RW && RW.inTurn === RW.ids, `RED: «the cache holds it» taken for «no read» (round 4) ⇒ the handler reads all ${RW && RW.inTurn} rewritten files whole in one turn`, RW);
   // (3) ONE FOLD HOLDS UNCACHED LINES — driven: a cached fold's entry evicted mid-fold (evictIdle's live block) while another fold owns uncached lines
@@ -321,7 +321,7 @@ console.log('§20 THE PINS THAT BITE — the rates past the cap; the 4 MB stop; 
   const ev = evict(null);
   ok(ev.aIn && ev.bOwn && ev.maxOut <= 1 && ev.yielded >= 1 && ev.landed === 2, `ONE FOLD HOLDS UNCACHED LINES, judged at every chunk and every turn's start: A's entry evicted mid-fold while B owns uncached lines ⇒ A yields (${ev.yielded}), folds holding lines outside the cache at any chunk ≤ ${ev.maxOut}; both land after (${ev.landed})`, ev);
   const M3 = mutantCopies('usage-relearn-stepped-nochunkown', REPO), from3 = "  _ownJudge(f) {\n";
-  const EM3 = src.includes(from3) ? require(M3.write('src/usage-estimator.js', src.replace(from3, "  _ownJudge(f) { return false;\n"), 'no-chunk-own')) : null;
+  const EM3 = src.includes(from3) ? require(M3.write('src/usage-estimator.js', editAnchor(src, from3, "  _ownJudge(f) { return false;\n", "src/usage-estimator.js"), 'no-chunk-own')) : null;
   const ER = EM3 ? evict(EM3.UsageEstimator) : null;
   ok(!!ER && ER.maxOut > 1, `RED: ownership judged only at the open (no judgement at a chunk or a turn) ⇒ ${ER && ER.maxOut} folds hold lines outside the cache at once`, ER);
 }
@@ -440,7 +440,7 @@ console.log('§22 A FIRST LEARN IS NEVER STARVED BY RE-FOLDS — a cold boot und
   const SCALE = 0.25, PER = 2, rs = rows(null, SCALE, PER, 120), BOUND = Math.ceil(rs.lines / (PER * STEP)) + 4; // the first learns' lines at the pass's step budget, +4 passes
   ok(rs.all >= 0 && rs.all <= BOUND && rs.without === 0 && rs.idle === 0, `A COLD BOOT UNDER A ROW EVERY PASS (the owner's 27 × ${SCALE}, ${rs.lines} lines; every identity invalidated each pass; ${PER} turns of ${STEP} lines a pass): all 27 have rates at pass ${rs.all} (stated bound: ${BOUND} = the lines ÷ the pass's budget + 4), ${rs.stale} landings stale on the way, ${rs.idle} turns spent nothing`, rs);
   const M = mutantCopies('usage-relearn-stepped-refoldfirst', REPO), src = read('src/usage-estimator.js'), from = '    f.first = !((this._rateCache.get(identityKey) || {}).rates);\n';
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '    f.first = true;\n'), 'refold-first')) : null; // round 4's queue: no class, the smallest left first
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '    f.first = true;\n', "src/usage-estimator.js"), 'refold-first')) : null; // round 4's queue: no class, the smallest left first
   const R = EM ? rows(EM.UsageEstimator, SCALE, PER, 120) : null;
   ok(!!R && R.all < 0 && R.without > 0, `RED: re-folds in the queue beside first learns (round 4's order) ⇒ after ${R && R.passes} passes ${R && R.without} of 27 identities still have NO rates — starved by the re-folds of the ones that landed`, R);
 }

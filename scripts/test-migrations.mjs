@@ -1499,7 +1499,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       ok(foundDated, 'CONTROL (e) setup: the fold\'s date clause is found exactly once');
       if (foundDated) {
         try {
-          const B0 = MZ.load('src/browser-profiles.js', bpSrc.replace(DATED, "      if (at < (Number(p.scopeAt) || 0)) continue;\n"), 'fold-undated');
+          const B0 = MZ.load('src/browser-profiles.js', editAnchor(bpSrc, DATED, "      if (at < (Number(p.scopeAt) || 0)) continue;\n", "src/browser-profiles.js"), 'fold-undated');
           const z0 = docZ(); const r0 = B0.migrateWhoList(z0);
           ok(r0.migrated.length === 1 && r0.migrated[0].folded.includes(L0) && B0.mayAttach(withUse(z0.profiles[0]), { browserKey: L0 }).ok, 'CONTROL (e): that copy folds the landing into the list — a conversation 2.369.195 refused would be let in by the upgrade; the date clause is what keeps it out', r0);
         } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
@@ -1972,10 +1972,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const guard = "    if (!Object.keys(stripped).length) return { settings: 'untouched', stripped };\n";
       const ret = "    return { settings: 'rewritten', stripped };\n";
       ok(src.split(guard).length === 2 && src.split(ret).length === 2, 'CONTROL scope: the two lines the patched copies remove are present once each');
-      const always = M.load('src/server/migrations.js', src.replace(guard, ''), 'always-rewrite');
+      const always = M.load('src/server/migrations.js', editAnchor(src, guard, '', "src/server/migrations.js"), 'always-rewrite');
       const c1 = (await scenario(always.create, 'mut1')).out;
       ok(!c1.cleanUntouched && c1.stripsExactly, 'NEGATIVE CONTROL: a copy that rewrites even when nothing was stripped is caught by the byte-identical leg (and only by it)');
-      const noArchive = M.load('src/server/migrations.js', src.replace(ret, "    return { settings: 'rewritten', stripped: {} };\n"), 'no-archive');
+      const noArchive = M.load('src/server/migrations.js', editAnchor(src, ret, "    return { settings: 'rewritten', stripped: {} };\n", "src/server/migrations.js"), 'no-archive');
       const c2 = (await scenario(noArchive.create, 'mut2')).out;
       ok(!c2.archived && c2.stripsExactly, 'NEGATIVE CONTROL: a copy that strips without archiving is caught by the archive leg');
       // 主开发's pin (lane engine-spi-egress L3 interim, 2026-11-03): THIS migration strips ITS OWN seven keys, ever — re-run where
@@ -1994,7 +1994,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         '2026-10-settings-rows-retired strips ITS OWN seven keys only: re-run where its ledger was lost, it keeps the two later-retired browser.cloak.* values for 2026-11-cloak-to-plugin to carry', o7.after);
       const cut7 = 'stripRetiredSettings(doc, RETIRED_2026_10)';
       ok(src.split(cut7).length === 2, 'CONTROL scope: the own-seven call is present once');
-      const wholeList = M.load('src/server/migrations.js', src.replace(cut7, 'stripRetiredSettings(doc)'), 'whole-list');
+      const wholeList = M.load('src/server/migrations.js', editAnchor(src, cut7, 'stripRetiredSettings(doc)', "src/server/migrations.js"), 'whole-list');
       const c7 = ownSeven(wholeList.create, 'own-seven-mut');
       ok(c7.own && !c7.kept, 'NEGATIVE CONTROL: the pre-correction call (the whole retired list) strips the browser.cloak.* values a lost ledger re-runs over — the leg above would be red', c7.after);
     }
@@ -2033,9 +2033,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const guardLine = '    if (back.length) { data = { ...data }; for (const k of back) delete data[k]; }\n';
       const reloadLine = "    _settingsCache = v; _settingsRead = true; try { settingsHold.adoptRead(v); } catch { /* held since: its own ladder reads it */ }   // (the file is THERE now: a start read «missing» no longer makes the next write an exclusive create that meets it)\n";   // (B-225b: the re-read replaces the copy only with settings it READ — and the hold adopts it: the file is there now)
       ok(PSRC.split(guardLine).length === 2 && PSRC.split(reloadLine).length === 2, 'CONTROL scope: the writer guard and the cache drop are present once each');
-      const noGuard = await survive(M2.load('src/routes/persistence.js', PSRC.replace(guardLine, ''), 'no-guard'), 'mut-guard');
+      const noGuard = await survive(M2.load('src/routes/persistence.js', editAnchor(PSRC, guardLine, '', "src/routes/persistence.js"), 'no-guard'), 'mut-guard');
       ok(noGuard.stale === 7 && noGuard.fresh === 0, 'NEGATIVE CONTROL: without the writer guard a stale tab writes all seven retired keys back', noGuard);
-      const noReload = await survive(M2.load('src/routes/persistence.js', PSRC.replace(reloadLine, ''), 'no-reload'), 'mut-reload');
+      const noReload = await survive(M2.load('src/routes/persistence.js', editAnchor(PSRC, reloadLine, '', "src/routes/persistence.js"), 'no-reload'), 'mut-reload');
       ok(noReload.served === 7 && noReload.fresh === 7, 'NEGATIVE CONTROL: without the cache drop GET still serves the seven stripped keys and the first save writes them back (the guard trusts the stale cache as "the file still holds it")', noReload);
     }
   }
@@ -2367,7 +2367,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const msrc = fs.readFileSync(path.join(REPO_ROOT, 'src', 'server', 'migrations.js'), 'utf-8');
       const RLINE = "    for (const r of results) if (r.id === '2026-10-grants-unify' && r.status === 'already') Object.assign(r, grantsStoreBoot());   // verify F2: the ledger stamped, the store deleted\n";
       ok(msrc.split(RLINE).length === 2, 'CONTROL setup: the boot-check line is found exactly once');
-      const MM = MR.load('src/server/migrations.js', msrc.replace(RLINE, ''), 'no-rearm');
+      const MM = MR.load('src/server/migrations.js', editAnchor(msrc, RLINE, '', "src/server/migrations.js"), 'no-rearm');
       const rX = mk('gu-rollback-ctl'); fixture(rX);
       bootIn(rX, MM); fs.unlinkSync(gfile(rX));
       const x2 = bootIn(rX, MM);
@@ -2937,7 +2937,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const NSRC = fs.readFileSync(path.join(REPO_ROOT, 'src/custom-theme-normalize.js'), 'utf8');
     const CURRULE = " || (typeof v === 'string' && v.trim() === DERIVED_WARMTH[k])";
     ok(NSRC.split(CURRULE).length === 2, 'ANCHOR: the current-derivation rule, spelled once');
-    const MN = mutantCopies('theme-normalize', REPO_ROOT).load('src/custom-theme-normalize.js', NSRC.replace(CURRULE, ''), 'superseded-only');
+    const MN = mutantCopies('theme-normalize', REPO_ROOT).load('src/custom-theme-normalize.js', editAnchor(NSRC, CURRULE, '', "src/custom-theme-normalize.js"), 'superseded-only');
     const mres = MN.normalizeCustomThemes(STORE);
     ok(!(mres.dropped && mres.dropped.savedSince), 'CONTROL RED: the release\'s rule (the .374 strings only) keeps every current string — the next derivation change needs another migration', mres.dropped);
   }
@@ -3277,7 +3277,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const srcA = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
       const gate = "    const mark = fs.existsSync(path.join(dataDir, CLOAK_OLD.unpackMark));";
       ok(srcA.split(gate).length === 2, 'A CONTROL scope: the proof is read where the patched copy drops it');
-      const noProof = MA.load('src/server/migrations.js', srcA.replace(gate, "    return { present: true, proven: true, why: 'executable' };\n" + gate), 'no-proof');
+      const noProof = MA.load('src/server/migrations.js', editAnchor(srcA, gate, "    return { present: true, proven: true, why: 'executable' };\n" + gate, "src/server/migrations.js"), 'no-proof');
       const wm = seedC('proof-mut', { reg: world() }); const seamM = proofOf(wm, 'marker');
       noProof.create({ rootDir: wm.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: { add: () => ({ id: 'x' }), flush() { } }, ...seamM }).runLocalMigrations({ only: [ID] });
       ok((wm.J('settings.json') || {})[EXE] === wm.dl, 'A NEGATIVE CONTROL: a copy that takes an executable file as proof carries the CUT unpack into the plugin\'s program row — A\'s «marker» leg goes red');
@@ -3322,7 +3322,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         const MS = mutantCopies('migrations-cloak-sync-hash', REPO_ROOT);
         const streamCall = '    const run = sha256Of(f.file).then(';
         ok(srcP.split(streamCall).length === 2, 'A′ CONTROL scope: the streamed hash is where the patched copy puts the sync spelling back');
-        const syncHash = MS.load('src/server/migrations.js', srcP.replace(streamCall, "    const run = Promise.resolve(require('crypto').createHash('sha256').update(fs.readFileSync(f.file)).digest('hex')).then("), 'sync-hash');
+        const syncHash = MS.load('src/server/migrations.js', editAnchor(srcP, streamCall, "    const run = Promise.resolve(require('crypto').createHash('sha256').update(fs.readFileSync(f.file)).digest('hex')).then(", "src/server/migrations.js"), 'sync-hash');
         lgS = await lagRun(syncHash, 'sync');
       } catch (e) { ok(false, `A′: the negative control could not run on this tree (${(e && e.message) || e})`); }
       const lg = await lagRun(MIGM, 'stream');
@@ -3418,7 +3418,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const wc = seedC('mut-over', { reg: world(), settings: { 'browser.cloak.executablePath': '/opt/old/chrome', [EXE]: '/home/u/cloak/chrome' } });
       over.create({ rootDir: wc.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: { add: () => ({ id: 'x' }), flush() { } } }).runLocalMigrations({ only: [ID] });
       ok((wc.J('settings.json') || {})[EXE] === '/opt/old/chrome', 'NEGATIVE CONTROL: a copy without the never-overwrite rule writes over the plugin\'s own program row — M4 goes red');
-      const blind = MC.load('src/server/migrations.js', srcC.replace(readSeeds, "      const T = (() => { try { return readJson(seedsFile, 'seeds'); } catch { return { doc: {} }; } })();"), 'blind-seeds');
+      const blind = MC.load('src/server/migrations.js', editAnchor(srcC, readSeeds, "      const T = (() => { try { return readJson(seedsFile, 'seeds'); } catch { return { doc: {} }; } })();", "src/server/migrations.js"), 'blind-seeds');
       const wd = seedC('mut-seeds', { reg: world(), seeds: '{ not json' });
       blind.create({ rootDir: wd.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: { add: () => ({ id: 'x' }), flush() { } } }).runLocalMigrations({ only: [ID] });
       ok(fs.readFileSync(wd.seedsFile, 'utf8') !== '{ not json', 'NEGATIVE CONTROL: a copy that reads past an unreadable seeds.json writes over the plugin\'s table — M8 goes red');
@@ -3566,7 +3566,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(BS.projs === '-home-userN' && BS.marker, 'B-8033 cure 2: the old user\'s BARE home folder alone names the old user, and moves to the new bare folder (resume in ~ finds its conversations)', BS);
     const STALE = '    const m = /^-home-([a-z][a-z0-9]*)(?:-|$)/.exec(d);';
     ok(CHSRC.split(STALE).length === 2, 'ANCHOR: staleUsers reads the bare folder too, spelled once');
-    const MB = await bareScene(MH.load('src/harnesses/claude-home.js', CHSRC.replace(STALE, '    const m = /^-home-([a-z][a-z0-9]*)-/.exec(d);'), 'bare-unread'), 'mb');
+    const MB = await bareScene(MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, STALE, '    const m = /^-home-([a-z][a-z0-9]*)-/.exec(d);', "src/harnesses/claude-home.js"), 'bare-unread'), 'mb');
     ok(MB.projs === '-home-olduser', 'MUTANT RED: the bare folder unread ⇒ the old user is never found from it; its conversations stay where resume no longer looks', MB);
     // relinkLegacy (the symlinked-home deploy) follows the same law — pinned, not driven: its new prefix is the encoding of the
     // WHOLE home path, and a scratch home never encodes to -home-<name>
@@ -3585,7 +3585,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(relinkReads(CH, 'real') === 0, 'B-8033 cure 3: two relinks over a link and a folder open NO transcript (lstat first)');
     const LST = '    let ds; try { ds = fs.lstatSync(full); } catch { continue; }';
     ok(CHSRC.split(LST).length === 2, 'ANCHOR: the relink\'s lstat, spelled once');
-    ok(relinkReads(MH.load('src/harnesses/claude-home.js', CHSRC.replace(LST, '    ownerByCwd(full, old);\n' + LST), 'relink-reads'), 'm9') > 0, 'MUTANT RED: a relink that asks a transcript before its lstat ⇒ reads through the link, at every boot');
+    ok(relinkReads(MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, LST, '    ownerByCwd(full, old);\n' + LST, "src/harnesses/claude-home.js"), 'relink-reads'), 'm9') > 0, 'MUTANT RED: a relink that asks a transcript before its lstat ⇒ reads through the link, at every boot');
     // cure 3 (A): ONE VERDICT PER FOLDER PER BOOT — the move and the count of what is left share it; counted on a fixture of N folders
     const countScene = async (CHm, tag, k = 5) => {
       const h = path.join(base, `n-${tag}`, 'home', 'olduser-x'), P = path.join(h, '.claude', 'projects');
@@ -3603,7 +3603,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(NC.folders === NC.n && NC.opens === NC.transcripts, `B-8033 cure 3: ONE verdict per folder per boot — ${NC.n} folders, ${NC.transcripts} transcripts ⇒ ${NC.folders} verdicts and ${NC.opens} opens (each transcript once)`, NC);
     const CTX = 'const ctxOwners = (ctx, home, old) => (ctx && ctx.owners) || (ctx ? (ctx.owners = ownersOf(home, old)) : ownersOf(home, old));';
     ok(CHSRC.split(CTX).length === 2, 'ANCHOR: the shared verdicts, spelled once');
-    const NB = await countScene(MH.load('src/harnesses/claude-home.js', CHSRC.replace(CTX, 'const ctxOwners = (ctx, home, old) => ownersOf(home, old);'), 'two-passes'), 'm10');
+    const NB = await countScene(MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, CTX, 'const ctxOwners = (ctx, home, old) => ownersOf(home, old);', "src/harnesses/claude-home.js"), 'two-passes'), 'm10');
     console.log(`    …the two passes of cure 2 (the move, then the count of what is left, each reading): ${NB.folders} folder verdicts, ${NB.opens} transcript opens`);
     ok(NB.opens > NC.opens && NB.folders > NC.folders, 'MUTANT RED: each pass reads for itself (cure 2) ⇒ the transcripts are read again by the count of what is left', NB);
     // cure 3 (B): THE STORES ARE REWRITTEN ONLY FOR A USER THE MOVE JUDGED OLD — the person olduser.x, no /home/olduser here: its own
@@ -3639,7 +3639,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       'B-8033 cure 3: a transcript that cannot be read ⇒ a FAILED move — not marked, said, the stores NOT decided yet; once it reads, the next start moves the folder, marks, and rewrites the stores', US);
     const RE = "    if (cwd === READ_ERR) return 'error';";
     ok(CHSRC.split(RE).length === 2, 'ANCHOR: the unreadable verdict, spelled once');
-    const UM = await unreadScene(MH.load('src/harnesses/claude-home.js', CHSRC.replace(RE, '    if (cwd === READ_ERR) return null;'), 'unread-undecided'), 'm12');
+    const UM = await unreadScene(MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, RE, '    if (cwd === READ_ERR) return null;', "src/harnesses/claude-home.js"), 'unread-undecided'), 'm12');
     ok(UM.m1 === true, 'MUTANT RED: an unreadable transcript taken as «undecided» ⇒ the move is marked whole at once — one NFS hiccup strands the old project for good', UM);
     // …and a folder that can NEVER move does not make the whole move run again at every start for ever: MOVE_TRIES starts (one a
     // TRY_GAP_MS — a restart loop spends one), then said once and marked
@@ -3679,7 +3679,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(LA.failed === 1 && LA.sameName === 0, 'B-8033 cure r2: the new folder lacks s2.jsonl the old one holds ⇒ failed (no marker, tried again)', LA);
     const FSOME = '    if (!dstDir || files.some((f) => !fs.existsSync(path.join(dst, f)))) failed++; else sameName++;';
     ok(CHSRC.split(FSOME).length === 2, 'ANCHOR: leftAfterMove\'s missing-transcript test, spelled once');
-    const MLA = MH.load('src/harnesses/claude-home.js', CHSRC.replace(FSOME, '    if (!dstDir) failed++; else sameName++;'), 'left-names-unread').leftAfterMove(lh, 'olduser', 'userN');
+    const MLA = MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, FSOME, '    if (!dstDir) failed++; else sameName++;', "src/harnesses/claude-home.js"), 'left-names-unread').leftAfterMove(lh, 'olduser', 'userN');
     ok(MLA.sameName === 1 && MLA.failed === 0, 'MUTANT RED: the transcripts not compared ⇒ the move is called whole, s2.jsonl stranded under the old name for good', MLA);
     const SJ = fs.readFileSync(path.join(REPO_ROOT, 'server.js'), 'utf8');
     ok(/require\('\.\/src\/server\/home-rename\.js'\)\.migrateHomeRename\(\{ dataDir: path\.join\(__dirname, 'data'\), metaDir: META_DIR \}\);/.test(SJ) && !/function migrateHomeRename/.test(SJ),

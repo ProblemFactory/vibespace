@@ -149,17 +149,17 @@ const ksrc = read('src/server/browser-keeper.js');
   // isRemoteKey itself: the wiring's rule (a live session on another machine), never a branch on hostId inside the keeper
   ok(/const isRemoteKey = \(browserKey, remote = false\) => \{ if \(remote\) return true; try \{ const v = remoteKeys\(\);/.test(ksrc) && !/hostId\s*\|\|\s*\w+\.host\b/.test(stripComments(ksrc).split('\n').filter((l) => /isRemoteKey/.test(l)).join('\n')), 'isRemoteKey reads the wiring\'s `remoteKeys()` set (or the caller\'s explicit `remote`), never a hostId branch of its own');
   // CONTROL (a): a raw door added to the keeper — a new function pushing a lease without any fence ⇒ unknown site RED
-  const rawDoor = ksrc.replace('  function detach({ profileId, profile: ref, browserKey, by = \'agent\' } = {}) {', "  function joinRaw(profileId, browserKey) { reg.leases.push({ profileId, browserKey, since: now() }); commit(); }\n  function detach({ profileId, profile: ref, browserKey, by = 'agent' } = {}) {");
+  const rawDoor = editAnchor(ksrc, '  function detach({ profileId, profile: ref, browserKey, by = \'agent\' } = {}) {', "  function joinRaw(profileId, browserKey) { reg.leases.push({ profileId, browserKey, since: now() }); commit(); }\n  function detach({ profileId, profile: ref, browserKey, by = 'agent' } = {}) {", "src/server/browser-keeper.js");
   const va = judgeAdmission(rawDoor);
   ok(rawDoor !== ksrc && va.unknown.length === 1 && /lease-push .* in joinRaw/.test(va.unknown[0]), 'CONTROL (a): a keeper copy with a raw `joinRaw` door that pushes a lease outside the fence is RED by name', va.unknown);
   M.write('src/server/browser-keeper.js', rawDoor, 'raw-door'); // written (the census discipline: every control is a copy outside the tree), judged as text
   // CONTROL (b): attach without its remote fence ⇒ the fence-order leg RED naming attach
-  const noFence = ksrc.replace(/    if \(isRemoteKey\(browserKey\)\) \{\n      const rr = B\.remoteSessionRefusal\(\{ label: p\.label \}\);[\s\S]*?throw namedError\(rr\.code, rr\.error, \{ remedy: rr\.remedy \}\);\n    \}\n/, '');
+  const noFence = editAnchor(ksrc, /    if \(isRemoteKey\(browserKey\)\) \{\n      const rr = B\.remoteSessionRefusal\(\{ label: p\.label \}\);[\s\S]*?throw namedError\(rr\.code, rr\.error, \{ remedy: rr\.remedy \}\);\n    \}\n/, '', "src/server/browser-keeper.js");
   const vb = judgeAdmission(noFence);
   ok(noFence !== ksrc && vb.fence.some((x) => /^attach: "isRemoteKey\(browserKey\)"/.test(x)), 'CONTROL (b): a keeper copy whose `attach` lost the remote fence is RED (attach named, the missing needle named)', vb.fence);
   M.write('src/server/browser-keeper.js', noFence, 'no-remote-fence');
   // CONTROL (c): setPin writing the owner itself (the list written beside the ONE add) ⇒ RED
-  const pinWrites = ksrc.replace("    reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };", "    { const rw = B.rowWithConversation(p, browserKey); if (rw) writeUseRow(p, rw, 'user'); }\n    reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };");
+  const pinWrites = editAnchor(ksrc, "    reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };", "    { const rw = B.rowWithConversation(p, browserKey); if (rw) writeUseRow(p, rw, 'user'); }\n    reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };", "src/server/browser-keeper.js");
   const vc = judgeAdmission(pinWrites);
   ok(pinWrites !== ksrc && vc.fence.some((x) => /^setPin: must never contain/.test(x)), 'CONTROL (c): a keeper copy whose `setPin` writes the owner list itself (a second writer beside addConversation) is RED', vc.fence);
   M.write('src/server/browser-keeper.js', pinWrites, 'pin-writes-owner');
@@ -313,7 +313,7 @@ const rsrc = read('src/routes/browser.js');
   // the belt's exception: exactly ['drivers'] (owner ruling A (2)), spelled once in the PURE module
   ok(Array.isArray(B.BELT_EXCEPTIONS) && B.BELT_EXCEPTIONS.length === 0 && Object.isFrozen(B.BELT_EXCEPTIONS), 'BELT_EXCEPTIONS is EMPTY and frozen — lane browser-windows retired `$.drivers` (owner ruling A (2)\'s one exception) with the drive claim: no conversation\'s key reaches another, ever');
   // CONTROL (e): a raw agent route registered BEFORE the belt ⇒ RED naming the route and the belt line
-  const early = rsrc.replace("const AGENT_PREFIX = '/api/agent/browser';", "router.get('/api/agent/browser/early', (req, res) => res.json(ctx.keeper.list()));\nconst AGENT_PREFIX = '/api/agent/browser';");
+  const early = editAnchor(rsrc, "const AGENT_PREFIX = '/api/agent/browser';", "router.get('/api/agent/browser/early', (req, res) => res.json(ctx.keeper.list()));\nconst AGENT_PREFIX = '/api/agent/browser';", "src/routes/browser.js");
   const ve = judgeAgentRoutes(early);
   ok(early !== rsrc && ve.problems.some((p) => /early .*registered BEFORE the belt/.test(p)), 'CONTROL (e): a routes copy with a raw route registered before the belt is RED by name', ve.problems);
   M.write('src/routes/browser.js', early, 'early-route');
@@ -569,7 +569,7 @@ async function walkAs(jj, s, { eph = aEph && aEph.profileId, helper = helperKey 
   // CONTROL (h): the routes WITHOUT the belt + a raw route answering k.list() ⇒ the walk is RED on that route
   const rsrcAll = read('src/routes/browser.js');
   const rawRoute = "\nrouter.get('/api/agent/browser/raw', (req, res) => { const f = agentFacts(req, res); if (!f) return; res.json({ ...ctx.keeper.list(), me: ctx.keeper.statusFor(f.browserKey), rows: ctx.keeper.switcherView(" + JSON.stringify(P.id) + ").rows }); });\n";
-  const noBelt = rsrcAll.replace('router.use(AGENT_PREFIX, agentBelt);', '') + rawRoute;
+  const noBelt = editAnchor(rsrcAll, 'router.use(AGENT_PREFIX, agentBelt);', '', "src/routes/browser.js") + rawRoute;
   ok(noBelt !== rsrcAll + rawRoute, 'CONTROL (h): the belt line was really removed from the copy');
   const Rn = M.load('src/routes/browser.js', noBelt, 'no-belt-raw-route'); Rn.setup(ctxFor(k));
   const srvN = await serve([Rn.router]); const jN = jAt(`http://127.0.0.1:${srvN.address().port}`);
@@ -590,7 +590,7 @@ async function walkAs(jj, s, { eph = aEph && aEph.profileId, helper = helperKey 
   srvB.close();
   // CONTROL (i): a PURE belt copy that GAINS an exception ⇒ the walk's judge RED on it (lane browser-windows: there is none)
   const bsrc = read('src/browser-profiles.js');
-  const bsrcX = bsrc.replace("const BELT_EXCEPTIONS = Object.freeze([]);", "const BELT_EXCEPTIONS = Object.freeze(['leases']);");
+  const bsrcX = editAnchor(bsrc, "const BELT_EXCEPTIONS = Object.freeze([]);", "const BELT_EXCEPTIONS = Object.freeze(['leases']);", "src/browser-profiles.js");
   ok(bsrcX !== bsrc, 'control: the patched belt copy gained an exception (`leases`)');
   const Bx = M.load('src/browser-profiles.js', bsrcX, 'two-exceptions');
   const raw = { ...k.list(), me: k.statusFor(Bk) };
@@ -609,12 +609,12 @@ async function walkAs(jj, s, { eph = aEph && aEph.profileId, helper = helperKey 
     ok(!bad(out), 'r4 the belt masks a key inside a longer token, beside a letter / digit / underscore, in upper case, in a url, as an object KEY (twice, told apart), in a 140 KB string and 70 levels deep (dropped), a conversation id inside a sentence, an ephemeral pid', JSON.stringify(out).slice(0, 300));
     ok(out.own === me && out.ownChild === me + '.2' && out.ownUpper === me.toUpperCase() && Object.keys(out.twoKeys).length === 2 && !JSON.stringify(out.deep).includes(A1) && JSON.stringify(out.deep).includes('null'), 'r4 the asker\'s own key (child form, upper case) is kept; two masked keys are two entries; the too-deep subtree is dropped, never returned raw', out);
     ok(v({ s: A1 + ' and ' + A1 + '.1' }, [A1 + '.1']).s === B.MASKED_KEY + ' and ' + A1 + '.1', 'r4 an echo of what the asker said is kept even beside a masked one');
-    const pre = M.load('src/browser-profiles.js', bsrc.replace("const KEY_IN_TEXT_RE = /bk-[0-9a-f]{8}(?:\\.\\d{1,4})?/gi;", "const KEY_IN_TEXT_RE = /\\bbk-[0-9a-f]{8}(?:\\.\\d{1,4})?\\b/g;"), 'pre-r4-belt-regex');
+    const pre = M.load('src/browser-profiles.js', editAnchor(bsrc, "const KEY_IN_TEXT_RE = /bk-[0-9a-f]{8}(?:\\.\\d{1,4})?/gi;", "const KEY_IN_TEXT_RE = /\\bbk-[0-9a-f]{8}(?:\\.\\d{1,4})?\\b/g;", "src/browser-profiles.js"), 'pre-r4-belt-regex');
     const preOut = pre.agentAnswerView({ under: 'trace_' + A1, upper: A1.toUpperCase(), hexAfter: A1 + 'f' }, { me, foreign: fg, echoes: new Set() });
     ok(/bk-0000aaa1|BK-0000AAA1/.test(JSON.stringify(preOut)), 'CONTROL (i″): the pre-r4 word-boundary regex in a copy lets `trace_bk-…`, `BK-…` and `bk-…f` through — RED', preOut);
   }
   // the belt fails CLOSED: a body it cannot judge is answered as belt_failed, never raw
-  const Rf = M.load('src/routes/browser.js', rsrcAll.replace('out = B.agentAnswerView(body, {', 'if (body && body.profiles) throw new Error(\'fake: cannot judge\'); out = B.agentAnswerView(body, {') + rawRoute, 'belt-throws'); Rf.setup(ctxFor(k));
+  const Rf = M.load('src/routes/browser.js', editAnchor(rsrcAll, 'out = B.agentAnswerView(body, {', 'if (body && body.profiles) throw new Error(\'fake: cannot judge\'); out = B.agentAnswerView(body, {', "src/routes/browser.js") + rawRoute, 'belt-throws'); Rf.setup(ctxFor(k));
   const srvF = await serve([Rf.router]); const jF = jAt(`http://127.0.0.1:${srvF.address().port}`);
   const warn0 = console.warn; console.warn = () => { }; // the belt's own warn line, expected here
   const rf = await jF('GET', '/api/agent/browser/raw', undefined, as(sB));
@@ -661,7 +661,7 @@ console.log('— ④b the user browsing a profile himself: every agent READ byte
   const rsrc = read('src/routes/browser.js');
   const sneedle = 'k.switcherView(p.id, { forAgent: true })';
   ok(rsrc.includes(sneedle), 'the agent switcher-read needle');
-  const Rh = M.load('src/routes/browser.js', rsrc.replace(sneedle, 'k.switcherView(p.id)'), 'agent-switcher-with-human'); Rh.setup(ctxFor(k));
+  const Rh = M.load('src/routes/browser.js', editAnchor(rsrc, sneedle, 'k.switcherView(p.id)', "src/routes/browser.js"), 'agent-switcher-with-human'); Rh.setup(ctxFor(k));
   const srvH = await serve([Rh.router]); const jH = jAt(`http://127.0.0.1:${srvH.address().port}`);
   const rh = await jH('GET', '/api/agent/browser/backend?profile=p-all', undefined, as(sB));
   const i0 = GETS.findIndex(([, p]) => p === '/api/agent/browser/backend?profile=p-all');
@@ -691,8 +691,8 @@ console.log('— ④b the user browsing a profile himself: every agent READ byte
     const ksrc = read('src/server/browser-keeper.js');
     const L1 = 'inputs: inputsView({ withHumans: !forAgent })', L2 = 'humans: forAgent ? [] : humanRowsOn(p.id)';
     ok(ksrc.includes(L1) && ksrc.includes(L2), 'the two forAgent layers (the controls below remove them)');
-    const kIn = await faLeg(M.load('src/server/browser-keeper.js', ksrc.replace(L1, 'inputs: inputsView()'), 'fa-inputs-only-gone'), 'in');
-    const kHu = await faLeg(M.load('src/server/browser-keeper.js', ksrc.replace(L2, 'humans: humanRowsOn(p.id)'), 'fa-rows-only-gone'), 'hu');
+    const kIn = await faLeg(M.load('src/server/browser-keeper.js', editAnchor(ksrc, L1, 'inputs: inputsView()', "src/server/browser-keeper.js"), 'fa-inputs-only-gone'), 'in');
+    const kHu = await faLeg(M.load('src/server/browser-keeper.js', editAnchor(ksrc, L2, 'humans: humanRowsOn(p.id)', "src/server/browser-keeper.js"), 'fa-rows-only-gone'), 'hu');
     const kBoth = await faLeg(M.load('src/server/browser-keeper.js', editAnchor(editAnchor(ksrc, L1, 'inputs: inputsView()', "src/server/browser-keeper.js"), L2, 'humans: humanRowsOn(p.id)', "src/server/browser-keeper.js"), 'fa-both-gone'), 'both');
     ok(kIn.same && kHu.same && !kBoth.same, 'CONTROLS: either forAgent layer alone keeps him out of the agent\'s read (two layers, each enough); with BOTH gone the agent reads his hold ("driven") — the leg above can go red', { inputsGone: kIn, rowsGone: kHu, bothGone: kBoth });
     // …and the BELT's own `hu-` mask (r1: "a raw route tomorrow"): a raw answer carrying his key through the REAL PURE belt is
@@ -701,7 +701,7 @@ console.log('— ④b the user browsing a profile himself: every agent READ byte
     const viaBelt = JSON.stringify(B.agentAnswerView(rawHuman, { me: A, foreign: { ids: new Set(), pids: new Set() } }));
     const bsrc2 = read('src/browser-profiles.js');
     const mline = "    t = t.replace(HUMAN_KEY_IN_TEXT_RE, (m) => (said.has(m) ? m : MASKED_KEY)); // BROWSE YOURSELF verify r1: the user's key is nobody's to read (a proposal's reason, a raw route tomorrow)\n";
-    const Bm = M.load('src/browser-profiles.js', bsrc2.replace(mline, ''), 'belt-no-human-mask');
+    const Bm = M.load('src/browser-profiles.js', editAnchor(bsrc2, mline, '', "src/browser-profiles.js"), 'belt-no-human-mask');
     const viaNoMask = JSON.stringify(Bm.agentAnswerView(rawHuman, { me: A, foreign: { ids: new Set(), pids: new Set() } }));
     ok(rawHuman.h && !/hu-[0-9a-f]{8}/.test(viaBelt) && bsrc2.includes(mline) && viaNoMask.includes(HALL), 'the BELT masks his key in a raw answer (`bk-********`); CONTROL a belt copy without the `hu-` mask hands it to the agent — red', { viaBelt: viaBelt.slice(0, 200) });
   }
@@ -745,7 +745,7 @@ console.log('— ⑤ THE SWITCH: an agent the list keeps out never switches a pr
   try { await kw.stop(pw.id, { why: 'user' }); } catch { /* fake */ }
   // CONTROL (j): the pre-fix rule restored (owner.kind === 'session') ⇒ the list shapes switch directly — RED
   const swsrc = read('src/browser-switch.js');
-  const pre = swsrc.replace(/    else if \(admitted !== true\) \{ mode = 'proposal'; reason = admitted === false \? '[^']*' : '[^']*'; \}/, "    else if (profile.owner && profile.owner.kind === 'session' && byKey && profile.owner.id !== byKey) { mode = 'proposal'; reason = 'this conversation does not own the profile'; }");
+  const pre = editAnchor(swsrc, /    else if \(admitted !== true\) \{ mode = 'proposal'; reason = admitted === false \? '[^']*' : '[^']*'; \}/, "    else if (profile.owner && profile.owner.kind === 'session' && byKey && profile.owner.id !== byKey) { mode = 'proposal'; reason = 'this conversation does not own the profile'; }", "src/browser-switch.js");
   const SWp = M.load('src/browser-switch.js', pre, 'pre-fix-owner-rule');
   const direct = T.slice(0, 3).map(([n, p]) => [n, SWp.switchVerdict({ ...base, profile: p, admitted: false }).mode]);
   ok(pre !== swsrc && direct[0][1] === 'switch' && direct[1][1] === 'switch' && direct[2][1] === 'proposal', 'CONTROL (j): the pre-fix rule (owner.kind === \'session\') in a copy: the list and the task list switch DIRECTLY, only the retired pre-list shape proposes — the table is RED on it', direct);
@@ -821,7 +821,7 @@ console.log('— ⑥ THE FRESH-KEY RULE (r4): a browser key is 32 bits and carri
   const bsrc = read('src/browser-profiles.js');
   const nl = "    if (!named(key)) return { key, retries, exhausted: false };";
   ok(bsrc.split(nl).length === 2, '⑥ control setup: the rule\'s one line is found once');
-  const Bm = M.load('src/browser-profiles.js', bsrc.replace(nl, "    if (true) return { key, retries, exhausted: false };"), 'no-fresh-rule');
+  const Bm = M.load('src/browser-profiles.js', editAnchor(bsrc, nl, "    if (true) return { key, retries, exhausted: false };", "src/browser-profiles.js"), 'no-fresh-rule');
   const rl = Bm.freshBrowserKey({ mint: seq([OLD, 'bk-0000beef']), named });
   ok(rl.key === OLD, 'CONTROL (l): the loop without its rule (a copy) hands out the key the store still names — RED', rl);
   const bkRaw = read('src/server/browser-key.js').replace(/B\.freshBrowserKey\(\{ mint: rawMint, named: keyNamed \}\)/, '{ key: rawMint(), retries: 0, exhausted: false }');
@@ -877,7 +877,7 @@ console.log('— ⑦ A TASK GROUP CHANGE (r4): a conversation removed from the T
   const ksrc = read('src/server/browser-keeper.js');
   const nk = "      if (!row || ![...row.to, ...row.except].some((e) => e.kind === 'group')) continue;";   // lane grants-unify: the walk's filter reads the store's row
   ok(ksrc.split(nk).length === 2, '⑦ control setup: the walk\'s one filter line is found once');
-  const Km = M.load('src/server/browser-keeper.js', ksrc.replace(nk, "      if (true) continue;"), 'no-task-walk');
+  const Km = M.load('src/server/browser-keeper.js', editAnchor(ksrc, nk, "      if (true) continue;", "src/server/browser-keeper.js"), 'no-task-walk');
   groupsOf.set(KT, ['T-G']); r = await j('POST', '/api/agent/browser/use', { profile: 'p-group-med' }, as(sT)); ok(r.status === 200, '⑦ T re-admitted for the control');
   const km = Km.create({ ...taskDeps, dataDir: DATA, homeDir: HOME, env: () => env, serverSetting: () => undefined, liveKeys: () => live, remoteKeys, runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: { log() { }, warn() { }, error() { } }, install: false, now: () => clock, conversationFacts: (bk) => facts[bk] || { turn: null, name: null } });
   groupsOf.set(KT, []);

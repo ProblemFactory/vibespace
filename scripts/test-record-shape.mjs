@@ -249,20 +249,20 @@ console.log('§2c the card policy\'s RED controls — a patched copy per rule (.
   };
   const real = run(MM);
   ok('the real normalizer: field growth ⇒ 1 card + 1 ledger row; an enum drift ⇒ 1 card (lane drift-card-restore: the card is the update signal)', real.fieldCards === 1 && real.rows === 1 && real.enumCards === 1, real);
-  const hidden = require(M.write('src/message-manager.js', mmSrc.replace(gate, '    if (!newEnums.length) return;\n'), 'hidden-276'));
+  const hidden = require(M.write('src/message-manager.js', editAnchor(mmSrc, gate, '    if (!newEnums.length) return;\n', "src/message-manager.js"), 'hidden-276'));
   const hc = run(hidden);
   ok('CONTROL: a copy with .276\'s hiding restored (only an undeclared value draws a card) ⇒ the field leg goes RED (no system/init card; the enum card and the row stay)', hc.fieldCards === 0 && hc.enumCards === 1 && hc.rows === 1, hc);
-  const noRow = require(M.write('src/message-manager.js', mmSrc.replace(write, '    if (false) noteFieldDrift({ conversation: raw.session_id || raw.sessionId || this.sessionId,'), 'no-ledger'));
+  const noRow = require(M.write('src/message-manager.js', editAnchor(mmSrc, write, '    if (false) noteFieldDrift({ conversation: raw.session_id || raw.sessionId || this.sessionId,', "src/message-manager.js"), 'no-ledger'));
   const nr = run(noRow);
   ok('CONTROL: a copy that never writes the ledger ⇒ the ledger leg goes RED (0 rows — ⚙ Diagnostics would list nothing; the card alone stays)', nr.rows === 0 && nr.fieldCards === 1, nr);
-  const noEnum = require(M.write('src/message-manager.js', mmSrc.replace(gate, '    if (!newFields.length) return;\n'), 'no-enum-card'));
+  const noEnum = require(M.write('src/message-manager.js', editAnchor(mmSrc, gate, '    if (!newFields.length) return;\n', "src/message-manager.js"), 'no-enum-card'));
   const ne = run(noEnum);
   ok('CONTROL: a copy that drops the enum card ⇒ the enum leg goes RED (0 cards for the undeclared value)', ne.enumCards === 0, ne);
   // the codex twin, the same three-way rule
   const cxRun = (C, MMx) => { const x = new C('test-policy-cx-' + Math.random()); x.processLive({ timestamp: '2026-10-15T00:00:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: 1 }, last_token_usage: { total_tokens: 1 }, model_context_window: 100, grown: 1 }, rate_limits: { limit_id: 'codex' } } }); return { cards: driftCards(x).length, rows: ledgerOf(x.sessionId, MMx).length }; };
   const cr = cxRun(CodexMessageManager, MM);
   ok('codex: field growth ⇒ 1 card + 1 ledger row (the shared ledger, harness Codex)', cr.cards === 1 && cr.rows === 1, cr);
-  const cxHidden = require(M.write('src/codex-message-manager.js', cxSrc.replace(gate, '    if (!newEnums.length) return;\n'), 'cx-hidden-276')).CodexMessageManager;
+  const cxHidden = require(M.write('src/codex-message-manager.js', editAnchor(cxSrc, gate, '    if (!newEnums.length) return;\n', "src/codex-message-manager.js"), 'cx-hidden-276')).CodexMessageManager;
   const co = cxRun(cxHidden, MM);
   ok('CONTROL: the codex copy with .276\'s hiding restored ⇒ RED (0 cards, the row alone)', co.cards === 0 && co.rows === 1, co);
 }
@@ -805,7 +805,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const M7 = mutantCopies('record-307', REPO);
     const FILL7 = 'for (const [key, fields] of Object.entries(FIELDS_307)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);';
     const rsSrc7 = read('src/record-shape.js'), mmSrc7 = read('src/message-manager.js'), REQ7 = "require('./record-shape.js')";
-    const MM7 = rsSrc7.split(FILL7).length === 2 && mmSrc7.split(REQ7).length === 2 ? require(M7.write('src/message-manager.js', mmSrc7.replace(REQ7, 'require(' + JSON.stringify(M7.write('src/record-shape.js', rsSrc7.replace(FILL7, '/* FIELDS_307 not filled (control) */'), 'no-307')) + ')'), 'mm-no-307')) : null;
+    const MM7 = rsSrc7.split(FILL7).length === 2 && mmSrc7.split(REQ7).length === 2 ? require(M7.write('src/message-manager.js', editAnchor(mmSrc7, REQ7, 'require(' + JSON.stringify(M7.write('src/record-shape.js', editAnchor(rsSrc7, FILL7, '/* FIELDS_307 not filled (control) */', "src/record-shape.js"), 'no-307')) + ')', "src/message-manager.js"), 'mm-no-307')) : null;
     const ctl7 = MM7 && live7(MM7, SID7.replace(/a7$/, 'a8'));
     ok('RED CONTROL: the same frames on a copy without FIELDS_307 (the .340 tree on 2.1.307) ⇒ the red card is back — ONE drift card on command_lifecycle naming scheduled_for + wakeup_source, and its ledger row; the attachment still draws nothing', !!ctl7 && ctl7.cards === 1 && ctl7.fields === 'scheduled_for,wakeup_source' && ctl7.rows === 1 && ctl7.attachmentMsgs === 0, ctl7);
     // THE NESTED OBJECTS (lane cli-2-1-307-records) — the union is depth-1, so a field a build added INSIDE rate_limit_info never
@@ -829,7 +829,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const realRl = liveRl(MM, 'e2e00000-0000-4000-8000-0000000003b1');
     ok('the REAL normalizer on a 2.1.307 rejected rate_limit_event (overageEnabled, overageInUse, usageCreditOffer, adminRequestOffer) ⇒ no drift card, no ledger row', realRl.cards === 0 && realRl.rows === 0, realRl);
     const EXPORTS7 = 'module.exports = { SCHEMA_CLI_VERSION,';
-    const MMn = rsSrc7.split(EXPORTS7).length === 2 ? require(M7.write('src/message-manager.js', mmSrc7.replace(REQ7, 'require(' + JSON.stringify(M7.write('src/record-shape.js', rsSrc7.replace(EXPORTS7, "for (const sp of [RATE_LIMIT_INFO, COMPACT_METADATA, API_ERROR_ERROR]) sp.ignored.clear(); RATE_LIMIT_INFO.known.delete('overageInUse'); /* the .340 nested declaration (control) */\n" + EXPORTS7), 'nested-340')) + ')'), 'mm-nested-340')) : null;
+    const MMn = rsSrc7.split(EXPORTS7).length === 2 ? require(M7.write('src/message-manager.js', editAnchor(mmSrc7, REQ7, 'require(' + JSON.stringify(M7.write('src/record-shape.js', editAnchor(rsSrc7, EXPORTS7, "for (const sp of [RATE_LIMIT_INFO, COMPACT_METADATA, API_ERROR_ERROR]) sp.ignored.clear(); RATE_LIMIT_INFO.known.delete('overageInUse'); /* the .340 nested declaration (control) */\n" + EXPORTS7, "src/record-shape.js"), 'nested-340')) + ')', "src/message-manager.js"), 'mm-nested-340')) : null;
     const ctlRl = MMn && liveRl(MMn, 'e2e00000-0000-4000-8000-0000000003b2');
     ok('RED CONTROL: the same frame on a copy with the .340 nested declaration ⇒ the red card is back — ONE drift card on rate_limit_event naming rate_limit_info.adminRequestOffer / .overageEnabled / .overageInUse / .usageCreditOffer, and its ledger row', !!ctlRl && ctlRl.cards === 1 && ctlRl.fields === 'rate_limit_info.adminRequestOffer,rate_limit_info.overageEnabled,rate_limit_info.overageInUse,rate_limit_info.usageCreditOffer' && ctlRl.rows === 1, ctlRl);
     // THE 2.1.308 PIN (lane cli-2-1-308-records) — the hub's claude AUTO-UPDATED again (2026-10-21 22:48 PT): its dump (strings over a
@@ -881,7 +881,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const M12 = mutantCopies('record-312', REPO);
     const FILL12 = 'for (const [key, fields] of Object.entries(FIELDS_312)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);';
     const rsSrc12 = read('src/record-shape.js'), mmSrc12 = read('src/message-manager.js');
-    const MM12 = rsSrc12.split(FILL12).length === 2 && mmSrc12.split(REQ7).length === 2 ? require(M12.write('src/message-manager.js', mmSrc12.replace(REQ7, 'require(' + JSON.stringify(M12.write('src/record-shape.js', rsSrc12.replace(FILL12, '/* FIELDS_312 not filled (control) */'), 'no-312')) + ')'), 'mm-no-312')) : null;
+    const MM12 = rsSrc12.split(FILL12).length === 2 && mmSrc12.split(REQ7).length === 2 ? require(M12.write('src/message-manager.js', editAnchor(mmSrc12, REQ7, 'require(' + JSON.stringify(M12.write('src/record-shape.js', editAnchor(rsSrc12, FILL12, '/* FIELDS_312 not filled (control) */', "src/record-shape.js"), 'no-312')) + ')', "src/message-manager.js"), 'mm-no-312')) : null;
     const ctl12 = MM12 && live12(MM12);
     ok('RED CONTROL: the same stdout on a copy without FIELDS_312 (the 7df30f96 tree on 2.1.312) ⇒ the card is back in EVERY conversation — ONE drift card on result naming model_usage_since_last_result alone, CLI 2.1.312, and its ledger row', !!ctl12 && ctl12.every((c) => c.cards === 1 && c.shapes === 'result' && c.fields === 'model_usage_since_last_result' && c.cli === '2.1.312' && c.rows === 1), ctl12);
     // A RECORD THE PRODUCT'S OWN INPUT CAUSES IS DECLARED WITH THE INPUT (lane claude-steer-inject r5): r4's chat wrapper stamps a uuid
@@ -905,7 +905,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const rsSrcU = read('src/record-shape.js'), mmSrcU = read('src/message-manager.js');
     const ROW_U = '    user_message_uuids: INIT_UUIDS_NOTE,\n';
     const MU = mutantCopies('record-init-uuids', REPO);
-    const MMU = rsSrcU.split(ROW_U).length === 2 && mmSrcU.split(REQ7).length === 2 ? require(MU.write('src/message-manager.js', mmSrcU.replace(REQ7, 'require(' + JSON.stringify(MU.write('src/record-shape.js', rsSrcU.replace(ROW_U, ''), 'no-init-uuids')) + ')'), 'mm-no-init-uuids')) : null;
+    const MMU = rsSrcU.split(ROW_U).length === 2 && mmSrcU.split(REQ7).length === 2 ? require(MU.write('src/message-manager.js', editAnchor(mmSrcU, REQ7, 'require(' + JSON.stringify(MU.write('src/record-shape.js', editAnchor(rsSrcU, ROW_U, '', "src/record-shape.js"), 'no-init-uuids')) + ')', "src/message-manager.js"), 'mm-no-init-uuids')) : null;
     ok('init.user_message_uuids is a CORPUS row (undeclared on init upstream), keyed by the builds it was MEASURED on (' + R.INIT_UUIDS_MEASURED.join(', ') + '), its reason naming the stamp that causes it — never known (nothing reads it)', R.INIT_UUIDS_MEASURED.includes('2.1.308') && R.INIT_UUIDS_MEASURED.includes('2.1.312') && R.SHAPES['claude:stream:system/init'].ignored.has('user_message_uuids') && !R.SHAPES['claude:stream:system/init'].known.has('user_message_uuids') && /MEASURED on 2\.1\.308 and 2\.1\.312/.test(R.SHAPES['claude:stream:system/init'].ignored.get('user_message_uuids')) && /stamps a uuid/.test(R.SHAPES['claude:stream:system/init'].ignored.get('user_message_uuids')) && !!MMU);
     for (const v of R.INIT_UUIDS_MEASURED) {
       const recs = stampedOf(v);
@@ -958,7 +958,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     ok('the REAL normalizer on a 2.1.314 ui_placed record (the literal\'s shape) ⇒ no card of any kind, no ledger row, no message', realUp.unknown === 0 && realUp.drift === 0 && realUp.rows === 0 && realUp.all === 0, realUp);
     const M14 = mutantCopies('record-314', REPO);
     const mmSrc14 = read('src/message-manager.js'), UP_LINE = mmSrc14.split('\n').filter((l) => l.startsWith("  'ui_placed',"));
-    const MMup = UP_LINE.length === 1 ? require(M14.write('src/message-manager.js', mmSrc14.replace(UP_LINE[0] + '\n', ''), 'no-ui-placed')) : null;
+    const MMup = UP_LINE.length === 1 ? require(M14.write('src/message-manager.js', editAnchor(mmSrc14, UP_LINE[0] + '\n', '', "src/message-manager.js"), 'no-ui-placed')) : null;
     const ctlUp = MMup && liveUp(MMup, 'e2e00000-0000-4000-8000-0000000003c2');
     ok('RED CONTROL: the same record on a copy without the ui_placed row (the .366 tree on 2.1.314) ⇒ the red «Unknown event» card is back, and no drift card', !!ctlUp && ctlUp.unknown === 1 && ctlUp.drift === 0, ctlUp);
     // m9t — the correction: ww's sentence plus « Correction to the text above: this call was stopped while running, …»
@@ -1051,7 +1051,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const rsSrc19 = read('src/record-shape.js'), FILL19 = "for (const [key, fields] of Object.entries(FIELDS_319)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);\n";
     const NEST19 = rsSrc19.split('\n').filter((l) => l.startsWith('    dailyCapPaused: NESTED_NOTE('));
     const REQ19 = "require('./record-shape.js')";
-    const MMno19 = rsSrc19.includes(FILL19) && NEST19.length === 1 && mmSrc19.split(REQ19).length === 2 ? require(M19.write('src/message-manager.js', mmSrc19.replace(REQ19, 'require(' + JSON.stringify(M19.write('src/record-shape.js', editAnchor(editAnchor(rsSrc19, FILL19, '', "src/record-shape.js"), NEST19[0] + '\n', '', "src/record-shape.js"), 'no-fields-319')) + ')'), 'mm-no-fields-319')) : null;
+    const MMno19 = rsSrc19.includes(FILL19) && NEST19.length === 1 && mmSrc19.split(REQ19).length === 2 ? require(M19.write('src/message-manager.js', editAnchor(mmSrc19, REQ19, 'require(' + JSON.stringify(M19.write('src/record-shape.js', editAnchor(editAnchor(rsSrc19, FILL19, '', "src/record-shape.js"), NEST19[0] + '\n', '', "src/record-shape.js"), 'no-fields-319')) + ')', "src/message-manager.js"), 'mm-no-fields-319')) : null;
     const ctlF19 = MMno19 && liveF19(MMno19, 'e2e00000-0000-4000-8000-0000000003d5');
     ok('RED CONTROL: the same conversation on a copy without FIELDS_319 + dailyCapPaused (the 8b3fdb6ab tree on 2.1.319) ⇒ the drift cards and the ledger rows are back', !!ctlF19 && ctlF19.drift >= 3 && ctlF19.rows >= 3, ctlF19);
     // LAW 3, FOR THE PERSON (主开发 on the interim): what each new shape DOES show. An unknown record is silence in a person's chat (lane door-healthy-chat), so a
@@ -1125,7 +1125,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const rsSrc21 = read('src/record-shape.js'), mmSrc21 = read('src/message-manager.js'), REQ21 = "require('./record-shape.js')";
     const FILL21 = "for (const [key, fields] of Object.entries(FIELDS_321)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);\n";
     const IGN21 = mmSrc21.split('\n').filter((l) => l.startsWith("  'ui_notify',") || l.startsWith("  'ui_notify_cancel',"));
-    const MMno21 = rsSrc21.includes(FILL21) && IGN21.length === 2 && mmSrc21.split(REQ21).length === 2 ? require(M21.write('src/message-manager.js', IGN21.reduce((t, l) => t.replace(l + '\n', ''), mmSrc21).replace(REQ21, 'require(' + JSON.stringify(M21.write('src/record-shape.js', rsSrc21.replace(FILL21, ''), 'no-fields-321')) + ')'), 'mm-no-321')) : null;
+    const MMno21 = rsSrc21.includes(FILL21) && IGN21.length === 2 && mmSrc21.split(REQ21).length === 2 ? require(M21.write('src/message-manager.js', IGN21.reduce((t, l) => t.replace(l + '\n', ''), mmSrc21).replace(REQ21, 'require(' + JSON.stringify(M21.write('src/record-shape.js', editAnchor(rsSrc21, FILL21, '', "src/record-shape.js"), 'no-fields-321')) + ')'), 'mm-no-321')) : null;
     const ctl21 = MMno21 && live21(MMno21, 'e2e00000-0000-4000-8000-0000000003e2');
     ok('RED CONTROL: the same conversation on a copy without the two list lines and FIELDS_321 (the f5e087bb5 tree on 2.1.321) ⇒ two unknown-record notices (a person\'s chat draws neither — only the status chip counts them) and the drift card + ledger rows for the result fields', !!ctl21 && ctl21.unknown === 2 && ctl21.drift >= 1 && ctl21.rows >= 1, ctl21);
     const DOORS21 = { nothing: ['system/ui_notify', 'system/ui_notify_cancel', 'result.tool_pool_build_count', 'result.first_request_cache_read_input_tokens', 'sdk.autoModeVerdictTools'] };

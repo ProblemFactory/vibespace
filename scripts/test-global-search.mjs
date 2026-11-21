@@ -160,7 +160,7 @@ const expectRows = idx.reduce((n, x) => n + x.rows, 0);
 const res = await walkResume(null);
 ok(res.parsed === 1 && res.rows === expectRows, `after the kill the walk re-read 1 of 3 transcripts (the cursors held the other 2) and the row count is exact (${res.rows} = ${expectRows})`, res);
 const W0 = read('src/search-index-worker.js');
-const noCursor = MUT.write('src/search-index-worker.js', W0.replace("if (cur && !reread && cur.size === st.size && cur.mtime === mtime) return", "if (false) return"), 'nocursor');
+const noCursor = MUT.write('src/search-index-worker.js', editAnchor(W0, "if (cur && !reread && cur.size === st.size && cur.mtime === mtime) return", "if (false) return", "src/search-index-worker.js"), 'nocursor');
 const resN = await walkResume(noCursor);
 ok(resN.parsed === 3, `CONTROL (no cursor): the resumed walk re-reads all 3 transcripts — the resume leg goes RED (${resN.parsed} parsed)`, resN);
 
@@ -227,7 +227,7 @@ console.log('§8 the routes: cookie-only, scope, operators, status, rebuild');
 
 console.log('§9 the controls: trigram, the index under data/, a raw-shape branch; the store census');
 {
-  const tri = MUT.write('src/search-index-worker.js', W0.replace(/unicode61 remove_diacritics 2/, 'trigram'), 'trigram');
+  const tri = MUT.write('src/search-index-worker.js', editAnchor(W0, /unicode61 remove_diacritics 2/, 'trigram', "src/search-index-worker.js"), 'trigram');
   const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-data3-'));
   const t = SI.create({ dataDir: d3, homeDir: home, log: quiet, exitHook: false, workerFile: tri }); t.start();
   for (const c of CONVS) await t.call('indexConversation', c);
@@ -431,7 +431,7 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
   // the controls: the change removed ⇒ the legs go RED
   const W2 = read('src/search-index-worker.js'), GE2 = read(GE_REL), O2 = read('src/server/search-index.js');
   const pin = (src, s) => { const n = src.split(s).length - 1; if (n !== 1) ok(false, `the control's anchor is in its file once: ${s}`, n); return s; };
-  const wmut = (from, to, tag) => MUT.write('src/search-index-worker.js', W2.replace(pin(W2, from), to), tag);
+  const wmut = (from, to, tag) => MUT.write('src/search-index-worker.js', editAnchor(W2, pin(W2, from), to, "src/search-index-worker.js"), tag);
   const oj = await scene(wmut('const body = judgeRow(mid, M.textOf(m), grp);', 'const body = M.textOf(m);', 'nojudge'));
   ok(oj.lateRows >= 1 && oj.rebuilt >= 2, `CONTROL (no judge at the write): a conversation indexed after the clear and a rebuild find the words again (${oj.lateRows}, ${oj.rebuilt})`, oj);
   const os2 = await scene(wmut('  for (const [gid, f] of Object.entries(fresh)) {\n    if (!CL.has(gid)) continue;', '  for (const [gid, f] of []) {\n    if (!CL.has(gid)) continue;', 'nosweep'));
@@ -446,9 +446,9 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
   ok(ob.f3after >= 1, `CONTROL (the record's own bytes only, no belted form): the message with a hidden character is found again (${ob.f3after})`, ob);
   const on = await scene(null, MUT.load(GE_REL, GE2.replace(pin(GE2, '      try { noteClearedNeedles(gid, out.cleared.map((vid) => found.get(vid)).filter(Boolean)); } catch { heldNeedles.delete(gid); }'), ''), 'nogrow'));
   ok(on.readsAtClear > 1, `CONTROL (the set not grown by the clear): a later clear reads the group's records again (${on.readsAtClear} reads)`, on);
-  const os3 = await scene(null, null, MUT.load('src/server/search-index.js', O2.replace(pin(O2, "    if (all && typeof all.then === 'function') {"), '    if (false) {'), 'syncboot'));
+  const os3 = await scene(null, null, MUT.load('src/server/search-index.js', editAnchor(O2, pin(O2, "    if (all && typeof all.then === 'function') {"), '    if (false) {', "src/server/search-index.js"), 'syncboot'));
   const WAIT = "    if (clearedReady) { let t; await Promise.race([clearedReady, new Promise((r) => { t = setTimeout(r, CLEARED_WAIT_MS); t.unref?.(); })]); clearTimeout(t); } // B-b291: no answer before the worker holds the whole cleared set\n";
-  const onw = await scene(null, null, MUT.load('src/server/search-index.js', O2.replace(pin(O2, WAIT), ''), 'nowait'));
+  const onw = await scene(null, null, MUT.load('src/server/search-index.js', editAnchor(O2, pin(O2, WAIT), '', "src/server/search-index.js"), 'nowait'));
   ok(onw.p6after >= 1, `CONTROL (no wait for the whole set at a boot): the first search answers from the cache-only set and finds the words (${onw.p6after})`, onw);
   const omg = await migrateScene(wmut("if (!fresh && uv > 0 && uv < SCHEMA_VERSION && migrate())", "if (false)", 'nomigrate'));
   ok(omg.kept === 0, `CONTROL (the schema step drops the index, as before the cure): the conversation no transcript reader can read is gone from search (${omg.kept})`, omg);
@@ -458,7 +458,7 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
   const ok2 = await scene(wmut("  if (typeof mid === 'string' && mid.startsWith('gm:')) {", "  if (false) {", 'nokey'));
   ok(ok2.keyOnly >= 1, `CONTROL (no card-key branch): a card of the record whose words differ is found again (${ok2.keyOnly})`, ok2);
   const CARRY = "...(m.peerGroup ? { peerGroup: { id: m.peerGroup.id } } : m.originKind === 'peer-message' ? { peerCard: true } : {})";
-  const ocar = await scene(null, null, MUT.load('src/server/search-index.js', O2.replace(pin(O2, CARRY), "...(m.originKind === 'peer-message' ? { peerCard: true } : {})"), 'nocarry'));
+  const ocar = await scene(null, null, MUT.load('src/server/search-index.js', editAnchor(O2, pin(O2, CARRY), "...(m.originKind === 'peer-message' ? { peerCard: true } : {})", "src/server/search-index.js"), 'nocarry'));
   ok(ocar.marrow >= 1, `CONTROL (the live door drops the card's group): the live card that carries only its group is found again (${ocar.marrow})`, ocar);
   const ogp = await scene(wmut("if ((grp === '' || grp === gid) && c.wholes.get(h) === f.length", "if ((!grp || grp === gid) && c.wholes.get(h) === f.length", 'anyrow'));
   ok(ogp.ownStays === 0, `CONTROL (every row of no group judged whole): the person's own message is hidden — the precision leg goes RED (${ogp.ownStays})`, ogp);
@@ -510,7 +510,7 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     const wk = await walkScene(SI);
     ok(!!wk.lastBuild && wk.running === false, `a walk whose closing call failed (sweepArtifacts throws) still ends «building» — the line and the window's re-ask stop (lastBuild ${wk.lastBuild})`, wk);
     const WALK_END = "      try { await call('sweepArtifacts', {}); } catch { }\n      if (gen === buildGen && st !== 'closed' && st !== 'disabled') {";
-    const wkc = await walkScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, WALK_END), "      try { await call('sweepArtifacts', {}); await call('noteBuild', { at: now() }); lastBuildAt = now(); } catch { }\n      if (false) {"), 'walkend'));
+    const wkc = await walkScene(MUT.load('src/server/search-index.js', editAnchor(O2, pin(O2, WALK_END), "      try { await call('sweepArtifacts', {}); await call('noteBuild', { at: now() }); lastBuildAt = now(); } catch { }\n      if (false) {", "src/server/search-index.js"), 'walkend'));
     ok(wkc.lastBuild === null, `CONTROL (one try around the closing calls, as before): the failed sweep leaves the index «building» for good — the leg goes RED (${wkc.lastBuild})`, wkc);
     const retryScene = async (O) => {
       let asks = 0, gaveUp, wholeSeen, guard;
@@ -532,7 +532,7 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     };
     const ra = await retryScene(SI);
     ok(ra === 14, `a whole hand-over (and a new worker's start, B-4543) gives a later partial set its ten tries again: 2 partial + the whole, then 1 + 10 tries after a worker restart (${ra} asks)`);
-    const rac = await retryScene(MUT.load('src/server/search-index.js', anchored(O2.replace(pin(O2, 'if (partial.length) retryCleared(mine); else clearedRetries = 0;'), 'if (partial.length) retryCleared(mine);'), 'const mine = worker; clearedRetries = 0; clearedPartial = true;', 'const mine = worker; clearedPartial = true;', 'B-4543 no reset at the start either'), 'noreset'));
+    const rac = await retryScene(MUT.load('src/server/search-index.js', anchored(editAnchor(O2, pin(O2, 'if (partial.length) retryCleared(mine); else clearedRetries = 0;'), 'if (partial.length) retryCleared(mine);', "src/server/search-index.js"), 'const mine = worker; clearedRetries = 0; clearedPartial = true;', 'const mine = worker; clearedPartial = true;', 'B-4543 no reset at the start either'), 'noreset'));
     ok(rac === 12, `CONTROL (the counter never reset — neither by a whole hand-over nor by a new worker's start): the partial set after the restart gets only the tries left over — the leg goes RED (${rac} asks)`);
     // the cure's second reader: a Rebuild pressed DURING a walk — that walk ends without «built» (the drop removed what it had
     // walked) and a fresh walk follows it; a walk broken off by the final close builds nothing either
@@ -555,15 +555,15 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     const gn = await genScene(SI);
     ok(gn.lists === 2 && gn.atSecond === null && !!gn.end, `a Rebuild during a walk: that walk ends without «built» and a fresh walk follows it — only that one sets the last build (${gn.lists} walks, ${gn.atSecond} between them)`, gn);
     ok(gn.aWalked === '0/3', `cure 3: the walk a Rebuild overtook stops at once — it reads none of its 3 conversations into the fresh index (${gn.aWalked})`, gn);
-    const gns = await genScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, "if (st === 'closed' || st === 'disabled' || gen !== buildGen) break;"), "if (st === 'closed' || st === 'disabled') break;"), 'nostop'));   // stale-pins: kept (the RED control puts the parent's loop back; its anchor checked once)
+    const gns = await genScene(MUT.load('src/server/search-index.js', editAnchor(O2, pin(O2, "if (st === 'closed' || st === 'disabled' || gen !== buildGen) break;"), "if (st === 'closed' || st === 'disabled') break;", "src/server/search-index.js"), 'nostop'));   // stale-pins: kept (the RED control puts the parent's loop back; its anchor checked once)
     ok(gns.aWalked === '3/3', `CONTROL (the overtaken walk goes on): it reads all 3 conversations — the leg goes RED (${gns.aWalked})`, gns);
-    const gnc = await genScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, "if (gen === buildGen && st !== 'closed' && st !== 'disabled') {"), "if (st !== 'closed' && st !== 'disabled') {"), 'nogen'));
+    const gnc = await genScene(MUT.load('src/server/search-index.js', editAnchor(O2, pin(O2, "if (gen === buildGen && st !== 'closed' && st !== 'disabled') {"), "if (st !== 'closed' && st !== 'disabled') {", "src/server/search-index.js"), 'nogen'));
     ok(gnc.atSecond !== null && gnc.atSecond !== 'not asked', `CONTROL (no build generation): the overtaken walk says «built» while the index is empty again — the leg goes RED (${gnc.atSecond})`, gnc);
-    const gnf = await genScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, "} finally { Promise.resolve(walking).catch(() => { }).then(() => backfill({ reason: 'rebuild' })).catch(() => { }); }"), "} finally { backfill({ reason: 'rebuild' }).catch(() => { }); }"), 'nochain'));
+    const gnf = await genScene(MUT.load('src/server/search-index.js', editAnchor(O2, pin(O2, "} finally { Promise.resolve(walking).catch(() => { }).then(() => backfill({ reason: 'rebuild' })).catch(() => { }); }"), "} finally { backfill({ reason: 'rebuild' }).catch(() => { }); }", "src/server/search-index.js"), 'nochain'));
     ok(gnf.lists === 1 && !gnf.end, `CONTROL (no fresh walk after the one in flight): the Rebuild walks nothing — the leg goes RED (${gnf.lists} walk)`, gnf);
     const cl = await genScene(SI, { closeMid: true });
     ok(cl.end === null, `a walk broken off by the final close builds nothing (${cl.end})`, cl);
-    const clc = await genScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, "if (gen === buildGen && st !== 'closed' && st !== 'disabled') {"), "if (gen === buildGen) {"), 'noclosed'), { closeMid: true });
+    const clc = await genScene(MUT.load('src/server/search-index.js', editAnchor(O2, pin(O2, "if (gen === buildGen && st !== 'closed' && st !== 'disabled') {"), "if (gen === buildGen) {", "src/server/search-index.js"), 'noclosed'), { closeMid: true });
     ok(clc.end !== null, `CONTROL (no state guard): the broken-off walk says «built» — the leg goes RED (${clc.end})`, clc);
   }
   // B-4543 — ONLY A FAILED READ SPENDS A TRY; A CHAIN BELONGS TO ITS WORKER; A SET THE WORKER LACKS IS SAID. The retry
@@ -884,7 +884,7 @@ console.log('§11 who wrote a hit (B-19bd): a user row the person never typed ca
   const W3 = read('src/search-index-worker.js');
   const NO = "    const r = S.insMsg.run(sid, host || '', backend || null, mid, Number(m.ts) || 0, m.role, body, grp, whoOf(m));";
   ok(W3.split(NO).length === 2, 'the control\'s anchor is in the worker once');
-  const oc = await run(MUT.write('src/search-index-worker.js', W3.replace(NO, NO.replace('whoOf(m)', 'null')), 'nowho'));
+  const oc = await run(MUT.write('src/search-index-worker.js', editAnchor(W3, NO, NO.replace('whoOf(m)', 'null'), "src/search-index-worker.js"), 'nowho'));
   ok(oc.peer && !oc.peer.other && oc.live && !oc.live.other, 'CONTROL (the verdict not stored): every user hit is drawn as the person\'s again — the leg goes RED', oc);
   // B-9a2e (the search road, bound 4): the backfill HANDED the conversation's rows labels VibeSpace's continue as VibeSpace's
   {
@@ -905,7 +905,7 @@ console.log('§11 who wrote a hit (B-19bd): a user row the person never typed ca
     // the patched-copy control (主开发's «as if a must»): the backfill without the conversation's rows ⇒ the leg goes RED
     const WS = read('src/search-index-worker.js'), HAND = 'await SP.withRows(Array.isArray(sent) ? sent : [], () =>';
     if (WS.split(HAND).length !== 2) ok(false, `the control's anchor is in the worker once: ${HAND}`);
-    const blind = await label([SP.rowOf(CONT, 'auto-resume', at0)], MUT.write('src/search-index-worker.js', WS.replace(HAND, 'await SP.withRows([], () =>'), 'norows'));
+    const blind = await label([SP.rowOf(CONT, 'auto-resume', at0)], MUT.write('src/search-index-worker.js', editAnchor(WS, HAND, 'await SP.withRows([], () =>', "src/search-index-worker.js"), 'norows'));
     ok(blind === 'person', `CONTROL (the backfill without the conversation's rows): the continue reads as the person's — the leg goes RED (${blind})`);
   }
   const SWT = read('src/lib/search-window.js');

@@ -63,6 +63,15 @@ const ok = (name, cond, extra) => {
   if (cond) { passed++; console.log('  ✓ ' + name); }
   else { failed++; console.error('  ✗ ' + name + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); }
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const RS = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-run-summary.js')).href);
 const AR = require(path.join(REPO, 'src/agent-routes.js'));
@@ -540,29 +549,29 @@ console.log('§5 THE FOR-YOU TRAY — named where it is');
 console.log('§6 NEGATIVE CONTROLS — each leg can go red');
 {
   const src = read('src/lib/chat-run-summary.js');
-  const a = src.replace('export function assistantNoteOf(m) {\n  if (!m || typeof m !== \'object\') return null;', 'export function assistantNoteOf(m) {\n  return null;');
+  const a = editAnchor(src, 'export function assistantNoteOf(m) {\n  if (!m || typeof m !== \'object\') return null;', 'export function assistantNoteOf(m) {\n  return null;', "src/lib/chat-run-summary.js");
   ok('(the classifier patch applied)', a !== src);
   const A = await import(pathToFileURL(M.write('src/lib/chat-run-summary.js', a, 'no-notes')).href);
   const aBad = noteTable(A);
   ok(`a classifier that never finds a note turns the §1 table red (${aBad} rows)`, aBad === NOTE_ROWS.length, aBad);
-  const b = src.replace('export function toolResultSentence(block) {', 'export function toolResultSentence(block) {\n  return null;');
+  const b = editAnchor(src, 'export function toolResultSentence(block) {', 'export function toolResultSentence(block) {\n  return null;', "src/lib/chat-run-summary.js");
   ok('(the sentence-table patch applied)', b !== src);
   const B = await import(pathToFileURL(M.write('src/lib/chat-run-summary.js', b, 'no-sentence')).href);
   const leaked = OPS.map(([, blk]) => visibleLine(B, blk)).filter((l) => LEAK.test(l) || /^\{"/.test(l));
   ok(`a renderer without the sentence table leaks ${leaked.length} lines the census catches ("internal metadata" / a \`{"\` head)`, sentenceTable(B) > 0 && leaked.length >= 3, leaked);
   const cdSrc = read('src/server/conversation-deliver.js');
-  const c = cdSrc.replace("if (kind === 'notification') text = vibespaceNoticeText(text);", '');
+  const c = editAnchor(cdSrc, "if (kind === 'notification') text = vibespaceNoticeText(text);", '', "src/server/conversation-deliver.js");
   ok('(the ladder patch applied)', c !== cdSrc);
   const lc = await ladderCheck(M.load('src/server/conversation-deliver.js', c, 'no-head'));
   ok('a ladder without the head hands the CLI a handback the assistant reads as a peer\'s message', lc.r1.ok && !lc.posted[0].startsWith(HEAD) && !NS.isVibespaceNotice(null, lc.posted[0]), lc.posted[0]);
   const tkSrc = read('src/browser-takeover.js');
-  const d = tkSrc.replace('`The user handed ${who} back to you after ${spellDur(heldMs)} of driving it.`', '`The user gave ${who} back to you after ${spellDur(heldMs)} of driving it.`');
+  const d = editAnchor(tkSrc, '`The user handed ${who} back to you after ${spellDur(heldMs)} of driving it.`', '`The user gave ${who} back to you after ${spellDur(heldMs)} of driving it.`', "src/browser-takeover.js");
   ok('(the handback wording patch applied)', d !== tkSrc);
   const D = M.load('src/browser-takeover.js', d, 'reworded');
   const f = D.handbackFacts(D.handbackText({ cause: 'explicit', url: 'https://x.test/', heldMs: 17000 }));
   ok('a handback re-worded without its reader fails the round trip (the card would lose its title)', f === null, f);
   const cmSrc = read('src/codex-message-manager.js');
-  const e = cmSrc.replace("if (!marker && !SERVER_PEER_FRAME_RE.test(text) && !startsWithNoticeHead(text)) return null;", "if (!marker && !SERVER_PEER_FRAME_RE.test(text)) return null;");
+  const e = editAnchor(cmSrc, "if (!marker && !SERVER_PEER_FRAME_RE.test(text) && !startsWithNoticeHead(text)) return null;", "if (!marker && !SERVER_PEER_FRAME_RE.test(text)) return null;", "src/codex-message-manager.js");
   ok('(the codex frame-recogniser patch applied)', e !== cmSrc);
   const eBad = codexRolloutTable(M.load('src/codex-message-manager.js', e, 'no-head-frame')).filter((r) => !r.pass);
   ok(`a codex normalizer that reads only the pre-S3 frames loses the two headed notifications on a rollout-only rebuild (${eBad.length} rows red)`, eBad.length === 2 && eBad.every((r) => /headed/.test(r.name)), eBad.map((r) => r.name));
@@ -570,18 +579,18 @@ console.log('§6 NEGATIVE CONTROLS — each leg can go red');
   // table built (the real normalizers stamped their path) — only the rule moves.
   const nsSrc = read('src/notification-senders.js');
   const PATH_RULE = "  if (via === 'peer') return false;\n  if (via === 'notification') return true;\n  const name = typeof from === 'string' ? from.trim() : '';\n  if (name) return isNotificationSender(name) || name === VIBESPACE_CARD_SENDER;\n";
-  const headAlone = nsSrc.replace(PATH_RULE, '');
+  const headAlone = editAnchor(nsSrc, PATH_RULE, '', "src/notification-senders.js");
   ok('(the trusts-the-head-alone patch applied)', headAlone !== nsSrc);
   const HA = impersonationTable(IMP_RECS, M.load('src/notification-senders.js', headAlone, 'head-alone'));
   const haRed = HA.filter((r) => !r.pass);
   ok(`a notice rule that trusts the head ALONE turns every head spoof red (${haRed.filter((r) => r.spoof === 'head').length}/${HA.filter((r) => r.spoof === 'head').length} — the verifier's probe among them)`, HA.filter((r) => r.spoof === 'head').every((r) => !r.pass) && HA.filter((r) => r.spoof === 'head').length >= 4, haRed.map((r) => r.label));
-  const preFix = nsSrc.replace(PATH_RULE, "  if (isNotificationSender(from)) return true;\n  if (typeof from === 'string' && from.trim() === VIBESPACE_CARD_SENDER) return true;\n");
+  const preFix = editAnchor(nsSrc, PATH_RULE, "  if (isNotificationSender(from)) return true;\n  if (typeof from === 'string' && from.trim() === VIBESPACE_CARD_SENDER) return true;\n", "src/notification-senders.js");
   ok('(the pre-fix rule patch applied — a listed name or the head, no path)', preFix !== nsSrc && preFix !== headAlone);
   const PF = impersonationTable(IMP_RECS, M.load('src/notification-senders.js', preFix, 'pre-fix'));
   const pfRed = PF.filter((r) => !r.pass).map((r) => r.label), spoofs = PF.filter((r) => r.spoof).map((r) => r.label);
   ok(`the pre-fix rule (the lane's own, before this fix) reddens EXACTLY the ${spoofs.length} impersonation rows and nothing else`, pfRed.length === spoofs.length && spoofs.every((l) => pfRed.includes(l)), { red: pfRed, spoofs });
   const arSrc = read('src/agent-routes.js');
-  const byName = arSrc.replace("    const notice = stashKindOf(e) === 'notification';", "    const notice = require('./notification-senders.js').isNotificationSender(e.fromName);");
+  const byName = editAnchor(arSrc, "    const notice = stashKindOf(e) === 'notification';", "    const notice = require('./notification-senders.js').isNotificationSender(e.fromName);", "src/agent-routes.js");
   ok('(the stash-by-name patch applied)', byName !== arSrc);
   const ARn = M.load('src/agent-routes.js', byName, 'stash-by-name');
   const nh = ARn.renderMsgStash([{ ts: 1, source: 'agent', kind: 'peer', fromName: 'VibeSpace browser', text: PROBE }]).text;
@@ -696,18 +705,18 @@ console.log('§7 NEGATIVE CONTROLS — the pre-fix builders go red');
   // normalizer whose require of it points at that copy
   const winSrc = read('src/message-window.js');
   const NEW_TM = "      if (m.role === 'user') Object.assign(entry, turnPreviewOf(m));";
-  const p1 = winSrc.replace(NEW_TM, "      if (m.role === 'user') { const raw = (m.content || []).map(b => b.text || '').join('').trim(); if (raw) entry.preview = raw.length > 60 ? raw.substring(0, 60) + '…' : raw; }");
+  const p1 = editAnchor(winSrc, NEW_TM, "      if (m.role === 'user') { const raw = (m.content || []).map(b => b.text || '').join('').trim(); if (raw) entry.preview = raw.length > 60 ? raw.substring(0, 60) + '…' : raw; }", "src/message-window.js");
   ok('(the pre-fix claude turnMap patch applied)', p1 !== winSrc);
   const winCopy = M.write('src/message-window.js', p1, 'pre-b40f8-turnmap');
-  const mmOnCopy = mmSrc.replace("require('./message-window.js')", `require(${JSON.stringify(winCopy)})`);
+  const mmOnCopy = editAnchor(mmSrc, "require('./message-window.js')", `require(${JSON.stringify(winCopy)})`, "src/message-manager.js");
   const c1 = previewTable(builderRows(M.load('src/message-manager.js', mmOnCopy, 'pre-b40f8-turnmap'), CXreal)).filter((r) => !r.pass).map((r) => r.name);
   ok(`the pre-fix claude turnMap previews the nudge as "Stop hook feedback: …" — exactly its row goes red (${c1.join(', ')})`, c1.length === 1 && c1[0].startsWith('claude turnMap'), c1);
   const cxSrc = read('src/adapters/codex.js');
-  const p2 = cxSrc.replace("const p = turnPreviewOf(msg);", "const text = (msg.content || []).map((b) => b.text || '').join(''); const p = text.trim() ? { preview: text.trim().replace(/\\s+/g, ' ').slice(0, 60) } : null;"); // _turnOf takes THE normalizer's message (lane minimap-person-rows r2)
+  const p2 = editAnchor(cxSrc, "const p = turnPreviewOf(msg);", "const text = (msg.content || []).map((b) => b.text || '').join(''); const p = text.trim() ? { preview: text.trim().replace(/\\s+/g, ' ').slice(0, 60) } : null;", "src/adapters/codex.js"); // _turnOf takes THE normalizer's message (lane minimap-person-rows r2)
   ok('(the pre-fix JSONL scan patch applied)', p2 !== cxSrc);
   const c2 = previewTable(builderRows(MMreal, M.load('src/adapters/codex.js', p2, 'pre-b40f8-scan'))).filter((r) => !r.pass).map((r) => r.name);
   ok(`a JSONL scan that cuts its own text reddens both huge-session rows (${c2.join(', ')})`, c2.length === 2 && c2.every((n) => n.includes('JSONL scan')), c2);
-  const p3 = mmSrc.replace('const output = hookPayloadText(rawOut) || (ok ? \'\' : rawOut);', 'const output = raw.output;');
+  const p3 = editAnchor(mmSrc, 'const output = hookPayloadText(rawOut) || (ok ? \'\' : rawOut);', 'const output = raw.output;', "src/message-manager.js");
   ok('(the pre-fix live hook card patch applied)', p3 !== mmSrc);
   const r3 = liveHookCard(M.load('src/message-manager.js', p3, 'pre-b40f8-hook'));
   ok('the pre-fix live card (the stream\'s raw JSON) is NOT a note on its first frame — the plain row the item saw', RS.assistantNoteOf(r3.first) === null && /^\{"hookSpecificOutput"/.test(r3.first?.content?.[0]?.hookData?.output || ''), r3.first?.content?.[0]?.hookData?.output?.slice(0, 40));

@@ -290,13 +290,13 @@ console.log('— ⑩ every row\'s class equals the committed snapshot the census
   const csrc = fs.readFileSync(path.join(REPO, 'src/cdp-census.js'), 'utf8'), msrc = fs.readFileSync(path.join(REPO, 'src/browser-mediation.js'), 'utf8');
   const a1 = "getAllCookies: 'read',", a2 = "dispatchKeyEvent: ['input', '2026-09-21'],";
   ok(csrc.split(a1).length === 2 && csrc.split(a2).length === 2, '⑩ control setup: the two rows are spelled once in src/cdp-census.js');
-  const c1 = require(MUTS.write('src/cdp-census.js', csrc.replace(a1, "getAllCookies: 'refused',"), 'getallcookies-refused'));
+  const c1 = require(MUTS.write('src/cdp-census.js', editAnchor(csrc, a1, "getAllCookies: 'refused',", "src/cdp-census.js"), 'getallcookies-refused'));
   const m1 = classesMoved(c1, snap);
   ok(m1.length === 1 && m1[0].method === 'Network.getAllCookies' && m1[0].was === 'read' && m1[0].now === 'refused', '⑩ CONTROL (the reviewers\' planted change): Network.getAllCookies read → refused in a census copy — the leg is RED and names that row', JSON.stringify(m1));
-  const p2 = MUTS.write('src/cdp-census.js', csrc.replace(a2, "dispatchKeyEvent: ['read', '2026-09-21'],"), 'dispatchkey-read');
+  const p2 = MUTS.write('src/cdp-census.js', editAnchor(csrc, a2, "dispatchKeyEvent: ['read', '2026-09-21'],", "src/cdp-census.js"), 'dispatchkey-read');
   const c2 = require(p2);
   const m2 = classesMoved(c2, snap);
-  const M2 = MUTS.load('src/browser-mediation.js', msrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(p2)})`), 'dispatchkey-read');
+  const M2 = MUTS.load('src/browser-mediation.js', editAnchor(msrc, "require('./cdp-census.js')", `require(${JSON.stringify(p2)})`, "src/browser-mediation.js"), 'dispatchkey-read');
   ok(m2.length === 1 && m2[0].method === 'Input.dispatchKeyEvent' && m2[0].was === 'input' && m2[0].now === 'read' && verdict(M2, 'Input.dispatchKeyEvent', { paused: true }) === 'forward' && verdict(M, 'Input.dispatchKeyEvent', { paused: true }) === 'browser_interrupted:input',
     '⑩ CONTROL (the dangerous direction): Input.dispatchKeyEvent input → read in a census copy — the copy\'s judge FORWARDS the agent\'s key while the person drives, and only this leg names it (red)', JSON.stringify(m2));
   for (const r of copiesCensus(MUTS.files, MUTS.dir, REPO, { minCopies: 2, label: '⑩ ' })) ok(r.pass, r.name, r.detail);
@@ -334,35 +334,35 @@ console.log('— CONTROLS: patched census copies — a new row removed, an until
   const untilA = "setSharedStorageTracking: { cls: 'harmless', until: C154 },", evalA = "evaluate: 'page-mutation',", chromeA = "getAdScripts: { cls: 'read', since: '2026-09-28', chrome: C154, ";
   ok((src.match(new RegExp(rowRe.source, 'gm')) || []).length === 1 && (src.match(new RegExp(markRe.source, 'gm')) || []).length === 1 && src.split(markA).length === 2 && src.split(untilA).length === 2 && src.split(evalA).length === 2 && src.split(chromeA).length === 2 && medSrc.split("require('./cdp-census.js')").length === 2, 'control setup: each anchor is spelled once');
   // (a) Browser.addMockCamera's row removed
-  const noRow = MUT.write('src/cdp-census.js', src.replace(rowRe, ''), 'no-mock-camera-row');
+  const noRow = MUT.write('src/cdp-census.js', editAnchor(src, rowRe, '', "src/cdp-census.js"), 'no-mock-camera-row');
   const Ca = require(noRow);
   const a = Ca.compare(fixtures[C154], { chrome: C154 });
-  const Ma = MUT.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(noRow)})`), 'no-mock-camera-row');
+  const Ma = MUT.load('src/browser-mediation.js', editAnchor(medSrc, "require('./cdp-census.js')", `require(${JSON.stringify(noRow)})`, "src/browser-mediation.js"), 'no-mock-camera-row');
   ok(!a.sameSet && a.unclassified.join() === 'Browser.addMockCamera' && verdict(Ma, 'Browser.addMockCamera', {}) === 'method_unclassified:unclassified' && verdict(M, 'Browser.addMockCamera', {}) === 'method_refused:whole-profile', `CONTROL (a) Browser.addMockCamera's row removed: Chrome ${C154} is no longer covered (unclassified: ${a.unclassified.join()}) and a free lease's mock camera is refused only as UNCLASSIFIED (lane chrome-157: before, FORWARDED into the shared device list) — its row is what names it a whole-browser act — the row is what refuses it on every lease`);
   // (b) a removed row's until mark dropped
-  const b = require(MUT.write('src/cdp-census.js', src.replace(untilA, "setSharedStorageTracking: 'harmless',"), 'no-until')).compare(fixtures[C154], { chrome: C154 });
+  const b = require(MUT.write('src/cdp-census.js', editAnchor(src, untilA, "setSharedStorageTracking: 'harmless',", "src/cdp-census.js"), 'no-until')).compare(fixtures[C154], { chrome: C154 });
   ok(!b.sameSet && b.stale.join() === 'Storage.setSharedStorageTracking' && b.unclassified.length === 0, `CONTROL (b) Storage.setSharedStorageTracking's until mark dropped: Chrome ${C154} reports it STALE (the table claims a method it no longer ships)`);
   // (c) a surviving row marked gone
-  const c = require(MUT.write('src/cdp-census.js', src.replace(evalA, "evaluate: { cls: 'page-mutation', until: C154 },"), 'mis-until')).compare(fixtures[C154], { chrome: C154 });
+  const c = require(MUT.write('src/cdp-census.js', editAnchor(src, evalA, "evaluate: { cls: 'page-mutation', until: C154 },", "src/cdp-census.js"), 'mis-until')).compare(fixtures[C154], { chrome: C154 });
   ok(!c.sameSet && c.misdated.join() === 'Runtime.evaluate' && c.stale.length === 0, `CONTROL (c) Runtime.evaluate marked until ${C154}: that Chrome still lists it — reported MISDATED`);
   // (d) a new row's chrome mark dropped
-  const d = require(MUT.write('src/cdp-census.js', src.replace(chromeA, "getAdScripts: { cls: 'read', since: '2026-09-28', "), 'no-chrome')).compare(fixtures['153.0.8010.47'], { chrome: '153.0.8010.47' });
+  const d = require(MUT.write('src/cdp-census.js', editAnchor(src, chromeA, "getAdScripts: { cls: 'read', since: '2026-09-28', ", "src/cdp-census.js"), 'no-chrome')).compare(fixtures['153.0.8010.47'], { chrome: '153.0.8010.47' });
   ok(!d.sameSet && d.stale.join() === 'Ads.getAdScripts', 'CONTROL (d) Ads.getAdScripts\' chrome mark dropped: Chrome 153.0.8010.47 reports it STALE (a 154 method claimed for 153)');
   // (e) Chrome 155's DOM.setTextMarker row removed
-  const noMark = MUT.write('src/cdp-census.js', src.replace(markRe, ''), 'no-text-marker-row');
+  const noMark = MUT.write('src/cdp-census.js', editAnchor(src, markRe, '', "src/cdp-census.js"), 'no-text-marker-row');
   const e = require(noMark).compare(fixtures[C155], { chrome: C155 });
-  const Me = MUT.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(noMark)})`), 'no-text-marker-row');
+  const Me = MUT.load('src/browser-mediation.js', editAnchor(medSrc, "require('./cdp-census.js')", `require(${JSON.stringify(noMark)})`, "src/browser-mediation.js"), 'no-text-marker-row');
   const ve = Me.judge({ id: 41, method: 'DOM.setTextMarker', params: {}, sessionId: 'S-A' }, scope(), { paused: true });
   ok(!e.sameSet && e.unclassified.join() === 'DOM.setTextMarker' && ve.why === 'unclassified' && verdict(M, 'DOM.setTextMarker', { paused: true }) === 'browser_interrupted:view', `CONTROL (e) DOM.setTextMarker's row removed: Chrome ${C155} is no longer covered (unclassified: ${e.unclassified.join()}) and the paused lease's marker is refused only as \`${ve.why}\` — the row is what says it is a view act`);
   // (f) DOM.setTextMarker classed read
-  const asRead = MUT.write('src/cdp-census.js', src.replace(markA, "setTextMarker: { cls: 'read',"), 'text-marker-read');
-  const Mf = MUT.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(asRead)})`), 'text-marker-read');
+  const asRead = MUT.write('src/cdp-census.js', editAnchor(src, markA, "setTextMarker: { cls: 'read',", "src/cdp-census.js"), 'text-marker-read');
+  const Mf = MUT.load('src/browser-mediation.js', editAnchor(medSrc, "require('./cdp-census.js')", `require(${JSON.stringify(asRead)})`, "src/browser-mediation.js"), 'text-marker-read');
   ok(require(asRead).compare(fixtures[C155], { chrome: C155 }).sameSet && verdict(Mf, 'DOM.setTextMarker', { paused: true }) === 'forward', `CONTROL (f) DOM.setTextMarker classed read: Chrome ${C155} is still "covered", yet a paused lease's marker is FORWARDED onto the page the user drives — the class is what refuses it`);
   // (g) Chrome 156's FindInPage.findFirst classed read (the dispatch's first guess: "reads the page")
   const findA = "findFirst: { cls: 'view',";
   ok(src.split(findA).length === 2, 'control setup: the findFirst anchor is spelled once');
-  const findRead = MUT.write('src/cdp-census.js', src.replace(findA, "findFirst: { cls: 'read',"), 'find-first-read');
-  const Mg = MUT.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(findRead)})`), 'find-first-read');
+  const findRead = MUT.write('src/cdp-census.js', editAnchor(src, findA, "findFirst: { cls: 'read',", "src/cdp-census.js"), 'find-first-read');
+  const Mg = MUT.load('src/browser-mediation.js', editAnchor(medSrc, "require('./cdp-census.js')", `require(${JSON.stringify(findRead)})`, "src/browser-mediation.js"), 'find-first-read');
   ok(require(findRead).compare(fixtures[C156], { chrome: C156 }).sameSet && verdict(Mg, 'FindInPage.findFirst', { paused: true }) === 'forward' && verdict(M, 'FindInPage.findFirst', { paused: true }) === 'browser_interrupted:view', `CONTROL (g) FindInPage.findFirst classed read: Chrome ${C156} is still "covered", yet a paused lease's find is FORWARDED — measured, it scrolls the page under the user's hands and blurs their field; the class is what refuses it`);
   for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 5, label: 'CONTROL ' })) ok(r.pass, r.name, r.detail);
 }
@@ -500,7 +500,7 @@ console.log('— ⑫ the whole-profile law, fast: the marks, a recipe for every 
     ok(r5.first >= 1 && r5.repeats === 0 && r5.changed >= 1 && r5.pend === 1, 'B-0645 (5): the same one-state notice told again five times — no write, no broadcast; another reason replaces it (one pending)', r5);
     const SS = fs.readFileSync(path.join(REPO, 'src/session-status.js'), 'utf8');
     const ssCut = "    if (ONE_STATE_KINDS.has(n.kind) && rec.pendingNotices.some((x) => x && x.kind === n.kind && String(x.text || '') === String(n.text || ''))) return rec.pendingNotices.length;\n";
-    const SSm = SS.includes(ssCut) ? MUT45.load('src/session-status.js', SS.replace(ssCut, ''), 'tells-again') : null;
+    const SSm = SS.includes(ssCut) ? MUT45.load('src/session-status.js', editAnchor(SS, ssCut, '', "src/session-status.js"), 'tells-again') : null;
     ok(SSm && tell(SSm).repeats === 5, 'CONTROL (B-0645 (5)): the base re-writes and re-broadcasts each repeat (RED)');
     // B-0645 cure (主开发 09:07Z): the executor's folder signal — a give-up says «lost» ONLY when the browser had not confirmed the
     // ordered put-back (then the journal says the folder is back), and every confirmed put-back says «back». The executor runs in
