@@ -162,7 +162,7 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
   };
   /** THE RELEASE'S FUNCTION, rebuilt from this file by putting its own lines back (each anchored: a moved line fails BY NAME) */
   const releaseCopy = () => {
-    const dir = scratchDir('vault-run-scrub-release');
+    const dir = scratchDir('scrublegs-release');   // r1670: never the run door's folder shape (vs-vault-run-…, src/temp-sweepers.js)
     fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
     for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
     let t = fs.readFileSync(SRC, 'utf8');
@@ -374,7 +374,7 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
    *  file — the oracle of walkLeg. `from`/`to`: a patch on the SHIPPED search first (a red control's copy), or none. */
   const WALK = "    const isPrefix = (sfx, broken) => { if (!sfx) return false; for (const t of texts) if (t.length > sfx.length && t.startsWith(sfx) && (!broken || t.charCodeAt(sfx.length) >= 0x80)) return true; return false; };\n    const prefixStart = (str, n = str.length, broken = false) => { let f = n; while (f > 0 && str.charCodeAt(f - 1) === 0xFFFD) f--; const q0 = Math.max(0, n - W); for (let q = q0; q < Math.min(n, f); q++) if (isPrefix(str.slice(q, n), broken)) return q; return n; };\n";
   const copyOf = (name, edit) => {
-    const dir = scratchDir('vault-run-scrub-' + name);
+    const dir = scratchDir('scrublegs-' + name);
     fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
     for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
     const f = path.join(dir, 'src', `vault-run-${name}.js`);

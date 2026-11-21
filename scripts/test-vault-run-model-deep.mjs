@@ -313,7 +313,7 @@ console.log('⑥b THE REAL PRODUCERS\' TABLE — every printing × a 21-characte
 
 console.log('⑧ MUTANTS (of ⑥) — patched copies of src/vault-run.js must go RED (moved with ⑥ from test-vault-run-model)');
 {
-  const dir = scratchDir('vault-run-model-deep');
+  const dir = scratchDir('scrubmodel-deep');   // r1670: never the run door's folder shape (vs-vault-run-…, src/temp-sweepers.js)
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
   for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
   const real = fs.readFileSync(SRC, 'utf8');

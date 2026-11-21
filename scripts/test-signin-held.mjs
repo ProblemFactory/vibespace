@@ -41,7 +41,7 @@ const { WebSocket, WebSocketServer } = require('ws');
 const { ok: check, report } = checker();
 // the ONE assertion helper (scripts/lib/check.mjs); here every condition is read as a boolean, and a swap throws
 const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(condition, name): the name comes second, a string'); return check(!!c, n, extra === undefined ? undefined : JSON.stringify(extra).slice(0, 900)); };
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-signin-held-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-heldsignin-'));   // r1670: never the sign-in card's scratch shape (vs-signin-…, src/temp-sweepers.js), which a hub's start sweep judges
 process.on('exit', () => { try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { } });
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 function compileAt(rel, src) { const file = path.join(REPO, rel); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src, file); return m.exports; }
