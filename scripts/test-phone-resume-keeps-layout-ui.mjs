@@ -30,6 +30,8 @@
 //      clock), so the leave's flush is its only road ⇒ after the reload the window is on show again and the hub's record holds
 //      it; RED CONTROL first (the release: no flush at the leave) ⇒ gone after the reload, no row. Each plant comes only after every
 //      record has gone QUIET and the page's two restoring gates are down (measured, never a clock)
+//   ⑥ (lane lg-recovery — B-46fc part 2) a socket NOT OPEN at the reload: the leave's flush queues the save in the closed socket and the
+//      page hands the queue to POST /api/layout-sync (fetch keepalive) ⇒ the window is on show after the reload; RED the hand-off cut
 // Screenshots go to $PRK_SHOTS_DIR when set (the lane's report), else nowhere.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -418,6 +420,49 @@ else await (async () => {
     ok(!!fact.press && fact.press.pressed, '⑤ the person\'s press on the Files button, through the still door — the element under the pointer at press time checked, the landing said', fact.press);
     ok(!!fact.opened && fact.due.due && fact.due.dirty && !fact.due.gate && fact.due.held && fact.due.leave === 'loggedLeave', '⑤ the person\'s press opened a files window; its save DUE and HELD in the page (no gate up) — the leave\'s flush its only road', fact.due);
     ok(fact.booted && !!fact.mine && fact.mine.desk === fact.desk && fact.mine.shown && fact.inHub && Array.isArray(fact.leave) && fact.leave.some((l) => l.sent === true), '⑤ B-46fc\'S OWN GATE: the page reloaded with the open\'s save still due ⇒ the leave\'s flush SENT it (logged), the hub\'s record holds that window\'s row, and after the reload the SAME window (its id) is on show on its desktop', { opened: fact.opened, mine: fact.mine, inHub: fact.inHub, leave: fact.leave, booted: fact.booted });
+    // ⑥ B-46fc PART 2 (lane lg-recovery — the row's remainder: «a socket that is not open at the reload»): the leave's flush queues the
+    //    save in the CLOSED socket, and the page hands that queue to the hub by its second road (POST /api/layout-sync, fetch keepalive —
+    //    the one «apply a layout save» the socket's case runs). The plant: ⑤'s held save, and the page's socket CLOSED in place, its
+    //    reconnect stopped (nothing re-opens it before the reload — placed, never waited for). RED CONTROL FIRST: the hand-off cut (it
+    //    answers 0) — the release's road: the save stays in the dead socket's queue and is lost with the page.
+    const closedScene = async (cut) => {
+      await P2.ev(`(() => { const lm = app.layoutManager, sock = app.ws; clearTimeout(lm._autoSaveTimer); lm._autoSaveTimer = null; sessionStorage.removeItem(${J(LEAVE_LOG)});
+        const log = (why, sent) => { try { const l = JSON.parse(sessionStorage.getItem(${J(LEAVE_LOG)}) || '[]'); l.push({ why, sent }); sessionStorage.setItem(${J(LEAVE_LOG)}, JSON.stringify(l)); } catch { } };
+        const realLeave = lm._flushOnLeave.bind(lm), realHand = lm._handOffQueued.bind(lm);
+        lm._flushOnLeave = function loggedLeave(why) { const sent = realLeave(why); log('flush:' + why, sent); return sent; };
+        lm._handOffQueued = ${cut ? "function cutRoad(why) { log('handoff:' + why, 0); return 0; }" : "function loggedHandOff(why) { const n = realHand(why); log('handoff:' + why, n); return n; }"};
+        lm.scheduleAutoSave = function heldSave() { lm._saveAskedAt = Date.now(); if (!lm._autoSaveTimer) lm._autoSaveTimer = setTimeout(() => {}, 600000); };
+        sock.connect = function noReconnect() { }; try { sock.ws && sock.ws.close(); } catch { }
+        return true; })()`);
+      const before = ((await P2.ev(FILESWIN)) || []).map((w) => w.id);
+      const press = await pressFiles();
+      const fresh = async () => ((await P2.ev(FILESWIN)) || []).find((w) => !before.includes(w.id) && w.path) || null;
+      const opened = (await until(async () => !!(await fresh()), 10000, 100)) ? await fresh() : null;
+      const due = await P2.ev(`(() => { const lm = app.layoutManager, dm = app.desktopManager; return { due: !!lm._autoSaveTimer && lm._saveAskedAt > (lm._savedAt || 0), dirty: !!lm._userDirty, gate: !!(lm._restoring || (dm && dm._restoring)), held: lm.scheduleAutoSave.name === 'heldSave', road: lm._handOffQueued.name, open: !!(app.ws.ws && app.ws.ws.readyState === 1) }; })()`);
+      const desk = await P2.ev('app.desktopManager.activeDesktopId');
+      await P2.ev('(window.__b46fcOld = 1, true)');
+      await P2.send('Page.reload', {});
+      const booted = await until(async () => { try { return await P2.ev('!window.__b46fcOld && !!(window.app && app.desktopManager && app.desktopManager.activeDesktopId && app.layoutManager && !app.layoutManager._restoring)'); } catch { return false; } }, 30000, 250);
+      if (booted && (await P2.ev('app.desktopManager.activeDesktopId')) !== desk) { await P2.ev(`(app.desktopManager.switchTo(${J(desk)}), true)`); await sleep(1500); }
+      await sleep(1500);
+      const after = (await P2.ev(FILESWIN).catch(() => null)) || [];
+      const leave = await P2.ev(`JSON.parse(sessionStorage.getItem(${J(LEAVE_LOG)}) || '[]')`).catch(() => null);
+      const hub = (((await api('/api/layouts')).desktops[desk] || {}).autoSave?.windows || []).filter((w) => w.type === 'files').map((w) => w.winId);
+      const mine = opened ? after.find((w) => w.id === opened.id) || null : null;
+      return { press, opened, due, desk, booted, leave, mine, hub, inHub: !!opened && hub.includes(opened.id) };
+    };
+    const s6 = await settle(P2);
+    ok(s6.ok, '⑥ before the plant: every record quiet, this page\'s gates down (as ⑤)', s6);
+    const cutR = await closedScene(true);
+    ok(!!cutR.opened && cutR.due.due && cutR.due.dirty && !cutR.due.gate && cutR.due.held && cutR.due.open === false && cutR.due.road === 'cutRoad', '⑥ RED CONTROL proves its plant first: a files window opened, its save DUE and HELD, the page\'s socket NOT OPEN, the hand-off cut', cutR.due);
+    ok(cutR.booted && !cutR.mine && !cutR.inHub && Array.isArray(cutR.leave) && cutR.leave.some((l) => /^flush:/.test(l.why) && l.sent === true) && cutR.leave.every((l) => !/^handoff:/.test(l.why) || l.sent === 0),
+      '⑥ RED CONTROL — the release\'s road: the leave\'s flush ran and QUEUED the save in the closed socket, nothing handed it off ⇒ after the reload the window is GONE and the hub\'s record lacks it', { leave: cutR.leave, hub: cutR.hub, mine: cutR.mine });
+    const s6b = await settle(P2);
+    ok(s6b.ok, '⑥ …and again before the second plant', s6b);
+    const road = await closedScene(false);
+    ok(!!road.opened && road.due.due && road.due.held && road.due.open === false && road.due.road === 'loggedHandOff', '⑥ the plant: a files window opened, its save DUE and HELD, the page\'s socket NOT OPEN', road.due);
+    ok(road.booted && !!road.mine && road.mine.desk === road.desk && road.mine.shown && road.inHub && Array.isArray(road.leave) && road.leave.some((l) => /^handoff:/.test(l.why) && l.sent >= 1),
+      '⑥ B-46fc PART 2\'S GATE: the page reloaded with its socket closed ⇒ the leave queued the save and HANDED IT OFF (POST /api/layout-sync) — the hub\'s record holds the window and the reloaded page shows it', { leave: road.leave, hub: road.hub, mine: road.mine });
   } catch (e) {
     ok(false, 'the suite threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e));
   } finally {

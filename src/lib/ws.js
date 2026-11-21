@@ -73,7 +73,10 @@ class WsManager {
     this.ws.onerror = () => {};
   }
   get connected() { return this._connected; }
+  /** B-46fc part 2: this page load's layout writer token — rides every layout-sync frame (the route's save is then judged as this page's own) */
+  get layoutWriter() { return this._layoutWriter || (this._layoutWriter = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10)); }
   send(d) {
+    if (d && d.type === 'layout-sync' && !d.writer) d = { ...d, writer: this.layoutWriter }; // B-46fc part 2: this page load's writer token (a save handed off at the leave is judged as its writer's)
     const m = wireText(d);
     if (d && d.type === 'attach' && d.sessionId) this._attachInFlight.set(d.sessionId, Date.now());
     this.ws?.readyState === 1 ? this.ws.send(m) : this.pending.push(m);

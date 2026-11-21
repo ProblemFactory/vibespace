@@ -495,6 +495,17 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // (the phone's own `autoSaveMobile` slot is gone — lane phone-arrangement-local, §6b guard 10: nobody posted it, a phone
   // writes membership into the desktop's record over layout-sync and keeps its window on show locally; a stored slot is
   // simply never read, and the next write of layouts.json drops it below)
+  // B-46fc part 2: A PAGE THAT LEAVES WITH ITS SOCKET NOT OPEN hands its queued layout save here (fetch keepalive at pagehide / hidden) —
+  // the frame the socket would have carried, through the ONE «apply a layout save» (src/server/layout-sync-door.js → ws-handler's
+  // applyLayoutSync: every guard the socket's save meets). Bounded (256 KB, refused by name); the answer = what the socket would have heard.
+  router.post('/api/layout-sync', (req, res) => {
+    const door = require('../server/layout-sync-door.js');
+    const too = door.sizeVerdict(Number(req.headers['content-length']) || Buffer.byteLength(JSON.stringify(req.body || {})));
+    if (too) return res.status(413).json({ error: too });
+    const r = door.apply(req.body);
+    if (r.status !== 200) return res.status(r.status).json({ error: r.error });
+    res.json({ ok: true, answers: r.answers });
+  });
   router.post('/api/layouts-autosave', (req, res) => {
     const data = readLayouts();
     if (req.body?.deviceType === 'mobile') return res.status(410).json({ error: 'no mobile slot: a phone saves over layout-sync' });
@@ -1698,7 +1709,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   // B-225b: EVERY door of the desktops and the custom themes answers a held store BY NAME (503 store_unread) — its handlers wrapped
   // once, here, by path (the conversation list's and the bookmarks' doors say it in their own handlers)
-  for (const layer of router.stack) if (layer.route && /^\/api\/(layouts|layouts-active|layouts-autosave|custom-grids|layout-history|custom-themes|settings)(\/|$)/.test(layer.route.path)) for (const l of layer.route.stack) l.handle = guarded(l.handle);
+  for (const layer of router.stack) if (layer.route && /^\/api\/(layouts|layouts-active|layouts-autosave|layout-sync|custom-grids|layout-history|custom-themes|settings)(\/|$)/.test(layer.route.path)) for (const l of layer.route.stack) l.handle = guarded(l.handle);
   // B-225b: an import that STOPS after it set a damaged store's bytes aside says so — the person's bytes are under a dated name, kept
   // whole, and the store now starts empty: never a bare failure that leaves them looking for their file
   for (const layer of router.stack) if (layer.route && layer.route.path === '/api/config/import') for (const l of layer.route.stack) {

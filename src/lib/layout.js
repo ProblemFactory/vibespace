@@ -198,6 +198,9 @@ class LayoutManager {
     // debounce still holds goes at once (_flushOnLeave)
     if (typeof window !== 'undefined') window.addEventListener?.('pagehide', () => this._flushOnLeave('pagehide'));
     document.addEventListener('visibilitychange', () => { if (document.hidden) this._flushOnLeave('hidden'); });
+    // B-46fc part 2: then what a CLOSED socket still queues leaves by its own road (registered after the flush: it runs after it)
+    if (typeof window !== 'undefined') window.addEventListener?.('pagehide', () => this._handOffQueued('pagehide'));
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this._handOffQueued('hidden'); });
     // Server restart resets its seq counter — reset ours on every reconnect; and a RECONNECT re-reads the layout
     // (§6b guard 9, lane desktop-move verify r1 D2): what other clients wrote during the outage never arrives
     // by broadcast. 250 ms after the open — the sends queued during the outage have left first.
@@ -1796,6 +1799,34 @@ class LayoutManager {
    *  built, and an add-only frame half-carried a move). A deferral re-arms the dirty bit only for a PERSON's act it holds
    *  (`_deferUserAt`, the 1.1 s kind) — an owed-recipe deferral sends only its recipes (_doAutoSave's own road). A socket that is not
    *  open queues the frame (ws.js) and the page takes it away: said, not solved here. → whether a save left. */
+  /** B-46fc part 2 — A SAVE NEVER STAYS IN A CLOSED SOCKET'S QUEUE AT THE LEAVE: the layout-sync frames the socket queued (it is not open
+   *  — ws.js `pending`) are taken OUT of the queue (a page that comes back from the back-forward cache never sends them twice), the
+   *  newest per desktop, and handed to the hub by a request that outlives the page (fetch keepalive → POST /api/layout-sync — the same
+   *  «apply a layout save» as the socket's, every guard of it). Within the keepalive budget (60 KB in all); a frame over it stays queued,
+   *  said. → how many left. */
+  _handOffQueued(why) {
+    const ws = this.app.ws;
+    if (!ws || !Array.isArray(ws.pending) || !ws.pending.length || ws.ws?.readyState === 1) return 0;
+    const newest = new Map(), keep = [];
+    for (const text of ws.pending) {
+      let f = null; try { f = JSON.parse(text); } catch { f = null; }
+      if (f && f.type === 'layout-sync') { newest.set(f.desktopId || '', text); continue; }
+      keep.push(text);
+    }
+    if (!newest.size) return 0;
+    let budget = 60 * 1024, sent = 0;
+    const left = [];
+    for (const text of newest.values()) {
+      const bytes = new Blob([text]).size;
+      if (bytes > budget) { left.push(text); console.warn(`[layout] a layout save of ${Math.round(bytes / 1024)} KB is over the hand-off budget — it waits for the socket`); continue; }
+      budget -= bytes;
+      try { fetch('/api/layout-sync', { method: 'POST', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: text }).catch(() => { }); sent++; } catch { left.push(text); }
+    }
+    ws.pending = [...keep, ...left];
+    if (sent) { try { window.__vsOp?.('layout-handed-off', { why, n: sent }); } catch { } }
+    return sent;
+  }
+
   _flushOnLeave(why) {
     if (this._restoreArmed()) return false; // a restore armed this page's reload: nothing leaves at its leave (_restoreArmed)
     if (this._scratch) return false; // B-225b: a scratch surface takes nothing with it
