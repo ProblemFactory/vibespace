@@ -4062,17 +4062,24 @@ class JobManager {
     const keep = LS.keepSetOf({ jobs: [...this.jobs.values(), ...(this._removalOwed ? this._removalOwed.values() : [])], archive: this.archive || [], held });
     for (const id of keep.unreadable) if (!(this._logsUnreadSaid || (this._logsUnreadSaid = new Set())).has(id)) { this._logsUnreadSaid.add(id); this.d.log(`[jobs] job-logs: the record ${id} lists its runs in a shape that cannot be read — every dir of it is kept`); }   // round 3 §3: said once, by id
     const loaded = this._logsState !== null, counting = loaded ? !this._logsState.catchUp : true;
-    const ans = await this._logsRemover().sweep({ keep, cutoff: at - cfg.retentionMs, max: cfg.max, count: loaded ? counting : 'auto', stateFile: loaded ? null : this.logsSweepFile,   // `counting` walks on past B by NAME only (no stat, no /proc)
+    // B-323e: the COUNT FILES this engine has counted (their names in the record beside their counts) — forgotten first by this pass's
+    // child, once the record naming them is ON DISK (a restart between never counts one twice: the boot's read skips a name it holds)
+    const counted = [...((this._logsState && this._logsState.orphansCounted) || [])];
+    const onDisk = counted.length ? await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => false) : true;   // the fresh read's find 5: a record NOT on disk forgets nothing
+    const ans = await this._logsRemover().sweep({ keep, cutoff: at - cfg.retentionMs, max: cfg.max, count: loaded ? counting : 'auto', stateFile: loaded ? null : this.logsSweepFile, forget: onDisk === false ? [] : counted,   // `counting` walks on past B by NAME only (no stat, no /proc)
       archiveFile: this.archive && !this._logsUnread.archive ? null : this.archiveFile, storeFile: this._logsUnread.store ? this.file : null,
       setAside: { dir: this.d.dataDir, prefixes: [path.basename(this.file) + '.corrupt-', path.basename(this.archiveFile) + '.corrupt-'] }, orphanDir: this.d.dataDir },
       { timeoutMs: cfg.timeoutMs });   // round 2: the counting pass has the same timeout — past B it only reads directories
+    if (ans && Array.isArray(ans.forgot) && this._logsState) this._logsState.orphansCounted = (this._logsState.orphansCounted || []).filter((n) => !ans.forgot.includes(n));
     if (ans && !ans.error && ans.heldBy) { this._logsHeld(ans, cfg); return ans; }   // a set-aside record store: nothing removed, said once
     if (!ans || ans.error) {
       const part = ans && ans.partial && Number.isFinite(ans.partial.removed) ? ans.partial : null;   // what a cut pass removed before it was ended
-      if (ans && ans.error !== 'stopped' && !ans.held && (ans.error !== this._logsLastErr || part)) this.d.log(`[jobs] job-logs pass (${why}) failed: ${ans.error} — ${part ? `${part.removed} run dir(s) were removed before it was ended; ` : 'nothing removed; '}the next pass asks again after its rest`);   // HELD is said once by the remover; the same failure once
+      if (ans && ans.error !== 'stopped' && !ans.held && (ans.error !== this._logsLastErr || part)) this.d.log(`[jobs] job-logs pass (${why}) failed: ${ans.error} — ${part ? `${part.removed} run dir(s) were removed before it was ended; ` : ans.partialUnknown ? `how many run dirs it removed before it was ended is not known (${ans.partialUnknown}); ` : 'nothing removed; '}the next pass asks again after its rest`);   // HELD is said once by the remover; the same failure once
       if (ans) this._logsLastErr = ans.error;
       const cuF = this._logsState && this._logsState.catchUp;   // a STOP's count went into the record at the stop (round 4 §3: `_logsStop`)
-      if (cuF && part && ans.error !== 'stopped') { cuF.removed += part.removed; cuF.entries += part.entries || 0; cuF.jobDirs = (cuF.jobDirs || 0) + (part.jobDirs || 0); this._logsSave(); }
+      if (cuF && part && ans.error !== 'stopped') { cuF.removed += part.removed; cuF.entries += part.entries || 0; cuF.jobDirs = (cuF.jobDirs || 0) + (part.jobDirs || 0); }
+      if (part && ans.countFile && this._logsState) { const oc = this._logsState.orphansCounted || (this._logsState.orphansCounted = []); if (!oc.includes(ans.countFile)) oc.push(ans.countFile); }   // B-323e: counted ONCE — its name beside its count
+      if (part && ((cuF && ans.error !== 'stopped') || ans.countFile)) this._logsSave();
       if (cuF) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS, cfg.restFactor * cfg.timeoutMs));   // a failed or cut pass RESTS (≥ 5 min, ≥ 10× its timeout); an open catch-up never stalls
       return ans;
     }
@@ -4093,16 +4100,18 @@ class JobManager {
     }
     // B-c330 (主开发's ruling B): a steady pass FOLDS into one line a day (the counts summed, kept in the record — a restart loses none);
     // a pass that removes LOGS_SAY_AT_ONCE or more speaks at once (the journal's stamp is its hour); a HOLD speaks at once (_logsHeld)
-    const today = new Date(at).toISOString().slice(0, 10);
+    const today = new Date(at).toISOString().slice(0, 10), sayNow = [];
     if (st.day && st.day.day !== today) { this.d.log(LS.words.day(st.day)); st.day = null; }
     const cu = st.catchUp;
     if (cu) { if (!opened) { cu.removed += ans.removed; cu.entries += ans.entries; cu.jobDirs = (cu.jobDirs || 0) + (ans.jobDirs || 0); cu.passes++; } }   // the opening pass is in the record already
-    else if (ans.removed >= LOGS_SAY_AT_ONCE) this.d.log(LS.words.pass(ans));
+    else if (ans.removed >= LOGS_SAY_AT_ONCE) sayNow.push(LS.words.pass(ans));   // B-323e (the fresh read's find 7): said once the record holding it is ON DISK — a kill between never says it twice
     else if (ans.removed) { const d = st.day || (st.day = { day: today, removed: 0, entries: 0, passes: 0 }); d.removed += ans.removed; d.entries += ans.entries || 0; d.passes++; }
+    if (ans.countFile && !st.orphansCounted.includes(ans.countFile)) st.orphansCounted.push(ans.countFile);   // B-323e: its count file is counted HERE — its name in the same record as its count
     st.last = { at, why, removed: ans.removed, entries: ans.entries, more: !!ans.more, ms: ans.ms };
-    if (cu && !ans.more) { this.d.log(LS.words.done({ ...cu, kept: ans.keptOld || 0 })); st.catchUp = null; } // …and once when it is done, with its total (the last, complete pass's «kept»)
+    if (cu && !ans.more) { sayNow.push(LS.words.done({ ...cu, kept: ans.keptOld || 0 })); st.catchUp = null; } // …and once when it is done, with its total (the last, complete pass's «kept»)
     this._logsSave();
-    if (cu) await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { });   // round 2: a catch-up pass's count is on disk before the next — a hub killed between passes loses none (the batch in flight is the orphan file's)
+    if (cu || sayNow.length) await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { });   // round 2: a catch-up pass's count is on disk before the next — a hub killed between passes loses none (the batch in flight is its count file's)
+    for (const l of sayNow) this.d.log(l);
     if (st.catchUp) this._logsNext(Math.max(cfg.gapMs, cfg.restFactor * (ans.ms || 0)));   // round 2: a slow pass earns a longer rest
     return ans;
   }
@@ -4227,10 +4236,9 @@ class JobManager {
   _logsStop() {
     this._logsStopped = true;
     if (this._logsGapT) { clearTimeout(this._logsGapT); this._logsGapT = null; }
-    // round 4 §3: a stop on the hub's REAL exit — the in-flight batch's count (as its progress said it) goes into the open catch-up NOW
-    // and the record is dirty before shutdown's exitFlush writes it (the pass's own continuation runs after the exit, i.e. never)
-    const part = this._logsRm ? this._logsRm.stop() : null, cu = this._logsState && this._logsState.catchUp;
-    if (cu && part && Number.isFinite(part.removed) && part.removed > 0) { cu.removed += part.removed; cu.entries += part.entries || 0; cu.jobDirs = (cu.jobDirs || 0) + (part.jobDirs || 0); this._logsSave(); }
+    // round 4 §3 (B-323e): a stop keeps the in-flight batch's count — in ITS COUNT FILE (rewritten after every removal; the starter holds
+    // that child and ends it at the hub's exit): its name is not in this record, so the next engine counts it ONCE
+    if (this._logsRm) this._logsRm.stop();
   }
   /** once no pass and no removal is queued or in flight (a suite's wait; the catch-up's NEXT pass is a timer, not waited) */
   async logsSettled() {

@@ -243,37 +243,41 @@ try {
   ok(has(orphanOld), 'an archive that cannot be read removes NOTHING (a record it names could be lost) — the pass fails and says so');
   fs.writeFileSync(path.join(d1, 'jobs-archive.json'), '[]');
   // A WEDGED CHILD: a storage call that never returns is an uninterruptible wait not even SIGKILL ends (a child cannot model it
-  // on a local disk — a FIFO's open IS interruptible): a stand-in child that never exits. The batch times out, the child is killed
-  // and does not end ⇒ no second child beside it, the remover is HELD (said once), and goes on once that child has ended
+  // on a local disk — a FIFO's open IS interruptible): B-323e — a stand-in for THE STARTER's run (the remover's one road) whose
+  // child is killed at its bound and does not end. The batch times out ⇒ no second child beside it, the remover is HELD (said
+  // once), and goes on once that child has ended (the starter's onLateExit)
   if (LS) {
-    const { EventEmitter } = await import('node:events');
-    let started = 0, answer = false; const kids = [];
-    const fakeFork = () => { started++; const c = new EventEmitter(); c.kills = 0; c.ref = () => { }; c.unref = () => { }; c.channel = null;
-      c.kill = () => { c.kills++; };   // never exits on its own: wedged
-      c.send = (m) => { if (answer) setTimeout(() => c.emit('message', { seq: m.seq, removed: 0, entries: 0, more: false }), 5); };
-      kids.push(c); return c; };
-    const alive = setInterval(() => { }, 50);   // a stand-in child holds no handle — the real one keeps the loop up
-    const said = [], R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere'), log: (l) => said.push(l), timeoutMs: 150, wedgedMs: 300, forkImpl: fakeFork });
-    const a1 = await R.sweep({ keep: {}, cutoff: 0, max: 1 });
-    const a2 = await R.sweep({ keep: {}, cutoff: 0, max: 1 });
-    ok(a1.error && !a1.held && a2.held && started === 1 && kids[0].kills >= 1 && R.held(), `a sweep past its timeout answers its timeout (never repeated); its child is killed and does not end ⇒ HELD — the next batch answers at once and NO second child is started (${started} started)`);
+    let started = 0, answer = false; const late = [];
+    const standIn = (c, a, o) => { started++; const i = a.indexOf('--request'); if (i > 0) { try { fs.unlinkSync(path.join(a[2], a[i + 1])); } catch { } }
+      if (!answer) { late.push(o.onLateExit); return Promise.resolve({ started: true, timedOut: true, code: null, signal: 'SIGKILL', stdout: '', stderr: '' }); }
+      return Promise.resolve({ started: true, code: 0, signal: null, stdout: JSON.stringify({ removed: 0, entries: 0, more: false }) + '\n', stderr: '' }); };
+    const alive = setInterval(() => { }, 50);   // a stand-in run holds no handle — the real starter's pipe keeps the loop up
+    const said = [], R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere'), log: (l) => said.push(l), timeoutMs: 150, wedgedMs: 300, runImpl: standIn });
+    const a1 = await R.sweep({ keep: {}, cutoff: 0, max: 1, orphanDir: tmp });
+    const a2 = await R.sweep({ keep: {}, cutoff: 0, max: 1, orphanDir: tmp });
+    ok(a1.error && !a1.held && /has not ended/.test(a1.partialUnknown || '') && a2.held && started === 1 && R.held(), `a sweep past its timeout answers its timeout (never repeated; its count «unknown» while its child has not ended); its child is killed and does not end ⇒ HELD — the next batch answers at once and NO second child is started (${started} started)`);
     ok(said.filter((l) => /HELD/.test(l)).length === 1, 'the hold is said ONCE', said);
-    answer = true; kids[0].emit('exit', null, 'SIGKILL');
-    const a3 = await R.sweep({ keep: {}, cutoff: 0, max: 1 });
+    answer = true; if (late[0]) late[0]();
+    const a3 = await R.sweep({ keep: {}, cutoff: 0, max: 1, orphanDir: tmp });
     ok(!R.held() && !a3.error && started === 2 && said.some((l) => /has ended — removals go on/.test(l)), 'once the wedged child ends the remover goes on (a new child answers), and says so');
     R.stop(); clearInterval(alive);
   } else ok(false, 'a wedged child holds the remover (no remover on this tree)');
   // THE HUB'S EXIT NEVER WAITS FOR THE REMOVER (round 2): a process whose remover child is blocked in a storage call (a FIFO's
   // open that never returns) exits at once — a process exit joins its threads, never its children; the child goes when its call does
+  // (B-323e: one batch a child through the starter — the starter ends it when the hub's pipe closes)
   if (LS) {
     const fifoX = path.join(tmp, 'exit.fifo'); execFileSync('mkfifo', [fifoX]);
     const blockF = path.join(tmp, 'block-child.cjs');
-    fs.writeFileSync(blockF, `const fs = require('fs'); process.on('message', (m) => { fs.openSync(${JSON.stringify(fifoX)}, 'r'); process.send({ seq: m.seq, removed: 0, more: false }); }); process.on('disconnect', () => process.exit(0));\n`);
+    fs.writeFileSync(blockF, `const fs = require('fs'); fs.openSync(${JSON.stringify(fifoX)}, 'r'); process.stdout.write(JSON.stringify({ removed: 0, more: false }) + '\\n');\n`);   // B-323e: a one-batch child, blocked at its start
     const hubF = path.join(tmp, 'exiting-hub.cjs');
-    fs.writeFileSync(hubF, `const LS = require(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep.js'))}); const R = LS.createRemover({ logsDir: '/nowhere', workerPath: ${JSON.stringify(blockF)} });\nR.sweep({ keep: {}, cutoff: 0, max: 1 }); setTimeout(() => { R.stop(); const t = Date.now(); process.on('exit', () => process.stderr.write('EXIT ' + (Date.now() - t) + '\\n')); process.exit(0); }, 400);\n`);
+    fs.writeFileSync(hubF, `const LS = require(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep.js'))}); const R = LS.createRemover({ logsDir: ${JSON.stringify(path.join(tmp, 'exit-logs'))}, workerPath: ${JSON.stringify(blockF)} });\nR.sweep({ keep: {}, cutoff: 0, max: 1 }); setTimeout(() => { R.stop(); const t = Date.now(); process.on('exit', () => process.stderr.write('EXIT ' + (Date.now() - t) + '\\n')); process.exit(0); }, 400);\n`);
     const t0 = Date.now();
     const r = await new Promise((resolve) => { const c = spawn(process.execPath, [hubF], { stdio: ['ignore', 'ignore', 'pipe'] }); let err = ''; c.stderr.on('data', (d) => { err += d; }); const k = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 6000); c.on('exit', (code, sig) => { clearTimeout(k); resolve({ code, sig, err, ms: Date.now() - t0 }); }); });
-    try { const fd = fs.openSync(fifoX, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.closeSync(fd); } catch { /* ENXIO: no reader is left — the child was killed by the stop */ }
+    // B-323e (the fresh read's weak leg): the hub's exit closes the starter's pipe and the starter ends the children it holds — no
+    // reader is left on the FIFO (ENXIO); one still there is released here and the leg says so
+    await sleep(300);
+    let readerLeft = null; try { const fd = fs.openSync(fifoX, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.closeSync(fd); readerLeft = true; } catch (e) { readerLeft = e && e.code === 'ENXIO' ? false : null; }
+    ok(readerLeft === false, `B-323e: …and the starter ended the child blocked in its storage call once the hub's pipe closed (no reader left on its FIFO${readerLeft ? ' — ONE WAS: it outlived its hub' : ''})`);
     ok(r.code === 0 && !r.sig && /EXIT \d+/.test(r.err), `THE HUB'S EXIT NEVER WAITS FOR THE REMOVER: with its child blocked in a storage call, the process exits BY ITSELF (code ${r.code}${r.sig ? ', killed by the leg\'s 6 s backstop — it waited' : ''}; a thread there holds the exit until the backstop)`);
   }
 
@@ -747,15 +751,15 @@ try {
     // c. a cut SWEEP batch is never repeated before its rest; a cut WHOLE-dir batch is retried once (its caller's verdict)
     if (LS) {
       const slowF = path.join(tmp, 'slow-answer-child.cjs');
-      fs.writeFileSync(slowF, "process.on('message', (m) => { setTimeout(() => process.send({ seq: m.seq, removed: 0, entries: 0, more: false, gone: [] }), 3000); }); process.on('disconnect', () => process.exit(0));\n");
-      let started = 0; const cp = await import('node:child_process'); const saidC = [];
-      const R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere2'), log: (l) => saidC.push(l), timeoutMs: 150, wedgedMs: 2000, workerPath: slowF, forkImpl: (...a) => { started++; return cp.fork(...a); } });
-      const cut = await R.sweep({ keep: {}, cutoff: 0, max: 1 }); const sweepStarts = started;
+      fs.writeFileSync(slowF, "setTimeout(() => process.stdout.write(JSON.stringify({ removed: 0, entries: 0, more: false, gone: [] }) + '\\n'), 3000);\n");   // B-323e: a one-batch child that answers late
+      let started = 0; const CSc = require(path.join(ROOT, 'src/server/child-starter.js')); const saidC = [];
+      const R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere2'), log: (l) => saidC.push(l), timeoutMs: 150, wedgedMs: 2000, workerPath: slowF, runImpl: (c, a, o) => { if (a[5] === 'sweep' || a[5] === 'whole') started++; return CSc.childStarter().run(c, a, o); } });   // B-323e: THE STARTER's run, its sweep / whole starts counted
+      const cut = await R.sweep({ keep: {}, cutoff: 0, max: 1, orphanDir: tmp }); const sweepStarts = started;
       await until(() => !R.held(), 3000);
       const w = await R.whole(['jb-12340001']);
       ok(cut.error && /no answer in/.test(cut.error) && sweepStarts === 1, `A CUT SWEEP IS NOT REPEATED at once: one child, one timeout, answered («${cut.error}») — the pass's rest comes next`);
       ok(w.error && started === 3, `…while a cut WHOLE-dir batch (a caller's verdict) is retried once (${started - sweepStarts} children)`);
-      const fl = saidC.filter((l) => /remover: a \w+ batch failed/.test(l));
+      const fl = saidC.filter((l) => /remover: a (?:sweep|whole) batch failed/.test(l));   // B-323e: the cut sweep's count read (a count batch) fails here too — its own line
       ok(fl.length === 3 && /a sweep batch failed .* — not repeated before the pass's rest$/.test(fl[0]) && /a whole batch failed .* — queued again$/.test(fl[1]) && !/queued again/.test(fl[2]), 'round 4 §3: the journal says «queued again» only for the whole-dir batch that IS queued again — the cut sweep\'s line says it waits for its pass\'s rest', fl);
       R.stop();
     }
@@ -766,9 +770,9 @@ try {
       const pc = path.join(tmp, 'pc'); fs.mkdirSync(path.join(pc, 'job-logs'), { recursive: true });
       const base = Date.now() - 50 * DAY; for (let i = 0; i < 600; i++) seedRun(pc, 'jb-0ld0000c', base + i * 1000, { ageMs: 30 * DAY });
       const R2 = LS.createRemover({ logsDir: path.join(pc, 'job-logs'), timeoutMs: 350, wedgedMs: 2000, workerPath: slow1 });
-      const cutAns = await R2.sweep({ keep: { named: ['jb-0ld0000c'], listed: [], skeleton: [], held: [] }, cutoff: Date.now() - 14 * DAY, max: 1000 });
+      const cutAns = await R2.sweep({ keep: { named: ['jb-0ld0000c'], listed: [], skeleton: [], held: [] }, cutoff: Date.now() - 14 * DAY, max: 1000, orphanDir: pc });   // B-323e: its count file in the data dir
       const goneOnDisk = 600 - runsOn(pc, 'jb-0ld0000c').length;
-      ok(cutAns.error && cutAns.partial && cutAns.partial.removed >= 1 && cutAns.partial.removed <= goneOnDisk && goneOnDisk - cutAns.partial.removed <= 3, `the REAL remover's progress: a pass cut at its timeout answers what it removed so far, never more (${cutAns.partial && cutAns.partial.removed} said, ${goneOnDisk} gone — said after every removal; a message in flight at the kill may lag)`);
+      ok(cutAns.error && cutAns.partial && cutAns.partial.removed >= 1 && cutAns.partial.removed <= goneOnDisk && goneOnDisk - cutAns.partial.removed <= 3, `the REAL remover's progress: a pass cut at its timeout answers what it removed so far, never more (${cutAns.partial && cutAns.partial.removed} said, ${goneOnDisk} gone — B-323e: its count file, rewritten after every removal and read once its child ended; a kill between a removal and its write may lag one)`);
       R2.stop();
     }
     // d. a pass cut at its timeout RESTS (≥ 5 min, ≥ 10× its timeout) and keeps the count of what it removed before it was ended
@@ -901,19 +905,20 @@ try {
     const { jm: N5, logs: LN5 } = boot(o5, { max: 20, gapMs: 15, bootDelayMs: 20 });
     await until(() => left() === 0 && N5._logsState && !N5._logsState.catchUp && LN5.some((l) => /catch-up done/.test(l)), 15000, 10);
     const done5 = LN5.find((l) => /catch-up done/.test(l)) || '';
-    ok(/catch-up done: 60 run dir\(s\) removed/.test(done5) && LN5.some((l) => /a remover whose hub ended removed \d+ run dir\(s\) before it stopped — counted in the catch-up/.test(l)) && !orphanFile(), 'the NEXT engine counts what the orphan removed exactly once: the catch-up\'s done line says all 60, and the orphan\'s file is forgotten after its count is on disk', { done5 });
+    ok(/catch-up done: 60 run dir\(s\) removed/.test(done5) && LN5.some((l) => /a remover whose hub ended removed \d+ run dir\(s\) before it stopped — counted in the catch-up/.test(l)) && !fs.readdirSync(o5).some((n) => n.startsWith(LS.ORPHAN_PREFIX) && n.endsWith('.json') && !((N5._logsState && N5._logsState.orphansCounted) || []).includes(n)), 'the NEXT engine counts what the orphan removed exactly once: the catch-up\'s done line says all 60, and the orphan\'s file is forgotten after its count is on disk (B-323e: only the engine\'s own last count file is left, named in its record — its next pass forgets it)', { done5 });
   } else ok(false, 'no remover outlives its hub (no remover on this tree)');
   // THE CHILD KNOWS ITS HUB BY WHAT THE HUB TELLS IT (round 3 §4): the hub is killed THE MOMENT its child's pid appears (said
   // once its batch message is written), while the child is still starting (a stand-in delays its start 400 ms) — the child,
-  // reading its batch from a hub already gone, must never run it
+  // reading its batch from a hub already gone, must never run it. B-323e: the batch is handed in its arguments or its request file
+  // and the child is the starter's — it writes its pid first; the hub's end makes the starter end it, or it refuses at its start
   if (LS) {
     const o7 = mkDir('o7'); fs.mkdirSync(path.join(o7, 'job-logs'), { recursive: true });
     const b7 = Date.now() - 50 * DAY; for (let i = 0; i < 20; i++) seedRun(o7, 'jb-0ld00011', b7 + i * 1000, { ageMs: 30 * DAY });
     const lateChild = path.join(tmp, 'late-start-child.cjs');
-    const walked = path.join(tmp, 'o7-walked');
-    fs.writeFileSync(lateChild, `const fs = require('fs'); const rd = fs.readdirSync; fs.readdirSync = function (p, ...a) { if (String(p) === ${JSON.stringify(path.join(o7, 'job-logs'))}) fs.writeFileSync(${JSON.stringify(walked)}, '1'); return rd.call(this, p, ...a); };\nconst sab = new Int32Array(new SharedArrayBuffer(4)); Atomics.wait(sab, 0, 0, 400);   // a slow start: the hub dies meanwhile\nrequire(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep-worker.js'))});\n`);
+    const walked = path.join(tmp, 'o7-walked'), pid7 = path.join(tmp, 'o7-child.pid');
+    fs.writeFileSync(lateChild, `const fs = require('fs'); fs.writeFileSync(${JSON.stringify(pid7)}, String(process.pid)); const rd = fs.readdirSync; fs.readdirSync = function (p, ...a) { if (String(p) === ${JSON.stringify(path.join(o7, 'job-logs'))}) fs.writeFileSync(${JSON.stringify(walked)}, '1'); return rd.call(this, p, ...a); };\nconst sab = new Int32Array(new SharedArrayBuffer(4)); Atomics.wait(sab, 0, 0, 400);   // a slow start: the hub dies meanwhile\nrequire(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep-worker.js'))});\n`);
     const hub7 = path.join(tmp, 'hub7.cjs');
-    fs.writeFileSync(hub7, `const cp = require('child_process'); const LS = require(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep.js'))});\nconst R = LS.createRemover({ logsDir: ${JSON.stringify(path.join(o7, 'job-logs'))}, workerPath: ${JSON.stringify(lateChild)}, forkImpl: (p, a) => { const c = cp.fork(p, a, { env: { PATH: process.env.PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }); globalThis.kid = c; return c; } });\nR.sweep({ keep: { named: [], listed: [], skeleton: [], held: [] }, cutoff: Date.now(), max: 100 });\nsetTimeout(() => process.stdout.write('CHILD ' + globalThis.kid.pid + '\\n'), 30);   // the batch message is WRITTEN by now; the child is still starting\nsetInterval(() => { }, 1000);\n`);
+    fs.writeFileSync(hub7, `const fs = require('fs'); const LS = require(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep.js'))});\nconst R = LS.createRemover({ logsDir: ${JSON.stringify(path.join(o7, 'job-logs'))}, workerPath: ${JSON.stringify(lateChild)} });\nR.sweep({ keep: { named: [], listed: [], skeleton: [], held: [] }, cutoff: Date.now(), max: 100, orphanDir: ${JSON.stringify(o7)} });\nconst t = setInterval(() => { let p = ''; try { p = fs.readFileSync(${JSON.stringify(pid7)}, 'utf8'); } catch { } if (p) { clearInterval(t); process.stdout.write('CHILD ' + p + '\\n'); } }, 5);   // the child is born (its batch handed) and still starting\nsetInterval(() => { }, 1000);\n`);
     const h7 = spawn(process.execPath, [hub7], { stdio: ['ignore', 'pipe', 'ignore'] }); kids.push(h7);
     let o7out = ''; const childPid = await new Promise((resolve) => { const k = setTimeout(() => resolve(0), 8000); h7.stdout.on('data', (d) => { o7out += d; const m = /CHILD (\d+)/.exec(o7out); if (m) { clearTimeout(k); try { process.kill(h7.pid, 'SIGKILL'); } catch { } resolve(Number(m[1])); } }); });
     const gone = await until(() => { try { fs.statSync('/proc/' + childPid); return false; } catch { return true; } }, 8000, 10);   // the child's own end
@@ -935,10 +940,12 @@ try {
   // child appears (its batch message written), the child starting 400 ms late: a whole-dir batch, the record read, a forget, a note
   if (LS) {
     const late14 = path.join(tmp, 'late14-child.cjs');
-    fs.writeFileSync(late14, `const sab = new Int32Array(new SharedArrayBuffer(4)); Atomics.wait(sab, 0, 0, 400);   // a slow start: the hub dies meanwhile\nrequire(${JSON.stringify(WORKER)});\n`);
+    const pid14 = path.join(tmp, 'g14-child.pid');
+    fs.writeFileSync(late14, `require('fs').writeFileSync(${JSON.stringify(pid14)}, String(process.pid)); const sab = new Int32Array(new SharedArrayBuffer(4)); Atomics.wait(sab, 0, 0, 400);   // a slow start: the hub dies meanwhile\nrequire(${JSON.stringify(WORKER)});\n`);
     const hub14 = path.join(tmp, 'hub14.cjs');
-    fs.writeFileSync(hub14, `const cp = require('child_process'); const LS = require(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep.js'))});\nconst [logsDir, op, args] = JSON.parse(process.argv[2]);\nconst R = LS.createRemover({ logsDir, workerPath: ${JSON.stringify(late14)}, forkImpl: (p, a) => { const c = cp.fork(p, a, { env: { PATH: process.env.PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }); globalThis.kid = c; return c; } });\nif (typeof R[op] === 'function') R[op](...args);\nsetTimeout(() => { if (globalThis.kid) process.stdout.write('CHILD ' + globalThis.kid.pid + '\\n'); }, 30);   // the batch message is WRITTEN by now\nsetInterval(() => { }, 1000);\n`);
+    fs.writeFileSync(hub14, `const fs = require('fs'); const LS = require(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep.js'))});\nconst [logsDir, op, args] = JSON.parse(process.argv[2]);\nconst R = LS.createRemover({ logsDir, workerPath: ${JSON.stringify(late14)} });\nif (typeof R[op] === 'function') R[op](...args);\nconst t = setInterval(() => { let p = ''; try { p = fs.readFileSync(${JSON.stringify(pid14)}, 'utf8'); } catch { } if (p) { clearInterval(t); process.stdout.write('CHILD ' + p + '\\n'); } }, 5);   // B-323e: the child is born (its batch handed) and still starting\nsetInterval(() => { }, 1000);\n`);
     const goneAtFork = async (logsDir, op, args) => {
+      try { fs.unlinkSync(pid14); } catch { }   // B-323e: each child writes its own pid
       const h = spawn(process.execPath, [hub14, JSON.stringify([logsDir, op, args])], { stdio: ['ignore', 'pipe', 'ignore'] }); kids.push(h);
       let o = ''; const pid = await new Promise((resolve) => { const k = setTimeout(() => { try { process.kill(h.pid, 'SIGKILL'); } catch { } resolve(0); }, 8000); h.stdout.on('data', (d) => { o += d; const m = /CHILD (\d+)/.exec(o); if (m) { clearTimeout(k); try { process.kill(h.pid, 'SIGKILL'); } catch { } resolve(Number(m[1])); } }); });
       return pid > 0 && await until(() => { try { fs.statSync('/proc/' + pid); return false; } catch { return true; } }, 8000, 10);
@@ -972,7 +979,10 @@ try {
     await sleep(80);
     let recX = null; try { recX = JSON.parse(fs.readFileSync(path.join(x9, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
     const goneX = 60 - leftX();
-    ok(midX && recX && recX.catchUp && recX.catchUp.removed >= goneX - 1 && recX.catchUp.removed <= goneX, `round 4 §3: a stop on the hub's REAL exit road keeps the in-flight batch's count — the record the exit flushed says ${recX && recX.catchUp && recX.catchUp.removed}, ${goneX} are gone (a progress message in the pipe at the stop may lag one)`, { midX, catchUp: recX && recX.catchUp });
+    // B-323e: the in-flight batch's count rides ITS COUNT FILE (its name not in the record — the next engine counts it once)
+    const inflightX = fs.readdirSync(x9).filter((n) => LS.COUNT_NAME.test(n) && !((recX && recX.orphansCounted) || []).includes(n)).reduce((s, n) => { try { return s + (Number(JSON.parse(fs.readFileSync(path.join(x9, n), 'utf8')).removed) || 0); } catch { return s; } }, 0);
+    const keptX = recX && recX.catchUp ? recX.catchUp.removed + inflightX : -1;
+    ok(midX && recX && recX.catchUp && keptX >= goneX - 1 && keptX <= goneX, `round 4 §3: a stop on the hub's REAL exit road keeps the in-flight batch's count — the record the exit flushed says ${recX && recX.catchUp && recX.catchUp.removed}, the in-flight batch's count file ${inflightX} (B-323e: counted once by the next engine), ${goneX} are gone (a kill between a removal and its write may lag one)`, { midX, catchUp: recX && recX.catchUp, inflightX });
   }
   // round 4 §3 (a survivor pinned): what a ✕ owed BEFORE A RESTART is re-sent while the clean-up is PAUSED — the record read first
   if (LS) {
@@ -994,13 +1004,12 @@ try {
     ok(answered, 'the For-you store\'s whenWritten is answered when its flush finds memory unchanged (a «said» never waits for an unrelated later write)');
     try { U.stop && U.stop(); } catch { }
   }
-  // an IDLE child ends — no process parked between two passes
+  // NO CHILD IS KEPT between two batches (B-323e: one child a batch, started by the starter — the warm child and its linger are gone)
   if (LS) {
-    const cpm = await import('node:child_process'); const forked = [];
-    const R = LS.createRemover({ logsDir: path.join(tmp, 'idle-nowhere'), idleMs: 50, forkImpl: (...a) => { const c = cpm.fork(a[0], a[1], { env: { PATH: process.env.PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }); forked.push(c); return c; } });
-    await R.whole(['jb-1d1e0001']); await R.settled();
-    const ended = await new Promise((resolve) => { const c = forked[0]; if (!c) return resolve(false); if (c.exitCode !== null || c.signalCode !== null) return resolve(true); const k = setTimeout(() => resolve(false), 5000); c.once('exit', () => { clearTimeout(k); resolve(true); }); });
-    ok(forked.length === 1 && ended, 'an IDLE child ends after its linger: no process is parked between two passes');
+    const CSi = require(path.join(ROOT, 'src/server/child-starter.js'));
+    const R = LS.createRemover({ logsDir: path.join(tmp, 'idle-nowhere') });
+    const w = await R.whole(['jb-1d1e0001']); await R.settled();
+    ok(w && !w.error && !R.busy() && CSi.childStarter().stats().pending === 0, 'NO CHILD IS PARKED between two batches: once its batch is answered the starter holds no child of the remover (one child a batch)', CSi.childStarter().stats());
     R.stop();
   }
 
@@ -1027,10 +1036,15 @@ try {
     T8.sweepLogs({ why: 'boot' });
     await until(() => T8._logsState && T8._logsState.catchUp && T8._logsState.catchUp.passes >= 1 && runsOn(t8, 'jb-0ld00013').length <= 27, 10000, 2);   // mid the second pass
     T8.shutdown(); await settle(T8); await sleep(50);
+    // B-323e: an in-process stop does not end the in-flight child (the starter holds it; the hub's exit ends it) — its own end is
+    // waited for, and its count rides its count file (its name not in the record: the next engine counts it once)
+    await until(() => require(path.join(ROOT, 'src/server/child-starter.js')).childStarter().stats().pending === 0, 10000, 5);
     await W8.storeWriter().durable(path.join(t8, 'jobs-logs-sweep.json'));
     let r8 = null; try { r8 = JSON.parse(fs.readFileSync(path.join(t8, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
     const gone8 = 40 - runsOn(t8, 'jb-0ld00013').length;
-    ok(r8 && r8.catchUp && r8.catchUp.removed >= gone8 - 1 && r8.catchUp.removed <= gone8, `a batch ended by a STOP keeps its count: the record says ${r8 && r8.catchUp && r8.catchUp.removed}, ${gone8} gone (a message in flight at the stop may lag one)`);
+    const inflight8 = fs.readdirSync(t8).filter((n) => LS.COUNT_NAME.test(n) && !((r8 && r8.orphansCounted) || []).includes(n)).reduce((s, n) => { try { return s + (Number(JSON.parse(fs.readFileSync(path.join(t8, n), 'utf8')).removed) || 0); } catch { return s; } }, 0);
+    const kept8 = r8 && r8.catchUp ? r8.catchUp.removed + inflight8 : -1;
+    ok(kept8 >= gone8 - 1 && kept8 <= gone8, `a batch ended by a STOP keeps its count: the record says ${r8 && r8.catchUp && r8.catchUp.removed}, the in-flight batch's count file ${inflight8}, ${gone8} gone (a kill between a removal and its write may lag one)`);
     // c. a catch-up record that cannot be READ makes the pass wait (said once, nothing removed, nothing overwritten); one that does not
     // PARSE is set aside and a fresh one starts
     const c8 = mkDir('c8'); fs.mkdirSync(path.join(c8, 'jobs-logs-sweep.json'));   // a directory in its place: EISDIR
@@ -1055,7 +1069,7 @@ try {
     const { jm: E8, logs: LE8 } = boot(e8, { max: 20, gapMs: 15 });
     let recAtForget = null; const realF = E8._logsRemover(); const of = realF.forget; realF.forget = (dir, names) => { try { recAtForget = JSON.parse(fs.readFileSync(path.join(e8, 'jobs-logs-sweep.json'), 'utf8')); } catch { } return of(dir, names); };
     await E8.sweepLogs({ why: 'boot' }); await settle(E8);
-    ok(LE8.some((l) => /count file was cut while it was written \(jobs-remover-orphan-11-1\.json\.tmp\)/.test(l)) && LE8.some((l) => /jobs-remover-orphan-12-1\.json does not hold a remover's count/.test(l)) && !fs.readdirSync(e8).some((n) => n.startsWith(LS.ORPHAN_PREFIX)), 'an orphan\'s cut write (.tmp) is forgotten and said; a count that is not a whole number of a batch is never taken verbatim (said, forgotten)');
+    ok(LE8.some((l) => /count file was cut while it was written \(jobs-remover-orphan-11-1\.json\.tmp\)/.test(l)) && LE8.some((l) => /jobs-remover-orphan-12-1\.json does not hold a remover's count/.test(l)) && !fs.readdirSync(e8).some((n) => n.startsWith(LS.ORPHAN_PREFIX) && !((E8._logsState && E8._logsState.orphansCounted) || []).includes(n)), 'an orphan\'s cut write (.tmp) is forgotten and said; a count that is not a whole number of a batch is never taken verbatim (said, forgotten)');
     ok(recAtForget && (recAtForget.orphansCounted || []).includes(LS.ORPHAN_PREFIX + '13-1.json') && recAtForget.catchUp && recAtForget.catchUp.removed >= 6, 'an orphan\'s file is FORGOTTEN only once the record holding its count is on disk (read from the disk at the forget)');
     // e. a set-aside-named file a PERSON made: its item says only what is true of it
     const f8 = mkDir('f8'); fs.writeFileSync(path.join(f8, 'jobs.json.corrupt-backup'), 'a person\'s copy');

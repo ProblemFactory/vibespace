@@ -988,6 +988,7 @@
 - (2026-11-21) A SIGN-IN FILE THAT COULD NOT BE READ RAN THE INSTANCE OPEN (B-dc3f, HIGH). 不变量 = an existing data/auth.json that cannot be read HOLDS what it guards (SSO still signs in, in memory); the sign-in page answers 200; nothing is written over it ⇒ kb-bugfix-invariants
 - (2026-11-20) A WINDOW THAT FINISHED OPENING TOOK THE KEYBOARD FROM THE WINDOW THE PERSON CLICKED MEANWHILE — typing went unseen into the other conversation (B-c87d). 不变量 = a late focus asks ONE door; a race lost is dropped ⇒ kb-bugfix-invariants
 - (2026-11-21) THE CUT RACE in test-codex-effort-meta ⑩ (B-1217 / B-3a3c): its claim checks read the integration branch per call — a cut mid-run judged two branches. 不变量 = ONE commit read, the reads counted (one log, REF only to rev-parse) ⇒ kb-bugfix-invariants
+- (2026-11-21) THE HOURLY JOB-LOG CLEAN-UP FORKED ITS REMOVER FROM THE HUB (B-323e). 不变量 = one child a batch through the starter, no IPC; names in its arguments ≤ 32 KiB, else its request file; a count file read with a bound (missing or torn = unknown), counted once ⇒ kb-file-structure
 
 ## AN OLD ENGINE'S RAW «>» IN A TITLE ENDED THE ANCHOR TAG THREE PASSES READ (lane setting-doors, the acceptance's F4, 2026-11-15)
 

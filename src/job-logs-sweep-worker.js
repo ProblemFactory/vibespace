@@ -1,7 +1,10 @@
 'use strict';
 // THE JOB-LOGS REMOVER'S CHILD (lane job-logs-sweep, 2026-11-12; a child process since round 2 — a process exit joins its
-// threads, never its children) — src/job-logs-sweep.js createRemover forks it for a batch (an IPC channel, a built env) and
-// kills it when its queue is empty; it THROWS without its IPC channel (never in the hub's own process). Every syscall
+// threads, never its children). B-323e: ONE BATCH A CHILD, started by THE STARTER (src/server/child-starter.js — never a fork of
+// the hub, no IPC channel): `node <this> <logsDir> <hubPid> --once <op> --names <job folder name>…` (a whole-dir batch's names, at
+// most src/job-logs-sweep.js ARGV_MAX bytes) or `--once <op> --request <name>` (every other batch: the remover's own request file in
+// the logs folder, read with its bound and removed here); its answer is ONE JSON line on stdout, and it ends. It THROWS without
+// `--once` (never in the hub's own process). Every syscall
 // that removes anything under data/job-logs runs HERE, never on the hub's main loop and never in the fs threadpool (on the
 // owner's hub data/ is a network mount). lstat only — a link is removed as a link, never followed; only `jb-…` job dirs
 // and numeric run dirs are judged; an entry of any other name in a job dir is left alone by the sweep.
@@ -11,7 +14,9 @@
 //                  oldest first, at most `max` removed; `count` walks on past it to count what is left (the catch-up's
 //                  start); `stateFile` (the first pass after a boot) reads the catch-up record here, off the main thread.
 //   note {dir, notes} — round 4: a record store's NOTE (`<store>.corrupt-unread`, O_EXCL — one per store; EEXIST = it stands).
-if (typeof process.send !== 'function') throw new Error('src/job-logs-sweep-worker.js runs only as the child src/job-logs-sweep.js forks (an IPC channel)');
+//   count {dir, name} — B-323e: a cut sweep's COUNT FILE, read once its child has ended (read only: the hub keeps its name in the
+//                  record with its count, and a later batch forgets it).
+if (process.argv[4] !== '--once') throw new Error('src/job-logs-sweep-worker.js runs only as the one-batch child src/job-logs-sweep.js starts through the starter (<logsDir> <hubPid> --once <op> …)');
 const fs = require('fs');
 const path = require('path');
 const PI = require('./proc-identity.js');
@@ -39,22 +44,54 @@ function namedRuns() {
   }
   writers = set; return writers;
 }
-// ITS HUB (round 2): the process that forked it. The production unit stops with KillMode=process and a hub can be SIGKILLed (the
-// OOM killer, a crash, the unit's timeout) — nobody kills this child then; it checks between two run dirs (getppid: the parent's
-// death re-parents it) and stops at once, so no remover outlives its hub by more than the one call it is in, and two removers
-// never delete in one data dir at once (the next hub starts ≥ 5 s later and passes 2 min after its boot)
-// round 3 §4: the hub's pid is what the hub HANDED it (argv[3]) — never getppid read ~20 ms after the fork (a hub that died in that
-// window left a child whose «hub» was the reaper); a child whose parent already differs at a batch's start refuses the batch
-const HUB = Number(process.argv[3]) > 1 ? Number(process.argv[3]) : process.ppid;
-const hubGone = () => process.ppid !== HUB;
-let orphanDir = null, orphanSeq = null;
-/** the hub ended mid-batch: what this batch removed is left in a file for the next engine (counted once), then exit */
-function orphaned(out) {
-  if (orphanDir && out && out.removed) {
-    const f = path.join(orphanDir, `${S.ORPHAN_PREFIX}${process.pid}-${orphanSeq}.json`);
-    try { fs.writeFileSync(f + '.tmp', JSON.stringify({ removed: out.removed, entries: out.entries, jobDirs: out.jobDirs, at: Date.now() })); fs.renameSync(f + '.tmp', f); } catch { }
-  }
-  process.exit(0);
+// ITS HUB (round 2; B-323e): its parent is THE STARTER the hub made (or, on the starter's old road after two faults, the hub
+// itself). The production unit stops with KillMode=process and a hub can be SIGKILLed (the OOM killer, a crash, the unit's
+// timeout): the hub's end closes the starter's pipe and the starter kills the children it holds; a starter that ends any other way
+// re-parents this child — it checks between two run dirs that its parent is still the one it was born of and stops at once, so no
+// remover outlives its hub by more than the one call it is in, and two removers never delete in one data dir at once (the next hub
+// starts ≥ 5 s later and passes 2 min after its boot)
+// round 3 §4: the hub's pid is what the hub HANDED it (argv[3]) — never getppid alone (a hub that died before this child read it
+// left a child whose «hub» was the reaper): born of the hub, or of a process the hub started (its parent's parent IS the hub), or the
+// batch is refused
+const HUB = Number(process.argv[3]) > 1 ? Number(process.argv[3]) : 0;
+const BORN = process.ppid;
+/** a process's parent: /proc's, or — a machine with no /proc (macOS; the fresh read's find 3) — `ps -o ppid=` (bounded); null unknown */
+function parentOf(pid) {
+  if (PI.hasProc()) return PI.ppidOf(pid);
+  const r = require('child_process').spawnSync('ps', ['-o', 'ppid=', '-p', String(Number(pid))], { encoding: 'utf8', timeout: 3000 });
+  const n = Number(String((r && r.stdout) || '').trim());
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+const bornOfHub = HUB > 1 && BORN > 1 && (BORN === HUB || parentOf(BORN) === HUB);
+const hubGone = () => !bornOfHub || process.ppid !== BORN;
+// B-323e: THIS sweep's COUNT FILE (`<ORPHAN_PREFIX><the remover>-<seq>.json` in the data dir, its name the hub's): rewritten by temp +
+// rename after EVERY removal, never removed here — whatever ends this child (its answer, its bound, its hub's end, a stop), what it
+// removed is on disk; the hub counts it ONCE (its name kept in the record beside its count) and a later batch forgets it
+let countFile = null;
+function countWrite(out) {
+  if (!countFile) return;
+  try { fs.writeFileSync(countFile + '.tmp', JSON.stringify({ removed: out.removed, entries: out.entries, jobDirs: out.jobDirs, at: Date.now() })); fs.renameSync(countFile + '.tmp', countFile); out.countFile = path.basename(countFile); } catch { }
+}
+/** the hub ended mid-batch (or it was never this child's): stop now — what this batch removed is in its count file already */
+function orphaned() { process.exit(0); }
+/** B-323e: ONE file read WITH ITS BOUND — never a link followed (O_NOFOLLOW), never a FIFO waited on (O_NONBLOCK, then not a file)
+ *  → {text} or {why} ('missing', 'not a file', 'over its bound (N bytes)', 'unreadable: CODE') */
+function bounded(f, max) {
+  let fd; try { fd = fs.openSync(f, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); } catch (e) { return { why: e && e.code === 'ENOENT' ? 'missing' : e && e.code === 'ELOOP' ? 'not a file' : `unreadable: ${(e && e.code) || e}` }; }
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) return { why: 'not a file' };
+    if (st.size > max) return { why: `over its bound (${max} bytes)` };
+    const buf = Buffer.alloc(st.size); let n = 0;
+    while (n < st.size) { const k = fs.readSync(fd, buf, n, st.size - n, n); if (!k) break; n += k; }
+    return { text: buf.toString('utf8', 0, n) };
+  } catch (e) { return { why: `unreadable: ${(e && e.code) || e}` }; } finally { fs.closeSync(fd); }   // ONE close, its owner's (the fd-close census: never under an empty catch)
+}
+/** a count a remover wrote: whole numbers of a batch's size, never verbatim → {removed, entries, jobDirs} or null */
+const countN = (v) => (Number.isInteger(v) && v >= 0 && v <= 100000 ? v : null);
+function countsOf(o) {
+  const c = o && typeof o === 'object' ? { removed: countN(o.removed), entries: countN(o.entries), jobDirs: countN(o.jobDirs == null ? 0 : o.jobDirs) } : null;
+  return c && c.removed != null && c.entries != null && c.jobDirs != null ? c : null;
 }
 const lst = (p) => { try { return fs.lstatSync(p); } catch { return null; } };
 
@@ -115,13 +152,15 @@ function whole({ ids = [] }) {
   return out;
 }
 
-function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile = null, archiveFile = null, storeFile = null, setAside = null, seq = null }) {
+function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile = null, archiveFile = null, storeFile = null, setAside = null, orphanDir = null, forget: counted = null }) {
   const t0 = Date.now();
   // nameOld = run dirs that STARTED before the cutoff and no record lists, holds or recovered — THE CATCH-UP's count, BY NAME (a
   // counting pass walks on past `max` with readdirs only: no stat, no /proc — round 2 law 3); keptOld = of those, the ones the full
   // verdict kept (young by their newest file, live, unjudgeable) — the done line's «kept» (a complete pass's figure)
   const out = { removed: 0, entries: 0, jobDirs: 0, nameOld: 0, keptOld: 0, unnamedJobs: 0, failed: 0, more: false, kept: { listed: 0, held: 0, skeleton: 0, young: 0, alive: 0, unproven: 0 } };
-  const progress = () => { if (seq != null) { try { process.send({ seq, progress: { removed: out.removed, entries: out.entries, jobDirs: out.jobDirs } }); } catch { } } };   // a pass cut at its timeout keeps its count
+  const progress = () => countWrite(out);   // B-323e: after every removal — a pass cut at its bound (or its hub's end, a stop) keeps its count
+  // B-323e: the count files the hub has COUNTED (their names in its record) go first — whatever this pass answers after
+  if (Array.isArray(counted) && counted.length && typeof orphanDir === 'string') out.forgot = forget({ dir: orphanDir, names: counted }).done;
   if (stateFile) { let st = null; try { st = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { st = null; } out.state = st && typeof st === 'object' ? st : null; }
   if (count === 'auto') count = !(out.state && out.state.catchUp);
   out.counted = !!count;
@@ -152,7 +191,8 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
   }
   let jobs; try { jobs = fs.readdirSync(logsDir, { withFileTypes: true }); } catch (e) { if (e.code !== 'ENOENT') out.error = e.message; out.ms = Date.now() - t0; return out; }
   walk: for (const je of jobs) {
-    if (!je.isDirectory() || !S.JOB_NAME.test(je.name)) continue;
+    // B-323e: a request file left by a batch whose child never read it (its start failed, its write was cut) goes with this walk
+    if (!je.isDirectory() || !S.JOB_NAME.test(je.name)) { if (je.name.startsWith(S.REQUEST_PREFIX)) { try { fs.unlinkSync(path.join(logsDir, je.name)); } catch { } } continue; }
     const id = je.name, jobDir = path.join(logsDir, id);
     if (!named.has(id)) out.unnamedJobs++;
     let ents; try { ents = fs.readdirSync(jobDir, { withFileTypes: true }); } catch { continue; }
@@ -213,28 +253,59 @@ function stateOf({ stateFile, orphanDir: od = null }) {
   try { raw = fs.readFileSync(stateFile, 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') return { error: `the catch-up record could not be read: ${(e && (e.code || e.message)) || e}`, code: String((e && (e.code || e.message)) || e).slice(0, 60) }; }
   if (raw != null) { try { st = JSON.parse(raw); } catch { const to = `${stateFile}.corrupt-${Date.now()}`; try { fs.renameSync(stateFile, to); recordSetAside = path.basename(to); } catch (re) { return { error: `the catch-up record did not parse and could not be set aside: ${(re && re.code) || re}`, code: `did not parse; set-aside refused: ${String((re && re.code) || re).slice(0, 30)}` }; } } }
   const orphans = [], cutCounts = [], badCounts = [];
-  const count = (v) => (Number.isInteger(v) && v >= 0 && v <= 100000 ? v : null);   // a count a remover wrote: a whole number of a batch's size, never verbatim
   if (od) { let all = []; try { all = fs.readdirSync(od).filter((n) => n.startsWith(S.ORPHAN_PREFIX)); } catch { }
     for (const n of all) {
       if (n.endsWith('.json.tmp')) { try { fs.unlinkSync(path.join(od, n)); cutCounts.push(n); } catch { } continue; }   // a write cut by a death: no count in it
       if (!n.endsWith('.json')) continue;
-      let o = null; try { o = JSON.parse(fs.readFileSync(path.join(od, n), 'utf8')); } catch { }
-      const c = o && typeof o === 'object' ? { removed: count(o.removed), entries: count(o.entries), jobDirs: count(o.jobDirs == null ? 0 : o.jobDirs) } : null;
-      if (!c || c.removed == null || c.entries == null || c.jobDirs == null) { try { fs.unlinkSync(path.join(od, n)); badCounts.push(n); } catch { } continue; }
+      let o = null; const rd = bounded(path.join(od, n), S.COUNT_MAX); try { o = rd.why ? null : JSON.parse(rd.text); } catch { }   // B-323e: read with its bound
+      const c = countsOf(o);
+      if (!c) { try { fs.unlinkSync(path.join(od, n)); badCounts.push(n); } catch { } continue; }
       orphans.push({ name: n, ...c });
     } }
   return { state: st && typeof st === 'object' ? st : null, orphans, recordSetAside, cutCounts, badCounts };
 }
 /** an orphan's files, once the record that counted them is on disk — only names of that prefix, in that dir */
-function forget({ dir, names = [] }) { let n = 0; for (const name of names) { if (typeof name !== 'string' || !name.startsWith(S.ORPHAN_PREFIX) || name.includes('/')) continue; try { fs.unlinkSync(path.join(dir, name)); n++; } catch { } } return { forgotten: n }; }
+function forget({ dir, names = [] }) {
+  let n = 0; const done = [];
+  for (const name of Array.isArray(names) ? names : []) {
+    if (typeof name !== 'string' || !name.startsWith(S.ORPHAN_PREFIX) || name.includes('/') || typeof dir !== 'string') continue;
+    let gone = false; try { fs.unlinkSync(path.join(dir, name)); n++; gone = true; } catch (e) { gone = !!e && e.code === 'ENOENT'; }
+    try { fs.unlinkSync(path.join(dir, name + '.tmp')); } catch { }   // B-323e: a write of it cut by a kill
+    if (gone) done.push(name);
+  }
+  return { forgotten: n, done };
+}
+/** B-323e: a cut sweep's count, read once its child has ended → {count: {removed, entries, jobDirs}} or {count: null, why}: a file
+ *  missing, cut while it was written, over its bound or not a count is «unknown» — never «nothing removed». Read only */
+function countOf({ dir, name }) {
+  if (typeof dir !== 'string' || typeof name !== 'string' || !S.COUNT_NAME.test(name)) return { count: null, why: 'not a count file\'s name' };
+  const f = path.join(dir, name), rd = bounded(f, S.COUNT_MAX);
+  if (rd.why) return { count: null, why: rd.why === 'missing' && lst(f + '.tmp') ? 'cut while it was written' : rd.why };
+  let o = null; try { o = JSON.parse(rd.text); } catch { }
+  const c = countsOf(o);
+  return c ? { count: c } : { count: null, why: 'not a count' };
+}
+/** B-323e: THE BATCH — its job folder names in the arguments (a whole-dir batch), or the remover's own REQUEST FILE in the logs
+ *  folder (every other batch): read with its bound and REMOVED here, read or not */
+function batchOf([op, how, ...rest]) {
+  if (!S.OPS.includes(op)) return { error: 'its batch names no op' };
+  if (op === 'whole' && how === '--names') return { op, ids: rest.filter((n) => S.JOB_NAME.test(n)) };
+  if (how !== '--request' || rest.length !== 1 || !S.REQUEST_NAME.test(rest[0])) return { error: 'its batch could not be read' };
+  const f = path.join(logsDir, rest[0]), rd = bounded(f, S.REQUEST_MAX);
+  try { fs.unlinkSync(f); } catch { }
+  if (rd.why) return { error: `its request file: ${rd.why}` };
+  let m = null; try { m = JSON.parse(rd.text); } catch { return { error: 'its request file did not parse' }; }
+  return m && typeof m === 'object' && m.op === op ? m : { error: 'its request file is not this batch\'s' };
+}
 
-process.on('disconnect', () => process.exit(0));   // the hub went (or killed its remover): nothing is waited for
-process.on('message', (msg) => {
-  if (hubGone()) orphaned(null);   // round 3 §4: a batch from a hub that is gone is never started
-  procRoot = msg && typeof msg.procRoot === 'string' ? msg.procRoot : '/proc'; writers = null;   // a fresh walk per batch (a suite may point it elsewhere)
-  orphanDir = msg && typeof msg.orphanDir === 'string' ? msg.orphanDir : null; orphanSeq = msg && msg.seq;
+// THE ONE BATCH (B-323e): refused before anything is read when its hub is gone (round 3 §4), its answer ONE line on stdout
+if (hubGone()) orphaned();
+let msg; try { msg = batchOf(process.argv.slice(5)); } catch (e) { msg = { error: `its batch could not be read: ${(e && (e.code || e.message)) || e}` }; }
+procRoot = typeof msg.procRoot === 'string' ? msg.procRoot : '/proc';   // a suite may point it elsewhere
+countFile = msg.op === 'sweep' && typeof msg.orphanDir === 'string' && typeof msg.countName === 'string' && S.COUNT_NAME.test(msg.countName) ? path.join(msg.orphanDir, msg.countName) : null;
+{
   let out;
-  try { out = msg && msg.op === 'whole' ? whole(msg) : msg && msg.op === 'sweep' ? sweep({ ...msg, seq: msg.seq }) : msg && msg.op === 'state' ? stateOf(msg) : msg && msg.op === 'forget' ? forget(msg) : msg && msg.op === 'note' ? note(msg) : { error: 'unknown op' }; }
+  try { out = msg.error ? { error: msg.error } : msg.op === 'whole' ? whole(msg) : msg.op === 'sweep' ? sweep(msg) : msg.op === 'state' ? stateOf(msg) : msg.op === 'forget' ? forget(msg) : msg.op === 'note' ? note(msg) : msg.op === 'count' ? countOf(msg) : { error: 'unknown op' }; }
   catch (e) { out = { error: (e && e.message) || String(e) }; }
-  try { process.send({ ...out, seq: msg && msg.seq }); } catch { }
-});
+  try { process.stdout.write(JSON.stringify(out) + '\n'); } catch { }
+}
