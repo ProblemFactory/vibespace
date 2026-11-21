@@ -460,6 +460,19 @@ console.log('§5 wiring pins');
   ok(/onLayout: \(v\) => \{ renderMore\(\); floorPane\(v\); \}/.test(lw) && /app\.wm\.setPaneMinWidth\?\.\(winInfo\.id, v\.floor \+ chrome\)/.test(lw) && /const chrome = Math\.max\(0, \(winInfo\.content\.offsetWidth \|\| 0\) - v\.widthPx\)/.test(lw), 'THE SPLIT FLOOR: after every fold the live view keeps its pane at ≥ its bar\'s floor + the chrome around the bar (WindowManager.setPaneMinWidth)');
   ok(/if \(key === 'badge'\) rows\.push\(\{ caption: modeBadge\.title \|\| modeBadge\.textContent, title: modeBadge\.title \}\)/.test(lw) && /moreBtn\.dataset\.badge = want/.test(lw) && /moreBtn\.dataset\.mode = !taken \? 'watch' : st\.mine \? 'takeover' : 'other'/.test(lw) && /\.browser-live-bar > \.browser-live-more\[data-badge="folded"\]\[data-mode="takeover"\]/.test(cssText), 'a FOLDED badge rides the ⋯: its sentence is the first ⋯ row (a caption — lane ui-controls-and-bugs: words, not a greyed row), the ⋯ wears its colour per mode (style.css) and names it in its tooltip');
   ok(/createBarFold\(bar, \{\s*more: moreBtn,/.test(lw) && /priority: key === 'kbd' && st\.claimed && \(ky\.yielded \|\| ky\.dialogHolds\) \? LIVE_BAR_PRIORITY\.badge : LIVE_BAR_PRIORITY\[key\], flexMin: key === 'url' \? URL_MIN_PX : undefined/.test(lw) && /signal: winInfo\._listenerCtl\?\.signal/.test(lw.slice(lw.indexOf('createBarFold(bar'))), 'the live view folds its bar through createBarFold (the ⋯, the priority table — the keyboard chip at the badge\'s rank while its keys are yielded to a text box the user pressed, lane takeover-keyboard, or held by a dialog he opened, lane dialog-keys — the URL minimum, the window\'s AbortSignal)');
+  { // B-8703 unit 2's own catch: the «Agent browser…» door joined the bar but not the fold, so a narrow bar (overflow: hidden)
+    // clipped it and the ⋯ after it — every child the live bar appends is a fold item, but the ⋯ itself
+    const census = (text) => {
+      const ap = /\bbar\.append\(([^)]*)\);/.exec(text), bi = /const barItems = \{([^}]*)\};/.exec(text);
+      const kids = ap ? ap[1].split(',').map((x) => x.trim()).filter(Boolean) : [];
+      const els = new Set(bi ? [...bi[1].matchAll(/(\w+)(?:\s*:\s*(\w+))?\s*(?:,|$)/g)].map((m) => m[2] || m[1]) : []);
+      return { kids, missing: kids.filter((k) => k !== 'moreBtn' && !els.has(k)) };
+    };
+    const c = census(lw);
+    ok(c.kids.length >= 20 && c.kids.includes('abBtn') && c.missing.length === 0 && pri && pri.agentBrowser === 0, `every child of the live bar but the ⋯ is a fold item (${c.kids.length} children${c.missing.length ? '; missing: ' + c.missing.join(', ') : ''}); the «Agent browser…» door holds Reconnect's never-fold rank (${pri && pri.agentBrowser})`);
+    const planted = census(lw.replace(', agentBrowser: abBtn };', ' };'));
+    ok(planted.missing.length === 1 && planted.missing[0] === 'abBtn', 'NEGATIVE CONTROL: the pre-cure fold (the door appended to the bar, never listed) is named missing', planted.missing);
+  }
   ok(/showContextMenu\(r\.left, r\.bottom \+ 2, rows\)/.test(lw) && /const foldedRows = \(\) =>/.test(lw) && /check\('tabs', tabsBtn\)/.test(lw), 'the ⋯ opens showContextMenu with one row per folded item, the pane rows carrying their live counts');
   ok(!/watchBtn/.test(lw) && /takeBtn\.style\.display = taken \? 'none' : ''/.test(lw) && /handBtn\.style\.display = taken \? '' : 'none'/.test(lw), 'ONE mode toggle: Take over while the agent drives, Hand back while anybody does (the Watch button — a second Hand back — is gone)');
   ok(/takeBtn\.style\.display = show && m\.mode !== 'takeover' \? '' : 'none';/.test(dw) && /handBtn\.style\.display = show && m\.mode === 'takeover' \? '' : 'none';/.test(dw) && /modeBadge\.textContent = t\(shortModeBadge\(m\)\)/.test(dw), "the desktop strip's window-live form: the same ONE toggle and the same short badge (the sentence in its tooltip)");
