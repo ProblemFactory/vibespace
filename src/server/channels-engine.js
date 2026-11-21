@@ -10412,6 +10412,7 @@ function create(deps = {}) {
     digestReady: ['allow', 'async', 'whether the first digest’s warm-up has landed (a promise of true) — reads no family; the digest itself says paused'],
     digestWarm: ['paused', 'async', 'the first digest’s sliced warm-up over the index rows (B-dfa4 cut 4): boot work — while paused it does nothing'],
     digestWarmStats: ['allow', 'sync', 'the warm-up counters (slices, the longest slice, restarts) — reads no family'],
+    digestWaitMs: ['allow', 'const', 'a constant: how long GET /api/channels waits for the first digest’s warm-up before it builds whole (DIGEST_WAIT_MS, 5 s; a suite’s walk.digestWaitMs) — answers the same held or not; the digest itself says paused'],
     rejudgeConvCaps: ['refused', 'async', 'refused while paused (no allow row): re-judges the conversations of an account — writes rows of the held list'],
     rejudgeStats: ['allow', 'sync', 'the sliced re-judge counters (slices, the longest slice) — reads no family'],
     store: ['allow', 'const', 'a constant — answers the same held or not'],
