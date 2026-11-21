@@ -6327,6 +6327,10 @@ function create(deps = {}) {
   // the start that holds the record (`keepFor`); that start, if it hands the message, clears the named rows in its OWN final
   // durable write (`clearKept`), so a restart after it never finds them; a row parked later than that write sees the ticket
   // handed at write time and is never written (keepPending's `skip`). A start that gives back leaves them: they are the backup.
+  /** B-1ca5 part B (round wig9owq5o): THE LATE PARK'S SKIP — for each of `hits`, the starts in flight that hold it NOW; the park
+   *  skips one whose holder has HANDED by the time the row is written. The ONE reader of a ticket's state outside the verdict
+   *  (test-channel-take-race's census names it). */
+  function skipHandedOf(adapterId, convId, names, hits) { const tks = new Map((hits || []).map((h) => [h, ticketsOf(adapterId, convId, names, h)])); return (h) => (tks.get(h) || []).some((tk) => tk.handed); }
   function ticketsOf(adapterId, convId, names, h) { const out = []; for (const nm of names) { const tk = takeOf(adapterId, convId, nm, h); if (tk && !out.includes(tk)) out.push(tk); } return out; }
   function keepFor(adapterId, convId, names, pk, hs) {
     for (const h of hs || []) {
@@ -8996,7 +9000,7 @@ function create(deps = {}) {
     if (stopped) {   // B-1ca5 round w8ghfur9h: held, never stashed after a stop (a record in flight elsewhere named to that start, as a wait that ran out)
       const fl = judgeHits(rec.id, convId, pk, target.cid, all, { ranOut: true }).kept;
       keepFor(rec.id, convId, names, pk, fl);
-      if (!fromPending && !carry) { const tks = new Map(fl.map((h) => [h, ticketsOf(rec.id, convId, names, h)])); await keepPending(rec, convId, withSkip(hits, (h) => (tks.get(h) || []).some((tk) => tk.handed)), 0, pk, 'next-turn'); }
+      if (!fromPending && !carry) await keepPending(rec, convId, withSkip(hits, skipHandedOf(rec.id, convId, names, fl)), 0, pk, 'next-turn');
       return { ok: false, held: true, why: 'stopped' };
     }
     // B-1ca5 part B — THE VERDICT at this read (after the wait: a record still in flight is KEPT): handed to this watcher or this
@@ -9004,9 +9008,12 @@ function create(deps = {}) {
     // mark below is ONE synchronous step (the stash takes nothing — it marks); the park of a fresh hit in flight waits until after it
     const vS = judgeHits(rec.id, convId, pk, target.cid, all, { ranOut: true });
     if (parked) for (const h of vS.kept) if (h && h.record) parked.ids.delete(h.record.id);
+    // round wig9owq5o — THE MUST: a row the verdict KEPT for its holder leaves the carried set the pending stash clears
+    // (stashPending's clearCarried after this returns), as the wake's own carried set and the parked case — never cleared as spent
+    if (fromPending && fromPending.ids) for (const h of vS.kept) if (h && h.record) fromPending.ids.delete(h.record.id);
     keepFor(rec.id, convId, names, pk, vS.kept);
     const flyS = !fromPending && !carry ? vS.kept.filter((h) => hits.includes(h) && !(parked && parked.ids.has(h.record.id))) : [];
-    const parkFlying = async () => { if (!flyS.length) return; const tks = new Map(flyS.map((h) => [h, ticketsOf(rec.id, convId, names, h)])); await keepPending(rec, convId, withSkip(flyS, (h) => (tks.get(h) || []).some((tk) => tk.handed)), 0, pk, 'next-turn'); };
+    const parkFlying = async () => { if (!flyS.length) return; await keepPending(rec, convId, withSkip(flyS, skipHandedOf(rec.id, convId, names, flyS)), 0, pk, 'next-turn'); };
     const fresh = seen ? vS.deliver.filter((h) => !(h.record && seen.has(h.record.id))) : vS.deliver;
     const carriedNow = fromPending || parked;
     if (!fresh.length && !(parked && parked.elided)) {
@@ -9602,8 +9609,7 @@ function create(deps = {}) {
       if (!fromPending) {   // a record still in flight elsewhere is named to that start and parked only if it has not handed by write time
         const fl = judgeHits(rec.id, convId, pk, target.cid, freshHits, { ranOut: true }).kept;
         keepFor(rec.id, convId, names, pk, fl);
-        const tks = new Map(fl.map((h) => [h, ticketsOf(rec.id, convId, names, h)]));
-        await keepPending(rec, convId, withSkip(freshHits, (h) => (tks.get(h) || []).some((tk) => tk.handed)), elided, pk, 'wake');
+        await keepPending(rec, convId, withSkip(freshHits, skipHandedOf(rec.id, convId, names, fl)), elided, pk, 'wake');
       }
       return { ok: false, why: 'stopped', held: true };
     }
@@ -9613,14 +9619,13 @@ function create(deps = {}) {
     // same record fresh) — goes once; nothing left ⇒ no wake, the carried rows done
     const fresh0 = freshHits;
     let flyFresh = [];
-    const flyTks = new Map();   // B-1ca5 follow-up: a kept fresh hit → the starts that held it (a late park is skipped once one handed)
-    const handedNow = (h) => (flyTks.get(h) || []).some((tk) => tk.handed);
+    let handedNow = () => false;   // B-1ca5 follow-up: a kept fresh hit's late park is skipped once a start that held it handed (skipHandedOf)
     // B-1ca5 part B — THE VERDICT at this read, with THE TAKE in the same synchronous call (a receiver resolved: both names;
     // given back by name in the `finally` at this function's end unless the start took)
     const vW = judgeHits(rec.id, convId, pk, target.cid, hits, { ranOut: true, take: target.cid ? true : null });
     const verdictW = new Map();
     for (const k of ['deliver', 'kept', 'spent']) for (const h of vW[k]) verdictW.set(h, k);
-    { const vF = judgeHits(rec.id, convId, pk, target.cid, freshHits.filter((h) => !verdictW.has(h)), { ranOut: true }); for (const k of ['deliver', 'kept', 'spent']) for (const h of vF[k]) verdictW.set(h, k); }   // a fresh hit the batch left out of `hits`
+    { const vF = judgeHits(rec.id, convId, pk, target.cid, freshHits.filter((h) => !verdictW.has(h)), { ranOut: true, own: vW.ticket }); for (const k of ['deliver', 'kept', 'spent']) for (const h of vF[k]) verdictW.set(h, k); }   // round wig9owq5o: its own take never reads as another's flight   // a fresh hit the batch left out of `hits`
     const take = vW.ticket;
     try {
     {
@@ -9632,7 +9637,7 @@ function create(deps = {}) {
         for (const h of fly) if (carried && carried.ids) carried.ids.delete(h.record.id);
         flyFresh = fromPending ? [] : fly.filter((h) => fresh0.includes(h));
         keepFor(rec.id, convId, names, pk, fly);   // B-1ca5 follow-up (1): the start in flight clears them when it hands
-        for (const h of flyFresh) flyTks.set(h, ticketsOf(rec.id, convId, names, h));
+        handedNow = skipHandedOf(rec.id, convId, names, flyFresh);
         freshHits = freshHits.filter((h) => !had.has(h) && verdictW.get(h) === 'deliver');
         hits.splice(0, hits.length, ...hits.filter((h) => !had.has(h)));
         if (!hits.length && !allElided) {

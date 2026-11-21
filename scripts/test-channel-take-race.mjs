@@ -434,6 +434,9 @@ console.log('② THE ONE VERDICT (B-1ca5 part B, round w5y5digbw): its table, th
       [/\bmarkFrom\(/, 'markFrom', ['markOf']],
       [/\btakeOf\(/, 'takeOf', ['ticketsOf', 'waitTaken']],
       [/\bhanded\.(get|has)\(|\bof handed\b/, 'the hand-over map', ['markHanded', 'takeOf', 'markOf', 'takeHits', 'giveBack']],
+      // round wig9owq5o: a TICKET's state is a mark too — the starts that hold a record (ticketsOf) and whether one handed (.handed)
+      [/\bticketsOf\(/, 'ticketsOf (the starts holding a record)', ['keepFor', 'skipHandedOf']],
+      [/\.handed\b/, 'a ticket\'s state (.handed)', ['tookIt', 'clearKept', 'skipHandedOf']],
     ];
     const out = [], asks = new Set();
     let fn = null;
@@ -457,6 +460,8 @@ console.log('② THE ONE VERDICT (B-1ca5 part B, round w5y5digbw): its table, th
   const VS = '    const vS = judgeHits(rec.id, convId, pk, target.cid, all, { ranOut: true });\n';
   const csR2 = markCensus(anchored(src, VS, '    const vS = { deliver: all.filter((h) => !takeOf(rec.id, convId, pk, h)), wait: [], kept: [], spent: [], ticket: null };\n', 'census-own-verdict'));
   ok(J(csR2) === J(['stashHits: reads takeOf by hand']), `RED CONTROL: a copy whose stash makes its own verdict — the census names it: ${J(csR2)}`);
+  const csR3 = markCensus(anchored(src, VW, VW + "    const byTicket = ticketsOf(rec.id, convId, names, hits[0]).some((tk) => tk.handed);\n", 'census-ticket-read'));
+  ok(J(csR3) === J(['wakeNow: reads ticketsOf (the starts holding a record) by hand', "wakeNow: reads a ticket's state (.handed) by hand"]), `RED CONTROL (round wig9owq5o): a copy whose wake reads a ticket's state by hand — the census names both reads: ${J(csR3)}`);
 
   // MUST 2 (round w5y5digbw), A LAW OF ORDER: the stash takes nothing — it MARKS — so from its delivering read to its mark is
   // ONE synchronous step: no await on the straight path between them (an await in a branch that returns is no hand-over). The
@@ -655,6 +660,56 @@ console.log('④ THE HAND-OVER CLEARS THE SAME RECEIVER\'S OTHER ROWS — a cont
   ok(sm.wrote && sm.stashedM === 1 && sm.ownAfterStash === 1 && sm.startsAfterRestart === 1, `MUST 3 AT THE STASH: the group's stash held m «in memory only» — agent-1's own row STAYS (${sm.ownAfterStash}); after the restart m reaches agent-1 (${sm.startsAfterRestart} start)`, J(sm));
   const smR = await stashClearLeg(MUT.load('src/server/channels-engine.js', anchored(src, STASH_RCV, 'if (e2) clearForReceiver(e2, target.cid, fresh, pk);', 'stash-clears-on-any-stash'), 'stash-clears-on-any-stash'), 'stash-clear-memory-red', { memory: true });   // stale-pins: kept (the control plants the clear as it was: on ANY stash)
   ok(smR.ownAfterStash === 0 && smR.startsAfterRestart === 0, `RED CONTROL: the stash clearing on ANY stash (as it was) — agent-1's row dropped for a stash a restart forgets (${smR.ownAfterStash}); after the restart nothing brings m (${smR.startsAfterRestart}): the message LOST`, J(smR));
+}
+
+console.log('⑤ round wig9owq5o — THE NEXT-TURN PENDING STASH KEEPS A ROW THE VERDICT KEPT FOR ITS HOLDER');
+{
+  // The scene of the round's must: the account digest of agent-1 (its holder) has taken m and sits in its ladder; the group G
+  // (agent-1 its one live member) rides the Ops room on the NEXT-TURN road and its row of m waits as a pending row; G's pending
+  // flush reaches stashPending → stashHits (fromPending): agent-1's mark is in flight, the stash waits its bound (200 ms), its read
+  // says KEPT for m — the pending clear must leave that row. The holder is then REFUSED (its stash refused too) and gives m back:
+  // the row the holder's give-back counts on is still there, and G's next flush delivers m ONCE
+  const pendFor = (w, r, pk, conv = OPS) => ((w.eng.store.index.live()[`${A}/${conv}`] || {}).pending || []).filter((p) => p && p.record && p.record.id === r.id && p.for === pk).length;
+  async function pendingKeptLeg(ENGM, tag) {
+    let open = () => {}, entered = () => {}, waited = false, stashCalls = 0;
+    const gate1 = new Promise((r) => { open = r; }), in1 = new Promise((r) => { entered = r; });
+    const live = { 'agent-1': [] };
+    const w = mkEngine(ENGM, path.join(ROOT, tag), {
+      roster: () => [{ cid: 'agent-1', name: 'Worker', groups: live['agent-1'] }, { cid: 'agent-2', name: 'Other', groups: [] }],
+      gate: (k) => (k === 0 ? (entered(), gate1) : null),
+      answer: (k) => (k === 0 ? { ok: false, reason: 'the spend cap is reached (planted)', refused: 'cap' } : null),
+      stashThrows: () => ++stashCalls === 1,   // the FIRST stash is the refused holder's (G's first flush stashes nothing: m is kept)
+      onTakeWait: () => { waited = true; },
+      heldBound: { takeWaitMs: 200 },
+    });
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, notify: 'digest', digestMinutes: 30 }] });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP, delivery: 'next-turn' }] });
+    const m = w.tail(OPS).slice(-1)[0];
+    await w.eng.onFresh(w.recOf(), OPS, [m], { origin: 'test' });   // G has no live member: its row of m waits; the digest holds m too
+    live['agent-1'] = ['G'];
+    const rowBefore = pendFor(w, m, 'group:G');
+    const first = w.eng.flushScope(A, 'account', null, 'agent:agent-1');   // the HOLDER takes m and is held in its ladder
+    await in1;
+    const fl = await w.eng.flushPending(A, OPS, { pk: 'group:G' });   // G's pending flush: the stash waits its bound, reads «kept» for m
+    const placed = waited;   // the stash met the holder's take and waited (the engine's seam), not a guess
+    const rowKept = pendFor(w, m, 'group:G');
+    open(); await first;   // the holder is REFUSED (its stash refused too): it gives m back
+    if (w.eng.settleWakes) await w.eng.settleWakes();
+    const rowAfterGiveBack = pendFor(w, m, 'group:G');
+    await w.eng.flushPending(A, OPS, { pk: 'group:G' });   // G's next flush: nobody holds m now
+    if (w.eng.settleWakes) await w.eng.settleWakes();
+    const out = { rowBefore, placed, stash: (fl && (fl.why || (fl.ok ? 'ok' : null))) || null, rowKept, rowAfterGiveBack, delivered: recs(w, 'agent-1', m), rowEnd: pendFor(w, m, 'group:G') };
+    await w.eng.stop();
+    return out;
+  }
+  const KEPT_PENDING = "    if (fromPending && fromPending.ids) for (const h of vS.kept) if (h && h.record) fromPending.ids.delete(h.record.id);\n";
+  const pk = await pendingKeptLeg(ENG, 'pending-kept');
+  console.log(`    G's row of m: before ${pk.rowBefore}, after the pending stash read «kept» ${pk.rowKept}, after the holder gave back ${pk.rowAfterGiveBack}; m delivered ${pk.delivered} time(s)`);
+  ok(pk.rowBefore === 1 && pk.placed && pk.rowKept === 1 && pk.rowAfterGiveBack === 1 && pk.delivered === 1 && pk.rowEnd === 0,
+    `round wig9owq5o MUST: the next-turn pending stash read «kept» for m (its holder in flight past the stash's bound) and its clear LEFT the row (${pk.rowKept}); the holder gave m back and the row was still there (${pk.rowAfterGiveBack}); G's next flush delivered m ONCE (${pk.delivered})`, J(pk));
+  const pkR = await pendingKeptLeg(MUT.load('src/server/channels-engine.js', anchored(src, KEPT_PENDING, '', 'pending-clears-a-kept-row'), 'pending-clears-a-kept-row'), 'pending-kept-red');
+  ok(pkR.rowKept === 0 && pkR.delivered === 0, `RED CONTROL: the pending stash's clear as it was — the KEPT row cleared (${pkR.rowKept}); the holder gave m back to a row that was gone: m delivered ${pkR.delivered} times — the watcher never hears of it`, J(pkR));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
