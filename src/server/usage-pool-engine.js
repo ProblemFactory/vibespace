@@ -1697,19 +1697,12 @@ function windowGroupOf(id) { try { return usageIdentityAccountIds(id).slice().so
 function appendReadingArchive(row) {
   try {
     fs.mkdirSync(path.dirname(READING_ARCHIVE), { recursive: true });
-    // BOUNDED, and the roll is APPENDED under a per-DAY name: an account whose
-    // weekly window genuinely moved keeps producing mismatches until its next
-    // panel refresh re-establishes it, ~20 readings a turn. A Date.now()-named
-    // shard would let two rolls inside one millisecond overwrite each other —
-    // the slot-transition ledger's own lesson (an archive that loses what it
-    // exists to preserve is worse than no archive).
-    try {
-      if (fs.statSync(READING_ARCHIVE).size > 5 * 1024 * 1024) {
-        const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        fs.appendFileSync(READING_ARCHIVE.replace(/\.ndjson$/, `-${day}.ndjson`), fs.readFileSync(READING_ARCHIVE));
-        fs.writeFileSync(READING_ARCHIVE, '');
-      }
-    } catch { }
+    // BOUNDED, and the roll goes to a per-DAY shard: an account whose weekly window genuinely moved keeps producing
+    // mismatches until its next panel refresh re-establishes it, ~20 readings a turn. B-360d part 3 U2: the roll is a RENAME
+    // (src/archive-roll.js — a shard that exists is never written over; a second roll the same day takes the next number),
+    // never a whole read and rewrite of the file on the loop (an archive that loses what it exists to preserve is worse than
+    // no archive)
+    try { require('../archive-roll.js').rollIfOver(READING_ARCHIVE, 5 * 1024 * 1024); } catch { }
     // the TARGET'S established window rides along with its own age: a reading
     // archived because the account's window genuinely moved (a plan change) is
     // told apart from a mis-filed one by how stale `ownWindow.at` is, and that

@@ -380,7 +380,8 @@ const code = (f) => read(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test
       && /const \{ name, email, \.\.\.usage \} = newest;\s*\n\s*_rateLimitCache = (?:quotaModel\.withOwnAbsence\(usage, g\)|usage); writeUsageCache\(\);/.test(read('src/usage-routes.js'))
       // …and the wrapper holds NOTHING but that payload, which is why archiving
       // `.claude` archives the whole file
-      && /fs\.writeFileSync\(tmpPath, JSON\.stringify\(\{ claude: _rateLimitCache \}, null, 2\)\);/.test(read('src/usage-routes.js')), '');
+      // (B-360d part 3 U2: the copy is written by the store writer — its produce makes the same bytes)
+      && /storeWriter\(\)\.dirty\(USAGE_CACHE_FILE, \{ name: 'usage-cache\.write', makeDir: true, produce: \(\) => \(_rateLimitCache \? JSON\.stringify\(\{ claude: _rateLimitCache \}, null, 2\) : null\) \}\);/.test(read('src/usage-routes.js')), '');
     ok('§16c SOURCE PIN: …and it is read back NEWEST-WINS, which is why a rewound rebuild can never displace a stale copy — and why `!_rateLimitCache` re-seeds it once the copy is gone',
       /if \(!_rateLimitCache \|\| \(u\.fetchedAt > \(_rateLimitCache\.fetchedAt \|\| 0\)\)\) \{ _rateLimitCache = u; writeUsageCache\(\); \}/.test(read('src/usage-routes.js'))
       && /out\.fetchedAt = anchor\.fetchedAt;/.test(read('src/reading-repair.js')), '');

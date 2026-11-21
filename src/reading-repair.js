@@ -1147,6 +1147,9 @@ function repairCachesByWindow({ cacheDir, archiveDir, windows, accounts = null, 
  *  honest repair for either is to drop the copy and let it be re-seeded. */
 function repairGlobalFile({ dataDir, cacheDir, archiveDir, windows, accounts = null, id, now = Date.now() }) {
   const f = path.join(dataDir, 'usage-cache.json');
+  // B-360d part 3 U2: the hub writes this copy through the store writer (usage-routes writeUsageCache) — a write still owed
+  // lands FIRST, so the repair judges (and removes) the copy memory holds, and no write owed before it lands after its removal
+  try { require('./store-writer.js').storeWriter().flushSync([f], { waitedBy: 'the identity repair (usage-cache.json)' }); } catch { }
   const doc = _readJson(f);
   const cur = doc && doc.claude;
   // no file, unreadable, or a shape whose `.claude` payload we do not

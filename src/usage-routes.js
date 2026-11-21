@@ -95,13 +95,14 @@ function readUsageCache() {
   }
 }
 
+// B-360d part 3 U2 (主开发 r1459): data/usage-cache.json is a DERIVED copy — the boot's seed of _rateLimitCache; the reading
+// itself lives in usage-cache/__global__.json — so it is written by the STORE WRITER (memory is authoritative; a burst is one
+// write, off the loop; the folder made on its own thread), the latest state at its write; no state ⇒ nothing written, as
+// before. Its other writer, the identity repair (src/reading-repair.js repairGlobalFile), flushes this file before it judges it.
 function writeUsageCache() {
   if (!_rateLimitCache) return;
   try {
-    ensureDir(path.dirname(USAGE_CACHE_FILE));
-    const tmpPath = `${USAGE_CACHE_FILE}.tmp`;
-    fs.writeFileSync(tmpPath, JSON.stringify({ claude: _rateLimitCache }, null, 2));
-    fs.renameSync(tmpPath, USAGE_CACHE_FILE);
+    require('./store-writer.js').storeWriter().dirty(USAGE_CACHE_FILE, { name: 'usage-cache.write', makeDir: true, produce: () => (_rateLimitCache ? JSON.stringify({ claude: _rateLimitCache }, null, 2) : null) });
   } catch {}
 }
 

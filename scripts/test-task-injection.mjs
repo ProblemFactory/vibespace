@@ -282,7 +282,6 @@ const TIME_ALLOWED = [
   ['src/server/vault-run-door.js', 'vault-grant-ends.json.corrupt-${', 'the grant ends\' aside NAME (bytes that did not parse, set aside beside it — bl-vault B-a14b) — never shown as a time'],
   ['src/server/job-secrets-door.js', '.corrupt-${', 'the job-secrets leftover record\'s aside NAME (bytes that did not parse, set aside beside it — bl-vault B-ef1b, 主开发 r333) — never shown as a time'],
   ['src/server/usage-pool-engine.js', '.corrupt-${', 'a corrupt file\'s aside NAME'],
-  ['src/server/usage-pool-engine.js', "const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');", 'a day-named archive shard\'s FILE name'],
   ['src/server/csp-reports.js', "const today = new Date(now()).toISOString().slice(0, 10);", 'the CSP notice cap\'s DAY KEY (ten notices a day, lane app-page-csp .331 — int332 seam: a site after this census\'s base) — a counter key, never shown'],
   ['src/server/channels-engine.js', 'log.warn(`[channels] ${k}: send row not resolved', 'a journal line (the server log, never an agent\'s or the owner\'s words)'],
 ];

@@ -168,6 +168,7 @@ const ROWS = [
   ["src/app-serve.js", "move", "move", "", "create > writeManifest"],
   ["src/app-serve.js", "move", "derived", "a downloaded installer / app image, checked and installed again", "create > fetchInstaller", "create > installAppImage", "create > installAppImage"],
   ["src/app-system-serve.js", "unsynced", "derived", "the shims, synced again at each start", "create > syncShims"],
+  ["src/archive-roll.js", "move", "move", "the reading archive's roll (B-360d part 3 U2): the live append-only file renamed to its day's shard — a rotation, a shard never written over", "rollIfOver"],
   ["src/browser-serve.js", "unsynced", "person", "a browser profile's own preferences file", "planLaunch"],
   ["src/browser-serve.js", "unsynced", "derived", "the build pointer, written again at each launch", "writeBuildView"],
   ["src/channel-outbox-files.js", "move", "store", "an approved attachment's folder: its files staged moments before in the same request (stage(), no sync), then renamed into place (round wl2wglpsq's must)", "commit"],
@@ -321,7 +322,6 @@ const ROWS = [
   ["src/usage-ledger-dedup.js", "move", "move", "", "appendFile"],
   ["src/usage-ledger-dedup.js", "synced", "self-synced", "", "dedupSteps"],
   ["src/usage-origin-backfill.js", "unsynced", "store", "", "_writeAtomic"],
-  ["src/usage-routes.js", "unsynced", "store", "", "setupUsage > writeUsageCache"],
   ["src/user-todos.js", "move", "move", "", "UserTodoManager._setAside", "UserTodoManager._setAsideOff"],
   ["src/user-todos.js", "unsynced", "store", "", "UserTodoManager._flush"],
   ["src/vnc.js", "unsynced", "store", "", "VncManager._record"],
@@ -329,7 +329,7 @@ const ROWS = [
   ["src/webdav.js", "unsynced", "person", "a DAV upload (PUT)", "registerWebdav > route:USE /dav"],
   ["src/webdav.js", "move", "move", "", "registerWebdav > route:USE /dav"]
 ];
-const OWED_MAX = 147;   // the live-tip census cure (lane lg-store-writes, r1790): 147 stays, each step by name — −1 the layouts and settings (src/routes/persistence.js writeJsonAtomic: the store writer's since B-0248 step 2), +1 the layouts' owed mark (setup > writeMark: new, unsynced, B-574d owes it); the remover's count is the old site renamed (orphaned → countWrite). Before: row B-360d (lane hub-loop-stalls, its move onto the .416 root): 148 → 147 — the OTel stash's trim rename (otel-ingest's replayEnd) is the store writer's REWRITE job now (src/store-writer-worker.js rewriteJob: fsync'd, renamed on the writer's thread). B-ddf3 unit 1 (lane bl-scratch): 150 → 148 — the Gmail copy and the rescued transcript synced. The sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
+const OWED_MAX = 146;   // B-360d part 3 U2 (lane lg-group-parents): 147 → 146 — data/usage-cache.json through the store writer (writeUsageCache's own temp + rename gone). Before: the live-tip census cure (lane lg-store-writes, r1790): 147 stays, each step by name — −1 the layouts and settings (src/routes/persistence.js writeJsonAtomic: the store writer's since B-0248 step 2), +1 the layouts' owed mark (setup > writeMark: new, unsynced, B-574d owes it); the remover's count is the old site renamed (orphaned → countWrite). Before: row B-360d (lane hub-loop-stalls, its move onto the .416 root): 148 → 147 — the OTel stash's trim rename (otel-ingest's replayEnd) is the store writer's REWRITE job now (src/store-writer-worker.js rewriteJob: fsync'd, renamed on the writer's thread). B-ddf3 unit 1 (lane bl-scratch): 150 → 148 — the Gmail copy and the rescued transcript synced. The sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
 // THE RATCHET (round wl2wglpsq): OWED_MAX is an EQUALITY with the census (a cure lowers it in the cure's own commit). A commit
 // could raise it and stay green here, so a rise above the KEPT baseline is red by name unless RISES names it with its row
 const OWED_BASELINE = 150;   // kept at the census's acceptance (round wl2wglpsq's cure: 148 + the Gmail copy + the outbox folder)
