@@ -158,28 +158,64 @@ function _setHelperClockForTest(fn) { _helperClock = typeof fn === 'function' ? 
 // worker's page, a stat's answer) a single setImmediate runs in that SAME iteration's check phase, no timer between: it hops twice
 // B-360d: THE BUDGET IS SHARED — every pacer of this door counts from the first slice that began in this loop iteration, so folds
 // resumed in one check phase (two conversations' helpers, a read beside another's rows, a rebuild's prefetch) never take a fresh
-// HELPER_TURN_MS each. Its reset runs FIRST in each check phase (its read's should): it is queued in the iteration before — by the
-// first hop or opening there — ahead of every hop's second half, so no slice ever inherits the previous iteration's budget.
+// HELPER_TURN_MS each. Its reset is queued in the iteration before — by the first hop or opening there — ahead of every hop's second
+// half queued after it, so it normally runs first in each check phase; in the rare order where a hop's first half ran before a reset
+// still pending, a slice may find the last iteration's budget and turn early: an iteration lost, never a hold (the round's words).
 let _turnT0 = 0, _turnOpen = false, _resetQueued = false;
-function queueReset() { if (_resetQueued) return; _resetQueued = true; setImmediate(() => { _resetQueued = false; _turnOpen = false; }); }
+function queueReset() { if (_resetQueued) return; _resetQueued = true; setImmediate(() => { _resetQueued = false; _turnOpen = false; _fgOpen = false; }); }
 const oneHop = () => new Promise((r) => setImmediate(r));
 const loopTurn = () => new Promise((r) => setImmediate(() => { queueReset(); setImmediate(r); }));
 function turnBegins() { if (_turnOpen) return; _turnOpen = true; _turnT0 = _helperClock(); queueReset(); }
-/** `due()` once HELPER_TURN_MS of work ran in this loop iteration (every pacer's, shared); `turn()` gives the loop an iteration
- *  (MEASURED: past the rows' 500 cap a helper's write costs ~1.1 ms to fold — a count-sliced 500 held the loop 0.7 s a turn).
- *  A slice cut short by ANOTHER stretch's spend (it ran under half the budget itself) resumes one iteration sooner — a single hop,
- *  safe once it has resumed before (it runs from a check phase: the hop still crosses a timer phase) — so two folds take the
- *  iterations in turn, never one starved behind the other. */
-function pacer() {
+// B-360d (主开发 r1339 — A PERSON'S ASK GOES BEFORE BACKGROUND FOLDS): a stretch a person waits on (the rebuild's prefetch WALK — a
+// history open awaits it, outside the prefetch's 2 s bound) is FOREGROUND: the walks share FG_TURN_MS of EVERY iteration (ONE share,
+// however many walks: its reset is the background's), never behind the background folds; while a walk is alive — or one ran in this
+// iteration — the background folds share the rest of HELPER_TURN_MS, so an iteration's total stays one budget (its read's must: a share
+// per walk gave three walks 30 ms beside the background's 10)
+const FG_TURN_MS = 10;
+let _fgLive = 0, _fgT0 = 0, _fgOpen = false;
+function fgBegins() { if (_fgOpen) return; _fgOpen = true; _fgT0 = _helperClock(); queueReset(); }
+const bgBudget = () => (_fgLive > 0 || _fgOpen ? HELPER_TURN_MS - FG_TURN_MS : HELPER_TURN_MS);
+/** A pacer. BACKGROUND (the live folds, the reads): `due()` once the background's share of this loop iteration's budget is spent (every
+ *  background pacer's work counts, shared); `turn()` gives the loop an iteration and returns only into one whose share is not spent — a
+ *  stretch resumed behind another's spend does no unit there and waits again (no forced unit: an iteration's total stays bounded). A
+ *  slice cut short by ANOTHER stretch's spend (it ran under half the share itself) resumes one iteration sooner — a single hop, safe
+ *  once it has resumed before (it runs from a check phase: the hop still crosses a timer phase) — so two folds take the iterations in
+ *  turn. FOREGROUND ({foreground: true}, `end()` when done): the walks' ONE FG_TURN_MS share of each iteration — a walk alone takes it
+ *  every iteration (a single hop once it runs from a check phase); of several, two take the iterations in turn as the background does
+ *  and a third waits for a slot; a walk resumed behind another's spend waits again. (MEASURED: past the rows' 500 cap a helper's write costs ~1.1 ms to fold — a
+ *  count-sliced 500 held the loop 0.7 s a turn.) */
+function pacer({ foreground = false } = {}) {
+  if (foreground) {
+    _fgLive++;
+    let mine = _helperClock(), resumed = false, ended = false;
+    const fgDue = () => _helperClock() - _fgT0 >= FG_TURN_MS;
+    return {
+      due: fgDue,
+      turn: async () => {
+        for (;;) {
+          const short = resumed && (_fgLive <= 1 || _helperClock() - mine < FG_TURN_MS / 2);
+          if (short) { queueReset(); await oneHop(); } else await loopTurn();
+          resumed = true; fgBegins(); mine = _helperClock();
+          if (!fgDue()) return;   // another walk spent this iteration's share: wait again
+        }
+      },
+      end: () => { if (!ended) { ended = true; _fgLive--; } },
+    };
+  }
   turnBegins();
   let mine = _helperClock(), resumed = false;
+  const due = () => _helperClock() - _turnT0 >= bgBudget();
   return {
-    due: () => _helperClock() - _turnT0 >= HELPER_TURN_MS,
+    due,
     turn: async () => {
-      const short = resumed && _helperClock() - mine < HELPER_TURN_MS / 2;
-      if (short) { queueReset(); await oneHop(); } else await loopTurn();
-      resumed = true; turnBegins(); mine = _helperClock();
+      for (;;) {
+        const short = resumed && _helperClock() - mine < bgBudget() / 2;
+        if (short) { queueReset(); await oneHop(); } else await loopTurn();
+        resumed = true; turnBegins(); mine = _helperClock();
+        if (!due()) return;   // an iteration whose share another stretch already spent: no unit here — wait again
+      }
     },
+    end: () => { },
   };
 }
 function harnessHooks(session) {
@@ -295,18 +331,18 @@ async function helperPrefetch(session, records) {
   const h = session && harnessHooks(session);
   if (!h || !Array.isArray(records) || (session.host && session.host !== 'local')) return null;
   const state = { runs: new Map() }, files = new WeakMap(), ops = new Map();
-  // B-360d (its read's notes): the prefetch is reached SYNCHRONOUSLY from its caller (a rebuild) — maybe inside another module's
-  // immediate, ahead of the budget's reset in that check phase: it enters through a TIMER (the timers phase comes before that reset),
-  // so its pacer opens in order, and its slices start on an iteration of their own
-  await new Promise((r) => setTimeout(r, 0));
-  const pace = pacer();
-  await pace.turn();
-  for (let i = 0; i < records.length; i++) {
-    if (pace.due()) await pace.turn();
-    const rec = records[i], named = helperFilesOf(session, rec, state);
-    if (rec && typeof rec === 'object') files.set(rec, named.length ? named : NO_FILES);
-    for (const { file } of named) if (!ops.has(file)) ops.set(file, null);
-  }
+  // B-360d (主开发 r1339): a history open AWAITS this walk — a FOREGROUND stretch (its own FG_TURN_MS of every iteration, never the
+  // crawler behind background folds); it starts on an iteration of its own and keeps no part of the shared budget (no timer entry needed)
+  const pace = pacer({ foreground: true });
+  try {
+    await pace.turn();
+    for (let i = 0; i < records.length; i++) {
+      if (pace.due()) await pace.turn();
+      const rec = records[i], named = helperFilesOf(session, rec, state);
+      if (rec && typeof rec === 'object') files.set(rec, named.length ? named : NO_FILES);
+      for (const { file } of named) if (!ops.has(file)) ops.set(file, null);
+    }
+  } finally { pace.end(); }
   const names = [...ops.keys()], got = new Map();
   if (!names.length) return { files, ops: got, left: 0, done: Promise.resolve() };
   const done = (async () => { for (const file of names) got.set(file, await helperFileOps(h.artifactsOf, file)); })().catch(() => { });

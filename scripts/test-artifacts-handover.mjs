@@ -488,21 +488,21 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
     ok(!!pc && pc.max === 16 && pc.rows === 40, 'CONTROL the budget asked per 16-op chunk: 16 such ops land in ONE iteration — the leg above can tell', pc);
     // THE SHARED BUDGET: two pacers whose turns were asked together resume in ONE check phase; the first spends the budget
     const sharedOf = async (reg) => {
-      let t = 2e12; reg._setHelperClockForTest(() => t);
+      let t = 2e12, turns = 0, on = true; const spin = () => { if (!on) return; turns++; setImmediate(spin); };
       try {
+        reg._setHelperClockForTest(() => t); setImmediate(spin);
         const P = reg._pacerForTest, p1 = P(), p2 = P();
-        let second = null;
-        await Promise.all([p1.turn().then(() => { t += 25; }), p2.turn().then(() => { second = p2.due(); })]);
-        await p2.turn();
-        return { second, next: p2.due() };
-      } finally { reg._setHelperClockForTest(null); await new Promise((r) => setImmediate(() => setImmediate(r))); }
+        let at1 = null, at2 = null;
+        await Promise.all([p1.turn().then(() => { at1 = turns; t += 25; }), p2.turn().then(() => { at2 = turns; })]);
+        return { at1, at2 };
+      } finally { on = false; reg._setHelperClockForTest(null); await new Promise((r) => setImmediate(() => setImmediate(r))); }
     };
     const sh = await sharedOf(REG);
-    const OWN = "    due: () => _helperClock() - _turnT0 >= HELPER_TURN_MS,\n";
-    const MP = M.load('src/server/artifact-registry.js', anchored(RSRC, OWN, "    due: () => _helperClock() - mine >= HELPER_TURN_MS,\n", 'B-360d a budget per pacer'), 'b360d-perpacer');
+    const OWN = "  const due = () => _helperClock() - _turnT0 >= bgBudget();\n";
+    const MP = M.load('src/server/artifact-registry.js', anchored(RSRC, OWN, "  const due = () => _helperClock() - mine >= bgBudget();\n", 'B-360d a budget per pacer'), 'b360d-perpacer');
     const shc = MP ? await sharedOf(MP) : null;
-    ok(sh.second === true && sh.next === false, 'B-360d: the budget is SHARED — of two pacers resumed in one check phase, the second is due at once when the first spent the budget; a new iteration gives a new budget', sh);
-    ok(!!shc && shc.second === false, 'CONTROL a budget per pacer: the second takes a fresh 20 ms in the same check phase — the leg above can tell', shc);
+    ok(sh.at1 != null && sh.at2 > sh.at1, 'B-360d: the budget is SHARED — of two pacers whose turns resumed in one check phase, the second finds the first one\'s spend and does no unit there: it returns a later iteration (no forced unit)', sh);
+    ok(!!shc && shc.at2 === shc.at1, 'CONTROL a budget per pacer: the second takes a fresh budget in the same check phase — the leg above can tell', shc);
     // NO FOLD STARVES BEHIND ANOTHER (its read's should): two stretches of 40 units of 5 ms each (4 to a budget), side by side — a
     // slice cut short by the other's spend resumes one iteration sooner, so they take the iterations in turn: when the first ends,
     // the second is (nearly) done too; CONTROL every turn a whole iteration ⇒ the second does one forced unit per two iterations
@@ -518,11 +518,84 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
       } finally { reg._setHelperClockForTest(null); await new Promise((r) => setImmediate(() => setImmediate(r))); }
     };
     const fr = await fairOf(REG);
-    const SHORT = "      const short = resumed && _helperClock() - mine < HELPER_TURN_MS / 2;\n      if (short) { queueReset(); await oneHop(); } else await loopTurn();\n";
-    const MF = M.load('src/server/artifact-registry.js', anchored(RSRC, SHORT, "      await loopTurn();\n", 'B-360d no turn taking'), 'b360d-nofair');
+    const SHORT = "        const short = resumed && _helperClock() - mine < bgBudget() / 2;\n        if (short) { queueReset(); await oneHop(); } else await loopTurn();\n";
+    const MF = M.load('src/server/artifact-registry.js', anchored(RSRC, SHORT, "        await loopTurn();\n", 'B-360d no turn taking'), 'b360d-nofair');
     const frc = MF ? await fairOf(MF) : null;
     ok(fr.b === 40 && fr.bAtAEnd >= 30, 'B-360d: two folds side by side take the loop\'s iterations IN TURN — when the first of two 40-unit stretches ends, the second has done ≥ 30 of its own', fr);
     ok(!!frc && frc.bAtAEnd < 20, 'CONTROL every turn a whole iteration (no turn taking): the second stretch only crawls behind the first — the leg above can tell', frc);
+    // (l) 主开发 r1339 — A PERSON'S ASK GOES BEFORE BACKGROUND FOLDS: TWENTY folds in flight and one person's WALK (the stretch a
+    // history open awaits: the rebuild's prefetch walk is a foreground pacer) — the walk's units an iteration, counted: its own share of
+    // every iteration (≈ 10 units of 1 ms), and an iteration's total stays one budget (+ one unit of each); RED: the walk as a background
+    // stretch (the tip before this rule) crawls — under one unit an iteration
+    const fgOf = async (reg, walks = 1) => {
+      let t = 4e12, turns = 0, on = true; const spin = () => { if (!on) return; turns++; setImmediate(spin); };
+      try {
+        reg._setHelperClockForTest(() => t); setImmediate(spin);
+        const P = reg._pacerForTest, total = new Map();
+        let bgLeft = 20, start = null, firstTen = 0, fgUnits = 0;
+        const bg = async () => { const p = P(); try { await p.turn(); for (let i = 0; i < 30; i++) { if (p.due()) await p.turn(); t += 2; total.set(turns, (total.get(turns) || 0) + 2); } } finally { p.end(); bgLeft--; } };
+        const fg = async () => { if (start == null) start = turns; const p = P({ foreground: true }); try { await p.turn(); for (let i = 0; i < 400 && bgLeft > 0; i++) { if (p.due()) await p.turn(); if (bgLeft <= 0) break; t += 1; fgUnits++; if (turns < start + 10) firstTen++; total.set(turns, (total.get(turns) || 0) + 1); } } finally { p.end(); } };
+        await Promise.all([...Array.from({ length: 20 }, bg), ...Array.from({ length: walks }, fg)]);
+        return { firstTen, fgUnits, maxTotal: Math.max(0, ...total.values()) };
+      } finally { on = false; reg._setHelperClockForTest(null); await new Promise((r) => setImmediate(() => setImmediate(r))); }
+    };
+    const fgr = await fgOf(REG);
+    const MW = M.load('src/server/artifact-registry.js', anchored(RSRC, '  if (foreground) {\n', '  if (false) {\n', 'B-360d the walk as background'), 'b360d-walk-bg');
+    const fgc = MW ? await fgOf(MW) : null;
+    ok(fgr.firstTen >= 50 && fgr.maxTotal <= 23, 'B-360d (r1339): a person\'s WALK beside TWENTY background folds keeps its own share of every iteration — ≥ 50 units of 1 ms in its first ten iterations — and an iteration\'s total stays one budget (≤ 20 ms + one unit of each)', fgr);
+    ok(!!fgc && fgc.firstTen < 20, 'RED — the walk as a background stretch (the tip before this rule): it waits behind the twenty folds — under 20 units in its first ten iterations — the leg above goes red there', fgc);
+    // ITS READ'S MUST: THREE walks at once (three windows re-attached) share ONE foreground share — an iteration still holds one budget;
+    // RED: a share per walk (the first cut of this rule) — three walks hold 30 ms beside the background's 10
+    const fg3 = await fgOf(REG, 3);
+    const PERWALK = "    const fgDue = () => _helperClock() - _fgT0 >= FG_TURN_MS;\n";
+    const MPW = M.load('src/server/artifact-registry.js', anchored(RSRC, PERWALK, "    const fgDue = () => _helperClock() - mine >= FG_TURN_MS;\n", 'B-360d a share per walk'), 'b360d-perwalk');
+    const fg3c = MPW ? await fgOf(MPW, 3) : null;
+    ok(fg3.firstTen >= 50 && fg3.maxTotal <= 23, 'B-360d: THREE walks beside the twenty folds share ONE foreground share — ≥ 50 walk units in their first ten iterations, and no iteration over one budget (≤ 20 ms + one unit of each)', fg3);
+    ok(!!fg3c && fg3c.maxTotal >= 30, 'RED — a share per walk: three walks hold ≥ 30 ms of one iteration beside the background — the leg above goes red there', fg3c);
+  }
+  // (m) THE ROWS' ORDER AND THE LAST ROW = the unpaced fold's (the round: counted, never compared) — 600 writes past the 500-row cap,
+  // every row's fields but its instants; CONTROL a copy that tags each chunk backwards ⇒ the order differs (the compare can fail)
+  {
+    const DM = CWD + '/order/';
+    helper('a21', 'toolu_T21', 'Order keeper', { mb: 0.2, writes: Array.from({ length: 600 }, (_, i) => ({ atMb: 0.0003 * i, file: DM + `f${i}.md` })) });
+    const TM = [agentUse('toolu_T21', 'Order keeper', 120), ends('toolu_T21', 'a21', 121)];
+    const factsM = (sx) => { const r = rows(sx), ks = Object.keys(r).filter((k) => k.includes('/order/')); return { n: ks.length, keys: ks.join('|'), last: ks[ks.length - 1], rows: JSON.stringify(ks.map((k) => { const { firstAt: _f, lastAt: _l, ...x } = r[k]; return x; })) }; };
+    const sM = await liveOf(REG, 'BM', TM);
+    const MU = M.load('src/server/artifact-registry.js', anchored(RSRC, 'const HELPER_TURN_MS = 20,', 'const HELPER_TURN_MS = Infinity,', 'B-360d the pacing off'), 'b360d-unpaced');
+    const sU = MU ? await liveOf(MU, 'BMu', TM) : null;
+    const MV = M.load('src/server/artifact-registry.js', anchored(RSRC, 'helperTagged(session, list.slice(i, i + HELPER_NOTE_CHUNK), via, state, at)', 'helperTagged(session, list.slice(i, i + HELPER_NOTE_CHUNK).reverse(), via, state, at)', 'B-360d each chunk backwards'), 'b360d-backwards');
+    // ITS READ'S SHOULD: the RELEASE's own rows loop (the whole list tagged at once, noted 16 ops at a time) as the second reference
+    const ROWS_NOW = RSRC.slice(RSRC.indexOf("      if (!list || !list.length) continue;\n"), RSRC.indexOf("    }\n  }).catch((e) => { deps.log.warn?.(`[artifacts] a helper's rows failed"));
+    const ROWS_REL = "      const ops = list && list.length ? helperTagged(session, list, via, state, at) : [], pace = pacer();\n      for (let i = 0; i < ops.length; i += HELPER_NOTE_CHUNK) { if (pace.due()) await pace.turn(); if (!stands(session)) return; noteOps(session, ops.slice(i, i + HELPER_NOTE_CHUNK)); }\n";
+    const MREL = ROWS_NOW.length > 200 ? M.load('src/server/artifact-registry.js', anchored(RSRC, ROWS_NOW, ROWS_REL, 'B-360d the release\'s rows loop'), 'b360d-release-rows') : null;
+    const sRel = MREL ? await liveOf(MREL, 'BMrel', TM) : null;
+    const sV = MV ? await liveOf(MV, 'BMv', TM) : null;
+    REG.configure({ activeSessions: () => new Map(), log: quiet });
+    const fa = factsM(sM), fu = sU ? factsM(sU) : null, fv = sV ? factsM(sV) : null, fr = sRel ? factsM(sRel) : null;
+    ok(fa.n === 500 && !!fu && !!fr && fa.keys === fu.keys && fa.last === fu.last && fa.rows === fu.rows && fa.keys === fr.keys && fa.last === fr.last && fa.rows === fr.rows, 'B-360d: the rows\' ORDER, every row\'s fields and THE LAST ROW equal the unpaced fold\'s AND the release\'s own rows loop\'s — 600 helper writes past the 500-row cap', { n: fa.n, last: fa.last, sameKeys: !!fu && fa.keys === fu.keys, sameRows: !!fu && fa.rows === fu.rows, release: !!fr && fa.keys === fr.keys && fa.rows === fr.rows });
+    ok(!!fv && fv.keys !== fu.keys, 'CONTROL each chunk tagged backwards: the rows\' order differs — the compare above can fail', { same: !!fv && !!fu && fv.keys === fu.keys });
+  }
+  // (n) A CONVERSATION REMOVED BETWEEN THE NEW HOPS (as its helper's read ends, before the rows' first iteration) gets NO row and NO
+  // save — the stands() after the rows' first turn; RED: a copy without it notes the rows
+  {
+    const goneOf = async (reg, aid) => {
+      helper(aid, 'toolu_' + aid, 'Gone ' + aid, { mb: 0.05, writes: [{ atMb: 0.01, file: CWD + '/gone/' + aid + '.md' }] });
+      const s = mk('G' + aid, { sockName: 'cw-g' + aid }), live = new Map([['sess-g' + aid, s]]), writes = [];
+      reg.configure({ activeSessions: () => live, sessionMeta: () => ({ readSessionMeta: () => null, writeSessionMeta: (n) => writes.push(n) }), log: quiet });
+      const realRead = C.readJsonlBoundedParsedPagedAsync;
+      C.readJsonlBoundedParsedPagedAsync = function (...x) { return realRead.apply(this, x).then((v) => { live.delete('sess-g' + aid); return v; }); };   // removed as the read ends: between the new hops
+      try { for (const r of [agentUse('toolu_' + aid, 'Gone ' + aid, 130), ends('toolu_' + aid, aid, 131)]) reg.observe(s, r); await reg.helperSettled(s); }
+      finally { C.readJsonlBoundedParsedPagedAsync = realRead; }
+      const timer = !!s._artifactsTimer; clearTimeout(s._artifactsTimer);
+      reg.configure({ activeSessions: () => new Map(), sessionMeta: null, log: quiet });
+      return { rows: Object.keys(rows(s)).length, saveDue: timer, writes: writes.length };
+    };
+    const gn = await goneOf(REG, 'a22');
+    const MG = M.load('src/server/artifact-registry.js', anchored(RSRC, '      await pace.turn();\n      if (!stands(session)) return;\n', '      await pace.turn();\n', 'B-360d no stands after the rows\' first turn'), 'b360d-nostands');
+    const gc = MG ? await goneOf(MG, 'a23') : null;
+    REG.configure({ activeSessions: () => new Map(), log: quiet });
+    ok(gn.rows === 0 && !gn.saveDue && gn.writes === 0, 'B-360d: a conversation removed between the new hops (its helper\'s read ended, the rows not begun) gets NO row and NO save due', gn);
+    ok(!!gc && gc.rows >= 1, 'RED — no stands() after the rows\' first turn: the gone conversation gets its row — the leg above goes red there', gc);
   }
 }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} — ${pass} passed, ${fail} failed`);
