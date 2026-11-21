@@ -513,6 +513,14 @@ This file is the engineers' record of every release: the lanes, the verification
 - **A held read, said (item 3):** while an earlier read holds the slot past its deadline, a card says «A file read for an earlier card did not reply; until it does or the hub restarts, every card says its file facts could not be read.» (en / zh / ja, its own line), and the journal says it once per such read (`[vault-job] a file read … did not reply within 2000 ms (in <folder>)`); once the read replies the next card reads again (leg ⑫c).
 - **The chrome suite (item 4):** «on screen» is now the topmost element at the button's centre too (Allow at 1280 and 390, the chip's ✕, the job card's ✕); the scratch second password rides the seed child's env, never its argv.
 
+### lg-vault-stages follow 3 — B-a08e after the round wtjb84nh2 (主开发 r1091: take; follow 2 taken for the next block)
+
+- **env's words that change where the program is found (主开发's law, asked):** `env -C`, `PATH=…`, `-u PATH` / `--unset=PATH`, `-i` / `-` (an empty environment) and `-S` are NOT understood — the card names env itself (what is literally run), the whole command as typed; any other word with «=» before the program is an assignment (GNU env's own reading). Leg: `env -C <dir>` moved from the understood forms to the not-understood ones, beside `env PATH=…`, `env -u PATH`, `--unset=PATH`, `env -i`, `env -`.
+- **A wrapper named is counted as changeable (lens 1):** when a word is not understood the card names the wrapper's real path — and now says what it starts could not be read from the command's words, counted as one an agent can change (its own line, en / zh / ja), never a root-owned system program drawn with no mark.
+- **Options end at the first operand (lenses 1 + 2):** as GNU coreutils / util-linux read them — `env A=1 -i …` names «-i», `timeout 60 -- …` names «--» (the word the wrapper would exec).
+- **The slot is a card's whole sequence (lens 1's burst should):** a card takes the door's one slot once and gives it back at its end (a late read's own return gives it back instead) — still one pool thread, and in a burst the earlier cards finish first. Leg: two cards on a healthy folder both read, the second's reads all after the first's.
+- **Answered, not changed:** the held-read journal line names the read's folder masked by secret shapes — the owner's own journal, said; a wrapper recognised by its basename (an agent's own `./timeout`) predates this unit, the command is shown whole.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
