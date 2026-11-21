@@ -83,7 +83,9 @@ function linkedHere(fs, tmp, file) {
 const PIECE = 4 * 1024 * 1024;
 function rewriteJob(m, fs) {
   sweepTemps(fs, m.file, m.tmp);   // B-f276 1b's: this road's own temp left by an earlier life of its thread
-  if (LINKED.has(m.tmp) && !dropTemp(fs, m.tmp)) throw Object.assign(new Error(`${m.tmp} is still a second name of ${m.file} (its removal failed) — not written through it`), { code: 'ETEMPLINKED' });   // B-f276 1b's law: never opened for a write while it is a second name of the store
+  if (LINKED.has(m.tmp) && !dropTemp(fs, m.tmp)) {   // B-f276 1b's law on the rewrite road too: never opened for a write while it is a second name of the store
+    throw Object.assign(new Error(`${m.tmp} is still a second name of ${m.file} (its removal failed) — not rewritten through it`), { code: 'ETEMPLINKED' });
+  }
   const ranges = m.rewrite.ranges, size = m.rewrite.size;
   let src = null, out = null, err = null;
   try {
