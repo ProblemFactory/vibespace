@@ -1000,9 +1000,33 @@ console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program o
     };
     const ul = await unlinkOrder(DOOR);
     ok(ul.n === 1 && ul.gone && ul.order.length === 3 && ul.order[2] === DOOR.OWNER_FILE, 'r1152: a dead folder is shredded MARK LAST — every value file first, then .owner, then the folder', ul);
-    const markFirst = M.load('src/server/vault-run-door.js', anchored(SRCs, "  for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));\n  if (names.includes(OWNER_FILE)) shredFile(path.join(dir, OWNER_FILE));\n", "  if (names.includes(OWNER_FILE)) shredFile(path.join(dir, OWNER_FILE));\n  for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));\n", 'test-vault-run ⑥b r1152 mark-first'), 'r1152-mark-first');
+    const FOR_LINE = "  for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));\n", MARK_ANY = "  if (names.includes(OWNER_FILE)) shredFile(path.join(dir, OWNER_FILE));\n", LEFT_LINE = "  if (left && left.length === 1 && left[0] === OWNER_FILE) shredFile(path.join(dir, OWNER_FILE));\n";
+    const markFirst = M.load('src/server/vault-run-door.js', anchored(anchored(SRCs, FOR_LINE, MARK_ANY + FOR_LINE, 'test-vault-run ⑥b r1152 mark-first'), LEFT_LINE, '', 'test-vault-run ⑥b r1152 mark-first (its last line)'), 'r1152-mark-first');
     const ulR = await unlinkOrder(markFirst);
     ok(ulR.n === 1 && ulR.order.length === 3 && ulR.order[0] === DOOR.OWNER_FILE, 'RED — a shred that takes the mark FIRST (its plant proves itself: three files were unlinked): the mark-last leg goes red there', ulR);
+    // r1213 (a): THE MARK GOES ONLY WHEN NOTHING ELSE IS LEFT (the folder read again) — a file whose unlink failed, or a sub-folder
+    // the run's program made, keeps the folder MARKED, so the next start's sweep judges it again (an unmarked folder with something
+    // in it would be kept for ever by the law)
+    const leftOf = async (doorMod) => {
+      const w = await world({ doorMod });
+      const d = path.join(w.runRoot, DOOR.RUN_DIR_PREFIX + 'gone04'); fs.mkdirSync(d, { mode: 0o700 });
+      fs.writeFileSync(path.join(d, DOOR.OWNER_FILE), JSON.stringify(deadId)); for (const f of ['f0', 'f1']) fs.writeFileSync(path.join(d, f), VALUE, { mode: 0o600 });
+      const sd = path.join(w.runRoot, DOOR.RUN_DIR_PREFIX + 'gone05'); fs.mkdirSync(path.join(sd, 'made-by-the-program'), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(path.join(sd, DOOR.OWNER_FILE), JSON.stringify(deadId)); fs.writeFileSync(path.join(sd, 'f0'), VALUE, { mode: 0o600 });
+      const un0 = fs.unlinkSync; let refused = 0;
+      fs.unlinkSync = function (q, ...rest) { if (String(q) === path.join(d, 'f1')) { refused++; throw Object.assign(new Error('EBUSY (the leg refuses this one unlink)'), { code: 'EBUSY' }); } return un0.call(this, q, ...rest); };
+      let n1 = null; try { n1 = w.door.sweep(); } finally { fs.unlinkSync = un0; }
+      const at1 = { dMark: fs.existsSync(path.join(d, DOOR.OWNER_FILE)), dF1: fs.existsSync(path.join(d, 'f1')), dF0: fs.existsSync(path.join(d, 'f0')), sMark: fs.existsSync(path.join(sd, DOOR.OWNER_FILE)), sSub: fs.existsSync(path.join(sd, 'made-by-the-program')), sF0: fs.existsSync(path.join(sd, 'f0')) };
+      const n2 = w.door.sweep();   // the next start: the unlink works again
+      return { refused, n1, at1, n2, dGone: !fs.existsSync(d), sMark2: fs.existsSync(path.join(sd, DOOR.OWNER_FILE)) };
+    };
+    const lf = await leftOf(DOOR);
+    ok(lf.refused === 1 && lf.n1 === 2 && lf.at1.dMark && lf.at1.dF1 && !lf.at1.dF0 && lf.at1.sMark && lf.at1.sSub && !lf.at1.sF0 && lf.n2 === 2 && lf.dGone && lf.sMark2,
+      'r1213 (a): the mark is shredded only when NOTHING ELSE is left — a file whose unlink failed, or a sub-folder the run\'s program made, keeps its folder MARKED (its other value files gone); the next start\'s sweep judges both again and finishes the first', lf);
+    const anyLeft = M.load('src/server/vault-run-door.js', anchored(SRCs, LEFT_LINE, MARK_ANY, 'test-vault-run ⑥b r1213 mark-with-something-left'), 'r1213-mark-any');
+    const lfR = anyLeft ? await leftOf(anyLeft) : null;
+    ok(!!anyLeft && lfR && lfR.refused === 1 && lfR.at1.dF1 && !lfR.at1.dMark && lfR.at1.sSub && !lfR.at1.sMark && lfR.n2 === 0 && !lfR.dGone,
+      'RED — the r1152 line (the mark shredded whatever is left; its plant proves itself: one unlink was refused): both folders are left UNMARKED with something in them, and the next sweep never judges them again — the leg above goes red there', lfR);
   }
   // THE ORDER THE LAW STANDS ON (pinned): in a run folder the door's mark is the FIRST file made — before any value file — so a
   // folder with no mark never holds a value of the door's. Every O_CREAT open under the world's run root is recorded
@@ -1025,10 +1049,32 @@ console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program o
     ok(real.ok && real.made[0] === DOOR.OWNER_FILE && real.made.includes('f0') && real.made.indexOf(DOOR.OWNER_FILE) < real.made.indexOf('f0'),
       'r1152: the order the law stands on — a run folder\'s FIRST file is the door\'s mark (.owner), then its value file (f0): a folder with no mark holds no value of the door\'s', real);
     const SRCo = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-    const OWN2 = "      const ofd = fs.openSync(path.join(dir, OWNER_FILE), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);\n      try { fs.writeSync(ofd, JSON.stringify(hubIdentity || { pid: process.pid })); } finally { fs.closeSync(ofd); }\n";
+    const MARK_W = "      try { const mb = Buffer.from(JSON.stringify(hubIdentity || { pid: process.pid })), wrote = fs.writeSync(ofd, mb); if (wrote !== mb.length) throw Object.assign(new Error(`the owner mark was written short (${wrote} of ${mb.length} bytes)`), { code: 'ESHORTMARK' }); } finally { fs.closeSync(ofd); }   // r1213 (b): a SHORT write is a failed mark — the run stops before any value file and its folder is shredded, as a thrown write is\n";   // the mark's CHECKED write (r1213 b)
+    const OWN2 = "      const ofd = fs.openSync(path.join(dir, OWNER_FILE), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);\n" + MARK_W;
     const late = M.load('src/server/vault-run-door.js', anchored(anchored(SRCo, OWN2, '', 'test-vault-run ⑥b r1152 mark-late (cut)'), '      const rec = { conv: caller.conversationId', "      { const ofd = fs.openSync(path.join(dir, OWNER_FILE), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600); try { fs.writeSync(ofd, JSON.stringify(hubIdentity || { pid: process.pid })); } finally { fs.closeSync(ofd); } }\n      const rec = { conv: caller.conversationId", 'test-vault-run ⑥b r1152 mark-late (after)'), 'r1152-mark-late');
     const lateR = await orderOf(late);
     ok(lateR.ok && lateR.made.includes(DOOR.OWNER_FILE) && lateR.made.includes('f0') && lateR.made.indexOf('f0') < lateR.made.indexOf(DOOR.OWNER_FILE), 'RED — a door that writes a VALUE file before its mark (an anchored copy: the mark moved after the files; its run still runs — the plant is where it claims): the order leg above goes red there', lateR);
+    // r1213 (b): THE MARK'S WRITE IS CHECKED — a SHORT write (fewer bytes than the mark) is a failed mark: the run stops before
+    // any value file, nothing runs, and its folder is shredded, as a thrown write is
+    const shortOf = async (doorMod) => {
+      const ow = await world({ doorMod });
+      openRow(ow);
+      const under = (q) => { try { return String(q).startsWith(ow.runRoot + path.sep); } catch { return false; } };
+      const saved = { openSync: fs.openSync, writeSync: fs.writeSync };
+      let markFd = null, shorts = 0;
+      let armed = true;   // only the MARK's write is made short: the shred that follows reopens the torn .owner to overwrite it (the round's must)
+      fs.openSync = function (q, ...rest) { const fd = saved.openSync.call(this, q, ...rest); if (armed && under(q) && path.basename(String(q)) === DOOR.OWNER_FILE) { markFd = fd; armed = false; } return fd; };
+      fs.writeSync = function (fd, buf, ...rest) { if (markFd != null && fd === markFd) { markFd = null; shorts++; const b = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf)); return saved.writeSync.call(this, fd, b, 0, Math.max(0, b.length - 1)); } return saved.writeSync.call(this, fd, buf, ...rest); };
+      const ran = path.join(ow.work, 'ran-short.txt');
+      let r = null;
+      try { ({ r } = await runAnswered(ow, ['--file', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'ran', ran])); } finally { Object.assign(fs, saved); }
+      return { shorts, ok: !!(r && r.ok), code: r && r.code, ran: fs.existsSync(ran), dirs: runDirs(ow).length };
+    };
+    const sh = await shortOf(DOOR);
+    ok(sh.shorts === 1 && !sh.ok && sh.code === 'spawn_failed' && !sh.ran && sh.dirs === 0, 'r1213 (b): the mark\'s write is CHECKED — a write one byte short is a failed mark: spawn_failed, nothing ran, no run folder left', sh);
+    const unchecked = M.load('src/server/vault-run-door.js', anchored(SRCo, MARK_W, "      try { fs.writeSync(ofd, JSON.stringify(hubIdentity || { pid: process.pid })); } finally { fs.closeSync(ofd); }\n", 'test-vault-run ⑥b r1213 mark-unchecked'), 'r1213-mark-unchecked');
+    const shR = unchecked ? await shortOf(unchecked) : null;
+    ok(!!unchecked && shR && shR.shorts === 1 && shR.ok && shR.ran, 'RED — the unchecked write (the release\'s line; its plant proves itself: the mark was written short): the run GOES over a torn mark — the leg above goes red there', shR);
   }
   // r1152 (A — the suites' hygiene): NO SUITE'S SCRATCH WEARS A NAME A PRODUCT SWEEPER OWNS — the scratch helper refuses the
   // vault run door's folder shape by name (as it refuses `ab`), and no tracked suite asks for it (a census over scripts/)

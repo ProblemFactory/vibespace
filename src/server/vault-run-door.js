@@ -335,7 +335,11 @@ function shredDir(dir) {
   // r1152: the door's MARK goes LAST — a hub ended mid-shred (a kill, a crash) leaves a folder that still carries its mark, so the
   // next start's sweep (which judges only a marked folder) finishes the job; shredded first, its values would be left unmarked forever
   for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));
-  if (names.includes(OWNER_FILE)) shredFile(path.join(dir, OWNER_FILE));
+  // r1213 (a): …and only when NOTHING ELSE is left (the folder read again): a file whose unlink failed, or a sub-folder the run's
+  // program made (shredFile unlinks files only), keeps the folder MARKED, so every later start's sweep judges it again — never an
+  // unmarked folder with something in it, which the law would keep for ever
+  let left = null; try { left = fs.readdirSync(dir); } catch { left = null; }
+  if (left && left.length === 1 && left[0] === OWNER_FILE) shredFile(path.join(dir, OWNER_FILE));
   try { fs.rmdirSync(dir); } catch { }
 }
 /** The command as a shell would read it back — the card, the audit (references stay references). */
@@ -2433,7 +2437,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     try {
       dir = fs.mkdtempSync(path.join(runRoot(), RUN_DIR_PREFIX)); fs.chmodSync(dir, 0o700);
       const ofd = fs.openSync(path.join(dir, OWNER_FILE), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
-      try { fs.writeSync(ofd, JSON.stringify(hubIdentity || { pid: process.pid })); } finally { fs.closeSync(ofd); }
+      try { const mb = Buffer.from(JSON.stringify(hubIdentity || { pid: process.pid })), wrote = fs.writeSync(ofd, mb); if (wrote !== mb.length) throw Object.assign(new Error(`the owner mark was written short (${wrote} of ${mb.length} bytes)`), { code: 'ESHORTMARK' }); } finally { fs.closeSync(ofd); }   // r1213 (b): a SHORT write is a failed mark — the run stops before any value file and its folder is shredded, as a thrown write is
     } catch (e) { if (dir) shredDir(dir); values = null; note('spawn_failed', { ...head, why: `the run directory (${e.code || e.message})` }); closeTool(); return named('spawn_failed', { why: 'the run directory could not be made' }); }
     const mark = path.basename(dir);
     const m = VR.materialize(spec, { valueOf: (ref) => values.get(ref), pathOf: (slot) => path.join(dir, `f${slot}`) });
