@@ -7879,11 +7879,11 @@ await section(async () => {
     && script107.indexOf('agentd-bundle-strip.mjs') < script107.indexOf('scripts/agentd-release.mjs');
   const shipped107 = (r) => (strips107 ? strip107(r.outputFiles[0].text, undefined, { check: false }) : r.outputFiles[0].text);   // a size reading (the build's own step checks)
   // THE LAW (the coordinator's, 2026-11-20): the base is the LAST RELEASE's SIGNED device bundle size, restated at each cut to the size
-  // that cut signs. Restated at the 2.369.414 cut (int361): 2.369.414's signed bundle, 5112402 bytes (its manifest's sha256 a10d0941…);
+  // that cut signs. Restated at the 2.369.415 cut (int361): 2.369.415's signed bundle, 5112402 bytes (its manifest's sha256 a8a76366…);
   // the 2 % margin holds the next block's DEVICE code over it. WHICH lines of a block change the bundle is COMPUTED at the cut, never
   // remembered: the files changed between the release and the tip that are in this build's own input list (the metafile below), each
   // mapped to its list line — the bundle carries chat-pipeline files too (message-manager.js, record-shape.js, permission-outcome.js…).
-  // Was 5042938, 2.369.413's signed bundle; 43 of the build's inputs changed between the two releases (computed at the cut).
+  // Was 5112402, 2.369.414's signed bundle: the hotfix 2.369.415 changed no device input but the version text the bundle carries.
   const RELEASE_BUNDLE_BYTES = 5112402, DEVICE_BUNDLE_MARGIN = 0.02;
   ok(strips107, '§107 build:agentd strips the device bundle (scripts/agentd-bundle-strip.mjs) right after esbuild writes it to a side name, renaming it into data/bin/vibespace-agentd.js, and before agentd-release.mjs hashes it', script107);
   const r107 = await build107(ext107);
@@ -7894,7 +7894,7 @@ await section(async () => {
   // the device agent's bundle (the descriptor reaches it only by a path the worker pool starts, never a require)
   const in107 = Object.keys(r107.metafile.inputs);
   ok(in107.some((k) => /src\/agy-backfill\.js$/.test(k)) && !in107.some((k) => /src\/agy-cards(?:-worker)?\.js$/.test(k)), `§107 the device bundle carries agy-backfill (the descriptor's reader) but NOT the hub's agy-cards worker nor its reads (${in107.filter((k) => /agy-/.test(k)).join(', ')})`);
-  ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of ${RELEASE_BUNDLE_BYTES} bytes — the 2.369.414 release's signed device bundle, plus ${DEVICE_BUNDLE_MARGIN * 100} % for this block's device code — as shipped (${size107})${size107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN) ? ' — OVER: is the new code device code? a hub-only library goes --external in build:agentd; device code over the margin is the coordinator\'s to rule — the base is the last release\'s signed size, restated only at a cut' : ''}`, size107);
+  ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of ${RELEASE_BUNDLE_BYTES} bytes — the 2.369.415 release's signed device bundle, plus ${DEVICE_BUNDLE_MARGIN * 100} % for this block's device code — as shipped (${size107})${size107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN) ? ' — OVER: is the new code device code? a hub-only library goes --external in build:agentd; device code over the margin is the coordinator\'s to rule — the base is the last release\'s signed size, restated only at a cut' : ''}`, size107);
   ok(Buffer.byteLength(plain107) > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same bundle NOT stripped (${Buffer.byteLength(plain107)} bytes) is over the cap — the size leg goes red without the strip step`);
   // the strip removes comments and margins ONLY: esbuild's column-0 module banners (whose code a line is — §5 reads them) and the
   // libraries' legal notices stay, every line keeps its own spacing, a second pass changes nothing
