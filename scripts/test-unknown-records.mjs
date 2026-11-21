@@ -58,8 +58,10 @@ console.log('§1b (B-9ff2 step 3, the coordinator\'s law r172) an unknown system
     const c = cards(mm);
     ok('a system subtype on neither list WITH a tool_use_id ⇒ ONE fall-back card carrying the whole record, its record-kinds count (system/zz_call_linked_b9ff2) and its breadcrumb (cli-unknown-system-subtype)', c.length === 1 && c[0].content[0].kind === 'system' && c[0].content[0].name === 'zz_call_linked_b9ff2' && /"tool_use_id": "toolu_zz"/.test(c[0].content[0].record) && mm.addedKinds().filter((k) => k.name === 'system/zz_call_linked_b9ff2').length === 1 && names.filter(([n, d]) => n === 'cli-unknown-system-subtype' && d === 'zz_call_linked_b9ff2').length === 1, { cards: c.length, kinds: mm.addedKinds(), names });
     const mm2 = createMessageManager('claude', 'test-known-call-id');
-    mm2.processLive(rec('late_allow_not_run'));
-    ok('…a DECLARED card-less one with a call id (2.1.328\'s late_allow_not_run) draws no card and adds no kind — and is COUNTED by the breadcrumb, as the card-less ones without a call id always were', cards(mm2).length === 0 && !mm2.addedKinds().some((k) => /late_allow_not_run/.test(k.name)) && names.filter(([n, d]) => n === 'cli-unknown-system-subtype' && d === 'late_allow_not_run').length === 1, { names });
+    // (2.1.328's late_allow_not_run was this leg's example until B-9ff2's remainder made it HANDLED — the late-Allow card; 2.1.296's
+    // permission_check_status is the declared card-less subtype with a call id now)
+    mm2.processLive({ type: 'system', subtype: 'permission_check_status', tool_use_id: 'toolu_zz', status: 'checking', uuid: 'u-zz-pcs', session_id: 's-zz' });
+    ok('…a DECLARED card-less one with a call id (2.1.296\'s permission_check_status) draws no card and adds no kind — and is COUNTED by the breadcrumb, as the card-less ones without a call id always were', cards(mm2).length === 0 && !mm2.addedKinds().some((k) => /permission_check_status/.test(k.name)) && names.filter(([n, d]) => n === 'cli-unknown-system-subtype' && d === 'permission_check_status').length === 1, { names });
     const mm3 = createMessageManager('claude', 'test-handled-call-id');
     mm3.processLive({ type: 'system', subtype: 'task_progress', tool_use_id: 'toolu_none', task_id: 't-none', uuid: 'u-tp', session_id: 's-zz' });
     ok('…a HANDLED one with a call id is untouched: task_progress for a call this conversation never drew ⇒ no card, no kind, no breadcrumb', cards(mm3).length === 0 && mm3.addedKinds().length === 0 && !names.some(([, d]) => d === 'task_progress'));

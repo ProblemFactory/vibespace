@@ -5995,6 +5995,9 @@ export default {
   "This answer did not reach the agent: no running session holds this request. Nothing was sent.": "这个回答没有送达 agent：没有运行中的会话持有这个请求。这次没有发送任何内容。",
   "Ended — reason unknown (the CLI wrote a result VibeSpace does not recognise)": "已结束——原因未知（CLI 写下的结果 VibeSpace 无法识别）",
   "Not run — the request was withdrawn or the turn ended before an answer": "未执行——请求已被撤回，或回合在回答之前就结束了",
+  "Allowed too late — not run": "允许得太晚——未运行",
+  "Allowed late — it ran": "较晚允许——已运行",
+  "Allowed late — waiting for the agent to say whether it ran": "较晚允许——正在等代理说明是否已运行",
   "Already ended — reason unknown. Nothing was sent.": "已经结束——原因未知。这次没有发送任何内容。",
   // R4 (2026-09-27): access and notification — two operations, access first; compose (B-6acc)
   "That rule no longer exists": "这条规则已经不存在了",

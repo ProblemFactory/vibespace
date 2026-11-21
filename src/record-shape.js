@@ -210,12 +210,13 @@ const SHAPES = {
   "claude:stream:system/ui_notify": sh(['plugin', 'source', 'title', 'text', 'key', 'delay_ms', 'at', 'until_back', 'rewritten']),
   "claude:stream:system/ui_notify_cancel": sh(['plugin', 'source', 'key']),
   // NEW in 2.1.328 (B-9ff2 step 2, lane bl-ci) — VERBATIM from the 2.1.328 union (scripts/fixtures/claude-cli/2.1.328.json, `zod` holds each
-  // literal with its .describe() words): the hosted runner's build, read through its dump alone. All three card-less (message-manager
-  // KNOWN_IGNORED). late_allow_not_run: «Why no late Allow runs the call» (reason turn_running | card_open | call_gone | invalid_answer |
-  // limited | stopped | declined | asked_again | withdrawn | expired | not_run, «Treat any other word as "did not run" too») — the answer to an
-  // Allow that came after the approval request was parked; VibeSpace's card does not read it yet (a door that tells a person their late Allow
-  // did not run is B-9ff2's remainder). shell_cwd: the folder a PostToolUse hook on the call is given («treat it as data»). task_list_statuses:
-  // the task list's statuses {id, status: pending | in_progress | completed}.
+  // literal with its .describe() words): the hosted runner's build, read through its dump alone. late_allow_not_run: «Why no late Allow
+  // runs the call» (reason turn_running | card_open | call_gone | invalid_answer | limited | stopped | declined | asked_again | withdrawn |
+  // expired | not_run, «Treat any other word as "did not run" too») — the answer to an Allow that came after the approval request was
+  // parked. Since B-9ff2's remainder (the coordinator's r1210) it is HANDLED: the card the person pressed reads «Allowed too late — not run»
+  // (message-manager _processLateAllowNotRun → lateAllowOf). The two others are card-less (message-manager KNOWN_IGNORED): shell_cwd, the
+  // folder a PostToolUse hook on the call is given («treat it as data»); task_list_statuses, the task list's statuses {id, status:
+  // pending | in_progress | completed}.
   "claude:stream:system/late_allow_not_run": sh(['request_id', 'tool_use_id', 'reason']),
   "claude:stream:system/shell_cwd": sh(['cwd']),
   "claude:stream:system/task_list_statuses": sh(['statuses']),
@@ -260,7 +261,10 @@ const SHAPES = {
   // outside the five is an enum-drift card naming it — the studies' silence for a FUTURE ask shape.
   "claude:stream:control_request": sh(['request_id', 'request'], { nested: { request: sh(['subtype', 'tool_name', 'mcp_server', 'input', 'permission_suggestions', 'blocked_path', 'decision_reason', 'decision_reason_type', 'decision_reason_code', 'classifier_approvable', 'suppress_always_allow_rule', 'default_to_no', 'matched_ask_rule', 'title', 'display_name', 'tool_use_id', 'agent_id', 'description', 'requires_user_interaction', 'server_prompt', 'computer_folder', 'tool_kind', 'dialog_kind', 'payload', 'mcp_server_name', 'message', 'mode', 'url', 'elicitation_id', 'requested_schema', 'callback_id', 'issued_at', 'deadline_ms', 'server_name'], { enums: { subtype: ['can_use_tool', 'request_user_dialog', 'elicitation', 'hook_callback', 'mcp_message'] } }) } }),
   "claude:stream:control_response": sh(['response']),
-  "claude:stream:control_cancel_request": sh(['request_id']),
+  // takes_late_allow (2.1.328): KNOWN since B-9ff2's remainder — a cancel that carries it STATES the late-Allow road, so an Allow of ours
+  // that crosses the cancel is a late Allow whose card waits for the program's word (message-manager _processControlCancel → lateAllowOf);
+  // a cancel without it (an older program) keeps today's card
+  "claude:stream:control_cancel_request": sh(['request_id', 'takes_late_allow']),
   "claude:stream:keep_alive": sh([]),
   "claude:stream:update_environment_variables": sh(['variables', 'request_id']),
   "claude:stream:session_notice": sh(['notice_class', 'from_session_id', 'content', 'isSynthetic', 'inbound_origin']),
@@ -431,7 +435,6 @@ const FIELDS_328 = Object.freeze({
     api_error_type: NEW_328('the kind of API error an assistant error message stands for — the chat draws an error turn from its text'),
   },
   'claude:stream:control_cancel_request': {
-    takes_late_allow: NEW_328('whether the CLI still runs the call if an Allow arrives after this cancel (2.1.328\'s late Allow: system/late_allow_not_run says when one did not) — the card closes on the cancel'),
     tool_use_id: NEW_328('the call the cancelled approval request was for — the card ties a cancel to its request by request_id'),
   },
   'claude:stream:result': {
@@ -892,8 +895,9 @@ function unknownFieldsSample(record) {
 // (the box's claude by 2026-11-13, B-9ff2; dumped 2026-11-17 by lane bl-tests-e, the file READ, never run: its dump equals 2.1.321's in
 // every key, field, nested object and sentence text — only the minified names moved — so nothing is declared for it, no FIELDS_322) + 2.1.328
 // (2026-11-20, B-9ff2 step 2, lane bl-ci — the hosted runner's build, npm's newest on 2026-11-19, dumped ON the runner by ci.yml's fast part 1;
-// on no machine of ours: three new subtypes (late_allow_not_run, shell_cwd, task_list_statuses), card-less; 26 fields on twelve shapes:
-// FIELDS_328; six off a stream shape: FIELDS_328_ELSEWHERE; one nested key (rate_limit_info.memberSpendLimit); nine zod non-records +
+// on no machine of ours: three new subtypes (late_allow_not_run, shell_cwd, task_list_statuses), card-less (late_allow_not_run HANDLED since
+// B-9ff2's remainder: the late-Allow card); 26 fields on twelve shapes: FIELDS_328 (25; control_cancel_request.takes_late_allow KNOWN since
+// the same remainder, read by message-manager); six off a stream shape: FIELDS_328_ELSEWHERE; one nested key (rate_limit_info.memberSpendLimit); nine zod non-records +
 // queued_command, an attachment payload message-manager already reads; five more sentences, src/permission-outcome.js). Each
 // pinned build has its TRACKED dump in scripts/fixtures/claude-cli/<version>.json, judged with no binary at all;
 // test-record-shape's binary oracle runs on whichever claude is installed and expects the rows of THAT build

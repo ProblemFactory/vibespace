@@ -2138,5 +2138,73 @@ console.log('⑱g (B-9ff2 step 3, the coordinator\'s ruling r180) a main card th
   check('⑱g RED CONTROL (the follow-up): without the move, the call that RAN still reads «' + wordsOf(stuck) + '» on its withdrawn card', stuck === 'cancelled', stuck);
 }
 
+console.log('⑱h (B-9ff2\'s remainder, the coordinator\'s r1210) A LATE ALLOW SAYS WHAT BECAME OF IT: not run, ran, or waiting for the program\'s word — never «Allowed» as if done; RED on the a117cebb8 release');
+{
+  // the records are the PINNED build's own shapes (2.1.328, the tracked dump): the cancel {request_id, takes_late_allow, tool_use_id},
+  // system/late_allow_not_run {request_id, tool_use_id, reason, uuid, session_id} — read here off the dump, never typed from memory
+  const D328 = JSON.parse(read('scripts/fixtures/claude-cli/2.1.328.json'));
+  const conv = 'e2e00000-0000-4000-8000-00000000la01';
+  const use = { type: 'assistant', message: { id: 'm-la', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_la', name: 'Bash', input: { command: 'make release' } }] }, uuid: 'u-la' };
+  const ask = { type: 'control_request', request_id: 'req-la', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'make release' }, tool_use_id: 'toolu_la' } };
+  const cancel = { type: 'control_cancel_request', request_id: 'req-la', tool_use_id: 'toolu_la', takes_late_allow: true };
+  const cancelNo = { ...cancel, takes_late_allow: false };
+  const cancelOld = { type: 'control_cancel_request', request_id: 'req-la' };   // an older program: its cancel states nothing of a late Allow
+  const allow = { type: 'control_response', response: { subtype: 'success', request_id: 'req-la', response: { behavior: 'allow', updatedInput: {} } } };
+  const deny = { type: 'control_response', response: { subtype: 'success', request_id: 'req-la', response: { behavior: 'deny', message: 'User denied this action' } } };
+  const notRun = (reason = 'turn_running', requestId = 'req-la') => ({ type: 'system', subtype: 'late_allow_not_run', request_id: requestId, tool_use_id: 'toolu_la', reason, uuid: 'u-la-n-' + reason, session_id: conv });
+  const ran = { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_la', content: 'released', is_error: false }] }, uuid: 'u-la-ok' };
+  const fieldsOf = (r, drop) => Object.keys(r).filter((k) => !drop.includes(k)).sort().join();
+  check('⑱h the records carry EXACTLY the 2.1.328 dump\'s fields: the cancel ' + D328.union.control_cancel_request.join('/') + ', late_allow_not_run ' + D328.union['system/late_allow_not_run'].join('/'),
+    fieldsOf(cancel, ['type']) === D328.union.control_cancel_request.slice().sort().join() && fieldsOf(notRun(), ['type', 'subtype']) === D328.union['system/late_allow_not_run'].slice().sort().join()
+      && /reason:U\(\["turn_running"/.test(D328.zod['system/late_allow_not_run']));
+  const run = (MMx, recs, id, how = 'live') => {
+    const mm = new MMx(id);
+    if (how === 'live') for (const r of recs) mm.processLive(JSON.parse(JSON.stringify(r))); else mm.convertHistory(JSON.parse(JSON.stringify(recs)));
+    const c = mm.messages.find((m) => m.permission && m.permission.requestId === 'req-la');
+    const p = c ? c.permission : null;
+    // the renderer's choice (chat-renderers' settled main card): the late speller first, then the outcome word
+    const w = p && ((p.late && H.lateAllowWords(p.late)) || H.mainAskSettledWords(p.resolved));
+    return { resolved: p && p.resolved, late: p && p.late ? p.late.state : null, reason: p && p.late && p.late.reason || null, words: w ? w.text : null };
+  };
+  const both = (MMx, recs, tag) => ({ live: run(MMx, recs, 'sess-la-l-' + tag), rebuilt: run(MMx, recs, 'sess-la-r-' + tag, 'history') });
+  const same = (x, f) => f(x.live) && f(x.rebuilt);
+  const WAIT = H.lateAllowWords({ state: 'waiting' }).text, NOTRUN = H.lateAllowWords({ state: 'not-run' }).text, RAN = H.lateAllowWords({ state: 'ran' }).text;
+  const scenes = {
+    'the cancel, then the Allow': [use, ask, cancel, allow],
+    'the Allow, then the cancel (they crossed)': [use, ask, allow, cancel],
+    'the cancel, the Allow, then «not run»': [use, ask, cancel, allow, notRun()],
+    'the Allow, the cancel, then «not run»': [use, ask, allow, cancel, notRun('expired')],
+    'the cancel (it takes a late Allow), the Allow, then the result': [use, ask, cancel, allow, ran],
+    'no cancel: the Allow, then «not run» (the program moved on)': [use, ask, allow, notRun('call_gone')],
+    '«not run» naming the call, its request id another (the record says it is not checked)': [use, ask, allow, notRun('withdrawn', 'req-elsewhere')],
+    'a cancel that takes no late Allow, then the Allow': [use, ask, cancelNo, allow],
+  };
+  const g = Object.fromEntries(Object.entries(scenes).map(([k, v], i) => [k, both(MessageManager, v, 'h' + i)]));
+  const k = Object.keys(scenes);
+  check('⑱h WAITING: a late Allow the program has said nothing of reads «' + WAIT + '» in either order, live and rebuilt — never «Allowed»: ' + JSON.stringify([g[k[0]], g[k[1]], g[k[7]]]),
+    [k[0], k[1], k[7]].every((x) => same(g[x], (r) => r.late === 'waiting' && r.words === WAIT)) && /^Allowed late — waiting/.test(WAIT));
+  check('⑱h NOT RUN: «' + NOTRUN + '» when the program says the late Allow did not run the call — in either order, with no cancel at all, and by the call when the request id is another; the reason kept: ' + JSON.stringify([g[k[2]], g[k[3]], g[k[5]], g[k[6]]]),
+    same(g[k[2]], (r) => r.late === 'not-run' && r.reason === 'turn_running' && r.words === NOTRUN) && same(g[k[3]], (r) => r.late === 'not-run' && r.reason === 'expired') && same(g[k[5]], (r) => r.late === 'not-run' && r.reason === 'call_gone') && same(g[k[6]], (r) => r.late === 'not-run' && r.reason === 'withdrawn'));
+  check('⑱h RAN: «' + RAN + '» when the cancel takes a late Allow and the call\'s own result follows: ' + JSON.stringify(g[k[4]]), same(g[k[4]], (r) => r.late === 'ran' && r.words === RAN));
+  const old = both(MessageManager, [use, ask, cancelOld, allow], 'old'), oldNot = both(MessageManager, [use, ask, allow, cancelOld], 'old2');
+  check('⑱h NO GUESS where the program is silent: an older program\'s cancel (no takes_late_allow) keeps today\'s card — «Allowed» after it, «Not run» before it — and no late state: ' + JSON.stringify([old, oldNot]),
+    same(old, (r) => r.late === null && r.resolved === 'allowed') && same(oldNot, (r) => r.late === null && r.resolved === 'cancelled'));
+  const dn = both(MessageManager, [use, ask, cancel, deny, notRun()], 'deny');
+  check('⑱h a person who DENIED is never told «allowed too late»: a deny, the cancel and «not run» keep the deny\'s card: ' + JSON.stringify(dn), same(dn, (r) => r.late === null));
+  // THE DEVICE STREAM is the same judge: the session's feed (normalizers feedLive), as the hub reads a paired machine's stream
+  const sd = { _normalizer: new MessageManager('sess-la-dev'), _subNormalizers: new Map(), _taskRecords: {}, _webuiId: 'sess-la-dev', backend: 'claude' };
+  for (const r of scenes[k[2]]) N.feedLive(sd, JSON.parse(JSON.stringify(r)));
+  const devCard = sd._normalizer.messages.find((m) => m.permission && m.permission.requestId === 'req-la');
+  check('⑱h the session feed (the device stream\'s road) reaches the SAME judge: «not run» there too', !!devCard && devCard.permission.late && devCard.permission.late.state === 'not-run', devCard && devCard.permission);
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  check('⑱h the three words in zh and ja', [WAIT, NOTRUN, RAN].every((w) => zh.includes(JSON.stringify(w) + ':') && ja.includes(JSON.stringify(w) + ':')));
+  // RED CONTROL: the a117cebb8 release — no late-Allow judge — reads the same late Allow «Allowed», as if done
+  const mmSrc = read('src/message-manager.js'), JUDGE = 'function lateAllowOf(perm, res) {\n';
+  const NoJudge = mutantCopies('late-allow-unjudged', REPO).load('src/message-manager.js', anchored(mmSrc, JUDGE, JUDGE + '  return null;\n', 'late-allow-unjudged'), 'late-allow-unjudged').MessageManager;
+  const c1 = run(NoJudge, scenes[k[0]], 'sess-la-c1'), c3 = run(NoJudge, scenes[k[2]], 'sess-la-c3'), c5 = run(NoJudge, scenes[k[4]], 'sess-la-c5');
+  check('⑱h RED CONTROL (no late-Allow judge, as released): the waiting, the not-run and the ran late Allows all read «' + (c1.words || '') + '» — the word this cures: ' + JSON.stringify([c1, c3, c5]),
+    [c1, c3, c5].every((r) => r.late === null && r.words === 'Allowed'));
+}
+
 console.log(`\n${failed ? '✗' : 'ALL PASS'} (${passed} passed${failed ? `, ${failed} failed` : ''})`);
 process.exit(failed ? 1 : 0);

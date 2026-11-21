@@ -5994,6 +5994,9 @@ export default {
   "This answer did not reach the agent: no running session holds this request. Nothing was sent.": "この回答はエージェントに届きませんでした：このリクエストを保持している実行中のセッションはありません。今回は何も送信されていません。",
   "Ended — reason unknown (the CLI wrote a result VibeSpace does not recognise)": "終了——理由不明（CLI が書いた結果を VibeSpace が認識できません）",
   "Not run — the request was withdrawn or the turn ended before an answer": "未実行——リクエストが取り下げられたか、回答前にターンが終了しました",
+  "Allowed too late — not run": "許可が遅すぎました——実行されていません",
+  "Allowed late — it ran": "遅れて許可——実行されました",
+  "Allowed late — waiting for the agent to say whether it ran": "遅れて許可——実行されたかどうか、エージェントの返答を待っています",
   "Already ended — reason unknown. Nothing was sent.": "すでに終了——理由不明。何も送信されませんでした。",
   // R4 (2026-09-27): access and notification — two operations, access first; compose (B-6acc)
   "That rule no longer exists": "そのルールはもう存在しません",

@@ -115,7 +115,7 @@ import { userChannelKind, userChannelRecord, userMessageCardHtml, userFileCardHt
 import { stallWords } from '../workflow-disk.js'; // PURE: a stalled Workflow run's words — the View Workflow window reads the same function
 import { clearedText } from './record-clear-ui.js'; // the .197 integration: a CLEARED group card's words (the device's language)
 import { GROUP_ADAPTER_ID } from '../channel-groups.js'; // lane group-report-card: a group card's group opens its window (the group namespace, never a registry adapter id)
-import { askTarget, askSubject, askState, isWaiting, helperAskHead, helperAskSettledWords, mainAskSettledWords, helperLabelOf, agentStatusWords, isStopRejection, isSubTerminated, hiddenCharsOf, revealParts, revealHidden, secondPressVerdict } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask; r6: the whole subject (F3) + the hidden-character screen and the second press (F7) — its card's words, a stopped helper's chip
+import { askTarget, askSubject, askState, isWaiting, helperAskHead, helperAskSettledWords, mainAskSettledWords, lateAllowWords, helperLabelOf, agentStatusWords, isStopRejection, isSubTerminated, hiddenCharsOf, revealParts, revealHidden, secondPressVerdict } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask; r6: the whole subject (F3) + the hidden-character screen and the second press (F7) — its card's words, a stopped helper's chip
 /** The css class of a settled permission's words (verify r5): green for allowed, red for a refusal, grey for unknown. */
 const permissionClassOf = (w) => (w && w.cls === 'allowed' ? 'chat-permission-allowed' : w && w.cls === 'unknown' ? 'chat-permission-unknown' : w && w.cls === 'stopped' ? 'chat-permission-stopped' : 'chat-permission-denied');
 // THE one reset-credit confirm dialog (design-reset-credits p2): the wall card /
@@ -2500,10 +2500,11 @@ class ChatRenderers {
         ? t('Not run — it waited while you drove the browser and the page changed. The agent re-plans from the handback.')
         : t('Not run — you took over the browser, so this step went stale. The agent re-plans after you hand back.'));
       section.appendChild(line);
-    } else if (msg.permission.resolved) {
+    } else if (msg.permission.resolved || msg.permission.late) {
       // verify r5: the ONE speller of a settled main card (allowed · denied · cancelled · unknown — a word outside
-      // the census reads as unknown here too, never as "✓ Allowed")
-      const w = mainAskSettledWords(msg.permission.resolved, t) || mainAskSettledWords('unknown', t);
+      // the census reads as unknown here too, never as "✓ Allowed"); a LATE Allow first (B-9ff2's remainder): what the program
+      // says became of it — not run, ran, or waiting for its word (the server's one judge, message-manager lateAllowOf)
+      const w = (msg.permission.late && lateAllowWords(msg.permission.late, t)) || mainAskSettledWords(msg.permission.resolved, t) || mainAskSettledWords('unknown', t);
       section.innerHTML = `<details class="chat-diff"><summary class="chat-diff-summary"><span class="chat-permission-resolved ${permissionClassOf(w)}">${escHtml(w.icon)} ${escHtml(w.text)}</span></summary></details>`;
     } else if (Array.isArray(msg.permission.options) && msg.permission.options.length) {
       // Harness-neutral ORDERED options (ACP request_permission: the agent

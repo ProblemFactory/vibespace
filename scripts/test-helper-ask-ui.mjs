@@ -25,6 +25,10 @@
 //      both asks ("No longer waiting — the helper was stopped"), the background
 //      helper's chip reads "stopped", the foreground helper's card says "Stopped
 //      before it finished" (never the CLI's canned rejection string)
+//   C8 A LATE ALLOW (B-9ff2's remainder, the coordinator's r1210): a MAIN card's Allow, a real click, which the stub answers
+//      as 2.1.328 does a late one — the crossing cancel (takes_late_allow) then system/late_allow_not_run: the card reads
+//      «Allowed too late — not run», never «Allowed» as if done (the a117cebb8 release read «✓ Allowed»; the fast twin and its
+//      red control: test-helper-ask ⑱h)
 //   C7 CONTROL: the same page on the PRE-LANE normalizer (the helper branch removed
 //      in the scratch worktree) — the chip still says "waiting for you" and there is
 //      NO card to click anywhere (the studies' state); the leg can go red
@@ -134,7 +138,21 @@ process.stdin.on('data', (d) => {
         out({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: helpers.D.agent, task_type: 'local_agent', description: helpers.D.desc }], uuid: U() });
         setTimeout(() => { ask(helpers.D); pending.add('D'); }, 200);
         setTimeout(() => { launch(helpers.C); ask(helpers.C); pending.add('C'); }, 500); // a FOREGROUND helper: the turn stays open on its Agent call
+      } else if (userN === 3) {
+        // C8: a MAIN-thread ask (no helper) — answered below as 2.1.328 answers a LATE Allow
+        asst([{ type: 'tool_use', id: 'toolu_ui_L', name: 'Bash', input: { command: 'make release', description: 'Cut the release' } }]);
+        state('requires_action');
+        out({ type: 'control_request', request_id: 'req-ui-L', request: { subtype: 'can_use_tool', tool_name: 'Bash', display_name: 'Bash', input: { command: 'make release', description: 'Cut the release' }, description: 'Cut the release', permission_suggestions: [], tool_use_id: 'toolu_ui_L' } });
       } else if (/stop/i.test(JSON.stringify(m.message))) stopBoth();
+      continue;
+    }
+    if (m.type === 'control_response' && m.response && m.response.request_id === 'req-ui-L') {
+      // the 2.1.328 shapes (scripts/fixtures/claude-cli/2.1.328.json): the cancel {request_id, takes_late_allow, tool_use_id} crossed
+      // the Allow, and the late Allow did not run the call — system/late_allow_not_run {request_id, tool_use_id, reason}
+      out({ type: 'control_cancel_request', request_id: 'req-ui-L', tool_use_id: 'toolu_ui_L', takes_late_allow: true });
+      out({ type: 'system', subtype: 'late_allow_not_run', request_id: 'req-ui-L', tool_use_id: 'toolu_ui_L', reason: 'turn_running', uuid: U() });
+      turnEnd('The release step was not run.');
+      state('idle');
       continue;
     }
     if (m.type === 'control_response' && m.response) {
@@ -364,6 +382,18 @@ try {
   check('THE FINDING: the stopped background helper\'s title chip reads "stopped" (was "⟳ running")', c6.dChip === 'stopped' && c6.dChipTitle === 'Stopped before it finished' && !/running/.test(c6.dLabel), c6);
   check('THE FINDING: the stopped foreground helper keeps its title and says "Stopped before it finished"', /Agent: Read the README \(foreground\)/.test(c6.cText) && /Stopped before it finished/.test(c6.cText), c6.cText.slice(0, 300));
   check('…never the CLI\'s canned rejection string', !/doesn't want to proceed|STOP what you are doing/.test(c6.cText));
+
+  // ═══ C8 a late Allow says what became of it (B-9ff2's remainder) ════════
+  console.log('C8 a late Allow says what became of it');
+  liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'cut the release' }));
+  check('a MAIN-thread ask: its card offers Allow', await waitFor(`!!(${CARD(sid, 'toolu_ui_L')})?.querySelector('.chat-perm-allow')`, 15000),
+    await evalJs(`(${CARD(sid, 'toolu_ui_L')})?.textContent?.slice(0, 200) || null`));
+  check('a real click on Allow', await realClickEl(`(${CARD(sid, 'toolu_ui_L')})?.querySelector('.chat-perm-allow')`));
+  const gotL = await waitResponses('req-ui-L');
+  check('the stub got the Allow (it answers with the crossing cancel and «not run», as 2.1.328 does)', gotL.length === 1 && gotL[0].response?.response?.behavior === 'allow', gotL);
+  const lateLine = `((${CARD(sid, 'toolu_ui_L')})?.querySelector('.chat-permission-resolved')?.textContent || '')`;
+  check('THE FINDING: the card reads «Allowed too late — not run» (no buttons) — never «Allowed» as if done', await waitFor(`/Allowed too late — not run/.test(${lateLine}) && !(${CARD(sid, 'toolu_ui_L')})?.querySelector('.chat-perm-btn')`, 10000),
+    await evalJs(lateLine));
   check('no page error during the run', pageErrors.length === 0, pageErrors);
   try { liveWs.send(JSON.stringify({ type: 'kill', sessionId: sid })); } catch {}
 

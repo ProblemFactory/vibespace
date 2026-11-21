@@ -446,6 +446,16 @@ function mainAskSettledWords(resolved, t = fmt) {
   return null;
 }
 
+/** How a LATE Allow's card reads (B-9ff2's remainder, the coordinator's r1210): what the program says became of it — not run, ran, or
+ *  waiting for its word — never «Allowed» as if done. `late` = message-manager lateAllowOf's { state }. null = no late Allow. */
+function lateAllowWords(late, t = fmt) {
+  const s = late && late.state;
+  if (s === 'not-run') return { icon: '✗', cls: 'denied', text: t('Allowed too late — not run') };
+  if (s === 'ran') return { icon: '✓', cls: 'allowed', text: t('Allowed late — it ran') };
+  if (s === 'waiting') return { icon: '…', cls: 'unknown', text: t('Allowed late — waiting for the agent to say whether it ran') };
+  return null;
+}
+
 /** The For-you item for an ask left unanswered for HELPER_ASK_INBOX_MS. `text`
  *  is English (the store's dedupe key and the agent CLI's contract); `i18n` the
  *  same words as structure for the client; `action` names the request so the
@@ -540,7 +550,7 @@ module.exports = {
   // verify r6: the WHOLE subject (F3), the hidden-character screen + the second press (F7)
   askSubject, INBOX_SUBJECT_MAX, hiddenCharsOf, revealParts, revealHidden, SECOND_PRESS_MS, secondPressVerdict,
   HELPER_ASK_INBOX_MS, helperAskOf, askRecordOf, helperParentOf, askTarget, askState, hasPendingHelperAsk, helperLabelOf,
-  pendingAsksOf, chipAsksOf, asksSignature, waitingChip, helperAskHead, helperAskSettledWords, mainAskSettledWords, inboxItemFor, inboxDueAt,
+  pendingAsksOf, chipAsksOf, asksSignature, waitingChip, helperAskHead, helperAskSettledWords, mainAskSettledWords, lateAllowWords, inboxItemFor, inboxDueAt,
   isStopRejection, isSubTerminated, SUB_TERMINATED_NOTE, agentStatusWords, answerSessionFor, answerRefusalWords,
   // verify r3: THE TABLE
   ASK_STATES, ASK_EVENTS, ASK_EFFECTS, ASK_INITIAL, ASK_RECORD_EVENTS, ASK_TABLE, askTransition, isWaiting, answerVerdict,

@@ -33,6 +33,7 @@ const { safetyStopOf } = require('./safety-stop.js'); // PURE (lane classifier-s
 // a branch; task_* are handled under the tool_use_id path.
 const HANDLED_SYSTEM_SUBTYPES = new Set([
   'init', 'hook_response', 'stop_hook_summary', 'model_refusal_fallback',
+  'late_allow_not_run',     // 2.1.328 {request_id, tool_use_id, reason}: a LATE Allow did not run the call — the card the person pressed says so (B-9ff2's remainder, r1210)
   'model_refusal_no_fallback',
   'task_started', 'task_progress', 'task_notification',
   // api_retry is DELIBERATELY card-less: the server feeds it into the
@@ -1611,6 +1612,9 @@ class MessageManager extends MessageWindow {
       }
       if (unknown) this._noteUnknownRecord('system', raw.subtype, raw, emit); // 2.369.119: a card, not a breadcrumb
     }
+    // A LATE ALLOW THAT DID NOT RUN (2.1.328, B-9ff2's remainder): the card the person pressed says so — after the breadcrumb, so a copy
+    // that unlists the subtype still leaves its trace; before the task path, which this record's call id would otherwise enter
+    if (raw.subtype === 'late_allow_not_run') { this._processLateAllowNotRun(raw, emit); return; }
 
     // Task lifecycle → edit existing tool message. Resolution goes through
     // the task index FIRST — pendingToolCalls only helps for task_started
@@ -2211,6 +2215,7 @@ class MessageManager extends MessageWindow {
         ...(tr.is_error && isStoppedRun(resultText) ? { stoppedWhileRunning: true } : {}), // lane cli-2-1-314-records: the census's word, for the tool card
         ...(tr.is_error && isAgentCutOff(resultText) ? { agentCutOff: true } : {}), // lane cli-2-1-319-records: the process ended under this agent — the Agent card's words
       }];
+      if (existing.permission && this._lateSettle(existing)) permResolved = true;   // B-9ff2's remainder: the result is the program's word on a late Allow
       if (emit) this._emit({ op: 'edit', id: existing.id, fields: { status: existing.status, toolStatus: existing.toolStatus, content: existing.content, ...(permResolved ? { permission: existing.permission } : {}) } });
       // LAUNCH-ACK taskInfo synthesis (2.368.30): works on HISTORY too (the
       // stream-only task_started never persists), so resumed sessions get
@@ -2754,7 +2759,9 @@ class MessageManager extends MessageWindow {
       if (m.permission?.requestId === requestId) {
         // a rebuild replays our allow AFTER the result: a call the CLI says was stopped while it ran stays stopped (it was allowed)
         m.permission.resolved = approved ? (m.permission.resolved === 'stopped' ? 'stopped' : 'allowed') : 'denied';
+        m.permission.answer = approved ? 'allow' : 'deny';   // the person's own answer, kept beside the outcome word (the late Allow's judge reads it)
         if (staleBy) m.permission.staleBy = staleBy;
+        this._lateSettle(m);
         if (emit) this._emit({ op: 'edit', id: m.id, fields: { permission: m.permission } });
         break;
       }
@@ -2767,6 +2774,35 @@ class MessageManager extends MessageWindow {
   _dropStashedAsk(requestId) {
     if (!this._askStash || requestId == null) return;
     for (const [k, r] of this._askStash) if (r && r.request_id === requestId) { this._askStash.delete(k); break; }
+  }
+
+  /** 2.1.328's `system/late_allow_not_run` {request_id, tool_use_id, reason}: «why no late Allow runs the call» (its own text; «treat any
+   *  other word as did not run too»). The card it names — by its request id, else by its call (the record says the request id is not
+   *  checked) — keeps the reason; the one judge says «Allowed too late — not run» on a card the person allowed. */
+  _processLateAllowNotRun(raw, emit) {
+    const reason = typeof raw.reason === 'string' && raw.reason ? raw.reason.slice(0, 40) : 'not_run';
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const m = this.messages[i], p = m.permission;
+      if (!p) continue;
+      const call = Array.isArray(m.content) && m.content[0] ? m.content[0].toolCallId : null;
+      if ((raw.request_id && p.requestId === raw.request_id) || (raw.tool_use_id && call === raw.tool_use_id)) {
+        p.lateNotRun = reason;
+        if (this._lateSettle(m) && emit) this._emit({ op: 'edit', id: m.id, fields: { permission: p } });
+        return;
+      }
+    }
+  }
+
+  /** THE ONE JUDGE of a late Allow (B-9ff2's remainder): re-reads the card — our answer, the cancel's statement, the not-run record, the
+   *  call's own result — every record calls it, live or rebuilt; true when the card's late state changed (the caller emits). */
+  _lateSettle(m) {
+    const p = m && m.permission;
+    if (!p) return false;
+    const res = Array.isArray(m.content) && m.content[0] && m.content[0].type === 'tool_result' ? m.content[0] : null;
+    const late = lateAllowOf(p, res), was = p.late ? JSON.stringify(p.late) : null, now = late ? JSON.stringify(late) : null;
+    if (was === now) return false;
+    if (late) p.late = late; else delete p.late;
+    return true;
   }
 
   _processControlCancel(raw, emit) {
@@ -2782,6 +2818,10 @@ class MessageManager extends MessageWindow {
         const res = Array.isArray(m.content) && m.content[0] && m.content[0].type === 'tool_result' ? m.content[0] : null;
         const ran = !!res && (res.status === 'ok' || res.stoppedWhileRunning === true);
         if (m.permission.resolved !== 'stopped' && !ran) m.permission.resolved = 'cancelled';
+        // B-9ff2's remainder: a cancel that STATES the late-Allow road (2.1.328's takes_late_allow) makes an Allow of ours that crosses it
+        // a late Allow; a cancel without the field (an older program) states nothing, and the card stays as today
+        if (typeof raw.takes_late_allow === 'boolean') { m.permission.lateAllowStated = true; m.permission.takesLateAllow = raw.takes_late_allow; }
+        this._lateSettle(m);
         if (emit) this._emit({ op: 'edit', id: m.id, fields: { permission: m.permission } });
         break;
       }
@@ -2791,6 +2831,20 @@ class MessageManager extends MessageWindow {
     this._settleHelperAsk(raw.request_id, 'withdraw', emit); // the table's withdraw row (overrides our own answer)
     this._dropStashedAsk(raw.request_id);
   }
+}
+
+// A LATE ALLOW SAYS WHAT BECAME OF IT (B-9ff2's remainder — the coordinator's r1210, lane bl-ci, 2026-11-21). A person's Allow that
+// reaches Claude Code after it moved on — it crossed the CLI's cancel (either record first), or the CLI says it came too late — is a
+// LATE Allow. 2.1.328 states what it did with one: its cancel carries `takes_late_allow`, and `system/late_allow_not_run` gives «why no
+// late Allow runs the call». The card says the program's truth: NOT RUN (that record), RAN (the call's own result proves it: ok, or
+// stopped while it ran), and until either, WAITING on the program — never «Allowed» as if done. No guess where the program is silent:
+// a cancel without the field (an older program) and no not-run record keep today's card. PURE → { state, reason? } | null.
+function lateAllowOf(perm, res) {
+  if (!perm || perm.answer !== 'allow') return null;   // only a card the person ALLOWED
+  if (perm.lateNotRun) return { state: 'not-run', reason: perm.lateNotRun };
+  if (!perm.lateAllowStated) return null;              // no cancel that states the late-Allow road: today's card
+  if (res && (res.status === 'ok' || res.stoppedWhileRunning === true)) return { state: 'ran' };
+  return { state: 'waiting' };
 }
 
 // THE DRIFT LEDGER (lane record-oracle-2-1-296; since lane drift-card-restore BESIDE the chat card, owner 2026-10-15): a KNOWN record
@@ -2975,9 +3029,8 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'ui_notify_cancel',       // the plugin UI host: take back a ui_notify by source + key (no key: the engine dropped the plugin) — card-less with it
   'ui_placed',              // the plugin UI host: the conversation's PLACED rows {rows:[{plugin, id, request_id, after_uuid?}]} (where each «Placed» ui_render sits) — a LOCAL stream-json session gets one whenever a plugin calls $.ui.place (2.1.314 Yd()); card-less: display-only (the binary: «no message carries these rows»), drawn only by a ui_render surface, which VibeSpace does not serve
   // 2026-11-20 (CLI 2.1.328, B-9ff2 step 2, lane bl-ci — read off the 2.1.328 zod union, scripts/fixtures/claude-cli/2.1.328.json; the hosted runner's build):
-  'late_allow_not_run',     // {request_id, tool_use_id, reason}: why no late Allow runs the call (turn_running | card_open | call_gone | invalid_answer | limited | stopped | declined | asked_again | withdrawn | expired | not_run) — card-less for now: the card closes on the cancel; a door that tells a person their late Allow did not run is B-9ff2's remainder (the coordinator's ruling r140 (d))
   'shell_cwd',              // {cwd}: the folder a PostToolUse hook on the call is given («treat it as data») — card-less: no consumer yet (nothing here reads a hook's folder)
   'task_list_statuses',     // {statuses: [{id, status: pending | in_progress | completed}]}: the task list's statuses — card-less: no consumer yet (the chat draws the task tools' calls as calls)
 ]);
 
-module.exports = { turnOpenerOf, turnByForAsk, splitToolResultContent, pictureBaseOf, pictureOrdinalsOf, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, applyPeerOrigin, userRecordOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };
+module.exports = { turnOpenerOf, turnByForAsk, splitToolResultContent, pictureBaseOf, pictureOrdinalsOf, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, applyPeerOrigin, userRecordOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows, lateAllowOf };
