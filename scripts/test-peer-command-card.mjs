@@ -687,7 +687,7 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   };
   {
     const fz = fuzz(SB);
-    console.log(`  B-3336 fuzz (the facts judged): ${fz.runs} interleavings, ${fz.points} level points judged EXACTLY against today's parse alone — ${fz.devFirstPoints} inside a turn whose init the device delivered first (${fz.devFirstPersonPoints} of them a person's turn), the belt seen holding ${fz.beltSeen} times between the device's init and the parse's copy; ${fz.bad.length} mismatches${fz.bad.length ? ' — ' + JSON.stringify(fz.bad.slice(0, 2)) : ''}`);
+    console.log(`  B-3336 fuzz (the facts judged): ${fz.runs} interleavings, ${fz.points} level points judged EXACTLY against today's parse alone — ${fz.devFirstPoints} inside a turn whose init the device delivered first (${fz.devFirstPersonPoints} of them a person's turn), the belt seen holding ${fz.beltSeen} times between the device's init and the parse's copy; ${fz.bad.length} mismatches (both feeds carry the whole stream, so it never generates an init the parse never brings — the fixed belt leg covers that)${fz.bad.length ? ' — ' + JSON.stringify(fz.bad.slice(0, 2)) : ''}`);
     ok(`B-3336 THE FUZZ: ${fz.runs} random interleavings of both whole feeds; at each of ${fz.points} level points the opener holds EXACTLY today's parse-alone state — ${fz.devFirstPersonPoints} of them inside a person's turn whose init the device won the race for; ${fz.bad.length} mismatches`,
       fz.runs === 300 && fz.points > 2 * fz.runs && fz.bad.length === 0 && fz.devFirstPersonPoints > 0 && fz.beltSeen > 0, JSON.stringify(fz.bad.slice(0, 3)));
     // the fuzz CAN fail: the copy without the once-memory (a late copy from the other feed counts again) and the copy without the parse

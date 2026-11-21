@@ -96,6 +96,8 @@ function noteTurnOpener(session, msg, feed = 'parse') {
 // record's stamp. Whether it stands or has ended, the background tasks launched under the belt's «unrecorded» are keyed as the parse
 // alone keys them (they outlive their turn). A turn whose init the parse never brings keeps the belt (unrecorded, device-init).
 function parseCopyOfOpening(session, st, msg, b) {
+  // the stamps are judged when the COPY arrives: that equals the parse alone only because the wrapper writes a frame_stamp as the
+  // frame reaches the CLI, before the CLI's init; with neither stamp held the parse alone keys this turn and its helpers as already done
   st.belted.delete(b.key);
   const standing = st.belt === b && st.live === true;
   if (standing) { st.firstFromDevice = false; st.belt = null; }
