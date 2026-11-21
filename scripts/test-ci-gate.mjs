@@ -1936,6 +1936,43 @@ console.log('\n§2r no real agent CLI on the hosted runner but the legs sanction
   ];
   const seen = CONTROLS.map(([k, run, want]) => { const p = run(); return [k, p.length > 0 && p.some((x) => want.test(x)), p.join(' · ').slice(0, 160)]; });
   ok(seen.every(([, hit]) => hit), `CONTROLS: each planted fault is named — ${seen.map(([k, hit, p]) => `${k}: ${hit ? 'named' : 'MISSED'} («${p}»)`).join(' · ')}`);
+  // THE WORKFLOWS PARSE (lane bl-ci, 2026-11-21): the side run 44949388570 ran NO job — GitHub refused ci.yml at its line 271, a PLAIN
+  // step name holding «: » inside its parenthesis («mapping values are not allowed here»). Every leg above reads the file as TEXT, so a
+  // file GitHub cannot parse passed them all. No YAML library is in the tree; the census reads what breaks a PLAIN scalar: a value written
+  // unquoted (not ' " [ { | >) that holds «: » or ends in «:» before its comment (« #»). Block scalars (| >) are skipped whole.
+  const plainColons = (text) => {
+    const out = []; let block = -1, n = 0;
+    text.split('\n').forEach((line, i) => {
+      const ind = line.length - line.trimStart().length;
+      if (block >= 0) { if (!line.trim() || ind > block) return; block = -1; }
+      const t = line.trim();
+      if (!t || t.startsWith('#')) return;
+      const m = /^\s*(?:-\s+)?[A-Za-z0-9_.-]+:(?:\s+(.*))?$/.exec(line);
+      const v = m ? (m[1] || '').trim() : '';
+      if (!v) return;
+      if (/^[|>]/.test(v)) { block = ind; return; }
+      if (/^['"[{]/.test(v)) return;
+      n++;
+      if (/:\s|:$/.test(v.replace(/\s+#.*$/, ''))) out.push(`line ${i + 1}: ${t.slice(0, 120)}`);
+    });
+    return { out, n };
+  };
+  const WFS = fs.readdirSync(path.join(REPO, '.github', 'workflows')).filter((f) => /\.ya?ml$/.test(f)).sort();
+  const wfr = WFS.map((f) => [f, plainColons(fs.readFileSync(path.join(REPO, '.github', 'workflows', f), 'utf-8'))]);
+  ok(wfr.length >= 3 && wfr.every(([, r]) => r.out.length === 0) && wfr.reduce((a, [, r]) => a + r.n, 0) > 100,
+    `THE WORKFLOWS PARSE: no plain YAML value holds «: » (${wfr.map(([f, r]) => `${f} ${r.n}`).join(', ')} plain values read)${wfr.some(([, r]) => r.out.length) ? ' — ' + wfr.flatMap(([f, r]) => r.out.map((x) => f + ' ' + x)).join(' | ') : ''}`);
+  {
+    // RED on 20fcb0a3b's file: that file is today's with ONE name — the cured one put back — and the census names exactly its line
+    const yml = fs.readFileSync(path.join(REPO, '.github', 'workflows', 'ci.yml'), 'utf-8');
+    const CURED = "      - name: Install claude CLI, the tree's pinned build (B-28b1, scripts/ci-claude.mjs pin, as the fast job)\n";
+    const OLD = CURED.replace('(B-28b1, ', '(B-28b1: ');   // stale-pins: kept — the control rebuilds the 20fcb0a3b line
+    const at = yml.split('\n').indexOf(CURED.slice(0, -1)) + 1;
+    const was = plainColons(yml.split(CURED).join(OLD));
+    ok(yml.split(CURED).length === 2 && was.out.length === 1 && was.out[0].startsWith(`line ${at}: `) && /B-28b1: scripts/.test(was.out[0]),
+      `CONTROL: on 20fcb0a3b's file (this one with that name put back) the census NAMES exactly its line ${at} — the line GitHub refused (${was.out.join(' | ')})`);
+    const neg = plainColons(yml + "\n      - name: 'a quoted name: fine'\n        run: |\n          echo 'a block: never read'\n");
+    ok(neg.out.length === 0, '…and passes a QUOTED value and a block scalar\'s line that hold «: » (YAML reads both)', neg.out.join(' | '));
+  }
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
