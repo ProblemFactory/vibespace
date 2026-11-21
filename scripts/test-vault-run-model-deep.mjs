@@ -7,8 +7,17 @@
 //      the release's function (rebuilt from this file by putting its lines back) and this one; the scan's budget met by none.
 //   ② THE LONGEST TURN NEAR THE BOUND (r1068): two values that tile one repeating text, wrapped in lines of 239 characters, and a
 //      value of one repeated character in a hex dump of zeros — 2 MiB each, the holds the release's model makes: the longest
-//      turn's counted steps linear in the text held and under the turn's figure, the run's under the run's, nothing failed closed.
+//      turn's counted steps linear in the text held; the dump under the turn's figure and the run's, the tiling pair (about 21.7 M a
+//      turn, over 2^24 since r1216's figure) linear or failed closed by name.
 //      Its red control is the fast suite's, at 32 KiB («the two fixpoints put back»: at 2 MiB that copy holds the loop minutes).
+//   ③ THE CUT'S SEARCH COUNTED (主开发 r1216): the heads' search at a cut against the plain walk it replaced (every suffix against
+//      every full form), 400 seeded runs cut at their end and 27 at the boundaries (a long form cut at its 63rd / 64th / 65th
+//      character, before nothing or a broken character; a 64-character form that is a longer one's head), byte for byte; four red
+//      controls (a long suffix taken at its head, a short one taken by the head after it, the broken rule dropped on each long road).
+//   ③c THE CUT'S SEARCH COUNTED AS IT COMPARES (主开发 r1216): a stored 1 600 «A» + «B», 2 000 «A» cut before a «C» — the cut's own
+//      count (`cutSteps`) at least its compares past the heads; red control «the cut's verify uncounted».
+//   ③b THE HEADS MISS NOTHING (主开发 r1216): two long forms sharing a head, a 64-character form that is a longer one's head, a push
+//      edge at a long form's 63rd / 64th / 65th character — against the release, no cut, byte for byte; three red controls.
 //   ⑥ THE SCRUBBER and ⑥b THE REAL PRODUCERS' TABLE (lane vault-scrub-forms and before), moved here VERBATIM from the fast suite
 //      with the red controls that run them (eleven: base64, the window, the seven forms, a backslash run, a view's held tail) —
 //      every split point of 322 texts fed 1 / 3 / 7+2 characters at a time, every printing × a value: about 10 s of the fast suite's
@@ -53,7 +62,47 @@ console.log('② THE LONGEST TURN near the bound — 2 MiB in the door\'s 64 KiB
   console.log(`    judged — two values tiling one text wrapped in lines of 239: ${line(t.rot)}; a value of one repeated character in a hex dump of zeros: ${line(t.zeros)}; the figures: a turn ${V.SCRUB_STEPS_PUSH}, a run ${V.SCRUB_STEPS_RUN}, and 32 steps (× the charge a character) a character a turn reads (the most held + a push) + 65 536`);
   console.log(`    judged — the same, ended at a CUT (the cut reads the held text through every view again): two values tiling one text: ${line(tc.rot)}; the hex dump of zeros: ${line(tc.zeros)}`);
   ok([tc.rot, tc.zeros].every((x) => x.clear < 8 && (x.over ? x.said : !x.said)), `ENDED AT A CUT near the bound: ${line(tc.rot)} · ${line(tc.zeros)} — nothing of a value in the clear, and the words said exactly when it failed closed (the second read's G9: the bound itself holds by construction)`, tc);
-  ok([t.rot, t.zeros].every((x) => !x.over && x.maxSteps <= V.SCRUB_STEPS_PUSH && x.runSteps <= V.SCRUB_STEPS_RUN && x.maxSteps <= 32 * x.charge * (x.most + x.push + x.W) + 65536), `THE LONGEST TURN NEAR THE BOUND: ${line(t.rot)} · ${line(t.zeros)} — linear in what a turn reads (the most held + a push), under the turn's figure and the run's, nothing failed closed (the release's fixpoint walked these chains back a group a pass: groups² a turn)`, t);
+  ok(!t.zeros.over && t.zeros.maxSteps <= V.SCRUB_STEPS_PUSH && t.zeros.runSteps <= V.SCRUB_STEPS_RUN && t.zeros.maxSteps <= 32 * t.zeros.charge * (t.zeros.most + t.zeros.push + t.zeros.W) + 65536 && (t.rot.over ? t.rot.said && t.rot.clear < 8 : t.rot.maxSteps <= 32 * t.rot.charge * (t.rot.most + t.rot.push + t.rot.W) + 65536), `THE LONGEST TURN NEAR THE BOUND: ${line(t.rot)} · ${line(t.zeros)} — the hex dump linear in what a turn reads (the most held + a push) and under the turn's figure and the run's; the two values tiling one text (about 21.7 M steps a turn: over the turn's figure of 2^24 since 主开发 r1216's rule) linear too, or failed closed by name with nothing of a value in the clear (the release's fixpoint walked these chains back a group a pass: groups² a turn)`, t);
+}
+
+console.log('③ THE CUT\'S SEARCH COUNTED, against the plain walk it replaced — seeded runs cut at their end (主开发 r1216)');
+{
+  const Vw = SCRUB.walkCopy(), w = SCRUB.walkLeg(Vw, V);
+  console.log(`    judged — ${w.trials} cut runs (27 at the boundaries: an ASCII and a CJK long form and a 64-character head cut at 63 / 64 / 65, before nothing, one or two broken characters; then seeded: random / CJK values, two long forms sharing a head, a 64-character form that is a longer one's head, a long run of one character; a spelling cut short, at times a broken character or an unfinished token after it): ${w.differ.length} differ from the walk`);
+  ok(w.differ.length === 0, `THE COUNTED SEARCH FINDS WHAT THE WALK FOUND: ${w.trials} seeded cut runs, output byte for byte, hits and bytes — ${w.differ.length} differ`, w.differ.slice(0, 2));
+  for (const [name, from, to] of [
+    ['a long suffix taken at its head', 'if (j === len && (!broken || t.charCodeAt(len) >= 0x80)) return q;', 'if (!broken || t.charCodeAt(len) >= 0x80) return q;'],
+    ['a short suffix taken by the head after it', 'if (j < sorted.length && sorted[j].startsWith(s)) return true;', 'if (j < sorted.length) return true;'],
+    ['a long suffix before a broken character taken whatever follows it', 'if (j === len && (!broken || t.charCodeAt(len) >= 0x80)) return q;', 'if (j === len) return q;'],
+    ['a long head before a broken character taken whatever follows it', 'return !!longs && (!broken || longs.some((t) => t.charCodeAt(SCRUB_HEAD) >= 0x80));', 'return !!longs;'],
+  ]) {
+    const r = SCRUB.walkLeg(Vw, SCRUB.patchedCopy(name.replace(/\W+/g, '-'), from, to));
+    ok(r.differ.length > 0, `MUTANT «${name}»: the patch hits once and the walk leg goes RED (${r.differ.length} of ${r.trials} runs differ) — the shipped search passes it`, r.differ.slice(0, 1));
+  }
+}
+
+console.log('③b THE HEADS MISS NOTHING THE RELEASE FOUND — the shapes a regex of heads could miss, no cut (主开发 r1216; here to keep the fast suite under 10 s)');
+{
+  const Vr = SCRUB.release(), hs = SCRUB.headShapesLeg(Vr, V, 1216, 36);
+  console.log(`    judged — the heads' shapes against the release (no cut): ${hs.trials} runs (two long forms sharing a head; a 64-character form that is a longer one's head; a push edge at a long form's 63rd / 64th / 65th character), ${hs.differ.length} differ`);
+  ok(hs.differ.length === 0, `THE HEADS MISS NOTHING THE RELEASE FOUND: ${hs.trials} seeded runs of the three shapes, byte for byte, hits and bytes, ${hs.differ.length} differ`, hs.differ.slice(0, 2));
+  for (const [name, from, to] of [
+    ['a long form taken unverified', 'for (const t of longs) { spend(t.length); if (sk.startsWith(t, m.index)) return t; }', 'for (const t of longs) { spend(t.length); return t; }'],
+    ['no short form under a long head', 'return shortIn.has(k) ? shortIn.get(k) : null; };', 'return null; };'],
+    ['the window by the heads', '  const W = maxLen - 1;', '  const W = Math.min(maxLen, SCRUB_HEAD) - 1;'],
+  ]) {
+    const r = SCRUB.headShapesLeg(Vr, SCRUB.patchedCopy(name.replace(/\W+/g, '-'), from, to), 1216, 18);
+    ok(r.differ.length > 0, `MUTANT «${name}»: the patch hits once and the shapes leg goes RED (${r.differ.length} of ${r.trials} runs differ) — the shipped scan passes it`, r.differ.slice(0, 1));
+  }
+}
+
+console.log('③c THE CUT\'S PREFIX SEARCH IS COUNTED AS IT COMPARES (主开发 r1216, the follow\'s item 1; here to keep the fast suite under 10 s)');
+{
+  const cc = SCRUB.cutCountLeg(V);
+  console.log(`    judged — the cut's prefix search: a stored 1 600 «A» + «B», a run of 2 000 «A» cut before its end — the cut's own search counted ${cc.cutSteps} steps (the whole end turn ${cc.endSteps}); its compares past the heads in the plain read alone ${cc.past}; ${cc.clean ? 'the tail flushed clean (no value there)' : 'the tail NOT as printed'}`);
+  ok(!cc.over && cc.clean && cc.past > 1e6 && cc.cutSteps >= cc.past, `THE CUT'S PREFIX SEARCH IS COUNTED AS IT COMPARES: every suffix of a run of «A» before the cut follows a stored form of 1 600 «A» a thousand deep and more — the cut's own search counted ${cc.cutSteps} steps, at least the ${cc.past} compares past the heads (the plain read's alone)`, cc);
+  const r = SCRUB.cutCountLeg(SCRUB.patchedCopy('the-cut-s-verify-uncounted', 'spend(j - SCRUB_HEAD + 1);   // the verify, counted as it compares', 'void 0;   // the verify, counted as it compares'));
+  ok(r.cutSteps < r.past, `MUTANT «the cut's verify uncounted»: the patch hits once and the leg goes RED — the cut's search counted ${r.cutSteps} steps for ${r.past} compares past the heads; the shipped search counts them`, r);
 }
 
 // ─── moved VERBATIM from test-vault-run-model (主开发 r1068: its deep legs into this twin) ───

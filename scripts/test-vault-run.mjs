@@ -948,6 +948,25 @@ async function auditClean(doorMod) {
   ok(!!ran && ran.by.kind === 'agent' && ran.by.name === 'Lane X' && ran.entries[0] === 'vault://mounts/m1/secretKey' && /^[0-9a-f]{16}$/.test(ran.shapeId) && ran.exit === 3 && ran.allowedBy === 'once' && ran.scrubbed.bytes > 0 && ran.scrubbed.hits > 0 && Array.isArray(ran.injection) && typeof ran.cmd === 'string' && typeof ran.ms === 'number' && /\[vault:mounts\/m1\/secretKey\]/.test(ran.stdout),
     'the run\'s line: the actor, the entries (references), the shape, the injection, the command, what allowed it, the exit code, the time, the scrubbed bytes, the scrubbed head of the output', ran);
   ok(/^vr-[0-9a-f]{16}$/.test(ran.receipt) && a.receipt === ran.receipt, 'the agent\'s answer and the audit line carry ONE receipt (design D1: a use + a receipt)', [a.receipt, ran.receipt]);
+  ok(!('withheld' in ran.scrubbed), 'a run whose scrubbing stayed within its work bound carries no `withheld` on its line (主开发 r1216: the field is the fact, said only when met)', ran.scrubbed);
+}
+// THE OWNER'S RECORD OF THE WORK BOUND (主开发 r1216): a run whose scrubbing met its work bound says so — ONE field, `withheld:
+// 'scrub_work_bound'`, on the audit line and in the answer. The door's own figure is out of a fast leg's reach (an ordinary output
+// never meets it), so a copy of the door plants a turn's figure of 64 steps on its one scrubber — its start otherwise the door's.
+{
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+  const SMALL = ["scrub = VR.createRunMasker(secrets, ['out', 'err']);", "scrub = VR.createRunMasker(secrets, ['out', 'err'], { steps: { push: 64, run: 1 << 30 } });"];
+  const copyOf = (pairs, tag) => { let t = SRC, n = 0; for (const [f, to] of pairs) { n += SRC.split(f).length - 1 === 1 ? 1 : 0; t = t.replace(f, to); } return { hit: n === pairs.length, mod: n === pairs.length ? M.load('src/server/vault-run-door.js', t, tag) : null }; };
+  const boundLeg = async (mod) => {
+    const wb = await world({ doorMod: mod }); openRow(wb);
+    const { r } = await runAnswered(wb, ENV('env'));
+    const ran = runLines(wb).find((x) => x.outcome === 'ran'), out = (r && (r.stdout || '') + (r.stderr || '')) || '';
+    return { ok: !!(r && r.ok), said: out.includes('(scrub_work_bound)]'), answer: r && r.scrubbed ? r.scrubbed.withheld : null, line: ran && ran.scrubbed ? ran.scrubbed.withheld : null, leaks: leaks(out, VALUE).length };
+  };
+  const small = copyOf([SMALL], 'smallbound'), rb = small.mod ? await boundLeg(small.mod) : null;
+  ok(small.hit && rb && rb.ok && rb.said && rb.answer === 'scrub_work_bound' && rb.line === 'scrub_work_bound' && rb.leaks === 0, 'THE OWNER\'S RECORD: a run whose scrubbing met its work bound (a planted figure) — the output says so by name, the answer and the audit line each carry `withheld: \'scrub_work_bound\'`, nothing of the value in the output', rb);
+  const gone = copyOf([SMALL, ["...(scrub.over ? { withheld: 'scrub_work_bound' } : {}) };", '};']], 'smallbound-nofield'), rg = gone.mod ? await boundLeg(gone.mod) : null;
+  ok(gone.hit && rg && rg.said && !rg.line && !rg.answer, 'MUTANT «the work bound not on the record»: the patch hits once and the leg goes RED — the output said the words, the audit line and the answer carry no `withheld`; the shipped door writes the one field', rg);
 }
 
 console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program on the card (the security review)');

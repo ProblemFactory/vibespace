@@ -2500,14 +2500,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         // (the owner's agent got 1008 bytes of «redacted» for a 10 KB response). The name-based belt is for text whose values are
         // UNKNOWN (chat, logs, the group feed, the judge input), never a run's output. See kb-design-lessons, the vault-run row (THE TWO SCRUBBERS).
         const outT = { text: parts.out.join(''), redacted: 0 }, errT = { text: parts.err.join(''), redacted: 0 };
-        const scrubbed = { hits: scrub.hits, bytes: scrub.bytes, byForm: Object.fromEntries(VR.FORMS.map((f) => [f, scrub.byForm[f] || 0]).filter(([, n]) => n)) };
+        const scrubbed = { hits: scrub.hits, bytes: scrub.bytes, byForm: Object.fromEntries(VR.FORMS.map((f) => [f, scrub.byForm[f] || 0]).filter(([, n]) => n)), ...(scrub.over ? { withheld: 'scrub_work_bound' } : {}) };   // 主开发 r1216: the owner's record says a run whose scrubbing met its work bound (the output after the words withheld) — ONE field, on the audit line and the answer
         // the run's RECEIPT (minted at the run's start): the agent's answer, its audit line and each entry's use line carry the same one (design D1: a use + a receipt)
         const line = { ...head, receipt, allowedBy: verdict.by, askId, exit: Number.isInteger(code) ? code : null, signal: sig || null, ms, timedOut: rec.stopped === 'timeout', truncated, tailDropped: false, strays, scrubbed, redacted: outT.redacted + errT.redacted, stdout: utf8Head(outT.text), stderr: utf8Head(errT.text) };
         if (spawnError) { const { receipt: _r, ...noRun } = line; note('spawn_failed', { ...noRun, why: spawnError }); resolve(named('spawn_failed', { why: spawnError })); return; }   // no child ran: no receipt, no use
         if (rec.stopped === 'lock') { note('vault_locked', { ...line, killed: true }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(named('vault_locked', { killed: true })); return; }
         if (rec.stopped === 'gone') { note('caller_gone', { ...line, killed: true }); resolve(named('caller_gone')); return; }
         note('ran', line);
-        resolve({ ok: true, exit: line.exit, signal: line.signal, timedOut: line.timedOut, truncated, ms, stdout: outT.text, stderr: errT.text, scrubbed: { hits: scrubbed.hits, bytes: scrubbed.bytes }, redacted: line.redacted, by: verdict.by, shapeId: head.shapeId, receipt });
+        resolve({ ok: true, exit: line.exit, signal: line.signal, timedOut: line.timedOut, truncated, ms, stdout: outT.text, stderr: errT.text, scrubbed: { hits: scrubbed.hits, bytes: scrubbed.bytes, ...(scrubbed.withheld ? { withheld: scrubbed.withheld } : {}) }, redacted: line.redacted, by: verdict.by, shapeId: head.shapeId, receipt });
       };
       let child;
       try {

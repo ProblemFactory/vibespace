@@ -212,7 +212,7 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
     return { seed, trials, differ };
   };
   /** THE COST on a 2 MiB output (the scrubber runs on the hub, in the run's own pushes): the characters every scan read and the
-   *  regex's exec calls, the release's function and this one — a log with the value 6 times in it, and the value printed back to back;
+   *  exec calls of every regex it runs (the release's alternation; this one's heads), the release's function and this one — a log with the value 6 times in it, and the value printed back to back;
    *  64 KiB pushes, then the cut (the 2 MiB bound) */
   const costLeg = (Vr, Vm) => {
     const rnd = seeded(5150), tok = (k) => Array.from({ length: k }, () => B62[Math.floor(rnd() * 62)]).join('');
@@ -223,7 +223,7 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
     const one = (M, text, two = false) => {
       let execs = 0;
       class CountRe extends RegExp { exec(s) { execs++; return super.exec(s); } }
-      const C = M.compileForms([{ label: 'cost', value: v }]), Cc = { ...C, re: new CountRe(C.re.source, C.re.flags) };
+      const C = M.compileForms([{ label: 'cost', value: v }]), counted = (x) => x && new CountRe(x.source, x.flags), Cc = { ...C, re: counted(C.re), hre: counted(C.hre) };   // 主开发 r1216: every regex a scan may run — the release's one and the heads' (the line before counted only the release's: the scan had stopped running it; the cut's search runs none)
       const m = M.createRunMasker(Cc, ['out', 'err']);
       let out = '';
       if (two) out += m.push('err', 'warning: a short line first\n').err;
@@ -269,7 +269,7 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
       const e = m.end(true); after += e.out + e.err; all += e.out + e.err;
       return { over: m.over, at, said: all.includes('scrub_work_bound'), masked: all.includes('[vault:\u2026]'), clear: clearRun(all, v), after: after.length, withheld: m.withheld };
     };
-    return { turn: one({ push: 20000, run: 2 ** 40 }), run: one({ push: 2 ** 40, run: 60000 }) };
+    return { turn: one({ push: 20000, run: 2 ** 40 }), run: one({ push: 2 ** 40, run: 60000, aChar: 64 }) };   // the run's own planted a character (r1216: the shipped one is 1 024)
   };
   /** THE LONGEST TURN (主开发 r1068): two values that tile one repeating text wrapped in lines of 239 characters, and a value of one
    *  repeated character in a hex dump of zeros (60 a line) — the holds the release's model makes — `size` characters in `push`-
@@ -304,5 +304,123 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
     };
     return Object.fromEntries(Object.entries(cases).filter(([k]) => !only || only.includes(k)).map(([k, f]) => [k, f()]));
   };
-  return { periodLeg, sweepLeg, budgetLeg, turnLeg, cutLeg, cut2Leg, overlapLeg, chainLeg, selfLeg, parityLeg, rotLeg, binLeg, release, diffLeg, costLeg, bytes };
+  /** THE CUT'S PREFIX SEARCH, COUNTED (主开发 r1216, the follow's item 1): a long form of one repeated character (1 600 «A» + «B»), a
+   *  log line, then a run of 2 000 «A» cut before its end in another character — every suffix the search tries follows the form
+   *  thousands deep, then misses. → the steps the cut's own search counted (the masker's `cutSteps`: the end turn's scans resolve
+   *  the same heads and would hide it — the follow's read), and the compares the search makes past the heads there (each suffix's
+   *  common prefix with the form beyond its first SCRUB_HEAD characters, the plain read's alone: a floor of the count) */
+  const HUGE = { push: 2 ** 40, run: 2 ** 50 };
+  const cutCountLeg = (Vm) => {
+    const v = 'A'.repeat(1600) + 'B', text = 'build: ok\n' + 'A'.repeat(2000) + 'C';
+    const C = Vm.compileForms([{ label: 'c', value: v }]), m = Vm.createRunMasker(C, ['out', 'err'], { steps: HUGE });
+    for (let i = 0; i < text.length; i += 1024) m.push('out', text.slice(i, i + 1024));
+    const e = m.end(true);
+    let past = 0;
+    for (let q = Math.max(0, text.length - C.W); q < text.length; q++) {
+      const len = text.length - q;
+      if (v.length <= len) continue;
+      let j = 0; while (j < len && v.charCodeAt(j) === text.charCodeAt(q + j)) j++;
+      past += Math.max(0, j - 64);
+    }
+    return { cutSteps: m.cutSteps, endSteps: m.steps, past, over: !!m.over, clean: e.out === text && e.err === '' };
+  };
+  /** THE BOUND MET INSIDE THE CUT'S END (主开发 r1216, the follow's item 4): 8 KiB of log lines in 4 KiB reads (handed on, each turn
+   *  well under the figure), then the costly tail of cutCountLeg held at the cut — a turn's figure of 2^20 planted between them:
+   *  the end fails closed INSIDE its prefix search. → what the end gave against the cut's placeholder and the words, what the pushes
+   *  handed on against a run with no figure, the mark before and after the end */
+  const cutEndLeg = (Vm) => {
+    const v = 'A'.repeat(1600) + 'B';
+    let log = ''; for (let i = 0; log.length < 8192; i++) log += `${String(i).padStart(6, '0')} compiling module_${i % 97} ... ok\n`;
+    const text = log + 'A'.repeat(2000) + 'C';
+    const one = (steps) => {
+      const m = Vm.createRunMasker(Vm.compileForms([{ label: 'c', value: v }]), ['out', 'err'], { steps });
+      let pushed = '';
+      for (let i = 0; i < text.length; i += 4096) { const o = m.push('out', text.slice(i, i + 4096)); pushed += o.out + o.err; }
+      const before = !!m.over, most = m.maxSteps;
+      let e = null, threw = null;
+      try { e = m.end(true); } catch (x) { threw = String((x && x.description) || x); }
+      return { pushed, before, most, e, threw, over: !!m.over, hits: m.hits };
+    };
+    const free = one(HUGE), met = one({ push: 2 ** 20, run: 2 ** 50 });
+    const WORDS = '\n[vault: this stretch of the output is withheld — scrubbing it passed its work bound (scrub_work_bound)]\n';
+    return { pushesUnder: free.most < 2 ** 20, endOver: free.over, samePushes: met.pushed === free.pushed, before: met.before, threw: met.threw, over: met.over, endOut: met.e ? met.e.out : null, endErr: met.e ? met.e.err : null, ok: !!met.e && met.e.out === '[vault:…]' && met.e.err === WORDS };
+  };
+  /** THE HEADS MISS NOTHING THE RELEASE FOUND (主开发 r1216, the follow's item 4): the shapes where a regex of heads could — two forms
+   *  over 64 characters sharing their head; a form of 64 characters that IS a longer form's head (each printed alone, and the short
+   *  one followed by another tail); a long form whose push edge falls at its 63rd, 64th or 65th character — among seeded noise on
+   *  both pipes, no cut: the release's function and this one, output byte for byte, hits and bytes. → { trials, differ } */
+  const headShapesLeg = (Vr, Vm, seed = 1216, trials = 60) => {
+    const rnd = seeded(seed), pick = (k) => Math.floor(rnd() * k), tok = (k) => Array.from({ length: k }, () => B62[pick(62)]).join('');
+    const differ = [];
+    for (let i = 0; i < trials; i++) {
+      const shape = i % 3, P = tok(66), X = tok(64);
+      const vals = shape === 0 ? [P + tok(10 + pick(20)), P + tok(30 + pick(20))] : shape === 1 ? [X, X + tok(20 + pick(30))] : [tok(90 + pick(60))];
+      const secrets = vals.map((v, j) => ({ label: `h${j}`, value: v }));
+      const spell = [(v) => v, (v) => Buffer.from(v).toString('hex'), (v) => Buffer.from(v).toString('base64'), (v) => JSON.stringify({ k: v })];
+      const said = shape === 1 ? [vals[1], vals[0] + '~' + tok(8), vals[0]] : vals, W = Vm.compileForms(secrets).W;
+      const chunks = [];
+      for (const v of said) {
+        const f = spell[pick(spell.length)](v), at = (shape === 2 ? 63 + (Math.floor(i / 3) % 3) : 1 + pick(f.length - 1)) + (f.startsWith('{') ? 6 : 0);   // the follow's read: by i % 3 alone the edge was always the 65th
+        const lead = `line ${i}: ${tok(W + 1 + pick(30))} `;   // past the window: the push that ends at the edge is a turn of its own (a shorter one waits)
+        chunks.push([pick(4) ? 'out' : 'err', `noise ${tok(pick(20))}\n`], ['out', lead + f.slice(0, at)], ['out', f.slice(at) + '\n']);
+      }
+      const run = (M) => { const m = M.createRunMasker(M.compileForms(secrets), ['out', 'err']), acc = { out: '', err: '' }; for (const [k, c] of chunks) { const o = m.push(k, c); acc.out += o.out; acc.err += o.err; } const o = m.end(); acc.out += o.out; acc.err += o.err; return { ...acc, hits: m.hits, bytes: m.bytes }; };
+      const a = run(Vr), b = run(Vm);
+      if (a.out !== b.out || a.err !== b.err || a.hits !== b.hits || a.bytes !== b.bytes) differ.push({ i, shape, release: { hits: a.hits, bytes: a.bytes }, now: { hits: b.hits, bytes: b.bytes } });
+    }
+    return { trials, differ };
+  };
+  /** THE PLAIN WALK (the line before's prefix search, its own two lines: every suffix against every FULL form) in a copy of this
+   *  file — the oracle of walkLeg. `from`/`to`: a patch on the SHIPPED search first (a red control's copy), or none. */
+  const WALK = "    const isPrefix = (sfx, broken) => { if (!sfx) return false; for (const t of texts) if (t.length > sfx.length && t.startsWith(sfx) && (!broken || t.charCodeAt(sfx.length) >= 0x80)) return true; return false; };\n    const prefixStart = (str, n = str.length, broken = false) => { let f = n; while (f > 0 && str.charCodeAt(f - 1) === 0xFFFD) f--; const q0 = Math.max(0, n - W); for (let q = q0; q < Math.min(n, f); q++) if (isPrefix(str.slice(q, n), broken)) return q; return n; };\n";
+  const copyOf = (name, edit) => {
+    const dir = scratchDir('vault-run-scrub-' + name);
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
+    const f = path.join(dir, 'src', `vault-run-${name}.js`);
+    fs.writeFileSync(f, edit(fs.readFileSync(SRC, 'utf8')));
+    return require(f);
+  };
+  const walkCopy = () => copyOf('walk', (t) => {
+    const a = t.indexOf('    const lowerBound = (s) => {'), z = t.indexOf("    // THE ENDS a half value may run off (r858");
+    if (a < 0 || z < a) throw new Error('ANCHOR GONE «the plain walk» — the counted search is not where the copy expects it');
+    return t.slice(0, a) + WALK + t.slice(z);
+  });
+  const patchedCopy = (name, from, to) => copyOf(name, (t) => anchored(t, from, to, `the cut's search «${name}»`));
+  /** THE COUNTED SEARCH FINDS WHAT THE WALK FOUND (主开发 r1216, the follow's item 1 — no new miss at the cut): seeded runs CUT at
+   *  their end — 1 to 3 values (random, CJK, two long forms sharing a head, a 64-character form that is a longer one's head, a long
+   *  run of one character), a log, then one value's spelling cut short (raw / hex / base64 / JSON / percent), at times a broken
+   *  character or an unfinished view token after it — the walk's copy and this one, figures planted out of reach: output byte for
+   *  byte, hits and bytes. → { trials, differ } */
+  const walkLeg = (Vw, Vm, seed = 12161, trials = 400) => {
+    const rnd = seeded(seed), pick = (k) => Math.floor(rnd() * k), tok = (k) => Array.from({ length: k }, () => B62[pick(62)]).join('');
+    const CJK = '密码钥匙令牌证书服务器部署生产环境数据库账号用户口令安全';
+    const spell = [(v) => v, (v) => Buffer.from(v).toString('hex'), (v) => Buffer.from(v).toString('base64'), (v) => JSON.stringify(v).slice(1, -1), (v) => encodeURIComponent(v)];
+    const differ = [];
+    const one = (i, kind, secrets, chunks) => {
+      const run = (M) => { const m = M.createRunMasker(M.compileForms(secrets), ['out', 'err'], { steps: HUGE }), acc = { out: '', err: '' }; for (const [k, c] of chunks) { const o = m.push(k, c); acc.out += o.out; acc.err += o.err; } const o = m.end(true); acc.out += o.out; acc.err += o.err; return { ...acc, hits: m.hits, bytes: m.bytes }; };
+      const a = run(Vw), b = run(Vm);
+      if (a.out !== b.out || a.err !== b.err || a.hits !== b.hits || a.bytes !== b.bytes) differ.push({ i, kind, walk: { hits: a.hits, bytes: a.bytes }, now: { hits: b.hits, bytes: b.bytes } });
+    };
+    // THE BOUNDARIES BY CONSTRUCTION (the follow's read: by chance the seeds met them under 1 % of runs): a long form cut at its 63rd,
+    // 64th and 65th character, then nothing, a broken character, or two — an ASCII form (the head before a broken one never counts)
+    // and a CJK one (it counts) — and a 64-character form that IS a longer one's head, cut there
+    const LONG = 'k-' + tok(118), CJKV = Array.from({ length: 90 }, () => CJK[pick(CJK.length)]).join(''), H64 = tok(64);
+    for (const [kind, vals, f] of [['ascii', [LONG], LONG], ['cjk', [CJKV], CJKV], ['head', [H64, H64 + tok(40)], H64 + tok(40)]])
+      for (const at of [63, 64, 65]) for (const tail of ['', '\uFFFD', '\uFFFD\uFFFD']) one(`${kind}@${at}${tail.length ? '+' + tail.length : ''}`, kind, vals.map((v, j) => ({ label: `b${j}`, value: v })), [['out', 'line 0: ok\n'], ['out', 'token=' + f.slice(0, at) + tail]]);
+    for (let i = 0; i < trials; i++) {
+      const kind = i % 6, P = tok(66), X = tok(64);
+      const vals = kind === 0 ? [tok(20 + pick(180))] : kind === 1 ? [Array.from({ length: 8 + pick(12) }, () => CJK[pick(CJK.length)]).join('')] : kind === 2 ? [P + tok(5 + pick(40)), P + tok(5 + pick(40))]
+        : kind === 3 ? [X, X + tok(10 + pick(60))] : kind === 4 ? ['A'.repeat(100 + pick(300)) + 'B'] : [tok(20 + pick(40)), 'k-' + tok(70 + pick(60))];
+      const secrets = vals.map((v, j) => ({ label: `w${j}`, value: v }));
+      const v = vals[pick(vals.length)], f = spell[pick(spell.length)](v), cutAt = 1 + pick(f.length - 1);
+      let text = '';
+      for (let l = 0; l < 2 + pick(6); l++) text += `line ${l}: ${kind === 4 && pick(2) ? 'A'.repeat(pick(400)) : tok(pick(50))}\n`;
+      text += (pick(2) ? 'token=' : '') + f.slice(0, cutAt) + ['', '', '�', '��', '\x1b[3', '=', '\\x4', '&#12'][pick(8)];
+      const chunks = []; for (let at = 0; at < text.length;) { const n = 1 + pick(300); chunks.push([pick(4) ? 'out' : 'err', text.slice(at, at + n)]); at += n; }
+      one(i, kind, secrets, chunks);
+    }
+    return { trials: trials + 27, differ };
+  };
+  return { periodLeg, sweepLeg, budgetLeg, turnLeg, cutLeg, cut2Leg, overlapLeg, chainLeg, selfLeg, parityLeg, rotLeg, binLeg, release, diffLeg, costLeg, cutCountLeg, cutEndLeg, headShapesLeg, walkCopy, patchedCopy, walkLeg, bytes };
 }

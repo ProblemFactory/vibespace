@@ -1811,6 +1811,9 @@ function readView(vw, buf, end, final) {
  * throws `entry_too_short_to_mask`. → a frozen { table, texts, re, W, size } (`size` = the distinct spelled forms).
  */
 const COMPILED = Symbol('vault-run.compiledForms');
+/** A 64-character window's hash (int32, mod 2^32): Σ c_i · HEAD_B^(63 − i) — rolled one character at a time by the cut's search */
+const HEAD_B = 0x01000193, HEAD_P = (() => { let p = 1; for (let i = 0; i < 63; i++) p = Math.imul(p, HEAD_B); return p; })();
+const headHash = (s, at) => { let h = 0; for (let i = 0; i < 64; i++) h = (Math.imul(h, HEAD_B) + s.charCodeAt(at + i)) | 0; return h; };
 function compileForms(secrets) {
   const table = new Map();
   let vi = 0;   // r858: each value's own index (`v`) — two values may share a placeholder (a web login's passwords): the overlap rule tells them apart by it
@@ -1835,7 +1838,12 @@ function compileForms(secrets) {
   const shorts = texts.filter((t) => t.length <= HEAD);
   for (const k of keys) { const s = shorts.find((t) => k.startsWith(t)); if (s) shortIn.set(k, s); }
   const hre = keys.length ? new RegExp(keys.map(reEscape).join('|'), 'g') : null;
-  return Object.freeze({ [COMPILED]: true, table, texts, re, W, size: texts.length, keys, hre, longOf, shortIn });
+  // THE CUT'S PREFIX SEARCH (主开发 r1216, the follow's item 1): the heads sorted by code unit (a suffix of a head's length or less is
+  // a head's prefix where a binary search lands), and the LONG forms' heads by their rolling hash (a longer suffix starts with one;
+  // the follow's read: a regex of every long head was work per alternative at every position, which no count saw)
+  const sorted = [...keys].sort(), lhash = new Map();
+  for (const k of longOf.keys()) { const h = headHash(k, 0); let l = lhash.get(h); if (!l) lhash.set(h, l = []); l.push(k); }
+  return Object.freeze({ [COMPILED]: true, table, texts, re, W, size: texts.length, keys, hre, longOf, shortIn, sorted, lhash });
 }
 /** Is `x` a compiled set (compileForms), not a secrets list? */
 const isCompiledForms = (x) => !!(x && x[COMPILED] === true);
@@ -1843,8 +1851,8 @@ const isCompiledForms = (x) => !!(x && x[COMPILED] === true);
  *  of a turn (a push, or the end) counts its steps — a character a read reads, a regex call, a group or a range the cuts visit;
  *  past SCRUB_STEPS_PUSH in one turn or SCRUB_STEPS_RUN in the run, the run FAILS CLOSED: a sticky mark, every stream's held text
  *  masked whole under the cut's placeholder, these words said once by name, and nothing handed on after. */
-const SCRUB_STEPS_PUSH = 1 << 25, SCRUB_STEPS_RUN = 1 << 29, SCRUB_STEPS_A_CHAR = 64, SCRUB_HEAD = 64;   // the run's figure grows by SCRUB_STEPS_A_CHAR a character it read (a job's log has no bound: its masker may live for gigabytes — the second read, G4); SCRUB_HEAD: the longest literal the regex holds
-const SCRUB_OVER_WORDS = '\n[vault: the rest of this output is withheld — scrubbing it passed the work a run is allowed (scrub_work_bound)]\n';
+const SCRUB_STEPS_PUSH = 1 << 24, SCRUB_STEPS_RUN = 1 << 28, SCRUB_STEPS_A_CHAR = 1024, SCRUB_HEAD = 64;   // THE FIGURES BY A MEASURED RULE (主开发 r1216): a turn's — the smallest power of two at least four times the longest turn of an ORDINARY run at the door's largest set (256 values, the runnable list's cap, each a realistic length; a 2 MiB log), never over 2^24: that turn read 8.59 M steps, so the rule gives 2^26 and the ceiling binds (the margin 1.95×, said). The run's: 16 × the turn's (the proportion), and SCRUB_STEPS_A_CHAR a character it read — the smallest power of two that makes the figure at least four times the costliest ordinary run there (575 M steps over the 2.03 M characters a 2 MiB run read in 4 KiB reads: 2^28 + 1 024 × 2.03 M = 2.35 G); a job's log has no bound, so its masker's figure grows with what it read (the second read, G4). SCRUB_HEAD: the longest literal the regex holds
+const SCRUB_OVER_WORDS = '\n[vault: this stretch of the output is withheld — scrubbing it passed its work bound (scrub_work_bound)]\n';   // 主开发 r1216: true for each road — the run door hands on nothing after these words (its run's output ends here; the child runs on, what it prints is counted as withheld), a job's log resumes at its next quiet (the wrapper starts a fresh masker there, kb-design-lessons)
 /** THE CUTS SETTLED IN ONE SWEEP (主开发 r1068, the readers' cure: two fixpoints walked a chain of overlapping groups back one group
  *  a pass — groups² a turn). `lists` = each group's ranges [[stream, a, b], …]; `cut` (stream → offset) falls to the greatest cuts
  *  under it that split no group: a group not wholly before the cuts moves every cut it starts before back to its start. A cut only
@@ -1907,14 +1915,14 @@ function createRunMasker(secrets, streams = ['out', 'err'], opts = {}) {
   const names = [...streams];
   let held = [];   // [[stream, text]] in arrival order — what the run has not handed on yet
   const st = { hits: 0, bytes: 0, byForm: {}, scanned: 0 };   // scanned: the characters every scan read (the suites' cost count)
-  Object.assign(st, { steps: 0, runSteps: 0, maxSteps: 0, over: false, withheld: 0, inTurn: false, fresh: 0, read: 0 });   // THE SCAN'S BUDGET: this turn's steps, the run's, the longest turn, the sticky mark, what was withheld after it
-  const limit = { push: (opts.steps && opts.steps.push) || SCRUB_STEPS_PUSH, run: (opts.steps && opts.steps.run) || SCRUB_STEPS_RUN };   // THE SCAN'S BUDGET: the figures (a suite may plant smaller ones)
+  Object.assign(st, { steps: 0, runSteps: 0, maxSteps: 0, over: false, withheld: 0, inTurn: false, fresh: 0, read: 0, cutSteps: 0 });   // THE SCAN'S BUDGET: this turn's steps, the run's, the longest turn, the sticky mark, what was withheld after it
+  const limit = { push: (opts.steps && opts.steps.push) || SCRUB_STEPS_PUSH, run: (opts.steps && opts.steps.run) || SCRUB_STEPS_RUN, aChar: (opts.steps && opts.steps.aChar) || SCRUB_STEPS_A_CHAR };   // THE SCAN'S BUDGET: the figures (a suite may plant smaller ones)
   if (!HEADS.has(C)) HEADS.set(C, repeatingHeads(C.keys || texts));   // THE SCAN'S BUDGET: the heads the regex holds (≤ SCRUB_HEAD characters each)
-  const hre = C.hre || re, longOf = C.longOf || new Map(), shortIn = C.shortIn || new Map();   // THE SCAN'S BUDGET
+  const hre = C.hre || re, longOf = C.longOf || new Map(), shortIn = C.shortIn || new Map(), sorted = C.sorted, lhash = C.lhash;   // THE SCAN'S BUDGET
   const resolve = (sk, m) => { const k = m[0], longs = longOf.get(k); if (longs) for (const t of longs) { spend(t.length); if (sk.startsWith(t, m.index)) return t; } return shortIn.has(k) ? shortIn.get(k) : null; };   // THE SCAN'S BUDGET: a head → the longest form at that place, a long one VERIFIED by a counted compare (null: none is there)
   const heads = HEADS.get(C), charge = 1 + heads.flat + heads.byD.reduce((n, [, hs]) => n + hs.reduce((m, x) => m + x.h, 0), 0);   // THE SCAN'S BUDGET: the repeating heads (the read's F1); `charge` = the most a character can cost, for the suites' figures
   const OVER = Symbol('vault-run.scrub-over');   // THE SCAN'S BUDGET
-  const spend = (n) => { st.steps += n; st.runSteps += n; if (st.steps > limit.push || st.runSteps > limit.run + SCRUB_STEPS_A_CHAR * st.read) throw OVER; };   // THE SCAN'S BUDGET: every loop of a turn counts here — past a figure the turn stops where it is
+  const spend = (n) => { st.steps += n; st.runSteps += n; if (st.steps > limit.push || st.runSteps > limit.run + limit.aChar * st.read) throw OVER; };   // THE SCAN'S BUDGET: every loop of a turn counts here — past a figure the turn stops where it is
   const none = () => { const o = {}; for (const k of names) o[k] = ''; return o; };   // THE SCAN'S BUDGET
   const overrun = () => { st.over = true; const out = none(), own = new Map(); for (const [k, x] of held) own.set(k, (own.get(k) || '') + x); for (const [k, x] of own) if (x) { out[k] += CUT_PH; st.hits++; st.bytes += bytesOf(x); } out[names.includes('err') ? 'err' : names[0]] += SCRUB_OVER_WORDS; held = []; return out; };   // THE SCAN'S BUDGET: FAILS CLOSED — everything held under the cut's placeholder, the words once, by name
   const turn = (fn) => { st.inTurn = true; st.steps = 0; const keep = [st.hits, st.bytes, { ...st.byForm }], heldAt = held; try { return fn(); } catch (e) { if (e !== OVER) throw e; [st.hits, st.bytes, st.byForm] = keep; held = heldAt; return overrun(); } finally { st.inTurn = false; if (st.steps > st.maxSteps) st.maxSteps = st.steps; } };   // THE SCAN'S BUDGET: one push, or the end, is ONE counted turn
@@ -2033,9 +2041,59 @@ function createRunMasker(secrets, streams = ['out', 'err'], opts = {}) {
   function cutTailStart(buf) {
     const L = buf.length;
     if (!L) return L;
-    spend(2 * L * (1 + VIEWS.length));   // THE SCAN'S BUDGET: the cut's reads — the text through every view, the broken characters' walk
-    const isPrefix = (sfx, broken) => { if (!sfx) return false; for (const t of texts) if (t.length > sfx.length && t.startsWith(sfx) && (!broken || t.charCodeAt(sfx.length) >= 0x80)) return true; return false; };   // a NON-EMPTY proper prefix of some spelled form; before a BROKEN character, only a head whose next character is not ASCII — the character the cut broke was the value's own (read 5: a one-character head, NUL or `%` or a hex digit, before a binary tail's U+FFFD counted a hit). A suffix of only U+FFFD is never asked (prefixStart skips it): a broken character is no value's character
-    const prefixStart = (str, n = str.length, broken = false) => { let f = n; while (f > 0 && str.charCodeAt(f - 1) === 0xFFFD) f--; const q0 = Math.max(0, n - W); spend(W * (texts.length + 1) + (n - f) + deepCost(str.slice(q0, n), heads)); for (let q = q0; q < Math.min(n, f); q++) if (isPrefix(str.slice(q, n), broken)) return q; return n; };   // earliest offset whose suffix up to n is a value prefix (W bounds the search); a suffix of only U+FFFD (q ≥ f) is no value's head — the run walked once (the second read, G3: a test of every suffix was the window squared)
+    const s0 = st.steps; spend(2 * L * (1 + VIEWS.length));   // THE SCAN'S BUDGET: the cut's reads — the text through every view, the broken characters' walk
+    // THE CUT'S PREFIX SEARCH, COUNTED (主开发 r1216 — the follow's item 1: each candidate suffix was compared against every FULL form
+    // while the count charged by the heads). The earliest offset q in the last W characters before n whose suffix up to n is a NON-EMPTY
+    // proper prefix of some spelled form — the release's walk, the same answer, its work counted as it is done:
+    //  - a suffix LONGER than a head (SCRUB_HEAD characters) can only begin a long form whose head starts at q: each 64-character
+    //    window is looked up by its rolling hash among the long heads (a few steps a position, the head compared on a hit — no regex:
+    //    an alternation of every long head is work per alternative at every position, which no count sees), and each form under a
+    //    found head is VERIFIED by a compare counted character by character;
+    //  - a suffix of a head's length or less begins a form iff it begins a HEAD: a binary search of the sorted heads (each of its
+    //    compares charged by the suffix's length); a suffix that IS a long form's head begins that form.
+    // Before a BROKEN character (`broken`), only a prefix whose next character is not ASCII counts — the character the cut broke was the
+    // value's own (read 5: a one-character head, NUL or `%` or a hex digit, before a binary tail's U+FFFD counted a hit); the heads that
+    // go on past a suffix sort by that character, so the search lands at s + U+0080. A suffix of only U+FFFD is never asked: a broken
+    // character is no value's character (the run walked once — the second read, G3)
+    const lowerBound = (s) => { let lo = 0, hi = sorted.length; spend((Math.ceil(Math.log2(hi + 1)) + 2) * (s.length + 2)); while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] < s) lo = mid + 1; else hi = mid; } return lo; };
+    const headPrefix = (s, broken) => {
+      const j = lowerBound(s + (broken ? '\x80' : '\0'));
+      spend(s.length + 1);
+      if (j < sorted.length && sorted[j].startsWith(s)) return true;   // a head that goes on past s (when broken: on with a character ≥ U+0080)
+      if (s.length < SCRUB_HEAD) return false;
+      const longs = longOf.get(s);
+      spend(SCRUB_HEAD + (longs ? longs.length : 0));
+      return !!longs && (!broken || longs.some((t) => t.charCodeAt(SCRUB_HEAD) >= 0x80));   // s is a long form's whole head: the form goes on
+    };
+    const prefixStart = (str, n = str.length, broken = false) => {
+      let f = n; while (f > 0 && str.charCodeAt(f - 1) === 0xFFFD) f--;
+      const q0 = Math.max(0, n - W), qz = Math.min(n, f), qh = Math.min(qz, n - SCRUB_HEAD);   // [q0, qh): the suffixes longer than a head
+      spend(n - f + 1);
+      if (lhash.size && q0 < qh) {   // THE LONG ROAD: every 64-character window from q0 by its rolling hash — a few steps a position, and no regex
+        let h = headHash(str, q0);
+        spend(SCRUB_HEAD + 4 * (qh - q0));   // the first window's hash, then each position's roll and look-up
+        for (let q = q0; q < qh; q++) {
+          if (q > q0) h = (Math.imul((h - Math.imul(str.charCodeAt(q - 1), HEAD_P)) | 0, HEAD_B) + str.charCodeAt(q + SCRUB_HEAD - 1)) | 0;
+          const ks = lhash.get(h);
+          if (!ks) continue;
+          const len = n - q;
+          for (const k of ks) {
+            spend(SCRUB_HEAD + 1);
+            if (!str.startsWith(k, q)) continue;   // the head itself, compared (a hash is a hint)
+            for (const t of longOf.get(k)) {
+              spend(1);
+              if (t.length <= len) continue;
+              let j = SCRUB_HEAD;
+              while (j < len && t.charCodeAt(j) === str.charCodeAt(q + j)) j++;
+              spend(j - SCRUB_HEAD + 1);   // the verify, counted as it compares
+              if (j === len && (!broken || t.charCodeAt(len) >= 0x80)) return q;
+            }
+          }
+        }
+      }
+      for (let q = Math.max(q0, n - SCRUB_HEAD); q < qz; q++) { spend(n - q + 1); if (headPrefix(str.slice(q, n), broken)) return q; }
+      return n;
+    };
     // THE ENDS a half value may run off (r858, the scrubber's reads): the text's own end; the start of a trailing UNFINISHED view token
     // (its first trigger within the last vw.max − 1 characters — a colour code, a `=`, a `\x` cut short: its decode is unknown, so it is
     // uncertain from there); and the start of a trailing run of U+FFFD (the 2 MiB bound counts BYTES: a character cut there is decoded
@@ -2056,6 +2114,7 @@ function createRunMasker(secrets, streams = ['out', 'err'], opts = {}) {
         if (ps < n) { const raw = r.at[ps]; if (raw != null && raw < start) start = raw; }   // a complete-token VIEW decode whose tail is a value prefix — mapped back to a raw offset
       }
     }
+    st.cutSteps += st.steps - s0;   // the steps of the cut's own search, a run's sum (the suites': its count is judged against its compares)
     return start;
   }
   // THE CUT'S TWO FAULTS (lane lg-vault-file, r858 — every version back to round 21): (1) the uncertain tail could start INSIDE a
@@ -2106,7 +2165,7 @@ function createRunMasker(secrets, streams = ['out', 'err'], opts = {}) {
       return step(false);
     },
     end: (cut = false) => endStep(cut),
-    get steps() { return st.steps; }, get maxSteps() { return st.maxSteps; }, get runSteps() { return st.runSteps; }, get over() { return st.over; }, get withheld() { return st.withheld; }, get charge() { return charge; },   // THE SCAN'S BUDGET: the counts, and the mark
+    get steps() { return st.steps; }, get maxSteps() { return st.maxSteps; }, get runSteps() { return st.runSteps; }, get over() { return st.over; }, get withheld() { return st.withheld; }, get cutSteps() { return st.cutSteps; }, get charge() { return charge; },   // THE SCAN'S BUDGET: the counts, and the mark
     get hits() { return st.hits; }, get bytes() { return st.bytes; }, get byForm() { return { ...st.byForm }; }, get scanned() { return st.scanned; }, window: W, streams: names,
   };
 }
