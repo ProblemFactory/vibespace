@@ -7197,6 +7197,7 @@ class ChatView {
 
   focus() {
     if (this._chatInput) this._chatInput.focus();
+    this._personAct?.();   // B-cd4b r1035: going to a bulk resume's window while its history waits is a person's own act (src/lib/session-lifecycle.js)
     this._clearWaiting();
   }
 

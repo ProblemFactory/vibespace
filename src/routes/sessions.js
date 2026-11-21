@@ -49,6 +49,7 @@ function setup(ctx) {
     if (!resolvedSessionId) return res.status(400).json({ error: 'backendSessionId or claudeSessionId required' });
     const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, host: req.query.host, memo: {} };   // one request, one read of its history (lane resume-all-paced L3)
     try {
+      if (req.query.person === '1') return res.json(transcripts.personAsk(ref));   // B-cd4b r1035: a person's own act on a conversation whose history still waits (never a read)
       if (req.query.turnmap) return res.json(await transcripts.turnmap(ref));
       if (search) return res.json(await transcripts.searchIndexed(ref, search));
       const payload = await transcripts.page(ref, { offset, limit, untilUuid: req.query.untilUuid });

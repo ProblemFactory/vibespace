@@ -169,7 +169,24 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
    *  whole sessions store with a synchronous listing to find a rollout and may start a codex app-server for a thread this
    *  machine does not hold, at every Properties refetch. A harness with none warms nothing. Never throws. */
   async function taskWarmOf(r) {
-    try { const warm = harnessOf(r.backend || 'claude').store?.warmTaskState; if (warm) await warm(r.sessionId, r.cwd, { remote: !!r.host }); } catch { }
+    try { const warm = harnessOf(r.backend || 'claude').store?.warmTaskState; if (warm) await warm(r.sessionId, r.cwd, { remote: !!r.host, bulk: bulkOf(r) }); } catch { }
+  }
+  /** B-cd4b unit 2's follow (主开发 r1035): WHO IS BULK IS DECIDED BY THE CONVERSATION, not by the road that asks — the first history
+   *  read of a conversation a paced «Resume all» created (its live session's `_bulkRead`, set by ws-create) is bulk on EVERY road
+   *  that warms: the socket's first attach (ws-handler), this service's view and task warm, and codex's raw read — until a person's
+   *  own act on it (personAsk, below; or the socket's first attach, which reads it and clears it as before). */
+  function bulkOf(r) { const live = liveSession(r); return !!(live && live._bulkRead); }
+  /** A PERSON'S OWN ACT on a conversation whose history still waits (the creating page's quiet window: its pointer press, or the
+   *  app going to it — src/lib/session-lifecycle.js): the conversation's bulk mark is cleared, and its warm is asked as a person's —
+   *  it joins the one in flight for the file and moves it into the person's line (src/session-store.js promoteWarm). Never waits,
+   *  never reads: the creating page's own history request lands it. A codex raw read already waiting keeps its place (its line has
+   *  no move); the mark's clear serves its next. */
+  function personAsk(ref) {
+    const r = norm(ref);
+    const live = liveSession(r);
+    if (live) live._bulkRead = false;
+    try { const warm = harnessOf(r.backend || 'claude').store?.warmTranscript; if (warm) Promise.resolve(warm(r.sessionId, r.cwd, { remote: !!r.host, ...(live ? { session: live } : {}) })).catch(() => { }); } catch { }
+    return { ok: true, live: !!live };
   }
   async function view(ref) {
     const r = norm(ref);
@@ -179,7 +196,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     // item 5, local only); a harness without the hook skips
     // (B-299b A1: + the live session, when there is one — antigravity reads its account's cards for it; claude / codex ignore it)
     const live = liveSession(r);
-    try { const warm = harnessOf(r.backend || 'claude').store?.warmTranscript; if (warm) await warm(r.sessionId, r.cwd, { remote: !!r.host, ...(live ? { session: live } : {}) }); } catch { }
+    try { const warm = harnessOf(r.backend || 'claude').store?.warmTranscript; if (warm) await warm(r.sessionId, r.cwd, { remote: !!r.host, ...(live ? { session: live } : {}), bulk: bulkOf(r) }); } catch { }   // r1035: the conversation's own mark
     const session = liveSession(r);
     // An attach rebuild in flight: join it instead of converting again
     // (review-caught: the HTTP side re-entered the exact sync stall the
@@ -190,7 +207,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     }
     if (r.memo && r.memo.view) return r.memo.view;   // this request converted it already (one request, one read)
     const sm = readerFor(r, session);
-    if (typeof sm.rawAsync === 'function') await sm.rawAsync(); // lane resume-all-paced (L2): a store that reads its records off the loop does so first (codex)
+    if (typeof sm.rawAsync === 'function') await sm.rawAsync({ bulk: bulkOf(r) }); // lane resume-all-paced (L2): a store that reads its records off the loop does so first (codex) — r1035: in the bulk line while the conversation is a bulk resume's
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const mm = createMessageManager(r.backend, 'api', { threadId: r.sessionId }); // the rendered conversation's id (codex ledger key)
     await mm.convertHistoryAsync(sm.raw());
@@ -248,7 +265,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     }
     await taskWarmOf(r); // B-299b A2: the task-tool scan (claude) is read off the loop before taskState answers
     const sm = await sideFileOf(readerFor(r, session));
-    if (typeof sm.rawAsync === 'function') await sm.rawAsync(); // lane resume-all-paced (L2): a store that reads its records off the loop does so first (codex)
+    if (typeof sm.rawAsync === 'function') await sm.rawAsync({ bulk: bulkOf(r) }); // lane resume-all-paced (L2): a store that reads its records off the loop does so first (codex) — r1035: in the bulk line while the conversation is a bulk resume's
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const chatStatus = sm.chatStatus();
     if (session?._permissionMode && chatStatus && !chatStatus.permissionMode) {
@@ -433,7 +450,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     return out.ok ? { ok: true, mediaType: out.mediaType, b64: out.b64 } : out;
   }
 
-  return { view, page, turnmap, searchIndexed, status, taskState, filePath, gapInfo, gapSlab, searchFull, searchFullStream, fullTurnmap, refreshRemote, rescue, picture, pictureHere };
+  return { view, page, turnmap, searchIndexed, status, taskState, filePath, gapInfo, gapSlab, searchFull, searchFullStream, fullTurnmap, refreshRemote, rescue, picture, pictureHere, personAsk, bulkOf };
 }
 
 module.exports = { createTranscriptService };

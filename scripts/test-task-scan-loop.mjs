@@ -213,7 +213,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       return { nTask, nStatus, ans, ran: ran(cmd) };
     };
     const tsSrc = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8');
-    const WARM_NOW = "const warm = harnessOf(r.backend || 'claude').store?.warmTaskState; if (warm) await warm(r.sessionId, r.cwd, { remote: !!r.host });";
+    const WARM_NOW = "const warm = harnessOf(r.backend || 'claude').store?.warmTaskState; if (warm) await warm(r.sessionId, r.cwd, { remote: !!r.host, bulk: bulkOf(r) });";   // B-cd4b r1035: the conversation's bulk mark rides it
     // RED: cadb07780's road planted back — the task-state and status roads call the harness's TRANSCRIPT warm
     const RelTS = mutantCopies('a2-transcript-warm', REPO).load('src/transcript-service.js', tsSrc.replace(WARM_NOW, () => WARM_NOW.replace('warmTaskState', 'warmTranscript')), 'transcript-warm');
     const green = await scene({ createTranscriptService }, standIn('codex-green'));

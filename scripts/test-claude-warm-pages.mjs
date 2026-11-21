@@ -187,6 +187,42 @@ try {
     ok(g8.ra === false && g8.rb === true, `a warm whose read rejects answers false (its caller reads the old road) and the warm behind it runs (${g8.rb})`, g8);
     ok(r8.ra === false && r8.rb === null, 'RED: the line let go only on success ⇒ the warm behind a rejected one never runs', r8);
   }
+
+  console.log('— ⑨ THE CONVERSATION DECIDES (主开发 r1035): a bulk resume\'s conversation is bulk on the HISTORY road too, until a person\'s own act');
+  {
+    // the page that pressed «Resume all» never attaches over the socket: it reads each created conversation's history over HTTP
+    // (GET /api/session-messages → src/transcript-service.js view / status). The service reads the LIVE conversation's own mark
+    // (`_bulkRead`): its warm and codex's raw read go in the bulk line. A person's own act (person=1: a press in the window, or the
+    // app going to it) clears the mark and asks the warm as a person's (it joins the one in flight and moves it up). RED: the view's
+    // warm without the conversation's mark (the release's gap) ⇒ every resumed conversation's warm is a person's
+    const H = require(path.join(REPO, 'src/harnesses')); const st = H.get('claude').store;
+    const tsSrc = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8');
+    const SID9 = 'a0b10000-0000-4000-8000-0000000c9d01';
+    const road = async (TSm) => {
+      const calls = [], raws = [], w0 = st.warmTranscript;
+      st.warmTranscript = async (id, cwd, o) => { calls.push({ id, bulk: !!(o && o.bulk) }); return true; };
+      try {
+        const live = { backend: 'claude', claudeSessionId: SID9, backendSessionId: SID9, host: null, _bulkRead: true };
+        const svc = TSm.createTranscriptService({ activeSessions: new Map([['w9', live]]), createSessionMessages: () => ({ raw: () => [], rawAsync: async (o) => { raws.push(!!(o && o.bulk)); } }), hosts: null });
+        const ref = () => ({ backend: 'claude', sessionId: SID9, cwd: CWD, memo: {} });
+        await svc.view(ref());
+        const asked = svc.personAsk ? svc.personAsk(ref()) : null;
+        await new Promise((r) => setImmediate(r));
+        return { calls, raws, cleared: live._bulkRead === false, asked };
+      } finally { st.warmTranscript = w0; }
+    };
+    const g9 = await road(require(path.join(REPO, 'src/transcript-service.js')));
+    const gap = anchored(tsSrc, '...(live ? { session: live } : {}), bulk: bulkOf(r) }); } catch { }   // r1035: the conversation\'s own mark', '...(live ? { session: live } : {}) }); } catch { }', 'ts-no-mark');   // stale-pins: kept (the red plants the road without the mark)
+    const r9 = await road(require(M.write('src/transcript-service.js', gap, 'ts-no-mark')));
+    ok(g9.calls.length === 2 && g9.calls[0].bulk === true && g9.raws[0] === true && g9.calls[1].bulk === false && g9.cleared && g9.asked && g9.asked.ok,
+      `the history road of a bulk resume's conversation warms in the BULK line (the conversation's own mark) and its raw read with it; a person's own act clears the mark and asks the warm as a person's (${JSON.stringify(g9.calls)})`, g9);
+    ok(r9.calls.length >= 1 && r9.calls[0].bulk === false, `RED: the view's warm without the conversation's mark ⇒ a person's (${JSON.stringify(r9.calls)})`, r9);
+    // THE PAGE (pinned by text: it is not loaded here): a bulk resume's window tells the hub ONCE at a person's own act while its history
+    // waits — a press in the window, or the app going to it (ChatView.focus)
+    const slSrc = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8'), cvSrc = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
+    ok(/if \(bulk\) \{\s*let told = false;\s*const tell = \(\) => \{ if \(told \|\| !chatView\._historyInFlight\) return; told = true; fetch\(`\/api\/session-messages\?[^`]*&person=1/.test(slSrc) && /chatView\._personAct = tell;\s*winInfo\.content\?\.addEventListener\?\.\('pointerdown', tell, \{ once: true \}\);/.test(slSrc)
+      && /focus\(\) \{\s*if \(this\._chatInput\) this\._chatInput\.focus\(\);\s*this\._personAct\?\.\(\);/.test(cvSrc), 'the page: a bulk resume\'s window tells the hub once (person=1) at a press in it or the app going to it, while its history waits');
+  }
 } catch (e) { fail++; console.log('  ✗ threw: ' + ((e && e.stack) || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

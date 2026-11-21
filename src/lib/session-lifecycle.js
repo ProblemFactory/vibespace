@@ -584,6 +584,15 @@ export function installSessionLifecycle(App, ctx = {}) {
               // This first turn is also what makes the fork diverge (claude mints
               // the fork's new id on first input).
               .finally(() => { chatView.noteHistoryInFlight(false); if (initialMessage) this._sendChatMessage(msg.sessionId, initialMessage); });
+            // B-cd4b r1035: a BULK resume's window (a paced «Resume all») — the hub reads the conversation's own bulk mark, so its
+            // history waits behind every person's own window. A PERSON'S OWN ACT on it while that history still waits — a press in the
+            // window, or the app going to it (ChatView.focus) — tells the hub ONCE (`person=1`): the warm moves into the person's line
+            if (bulk) {
+              let told = false;
+              const tell = () => { if (told || !chatView._historyInFlight) return; told = true; fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId || resumeId)}&cwd=${encodeURIComponent(cwd || '')}&person=1${hostId ? `&host=${encodeURIComponent(hostId)}` : ''}`).catch(() => { }); };
+              chatView._personAct = tell;
+              winInfo.content?.addEventListener?.('pointerdown', tell, { once: true });
+            }
           } else if (initialMessage) {
             this._sendChatMessage(msg.sessionId, initialMessage);
           }
