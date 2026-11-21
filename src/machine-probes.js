@@ -176,10 +176,12 @@ async function settingsMergeOp(msg, { dir, write = null, readOff = settingsReadO
   const late = new Promise((res) => { timer = setTimeout(() => res({ ok: false, reason: 'late' }), boundMs); if (timer.unref) timer.unref(); });
   try { return await Promise.race([work.catch((e) => ({ ok: false, reason: 'write-failed', code: (e && e.code) || null })), late]); } finally { clearTimeout(timer); }
 }
-/** …and its files' life: a merged file whose conversation ENDED by this machine's own record (`ended(sid)`: a pipe session or a
- *  keeper that says it exited) or older than SETTINGS_KEEP_MS goes — run with the agent's hourly sweep of its other state */
+/** …and its files' life: a merged file whose conversation ENDED by this machine's own record (`stateOf(sid)` → 'ended': its pipe
+ *  session is not alive, or its keeper's meta says it exited) goes at once; one whose state is UNKNOWN (no record) goes past
+ *  SETTINGS_KEEP_MS; one whose conversation is ALIVE is never swept by age (its CLI may read its --settings file again) — run
+ *  with the agent's hourly sweep of its other state */
 const SETTINGS_KEEP_MS = 7 * 86400000;
-async function sweepMergedSettings(dir, { ended = () => false, now = Date.now() } = {}) {   // off the loop (the sync-fs census)
+async function sweepMergedSettings(dir, { stateOf = async () => 'unknown', now = Date.now() } = {}) {   // off the loop (the sync-fs census)
   let names = [], gone = 0;
   try { names = await fs.promises.readdir(dir); } catch { return 0; }
   for (const fn of names) {
@@ -188,9 +190,9 @@ async function sweepMergedSettings(dir, { ended = () => false, now = Date.now() 
     const f = path.join(dir, fn);
     let mt = 0;
     try { mt = (await fs.promises.stat(f)).mtimeMs; } catch { continue; }
-    let over = false;
-    try { over = !!(await ended(m[1])); } catch { over = false; }
-    if (over || now - mt > SETTINGS_KEEP_MS) { try { await fs.promises.unlink(f); gone++; } catch { } }
+    let st = 'unknown';
+    try { st = await stateOf(m[1]); } catch { st = 'unknown'; }
+    if (st === 'ended' || (st !== 'alive' && now - mt > SETTINGS_KEEP_MS)) { try { await fs.promises.unlink(f); gone++; } catch { } }
   }
   return gone;
 }

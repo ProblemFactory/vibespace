@@ -636,7 +636,7 @@ console.log('— ⑦b B-e7c0 ON A PAIRED MACHINE (r723): the merge made ON the d
   const mj = m.ok ? JSON.parse(m.json) : {};
   console.log(`    (the merged keys: ${Object.keys(mj).join(', ')} · env: ${Object.keys(mj.env || {}).join(', ')} · dropped: ${(m.dropped || []).join(', ')})`);
   ok(m.ok && mj.hooks && JSON.stringify(mj.permissions) === JSON.stringify(PERSON.permissions) && mj.env.PERSON_MARK === OWN_MARK && !('ANTHROPIC_API_KEY' in mj.env) && m.dropped.includes('ANTHROPIC_API_KEY') && mj.apiKeyHelper === '' && mj.outputStyle === 'Concise',
-    '⑦b PURE deviceMergeOf: the person\'s hooks, deny rules and own env KEPT, every route / credential name DROPPED (named), the start\'s layer applied LAST', { keys: Object.keys(mj), dropped: m.dropped });
+    '⑦b PURE deviceMergeOf: the person\'s hooks, deny rules and own env KEPT, every route / credential name DROPPED (named), the start\'s layer merged by THE ONE RULE (its other keys win)', { keys: Object.keys(mj), dropped: m.dropped });
   const helperFile = BP.deviceMergeOf({ ownText: JSON.stringify({ apiKeyHelper: '/x/key.sh' }), layer, row: CLAUDE_CREDS.keyHelper });
   const notJson = BP.deviceMergeOf({ ownText: '[1]', layer, row: CLAUDE_CREDS.keyHelper }), big = BP.deviceMergeOf({ ownText: '{}', layer: { k: 'x'.repeat(BP.LAYER_MAX) }, row: CLAUDE_CREDS.keyHelper });
   ok(helperFile.reason === 'own-names-helper' && notJson.reason === 'own-not-json' && big.reason === 'layer-too-large' && BP.layerRefusal([]) === 'layer-not-object',
@@ -646,6 +646,43 @@ console.log('— ⑦b B-e7c0 ON A PAIRED MACHINE (r723): the merge made ON the d
   const args = ['-p', '--settings', JSON.stringify(layer), '--x'];
   ok(JSON.stringify(BP.settingsLayerOf(args)) === JSON.stringify(layer) && JSON.stringify(BP.withSettingsPath(args, '/d/s.settings')) === JSON.stringify(['-p', '--settings', '/d/s.settings', '--x']) && BP.settingsLayerOf(['--settings', '/a/file.json']) === null,
     '⑦b PURE: the layer is the argv\'s inline --settings (a file path is none), and only the merged file\'s PATH goes back into the line');
+  // THE ONE MERGE RULE ON BOTH ROADS (主开发 r895, the must of round wgn4g2rf7): the REAL adapter builds this machine's merge (the
+  // person's file as ownSettings) and the set-aside start whose inline layer a paired machine's agent merges (deviceMergeOf) — over
+  // GENERATED person files and settings: the two merged objects are EQUAL (keys compared in one order), and the person's deny survives
+  const { ClaudeCodeAdapter: CCA } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+  const adp = new CCA({ claudeCmd: '/usr/bin/claude', chatWrapper: '/w/chat', ptyWrapper: '/w/pty', buffersDir: '/b' });
+  const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
+  const SMSRC0 = read('src/settings-merge.js');
+  const spread = M.load('src/settings-merge.js', anchored(SMSRC0, 'json: JSON.stringify(mergeLayer(own.settings, layer))', 'json: JSON.stringify({ ...own.settings, ...layer })', 'B-e7c0 the device merge as a top-level spread (the line r895 refused)'), 'spread-merge');
+  const parity = (merge) => {
+    let seed = 7;   // mulberry32 (32-bit integer math: a float LCG loses its low bits past 2^53)
+    const rnd = (n) => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) % n; };
+    const pick = (a) => a[rnd(a.length)];
+    const out = { diffs: [], withPerm: 0, denyKept: 0, denyHad: 0, n: 0 };
+    for (let k = 0; k < 60; k++) {
+      const person = {};
+      if (rnd(4)) person.permissions = { ...(rnd(2) ? { deny: [pick(['Bash(rm -rf:*)', 'Read(./.env)', 'WebFetch'])] } : {}), ...(rnd(2) ? { allow: [pick(['Read', 'Bash(git status:*)', 'Bash(vibespace-msg:*)'])] } : {}), ...(rnd(2) ? { ask: ['Bash(git push:*)'] } : {}), ...(rnd(3) ? {} : { defaultMode: pick(['plan', 'acceptEdits']) }) };
+      if (rnd(2)) person.hooks = { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: `echo ${k}` }] }] };
+      if (rnd(2)) person.env = { MINE: String(k), ...(rnd(2) ? { ANTHROPIC_BASE_URL: 'https://x.example' } : {}) };
+      if (rnd(3) === 0) person.outputStyle = 'Explanatory';
+      const text = JSON.stringify(person);
+      const opts = { cwd: '/home/u/proj', mode: pick(['chat', 'terminal']), neutralizeKeyHelper: true, keyHelperNamed: pick([true, null]), extraArgs: ['--settings', '/home/u/my.json'],
+        settings: { allowAgentTools: rnd(5) !== 0, ...(rnd(3) === 0 ? { outputStyle: 'Concise' } : {}) }, permissionMode: pick(['default', 'acceptEdits', 'plan', undefined]) };
+      const local = BP.settingsLayerOf(adp.buildSessionArgs({ ...opts, ownSettings: BP.ownSettingsOf(text).settings }).args);
+      const layer = BP.settingsLayerOf(adp.buildSessionArgs(opts).args);
+      const dev = merge({ ownText: text, layer, row: CLAUDE_CREDS.keyHelper }), dj = dev.ok ? JSON.parse(dev.json) : null;
+      out.n++;
+      if (canon(local) !== canon(dj)) out.diffs.push({ k, person, local, device: dj });
+      if (layer && layer.permissions) out.withPerm++;
+      if (person.permissions && person.permissions.deny) { out.denyHad++; if (dj && dj.permissions && canon(dj.permissions.deny) === canon(person.permissions.deny)) out.denyKept++; }
+    }
+    return out;
+  };
+  const par = parity(BP.deviceMergeOf), parOld = parity(spread.deviceMergeOf);
+  console.log(`    (parity over ${par.n} generated starts: ${par.diffs.length} differ · layers carrying the agent's permissions: ${par.withPerm} · the person's deny kept ${par.denyKept} of ${par.denyHad} · the top-level spread: ${parOld.diffs.length} differ, deny kept ${parOld.denyKept} of ${parOld.denyHad})`);
+  ok(par.diffs.length === 0 && par.withPerm >= 20 && par.denyHad >= 10 && par.denyKept === par.denyHad,
+    '⑦b THE ONE MERGE RULE: over 60 generated starts the REAL adapter\'s merge on this machine and a paired machine\'s merge of the set-aside layer are EQUAL — the person\'s deny / ask / allow rules, hooks and default mode kept, the agent\'s own allow rules added (the layer carries them on most starts)', par.diffs.slice(0, 2));
+  ok(parOld.diffs.length > 0 && parOld.denyKept < parOld.denyHad, '⑦b RED CONTROL (the device merge as a top-level spread — the line round wgn4g2rf7 refused): the two roads differ and the person\'s deny is LOST where the layer carries the agent\'s permissions', { differ: parOld.diffs.length, denyKept: parOld.denyKept, denyHad: parOld.denyHad });
   // THE HUB'S ONE ASK (src/server/settings-merge-device.js) over stand-in agents
   const ASK = require(path.join(REPO, 'src/server/settings-merge-device.js'));
   const hostsOf = (dm) => ({ deviceBounded: async () => dm });
@@ -671,14 +708,14 @@ console.log('— ⑦b B-e7c0 ON A PAIRED MACHINE (r723): the merge made ON the d
   // THE FILE'S LIFE on the device: the agent's hourly sweep (src/machine-probes.js sweepMergedSettings)
   const MP = require(path.join(REPO, 'src/machine-probes.js'));
   const SD = path.join(scratchDir('bpick-merged'), 'settings'); fs.mkdirSync(SD, { recursive: true });   // the agent's own folder (the scratch dir keeps its own marker file)
-  for (const n of ['ended-1', 'old-1', 'live-1']) fs.writeFileSync(path.join(SD, `${n}.settings`), '{}', { mode: 0o600 });
+  for (const n of ['ended-1', 'old-1', 'live-1', 'alive-old']) fs.writeFileSync(path.join(SD, `${n}.settings`), '{}', { mode: 0o600 });
   fs.writeFileSync(path.join(SD, 'other.txt'), 'x');
-  const oldAt = new Date(Date.now() - MP.SETTINGS_KEEP_MS - 60000); fs.utimesSync(path.join(SD, 'old-1.settings'), oldAt, oldAt);
-  const gone = await MP.sweepMergedSettings(SD, { ended: (sid) => sid === 'ended-1' });
+  const oldAt = new Date(Date.now() - MP.SETTINGS_KEEP_MS - 60000); fs.utimesSync(path.join(SD, 'old-1.settings'), oldAt, oldAt); fs.utimesSync(path.join(SD, 'alive-old.settings'), oldAt, oldAt);
+  const gone = await MP.sweepMergedSettings(SD, { stateOf: async (sid) => (sid === 'ended-1' ? 'ended' : sid === 'alive-old' ? 'alive' : 'unknown') });
   const left = fs.readdirSync(SD).sort().join(',');
   console.log(`    (the sweep removed ${gone}; left: ${left})`);
-  ok(gone === 2 && left === 'live-1.settings,other.txt' && MP.SETTINGS_KEEP_MS === 7 * 86400000,
-    '⑦b the merged file\'s life: the sweep takes the one whose conversation ENDED (by the agent\'s own record) and the one past 7 days; a live one and anything not <id>.settings stay', left);
+  ok(gone === 2 && left === 'alive-old.settings,live-1.settings,other.txt' && MP.SETTINGS_KEEP_MS === 7 * 86400000,
+    '⑦b the merged file\'s life: the sweep takes the one whose conversation ENDED (by the agent\'s own record) and an unknown one past 7 days; an ALIVE conversation\'s file stays whatever its age (its CLI may read it again), and anything not <id>.settings stays', left);
   // RED CONTROL: the merge without its drop of route / credential names — the person's credential rides the device's file
   const SMSRC = read('src/settings-merge.js');
   const noDrop = M.load('src/settings-merge.js', anchored(SMSRC, "    for (const [k, v] of Object.entries(settings.env)) { if (ROUTE.routeNameAny(k)) dropped.push(k); else env[k] = v; }", "    for (const [k, v] of Object.entries(settings.env)) { env[k] = v; }", 'B-e7c0 the drop of route / credential names'), 'nodrop-device');
@@ -701,6 +738,11 @@ console.log('— ⑦b B-e7c0 ON A PAIRED MACHINE (r723): the merge made ON the d
   console.log(`    (the merged start's --settings: ${path0} · asked with ${mh.merges[0] ? JSON.stringify(mh.merges[0].layer) : 'nothing'} · the refused start's inline: ${JSON.stringify(ly.settings)})`);
   ok(!lx.why && mh.merges.length === 1 && path0 === `/home/u/.vibespace/agentd/state/settings/${mh.merges[0].sid}.settings` && !lx.line.includes('/home/u/my-settings.json') && mh.merges[0].ownFile === '/home/u/my-settings.json' && mh.merges[0].cwd === '/home/u/proj',
     '⑦b the REAL create on the paired machine: a pick whose start carries the person\'s file asks its agent ONCE (the start\'s cwd and file named as the start has them) and the remote line carries ONLY the merged file\'s path', { why: lx.why, path0, asked: mh.merges.length });
+  const realLayer = mh.merges[0] && mh.merges[0].layer, onDevice = realLayer ? BP.deviceMergeOf({ ownText: JSON.stringify(PERSON), layer: realLayer, row: CLAUDE_CREDS.keyHelper }) : { ok: false };
+  const od = onDevice.ok ? JSON.parse(onDevice.json) : {};
+  console.log(`    (the REAL create's layer: ${JSON.stringify(realLayer)} · merged on the device: permissions ${JSON.stringify(od.permissions)})`);
+  ok(!!realLayer && !!realLayer.permissions && JSON.stringify(od.permissions && od.permissions.deny) === JSON.stringify(PERSON.permissions.deny) && realLayer.permissions.allow.every((r) => od.permissions.allow.includes(r)) && od.apiKeyHelper === '',
+    '⑦b the layer the REAL create sends (the agent\'s own allow rules in it, on by default) merged on the device: the person\'s deny survives, the agent\'s allow rules are added, the helper is set aside', { realLayer, merged: od.permissions });
   ok(JSON.stringify(mh.merges[0] && mh.merges[0].layer) === JSON.stringify(ly.settings) && neutralized(ly),
     '⑦b NO WIDENING: the layer the device merged is EXACTLY the inline settings the set-aside start carries (the refused run\'s line)', { asked: mh.merges[0] && mh.merges[0].layer, setAside: ly.settings });
   ok(saidKind(x, 'billing') === 0 && x.notices.filter((n) => n.key.startsWith('settings-file-mergeDropped-')).length === 1 && saidKind(y, 'billing') === 1,

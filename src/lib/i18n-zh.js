@@ -14561,6 +14561,7 @@ export default {
   "conversation “{name}”": "对话「{name}」",
   "VibeSpace, by itself": "VibeSpace 自动",
   "Read files": "读取文件",
+  "Merge your settings file for a conversation": "为一个对话合并你的设置文件",
   "Write a file": "写入文件",
   "Delete a file": "删除文件",
   "Move a file": "移动文件",

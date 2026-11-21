@@ -6,7 +6,8 @@
  * `settings-merge`, src/machine-probes.js settingsMergeOp — this module is in the device bundle; billing-pick's words are not).
  *   · ownSettingsOf: the person's file text → its settings with every route / credential name of the tree's own list dropped
  *     (and the cloud credential commands), each named;
- *   · deviceMergeOf: + the start's LAYER applied LAST (exactly the inline settings the set-aside start carries — no widening),
+ *   · mergeLayer: THE ONE MERGE RULE of a person's settings and the hub's layer (both machines' roads — the adapter's own merge);
+ *   · deviceMergeOf: + the start's LAYER by that rule (exactly the inline settings the set-aside start carries — no widening),
  *     refused by name for a file that names the helper itself, one that is no JSON object, a layer that is not a bounded object;
  *   · the id a device names its file by (MERGE_SID_RE), the one ask's bound (DEVICE_MERGE_MS), the argv's layer and its path swap.
  */
@@ -46,16 +47,42 @@ function layerRefusal(layer) {
   try { n = Buffer.byteLength(JSON.stringify(layer), 'utf8'); } catch { return 'layer-not-object'; }
   return n > LAYER_MAX ? 'layer-too-large' : null;
 }
+/** THE ONE MERGE RULE of a person's settings (`base`) and a layer the hub adds (`layer`), on BOTH machines' roads (主开发 r895, the
+ *  must of round wgn4g2rf7: a top-level spread let the layer's `permissions` — the agent's own allow rules, on by default — replace
+ *  the person's deny / ask / allow rules): the person's rule lists (permissions.allow / ask / deny), their hooks and their env names
+ *  SURVIVE — the layer's entries are ADDED after them, none twice (an env name both carry: the layer's); the person's other
+ *  permission keys (their default mode) stand; any OTHER
+ *  key of the layer wins (the hub's billing and helper names: apiKeyHelper, the output style, the statusline …). The adapter's
+ *  own merge on this machine (src/adapters/claude-code.js mergeSettings) is this function; the device merge below is too. PURE. */
+const RULE_LISTS = Object.freeze(['allow', 'ask', 'deny']);
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const unionOf = (a, b) => { const out = Array.isArray(a) ? a.slice() : []; for (const x of (Array.isArray(b) ? b : [])) if (!out.some((y) => JSON.stringify(y) === JSON.stringify(x))) out.push(x); return out; };
+function mergeLayer(base, layer) {
+  const out = isObj(base) ? { ...base } : {};
+  for (const [k, v] of Object.entries(isObj(layer) ? layer : {})) {
+    if (k === 'permissions' && isObj(v) && isObj(out.permissions)) {
+      const mine = out.permissions, p = { ...v, ...mine };
+      for (const r of RULE_LISTS) if (r in mine || r in v) p[r] = unionOf(mine[r], v[r]);
+      out.permissions = p;
+    } else if (k === 'hooks' && isObj(v) && isObj(out.hooks)) {
+      const h = { ...out.hooks };
+      for (const [ev, list] of Object.entries(v)) h[ev] = unionOf(h[ev], list);
+      out.hooks = h;
+    } else if (k === 'env' && isObj(v) && isObj(out.env)) out.env = { ...out.env, ...v };   // the person's own names kept; the hub's win where both name one
+    else out[k] = v;
+  }
+  return out;
+}
 /** THE MERGE both sides run (PURE): the person's file TEXT + the start's layer → { ok: true, json, dropped } | { ok: false, reason } —
  *  every route / credential name dropped (ownSettingsOf), a file that names the helper itself refused (that file is about billing),
- *  the layer LAST (the adapter's mergeSettings is a top-level assign: the same order as this machine's own merge) */
+ *  the layer merged by THE ONE RULE (mergeLayer: the person's rule lists and hooks kept, the hub's other keys winning) */
 function deviceMergeOf({ ownText = null, layer = null, row = null } = {}) {
   const lr = layerRefusal(layer);
   if (lr) return { ok: false, reason: lr };
   const own = ownSettingsOf(ownText);
   if (!own) return { ok: false, reason: 'own-not-json' };
   if (namesHelper(own.settings, row)) return { ok: false, reason: 'own-names-helper' };
-  return { ok: true, json: JSON.stringify({ ...own.settings, ...layer }), dropped: own.dropped };
+  return { ok: true, json: JSON.stringify(mergeLayer(own.settings, layer)), dropped: own.dropped };   // THE ONE RULE (mergeLayer)
 }
 /** the argv's ONE `--settings` value: its inline JSON (the layer a device merges) — a plain object, else null (a file path governs) */
 function settingsLayerOf(args) {
@@ -70,4 +97,4 @@ function withSettingsPath(args, file) {
   const out = args.slice(); out[i + 1] = file; return out;
 }
 
-module.exports = { ownSettingsOf, MERGE_DROPS_KEYS, LAYER_MAX, MERGE_SID_RE, DEVICE_MERGE_MS, layerRefusal, deviceMergeOf, settingsLayerOf, withSettingsPath };
+module.exports = { mergeLayer, RULE_LISTS, ownSettingsOf, MERGE_DROPS_KEYS, LAYER_MAX, MERGE_SID_RE, DEVICE_MERGE_MS, layerRefusal, deviceMergeOf, settingsLayerOf, withSettingsPath };

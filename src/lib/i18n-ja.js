@@ -14560,6 +14560,7 @@ export default {
   "conversation “{name}”": "会話「{name}」",
   "VibeSpace, by itself": "VibeSpace（自動）",
   "Read files": "ファイルを読み取り",
+  "Merge your settings file for a conversation": "会話のために設定ファイルをマージ",
   "Write a file": "ファイルを書き込み",
   "Delete a file": "ファイルを削除",
   "Move a file": "ファイルを移動",

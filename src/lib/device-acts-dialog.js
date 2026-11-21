@@ -48,7 +48,7 @@ const ACT_WORDS = {
   'tcp-unlisten': 'Forward a port', 'unserve-folder': 'Share a folder', 'unserve-socks': 'Forward a port', 'desktop-serve:launch': 'Start its desktop', 'desktop-serve:relaunch': 'Start its desktop',
   'desktop-serve:stop': 'Stop its desktop', 'desktop-serve:close-asked': 'Stop its desktop', 'desktop-serve:fit': 'Use its desktop', 'desktop-serve:keep-alive': 'Use its desktop',
   'desktop-serve:pin': 'Use its desktop', 'desktop-serve:app-unstage': 'Use its desktop', 'desktop-serve:app-forget': 'Use its desktop', 'desktop-serve:app-adopt-drift': 'Use its desktop',
-  'browser-serve:stop': 'Stop a browser', 'browser-serve:end-daemon': 'Stop a browser', 'run-cmd': 'Run a command', 'run-stream': 'Run a command', 'place-secret': 'Place a secret', 'settings-merge': 'Write a file',
+  'browser-serve:stop': 'Stop a browser', 'browser-serve:end-daemon': 'Stop a browser', 'run-cmd': 'Run a command', 'run-stream': 'Run a command', 'place-secret': 'Place a secret', 'settings-merge': 'Merge your settings file for a conversation',
   'input-events': 'Type and click', 'tcp-connect': 'Connect to a port', 'serve-socks': 'Forward a port', 'serve-folder': 'Share a folder', 'fs-op:write': 'Write a file',
   'fs-op:rm': 'Delete a file', 'fs-op:rename': 'Move a file', 'fs-op:mkdir': 'Make a folder', 'fs-op:copy': 'Copy a file', 'fs-op:move': 'Move a file', 'fs-op:write-stream': 'Write a file',
   'design-fs:write-user': 'Write a file', 'desktop-serve:app-install': 'Install an app', 'desktop-serve:app-remove': 'Remove an app', 'desktop-serve:app-fetch': 'Download an app',

@@ -253,7 +253,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
       let settingsObj = {};
       const si = args.indexOf('--settings');
       if (si >= 0 && args[si + 1]) { try { settingsObj = JSON.parse(args[si + 1]) || {}; } catch {} }
-      Object.assign(settingsObj, patch);
+      settingsObj = require('../settings-merge.js').mergeLayer(settingsObj, patch);   // THE ONE MERGE RULE (r895): a person's rule lists and hooks kept, the hub's other keys win — the same rule a paired machine's agent merges by
       const sjson = JSON.stringify(settingsObj);
       if (si >= 0) args[si + 1] = sjson; else args.push('--settings', sjson);
     };
