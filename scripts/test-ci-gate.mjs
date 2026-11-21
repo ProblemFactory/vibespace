@@ -1649,7 +1649,7 @@ console.log('\n§2p a wait that runs out says so: no suite returns its last read
   const t0 = Date.now();
   const acorn = createRequire(import.meta.url)('acorn');
   const { lastReadWaits } = await import('./last-read-waits.mjs');
-  const RATCHET = { 'test-browser-resume-ui': 3, 'test-dial-bridge-credit': 1, 'test-pull-refresh': 1, 'test-chat-needs-card-chrome': 1, 'test-phone-dock-chrome': 1, 'test-window-dialog': 1, 'test-channel-threads-ui': 1, 'test-dead-bridge': 1 };   // 2026-11-21: 35 waits in 20 heavy suites; each cure lowers its row
+  const RATCHET = { 'test-browser-resume-ui': 3, 'test-pull-refresh': 1, 'test-chat-needs-card-chrome': 1, 'test-phone-dock-chrome': 1, 'test-window-dialog': 1, 'test-channel-threads-ui': 1, 'test-dead-bridge': 1 };   // 2026-11-21: 35 waits in 20 heavy suites; each cure lowers its row
   const heavy = SUITES, per = new Map(), unread = [];   // every tier (r1372); the name kept for the lines below
   for (const x of heavy) {
     const f = path.join(REPO, 'scripts', x.name + '.mjs'); if (!fs.existsSync(f)) continue;

@@ -43,6 +43,7 @@ import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
 import { scratch } from './scratch.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -50,7 +51,7 @@ const ok = (n, c, e) => { if (typeof n !== 'string') throw new Error('ok(name, c
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // waits on an EFFECT with a deadline, never a fixed sleep
 const until = async (f, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (f()) return true; await sleep(2); } return !!f(); };
-const quiet = async (f, ms = 3000, n = 15) => { const t0 = Date.now(); let last, same = 0; while (Date.now() - t0 < ms) { const v = f(); if (v === last) { if (++same >= n) return v; } else { same = 0; last = v; } await sleep(3); } return f(); };
+const quiet = async (f, ms = 3000, n = 15) => { const t0 = Date.now(); let last, same = 0; while (Date.now() - t0 < ms) { const v = f(); if (v === last) { if (++same >= n) return v; } else { same = 0; last = v; } await sleep(3); } return markTimedOut(f(), ms, `quiet (a value that held still for ${n} reads)`); };   // a wait that runs out says so (r1372; test-ci-gate §2p)
 const { Mux, PROTO_VERSION, INITIAL_WINDOW } = require(path.join(REPO, 'src/agentd/mux.js'));
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
 const BRF = 'src/dial-session-bridge.js';
