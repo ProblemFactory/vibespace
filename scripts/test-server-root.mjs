@@ -54,8 +54,8 @@ const ROWS = [
   ['the root IS a tmp root (a temp home)', { root: '/tmp', tmpRoots: TMP, home: '/tmp/h' }, 'tmp'],
   ['a custom os.tmpdir() the caller passed (TMPDIR=/run/user/1000/tmp), a home under it', { root: '/run/user/1000/tmp/vs-y', tmpRoots: [...TMP, '/run/user/1000/tmp'], home: '/run/user/1000/tmp/h' }, 'tmp'],
   ['a tmp root with a trailing slash still judges', { root: '/scratch/a', tmpRoots: ['/scratch/'], home: '/scratch/h' }, 'tmp'],
-  ['SEGMENT BOUNDARY: /tmpx is not under /tmp', { root: '/tmpx/vibespace', tmpRoots: TMP }, 'checkout'],
-  ['SEGMENT BOUNDARY: /var/tmpfoo is not under /var/tmp', { root: '/var/tmpfoo/vibespace', tmpRoots: TMP }, 'checkout'],
+  ['SEGMENT BOUNDARY: /tmpx is not under /tmp', { root: '/tmpx/vibespace', tmpRoots: TMP, home: '/tmp/h' }, 'checkout'],   // a temp home: only the boundary decides (r1278: the tmp kind needs one)
+  ['SEGMENT BOUNDARY: /var/tmpfoo is not under /var/tmp', { root: '/var/tmpfoo/vibespace', tmpRoots: TMP, home: '/var/tmp/h' }, 'checkout'],
   ['a vs- name OUTSIDE the tmp roots is a user\'s folder, not judged', { root: '/home/u/vs-tools/vibespace', gitDir: '/home/u/vs-tools/vibespace/.git', gitCommonDir: '/home/u/vs-tools/vibespace/.git', tmpRoots: TMP }, 'checkout'],
   ['a relative tmp root is ignored (never a prefix match on a relative string)', { root: '/home/u/tmp/x', tmpRoots: ['tmp', 'home'] }, 'checkout'],
   ['VIBESPACE_SKIP_AGENT_HOOKS=1 on a checkout', { root: CO, gitDir: CO + '/.git', gitCommonDir: CO + '/.git', tmpRoots: TMP, envOverride: true }, 'override'],
@@ -67,6 +67,7 @@ const ROWS = [
   ['FORCE under the lane\'s scratch HOME (/var/tmp/…/home) lifts a tmp refusal', { root: '/var/tmp/l/wt', tmpRoots: TMP, force: true, home: '/var/tmp/l/home' }, 'forced'],
   ['FORCE with the REAL HOME is ignored — a worktree still refused, and the why says so', { root: '/home/u/wt', gitDir: CO + '/.git/worktrees/wt', gitCommonDir: CO + '/.git', tmpRoots: TMP, force: true, home: '/home/u' }, 'worktree', (v) => /honoured only under a scratch HOME — \/home\/u is not one/.test(v.why)],
   ['FORCE with no HOME: no home read is never «tmp» (r1278), so a copy under /tmp is a checkout and FORCE changes nothing', { root: '/tmp/vs-a', tmpRoots: TMP, force: true }, 'checkout'],
+  ['FORCE with no HOME on a WORKTREE is ignored — still refused', { root: '/home/u/wt2', gitDir: CO + '/.git/worktrees/wt2', gitCommonDir: CO + '/.git', tmpRoots: TMP, force: true }, 'worktree'],
   ['FORCE under a scratch HOME also lifts the override', { root: CO, tmpRoots: TMP, envOverride: true, force: true, home: '/tmp/vs-h' }, 'forced'],
   ['FORCE on a plain checkout changes nothing', { root: CO, tmpRoots: TMP, force: true, home: '/home/u' }, 'checkout'],
   ['FORCE must be a boolean true', { root: '/tmp/vs-a', tmpRoots: TMP, force: '1', home: '/tmp/h' }, 'tmp'],
@@ -112,7 +113,7 @@ const M = mutantCopies('server-root', REPO);
 const CONTROLS = [
   { what: 'tmp prefix WITHOUT the segment boundary', needle: "return a === d || a.startsWith(d + '/');", repl: 'return a === d || a.startsWith(d);', reds: ['SEGMENT BOUNDARY: /tmpx is not under /tmp', 'SEGMENT BOUNDARY: /var/tmpfoo is not under /var/tmp'] },
   { what: 'the worktree rule dropped (the old /tmp-only guard)', needle: "  } else if (isLinkedWorktree(gitDir, gitCommonDir)) {", repl: '  } else if (false) {', reds: ['a WORKTREE beside the checkout (not under any tmp root — the old guard passed it)', 'a WORKTREE under /var/tmp (the 2026-10-01 incident shape) — worktree outranks tmp'] },
-  { what: 'FORCE honoured whatever the HOME', needle: 'if (isAbs(h) && roots.some((t) => isUnder(h, t))) return', repl: 'if (true) return', reds: ['FORCE with the REAL HOME is ignored — a worktree still refused, and the why says so', 'FORCE with no HOME is ignored'] },
+  { what: 'FORCE honoured whatever the HOME', needle: 'if (isAbs(h) && roots.some((t) => isUnder(h, t))) return', repl: 'if (true) return', reds: ['FORCE with the REAL HOME is ignored — a worktree still refused, and the why says so', 'FORCE with no HOME on a WORKTREE is ignored — still refused'] },
 ];
 for (const c of CONTROLS) {
   ok(src.includes(c.needle), `control "${c.what}": the needle is in the shipped source (a stale control would prove nothing)`);

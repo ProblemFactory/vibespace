@@ -65,9 +65,11 @@ const HUB_DROPS = Object.freeze([
 /** THE ONE TEST, for a root and the home it was handed (`roots`: the temp roots, tmpRootsOf's by default — a seam for the
  *  suites' tables). The home is judged by its real path too; an unread home is never a «temp» one (no answer is never throwaway). */
 function judge(root, handed, { roots = tmpRoots(handed) } = {}) {
-  const facts = readRootFacts(root);
-  const home = typeof handed === 'string' && handed.startsWith('/') ? realOr(handed) : null;
-  const v = SR.rootVerdict({ ...facts, root: realOr(root), tmpRoots: roots, home });
+  const facts = readRootFacts(root), r = realOr(root);
+  // the handed home is RESOLVED only when the root lies under a temp root (the only case it decides): an installed root's boot
+  // never touches the home it was handed
+  const home = typeof handed === 'string' && handed.startsWith('/') ? (SR.tmpRootUnder({ root: r, tmpRoots: roots }) ? realOr(handed) : handed) : null;
+  const v = SR.rootVerdict({ ...facts, root: r, tmpRoots: roots, home });
   return { facts, rootVerdict: v, throwaway: SR.isThrowaway(v), linkedWorktree: SR.isLinkedWorktree(facts.gitDir, facts.gitCommonDir) };
 }
 /** Is this root throwaway? — the boot's answer for the declared hub, else judged now (no hub declared ⇒ false). */
