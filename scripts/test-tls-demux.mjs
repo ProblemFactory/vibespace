@@ -19,6 +19,7 @@ import tls from 'tls';
 import { execFileSync } from 'child_process';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { WebSocketServer, WebSocket } = require(path.join(REPO, 'node_modules/ws'));
@@ -255,7 +256,7 @@ try {
     const from = '      if (held) held.then(hand).catch(';
     ok(src.split(from).length === 2, 'the control\'s anchor is in the module');
     const cp = path.join(DIR, 'tls-control-nohold.js');
-    fs.writeFileSync(cp, src.replace(from, '      if (false) held.then(hand).catch(').replace("require('../tls-plan.js')", JSON.stringify(path.join(REPO, 'src/tls-plan.js')).replace(/^/, 'require(') + ')').replace("require('./loop-turns.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/server/loop-turns.js')) + ')'));
+    fs.writeFileSync(cp, anchored(anchored(anchored(src, from, '      if (false) held.then(hand).catch(', 'b-cd4b-tls-no-hold'), "require('../tls-plan.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/tls-plan.js')) + ')', 'b-cd4b-tls-plan-path'), "require('./loop-turns.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/server/loop-turns.js')) + ')', 'b-cd4b-tls-turns-path'));
     const r6 = await scene(require(cp), { tag: 'r' });
     ok(g6.ok && g6.holding && !g6.after && g6.ev.indexOf('answer') > g6.ev.indexOf('end') && g6.ev.indexOf('end') > 0 && g6.names[0] === 'restore' && g6.names.length > 2 && g6.names.slice(1).every((n) => n === 'listen'),
       `held: a request written while the step's turns run is answered AFTER its last turn (${g6.ev.join(' → ')}; the step ${g6.ended} ms, the answer at ${g6.answered} ms), each turn named (${g6.names[0]}, then ${g6.names.length - 1} × ${g6.names[1]}); holding while it runs, not after`, g6);

@@ -1312,7 +1312,9 @@ function restoreCatchUp(rb, { max = RESTORE_CATCHUP_MAX } = {}) {
     const text = read(start, size - start).toString('utf-8');
     return text.length > rb.partial.length ? { text, drop: text.startsWith(rb.partial) ? rb.partial : '' } : null;
   } catch (e) { return { skipped: `its buffer could not be read (${(e && e.code) || (e && e.message) || e})` }; }
-  finally { if (fd !== null) { try { fs.closeSync(fd); } catch { } } }
+  finally {   // one owner, closed once, the number forgotten at its close; a failed close is SAID (its errno and the file), never swallowed — what was read is returned whatever the close answered (test-fd-close-census)
+    if (fd !== null) { try { fs.closeSync(fd); } catch (e) { console.warn(`[boot-restore] the catch-up could not close its descriptor of ${rb.file} (${(e && e.code) || (e && e.message) || e})`); } fd = null; }
+  }
 }
 // B-cd4b: the LAST billing source a buffer holds (the restore's backfill reads the copy the restore already holds) — PURE
 const API_KEY_SOURCE = 'apiKeySource":"';
