@@ -22,6 +22,9 @@ const LOGIN_WORDS = Object.freeze({
   network: Object.freeze({ en: 'Network error — try again', zh: '网络出错，请再试一次', ja: 'ネットワークエラーです。もう一度お試しください' }),
   'wrong-password': Object.freeze({ en: 'Wrong password — try again', zh: '密码不对，请再试一次', ja: 'パスワードが違います。もう一度お試しください' }),
   'too-many': Object.freeze({ en: 'Too many attempts — wait a minute', zh: '尝试次数太多，请等一分钟', ja: '試行回数が多すぎます。1 分待ってください' }),
+  // B-dc3f: the sign-in file is there but cannot be read — the instance is HELD closed (src/auth.js refuseHeld)
+  'signin-held': Object.freeze({ en: 'Sign-in is on hold: the sign-in file is there but cannot be read, so nobody can sign in and nothing is open.', zh: '登录已暂停：登录文件还在，但读不出来，所以谁都登录不了，也没有任何东西对外开放。', ja: 'サインインを停止中です。サインインのファイルはありますが読めないため、誰もサインインできず、何も開いていません。' }),
+  'signin-held-fix': Object.freeze({ en: 'Restore data/auth.json from a backup and restart VibeSpace, or remove it to start with no sign-in.', zh: '请从备份恢复 data/auth.json 后重启 VibeSpace；或者删除它，以不设登录的方式启动。', ja: 'data/auth.json をバックアップから戻して VibeSpace を再起動するか、削除してサインインなしで始めてください。' }),
 });
 const LANGS = Object.freeze(['en', 'zh', 'ja']);
 /** The page's words in one language (an unknown language reads English). */

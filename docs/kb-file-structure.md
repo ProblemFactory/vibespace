@@ -12781,6 +12781,8 @@ writer-sweep.js — THE pre-resume writer sweep, ONE implementation for every ma
 
 ### auth.js
 
+**B-dc3f (2026-11-21): A SIGN-IN FILE THAT EXISTS AND CANNOT BE READ OR PARSED HOLDS THE INSTANCE CLOSED** (`auth.held`): every request the gate sees refused 503 by name, sign-in reads «on», no login valid, nothing written over the file; a truly missing file stays a new instance ⇒ kb-bugfix-invariants.md.
+
 auth.js              — Optional password auth (scrypt, server-side cookie tokens in data/auth.json, per-IP rate limit; VIBESPACE_PASSWORD / VIBESPACE_GENERATE_PASSWORD=1). 2.103.0: optional Clerk SSO rides on top — `passwordEnabled` vs `enabled` split (Clerk alone enables auth), POST /api/clerk-login verifies the Clerk session JWT vs JWKS and issues the SAME cookie token; loginHtml() renders password and/or SSO per config 2.369.214 (lane slack-landing-nologin): the middleware's exemption list also lets through exactly `GET /api/channels/oauth/cb/<kind>` — the Slack consent landing, often reached from another browser profile with no cookie; its signed state is the credential and src/routes/channels.js rate-limits it per address (30/min); every other oauth route keeps the cookie (scripts/test-slack-landing-nologin.mjs, password + stubbed Clerk).
 
 ### routes/persistence.js

@@ -34,7 +34,7 @@ export const ROWS = [
   ['src/app-serve.js', 'own-tree', 38, null, `${DATA}; lane apps-launcher-witness +3: the witness file (data/) + the XDG application dirs (~/.local/share/applications, /usr/share/applications — the OS's own records at fixed paths, opened O_NONBLOCK|O_NOFOLLOW, never a path anyone names); lane app-register-model +5: a Flatpak's exported desktop file (×2, a fixed path under the user's own ~/.local/share/flatpak), a declared exec's access/stat (resolving it as the user would run it) and a declared icon's size (validated under the home or /usr/share); rel254-verify-fixes +1: realpath of this machine's flatpak and a Flatpak row's exec (F8 — the binary the PATH names, never a mount path anyone types)`],
   ['src/app-squashfs.js', 'own-tree', 2, null, DATA],
   ['src/app-system-serve.js', 'own-tree', 13, null, DATA],
-  ['src/auth.js', 'own-tree', 1, null, DATA],
+  ['src/auth.js', 'own-tree', 2, null, `${DATA}; B-dc3f +1: the lstat that tells a link to nothing (held) from a truly missing data/auth.json (a new instance)`],
   ['src/browser-facts.js', 'own-tree', 26, null, PROC], // + makeBrowserTmpDir: /proc/self/mountinfo + the per-uid dir's lstat (lane browser-tmpdir-socket-length)
   ['src/browser-serve.js', 'own-tree', 7, null, DATA],
   ['src/browser-verbs.js', 'own-tree', 2, null, DATA],

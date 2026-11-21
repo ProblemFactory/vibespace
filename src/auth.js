@@ -13,6 +13,14 @@
  *   decision ④, design q-042 D9); a vault LOCK signs every login out (the hub's
  *   wiring calls revokeAllTokens and closes every page's socket).
  * - Login attempts are rate limited per IP (5 fails → 60s lock).
+ * - THE SIGN-IN FILE IS HELD WHEN IT CANNOT BE READ (B-dc3f, HIGH): a data/auth.json that EXISTS and cannot be read or
+ *   parsed (a torn write, a folder or a link to nothing in its place, a permission, a network mount's bad read) HOLDS
+ *   the instance CLOSED. Before, it was taken as «no sign-in»: the instance ran OPEN to its network until its next start,
+ *   and a later save wrote an empty table over the real file. Held (`_held`, set at load, read by every road from here):
+ *   every request the gate sees — pages, APIs and doors — is refused by name with the way out; `enabled` and
+ *   `passwordEnabled` answer «on»; no login is valid (`checkToken`, `requestAuthed`: every upgrade that asks); NOTHING is
+ *   written over the file (`_save` and every road that would write refuse). The journal says it once, at the start. A
+ *   file that is truly missing (nothing at the path) stays a new instance, as before.
  */
 
 const fs = require('fs');
@@ -29,6 +37,18 @@ const TOKEN_TTL_MS = 180 * 24 * 3600 * 1000; // THE CAP: 180 days from the sign-
 const TOKEN_IDLE_MS = 30 * 24 * 3600 * 1000; // THE SLIDE: 30 days from the last use (each use extends it)
 const TOKEN_SLIDE_SAVE_MS = 3600 * 1000;     // a use moves `usedAt` on disk (and the cookie's Max-Age) at most once an hour
 const MAX_TOKENS = 200;
+/** the held state's refusal (B-dc3f): every request the gate sees — a page gets the words (the sign-in page says it), an API
+ *  or a door gets them as JSON; 503, the way out named */
+function refuseHeld(held, req, res) {
+  const lang = landingLang(req.headers['accept-language']), w = loginWords(lang);
+  res.setHeader('Retry-After', '3600');
+  if (req.method === 'GET' && String(req.headers.accept || '').includes('text/html')) {
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    return res.status(503).type('html').send(`<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(w.title)}</title></head><body style="font-family:system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1em;line-height:1.5"><h1 style="font-size:1.3em">${esc(w['signin-held'])}</h1><p>${esc(w['signin-held-fix'])}</p><p style="color:#666;font-size:.9em"><code>data/auth.json</code>: ${esc(held.why)}</p></body></html>`);
+  }
+  return res.status(503).json({ error: 'signin-held', why: LOGIN_WORDS['signin-held'].en, fix: LOGIN_WORDS['signin-held-fix'].en, detail: held.why });
+}
+const heldError = (held) => Object.assign(new Error(`the sign-in file is held (${held.why}) — nothing is written over it`), { code: 'signin-held' });
 /** auth.json keys a login by sha256(token) — never the token. A 48-hex key is a token an older build stored (hashed at load). */
 const tokenDigest = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 const DIGEST_RE = /^[0-9a-f]{64}$/;
@@ -43,7 +63,17 @@ class Auth {
   }
 
   _load() {
-    try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { this._state = null; }
+    this._held = null;
+    let text;
+    try { text = fs.readFileSync(this._file, 'utf-8'); } catch (e) {
+      if (!e || e.code !== 'ENOENT') return this._hold(`it cannot be read (${(e && e.code) || 'an error'})`);
+      try { fs.lstatSync(this._file); } catch { this._state = null; return; }   // truly missing: nothing at the path — a new instance
+      return this._hold('it is a link to a file that is not there');   // ENOENT, yet something stands at the path
+    }
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { return this._hold('its text is not a sign-in table (it does not parse)'); }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return this._hold('it holds no sign-in table');
+    this._state = parsed;
     // THE MIGRATION (once, at the first start of this build): a plaintext token map becomes its digests — every login
     // stays valid ONCE (the cookie's token hashes to its key; an older build never stamped a use, so the migration counts as
     // one: 30 days from now, still inside its 180-day cap); the old file's bytes are overwritten (replaceShredding)
@@ -56,8 +86,18 @@ class Auth {
     }
   }
 
+  /** HOLD the instance closed on a sign-in file that cannot be read (B-dc3f): said once, here, at the start */
+  _hold(why) {
+    this._state = null;
+    this._held = { why };
+    try { console.error(`[auth] THE SIGN-IN FILE IS HELD: ${this._file} is there but ${why} — every page and API is refused until it is restored from a backup (then restart), or removed to start with no sign-in; nothing is written over it`); } catch { }
+  }
+
+  /** the held state (B-dc3f), or null: { why } */
+  get held() { return this._held; }
+
   _save() {
-    if (!this._state) return;
+    if (!this._state || this._held) return;   // NOTHING is written over a held file
     if (this._state.tokens) this._state.tokensHashed = 1;   // a reader's note: the keys are sha256 digests
     replaceShredding(this._file, JSON.stringify(this._state));   // 0600, atomic; the replaced bytes overwritten
   }
@@ -83,7 +123,7 @@ class Auth {
   }
 
   /** A configured password specifically (Clerk SSO alone also enables auth). */
-  get passwordEnabled() { return !!(this._state && this._state.passwordHash); }
+  get passwordEnabled() { return !!this._held || !!(this._state && this._state.passwordHash); }   // held: «on» — a held file never reads as «off»
 
   get enabled() { return this.passwordEnabled || !!this._clerk?.enabled; }
 
@@ -102,6 +142,7 @@ class Auth {
    * resolution never overrides a user-set state (incl. user-removed).
    */
   setPassword(password, { userSet = false } = {}) {
+    if (this._held) throw heldError(this._held);
     const salt = crypto.randomBytes(16).toString('hex');
     const passwordHash = this._hash(password, salt);
     this._state = { passwordHash, salt, userSet: userSet || this._state?.userSet || false, tokens: this._state?.tokens || {} };
@@ -110,6 +151,7 @@ class Auth {
 
   /** Disable auth entirely (user choice — env won't re-enable on next boot). */
   removePassword() {
+    if (this._held) throw heldError(this._held);
     this._state = { userSet: true, tokens: {} };
     this._save();
   }
@@ -117,7 +159,7 @@ class Auth {
   /** Revoke every login token except (optionally) one — in-app password change kicks all other devices; a vault LOCK
    *  revokes them all (lane vault-e2e-password-fix-r2 — the hub's wiring). → how many logins ended. */
   revokeAllTokens(exceptToken = null) {
-    if (!this._state) return 0;
+    if (!this._state || this._held) return 0;
     const d = exceptToken ? tokenDigest(exceptToken) : null;
     const keep = d && this._state.tokens ? this._state.tokens[d] : null;
     const n = Object.keys(this._state.tokens || {}).length - (keep ? 1 : 0);
@@ -128,12 +170,13 @@ class Auth {
 
   /** Export the password record for config transfer (hash + salt, never tokens). */
   exportPasswordRecord() {
-    if (!this.passwordEnabled) return null;
+    if (this._held || !this.passwordEnabled) return null;
     return { passwordHash: this._state.passwordHash, salt: this._state.salt };
   }
 
   /** Import a password record (config transfer). Revokes all tokens — caller should issue a fresh one. */
   importPasswordRecord(rec) {
+    if (this._held) throw heldError(this._held);
     if (!rec?.passwordHash || !rec?.salt) throw new Error('invalid password record');
     this._state = { passwordHash: String(rec.passwordHash), salt: String(rec.salt), userSet: true, tokens: {} };
     this._save();
@@ -150,6 +193,7 @@ class Auth {
    * Returns { generated?: string } — the plaintext ONLY when freshly generated.
    */
   ensurePassword({ generateIfMissing = false } = {}) {
+    if (this._held) return {};   // held: neither the env nor a generated password is written over the file
     if (this._state?.userSet) return {};
     const envPw = process.env.VIBESPACE_PASSWORD;
     if (envPw) {
@@ -168,13 +212,14 @@ class Auth {
   }
 
   verifyPassword(password) {
-    if (!this.passwordEnabled) return false;
+    if (this._held || !this.passwordEnabled) return false;
     const got = Buffer.from(this._hash(password, this._state.salt), 'hex');
     const want = Buffer.from(this._state.passwordHash, 'hex');
     return got.length === want.length && crypto.timingSafeEqual(got, want);
   }
 
   issueToken(ua = '') {
+    if (this._held) throw heldError(this._held);
     const token = crypto.randomBytes(24).toString('hex');
     const now = Date.now();
     // Clerk-only instances may have no auth.json yet — tokens still persist
@@ -193,6 +238,7 @@ class Auth {
 
   /** A use of a login: alive ⇒ it SLIDES (in memory now; on disk at most once an hour) → true. */
   checkToken(token) {
+    if (this._held) return false;   // held: no login is valid
     if (!this.enabled) return true;
     const rec = this._login(token);
     const now = Date.now();
@@ -213,6 +259,7 @@ class Auth {
   }
 
   revokeToken(token) {
+    if (this._held) return;
     const d = token ? tokenDigest(token) : null;
     if (d && this._state?.tokens?.[d]) { delete this._state.tokens[d]; this._save(); }
   }
@@ -262,6 +309,7 @@ class Auth {
    *  from this instance's own page: every caller (the upgrade dispatcher's /ws and /proxy/, the desktop and browser
    *  streams, private /svc mounts, private /p pages) inherits the same-origin rule */
   requestAuthed(req) {
+    if (this._held) return false;   // held: every upgrade and private page that asks is refused
     const v = this.originVerdict(req);
     if (!v.ok) { this._logCrossSite(req, v); return false; }
     if (!this.enabled) return true;
@@ -271,6 +319,7 @@ class Auth {
   /** Express middleware guarding everything except the login flow — server.js mounts it BEFORE every router */
   middleware() {
     return (req, res, next) => {
+      if (this._held) return refuseHeld(this._held, req, res);   // HELD (B-dc3f): before every door and route — nothing is open
       const p = req.path;
       // ── THE DOORS: callers that are not the owner's browser, each judged by its OWN credential — never the cookie,
       // so never the same-origin rule below (a door's refusals are its own) ──
