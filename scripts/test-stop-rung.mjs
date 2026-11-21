@@ -86,10 +86,11 @@ console.log('§1 B-d8f4 — the group rung\'s counts and words (the scenes run t
   const leaverScene = timed(async (wrapperText, tag) => {
     const dd = path.join(D, tag); fs.mkdirSync(dd, { recursive: true });
     const LP = path.join(dd, 'leaver.pid'), LS = path.join(dd, 'leaver.sh');
-    fs.writeFileSync(LS, `echo $$ > ${JSON.stringify(LP)}\ntrap 'exec setsid sleep 0.6' TERM\nwhile :; do sleep 0.05; done\n`);
-    // the member is RE-PARENTED before the stop (its subshell exits) and stays in the job's group: in no tree the stop reads, never an
-    // escapee at the stop step — only the engine's group signal reaches it (it then leaves the group: `exec setsid`, no child of its own)
-    return jobScene(wrapperText, tag, { deps: { memorySample: { stopMs: 1000 } }, argv: ['sh', '-c', `trap 'sleep 0.25; exit 0' TERM; (sh ${JSON.stringify(LS)} &); while :; do sleep 0.05; done`],
+    fs.writeFileSync(LS, `echo $$ > ${JSON.stringify(LP)}\ntrap 'sleep 0.15; exec setsid sleep 0.6' TERM\nwhile :; do sleep 0.05; done\n`);
+    // the member is RE-PARENTED before the stop (its subshell exits) and stays in the job's group: in no tree the stop reads. It leaves the
+    // group only 150 ms after the engine's signal (`exec setsid`, no child of its own) — the wrapper's stop step has read and marked it IN
+    // the group by then (never an escapee there); the main ends 350 ms after it, so the drain's first scan finds the member outside
+    return jobScene(wrapperText, tag, { deps: { memorySample: { stopMs: 1000 } }, argv: ['sh', '-c', `trap 'sleep 0.35; exit 0' TERM; (sh ${JSON.stringify(LS)} &); while :; do sleep 0.05; done`],
       ready: () => fs.existsSync(LP) && Number(fs.readFileSync(LP, 'utf8').trim()) > 1,
       before: ({ jm }) => { const id = PI.identityOf(Number(fs.readFileSync(LP, 'utf8').trim())); mine.push(id); const job = [...jm.jobs.values()][0];
         return { after: async () => { await until(() => PI.aliveIdentity(id) === false, 2000); const alive = PI.aliveIdentity(id) === true; if (alive) PI.signalIdentity(id, 'SIGKILL'); return { alive, left: (job.runs[job.runs.length - 1] || {}).left || null }; } }; } });
