@@ -37,7 +37,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { vncEnv } from './scratch.mjs';
+import { vncEnv, anchored } from './scratch.mjs';
 import { WebSocket } from 'ws';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
@@ -893,6 +893,45 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
   ok(frames.some((f) => /VSHEALED/.test(f.data || '')), 'reattachLocalPty RESENDS the input the never-spoke bridge was holding',
     JSON.stringify({ attachMs, healBound, waitedMs: Date.now() - t0, frames: frames.length, tail: frames.slice(-3).map((f) => String(f.data || '').slice(-60)) }));
   try { session.pty?.kill?.(); } catch { }
+  // B-1217 (the folded B-380f, lane lg-recovery): THIS LEG'S RUNNER RED, PLACED. setupSessionPty stamped the birth at `now` and
+  // took a byte from ANY pty it ever wired: a byte of the OLD attach in the stand-in's birth millisecond reads «spoke» by
+  // ptyQuietSince's tie, so writeSessionInput held nothing and the heal had nothing to resend. THE STALL PLACED (never load): the
+  // clock held at the old attach's last byte from the stand-in's birth through the heal — on the cure the stand-in is born after
+  // that byte and the heal replays; on a copy of the release's two lines nothing is held, every run
+  const SS5 = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8');
+  const release5 = anchored(anchored(SS5, '  session._ptyOpenedAt = Math.max(Date.now(), (Number(session._lastPtyDataAt) || 0) + 1);', '  session._ptyOpenedAt = Date.now();' /* stale-pins: kept — the release's line, this control's plant */, 'release: the birth at now'),
+    '  ptyProcess.onData(() => { if (session.pty === ptyProcess) session._lastPtyDataAt = Date.now(); });', '  ptyProcess.onData(() => { session._lastPtyDataAt = Date.now(); });' /* stale-pins: kept — the release's line, this control's plant */, 'release: any pty stamps');
+  const stalledHeal = async (modulePath, tag) => {
+    const { eng: E, activeSessions: AS, frames: F } = makeEngine({ getDeviceMgr: () => null, modulePath });
+    const sock2 = mkQuietFixture('healer-' + tag);
+    const id2 = 'sess-healer-' + tag + '-' + Date.now();
+    const s2 = { mode: 'terminal', backend: 'shell', clients: new Map(), buffer: '', socketPath: sock2, cwd: ROOT };
+    AS.set(id2, s2);
+    const tA = Date.now();
+    E.attachToDtach(id2, sock2, s2);
+    while (!Number(s2._lastPtyDataAt) && Date.now() - tA < BUDGET_MS) await sleep(20);
+    const aMs = Date.now() - tA, old = s2.pty, lastByte = Number(s2._lastPtyDataAt);
+    const dead2 = { _daemon: true, pid: -1, onData: () => ({ dispose() { } }), onExit: () => ({ dispose() { } }), write() { }, resize() { }, kill() { } };
+    const realNow = Date.now; let replay = [];
+    Date.now = () => lastByte;   // the stall placed: the stand-in is born, typed into and healed inside the old attach's last-byte millisecond
+    try {
+      try { old.kill(); } catch { }
+      E.setupSessionPty(s2, id2, dead2);
+      E.writeSessionInput(s2, 'echo VSSTALLED');
+      E.reattachLocalPty(id2, s2, 'test heal (B-1217 stall placed)');
+      replay = s2._bridgeHeldInputs && s2._bridgeHeldInputs.replaying ? s2._bridgeHeldInputs.lines.slice() : [];
+    } finally { Date.now = realNow; }
+    const t1 = Date.now(), bound = Math.max(BUDGET_MS, aMs * 20);
+    if (replay.length) while (Date.now() - t1 < bound && !F.some((f) => /VSSTALLED/.test(f.data || ''))) await sleep(50);
+    const seen = F.some((f) => /VSSTALLED/.test(f.data || ''));
+    try { s2.pty?.kill?.(); } catch { }
+    AS.delete(id2);
+    return { replay, seen, aMs, lastByte, frames: F.length };
+  };
+  const st = await stalledHeal(path.join(REPO, 'src/server/session-stdout.js'), 'b1217-cure');
+  ok(JSON.stringify(st.replay) === '["echo VSSTALLED"]' && st.seen, 'B-1217 THE STALL PLACED: the stand-in born in the old attach\'s last-byte millisecond still reads never-spoke — the heal holds the input and the new attach carries it', st);
+  const sr = await stalledHeal(MUTR.write('src/server/session-stdout.js', release5, 'b1217-release'), 'b1217-release');
+  ok(sr.replay.length === 0 && !sr.seen, 'B-1217 RED (a copy of the release\'s two lines, the same stall): the tie reads «spoke» — nothing held, nothing resent (the runner\'s red, every run)', sr);
 }
 
 // daemonPtyShim must serve MORE THAN ONE data listener (the stamp + the consumer).
@@ -929,12 +968,19 @@ console.log('— §6 the device pty shim is a real node-pty duck (multi-listener
 // death; the boot gets 120 s and «did not boot» is its own red, never read as «survived».
 console.log('— §7 a paired machine that cannot be reached never stops the hub —');
 {
-  const BIN7 = path.join(ROOT, 'dead-ssh-bin'); fs.mkdirSync(BIN7, { recursive: true });
+  // B-1217 (the folded B-380f, lane lg-recovery): THE CONTROL'S DEATH WAS A RACE. Node destroys a child's stdin when the child
+  // exits, and a plain destroy emits no 'error' — so the pre-fix hub died only when the kernel's EPIPE on the pending tar write
+  // was handled BEFORE the child's exit was. A fake ssh that closes stdin and exits at once let either come first (red on the
+  // runner at load 2.5–2.8: the exit first ⇒ nothing uncaught ⇒ the control's hub lived). The fake ssh now KEEPS ITS PROCESS for
+  // LINGER7_S after closing stdin (its stderr line first, as ssh prints it): the write fails while the child lives. The release's
+  // shape stays as BIN7_NOW, only for the race's own control below (a stall placed in its window).
+  const LINGER7_S = 3;
   const CALLS7 = path.join(ROOT, 'dead-ssh-calls.log');
-  fs.writeFileSync(path.join(BIN7, 'ssh'), `#!/bin/sh\nexec 0<&-\necho x >> '${CALLS7}'\necho "ssh: Could not resolve hostname mac.example.test: Name or service not known" >&2\nexit 255\n`, { mode: 0o755 });
+  const deadSsh = (dir, linger) => { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'ssh'), `#!/bin/sh\nexec 0<&-\necho x >> '${CALLS7}'\necho "ssh: Could not resolve hostname mac.example.test: Name or service not known" >&2\n${linger ? `sleep ${linger}\n` : ''}exit 255\n`, { mode: 0o755 }); return dir; };
+  const BIN7 = deadSsh(path.join(ROOT, 'dead-ssh-bin'), LINGER7_S), BIN7_NOW = deadSsh(path.join(ROOT, 'dead-ssh-bin-now'), 0);
   const PAD7 = 6 << 20;           // the tools tar's padding: far past any socket buffer, under installAgentTools' 8 MB tar bound
   const WRITE_ERR7 = /write (?:EPIPE|ECONNRESET)|ERR_STREAM_DESTROYED/;
-  const deadHub = async (tag, hostsSrc, { expectDeath = false } = {}) => {
+  const deadHub = async (tag, hostsSrc, { expectDeath = false, bin = BIN7 } = {}) => {
     const wt = path.join(ROOT, 'wt-dead-' + tag);
     worktrees.add(wt);
     execFileSync('git', ['-C', REPO, 'worktree', 'add', '--detach', wt, 'HEAD'], { stdio: 'ignore' });
@@ -946,7 +992,7 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     fs.writeFileSync(path.join(wt, 'data/hosts.json'), JSON.stringify({ hosts: [{ id: 'h-dead', name: 'my-mac', host: 'mac.example.test', user: 'me', port: 22, transport: 'ssh', createdAt: Date.now() }] }));
     const PORT = await freePort();
     const root7 = path.join(ROOT, 'daemons', 'dead-' + tag); daemonRoots.add(root7);
-    const env = { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_AGENTD_ROOT: root7, VIBESPACE_NODE_MODULES: path.join(REPO, 'node_modules'), PATH: `${BIN7}:${process.env.PATH}` };
+    const env = { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_AGENTD_ROOT: root7, VIBESPACE_NODE_MODULES: path.join(REPO, 'node_modules'), PATH: `${bin}:${process.env.PATH}` };
     const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] }); servers.add(srv);
     let out = ''; srv.stdout.on('data', (d) => { out += d; }); srv.stderr.on('data', (d) => { out += d; });
     let exited = null; srv.on('exit', (c, sig) => { exited = { code: c, sig }; });
@@ -981,6 +1027,20 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     ok(preFix7 !== src7 && ctl.ready, `§7 RED CONTROL setup: the copy without the listener took its edit and its hub booted (${ctl.bootMs} ms — «did not boot» is this red, never «survived»)`, ctl.journal().slice(-600));
     ok(ctl.exitedAfterInstall != null && ctl.exitedAfterInstall.code === 1 && !!ctl.writeErr && ctl.steps.next.status === 'NO ANSWER',
       `§7 RED CONTROL: the same hub with a feedStdin that does not listen DIES of the first stdin road (exit ${JSON.stringify(ctl.exitedAfterInstall)} right after the tools install, «${ctl.writeErr}» in its journal, the next request ${ctl.steps.next.status})`, ctl.journal().slice(-600));
+    // B-1217: THE RACE, PLACED (a stall in its window, never load). The pre-fix copy with its tar write HELD: (a) until the child's
+    // exit — the order the runner hit, forced: Node has destroyed the child's stdin by then, no 'error' comes and the hub LIVES on
+    // the release's fake ssh; (b) 300 ms, well inside the linger — on the lingering ssh the held write still meets EPIPE with the
+    // child alive and the hub DIES: the linger, not the box's timing, decides
+    const STALL7 = "  try { if (bytes == null) stdin.end(); else stdin.end(bytes); } catch (e) { if (!fed.error) fed.error = e; }\n";
+    const held7 = (how) => (preFix7.includes(STALL7) ? preFix7.replace(STALL7, `  ${how}(() => { try { if (bytes == null) stdin.end(); else stdin.end(bytes); } catch (e) { if (!fed.error) fed.error = e; } }${how === 'setTimeout' ? ', 300' : ''}); /* B-1217: the stall placed */\n`) : null);
+    const afterExit7 = held7("child.once('exit', "), stalled7 = held7('setTimeout');
+    ok(!!afterExit7 && !!stalled7 && afterExit7.includes("child.once('exit', (() =>") === false, '§7 the race\'s stall finds its line in the pre-fix copy (the one write of feedStdin)');
+    const raceNow = await deadHub('race-now', afterExit7, { expectDeath: true, bin: BIN7_NOW });
+    ok(raceNow.ready && raceNow.exitedAfterInstall == null,
+      `§7 THE RACE (RED on the release's fake ssh): the write held until the child's exit meets a stdin Node already destroyed — no 'error', the pre-fix hub LIVES (exit ${JSON.stringify(raceNow.exitedAfterInstall)}, next ${raceNow.steps.next.status})`, raceNow.journal().slice(-400));
+    const raceCure = await deadHub('race-cure', stalled7, { expectDeath: true });
+    ok(raceCure.ready && raceCure.exitedAfterInstall != null && raceCure.exitedAfterInstall.code === 1 && !!raceCure.writeErr,
+      `§7 …and on the lingering ssh the SAME held write meets EPIPE while the child lives: the pre-fix hub DIES (exit ${JSON.stringify(raceCure.exitedAfterInstall)}, «${raceCure.writeErr}»)`, raceCure.journal().slice(-400));
   } catch (e) { ok(false, '§7 the dead-machine leg ran', String((e && e.stack) || e).slice(0, 600)); }
 }
 
