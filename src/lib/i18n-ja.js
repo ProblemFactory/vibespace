@@ -13291,6 +13291,7 @@ export default {
   "The approvals could not be read — nothing was written; try again in a moment": "承認の記録を読めませんでした — 何も書き込んでいません。しばらくしてからもう一度お試しください",
   "Its file facts could not be read in time — counted as a program an agent can change.": "ファイル情報を時間内に読めませんでした — agent が変更できるプログラムとして扱います。",
   "Its file facts could not be read in time — counted as a script an agent can change.": "ファイル情報を時間内に読めませんでした — agent が変更できるスクリプトとして扱います。",
+  "A file read for an earlier card did not reply; until it does or the hub restarts, every card says its file facts could not be read.": "以前のカードのファイル読み取りが応答していません。応答するかハブが再起動するまで、どのカードもファイル情報を読めなかったと表示します。",
   "a service that is not restarted by itself — each start gets the secret": "自分では再起動しない service — 起動のたびにこのシークレットを受け取ります",
   "its program reads it once from the descriptor ${var} names — never from its environment, its command line or a file": "プログラムは ${var} が示すディスクリプタから一度だけ読みます — 環境変数・コマンドライン・ファイルは通りません",
   "unknown — VibeSpace cannot read where a program connects": "不明 — VibeSpace はプログラムの接続先を読み取れません",

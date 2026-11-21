@@ -1166,7 +1166,8 @@ function jobCardOf(item, { t = fmt } = {}) {
     { key: 'secret', strip: 1, lines: [[{ text: str(entry.label) || str(entry.ref) }], [{ text: t('its program reads it once from the descriptor ${var} names — never from its environment, its command line or a file', { var: str(entry.var) }) }]] },
     // `unread` (主开发 r850 item 2): the file facts were not read in time — said, and counted as one an agent can change
     { key: 'program', strip: 4, lines: [[{ mono: str(prog.path) }], ...(prog.unread === true ? [[{ text: t('Its file facts could not be read in time — counted as a program an agent can change.') }]] : prog.writable === true ? [[{ text: t('An agent can change this program.') }]] : []),
-      ...(script ? [[{ mono: str(script.path) }], ...(script.unread === true ? [[{ text: t('Its file facts could not be read in time — counted as a script an agent can change.') }]] : script.writable === true ? [[{ text: t('An agent can change this script.') }]] : [])] : [])] },
+      ...(script ? [[{ mono: str(script.path) }], ...(script.unread === true ? [[{ text: t('Its file facts could not be read in time — counted as a script an agent can change.') }]] : script.writable === true ? [[{ text: t('An agent can change this script.') }]] : [])] : []),
+      ...(f.held === true ? [[{ text: t('A file read for an earlier card did not reply; until it does or the hub restarts, every card says its file facts could not be read.') }]] : [])] },   // r1042 item 3: an earlier read holds the door's one slot
     { key: 'folder', lines: [[{ mono: str(f.folder) }]] },
     { key: 'hosts', lines: [[{ text: t('unknown — VibeSpace cannot read where a program connects') }]] },
     { key: 'lock', lines: [[{ text: t('it keeps running; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it') }], [{ text: t('Taking it back — ✕ on its Vault row or on the job card — stops it at once.') }]] },

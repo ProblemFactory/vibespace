@@ -611,7 +611,7 @@ async function legFactsOffLoop(doorSrc = null) {
   let last = performance.now(), gap = 0;
   const iv = setInterval(() => { const t = performance.now(); gap = Math.max(gap, t - last); last = t; }, 5);   // the loop's turns, while the read runs
   const t0 = performance.now();
-  const p = await D.programFacts({ argv: [process.execPath, '/srv/stalled/bot.js'], cwd: '/srv/stalled' }, { fsp: st.fsp, ms: BOUND_MS, state: { stuck: 0 } });
+  const p = await D.programFacts({ argv: [process.execPath, '/srv/stalled/bot.js'], cwd: '/srv/stalled' }, { fsp: st.fsp, ms: BOUND_MS, state: D.newReadState() });
   const answeredThen = st.answered();   // the facts came back BEFORE any stalled read answered ⇔ the bound ended the read
   const took = Math.round(performance.now() - t0);
   clearInterval(iv);
@@ -635,17 +635,66 @@ async function legFactsCard() {
   W.end();
   return rows;
 }
-async function legWrapperSkip() {
+async function legWrapperSkip(doorSrc = null) {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
-  const D = doorOf(null);
+  const D = doorOf(doorSrc);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `${PREFIX}wrap-`)); ROOTS.add(dir);
   const script = path.join(dir, 'bot.js'); fs.writeFileSync(script, '// a scratch script\n');
   const node = fs.realpathSync(process.execPath), real = fs.realpathSync(script);
-  const cases = [['timeout', '3600'], ['nohup'], ['nice', '-n', '5'], ['env', 'A=1', 'B=2'], ['timeout', '--signal=KILL', '30s', 'nice', '-n', '5'], []];
-  const got = [];
-  for (const pre of cases) { const p = await D.programFacts({ argv: [...pre, process.execPath, script, '--poll', '60'], cwd: dir }); got.push({ pre: pre.join(' ') || '(none)', program: p.program.path, script: p.script && p.script.path, command: p.command, unread: !!p.program.unread }); }
-  row(got.every((g) => g.program === node && g.script === real && g.command.endsWith('bot.js --poll 60') && !g.unread) && got.slice(0, -1).every((g) => g.command.startsWith(g.pre.split(' ')[0] + ' ')),
-    'THE WRAPPERS IN FRONT (round w6tezed7d): `timeout 3600`, `nohup`, `nice -n 5`, `env A=1 B=2` and two wrappers in a row in front — the card names the program it RUNS (node\'s real path) and its script, the command shown whole', got);
+  // the wrapper itself, as the card would find it on PATH (its real path), or the word as typed when it is not installed
+  const onPath = (w) => { for (const d of String(process.env.PATH || '').split(':').filter(Boolean)) { try { const p = fs.realpathSync(path.join(d, w)); if (fs.statSync(p).isFile()) return p; } catch { } } return w; };
+  const understood = [['timeout', '3600'], ['nohup'], ['nice', '-n', '5'], ['env', 'A=1', 'B=2'], ['timeout', '--signal=KILL', '30s', 'nice', '-n', '5'], [],
+    // 主开发 r1042 item 2: an option that takes a VALUE — never named as the program
+    ['timeout', '-s', 'KILL', '60'], ['timeout', '--signal', 'KILL', '60'], ['timeout', '-k', '5', '60'], ['env', '-u', 'HOME'], ['env', '-C', dir], ['stdbuf', '-o', 'L'], ['stdbuf', '-oL'], ['taskset', '0x3'], ['taskset', '-c', '0-1'], ['nice', '-5']];
+  const notUnderstood = [['timeout', '--weird', '5'], ['env', '-S', 'node bot.js'], ['taskset', '-p', '123'], ['stdbuf', '-x', 'L']];
+  const got = [], wrap = [];
+  for (const pre of understood) { const p = await D.programFacts({ argv: [...pre, process.execPath, script, '--poll', '60'], cwd: dir }); got.push({ pre: pre.join(' ') || '(none)', program: p.program.path, script: p.script && p.script.path, command: p.command, unread: !!p.program.unread }); }
+  for (const pre of notUnderstood) { const p = await D.programFacts({ argv: [...pre, process.execPath, script], cwd: dir }); wrap.push({ pre: pre.join(' '), program: p.program.path, want: onPath(pre[0]), script: p.script && p.script.path, command: p.command }); }
+  rows.got = got;
+  row(got.every((g) => g.program === node && g.script === real && g.command.endsWith('bot.js --poll 60') && !g.unread) && got.filter((g) => g.pre !== '(none)').every((g) => g.command.startsWith(g.pre.split(' ')[0] + ' ')),
+    'THE WRAPPERS IN FRONT (rounds w6tezed7d, whmslzr9y): `timeout 3600`, `nohup`, `nice -n 5`, `env A=1 B=2`, two in a row — and an option that takes a VALUE (`timeout -s KILL 60`, `--signal KILL`, `-k 5`, `env -u HOME`, `env -C <dir>`, `stdbuf -o L`, `stdbuf -oL`, `taskset 0x3`, `taskset -c 0-1`, `nice -5`): the card names the program it RUNS (node\'s real path) and its script — never an option\'s value', got.filter((g) => !(g.program === node && g.script === real && g.command.endsWith('bot.js --poll 60') && !g.unread && (g.pre === '(none)' || g.command.startsWith(g.pre.split(' ')[0] + ' ')))));   // the cases that missed, whatever they missed
+  row(wrap.every((w) => w.program === w.want && !w.script && w.command.startsWith(w.pre.split(' ')[0] + ' ')),
+    'a word the wrapper\'s grammar does not know (`timeout --weird`, `env -S`, `taskset -p`, `stdbuf -x`): the card names THE WRAPPER itself — what is literally run — the whole command as typed', wrap);
+  return rows;
+}
+// ⑫c THE SECOND FOLLOW (主开发 r1042 — the narrow round whmslzr9y): ONE read on the pool at a time · a held read said · the wrappers' words
+const heldFs = () => {
+  const calls = []; let open = null;
+  const gate = new Promise((r) => { open = r; });
+  // the door's own timers are unref'd (they never hold the hub up): this ONE ref'd, bounded timer keeps the suite alive while a read is held
+  const keep = setTimeout(() => { }, 15000);
+  const free = () => { clearTimeout(keep); open(); };
+  const fake = { uid: 0, mode: 0o40755, isFile: () => true };
+  const on = (p, v) => { calls.push(String(p)); return String(p).startsWith('/srv/held/') ? gate.then(() => v) : Promise.resolve(v); };   // a path under /srv/held never replies until free()
+  return { fsp: { stat: (p) => on(p, fake), realpath: (p) => on(p, p) }, calls, free };
+};
+async function legOneSlot(doorSrc = null) {
+  const D = doorOf(doorSrc), h = heldFs(), state = D.newReadState();
+  const a = D.programFacts({ argv: ['/srv/held/bin/prog'], cwd: '/srv/held' }, { fsp: h.fsp, ms: 300, state });
+  const b = D.programFacts({ argv: ['/srv/ok/bin/prog'], cwd: '/srv/ok' }, { fsp: h.fsp, ms: 300, state });   // a SECOND card, filed while the first's read is held
+  const [pa, pb] = await Promise.all([a, b]);
+  const out = { a: pa.program, b: pb.program, okReads: h.calls.filter((c) => c.startsWith('/srv/ok/')).length, heldReads: h.calls.filter((c) => c.startsWith('/srv/held/')).length };
+  h.free();
+  return out;
+}
+async function legHeldSaid() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('heldsaid');
+  const h = heldFs(), logs = [];
+  const D = doorOf(null).create({ vault: W.vault, grants: () => W.grants, userTodos: W.todos, fsp: h.fsp, factsMs: 300, log: (m) => logs.push(String(m)) });
+  const fake = (n, dir) => ({ id: `jb-1f00010${n}`, kind: 'task', owner: { conversation: { id: 'conv-a' } }, cmd: { argv: [`${dir}/bin/prog`], cwd: dir }, vault: [{ name: 'TOK', ref: 'vault://agent:conv-a/tok' }] });
+  const factsOf = (n) => ((cards(W).find((i) => i.action.jobId === `jb-1f00010${n}`)) || {});
+  D.ask(fake(1, '/srv/held'), { missing: ['TOK'] }); await D.factsLanded();   // its folder never replies
+  D.ask(fake(2, '/srv/ok'), { missing: ['TOK'] }); await D.factsLanded();     // a later card, a healthy folder: the slot is held
+  const okBefore = h.calls.filter((c) => c.startsWith('/srv/ok/')).length, said = logs.filter((l) => /did not reply/.test(l));
+  h.free();                                                                    // the held read replies: the slot is free again
+  D.ask(fake(3, '/srv/ok'), { missing: ['TOK'] }); await D.factsLanded();
+  const c1 = factsOf(1), c2 = factsOf(2), c3 = factsOf(3), f1 = c1.facts || {}, f2 = c2.facts || {}, f3 = c3.facts || {};
+  row(!!c1.id && f1.program && f1.program.unread === true && !f1.held && !!c2.id && f2.program && f2.program.unread === true && f2.held === true && okBefore === 0 && /every card says its file facts could not be read/.test(String(c2.detail || '')) && said.length === 1,
+    'A READ THAT NEVER REPLIES (主开发 r1042 items 1 + 3): its card says «could not be read in time»; a LATER card, on a healthy folder, reads nothing while that read holds the slot — still filed, its card says the earlier read did not reply and that this lasts until it replies or the hub restarts; the journal says it ONCE', { f1: f1.program, f2: { program: f2.program, held: f2.held }, okBefore, said });
+  rows[rows.length - 1].push(said);   // the journal lines it judged
+  row(!!c3.id && f3.program && !f3.program.unread && !f3.held && f3.program.writable === false, '…and once that read REPLIES the slot is free: the next card reads its facts again (root-owned here: not writable)', f3.program);
+  W.end();
   return rows;
 }
 async function legClosedElsewhere(doorSrc = null) {
@@ -1059,6 +1108,10 @@ const [held, heldMut] = await Promise.all([legHeld(), MUT_HELD ? legHeld(MUT_HEL
 const MUT_NOBOUND = dmut('t = setTimeout(() => res(LATE), left);', 't = setTimeout(() => res(LATE), left + 60e3);');
 const MUT_SYNCREAD = dmut('const realOf = async (p) => (await call((x) => fsp.realpath(x), p)).v || null;', 'const realOf = async (p) => fsp.realpathSync(p);');
 const MUT_ONSTATUS = dmut("  if (userTodos && typeof userTodos.onStatus === 'function') {\n", '  if (false) {\n');
+// ⑫c's controls: the slot guard cut (a second card reads while the first is held) · an option's value named as the program (planted)
+const MUT_NOSLOT = dmut('    if (!(await slot())) throw LATE;', '    void slot;');
+const MUT_VALUEPROG = dmut('function pastWrapper(argv, i) {\n', "function pastWrapper(argv, i) {\n  if (argv[i + 1] === '-s') return i + 2;\n");
+const [oneSlot, oneSlotMut, heldSaid, wrapMut] = await Promise.all([legOneSlot(), MUT_NOSLOT ? legOneSlot(MUT_NOSLOT) : null, legHeldSaid(), MUT_VALUEPROG ? legWrapperSkip(MUT_VALUEPROG) : null]);
 const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
   legFactsCard(), legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls()]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
@@ -1106,6 +1159,12 @@ ok(!!MUT_NOBOUND && !!offNoBound && offNoBound.answeredThen > 0, 'CONTROL — th
 ok(!!MUT_SYNCREAD && !!offSync && offSync.sync > 0, 'CONTROL — the read made SYNCHRONOUS: the placed stall is read on the loop\'s own thread (each a held turn) — RED on the copy', MUT_SYNCREAD ? offSync && { sync: offSync.sync, gap: offSync.gap } : 'the copy could not be built (its anchor is missing)');
 print('⑫b THE CARD AT ITS LANDING · THE WRAPPERS IN FRONT · A CARD CLOSED ELSEWHERE · A RESTART AFTER A TAKE-BACK · THE SMALLS', [...factsCard, ...wrapSkip, ...closedElse, ...restartRevoke, ...smalls]);
 ok(!!MUT_ONSTATUS && closedMut.state === 'waiting', 'CONTROL — another door\'s close not heard (the store\'s listener removed): the job waits for ever with no card — RED on the copy', MUT_ONSTATUS ? closedMut.state : 'the copy could not be built (its anchor is missing)');
+{ const o = oneSlot || {};
+  ok(!!o.a && o.a.unread === true && !!o.b && o.b.unread === true && o.okReads === 0 && o.heldReads === 1,
+    'ONE READ ON THE POOL AT A TIME (主开发 r1042 item 1): a SECOND card filed while the first card\'s read is held reads NOTHING (its facts «could not be read in time»), the held read the only one taken', o); }
+ok(!!MUT_NOSLOT && !!oneSlotMut && oneSlotMut.okReads > 0, 'CONTROL — the slot guard cut: the second card reads while the first is held (another pool thread) — RED on the copy', MUT_NOSLOT ? oneSlotMut && { okReads: oneSlotMut.okReads } : 'the copy could not be built (its anchor is missing)');
+print('⑫c A HELD READ, SAID · THE NEXT CARD READS AGAIN', heldSaid);
+ok(!!MUT_VALUEPROG && !!wrapMut && ((wrapMut.got || []).find((g) => g.pre === 'timeout -s KILL 60') || {}).program === 'KILL', 'CONTROL — an option\'s value taken for the program (planted: `-s` skipped without its value): the card says «Program: KILL» — RED on the copy', MUT_VALUEPROG ? wrapMut && ((wrapMut.got || []).find((g) => g.pre === 'timeout -s KILL 60') || {}) : 'the copy could not be built (its anchor is missing)');
 print('⑪ WHAT THE OWNER SEES (L2) — the Vault row\'s jobs, a job\'s uses, the starts counted, the chips', [...surfaces, ...chips]);
 ok(!!MUT_STARTS && surfacesMut.starts === 0, 'CONTROL — the Vault row\'s starts never counted (the door\'s tally removed): «started 0×» for a job that started — RED on the copy', MUT_STARTS ? surfacesMut.starts : 'the copy could not be built (its anchor is missing)');
 console.log('⑦ MUTANTS');

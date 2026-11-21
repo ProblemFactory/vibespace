@@ -56,23 +56,87 @@ const SS = require('../secret-shapes.js');   // the card's command, folder and p
 // OFF THE LOOP, BOUNDED (主开发 r850 item 2 — the three readers of round w6tezed7d: the paths are an agent's, a job's folder is
 // usually on the workspace mount, and the blocked mark does not cover a mount that is slow or newly hung): every stat / realpath
 // goes through fs.promises (the threadpool) and races the card's ONE deadline (FACTS_MS); a fact not read by then is said
-// «could not be read» and counted as one an agent can change (fail closed). A read past its deadline still holds its thread: while
-// one is (`state.stuck`), a new card's facts are not read at all — each is «could not be read» at once (one hung mount holds no
-// more threads than the reads it already took).
+// «could not be read» and counted as one an agent can change (fail closed). ONE read holds a pool thread at a time (below).
 const DOOR = require('../mount-door.js');
 const FACTS_MS = 2000;
 const LATE = Symbol('late');
-async function programFacts(cmd = {}, { fsp = fs.promises, ms = FACTS_MS, state = { stuck: 0 } } = {}) {
+// ONE READ ON THE POOL AT A TIME, DOOR-WIDE (主开发 r1042 item 1 — the narrow round whmslzr9y: the reads started before a first deadline
+// could each hold a thread of the hub's shared file pool, and one that never returns holds it for ever): a read waits for THE slot until
+// its card's deadline; the slot is freed only when the read RETURNS — a read past its deadline keeps it (`late`) — so a mount that never
+// replies holds ONE thread, never more. A card that cannot have the slot before its deadline reads nothing («could not be read in time»)
+// and is still filed and decidable; while an earlier read holds the slot past its deadline its card says so (`held`), and the journal
+// says it once per such read.
+const newReadState = () => ({ busy: false, waiters: [], late: false, said: false });
+// THE WRAPPERS' OWN WORDS (主开发 r1042 item 2): each wrapper's options that take a VALUE (the next word, or `--opt=value`), its flags,
+// its positional words — the card names the program a wrapper runs ONLY when every word before it was understood; a word this table
+// does not know ⇒ the card names the outermost wrapper itself (what is literally run), the whole command shown as typed
+const WRAP_GRAMMAR = {
+  timeout: { value: ['-s', '--signal', '-k', '--kill-after'], flags: ['--preserve-status', '--foreground', '-v', '--verbose'], positional: [/^\d+(\.\d+)?[smhd]?$/] },
+  nohup: { value: [], flags: [], positional: [] },
+  nice: { value: ['-n', '--adjustment'], flags: [], positional: [], attached: /^-\d+$/ },
+  env: { value: ['-u', '--unset', '-C', '--chdir'], flags: ['-i', '--ignore-environment', '-0', '--null', '-v', '--debug', '-'], positional: [], assigns: true },
+  setsid: { value: [], flags: ['-c', '--ctty', '-f', '--fork', '-w', '--wait'], positional: [] },
+  stdbuf: { value: ['-i', '--input', '-o', '--output', '-e', '--error'], flags: [], positional: [], attached: /^-[ioe].+$/ },
+  ionice: { value: ['-c', '--class', '-n', '--classdata'], flags: ['-t', '--ignore'], positional: [], attached: /^-[cn]\d+$/ },
+  chrt: { value: [], flags: ['-b', '--batch', '-d', '--deadline', '-f', '--fifo', '-i', '--idle', '-o', '--other', '-r', '--rr', '-R', '--reset-on-fork'], positional: [/^\d+$/] },
+  taskset: { value: [], flags: ['-c', '--cpu-list'], positional: [/^(0x)?[0-9a-fA-F,-]+$/] },
+  time: { value: ['-o', '--output', '-f', '--format'], flags: ['-p', '--portability', '-a', '--append', '-v', '--verbose', '-q', '--quiet'], positional: [] },
+  unbuffer: { value: [], flags: ['-p'], positional: [] },
+};
+/** PURE: the index of the program the wrapper at `i` runs | -1 (not a wrapper, or a word its grammar does not know) */
+function pastWrapper(argv, i) {
+  const g = WRAP_GRAMMAR[VR.toolNameOf(argv[i] || '')];
+  if (!g) return -1;
+  let j = i + 1, pos = 0, ended = false;
+  while (j < argv.length) {
+    const a = argv[j];
+    if (!ended && a === '--') { ended = true; j++; continue; }
+    if (!ended && a.length > 1 && a.startsWith('-') && pos === 0) {
+      const eq = a.indexOf('='), name = eq > 0 ? a.slice(0, eq) : a;
+      if (g.value.includes(name)) { j += eq > 0 ? 1 : 2; continue; }   // its value: attached (=) or the next word
+      if (g.flags.includes(a) || (g.attached && g.attached.exec(a))) { j++; continue; }
+      return -1;   // an option this table does not know: the card names the wrapper
+    }
+    if (!ended && a === '-' && g.flags.includes('-')) { j++; continue; }
+    if (g.assigns && pos === 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(a)) { j++; continue; }
+    if (pos < g.positional.length) { if (!g.positional[pos].exec(a)) return -1; pos++; j++; continue; }
+    break;   // the program
+  }
+  return pos < g.positional.length || j >= argv.length ? -1 : j;
+}
+async function programFacts(cmd = {}, { fsp = fs.promises, ms = FACTS_MS, state: given = null, log = () => { } } = {}) {
+  const state = given && Array.isArray(given.waiters) ? given : newReadState();   // a state of another shape starts a fresh one (never a crash in release)
   const deadline = Date.now() + ms;
+  let held = false;   // a fact not read because an EARLIER read holds the slot past its own deadline (it never replied)
+  const slot = () => {
+    if (!state.busy) { state.busy = true; return Promise.resolve(true); }
+    const left = deadline - Date.now();
+    if (left <= 0) { if (state.late) held = true; return Promise.resolve(false); }
+    return new Promise((res) => {
+      let t = null;
+      const w = { go: () => { clearTimeout(t); res(true); } };
+      t = setTimeout(() => { const i = state.waiters.indexOf(w); if (i >= 0) state.waiters.splice(i, 1); if (state.late) held = true; res(false); }, left);
+      if (t.unref) t.unref();
+      state.waiters.push(w);
+    });
+  };
+  const release = () => { if (state.late) { state.late = false; state.said = false; } const w = state.waiters.shift(); if (w) w.go(); else state.busy = false; };
   const call = async (fn, p) => {
     if (DOOR.blocked(p)) return {};   // a mount the sweep found dead: never touched
+    if (!(await slot())) throw LATE;   // THE one slot (a card that cannot have it before its deadline reads nothing)
     const left = deadline - Date.now();
-    if (left <= 0 || state.stuck > 0) throw LATE;
+    if (left <= 0) { release(); throw LATE; }
     const raw = Promise.resolve().then(() => fn(p));
     let t = null;
     const r = await Promise.race([raw.then((v) => ({ v }), () => ({})), new Promise((res) => { t = setTimeout(() => res(LATE), left); if (t.unref) t.unref(); })]);
     clearTimeout(t);
-    if (r === LATE) { state.stuck++; raw.then(() => { state.stuck--; }, () => { state.stuck--; }); throw LATE; }
+    if (r === LATE) {
+      state.late = true;
+      if (!state.said) { state.said = true; try { log(`[vault-job] a file read for a Background job's approval card did not reply within ${ms} ms (in ${SS.redactSecrets(path.dirname(String(p))).text}) — every later card says its file facts could not be read until it replies or the hub restarts`); } catch { } }
+      raw.then(release, release);   // the slot is freed only when the read RETURNS
+      throw LATE;
+    }
+    release();
     return r;
   };
   const rootOwned = async (p) => { const r = await call((x) => fsp.stat(x), p); return !!(r.v && r.v.uid === 0 && (r.v.mode & 0o022) === 0); };
@@ -89,16 +153,17 @@ async function programFacts(cmd = {}, { fsp = fs.promises, ms = FACTS_MS, state 
     for (const d of PATH.split(':').filter(Boolean)) { const r = await realOf(path.join(path.resolve(cwd, d), n)); if (r && await isFile(r)) return r; }
     return null;
   };
-  // a WRAPPER runs the program (`timeout 3600 python3 bot.py`, `nohup`, `nice -n 5`, `env A=1 …` — the second adversarial read):
-  // the program on the card is the one it runs; the wrapper's own options, durations and NAME=value words are skipped
-  const WRAPS = new Set(['timeout', 'nohup', 'nice', 'env', 'setsid', 'stdbuf', 'ionice', 'chrt', 'taskset', 'time', 'unbuffer']);
+  // a WRAPPER runs the program (`timeout 3600 python3 bot.py`, `nohup`, `nice -n 5`, `env A=1 …`): the program on the card is the one it
+  // runs ONLY when its grammar (WRAP_GRAMMAR) understood every word before it — else the outermost wrapper itself is named
   const whole = argv.slice();   // the command as it runs — the card shows it whole
   let at = 0;
-  for (let guard = 0; guard < 4 && at < argv.length && WRAPS.has(VR.toolNameOf(argv[at] || '')); guard++) {
-    at++;
-    while (at < argv.length && (/^-/.test(argv[at]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[at]) || /^\d+(\.\d+)?[smhd]?$/.test(argv[at]))) at++;
+  for (let guard = 0; guard < 4 && WRAP_GRAMMAR[VR.toolNameOf(argv[at] || '')]; guard++) {
+    const nx = pastWrapper(argv, at);
+    if (nx < 0) { at = 0; break; }   // a word not understood: what is literally run is named
+    at = nx;
   }
-  if (at > 0 && at < argv.length) argv.splice(0, at);
+  if (at > 0 && WRAP_GRAMMAR[VR.toolNameOf(argv[at] || '')]) at = 0;   // wrappers deeper than four: the outermost is named
+  if (at > 0) argv.splice(0, at);
   let real = null, unread = false, writable = true;
   try { real = await find(argv[0]); if (real) writable = !(await chainRootOwned(real)); } catch (e) { unread = late(e); writable = true; }
   const tool = VR.toolNameOf(argv[0] || '', real).replace(/[\d.]+$/, '');
@@ -120,7 +185,7 @@ async function programFacts(cmd = {}, { fsp = fs.promises, ms = FACTS_MS, state 
     }
   }
   const mask = (s) => SS.redactSecrets(String(s)).text;
-  return { program: { path: mask(real || String(argv[0] || '')), writable, ...(unread ? { unread: true } : {}) }, script: script ? { ...script, path: mask(script.path) } : null, folder: mask(cwd), command: mask(whole.map((a) => (a === '' || /[\s'"\\$`]/.test(a) ? JSON.stringify(a) : a)).join(' ')) };
+  return { ...(held ? { held: true } : {}), program: { path: mask(real || String(argv[0] || '')), writable, ...(unread ? { unread: true } : {}) }, script: script ? { ...script, path: mask(script.path) } : null, folder: mask(cwd), command: mask(whole.map((a) => (a === '' || /[\s'"\\$`]/.test(a) ? JSON.stringify(a) : a)).join(' ')) };
 }
 
 /**
@@ -280,7 +345,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     // it by name, as a refusal here would have
     const keys = fresh.map((r) => `${jobId}\n${r.id}`);
     for (const [i, r] of fresh.entries()) pend.set(keys[i], { jobId, conv, entry: r.id });
-    const work = programFacts(cmd, { fsp, ms: factsMs, state: readState })
+    const work = programFacts(cmd, { fsp, ms: factsMs, state: readState, log })
       .then((p) => fileCards({ job, jobId, o, conv, who, label, head, fresh, p }))
       .catch((e) => { log(`[vault-job] the approval card of ${jobId} could not be filed (${(e && e.message) || e})`); refuseLater(jobId, named('ask_unfiled')); })
       .finally(() => { for (const k of keys) pend.delete(k); });
@@ -288,7 +353,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     return { ok: true, filed: 0, reading: fresh.length };
   }
   const pend = new Map();   // `${jobId}\n${entry id}` → { jobId, conv, entry } — a card whose file facts are being read
-  const inflight = new Set(), readState = { stuck: 0 };
+  const inflight = new Set(), readState = newReadState();
   /** → a promise that resolves once no card's file facts are being read (the suites wait on it — never a fixed sleep) */
   function factsLanded() { return inflight.size ? Promise.allSettled([...inflight]).then(() => factsLanded()) : Promise.resolve(); }
   const refuseLater = (jobId, v) => { try { if (jm && typeof jm.vaultRefused === 'function') jm.vaultRefused(jobId, v, 'vault-card-unfiled'); } catch (e) { log(`[vault-job] ${jobId}: its card could not be filed and the job could not be refused (${(e && e.message) || e})`); } };
@@ -528,4 +593,4 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   return { gate, payload, noteUses, blocked, onChange, ask, answer, askOver, revoke, dropRow, entryGone, jobGone, rowFacts, usesOf, bindJobs, factsLanded };
 }
 
-module.exports = { create, programFacts, FACTS_MS };
+module.exports = { create, programFacts, pastWrapper, newReadState, FACTS_MS, WRAP_GRAMMAR };

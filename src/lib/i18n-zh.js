@@ -13292,6 +13292,7 @@ export default {
   "The approvals could not be read — nothing was written; try again in a moment": "批准记录读不到——什么也没写；请稍后再试",
   "Its file facts could not be read in time — counted as a program an agent can change.": "它的文件信息没能及时读到——按 agent 能改的程序算。",
   "Its file facts could not be read in time — counted as a script an agent can change.": "它的文件信息没能及时读到——按 agent 能改的脚本算。",
+  "A file read for an earlier card did not reply; until it does or the hub restarts, every card says its file facts could not be read.": "之前一张卡片的文件读取没有回应；在它回应或 hub 重启之前，每张卡片都会说读不到它的文件信息。",
   "a service that is not restarted by itself — each start gets the secret": "一个不会自己重启的 service——每次启动都会拿到这个密钥",
   "its program reads it once from the descriptor ${var} names — never from its environment, its command line or a file": "程序从 ${var} 指定的描述符读它一次——绝不经过环境变量、命令行或文件",
   "unknown — VibeSpace cannot read where a program connects": "未知——VibeSpace 读不出一个程序会连到哪里",

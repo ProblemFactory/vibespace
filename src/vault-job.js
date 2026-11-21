@@ -258,7 +258,7 @@ const kindKeyOf = (kind, restart) => (kind === 'service' ? (restart === 'never' 
 // agent's — a reordering / invisible character is SHOWN as ⟦U+XXXX⟧ (never drawn), a line break or a tab becomes a space
 const cardClip = (s) => { const t = HC.revealHidden(String(s == null ? '' : s)).replace(/[\u0000-\u001f\u007f]/g, ' '); return t.length > CARD_LINE_MAX ? `${t.slice(0, CARD_LINE_MAX - 1)}…` : t; };
 const fillLine = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
-function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null, folder = '', command = '' } = {}) {
+function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null, folder = '', command = '', held = false } = {}) {
   const kind = ['service', 'cron', 'task'].includes(job.kind) ? job.kind : 'task';
   const restart = kind === 'service' && ['always', 'on-failure', 'never'].includes(job.restart) ? job.restart : null;
   const f = {
@@ -266,7 +266,7 @@ function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null
     entry: { label: cardClip(entry.label || entry.id || ''), ref: cardClip(entry.ref || ''), var: `${entry.name || ''}_FD` },
     program: { path: cardClip(program.path || ''), writable: program.writable === true, ...(program.unread === true ? { unread: true } : {}) },   // unread: its file facts were not read in time (counted writable)
     ...(script && script.path ? { script: { path: cardClip(script.path), writable: script.writable === true, ...(script.unread === true ? { unread: true } : {}) } } : {}),
-    folder: cardClip(folder), command: cardClip(command), dest: 'unknown', lock: 'runs-on',
+    folder: cardClip(folder), command: cardClip(command), dest: 'unknown', lock: 'runs-on', ...(held === true ? { held: true } : {}),   // held: an earlier read holds the door's one slot (it never replied)
   };
   // ≤ 12 lines whatever the facts (the store keeps an item's first 12 i18n lines — src/user-todos.js normalizeI18n): «an agent
   // can change it» rides its path's own line
@@ -279,6 +279,7 @@ function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null
       : f.program.writable ? { key: i18nKey('Program: {path} — an agent can change this program.'), params: { path: f.program.path } } : { key: i18nKey('Program: {path}'), params: { path: f.program.path } },
     ...(f.script ? [f.script.unread ? { key: i18nKey('Script: {path} — its file facts could not be read in time; counted as one an agent can change.'), params: { path: f.script.path } }
       : f.script.writable ? { key: i18nKey('Script: {path} — an agent can change this script.'), params: { path: f.script.path } } : { key: i18nKey('Script: {path}'), params: { path: f.script.path } }] : []),
+    ...(f.held ? [{ key: i18nKey('A file read for an earlier card did not reply; until it does or the hub restarts, every card says its file facts could not be read.') }] : []),   // 主开发 r1042 item 3: said to the person — it lasts until that read replies or the hub restarts
     { key: i18nKey('Folder: {folder}'), params: { folder: f.folder } },
     { key: i18nKey('Command: {command}'), params: { command: f.command } },
     { key: i18nKey('Where it sends the secret: unknown — VibeSpace cannot read where a program connects.') },

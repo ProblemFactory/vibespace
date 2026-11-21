@@ -53,7 +53,7 @@ fs.writeFileSync(path.join(wt, 'vjc-bot.js'), "const fs = require('fs'); for (co
 const seedFile = path.join(wt, 'vjc-seed.cjs');
 fs.writeFileSync(seedFile, `'use strict';
 const path = require('path'), crypto = require('crypto');
-const tree = process.argv[2], PW = process.argv[3], dd = path.join(tree, 'data');
+const tree = process.argv[2], PW = process.env.VJC_SECOND, dd = path.join(tree, 'data');
 const R = (p) => require(path.join(tree, p));
 (async () => {
   const v = R('src/server/vault-engine.js').create({ dataDir: dd, log: { log() { }, warn() { } }, idleTimer: false, register: false });
@@ -82,7 +82,7 @@ const R = (p) => require(path.join(tree, p));
   process.exit(0);
 })().catch((e) => { console.error(e && e.stack || e); process.exit(1); });
 `);
-const sr = spawnSync(process.execPath, [seedFile, wt, SECOND], { cwd: wt, encoding: 'utf8', timeout: 120000, env: { PATH: process.env.PATH, HOME: home, LANG: 'C.UTF-8', VS_NO_REAL_CLI: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1' } });
+const sr = spawnSync(process.execPath, [seedFile, wt], { cwd: wt, encoding: 'utf8', timeout: 120000, env: { PATH: process.env.PATH, HOME: home, LANG: 'C.UTF-8', VS_NO_REAL_CLI: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1', VJC_SECOND: SECOND } });   // the second password rides the env, never argv
 let S = null;
 try { S = JSON.parse(String(sr.stdout || '').trim().split('\n').pop()); } catch { S = null; }
 ok(!!(sr.status === 0 && !!S), 'the seed (a child that exited): a vault with three keys the owner stored, three jobs over them, ONE approved by its grant row', { status: sr.status, err: String(sr.stderr || '').slice(0, 800) });
@@ -152,8 +152,9 @@ const pressAllow = async () => {
   }
   return null;
 };
-// on screen: scrolled to first (as a person does), then inside the viewport, its size said
-const inView = (sel) => evalJs(`(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) return null; b.scrollIntoView({ block: 'center' }); const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1 }; })()`);
+// on screen: scrolled to first (as a person does), then inside the viewport AND the topmost element at its centre (nothing covers it —
+// a person can press it: round whmslzr9y), its size said
+const inView = (sel) => evalJs(`(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) return null; b.scrollIntoView({ block: 'center' }); const r = b.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { w: Math.round(r.width), h: Math.round(r.height), inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1, topmost: !!top && (top === b || b.contains(top)) }; })()`);
 
 try {
   // ── THE UNLOCK: the vault the seed set up is locked at the boot; the page unlocks it — the jobs are judged again ──
@@ -186,7 +187,7 @@ try {
   const pw1 = press1 ? await reauthIfAsked() : 'no-ask';
   console.log(`      the Allow presses at 1280: ${JSON.stringify(press1)} (a refusal = the window's arm, said by the window)`);
   const up1 = await until(async () => { const j = await jobOf(S.j1); return j && j.state === 'up' && (j.vaultUses || []).some((x) => x.approved === true) ? j : null; }, 30000, 400);
-  ok(!!(!!allowAt && allowAt.inside && pw1 === 'pw-typed' && !!up1), '③ 1280: Allow (on screen) asks 验证是你 first — the second password in the page\'s own dialog — and the job STARTS by itself, approved', { allowAt, press1, pw1, job: up1 && { state: up1.state } });
+  ok(!!(!!allowAt && allowAt.inside && allowAt.topmost && pw1 === 'pw-typed' && !!up1), '③ 1280: Allow (on screen) asks 验证是你 first — the second password in the page\'s own dialog — and the job STARTS by itself, approved', { allowAt, press1, pw1, job: up1 && { state: up1.state } });
 
   // ④ THE VAULT WINDOW: each approved job is a chip on its secret's row
   await evalJs("window.dispatchEvent(new Event('vs-vault-door')); true");
@@ -195,9 +196,10 @@ try {
   ok(!!(!!c1 && !!c2 && /^Background job: telegram-bot · running · started 1×$/.test(c1[0].words) && /^Background job: weather-poller · running · started 1×$/.test(c2[0].words) && c1[0].x && c2[0].x), '④ the Vault window: «Telegram bot»\'s row and «Weather API»\'s row each carry their job\'s chip — its name · running · started 1× — with its ✕', { c1, c2 });
 
   // ⑤ THE CHIP'S ✕: the theme's confirm ⇒ stopped, the chip gone
+  const xAt = await inView(`.vw-row[data-id="${ROW(S.e2)}"] .vw-job-x`);   // the chip's ✕: on screen, nothing covering it
   await evalJs(`(() => { const r = document.querySelector('.vw-row[data-id=' + ${JSON.stringify(JSON.stringify(ROW(S.e2)))} + ']'); const x = r && r.querySelector('.vw-job-x'); if (x) x.click(); return !!x; })()`);
   const conf = await until(confirmShown, 8000, 150);
-  ok(!!(!!conf && conf.ok && /weather-poller/.test(conf.text) && /cannot be taken back/.test(conf.text) && conf.native === 0), '⑤ the chip\'s ✕ asks in the THEME\'s confirm (a dialog overlay, never a native confirm) naming the job and what cannot be taken back', conf);
+  ok(!!(!!xAt && xAt.inside && xAt.topmost && !!conf && conf.ok && /weather-poller/.test(conf.text) && /cannot be taken back/.test(conf.text) && conf.native === 0), '⑤ the chip\'s ✕ (on screen, the topmost element at its centre) asks in the THEME\'s confirm (a dialog overlay, never a native confirm) naming the job and what cannot be taken back', { xAt, conf });
   await confirmOk();
   const down2 = await until(async () => { const j = await jobOf(S.j2); return j && j.desiredUp === false && j.state !== 'up' && !(j.vaultUses || []).some((x) => x.approved) ? j : null; }, 20000, 400);
   const gone2 = await until(async () => { const c = await chipsOf(S.e2); return c && c.length === 0 ? 'gone' : null; }, 15000);
@@ -212,7 +214,7 @@ try {
   const pw3 = press3 ? await reauthIfAsked() : 'no-ask';
   console.log(`      the Allow presses at 390: ${JSON.stringify(press3)}`);
   const up3 = await until(async () => { const j = await jobOf(S.j3); return j && j.state === 'up' ? j : null; }, 30000, 400);
-  ok(!!(!!allow390 && allow390.inside && allow390.h >= 24 && txt390 === true && pw3 === 'pw-typed' && !!up3), `⑥ 390: «mail-bot»\'s card opens with its Allow ON SCREEN (inside the viewport, ${allow390 ? allow390.w + '×' + allow390.h : '?'} px — the For-you window\'s own action row); Allow ⇒ 验证是你 (a fresh page asks again) ⇒ the job starts`, { allow390, txt390, press3, pw3, job: up3 && up3.state });
+  ok(!!(!!allow390 && allow390.inside && allow390.topmost && allow390.h >= 24 && txt390 === true && pw3 === 'pw-typed' && !!up3), `⑥ 390: «mail-bot»\'s card opens with its Allow ON SCREEN (inside the viewport, ${allow390 ? allow390.w + '×' + allow390.h : '?'} px — the For-you window\'s own action row); Allow ⇒ 验证是你 (a fresh page asks again) ⇒ the job starts`, { allow390, txt390, press3, pw3, job: up3 && up3.state });
   await evalJs('app.openJobs({ forceWindow: true }); true');
   const l3 = await until(async () => { const v = await vaultLineOf(S.j3); return v && v.line && v.x ? v : null; }, 15000);
   const x390 = await inView('.jobs-win .jobs-card[data-job="' + S.j3 + '"] .jobs-vault-x');
@@ -220,7 +222,7 @@ try {
   const conf3 = await until(confirmShown, 8000, 150);
   await confirmOk();
   const down3 = await until(async () => { const j = await jobOf(S.j3); return j && j.desiredUp === false && j.state !== 'up' ? j : null; }, 20000, 400);
-  ok(!!(!!l3 && !!x390 && x390.inside && !!conf3 && conf3.ok && conf3.native === 0 && !!down3), '⑥ 390: the job card\'s ✕ (on screen) asks in the theme\'s confirm ⇒ the job STOPS — no native dialog on any road', { l3, x390, conf3, job: down3 && { state: down3.state, desiredUp: down3.desiredUp } });
+  ok(!!(!!l3 && !!x390 && x390.inside && x390.topmost && !!conf3 && conf3.ok && conf3.native === 0 && !!down3), '⑥ 390: the job card\'s ✕ (on screen) asks in the theme\'s confirm ⇒ the job STOPS — no native dialog on any road', { l3, x390, conf3, job: down3 && { state: down3.state, desiredUp: down3.desiredUp } });
 } catch (e) {
   ok(false, 'the legs ran to their end', String((e && (e.stack || e.message)) || e));
 } finally {
