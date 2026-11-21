@@ -36,6 +36,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - «Who may use it…» no longer saves over a change someone made since you opened it: it shows theirs with your own changes kept, to save again.
 - A file written through a folder link into a paired machine's mounted folder is no longer refused as «not mounted».
 - Where two rows share one folder, a refusal there now names the row that holds it.
+- After VibeSpace restarts, a conversation whose last turn had ended is no longer treated as still working until you open its window.
+- A command Claude Code answers by itself, such as /cost or /model, no longer leaves its conversation marked as working.
 
 ### Changed
 - The chat window's status bar is arranged by what you need: one row on a wide window, the same two rows on a narrow one, nothing hidden behind «⋯».
