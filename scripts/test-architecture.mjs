@@ -7683,7 +7683,7 @@ await section(async () => {
       const c = node.type === 'CallExpression' && node.callee;
       if (!(c && c.type === 'MemberExpression' && c.object.type === 'Identifier' && c.object.name === 'activeSessions' && c.property && ['set', 'delete'].includes(c.property.name))) return;
       n++;
-      const fnNode = anc.slice().reverse().find((a) => /Function/.test(a.type));
+      const fnNode = anc.slice().reverse().find((a) => /Function/.test(a.type) && !(a.generator && anc.some((b) => b !== a && /Function/.test(b.type) && b.start < a.start && b.end > a.end)));   // B-cd4b unit 3: a generator INSIDE a function is that function's own loop (restoreSessions' registerEach) — its sets are judged with it; a top-level generator is judged alone
       if (!fnNode || !src.slice(fnNode.start, fnNode.end).includes('broadcastActiveSessions(')) out.push(`${file}:${src.slice(0, node.start).split('\n').length} ${c.property.name}`);
     });
     return { n, out };
@@ -7700,6 +7700,8 @@ await section(async () => {
   ok(sites >= 8 && silent.length === 0, `§104a every session that enters or leaves the list reaches its ONE notify point (broadcastActiveSessions) — ${sites} set/delete sites${silent.length ? '; SILENT: ' + silent.join(', ') : ''}`);
   const ctl = silentChanges("function a() { activeSessions.set(id, s); broadcastActiveSessions(); }\nfunction b() { activeSessions.delete(id); }\nfunction c() { x.then(() => { activeSessions.set(id, s); }); broadcastActiveSessions(); }", 'planted.js');
   ok(ctl.n === 3 && JSON.stringify(ctl.out) === JSON.stringify(['planted.js:2 delete', 'planted.js:3 set']), `§104a CONTROL: a delete with no broadcast and a set in a callback whose function never broadcasts are both named (${JSON.stringify(ctl.out)})`);
+  const ctlG = silentChanges("function d() { function* g() { activeSessions.set(id, s); } broadcastActiveSessions(); }\nfunction* e() { activeSessions.set(id, s); }", 'planted2.js');   // B-cd4b unit 3
+  ok(ctlG.n === 2 && JSON.stringify(ctlG.out) === JSON.stringify(['planted2.js:2 set']), `§104a CONTROL: a set in a generator inside a function is judged with that function (told), a top-level generator's set alone (SILENT) — ${JSON.stringify(ctlG.out)}`);
 
   const server = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const fnBody = (src, name) => { let body = null; visit(parse(src), (node) => { if (body == null && node.type === 'FunctionDeclaration' && node.id && node.id.name === name) body = src.slice(node.start, node.end); }); return body || ''; };
