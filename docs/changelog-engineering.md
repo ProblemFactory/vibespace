@@ -438,6 +438,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CURE (scripts/ci.mjs): `loopTurn()` — two check phases, a whole poll phase between them — awaited before the pre-build question and before the post-build one; nothing else of heavyGate's order moved.
 - LEGS: NEW fast suite test-ci-heavy-signal — a stub repository's real ci.mjs (a copy with a stall PLACED after the scratch checkout, and one at the build's own start), real `--heavy --isolate` runs side by side: the cure builds nothing / starts no suite; RED controls with each turn cut (the build runs after the signal; a lane starts the suite); the checkout gone, unregistered, the lock released, no verdict on the three exit roads (before, during, after the build).
 
+### bl-accounts B-87fd — an unknown pool holder's reading is filed nowhere; its refusal keeps the release's road (round wr6849r96)
+- THE RULE: a non-hot pool's process whose held member nothing names (no spawn stamp, no ledger row before its start — heldPoolUnknown) has its READING filed under no member: writeCodexReading refuses it (codex is the one non-hot harness), said in the journal with its count at the 1st, 10th, 100th …; before, every reading resolver fell back to the pool's link member, so a member the process may not hold carried its numbers.
+- THE ROUND'S MUST (cured): the first cut answered «nothing» from readingSlotFor, which the codex limit banner (a REFUSAL) asks too — it fell to the link as it is NOW, so after another conversation's wall moved the default A → B, the unknown holder's failed turn marked healthy B. readingSlotFor is the release's again: a refusal walks back to the member the request went out on (A). test-codex-pool (17c) plays that scene (A marked, never B) with the early answer as its RED.
+- Said and pinned with it: a key's live probe never takes an unknown holder as its carrier; an exhausted push of it signals no wall and feeds no wake (the wall rides the failed turn); its fresh non-limited reading still feeds its own conversation's idle wake, through the codex producer's ONE call of the shared reading edge; a person's ⟳ on it is refused as holder_unknown (route 409) before any read. Each refusal line has its own red control.
+- Gate: test-harness-contract's wiring law (the edge keeps exactly two producers) caught a second codex call of the edge in the first cure; the producer now calls it once, from both of its roads.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
