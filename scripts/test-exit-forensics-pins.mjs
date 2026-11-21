@@ -120,6 +120,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/server/cli-cmd.js': [2, "the CLI location ask (lane cli-shell-truth, B-fb02; declared by int378): runShell's OWN probe shell — the child by its pid, then its own session's group (detached ⇒ setsid ⇒ pgid = its pid), at the answer or the 10 s bound; never a session, its exit never judged"],
     'src/agentd/attach-cli.js': [1, 'device: an attach client'],
     'src/agentd/client.js': [1, 'device: an attach client'],
+    'src/discovery-facts.js': [1, "device: the discovery walk's OWN child (our execFile handle — lane lg-remote-hardening, B-5278 unit 2), ended by SIGKILL when it is let go past DISCOVERY_STUCK_MS — never a conversation"],
     'src/dial-session-bridge.js': [5, 'device: dial bridge handles (+ dial-bridge-credit: a pty opened for an attach that went away is ended at the open)'],
     'src/server/dial-pairing.js': [1, 'device: a pairing handle'],
     'src/hosts.js': [1, 'device: an install child on a timeout'],

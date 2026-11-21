@@ -948,21 +948,28 @@ function snapshotChildVerdict(err, stdout) {
 // CHILD AT A TIME a machine: an ask that meets a walk in flight JOINS it; a walk older than DISCOVERY_STUCK_MS (its bound
 // and a hold window — a child stuck in an uninterruptible read outlives its kill) is let go and said, so at most one stuck
 // child a window is left behind, never one an ask.
-const DISCOVERY_ANSWER_MS = 10 * 1000, DISCOVERY_STUCK_MS = 60 * 1000;
+// (round wl11e5xw6) 8 s, not 10: the hub's 12 s covers the connect, the send and the kept snapshot's transfer too
+const DISCOVERY_ANSWER_MS = 8 * 1000, DISCOVERY_STUCK_MS = 60 * 1000;
 async function snapshotReply({ runChild, kept, now = Date.now, answerBy = DISCOVERY_ANSWER_MS, stuckAfter = DISCOVERY_STUCK_MS, timers = { setTimeout, clearTimeout }, log = () => { } }) {
   if (kept.inflight && now() - kept.inflight.startedAt > stuckAfter) {
-    try { log(`[discovery] the walk started ${Math.round((now() - kept.inflight.startedAt) / 1000)} s ago never ended (past its bound and a hold window): let go, a new one walks`); } catch { }
+    try { log(`[discovery] the walk started ${Math.round((now() - kept.inflight.startedAt) / 1000)} s ago never ended (past its bound and a hold window): ended, a new one walks`); } catch { }
+    // (round wl11e5xw6) the let-go child is ENDED by its held handle, never only forgotten (a home that never answers piled one up
+    // a minute); a child truly stuck in an uninterruptible read may outlive even this — at most one a window, said
+    try { if (kept.inflight.child && typeof kept.inflight.child.kill === 'function') kept.inflight.child.kill('SIGKILL'); } catch { }
     kept.inflight = null;
   }
   if (!kept.inflight) {
+    // (round wl11e5xw6) each walk has its own number: a landing older than the one kept never replaces it — by a guard of its own
+    const walk = (kept.walks = (kept.walks || 0) + 1);
+    let child = null;
     const p = new Promise((resolve) => {
-      try { runChild((err, stdout) => resolve(snapshotChildVerdict(err, stdout))); } catch (e) { resolve(snapshotChildVerdict(Object.assign(e instanceof Error ? e : new Error(String(e)), { spawnFailed: true }), '')); }
+      try { child = runChild((err, stdout) => resolve(snapshotChildVerdict(err, stdout))); } catch (e) { resolve(snapshotChildVerdict(Object.assign(e instanceof Error ? e : new Error(String(e)), { spawnFailed: true }), '')); }
     }).then((v) => {
       if (kept.inflight && kept.inflight.promise === p) kept.inflight = null;
-      if (v.snap) { kept.snap = v.snap; kept.at = now(); }
+      if (v.snap && walk > (kept.landed || 0)) { kept.snap = v.snap; kept.at = now(); kept.landed = walk; }
       return v;
     });
-    kept.inflight = { promise: p, startedAt: now() };
+    kept.inflight = { promise: p, startedAt: now(), child, walk };
   }
   let timer = null;
   const byDeadline = new Promise((resolve) => { timer = timers.setTimeout(() => resolve({ slow: true }), answerBy); if (timer && timer.unref) timer.unref(); });

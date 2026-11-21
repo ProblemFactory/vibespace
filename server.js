@@ -1089,12 +1089,12 @@ hosts.onUsageEvents = (hostId, text) => {
       try {
         if (!wss.clients.size) return; // nobody to tell — do not spend the scan
         const d = await hosts.discoverSessions(hostId, { ttlMs: 0 });
-        bcastAll({ type: 'remote-sessions', hostId, sessions: d?.sessions || [], at: Date.now() });
+        bcastAll({ type: 'remote-sessions', hostId, sessions: Array.isArray(d) ? d : (d?.sessions || []), at: Date.now() });   // B-5278 (r951): discoverSessions answers the ROWS (an array) — `d.sessions` pushed [] every time
       } catch (e) {
         // An unreachable machine must not silently freeze the list at a state
         // we know is wrong — say so, and let the client keep its labelled
         // last-known copy (the same degrade the pull path already does).
-        try { bcastAll({ type: 'remote-sessions', hostId, error: String(e?.message || e), at: Date.now() }); } catch { }
+        try { bcastAll({ type: 'remote-sessions', hostId, error: String(e?.message || e), ...(typeof e?.code === 'string' && /^discovery-/.test(e.code) ? { code: e.code } : {}), at: Date.now() }); } catch { }
       }
     }, 400));
   };

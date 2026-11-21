@@ -1340,7 +1340,8 @@ const sealedOrders = {
       repointPoolSymlink(actLink, next.dir, next.creds || null);
       this._lastActAt = Date.now();
       const ev = { ts: Date.now(), poolId: o2.poolId, sid, banner: banner.kind, from: currentDir, to: next.id, link: actLink };
-      try { fs.appendFileSync(ORDERS_LOG, JSON.stringify(ev) + '\n'); } catch { }
+      // B-5278 unit 2 (find 2's follow): a torn last line (a crash mid-append, no newline) never swallows the next record
+      try { let lead = ''; try { const st = fs.statSync(ORDERS_LOG); if (st.size > 0) { const fd = fs.openSync(ORDERS_LOG, 'r'); try { const b = Buffer.alloc(1); fs.readSync(fd, b, 0, 1, st.size - 1); if (b[0] !== 10) lead = '\n'; } finally { fs.closeSync(fd); } } } catch (e) { if (!e || e.code !== 'ENOENT') log(`sealed-orders: the report's last byte was not read (${(e && e.code) || e}): the record is appended as it is`); } fs.appendFileSync(ORDERS_LOG, lead + JSON.stringify(ev) + '\n'); } catch { }
       log(`sealed-orders EXECUTED: pool ${o2.poolId} → ${next.id} (banner ${banner.kind} in ${sid}, no orchestrator)`);
     } catch (e) { log('sealed-orders execute failed: ' + e.message); }
   },
@@ -2201,7 +2202,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               // its age said, or that end by name (discovery-facts snapshotReply)
               const r = await require('./../discovery-facts.js').snapshotReply({ kept: discoveryKept, runChild: (cb) => {
                 const { execFile } = require('child_process');
-                execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);
+                return execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);
               }, log });
               if (r.error) { mux.control({ op: 'discovery-result', id: msg.id, error: r.error, code: r.code }); return; }
               snap = r.snap; stale = r.stale || null;
@@ -2227,7 +2228,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               // its age said, or that end by name (discovery-facts snapshotReply)
               const r = await require('./../discovery-facts.js').snapshotReply({ kept: discoveryKept, runChild: (cb) => {
                 const { execFile } = require('child_process');
-                execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);
+                return execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);
               }, log });
               if (r.error) { mux.control({ op: 'discovery-result', id: msg.id, error: r.error, code: r.code }); return; }
               snap = r.snap; stale = r.stale || null;

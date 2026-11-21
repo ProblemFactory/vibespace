@@ -1,5 +1,6 @@
 import { agoText, escHtml, copyText, createPopover, showConfirmDialog, showContextMenu, uiScale } from './utils.js';
 import { t as tr, tc } from './i18n.js';
+import { staleTip } from './stale-words.js'; // B-5278 (r951): a machine that replied is never called unreachable
 import { stampAt as when, clockOf, stampAt as whenAt } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the board status's stored values in words (the walk's task-groups-19 / -23)
 import { registerCommand, registerMenuItem, menuItems } from './contributions.js';
@@ -525,10 +526,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     schip.style.setProperty('--chip-color', 'var(--yellow, #e5c07b)');
     const label = s.staleAt ? tr('last known · {ago}', { ago: agoText(s.staleAt) }) : tr('last known');
     schip.innerHTML = `<span class="chip-icon">⚠</span><span class="chip-text">${escHtml(label)}</span>`;
-    // B-5278 (r908 (4)): a machine that answered, whose walk ran out of time, is not «unreachable»
-    schip.dataset.tip = s.staleWhy
-      ? tr('This machine\'s list could not be read in time — showing its last list, so this session may have changed or ended since.')
-      : tr('This machine was unreachable — showing the last successful scan, so this session may have changed or ended since.');
+    // B-5278 (r908 (4), r951): the words by the row's reason — a machine that answered is never «unreachable» (stale-words.js)
+    schip.dataset.tip = staleTip(s.staleWhy, tr);
     stateChip?.after(schip);
   }
   // Custom config marker: shown when this session has persisted model/effort/permission overrides

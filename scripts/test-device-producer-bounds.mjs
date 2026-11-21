@@ -17,12 +17,17 @@
 //   ⑤ FIND 2: the pool's report parsed every line in ONE try — one torn line answered no event, so the hub acked nothing and
 //     the line stayed, hiding every report for good. The release's parse (a copy) ⇒ 0 events; the tree's: the whole lines,
 //     the torn one counted.
+//   ⑥ r951, THE LAW of item 4: a machine that replied is never called unreachable ANYWHERE its list is drawn — every reason's
+//     words through the one door (src/lib/stale-words.js), the fixed-string search over src/lib, the hub's fallback DRIVEN with
+//     a device that replied «still walking» (RED: today's row and the release's fallback, in copies); ALSO CURED: the dirty push
+//     emptied the list (RED: the release's expression); the smalls: an older landing refused by its walk's number, the let-go
+//     child ended by its handle (controls in copies), the pool append after a torn last line (RED: the release's line).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
@@ -131,22 +136,26 @@ console.log('④ r908: the answer by its deadline, under the hub\'s wait (slow i
   const childBound = Number((AGSRC.match(/\[__filename, '--discovery-snapshot-child'\], \{ windowsHide: true, timeout: (\d+),/) || [])[1]);
   ok(hubSnap > 0 && hubClaims > 0 && DF.DISCOVERY_ANSWER_MS < Math.min(hubSnap, hubClaims) && childBound > DF.DISCOVERY_ANSWER_MS && DF.DISCOVERY_STUCK_MS > childBound,
     `the REAL bounds: the agent answers by ${DF.DISCOVERY_ANSWER_MS} ms, under the hub's waits (${hubSnap} ms the snapshot, ${hubClaims} ms the claims); its child walks on to its own ${childBound} ms; a walk past ${DF.DISCOVERY_STUCK_MS} ms is let go`, { hubSnap, hubClaims, childBound });
-  // a SLOW child (it lands at 1.5 s, inside its own bound) against an answer due at 300 ms
-  const lands = (file) => (cb) => execFile(process.execPath, ['-e', `setTimeout(() => process.stdout.write(JSON.stringify({ jsonls: [{ file: ${JSON.stringify(file)} }], locks: [] })), 1500)`], { timeout: 5000 }, cb);
+  // a SLOW child: a REAL one that lands only when the leg RELEASES it (a line on its stdin) — inside its own bound, so every
+  // order below is placed, never raced against the clock (the suite used to wait 1.5 s a child, seven times)
+  const held = [];
+  const lands = (file) => (cb) => { const c = execFile(process.execPath, ['-e', `process.stdin.once('data', () => process.stdout.write(JSON.stringify({ jsonls: [{ file: ${JSON.stringify(file)} }], locks: [] })))`], { timeout: 5000 }, cb); held.push(c); return c; };
+  const release = () => { for (const c of held.splice(0)) { try { c.stdin.end('go\n'); } catch { } } };
   const oldSnap = { jsonls: [{ file: 'old.jsonl' }], locks: [] };
   const k1 = { snap: oldSnap, at: Date.now() - 60000 };
-  const t0 = Date.now(); const r1 = await DF.snapshotReply({ runChild: lands('late.jsonl'), kept: k1, answerBy: 300, timers: refTimers }); const t1 = Date.now() - t0;
-  ok(r1.snap === oldSnap && r1.stale && r1.stale.why === 'discovery-slow' && r1.stale.ageMs >= 60000 && t1 < 1400 && !!k1.inflight,
-    `a slow walk is answered by its deadline (${t1} ms): the kept snapshot, its age, «discovery-slow» — the child walks on`, { t1, stale: r1.stale });
-  if (k1.inflight) await k1.inflight.promise;
+  const r1 = await DF.snapshotReply({ runChild: lands('late.jsonl'), kept: k1, answerBy: 50, timers: refTimers });
+  ok(r1.snap === oldSnap && r1.stale && r1.stale.why === 'discovery-slow' && r1.stale.ageMs >= 60000 && !!k1.inflight,
+    'a slow walk is answered by its deadline while its child is held (it cannot land before the leg releases it): the kept snapshot, its age, «discovery-slow» — the child walks on', { stale: r1.stale });
+  release(); if (k1.inflight) await k1.inflight.promise;
   ok(k1.snap && k1.snap.jsonls[0].file === 'late.jsonl' && !k1.inflight, 'what it lands is KEPT for the next ask (slow is not hung)');
-  const k2 = { snap: null, at: 0 }, r2 = await DF.snapshotReply({ runChild: lands('x.jsonl'), kept: k2, answerBy: 300, timers: refTimers });
+  const k2 = { snap: null, at: 0 }, r2 = await DF.snapshotReply({ runChild: lands('x.jsonl'), kept: k2, answerBy: 50, timers: refTimers });
   ok(r2.code === 'discovery-slow' && !r2.snap, `nothing kept yet: «${r2.error}», by name`);
-  if (k2.inflight) await k2.inflight.promise;
+  release(); if (k2.inflight) await k2.inflight.promise;
   // JOIN: two asks that meet one walk start ONE child
-  let starts = 0; const counted = (cb) => { starts++; lands('j.jsonl')(cb); };
+  let starts = 0; const counted = (cb) => { starts++; return lands('j.jsonl')(cb); };
   const k3 = { snap: null, at: 0 };
-  const [a3, b3] = await Promise.all([DF.snapshotReply({ runChild: counted, kept: k3, answerBy: 4000, timers: refTimers }), DF.snapshotReply({ runChild: counted, kept: k3, answerBy: 4000, timers: refTimers })]);
+  const pj = Promise.all([DF.snapshotReply({ runChild: counted, kept: k3, answerBy: 4000, timers: refTimers }), DF.snapshotReply({ runChild: counted, kept: k3, answerBy: 4000, timers: refTimers })]);
+  release(); const [a3, b3] = await pj;
   ok(starts === 1 && a3.snap && a3.snap === b3.snap, `two asks that meet one walk JOIN it (${starts} child, one snapshot)`);
   // STUCK: a walk that never ends (its child never calls back) — joined within its window, let go and said ONCE past it
   const said = []; let st4 = 0, clock = 1000;
@@ -161,18 +170,20 @@ console.log('④ r908: the answer by its deadline, under the hub\'s wait (slow i
   // CONTROLS (copies): the deadline cut ⇒ the ask waits for the walk; the join cut ⇒ a child an ask
   const DSRC2 = read('src/discovery-facts.js');
   const NoDeadline = M.load('src/discovery-facts.js', anchored(DSRC2, '  const v = await Promise.race([kept.inflight.promise, byDeadline]);', '  const v = await kept.inflight.promise;', 'answer-deadline-cut'), 'answer-deadline-cut');
-  const t2s = Date.now(); await NoDeadline.snapshotReply({ runChild: lands('c.jsonl'), kept: { snap: oldSnap, at: Date.now() }, answerBy: 300, timers: refTimers }); const t2 = Date.now() - t2s;
-  ok(t2 >= 1400, `CONTROL (the deadline cut, in a copy): the ask waits for the whole walk (${t2} ms, past an answer due at 300 ms) — RED`);
-  const NoJoin = M.load('src/discovery-facts.js', anchored(DSRC2, '  if (!kept.inflight) {\n    const p = new Promise', '  if (true) {\n    const p = new Promise', 'join-cut'), 'join-cut');
-  let starts6 = 0; const counted6 = (cb) => { starts6++; lands('k.jsonl')(cb); };
+  const pd = NoDeadline.snapshotReply({ runChild: lands('c.jsonl'), kept: { snap: oldSnap, at: Date.now() }, answerBy: 50, timers: refTimers });
+  const before = await Promise.race([pd.then(() => 'replied'), new Promise((r) => setTimeout(() => r('still waiting'), 300))]);
+  release(); const r2c = await pd;
+  ok(before === 'still waiting' && !!(r2c.snap && r2c.snap.jsonls[0].file === 'c.jsonl' && !r2c.stale), `CONTROL (the deadline cut, in a copy): the ask waits for the whole walk — no reply while its child is held past an answer due at 50 ms (${before}), then the walk's own landing — RED`);
+  const NoJoin = M.load('src/discovery-facts.js', anchored(DSRC2, '  if (!kept.inflight) {\n', '  if (true) {\n', 'join-cut'), 'join-cut');
+  let starts6 = 0; const counted6 = (cb) => { starts6++; return lands('k.jsonl')(cb); };
   const k6 = { snap: null, at: 0 };
-  await Promise.all([NoJoin.snapshotReply({ runChild: counted6, kept: k6, answerBy: 4000, timers: refTimers }), NoJoin.snapshotReply({ runChild: counted6, kept: k6, answerBy: 4000, timers: refTimers })]);
+  const pn = Promise.all([NoJoin.snapshotReply({ runChild: counted6, kept: k6, answerBy: 4000, timers: refTimers }), NoJoin.snapshotReply({ runChild: counted6, kept: k6, answerBy: 4000, timers: refTimers })]);
+  release(); await pn;
   ok(starts6 === 2, `CONTROL (the join cut, in a copy): two asks start two children (${starts6}) — RED`);
   // the hub and the page: a row's own age kept by the unreachable fallback, its reason carried, the chip's words by it
-  ok(HS.includes('return last.sessions.map((s) => ({ ...s, stale: true, staleAt: s.staleAt || last.at, staleWhy: undefined }));') && HS.includes('staleWhy: (stale && stale.why) || undefined')
-    && read('src/lib/sidebar-workbench.js').includes('staleWhy: s.staleWhy || undefined,') && read('src/lib/session-card.js').includes("tr('This machine\\'s list could not be read in time — showing its last list, so this session may have changed or ended since.')"),
+  ok(HS.includes('const lastKnownRows = (sessions, at, deviceWhy) => sessions.map((s) => ({ ...s, stale: true, staleAt: s.staleAt || at, staleWhy: deviceWhy || undefined }));') && HS.includes('staleWhy: (stale && stale.why) || undefined')
+    && read('src/lib/sidebar-workbench.js').includes('staleWhy: s.staleWhy || undefined,') && read('src/lib/session-card.js').includes('schip.dataset.tip = staleTip(s.staleWhy, tr);'),
     'the hub keeps a row\'s OWN age when its unreachable fallback re-marks a list; the reason rides to the page, whose chip says «could not be read in time» for a machine that answered, «unreachable» only when it did not');
-  for (const lang of ['zh', 'ja']) ok(read(`src/lib/i18n-${lang}.js`).includes('"This machine\'s list could not be read in time — showing its last list, so this session may have changed or ended since.":'), `…its sentence has its ${lang} row`);
 }
 
 console.log('⑤ find 2: the pool\'s report is read line by line — one torn line never hides every report');
@@ -187,6 +198,119 @@ console.log('⑤ find 2: the pool\'s report is read line by line — one torn li
   ok(before.events.length === 0, `THE FAULT, on the release's parse (a copy): one torn line (a crash mid-append) among three whole ones ⇒ ${before.events.length} events reported — the hub acks nothing, the torn line stays, every later report hidden`);
   ok(after.events.length === 3 && after.torn === 1 && after.events.map((e) => e.to).join() === 'a,b,c', `the tree's parse: the three whole switches reported (${after.events.map((e) => e.to).join()}), the torn line left out and counted (${after.torn})`);
   ok(AGSRC.includes("pendingReport() { try { const r = SO.reportOf(fs.readFileSync(ORDERS_LOG, 'utf-8'));"), 'the agent reads its pool report through that parse, and says a torn line once');
+}
+
+console.log('⑥ r951, THE LAW of item 4: a machine that replied is never called unreachable ANYWHERE its list is drawn; the device\'s own reply is remembered through the hub\'s fallback and said');
+{
+  const refTimers = { setTimeout: (fn, ms) => ({ id: setTimeout(fn, ms) }), clearTimeout: (t) => clearTimeout(t && t.id) };   // the leg's own timers stay ref'd
+  const trS = (k, p = {}) => String(k).replace(/\{(\w+)\}/g, (m, n) => (n in p ? String(p[n]) : m));
+  const SW = await import(pathToFileURL(path.join(REPO, 'src/lib/stale-words.js')).href);
+  const REPLIED = ['discovery-slow', 'discovery-timeout', 'discovery-too-large', 'discovery-child-failed', 'discovery-child-unstarted'];
+  const wordsOf = (W, why) => [W.staleTip(why, trS), W.staleZoneText(why, 'gpu-a', trS), W.errorZoneText(why, 'gpu-a', trS), W.errorChipText(why, '', trS)];
+  for (const why of REPLIED) {
+    const w = wordsOf(SW, why);
+    ok(w.every((x) => !/unreachable/i.test(x)) && /in time/.test(w[1]) === (why === 'discovery-slow' || why === 'discovery-timeout'),
+      `a machine that replied «${why}»: the chip's tip, the zone's row (an old list / no list) and the row's chip never say «unreachable» («${w[1]}» · «${w[2]}» · «${w[3]}»)`, w);
+  }
+  const silent = wordsOf(SW, undefined), again = wordsOf(SW, 'discovery-rescan');
+  ok(silent.slice(0, 3).every((x) => /unreachable/.test(x)) && silent[3] === 'unreachable', `a machine that did NOT answer is still said so («${silent[1]}»)`, silent);
+  ok(/being read again/.test(again[0]) && /being read again/.test(again[1]) && !/unreachable/.test(again[0] + again[1]),
+    `the hub's own kept list served after its restart, while the machine is read again: «${again[1]}» (it said «was unreachable» of a machine nobody had asked yet)`, again);
+  // RED: TODAY'S ROW (the zone's own row before this cure: «was unreachable» whatever the rows' reason — a copy of the door with it)
+  const SWSRC = read('src/lib/stale-words.js');
+  const Today = await import(pathToFileURL(M.write('src/lib/stale-words.js', anchored(SWSRC, 'export function staleZoneText(why, host, tr) {\n', "export function staleZoneText(why, host, tr) {\n  return tr('Last known scan — {host} was unreachable.', { host });\n", 'todays-row'), 'todays-row', { esm: true })).href);
+  const todays = Today.staleZoneText('discovery-slow', 'gpu-a', trS);
+  ok(/was unreachable/.test(todays), `CONTROL (today's row, in a copy): a machine that replied «discovery-slow» is called «${todays}» — RED`);
+  // THE SEARCH (fixed-string, «unreachable», in src/lib — the three word tables among it): every place that draws a machine's
+  // old list draws it through the one door; the sentences of an old list live nowhere else
+  const libFiles = fs.readdirSync(path.join(REPO, 'src/lib'), { recursive: true }).filter((f) => /\.js$/.test(f)).sort();
+  let lines = 0, inFiles = 0;
+  for (const f of libFiles) { const n = read(`src/lib/${f}`).split('\n').filter((l) => l.includes('unreachable')).length; lines += n; if (n) inFiles++; }
+  console.log(`  · the fixed-string search «unreachable» in src/lib: ${lines} lines in ${inFiles} files (the line judges each place that draws a machine's list)`);
+  const OLD_LIST = ['Last known scan — {host} was unreachable.', 'Showing cached results — {host} is unreachable.', 'This machine was unreachable — showing the last successful scan'];
+  const elsewhere = libFiles.filter((f) => f !== 'stale-words.js' && !/^i18n(-[a-z]+)?\.js$/.test(f) && OLD_LIST.some((s) => read(`src/lib/${f}`).includes(s)));
+  const WB = read('src/lib/sidebar-workbench.js'), SC = read('src/lib/session-card.js');
+  const nOf = (s, t) => s.split(t).length - 1;
+  ok(elsewhere.length === 0 && !WB.includes("tr('unreachable')") && nOf(WB, 'staleZoneText(') === 1 && nOf(WB, 'errorZoneText(') === 2 && nOf(WB, 'errorChipText(') === 4 && nOf(SC, 'staleTip(') === 1,
+    'the old list\'s sentences live only in stale-words.js (and the word tables); the zone\'s row, its head chip, the search\'s two rows and the chip\'s tip all draw through it — no «unreachable» of the workbench\'s own left', { elsewhere });
+  for (const lang of ['zh', 'ja']) {
+    const T = read(`src/lib/i18n-${lang}.js`);
+    const keys = [...SWSRC.matchAll(/tr\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
+    const missing = keys.filter((k) => !T.includes(JSON.stringify(k) + ':'));
+    ok(keys.length === 14 && missing.length === 0, `…every sentence of the door (${keys.length}) has its ${lang} row`, missing);
+  }
+  // THE HUB'S FALLBACK, DRIVEN (a HostManager in a temp folder; the device and ssh stood in): a device that replied «still walking»
+  const { HostManager, lastKnownRows } = require('../src/hosts.js');
+  const walking = () => Promise.reject(Object.assign(new Error('the discovery walk is still running (past 8 s); what it finds is kept for the next ask'), { code: 'discovery-slow' }));
+  const hub = (HM, { replies = true, list = true } = {}) => {
+    const m = new HM({ dataDir: fs.mkdtempSync(path.join(tmp, 'hub-')) });
+    m._state.hosts.push({ id: 'hD', name: 'gpu-a', transport: 'dial' });
+    m.deviceBounded = async () => { if (!replies) throw new Error('gpu-a: connect timed out'); return { connect: async () => ({ info: { capabilities: ['discovery-claims'] } }), discoveryClaims: walking, discoverySnapshot: walking }; };
+    m._ssh = async () => { throw new Error('ssh: connect to host gpu-a port 22: Connection timed out'); };
+    if (list) m._discoveryCache.set('hD', { at: 5000, sessions: [{ sessionId: 's1' }, { sessionId: 's2', staleAt: 3000 }] });
+    return m;
+  };
+  const tryRows = async (m) => { try { return { rows: await m.discoverSessions('hD', { ttlMs: 0 }) }; } catch (e) { return { err: e }; } };
+  const a = await tryRows(hub(HostManager));
+  ok(a.rows && a.rows.every((s) => s.stale && s.staleWhy === 'discovery-slow') && a.rows[0].staleAt === 5000 && a.rows[1].staleAt === 3000 && /in time/.test(SW.staleZoneText(a.rows[0].staleWhy, 'gpu-a', trS)),
+    `a device that replied «still walking», its ssh twin down: the hub's last list, each row its own age, the device's reply remembered (${a.rows && a.rows[0].staleWhy}) — the zone says «${a.rows && SW.staleZoneText(a.rows[0].staleWhy, 'gpu-a', trS)}»`, a.rows);
+  const b = await tryRows(hub(HostManager, { list: false }));
+  ok(b.err && b.err.code === 'discovery-slow' && /still running/.test(b.err.message) && /could not be read in time/.test(SW.errorZoneText(b.err.code, 'gpu-a', trS)),
+    `…and no list to show: the hub answers the device's own words by code («${b.err && b.err.message}», ${b.err && b.err.code}), never its ssh twin's «connection timed out»`);
+  const c = await tryRows(hub(HostManager, { replies: false }));
+  ok(c.rows && c.rows.every((s) => s.stale && s.staleWhy === undefined) && /unreachable/.test(SW.staleZoneText(c.rows[0].staleWhy, 'gpu-a', trS)),
+    'CONTROL (true): a device that did not answer, ssh down — its rows carry no reason, and the zone says «unreachable»');
+  const HSRC = read('src/hosts.js');
+  const Forgets = M.load('src/hosts.js', anchored(HSRC, '        return lastKnownRows(last.sessions, last.at, deviceWhy);', '        return lastKnownRows(last.sessions, last.at, undefined);', 'fallback-forgets'), 'fallback-forgets');
+  const red = await tryRows(hub(Forgets.HostManager));
+  ok(red.rows && red.rows[0].staleWhy === undefined && /was unreachable/.test(SW.staleZoneText(red.rows[0].staleWhy, 'gpu-a', trS)),
+    `CONTROL (the fallback that forgets the device's reply, in a copy — the release's): «${red.rows && SW.staleZoneText(red.rows[0].staleWhy, 'gpu-a', trS)}» for a machine that replied — RED`);
+  const coldHub = hub(HostManager, { list: false }); coldHub._persistedDisc.hD = { at: 7000, sessions: [{ sessionId: 's9' }] }; coldHub.onDiscoveryDirty = () => { };
+  const cold = await coldHub.discoverSessions('hD', {});
+  ok(cold.length === 1 && cold[0].stale && cold[0].staleWhy === 'discovery-rescan' && cold[0].staleAt === 7000 && typeof lastKnownRows === 'function',
+    'the kept list served at once after the hub\'s restart says THAT (being read again) with its own age — it said «was unreachable» of a machine nobody had asked yet');
+  // THE CODE RIDES TO THE PAGE: the client keeps a device's discovery code, the route and the push pass it, the page keeps it
+  const { replyError } = require('../src/agentd/client.js');
+  const re = replyError({ op: 'discovery-result', error: 'the discovery walk is still running', code: 'discovery-slow' });
+  const SRV = read('server.js'), XR = read('src/server/exit-routes.js');
+  ok(re.code === 'discovery-slow' && XR.includes("res.status(400).json({ error: e.message, ...(e && typeof e.code === 'string' && /^discovery-/.test(e.code) ? { code: e.code } : {}) });")
+    && SRV.includes("error: String(e?.message || e), ...(typeof e?.code === 'string' && /^discovery-/.test(e.code) ? { code: e.code } : {}), at: Date.now() });")
+    && WB.includes("{ code: (d && typeof d.code === 'string') ? d.code : null }") && WB.includes('errorCode: e.code || null,') && WB.includes("errorCode: typeof msg.code === 'string' ? msg.code : null,"),
+    'the device\'s code rides every road to the page: the client keeps it (driven), the sessions route and the dirty push pass it, the page keeps it on a pull and on a push');
+  // ALSO CURED (found on the walk): the dirty push sent `d.sessions` of an ARRAY — every push emptied the machine's list
+  const pushExpr = (SRV.match(/bcastAll\(\{ type: 'remote-sessions', hostId, sessions: (.+?), at: Date\.now\(\) \}\);/) || [])[1];
+  const pushed = pushExpr ? new Function('d', `return (${pushExpr});`)([{ sessionId: 's1' }]) : null;
+  const relPushed = new Function('d', 'return (d?.sessions || []);')([{ sessionId: 's1' }]);
+  ok(Array.isArray(pushed) && pushed.length === 1 && relPushed.length === 0, `the dirty push carries the rows the hub answered (${pushed && pushed.length}); the release's expression over the same answer pushed ${relPushed.length} — the list emptied at every push (RED)`, { pushExpr });
+  // SMALL (1): an older landing is refused by a guard of its own — each walk's number; (2) the let-go child is ENDED by its handle
+  const DSRC3 = read('src/discovery-facts.js');
+  const landing = async (DFm) => {
+    const cbs = [], kills = []; let clock = 1000;
+    const run = (cb) => { cbs.push(cb); return { kill: (sig) => kills.push(sig) }; };
+    const kept = { snap: null, at: 0 };
+    const ask = () => DFm.snapshotReply({ runChild: run, kept, answerBy: 20, now: () => clock, stuckAfter: 60000, timers: refTimers });
+    await ask(); clock += 70000; await ask();
+    const tick = () => new Promise((r) => setImmediate(r));
+    cbs[1](null, JSON.stringify({ jsonls: [{ file: 'new.jsonl' }], locks: [] })); await tick();
+    cbs[0](null, JSON.stringify({ jsonls: [{ file: 'old.jsonl' }], locks: [] })); await tick();
+    return { file: kept.snap && kept.snap.jsonls[0].file, kills, children: cbs.length };
+  };
+  const DFt = require('../src/discovery-facts.js');
+  const g = await landing(DFt);
+  ok(g.children === 2 && g.file === 'new.jsonl' && g.kills.join() === 'SIGKILL', `a let-go walk is ENDED by its handle (${g.kills.join() || 'no kill'}); when it lands anyway after the newer walk, the newer list is kept (${g.file})`, g);
+  const NoGuard = M.load('src/discovery-facts.js', anchored(DSRC3, '      if (v.snap && walk > (kept.landed || 0)) {', '      if (v.snap) {', 'older-landing-guard-cut'), 'older-landing-guard-cut');
+  const g2 = await landing(NoGuard);
+  ok(g2.file === 'old.jsonl', `CONTROL (the guard cut, in a copy): the older walk's late landing replaces the newer list (${g2.file}) — RED`);
+  const NoKill = M.load('src/discovery-facts.js', anchored(DSRC3, "    try { if (kept.inflight.child && typeof kept.inflight.child.kill === 'function') kept.inflight.child.kill('SIGKILL'); } catch { }\n", '    // (the kill cut)\n', 'let-go-kill-cut'), 'let-go-kill-cut');
+  const g3 = await landing(NoKill);
+  ok(g3.kills.length === 0, 'CONTROL (the kill cut, in a copy): the let-go child is only forgotten, never ended — RED');
+  // SMALL (3): the agent's pool append never glues its record to a torn last line (the statement itself, run on a temp file)
+  const SO = require('../src/sealed-orders.js');
+  const stmt = (AGSRC.split('\n').find((l) => l.includes("try { let lead = ''; try { const st = fs.statSync(ORDERS_LOG);")) || '').trim();
+  const appendWith = (code) => { const f = path.join(fs.mkdtempSync(path.join(tmp, 'pool-')), 'pool-orders-log.ndjson'); fs.writeFileSync(f, JSON.stringify({ ts: 1, poolId: 'p1', to: 'a' }) + '\n{"ts":2,"poolId":"p1","to":'); new Function('fs', 'ORDERS_LOG', 'ev', 'log', code)(fs, f, { ts: 3, poolId: 'p1', to: 'b' }, () => { }); return SO.reportOf(fs.readFileSync(f, 'utf8')); };
+  const now3 = appendWith(stmt), rel3 = appendWith("try { fs.appendFileSync(ORDERS_LOG, JSON.stringify(ev) + '\\n'); } catch { }");   // the release's line, quoted (stale-pins: kept)
+  ok(stmt && now3.events.map((e) => e.to).join() === 'a,b' && now3.torn === 1 && rel3.events.map((e) => e.to).join() === 'a',
+    `the agent's own append after a torn last line: its record whole (${now3.events.map((e) => e.to).join()}, the torn one counted); the release's line glued it to the torn one and lost it (${rel3.events.map((e) => e.to).join()}) — RED`);
 }
 
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);

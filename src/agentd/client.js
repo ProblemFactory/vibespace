@@ -98,7 +98,7 @@ const gateRefusal = (e) => stageMark(e, 'gate');
 /** THE ERROR OF AN AGENT'S ERROR REPLY (`_request` rejects with it): its words, a lost link's code, an op refused by the
  *  device's own allow flags (code / flag / remedy), and the reason an op named for itself (`refused`, B-5e0d's quota-refresh). */
 function replyError(m) {
-  return Object.assign(new Error(m.error), m.code === 'answer-too-large' ? { code: m.code, bytes: m.bytes, cap: m.cap, op: m.op, params: { op: m.op, size: AC.sizeOf(m.bytes), cap: AC.sizeOf(m.cap) } } : {}, m.linkLost ? { code: 'link_lost' } : {}, m.op === 'op-refused' ? { code: m.code, flag: m.flag, remedy: m.remedy } : {}, typeof m.refused === 'string' ? { refused: m.refused } : {});
+  return Object.assign(new Error(m.error), typeof m.code === 'string' && /^discovery-/.test(m.code) ? { code: m.code } : {}, m.code === 'answer-too-large' ? { code: m.code, bytes: m.bytes, cap: m.cap, op: m.op, params: { op: m.op, size: AC.sizeOf(m.bytes), cap: AC.sizeOf(m.cap) } } : {}, m.linkLost ? { code: 'link_lost' } : {}, m.op === 'op-refused' ? { code: m.code, flag: m.flag, remedy: m.remedy } : {}, typeof m.refused === 'string' ? { refused: m.refused } : {});
 }
 /** B-5e0d: the quota-refresh op's own reason, by name (a reply or the error of one) — 'long-lived' | 'no-valid-login' | null */
 const quotaReasonOf = (x) => (x && (x.refused === 'long-lived' || x.refused === 'no-valid-login') ? x.refused : null);

@@ -171,6 +171,10 @@ function passiveOfPeek(raw) {
 const USAGE_HARVEST_LIMITS = Object.freeze({ maxBuffer: 128 * 1024 * 1024, timeoutMs: 180000 });
 // B-5278 unit 2 (r849): a device that could not walk answered its LAST list, its age said — every row says it is old (the
 // marks the hub's own last-known list carries: stale, staleAt)
+// (r951, THE LAW of item 4) the rows the hub's own fallback serves: each keeps its own age, and its reason is the DEVICE's own
+// reply when it gave one (a walk that ran out of time — never «unreachable» for a machine that answered), else unreachable
+const lastKnownRows = (sessions, at, deviceWhy) => sessions.map((s) => ({ ...s, stale: true, staleAt: s.staleAt || at, staleWhy: deviceWhy || undefined }));
+const discoveryCodeOf = (e) => (e && typeof e.code === 'string' && /^discovery-/.test(e.code) ? e.code : null);
 const staleSessions = (sessions, stale) => { const at = Date.now() - Math.max(0, Number(stale && stale.ageMs) || 0); return sessions.map((x) => ({ ...x, stale: true, staleAt: at, staleWhy: (stale && stale.why) || undefined })); };
 const usageScanBound = (L) => ({ maxBytes: Math.floor(L.maxBuffer / 2), maxMs: Math.floor(L.timeoutMs / 3) });
 // …and a harvest that failed backs off: 1 min, doubling, at most 30 min (a forced harvest — the owner's own ask — goes)
@@ -3538,7 +3542,9 @@ class HostManager {
     // (ttlMs 0) still blocks for the real scan, so "refresh" means refresh.
     if (ttlMs > 0 && !hit && this._persistedDisc[id]?.sessions?.length) {
       try { this.onDiscoveryDirty?.(id); } catch { } // debounced: one background compute + one broadcast
-      return this._persistedDisc[id].sessions.map((x) => ({ ...x, stale: true }));
+      // (r951) the list kept on disk, served while it is read again: its own age, and THAT reason — never «unreachable» for a
+      // machine nobody has asked yet
+      return lastKnownRows(this._persistedDisc[id].sessions, this._persistedDisc[id].at, 'discovery-rescan');
     }
     // One round trip: alive lock files + all project JSONLs (path, mtime, size)
     const script = `
@@ -3634,6 +3640,7 @@ ${codexOpenRolloutsShell()}
       fi
     `.trim();
     let out, snapStale = null;   // B-5278 unit 2 (r849): the device answered its LAST snapshot, its age said
+    let deviceWhy = null, deviceErr = null;   // (r951) the device's own named reply, remembered through the rungs below
     try {
       // CS data-plane (device data plane — always on since the 2.175.0 flag graduation): the daemon's raw-facts snapshot
       // SYNTHESIZED into the exact LOCK/J/H/N/T line format the ssh script
@@ -3670,6 +3677,7 @@ ${codexOpenRolloutsShell()}
               if (res?.error) throw new Error(res.error);
               if (Array.isArray(res?.sessions)) claimed = res.stale ? staleSessions(res.sessions, res.stale) : res.sessions;
             } catch (e3) {
+              if (discoveryCodeOf(e3)) { deviceWhy = discoveryCodeOf(e3); deviceErr = e3; }
               // B-5278 unit 2 (r849): a refusal is said ONCE a machine and reason (the rungs below stay as they were)
               if (!this._claimsSaid) this._claimsSaid = new Set();
               const said = `${id}\n${String(e3.message).slice(0, 80)}`;
@@ -3686,7 +3694,7 @@ ${codexOpenRolloutsShell()}
           const snap = await deadline(dm.discoverySnapshot(), 12000, 'device-discovery');
           out = synthesizeDiscoveryLines(snap); // shared with the device's own discovery.v2 chain
           snapStale = snap && snap.stale ? snap.stale : null;
-        } catch (e2) { out = null; /* legacy fallback below */ }
+        } catch (e2) { out = null; if (discoveryCodeOf(e2)) { deviceWhy = discoveryCodeOf(e2); deviceErr = e2; } /* legacy fallback below */ }
       }
       if (out == null) out = await this._ssh(h, script, { timeoutMs: 20000 });
     } catch (e) {
@@ -3695,10 +3703,11 @@ ${codexOpenRolloutsShell()}
       // failing the sidebar into an empty remote zone (2.124.0).
       const last = this._discoveryCache.get(id) || this._persistedDisc[id];
       if (last && Array.isArray(last.sessions)) {
-        // (r908 (3)) a row's OWN age is kept (a list the device already answered old says when it was read), and its reason is
-        // this one now: the machine unreachable
-        return last.sessions.map((s) => ({ ...s, stale: true, staleAt: s.staleAt || last.at, staleWhy: undefined }));
+        // (r908 (3)) a row's OWN age is kept; (r951) its reason is the device's own reply when it gave one, else unreachable
+        return lastKnownRows(last.sessions, last.at, deviceWhy);
       }
+      // (r951) no list to show: a machine that answered by name is said by its own words (its code), never as unreachable
+      if (deviceWhy) throw Object.assign(new Error(`${h.name}: ${deviceErr.message}`), { code: deviceWhy });
       throw e;
     }
     const read = interpretDiscoveryLines(out, { hostId: h.id, hostName: h.name, claimJsonls });
@@ -3960,4 +3969,4 @@ HostManager.prototype.bootstrap = function (id, onEvent) {
   });
 };
 
-module.exports = { HostManager, USAGE_HARVEST_LIMITS, usageScanBound, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody, parseSshG, configVerdict, sshRecordRefusal, sshPortOf, dialRootOk, dialRootOf };
+module.exports = { HostManager, lastKnownRows, staleSessions, USAGE_HARVEST_LIMITS, usageScanBound, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody, parseSshG, configVerdict, sshRecordRefusal, sshPortOf, dialRootOk, dialRootOf };

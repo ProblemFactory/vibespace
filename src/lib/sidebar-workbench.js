@@ -9,6 +9,7 @@
 //             main filter searches it; expanding renders capped pages).
 // Starred sessions float to the top of their zone.
 import { t as tr, tc } from './i18n.js'; // sidebar cluster convention
+import { staleZoneText, errorZoneText, errorChipText } from './stale-words.js'; // B-5278 (r951): a machine that replied is never called unreachable
 import { agoText, escHtml, hostStateChip, showConfirmDialog, showToast, stripCwdHostLabel, sessionMatchesFilter } from './utils.js';
 import { passesAgentKindFilter } from './agent-meta.js';
 
@@ -92,7 +93,7 @@ export function installSidebarWorkbench(Sidebar) {
     _wbHostHeadChip(st) {
       if (!st) return null;
       if (st.loading) return hostStateChip('pending', { text: tr('scanning…'), title: tr('Scanning sessions over ssh…') });
-      if (st.error) return hostStateChip('error', { text: tr('unreachable'), title: st.error });
+      if (st.error) return hostStateChip('error', { text: errorChipText(st.errorCode, '', tr), title: st.error });   // B-5278 (r951): by the hub's code
       const at = this._wbSnapshotAt(st);
       if (at && Date.now() - at > 120000) return hostStateChip('stale', { age: at, title: tr('One-shot scan — click ⟳ to re-scan this host.') });
       return null;
@@ -115,13 +116,14 @@ export function installSidebarWorkbench(Sidebar) {
       let text = '', chip = null;
       const at = this._wbSnapshotAt(st);
       if (st.error && cached) {
-        text = tr('Showing cached results — {host} is unreachable.', { host: hostLabel });
-        chip = hostStateChip('error', { text: at ? tr('as of {ago}', { ago: agoText(at) }) : tr('unreachable'), title: st.error });
+        // B-5278 (r951): the words by the hub's own code — a machine that answered by name is never «unreachable»
+        text = errorZoneText(st.errorCode, hostLabel, tr);
+        chip = hostStateChip('error', { text: errorChipText(st.errorCode, at ? agoText(at) : '', tr), title: st.error });
       } else if (st.loading && cached) {
         text = tr('Re-scanning {host}…', { host: hostLabel });
         chip = hostStateChip('pending', { text: tr('scanning…') });
       } else if (cached && (st.sessions || []).some(s => s.stale)) {
-        text = tr('Last known scan — {host} was unreachable.', { host: hostLabel });
+        text = staleZoneText(((st.sessions || []).find((s) => s.stale) || {}).staleWhy, hostLabel, tr);   // B-5278 (r951): by the rows' own reason
         chip = hostStateChip('stale', { age: at, title: tr('Session states may have changed since this scan.') });
       } else if (at && Date.now() - at > 120000) {
         text = tr('Remote sessions are scanned once, not polled.');
@@ -178,7 +180,7 @@ export function installSidebarWorkbench(Sidebar) {
         const cur = map.get(id);
         if (msg.error) {
           // keep the last good list, labelled — same degrade as a failed pull
-          map.set(id, { loading: false, sessions: cur?.sessions || null, error: msg.error, fetchedAt: cur?.fetchedAt || 0, lastFailAt: Date.now() });
+          map.set(id, { loading: false, sessions: cur?.sessions || null, error: msg.error, errorCode: typeof msg.code === 'string' ? msg.code : null, fetchedAt: cur?.fetchedAt || 0, lastFailAt: Date.now() });
         } else {
           map.set(id, { loading: false, sessions: msg.sessions || [], error: null, fetchedAt: msg.at || Date.now(), lastFailAt: 0 });
         }
@@ -209,7 +211,7 @@ export function installSidebarWorkbench(Sidebar) {
       fetch(`/api/hosts/${hostId}/sessions${fresh ? '?fresh=1' : ''}`)
         .then(async (r) => {
           const d = await r.json().catch(() => null);
-          if (!r.ok || !d || d.error) throw new Error(d?.error || `${r.status} ${r.statusText || 'discovery failed'}`);
+          if (!r.ok || !d || d.error) throw Object.assign(new Error(d?.error || `${r.status} ${r.statusText || 'discovery failed'}`), { code: (d && typeof d.code === 'string') ? d.code : null });
           return d;
         })
         .then(d => {
@@ -221,7 +223,7 @@ export function installSidebarWorkbench(Sidebar) {
           // KEEP the last good list — an unreachable host must degrade to a
           // labelled "cached results" zone, never to an empty one.
           const prev = map.get(hostId);
-          map.set(hostId, { loading: false, sessions: prev?.sessions || null, error: e.message, fetchedAt: prev?.fetchedAt || 0, lastFailAt: Date.now() });
+          map.set(hostId, { loading: false, sessions: prev?.sessions || null, error: e.message, errorCode: e.code || null, fetchedAt: prev?.fetchedAt || 0, lastFailAt: Date.now() });   // B-5278 (r951): the device's own code
           if (relevant()) this._render();
         });
     },
@@ -359,12 +361,12 @@ export function installSidebarWorkbench(Sidebar) {
         const st = this._remoteHostState(h.id);
         const hname = st?.sessions?.[0]?.hostName || h.name || h.id;
         if (!st || (st.loading && !st.sessions)) { stateRow('pending', tr('Searching {host}…', { host: hname }), tr('scanning…')); continue; }
-        if (st.error && !st.sessions?.length) { stateRow('error', tr('Search on {host} failed.', { host: hname }), tr('unreachable'), st.error); continue; }
+        if (st.error && !st.sessions?.length) { stateRow('error', tr('Search on {host} failed.', { host: hname }), errorChipText(st.errorCode, '', tr), st.error); continue; }
         if (!st.sessions) continue;
         const textHits = st.sessions.filter(s => !liveIds.has(s.sessionId) && this._wbMatchRemote(s, f));
         const matches = textHits.filter(s => passesAgentKindFilter(s, this._agentKindFilter));
         const kindHidden = textHits.length - matches.length; // matches the kind filter alone removed
-        if (st.error) stateRow('error', tr('Showing cached results — {host} is unreachable.', { host: hname }), tr('unreachable'), st.error);
+        if (st.error) stateRow('error', errorZoneText(st.errorCode, hname, tr), errorChipText(st.errorCode, '', tr), st.error);   // B-5278 (r951): by the hub's code
         if (kindHidden) { ensureHead(); this._kindHiddenRow(kindHidden, hname); }
         if (!matches.length) continue;
         ensureHead();

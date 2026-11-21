@@ -357,7 +357,7 @@ app.delete('/api/hosts/:id/host-keys', async (req, res) => {
 });
 app.get('/api/hosts/:id/sessions', async (req, res) => {
   try { res.json({ sessions: await hosts.discoverSessions(req.params.id, req.query.fresh ? { ttlMs: 0 } : {}) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json({ error: e.message, ...(e && typeof e.code === 'string' && /^discovery-/.test(e.code) ? { code: e.code } : {}) }); }   // B-5278 (r951): the device's own reply, by its code
 });
 /** ONE removal of a machine record — DELETE /api/hosts/:id, and a replaced machine once its new record is saved (POST /api/hosts
  *  `replaces`, verifier #3). */
