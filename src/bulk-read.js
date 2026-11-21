@@ -5,7 +5,7 @@
 // history or its facts (every export is a door unless its NOT_DOORS names it, with the reason) and the socket's replies of a history
 // (src/ws-handler.js: a chat attach, a terminal's attach, View History) call `replied` WHEN THEY REPLY — whatever served the reply:
 // the local read, the hub's own copy, the paired machine, a fallback. A reply that FAILS (a throw, a refusal, the pager's bound, the
-// asker gone before it) consumes nothing: the retry is still the first read. A person's own act consumes it too (`personAct`:
+// asker gone before it) consumes nothing: the retry is still the first read; «nothing» (an empty page, a no-gap answer) IS a reply. A person's own act consumes it too (`personAct`:
 // person=1), and the conversation's end (the session object goes with it). Every later read is a person's. A census holds every call
 // site and every export (scripts/test-claude-warm-pages.mjs ⑩). PURE over the session object.
 /** Is this read of the conversation a bulk resume's first? (true until a door replied or a person acted) */

@@ -355,6 +355,21 @@ try {
     ok(o1.r1.length >= 4 && o1.r1.every((b) => b === true) && o1.r2.length >= 4 && o1.r2.every((b) => b === false),
       `one request, one first read: the withStatus composite reads in one line (${o1.r1.join(',')}), the next request a person's (${o1.r2.join(',')})`, o1);
     ok(o1r.r1[0] === true && o1r.r1.some((b) => b === false), `RED: the verdict not the request's ⇒ its status and turnmap warm as a person's (${o1r.r1.join(',')})`, o1r);
+    // A FORK SHARING ITS PARENT'S THREAD ID (主开发 r1127): the history route names the window's own conversation (`webuiId`, sent by
+    // the page's history read and its person's act), so a read of the parent never spends the fork's mark. RED: a read naming none
+    // (the route before) ⇒ the first live match — the fork, listed first — is spent
+    const fk = (await stubbed(async () => {
+      const sid = 'a0b10000-0000-4000-8000-0000001f0001';
+      const fork = { backend: 'claude', claudeSessionId: sid, backendSessionId: sid, host: null, _bulkRead: true }, parent = { backend: 'claude', claudeSessionId: sid, backendSessionId: sid, host: null };
+      const svc = TS10.createTranscriptService({ activeSessions: new Map([['w-fork', fork], ['w-parent', parent]]), createSessionMessages: () => ({ raw: () => [], rawAsync: async () => { }, chatStatus: () => ({}), taskState: () => ({}) }), hosts: null });
+      await svc.page({ backend: 'claude', sessionId: sid, cwd: CWD, memo: {}, webuiId: 'w-parent' }, { offset: 0, limit: 50 }); const kept = fork._bulkRead === true;
+      await svc.page({ backend: 'claude', sessionId: sid, cwd: CWD, memo: {} }, { offset: 0, limit: 50 }); const spent = fork._bulkRead === false;
+      return { kept, spent };
+    })).out;
+    const rsF = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8'), slF = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
+    ok(fk.kept && fk.spent && /sessionId: resolvedSessionId, cwd, webuiId: req\.query\.webuiId, gone:/.test(rsF) && /webuiId: typeof ref\.webuiId === 'string' && ref\.webuiId \? ref\.webuiId : null/.test(tsSrc10)
+      && (slF.match(/&webuiId=\$\{encodeURIComponent\(msg\.sessionId \|\| ''\)\}&(?:withStatus|person)=1/g) || []).length === 2,
+      `a fork sharing its parent's thread id: a read naming the parent's own window leaves the fork's mark (${fk.kept}); RED a read naming none spends it (${fk.spent}); the route takes the window's id and the page sends it on its history read and its person's act (pinned by text)`, fk);
     // THE ENTRIES: every export by name — a door, or not one (its reason in NOT_DOORS); the ones that are not consume nothing
     const ENTRIES = { view: 'door', page: 'door', turnmap: 'door', searchIndexed: 'door', status: 'door', taskState: 'door', gapInfo: 'door', gapSlab: 'door', searchFull: 'door', searchFullStream: 'door', fullTurnmap: 'door',
       filePath: 'not', refreshRemote: 'not', rescue: 'not', picture: 'not', pictureHere: 'not', personAsk: 'not', bulkOf: 'not' };
@@ -365,7 +380,7 @@ try {
     const nd = (await stubbed(async () => { const c = conv(TS10, 'claude', 'local'); c.svc.filePath(c.ref()); await c.svc.refreshRemote(c.ref()); const b = c.svc.bulkOf(c.ref()); const kept = c.live._bulkRead === true; c.svc.personAsk(c.ref()); return { b, kept, acted: c.live._bulkRead === false }; })).out;
     ok(!ec.unlisted.length && !ec.dead.length && ecPlanted.unlisted.join() === 'plantedEntry' && notDoors.slice().sort().join() === Object.keys(ENTRIES).filter((k) => ENTRIES[k] === 'not').sort().join()
       && Object.keys(ENTRIES).filter((k) => ENTRIES[k] === 'door').every((k) => good.out.some((x) => x.door === k)) && nd.b === true && nd.kept && nd.acted,
-      `THE ENTRIES: every export of the service is a row by name (${keys.length}; unlisted ${ec.unlisted.join(', ') || 'none'}, dead ${ec.dead.join(', ') || 'none'}); CONTROL a planted entry named (${ecPlanted.unlisted.join()}); NOT_DOORS = the table's not-doors (${notDoors.join(', ')}), each consuming nothing; personAsk acts`, { ec, notDoors, nd });
+      `THE ENTRIES: every export of the service is a row by name (${keys.length}; unlisted ${ec.unlisted.join(', ') || 'none'}, dead ${ec.dead.join(', ') || 'none'}); CONTROL a planted entry named (${ecPlanted.unlisted.join()}); NOT_DOORS = the table's not-doors (${notDoors.join(', ')}: read from the source by its literal — a reformatted list finds nothing and fails HERE by name, never passes quietly), each consuming nothing; personAsk acts`, { ec, notDoors, nd });
     // THE CONSUME'S CALL SITES and the field's reads — by name, comments stripped (line numbers kept)
     const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, '')).replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
     const walk = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.posix.join(d, e.name); if (e.isDirectory()) walk(r, out); else if (e.name.endsWith('.js')) out.push(r); } return out; };
@@ -400,7 +415,7 @@ try {
     const SENDS = [
       ['attachedFrameText(livePayload', 1, /ws\.send\(attachedFrameText\(livePayload, resume, \(\) => \(\{[\s\S]{0,600}?\}\)\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN && !livePayload\.historyNotLoaded\) BULK\.replied\(session\);/],   // a chat attach
       ["buffer: session.buffer || ''", 1, /buffer: session\.buffer \|\| '' \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) BULK\.replied\(session\);/],   // a terminal's attach
-      ["name: data.name || '', cwd: data.cwd || '', mode: 'chat'", 1, /viewOnly: true(?:, historyNotLoaded: [^\n]*?)? \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN && !sm\.notLoaded\) for \(const \[, s\] of activeSessions\) if \(addressableId\(s\) === backendSessionId\) BULK\.replied\(s\);/],   // View History (row B-422c: its not-loaded info rides the same send)
+      ["name: data.name || '', cwd: data.cwd || '', mode: 'chat'", 1, /viewOnly: true(?:, historyNotLoaded: [^\n]*?)? \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN && !sm\.notLoaded\) for \(const \[, s\] of activeSessions\) if \(addressableId\(s\) === backendSessionId && \(s\.host \|\| null\) === \(data\.host \|\| null\)\) BULK\.replied\(s\);/],   // View History (row B-422c: its not-loaded info rides the same send; its own address, on its machine)
       ['sessionId: subId', 3, null],   // NOT A DOOR: a subagent's own transcript — a virtual session no create marks
     ];
     const sendsCensus = (t) => {

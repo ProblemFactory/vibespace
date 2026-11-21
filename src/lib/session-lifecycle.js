@@ -575,7 +575,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           // only because attach/view paths had already cached their transcript.
           if (resumeId) {
             chatView.noteHistoryInFlight(true); // until this page lands nothing is known about what lies above (inc-mvl02dkn-gop0)
-            fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId || resumeId)}&cwd=${encodeURIComponent(cwd||'')}&withStatus=1${hostId ? `&host=${encodeURIComponent(hostId)}` : ''}${forkAtUuid ? `&untilUuid=${encodeURIComponent(forkAtUuid)}` : ''}`)
+            fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId || resumeId)}&cwd=${encodeURIComponent(cwd||'')}&webuiId=${encodeURIComponent(msg.sessionId || '')}&withStatus=1${hostId ? `&host=${encodeURIComponent(hostId)}` : ''}${forkAtUuid ? `&untilUuid=${encodeURIComponent(forkAtUuid)}` : ''}`)
               .then(r => r.json())
               .then(data => {
                 if (data.messages?.length) chatView.loadHistory(data.messages, data.total);
@@ -593,7 +593,7 @@ export function installSessionLifecycle(App, ctx = {}) {
             // window, or the app going to it (ChatView.focus) — tells the hub ONCE (`person=1`): the warm moves into the person's line
             if (bulk) {
               let told = false;
-              const tell = () => { if (told || !chatView._historyInFlight) return; told = true; fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId || resumeId)}&cwd=${encodeURIComponent(cwd || '')}&person=1${hostId ? `&host=${encodeURIComponent(hostId)}` : ''}`).catch(() => { }); };
+              const tell = () => { if (told || !chatView._historyInFlight) return; told = true; fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId || resumeId)}&cwd=${encodeURIComponent(cwd || '')}&webuiId=${encodeURIComponent(msg.sessionId || '')}&person=1${hostId ? `&host=${encodeURIComponent(hostId)}` : ''}`).catch(() => { }); };
               chatView._personAct = tell;
               winInfo.content?.addEventListener?.('pointerdown', tell, { once: true });
             }

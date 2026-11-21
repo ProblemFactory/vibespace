@@ -70,8 +70,8 @@ function setup(ctx) {
     const { backend, backendSessionId, claudeSessionId, cwd, offset, limit, search } = req.query;
     const resolvedSessionId = backendSessionId || claudeSessionId;
     if (!resolvedSessionId) return res.status(400).json({ error: 'backendSessionId or claudeSessionId required' });
-    const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, gone: () => !!(req.socket && req.socket.destroyed), host: req.query.host, memo: {} };   // one request, one read of its history (lane resume-all-paced L3); B-cd4b r1093: a page that hung up got no reply — the mark stays
-    try {
+    const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, webuiId: req.query.webuiId, gone: () => !!(req.socket && req.socket.destroyed), host: req.query.host, memo: {} };   // one request, one read of its history (lane resume-all-paced L3)
+    try {   // B-cd4b: `webuiId` = the window's own conversation (a fork sharing its parent's thread id; the service keeps a non-empty string only); `gone` = a hung-up asker keeps the mark
       if (req.query.person === '1') return res.json(transcripts.personAsk(ref));   // B-cd4b r1035: a person's own act on a conversation whose history still waits (never a read)
       if (req.query.turnmap) return res.json(await transcripts.turnmap(ref));
       if (search) return res.json(await transcripts.searchIndexed(ref, search));
