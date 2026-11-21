@@ -667,12 +667,18 @@ console.log('⑪ round 4 — the smaller items');
 // pass the truth by at most the window's measured wait (+1 ms) — a lenient reading (the wait is the window's, from the
 // reading before the hold to the one after), not a law of the hold; the hour bound (< 3 × the truth) is not relaxed.
 // NOT cured, said (B-518e-loop's readers): a watchdog thread starved through the whole hold reads samples 0 («not sampled»)
-// whatever the wait, and the main thread's own run in the gap after the spin is not in the wait — both rare, both red
+// whatever the wait — rare, red. (The main thread's own run in the gap after the spin, the second of their two, is READ since
+// r1649 and stated as the margin: judge12's afterMs below.)
 const NOT_SAMPLED = [LH.V.unsampled, LH.V.unknown, LH.V.cpu];
 const excused12 = (x) => !!x && x.waitMs != null && LH.waitedMuch({ wallMs: x.msHi || x.ms, waitMs: x.waitMs });   // (the witness's own window is at least the hold's upper bound)
-function judge12(x, truth) {
+// r1649 (the load row — seen red at 4861f5e5c-20261121204803-both, UTC: «ONE hold of 302–322 ms … 0 ms» of wait, truth 300): the
+// leg IS A MEASURE OF TIME. Its one excess left unread above — the main thread's OWN run in the gap after the spin, before the
+// next beat is served — is now READ in the same run (⑫'s `afterMs`: from the spin's end to the first timer turn after it, which
+// the beat, expired during the spin, cannot follow) and passed here as a margin STATED from that reading, printed in the line;
+// the pure controls (⑫b) pass none
+function judge12(x, truth, afterMs = 0) {
   if (!x) return false;
-  return x.ms <= truth + 1 + (x.waitMs > 0 ? x.waitMs : 0) && (x.msHi || x.ms) + 40 >= truth && (x.msHi || x.ms) < 3 * truth
+  return x.ms <= truth + 1 + (x.waitMs > 0 ? x.waitMs : 0) + (afterMs > 0 ? afterMs : 0) && (x.msHi || x.ms) + 40 >= truth && (x.msHi || x.ms) < 3 * truth
     && (excused12(x) ? x.samples >= 1 && !NOT_SAMPLED.includes(x.verdict) : x.verdict === LH.V.js || x.verdict === LH.V.tie);   // r116 (b): the spin calls performance.now() — an ask inside that native call is native, so a 1:1 of JavaScript and native is THE TIE, true and counted (the machine's UTC run at b056a2453: «JavaScript ×1 and native code or garbage collection ×1 (a tie, in the order they came)»); this leg guards the clock, never the class
 }
 console.log('⑫a B-f534 — after the exit mark the watchdog connects to nothing (the REAL thread, in this process)');
@@ -731,18 +737,19 @@ console.log('⑫ round 5 — the monotonic clock, by behaviour (a date step insi
   const W = SFW.create({ rootDir: REPO, armed: true, readMountinfo: () => '', fresh: true, beatMs: 20, holdMs: 100, noAnswerMs: 50, liveMs: 60000,
     log: { warn: (l) => said.push(String(l)), log() {}, error() {}, info() {} }, holdsOptions: { eluEveryMs: 50, eluBeforeMs: 500 } }).start({ installHook: false });
   await new Promise((r) => setTimeout(r, 800));   // the watchdog's thread up, its first checks done
-  const realNow = Date.now; let truth = 0;
+  const realNow = Date.now; let truth = 0, afterMs = 0;
   try {
     const m0 = performance.now(); let stepped = false;
     while (performance.now() - m0 < 300) { if (!stepped && performance.now() - m0 >= 150) { const r0 = realNow; Date.now = () => r0() + 3600000; stepped = true; } }
     truth = performance.now() - m0;
+    const tEnd = performance.now(); await new Promise((r) => setTimeout(r, 0)); afterMs = performance.now() - tEnd;   // r1649: the main thread's own run after the spin, read
     await new Promise((r) => setTimeout(r, 900));
   } finally { Date.now = realNow; }
   const rep = W.holds().report(); try { W.stop(); } catch { }
   const hs = (rep.holds || []).filter((h) => h.ms >= 100);
   const h = hs[0];
-  ok(hs.length === 1 && judge12(h, truth),
-    `⑫ a real ${truth.toFixed(0)} ms hold with the date stepped +1 h inside it, the witness with its default clock: ONE hold of ${h && h.ms}–${h && h.msHi} ms (the truth inside; the thread's own wait for a CPU, as the witness measured it: ${h && h.waitMs} ms), «${h && h.verdict}»${h && excused12(h) ? ` — it waited a fifth of the hold or more (the witness's own rule), so judged SAMPLED (${h.samples} samples), not on its class` : h && h.waitMs == null ? ' — NO SCHEDULER FACTS on this machine: the class judged' : ''}`, { holds: (rep.holds || []).map((x) => [x.ms, x.msHi, x.verdict, x.waitMs, x.samples, x.line]) });
+  ok(hs.length === 1 && judge12(h, truth, afterMs),
+    `⑫ a real ${truth.toFixed(0)} ms hold with the date stepped +1 h inside it, the witness with its default clock: ONE hold of ${h && h.ms}–${h && h.msHi} ms (the truth inside; the thread's own wait for a CPU, as the witness measured it: ${h && h.waitMs} ms; the main thread's own run after the spin, read in this run: ${afterMs.toFixed(1)} ms — the margin, stated), «${h && h.verdict}»${h && excused12(h) ? ` — it waited a fifth of the hold or more (the witness's own rule), so judged SAMPLED (${h.samples} samples), not on its class` : h && h.waitMs == null ? ' — NO SCHEDULER FACTS on this machine: the class judged' : ''}`, { holds: (rep.holds || []).map((x) => [x.ms, x.msHi, x.verdict, x.waitMs, x.samples, x.line]) });
 }
 // ⑫b B-518e — THE JUDGE OVER FIXED HOLDS (pure; the leg's controls). ⑫ was red THREE times on the first test machine in
 // packed runs, green alone: «302–322 ms, native code or garbage collection» (truth 302; run 2ae16d9e9, the box's zone),
