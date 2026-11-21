@@ -456,7 +456,6 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // not own its display holds the person's own windows beside the app: their terminal is never addressable by a typed id)
     const subH = sub != null ? UN.subHandle(rec.id, sub) : null;
     const unreadable = (why) => namedError('window_list_unreadable', `${subH}: the app's window list could not be read just now${why ? ` (${String(why).slice(0, 120)})` : ''} — nothing was done; try again, or \`vibespace-window screenshot ${rec.id}\` for the app's own image`, { handle: subH });
-    if (sub != null && (rec.origin === 'desktop' || !capsOf(rec).ownsDisplay)) throw namedError('window_subject_shared', `${subH}: a window's own handle exists only on a desktop the app owns — this one is shared with the person's own windows; use the app's own handle ${rec.id}`, { handle: subH });
     if (rec.origin === 'desktop' || typeof keeper.windows !== 'function') { if (sub != null) throw unreadable(); return null; }
     try {
       let r = await keeper.windows(rec.id);
@@ -489,12 +488,12 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   const streamOf = (rec) => (rec && (rec.stream || M.streamKindOf(rec))) || null; // a FACT the reach view reports, never a branch
   const capsOf = (rec) => M.capsOf(rec); // the rung's capability cells (the view's, else the row's)
   /** The pixel verbs' common door: an injection backend (unless only reading), the plan, the VISIBILITY gate. */
-  async function pixelsFor(rec, who, verb, { inject = true, sub = null } = {}) {
+  async function pixelsFor(rec, who, verb, { inject = true, sub = null, plan: given = undefined } = {}) {
     const { backends, xenv, bins: b } = await backendsFor(rec);
     if (inject && !backends.injection) { audit({ ...who, verb, by: 'inject', ok: false, code: 'no_injection_backend' }); throw namedError('no_injection_backend', `${verb === 'key' ? 'a chord has no road on the accessibility tree and' : 'this is injection and'} no wired injection backend is available on ${rec.display}: ${wt.verbVerdicts({ backends }).probe}`, { backends: backends.rows }); }
-    const plan = await planFor(rec, sub);
+    const plan = given !== undefined ? given : await planFor(rec, sub); // r989 (3): the door's plan, handed on — never read twice a call
     const vis = R.visibilityVerdict({ perWindow: capsOf(rec).perWindow, plan });
-    if (!vis.ok) { audit({ ...who, verb, by: 'pixels', ok: false, code: vis.code }); throw namedError(vis.code, vis.why.replace('<handle>', sub != null ? UN.subHandle(rec.id, sub) : rec.id), { handle: rec.id }); }
+    if (!vis.ok) { audit({ ...who, verb, by: 'pixels', ok: false, code: vis.code }); throw namedError(vis.code, vis.why.replace('<handle>', sub != null ? UN.subHandle(rec.id, sub) : rec.id), { handle: sub != null ? UN.subHandle(rec.id, sub) : rec.id }); }
     return { backends, xenv, bins: b, plan };
   }
   /** fb-bc200800e0 (lane bl-windows): a verb with no point of its own (type, key, a scroll without --at) on a display a viewer
@@ -550,16 +549,20 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   async function subjectDoor(handle0, facts, verb, { subjectVerb = false, tree = false } = {}) {
     const { handle, sub } = splitSubject(handle0);
     if (sub == null) return { handle, sub: null };
-    const subH = String(handle0);
-    const refuse = (code, why, extra = {}) => { const rec0 = liveAny(handle); audit({ sessionId: facts && facts.sessionId, browserKey: facts && facts.browserKey, handle: rec0 ? rec0.id : handle, subject: subH, verb, by: 'subject', ok: false, code }); return namedError(code, why, { handle: subH, ...extra }); };
-    if (!subjectVerb) throw refuse('window_subject_verb', `${subH} is one window of the app — \`${verb}\` takes the app's own handle ${handle}; a window's own handle takes only screenshot, click --at, type, key and scroll`);
-    if (tree) throw refuse('window_subject_pixels', `${subH} is one window of the app, reached by its pixels — \`screenshot\`, \`click --at\`, \`type\`, \`key\`, \`scroll\`; the tree verbs (@refs) take the app's own handle ${handle}`);
-    const rec0 = liveAny(handle); // the record KIND first — a shared desktop has no window handles, lease or not
-    if (rec0 && (rec0.origin === 'desktop' || !capsOf(rec0).ownsDisplay)) throw refuse('window_subject_shared', `${subH}: a window's own handle exists only on a desktop the app owns — this one is shared with the person's own windows; use the app's own handle ${rec0.id}`);
+    // r989 (2): the LEASE and the REACH first — a conversation the record was never shared with is told what it is told for the
+    // app's own handle, never a subject's word first
     const { rec, lease } = requireLease(handle, facts, verb);
+    const subH = UN.subHandle(rec.id, sub); // r989 (4): the subject in ONE form, refused or acted
+    const refuse = (code, why, extra = {}) => { audit({ sessionId: facts && facts.sessionId, browserKey: facts && facts.browserKey, handle: rec.id, subject: subH, verb, by: 'subject', ok: false, code }); return namedError(code, why, { handle: subH, ...extra }); };
+    // r989 (3): THE ONE COPY of the record-kind rule — a desktop the app does not own (the person's own, a shared rung) has no window handles
+    if (rec.origin === 'desktop' || !capsOf(rec).ownsDisplay) throw refuse('window_subject_shared', `${subH}: a window's own handle exists only on a desktop the app owns — this one is shared with the person's own windows; use the app's own handle ${rec.id}`);
+    if (!subjectVerb) throw refuse('window_subject_verb', `${subH} is one window of the app — \`${verb}\` takes the app's own handle ${rec.id}; a window's own handle takes only screenshot, click --at, type, key and scroll`);
+    if (tree) throw refuse('window_subject_pixels', `${subH} is one window of the app, reached by its pixels — \`screenshot\`, \`click --at\`, \`type\`, \`key\`, \`scroll\`; the tree verbs (@refs) take the app's own handle ${rec.id}`);
     if (rec.state !== 'ready') throw refuse('window_not_ready', `${subH}: the app is still starting — its windows are listed once it is ready; nothing was done`);
     let plan = null;
     try { plan = await planFor(rec, sub); } catch (e) { throw refuse(e && e.code ? e.code : 'window_list_unreadable', (e && e.message) || `${subH}: the app's window list could not be read just now — nothing was done`); }
+    // r989 (1): a plan that is NOT OK (a listed window with no class, name or title, or one pixel small) is refused — never the main's keys
+    if (!plan || !plan.ok || !plan.subject) throw refuse('window_unshowable', `${subH}: that window cannot be shown alone (${(plan && plan.why) || 'it has no name or no size'}) — nothing was done; \`vibespace-window screenshot ${rec.id}\` for the app's own image`);
     return { handle, sub, rec, lease, plan };
   }
   /** B-dbb4 unit 2: `<handle>.w<hex X id>` = one window of that app as the call's subject; the whole handle a record wins. */
@@ -574,8 +577,10 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const { handle, sub } = splitSubject(handle0);
     if (sub == null) return;
     const rec0 = liveAny(handle);
-    audit({ sessionId: facts && facts.sessionId, browserKey: facts && facts.browserKey, handle: rec0 ? rec0.id : handle, subject: String(handle0), verb, by: 'subject', ok: false, code: 'window_subject_verb' });
-    throw namedError('window_subject_verb', `${handle0} is one window of the app — \`${verb}\` takes the app's own handle ${handle}; a window's own handle takes only screenshot, click --at, type, key and scroll`, { handle: String(handle0) });
+    if (rec0) requireReach(rec0, facts, verb); // r989 (2): the reach first — never a subject's word to a conversation the app is not shared with
+    const subH = UN.subHandle(rec0 ? rec0.id : handle, sub);
+    audit({ sessionId: facts && facts.sessionId, browserKey: facts && facts.browserKey, handle: rec0 ? rec0.id : handle, subject: subH, verb, by: 'subject', ok: false, code: 'window_subject_verb' });
+    throw namedError('window_subject_verb', `${subH} is one window of the app — \`${verb}\` takes the app's own handle ${handle}; a window's own handle takes only screenshot, click --at, type, key and scroll`, { handle: subH });
   }
   function liveAny(handle) { const h = String(handle || ''); return liveRecord(h) || liveDesktop(h, { trustPid: leases.has(h) }); }
   /** Every lease on the desktop class goes when the switch is off — the user's decision always wins, before any takeover is asked for. */
@@ -1285,7 +1290,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   const nodeLine = (e, action) => ({ role: e.role, name: e.name, ...(action ? { action } : {}) });
   async function act(handle0, facts, body = {}) {
     const verb = String(body.verb || '');
-    const { handle, sub } = await subjectDoor(handle0, facts, verb || 'act', { subjectVerb: ['click', 'type', 'key', 'scroll'].includes(verb), tree: !!body.ref }); // B-dbb4 (r946): the one door
+    const door = await subjectDoor(handle0, facts, verb || 'act', { subjectVerb: ['click', 'type', 'key', 'scroll'].includes(verb), tree: !!body.ref }); // B-dbb4 (r946): the one door
+    const { handle, sub } = door;
     const { rec, lease } = requireLease(handle, facts, verb || 'act');
     // B-dbb4 M3: the chosen window IS the plan's main (its own plan) — keys and text focus it and go to its X window
     const subjectWin = (px) => (sub != null && px && px.plan && px.plan.subject && px.plan.main ? px.plan.main : null);
@@ -1365,7 +1371,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (verb === 'click' && body.at) {
       const at = parseAt(body.at);
       if (!at) throw namedError('bad-request', '--at needs `x,y` (integers: a pixel of `vibespace-window screenshot`)');
-      const px = await pixelsFor(rec, who, 'click', { sub });
+      const px = await pixelsFor(rec, who, 'click', { sub, ...(door.plan ? { plan: door.plan } : {}) });
       const pt = await pointOf(rec, px, at, who, 'click');
       held();
       const r = await injecting((signal) => wt.injectClick({ bins: px.bins, xenv: px.xenv, x: pt.x, y: pt.y, button: body.button, signal, python }));
@@ -1375,7 +1381,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (verb === 'click') throw namedError('bad-request', 'click needs a ref (@e7) or --at x,y');
 
     if (verb === 'scroll') {
-      const px = await pixelsFor(rec, who, 'scroll', { sub });
+      const px = await pixelsFor(rec, who, 'scroll', { sub, ...(door.plan ? { plan: door.plan } : {}) });
       let pt = null;
       if (body.at) {
         const at = parseAt(body.at);
@@ -1401,7 +1407,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       const pixelShare = !!rr && (rr.mode === 'pixels' || (rr.mode === 'auto' && res && res.mode === 'pixels'));
       /** Lane E: text as KEYS into whatever holds focus on the app's own display (pixel mode, Chrome's entries). */
       const injected = async (e, line) => {
-        const px = await pixelsFor(rec, who, 'type', { sub });
+        const px = await pixelsFor(rec, who, 'type', { sub, ...(door.plan ? { plan: door.plan } : {}) });
         await displayHolds(rec, px, subjectWin(px) ? visiblePoint(subjectWin(px)) : keysPointOf(px, lease), who, 'type', 'keys are');   // fb-bc200800e0: keys on a display that cannot take them are refused, never «typed»
         if (e) { held(); const f = await wt.focusNode({ entry: e, env: base, ...helperOpts() }); fromHelper(f, { verb: 'focus', by: 'node', node: nodeLine(e) }); await sleep(120); }
         held();
@@ -1438,7 +1444,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (verb === 'key') {
       const chord = wt.parseChord(body.chord);
       if (!chord.ok) throw namedError(chord.code, chord.why);
-      const px = await pixelsFor(rec, who, 'key', { sub });
+      const px = await pixelsFor(rec, who, 'key', { sub, ...(door.plan ? { plan: door.plan } : {}) });
       await displayHolds(rec, px, subjectWin(px) ? visiblePoint(subjectWin(px)) : keysPointOf(px, lease), who, 'key', 'keys are');   // fb-bc200800e0: the same for a chord
       // where the pointer rests before a chord (a bare display has PointerRoot focus): inside the MAIN window when the
       // keeper names it (lane E — tree bounds are toolkit coordinates), else the last snapshot's frame
@@ -1481,7 +1487,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   // ── screenshot (the pixel road's read) ──
   async function screenshot(handle0, facts) {
-    const { handle, sub } = await subjectDoor(handle0, facts, 'screenshot', { subjectVerb: true }); // B-dbb4 (r946): the one door — before the desktop record's own early return
+    const door = await subjectDoor(handle0, facts, 'screenshot', { subjectVerb: true }); // B-dbb4 (r946): the one door — before the desktop record's own early return
+    const { handle, sub } = door;
     const { rec, lease } = requireLease(handle, facts, 'screenshot');
     if (rec.origin === 'desktop') return desktopScreenshot(rec, facts);
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, ...(sub != null ? { subject: UN.subHandle(rec.id, sub) } : {}) };
@@ -1492,7 +1499,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const out = path.join(dir, `${rec.id}-${now()}-${process.pid}.png`);
     // lane E (D7): the app's OWN windows composed by root position — never the root (on the xpra rung the root is
     // composited offscreen and grabs black), never AT-SPI bounds (logical px on GTK4, DIP on Chrome)
-    const plan = await planFor(rec, sub);
+    const plan = door.plan || await planFor(rec, sub); // r989 (3): the door's plan, handed on
     if (plan) {
       const vis = R.visibilityVerdict({ perWindow: capsOf(rec).perWindow, plan });
       if (!vis.ok) { audit({ ...who, verb: 'screenshot', by: 'pixels', ok: false, code: vis.code }); throw namedError(vis.code, vis.why.replace('<handle>', sub != null ? UN.subHandle(rec.id, sub) : rec.id), { handle: sub != null ? UN.subHandle(rec.id, sub) : rec.id }); }

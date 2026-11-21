@@ -537,7 +537,7 @@ console.log('CONTROLS (patched copies)');
       'M1: the window list answering not-ok, or throwing ⇒ a screenshot, a click and a key on `da-pop.w2` are refused window_list_unreadable naming THAT handle — no click, no key (never the main\'s image, never display coordinates)', { u1: u1 && [u1.code, u1.message], u2: u2 && u2.code, u3: u3 && u3.code, clicks: clicksP.length - clicks0 });
     // RED CONTROLS: an engine copy with today's fall-through (the list's not-ok answers null) / no subject focus / the tree road
     const ES = read(ENGINE_REL);
-    const fall = ES.replace("if (!r || !r.ok) { if (sub != null) throw unreadable(r && r.error); return null; }", 'if (!r || !r.ok) return null;').replace("if (sub != null) throw (e && ['window_gone', 'window_list_unreadable', 'window_subject_shared'].includes(e.code) ? e : unreadable(e && e.message));\n      return null;", 'return null;'); // stale-pins: kept (a RED control plants the pre-cure text)
+    const fall = ES.replace("if (!r || !r.ok) { if (sub != null) throw unreadable(r && r.error); return null; }", 'if (!r || !r.ok) return null;').replace("if (sub != null) throw (e && ['window_gone', 'window_list_unreadable', 'window_subject_shared'].includes(e.code) ? e : unreadable(e && e.message));\n      return null;", 'return null;').replace("if (!plan || !plan.ok || !plan.subject) throw refuse('window_unshowable',", "if (false) throw refuse('window_unshowable',"); // stale-pins: kept (a RED control plants the pre-cure text)
     const noFocus = ES.replace("const dw = subjectWin(px) || dialogWindow(px, lease); // lane window-dialog-member", "const dw = dialogWindow(px, lease); // lane window-dialog-member"); // stale-pins: kept (a RED control plants the pre-cure text)
     const treeRoad = ES.replace("if (!body.ref && (pixelShare || sub != null)) return injected(", "if (!body.ref && pixelShare) return injected("); // stale-pins: kept (a RED control plants the pre-cure text)
     ok(fall !== ES && noFocus !== ES && treeRoad !== ES, 'controls planted: the fall-through, the key without its subject window, the tree road for a chosen window');
@@ -586,43 +586,56 @@ console.log('CONTROLS (patched copies)');
       snapshot: (E, h) => E.snapshot(h, fP), attach: (E, h) => E.attach(h, fP), detach: (E, h) => E.detach(h, fP), size: (E, h) => E.setSize(h, '800x600', fP), mode: (E, h) => E.setLaunchMode(h, 'pixels', fP), stop: (E, h) => E.stopOwn(h, fP), watch: (E, h) => E.watch(h, fP) };
     // the record kinds: an app on a rung that owns its display (xpra), the person's own desktop (a record of origin «desktop»), a tree share
     const recDk = { id: 'da-dsk', label: 'Desktop', exec: 'x', state: 'ready', origin: 'desktop', display: ':0', pids: { app: 4747 }, backend: 'xpra', startedAt: Date.now(), readyAt: Date.now() };
-    const keeperT = { ...keeperP, listApps: () => [recP, recDk], get: (id) => (id === recP.id ? recP : id === recDk.id ? recDk : null), windows: async (id) => keeperP.windows(id) };
+    const recV = { id: 'da-vnc', label: 'OnePane', exec: 'x', state: 'ready', display: ':95', pids: { app: 4848 }, backend: 'vnc-display', startedAt: Date.now(), readyAt: Date.now() };
+    const recSh = { id: 'da-shr', label: 'Shared', exec: 'x', state: 'ready', display: ':0', pids: { app: 4949 }, backend: 'desktop-singleton', startedAt: Date.now(), readyAt: Date.now() };
+    const RECS = { 'da-pop': recP, 'da-dsk': recDk, 'da-vnc': recV, 'da-shr': recSh };
+    let tableUnreadable = false;
+    const vncRows = [{ id: 2, x: 0, y: 0, w: 500, h: 600, mapped: true }, { id: 1, title: 'App', cls: 'x', x: 600, y: 400, w: 1200, h: 800, mapped: true }]; // the subject listed with no class, name or title
+    const keeperT = { ...keeperP, listApps: () => Object.values(RECS), get: (id) => RECS[id] || null, windows: async (id) => (tableUnreadable ? { ok: false, error: 'the table: unreadable' } : id === 'da-vnc' ? { ok: true, windows: vncRows.map((w) => ({ ...w })) } : keeperP.windows(id)) };
     const tableRun = async (E, label) => {
       const cells = [], miss = [];
-      for (const kind of ['xpra', 'desktop', 'tree']) for (const state of ['found', 'unreadable', 'gone', 'launching']) for (const verb of CLI_VERBS.filter((v) => !NO_HANDLE.has(v))) {
-        const h = (kind === 'desktop' ? 'da-dsk' : 'da-pop') + (state === 'gone' ? '.w99' : '.w2');
+      const KIND_REC = { xpra: 'da-pop', tree: 'da-pop', desktop: 'da-dsk', onepane: 'da-vnc', shared: 'da-shr' };
+      for (const kind of Object.keys(KIND_REC)) for (const state of ['found', 'unreadable', 'gone', 'launching']) for (const verb of CLI_VERBS.filter((v) => !NO_HANDLE.has(v))) {
+        const base0 = KIND_REC[kind], recK = RECS[base0];
+        const h = base0 + (state === 'gone' ? '.w99' : '.w2');
         if (!CALL[verb]) { miss.push(verb); continue; }
         E.setShareMode('da-pop', kind === 'tree' ? 'tree' : 'pixels');
-        const winsT = keeperP.windows; if (state === 'unreadable') keeperP.windows = async () => ({ ok: false, error: 'the table: unreadable' });
-        if (state === 'launching') recP.state = 'launching';
+        tableUnreadable = state === 'unreadable';
+        if (state === 'launching') recK.state = 'launching';
+        const lastOf = { click: clicksP[clicksP.length - 1], key: keysP[keysP.length - 1], type: typedP[typedP.length - 1], scroll: scrollsP[scrollsP.length - 1], screenshot: shotsP[shotsP.length - 1] };
         const before = { inj: clicksP.length + keysP.length + typedP.length + scrollsP.length + shotsP.length, audit: fs.readFileSync(E.auditFile, 'utf8').length };
         let res = null, err = null; try { res = await CALL[verb](E, h); } catch (e) { err = e; }
-        keeperP.windows = winsT; recP.state = 'ready';
+        tableUnreadable = false; recK.state = 'ready';
         const after = clicksP.length + keysP.length + typedP.length + scrollsP.length + shotsP.length;
         const rows = fs.readFileSync(E.auditFile, 'utf8').slice(before.audit).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-        const want = !PIXEL_VERBS.has(verb) ? OTHER_CODE[verb] : kind === 'desktop' ? 'window_subject_shared' : state === 'unreadable' ? 'window_list_unreadable' : state === 'gone' ? 'window_gone' : state === 'launching' ? 'window_not_ready' : 'acted';
-        const acted = !err && after > before.inj && (verb !== 'screenshot' || (res && res.subject && res.subject.handle === h));
+        // the door's order (r989): the lease, the record kind, the verb's kind, the record's state, the window (its plan OK)
+        const sharedKind = kind === 'desktop' || kind === 'shared';
+        const want = OTHER_CODE[verb] === 'window_subject_verb' ? 'window_subject_verb' : sharedKind ? 'window_subject_shared' : verb === 'snapshot' ? 'window_subject_pixels' : state === 'launching' ? 'window_not_ready' : state === 'unreadable' ? 'window_list_unreadable' : state === 'gone' ? 'window_gone' : kind === 'onepane' ? 'window_unshowable' : 'acted';
+        // r989 (4): an «acted» cell judges the injection went to the SUBJECT's own window (the popup at 0,0, 500×600), never the main's
+        const last = { click: clicksP[clicksP.length - 1], key: keysP[keysP.length - 1], type: typedP[typedP.length - 1], scroll: scrollsP[scrollsP.length - 1], screenshot: shotsP[shotsP.length - 1] }[verb];
+        const toSubject = verb === 'click' ? !!last && last !== lastOf.click && last.x === 10 && last.y === 20 : verb === 'key' || verb === 'type' ? !!last && last !== lastOf[verb] && last.window === 2 : verb === 'scroll' ? !!last && last !== lastOf.scroll && last.x === 250 && last.y === 300 : verb === 'screenshot' ? !!(res && res.subject && res.subject.id === 2 && res.subject.handle === h && last && last.main === 2) : false;
+        const acted = !err && after > before.inj && toSubject;
         const pass = want === 'acted' ? acted : (!!err && err.code === want && after === before.inj && !rows.some((r) => r.ok === true));
         const own = rows.filter((r) => r.verb === verb || r.by === 'subject'); // the cell's OWN rows (a share switch between cells audits its own)
         const subjOk = own.length >= 1 && own.every((r) => r.subject === h);
-        cells.push({ cell: `${kind}·${state}·${verb}`, want, got: err ? err.code : 'acted', pass, subjOk, rows: rows.length });
+        cells.push({ cell: `${kind}·${state}·${verb}`, want, got: err ? err.code : acted ? 'acted' : 'acted elsewhere', pass, subjOk, rows: rows.length });
       }
       E.setShareMode('da-pop', 'pixels');
       return { cells, miss, label };
     };
     const ET = ENGINE.create({ keeper: keeperT, dataDir: path.join(dir, 'dbb4-table'), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 });
-    for (const id of ['da-pop', 'da-dsk']) { ET.grantReach(id, { kind: 'session', id: 's1' }); ET.setShareMode(id, 'pixels'); try { ET.attach(id, fP); } catch { /* the desktop record's own rule */ } }
+    for (const id of Object.keys(RECS)) { ET.grantReach(id, { kind: 'session', id: 's1' }); ET.setShareMode(id, 'pixels'); try { ET.attach(id, fP); } catch { /* the record's own rule */ } }
     const T1 = await tableRun(ET, 'the cure');
     const bad = T1.cells.filter((c) => !c.pass), noSubj = T1.cells.filter((c) => !c.subjOk);
-    console.log(`  · r946 the table: ${T1.cells.length} cells (${CLI_VERBS.length - NO_HANDLE.size} verbs × 3 kinds × 4 states); refused ${T1.cells.filter((c) => c.want !== 'acted').length}, acted ${T1.cells.filter((c) => c.want === 'acted').length}`);
-    ok(T1.cells.length >= 144 && bad.length === 0 && T1.miss.length === 0, 'r946 THE TABLE: every CLI verb × record kind (an app owning its display, the person\'s own desktop, a tree share) × subject state (found, the list unreadable, gone since the list, still launching) — each cell acted on THAT window, or refused by name with nothing injected and nothing recorded as done', bad.slice(0, 12));
+    console.log(`  · r946 the table: ${T1.cells.length} cells (${CLI_VERBS.length - NO_HANDLE.size} verbs × 5 kinds × 4 states); refused ${T1.cells.filter((c) => c.want !== 'acted').length}, acted ${T1.cells.filter((c) => c.want === 'acted').length}`);
+    ok(T1.cells.length >= 240 && bad.length === 0 && T1.miss.length === 0, 'r946 + r989 THE TABLE: every CLI verb × record kind (an app owning its display, the person\'s own desktop, a tree share, a rung that cannot show one window alone, a shared rung) × subject state (found, the list unreadable, gone since the list, still launching) — each cell acted on THAT window, or refused by name with nothing injected and nothing recorded as done', bad.slice(0, 12));
     ok(noSubj.length === 0, 'r946: the audit row of EVERY cell carries the window\'s own handle as its subject (one assertion over the table)', noSubj.slice(0, 12));
     // RED CONTROLS: the door taken out of one verb (screenshot); a record kind's early return put back before the door
     const EST = read(ENGINE_REL);
-    const noDoor = EST.replace("const { handle, sub } = await subjectDoor(handle0, facts, 'screenshot', { subjectVerb: true }); // B-dbb4 (r946): the one door — before the desktop record's own early return", "const { handle, sub } = splitSubject(handle0);"); // stale-pins: kept (a RED control plants the pre-door text)
+    const noDoor = EST.replace("const door = await subjectDoor(handle0, facts, 'screenshot', { subjectVerb: true }); // B-dbb4 (r946): the one door — before the desktop record's own early return", "const door = { ...splitSubject(handle0), plan: null };"); // stale-pins: kept (a RED control plants the pre-door text)
     const earlyBack = EST.replace("  async function screenshot(handle0, facts) {\n", "  async function screenshot(handle0, facts) {\n    { const r0 = liveAny(splitSubject(handle0).handle); if (r0 && r0.origin === 'desktop') return { handle: r0.id, file: null, w: 1, h: 1, coords: 'display', planted: 'the early return before the door' }; }\n");
     ok(noDoor !== EST && earlyBack !== EST, 'controls planted: screenshot without the door; the desktop record\'s early return put back before it');
-    const tableCopy = async (src, tag) => { const EC = MUT.load(ENGINE_REL, src, tag); const E2 = EC.create({ keeper: keeperT, dataDir: path.join(dir, 'dbb4-table-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 }); for (const id of ['da-pop', 'da-dsk']) { E2.grantReach(id, { kind: 'session', id: 's1' }); E2.setShareMode(id, 'pixels'); try { E2.attach(id, fP); } catch { /* */ } } return tableRun(E2, tag); };
+    const tableCopy = async (src, tag) => { const EC = MUT.load(ENGINE_REL, src, tag); const E2 = EC.create({ keeper: keeperT, dataDir: path.join(dir, 'dbb4-table-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 }); for (const id of Object.keys(RECS)) { E2.grantReach(id, { kind: 'session', id: 's1' }); E2.setShareMode(id, 'pixels'); try { E2.attach(id, fP); } catch { /* */ } } return tableRun(E2, tag); };
     const R1 = await tableCopy(noDoor, 'no-door'), R2 = await tableCopy(earlyBack, 'early-back');
     const tRed1 = R1.cells.filter((c) => !c.pass && c.cell.endsWith('·screenshot')), tRed2 = R2.cells.filter((c) => !c.pass && c.cell.startsWith('desktop·') && c.cell.endsWith('·screenshot'));
     ok(tRed1.length > 0, `RED CONTROL: screenshot without the door — its cells go red by name (${tRed1.map((c) => c.cell).slice(0, 4).join(', ')})`, tRed1.slice(0, 4));

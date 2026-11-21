@@ -171,9 +171,10 @@ app owns. Refused by name:
   app's own handle, and ask the user about the other windows (they see them in the live view);
 - `window_not_visible` — the window has no pixels yet (nobody shows it): the user's live view shows it;
 - `window_not_ready` — the app is still starting: its windows are listed once it is ready;
+- `window_unshowable` — that window cannot be shown alone (no name, or too small to draw): use the app's own handle;
 - `window_subject_verb` — `attach`, `detach`, `size`, `mode`, `stop` and `watch` take the app's own handle, never a window's.
 
-Every verb meets ONE check of a window's handle before anything else runs: it acts on THAT window or is refused by name, and nothing is injected or recorded as done when it is refused.
+Every verb meets ONE check of a window's handle before anything else runs (after your lease and the share, which answer as for the app's own handle): it acts on THAT window or is refused by name, and nothing is injected or recorded as done when it is refused.
 
 A **handle** is the window's id from `list` (`da-…`); `open` prints it. A
 **lease** is what `attach` takes: one holder per window, and every reading or
