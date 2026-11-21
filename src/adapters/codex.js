@@ -872,7 +872,7 @@ const FILE_REFUSALS_MAX = 4096, FILE_REFUSALS_HUNG_MAX = 8192;  // the storage's
 // file the pool was never asked about reads nothing on the loop either while it stands; any answer of the pool ends it
 const POOL_REFUSING_MS = 30000;
 // a file the storage's is asked of the POOL again (off the loop — the pool's own memory refuses at once while it remembers, then one
-// worker tries) at most once a gap: 30 s, doubling on each storage refusal, at most 8 min (B-23e5's span); one caller claims each retry
+// worker tries) at most once a gap: 30 s, doubling on each retry, at most 8 min (B-23e5's span); one caller claims each retry
 let STORAGE_RETRY_MS = 30000;
 const STORAGE_RETRY_MAX_MS = 8 * 60000;
 function storageRetryDue(fp) {
@@ -880,7 +880,8 @@ function storageRetryDue(fp) {
   if (!r || !(r.storage || r.ownDeadline)) return true;   // the door or the pool's memory alone: the pool's door answers at once
   const now = Date.now();
   if (now < (r.retryAt || 0)) return false;
-  r.retryAt = now + (r.retryGap || STORAGE_RETRY_MS);
+  r.retryGap = Math.min(STORAGE_RETRY_MAX_MS, (r.retryGap || STORAGE_RETRY_MS) * 2);   // the next retry waits twice as long (30 s, 1 min, 2 … ≤ 8 min)
+  r.retryAt = now + r.retryGap;
   return true;
 }
 let _poolRefusedAt = 0;
@@ -916,9 +917,9 @@ function noteFileRefusal(fp, refusal, { history = false } = {}) {
   }
   rec.lastAt = now; rec.count++;
   rec.why = (refusal && refusal.why) || rec.why || 'refused';
-  if (storage) {   // the STORAGE's — for the record's life: only a history read's answer for the file forgives it (never a timer: the pool's own retry may still be wedged in it)
-    rec.retryGap = rec.storage ? Math.min(STORAGE_RETRY_MAX_MS, (rec.retryGap || STORAGE_RETRY_MS) * 2) : STORAGE_RETRY_MS;   // each storage refusal doubles the wait
+  if (storage && !rec.storage) {   // the STORAGE's — for the record's life: only a history read's answer for the file forgives it (never a timer: the pool's own retry may still be wedged in it)
     rec.storage = true;
+    rec.retryGap = STORAGE_RETRY_MS;   // the first retry waits one gap; each RETRY then doubles it (storageRetryDue) — never each refusal (a tail and a task scan refused at once are one event)
     rec.retryAt = now + rec.retryGap;
   }
   return rec;
