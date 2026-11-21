@@ -3977,10 +3977,11 @@ export function peelFullNames(repoRoot, names) {
 /** → Map(marker → [commit…]): a red's commits (its name's, its field's — 0, 1 or 2), a green's (exactly 1, or none). `.names`
  *  (a second Map) is each marker's NAME commit alone — the writer's refusal and «already green» match an UNREADABLE file by it. */
 export function markerCommitsOf(repoRoot, markers, { resolveShort = (names) => resolveShortNames(repoRoot, names), peelFull = (names) => peelFullNames(repoRoot, names) } = {}) {
-  const FULL = /^[0-9a-f]{40}$/;
+  const FULL = /^[0-9a-f]{40}$/, HEX = /^[0-9a-f]{7,40}$/;
   // a RED's field is read the way master read it — any truthy value, coerced to text and handed to git (a ref, a number, an array of
-  // one sha all resolve there); a GREEN's only when its record is readable (its shape makes the field a sha)
-  const fieldOf = (m) => (m.kind === 'red' ? (m.field ? String(m.field) : null) : (!m.unreadable && typeof m.field === 'string' ? m.field : null));
+  // one sha all resolve there: a red only ever blocks more); a GREEN's only when its record is readable AND the field is hex, 7 to 40
+  // digits — a RULE here at the door, not a consequence of the shape law upstream: a revision word in a green's field never reaches git
+  const fieldOf = (m) => (m.kind === 'red' ? (m.field ? String(m.field) : null) : (!m.unreadable && typeof m.field === 'string' && HEX.test(m.field) ? m.field : null));
   const fulls = new Set(), others = new Set();
   for (const m of markers) for (const x of [m.sha, fieldOf(m)]) if (typeof x === 'string' && x) { if (FULL.test(x)) fulls.add(x); else others.add(x); }
   const peeled = fulls.size ? peelFull([...fulls]) : new Map(), res = others.size ? resolveShort([...others]) : new Map();

@@ -44,7 +44,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { tableTiersOf, launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, runSuiteAsync, passedCountOf, wholeSkipOf, heavyVerdictSaid } from './ci.mjs';
+import { tableTiersOf, launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, runSuiteAsync, passedCountOf, wholeSkipOf, heavyVerdictSaid, markerCommitsOf, resolveShortNames } from './ci.mjs';
 import { REPO, ok, git, writeMarker, report, GIT_ENV } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';
@@ -1096,6 +1096,30 @@ console.log('§7c THE DIFFERENTIAL (B-e56e) — seeded marker sets: every «mast
       const refused = sceneOf('refused', (p) => p(c1, 'red', { sha: XB7, result: 'red', failed: ['t3'], startedAt: 1, endedAt: 1 }));
       const vRefused = judgeAt('refused', refused.dir, refused.files, c3);
       ok(!vRefused.master && vRefused.reader && vRefused.law, `a red NAMED c1 whose sha field is ${XB7}: master CLEAR (it reads the field, and its merge-base refuses the name), the reader and the law BLOCK on the name's commit`);
+      // A RED NAMED BY A SHARED NAME (主开发 r1398's small, said in the kb): name AND field both XB7 — it names NOTHING, as on master
+      // (its merge-base refuses the name); the release's hinted question had blocked on it: stricter by accident, never a law
+      const sharedRed = sceneOf('shared-red', (p) => p(XB7, 'red', { sha: XB7, result: 'red', failed: ['t1'], startedAt: 1, endedAt: 1 }));
+      const vShared = judgeAt('shared-red', sharedRed.dir, sharedRed.files, c3);
+      const vSharedHinted = safely(() => HINTED.heavyBlocker({ dir: sharedRed.dir, head: c3, repoRoot: RG }));
+      ok(!vShared.master && !vShared.reader && !vShared.law && !!vSharedHinted && !vSharedHinted.threw,
+        `a red whose name AND field are ${XB7} (a commit and a blob answer to it) names nothing: master CLEAR, the reader CLEAR, the law CLEAR — as before the release; the release's hinted question BLOCKED on it (stricter by accident, not a law)`);
+      // THE GREEN's FIELD RULE (主开发 r1398's small): a green's field reaches git only when it is hex, 7 to 40 digits — at the door,
+      // for any caller that hands markerCommitsOf a marker (the shape law upstream refuses such a FILE; the door no longer leans on it).
+      // A red's field is still asked whatever its text, as master did (a red only blocks more).
+      const doorAsk = (mod) => {
+        const asked = [], mk = [{ kind: 'green', sha: c3.slice(0, 9), field: 'main' }, { kind: 'green', sha: side.slice(0, 9), field: 'side' }, { kind: 'red', sha: c1, field: 'light' }];
+        const got = mod.markerCommitsOf(RG, mk, { resolveShort: (names) => { asked.push(...names); return mod.resolveShortNames(RG, names); } });
+        return { asked, g0: got.get(mk[0]), g1: got.get(mk[1]), r: got.get(mk[2]) };
+      };
+      const door = doorAsk({ markerCommitsOf, resolveShortNames });
+      ok(door.g0.length === 0 && door.g1.length === 0 && !door.asked.includes('main') && !door.asked.includes('side') && door.asked.includes('light') && door.r.join() === [c1, c2].join(),
+        `a GREEN whose field is a revision word («main», «side») covers NOTHING and git is never asked the word; a RED's field «light» is asked and speaks for its commit (the red: c1 by its name, c2 by its field) — asked: ${door.asked.join(' ')}`);
+      const RULE = "!m.unreadable && typeof m.field === 'string' && HEX.test(m.field) ? m.field : null";
+      ok(SRC.split(RULE).length === 2, 'the green\'s field rule is ONE condition at the door (markerCommitsOf)');
+      const NORULE = await import(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(RULE, RULE.replace(' && HEX.test(m.field)', '')), 'green-field-door')).href);
+      const doorOld = doorAsk(NORULE);
+      ok(doorOld.g0.join() === c3 && doorOld.g1.join() === side && doorOld.asked.includes('main'),
+        `RED CONTROL: without the rule the same greens reach git and speak for c3 and the side commit (${(doorOld.g0 || []).map((x) => x.slice(0, 9)).join() || 'none'} · ${(doorOld.g1 || []).map((x) => x.slice(0, 9)).join() || 'none'})`);
       // THE SEEDED SETS, §7c's generator over this history's names (fewer sets: every verdict asks real git)
       let gs7 = 0x5eed3d7 >>> 0;
       const gRnd = () => { gs7 = (gs7 + 0x6D2B79F5) >>> 0; let t = gs7; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -1124,7 +1148,7 @@ console.log('§7c THE DIFFERENTIAL (B-e56e) — seeded marker sets: every «mast
         for (const head of [c3, side, gPick([x, c1, c2])]) judgeAt(`set ${c}`, dir, files, head);
       }
       for (const b of badG) console.log(`    ${b.tag} at HEAD ${b.head.slice(0, 9)}: ${b.why}\n${b.files.map((f) => `      ${f.fname}  ${f.body}`).join('\n')}`);
-      ok(!badG.length && tallyG.judged === 4 + SETS * 3, `${SETS} seeded marker sets × 3 HEADs + the 4 crafted scenes (${tallyG.judged} verdicts, every one asking real git): the reader IS the law everywhere, and every «master BLOCKED → reader CLEAR» (${tallyG.loosened}) is an honest union of list-scoped greens — master blocked ${tallyG.mBlocked}, the reader ${tallyG.nBlocked}, stricter than master ${tallyG.tightened}; master's reader threw ${tallyG.masterThrew}× (its guard answered «not blocking»)`);
+      ok(!badG.length && tallyG.judged === 5 + SETS * 3, `${SETS} seeded marker sets × 3 HEADs + the 5 crafted scenes (${tallyG.judged} verdicts, every one asking real git): the reader IS the law everywhere, and every «master BLOCKED → reader CLEAR» (${tallyG.loosened}) is an honest union of list-scoped greens — master blocked ${tallyG.mBlocked}, the reader ${tallyG.nBlocked}, stricter than master ${tallyG.tightened}; master's reader threw ${tallyG.masterThrew}× (its guard answered «not blocking»)`);
       ok(tallyG.loosened > 0 && tallyG.tightened > 0, `both directions are reached on real git (looser by an honest union: ${tallyG.loosened} · stricter: ${tallyG.tightened}) — the leg is not vacuous`);
     }
   }
