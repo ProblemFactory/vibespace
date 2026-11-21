@@ -125,7 +125,10 @@ const conn = await ready;
 {
   const caps = conn.info.capabilities;
   ok(caps.includes('stream-audio') && caps.indexOf('stream-audio') === caps.length - 1 && caps.indexOf('stream-mic') === caps.length - 2, 'the hello-ack names stream-audio (after stream-mic)', caps.slice(-3));
-  ok(/op: "stream-audio-result"/.test(bundleText) && /function createSound\(/.test(bundleText) && /hc = r\.helper = spawn\(h\.exe, \["loopback"\]/.test(bundleText), 'the bundle answers stream-audio-result and carries src/desktop-sound.js (npm run build:agentd after a change)');
+  // the leg judges what it says (主开发 r952): the op's reply word and the module's OWN marker (its factory) in the bundle — never the
+  // spelling of one statement inside the module (a pin on `hc = r.helper = spawn(h.exe, ["loopback"]…` went stale when row B-147f
+  // made the helper's start heard at once); the op's reply itself is judged live just below (by id) and in §2
+  ok(/op: "stream-audio-result"/.test(bundleText) && /function createSound\(/.test(bundleText), 'the bundle answers stream-audio-result and carries src/desktop-sound.js (npm run build:agentd after a change)');
   // (the THREE-TOUCH pin of src/agentd/client.js: MOVED to the fast scripts/test-stream-sound-op-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const raw = await dm._request({ op: 'stream-audio', sid: 'nope', on: true, timeoutMs: 5000 });
   ok(raw && raw.result && raw.result.ok === false && raw.result.code === 'not_found', 'a raw request is answered BY ID (not a timeout): an unknown session is not_found', raw);
