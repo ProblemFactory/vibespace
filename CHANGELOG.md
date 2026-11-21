@@ -67,6 +67,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In a desktop app window, Chrome's own «Can't update Chrome» notice no longer appears or takes the keyboard; Chrome outside VibeSpace still shows it.
 - Refreshing Codex usage while the only running Codex conversation cannot be tied to an account now says so, instead of «no session is running».
 - Opening many conversations at once is lighter on VibeSpace: a chat window no longer fetches every background job just to show its waiting notifications.
+- Beside the conversation list on a tablet-sized screen, the state in the top bar now shows whole or as a coloured dot, never cut.
 
 ## 2.369.415 — 2026-11-21
 
