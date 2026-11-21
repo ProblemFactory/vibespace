@@ -525,7 +525,10 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     schip.style.setProperty('--chip-color', 'var(--yellow, #e5c07b)');
     const label = s.staleAt ? tr('last known · {ago}', { ago: agoText(s.staleAt) }) : tr('last known');
     schip.innerHTML = `<span class="chip-icon">⚠</span><span class="chip-text">${escHtml(label)}</span>`;
-    schip.dataset.tip = tr('This machine was unreachable — showing the last successful scan, so this session may have changed or ended since.');
+    // B-5278 (r908 (4)): a machine that answered, whose walk ran out of time, is not «unreachable»
+    schip.dataset.tip = s.staleWhy
+      ? tr('This machine\'s list could not be read in time — showing its last list, so this session may have changed or ended since.')
+      : tr('This machine was unreachable — showing the last successful scan, so this session may have changed or ended since.');
     stateChip?.after(schip);
   }
   // Custom config marker: shown when this session has persisted model/effort/permission overrides

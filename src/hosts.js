@@ -171,7 +171,7 @@ function passiveOfPeek(raw) {
 const USAGE_HARVEST_LIMITS = Object.freeze({ maxBuffer: 128 * 1024 * 1024, timeoutMs: 180000 });
 // B-5278 unit 2 (r849): a device that could not walk answered its LAST list, its age said — every row says it is old (the
 // marks the hub's own last-known list carries: stale, staleAt)
-const staleSessions = (sessions, stale) => { const at = Date.now() - Math.max(0, Number(stale && stale.ageMs) || 0); return sessions.map((x) => ({ ...x, stale: true, staleAt: at })); };
+const staleSessions = (sessions, stale) => { const at = Date.now() - Math.max(0, Number(stale && stale.ageMs) || 0); return sessions.map((x) => ({ ...x, stale: true, staleAt: at, staleWhy: (stale && stale.why) || undefined })); };
 const usageScanBound = (L) => ({ maxBytes: Math.floor(L.maxBuffer / 2), maxMs: Math.floor(L.timeoutMs / 3) });
 // …and a harvest that failed backs off: 1 min, doubling, at most 30 min (a forced harvest — the owner's own ask — goes)
 const HARVEST_BACKOFF_MS = 60 * 1000, HARVEST_BACKOFF_MAX_MS = 30 * 60 * 1000;
@@ -3695,7 +3695,9 @@ ${codexOpenRolloutsShell()}
       // failing the sidebar into an empty remote zone (2.124.0).
       const last = this._discoveryCache.get(id) || this._persistedDisc[id];
       if (last && Array.isArray(last.sessions)) {
-        return last.sessions.map((s) => ({ ...s, stale: true, staleAt: last.at }));
+        // (r908 (3)) a row's OWN age is kept (a list the device already answered old says when it was read), and its reason is
+        // this one now: the machine unreachable
+        return last.sessions.map((s) => ({ ...s, stale: true, staleAt: s.staleAt || last.at, staleWhy: undefined }));
       }
       throw e;
     }

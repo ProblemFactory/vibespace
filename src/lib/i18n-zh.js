@@ -3277,6 +3277,7 @@ export default {
   "This account is signed in elsewhere — log it in on this machine, or run the session where it is signed in.": "该账号在别处已登录——请在本机登录它，或把会话跑在它已登录的那台机器上。",
   "This instance's public address (for reverse mounts)": "本实例的公网地址（用于反向挂载）",
   "This machine was unreachable — showing the last successful scan, so this session may have changed or ended since.": "此机器当时不可达——正在显示最后一次成功的扫描结果，因此该会话此后可能已发生变化或已结束。",
+  "This machine's list could not be read in time — showing its last list, so this session may have changed or ended since.": "这台机器的列表没能及时读出——显示的是它上一次的列表，所以这个会话可能已经变化或结束。",
   "Upgrade \"{name}\" to dial-out": "将“{name}”升级为拨出连接",
   "Upgrade \"{name}\" to dial-out (faster + self-healing over a flaky link; ssh kept as rescue)": "将“{name}”升级为拨出连接（在不稳定链路上更快、可自愈；ssh 仍保留作为救援通道）",
   "Upgrade to dial-out": "升级为拨出连接",

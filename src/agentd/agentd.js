@@ -1344,7 +1344,8 @@ const sealedOrders = {
       log(`sealed-orders EXECUTED: pool ${o2.poolId} → ${next.id} (banner ${banner.kind} in ${sid}, no orchestrator)`);
     } catch (e) { log('sealed-orders execute failed: ' + e.message); }
   },
-  pendingReport() { try { return fs.readFileSync(ORDERS_LOG, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } },
+  // B-5278 unit 2 (find 2): read line by line (sealed-orders.js reportOf) — a torn line is left out and said, never every report hidden
+  pendingReport() { try { const r = SO.reportOf(fs.readFileSync(ORDERS_LOG, 'utf-8')); if (r.torn && !this._tornSaid) { this._tornSaid = true; log(`sealed-orders: ${r.torn} torn line(s) in the pool's report left out`); } return r.events; } catch { return []; } },
   clearReport() { try { fs.rmSync(ORDERS_LOG, { force: true }); } catch { } },
 };
 sealedOrders.load();
@@ -2201,7 +2202,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               const r = await require('./../discovery-facts.js').snapshotReply({ kept: discoveryKept, runChild: (cb) => {
                 const { execFile } = require('child_process');
                 execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);
-              } });
+              }, log });
               if (r.error) { mux.control({ op: 'discovery-result', id: msg.id, error: r.error, code: r.code }); return; }
               snap = r.snap; stale = r.stale || null;
             } else snap = computeDiscoverySnapshot();   // msg.forceInline: a parity suite's pin only (the hub never sends it)
@@ -2227,7 +2228,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               const r = await require('./../discovery-facts.js').snapshotReply({ kept: discoveryKept, runChild: (cb) => {
                 const { execFile } = require('child_process');
                 execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);
-              } });
+              }, log });
               if (r.error) { mux.control({ op: 'discovery-result', id: msg.id, error: r.error, code: r.code }); return; }
               snap = r.snap; stale = r.stale || null;
             } else snap = computeDiscoverySnapshot();   // msg.forceInline: a parity suite's pin only (the hub never sends it)

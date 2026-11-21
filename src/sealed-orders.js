@@ -78,4 +78,16 @@ function orderProviderFields({ ranked = [], links = [], memberIds = [], defaultM
   };
 }
 
-module.exports = { providerAware, recordedProviderOf, deviceFallback, orderProviderFields };
+// B-5278 unit 2 (find 2): the report of the switches a machine made alone (its pool-orders-log.ndjson), read LINE BY LINE (PURE):
+// a torn line (a crash mid-append) is left out and counted. The release parsed every line in ONE try, so one torn line
+// answered no event at all — the hub then acked nothing, and the torn line stayed, hiding every report for good.
+function reportOf(text) {
+  const events = []; let torn = 0;
+  for (const l of String(text || '').split('\n')) {
+    if (!l) continue;
+    let e = null; try { e = JSON.parse(l); } catch { }
+    if (e && typeof e === 'object' && !Array.isArray(e)) events.push(e); else torn++;
+  }
+  return { events, torn };
+}
+module.exports = { providerAware, recordedProviderOf, deviceFallback, orderProviderFields, reportOf };

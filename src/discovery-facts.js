@@ -937,20 +937,46 @@ function snapshotChildVerdict(err, stdout) {
     return r && r.jsonls ? { snap: r } : { error: 'the discovery walk answered no snapshot', code: 'discovery-child-failed' };
   }
   if (err.spawnFailed || (typeof err.code === 'string' && /^E[A-Z0-9]+$/.test(err.code) && err.syscall !== undefined)) return { error: `the discovery walk could not start (${err.code || 'spawn'})`, code: 'discovery-child-unstarted' };
+  // (r908 (4)) a child ended for TOO MUCH OUTPUT is said as that (Node kills it at its buffer — a kill, not its time bound)
+  if (err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return { error: 'the discovery walk answered more than its bound (64 MiB)', code: 'discovery-too-large' };
   if (err.killed || err.signal) return { error: `the discovery walk did not finish (${err.signal || 'killed'} at its bound)`, code: 'discovery-timeout' };
   return { error: `the discovery walk failed (${String((err && err.message) || err).split('\n')[0].slice(0, 160)})`, code: 'discovery-child-failed' };
 }
-async function snapshotReply({ runChild, kept, now = Date.now }) {
-  const v = await new Promise((resolve) => {
-    try { runChild((err, stdout) => resolve(snapshotChildVerdict(err, stdout))); } catch (e) { resolve(snapshotChildVerdict(Object.assign(e instanceof Error ? e : new Error(String(e)), { spawnFailed: true }), '')); }
-  });
-  if (v.snap) { kept.snap = v.snap; kept.at = now(); return { snap: v.snap }; }
-  if (kept.snap) return { snap: kept.snap, stale: { ageMs: Math.max(0, now() - kept.at), why: v.code } };
+// (r908 (1)) THE ANSWER GOES BY DISCOVERY_ANSWER_MS, UNDER THE HUB's WAIT (it stops at 12 s for the snapshot, 15 s for the
+// claims): a slow walk is not a hung one — the child walks on to its own bound (30 s), and what it lands is KEPT for the
+// next ask, while this ask is answered the kept snapshot with its age (or «still walking», by name). (r908 (2)) ONE WALK
+// CHILD AT A TIME a machine: an ask that meets a walk in flight JOINS it; a walk older than DISCOVERY_STUCK_MS (its bound
+// and a hold window — a child stuck in an uninterruptible read outlives its kill) is let go and said, so at most one stuck
+// child a window is left behind, never one an ask.
+const DISCOVERY_ANSWER_MS = 10 * 1000, DISCOVERY_STUCK_MS = 60 * 1000;
+async function snapshotReply({ runChild, kept, now = Date.now, answerBy = DISCOVERY_ANSWER_MS, stuckAfter = DISCOVERY_STUCK_MS, timers = { setTimeout, clearTimeout }, log = () => { } }) {
+  if (kept.inflight && now() - kept.inflight.startedAt > stuckAfter) {
+    try { log(`[discovery] the walk started ${Math.round((now() - kept.inflight.startedAt) / 1000)} s ago never ended (past its bound and a hold window): let go, a new one walks`); } catch { }
+    kept.inflight = null;
+  }
+  if (!kept.inflight) {
+    const p = new Promise((resolve) => {
+      try { runChild((err, stdout) => resolve(snapshotChildVerdict(err, stdout))); } catch (e) { resolve(snapshotChildVerdict(Object.assign(e instanceof Error ? e : new Error(String(e)), { spawnFailed: true }), '')); }
+    }).then((v) => {
+      if (kept.inflight && kept.inflight.promise === p) kept.inflight = null;
+      if (v.snap) { kept.snap = v.snap; kept.at = now(); }
+      return v;
+    });
+    kept.inflight = { promise: p, startedAt: now() };
+  }
+  let timer = null;
+  const byDeadline = new Promise((resolve) => { timer = timers.setTimeout(() => resolve({ slow: true }), answerBy); if (timer && timer.unref) timer.unref(); });
+  const v = await Promise.race([kept.inflight.promise, byDeadline]);
+  timers.clearTimeout(timer);
+  if (v.snap) return { snap: v.snap };
+  const why = v.slow ? 'discovery-slow' : v.code;
+  if (kept.snap) return { snap: kept.snap, stale: { ageMs: Math.max(0, now() - kept.at), why } };
+  if (v.slow) return { error: `the discovery walk is still running (past ${Math.round(answerBy / 1000)} s); what it finds is kept for the next ask`, code: 'discovery-slow' };
   return { error: v.error, code: v.code };
 }
 
 module.exports = {
-  snapshotChildVerdict, snapshotReply,
+  snapshotChildVerdict, snapshotReply, DISCOVERY_ANSWER_MS, DISCOVERY_STUCK_MS,
   cwdsToResolve, realCwdsOf, // B-16d7: one list for both roads, the device's bounded resolver
   extractTailIds, nameFromUserRecord, nameFromUserLine, nameFromText, titleFromRecord, titleFromText, titleLinesOf, TITLE_NEEDLE, TITLE_HEAD_BYTES, TITLE_TAIL_BYTES, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, NAME_MAX,
   // S3 (codex facts + zstd rollouts)

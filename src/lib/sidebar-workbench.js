@@ -496,6 +496,7 @@ export function installSidebarWorkbench(Sidebar) {
         // may have exited long ago — rendered exactly like fresh discovery.
         stale: s.stale || undefined,
         staleAt: s.staleAt || undefined,
+        staleWhy: s.staleWhy || undefined,   // B-5278 (r908 (4)): why it is old — the walk ran out of time, not the machine away
         startedAt: s.mtime,
       };
     },

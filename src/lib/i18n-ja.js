@@ -3277,6 +3277,7 @@ export default {
   "This account is signed in elsewhere — log it in on this machine, or run the session where it is signed in.": "このアカウントは別の場所でログイン済みです——このマシンでログインするか、ログイン済みの場所でセッションを実行してください。",
   "This instance's public address (for reverse mounts)": "このインスタンスの公開アドレス（逆方向マウント用）",
   "This machine was unreachable — showing the last successful scan, so this session may have changed or ended since.": "このマシンは到達できませんでした——最後に成功したスキャン結果を表示しています。このセッションはそれ以降に変化または終了している可能性があります。",
+  "This machine's list could not be read in time — showing its last list, so this session may have changed or ended since.": "このマシンの一覧を時間内に読み取れませんでした — 前回の一覧を表示しているため、このセッションは変わったか終了している可能性があります。",
   "Upgrade \"{name}\" to dial-out": "「{name}」を発信接続にアップグレード",
   "Upgrade \"{name}\" to dial-out (faster + self-healing over a flaky link; ssh kept as rescue)": "「{name}」を発信接続にアップグレード（不安定な回線でも高速・自己修復；ssh は救援用として維持）",
   "Upgrade to dial-out": "発信接続にアップグレード",
