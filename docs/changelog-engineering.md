@@ -9,6 +9,39 @@ This file is the engineers' record of every release: the lanes, the verification
 ### bl-windows B-f276 unit 1a — the deliverer's contract with a held producer (the first of three, 主开发 r596)
 - WHY: two fresh reads of the one-unit shape found their musts where the store-hold rule meets the deliverer (a billed wake posted over a held pace file, a kept entry evicted by the cap, an owed wake falling before the producer was asked). Cut out alone, then reshaped after its own fresh read (shape A asked on each road, missed three and could spin the cap's loop): ONE door (`asideHeld`) sets a held wake aside before every road — one mark on disk, no attempt, no fall, no force, no post, no resume; the bound clock moves by the hold. A refused force waits the pacer's time (never past the 10-min step). {keep} and the judge's keep; a drain by id takes what went out; the cap judges fresh and never evicts a kept entry (HELD_CAP 200, said); an ended wake over kept entries waits. Stand-in producer legs with controls (test-paced-wake-retry, test-peer-delivery, test-delivery-wake-line). Engines pause in 1b and 1c.
 
+### bl-windows B-f276 unit 1b — the channels engine paused while its index is held; every family through its store hold (the second of three, 主开发 r809)
+- WHY: the field's torn or unreadable channels file started EMPTY or was set aside at a start, and the next write went over it. r487's one pause, r566's words and r809's shape (a): every family reads through src/store-hold.js, keeps its own writes, and is refused by name while held.
+- THE READ AND THE LIFT:
+  - one store hold a family; held = unreadable (read again on the ladder) or damaged (torn: one door, a person's);
+  - the six small families take a read-again value in place;
+  - the index and the stamps are «loaded at the next start» (the cheap parse after the start).
+- THE DAMAGED DOOR: For you's check row `channel-store-damaged`, «Start it empty» → POST /api/channels/stores/:file/empty (owner) → the hold's set-aside under a dated name, and the family starts empty in place.
+- THE MISSING LAW — its road is THE STORE WRITER: a family read missing writes `exclusive` until one write lands (a link on the writer's thread). A file that appeared is never written over: the writer drops the change, the store reads and keeps the file, and `landed` rejects `store-appeared`.
+  - Two roads were tried and dropped. A synchronous claim through the hold wrote on the main thread (test-channel-store-loop-free (a)). An async claim beside the writer was met by the synchronous flushes and looped (the gate's hangs).
+- THE PAUSE (the A3 port): the engine starts only after the index's first good read. HELD_DOORS gives every door 'allow' / 'refuse'. The callers' census (test-channel-outbox §P) requires each refused door's caller to answer by name.
+  - the digest's `paused`; the rail's ⚠; a held file's For-you item (damaged with its door, appeared, emptied);
+  - the account doors, the webhook paths list, the raw-API agent routes and the consent landing ask the pause;
+  - the agent CLI knows `store-blocked`.
+- INTO 1b FROM r809: an ENDED wake is held only when every producer says held; `held()` counts only `=== true` (a thenable = unknown = held, said); the judges' contract is worded: ANY judge's throw keeps an owed entry (fail closed), said once per entry and judge. The strip COUNTS kept entries.
+- FOUND AND CURED ON THE WAY:
+  - the digest dropped a held file's `kind`, so the panel's damaged / appeared words never drew. The digest now carries it.
+  - the damaged door's copy of adapters.json (`.damaged-<ts>`) was not among the accounts' copies the key check counts (r459): after «Start it empty» a value could be minted over its sealed sign-ins. The door lists its copy, and a start lists both names (test-key-file-law: the leg + its red control).
+- LEGS (fast):
+  - test-channel-groups §2b / §2c, re-stated: held never set aside, the door, the missing law's leg + its control;
+  - test-channel-outbox §P, the census + the totals leg + its control;
+  - test-paced-wake-retry, test-peer-delivery and test-delivery-wake-line ㉔ (r809's legs and controls);
+  - test-account-policy-door (the paused doors, with an anchored control).
+- ITS FRESH READ r1 (2 MUST, 6 SHOULD, 4 NIT; all cured but two NIT, said in the line):
+  - a damaged index or stamps file was lifted by the cheap parse a second after the start, so the door answered «none» for ever. Its ladder stops now.
+  - the index's acts journal sat outside both laws. An index that never landed journals nothing now. The door sets the family's other files aside with it (the acts journal, the stamps journal, the outbox's attachment folders — the files sweep had discarded them).
+  - the writer: an EEXIST from our own link (same inode) is our link landed; a temp left as a second name of the store is never opened again.
+  - a first start's empty copies list is listed again once a family's file appears; a big family that appears is held at once; a small one's adopt writes.
+  - the index's pause words say «appeared»; the sidebar chip counts kept entries.
+- ITS FRESH READ r2 (no MUST; 4 SHOULD, 7 NIT): a half-done press puts the family's other files back; `store-appeared` has the client's words (zh + ja) and a refused mark is said at the press; the stamps journal's first open is an exclusive create while the stamps read missing; a temp left by an earlier life of the writer's thread is removed at its first sweep; the inode is compared as a bigint; any family that appeared is said so in the pause words. NAMED, not cured: a sign-in that mints in the moment between a late mount and the first family write meeting it (it needs a lost key file and a legacy copy with sealed sign-ins too); a failed press leaves a small damaged family's ladder stopped (the press can be made again); a damaged small family whose read again fails on I/O is held as unreadable, and its door then answers «none».
+- HEAVY: test-channel-store ⑮ is re-stated (a PROVE line); test-channels-engine and test-channel-agent-watch read it.
+- ROWS RESTATED (r809: by solo kit runs, box zone, the slower of two): test-paced-wake-retry 4.2 → 13.6 s (12.5 s at 1a's tip already: a named debt, its next-list item 1c — the held-wake legs move to a suite of their own), test-delivery-wake-line 2.4 → 6.3 s, test-peer-delivery 442 ms → 1.7 s, test-key-file-law 2.4 → 8.2 s, test-channel-groups 3.4 → 8.2 s, test-channel-outbox 12.2 → 17.0 s (its debt B-54a9 kept). The fast tier's sum cap moved UP by that arithmetic, +30 s (1562 → 1592 s; test-ci-gate measured 1592 s with the six).
+- LEFT for 1c: the groups engine (pace-held marks until the pacer registers, «No groups yet» while held).
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
