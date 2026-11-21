@@ -369,7 +369,7 @@ export function groupErrorText(r) {
     case 'bad-notify': return t('Unknown notification mode');
     case 'self': return t('An agent cannot do that to itself');
     case 'unavailable': return t('Agent groups are not available on this instance');
-    case 'store-blocked': return t('A channels store file could not be read or set aside — changes are refused until it is fixed or moved (see For you)');
+    case 'store-blocked': return t('A channels store file could not be read — it is held, nothing was set aside or written over; changes are refused until it reads again (see For you)');   // B-f276 1c (r1143 (5)): held, never set aside
     case 'store-appeared': return t('A channels store file appeared since VibeSpace started — it is kept as it is; this change was not made (see For you)');   // B-f276 1b (its read r2 S2)
     // r3: a 409 that carries the fresh view has already repainted the preview
     case 'wake-count-mismatch': return r.group ? t('The group changed since the preview (a member was renamed, joined, left or changed its notify mode) — the preview is updated; review it and send again.') : t('The group changed since the preview — this would wake {n} agent(s) now. Review and send again.', { n: Number(r.wakes) || 0 });

@@ -341,10 +341,20 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     armOwed();
     return false;
   }
+  /** B-f276 1c (主开发 r1143 (3)): setAside OFF THE LOOP — the same checks and the same dated name, the rename through fs.promises
+   *  (a person's press on a file whose storage may be a mount). → Promise<the aside path> */
+  async function setAsideAsync(when = now()) {
+    if (!held || held.kind !== 'damaged') throw Object.assign(new Error(`${path.basename(file)} is not damaged — only bytes that are not the store are set aside`), { status: 409, code: 'store_not_damaged' });
+    const aside = `${file}.damaged-${new Date(when).toISOString().replace(/[:.]/g, '-')}`;
+    await fs.promises.rename(file, aside);
+    if (timer) { (schedule ? null : clearTimeout(timer)); timer = null; }
+    held = null; missing = true; value = undefined; text = null; tries = 0;
+    return aside;
+  }
   function stop() { stopped = true; if (timer) { (schedule ? null : clearTimeout(timer)); timer = null; } if (owedTimer) { (schedule ? null : clearTimeout(owedTimer)); owedTimer = null; } }
 
   return {
-    readAtStart, readAgain, answer, refuseIfHeld, write, set, adoptRead, takeText, setAside, stop, flush, owedAgain, owe, after, notDurable,
+    readAtStart, readAgain, answer, refuseIfHeld, write, set, adoptRead, takeText, setAside, setAsideAsync, stop, flush, owedAgain, owe, after, notDurable,
     /** r1092: the value whose bytes the writer took and did NOT land yet (in flight, or failed and owed) — undefined when none */
     inFlight: () => (producedSeq > toldSeq ? producedValue : undefined),
     /** B-0248 (r1353 (4)): a door's own bound passed while its change still waits to be handed (behind a late rollback point): the

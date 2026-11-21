@@ -2519,6 +2519,7 @@ The reports, the causes as measured and the before / after shots: /var/tmp/vibes
 - EEXIST: the file APPEARED since. `appearedHere` never retries the write and never writes over the file. Its waiters hear false, it is said once, and `onWritten(false, {code: 'EEXIST'})` lets its store read and keep the file.
 - Until the store says `exclusive: false` (it took the file in), its changes are not taken, and `durable()` answers false with `whyNotDurable` → `{why: 'failed', code: 'EEXIST'}`.
 - A landed exclusive write clears the flag: the file is the store's own from then on.
+- **B-f276 unit 1c — `dirty(file, {ownOnly})`:** a store that read its file missing writes only over the file it made itself. The worker keeps the file's own numbers (`OWN`, dev + ino as bigint, also carried in each job as `m.own`, the reply's `own` recording them on the main side). A different file there is EEXIST (`notOwn`) → `appearedHere`; a file gone since is created exclusively again. An own-only append's first open is `'ax'`, and every later one is checked by `fstat`. `appeared` is cleared only when the store says both `exclusive: false` and `ownOnly: false`. The own-temp sweep marks a temp it could not remove (LINKED).
 - An EEXIST whose file IS the temp (same inode: an NFS retransmit of our own link) is our link landed (`sameFile`). A temp whose removal failed after its link is a second name of the store file (`LINKED`): it is removed before it is opened again, or the write fails `ETEMPLINKED`, so the live store is never truncated through it.
 - One user today: src/channel-store.js. Gate: test-channel-groups §2b (the missing law's leg and its control), test-channel-store-loop-free (no main-thread call: the claim is the writer's).
 On the owner's hub 58 of 64 holds ≥ 1 s in six hours were the channels index's rename (21.7 MB rewritten whole, 1.3 s median on a fuse.bindfs data dir over network storage); a scratch hub on a slow stand-in showed EVERY atomic store write holding the loop for its whole rename (kb-design-lessons §19 «NO STORE WRITE HOLDS THE MAIN THREAD»; kb-bugfix-invariants).
@@ -10926,6 +10927,11 @@ A worktree server + headless chrome over the fake adapter's NAMED seam `VIBESPAC
   - a big family that appears is held at once (no read of a file it will not load); a small one clears `missing` before its adopt;
   - a first start's empty copies list is listed again (`relistAside`) once a family's file appears.
 - ITS FRESH READ r2 (cured): a press whose own set-aside fails puts the other files back (`back()`, the door answers failed); the stamps journal's first open is an exclusive create (`'ax'`) while the stamps read missing with no journal at the start — a journal that appeared is kept and the stamps are held at once; `store-appeared` has the client's words (src/lib/channel-words.js).
+- **B-f276 unit 1c (lane bl-windows, 主开发 r1143).**
+  - A FAMILY THAT READ MISSING NEVER RENAMES OVER A FILE IT HAS NOT READ: `fam.readMissing` (read missing, or started empty by the door) makes every whole write and every journal append `ownOnly`, until a read of this life has seen the file (`tookAppeared` adopting it). The writer's thread checks the file's own numbers; a file that is not the one it made is read and kept, and the change refused by name.
+  - A family's COMPANION is read under its own hold (`holdCompanion`): a failed read of index-acts.ndjson or poll-stamps.log, anything but «not there», HOLDS the index or the stamps (unreadable, loaded at the next start).
+  - The damaged door's own rename runs off the loop (src/store-hold.js `setAsideAsync`, the same dated name).
+  - The peer's pairing completion asks the pause first (src/routes/webhook.js: after the frame proved its code, before the one write; 503 store-blocked, nothing stored, the code kept).
 - THE FACTS: `store.quarantined` entries are `{file, kind, why, at, held, lifts: 'by-itself' | 'next-start' | 'a-person', groups, readsAt, readsAs, loadedAt, done}`. `groups` = one of the agent groups' files (GROUP_FILES: their pause is the groups engine's, unit 1c). The `onHeldRead` hook says reads-again / loaded / appeared / emptied.
 - Gate: test-channel-groups §2b (held, the door, THE MISSING LAW's leg — a file planted between the read and the first change is kept, the change refused by name; its control, an anchored copy without the exclusive flag, writes over it). Also test-channel-store (heavy) ⑮, test-key-file-law, test-store-write-census.
 
@@ -11500,6 +11506,18 @@ was handed in — a bare suite engine has no row.
 **r3 (agent groups, 2026-09-23): `sendStartsTurn: true` on the MODULE** — a send here is a WAKE (a billed turn through the ladder), so the channels engine's `wakeGate` asks the owner's consent echo and, auth off, the owner's pace before it (the Channels composer's `/send` and `/propose` and the outbox `/approve` were three unpaced, echo-less side doors beside the fenced group routes). The engine reads the declaration through `registry.get(kind)`, never the kind; the digest's adapter row carries it (`sendStartsTurn`) and a proposal's view `wakes` (0|1) so the composer and the approval card say the cost and echo it.
 
 ### src/channel-groups.js (PURE) + src/server/groups-engine.js (ORCH)
+
+**B-f276 unit 1c (lane bl-windows) — THE GROUPS ENGINE PAUSED while a family it reads is held (groups.json, wake-pace.json, dispatch-ledger.json).** `GROUP_HELD_DOORS` is the census of every door (deny by default, the store's `pauseDoorsOf`).
+- The pacer answers WAIT (`store-blocked`, asked again in 60 s): no grant over floors nobody read.
+- No dispatch while the ledger is held (the money road).
+- `owedWords` waits and `owedFell` never says «it will not reach them» over a list nobody read.
+- `reportsForTurn` answers nothing while paused; the first turn after the lift carries the reports once.
+- The orphan-queued scan runs again once the families read.
+- `reach` / `sharesGroup` stay allowed: they read the roster, never groups.json.
+- The deliverer keeps a mark the PACE said (`waitsHeld.pace`) until the pacer registers (r809 (2)).
+- The panel draws «the agent groups are paused» for a group list refused store-blocked, never «No groups yet».
+- The agent's reminder says the channels are PAUSED (reach `paused`), never an empty reach.
+
 
 lane pair-group-fate (2.369.233): PURE `deliveryOf(group, rec, {log, liveness})` + `undeliverable` / `livenessOf` / `closePair` / `endedText` / `awaitVerdict` / `awaitState`; the engine's `ended` ledger, `onConversationEnded` / `sweepEnded` / `endedRefusal`, `post({await})` + `awaitWakes` (the SAME `wake()`); channels-wiring's `livenessReader` supplies FACTS only (roster, user-state archivedSessions, transcript on disk, the owner — a conversation-index claim ⇒ remote / ambiguous ⇒ unknown, else this machine's session-meta: no `host` ⇒ local — and whether the transcript dir was readable) and PURE `livenessFrom` judges: `gone` ONLY for a known-local conversation absent from a readable transcript dir; remote / unknown owner / unreadable dir ⇒ stopped, never closed (r2); the vibespace-msg CLI's `--await`, `(closed)` and read clauses.
 

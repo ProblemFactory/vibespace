@@ -2729,8 +2729,35 @@ await leg(148, async () => {
   };
   const bt = await bootRun(DELIVER0, 'head');
   ok(bt.before === 0 && bt.after === 1, 'B-f276 1b (the 1a round\'s should): at a start whose producer is NOT registered yet, its held ended wake stays aside (never resumed before it can say) — it registers, not held: resumed ONCE', JSON.stringify(bt));
-  const btx = await bootRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, '      if (e.waitsHeld.by && !owedProducers.has(e.waitsHeld.by)) {', '      if (false) {', 'the boot window cut'), 'boot-window-cut'), 'cut');
+  const btx = await bootRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, "      if ((e.waitsHeld.by && !owedProducers.has(e.waitsHeld.by)) || (e.waitsHeld.pace && typeof wakePacer !== 'function')) {", '      if (false) {', 'the boot window cut'), 'boot-window-cut'), 'cut');
   ok(btx.before > 0, 'B-f276 1b BOOT-WINDOW CONTROL (the mark lifts at once at the start, in a copy): the ended wake is resumed before its producer can say — red', JSON.stringify(btx));
+  // B-f276 1c (主开发 r809 (2)): a mark the PACE said (its file held) survives a restart and stays until the pacer registers — never a
+  // wake posted unpaced in the boot's window (the deliverer answers «no pacer» as no pace at all)
+  const paceBootRun = async (DL, tag) => {
+    const c = { now: T0, timers: [] };
+    const stand = () => ({ render: () => ({ text: 'the paced wake', kind: 'notification', fromName: 'Stand-in' }), fell: () => true, cancelled: () => { } });
+    const pacerOf = (held) => { const p = () => { const m = () => true; m.force = () => ({ ok: true }); m.refund = () => { }; return m; }; p.held = () => held; return p; };
+    const R1 = rig(`held1c-paceboot-${tag}`, { DELIVER: DL, shared: c });
+    R1.deliver.registerWakePacer(pacerOf(true));
+    R1.deliver.registerOwedWake('stand-in-pace', stand());
+    R1.deliver.parkOwedWake(B, { producer: 'stand-in-pace', key: 'k-pb', retryInMs: 1000, spendReason: 'stand-in', kind: 'notification', fromName: 'Stand-in', sender: A, reason: 'paced', meta: { k: 4 } });
+    await R1.at(5 * 60e3);
+    const marked = !!(R1.owed(B)[0] && R1.owed(B)[0].waitsHeld && R1.owed(B)[0].waitsHeld.pace);
+    R1.close(); c.timers.length = 0; c.now = T0 + 10 * 60e3;
+    const R2 = rig(`held1c-paceboot-${tag}-2`, { DELIVER: DL, shared: c, dir: R1.dataDir, GE: { create: () => ({ stop() { } }) } });   // no groups engine yet: no pacer registered (the window)
+    R2.deliver.registerOwedWake('stand-in-pace', stand());   // the producer comes up FIRST, the pacer later
+    await R2.advanceTo(T0 + 40 * 60e3);
+    const before = R2.posts.length;
+    R2.deliver.registerWakePacer(pacerOf(false));
+    await R2.advanceTo(T0 + 45 * 60e3);
+    const out = { marked, before, after: R2.posts.length };
+    R2.close();
+    return out;
+  };
+  const pb = await paceBootRun(DELIVER0, 'head');
+  ok(pb.marked && pb.before === 0 && pb.after === 1, 'B-f276 1c (r809 (2)): a wake the PACE held survives a restart marked so, and stays aside until the pacer registers (never posted unpaced) — it registers, its file read: posted ONCE', JSON.stringify(pb));
+  const pbx = await paceBootRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, "      if ((e.waitsHeld.by && !owedProducers.has(e.waitsHeld.by)) || (e.waitsHeld.pace && typeof wakePacer !== 'function')) {", '      if (e.waitsHeld.by && !owedProducers.has(e.waitsHeld.by)) {', 'the pace mark lifts at the start'), 'pace-boot-cut'), 'cut');   // stale-pins: kept — the cut's own text (the 1b form)
+  ok(pbx.before > 0, 'B-f276 1c (r809 (2)) CONTROL (a pace mark lifts at the start, the 1b form): the wake is posted before its pacer can say — red', JSON.stringify(pbx));
   const enx = await endedRun(NO_DOOR, 'cut');
   ok(enx.during.line > 0, 'B-f276 1a ENDED CONTROL (the door never asks): the ended wake goes to the resume line over the held file — red', JSON.stringify(enx.during));
   const enl = await endedRun(NO_LIFT, 'nolift');

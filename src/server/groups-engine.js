@@ -68,6 +68,7 @@
  *                (B-eba8, `send --await`) is `g.awaits[vendorId]`, its wake the SAME
  *                `wake()` (spendReason peer-message — no new producer).
  */
+const { pauseDoorsOf } = require('../channel-store.js');   // B-f276 A2: THE ONE DOOR WRAPPER (both engines)
 const crypto = require('crypto');
 const { isPress } = require('../write-origin.js');   // lane owner-press-attended r2: the owner's wake is attended only on its door's press
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
@@ -165,6 +166,17 @@ function create({
     try { return roster.sessionOf(cid); } catch (e) { log.warn && log.warn('[groups] roster threw:', e && e.message); return null; } // as live() answers a throw
   };
   const all = () => store.groups.live().groups;
+  // B-f276 A2 (主开发 r487): A HELD FAMILY PAUSES EVERY READER OF IT — the agent groups read groups.json, wake-pace.json and
+  // dispatch-ledger.json; any one held (its read failed: empty in memory) pauses this engine through THE ONE PAUSE (the store's
+  // heldOf): no wake granted over floors nobody read, no dispatch (MONEY: a ledger row that cannot be written is a second billed
+  // wake after the next start), no «no such group» over a list nobody read — every door refused BY NAME (store-blocked, 503).
+  const GROUP_FAMILIES = Array.isArray(store.groupFamilies) ? store.groupFamilies : [];   // the store names its own files (record-clear)
+  const groupsPaused = () => !!(store.heldOf && store.heldOf(GROUP_FAMILIES).length);
+  const groupsPausedWords = () => `the agent groups are paused: ${(store.heldOf && store.heldOf(GROUP_FAMILIES)[0]) || 'a file of theirs'} could not be read — nothing is sent until it reads again`;
+  const groupsPausedError = () => { const e = new Error(groupsPausedWords()); e.code = 'store-blocked'; e.status = 503; e.paused = true; return e; };
+  const groupsPausedAnswer = () => ({ ok: false, code: 'store-blocked', paused: true, error: groupsPausedWords() });
+  let groupsPausedSaid = false;
+  const sayGroupsPaused = () => { if (groupsPausedSaid) return; groupsPausedSaid = true; (log.warn || log.log || (() => {})).call(log, `[groups] ${groupsPausedWords()}`); if (store.whenRead) store.whenRead(GROUP_FAMILIES, () => { groupsPausedSaid = false; }); };   // N7: said again after a lift
   // lane roster-per-pass: a synchronous pass over groups / members reads ONE roster (checked once at its start —
   // src/server/roster-pass.js); a plain roster function (a drill's) has no passes: each read is its own
   const inPass = (fn) => (typeof roster.pass === 'function' ? roster.pass(fn) : fn());
@@ -545,13 +557,23 @@ function create({
   // round 3: a `queued` row whose ladder record is GONE (msg-queued.json lost) settles at that conversation's next turn start
   // (its frame ran then, or before) — found once at boot, never «waiting for the current turn» for good
   const orphanQueued = new Map();   // cid -> [{gid, upTo}]
+  const scanOrphanQueued = () => {
+  orphanQueued.clear();   // B-f276: ONE scan's answer (run at create and again on read) — never a row twice
+  // B-f276: the queued-wakes ladder unread (msg-queued.json held) answers no entries — never «every queued row carried»
+  if (deliver && typeof deliver.queuedFileState === 'function' && (deliver.queuedFileState() || {}).unread) return;
   try {
     const held = new Set(((deliver && typeof deliver.queuedEntries === 'function' ? deliver.queuedEntries() : []) || []).filter((e) => e.mark).map((e) => `${e.mark.gid}|${e.cid}|${e.mark.upTo}`));
     for (const g of Object.values(all() || {})) for (const m of (g && g.members) || []) for (const q of (m && Array.isArray(m.queued) ? m.queued : [])) {
       if (q && q.state === 'queued' && !held.has(`${g.id}|${m.member}|${Number(q.upTo)}`)) { const l = orphanQueued.get(m.member) || []; l.push({ gid: g.id, upTo: Number(q.upTo) }); orphanQueued.set(m.member, l); }
     }
-    deliver?.onTurnStarted?.((cid) => { const l = orphanQueued.get(cid); if (!l) return; orphanQueued.delete(cid); for (const o of l) markCarried(o.gid, cid, o.upTo).catch(() => { }); });
   } catch (e) { (log.warn || log.log || (() => {})).call(log, '[groups] the queued-row boot check failed:', e.message); }
+  };
+  scanOrphanQueued();
+  if (groupsPaused()) store.whenRead?.(GROUP_FAMILIES, scanOrphanQueued);   // B-f276: a held groups.json found none — the scan runs again once it reads
+  try { deliver?.onQueuedFileState?.((st) => { if (st && !st.unread) scanOrphanQueued(); }); } catch { }   // …and once the ladder reads
+  try {
+    deliver?.onTurnStarted?.((cid) => { const l = orphanQueued.get(cid); if (!l) return; orphanQueued.delete(cid); for (const o of l) markCarried(o.gid, cid, o.upTo).catch(() => { }); });
+  } catch { }
   try {
     deliver?.onCarried?.((cid, e) => { if (e && e.mark) markCarried(e.mark.gid, cid, e.mark.upTo).catch((err) => (log.warn || log.log || (() => {})).call(log, '[groups] queued wake carry failed:', err.message)); });
     deliver?.onHandedBack?.((cid, e) => { if (e && e.mark) markRestashed(e.mark.gid, cid, e.mark.upTo).catch((err) => (log.warn || log.log || (() => {})).call(log, '[groups] queued wake hand-back failed:', err.message)); });
@@ -726,6 +748,7 @@ function create({
   function pacerFor(sender) {
     const tokens = new Map();
     const mayWake = (member) => {
+      if (groupsPaused()) return { reason: 'store-blocked', why: groupsPausedWords(), rule: 'paused', retryInMs: 60_000 };   // B-f276: no grant over floors nobody read — parked, asked again
       const at = paceClock();
       const live0 = store.pace.live();
       // r3: a stamp in the FUTURE is not a wake (a backward clock step, a
@@ -755,6 +778,7 @@ function create({
     mayWake.sender = sender;   // lane paced-wake-retry: a producer that parks a refused wake names whose ledger re-judges it
     /** THE HARD BOUND (the owner's rule): a paced wake past its 60 min goes whatever the verdict; the slot is stamped all the same, so the next wake reads a true ledger */
     mayWake.force = (member) => {
+      if (groupsPaused()) return { ok: false, reason: 'store-blocked', why: groupsPausedWords(), rule: 'paused', retryInMs: 60_000 };   // B-f276: no grant past the bound over floors nobody read — ok:false IS the deliverer's refused force (its read r1 M1)
       const at = paceClock();
       const gr = G.paceGrant(G.prunePace(store.pace.live(), at), { sender, member, at });
       store.pace.set(gr.state);
@@ -834,6 +858,7 @@ function create({
   }
 
   function owedWords(cid, e) {
+    if (groupsPaused()) return { wait: groupsPausedWords(), held: true };   // B-f276: waits (no attempt, no fall) — never «no longer in that group» over a list nobody read
     const { gid, at, why, awaitAt } = e.meta || {};
     const g = getGroup(gid);
     const m = g && G.memberOf(g, cid);
@@ -885,6 +910,7 @@ function create({
    *  the FALL is said — the hub's journal + an audit row + a free notice on the SENDER's next turn (the park files it, on
    *  its not-reachable road). `taken`: the group log is this entry's stash, a stashed copy would arrive twice. */
   function owedFell(cid, e, extra = {}) {
+    if (groupsPaused()) { sayGroupsPaused(); return; }   // B-f276 wall: never «it will not reach them» over a list nobody read (the deliverer holds a held wake: it never falls)
     const { gid, why, vids } = e.meta || {};
     const g = getGroup(gid);
     const outcome = G.owedOutcome(extra);
@@ -985,8 +1011,8 @@ function create({
     const carried = Object.entries(g.awaits || {}).filter(([, a]) => a && a.by === member && Number.isFinite(a.heldAt) && !Number.isFinite(a.wokeAt) && Number(m.reportedUpTo) >= Number(a.answeredAt)).map(([vid]) => vid);
     if (carried.length) patchAwaits(gid, carried, { heldAt: undefined, held: undefined }).catch(() => { });
   }
-  if (deliver && typeof deliver.registerOwedWake === 'function') deliver.registerOwedWake(OWED, { render: owedWords, fell: owedFell, cancelled: owedCancelled, merge: mergeOwed });
-  if (deliver && typeof deliver.registerWakePacer === 'function') deliver.registerWakePacer((sender) => pacerFor(sender));
+  if (deliver && typeof deliver.registerOwedWake === 'function') deliver.registerOwedWake(OWED, { held: () => groupsPaused(), render: owedWords, fell: owedFell, cancelled: owedCancelled, merge: mergeOwed });   // B-f276 1c (its read r1 M2): HELD while a group family is — set aside, no attempt, no fall
+  if (deliver && typeof deliver.registerWakePacer === 'function') deliver.registerWakePacer(Object.assign((sender) => pacerFor(sender), { held: () => groupsPaused() }));   // B-f276 1c (M2): the pace's own files held ⇒ every paced wake aside (no pace asked, no force)
   /** `consent(n) → true | refusal` — asked of the number of wakes an act
    *  would cause, INSIDE the door, before anything is written. */
   const consentOf = (consent, n) => {
@@ -1333,6 +1359,7 @@ function create({
    * same `why` re-logs nothing. ONE broadcast.
    */
   async function onConversationEnded(cid, { why = 'archived', at = null } = {}) {
+    if (groupsPaused()) { sayGroupsPaused(); return groupsPausedAnswer(); }   // B-f276: its first act drops held frames — never over a list nobody read
     try { deliver?.noteConversationEnded?.(cid, why); } catch { }   // lane queued-is-not-woke round 3: its held frames leave at the act, said (never reloaded at every boot)
     if (!G.isCid(cid) || !G.ENDED_WHYS.includes(why)) return { ok: false, closed: [], marked: [] };
     // AN END THAT CHANGES NOTHING WRITES NOTHING AND ANNOUNCES NOTHING (lane groups-sweep-on-change): the ledger already says
@@ -1662,6 +1689,7 @@ function create({
   }
   function judgeHeldEntry(e) {
     if (!e || typeof e.text !== 'string' || !e.text.includes('(')) return null;
+    if (groupsPaused()) return { keep: true };   // B-f276 A3 (M4): which lines were cleared cannot be read now — kept until it can (the deliverer judges it again at every read)
     let out = null;
     for (const [gid, g] of Object.entries(all())) {
       const vids = clearedVids(g);
@@ -1769,6 +1797,7 @@ function create({
    *   nothing: `marks` is empty and `pending` lists every waiting message.
    */
   function reportsForTurn(cid, { budget = TURN_BUDGET, preview = false, aside = false } = {}) {
+    if (groupsPaused()) return { text: '', marks: [], cards: [] };   // B-f276 A3 (r566 #6): nothing while paused — the reports wait, no marker moves; the first turn after the lift carries them once
     if (preview) return previewFor(cid, budget);
     return composeReports(cid, budget, aside);
   }
@@ -1946,7 +1975,53 @@ function create({
     });
   })();
 
-  return {
+  // B-f276 A2 (主开发 r487): THE CENSUS OF THE GROUPS ENGINE'S DOORS while a family it reads is held — every key of the API below
+  // is a row (scripts/test-channel-groups.mjs is red on a key without one); THE ONE WRAPPER (src/channel-store.js pauseDoorsOf).
+  const GROUP_HELD_DOORS = {
+    pausedState: ['allow', 'sync', 'the pause itself: the held families by name — never a verdict on what they hold'],
+    onConversationEnded: ['paused', 'async', 'a conversation ended: drops its held frames and rewrites its rows — never over a list nobody read'],
+    onConversationRevived: ['paused', 'async', 'a conversation back: rewrites its rows in groups.json'],
+    sweepEnded: ['paused', 'async', 'the boot / user-state sweep: ends rows of conversations it finds ended'],
+    endedOf: ['refused', 'sync', 'refused while paused (no allow row): an ended conversation’s mark — while held it answers not ended, which ends nothing'],
+    endedRefusal: ['refused', 'sync', 'refused while paused (no allow row): the words of an ended member — read only'],
+    readWaiting: ['refused', 'async', 'what waits for a conversation — refused, so the wait-watch’s reading fails and it ends nothing (never an empty answer)'],
+    waitingReads: ['refused', 'sync', 'refused while paused (no allow row): the reading counters only'],
+    list: ['refused', 'sync', 'the owner’s / an agent’s group list — an empty list would read as «no groups»'],
+    listFor: ['refused', 'sync', 'an agent’s groups — an empty list would read as «you are in no group»'],
+    markRead: ['refused', 'async', 'a read mark: a groups.json write'],
+    liveRoster: ['allow', 'sync', 'the live sessions (not a held family): the same answer held or not'],
+    pacerFor: ['allow', 'sync', 'a producer’s pacer (主开发 r1143 (6)): while a family is held its wake answers WAIT inside (store-blocked, asked again in 60 s) — never a grant over floors nobody read, never a throw a producer cannot read'],
+    noteRoster: ['paused', 'sync', 'a roster broadcast'],
+    get: ['refused', 'sync', 'one group — an absent one would read as «no such group»'],
+    resolveGroup: ['refused', 'sync', 'a group by id or name — «no such group» over a list nobody read'],
+    resolveMember: ['allow', 'sync', 'a name among the live conversations (not a held family): the same answer held or not'],
+    resolveTarget: ['refused', 'sync', 'the send door’s target — «no such group» over a list nobody read'],
+    reach: ['allow', 'sync', 'a reach verdict from the live sessions’ Task Groups and their opened reach (the roster) — it never reads groups.json'],
+    sharesGroup: ['allow', 'sync', 'two live sessions share a Task Group (the roster) — it never reads groups.json'],
+    dispatchLedger: ['allow', 'const', 'the dispatch ledger’s own door object (not a function: never wrapped) — its reads come only from the dispatch road, which is refused while paused'],
+    create: ['refused', 'async', 'a new group: a groups.json write'],
+    invite: ['refused', 'async', 'members added: a groups.json write and wakes'],
+    leave: ['refused', 'async', 'a member leaves: a groups.json write'],
+    kick: ['refused', 'async', 'a member removed: a groups.json write'],
+    rename: ['refused', 'async', 'a groups.json write'],
+    archive: ['refused', 'async', 'a groups.json write'],
+    setNotify: ['refused', 'async', 'a member’s notify mode: a groups.json write'],
+    post: ['refused', 'async', 'a group message: a log append, a groups.json write and wakes'],
+    sendToAgent: ['refused', 'async', 'a direct message: a pair found or made, a post and a wake'],
+    findPair: ['refused', 'sync', 'a direct pair — none would read as «no direct group exists yet»'],
+    findOrCreatePair: ['refused', 'async', 'a pair made: a groups.json write'],
+    read: ['refused', 'sync', 'a group’s log read — «no such group» over a list nobody read'],
+    clearMessages: ['refused', 'async', 'a log rewrite and a groups.json write'],
+    clearedCopies: ['refused', 'sync', 'what was cleared — «nothing» over a list nobody read would un-redact; the search worker asks again'],
+    clearedCopiesAsync: ['refused', 'async', 'the same, off the loop'],
+    reportsForTurn: ['allow', 'sync', 'answers NOTHING while paused (the reports wait, no marker moves): the first turn after the lift carries them once'],
+    commitReports: ['refused', 'async', 'the markers after a turn carried reports: a groups.json write'],
+    WAKE_BUDGET: ['allow', 'const', 'a constant — answers the same held or not'],
+    TURN_BUDGET: ['allow', 'const', 'a constant — answers the same held or not'],
+    MIN_REPORT_ROOM: ['allow', 'const', 'a constant — answers the same held or not'],
+  };
+  return pauseDoorsOf({
+    pausedState: () => (groupsPaused() ? { code: 'store-blocked', error: groupsPausedWords(), held: store.heldOf(GROUP_FAMILIES) } : null),
     onConversationEnded, onConversationRevived, sweepEnded, endedOf, endedRefusal,
     readWaiting, waitingReads: () => waitReads,   // lane queued-is-not-woke laws 2 + 3, shape C: the reading (src/server/wait-watch.js)
     list, listFor, markRead, liveRoster, pacerFor, noteRoster, get: (id) => { const g = getGroup(id); return g ? view(g) : null; }, resolveGroup, resolveMember, resolveTarget, reach,
@@ -1955,7 +2030,7 @@ function create({
     rename: renameGroup, archive: archiveGroup, setNotify, post, sendToAgent, findPair, findOrCreatePair, read, clearMessages, clearedCopies, clearedCopiesAsync,
     reportsForTurn, commitReports,
     WAKE_BUDGET, TURN_BUDGET, MIN_REPORT_ROOM,
-  };
+  }, GROUP_HELD_DOORS, { held: groupsPaused, error: groupsPausedError, answer: groupsPausedAnswer, say: sayGroupsPaused });
 }
 
 module.exports = { create, WAKE_BUDGET, TURN_BUDGET, MIN_REPORT_ROOM, TEXT_MAX, ASIDE_LINE };

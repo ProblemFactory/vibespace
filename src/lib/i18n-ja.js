@@ -395,7 +395,7 @@ export default {
   "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again": "チャンネルを一時停止しました: {file} を読み込めません — 読めるようになるまで、取得も送信もしません",
   "Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved": "チャンネル: {file} を読み込めず、退避もできませんでした — 修正または移動するまで、このファイルへの書き込みは拒否されます",
   "Channels: {file} could not be read and was set aside as {where}": "チャンネル: {file} を読み込めなかったため {where} として退避しました",
-  "A channels store file could not be read or set aside — changes are refused until it is fixed or moved (see For you)": "チャンネルのストアファイルを読み込めず、退避もできませんでした — 修正または移動するまで変更は拒否されます（「あなたへ」を参照）",
+  "A channels store file could not be read — it is held, nothing was set aside or written over; changes are refused until it reads again (see For you)": "チャンネルのストアファイルを読めません — 保持されており、退避も上書きもしていません。再び読めるまで変更は拒否されます（「あなた宛て」を参照）",   // B-f276 1c
   "Start it empty": "空から始める",   // B-f276 1b: the damaged door
   "Set the damaged file aside and start it empty — nothing is deleted, its bytes are kept under a dated name": "破損したファイルを退避して空から始めます — 何も削除せず、そのバイトは日付付きの名前で保持します",   // B-f276 1b: the damaged door
   "Started empty — the damaged bytes are kept under a dated name": "空から始めました — 破損したバイトは日付付きの名前で保持しています",   // B-f276 1b: the damaged door
@@ -419,6 +419,7 @@ export default {
   "Channels: {file} read again and loaded — nothing to do": "チャンネル: {file} を読み直して読み込みました — 操作は不要です",
   "{file} read again and is loaded": "{file} を読み直して読み込みました",
   "The channels are paused — {file} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again": "チャンネルは一時停止中です — {file} を読み込めないため、ここは一覧のすべてではありません。読めるようになるまで取得も送信もしません",
+  "The agent groups are paused — a file of theirs could not be read, so this list is not the whole list; nothing is sent until it reads again": "エージェントのグループは一時停止中です — そのファイルの一つを読めないため、この一覧はすべてではありません。再び読めるまで何も送信しません",   // B-f276 1c
   "It read again and is loaded; changes to it are written again.": "読み直して読み込みました。変更は再び書き込まれます。",
   "{file} reads again — restart VibeSpace to load it": "{file} が読めるようになりました — VibeSpace を再起動すると読み込まれます",
   "{file} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace": "{file} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたら次回の VibeSpace 起動時に読み込みます",

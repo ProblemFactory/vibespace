@@ -237,8 +237,10 @@ router.post('/api/channels/webhook/:slug/pair', async (req, res) => {
   if (rb.err) return answer(res, 'unauthorized');
   try {
     let held = null;   // r6: judged AFTER the frame proved the code (an unproven frame hears nothing), BEFORE the one write
+    let paused = null;   // B-f276 1c (主开发 r1143 (4)): the channels paused — asked at the same place: nothing stored, the code not spent
     const v = WP.complete({ slug, headers: req.headers, body: rb.body, now: D.now(), pending: p, allowPrivate: allowPrivate() },
-      { hmacHex: WH.hmacHex, safeEqual, write: (f) => { held = heldAtCompletion(p, slug); if (!held) st.pair(slug, { id: callerId, name: f.name, token: p.token, outToken: f.token, outCaller: f.caller, replyUrl: f.hookUrl }); } });
+      { hmacHex: WH.hmacHex, safeEqual, write: (f) => { paused = pausedNow(); if (paused) return; held = heldAtCompletion(p, slug); if (!held) st.pair(slug, { id: callerId, name: f.name, token: p.token, outToken: f.token, outCaller: f.caller, replyUrl: f.hookUrl }); } });
+    if (v.ok && paused) return res.status(503).set('Cache-Control', 'no-store').json({ ok: false, code: 'store-blocked', error: paused.error });   // refused BY NAME, the path not half-made
     if (v.ok && held) return res.status(403).set('Cache-Control', 'no-store').json({ ok: false, code: 'pair-wake-held', error: held });
     if (!v.ok && v.answer === 'spent') return res.status(409).set('Cache-Control', 'no-store').json({ ok: false, code: 'code-used', error: 'this pairing code was already used — ask for a new one' });
     if (!v.ok) return v.answer === 'unauthorized' ? answer(res, 'unauthorized') : res.status(400).set('Cache-Control', 'no-store').json({ ok: false, code: v.why, error: v.error });
@@ -304,6 +306,7 @@ async function syncRow(slug, options) {
 }
 // B-f276 A2 (主开发 r487): while the channels are PAUSED (a family of theirs could not be read) an owner's webhook act is refused by
 // name — 503 store-blocked — before the path, its callers or its row change (the index's half would be refused: a half-made path)
+const pausedNow = () => { const e = engine(); return e && typeof e.pausedState === 'function' ? e.pausedState() : null; };   // B-f276 1c: the pause as a fact (the pairing's own place)
 const pausedRefused = (res) => { const e = engine(); const pz = e && typeof e.pausedState === 'function' ? e.pausedState() : null; if (!pz) return false; res.set('Cache-Control', 'no-store'); res.status(503).json({ ok: false, code: 'store-blocked', error: pz.error }); return true; };
 const pathView = (st, slug) => ({ ...st.path(slug), options: optionsOf(slug), callers: st.callers(slug), hookUrl: `/hook/${slug}` });
 router.get('/api/channels/webhook/paths', (req, res) => { if (!owner(req, res)) return; if (pausedRefused(res)) return; /* B-f276 1b: each path's options are read from the held list — never its defaults shown as the truth */ const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable'); res.set('Cache-Control', 'no-store').json({ ok: true, paths: st.paths().map((s) => pathView(st, s)) }); });

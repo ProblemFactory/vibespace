@@ -1402,6 +1402,7 @@ export function renderChannelsPanel(app, c) {
   /** The two inputs the list is drawn from — `digest` = the accounts, counts and totals of the last read / broadcast
    *  (design 008: its rows live in `store`, keyed), `groups` the group list (replaced whole by its broadcast). */
   let digest = null, groups = null;
+  let groupsPausedNow = false;   // B-f276 1c (r1143 (6)): the groups' list refused store-blocked — an empty list then is no truth («No groups yet» never drawn)
   const store = createRowStore();
   // design 008: A LIST READ FROM THE SERVER — a page (its end came near), a re-read of what a stale list had, the search.
   //  One read per list at a time; a row a broadcast wrote while the page was on its way keeps the broadcast's copy.
@@ -1685,7 +1686,9 @@ export function renderChannelsPanel(app, c) {
     listEl.dataset.view = fs.view;
     const listKids = [];
     const list = { appendChild: (x) => { listKids.push(x); return x; } };
-    if (pausedNow) {
+    if (groupsPausedNow && !pausedNow) {
+      list.appendChild(chanLine('empty-hint chan-groups-empty chan-paused', t('The agent groups are paused — a file of theirs could not be read, so this list is not the whole list; nothing is sent until it reads again')));   // B-f276 1c
+    } else if (pausedNow) {
       list.appendChild(chanLine('empty-hint chan-groups-empty chan-paused', t('The channels are paused — {file} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again', { file: pausedNow[0] })));   // B-f276 (r566 #8)
     } else if (!rows.length) {
       list.appendChild(chanLine('empty-hint chan-groups-empty', t('No groups yet. "New group" starts one with live agent sessions; an agent can too (vibespace-msg group create). Every conversation of an account you connect below appears here as well.')));
@@ -2403,8 +2406,8 @@ export function renderChannelsPanel(app, c) {
     digest = store.meta;
     // a refused group list is an EMPTY list plus a toast — the channel half still draws
     if (groupsGen !== g0) { /* a broadcast's list landed while this one was on its way — it is newer */ }
-    else if (g && !g.error) groups = Array.isArray(g.groups) ? g.groups : [];
-    else { groups = []; if (g && g.code !== 'unavailable') showToast(groupErrorText(g), { type: 'error' }); }
+    else if (g && !g.error) { groups = Array.isArray(g.groups) ? g.groups : []; groupsPausedNow = false; }
+    else { groups = []; groupsPausedNow = !!(g && g.code === 'store-blocked'); if (g && g.code !== 'unavailable' && !groupsPausedNow) showToast(groupErrorText(g), { type: 'error' }); }   // paused: said in the list, not a toast
     draw();
     reread(stale);
     wantAll();
@@ -2424,7 +2427,7 @@ export function renderChannelsPanel(app, c) {
     if (!c.isConnected) return;
     if (msg.type === 'channel-groups-updated') {
       if (!Array.isArray(msg.groups)) return;
-      groups = msg.groups; groupsGen++;   // kept even before the first paint: the refresh on its way keeps this newer list
+      groups = msg.groups; groupsGen++; groupsPausedNow = false;   // B-f276 1c (N3): a list that came is the list   // kept even before the first paint: the refresh on its way keeps this newer list
       if (digest === null) return;   // the first paint is refresh()'s
       draw();
       return;

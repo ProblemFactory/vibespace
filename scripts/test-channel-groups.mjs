@@ -413,7 +413,7 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const { anchored } = await import('./scratch.mjs');
     const SSRC = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-    const cut = anchored(SSRC, '    return { exclusive: !!fam.missing, onWritten: (ok, err) => {', '    return { exclusive: false, onWritten: (ok, err) => {', 'the first write not exclusive');
+    const cut = anchored(SSRC, '    return { exclusive: !!fam.missing, ownOnly: !!fam.readMissing, onWritten: (ok, err) => {', '    return { exclusive: false, ownOnly: false, onWritten: (ok, err) => {', 'the first write not exclusive');
     const M = mutantCopies('channel-groups-missing-law', REPO).load('src/channel-store.js', cut, 'no-claim');
     const apx = await appearRun(M.createChannelStore, 'cut');
     ok(!apx.keptBytes && apx.code === null, 'MISSING-LAW CONTROL (the first write not exclusive, in a copy): the file that appeared is WRITTEN OVER by the empty state plus the change — red', JSON.stringify(apx));
@@ -427,13 +427,13 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     const qlog = { warn() {}, log() {}, info() {} };
     const nap = (ms) => new Promise((z) => setTimeout(z, ms));
     // M1: a DAMAGED big family whose ends look like one object stays HELD past many rungs of its ladder — only the door lifts it
-    const bigDamagedRun = async (mk, tag) => {
+    const bigDamagedRun = async (mk, tag, until = null) => {   // until: the control waits on its condition (bounded), never a fixed nap
       const d = path.join(ROOT, `store-bigdamaged-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
       fs.writeFileSync(path.join(d, 'index.json'), '{"v":1,"conversations":{"fake/c1":{"key":"fake/c1",}}}');   // both ends an object, the middle not JSON
       const evs = [];
       const s4 = mk({ dir: d, log: qlog, heldRetry: { firstMs: 5, maxMs: 10 } });
       if (s4.onHeldRead) s4.onHeldRead((ev) => evs.push(ev.state));
-      await nap(200);
+      if (until) { for (const end = Date.now() + 3000; !until(evs) && Date.now() < end;) await nap(5); } else await nap(500);   // ~50 rungs of its ladder
       const q = (s4.quarantined || []).find((x) => x.file === 'index.json') || {};
       const door = await s4.startDamagedEmpty('index.json');
       s4.close();
@@ -441,7 +441,7 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     };
     const bd = await bigDamagedRun(createChannelStore, 'head');
     ok(bd.kind === 'damaged' && !/reads-again/.test(bd.events) && bd.door === 'pass', 'r1 M1: a DAMAGED index.json whose ends look like one object stays HELD past its ladder (the cheap parse never lifts it) — the door starts it empty', JSON.stringify(bd));
-    const bdx = await bigDamagedRun(MC.load('src/channel-store.js', anchored(SSRC, "    if (big && h.kind === 'damaged') fam.H.stop();\n", '', 'the damaged big hold not stopped'), 'r1-m1').createChannelStore, 'cut');
+    const bdx = await bigDamagedRun(MC.load('src/channel-store.js', anchored(SSRC, "    if (big && h.kind === 'damaged') fam.H.stop();\n", '', 'the damaged big hold not stopped'), 'r1-m1').createChannelStore, 'cut', (evs) => evs.includes('reads-again'));
     ok(/reads-again/.test(bdx.events) && bdx.door === 'none', 'r1 M1 CONTROL (the ladder left running): the cheap parse lifts it «reads again» and the door answers «none» for ever — red', JSON.stringify(bdx));
     // M2 + S1: the door sets the family's OTHER files aside with it (the index's acts journal, the outbox's attachment folders), and an
     // index that never landed journals NOTHING: the act writes the index itself — the next start reads no row of the damaged store
@@ -486,7 +486,7 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     };
     const ia = await ixAppearRun(createChannelStore, 'head');
     ok(ia.code === 'store-appeared' && ia.kind === 'appeared' && ia.ixKept && ia.actsKept, 'r1 S5 / M2: an index.json (and its journal) that APPEARED — the durable act is refused by name (store-appeared), the index held at once, both files byte-identical (nothing of this life appended to the journal that came)', JSON.stringify(ia));
-    const iax = await ixAppearRun(MC.load('src/channel-store.js', anchored(SSRC, "    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all) return 'whole';", 'a missing index journals'), 'r1-m2a').createChannelStore, 'cut');   // stale-pins: kept — the cut's own text
+    const iax = await ixAppearRun(MC.load('src/channel-store.js', anchored(anchored(SSRC, "    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all) return 'whole';", 'a missing index journals'), 'ownOnly: !!ixLoad.readMissing && !actsAtStart,', 'ownOnly: false,', 'and appends to any journal'), 'r1-m2a').createChannelStore, 'cut');   // stale-pins: kept — the cut's own text
     ok(!iax.actsKept && iax.code === null, 'r1 M2 CONTROL (a missing index journals its acts): the act is appended to the journal that came and answered OK — dropped as «skipped» at the next start — red', JSON.stringify(iax));
     // S6: a small family's value that appeared — its own adopt's write (the pace's union) lands
     const paceAppearRun = async (mk, tag) => {
@@ -502,20 +502,92 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     };
     const pa = await paceAppearRun(createChannelStore, 'head');
     ok(pa.live === 'before,now' && pa.disk === 'before,now', 'r1 S6: a wake-pace.json that appeared is taken in WITH this life\'s floor, and the union is on disk (the adopt\'s own write lands)', JSON.stringify(pa));
-    const MISS = "        fam.missing = false;   // its own now — BEFORE the adopt (its read r1 S6: the pace's union is the adopt's own write; the writer hears `exclusive: false`)\n";
+    const MISS = "        fam.missing = false; fam.readMissing = false;   // its own now (read in this life) — BEFORE the adopt (its read r1 S6: the pace's union is the adopt's own write; the writer hears `exclusive: false`)\n";
     const ADOPT = "        try { fam.adopt(a.value); } catch (e) { warn(`[channels] ${fam.name}: the file that appeared was not taken in: ${(e && e.message) || e}`); }\n";
-    const pax = await paceAppearRun(MC.load('src/channel-store.js', anchored(anchored(SSRC, MISS, '', 'missing cleared late (1)'), ADOPT, ADOPT + '        fam.missing = false;\n', 'missing cleared late (2)'), 'r1-s6').createChannelStore, 'cut');
+    const pax = await paceAppearRun(MC.load('src/channel-store.js', anchored(anchored(SSRC, MISS, '', 'missing cleared late (1)'), ADOPT, ADOPT + '        fam.missing = false; fam.readMissing = false;\n', 'missing cleared late (2)'), 'r1-s6').createChannelStore, 'cut');
     ok(pax.live === 'before,now' && pax.disk === 'before', 'r1 S6 CONTROL (missing cleared after the adopt): the union lives in memory only — the file keeps the floor that came, this life\'s is lost at a restart — red', JSON.stringify(pax));
+    // ── 主开发 r1143 (1), AS IF A MUST: THE LATE MOUNT AFTER THE FIRST WRITE — a family that read missing never renames over a file it has
+    // not read. The first write lands (the exclusive create); the file is then REPLACED by another (a stand-in for the mount arriving)
+    const MOUNT = JSON.stringify({ v: 1, groups: { 'g-0000aaaa': G.makeGroup({ id: 'g-0000aaaa', name: 'the mount', createdBy: A, at: T0, members: [B] }).group } });
+    const lateMountRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-latemount-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const s11 = mk({ dir: d, log: qlog });
+      await s11.groups.update((gr) => { gr.groups['g-00000003'] = G.makeGroup({ id: 'g-00000003', name: 'first', createdBy: A, at: T0, members: [B] }).group; });
+      fs.writeFileSync(path.join(d, 'groups.json.mount'), MOUNT); fs.renameSync(path.join(d, 'groups.json.mount'), path.join(d, 'groups.json'));
+      let code = null;
+      try { await s11.groups.update((gr) => { gr.groups['g-00000004'] = G.makeGroup({ id: 'g-00000004', name: 'next', createdBy: A, at: T0, members: [B] }).group; }); } catch (e) { code = (e && e.code) || 'threw'; }
+      const live = Object.keys(s11.groups.live().groups).sort().join();
+      s11.close();
+      return { code, kept: fs.readFileSync(path.join(d, 'groups.json'), 'utf8') === MOUNT, live };
+    };
+    const lm = await lateMountRun(createChannelStore, 'head');
+    ok(lm.code === 'store-appeared' && lm.kept && lm.live === 'g-0000aaaa', 'r1143 (1): the first write landed, then ANOTHER groups.json took its name (a mount that came late) — the next change is refused by name, the file that came is read and KEPT', JSON.stringify(lm));
+    const lmx = await lateMountRun(MC.load('src/channel-store.js', anchored(SSRC, 'ownOnly: !!fam.readMissing, onWritten: (ok, err) => {', 'ownOnly: false, onWritten: (ok, err) => {', 'renames over any file'), 'r1143-1').createChannelStore, 'cut');
+    ok(!lmx.kept && lmx.code === null, 'r1143 (1) CONTROL (the 1b law: the exclusive create only): the next write RENAMES OVER the mount\'s file — red', JSON.stringify(lmx));
+    // …and the index's acts journal (an append): its first open was the exclusive create; a journal that took its name is never appended to
+    const JOURNAL = '{"seq":9001,"rows":{"fake/m":{"key":"fake/m","id":"m","adapterId":"fake"}}}\n';
+    const lateJournalRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-latejournal-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const s12 = mk({ dir: d, log: qlog });
+      const act = (k) => s12.index.update(() => { const en = s12.index.entry('fake', k); en.title = k; }, { durable: true });
+      await act('one');   // the index's first write (whole: a never-landed index journals nothing)
+      await act('two');   // the journal's first line: its exclusive create
+      const had = fs.existsSync(path.join(d, 'index-acts.ndjson'));
+      fs.writeFileSync(path.join(d, 'acts.mount'), JOURNAL); fs.renameSync(path.join(d, 'acts.mount'), path.join(d, 'index-acts.ndjson'));
+      let code = null; try { await act('three'); } catch (e) { code = (e && e.code) || 'threw'; }
+      const q = (s12.quarantined || []).find((x) => x.file === 'index.json') || {};
+      s12.close();
+      return { had, code, kind: q.kind || null, kept: fs.readFileSync(path.join(d, 'index-acts.ndjson'), 'utf8') === JOURNAL };
+    };
+    const lj = await lateJournalRun(createChannelStore, 'head');
+    ok(lj.had && lj.code === 'store-appeared' && lj.kind === 'appeared' && lj.kept, 'r1143 (1): an acts journal that took the name of the one this store made is never appended to — the act refused by name, the index held, the journal byte-identical', JSON.stringify(lj));
+    const ljx = await lateJournalRun(MC.load('src/channel-store.js', anchored(SSRC, 'ownOnly: !!ixLoad.readMissing && !actsAtStart,', 'ownOnly: false,', 'appends to any journal'), 'r1143-1j').createChannelStore, 'cut');
+    ok(!ljx.kept && ljx.code === null, 'r1143 (1) CONTROL (the journal appended by name): this life\'s act is appended to the journal that came and answered OK — red', JSON.stringify(ljx));
+    // B-f276 1c (its read r1 M3): an index held because its journal is not its own — a durable ask of the DIRTY index is answered by name
+    // (false), never «done» for bytes nothing will write
+    const m3Run = async (mk, tag) => {
+      const d = path.join(ROOT, `store-m3-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const s17 = mk({ dir: d, log: qlog });
+      const act = (k) => s17.index.update(() => { const en = s17.index.entry('fake', k); en.title = k; }, { durable: true });
+      await act('one'); await act('two');   // the index landed; the journal's first line its exclusive create
+      await s17.index.update(() => { const en = s17.index.entry('fake', 'three'); en.title = 'paced'; });   // a PACED change: the index dirty (its write ≥ 500 ms away)
+      fs.writeFileSync(path.join(d, 'acts.mount'), JOURNAL); fs.renameSync(path.join(d, 'acts.mount'), path.join(d, 'index-acts.ndjson'));
+      let code = null; try { await act('four'); } catch (e) { code = (e && e.code) || 'threw'; }   // the append meets a journal not its own: the index held
+      const done = await s17.index.durable();
+      s17.close();
+      return { code, done };
+    };
+    const m3 = await m3Run(createChannelStore, 'head');
+    ok(m3.code === 'store-appeared' && m3.done === false, 'r1 M3: the index held (a journal not its own) — a durable ask of the dirty index answers FALSE by name, never «done» for a change nothing will write', JSON.stringify(m3));
+    const m3x = await m3Run(MC.load('src/channel-store.js', anchored(SSRC, "      if (ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index.json held: ' + ixLoad.blocked), { code: 'EEXIST' });\n", '', 'the held index answers null'), 'r1c-m3').createChannelStore, 'cut');
+    ok(m3x.done === true, 'r1 M3 CONTROL (a held index answers «nothing to write», the 1c tip before its read): the durable ask is told DONE — red', JSON.stringify(m3x));
+    // ── 主开发 r1143 (2), AS IF A MUST: a COMPANION read that FAILS (not «not there») holds its family — never «no text»
+    const companionRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-companion-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'index.json'), JSON.stringify({ v: 1, conversations: { 'fake/k': { key: 'fake/k', id: 'k', adapterId: 'fake' } } }));
+      fs.writeFileSync(path.join(d, 'poll-stamps.json'), JSON.stringify({ v: 1, fields: ['lastPollAt', 'lastScanAt', 'walkStartedAt'], stamps: {} }));
+      for (const n of ['index-acts.ndjson', 'poll-stamps.log']) { fs.mkdirSync(path.join(d, n)); fs.writeFileSync(path.join(d, n, 'x'), 'x'); }   // their reads FAIL (EISDIR)
+      const s13 = mk({ dir: d, log: qlog });
+      const q = (n) => ((s13.quarantined || []).find((x) => x.file === n) || {});
+      let code = null; try { await s13.index.update(() => { const en = s13.index.entry('fake', 'k'); en.title = 'mine'; }, { durable: true }); } catch (e) { code = (e && e.code) || 'threw'; }
+      const out = { ix: q('index.json').kind || null, ixLifts: q('index.json').lifts || null, ps: q('poll-stamps.json').kind || null, code };
+      s13.close();
+      return out;
+    };
+    const cp = await companionRun(createChannelStore, 'head');
+    ok(cp.ix === 'unreadable' && cp.ixLifts === 'next-start' && cp.ps === 'unreadable' && cp.code === 'store-blocked', 'r1143 (2): the acts journal and the stamps journal that could not be read (EISDIR) HOLD their families — the index and the stamps held, an act refused by name', JSON.stringify(cp));
+    const cpx = await companionRun(MC.load('src/channel-store.js', anchored(anchored(SSRC, " if (e && e.code !== 'ENOENT') holdCompanion(ixLoad, 'index-acts.ndjson', e);", '', 'the acts read as empty'), " if (e && e.code !== 'ENOENT') holdCompanion(psLoad, 'poll-stamps.log', e);", '', 'the stamps log read as empty'), 'r1143-2').createChannelStore, 'cut');
+    ok(cpx.ix === null && cpx.ps === null && cpx.code !== 'store-blocked', 'r1143 (2) CONTROL (a failed companion read as «no text»): nothing is held, the act is TAKEN over an index read without its journal (never refused by name) — red', JSON.stringify(cpx));
     // r2 S1: a HALF-DONE press — the family's own set-aside fails after its acts journal moved: the journal is put BACK, the door says failed
     const halfRun = async (mk, tag) => {
       const d = path.join(ROOT, `store-halfpress-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
       fs.writeFileSync(path.join(d, 'index.json'), '{"v":1,"conversations":{');
       fs.writeFileSync(path.join(d, 'index-acts.ndjson'), OLD_ACTS);
       const s9 = mk({ dir: d, log: qlog });
-      const real = fs.renameSync, ixf = path.join(d, 'index.json');
-      fs.renameSync = function (a, b) { if (path.resolve(String(a)) === path.resolve(ixf)) throw Object.assign(new Error('EIO'), { code: 'EIO' }); return real.call(this, a, b); };
+      const real = fs.promises.rename, ixf = path.join(d, 'index.json');   // the door's own rename is off the loop (1c, r1143 (3)): fs.promises
+      fs.promises.rename = async function (a, b) { if (path.resolve(String(a)) === path.resolve(ixf)) throw Object.assign(new Error('EIO'), { code: 'EIO' }); return real.call(this, a, b); };
       let door;
-      try { door = await s9.startDamagedEmpty('index.json'); } finally { fs.renameSync = real; }
+      try { door = await s9.startDamagedEmpty('index.json'); } finally { fs.promises.rename = real; }
       const q = (s9.quarantined || []).find((x) => x.file === 'index.json') || {};
       s9.close();
       return { door: door && door.state, code: door && door.code, journalBack: fs.existsSync(path.join(d, 'index-acts.ndjson')) && fs.readFileSync(path.join(d, 'index-acts.ndjson'), 'utf8') === OLD_ACTS, stillHeld: !!q.held && !q.done, aside: fs.readdirSync(d).filter((n) => /\.damaged-/.test(n)) };
@@ -537,7 +609,7 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     };
     const lr = await logRun(createChannelStore, 'head');
     ok(lr.kind === 'appeared' && lr.kept, 'r2 S3: a poll-stamps.log that APPEARED while the stamps read missing is kept byte for byte — its first open is an exclusive create; the stamps held at once', JSON.stringify(lr));
-    const lrx = await logRun(MC.load('src/channel-store.js', anchored(SSRC, "psLoad.missing && !journalWas ? 'ax' : 'a'", "'a'", 'the journal opened for append'), 'r2-s3').createChannelStore, 'cut');
+    const lrx = await logRun(MC.load('src/channel-store.js', anchored(SSRC, "psLoad.readMissing && !journalWas ? 'ax' : 'a'", "'a'", 'the journal opened for append'), 'r2-s3').createChannelStore, 'cut');
     ok(!lrx.kept, 'r2 S3 CONTROL (the journal opened for append): this life\'s stamp is appended to the journal that came — red', JSON.stringify(lrx));
     // S2 + S3: the writer's thread — a temp left as a second name is never opened again; our own link answered EEXIST is our link landed
     const WSRC = fs.readFileSync(path.join(REPO, 'src/store-writer-worker.js'), 'utf-8');
@@ -565,6 +637,110 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
       "  if (LINKED.has(m.tmp) && !dropTemp(fs, m.tmp)) throw", "  if (false) throw", 'the second name opened');
     const wkx = workerRun(MC.load('src/store-writer-worker.js', cutW, 'r1-s2s3'), 'cut');
     ok(wkx.s3 === 'EEXIST' && !wkx.storeWhole, 'r1 S3 / S2 CONTROL (no inode check, the second name opened): our own link reads as «appeared», and the failed write truncates the live store through the shared inode — red', JSON.stringify(wkx));
+    // ── round wwlskwphv lens 3: the writer's no-link FALLBACK (a filesystem without hard links: a last look, then the rename) and its
+    // OWN-TEMP sweep (a second name left by an earlier life of the thread is removed before a temp is opened)
+    const fallbackRun = (WK, tag) => {
+      const d = path.join(ROOT, `store-nolink-${tag}`); fs.mkdirSync(d, { recursive: true });
+      const FE = Object.assign(Object.create(fs), { linkSync: () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); } });
+      const f1 = path.join(d, 'new.json'), f2 = path.join(d, 'there.json');
+      fs.writeFileSync(f2, '{"theirs":1}');
+      const out = {};
+      try { WK.writeJob({ file: f1, tmp: f1 + '.tmp-1-w', parts: ['{"v":1}'], exclusive: true }, FE); out.fresh = fs.readFileSync(f1, 'utf8'); } catch (e) { out.fresh = (e && e.code) || 'threw'; }
+      try { WK.writeJob({ file: f2, tmp: f2 + '.tmp-1-w', parts: ['{"v":1}'], exclusive: true }, FE); out.there = 'written'; } catch (e) { out.there = (e && e.code) || 'threw'; }
+      out.kept = fs.readFileSync(f2, 'utf8') === '{"theirs":1}';
+      return out;
+    };
+    const fb = fallbackRun(require(path.join(REPO, 'src/store-writer-worker.js')), 'head');
+    ok(fb.fresh === '{"v":1}' && fb.there === 'EEXIST' && fb.kept, 'lens 3: a filesystem without hard links (EPERM): an exclusive create of a new file lands by the rename; over a file already there it is refused EEXIST, the file kept', JSON.stringify(fb));
+    const fbx = fallbackRun(MC.load('src/store-writer-worker.js', anchored(WSRC, "    if (fs.existsSync(file)) throw Object.assign(new Error(`${file} appeared since its store read it missing`), { code: 'EEXIST' });\n", '', 'no last look'), 'lens3-nolink'), 'cut');
+    ok(!fbx.kept && fbx.there === 'written', 'lens 3 CONTROL (no last look): the fallback renames over the file that was there — red', JSON.stringify(fbx));
+    const sweepRun = (WK, tag) => {
+      const d = path.join(ROOT, `store-ownsweep-${tag}`); fs.mkdirSync(d, { recursive: true });
+      const f = path.join(d, 'y.json'), t = `${f}.tmp-${process.pid}-w`;
+      fs.writeFileSync(f, '{"v":1,"a":"whole"}');
+      fs.linkSync(f, t);   // an earlier life of the thread left its temp as a SECOND NAME of the store
+      const FW = Object.assign(Object.create(fs), { writeSync: () => { throw Object.assign(new Error('EIO'), { code: 'EIO' }); } });
+      let code = null; try { WK.writeJob({ file: f, tmp: t, parts: ['{"v":1,"a":"next"}'] }, FW); } catch (e) { code = (e && e.code) || 'threw'; }
+      try { fs.unlinkSync(t); } catch { }
+      return { code, whole: fs.readFileSync(f, 'utf8') === '{"v":1,"a":"whole"}' };
+    };
+    const fresh = (tag) => MC.load('src/store-writer-worker.js', anchored(WSRC, 'module.exports = { writeJob, writeAll, sweepTemps, linkedHere };', `module.exports = { writeJob, writeAll, sweepTemps, linkedHere };   // a fresh life of the thread (${tag})`, `fresh life ${tag}`), `life-${tag}`);   // a module of its own: its first sweep of the file
+    const sw = sweepRun(fresh('head'), 'head');
+    ok(sw.code === 'EIO' && sw.whole, 'lens 3: a temp of THIS road left by an earlier life of the thread (a second name of the store) is removed at the first sweep — a write that then fails part-way leaves the store whole', JSON.stringify(sw));
+    const swx = sweepRun(MC.load('src/store-writer-worker.js', anchored(WSRC, ' || path.join(dir, n) === ownTmp)) {', ')) {', 'no own-temp sweep'), 'lens3-sweep'), 'cut');
+    ok(!swx.whole, 'lens 3 CONTROL (only other pids\' temps swept): the open truncates the live store through its second name — red', JSON.stringify(swx));
+    // lens 3: a PACED change (no durable door, a stamp or a row's bookkeeping) that meets an index that appeared — never written over it;
+    // the index held at once, its file kept (a person's act takes the durable road: refused by name, ixAppearRun above)
+    const pacedRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-pacedappear-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const s14 = mk({ dir: d, log: qlog });
+      fs.writeFileSync(path.join(d, 'index.json'), IX);
+      await s14.index.update(() => { const en = s14.index.entry('fake', 'p'); en.title = 'paced'; });   // no durable: resolves in memory
+      try { s14.index.flush(); } catch { }
+      const q = (s14.quarantined || []).find((x) => x.file === 'index.json') || {};
+      s14.close();
+      return { kind: q.kind || null, kept: fs.readFileSync(path.join(d, 'index.json'), 'utf8') === IX };
+    };
+    const pc = await pacedRun(createChannelStore, 'head');
+    ok(pc.kind === 'appeared' && pc.kept, 'lens 3: a PACED index change that meets an index that appeared is never written over it — the index held at once, its file kept', JSON.stringify(pc));
+    const pcx = await pacedRun(MC.load('src/channel-store.js', anchored(SSRC, 'return { exclusive: !!fam.missing, ownOnly: !!fam.readMissing, onWritten:', 'return { exclusive: false, ownOnly: false, onWritten:', 'neither exclusive nor own-only'), 'lens3-paced').createChannelStore, 'cut');
+    ok(!pcx.kept, 'lens 3 CONTROL (neither exclusive nor own-only): the paced write renames over the index that came — red', JSON.stringify(pcx));
+    // lens 3: TWO PRESSES at once share one answer (one set-aside); a put-back that FAILS leaves the other file under the dated name, said
+    const pressRun = async (tag, failBack) => {
+      const d = path.join(ROOT, `store-press-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'index.json'), '{"v":1,"conversations":{');
+      fs.writeFileSync(path.join(d, 'index-acts.ndjson'), OLD_ACTS);
+      const said = [];
+      const s15 = createChannelStore({ dir: d, log: { warn: (...a) => said.push(a.join(' ')), log() {}, info() {} } });
+      const real = fs.promises.rename, ixf = path.join(d, 'index.json');
+      if (failBack) fs.promises.rename = async function (a, b) { if (path.resolve(String(a)) === path.resolve(ixf) || /index-acts\.ndjson\.damaged-/.test(String(a))) throw Object.assign(new Error('EIO'), { code: 'EIO' }); return real.call(this, a, b); };
+      let both;
+      try { both = await Promise.all([s15.startDamagedEmpty('index.json'), s15.startDamagedEmpty('index.json')]); } finally { fs.promises.rename = real; }
+      s15.close();
+      return { a: both[0].state, b: both[1].state, same: both[0] === both[1], asides: fs.readdirSync(d).filter((n) => /\.damaged-/.test(n)).length, byHand: said.some((l) => /move it back by hand/.test(l)) };
+    };
+    const p2 = await pressRun('two', false);
+    ok(p2.a === 'pass' && p2.same && p2.asides === 2, 'lens 3: two presses at once share ONE answer — the index and its journal set aside once', JSON.stringify(p2));
+    const pf = await pressRun('back', true);
+    ok(pf.a === 'failed' && pf.asides === 1 && pf.byHand, 'lens 3: a press whose own set-aside fails and whose put-back fails too — the journal left under the dated name, said «move it back by hand», the door failed', JSON.stringify(pf));
+    // lens 3: the ALIASES family refused at the store while held (its own refusal, as adapters / outbox / groups have theirs)
+    {
+      const d = path.join(ROOT, 'store-aliases-held', 'channels'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'aliases.json'), '{"v":1,"aliases":{');
+      const s16 = createChannelStore({ dir: d, log: qlog });
+      let code = null; try { await s16.aliases.update((al) => { al.aliases.fake = { u1: { alias: 'x', at: 1 } }; }); } catch (e) { code = (e && e.code) || 'threw'; }
+      s16.close();
+      ok(code === 'store-blocked' && fs.readFileSync(path.join(d, 'aliases.json'), 'utf8') === '{"v":1,"aliases":{', 'lens 3: aliases.json held (torn) — its update refused BY NAME at the store, its bytes untouched', String(code));
+    }
+  }
+  // B-f276 1c (round wwlskwphv, lens 3): ⑮b's PURE checks in the FAST tier too (test-channel-store holds them heavy) — the walls census,
+  // the wrapper's deny by default, a failed message-log read trims nothing
+  {
+    const SM = require(path.join(REPO, 'src/channel-store.js'));
+    const W = SM.HELD_WALLS || {};
+    const files = ['src/channel-store.js', 'src/server/channels-engine.js', 'src/server/channels-outbound.js', 'src/server/channels-auth.js', 'src/server/channels-access.js', 'src/server/groups-engine.js'];
+    const text = files.map((f) => fs.readFileSync(path.join(REPO, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1')).join('\n');
+    const asked = new Map();
+    for (const m of text.matchAll(/wallHeld\('([A-Za-z]+)'\)|\bHELD_WALLS\.([A-Za-z]+) &&/g)) { const n = m[1] || m[2]; asked.set(n, (asked.get(n) || 0) + 1); }
+    const rows = Object.keys(W);
+    const unasked = rows.filter((n) => !asked.has(n)), twice = rows.filter((n) => (asked.get(n) || 0) > 1), stray = [...asked.keys()].filter((n) => !rows.includes(n));
+    ok(rows.length >= 7 && !unasked.length && !twice.length && !stray.length, `THE WALLS (fast): every cleanup over what a family holds is a row of HELD_WALLS (${rows.length}) and asks it ITSELF exactly once`, JSON.stringify({ unasked, twice, stray }));
+    const api = SM.pauseDoorsOf({ plantedNewDoor: () => 'yes', allowedDoor: () => 'ok' }, { allowedDoor: ['allow', 'sync', 'a test row'] }, { held: () => true, error: () => Object.assign(new Error('paused'), { code: 'store-blocked' }), answer: () => ({ ok: false }) });
+    let threw = null; try { api.plantedNewDoor(); } catch (e) { threw = e && e.code; }
+    ok(threw === 'store-blocked' && api.allowedDoor() === 'ok', 'THE WRAPPER (fast): a PLANTED door with no row is refused while paused (deny by default); an allowed door answers', JSON.stringify({ threw }));
+    const d2 = path.join(ROOT, 'wall-trim-fast'); const st2 = SM.createChannelStore({ dir: d2, log: { log() {}, info() {}, warn() {}, error() {} } });
+    fs.mkdirSync(path.join(d2, 'msgs', 'fake', 'c1.ndjson'), { recursive: true });   // the log's read fails (EISDIR)
+    const t = st2.trim('fake', 'c1');
+    st2.close();
+    ok(t && t.unread === true && t.removed === 0, 'trim (fast): a message log whose read FAILED trims nothing (only ENOENT is «no log»)', JSON.stringify(t));
+  }
+  // B-f276 1c (its read r1 M4 / S4): every agent msg route asks the groups' pause FIRST (a refused door throws synchronously — inside an
+  // async route it hung the request), and the group answer maps store-blocked to 503
+  {
+    const AR = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
+    const routes = ["app.post('/api/agent/msg/send'", "app.post('/api/agent/msg/dispatch'", "app.get('/api/agent/msg/groups'", "app.get('/api/agent/msg/read'", "app.post('/api/agent/msg/group'"];
+    const asks = routes.map((r) => { const i = AR.indexOf(r); return i >= 0 && /^[^]*?if \(!(?:who|c)\) return;\n  if \(msgPausedRefused\(res\)\) return;/.test(AR.slice(i, i + 400)); });
+    ok(asks.every(Boolean) && /const status = code === 'store-blocked' \? 503 :/.test(AR) && /const msgPausedRefused = \(res\) => \{ const ge = groupsEngine\(\);/.test(AR), 'PIN (B-f276 1c, r1 M4 / S4): the five agent msg routes ask the groups\' pause first (503 store-blocked by name), and groupAnswer maps store-blocked to 503', JSON.stringify(asks));
   }
   // the For-you notice: the channels engine files ONE item per held file — a damaged one carries its door (the For-you check row)
   const ddir = path.join(ROOT, 'store-corrupt-engine');
@@ -595,6 +771,7 @@ console.log('§2c a held store is on the FIRST SCREEN (r3 finding 7, re-stated b
   try { ce1.store.close(); } catch {}
   const P = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
   ok(/d\.quarantined/.test(P) && /noteLine\('chan-quarantine-note'/.test(P) && /q\.kind === 'damaged'/.test(P), 'PIN: the panel draws a warning line per held store from the digest — a damaged one in its own words');
+  ok(/groupsPausedNow = !!\(g && g\.code === 'store-blocked'\)/.test(P) && /if \(groupsPausedNow && !pausedNow\) \{\n\s+list\.appendChild\(chanLine\('empty-hint chan-groups-empty chan-paused'/.test(P), 'PIN (B-f276 1c, r1143 (6)): a group list refused while the groups are paused draws the paused line — never «No groups yet» over a groups.json nobody read');
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf-8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf-8');
   const KEY = 'Channels: {file} could not be read as itself (damaged) — every change to it is refused';
   ok(zh.includes(JSON.stringify(KEY)) && ja.includes(JSON.stringify(KEY)), 'the damaged headline has zh + ja rows');
@@ -624,10 +801,10 @@ console.log('§1e the PACE rules (PURE) — r3 findings 4 + 5');
 }
 
 // ── the engine fixture: the REAL store + the REAL ladder + a recording authorizer
-function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info() {}, warn() {}, log() {} }, onCleared = undefined, ge = GE } = {}) {
+function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info() {}, warn() {}, log() {} }, onCleared = undefined, ge = GE, heldRetry = null } = {}) {
   const dataDir = path.join(ROOT, name);
   fs.mkdirSync(dataDir, { recursive: true });
-  const store = createChannelStore({ dir: path.join(dataDir, 'channels') });
+  const store = createChannelStore({ dir: path.join(dataDir, 'channels'), heldRetry });
   const sessions = new Map();
   const roster = [
     { cid: A, name: 'alpha', groups: ['tg1'], reachability: null },
@@ -2849,6 +3026,87 @@ console.log('§bl-msg B-3e61 a message arrives whole — the value masked, the r
   ok(late.p.ok && late.atB !== '@beta' && !(late.p.masked || []).length, 'RED CONTROL (the mask only at the append, after the @-scan): the @ place misses its @ and the answer names nothing — the SEND legs go red', JSON.stringify(late.atB));
   const lineMode = await drive('blmsg-line', M.load('src/server/groups-engine.js', editAnchor(src, 'message: true', 'message: false', "src/server/groups-engine.js", 'join'), 'line-mode'));
   ok(lineMode.p.ok && !lineMode.p.message.text.includes('the rest of the brief arrives'), 'RED CONTROL (the line mode in the group log): the rest of the message is lost again — the SEND leg goes red', JSON.stringify(lineMode.p.message && lineMode.p.message.text));
+}
+
+console.log('§P B-f276 (lane bl-windows, 主开发 r487): a HELD groups.json pauses the agent groups — every door refused BY NAME, nothing granted, nothing sent');
+{
+  const pausedRun = async (ge, tag) => {
+    const name = `groups-held-${tag}`;
+    const gj = path.join(ROOT, name, 'channels', 'groups.json');
+    fs.mkdirSync(gj, { recursive: true }); fs.writeFileSync(path.join(gj, 'x'), 'x');   // the read of groups.json fails (EISDIR)
+    const said = [];
+    const f = fixture(name, { ge, heldRetry: { firstMs: 5, maxMs: 10 }, log: { info() {}, log() {}, warn: (...a) => said.push(a.join(' ')) } });
+    const code = async (fn) => { try { const v = await fn(); return v && v.code ? `answer:${v.code}` : `answer:${JSON.stringify(v === undefined ? null : v).slice(0, 60)}`; } catch (e) { return `threw:${e && e.code}`; } };
+    const r = {};
+    r.send = await code(() => f.eng.sendToAgent({ from: A, to: B, text: 'while held' }));
+    r.create = await code(() => f.eng.create({ by: A, name: 'held', members: [B] }));
+    r.listFor = await code(() => f.eng.listFor(A));
+    r.read = await code(() => f.eng.read({ by: A, group: 'g-00000001' }));
+    r.resolve = await code(() => f.eng.resolveTarget('g-00000001', A));
+    r.pace = f.eng.pacerFor(A)(B);
+    r.force = f.eng.pacerFor(A).force(B);   // B-f276 1c (its read r1 M1): the force at the bound — refused (ok:false), never a grant
+    // B-f276 1c (M2): the engine's HOLD reaches the deliverer — a groups owed wake and a paced wake are held (set aside: no attempt, no fall)
+    r.heldOwed = f.deliver.heldWhyOf({ cid: B, producer: 'groups', held: { why: 'paced' } });
+    r.heldPaced = f.deliver.heldWhyOf({ cid: B, producer: 'stash-wake', held: { why: 'paced' } });
+    r.paused = f.eng.pausedState();
+    r.posts = f.posts.length;
+    // groups.json reads again: the store takes it in, the doors answer again
+    fs.rmSync(gj, { recursive: true, force: true }); fs.writeFileSync(gj, JSON.stringify({ v: 1, groups: {} }));
+    let read = false; f.store.whenRead(['groups.json'], () => { read = true; });
+    const end = Date.now() + 5000; while (!read && Date.now() < end) await new Promise((z) => setTimeout(z, 5));   // the bound is a red line, never the wait
+    r.after = { read, paused: f.eng.pausedState(), send: await code(() => f.eng.sendToAgent({ from: A, to: B, text: 'after the read' })) };
+    f.close();
+    return r;
+  };
+  const r = await pausedRun(GE, 'head');
+  console.log(`    facts: ${JSON.stringify(r)}`);
+  const refused = (x) => x === 'threw:store-blocked' || x === 'answer:store-blocked';
+  ok(refused(r.send) && refused(r.create) && r.posts === 0, 'a message to an agent and a new group while groups.json is held: refused BY NAME (store-blocked, «paused»), nothing posted, nothing woken', JSON.stringify(r));
+  ok(refused(r.listFor) && refused(r.read) && refused(r.resolve), 'the reads whose empty answer would say «no group» / «no such group»: refused BY NAME', JSON.stringify({ listFor: r.listFor, read: r.read, resolve: r.resolve }));
+  ok(r.force && r.force.ok === false && r.force.reason === 'store-blocked', 'B-f276 1c (its read r1 M1): the paced wake\'s FORCE at its bound is REFUSED (ok:false) while paused — never a billed turn over floors nobody read', JSON.stringify(r.force));
+  ok(!!r.heldOwed && !!r.heldPaced, 'B-f276 1c (M2): the groups\' HOLD reaches the deliverer — its own owed wakes and every paced wake are held (set aside: no attempt, no fall)', JSON.stringify({ owed: r.heldOwed, paced: r.heldPaced }));
+  ok(r.pace && r.pace.reason === 'store-blocked' && r.pace.retryInMs > 0, 'the pace every producer asks answers a WAIT (parked and asked again) — never a grant over floors nobody read', JSON.stringify(r.pace));
+  ok(r.paused && r.paused.code === 'store-blocked' && /the agent groups are paused: groups\.json could not be read/.test(r.paused.error), 'the pause says itself by name (pausedState — the routes and the CLI word it)', JSON.stringify(r.paused));
+  ok(r.after.read && r.after.paused === null && /^answer:/.test(r.after.send) && !refused(r.after.send), 'groups.json reads again: taken in, the pause lifts, a message is sent again', JSON.stringify(r.after));
+  // r566 #6: reportsForTurn answers NOTHING while paused (no marker moves) — the first turn after the lift carries the reports ONCE
+  {
+    const src0 = fixture('groups-rep-src');
+    const made = await src0.eng.create({ by: A, name: 'rep', members: ['beta'], quiet: true });
+    await src0.eng.post({ group: made.group.id, from: A, text: 'a report for beta' });
+    src0.close();
+    const from = path.join(ROOT, 'groups-rep-src', 'channels'), to = path.join(ROOT, 'groups-rep-held', 'channels');
+    fs.cpSync(from, to, { recursive: true });
+    const good = fs.readFileSync(path.join(to, 'groups.json'), 'utf8');
+    fs.rmSync(path.join(to, 'groups.json')); fs.mkdirSync(path.join(to, 'groups.json')); fs.writeFileSync(path.join(to, 'groups.json', 'x'), 'x');
+    const fr = fixture('groups-rep-held', { heldRetry: { firstMs: 5, maxMs: 10 } });
+    const held = fr.eng.reportsForTurn(B);
+    fs.rmSync(path.join(to, 'groups.json'), { recursive: true, force: true }); fs.writeFileSync(path.join(to, 'groups.json'), good);
+    let readNow = false; fr.store.whenRead(['groups.json'], () => { readNow = true; });
+    const endR = Date.now() + 5000; while (!readNow && Date.now() < endR) await new Promise((z) => setTimeout(z, 5));   // the bound is a red line, never the wait
+    const first = fr.eng.reportsForTurn(B);
+    if (first.marks && first.marks.length) await fr.eng.commitReports(B, first.marks);
+    const second = fr.eng.reportsForTurn(B);
+    fr.close();
+    console.log(`    facts: held «${held.text}» · first after the lift «${String(first.text).slice(0, 60)}» · second «${second.text}»`);
+    ok(held.text === '' && (held.marks || []).length === 0 && /a report for beta/.test(first.text) && second.text === '', 'r566 #6: while groups.json is held the turn carries NOTHING (no marker moves); the first turn after the lift carries the report ONCE', JSON.stringify({ held, first: first.text, second: second.text }));
+  }
+  // THE CENSUS: every door of the groups engine is a row of GROUP_HELD_DOORS
+  const gsrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf8');
+  const blk = (gsrc.split('  const GROUP_HELD_DOORS = {\n')[1] || '').split('\n  };\n')[0] || '';
+  const rows = new Map([...blk.matchAll(/^    ([A-Za-z_$][\w$]*): \['(allow|paused|refused|read|none)', '(async|sync|const)', '([^'\n]+)'\],/gm)].map((m) => [m[1], m[2]]));
+  const fc = fixture('groups-census');
+  const keys = Object.keys(fc.eng); fc.close();
+  const noRow = keys.filter((k) => !rows.has(k)), stale = [...rows.keys()].filter((k) => !keys.includes(k));
+  ok(rows.size >= 40 && !noRow.length && !stale.length, `THE CENSUS: every door of the groups engine (${keys.length}) is a row of GROUP_HELD_DOORS; none without a row, none stale`, JSON.stringify({ noRow, stale }));
+  // CONTROL: the pause cut (today's engine over a held groups.json)
+  const CUT = ['const groupsPaused = () => !!(store.heldOf && store.heldOf(GROUP_FAMILIES).length);', 'const groupsPaused = () => false;'];
+  ok(gsrc.split(CUT[0]).length === 2, 'CONTROL setup: the pause is where the control cuts it');
+  const MP = mutantCopies('groups-paused', REPO);
+  const { anchored: anchoredP } = await import('./scratch.mjs');
+  const c = await pausedRun(MP.load('src/server/groups-engine.js', anchoredP(gsrc, CUT[0], CUT[1], 'the groups pause cut'), 'groups-pause-cut'), 'cut');
+  const hk = await pausedRun(MP.load('src/server/groups-engine.js', anchoredP(anchoredP(anchoredP(gsrc, "{ held: () => groupsPaused(), render: owedWords,", '{ render: owedWords,', 'no owed hold'), "Object.assign((sender) => pacerFor(sender), { held: () => groupsPaused() })", '(sender) => pacerFor(sender)', 'no pace hold'), "return { ok: false, reason: 'store-blocked', why: groupsPausedWords(), rule: 'paused', retryInMs: 60_000 };", "return { reason: 'store-blocked', why: groupsPausedWords(), rule: 'paused', retryInMs: 60_000 };", 'force without ok:false'), 'groups-hold-cut'), 'holdcut');   // stale-pins: kept — the cut's own text
+  ok(!hk.heldOwed && !hk.heldPaced && !(hk.force && hk.force.ok === false), 'B-f276 1c CONTROL (no hold hooks, the force without ok:false — the 1c tip before its read): the deliverer attempts the wakes toward their fall and reads the force as a grant — red', JSON.stringify({ owed: hk.heldOwed, paced: hk.heldPaced, force: hk.force }));
+  ok(!refused(c.listFor) && !refused(c.resolve) && !(c.pace && c.pace.reason === 'store-blocked'), 'CONTROL (the pause cut — today\'s engine over a held groups.json): the list answers empty («no groups»), the target «no such group», the pace grants — red', JSON.stringify({ listFor: c.listFor, resolve: c.resolve, pace: c.pace }));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

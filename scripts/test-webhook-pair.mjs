@@ -237,6 +237,33 @@ try {
   const revoke = await A.call('POST', `/api/channels/webhook/paths/ci/callers/${aRow.id}/revoke`, { body: {} });
   const afterRev = JSON.parse(fs.readFileSync(path.join(A.dataDir, 'channels', 'webhook', 'callers.json'), 'utf-8')).paths.ci.callers[0];
   ok(revoke.status === 200 && !afterRev.tokenEnc && !afterRev.outEnc, 'a revoked peer keeps neither token (its own nor the one it was given)');
+  // B-f276 1c (主开发 r1143 (4)): the peer's completion while A's channels are PAUSED — asked after the frame proved its code (an unproven
+  // frame hears nothing), before the one write: 503 store-blocked BY NAME, no caller stored, the code NOT spent — once A reads again the
+  // same code pairs
+  {
+    const pausedPair = async (I, tag) => {
+      const mk = await I.call('POST', '/api/channels/webhook/paths', { body: { slug: `pz-${tag}`, title: 'P' } });
+      const code = await I.call('POST', `/api/channels/webhook/paths/pz-${tag}/pair-code`, { body: { name: 'Hub A' } });
+      const was = I.eng.pausedState;
+      I.eng.pausedState = () => ({ code: 'store-blocked', error: 'the channels are paused: index.json could not be read', held: ['index.json'] });
+      let join;
+      try { join = await B.call('POST', '/api/channels/webhook/join', { body: { code: code.j.code, slug: `side-pz-${tag}`, name: 'Hub B' } }); } finally { I.eng.pausedState = was; }
+      const stored = I.callers(`pz-${tag}`).length;
+      const again = await B.call('POST', '/api/channels/webhook/join', { body: { code: code.j.code, slug: `side-pz2-${tag}`, name: 'Hub B' } });
+      return { made: mk.status, joinStatus: join.status, joinCode: join.j && join.j.code, stored, again: again.status, after: I.callers(`pz-${tag}`).length };
+    };
+    const pp = await pausedPair(A, 'head');
+    ok(pp.made === 200 && pp.joinStatus !== 200 && pp.stored === 0 && pp.again === 200 && pp.after === 1, 'B-f276 1c (r1143 (4)): a pairing completed while A is PAUSED is refused by name — no caller stored, the code not spent; once A reads again the same code pairs', JSON.stringify(pp));
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const { anchored } = await import('./scratch.mjs');
+    const WSRC = fs.readFileSync(routePath, 'utf8');
+    const WM = mutantCopies('webhook-pair-paused', repo).load('src/routes/webhook.js', anchored(WSRC, ' paused = pausedNow(); if (paused) return;', '', 'the pairing asks no pause'), 'pair-no-pause');
+    const A2 = await instance('a2', A.settings, { routes: () => WM });
+    try {
+      const px = await pausedPair(A2, 'cut');
+      ok(px.stored === 1 && px.again !== 200, 'B-f276 1c (r1143 (4)) CONTROL (the completion asks no pause, in a copy): the caller is stored and the code spent while paused — red', JSON.stringify(px));
+    } finally { A2.stop(); }
+  }
 } catch (e) { fail++; console.error('  ✗ threw:', e.stack || e.message); }
 finally { A.stop(); B.stop(); }
 

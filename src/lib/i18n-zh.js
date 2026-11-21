@@ -395,7 +395,7 @@ export default {
   "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again": "频道已暂停：{file} 无法读取 —— 在能再次读取之前，不获取也不发送任何内容",
   "Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved": "频道：{file} 无法读取，而且无法另存 —— 在修好或移走它之前，对它的写入都会被拒绝",
   "Channels: {file} could not be read and was set aside as {where}": "频道：{file} 无法读取，已另存为 {where}",
-  "A channels store file could not be read or set aside — changes are refused until it is fixed or moved (see For you)": "有一个频道存储文件无法读取也无法另存 —— 在修好或移走它之前，修改都会被拒绝（见“给你”）",
+  "A channels store file could not be read — it is held, nothing was set aside or written over; changes are refused until it reads again (see For you)": "一个频道存储文件无法读取——它被保留，没有移到一旁也没有被覆盖；在能再次读取前，更改会被拒绝（见「待你处理」）",   // B-f276 1c
   "Start it empty": "从空开始",   // B-f276 1b: the damaged door
   "Set the damaged file aside and start it empty — nothing is deleted, its bytes are kept under a dated name": "把损坏的文件移到一旁并从空开始——不删除任何内容，它的字节以带日期的名字保留",   // B-f276 1b: the damaged door
   "Started empty — the damaged bytes are kept under a dated name": "已从空开始——损坏的字节以带日期的名字保留",   // B-f276 1b: the damaged door
@@ -419,6 +419,7 @@ export default {
   "Channels: {file} read again and loaded — nothing to do": "频道：{file} 已重新读取并载入 —— 你无需操作",
   "{file} read again and is loaded": "{file} 已重新读取并载入",
   "The channels are paused — {file} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again": "频道已暂停 —— {file} 无法读取，所以这里不是完整的列表；在能再次读取之前，不获取也不发送任何内容",
+  "The agent groups are paused — a file of theirs could not be read, so this list is not the whole list; nothing is sent until it reads again": "智能体群已暂停——它们的一个文件无法读取，所以这个列表不完整；能再次读取前不会发送任何内容",   // B-f276 1c
   "It read again and is loaded; changes to it are written again.": "已重新读取并载入；对它的修改会再次写入。",
   "{file} reads again — restart VibeSpace to load it": "{file} 已能读取 —— 重启 VibeSpace 即可载入",
   "{file} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace": "{file} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后会在 VibeSpace 下次启动时载入",

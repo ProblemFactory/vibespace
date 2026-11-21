@@ -26,6 +26,8 @@ const CHANNELS_SECTION_LINES = Object.freeze({
   request: 'The user connected mail, chats and threads you may ASK to read: `vibespace-channels list --all` names them, `vibespace-channels request <conv> "why"` files the ask (the user approves). A question about people, mail, deals or chats: ask here BEFORE any other connector or file. Manual: `vibespace-docs channels`.',
   // lane pod-oauth-callback (study 1 L1: an agent that needed Lark opened Lark's WEB login in its own browser): nothing
   // connected yet, the admin offers a company app — the agent puts the Connect button in the chat
+  // B-f276 1c (round wwlskwphv): the channels PAUSED (a channels file could not be read) — unknown, said; never «nothing connected»
+  paused: 'The mail, chats and threads the user connected are PAUSED now — a channels file could not be read: every `vibespace-channels` verb says why; it lifts when the file reads again (or at a restart). Never take a missing answer for an empty one.',
   connect: 'No mail or chat account is connected yet. A task needs one (Lark, Gmail, Slack)? `vibespace-channels connect <kind>` puts a Connect button for the user in this chat — they sign in there; never a vendor\'s web login in your browser. Manual: `vibespace-docs channels`.',
 });
 /** lane channels-teach: the reminder's segment by reach (each ≤ 120 B — test-channels-teach) */
@@ -33,8 +35,9 @@ const CHANNELS_REMINDER_SEG = Object.freeze({
   read: 'vibespace-channels list|search "words"|read <conv> — the mail and chats the user connected; look there first',
   request: 'vibespace-channels list --all|request <conv> "why" — the mail and chats the user connected, yours to ask for',
   connect: 'vibespace-channels connect <kind> — nothing connected yet: a Connect button for the user in this chat',
+  paused: 'vibespace-channels — PAUSED now (a channels file could not be read): every verb says why',
 });
-const channelsByReach = (map, reach) => map[reach === 'request' || reach === 'connect' ? reach : 'read'];
+const channelsByReach = (map, reach) => map[reach === 'request' || reach === 'connect' || reach === 'paused' ? reach : 'read'];
 /** lane channel-reauth-visible (userW inc-mvl9qdru-dlew): an account this session reads whose sign-in is DEAD is NAMED where
  *  the hook teaches the door — `expired` = its labels (the engine's signinExpiredFor: ≤ 3, each ≤ 60 characters). Only
  *  while one is dead: the widest NORMAL shape (the caps below) is unchanged. */

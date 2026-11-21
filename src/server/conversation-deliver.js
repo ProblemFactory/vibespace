@@ -979,7 +979,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (isOwed(e) && wakePacer && typeof wakePacer.held === 'function') {
       let v = false;
       try { v = !!wakePacer.held(e.cid, e); } catch { v = true; }
-      if (v) return { why: 'its wake pace cannot be read now (its file is held)', by: null };
+      if (v) return { why: 'its wake pace cannot be read now (its file is held)', by: null, pace: true };
     }
     // the line found nothing but KEPT entries for an ended wake (`kept`): it waits while the stash still keeps one
     if (e.waitsHeld && e.waitsHeld.kept && stashKeptCount(e.cid) > 0) return { why: e.waitsHeld.why, by: null };
@@ -1009,10 +1009,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     for (const e of q) {
       if (!e || e.inflight || e.ho || !(isOwed(e) || isEnded(e))) continue;
       const h = heldWhy(e);
-      if (h) { if (setAside(e, h.why, at, h.by ? { by: h.by } : {})) marked.push(e); continue; }
+      if (h) { if (setAside(e, h.why, at, h.by ? { by: h.by } : h.pace ? { pace: true } : {})) marked.push(e); continue; }
       if (!e.waitsHeld) continue;
       // the producer that said held is not registered yet (the boot's window): unknown is held — the mark stays until it registers
-      if (e.waitsHeld.by && !owedProducers.has(e.waitsHeld.by)) {
+      // B-f276 1c (主开发 r809 (2)): a mark the PACE said (its file held) stays until the pacer registers — unknown is held, never a wake
+      // posted unpaced in the boot's window (the same hour bound as a producer's)
+      if ((e.waitsHeld.by && !owedProducers.has(e.waitsHeld.by)) || (e.waitsHeld.pace && typeof wakePacer !== 'function')) {
         if (at - parkBootAt <= RETRY_MAX_MS) { e.nextAt = at + HELD_STEP_MS; continue; }
         delete e.waitsHeld; e.nextAt = at; lifted.push(e); continue;   // past the boot's hour: the mark gives way, its bound clock not moved — the unready road says it
       }

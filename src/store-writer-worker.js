@@ -44,7 +44,7 @@ function sweepTemps(fs, file, ownTmp = null) {   // B-f276 1b (its read r2 N3): 
   try { names = fs.readdirSync(dir); } catch { return; }
   for (const n of names) {
     const m = n.startsWith(base) ? /^(\d+)(-w)?$/.exec(n.slice(base.length)) : null;
-    if (m && (Number(m[1]) !== process.pid || path.join(dir, n) === ownTmp)) { try { fs.unlinkSync(path.join(dir, n)); } catch { } }
+    if (m && (Number(m[1]) !== process.pid || path.join(dir, n) === ownTmp)) { try { fs.unlinkSync(path.join(dir, n)); } catch (e) { if (path.join(dir, n) === ownTmp && e && e.code !== 'ENOENT' && sameFile(fs, ownTmp, file)) LINKED.add(ownTmp); } }   // only a temp that IS a second name of the store   // B-f276 1c: this road's own temp that would not go — a second name, never opened (ETEMPLINKED)
   }
 }
 /** B-f276 1b (主开发 r809, THE MISSING LAW): an EXCLUSIVE job — its store read the file MISSING — LINKS the temp to the file: a link
@@ -61,6 +61,12 @@ function dropTemp(fs, tmp) {
 }
 // B-f276 1b (its read r1 S3): an EEXIST whose file IS the temp (an NFS retransmit of our own link, its first answer lost) is our link landed
 const sameFile = (fs, a, b) => { try { const [x, y] = [a, b].map((p) => fs.statSync(p, { bigint: true })); return x.ino === y.ino && x.dev === y.dev; } catch { return false; } };   // bigint: an NTFS id passes 2^53
+// B-f276 1c (主开发 r1143 (1)): file → the own numbers {dev, ino} of the file THIS road made for a store that may write only over its own
+// file (`m.ownOnly`: its store read the file missing and has not read it since). A later whole write renames only over that file; a later
+// append opens only that file. The job carries the store's last known numbers too (`m.own`: a thread that started again)
+const OWN = new Map();
+const idOf = (fs, p) => { try { const s = fs.statSync(p, { bigint: true }); return { dev: s.dev, ino: s.ino }; } catch (e) { if (e && e.code === 'ENOENT') return null; throw e; } };
+const notOwn = (file) => Object.assign(new Error(`${file} is not the file its store made (a mount that came late?) — not written over`), { code: 'EEXIST' });
 function linkedHere(fs, tmp, file) {
   try { fs.linkSync(tmp, file); }
   catch (e) {
@@ -136,15 +142,25 @@ function rewriteJob(m, fs) {
  *  fsync, close — a failure truncates back to the size before it (no torn line is left for a promise that resolved). */
 function writeJob(m, fs = FS) {
   if (m.rewrite) return rewriteJob(m, fs);
+  let res;
   if (m.append) {
     sweepTemps(fs, m.file, m.tmp);   // row B-360d: a rewrite killed mid-copy left its temp beside an APPEND store — the first append of the file in this process removes another process's, and (主开发 r1939 (2)) this road's OWN temp left by an earlier life of the thread: the sweep runs once a file, so an append first must not leave it for the whole write's
+    // B-f276 1c (r1143 (1)): an own-only store's FIRST append is an exclusive create; every later one is checked by the open file's numbers
+    const fl = m.ownOnly && !OWN.get(m.file) && !m.own ? 'ax' : 'a';
     // the ONE open of an append (made again after a ring's rotation); a missing parent directory is made here, on the writer's
     // thread, ONLY for a store that asks (`m.makeDir` — B-48a4: the hub's audit rings, whose old main-thread code made it per line)
     const openA = () => {
-      try { return fs.openSync(m.file, 'a', m.mode == null ? 0o666 : m.mode); }
-      catch (e) { if (!e || e.code !== 'ENOENT' || !m.makeDir) throw e; fs.mkdirSync(path.dirname(m.file), { recursive: true, mode: 0o700 }); return fs.openSync(m.file, 'a', m.mode == null ? 0o666 : m.mode); }
+      try { return fs.openSync(m.file, fl, m.mode == null ? 0o666 : m.mode); }
+      catch (e) { if (!e || e.code !== 'ENOENT' || !m.makeDir) throw e; fs.mkdirSync(path.dirname(m.file), { recursive: true, mode: 0o700 }); return fs.openSync(m.file, fl, m.mode == null ? 0o666 : m.mode); }
     };
     let fd = openA();
+    if (m.ownOnly) {
+      let st;
+      try { st = fs.fstatSync(fd, { bigint: true }); } catch (e) { try { fs.closeSync(fd); } catch (ce) { e.closeError = ce.code || String(ce); } throw e; }   // B-f276 1c (its read r1 S1): no fd left open
+      const mine = OWN.get(m.file) || m.own || null;
+      if (mine && !(st.ino === mine.ino && st.dev === mine.dev)) { let ce = null; try { fs.closeSync(fd); } catch (e) { ce = e; } throw Object.assign(notOwn(m.file), ce ? { closeError: ce.code || String(ce) } : {}); }   // the close's error rides the refusal
+      res = { own: { dev: st.dev, ino: st.ino } }; OWN.set(m.file, res.own);
+    }
     let err = null, size0 = null;
     try {
       size0 = fs.fstatSync(fd).size;
@@ -161,7 +177,7 @@ function writeJob(m, fs = FS) {
     if (err && size0 != null && fd != null) { try { fs.ftruncateSync(fd, size0); } catch { } }
     if (fd != null) { try { fs.closeSync(fd); } catch (e) { if (!err) err = e; } }
     if (err) throw err;
-    return;
+    return res;
   }
   sweepTemps(fs, m.file, m.tmp);
   // channel-store-off-loop (commit 1): A MISSING PARENT DIRECTORY IS MADE HERE, on the writer's thread — a store whose
@@ -185,8 +201,23 @@ function writeJob(m, fs = FS) {
   if (err) throw err;   // the caller removes the temp: the store keeps its previous whole version
   // `mode` applies when the temp file is CREATED; a leftover temp from a killed write keeps its old bits
   if (m.mode != null) { try { fs.chmodSync(m.tmp, m.mode); } catch { /* a filesystem without modes */ } }
-  if (m.exclusive && linkedHere(fs, m.tmp, m.file)) return;   // B-f276 1b: a store read missing — its first write never lands over a file that appeared
+  // B-f276 1c (主开发 r1143 (1)): an own-only store renames only over the file it made itself (a different file there: not its own,
+  // refused — its store reads and keeps it); a file gone since is created exclusively again
+  if (m.ownOnly && !m.exclusive) {
+    const cur = idOf(fs, m.file), mine = OWN.get(m.file) || m.own || null;
+    if (cur && !(mine && cur.ino === mine.ino && cur.dev === mine.dev)) throw notOwn(m.file);
+    const made0 = !cur ? idOf(fs, m.tmp) : null;   // B-f276 1c (S2): the temp's own numbers, read BEFORE the link (after it: the same inode)
+    if (!cur && linkedHere(fs, m.tmp, m.file)) { res = { own: made0 }; OWN.set(m.file, made0); return res; }
+  }
+  const made1 = m.exclusive && m.ownOnly ? idOf(fs, m.tmp) : null;   // B-f276 1c (S2): read from the temp, before the link
+  if (m.exclusive && linkedHere(fs, m.tmp, m.file)) {   // B-f276 1b: a store read missing — its first write never lands over a file that appeared
+    if (m.ownOnly) { res = { own: made1 }; OWN.set(m.file, made1); }
+    return res;
+  }
+  const made = m.ownOnly ? idOf(fs, m.tmp) : null;
   fs.renameSync(m.tmp, m.file);   // THE commit point: the store's file is the old whole version or the new one, never half
+  if (made) { res = { own: made }; OWN.set(m.file, made); }
+  return res;
 }
 
 if (parentPort && require.main === module) {   // the thread's own script (a suite's stand-in thread requires writeJob alone)
@@ -199,14 +230,15 @@ if (parentPort && require.main === module) {   // the thread's own script (a sui
     if (S) Atomics.store(S, 0, m.id);
     const t0 = process.hrtime.bigint();
     let err = null;
+    let res = null;
     if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch (e) { if (!e || e.code !== 'ENOENT') err = { code: (e && e.code) || null, message: (e && e.message) || String(e) }; } }
-    else { try { writeJob(m); } catch (e) { err = { code: (e && e.code) || null, message: (e && e.message) || String(e) }; if (!m.append) { try { fs.unlinkSync(m.tmp); } catch { } } } }
+    else { try { res = writeJob(m); } catch (e) { err = { code: (e && e.code) || null, message: (e && e.message) || String(e) }; if (!m.append) { try { fs.unlinkSync(m.tmp); } catch { } } } }
     const ms = Number(process.hrtime.bigint() - t0) / 1e6;
     if (S) {
       if (err && S.byteLength >= 48) { const c = Buffer.from(String(err.code || 'EWRITE').slice(0, 32), 'latin1'); new Uint8Array(S.buffer, 16, 32).set(c); Atomics.store(S, 3, c.length); } else if (S.length > 3) Atomics.store(S, 3, 0);
       Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1);   /* this thread is the count's ONE writer */ Atomics.store(S, 0, 0); Atomics.notify(S, 1);   // the cell the main thread waits on
     }
-    parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err });
+    parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err, file: m.file, own: (res && res.own) || null });   // own: the numbers of the file an own-only store made
   });
 }
 

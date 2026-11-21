@@ -139,6 +139,30 @@ try {
     const pc = await askBoth(mutantCopies('account-door-paused', REPO).load('src/routes/channels.js', cut, 'accounts-no-pause'));
     ok(pc.view.status === 404 && pc.list.status === 200, 'B-f276 1b CONTROL (the account doors ask no pause, in a copy): «no such account» (404) and an empty list (200) over the held file — red', JSON.stringify(pc));
   }
+  // B-f276 1c (round wwlskwphv, lens 3): THE DAMAGED DOOR'S ROUTE — a person's own press (the owner's cookie) starts the file empty;
+  // an agent's bearer is refused BY NAME (403 agent-forbidden) and the door is never reached
+  {
+    const pressed = [];
+    const doorEng = { pausedState: () => null, startDamagedEmpty: async (f) => { pressed.push(f); return { ok: true, state: 'pass', aside: `${f}.damaged-x` }; } };
+    const pressBoth = async (R0) => {
+      R0.setup({ getEngine: () => doorEng });
+      const app3 = express(); app3.use(express.json()); app3.use(R0.router);
+      const s3 = await new Promise((resolve) => { const x = app3.listen(0, '127.0.0.1', () => resolve(x)); });
+      const b3 = `http://127.0.0.1:${s3.address().port}`;
+      const one = async (headers) => { const r = await fetch(b3 + '/api/channels/stores/groups.json/empty', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: '{}' }); return { status: r.status, j: await r.json().catch(() => ({})) }; };
+      pressed.length = 0;
+      try { const owner = await one({}); const agent = await one({ Authorization: 'Bearer vsst_' + 'a'.repeat(32) }); return { owner, agent, pressed: pressed.slice() }; } finally { s3.close(); }
+    };
+    const dr = await pressBoth(routes);
+    routes.setup({ getEngine: () => eng });
+    ok(dr.owner.status === 200 && dr.owner.j.state === 'pass' && dr.agent.status === 403 && dr.agent.j.code === 'agent-forbidden' && dr.pressed.join() === 'groups.json', 'B-f276 1c: the damaged door\'s route — the owner\'s press starts the file empty (pass); an agent\'s bearer is refused BY NAME (403 agent-forbidden), the door never reached', JSON.stringify(dr));
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const { anchored } = await import('./scratch.mjs');
+    const RSRC2 = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf8');
+    const drx = await pressBoth(mutantCopies('account-door-damaged', REPO).load('src/routes/channels.js', anchored(RSRC2, '    if (refuseAgentBearer(req, res, STORE_IS_OWNERS)) return;\n', '', 'the door takes a bearer'), 'door-bearer'));
+    routes.setup({ getEngine: () => eng });
+    ok(drx.agent.status === 200 && drx.pressed.length === 2, 'B-f276 1c CONTROL (the route takes a bearer, in a copy): an agent token starts a person\'s file empty — red', JSON.stringify(drx));
+  }
   const back = await call('PUT', '/api/channels/adapters/acc', { policy: null, base: 'direct' });
   ok(back.status === 200 && eng.conversationView('acc', C1).policy.mode === 'review' && eng.conversationView('acc', C2).policy.source === 'conversation', '"The vendor\'s default" (PUT null) ⇒ the inheriting conversation reads review again; the one with its own keeps its own');
   // the CLI's words (the same function the CLI prints with)

@@ -436,7 +436,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // bytes in place when they read and its hold LIFTS by itself; the index and the poll stamps (the acts journal's replay,
   // the engine's live readers) are never swapped under a running hub: the read again SAYS the file reads now and it is
   // loaded at the next start. Only bytes that were READ and do not parse (or have the wrong shape) are corrupt: renamed
-  // beside themselves as `<name>.corrupt-<ts>` — never unlinked — with ONE named log line, and the family starts empty
+  // beside themselves as `<name>.corrupt-<ts>` — never unlinked — with ONE named log line, and the family starts empty (SUPERSEDED by
+  // B-f276 1b: a file that cannot be read, torn bytes included, is HELD by its store hold — never renamed at a start; the one rename is
+  // the damaged door's, a person's, under `<name>.damaged-<ts>`)
   // only once the bytes are safe; if even the rename fails the family is BLOCKED (its door refuses every write rather
   // than overwrite the only copy). `quarantined` names each (the channels engine files ONE "For you" item per entry).
   const quarantined = [];
@@ -471,6 +473,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     let st;
     try { st = fam.H.readAtStart(); } finally { startRead = true; }
     if (st === 'data') { fam.value = fam.H.answer(); return fam; }
+    fam.readMissing = st === 'missing';   // B-f276 1c (r1143 (1)): own-only for the life until a read of this life saw the file
     if (st === 'missing') { fam.value = empty(); fam.missing = true; return fam; }
     const h = fam.H.held();
     fam.value = empty(); fam.held = true; fam.blocked = heldWords(name, h, big);
@@ -506,9 +509,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function firstWrite(file, onWritten) {
     const fam = famByFile.get(file);
     if (!fam) return onWritten ? { onWritten } : {};
-    return { exclusive: !!fam.missing, onWritten: (ok, err) => {
+    return { exclusive: !!fam.missing, ownOnly: !!fam.readMissing, onWritten: (ok, err) => {   // ownOnly: B-f276 1c (主开发 r1143 (1)) — never a rename over a file it has not read
       if (ok && fam.missing && !fam.appearing) fam.missing = false;
-      else if (!ok && err && err.code === 'EEXIST' && fam.missing) tookAppeared(fam);
+      else if (!ok && err && err.code === 'EEXIST' && (fam.missing || fam.readMissing)) tookAppeared(fam);
       if (onWritten) onWritten(ok, err);
     } };
   }
@@ -516,6 +519,17 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  «loaded at the next start», its writes refused — AT ONCE, no read of a file it will not load: its read r1 S5). ONE read a family (a
    *  second EEXIST while it runs waits for the same read). The folder changed under the store: a first start's empty copies list is
    *  listed again (its read r1 S4) */
+  /** B-f276 1c (主开发 r1143 (2)): a family's COMPANION (the index's acts journal, the stamps' journal) that could not be read — any
+   *  failure but «not there» — HOLDS its family, as its own file's failed read does (a big family: loaded at the next start) */
+  function holdCompanion(fam, name, e) {
+    if (fam.held) return;
+    const code = (e && e.code) || 'EIO';
+    fam.held = true; fam.blocked = `${name} (beside ${fam.name}) could not be read (${code}) — ${fam.name} is held: nothing was set aside or written over, and every change to it is refused until it reads at the next start`;
+    fam.q = { file: fam.name, to: null, why: `unreadable (${name}: ${code})`, kind: 'unreadable', at: now(), held: true, lifts: 'next-start', readsAt: null, loadedAt: null };
+    quarantined.push(fam.q);
+    holds.set(fam.file, { fam });
+    warn(`[channels] ${fam.blocked}`);
+  }
   function holdAppeared(fam) {
     fam.held = true; fam.blocked = `${fam.name} appeared since the start (it was not there when it was read) — it is kept as it is and loaded at the next start; every change to it is refused until then`;
     fam.q = { file: fam.name, to: null, why: 'appeared since the start', kind: 'appeared', at: now(), held: true, lifts: 'next-start', readsAt: null, loadedAt: null };
@@ -532,13 +546,18 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       fam.appearing = Promise.resolve();
       return fam.appearing;
     }
+    // B-f276 1c (round wwlskwphv): HELD for the length of its read — a change in that moment is refused by name, never taken in memory
+    // and then dropped under the value that came
+    const was = { blocked: fam.blocked, held: fam.held };
+    fam.held = true; fam.blocked = `${fam.name} appeared since the start — it is being read now; this change was not made`;
     fam.appearing = (async () => {
       let read;
       try { read = { text: await fs.promises.readFile(fam.file, 'utf-8') }; } catch (error) { read = { error }; }
       const a = SR.storeAnswer(read, { valid: fam.valid });
+      fam.held = was.held; fam.blocked = was.blocked;   // the read answered: taken in, or held below
       if (a && a.state === 'data') {
         fam.value = a.value;
-        fam.missing = false;   // its own now — BEFORE the adopt (its read r1 S6: the pace's union is the adopt's own write; the writer hears `exclusive: false`)
+        fam.missing = false; fam.readMissing = false;   // its own now (read in this life) — BEFORE the adopt (its read r1 S6: the pace's union is the adopt's own write; the writer hears `exclusive: false`)
         try { fam.adopt(a.value); } catch (e) { warn(`[channels] ${fam.name}: the file that appeared was not taken in: ${(e && e.message) || e}`); }
       } else holdAppeared(fam);
       fam.appearedAt = now();
@@ -577,7 +596,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         }
       }
       let aside;
-      try { aside = fam.H.setAside(when); }
+      try { aside = await fam.H.setAsideAsync(when); }   // B-f276 1c (r1143 (3)): off the loop, the same dated name
       catch (e) {
         warn(`[channels] ${fam.name} could not be set aside (${(e && e.code) || (e && e.message) || e}) — nothing was started empty; it stays held, its other files put back`);
         await back();
@@ -585,7 +604,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       }
       if (fam.name === 'adapters.json' && !asideNames.includes(path.basename(aside))) asideNames.push(path.basename(aside));   // B-f276 1b: the accounts' copy COUNTS in the key check (it may hold sealed sign-ins — never a value made over them)
       holds.delete(fam.file);
-      fam.value = fam.empty(); fam.blocked = null; fam.held = false; fam.missing = true; fam.appearing = null;   // its first write: the exclusive create
+      fam.value = fam.empty(); fam.blocked = null; fam.held = false; fam.missing = true; fam.readMissing = true; fam.appearing = null;   // its first write: the exclusive create
+      fam.readMissing = true; if (fam === psLoad) journalWas = false;   // B-f276 1c: its first write (and the stamps' first journal open) is an exclusive create again
       if (fam.adopt) { try { fam.adopt(fam.value); } catch (e) { warn(`[channels] ${fam.name}: its empty store was not taken in: ${(e && e.message) || e}`); } }
       if (fam.q) { fam.q.to = path.basename(aside); fam.q.loadedAt = now(); fam.q.done = true; }
       warn(`[channels] ${fam.name} was damaged — a person started it empty; its bytes were set aside as ${path.basename(aside)}${(COMPANIONS[fam.name] || []).length ? ` (its ${COMPANIONS[fam.name].join(', ')} beside it, under the same name)` : ''} — nothing deleted`);
@@ -646,6 +666,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // it holds (`actsSeq`); the load replays the lines past it, in order; a written index drops its acts from the journal.
   // An act that reached the WHOLE map (an account's policy, a removal) writes the index itself, durable.
   const actsFile = path.join(dir, 'index-acts.ndjson');
+  let actsAtStart = false;   // B-f276 1c: the journal was there at the start (an index read missing writes it own-only only when it was not)
+  const actsOwn = () => ({ ownOnly: !!ixLoad.readMissing && !actsAtStart, onWritten: actsWritten });   // B-f276 1c (r1143 (1)): the journal under the index's law
   // THE JOURNAL IS APPEND-ONLY (round 2, law C iii): an act appends ITS line (fsynced, through the writer's thread) — the
   // bytes an act writes never grow with the acts before it; several acts in flight ride one append. A written index that
   // holds them makes the journal owe a COMPACTION (one small whole-file rewrite keeping only the lines past it). The
@@ -671,7 +693,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const owedOf = () => { let b = 0; for (const x of actLines) if (x.seq > appendedSeq) b += lb(x); return b; };
   if (!ixLoad.blocked && ix.conversations && typeof ix.conversations === 'object') {
     let text = null;
-    try { text = timedSync('channels-acts.read', () => fs.readFileSync(actsFile, 'utf8')); } catch { text = null; }
+    // B-f276 1c (主开发 r1143 (2)): the index's COMPANION is read under the index's own hold — any failure but «not there» HOLDS the index
+    try { text = timedSync('channels-acts.read', () => fs.readFileSync(actsFile, 'utf8')); actsAtStart = true; } catch (e) { text = null; if (e && e.code !== 'ENOENT') holdCompanion(ixLoad, 'index-acts.ndjson', e); }
     const held = actSeq;
     const rj = replayIndexJournal(ix, text, held);   // B-360d unit 1 (law 8): the ONE reader
     const { skippedHeld, unreadable, wrongShape, backwards, partialRows, wrongTop } = rj;
@@ -723,7 +746,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const journalStats = { replayed: 0, torn: 0, lines: 0, bytes: 0, folds: 0 };
   {   // the journal replayed over the side file, in order — a kill since its last write lost no stamp
     let text = '';
-    try { text = fs.readFileSync(stampsLog, 'utf8'); journalWas = true; } catch { /* none: the side file is the whole truth */ }
+    try { text = fs.readFileSync(stampsLog, 'utf8'); journalWas = true; } catch (e) { if (e && e.code !== 'ENOENT') holdCompanion(psLoad, 'poll-stamps.log', e); /* «not there»: the side file is the whole truth */ }
     if (text && !text.endsWith('\n')) journalTorn = true;   // a tail a kill cut short: the next line starts on its own
     for (const ln of text.split('\n')) {
       if (!ln) continue;
@@ -892,7 +915,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function touchKey(key) {
     dirtyKeys.add(key);
     if (curTouch) { if (curTouch.before && !curTouch.before.has(key)) curTouch.before.set(key, hasOwn(ix.conversations, key) ? JSON.stringify(ix.conversations[key], INDEX_KEYS) : null); curTouch.add(key); }
-    else { fire(key); outsideTouched.add(key); if (!outsideArmed) { outsideArmed = true; Promise.resolve().then(() => { outsideArmed = false; const o = outsideTouched; outsideTouched = new Set(); if (closed || !o.size) return; try { const k = actOf(o, false); if (k === 'whole') oweWhole(); } catch (e) { warn('[channels] index-acts.ndjson: a touch outside an update was not journaled:', (e && e.message) || e); oweWhole(); } }); } }   // B-360d unit 1: a row touched outside an update rides the journal too
+    else { fire(key); outsideTouched.add(key); if (!outsideArmed) { outsideArmed = true; Promise.resolve().then(() => { outsideArmed = false; const o = outsideTouched; outsideTouched = new Set(); if (closed || !o.size || ixLoad.blocked) return; try { const k = actOf(o, false); if (k === 'whole') oweWhole(); } catch (e) { warn('[channels] index-acts.ndjson: a touch outside an update was not journaled:', (e && e.message) || e); oweWhole(); } }); } }   // B-360d unit 1: a row touched outside an update rides the journal too
   }
   // B-360d unit 1: a census's tap — fn(why) AT the whole touch, in the scope that made it (its stack names it; the hooks
   // above hear it after the update ended, its scope gone). Nothing is kept: no tap, no cost.
@@ -917,7 +940,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function oweWhole(act = false) { if (!closed) wholeOwed = ++wholeAsked; markDirty(act); }
   // the journal's write asked now (its owed lines, or the compaction owed — a journal read at open with lines the index
   // already held is compacted only when asked: law 11's purge asks it)
-  function askActs() { if (closed || ixLoad.blocked) return; if (compactOwed || actSeq > appendedSeq) W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, rank: 0, allowEmpty: true, onWritten: actsWritten }); }
+  function askActs() { if (closed || ixLoad.blocked) return; if (compactOwed || actSeq > appendedSeq) W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, rank: 0, allowEmpty: true, ...actsOwn() }); }   // B-f276 1c (the meeting with B-360d unit 1): every journal write under the index's law
   function markDirty(act = false) {
     dirty = true;
     // R4 verify r4: a change that lands AFTER close() (a wake queued behind one
@@ -936,7 +959,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function produceIndex(o) {
     if (!dirty && !fullOwed) return null;
     // every refusal is said (r3: a once-only line went silent after the first)
-    if (ixLoad.blocked) { warn('[channels] index.json not written: ' + ixLoad.blocked); dirty = false; return null; }
+    if (ixLoad.blocked) {
+      // B-f276 1c (its read r1 M3): an index held because a file of its came that is NOT its own answers BY NAME — never null («equal to
+      // the disk»: a durable act waiting on the index would be told done for a change nothing will write)
+      if (ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index.json held: ' + ixLoad.blocked), { code: 'EEXIST' });
+      warn('[channels] index.json not written: ' + ixLoad.blocked); dirty = false; return null;
+    }
     const full = fullOwed; fullOwed = false;
     if (actSeq > 0 && ix.actsSeq !== actSeq) ix.actsSeq = actSeq;   // the last act this write holds (the load replays past it)
     pendingActsSeq = actSeq;
@@ -963,7 +991,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       journalBytes = actLines.reduce((n, x) => n + lb(x), 0);   // S6: what the compaction keeps — the bound never re-fires before it lands
       if (topLineSeq <= pendingTopSeq && pendingTopCmp !== null) persistedTop = pendingTopCmp;   // M4: the top this index holds
       if (pendingWhole >= wholeOwed) wholeOwed = 0;   // S5: a whole update's write landed
-      if (actLines.length !== before || compactOwed) { compactOwed = true; W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, allowEmpty: true, onWritten: actsWritten }); }
+      if (actLines.length !== before || compactOwed) { compactOwed = true; W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, allowEmpty: true, ...actsOwn() }); }   // B-f276 1c: the compaction under the index's law (own-only while it read missing)
       return;
     }
     bytesOwed = true; lastTop = null; dirty = true;   // owed: the writer has kept it dirty and retries
@@ -973,6 +1001,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  settles first (never two writes of one file at once), then the index's bytes are written on this thread. During the
    *  hub's exit the writer only keeps it dirty: its exit flush writes every store once, bounded. */
   function flush({ full = false } = {}) {
+    if (ixLoad.blocked) { if (dirty) warn('[channels] index.json not written: ' + ixLoad.blocked); return false; }   // B-f276 1c: a held index is never written — refused before its producer is asked (it answers a held «appeared» by name)
     // B-360d unit 1: a change the JOURNAL alone holds is not in index.json yet — the synchronous write (close, a suite, a
     // change after close) writes the index whole, so index.json alone holds every change (law 7's clean stop)
     if (!dirty && actLines.length) dirty = true;
@@ -1322,7 +1351,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     owedBytes += lb(line);
     if (owedBytes > ACTS_MAX_BYTES && !owedEpisode) { owedEpisode = true; warn(`[channels] index-acts.ndjson: ${Math.round(owedBytes / 1048576)} MB of changes are kept in memory, not on disk yet — the storage has not taken them (the next writes carry at most ${ACTS_MAX_BYTES / 1048576} MB each; the index's whole write folds the rest)`); }
     flushStats.journaled = (flushStats.journaled || 0) + rows.length;
-    W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, rank: durable ? 0 : 1, allowEmpty: true, onWritten: actsWritten });
+    W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, rank: durable ? 0 : 1, allowEmpty: true, ...actsOwn() });   // B-f276 1c: the append under the index's law
     if (journalBytes > ACTS_MAX_BYTES) {   // THE BOUND: said, and the index's own write made urgent (it folds the journal)
       if (actsOverSaid++ % 100 === 0) warn(`[channels] index-acts.ndjson is past its bound (${Math.round(journalBytes / 1048576)} MB of ${ACTS_MAX_BYTES / 1048576}) — the index is written now to fold it${actsOverSaid > 1 ? ` (still past it: the index has not landed since — ${flushStats.writes} index write${flushStats.writes === 1 ? '' : 's'} so far; the acts keep coming faster than its paced turn)` : ''}`);
       if (!closed) askFold();
@@ -1335,7 +1364,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const notDurableSaid = {};   // file → acts that failed since the first was said (round 3, smaller 7)
   const sayLanded = (fileN) => { const n = notDurableSaid[fileN]; if (n > 1) warn(`[channels] ${fileN}: written again — ${n - 1} more act${n - 1 === 1 ? '' : 's'} had failed the same way meanwhile (each kept in memory, now on disk)`); delete notDurableSaid[fileN]; };
   function produceActs() {
-    if (ixLoad.blocked) { warn('[channels] index-acts.ndjson not written: ' + ixLoad.blocked); return null; }   // r1542's law: the journal stands behind the index's hold
+    if (ixLoad.blocked) {   // r1542's law: the journal stands behind the index's hold — and B-f276 1c (its read r1 M3, the meeting): an index held because a
+      // file of its came that is NOT its own answers BY NAME (EEXIST) — never null: a durable act waits on THIS file now, and null would tell it «done»
+      if (ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index-acts.ndjson held: ' + ixLoad.blocked), { code: 'EEXIST' });
+      warn('[channels] index-acts.ndjson not written: ' + ixLoad.blocked); return null;
+    }
     // law 10: NO JOURNAL JOB CARRIES MORE THAN THE BOUND — past it (the storage did not take the lines in time) the index's
     // whole write FOLDS them (its landing drops the lines it holds) and this file waits (LATER: its waiters wait — a job
     // must never be cut short, the writer answers every waiter of the version it wrote)
@@ -1346,7 +1379,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     actsWriting = { compact: false, upTo: fresh[fresh.length - 1].seq };
     return { append: fresh.map((x) => x.text).join('') };
   }
-  function actsWritten(ok) {
+  function actsWritten(ok, err) {
+    if (!ok && err && err.code === 'EEXIST' && ixLoad.readMissing) { tookAppeared(ixLoad); return; }   // B-f276 1c: the journal there is not the one this store made — the index held, the journal kept
     const w = actsWriting; actsWriting = null;
     // round 3 (law 4): THE JOURNAL'S TAIL IS ALWAYS A WHOLE LINE BEFORE THE NEXT APPEND — after ANY failed append its tail is
     // unknown (the thread truncates back, but a truncate can fail too: ENOSPC after 4 KB + ftruncate EIO left a fragment the
@@ -2712,7 +2746,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     try {
       // B-f276 1b (its read r2 S3): the stamps read missing with no journal at the start — the journal's first open is an EXCLUSIVE create:
       // a journal that APPEARED (a mount that came late) is kept as it is, never appended to
-      if (journalFd === null) { journalFd = fs.openSync(stampsLog, psLoad.missing && !journalWas ? 'ax' : 'a'); journalWas = true; }
+      if (journalFd === null) { journalFd = fs.openSync(stampsLog, psLoad.readMissing && !journalWas ? 'ax' : 'a'); journalWas = true; }   // B-f276 1c (its read r1 S3): readMissing, the whole life
       let o = 0;
       while (o < b.length) o += fs.writeSync(journalFd, b, o, b.length - o);
       journalTorn = false; journalStats.lines += Array.isArray(keys) ? keys.length : 1; journalStats.bytes += b.length;
@@ -2730,6 +2764,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  folded — the journal grew for the life of the process and the next boot replayed all of it on the main thread. The
    *  window a kill can hit is between these two calls of one fold: the keys set during that one write's flight. */
   function foldJournal(keep) {
+    if (journalFd === null && psLoad.readMissing && !journalWas) return;   // B-f276 1c (its read r1 S3): a journal this life never read nor opened is never truncated by name while the stamps read missing
     try { if (journalFd !== null) fs.ftruncateSync(journalFd, 0); else fs.truncateSync(stampsLog, 0); journalTorn = false; }
     catch (e) { if (e && e.code !== 'ENOENT') warn(`[channels] poll-stamps.log not folded (${e.code || e.message || e}) — replayed over the side file at the next start`); return; }
     journalStats.folds++;
@@ -2862,6 +2897,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       asideCopies: () => (asideListed ? asideNames.slice() : null) },
     outbox: { update: outboxUpdate, snapshot: outboxSnapshot, nextId: outboxNextId, live: () => ob },
     groups: { update: groupsUpdate, snapshot: groupsSnapshot, live: () => gr },
+    groupFamilies: Object.freeze([...GROUP_FILES]),   // B-f276 1c: the agent groups' families BY NAME — the store owns the names (record-clear)
     aliases: { update: aliasesUpdate, live: () => al, blocked: () => alLoad.blocked || null },
     pace: { live: () => pc, set: paceSet, flush: paceFlush },
     dispatch: { live: () => dl, set: dispatchSet, flush: dispatchFlush },

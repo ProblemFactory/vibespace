@@ -1882,11 +1882,14 @@ convOps.provide({ groupsEngine }); // an automation's groups.invite reaches the 
 // B-0248 step 3 (d, r1443): a REACH refusal while the Task Groups store is HELD unread is not «outside your reach» — reach is judged
 // on the groups, and the groups are UNKNOWN then, never «no groups»: the held line by name (503 TASK_GROUPS_UNREAD); reach stays closed
 const heldReach = (res) => { const w = typeof tasks.unreadRefusal === 'function' ? tasks.unreadRefusal('this message (who it can reach is judged by Task Group)') : null; if (!w) return false; res.status(503).json({ error: w, code: 'TASK_GROUPS_UNREAD' }); return true; };
+/** B-f276 1c (its read r1 M4 / S4): the agent groups PAUSED (a family of theirs held) — refused BY NAME before any door (a refused door
+ *  throws synchronously: inside an async route it hung the request) */
+const msgPausedRefused = (res) => { const ge = groupsEngine(); const pz = ge && typeof ge.pausedState === 'function' ? ge.pausedState() : null; if (!pz) return false; res.status(503).json({ ok: false, code: 'store-blocked', error: pz.error }); return true; };
 const groupAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   if (code === 'unreachable' && heldReach(res)) return;
-  const status = code === 'not-found' || code === 'unreachable' ? 404 : code === 'not-allowed' || code === 'not-member' || code === 'job-token' ? 403 : code === 'archived' || code === 'ended' || code === 'pair-group' || code === 'confirm-wakes' || code === 'not-chat' ? 409 : 400;
+  const status = code === 'store-blocked' ? 503 : code === 'not-found' || code === 'unreachable' ? 404 : code === 'not-allowed' || code === 'not-member' || code === 'job-token' ? 403 : code === 'archived' || code === 'ended' || code === 'pair-group' || code === 'confirm-wakes' || code === 'not-chat' ? 409 : 400;
   return res.status(status).json(msgRefusalAnswer(r, code));   // verify r2 (lane peer-census): the sentence and the candidates through the belt (the door)
 };
 /** WHO is calling vibespace-msg: a session (vsst_) acts as its own
@@ -1967,6 +1970,7 @@ function handoverAfterSend({ ge, r, tgt, myCid, s, items }) {
 app.post('/api/agent/msg/send', async (req, res) => {
   const who = msgCaller(req, res);
   if (!who) return;
+  if (msgPausedRefused(res)) return;   // B-f276 1c (M4)
   if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
   const { s, id } = who;
   const to = String(req.body?.to || '').trim();
@@ -2061,6 +2065,7 @@ const dispatcher = () => {
 app.post('/api/agent/msg/dispatch', async (req, res) => {
   const who = msgCaller(req, res);
   if (!who) return;
+  if (msgPausedRefused(res)) return;   // B-f276 1c (S4)
   if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
   if (who.job) { const r = await dispatcher().dispatch({ fromKind: 'job' }); return res.status(403).json(msgRefusalAnswer(r, r.code)); }
   const to = String(req.body?.to || '').trim();
@@ -2105,11 +2110,13 @@ function groupCaller(req, res) {
 app.get('/api/agent/msg/groups', (req, res) => {
   const c = groupCaller(req, res);
   if (!c) return;
+  if (msgPausedRefused(res)) return;   // B-f276 1c (S4)
   res.json(withWaiting(c.ge, c.cid, { groups: msgGroupsAnswer(c.ge.listFor(c.cid)) }));   // lane peer-census verify r1: every group and member name through the belt
 });
 app.get('/api/agent/msg/read', (req, res) => {
   const c = groupCaller(req, res);
   if (!c) return;
+  if (msgPausedRefused(res)) return;   // B-f276 1c (S4)
   const r = c.ge.read({ by: c.cid, group: req.query.group, before: req.query.before !== undefined && req.query.before !== '' ? Number(req.query.before) : null, limit: Number(req.query.limit) || 50 });
   if (!r.ok) return groupAnswer(res, r);
   res.json(withWaiting(c.ge, c.cid, msgReadAnswer(r), r.group && r.group.id));   // lane peer-census verify r1: the group's name, each record's author and text through the belt (judged where they leave the store)
@@ -2117,6 +2124,7 @@ app.get('/api/agent/msg/read', (req, res) => {
 app.post('/api/agent/msg/group', async (req, res) => {
   const c = groupCaller(req, res);
   if (!c) return;
+  if (msgPausedRefused(res)) return;   // B-f276 1c (S4)
   const b = req.body || {};
   if (c.job) return res.status(403).json({ error: JOB_NO_MEMBERSHIP, code: 'job-token' });
   const members = Array.isArray(b.members) ? b.members.map(String) : [];
@@ -2188,7 +2196,7 @@ const channelsTaughtFor = (s, id, { fresh = false } = {}) => {
   let v = false, x = [];
   // lane pod-oauth-callback (study 1 L1): nothing connected yet on an instance whose admin offers a company app ⇒ 'connect'
   // (the agent learns `vibespace-channels connect <kind>` — a Connect button in the chat, never a vendor's web login)
-  try { v = eng.reachCountFor(channelPrincipal(s, id)) || (typeof eng.connectTaught === 'function' && eng.connectTaught() ? 'connect' : false); } catch { v = false; }
+  try { v = eng.reachCountFor(channelPrincipal(s, id)) || (typeof eng.connectTaught === 'function' && eng.connectTaught() ? 'connect' : false); } catch (e) { v = e && e.code === 'store-blocked' ? 'paused' : false; }   // B-f276 1c: paused is UNKNOWN, said — never an empty reach
   // lane channel-reauth-visible: the accounts it reads whose sign-in is DEAD — named on the same line (none ⇒ the line is byte-identical)
   try { x = v === 'read' && typeof eng.signinExpiredFor === 'function' ? eng.signinExpiredFor(channelPrincipal(s, id)) : []; } catch { x = []; }
   const out = { at: t, v, x };

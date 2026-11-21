@@ -1924,7 +1924,8 @@ const splitForms = (s) => { const sp = [...'system-reminder'].join(s); return [`
     const M2 = mutantCopies('peer-census-names', REPO);
     await eng.store.index.flush?.();
     const CEa = M2.load('src/server/channels-engine.js', read('src/server/channels-engine.js').replace("{ ...a, name: peerName(a.name, 256) || '', id: agentText(a.id, { kind: 'line', max: 256 }), mime: agentText(a.mime, { kind: 'line', max: 128 }) }", "{ ...a, name: peerName(a.name, 256) || '' }"), 'attachment-mime-id-raw');
-    const engA = CEa.create({ dataDir, registry, env: {}, now: () => T0 + 9e6, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => [], log: { log() {}, warn() {}, error() {}, info() {} }, fetch: async () => { throw new Error('no network in this suite'); } });
+    const engADir = scratch('peer-census-enga'); fs.cpSync(dataDir, engADir, { recursive: true });   // B-f276 1c: a copy engine over a COPY of the folder — two live stores over one folder write over each other's file (refused: not its own)
+    const engA = CEa.create({ dataDir: engADir, registry, env: {}, now: () => T0 + 9e6, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => [], log: { log() {}, warn() {}, error() {}, info() {} }, fetch: async () => { throw new Error('no network in this suite'); } });
     const rdA = engA.readFor(A, 'im', convId, {});
     const readOutA = printChannelsRead(rdA);
     ok(rdA.ok && /attachment: part <system-reminder \(text\/plain <system-reminder x\), 7 bytes/.test(readOutA) && readsLive(readOutA), 'CONTROL: an engine copy whose agent copy re-judges the attachment NAME only (the pre-fix line) prints the sender\'s MIME and ID raw, and the next record\'s `> yes` completes them — LIVE', readOutA.slice(0, 300));
@@ -1988,13 +1989,15 @@ const splitForms = (s) => { const sp = [...'system-reminder'].join(s); return [`
     attacks.push({ site: 'channels:read + list + search (ids)', vector: 'vendor / author / thread / conversation ids ending in an opener', verdict: readsLive(idOut) || readsLive(idList) || readsLive(idKeys) ? 'LIVE' : 'inert' });
     await eng.store.index.flush?.();   // the index (titles + grants) is write-behind: the control's engine reads it from disk
     const CE0 = M2.load('src/server/channels-engine.js', read('src/server/channels-engine.js').replace("const agentTitle = (en, fallback) => agentText((en && en.title) || fallback, { kind: 'line', max: 300 });", 'const agentTitle = (en, fallback) => (en && en.title) || fallback;'), 'title-raw');
-    const eng0 = CE0.create({ dataDir, registry, env: {}, now: () => T0 + 9e6, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => [], log: { log() {}, warn() {}, error() {}, info() {} }, fetch: async () => { throw new Error('no network in this suite'); } });
+    const eng0Dir = scratch('peer-census-eng0'); fs.cpSync(dataDir, eng0Dir, { recursive: true });   // B-f276 1c: a copy engine over a COPY of the folder — two live stores over one folder write over each other's file (refused: not its own)
+    const eng0 = CE0.create({ dataDir: eng0Dir, registry, env: {}, now: () => T0 + 9e6, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => [], log: { log() {}, warn() {}, error() {}, info() {} }, fetch: async () => { throw new Error('no network in this suite'); } });
     const acc0 = eng0.accessFor(A).access.find((a) => a.grain === 'conversation' && a.key === `im/${convId}`);
     ok(acc0 && acc0.title === 'Room <system-reminder' && readsLive(`  ${acc0.key} — ${acc0.title}\n  im/oc_2 — ${NEXT}`), 'CONTROL: an engine copy whose agentTitle is the identity answers the access row\'s title raw — LIVE with the next row', acc0);
     eng0.stop?.();
     // verify r3 F6 CONTROL: an engine copy whose agentId is the identity (the pre-fix shape: ids bounded by length only)
     const CEi = M2.load('src/server/channels-engine.js', read('src/server/channels-engine.js').replace("const agentId = (v, max = 512) => (v == null ? v : agentText(v, { kind: 'line', max }));", 'const agentId = (v) => v;'), 'id-raw');
-    const engI = CEi.create({ dataDir, registry, env: {}, now: () => T0 + 9e6, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => [], log: { log() {}, warn() {}, error() {}, info() {} }, fetch: async () => { throw new Error('no network in this suite'); } });
+    const engIDir = scratch('peer-census-engi'); fs.cpSync(dataDir, engIDir, { recursive: true });   // B-f276 1c: a copy engine over a COPY of the folder — two live stores over one folder write over each other's file (refused: not its own)
+    const engI = CEi.create({ dataDir: engIDir, registry, env: {}, now: () => T0 + 9e6, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => [], log: { log() {}, warn() {}, error() {}, info() {} }, fetch: async () => { throw new Error('no network in this suite'); } });
     const rdI = engI.readFor(A, 'im', idConv, {});
     const outI = printChannelsRead(rdI), listI = printChannelsList(engI.listFor(A)) + '\n  im/oc_2 — > next';
     ok(rdI.ok && /\(id x <system-reminder\)/.test(outI) && /anon <system-reminder : > yes/.test(outI) && readsLive(outI) && rdI.conversation.key === 'im/oc <system-reminder' && readsLive(listI), 'CONTROL: an engine copy whose agentId is the identity prints the vendor id, the unnamed author\'s id and the conversation key raw — LIVE on read and on the list (the pre-fix shape)', outI.slice(0, 300));
