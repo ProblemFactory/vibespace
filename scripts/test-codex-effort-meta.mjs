@@ -32,6 +32,14 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// THE FIXTURE HOME (主开发 r788: a suite's fixtures live in the run's scratch, never the checkout's data folder). ONE home,
+// minted BEFORE any product module loads: src/adapters/codex.js fixes its sessions folder from os.homedir() at load, so ⑪b's
+// rollout sits in this home's own ~/.codex/sessions and no leg walks the person's real one. The real home is kept for the one
+// corpus count that reads it on purpose (counts only). Removed at exit.
+const _homeBefore = process.env.HOME;   // the real home: the corpus count below reads it on purpose (counts only)
+const FIX_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxeff-home-'));
+process.env.HOME = FIX_HOME; process.env.CODEX_HOME = path.join(FIX_HOME, '.codex');
+process.on('exit', () => { try { fs.rmSync(FIX_HOME, { recursive: true, force: true }); } catch { } });
 const { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manager.js'));
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -70,7 +78,8 @@ console.log('— ① the PURE label rules (agent-meta): ultra is a MODE, the lev
 // A stub app-server that reproduces the incident's ORDER: `turn/started` for a
 // turn the app-server auto-continues on resume goes out BEFORE the
 // thread/resume reply that carries the thread's real reasoningEffort.
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxeff-'));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxeff-'));   // ended at exit (§84 — the B-60d2 row this suite carried is gone)
+process.on('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } });
 const SID = 'sess-7-1700000000007';
 const buf = path.join(dir, SID + '.buf'), metaFile = path.join(dir, SID + '.json'), rpcLog = path.join(dir, 'rpc.jsonl');
 const STUB = `
@@ -94,7 +103,13 @@ process.stdin.on('data', (d) => {
       const tid = 'turn-resumed'; activeTurn = tid; turns++;
       send({ method: 'event/goalCleared', params: { threadId: 'th-eff' } });
       send({ method: 'turn/started', params: { threadId: 'th-eff', turn: { id: tid, status: 'inProgress', items: [] } } });
-      send({ id: m.id, result: { thread: { id: 'th-eff' }, model: 'gpt-6-astra', modelProvider: 'openai', cwd: ${JSON.stringify(dir)}, approvalPolicy: 'never', reasoningEffort: threadEffort } });
+      const reply = { id: m.id, result: { thread: { id: 'th-eff' }, model: 'gpt-6-astra', modelProvider: 'openai', cwd: ${JSON.stringify(dir)}, approvalPolicy: 'never', reasoningEffort: threadEffort } };
+      // THE ORDER IS PLACED, NOT HOPED FOR (主开发 r944): with CX_RESUME_GO set, the reply is HELD until the suite has seen
+      // the wrapper's synthesized turn_context (the suite then writes that file) — bounded at 10 s, then sent anyway
+      const go = process.env.CX_RESUME_GO;
+      if (!go) { send(reply); continue; }
+      const held = Date.now();
+      const tick = setInterval(() => { if (fs.existsSync(go) || Date.now() - held > 10000) { clearInterval(tick); send(reply); } }, 5);
       continue;
     }
     if (m.method === 'thread/settings/update') {
@@ -133,6 +148,7 @@ process.stdin.on('data', (d) => {
 });
 `;
 console.log('— ② the incident: the resume race (REAL wrapper vs a stub that answers in the incident\'s order)');
+const goFile = path.join(dir, 'resume.go');   // the stand-in holds its thread/resume reply until this file exists (r944)
 const w = spawn(process.execPath, [path.join(REPO, 'data/bin/codex-chat-wrapper.js'), buf, metaFile, process.execPath, '-e', STUB], {
   stdio: ['pipe', 'pipe', 'pipe'],
   env: {
@@ -142,6 +158,7 @@ const w = spawn(process.execPath, [path.join(REPO, 'data/bin/codex-chat-wrapper.
     // "new or resumed Codex sessions", so a resume really does spawn with it.
     CODEX_WEBUI_EFFORT: 'xhigh',
     CODEX_WEBUI_MODEL: 'gpt-6-astra',
+    CX_RESUME_GO: goFile,
   },
 });
 let out = ''; w.stdout.on('data', (d) => { out += d; });
@@ -153,15 +170,32 @@ const readMeta = () => { try { return JSON.parse(fs.readFileSync(metaFile, 'utf8
 const waitFor = async (pred, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(60); } return pred(); };
 const sendLine = (o) => w.stdin.write(JSON.stringify(o) + '\n');
 
+// THE PREMISE IS PLACED (主开发 r944 — a leg whose premise is an ORDER of two events places it, never hopes for it). The
+// 2.369.413 block's and the 2.369.414 candidate's hosted runs each read this leg with the reply's session_meta not yet in
+// the window (tc@0 session_meta@-1): the leg had judged the order before the reply it waits for had come. Now the stand-in
+// holds its thread/resume reply until the wrapper's synthesized turn_context is SEEN here, and the order is read only once
+// the reply's session_meta and the restated turn_context have both arrived.
+const sawProvisional = await waitFor(() => turnContexts().length >= 1);
+fs.writeFileSync(goFile, '');
 ok(await waitFor(() => readMeta()?.threadId === 'th-eff'), 'wrapper resumed the thread against the stub');
-ok(await waitFor(() => turnContexts().length >= 2), 'the resumed turn produced TWO turn_context records', JSON.stringify(turnContexts().map((r) => r.payload.effort)));
+const settled = await waitFor(() => turnContexts().length >= 2 && events().some((r) => r.type === 'session_meta'));
 const tcs = turnContexts();
-// The leg is only meaningful if the race really happened in this run.
 const evs = events();
 const iFirstTc = evs.findIndex((r) => r.type === 'turn_context');
 const iSessionMeta = evs.findIndex((r) => r.type === 'session_meta');
-ok(iFirstTc >= 0 && iSessionMeta > iFirstTc,
-  'the race is REAL in this run: the synthesized turn_context precedes the thread/resume reply (session_meta)', `tc@${iFirstTc} session_meta@${iSessionMeta}`);
+const premise = sawProvisional && iFirstTc >= 0 && iSessionMeta > iFirstTc;
+ok(premise,
+  'PREMISE (the stand-in\'s placed order — not the product): the wrapper\'s synthesized turn_context was seen BEFORE the stand-in let its thread/resume reply go, and the reply\'s session_meta follows it',
+  `seen before the reply: ${sawProvisional} · tc@${iFirstTc} session_meta@${iSessionMeta}`);
+// Through the REAL normalizer: the popup value is _status.effort at token_count.
+const feedAll = (records, mm) => { for (const r of records) mm.processLive(r); return mm; };
+const assistantTurnRecords = (turnId) => ([
+  { type: 'response_item', payload: { type: 'message', item_id: 'it-' + turnId, role: 'assistant', content: [{ type: 'output_text', text: 'reply' }] } },
+  { type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { totalTokens: 10, inputTokens: 8, cachedInputTokens: 0, outputTokens: 2 }, total_token_usage: { totalTokens: 100 + turnId.length, inputTokens: 80, cachedInputTokens: 0, outputTokens: 20 }, model_context_window: 272000 } } },
+]);
+if (!premise) console.log('  ~ ② NOT JUDGED: the race legs below hold only on their premise, which did not hold in this run (the line above names it — a premise, never the product\'s red)');
+if (premise) {
+ok(settled, 'the resumed turn produced TWO turn_context records', JSON.stringify(turnContexts().map((r) => r.payload.effort)));
 ok(tcs[0]?.payload?.turn_id === 'turn-resumed' && tcs[0]?.payload?.effort === 'xhigh',
   'the FIRST (provisional) copy quotes the spawn env — the master bug, reproduced verbatim', JSON.stringify(tcs[0]?.payload));
 ok(tcs[1]?.payload?.turn_id === 'turn-resumed' && tcs[1]?.payload?.effort === 'ultra',
@@ -169,12 +203,6 @@ ok(tcs[1]?.payload?.turn_id === 'turn-resumed' && tcs[1]?.payload?.effort === 'u
 ok(rpc().every((m) => m.method !== 'turn/start'),
   'we never started that turn — so the value we quoted first had never reached codex at all');
 
-// Through the REAL normalizer: the popup value is _status.effort at token_count.
-const feedAll = (records, mm) => { for (const r of records) mm.processLive(r); return mm; };
-const assistantTurnRecords = (turnId) => ([
-  { type: 'response_item', payload: { type: 'message', item_id: 'it-' + turnId, role: 'assistant', content: [{ type: 'output_text', text: 'reply' }] } },
-  { type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { totalTokens: 10, inputTokens: 8, cachedInputTokens: 0, outputTokens: 2 }, total_token_usage: { totalTokens: 100 + turnId.length, inputTokens: 80, cachedInputTokens: 0, outputTokens: 20 }, model_context_window: 272000 } } },
-]);
 {
   const live = feedAll([...events(), ...assistantTurnRecords('turn-resumed')], new CodexMessageManager('eff-1'));
   const am = live.messages.find((m) => m.role === 'assistant');
@@ -202,6 +230,7 @@ const assistantTurnRecords = (turnId) => ([
   ok(masterShape.filter((r) => r.type === 'turn_context').length === 1,
     '…and that shape really is one turn_context, as the owner\'s 1137-line buffer had');
 }
+}   // the premise's block (②)
 
 // ───────────────────────────────────────────────────────────────────────────
 console.log('— ③ set-effort reaches the APP-SERVER and the live status, not just the next turn/start');
@@ -359,7 +388,8 @@ console.log('— ⑤ the wrapper_meta fallback: a mid-turn attach is honest with
   ok(mm.status().effort === 'high' && mm.status().effortNext === null, 'the next turn_context settles both again', JSON.stringify(mm.status().effortNext));
   // chatStatus (the attach payload) over a buffer of ONLY wrapper_meta
   const { CodexSessionMessages } = require(path.join(REPO, 'src/codex-session-store.js'));
-  const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxeff2-'));
+  const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxeff2-'));   // ended at exit (§84 — the B-60d2 row this suite carried is gone)
+  process.on('exit', () => { try { fs.rmSync(d2, { recursive: true, force: true }); } catch { } });
   fs.writeFileSync(path.join(d2, 'sess-y.json'), JSON.stringify({ threadId: 'th-y', model: 'gpt-6-astra', effort: 'ultra', effortNext: 'high' }));
   const bufText = JSON.stringify({ type: 'wrapper_meta', payload: { threadId: 'th-y', model: 'gpt-6-astra', activeTurnId: 'tZ', effort: 'ultra', effortNext: 'high' } }) + '\n';
   const sm = new CodexSessionMessages({ buffer: bufText, backendSessionId: 'th-y' }, 'sess-y', { buffersDir: d2 });
@@ -441,7 +471,8 @@ console.log('— ⑥b the SETTINGS twin folds the same way (r2 review: our copy 
 // ───────────────────────────────────────────────────────────────────────────
 console.log('— ⑦ the WRITER: the wrapper\'s effort reaches session-meta, so the NEXT resume carries it');
 {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxeff-w-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxeff-w-'));   // ended at exit (§84 — the B-60d2 row this suite carried is gone)
+  process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } });
   const BUFFERS_DIR = path.join(tmp, 'buffers'), META_DIR = path.join(tmp, 'meta');
   fs.mkdirSync(BUFFERS_DIR, { recursive: true }); fs.mkdirSync(META_DIR, { recursive: true });
   const activeSessions = new Map();
@@ -962,19 +993,13 @@ console.log('— ⑪a2 r2: dialog → client → THE WIRE → server ladder → 
 }
 
 console.log('— ⑪b end-to-end: a rollout at ultra → descriptor → ladder → adapter env → the REAL wrapper');
-const _homeBefore = process.env.HOME, _codexHomeBefore = process.env.CODEX_HOME;
 {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-b6b6d-home-'));
-  process.env.HOME = home; process.env.CODEX_HOME = path.join(home, '.codex');
-  // the remote rollout's host folder, a name MINTED for this run (主开发 r634/r641): two runs in one shard never meet in the checkout's
-  // data/remote-jsonl (the store finds the rollout by its thread id under any host folder); removed at the leg's end and at any exit
-  const FIX = path.join(REPO, 'data', 'remote-jsonl', `b6b6d-fixture-${process.pid}-${Date.now().toString(36)}`);
-  process.once('exit', () => { try { fs.rmSync(FIX, { recursive: true, force: true }); } catch { } });
-  const rdir = path.join(FIX, 'codex');
+  const home = FIX_HOME;   // the suite's fixture home (above): the rollout in its own ~/.codex/sessions, where codex writes one
+  const rdir = path.join(home, '.codex', 'sessions', '2026', '09', '06');
   fs.mkdirSync(rdir, { recursive: true });
   const TID = '01a072a3-0d70-78c3-9a90-a69a61e14466';
   const rec = (o) => JSON.stringify(o) + '\n';
-  fs.writeFileSync(path.join(rdir, `${TID}.jsonl`), [
+  fs.writeFileSync(path.join(rdir, `rollout-2026-09-06T20-33-00-${TID}.jsonl`), [
     rec({ timestamp: '2026-09-06T20:33:00.000Z', type: 'session_meta', payload: { id: TID, cwd: '/w', originator: 'claude-code-webui' } }),
     // the conversation ran at xhigh, then the owner set it to ultra
     rec({ timestamp: '2026-09-06T20:33:10.000Z', type: 'turn_context', payload: { cwd: '/w', model: 'gpt-5.6-sol', effort: 'xhigh' } }),
@@ -1168,9 +1193,7 @@ const _homeBefore = process.env.HOME, _codexHomeBefore = process.env.CODEX_HOME;
   const harmArgs = new ClaudeCodeAdapter({}).buildSessionArgs({ cwd: '/w', resumeId: FID, model: 'claude-fable-5', mode: 'chat' });
   ok(harmArgs.args.join(' ').includes('--model claude-fable-5'),
     'negative control: the served id WOULD have been commanded verbatim — which is the [1m] downgrade, in one argv');
-    try { fs.rmSync(FIX, { recursive: true, force: true }); } catch { }
 }
-process.env.HOME = _homeBefore; if (_codexHomeBefore === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = _codexHomeBefore;
 
 // (⑪c WIRING: every resume / fork / restart entry point — MOVED to the fast scripts/test-codex-effort-meta-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 

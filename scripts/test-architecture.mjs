@@ -5374,7 +5374,6 @@ await section(async () => {
     'test-chat-frame-guard.mjs': ['home'],
     'test-ci-gate-reaper.mjs': ['sGone', 'sGone2', 'sGone5', 'sLive'], // §9 (the gate's split, lane fast-tier-ratchet)
     'test-codex-0153.mjs': ['home'],
-    'test-codex-effort-meta.mjs': ['dir', 'd2', 'tmp', 'home'],
     'test-codex-p2-client.mjs': ['dir'],
     'test-codex-p2-wrapper.mjs': ['dir'],
     'test-codex-pool.mjs': ['root', 'arDir', 'dir', 'd'],
