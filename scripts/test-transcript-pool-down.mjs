@@ -174,6 +174,7 @@ for (const [name, shape, hung, extra] of KINDS) {
 
 // ── THE CLAUDE HISTORY'S NOTE: a kept copy, the storage's refusal, the note's end ──
 console.log('the Claude history\'s note');
+C._setSlicedForTest({ storageRetryMs: 0 });   // the storage's retry due at once (its gap has its own leg at the end)
 const TW = require(path.join(REPO, 'src/transcript-worker.js'));
 const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); } });
 {
@@ -288,6 +289,19 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   const readC = await SS0.warmSessionJsonlAsync(sid, cwd);
   global.__vsMetric = metricWas;
   ok(readC === true && metrics.includes('srv-jsonl-parse-bytes') && U.calls.includes('taskLines'), `the hung retry that reads stamps its parse and warms the task scan (metrics: ${[...new Set(metrics)].join(', ') || 'none'}; asked: ${U.calls.join(', ')})`, { metrics, calls: U.calls });
+  // (5) THE STORAGE'S RETRY HAS A GAP: a file the storage's is asked of the pool again at most once a gap (30 s doubling, ≤ 8 min —
+  // here 60 ms): a warm inside the gap asks nothing, the first after it asks once
+  C._setSlicedForTest({ storageRetryMs: 60 });
+  fs.writeFileSync(claudeFp, lines.slice(0, 400).join('\n') + '\n');
+  const Hg = refusing({ status: 503, code: 'path-hung' }); C._setTranscriptPoolForTest(Hg);
+  await SS0.warmSessionJsonlAsync(sid, cwd);   // the storage's (the cache was behind: the pool asked, refused)
+  const g0 = tails(Hg);
+  await SS0.warmSessionJsonlAsync(sid, cwd);   // inside the gap: nothing asked
+  const g1 = tails(Hg);
+  await new Promise((res) => setTimeout(res, 90));
+  await SS0.warmSessionJsonlAsync(sid, cwd);   // past it: the pool asked once
+  ok(g0 >= 1 && g1 === g0 && tails(Hg) === g0 + 1, `the storage's retry has a gap: inside it nothing asked (${g1 - g0}), past it the pool asked once (${tails(Hg) - g1})`, { g0, g1, g2: tails(Hg) });
+  C._setSlicedForTest({});
 }
 C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
 

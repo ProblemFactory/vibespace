@@ -695,12 +695,14 @@ async function parseCodexSessionJsonlAsync(threadId, { fp: known } = {}) {
   let why = 'its rollout was not found (the thread/read copy is read)';
   if (fp) {
     let refusal = null;
-    // row B-422c: a rollout the memory calls the STORAGE's (a deadline, a hung path, a blocked mount) — nothing tried there: no pool
-    // call, no read, «not loaded yet» (the next attach asks again once a history read answered for it)
-    if (require('./adapters/codex').fileStorageHung(fp)) {
-      noteNotLoadedOnce(threadId, 'its storage hung (a deadline, a hung path or a blocked mount)');
-      return Object.assign([], { notLoaded: NOT_LOADED, why: 'its storage hung', storageHung: true });
-    }
+    // row B-422c: a rollout the memory calls the STORAGE's (a deadline, a hung path, a blocked mount) — nothing tried on the loop: no
+    // read here, «not loaded yet»
+    // (asked of the POOL again — off the loop, the pool's own memory first — at most once a gap: 30 s doubling, ≤ 8 min; never stuck)
+    { const Cx = require('./adapters/codex');
+      if (Cx.fileStorageHung(fp) && !Cx.storageRetryDue(fp)) {
+        noteNotLoadedOnce(threadId, 'its storage hung (a deadline, a hung path or a blocked mount)');
+        return Object.assign([], { notLoaded: NOT_LOADED, why: 'its storage hung', storageHung: true });
+      } }
     try {
       const { readJsonlBoundedParsedPagedAsync } = require('./adapters/codex');
       const r = await readJsonlBoundedParsedPagedAsync(fp, { tailOnly: true, onFail: (w, refused) => { why = w; refusal = refused || null; } });   // in pages: the loop free between them

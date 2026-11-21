@@ -871,6 +871,18 @@ const FILE_REFUSALS_MAX = 4096, FILE_REFUSALS_HUNG_MAX = 8192;  // the storage's
 // THE POOL REFUSING EVERY CALL (closed, no worker, no idle one): a fact of the pool, not of one file — a parse of a session whose
 // file the pool was never asked about reads nothing on the loop either while it stands; any answer of the pool ends it
 const POOL_REFUSING_MS = 30000;
+// a file the storage's is asked of the POOL again (off the loop — the pool's own memory refuses at once while it remembers, then one
+// worker tries) at most once a gap: 30 s, doubling on each storage refusal, at most 8 min (B-23e5's span); one caller claims each retry
+let STORAGE_RETRY_MS = 30000;
+const STORAGE_RETRY_MAX_MS = 8 * 60000;
+function storageRetryDue(fp) {
+  const r = fp && _fileRefusals.get(fp);
+  if (!r || !(r.storage || r.ownDeadline)) return true;   // the door or the pool's memory alone: the pool's door answers at once
+  const now = Date.now();
+  if (now < (r.retryAt || 0)) return false;
+  r.retryAt = now + (r.retryGap || STORAGE_RETRY_MS);
+  return true;
+}
 let _poolRefusedAt = 0;
 const POOL_WIDE = new Set(['no-worker', 'no-idle']);
 function notePoolRefusing(e) { if (!e || POOL_WIDE.has(e.code) || /safeFs closed/.test(String(e.message || '')) || e.why === 'no transcript pool on this process') _poolRefusedAt = Date.now(); }
@@ -904,7 +916,11 @@ function noteFileRefusal(fp, refusal, { history = false } = {}) {
   }
   rec.lastAt = now; rec.count++;
   rec.why = (refusal && refusal.why) || rec.why || 'refused';
-  if (storage) rec.storage = true;   // the STORAGE's — for the record's life: only a history read's answer for the file forgives it (never a timer: the pool's own retry may still be wedged in it)
+  if (storage) {   // the STORAGE's — for the record's life: only a history read's answer for the file forgives it (never a timer: the pool's own retry may still be wedged in it)
+    rec.retryGap = rec.storage ? Math.min(STORAGE_RETRY_MAX_MS, (rec.retryGap || STORAGE_RETRY_MS) * 2) : STORAGE_RETRY_MS;   // each storage refusal doubles the wait
+    rec.storage = true;
+    rec.retryAt = now + rec.retryGap;
+  }
   return rec;
 }
 const forgiveFile = (fp) => { if (fp) _fileRefusals.delete(fp); };   // the pool answered for it: the refusal no longer stands
@@ -1018,7 +1034,7 @@ function readCodexRolloutSliced(fp) {
   });
 }
 /** row B-422c unit 2's legs: the stated time and the read's deadline (ms; null = the product's), and the file records' state */
-function _setSlicedForTest({ afterMs = null, deadlineMs = null, standGapMs = null } = {}) { SLICED_AFTER_MS = afterMs == null ? 10000 : afterMs; SLICED_READ_DEADLINE_MS = deadlineMs == null ? 60000 : deadlineMs; STAND_GAP_MS = standGapMs == null ? 120000 : standGapMs; }
+function _setSlicedForTest({ afterMs = null, deadlineMs = null, standGapMs = null, storageRetryMs = null } = {}) { SLICED_AFTER_MS = afterMs == null ? 10000 : afterMs; SLICED_READ_DEADLINE_MS = deadlineMs == null ? 60000 : deadlineMs; STAND_GAP_MS = standGapMs == null ? 120000 : standGapMs; STORAGE_RETRY_MS = storageRetryMs == null ? 30000 : storageRetryMs; }
 const slicedState = () => ({ files: _fileRefusals.size, parked: _slicedParked, said: _slicedSaid.size });
 
 /** Generic off-loop call (S3: codex discovery ops) → the worker's result. Row B-422c: `whenRefused(refusal)` is what a POOL
@@ -1767,7 +1783,7 @@ class CodexAdapter extends BackendAdapter {
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
   _setTranscriptPoolForTest, // row B-422c's legs
-  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, fileRefused, poolRefusing, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
+  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, fileRefused, poolRefusing, storageRetryDue, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,

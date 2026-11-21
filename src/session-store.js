@@ -732,6 +732,7 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
   const bulk = !!(opts && opts.bulk === true);   // r935: a bulk resume's first attach (ws-handler `_bulkRead`); every other ask is a person's
   const known = knownPathOf(claudeSessionId, cwd);
   if (known && C().fileStorageHung(known)) {
+    if (!C().storageRetryDue(known)) return false;   // asked of the pool again at most once a gap (30 s doubling, ≤ 8 min) — never stuck
     // the STORAGE hung under this transcript (a deadline, a hung path, a blocked mount — its record says so) — NO find and NO stat on
     // this loop: the pool alone is asked again (its path memory refuses at once while it remembers; then a worker tries, off the loop)
     const t0 = performance.now();
