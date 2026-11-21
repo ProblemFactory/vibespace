@@ -1517,13 +1517,23 @@ console.log('B-82b8 the settings words live apart from the device\'s table');
     'B-82b8 RED CONTROLS: a planted row with no words, words with no row, and a word left in the device\'s table are each named', { rowNoWords: c1, wordsNoRow: c2, leftWord: c3 });
   // THE EIGHT NOTES (主开发 2026-11-17 03:25Z): a person's words, each a dictionary entry with zh and ja; no engineers' phrase remains
   const zh = new Set(Object.keys(require(path.join(REPO, 'src/lib/i18n-zh.js')).default || {})), ja = new Set(Object.keys(require(path.join(REPO, 'src/lib/i18n-ja.js')).default || {}));
-  // a note that names the agent's own flag or environment name (`--model`, `--settings outputStyle`, CLAUDE_CODE_…) is the machine's
-  // name shown as it is, never translated; every OTHER note is prose a person reads, and is judged here
-  const allNotes = Object.entries(HSW.HARNESS_SETTINGS_WORDS).flatMap(([id, w]) => Object.entries(w.rows).filter(([, r]) => typeof r.how === 'string').map(([k, r]) => [`${id}.${k}`, r.how]));
-  const machineName = (h) => /^--|\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b/.test(h);
+  // THE RULE THAT DECIDES WHICH NOTES ARE PROSE. A note is the machine's own name, shown as it is and never translated, when it
+  // STARTS with a flag (`--model`, `--settings outputStyle`) or holds no two words in a row (`CLAUDE_CODE_NO_FLICKER / …`). Every
+  // other note is prose a person reads and needs its zh and ja entry — a prose note that also names a flag or an environment name
+  // is still prose, and judged. The one way past: a prose note that starts with `--` — never write one (the name goes in the
+  // row's description). RED CONTROL below: a planted prose note with no entry is named.
+  const notesOf = (W) => Object.entries(W).flatMap(([id, w]) => Object.entries(w.rows).filter(([, r]) => typeof r.how === 'string').map(([k, r]) => [`${id}.${k}`, r.how]));
+  const allNotes = notesOf(HSW.HARNESS_SETTINGS_WORDS);
+  const machineName = (h) => /^--/.test(h) || !/[a-z]{3,} [a-z]{3,}/.test(h);
   const notes = allNotes.filter(([, h]) => !machineName(h)), names = allNotes.filter(([, h]) => machineName(h));
-  const OLD = /appended argv|\(while off\)|the wrapper's thread personality|pool engine|exhaustion ladder|rung/;   // stale-pins: kept (an absence check: the engineers' phrases must be gone)
+  // the engineers' phrases, and the round's MUST 2 (r835): the reset-credit note once claimed a credit waits for the whole pool —
+  // a warm conversation spends one before it switches (src/reset-credit.js, THE LADDER FORKS BY WARMTH)
+  const OLD = /appended argv|\(while off\)|the wrapper's thread personality|pool engine|exhaustion ladder|rung|every Codex account in the pool/;   // stale-pins: kept (an absence check: the engineers' phrases must be gone)
   okP(notes.length >= 8 && notes.every(([, h]) => zh.has(h) && ja.has(h)) && allNotes.every(([, h]) => !OLD.test(h)), 'B-82b8 THE EIGHT NOTES (and every other note in prose): each is a person\'s words with a zh AND a ja entry — none of the engineers\' phrases («appended argv», «(while off)», «pool engine — … rung …») is left', { notes, missing: notes.filter(([, h]) => !zh.has(h) || !ja.has(h)), oldPhrase: allNotes.filter(([, h]) => OLD.test(h)), machineNames: names.length, machineNameNotes: names.map(([k]) => k) });
+  const plantedNote = { ...HSW.HARNESS_SETTINGS_WORDS, codex: { ...HSW.HARNESS_SETTINGS_WORDS.codex, rows: { ...HSW.HARNESS_SETTINGS_WORDS.codex.rows, limitResetCredit: { ...HSW.HARNESS_SETTINGS_WORDS.codex.rows.limitResetCredit, how: 'a note in plain words nobody translated' } } } };
+  const plantedMissing = notesOf(plantedNote).filter(([, h]) => !machineName(h) && !(zh.has(h) && ja.has(h)));
+  okP(plantedMissing.length === 1 && plantedMissing[0][0] === 'codex.limitResetCredit' && machineName('--model') && machineName('SOME_AGENT_FLAG / OTHER_AGENT_FLAG') && !machineName('runs CLAUDE_CODE_X when this is on'),
+    'B-82b8 RED CONTROL: a planted prose note with no zh or ja entry is named; a flag or a bare environment name is a name, a sentence that names one is prose', { planted: plantedMissing });
   // EVERY OPTION LABEL is a name shown as it is (the label IS its value: «Concise», a model id) or a person's words with a zh AND a
   // ja entry. The words module keeps the labels as a value → label map, no `label:` field, so test-ui-language's ① does not see
   // them there: this leg does. RED CONTROL: a planted label in English words of its own is named.

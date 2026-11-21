@@ -1,5 +1,5 @@
 {
- "note": "lane ui-language — shrink-only: ① visible English outside t() ({file: [text…]}) and ⑤ zh/ja rows left in English. Lower with `node scripts/test-ui-language.mjs --lower`; never add a row.",
+ "note": "lane ui-language — shrink-only: ① visible English outside t() ({file: [text…]}) and ⑤ zh/ja rows left in English. Lower with `node scripts/test-ui-language.mjs --lower`; never add a row. src/harness-settings-words.js keeps its option labels as a value → label map, which ① does not see: test-harness-contract §B-82b8 judges each one (its own value, or words with zh and ja) — never add them here.",
  "visible": {
   "src/decision-model.js": [
    "Hi Sam, can you approve the Q3 budget by Friday? Finance is waiting on you.",

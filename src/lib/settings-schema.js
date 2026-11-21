@@ -16,8 +16,8 @@
  */
 
 import { t } from './i18n.js';
-import { HARNESS_SETTINGS, settingPath, checkTable, rowsOfKind } from '../harness-settings.js';
-import { withWords } from '../harness-settings-words.js'; // B-82b8: a built-in table's words (a person's) live apart from its machine facts — joined here, by the row's own name // PURE (CJS): the descriptor-declared per-harness tables — the Claude/Codex/OpenCode sections are DERIVED from them (docs/design-harness-settings.zh.md §4)
+import { HARNESS_SETTINGS, settingPath, checkTable, rowsOfKind } from '../harness-settings.js'; // PURE (CJS): the descriptor-declared per-harness tables — the Claude/Codex/OpenCode sections are DERIVED from them (docs/design-harness-settings.zh.md §4)
+import { withWords } from '../harness-settings-words.js'; // B-82b8: a built-in table's words (a person's) live apart from its machine facts — joined here, by the row's own name
 import { whenClauses } from './settings-view.js'; // PURE: the tier / when rules (WHEN_KINDS) — re-exported below
 import { CHANNEL_SETTINGS, settingPath as channelSettingPath } from '../channel-settings.js';
 import { IDLE_PAINT_DEFAULT } from '../browser-idle.js'; // PURE (CJS): browser.idlePaintFreeze's ONE default — the keeper reads the same value

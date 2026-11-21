@@ -48,7 +48,9 @@ console.log('§1 checkTable refusals');
   const tbl = (over = {}) => ({ prefix: 'zed', category: 'Zed', files: {}, rows: [row()], ...over });
   const refuses = (name, table, ctx, re) => { const errs = checkTable(table, ctx); ok(name, errs.some((e) => re.test(e)), errs); };
   ok('a sound table passes', checkTable(tbl()).length === 0, checkTable(tbl()));
-  for (const t of Object.values(HARNESS_SETTINGS)) ok(`built-in table ${t.prefix} passes (${t.rows.length} rows)`, checkTable(t).length === 0, checkTable(t));
+  // B-82b8: a built-in table's words live in src/harness-settings-words.js — the table JOINED to them is whole, and the bare table is
+  // whole with its words apart (the device's road: src/harnesses/index.js)
+  for (const t of Object.values(HARNESS_SETTINGS)) ok(`built-in table ${t.prefix} passes (${t.rows.length} rows): joined to its words, and bare with its words apart`, checkTable(HSW.withWords(t)).length === 0 && checkTable(t, { wordsApart: true }).length === 0, { joined: checkTable(HSW.withWords(t)), bare: checkTable(t, { wordsApart: true }) });
   refuses('prefix must be a slug', tbl({ prefix: 'Zed!' }), {}, /prefix must be a lowercase slug/);
   refuses('prefix must match the descriptor', tbl(), { settingsPrefix: 'other' }, /does not match the descriptor/);
   refuses('a contributed harness may not squat a built-in prefix', tbl({ prefix: 'claude' }), { contributed: { id: 'claude' } }, /built-in harness namespace/);

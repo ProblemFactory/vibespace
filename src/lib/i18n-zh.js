@@ -14935,7 +14935,7 @@ export default {
   "new sessions start without Claude Code's own continue at a usage limit, unless this is on": "新会话不使用 Claude Code 自己的「到达用量上限后继续」，除非这里已打开",
   "VibeSpace's own agent tools run without asking; publishing a page still asks in a mode that asks anyway": "VibeSpace 自己的智能体工具无需询问即可运行；在本来就会询问的模式下，发布页面仍会询问",
   "the personality a new Codex conversation starts with": "新的 Codex 对话开始时使用的个性",
-  "when every Codex account in the pool has reached its limit": "当池中所有 Codex 账号都达到上限时",
+  "when a Codex conversation reaches its usage limit": "当 Codex 对话达到用量上限时",
   // B-82b8 ALSO: the seed model labels with a 1M context had no entry (the dictionary held «… (latest, 1M)», an older spelling)
   "fable[1m] (latest, 1M context)": "fable[1m]（最新，1M 上下文）",
   "opus[1m] (latest, 1M context)": "opus[1m]（最新，1M 上下文）",

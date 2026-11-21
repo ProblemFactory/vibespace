@@ -110,7 +110,7 @@ const HARNESS_SETTINGS_WORDS = {
       limitResetCredit: {
         label: t("Use stored reset credits on a usage limit (Codex)"),
         description: t("ChatGPT plans can hold rate-limit reset credits. A consumed credit starts a NEW window at once: the limit is full again and the next reset moves one full window from now (Claude's web reset works differently — it refills in place and the weekly reset time does not move; Claude Code offers it only as the interactive /limit-reset). Because a re-opened window is worth most right at the limit, VibeSpace judges a credit worth using as soon as a limit is hit — except the last credit with less than a tenth of a window left. A conversation that is mid-turn or whose prompt cache is still warm tries the credit before switching accounts (a switch re-bills the whole context); a cold one switches first and uses a credit only when no pool member can take it. \"Off\" (the default) never spends one by itself; \"Ask\" files one decision in For you per limit; \"Auto\" spends it for you, within the unattended-spend ceiling."),
-        how: t("when every Codex account in the pool has reached its limit"),
+        how: t("when a Codex conversation reaches its usage limit"),
         options: { ["off"]: t("Off — never spend a reset credit automatically"), ["ask"]: t("Ask — offer it in For you when it is worth it"), ["auto"]: t("Auto — use one when it is worth it (advanced)") },
       },
       defaultModel: {

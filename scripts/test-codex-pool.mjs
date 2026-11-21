@@ -103,7 +103,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   // the row lives in the codex harness's DECLARED table (src/harness-settings.js) and the schema DERIVES the Codex section from it (2.369.123)
   const { HARNESS_SETTINGS: HS_TABLES, rowOf: hsRowOf } = require(path.join(REPO, 'src/harness-settings.js'));
   const lrc = hsRowOf(HS_TABLES.codex, 'limitResetCredit');
-  ok('the setting exists in the Codex group: off | ask | auto, default off (NEVER auto by default)', !!lrc && lrc.default === 'off' && JSON.stringify(lrc.options.map((o) => o.value)) === '["off","ask","auto"]' && lrc.apply.kind === 'server' && /deriveHarnessTable\(tbl\)/.test(read('src/lib/settings-schema.js')));
+  ok('the setting exists in the Codex group: off | ask | auto, default off (NEVER auto by default)', !!lrc && lrc.default === 'off' && JSON.stringify(lrc.options.map((o) => o.value)) === '["off","ask","auto"]' && lrc.apply.kind === 'server' && /deriveHarnessTable\(withWords\(tbl\)\)/.test(read('src/lib/settings-schema.js')));
   ok('session-schema registers the throttle fields', /_codexResetTriedAt/.test(read('src/session-schema.js')) && /_codexLastResetsAt/.test(read('src/session-schema.js')));
   const wsrc = read('src/ws-handler.js');
   // 2.369.151: CAPABILITY-gated (quotaProbe 'rpc-rate-limits'), never a backend id — test-harness-contract pins the verdict per harness.

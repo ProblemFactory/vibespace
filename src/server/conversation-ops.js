@@ -158,7 +158,7 @@ function limitChoices({ accounts = null } = {}) {
   try { ids = require('../harnesses').ids(); } catch { ids = []; }
   try { HS = require('../harness-settings'); } catch { HS = null; }
   let joinWords = (tbl) => tbl;   // B-82b8: the option labels are a person's words — joined from the words module (the hub's; never the device's)
-  try { joinWords = require('../harness-settings-words').withWords; } catch { }
+  try { joinWords = require('../harness-settings-words').withWords; } catch (e) { console.warn(`[settings] the settings words module could not be loaded — the limit choices show their values: ${e && e.message}`); }
   const permissionModes = [], models = [];
   for (const id of ids) {
     const table = HS && HS.HARNESS_SETTINGS ? joinWords(HS.HARNESS_SETTINGS[id]) : null;

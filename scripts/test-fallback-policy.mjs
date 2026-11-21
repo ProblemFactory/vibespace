@@ -124,7 +124,9 @@ check('auto-continue: an explicit key in the user\'s own inline --settings JSON 
   check('premise: VibeSpace\'s auto-resume delivers to CHAT sessions only (server.js sendToSession) — so OFF leaves terminal sessions with no automatic continue', CHAT_ONLY.test(readRepo('server.js')));
   check('premise NEGATIVE CONTROL: a sendToSession without the chat gate fails the pin', !CHAT_ONLY.test("sendToSession: (id, s, text, carried) => { try { const ad = adapterRegistry.get(s.backend); if (!ad || !s.pty) return false;"));
   const HS = require(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/harness-settings.js'));
-  const row = HS.HARNESS_SETTINGS.claude.rows.find((r) => r.key === 'autoContinueAtUsageLimit');
+  // B-82b8: the row's words live in src/harness-settings-words.js — read through the join, the shape Settings shows
+  const HSW = require(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/harness-settings-words.js'));
+  const row = HSW.withWords(HS.HARNESS_SETTINGS.claude).rows.find((r) => r.key === 'autoContinueAtUsageLimit');
   const TRUE_WORDS = (d) => /Chat sessions never run it/.test(d) && /nothing continues it by itself/.test(d) && !/two producers/.test(d) && !/pick up/.test(d);
   check('the row\'s description says the per-mode truth (chat never runs it; terminal: nothing continues it when off) and not the refuted "two producers" premise', !!row && TRUE_WORDS(row.description));
   check('description NEGATIVE CONTROL: the pre-fix wording ("…a limit then stops the turn for VibeSpace\'s auto-resume to pick up … two producers…") fails it', !TRUE_WORDS("VibeSpace runs its own auto-resume, so this stays off: a limit then stops the turn for VibeSpace's auto-resume to pick up. On lets two producers continue the same conversation at the same reset."));

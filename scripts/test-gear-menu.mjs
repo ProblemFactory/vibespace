@@ -47,7 +47,10 @@ const REG = require('../src/integration-registry.js'); // the window's expected 
 // order rule (orderedCategories — the declared group order, then any late-registered one). Read off the registry, not typed.
 const HARNESSES = require('../src/harnesses');
 const { orderedCategories } = await import('../src/lib/settings-schema.js');
-const HARNESS_ROWS = orderedCategories(HARNESSES.list().filter((h) => h.settings).map((h) => h.settings.category));
+// B-82b8: a built-in table's category is a person's word — it lives in src/harness-settings-words.js; read through the join (a
+// contributed harness's table keeps its words inline and comes back as it is)
+const { withWords } = require('../src/harness-settings-words.js');
+const HARNESS_ROWS = orderedCategories(HARNESSES.list().filter((h) => h.settings).map((h) => withWords(h.settings).category));
 
 // ── THE VAULT'S ONE ROW, read off the source (lane vault-one-door) ──
 /** Every `registerMenuItem({ … })` STATEMENT's text in `src` (a call that starts its line — a comment that names the call is
