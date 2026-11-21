@@ -679,6 +679,20 @@ This file is the engineers' record of every release: the lanes, the verification
   - NOT CAUGHT, said: a swap whose name is a variable.
 - LEGS: test-guard-inline-helpers (fast). It runs fixtures of each helper shape and call kind, each guarantee with an anchored mutant of the tool as its RED, plus a scratch repo's dry run / apply / second run. test-ci-gate-tiers §7b: the list's leg asks that the list was read, no longer that it is long (it falls to 16 at the apply).
 
+### bl-browser-a — B-346d's recorder: the next daemon that ends early leaves ONE journal record, so it is placed from the record (the coordinator's r1228)
+- WHY: why the owner's ephemeral daemon ended about a minute in (2026-11-09) is still unknown. The two measuring suites showed the hub's own wiring does not end it; the coordinator's look at that day's hub journal found two «daemon gone» lines and NO out-of-memory kill. What the journal held then: the pid, what saw it gone, and an upper bound. The next occurrence must say more, without anyone sampling a hub.
+- THE RECORD: at «daemon gone» (markEphemeralGone and markDaemonGone, BEFORE reapOrphan ends its Chrome) the keeper journals ONE line, `[browser] gone record <profile> (<ns>): …` (PURE src/browser-gone-record.js; names and numbers only — no page address, no site name):
+  - (a) the last time a tick saw this run's daemon alive, beside when it was found gone (a bound on both sides; «never by a tick» when none did);
+  - (b) its Chrome in every case: alive (the hub ends it now) / already gone / another process now / none recorded — before, reapOrphan spoke only when the Chrome outlived its daemon;
+  - (c) the hub's own signals to that daemon or its Chrome during the run, from ONE small ledger a pid (src/server/signal-ledger.js; noted at endProcess — its caller names the site —, at the keeper's stop, and at the process panel's kill; read from the run's start, so a reused pid's rows are not this run's): «none», or each with its site and time;
+  - (d) the hub unit's OOM kill counter (its cgroup's memory.events `oom_kill`, the path off /proc/self/cgroup; read ASYNC once a tick): at the run's first tick alive and when found gone, a rise said.
+  - (e) NOT here: the daemon's own last lines. Whether the driver hands its error stream to the daemon is a measure on the real driver, ordered by the coordinator after the hotfix.
+- LEGS (test-keeper-sweep-yields ⑫, fast): one world through the REAL keeper — stand-in daemon and Chrome processes, a stand-in memory.events, a signal in the ledger; two ticks (alive, then gone 12 s later).
+  - The line carries all four, and no address. Every Chrome case is said. A row noted before the run is not this run's. A daemon gone before any tick says «never by a tick».
+  - The ledger's five sites are pinned once each.
+  - Each of (a)–(d) has a RED control: a keeper copy without that field, built with anchored().
+- THE ROUND (wlgwis3cs) and the coordinator's MUST (r1311): THE RECORDER NEVER GATES THE TICK — 58a5e2c02's tick awaited the counter's read at its head, so a held file threadpool (this tree's three whole-instance outages) would have held every tick. Now the read is its own flight (one at a time, never awaited), the record uses the last value that came back with its time, «not read» otherwise; a leg holds the read for good (a FIFO nobody writes) and the tick stays free, its CONTROL the awaiting tick held. In the same commit: (1) both recorder calls fenced (a planted throw: the daemon still stopped, its Chrome still ended; CONTROL unfenced: not ended); (2) the line written when its facts are read, before the reap's line (CONTROL: read after the reap carries the reap's own signal); (3) every tick forgets the runs no longer live; (4) the ledger notes inside each kill's try, after it succeeded, with the process's start (three census needles moved with their lines; a row of another process is said so; «none» says since when); (5) «alive when found gone (the reap decides)».
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
