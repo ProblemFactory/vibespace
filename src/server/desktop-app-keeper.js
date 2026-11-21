@@ -52,6 +52,7 @@ const LIMITS = require('../keeper-limits');
 const displayFacts = require('../desktop-display');
 // B-91aa: on the hub (device #0) the belt's X tools are started by THE STARTER (one small process), never by a fork of the hub
 displayFacts.useStarter(require('./child-starter').childStarter());
+require('../sysinfo.js').useStarter(require('./child-starter').execFileVia(require('./child-starter').childStarter()));   // B-360d (r1020): the System facts' ps / df start from the starter's small process too — never a fork of the hub
 const DV = require('../desktop-viewers');
 const DS = require('../desktop-serve'); // THE MACHINE HALF (SHARED — the daemon bundles it)
 const fs = require('fs');

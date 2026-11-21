@@ -158,7 +158,18 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
 let shared = null;
 /** THE hub's starter (one per process) */
 function childStarter() { if (!shared) shared = createChildStarter(); return shared; }
+/** B-360d (lane bl-keys-misc, r1020) — a program run through the starter, answered in execFile's shape: → (bin, args, {timeout, maxBuffer})
+ *  → Promise<{ err, stdout }>; `err` = a failure, a timeout, an output past the buffer, or the starter's «no answer» — said as what it
+ *  is, never «the program failed» as a guess. The hub hands it to a SHARED module that keeps execFile on the device agent
+ *  (src/sysinfo.js useStarter), so the device's bundle carries none of these words. */
+function execFileVia(starter) {
+  return (bin, args, { timeout = 8000, maxBuffer = 1024 * 1024 } = {}) => Promise.resolve().then(() => starter.run(bin, args, { timeoutMs: timeout, maxBuffer, capture: true, envAdd: {} })).then((r) => {
+    const ok = !!r && r.code === 0 && !r.timedOut && !r.overflow && !r.unknown;
+    const why = !r ? 'no answer' : r.unknown ? 'the starter gave no answer' : r.timedOut ? 'timed out' : r.overflow ? `its output passed ${maxBuffer} bytes` : (r.error || `exit ${r.code}`);
+    return { err: ok ? null : Object.assign(new Error(`${bin}: ${why}`), { code: r ? r.code : null, killed: !!(r && r.timedOut) }), stdout: String((r && r.stdout) || '') };
+  }, (e) => ({ err: e instanceof Error ? e : new Error(String(e)), stdout: '' }));
+}
 /** a suite's seam: hand the process a starter of its own (null = the default again) */
 function setChildStarter(s) { shared = s || null; }
 
-module.exports = { createChildStarter, childStarter, setChildStarter, STARTER_SCRIPT, GUARD_MS, SECRET_NAME };
+module.exports = { createChildStarter, childStarter, setChildStarter, execFileVia, STARTER_SCRIPT, GUARD_MS, SECRET_NAME };

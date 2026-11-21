@@ -12,6 +12,19 @@ const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 
+// THE HUB HANDS ITS STARTER (B-360d, lane bl-keys-misc — the coordinator's r1020: GET /api/sysinfo held the hub's loop 62 ms in ONE
+// turn while this module's programs were started by a FORK of the hub; src/server/child-starter.js B-91aa measured those forks on
+// the owner's 4.5–5 GB hub). EVERY program this module starts goes through `runProgram`: the runner the hub hands (its starter in
+// execFile's shape, child-starter.js execFileVia — the starter's words live THERE, hub-only, so the device agent's signed bundle
+// keeps its bytes) else execFile from this process — the device agent hands none (its own small process, as the desktop belt's).
+// → Promise<{ err, stdout }>
+let _run = null;
+function useStarter(run) { _run = typeof run === 'function' ? run : null; }
+function runProgram(bin, args, { timeout = 8000, maxBuffer = 1024 * 1024 } = {}) {
+  if (_run) return _run(bin, args, { timeout, maxBuffer });
+  return new Promise((resolve) => { execFile(bin, args, { timeout, maxBuffer, encoding: 'utf8' }, (err, stdout) => resolve({ err, stdout: String(stdout || '') })); });
+}
+
 // Container-aware memory: cgroup v2 → v1 → host meminfo. /sys reads are
 // kernel-backed and never hang (unlike FUSE paths — safe to read sync).
 //
@@ -86,11 +99,11 @@ function memInfo() {
 // cheap /sys path for the Linux watch loop.
 function memInfoDarwin() {
   return new Promise((resolve) => {
-    execFile('sysctl', ['-n', 'hw.memsize', 'vm.pagesize'], { timeout: 4000 }, (e1, out1) => {
+    runProgram('sysctl', ['-n', 'hw.memsize', 'vm.pagesize'], { timeout: 4000 }).then(({ err: e1, stdout: out1 }) => {
       const [total, pageRaw] = String(out1 || '').split('\n').map((x) => parseInt(x, 10));
       const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 4096;
       if (e1 || !Number.isFinite(total) || !total) return resolve(null);
-      execFile('vm_stat', [], { timeout: 4000 }, (e2, out2) => {
+      runProgram('vm_stat', [], { timeout: 4000 }).then(({ err: e2, stdout: out2 }) => {
         if (e2) return resolve(null);
         let pages = 0;
         for (const ln of String(out2).split('\n')) {
@@ -127,7 +140,7 @@ async function memInfoAsync() {
 const PS_MAX_BUFFER = 64 * 1024 * 1024;
 function topProcs(n = 8) {
   return new Promise((resolve) => {
-    execFile('ps', ['aux', '--sort=-rss'], { timeout: 8000, maxBuffer: PS_MAX_BUFFER }, (err, out) => {
+    runProgram('ps', ['aux', '--sort=-rss'], { timeout: 8000, maxBuffer: PS_MAX_BUFFER }).then(({ err, stdout: out }) => {
       const parse = (text) => text.split('\n').slice(1).filter(Boolean).map((ln) => {
         const f = ln.trim().split(/\s+/);
         // USER PID %CPU %MEM VSZ RSS TTY STAT START TIME CMD…
@@ -135,7 +148,7 @@ function topProcs(n = 8) {
       }).filter((p) => p.pid);
       if (!err) return resolve(parse(out).slice(0, n));
       // BSD ps (no --sort): sort ourselves
-      execFile('ps', ['aux'], { timeout: 8000, maxBuffer: PS_MAX_BUFFER }, (e2, out2) => {
+      runProgram('ps', ['aux'], { timeout: 8000, maxBuffer: PS_MAX_BUFFER }).then(({ err: e2, stdout: out2 }) => {
         if (e2) {
           console.warn(`[sysinfo] topProcs: both ps legs failed — process list will be EMPTY (${String(e2.message || e2).slice(0, 200)}; first leg: ${String(err.message || err).slice(0, 120)})`);
           return resolve([]);
@@ -240,7 +253,7 @@ function listProcs({ max = 350 } = {}) {
     // Same sizing story as topProcs above — measured 4,244,406 bytes for 2,404
     // processes here, which is half of the old 8 MiB: the cap is applied AFTER
     // parsing the whole table, so the WHOLE table has to fit.
-    execFile('ps', ['axo', PS_COLUMNS], { timeout: 8000, maxBuffer: PS_MAX_BUFFER }, (err, out) => {
+    runProgram('ps', ['axo', PS_COLUMNS], { timeout: 8000, maxBuffer: PS_MAX_BUFFER }).then(({ err, stdout: out }) => {
       if (err) {
         console.warn(`[sysinfo] listProcs: ps failed — process table will be EMPTY (${String(err.message || err).slice(0, 200)})`);
         return resolve({ procs: [], total: 0, sampled: false, error: String(err.message || err).slice(0, 200) });
@@ -260,7 +273,7 @@ function listProcs({ max = 350 } = {}) {
 
 function diskInfo(dir) {
   return new Promise((resolve) => {
-    execFile('df', ['-kP', dir], { timeout: 8000 }, (err, out) => {
+    runProgram('df', ['-kP', dir], { timeout: 8000 }).then(({ err, stdout: out }) => {
       if (err) return resolve(null);
       const f = (out.split('\n')[1] || '').trim().split(/\s+/);
       const total = (parseInt(f[1], 10) || 0) * 1024, used = (parseInt(f[2], 10) || 0) * 1024;
@@ -448,4 +461,4 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null } 
   return () => { clearInterval(t); clearInterval(lagT); clearInterval(persistT); persistHistory(); };
 }
 
-module.exports = { read, startWatch, loopLagNow, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD };
+module.exports = { read, startWatch, loopLagNow, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD, useStarter, runProgram };
