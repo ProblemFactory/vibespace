@@ -209,6 +209,7 @@ const ROWS = [
   ["src/node-runtime.js", "move", "derived", "a downloaded Node runtime (checked by its digest), fetched again", "provision", "provision"],
   ["src/opencode-serve.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/plugins.js", "unsynced", "store", "", "PluginManager._save"],
+  ["src/pool-pin-record.js", "move", "move", "the person's pool pin record (B-526c unit 2): a symlink whose target text is the pin, renamed over its name — a symlink swap, no file bytes written", "write"],
   ["src/port-forward.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/reading-repair.js", "unsynced", "store", "", "_writeAtomic"],
   ["src/routes/files.js", "unsynced", "store", "", "writeExtractJournal"],
