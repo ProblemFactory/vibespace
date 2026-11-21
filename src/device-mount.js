@@ -144,24 +144,30 @@ let unmountMissingSaid = false;
 // UNMOUNT_MS is ended by its handle and answers 'hung' — said once by its caller, never waited on for ever; while that child
 // has not exited (a stat stuck in the kernel keeps it alive), the mount point gets no second child (it answers 'hung' at once)
 const UNMOUNT_MS = 10000;
-const unmountStuck = new Set();
-function lazyUnmount(mountpoint, { say = null, ms = UNMOUNT_MS } = {}) {
-  if (unmountStuck.has(mountpoint)) return Promise.resolve('hung');
-  const ran = (c, r) => {
-    let done = false;
-    const end = (v) => { if (done) return; done = true; clearTimeout(t); r(v); };
-    const t = setTimeout(() => {
-      if (done) return;
-      unmountStuck.add(mountpoint); c.once('exit', () => unmountStuck.delete(mountpoint));
-      try { c.kill('SIGKILL'); } catch { }
-      end('hung');
-    }, ms);
-    if (t.unref) t.unref();
-    c.on('exit', (code) => end(code === 0 ? 'ok' : 'no'));
-    c.on('error', (e) => end(e && e.code === 'ENOENT' ? 'missing' : 'no'));
+// B-323e (主开发 r1352 (2), lane bl-machines-b): the pair rides THE STARTER (a fork of a few MB, never the hub's: every pull attempt and
+// teardown — about every six minutes for a failing pull, for ever on an ssh machine); its answers read as the release read its own
+// children: ended 0 = 'ok', another end = 'no', not on PATH = 'missing'; killed at its bound, NO ANSWER from the starter or never
+// started = 'hung' (no verdict: nothing is mounted over a folder still held). A child that may still run keeps the mount point
+// STUCK while it lives — released at its late end, or once its end is asked and it is gone (`held`: the caller's witness —
+// machine-mounts' heldChild, /proc by its pid or the kernel by signal 0 —; without one, its late end alone)
+const unmountStuck = new Map();   // mount point → the stuck child's witness ({ gone() })
+const stuckAt = (mp) => { const h = unmountStuck.get(mp); if (h && h.gone()) { unmountStuck.delete(mp); return false; } return !!h; };
+function lazyUnmount(mountpoint, { say = null, ms = UNMOUNT_MS, held = null } = {}) {
+  if (stuckAt(mountpoint)) return Promise.resolve('hung');
+  const S = require('./server/child-starter').childStarter(), envAdd = { PATH: process.env.PATH || '' };
+  const keep = (pid) => { const h = (typeof held === 'function' && pid ? held(pid) : null) || { pid, gone: () => false }; unmountStuck.set(mountpoint, h); return h; };
+  const ask = (cmd) => {
+    let h = null;
+    return S.run(cmd, ['-uz', mountpoint], { timeoutMs: ms, envAdd, onTimeout: (pid) => { h = keep(pid); }, onLateExit: () => { if (h && unmountStuck.get(mountpoint) === h) unmountStuck.delete(mountpoint); } })
+      .then((r) => {
+        if (!r || r.unknown) { if (r && r.pid && !h) h = keep(r.pid); return 'hung'; }   // started, then no answer: it may still run
+        if (!r.started) return r.error === 'ENOENT' ? 'missing' : /^(EAGAIN|EMFILE|ENFILE|ENOMEM)$/.test(String(r.error || '')) ? 'hung' : 'no';   // the table full: no verdict; another error (EACCES): as the release
+        if (r.timedOut) { if (!h && r.pid) h = keep(r.pid); return 'hung'; }
+        return r.code === 0 && !r.error ? 'ok' : 'no';
+      }, () => 'hung');
   };
-  const fuse3 = () => new Promise((r) => { try { ran(spawn('fusermount3', ['-uz', mountpoint], { stdio: 'ignore' }), r); } catch { r('missing'); } });
-  const fuse2 = () => new Promise((r) => { try { ran(spawn('fusermount', ['-uz', mountpoint], { stdio: 'ignore' }), r); } catch { r('missing'); } });
+  const fuse3 = () => ask('fusermount3');
+  const fuse2 = () => ask('fusermount');
   return fuse3().then((a) => (a === 'missing' ? fuse2() : a)).then((b) => {
     if (b === 'missing' && !unmountMissingSaid) { unmountMissingSaid = true; try { (say || ((l) => console.warn(l)))(`pull mount ${mountpoint}: neither fusermount3 nor fusermount is on PATH — a pull mount point cannot be released (install fuse3)`); } catch { } }
     if (b === 'hung') { try { (say || ((l) => console.warn(l)))(`pull mount ${mountpoint}: could not release the folder — its unmount did not answer in ${Math.round(ms / 1000)} s (ended; tried again at the next check)`); } catch { } }
@@ -171,9 +177,9 @@ function lazyUnmount(mountpoint, { say = null, ms = UNMOUNT_MS } = {}) {
 /** B-fcc7: release what a pull mount left on THIS machine — the lazy unmount, then the stale daemons of exactly that mount
  *  point (B-1ea6). The pre-clean of every mount, and the boot's answer for a recorded pull whose machine is offline: its
  *  last hub's rclone must not stay a FUSE entry whose every read fails ENOTCONN until the next mount. */
-async function releaseStale(mountpoint, { log = () => {}, ms = UNMOUNT_MS } = {}) {
+async function releaseStale(mountpoint, { log = () => {}, ms = UNMOUNT_MS, held = null } = {}) {
   // a release whose unmount HUNG is a failure by name (`unmount_hung`): nothing is mounted over a folder still held
-  if ((await lazyUnmount(mountpoint, { say: log, ms })) === 'hung') throw require('./mount-error-words.js').refusal('unmount_hung', { mountpoint, s: Math.round(ms / 1000) });   // B-af94: worded by code
+  if ((await lazyUnmount(mountpoint, { say: log, ms, held })) === 'hung') throw require('./mount-error-words.js').refusal('unmount_hung', { mountpoint, s: Math.round(ms / 1000) });   // B-af94: worded by code
   return killMountDaemons(mountpoint, { say: log }); // non-Linux: no /proc — the lazy unmount alone
 }
 
@@ -308,7 +314,7 @@ function heldRefresher({ mountpoint, statRemote, invalidate, procRoot = '/proc',
  *  log          logger
  * @returns {Promise<{ mountpoint, devicePort, bridgePort, teardown }>}
  */
-async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vfsCacheDir, log = () => {}, onGone = null, preCleaned = false, canRelease = null }) {
+async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vfsCacheDir, log = () => {}, onGone = null, preCleaned = false, canRelease = null, heldChild = null }) {   // heldChild: the caller's witness of a child whose end may never be heard (B-323e)
   let refresher = null, tornDown = false; // heldRefresher, once the mount is up
   const sawGet = (d) => { if (refresher && d.indexOf('GET ') !== -1) refresher.sawRead(); };
   // 1) ask the device to serve the folder over WebDAV on its own loopback
@@ -364,7 +370,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   // offline with no way back). Lazy-unmount + kill the exact orphan (B-1ea6:
   // argv ELEMENTS, never a substring — a prefix mount point named another
   // mount's daemon; the /proc pass off the loop; the kill re-checked at the signal).
-  if (!preCleaned) await releaseStale(mountpoint, { log }); // machine-mounts _up released it before it asked the machine anything (B-fcc7 r2)
+  if (!preCleaned) await releaseStale(mountpoint, { log, held: heldChild }); // machine-mounts _up released it before it asked the machine anything (B-fcc7 r2)
   await fs.promises.mkdir(mountpoint, { recursive: true }); // lane hub-fuse-sync-guard: a stale FUSE mount point right after the lazy unmount — never a sync call from the loop
   // /proc fd links name the REAL path; resolve it before the mount covers it
   let realMp = mountpoint; try { realMp = await fs.promises.realpath(mountpoint); } catch { }
@@ -395,7 +401,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   // B-844b: may THIS chain still release its folder? (its owner answers: not when another record now holds that folder — a pull
   // removed while it was mounted and added again on the same folder). A chain that may not ends only its own processes
   const mayRelease = () => { try { return typeof canRelease !== 'function' || canRelease() !== false; } catch { return true; } };
-  const releaseOwn = () => (mayRelease() ? lazyUnmount(mountpoint, { say: log }).catch(() => 'no') : Promise.resolve('kept'));
+  const releaseOwn = () => (mayRelease() ? lazyUnmount(mountpoint, { say: log, held: heldChild }).catch(() => 'no') : Promise.resolve('kept'));
   rc.on('exit', (code, sig) => {
     rcGone = true;
     if (tornDown || !refresher) return; // not up yet: the wait below answers it
@@ -439,14 +445,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
       req.on('error', () => resolve(null));
       req.end();
     }),
-    // one open + close per file in a CHILD (never node fs on the mount): the
-    // kernel drops the inode's cached pages on open; nothing is read
-    invalidate: (paths) => new Promise((resolve) => {
-      const c = spawn('sh', ['-c', 'for f; do : < "$f"; done 2>/dev/null', 'sh', ...paths], { stdio: 'ignore' });
-      const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch {} resolve(); }, 10000);
-      c.on('exit', () => { clearTimeout(t); resolve(); });
-      c.on('error', () => { clearTimeout(t); resolve(); });
-    }),
+    invalidate: openHeld,
   });
 
   const teardown = async () => {
@@ -461,18 +460,27 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   return { mountpoint, devicePort, bridgePort, teardown, released: () => released };   // released(): the lazy unmount's promise once begun (B-fcc7)
 }
 
+/** One open + close per file in a CHILD (never node fs on the mount): the kernel drops the inode's cached pages on open; nothing is
+ *  read. B-323e (r1352 (2)): by THE STARTER, bounded 10 s (as the release ended its own child); its answer, whatever it is, ends it */
+function openHeld(paths) {
+  return require('./server/child-starter').childStarter().run('sh', ['-c', 'for f; do : < "$f"; done 2>/dev/null', 'sh', ...paths], { timeoutMs: 10000, envAdd: { PATH: process.env.PATH || '' } }).then(() => { }, () => { });
+}
+
 function waitMounted(mp, timeoutMs) {
+  // B-323e (r1352 (2)): each `ls` by THE STARTER, bounded by what is left of the wait — it had NO bound: a hung `ls` left the wait,
+  // and the record's mounting mark, unresolved for ever; one at a time; no answer or killed at its bound = not up (yet)
+  const S = require('./server/child-starter').childStarter(), envAdd = { PATH: process.env.PATH || '' };
   return new Promise((resolve) => {
     const t0 = Date.now();
     const tick = () => {
       // a child `ls` (never node fs — a wedged fuse mount hangs the thread pool)
-      const c = spawn('ls', [mp], { stdio: 'ignore' });
-      c.on('exit', (code) => { if (code === 0) return resolve(true); retry(); });
-      c.on('error', retry);
+      const left = timeoutMs - (Date.now() - t0);
+      if (left <= 0) return resolve(false);
+      S.run('ls', [mp], { timeoutMs: Math.max(1000, left), envAdd }).then((r) => { if (r && !r.unknown && r.started && !r.timedOut && r.code === 0 && !r.error) return resolve(true); retry(); }, retry);
     };
     const retry = () => { if (Date.now() - t0 > timeoutMs) return resolve(false); setTimeout(tick, 250); };
     setTimeout(tick, 300);
   });
 }
 
-module.exports = { deviceFolderMount, heldRefresher, pullMountArgs, PULL_ROW, isMountDaemonOf, mountDaemonsOf, killMountDaemons, releaseStale, lazyUnmount, UNMOUNT_MS, unmountStuckOf: (mp) => unmountStuck.has(mp) };
+module.exports = { deviceFolderMount, heldRefresher, pullMountArgs, PULL_ROW, isMountDaemonOf, mountDaemonsOf, killMountDaemons, releaseStale, lazyUnmount, UNMOUNT_MS, unmountStuckOf: (mp) => stuckAt(mp), openHeld, waitMounted };

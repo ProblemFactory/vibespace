@@ -37,6 +37,7 @@ const procStat = async (root, pid) => { let s; try { s = await fs.promises.readF
 const notOurs = (e) => !!e && ['ENOENT', 'ESRCH', 'EACCES', 'EPERM'].includes(e.code);   // ended, or another user's (hidepid): not ours
 const READ_MS = 2000;   // B-e783: one /proc read that has not answered — the walk gives up («can't tell») and never asks that process again
 const CANT_TELL_GAP_MS = 30 * 60e3;   // r9: a «can't tell» entry this old is an episode long over — the next one waits again
+const DAEMON_ASK_MS = 15000;   // B-323e (主开发 r1299): the detached start's answer (its spawn) is awaited this long; past it: no verdict, no start said
 const CANT_TELL_MS = 60000;   // B-e783 r8: a connect waits at most this long on «can't tell» (a sleeper it cannot read may be ANY rclone: a pull mount's, another instance's) — then it connects, said
 const hasProcMemo = new Map();   // no /proc (a hub on macOS): «can't tell» — the walks' callers keep their old answer; asked once per root
 const hasProc = (opts) => { const k = (opts && opts.procRoot) || ''; if (!hasProcMemo.has(k)) hasProcMemo.set(k, PI.hasProc(opts)); return hasProcMemo.get(k); };
@@ -1348,17 +1349,32 @@ class MountManager {
     // WHERE the cache lives is decided HERE, at a remount, after the outgoing daemon is gone (lane vfs-cache-local)
     const cacheDir = await this._placeCache(m, rcQueue);
     const args = this._mountArgv(m, { remote, mp, cacheDir, rcSocket: this._rcSocketReady(m) });
-    // detached: mounts survive server restarts (adopted on boot)
-    const log = this._openMountLog(m.id);
-    const child = spawn(this.rcloneBin(), args, { env, detached: true, stdio: ['ignore', log, log] });
-    child.on('error', (e) => console.warn(`[mounts] mount ${id}: the rclone daemon could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
-    child.unref();
-    this._seedDaemonId(mp, child.pid);   // B-e783: known from its first moment — judged by its stat line, killed without a walk
+    // THE DAEMON'S OWN START (B-323e, 主开发 r1299): THE STARTER starts it DETACHED — never signalled, held nor counted by it — so it
+    // outlives the starter and the hub and is adopted after a restart as before, and the hub never forks for it. Its output goes to the
+    // record's OWN log (the path judged here, the marker written first, as today); its env is the record's whole env (the starter keeps
+    // none of it); its answer comes at its SPAWN (the pid, seeded and watched as before). No /proc (law 6): the watch reads its life by
+    // signal 0 as before, the starter reaping it when it ends; adoption has no walk there — a start whose ANSWER WAS LOST holds the
+    // next start on its mount point as «can't tell» does (bounded, CANT_TELL_MS), the rest as before (a connect starts one)
+    const log = this._openMountLog(m.id), logPath = this._mountLogFile(m.id);
     fs.closeSync(log);
+    const st = await require('./server/child-starter').childStarter().run(this.rcloneBin(), args, { detach: { log: logPath }, wholeEnv: true, env, timeoutMs: DAEMON_ASK_MS })
+      .catch((e) => ({ started: false, error: String((e && e.message) || e) }));
     m.desired = 'mounted';
+    if (!st || !st.started || !st.pid) {
+      // NO REPLY IS NO VERDICT (law 5): «could not be started», never «died» — the person's words are today's for a start that never ran;
+      // and A REPLY LOST IS NOT «NO START» (law 2): the next turn's own adoption look (the recorded identity, else the argv walk, above)
+      // finds a daemon that lives before any new start — one daemon a mount point, whatever is lost
+      console.warn(`[mounts] mount ${id}: the rclone daemon could not be started: ${(st && (st.error || (st.unknown ? 'no answer from the starter' : ''))) || 'not started'}`);
+      if (st && st.unknown && st.why !== 'no starter') (this._lostStart = this._lostStart || new Map()).set(mp, Date.now());   // an ask that may have started it: no /proc ⇒ the next look waits (_adoptable)
+      this._errors.set(id, this._sayW(id, st && st.unknown ? 'start_unanswered' : 'start_exited'));   // no reply: no verdict — never «exited»
+      this._save(); this._notify();
+      return false;
+    }
+    this._lostStart?.delete(mp);
+    this._seedDaemonId(mp, st.pid, st.starttime);   // B-e783: known from its first moment — judged by its stat line, killed without a walk (its start time read by its starter at its spawn)
     this._errors.delete(id);
     this._save();
-    return this._watchStart(m, mp, child.pid, opts);
+    return this._watchStart(m, mp, st.pid, opts);
   }
 
   // ── STARTING (2.369.213, the owner's OneDrive, 2026-10-04) ──
@@ -1719,9 +1735,10 @@ class MountManager {
 
   /** The daemon THIS hub spawned is known from its first moment: the pid and its start time — ONE stat line, read at once (no
    *  memory-map lock; never through the pool, which a wedged mount may hold — the record is what judges and kills with no walk). */
-  _seedDaemonId(mp, pid) {
+  _seedDaemonId(mp, pid, given = null) {
     if (!pid) return;
-    const st = PI.starttimeOf(pid, this._procOpts && this._procOpts.procRoot ? { procRoot: this._procOpts.procRoot } : undefined);
+    const root = this._procOpts && this._procOpts.procRoot;
+    const st = given != null && !root ? given : PI.starttimeOf(pid, root ? { procRoot: root } : undefined);
     if (st != null) this._record(mp, { pid, starttime: st });
   }
 
@@ -1733,14 +1750,18 @@ class MountManager {
     let pids;
     try { const p = (await this._daemonPids(mp, { strict: true }))[0] || 0; ct.delete(mp); return p; }
     catch (e) {
-      if (e && e.code === 'no_proc') return 0;
-      pids = (e && e.unreadPids) || [];
+      // B-323e (主开发 r1299, law 2 with NO /proc): a detached start whose ANSWER WAS LOST may live, and no walk can say so — the
+      // connect waits on it as on «can't tell» (bounded; the mount table shows it if it mounts meanwhile), never a second daemon at once
+      if (e && e.code === 'no_proc') { if (!this._lostStart?.has(mp)) return 0; pids = ['(a start whose answer was lost)']; }
+      else pids = (e && e.unreadPids) || [];
     }
     const was = ct.get(mp), now = Date.now();   // r8: «can't tell» may be ANY rclone asleep (a pull mount's, another instance's) — bounded
     const since = was && now - was.at < CANT_TELL_GAP_MS ? was.since : now;   // r9: from the FIRST refusal of this episode
     ct.set(mp, { since, at: now, pids });
+    const lost = this._lostStart?.get(mp);   // (no /proc) a lost start is held as long as a start may take — its ceiling — never «can't tell»'s 60 s
+    if (lost != null && now - lost < (this._startingT || MountManager.STARTING).ceilingMs) return null;
     if (now - since < (this._cantTellMs ?? CANT_TELL_MS)) return null;
-    ct.delete(mp);
+    ct.delete(mp); this._lostStart?.delete(mp);
     console.warn(`[mounts] mount ${id}: «can't tell» for ${Math.round((Date.now() - since) / 1000)} s (unread: ${pids.join(', ') || 'a read that stalled'}) — connecting`);   // the record id, never its name
     return 0;
   }
@@ -2335,9 +2356,16 @@ class MountManager {
 
   /** A NEW daemon's log fd: data/mount-logs/<id>.log APPENDED (it was reopened 'w' at every remount, destroying the
    *  dead daemon's last words), rotated to <id>.log.1 past LOG_ROTATE_BYTES, one marker line per spawn. */
+  /** B-323e (主开发 r1299, law 4): THE LOG PATH IS THE HUB'S OWN — the record's own file under the mount logs folder, judged here before
+   *  any child is asked to open it (an id that would leave the folder is refused, never opened) */
+  _mountLogFile(id) {
+    const dir = path.resolve(this._logDir), f = path.resolve(dir, `${id}.log`);
+    if (String(id).includes('\0') || path.dirname(f) !== dir || path.basename(f) !== `${id}.log`) throw Object.assign(new Error('a mount log path outside its folder'), { code: 'log_path' });
+    return f;
+  }
   _openMountLog(id) {
     fs.mkdirSync(this._logDir, { recursive: true });
-    const f = path.join(this._logDir, `${id}.log`);
+    const f = this._mountLogFile(id);
     try { if (fs.statSync(f).size >= LOG_ROTATE_BYTES) fs.renameSync(f, f + '.1'); } catch {}
     const fd = fs.openSync(f, 'a');
     try { fs.writeSync(fd, `${MountManager.LOG_MARK} ${new Date().toISOString()}\n`); } catch {}

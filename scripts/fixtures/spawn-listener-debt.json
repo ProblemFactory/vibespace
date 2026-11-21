@@ -5,7 +5,7 @@
     { "file": "src/remote-fs.js", "n": 1, "sites": "the ssh write (writeFile)", "owner": "bl-loop-a, the next unit (2.369.413)" }
   ],
   "survives": [
-    { "file": "src/mounts.js", "n": 2, "sites": "the rclone mount start, the drive sign-in's rclone" },
+    { "file": "src/mounts.js", "n": 1, "sites": "the drive sign-in's rclone (B-323e: the rclone mount start rides the starter, detached)" },
     { "file": "src/plugins/frp.js", "n": 1, "sites": "the frpc start" },
     { "file": "src/plugins/tailscale.js", "n": 2, "sites": "the tailscaled start, the sign-in" },
     { "file": "src/vnc.js", "n": 1, "sites": "the desktop session's start" },

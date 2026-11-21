@@ -27,7 +27,14 @@
  *    gave it — and keeps nothing. The hub's OWN secret prefixes (THE one secret shape's first half) are refused in it, a
  *    guard against a mistake (a site handing process.env whole). It is never said: no part of it reaches a journal, a log
  *    line or an error's words (the refusal is said once, as a count).
+ *  · THE DETACHED START (B-323e — the mount daemon's own start, 主开发 r1299): `run(cmd, args, { detach: { log }, wholeEnv, env,
+ *    timeoutMs })` — a long-lived child the starter NEVER signals, NEVER holds, NEVER counts (its fault, its end, its re-arm and the
+ *    hub's end leave it alone: the kill law still reads «only what it holds»). Its own session, its output to the log the caller
+ *    judged (opened for append there), its answer AT THE SPAWN: {started, pid} or its start error; `timeoutMs` bounds only that
+ *    answer. NO ANSWER IS NO VERDICT: `unknown` — the caller's own look decides whether one lives (a reply lost is not «no start»).
+ *    The old road (after two faults) starts it the same way from this process.
  */
+const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { serviceEnv, SECRET_SHAPE } = require('../agent-env');
@@ -78,7 +85,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
     let m; try { m = JSON.parse(line); } catch { return; }
     if (!m || typeof m !== 'object') return;   // only an object is an answer (a stray `null` / number never throws in the pipe's handler)
     const q = pending.get(m.id); if (!q) return;
-    if (m.ev === 'started') { q.started = true; q.pid = Number(m.pid) || 0; return; }
+    if (m.ev === 'started') { q.started = true; q.pid = Number(m.pid) || 0; if (q.detach && m.logClose) log.warn(`[child-starter] a detached start's log descriptor did not close in the starter: ${m.logClose}`); if (q.detach) settle(m.id, { started: true, detached: true, starttime: m.starttime == null ? null : m.starttime, code: null, signal: null, stdout: '', stderr: '', error: null }); return; }   // B-323e: a detached start answers at its spawn
     if (m.ev === 'timeout') { settle(m.id, { started: true, timedOut: true, overflow: !!m.overflow, code: null, signal: 'SIGKILL', stdout: '', stderr: '' }); return; }
     if (m.ev === 'exit') {
       if (q.settled) { pending.delete(m.id); refs(); try { q.onLateExit?.(); } catch { } return; }   // a timed-out child that ended at last
@@ -110,7 +117,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
     if (!o.wholeEnv) for (const [k, v] of Object.entries(o.envAdd || {})) if ((typeof v === 'string' || v === null) && !SECRET_NAME.test(k)) add[k] = v;   // null = the site's env lacks it (removed)
     return new Promise((resolve) => {
       const bound = (o.timeoutMs > 0 ? o.timeoutMs : NO_BOUND_MS) + guardMs;
-      const q = { resolve, settled: false, started: false, pid: 0, onTimeout: o.onTimeout || null, onLateExit: o.onLateExit || null, timer: null };
+      const q = { resolve, settled: false, started: false, pid: 0, onTimeout: o.onTimeout || null, onLateExit: o.onLateExit || null, timer: null, detach: !!o.detach };
       // its read (S): a timer runs before the loop reads its pipe — a hub held past the bound would fault a working starter; the
       // check waits one turn (setImmediate runs after the poll phase), so an answer already in the pipe is read first
       // + ONE more guard while the starter lives (its readers: a whole-box stall freezes both processes — the hub's timer fires on
@@ -120,7 +127,9 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
       pending.set(id, q); refs();
       const p = proc;
       if (!p.stdin.listenerCount('error')) p.stdin.on('error', () => { });   // a pipe the starter closed is never an uncaught 'error' (§101)
-      try { p.stdin.write(JSON.stringify({ op: 'run', id, cmd: String(cmd), args: (args || []).map(String), env: add, ...(o.wholeEnv ? { whole: true } : {}), timeoutMs: o.timeoutMs > 0 ? o.timeoutMs : 0, maxBuffer: o.maxBuffer || 1048576, capture: !!o.capture }) + '\n'); }
+      try { p.stdin.write(JSON.stringify(o.detach
+        ? { op: 'detach', id, cmd: String(cmd), args: (args || []).map(String), env: add, ...(o.wholeEnv ? { whole: true } : {}), log: String(o.detach.log || '') }   // B-323e: never held there
+        : { op: 'run', id, cmd: String(cmd), args: (args || []).map(String), env: add, ...(o.wholeEnv ? { whole: true } : {}), timeoutMs: o.timeoutMs > 0 ? o.timeoutMs : 0, maxBuffer: o.maxBuffer || 1048576, capture: !!o.capture }) + '\n'); }
       catch { fault('the pipe to the starter broke'); }
     });
   }
@@ -137,6 +146,17 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
   /** THE OLD ROAD (after two faults): a direct start from this process, with the starter road's env (directEnv) */
   function runDirect(cmd, args, o) {
     stats.direct++;
+    if (o.detach) return new Promise((resolve) => {   // B-323e: the detached start, as the starter makes it (its own session, the log, the answer at its spawn)
+      let fd = null, c = null, said = false, startErr = null;
+      const no = (e) => resolve({ started: false, code: null, error: String((e && e.code) || e) });
+      try { fd = fs.openSync(String(o.detach.log || ''), 'a'); } catch (e) { no(e); return; }
+      try { const env = directEnv(o); c = spawn(cmd, args, { env, detached: true, stdio: ['ignore', fd, fd] }); } catch (e) { startErr = e; }
+      // ONE close of the log's descriptor, here: spawn returns after the fork, so the child already holds its own copy (or none started)
+      try { fs.closeSync(fd); } catch (e) { log.warn(`[child-starter] the old road's log descriptor did not close: ${(e && e.code) || e}`); }
+      if (!c) { no(startErr); return; }
+      c.on('error', (e) => { if (said) return; said = true; no(e); });
+      c.on('spawn', () => { if (said) return; said = true; try { c.unref(); } catch { } resolve({ started: true, detached: true, pid: c.pid, starttime: (() => { try { return require('../proc-identity.js').starttimeOf(c.pid); } catch { return null; } })(), code: null, signal: null, stdout: '', stderr: '', error: null }); });
+    });
     return new Promise((resolve) => {
       let c, out = '', err = '', done = false, timedOut = false, outN = 0, errN = 0, overflow = false, t = null;
       const max = o.maxBuffer || 1048576;

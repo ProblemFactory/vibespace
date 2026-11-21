@@ -368,7 +368,7 @@ try {
     // FOUNDING, a count a FILE (cure 3, the read's SHOULD: a sum let one file grow while another fell): raising one is an edit here
     const FOUNDING = {
       pipeFirst: { 'src/routes/files.js': 3, 'src/remote-fs.js': 1 },   // B-147f: desktop-display (2) and node-runtime (1) cured — out; B-323e: machine-mounts' two ride the starter — out
-      survives: { 'src/mounts.js': 2, 'src/plugins/frp.js': 1, 'src/plugins/tailscale.js': 2, 'src/vnc.js': 1, 'src/routes/files.js': 4, 'src/remote-fs.js': 1, 'src/claude-oat-probe.js': 1, 'src/device-mount.js': 1 },
+      survives: { 'src/mounts.js': 1, 'src/plugins/frp.js': 1, 'src/plugins/tailscale.js': 2, 'src/vnc.js': 1, 'src/routes/files.js': 4, 'src/remote-fs.js': 1, 'src/claude-oat-probe.js': 1, 'src/device-mount.js': 1 },
     };
     const SURV_MARK = 'ckpt61 cure 2: the hub survives a start that fails';
     const bad = sites.filter((x) => x.bad).map((x) => x.site);

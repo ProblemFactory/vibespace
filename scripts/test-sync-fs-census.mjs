@@ -144,6 +144,8 @@ const ROWS = [
   ["src/mounts.js", "MountManager._mountGmail", 1, "guarded", "mkdir of a gmail row's folder (filesystem:false: a LOCAL folder, never a storage root); under a FUSE mount the guard refuses it"],
   ["src/mounts.js", "MountManager._mintViaMc", 2, "local-only", "policyFile = os.tmpdir()/vs-policy-<rand>.json, written and removed by the hub itself"],
   ["src/mounts.js", "MountManager._cpuTicks", 1, "local-only", "`${procRoot || '/proc'}/<pid>/stat` — /proc (procRoot only a test's planted root; B-e783: one stat line, no memory-map lock)"],
+  ["src/server/child-starter-proc.js", "*", 1, "via-safefs", "B-323e (lane bl-machines-b): THE STARTER process (src/server/child-starter.js starts it — never the hub's main thread): its detached start opens the log the hub judged, <dataDir>/mount-logs/<id>.log (mounts.js _mountLogFile), for append"],
+  ["src/server/child-starter.js", "createChildStarter > runDirect", 1, "local-only", "B-323e (lane bl-machines-b): the old road's detached start (after two faults) opens the log the caller judged — <dataDir>/mount-logs/<id>.log (mounts.js _mountLogFile), never a storage path"],
   ["src/nice-program.js", "*", 1, "local-only", "B-460d niceProgram (moved here by its remainder: ONE file, the hub's starts and the device agent's hello): ONE look per process for the nice program in FIXED local system dirs (/usr/bin, /bin, /usr/local/bin, /opt/homebrew/bin — never a PATH entry), at the first ask"],
   ["src/node-runtime.js", "*", 7, "local-only", "root = the instance data dir (data/runtime, runtime-boot.js) or the agentd device root; provision runs in runtime-check.mjs / agentd"],
   ["src/opencode-serve.js", "writeJsonAtomic", 3, "local-only", "only caller writeRecord passes recordPath = <dataDir>/opencode-serve.json; dataDir = <checkout>/data (cli-env.js:234)."],
@@ -430,6 +432,7 @@ const LAUNCHERS = {
   "src/job-logs-sweep-worker.js": "src/job-logs-sweep.js",   // lane job-logs-sweep: the job-logs remover (createRemover)
   "src/search-index-worker.js": "src/server/search-index.js",
   "src/usage-index-worker.js": "src/server/usage-index.js",
+  "src/server/child-starter-proc.js": "src/server/child-starter.js",   // B-323e (lane bl-machines-b): THE STARTER process (its detached start's log)
 };
 
 /** The census over a set of sites: { unclaimed, stale: [{row, got}], claimed: Map(row → n) }. */

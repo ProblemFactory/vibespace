@@ -10,8 +10,14 @@
  * request's env (its site built it through serviceEnv), and this process keeps none of it.
  * IT NEVER OUTLIVES THE HUB: when its stdin ends or closes (the hub is gone — the pipe closes with it), or its stdout
  * breaks, it kills the children it holds and ends. It signals only the children it spawned and holds (by request id).
+ * A DETACHED CHILD (op 'detach', B-323e — the mount daemon's own start, 主开发 r1299) is the one it NEVER signals, NEVER holds,
+ * NEVER counts: started in its own session, its output to the log file the hub named (opened here for append; the hub judged the
+ * path and wrote its marker first), unref'd, answered at its SPAWN (started + pid) or by its start error; it outlives this process
+ * and the hub. Its env (a record's sign-in material, the request's whole env) is handed to that one child and kept by nothing
+ * here: the request is dropped once it is started, and no later child sees it (each child's env is built anew).
  */
 const { spawn } = require('child_process');
+const fs = require('fs');
 
 const held = new Map();   // request id → the ChildProcess this process spawned
 let buf = '', ending = false;
@@ -27,6 +33,7 @@ function bye() {
 function handle(line) {
   let m; try { m = JSON.parse(line); } catch { return; }
   if (!m || typeof m !== 'object') return;
+  if (m.op === 'detach') { detach(m); return; }   // B-323e: never held (below)
   if (m.op !== 'run') return;
   const id = m.id, max = Number(m.maxBuffer) > 0 ? Number(m.maxBuffer) : 1048576, capture = !!m.capture;
   const cmd = String(m.cmd || ''), args = Array.isArray(m.args) ? m.args.map(String) : [];
@@ -52,6 +59,23 @@ function handle(line) {
   c.on('spawn', () => send({ id, ev: 'started', pid: c.pid }));
   c.on('close', (code, signal) => end({ code, signal }));
   if (Number(m.timeoutMs) > 0) timer = setTimeout(() => { timedOut = true; try { c.kill('SIGKILL'); } catch { } send({ id, ev: 'timeout', overflow }); }, Number(m.timeoutMs));   // an overflow kept: the bound past the cut is not «hung»
+}
+
+/** B-323e (主开发 r1299): THE DETACHED START — never in `held`, never signalled, never counted; the env dropped once started */
+function detach(m) {
+  const id = m.id, cmd = String(m.cmd || ''), args = Array.isArray(m.args) ? m.args.map(String) : [], logPath = String(m.log || '');
+  const env = (m.whole === true) ? {} : { ...process.env };   // (as the run op builds it — its text kept apart: a suite's red anchors the run op's line; no closure below holds it)
+  for (const [k, v] of Object.entries(m.env || {})) { if (typeof v === 'string') env[k] = v; else if (v === null) delete env[k]; }
+  m.env = null;   // the request keeps no sign-in material once its child's env is built
+  let fd = null, c = null, said = false, startErr = null, closeErr = null;
+  const no = (e) => { send({ id, ev: 'exit', code: null, signal: null, error: String((e && e.code) || e) }); };
+  try { fd = fs.openSync(logPath, 'a'); } catch (e) { return no(e); }
+  try { c = spawn(cmd, args, { env, detached: true, stdio: ['ignore', fd, fd] }); } catch (e) { startErr = e; }
+  // ONE close of the log's descriptor, here: spawn returns after the fork, so the child already holds its own copy (or none started)
+  try { fs.closeSync(fd); } catch (e) { closeErr = String((e && e.code) || e); }
+  if (!c) return no(startErr);
+  c.on('error', (e) => { if (said) return; said = true; no(e); });
+  c.on('spawn', () => { if (said) return; said = true; try { c.unref(); } catch { } send({ id, ev: 'started', pid: c.pid, detached: true, starttime: (() => { try { return require('../proc-identity.js').starttimeOf(c.pid); } catch { return null; } })(), ...(closeErr ? { logClose: closeErr } : {}) }); });   // its start time read here, before this process can reap it (the hub's adoption proof)
 }
 
 process.stdin.setEncoding('utf8');

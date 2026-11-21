@@ -170,6 +170,8 @@ const ROWS = [
   ["src/machine-mounts.js","*",7,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/migration-runner.js","*",5,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
   ["src/mounts.js","*",18,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/child-starter-proc.js","*",1,"not-main","—","—","B-323e (lane bl-machines-b): THE STARTER process (never the hub's main thread): its detached start opens the judged mount log (<dataDir>/mount-logs/<id>.log) for append — the daemon's own output"],
+  ["src/server/child-starter.js","*",1,"not-a-store","—","—","B-323e (lane bl-machines-b): the old road's detached start opens the judged mount log for append — the daemon's own output file, never a store's write"],
   ["src/opencode-serve.js","*",9,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/opslog.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/plugins.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],

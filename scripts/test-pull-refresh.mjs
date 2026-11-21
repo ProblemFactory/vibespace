@@ -423,7 +423,7 @@ try {
     check('no /proc ⇒ nothing found, nothing signalled (the fusermount pass alone)', (await mountDaemonsOf(mac, { procRoot: path.join(tmp, 'no-proc') })).length === 0);
     const dsrc = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
     check('the pre-clean goes through killMountDaemons; no sync /proc walk and no substring match is left in the file',
-/if \(!preCleaned\) await releaseStale\(mountpoint, \{ log \}\);[^\n]*\n  await fs\.promises\.mkdir\(mountpoint/.test(dsrc) && /if \(\(await lazyUnmount\(mountpoint, \{ say: log, ms \}\)\) === 'hung'\) throw [^\n]*\n  return killMountDaemons\(mountpoint/.test(dsrc) && !/readdirSync\('\/proc'\)/.test(dsrc) && !/cmd\.includes\(mountpoint\)/.test(dsrc));
+/if \(!preCleaned\) await releaseStale\(mountpoint, \{ log, held: heldChild \}\);[^\n]*\n  await fs\.promises\.mkdir\(mountpoint/.test(dsrc) && /if \(\(await lazyUnmount\(mountpoint, \{ say: log, ms, held \}\)\) === 'hung'\) throw [^\n]*\n  return killMountDaemons\(mountpoint/.test(dsrc) && !/readdirSync\('\/proc'\)/.test(dsrc) && !/cmd\.includes\(mountpoint\)/.test(dsrc));
     // RED CONTROL: the release's predicate (a substring of the joined command line) in a patched copy — the leg goes red
     const SRC = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src');
     const body = /function isMountDaemonOf\(argv, mountpoint\) \{\n[\s\S]*?\n\}\n/;
@@ -477,25 +477,25 @@ try {
       } finally { process.env.PATH = path.join(FC, 'bin') + ':' + PATH0; }
       check('A: the unmount ladder — fusermount3 when it is here, fusermount when it is not, neither ⇒ said ONCE (never a silent no-op)', a1 === 'ok' && fuses(path.join(FC, 'mnt-l3')) === 1 && a2 === 'ok' && fuses(path.join(FC, 'mnt-l2')) === 1 && a3 === 'missing' && said.length === 1 && /neither fusermount3 nor fusermount is on PATH/.test(said[0]), JSON.stringify({ a1, a2, a3, said }));
     }
-    { // the cure (the readers' 1): THE UNMOUNT CHILD HAS A BOUND — a hung one is ended by its handle, said once, never waited on
-      const DM = require('../src/device-mount.js');
-      const B3 = path.join(FC, 'bin-hang'); fs.mkdirSync(B3, { recursive: true });
-      const hangLog = path.join(FC, 'hang.log'); fs.writeFileSync(hangLog, '');
-      fs.writeFileSync(path.join(B3, 'fusermount3'), `#!/bin/sh\necho "$*" >> '${hangLog}'\nexec sleep 30\n`, { mode: 0o755 });
-      const spawns = () => fs.readFileSync(hangLog, 'utf8').split('\n').filter(Boolean).length;
+    { // the cure (the readers' 1): THE UNMOUNT CHILD HAS A BOUND — a hung one is ended at its bound, said once, never waited on.
+      // B-323e (lane bl-machines-b): the pair rides THE STARTER — over a STAND-IN starter here, whose killed child LINGERS (asleep in the
+      // kernel) until this leg tells its late end: through the real one its exit line may arrive with its timeout line (one chunk)
+      const DM = require('../src/device-mount.js'), CS = require('../src/server/child-starter.js');
+      const asks = [], late = [];
+      const lingering = { stats: () => ({}), run: (cmd, args, o) => { asks.push({ cmd, mp: args[args.length - 1], ms: o && o.timeoutMs }); if (o && o.onTimeout) o.onTimeout(0); if (o && o.onLateExit) late.push(o.onLateExit); return Promise.resolve({ started: true, timedOut: true, code: null, pid: 0 }); } };
       const mpH = path.join(FC, 'mnt-hang'), said = [];
-      let a1, a2, rel = null, stuckAfter = null;
+      let a1, a2, n2, rel = null, stuckAfter = null;
+      const S0 = CS.childStarter(); CS.setChildStarter(lingering);
       try {
-        process.env.PATH = B3 + ':' + PATH0;
         a1 = await DM.lazyUnmount(mpH, { ms: 40, say: (l) => said.push(l) });
-        a2 = await DM.lazyUnmount(mpH, { ms: 40, say: (l) => said.push(l) });   // its first child has not exited yet: no second one
-        const n2 = spawns();
-        await until(() => !DM.unmountStuckOf(mpH));   // the killed child exits — the mount point may be tried again
+        a2 = await DM.lazyUnmount(mpH, { ms: 40, say: (l) => said.push(l) });   // its first child has not ended: no second one
+        n2 = asks.filter((x) => x.mp === mpH).length;
+        late.splice(0).forEach((f) => { try { f(); } catch { } });   // the killed child ends at last — the mount point may be tried again
         stuckAfter = DM.unmountStuckOf(mpH);
         try { await DM.releaseStale(path.join(FC, 'mnt-hang2'), { ms: 40, log: () => {} }); } catch (e) { rel = e && e.code; }
-        check('A: a hung unmount answers «hung» at its bound, its child ended by the handle, SAID once; while that child lives the mount point gets no second child; a release over it fails BY NAME (unmount_hung)',
-          a1 === 'hung' && a2 === 'hung' && n2 === 1 && said.length === 1 && /could not release the folder — its unmount did not answer/.test(said[0]) && stuckAfter === false && rel === 'unmount_hung', JSON.stringify({ a1, a2, n2, said, stuckAfter, rel }));
-      } finally { process.env.PATH = path.join(FC, 'bin') + ':' + PATH0; }
+        check('A: a hung unmount answers «hung» at its bound, its child ended by the starter, SAID once; while that child lives the mount point gets no second child; a release over it fails BY NAME (unmount_hung)',
+          a1 === 'hung' && a2 === 'hung' && n2 === 1 && asks.every((x) => x.ms === 40) && said.length === 1 && /could not release the folder — its unmount did not answer/.test(said[0]) && stuckAfter === false && rel === 'unmount_hung', JSON.stringify({ a1, a2, n2, said, stuckAfter, rel }));
+      } finally { CS.setChildStarter(S0); }
     }
     const rc0 = await realChainControl;
     if (rc0.skip) console.log(`  SKIP test-pull-refresh §15 A CONTROL: the release ${BASE_REF} is not in this checkout (a depth-1 clone)`);

@@ -732,7 +732,7 @@ class MachineMounts {
       // B-fcc7 (adversarial r1 #2): release what the LAST chain left FIRST, before the machine is asked anything — a heal that
       // fails (an ssh machine unreachable: _online() is always true for ssh; a folder server refused) never leaves the old FUSE
       // entry for the next try five minutes on
-      await DM.releaseStale(rec.mountpoint, { log: this.log });
+      await DM.releaseStale(rec.mountpoint, { log: this.log, held: heldChild });   // B-323e: a stuck unmount child's end, asked of /proc
       if (this._pullErrors && this._pullErrors.delete(rec.id)) this._notify();   // cure 2: the folder IS released now — its words go, whatever the mount does next
       const device = await this.hosts.deviceBounded(rec.hostId, 10000); // ssh: daemon over --stdio; dial: the dialed-in link
       // normalize a stored trailing slash so an EXISTING record (minted before
@@ -742,7 +742,7 @@ class MachineMounts {
       let entry = null;
       const h = await DM.deviceFolderMount({
         device, remotePath, mountpoint: rec.mountpoint,
-        rcloneBin: this.rcloneBin(), log: this.log, preCleaned: true,
+        rcloneBin: this.rcloneBin(), log: this.log, preCleaned: true, heldChild,   // B-323e: the witness of a child whose end may never be heard
         canRelease: () => !this._otherHolds(rec),   // B-844b: a pull removed and added again on this folder — the new record's mount stays
         // B-fcc7: its rclone exited — the mount point is already released (lazy unmount); the row says so at once, the
         // sweep's pending branch remounts while the machine is linked (only THIS chain's entry: a newer one is left alone).
@@ -1236,7 +1236,7 @@ class MachineMounts {
     let prev = Promise.resolve();
     for (const rec of offline) {
       const key = this._markKey(rec);   // B-844b: the REAL path
-      const p = prev.then(() => DM.releaseStale(rec.mountpoint, { log: this.log })).then(() => { if (!this._held.has(rec.id) && this._pullErrors && this._pullErrors.delete(rec.id)) this._notify(); }).catch((e) => {   // read 2: a held record's words stay
+      const p = prev.then(() => DM.releaseStale(rec.mountpoint, { log: this.log, held: heldChild })).then(() => { if (!this._held.has(rec.id) && this._pullErrors && this._pullErrors.delete(rec.id)) this._notify(); }).catch((e) => {   // read 2: a held record's words stay
         if (e && e.code === 'unmount_hung' && !this._held.has(rec.id) && this._state.mounts.some((m) => m.id === rec.id)) { this._sayCode(rec.id, e); (this._pullErrors = this._pullErrors || new Map()).set(rec.id, e.message); this._notify(); }
       });
       this._releasing.set(key, p);
