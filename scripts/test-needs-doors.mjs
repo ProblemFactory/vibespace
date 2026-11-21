@@ -1803,13 +1803,40 @@ console.log('⑦ THE RELEASE FACTS (verifier #4 / #5)');
   const statedMs = rowM ? Number(rowM[1]) * (rowM[2] === 's' ? 1000 : 1) : null;
   ok(statedMs !== null && statedMs > FIFO_BOUND_MS, `verifier #4: scripts/ci.mjs's test-needs-doors row states a cost above the ${FIFO_BOUND_MS} ms this suite waits on purpose (the FIFO read's bound) — it states ${rowM ? rowM[1] + ' ' + rowM[2] : 'no time'}`, rowM && rowM[0]);
   // verifier #5: the user CHANGELOG's newest «Fixed» is what a user of the RELEASE notices — none of its bullets names a door the same
-  // version ADDS (a defect of a door the release never had is the engineering log's); the three languages keep one bullet count
-  const sectionOf = (file) => { const t = fs.readFileSync(path.join(REPO, file), 'utf8'); const top = t.split(/\n## /)[1] || ''; const fixed = (top.split(/\n### /).find((x) => /^(Fixed|修复|修正)\s/.test(x)) || ''); return { head: top.split('\n')[0], fixed: fixed.split('\n').filter((l) => l.startsWith('- ')) }; };
-  const en = sectionOf('CHANGELOG.md'), zh = sectionOf('CHANGELOG.zh.md'), ja = sectionOf('CHANGELOG.ja.md');
+  // version ADDS (a defect of a door the release never had is the engineering log's); the three languages keep one bullet count.
+  // A head may hold no «Fixed» at all (a version of changes only, as a lane's tip on a release is before its block gathers): then
+  // the three languages agree it has none. The head must still hold a section, so a parse that finds nothing is red, never a pass.
+  const sectionOf = (t) => {
+    const top = t.split(/\n## /)[1] || '';
+    const parts = top.split(/\n### /).slice(1);
+    const fixed = parts.find((x) => /^(Fixed|修复|修正)\s/.test(x));
+    return { head: top.split('\n')[0], sections: parts.length, hasFixed: fixed !== undefined, fixed: (fixed || '').split('\n').filter((l) => l.startsWith('- ')) };
+  };
   const ADDED_DOORS = ['Copy the public key to add', 'Stop loading', 'Close this tab', 'Reload now', 'Add the API key'];   // the doors picks 1–2 ADD (CHANGELOG «Added»)
-  const named = en.fixed.filter((b) => ADDED_DOORS.some((d) => b.includes(d)));
-  ok(/^2\.369\.\d+ — /.test(en.head) && en.fixed.length > 0 && named.length === 0 && zh.fixed.length === en.fixed.length && ja.fixed.length === en.fixed.length,
-    `verifier #5: CHANGELOG ${en.head} «Fixed» says what a user of the release notices — no bullet names a door this version adds (${en.fixed.length} bullets, the same in zh / ja)`, { named, counts: [en.fixed.length, zh.fixed.length, ja.fixed.length] });
+  const verdict5 = (en, zh, ja) => {
+    const named = en.fixed.filter((b) => ADDED_DOORS.some((d) => b.includes(d)));
+    const agree = [zh, ja].every((x) => x.hasFixed === en.hasFixed && x.fixed.length === en.fixed.length);
+    const held = [en, zh, ja].every((x) => x.sections > 0) && (!en.hasFixed || en.fixed.length > 0);
+    return { ok: /^2\.369\.\d+ — /.test(en.head) && held && agree && named.length === 0, named };
+  };
+  const read = (file) => sectionOf(fs.readFileSync(path.join(REPO, file), 'utf8'));
+  const en = read('CHANGELOG.md'), zh = read('CHANGELOG.zh.md'), ja = read('CHANGELOG.ja.md');
+  const v5 = verdict5(en, zh, ja);
+  const saw = { head: en.head, sections: [en.sections, zh.sections, ja.sections], fixed: [en, zh, ja].map((x) => (x.hasFixed ? x.fixed.length : 'none')) };
+  console.log(`  · verifier #5 judged: ${JSON.stringify(saw)}`);
+  ok(v5.ok, `verifier #5: CHANGELOG ${en.head} «Fixed» says what a user of the release notices — no bullet names a door this version adds (${en.hasFixed ? en.fixed.length + ' bullets' : 'no «Fixed» under this head'}, the same in zh / ja)`, { named: v5.named, ...saw });
+  // CONTROLS: four planted heads, each red by name (pure inputs to the same verdict; nothing is written)
+  const H = '# Changelog\n\n## 2.369.999 — 2026-01-01\n\n';
+  const fx = (n) => '### Fixed\n' + Array.from({ length: n }, (_, i) => `- fix ${i}`).join('\n') + '\n';
+  const CTRL = [
+    ['a Fixed bullet names a door the version adds', [H + '### Fixed\n- Stop loading now answers.\n', H + fx(1), H + fx(1)]],
+    ['zh keeps one bullet fewer', [H + fx(2), H + fx(1), H + fx(2)]],
+    ['en has a Fixed, zh and ja none', [H + fx(1), H + '### Changed\n- x\n', H + '### Changed\n- x\n']],
+    ['the head holds no section (a parse that finds nothing)', [H + 'no sections\n', H + 'no sections\n', H + 'no sections\n']],
+  ].map(([name, texts]) => ({ name, red: !verdict5(...texts.map(sectionOf)).ok }));
+  const calm = verdict5(...[H + '### Changed\n- x\n', H + '### Changed\n- x\n', H + '### Changed\n- x\n'].map(sectionOf)).ok;
+  console.log(`  · verifier #5 controls: ${CTRL.map((c) => `${c.name} ${c.red ? 'RED' : 'green'}`).join(' · ')} · a head of changes only in all three ${calm ? 'green' : 'RED'}`);
+  ok(CTRL.every((c) => c.red) && calm, 'CONTROL: verifier #5 goes RED by name for each planted head (an added door named, a bullet count apart, a Fixed in one language only, a head with no section) and holds a head of changes only in all three languages', CTRL);
 }
 
 console.log('⑥ WINDOWS, DIALOGS AND MACHINE ROWS (lane ui-needs-a-button pick 3)');
