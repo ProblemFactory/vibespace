@@ -556,13 +556,13 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
 {
   const MUT = mutantCopies('badm-builds', REPO);
   const src = read('src/browser-builds.js');
-  const agentMay = src.replace("  if (by !== 'user') return { ok: false, code: 'browser_choice_user_only',", "  if (false) return { ok: false, code: 'browser_choice_user_only',");
+  const agentMay = editAnchor(src, "  if (by !== 'user') return { ok: false, code: 'browser_choice_user_only',", "  if (false) return { ok: false, code: 'browser_choice_user_only',", "src/browser-builds.js");
   ok(agentMay !== src, 'control (a): the patch (a verdict that lets an agent choose a build) applies');
   const BBa = MUT.load('src/browser-builds.js', agentMay, 'agent-may');
   ok(judgeVerdict(BBa).length > 0, 'control (a): …and ①\'s verdict table goes red on it', judgeVerdict(BBa));
   const ks = read('src/server/browser-keeper.js');
   const kbk = read('src/server/browser-builds-keeper.js'), CBK = 'src/server/browser-builds-keeper.js'; // rv-browser F7: Change build… is the builds row's file
-  const fallback = ks.replace("    noteBuildMissing(p, c, v);\n    throw namedError(", "    noteBuildMissing(p, c, v);\n    return {};\n    throw namedError(");
+  const fallback = editAnchor(ks, "    noteBuildMissing(p, c, v);\n    throw namedError(", "    noteBuildMissing(p, c, v);\n    return {};\n    throw namedError(", "src/server/browser-keeper.js");
   ok(fallback !== ks, 'control (b): the patch (a keeper that falls back to the default build when the chosen one vanished) applies');
   const Kb = MUT.load('src/server/browser-keeper.js', fallback, 'fallback');
   const kb = Kb.create({ dataDir: path.join(ROOT, 'data-cb'), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false });
@@ -574,7 +574,7 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   ok(!eb && fake.launches().length === n0 + 1 && fake.launches().at(-1).exe === null, 'control (b): …it LAUNCHED the default build silently — exactly what ②\'s "refused by name, nothing launched" catches');
   try { await kb.stop(pb.id, { why: 'user' }); } catch { /* none */ }
   fs.renameSync(path.join(BROWSERS, 'chrome-152.0.1.2.away'), path.join(BROWSERS, 'chrome-152.0.1.2'));
-  const forget = ks.replace("      const launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0', ...(headed0 === true ? { AGENT_BROWSER_HEADED: '1' } : headed0 === false ? { AGENT_BROWSER_HEADED: '0' } : {}), ...providerEnv };", "      const launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0', ...(headed0 === true ? { AGENT_BROWSER_HEADED: '1' } : headed0 === false ? { AGENT_BROWSER_HEADED: '0' } : {}), ...(p.provider === 'chromium' ? {} : providerEnv) };");
+  const forget = editAnchor(ks, "      const launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0', ...(headed0 === true ? { AGENT_BROWSER_HEADED: '1' } : headed0 === false ? { AGENT_BROWSER_HEADED: '0' } : {}), ...providerEnv };", "      const launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0', ...(headed0 === true ? { AGENT_BROWSER_HEADED: '1' } : headed0 === false ? { AGENT_BROWSER_HEADED: '0' } : {}), ...(p.provider === 'chromium' ? {} : providerEnv) };", "src/server/browser-keeper.js");
   ok(forget !== ks, 'control (c): the patch (the build on the launch only, forgotten on the later calls) applies');
   const Kc = MUT.load('src/server/browser-keeper.js', forget, 'forget');
   fs.mkdirSync(path.join(ROOT, 'data-cc'), { recursive: true });
@@ -600,7 +600,7 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   try { await kd.stop(pd.id, { why: 'user' }); } catch { /* none */ }
   // verify r2 (H2): a keeper whose takeover does not ask whether the browser is restarting ⇒ the user takes over inside the
   // restart and it goes on under his hands; one blind to a Browse yourself in flight ⇒ Change build… restarts his opening tab
-  const noRestartGate = ks.replace("    if (profileId && switching.has(String(profileId))) { const p = profile(profileId);", "    if (false) { const p = profile(profileId);");
+  const noRestartGate = editAnchor(ks, "    if (profileId && switching.has(String(profileId))) { const p = profile(profileId);", "    if (false) { const p = profile(profileId);", "src/server/browser-keeper.js");
   ok(noRestartGate !== ks, 'control (h): the patch (a takeover blind to a restart in progress) applies');
   const Kh = MUT.load('src/server/browser-keeper.js', noRestartGate, 'no-restart-gate');
   fs.mkdirSync(path.join(ROOT, 'data-ch'), { recursive: true });
@@ -624,7 +624,7 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   ok(ri && ri.ok && ri.restarted === true, 'control (i): …Change build… RESTARTED the browser while his own tab was being opened — exactly what ②\'s Browse-in-flight leg catches', ri && (ri.code || ri.restarted));
   try { await ki.endHuman(pi.id, 'closed', { closeTab: true }); await ki.stop(pi.id, { why: 'user' }); } catch { /* none */ }
   // verify r2 (B5): a keeper with no settle window (the pre-fix heal) ⇒ the dead build is healed in its daemon, no second word
-  const noSettle = ks.replace("    if (rec.buildChange && now() - Number(rec.buildChange.at || 0) <= CHANGE_SETTLE_MS) return fallBackFromChange(rec, p, seenBy);\n", '');
+  const noSettle = editAnchor(ks, "    if (rec.buildChange && now() - Number(rec.buildChange.at || 0) <= CHANGE_SETTLE_MS) return fallBackFromChange(rec, p, seenBy);\n", '', "src/server/browser-keeper.js");
   ok(noSettle !== ks, 'control (j): the patch (no fall-back from a change that closed within seconds) applies');
   const fj = await fallBackLeg(MUT.load('src/server/browser-keeper.js', noSettle, 'no-settle'));
   ok(fj.events.map((e) => e.outcome).join() === 'changed' && fj.choice === '157.0.1.1' && fj.todos.length === 0, 'control (j): …the conversation heard only "changed" and the choice stayed on the build that closed — exactly what ②\'s fall-back leg catches', fj);
@@ -637,12 +637,12 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   ok(eg.restored.err && eg.restored.err.restored === true && eg.restored.events.length === 1 && eg.restored.events[0].outcome === 'changed', 'control (g): …the holder read "changed to Chrome 160" while the old build ran again — exactly what ②\'s outcome leg catches', eg.restored.events);
   // verify r1 (F5): the agent's profile view that keeps a named file's path; a status that hands the agent the launch view
   const ps = read('src/browser-profiles.js');
-  const keepPath = ps.replace("  if (rest.browser && rest.browser.kind === 'path') rest.browser = { kind: 'path' };\n", '');
+  const keepPath = editAnchor(ps, "  if (rest.browser && rest.browser.kind === 'path') rest.browser = { kind: 'path' };\n", '', "src/browser-profiles.js");
   ok(keepPath !== ps, 'control (e): the patch (an agent profile view that keeps the path) applies');
   const Pe = MUT.load('src/browser-profiles.js', keepPath, 'keep-path');
   const ve = Pe.agentProfileView({ id: 'bp-0000eeee', label: 'E', provider: 'chromium', owner: { kind: 'instance', id: null }, browser: { kind: 'path', path: '/opt/named/chrome' } }, {}, {});
   ok(ve.browser && ve.browser.path === '/opt/named/chrome', 'control (e): …the path crossed to the agent — exactly what ③b\'s versions-only leg catches', ve.browser);
-  const envLeak = ks.replace("browser: agentBrowserView(reg.browsers[l.profileId]), others:", "browser: browserView(reg.browsers[l.profileId]), others:");
+  const envLeak = editAnchor(ks, "browser: agentBrowserView(reg.browsers[l.profileId]), others:", "browser: browserView(reg.browsers[l.profileId]), others:", "src/server/browser-keeper.js");
   ok(envLeak !== ks, 'control (f): the patch (a status that hands the agent the browser\'s launch view) applies');
   const Kf = MUT.load('src/server/browser-keeper.js', envLeak, 'env-leak');
   fs.mkdirSync(path.join(ROOT, 'data-cf'), { recursive: true });
@@ -726,7 +726,7 @@ const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platfor
     const qAnchor = "  const failedAs = (verbWord) => { const pe = pluginErrorOf(status, body);";
     ok(es0.includes(qAnchor), 'control setup (B-a470): the quote\'s line is where the control cuts');
     const MA = mutantCopies('badm-a470', REPO);
-    const EQ = MA.load('src/browser-engines.js', es0.replace(qAnchor, "  const failedAs = (verbWord) => { const pe = null;"), 'no-quote');
+    const EQ = MA.load('src/browser-engines.js', editAnchor(es0, qAnchor, "  const failedAs = (verbWord) => { const pe = null;", "src/browser-engines.js"), 'no-quote');
     const qa = fv(EQ, 500, { ...DEN, permission: 'FileSystemRead', resource: '/usr/bin/python3' });
     ok(!qa.failed && !qa.error.includes('ERR_ACCESS_DENIED') && /does not speak this VibeSpace's engine protocol/.test(qa.error), 'CONTROL (B-a470): without the quote the 500 says the generic sentence — no code, no resource (RED for the legs above)', qa.error);
   }
@@ -770,7 +770,7 @@ const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platfor
     const bmCut = "  const lw = c.kind === 'plugin' && live && kernelLive && ";
     if (!bmSrc.includes(bmCut)) throw new Error('the anchor of the control «B-cf42 cure: the mark on a stopped row» is not in the source');
     const MCb = mutantCopies('browser-builds-cf42-cure', REPO);
-    const BMs = await import(MCb.write('src/lib/browser-build-model.js', bmSrc.replace(bmCut, "  const lw = c.kind === 'plugin' && kernelLive && "), 'mark-while-stopped', { esm: true }));   // stale-pins: kept — the base's line, written back by this RED control
+    const BMs = await import(MCb.write('src/lib/browser-build-model.js', editAnchor(bmSrc, bmCut, "  const lw = c.kind === 'plugin' && kernelLive && ", "src/lib/browser-build-model.js"), 'mark-while-stopped', { esm: true }));   // stale-pins: kept — the base's line, written back by this RED control
     ok(BMs.cardBuildLine({ choice: { kind: 'plugin', id: EID }, live: false, kernelLive: KL }, tK(null)).warn === true, 'CONTROL (B-cf42 cure): the base\'s line warns on a stopped row (RED for the leg above)');
     const eRow = { id: EID, label: 'Kernel', installed: true, executable: true, version: '150', features: ALL3, live: { n: 13, ...KV(rowsK[1][0]) } };
     const en = BMk.engineNote(eRow, tK(null)), ej = BMk.engineNote(eRow, tK(jaK)), e0 = BMk.engineNote({ ...eRow, live: null }, tK(null));
@@ -781,7 +781,7 @@ const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platfor
     const esK = read('src/browser-engines.js');
     ok(esK.includes(kAnchor), 'control setup (B-cf42): the verdict\'s kernel-feature filter is where the control cuts');
     const MK = mutantCopies('badm-cf42', REPO);
-    const EK = MK.load('src/browser-engines.js', esK.replace(kAnchor, "  const side = (a) => [...new Set((Array.isArray(a) ? a : []).map(String))].sort();"), 'all-words');
+    const EK = MK.load('src/browser-engines.js', editAnchor(esK, kAnchor, "  const side = (a) => [...new Set((Array.isArray(a) ? a : []).map(String))].sort();", "src/browser-engines.js"), 'all-words');
     ok(EK.kernelLiveVerdict(rowsK[4][0]) !== null, 'CONTROL (B-cf42): a verdict comparing every word says an egress-only engine runs otherwise (RED for the table above)');
   }
   // lane engine-spi-egress: the features are a CLOSED set; `egress-allowlist` needs the manifest's RESERVED row (a string)
@@ -1049,7 +1049,7 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
     const rCut = "{ failed: agentRoad ? agentFailed(e.failed) : e.failed }";
     if (!rSrc.includes(rCut)) throw new Error('the anchor of the control «B-a470 cure: the agent\'s path» is not in the source');
     const MCr = mutantCopies('browser-builds-a470-cure', REPO);
-    const RBm = MCr.load('src/routes/browser.js', rSrc.replace(rCut, '{ failed: e.failed }'), 'agent-gets-path');   // stale-pins: kept — the base's line, written back by this RED control
+    const RBm = MCr.load('src/routes/browser.js', editAnchor(rSrc, rCut, '{ failed: e.failed }', "src/routes/browser.js"), 'agent-gets-path');   // stale-pins: kept — the base's line, written back by this RED control
     ok(answer(RBm, '/api/agent/browser/start').failed.resource === '/usr/bin/python3', 'CONTROL (B-a470 cure): the base\'s answer hands the agent the hub\'s path (RED for the leg above)');
   }
   setMode(null);
@@ -1115,7 +1115,7 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
     const kCut = "  function markCleared(m, p) {\n    if (!m || !m.noticeId) return;\n";
     if (!kSrc.includes(kCut)) throw new Error('the anchor of the control «B-cf42 cure: the notice left open» is not in the source');
     const MCk = mutantCopies('browser-builds-cf42-notice', REPO);
-    const Kn = MCk.load('src/server/browser-keeper.js', kSrc.replace(kCut, "  function markCleared(m, p) {\n    return;\n"), 'notice-left-open');
+    const Kn = MCk.load('src/server/browser-keeper.js', editAnchor(kSrc, kCut, "  function markCleared(m, p) {\n    return;\n", "src/server/browser-keeper.js"), 'notice-left-open');
     const kn = mkKeeper(path.join(ROOT, 'data-eng-notice'), { engines: ENGR, serverSetting: (k) => settingsE[k], fleetFacts: () => fleetE, liveKeys: () => new Set([KEY_A, KEY_E]) }, Kn);
     const crm = await cureRun(kn);
     ok(crm.idX && crm.doneX.length === 0 && crm.doneY.length === 0, 'CONTROL (B-cf42 cure): a keeper that never resolves leaves «runs as standard Chrome» open after the kernel answers again (RED for the leg above)', crm);
@@ -1127,7 +1127,7 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
     const pSrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
     const pCut = (pSrc.match(/\n  if \(rest\.kernelLive\) rest\.kernelLive = \{[^\n]*/) || [''])[0];
     if (!pCut) throw new Error('the anchor of the control «B-cf42 cure: the agent view\'s bookkeeping» is not in the source');
-    const PBm = MCk.load('src/browser-profiles.js', pSrc.replace(pCut, ''), 'agent-view-keeps-bookkeeping');
+    const PBm = MCk.load('src/browser-profiles.js', editAnchor(pSrc, pCut, '', "src/browser-profiles.js"), 'agent-view-keeps-bookkeeping');
     ok('filed' in (PBm.agentProfileView(markRow, {}, {}).kernelLive || {}), 'CONTROL (B-cf42 cure): a view without its projection hands the agent the keeper\'s bookkeeping (RED for the leg above)');
   }
   // the PLUGIN turned off ⇒ the table loses it at once ⇒ refused browser_engine_missing (marked, ONE item)
@@ -1681,7 +1681,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const overlay = 'installed: !!(fact && (fact.usable || fact.why === \'not-executable\')), executable: v.ok, userBinary: v.ok ? null : { code: v.code, why: v.why, error: v.error } } };';
   if (!bes.includes(overlay)) ok(false, 'control (u): the anchor (the core\'s verdict over the plugin\'s word) is not in this tree', overlay);
   else {
-    const RU = MUTU.load('src/server/browser-engines.js', bes.replace(overlay, 'userBinary: null } };'), 'trust-plugin').create({ loader: LDRU, dataDir: path.join(UROOT, 'data'), timeoutMs: 2000, setting: (k) => settingsU[k] });
+    const RU = MUTU.load('src/server/browser-engines.js', editAnchor(bes, overlay, 'userBinary: null } };', "src/server/browser-engines.js"), 'trust-plugin').create({ loader: LDRU, dataDir: path.join(UROOT, 'data'), timeoutMs: 2000, setting: (k) => settingsU[k] });
     settingsU[UROW] = path.join(UD, 'gone');
     const pTrust = await RU.probe(UID);
     const vTrust = pTrust.ok ? ENGN.engineChoiceVerdict({ choice: { kind: 'plugin', id: UID }, engine: { ...pTrust.fact, executable: true } }) : null;
@@ -1691,7 +1691,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const engsL = read('src/browser-engines.js'), lAnchor = 'const LAUNCHER_ARG_RE = new RegExp(`^--?(?:${LAUNCHER_SWITCHES.map((r) => r.name).join(\'|\')})(?:=|$)`, \'i\');';
   if (!engsL.includes(lAnchor)) ok(false, 'control (l): the anchor (the launcher census\'s pattern) is not in this tree', lAnchor);
   else {
-    const EL = MUTU.load('src/browser-engines.js', engsL.replace(lAnchor, 'const LAUNCHER_ARG_RE = /(?!)/;'), 'no-launchers');
+    const EL = MUTU.load('src/browser-engines.js', editAnchor(engsL, lAnchor, 'const LAUNCHER_ARG_RE = /(?!)/;', "src/browser-engines.js"), 'no-launchers');
     const vl = EL.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--no-sandbox', '--browser-subprocess-path=/usr/bin/true'] } }, { id: UID });
     ok(vl.ok === true && vl.launch.args.includes('--browser-subprocess-path=/usr/bin/true'), 'control (l): a launch verdict without the launcher census ACCEPTS a plugin naming another program through --browser-subprocess-path — exactly what r3 catches', vl);
   }
@@ -1699,7 +1699,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const wAnchor = "function switchFormOf(a) { return String(a == null ? '' : a).replace(/^[\\s\\u0085]+|[\\s\\u0085]+$/g, ''); }";
   if (!engsL.includes(wAnchor)) ok(false, 'control (w): the anchor (the one trimmed reading) is not in this tree', wAnchor);
   else {
-    const EW = MUTU.load('src/browser-engines.js', engsL.replace(wAnchor, "function switchFormOf(a) { return String(a == null ? '' : a); }"), 'untrimmed');
+    const EW = MUTU.load('src/browser-engines.js', editAnchor(engsL, wAnchor, "function switchFormOf(a) { return String(a == null ? '' : a); }", "src/browser-engines.js"), 'untrimmed');
     const vw = EW.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--no-sandbox', '\t--browser-subprocess-path=/usr/bin/true', ' --no-proxy-server'] } }, { id: UID });
     const vw5 = EW.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--no-sandbox', '\t--browser-subprocess-path=/usr/bin/true'] } }, { id: UID });
     ok(vw.launcher !== '--browser-subprocess-path' && vw5.launcher !== '--browser-subprocess-path' && !/proxy is VibeSpace/.test(String(vw.error)), 'control (w): the UNTRIMMED reading never NAMES «\\t--browser-subprocess-path=…» nor « --no-proxy-server» as the switches Chromium trims them into (r5\'s switch-only rule still stops them, unnamed) — exactly what r4\'s «refused NAMING the switch» catches', { vw, vw5 });
@@ -1708,7 +1708,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const sAnchor = 'const SWITCH_FORM_RE = /^--?[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$/s;'; // r6: the `s` flag
   if (!engsL.includes(sAnchor)) ok(false, 'control (s): the anchor (the switch-only rule) is not in this tree', sAnchor);
   else {
-    const ES = MUTU.load('src/browser-engines.js', engsL.replace(sAnchor, 'const SWITCH_FORM_RE = /(?:)/;'), 'any-argument');
+    const ES = MUTU.load('src/browser-engines.js', editAnchor(engsL, sAnchor, 'const SWITCH_FORM_RE = /(?:)/;', "src/browser-engines.js"), 'any-argument');
     const vs = ES.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--no-sandbox', '--'] } }, { id: UID });
     const ws = ES.engineWrapperText({ program: '/k/chrome', args: [...(vs.ok ? vs.launch.args : []), '--proxy-server=http://127.0.0.1:1', '--proxy-bypass-list=<-loopback>'] });
     ok(vs.ok === true && ws.ok === true && /'--' '--proxy-server=http:\/\/127\.0\.0\.1:1'/.test(ws.text), 'control (s): without the switch-only rule a bare «--» passes and the wrapper writes the keeper\'s proxy pair AFTER the end of switches — exactly what r5 catches', ws.ok ? ws.text.split('\n').pop() || ws.text.split('\n').at(-2) : ws);
@@ -1731,7 +1731,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const upAnchor = "const userPathOf = (id) => { let v; try { v = setting(BE.binaryRowPath(id)); } catch { v = undefined; } return typeof v === 'string' ? v.trim() : ''; };";
   if (!bes.includes(upAnchor)) ok(false, 'control (d): the anchor (the owner\'s stored value only) is not in this tree', upAnchor);
   else {
-    const RD = MUTU.load('src/server/browser-engines.js', bes.replace(upAnchor, "const userPathOf = (id) => { let v; try { v = setting(BE.binaryRowPath(id)); } catch { v = undefined; } const r = tableRows().find((x) => x.id === id); const d = r ? (r.settings.find((s) => s.key === 'executablePath') || {}).default : ''; return String(typeof v === 'string' ? v : d || '').trim(); };"), 'manifest-default').create({ loader: stubLoader, dataDir: path.join(UROOT, 'data'), timeoutMs: 2000, setting: (k) => settingsD[k] });
+    const RD = MUTU.load('src/server/browser-engines.js', editAnchor(bes, upAnchor, "const userPathOf = (id) => { let v; try { v = setting(BE.binaryRowPath(id)); } catch { v = undefined; } const r = tableRows().find((x) => x.id === id); const d = r ? (r.settings.find((s) => s.key === 'executablePath') || {}).default : ''; return String(typeof v === 'string' ? v : d || '').trim(); };", "src/server/browser-engines.js"), 'manifest-default').create({ loader: stubLoader, dataDir: path.join(UROOT, 'data'), timeoutMs: 2000, setting: (k) => settingsD[k] });
     delete settingsD[UROW];
     const pM = await RD.probe(UID);
     ok(pM.ok && pM.fact.binaryPath === PROG && pM.fact.executable === true, 'control (d): a registry whose program path falls back to the manifest row\'s DEFAULT runs the program the PLUGIN named while the owner stored nothing — exactly what MAJOR 1 (b) catches', pM.ok ? { binaryPath: pM.fact.binaryPath } : pM);
@@ -1740,14 +1740,14 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const bbsU = read('src/browser-builds.js'), nAnchor = "if (c.kind === 'plugin' && source === 'user' && (code === 'browser_engine_kernel_missing' || code === 'browser_engine_not_executable')) {";
   if (!bbsU.includes(nAnchor)) ok(false, 'control (n): the anchor (the owner\'s program notice) is not in this tree', nAnchor);
   else {
-    const nm = MUTU.load('src/browser-builds.js', bbsU.replace(nAnchor, 'if (false) {'), 'kernel-words').missingNotice({ label: 'Work', choice: { kind: 'plugin', id: UID }, code: 'browser_engine_kernel_missing', engineLabel: 'Fixture User Engine', source: 'user', why: 'unset' });
+    const nm = MUTU.load('src/browser-builds.js', editAnchor(bbsU, nAnchor, 'if (false) {', "src/browser-builds.js"), 'kernel-words').missingNotice({ label: 'Work', choice: { kind: 'plugin', id: UID }, code: 'browser_engine_kernel_missing', engineLabel: 'Fixture User Engine', source: 'user', why: 'unset' });
     ok(!progNoticeOk(nm, 'Fixture User Engine') && /kernel is not installed/.test(nm.text), 'control (n): a notice blind to the engine\'s source tells the owner its «kernel is not installed» — exactly what MAJOR 2 catches', nm.text);
   }
   // (p) the settings door judging only the keys a body NAMES lets a bearer's whole-file POST erase the owner's rows
   const pssU = read('src/routes/persistence.js'), cmpAnchor = 'return [...keys].filter((k) => Object.hasOwn(cur, k) !== Object.hasOwn(nxt, k) || JSON.stringify(cur[k]) !== JSON.stringify(nxt[k]));';
   if (!pssU.includes(cmpAnchor)) ok(false, 'control (p): the anchor (the stored rows against the would-be file) is not in this tree', cmpAnchor);
   else {
-    const PRm = MUTU.load('src/routes/persistence.js', pssU.replace(cmpAnchor, 'return Object.keys(req.body && typeof req.body === \'object\' ? req.body : {}).filter((k) => RE.test(k));'), 'names-only');
+    const PRm = MUTU.load('src/routes/persistence.js', editAnchor(pssU, cmpAnchor, 'return Object.keys(req.body && typeof req.body === \'object\' ? req.body : {}).filter((k) => RE.test(k));', "src/routes/persistence.js"), 'names-only');
     const PDm = path.join(ROOT, 'persist-v3-mut'); fs.mkdirSync(PDm, { recursive: true });
     PRm.setup({ dataDir: PDm, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => {} });
     const appM = expressE(); appM.use(expressE.json()); appM.use(PRm.router);
@@ -1781,7 +1781,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   fs.renameSync(KP + '.away', KP);
   const es = read('src/browser-engines.js');
   const envAnchor = "    const extra = Object.keys(env).filter((k) => !ENGINE_ENV_KEYS.includes(k));";
-  const open = es.replace(envAnchor, "    const extra = [];");
+  const open = editAnchor(es, envAnchor, "    const extra = [];", "src/browser-engines.js");
   ok(es.includes(envAnchor) && open !== es, 'control (f): the patch (an engine verdict that lets any env key through) applies');
   const ENo = MUT.load('src/browser-engines.js', open, 'env-open');
   ok(ENo.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: [], env: { LD_PRELOAD: '/x' } } }, { id: EID }).ok === true, 'control (f): …LD_PRELOAD rides the browser\'s env — exactly what ⑦\'s browser_engine_env row catches');
@@ -1793,7 +1793,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const wrapAnchor = '    const egress = engine.egress || pproxy ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || \'\', ...(engine.egress ? { setting: engine.egress.setting, fallback: engine.egress.default } : {}), ...(pproxy ? { proxy: pproxy } : {}) }) : null;';   // B-8b87: + a profile's proxy rides the same egress pair
   if (!ks.includes(wrapAnchor)) ok(false, 'control (h): the anchor (the keeper\'s wrap) is not in this tree', wrapAnchor);
   else await (async () => {
-  const Kw = MUT.load('src/server/browser-keeper.js', ks.replace(wrapAnchor, '    const egress = null;'), 'no-wrap');
+  const Kw = MUT.load('src/server/browser-keeper.js', editAnchor(ks, wrapAnchor, '    const egress = null;', "src/server/browser-keeper.js"), 'no-wrap');
   fs.mkdirSync(path.join(ROOT, 'data-cw'), { recursive: true });
   LDRG.setEnabled(GID, true);
   const tw = Date.now(); while (!ENGRG.rows().length && Date.now() - tw < 8000) await new Promise((r) => setTimeout(r, 25));
@@ -2680,24 +2680,24 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   ok(bigR.st.maxErr > 2 && (uncaught.length > 0 || (eNosR && eNosR.code === 'hung')), `control (1): the OLD extract is RED — ${bigR.st.maxErr} 'error' listeners piled on one stream; the injected ENOSPC ${uncaught.length ? `reached process 'uncaughtException' (${uncaught.join(', ')}) — the hub's exit` : 'hung the install'}`, { maxErr: bigR.st.maxErr, uncaught, eNosR: eNosR && eNosR.code });
   for (const n of leftovers()) fs.rmSync(path.join(path.dirname(kdir), n), { recursive: true, force: true }); // what the hung copy left
   // (3) no node gate: the whole archive fetched and hashed, then the ARCHIVE blamed
-  const EDg = M8.load('src/server/engine-distribution.js', EDS.replace(gateAnchor, '      planOf(sid, { unpack: null });'), 'no-node-gate');
+  const EDg = M8.load('src/server/engine-distribution.js', editAnchor(EDS, gateAnchor, '      planOf(sid, { unpack: null });', "src/server/engine-distribution.js"), 'no-node-gate');
   writeKJ('/k.tar.zst'); const h13 = hits.length;
   const eG = await thrK(edAt('data-ed13c', { zlib: {}, nodeVersion: '20.20.2' }, EDg).installKernel(EID, { wait: true }));
   ok(eG && eG.code === 'build_unpack_failed' && hits.length > h13 && fs.existsSync(KP), 'control (3): a copy WITHOUT the gate fetches the whole archive, hashes it, then blames the ARCHIVE (build_unpack_failed) — RED against ⑪', { code: eG && eG.code, hits: hits.slice(h13) });
   // (4) no put-back / no restore: the previous kernel lost
-  const EDb = M8.load('src/server/engine-distribution.js', EDS.replace(backAnchor, backAnchor.replace('if (had)', 'if (false)')), 'no-put-back');
+  const EDb = M8.load('src/server/engine-distribution.js', editAnchor(EDS, backAnchor, backAnchor.replace('if (had)', 'if (false)'), "src/server/engine-distribution.js"), 'no-put-back');
   const eB = await thrK(edAt('data-ed13d', { io: failLand }, EDb).installKernel(EID, { wait: true }));
   const lostB = !fs.existsSync(KP) && fs.existsSync(removing);
-  const EDa = M8.load('src/server/engine-distribution.js', EDS.replace(asideAnchor, asideAnchor + ' return false;'), 'no-restore');
+  const EDa = M8.load('src/server/engine-distribution.js', editAnchor(EDS, asideAnchor, asideAnchor + ' return false;', "src/server/engine-distribution.js"), 'no-restore');
   const mB = await edAt('data-ed13e', {}, EDa).measure(EID, { force: true }); // round 3's measure would put it back — this copy never does
   const eA = await thrK(edAt('data-ed13f', { io: failLand }, EDa).installKernel(EID, { wait: true })); // the aside copy the control above left
   const lostA = !fs.existsSync(KP) && !fs.existsSync(removing);
   ok(eB && eA && !mB.ok && mB.code === 'browser_engine_kernel_missing' && lostB && lostA, 'control (4): a copy that does not move the previous kernel back leaves NO kernel at its path (measure: kernel missing) — RED; a copy that does not restore an aside copy DELETES it at the next landing — the previous kernel lost, RED', { mB: mB.code, lostB, lostA });
   // (6) the fleet's http URL dropped for the package's; (7) `./` read as a top folder
-  const EKf = M8.load('src/engine-kernel.js', EKS.replace(urlAnchor, "if (flUrl && !httpsUrlOf(flUrl)) flUrl = ''; if (false) return { ok: false, code: 'engine_url_not_https'"), 'fleet-fallback');
+  const EKf = M8.load('src/engine-kernel.js', editAnchor(EKS, urlAnchor, "if (flUrl && !httpsUrlOf(flUrl)) flUrl = ''; if (false) return { ok: false, code: 'engine_url_not_https'", "src/engine-kernel.js"), 'fleet-fallback');
   const fF = EKf.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: { url: 'http://artifacts.fleet.test/k.tar.zst', sha256: 'b'.repeat(64) } });
   ok(fF.ok && fF.host === 'kernels.test', 'control (6): a copy that DROPS the http fleet URL silently takes the package\'s address in its place — RED against the refusal', { ok: fF.ok, host: fF.host });
-  const EKr = M8.load('src/engine-kernel.js', EKS.replace(rootAnchor, '    /* no root rule */'), 'no-root');
+  const EKr = M8.load('src/engine-kernel.js', editAnchor(EKS, rootAnchor, '    /* no root rule */', "src/engine-kernel.js"), 'no-root');
   const dR = EKr.tarShapeVerdict(dotList, { layout: { stripComponents: 1, requiredFiles: ['chrome', 'icudtl.dat'] } });
   ok(!dR.ok && /two top folders/.test(dR.error), 'control (7): a copy without the root rule reads `./` as a top folder («two top folders») — RED', dR.error);
   // ROUND 3's RED controls. (8) the end settles at 'finish' (round 2's): a file that failed at close LANDS, and one short of its bytes
@@ -2716,7 +2716,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   const bootAnchor = '    const restored = await bootRestore();';
   const asideRecAnchor = '      if (!back) { const rk = recOf(sid);';
   ok([bootAnchor, asideRecAnchor].every((a) => EDS.includes(a)), 'control: round 3\'s anchors are in engine-distribution.js');
-  const ED9 = M8.load('src/server/engine-distribution.js', EDS.replace(bootAnchor, '    const restored = [];'), 'no-boot-restore');
+  const ED9 = M8.load('src/server/engine-distribution.js', editAnchor(EDS, bootAnchor, '    const restored = [];', "src/server/engine-distribution.js"), 'no-boot-restore');
   await thrK(atB().installKernel(EID, { wait: true })); // the record: installed
   fs.renameSync(kdir, removing);
   const n9 = atB({}, ED9); await n9.bootFleet();
@@ -2724,14 +2724,14 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   fs.renameSync(removing, kdir);
   ok(lie9, 'control (9): a copy whose boot does not put the aside copy back leaves the place EMPTY while the record says «installed» — RED against ⑫b', { lie9 });
   // (10) the landing keeps the record when NEITHER kernel is in its place
-  const ED10 = M8.load('src/server/engine-distribution.js', EDS.replace(asideRecAnchor, '      if (false) { const rk = recOf(sid);'), 'aside-record');
+  const ED10 = M8.load('src/server/engine-distribution.js', editAnchor(EDS, asideRecAnchor, '      if (false) { const rk = recOf(sid);', "src/server/engine-distribution.js"), 'aside-record');
   const n10 = atB({ io: failBoth }, ED10); const e10 = await thrK(n10.installKernel(EID, { wait: true }));
   const lie10 = !fs.existsSync(KP) && fs.existsSync(removing) && n10.kernelFact(EID).state === 'installed';
   fs.renameSync(removing, kdir);
   ok(e10 && e10.code === 'build_unpack_failed' && lie10, 'control (10): a copy whose landing keeps the record when both renames fail says «installed» over an EMPTY place — RED against ⑫b', { e10: e10 && e10.code, lie10 });
   // (11) round 2's fleet reading: a malformed fleet sha256 dropped for the package's — the silent fallback
   const shaFleetAnchor = "  const flSha = isObj(fleet) ? given(fleet.sha256).toLowerCase() : '';";
-  const EKs = M8.load('src/engine-kernel.js', EKS.replace(shaFleetAnchor, "  const flSha = isObj(fleet) && SHA_RE.test(given(fleet.sha256).toLowerCase()) ? given(fleet.sha256).toLowerCase() : '';"), 'fleet-sha-fallback');
+  const EKs = M8.load('src/engine-kernel.js', editAnchor(EKS, shaFleetAnchor, "  const flSha = isObj(fleet) && SHA_RE.test(given(fleet.sha256).toLowerCase()) ? given(fleet.sha256).toLowerCase() : '';", "src/engine-kernel.js"), 'fleet-sha-fallback');
   const fS = EKs.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: { url: '', sha256: 'abc123' } });
   ok(EKS.includes(shaFleetAnchor) && fS.ok && fS.sha256 === 'a'.repeat(64), 'control (11): a copy that DROPS a malformed fleet sha256 silently takes the package\'s sha256 in its place — RED against the refusal', { ok: fS.ok, sha: fS.sha256 });
   // ROUND 4's RED controls. (12) round 3's put-back predicate: ANY stat error of the place reads as an empty place (its stat
@@ -2751,14 +2751,14 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
     'control (12): round 3\'s predicate (any stat error = an empty place) renames onto the GOOD kernel after ONE EIO ⇒ engine_kernel_aside, the record DROPPED, a FALSE For-you notice — and the leftover kept beside the kernel at the next start — RED against ⑫c (a)', { b12: b12.restored, kf12: kf12.state, todos: redTodos.length, kept: fs.existsSync(removing) });
   // (13) no heal: the record dropped by (12) stays dropped while the kernel measures in its place
   const healAnchor = '    if (!rec.kernel && !running.has(sid)) await placeHeld(sid, plan, rec);';
-  const ED13 = M8.load('src/server/engine-distribution.js', EDS.replace(healAnchor, ''), 'no-heal');
+  const ED13 = M8.load('src/server/engine-distribution.js', editAnchor(EDS, healAnchor, '', "src/server/engine-distribution.js"), 'no-heal');
   const n13 = atR({}, ED13); const m13 = await n13.measure(EID, { force: true });
   const kf13 = n13.kernelFact(EID);
   ok(EDS.includes(healAnchor) && m13.ok && kf13.state === 'failed' && !recAt('data-ed13i').kernel, 'control (13): a copy without the heal MEASURES the kernel in its place while the record stays dropped («failed» over a good kernel) — RED against ⑫c (c)', { m: m13.version || m13.code, kf13: kf13.state });
   // (14) the keeper's round-3 re-measure condition: a probe that says installed + a measured version never asks — no heal
   const KS = read('src/server/browser-keeper.js');
   const unrecAnchor = '(!engine.measuredVersion || unrecorded)';
-  const K14 = M8.load('src/server/browser-keeper.js', KS.replace(unrecAnchor, '!engine.measuredVersion'), 'no-reprobe');
+  const K14 = M8.load('src/server/browser-keeper.js', editAnchor(KS, unrecAnchor, '!engine.measuredVersion', "src/server/browser-keeper.js"), 'no-reprobe');
   fs.mkdirSync(path.join(ROOT, 'data-eng13'), { recursive: true });
   const d14 = atR(); await d14.ready;
   const ke14 = K14.create({ dataDir: path.join(ROOT, 'data-eng13'), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set([KEY_A]), install: false, tickMs: 3600e3,
@@ -2841,7 +2841,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   ok(eBrk && eBrk.code === 'browser_engine_protocol' && fBrk.code !== 'engine_node_unsupported' && eZip && eZip.code === 'browser_engine_protocol' && fZip.code !== 'engine_node_unsupported'
     && eZst && eZst.code === 'engine_node_unsupported' && fZst.state === 'failed' && fZst.code === 'engine_node_unsupported' && fUpd.state !== 'failed' && !eUpd && fs.existsSync(kpN),
     'r2 minor 2: on a Node WITHOUT zstd a broken / zip kernel.json is refused AS ITSELF (browser_engine_protocol — never recorded engine_node_unsupported); a tar.zst one is engine_node_unsupported for that Node and that plugin version — the plugin updated to a tar.gz kernel.json ⇒ asked again and it lands', { eBrk: eBrk && eBrk.code, fBrk: fBrk.code, eZip: eZip && eZip.code, eZst: eZst && eZst.code, fUpd: fUpd.state, eUpd: eUpd && eUpd.message });
-  const EDz = M8.load('src/server/engine-distribution.js', EDS.replace('gz ? zlib.createGunzip() : zlibIn.createZstdDecompress()', 'zlibIn.createZstdDecompress()'), 'zstd-only');
+  const EDz = M8.load('src/server/engine-distribution.js', editAnchor(EDS, 'gz ? zlib.createGunzip() : zlibIn.createZstdDecompress()', 'zlibIn.createZstdDecompress()', "src/server/engine-distribution.js"), 'zstd-only');
   const gC = (() => { const kpC = path.join(ROOT, 'data-gz6-k', 'kernel', 'linux-x64', 'chrome'); const d = edAt('data-gz6', { engines: { kernelPath: () => kpC } }, EDz); fs.writeFileSync(path.join(ROOT, 'data-gz6', 'plugins', EID, 'kernel.json'), JSON.stringify(kjson({}, { url: 'https://kernels.test/k.tar.gz', sha256: sha(GZ), bytes: GZ.length, layout: GZL }))); return d; })();
   const rCz = await thrK(gC.installKernel(EID, { wait: true }));
   ok(EDS.includes('gz ? zlib.createGunzip() : zlibIn.createZstdDecompress()') && rCz && rCz.code === 'build_unpack_failed', 'control (gz): a copy that reads every archive as zstd refuses the same tar.gz (build_unpack_failed) — RED against ⑧e', rCz && rCz.message);
@@ -3168,7 +3168,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   const sub = "  if (mediator && typeof mediator.onFolder === 'function') mediator.onFolder((ev) => {";
   if (!ksrc.includes(sub)) throw new Error('the anchor of the control «B-0645 cure: no folder subscription» is not in the source');
   const MCf = mutantCopies('browser-builds-folder', REPO);
-  const f0 = await folderRun(MCf.load('src/server/browser-keeper.js', ksrc.replace(sub, "  if (false) mediator.onFolder((ev) => {"), 'no-folder-notice'));
+  const f0 = await folderRun(MCf.load('src/server/browser-keeper.js', editAnchor(ksrc, sub, "  if (false) mediator.onFolder((ev) => {", "src/server/browser-keeper.js"), 'no-folder-notice'));
   ok(f0.once === 0 && f0.all === 0, 'CONTROL (B-0645 cure): a keeper that does not hear the folder signal tells the person nothing — the base\'s journal line only (RED for the leg above)', f0);
   // B-0645 cure 2 (主开发 10:26Z): A HUB RESTART — the notices live in memory, the items in the For-you store; the keeper's first
   // load takes an open one back (its browser alive ⇒ held, a later put-back ends it) or resolves it (its browser gone)
@@ -3201,7 +3201,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
     'B-0645 cure 2: after a hub restart the keeper takes the open folder notices back — one of a browser that ended is resolved at the first load, one of a running browser is held and ended by its next confirmed put-back', rr);
   const rcCut = "cliBoot(); reclaimFolderNotices(); } }";
   if (!ksrc.includes(rcCut)) throw new Error('the anchor of the control «B-0645 cure 2: no reclaim» is not in the source');
-  const r0 = await restartRun(MCf.load('src/server/browser-keeper.js', ksrc.replace(rcCut, 'cliBoot(); } }'), 'no-reclaim'), 'mut');
+  const r0 = await restartRun(MCf.load('src/server/browser-keeper.js', editAnchor(ksrc, rcCut, 'cliBoot(); } }', "src/server/browser-keeper.js"), 'no-reclaim'), 'mut');
   ok(r0.atLoad === '' && r0.open.split(',').length === 2, 'CONTROL (B-0645 cure 2): a keeper that does not take them back leaves both open after a restart — the first one ends only by its Restart press (RED for the leg above)', r0);
 }
 
@@ -3267,12 +3267,12 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
   const msrc = read('src/lib/browser-build-model.js');
   const needle = "    if (!e.installed || (k && k.next && k.next.unread)) out.push(";
   ok(msrc.split(needle).length === 2, 'B-0bc7 control setup: the door rule is found once in src/lib/browser-build-model.js');
-  const fCopy = MUTK.write('src/lib/browser-build-model.js', msrc.replace(needle, "    if ((!e.installed && !(k && k.state === 'failed')) || (k && k.next && k.next.unread)) out.push("), 'no-failed-door', { esm: true });
+  const fCopy = MUTK.write('src/lib/browser-build-model.js', editAnchor(msrc, needle, "    if ((!e.installed && !(k && k.state === 'failed')) || (k && k.next && k.next.unread)) out.push(", "src/lib/browser-build-model.js"), 'no-failed-door', { esm: true });
   const BMx = await import('file://' + fCopy);
   ok(!judgeDoors(BMx) && !BMx.kernelDoors(R0).some((d) => d.id === 'eng-failed'), 'CONTROL (B-0bc7): a door rule without the failed download — that engine has no «Download kernel» ⇒ the door table goes RED', BMx.kernelDoors(R0));
   const stepNeedle = "  if (!r || r.error) return { polling: !!polling, tick: !!polling, redraw: false };";
   ok(msrc.split(stepNeedle).length === 2, 'B-0bc7 control setup: the failed-read step is found once');
-  const fCopy2 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(stepNeedle, "  if (!r || r.error) return { polling: false, tick: false, redraw: true };"), 'failed-read-ends', { esm: true });
+  const fCopy2 = MUTK.write('src/lib/browser-build-model.js', editAnchor(msrc, stepNeedle, "  if (!r || r.error) return { polling: false, tick: false, redraw: true };", "src/lib/browser-build-model.js"), 'failed-read-ends', { esm: true });
   const BMy = await import('file://' + fCopy2);
   ok(!judgeStep(BMy), 'CONTROL (B-0bc7, round 2\'s should): a step that lets ONE failed read end the poll (the doors removed, never asked again) goes RED');
   // its verdict's MUST: a press on a busy door SHOWS its words — the old answer ends when a download STARTS, never on a read that still
@@ -3294,10 +3294,10 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
   ok(js.drawn && js.endsAtEnd && js.standsWhileSame && js.endsAtStart, `B-0bc7 (its verdict's must + cure 2): a press on a busy door, then a read that still says downloading — its words are DRAWN (${js.drawn}); the download then FAILS — «already downloading» is gone (${js.endsAtEnd}, never beside a fact line that says it failed); a refusal stands while nothing changes (${js.standsWhileSame}); a download that STARTS ends it (${js.endsAtStart})`, js);
   const saidNeedle = "    if (st.has(id) ? st.get(id) !== now : now === 'downloading') s.delete(id);";
   ok(msrc.split(saidNeedle).length === 2, 'B-0bc7 control setup: the «ends at the start» rule is found once in src/lib/browser-build-model.js');
-  const fCopy3 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(saidNeedle, "    if (now === 'downloading') s.delete(id);"), 'said-every-read', { esm: true }); // stale-pins: kept — the batch's first rule, planted back
+  const fCopy3 = MUTK.write('src/lib/browser-build-model.js', editAnchor(msrc, saidNeedle, "    if (now === 'downloading') s.delete(id);", "src/lib/browser-build-model.js"), 'said-every-read', { esm: true }); // stale-pins: kept — the batch's first rule, planted back
   const BMz = await import('file://' + fCopy3);
   ok(!judgeSaid(BMz).drawn, 'CONTROL (B-0bc7, its verdict\'s must): the batch\'s own rule — a downloading read ends the answer (settings-ui\'s old line) — erases the busy press\'s words before they are drawn ⇒ RED', judgeSaid(BMz));
-  const fCopy4 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(saidNeedle, "    if (now === 'downloading' && st.get(id) !== 'downloading') s.delete(id);"), 'said-only-at-start', { esm: true }); // stale-pins: kept — the first cure's rule, planted back as this control's mutant
+  const fCopy4 = MUTK.write('src/lib/browser-build-model.js', editAnchor(msrc, saidNeedle, "    if (now === 'downloading' && st.get(id) !== 'downloading') s.delete(id);", "src/lib/browser-build-model.js"), 'said-only-at-start', { esm: true }); // stale-pins: kept — the first cure's rule, planted back as this control's mutant
   const BMw = await import('file://' + fCopy4);
   ok(!judgeSaid(BMw).endsAtEnd && judgeSaid(BMw).drawn, 'CONTROL (B-0bc7 cure 2): the first cure\'s rule — the answer ends only when a download STARTS — keeps «its kernel is already downloading» beside a download that FAILED ⇒ RED', judgeSaid(BMw));
   const ui2 = read('src/lib/settings-ui.js');

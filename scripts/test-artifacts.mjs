@@ -18,6 +18,15 @@ const { harnessOf, harnessIds } = require(path.join(REPO, 'src/harnesses/index.j
 const M = mutantCopies('artifacts', REPO);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // ── fixtures: the claude transcript's own record shapes ──
 const CWD = '/home/u/proj';
@@ -195,21 +204,21 @@ ok(harnessIds().every((id) => 'artifactsOf' in harnessOf(id) && (harnessOf(id).a
 const src = (await import('node:fs')).readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8');
 const noSeen = "  if (prev && o.id && prev.lastId === o.id) return { rows: cur, row: prev, born: false, evicted: [], skipped: 'seen' };\n";
 ok(src.includes(noSeen), 'control anchor: the seen-call guard is in the reducer');
-const MUT = M.load('src/artifacts.js', src.replace(noSeen, '\n'), 'noseen');
+const MUT = M.load('src/artifacts.js', editAnchor(src, noSeen, '\n', "src/artifacts.js"), 'noseen');
 let mr = {}; for (const r of [W1.rec, W1.rec]) for (const o of AO.claude(r)) mr = MUT.fold(mr, o);
 ok(mr[bk].writes === 2, 'CONTROL: without the seen-call guard the double feed counts 2 writes (the ③ assert sees it)', mr[bk].writes);
 const cfg = "  if (AGENT_CONFIG_NAMES.has(baseName(p).toLowerCase()) || AGENT_CONFIG_DIR.test(p)) return 'code';\n";
-ok(src.includes(cfg) && M.load('src/artifacts.js', src.replace(cfg, '\n'), 'nocfg').kindOf('/p/CLAUDE.md') === 'doc', 'CONTROL: without the agent-config rule CLAUDE.md becomes a doc card (the ① assert sees it)');
+ok(src.includes(cfg) && M.load('src/artifacts.js', editAnchor(src, cfg, '\n', "src/artifacts.js"), 'nocfg').kindOf('/p/CLAUDE.md') === 'doc', 'CONTROL: without the agent-config rule CLAUDE.md becomes a doc card (the ① assert sees it)');
 // lane artifacts-registries: the kind rank and the rebuild's third input are each load-bearing
 const rank = " && !outranks(row.kind, o.kind)) row.kind = o.kind;";
-const MR = src.includes(rank) ? M.load('src/artifacts.js', src.replace(rank, ') row.kind = o.kind;'), 'norank') : null;
+const MR = src.includes(rank) ? M.load('src/artifacts.js', editAnchor(src, rank, ') row.kind = o.kind;', "src/artifacts.js"), 'norank') : null;
 ok(MR && MR.fold(MR.fold({}, MR.designOp(DS)), MR.pageOp({ id: 'pg2', srcKey: 'local:' + DS.dir, srcPath: DS.dir, path: '/p/pg2', updatedAt: 1 }))[dk].kind === 'page', 'CONTROL: without the kind rank a published design turns into a page (the ⑧ assert sees it)');
 const regOnly = "  if (REG_OPS.includes(o.op)) {";
-const MC = src.includes(regOnly) ? M.load('src/artifacts.js', src.replace(regOnly, '  if (false) {'), 'regcount') : null;
+const MC = src.includes(regOnly) ? M.load('src/artifacts.js', editAnchor(src, regOnly, '  if (false) {', "src/artifacts.js"), 'regcount') : null;
 ok(MC && MC.fold(MC.fold({}, MC.pageOp(PG)), MC.pageOp({ ...PG, updatedAt: 9 }))[pk].edits === 2, 'CONTROL: without the registry-op branch every publish counts as an edit (the ⑧ "never counts" assert sees it)');
 const nsrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
 const third = 'AF.merge(AF.merge(mm.derivedArtifacts || {}, session._artifacts || {}), artifactStoreRows(session, sessionId))';
-const MN = nsrc.includes(third) ? M.load('src/normalizers.js', nsrc.replace(third, 'AF.merge(mm.derivedArtifacts || {}, session._artifacts || {})'), 'nostore') : null;
+const MN = nsrc.includes(third) ? M.load('src/normalizers.js', editAnchor(nsrc, third, 'AF.merge(mm.derivedArtifacts || {}, session._artifacts || {})', "src/normalizers.js"), 'nostore') : null;
 if (MN) MN.setArtifactStoreSource(REG.storeRowsOf);
 const s7 = { backend: 'claude', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
 STORE.pages = [{ ...PG, sessionId: 's7' }];
@@ -293,7 +302,7 @@ ok(ids1.join() === ids2.join() && new Set(ids2).size === ids2.length && !cardsOf
 const nsrc8 = (await import('node:fs')).readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
 const settleCall = 'if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b, { rebuilt: true });';
 ok(nsrc8.includes(settleCall), 'control anchor: settle places a REBUILT card');
-const MT = M.load('src/normalizers.js', nsrc8.replace(settleCall, 'if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b);'), 'tailsettle');
+const MT = M.load('src/normalizers.js', editAnchor(nsrc8, settleCall, 'if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b);', "src/normalizers.js"), 'tailsettle');
 MT.setArtifactStoreSource(REG.storeRowsOf); MT.setArtifactServiceSource((s) => (s && s.svcFixture ? SVC : {}));
 const s9 = { backend: 'claude', cwd: CWD, host: '', svcFixture: true, _artifacts: { ...persisted8 }, _normalizer: null };
 await MT.rebuildHistory(s9, 's8', SLAB_RECS);
@@ -303,8 +312,8 @@ ok(last9 > 0 && [oldDocKey, pgOldKey, svcKey].every((k) => tail9.includes(k)), '
 const asrc8 = (await import('node:fs')).readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8');
 const range = '  if (at < slabFirstAt) return \'none\';\n';
 ok(asrc8.includes(range), 'control anchor: the slab range check is in cardPlacement');
-const afNoRange = M.write('src/artifacts.js', asrc8.replace(range, '\n'), 'norange');
-const MR8 = M.load('src/normalizers.js', nsrc8.replace("require('./artifacts.js')", 'require(' + JSON.stringify(afNoRange) + ')'), 'norange');
+const afNoRange = M.write('src/artifacts.js', editAnchor(asrc8, range, '\n', "src/artifacts.js"), 'norange');
+const MR8 = M.load('src/normalizers.js', editAnchor(nsrc8, "require('./artifacts.js')", 'require(' + JSON.stringify(afNoRange) + ')', "src/normalizers.js"), 'norange');
 MR8.setArtifactStoreSource(REG.storeRowsOf); MR8.setArtifactServiceSource(() => ({}));
 const s10 = { backend: 'claude', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
 await MR8.rebuildHistory(s10, 's8', SLAB_RECS);
@@ -387,11 +396,11 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
   {
     const fsD = await import('node:fs'), rsrc = fsD.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), nsrcD = fsD.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
     const liveDoor = 'noteOp(session, { ...o, by: AF.opAuthor(o) })', rbDoor = "by: AF.opAuthor(o) }); // the person's own page link";
-    const M4e = rsrc.includes(liveDoor) ? M.load('src/server/artifact-registry.js', rsrc.replace(liveDoor, "noteOp(session, { ...o, by: 'agent' })"), 'liveagent') : null;
+    const M4e = rsrc.includes(liveDoor) ? M.load('src/server/artifact-registry.js', editAnchor(rsrc, liveDoor, "noteOp(session, { ...o, by: 'agent' })", "src/server/artifact-registry.js"), 'liveagent') : null;
     const sE = { backend: 'claude', sockName: 'sE', claudeSessionId: 'c-pe', cwd: CWD, host: '', _artifacts: {} };
     if (M4e) { M4e.configure(regCfg([['sE', sE]])); for (const r of DOOR) M4e.observe(sE, r); REG.configure(regCfg()); } // the copy's configure pointed the rebuild's helper seam at itself — the real one again
     ok(M4e && bandsOf(sE._artifacts)[PASTEP.id] === 'foryou', 'CONTROL the live door forcing «agent» (r1 — the acceptor\'s M4e) ⇒ the person\'s paste reads «for you» — RED', M4e && bandsOf(sE._artifacts));
-    const M4f = nsrcD.includes(rbDoor) ? M.load('src/normalizers.js', nsrcD.replace(rbDoor, "by: 'agent' }); // control"), 'rebuildagent') : null;
+    const M4f = nsrcD.includes(rbDoor) ? M.load('src/normalizers.js', editAnchor(nsrcD, rbDoor, "by: 'agent' }); // control", "src/normalizers.js"), 'rebuildagent') : null;
     const sF = { backend: 'claude', sockName: 'sF', claudeSessionId: 'c-pf', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
     if (M4f) await M4f.rebuildHistory(sF, 'sF', DOOR);
     ok(M4f && bandsOf(sF._artifacts)[PASTEP.id] === 'foryou', 'CONTROL the rebuild forcing «agent» (r1 — the acceptor\'s M4f) ⇒ RED', M4f && bandsOf(sF._artifacts));
@@ -437,13 +446,13 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     // controls: r3's whole-message rule at the reader; r3's presentAsk (attachments only)
     const fsT = await import('node:fs'), osrc = fsT.readFileSync(path.join(REPO, 'src/harnesses/artifacts-of.js'), 'utf8'), rsrcT = fsT.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
     const splitLine = (/^ {2}for \(const s of texts\) \{ const rp = parseReply\(s\); if \(rp\) out\.push\(.*$/m.exec(osrc) || [''])[0]; // the reader's split line (r4's or r5's words)
-    const WM = splitLine ? M.load('src/harnesses/artifacts-of.js', osrc.replace(splitLine, '  out.push(...presentOps(texts, by));'), 'wholemsg') : null;
+    const WM = splitLine ? M.load('src/harnesses/artifacts-of.js', editAnchor(osrc, splitLine, '  out.push(...presentOps(texts, by));', "src/harnesses/artifacts-of.js"), 'wholemsg') : null;
     if (ok(WM, 'CONTROL needle present: the reader\'s split of a tray answer (r4) — a tree without it has nothing to patch')) {
       const wmB = bandsOf(AF.resolvePresented(WM.claude(RECS3['claude JSONL (sdk)']).reduce((rows, o) => AF.apply(rows, { cwd: CWD, at: 1, ...o, by: AF.opAuthor(o) }).rows, {}), { pageOf: (id) => ({ page: { ...ASKP, id } }) }));
       ok(wmB[ASKP.id] === 'made', 'CONTROL r3\'s whole-message rule (a tray answer\'s every line the person\'s) ⇒ the ask\'s page reads «made here» — RED', wmB);
     }
     const askLine = 'for (const op of AF.askOps({ artifacts, id, at, said }))'; // r6: the ONE reader of an ask (AF.askOps)
-    const PA = rsrcT.includes(askLine) ? M.load('src/server/artifact-registry.js', rsrcT.replace(askLine, 'for (const op of AF.askOps({ artifacts, id, at }))'), 'askattachonly') : null;
+    const PA = rsrcT.includes(askLine) ? M.load('src/server/artifact-registry.js', editAnchor(rsrcT, askLine, 'for (const op of AF.askOps({ artifacts, id, at }))', "src/server/artifact-registry.js"), 'askattachonly') : null;
     if (ok(PA, 'CONTROL needle present: presentAsk\'s fold of the ask\'s words (r4) — a tree without it has nothing to patch')) {
       const sQ2 = sess('sQ2');
       PA.configure(regCfg([['sQ2', sQ2]])); PA.presentAsk(sQ2, null, { id: ASK.id, said: [ASK.text, ASK.detail] }); REG.configure(regCfg());
@@ -459,7 +468,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     ok((pad + AT).length === C && askPh === 0 && !atCap.phantom.length && !atCap.cutLink.length, 'a token of pg + 11 (no link) cut by the cap to pg + 10 ⇒ no row from the reply (the ask saw no link either); a link ending AT the cap with more detail beyond ⇒ no row from the reply — a token cut through', atCap);
     ok(atCap.whole.join() === AT + ':agent' && atCap.before.join() === AT + ':agent', 'a link ending at the cap in a detail of exactly the cap (whole) ⇒ read, the agent\'s; a link ending one before the cap (a space at the cut) ⇒ read', atCap);
     const uncutLine = 'presentOps([uncut(rp)])'; // the quote's reading (r5's words; r10 names the quoted item after it)
-    const UC = osrc.includes(uncutLine) ? M.load('src/harnesses/artifacts-of.js', osrc.replace(uncutLine, 'presentOps([rp.quote])'), 'quotewhole') : null;
+    const UC = osrc.includes(uncutLine) ? M.load('src/harnesses/artifacts-of.js', editAnchor(osrc, uncutLine, 'presentOps([rp.quote])', "src/harnesses/artifacts-of.js"), 'quotewhole') : null;
     if (ok(UC, 'CONTROL needle present: the reader\'s drop of the token the cap cut (r5) — a tree without it has nothing to patch')) {
       const ucPh = UC.claude({ type: 'user', promptSource: 'sdk', message: { role: 'user', content: IR.composeReply({ ...ASK, detail: pad + PH + 'z and more' }, 'ok', { now: Date.parse(T(80)) }) } }).map((o) => o.page);
       ok(ucPh.includes(PH), 'CONTROL r4\'s reader (the quote read whole) ⇒ the cut token births a phantom row «' + PH + '» — RED', ucPh);
@@ -529,7 +538,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
       'census: the client hears it — chat-view re-reads GET /api/artifacts on artifacts-changed; the chip and an open Artifacts window (publishArtifacts) draw the answer');
     const rsrcV = (await import('node:fs')).readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
     const oneRule = "  if (r.born || AF.intentOf(before[r.row.key]) !== AF.intentOf(r.row)) tellChanged(session);";
-    const B4 = rsrcV.includes(oneRule) ? M.load('src/server/artifact-registry.js', rsrcV.replace(oneRule, '  if (r.row.presented && r.born) tellChanged(session);'), 'tellborn') : null;
+    const B4 = rsrcV.includes(oneRule) ? M.load('src/server/artifact-registry.js', editAnchor(rsrcV, oneRule, '  if (r.row.presented && r.born) tellChanged(session);', "src/server/artifact-registry.js"), 'tellborn') : null;
     if (ok(B4, 'CONTROL needle present: noteOp\'s one tell rule (r5) — a tree without it has nothing to patch')) {
       const g4 = run(B4);
       REG.configure(regCfg()); // the copy's configure re-pointed the normalizers' seams — the real one again
@@ -549,7 +558,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     REG.configure(regCfg());
     ok(lv.host === HID && JSON.stringify(lv.hostNames) === JSON.stringify({ [HID]: 'gpu1', 'host-2b3c4d5e': 'gpu2' }), 'listFor names the machines its view mentions by the hosts registry\'s name (the conversation\'s own included; the hub\'s own and a machine gone from the list: none — the model says «Local» / the id)', lv.hostNames);
     const hsrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), hdoor = ', hostNames: hostNamesOf([host, ...v.items.map((r) => r.host), ...v.code.map((r) => r.host)]) }';
-    const MH = hsrc.includes(hdoor) ? M.load('src/server/artifact-registry.js', hsrc.replace(hdoor, ' }'), 'nohostnames') : null;
+    const MH = hsrc.includes(hdoor) ? M.load('src/server/artifact-registry.js', editAnchor(hsrc, hdoor, ' }', "src/server/artifact-registry.js"), 'nohostnames') : null;
     if (ok(MH, 'CONTROL needle present: listFor\'s machine names (r4) — a tree without it has nothing to patch')) {
       const mhv = (MH.configure(cfgH), MH.listFor('sH'));
       REG.configure(regCfg()); // the copy's configure re-pointed the normalizers' seams — the real one again
@@ -639,7 +648,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     const c6 = await rebuild('sC6', viaCopy(S6)), c0 = await rebuild('sC0', viaCopy(S0)), cK = await rebuild('sF', viaCopy(SK), { cid: 'c-par', more: FORK, ...bare }), cP = await rebuild('sE', viaCopy(SP), { cid: 'c-e', ...bare }), cR = await rebuild('sCR', viaCopy(STR, BR)), c7 = await rebuild('sC7', viaCopy(STR, B7)), c8 = await rebuild('sC8', viaCopy(STR, B8));
     // the persist seam asked at a rebuild that gains nothing: this tree's normalizers vs a copy that persists at every rebuild (a spy for persistSoon)
     const nsrc = fsX.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8'), GAIN = 'if (artifactPersistSink && AF.stampsGained(was, session._artifacts)) artifactPersistSink(session);';
-    const NM = nsrc.includes(GAIN) ? M.load('src/normalizers.js', nsrc.replace(GAIN, 'if (artifactPersistSink) artifactPersistSink(session);'), 'persistall') : null;
+    const NM = nsrc.includes(GAIN) ? M.load('src/normalizers.js', editAnchor(nsrc, GAIN, 'if (artifactPersistSink) artifactPersistSink(session);', "src/normalizers.js"), 'persistall') : null;
     const spyOn = async (Nmod) => { let n = 0; const sR = { backend: 'claude', sockName: 'sR', claudeSessionId: 'c-pr', cwd: CWD, host: '', name: 'Reporter', _artifacts: JSON.parse(JSON.stringify(g7.rows)), _normalizer: null }; Nmod.setArtifactPersistSink(() => n++); await Nmod.rebuildHistory(sR, 'sR', recsP); return n; };
     const spy = { tree: await spyOn(N), everyRebuild: NM ? await spyOn(NM) : null };
     REG.configure({ ...regCfg(), asks: () => [] }); // the registry's own sink back on the real normalizers
@@ -683,13 +692,13 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
   // controls
   const asrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8');
   const cw = " && !row.presented); // lane pages-chip-groups";
-  const MW = asrc.includes(cw) ? M.load('src/artifacts.js', asrc.replace(cw, '); // control'), 'cardpresented') : null;
+  const MW = asrc.includes(cw) ? M.load('src/artifacts.js', editAnchor(asrc, cw, '); // control', "src/artifacts.js"), 'cardpresented') : null;
   ok(MW && MW.cardWorthy(MW.fold({}, MW.presentOp({ id: OTHER.id }))[keyO]), 'CONTROL: without the presented guard a shown link draws a second chat card (the card assert sees it)');
   const ownDrop = '    if (page && own(page)) continue;\n';
-  const MO = asrc.includes(ownDrop) ? M.load('src/artifacts.js', asrc.replace(ownDrop, '\n'), 'owndrop') : null;
+  const MO = asrc.includes(ownDrop) ? M.load('src/artifacts.js', editAnchor(asrc, ownDrop, '\n', "src/artifacts.js"), 'owndrop') : null;
   ok(MO && MO.resolvePresented(MO.fold({}, MO.presentOp({ id: MINE.id })), { pageOf: () => ({ page: MINE }), own: () => true })[AF.keyOf('', '/p/' + MINE.id)], 'CONTROL: without the own drop this conversation\'s page shows twice (own + shown here — the own assert sees it)');
   const capLine = 'evictOver(next, key).concat(row.presented ? evictPresented(next, key) : [])';
-  const MP = asrc.includes(capLine) ? M.load('src/artifacts.js', asrc.replace(capLine, 'evictOver(next, key)'), 'nocap') : null;
+  const MP = asrc.includes(capLine) ? M.load('src/artifacts.js', editAnchor(asrc, capLine, 'evictOver(next, key)', "src/artifacts.js"), 'nocap') : null;
   let capRows = {};
   if (MP) for (let i = 0; i < 55; i++) capRows = MP.fold(capRows, { ...MP.presentOp({ id: `pg${String(i).padStart(10, '0')}` }), at: i + 1 });
   ok(MP && Object.keys(capRows).length === 55, 'CONTROL: without the cap 55 links keep 55 rows (the cap assert sees it)');
@@ -788,7 +797,7 @@ console.log('⑫ an ACP / agy rebuild reads its records\' own `ts` — an old ca
   const nsrc12 = (await import('node:fs')).readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
   const readTs = "  const v = typeof raw.timestamp === 'string' ? raw.timestamp : raw.ts;\n";
   ok(nsrc12.includes(readTs), 'control anchor: recordAt falls back to the record\'s `ts`');
-  const MB = M.load('src/normalizers.js', nsrc12.replace(readTs, "  const v = raw.timestamp;\n"), 'tsblind');
+  const MB = M.load('src/normalizers.js', editAnchor(nsrc12, readTs, "  const v = raw.timestamp;\n", "src/normalizers.js"), 'tsblind');
   MB.setArtifactStoreSource(REG.storeRowsOf); MB.setArtifactServiceSource(() => ({}));
   const s12b = { backend: 'antigravity', cwd: ACWD, host: '', _artifacts: { ...rows12 }, _normalizer: null };
   await MB.rebuildHistory(s12b, 's12', RECS);

@@ -531,8 +531,8 @@ let flowState = null;
     const LAST_LT = "    if (/^[\\x20-\\x7e]*$/.test(a)) return a;\n    const { addr, words } = addressParts(a);\n    if (!words) return addr;\n    return `${/^[\\x20-\\x7e]*$/.test(words) ? `\"${words.replace(/[\\\\\"]/g, '\\\\$&')}\"` : encodeHeader(words)} <${addr}>`;";
     const COMMENT = "    else if (ch === '(') depth = 1;\n";
     ok(srcR1.split(LAST_LT).length === 2 && srcR1.split(COMMENT).length === 2, 'the per-item wire rebuild and the comment state are present once (the controls drop exactly them)');
-    const gLt = MR1.load('src/channels/gmail.js', srcR1.replace(LAST_LT, "    const lt = a.lastIndexOf('<');\n    if (lt <= 0) return encodeHeader(a);\n    const name = a.slice(0, lt).trim();\n    return `${/^[\\x20-\\x7e]*$/.test(name) ? name : encodeHeader(name.replace(/^\"|\"$/g, ''))} ${a.slice(lt).trim()}`;"), 'last-lt');
-    const gCm = MR1.load('src/channels/gmail.js', srcR1.replace(COMMENT, ''), 'no-comment');
+    const gLt = MR1.load('src/channels/gmail.js', editAnchor(srcR1, LAST_LT, "    const lt = a.lastIndexOf('<');\n    if (lt <= 0) return encodeHeader(a);\n    const name = a.slice(0, lt).trim();\n    return `${/^[\\x20-\\x7e]*$/.test(name) ? name : encodeHeader(name.replace(/^\"|\"$/g, ''))} ${a.slice(lt).trim()}`;", "src/channels/gmail.js"), 'last-lt');
+    const gCm = MR1.load('src/channels/gmail.js', editAnchor(srcR1, COMMENT, '', "src/channels/gmail.js"), 'no-comment');
     const c1 = R1(gLt), c2 = R1(gCm);
     // a reply-all whose answered message was deleted between propose and approve ⇒ refused by name, no draft
     v8.state.ticket = true;
@@ -547,7 +547,7 @@ let flowState = null;
     const drP = await threw(() => a.replyEnvelope(C, { anchorId: 'msg_draft' }));
     const drA = await threw(() => a.replyEnvelope(C, { anchorId: 'msg_draft', all: true }));
     const DRAFT_GUARD = `${srcR1.split('\n').find((l) => l.includes("why: 'reply-anchor-draft'"))}\n`;
-    const gDr = MR1.load('src/channels/gmail.js', srcR1.replace(DRAFT_GUARD, ''), 'no-draft-guard');
+    const gDr = MR1.load('src/channels/gmail.js', editAnchor(srcR1, DRAFT_GUARD, '', "src/channels/gmail.js"), 'no-draft-guard');
     const tokDr = { read: () => ({ token: { access_token: 'ya29.s', expiresAt: now() + 3600e3, refresh_token: '1//r', scopes: [gmail.SCOPE, gmail.SCOPE_COMPOSE], email: 'member.a@example.com' }, why: null }), write: async () => {}, clear: async () => {} };
     const drM = await gDr.create({ id: 'gmail', options: {} }, { now, fetch: v8.fetchFn, tokens: tokDr, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet }).replyEnvelope(C, { anchorId: 'msg_draft', all: true }).catch((e) => e);
     v8.state.draft = false;
@@ -567,7 +567,7 @@ let flowState = null;
     const srcG = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
     const LINE = "      const h = { to: String(env.to), cc: env.cc ? String(env.cc) : null, subject: String(env.subject || ''), inReplyTo: env.inReplyTo || null, references: env.references || null };";
     ok(srcG.split(LINE).length === 2, 'the verbatim-envelope line is present once (the control restores the send-time derivation)');
-    const gNo = Mf3.load('src/channels/gmail.js', srcG.replace(LINE, '      const h = replyHeaders(msgs[msgs.length - 1], self);'), 'send-time-recipients');
+    const gNo = Mf3.load('src/channels/gmail.js', editAnchor(srcG, LINE, '      const h = replyHeaders(msgs[msgs.length - 1], self);', "src/channels/gmail.js"), 'send-time-recipients');
     const regNo = CH.createChannelRegistry(); regNo.register(gNo.adapter);
     const vNo = mkVendor(); vNo.state.lateMessage = true;
     const tokNo = { st: { token: { access_token: 'ya29.s', expiresAt: now() + 3600e3, refresh_token: '1//r', scopes: [gmail.SCOPE, gmail.SCOPE_COMPOSE], email: 'member.a@example.com' } }, read: () => ({ token: tokNo.st.token, why: null }), write: async (t2) => { tokNo.st.token = t2; }, clear: async () => { tokNo.st.token = null; } };
@@ -772,15 +772,15 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   M.write('src/channels/gmail.js', bare, 'bare-call');
   const cb = gateCensus(bare, { gateRe: GATE, ungatedIds: ids });
   ok(bare !== srcMain && cb.problems.some((x) => /no marker/.test(x) && /gmail labels/.test(x)), 'CONTROL: a copy with one more callJson (a labels read, no marker) is RED on that line', cb.problems.join(' ; '));
-  const renamed = srcMain.replace('// ungated: consent-profile', '// ungated: consent-profile-2');
+  const renamed = editAnchor(srcMain, '// ungated: consent-profile', '// ungated: consent-profile-2', "src/channels/gmail.js");
   M.write('src/channels/gmail.js', renamed, 'unknown-id');
   const cr = gateCensus(renamed, { gateRe: GATE, ungatedIds: ids });
   ok(renamed !== srcMain && cr.problems.some((x) => /'consent-profile-2' has no UNGATED row/.test(x)) && cr.problems.some((x) => /names 'consent-profile' but no call/.test(x)), 'CONTROL: a marker whose id UNGATED does not name is RED (and the orphaned row too)', cr.problems.join(' ; '));
-  const noRow = srcMain.replace(/\n  \{ id: 'consent-profile', why: [^\n]+\n/, '\n');
+  const noRow = editAnchor(srcMain, /\n  \{ id: 'consent-profile', why: [^\n]+\n/, '\n', "src/channels/gmail.js", 'first');
   const modNoRow = M.load('src/channels/gmail.js', noRow, 'no-row');
   const cn = gateCensus(noRow, { gateRe: GATE, ungatedIds: new Set(modNoRow.UNGATED.map((u) => u.id)) });
   ok(noRow !== srcMain && modNoRow.UNGATED.length === gmail.UNGATED.length - 1 && cn.problems.some((x) => /'consent-profile' has no UNGATED row/.test(x)), 'CONTROL: a copy whose UNGATED lost the consent-profile row is RED on the marker that still carries it', cn.problems.join(' ; '));
-  const unmarkedRefresh = srcMain.replace('// ungated: token-refresh', '');
+  const unmarkedRefresh = editAnchor(srcMain, '// ungated: token-refresh', '', "src/channels/gmail.js");
   M.write('src/channels/gmail.js', unmarkedRefresh, 'unmarked-refresh');
   ok(gateCensus(unmarkedRefresh, { gateRe: GATE, ungatedIds: ids }).problems.some((x) => /no marker/.test(x) && /gmail token refresh/.test(x)), 'CONTROL: the token refresh with its marker removed is RED (a comment is not a call, and a call is not a comment)');
   // the pre-fix build (the r3 tree): three unmarked sites. B-3642 (lane bl-tests-e): 6f1aad6df is a lane commit master never held — the
@@ -866,7 +866,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   {
     const r = await raceReauth(reg);
     ok(r.arrived && r.rs.every((x) => x === 'ok') && r.held === '1//reauth' && r.bearers.join() === 'Bearer ya29.REAUTH' && r.writes === 1, `(d) a re-authorize landing during the refresh: the held token is the re-authorize's (${r.held}), the late refresh wrote nothing (${r.writes} write = the consent's), its 5 callers carried the new bearer (${r.bearers.join()})`, JSON.stringify(r));
-    const r4 = srcMain.replace("    const cur = readToken().token;\n    if (!cur) throw new ChannelError('auth-expired', 'Gmail was disconnected while its token was refreshed — the refreshed token was discarded, the request was not sent', { retryable: false, detail: { tokenDropped: true } });\n    if (String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;\n    const w = await persistToken(next, String(token.refresh_token || ''));   // verify r6: the door's compare-and-swap — superseded at apply time ⇒ nothing written, the caller re-reads\n    if (w && w.superseded) return null;", '    await persistToken(next);');
+    const r4 = editAnchor(srcMain, "    const cur = readToken().token;\n    if (!cur) throw new ChannelError('auth-expired', 'Gmail was disconnected while its token was refreshed — the refreshed token was discarded, the request was not sent', { retryable: false, detail: { tokenDropped: true } });\n    if (String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;\n    const w = await persistToken(next, String(token.refresh_token || ''));   // verify r6: the door's compare-and-swap — superseded at apply time ⇒ nothing written, the caller re-reads\n    if (w && w.superseded) return null;", '    await persistToken(next);', "src/channels/gmail.js");
     ok(r4 !== srcMain, 'CONTROL fixture: the write-only-while-current guard was removed from a copy');
     const modR4 = M.load('src/channels/gmail.js', r4, 'r4-write'); const rg4 = CH.createChannelRegistry(); rg4.register(modR4.adapter);
     const c = await raceReauth(rg4);
@@ -928,7 +928,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   {
     const r = await coalesce(reg);
     ok(r.r1 === 'ok' && r.rx === 'ok' && r.ry === 'ok' && r.held === '1//rot-2' && !r.retired.includes(r.held) && r.rz === 'ok' && r.state === 'connected', `(h) a later token's persist queued behind an in-flight flush of the earlier one: the store ends with the LIVE token (${r.held}; retired ${r.retired.join(',')}), the next refresh ok, connected`, JSON.stringify(r));
-    const r5 = srcMain.replace(srcMain.slice(srcMain.indexOf('  let persisting = null;'), srcMain.indexOf('  let swapSaid = null;')), "  let persisting = null;   // ONE write in flight: the waiters of a refresh each re-enter accessToken() and must not each re-write\n  function persistToken(next) {\n    if (persisting) return persisting;\n    persisting = (async () => {\n      const raw = tokens.read(); const storeRt = raw && raw.token ? String(raw.token.refresh_token || '') : '';\n      try { await tokens.write(next, { expiresAt: null, scopes: next.scopes || [], user: next.email || null }); unsaved = null; }\n      catch (e) {\n        unsaved = { token: next, supersedes: storeRt };\n        log.warn && log.warn(`[channels] gmail: the refreshed token could not be persisted (${(e && e.message) || e}) \u2014 held in memory and written again at the next request`);\n      }\n    })().finally(() => { persisting = null; });\n    return persisting;\n  }" + '\n');
+    const r5 = editAnchor(srcMain, srcMain.slice(srcMain.indexOf('  let persisting = null;'), srcMain.indexOf('  let swapSaid = null;')), "  let persisting = null;   // ONE write in flight: the waiters of a refresh each re-enter accessToken() and must not each re-write\n  function persistToken(next) {\n    if (persisting) return persisting;\n    persisting = (async () => {\n      const raw = tokens.read(); const storeRt = raw && raw.token ? String(raw.token.refresh_token || '') : '';\n      try { await tokens.write(next, { expiresAt: null, scopes: next.scopes || [], user: next.email || null }); unsaved = null; }\n      catch (e) {\n        unsaved = { token: next, supersedes: storeRt };\n        log.warn && log.warn(`[channels] gmail: the refreshed token could not be persisted (${(e && e.message) || e}) \u2014 held in memory and written again at the next request`);\n      }\n    })().finally(() => { persisting = null; });\n    return persisting;\n  }" + '\n', "src/channels/gmail.js");
     ok(r5 !== srcMain && /if \(persisting\) return persisting;/.test(r5) && r5.includes('  const openSecret = '), 'CONTROL fixture: the r5 single-flight persist (a different token handed the in-flight promise) restored in a copy — the slice ends before B-166e\'s client helpers, which the copy keeps');
     const mod5 = M.load('src/channels/gmail.js', r5, 'r5-persist'); const rg5 = CH.createChannelRegistry(); rg5.register(mod5.adapter);
     const c = await coalesce(rg5);
@@ -1029,7 +1029,7 @@ console.log('\n⑧ what we sent never comes back in our words (verify r4)');
   const srcG = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
   const SCRUB = '  if (!r.ok) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));';
   ok(srcG.split(SCRUB).length === 2, 'CONTROL setup: the scrub line is present once');
-  const gm = M8.load('src/channels/gmail.js', srcG.replace(SCRUB, '  if (!r.ok) throw typedFailure(r.status, parsed, what, retryAfterSeconds(r.headers));'), 'unscrubbed');
+  const gm = M8.load('src/channels/gmail.js', editAnchor(srcG, SCRUB, '  if (!r.ok) throw typedFailure(r.status, parsed, what, retryAfterSeconds(r.headers));', "src/channels/gmail.js"), 'unscrubbed');
   const rc = await drive(gm, () => { const rg = CH.createChannelRegistry(); rg.register(gm.adapter); return rg; });
   ok(String(rc.pb.error).includes(SECRET) && all(rc.e1).includes(SECRET), 'CONTROL: a copy that hands the body over unscrubbed words the echoed secret into the refusal — the checks above would be red');
   // ── verify r5: EVERY SPELLING a sent value left in, and a Bearer read without a regex ──
@@ -1050,9 +1050,9 @@ console.log('\n⑧ what we sent never comes back in our words (verify r4)');
   const SPELL = "const spellingsOf = (value) => new Set([value, encodeURIComponent(value), new URLSearchParams([['v', value]]).toString().slice(2)]);";
   const BEAR = '  const bearer = bearerOf(a);   // verify r5: no regex — a regex would park the header in RegExp.input until the next match\n  if (bearer && bearer.length >= SENT_SECRET_MIN) out.push({ name: \'access_token\', value: bearer });\n';
   ok(srcI.split(SPELL).length === 2 && srcI.split(BEAR).length === 2, 'CONTROL setup: the spellings set and the regex-free Bearer read are present once');
-  const ix2 = M8.load('src/channels/index.js', srcI.replace(SPELL, 'const spellingsOf = (value) => new Set([value, encodeURIComponent(value)]);'), 'two-spellings');
+  const ix2 = M8.load('src/channels/index.js', editAnchor(srcI, SPELL, 'const spellingsOf = (value) => new Set([value, encodeURIComponent(value)]);', "src/channels/index.js"), 'two-spellings');
   ok(CH.withoutSent(`echo: ${rawForm}`, sentOdd) !== ix2.withoutSent(`echo: ${rawForm}`, ix2.sentSecrets({ fields: { client_secret: odd } })) && ix2.withoutSent(`echo: ${rawForm}`, ix2.sentSecrets({ fields: { client_secret: odd } })).includes('sec%21ret'), 'CONTROL (a): a copy with the two r4 spellings lets the form body\'s own spelling through — the check above would be red');
-  const ix3 = M8.load('src/channels/index.js', srcI.replace(BEAR, "  const m = typeof a === 'string' ? /^Bearer\\s+(\\S+)$/i.exec(a) : null;\n  if (m && m[1].length >= SENT_SECRET_MIN) out.push({ name: 'access_token', value: m[1] });\n"), 'regex-bearer');
+  const ix3 = M8.load('src/channels/index.js', editAnchor(srcI, BEAR, "  const m = typeof a === 'string' ? /^Bearer\\s+(\\S+)$/i.exec(a) : null;\n  if (m && m[1].length >= SENT_SECRET_MIN) out.push({ name: 'access_token', value: m[1] });\n", "src/channels/index.js"), 'regex-bearer');
   const marker3 = 'ya29.r5-bearer-marker3-' + Math.random().toString(16).slice(2);
   ix3.sentSecrets({ headers: { Authorization: `Bearer ${marker3}` } });
   ok(String(RegExp.input || '').includes(marker3), 'CONTROL (b): a copy that reads the Bearer with a regex leaves the whole header in RegExp.input — the check above would be red');
@@ -1065,7 +1065,7 @@ console.log('\n⑧ what we sent never comes back in our words (verify r4)');
   ok(ig.code === 'auth-expired' && ig.message === 'gmail token refresh: Token has been expired or revoked. (400)' && !ig.detail.clientRefused, '…and invalid_grant keeps the plain token-refusal sentence');
   const IC = "  if (body && body.error === 'invalid_client') return new ChannelError('auth-expired', `${what}: ${msg} — Google refused the OAuth client itself (invalid_client:";
   ok(srcG.split(IC).length === 2, 'CONTROL setup: the invalid_client branch is present once');
-  const gm3 = M8.load('src/channels/gmail.js', srcG.replace(IC, "  if (false) return new ChannelError('auth-expired', `${what}: ${msg} — Google refused the OAuth client itself (invalid_client:"), 'no-invalid-client');
+  const gm3 = M8.load('src/channels/gmail.js', editAnchor(srcG, IC, "  if (false) return new ChannelError('auth-expired', `${what}: ${msg} — Google refused the OAuth client itself (invalid_client:", "src/channels/gmail.js"), 'no-invalid-client');
   const ic3 = gm3.typedFailure(401, { error: 'invalid_client', error_description: 'Unauthorized' }, 'gmail token refresh');
   ok(ic3.message === 'gmail token refresh: Unauthorized (401)' && !(ic3.detail && ic3.detail.clientRefused), 'CONTROL (c): a copy without the branch says only "Unauthorized (401)" — the check above would be red');
   for (const c of copiesCensus(M8.files, M8.dir, REPO, { minCopies: 4 })) ok(c.pass, c.name, c.detail);
@@ -1142,14 +1142,14 @@ console.log('\n⑲ verify r3: one response judge, the catch census (gmail.js + l
   Mg.write('src/channels/gmail.js', bare, 'bare-send');
   const cb = responseCensus(bare, OPT());
   ok(cb.problems.some((p) => /raw send whose answer no judge reads/.test(p)), 'CONTROL ①: a bare fetch outside the judge is RED', cb.problems.join(' ; '));
-  const swallow = src.replace(anchorHist, "let h; try { h = await api(`/history?${q}`, { what: 'gmail history' }); } catch (e) { h = { history: [] }; }");
+  const swallow = editAnchor(src, anchorHist, "let h; try { h = await api(`/history?${q}`, { what: 'gmail history' }); } catch (e) { h = { history: [] }; }", "src/channels/gmail.js");
   Mg.write('src/channels/gmail.js', swallow, 'swallowing-catch');
   const cs = responseCensus(swallow, OPT());
   ok(swallow !== src && cs.problems.some((p) => /can swallow a rate refusal/.test(p)), 'CONTROL ②: a try/catch around the history read that swallows is RED', cs.problems.join(' ; '));
-  const modOk = Mg.load('src/channels/gmail.js', src.replace(anchorJudge, 'if (r.status !== 429 && !r.ok) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));'), 'judge-maps-429-ok');
+  const modOk = Mg.load('src/channels/gmail.js', editAnchor(src, anchorJudge, 'if (r.status !== 429 && !r.ok) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));', "src/channels/gmail.js"), 'judge-maps-429-ok');
   const eOk = await threw(() => mkG(async () => res429(), modOk).listConversations({ limit: 10 }));
   ok(eOk === null, 'CONTROL ③: a judge that maps a 429 to ok (the listing resolves on a refused page) is RED by behaviour');
-  const modPre = Mg.load('src/channels/gmail.js', src.replace(anchorList, "try { m = await nameFor(id); } catch (e) { if (e instanceof ChannelError && e.code === 'auth-expired') throw e; m = null; }"), 'listing-swallow');
+  const modPre = Mg.load('src/channels/gmail.js', editAnchor(src, anchorList, "try { m = await nameFor(id); } catch (e) { if (e instanceof ChannelError && e.code === 'auth-expired') throw e; m = null; }", "src/channels/gmail.js"), 'listing-swallow');
   const lp = await listRun(modPre);
   ok(lp.code === null && lp.listed === 12 && lp.meta === 10, `CONTROL: the pre-r3 listing swallows the title read's 429 and sends ${lp.meta} title reads into the stop while resolving ok — RED`);
   // ── verify r4 — THE INJECTION TABLE'S FINDS (2026-10-01), the Gmail half ──
@@ -1185,7 +1185,7 @@ console.log('\n⑲ verify r3: one response judge, the catch census (gmail.js + l
     ok(rNet.code === null && rNet.listed === 12 && rNet.meta === 1, `r4 F2: a network blip on a title read: ONE read, the listing resolves on snippets, the rest of the titles wait for the next pass (${JSON.stringify(rNet)})`);
     const aF2 = "            if (e instanceof ChannelError && e.code === 'transport' && e.detail && Number(e.detail.status) >= 500) throw e;\n            budget = 0; m = null;\n          }";
     ok(src.includes(aF2), 'r4 F2 CONTROL anchor: the 5xx throw + the blip stop are in the file');
-    const modF2 = Mg.load('src/channels/gmail.js', src.replace(aF2, '            m = null;\n          }'), 'listing-5xx-continues');
+    const modF2 = Mg.load('src/channels/gmail.js', editAnchor(src, aF2, '            m = null;\n          }', "src/channels/gmail.js"), 'listing-5xx-continues');
     const c503 = await listRun2(modF2, res503); const cNet = await listRun2(modF2, () => { throw new Error('ECONNRESET'); });
     ok(c503.code === null && c503.meta === 10 && cNet.meta === 10, `r4 F2 CONTROL: the copy sends ${c503.meta} title reads into the 503 window and ${cNet.meta} into the dead connection while resolving ok (RED)`);
   }
@@ -1213,7 +1213,7 @@ console.log('\n⑲ verify r3: one response judge, the catch census (gmail.js + l
     ok(f3.second === 'rate-limited' && f3.third === 'rate-limited' && f3.historyAskedAgain, `r4 F3: a refused history.list is asked again 8 s later (the memo keeps no refusal) (${JSON.stringify(f3)})`);
     const aF3 = '      mailbox.at = 0;   // verify r4 F3';
     ok(src.includes(aF3), 'r4 F3 CONTROL anchor: the memo reset is in the file');
-    const c3 = await run(Mg.load('src/channels/gmail.js', src.replace(aF3, '      // (memo kept)'), 'mailbox-memo-keeps-refusal'));
+    const c3 = await run(Mg.load('src/channels/gmail.js', editAnchor(src, aF3, '      // (memo kept)', "src/channels/gmail.js"), 'mailbox-memo-keeps-refusal'));
     ok(c3.second === 'rate-limited' && c3.third === null && !c3.historyAskedAgain, 'r4 F3 CONTROL: the copy serves the refused sync from the memo — the pass 8 s later resolves ok with no vendor call (RED)');
   }
   for (const x of copiesCensus(Mg.files, Mg.dir, REPO, { minCopies: 7, label: '⑲ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
@@ -1359,7 +1359,7 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
   const GSRC = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
   const A1 = "snippet: SR.snippetOf(typeof m.snippet === 'string' ? m.snippet : null) });";
   ok(GSRC.split(A1).length === 2, 'CONTROL anchor: the reader line is in gmail.js once');
-  const ga = mkA(MUT.load('src/channels/gmail.js', GSRC.replace(A1, "snippet: typeof m.snippet === 'string' ? m.snippet : null });"), 'no-reader'));
+  const ga = mkA(MUT.load('src/channels/gmail.js', editAnchor(GSRC, A1, "snippet: typeof m.snippet === 'string' ? m.snippet : null });", "src/channels/gmail.js"), 'no-reader'));
   const pc = await ga.search({ query: 'deploy', pageToken: 'gp-2' });
   const c56 = pc.hits.find((h) => h.vendorId === 'msg_arch_56');
   ok(c56 && c56.snippet.length === 1024 * 1024, 'CONTROL: the copy without the reader returns the 1 MB snippet whole — the leg above would be RED', String(c56 && c56.snippet.length));
@@ -1367,7 +1367,7 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
   const SH = "        if (typeof shows === 'function' && !shows(it.threadId)) { unshown.set(it.threadId, (unshown.get(it.threadId) || 0) + 1); continue; }\n";
   const ST = "        const held = typeof storedAt === 'function' ? Number(storedAt(it.threadId, it.id)) || 0 : 0;\n        if (held > 0) { hits.push({ convId: it.threadId, vendorId: it.id, at: held, fromId: null, threadKey: null, snippet: null }); continue; }\n";
   ok(GSRC.split(SH + ST).length === 2, 'CONTROL 1b anchor: `shows` is asked right before `storedAt` in gmail.js');
-  const gb = mkA(MUT.load('src/channels/gmail.js', GSRC.replace(SH + ST, ST + SH), 'stored-first'));
+  const gb = mkA(MUT.load('src/channels/gmail.js', editAnchor(GSRC, SH + ST, ST + SH, "src/channels/gmail.js"), 'stored-first'));
   const asked1b = [];
   await gb.search({ query: 'deploy', shows: (cid) => cid === 'thr_ops_0001', storedAt: (cid, id) => { asked1b.push(id); return id === 'msg_ops_b' ? T0 : 0; } });
   ok(asked1b.some((id) => /^msg_arch_/.test(id)), 'CONTROL 1b: the copy asking `storedAt` first reads the hidden thread\'s ids — the order leg above would be RED', asked1b.join());
@@ -1383,7 +1383,7 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
   const ESRC = engineSource(REPO);
   const A2 = 'e.adapter.search({ query, pageToken: next, storedAt, shows })';
   ok(ESRC.split(A2).length === 2, 'CONTROL anchor: the hinted search call is in the engine once');
-  const EC = MUT.load('src/server/channels-engine.js', ESRC.replace(A2, 'e.adapter.search({ query, pageToken: next })'), 'no-hints');
+  const EC = MUT.load('src/server/channels-engine.js', editAnchor(ESRC, A2, 'e.adapter.search({ query, pageToken: next })', "src/server/channels-engine.js"), 'no-hints');
   const e2 = await connectFresh(EC, 'eng-s6-ctl');
   const dc = await drive(e2);
   e2.stop();
@@ -1460,7 +1460,7 @@ console.log('\n㉑ lane gmail-reply-known: a listed thread\'s send row needs no 
   ok(ESRC.split(HINT).length === 2, 'CONTROL anchor: the listing hint is passed in one place');
   const M21 = mutantCopies('chan-gmail-s21', REPO);
   quota = false;
-  const E2 = await fresh(M21.load('src/server/channels-engine.js', ESRC.replace(HINT, HINT.replace('{ listed }', '{}')), 'no-listing-hint'), 'eng-s21-ctl');
+  const E2 = await fresh(M21.load('src/server/channels-engine.js', editAnchor(ESRC, HINT, HINT.replace('{ listed }', '{}'), "src/server/channels-engine.js"), 'no-listing-hint'), 'eng-s21-ctl');
   const rc = await oldThread(E2);
   E2.stop();
   quota = false;
@@ -1699,10 +1699,10 @@ console.log('\n㉒ lane gmail-anchor-churn: the anchor is a message the vendor w
   ok([NEW_ANCHOR, NEW_WALK, NEW_LOST, HOLD, SAME].every((x) => SRC.split(x).length === 2), 'the anchor line, the history-walk line, the lost-anchor line, the hold and the same-id note are present ONCE each (the controls restore exactly them)');
   const MC = mutantCopies('chan-gmail-churn', REPO);
   const gPre = MC.load('src/channels/gmail.js', editAnchor(editAnchor(editAnchor(editAnchor(SRC, NEW_ANCHOR, OLD_ANCHOR, "src/channels/gmail.js"), NEW_WALK, OLD_WALK, "src/channels/gmail.js"), NEW_LOST, OLD_LOST, "src/channels/gmail.js"), HOLD, '      if (false', "src/channels/gmail.js"), 'pre-fix');
-  const gNewest = MC.load('src/channels/gmail.js', SRC.replace(NEW_ANCHOR, OLD_ANCHOR), 'newest-id');
-  const gNoNews = MC.load('src/channels/gmail.js', SRC.replace(NEW_WALK, OLD_WALK), 'draft-is-news');
-  const gNoHold = MC.load('src/channels/gmail.js', SRC.replace(HOLD, '      if (false'), 'no-hold');
-  const gNoNote = MC.load('src/channels/gmail.js', SRC.replace(SAME, ''), 'no-same-id-note');
+  const gNewest = MC.load('src/channels/gmail.js', editAnchor(SRC, NEW_ANCHOR, OLD_ANCHOR, "src/channels/gmail.js"), 'newest-id');
+  const gNoNews = MC.load('src/channels/gmail.js', editAnchor(SRC, NEW_WALK, OLD_WALK, "src/channels/gmail.js"), 'draft-is-news');
+  const gNoHold = MC.load('src/channels/gmail.js', editAnchor(SRC, HOLD, '      if (false', "src/channels/gmail.js"), 'no-hold');
+  const gNoNote = MC.load('src/channels/gmail.js', editAnchor(SRC, SAME, '', "src/channels/gmail.js"), 'no-same-id-note');
 
   // ① THE INCIDENT, 5 polls: the owner's reply is a draft being saved in the mail app
   const yours = await churnRig(gmail, 'draft', 'yours');
@@ -1841,7 +1841,7 @@ console.log('\n㉓ lane gmail-draft-not-a-message: a DRAFT-labelled message is a
   const KIND = "    ...(draft ? { kind: 'draft', draftState: draftStateOf(labels) } : {}),\n";
   ok(DSRC.split(KIND).length === 2, 'control setup: the kind line is present once');
   const MD = mutantCopies('chan-gmail-draft', REPO);
-  const gNoKind = MD.load('src/channels/gmail.js', DSRC.replace(KIND, ''), 'no-draft-kind');
+  const gNoKind = MD.load('src/channels/gmail.js', editAnchor(DSRC, KIND, '', "src/channels/gmail.js"), 'no-draft-kind');
   const X = await draftRig(gNoKind, 'nokind');
   ok(X.row.lastText === 'Draft v2: Friday at 10' && Number(X.row.lastAt) === clock - 600e3, 'CONTROL: a copy whose toRecord drops the kind ⇒ the unsent draft is the row\'s last line and instant again (red)', J({ lastText: X.row.lastText, lastAt: X.row.lastAt }));
   for (const x of copiesCensus(MD.files, MD.dir, REPO, { minCopies: 1, label: '㉓ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
@@ -1973,11 +1973,11 @@ console.log('\n㉔ B-2f6c: a Disconnect keeps the mailbox cursor — the re-auth
   const OLD_WALK_H = '          if (mailbox.walkFrom && t.historyId && Number(t.historyId) > Number(mailbox.walkFrom)) mailbox.changed.add(id);\n';
   ok(ASRC.split(KEEP).length === 2 && GSRC.split(WALK).length === 2, 'control setup: the Disconnect\'s write and the walk line are present ONCE each');
   const MH = mutantCopies('chan-gmail-hole', REPO);
-  const authWipe = MH.write('src/server/channels-auth.js', ASRC.replace(KEEP, WIPE), 'wipe');
+  const authWipe = MH.write('src/server/channels-auth.js', editAnchor(ASRC, KEEP, WIPE, "src/server/channels-auth.js"), 'wipe');
   const ESRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
   ok(ESRC.split("require('./channels-auth.js')").length === 2, 'control setup: the engine requires channels-auth once');
-  const engWipe = MH.load('src/server/channels-engine.js', ESRC.replace("require('./channels-auth.js')", `require(${JSON.stringify(authWipe)})`), 'wipe');
-  const gOldWalk = MH.load('src/channels/gmail.js', GSRC.replace(WALK, OLD_WALK_H), 'old-walk');
+  const engWipe = MH.load('src/server/channels-engine.js', editAnchor(ESRC, "require('./channels-auth.js')", `require(${JSON.stringify(authWipe)})`, "src/server/channels-engine.js"), 'wipe');
+  const gOldWalk = MH.load('src/channels/gmail.js', editAnchor(GSRC, WALK, OLD_WALK_H, "src/channels/gmail.js"), 'old-walk');
   const W = await holeRig('wipe', { E: engWipe });
   ok(!W.cursorKept && W.lost.length === 0 && W.reads === 12, 'RED CONTROL (the root): with the wipe restored the cursor is gone after the Disconnect — and the defence still reads every held thread once (none lost)', J({ kept: W.cursorKept, lost: W.lost, reads: W.reads }));
   const P = await holeRig('pre', { E: engWipe, mod: gOldWalk });
@@ -2013,14 +2013,14 @@ console.log('\n㉔ B-2f6c: a Disconnect keeps the mailbox cursor — the re-auth
       const ch = await a.changes();
       return { changed: ch.changed.slice().sort(), st };
     };
-    const gNamed = MH.load('src/channels/gmail.js', GSRC.replace(WALK, WALK.replace(': holds(id))', ': named(id))')), 'named-not-held');
+    const gNamed = MH.load('src/channels/gmail.js', editAnchor(GSRC, WALK, WALK.replace(': holds(id))', ': named(id))'), "src/channels/gmail.js"), 'named-not-held');
     const lostCur = await walkRun(gmail, {});
     const lostNamed = await walkRun(gNamed, {});
     ok(J(lostCur.changed) === J(ids) && lostNamed.changed.length === 0, 'a LOST cursor reads every thread the engine HOLDS, named or not (a catch-up past the naming budget leaves rows unnamed); RED CONTROL: keyed on `named`, those rows were walked unread', J({ held: lostCur.changed, named: lostNamed.changed }));
     ok(lostCur.st.gmailMustWalk === false && !!lostCur.st.gmailHistoryId, 'the completed walk is persisted as done (gmailMustWalk false)', J(lostCur.st));
     const RESTORE = '    if (st0 && st0.gmailHistoryId) { mailbox.historyId = String(st0.gmailHistoryId); mailbox.mustWalk = !!st0.gmailWalkFrom || st0.gmailMustWalk === true;';
     ok(GSRC.split(RESTORE).length === 2, 'control setup: the restore line is present once');
-    const gOldRestore = MH.load('src/channels/gmail.js', GSRC.replace(RESTORE, RESTORE.replace(' || st0.gmailMustWalk === true', '')), 'old-restore');
+    const gOldRestore = MH.load('src/channels/gmail.js', editAnchor(GSRC, RESTORE, RESTORE.replace(' || st0.gmailMustWalk === true', ''), "src/channels/gmail.js"), 'old-restore');
     const mid = { gmailHistoryId: String(mb.hid), gmailChanged: [], gmailWalkFrom: null, gmailMustWalk: true };   // a restart in the middle of a cursor-less walk
     const resumed = await walkRun(gmail, mid), dropped = await walkRun(gOldRestore, mid);
     ok(J(resumed.changed) === J(ids) && dropped.changed.length === 0, 'a restart in the middle of a cursor-less walk walks again and reads every held thread; RED CONTROL: the old restore line dropped the walk (the held threads\' news never read)', J({ resumed: resumed.changed, dropped: dropped.changed }));
@@ -2164,9 +2164,9 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   const ARM = "    if (p.ok) { for (const q of landedBefore(p)) endLandedAsk(q, 'a newer sign-in of its type landed'); landedAskLater(p); }   // B-8edd: the newest landing is the one asked about\n";
   ok(ASRC2.split(ARM).length === 2, 'control setup: the arming line is present once');
   const ML = mutantCopies('chan-gmail-landed', REPO);
-  const authNoAsk = ML.write('src/server/channels-auth.js', ASRC2.replace(ARM, ''), 'no-ask');
+  const authNoAsk = ML.write('src/server/channels-auth.js', editAnchor(ASRC2, ARM, '', "src/server/channels-auth.js"), 'no-ask');
   const ESRC2 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
-  const engNoAsk = ML.load('src/server/channels-engine.js', ESRC2.replace("require('./channels-auth.js')", `require(${JSON.stringify(authNoAsk)})`), 'no-ask');
+  const engNoAsk = ML.load('src/server/channels-engine.js', editAnchor(ESRC2, "require('./channels-auth.js')", `require(${JSON.stringify(authNoAsk)})`, "src/server/channels-engine.js"), 'no-ask');
   const C = await landedRig('control', engNoAsk);
   await C.signIn({ armed: false });
   ok(C.asks().length === 0 && C.e2.oauthStatus(null, { kind: 'gmail' }).done === true, 'RED CONTROL: without the arming line the landed sign-in waits unsaid (the release\'s silence) — the leg above is red on it', J(C.todos.openItems()));
@@ -2176,7 +2176,7 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   const SWEEP = "  try { if (userTodos && typeof userTodos.idsWhere === 'function') for (const id of userTodos.idsWhere(";
   const CONNOLD = "    for (const q of landedBefore(p)) endLandedAsk(q, 'a newer sign-in of its type was connected');\n";
   ok([BAIL, ENDOLD, GUARD, SWEEP, CONNOLD].every((x) => ASRC2.split(x).length === 2), 'control setup: the bail, the landing\'s and Connect\'s ends of the older asks, the pending guard and the restart sweep are present once each');
-  const engOf = (src, tag) => ML.load('src/server/channels-engine.js', ESRC2.replace("require('./channels-auth.js')", `require(${JSON.stringify(ML.write('src/server/channels-auth.js', src, tag))})`), tag);
+  const engOf = (src, tag) => ML.load('src/server/channels-engine.js', editAnchor(ESRC2, "require('./channels-auth.js')", `require(${JSON.stringify(ML.write('src/server/channels-auth.js', src, tag))})`, "src/server/channels-engine.js"), tag);
   const engFan = engOf(ASRC2.replace(BAIL, "    for (const q of pendingFlows.values()) if (q !== p && q.kind === p.kind) endLandedAsk(q, 'a newer sign-in of its type landed');\n").replace(ENDOLD, '    if (p.ok) landedAskLater(p);\n').replace(CONNOLD, ''), 'fan-out');
   const twoF = await twoRun(engFan, 'two-fan', { connect: true });
   ok(J(twoF.asks) === J([twoF.a]), 'RED CONTROL (the row\'s first commit): its fan-out let the OLDER timer file «finish connecting» for the sign-in the person replaced and connected over', J(twoF));
@@ -2368,23 +2368,23 @@ console.log('\n㉖ B-166e: an account refreshes with the client it signed in wit
     const HOLDS = "  if (token.refusedCause !== 'client-changed' || !token.refusedClient) return true;\n";
     const ADOPT = "!use.minted.secretEnc || keptSecret !== String(use.clientSecret))";
     ok(GS2.split(STATE).length === 2 && GS2.split(HOLDS).length === 2 && GS2.split(ADOPT).length === 2, 'control setup: the state\'s cause, the stamp\'s hold and the re-seal are present once each');
-    const cA = await account(MS2.load('src/channels/gmail.js', GS2.replace(STATE, "why: 'refresh-refused', credentialSource: cred.source, credentialKey };"), 'old-state'), { legacy: true });   // stale-pins: kept (the release's state line, restored by the red control)
+    const cA = await account(MS2.load('src/channels/gmail.js', editAnchor(GS2, STATE, "why: 'refresh-refused', credentialSource: cred.source, credentialKey };", "src/channels/gmail.js"), 'old-state'), { legacy: true });   // stale-pins: kept (the release's state line, restored by the red control)
     presetsHolder.list = [NEW]; await cA.refresh();
     ok((await cA.a.auth.state()).why === 'refresh-refused', 'RED CONTROL (A): the release\'s state line says «refresh refused» for a client-changed stamp', '');
-    const gB = MS2.load('src/channels/gmail.js', GS2.replace(HOLDS, '  return true;\n'), 'stamp-forever');
+    const gB = MS2.load('src/channels/gmail.js', editAnchor(GS2, HOLDS, '  return true;\n', "src/channels/gmail.js"), 'stamp-forever');
     const cB = await account(gB, { legacy: true });
     presetsHolder.list = [NEW]; await cB.refresh();
     presetsHolder.list = [OLD];
     const cb = await cB.refresh();
     ok(cb.e && cB.tok.st.token.invalidGrantAt, 'RED CONTROL (B): a stamp that always holds keeps the account dead after the first preset is put back (the vendor would honour it)', J({ e: cb.e && cb.e.message }));
-    const cR = await account(MS2.load('src/channels/gmail.js', GS2.replace(ADOPT, '!use.minted.secretEnc)'), 'no-reseal'));   // stale-pins: kept (the release's adoption test, restored by the red control)
+    const cR = await account(MS2.load('src/channels/gmail.js', editAnchor(GS2, ADOPT, '!use.minted.secretEnc)', "src/channels/gmail.js"), 'no-reseal'));   // stale-pins: kept (the release's adoption test, restored by the red control)
     presetsHolder.list = [{ ...OLD, clientSecret: ROT }];
     await cR.refresh();
     ok(SEAL.open(cR.tok.st.token.client.secretEnc) === OLD.clientSecret, 'RED CONTROL: without the re-seal the sealed copy keeps the OLD secret after a rotation', '');
     // cure 2's control: today's spread — the dead grant's stamp keeps the old client fields
     const PLAIN = 'await tokens.write({ ...plainOf(cur), invalidGrantAt: now(),';
     ok(GS2.split(PLAIN).length === 2, 'control setup: the plain stamp write is present once');
-    const dgc = await deadAfterSwap(MS2.load('src/channels/gmail.js', GS2.replace(PLAIN, 'await tokens.write({ ...cur, invalidGrantAt: now(),'), 'spread-stamp'));   // stale-pins: kept (the spread, restored by the red control)
+    const dgc = await deadAfterSwap(MS2.load('src/channels/gmail.js', editAnchor(GS2, PLAIN, 'await tokens.write({ ...cur, invalidGrantAt: now(),', "src/channels/gmail.js"), 'spread-stamp'));   // stale-pins: kept (the spread, restored by the red control)
     ok(dgc.more === 2 && dgc.state === 'connected' && dgc.fields.length === 2, `RED CONTROL: the spread keeps «client changed» on a dead grant — Google is asked on EVERY pass (${dgc.more} in two) and the dead account reads ${dgc.state}`, J(dgc));
     for (const x of copiesCensus(MS2.files, MS2.dir, REPO, { minCopies: 4, label: '㉖ cure ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
     // CONTROL: the release's refresh line — the preset's client whatever it is ⇒ the swap refuses the refresh (the outage)
@@ -2392,7 +2392,7 @@ console.log('\n㉖ B-166e: an account refreshes with the client it signed in wit
     const FORM = "form: { grant_type: 'refresh_token', client_id: use.clientId, client_secret: use.clientSecret, refresh_token: token.refresh_token } }).catch((e0) => {";
     ok(GS.split(FORM).length === 2, 'control setup: the refresh form line is present once');
     const MS = mutantCopies('chan-gmail-swap', REPO);
-    const gOld = MS.load('src/channels/gmail.js', GS.replace(FORM, "form: { grant_type: 'refresh_token', client_id: cred.values.clientId, client_secret: cred.values.clientSecret, refresh_token: token.refresh_token } }).catch((e0) => {"), 'release-refresh');
+    const gOld = MS.load('src/channels/gmail.js', editAnchor(GS, FORM, "form: { grant_type: 'refresh_token', client_id: cred.values.clientId, client_secret: cred.values.clientSecret, refresh_token: token.refresh_token } }).catch((e0) => {", "src/channels/gmail.js"), 'release-refresh');
     const C = await account(gOld);
     presetsHolder.list = [NEW];
     const r6 = await C.refresh();

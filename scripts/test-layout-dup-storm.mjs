@@ -648,7 +648,7 @@ await section('§D285 B-d285 (lane bl-windows) — the reveal door reads the one
   const DSRC = read('src/lib/desktop-manager.js'), find = 'const e = (st?.windows || []).find((w) => w && doorSessionOf(w, live) === String(serverId)';
   ok(DSRC.includes(find), '§D285 CONTROL setup: the reveal door\'s find exists in desktop-manager.js');
   const M = mutantCopies('ldup-d285', REPO);
-  const DMx = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(find, 'const e = (st?.windows || []).find((w) => w && w.openSpec && doorSessionOf(w, live) === String(serverId)'), 'd285-recipe-only', { esm: true })).href)).DesktopManager;
+  const DMx = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, 'const e = (st?.windows || []).find((w) => w && w.openSpec && doorSessionOf(w, live) === String(serverId)', "src/lib/desktop-manager.js"), 'd285-recipe-only', { esm: true })).href)).DesktopManager;
   const f = await d285Legs({ DM: DMx, install: install10, quiet: true }), fb = await d285Legs({ DM: DMx, install: install10, quiet: true, shape: 'b' });
   ok(f.some((n) => n.startsWith('§D285 (g) the person opens')) && fb.some((n) => n.startsWith('§D285 (b) the person opens')), `§D285 CONTROL: the release's find (a recipe first) ⇒ each open builds a second window on X — the reveal legs go RED (g: ${f.length} red, b: ${fb.length} red; the autosave legs: ${[...f, ...fb].filter((n) => /autosave/.test(n)).length} red)`, { f, fb });
 });
@@ -1822,7 +1822,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
   {
     const find = "    if (ev.has(id) && why.get(id) === 'dup') { const seen = !!(sid && showing(sid, id)); if (!seen && shownBy(sid, id, byOf.get(id), nextList, elsewhere)) continue; unexplained.push(id); dup.push(id); if (seen) shown.push(id); continue; }";
     ok(PSRC.includes(find), 'mutant A-no-by-check: the patched line exists in desktop-record.js');
-    const Mx = M.load('src/lib/desktop-record.js', PSRC.replace(find, "    if (ev.has(id) && why.get(id) === 'dup') continue;"), 'a-no-by-check');
+    const Mx = M.load('src/lib/desktop-record.js', editAnchor(PSRC, find, "    if (ev.has(id) && why.get(id) === 'dup') continue;", "src/lib/desktop-record.js"), 'a-no-by-check');
     const f = pureLegs(Mx, { quiet: true }), h = await hubLegs(loadHandler({ shrinkVerdict: Mx.shrinkVerdict }), { quiet: true });
     ok(f.some((n) => /CONTROL: a 'dup' whose `by` shows nothing/.test(n)) && h.some((n) => /CONTROL: the same drop with a `by` that shows nothing of S/.test(n)), `mutant A-no-by-check: a duplicate taken on the page's word drops a window nothing shows — RED (${f.length}/${h.length})`);
   }
@@ -1840,7 +1840,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
   {
     const find = '    if (s && now - s.at < REFUSAL_TOAST_MS) { s.count++; return false; }';
     ok(DSRC.includes(find), 'mutant D-no-dedup: the patched line exists in desktop-manager.js');
-    const DMx = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(find, ''), 'd-no-dedup', { esm: true })).href)).DesktopManager;
+    const DMx = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '', "src/lib/desktop-manager.js"), 'd-no-dedup', { esm: true })).href)).DesktopManager;
     const f = await toastLegs({ DM: DMx, quiet: true });
     ok(f.some((n) => /ONE TOAST PER CAUSE: three refusals/.test(n)), `mutant D-no-dedup: a warn per refusal — RED (${f.length})`);
   }
@@ -1852,7 +1852,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     ok(cg.some((n) => /is REFUSED 'chain-disagrees'/.test(n)), `mutant r3-G-no-chain-gate (ab1226ff2's handler): the inconsistent re-send is written — RED (${cg.length})`);
     const find = "    if (w.tabChain.tabs.some((m) => String(m) !== id && rows.has(String(m)) && members(rows.get(String(m))) !== mine)) out.push(id);";
     ok(PSRC.includes(find), 'mutant r3-G-blind-verdict: the patched line exists in desktop-record.js');
-    const Mx = M.load('src/lib/desktop-record.js', PSRC.replace(find, ''), 'r3-g-blind');
+    const Mx = M.load('src/lib/desktop-record.js', editAnchor(PSRC, find, '', "src/lib/desktop-record.js"), 'r3-g-blind');
     const p = pureLegs(Mx, { quiet: true });
     ok(p.some((n) => /chainsAgree: the r2 re-send/.test(n)) && p.some((n) => /NO chain disagrees too/.test(n)), `mutant r3-G-blind-verdict: chainsAgree sees no disagreement — RED (${p.length})`);
   }
@@ -1860,7 +1860,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
   {
     const PSRC = read('src/routes/persistence.js'), find = '    tracesTrue(data);\n';
     ok(PSRC.includes(find), 'mutant r4-K-restore-spreads: the patched line exists in persistence.js');
-    const Px = M.load('src/routes/persistence.js', PSRC.replace(find, ''), 'r4-k-spread');
+    const Px = M.load('src/routes/persistence.js', editAnchor(PSRC, find, '', "src/routes/persistence.js"), 'r4-k-spread');
     const k = await persistLegs(Px, { quiet: true });
     ok(k.some((n) => /THE ONE-DESKTOP RESTORE/.test(n)) && k.some((n) => /…and ANY write through writeLayouts/.test(n)), `mutant r4-K-restore-spreads (36bd0c866's writeLayouts): the restored record lists the copy the trace still names — RED (${k.length})`);
     const ND = require(MODEL).noteDupsLeft;
@@ -1874,7 +1874,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
   {
     const WSRC = read('src/ws-handler.js'), find = 'gone, alive: (sid) => !endedConvs.has(sid) });';
     ok(WSRC.includes(find), 'mutant r5-N-live-set: the patched line exists in ws-handler.js');
-    const Wx = M.load('src/ws-handler.js', WSRC.replace(find, 'gone, alive: (sid) => activeSessions.has(sid) });'), 'r5-n-live');
+    const Wx = M.load('src/ws-handler.js', editAnchor(WSRC, find, 'gone, alive: (sid) => activeSessions.has(sid) });', "src/ws-handler.js"), 'r5-n-live');
     const n = await hubNLegs(Wx, { quiet: true });
     ok(n.some((x) => /a STOPPED conversation stays traced/.test(x)) && n.some((x) => /not ADOPTED the conversation yet/.test(x)), `mutant r5-N-live-set (4ad07d751's \`activeSessions.has\` alone): a stopped conversation and one not adopted yet leave the trace — RED (${n.length}: ${n.filter((x) => /r5 N/.test(x)).map((x) => x.slice(0, 60)).join(' | ')})`);
   }
@@ -1884,7 +1884,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const dm8 = async (find, repl, tag) => { ok(D8.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); return (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', D8.replace(find, repl), tag, { esm: true })).href)).DesktopManager; };
     // a second taskbar module in one process: its top-level registerWindowMenu() would register the window menu's commands again
     // (contributions' registry is the process's, and refuses a duplicate) — the copy leaves that one call out
-    const tb8 = async (find, repl, tag) => { ok(T8.includes(find) && T8.includes('\nregisterWindowMenu();\n'), `mutant ${tag}: the patched lines exist in taskbar.js`); return import(pathToFileURL(M.write('src/lib/taskbar.js', T8.replace(find, repl).replace('\nregisterWindowMenu();\n', '\n\n'), tag, { esm: true })).href); };
+    const tb8 = async (find, repl, tag) => { ok(T8.includes(find) && T8.includes('\nregisterWindowMenu();\n'), `mutant ${tag}: the patched lines exist in taskbar.js`); return import(pathToFileURL(M.write('src/lib/taskbar.js', editAnchor(T8.replace(find, repl), '\nregisterWindowMenu();\n', '\n\n', "src/lib/taskbar.js"), tag, { esm: true })).href); };
     const heads = (f) => f.map((n) => n.slice(0, 16)).join(' | ');
     const blind = await dm8('    return !!(ask && ask.desk === desktopId) || !!(r && r.desk === desktopId && r.gen === (this._revealGen || 0));', '    return !!(ask && ask.desk === desktopId) || !!(r && r.gen === (this._revealGen || 0));', 'r8-R1-deskblind');
     const fb = await r8Legs({ DM: blind, install: install8, quiet: true, legs: ['R1b', 'R1c'] });
@@ -1925,7 +1925,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     ok(fv.some((n) => n.startsWith('§R9 (f):')) && fv.some((n) => n.startsWith('§R9 (g):')), `mutant r9-two-resolvers (the verdict reads the server id first, the restore keeps its own ladder): where the two names disagree the verdict and the restore part — S's copy restored (its attach raised X's window), D's real window never built — (f)(g) RED (${fv.length}: ${heads(fv)})`);
     const alive = "        // (desktop-record liveSessionOf — r9: a row whose session, so resolved, this page shows is a copy: never restored here)\n        const alive = liveSessionOf(ws, activeSessions);\n";
     ok(L9s.includes(alive), 'mutant r9-two-resolvers (restore side): the patched lines exist in layout.js');
-    const LMr = (await import(pathToFileURL(M.write('src/lib/layout.js', L9s.replace(alive, "        const alive = (ws.serverSessionId && activeSessions.find((s) => s.id === ws.serverSessionId)) || liveSessionOf(ws, activeSessions);\n"), 'r9-two-resolvers-restore', { esm: true })).href)).LayoutManager;
+    const LMr = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(L9s, alive, "        const alive = (ws.serverSessionId && activeSessions.find((s) => s.id === ws.serverSessionId)) || liveSessionOf(ws, activeSessions);\n", "src/lib/layout.js"), 'r9-two-resolvers-restore', { esm: true })).href)).LayoutManager;
     const fr9 = await r9Legs({ LM: LMr, install: install9, quiet: true, legs: ['f', 'g'] });
     ok(fr9.length === 1 && fr9[0].startsWith('§R9 (g):'), `mutant r9-two-resolvers (restore side: restoreState keeps its own order — the server id first): D's row passes the verdict, its restore attaches S and raises X's window — (g) RED, (f) green (the verdict settles it first) (${fr9.length}: ${heads(fr9)})`);
     const list = "    const listed = (this.app.sidebar?._webuiSessions || []).filter((s) => s && s.id != null), named = new Set(listed.map((s) => String(s.id)));\n";
@@ -1941,11 +1941,11 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const dupKey = '      const id = idOf(w), sid = sessionOf(w), door = doorSessionOf(w, live), by = sid && door && shows.has(door) ? shows.get(sid) : null;\n';
     const imp = "from './desktop-record.js';", hand = '    for (const x of duplicatesOf({ records: this._savedStates, shown, live: this._shownCensus().live })) {\n';
     if (ok(P10.includes(dupKey) && D10.includes(imp) && D10.includes(hand), 'mutant r10: the patched lines exist in desktop-record.js / desktop-manager.js')) {
-      const drOld = M.write('src/lib/desktop-record.js', P10.replace(dupKey, '      const id = idOf(w), sid = sessionOf(w), by = sid ? shows.get(sid) : null;\n'), 'r10-dups-on-sessionof');
-      const DMo = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', D10.split(imp).join(`from ${J(drOld)};`), 'r10-dups-on-sessionof-dm', { esm: true })).href)).DesktopManager;
+      const drOld = M.write('src/lib/desktop-record.js', editAnchor(P10, dupKey, '      const id = idOf(w), sid = sessionOf(w), by = sid ? shows.get(sid) : null;\n', "src/lib/desktop-record.js"), 'r10-dups-on-sessionof');
+      const DMo = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(D10, imp, `from ${J(drOld)};`, "src/lib/desktop-manager.js", 'join'), 'r10-dups-on-sessionof-dm', { esm: true })).href)).DesktopManager;
       const fo = await r10Legs({ DM: DMo, install: install10, quiet: true, legs: ['gn', 'gs', 'es'] });
       ok(fo.length === 2 && fo.some((n) => n.startsWith('§R10 (gn):')) && fo.some((n) => n.startsWith('§R10 (gs):')), `mutant r10-dups-on-sessionof (9d11dd973's duplicatesOf: the server id alone): the autosave proposes D's row as S's 'dup', the hub takes it, D's window is never built — (gn)(gs) RED, the true copy (es) green (${fo.length}: ${heads(fo)})`);
-      const DMn = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', D10.replace(hand, '    for (const x of duplicatesOf({ records: this._savedStates, shown })) {\n'), 'r10-dups-no-census', { esm: true })).href)).DesktopManager;
+      const DMn = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(D10, hand, '    for (const x of duplicatesOf({ records: this._savedStates, shown })) {\n', "src/lib/desktop-manager.js"), 'r10-dups-no-census', { esm: true })).href)).DesktopManager;
       const fn = await r10Legs({ DM: DMn, install: install10, quiet: true, legs: ['gn', 'es'] });
       ok(fn.length === 1 && fn[0].startsWith('§R10 (es):'), `mutant r10-dups-no-census (normalizeDups hands duplicatesOf no live list): a row with no recipe resolves to nothing — the true copy (es) is never proposed, carried for ever — RED; (gn) green (${fn.length}: ${heads(fn)})`);
     }
@@ -1975,7 +1975,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const a = '      out.push(carry ? { desk, id, by: String(by), sid, carry } : { desk, id, by: String(by), sid });';
     if (ok(PSRC.includes(a), 'mutant pr-dup-drops-place: the patched line exists in desktop-record.js')) {
-      const Mx = M.load('src/lib/desktop-record.js', PSRC.replace(a, '      out.push({ desk, id, by: String(by), sid });'), 'pr-dup-drops-place');
+      const Mx = M.load('src/lib/desktop-record.js', editAnchor(PSRC, a, '      out.push({ desk, id, by: String(by), sid });', "src/lib/desktop-record.js"), 'pr-dup-drops-place');
       const f = await prLegs({ PURE: Mx, quiet: true, legs: ['b'] });
       ok(f.some((n) => n.startsWith('§PR (b) PURE duplicatesOf')), `mutant pr-dup-drops-place (a5dedfed1's duplicatesOf: the copy's box leaves with it): (b) RED (${f.length})`);
     }
@@ -1991,7 +1991,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const a = '            } else if (!ws.isMinimized) unplaced.push(wid); // A DESKTOP WHOSE ROWS HAVE NO POSITION SAYS SO (LAW 2) — never nothing\n';
     if (ok(DSRC.includes(a), 'mutant pr-preview-blank: the patched line exists in desktop-manager.js')) {
-      const DMp = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(a, '            }\n'), 'pr-preview-blank', { esm: true })).href)).DesktopManager;
+      const DMp = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, a, '            }\n', "src/lib/desktop-manager.js"), 'pr-preview-blank', { esm: true })).href)).DesktopManager;
       const f = await prLegs({ DM: DMp, quiet: true, legs: ['p'] });
       ok(f.some((n) => n.startsWith('§PR LAW 2')), `mutant pr-preview-blank (a5dedfed1's preview: a row with no box draws nothing): LAW 2 RED (${f.length})`);
     }
@@ -2018,7 +2018,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const a = '    for (const id of unplaced) this._takeKeptRow(d, id, rec);\n';
     if (ok(DSRC.includes(a), 'mutant pr2-reconcile-resends-drop: the patched line exists in desktop-manager.js')) {
-      const DMp = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(a, ''), 'pr2-reconcile-resends-drop', { esm: true })).href)).DesktopManager;
+      const DMp = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, a, '', "src/lib/desktop-manager.js"), 'pr2-reconcile-resends-drop', { esm: true })).href)).DesktopManager;
       const f = await pr2Legs({ DM: DMp, install: installPR, quiet: true, legs: ['n3'] });
       ok(f.length === 1 && f[0].startsWith('§PR2 (n3) N3 write 1'), `mutant pr2-reconcile-resends-drop (461b41f78's reconcile: the kept row's window never taken back — the next write is the drop again): (n3) RED (${f.length})`);
     }
@@ -2026,7 +2026,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const a = '          } else if (this._deadFor(win, rw.openSpec)) {\n';
     if (ok(LYSRC.includes(a), 'mutant pr2-dead-view-kept: the patched line exists in layout.js')) {
-      const LMp = (await import(pathToFileURL(M.write('src/lib/layout.js', LYSRC.replace(a, '          } else if (false) {\n'), 'pr2-dead-view-kept', { esm: true })).href)).LayoutManager;
+      const LMp = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LYSRC, a, '          } else if (false) {\n', "src/lib/layout.js"), 'pr2-dead-view-kept', { esm: true })).href)).LayoutManager;
       const f = await pr2Legs({ LM: LMp, install: installPR, quiet: true, legs: ['n2'] });
       ok(f.length === 1 && f[0].startsWith('§PR2 (n2) N2 TWO PAGES'), `mutant pr2-dead-view-kept (461b41f78's apply: a changed recipe rebuilt for a placeholder only): (n2) RED (${f.length})`);
     }
@@ -2043,7 +2043,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const a = "    this.app.resumeSession?.(cid, e.cwd || e.openSpec?.cwd || '', titleNameOf(e) || 'Session', { backend, backendSessionId: cid, hostId: hostOf(e) || undefined, fromWin: win.id });\n";
     if (ok(LYSRC.includes(a), 'mutant pr2-tile-closes-first: the patched line exists in layout.js')) {
-      const LMp = (await import(pathToFileURL(M.write('src/lib/layout.js', LYSRC.replace(a, "    const bounds = this.app._snapshotWinBounds?.(win);\n    this.app.wm.closeWindow(win.id);\n    this.app.resumeSession?.(cid, e.cwd || e.openSpec?.cwd || '', titleNameOf(e) || 'Session', { backend, backendSessionId: cid, hostId: hostOf(e) || undefined, winBounds: bounds ? { ...bounds, winId: win.id } : undefined });\n"), 'pr2-tile-closes-first', { esm: true })).href)).LayoutManager;
+      const LMp = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LYSRC, a, "    const bounds = this.app._snapshotWinBounds?.(win);\n    this.app.wm.closeWindow(win.id);\n    this.app.resumeSession?.(cid, e.cwd || e.openSpec?.cwd || '', titleNameOf(e) || 'Session', { backend, backendSessionId: cid, hostId: hostOf(e) || undefined, winBounds: bounds ? { ...bounds, winId: win.id } : undefined });\n", "src/lib/layout.js"), 'pr2-tile-closes-first', { esm: true })).href)).LayoutManager;
       const f = await pr2Legs({ LM: LMp, install: installPR, quiet: true, legs: ['n4'] });
       ok(f.length === 1 && f[0].startsWith('§PR2 (n4)'), `mutant pr2-tile-closes-first (461b41f78's tile press: closed first, a new id minted): (n4) RED (${f.length})`);
     }
@@ -2090,7 +2090,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const a = '  for (const [nid, kid] of pairsOf(refused)) if (nextBy.has(nid) && !hasBox(nextBy.get(nid)) && hasBox(prevBy.get(kid)) && !unplaced.includes(kid)) unplaced.push(kid);\n';
     if (ok(PSRC.includes(a), 'mutant pr3-c1-forgets: the patched line exists in desktop-record.js')) {
-      const Mx = M.load('src/lib/desktop-record.js', PSRC.replace(a, ''), 'pr3-c1-forgets');
+      const Mx = M.load('src/lib/desktop-record.js', editAnchor(PSRC, a, '', "src/lib/desktop-record.js"), 'pr3-c1-forgets');
       const f = await pr3Legs({ PURE: Mx, WSH: loadHandler({ shrinkVerdict: Mx.shrinkVerdict }), quiet: true, legs: ['c1'] });
       ok(f.length === 1 && f[0].startsWith('§PR3 (c1) C1 A REFUSED'), `mutant pr3-c1-forgets (d159c081b's belt: the re-send of a refused newcomer beside its kept row is taken): (c1) RED (${f.length})`);
     }
@@ -2098,7 +2098,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const a = '  for (const [id, w] of nextBy) if (prevBy.has(id) && hasBox(prevBy.get(id)) && !hasBox(w) && !carriesFrame(id, w)) unplaced.push(id);\n';
     if (ok(PSRC.includes(a), 'mutant pr3-c2-grouped-exempt: the patched line exists in desktop-record.js')) {
-      const Mx = M.load('src/lib/desktop-record.js', PSRC.replace(a, '  const grouped = (w) => !!(w && (w.isTabGuest || (w.tabChain && Array.isArray(w.tabChain.tabs) && w.tabChain.tabs.length > 1)));\n  for (const [id, w] of nextBy) if (prevBy.has(id) && hasBox(prevBy.get(id)) && !hasBox(w) && !grouped(w)) unplaced.push(id);\n'), 'pr3-c2-grouped-exempt');
+      const Mx = M.load('src/lib/desktop-record.js', editAnchor(PSRC, a, '  const grouped = (w) => !!(w && (w.isTabGuest || (w.tabChain && Array.isArray(w.tabChain.tabs) && w.tabChain.tabs.length > 1)));\n  for (const [id, w] of nextBy) if (prevBy.has(id) && hasBox(prevBy.get(id)) && !hasBox(w) && !grouped(w)) unplaced.push(id);\n', "src/lib/desktop-record.js"), 'pr3-c2-grouped-exempt');
       const f = await pr3Legs({ PURE: Mx, quiet: true, legs: ['c2'] });
       ok(f.length === 1 && f[0].startsWith('§PR3 (c2) C2 PURE'), `mutant pr3-c2-grouped-exempt (d159c081b's belt: every grouped row exempt — a placed frame stripped is taken): (c2) RED (${f.length})`);
     }
@@ -2106,7 +2106,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const a = '    if (!w || !wm.rekeyWindow(w.id, id, { inChain: true })) return false;\n';
     if (ok(DSRC.includes(a), 'mutant pr3-c3-chain-declined: the patched line exists in desktop-manager.js')) {
-      const DMp = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(a, '    if (!w || !wm.rekeyWindow(w.id, id)) return false;\n'), 'pr3-c3-chain-declined', { esm: true })).href)).DesktopManager;
+      const DMp = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, a, '    if (!w || !wm.rekeyWindow(w.id, id)) return false;\n', "src/lib/desktop-manager.js"), 'pr3-c3-chain-declined', { esm: true })).href)).DesktopManager;
       const f = await pr3Legs({ DM: DMp, install: installPR, quiet: true, legs: ['c3'] });
       ok(f.length === 1 && f[0].startsWith('§PR3 (c3)'), `mutant pr3-c3-chain-declined (d159c081b's re-key: a grouped window declined — the kept row rebuilt beside it): (c3) RED (${f.length})`);
     }
@@ -2114,7 +2114,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const a = "              const nw = this.app.wm.windows.get(String(rw.winId || rw.id)), box = (a && a.gridBounds) || own;\n              if (nw && box && !nw._onStage) { nw.gridBounds = { ...box }; this.app.wm._applyGridBounds(nw); }\n              continue;\n";
     if (ok(LYSRC.includes(a), 'mutant pr3-tile-default-box: the patched lines exist in layout.js')) {
-      const LMa = (await import(pathToFileURL(M.write('src/lib/layout.js', LYSRC.replace(a, '              continue;\n'), 'pr3-tile-default-box', { esm: true })).href)).LayoutManager;
+      const LMa = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LYSRC, a, '              continue;\n', "src/lib/layout.js"), 'pr3-tile-default-box', { esm: true })).href)).LayoutManager;
       const f = await pr3Legs({ LM: LMa, install: installPR, quiet: true, legs: ['ph'] });
       ok(f.length === 1 && f[0].startsWith('§PR3 (ph)'), `mutant pr3-tile-default-box (d159c081b's apply: a tile replaced by a phone's live record placed at the desktop's default): (ph) RED (${f.length})`);
     }
@@ -2182,7 +2182,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const LY = read('src/lib/layout.js'), a = '    if (refused) this._recipesRefused(s, key); // a recipe that save carried is owed again (r4 N1)\n';
     if (ok(LY.includes(a), 'mutant pr4-refusal-forgets: the patched line exists in layout.js')) {
-      const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', LY.replace(a, ''), 'pr4-refusal-forgets', { esm: true })).href)).LayoutManager;
+      const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LY, a, '', "src/lib/layout.js"), 'pr4-refusal-forgets', { esm: true })).href)).LayoutManager;
       const f = await pr4Legs({ LM: LMx, install: installPR, quiet: true, legs: ['owe-r'] });
       ok(f.length === 1 && f[0].startsWith('§PR4 (owe-r)'), `mutant pr4-refusal-forgets (a recipe counted as carried at its SEND — the refused save carried nothing): (owe-r) RED (${f.length})`);
     }
@@ -2190,7 +2190,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const LY = read('src/lib/layout.js'), a = '          const a = arrangementFor(layers, rw) || (!win && held ? arrangementFor(held, rw) : null);';
     if (ok(LY.includes(a), 'mutant pr4-held-box-dropped: the patched line exists in layout.js')) {
-      const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', LY.replace(a, '          const a = arrangementFor(layers, rw);'), 'pr4-held-box-dropped', { esm: true })).href)).LayoutManager;
+      const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LY, a, '          const a = arrangementFor(layers, rw);', "src/lib/layout.js"), 'pr4-held-box-dropped', { esm: true })).href)).LayoutManager;
       const f = await pr4Legs({ LM: LMx, install: installPR, quiet: true, legs: ['hb'] });
       ok(f.length === 1 && f[0].startsWith('§PR4 (hb)'), `mutant pr4-held-box-dropped (5033f0a06's apply: a phone-named row a desktop had not drawn built at its default box): (hb) RED (${f.length})`);
     }
@@ -2235,7 +2235,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const LY = read('src/lib/layout.js'), a = "    this._recipeTries?.delete(id); // a NEW recipe (a resume re-opens its row under the same id) has its own two tries — per recipe, never per row for the page's life (r5)\n";
     if (ok(LY.includes(a), 'mutant pr5-budget-per-row: the patched line exists in layout.js')) {
-      const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', LY.replace(a, ''), 'pr5-budget-per-row', { esm: true })).href)).LayoutManager;
+      const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LY, a, '', "src/lib/layout.js"), 'pr5-budget-per-row', { esm: true })).href)).LayoutManager;
       const f = await pr5Legs({ LM: LMx, install: installPR, quiet: true, legs: ['owe-b'] });
       ok(f.length === 1 && f[0].startsWith('§PR5 (owe-b)'), `mutant pr5-budget-per-row (0691bb591: the two tries per row id for the page's life — a re-made row's new recipe dropped at its first refusal): (owe-b) RED (${f.length})`);
     }

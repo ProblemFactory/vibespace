@@ -1342,7 +1342,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   const veSrc = fs.readFileSync(path.join(REPO, 'src/server/vault-engine.js'), 'utf8');
 
   // Mutant 1: remove origin gate in fillVaultElement -> types secret on evil origin!
-  const m1LfSrc = lfSrc.replace('  if (iso.origin !== wantOrigin) {', '  if (false && iso.origin !== wantOrigin) {');
+  const m1LfSrc = editAnchor(lfSrc, '  if (iso.origin !== wantOrigin) {', '  if (false && iso.origin !== wantOrigin) {', "src/server/browser-login-fill.js");
   const LF_M1 = m1LfSrc !== lfSrc ? MUT.load('src/server/browser-login-fill.js', m1LfSrc, 'origin-gate-removed') : null;
   const fkM1 = await startFakeKernel({ firstUrl: 'https://evil.example.test/phish' });
   try {
@@ -1386,10 +1386,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   }
 
   // Mutant 2: remove read fence (`liveFillVerdict` -> `{ ok: true }`) -> lets `eval` read live DOM!
-  const m2BlSrc = blSrc.replace(
+  const m2BlSrc = editAnchor(blSrc,
     "function liveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '', holdReason = '' } = {}) {",
-    "function liveFillVerdict() { return { ok: true }; }\nfunction _deadLiveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '', holdReason = '' } = {}) {",
-  );
+    "function liveFillVerdict() { return { ok: true }; }\nfunction _deadLiveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '', holdReason = '' } = {}) {"
+  , "src/browser-login.js");
   const BL_M2 = m2BlSrc !== blSrc ? MUT.load('src/browser-login.js', m2BlSrc, 'read-fence-removed') : null;
   const realFence = BL.liveFillVerdict({ verb: 'eval', argv: ['eval', 'document.querySelector("#pw").value'], origin: 'https://shop.example.test' });
   const mutFence = BL_M2 ? BL_M2.liveFillVerdict({ verb: 'eval', argv: ['eval', 'document.querySelector("#pw").value'], origin: 'https://shop.example.test' }) : null;
@@ -1463,7 +1463,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   }
 
   // Mutant 5 (L2): remove `rev` from `vault-engine.js:secretNames()` -> Vault-window `{ name, rev: entry.rev }` fails with `card_changed` on `rev >= 2`!
-  const m5VeSrc = veSrc.replace(', ...(Number.isInteger(b.rev) && b.rev >= 1 ? { rev: b.rev } : {})', '');
+  const m5VeSrc = editAnchor(veSrc, ', ...(Number.isInteger(b.rev) && b.rev >= 1 ? { rev: b.rev } : {})', '', "src/server/vault-engine.js");
   const VE_M5 = m5VeSrc !== veSrc ? MUT.load('src/server/vault-engine.js', m5VeSrc, 'secretNames-without-rev') : null;
   {
     const dirM5 = scratch('vl-r23-m5');
@@ -1494,10 +1494,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   }
 
   // Mutant 6 (L3): pass `{ usernameHint: p.usernameHint }` instead of `{ username: uname }` -> takeover credentialSubmitted files 0 cards!
-  const m6BdSrc = bdSrc.replace(
+  const m6BdSrc = editAnchor(bdSrc,
     'const r = logins.offerOwnerSaveCard({ origin: pageOrigin, username: uname, password: rawPw, profileId: w.profileId });',
-    'const r = logins.offerOwnerSaveCard({ origin: pageOrigin, usernameHint: uname, password: rawPw, profileId: w.profileId });',
-  );
+    'const r = logins.offerOwnerSaveCard({ origin: pageOrigin, usernameHint: uname, password: rawPw, profileId: w.profileId });'
+  , "src/server/browser-dialogs.js");
   const BD_M6 = m6BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m6BdSrc, 'usernameHint-field-mismatch') : null;
   // Mutant 7 (L4): restore cross-tab `preferRef` fallback in `pickScopedTabFor` -> `@e2` on tab B types into background tab A!
   const m7BdSrc = editAnchor(editAnchor(editAnchor(bdSrc,
@@ -1512,7 +1512,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
     , "src/server/browser-dialogs.js");
   const BD_M7 = m7BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m7BdSrc, 'cross-tab-ref-fallback') : null;
   // Mutant 9 (M1): skip `precheckVaultFill` -> locked vault sends CDP calls and returns `login_phishing` on wrong-origin tab!
-  const m9BdSrc = bdSrc.replace('if (!prechecked) {', 'if (false && !prechecked) {');
+  const m9BdSrc = editAnchor(bdSrc, 'if (!prechecked) {', 'if (false && !prechecked) {', "src/server/browser-dialogs.js");
   const BD_M9 = m9BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m9BdSrc, 'phishing-before-vault-locked') : null;
 
   {
@@ -1657,10 +1657,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   }
 
   // Mutant 10 (N1a): relax `wantCred` on `holdReason` (r23's bug) -> foreign POST passes unwatched after hold!
-  const m10BdSrc = bdSrc.replace(
+  const m10BdSrc = editAnchor(bdSrc,
     'const wantCred = Boolean(e.liveFill || e.credPreArming);',
-    'const wantCred = Boolean((e.liveFill && !e.liveFill.holdReason) || e.credPreArming);',
-  );
+    'const wantCred = Boolean((e.liveFill && !e.liveFill.holdReason) || e.credPreArming);'
+  , "src/server/browser-dialogs.js");
   const BD_M10 = m10BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m10BdSrc, 'n1-hold-relaxes-fetch') : null;
 
   // Mutant 11 (N1b): `toPerson` sends raw `Fetch.disable` bypassing `syncTabFetchMode` (leaving `e.fetchMode` stale) -> mode flip drops `*` intercept!
@@ -1671,24 +1671,24 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   const BD_M11 = m11BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m11BdSrc, 'n1-toperson-bypasses-sync') : null;
 
   // Mutant 12 (N2): `noteSnapshot` calls `Accessibility.getFullAXTree` over the watch socket (r23's bug) -> 3,000-row page drops watch with 1009!
-  const m12BdSrc = bdSrc.replace(
+  const m12BdSrc = editAnchor(bdSrc,
     '    e.snapshotRefs = { specs, resolved: new Map(), map: null, at: now(), navSeq: e.navSeq || 0 };',
-    '    await call(w, \'Accessibility.getFullAXTree\', { frameId: e.targetId }, e.sid);\n    e.snapshotRefs = { specs, resolved: new Map(), map: null, at: now(), navSeq: e.navSeq || 0 };',
-  );
+    '    await call(w, \'Accessibility.getFullAXTree\', { frameId: e.targetId }, e.sid);\n    e.snapshotRefs = { specs, resolved: new Map(), map: null, at: now(), navSeq: e.navSeq || 0 };'
+  , "src/server/browser-dialogs.js");
   const BD_M12 = m12BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m12BdSrc, 'n2-snapshot-full-ax-on-watch') : null;
 
   // Mutant 13 (N4): `json_too_many_nodes` limit returns `{ carries: false, undecodable: false }` -> cross-origin >4096-node JSON fails open!
-  const m13BdSrc = bdSrc.replace(
+  const m13BdSrc = editAnchor(bdSrc,
     "return { carries: false, undecodable: true, reason: 'json_too_many_nodes' };",
-    "return { carries: false, undecodable: false, format: 'json' };",
-  );
+    "return { carries: false, undecodable: false, format: 'json' };"
+  , "src/server/browser-dialogs.js");
   const BD_M13 = m13BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m13BdSrc, 'n4-json-cap-fails-open') : null;
 
   // Mutant 14 (m2): omit `Network.disable` when `wantCred` drops -> `Network.*` stays enabled after fence lifts!
-  const m14BdSrc = bdSrc.replace(
+  const m14BdSrc = editAnchor(bdSrc,
     "ops.push(call(w, 'Network.disable', {}, e.sid, interceptTimeoutMs).catch(() => {}));",
-    '/* m2 mutant: Network.disable omitted */',
-  );
+    '/* m2 mutant: Network.disable omitted */'
+  , "src/server/browser-dialogs.js");
   const BD_M14 = m14BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m14BdSrc, 'm2-network-never-disabled') : null;
 
   // Mutant 15 (N5): strip post-prepare `inert` + `onTypingFocusGuard` + `onTargetBlurGuard` -> post-prepare macrotask decoy receives `Input.insertText`!
@@ -1702,25 +1702,25 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
 
   // Mutant 16 (m3): `dialogAnswerFor` omits `else if (started) D.verbStarted` -> `fill --vault` `/audit` decrements parallel verb!
   const rbSrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
-  const m16RbSrc = rbSrc.replace(
+  const m16RbSrc = editAnchor(rbSrc,
     'else if (started) D.verbStarted(',
-    'else if (false && started) D.verbStarted(',
-  );
+    'else if (false && started) D.verbStarted('
+  , "src/routes/browser.js");
   const RB_M16 = m16RbSrc !== rbSrc ? MUT.load('src/routes/browser.js', m16RbSrc, 'm3-unpaired-verb-ended') : null;
 
   // Mutant 17 (m6): `addOwn` skips checking whether `totp:<totpName>` exists in the vault -> saves dangling `totpName`!
   const lgSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-logins.js'), 'utf8');
-  const m17LgSrc = lgSrc.replace(
+  const m17LgSrc = editAnchor(lgSrc,
     "if (!tl.some((s) => s && s.name === `totp:${str(totpName)}`)) {",
-    "if (false && !tl.some((s) => s && s.name === `totp:${str(totpName)}`)) {",
-  );
+    "if (false && !tl.some((s) => s && s.name === `totp:${str(totpName)}`)) {"
+  , "src/server/browser-logins.js");
   const LG_M17 = m17LgSrc !== lgSrc ? MUT.load('src/server/browser-logins.js', m17LgSrc, 'm6-dangling-totp-allowed') : null;
 
   // Mutant 18 (m7): `fillVerdict` checks `onSite.length > 1` BEFORE grant check -> discloses usernames to ungranted caller!
-  const m18BlSrc = blSrc.replace(
+  const m18BlSrc = editAnchor(blSrc,
     '      const admitted = [];',
-    "      if (onSite.length > 1) return no('login_ambiguous', `${onSite.length} logins match ${spec.origin} (${onSite.map((e) => e.user).slice(0, 5).join(', ')})`);\n      const admitted = [];",
-  );
+    "      if (onSite.length > 1) return no('login_ambiguous', `${onSite.length} logins match ${spec.origin} (${onSite.map((e) => e.user).slice(0, 5).join(', ')})`);\n      const admitted = [];"
+  , "src/browser-login.js");
   const BL_M18 = m18BlSrc !== blSrc ? MUT.load('src/browser-login.js', m18BlSrc, 'm7-ambiguous-leaks-users') : null;
 
   {
@@ -1953,10 +1953,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
           { rfSite, rfNamed, rfNew, usesUngranted });
 
         // Mutant 23 (r25): record `web-login:<origin>#<user>` on `login_not_granted` -> `usesOf(conv)` leaks `#<user>` back to ungranted caller!
-        const m23LgSrc = lgSrc.replace(
+        const m23LgSrc = editAnchor(lgSrc,
           'use(`${BL.PREFIX}${siteOrigin}`, { conv, actor, outcome: \'not_granted\', purpose: purposeOf(parsed.field, siteOrigin, profileId) });',
-          'use(`${BL.PREFIX}${siteOrigin}#${parsed.user || (allEntries[0] && allEntries[0].user) || \'leaked\'}`, { conv, actor, outcome: \'not_granted\', purpose: purposeOf(parsed.field, siteOrigin, profileId) });',
-        );
+          'use(`${BL.PREFIX}${siteOrigin}#${parsed.user || (allEntries[0] && allEntries[0].user) || \'leaked\'}`, { conv, actor, outcome: \'not_granted\', purpose: purposeOf(parsed.field, siteOrigin, profileId) });'
+        , "src/server/browser-logins.js");
         const LG_M23 = m23LgSrc !== lgSrc ? MUT.load('src/server/browser-logins.js', m23LgSrc, 'r25-refused-fill-uses-leaks-user') : null;
         if (LG_M23) {
           const logM23 = LG_M23.create({ vault: engR24, grants: () => gR24, log: () => {} });
@@ -2034,10 +2034,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
           { schema: parsedLegacy?.schema, secretPutCountOnFill, masterReadsAfterFill });
 
         // Mutant 22 (A4): omit top-level `password` mirror in `textOf` -> `.388` `recordOf` returns null on rollback!
-        const m22BlSrc = blSrc.replace(
+        const m22BlSrc = editAnchor(blSrc,
           'return JSON.stringify({ ...r, schema: 2, password: compatPw });',
-          'return JSON.stringify({ ...r, schema: 2 });',
-        );
+          'return JSON.stringify({ ...r, schema: 2 });'
+        , "src/browser-login.js");
         const BL_M22 = m22BlSrc !== blSrc ? MUT.load('src/browser-login.js', m22BlSrc, 'a4-rollback-password-omitted') : null;
         if (BL_M22) {
           const mutDrop = master388RecordOf(BL_M22.textOf(rOwn));
@@ -2049,10 +2049,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
 
       // Mutant 20 (A2): restore `req.body?.vaultFill === true` skipping `liveFillRefusal` in `src/routes/browser.js` -> `eval` with `vaultFill: true` returns 200!
       {
-        const m20RbSrc = rbSrc.replace(
+        const m20RbSrc = editAnchor(rbSrc,
           '    if (await liveFillRefusal(res, k, f, r.profile && r.profile.id, req, verb)) return;',
-          '    if (req.body?.vaultFill !== true && await liveFillRefusal(res, k, f, r.profile && r.profile.id, req, verb)) return;',
-        );
+          '    if (req.body?.vaultFill !== true && await liveFillRefusal(res, k, f, r.profile && r.profile.id, req, verb)) return;'
+        , "src/routes/browser.js", 'first');
         const RB_M20 = m20RbSrc !== rbSrc ? MUT.load('src/routes/browser.js', m20RbSrc, 'a2-body-vaultfill-bypasses-fence') : null;
         if (RB_M20 && typeof RB_M20.setup === 'function') {
           const express = require(path.join(REPO, 'node_modules/express'));
@@ -2596,7 +2596,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         if (m24BlSrc !== blSrc) {
           const blM24Path = MUT.write('src/browser-login.js', m24BlSrc, 'r26-c1-non-idempotent-recordof', { name: 'r26-c1-bl' });
           const BL_M24 = require(blM24Path);
-          const m24LgSrc = lgSrc.replace("require('../browser-login.js')", `require(${JSON.stringify(blM24Path)})`);
+          const m24LgSrc = editAnchor(lgSrc, "require('../browser-login.js')", `require(${JSON.stringify(blM24Path)})`, "src/server/browser-logins.js");
           const LM_M24 = MUT.load('src/server/browser-logins.js', m24LgSrc, 'r26-c1-non-idempotent-logins');
           const engM24 = VE.create({ dataDir: vaultRedDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
           await engM24.unlock(vpwC1);
@@ -2781,10 +2781,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             { putsBoot1, batchesBoot1, putsBoot2, batchesBoot2, vaultByteIdentical, listBoot1PendingCount, fillBoot1Ok, fillBoot2Ok, masterStillPendingAll3, remindsAfterBoot1, remindsAfterRestart: remindItems.length, remindLedgerMode0600 });
 
           // MUTANT 30 RED (r27 Compulsory 1 — r26 shape where maybeRemindPending stamps remindedAt via writeEntry):
-          const m30LgSrc = lgSrc.replace(
+          const m30LgSrc = editAnchor(lgSrc,
             '      if (filed) {\n        remindedDigests.add(digest);\n        dirty = true;\n        reminded++;\n      }',
-            '      if (filed) {\n        const stamped = { ...o.rec, schema: 2, pending: { ...o.rec.pending, remindedAt: t } };\n        writeEntry(e.name, stamped, { actor: e.actor, owner: e.owner });\n        reminded++;\n      }',
-          );
+            '      if (filed) {\n        const stamped = { ...o.rec, schema: 2, pending: { ...o.rec.pending, remindedAt: t } };\n        writeEntry(e.name, stamped, { actor: e.actor, owner: e.owner });\n        reminded++;\n      }'
+          , "src/server/browser-logins.js");
           if (m30LgSrc !== lgSrc) {
             const LM_M30 = MUT.load('src/server/browser-logins.js', m30LgSrc, 'r27-c1-remind-rewrites-entry');
             const engM30 = VE.create({ dataDir: agedRedDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
@@ -2873,10 +2873,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             'r27 DEK-keyed reminder marks (RULE 5′): swapping the vault DEK produces completely distinct 32-hex marks in browser-login-reminders.json (mode 0600 via writeJsonAtomic), and zero marks match any unsalted sha256 prefix',
             dekPin);
 
-          const m33LgSrc = lgSrc.replace(
+          const m33LgSrc = editAnchor(lgSrc,
             "      const mac = vault.macOf('browser-login-remind', rk);",
-            "      const mac = crypto.createHash('sha256').update(rk).digest('hex');",
-          );
+            "      const mac = crypto.createHash('sha256').update(rk).digest('hex');"
+          , "src/server/browser-logins.js");
           if (m33LgSrc !== lgSrc) {
             const LM_M33 = MUT.load('src/server/browser-logins.js', m33LgSrc, 'r27-remind-unsalted-sha256');
             const dekMut = await runTwoDekMarksProbe(LM_M33, 'mut33-dek');
@@ -2945,10 +2945,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             { rRevFill, evilInsertCount, realIsoDanger });
 
           // MUTANT 25 RED (Compulsory 2 verifier mutant): overwrite `frameOrigin = secOrigin = targetOrigin = isoOrigin; trackedOrigin = null;` before `const allAgree` in `openIsolatedOrigin`!
-          const m25LfSrc = lfSrc.replace(
+          const m25LfSrc = editAnchor(lfSrc,
             '    const allAgree = !!(frameOrigin && secOrigin && targetOrigin && isoOrigin',
-            '    frameOrigin = secOrigin = targetOrigin = isoOrigin; trackedOrigin = null;\n    const allAgree = !!(frameOrigin && secOrigin && targetOrigin && isoOrigin',
-          );
+            '    frameOrigin = secOrigin = targetOrigin = isoOrigin; trackedOrigin = null;\n    const allAgree = !!(frameOrigin && secOrigin && targetOrigin && isoOrigin'
+          , "src/server/browser-login-fill.js");
           const LF_M25 = m25LfSrc !== lfSrc ? MUT.load('src/server/browser-login-fill.js', m25LfSrc, 'r26-c2-trusts-iso-origin') : null;
           if (LF_M25) {
             const mutIsoDanger = await LF_M25.openIsolatedOrigin({
@@ -3047,10 +3047,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
           'r26 Compulsory 2 (prepare->insertText window): cross-origin top-frame Document Fetch is held until fill exits and both Fetch pause & frameStartedNavigating refuse login_phishing with 0 Input.insertText calls',
           { pFetchHold, pNavGuard });
 
-        const m26BdSrc = bdSrc.replace(
+        const m26BdSrc = editAnchor(bdSrc,
           '    const myActiveFill = !checkOnly ? {',
-          '    const myActiveFill = false ? {',
-        );
+          '    const myActiveFill = false ? {'
+        , "src/server/browser-dialogs.js");
         const BD_M26 = m26BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m26BdSrc, 'r26-c2-no-activefill-guard') : null;
         if (BD_M26) {
           const mutNavLeak = await runJumpWindowProbe(BD_M26, 'frame-nav');
@@ -3094,10 +3094,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             verdicts);
 
           // MUTANT 27 RED: restore r25's `if (!onSite.length) return no('login_no_entry', ...)` before `checkGrantFor('')`!
-          const m27BlSrc = blSrc.replace(
+          const m27BlSrc = editAnchor(blSrc,
             "      if (!onSite.length) {\n        const gmSite = checkGrantFor('');\n        if (!gmSite.ok) {\n          return no('login_not_granted', grantWords(gmSite.code || 'no_grant', spec.origin, false, ''), {\n            grant: gmSite.code || 'no_grant',\n            origin: spec.origin,\n          });\n        }",
-            "      if (!onSite.length) {\n        if (false) checkGrantFor('');",
-          );
+            "      if (!onSite.length) {\n        if (false) checkGrantFor('');"
+          , "src/browser-login.js");
           const BL_M27 = m27BlSrc !== blSrc ? MUT.load('src/browser-login.js', m27BlSrc, 'r26-m1-no-entry-before-grant') : null;
           if (BL_M27) {
             const vZero = BL_M27.fillVerdict({
@@ -3233,10 +3233,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
           greenOtp);
 
         // MUTANT 28 RED: restore r25's eager `totpCode(...)` before `if (checkOnly)` -> 4 calls per fill, and fill #6 hits 429 (`code_paced` / `login_no_otp`)!
-        const m28LgSrc = lgSrc.replace(
+        const m28LgSrc = editAnchor(lgSrc,
           "      if (checkOnly) {\n        let tl = [];\n        try { tl = vault.secretNames() || []; } catch { tl = []; }\n        const totpEntry = tl.find((s) => s && s.name === `totp:${str(o.rec.totpName)}`);\n        if (!totpEntry || (isOwn && (!totpEntry.owner || !ownSet.has(totpEntry.owner)))) {\n          return named('login_no_otp', `the paired two-step code (${o.rec.totpName}) could not be opened — ask the owner in the Vault window`);\n        }\n        return { ok: true, checkOnly: true, name: v.name, origin: v.origin, user: v.user, field: 'otp', slot: 'otp', generated: false, pending: o.rec.pending ? o.rec.pending.kind : null };\n      }\n      let c = null;\n      try { c = totpCode(o.rec.totpName, { conv, ...(isOwn ? { owners: [...ownSet] } : {}) }); } catch { c = null; }",
-          "      let c = null;\n      try { c = totpCode(o.rec.totpName, { conv, ...(isOwn ? { owners: [...ownSet] } : {}) }); } catch { c = null; }\n      if (checkOnly && c && c.ok && c.code) {\n        return { ok: true, checkOnly: true, name: v.name, origin: v.origin, user: v.user, field: 'otp', slot: 'otp', generated: false, pending: o.rec.pending ? o.rec.pending.kind : null };\n      }",
-        );
+          "      let c = null;\n      try { c = totpCode(o.rec.totpName, { conv, ...(isOwn ? { owners: [...ownSet] } : {}) }); } catch { c = null; }\n      if (checkOnly && c && c.ok && c.code) {\n        return { ok: true, checkOnly: true, name: v.name, origin: v.origin, user: v.user, field: 'otp', slot: 'otp', generated: false, pending: o.rec.pending ? o.rec.pending.kind : null };\n      }"
+        , "src/server/browser-logins.js");
         const LM_M28 = m28LgSrc !== lgSrc ? MUT.load('src/server/browser-logins.js', m28LgSrc, 'r26-m2-eager-totp-on-precheck') : null;
         if (LM_M28) {
           const redOtp = await runOtpQuotaProbe(LM_M28, 'red');
@@ -3250,10 +3250,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
       {
         const express = require(path.join(REPO, 'node_modules/express'));
         const RB = require(path.join(REPO, 'src/routes/browser.js'));
-        const m29RbSrc = rbSrc.replace(
+        const m29RbSrc = editAnchor(rbSrc,
           "  const V = require('../browser-verbs.js');",
-          "  return true;\n  const V = require('../browser-verbs.js');",
-        );
+          "  return true;\n  const V = require('../browser-verbs.js');"
+        , "src/routes/browser.js");
         const RB_M29 = m29RbSrc !== rbSrc ? MUT.load('src/routes/browser.js', m29RbSrc, 'r26-m5-ticket-skips-argv-check') : null;
         if (RB_M29 && typeof RB_M29.setup === 'function') {
           const runTicketProbe = async (RoutesMod, tag) => {
@@ -3517,10 +3517,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
           { pFetchErr, pFetchTimeout, pNetErr, pDropBeforeInsert });
 
         // MUTANT 31 RED (r27 Compulsory 2 `fence-unconfirmed-allowed` at runActiveFill / preArmIntercept):
-        const m31BdSrc = bdSrc.replace(
+        const m31BdSrc = editAnchor(bdSrc,
           '    const fenceConfirmed = (fm, needCred = false) => Boolean(',
-          '    const fenceConfirmed = (fm, needCred = false) => true || Boolean(',
-        );
+          '    const fenceConfirmed = (fm, needCred = false) => true || Boolean('
+        , "src/server/browser-dialogs.js");
         if (m31BdSrc !== bdSrc) {
           const DM_M31 = MUT.load('src/server/browser-dialogs.js', m31BdSrc, 'r27-c2-fence-unconfirmed-allowed');
           const mFetchErr = await runFenceFailProbe(DM_M31, 'fetch-error');
@@ -3533,10 +3533,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
 
         // MUTANT 32 RED (r27 Compulsory 2 3rd fence check inside `guardBeforeInsert` at `:3936`):
         // Keep `runActiveFill` (:3803) and `preArmIntercept` (:3922) intact, strip ONLY the `guardBeforeInsert` check!
-        const m32BdSrc = bdSrc.replace(
+        const m32BdSrc = editAnchor(bdSrc,
           "          if (!fenceConfirmed({ ok: true }, pre.field !== 'user')) {\n            return { ok: false, code: 'login_fence_unavailable', error: 'refused to fill because browser request interception dropped before typing — nothing was filled' };\n          }",
-          '          /* MUTANT 32: 3rd fence check in guardBeforeInsert stripped */',
-        );
+          '          /* MUTANT 32: 3rd fence check in guardBeforeInsert stripped */'
+        , "src/server/browser-dialogs.js");
         if (m32BdSrc !== bdSrc) {
           const DM_M32 = MUT.load('src/server/browser-dialogs.js', m32BdSrc, 'r27-c2-guard-before-insert-fence-stripped');
           const mDrop = await runFenceFailProbe(DM_M32, 'drop-before-insert');

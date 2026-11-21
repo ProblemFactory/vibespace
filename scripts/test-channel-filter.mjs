@@ -249,7 +249,7 @@ console.log('⑦ the wake block is budgeted and frame-inert');
   ok(PSRC.split(L1).length === 2 && PSRC.split(L1b).length === 2 && FSRC.split(L2).length === 2, 'CONTROL setup: the belt applies the line rule once per kind, and channel-filter requires the belt once');
   const M = mutantCopies('chan-filter-lines', REPO);
   const beltPath = M.write('src/peer-text.js', editAnchor(editAnchor(PSRC, L1, '  if (line) return R.inertFrames(t);', "src/peer-text.js"), L1b, '  return R.inertFrames(t);', "src/peer-text.js"), 'complete-tags-only', { name: 'peer-text-complete-tags-only' });
-  const F0 = M.load('src/channel-filter.js', FSRC.replace(L2, `const { toAgentText, cutText, foldHidden } = require(${JSON.stringify(beltPath)});`), 'complete-tags-only');
+  const F0 = M.load('src/channel-filter.js', editAnchor(FSRC, L2, `const { toAgentText, cutText, foldHidden } = require(${JSON.stringify(beltPath)});`, "src/channel-filter.js"), 'complete-tags-only');
   const b0 = blocksOf(F0);
   ok(Object.values(b0).every((x) => carriesFrame(x)), 'CONTROL: the copy whose helpers neuter only complete tags leaves a live frame in every block form', Object.entries(b0).map(([k, x]) => `${k}:${carriesFrame(x)}`).join(' '));
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
@@ -403,7 +403,7 @@ console.log('⑨ controls: account-over-conversation precedence; a finer grain s
   const src = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
   const marker = '/* PRECEDENCE: conversation > pattern > account */';
   ok(src.includes(marker), 'the precedence line carries its marker (the control patches exactly it)');
-  const bad = M.load('src/channel-filter.js', src.replace(marker, marker + " if (account) { const g0 = grainOf(account); if (g0.access.length) return { access: g0.access.map((row) => ({ row, source: 'account', patternId: null, why: [] })), watchers: g0.watchers.map((watcher) => ({ watcher, source: 'account', patternId: null, why: [] })), source: 'account', patternId: null, why: [] }; }"), 'reversed');
+  const bad = M.load('src/channel-filter.js', editAnchor(src, marker, marker + " if (account) { const g0 = grainOf(account); if (g0.access.length) return { access: g0.access.map((row) => ({ row, source: 'account', patternId: null, why: [] })), watchers: g0.watchers.map((watcher) => ({ watcher, source: 'account', patternId: null, why: [] })), source: 'account', patternId: null, why: [] }; }", "src/channel-filter.js"), 'reversed');
   const facts = { title: 't', participants: '', kind: 'group', authors: [] };
   const accG = { access: [{ principal: { kind: 'agent', id: 'A' }, authority: 'send' }], watchers: [{ principal: { kind: 'agent', id: 'A' }, notify: 'wake', mode: 'all' }] };
   const cvG = { access: [{ principal: { kind: 'agent', id: 'A' }, authority: 'draft' }, { principal: { kind: 'agent', id: 'C' }, authority: 'draft' }], watchers: [{ principal: { kind: 'agent', id: 'C' }, notify: 'wake', mode: 'all' }] };
@@ -414,7 +414,7 @@ console.log('⑨ controls: account-over-conversation precedence; a finer grain s
   // conversation watcher would silence A's account-wide notification
   const LINE = '      if (seenW.has(k)) continue;';
   ok(src.split(LINE).length === 2, 'the per-principal watcher line is present once (the second control patches exactly it)');
-  const whole = M.load('src/channel-filter.js', src.replace(LINE, '      if (seenW.has(k) || (watchers.length && watchers[0].source !== gr.source)) continue;'), 'wholesale');
+  const whole = M.load('src/channel-filter.js', editAnchor(src, LINE, '      if (seenW.has(k) || (watchers.length && watchers[0].source !== gr.source)) continue;', "src/channel-filter.js"), 'wholesale');
   const gW = F.effectiveGrants({ conversation: cvG, patterns: [], account: accG }, facts).watchers.map((x) => x.watcher.principal.id).sort().join();
   const mW = whole.effectiveGrants({ conversation: cvG, patterns: [], account: accG }, facts).watchers.map((x) => x.watcher.principal.id).sort().join();
   ok(gW === 'A,C' && mW === 'C', `CONTROL: the wholesale copy wakes only C where the real module wakes A and C (${gW} vs ${mW}) — "another principal's rows never mask A's" would go red`);
@@ -437,7 +437,7 @@ console.log('⑩ R4 verify r2: the store invariant holds at READ — a watcher w
   ok(F.liftGrainRecord({ principal: ag('L'), mode: 'all', notify: 'wake', authority: 'draft', watchers: [{ principal: ag('B'), notify: 'wake', mode: 'all' }] }).rec.watchers.map((w) => w.principal.id).join() === 'L', 'liftGrainRecord (the migration) repairs the orphan on its way through');
   const LINE = '  return { access, watchers: watchers.filter((w) => eligibleFor(keys, w.principal, w)) };';   // lane channel-agent-watch: the ONE eligibility rule (access here or above)
   ok(src.split(LINE).length === 2, 'the read-time filter line is present once (the control patches exactly it)');
-  const bad = M.load('src/channel-filter.js', src.replace(LINE, '  return { access, watchers };'), 'orphan-honoured');
+  const bad = M.load('src/channel-filter.js', editAnchor(src, LINE, '  return { access, watchers };', "src/channel-filter.js"), 'orphan-honoured');
   ok(bad.grainOf(orphan).watchers.length === 2, 'CONTROL: a copy without the filter honours the orphan watcher — the leg above would go red');
 }
 
@@ -572,7 +572,7 @@ console.log('⑫ the Notify preview sentence: one sentence per watcher, every la
     const M = mutantCopies('chan-filter-notify', REPO);
     const FROM = '    dailyWakeCap: num(x.cap, F.DEFAULT_DAILY_WAKE_CAP),\n';
     ok(WSRC.split(FROM).length === 2, 'CONTROL setup: the cap\'s line of the mapping is spelled once');
-    const W2 = await import(pathToFileURL(M.write('src/lib/channel-words.js', WSRC.replace(FROM, '    dailyWakeCap: digest ? F.DEFAULT_DAILY_WAKE_CAP : num(x.cap, F.DEFAULT_DAILY_WAKE_CAP),\n'), 'cap-third-answer', { esm: true })).href);
+    const W2 = await import(pathToFileURL(M.write('src/lib/channel-words.js', editAnchor(WSRC, FROM, '    dailyWakeCap: digest ? F.DEFAULT_DAILY_WAKE_CAP : num(x.cap, F.DEFAULT_DAILY_WAKE_CAP),\n', "src/lib/channel-words.js"), 'cap-third-answer', { esm: true })).href);
     const lost2 = SPACE.filter((w) => !same(backOf(W2)(w), w));
     ok(lost2.length > 0 && lost2.every((w) => w.notify === 'digest' && w.dailyWakeCap !== F.DEFAULT_DAILY_WAKE_CAP) && lost2.length === SPACE.filter((w) => w.notify === 'digest' && w.dailyWakeCap !== F.DEFAULT_DAILY_WAKE_CAP).length, `CONTROL: with the cap as a third exclusive answer every digest with its own cap is LOST (${lost2.length} of ${SPACE.length}, every one a digest) — the one-to-one leg would redden`, JSON.stringify(lost2.slice(0, 1)));
     for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
@@ -635,7 +635,7 @@ console.log('⑫ the Notify preview sentence: one sentence per watcher, every la
     const FROM = '  const same = samePrincipal(principal, stored && stored.principal);\n';
     const SRC3 = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
     ok(SRC3.split(FROM).length === 2, 'CONTROL setup: the same-principal test is spelled once');
-    const W3 = await import(pathToFileURL(M.write('src/lib/channel-words.js', SRC3.replace(FROM, '  const same = !!stored;\n'), 'any-principal', { esm: true })).href);
+    const W3 = await import(pathToFileURL(M.write('src/lib/channel-words.js', editAnchor(SRC3, FROM, '  const same = !!stored;\n', "src/lib/channel-words.js"), 'any-principal', { esm: true })).href);
     const storedA = { principal: A, mode: 'all', notify: 'wake', digestMinutes: 90, dailyWakeCap: 7, receiptWake: true };
     const moved3 = W3.watcherOfAnswers(W3.notifyAnswers(storedA), { principal: { kind: 'agent', id: 'cid-other', name: 'Other' }, stored: storedA });
     ok(moved3.receiptWake === true && moved3.digestMinutes === 90, 'CONTROL: carrying the baggage to any principal hands B a receiptWake it never opted into — the re-pointed leg would redden', JSON.stringify(moved3));
@@ -744,14 +744,14 @@ console.log('⑬ owner decision A: a topic wakes, a quote chain does not, a quot
   // (b) the QUOTE CLAUSE removed from in-thread-with-me (a topic-only rule): a quote of my message no longer wakes — red
   const QC = "    if (quotesMine) return WHY_QUOTED;\n    return null;\n  }\n  return null;\n}";
   ok(SRC.split(QC).length === 2, 'CONTROL setup: the in-thread rule\'s quote clause is one line');
-  const Fq = M.load('src/channel-filter.js', SRC.replace(QC, "    return null;\n  }\n  return null;\n}"), 'no-quote-clause');
+  const Fq = M.load('src/channel-filter.js', editAnchor(SRC, QC, "    return null;\n  }\n  return null;\n}", "src/channel-filter.js"), 'no-quote-clause');
   const nq = run(Fq, CTX);
   const redQ = nq.filter((x) => !x.ok).map((x) => x.id);
   ok(['om_c3', 'om_m1', 'om_s1'].every((id) => redQ.includes(id)), `CONTROL (b): without the explicit quote clause a quote of my message does not wake under "in a thread I am in" (${redQ.join(', ')} red)`, JSON.stringify(nq.filter((x) => !x.ok).map((x) => ({ id: x.id, got: x.got }))));
   // (c) the classifier's topic gate dropped (every thread fact counts): a quote chain wakes again — red
   const TG = "  const inTopic = !!c.topic && /^topic-/.test(kind);";
   ok(SRC.split(TG).length === 2, 'CONTROL setup: the topic gate is one line');
-  const Fg = M.load('src/channel-filter.js', SRC.replace(TG, '  const inTopic = true;'), 'no-topic-gate');
+  const Fg = M.load('src/channel-filter.js', editAnchor(SRC, TG, '  const inTopic = true;', "src/channel-filter.js"), 'no-topic-gate');
   const ng = run(Fg, { ...CTX, threadOf: oldThreadOf });
   ok(ng.some((x) => !x.ok && ['om_c2', 'om_m2', 'om_s2'].includes(x.id)), `CONTROL (c): a rule that does not ask the classifier whether it is a TOPIC wakes on a quote chain (${ng.filter((x) => !x.ok).map((x) => x.id).join(', ')} red)`);
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(x.pass, 'tree: ' + x.name, x.detail);
@@ -834,12 +834,12 @@ console.log('⑭ notify-rules-r2: regex rules judged at save, matched on the fol
   // lane lg-group-parents (the chain's cure (D)): the membership line hands the access rows (the via judge reads «仅本组» and the lineage)
   const CUT1 = "    const via = !keys.has(k) && v.watcher.principal.kind === 'agent' ? memberVia(keys, v.watcher.principal.id, members, { rows: accessRows, except }) : null;";
   ok(FSRC.split(CUT1).length === 2, 'control setup: the membership line is present once');
-  const Fm = M.load('src/channel-filter.js', FSRC.replace(CUT1, '    const via = null;'), 'member-not-eligible');
+  const Fm = M.load('src/channel-filter.js', editAnchor(FSRC, CUT1, '    const via = null;', "src/channel-filter.js"), 'member-not-eligible');
   const c1 = Fm.validateWatchers([w('S1')], access, { members });
   ok(!c1.ok && c1.code === 'watcher-needs-access', 'CONTROL ①: a copy without the crosswalk refuses the member session — the membership leg above goes RED');
   const CUT2 = "          if (hasQuantifier(p.group)) { const e = new Error('regex-nested-quantifier'); e.code = e.message; e.piece = p.piece; throw e; }";
   ok(FSRC.split(CUT2).length === 2, 'control setup: the nested-quantifier refusal is present once');
-  const nestedPath = M.write('src/channel-filter.js', FSRC.replace(CUT2, ''), 'nested-accepted'), Fn = require(nestedPath);
+  const nestedPath = M.write('src/channel-filter.js', editAnchor(FSRC, CUT2, '', "src/channel-filter.js"), 'nested-accepted'), Fn = require(nestedPath);
   const acc = Fn.validateRule({ kind: 'regex', value: '^(a+)+$' });
   // A DEADLINE, NEVER A RATIO (lane regex-control-deadline — rel241's mirror read +4 chars ×5.5 against a ×6 pin): the
   // mutant's matchRecord runs in a CHILD killed past NESTED_WALL_MS on 'a'×40 + '!' (2^40 backtracking steps; 'a'×26 is
@@ -931,16 +931,16 @@ console.log('⑮ reply-to-sent: a reply to a message THIS agent sent, in every s
   const C4 = "  const q = kind !== 'topic-reply' ? (of(c.quotes) || (!topical ? of(rec.replyTo) : null)) : null;";
   const C5 = "  if (topical) {";
   ok([C1, C2, C3, C4, C5].every((c) => FSRC.split(c).length === 2), 'control setup: the mail clause, the sentByMe read, the per-member fan-out, the quote clause and the topic gate are each one line');
-  const F5 = M.load('src/channel-filter.js', FSRC.replace(C5, '  if (topical || rec.root || rec.threadKey) {'), 'chain-root');
+  const F5 = M.load('src/channel-filter.js', editAnchor(FSRC, C5, '  if (topical || rec.root || rec.threadKey) {', "src/channel-filter.js"), 'chain-root');
   ok(chainLegs(F5).some(([, c]) => c.hit), 'CONTROL ⑤: a copy whose thread clause reads a quote chain\'s root_id / threadKey hits C — the chain leg goes RED', J2(chainLegs(F5).map(([b, c]) => [b.hit, c.hit])));
   // lane channel-reply-real: clause (e) RESTORED (the 2.369.232 line, verbatim) ⇒ the DM legs above go red
-  const F1 = M.load('src/channel-filter.js', FSRC.replace(C1, C1 + "\n  if (ctx.convKind === 'dm' && at - Number(newest.at) <= 24 * 3600e3) return { why: 'the next message after yours in a direct chat', sent: newest };"), 'dm-clause-back');
+  const F1 = M.load('src/channel-filter.js', editAnchor(FSRC, C1, C1 + "\n  if (ctx.convKind === 'dm' && at - Number(newest.at) <= 24 * 3600e3) return { why: 'the next message after yours in a direct chat', sent: newest };", "src/channel-filter.js"), 'dm-clause-back');
   ok(dmLegs(F1).filter(Boolean).length === 4, 'CONTROL ①: a copy with the direct-chat clause restored hits all four plain DM messages — the DM leg goes RED', J2(dmLegs(F1)));
-  const F4 = M.load('src/channel-filter.js', FSRC.replace(C4, "  const q = kind !== 'topic-reply' ? ([...sent.values()].filter((s) => Number(s.at) < Number(rec.at)).pop() || null) : null;"), 'quote-by-clock');
+  const F4 = M.load('src/channel-filter.js', editAnchor(FSRC, C4, "  const q = kind !== 'topic-reply' ? ([...sent.values()].filter((s) => Number(s.at) < Number(rec.at)).pop() || null) : null;", "src/channel-filter.js"), 'quote-by-clock');
   ok(dmLegs(F4).some(Boolean), 'CONTROL ④: a copy whose quote clause reads `rec.at` (the clock) instead of the quoted id calls a plain DM message a quote — the DM leg goes RED', J2(dmLegs(F4)));
-  const F2 = M.load('src/channel-filter.js', FSRC.replace(C2, "  const sent = new Map([...(ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : []), ...[...((ctx && ctx.ownerMine) || [])].map((v) => [v, { at: 0, words: '' }])]);"), 'owner-as-sent');
+  const F2 = M.load('src/channel-filter.js', editAnchor(FSRC, C2, "  const sent = new Map([...(ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : []), ...[...((ctx && ctx.ownerMine) || [])].map((v) => [v, { at: 0, words: '' }])]);", "src/channel-filter.js"), 'owner-as-sent');
   ok(hitOf(F2, rec('om_qo', T + 60e3, { replyTo: 'om_o1' }), ctxOf(A, 'group')).hit, 'CONTROL ②: a copy counting the owner\'s messages as the agent\'s sends hits the owner\'s quote — the ownerMine leg goes RED');
-  const F3 = M.load('src/channel-filter.js', FSRC.replace(C3, '    if (false) {'), 'group-round-robin');
+  const F3 = M.load('src/channel-filter.js', editAnchor(FSRC, C3, '    if (false) {', "src/channel-filter.js"), 'group-round-robin');
   ok(J2(fo(F3, fOnly).watchers.map((x) => F3.principalKey(x.watcher.principal))) === J2(['group:g1']), 'CONTROL ③: a copy without the per-member fan-out hands the group ONE round-robin item — the member legs go RED');
 }
 
@@ -1020,7 +1020,7 @@ console.log('⑰ verify r3 (lane channel-reply-real): the alias self witness, Sl
   ok(!g.alias && !g.self && g.customer && g.spoof, 'Gmail: the owner\'s alias reply (SENT, From owner@alias.io) and own reply ⇒ NO hit (self); the customer\'s reply ⇒ hit; an INBOX mail claiming the owner\'s From is not the owner\'s ⇒ judged', J2(g));
   const GC = "isSelf: sentLabel(m) === true || (!!selfEmail && from.id === String(selfEmail).toLowerCase() && sentLabel(m) !== false), isBot: false },";
   ok(GSRC.split(GC).length === 2, 'control setup: the gmail self witness is one line');
-  const G1 = M.load('src/channels/gmail.js', GSRC.replace(GC, 'isSelf: !!selfEmail && from.id === String(selfEmail).toLowerCase(), isBot: false },'), 'no-sent-witness');
+  const G1 = M.load('src/channels/gmail.js', editAnchor(GSRC, GC, 'isSelf: !!selfEmail && from.id === String(selfEmail).toLowerCase(), isBot: false },', "src/channels/gmail.js"), 'no-sent-witness');
   ok(gLegs(G1).alias === true, 'CONTROL ⑥: a gmail copy without the SENT witness calls the alias reply a peer\'s answer — the alias leg goes RED');
   // (2) Slack threadOnly NEGATIVES: a plain message (no root / threadKey / replyTo) 1 h after a send ⇒ never a reply
   const S = new Map([['171.1', { at: T, words: 'deploy?', subject: '' }]]);
@@ -1030,7 +1030,7 @@ console.log('⑰ verify r3 (lane channel-reply-real): the alias self witness, Sl
   const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
   const SC = '    const s = of(rec.root) || of(rec.threadKey) || of(rec.replyTo);';
   ok(FSRC.split(SC).length === 2, 'control setup: the threadOnly read is one line');
-  const F7 = M.load('src/channel-filter.js', FSRC.replace(SC, '    const s = of(rec.root) || of(rec.threadKey) || of(rec.replyTo) || [...sent.values()].find((x) => Number(x.at) < Number(rec.at)) || null;'), 'slack-clock');
+  const F7 = M.load('src/channel-filter.js', editAnchor(FSRC, SC, '    const s = of(rec.root) || of(rec.threadKey) || of(rec.replyTo) || [...sent.values()].find((x) => Number(x.at) < Number(rec.at)) || null;', "src/channel-filter.js"), 'slack-clock');
   ok(slackNeg(F7).every(Boolean), 'CONTROL ⑦: a copy with a clock clause under the threadOnly branch hits both plain messages — the Slack negative goes RED');
   // (3) a send in PARTS (Lark text + a file message): a 引用 of part 2 is a reply to what the agent sent
   const res = { vendorMessageId: 'om_t1', parts: [{ part: 'text', ok: true, vendorMessageId: 'om_t1' }, { part: 'attachment', name: 'q3.pdf', ok: true, vendorMessageId: 'om_f2' }, { part: 'attachment', name: 'big.zip', ok: false, code: 'too-large' }] };
@@ -1186,7 +1186,7 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
   const SRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
   const EDGE = "return p !== null && p >= th ? `decision: ${conditionWords(rule)} → ${p.toFixed(2)}` : null;";
   ok(SRC.split(EDGE).length === 2, 'control setup: the predicate verdict is one line');
-  const FX = M.load('src/channel-filter.js', SRC.replace(EDGE, EDGE.replace('p !== null && p >= th', 'p !== null')), 'no-threshold');
+  const FX = M.load('src/channel-filter.js', editAnchor(SRC, EDGE, EDGE.replace('p !== null && p >= th', 'p !== null'), "src/channel-filter.js"), 'no-threshold');
   ok(FX.matchRecord({ rules: [r] }, one, at(0.69)).hit === true, 'CONTROL: a copy that ignores the threshold hits at 0.69 — the edge leg above goes RED');
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
 }
@@ -1267,9 +1267,9 @@ console.log('⑲ lane dm-reply-infers (B-6b4b): reply-to-sent `infer` — the sc
   const same = ['dm', 'group', 'thread'].flatMap((k) => fixtures.map((r) => J2(F.matchRecord({ rules: [R0] }, r, fctx(k))) === J2(BASE.matchRecord({ rules: [R0] }, r, fctx(k)))));
   ok(same.every(Boolean) && same.length === 15, `infer OFF ⇒ the marker road byte for byte: ${same.length} fixtures (plain / quote / topic reply / mail × dm, group, thread) answer exactly as a copy without the judged road — even with a YES for every one of them handed in`);
   ok(BASE.matchRecord({ rules: [RI] }, plain2h, ctxOf({ inferred: said(0.99) })).hit === false && F.matchRecord({ rules: [RI] }, plain2h, ctxOf({ inferred: said(0.99) })).hit === true, 'CONTROL ⑧: the marker-only copy misses the 2 h plain answer even with infer on — the judged road is what wakes userW\'s agent');
-  const S1 = MM.load('src/channel-filter.js', FSRC.replace(SPAN, '  const span = Infinity;'), 'no-span');
+  const S1 = MM.load('src/channel-filter.js', editAnchor(FSRC, SPAN, '  const span = Infinity;', "src/channel-filter.js"), 'no-span');
   const S2 = MM.load('src/channel-filter.js', editAnchor(editAnchor(FSRC, MARK, '', "src/channel-filter.js"), KIND, '', "src/channel-filter.js"), 'marked-judged');
-  const S3 = MM.load('src/channel-filter.js', FSRC.replace(EDGE, '  if (p === null) return null;'), 'no-threshold');
+  const S3 = MM.load('src/channel-filter.js', editAnchor(FSRC, EDGE, '  if (p === null) return null;', "src/channel-filter.js"), 'no-threshold');
   ok(outLegs(S1).includes('25 h after (the default span 24 h)'), 'CONTROL ⑨: a copy without the span judges the 25 h message — the scope leg goes RED', J2(outLegs(S1)));
   ok(outLegs(S2).includes('a quote of ANOTHER message') && outLegs(S2).includes('a topic reply under another root'), 'CONTROL ⑩: a copy without the unmarked checks judges a quote of another message and a topic reply — the scope leg goes RED', J2(outLegs(S2)));
   ok(lowLegs(S3)[0] === true, 'CONTROL ⑪: a copy without the threshold hits at 0.79 — the judged-no leg goes RED');
@@ -1348,10 +1348,10 @@ console.log('⑳ lane reply-infer-owner-between (agent feedback fb-377439b167): 
   const CAND = 'gapMin: Math.max(0, Math.round((at - Number(newest.at)) / 60000)), between: inferBetween(rec, newest, ctx) };';
   const KCUT = '.sort((a, b) => Number(a.at) - Number(b.at)).slice(-INFER.between);';
   ok(FSRC.split(CAND).length === 2 && FSRC.split(KCUT).length === 2, 'control setup: the candidate\'s fact and the K bound are each one line');
-  const BASE = MM.load('src/channel-filter.js', FSRC.replace(CAND, 'gapMin: Math.max(0, Math.round((at - Number(newest.at)) / 60000)) };'), 'no-between');
+  const BASE = MM.load('src/channel-filter.js', editAnchor(FSRC, CAND, 'gapMin: Math.max(0, Math.round((at - Number(newest.at)) / 60000)) };', "src/channel-filter.js"), 'no-between');
   const cb = BASE.inferCandidate(reply, ctxOf({ turnsBetween: tb }));
   ok(cb && cb.between === undefined && J2(BASE.matchRecord({ rules: [RI] }, reply, ctxOf({ turnsBetween: reader([VOICE]), inferred: new Map([['r-om_p1|om_s1', { probability: 0.92 }]]) })).why) === J2(y0.why), 'CONTROL (the base): a scope without the fact hands the judge nothing between and tells the agent nothing — the incident leg above goes RED', J2(cb));
-  const NOK = MM.load('src/channel-filter.js', FSRC.replace(KCUT, '.sort((a, b) => Number(a.at) - Number(b.at));'), 'no-k-bound');
+  const NOK = MM.load('src/channel-filter.js', editAnchor(FSRC, KCUT, '.sort((a, b) => Number(a.at) - Number(b.at));', "src/channel-filter.js"), 'no-k-bound');
   const nk = NOK.inferBetween(reply, S.get('om_s1'), ctxOf({ turnsBetween: () => many }));
   ok(nk.own + nk.others === 8, 'CONTROL: a copy without the K bound counts all 8 turns — the K-bound leg goes RED', J2(nk));
   for (const x of copiesCensus(MM.files, MM.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);

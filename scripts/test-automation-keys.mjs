@@ -188,7 +188,7 @@ console.log('③ MUTANT — a verdict that ignores revokedAt');
 {
   const needle = "  if (k.revokedAt) return { ok: false, code: 'key_revoked' };";
   ok(SRC.split(needle).length === 2, 'ANCHOR: the revoked check is spelled once');
-  const Mx = M.load('src/automation-keys.js', SRC.replace(needle, ''), 'no-revoke');
+  const Mx = M.load('src/automation-keys.js', editAnchor(SRC, needle, '', "src/automation-keys.js"), 'no-revoke');
   const red = runTable(Mx);
   ok(red.includes('revoked'), `MUTANT RED: without it a revoked key still runs (the table's "revoked" row goes ${verdictWord(Mx.useVerdict(T[3][1]))})`, red);
 }
@@ -198,7 +198,7 @@ console.log('④ MUTANT — an outside caller judged by the internal grants');
   // lane grants-unify: the split is the candidate loop's first line (a conversation's grants are judged by admits after it)
   const needle = "    if (external) { if (g.subject === 'external') cands.push({ g, via: 'external' }); continue; }";
   ok(SRC.split(needle).length === 2, 'ANCHOR: the external / internal split is spelled once');
-  const Mx = M.load('src/automation-keys.js', SRC.replace(needle, "    if (external) { cands.push({ g, via: 'external' }); continue; }"), 'external-wide');
+  const Mx = M.load('src/automation-keys.js', editAnchor(SRC, needle, "    if (external) { cands.push({ g, via: 'external' }); continue; }", "src/automation-keys.js"), 'external-wide');
   const red = runTable(Mx);
   ok(red.includes('an outside caller, an internal grant'), 'MUTANT RED: an `external` caller let through by a conversation\'s grant — the wall row goes red', red);
 }
@@ -441,7 +441,7 @@ console.log('⑧ THE DOORS — an agent calls with its own token; every owner do
   const rNeedle = ', signal: gone.signal }));';
   ok(RSRC.split(rNeedle).length === 2, 'ANCHOR: the door hands the call its request\'s signal once');
   const appX = express(); appX.use(express.json());
-  M.load('src/routes/automation.js', RSRC.replace(rNeedle, ' }));'), 'no-signal').registerAutomationRoutes(appX, { engine: w.engine, callerOf: (t) => tokens[t] || null });
+  M.load('src/routes/automation.js', editAnchor(RSRC, rNeedle, ' }));', "src/routes/automation.js"), 'no-signal').registerAutomationRoutes(appX, { engine: w.engine, callerOf: (t) => tokens[t] || null });
   const srvX = http.createServer(appX); await new Promise((r) => srvX.listen(0, '127.0.0.1', r));
   tokens.vsst_gone6 = caller({ conversationId: 'conv-6', sessionKey: 'claude:conv-6', name: 'Worker six' });
   const cut6 = new AbortController();
@@ -580,12 +580,12 @@ console.log('⑪b MUTANTS — a lexical-only folder check; a root prefix without
   const LSRC = fs.readFileSync(path.join(ROOT, 'src/automation-keys.js'), 'utf8');
   const n1 = "  const cwd = typeof realpath === 'function' ? real(str(s.cwd)) : normPath(s.cwd);";
   ok(LSRC.split(n1).length === 2, 'ANCHOR: the cwd\'s real path is read once');
-  const M1x = M.load('src/automation-keys.js', LSRC.replace(n1, '  const cwd = normPath(s.cwd);'), 'lim-lexical');
+  const M1x = M.load('src/automation-keys.js', editAnchor(LSRC, n1, '  const cwd = normPath(s.cwd);', "src/automation-keys.js"), 'lim-lexical');
   const r1 = runLimits(M1x);
   ok(r1.some((x) => x.startsWith('a link inside the root pointing out')), 'MUTANT RED: a lexical-only check lets a link inside the root out of it (the symlink row goes ok)', r1);
   const n2 = "const within = (p, root) => root === '/' || p === root || p.startsWith(root + '/');";
   ok(LSRC.split(n2).length === 2, 'ANCHOR: the containment rule is spelled once');
-  const M2x = M.load('src/automation-keys.js', LSRC.replace(n2, "const within = (p, root) => p.startsWith(root);"), 'lim-prefix');
+  const M2x = M.load('src/automation-keys.js', editAnchor(LSRC, n2, "const within = (p, root) => p.startsWith(root);", "src/automation-keys.js"), 'lim-prefix');
   const r2 = runLimits(M2x);
   ok(r2.some((x) => x.startsWith('a sibling sharing the root')), 'MUTANT RED: a bare startsWith lets lim-root-evil pass as lim-root', r2);
 }
@@ -782,7 +782,7 @@ console.log('⑫c MUTANT — the config read BEFORE the folder judge');
   const ESRC = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8');
   const n1 = "    const v = A.openLimitsVerdict(k.limits, eff, { realpath: (p) => (reals.has(p) ? reals.get(p) : null) });\n    if (!v.ok) return { ...named(v.code, v.why, { field: v.field, limits: k.limits }), args };";
   ok(ESRC.split(n1).length === 2, 'ANCHOR: the folder judge runs first, spelled once');
-  const MX = M.load('src/server/automation-engine.js', ESRC.replace(n1, "    if (!eff.permissionMode && typeof openFacts.permissionDefault === 'function') { try { await openFacts.permissionDefault(String(eff.cwd || ''), eff.backend); } catch { } }\n" + n1), 'config-first');
+  const MX = M.load('src/server/automation-engine.js', editAnchor(ESRC, n1, "    if (!eff.permissionMode && typeof openFacts.permissionDefault === 'function') { try { await openFacts.permissionDefault(String(eff.cwd || ''), eff.backend); } catch { } }\n" + n1, "src/server/automation-engine.js"), 'config-first');
   const reads = [];
   const rig = judgeRig();
   const w = await mkWorld('judge-perm-mutant');
@@ -855,11 +855,11 @@ console.log('⑫d B-dbba — `conversations open --name` names the conversation 
   const SSRC = fs.readFileSync(path.join(ROOT, 'src/conversation-spec.js'), 'utf8');
   const nW = "  if (s.name !== undefined) w.sessionName = s.name;\n  for (const k of ['model', 'effort', 'permissionMode', 'taskId', 'accountId']) if (s[k] !== undefined) w[k] = s[k];";
   ok(SSRC.split(nW).length === 2, 'ANCHOR: wireOf\'s name field is spelled once');
-  const specCopy = M.write('src/conversation-spec.js', SSRC.replace(nW, "  for (const k of ['name', 'model', 'effort', 'permissionMode', 'taskId', 'accountId']) if (s[k] !== undefined) w[k] = s[k];"), 'wire-name');
+  const specCopy = M.write('src/conversation-spec.js', editAnchor(SSRC, nW, "  for (const k of ['name', 'model', 'effort', 'permissionMode', 'taskId', 'accountId']) if (s[k] !== undefined) w[k] = s[k];", "src/conversation-spec.js"), 'wire-name');
   const OSRC = fs.readFileSync(path.join(ROOT, 'src/server/conversation-ops.js'), 'utf8');
   const nO = "const SPEC = require('../conversation-spec.js');";
   ok(OSRC.split(nO).length === 2, 'ANCHOR: conversation-ops requires the spec once');
-  const OPSX = M.load('src/server/conversation-ops.js', OSRC.replace(nO, `const SPEC = require(${JSON.stringify(specCopy)});`), 'ops-wire-name');
+  const OPSX = M.load('src/server/conversation-ops.js', editAnchor(OSRC, nO, `const SPEC = require(${JSON.stringify(specCopy)});`, "src/server/conversation-ops.js"), 'ops-wire-name');
   const rigX = judgeRig(OPSX);
   const wx = await mkWorld('open-name-mutant');
   const ex = judgeEngine(ENG, wx, rigX);
@@ -1013,7 +1013,7 @@ console.log('⑯ THE REACH — ONE PURE rule for every verb that names another c
   ok(A.openedOf({ keyId: K, webuiId: 'sess-1-1', conversationId: 'w', at: 5 }).at === 5 && A.openedOf({ keyId: 'nope', webuiId: 'sess-1-1' }) === null && A.openedOf({ keyId: K }) === null && A.openedOf({ keyId: K, conversationId: 'w' }).webuiId === null, 'openedOf: a row needs a key id and one of the two ids; anything else is not a row');
   const needle = "  if (rows.some((o) => (cid && o.conversationId && o.conversationId === cid) || (wid && o.webuiId && o.webuiId === wid))) return { ok: true, by: 'opener' };";
   ok(SRC.split(needle).length === 2, 'ANCHOR: the opener clause is spelled once');
-  const Mx = M.load('src/automation-keys.js', SRC.replace(needle, ''), 'no-opener');
+  const Mx = M.load('src/automation-keys.js', editAnchor(SRC, needle, '', "src/automation-keys.js"), 'no-opener');
   const redM = runReach(Mx);
   ok(redM.length === 3 && redM.every((n) => /opened|webui id, before|ENDED/.test(n)), 'MUTANT RED: without (a) the opener loses what it opened — the three opener rows go red, nothing else moves', redM);
   const redB = B3190.anchored() ? runReach(M.load('src/automation-keys.js', B3190.oldB(true), 'b-keyed-to-key')) : ['no anchor'];
@@ -1039,7 +1039,7 @@ console.log('⑯ THE REACH — ONE PURE rule for every verb that names another c
   // lane grants-unify: the reach the target is judged against = the riding grants' reach rows (else the summary mapped)
   const needle2 = "  const rrows = (Array.isArray(reachRows) ? reachRows : [reachRowOf({ reach: r })]).filter(Boolean);";
   ok(SRC.split(needle2).length === 2, 'ANCHOR: the instance clause is spelled once');
-  const My = M.load('src/automation-keys.js', SRC.replace(needle2, "  const rrows = (Array.isArray(reachRows) ? reachRows : [reachRowOf({ reach: r === 'opened' ? 'instance' : r })]).filter(Boolean);"), 'instance-for-opened');
+  const My = M.load('src/automation-keys.js', editAnchor(SRC, needle2, "  const rrows = (Array.isArray(reachRows) ? reachRows : [reachRowOf({ reach: r === 'opened' ? 'instance' : r })]).filter(Boolean);", "src/automation-keys.js"), 'instance-for-opened');
   const redY = [...runReach(My), ...runReach2(My)];
   ok(redY.length === 8 && redY.every((n) => /no row, no grant|ANOTHER key|ANOTHER grant|Task Group the key is granted to|nobody opened|opened \(the default\)|unknown reach/.test(n)), 'MUTANT RED: a table that lets `instance` through for an `opened` grant — the six refused rows of the base table (B-3190: the two a grant names among them) and the two opened rows of the reach table go red, nothing else moves', redY);
 }
@@ -1250,7 +1250,7 @@ console.log('⑮ THE FEEDBACK VERBS (lane feedback-handled-verb — the owner 20
   const needle = "      const r = store.setStatus(args.id, 'handled', { by: caller.maintainer ? M.MAINTAINER_BY : caller.name || caller.sessionKey || caller.conversationId, version: args.version, note: args.note });";   // lane fleet-feedback-marks: + the maintainer key's `by`
   ok(FSRC.split(needle).length === 2, 'ANCHOR: the verb\'s store call is spelled once');
   const direct = "      const fsx = require('fs'), j = JSON.parse(fsx.readFileSync(store.file, 'utf8')), rec = j.records.find((x) => x.id === args.id); if (rec) Object.assign(rec, { status: 'handled', handledAt: Date.now(), handledBy: caller.name, handledVersion: args.version, handledNote: args.note || null }); fsx.writeFileSync(store.file, JSON.stringify(j)); const r = rec ? { ok: true, report: { ...rec } } : { ok: false, code: 'not_found', error: 'no report' };";
-  const FX = M.load('src/server/feedback-store.js', FSRC.replace(needle, direct), 'direct-write');
+  const FX = M.load('src/server/feedback-store.js', editAnchor(FSRC, needle, direct, "src/server/feedback-store.js"), 'direct-write');
   const mdir = path.join(TMP, 'feedback-mutant'); fs.mkdirSync(mdir, { recursive: true });
   const mstore = FX.create({ dataDir: mdir, now: () => NOW });
   const m1 = mstore.report({ text: 'a report', kind: 'cli' }, { session: { id: 'conv-8', name: 'lane beta' }, harness: 'claude', instance: {} });
@@ -1282,7 +1282,7 @@ console.log('⑰ 编辑… — a minted key\'s verbs and limits after minting (l
   ok(/const sc = scopesPlan\(scopes\);\n  if \(!sc\.ok\) return sc;\n  const lim = limitsPlan\(limits === undefined \? \{\} : limits, sc\.scopes\);/.test(SRC) && /const sc = scopes === undefined \? \{ ok: true, scopes: k\.scopes \} : scopesPlan\(scopes\);/.test(SRC),
     'mintPlan and editPlan call THE scope rule (scopesPlan) — one rule, two doors');
   // MUTANT: an edit that takes the verbs raw (no scope rule) ⇒ an unknown verb and an empty key are stored ⇒ the rows above RED
-  const MX = M.load('src/automation-keys.js', SRC.replace('const sc = scopes === undefined ? { ok: true, scopes: k.scopes } : scopesPlan(scopes);', 'const sc = { ok: true, scopes: scopes === undefined ? k.scopes : scopes };'), 'edit-raw');
+  const MX = M.load('src/automation-keys.js', editAnchor(SRC, 'const sc = scopes === undefined ? { ok: true, scopes: k.scopes } : scopesPlan(scopes);', 'const sc = { ok: true, scopes: scopes === undefined ? k.scopes : scopes };', "src/automation-keys.js"), 'edit-raw');
   const mxBad = bads.filter(([sc, re]) => { let r; try { r = MX.editPlan(k0, { scopes: sc }); } catch { return true; } return r.ok || r.code !== 'bad_args' || !re.test(r.why); }).length;   // a throw is no refusal by name either
   ok(mxBad >= 3 && MX.editPlan(k0, { scopes: ['files.delete'] }).ok, `MUTANT RED: an edit without the mint's scope rule lets ${mxBad} of ${bads.length} refused picks through (an unknown verb stored as ${JSON.stringify(MX.editPlan(k0, { scopes: ['files.delete'] }).scopes)})`);
   // PURE pickKey: the keys THIS caller holds lack the verb ⇒ verb_not_in_scope naming them (never a not_granted that reads as «ask
@@ -1482,7 +1482,7 @@ console.log('⑲ THE MAINTAINER KEY (lane fleet-feedback-marks) — the instance
   ok(threw, 'the compare is INJECTED (the module imports nothing) — none given ⇒ it throws, never a plain ===');
   ok(A.maintainerNote('feedback.handled', { id: 'fb-0123456789', version: '2.369.346' }) === 'marked handled by the maintainer key · 2.369.346' && A.maintainerNote('feedback.list', {}) === null && A.MAINTAINER_NAME === FM.MAINTAINER_BY, 'the audit note: «marked handled by the maintainer key · 2.369.346»; the store\'s `by` is the same words (feedback-model MAINTAINER_BY)');
   // ⑲ MUTANT: a verdict that judges the key but not the closed list ⇒ the maintainer key opens a conversation ⇒ RED
-  const MSRC = SRC.replace("  if (!MAINTAINER_VERBS.includes(str(verb))) return { ok: false, code: 'maintainer_key_scope'", "  if (false) return { ok: false, code: 'maintainer_key_scope'");
+  const MSRC = editAnchor(SRC, "  if (!MAINTAINER_VERBS.includes(str(verb))) return { ok: false, code: 'maintainer_key_scope'", "  if (false) return { ok: false, code: 'maintainer_key_scope'", "src/automation-keys.js");
   ok(MSRC !== SRC, 'ANCHOR: the closed-list line is spelled once');
   const AX = M.load('src/automation-keys.js', MSRC, 'no-closed-list');
   const mv = AX.maintainerVerdict({ token: KEY, sha: SHA, verb: 'conversations.open', matches: tokenMatches });
@@ -1615,8 +1615,8 @@ console.log('⑳ «除了» ON BOTH KEY DOORS (verify grants-verify mutation gap
   ok(SRC.split(GM_REQ).length === 2, 'ANCHOR: automation-keys requires THE model once');
   for (const [tag, [what, [from, to], want]] of Object.entries(MUT)) {
     ok(GMSRC.split(from).length === 2, `ANCHOR (mutant ${tag}): ${what} — the line is spelled once`);
-    const gmCopy = M.write('src/grant-model.js', GMSRC.replace(from, to), `gm-${tag}`);
-    const Ax = M.load('src/automation-keys.js', SRC.replace(GM_REQ, `const GM = require(${JSON.stringify(gmCopy)});`), `keys-gm-${tag}`);
+    const gmCopy = M.write('src/grant-model.js', editAnchor(GMSRC, from, to, "src/grant-model.js"), `gm-${tag}`);
+    const Ax = M.load('src/automation-keys.js', editAnchor(SRC, GM_REQ, `const GM = require(${JSON.stringify(gmCopy)});`, "src/automation-keys.js"), `keys-gm-${tag}`);
     const red = runKeyLegs(Ax);
     ok(want.every((n) => red.includes(n)), `MUTANT ${tag} RED (${what}): the key doors' own legs go red — ${want.map((n) => n.split(':')[0]).join(' + ')}`, red);
   }
@@ -1760,7 +1760,7 @@ console.log('㉑b THE ONCE RESERVATION + UNREADABLE TASK GROUPS (lane key-grant-
   const RES = '    let held = null;\n    if (verdict.spend) {\n';
   ok(ESRC.split(RES).length === 2, 'ANCHOR: the once reservation, spelled once');
   if (ESRC.split(RES).length === 2) {
-    const MX = M.load('src/server/automation-engine.js', ESRC.replace(RES, "    let held = null;\n    if (verb === 'conversations.open') await limitsJudge(keyById(key.id) || key, v0.args);\n    if (verdict.spend) {\n"), 'reserve-after-judge');
+    const MX = M.load('src/server/automation-engine.js', editAnchor(ESRC, RES, "    let held = null;\n    if (verb === 'conversations.open') await limitsJudge(keyById(key.id) || key, v0.args);\n    if (verdict.spend) {\n", "src/server/automation-engine.js"), 'reserve-after-judge');
     const mx = await race(MX, 'race-mutant', [ALL], ['conv-a', 'conv-b', 'conv-c']);
     ok(mx.ran.length === 3, `MUTANT RED: the reservation written AFTER the limits' await (01b6db270's order — a check-then-write across an await) ⇒ ${mx.ran.length} opens ran on ONE once-grant`, mx);
   }
@@ -1793,7 +1793,7 @@ console.log('㉑b THE ONCE RESERVATION + UNREADABLE TASK GROUPS (lane key-grant-
   const UNEEDLE = 'groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], inheritedGroupIds: subjectInherited, groupsUnreadable: !!subjectGroupsUnreadable };';   // lane lg-group-parents U3d: + the lineage beside the groups (as handed — the model reads a non-list unreadable)
   ok(SRC.split(UNEEDLE).length === 2, 'ANCHOR: useVerdict hands the unreadable fact to the ONE admission — spelled once');
   if (SRC.split(UNEEDLE).length === 2) {
-    const Au = M.load('src/automation-keys.js', SRC.replace(UNEEDLE, 'groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], inheritedGroupIds: subjectInherited };'), 'groups-unreadable-dropped');
+    const Au = M.load('src/automation-keys.js', editAnchor(SRC, UNEEDLE, 'groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], inheritedGroupIds: subjectInherited };', "src/automation-keys.js"), 'groups-unreadable-dropped');
     const mv = uv(Au, [GEX], 'conv-m', { subjectGroupsUnreadable: true });
     ok(mv.ok === true, 'MUTANT RED: the fact dropped (01b6db270\'s shape) ⇒ the conversation the owner left out of All agents is ADMITTED while its Task Groups are unreadable', mv);
   }
@@ -1863,12 +1863,12 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   ok(!runPk(A).length, `pickKey (${PK.length} rows): the caller's own grant › a Task Group's › All agents', then always, then the oldest key`, runPk(A));
   const PSORT = '    const pick = granted.sort((a, b) => above(rk(b), rk(a)))[0];';
   ok(SRC.split(PSORT).length === 2, 'ANCHOR: pickKey\'s ranking, spelled once');
-  const redPk = runPk(M.load('src/automation-keys.js', SRC.replace(PSORT, "    const pick = granted.sort((a, b) => (b.v.grant.mode === 'always') - (a.v.grant.mode === 'always') || (a.k.createdAt || 0) - (b.k.createdAt || 0))[0];"), 'b3190-pick-by-age'));
+  const redPk = runPk(M.load('src/automation-keys.js', editAnchor(SRC, PSORT, "    const pick = granted.sort((a, b) => (b.v.grant.mode === 'always') - (a.v.grant.mode === 'always') || (a.k.createdAt || 0) - (b.k.createdAt || 0))[0];", "src/automation-keys.js"), 'b3190-pick-by-age'));
   ok(redPk.length === 4 && redPk.every((n) => /vs the conversation|vs a Task Group/.test(n)), 'MUTANT RED: the release\'s ranking (always, then key age) ⇒ the four specificity rows go red (an older key overrides the conversation\'s own)', redPk);
   // lane lg-group-parents U3d: the rank also reads whether a parent's group entry decided (`inherited`)
   const RSPEC = '  const usable = bySpec.filter((c) => c.g.mode === \'always\' || !c.g.spentAt), spec = usable.length ? viaRank(usable[0].via, usable[0].inherited) : -1;';
   ok(SRC.split(RSPEC).length === 2, 'ANCHOR: a key\'s claim (spec), spelled once');
-  const redSp = runPk(M.load('src/automation-keys.js', SRC.replace(RSPEC, "  const usable = bySpec.filter((c) => c.g.mode === 'always' || !c.g.spentAt), spec = usable.length ? viaRank((bySpec.find((c) => c.g.mode === 'always') || usable[0]).via, (bySpec.find((c) => c.g.mode === 'always') || usable[0]).inherited) : -1;"), 'b3190-rank-by-ridden'));
+  const redSp = runPk(M.load('src/automation-keys.js', editAnchor(SRC, RSPEC, "  const usable = bySpec.filter((c) => c.g.mode === 'always' || !c.g.spentAt), spec = usable.length ? viaRank((bySpec.find((c) => c.g.mode === 'always') || usable[0]).via, (bySpec.find((c) => c.g.mode === 'always') || usable[0]).inherited) : -1;", "src/automation-keys.js"), 'b3190-rank-by-ridden'));
   ok(redSp.length === 1 && /the key\'s claim, not the grant ridden/.test(redSp[0]), 'MUTANT RED: ranking by the grant RIDDEN (an All-agents «Always» before the own once-grant) ⇒ adding that «Always» makes the key lose to a Task Group\'s (r1: not monotonic)', redSp);
 
   // PURE pickKey, the caller's Task Groups UNREADABLE: a key they decide is in the running ⇒ said by name
@@ -1892,14 +1892,14 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
     'r1: a SPENT once-grant to a Task Group, or a newer key\'s once-grant that could only tie, refuses nothing (the pick stands); both once-grants spent ⇒ once_spent (a card), never «call again»', { c1, c2: c2.key && c2.key.name, d1: d1.code });
   const USPENT = "else if (v.code === 'groups_unreadable' && canAdmit) {";   // B-3190 follow-up: the one «could it ever admit» flag of both branches
   ok(SRC.split(USPENT).length === 2, 'ANCHOR: an undecided grant counts only when it could be used — spelled once');
-  const Ms = M.load('src/automation-keys.js', SRC.replace(USPENT, "else if (v.code === 'groups_unreadable') {"), 'b3190-unread-spent');
+  const Ms = M.load('src/automation-keys.js', editAnchor(SRC, USPENT, "else if (v.code === 'groups_unreadable') {", "src/automation-keys.js"), 'b3190-unread-spent');
   const ms1 = pk(Ms, [G({ keyId: kOld.id, subject: ALL6 }), G({ n: 3, keyId: kGrp.id, subject: 'group:T-1', mode: 'once', spentAt: NOW })], un);
   ok(ms1.ok === false && ms1.code === 'groups_unreadable', 'MUTANT RED: a spent undecided grant counted ⇒ the call is refused «call again» though nothing could change the pick', ms1);
   const UAMB = "  if (unread.length) return { ok: false, code: 'groups_unreadable', names: unread };\n  return { ok: false, code: 'key_ambiguous'";
   const UWIN = "    if (over.length) return { ok: false, code: 'groups_unreadable', names: over.slice(0, 20), works: { id: pick.k.id, name: pick.k.name } };   // r2: the key granted to the caller NOW — the door that works without waiting (r3: by id — names are not unique)\n";
   ok(SRC.split(UAMB).length === 2 && SRC.split(UWIN).length === 2, 'ANCHOR: the two unreadable answers, spelled once');
-  const Mu1 = M.load('src/automation-keys.js', SRC.replace(UAMB, "  return { ok: false, code: 'key_ambiguous'"), 'b3190-unread-ambiguous');
-  const Mu2 = M.load('src/automation-keys.js', SRC.replace(UWIN, ''), 'b3190-unread-switch');
+  const Mu1 = M.load('src/automation-keys.js', editAnchor(SRC, UAMB, "  return { ok: false, code: 'key_ambiguous'", "src/automation-keys.js"), 'b3190-unread-ambiguous');
+  const Mu2 = M.load('src/automation-keys.js', editAnchor(SRC, UWIN, '', "src/automation-keys.js"), 'b3190-unread-switch');
   const m1 = Mu1.pickKey({ keys: [kOld, kOwn], grants: [GX], subject: 'session:conv-m', verb: 'conversations.rename', ...un });
   const m2 = pk(Mu2, [G({ keyId: kOld.id, subject: ALL6 }), G({ n: 3, keyId: kGrp.id, subject: 'group:T-1' })], un);
   ok(m1.code === 'key_ambiguous' && m2.ok && m2.key.name === 'old-all', 'MUTANTS RED: without them ⇒ key_ambiguous (r2\'s case) · a quiet pick of the All-agents key', { m1, m2: m2.key && m2.key.name });
@@ -1913,7 +1913,7 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   // lane lg-group-parents U3d: the order reads the parent step too (the line carries its comment)
   const VSORT = '  const bySpec = cands.slice().sort((a, b) => viaRank(b.via, b.inherited) - viaRank(a.via, a.inherited));';
   ok(SRC.split(VSORT).length === 2, 'ANCHOR: useVerdict\'s specificity order, spelled once');
-  const mo = uvb(M.load('src/automation-keys.js', SRC.replace(VSORT, '  const bySpec = cands.slice();'), 'b3190-once-store-order'), OB);
+  const mo = uvb(M.load('src/automation-keys.js', editAnchor(SRC, VSORT, '  const bySpec = cands.slice();', "src/automation-keys.js"), 'b3190-once-store-order'), OB);
   ok(mo.ok && mo.grant.id === 'ag-000000000001', 'MUTANT RED: the store\'s order ⇒ the All-agents once-grant is spent and the answer\'s own stays behind (the next open runs with no card)', mo.grant && mo.grant.id);
   // …and behind a SPENT once-grant of its own, an undecided Task Group grant says groups_unreadable (never a first-use card)
   const GXm = { ...GX, keyId: 'ak-000000000001' };
@@ -1922,7 +1922,7 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
     'its own once-grant spent + an All-agents grant «除了» a Task Group, the groups unreadable ⇒ groups_unreadable (read: admitted; alone: once_spent, as before)');
   const VLAST = "  return { ok: false, code: unreadable ? 'groups_unreadable' : 'once_spent', ...cx };";
   ok(SRC.split(VLAST).length === 2, 'ANCHOR: useVerdict\'s last answer, spelled once');
-  ok(sp(M.load('src/automation-keys.js', SRC.replace(VLAST, "  return { ok: false, code: 'once_spent', ...cx };"), 'b3190-spent-first'), { subjectGroupsUnreadable: true }).code === 'once_spent', 'MUTANT RED: once_spent first ⇒ a first-use card about a conversation whose grant could not be judged');
+  ok(sp(M.load('src/automation-keys.js', editAnchor(SRC, VLAST, "  return { ok: false, code: 'once_spent', ...cx };", "src/automation-keys.js"), 'b3190-spent-first'), { subjectGroupsUnreadable: true }).code === 'once_spent', 'MUTANT RED: once_spent first ⇒ a first-use card about a conversation whose grant could not be judged');
 
   // THE REAL ENGINE (主开发's check): a coordinator that OPENED its lane ends it; a lane another grant names, or a Task Group's
   // member, it does not — until the owner widens its reach to the Task Group (这些岗位的会话)
@@ -1971,7 +1971,7 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   ok(!!(g4.ok && before4 && !after4), 'follow-up (3): keysFor reads the LIVE grants — a once-grant from before a restart (boot is a lock; the pick and the verdict skip it) is no longer listed', { before4, after4 });
   const KLIVE = '      const gs = lg.filter((g) => g.keyId === k.id';   // cure 2: the listing reads ONE liveGrants() per call
   ok(ENGS.split(KLIVE).length === 2, 'ANCHOR: keysFor reads liveGrants(), spelled once');
-  ok(listedAfterBoot(M.load('src/server/automation-engine.js', ENGS.replace(KLIVE, '      const gs = db.grants.filter((g) => g.keyId === k.id'), 'b3190-keys-store')) === true,   // stale-pins: kept — a deliberate mutant planting the pre-cure listing
+  ok(listedAfterBoot(M.load('src/server/automation-engine.js', editAnchor(ENGS, KLIVE, '      const gs = db.grants.filter((g) => g.keyId === k.id', "src/server/automation-engine.js"), 'b3190-keys-store')) === true,   // stale-pins: kept — a deliberate mutant planting the pre-cure listing
     'MUTANT RED: keysFor over the store\'s rows ⇒ the dead once-grant is listed after a restart (a key the pick then refuses)');
   // (4) one law, one place: the rank is the grant model's
   ok(/const viaRank = \(via, inherited = false\) => GM\.specificityOf\(via, inherited\);/.test(SRC) && GM.specificityOf('conversation') > GM.specificityOf('group') && GM.specificityOf('group') > GM.specificityOf('everyone') && GM.specificityOf('x') < GM.specificityOf('everyone')

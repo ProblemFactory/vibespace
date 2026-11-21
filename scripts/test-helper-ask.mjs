@@ -371,7 +371,7 @@ console.log('⑥ negative controls (patched copies, scripts/mutant-copy.mjs)');
   const mmSrc = read('src/message-manager.js');
   const needle = 'const helper = this._subView ? null : helperAskOf(raw);';
   check('⑥ the patch site exists (the helper branch)', mmSrc.includes(needle));
-  const Mut = M.load('src/message-manager.js', mmSrc.replace(needle, 'const helper = null;'), 'mm-prelane').MessageManager;
+  const Mut = M.load('src/message-manager.js', editAnchor(mmSrc, needle, 'const helper = null;', "src/message-manager.js"), 'mm-prelane').MessageManager;
   const r = streamLegs('⑥ mutant', Mut, N, false);
   check('⑥ CONTROL: on the pre-lane normalizer the finding leg is RED — no card carries the ask (what both studies saw)', r.oneCard === false && r.pendingOne === false, r);
   check('⑥ …and the helper-view leg alone still holds on the copy (the helper\'s own card never depended on the branch)', r.subCard === true);
@@ -379,7 +379,7 @@ console.log('⑥ negative controls (patched copies, scripts/mutant-copy.mjs)');
   const nSrc = read('src/normalizers.js');
   const gateNeedle = '  routeToHelperView(session, msg);\n  if (session._normalizer.pendingAsksVersion !== v0) notifyAsks(session);';
   check('⑥ the patch site exists (the gate\'s route)', nSrc.includes(gateNeedle));
-  const MutN = M.load('src/normalizers.js', nSrc.replace(gateNeedle, '  if (session._normalizer.pendingAsksVersion !== v0) notifyAsks(session);'), 'norm-noroute');
+  const MutN = M.load('src/normalizers.js', editAnchor(nSrc, gateNeedle, '  if (session._normalizer.pendingAsksVersion !== v0) notifyAsks(session);', "src/normalizers.js"), 'norm-noroute');
   const r2 = streamLegs('⑥ mutant gate', MessageManager, MutN, false);
   check('⑥ CONTROL: without the gate\'s route the helper\'s View Log card has NO Allow/Deny (and the answer never settles it)', r2.subCard === false && r2.allowedBoth === false && r2.oneCard === true, r2);
   check('⑥ the copies live outside the tree', M.files.every((f) => !f.startsWith(REPO)));
@@ -456,7 +456,7 @@ async function consumerLeg(consumer, { withAgentId = true } = {}) {
   const csSrc = read('src/server/stdout/claude-stream-json.js');
   const needle = "} else if ((msg.parent_tool_use_id || msg.isSidechain) && !CONTROL_RECORD_TYPES.has(msg.type)) {";
   check('⑦ the patch site exists (the control-record exclusion)', csSrc.includes(needle));
-  const MutC = M2.load('src/server/stdout/claude-stream-json.js', csSrc.replace(needle, '} else if (msg.parent_tool_use_id || msg.isSidechain) {'), 'sidechain-only');
+  const MutC = M2.load('src/server/stdout/claude-stream-json.js', editAnchor(csSrc, needle, '} else if (msg.parent_tool_use_id || msg.isSidechain) {', "src/server/stdout/claude-stream-json.js"), 'sidechain-only');
   const c = await consumerLeg(MutC);
   check('⑦ CONTROL: routed to the helper view alone, the PARENT never learns the ask (no pending entry, no card) while the helper view has it — round 1\'s F4, the legs above can go red', c.parentHas === false && c.onRightCard === false && c.subHas === true, c);
   check('⑦ the copies live outside the tree', M2.files.every((f) => !f.startsWith(REPO)));
@@ -502,7 +502,7 @@ async function staleLegs(HAmod) {
   const haSrc = read('src/server/helper-asks.js');
   const needle = '  if (data.requestId != null && !knowsRequest(session, data.requestId)) return null;\n';
   check('⑧ the patch site exists (the view-id rung\'s knows-the-request guard)', haSrc.includes(needle));
-  const MutHA = M8.load('src/server/helper-asks.js', haSrc.replace(needle, ''), 'no-knows');
+  const MutHA = M8.load('src/server/helper-asks.js', editAnchor(haSrc, needle, '', "src/server/helper-asks.js"), 'no-knows');
   const c = await staleLegs(MutHA);
   check('⑧ CONTROL: without the guard the stale frame is routed to the NEW session by its view id (the leg above can go red)', c.staleRefused === false && c.liveRouted === true, c);
   check('⑧ the copies live outside the tree', M8.files.every((f) => !f.startsWith(REPO)));
@@ -552,10 +552,10 @@ function withdrawLegs(MM) {
   const haSrc9 = read('src/helper-ask.js');
   const needle = "    withdraw: X('cancelled', 'redraw'),\n"; // its FIRST occurrence is the `allowed` row
   check('⑨ the patch site exists (the table\'s allowed+withdraw cell)', haSrc9.indexOf(needle) > 0 && haSrc9.indexOf(needle) < haSrc9.indexOf('  denied: Object.freeze({'));
-  const mutTable9 = M9.write('src/helper-ask.js', haSrc9.replace(needle, "    withdraw: X('allowed'),\n"), 'no-override');
+  const mutTable9 = M9.write('src/helper-ask.js', editAnchor(haSrc9, needle, "    withdraw: X('allowed'),\n", "src/helper-ask.js", 'first'), 'no-override');
   const mmSrc9 = read('src/message-manager.js');
   check('⑨ the normalizer binds the table ONCE (one require to rebind)', mmSrc9.split("require('./helper-ask.js')").length === 2);
-  const MutMM = M9.load('src/message-manager.js', mmSrc9.replace("require('./helper-ask.js')", `require(${JSON.stringify(mutTable9)})`), 'mm-on-no-override-table').MessageManager;
+  const MutMM = M9.load('src/message-manager.js', editAnchor(mmSrc9, "require('./helper-ask.js')", `require(${JSON.stringify(mutTable9)})`, "src/message-manager.js"), 'mm-on-no-override-table').MessageManager;
   const c = withdrawLegs(MutMM);
   check('⑨ CONTROL: with the table\'s allowed+withdraw cell not overriding, the REAL normalizer keeps the dropped Allow reading "allowed" on a stopped helper (the measured lie) — the leg above can go red', c.firstAllowed === true && c.nowCancelled === false, c);
   check('⑨ the copies live outside the tree', M9.files.every((f) => !f.startsWith(REPO)));
@@ -626,7 +626,7 @@ function inboxLegs(HAmod) {
   const needleA = '    if (twin && fileItem(session, twin)) {';
   const needleB = '    resolveItems(session, live, st, now);\n    for (const [rid, a] of live) {';
   check('⑩ the patch sites exist (the twin re-point; resolve before filing)', haSrc.includes(needleA) && haSrc.includes(needleB));
-  const MutA = M10.load('src/server/helper-asks.js', haSrc.replace(needleA, '    if (false && twin && fileItem(session, twin)) {'), 'no-twin');
+  const MutA = M10.load('src/server/helper-asks.js', editAnchor(haSrc, needleA, '    if (false && twin && fileItem(session, twin)) {', "src/server/helper-asks.js"), 'no-twin');
   const ca = inboxLegs(MutA);
   check('⑩ CONTROL: without the re-point the shared item is resolved while the twin still waits (the pointer gone)', ca.oneShared === true && ca.keptWhileTwinWaits === false, ca);
   const MutB = M10.load('src/server/helper-asks.js', editAnchor(editAnchor(haSrc, needleB, '    for (const [rid, a] of live) {', "src/server/helper-asks.js"), "  } catch (e) { deps.log?.warn?.(`[helper-ask] sync failed", "    resolveItems(session, live, st, now);\n  } catch (e) { deps.log?.warn?.(`[helper-ask] sync failed", "src/server/helper-asks.js"), 'resolve-after');
@@ -726,7 +726,7 @@ function pureWalk(Hm, seed, steps) {
   ];
   for (const m of MUTANTS) {
     check(`⑪ the patch site exists (${m.tag})`, haSrc.includes(m.needle));
-    const Hm = M11.load('src/helper-ask.js', haSrc.replace(m.needle, m.patch), m.tag);
+    const Hm = M11.load('src/helper-ask.js', editAnchor(haSrc, m.needle, m.patch, "src/helper-ask.js"), m.tag);
     const c = tableCensus(Hm); const w = pureWalk(Hm, 777, 3000);
     check(`⑪ MUTANT ${m.tag} (${m.why}): the census names the cell and the walk goes red`, !c.clean && m.red(c, w), { census: Object.fromEntries(Object.entries(c).filter(([, v]) => Array.isArray(v) && v.length)), violations: w.violations.slice(0, 3) });
   }
@@ -984,26 +984,26 @@ async function engineWalk({ seed, steps, HAmod = HA, MM = MessageManager, Nmod =
   const M13 = mutantCopies('helper-ask-r3-engine', REPO);
   const haSrc = read('src/helper-ask.js');
   const needle = "    'press-allow': X('allowed', 'refuse'), 'press-deny': X('allowed', 'refuse'),\n";
-  const mutTable = M13.write('src/helper-ask.js', haSrc.replace(needle, "    'press-allow': X('allowed', 'write-stdin'), 'press-deny': X('allowed', 'write-stdin'),\n"), 'write-twice');
+  const mutTable = M13.write('src/helper-ask.js', editAnchor(haSrc, needle, "    'press-allow': X('allowed', 'write-stdin'), 'press-deny': X('allowed', 'write-stdin'),\n", "src/helper-ask.js"), 'write-twice');
   const haEngineSrc = read('src/server/helper-asks.js');
-  const MutHA = M13.load('src/server/helper-asks.js', haEngineSrc.replace("require('../helper-ask.js')", `require(${JSON.stringify(mutTable)})`), 'engine-on-write-twice');
+  const MutHA = M13.load('src/server/helper-asks.js', editAnchor(haEngineSrc, "require('../helper-ask.js')", `require(${JSON.stringify(mutTable)})`, "src/server/helper-asks.js"), 'engine-on-write-twice');
   const wc = await engineWalk({ seed: 20260927, steps: 400, HAmod: MutHA, tag: 'walk-ctl' });
   check('⑬ CONTROL: the engine on a table whose allowed+press cell writes again puts a SECOND control_response on stdin for one ask — the walk names it (the leg above can go red)', wc.violations.some((x) => /stdin written 2× for one ask/.test(x)), wc.violations.slice(0, 3));
   // CONTROLS (r4): two ENGINE mutants performing an effect the table does not name — INVISIBLE to the r3 oracle, named by the r4 one
   // m1: the normalizer redraws an ask that did not move (an edit op on every settle, moved or not)
   const mmSrc = read('src/message-manager.js');
   const m1Needle = '      if (next.state === cur) return true;\n';
-  const mmMut = M13.write('src/message-manager.js', mmSrc.replace(m1Needle, "      if (next.state === cur) { if (emit) this._emit({ op: 'edit', id: hit.card.id, fields: { helperAsks: hit.card.helperAsks } }); return true; }\n"), 'extra-redraw');
+  const mmMut = M13.write('src/message-manager.js', editAnchor(mmSrc, m1Needle, "      if (next.state === cur) { if (emit) this._emit({ op: 'edit', id: hit.card.id, fields: { helperAsks: hit.card.helperAsks } }); return true; }\n", "src/message-manager.js"), 'extra-redraw');
   check('⑬ (r4) the m1 patch site exists', mmSrc.includes(m1Needle));
   const nMutPath = M13.write('src/normalizers.js', read('src/normalizers.js').replace("require('./message-manager')", `require(${JSON.stringify(mmMut)})`), 'on-extra-redraw');
   const NMut = require(nMutPath);
-  const HAonNMut = M13.load('src/server/helper-asks.js', haEngineSrc.replace("require('../normalizers')", `require(${JSON.stringify(nMutPath)})`), 'ha-on-extra-redraw');
+  const HAonNMut = M13.load('src/server/helper-asks.js', editAnchor(haEngineSrc, "require('../normalizers')", `require(${JSON.stringify(nMutPath)})`, "src/server/helper-asks.js"), 'ha-on-extra-redraw');
   const wm1 = await engineWalk({ seed: 20260927, steps: 600, MM: require(mmMut).MessageManager, Nmod: NMut, HAmod: HAonNMut, tag: 'walk-m1' });
   check(`⑬ (r4) CONTROL m1: a normalizer that redraws an unmoved ask — the r3 oracle is BLIND (${wm1.violations.length} violations) while the effect oracle names the extra helperAsks edits on cells the table calls nothing (${wm1.effectViolations.length})`, wm1.violations.length === 0 && wm1.effectViolations.some((x) => /helperAsks edit\(s\) on the card of an ask that did not move/.test(x)), { old: wm1.violations.slice(0, 2), fx: wm1.effectViolations.slice(0, 3) });
   // m2: the engine writes the session meta on EVERY sync (the r3 "only when changed" guard removed)
   const m2Needle = '  if (prevKey === key) { session._helperAskedAtKey = key; return; }\n';
   check('⑬ (r4) the m2 patch site exists', haEngineSrc.includes(m2Needle));
-  const HAm2 = M13.load('src/server/helper-asks.js', haEngineSrc.replace(m2Needle, '  void prevKey;\n'), 'extra-meta-write');
+  const HAm2 = M13.load('src/server/helper-asks.js', editAnchor(haEngineSrc, m2Needle, '  void prevKey;\n', "src/server/helper-asks.js"), 'extra-meta-write');
   const wm2 = await engineWalk({ seed: 20260927, steps: 400, HAmod: HAm2, tag: 'walk-m2' });
   check(`⑬ (r4) CONTROL m2: an engine writing the session meta on every sync — the r3 oracle is BLIND (${wm2.violations.length}) while the effect oracle names the writes on steps that changed nothing (${wm2.effectViolations.length})`, wm2.violations.length === 0 && wm2.effectViolations.some((x) => /session-meta writes 1, the waiting set did not change/.test(x)), { old: wm2.violations.slice(0, 2), fx: wm2.effectViolations.slice(0, 3) });
   check('⑬ the copies live outside the tree', M13.files.every((f) => !f.startsWith(REPO)));
@@ -1169,7 +1169,7 @@ console.log('⑯ (r3) the 60 s clock across a restart: filed from the persisted 
       const haSrc16 = read('src/server/helper-asks.js');
       const needle16 = '  const keyOf = (m) => JSON.stringify(Object.keys(m || {}).sort().map((k) => [k, m[k]]));\n';
       check('⑯ (r4) the control\'s patch site exists', haSrc16.includes(needle16));
-      const HAord = M16.load('src/server/helper-asks.js', haSrc16.replace(needle16, '  const keyOf = (m) => JSON.stringify(m || {});\n'), 'ordered-key');
+      const HAord = M16.load('src/server/helper-asks.js', editAnchor(haSrc16, needle16, '  const keyOf = (m) => JSON.stringify(m || {});\n', "src/server/helper-asks.js"), 'ordered-key');
       let ctlWrites = 0;
       HAord.install({ userTodos: todos, sessionKeyFor: (x, id) => `claude:${id}`, activeSessions: act, log: { log() {}, warn() {} }, persistAskedAt: () => { ctlWrites++; } });
       const sTie2 = { _normalizer: new MessageManager('sess-clk-tie2'), _subNormalizers: new Map(), _taskRecords: s._taskRecords, _webuiId: 'sess-clk-tie2', backend: 'claude', mode: 'chat', buffer: '', _helperAskedAt: { ...tieMap } };
@@ -1256,7 +1256,7 @@ console.log('⑰ (r3/r4) the takeover sweep: a helper\'s pending browser approva
   check('⑰ wiring: the announcer is handed `pendingHelpers` (normalizers.pendingHelperApprovals) beside `pending`; the sweep reads both lists and judges a helper ask by the child handle its witness bound (session._browserHelpers), answering through helper-asks.answerFrame with serverDeny', /pendingHelpers: \(session\) => N\.pendingHelperApprovals\(session\)/.test(mw) && /approvals\.pendingHelpers\(sess\.s\)/.test(bh) && /for \(const p of \[\.\.\.pend, \.\.\.helpers\]\)/.test(bh) && /sess\.s\._browserHelpers/.test(bh) && /if \(r && r\.ok\)/.test(bh) && /function pendingHelperApprovals\(session\)/.test(nm) && /pendingHelperApprovals,/.test(nm));
   // CONTROL: the r3 sweep (main cards only) in a patched copy — the Bash helper's click stays pending at the parent's takeover
   const M17 = mutantCopies('helper-ask-r4-sweep', REPO);
-  const ctlSrc = bh.replace('for (const p of [...pend, ...helpers]) {', 'for (const p of pend) {');
+  const ctlSrc = editAnchor(bh, 'for (const p of [...pend, ...helpers]) {', 'for (const p of pend) {', "src/server/browser-handback.js");
   check('⑰ the control\'s patch site exists', ctlSrc !== bh);
   const BHctl = M17.load('src/server/browser-handback.js', ctlSrc, 'main-cards-only');
   {
@@ -1385,7 +1385,7 @@ console.log('⑱b (r5) the sentence census: every row drives the real rebuild; a
   const mmSrc = read('src/message-manager.js');
   const needle = '    return permissionOutcome(outputText, isError).outcome;\n';
   check('⑱b the patch site exists', mmSrc.includes(needle));
-  const mmOpen = M18.write('src/message-manager.js', mmSrc.replace(needle, "    if (!isError) return 'allowed';\n    return /user (doesn'?t want|rejected|declined|chose not)/i.test(outputText || '') ? 'denied' : 'allowed';\n"), 'fail-open');
+  const mmOpen = M18.write('src/message-manager.js', editAnchor(mmSrc, needle, "    if (!isError) return 'allowed';\n    return /user (doesn'?t want|rejected|declined|chose not)/i.test(outputText || '') ? 'denied' : 'allowed';\n", "src/message-manager.js"), 'fail-open');
   const nOpen = require(M18.write('src/normalizers.js', read('src/normalizers.js').replace("require('./message-manager')", `require(${JSON.stringify(mmOpen)})`), 'on-fail-open'));
   const MMOpen = require(mmOpen).MessageManager;
   const onCopy = (text) => { const x = replay(MMOpen, nOpen, { upto: idxOf(fetchAsk) + 1, id: 'sess-open' }); nOpen.noteHelperResults(x, toolResultRec(fetchAsk, false, text)); return HA.settledState(x, fetchAsk.request_id); };
@@ -1455,7 +1455,7 @@ console.log('⑱d (2.1.314) a call stopped while it ran: the main card patched t
   check('⑱d (r2) EVERY word of the census (' + PO.PERMISSION_OUTCOMES.join(' · ') + ') on a main card reads a member of the table\'s states — the request is settled, a press writes nothing; a census word is never «unknown here, the CLI decides»', Object.values(perWord).every(([st, wr]) => H.ASK_STATES.includes(st) && wr === false), perWord);
   const MP = mutantCopies('helper-ask-314-press', REPO), haSrc9 = read('src/server/helper-asks.js');
   const NEEDLE9 = 'return !p.resolved ? H.ASK_INITIAL : mainCardState(String(p.resolved));';
-  const HAP = haSrc9.includes(NEEDLE9) ? MP.load('src/server/helper-asks.js', haSrc9.replace(NEEDLE9, 'return !p.resolved ? H.ASK_INITIAL : (H.ASK_STATES.includes(String(p.resolved)) ? String(p.resolved) : null);'), 'r1-closed-vocabulary') : null;
+  const HAP = haSrc9.includes(NEEDLE9) ? MP.load('src/server/helper-asks.js', editAnchor(haSrc9, NEEDLE9, 'return !p.resolved ? H.ASK_INITIAL : (H.ASK_STATES.includes(String(p.resolved)) ? String(p.resolved) : null);', "src/server/helper-asks.js"), 'r1-closed-vocabulary') : null;
   const XP = HAP && press2(HAP, 'sess-s9-xp');
   check('⑱d (r2) RED CONTROL: on a copy with r1\'s closed vocabulary (a word outside ASK_STATES ⇒ null) the stopped card is «unknown here» and the SECOND press is WRITTEN to stdin', !!XP && XP.resolved === 'stopped' && XP.st === null && XP.p2.ok === true && XP.written === 2, XP);
   check('⑱d (r2) the press copies live outside the tree', MP.files.length === 1 && MP.files.every((f) => !f.startsWith(REPO)));
@@ -1476,7 +1476,7 @@ console.log('⑱d (2.1.314) a call stopped while it ran: the main card patched t
   const poSrc = read('src/permission-outcome.js'), a = poSrc.indexOf('  // ── a call that RAN, stopped while it ran'), b = poSrc.indexOf('  // ── the CLI itself says UNKNOWN ──');
   const poMut = a > 0 && b > a ? MX.write('src/permission-outcome.js', poSrc.slice(0, a) + poSrc.slice(b), 'no-m9t') : null;
   const mmSrcX = read('src/message-manager.js'), REQ_PO = "require('./permission-outcome.js')";
-  const MMX = poMut && mmSrcX.split(REQ_PO).length === 2 ? require(MX.write('src/message-manager.js', mmSrcX.replace(REQ_PO, 'require(' + JSON.stringify(poMut) + ')'), 'mm-no-m9t')).MessageManager : null;
+  const MMX = poMut && mmSrcX.split(REQ_PO).length === 2 ? require(MX.write('src/message-manager.js', editAnchor(mmSrcX, REQ_PO, 'require(' + JSON.stringify(poMut) + ')', "src/message-manager.js"), 'mm-no-m9t')).MessageManager : null;
   const xl = MMX && live(MMX, [use, ask, allow, res()], 'sess-s9-x'), xr = MMX && rebuilt(MMX, [use, ask, res()], 'sess-s9-xr'), xb = MMX && bl(MMX, M9.text, 'sess-s9-xb');
   check('⑱d RED CONTROL: on a copy with the .366 table (no m9t row) the same records read «denied» on a rebuild with no record, the live card is never patched (allowed), and the bypass line says the CLI did not run a call that ran; the tool card gets no stopped mark', !!xl && xl.seen.join() === ',,allowed,allowed' && !!xr && xr.resolved === 'denied' && !!xb && xb.level === 'warning' && !cardOf(xl.mm)[0].content[0].stoppedWhileRunning, { xl: xl && xl.seen, xr, xb: xb && xb.level });
   check('⑱d the copies live outside the tree', MX.files.every((f) => !f.startsWith(REPO)));
@@ -1536,7 +1536,7 @@ console.log('⑱c (r5) the WebFetch provenance re-ask (a fresh tool_use_id) bind
   const mmSrc = read('src/message-manager.js');
   const needle = '    if (!existing) existing = this._provenanceReaskCard(raw.request);\n';
   check('⑱c the patch site exists', mmSrc.includes(needle));
-  const mmNo = M18c.write('src/message-manager.js', mmSrc.replace(needle, ''), 'no-binding');
+  const mmNo = M18c.write('src/message-manager.js', editAnchor(mmSrc, needle, '', "src/message-manager.js"), 'no-binding');
   const NNo = require(M18c.write('src/normalizers.js', read('src/normalizers.js').replace("require('./message-manager')", `require(${JSON.stringify(mmNo)})`), 'on-no-binding'));
   const sN = replay(require(mmNo).MessageManager, NNo, { upto: 1, id: 'sess-prov-ctl' });
   NNo.feedLive(sN, { type: 'assistant', message: { id: 'm-pc', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_main_wf', name: 'WebFetch', input: { url: URL_, prompt: 'summarise' } }] }, uuid: 'u-pc' });
@@ -1653,7 +1653,7 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
     check('⑱f ONE line per record, by its uuid: a live record held in the rebuild\'s queue beside the kept one draws one line, and so does the record arriving after a rebuild that placed it', linesOf(raced._normalizer).length === 1 && linesOf(livedFirst._normalizer).length === 1, { raced: linesOf(raced._normalizer).length, lived: linesOf(livedFirst._normalizer).length });
     const mmSrc = read('src/message-manager.js'), DEDUPE = mmSrc.split('\n').filter((l) => l.includes('this._writesLostSeen || (this._writesLostSeen = new Set())'));
     const MXd = mutantCopies('helper-ask-319-r2', REPO);
-    const MMnoDedupe = DEDUPE.length === 1 ? require(MXd.write('src/message-manager.js', mmSrc.replace(DEDUPE[0] + '\n', ''), 'no-dedupe')).MessageManager : null;
+    const MMnoDedupe = DEDUPE.length === 1 ? require(MXd.write('src/message-manager.js', editAnchor(mmSrc, DEDUPE[0] + '\n', '', "src/message-manager.js"), 'no-dedupe')).MessageManager : null;
     const twice = MMnoDedupe && new MMnoDedupe('w-x'); if (twice) { twice.replay(rec(), { at: t0 }); twice.processLive(rec()); }
     check('⑱f RED CONTROL: a copy without the uuid check draws the same record twice', !!twice && linesOf(twice).length === 2, twice && linesOf(twice).length);
     store.note(rec({ uuid: 'u-swl-2', error_code: 'EDQUOT' }));
@@ -1874,23 +1874,23 @@ console.log('⑳ (r6) what you approve is what runs: the helper card shows the W
   const haSrc = read('src/server/helper-asks.js');
   const needle6 = 'answerFromRecord(recordOf(target.session, data.requestId), { ...data, denyMessage: undefined })';
   check('⑳ the F6 patch site exists', haSrc.includes(needle6));
-  const HA6 = M20.load('src/server/helper-asks.js', haSrc.replace(needle6, '{ ok: true, data: { ...data, denyMessage: undefined } }'), 'f6-client-frame');
+  const HA6 = M20.load('src/server/helper-asks.js', editAnchor(haSrc, needle6, '{ ok: true, data: { ...data, denyMessage: undefined } }', "src/server/helper-asks.js"), 'f6-client-frame');
   const C6 = legs(HA6);
   check('⑳ F6 CONTROL: answerFrame writing the CLIENT\'s frame (the pre-r6 path) writes the forged `rm -rf ~` and the forged updates — the F6 cells go red', C6.main === false && JSON.stringify(C6.mainResp.updatedInput) === JSON.stringify(FORGED) && C6.helper === false && C6.stash === false && C6.unknown === false, C6.mainResp);
   const hSrc = read('src/helper-ask.js');
   const n3 = "if (typeof i.command === 'string' && i.command) return { kind: 'command', text: i.command };";
-  const H3 = hSrc.includes(n3) ? M20.load('src/helper-ask.js', hSrc.replace(n3, "if (typeof i.command === 'string' && i.command) return { kind: 'command', text: String(i.command).split('\\n')[0].trim().slice(0, 200) };"), 'f3-first-line') : null;
+  const H3 = hSrc.includes(n3) ? M20.load('src/helper-ask.js', editAnchor(hSrc, n3, "if (typeof i.command === 'string' && i.command) return { kind: 'command', text: String(i.command).split('\\n')[0].trim().slice(0, 200) };", "src/helper-ask.js"), 'f3-first-line') : null;
   check('⑳ F3 CONTROL: a first-line subject (the pre-r6 askTarget rule) loses `curl … | sh` from the card and the For-you detail — the F3 cells go red', !!H3 && H3.askSubject(two).text === 'ls -la' && !H3.inboxItemFor(two, { label: 'f' }).detail.includes('curl -s https://evil') && !H3.inboxItemFor(long).detail.includes('rm -rf ~/x'));
   const U = (h) => String.fromCharCode(92) + 'u' + h; // the regex SOURCE's escapes, spelled without writing one here
   // verify-r6 Z2: the set lives in src/hidden-chars.js (helper-ask delegates); the control drops the format class
   // (\p{Cf} — the bidi controls, the zero-width characters) from THAT set and points a helper-ask copy at it
   const hcSrc = read('src/hidden-chars.js');
   const nCf = String.fromCharCode(92) + 'p{Cf}';
-  const hcCopy = hcSrc.includes(nCf) ? M20.write('src/hidden-chars.js', hcSrc.replace(nCf, ''), 'f7-no-cf') : null;
-  const H7 = hcCopy && hSrc.includes("require('./hidden-chars.js')") ? M20.load('src/helper-ask.js', hSrc.replace("require('./hidden-chars.js')", `require(${JSON.stringify(hcCopy)})`), 'f7-no-bidi') : null;
+  const hcCopy = hcSrc.includes(nCf) ? M20.write('src/hidden-chars.js', editAnchor(hcSrc, nCf, '', "src/hidden-chars.js"), 'f7-no-cf') : null;
+  const H7 = hcCopy && hSrc.includes("require('./hidden-chars.js')") ? M20.load('src/helper-ask.js', editAnchor(hSrc, "require('./hidden-chars.js')", `require(${JSON.stringify(hcCopy)})`, "src/helper-ask.js"), 'f7-no-bidi') : null;
   check('⑳ F7 CONTROL: a screen without the bidi ranges lets the Trojan line through unmarked — the F7 cells go red', !!H7 && !H7.hiddenCharsOf(troj.input).includes('U+202E') && H7.revealHidden('a' + RLO).includes(RLO));
   const n7b = "return (Number(now) || 0) - Number(armedAt) < gapMs ? 'early' : 'go';";
-  const H7b = hSrc.includes(n7b) ? M20.load('src/helper-ask.js', hSrc.replace(n7b, "return 'go';"), 'f7-one-gesture') : null;
+  const H7b = hSrc.includes(n7b) ? M20.load('src/helper-ask.js', editAnchor(hSrc, n7b, "return 'go';", "src/helper-ask.js"), 'f7-one-gesture') : null;
   check('⑳ F7 CONTROL: a verdict without the gap lets a double click be the "second press" — the F7 press cell goes red', !!H7b && H7b.secondPressVerdict(t0, t0 + 120) === 'go');
   check('⑳ the copies live outside the tree', M20.files.length >= 4 && M20.files.every((f) => !f.startsWith(REPO)));
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
@@ -1931,7 +1931,7 @@ console.log('㉑ (B-63f1) the launch ack as the transcript holds it — a text-b
   // NEGATIVE CONTROL: the pre-fix normalizer read the card's JSON
   const M21 = mutantCopies('helper-ask-b63f1', REPO);
   const mmSrc = read('src/message-manager.js');
-  const pre = mmSrc.replace('const ackText = toolResultText(tr.content);', 'const ackText = resultText;');
+  const pre = editAnchor(mmSrc, 'const ackText = toolResultText(tr.content);', 'const ackText = resultText;', "src/message-manager.js");
   check('㉑ (the pre-fix patch applied)', pre !== mmSrc);
   const Lp = launches(M21.load('src/message-manager.js', pre, 'pre-b63f1').MessageManager);
   check('㉑ NEGATIVE CONTROL: the pre-fix normalizer (the card\'s JSON) leaves every rebuilt launch card without its helper', Lp.length === acks.length && Lp.every((x) => x.got === null && !x.mapped), Lp);

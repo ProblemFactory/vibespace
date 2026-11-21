@@ -426,7 +426,7 @@ const world = (() => {
   const M5 = mutantCopies('chan-lark-facts', REPO);
   const srcL5 = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
   const DOOR = 'const v = validateFacts(fs0.map((f, i) => (i === vi ? { ...f, v: { ...f.v, name: nm } } : f)));';
-  const noDoor = srcL5.replace(DOOR, 'const v = { ok: true, facts: fs0.map((f, i) => (i === vi ? { ...f, v: { ...f.v, name: nm } } : f)) };');
+  const noDoor = editAnchor(srcL5, DOOR, 'const v = { ok: true, facts: fs0.map((f, i) => (i === vi ? { ...f, v: { ...f.v, name: nm } } : f)) };', "src/channels/lark.js");
   const modN = M5.load('src/channels/lark.js', noDoor, 'view-nodoor');
   const st3 = modN.toRecord('lark', C, appIt('om_v5', 'cli_facts_evil_q9'));
   modN.toRecord('lark', C, { ...real(base), message_id: 'om_v6', mentions: [{ key: '@_user_1', id: 'cli_facts_evil_q9', id_type: 'app_id', name: BAD }] });
@@ -434,7 +434,7 @@ const world = (() => {
   // TWO doors stand in front of that chip: the app-name cache judges a name when it is remembered (D3 / lark-search-poll
   // ④g), and the rename runs the record's validator. Either one alone holds; both removed, the raw name is stored.
   const REMEMBER = 'APP_NAMES.set(id, { name: name ? (peerName(name, 200) || null) : null,';
-  const noDoors = noDoor.replace(REMEMBER, 'APP_NAMES.set(id, { name: name ? (name || null) : null,');
+  const noDoors = editAnchor(noDoor, REMEMBER, 'APP_NAMES.set(id, { name: name ? (name || null) : null,', "src/channels/lark.js");
   const modN2 = M5.load('src/channels/lark.js', noDoors, 'view-nodoors');
   const st4 = modN2.toRecord('lark', C, appIt('om_v7', 'cli_facts_evil_r1'));
   modN2.toRecord('lark', C, { ...real(base), message_id: 'om_v8', mentions: [{ key: '@_user_1', id: 'cli_facts_evil_r1', id_type: 'app_id', name: BAD }] });
@@ -543,7 +543,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   ok(/if \(refreshing\) \{ await refreshing; return accessToken\(depth \+ 1\); \}/.test(src) && /refreshing = refreshAccessToken\(cred, token\)\.finally/.test(src) && /cur\.refresh_token \|\| ''\) === String\(token\.refresh_token/.test(src), 'the refresh is SINGLE-FLIGHT and a refused refresh stamps invalidGrantAt only while the stored token is still the one it tried');
   // NEGATIVE CONTROLS (patched copies in scratch, never src/)
   const M = mutantCopies('chan-lark-gate', REPO);
-  const unpaced = src.replace("      await pace(1);   // lane R5 verify r4: a send is a vendor request like any other — paced, then metered (it was neither)\n      let win = _windowOf ? _windowOf() : null;   // r4 (B-0207): a file's message after a landed retry reads the budget here (none left: thrown, nothing metered or sent)\n      meter(1);\n      if (bearerExpired()) { at0 = await accessToken(); if (_windowOf) win = _windowOf(); }   // verify r5: an expired bearer is refreshed before the send, never sent; r4 r1: the window read again after the refresh\n      const at = bearerNow(at0);", "      let win = _windowOf ? _windowOf() : null;\n      const at = at0;");   // B-0207 moved the window read in: the copy keeps it, drops pace + meter + the refresh
+  const unpaced = editAnchor(src, "      await pace(1);   // lane R5 verify r4: a send is a vendor request like any other — paced, then metered (it was neither)\n      let win = _windowOf ? _windowOf() : null;   // r4 (B-0207): a file's message after a landed retry reads the budget here (none left: thrown, nothing metered or sent)\n      meter(1);\n      if (bearerExpired()) { at0 = await accessToken(); if (_windowOf) win = _windowOf(); }   // verify r5: an expired bearer is refreshed before the send, never sent; r4 r1: the window read again after the refresh\n      const at = bearerNow(at0);", "      let win = _windowOf ? _windowOf() : null;\n      const at = at0;", "src/channels/lark.js");   // B-0207 moved the window read in: the copy keeps it, drops pace + meter + the refresh
   M.write('src/channels/lark.js', unpaced, 'send-unpaced');
   const cu = gateCensus(unpaced, { gateRe: GATE, ungatedIds: ids });
   ok(unpaced !== src && cu.problems.filter((x) => /gated-inline 'send(-reply)?' has no 'await pace\('/.test(x)).length === 2, 'CONTROL: the P4 send (no pace, no meter) is RED on both send forms', cu.problems.join(' ; '));
@@ -551,7 +551,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   M.write('src/channels/lark.js', bare, 'bare-call');
   const cb = gateCensus(bare, { gateRe: GATE, ungatedIds: ids });
   ok(bare !== src && cb.problems.some((x) => /no marker/.test(x) && /lark bot info/.test(x)), 'CONTROL: a copy with one more callJson (a bot-info read, no marker) is RED on that line', cb.problems.join(' ; '));
-  const renamed = src.replace('// ungated: integration-test', '// ungated: integration-test-2');
+  const renamed = editAnchor(src, '// ungated: integration-test', '// ungated: integration-test-2', "src/channels/lark.js");
   M.write('src/channels/lark.js', renamed, 'unknown-id');
   const cr = gateCensus(renamed, { gateRe: GATE, ungatedIds: ids });
   ok(renamed !== src && cr.problems.some((x) => /'integration-test-2' has no UNGATED row/.test(x)), 'CONTROL: a marker whose id UNGATED does not name is RED', cr.problems.join(' ; '));
@@ -627,7 +627,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   {
     const r = await raceReauthL(reg);
     ok(r.arrived && r.rs.every((x) => x === 'ok') && r.held === 'ur-reauth' && r.bearers.join() === 'Bearer u-REAUTH' && r.writes === 1, `(d) a re-authorize landing during the refresh: the held token is the re-authorize's (${r.held}), the late (rotated) refresh wrote nothing, its 5 callers carried the new bearer`, JSON.stringify(r));
-    const r4 = src.replace("    const { token: cur, why: curWhy } = readToken();\n    // r3: a vault locked while the POST was in flight — the vendor ROTATED the token, the store cannot take it now: it is held\n    // in memory (as an unsaved write) and written at the first read after the unlock; the request hears `vault-locked`\n    if (!cur && vaultLockedWhy(curWhy)) { unsaved = { token: next, supersedes: String(token.refresh_token || '') }; throw notConnectedError('Lark', curWhy); }\n    if (!cur) throw new ChannelError('auth-expired', 'Lark was disconnected while its token was refreshed — the refreshed token was discarded, the request was not sent', { retryable: false, detail: { tokenDropped: true } });\n    if (String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;\n    const w = await persistToken(next, String(token.refresh_token || ''));   // verify r6: the door's compare-and-swap — superseded at apply time ⇒ nothing written, the caller re-reads\n    if (w && w.superseded) return null;", '    await persistToken(next);');
+    const r4 = editAnchor(src, "    const { token: cur, why: curWhy } = readToken();\n    // r3: a vault locked while the POST was in flight — the vendor ROTATED the token, the store cannot take it now: it is held\n    // in memory (as an unsaved write) and written at the first read after the unlock; the request hears `vault-locked`\n    if (!cur && vaultLockedWhy(curWhy)) { unsaved = { token: next, supersedes: String(token.refresh_token || '') }; throw notConnectedError('Lark', curWhy); }\n    if (!cur) throw new ChannelError('auth-expired', 'Lark was disconnected while its token was refreshed — the refreshed token was discarded, the request was not sent', { retryable: false, detail: { tokenDropped: true } });\n    if (String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;\n    const w = await persistToken(next, String(token.refresh_token || ''));   // verify r6: the door's compare-and-swap — superseded at apply time ⇒ nothing written, the caller re-reads\n    if (w && w.superseded) return null;", '    await persistToken(next);', "src/channels/lark.js");
     ok(r4 !== src, 'CONTROL fixture: the write-only-while-current guard was removed from a copy');
     const modR4 = M.load('src/channels/lark.js', r4, 'r4-write'); const rg4 = CH.createChannelRegistry(); rg4.register(modR4.adapter);
     const c = await raceReauthL(rg4);
@@ -659,7 +659,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
     ok(g.first && g.first.code === 'auth-expired' && g.first.detail.cause === 'refresh-refused', 'the recorded invalid_grant (20003, already auth-expired) carries its cause too');
     const rl = await deadRefresh(reg, { status: 429, body: { code: 99991400, msg: 'request trigger frequency limit' } });
     ok(rl.first && rl.first.code === 'rate-limited' && !rl.stamp.invalidGrantAt, `CONTROL: a RATE refusal of the refresh stays rate-limited, nothing stamped (${rl.first && rl.first.code})`);
-    const cut = src.replace('      e = refreshFailure(e);   // lane channel-reauth-visible: 20064 & co. are a dead grant at the FIRST answer, never 3 vendor-errors\n', '');
+    const cut = editAnchor(src, '      e = refreshFailure(e);   // lane channel-reauth-visible: 20064 & co. are a dead grant at the FIRST answer, never 3 vendor-errors\n', '', "src/channels/lark.js");
     ok(cut !== src, 'CONTROL fixture: the dead-refresh mapping removed from a copy');
     const rgC = CH.createChannelRegistry(); rgC.register(M.load('src/channels/lark.js', cut, 'no-dead-refresh').adapter);
     const c = await deadRefresh(rgC, R20064);
@@ -718,7 +718,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   {
     const r = await coalesce(reg);
     ok(r.r1 === 'ok' && r.rx === 'ok' && r.ry === 'ok' && r.held === 'ur-rot-2' && !r.retired.includes(r.held) && r.rz === 'ok' && r.state === 'connected', `(h) a later token's persist queued behind an in-flight flush of the earlier one: the store ends with the LIVE token (${r.held}; retired ${r.retired.join(',')}), the next refresh ok, connected`, JSON.stringify(r));
-    const r5 = src.replace(src.slice(src.indexOf('  let persisting = null;'), src.indexOf('  async function refreshAccessToken')), "  let persisting = null;   // ONE write in flight: the waiters of a refresh each re-enter accessToken() and must not each re-write\n  function persistToken(next) {\n    if (persisting) return persisting;\n    persisting = (async () => {\n      const raw = tokens.read(); const storeRt = raw && raw.token ? String(raw.token.refresh_token || '') : '';\n      try { await tokens.write(next, { expiresAt: next.refreshExpiresAt, scopes: next.scopes }); unsaved = null; }\n      catch (e) {\n        unsaved = { token: next, supersedes: storeRt };\n        log.warn && log.warn(`[channels] lark: the refreshed token could not be persisted (${(e && e.message) || e}) \u2014 held in memory and written again at the next request`);\n      }\n    })().finally(() => { persisting = null; });\n    return persisting;\n  }" + '\n');
+    const r5 = editAnchor(src, src.slice(src.indexOf('  let persisting = null;'), src.indexOf('  async function refreshAccessToken')), "  let persisting = null;   // ONE write in flight: the waiters of a refresh each re-enter accessToken() and must not each re-write\n  function persistToken(next) {\n    if (persisting) return persisting;\n    persisting = (async () => {\n      const raw = tokens.read(); const storeRt = raw && raw.token ? String(raw.token.refresh_token || '') : '';\n      try { await tokens.write(next, { expiresAt: next.refreshExpiresAt, scopes: next.scopes }); unsaved = null; }\n      catch (e) {\n        unsaved = { token: next, supersedes: storeRt };\n        log.warn && log.warn(`[channels] lark: the refreshed token could not be persisted (${(e && e.message) || e}) \u2014 held in memory and written again at the next request`);\n      }\n    })().finally(() => { persisting = null; });\n    return persisting;\n  }" + '\n', "src/channels/lark.js");
     ok(r5 !== src && /if \(persisting\) return persisting;/.test(r5), 'CONTROL fixture: the r5 single-flight persist restored in a copy');
     const mod5 = M.load('src/channels/lark.js', r5, 'r5-persist'); const rg5 = CH.createChannelRegistry(); rg5.register(mod5.adapter);
     const c = await coalesce(rg5);
@@ -847,7 +847,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
     const srcL = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     const BELT = "    if (replyTo) {\n      const a = replyAnchor && typeof replyAnchor === 'object' ? replyAnchor : null;";
     ok(srcL.split(BELT).length === 2, 'the belt is present once (the control disables exactly it)');
-    const larkNo = Mf1.load('src/channels/lark.js', srcL.replace(BELT, "    if (false) {\n      const a = replyAnchor && typeof replyAnchor === 'object' ? replyAnchor : null;"), 'no-anchor-belt');
+    const larkNo = Mf1.load('src/channels/lark.js', editAnchor(srcL, BELT, "    if (false) {\n      const a = replyAnchor && typeof replyAnchor === 'object' ? replyAnchor : null;", "src/channels/lark.js"), 'no-anchor-belt');
     const regNo = CH.createChannelRegistry(); regNo.register(larkNo.adapter);
     const vNo = mkVendor(); const tokNo = mkTokens();
     tokNo.st.token = { access_token: 'u-access-0001', expiresAt: now() + 7200e3, refresh_token: 'ur-refresh-0001', refreshExpiresAt: now() + 2592000e3, scopes: SEND, openId: 'ou_member_a', name: 'Member A' };
@@ -1026,7 +1026,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   const WALK = '      if (got.refused && got.code === RESOURCE_NOT_IN_MESSAGE) {\n';
   ok(LSRC.split(WALK).length === 2, 'control setup: the 234003 walk is present once');
   const MF = mutantCopies('lark-fbac', REPO);
-  const Pre = mk(MF.load('src/channels/lark.js', LSRC.replace(WALK, '      if (false) {\n'), 'release-fetch'));
+  const Pre = mk(MF.load('src/channels/lark.js', editAnchor(LSRC, WALK, '      if (false) {\n', "src/channels/lark.js"), 'release-fetch'));
   const ep = await threw(() => Pre.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_quoted', mime: 'image/*' }));
   ok(ep && /File not in message\. \(234003\)/.test(ep.message) && JF(Pre.got) === JF(['om_reply']), 'RED CONTROL: the release\'s fetch asks the reply alone and fails with the vendor\'s line — the incident; the first leg is red on it', ep && ep.message);
   for (const x of copiesCensus(MF.files, MF.dir, REPO, { minCopies: 1, label: 'B-fbac ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
@@ -1073,7 +1073,7 @@ console.log('\n⑨ what we sent never comes back in our words (verify r4)');
   const srcL = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
   const SCRUB = "  if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));";
   ok(srcL.split(SCRUB).length === 2, 'CONTROL setup: the scrub line is present once');
-  const lm = M9.load('src/channels/lark.js', srcL.replace(SCRUB, "  if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, parsed, what, retryAfterSeconds(r.headers));"), 'unscrubbed');
+  const lm = M9.load('src/channels/lark.js', editAnchor(srcL, SCRUB, "  if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, parsed, what, retryAfterSeconds(r.headers));", "src/channels/lark.js"), 'unscrubbed');
   const rc = await drive(lm);
   ok(String(rc.pb.error).includes(SECRET) && all(rc.e1).includes(SECRET), 'CONTROL: a copy that hands the body over unscrubbed words the echoed secret into the refusal — the checks above would be red');
   for (const c of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
@@ -1093,7 +1093,7 @@ console.log('\n⑩ a body the reader cannot read is its words, never a throw (la
   const srcL = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
   const G = '  try { return Blocks.quoteTags(textOfRaw(item)); } catch {';
   ok(srcL.split(G).length === 2, 'CONTROL setup: the guard line is present once');
-  const unguarded = srcL.replace(G, '  if (true) return Blocks.quoteTags(textOfRaw(item)); {');
+  const unguarded = editAnchor(srcL, G, '  if (true) return Blocks.quoteTags(textOfRaw(item)); {', "src/channels/lark.js");
   const lm = MG.load('src/channels/lark.js', unguarded, 'unguarded');
   let ce = null;
   try { lm.toRecord('lark', 'oc_g', it(), {}); } catch (x) { ce = x; }
@@ -1191,7 +1191,7 @@ console.log('\n⑩ lane channel-threads: the thread walk, reactions list / add /
     const srcS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     const SL = "    if (!continuing) { w = { stopAt: (stopAt ? String(stopAt) : null) || anchor || null, pageToken: null, newest: null, at: now(), count: 0, max: 0 }; w.max = w.stopAt ? FIRST_INGEST_MAX : firstMax; walks.set(wk, w); }";
     ok(srcS.split(SL).length === 2, 'CONTROL setup: the thread walk takes `stopAt` once');
-    const ls = MS.load('src/channels/lark.js', srcS.replace(SL, "    if (!continuing) { w = { stopAt: anchor || null, pageToken: null, newest: null, at: now(), count: 0, max: 0 }; w.max = w.stopAt ? FIRST_INGEST_MAX : firstMax; walks.set(wk, w); }"), 'no-stopat');
+    const ls = MS.load('src/channels/lark.js', editAnchor(srcS, SL, "    if (!continuing) { w = { stopAt: anchor || null, pageToken: null, newest: null, at: now(), count: 0, max: 0 }; w.max = w.stopAt ? FIRST_INGEST_MAX : firstMax; walks.set(wk, w); }", "src/channels/lark.js"), 'no-stopat');
     const rs = CH.createChannelRegistry(); rs.register(ls.adapter);
     const aS = rs.create('lark', { id: 'lark', options: {} }, { now, fetch: fetchFn, tokens, resolveIntegration: () => CRED, log: { warn() {} }, pace: async () => {}, meter: () => {} });
     const x1 = await aS.threadHistory(C, 'omt_x', { anchor: 'om_t4', stopAt: 'om_t1', limit: 50 });
@@ -1210,7 +1210,7 @@ console.log('\n⑩ lane channel-threads: the thread walk, reactions list / add /
     ok(fn === 5 && fg === 10 && !f.bounded, 'a depth past what the vendor holds walks to its last page — complete, NOT bounded (the thread\'s true start)', JSON.stringify({ fn, fg, bounded: f.bounded }));
     const DL = "    const max = Number(w.max) > 0 ? w.max : (w.stopAt ? FIRST_INGEST_MAX : firstMax);";
     ok(srcS.split(DL).length === 2, 'CONTROL setup: the walk reads the bound it started with once');
-    const lD = MS.load('src/channels/lark.js', srcS.replace(DL, '    const max = w.stopAt ? FIRST_INGEST_MAX : firstMax;'), 'no-depth-kept');
+    const lD = MS.load('src/channels/lark.js', editAnchor(srcS, DL, '    const max = w.stopAt ? FIRST_INGEST_MAX : firstMax;', "src/channels/lark.js"), 'no-depth-kept');
     const rD = CH.createChannelRegistry(); rD.register(lD.adapter);
     const dwc = await deepWalk(rD.create('lark', { id: 'lark', options: {} }, { now, fetch: fetchFn, tokens, resolveIntegration: () => CRED, log: { warn() {} }, pace: async () => {}, meter: () => {} }));
     ok(dwc.n === 5 && dwc.got === 10, `CONTROL: a walk that forgets its depth on the continuation call runs on to the vendor's last page (${dwc.n} calls for a depth of 4) — the leg above would be red`, JSON.stringify(dwc));
@@ -1225,7 +1225,7 @@ console.log('\n⑩ lane channel-threads: the thread walk, reactions list / add /
     const srcF = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     const LINE = "    const items = all.filter((m) => !m.chat_id || String(m.chat_id) === String(convId));";
     ok(srcF.split(LINE).length === 2, 'CONTROL setup: the chat_id filter is present once');
-    const lf = MF.load('src/channels/lark.js', srcF.replace(LINE, '    const items = all;'), 'no-chat-filter');
+    const lf = MF.load('src/channels/lark.js', editAnchor(srcF, LINE, '    const items = all;', "src/channels/lark.js"), 'no-chat-filter');
     const rf = CH.createChannelRegistry(); rf.register(lf.adapter);
     const af = rf.create('lark', { id: 'lark', options: {} }, { now, fetch: fetchFn, tokens, resolveIntegration: () => CRED, log: { warn() {} }, pace: async () => {}, meter: () => {} });
     const wfc = await af.threadHistory(C, 'omt_f', { anchor: null, limit: 50 });
@@ -1360,7 +1360,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     const srcR = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     const GATE = "WIDE_SCOPES.filter((x) => optionOf(record, 'reactions') === 'read' || !REACTIONS_READ_SCOPES.includes(x))";
     ok(srcR.split(GATE).length === 2, 'CONTROL setup: the wide group\'s reactions gate is spelled once');
-    const ro = await capture(MR.load('src/channels/lark.js', srcR.replace(GATE, 'WIDE_SCOPES.slice()'), 'wide-rx-ungated'), { reactions: 'off' });
+    const ro = await capture(MR.load('src/channels/lark.js', editAnchor(srcR, GATE, 'WIDE_SCOPES.slice()', "src/channels/lark.js"), 'wide-rx-ungated'), { reactions: 'off' });
     ok(ro.scopes.includes('im:message:readonly') && rxRead(ro.scopes), 'CONTROL — the wide group unfiltered (the lane as committed): reactions OFF asks im:message:readonly and its token reads who reacted — the assert above would be red');
     for (const r of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 1, label: 'chan-lark-wide-rx: ' })) ok(r.pass, r.name, r.detail); }
   const x1 = await dflt.exchange({ code: 'c', redirectUri: 'http://127.0.0.1:1/cb', cancelled: () => null, narrowed: [OPT] });
@@ -1373,7 +1373,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     const srcX = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     const DEF = "  { key: 'reactions', label: i18nKey('Reactions'), default: 'read',";
     ok(srcX.split(DEF).length === 2, 'CONTROL setup: the reactions option\'s default is spelled once');
-    const lx = MX.load('src/channels/lark.js', srcX.replace(DEF, "  { key: 'reactions', label: i18nKey('Reactions'), default: 'off',"), 'rx-default-off');
+    const lx = MX.load('src/channels/lark.js', editAnchor(srcX, DEF, "  { key: 'reactions', label: i18nKey('Reactions'), default: 'off',", "src/channels/lark.js"), 'rx-default-off');
     const c = await capture(lx, {});
     ok(!c.scopes.includes(OPT) && !c.optional.some((g) => g.includes(OPT)), 'CONTROL: a copy with the pre-ruling default ("off") asks the default consent WITHOUT the scope — the first assert of ⑪ would be red');
     for (const r of copiesCensus(MX.files, MX.dir, REPO, { minCopies: 1, label: 'chan-lark-rx-default: ' })) ok(r.pass, r.name, r.detail);
@@ -1670,7 +1670,7 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
     // lane lark-consent-chain: a chain's later page reuses the list its first page read (the read is still this one line)
     const READ = '        const app = at && at.page > 1 && appRead && now() - appRead.at < CHAIN_APP_READ_REUSE_MS ? appRead.v : await appUserScopes();\n';
     ok(srcP.split(READ).length === 2, 'CONTROL setup: the consent\'s read of the app\'s list is spelled once');
-    const np = await capture(require(MP.write('src/channels/lark.js', srcP.replace(READ, "        const app = { scopes: [], why: 'the pre-lane consent' };\n"), 'noread')), {}, vOwn);
+    const np = await capture(require(MP.write('src/channels/lark.js', editAnchor(srcP, READ, "        const app = { scopes: [], why: 'the pre-lane consent' };\n", "src/channels/lark.js"), 'noread')), {}, vOwn);
     ok(JSON.stringify(np.scopes) === JSON.stringify(FLOOR) && np.scopes.length < N, `CONTROL — the consent without the read (every release before): ${np.scopes.length} of the app's ${N} — the assert above would be red`);
     for (const r of copiesCensus(MP.files, MP.dir, REPO, { minCopies: 1, label: 'chan-lark-noread: ' })) ok(r.pass, r.name, r.detail); }
   ok(!all.scopes.some((x) => TENANT_ONLY.includes(x)), 'a TENANT-only permission (token_types tenant) is never asked of a user');
@@ -1709,7 +1709,7 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
     const MO = mutantCopies('chan-lark-optmax64', REPO);
     const srcO = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf-8');
     ok(srcO.split('const OPTIONAL_SCOPES_MAX = 200;').length === 2, 'CONTROL setup: the loopback bound is spelled once');
-    const OL64 = MO.load('src/oauth-loopback.js', srcO.replace('const OPTIONAL_SCOPES_MAX = 200;', 'const OPTIONAL_SCOPES_MAX = 64;'), 'max64');
+    const OL64 = MO.load('src/oauth-loopback.js', editAnchor(srcO, 'const OPTIONAL_SCOPES_MAX = 200;', 'const OPTIONAL_SCOPES_MAX = 64;', "src/oauth-loopback.js"), 'max64');
     const ol64 = OL64.createOAuthLoopback({ now, log: { warn() {}, log() {}, error() {} }, fixedCallbackUrl: `http://127.0.0.1:${await freePort()}/lark/cb` });
     try {
       const b64 = await capture(lark, {}, vendorOf(() => appRows([...FLOOR, ...MANY], [])), ol64);
@@ -1723,7 +1723,7 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
   { const MW = mutantCopies('chan-lark-appwait', REPO);
     const srcW = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     ok(lark.APP_SCOPES_WAIT_MS === 8000 && srcW.split('const APP_SCOPES_WAIT_MS = 8000;').length === 2, 'the wait for the app\'s list is 8 s, spelled once');
-    const lw = require(MW.write('src/channels/lark.js', srcW.replace('const APP_SCOPES_WAIT_MS = 8000;', 'const APP_SCOPES_WAIT_MS = 300;'), 'wait300'));
+    const lw = require(MW.write('src/channels/lark.js', editAnchor(srcW, 'const APP_SCOPES_WAIT_MS = 8000;', 'const APP_SCOPES_WAIT_MS = 300;', "src/channels/lark.js"), 'wait300'));
     const hung = await capture(lw, {}, vendorOf(() => [], { hang: true }));
     ok(JSON.stringify(hung.scopes) === JSON.stringify(FLOOR) && hung.warns.length === 1 && /no answer in 0\.3 s/.test(hung.warns[0]), 'a read that never answers: the page opens once the bound passes (a 300 ms copy) with the floor, said once');
     for (const r of copiesCensus(MW.files, MW.dir, REPO, { minCopies: 1, label: 'chan-lark-appwait: ' })) ok(r.pass, r.name, r.detail); }
@@ -1734,10 +1734,10 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
     const TYPE = " || !(Array.isArray(r.token_types) && r.token_types.includes('user'))) continue;";
     const MEDS = "const MINUTES_MEDIA_SCOPES = Object.freeze(['minutes:minutes.media:export']);";
     ok(srcC.split(TYPE).length === 2 && srcC.split(MEDS).length === 2, 'CONTROL setup: the read\'s user-type filter and the recording\'s scope are spelled once');
-    const lt = require(MC.write('src/channels/lark.js', srcC.replace(TYPE, ') continue;'), 'notype'));
+    const lt = require(MC.write('src/channels/lark.js', editAnchor(srcC, TYPE, ') continue;', "src/channels/lark.js"), 'notype'));
     const ct = await capture(lt, {}, vOwn);
     ok(TENANT_ONLY.every((x) => ct.scopes.includes(x)), 'CONTROL — the read without its user-type filter asks the tenant-only permissions of a user — the assert above would be red');
-    const lc = require(MC.write('src/channels/lark.js', srcC.replace(MEDS, "const MINUTES_MEDIA_SCOPES = Object.freeze(['minutes:minute:download']);"), 'closed'));
+    const lc = require(MC.write('src/channels/lark.js', editAnchor(srcC, MEDS, "const MINUTES_MEDIA_SCOPES = Object.freeze(['minutes:minute:download']);", "src/channels/lark.js"), 'closed'));
     const cc = await capture(lc, {}, vendorOf(() => [], { refuse: REFUSE_READ }));
     ok(cc.scopes.includes('minutes:minute:download') && cc.scopes.some((x) => CLOSED.includes(x)), 'CONTROL — the recording spelled with the closed minutes:minute:download: the floor names it (every new app would refuse the consent, 20027) — the guard above would be red');
     for (const r of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1, label: 'chan-lark-appfilters: ' })) ok(r.pass, r.name, r.detail); }
@@ -1909,7 +1909,7 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
     const MB = mutantCopies('chan-lark-page6k', REPO);
     const srcB = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     ok(srcB.split('const CONSENT_URL_MAX_BYTES = 3000;').length === 2, 'CONTROL setup: the page bound is spelled once');
-    const L6 = require(MB.write('src/channels/lark.js', srcB.replace('const CONSENT_URL_MAX_BYTES = 3000;', 'const CONSENT_URL_MAX_BYTES = 6144;'), 'page6k'));
+    const L6 = require(MB.write('src/channels/lark.js', editAnchor(srcB, 'const CONSENT_URL_MAX_BYTES = 3000;', 'const CONSENT_URL_MAX_BYTES = 6144;', "src/channels/lark.js"), 'page6k'));
     // the engine registers a vendor kind only when its registry lacks it — a registry holding the copy runs it as Lark
     const reg6 = CH.createChannelRegistry(); reg6.register(L6.adapter);
     APP.scopes = [...FLOOR, ...MANY]; pages.length = 0;   // enough permissions to fill a 6 KB page
@@ -2025,7 +2025,7 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
     const srcX = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     const BOUND = 'if (floor.length + page.length >= CONSENT_SCOPES_MAX || bytesOf([...floor, ...page, x]) > CONSENT_URL_MAX_BYTES) break;';
     ok(srcX.split(BOUND).length === 2, 'CONTROL setup: the page bound is spelled once in consentPage');
-    const LX = require(MX.write('src/channels/lark.js', srcX.replace(BOUND, 'if (floor.length + page.length >= CONSENT_SCOPES_MAX) break;'), 'nobound'));
+    const LX = require(MX.write('src/channels/lark.js', editAnchor(srcX, BOUND, 'if (floor.length + page.length >= CONSENT_SCOPES_MAX) break;', "src/channels/lark.js"), 'nobound'));
     const regX = CH.createChannelRegistry(); regX.register(LX.adapter);
     const { eng: eX, ol: olX, id } = await chainOwner('chain-nobound', ENG, { registry: regX });
     try {
@@ -2165,7 +2165,7 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
         const srcR = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
         const HELD = " && !heldLive.has(x)) };";
         ok(srcR.split(HELD).length === 2, 'CONTROL setup: the held token\'s subtraction is spelled once in the consent\'s source');
-        const m = await beginWith(require(MR.write('src/channels/lark.js', srcR.replace(HELD, ') };'), 'heldlack')), FLOOR, rowsWithout(X, 'omit'));
+        const m = await beginWith(require(MR.write('src/channels/lark.js', editAnchor(srcR, HELD, ') };', "src/channels/lark.js"), 'heldlack')), FLOOR, rowsWithout(X, 'omit'));
         ok(JSON.stringify(m.lacking) === JSON.stringify([X]) && rowFor(m).show === true, `CONTROL — «lacking» without the held token: a re-authorize whose token HOLDS ${X} draws the row — the R2 assert above would be red`);
         for (const r of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 1, label: 'chan-lark-heldlack: ' })) ok(r.pass, r.name, r.detail);
         // lane lark-refresh-stall r2 (acceptance r1's narrow mutant: 10 of the 11 held, the list omits the 11th ⇒ the row said «the
@@ -2388,7 +2388,7 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     const ENVL = "      if (data.has_more === true && !next) throw envelope('page_token', 'has_more with no page_token (the rest of the window cannot be asked for)');";
     ok(LSRCe.split(ENVL).length === 2, 'CONTROL setup: the has_more-without-token refusal is spelled once');
     {
-      const mod = MENV.load('src/channels/lark.js', LSRCe.replace(ENVL, ''), 'envelope-token-trusted');
+      const mod = MENV.load('src/channels/lark.js', editAnchor(LSRCe, ENVL, '', "src/channels/lark.js"), 'envelope-token-trusted');
       const rgE = CH.createChannelRegistry(); rgE.register(mod.adapter);
       const tk = mkTokens(); tk.st.token = { ...tokens.st.token };
       const fetchE = async () => jsonRes({ code: 0, data: { items: thirty, total: 500, has_more: true } });
@@ -2455,7 +2455,7 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     const LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     const RUNG = LS.slice(LS.indexOf('      // B-64f6 (the owner'), LS.indexOf('      const peers = [];'));
     ok(RUNG.length > 100 && LS.split(RUNG).length === 2, 'CONTROL setup: the members rung is spelled once');
-    const modB = MB.load('src/channels/lark.js', LS.replace(RUNG, ''), 'b64f6-no-members-rung');
+    const modB = MB.load('src/channels/lark.js', editAnchor(LS, RUNG, '', "src/channels/lark.js"), 'b64f6-no-members-rung');
     const rgB = CH.createChannelRegistry(); rgB.register(modB.adapter);
     const tkB = mkTokens(); tkB.st.token = { ...tokens.st.token };
     const aB = rgB.create('lark', { id: 'lark' }, { now, fetch: fetchS, tokens: tkB, resolveIntegration: () => CRED, log: logS, meter() {} });
@@ -2531,7 +2531,7 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     ok(vr.ok && pr.hits.length === 5 && pc.hits.length === 3 && pc.hits.every((h) => h.isP2p), 'lark-p2p: a vendor that reads the window only inside `filter` (its doc) answers the window — five hits, the page trusted; the catch-up\'s `chat_type` inside `filter` answers the three single chats', JSON.stringify({ n: pr.hits.length, v: vr.ok, p2p: pc.hits.length }));
     const OLDB = "      const filter = { time_range: { start_time: Feed.isoSec(from), end_time: Feed.isoSec(to) } };\n      if (chatType === 'p2p' || chatType === 'group') filter.chat_type = chatType;\n      const body = { query: '', filter };";
     ok(LSRCP.split(OLDB).length === 2, 'CONTROL setup: the request body is spelled once');
-    const old = MP.load('src/channels/lark.js', LSRCP.replace(OLDB, "      const body = { query: '', time_range: { start_time: Feed.isoSec(from), end_time: Feed.isoSec(to) } };\n      if (chatType === 'p2p' || chatType === 'group') body.chat_type = chatType;"), 'lark-p2p-toplevel-window');
+    const old = MP.load('src/channels/lark.js', editAnchor(LSRCP, OLDB, "      const body = { query: '', time_range: { start_time: Feed.isoSec(from), end_time: Feed.isoSec(to) } };\n      if (chatType === 'p2p' || chatType === 'group') body.chat_type = chatType;", "src/channels/lark.js"), 'lark-p2p-toplevel-window');
     const pO = await adapterOf(old, docVendor([])).changes(win);
     const vO = Feed.pageVerdict(pO, win, { pageSize: 30, now: T0 });
     ok(!vO.ok && vO.park === 'time-range-ignored' && pO.hits.length === 6, `CONTROL: the .197 request (the window at the TOP level) gets the vendor's whole history — a month-old single chat on the first page (${pO.hits.length} hits) — parked as an ignored window by the (now readable) page`, JSON.stringify(vO));
@@ -2548,7 +2548,7 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     // the .197 DECLARATION over the OBSERVED page: every hit malformed — the production incident, reproduced
     const DECL = "describes: true, timeUnit: 'iso', reader: 2 }),";
     ok(LSRCP.split(DECL).length === 2, 'CONTROL setup: the declaration is spelled once');
-    const ms197 = MP.load('src/channels/lark.js', LSRCP.replace(DECL, "describes: true, timeUnit: 'ms', reader: 2 }),"), 'lark-p2p-ms-declared');
+    const ms197 = MP.load('src/channels/lark.js', editAnchor(LSRCP, DECL, "describes: true, timeUnit: 'ms', reader: 2 }),", "src/channels/lark.js"), 'lark-p2p-ms-declared');
     const p197 = await adapterOf(ms197, async () => jsonRes(pageOfX(SX.page1))).changes({ from: T0 - 90e3, to: T0 });
     ok(p197.hits.length === 0 && p197.malformed === 5 && JSON.stringify(p197.malformedFields) === JSON.stringify([['meta_data.create_time']]), 'CONTROL (the .197 declaration `ms`): the OBSERVED page reads as five malformed hits — the production incident (241 260 of them), now named by field', JSON.stringify(p197));
   }
@@ -2944,11 +2944,11 @@ console.log('\n⑰ verify r3: one response judge, the catch census, the push pat
   M17.write('src/channels/lark.js', bare, 'bare-send');
   const cb = responseCensus(bare, OPT());
   ok(bare !== src && cb.problems.some((p) => /raw send whose answer no judge reads/.test(p)) && cls(cb, 'raw:unjudged') === 1, 'CONTROL ①: a bare fetch outside the judge (its answer read by nobody) is RED', cb.problems.join(' ; '));
-  const swallow = src.replace(anchorMembers, "let d; try { d = await api(`/im/v1/chats/${encodeURIComponent(convId)}/members?${p}`, { what: 'lark chat members' }); } catch (e) { d = { data: { items: [] } }; }");
+  const swallow = editAnchor(src, anchorMembers, "let d; try { d = await api(`/im/v1/chats/${encodeURIComponent(convId)}/members?${p}`, { what: 'lark chat members' }); } catch (e) { d = { data: { items: [] } }; }", "src/channels/lark.js");
   M17.write('src/channels/lark.js', swallow, 'swallowing-catch');
   const cs = responseCensus(swallow, OPT());
   ok(swallow !== src && cs.problems.some((p) => /can swallow a rate refusal/.test(p)) && cls(cs, 'catch:RED') === 1, 'CONTROL ②: a try/catch around a vendor call that swallows (no re-throw, no row) is RED', cs.problems.join(' ; '));
-  const mapsOk = src.replace(anchorJudge, 'if (r.status !== 429 && (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0))) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));');
+  const mapsOk = editAnchor(src, anchorJudge, 'if (r.status !== 429 && (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0))) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));', "src/channels/lark.js");
   const modOk = M17.load('src/channels/lark.js', mapsOk, 'judge-maps-429-ok');
   const eOk = await threw(() => mkA(async () => res429(), modOk).history('oc_1', { limit: 5 }));
   ok(mapsOk !== src && eOk === null && e429 && e429.code === 'rate-limited', 'CONTROL ③: a judge that maps a 429 to ok (history() resolves on a refused page) is RED by behaviour — the real judge throws rate-limited');
@@ -2980,7 +2980,7 @@ console.log('\n⑰ verify r3: one response judge, the catch census, the push pat
   ok(pr.persisted === 7 && pr.inside === 1 && pr.after === 2 && pr.warnsInside === 1 && pr.warns === 2 && pr.said, `PUSH PATH: six pushed messages under a members 429 ⇒ every record persisted (bare ids), ONE members read then none inside the vendor's 60 s hint, ONE warn line naming the pause; the lookup resumes after the hint (refused again ⇒ one more read, one more pause said) (${JSON.stringify(pr)})`);
   const anchorPause = '      if (now() >= pushNamesPausedUntil) {';
   ok(src.includes(anchorPause), 'CONTROL anchor: the push path\'s pause gate is in the file');
-  const modNoPause = M17.load('src/channels/lark.js', src.replace(anchorPause, '      if (true) {'), 'push-no-pause');
+  const modNoPause = M17.load('src/channels/lark.js', editAnchor(src, anchorPause, '      if (true) {', "src/channels/lark.js"), 'push-no-pause');
   const pc = await pushRun(modNoPause);
   ok(pc.inside === 6 && pc.warnsInside >= 6, `CONTROL: the pre-r3 push path (no pause) sends one members read per pushed message into the stop (${pc.inside} of 6, a warn line each) — RED`);
 
@@ -3042,7 +3042,7 @@ console.log('\n⑰ verify r3: one response judge, the catch census, the push pat
     ok(f4.first === 1 && f4.bare === null && f4.again === 1 && f4.named === 'Ada', `r4 F4: a 503 on the members page leaves the author bare for the vendor's moment (a minute) and the chat is asked again two minutes later — named (${JSON.stringify(f4)})`);
     const aUntil = "      if (e instanceof ChannelError && e.code === 'transport') until = now() + peoplePauseMs(e);\n";
     ok(src.includes(aUntil), 'r4 F4 CONTROL anchor: the transient memo line is in the file');
-    const c4 = await run(M17.load('src/channels/lark.js', src.replace(aUntil, ''), 'members-blip-6h'));
+    const c4 = await run(M17.load('src/channels/lark.js', editAnchor(src, aUntil, '', "src/channels/lark.js"), 'members-blip-6h'));
     ok(c4.first === 1 && c4.again === 0 && c4.named === null, `r4 F4 CONTROL: the copy remembers the blip as the chat's refusal — not asked again two minutes later, the author still bare (RED)`);
   }
   // r4 T2 ① (LOW): the push path's pause honoured a 3600 s hint for 5 min only — twelve refused reads an hour into the stop, a warn line
@@ -3052,7 +3052,7 @@ console.log('\n⑰ verify r3: one response judge, the catch census, the push pat
     ok(p2.persisted === 7 && p2.inside === 1 && p2.after === 2 && p2.said, `T2 ①: a 3600 s hint pauses the push path's lookups 900 s (the engine's cap), every record persisted meanwhile (${JSON.stringify(p2)})`);
     const aCap = '  const PUSH_PAUSE_MAX_MS = 15 * 60e3;';
     ok(src.includes(aCap), 'T2 ① CONTROL anchor: the push pause cap is in the file');
-    const c2 = await pushRun(M17.load('src/channels/lark.js', src.replace(aCap, '  const PUSH_PAUSE_MAX_MS = 5 * 60e3;'), 'push-pause-5min'), { hint: 3600, pauseSec: 900 });
+    const c2 = await pushRun(M17.load('src/channels/lark.js', editAnchor(src, aCap, '  const PUSH_PAUSE_MAX_MS = 5 * 60e3;', "src/channels/lark.js"), 'push-pause-5min'), { hint: 3600, pauseSec: 900 });
     ok(c2.said === false, 'T2 ① CONTROL: the 5-min cap says "for 300 s" and asks again inside the hint (RED)');
   }
   for (const x of copiesCensus(M17.files, M17.dir, REPO, { minCopies: 8, label: '⑰ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
