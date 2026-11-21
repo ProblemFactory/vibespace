@@ -187,7 +187,7 @@ const ctl = await jobScene(relWrap, 'job-mut');
 ok(ctl.held && ctl.left.some((m) => m.comm === 'flock' || m.comm === 'sh') && !ctl.free, 'CONTROL (the release\'s wrapper): the setsid env -i waiter is LEFT RUNNING with the queue\'s lock held', { left: names(ctl.left), free: ctl.free });
 // THE FORCE STOP: the wrapper is SIGKILLed — its stop step never runs; the ENGINE ends the tree (read first) — nothing left
 const fz = await jobScene(WRAP, 'job-force', { force: true });
-ok(fz.held && !fz.left.length && fz.free && /its forced end killed \d+ process(es)? it started outside its group/.test(fz.said), 'B-c134: a FORCE stop (the wrapper SIGKILLed) — the engine reads the tree first and kills it, said in the log; nothing left', { left: names(fz.left), said: fz.said });
+ok(fz.held && !fz.left.length && fz.free && /its forced end killed \d+ process(es)? it started outside its group/.test(fz.said), 'B-c134: a FORCE stop (the wrapper SIGKILLed) — the engine reads the tree first and kills it, said in the log; nothing left', { left: names(fz.left), said: fz.said });   // stale-pins: kept — the engine's line still opens «its forced end killed N» whenever it killed any (B-d8f4 r902 builds it in two parts)
 ok(/\[jobs\] stop: its forced end killed \d+ process(es)? it started outside its group \([^)]*\)/.test(fz.log), 'B-c134 cure (MUST B): the FORCE stop\'s line is in the job\'s OWN log — where the person reads it (the wrapper is dead; the engine writes it)', fz.log.split('\n').filter((l) => /\[jobs\]/.test(l)));
 ok(real.heldOut, 'B-c134 cure (MUST A): the engine keeps each live job\'s wrapper OUT of every other stop\'s walk (PI.keptOut names it) — and its own stop walks it (the root)', real.heldOut);
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 0, label: 'B-c134 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
@@ -946,9 +946,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   const MK = "      if (id.pid === Number(stamp.pid) || inTree.has(`${id.pid}:${id.starttime}`) || (!group && PI.pgidOf(id.pid) === Number(stamp.pid)) || hubs(id.pid) || ko.has(id.pid)) continue;";
   const RM = "mark: `VIBESPACE_JOB_RUN=${job.id}:${run0.startedAt}`";
   ok(JSRC.split(MK).length === 2 && JSRC.split(RM).length === 2, 'control setup: the engine\'s mark kill and its run\'s mark are found once each in jobs.js');
-  const NW = " + (mscan.unread ? ` — its mark's scan could not list the processes (${mscan.unread}): what left its group may be left` : '');";   // B-d8f4 (10)
-  ok(JSRC.split(NW).length === 2, 'control setup: the engine\'s words for a failed listing are found once in jobs.js');
-  const noMark = MJ.load('src/jobs.js', anchored(anchored(JSRC, MK, '      continue;   /* MUTANT: no mark kill */', 'b7ca1-engine-mark-cut'), NW, ";   /* MUTANT: a failed listing unsaid (B-d8f4 §12's control; fx reads only liveness) */", 'd8f4-unread-words'), 'b7ca1-engine-mark-cut');
+  const noMark = MJ.load('src/jobs.js', anchored(JSRC, MK, '      continue;   /* MUTANT: no mark kill */', 'b7ca1-engine-mark-cut'), 'b7ca1-engine-mark-cut');
   const jobMark = MJ.load('src/jobs.js', anchored(JSRC, RM, 'mark: `VIBESPACE_JOB_ID=${job.id}`', 'b7ca1-engine-runmark-cut'), 'b7ca1-engine-runmark-cut');
   // (c) its read r2 (S1): a task that restarted the hub with a LAUNCHER — `(setsid sh -c '<the hub> & echo $! > server.pid; wait' &)`:
   // the launcher carries this run's mark, sits in its own group, re-parented, and is the hub's PARENT (never under it): a stop of
@@ -971,52 +969,12 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   // before B-d8f4 (the first scan and the stop step only) — the tree's member outside the group is in n but not «outside» (1)
   const OC = "  const outsideReached = reachedKeys.length;";
   const oldCount = anchored(WRAP, OC, "  const outsideReached = runStopped.length; /* MUTANT: the count before B-d8f4 */", 'd8f4-outside-count');
-  // B-d8f4 (10): WHERE THERE IS NO /proc the sweep cannot run — said in the job's log, never silent. The absence is PLACED in a copy: its
-  // escapee scan lists a /proc path that does not exist (every other /proc read of the wrapper stays real). CONTROL: the copy without the line
-  const NP = "  try { ents = fs.readdirSync('/proc').filter((e) => /^\\d+$/.test(e))";
-  const noProc = anchored(WRAP, NP, "  try { ents = fs.readdirSync('/proc/b-d8f4-none').filter((e) => /^\\d+$/.test(e))", 'd8f4-no-proc');
-  const noList = anchored(WRAP, NP, "  try { ents = fs.readdirSync('/proc/self/stat').filter((e) => /^\\d+$/.test(e))", 'd8f4-no-list');   // r902: the OTHER branch — a listing that fails with another errno (placed: ENOTDIR)
-  const NPW = "    if (o && o.none && stopping && !saidNone) {";
-  const noProcSilent = anchored(noProc, NPW, "    if (false) {", 'd8f4-no-proc-silent');
   // the eight scenes are INDEPENDENT (their own folders, managers, marks and processes): they run together — the suite's time is the
   // slowest scene's, not their sum (it measured 9.9 s alone with them in a row; the fast tier's bound is 10 s)
-  // r902: the drain's early returns — nothing alive at the drain (a tree member in a group of its own that the stop step's SIGTERM ended at
-  // once: a bare sleep has no handler), and the exit record still counts what the stop reached. CONTROL: the fold cut (the release's returns)
-  const foldScene = timed(async (wrapperText, tag) => jobScene(wrapperText, tag, { argv: ['sh', '-c', 'setsid sleep 337 & wait'],
-    ready: (tree) => tree.some((m) => m.comm === 'sleep'),
-    before: ({ jm }) => { const job = [...jm.jobs.values()][0]; return { after: async () => ({ left: (job && job.runs[job.runs.length - 1] || {}).left || null }) }; } }));
-  const FOLD = "  if (!left.length && !out.length && !stepReached.length) return {};";
-  const foldCut = anchored(WRAP, FOLD, "  if (!left.length && !out.length) return {};   /* MUTANT: the release's early return */", 'd8f4-fold-cut');
   // 主开发 r902 (its round's race): the count the product keeps is what the stop step's signal HEARD — the line's total less its «(N could
   // not be signalled: gone, or not ours)» (the timeout program may end its sleep before the wrapper's own signal reads it again)
   const treeOutOf = (r) => { const m = ((r && r.log) || '').match(/stop: (\d+) process(?:es)? it started outside its group \([^)]*\) hears? it from the wrapper(?: \((\d+) could not be signalled)?/); return m ? Number(m[1]) - Number(m[2] || 0) : 0; };
-  // B-d8f4 UNIT 2 — (8)'s legs on the REAL wrapper, a 400 ms grace (the engine's seam: memorySample.stopMs)
-  const GRACE = { memorySample: { stopMs: 400 } };
-  // (8a) THE KILL PASS'S OWN FILTER: an escapee of this run that IGNORES the polite signal (SIG_IGN survives its exec) — the stop step's
-  // SIGTERM does nothing, the drain waits the grace, the kill pass ends it (killed: counted outside). CONTROL: the kill pass without its
-  // escapees (the filter cut) — it is left running
-  const deafScene = timed(async (wrapperText, tag) => {
-    const E = path.join(D, tag, 'deaf.pid');
-    return jobScene(wrapperText, tag, { deps: GRACE, argv: ['sh', '-c', `(setsid sh -c 'trap "" TERM; echo $$ > ${JSON.stringify(E)}; exec sleep 343' &); sleep 344 & wait`],
-      ready: () => fs.existsSync(E) && Number(fs.readFileSync(E, 'utf8').trim()) > 1,
-      before: ({ jm }) => { const id = PI.identityOf(Number(fs.readFileSync(E, 'utf8').trim())); mine.push(id); const job = [...jm.jobs.values()][0];
-        return { after: async () => { await until(() => PI.aliveIdentity(id) === false, 300); const alive = PI.aliveIdentity(id) === true; if (alive) PI.signalIdentity(id, 'SIGKILL'); return { alive, left: (job.runs[job.runs.length - 1] || {}).left || null }; } }; } });
-  });
-  const KF = "    const esc = mine ? rawE : taskStop ? rawE.filter(ours) : [];";
-  const killFilterCut = anchored(WRAP, KF, "    const esc = mine ? rawE : [];   /* MUTANT: the kill pass without this run's escapees */", 'd8f4-kill-filter');
-  // (unit 1's round, lens 1) A SIGTERM THAT DID NOT LAND (EPERM) never makes a process «reached»: PLACED in a copy — both its signals to
-  // the re-parented escapee throw EPERM (the pid is read from the scene's own file). It is left running, said «not stopped», never counted
-  // outside. CONTROL: the copy counting by «termed» alone (the unit-1 count)
-  const EP = path.join(D, 'esc-eperm', 'esc.pid'), EPX = path.join(D, 'esc-eperm-mut', 'esc.pid');
-  const epermOf = (pidFile) => {
-    const T1 = "try { process.kill(p[0], 'SIGTERM'); rec.ok = true; return true; } catch { return false; } };";
-    const T2 = "const killNow = (p) => { if (!same(p)) return false; try { process.kill(p[0], 'SIGKILL'); return true; } catch { return false; } };";
-    const thrower = `(() => { let x = ''; try { x = fs.readFileSync(${JSON.stringify(pidFile)}, 'utf8').trim(); } catch { } if (String(p[0]) === x) throw Object.assign(new Error('EPERM (placed)'), { code: 'EPERM' }); })(); `;
-    return anchored(anchored(WRAP, T1, `try { ${thrower}process.kill(p[0], 'SIGTERM'); rec.ok = true; return true; } catch { return false; } };`, 'd8f4-eperm-term'), T2, `const killNow = (p) => { if (!same(p)) return false; try { ${thrower}process.kill(p[0], 'SIGKILL'); return true; } catch { return false; } };`, 'd8f4-eperm-kill');
-  };
-  const HEARD = "const landed = (k) => !!(termed.get(k) || {}).ok;";
-  const epermOld = anchored(epermOf(EPX), HEARD, "const landed = (k) => termed.has(k);   /* MUTANT: «termed» alone */", 'd8f4-heard-cut');
-  const [sa, sx, sr, fa, fx, fj, la, lx, ox, np, npx, nl, fo, fox, dp, dpx, ep, epx] = await Promise.all([
+  const [sa, sx, sr, fa, fx, fj, la, lx, ox] = await Promise.all([
     escScene(WRAP, 'esc-stop', { viewMod: viewCut }),
     escScene(relEsc, 'esc-stop-mut'),
     escScene(anyRun, 'esc-run-mut'),
@@ -1025,23 +983,8 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
     escScene(WRAP, 'esc-force-jobmark', { force: true, jobsMod: jobMark }),
     launchScene(WRAP, 'esc-launcher'),
     launchScene(anchored(WRAP, KA, "    if (kept && kept(e)) continue;   // MUTANT: no ancestors kept", 'b7ca1-ancestors-cut'), 'esc-launcher-mut'),
-    escScene(oldCount, 'esc-count-mut'),
-    escScene(noProc, 'esc-no-proc'),
-    escScene(noProcSilent, 'esc-no-proc-mut'),
-    escScene(noList, 'esc-no-list'),
-    foldScene(WRAP, 'fold'),
-    foldScene(foldCut, 'fold-mut'),
-    deafScene(WRAP, 'deaf'),
-    deafScene(killFilterCut, 'deaf-mut'),
-    escScene(epermOf(EP), 'esc-eperm', { deps: GRACE }),   // the escapee no signal reaches: the drain waits the grace, never the default 10 s
-    escScene(epermOld, 'esc-eperm-mut', { deps: GRACE })
-  ]);
-  console.log(`    facts (B-d8f4 unit 2) ${JSON.stringify({ deaf: dp.after, deafCut: dpx.after, eperm: ep.after && ep.after.left, epermOld: epx.after && epx.after.left })}`);
-  ok(dp.after && !dp.after.alive && dp.after.left && dp.after.left.outside === 1 && dp.after.left.force, 'B-d8f4 (8): an escapee of this run that IGNORES the polite signal is ended by the kill pass at the grace — counted outside its group, the stop said «by force»', dp.after);
-  ok(dpx.after && dpx.after.alive, 'CONTROL (the kill pass without this run\'s escapees, in a copy): the deaf escapee is left running (red)', dpx.after);
-  const kEp = treeOutOf(ep), kEpx = treeOutOf(epx);
-  ok(ep.after && ep.after.alive && ep.after.left && ep.after.left.outside === kEp && (ep.after.left.escaped || 0) >= 1, 'B-d8f4 (unit 1\'s round): an escapee whose signals did not land (EPERM, placed) is left running and said «not stopped» — never counted outside its group', { left: ep.after && ep.after.left, k: kEp });
-  ok(epx.after && epx.after.left && epx.after.left.outside === kEpx + 1, 'CONTROL (the count by «termed» alone, in a copy): the escapee no signal reached is counted outside (red)', { left: epx.after && epx.after.left, k: kEpx });
+    escScene(oldCount, 'esc-count-mut')
+  ]);   // B-d8f4's other scenes (no /proc, the fold, the deaf escapee, EPERM) and its engine legs run in scripts/test-stop-rung.mjs (this suite's fast bound)
   // B-d8f4 (7): the stop step names the tree's members outside its group it signalled (`timeout` and its `sleep`, in timeout's own group) —
   // K, read from the job's log; «outside» = the re-parented child + those K, whatever the drain still finds alive, and never above n
   const kSa = treeOutOf(sa), kOx = treeOutOf(ox);
@@ -1049,13 +992,6 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   ok(sa.after && !sa.after.inTree && sa.after.ownGroup && !sa.after.alive && sa.state === 'interrupted' && sa.after.left && kSa >= 1 && sa.after.left.outside === 1 + kSa && sa.after.left.outside <= sa.after.left.n,
     'B-7ca1: a task\'s STOP on the group rung ends the child that left its group and was re-parented before the stop (it carried THIS run\'s mark) — counted as stopped outside its group, never «not stopped»; B-d8f4 (7): with the K tree members the stop step heard outside its group (timeout, its sleep) — never above n', { left: sa.after && sa.after.left, k: kSa });
   ok(ox.after && !ox.after.alive && ox.after.left && kOx >= 1 && ox.after.left.outside === 1 && ox.after.left.n >= 1 + kOx, 'CONTROL (B-d8f4 (7), the count before it, in a copy): the stop reached its tree\'s members outside the group, counted in n but NOT «outside» — the count low (red)', { left: ox.after && ox.after.left, k: kOx });
-  ok(np.after && np.after.alive && /this machine has no process file system \(\/proc\)/.test(np.log), 'B-d8f4 (10): where the escapee scan cannot list /proc (placed: the copy\'s path does not exist) the re-parented child is not found — and the job\'s log SAYS so', { alive: np.after && np.after.alive, log: (np.log || '').slice(-400) });
-  ok(npx.after && npx.after.alive && !/no process file system/.test(npx.log || ''), 'CONTROL (B-d8f4 (10), the line cut, in a copy): the child is left running and nothing says why (red)', { alive: npx.after && npx.after.alive });
-  ok(nl.after && nl.after.alive && /it could not list the processes in \/proc \(ENOTDIR\) — what left its group cannot be found/.test(nl.log || ''), 'B-d8f4 (10, 主开发 r902): a listing that fails with ANOTHER errno (placed: ENOTDIR) — said with its errno, never as «no process file system»', { alive: nl.after && nl.after.alive, log: (nl.log || '').slice(-300) });
-  const kFo = treeOutOf(fo), kFox = treeOutOf(fox);
-  console.log(`    facts (r902 fold) ${JSON.stringify({ fo: { left: fo.after && fo.after.left, k: kFo }, fox: { left: fox.after && fox.after.left, k: kFox } })}`);
-  ok(fo.after && kFo === 1 && fo.after.left && fo.after.left.n === 1 && fo.after.left.outside === 1, 'B-d8f4 (主开发 r902): nothing alive at the drain — the stop step\'s SIGTERM ended the tree\'s member in a group of its own at once — and the exit record still counts it (n 1, outside 1)', { left: fo.after && fo.after.left, k: kFo });
-  ok(fox.after && kFox === 1 && !(fox.after.left && fox.after.left.n), 'CONTROL (the fold cut, in a copy): the release\'s early return — the record has no count at all (red)', { left: fox.after && fox.after.left, k: kFox });
   ok(sa.after && sa.after.strangerOwn && sa.after.stranger && sa.after.left && sa.after.left.escaped === 1, 'B-7ca1 (its read\'s MUST): a process carrying the job\'s mark but ANOTHER run\'s (an earlier run\'s leftover\'s fork) is NOT ended by this run\'s stop — said «left its group — not stopped»', sa.after);
   ok(sa.after && sa.after.view && sa.after.view.outside === sa.after.left.outside, 'B-7ca1: the API\'s view of the run (the card\'s row) carries what was stopped outside its group — its walk found the view dropped it (a list of named fields)', sa.after && sa.after.view);
   ok(sa.after && sa.after.left && sa.after.left.outside >= 1 && sa.after.viewCut && !sa.after.viewCut.threw && sa.after.view && sa.after.viewCut.n === sa.after.view.n && !sa.after.viewCut.outside, 'CONTROL (the view without `outside`, in a copy — over the same run): the run records it but the card\'s row never sees it — RED', sa.after && sa.after.viewCut);
@@ -1066,41 +1002,6 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   ok(fj.after && fj.after.strangerOwn && !fj.after.stranger, 'CONTROL (the engine by the job\'s mark, in a copy): the force stop kills the STRANGER — another run\'s — RED', fj.after);
   ok(la.after && la.after.launcher && la.after.hub, 'B-7ca1 (its read r2, S1): a task\'s stop never ends the hub\'s LAUNCHER (it carries this run\'s mark, re-parented, its own group — the hub\'s parent) nor the hub', { ...la.after, state: la.state, ms: la.ms });
   ok(lx.after && !lx.after.launcher, 'CONTROL (the hub\'s ancestors not kept, in a copy): the stop ends the hub\'s launcher — RED', lx.after);
-  console.log('§12 B-d8f4 — the engine\'s mark kill (a force stop on the group rung): its exclusions, and its words for a cut scan and a failed listing');
-  {
-    // the engine's _killTree over a STUBBED scan (the same proc-identity module the engine requires): what it signals is recorded, nothing
-    // real is signalled. The members its mark's scan returns: the job's WRAPPER (the caller's own signal), THE HUB (this process), a holder
-    // another stop keeps out (PI.keptOut), and a stranger of this run's — only the stranger is the mark kill's. The fake pids sit above the
-    // kernel's limit (4194304): no process can hold them. Each control takes ONE exclusion's input away (no copy loaded)
-    const WRAPPER = 4194305, KEPT = 4194306, STR = 4194307;
-    let seq12 = 0;
-    const engineKill = (Mod, tag, { members, scan, keptOut = [[KEPT, 1]], stampPid = WRAPPER, hubOff = false }) => {
-      const dd = path.join(D, tag); fs.mkdirSync(dd, { recursive: true });
-      const logs = [];
-      const jm = new Mod.JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log: (...a) => logs.push(a.join(' ')), apiBase: 'http://127.0.0.1:9', memoryRungs: [] });
-      if (hubOff) jm._hubTest = () => () => false;
-      const job = { id: 'jb-d8f4' + String(++seq12).padStart(4, '0'), kind: 'task', runs: [{ startedAt: 1700000000000 }] };
-      const keep = {}; for (const k of ['treeOf', 'membersOf', 'signalIdentity', 'keptOut', 'pgidOf']) keep[k] = PI[k];
-      const sent = [];
-      PI.treeOf = () => []; PI.membersOf = () => Object.assign(members.map((pid) => ({ pid, starttime: 5, bootId: 'b' })), { scan }); PI.signalIdentity = (id) => { sent.push(id.pid); return { ok: true }; }; PI.keptOut = () => keptOut; PI.pgidOf = () => 0;
-      try { jm._killTree(job, { pid: stampPid, starttime: 1 }, { group: true }); } finally { Object.assign(PI, keep); }
-      try { jm.shutdown(); } catch { }
-      return { sent, said: logs.join(' | ') };
-    };
-    const ALL = [WRAPPER, process.pid, KEPT, STR], whole = { scanned: 4, total: 4, cut: false }, real = require(path.join(ROOT, 'src/jobs.js'));
-    const ex = engineKill(real, 'mark-excl', { members: ALL, scan: whole });
-    ok(JSON.stringify(ex.sent) === JSON.stringify([STR]) && /1 process carrying its run's mark outside its group \(re-parented\)/.test(ex.said), 'B-d8f4 (8): the engine\'s mark kill signals only the stranger of this run — never its wrapper, the hub, or what another stop keeps out', ex);
-    const exK = engineKill(real, 'mark-excl-ko', { members: ALL, scan: whole, keptOut: [] });
-    const exH = engineKill(real, 'mark-excl-hub', { members: ALL, scan: whole, hubOff: true });
-    const exW = engineKill(real, 'mark-excl-wrap', { members: ALL, scan: whole, stampPid: 4194308 });
-    ok(exK.sent.includes(KEPT) && exH.sent.includes(process.pid) && exW.sent.includes(WRAPPER), 'CONTROLS (each exclusion\'s input taken away): no keep-out — the held process is signalled; no hub test — the HUB is signalled; another wrapper stamp — this wrapper is signalled (red, each)', { keptOut: exK.sent, hub: exH.sent, wrapper: exW.sent });
-    const cut = engineKill(real, 'mark-cut', { members: [STR], scan: { scanned: 5, total: 9, cut: true } });
-    ok(/its mark's scan read 5 of 9 processes: what left its group may be left/.test(cut.said), 'B-d8f4 (8): a mark scan cut at its bound is said with its count — «its mark\'s scan read 5 of 9 processes»', cut.said);
-    const unread = engineKill(real, 'mark-unread', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
-    ok(/its forced end — its mark's scan could not list the processes \(EMFILE\): what left its group may be left/.test(unread.said) && !/killed 0/.test(unread.said), 'B-d8f4 (10): a force stop whose mark scan could not list the processes says so with its errno (the hub\'s log); 主开发 r902: nothing killed never opens with «killed 0»', unread.said);
-    const unreadX = engineKill(noMark, 'mark-unread-mut', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
-    ok(!/could not list the processes/.test(unreadX.said), 'CONTROL (the words cut, in §11\'s engine copy): a failed listing and nothing said (red)', unreadX.said);
-  }
   // a hub started INSIDE a job never hands that run's mark to what it starts (its env loses it at the engine's construction)
   const envOf = (Mod, tag) => { const d = path.join(D, tag); fs.mkdirSync(d, { recursive: true }); process.env.VIBESPACE_JOB_RUN = 'jb-0000aaaa:1'; let threw = null; try { new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, memoryRungs: [] }); } catch (e) { threw = String((e && e.message) || e); } const had = 'VIBESPACE_JOB_RUN' in process.env; delete process.env.VIBESPACE_JOB_RUN; return threw ? `threw: ${threw}` : had; };   // its round: a constructor that throws is a red, never «dropped»
   const STRIP = "    delete process.env.VIBESPACE_JOB_RUN;";
