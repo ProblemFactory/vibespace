@@ -1573,12 +1573,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function stockEnvFor(p) {
     const envR = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p));
     const st = ENV.stockLaunchOf(envR, { languageTold: !!p.languageTold, machineTag: ENV.machineLanguageTag() });
-    // the mark rides the launch's OWN synchronous landing (commitSync before Chrome, both roads): on disk before the browser could keep a
-    // language — no deferred save of its own
-    if (st.languageTold && !p.languageTold) p.languageTold = true;
     const says = !!p.environment || st.args.length > 0;
     return { ...st, environment: says ? { applied: { timezone: st.env.TZ || null, language: st.language, location: 'machine' }, confirmed: true, by: 'stock', unfollowed: envR.unfollowed } : null };
   }
+  /** B-9584 U2b: the store's mark, set by the LAUNCH that tells a language — on each road right before its OWN synchronous landing
+   *  (commitSync before Chrome): on disk before the browser could keep a language, no deferred save of its own; a start refused
+   *  before its launch marks nothing (the resolve itself is read-only — round wyx4vuerd 9 resolves ONCE, before the road). */
+  function markLanguageTold(p, stockEnv) { if (stockEnv && stockEnv.languageTold && !p.languageTold) p.languageTold = true; }
   /** B-9584 U2b: the switches a browser's LAUNCH was stamped with (`rec.envArgs`) — its config file carries them until its next launch. */
   function envArgsFor(kind, mark) {
     if (kind !== 'machine' || !mark) return [];
@@ -1592,7 +1593,12 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // first-use kernel download), never a browser in another time zone than the profile says
     const envR = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p));
     const engLabel = (() => { try { const r = engs().rows().find((x) => x && x.id === c.id); return String((r && r.label) || c.id).slice(0, 80); } catch { return String(c.id).slice(0, 80); } })();
-    if (p.environment && !(typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id))) throw namedError('browser_engine_environment_unread', `${engLabel} does not state that it reads a profile's time zone, language and location — update the browser plugin; this profile's start is refused, never run in another time zone than the profile says`, { engine: c.id });
+    // round wyx4vuerd MUST — A REFUSAL NAMES ITS DOOR: «does not state the word» HERE only for an engine the loader lists valid, enabled
+    // and trusted (`false`); switched off, untrusted or not installed (`null`) falls through to the verdict that names THAT door
+    // (browser_engine_missing, its For-you line and its mark — the release's); anything still unstated past the verdict is refused there
+    const statesEnv = !p.environment ? true : typeof engs().statesEnvironment === 'function' ? engs().statesEnvironment(c.id) : null;
+    const unread = () => namedError('browser_engine_environment_unread', `${engLabel} does not state that it reads a profile's time zone, language and location — update the browser plugin; this profile's start is refused, never run in another time zone than the profile says`, { engine: c.id });
+    if (statesEnv === false) throw unread();
     // lane fleet-plugin-catalog: a kernel that waited beside its place (downloaded while a browser ran the previous one) takes it
     // NOW when no browser runs the previous one — this start is «the next browser start»
     // round 2 (N3): then THIS start HOLDS the place until its spawn (released when the start settles — placeHolds) — no landing swaps the
@@ -1638,16 +1644,17 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!v.ok && fetching && fetching.answered === false && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace has asked ${fetching.host} for it and has no answer yet; start the browser again in a moment`;
     else if (!v.ok && fetching && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace is downloading it now (${fetching.total || fetching.bytes ? `${Math.round(Number(fetching.total || fetching.bytes) / 1e6)} MB` : 'its kernel.json\'s archive'}); start the browser again when it is done`;
     if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id, ...(v.failed ? { failed: v.failed } : {}) }); }
+    if (statesEnv !== true) throw unread();   // the belt past the verdict: an engine that runs and states nothing (a built-in one) — never asked to launch
     // the exit check (the owner 2026-11-17): the profile's KEPT exit rides resolve-launch as `egress` {publicIp, country, timezone,
     // checkedAt, source} — the names settled with the plugin's conversation; absent when none is kept. NO request is made here.
     const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}), ...(p.egress && typeof p.egress === 'object' ? { egress: egressHandOf(p.egress) } : {}), ...(envR.told ? { environment: envR.told } : {}) });
     // a refusal of the profile's ENVIRONMENT is no missing build (no mark, no For-you item of a build): said by its own name
-    if (!lo.ok) { if (!['browser_engine_unanswered', 'browser_engine_location_unsupported', 'browser_engine_environment_refused'].includes(lo.code)) noteBuildMissing(p, c, lo, engine); throw namedError(lo.code, lo.error, { engine: c.id, ...(lo.failed ? { failed: lo.failed } : {}) }); }
+    if (!lo.ok) { if (!['browser_engine_unanswered', 'browser_engine_location_unsupported', 'browser_engine_environment_refused'].includes(lo.code) && lo.echo !== 'malformed') noteBuildMissing(p, c, lo, engine); throw namedError(lo.code, lo.error, { engine: c.id, ...(lo.failed ? { failed: lo.failed } : {}) }); }
     // r991 MUST 1: «confirmed» means the echo EQUALS what was told — each of the three, the location as its word. A difference refuses
     // the start by name HERE, before the wrapper and the exit are built (nothing has started: the reply only names the program), naming
     // the setting by its word (never a place); no build is marked missing for it
     if (p.environment && lo.launch.applied) {
-      const off = ENG.echoMismatch(envR.told, lo.launch.applied);
+      const off = ENG.echoMismatch(envR.told, lo.launch.applied, { zone: ENV.canonicalZone, tag: ENV.canonicalTag });   // round wyx4vuerd (3): the hub's two forms, both sides
       const WORD = { timezone: 'time zone', language: 'language', location: 'location' };
       if (off.length) throw namedError('browser_engine_environment_mismatch', `${engLabel} answered that its browser would start with another ${off.map((k) => WORD[k]).join(' and ')} than this profile says — the start is refused; update the browser plugin, or set ${off.length > 1 ? 'those settings' : 'that setting'} to «This machine's»`, { engine: c.id, settings: off });
     }
@@ -5005,7 +5012,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       const attachExe = buildEnv.executablePath || ATL.chromeExecutable(rtEnv);
       const road = AT.launchRoad({ local: true, starts: !!prow.starts, ownLaunch: argvPrefix.length > 0, headed: headed0, wired: !!displayKeeper, driverVersion: displayKeeper ? ((await cliNow()) || {}).version || null : null, xpra: await displayHasXpra(), exe: attachExe });
       rec.launch = road.launch; rec.launchWhy = road.why;
-      if (road.launch === 'attach') { const a = await attachStart(p, rec, prevRec, { exe: attachExe, why, ns, engineLaunch: buildEnv.engine ? buildEnv : null }); if (a) return a; } // null ⇒ its display did not come up: the driver road, said
+      // B-9584 U2b: the stock browser's own environment (an engine's is its hand-over) — resolved ONCE a start (round wyx4vuerd 9): the
+      // attach road takes this answer, and a display that did not come up falls back to the driver road with the same one
+      const stockEnv = buildEnv && buildEnv.engine ? null : stockEnvFor(p);
+      if (road.launch === 'attach') { const a = await attachStart(p, rec, prevRec, { exe: attachExe, why, ns, engineLaunch: buildEnv.engine ? buildEnv : null, stockEnv }); if (a) return a; } // null ⇒ its display did not come up: the driver road, said
       // lane headless-fallback: THE DISPLAY IS A FACT — probed now, here (the launch's view carries the plan: HEADED and the
       // planned config every call of this record names); the fact rides the record
       rec.display = await displays.factFor({ baseFile: machineConfigFile('machine', p.id), headedEnv: headed0, prev: prevRec && prevRec.display, mode: noDisplayMode(), preference: headed0 }); // H5: an unset preference resolved against this probe
@@ -5016,6 +5026,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       // plan's ozone pin / software GL): ONE source on both roads (a conversation's derived config merges the same file's list)
       if (buildEnv.engine) { const kept = plannedArgsOf('machine', p.id, rec.display, { wrapped: !!buildEnv.egress }); if (kept) providerEnv = { ...providerEnv, ...engineEnvOf(p, prow, buildEnv, kept, quietLog) }; }
       const launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0', ...(headed0 === true ? { AGENT_BROWSER_HEADED: '1' } : headed0 === false ? { AGENT_BROWSER_HEADED: '0' } : {}), ...providerEnv };
+      // round wyx4vuerd (7): the ZONE rides the launch's own VIEW too — every later call of this record names it (a heal's relaunch
+      // through `get cdp-url`, the stop's close): a Chrome its daemon starts again keeps the profile's zone, never the machine's
+      if (stockEnv && stockEnv.env.TZ) launchEnv.TZ = stockEnv.env.TZ;
       rec.launchEnv = launchEnv;
       // VERIFY r2 M1: BEFORE EVERY LAUNCH ON THE DIRECTORY — a dead daemon's browser is ended first (in flight: waited),
       // then the lock's holder judged: the keeper's own orphan ended, anything else refused `profile_locked` by name
@@ -5026,8 +5039,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       rec.mark = p.id; // r4 (MAJOR 2): the launch carries this profile's MARK (machine-<id>.json); every later keeper call keeps that file
       rec.holdDialogs = true; // lane browser-stuck: …and holds page dialogs (noAutoDialog) from this launch on
       rec.launchFlags = !!prow.launchFlags && (argvPrefix.length > 0 || Object.keys(providerEnv).length > 0); // r4: a provider's own launch flags (its env pair; the row's `launchFlags`) — a heal never relaunches it. lane browser-admin 2a: a chromium build pin is NOT one — the heal's `get cdp-url` carries rec.launchEnv (the executable included), so it relaunches the SAME build
-      const stockEnv = buildEnv && buildEnv.engine ? null : stockEnvFor(p);   // B-9584 U2b: the stock browser's own environment (an engine's is its hand-over)
       if (stockEnv && stockEnv.args.length) rec.envArgs = stockEnv.args; // stamped: the config file carries them until the next launch
+      markLanguageTold(p, stockEnv);   // B-9584 U2b: with the landing below (commitSync before Chrome)
       rec.browserChoice = recordedChoice(p, buildEnv); if (buildEnv && buildEnv.environment) rec.environment = buildEnv.environment; if (stockEnv && stockEnv.environment) rec.environment = stockEnv.environment; // B-9584 U2a (only when there is something to say: an untouched profile's record is the release's): the start's word on the profile's environment (an engine's echo, its unfollowed list) · what this launch was asked to run (the running build is `cdpBrowser`, the browser's own answer; lane engine-plugin: + an engine's version)
       const stamp0 = F.dirLaunchStamp(p.dir); // r5 MAJOR 1 (iii): the directory before this launch
       rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
@@ -5310,7 +5323,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    * adoption judge that pid — no daemon of ours sits under it. → browserView(rec) | null when the display session did not
    * come up (said on the record; the caller runs the driver road).
    */
-  async function attachStart(p, rec, prevRec, { exe, why, ns, engineLaunch = null }) {
+  async function attachStart(p, rec, prevRec, { exe, why, ns, engineLaunch = null, stockEnv = null }) {   // `stockEnv`: the start's ONE resolve (B-9584 U2b)
     const profileId = p.id;
     // lane hotfix-attach-engine-args (2.369.375): EVERY launch this road does not start is journaled BY NAME — its code, the argv
     // items it names — BEFORE its display session is stopped (the owner's hub journaled only «stopped — its launch was refused»;
@@ -5340,7 +5353,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     rec.launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' };
     rec.cli = await cliNow(); // the CLI every later call of this browser runs (it attaches; it never launches)
     cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now
-    const stockEnv = engineLaunch ? null : stockEnvFor(p);   // B-9584 U2b: before the landing below, so the store's mark lands with it
+    markLanguageTold(p, stockEnv);   // B-9584 U2b: with the landing below
     if (!commitSync()) throw await refused('launch_not_on_disk', LAUNCH_NOT_ON_DISK);   // the census cure (finding 6): the stamped lineage on disk before Chrome
     const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? ENG.engineArgs(engineLaunch) : []; // lane engine-plugin: the engine's own arguments, censused by the builder (lane engine-spi-egress: + the keeper's proxy arguments when wrapped)
     if (rec.tailnet && rec.tailnet.arg) engineArgs.push(rec.tailnet.arg);

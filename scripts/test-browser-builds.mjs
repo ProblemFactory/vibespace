@@ -1930,8 +1930,8 @@ console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — 
   const a400p = lv2({ code: 'bad_location', error: 'latitude 35.6762, longitude 139.6503 is out of range' }, 400);   // a kernel whose text echoes the bad input
   ok(a400p.code === 'browser_engine_environment_refused' && !/35\.67|139\.65/.test(a400p.error) && /This machine's/.test(a400p.error) && /update the browser plugin/.test(a400p.error),
     '⑦e ② r991 (a location is never in an error\'s words): a 400 whose text echoes a place is relayed by its CODE only — no number of it in the refusal — with the way out (this machine\'s, or update the plugin)', a400p.error);
-  ok(a409.code === 'browser_engine_location_unsupported' && /kernel update/.test(a409.error) && a400.code === 'browser_engine_environment_refused' && /bad_timezone/.test(a400.error) && !!a400.failed && a400.failed.code === 'bad_timezone',
-    '⑦e ② the kernel\'s refusals of the environment come back BY NAME: 409 location_unsupported_by_kernel ⇒ browser_engine_location_unsupported (the kernel update named); 400 bad_timezone ⇒ browser_engine_environment_refused with its code', { a409, a400 });
+  ok(a409.code === 'browser_engine_location_unsupported' && /kernel update/.test(a409.error) && a400.code === 'browser_engine_environment_refused' && /bad_timezone/.test(a400.error) && !a400.failed && a400.refusedCode === 'bad_timezone',
+    '⑦e ② the kernel\'s refusals of the environment come back BY NAME: 409 location_unsupported_by_kernel ⇒ browser_engine_location_unsupported (the kernel update named); 400 bad_timezone ⇒ browser_engine_environment_refused with its code (round wyx4vuerd 1: no `failed` block — the page takes the environment\'s own sentence)', { a409, a400 });
   const echo = lv2({ ...okBody, appliedEnvironment: { timezone: 'Asia/Tokyo', language: 'ja-JP', location: 'blocked' } }), none = lv2(okBody), odd = lv2({ ...okBody, appliedEnvironment: { timezone: 'Asia/Tokyo', language: 'ja-JP', location: 'somewhere' } });
   ok(echo.ok && J(echo.launch.applied) === J({ timezone: 'Asia/Tokyo', language: 'ja-JP', location: 'blocked' }) && none.ok && !('applied' in none.launch) && !odd.ok && odd.code === 'browser_engine_protocol',
     '⑦e ② the echo: of its shape kept as `applied`; absent ⇒ none (the start says «not confirmed»); of another shape ⇒ refused by name', { echo: echo.launch, odd });
@@ -1975,22 +1975,24 @@ console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — 
   ok(!!r.ee && r.ee.code === 'browser_engine_environment_unread' && /update the browser plugin/.test(String(r.ee.message)) && r.asked === 0, '⑦e ③ an engine that does not STATE the word: a profile that sets something is refused by name BEFORE its launch is asked — never a browser in another zone than it says', { code: r.ee && r.ee.code, asked: r.asked });
   // r991 MUST 1: «confirmed» means the echo EQUALS what was told — an echo that differs in each of the three, in turn, refuses the start
   // by name before the wrapper and the exit (the setting named by its word, never a place); no build marked missing
-  const mismatchOf = async (Kmod, tag, echoE) => {
+  const mismatchOf = async (Kmod, tag, echoE, { env = null, raw = null } = {}) => {
     const km = mkKeeper(path.join(ROOT, `data-eng-mis-${tag}`), { engines: ENGW, serverSetting: (k) => settingsE[k], fleetFacts: () => fleetE, liveKeys: () => new Set([KEY_A, KEY_E]) }, Kmod);
     const pm = km.createProfile({ label: `Kernel mismatch ${tag}`, browser: { kind: 'plugin', id: EID } }, { engine: await km.engineFactOf(EID) });
-    km._reg().profiles.find((x) => x && x.id === pm.id).environment = ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Tokyo' }, location: { mode: 'value', value: { latitude: 35.6762, longitude: 139.6503 } } }).value;
-    states = true; answer = async (id, input) => { const r0 = await ENGR.launchOptions(id, input); return r0.ok ? { ...r0, launch: { ...r0.launch, applied: echoE } } : r0; };
+    km._reg().profiles.find((x) => x && x.id === pm.id).environment = env || ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Tokyo' }, location: { mode: 'value', value: { latitude: 35.6762, longitude: 139.6503 } } }).value;
+    states = true; answer = raw || (async (id, input) => { const r0 = await ENGR.launchOptions(id, input); return r0.ok ? { ...r0, launch: { ...r0.launch, applied: echoE } } : r0; });
     const t0m = todos.length;
     const e = await thr(() => km.start(pm.id, { why: 'test' }));
     answer = null;
+    const b = km._reg().browsers[pm.id] || {};
+    const out = { code: e && e.code, msg: String((e && e.message) || ''), settings: e && e.settings, marked: !!km._reg().profiles.find((x) => x && x.id === pm.id).buildMissing, todos: todos.length - t0m, rec: b.environment || null, ready: b.state === 'ready', egress: !!(km.egressFor(pm.id) || {}).url };
     if (!e) await km.stop(pm.id, { why: 'user' });
-    return { code: e && e.code, msg: String((e && e.message) || ''), marked: !!km._reg().profiles.find((x) => x && x.id === pm.id).buildMissing, todos: todos.length - t0m, rec: (km._reg().browsers[pm.id] || {}).environment || null };
+    return out;
   };
   const ECHOES = [['zone', { timezone: null, language: null, location: 'fixed' }, /another time zone than/], ['language', { timezone: 'Asia/Tokyo', language: 'ja-JP', location: 'fixed' }, /another language than/], ['location', { timezone: 'Asia/Tokyo', language: null, location: 'machine' }, /another location than/]];
   for (const [what, echoE, words] of ECHOES) {
     const mm = await mismatchOf(K, what, echoE);
-    ok(mm.code === 'browser_engine_environment_mismatch' && words.test(mm.msg) && !/35\.67|139\.65/.test(mm.msg) && !mm.marked && mm.todos === 0,
-      `⑦e ③ r991: the echo differs in its ${what} from what was told (a zone and a fixed place) ⇒ the start refused BY NAME (the setting by its word, no place), no build marked missing`, mm);
+    ok(mm.code === 'browser_engine_environment_mismatch' && words.test(mm.msg) && !/35\.67|139\.65/.test(mm.msg) && !mm.marked && mm.todos === 0 && !mm.ready && !mm.egress,
+      `⑦e ③ r991: the echo differs in its ${what} from what was told (a zone and a fixed place) ⇒ the start refused BY NAME (the setting by its word, no place), no build marked missing, no browser record ready and no exit built (round wyx4vuerd)`, mm);
   }
   const mOk = await mismatchOf(K, 'equal', { timezone: 'Asia/Tokyo', language: null, location: 'fixed' });
   ok(!mOk.code && !!mOk.rec && mOk.rec.confirmed === true, '⑦e ③ r991: the echo EQUALS what was told (the zone, no language, the place as its word «fixed») ⇒ the start runs, recorded confirmed', mOk);
@@ -2006,12 +2008,12 @@ console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — 
   ok(ENGR2.statesEnvironment(EID) === true, '⑦e ④ …and a copy of it whose manifest declares capabilities.browserEngine ["environment"] (enabled, trusted) STATES it', ENGR2.statesEnvironment(EID));
   try { LDR2.shutdown(); } catch { /* gone */ }
   // r991 (small): the stated-word check comes BEFORE a first-use kernel download (and before the place hold and the probe)
-  { const ks0 = read('src/server/browser-keeper.js'); const f0 = ks0.indexOf('  async function launchEngineOf(p, c) {'); const u0 = ks0.indexOf("throw namedError('browser_engine_environment_unread'", f0), d0 = ks0.indexOf("by: 'first-use'", f0), h0 = ks0.indexOf('d0.beforeStart(c.id)', f0);
+  { const ks0 = read('src/server/browser-keeper.js'); const f0 = ks0.indexOf('  async function launchEngineOf(p, c) {'); const u0 = ks0.indexOf('    if (statesEnv === false) throw unread();', f0), d0 = ks0.indexOf("by: 'first-use'", f0), h0 = ks0.indexOf('d0.beforeStart(c.id)', f0);
     ok(f0 > 0 && u0 > f0 && d0 > u0 && h0 > u0, '⑦e ④ r991: in launchEngineOf the stated-word refusal stands before the place hold and the first-use kernel download', { f0, u0, d0, h0 }); }
   // REDs: the keeper with each rule taken back (anchored, THE one door for a red control's edit)
   const MUTe = mutantCopies('envm-builds', REPO);
   const ksE = read('src/server/browser-keeper.js');
-  const Kno = MUTe.load('src/server/browser-keeper.js', anchored(ksE, "    if (p.environment && !(typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id))) throw namedError('browser_engine_environment_unread',", "    if (false) throw namedError('browser_engine_environment_unread',", '⑦e RED unread'), 'env-unread-off');
+  const Kno = MUTe.load('src/server/browser-keeper.js', anchored(anchored(ksE, '    if (statesEnv === false) throw unread();', '    if (false) throw unread();', '⑦e RED unread (early)'), '    if (statesEnv !== true) throw unread();   // the belt', '    if (false) throw unread();   // the belt', '⑦e RED unread (belt)'), 'env-unread-off');
   const rn = await roadOf(Kno, 'red-unread');
   ok(!rn.ee && rn.asked === 1, '⑦e RED — the keeper without the stated-word check: the start ASKS the launch of an engine that does not read the environment (a browser in the machine\'s own zone)', { ee: rn.ee && rn.ee.code, asked: rn.asked });
   const Kal = MUTe.load('src/server/browser-keeper.js', anchored(ksE, '...(envR.told ? { environment: envR.told } : {})', 'environment: envR.told', '⑦e RED always'), 'env-always');
@@ -2022,6 +2024,105 @@ console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — 
   ok(PMm.capabilitiesHash(m1.manifest) !== PMm.capabilitiesHash(m0.manifest), '⑦e RED — the word list inside the consent hash: the unchanged plugin\'s hash moves (the loader switches it off at the update)', null);
   const ra = await roadOf(Kal, 'red-always');
   ok(!!ra.in0 && 'environment' in ra.in0, '⑦e RED — the keeper that always hands `environment`: an untouched profile\'s hand-over carries the key (the kernel would read it as ruling all three)', ra.in0);
+  // ═══ round wyx4vuerd on U2a's cure ═══
+  // MUST — A REFUSAL NAMES ITS DOOR: «does not state the word» only for an engine the loader lists valid, enabled and trusted; a plugin
+  // switched OFF, UNTRUSTED (its capabilities drifted since its consent) or NOT INSTALLED is refused as at the release —
+  // browser_engine_missing, its For-you line, its mark — over the REAL engine table on a copy of the fixture (statesEnvironment's
+  // three answers: true / false / null)
+  const doorOf = async (Kmod, tag) => {
+    const EROOT3 = path.join(ROOT, `engine-root-door-${tag}`);
+    fs.rmSync(EROOT3, { recursive: true, force: true });
+    fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(EROOT3, 'data', 'plugins', EID), { recursive: true });
+    const LDR3 = require('../src/server/plugin-loader.js').create({ rootDir: EROOT3, app: expressE(), hostVersion: '2.369.356', log: { log() { }, warn() { } }, agentEnv: () => ({ PATH: process.env.PATH }) });
+    const out = { states: {} };
+    try {
+      LDR3.setEnabled(EID, true, { trusted: true });
+      const ENGR3 = require('../src/server/browser-engines.js').create({ loader: LDR3, dataDir: path.join(EROOT3, 'data'), timeoutMs: 400 });
+      { const KP3 = ENGR3.kernelPath(EID); fs.mkdirSync(path.dirname(KP3), { recursive: true }); fs.writeFileSync(KP3, `#!/bin/sh\necho "${KVER}"\n`, { mode: 0o755 }); }   // its kernel in the copy's own state folder (as the suite's own loader has it)
+      const rowsAre = async (n) => { const t0r = Date.now(); while (ENGR3.rows().length !== n && Date.now() - t0r < 8000) await new Promise((r) => setTimeout(r, 25)); return ENGR3.rows().length === n; };
+      out.up = await rowsAre(1);
+      out.states.listed = ENGR3.statesEnvironment(EID);
+      const kd = mkKeeper(path.join(ROOT, `data-eng-door-${tag}`), { engines: ENGR3, serverSetting: (k) => settingsE[k], fleetFacts: () => fleetE, liveKeys: () => new Set([KEY_A, KEY_E]) }, Kmod);
+      const pd = kd.createProfile({ label: `Kernel door ${tag}`, browser: { kind: 'plugin', id: EID } }, { engine: await kd.engineFactOf(EID) });
+      const prof = () => kd._reg().profiles.find((x) => x && x.id === pd.id);
+      prof().environment = ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Tokyo' } }).value;   // a stand-in for U3's writer
+      const one = async (key) => {
+        delete prof().buildMissing;
+        const t0d = todos.length;
+        const e = await thr(() => kd.start(pd.id, { why: 'test' }));
+        if (!e) await kd.stop(pd.id, { why: 'user' });
+        out[key] = { code: e && e.code, msg: String((e && e.message) || '').slice(0, 200), marked: !!prof().buildMissing, todos: todos.length - t0d, text: todos.length > t0d ? String(todos.at(-1).text || '').slice(0, 200) : '' };
+      };
+      LDR3.setEnabled(EID, false); out.downOff = await rowsAre(0); out.states.off = ENGR3.statesEnvironment(EID); await one('off');
+      LDR3.setEnabled(EID, true, { trusted: true }); await rowsAre(1);
+      const MF = path.join(EROOT3, 'data', 'plugins', EID, 'vibespace-plugin.json'), mj = JSON.parse(fs.readFileSync(MF, 'utf8'));
+      const caps = mj.capabilities || {}, srv = caps.server || {};
+      fs.writeFileSync(MF, JSON.stringify({ ...mj, version: '0.0.9', capabilities: { ...caps, server: { ...srv, net: [...(Array.isArray(srv.net) ? srv.net : []), 'kernels.example'] } } }));   // a new version asks one more host: its consent drifts
+      LDR3.reload(); out.downUntrusted = await rowsAre(0); out.states.untrusted = ENGR3.statesEnvironment(EID); out.trustedAfter = LDR3.isTrusted(EID); await one('untrusted');
+      fs.rmSync(path.join(EROOT3, 'data', 'plugins', EID), { recursive: true, force: true });   // not installed
+      LDR3.reload(); out.downAbsent = await rowsAre(0); out.states.absent = ENGR3.statesEnvironment(EID); await one('absent');
+    } finally { try { LDR3.shutdown(); } catch { /* gone */ } }
+    return out;
+  };
+  const dr = await doorOf(K, 'real');
+  ok(dr.up && dr.states.listed === false && dr.states.off === null && dr.states.untrusted === null && dr.states.absent === null && dr.trustedAfter === false,
+    '⑦e MUST (round wyx4vuerd): statesEnvironment answers THREE ways — a listed engine that does not state the word ⇒ false; switched off, untrusted (its consent drifted), not installed ⇒ null (not listed so)', dr.states);
+  for (const key of ['off', 'untrusted', 'absent']) {
+    const d = dr[key] || {};
+    ok(d.code === 'browser_engine_missing' && d.marked && d.todos === 1 && /plugin is not running/.test(d.text) && !/does not state/.test(d.msg),
+      `⑦e MUST: a profile with a zone on an engine plugin ${key === 'off' ? 'switched off' : key === 'untrusted' ? 'no longer trusted' : 'not installed'} ⇒ the release's refusal by name (browser_engine_missing), its For-you line («its plugin is not running») and its mark — never «update the browser plugin»`, d);
+  }
+  // item 4: a malformed echo is the kernel's protocol fault — refused by its own name, NO build marked missing, no «missing build» line
+  const lvM = (body) => ENGN.engineAnswerVerdict('launchOptions', { status: 200, body }, { id: EID, label: 'Kernel' });
+  const malformed = async () => lvM({ executablePath: '/k/chrome', args: [], env: {}, appliedEnvironment: { timezone: 7, language: null, location: 'machine' } });
+  const mal = await mismatchOf(K, 'malformed', null, { raw: malformed });
+  ok(mal.code === 'browser_engine_protocol' && /another shape/.test(mal.msg) && /protocol fault/.test(mal.msg) && !mal.marked && mal.todos === 0 && !mal.ready,
+    '⑦e (round wyx4vuerd 4): an echo of another shape ⇒ refused browser_engine_protocol, said as the kernel\'s protocol fault — no build marked missing, no For-you line of a missing build', mal);
+  // also cured: a launch TOLD an environment quotes a plugin's own error by its CODE only (its text may echo a place); untold, as at the release
+  const crash = { code: 'E_KERNEL', error: 'resolve-launch crashed reading latitude 35.6762, longitude 139.6503' };
+  const qTold = ENGN.engineAnswerVerdict('launchOptions', { status: 500, body: crash }, { id: EID, label: 'Kernel', told: true });
+  const qUntold = ENGN.engineAnswerVerdict('launchOptions', { status: 500, body: crash }, { id: EID, label: 'Kernel' });
+  ok(qTold.code === 'browser_engine_protocol' && /E_KERNEL/.test(qTold.error) && !/35\.67|139\.65/.test(J(qTold)) && qTold.failed && qTold.failed.message === null && /35\.6762/.test(qUntold.error),
+    '⑦e (round wyx4vuerd, also cured): a launch that was told an environment quotes a plugin\'s own 500 by its CODE only — no number of a place in the refusal or its facts; a launch told nothing quotes it as at the release', { told: qTold.error, untold: qUntold.error });
+  // item 3: EQUAL AFTER THE SAME CANONICAL FORM ON BOTH SIDES — the hub's two forms; what still differs is a real difference
+  const CAN = { zone: ENVm.canonicalZone, tag: ENVm.canonicalTag };
+  const toldZ = ENVm.canonicalZone('Asia/Calcutta'), otherZ = toldZ === 'Asia/Kolkata' ? 'Asia/Calcutta' : 'Asia/Kolkata';
+  const eqA = ENGN.echoMismatch({ timezone: toldZ }, { timezone: otherZ, language: null, location: 'machine' }, CAN);
+  const eqC = ENGN.echoMismatch({ timezone: 'Asia/Tokyo', language: 'ja-JP' }, { timezone: 'asia/tokyo', language: 'ja-jp', location: 'machine' }, CAN);
+  const neq = ENGN.echoMismatch({ timezone: 'Asia/Tokyo' }, { timezone: 'Asia/Seoul', language: null, location: 'machine' }, CAN);
+  const raw3 = ENGN.echoMismatch({ timezone: toldZ }, { timezone: otherZ, language: null, location: 'machine' });
+  ok(ENVm.canonicalZone(otherZ) === toldZ && J(eqA) === '[]' && J(eqC) === '[]' && J(neq) === '["timezone"]' && J(raw3) === '["timezone"]',
+    `⑦e (round wyx4vuerd 3): told ${toldZ}, an echo of its alias ${otherZ} ⇒ confirmed; another case of the same zone and tag (asia/tokyo, ja-jp) ⇒ confirmed; another zone (Asia/Seoul) ⇒ refused — and without the hub's forms the alias pair reads as different (the leg can see it)`, { toldZ, otherZ, eqA, eqC, neq, raw3 });
+  const envAlias = ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Calcutta' }, language: { mode: 'value', value: 'ja-JP' } }).value;
+  const mAlias = await mismatchOf(K, 'alias', { timezone: otherZ, language: 'ja-jp', location: 'machine' }, { env: envAlias });
+  ok(!mAlias.code && !!mAlias.rec && mAlias.rec.confirmed === true, `⑦e (round wyx4vuerd 3) through the keeper: a profile told ${toldZ} and ja-JP, a kernel echoing ${otherZ} and ja-jp ⇒ the start runs, recorded confirmed`, mAlias);
+  // items 1 and 2 at the person's door: the page's words for the relayed refusal and for the mismatch
+  const BMe = await import('../src/lib/browser-build-model.js');
+  const tE = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
+  const wRef = BMe.buildRefusalWords({ code: a400p.code, error: a400p.error, ...(a400p.failed ? { failed: a400p.failed } : {}) }, tE);
+  const wOld = BMe.buildRefusalWords({ code: a400p.code, error: a400p.error, failed: { status: 400, code: 'bad_location' } }, tE);
+  ok(/refused this profile's time zone, language or location/.test(String(wRef)) && /This machine's/.test(String(wRef)) && !/refused this profile/.test(String(wOld)),
+    '⑦e (round wyx4vuerd 1): the relayed environment refusal reaches the page in ITS OWN sentence (the way out: «This machine\'s» or the plugin\'s update); a relay with the release\'s `failed` block took the plugin-failed branch instead (the leg can see it)', { wRef, wOld });
+  const w1 = BMe.buildRefusalWords({ code: 'browser_engine_environment_mismatch', settings: ['timezone'] }, tE);
+  const w2 = BMe.buildRefusalWords({ code: 'browser_engine_environment_mismatch', settings: ['language', 'timezone'] }, tE);
+  const w0 = BMe.buildRefusalWords({ code: 'browser_engine_environment_mismatch' }, tE);
+  const RB = require('../src/routes/browser.js');
+  const resOf = () => ({ req: { path: '/api/browser/profiles/bp-00000001/start' }, locals: {}, status(c) { this.c = c; return this; }, json(o) { this.o = o; return this; } });
+  const rs = resOf(); RB.fail(rs, Object.assign(new Error('x'), { code: 'browser_engine_environment_mismatch', settings: ['timezone', 'nonsense'] }));
+  ok(/another time zone than/.test(String(w1)) && /set the time zone to «This machine's»/.test(String(w1)) && /another time zone and language than/.test(String(w2)) && /time zone, language or location/.test(String(w0))
+    && rs.c === 409 && J(rs.o.settings) === '["timezone"]',
+    '⑦e (round wyx4vuerd 2): the mismatch says WHICH on the page — «another time zone», «the time zone and language» (the route forwards the setting words, only the three), the general sentence when none is named', { w1, w2, rs: rs.o });
+  // REDs (anchored)
+  const Kdoor = MUTe.load('src/server/browser-keeper.js', anchored(ksE, '    if (statesEnv === false) throw unread();', '    if (statesEnv !== true) throw unread();', '⑦e RED early check'), 'env-door-early');
+  const drR = await doorOf(Kdoor, 'red');
+  ok(['off', 'untrusted', 'absent'].every((k) => drR[k] && drR[k].code === 'browser_engine_environment_unread' && !drR[k].marked && drR[k].todos === 0),
+    '⑦e RED — today\'s early check (refused unless the engine states the word): a switched-off, an untrusted and an absent plugin are each told «update the browser plugin» — the real door never named, no For-you line', { off: drR.off, untrusted: drR.untrusted, absent: drR.absent });
+  const Kmal = MUTe.load('src/server/browser-keeper.js', anchored(ksE, " && lo.echo !== 'malformed') noteBuildMissing(p, c, lo, engine);", ') noteBuildMissing(p, c, lo, engine);', '⑦e RED malformed echo'), 'env-echo-marks');
+  const malR = await mismatchOf(Kmal, 'red-malformed', null, { raw: malformed });
+  ok(malR.code === 'browser_engine_protocol' && malR.marked && malR.todos === 1, '⑦e RED — the malformed echo not excluded: its build is marked missing and a «missing build» line is filed', malR);
+  const Kcan = MUTe.load('src/server/browser-keeper.js', anchored(ksE, 'ENG.echoMismatch(envR.told, lo.launch.applied, { zone: ENV.canonicalZone, tag: ENV.canonicalTag })', 'ENG.echoMismatch(envR.told, lo.launch.applied)', '⑦e RED canonical'), 'env-echo-raw');   // stale-pins: kept (the RED's own replacement: the raw compare)
+  const mAliasR = await mismatchOf(Kcan, 'red-alias', { timezone: otherZ, language: 'ja-jp', location: 'machine' }, { env: envAlias });
+  ok(mAliasR.code === 'browser_engine_environment_mismatch', '⑦e RED — the raw compare: the same zone under its alias and the same tag in another case refuse a healthy kernel at every start', mAliasR);
 }
 
 // ═══ ⑦f B-9584 U2b — THE STOCK BROWSER'S OWN LANGUAGE AND ZONE (the box measure: TZ reaches Chrome; Chrome keeps a prior language) ═══
@@ -2039,8 +2140,10 @@ console.log('— ⑦f B-9584 U2b: the stock browser\'s own language and zone —
     await kb2.start(pu.id, { why: 'test' }); o.lu = lastLaunch(pu.id); o.recU = kb2._reg().browsers[pu.id] || {}; o.markU = !!profOf(pu.id).languageTold;
     await kb2.stop(pu.id, { why: 'user' });
     profOf(pa.id).environment = ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Tokyo' }, language: { mode: 'value', value: 'ja-JP' } }).value;   // a stand-in for the store writer (U3)
-    await kb2.start(pa.id, { why: 'test' }); o.la1 = lastLaunch(pa.id); o.rec1 = kb2._reg().browsers[pa.id].environment; o.mark1 = profOf(pa.id).languageTold === true;
+    const c1 = fake.calls().length;
+    await kb2.start(pa.id, { why: 'test' }); o.la1 = lastLaunch(pa.id); o.rec1 = kb2._reg().browsers[pa.id].environment; o.mark1 = profOf(pa.id).languageTold === true; o.view1 = (kb2._reg().browsers[pa.id].launchEnv || {}).TZ || null;
     await kb2.stop(pa.id, { why: 'user' });
+    o.calls1 = fake.calls().slice(c1).filter((c) => c.ns === 'vs-' + pa.id && /^(?:get cdp-url|close --all)$/.test(c.verb)).map((c) => ({ verb: c.verb, tz: c.tz }));
     profOf(pa.id).environment = ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Tokyo' } }).value;   // the language back at «this machine's»
     await kb2.start(pa.id, { why: 'test' }); o.la2 = lastLaunch(pa.id);
     await kb2.stop(pa.id, { why: 'user' });
@@ -2054,6 +2157,32 @@ console.log('— ⑦f B-9584 U2b: the stock browser\'s own language and zone —
     '⑦f ② a zone and a language set: --lang / --accept-lang ja-JP in the launch config (before the keeper\'s mark, the tail last), TZ=Asia/Tokyo in the browser\'s env, the record says it, the mark set', { a1, tz: s0.la1 && s0.la1.tz, rec: s0.rec1 });
   ok(!!mt && argsOf(s0.la2).includes(`--lang=${mt}`) && argsOf(s0.la2).includes(`--accept-lang=${mt}`) && s0.la2.tz === 'Asia/Tokyo',
     `⑦f ③ the language back at «this machine's» on a profile that had one: the machine's own tag (${mt}) STATED — Chrome would keep ja-JP from its Preferences`, argsOf(s0.la2));
+  // round wyx4vuerd (7): THE ZONE ON A LATER CALL — the launch's own view carries it, so every later call of the record (the `get cdp-url`
+  // a heal relaunches through, the stop's close) names the profile's zone, never the machine's
+  ok(s0.view1 === 'Asia/Tokyo' && s0.calls1.length >= 2 && s0.calls1.some((c) => c.verb === 'get cdp-url') && s0.calls1.some((c) => c.verb === 'close --all') && s0.calls1.every((c) => c.tz === 'Asia/Tokyo'),
+    '⑦f (round wyx4vuerd 7): the zone rides the record\'s launch view — every later keeper call of that browser (get cdp-url, close --all) carries TZ=Asia/Tokyo', { view: s0.view1, calls: s0.calls1 });
+  // round wyx4vuerd (6): HOSTILE STORED VALUES AT USE (a stand-in for a store edited by hand) — no switch and no zone reach the launch;
+  // each is listed as not followed
+  const HOSTILE = [
+    { language: { mode: 'value', value: 'ja-JP,--no-sandbox' }, timezone: { mode: 'value', value: ':/etc/localtime' } },
+    { language: { mode: 'value', value: 'ja-JP\n--remote-debugging-port=1' }, timezone: { mode: 'value', value: '/etc/passwd' } },
+    { language: { mode: 'value', value: '--no-sandbox' } },
+  ];
+  const kh = mkKeeper(path.join(ROOT, 'data-stock-env-hostile'), {});
+  const hostile = [];
+  for (const [i, env] of HOSTILE.entries()) {
+    const ph = kh.createProfile({ label: `Stock hostile ${i}` });
+    kh._reg().profiles.find((x) => x && x.id === ph.id).environment = env;   // planted raw: never through the verdict
+    await kh.start(ph.id, { why: 'test' });
+    const lh = lastLaunch(ph.id), bh = kh._reg().browsers[ph.id] || {};
+    hostile.push({ args: argsOf(lh), tz: lh && lh.tz, view: (bh.launchEnv || {}).TZ || null, envArgs: bh.envArgs || null, unf: ((bh.environment || {}).unfollowed || []).map((u) => u.key).sort() });
+    await kh.stop(ph.id, { why: 'user' });
+  }
+  const base0 = argsOf(s0.lu).filter((a) => !a.startsWith('--vibespace-keeper='));
+  ok(hostile.every((h, i) => J(h.args.filter((a) => !a.startsWith('--vibespace-keeper='))) === J(base0) && h.tz === null && h.view === null && h.envArgs === null && J(h.unf) === J(Object.keys(HOSTILE[i]).sort())),
+    '⑦f (round wyx4vuerd 6): a stored language with a comma and a switch, with a newline, or a leading dash, and a zone that is a file path — judged again at USE: the launch config is the untouched one\'s, no TZ, nothing stamped; each listed as not followed', hostile);
+  // round wyx4vuerd (9): the environment is resolved ONCE a start (the attach road takes the driver road's answer; its fallback reuses it)
+  { const ks9 = read('src/server/browser-keeper.js'); ok((ks9.match(/: stockEnvFor\(p\)/g) || []).length === 1 && (ks9.match(/stockEnvFor\(/g) || []).length === 2 && /attachStart\(p, rec, prevRec, \{[^}]*stockEnv \}\)/.test(ks9), '⑦f (round wyx4vuerd 9): ONE resolve of the stock environment a start (its definition and one call), handed to the attach road', (ks9.match(/stockEnvFor\(/g) || []).length); }
   const MUTs = mutantCopies('envs-builds', REPO), ksS = read('src/server/browser-keeper.js');
   const Km = MUTs.load('src/server/browser-keeper.js', anchored(ksS, 'languageTold: !!p.languageTold, machineTag', 'languageTold: false, machineTag', '⑦f RED mark'), 'env-mark-off');
   const sm = await stockRoad(Km, 'red-mark');
@@ -2061,6 +2190,9 @@ console.log('— ⑦f B-9584 U2b: the stock browser\'s own language and zone —
   const Kt = MUTs.load('src/server/browser-keeper.js', anchored(ksS, '...(stockEnv ? stockEnv.env : {}), ', '', '⑦f RED zone'), 'env-tz-off');
   const st = await stockRoad(Kt, 'red-tz');
   ok(st.la1 && st.la1.tz === null, '⑦f RED — the zone not handed to the driver\'s env: the browser runs in the machine\'s own zone', st.la1 && st.la1.tz);
+  const Kv = MUTs.load('src/server/browser-keeper.js', anchored(ksS, '      if (stockEnv && stockEnv.env.TZ) launchEnv.TZ = stockEnv.env.TZ;\n', '', '⑦f RED view'), 'env-tz-view-off');
+  const sv = await stockRoad(Kv, 'red-view');
+  ok(sv.la1 && sv.la1.tz === 'Asia/Tokyo' && sv.view1 === null && sv.calls1.some((c) => c.tz === null), '⑦f RED — the zone on the launch only, not its view: the later calls (a heal\'s relaunch among them) name no zone — a Chrome started again comes back in the machine\'s zone', { view: sv.view1, calls: sv.calls1 });
 }
 
 // ═══ ⑧ lane engine-distribution: THE KERNEL DOWNLOADED (design-custom-browser-plugin §5.3 as built) ═══════════════════════

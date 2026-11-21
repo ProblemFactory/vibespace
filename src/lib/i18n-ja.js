@@ -14808,4 +14808,10 @@ export default {
   "This browser build cannot set or block the location yet — the kernel update brings it. Set the location to «This machine's» to start it now.": "このブラウザーのビルドはまだ位置の設定やブロックができません — カーネルの更新で対応します。今すぐ起動するには、位置を「このマシンのもの」にしてください。",
   "The browser engine refused this profile's time zone, language or location — set that setting to «This machine's», or update the browser plugin.": "ブラウザーエンジンが、このプロファイルのタイムゾーン・言語・位置を拒否しました — その設定を「このマシンのもの」にするか、ブラウザープラグインを更新してください。",
   "The browser engine said its browser would start with another time zone, language or location than this profile says — the start was refused. Update the browser plugin, or set that setting to «This machine's».": "ブラウザーエンジンは、このプロファイルと違うタイムゾーン・言語・位置でブラウザーを起動すると答えました — 起動は拒否されました。ブラウザープラグインを更新するか、その設定を「このマシンのもの」にしてください。",
+  "The browser engine said its browser would start with another {which} than this profile says — the start was refused. Update the browser plugin, or set the {which} to «This machine's».": "ブラウザーエンジンは、このプロファイルと違う{which}でブラウザーを起動すると答えました — 起動は拒否されました。ブラウザープラグインを更新するか、{which}を「このマシンのもの」にしてください。", // B-9584: the settings an engine's echo differed in, by name
+  "time zone": "タイムゾーン",
+  "language": "言語",
+  "location": "位置",
+  "{a} and {b}": "{a}と{b}",
+  "{a}, {b} and {c}": "{a}・{b}・{c}",
 };

@@ -344,7 +344,8 @@ function validateManifest(raw, { hostVersion = null, folderName = null, homeDir 
   // B-9584 U2a (the custom kernel's plugin 0.2.3, 主开发 r771): `capabilities.browserEngine` — the words an ENGINE plugin STATES its
   // launch reads (today one: src/browser-engines.js ENVIRONMENT_WORD). Plain words, bounded, an unknown word kept as a word and never
   // trusted as more; a malformed entry dropped with a warning. KEPT ONLY WHEN DECLARED: an undeclaring manifest normalizes as before,
-  // byte for byte, so its capabilitiesHash (and its consent) is the same
+  // byte for byte. The CONSENT is the same either way because the hash leaves these words out (consentCapabilities, below — the
+  // U2a cure): a plugin that adds the word keeps the trust it was given
   if (cap.browserEngine !== undefined) {
     if (!Array.isArray(cap.browserEngine)) warnings.push('capabilities.browserEngine must be a list of words — ignored');
     else {

@@ -319,6 +319,8 @@ function fail(res, e) {
     ...(typeof e?.restored === 'boolean' ? { restored: e.restored, from: e.from || null, to: e.to || null } : {}),
     // lane browser-profile-clone: a refused copy names its source, the size it measured and the fs code a failed copy hit
     ...(typeof e?.source === 'string' ? { source: e.source } : {}), ...(Number.isFinite(e?.bytes) ? { bytes: e.bytes } : {}), ...(e?.fsCode ? { fsCode: e.fsCode } : {}),
+    // B-9584 (round wyx4vuerd 2): a mismatched engine echo names WHICH of the three settings differ — the page's sentence names them
+    ...(e?.code === 'browser_engine_environment_mismatch' && Array.isArray(e?.settings) ? { settings: e.settings.filter((k) => ['timezone', 'language', 'location'].includes(k)) } : {}),
     ...(e?.failed && typeof e.failed === 'object' ? { failed: agentRoad ? agentFailed(e.failed) : e.failed } : {}), // B-a470: an engine plugin's OWN error (its code, message, what Node denied it) — every door quotes it; an agent's, without the hub's path
     ...rulingExtras(e), ...(res.locals && res.locals.recipe ? { recipe: res.locals.recipe } : {}) });
 }

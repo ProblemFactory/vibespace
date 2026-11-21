@@ -59,13 +59,17 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
   }
   function rows() { return tableRows().map(({ own, settings, ...r }) => r); }
   /** B-9584 U2a: does the engine `id` STATE that its launch reads a profile's environment (its manifest's capabilities.browserEngine
-   *  holds src/browser-engines.js ENVIRONMENT_WORD)? A built-in engine, an engine not in the table, a list that cannot be read: no. */
+   *  holds src/browser-engines.js ENVIRONMENT_WORD)? THREE ANSWERS (round wyx4vuerd MUST — a refusal names ITS door): `true` = the
+   *  loader lists it valid, enabled, trusted, an engine, and it states the word · `false` = listed so, and it does NOT state it (the
+   *  door: update the browser plugin) · `null` = not listed so — switched off, untrusted, not installed, a built-in engine, a list that
+   *  cannot be read: the engine's own verdict names that door (browser_engine_missing with its For-you line, as at the release). */
   function statesEnvironment(id) {
     const l = L();
-    let list = [];
-    try { list = l && typeof l.list === 'function' ? l.list() : []; } catch { return false; }
+    let list = null;
+    try { list = l && typeof l.list === 'function' ? l.list() : null; } catch { list = null; }
+    if (!Array.isArray(list)) return null;
     const p = list.find((x) => x && String(x.id) === String(id) && x.valid && x.enabled && x.trusted && x.contributes && x.contributes.browserEngine === true);
-    return !!p && BE.statesEnvironment(p.capabilities);
+    return p ? BE.statesEnvironment(p.capabilities) : null;
   }
   async function askManifest(row, verb, input) {
     const v = BE.ENGINE_VERBS[verb];
@@ -77,7 +81,7 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
       if (e && e.status === 504) return BE.unansweredOf({ id: row.id, label: row.label, ms: timeoutMs || 30000 });
       return BE.missingOf({ id: row.id });
     }
-    return BE.engineAnswerVerdict(verb, reply, { id: row.id, label: row.label, settings: row.settings, denied: PL.deniedWords });
+    return BE.engineAnswerVerdict(verb, reply, { id: row.id, label: row.label, settings: row.settings, denied: PL.deniedWords, told: !!(input && input.environment) });
   }
   async function askBuiltin(row, verb, input) {
     const m = P();

@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratch, deadPort } from './scratch.mjs';
+import { scratch, deadPort, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -113,7 +113,7 @@ const ST = process.env.FAKE_STATE; const args = process.argv.slice(2);
 const udd = (args.find((a) => a.startsWith('--user-data-dir=')) || '').slice(16);
 let mode = 'ok'; try { mode = fs.readFileSync(path.join(ST, 'chrome-mode'), 'utf8').trim(); } catch {}
 try { mode = fs.readFileSync(path.join(ST, 'chrome-mode-' + udd.replace(/[^A-Za-z0-9]/g, '_')), 'utf8').trim(); } catch {} // one profile's own mode (the cdp_port_missing keeper leg)
-fs.appendFileSync(path.join(ST, 'chrome.log'), JSON.stringify({ pid: process.pid, args, mode, DISPLAY: process.env.DISPLAY || null, XAUTHORITY: process.env.XAUTHORITY || null, TMPDIR: process.env.TMPDIR || null, ab: Object.keys(process.env).filter((k) => k.startsWith('AGENT_BROWSER_')) }) + '\\n');
+fs.appendFileSync(path.join(ST, 'chrome.log'), JSON.stringify({ pid: process.pid, args, mode, DISPLAY: process.env.DISPLAY || null, XAUTHORITY: process.env.XAUTHORITY || null, TMPDIR: process.env.TMPDIR || null, TZ: process.env.TZ || null, ab: Object.keys(process.env).filter((k) => k.startsWith('AGENT_BROWSER_')) }) + '\\n');
 process.on('SIGTERM', () => process.exit(0));
 if (mode === 'exit') { console.error('ERROR: the profile appears to be in use by another Google Chrome process'); process.exit(21); }
 const pfile = path.join(udd, 'DevToolsActivePort');
@@ -784,6 +784,54 @@ setMode('ok');
   const aU = await attachProxied(kU, 'Proxied attach red');
   ok(aU.args.some((a) => /^--proxy-server=/.test(a)) && !aU.args.includes(UDP), 'RED: an attach road that pushes the switch alone — the policy is missing (the leg above goes red on it)', aU.args.filter((a) => /proxy|webrtc/.test(a)));
   kU.shutdown?.(); kP2.shutdown?.();
+}
+
+// B-9584 U2b (round wyx4vuerd 5 / 6): THE ATTACH ROAD WITH A PROFILE'S OWN LANGUAGE AND ZONE — its two switches in Chrome's argv
+// (before the keeper's mark), its TZ in the spawn env; a hostile stored value judged again at use reaches neither; an untouched
+// profile is the release's. REDs: copies of the keeper without the push, without the zone (anchored)
+console.log('— B-9584 U2b: the attach road with a profile\'s own language and zone');
+{
+  const ENVm = require('../src/browser-environment.js');
+  const startAttach = async (kk, label, env) => {
+    const pp = kk.createProfile({ label }, { owner: { kind: 'instance', id: null } });
+    if (env) kk._reg().profiles.find((x) => x && x.id === pp.id).environment = env;   // a stand-in for the store writer (U3), or a value planted raw
+    const n = chromeLog().length;
+    await kk.start(pp.id, { why: 'test' });
+    const c = chromeLog().slice(n).pop() || { args: [] };
+    const rec = kk._reg().browsers[pp.id] || {};
+    const out = { launch: rec.launch, args: c.args || [], TZ: c.TZ || null, env: rec.environment || null, mark: B.keeperMarkArg(pp.id), dir: pp.dir };
+    try { await kk.stop(pp.id, { why: 'user' }); } catch { /* gone */ }
+    return out;
+  };
+  setMode('ok');
+  const DATA_E = path.join(S, 'data-env-attach'); fs.mkdirSync(DATA_E, { recursive: true });
+  const kE2 = mk({ dataDir: DATA_E });
+  const set = ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Tokyo' }, language: { mode: 'value', value: 'ja-JP' } }).value;
+  const a1 = await startAttach(kE2, 'Env attach set', set);
+  const iL = a1.args.indexOf('--lang=ja-JP'), iA = a1.args.indexOf('--accept-lang=ja-JP'), iM = a1.args.indexOf(a1.mark);
+  ok(a1.launch === 'attach' && iL >= 0 && iA === iL + 1 && iM > iA && a1.TZ === 'Asia/Tokyo' && !!a1.env && a1.env.by === 'stock',
+    'the attach road (round wyx4vuerd 5), a profile with a zone and a language: --lang / --accept-lang ja-JP in Chrome\'s argv before the keeper\'s mark, TZ=Asia/Tokyo in its spawn env, the record says it', { args: a1.args, TZ: a1.TZ });
+  // (6) hostile stored values at use: the argv is the TABLE's own untouched argv for that profile (the leg above it: an untouched start), no TZ
+  // (the leading dash rides the driver road's leg and the contract's: one start each here for the comma and the newline)
+  const HOSTILE = [
+    { language: { mode: 'value', value: 'ja-JP,--no-sandbox' }, timezone: { mode: 'value', value: ':/etc/localtime' } },
+    { language: { mode: 'value', value: 'ja-JP\n--remote-debugging-port=1' }, timezone: { mode: 'value', value: '/etc/passwd' } },
+  ];
+  const hs = [];
+  for (const [i, h] of HOSTILE.entries()) hs.push(await startAttach(kE2, `Env attach hostile ${i}`, h));
+  ok(hs.every((h) => h.launch === 'attach' && JSON.stringify(h.args) === JSON.stringify(AT.attachArgv({ profileDir: h.dir, mark: h.mark, quiet }).argv) && h.TZ === null && !!h.env && h.env.unfollowed.length === 2),
+    'the attach road (round wyx4vuerd 6): a stored tag with a comma and a switch, or with a newline, and a zone that is a file path — judged again at USE: Chrome\'s argv is the table\'s untouched one, no TZ, both listed as not followed', hs.map((h) => ({ extra: h.args.filter((x) => !AT.attachArgv({ profileDir: h.dir, mark: h.mark, quiet }).argv.includes(x)), TZ: h.TZ })));
+  // RED: ONE copy of the keeper without the push and without the zone (anchored) — each leg above goes red on it
+  const ksrcE = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const MUTE = mutantCopies('browser-keeper-env-attach', REPO);
+  const realCreateE = K.create;
+  const noEnv = anchored(anchored(ksrcE, '    if (stockEnv) engineArgs.push(...stockEnv.args);', '    if (false) engineArgs.push(...stockEnv.args);', 'keeper RED attach push'), '    if (stockEnv && stockEnv.env.TZ) env.TZ = stockEnv.env.TZ;', '    if (false) env.TZ = stockEnv.env.TZ;', 'keeper RED attach zone');
+  const Km = MUTE.load('src/server/browser-keeper.js', noEnv, 'no-push-no-zone');
+  let rB = null;
+  try { K.create = Km.create; const DATA_R = path.join(S, 'data-env-attach-red'); fs.mkdirSync(DATA_R, { recursive: true }); rB = await startAttach(mk({ dataDir: DATA_R }), 'Env attach red', set); }
+  finally { K.create = realCreateE; }
+  ok(rB.launch === 'attach' && !rB.args.some((x) => /^--(?:accept-)?lang=/.test(x)) && rB.TZ === null, 'RED — the attach road without the push and the zone: a profile with a language and a zone starts with neither, its browser in the machine\'s own zone (the leg above goes red on it)', { args: rB.args, TZ: rB.TZ });
+  for (const c of copiesCensus(MUTE.files, MUTE.dir, REPO, { label: 'B-9584 attach controls: ' })) ok(c.pass, c.name, c.detail);
 }
 
 fs.rmSync(S, { recursive: true, force: true });

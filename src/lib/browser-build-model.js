@@ -400,6 +400,17 @@ export function changedWords({ label = '', to = null, restarted = false, told = 
   return Number(told) > 0 ? t(i18nKey('Restarted {label} on {build}; {n} conversation(s) were told.'), { label, build, n: Number(told) }) : t(i18nKey('Restarted {label} on {build}.'), { label, build });
 }
 
+/** B-9584 (round wyx4vuerd 2): the settings an engine's echo differed in, in the device's words («the time zone and the language»);
+ *  null when none is named (the general sentence then). */
+const ENV_SETTING_WORDS = Object.freeze({ timezone: i18nKey('time zone'), language: i18nKey('language'), location: i18nKey('location') });
+export function environmentSettingsWords(settings, t) {
+  const ks = Array.isArray(settings) ? ['timezone', 'language', 'location'].filter((k) => settings.includes(k)) : [];
+  const w = ks.map((k) => t(ENV_SETTING_WORDS[k]));
+  if (!w.length) return null;
+  if (w.length === 1) return w[0];
+  if (w.length === 2) return t(i18nKey('{a} and {b}'), { a: w[0], b: w[1] });
+  return t(i18nKey('{a}, {b} and {c}'), { a: w[0], b: w[1], c: w[2] });
+}
 /** A refused change / create, in the device's words by the server's CODE. null = the caller adds the server's sentence. */
 /** lane ui-needs-a-button: a refusal whose cure is a plugin turned on has a door — the Plugins list (the caller draws pluginsDoor) */
 export function buildRefusalDoorOf(r) { return r && r.code === 'browser_engine_missing' ? 'plugins' : null; }
@@ -432,7 +443,7 @@ export function buildRefusalWords(r, t) {
     case 'browser_engine_environment_unread': return t(i18nKey("This browser engine does not say it reads a profile's time zone, language and location — update the browser plugin. The start is refused so the browser never runs in another time zone than the profile says."));
     case 'browser_engine_location_unsupported': return t(i18nKey("This browser build cannot set or block the location yet — the kernel update brings it. Set the location to «This machine's» to start it now."));
     case 'browser_engine_environment_refused': return t(i18nKey("The browser engine refused this profile's time zone, language or location — set that setting to «This machine's», or update the browser plugin."));
-    case 'browser_engine_environment_mismatch': return t(i18nKey("The browser engine said its browser would start with another time zone, language or location than this profile says — the start was refused. Update the browser plugin, or set that setting to «This machine's»."));
+    case 'browser_engine_environment_mismatch': { const which = environmentSettingsWords(r && r.settings, t); return which ? t(i18nKey("The browser engine said its browser would start with another {which} than this profile says — the start was refused. Update the browser plugin, or set the {which} to «This machine's»."), { which }) : t(i18nKey("The browser engine said its browser would start with another time zone, language or location than this profile says — the start was refused. Update the browser plugin, or set that setting to «This machine's».")); }
     case 'engine_kernel_landing': return t(i18nKey('The browser kernel is being replaced — try again in a moment.')); // lane fleet-plugin-catalog r5: a start refused beside a half-landed kernel
     default: return null;
   }

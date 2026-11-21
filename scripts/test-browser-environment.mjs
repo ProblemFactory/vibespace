@@ -11,7 +11,8 @@
 //   ④ THE ONE READER of the kept exit
 //   ⑤ WHAT EACH SETTING IS — told (the hand-over's own object, or null), geolocation, unfollowed, case by case
 //   ⑥ THE SEEDED LAW — 3 seeds × 400 environments × exits; the facts judged printed
-//   ⑦ REDS — eight mutants of the module (through anchored()), each judged by the same legs
+//   ⑦ REDS — nine mutants of the module (through anchored()), each judged by the same legs (the ninth, round wyx4vuerd: a kept value
+//      used raw at a start — the hostile-values leg goes red)
 // The runtime decides two facts here: a zone name (its date formatter) and a language tag (Intl.getCanonicalLocales, its ICU data);
 // where the runtime's own spelling is the expected value (a legacy alias, Etc/UTC, a three-letter code), the leg asks the runtime.
 import fs from 'node:fs';
@@ -155,7 +156,22 @@ function legs(M) {
     J(sl) === J({ args: ['--lang=ja-JP', '--accept-lang=ja-JP'], env: { TZ: 'Asia/Tokyo' }, language: 'ja-JP', languageTold: true }) && J(su) === J({ args: [], env: {}, language: null, languageTold: false }) && J(sb.args) === J(['--lang=en-US', '--accept-lang=en-US']) && sb.languageTold === true, { sl, su, sb });
   leg('U2b withEnvironmentArgs keeps the args\' shape (a list, the comma text, the newline text); nothing added ⇒ the same value',
     J(M.withEnvironmentArgs(['--a'], ['--b'])) === J(['--a', '--b']) && M.withEnvironmentArgs('--a,--c', ['--b']) === '--a,--c,--b' && M.withEnvironmentArgs('--a\n--c', ['--b']) === '--a\n--c\n--b' && M.withEnvironmentArgs('--a', []) === '--a' && M.withEnvironmentArgs('', ['--b']) === '--b', null);
-  leg('U2b machineLanguageTag: a runtime locale judged by the language rule (en-US kept; a tag the kernel would refuse ⇒ null)', M.machineLanguageTag('en-US') === 'en-US' && M.machineLanguageTag('en-US-u-hc-h23') === null, null);
+  leg('U2b machineLanguageTag: a runtime locale judged by the language rule — en-US kept; one the kernel rule refuses falls back to its BASE, language and region (round wyx4vuerd 9): en-US-u-hc-h23 ⇒ en-US, zh-Hant-TW-u-nu-hanidec ⇒ zh-TW; no tag at all ⇒ null',
+    M.machineLanguageTag('en-US') === 'en-US' && M.machineLanguageTag('en-US-u-hc-h23') === 'en-US' && M.machineLanguageTag('zh-Hant-TW-u-nu-hanidec') === 'zh-TW' && M.machineLanguageTag('') === null && M.machineLanguageTag('--x') === null,
+    { a: M.machineLanguageTag('en-US-u-hc-h23'), b: M.machineLanguageTag('zh-Hant-TW-u-nu-hanidec') });
+  // round wyx4vuerd (6): HOSTILE STORED VALUES, judged again AT USE — a tag with a comma and a switch, with a newline, with a leading dash;
+  // a zone that is a file path: no switch and no zone reach a start, each listed as not followed
+  const HOSTILE = [
+    [{ language: { mode: 'value', value: 'ja-JP,--no-sandbox' }, timezone: { mode: 'value', value: ':/etc/localtime' } }, ['language', 'timezone']],
+    [{ language: { mode: 'value', value: 'ja-JP\n--hostile-switch=1' }, timezone: { mode: 'value', value: '/etc/passwd' } }, ['language', 'timezone']],   // (a switch of the same shape: this file launches no Chrome — the chrome-store census, §47b)
+    [{ language: { mode: 'value', value: '--no-sandbox' } }, ['language']],
+  ];
+  const hs = HOSTILE.map(([env, keys]) => { const r = R(env); const s = M.stockLaunchOf(r, { languageTold: false, machineTag: 'en-US' }); return { pass: J(s.args) === '[]' && J(s.env) === '{}' && r.told === null && J(r.unfollowed.map((u) => u.key).sort()) === J(keys), args: s.args, env: s.env, unf: r.unfollowed }; });
+  leg('U2b hostile stored values at use: no switch, no zone, each listed as not followed', hs.every((h) => h.pass), hs);
+  // round wyx4vuerd (3): THE HUB'S TWO CANONICAL FORMS — a zone's and a tag's case and the runtime's own spelling; a value neither reads kept as given
+  leg('the hub\'s two canonical forms: asia/tokyo ⇒ Asia/Tokyo, ja-jp ⇒ ja-JP; a name that is no zone or tag kept as given (it then differs)',
+    M.canonicalZone('asia/tokyo') === 'Asia/Tokyo' && M.canonicalTag('ja-jp') === 'ja-JP' && M.canonicalZone('Mars/Base') === 'Mars/Base' && M.canonicalTag('--no-sandbox') === '--no-sandbox' && M.canonicalZone(M.canonicalZone('Asia/Calcutta')) === M.canonicalZone('Asia/Kolkata'),
+    { kolkata: M.canonicalZone('Asia/Kolkata'), calcutta: M.canonicalZone('Asia/Calcutta') });
   return out;
 }
 
@@ -223,6 +239,7 @@ const REDS = [
   ['the start left unsaid (no unfollowed list)', ['    if (r.said) unfollowed.push({ key: row.key, mode, said: r.said });\n', ''], '⑤ «SAYS SO» AT THE START', 'U'],
   ['an untouched profile hands {} (the told object always present)', ['  return { settings, told: Object.keys(told).length ? told : null, geolocation, unfollowed };', '  return { settings, told, geolocation, unfollowed };'], '⑤ THE DEFAULT', 'E'],
   ['the language rule wider than the kernel\'s (its shape not checked)', ['  if (!KERNEL_TAG.test(canon[0])) return refuse(', '  if (false) return refuse('], '③ refused by name: an extension the kernel refuses', null],
+  ['a kept value used raw at a start (the judgment at use bypassed)', ['    if (mode === MODES.VALUE) { const v = row.value(c.value);', '    if (mode === MODES.VALUE) { const v = { ok: true, value: c.value };'], 'U2b hostile stored values at use', null],
   ['a hex or an exponent read as a number', ["typeof x === 'string' && DECIMAL.test(x.trim()) ? Number(x.trim()) : NaN", "typeof x === 'string' && x.trim() !== '' ? Number(x.trim()) : NaN"], '③ refused by name: a hex latitude', null],
 ];
 for (const [what, [from, to], legName, lawName] of REDS) {

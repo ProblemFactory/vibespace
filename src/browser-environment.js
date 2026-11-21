@@ -28,6 +28,12 @@
  *                     Automatic with nothing to follow, a kept value the runtime no longer accepts): [{ key, mode, said }]. The
  *                     start still runs (the owner's decision 2: it acts as this machine's), and it SAYS so where the person is
  *   · environmentLogView(env)         — a place is the person's private fact: never in a log or a journal line (its kind only)
+ *   · stockLaunchOf(resolved, o)      — U2b: the STOCK browser's own start — its two language switches (one tag), its TZ, the
+ *                                       store's mark that a language was ever told
+ *   · machineLanguageTag(locale)      — the hub's own tag, STATED at «this machine's» once a language was told (its base —
+ *                                       language and region — when the resolved locale is not a tag the kernel rule takes)
+ *   · withEnvironmentArgs(args, extra) — a launch config's `args` (a list or the driver's comma / newline text) with the switches added
+ *   · canonicalZone(v) / canonicalTag(v) — the hub's own two canonical forms: an engine's echo is compared through them, both sides
  * THE DEFAULT IS UNCHANGED: a profile with no `environment`, or one whose every setting is «this machine's», keeps nothing and hands
  * nothing (told null) — its start is the release's, byte for byte.
  * The runtime decides two facts: a zone name by its date formatter (src/browser-exit.js zoneVerdict, the exit check's one rule) and a
@@ -183,11 +189,22 @@ function stockLaunchOf(resolved, { languageTold = false, machineTag = null } = {
   const env = typeof told.timezone === 'string' ? { TZ: told.timezone } : {};
   return { args, env, language: lang, languageTold: !!own || !!languageTold };
 }
-/** The machine's own language tag (the hub's runtime locale), judged by the same rule as a person's (null when it is not one). */
+/** The machine's own language tag (the hub's runtime locale), judged by the same rule as a person's. A resolved locale that rule
+ *  refuses (an extension such as -u-va-posix, a variant) falls back to its BASE — its language and region — so a profile once told a
+ *  language still STATES one at «this machine's» (round wyx4vuerd 9); null only when not even the base is a tag. */
 function machineLanguageTag(locale = (() => { try { return Intl.DateTimeFormat().resolvedOptions().locale; } catch { return ''; } })()) {
   const v = languageVerdict(locale);
-  return v.ok ? v.value : null;
+  if (v.ok) return v.value;
+  let base = '';
+  try { const l = new Intl.Locale(str(locale)); base = l.region ? `${l.language}-${l.region}` : l.language; } catch { base = ''; }
+  const b = base ? languageVerdict(base) : null;
+  return b && b.ok ? b.value : null;
 }
+/** THE HUB'S TWO CANONICAL FORMS (round wyx4vuerd 3) — a zone as the runtime's date formatter spells it (a legacy alias and its zone,
+ *  another case: one name), a tag as Intl.getCanonicalLocales spells it; a value neither reads is kept as given (it then differs).
+ *  An engine's echo is compared to what was told through these, on BOTH sides (src/browser-engines.js echoMismatch). */
+function canonicalZone(v) { const z = zoneVerdict(v); return z.ok && z.value ? z.value : str(v); }
+function canonicalTag(v) { try { const c = Intl.getCanonicalLocales(str(v)); return c.length === 1 ? c[0] : str(v); } catch { return str(v); } }
 /** A launch config's `args` (a list, or the driver's comma / newline text) with the environment's switches added — the shape kept. */
 function withEnvironmentArgs(args, extra = []) {
   const add = (Array.isArray(extra) ? extra : []).map(String).filter(Boolean);
@@ -210,4 +227,4 @@ function environmentLogView(environment) {
   return out;
 }
 
-module.exports = { stockLaunchOf, machineLanguageTag, withEnvironmentArgs, MODES, PLACE_ACCURACY_M, KERNEL_TAG, LANGUAGE_ROWS, languageOfCountry, SETTINGS, SETTING_KEYS, environmentVerdict, keptExitOf, resolveEnvironment, environmentLogView, languageVerdict, placeVerdict, timezoneVerdict };
+module.exports = { stockLaunchOf, machineLanguageTag, canonicalZone, canonicalTag, withEnvironmentArgs, MODES, PLACE_ACCURACY_M, KERNEL_TAG, LANGUAGE_ROWS, languageOfCountry, SETTINGS, SETTING_KEYS, environmentVerdict, keptExitOf, resolveEnvironment, environmentLogView, languageVerdict, placeVerdict, timezoneVerdict };

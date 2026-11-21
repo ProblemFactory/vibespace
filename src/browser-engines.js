@@ -51,13 +51,18 @@ function appliedEchoOf(body) {
 }
 /** B-9584 U2a cure (主开发 r991 MUST 1): «confirmed» means the echo EQUALS what was told, each of the three — the zone and the language
  *  as values (absent told = null), the location as its WORD only (machine / fixed / blocked: never a place). → the settings that
- *  differ, by key ([] = the echo confirms what was told). */
-function echoMismatch(told, echo) {
+ *  differ, by key ([] = the echo confirms what was told). Round wyx4vuerd (3): EQUAL AFTER THE SAME CANONICAL FORM ON BOTH SIDES —
+ *  `canon.zone` / `canon.tag` are the hub's own two forms (src/browser-environment.js canonicalZone / canonicalTag: a legacy alias of
+ *  the same zone, another case of the same tag, read as one); what still differs after them is a real difference. This file is
+ *  client-bundled and requires nothing, so the keeper hands them in. */
+function echoMismatch(told, echo, canon = {}) {
   const t = told && typeof told === 'object' ? told : {};
   const want = { timezone: typeof t.timezone === 'string' ? t.timezone : null, language: typeof t.language === 'string' ? t.language : null,
     location: t.location === 'blocked' ? 'blocked' : t.location && typeof t.location === 'object' ? 'fixed' : 'machine' };
   const e = echo && typeof echo === 'object' ? echo : {};
-  return ['timezone', 'language', 'location'].filter((k) => e[k] !== want[k]);
+  const form = { timezone: typeof canon.zone === 'function' ? canon.zone : (v) => v, language: typeof canon.tag === 'function' ? canon.tag : (v) => v, location: (v) => v };
+  const same = (k) => e[k] === want[k] || (typeof e[k] === 'string' && typeof want[k] === 'string' && form[k](e[k]) === form[k](want[k]));
+  return ['timezone', 'language', 'location'].filter((k) => !same(k));
 }
 /** The protocol this VibeSpace speaks (the kernel's `VibeSpace.getVersion` answers the same number). */
 const PROTOCOL = 1;
@@ -273,14 +278,17 @@ function kernelLiveVerdict({ probe = [], live = [], why = null } = {}) {
  *  probe: `{ok:true, fact:{id, installed, executable, binaryPath, version, protocol, kinds, features, egress}}` (`egress` =
  *  `{setting, default}` when it declares egress-allowlist, else null); launchOptions: `{ok:true, launch:{executablePath,
  *  args, env}}`; else `{ok:false, code, error}`. */
-function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null, denied = null } = {}) {
+function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null, denied = null, told = false } = {}) {
   const who = engineWords({ id, label });
   const bad = (code, why) => ({ ok: false, code, error: `${who} ${why}` });
   const status = reply && Number(reply.status);
   const body = reply ? reply.body : null;
   // B-a470: a plugin that answered with ITS OWN error is quoted (its code, its message, what Node denied it) — never the generic
   // «does not speak this VibeSpace's engine protocol» over it (the code stays browser_engine_protocol; `failed` carries the facts)
-  const failedAs = (verbWord) => { const pe = pluginErrorOf(status, body); return pe ? { ...bad('browser_engine_protocol', pluginErrorWords(pe, verbWord, denied)), failed: { ...pe, label: clip(label || id, 80) || null } } : null; };
+  // B-9584 (round wyx4vuerd, also cured): a launch that was TOLD an environment quotes the plugin's own error by its CODE only — its text
+  // may echo the input (a fixed place's numbers), and these words reach the journal and a For-you line
+  const codeOnly = (pe) => (pe && told && verb === 'launchOptions' ? { ...pe, message: null } : pe);
+  const failedAs = (verbWord) => { const pe = pluginErrorOf(status, body); return pe ? { ...bad('browser_engine_protocol', pluginErrorWords(codeOnly(pe), verbWord, denied)), failed: { ...codeOnly(pe), label: clip(label || id, 80) || null } } : null; };
   if (verb === 'probe') {
     { const f = status === 200 ? null : failedAs('probe'); if (f) return f; }
     if (status !== 200 || !isObj(body)) return bad('browser_engine_protocol', `answered its probe with ${status === 200 ? 'no JSON object' : 'HTTP ' + (status || '?')} — it does not speak this VibeSpace's engine protocol`);
@@ -308,7 +316,7 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
     if (status === 409 && isObj(body) && body.code === 'location_unsupported_by_kernel') return bad('browser_engine_location_unsupported', 'cannot set or block the location in this browser build yet — the kernel update brings it; set the location to «This machine\'s» to start this profile now');
     // r991 (the owner's fourth decision: a location is never in an error's words): the relay carries the kernel's CODE only — never its
     // text, which may echo the bad input (a fixed place's numbers)
-    if (status === 400 && isObj(body) && ['bad_environment', 'bad_timezone', 'bad_language', 'bad_location'].includes(body.code)) return { ...bad('browser_engine_environment_refused', `refused this profile's environment (${body.code}) — set that setting to «This machine's», or update the browser plugin`), failed: { status: 400, code: body.code } };
+    if (status === 400 && isObj(body) && ['bad_environment', 'bad_timezone', 'bad_language', 'bad_location'].includes(body.code)) return { ...bad('browser_engine_environment_refused', `refused this profile's environment (${body.code}) — set that setting to «This machine's», or update the browser plugin`), refusedCode: body.code };   // round wyx4vuerd (1): no `failed` block — the page's words take the environment's own sentence (the kernel's code rides `refusedCode` and the text)
     { const f = status === 200 ? null : failedAs('launch options'); if (f) return f; }
     if (status !== 200 || !isObj(body)) return bad('browser_engine_protocol', `answered its launch options with ${status === 200 ? 'no JSON object' : 'HTTP ' + (status || '?')}`);
     const exe = body.executablePath;
@@ -334,7 +342,7 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
     const extra = Object.keys(env).filter((k) => !ENGINE_ENV_KEYS.includes(k));
     if (extra.length) return bad('browser_engine_env', `asked to set ${extra.slice(0, 8).map((k) => clip(k, 40)).join(', ')} on its browser's environment — an engine sets ${ENGINE_ENV_KEYS.length ? 'only ' + ENGINE_ENV_KEYS.join(', ') : 'no environment variable'} (the values were not read)`);
     const echo = appliedEchoOf(body);   // B-9584 U2a: what the browser really got (absent ⇒ null: «not confirmed»)
-    if (echo === false) return bad('browser_engine_protocol', `answered an ${APPLIED_ECHO} of another shape (timezone and language a name or null, location one of ${APPLIED_LOCATIONS.join(' / ')})`);
+    if (echo === false) return { ...bad('browser_engine_protocol', `answered an ${APPLIED_ECHO} of another shape (timezone and language a name or null, location one of ${APPLIED_LOCATIONS.join(' / ')}) — the kernel's protocol fault; update the browser plugin`), echo: 'malformed' };   // round wyx4vuerd (4): no build is missing — the keeper marks none
     return { ok: true, launch: { executablePath: exe, args: args.slice(), env: { ...env }, ...(echo ? { applied: echo } : {}) } };
   }
   return bad('browser_engine_protocol', `was asked an unknown verb ${clip(verb, 40)}`);
