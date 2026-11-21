@@ -407,6 +407,10 @@ const stripText = (p) => p.ev(`(() => { const q = (s) => { const e = document.qu
 const centre = (p) => p.ev(`(() => { const b = document.querySelector('${WIN} .stream-video').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
 const sessions = async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/stream/facts?host=win-a`)).json()).sessions || [];
 const linesSince = (n) => psLines().slice(n);
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): the input lines that came, MARKED when the awaited one never did —
+// its caller's judge says that by name («the state never came»), never a verdict on the product
+const linesUntil = async (n0, want, tries) => { for (let i = 0; i < tries; i++) { const l = linesSince(n0); if (l.includes(want)) return l; await sleep(100); } return Object.assign(linesSince(n0), { timedOut: `«${want}» never came in ${(tries * 100) / 1000} s` }); };
+const never = (got) => (got && got.timedOut ? ` — THE STATE NEVER CAME: ${got.timedOut}, so this red is that, not a verdict on the product` : '');
 // ⑦: the firewall notice's copy button — where it is (ahead of the numbers? wholly inside the strip's visible box? the topmost
 // element at its centre?), then a click at its centre with the page's clipboard stubbed
 const FW_RULE = `netsh advfirewall firewall add rule name="VibeSpace agent" dir=in action=allow program="${NODE_EXE}" protocol=UDP`;
@@ -455,10 +459,10 @@ console.log('① – ⑥ desk 1280 px');
   const n0 = psLines().length;
   await p.click(cx, cy);
   await p.key('a', 'KeyA', 65);
-  const got = await (async () => { for (let i = 0; i < 60; i++) { const l = linesSince(n0); if (l.includes('K 30 0 1')) return l; await sleep(100); } return linesSince(n0); })();
+  const got = await linesUntil(n0, 'K 30 0 1', 60);
   const pt = got.filter((l) => /^M /.test(l))[0] || '';
   const [, mx, my] = pt.split(' ').map(Number);
-  ok(Math.abs(mx - 640) <= 2 && Math.abs(my - 360) <= 2 && got.includes('D 0') && got.includes('U 0') && got.indexOf('D 0') < got.indexOf('U 0') && got.includes('K 30 0 0') && got.includes('K 30 0 1'), '④ a click at the picture\'s centre reached THE resident script as M 640 360 · D 0 · U 0 (over the data channel), the key A as its scan code down + up', got);
+  ok(Math.abs(mx - 640) <= 2 && Math.abs(my - 360) <= 2 && got.includes('D 0') && got.includes('U 0') && got.indexOf('D 0') < got.indexOf('U 0') && got.includes('K 30 0 0') && got.includes('K 30 0 1'), '④ a click at the picture\'s centre reached THE resident script as M 640 360 · D 0 · U 0 (over the data channel), the key A as its scan code down + up' + never(got), got);
   fs.writeFileSync(ELEVATED, '1');
   await p.click(cx, cy);
   const uipi = await p.until(`/管理员窗口/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 5000);
@@ -578,10 +582,10 @@ console.log('⑨ phone 375×667');
   const [cx, cy] = await centre(p);
   const n0 = psLines().length;
   await p.tap(cx, cy);
-  const got = await (async () => { for (let i = 0; i < 40; i++) { const l = linesSince(n0); if (l.includes('U 0')) return l; await sleep(100); } return linesSince(n0); })();
+  const got = await linesUntil(n0, 'U 0', 40);
   const pt = got.find((l) => /^M /.test(l)) || '';
   const [, mx, my] = pt.split(' ').map(Number);
-  ok(Math.abs(mx - 640) <= 4 && Math.abs(my - 360) <= 4 && got.includes('D 0') && got.includes('U 0'), '⑨ a TAP at the picture\'s centre is a click at the machine\'s 640 360 (touch → pointer events → the data channel)', got);
+  ok(Math.abs(mx - 640) <= 4 && Math.abs(my - 360) <= 4 && got.includes('D 0') && got.includes('U 0'), '⑨ a TAP at the picture\'s centre is a click at the machine\'s 640 360 (touch → pointer events → the data channel)' + never(got), got);
   await p.shot('phone.png');
   const scrolled = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'); s.scrollLeft = s.scrollWidth; const st = document.querySelector('${WIN} .desktop-strip-status').getBoundingClientRect(); return s.scrollLeft >= 0 && st.right <= 375 + 1 && st.left >= 0; })()`);
   ok(scrolled, '⑨ the strip scrolls sideways to its summary (串流 · N ms · N fps in view — its tap opens the numbers: ⑮)');
@@ -914,8 +918,8 @@ console.log('⑭ THE HAND-OVER (lane desktop-handover): the strip gives the stre
   ok(shot.w === 1280 && shot.h === 720 && shot.png.readUInt32BE(16) === 1280 && shot.coords === 'display', '⑭ the agent\'s screenshot = desktop-grab through the REAL bundle (the fake source\'s 1280×720 PNG) — its size printed', { w: shot.w, h: shot.h, bytes: shot.png.length });
   const n0 = psLines().length;
   await ho.act('md-win-a', A, { verb: 'click', at: '640,360' });
-  const got = await (async () => { for (let i = 0; i < 50; i++) { const l = linesSince(n0); if (l.includes('U 0')) return l; await sleep(100); } return linesSince(n0); })();
-  ok(JSON.stringify(got.slice(0, 4)) === JSON.stringify(['M 640 360', 'M 640 360', 'D 0', 'M 640 360']) || (got.includes('M 640 360') && got.includes('D 0') && got.includes('U 0') && got.indexOf('D 0') < got.indexOf('U 0') && got.every((l) => !/^M /.test(l) || l === 'M 640 360')), '⑭ the agent\'s click at the still\'s centre reached THE resident script as ④\'s owner click did: M 640 360 · D 0 · U 0 (desktop-input → the session\'s own sink)', got);
+  const got = await linesUntil(n0, 'U 0', 50);
+  ok(JSON.stringify(got.slice(0, 4)) === JSON.stringify(['M 640 360', 'M 640 360', 'D 0', 'M 640 360']) || (got.includes('M 640 360') && got.includes('D 0') && got.includes('U 0') && got.indexOf('D 0') < got.indexOf('U 0') && got.every((l) => !/^M /.test(l) || l === 'M 640 360')), '⑭ the agent\'s click at the still\'s centre reached THE resident script as ④\'s owner click did: M 640 360 · D 0 · U 0 (desktop-input → the session\'s own sink)' + never(got), got);
   const dot = await p.until(`(() => { const c = document.querySelector('${WIN} .browser-live-agent-cursor'); if (!c || c.style.display === 'none') return false; const v = document.querySelector('${WIN} .stream-video').getBoundingClientRect(), b = c.getBoundingClientRect(); return Math.abs(b.left - (v.left + v.width / 2)) < 12 && Math.abs(b.top - (v.top + v.height / 2)) < 12 && /Alpha/.test(c.textContent); })()`, 5000);
   ok(dot, '⑭ the agent\'s pointer shows over the picture where it clicked, labelled Alpha (browser-live-window\'s labelled cursor)');
   await p.shot('handover.png', WIN);
@@ -1151,9 +1155,9 @@ console.log('⑮ a phone: the summary\'s tap, the pill under a finger');
   const away = await p.until(`document.querySelector('${WIN} .desktop-strip').classList.contains('is-away')`, 6000);
   const n0 = psLines().length;
   await p.tap(187, 420); // the middle of the picture: the machine's
-  const mid = await (async () => { for (let i = 0; i < 30; i++) { const l = linesSince(n0); if (l.includes('U 0')) return l; await sleep(100); } return linesSince(n0); })();
+  const mid = await linesUntil(n0, 'U 0', 30);
   const stillAway = await p.ev(`document.querySelector('${WIN} .desktop-strip').classList.contains('is-away')`);
-  ok(full && away && mid.includes('D 0') && mid.includes('U 0') && stillAway, '⑮ in full screen the pill fades (no finger moved); a tap in the middle is a click on the machine (D 0 · U 0) and leaves the pill away', { full, away, mid, stillAway });
+  ok(full && away && mid.includes('D 0') && mid.includes('U 0') && stillAway, '⑮ in full screen the pill fades (no finger moved); a tap in the middle is a click on the machine (D 0 · U 0) and leaves the pill away' + never(mid), { full, away, mid, stillAway });
   const n1 = psLines().length;
   await p.tap(30, 40); // the pill's corner (top-left third)
   const woke = await p.until(`!document.querySelector('${WIN} .desktop-strip').classList.contains('is-away')`, 1000);
