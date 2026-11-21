@@ -719,6 +719,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - LEGS: test-desktop-apps (fast: the argv, the merge of a row's own list, never twice, firefox untouched; RED: the release's argv in a copy); test-desktop-app-keeper (heavy: the record's argv); test-desktop-xpra-window-open (heavy, the proof: the RUNNING Chrome's own argv carries the switch once; 3 s after the click into the page — the bubble took the focus at about 1.3 s — the page's own last focus event is a focus, never a blur; then its keyboard legs).
 - THE STAND-IN'S FIRST BOX RUN (int361 row 39, r1472 — its first run anywhere; never green before): two reds, both THE LEG's. A real Chrome lets ONE window.open use a click's activation, so the page's one click never opened its second popup (the server saw /p1 alone); the pages carried no charset (the title read «Sign in â€“ stand-in 1»); and the title pattern ended at «» while the window bar adds « - Google Chrome». Tests only: one popup a click and two real clicks (each popup waited for), `text/html; charset=utf-8`, the pattern takes the browser's suffix. The product's own law leg was green in that run.
 
+### bl-accounts B-87fd follow — the ⟳'s true reason for an unknown holder (主开发 r1477, narrow round wg6jz85ye)
+- A ⟳ by KEY found no carrier because the pool's only running conversation was an unknown holder (the carrier skip), and answered «no Codex chat session is running» while one visibly ran. It now answers holder_unknown naming the key (`unknownHolderOn`: a running local codex chat conversation whose pool lists the key, or whose link is it, and whose held member cannot be named), and codexRefreshToast words it in en / zh / ja. Nothing is read through it.
+- test-codex-pool (17c): the key road's answer and its toast (+ the RED: the release's «no session»); the carrier RED's words corrected (no read was ever spent — the session's own guard refused it); the wall leg asserts the bucket THAT wall wrote (its own stated reset). test-billing-slot-parity: the new caller's row.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
