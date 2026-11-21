@@ -55,6 +55,12 @@ const PAGE = process.env.CD4B_PAGE === 'ready' ? 'ready' : 'held';
 const REDS = PAGE === 'held' && process.env.CD4B_REDS !== '0';
 const SCALE = Number(process.env.BOOT_SHAPE_SCALE) || 1;
 const ANSWER_LAW_MS = 1000, SAMPLE_MS = 500, HOLD_LAW_MS = 250, PROBE_TIMEOUT_MS = 5000;
+// THE CLOCK LAW IS THE BOX'S (主开发 r965, after the suite's first hosted run: the dead scene held 316 / 323 ms on the Actions runner,
+// a machine about 1.7 times slower). The law's number does not move — 250 ms is the owner's, on the hub. On the hosted runner (its own
+// mark: GITHUB_ACTIONS=true — never a guess from speed) every scene still runs and every other leg is judged; the loop-hold law prints
+// its reading and says by name that it is not judged there: a SKIP line (counted as a skip, never a green). The box's run is the law's proof.
+const HOSTED = process.env.GITHUB_ACTIONS === 'true';
+const CLOCK = [];   // each scene's longest hold and what the boot trace named it — printed at the end (inside a red run's last 40 lines)
 const T_START = Date.now(), END_BY = T_START + (Number(process.env.CD4B_BUDGET_S) || 1080) * 1000;   // the runner's --one deadline is 20 min
 const S = JSON.stringify;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -254,6 +260,7 @@ async function report(tag, from, to, marks, { label = tag, judge = 'law', fromFi
   console.log(`  ${label}: /login — ${s.n} samples, ${s.preListen} refused before the listen, ${s.answered} answered, worst ${s.worst} ms (at +${s.worstAt != null ? (s.worstAt / 1000).toFixed(1) : '?'} s), ${s.overLaw} over ${ANSWER_LAW_MS} ms, ${s.overProbe} over the probe's ${PROBE_TIMEOUT_MS} ms; unanswered ${s.unansweredN} ${s.unansweredN ? S(s.unanswered) : ''}`);
   console.log(`  ${label}: loop — longest hold ${h.maxHeld} ms; ${h.over} gaps held ≥ ${HOLD_LAW_MS} ms (${h.sum} ms in all); the top: ${h.top.map((g) => `+${((g.abs - first) / 1000).toFixed(1)} s ${g.ms} ms (cpu ${g.cpu} · wait ${g.wait} · control ${g.ctl} ⇒ held ${g.held})`).join('; ')}`);
   console.log(`  ${label}: boot trace ≥ 100 ms: ${steps.join(' · ') || 'none'}`);
+  CLOCK.push(`${label}: the longest hold ${h.maxHeld} ms${named.length ? ` — the trace's longest named: ${String(named[0]).slice(0, 220)}` : ''}`);
   // THE LISTEN STEP's window (the round's follow): from the listen callback to its last turn's end — server.js runs the restore's
   // registration ('restore') and the rest of the step ('listen-rest') each in a loop turn of its own, the boot trace's steps — and the
   // longest hold in it: the room under the bound, said in numbers (the law above judges every hold of the window)
@@ -267,7 +274,9 @@ async function report(tag, from, to, marks, { label = tag, judge = 'law', fromFi
   const hl = holdLines(tag); console.log(`  ${label}: the hub's [loop-hold] lines: ${hl.length}${hl.length ? '\n    ' + hl.slice(0, 6).join('\n    ') : ''}`);
   if (judge === 'law') {
     check(`${label}: THE LAW — /login answered within ${ANSWER_LAW_MS} ms at every ${SAMPLE_MS} ms sample past the listen (worst ${s.worst} ms, N = ${N})`, s.overLaw === 0 && s.unansweredN === 0 && s.answered > 0, s);
-    check(`${label}: THE LAW — no loop hold ≥ ${HOLD_LAW_MS} ms from the first loop turn (longest ${h.maxHeld} ms, N = ${N})`, h.ok && h.over === 0, h.top);
+    const lawWords = `${label}: THE LAW — no loop hold ≥ ${HOLD_LAW_MS} ms from the first loop turn (longest ${h.maxHeld} ms, N = ${N})`;
+    if (HOSTED) console.log(`  ⊘ SKIP: ${lawWords} — NOT JUDGED on the hosted runner (GITHUB_ACTIONS=true): the clock law is judged on the box only (主开发 r965); its reading is printed`);
+    else check(lawWords, h.ok && h.over === 0, h.top);
   } else if (judge === 'red') {
     // TIED TO ITS PLANT: a hold ≥ the law that the boot trace names by the planted code (its step, or the sites its samples stood in)
     const tied = trace && Array.isArray(trace.holds) ? trace.holds.filter((x) => (x.ms || 0) >= HOLD_LAW_MS && !!plant && plant.re.test([x.name || '', ...(x.sites || []).map((y) => y.what), ...(x.faint || []).map((y) => y.what)].join(' · '))) : [];
@@ -500,5 +509,6 @@ if (REDS && SHAPES.includes('survive') && !hubDied && left() > 260000) {
 else console.log(`  the red controls: not run (CD4B_PAGE=${PAGE}${process.env.CD4B_REDS === '0' ? ', CD4B_REDS=0' : ''}) — a measure, not the pin`);
 
 await stopHub('SIGTERM');
+console.log(`\nTHE CLOCK, each scene's longest hold and what the boot trace named it${HOSTED ? ' (the hosted runner: printed — the loop-hold law is judged on the box only)' : ''}:${CLOCK.length ? '\n  ' + CLOCK.join('\n  ') : ' none measured'}`);
 console.log(`\n${passed} passed, ${failed} failed (${((Date.now() - T_START) / 1000).toFixed(0)} s)`);
 process.exit(failed ? 1 : 0);
