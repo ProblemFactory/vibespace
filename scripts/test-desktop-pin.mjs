@@ -578,12 +578,15 @@ console.log('CONTROLS (patched copies)');
     const CLI_VERBS = [...new Set([...CLI_SRC.matchAll(/if \(verb === '([a-z]+)'\)/g)].map((m) => m[1]))];
     const NO_HANDLE = new Set(['list', 'open']); // they take no handle: no cell
     const PIXEL_VERBS = new Set(['screenshot', 'click', 'type', 'key', 'scroll']);
-    const OTHER_CODE = { attach: 'window_subject_verb', detach: 'window_subject_verb', size: 'window_subject_verb', mode: 'window_subject_verb', stop: 'window_subject_verb', watch: 'window_subject_verb', snapshot: 'window_subject_pixels' };
+    const OTHER_CODE = { attach: 'window_subject_verb', detach: 'window_subject_verb', size: 'window_subject_verb', mode: 'window_subject_verb', stop: 'window_subject_verb', watch: 'window_subject_verb', snapshot: 'window_subject_pixels', text: 'window_subject_verb' };
+    // B-4be3 (moved onto the train): `text @ref` goes through the ACT's door, as snapshot goes through the one door — the record kind
+    // is judged first (a shared desktop has no window handles), then the verb: neither is a pixel verb
+    const AFTER_KIND = new Set(['snapshot', 'text']);
     const unwritten = CLI_VERBS.filter((v) => !NO_HANDLE.has(v) && !PIXEL_VERBS.has(v) && !(v in OTHER_CODE));
     ok(CLI_VERBS.length >= 14 && unwritten.length === 0, `the table's verbs are the CLI's own (${CLI_VERBS.length}: ${CLI_VERBS.join(' ')}) — a verb nobody wrote a cell for is red by name`, unwritten);
     const scrollsP = []; wtP.injectScroll = async (o) => { scrollsP.push({ x: o.x, y: o.y }); return { ok: true, did: { verb: 'scroll', direction: o.direction, by: o.by } }; };
     const CALL = { screenshot: (E, h) => E.screenshot(h, fP), click: (E, h) => E.act(h, fP, { verb: 'click', at: '10,20' }), type: (E, h) => E.act(h, fP, { verb: 'type', text: 't' }), key: (E, h) => E.act(h, fP, { verb: 'key', chord: 'Return' }), scroll: (E, h) => E.act(h, fP, { verb: 'scroll', direction: 'down' }),
-      snapshot: (E, h) => E.snapshot(h, fP), attach: (E, h) => E.attach(h, fP), detach: (E, h) => E.detach(h, fP), size: (E, h) => E.setSize(h, '800x600', fP), mode: (E, h) => E.setLaunchMode(h, 'pixels', fP), stop: (E, h) => E.stopOwn(h, fP), watch: (E, h) => E.watch(h, fP) };
+      snapshot: (E, h) => E.snapshot(h, fP), text: (E, h) => E.act(h, fP, { verb: 'text', ref: '@e1' }), attach: (E, h) => E.attach(h, fP), detach: (E, h) => E.detach(h, fP), size: (E, h) => E.setSize(h, '800x600', fP), mode: (E, h) => E.setLaunchMode(h, 'pixels', fP), stop: (E, h) => E.stopOwn(h, fP), watch: (E, h) => E.watch(h, fP) };
     // the record kinds: an app on a rung that owns its display (xpra), the person's own desktop (a record of origin «desktop»), a tree share
     const recDk = { id: 'da-dsk', label: 'Desktop', exec: 'x', state: 'ready', origin: 'desktop', display: ':0', pids: { app: 4747 }, backend: 'xpra', startedAt: Date.now(), readyAt: Date.now() };
     const recV = { id: 'da-vnc', label: 'OnePane', exec: 'x', state: 'ready', display: ':95', pids: { app: 4848 }, backend: 'vnc-display', startedAt: Date.now(), readyAt: Date.now() };
@@ -610,7 +613,7 @@ console.log('CONTROLS (patched copies)');
         const rows = fs.readFileSync(E.auditFile, 'utf8').slice(before.audit).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
         // the door's order (r989): the lease, the record kind, the verb's kind, the record's state, the window (its plan OK)
         const sharedKind = kind === 'desktop' || kind === 'shared';
-        const want = OTHER_CODE[verb] === 'window_subject_verb' ? 'window_subject_verb' : sharedKind ? 'window_subject_shared' : verb === 'snapshot' ? 'window_subject_pixels' : state === 'launching' ? 'window_not_ready' : state === 'unreadable' ? 'window_list_unreadable' : state === 'gone' ? 'window_gone' : kind === 'onepane' ? 'window_unshowable' : 'acted';
+        const want = OTHER_CODE[verb] && !AFTER_KIND.has(verb) ? OTHER_CODE[verb] : sharedKind ? 'window_subject_shared' : AFTER_KIND.has(verb) ? OTHER_CODE[verb] : state === 'launching' ? 'window_not_ready' : state === 'unreadable' ? 'window_list_unreadable' : state === 'gone' ? 'window_gone' : kind === 'onepane' ? 'window_unshowable' : 'acted';
         // r989 (4): an «acted» cell judges the injection went to the SUBJECT's own window (the popup at 0,0, 500×600), never the main's
         const last = { click: clicksP[clicksP.length - 1], key: keysP[keysP.length - 1], type: typedP[typedP.length - 1], scroll: scrollsP[scrollsP.length - 1], screenshot: shotsP[shotsP.length - 1] }[verb];
         const toSubject = verb === 'click' ? !!last && last !== lastOf.click && last.x === 10 && last.y === 20 : verb === 'key' || verb === 'type' ? !!last && last !== lastOf[verb] && last.window === 2 : verb === 'scroll' ? !!last && last !== lastOf.scroll && last.x === 250 && last.y === 300 : verb === 'screenshot' ? !!(res && res.subject && res.subject.id === 2 && res.subject.handle === h && last && last.main === 2) : false;

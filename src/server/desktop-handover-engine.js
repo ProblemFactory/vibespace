@@ -212,7 +212,7 @@ function create({ dataDir, activeSessions, log = console, now = Date.now, tickMs
     const origin = lease.shot ? lease.shot.origin : (dev.source && dev.source.origin) || { x: 0, y: 0 };
     const refuse = (code, error, extra = {}) => { audit({ handle, verb, sessionKey: lease.holder.key, by: 'pixels', ok: false, code, ...extra }); throw named(code, error, { handle, origin: ORIGIN }); };
     let records, did;
-    if ((verb === 'click' || verb === 'type') && body.ref) refuse('mode_pixels', 'a machine\'s desktop has no tree here — read it with screenshot, act with click --at x,y / type / key / scroll');
+    if ((verb === 'click' || verb === 'type' || verb === 'text') && body.ref) refuse('mode_pixels', 'a machine\'s desktop has no tree here — read it with screenshot, act with click --at x,y / type / key / scroll');
     if (verb === 'click') {
       const pv = DH.pointVerdict(body.at, size);
       if (pv) refuse(pv.code, pv.error);

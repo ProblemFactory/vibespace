@@ -1260,6 +1260,9 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       const rr = wt.resolveRef(lease.refs, under);
       if (!rr.ok) throw namedError(rr.code, rr.why);
       root = rr.entry;
+      // r2 (a small): under `auto` resolved to PIXELS a subtree reads no tree either — the same refusal as `text` (it never re-probes)
+      const res0 = rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto' ? resolutions.get(rec.id) : null;
+      if (res0 && res0.mode === 'pixels') { audit({ ...who, verb: 'snapshot', by: 'mode', ok: false, code: 'mode_pixels', mode: 'auto', under: root.ref }); throw namedError('mode_pixels', `${res0.why || 'no accessibility tree — pixel mode'}: read it with screenshot, act with click --at x,y / type / key / scroll`, { mode: 'auto', resolvedMode: 'pixels' }); }
       for (const k of lease.refs.keys()) { const n = Number(String(k).slice(2)); if (n > refBase) refBase = n; }
     }
     const r = await wt.snapshotTarget({ pids, budget, text, ...(root ? { root, refBase } : {}), env: WT.treeEnvOf(rec, env()), ...helperOpts() });
@@ -1293,7 +1296,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     audit({ ...who, verb: 'snapshot', by: 'tree', ok: true, nodes: s.census.nodes, unreadable: s.unreadable.length, ...(dl.dialog ? { dialog: dl.dialog.ref } : {}), ...(root ? { under: root.ref } : {}) });
     // B-4be3: the subtree's answer SAYS that every older ref is gone, and the one-line recipe back to the whole window
     const subtree = root ? { of: root.ref, role: root.role, name: root.name, refs: s.nodes.length ? `${s.nodes[0].ref}–${s.nodes[s.nodes.length - 1].ref}` : null,
-      note: `a subtree of ${root.ref} (${root.role}${root.name ? ' ' + JSON.stringify(root.name) : ''}): these refs REPLACE the last snapshot's — every older ref is gone (acting on one is refused ref_unknown); \`vibespace-window snapshot ${rec.id}\` reads the whole window again` } : null;
+      note: `a subtree of ${root.ref} (${root.role}${root.name ? ' ' + JSON.stringify(root.name) : ''}): these refs REPLACE the last snapshot's — every older ref is gone (acting on one is refused ref_unknown; a ref is good only against the last snapshot you took); \`vibespace-window snapshot ${rec.id}\` reads the whole window again` } : null;
     return { handle: rec.id, label: rec.label, origin: rec.origin || ORIGIN, yourDesktop: rec.origin === 'desktop', apps: s.apps, nodes: dl.nodes.map(wt.nodeView), census: s.census, subtree,
       dialog: dl.dialog ? { ref: dl.dialog.ref, role: dl.dialog.role, name: dl.dialog.name, field: dl.dialog.field } : null, head: WT.dialogHead(dl.dialog), unreadable: s.unreadable, truncated: s.truncated, budget: s.budget, callTimeoutMs: s.callTimeoutMs, ms: s.ms, nodesPerSec: s.nodesPerSec,
       ...(rec.origin !== 'desktop' ? { mode: modeInfo(rec.id) } : {}),
@@ -1378,6 +1381,9 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       const e = refEntry();
       held();
       const r = await wt.actOnNode({ entry: e, verb: 'text', maxBytes: body.maxBytes, env: base, ...helperOpts() });
+      // r2 (主开发 r1219, THE MUST): a READ hands bytes back — the SAME re-check after the helper's await as the snapshot's
+      // (the stillHeld law): a take-over or a revoke while the helper read ⇒ the text is DROPPED, refused by name
+      if (r.ok) { try { stillHeld(rec, facts, 'text'); } catch (err) { audit({ ...who, verb: 'text', by: 'node', node: nodeLine(e), ok: false, code: err.code, dropped: true }); throw err; } }
       fromHelper(r, { verb: 'text', by: 'node', node: nodeLine(e), ...(r.ok && r.did ? { bytes: r.did.bytes, cut: !!r.did.cut } : {}) });
       return { ok: true, handle: rec.id, did: { ...r.did, verb: 'text', by: 'node', ref: e.ref }, ms: r.ms };
     }

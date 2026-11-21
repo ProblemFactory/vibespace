@@ -139,6 +139,19 @@ def actions_of(acc):
 # list cannot hold and takes clear fields away); AT-SPI's state set names no protected-text state to honour beside it.
 HIDDEN_TEXT_ROLES = ("password text",)
 
+# B-4be3 r2 (主开发 r1219, THE MUST): a node's NAME as a snapshot keeps it — the ref carries THIS cut, so every check of
+# «is it still the node the ref named» (an act, a subtree's root) compares the SAME cut: a name past it is never stale
+# because of its own length (it looped ref_stale for ever, the release's act included)
+NAME_CUT = 200
+
+
+def same_node(expect, role, name):
+    if not expect:
+        return True
+    if expect.get("role") and expect["role"] != role:
+        return False
+    return expect.get("name") is None or expect["name"] == (name or "")[:NAME_CUT]
+
 
 def text_hidden(role):
     return role in HIDDEN_TEXT_ROLES
@@ -208,13 +221,14 @@ def walk(app, budget, max_depth, want_text, deadline, base_path=None):
             break
         acc, path, depth, parent_ref = queue.pop(0)
         ref = "@e%d" % (len(nodes) + 1)
-        role = role_name(acc)
+        role_raw = safe(lambda: acc.get_role_name(), None)
+        role = role_raw or "unknown"
         name = safe(lambda: acc.get_name(), "") or ""
         ifaces = safe(lambda: list(acc.get_interfaces()), None)
         if ifaces is None:
             unreadable.append({"ref": ref, "path": path, "why": "get_interfaces failed (no answer within the call timeout)"})
             ifaces = []
-        node = {"ref": ref, "parent": parent_ref, "depth": depth, "path": path, "role": role, "name": name[:200], "iface": ifaces}
+        node = {"ref": ref, "parent": parent_ref, "depth": depth, "path": path, "role": role, "name": name[:NAME_CUT], "iface": ifaces}
         b = extents(acc) if "Component" in ifaces else None
         if b is not None:
             node["bounds"] = b
@@ -223,7 +237,9 @@ def walk(app, budget, max_depth, want_text, deadline, base_path=None):
             node["actions"] = acts
         node["editable"] = "EditableText" in ifaces
         if want_text and "Text" in ifaces:
-            if text_hidden(role):
+            if role_raw is None:
+                pass                         # r2: a role that did not answer may be a hidden field's — no text (fail closed)
+            elif text_hidden(role):
                 node["textHidden"] = True    # B-4be3: the tree's hidden-text role — its text is never read
             else:
                 tx = text_of(acc)
@@ -295,10 +311,10 @@ def op_snapshot(req):
         rrole = role_name(acc)
         rname = safe(lambda: acc.get_name(), "") or ""
         expect = root.get("expect") or {}
-        if expect and ((expect.get("role") and expect["role"] != rrole) or (expect.get("name") is not None and expect["name"] != rname)):
+        if not same_node(expect, rrole, rname):
             return {"ok": False, "code": "ref_stale", "why": "the node at that path is now %r %r, the ref named %r %r — take a new snapshot" % (rrole, rname, expect.get("role"), expect.get("name"))}
         mine = [{"pid": rpid, "name": next((a["name"] for a in apps if a["pid"] == rpid), ""), "acc": acc, "path": rpath}]
-        root_view = {"pid": rpid, "path": rpath, "role": rrole, "name": rname[:200]}
+        root_view = {"pid": rpid, "path": rpath, "role": rrole, "name": rname[:NAME_CUT]}
     all_nodes, unread, census, trunc = [], [], None, False
     for a in mine:
         n, c, u, t = walk(a["acc"], budget - len(all_nodes), max_depth, want_text, deadline, a.get("path"))
@@ -362,10 +378,13 @@ def op_act(req):
     acc, err = resolve_path(pid, path)
     if err:
         return err
-    role = role_name(acc)
+    role_raw = safe(lambda: acc.get_role_name(), None)
+    role = role_raw or "unknown"
     name = safe(lambda: acc.get_name(), "") or ""
-    if expect and ((expect.get("role") and expect["role"] != role) or (expect.get("name") is not None and expect["name"] != name)):
+    if not same_node(expect, role, name):
         return {"ok": False, "code": "ref_stale", "why": "the node at that path is now %r %r, the ref named %r %r — take a new snapshot" % (role, name, expect.get("role"), expect.get("name"))}
+    # r2: a role that did not answer may be a hidden field's — its text is never read (fail closed, as the snapshot)
+    hidden = role_raw is None or text_hidden(role)
     ifaces = safe(lambda: list(acc.get_interfaces()), []) or []
     verb = req.get("verb")
     t0 = time.time()
@@ -406,8 +425,8 @@ def op_act(req):
         if ok is None:
             return {"ok": False, "code": "action_failed", "why": "%s did not answer within %d ms" % (verb, call_ms)}
         return {"ok": bool(ok), "code": None if ok else "action_refused", "did": {"verb": verb, "chars": len(text), "role": role, "name": name}, "ms": round((time.time() - t0) * 1000, 1)}
-    if verb == "text" and text_hidden(role):
-        return {"ok": False, "code": "text_hidden", "why": "%s %r is the tree's hidden-text role (a password field) — its text is never read through the tree" % (role, name)}
+    if verb == "text" and hidden:
+        return {"ok": False, "code": "text_hidden", "why": ("%s %r is the tree's hidden-text role (a password field)" % (role, name) if role_raw is not None else "%r: its role did not answer (it may be a password field)" % name) + " — its text is never read through the tree"}
     if verb == "text":
         # B-4be3: ONE node's WHOLE text, on request — its Text interface (an entry's whole value, an address bar's whole
         # address) and its whole accessible name, each bounded by maxBytes of UTF-8 (the default 64 KiB, 256 KiB at most);
@@ -415,7 +434,7 @@ def op_act(req):
         cap = max(1, min(262144, int(req.get("maxBytes") or 65536)))
 
         def bounded(s):
-            b = (s or "").encode("utf-8")
+            b = (s or "").encode("utf-8", "replace")   # r2: a lone surrogate from a toolkit is replaced, never a helper_error
             if len(b) <= cap:
                 return s or "", False
             return b[:cap].decode("utf-8", "ignore"), True
@@ -437,7 +456,7 @@ def op_act(req):
                                     "chars": chars, "bytes": len((tx or "").encode("utf-8")), "maxBytes": cap, "cut": text_cut},
                 "ms": round((time.time() - t0) * 1000, 1)}
     if verb == "read":
-        return {"ok": True, "did": {"verb": "read", "role": role, "name": name, "iface": ifaces, "text": None if text_hidden(role) else text_of(acc, 2000), "actions": actions_of(acc), "states": state_names(acc)}}
+        return {"ok": True, "did": {"verb": "read", "role": role, "name": name, "iface": ifaces, "text": None if hidden else text_of(acc, 2000), "actions": actions_of(acc), "states": state_names(acc)}}
     if verb == "focus":
         if "Component" not in ifaces:
             return {"ok": False, "code": "action_refused", "why": "%s %r exports no Component interface — it cannot take keyboard focus through the tree" % (role, name)}

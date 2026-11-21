@@ -567,10 +567,17 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
         const r = req.root.path;   // ONE subtree: the table and its rows — cells only, nothing to act on
         const nodes = [nd('@e1', r, 'table', 'Expenses'), nd('@e2', r.concat(0), 'table row', 'row 1', { parent: '@e1' }), nd('@e3', r.concat(1), 'table row', 'row 2', { parent: '@e1' }), nd('@e4', r.concat(0, 0), 'table cell', 'Taxi', { parent: '@e2' })];
         out = { ok: true, apps: [{ pid, name: 'Chromium' }], nodes, root: { pid, path: r, role: 'table', name: 'Expenses' }, census: census(4), unreadable: [], truncated: false, budget: req.budget, callTimeoutMs: 800, ms: 1 };
+      } else if (req.op === 'snapshot' && fs.existsSync(${JSON.stringify(path.join(dir, 'closed-tree'))})) {
+        out = { ok: true, apps: [{ pid, name: 'Chromium' }], nodes: [nd('@e1', [], 'application', 'Chromium'), nd('@e2', [0], 'frame', '', { parent: '@e1' })], census: census(2), unreadable: [], truncated: false, budget: req.budget, callTimeoutMs: 800, ms: 1 };
       } else if (req.op === 'snapshot') {
         const nodes = [nd('@e1', [], 'application', 'Chromium'), nd('@e2', [0], 'frame', 'Reimbursements', { parent: '@e1' }), nd('@e3', [0, 0], 'table', 'Expenses', { parent: '@e2' }),
           nd('@e4', [0, 1], 'push button', 'Submit', { parent: '@e2', actions: ['press'] }), nd('@e5', [0, 2], 'entry', 'Address and search bar', { parent: '@e2', editable: true, text: 'https://example.test/report?id=1' })];
         out = { ok: true, apps: [{ pid, name: 'Chromium' }], nodes, census: census(5), unreadable: [], truncated: false, budget: req.budget, callTimeoutMs: 800, ms: 1 };
+      } else if (req.op === 'act' && req.verb === 'text' && req.maxBytes === 4242) {
+        // r2: a SLOW read — it says it started, then waits for the test's go (what happened, never a clock) before answering
+        fs.writeFileSync(${JSON.stringify(path.join(dir, 'text-started'))}, '1');
+        const t0 = Date.now(); while (!fs.existsSync(${JSON.stringify(path.join(dir, 'text-go'))}) && Date.now() - t0 < 6000) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5); }
+        out = { ok: true, did: { verb: 'text', role: req.expect.role, name: req.expect.name, nameChars: req.expect.name.length, nameCut: false, text: 'the-whole-field-value', chars: 21, bytes: 21, maxBytes: 4242, cut: false }, ms: 1 };
       } else if (req.op === 'act' && req.verb === 'text') {
         const whole = 'https://example.test/report?id=1&' + 'q'.repeat(90000);
         const t = whole.slice(0, req.maxBytes);
@@ -599,10 +606,25 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
     const txReq = reqs().filter((q) => q.op === 'act' && q.verb === 'text').pop() || null;
     const big = await caught(() => W.engine.act(r0.handle, W.fA, { verb: 'text', ref: '@e5', maxBytes: 999999 }));
     const bigReq = reqs().filter((q) => q.op === 'act' && q.verb === 'text').pop() || null;
+    // r2 (THE MUST): the person takes the window over WHILE the helper reads — placed inside the helper's wait
+    for (const f of ['text-started', 'text-go']) fs.rmSync(path.join(dir, f), { force: true });
+    await W.engine.snapshot(r0.handle, W.fA, {});
+    const slow = caught(() => W.engine.act(r0.handle, W.fA, { verb: 'text', ref: '@e5', maxBytes: 4242 }));
+    let settled = false; slow.then(() => { settled = true; });   // refused before the helper ran ⇒ the leg ends red by name, never hangs
+    while (!settled && !fs.existsSync(path.join(dir, 'text-started'))) await new Promise((res) => setTimeout(res, 5));
+    const tk = W.engine.takeover({ handle: r0.handle, viewerId: 'viewer-b4be3', holderAlive: true });
+    fs.writeFileSync(path.join(dir, 'text-go'), '1');
+    const during = await slow;
+    W.engine.handback?.({ handle: r0.handle, viewerId: 'viewer-b4be3' });
     const audit = fs.readFileSync(path.join(W.dir, 'data', ENGINE.AUDIT_FILE), 'utf8');
+    // r2 (a small): `auto` resolved to PIXELS (the whole window's tree closed) while the lease still holds refs ⇒ --under refused too
+    fs.writeFileSync(path.join(dir, 'closed-tree'), '1');
+    const closedWhole = await caught(() => W.engine.snapshot(r0.handle, W.fA, {}));
+    const underPx = await caught(() => W.engine.snapshot(r0.handle, W.fA, { under: '@e3' }));
+    fs.rmSync(path.join(dir, 'closed-tree'), { force: true });
     W.engine.setShareMode(r0.handle, 'pixels');
     const px = await caught(() => W.engine.act(r0.handle, W.fA, { verb: 'text', ref: '@e5' }));
-    return { W, whole, noSnapFirst, sub1, subReq, old, again, tx, txReq, big, bigReq, audit, px };
+    return { W, whole, noSnapFirst, sub1, subReq, old, again, tx, txReq, big, bigReq, audit, px, tk, during, closedWhole, underPx };
   }
   const D = await doorChecks(ENGINE, 'b4be3-real');
   const s1 = D.sub1.ok ? D.sub1.v : null;
@@ -617,12 +639,17 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
   ok(D.big.ok && D.bigReq && D.bigReq.maxBytes === 262144, 'an asked bound past the cap is held to 256 KiB', D.bigReq && D.bigReq.maxBytes);
   ok(!/q{50}/.test(D.audit) && /"verb":"text"[^\n]*"bytes":65536[^\n]*"cut":true/.test(D.audit), 'the audit names the node and the bytes, NEVER the text', D.audit.split('\n').filter((l) => l.includes('"text"')).slice(-1)[0]);
   ok(!D.px.ok && D.px.e.code === 'mode_pixels', 'a pixel share refuses the whole-text read by name (a tree read, the same door as snapshot)', D.px.ok ? 'read' : D.px.e.code);
+  ok(D.tk && D.tk.ok !== false && !D.during.ok && D.during.e.code === 'window_paused' && !J(D.during.e).includes('the-whole-field-value') && /"verb":"text"[^\n]*"code":"window_paused"[^\n]*"dropped":true/.test(D.audit), 'r2 THE MUST: the person takes the window over WHILE the helper reads — the text is DROPPED, refused window_paused by name, the audit says dropped (the same re-check after the await as the snapshot\'s)', D.during.ok ? D.during.v.did : { code: D.during.e.code });
+  ok(!D.closedWhole.ok && D.closedWhole.e.code === 'mode_pixels' && !D.underPx.ok && D.underPx.e.code === 'mode_pixels', 'r2: once `auto` resolved to pixels, --under over refs that survived is refused mode_pixels too (as text is)', { whole: D.closedWhole.ok || D.closedWhole.e.code, under: D.underPx.ok || D.underPx.e.code });
+  ok(/\(verb === 'click' \|\| verb === 'type' \|\| verb === 'text'\) && body\.ref\) refuse\('mode_pixels'/.test(read('src/server/desktop-handover-engine.js')), 'r2: a machine\'s desktop refuses `text @ref` mode_pixels by name, as click / type with a ref (source pin)');
   // CONTROLS (RED): refs minted from @e1 again (no base) — an older ref silently names a subtree node; the subtree re-probing
   // the auto mode — a page's table refused mode_pixels; the audit carrying the text
   const esrc = read(ENGINE_REL);
   const mutEng = (tag, from, to) => { assert1(esrc.includes(from), `B-4be3 control ${tag} planted`); return MUT.load(ENGINE_REL, esrc.replace(from, to), tag); };
   { const D2 = await doorChecks(mutEng('b4be3-nobase', "...(root ? { root, refBase } : {})", "...(root ? { root } : {})"), 'b4be3-nobase'); ok(D2.old.ok && D2.old.v.did.name === 'row 2', 'CONTROL (refs from @e1 again): the older ref @e3 silently reads a node of the subtree (row 2, not the table) — the leg above can fail', D2.old.ok ? D2.old.v.did : D2.old.e.code); }
   { const D3 = await doorChecks(mutEng('b4be3-reprobe', "if (!root && rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto') {", "if (rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto') {"), 'b4be3-reprobe'); ok(!D3.sub1.ok && D3.sub1.e.code === 'mode_pixels', 'CONTROL (the subtree re-probes the auto mode): a table of cells is refused mode_pixels', D3.sub1.ok ? 'read' : D3.sub1.e.code); }   // stale-pins: kept (the control puts the old text back)
+  { const D5 = await doorChecks(mutEng('b4be3-norecheck', "      if (r.ok) { try { stillHeld(rec, facts, 'text'); } catch (err) {", "      if (false) { try { stillHeld(rec, facts, 'text'); } catch (err) {"), 'b4be3-norecheck'); ok(D5.during.ok && D5.during.v.did.text === 'the-whole-field-value', 'CONTROL (no re-check after the await): the text reaches the conversation that lost the window — the leg above can fail', D5.during.ok ? 'handed' : D5.during.e.code); }
+  { const D6 = await doorChecks(mutEng('b4be3-underpx', "      if (res0 && res0.mode === 'pixels') {", "      if (false) {"), 'b4be3-underpx'); ok(D6.underPx.ok, 'CONTROL (no pixel check for --under): the subtree reads the tree under a pixel resolution — the leg above can fail', D6.underPx.ok ? 'read' : D6.underPx.e.code); }
   { const D4 = await doorChecks(mutEng('b4be3-audit', "...(r.ok && r.did ? { bytes: r.did.bytes, cut: !!r.did.cut } : {})", "...(r.ok && r.did ? { bytes: r.did.bytes, cut: !!r.did.cut, text: r.did.text } : {})"), 'b4be3-audit'); ok(/q{50}/.test(D4.audit), 'CONTROL (the audit carries the text): the text is in the audit file — the leg above can fail'); }
   { const Rm = MUT.load('src/window-reach.js', read('src/window-reach.js').replace("const TREE_VERBS = Object.freeze(['snapshot', 'text']);", "const TREE_VERBS = Object.freeze(['snapshot']);"), 'b4be3-reach');   // stale-pins: kept (the control puts the old text back)
     const real = require(path.join(REPO, 'src/window-reach.js')).verbGate({ mode: 'pixels', verb: 'text', hasRef: true }), mut = Rm.verbGate({ mode: 'pixels', verb: 'text', hasRef: true });
@@ -642,12 +669,22 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
     'class _Acc:',
     '    def __init__(self, d): self.d = d',
     '    def get_name(self): return self.d.get("name", "")',
-    '    def get_role_name(self): return self.d.get("role", "unknown")',
+    '    def get_role_name(self):',
+    '        if self.d.get("role") == "__raise__": raise RuntimeError("no answer within the call timeout")',
+    '        return self.d.get("role", "unknown")',
     '    def get_interfaces(self): return list(self.d.get("ifaces", []))',
     '    def get_child_count(self): return len(self.d.get("children", []))',
     '    def get_child_at_index(self, i): return _Acc(self.d["children"][i])',
     '    def get_process_id(self): return self.d.get("pid")',
     '    def get_text_iface(self): return self if "Text" in self.d.get("ifaces", []) else None',
+    '    def get_action_iface(self): return self if "Action" in self.d.get("ifaces", []) else None',
+    'class Action:',
+    '    @staticmethod',
+    '    def get_n_actions(a): return len(a.d.get("actions", []))',
+    '    @staticmethod',
+    '    def get_action_name(a, i): return a.d["actions"][i]',
+    '    @staticmethod',
+    '    def do_action(a, i): return True',
     'class Text:',
     '    @staticmethod',
     '    def get_character_count(t): return len(t.d.get("text", ""))',
@@ -657,41 +694,70 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
   ].join('\n') + '\n');
   const SECRET = ['hun', 'ter', '2-', 'not-a-real-one'].join('');   // invented; built so no literal reads as a credential
   const LONG = 'https://example.test/report?id=1&' + 'é'.repeat(40000);   // 2 bytes a character past the prefix
+  const LONGNAME = 'Receipt ' + 'x'.repeat(242);   // 250 characters: a snapshot keeps 200
   const tree = { apps: [{ pid: 4242, name: 'Chromium', role: 'application', children: [
     { role: 'frame', name: 'Reimbursements', children: [
       { role: 'table', name: 'Expenses', children: [1, 2, 3, 4, 5].map((i) => ({ role: 'table row', name: 'row ' + i, children: [{ role: 'table cell', name: 'cell ' + i, ifaces: ['Text'], text: 'amount ' + i }] })) },
       { role: 'entry', name: 'Address and search bar', ifaces: ['Text', 'EditableText'], text: LONG },
       { role: 'password text', name: 'Password', ifaces: ['Text', 'EditableText'], text: SECRET },
+      // r2: a link whose name is its 250-character content (past the 200 a snapshot keeps), and a node whose role does not answer
+      { role: 'link', name: LONGNAME, ifaces: ['Action', 'Text'], actions: ['jump'], text: 'see the receipt' },
+      { role: '__raise__', name: 'unreadable role', ifaces: ['Text'], text: 'what a hidden field could hold' },
+      { role: 'panel', name: LONGNAME, children: [{ role: 'label', name: 'inside' }] },
     ] }] }] };
   const treeFile = path.join(dir, 'tree.json'); fs.writeFileSync(treeFile, J(tree));
   const runPy = (helperFile, req) => { const r = spawnSync('python3', ['-I', helperFile], { input: J(req), encoding: 'utf8', env: { PATH: process.env.PATH, PYTHONPATH: giDir, VS_FAKE_ATSPI_TREE: treeFile } }); try { return JSON.parse(r.stdout.trim().split('\n').pop()); } catch { return { ok: false, code: 'unparsed', why: (r.stdout || '') + (r.stderr || '') }; } };
   // the -I flag drops PYTHONPATH, so the stand-in rides a copy of the helper beside a path insert (the helper itself unchanged)
   const asRun = (src, tag) => { const f = path.join(dir, `helper-${tag}.py`); fs.writeFileSync(f, `import sys\nsys.path.insert(0, ${J(giDir)})\n` + src); return f; };
   const HSRC = read('src/window-targets-helper.py');
-  /** The helper's checks, re-run by each control. */
-  const helperChecks = (src, tag) => {
+  /** The helper's checks; a control re-runs only the ones it names (each is one python run). */
+  const helperChecks = (src, tag, only = null) => {
     const f = asRun(src, tag);
-    const whole = runPy(f, { op: 'snapshot', pids: [4242], budget: 600 });
-    const sub = runPy(f, { op: 'snapshot', pids: [4242], budget: 4, root: { pid: 4242, path: [0, 0], expect: { role: 'table', name: 'Expenses' } } });
-    const stale = runPy(f, { op: 'snapshot', pids: [4242], budget: 600, root: { pid: 4242, path: [0, 0], expect: { role: 'table', name: 'Invoices' } } });
-    const tx = runPy(f, { op: 'act', pid: 4242, path: [0, 1], expect: { role: 'entry', name: 'Address and search bar' }, verb: 'text', maxBytes: 1000 });
-    const hid = runPy(f, { op: 'act', pid: 4242, path: [0, 2], expect: { role: 'password text', name: 'Password' }, verb: 'text', maxBytes: 1000 });
-    return { whole, sub, stale, tx, hid };
+    const cut = LONGNAME.slice(0, 200);   // r2: the ref carries the name AS THE SNAPSHOT KEPT IT (200 characters)
+    const asks = {
+      whole: { op: 'snapshot', pids: [4242], budget: 600 },
+      sub: { op: 'snapshot', pids: [4242], budget: 4, root: { pid: 4242, path: [0, 0], expect: { role: 'table', name: 'Expenses' } } },
+      stale: { op: 'snapshot', pids: [4242], budget: 600, root: { pid: 4242, path: [0, 0], expect: { role: 'table', name: 'Invoices' } } },
+      tx: { op: 'act', pid: 4242, path: [0, 1], expect: { role: 'entry', name: 'Address and search bar' }, verb: 'text', maxBytes: 1000 },
+      hid: { op: 'act', pid: 4242, path: [0, 2], expect: { role: 'password text', name: 'Password' }, verb: 'text', maxBytes: 1000 },
+      rd: { op: 'act', pid: 4242, path: [0, 2], expect: { role: 'password text', name: 'Password' }, verb: 'read' },
+      // r2: an act, the text verb and a subtree root on the long-named nodes; the node whose role does not answer
+      press: { op: 'act', pid: 4242, path: [0, 3], expect: { role: 'link', name: cut }, verb: 'do_action', action: 'jump' },
+      longTx: { op: 'act', pid: 4242, path: [0, 3], expect: { role: 'link', name: cut }, verb: 'text', maxBytes: 1000 },
+      longSub: { op: 'snapshot', pids: [4242], budget: 600, root: { pid: 4242, path: [0, 5], expect: { role: 'panel', name: cut } } },
+      urTx: { op: 'act', pid: 4242, path: [0, 4], expect: { role: 'unknown', name: 'unreadable role' }, verb: 'text', maxBytes: 1000 },
+      urRd: { op: 'act', pid: 4242, path: [0, 4], expect: { role: 'unknown', name: 'unreadable role' }, verb: 'read' },
+    };
+    const out = {};
+    for (const k of only || Object.keys(asks)) out[k] = runPy(f, asks[k]);
+    return out;
   };
   const P = helperChecks(HSRC, 'real');
   const pw = (P.whole.nodes || []).find((n) => n.role === 'password text');
-  ok(P.whole.ok && (P.whole.nodes || []).length === 15, 'SETUP: the real helper walks the stand-in tree (15 nodes)', P.whole.ok ? P.whole.nodes.length : P.whole);
+  ok(P.whole.ok && (P.whole.nodes || []).length === 19, 'SETUP: the real helper walks the stand-in tree (19 nodes)', P.whole.ok ? P.whole.nodes.length : P.whole);
   ok(P.sub.ok && P.sub.nodes.length === 4 && J(P.sub.nodes.map((n) => n.path)) === '[[0,0],[0,0,0],[0,0,1],[0,0,2]]' && P.sub.truncated === true && P.sub.root && P.sub.root.role === 'table', 'THE HELPER\'S SUBTREE: the walk starts at the root path, paths stay ABSOLUTE (an act re-resolves them), the budget (4) is spent below that node and the truncation said', P.sub.ok ? P.sub.nodes.map((n) => n.path) : P.sub);
   ok(!P.stale.ok && P.stale.code === 'ref_stale', 'a subtree whose node at that path is no longer the one named is refused ref_stale (as an act is)', P.stale);
   const enc = (P.tx.ok && P.tx.did.text) ? Buffer.byteLength(P.tx.did.text) : -1;
   ok(P.tx.ok && P.tx.did.cut === true && P.tx.did.bytes === enc && enc <= 1000 && enc >= 998 && P.tx.did.chars === LONG.length && P.tx.did.text.startsWith('https://example.test/report?id=1&'), 'THE HELPER\'S WHOLE TEXT: bounded by BYTES (1000 asked; a 2-byte character never split), the characters there were said, the cut said', P.tx.ok ? { bytes: P.tx.did.bytes, chars: P.tx.did.chars, cut: P.tx.did.cut } : P.tx);
   ok(!!pw && pw.textHidden === true && pw.text === undefined && !J(P.whole).includes(SECRET), 'THE HIDDEN-TEXT RULE (ALSO CURED): a password field (the tree\'s hidden-text role) carries NO text in the snapshot, said by textHidden', pw);
   ok(!P.hid.ok && P.hid.code === 'text_hidden' && !J(P.hid).includes(SECRET), '…and the whole-text verb refuses it by name, text_hidden — the value never leaves the helper', P.hid);
+  ok(P.rd.ok && P.rd.did.text === null && !J(P.rd).includes(SECRET), '…and the helper\'s read verb answers no text for it either', P.rd);
+  const lk = (P.whole.nodes || []).find((n) => n.role === 'link'), ur = (P.whole.nodes || []).find((n) => n.name === 'unreadable role');
+  ok(!!lk && lk.name.length === 200, 'SETUP r2: the snapshot keeps 200 characters of the 250-character name', lk && lk.name.length);
+  ok(P.press.ok && P.press.did.action === 'jump', 'r2 THE MUST — ALSO CURED ON THE RELEASE\'S ACT: a press on the long-named node (its ref carrying the cut name) is THAT node, never ref_stale for ever', P.press);
+  ok(P.longTx.ok && P.longTx.did.nameChars === 250 && P.longTx.did.name.length === 250, 'r2: the whole-text verb on it answers — with its WHOLE name (250 characters)', P.longTx.ok ? P.longTx.did.nameChars : P.longTx);
+  ok(P.longSub.ok && P.longSub.root && P.longSub.root.name.length === 200 && P.longSub.nodes.length === 2, 'r2: a subtree rooted at a long-named node is read (its root named as the snapshot names it)', P.longSub.ok ? P.longSub.nodes.length : P.longSub);
+  ok(!!ur && ur.role === 'unknown' && ur.text === undefined, 'r2: a node whose role did not answer carries no text in the snapshot (it may be a hidden field: fail closed)', ur);
+  ok(!P.urTx.ok && P.urTx.code === 'text_hidden' && P.urRd.ok && P.urRd.did.text === null && !J([P.urTx, P.urRd]).includes('hidden field could hold'), '…and the text verb refuses it text_hidden, the read verb answers no text (the act fails closed the same way)', { text: P.urTx.code || 'read', read: P.urRd.ok && P.urRd.did.text });
   // CONTROLS (RED), each a copy of the helper with ONE edit
-  const plantH = (from, to, tag) => { assert1(HSRC.includes(from), `B-4be3 helper control ${tag} planted`); return helperChecks(HSRC.replace(from, to), tag); };
-  { const C = plantH('    queue = [(app, list(base_path or []), 0, None)]', '    queue = [(app, [], 0, None)]', 'relpath'); ok(C.sub.ok && J(C.sub.nodes.map((n) => n.path)) !== '[[0,0],[0,0,0],[0,0,1],[0,0,2]]', 'CONTROL (paths relative to the subtree): an act would re-resolve the wrong node — the leg above can fail', C.sub.ok && C.sub.nodes.map((n) => n.path)); }   // stale-pins: kept (the control puts the old text back)
-  { const C = plantH('            return b[:cap].decode("utf-8", "ignore"), True', '            return s, True', 'nobound'); ok(C.tx.ok && Buffer.byteLength(C.tx.did.text) > 1000, 'CONTROL (the bound not applied): the whole value comes back past the asked bytes'); }
-  { const C = plantH('HIDDEN_TEXT_ROLES = ("password text",)', 'HIDDEN_TEXT_ROLES = ()', 'nohide'); ok(J(C.whole).includes(SECRET) && C.hid.ok && J(C.hid).includes(SECRET), 'CONTROL (no hidden-text rule — r1179\'s find): the snapshot AND the text verb hand the password field\'s value out'); }
+  const plantH = (from, to, tag, only) => { assert1(HSRC.includes(from), `B-4be3 helper control ${tag} planted`); return helperChecks(HSRC.replace(from, to), tag, only); };
+  { const C = plantH('    queue = [(app, list(base_path or []), 0, None)]', '    queue = [(app, [], 0, None)]', 'relpath', ['sub']); ok(C.sub.ok && J(C.sub.nodes.map((n) => n.path)) !== '[[0,0],[0,0,0],[0,0,1],[0,0,2]]', 'CONTROL (paths relative to the subtree): an act would re-resolve the wrong node — the leg above can fail', C.sub.ok && C.sub.nodes.map((n) => n.path)); }   // stale-pins: kept (the control puts the old text back)
+  { const C = plantH('            return b[:cap].decode("utf-8", "ignore"), True', '            return s, True', 'nobound', ['tx']); ok(C.tx.ok && Buffer.byteLength(C.tx.did.text) > 1000, 'CONTROL (the bound not applied): the whole value comes back past the asked bytes'); }
+  { const C = plantH('    return expect.get("name") is None or expect["name"] == (name or "")[:NAME_CUT]', '    return expect.get("name") is None or expect["name"] == (name or "")', 'wholename', ['press', 'longTx', 'longSub']); ok(!C.press.ok && C.press.code === 'ref_stale' && !C.longTx.ok && C.longTx.code === 'ref_stale' && !C.longSub.ok && C.longSub.code === 'ref_stale', 'CONTROL (the cut name compared with the WHOLE live name — the release\'s act): the press, the text and the subtree are ref_stale for ever', { press: C.press.code, text: C.longTx.code, sub: C.longSub.code }); }
+  { const C = plantH('            if role_raw is None:\n                pass', '            if False:\n                pass', 'roleopen', ['whole']); const u2 = (C.whole.nodes || []).find((n) => n.name === 'unreadable role'); ok(!!u2 && u2.text === 'what a hidden field could hold', 'CONTROL (a role that did not answer read anyway): its text is handed out', u2); }
+  { const C = plantH('    hidden = role_raw is None or text_hidden(role)', '    hidden = text_hidden(role)', 'actopen', ['urTx', 'urRd']); ok(C.urTx.ok && C.urRd.ok && C.urRd.did.text === 'what a hidden field could hold', 'CONTROL (the act reads a role that did not answer): the text and read verbs hand its text out', { text: C.urTx.ok ? 'read' : C.urTx.code }); }
+  { const C = plantH('        if not same_node(expect, rrole, rname):', '        if False:', 'nostale', ['stale']); ok(C.stale.ok, 'CONTROL (no root check): a subtree whose node moved is read as if it were the one named — the ref_stale leg can fail', C.stale.ok ? 'read' : C.stale.code); }
+  { const C = plantH('HIDDEN_TEXT_ROLES = ("password text",)', 'HIDDEN_TEXT_ROLES = ()', 'nohide', ['whole', 'hid', 'rd']); ok(J(C.whole).includes(SECRET) && C.hid.ok && J(C.hid).includes(SECRET) && J(C.rd).includes(SECRET), 'CONTROL (no hidden-text rule — r1179\'s find): the snapshot, the text verb AND the read verb hand the password field\'s value out'); }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

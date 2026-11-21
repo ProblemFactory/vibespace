@@ -111,7 +111,7 @@ the desktop browser YOU opened, see `mode` above):
 | Mode | How you read it | How you act | Refused |
 |---|---|---|---|
 | **tree** | `snapshot` (the accessibility tree, `@refs`) | `click @ref`, `type @ref`, plus the pixel verbs as your own fallback | nothing |
-| **pixels** | `screenshot` (the window's own image) | `click --at x,y`, `type "text"`, `key`, `scroll` | `snapshot`, `click @ref`, `type @ref` ⇒ **`mode_pixels`** |
+| **pixels** | `screenshot` (the window's own image) | `click --at x,y`, `type "text"`, `key`, `scroll` | `snapshot` (and `--under`), `text @ref`, `click @ref`, `type @ref` ⇒ **`mode_pixels`** |
 | **auto** (the default) | resolved when you `attach`: **tree** when the app's accessibility tree answers, else **pixels** | as the resolved mode | as the resolved mode |
 
 `list` prints each window's mode (`mode: auto → tree (…why…)`), and `attach`
@@ -263,17 +263,24 @@ table of a few dozen rows fills it). Read it **part by part** instead:
 
 * `vibespace-window snapshot <handle> --under @e12` reads **one subtree** —
   that node and everything below it, with the same budget spent there (the
-  same breadth-first walk, so a table's rows come before their cells). Take
-  the subtree's own refs further down: `--under` a row, then act on a cell.
+  same breadth-first walk, so a table's rows come before their cells; the
+  depth limit counts from that node). Take the subtree's own refs further
+  down: `--under` a row, then act on a cell. A machine's desktop (an `md-…`
+  handle) has no tree: `--under` and `text` are refused `mode_pixels` there.
 * **The subtree's refs REPLACE the last snapshot's.** They are numbered above
   every ref you had, so an older ref is simply **gone**: acting on one is
-  refused `ref_unknown` by name — never a different node. The answer's first
-  line says so; a plain `snapshot <handle>` reads the whole window again.
+  refused `ref_unknown` by name. A ref is good only against the **last**
+  snapshot you took — a later whole snapshot numbers from `@e1` again, so keep
+  no ref across snapshots. The answer's first line says so; a plain
+  `snapshot <handle>` reads the whole window again.
 * `vibespace-window text <handle> @e7 [--max-bytes N]` gives **one node's
   whole text** (a snapshot keeps 200 characters of a node's text and prints
   80) and its whole name: an address bar's full address, an entry's full
-  value. At most `N` bytes (default 65536, at most 262144); when cut, it says
-  the bound and how many characters there were. A read — nothing is typed.
+  value — a node whose name is longer than a snapshot keeps is read all the
+  same. At most `N` bytes (default 65536, at most 262144); when cut, it says
+  the bound and how many characters there were. A read — nothing is typed; if
+  the user takes the window over (or takes its share back) while it reads,
+  the text is dropped and the verb is refused by name.
 * **An accessible name can change between two loads of the same page** (a
   search box read by one name, later by another). Do not build a locator on a
   name: find the node again by its role and its place in the tree (or its

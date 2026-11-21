@@ -404,7 +404,9 @@ function printNode(n) {
     const d = r.did || {};
     console.log(`${d.ref} ${d.role}${d.name ? ' ' + JSON.stringify(d.name) : ''}${d.nameCut ? ` (name cut at ${d.maxBytes} bytes of ${d.nameChars} characters)` : ''}`);
     if (d.text == null) { console.log('— no text interface on this node (its name above is all it says)'); return; }
-    process.stdout.write(d.text + (d.text.endsWith('\n') ? '' : '\n'));
+    // r2 (a small): the app's text raw, but a control byte (an escape sequence) written as its code, never acted on by a reader
+    const shown = d.text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+    process.stdout.write(shown + (shown.endsWith('\n') ? '' : '\n'));
     console.log(`— ${d.bytes} bytes${d.chars != null ? ` of ${d.chars} characters` : ''}${d.cut ? ` — CUT at the ${d.maxBytes}-byte bound (--max-bytes N up to 262144)` : ' — whole'}`);
     return;
   }
