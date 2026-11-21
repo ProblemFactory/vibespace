@@ -66,6 +66,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a paired machine, the folder field lists the folder you type even while another folder there hangs, and says when its other suggestions are held.
 - In a desktop app window, Chrome's own «Can't update Chrome» notice no longer appears or takes the keyboard; Chrome outside VibeSpace still shows it.
 - Refreshing Codex usage while the only running Codex conversation cannot be tied to an account now says so, instead of «no session is running».
+- Opening many conversations at once is lighter on VibeSpace: a chat window no longer fetches every background job just to show its waiting notifications.
 
 ## 2.369.415 — 2026-11-21
 
