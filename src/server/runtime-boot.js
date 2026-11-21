@@ -36,11 +36,13 @@ function runtimeCheckArmed({ rootDir, env = process.env, tmpRoots = TMP_ROOTS(),
 function create({ rootDir, switched = { state: 'none' }, version = process.version, execPath = process.execPath, log = (l) => console.log(l), spawnFn = spawn } = {}) {
   const root = path.join(rootDir, 'data');
   const base = switched && switched.state === 'already' ? switched.from : null;   // the node this start began on
+  const supervised = switched && switched.state === 'supervised' ? switched.version : null;   // a supervised start: the provisioned runtime it did NOT switch to
   let check = null;   // {state: 'running' | 'done', at, ok?, code?, version?}
   const verdictNow = () => RF.verdict(version);
   function line() {
     const v = verdictNow();
-    const from = base ? ` (switched from ${base}: the instance's own runtime, ${path.join(root, 'runtime', 'current')})` : '';
+    const from = (base ? ` (switched from ${base}: the instance's own runtime, ${path.join(root, 'runtime', 'current')})` : '')
+      + (supervised ? ` — SUPERVISED: its supervisor started it on ${version}; the instance has provisioned ${supervised} (${path.join(root, 'runtime', 'current')}), and a supervised start never replaces itself (it would lose its start pipe)` : '');
     if (v.state === 'below-floor') return `[runtime] node ${v.version} below the floor ${v.floor} (${v.advisory}) — the next update provisions it${from}`;
     if (v.state === 'ok') return `[runtime] node ${v.version} — at or above the floor ${v.floor}${from}`;
     if (v.state === 'unknown-major') return `[runtime] node ${v.version} — the floor table (src/runtime-floor.js) names no line for v${v.major}${from}`;
@@ -78,6 +80,7 @@ function create({ rootDir, switched = { state: 'none' }, version = process.versi
       node: v.version || version, execPath, base, own: own ? { version: own.version, node: own.node } : null,
       verdict: v, advisory: RF.advisoryOf(v.advisory), running: own ? path.resolve(execPath) === path.resolve(own.node) : false,
       check, table: Object.fromEntries(Object.entries(RF.NODE_FLOORS).map(([k, r]) => [k, r.floor])),
+      supervised: supervised ? { running: version, provisioned: supervised } : null,   // the B2b cure 2 follow (主开发 r876): said, never an exit
     };
   }
   return { line, afterListen, answer };

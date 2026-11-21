@@ -54,15 +54,17 @@ function readStartSync(w, { ms = START_LINE_MS } = {}) {
       let n;
       try { n = fs.readSync(fd, chunk, 0, chunk.length, null); }
       catch (e) {
-        if (!e || (e.code !== 'EAGAIN' && e.code !== 'EWOULDBLOCK')) return { word: true, fd, why: 'ended' };
+        if (!e || (e.code !== 'EAGAIN' && e.code !== 'EWOULDBLOCK')) return { word: true, fd, why: 'read-fault', code: (e && e.code) || 'error' };   // a READ FAULT, said with its code
         if (Date.now() >= until) return { word: true, fd, why: 'no-line', ms };
         Atomics.wait(nap, 0, 0, 5);
         continue;
       }
       if (n === 0) return { word: true, fd, why: 'ended' };
-      parts.push(Buffer.from(chunk.subarray(0, n))); size += n;
-      const all = Buffer.concat(parts), i = all.indexOf(0x0a);
-      if (i >= 0) { let first = null; try { first = JSON.parse(all.subarray(0, i).toString('utf8')); } catch { } return { word: true, fd, first }; }   // never echoed: the line carries the secret
+      // TWO BOUNDS: the clock (`until`, START_LINE_MS) and the size (MAX_START_LINE); the newline is looked for in the NEW
+      // chunk only — what came before held none
+      const got = chunk.subarray(0, n), i = got.indexOf(0x0a);
+      if (i >= 0) { let first = null; try { first = JSON.parse(Buffer.concat([...parts, got.subarray(0, i)]).toString('utf8')); } catch { } return { word: true, fd, first }; }   // never echoed: the line carries the secret
+      parts.push(Buffer.from(got)); size += n;
       if (size > MAX_START_LINE) return { word: true, fd, first: null };   // a first line this long is no start
     }
   } finally { try { sock.destroy(); } catch { } }   // THE CLOSE, on every road above
@@ -78,7 +80,7 @@ function claim({ env = process.env, ms } = {}) { if (!claimed) claimed = takeSta
 /** the claimed (or a suite's) start, judged → { form: 'plain' } | { form: 'piped', start } | { form: 'piped', start: null, why } */
 function judge(s) {
   if (s.word === false) return { form: 'plain' };
-  if (s.why) return { form: 'piped', start: null, why: s.why, fd: s.fd, raw: s.raw, ms: s.ms };
+  if (s.why) return { form: 'piped', start: null, why: s.why, fd: s.fd, raw: s.raw, ms: s.ms, code: s.code };
   const m = s.first;
   if (m && m.op === 'start' && m.party === 'hub' && typeof m.secret === 'string' && typeof m.link === 'string') return { form: 'piped', start: { party: 'hub', secret: m.secret, link: m.link } };
   return { form: 'piped', start: null, why: 'no-start' };   // a first line that is no start: piped, it cannot join (it ends)

@@ -37,10 +37,17 @@
 //     CLOSES the descriptor there (Node cannot mark an inherited socket close-on-exec). BY MACHINE: server.js's own head, as
 //     written, runs in a child with a start pipe on fd 3; a child it then starts holds nothing that points to that pipe.
 //     MEASURED (Node 24): child_process with its default stdio and node-pty hand a child NO descriptor past its stdio, even
-//     one held open — so the road a held pipe can take is a spawner that passes descriptors through (stdio slot 3); every
+//     one held open — so the road a held pipe can take is a spawner that passes descriptors through (stdio slot 3): a road
+//     the product has NOWHERE today (every longer stdio list in the tree makes a NEW descriptor at slot 3); every
 //     leg prints all three. RED CONTROL: the head with the claim cut ⇒ a pass-through child holds it. (⑧ holds the same of
 //     decide(): fd 3 closed, every kind of child clean — RED: the close cut; and the line's bound on a real descriptor —
 //     RED: the bound cut ⇒ killed.)
+//   ⑫ THE RUNTIME-SWITCH ROAD (主开发 r864 small 1; ruled r876 (A)): a REAL switch in a scratch root (a newer runtime provisioned).
+//     MEASURED: a Node process's descriptors past its stdio do not cross an exec — a replaced image LOSES its start pipe. So
+//     A SUPERVISED START DOES NOT SWITCH: with the word, one image, said once («SUPERVISED: … provisioned v…»), and the claim
+//     reads the pipe (RED: the skip cut ⇒ the image is replaced and the start is bad). A PLAIN start switches as before (RED:
+//     a skip keyed on anything but the word ⇒ it no longer switches). The claim stays AFTER the runtime boot (RED: before it ⇒
+//     the switch never sees the word and the second image comes up plain).
 // in-process, plus children on a real fd 3; a scratch dir under os.tmpdir().
 import fs from 'node:fs';
 import os from 'node:os';
@@ -298,6 +305,14 @@ console.log('— ⑧ WITH THE WORD, EVERY BAD START ENDS BY NAME IN BOUNDED TIME
   const words = [];
   for (const w of ['x', '1', '-3', '999']) { const d = await HP.decide({ env: { [SP.START_WORD]: w } }); const r = await bootThrough(HP, d); words.push([w, d.why, endedOnly(r), r.lines.join(' ')]); }
   ok(words.every(([w, why, e, l]) => e && (w === '999' ? why === 'not-open' && l.includes('(fd 999) named by VIBESPACE_START_FD is not open') : why === 'no-descriptor' && l.includes('names no descriptor'))), 'the word naming no descriptor (\'x\', a stdio \'1\', \'-3\') or one that is not open (999): each ends by name', words);
+  const faulty = new PassThrough(); setImmediate(() => faulty.destroy(Object.assign(new Error('the read failed'), { code: 'EIO' })));
+  const dFault = await HP.decide({ pipe: faulty });
+  const rFault = await bootThrough(HP, dFault);
+  ok(dFault.why === 'read-fault' && dFault.code === 'EIO' && endedOnly(rFault) && rFault.lines.some((l) => l.includes('could not be read (EIO)')), `a READ FAULT on the start pipe is said as one, with its code: «${rFault.lines.join(' | ')}»`, { dFault, lines: rFault.lines });
+  const asEnded = overStartPipe("    const onFault = (e) => done({ why: 'read-fault', code: (e && e.code) || 'error' });   // a READ FAULT, said as one with its code (never «ended»)\n", "    const onFault = () => done({ why: 'ended' });\n");
+  const faulty2 = new PassThrough(); setImmediate(() => faulty2.destroy(Object.assign(new Error('the read failed'), { code: 'EIO' })));
+  const dAsEnded = await asEnded.decide({ pipe: faulty2 });
+  ok(dAsEnded.why === 'ended', `RED CONTROL — the fault read as an end: «${dAsEnded.why}», the code lost`, dAsEnded);
   const gone = new PassThrough(); gone.end();
   const dEnd = await HP.decide({ pipe: gone });
   const rEnd = await bootThrough(HP, dEnd);
@@ -337,8 +352,8 @@ console.log('— ⑧ WITH THE WORD, EVERY BAD START ENDS BY NAME IN BOUNDED TIME
   const keptCopy = path.join(T, 'hub-port-kept.js'); fs.writeFileSync(keptCopy, srcC.replace(NC, '  } finally { }\n'));
   const kidKept = await runProbe(['kid', keptCopy], { fd3: true, write: JSON.stringify(START) + '\n', env: { [SP.START_WORD]: '3' } });
   // the MEASURED fact (Node 24, the test machines): child_process with its default stdio and node-pty hand a child no descriptor
-  // past its stdio, even one this process holds open; a spawner that passes descriptors through does. So the red is that road.
-  ok(kidKept.j && kidKept.j.passHolds === true, `RED CONTROL — the close cut (the pipe left open): a child of a spawner that passes fd 3 through holds it: ${kidKept.j && kidKept.j.passHolds}; (facts: child_process default ${kidKept.j && kidKept.j.kidHolds}, node-pty ${kidKept.j && kidKept.j.ptyHolds}) (${kidKept.j && kidKept.j.startLink})`, kidKept.j && { kidHolds: kidKept.j.kidHolds, ptyHolds: kidKept.j.ptyHolds, selfAfter: kidKept.j.selfAfter, pty: kidKept.j.pty, kidLinks: kidKept.j.kid && kidKept.j.kid.links });
+  // past its stdio, even one this process holds open; a spawner that passes descriptors through does — a road the product has NOWHERE today — every longer stdio list in the tree (data/bin/job-wrapper.js, src/vnc.js, the forks' ipc) makes a NEW descriptor at slot 3; it stands here only to show the leg sees a held pipe.
+  ok(kidKept.j && kidKept.j.passHolds === true, `RED CONTROL — the close cut (the pipe left open): a child of a spawner that passes fd 3 through (a road the product has NOWHERE today — every longer stdio list in the tree (data/bin/job-wrapper.js, src/vnc.js, the forks' ipc) makes a NEW descriptor at slot 3; it stands here only to show the leg sees a held pipe) holds it: ${kidKept.j && kidKept.j.passHolds}; (facts: child_process default ${kidKept.j && kidKept.j.kidHolds}, node-pty ${kidKept.j && kidKept.j.ptyHolds}) (${kidKept.j && kidKept.j.startLink})`, kidKept.j && { kidHolds: kidKept.j.kidHolds, ptyHolds: kidKept.j.ptyHolds, selfAfter: kidKept.j.selfAfter, pty: kidKept.j.pty, kidLinks: kidKept.j.kid && kidKept.j.kid.links });
   const carriers = (AE) => {
     const base = { PATH: '/usr/bin', HOME: '/h', [SP.START_WORD]: '3' };
     const outs = { agentEnv: AE.agentEnv(base), daemonEnv: AE.daemonEnv(base), serviceEnv: AE.serviceEnv(base) };
@@ -460,7 +475,81 @@ ptyLinks().then((pf) => {
   const law = await runHead(headFile);
   ok(cut > 3 && law.j && !law.j.err && /^socket:\[\d+\]$/.test(law.j.before || '') && law.j.after !== law.j.before && law.j.word === 'gone' && law.j.childLinks > 2 && law.j.childHolds === false && law.j.ptyHolds === false && law.j.passHolds === false && !law.leaked, `server.js lines 1–${cut} as written: fd 3 was ${law.j && law.j.before}, after the head ${law.j && law.j.after}; a child_process child holds the start pipe: ${law.j && law.j.childHolds} (${law.j && law.j.childLinks} descriptors read); a node-pty child: ${law.j && law.j.ptyHolds} (${JSON.stringify(law.j && law.j.pty)}); a child of a spawner that passes fd 3 through: ${law.j && law.j.passHolds} (${JSON.stringify(law.j && law.j.pass)}); the word ${law.j && law.j.word}; no secret in its output`, law);
   const red = await runHead(noClaimFile);
-  ok(red.j && red.j.passHolds === true, `RED CONTROL — the head with the claim cut (the pipe left open): a child of a spawner that passes fd 3 through holds it: ${red.j && red.j.passHolds}; (facts: child_process default ${red.j && red.j.childHolds}, node-pty ${red.j && red.j.ptyHolds}) (${red.j && red.j.before})`, red.j);
+  ok(red.j && red.j.passHolds === true, `RED CONTROL — the head with the claim cut (the pipe left open): a child of a spawner that passes fd 3 through (a road the product has nowhere today) holds it: ${red.j && red.j.passHolds}; (facts: child_process default ${red.j && red.j.childHolds}, node-pty ${red.j && red.j.ptyHolds}) (${red.j && red.j.before})`, red.j);
+}
+
+console.log('— ⑫ THE RUNTIME-SWITCH ROAD: the head\'s first line replaces the process with a newer runtime — its version probe holds nothing of the start pipe, the pipe survives the replacement, and the NEW image claims it');
+{
+  // A REAL switch in a scratch root: <root>/data/runtime/current → node-v<newer patch of this major>, whose bin/node is a
+  // stand-in (it answers that version to the switch's probe, writing down the probe's own descriptor table; otherwise it execs
+  // THIS node) and whose record holds its sha256. server.js's head (lines 1–5 as written) runs with only its rootDir pointed at
+  // the scratch root; the first image probes, then execve()s itself — same pid, same argv — and the second image claims.
+  const [maj, min, pat] = process.version.slice(1).split('.').map(Number), newer = `v${maj}.${min}.${pat + 1}`;
+  const root = path.join(T, 'rt-root'), rtDir = path.join(root, 'data', 'runtime', `node-${newer}`), probeFds = path.join(T, 'rt-probe-fds.txt');
+  fs.mkdirSync(path.join(rtDir, 'bin'), { recursive: true });
+  const stand = `#!/bin/sh\nif [ "$1" = "-p" ]; then\n  for f in /proc/$$/fd/*; do readlink "$f"; done > ${JSON.stringify(probeFds)}\n  echo ${newer}\n  exit 0\nfi\nexec ${JSON.stringify(process.execPath)} "$@"\n`;
+  fs.writeFileSync(path.join(rtDir, 'bin', 'node'), stand, { mode: 0o755 });
+  fs.writeFileSync(path.join(rtDir, '.vibespace-runtime.json'), JSON.stringify({ version: newer, platform: process.platform, sha256: crypto.createHash('sha256').update(stand).digest('hex') }));
+  try { fs.unlinkSync(path.join(root, 'data', 'runtime', 'current')); } catch { }
+  fs.symlinkSync(`node-${newer}`, path.join(root, 'data', 'runtime', 'current'));
+  const L = read('server.js').split('\n'), CLAIM = " require('./src/server/hub-port.js').claim();", ROOT = 'boot({ rootDir: __dirname })';
+  const cut = L.findIndex((l, i) => i > 0 && /\brequire\(/.test(l.replace(/\/\/.*$/, '').replace(CLAIM.trim(), '')));
+  const head = L.slice(0, cut).join('\n') + '\n';
+  if (head.split(ROOT).length !== 2 || head.split(CLAIM).length !== 2) throw new Error('CONTROL needle not found exactly once: the head\'s runtime boot or its claim');
+  const headAt = (src, name) => { const f = path.join(T, name); fs.writeFileSync(f, src.replace(ROOT, `boot({ rootDir: ${JSON.stringify(root)} })`)); return f; };
+  const lawHead = headAt(head, 'rt-head.js');
+  const earlyHead = headAt(`require('./src/server/hub-port.js').claim();\n` + head.replace(CLAIM, ''), 'rt-head-early.js');   // RED: the claim BEFORE the runtime boot
+  // copies of the switch for the reds: the supervised skip CUT, and a skip keyed on anything but the start word
+  const SKIP = "  if (env[START_WORD] !== undefined) return { state: 'supervised', version: cur.version };\n";
+  const rtSrc = read('src/node-runtime.js'); if (rtSrc.split(SKIP).length !== 2) throw new Error('CONTROL needle not found exactly once: the supervised skip');
+  const rtNoSkip = path.join(T, 'node-runtime-noskip.js'); fs.writeFileSync(rtNoSkip, rtSrc.replace(SKIP, ''));
+  const rtAlways = path.join(T, 'node-runtime-always.js'); fs.writeFileSync(rtAlways, rtSrc.replace(SKIP, SKIP.replace('env[START_WORD] !== undefined', 'true')));
+  const probe12 = path.join(T, 'probe12.cjs');
+  fs.writeFileSync(probe12, `
+const fs = require('fs'), path = require('path'), Module = require('module');
+const REPO = ${JSON.stringify(REPO)}, FILE = path.join(REPO, 'server.js');
+const [headFile, outFile, runtimeCopy] = process.argv.slice(2);
+const link = (f) => { try { return fs.readlinkSync('/proc/self/fd/' + f); } catch { return null; } };
+const second = process.env.VIBESPACE_RUNTIME_REEXEC !== undefined, from = process.env.VIBESPACE_RUNTIME_REEXEC || null;
+if (!second) fs.writeFileSync(outFile + '.first', JSON.stringify({ pid: process.pid, link3: link(3) }));
+if (runtimeCopy) { const RT = path.join(REPO, 'src/node-runtime.js'); const r = new Module(RT, null); r.filename = RT; r.paths = Module._nodeModulePaths(path.dirname(RT)); r._compile(fs.readFileSync(runtimeCopy, 'utf8'), RT); r.loaded = true; require.cache[RT] = r; }
+const before = link(3);
+const m = new Module(FILE, null); m.filename = FILE; m.paths = Module._nodeModulePaths(path.dirname(FILE));
+let err = null; try { m._compile(fs.readFileSync(headFile, 'utf8'), FILE); } catch (e) { err = String(e && e.message).slice(0, 200); }
+require(path.join(REPO, 'src/server/hub-port.js')).decide().then((d) => {
+  fs.writeFileSync(outFile, JSON.stringify({ second, from, pid: process.pid, before, after: link(3), form: d.form, link: d.start ? d.start.link : null, why: d.why || null, word: process.env.VIBESPACE_START_FD === undefined ? 'gone' : 'kept', err }));
+  setTimeout(() => process.exit(0), 50);
+});
+`);
+  let n12 = 0;
+  const runSwitch = async (headFile, runtimeCopy, { word = true } = {}) => {
+    const out = path.join(T, `rt-out-${++n12}.json`); try { fs.unlinkSync(probeFds); } catch { }
+    const c = spawn(process.execPath, [probe12, headFile, out, ...(runtimeCopy ? [runtimeCopy] : [])], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH, NO_AUTO_UPDATE: '1', ...(word ? { VIBESPACE_START_FD: '3' } : {}) } });
+    let said = ''; c.stdout.on('data', (b) => { said += b; }); c.stderr.on('data', (b) => { said += b; });
+    c.stdio[3].on('error', () => { }); c.stdio[3].write(JSON.stringify(START) + '\n');
+    const code = await new Promise((r) => { const k = setTimeout(() => { c.kill('SIGKILL'); r('killed'); }, 15000); c.once('exit', (x) => { clearTimeout(k); r(x); }); });
+    try { c.stdio[3].destroy(); } catch { }
+    const j = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+    const first = j(out + '.first'), last = j(out);
+    let fds = []; try { fds = fs.readFileSync(probeFds, 'utf8').split('\n').filter(Boolean); } catch { }
+    return { code, first, last, probeRan: fds.length > 0, probeHolds: !!(first && first.link3 && fds.includes(first.link3)), leaked: said.includes(SECRET), said: said.split(SECRET).join('<the secret>').slice(0, 600) };
+  };
+  ok(/const START_WORD = 'VIBESPACE_START_FD';/.test(rtSrc) && SP.START_WORD === 'VIBESPACE_START_FD', `the switch knows the start word by the same name as src/start-pipe.js (${SP.START_WORD})`);
+  // ONE WAY — A SUPERVISED START (the word present) DOES NOT SWITCH: the first image stays, says so once, and claims its pipe
+  const sup = await runSwitch(lawHead);
+  const s1 = sup.last, f1 = sup.first;
+  ok(!!(s1 && f1) && s1.second === false && s1.pid === f1.pid && !sup.probeRan && s1.form === 'piped' && s1.link === START.link && s1.word === 'gone' && /SUPERVISED: its supervisor started it on v[\d.]+; the instance has provisioned v[\d.]+/.test(sup.said) && sup.said.includes(newer) && !sup.leaked && !s1.err,
+    `a SUPERVISED start with ${newer} provisioned: no switch (one image, pid ${s1 && s1.pid}; the version probe ran: ${sup.probeRan}), the claim read its pipe (${s1 && s1.form}, link ${s1 && s1.link === START.link ? 'read' : 'NOT read'}); said once: «${(sup.said.match(/\[runtime\][^\n]*/) || [''])[0].slice(0, 260)}»`, sup);
+  const noSkip = await runSwitch(lawHead, rtNoSkip);
+  ok(noSkip.last && noSkip.last.second === true && noSkip.last.form === 'piped' && !noSkip.last.link && noSkip.probeRan && !noSkip.probeHolds, `RED CONTROL — the supervised skip cut: the image is replaced (second image ${noSkip.last && noSkip.last.second}), its fd 3 is ${noSkip.last && noSkip.last.before} and the start is BAD (${noSkip.last && noSkip.last.why}) — every supervised start with a newer runtime would exit 2; the probe held nothing (${noSkip.probeHolds})`, noSkip.last);
+  // THE OTHER WAY — A PLAIN START (no word) SWITCHES EXACTLY AS BEFORE
+  const plain = await runSwitch(lawHead, null, { word: false });
+  ok(plain.last && plain.first && plain.last.second === true && plain.last.from === process.version && plain.last.pid === plain.first.pid && plain.last.form === 'plain' && plain.probeRan, `a PLAIN start with ${newer} provisioned switches as before: the probe ran, the image was replaced (pid ${plain.last && plain.last.pid}, from ${plain.last && plain.last.from}), and the new image is ${plain.last && plain.last.form}`, plain);
+  const always = await runSwitch(lawHead, rtAlways, { word: false });
+  ok(always.last && always.last.second === false, `RED CONTROL — a skip keyed on anything but the start word: a plain start no longer switches (second image ${always.last && always.last.second})`, always.last);
+  // and the claim's place: AFTER the runtime boot, or the switch no longer sees the word
+  const early = await runSwitch(earlyHead);
+  ok(early.last && early.last.second === true && early.last.form === 'plain', `RED CONTROL — the claim BEFORE the runtime boot: the word is gone before the switch looks, so the image is replaced and the second image comes up ${early.last && early.last.form} (a supervised hub that would listen on the port itself)`, early.last);
 }
 
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);

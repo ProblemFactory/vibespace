@@ -33,18 +33,23 @@ function firstLine(pipe, { ms = START_LINE_MS } = {}) {
     const done = (v) => {
       if (settled) return; settled = true; clearTimeout(timer);
       try { pipe.pause(); } catch { }
-      pipe.removeListener('data', onData); pipe.removeListener('end', onEnd); pipe.removeListener('error', onEnd);
+      pipe.removeListener('data', onData); pipe.removeListener('end', onEnd); pipe.removeListener('error', onFault);
       resolve({ ...v, pipe });
     };
     const onData = (chunk) => {
-      buf += chunk; const i = buf.indexOf('\n'); if (i < 0) { if (buf.length > MAX_START_LINE) done({ first: null, rest: '' }); return; }
-      let first = null; try { first = JSON.parse(buf.slice(0, i)); } catch { }   // never echoed: the line carries the secret
-      done({ first, rest: buf.slice(i + 1) });
+      // TWO BOUNDS: the clock (`ms`, the timer below) and the size (MAX_START_LINE); the newline is looked for in the NEW chunk
+      // only — what came before held none
+      const i = chunk.indexOf('\n');
+      if (i < 0) { buf += chunk; if (buf.length > MAX_START_LINE) done({ first: null, rest: '' }); return; }
+      const line = buf + chunk.slice(0, i);
+      let first = null; try { first = JSON.parse(line); } catch { }   // never echoed: the line carries the secret
+      done({ first, rest: chunk.slice(i + 1) });
     };
     const onEnd = () => done({ why: 'ended' });
+    const onFault = (e) => done({ why: 'read-fault', code: (e && e.code) || 'error' });   // a READ FAULT, said as one with its code (never «ended»)
     const timer = setTimeout(() => done({ why: 'no-line', ms }), ms);
     try { pipe.setEncoding?.('utf8'); } catch { }
-    pipe.on('data', onData); pipe.on('end', onEnd); pipe.on('error', onEnd);
+    pipe.on('data', onData); pipe.on('end', onEnd); pipe.on('error', onFault);
   });
 }
 
@@ -83,6 +88,7 @@ function whyText(s) {
     case 'not-a-pipe': return `the start pipe (fd ${s.fd}) named by ${START_WORD} is no pipe or socket`;
     case 'no-line': return `no line on the start pipe${s.fd ? ` (fd ${s.fd})` : ''} within ${(s.ms || START_LINE_MS) / 1000} s`;
     case 'ended': return `the start pipe${s.fd ? ` (fd ${s.fd})` : ''} ended before its first line`;
+    case 'read-fault': return `the start pipe${s.fd ? ` (fd ${s.fd})` : ''} could not be read (${s.code || 'error'})`;
     case 'no-start': return 'the start pipe\'s first line is no start';
     default: return 'the start is not readable';
   }

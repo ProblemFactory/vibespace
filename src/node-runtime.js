@@ -164,6 +164,7 @@ async function prune(rt, keepName) {
 }
 
 const RECORD = '.vibespace-runtime.json';
+const START_WORD = 'VIBESPACE_START_FD';   // the start word (src/start-pipe.js START_WORD — test-hub-port ⑫ pins the two equal)
 /** sha256 of a file, read in 1 MiB chunks (sync — the switch's one check before an execve; ~0.2 s for a node binary). */
 function hashFileSync(file) {
   const h = crypto.createHash('sha256'), buf = Buffer.alloc(1024 * 1024);
@@ -247,7 +248,7 @@ const sameMajor = (a, b) => { const x = RF.tripleOf(a), y = RF.tripleOf(b); retu
 /** THE SERVER'S FIRST STATEMENT: when <root>/runtime/current is a NEWER node than the running one and answers its own
  *  version, replace this process with it (same pid, same argv, same env + VIBESPACE_RUNTIME_REEXEC). Returns why it
  *  did not ({state}: 'none' | 'running' | 'not-newer' | 'other-major' | 'unverified' / 'tampered' (the binary is not the one
- *  provisioned — verifyRuntime) | 'broken' | 'unsupported' (win32 / no execve) | 'off' | 'already'); on success it does
+ *  provisioned — verifyRuntime) | 'broken' | 'unsupported' (win32 / no execve) | 'off' | 'already' | 'supervised' (the start word is present: a supervised start never switches)); on success it does
  *  not return. One synchronous version probe (≤ 10 s) before anything else loads — the boot's only blocking child. */
 function reexecOnOwnRuntime({ root, env = process.env, execve = process.execve, execPath = process.execPath, version = process.version, argv = process.argv, execArgv = process.execArgv, platform = process.platform, probe = null, log = (l) => console.log(l) } = {}) {
   if (env.VIBESPACE_RUNTIME_REEXEC) return { state: 'already', from: env.VIBESPACE_RUNTIME_REEXEC };
@@ -258,6 +259,11 @@ function reexecOnOwnRuntime({ root, env = process.env, execve = process.execve, 
   if (path.resolve(execPath) === path.resolve(cur.node)) return { state: 'running', version: cur.version };
   if (RF.compare(cur.version, version) !== 1) return { state: 'not-newer', version: cur.version };
   if (!sameMajor(cur.version, version)) return { state: 'other-major', version: cur.version };   // a native addon (node-pty) is built for ONE major's ABI
+  // A SUPERVISED START DOES NOT SWITCH (主开发 r876, (A)): a process whose start NAMES a start pipe (the start word — src/start-pipe.js
+  // START_WORD) would lose that descriptor across the image replacement (measured: a Node process's descriptors past its stdio do
+  // not cross an exec), so it stays on the runtime its supervisor started it with — the supervisor reads <root>/runtime/current
+  // itself. The word is the ONLY thing that turns the switch off; a plain start switches exactly as before (test-hub-port ⑫).
+  if (env[START_WORD] !== undefined) return { state: 'supervised', version: cur.version };
   if (typeof execve !== 'function') return { state: 'unsupported', version: cur.version };
   // RE-VERIFY WHAT IT EXECS: the binary must hash to the record the provisioner wrote — a planted / corrupted one never runs
   const chk = verifyRuntime(cur.dir, cur.node, cur.version);
