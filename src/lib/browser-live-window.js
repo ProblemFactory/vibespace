@@ -472,7 +472,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // B-8703 unit 2 (主开发 r700): a browser VibeSpace stopped starting is stopped in «Agent browser…» — that door stands on this window's
   // bar beside the status that names it (the gear menu's own item: app.openBrowserProfiles), never a path to it
   // — a fold item at Reconnect's rank (LIVE_BAR_PRIORITY: never folds), so a narrow bar counts it and never clips it
-  const abBtn = document.createElement('button'); abBtn.type = 'button'; abBtn.className = 'file-tool-btn browser-live-agent-browser need-door'; abBtn.dataset.door = 'agent-browser'; abBtn.textContent = t('Agent browser…'); abBtn.style.display = 'none'; abBtn.onclick = () => { if (typeof app.openBrowserProfiles === 'function') app.openBrowserProfiles(); };
+  const abBtn = document.createElement('button'); abBtn.type = 'button'; abBtn.className = 'file-tool-btn browser-live-agent-browser'; abBtn.dataset.door = 'agent-browser'; abBtn.textContent = t('Agent browser…'); abBtn.style.display = 'none'; abBtn.onclick = () => { if (typeof app.openBrowserProfiles === 'function') app.openBrowserProfiles(); };
   // P4 (§7.4) → the rebuilt switch dialog (2026-09-27): the profile's BROWSER NAME (`Chromium` / an engine's name, the digest's
   // fact in words — never a version or a plan). A BUTTON opening the switch dialog only when another browser is available
   // for this profile (`app.browserChoicesFor`), else the same words as a plain label; neither for the temporary browser.

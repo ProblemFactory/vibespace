@@ -402,7 +402,7 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
     acctSel.onchange = () => sidebar.setSessionConfig?.(s, { ...(sidebar.getSessionConfig?.(s) || {}), account: acctSel.value });
     acctRow.appendChild(acctSel);
     // B-8703 unit 2 (主开发 r700): an account whose long-lived token EXPIRED is a disabled option (its tooltip says so) — the door is a
-    // labelled button on THIS line that opens that account's own «Long-lived token…» dialog (the Manage Agents row menu's item)
+    // labelled button on THIS line that opens that account's own long-lived token dialog (the Manage Agents row menu's item opens it too)
     for (const x of accts) if (vOf(x)?.reason === 'oat-expired') { const b = document.createElement('button'); b.type = 'button'; b.className = 'mounts-btn need-door'; b.dataset.door = 'oat-remint'; b.textContent = t('Re-mint “{name}”’s long-lived token…', { name: x.name || '?' }); b.onclick = () => app._oatDialog?.(x.id, x); acctRow.appendChild(b); }
     bilSec.appendChild(acctRow);
 

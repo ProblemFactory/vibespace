@@ -2012,9 +2012,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (block && verdictsCold) block += ' ' + t('(unconfirmed — {host} hasn’t answered the availability check yet)', { host: rHostName });
       // lane ui-controls-and-bugs (the walk: two accounts greyed, no reason): the why ON the row, and the door where sign-in lives
       // B-8703 unit 2 (主开发 r700): an account whose long-lived token EXPIRED — the door on this line is that account's own
-      // «Long-lived token…» dialog (the Manage Agents row menu's item), never a path to it; every other block keeps «Manage agents…»
+      // «Long-lived token (expired)…» dialog (the door wears the Manage Agents row menu's own item for it), never a path to it; every
+      // other block keeps «Manage agents…»
       const oatDead = !!block && block.startsWith(t('“{name}”’s long-lived token has expired — re-mint it', { name: a.name }));
-      if (block && !cur) { items.push({ label: a.name + suffix, off: block, offDoor: oatDead ? { label: t('Long-lived token…'), action: () => this._oatDialog?.(a.id, a) } : { label: t('Manage agents…'), action: () => this._showAgentsDialog?.({ opener: 'billing' }) } }); continue; }
+      if (block && !cur) { items.push({ label: a.name + suffix, off: block, offDoor: oatDead ? { label: t('Long-lived token (expired)…'), action: () => this._oatDialog?.(a.id, a) } : { label: t('Manage agents…'), action: () => this._showAgentsDialog?.({ opener: 'billing' }) } }); continue; }
       // LINKED pick sends the REAL account id (2.241.0): the server's
       // email-linked rescue (ws-handler create, 2.240.2) maps it onto the
       // host's own login — zero creds ship — while session._accountId keeps

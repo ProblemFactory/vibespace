@@ -414,9 +414,10 @@ const inNet = (s) => { const x = String(s); return NET.path.test(x) || NET.direc
 /** B-8703 (the verifier's M5): THE ZH / JA NET — read by test-needs-doors over each dictionary VALUE whose English form the nets
  *  above miss: a menu path or a direction to a control said only in a translation is caught too, and claimed by its English form's
  *  row (a value is the same sentence). [path, direction] per language; ja «上の / 下の» only after a sentence's start or its
- *  punctuation («マシン上のフォルダー» is «on the machine», no direction). PURE: regexes only — the census does the reading. */
+ *  punctuation («マシン上のフォルダー» is «on the machine», no direction), «以上の / 以下の» before a control's word anywhere (B-8703
+ *  unit 2's read: a ja value kept «以下のオプション» after its English lost «below»). PURE: regexes only — the census does the reading. */
 const VALUE_NET = Object.freeze({
   zh: Object.freeze([/(设置|⚙)\s*(→|›|▸)|(→|›|▸)\s*(集成|插件|设置|频道)|⋯\s*(菜单|→)|在\s*⋯\s*(里|中)/, /(上面|下面|上方|下方)(的|这|那)?[^，。；—]{0,12}(按钮|开关|框|字段|链接|代码|令牌|文件夹|地址)/]),
-  ja: Object.freeze([/(設定|⚙)\s*(→|›|▸)|(→|›|▸)\s*(連携|プラグイン|設定|チャンネル)|⋯\s*(メニュー|→)/, /(?:^|[、。（(—「]\s*)(?:上|下)の(?:「|[^、。；—]{0,14}(?:ボタン|スイッチ|欄|フィールド|リンク|コード|トークン|フォルダー|アドレス))/]),
+  ja: Object.freeze([/(設定|⚙)\s*(→|›|▸)|(→|›|▸)\s*(連携|プラグイン|設定|チャンネル)|⋯\s*(メニュー|→)/, /(?:^|[、。（(—「]\s*)(?:上|下)の(?:「|[^、。；—]{0,14}(?:ボタン|スイッチ|欄|フィールド|リンク|コード|トークン|フォルダー|アドレス))|以(?:上|下)の[^、。；—]{0,14}(?:オプション|スイッチ|ボタン|欄|フィールド|リンク|コード|トークン|フォルダー|アドレス|設定|項目)/]),
 });
 module.exports = { NEEDS, NOT_NEEDS, DOORS_OWED, NET, VALUE_NET, needOf, notNeedOf, owedOf, inNet };

@@ -655,6 +655,17 @@ ok(P && P.unclaimed.length === 1 && /Frobnicate/.test(P.unclaimed[0].s), 'CONTRO
   ok(words.has(K1) && words.has(K2) && !netOf(UIT, K1) && !netOf(UIT, K2) && !!Z && Z.unclaimed.length === 2 && Z.unclaimed.map((x) => x.s).sort().join('|') === [K1, K2].sort().join('|'),
     'CONTROL (B-8703): the zh «按上面的按钮» put back and a ja «⚙ → 設定» planted — each English form is RED by name (the zh / ja net reads the value); the cured values are caught by no net', { unclaimed: Z && Z.unclaimed.map((x) => x.s), cured });
 }
+// B-8703 unit 2's read (the ja net's «以下の» hole): the ja value that kept «以下のオプション» after its English and zh lost the direction is
+// put back — its English form RED by name; the cured value is caught by no net
+{
+  const UIT = TABLES.find((x) => x.scope === 'ui').T;
+  const K3 = [...words.keys()].find((k) => k.endsWith('Every other option in this section only applies while this is ON.'));
+  const v3 = (VALUES.get(K3) || {}).ja || '', back = v3.replace('このセクションの他のオプションはすべて、', '以下のオプションはすべて');   // stale-pins: kept — the control puts the cured value back on purpose
+  const vj = new Map(VALUES); if (K3) vj.set(K3, { ...(VALUES.get(K3) || {}), ja: back });
+  const J = K3 ? census(words, vj).find((c) => c.scope === 'ui') : null;
+  ok(!!K3 && back !== v3 && !netOf(UIT, K3) && !!J && J.unclaimed.length === 1 && J.unclaimed[0].s === K3,
+    'CONTROL (B-8703 unit 2): the ja «以下のオプション» put back is RED by its English form (the ja net reads «以下の» + a control\'s word); the cured value is caught by no net', { K3: !!K3, changed: back !== v3, unclaimed: J && J.unclaimed.map((x) => x.s) });
+}
 const fc = ui && ui.rows.get('folder-create');
 const stripped = (f) => (f === 'src/lib/path-field.js' ? (sources.get(f) || '').replace(/data-act="tick"/g, 'data-act="gone"') : sources.get(f) || '');
 ok(fc && JSON.stringify(doorless(fc, stripped)) === JSON.stringify(['src/lib/path-field.js']), 'CONTROL: the folder field stating «create it?» with its create door taken out is RED by name', fc && doorless(fc, stripped));
@@ -967,18 +978,24 @@ try {
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 const fn = (m, k) => !!(CL && CL[m] && typeof CL[m][k] === 'function');
 // B-8703 unit 2 (主开发 r700): THE TWO LINES AWAY FROM THE MANAGE AGENTS ROW GAIN A DOOR — each lifted from its own source by its text and
-// PRESSED: the billing menu's expired-token row offers «Long-lived token…» (its act opens that account's own dialog, _oatDialog); the
+// PRESSED: the billing menu's expired-token row offers «Long-lived token (expired)…» (its act opens that account's own dialog, _oatDialog); the
 // session properties' account line gains «Re-mint “{name}”’s long-lived token…» for an account whose token expired (pressed: the same
 // dialog). RED CONTROLS: a block that is not the expired token keeps «Manage agents…»; an account that has not expired gains no button
 {
   const SLS = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8'), SPS = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
-  const doorM = /offDoor: (oatDead \? \{ label: t\('Long-lived token…'\), action: \(\) => this\._oatDialog\?\.\(a\.id, a\) \} : \{ label: t\('Manage agents…'\), action: \(\) => this\._showAgentsDialog\?\.\(\{ opener: 'billing' \}\) \})/.exec(SLS);
+  // the read's catch: the predicate itself is LIFTED too (a leg handed oatDead stays green if the source's own test never matches)
+  const deadM = /\n      (const oatDead = !!block && block\.startsWith\(t\('“\{name\}”’s long-lived token has expired — re-mint it', \{ name: a\.name \}\)\);)\n/.exec(SLS);
+  const deadKeys = [...SLS.matchAll(/t\('(“\{name\}”’s long-lived token has expired[^']*)'/g)].map((m) => m[1]);   // the three block sites + the predicate
+  const doorM = /offDoor: (oatDead \? \{ label: t\('Long-lived token \(expired\)…'\), action: \(\) => this\._oatDialog\?\.\(a\.id, a\) \} : \{ label: t\('Manage agents…'\), action: \(\) => this\._showAgentsDialog\?\.\(\{ opener: 'billing' \}\) \})/.exec(SLS);
   const loopM = /\n(    for \(const x of accts\) if \(vOf\(x\)\?\.reason === 'oat-expired'\) \{[^\n]*\}\n)/.exec(SPS);
   const opened = [], agents = [];
   const app = { _oatDialog: (id, a) => opened.push([id, a && a.name]), _showAgentsDialog: (o) => agents.push(o) };
   const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
-  const offDoor = (dead) => (doorM ? new Function('oatDead', 't', 'a', `return (${doorM[1]});`).call(app, dead, tt, { id: 'acct-x', name: 'Work Max' }) : null);
-  const dD = offDoor(true), dM = offDoor(false);
+  const A = { id: 'acct-x', name: 'Work Max' };
+  const offDoor = (block) => (deadM && doorM ? new Function('block', 't', 'a', `${deadM[1]}\nreturn (${doorM[1]});`).call(app, block, tt, A) : null);
+  const dead = tt(deadKeys[0] || '?', { name: A.name });
+  const dD = offDoor(dead), dU = offDoor(dead + ' ' + tt('(unconfirmed — {host} hasn’t answered the availability check yet)', { host: 'the-host' }));
+  const dM = offDoor(tt('The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.', { host: 'the-host', name: A.name, email: 'x@example.invalid' }));
   if (dD) dD.action(); if (dM) dM.action();
   const row = new Nd('div');
   const lineOf = (accts, reason) => { const r = new Nd('div'); if (loopM) new Function('accts', 'vOf', 'document', 't', 'acctRow', 'app', loopM[1])(accts, (x) => ({ reason: reason(x) }), DOC, tt, r, app); return r; };
@@ -986,9 +1003,9 @@ const fn = (m, k) => !!(CL && CL[m] && typeof CL[m][k] === 'function');
   const b = L1.children[0];
   if (b && typeof b.onclick === 'function') b.onclick();
   const L0 = lineOf([{ id: 'acct-y', name: 'Home' }], () => 'not-on-this-host');
-  console.log('    B-8703 unit 2, the facts judged: ' + JSON.stringify({ lifted: { door: !!doorM, loop: !!loopM }, dead: dD && dD.label, other: dM && dM.label, line: L1.children.map((c) => [c.tagName, c.textContent, c.dataset && c.dataset.door]), none: L0.children.length, opened, agents }));
-  ok(!!doorM && !!dD && dD.label === 'Long-lived token…' && opened.some(([id, n]) => id === 'acct-x' && n === 'Work Max'),
-    'B-8703 unit 2: the billing menu\'s EXPIRED-token row offers «Long-lived token…» — PRESSED, it opens that account\'s own dialog (_oatDialog)', { door: dD && dD.label, opened });
+  console.log('    B-8703 unit 2, the facts judged: ' + JSON.stringify({ lifted: { dead: !!deadM, door: !!doorM, loop: !!loopM }, deadKeys: deadKeys.length, deadKeysOne: new Set(deadKeys).size === 1, dead: dD && dD.label, cold: dU && dU.label, other: dM && dM.label, line: L1.children.map((c) => [c.tagName, c.textContent, c.dataset && c.dataset.door]), none: L0.children.length, opened, agents }));
+  ok(!!deadM && !!doorM && deadKeys.length === 4 && new Set(deadKeys).size === 1 && !!dD && dD.label === 'Long-lived token (expired)…' && !!dU && dU.label === 'Long-lived token (expired)…' && opened.some(([id, n]) => id === 'acct-x' && n === 'Work Max'),
+    'B-8703 unit 2: the billing menu\'s EXPIRED-token row offers «Long-lived token (expired)…» (the row menu\'s own item) — the block sentence its three sites write, alone or with the cold «unconfirmed» suffix, decided by the source\'s own oatDead; PRESSED, that account\'s own dialog (_oatDialog)', { door: dD && dD.label, cold: dU && dU.label, deadKeys, opened });
   ok(!!loopM && L1.children.length === 1 && b && b.tagName === 'BUTTON' && b.textContent === 'Re-mint “Work Max”’s long-lived token…' && b.dataset.door === 'oat-remint' && opened.filter(([id]) => id === 'acct-x').length === 2,
     'B-8703 unit 2: the session properties\' account line gains «Re-mint “{name}”’s long-lived token…» for the account whose token expired — PRESSED, the same dialog for that account', { line: L1.children.map((c) => c.textContent), opened });
   ok(!!dM && dM.label === 'Manage agents…' && agents.length === 1 && L0.children.length === 0, 'CONTROL B-8703 unit 2: any other block keeps «Manage agents…» (pressed: Manage agents), and a line with no expired token gains no button', { other: dM && dM.label, agents, none: L0.children.length });
@@ -1009,6 +1026,15 @@ const fn = (m, k) => !!(CL && CL[m] && typeof CL[m][k] === 'function');
   ok(!!btn && btn.tagName === 'BUTTON' && btn.textContent === 'Agent browser…' && btn.dataset.door === 'agent-browser' && opened.length === 1 && !!showM && shown(true) === '' && passes === 1,
     'B-8703 unit 2: a browser VibeSpace stopped starting — «Agent browser…» stands on the live window\'s bar beside the status that names it; PRESSED, it opens the gear menu\'s own target (app.openBrowserProfiles); only the unstable status shows it', { opened, passes });
   ok(!!showM && shown(false) === 'none', 'CONTROL B-8703 unit 2: any other status hides «Agent browser…» (setStatus without agentBrowser)', shown(false));
+  // the read's catch: «only the unstable status shows it» was a count of ONE passer's text — every mention of agentBrowser in the file is
+  // one of its five known forms and abBtn's display is set twice (made hidden; setStatus), so no other call can show it. CONTROL: a
+  // planted setStatus(…, { agentBrowser: true }) is named
+  const KNOWN = ['agentBrowser: 0', 'agentBrowser = false', "agentBrowser ? '' : 'none'", "agentBrowser: m.code === 'browser_unstable'", 'agentBrowser: abBtn'];
+  const passers = (text) => { const all = (text.match(/\bagentBrowser\b[^,;)}\n]*/g) || []).map((x) => x.trim()); return { all: all.length, others: all.filter((x) => !KNOWN.includes(x)), shows: (text.match(/\babBtn\.style\.display\s*=/g) || []).length }; };
+  const pa = passers(BLW), pp = passers(BLW + "\nsetStatus('x', { agentBrowser: true });\n");
+  console.log('    B-8703 unit 2 (Agent browser), who can show it: ' + JSON.stringify({ tip: pa, planted: pp }));
+  ok(pa.all === 5 && pa.others.length === 0 && pa.shows === 2, 'B-8703 unit 2: no other road shows «Agent browser…» — every mention of agentBrowser is one of its five known forms, abBtn\'s display set only at its making and in setStatus', pa);
+  ok(pp.others.length === 1 && pp.others[0] === 'agentBrowser: true', 'CONTROL B-8703 unit 2: a planted setStatus(…, { agentBrowser: true }) is named', pp);
 }
 // B-8703 part 3 (主开发 r533): THE OPEN USAGE POPUP IS REDRAWN THE MOMENT spend.allowOverageTurns FLIPS — the real meter (installUsageMeter,
 // _setupUsage, _renderUsage; in the one client bundle) over the minimal DOM, the popup OPEN with an in-use Credits chip; the switch flipped

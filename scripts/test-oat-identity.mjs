@@ -592,6 +592,9 @@ console.log('§5 the roster words');
     'This row has no usage window of its own, and the token’s first reading carried {other}’s weekly window. Two accounts can share a reset hour by chance, so nothing was marked and pools keep using it. Answer in «Long-lived token (active)…».',
     'The account’s usage window moved by this token’s own readings, so the move cannot vouch for the token. Nothing was marked and pools keep using it. Answer in «Long-lived token (active)…».',
     'No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-bind it, or re-mint it while signed in as this account, in «Long-lived token (active)…».',
+    // B-8703 unit 2's read: inside the token's own dialog the sentence names the dialog's own controls, never the menu that opened it
+    'No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-bind it with «Re-bind», or re-mint it in this dialog while signed in as this account.',
+    'No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-mint it in this dialog while signed in as this account.',
     'It is {name}’s', 'Not {name}’s', 'Confirmed: the token is {name}’s', 'Marked: the token is not {name}’s', 'Could not save the answer',
     "{account}'s long-lived token belongs to another account (its usage matches {other}) — re-mint it or re-bind it in Manage Agents", "{account}'s long-lived token belongs to another account — re-mint it or re-bind it in Manage Agents",
     "{account}'s long-lived token looks like {other}'s — confirm it is {account}'s, or re-bind it in Manage Agents",

@@ -1062,7 +1062,7 @@ export function installManageAgents(App, ctx = {}) {
         : (oatIdentityAsk(a) || oatUnverified(a))
         ? (oatIdentityAsk(a)
           ? `<div class="usage-warn oat-ask">${escHtml(oatAskWords(a))}</div><div class="oat-row oat-answer-row"><button class="btn-create" id="oat-mine">${escHtml(t('It is {name}’s', { name }))}</button><button class="btn-create danger" id="oat-not-mine">${escHtml(t('Not {name}’s', { name }))}</button></div>`
-          : `<div class="usage-note oat-unverified">${t('Identity unverified')} — ${t('No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-bind it, or re-mint it while signed in as this account, in «Long-lived token (active)…».')}</div>`)
+          : `<div class="usage-note oat-unverified">${t('Identity unverified')} — ${rebindTo.length ? t('No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-bind it with «Re-bind», or re-mint it in this dialog while signed in as this account.') : t('No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-mint it in this dialog while signed in as this account.')}</div>`)
           + (rebindTo.length
             ? `<div class="oat-row oat-rebind-row"><select id="oat-rebind-pick" class="settings-input-text" aria-label="${escHtml(t('Re-bind to'))}">${rebindTo.map((x) => `<option value="${escHtml(x.id)}"${x.id === rebindPick ? ' selected' : ''}>${escHtml(x.name || x.id)}</option>`).join('')}</select><button class="btn-create" id="oat-rebind">${t('Re-bind')}</button></div>`
             : '')
