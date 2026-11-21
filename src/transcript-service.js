@@ -31,6 +31,17 @@ const {
 const { get: harnessOf } = require('./harnesses'); // S3: store.locate per harness
 
 const DEVICE_HANDLE = '\u0000device:'; // opaque to the route; never a real path
+// B-9a2e (round w5vyt4hhv's second small): THE HUB'S OWN READ FOR A PAIRED MACHINE runs under the device road's gate — an async scope
+// the PURE sent-provenance module reads through its installed getter (setGate): the record answers only the ids the device road
+// would have been handed (src/sent-provenance.js passes). Installed once; a read for this hub's own conversation has no scope.
+const _readGate = new (require('async_hooks').AsyncLocalStorage)();
+require('./sent-provenance.js').setGate(() => _readGate.getStore());
+/** THE GATE, ONE helper: `fn` (a conversion of a paired machine's transcript done on the hub) runs under the device road's gate when
+ *  `host` is set — the service's own fallback reads and the view-only attach (src/ws-handler.js) alike. → fn's value */
+function gatedRead({ host = null, conv = null, from = null } = {}, fn) {
+  if (!host || typeof conv !== 'string' || !conv) return fn();
+  return _readGate.run({ conv, host, ids: require('./sent-provenance.js').idsFor(conv, Array.isArray(from) ? from : []) }, fn);
+}
 // lane chat-attachments-persist (the cut): pictures are read in ONE transcript worker of their own (its indexes are kept
 // and extended there — one copy, never one per pool thread); inline (the pool down) the op answers «unavailable»
 let _picturePool = null;
@@ -135,6 +146,8 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   // B-952b smalls (主开发 03:40Z): the conversation the request NAMES first (`webuiId` — Properties sends it), then the first match ON
   // THE MACHINE the request names. While a fork shares its parent's thread id the one Properties window of that conversation key shows
   // the row the sidebar lists first (the newer one); the other routes name no webui id and take the first match
+  /** Run `fn` (a conversion) under the device road's gate when `r` is a paired machine's conversation read HERE (the fallback). */
+  const gateRun = (r, fn) => gatedRead({ host: r.host, conv: r.sessionId, from: liveSession(r)?.forkedFrom }, fn);
   const liveSession = (r) => {
     const sameConv = (s) => !!s && (s.backend || 'claude') === r.backend && (s.backendSessionId || s.claudeSessionId) === r.sessionId;
     if (r.webuiId) { const own = activeSessions.get(r.webuiId); if (sameConv(own)) return own; }
@@ -236,7 +249,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (typeof sm.rawAsync === 'function') await sm.rawAsync({ bulk: bulkOf(r) }); // lane resume-all-paced (L2): a store that reads its records off the loop does so first (codex) — r1035: in the bulk line while the conversation is a bulk resume's
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const mm = createMessageManager(r.backend, 'api', { threadId: r.sessionId }); // the rendered conversation's id (codex ledger key)
-    await mm.convertHistoryAsync(sm.raw());
+    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine's transcript read here: the device road's gate
     if (r.memo) r.memo.view = { mm, session };
     return { mm, session };
   }
@@ -369,7 +382,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     records = records.filter((rec) => !isSubagentMessage(rec));
     const r = norm(ref);
     const mm = createMessageManager(r.backend, 'gap', { threadId: r.sessionId }); // a slab carries no session_meta — only the reader knows the file
-    mm.convertHistory(records);
+    gateRun(r, () => mm.convertHistory(records));   // a paired machine's slab read here: the device road's gate
     return mm.tail(mm.total);
   }
 
@@ -516,4 +529,4 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   return api;
 }
 
-module.exports = { createTranscriptService };
+module.exports = { createTranscriptService, gatedRead };

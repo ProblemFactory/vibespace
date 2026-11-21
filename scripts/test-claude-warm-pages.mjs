@@ -306,7 +306,7 @@ try {
     // RED: THE TIP'S SHAPE — the consume inside three roads (view after its conversion, status, the todos read), no door
     const tip = anchored(anchored(anchored(anchored(tsSrc10,
       'const reply = (out) => { if (!(r.gone && r.gone())) BULK.replied(live()); return out; };', 'const reply = (out) => out;', 'tip-no-door'),
-      '    await mm.convertHistoryAsync(sm.raw());\n', '    await mm.convertHistoryAsync(sm.raw());\n    BULK.replied(session);\n', 'tip-view'),
+      '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n', '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n    BULK.replied(session);\n', 'tip-view'),
       '    return { chatStatus, taskState: sm.taskState?.() || null };', '    BULK.replied(session);\n    return { chatStatus, taskState: sm.taskState?.() || null };', 'tip-status'),
       '    const st = sm.taskState() || {};\n', '    const st = sm.taskState() || {};\n    BULK.replied(live);\n', 'tip-todos');
     const red = await table(require(M.write('src/transcript-service.js', tip, 'ts-tip-shape')));
@@ -368,7 +368,7 @@ try {
       return { unlisted, wrong };
     };
     const sc = sitesCensus(tree);
-    const inRoad = anchored(tsSrc10, '    await mm.convertHistoryAsync(sm.raw());\n', '    await mm.convertHistoryAsync(sm.raw());\n    BULK.replied(session);\n', 'planted-road-consume');
+    const inRoad = anchored(tsSrc10, '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n', '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n    BULK.replied(session);\n', 'planted-road-consume');
     const scPlanted = sitesCensus([...tree.filter(([f]) => f !== 'src/transcript-service.js'), ['src/transcript-service.js', inRoad], ['src/planted-road.js', "const { replied } = require('./bulk-read');\nreplied(s);"]]);
     ok(!sc.unlisted.length && !sc.wrong.length && scPlanted.unlisted.length === 2 && scPlanted.unlisted[1] === 'src/planted-road.js:1' && /^src\/transcript-service\.js:\d+$/.test(scPlanted.unlisted[0]),
       `THE CONSUME is called at the doors only (${tree.length} files; unlisted ${sc.unlisted.join(', ') || 'none'}, ${sc.wrong.join(', ') || 'every door once'}); CONTROL a consume planted inside view's road and a destructured require are named (${scPlanted.unlisted.join(', ')})`, { sc, scPlanted });

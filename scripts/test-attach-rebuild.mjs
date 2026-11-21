@@ -209,7 +209,7 @@ const strip = (msgs) => JSON.stringify(msgs.map((m) => ({ ...m, ts: undefined })
   ok(/type: 'attach-ack', sessionId: data\.sessionId, progress:/.test(wsh) && /clearInterval\(progressTimer\)/.test(wsh), 'the rebuild window re-acks every 10s with progress (and the timer is cleared in finally)');
   ok(!/mm\.convertHistory\(sm\.raw\(\)\)/.test(wsh) && !/subMM\.convertHistory\(rawMsgs\)/.test(wsh), 'view-only and subagent attaches convert async too (boot replay opens N dead-session windows at once)');
   const ts = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8');
-  ok(/await session\._rebuildPromise/.test(ts) && /await mm\.convertHistoryAsync\(sm\.raw\(\)\)/.test(ts) && !/mm\.convertHistory\(sm\.raw\(\)\)/.test(ts), 'transcript-service.view joins an in-flight rebuild and never converts a whole transcript synchronously (the HTTP re-entry of the stall)');
+  ok(/await session\._rebuildPromise/.test(ts) && /await (?:gateRun\(r, \(\) => )?mm\.convertHistoryAsync\(sm\.raw\(\)\)/.test(ts) && !/mm\.convertHistory\(sm\.raw\(\)\)/.test(ts), 'transcript-service.view joins an in-flight rebuild and never converts a whole transcript synchronously (the HTTP re-entry of the stall)');
   const sl = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
   ok(/killSession\(webuiId, backendSessionId\) \{[\s\S]{0,900}resend: true/.test(sl), 'client killSession = ws.request with resend:true (re-sent on every reconnect until acknowledged)');
   ok(/const cancel = this\.ws\.request\(msg[\s\S]{0,200}onTimeout: \(\) => cancel\(\)/.test(sl), 'the kill watchdog DISARMS the request (ws.request leaves the handler live on timeout)');

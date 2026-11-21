@@ -752,12 +752,19 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
         const seeded = SRmod.restoredFor(res);
         res._sawFirstId = true; res.forkedFrom = ['th-rs']; res.backendSessionId = 'th-rn';   // claude-stream-json: the implicit fork's first line
         const resMoved = SRmod.adoptFor(res);
-        return { echo, own, src: kinds('th-src'), fk: kinds('th-fk'), restN, restMoved, r1: kinds('th-r1'), r2: SRmod.rowsFor('th-r2'), seeded, resMoved, rs: kinds('th-rs'), rn: kinds('th-rn') };
+        // a conversation noted before places were kept (the earlier release: no `on`) gets its machine when the boot restores its session
+        SRmod.note({ conv: 'th-pre', text: 'before places were kept', kind: 'typed', at: T0 - 1000 });
+        const preOpen = SP.mayHandMore('th-pre', 'th-k', 'h-other');
+        SRmod.restoredFor({ backendSessionId: 'th-pre', host: 'h-m2' });
+        const prePlaced = [SP.mayHandMore('th-pre', 'th-k', 'h-m2'), SP.mayHandMore('th-pre', 'th-k', 'h-other')];
+        return { preOpen, prePlaced, echo, own, src: kinds('th-src'), fk: kinds('th-fk'), restN, restMoved, r1: kinds('th-r1'), r2: SRmod.rowsFor('th-r2'), seeded, resMoved, rs: kinds('th-rs'), rn: kinds('th-rn') };
       } finally { SRmod.install(null); }
     };
     const b2 = runB(SR);
     ok('…a fork still carrying its source\'s id: an echo of that BORROWED id is no report — at the fork\'s own id its continue moves there (the parent\'s own send stays)',
       b2.echo === 0 && b2.own === 1 && JSON.stringify(b2.fk) === '["auto-resume"]' && JSON.stringify(b2.src) === '["typed"]', b2);
+    ok('…a conversation noted before places were kept has no machine (the gate open for it — the kb names it) until the boot restores its session: then its rows go to a read on ITS machine only',
+      b2.preOpen === true && JSON.stringify(b2.prePlaced) === '[true,false]', { preOpen: b2.preOpen, prePlaced: b2.prePlaced });
     ok('…a session the boot RESTORED was reported before the restart: a later new id moves nothing; a claude resume restored before its first id line gets its rows since its spawn back (the older one stays) and they move at that line',
       b2.restN === 0 && b2.restMoved === 0 && JSON.stringify(b2.r1) === '["typed"]' && b2.r2 === null && b2.seeded === 1 && b2.resMoved === 1 && JSON.stringify(b2.rs) === '["typed"]' && JSON.stringify(b2.rn) === '["auto-resume"]', b2);
     let SRb = null, whyb = null, SRr = null, whyr = null;

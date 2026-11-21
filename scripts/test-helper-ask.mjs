@@ -2239,7 +2239,7 @@ console.log('⑱h (B-9ff2\'s remainder, the coordinator\'s r1210) A LATE ALLOW S
   const vWasState = vWas && vWas.late && vWas.late.state;
   viewed.endLateAllows(false);
   const vNow = (viewed.messages.find((m) => m.permission && m.permission.requestId === 'req-la') || {}).permission;
-  const WS = read('src/ws-handler.js'), viewAt = WS.indexOf('await convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId })');
+  const WS = read('src/ws-handler.js'), viewAt = WS.indexOf('gatedRead({ host: data.host || null, conv: backendSessionId }, () => convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId })');   // B-9a2e follow 2: the view's conversion under the device road's gate
   check('⑱h (2) THE STOP\'S WORD SURVIVES A REBUILD: a stopped conversation\'s history, rebuilt, still waits («' + vWasState + '») until the View History road (src/ws-handler.js) closes it — the road calls endLateAllows right after its conversion — «unsaid»',
     vWasState === 'waiting' && vNow && vNow.late && vNow.late.state === 'unsaid' && viewAt > 0 && /^[^\n]*\n\s*try \{ if \(typeof mm\.endLateAllows === 'function'\) mm\.endLateAllows\(false\); \} catch \{ \}/.test(WS.slice(viewAt)));
   // r1296 (1): A RE-ASK FORGETS THE OLD WAIT — at the next turn's end the NEW ask is not «never said», and a late Allow on it waits

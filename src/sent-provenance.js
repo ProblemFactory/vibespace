@@ -65,8 +65,8 @@ const setSource = (fn) => { source = typeof fn === 'function' ? fn : null; };
 // hands each transcript op {id: rows} — the rows of every id the read may consult that the hub can name, built by ONE helper
 // (sentFor, below; src/transcript-service.js tryDevice sends it to an agent naming 'sent-rows') — and the device keeps them in THAT
 // OP'S OWN TABLE (holdFor; round ww0zvz7tw's third small): the agent runs the op inside an async scope whose getter it installs here
-// (setScope, src/agentd/agentd.js), so two ops at once — two hubs handing one id — never read each other's rows, and a table dies
-// with its op. An id the read consulted with nothing handed (a fork the hub could not name) is noted in that op's table (`unhanded`):
+// (setScope, src/agentd/agentd.js), so two ops at once — two hubs handing one id — never read each other's rows; a table is reached only
+// from its op's own async work (nothing is sent after its ack). An id the read consulted with nothing handed (a fork the hub could not name) is noted in that op's table (`unhanded`):
 // the op's ack names them and the hub may hand them in ONE more ask. Checked row by row, bounded.
 const ID_RE = /^[A-Za-z0-9_.:-]{1,128}$/;   // a conversation id (the hub's store keys by the same shape)
 const HAND_IDS_MAX = 16, HAND_ROWS_MAX = 100;
@@ -97,16 +97,29 @@ function handedOf(conv) {
   if (ID_RE.test(conv) && t.unhanded.size < HAND_IDS_MAX) t.unhanded.add(conv);
   return null;
 }
+// THE HUB'S OWN READ FOR A PAIRED MACHINE (round w5vyt4hhv's second small): when the device is not asked (the agent unreachable,
+// or one without 'transcript-op') the hub converts that machine's transcript itself — under THE SAME GATE as the device road: inside the read's
+// gate scope (setGate's getter — src/transcript-service.js) the source answers only an id the device road would have handed: one
+// the hub links to the conversation (the scope's `ids`), or one passing mayHandMore for that machine. The same transcript, one label.
+let gateOf = null;
+const setGate = (fn) => { gateOf = typeof fn === 'function' ? fn : null; };
+function passes(conv) {
+  let g = null;
+  try { g = gateOf ? gateOf() : null; } catch { g = null; }
+  if (!g || typeof g.conv !== 'string') return true;
+  return (Array.isArray(g.ids) && g.ids.includes(conv)) || mayHandMore(conv, g.conv, g.host);
+}
 function rowsFor(conv) {
   if (scoped) return scoped;
   if (typeof conv !== 'string' || !conv) return null;
   if (!source) return handedOf(conv);   // a device: what the hub handed for this conversation
+  if (!passes(conv)) return null;
   try { return source(conv); } catch { return null; }
 }
 /** The kind VibeSpace recorded for this record (`conv` its conversation, `at` its instant, `text` its words), or null. */
 const kindFor = ({ conv, at, text } = {}) => matchKind(rowsFor(conv), { at, text });
 /** The source's rows for a conversation (the hub thread; on a device the rows the hub handed for it) — never the scoped rows. */
-const rowsOf = (conv) => { if (typeof conv !== 'string' || !conv) return null; if (!source) return handedOf(conv); try { return source(conv); } catch { return null; } };
+const rowsOf = (conv) => { if (typeof conv !== 'string' || !conv) return null; if (!source) return handedOf(conv); if (!passes(conv)) return null; try { return source(conv); } catch { return null; } };
 // THE LINKS (the hub's store installs them — B-9a2e part 2): a conversation id → the ids it was adopted from (the resume / fork
 // that minted it, as the session recorded it). A read may consult those ids too (a codex fork's read prepends its parent's records,
 // each read under its own file's id; a claude record is read under the session id it carries), so the helper names them.
@@ -156,4 +169,4 @@ function withRows(rows, fn) {
 /** The rows' signature (a scan's cache key): what changes when a row is added or leaves. */
 const sigOf = (rows) => (Array.isArray(rows) && rows.length ? `${rows.length}:${rows[rows.length - 1].at}:${rows[0].at}` : '');
 
-module.exports = { KINDS, WINDOW_MS, SKEW_MS, ID_RE, HAND_IDS_MAX, HAND_ROWS_MAX, fold, digestOf, rowOf, okRow, matchKind, setSource, setLinks, setPlaces, setScope, rowsOf, kindFor, withRows, sigOf, holdFor, idsFor, sentFor, mayHandMore };
+module.exports = { KINDS, WINDOW_MS, SKEW_MS, ID_RE, HAND_IDS_MAX, HAND_ROWS_MAX, fold, digestOf, rowOf, okRow, matchKind, setSource, setLinks, setPlaces, setScope, setGate, rowsOf, kindFor, withRows, sigOf, holdFor, idsFor, sentFor, mayHandMore };

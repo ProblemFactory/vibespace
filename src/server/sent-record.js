@@ -131,7 +131,7 @@ function create({ dataDir, writer = null, readFile = null, log = () => { }, now 
       enc.delete(from);
       if (left.length) byConv.set(from, left); else byConv.delete(from);   // taken first: the bound below counts the drained conversation out
       const filed = fileRows(to, take);
-      if (!filed) { byConv.set(from, src); enc.delete(from); return 0; }   // a filing that failed gives them back
+      if (!filed) { byConv.set(from, src); enc.delete(from); return 0; }   // a filing that failed gives them back (a drained `from` at the newest end — unreachable today: `to` and the rows are checked)
       if (!left.length && onHost.delete(from)) { onEnc = null; persist(); }
       return filed;
     } catch (e) { log('[sent-record] rows were not moved:', e && e.message); return 0; }
@@ -238,6 +238,7 @@ function restoredFor(session) {
   try {
     const to = convOf(session);
     if (!installed || !session || typeof session !== 'object' || !to || reported.has(session) || borrowed(session)) return 0;
+    installed.place(to, session.host || '');   // round w5vyt4hhv's first small: a conversation noted before places were kept gets its machine at the boot
     if (session._resumeSpawn && !session._sawFirstId) {
       const since = Number(session.createdAt) || 0;
       const mine = (installed.rowsFor(to) || []).filter((r) => since > 0 && r.at >= since).slice(-MINE_MAX).map((row) => ({ conv: to, row }));

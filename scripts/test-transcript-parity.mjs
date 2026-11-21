@@ -88,7 +88,7 @@ fs.writeFileSync(path.join(cxDir, `rollout-2026-08-10T12-00-00-${TID}.jsonl`), c
 // same records under another id, for the control), a codex native fork of it (Y, Y2: a Referenced fork — its read PREPENDS X's
 // records, so X's id is consulted too) and a claude one (C, C2). The rows are the hub's (installed below); the agent has none.
 const SR_CONT = 'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.';
-const SR = { X: 'cccccccc-1111-2222-3333-000000000001', X2: 'cccccccc-1111-2222-3333-000000000002', Y: 'cccccccc-1111-2222-3333-000000000003', Y2: 'cccccccc-1111-2222-3333-000000000004', Y3: 'cccccccc-1111-2222-3333-000000000005', C: 'eeeeeeee-1111-2222-3333-000000000001', C2: 'eeeeeeee-1111-2222-3333-000000000002' };
+const SR = { C4: 'eeeeeeee-1111-2222-3333-000000000004', X: 'cccccccc-1111-2222-3333-000000000001', X2: 'cccccccc-1111-2222-3333-000000000002', Y: 'cccccccc-1111-2222-3333-000000000003', Y2: 'cccccccc-1111-2222-3333-000000000004', Y3: 'cccccccc-1111-2222-3333-000000000005', C: 'eeeeeeee-1111-2222-3333-000000000001', C2: 'eeeeeeee-1111-2222-3333-000000000002' };
 const srAt = Date.UTC(2026, 7, 10, 12, 0, 30);   // the continue's send; its record lands 2 s later (inside the match window)
 const srTs = (s) => new Date(srAt + s * 1000).toISOString();
 const srLines = (recs) => recs.map((r) => JSON.stringify(r)).join('\n') + '\n';
@@ -103,6 +103,11 @@ for (const id of [SR.Y, SR.Y2, SR.Y3]) fs.writeFileSync(path.join(cxDir, `rollou
   { timestamp: srTs(31), type: 'turn_context', payload: { model: 'gpt-5.6', cwd: CWD } },
   { timestamp: srTs(32), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'the fork asks 世界' }] } },
   { timestamp: srTs(33), type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'fork reply' }], id: 'item_fk_' + id.slice(-1) } },
+]));
+// C4: a claude transcript holding a record that carries ANOTHER conversation's id (C) — a claude record is read under its own id
+fs.writeFileSync(path.join(PROJ, SR.C4 + '.jsonl'), srLines([
+  { type: 'user', uuid: 'sru-c4', timestamp: srTs(2), sessionId: SR.C, promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: SR_CONT }] } },
+  { type: 'assistant', uuid: 'sra-c4', timestamp: srTs(3), sessionId: SR.C4, requestId: 'req_src4', message: { id: 'msg_src4', model: 'claude-fable-5', role: 'assistant', content: [{ type: 'text', text: 'continuing 继续' }] } },
 ]));
 for (const id of [SR.C, SR.C2]) fs.writeFileSync(path.join(PROJ, id + '.jsonl'), srLines([
   { type: 'user', uuid: 'sru-' + id.slice(-1), timestamp: srTs(2), sessionId: id, promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: SR_CONT }] } },
@@ -306,6 +311,61 @@ ok(missing.hasFile === false && missing.gap === null, 'missing transcript answer
     const bareC2 = await bareOf(ref(SR.C2, 'claude'), 'page');
     ok(!bareC2.includes('auto-resume') && bareC2.includes('"typed":true'), 'B-9a2e CONTROL (claude): the op without the rows — the continue reads as typed by the person');
   } finally { SP.setSource(null); }
+}
+// B-9a2e (round w5vyt4hhv's second small) — A CONVERSATION OF ANOTHER MACHINE, ON BOTH ROADS: the fork Y2 consults its parent X. A
+// read of Y2 for the paired machine 'h-paired' — through the agent (the one more ask) and on the hub's own fallback (no agent asked:
+// the hub converts the copy itself, under the same gate) — gives ONE answer: X noted on ANOTHER machine is handed on neither road
+// (the continue is today's on both); X noted on THAT machine is handed on both (VibeSpace's on both). This hub's own read: ungated.
+{
+  const SP = require(REPO + '/src/sent-provenance.js');
+  const row = SP.rowOf(SR_CONT, 'auto-resume', srAt);
+  SP.setSource((conv) => (conv === SR.X || conv === SR.Y2 ? [row] : null));
+  const make = (hosts, live = null) => createTranscriptService({ activeSessions: new Map(live ? [['w-live', live]] : []), createSessionMessages: (s) => (s?.backend === 'codex' ? new CodexSessionMessages(s, undefined, {}) : new SessionMessages(s, undefined, {})), hosts });
+  const yref = { backend: 'codex', sessionId: SR.Y2, cwd: CWD, host: 'h-paired' };
+  const roads = (live = null) => {
+    const asks = [];
+    const agent = make({ deviceBounded: async () => ({ connect: () => dm.connect(), transcriptOp: (m, r2, p, info) => { asks.push(Object.keys((p && p.sent) || {}).join('+')); return dm.transcriptOp(m, r2, p, info); } }) }, live);
+    const fallback = make({ fetchTranscript: async () => { } }, live);   // no device: the hub reads the copy here
+    return { agent, fallback, asks };
+  };
+  const both = async (live = null) => {
+    const { agent, fallback, asks } = roads(live);
+    return { viaAgent: J(await agent.page(yref, {})), viaHub: J(await fallback.page(yref, {})), asks };
+  };
+  const slabs = async () => {   // a claude SLAB (gapSlab) of C4, whose record carries C's id, on both roads
+    const cref = { backend: 'claude', sessionId: SR.C4, cwd: CWD, host: 'h-paired' };
+    const { agent, fallback } = roads();
+    const viaAgent = J(await agent.gapSlab(cref, '\u0000device:h-paired', 0, 10));
+    const g = await fallback.gapInfo(cref);
+    const viaHub = J(g.fp ? await fallback.gapSlab(cref, g.fp, 0, 10) : null);
+    return { viaAgent, viaHub };
+  };
+  try {
+    SP.setPlaces((id) => (id === SR.X ? 'h-else' : undefined));
+    const far = await both();
+    const own = J(await svc.page({ backend: 'codex', sessionId: SR.Y2, cwd: CWD }, {}));
+    ok(far.viaAgent === far.viaHub && !far.viaHub.includes('auto-resume') && far.asks.join() === SR.Y2 && own.includes('auto-resume'), `B-9a2e: the parent noted on ANOTHER machine — the agent's road and the hub's fallback give ONE answer, the parent's rows handed on neither (asks: ${far.asks.join(' | ')}); this hub's own read stamps it`);
+    if (far.viaAgent !== far.viaHub) console.error('    diff ' + firstDiff(far.viaHub, far.viaAgent));
+    SP.setPlaces((id) => (id === SR.X ? 'h-paired' : undefined));
+    const near = await both();
+    ok(near.viaAgent === near.viaHub && near.viaHub.includes('auto-resume') && near.asks.join() === `${SR.Y2},${SR.Y2}+${SR.X}`, `B-9a2e: the parent noted on THAT machine — handed on both roads, ONE answer (VibeSpace's continue) (asks: ${near.asks.join(' | ')})`);
+    if (near.viaAgent !== near.viaHub) console.error('    diff ' + firstDiff(near.viaHub, near.viaAgent));
+    // THE LIVE CHAIN (the gate's own ids): a live session of the fork, not yet read here, names X in its chain — X is handed on both
+    // roads although noted on another machine (the device road hands the chain at its first ask; the fallback's gate holds it)
+    SP.setPlaces((id) => (id === SR.X ? 'h-else' : undefined));
+    const chain = await both({ backend: 'codex', backendSessionId: SR.Y2, host: 'h-paired', cwd: CWD, forkedFrom: [SR.X] });
+    ok(chain.viaAgent === chain.viaHub && chain.viaHub.includes('auto-resume') && chain.asks.join() === `${SR.Y2}+${SR.X}`, `B-9a2e: a live session's own chain names the parent — handed on both roads, ONE answer (asks: ${chain.asks.join(' | ')})`);
+    if (chain.viaAgent !== chain.viaHub) console.error('    diff ' + firstDiff(chain.viaHub, chain.viaAgent));
+    // A SLAB (gapSlab): C4's record carries C's id — C noted on another machine: handed on neither road; on that machine: on both
+    SP.setSource((conv) => (conv === SR.X || conv === SR.Y2 || conv === SR.C ? [row] : null));
+    SP.setPlaces((id) => (id === SR.C ? 'h-else' : undefined));
+    const slabFar = await slabs();
+    SP.setPlaces((id) => (id === SR.C ? 'h-paired' : undefined));
+    const slabNear = await slabs();
+    ok(slabFar.viaAgent === slabFar.viaHub && !slabFar.viaHub.includes('auto-resume') && slabNear.viaAgent === slabNear.viaHub && slabNear.viaHub.includes('auto-resume'),
+      'B-9a2e: a claude SLAB whose record carries another conversation\'s id — of another machine: handed on neither road; of that machine: on both — ONE answer each');
+    if (slabNear.viaAgent !== slabNear.viaHub) console.error('    diff ' + firstDiff(slabNear.viaHub, slabNear.viaAgent));
+  } finally { SP.setPlaces(null); SP.setSource(null); }
 }
 // B-9a2e part 2 — THE LINK A FORK'S ADOPTION KEPT: a stopped fork VibeSpace made (Y3, of X), read on the paired machine with only
 // its own id given — the hub's real record (src/server/sent-record.js) names the parent through the link the fork's first id report

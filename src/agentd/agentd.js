@@ -2560,7 +2560,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             const ref = { backend: msg.ref?.backend, sessionId: msg.ref?.sessionId, cwd: msg.ref?.cwd };
             // B-9a2e part 1: what VibeSpace sent ({id: rows}, the hub's record) as THIS op's own table, its reads run inside the
             // op's async scope (sentScope) so the shared module finds it there and nowhere else — two ops at once (two hubs) never
-            // share one; the table dies with the op. The ack names the ids the read consulted with nothing handed (`unhanded`, an
+            // share one; it is reached only from the op's own work. The ack names the ids the read consulted with nothing handed (`unhanded`, an
             // op that carried `sent` only): the hub may hand them in one more ask
             const held = require('../sent-provenance.js').holdFor(msg.params?.sent);
             let result;
