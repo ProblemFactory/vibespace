@@ -288,7 +288,7 @@ function dirSliceOf(req) {
   if (!L._dirSlice) {
     let mc = { at: 0, rows: [] };
     L._dirSlice = require('../server/dir-slice.js').create({
-      call: (op, payload) => sfsPlain(req).call(op, payload),   // built ONCE over the first request: never its mark (r336)
+      call: (op, payload, opts) => sfsPlain(req).call(op, payload, opts),   // built ONCE over the first request: never its mark (r336); the field's calls ride idleOnly (B-d833)
       // (B-d833: a BLOCKED mount is no row, but the walk skips it: every mounted row is handed, `blocked` said)
       mounts: () => {
         if (Date.now() - mc.at > 5000) { let rows = []; try { rows = (L.mounts?.list?.() || []).filter((m) => m && m.mounted && m.path).map((m) => ({ ...m, blocked: !!L.mounts?.pathBlocked?.(m.path) })); } catch { rows = []; } mc = { at: Date.now(), rows }; }
@@ -322,7 +322,9 @@ router.get('/api/dir-complete', async (req, res) => {
   }
   if (!R && sliced) {
     try {
-      const ans = await dirSliceOf(req).slice({ text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), press: req.query.press === '1', q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), budgetMs: 450 });
+      // B-d833 M1: the page's abort (a field removed, a text that moved) closes this response — the field's re-asks end with it
+      const ac = new AbortController(); res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+      const ans = await dirSliceOf(req).slice({ text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), press: req.query.press === '1', q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), budgetMs: 450, signal: ac.signal });
       return res.json({ suggestions: require('../path-candidates.js').legacySuggestions(ans.listing, String(req.query.path || '')), ...ans });
     } catch (e) { return res.json({ suggestions: [], error: String((e && e.message) || e).slice(0, 120) }); }
   }

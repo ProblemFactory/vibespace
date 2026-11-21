@@ -194,6 +194,78 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
   const IR = path.join(HOME, 'work', 'investor-relations'), WORK = path.join(HOME, 'work');
   const STALE = path.join(TMP, 'stale-share'); fs.mkdirSync(path.join(STALE, 'a', 'b'), { recursive: true });
 
+  // B-d833's REMAINDER (2.369.414 shipped SafeFs `idleOnly`; the field now rides it): A HEALTHY FOLDER'S CHECK NEVER WAITS BEHIND A HUNG,
+  // SLOWER CALL — the REAL pool (one worker, short deadlines) held by a placed stall (the worker's `__sleep`, the stand-in for a hung
+  // listing: no mount of any kind); the field asks a healthy folder (~/work) while the worker is held, then again once the stall ended.
+  // RED CONTROL: the field's calls as on the release (no idleOnly) — the check waits in the held worker, runs out its own deadline and
+  // the folder is MARKED dead for 30 s (asked again: skipped)
+  {
+    process.env.VIBESPACE_SAFEFS_TEST = '1';   // the worker's `__sleep` op (a placed stall), inherited by the worker this pool spawns
+    const SF = require('../src/safe-fs.js').SafeFs;
+    const idleRun = async (D, name) => {
+      const P = new SF({ poolSize: 1, name, timeouts: { __sleep: 700, pathStat: 300, dirSlice: 300, dirIndex: 300 } });
+      try {
+        await P.call('pathStat', { path: HOME }).catch(() => null);   // the one worker up
+        const d = D.create({ home: HOME, repoDir: REPO, call: (op, pl, o) => P.call(op, pl, o) });
+        const stall = P.call('__sleep', { ms: 5000 }).then(() => 'answered', (e) => (e && e.safeFsTimeout ? 'deadline' : String((e && (e.code || e.message)) || e)));
+        await sleep(40);
+        const a = await d.slice({ text: '~/work', bases: [], budgetMs: 200 });
+        const st = await stall;
+        for (let i = 0; i < 50 && !(P.stats().alive > 0); i++) await sleep(100);   // the worker back after the stall's end (bounded)
+        await sleep(150);
+        const b = await d.slice({ text: '~/work', bases: [], budgetMs: 1500 });
+        return { stall: st, a: a.verdict && a.verdict.kind, b: b.verdict && b.verdict.kind, bUnread: !!b.rowsUnread, bSources: b.sourcesUnread || [], alive: P.stats().alive };
+      } finally { try { P.close(); } catch { } }
+    };
+    const cure = await idleRun(DS, 'dir-complete-idle');
+    ok('B-d833 remainder: a healthy folder asked while the one worker is held by a hung, slower call is answered LATE at its reply\'s bound (refused by the pool and asked again while no worker freed — never sent into the held worker) — and asked once the stall ended, it EXISTS (never marked dead)', cure.a === 'late' && cure.b === 'exists' && !cure.bUnread, cure);
+    const rel = await idleRun(mutant('d833-idle-out', [["const IDLE_ONLY = Object.freeze({ idleOnly: true });", 'const IDLE_ONLY = undefined;', 'the field\'s calls as on the release (no idleOnly)']]), 'dir-complete-idle-out');
+    // (the release's pool, B-23e5: the call whose deadline ends the held worker is the one MARKED; its siblings queued in that worker are
+    // ended «storage worker restarted», unmarked — so the mark lands on whichever of the field's calls the slice sent first: the line's
+    // ~/work, or the home's listing for its rows. Either is a HEALTHY folder marked dead behind a hung call: the fault)
+    ok(`RED CONTROL: the field's calls as on the release — the healthy folder's check waited in the held worker (${rel.a}), ran out its own deadline, and asked again a healthy folder of the field is answered from its own mark (dead for 30 s): ~/work ${rel.b}, the home's rows ${rel.bUnread ? 'COULD NOT BE READ' : 'read'}`, rel.a === 'late' && (rel.b === 'skipped' || (rel.bUnread && rel.bSources.includes(HOME))), rel);
+  }
+  // M1, FOLDED INTO B-d833's REMAINDER (lane bl-chat-c's fresh read; the coordinator's r1507): A BUSY POOL IS NOT A DEAD FOLDER. The REAL
+  // pool (one worker) kept busy by SHORT calls (the worker's `__sleep`, 60 ms each with a 60 ms gap — a Files window's ordinary work):
+  // the field's healthy folder is ASKED AGAIN until the worker frees and answered inside its bound (exists); a person's PRESS the same
+  // (law iii); a field whose page aborted stops asking (law i: no re-ask after its signal); every re-ask counted (law ii, stats()).
+  // RED CONTROL: idleOnly alone (3b79c841b — a refusal answered LATE at once)
+  {
+    const SF = require('../src/safe-fs.js').SafeFs;
+    const busyRun = async (D, name) => {
+      const P = new SF({ poolSize: 1, name, timeouts: { __sleep: 2000, pathStat: 300, dirSlice: 300, dirIndex: 300 } });
+      let holding = true;
+      try {
+        await P.call('pathStat', { path: HOME }).catch(() => null);   // the one worker up
+        const holder = (async () => { while (holding) { await P.call('__sleep', { ms: 60 }).catch(() => null); await sleep(60); } })();
+        const d = D.create({ home: HOME, repoDir: REPO, call: (op, pl, o) => P.call(op, pl, o) });
+        await sleep(20);
+        const typed = await d.slice({ text: '~/work', bases: [], budgetMs: 450 });
+        const pressed = await d.slice({ text: '~/work/investor-relations', bases: [], budgetMs: 450, press: true });
+        const busyCount = d.stats().noIdle;
+        holding = false; await holder;
+        // the field ENDS: the worker held by one long call, the page aborts while its field is asking again
+        const hold = P.call('__sleep', { ms: 600 }).catch(() => null);
+        await sleep(20);
+        const ac = new AbortController();
+        const pAb = d.slice({ text: '~/code', bases: [], budgetMs: 2000, signal: ac.signal });
+        await sleep(100);
+        const before = d.stats().noIdle.reasked;
+        ac.abort();
+        await sleep(30); const r1 = d.stats().noIdle.reasked;
+        await sleep(200); const r2 = d.stats().noIdle.reasked;
+        const ab = await pAb; await hold;
+        return { typed: typed.verdict && typed.verdict.kind, pressed: pressed.verdict && pressed.verdict.kind, busy: busyCount, abort: { before, r1, r2, kind: ab.verdict && ab.verdict.kind, late: d.stats().noIdle.late } };
+      } finally { holding = false; try { P.close(); } catch { } }
+    };
+    const [m1, m1c] = await Promise.all([busyRun(DS, 'dir-complete-busy'), busyRun(mutant('d833-m1-at-once', [["if ((signal && signal.aborted) || !(Date.now() + REASK_MS <= boundAt)) {", 'if (true) {', 'a refusal answered LATE at once (idleOnly alone)']]), 'dir-complete-busy-at-once')]);
+    ok(`B-d833 M1: a pool kept busy by short calls — the field's healthy folder is asked again until the worker frees and EXISTS inside its bound (typed: ${m1.typed}); a person's PRESS the same (${m1.pressed}); counted: ${JSON.stringify(m1.busy)}`,
+      m1.typed === 'exists' && m1.pressed === 'exists' && m1.busy.reasked > 0 && m1.busy.freed > 0, m1);
+    ok(`B-d833 M1: the waiting ends WITH ITS FIELD — the page aborted: no re-ask after its signal (${m1.abort.before} before, ${m1.abort.r1} → ${m1.abort.r2} after), the reply late (${m1.abort.kind}), counted late`,
+      m1.abort.before > 0 && m1.abort.r2 === m1.abort.r1 && m1.abort.kind === 'late' && m1.abort.late > 0, m1.abort);
+    ok(`RED CONTROL: idleOnly alone (3b79c841b) — a busy pool answers a healthy folder LATE (typed: ${m1c.typed}, pressed: ${m1c.pressed})`, m1c.typed === 'late' || m1c.pressed === 'late', m1c);
+  }
+
   // ③b (B-0f3d, kept): a hung PROBE (a Task Group's folder on a dead mount) never holds the typed text — judged by its own stat
   {
     const g = hold(), c1 = standIn({ dead: [{ path: IR, g }] }), ds = mkDS(DS, c1);

@@ -14,6 +14,19 @@
 const path = require('path');
 const os = require('os');
 const PC = require('../path-candidates.js');
+const { NO_IDLE } = require('../safe-fs.js');
+// B-d833's remainder: EVERY call of the field runs on an IDLE worker or not at all (SafeFs `idleOnly`) — a healthy folder's check
+// sent into a worker held by a hung, slower call waited there, ran out ITS OWN deadline and was marked dead for 30 s. A call the pool
+// refuses (every worker busy) is LATE: still looking, asked again by the field — never a mark, never «could not be read»
+const IDLE_ONLY = Object.freeze({ idleOnly: true });
+// …ITS M1 (lane bl-chat-c's fresh read; the coordinator's r1507): idleOnly alone refused a healthy folder whenever every worker had a
+// call in flight — the field's own counters can fill four workers and every file route shares the pool, so ordinary load answered
+// LATE, three partial replies made the page say «did not answer» and a person's press was refused. A call the pool refuses for NO
+// IDLE WORKER is ASKED AGAIN every REASK_MS until a worker frees, up to the reply's soft bound — never sent into a busy worker (the
+// hung-call harm stays cured), LATE only when none freed within the bound, no mark either way. THE WAITING ENDS WITH ITS FIELD: the
+// reply's `signal` (the page aborted: a field removed, a text that moved — the route's response closed) stops the re-asks. COUNTED
+// (stats().noIdle: refused · reasked · freed · late) and said in the journal at most once a minute when it moved.
+const REASK_MS = 25;
 
 const LIST_FRESH_MS = 2000;
 const INDEX_TTL_MS = 30e3;
@@ -61,6 +74,8 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
   const pressed = new Map();     // entrance path → when a person's press last went through its mark (ONCE per window)
   let mountPaths = [];           // the hub's mounted rows, as last read (a listing names them, never states inside them)
   const queued = new Map();      // counter + key → its promise (a call waiting for its counter's slot)
+  const busy = { refused: 0, reasked: 0, freed: 0, late: 0 }; // M1: the pool found busy — calls refused, re-asks, freed, ended late
+  let busySaid = { at: 0, reasked: 0, late: 0 };
   const dataRoot = dataDir || path.join(repoDir, 'data');
   const C = { line: { cap: LINE_SLOTS, busy: 0, q: [] }, rows: { cap: ROW_SLOTS, busy: 0, q: [] } };
   const pump = (c) => { while (c.busy < c.cap && c.q.length) c.q.shift()(); };
@@ -71,7 +86,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
   /* the hung ENTRANCE at or above p (the pool's deadline ended its call) — its mark speaks for everything below it */
   function entranceAbove(p, t, except = null) { for (const m of sent.values()) if (m !== except && m.entrance && m.hungAt != null && t - m.hungAt < PROBE_LATE_MS && under(p, m.path)) return m; return null; }
   /* ONE CALL: joined while it is SENT; queued in its asker's counter otherwise; at the grant it joins a call sent by then */
-  function once(key, cn, p, run, { entrance = false, born = now(), through = null }) {
+  function once(key, cn, p, run, { entrance = false, born = now(), through = null, boundAt = 0, signal = null }) {
     const t = now(), s0 = sent.get(key);
     if (s0 && s0.hungAt == null && t - s0.at < PROBE_LATE_MS) return s0.p;
     if (s0 && s0 !== through && s0.hungAt != null && t - s0.hungAt < PROBE_LATE_MS) return Promise.resolve({ skipped: markEnd(s0), at: p });   // its OWN deadline mark: never sent again inside the window
@@ -86,9 +101,19 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
       const m = entranceAbove(p, t1, through); if (m) { free(); return { skipped: markEnd(m), at: m.path }; }
       if (t1 - born > QUEUE_MAX_MS) { free(); return null; }
       const e = { key, path: p, entrance, at: t1, hungAt: null, p: null };
-      e.p = Promise.resolve().then(run).then(
+      // M1: refused for no idle worker ⇒ asked again until a worker frees, up to the reply's bound (`boundAt`, the real clock) or its
+      // field's end (`signal`); a call with no bound (a kid's facts, behind every answer) is LATE at once, as before
+      let reasked = 0;
+      const attempt = () => Promise.resolve().then(run).then((r) => { if (reasked) busy.freed++; return r; }, (err) => {
+        if (!(err && err.code === NO_IDLE.code)) throw err;
+        if (!reasked) busy.refused++;
+        if ((signal && signal.aborted) || !(Date.now() + REASK_MS <= boundAt)) { busy.late++; throw err; }
+        reasked++; busy.reasked++;
+        return new Promise((res) => setTimeout(res, REASK_MS)).then(attempt);
+      });
+      e.p = attempt().then(
         (r) => { free(); if (sent.get(key) === e) sent.delete(key); return { ok: r }; },
-        (err) => { free(); if (sent.get(key) === e) { if (err && err.safeFsTimeout) e.hungAt = now(); else sent.delete(key); } return { failed: String((err && (err.message || err.code)) || err || 'failed').slice(0, 200) }; });
+        (err) => { free(); if (sent.get(key) === e) { if (err && err.safeFsTimeout) e.hungAt = now(); else sent.delete(key); } if (err && err.code === NO_IDLE.code) return LATE; return { failed: String((err && (err.message || err.code)) || err || 'failed').slice(0, 200) }; });
       sent.set(key, e);
       return e.p;
     });
@@ -110,7 +135,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     const t = now(), k = known.get(p);
     if (k && t - k.at < LIST_FRESH_MS) return Promise.resolve({ ok: k.stat });
     const sk = skippedFor(p, t, o.press); if (sk && sk.skipped) return Promise.resolve(sk);
-    return once('stat:' + p, cn, p, () => call('pathStat', { path: p }).then((r) => { const st = r && r.stat; if (st && !st.err) noteKnown(p, st); return st; }), { ...o, entrance: true, through: sk && sk.through });
+    return once('stat:' + p, cn, p, () => call('pathStat', { path: p }, IDLE_ONLY).then((r) => { const st = r && r.stat; if (st && !st.err) noteKnown(p, st); return st; }), { ...o, entrance: true, through: sk && sk.through });
   }
   /* THE DESCENT: every level above `p` (to `p` itself when `self`) answered «a folder» — else where it stopped and why */
   async function descend(p, cn, o, self) {
@@ -149,7 +174,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
       const sk = skippedFor(a, t, o.press); if (sk && sk.skipped) return { path: c, answer: 'skipped', until: sk.skipped, at: sk.at };
       // ONE KEY per path: the line's own call IS that path's level stat (joined either way); a level's bare stat joined (no names) that
       // says absent is followed by the line's own, with the names — the folder answered, so it is no second call into a dead thing
-      const own = () => once('stat:' + a, 'line', a, () => call('pathStat', { path: a, names: path.basename(a), files: o.files }).then((x) => { const s1 = x && x.stat; if (s1 && s1.exists && !s1.err) noteKnown(a, s1); return s1; }), { ...o, entrance: true, through: sk && sk.through });
+      const own = () => once('stat:' + a, 'line', a, () => call('pathStat', { path: a, names: path.basename(a), files: o.files }, IDLE_ONLY).then((x) => { const s1 = x && x.stat; if (s1 && s1.exists && !s1.err) noteKnown(a, s1); return s1; }), { ...o, entrance: true, through: sk && sk.through });
       let r = await raceOf(own(), o.untilSoft);
       if (r && r !== LATE && r.ok && !r.ok.exists && !r.ok.err && r.ok.names === undefined) r = await raceOf(own(), o.untilSoft);
       if (r === LATE || !r) return { path: c, answer: 'late', at: a };
@@ -177,7 +202,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     if (c && (!files || c.entry.files) && (!pkg || c.pkg) && now() - c.at < LIST_FRESH_MS) return Promise.resolve({ ok: c.entry });
     return once(`list:${files ? 'f' : ''}${pkg ? 'p' : ''}:${a}`, 'rows', a, () => {
       const c0 = listCache.get(a), base = c0 && (!files || c0.entry.files) && (!pkg || c0.pkg) ? c0 : null;   // `same` answers THIS entry
-      return call('dirSlice', { path: a, dirs: [{ path: a, known: base ? base.entry.mtime : undefined }], files, pkg, skip: skipNow(o.skipAlso) }).then((r) => {
+      return call('dirSlice', { path: a, dirs: [{ path: a, known: base ? base.entry.mtime : undefined }], files, pkg, skip: skipNow(o.skipAlso) }, IDLE_ONLY).then((r) => {
         const d = ((r && r.dirs) || [])[0] || null;
         if (!d) return null;
         if (d.same) { if (!base) return null; listCache.set(a, { at: now(), entry: base.entry, pkg: base.pkg }); return base.entry; }
@@ -197,7 +222,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
   function probeOne(a, o) {
     return once('probe:' + a, 'rows', a, () => {
       const at = now();
-      return call('dirSlice', { path: a, dirs: [], probes: [a] }).then((r) => {
+      return call('dirSlice', { path: a, dirs: [], probes: [a] }, IDLE_ONLY).then((r) => {
         const f = ((r && r.probes) || [])[0] || null, t2 = now();
         if (f && !f.err) {
           const cur = landed.get(a);
@@ -242,7 +267,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     const key = root + '\n' + skip.join('\n');
     const c = indexCache.get(key);
     const walk = () => {
-      const p = Promise.resolve(once('index:' + key, 'rows', root, () => call('dirIndex', { path: root, roots: [root], depth: 4, max: 6000, budgetMs: 350, skip }), o)).then((r) => {
+      const p = Promise.resolve(once('index:' + key, 'rows', root, () => call('dirIndex', { path: root, roots: [root], depth: 4, max: 6000, budgetMs: 350, skip }, IDLE_ONLY), o)).then((r) => {
         if (r && r.ok) {
           indexCache.set(key, { at: now(), dirs: r.ok.dirs || [], links: r.ok.links || [], partial: !!r.ok.partial, p: null });
           if (indexCache.size > 48) indexCache.delete(indexCache.keys().next().value);
@@ -263,8 +288,13 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
    *  person's press is waiting for it (R-i: the entrance's one call goes through its window once).
    *  → { listing, self, took, partial, verdict?, rowsLate?, rowsUnread?, probesLate?, probesFailed?, sourcesLate?, sourcesUnread? } — `verdict` = the text's (PURE
    *  textVerdict: { kind: 'exists' | 'absent' | 'late' | 'skipped' | 'failed', path?, completed?, until?, err?, base? }) */
-  async function slice({ text = '', bases = [], probe = [], q = '', kind = 'folder', budgetMs = 450, press = false } = {}) {
+  async function slice({ text = '', bases = [], probe = [], q = '', kind = 'folder', budgetMs = 450, press = false, signal = null } = {}) {
     const t0 = now();
+    // M1: what the busy pool cost since the last line — said at most once a minute, only when it moved (a slow hub's next read sees it)
+    if (Date.now() - busySaid.at >= 60e3 && (busy.reasked !== busySaid.reasked || busy.late !== busySaid.late)) {
+      console.log(`[dir-slice] the file pool was busy: the folder field asked ${busy.reasked - busySaid.reasked} call(s) again, ${busy.late - busySaid.late} ended late (no idle worker within its reply's bound)`);
+      busySaid = { at: Date.now(), reasked: busy.reasked, late: busy.late };
+    }
     const files = kind === 'file';
     const abs = (p) => PC.fromTilde(home, String(p || '').trim()).replace(/(.)\/+$/, '$1');
     const allBases = (Array.isArray(bases) ? bases : []).map(String).filter((p) => p && (p.startsWith('/') || p.startsWith('~')));
@@ -287,7 +317,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     const until = new Promise((r) => { tm = setTimeout(() => r(LATE), Math.max(50, budgetMs)); });
     const untilSoft = until.then(() => new Promise((r) => setImmediate(() => r(LATE))));   // an answer already in hand beats the deadline
     const okOf = (r) => (r && r !== LATE && r.ok ? r.ok : null);
-    const o = { until, untilSoft, files, press: !!press, budget: Math.max(50, budgetMs), skipAlso: [...candAbs, ...probes] };
+    const o = { until, untilSoft, files, press: !!press, budget: Math.max(50, budgetMs), skipAlso: [...candAbs, ...probes], boundAt: Date.now() + Math.max(50, budgetMs), signal };
     for (const [k, m] of sent) if (m.hungAt != null && now() - m.hungAt >= PROBE_LATE_MS) sent.delete(k);   // a mark lives PROBE_LATE_MS
     // THE LINE: the candidates ONE AT A TIME, in the bases' order — stop at the first exact hit or the first that does not answer
     const lineP = (async () => {
@@ -360,7 +390,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     return { listing, self: me, took: now() - t0, partial, ...(verdict ? { verdict } : {}), ...(rowsLate ? { rowsLate: true } : {}), ...(rowsUnread ? { rowsUnread: true, sourcesUnread } : {}), ...(probesLate.length ? { probesLate } : {}), ...(probesFailed.length ? { probesFailed } : {}), ...(sourcesLate.length ? { sourcesLate } : {}) };
   }
 
-  return { slice, self, _caches: { listCache, indexCache, known, landed }, _counters: C };
+  return { slice, self, stats: () => ({ noIdle: { ...busy } }), _caches: { listCache, indexCache, known, landed }, _counters: C };
 }
 
 module.exports = { create, LIST_FRESH_MS, INDEX_TTL_MS, SELF_TTL_MS, PROBE_LATE_MS, LANDED_FRESH_MS, LINE_SLOTS, ROW_SLOTS };
