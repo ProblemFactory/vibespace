@@ -9,7 +9,7 @@
 //             main filter searches it; expanding renders capped pages).
 // Starred sessions float to the top of their zone.
 import { t as tr, tc } from './i18n.js'; // sidebar cluster convention
-import { staleZoneText, errorZoneText, errorChipText } from './stale-words.js'; // B-5278 (r951): a machine that replied is never called unreachable
+import { staleZoneText, errorZoneText, errorChipText, failedRowText } from './stale-words.js'; // B-5278 (r951): a machine that replied is never called unreachable
 import { agoText, escHtml, hostStateChip, showConfirmDialog, showToast, stripCwdHostLabel, sessionMatchesFilter } from './utils.js';
 import { passesAgentKindFilter } from './agent-meta.js';
 
@@ -203,7 +203,7 @@ export function installSidebarWorkbench(Sidebar) {
       // wiped the error, leaving a permanent "Scanning sessions over ssh…" row
       // as the only visible state.
       if (!fresh && cur?.lastFailAt && Date.now() - cur.lastFailAt < 10000) return;
-      map.set(hostId, { loading: true, sessions: cur?.sessions || null, error: cur?.error || null, fetchedAt: cur?.fetchedAt || 0, lastFailAt: cur?.lastFailAt || 0 });
+      map.set(hostId, { loading: true, sessions: cur?.sessions || null, error: cur?.error || null, errorCode: cur?.errorCode || null, fetchedAt: cur?.fetchedAt || 0, lastFailAt: cur?.lastFailAt || 0 });   // (r1044) a re-scan keeps the code with its error
       if (fresh) this._render(); // in-flight state (⟳ disabled + "scanning…" chip) must show immediately
       // re-render for the selected zones OR whenever a search is active (so
       // cross-host search matches appear as each host's scan lands)
@@ -394,7 +394,7 @@ export function installSidebarWorkbench(Sidebar) {
       // A failed re-scan with a cached list must SHOW the cached list under an
       // honest banner — bailing to a bare error row threw away sessions the
       // user could still resume.
-      if (st.error && !st.sessions?.length) { empty(tr('Discovery failed: {err}', { err: st.error })); return; }
+      if (st.error && !st.sessions?.length) { empty(failedRowText(st.errorCode, st.error, hostLabelFallback, tr)); return; }   // (r1044) by the code, in the person's language
       this._wbHostStateRow(st, hostLabelFallback);
       const all = this._wbFilterRemote(st.sessions || []);
       const cutoff = Date.now() - RECENT_MS;
@@ -897,7 +897,7 @@ export function installSidebarWorkbench(Sidebar) {
         if (histLoading) {
           this._wbEmptyRow(tr('Scanning sessions over ssh…'));
         } else if (histHost && histState?.error && !histState.sessions?.length) {
-          this._wbEmptyRow(tr('Discovery failed: {err}', { err: histState.error }));
+          this._wbEmptyRow(failedRowText(histState.errorCode, histState.error, histLabel, tr));   // (r1044) by the code
         } else if (!histList.length) {
           const hidden = histHost && !(searchingH && histHost === (this._wbRecentHost || ''))
             ? this._wbKindHidden(histState?.sessions, s => (s.mtime || 0) < cutoffH && s.status !== 'remote-running') : 0;

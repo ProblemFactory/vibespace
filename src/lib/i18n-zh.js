@@ -3284,6 +3284,8 @@ export default {
   "Showing cached results — {host}'s list could not be read in time.": "显示缓存的结果 — {host} 的列表没能及时读出。",
   "Showing cached results — {host}'s list could not be read.": "显示缓存的结果 — {host} 的列表没能读出。",
   "not read": "未读出",
+  "{host}'s list could not be read in time.": "{host} 的列表没能及时读出。",
+  "{host}'s list could not be read.": "{host} 的列表没能读出。",
   "This machine's list is being read again — showing its last list, so this session may have changed or ended since.": "正在重新读取这台机器的列表——显示的是它上一次的列表，所以这个会话可能已经变化或结束。",
   "Last known list — {host}'s list is being read again.": "上一次的列表 — 正在重新读取 {host} 的列表。",
   "Upgrade \"{name}\" to dial-out": "将“{name}”升级为拨出连接",

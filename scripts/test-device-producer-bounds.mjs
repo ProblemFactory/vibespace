@@ -22,6 +22,10 @@
 //     a device that replied «still walking» (RED: today's row and the release's fallback, in copies); ALSO CURED: the dirty push
 //     emptied the list (RED: the release's expression); the smalls: an older landing refused by its walk's number, the let-go
 //     child ended by its handle (controls in copies), the pool append after a torn last line (RED: the release's line).
+//   ⑦ r1044, the follow: the door's default (any reason it does not know ⇒ «could not be read»; RED: the door that knows only
+//     today's five), a re-scan keeps its code and the «Discovery failed» row says the code — the workbench's REAL methods on a
+//     bare class (RED: the loading step that drops it, in a copy) — and the dirty push END TO END: server.js's own wiring, a
+//     HostManager answering rows, the page's own handler over a map holding a list (RED: the release's d?.sessions).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -237,7 +241,7 @@ console.log('⑥ r951, THE LAW of item 4: a machine that replied is never called
     const T = read(`src/lib/i18n-${lang}.js`);
     const keys = [...SWSRC.matchAll(/tr\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
     const missing = keys.filter((k) => !T.includes(JSON.stringify(k) + ':'));
-    ok(keys.length === 14 && missing.length === 0, `…every sentence of the door (${keys.length}) has its ${lang} row`, missing);
+    ok(keys.length === 17 && missing.length === 0, `…every sentence of the door (${keys.length}) has its ${lang} row`, missing);
   }
   // THE HUB'S FALLBACK, DRIVEN (a HostManager in a temp folder; the device and ssh stood in): a device that replied «still walking»
   const { HostManager, lastKnownRows } = require('../src/hosts.js');
@@ -311,6 +315,81 @@ console.log('⑥ r951, THE LAW of item 4: a machine that replied is never called
   const now3 = appendWith(stmt), rel3 = appendWith("try { fs.appendFileSync(ORDERS_LOG, JSON.stringify(ev) + '\\n'); } catch { }");   // the release's line, quoted (stale-pins: kept)
   ok(stmt && now3.events.map((e) => e.to).join() === 'a,b' && now3.torn === 1 && rel3.events.map((e) => e.to).join() === 'a',
     `the agent's own append after a torn last line: its record whole (${now3.events.map((e) => e.to).join()}, the torn one counted); the release's line glued it to the torn one and lost it (${rel3.events.map((e) => e.to).join()}) — RED`);
+}
+
+console.log('⑦ r1044, the follow: the door\'s default, a re-scan keeps its code, the «Discovery failed» rows by the code, the push through the page\'s REAL handler');
+{
+  const trS = (k, p = {}) => String(k).replace(/\{(\w+)\}/g, (m, n) => (n in p ? String(p[n]) : m));
+  const SWSRC = read('src/lib/stale-words.js');
+  const SW = await import(pathToFileURL(path.join(REPO, 'src/lib/stale-words.js')).href);
+  // 1. THE DOOR'S DEFAULT: any reason it does not know is still a machine that replied; only NO reason reads «unreachable»
+  const NEWER = 'discovery-a-newer-reason';
+  const wordsOf = (W, why) => [W.staleTip(why, trS), W.staleZoneText(why, 'gpu-a', trS), W.errorZoneText(why, 'gpu-a', trS), W.errorChipText(why, '', trS), W.failedRowText(why, 'gpu-a: its own words', 'gpu-a', trS)];
+  const wn = wordsOf(SW, NEWER), none = wordsOf(SW, undefined);
+  ok(wn.every((x) => !/unreachable/.test(x)) && /list could not be read\.$/.test(wn[1]) && wn[3] === 'not read' && wn[4] === "gpu-a's list could not be read.",
+    `a reason this page does not know (a newer agent's «${NEWER}»): «${wn[1]}» · «${wn[3]}» · «${wn[4]}» — never «unreachable»`, wn);
+  ok(none.slice(0, 3).every((x) => /unreachable/.test(x)) && none[3] === 'unreachable' && none[4] === 'Discovery failed: gpu-a: its own words', 'only NO reason reads «unreachable» (and the no-list row keeps the hub\'s words, as before)', none);
+  const Five = await import(pathToFileURL(M.write('src/lib/stale-words.js', anchored(SWSRC, "export const answered = (why) => typeof why === 'string' && why !== '';", "export const answered = (why) => ['discovery-slow', 'discovery-timeout', 'discovery-too-large', 'discovery-child-failed', 'discovery-child-unstarted'].includes(why);", 'known-five-only'), 'known-five-only', { esm: true })).href);
+  ok(/unreachable/.test(Five.staleZoneText(NEWER, 'gpu-a', trS)) && /unreachable/.test(Five.errorZoneText(NEWER, 'gpu-a', trS)), `CONTROL (the door that knows only today's five reasons, in a copy — the cure as it was): «${Five.staleZoneText(NEWER, 'gpu-a', trS)}» for a machine that replied — RED`);
+  // THE WORKBENCH's REAL METHODS on a bare class (and a copy's), over a minimal DOM stand-in made AFTER the import
+  const WBSRC = read('src/lib/sidebar-workbench.js');
+  const { installSidebarWorkbench } = await import(pathToFileURL(path.join(REPO, 'src/lib/sidebar-workbench.js')).href);
+  const NoCode = await import(pathToFileURL(M.write('src/lib/sidebar-workbench.js', anchored(WBSRC, 'error: cur?.error || null, errorCode: cur?.errorCode || null, fetchedAt:', 'error: cur?.error || null, fetchedAt:', 'rescan-drops-code'), 'rescan-drops-code', { esm: true })).href);   // the release's loading step, quoted (stale-pins: kept)
+  const mkEl = (tag) => { const el = { tagName: tag, children: [], className: '', textContent: '', title: '', style: { setProperty() { } }, dataset: {}, classList: { add() { }, remove() { }, contains: () => false }, setAttribute() { }, append(...c) { el.children.push(...c); }, appendChild(c) { el.children.push(c); return c; } }; return el; };
+  const txt = (el) => [el.textContent || '', ...(el.children || []).map(txt)].join(' ').replace(/\s+/g, ' ').trim();
+  const hadDoc = 'document' in globalThis, hadFetch = globalThis.fetch;
+  globalThis.document = { createElement: mkEl, getElementById: () => null };
+  globalThis.fetch = () => new Promise(() => { });   // a re-scan in flight (it never lands in this leg)
+  try {
+    const bench = (install) => { class S { } install(S); const s = new S(); Object.assign(s, { listEl: mkEl('div'), app: { ws: { onGlobal() { } } }, _render() { }, _renderAgentKindQuickTabs() { }, _wbRecentHost: 'hD', _wbRemoteHosts: new Map(), _hostsData: { hosts: [{ id: 'hD', name: 'gpu-a' }] } }); return s; };
+    // 2. A RE-SCAN KEEPS THE CODE: the page holds its cached list and the hub's last error carried a discovery code; ⟳ pressed
+    const rescan = (install) => {
+      const s = bench(install);
+      s._wbRemoteHosts.set('hD', { loading: false, sessions: [{ sessionId: 's1', hostName: 'gpu-a' }], error: 'gpu-a: the discovery walk is still running', errorCode: 'discovery-slow', fetchedAt: 1000, lastFailAt: 0 });
+      s._loadRemoteHost('hD', { fresh: true });
+      s.listEl = mkEl('div'); s._wbHostStateRow(s._wbRemoteHosts.get('hD'), 'gpu-a');
+      return { loading: s._wbRemoteHosts.get('hD').loading, code: s._wbRemoteHosts.get('hD').errorCode, row: txt(s.listEl) };
+    };
+    const rs = rescan(installSidebarWorkbench), rsRed = rescan(NoCode.installSidebarWorkbench);
+    ok(rs.loading === true && rs.code === 'discovery-slow' && /could not be read in time/.test(rs.row) && !/unreachable/.test(rs.row), `a re-scan in flight keeps the code with its error: the zone's row says «${rs.row}»`, rs);
+    ok(/is unreachable/.test(rsRed.row), `CONTROL (the loading step that drops the code, in a copy — the release's): «${rsRed.row}» for the whole re-scan — RED`, rsRed);
+    // 3. THE «Discovery failed» ROW when there is no list anywhere: by the code (the recent zone, driven); History draws the same door
+    const fr = bench(installSidebarWorkbench);
+    fr._wbRemoteHosts.set('hD', { loading: false, sessions: null, error: 'gpu-a: the discovery walk is still running (past 8 s); what it finds is kept for the next ask', errorCode: 'discovery-slow', fetchedAt: 0, lastFailAt: Date.now() });
+    fr._renderRemoteRecent('hD');
+    const frRow = txt(fr.listEl);
+    ok(frRow === "gpu-a's list could not be read in time." && /\(r1044\) by the code/.test(WBSRC) && (WBSRC.split('failedRowText(').length - 1) === 2 && !WBSRC.includes("tr('Discovery failed: {err}'"),   // an absence check: the no-list row draws through the door now (stale-pins: kept)
+      `no list anywhere and a device that replied: the row says «${frRow}» by the code, in the person's language (zh / ja rows), not the device's own English sentence; the History row draws the same door`);
+    // 4. THE PUSH THROUGH THE REAL CONSUMER: server.js's own dirty wiring (its statement, its names handed in), a HostManager whose
+    // discovery answers rows, the real dirty signal, and the page's OWN handler over a map that holds a list
+    const SRVW = read('server.js'), wa = SRVW.indexOf('  hosts.onDiscoveryDirty = (hostId) => {'), wb = SRVW.indexOf('\n  };\n', wa);
+    const WIRING = wa >= 0 && wb > wa ? SRVW.slice(wa, wb + 5) : '';
+    const NOW_EXPR = 'sessions: Array.isArray(d) ? d : (d?.sessions || [])', REL_EXPR = 'sessions: d?.sessions || []';
+    const { HostManager } = require('../src/hosts.js');
+    const pushRun = async (wiring) => {
+      const hub = new HostManager({ dataDir: fs.mkdtempSync(path.join(tmp, 'push-')) });
+      hub._state.hosts.push({ id: 'hD', name: 'gpu-a', transport: 'dial' });
+      hub.deviceBounded = async () => ({ connect: async () => ({ info: { capabilities: ['discovery-claims'] } }), discoveryClaims: async () => ({ sessions: [{ sessionId: 's1', hostName: 'gpu-a' }, { sessionId: 's2', hostName: 'gpu-a' }] }) });
+      hub._ssh = async () => { throw new Error('no ssh in this leg'); };
+      const fired = [], pushed = [];
+      new Function('hosts', 'discDirtyTimers', 'wss', 'bcastAll', 'setTimeout', wiring)(hub, new Map(), { clients: { size: 1 } }, (m) => pushed.push(m), (fn) => { fired.push(fn); return 1; });
+      const page = bench(installSidebarWorkbench); let handler = null;
+      page.app = { ws: { onGlobal: (fn) => { handler = fn; } } };
+      page._wbRemoteHosts.set('hD', { loading: false, sessions: [{ sessionId: 's1', hostName: 'gpu-a' }], error: null, fetchedAt: 1000, lastFailAt: 0 });
+      page._initRemoteDirtySync();
+      hub.invalidateDiscovery('hD');   // the real dirty signal: a conversation ended there
+      for (const fn of fired.splice(0)) await fn();
+      if (hub._discPersistTimer) { clearTimeout(hub._discPersistTimer); hub._discPersistTimer = null; }
+      for (const m of pushed) handler && handler(m);
+      return { pushed: pushed.length, rows: (page._wbRemoteHosts.get('hD').sessions || []).map((s) => s.sessionId).join() || '(empty)' };
+    };
+    const pn = await pushRun(WIRING), pr = await pushRun(WIRING.replace(NOW_EXPR, REL_EXPR));
+    ok(WIRING.split(NOW_EXPR).length === 2 && pn.pushed === 1 && pn.rows === 's1,s2', `the dirty push, end to end (server.js's own wiring → the page's own handler): the machine's list on the page is its two rows (${pn.rows})`, pn);
+    ok(pr.pushed === 1 && pr.rows === '(empty)', `CONTROL (the release's line, d?.sessions): the same push empties the machine's list on the page (${pr.rows}) — RED`, pr);
+  } finally {
+    if (hadDoc) { } else delete globalThis.document;
+    globalThis.fetch = hadFetch;
+  }
 }
 
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);

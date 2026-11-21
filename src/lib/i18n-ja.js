@@ -3284,6 +3284,8 @@ export default {
   "Showing cached results — {host}'s list could not be read in time.": "キャッシュされた結果を表示中 — {host} の一覧を時間内に読み取れませんでした。",
   "Showing cached results — {host}'s list could not be read.": "キャッシュされた結果を表示中 — {host} の一覧を読み取れませんでした。",
   "not read": "未読み取り",
+  "{host}'s list could not be read in time.": "{host} の一覧を時間内に読み取れませんでした。",
+  "{host}'s list could not be read.": "{host} の一覧を読み取れませんでした。",
   "This machine's list is being read again — showing its last list, so this session may have changed or ended since.": "このマシンの一覧を読み直しています — 前回の一覧を表示しているため、このセッションは変わったか終了している可能性があります。",
   "Last known list — {host}'s list is being read again.": "前回の一覧 — {host} の一覧を読み直しています。",
   "Upgrade \"{name}\" to dial-out": "「{name}」を発信接続にアップグレード",
