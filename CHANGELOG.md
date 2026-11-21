@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.415 — 2026-11-21
+
+### Fixed
+- On Lark, an @name in an agent's proposed message now notifies that person; before the send, even after an edit, the card says which names go as plain words.
+- A vault value a command run for an agent prints no longer shows when the command is stopped just after, or when it begins inside another stored value.
+- A sign-in file that cannot be read no longer leaves VibeSpace open with no sign-in: it stays closed and says how to restore or remove the file.
+- With single sign-on, people can still sign in while the local sign-in file cannot be read.
+
 ## 2.369.414 — 2026-11-20
 
 ### Added
