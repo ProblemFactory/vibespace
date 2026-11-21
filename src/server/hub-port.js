@@ -45,10 +45,12 @@ function readStartSync(w, { ms = START_LINE_MS } = {}) {
   if (!(fd >= 3)) return { word: true, fd: null, raw: String(w.raw).slice(0, 16), why: 'no-descriptor' };   // 0–2 are stdio, never a start pipe
   let st;
   try { st = fs.fstatSync(fd); } catch { return { word: true, fd, why: 'not-open' }; }
-  if (!(st.isFIFO() || st.isSocket())) { try { fs.closeSync(fd); } catch { } return { word: true, fd, why: 'not-a-pipe' }; }   // closed too: no child inherits what the word named
+  // closed too: no child inherits what the word named — and a close that fails is KEPT in the judged start (closeCode), never
+  // swallowed (test-fd-close-census: no close under an empty catch)
+  if (!(st.isFIFO() || st.isSocket())) { let closeCode = null; try { fs.closeSync(fd); } catch (e) { closeCode = (e && e.code) || 'error'; } return { word: true, fd, why: 'not-a-pipe', ...(closeCode ? { closeCode } : {}) }; }
   let sock;
   try { sock = new net.Socket({ fd, readable: false, writable: false }); }   // the descriptor becomes non-blocking; nothing reads through this handle
-  catch { try { fs.closeSync(fd); } catch { } return { word: true, fd, why: 'not-a-pipe' }; }
+  catch { let closeCode = null; try { fs.closeSync(fd); } catch (e) { closeCode = (e && e.code) || 'error'; } return { word: true, fd, why: 'not-a-pipe', ...(closeCode ? { closeCode } : {}) }; }
   const nap = new Int32Array(new SharedArrayBuffer(4)), chunk = Buffer.alloc(4096), parts = [], until = Date.now() + ms;
   let size = 0;
   try {
@@ -82,7 +84,7 @@ function claim({ env = process.env, ms } = {}) { if (!claimed) claimed = takeSta
 /** the claimed (or a suite's) start, judged → { form: 'plain' } | { form: 'piped', start } | { form: 'piped', start: null, why } */
 function judge(s) {
   if (s.word === false) return { form: 'plain' };
-  if (s.why) return { form: 'piped', start: null, why: s.why, fd: s.fd, raw: s.raw, ms: s.ms, code: s.code };
+  if (s.why) return { form: 'piped', start: null, why: s.why, fd: s.fd, raw: s.raw, ms: s.ms, code: s.code, ...(s.closeCode ? { closeCode: s.closeCode } : {}) };
   const m = s.first;
   if (m && m.op === 'start' && m.party === 'hub' && typeof m.secret === 'string' && typeof m.link === 'string') return { form: 'piped', start: { party: 'hub', secret: m.secret, link: m.link } };
   return { form: 'piped', start: null, why: 'no-start' };   // a first line that is no start: piped, it cannot join (it ends)

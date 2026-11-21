@@ -110,6 +110,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/server/vault-run-door.js': [3, 'vibespace-vault run (lane vault-run-door; declared by lane vault-manual-and-lock): its OWN child\'s process group (SIGTERM, SIGKILL after the grace — a timeout, a lock, the caller gone, the run\'s end) with the child handle as its fallback, and a stray carrying the run\'s mark found by a fresh /proc scan — never a pid read from a file'],
     'src/adapters/claude-code.js': [1, "actor interrupt: the Stop's SIGINT fallback"],
     'src/server/sysinfo-wiring.js': [1, 'actor user-signal: the System panel'],
+    'src/server/hub-port.js': [1, 'not a conversation: the hub\'s OWN end (endSelf: process.kill(process.pid, \'SIGTERM\') — its normal shutdown, the stores flushed), the ONE site of every end the separation\'s port module makes (a bad start, no interface within the re-join bound, a refused join)'],
     'src/routes/sessions.js': [1, 'actor user-kill: /api/kill-pid'],
     'src/server/session-stdout.js': [3, 'attach: reattachLocalPty + an abandoned device open-session'],
     'src/server/bridge-watch.js': [2, "attach: shutdown's endAttachPtys + orphaned dtach -a clients (alias)"],

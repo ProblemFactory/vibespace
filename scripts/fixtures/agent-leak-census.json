@@ -16,7 +16,7 @@
     "p.startsWith('/p/')": "other: published pages — per page; a private page asks requestAuthed (the cookie)",
     "req.method === 'GET' && /^\\/api\\/channels\\/oauth\\/cb\\/[^/]+$/.test(p)": "other: the Slack consent landing — the signed state is the credential",
     "/^\\/hook(?:\\/|$)/.test(p) || (req.method === 'GET' && /^\\/api\\/channels\\/webhook\\/[a-z0-9][a-z0-9-]{0,62}\\/replies$/.test(p)) || (req.method === 'POST' && /^\\/api\\/channels\\/webhook\\/[a-z0-9][a-z0-9-]{0,62}\\/pair$/.test(p))": "other: webhook callers — their own token or signature (src/routes/webhook.js); the pairing code",
-    "!this.enabled": "other: a hub nobody signs in to — every route is open there to any caller (said by the census, not swept: it reads the signed-in hub)",
+    "!enabled": "other: a hub nobody signs in to — every route is open there to any caller (said by the census, not swept: it reads the signed-in hub)",
     "p === '/login' || p === '/api/login' || p === '/api/clerk-login' || p === '/api/logout' || p === '/favicon.ico'": "other: the login flow",
     "this.checkToken(tok)": "other: the owner's cookie (the signed-in owner's pass: a valid session cookie, slid) — every other request ends at the 401 below it"
   },

@@ -61,11 +61,12 @@ import { spawn } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import Module, { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { anchored } from './scratch.mjs';   // the ONE door for a red control's edit (B-0d3e): an anchor gone or doubled throws by name
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 500) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(…): its name must be a string — a swapped call is refused'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 500) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** a wait for WHAT HAPPENED, with its own bound → whether it happened */
 const until = async (f, ms) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) return false; await sleep(5); } return true; };
@@ -224,7 +225,7 @@ console.log('— ④ NO WORD, NO LOOK: a hub nobody named a start pipe to is pla
   const N4 = "  return Promise.resolve(judge(takeStart(env, ms)));\n";
   const src4 = read('src/server/hub-port.js'); if (src4.split(N4).length !== 2) throw new Error('CONTROL needle not found exactly once: decide');
   const looks = path.join(T, 'hub-port-looks.js');
-  fs.writeFileSync(looks, src4.replace(N4, "  return Promise.resolve(judge(takeStart({ ...env, VIBESPACE_START_FD: '3' }, ms)));\n"));
+  fs.writeFileSync(looks, anchored(src4, N4, "  return Promise.resolve(judge(takeStart({ ...env, VIBESPACE_START_FD: '3' }, ms)));\n", 'today\'s code: fd 3 looked at with no word'));
   const red = await runProbe(['read3', looks], { fd3: true, write: LINE4 });
   ok(red.j && (red.j.form !== 'plain' || red.j.fstat3 > 0 || red.j.rest !== want), `RED CONTROL — today's code (fd 3 looked at with no word): ${red.j && red.j.form}; fd 3 looked at ${red.j && red.j.fstat3} times; the line ${red.j && red.j.rest === want ? 'left' : 'TAKEN'} — a plain hub took itself for a piped one`, red);
 }
@@ -269,7 +270,7 @@ HP.claim(); HP.decide().then((d) => { const kept = HP.claim(); console.log(JSON.
   ok(claimedNow.j && claimedNow.j.form === 'piped' && JSON.stringify(claimedNow.j.keys) === '["word","fd"]' && !claimedNow.o.includes(SECRET), `the claimed road (server.js's own: claim, then decide): once judged the module keeps ${JSON.stringify(claimedNow.j && claimedNow.j.keys)} — no parsed start line; the secret in nothing it holds`, claimedNow.o.slice(0, 200));
   const DROP = '    if (!claimedDecision) { claimedDecision = judge(claimed); claimed = { word: claimed.word, fd: claimed.fd }; }\n';
   const src5 = read('src/server/hub-port.js'); if (src5.split(DROP).length !== 2) throw new Error('CONTROL needle not found exactly once: the drop');
-  const keeps = path.join(T, 'hub-port-keeps.js'); fs.writeFileSync(keeps, src5.replace(DROP, '    if (!claimedDecision) { claimedDecision = judge(claimed); }\n'));
+  const keeps = path.join(T, 'hub-port-keeps.js'); fs.writeFileSync(keeps, anchored(src5, DROP, '    if (!claimedDecision) { claimedDecision = judge(claimed); }\n', 'the drop cut'));
   const claimedKept = await claimedRun(keeps);
   ok(claimedKept.j && claimedKept.j.keys.includes('first') && claimedKept.o.includes(SECRET), `RED CONTROL — the drop cut: the module keeps the parsed start line (${JSON.stringify(claimedKept.j && claimedKept.j.keys)}), the secret in it`);
   const plainChild = spawn(process.execPath, [probe], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH } });
@@ -384,7 +385,7 @@ console.log('— ⑧ WITH THE WORD, EVERY BAD START ENDS BY NAME IN BOUNDED TIME
   const real = await runProbe(['silent'], { fd3: true, keepOpen: true, env: { [SP.START_WORD]: '3', PROBE_MS: String(PROBE_BOUND) } });
   const NB = "        if (Date.now() >= until) return { word: true, fd, why: 'no-line', ms };\n";
   const srcB = read('src/server/hub-port.js'); if (srcB.split(NB).length !== 2) throw new Error('CONTROL needle not found exactly once: the sync bound');
-  const unbound = path.join(T, 'hub-port-unbound.js'); fs.writeFileSync(unbound, srcB.replace(NB, ''));
+  const unbound = path.join(T, 'hub-port-unbound.js'); fs.writeFileSync(unbound, anchored(srcB, NB, '', 'the bound cut'));
   const hung = await runProbe(['silent', unbound], { fd3: true, keepOpen: true, env: { [SP.START_WORD]: '3', PROBE_MS: String(PROBE_BOUND) }, waitMs: Math.max(4 * (real.wall || 0), 1500) });
   ok(hung.code === 'killed' && !hung.j, `RED CONTROL — the line's bound cut on a REAL descriptor: the child never decides and is killed at ${Math.max(4 * (real.wall || 0), 1500)} ms (a hub that never listens and never ends)`, { code: hung.code });
   ok(real.j && real.j.why === 'no-line' && real.j.ended === 1 && real.j.own === 0 && real.j.ms >= PROBE_BOUND - 10 && real.j.ms < 10 * PROBE_BOUND && real.j.lines.some((l) => l.includes('no line on the start pipe (fd 3) within 0.15 s')), `the WORD on a REAL fd 3 that nobody writes to: «${real.j ? real.j.lines.join(' | ') : real.err}» after ${real.j && real.j.ms} ms (the bound 150 ms)`, real);
@@ -401,7 +402,7 @@ console.log('— ⑧ WITH THE WORD, EVERY BAD START ENDS BY NAME IN BOUNDED TIME
   ok(kid.j && /^socket:\[\d+\]$/.test(kid.j.startLink || '') && kid.j.selfAfter !== kid.j.startLink && kid.j.kid && kid.j.kid.links.length > 2 && !kid.j.kidHolds && !kid.j.ptyHolds && !kid.j.passHolds, `THE START PIPE IS CLOSED (the B2b cure 2): fd 3 pointed to ${kid.j && kid.j.startLink} before the decision and to ${kid.j && kid.j.selfAfter} after; a child_process child's ${kid.j && kid.j.kid ? kid.j.kid.links.length : 0} descriptors hold it: ${kid.j && kid.j.kidHolds}; a node-pty child's: ${kid.j && (kid.j.pty && kid.j.pty.links ? kid.j.ptyHolds + ' (' + kid.j.pty.links.length + ' read)' : JSON.stringify(kid.j.pty))}; a child of a spawner that passes fd 3 through: ${kid.j && kid.j.passHolds} (${JSON.stringify(kid.j && kid.j.pass)})`, kid.j && { startLink: kid.j.startLink, selfAfter: kid.j.selfAfter, kidLinks: kid.j.kid && kid.j.kid.links, pty: kid.j.pty });
   const NC = '  } finally { try { sock.destroy(); } catch { } }   // THE CLOSE, on every road above\n';
   const srcC = read('src/server/hub-port.js'); if (srcC.split(NC).length !== 2) throw new Error('CONTROL needle not found exactly once: the close');
-  const keptCopy = path.join(T, 'hub-port-kept.js'); fs.writeFileSync(keptCopy, srcC.replace(NC, '  } finally { }\n'));
+  const keptCopy = path.join(T, 'hub-port-kept.js'); fs.writeFileSync(keptCopy, anchored(srcC, NC, '  } finally { }\n', 'the close cut'));
   const kidKept = await runProbe(['kid', keptCopy], { fd3: true, write: JSON.stringify(START) + '\n', env: { [SP.START_WORD]: '3' } });
   // the MEASURED fact (Node 24, the test machines): child_process with its default stdio and node-pty hand a child no descriptor
   // past its stdio, even one this process holds open; a spawner that passes descriptors through does — a road the product has NOWHERE today — every longer stdio list in the tree (data/bin/job-wrapper.js, src/vnc.js, the forks' ipc) makes a NEW descriptor at slot 3; it stands here only to show the leg sees a held pipe.
@@ -491,7 +492,7 @@ console.log('— ⑪ THE PIPE IS CLOSED BEFORE THE FIRST CHILD, BY MACHINE: serv
   const cut = L.findIndex((l, i) => i > 0 && /\brequire\(/.test(l.replace(/\/\/.*$/, '').replace(CLAIM.trim(), '')));
   const head = L.slice(0, cut).join('\n') + '\n';
   const headFile = path.join(T, 'server-head.js'), noClaimFile = path.join(T, 'server-head-noclaim.js');
-  fs.writeFileSync(headFile, head); fs.writeFileSync(noClaimFile, head.replace(CLAIM, ''));
+  fs.writeFileSync(headFile, head); fs.writeFileSync(noClaimFile, anchored(head, CLAIM, '', 'the claim cut'));
   const probe11 = path.join(T, 'probe11.cjs');
   fs.writeFileSync(probe11, `
 const fs = require('fs'), path = require('path'), cp = require('child_process'), Module = require('module');
@@ -548,14 +549,14 @@ console.log('— ⑫ THE RUNTIME-SWITCH ROAD: the head\'s first line replaces th
   const cut = L.findIndex((l, i) => i > 0 && /\brequire\(/.test(l.replace(/\/\/.*$/, '').replace(CLAIM.trim(), '')));
   const head = L.slice(0, cut).join('\n') + '\n';
   if (head.split(ROOT).length !== 2 || head.split(CLAIM).length !== 2) throw new Error('CONTROL needle not found exactly once: the head\'s runtime boot or its claim');
-  const headAt = (src, name) => { const f = path.join(T, name); fs.writeFileSync(f, src.replace(ROOT, `boot({ rootDir: ${JSON.stringify(root)} })`)); return f; };
+  const headAt = (src, name) => { const f = path.join(T, name); fs.writeFileSync(f, anchored(src, ROOT, `boot({ rootDir: ${JSON.stringify(root)} })`, 'the scratch root')); return f; };
   const lawHead = headAt(head, 'rt-head.js');
-  const earlyHead = headAt(`require('./src/server/hub-port.js').claim();\n` + head.replace(CLAIM, ''), 'rt-head-early.js');   // RED: the claim BEFORE the runtime boot
+  const earlyHead = headAt(`require('./src/server/hub-port.js').claim();\n` + anchored(head, CLAIM, '', 'the claim moved before the runtime boot'), 'rt-head-early.js');   // RED: the claim BEFORE the runtime boot
   // copies of the switch for the reds: the supervised skip CUT, and a skip keyed on anything but the start word
   const SKIP = "  if (env[START_WORD] !== undefined) return { state: 'supervised', version: cur.version };\n";
   const rtSrc = read('src/node-runtime.js'); if (rtSrc.split(SKIP).length !== 2) throw new Error('CONTROL needle not found exactly once: the supervised skip');
-  const rtNoSkip = path.join(T, 'node-runtime-noskip.js'); fs.writeFileSync(rtNoSkip, rtSrc.replace(SKIP, ''));
-  const rtAlways = path.join(T, 'node-runtime-always.js'); fs.writeFileSync(rtAlways, rtSrc.replace(SKIP, SKIP.replace('env[START_WORD] !== undefined', 'true')));
+  const rtNoSkip = path.join(T, 'node-runtime-noskip.js'); fs.writeFileSync(rtNoSkip, anchored(rtSrc, SKIP, '', 'the supervised skip cut'));
+  const rtAlways = path.join(T, 'node-runtime-always.js'); fs.writeFileSync(rtAlways, anchored(rtSrc, SKIP, "  if (true) return { state: 'supervised', version: cur.version };\n", 'a skip keyed on anything but the word'));
   const probe12 = path.join(T, 'probe12.cjs');
   fs.writeFileSync(probe12, `
 const fs = require('fs'), path = require('path'), Module = require('module');

@@ -454,7 +454,7 @@ try {
     // survivors); the hub's turns named through the boot trace; the front holds new connections until the last turn (test-tls-demux §6)
     const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
     const lA = srv.indexOf('  migrateLegacyHomeProjects(); hub.turn(() => { //'), lB = srv.indexOf('\n  restoreSessions(); hub.turn(() => { bootBrowserKeeper(); ');
-    const lI = srv.indexOf("try { require('./src/server/local-index.js').configure("), lEnd = srv.indexOf("\n}, 'listen-rest'); }, 'restore'); }));\n");
+    const lI = srv.indexOf("try { require('./src/server/local-index.js').configure("), lEnd = srv.indexOf("\n}, 'listen-rest'); }, 'restore'); })));");   // the separation's B2b: the listen rides .finally(() => hubForm.then(…)) — one more close
     ok(lA > 0 && srv.indexOf('\n', lA) === lB && lI > lB && lEnd > lI && srv.split("require('./src/server/local-index.js').configure(").length === 2
       && /const hub = require\('\.\/src\/server\/tls\.js'\)\.create\(\{[^\n]*, step: \(name, fn\) => bootTrace\.step\(name, fn\) \}\);/.test(srv),
       'server.js: the restore\'s registration in a loop turn of its own (\'restore\'), the rest of the listen step in the turn after it (\'listen-rest\'), the CLI index configured in that last turn, the turns named in the boot trace');

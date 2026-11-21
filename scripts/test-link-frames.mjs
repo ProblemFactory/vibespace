@@ -20,11 +20,11 @@ import net from 'node:net';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
-import { endDaemonsAndWait, endDaemonsOf, scratch } from './scratch.mjs';
+import { endDaemonsAndWait, endDaemonsOf, scratch, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (n, c, e) => { if (typeof n !== 'string') throw new TypeError('ok(…): its name must be a string — a swapped call is refused'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // a wait on an EFFECT with a deadline (never a fixed sleep: a leg's verdict is not the clock's — 主开发 2026-11-17)
 const until = async (f, ms = 2000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (f()) return true; await sleep(2); } return !!f(); };
@@ -96,8 +96,8 @@ const asBuiltDrain = (() => {
   const A2 = 'else { this._wireWaiters.delete(chan); this.onWritable(chan); }   // told once';
   const D1 = "  writable() { if (this.closedAt || !this._needDrain) return; this._needDrain = false; this.emit('drain'); }\n";
   if (!ms.includes(A1) || !ms.includes(A2) || !ds.includes(D1)) return null;
-  return { Mux: require(MUT.write(MUXF, ms.split(A1).join('    if (this._dead) return;\n').split(A2).join('else this.onWritable(chan);'), 'drain-mux')).Mux,
-    ChanDuplex: require(MUT.write('src/agentd/chan-duplex.js', ds.split(D1).join("  writable() { if (!this.closedAt) this.emit('drain'); }\n"), 'drain-duplex')).ChanDuplex };
+  return { Mux: require(MUT.write(MUXF, ms.split(A1).join('    if (this._dead) return;\n').split(A2).join('else this.onWritable(chan);'), 'drain-mux')).Mux,   // stale-pins: kept — the drain red's own release-era text
+    ChanDuplex: require(MUT.write('src/agentd/chan-duplex.js', anchored(ds, D1, "  writable() { if (!this.closedAt) this.emit('drain'); }\n", 'drain after every write'), 'drain-duplex')).ChanDuplex };
 })();
 const pairA = () => { const a = new EventEmitter(), b = new EventEmitter(); a.write = (d) => { setImmediate(() => b.emit('data', Buffer.from(d))); return true; }; b.write = (d) => { setImmediate(() => a.emit('data', Buffer.from(d))); return true; }; return [a, b]; };
 for (const [name, lib, want] of [['the frame code', { Mux, ChanDuplex: CD }, true], ['RED CONTROL (the as-built drain: every outer writable a drain)', asBuiltDrain, false]]) {
@@ -150,8 +150,9 @@ console.log('§4 A CHANNEL\'S LIFE — its close leaves after its own queue, and
 const todaysLifecycle = (() => {
   const src = fs.readFileSync(path.join(REPO, MUXF), 'utf8');
   const A = "  closeChan(chan) {\n    if (this._closeAfterQueue && this._sendQ.get(chan)?.length) { this._closeAfter.add(chan); return; }   // behind its own queued data\n    this._raw(T.CLOSE, chan);\n    this.forget(chan);\n  }\n";
-  const G = "        if (!this._sendWin.has(chan)) break;   // a channel this side never wrote, or forgot: a late credit re-creates nothing\n";
-  return src.includes(A) && src.includes(G) ? require(MUT.write(MUXF, src.split(A).join('  closeChan(chan) { this._raw(T.CLOSE, chan); }\n').split(G).join(''), 'lifecycle')).Mux : null;
+  // TODAY'S RELEASE (2.369.414): its close at once and no forget; since B-beaf it already ignores a stale credit (G is its own
+  // line now — the chain's move kept the release's text), so the red cuts the close alone
+  return src.includes(A) ? require(MUT.write(MUXF, anchored(src, A, '  closeChan(chan) { this._raw(T.CLOSE, chan); }\n', 'today\'s close'), 'lifecycle')).Mux : null;
 })();
 // an in-memory pair of streams (each write reaches the other side on the next turn)
 const pair = () => { const a = new EventEmitter(), b = new EventEmitter(); a.write = (d) => { setImmediate(() => b.emit('data', Buffer.from(d))); return true; }; b.write = (d) => { setImmediate(() => a.emit('data', Buffer.from(d))); return true; }; return [a, b]; };
@@ -179,7 +180,7 @@ for (const [name, M, want] of [['the frame code', Mux, true], ['RED CONTROL (tod
     ok(`ten thousand channels opened, written and dropped leave the send maps at their starting size (window ${sizes.win}, queue ${sizes.q}), and a late credit — for a forgotten channel or one never written — re-creates nothing (${after})`, sizes.win === 0 && sizes.q === 0 && after === 0, { sizes, after });
     ok(`WITH closeAfterQueue (the interface's link, an inner link): three windows written with no credit, then the close — the far side reads all three windows (${bytes} B) and THEN the close`, order.closeAfterAll, order);
   } else {
-    ok(`${name}: the maps keep every channel (${sizes.win}) and a late credit re-creates one (${after}); the close OVERTAKES the queued windows (the close at event ${closeAt}, the last data at ${lastData})`, sizes.win === 10000 && after === 10001 && closeAt >= 0 && closeAt < lastData, { sizes, after, order });
+    ok(`${name}: the maps keep every channel (${sizes.win}; a late credit re-creates nothing there either since B-beaf: ${after}); the close OVERTAKES the queued windows (the close at event ${closeAt}, the last data at ${lastData})`, sizes.win === 10000 && after === 10000 && closeAt >= 0 && closeAt < lastData, { sizes, after, order });
   }
 }
 // TODAY'S DEVICE LINK KEEPS THE RELEASE'S CLOSE (主开发 2026-11-17, must 1): without the option a channel closed with two
@@ -188,7 +189,7 @@ for (const [name, M, want] of [['the frame code', Mux, true], ['RED CONTROL (tod
 const holdsAlways = (() => {
   const src = fs.readFileSync(path.join(REPO, MUXF), 'utf8');
   const A = '    if (this._closeAfterQueue && this._sendQ.get(chan)?.length) { this._closeAfter.add(chan); return; }';
-  return src.includes(A) ? require(MUT.write(MUXF, src.split(A).join('    if (this._sendQ.get(chan)?.length) { this._closeAfter.add(chan); return; }'), 'holds-always')).Mux : null;
+  return src.includes(A) ? require(MUT.write(MUXF, src.split(A).join('    if (this._sendQ.get(chan)?.length) { this._closeAfter.add(chan); return; }'), 'holds-always')).Mux : null;   // stale-pins: kept — the held-close red's own text
 })();
 for (const [name, M, want] of [['the frame code', Mux, true], ['RED CONTROL (the reviewed tip: every link held the close)', holdsAlways, false]]) {
   if (!M) { ok(name + ': the mutant could be made', false); continue; }

@@ -27,7 +27,7 @@ import { freePorts, scratch, scratchHome, endRootedProcesses, vncEnv } from './s
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + JSON.stringify(e).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof n !== 'string') throw new TypeError('check(…): its name must be a string — a swapped call is refused'); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + JSON.stringify(e).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms) => { const t = Date.now(); while (!(await f())) { if (Date.now() - t > ms) return false; await sleep(100); } return true; };
 

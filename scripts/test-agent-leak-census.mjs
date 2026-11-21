@@ -8,9 +8,9 @@
 //   (vsmk_, POST /api/agent/automation/:verb — an instance's env sha). An automation key's VALUE (vsak_) is never a
 //   bearer: it is a vault entry; a conversation uses a key it was granted by id, with its own vsst_. The census reads
 //   the SIGNED-IN hub (a hub nobody signs in to opens every route to anyone — the `!this.enabled` door, said, not swept),
-//   and src/auth.js's middleware only: the WebSocket upgrade dispatcher and the hub's side listeners (the CDP mediator,
+//   and the gate's doors only (src/door.js's door class and src/auth.js's middleware, since the separation's B3a): the WebSocket upgrade dispatcher and the hub's side listeners (the CDP mediator,
 //   the egress proxy, the metrics port) are other doors, judged by their own code.
-//   ① THE DOORS: every `if` in src/auth.js's middleware whose consequent calls next() (`return next()`, a block around it,
+//   ① THE DOORS: every `if` of the door class (src/door.js) and of src/auth.js's middleware whose consequent calls next() (`return next()`, a block around it,
 //      `next(); return;`) is a door — and every next() the middleware calls must sit in one — each one CLASSIFIED in
 //      scripts/fixtures/agent-leak-census.json: `bearer` (a bearer reaches it without a cookie — this census sweeps it)
 //      or `other: <why>` (its own credential). A new door in neither, a dead row, a reason-less `other` = RED. A
@@ -97,35 +97,52 @@ function walk(n, fn, parent = null) {
 const squash = (s) => String(s).replace(/\s+/g, ' ').trim();
 const lineAt = (src, i) => src.slice(0, i).split('\n').length;
 
-/** src/auth.js's doors: every `if (<cond>) return next();` inside the `middleware()` method → [{ cond, line, test }]
- *  where `test` = { kind: 'prefix' | 'exact', path } when the cond is ONE path test the census can read, else null. */
-function doorsOf(src) {
+/** THE GATE'S DOORS. Since the separation's B3a they stand in TWO places: the door class (src/door.js doorClassOf — the
+ *  middleware's door lines lifted verbatim: there `return next()` lets a request through its door, `return OPEN` the open
+ *  instance, `return LOGIN` the login flow — every class auth.js PASSES), and what src/auth.js's middleware still passes itself
+ *  (the cookie's check; its `PASSES.has(d.kind)` is the class's own pass, read through src/door.js). One file's doors: every
+ *  `if (<cond>)` whose consequent lets the request through → [{ cond, line, test, file }], where `test` = { kind: 'prefix' |
+ *  'exact', path } when the cond is ONE path test the census can read, else null. */
+function doorsOf(src, file = 'src/auth.js', { fn = null, method = 'middleware', passes = [], skip = () => false } = {}) {
   const ast = parse(src);
-  if (!ast) return { doors: null, why: 'src/auth.js does not parse' };
-  let mw = null;
-  walk(ast, (n) => { if (!mw && n.type === 'MethodDefinition' && n.key && n.key.name === 'middleware') mw = n; });
-  if (!mw) return { doors: null, why: 'no middleware() method in src/auth.js' };
-  const doors = [], nexts = [];
+  if (!ast) return { doors: null, why: `${file} does not parse` };
+  let body = null;
+  walk(ast, (n) => {
+    if (body) return;
+    if (fn && n.type === 'FunctionDeclaration' && n.id && n.id.name === fn) body = n.body;
+    else if (!fn && n.type === 'MethodDefinition' && n.key && n.key.name === method) body = n.value.body;
+  });
+  if (!body) return { doors: null, why: fn ? `no ${fn}() function in ${file}` : `no ${method}() method in ${file}` };
+  const doors = [], nexts = [], skipped = [];
   const isNextCall = (e) => e && e.type === 'CallExpression' && e.callee.type === 'Identifier' && e.callee.name === 'next';
-  // every `next()` the middleware calls (in any shape: `return next()`, `next(); return;`, `cond && next()`, …)
-  walk(mw.value.body, (n) => { if (isNextCall(n)) nexts.push(n.start); });
-  // a DOOR = an `if` whose consequent itself calls next() — `return next();`, or a block that does it among other
-  // statements (`{ log(); return next(); }`, `{ next(); return; }`) — never one only a nested function or `if` reaches
-  const callsNext = (st) => !!st && ((st.type === 'ReturnStatement' && isNextCall(st.argument)) || (st.type === 'ExpressionStatement' && isNextCall(st.expression)));
-  walk(mw.value.body, (n) => {
+  const isPass = (e) => isNextCall(e) || (!!e && e.type === 'Identifier' && passes.includes(e.name));
+  // every `next()` the function calls (in any shape: `return next()`, `next(); return;`, `cond && next()`, …)
+  walk(body, (n) => { if (isNextCall(n)) nexts.push(n.start); });
+  // a DOOR = an `if` whose consequent itself lets the request through — `return next();` (or a pass class), or a block that
+  // does it among other statements (`{ log(); return next(); }`, `{ next(); return; }`) — never one only a nested function or `if` reaches
+  const callsNext = (st) => !!st && ((st.type === 'ReturnStatement' && isPass(st.argument)) || (st.type === 'ExpressionStatement' && isNextCall(st.expression)));
+  walk(body, (n) => {
     if (n.type !== 'IfStatement') return;
     const c = n.consequent;
     if (!(callsNext(c) || (c.type === 'BlockStatement' && c.body.some(callsNext)))) return;
-    const t = n.test;
+    const t = n.test, cond = squash(src.slice(t.start, t.end));
+    if (skip(cond)) { skipped.push({ start: c.start, end: c.end }); return; }
     let test = null;
     if (t.type === 'CallExpression' && t.callee.type === 'MemberExpression' && !t.callee.computed && t.callee.object.type === 'Identifier' && t.callee.object.name === 'p'
       && t.callee.property.name === 'startsWith' && t.arguments.length === 1 && t.arguments[0].type === 'Literal' && typeof t.arguments[0].value === 'string') test = { kind: 'prefix', path: t.arguments[0].value };
     else if (t.type === 'BinaryExpression' && t.operator === '===' && t.left.type === 'Identifier' && t.left.name === 'p' && t.right.type === 'Literal' && typeof t.right.value === 'string') test = { kind: 'exact', path: t.right.value };
-    doors.push({ cond: squash(src.slice(t.start, t.end)), line: lineAt(src, n.start), test, start: c.start, end: c.end });
+    doors.push({ cond, line: lineAt(src, n.start), test, start: c.start, end: c.end, file });
   });
   // a next() that no door's consequent holds is a pass the census cannot place (RED)
-  const unplaced = nexts.filter((at) => !doors.some((d) => at >= d.start && at < d.end)).map((at) => `src/auth.js:${lineAt(src, at)}`);
+  const unplaced = nexts.filter((at) => !doors.some((d) => at >= d.start && at < d.end) && !skipped.some((d) => at >= d.start && at < d.end)).map((at) => `${file}:${lineAt(src, at)}`);
   return { doors, unplaced };
+}
+/** the gate's doors over a tree: the door class's, then what auth.js's middleware passes itself (see doorsOf) */
+function gateDoors(read) {
+  const a = doorsOf(read('src/door.js'), 'src/door.js', { fn: 'doorClassOf', passes: ['OPEN', 'LOGIN'] });
+  const b = doorsOf(read('src/auth.js'), 'src/auth.js', { method: 'middleware', skip: (cond) => cond === 'PASSES.has(d.kind)' });
+  if (!a.doors || !b.doors) return { doors: null, why: a.why || b.why };
+  return { doors: [...a.doors, ...b.doors], unplaced: [...a.unplaced, ...b.unplaced] };
 }
 
 const VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'all', 'use']);
@@ -204,7 +221,7 @@ function reachFrom(requires, root) {
 /** THE CENSUS of a tree ({ files, read }) against a table → every verdict ①–③ reads. */
 function census({ files, read, table }) {
   const out = { doors: [], doorUnclassified: [], doorDead: [], doorReasonless: [], bearerUnreadable: [], bearerDoors: [] };
-  const D = doorsOf(read('src/auth.js'));
+  const D = gateDoors(read);
   out.doorsWhy = D.why || null;
   const doorRows = table.doors || {};
   out.unplaced = D.unplaced || [];
@@ -212,9 +229,9 @@ function census({ files, read, table }) {
     out.doors = D.doors;
     const conds = new Set(D.doors.map((d) => d.cond));
     for (const d of D.doors) {
-      if (!has(doorRows, d.cond)) { out.doorUnclassified.push(`src/auth.js:${d.line} if (${d.cond}) … next()`); continue; }
+      if (!has(doorRows, d.cond)) { out.doorUnclassified.push(`${d.file}:${d.line} if (${d.cond}) … next()`); continue; }
       const v = String(doorRows[d.cond] || '');
-      if (v === 'bearer') { if (d.test) out.bearerDoors.push(d); else out.bearerUnreadable.push(`src/auth.js:${d.line} ${d.cond}`); }
+      if (v === 'bearer') { if (d.test) out.bearerDoors.push(d); else out.bearerUnreadable.push(`${d.file}:${d.line} ${d.cond}`); }
       else if (!/^other: \S/.test(v)) out.doorReasonless.push(d.cond);
     }
     out.doorDead = Object.keys(doorRows).filter((c) => !conds.has(c));
@@ -255,7 +272,7 @@ function census({ files, read, table }) {
 const FILES = hubFiles();
 const C = census({ files: FILES, read: readRepo, table: TABLE });
 
-console.log('① the doors (src/auth.js\'s middleware — every `if` whose consequent calls next())');
+console.log('① the doors (the door class src/door.js and src/auth.js\'s middleware — every `if` whose consequent lets a request through)');
 ok(!C.doorsWhy && C.doors.length >= 10, `the middleware's doors are read (${C.doors.length})`, C.doorsWhy);
 ok(!C.unplaced.length, 'every next() the middleware calls sits in a door the census reads (any shape: `return next()`, a block around it, `next(); return;`)', C.unplaced.join(' | '));
 ok(!C.doorUnclassified.length, 'every door is classified in the table (`bearer` or `other: <why>`)', C.doorUnclassified.length ? 'NEW — add each to ' + TABLE_REL + ' doors: ' + C.doorUnclassified.join(' | ') : '');
@@ -285,21 +302,21 @@ console.log('④ controls (the census over planted copies — the tree is never 
 const overlay = (over) => (f) => (has(over, f) ? over[f] : readRepo(f));
 {
   // a new door: a path test the table does not classify
-  const auth = readRepo('src/auth.js');
+  const auth = readRepo('src/door.js');   // the doors' own file since the separation's B3a (the door class)
   const at = auth.indexOf("if (p.startsWith('/api/agent/')) return next();");
-  ok(at > 0, 'the agent door is found in src/auth.js (the controls\' anchor)');
+  ok(at > 0, 'the agent door is found in src/door.js (the controls\' anchor)');
   const planted = auth.slice(0, at) + "if (p.startsWith('/api/planted/')) return next();\n      " + auth.slice(at);
-  const c1 = census({ files: FILES, read: overlay({ 'src/auth.js': planted }), table: TABLE });
+  const c1 = census({ files: FILES, read: overlay({ 'src/door.js': planted }), table: TABLE });
   ok(c1.doorUnclassified.length === 1 && /\/api\/planted\//.test(c1.doorUnclassified[0]), 'CONTROL: a planted door the table does not name ⇒ RED (unclassified)', c1.doorUnclassified);
-  const c1b = census({ files: FILES, read: overlay({ 'src/auth.js': planted }), table: { ...TABLE, doors: { ...TABLE.doors, "p.startsWith('/api/planted/')": 'bearer' } } });
+  const c1b = census({ files: FILES, read: overlay({ 'src/door.js': planted }), table: { ...TABLE, doors: { ...TABLE.doors, "p.startsWith('/api/planted/')": 'bearer' } } });
   ok(c1b.bearerDoors.some((d) => d.test.path === '/api/planted/') && !c1b.doorUnclassified.length, 'CONTROL: classified `bearer`, the planted door joins the sweep\'s doors');
-  const c1c = census({ files: FILES, read: overlay({ 'src/auth.js': planted.replace("if (p.startsWith('/api/planted/'))", "if (/^\\/api\\/planted\\//.test(p))") }), table: { ...TABLE, doors: { ...TABLE.doors, '/^\\/api\\/planted\\//.test(p)': 'bearer' } } });
+  const c1c = census({ files: FILES, read: overlay({ 'src/door.js': planted.replace("if (p.startsWith('/api/planted/'))", "if (/^\\/api\\/planted\\//.test(p))") }), table: { ...TABLE, doors: { ...TABLE.doors, '/^\\/api\\/planted\\//.test(p)': 'bearer' } } });
   ok(c1c.bearerUnreadable.length === 1, 'CONTROL: a `bearer` door written as a regex the census cannot read ⇒ RED', c1c.bearerUnreadable);
   const blockDoor = auth.slice(0, at) + "if (p.startsWith('/api/planted-block/')) { req.planted = 1; return next(); }\n      if (p === '/api/planted-tail') { next(); return; }\n      " + auth.slice(at);
-  const c1d = census({ files: FILES, read: overlay({ 'src/auth.js': blockDoor }), table: TABLE });
+  const c1d = census({ files: FILES, read: overlay({ 'src/door.js': blockDoor }), table: TABLE });
   ok(c1d.doorUnclassified.length === 2 && c1d.doorUnclassified.every((x) => /planted-(block|tail)/.test(x)), 'CONTROL: a door written as a block with more statements, and one as `next(); return;` ⇒ each read and RED (unclassified)', c1d.doorUnclassified);
   const loose = auth.slice(0, at) + "p === '/api/planted-loose' && next();\n      " + auth.slice(at);
-  const c1e = census({ files: FILES, read: overlay({ 'src/auth.js': loose }), table: TABLE });
+  const c1e = census({ files: FILES, read: overlay({ 'src/door.js': loose }), table: TABLE });
   ok(c1e.unplaced.length === 1, 'CONTROL: a next() no door holds (`cond && next()`) ⇒ RED (unplaced)', c1e.unplaced);
 }
 {

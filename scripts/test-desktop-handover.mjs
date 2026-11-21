@@ -582,7 +582,7 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
   const shutLines = fs.readFileSync(path.join(dataS, 'window-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   ok(stS.take && engS.stateOf('pcS') === null && shutLines.some((l) => l.verb === 'lease-end' && l.handle === 'md-pcS' && l.by === 'hub' && l.cause === 'stream_ended'), 'desktop-apps shutdownStreams() ⇒ the stream module\'s shutdown ⇒ a lease-end line (by: hub) written before it returns', shutLines.map((l) => [l.verb, l.by, l.cause]));
   const wiring = fs.readFileSync(path.join(REPO, 'src/server/window-live-wiring.js'), 'utf8'), serverJs = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-  ok(/shutdown: \(\) => \{ try \{ require\('\.\.\/routes\/desktop-apps'\)\.shutdownStreams\(\); \} catch \{[^}]*\} try \{ engine\.shutdown\(\); \}.*try \{ handover\.shutdown\(\); \}/.test(wiring) && /\nfunction shutdown\(\) \{[\s\S]*?shutdownWindowLeases\(\);[\s\S]*?process\.exit\(0\);/.test(serverJs), 'wired: server.js\'s shutdown → shutdownWindowLeases → the streams FIRST (their lease-end lines), then the window engine and the hand-over\'s tick — all before process.exit');
+  ok(/shutdown: \(\) => \{ try \{ require\('\.\.\/routes\/desktop-apps'\)\.shutdownStreams\(\); \} catch \{[^}]*\} try \{ engine\.shutdown\(\); \}.*try \{ handover\.shutdown\(\); \}/.test(wiring) && /\nfunction shutdown\(\) \{[\s\S]*?shutdownWindowLeases\(\);[\s\S]*?process\.exit\((?:0|require\('\.\/src\/server\/hub-port\.js'\)\.exitStatus\(\))\);/.test(serverJs), 'wired: server.js\'s shutdown → shutdownWindowLeases → the streams FIRST (their lease-end lines), then the window engine and the hand-over\'s tick — all before process.exit');
   engS.shutdown();
 }
 srv.close();

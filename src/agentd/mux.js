@@ -282,10 +282,10 @@ class Mux {
         break;
       case T.CREDIT: {
         if (payload.length !== 4) break;
-        // a credit for a channel this side never sent on, or forgot (B-beaf: a detached pipe channel — the peer still credits
-        // the input it took before the CLOSE; cs M1: a channel both sides closed), is stale: never a send window made again
-        if (!this._sendWin.has(chan)) break;
         const n = payload.readUInt32BE(0);
+        // B-beaf (its readers): a credit for a channel this side never sent on, or forgot (a detached pipe channel: the peer
+        // still credits the input it took before the CLOSE), is stale — never a send window made again for it (data() makes one)
+        if (!this._sendWin.has(chan)) break;
         this._sendWin.set(chan, this._sendWin.get(chan) + n);
         this._flush(chan); // window grew — send whatever now fits
         break;

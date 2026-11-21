@@ -662,7 +662,7 @@ console.log('§D014 the whole desktop over a real agent: the probe through its t
     const MT = mutantCopies('dsremote-tcp', REPO);
     const cText = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
     const FIX_H = 'const handle = { chan, get onData() { return dataFn; }, set onData(f) { dataFn = f; drain(); }, get onClose() { return closeFn; }, set onClose(f) { closeFn = f; drain(); } };';
-    const FIX_S = 'conn.sessions.set(chan, { onData: (b) => { if (dataFn && !early.length) dataFn(b); else early.push(b); }, onClose: () => { closed = true; drain(); } });';
+    const FIX_S = 'conn.sessions.set(chan, { onData: (b) => { if (dataFn && !early.length) dataFn(b); else early.push(b); }, onClose: () => { closed = true; drain(); }, onWritable: () => { try { handle.onWritable?.(); } catch { } } });';   // the session line as the separation's piece 1 left it (its onWritable: a write that said false hears the drain)
     ok(cText.split(FIX_H).length === 2 && cText.split(FIX_S).length === 2, 'CONTROL setup: the client spells the early-chunk handle and its session once each');
     const preC = MT.load('src/agentd/client.js', cText.replace(FIX_H, 'const handle = { chan, onData: null, onClose: null };').replace(FIX_S, 'conn.sessions.set(chan, { onData: (b) => handle.onData?.(b), onClose: () => handle.onClose?.() });'), 'pretcp');
     const home8 = scratchHome('dsremote-home8', fs, ['.vibespace']);
