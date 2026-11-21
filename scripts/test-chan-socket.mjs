@@ -180,7 +180,7 @@ for (const [name, lib, want] of [['the router', real, true], ['RED CONTROL (ever
   let uncaught = null; const onUncaught = (e) => { uncaught = e; };
   process.on('uncaughtException', onUncaught);
   W.hub.stream.emit('close');                              // the link dies under it
-  await until(() => closed, 1000); await sleep(20);
+  await until(() => closed || !!uncaught, 1000); await sleep(20);   // the red throws before its 'close' (an unheard error ends the emit): wait for either
   process.removeListener('uncaughtException', onUncaught);
   if (want) ok(`${name}: a channel socket no one listens on for errors (an upgraded one) is destroyed at the link's death and nothing is thrown (closed ${closed}, uncaught ${uncaught ? uncaught.message : 'none'})`, closed && !uncaught && W.router.size === 0);
   else ok(`${name}: the link's death throws «${uncaught && uncaught.message}» uncaught — one page's upgrade ends the hub with its link`, !!uncaught && uncaught.message === 'link lost');
