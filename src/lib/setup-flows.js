@@ -14,6 +14,9 @@ import { pathField } from './path-field.js'; // lane path-field: the first chat'
 import { loadHomeFolders, recentLocalCwds, paintFolderChips } from './folder-chips.js'; // lane door-day-one-landing: the folder chips' painter (the New Session dialog's too)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card inline in the tour's connect step
 import { capsOf } from '../backend-caps.js'; // PURE (lane signin-card-real-screen): the harness whose subscriptions the card signs in — its declared oauthUsage row, never an id
+/** a set-password refusal in a person's words: a HELD sign-in file (B-dc3f) says why and the way out (the server's own words, in
+ *  the asked language) — never its bare code; any other refusal is the server's error, as before */
+const refusalText = (d) => (d && d.error === 'signin-held' && d.why ? [d.why, d.fix].filter(Boolean).join(' ') : (d && d.error) || t('Failed'));
 
 /**
  * App setup/config flows mixin — the onboarding wizard, Backup & migrate
@@ -173,7 +176,7 @@ export function installSetupFlows(App) {
           body: JSON.stringify({ current: form.querySelector('#pw-cur')?.value, newPassword: nw }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { err.textContent = d.error || t('Failed'); return; }
+        if (!res.ok) { err.textContent = refusalText(d); return; }
         this._authEnabled = true;
         this._settingsUI?.redrawOpen?.();   // lane setting-doors f1: the open Settings redraws — its sign-in line is true again
         close();
@@ -192,7 +195,7 @@ export function installSetupFlows(App) {
           body: JSON.stringify({ current: cur, remove: true }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { err.textContent = d.error || t('Failed'); return; }
+        if (!res.ok) { err.textContent = refusalText(d); return; }
         this._authEnabled = false;
         this._settingsUI?.redrawOpen?.();   // lane setting-doors f1: the open Settings redraws — its sign-in line is true again
         close();
@@ -416,7 +419,7 @@ export function installSetupFlows(App) {
               body: JSON.stringify({ newPassword: pw }),
             });
             const d = await res.json().catch(() => ({}));
-            if (!res.ok) { errEl.textContent = d.error || t('Failed'); return; }
+            if (!res.ok) { errEl.textContent = refusalText(d); return; }
             this._authEnabled = true;
             this._settingsUI?.redrawOpen?.();   // lane setting-doors f1: the open Settings redraws — its sign-in line is true again
             step = 3; render();

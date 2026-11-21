@@ -33,9 +33,9 @@ function replaceShredding(file, text) {
     if (old !== null) try { fs.closeSync(old); } catch { }
     throw e;
   }
-  let dir = null;   // the folder's sync, best effort (not every platform opens a folder)
-  try { dir = fs.openSync(path.dirname(file), 'r'); fs.fsyncSync(dir); } catch { /* the name already points at the synced bytes */ }
-  if (dir !== null) { fs.closeSync(dir); dir = null; }
+  // THE FOLDER'S SYNC, BEST EFFORT (not every platform opens a folder): its open, its sync AND its close sit under it, so a
+  // write that LANDED is never reported as failed to its caller (主开发 r1195 1)
+  try { const dir = fs.openSync(path.dirname(file), 'r'); try { fs.fsyncSync(dir); } finally { fs.closeSync(dir); } } catch { /* the name already points at the synced bytes */ }
   if (old !== null) {
     try { if (size > 0) fs.writeSync(old, crypto.randomBytes(size), 0, size, 0); try { fs.fsyncSync(old); } catch { } } catch { /* the name already holds the new text */ }
     try { fs.closeSync(old); } catch { }

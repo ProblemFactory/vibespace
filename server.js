@@ -123,7 +123,7 @@ const auth = new Auth(path.join(__dirname, 'data'), { clerk: clerkAuth });
     console.log('  ║   VIBESPACE_PASSWORD to choose your own)        ║');
     console.log('  ╚════════════════════════════════════════════════╝\n');
   }
-  if (auth.passwordEnabled) console.log('  Password auth: ENABLED');
+  { const line = auth.bootLine(); if (line) console.log(line); }   // B-dc3f: «ENABLED», or HELD by name while the sign-in file cannot be read
   if (clerkAuth.enabled) console.log(`  Clerk SSO: ENABLED (${clerkAuth.frontendApi})`);
   // getter — auth can be enabled/disabled at runtime via /api/auth/set-password
   Object.defineProperty(app.locals, 'authEnabled', { get: () => auth.enabled });

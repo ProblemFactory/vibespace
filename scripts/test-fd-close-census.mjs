@@ -273,7 +273,7 @@ const EMPTY_CATCH_DEBT = Object.freeze({
   "src/run-reads.js": 1,
   "src/safe-fs-worker.js": 2,
   "src/secret-box.js": 1,
-  "src/secret-file.js": 3,
+  "src/secret-file.js": 4,   // B-dc3f r1195 (1), +1 BY NAME: the folder's close sits inside its sync's best effort, as the file's other closes — a write that LANDED is never reported failed for it
   "src/server/auto-resume-workflow.js": 2,
   "src/server/browser-attach-launch.js": 2,
   "src/server/browser-cli-install.js": 2,

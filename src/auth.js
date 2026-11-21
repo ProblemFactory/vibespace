@@ -48,6 +48,9 @@ const MAX_TOKENS = 200;
 const OWN_RULE_UPGRADES = new Set(['/api/device-dial', '/api/agentd-dial']);
 /** the local sign-in road — refused while held, also where single sign-on still guards */
 const LOCAL_ROAD = new Set(['/api/login', '/api/auth/set-password']);
+/** a path as express 4's router matches a route (its defaults: case-insensitive, one optional trailing slash) — so a held
+ *  refusal by name meets every spelling the route itself would answer (主开发 r1195 3) */
+const routeKey = (p) => String(p || '').toLowerCase().replace(/(.)\/$/, '$1');
 /** the held words in the asked language: why and the way out; `sso` = single sign-on still guards (B-dc3f) */
 function heldWords(lang, sso) { const w = loginWords(lang); return { title: w.title, why: w[sso ? 'signin-held-sso' : 'signin-held'], fix: w[sso ? 'signin-held-sso-fix' : 'signin-held-fix'] }; }
 const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -119,6 +122,12 @@ class Auth {
   get shut() { return !!this._held && !this._clerk?.enabled; }
   /** does the held state refuse this upgrade path? every one but a paired machine's dial-in (its own dial token) */
   upgradeHeld(pathname) { return this.shut && !OWN_RULE_UPGRADES.has(pathname); }
+  /** THE BOOT'S SIGN-IN LINE (server.js prints it): true in every state — while held it says HELD by name, never «a password is
+   *  set» (主开发 r1195 4: `passwordEnabled` answers «on» while held, for the gate) → the line, or null with no password */
+  bootLine() {
+    if (this._held) return this._clerk?.enabled ? '  Password auth: HELD — the sign-in file cannot be read (said above): single sign-on still guards, the password sign-in is refused' : '  Password auth: HELD — the sign-in file cannot be read (said above): every page and API is refused but the sign-in page';
+    return this.passwordEnabled ? '  Password auth: ENABLED' : null;
+  }
   /** the upgrade dispatcher's refusal while shut: 503 by name, nothing proxied */
   refuseHeldUpgrade(socket) { try { socket.write('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 3600\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{"error":"signin-held"}'); } catch { } try { socket.destroy(); } catch { } }
 
@@ -346,10 +355,10 @@ class Auth {
   middleware() {
     return (req, res, next) => {
       const p = req.path;
-      if (this._held) {   // HELD (B-dc3f): before every door and route
+      if (this._held) {   // HELD (B-dc3f): before every door and route — each path judged as the router matches it (routeKey)
         // nothing else guards: nothing is open — but THE SIGN-IN PAGE answers as a page (200, the held words: a health check asks it)
-        if (this.shut) return refuseHeld(this._held, req, res, { page: (req.method === 'GET' || req.method === 'HEAD') && p === '/login' });
-        if (LOCAL_ROAD.has(p)) return refuseHeld(this._held, req, res, { sso: true });   // single sign-on still guards: the local password road stays refused
+        if (this.shut) return refuseHeld(this._held, req, res, { page: (req.method === 'GET' || req.method === 'HEAD') && routeKey(p) === '/login' });
+        if (LOCAL_ROAD.has(routeKey(p))) return refuseHeld(this._held, req, res, { sso: true });   // single sign-on still guards: the local password road stays refused
       }
       // ── THE DOORS: callers that are not the owner's browser, each judged by its OWN credential — never the cookie,
       // so never the same-origin rule below (a door's refusals are its own) ──

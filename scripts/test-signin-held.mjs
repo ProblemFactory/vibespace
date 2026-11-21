@@ -140,6 +140,7 @@ for (const [name, make] of SHAPES) {
   console.log(`    ${name}: «${held && held.why}» · refused ${refused.map((r) => r.status).join(' ')} · the sign-in page ${sp.probe.status} / ${sp.ja.status} / HEAD ${sp.head.status} · roads ${JSON.stringify(roads)}`);
   ok(held && refused.every((r) => r.status === 503) && api.json && api.json.error === 'signin-held' && api.json.fix === LW.LOGIN_WORDS['signin-held-fix'].en && page.text.includes(LW.LOGIN_WORDS['signin-held'].en) && door.json && door.json.error === 'signin-held',
     `${name}: every API, page and door refused 503 by name — the API says why and the way out, a page says it`, { api: api.json, page: page.text.slice(0, 200) });
+  ok(/^ {2}Password auth: HELD — the sign-in file cannot be read/.test(I.auth.bootLine() || '') && I.auth.bootLine().includes('every page and API is refused'), `${name}: the boot's sign-in line says HELD by name, never «ENABLED» (r1195 4): «${I.auth.bootLine()}»`);
   ok(sp.alive, `${name}: THE SIGN-IN PAGE ANSWERS AS A PAGE — 200 with the held words to a health check (any accept), a browser (ja when asked) and HEAD`, { probe: [sp.probe.status, sp.probe.text.slice(0, 160)], ja: sp.ja.status, head: sp.head.status });
   ok(I.auth.enabled === true && I.auth.passwordEnabled === true && I.auth.shut === true && I.auth.checkToken('a'.repeat(48)) === false && I.auth.requestAuthed({ method: 'GET', headers: { host: 'hub.example' }, socket: {} }) === false && I.auth.verifyPassword('anything') === false && I.auth.exportPasswordRecord() === null,
     `${name}: the held state reaches every reader from ONE place — sign-in reads «on», no login is valid, requestAuthed (every upgrade that asks) is false`);
@@ -149,7 +150,7 @@ for (const [name, make] of SHAPES) {
 }
 {
   // RED CONTROL: the tip's sign-in page (refused 503 like every request) — a health check never sees the instance alive
-  const Tip = mutant('src/auth.js', "        if (this.shut) return refuseHeld(this._held, req, res, { page: (req.method === 'GET' || req.method === 'HEAD') && p === '/login' });", '        if (this.shut) return refuseHeld(this._held, req, res, { page: false });').Auth;
+  const Tip = mutant('src/auth.js', "        if (this.shut) return refuseHeld(this._held, req, res, { page: (req.method === 'GET' || req.method === 'HEAD') && routeKey(p) === '/login' });", '        if (this.shut) return refuseHeld(this._held, req, res, { page: false });').Auth;
   const I = await instance(SHAPES[0][1], Tip);
   const sp = await signInPage(I);
   ok(!sp.alive && sp.probe.status === 503, `RED CONTROL — the tip's page: the sign-in page refused ${sp.probe.status} to a health check — the pod never ready, restarted for ever`);
@@ -171,7 +172,8 @@ console.log('— ② A FILE THAT IS TRULY MISSING stays a new instance; a readab
   made.auth.setPassword(pw);
   await made.close();
   const real = new AUTH.Auth(made.dataDir, {});   // the file that setPassword wrote, read again as the next start reads it
-  ok(!real.held && real.passwordEnabled && real.verifyPassword(pw), 'a readable sign-in file is read as today (its password verifies, nothing held)');
+  ok(!real.held && real.passwordEnabled && real.verifyPassword(pw) && real.bootLine() === '  Password auth: ENABLED', 'a readable sign-in file is read as today (its password verifies, nothing held, the boot says ENABLED)');   // stale-pins: kept — auth.bootLine()'s own output, read off the module
+  ok(new AUTH.Auth(path.join(DIR, `none${++seq}`), {}).bootLine() === null, 'no sign-in file: the boot says no password line, as before');
 }
 
 console.log('— ③ THE HOLD CLOSES WHAT THE FILE GUARDS: held with single sign-on on, SSO still guards; nothing written');
@@ -185,12 +187,13 @@ async function ssoHeld(Auth = AUTH.Auth) {
   const inside = await hit(I, '/api/sessions', { headers: { accept: 'application/json', cookie } });
   const local = await hit(I, '/api/login', { method: 'POST', body: JSON.stringify({ password: 'anything' }), headers: own });
   const setPw = await hit(I, '/api/auth/set-password', { method: 'POST', body: JSON.stringify({ newPassword: 'pw-new' }), headers: { ...own, cookie } });
+  const spelled = [await hit(I, '/API/Login/', { method: 'POST', body: JSON.stringify({ password: 'anything' }), headers: own }), await hit(I, '/api/auth/Set-Password/', { method: 'POST', body: JSON.stringify({ newPassword: 'pw-new' }), headers: { ...own, cookie } })];
   const locked = I.auth.revokeAllTokens();   // a vault lock: every login ends, in memory
   const afterLock = await hit(I, '/api/sessions', { headers: { accept: 'application/json', cookie } });
   const roads = everyWriteRoad(I.auth);
   const after = stateOf(I.dataDir);
   await I.close();
-  return { I, page, sso, cookie, inside, local, setPw, roads, locked, afterLock, before, after };
+  return { I, page, sso, cookie, inside, local, setPw, spelled, roads, locked, afterLock, before, after };
 }
 {
   const r = await ssoHeld();
@@ -198,11 +201,29 @@ async function ssoHeld(Auth = AUTH.Auth) {
   ok(r.I.auth.held && r.I.auth.shut === false && r.sso.status === 200 && r.sso.json && r.sso.json.success && /^vs_token=[0-9a-f]+$/.test(r.cookie) && r.inside.status === 200 && r.inside.json && r.inside.json.reached, `held with single sign-on on: SSO still signs a person in (${r.sso.status}) and the login opens the instance (${r.inside.status}) — the hold closes only what the file guards`, { sso: r.sso.json, inside: r.inside.status });
   ok(r.page.status === 200 && r.page.text.includes(LW.LOGIN_WORDS['signin-held-sso'].en) && r.page.text.includes(LW.LOGIN_WORDS['signin-held-sso-fix'].en) && !r.page.text.includes('id="pw"') && r.page.text.includes('id="sso"'), 'the sign-in page says the file is held, offers single sign-on alone (no password form) and the way out', r.page.text.slice(0, 300));
   ok(r.local.status === 503 && r.local.json && r.local.json.error === 'signin-held' && r.local.json.why === LW.LOGIN_WORDS['signin-held-sso'].en && r.setPw.status === 503, `the local password road stays refused by name: the password sign-in ${r.local.status}, setting a password ${r.setPw.status}`, { local: r.local.json, setPw: r.setPw.status });
+  ok(r.spelled.every((x) => x.status === 503 && x.json && x.json.error === 'signin-held'), `the local roads are matched as the router matches them (r1195 3): /API/Login/ and /api/auth/Set-Password/ refused by name too (${r.spelled.map((x) => x.status).join(' ')})`, r.spelled.map((x) => x.json));
+  ok(r.I.auth.bootLine().includes('HELD') && r.I.auth.bootLine().includes('single sign-on still guards'), `the boot's sign-in line under single sign-on says HELD, the password refused: «${r.I.auth.bootLine()}»`);
   ok(r.locked >= 1 && r.afterLock.status === 401, `a vault lock still signs everyone out: ${r.locked} in-memory login(s) revoked, the cookie then refused (${r.afterLock.status})`);
   ok(r.before === r.after && r.roads.token === 'ran' && r.roads.set === 'signin-held' && r.roads.remove === 'signin-held' && r.roads.import === 'signin-held' && r.roads.generated === '{}' && r.roads.env === '{}', 'NOTHING written: the SSO login lived in memory only; the env password, a generated one, set / remove / import refused; the path and its folder as they were', { before: r.before, after: r.after, roads: r.roads });
   const Tip = mutant('src/auth.js', '  get shut() { return !!this._held && !this._clerk?.enabled; }', '  get shut() { return !!this._held; }').Auth;
   const t = await ssoHeld(Tip);
   ok(t.sso.status === 503 && t.inside.status === 503, `RED CONTROL — the tip's hold (every request refused): the SSO sign-in is refused ${t.sso.status} — every person of such an instance locked out`);
+  const Exact = mutant('src/auth.js', '        if (LOCAL_ROAD.has(routeKey(p))) return refuseHeld(', '        if (LOCAL_ROAD.has(p)) return refuseHeld(').Auth;   // stale-pins: kept — 2b64bca99's exact match, the red's text
+  const e = await ssoHeld(Exact);
+  ok(e.spelled[0].status !== 503 && !(e.spelled[0].json && e.spelled[0].json.error === 'signin-held'), `RED CONTROL — the exact match (2b64bca99's): /API/Login/ skips the refusal by name and answers ${e.spelled[0].status} ${JSON.stringify(e.spelled[0].json)}`);
+}
+{
+  // THE BOOT LINE AND THE PASSWORD DIALOG (r1195 4): what says «a password is set» while held tells the truth
+  const S = read('server.js');
+  ok(S.split('auth.bootLine()').length === 2 && !/console\.log\(['"`] *Password auth:/.test(S), 'server.js prints the boot\'s sign-in line from auth.bootLine() alone — no «Password auth» line of its own');
+  const held = new AUTH.Auth((() => { const d = path.join(DIR, `boot${++seq}`); fs.mkdirSync(d); fs.writeFileSync(path.join(d, 'auth.json'), '{'); return d; })(), {});
+  ok(held.held && held.passwordEnabled === true, `RED CONTROL — the tip's boot line (\`if (auth.passwordEnabled) …ENABLED\`) would print «Password auth: ENABLED» for a held file (passwordEnabled ${held.passwordEnabled})`);
+  const F = read('src/lib/setup-flows.js');
+  const helper = (F.match(/\nconst refusalText = (\(d\) => [^\n]*);\n/) || [])[1];
+  const refusalText = helper ? new Function('t', `return ${helper};`)((x) => x) : null;
+  const heldBody = { error: 'signin-held', why: LW.LOGIN_WORDS['signin-held-sso'].ja, fix: LW.LOGIN_WORDS['signin-held-sso-fix'].ja };
+  ok(refusalText && refusalText(heldBody) === `${heldBody.why} ${heldBody.fix}` && refusalText({ error: 'Current password is wrong' }) === 'Current password is wrong' && refusalText({}) === 'Failed' && F.split('refusalText(d)').length === 4 && !F.includes("d.error || t('Failed')"), 'the settings\' password dialog shows the held words (in the asked language), never the bare code; its other refusals as before; all three of its set-password refusals go through it');   // stale-pins: kept — an absence check: the tip's dialog line is gone
+  ok(((d) => d.error || 'Failed')(heldBody) === 'signin-held', 'RED CONTROL — the tip\'s dialog line (`d.error || t(\'Failed\')`): a person reads «signin-held»');
 }
 
 console.log('— ④ THE REAL UPGRADE ROAD: server.js\'s own dispatcher — while held every upgrade is refused, a public /svc socket too; the dial-in keeps its own rule');
@@ -249,14 +270,16 @@ console.log('— ④ THE REAL UPGRADE ROAD: server.js\'s own dispatcher — whil
 console.log('— ⑤ THE WRITER CANNOT TEAR IT: the temp file is synced BEFORE the rename points the name at it');
 {
   /** replaceShredding (or a copy) run over a RECORDING stand-in of node's fs: every open / sync / rename, in order */
-  function recorded(mod) {
+  function recorded(mod, { failFolderClose = false } = {}) {
     const steps = [], fds = new Map(), saved = {};
     for (const k of ['openSync', 'fsyncSync', 'renameSync', 'writeFileSync', 'closeSync']) saved[k] = fs[k];
     fs.openSync = (p, ...r) => { const fd = saved.openSync.call(fs, p, ...r); fds.set(fd, String(p)); steps.push(['open', path.basename(String(p))]); return fd; };
     fs.fsyncSync = (fd) => { steps.push(['sync', path.basename(fds.get(fd) || '?')]); return saved.fsyncSync.call(fs, fd); };
     fs.renameSync = (x, y) => { steps.push(['rename', path.basename(String(x)), path.basename(String(y))]); return saved.renameSync.call(fs, x, y); };
     fs.writeFileSync = (p, ...r) => { steps.push(['write', typeof p === 'number' ? path.basename(fds.get(p) || '?') : path.basename(String(p))]); return saved.writeFileSync.call(fs, p, ...r); };
-    try { const f = path.join(DIR, `w${++seq}`, 'auth.json'); fs.mkdirSync(path.dirname(f)); saved.writeFileSync.call(fs, f, '{"old":1}', { mode: 0o600 }); mod.replaceShredding(f, '{"new":1}'); steps.final = fs.readFileSync(f, 'utf8'); }
+    const f = path.join(DIR, `w${++seq}`, 'auth.json');
+    fs.closeSync = (fd) => { const was = fds.get(fd); saved.closeSync.call(fs, fd); if (failFolderClose && was === path.dirname(f)) throw Object.assign(new Error('EIO: i/o error, close'), { code: 'EIO' }); };   // a folder whose close fails AFTER the write landed
+    try { fs.mkdirSync(path.dirname(f)); saved.writeFileSync.call(fs, f, '{"old":1}', { mode: 0o600 }); try { mod.replaceShredding(f, '{"new":1}'); } catch (e) { steps.threw = e.code || String(e); } steps.final = fs.readFileSync(f, 'utf8'); }
     finally { Object.assign(fs, saved); }
     return steps;
   }
@@ -269,6 +292,12 @@ console.log('— ⑤ THE WRITER CANNOT TEAR IT: the temp file is synced BEFORE t
   const src = read('src/secret-file.js'); if (src.split(RELEASE).length !== 2) throw new Error('CONTROL needle not found exactly once: the synced write');
   const then = recorded(compileAt('src/secret-file.js', src.replace(RELEASE, "    fs.writeFileSync(tmp, text, { mode: 0o600, flag: 'wx' });\n")));   // stale-pins: kept — the release's own write, the red's text
   const r2 = then.findIndex((s) => s[0] === 'rename');
+  const closing = recorded(compileAt('src/secret-file.js', read('src/secret-file.js')), { failFolderClose: true });
+  ok(!closing.threw && closing.final === '{"new":1}', `a folder whose close fails after the write LANDED: the caller is told nothing failed (r1195 1) — the new bytes stand (thrown: ${closing.threw || 'nothing'})`, closing);
+  const FOLDER = "  try { const dir = fs.openSync(path.dirname(file), 'r'); try { fs.fsyncSync(dir); } finally { fs.closeSync(dir); } } catch { /* the name already points at the synced bytes */ }\n";
+  const src2 = read('src/secret-file.js'); if (src2.split(FOLDER).length !== 2) throw new Error('CONTROL needle not found exactly once: the folder sync');
+  const outside = recorded(compileAt('src/secret-file.js', src2.replace(FOLDER, "  let dir = null;\n  try { dir = fs.openSync(path.dirname(file), 'r'); fs.fsyncSync(dir); } catch { }\n  if (dir !== null) { fs.closeSync(dir); dir = null; }\n")), { failFolderClose: true });   // stale-pins: kept — 2b64bca99's own shape, the red's text
+  ok(outside.threw === 'EIO' && outside.final === '{"new":1}', `RED CONTROL — 2b64bca99's shape (the close outside the best effort): a write that LANDED is reported failed (${outside.threw})`, outside);
   ok(r2 >= 0 && !then.slice(0, r2).some((s) => s[0] === 'sync'), `RED CONTROL — the release's order (write, then rename): the rename comes with no sync before it (${then.slice(0, r2 + 1).map((s) => s[0]).join(' → ')})`, then);
 }
 
