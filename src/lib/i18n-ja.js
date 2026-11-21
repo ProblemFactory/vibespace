@@ -13746,6 +13746,7 @@ export default {
   "this folder or file did not answer in time — try again in {s} s": "このフォルダーまたはファイルは時間内に応答しませんでした — {s} 秒後にもう一度お試しください",
   "the file readers are restarting — try again in a moment": "ファイル読み取りプロセスが再起動中です — 少し待ってからもう一度お試しください",
   "“{machine}” is offline — this folder shows its files only while the machine is connected": "「{machine}」はオフラインです——このフォルダーはマシンの接続中にだけそのファイルを表示します",
+  "“{machine}”’s folder {mountpoint}: where its link leads could not be checked in time, so nothing is written here — VibeSpace checks it again by itself, or remove the row and add it again to have it checked now": "「{machine}」のフォルダー {mountpoint}：リンクの行き先を時間内に確認できなかったため、ここには何も書き込みません。VibeSpace が自動でもう一度確認します。今すぐ確認するには、行を削除してもう一度追加してください",
   "“{machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row": "「{machine}」のフォルダーは現在マウントされていません——このフォルダーがその表示場所です。自動で再試行されます。行の「今すぐ再マウント」も使えます",
   "“{machine}”’s folder {mountpoint} is not mounted — {why}": "「{machine}」のフォルダー {mountpoint} はマウントされていません — {why}",
   "another pull row holds this folder — remove one of the two rows": "別のプルマウントがこのフォルダーを使っています — 2 つの行のどちらかを削除してください",

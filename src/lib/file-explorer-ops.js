@@ -49,6 +49,7 @@ export function fsErrorText(d) {
   if (d && d.code === 'machine_offline') return t('“{machine}” is offline — this folder shows its files only while the machine is connected', { machine: p.machine || '?' });
   // B-02f6: a write under a pull folder HELD by its pair (another row holds its place) — the row's hold, in the reader's language
   if (d && d.code === 'machine_folder_held') return t('“{machine}”’s folder {mountpoint} is not mounted — {why}', { machine: p.machine || '?', mountpoint: p.mountpoint || '', why: mountWords(p.heldCode, p.heldParams || {}, { t, lang: resolveLang() }) || t('another pull row holds this folder — remove one of the two rows') });
+  if (d && d.code === 'machine_folder_unchecked') return t('“{machine}”’s folder {mountpoint}: where its link leads could not be checked in time, so nothing is written here — VibeSpace checks it again by itself, or remove the row and add it again to have it checked now', { machine: p.machine || '?', mountpoint: p.mountpoint || '' });   // B-02f6 remainder's follow (r1274)
   if (d && d.code === 'machine_folder_down') return t('“{machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row', { machine: p.machine || '?' });
   if (d && d.code === 'windows_no_shell') return t('this needs a POSIX shell ({shell}), and this Windows machine has none — not available on Windows machines without one yet', { shell: p.shell || 'sh' });
   return String((d && d.error) || '');

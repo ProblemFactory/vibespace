@@ -13747,6 +13747,7 @@ export default {
   "this folder or file did not answer in time — try again in {s} s": "这个文件夹或文件没有及时响应 — 请 {s} 秒后再试",
   "the file readers are restarting — try again in a moment": "文件读取进程正在重启 — 请稍后再试",
   "“{machine}” is offline — this folder shows its files only while the machine is connected": "“{machine}” 已离线——只有机器连接时，此文件夹才会显示它的文件",
+  "“{machine}”’s folder {mountpoint}: where its link leads could not be checked in time, so nothing is written here — VibeSpace checks it again by itself, or remove the row and add it again to have it checked now": "“{machine}”的文件夹 {mountpoint}：没能及时确认它的链接指向哪里，所以这里不会写入任何内容——VibeSpace 会自行再次检查，或删除这一行再重新添加以立即检查",
   "“{machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row": "“{machine}”的文件夹现在没有挂载——此文件夹是它出现的位置；会自动重试，也可以在它那一行按“立即重挂”",
   "“{machine}”’s folder {mountpoint} is not mounted — {why}": "“{machine}”的文件夹 {mountpoint} 没有挂载——{why}",
   "another pull row holds this folder — remove one of the two rows": "另一个拉取挂载占用着这个文件夹——请删除两行中的一行",

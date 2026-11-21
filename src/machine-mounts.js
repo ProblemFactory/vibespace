@@ -60,12 +60,12 @@ const PROOF_MS = 3000;          // the proof child's own bound (the starter answ
 const PROOF_KEEP_MS = 10000;    // its answer is kept for the record this long — a pass as much as a refusal (a writer in a loop starts no child a write)
 const PROOF_KIDS_MAX = 2;       // at most this many proof children IN FLIGHT (asked, not answered) — another ask meanwhile keeps its refusal, nothing kept
 /** A folder's REAL path by THE STARTER (src/server/child-starter.js): a writer in a loop drives the proof's road, and the hub's main
- *  process starts no program on such a road (B-323e) — `realpath -m`, bounded PROOF_MS → { real (null: no answer), slow (NO answer
- *  inside the bound: timed out, or the starter's «unknown») }. Nothing here waits on the child's end after its answer. */
+ *  process starts no program on such a road (B-323e) — `realpath -m`, bounded PROOF_MS → { real (null: no answer), slow (the child
+ *  TIMED OUT inside its bound — a starter fault's «unknown» is not slowness, r1274) }. Nothing here waits on the child's end after its answer. */
 async function starterRealpath(p, { ms = PROOF_MS } = {}) {
   const lex = path.resolve(String(p || '/'));
   let r = null; try { r = await require('./server/child-starter').childStarter().run('realpath', ['-m', '--', lex], { timeoutMs: ms, capture: true, maxBuffer: 8192, envAdd: { PATH: process.env.PATH || '' } }); } catch { r = null; }
-  const slow = !!(r && (r.timedOut || r.unknown));   // a throw (no child ran, no bound passed) is an answer, not «slow»
+  const slow = !!(r && r.timedOut);   // ONLY a real timeout is slow (r1274): a starter fault's «unknown» and a throw are answers — no folder was slow
   const out = r && !slow && r.code === 0 ? String(r.stdout || '').replace(/\n$/, '') : '';
   return { real: out.startsWith('/') ? out : null, slow };
 }
@@ -1052,6 +1052,9 @@ class MachineMounts {
     if (!(rp === w || rp.startsWith(w + '/'))) return s;
     // r1214 (1): once the pair check's own child has LEARNED the real folder, that answer maps the path — no proof child at all
     const real = this._realMp.has(rec.id) ? this._realMp.get(rec.id) : await this._proofReal(rec);
+    // r1274 (2): refused because its link could not be checked in time («never again») — the refusal says it heals by itself and what
+    // a person can do (the not-mounted words would send them to Remount, which cannot help)
+    if (!real && !s.offline && !s.hostsHeld && this._proofNever && this._proofNever.get(rec.id) === proofSig(rec)) return { ...s, unchecked: true };
     if (!real || real === w) return s;
     const asReal = real + rp.slice(w.length);
     return this._state.mounts.some((o) => o.dir === 'pull' && this._live.has(o.id) && this._pullFolders(o).some((x) => x !== '/' && (asReal === x || asReal.startsWith(x + '/')))) ? null : s;
@@ -1331,6 +1334,9 @@ function pullShadowBody(s) {
   if (s.hostsHeld) return { error: `“${s.machine}”’s folder: ${s.hostsHeldWords || 'the paired machines cannot be read right now'}`, code: 'hosts-unread', params };
   // B-02f6: a writer under a PAIR-held folder — the row's hold, by its code (the page words it: src/mount-error-words.js)
   if (s.pairHeld) { const why = String((s.held && s.held.words) || ''); return { error: `“${s.machine}”’s folder ${s.mountpoint} is not mounted — ${why}`, code: 'machine_folder_held', params: { machine: s.machine, mountpoint: s.mountpoint, heldCode: (s.held && s.held.code) || null, heldParams: (s.held && s.held.params) || {} } }; }
+  // B-02f6 remainder's follow (r1274): its link could not be checked in time — it heals by itself (the pair check asks again), or a person
+  // removes the row and adds it again
+  if (s.unchecked) return { error: `“${s.machine}”’s folder ${s.mountpoint}: where its link leads could not be checked in time, so nothing is written here — VibeSpace checks it again by itself, or remove the row and add it again to have it checked now`, code: 'machine_folder_unchecked', params: { machine: s.machine, mountpoint: s.mountpoint } };
   return s.offline
     ? { error: `“${s.machine}” is offline — this folder shows its files only while the machine is connected`, code: 'machine_offline', params }
     : { error: `“${s.machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row`, code: 'machine_folder_down', params };
