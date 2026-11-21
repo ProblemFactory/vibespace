@@ -667,7 +667,8 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
   // for a reason that names neither git nor the CHANGELOG. A helper that reads
   // a file which only ever grows states its own bound.
   const GIT_MAXBUF = 64 * 1024 * 1024;
-  const git = (...a) => execFileSync('git', ['-C', REPO, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: GIT_MAXBUF });
+  const gitCalls = [];   // every read ⑩ makes, in order — the cut race's guard below counts them
+  const git = (...a) => { gitCalls.push(a); return execFileSync('git', ['-C', REPO, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: GIT_MAXBUF }); };
   const REF = ['origin/master', 'master'].find((r) => { try { git('rev-parse', '--verify', r); return true; } catch { return false; } });
   // THE RELEASE RECORD MOVED (2026-09-30): CHANGELOG.md became the user's file
   // (one plain line per change under `## <version> — <date>` headings that name
@@ -676,7 +677,16 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
   // where every release keeps writing its section. A REF from before the move
   // still carries the record as CHANGELOG.md.
   const refLogOf = (ref) => { try { git('cat-file', '-e', `${ref}:docs/changelog-engineering.md`); return `${ref}:docs/changelog-engineering.md`; } catch { return `${ref}:CHANGELOG.md`; } };
-  const REF_LOG = REF ? refLogOf(REF) : null;
+  // THE INTEGRATION BRANCH IS READ ONCE (B-1217's folded member, the old row B-3a3c — THE CUT RACE; lane bl-release, 主开发 r1401).
+  // `claimants` ran `git log … REF` on EVERY call while the release record was read once, and the latest number came from a third
+  // read: a cut moving REF between two reads (a release landing on master while this suite runs) made «the latest release is
+  // claimed» and «NEXT_FREE is unclaimed» judge two DIFFERENT branches — red for a tree that squats nothing. REF is now resolved to
+  // ONE commit up front, and every claim (the subjects, the record, the latest number) reads that commit; the guard below COUNTS ⑩'s
+  // reads (one log, REF named only to the two rev-parse), and an illustration beside it plants the cut between two reads.
+  const REF_SHA = REF ? git('rev-parse', '--verify', `${REF}^{commit}`).trim() : null;
+  const REF_LOG = REF_SHA ? refLogOf(REF_SHA) : null;
+  const REF_AT = REF_SHA ? `${REF}@${REF_SHA.slice(0, 9)}` : REF;   // the words' name for the one commit read
+  const REF_SUBJECTS = REF_SHA ? git('log', '--format=%s', '-400', REF_SHA) : '';
   const TREE_LOG = 'docs/changelog-engineering.md';
   // REGRESSION (round 7): the helper must SURVIVE the biggest read it makes.
   // Measured as the consequence — the read either returns the whole file or
@@ -688,7 +698,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     // (2026-09-30: these two asserts passed their NAME as the condition since
     // round 7 — `ok` is (cond, name, detail) — so they could never fail.)
     ok(typeof refChangelog === 'string' && refChangelog.length > 0,
-      `the integration branch's release record (${REF_LOG}) reads through the git helper (${refChangelog ? refChangelog.length : 0} bytes) — a suite that CRASHES here reports nothing at all`, `${refErr?.code || refErr?.message || 'empty'}`);
+      `the integration branch's release record (${REF_AT}:${String(REF_LOG).split(':').slice(1).join(':')}) reads through the git helper (${refChangelog ? refChangelog.length : 0} bytes) — a suite that CRASHES here reports nothing at all`, `${refErr?.code || refErr?.message || 'empty'}`);
     if (refChangelog && refChangelog.length > 1024 * 1024) {
       // NEGATIVE CONTROL: the file really is over the default, and the default
       // really does fail — so the explicit bound above is load-bearing, not
@@ -699,26 +709,26 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
       ok(defErr?.code === 'ENOBUFS',
         `NEGATIVE CONTROL: the SAME read with node's DEFAULT maxBuffer fails with ENOBUFS (${refChangelog.length} bytes > 1 MiB) — the explicit bound is what keeps this suite runnable`, `${defErr?.code || 'no error at all'}`);
     } else {
-      console.log(`  SKIP: ${REF_LOG} is ${refChangelog ? refChangelog.length : 0} bytes — under node's 1 MiB default, so the ENOBUFS control would measure nothing`);
+      console.log(`  SKIP: ${REF_AT}:${String(REF_LOG).split(':').slice(1).join(':')} is ${refChangelog ? refChangelog.length : 0} bytes — under node's 1 MiB default, so the ENOBUFS control would measure nothing`);
     }
   }
   /** Everything on the INTEGRATION BRANCH that already claims this number:
    *  release commit subjects (`<n>: …`) and CHANGELOG headings (`## <n> — …`).
    *  A branch's own commit is not on that branch yet, so this is exactly "did
    *  somebody else ship it". */
-  const claimants = (mark) => {
-    if (!REF) return null;
+  const claimsIn = (subjects, record) => (mark) => {   // PURE over one snapshot of the branch: its subjects and its record
     const re = new RegExp(`^${mark.replace(/\./g, '\\.')}(?![\\d.])`);
     const out = [];
-    for (const line of git('log', '--format=%s', '-400', REF).split('\n')) {
+    for (const line of String(subjects || '').split('\n')) {
       const t = line.trim(); if (re.test(t)) out.push(t);
     }
-    for (const line of String(refChangelog || '').split('\n')) {
+    for (const line of String(record || '').split('\n')) {
       const m = /^## (.+)$/.exec(line.trim());
       if (m && re.test(m[1].trim())) out.push(m[1].trim());
     }
     return out;
   };
+  const claimants = (mark) => (REF ? claimsIn(REF_SUBJECTS, refChangelog)(mark) : null);
   // TWO predicates, because "same topic" and "same change" are different
   // questions and the old single one could not tell a predecessor from its
   // follow-up. `describesThisChange` demands a marker only THIS branch's work
@@ -738,7 +748,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     // ② the number the integrator will take is genuinely free — derived from
     //    the branch, never declared: highest released 2.369.N on REF, plus one.
     const releasedNs = [];
-    for (const line of git('log', '--format=%s', '-400', REF).split('\n')) { const m = /^2\.369\.(\d+)(?![\d.])/.exec(line.trim()); if (m) releasedNs.push(+m[1]); }
+    for (const line of REF_SUBJECTS.split('\n')) { const m = /^2\.369\.(\d+)(?![\d.])/.exec(line.trim()); if (m) releasedNs.push(+m[1]); }
     for (const line of String(refChangelog || '').split('\n')) { const m = /^## 2\.369\.(\d+)(?![\d.])/.exec(line.trim()); if (m) releasedNs.push(+m[1]); }
     const latestN = Math.max(...releasedNs);
     // THE RELEASE BEING CUT IS CLAIMED BY THIS TREE (2.369.70 gate, the second
@@ -763,9 +773,9 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     const cutting = CLAIMED_HERE.has(CURRENT);
     NEXT_FREE = `2.369.${Math.max(latestN, cutting ? curN : latestN) + 1}`;
     ok([...CLAIMED_HERE].every((v) => claimants(v).length === 0), `the release(s) being cut here (${[...CLAIMED_HERE].join(', ') || 'none'}) are not yet on ${REF} — the census exempts exactly them, and only because this tree's CHANGELOG heads each`, JSON.stringify([...CLAIMED_HERE].map((v) => claimants(v))).slice(0, 200));
-    ok(Number.isFinite(latestN) && claimants(`2.369.${latestN}`).length > 0, `the latest release on ${REF} is 2.369.${latestN} (derived, not declared)`, JSON.stringify(releasedNs.slice(-5)));
+    ok(Number.isFinite(latestN) && claimants(`2.369.${latestN}`).length > 0, `the latest release on ${REF_AT} is 2.369.${latestN} (derived, not declared)`, JSON.stringify(releasedNs.slice(-5)));
     const next = claimants(NEXT_FREE);
-    ok(next.length === 0, `${NEXT_FREE} is unclaimed on ${REF} — the integrator may take it`, JSON.stringify(next));
+    ok(next.length === 0, `${NEXT_FREE} is unclaimed on ${REF_AT} — the integrator may take it`, JSON.stringify(next));
     // ③ and this branch stamps NO unreleased number in any of the files a
     //    reader cross-references. (The suite itself is NOT in this census: its
     //    NEXT_FREE is the DECLARATION of a free number, asserted free above,
@@ -805,6 +815,27 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     ok(off.length > 0 && !off.every(describesThisChange),
       'negative control B: 2.369.61 IS claimed on the integration branch by a DIFFERENT change (this check can see a squatter)',
       JSON.stringify(off));
+    // THE CUT RACE'S GUARD (the lane's read: a modelled reader cannot go red when the real one regresses) — ⑩ COUNTS ITS OWN READS:
+    // exactly ONE `log` read of the branch (the snapshot's), and REF named only to `rev-parse` (the existence check, the snapshot);
+    // a claimants() or a latest-number read back on `git log … REF` per call adds reads and turns this leg red.
+    const refRe = new RegExp(`(?:^|[^\\w/])${REF.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w/-])`);   // REF in ANY form a read could name it: REF, REF:path, REF^…, REF~n, REF@{…}, A..REF — never origin/REF when REF is master
+    const nameOf = (x) => typeof x === 'string' && refRe.test(x);
+    const readOnce = (calls) => { const logs = calls.filter((a) => a[0] === 'log'), named = calls.filter((a) => a.some(nameOf)); return logs.length === 1 && named.length === 2 && named.every((a) => a[0] === 'rev-parse'); };   // the existence check + the snapshot
+    const logReads = gitCalls.filter((a) => a[0] === 'log'), byName = gitCalls.filter((a) => a.some(nameOf));
+    ok(readOnce(gitCalls),
+      `⑩ reads the integration branch ONCE — ${logReads.length} log read(s) (one: the snapshot at ${REF_AT}), ${REF} named ${byName.length} time(s), only to rev-parse (the existence check and the snapshot: ${byName.map((a) => a[0]).join(', ')})`,
+      JSON.stringify(gitCalls.map((a) => a.slice(0, 3))).slice(0, 400));
+    { const n0 = gitCalls.length; git('log', '--format=%s', '-1', REF);   // CONTROL: one read the release's way — REF by name, through the same helper
+      ok(readOnce(gitCalls.slice(0, n0)) && !readOnce(gitCalls) && [`${REF}~1`, `${REF}@{1}`, `x..${REF}`, `${REF}:CHANGELOG.md`].every(nameOf) && !nameOf(REF_SHA) && !nameOf(`${REF_SHA}:x`) && (REF !== 'master' || !nameOf('origin/master')),
+        `CONTROL: the guard's own check, true on ⑩'s reads, is FALSE once one \`git log … ${REF}\` (a read per call, the release's way) joins them; the matcher names REF in its ~ / @{} / .. / :path forms and never the sha`); }
+    // AN ILLUSTRATION of what the guard prevents (never the guard): a branch that gains the number this tree must find free BETWEEN two
+    // reads — the release's per-call reader finds the latest AND ${NEXT_FREE} claimed; the one snapshot finds ${NEXT_FREE} free
+    { const before = REF_SUBJECTS, cut = `${NEXT_FREE}: a release cut while this suite ran\n${before}`;
+      let reads = 0; const perCall = (mark) => claimsIn(reads++ === 0 ? before : cut, refChangelog)(mark);
+      const raceLatest = perCall(`2.369.${latestN}`), raceNext = perCall(NEXT_FREE), snap = claimsIn(before, refChangelog);
+      ok(raceLatest.length > 0 && raceNext.length > 0 && snap(`2.369.${latestN}`).length > 0 && snap(NEXT_FREE).length === 0,
+        `the cut race, illustrated: with ${NEXT_FREE} cut between two reads, a reader per call finds 2.369.${latestN} AND ${NEXT_FREE} claimed; the snapshot at ${REF_AT} finds ${NEXT_FREE} free`,
+        JSON.stringify({ raceNext, snapNext: snap(NEXT_FREE) })); }
   }
   // …and the CHANGELOG rule (test-harness-honesty's belt, kept): unreleased =
   // no entry (fine); released under the number we take = the entry must be OURS.
