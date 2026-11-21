@@ -78,6 +78,10 @@ export function scratch(name) {
   // lane H verify r2: `vs-ab-<n>` is the PRODUCT's socket-dir fallback shape (src/browser-profiles.js socketDirDecision),
   // which the scratch reaper (scripts/ci.mjs PRODUCT_ROOT_RE) never judges — a suite minting it would hide from the sweep
   if (name === 'ab') throw new Error('scratch(): "ab" would mint /tmp/vs-ab-<pid> — the product\'s own socket-dir shape; pick another name');
+  // r1152 (A — the suites' hygiene): `vault-run…` would mint /tmp/vs-vault-run-…, the PRODUCT's vault-run folder shape
+  // (src/server/vault-run-door.js RUN_DIR_PREFIX), which a hub's start sweep judges: on 2026-11-21 another suite's hub shredded
+  // a running test-vault-run's copies. No suite's folder wears a name a product sweeper owns (a mutant-copy folder is `<name>-mut`)
+  if (/^vault-run(?:-|$)/.test(name)) throw new Error(`scratch(): "${name}" would mint /tmp/vs-${name}-<pid> — the vault run door's own run-folder shape (vs-vault-run-…, which a hub's start sweep judges); pick another name`);
   if (MINTED.has(name)) return MINTED.get(name);
   let p = path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}${name}-${process.pid}`);
   if (fs.existsSync(p)) p = leftoverAside(p);

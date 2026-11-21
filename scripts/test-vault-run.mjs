@@ -77,7 +77,7 @@ const VE = R('src/server/vault-engine.js');
 const DOOR = R('src/server/vault-run-door.js');
 const VR = R('src/vault-run.js');
 const { UserTodoManager, DETAIL_MAX } = R('src/user-todos.js');
-const ROOT = scratchDir('vault-run');
+const ROOT = scratchDir('vaultrun');   // r1152: never `vault-run` — /tmp/vs-vault-run-… is the vault run door's own folder shape (its start sweep judges it)
 // THE SUITE'S OWN HOME AND ENVIRONMENT (主开发 2026-11-19 00:56Z — a suite judges the same under the kit and under a caller's whole
 // environment: the kit hands a fresh empty home and a minimal env, the tree's fast tier or a probe the caller's own). Every door this
 // suite builds gets SUITE_HOME as its home and SUITE_ENV (+ its PATH) as the agent env — never os.homedir() nor process.env; the
@@ -92,7 +92,7 @@ const SUITE_TMP = ROOT;
 // built outside world() and the suite's own process (Node's os.tmpdir(): mutant copies, a leg's own mkdtemp) still follow the caller's TMPDIR.
 const SUITE_ENV = Object.freeze({ HOME: SUITE_HOME, PATH: [path.dirname(process.execPath), '/usr/local/bin', '/usr/bin', '/bin'].join(':'), TMPDIR: SUITE_TMP, LANG: 'C.UTF-8' });
 process.env.VS_SUITE_CALLER_MARK = 'the-caller-env';   // a variable only the CALLER's environment carries
-const M = mutantCopies('vault-run', REPO);
+const M = mutantCopies('vaultrun', REPO);   // r1152: its folder /tmp/vs-vaultrun-mut-<pid> (was vs-vault-run-mut-<pid>: a hub's start sweep shredded it mid-run)
 const PW = 'the second password of the run suite';
 // the values: odd characters every form spells differently ( / + = & " \ and a non-ASCII letter)
 const VALUE = 'Vr-S3cret/value+with=odd&chars"\\ü-0123';
@@ -1029,6 +1029,28 @@ console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program o
     const late = M.load('src/server/vault-run-door.js', anchored(anchored(SRCo, OWN2, '', 'test-vault-run ⑥b r1152 mark-late (cut)'), '      const rec = { conv: caller.conversationId', "      { const ofd = fs.openSync(path.join(dir, OWNER_FILE), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600); try { fs.writeSync(ofd, JSON.stringify(hubIdentity || { pid: process.pid })); } finally { fs.closeSync(ofd); } }\n      const rec = { conv: caller.conversationId", 'test-vault-run ⑥b r1152 mark-late (after)'), 'r1152-mark-late');
     const lateR = await orderOf(late);
     ok(lateR.ok && lateR.made.includes(DOOR.OWNER_FILE) && lateR.made.includes('f0') && lateR.made.indexOf('f0') < lateR.made.indexOf(DOOR.OWNER_FILE), 'RED — a door that writes a VALUE file before its mark (an anchored copy: the mark moved after the files; its run still runs — the plant is where it claims): the order leg above goes red there', lateR);
+  }
+  // r1152 (A — the suites' hygiene): NO SUITE'S SCRATCH WEARS A NAME A PRODUCT SWEEPER OWNS — the scratch helper refuses the
+  // vault run door's folder shape by name (as it refuses `ab`), and no tracked suite asks for it (a census over scripts/)
+  {
+    const SCR = await import(pathToFileURL(path.join(REPO, 'scripts/scratch.mjs')).href);
+    const GE = await import(pathToFileURL(path.join(REPO, 'scripts/git-env.mjs')).href);   // the tree's git env (a caller's GIT_DIR never steers the census)
+    const FG = R('src/fixture-guard.js');
+    const MCm = await import(pathToFileURL(path.join(REPO, 'scripts/mutant-copy.mjs')).href);
+    const refusedBy = (fn) => { try { fn(); return null; } catch (e) { return String(e.message || e); } };
+    const VR_ = ['vault', 'run'].join('-');   // built at run time: the census below reads LITERALS, and these probes are the refusal's own
+    const r1 = refusedBy(() => SCR.scratch(VR_)), r2 = refusedBy(() => SCR.scratch(VR_ + '-mut')), ok3 = refusedBy(() => SCR.scratch('vaultrun-census-probe'));
+    const r4 = refusedBy(() => SCR.scratchDir(VR_ + '-x')), r5 = refusedBy(() => MCm.mutantCopies(VR_, REPO));   // the two doors into scratch() a suite uses
+    const shapeIsTheDoors = FG.FIXTURE_CWD_PREFIX + 'vault-run-' === DOOR.RUN_DIR_PREFIX;
+    const names = [];
+    let listed = [];
+    try { listed = require('child_process').execFileSync('git', ['ls-files', '--', 'scripts/*.mjs', 'scripts/*.cjs', 'scripts/*.js'], { cwd: REPO, encoding: 'utf8', env: GE.gitEnvFrom(process.env) }).split('\n').filter(Boolean); } catch (e) { names.push(`git ls-files failed: ${String((e && e.message) || e).slice(0, 120)}`); }
+    for (const f of listed) {
+      const t = fs.readFileSync(path.join(REPO, f), 'utf8');
+      for (const m of t.matchAll(/\b(?:scratchDir|scratch|mutantCopies)\(\s*(['"`])([a-z0-9-]+)\1/g)) if (/^vault-run(?:-|$)/.test(m[2])) names.push(`${f}: ${m[2]}`);
+    }
+    ok(/would mint \/tmp\/vs-vault-run-<pid> — the vault run door's own run-folder shape/.test(r1 || '') && /vs-vault-run-mut-<pid>/.test(r2 || '') && /vs-vault-run-x-<pid>/.test(r4 || '') && /vs-vault-run-mut-<pid>/.test(r5 || '') && ok3 === null && shapeIsTheDoors && listed.length > 100 && !names.length,
+      'r1152 (A): the scratch helper REFUSES by name a folder in the vault run door\'s shape — through scratch(), scratchDir() and mutantCopies() (vault-run ⇒ vs-vault-run-<pid>; a copies folder vault-run-mut) — that shape IS the door\'s RUN_DIR_PREFIX, another name passes, and no tracked script asks for it in any quote (the census over scripts/, git failing is a red by name)', { r1, r2, r4, r5, ok3, shapeIsTheDoors, listed: listed.length, names });
   }
   try { liveKid.kill('SIGKILL'); } catch { }
   // THE STORE'S MARK: a non-hex mark reads as empty (never a throw); a restored OLDER copy is a replay

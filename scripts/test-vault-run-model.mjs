@@ -1365,7 +1365,7 @@ const SCRUB = scrubLegs({ REPO, SRC, scratchDir, anchored, require });   // the 
 
 console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
 {
-  const dir = scratchDir('vault-run-model');
+  const dir = scratchDir('vaultrun-model');   // r1152: never the vault run door's folder shape vs-vault-run-…
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
   for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));   // B-ef1b: vault-inventory reads the For-you registry (a band item's declared buttons)
   const real = fs.readFileSync(SRC, 'utf8');
