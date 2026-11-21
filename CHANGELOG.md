@@ -61,6 +61,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The hub no longer pauses while it checks folder mounts or reconnects a storage that went down; an unanswered check says so instead of «no permission».
 - A storage folder that cannot be read is no longer mounted over, and files that may have been moved aside before a reconnect are listed in For you.
 - In Settings, the note beside eight settings (extra arguments, Codex's personality and reset credit, and two Claude rows) is now in your language.
+- Opening the Diagnostics report on a slow data folder no longer makes VibeSpace stop answering for seconds while it reads its event files.
 
 ## 2.369.415 — 2026-11-21
 
