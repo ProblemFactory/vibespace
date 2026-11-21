@@ -382,7 +382,7 @@ try {
     const SENDS = [
       ['attachedFrameText(livePayload', 1, /ws\.send\(attachedFrameText\(livePayload, resume, \(\) => \(\{[\s\S]{0,600}?\}\)\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) BULK\.replied\(session\);/],   // a chat attach
       ["buffer: session.buffer || ''", 1, /buffer: session\.buffer \|\| '' \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) BULK\.replied\(session\);/],   // a terminal's attach
-      ["name: data.name || '', cwd: data.cwd || '', mode: 'chat'", 1, /viewOnly: true \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) for \(const \[, s\] of activeSessions\) if \(addressableId\(s\) === backendSessionId\) BULK\.replied\(s\);/],   // View History
+      ["name: data.name || '', cwd: data.cwd || '', mode: 'chat'", 1, /viewOnly: true(?:, historyNotLoaded: [^\n]*?)? \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) for \(const \[, s\] of activeSessions\) if \(addressableId\(s\) === backendSessionId\) BULK\.replied\(s\);/],   // View History (row B-422c: its not-loaded info rides the same send)
       ['sessionId: subId', 3, null],   // NOT A DOOR: a subagent's own transcript — a virtual session no create marks
     ];
     const sendsCensus = (t) => {

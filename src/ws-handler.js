@@ -1538,7 +1538,7 @@ function registerWsHandler(wss, ctx) {
             if (!(live.clients instanceof Map && live.clients.has(ws))) break;
             if (live._historyLoaded) { reply({ type: 'history-ready' }); break; }
             const hid = SSH.getHistorySessionId(live);   // the id its marks and its parse use
-            try { const warm = harnessOf(live.backend || 'claude').store?.warmTranscript; if (warm && hid) await warm(hid, live.cwd, { remote: !!live.host, session: live }); } catch { }
+            try { const warm = harnessOf(live.backend || 'claude').store?.warmTranscript; if (warm && hid) await warm(hid, live.cwd, { remote: !!live.host, session: live, bulk: BULK.isBulk(live) }); } catch { }   // B-cd4b's mark read through its one place: a bulk resume's first read stays the bulk line's (the ask replies no history: it consumes nothing)
             sm = createSessionMessages(live, data.sessionId);
           } else if (data.viewOnly && (data.backendSessionId || data.claudeSessionId)) {
             const bsid = data.backendSessionId || data.claudeSessionId;
