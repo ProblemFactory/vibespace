@@ -88,6 +88,7 @@ function leftWords(l) {
   const sh = l.short ? ` (${l.short} process${es(l.short)} got less than the full grace)` : ''; // round 12: killed without its grace
   if (l.cleared) return `it left ${n} process${es(n)} running — stopped at ${hhmm(l.cleared)}${sh}`;
   if (l.gone) return `it left ${n} process${es(n)} running — ${n === 1 ? 'it' : 'they'} had already ended by ${hhmm(l.gone)}`;
+  if (l.hubMain) return `its main process was the VibeSpace hub — the ${n} process${es(n)} it left ${n === 1 ? 'is' : 'are'} the hub's (its conversations and helpers): left running, never stopped by this job`;
   if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
   const esc = l.escaped ? `${l.escaped} process${es(l.escaped)} left its group — not stopped` : '';
   if (!n) return `${esc}; run it as a service job`;
@@ -416,6 +417,7 @@ function launch() {
     stdio: [spec.stdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(gated ? ['pipe'] : VAL ? ['ignore'] : []), ...(VAL ? VAL.map(() => 'pipe') : [])],
   });
   const c = child;
+  armHubLatch();   // B-2c5c unit 1: is this main the hub? asked while it lives
   // protocol 3: each value on its own fresh pipe at fd 4 + i — written and ended now (every rung we try gets its own: a gate
   // that fell through never ran the job, nobody read the last one); the job reads it once
   if (VAL) for (let i = 0; i < VAL.length; i++) { const v = c.stdio[VJ.FD_BASE + i]; if (!v) continue; v.on('error', () => { }); try { v.end(VAL[i]); } catch { } }
@@ -735,9 +737,31 @@ const mainLive = () => !!child && !exited && child.exitCode === null && child.si
 // started AS this job: its command became the hub — by its pid file or its shape) is never signalled: the stop is refused by name in
 // the job's log, and the job is not said ended (it ends when the hub ends)
 const HUB_MAIN_WORDS = 'this job is the running VibeSpace: it is not stopped here';
-const mainKept = () => { if (!mainLive()) return false; const k = keptTest(); return !!(k && k(child.pid)); };
+// B-2c5c unit 1 (主开发 r1192, the row's (1)): «MY MAIN WAS THE HUB» IS REMEMBERED for as long as this wrapper runs — once the main
+// ended (a restart, an update) the kept test can no longer see that hub, and what it started (its conversations, its helpers,
+// re-parented into this job's group or scope) would read as the job's own: the drain at the end stops none of it, a stop after it
+// stops none of it, and the end's record says so (exit.json `hubMain` — the engine then never reaps the run's scope)
+let mainWasHub = false, hubLatchSaid = false;
+const mainKept = () => {
+  if (!mainLive()) return false;
+  const k = keptTest(), yes = !!(k && k(child.pid));
+  if (yes && !mainWasHub) { mainWasHub = true; if (!hubLatchSaid) { hubLatchSaid = true; try { fs.writeSync(logOpen(), Buffer.from(`[job-wrapper] its main process is the VibeSpace hub — what the job runs is the hub's: no end or stop of this job stops it\n`)); } catch { } } }
+  return yes;
+};
+// how often a live main is asked whether it is the hub: soon after its start (a hub by its shape at once, by <data>/server.pid
+// seconds into its boot), every 2 s through its first minute, then every 30 s (a main is the hub from its start or never)
+const HUB_LATCH = Object.freeze({ firstMs: 500, everyMs: 2000, earlyMs: 60000, laterMs: 30000 });
+let hubLatchTimer = null;
+const armHubLatch = () => {
+  if (hubLatchTimer) return;
+  const t0 = Date.now();
+  const tick = () => { if (mainWasHub || exited) return; mainKept(); hubLatchTimer = setTimeout(tick, Date.now() - t0 < HUB_LATCH.earlyMs ? HUB_LATCH.everyMs : HUB_LATCH.laterMs); hubLatchTimer.unref?.(); };
+  hubLatchTimer = setTimeout(tick, HUB_LATCH.firstMs); hubLatchTimer.unref?.();
+};
 let mainKeptSaid = 0, refusedAt = 0;
 const sayMainKept = (sig) => { if (mainKeptSaid++) return; try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] stop: ${sig} refused — ${HUB_MAIN_WORDS} (its main process is the VibeSpace hub, started as this job)\n`)); } catch { } };
+let hubLeftSaid = 0;
+const sayHubLeft = (sig) => { if (hubLeftSaid++) return; try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] stop: ${sig} refused — its main process was the VibeSpace hub and has ended: what is left is the hub's (its conversations and helpers), never this job's to stop\n`)); } catch { } };
 const killMain = () => { if (mainKept()) { sayMainKept('SIGKILL'); return false; } try { child.kill('SIGKILL'); return true; } catch { return false; } };
 const termMain = (p, sig) => { if (termed.has(termKey(p)) || !mainLive()) return false; if (mainKept()) { sayMainKept(sig); return false; } const rec = { at: Date.now(), pass: 'stop' }; termed.set(termKey(p), rec); try { process.kill(child.pid, sig); rec.ok = true; return true; } catch { return false; } };   // B-d8f4 (主开发 r1045): every writer of the table says whether its signal landed
 // round 10: the manager's kill of the scope is a delivery too — recorded, once per stop step (r9 sent a natural end's leftovers
@@ -766,6 +790,8 @@ function onStop(sig, at, by) {
   // B-2c5c (THE MAIN DOOR): the main IS the hub — the stop is refused whole: nothing here is the stop's (what the hub runs is the hub's,
   // its keeper ours); its intent is not taken up again at the end (`refusedAt`)
   if (mainKept()) { sayMainKept(sig); refusedAt = Math.max(refusedAt, at); return; }
+  // B-2c5c unit 1: the main WAS the hub and it has ended — what is left is the hub's (its conversations, its helpers): nothing stopped
+  if (mainWasHub) { sayHubLeft(sig); refusedAt = Math.max(refusedAt, at); return; }
   stopping = sig; stopAt = at; stopBy = by;
   markStopping(by);
   // round 9: A SIGNAL GOES TO A PROVEN IDENTITY, NEVER ASSUMED DELIVERED — the engine's group signal reached what is in OUR group
@@ -907,6 +933,7 @@ async function drainScope() {
     try { child.stdio[3].destroy(); } catch { }
     for (let i = 0; i < 40 && keeper && procsOf(scopeDir).includes(String(keeper.pid)); i++) await nap(25);
   }
+  if (mainWasHub) { const n = own().filter((p) => !isKeeper(p)).length; return { ...(n ? { left: { n, hubMain: true } } : {}), scopeEmpty: !n }; }   // B-2c5c unit 1: the hub's — counted, never signalled
   const procs = stopping ? [] : own().filter((p) => !isKeeper(p)), left = procs.length;
   if (left && keeps) { // round 6: named by identity too — a stop whose read of the scope does not answer SIGTERMs them blind
     const rows = procs.map((p) => [Number(p), Number((statOf(p) || [])[19])]).filter((r) => r[1] > 0).slice(0, 64);
@@ -978,6 +1005,7 @@ function escapedOf() { // started after us, outside our group, carrying the job'
   return out;
 }
 async function drainGroup() {
+  if (mainWasHub) { const n = groupLeft().length; return n ? { left: { n, hubMain: true } } : {}; }   // B-2c5c unit 1: the hub's — counted, never signalled
   const left = groupLeft();
   const out = escapedOf(), mine = keeps && stopping; // a service STOPPED: what it kept is its own, stopped with it — outside its group too
   // B-7ca1 (its round's should 5): a cut scan is said, as the engine's; B-d8f4 (10, its read's S2): a listing that failed too — for EVERY scan of
@@ -1084,7 +1112,7 @@ async function ended(code, signal) {
   const end = (drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '') + (drained.scopeUnread ? ` — its scope's list could not be read${typeof drained.scopeUnread === 'string' ? ` (${drained.scopeUnread})` : ''}: what it started may still run` : '');
   if (VAL) { const f = flushMask(); if (f.length) writeLog(f); } // …and what came on the pipes after the exit event, masked
   try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
-  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty, ...(drained.scopeUnread ? { scopeUnread: drained.scopeUnread } : {}) } : {}) });
+  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(mainWasHub ? { hubMain: true } : {}), ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty, ...(drained.scopeUnread ? { scopeUnread: drained.scopeUnread } : {}) } : {}) });
   process.exit(code === null ? 143 : code);
 }
 // THE START (protocol 3): the values first — drained from OUR fd 3 (a socket the hub wrote and ended) on a non-blocking handle

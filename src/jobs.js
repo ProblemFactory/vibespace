@@ -2436,6 +2436,9 @@ class JobManager {
   async _reapOnce(job, run) {
     const scope = this._runScope(job, run);
     if (!scope || !scope.dir) return true;
+    // B-2c5c unit 1: its MAIN WAS THE HUB (the wrapper's record) — what its scope holds is the hub's (its conversations, its helpers): never
+    // reaped, whatever road asked (said once)
+    { const ex = this._readExit(job, run); if (ex && ex.hubMain === true) { if (!run._hubMainSaid) { run._hubMainSaid = true; this.d.log(`[jobs] ${job.id}: its main process was the VibeSpace hub — what is left in its scope is the hub's: not reaped`); } return true; } }
     const st = run._reap || (run._reap = {}); // this run's reap across its attempts (runtime only): the count it read, its kill
     // round 7: ONLY A WRAPPER PROVEN GONE — an unreadable stamp is no death (a LIVE service's scope was killed blind at a boot
     // that could not read its pid.json): deferred, said once with what could not be read; a wrapper alive after all reaps nothing
@@ -2729,7 +2732,7 @@ class JobManager {
     if (this._reapLater.has(run) || (this._reaping && this._reaping.has(run))) return true;
     if (this._reaped && this._reaped.has(run)) return false;
     const exit = this._readExit(job, run);
-    return !(exit && exit.scopeEmpty === true);
+    return !(exit && (exit.scopeEmpty === true || exit.hubMain === true));   // B-2c5c unit 1: what a hub-main run left is the hub's — nothing to wait for
   }
   /** true: the start may go; false: it may not (round 8 — a run that may still run, what it kept not proven ended), said */
   async _clearBefore(job, run, trigger) {
@@ -3436,7 +3439,9 @@ class JobManager {
         // round 4: its wrapper is gone — what is left in its scope is an ended run's (a service's KEPT processes excepted —
         // round 5, the ruling: its replay stops them first); round 5: a service's replay AWAITS this reap (_startAfter); round
         // 6: a reap past its read's bound is never dropped — it enqueues itself and every tick retries it (_reapScope)
-        if (!(exit && (exit.scopeEmpty === true || (exit.left && exit.left.kept)))) this._reapScope(job, run).catch(() => { });
+        // B-2c5c unit 1: a run whose MAIN WAS THE HUB (exit.json `hubMain`) left the hub's own conversations and helpers in its scope —
+        // never reaped (never this job's)
+        if (!(exit && (exit.scopeEmpty === true || exit.hubMain === true || (exit.left && exit.left.kept)))) this._reapScope(job, run).catch(() => { });
         if (exit) { this._finalizeRun(job, run, exit, 'boot'); continue; }
         if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); continue; }
         // no live process, no exit record ⇒ died with the environment
@@ -3929,7 +3934,7 @@ class JobManager {
         // round 4: a wrapper gone, its scope not — never an ended run still running (a service's KEPT processes excepted —
         // round 5, the ruling). Round 6: the run is judged from its exit record NOW and its reap goes on beside it (bounded; one
         // that does not finish enqueues itself — _reapScope); a restart waits for it (_startAfter)
-        if (!(exit.scopeEmpty === true || (exit.left && exit.left.kept))) this._reapScope(job, run).catch(() => { }); // measured empty: nothing to reap
+        if (!(exit.scopeEmpty === true || exit.hubMain === true || (exit.left && exit.left.kept))) this._reapScope(job, run).catch(() => { }); // measured empty: nothing to reap · B-2c5c unit 1: the hub's, never reaped
         this._finalizeRun(job, run, exit, 'sweep');
         continue;
       }

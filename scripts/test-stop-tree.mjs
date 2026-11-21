@@ -617,7 +617,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   'THE MAIN DOOR (wrapper): a main that IS the hub (a hub of this checkout by its argv while it boots, or by its pid file alone — run as `node .`) is never signalled — neither the stop\'s SIGTERM nor the grace\'s SIGKILL — refused by name in the job\'s log, once; a job\'s own main hears both', { hubMain, hubMainPid, jobMain });
   ok(tCut.calls === 'signal 4501 SIGTERM' && kCut.calls === 'kill SIGKILL', 'CONTROLS (each door\'s kept test cut alone, in a copy): the stop\'s SIGTERM reaches the hub that is the main; the grace\'s SIGKILL reaches it — each RED', { tCut, kCut });
   // the stop REFUSED WHOLE while the main is the hub (nothing here is the stop's), and its intent not taken up again at the end
-  ok(/function onStop\(sig, at, by\) \{\n  if \(stopping\) return;\n(?:  \/\/[^\n]*\n)+  if \(mainKept\(\)\) \{ sayMainKept\(sig\); refusedAt = Math\.max\(refusedAt, at\); return; \}\n  stopping = sig;/.test(W)
+  ok(/function onStop\(sig, at, by\) \{\n  if \(stopping\) return;\n(?:  \/\/[^\n]*\n)+  if \(mainKept\(\)\) \{ sayMainKept\(sig\); refusedAt = Math\.max\(refusedAt, at\); return; \}\n(?:  \/\/[^\n]*\n)+  if \(mainWasHub\) \{ sayHubLeft\(sig\); refusedAt = Math\.max\(refusedAt, at\); return; \}\n  stopping = sig;/.test(W)
     && /const s0 = stopIntent\(\), s = s0 && s0\.at > refusedAt \? s0 : null;/.test(W) && /its process group was killed`; killMain\(\); \}, left\);/.test(W) && !/child\.kill\('SIGKILL'\)/.test(W.slice(W.indexOf('const killMain = ')) .replace(/^const killMain = [^\n]*\n/, '')),
   'WIRING: the wrapper\'s stop is refused whole while its main is the hub (before it marks itself stopping), that refused intent is no stop at the end, and the grace\'s kill of the main goes through the main door only');
   // (g) THE MAIN DOOR (engine): its parent IS the run's wrapper by its stamp — every road refuses by name before anything changes. A
@@ -718,7 +718,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   const drainOf = async (src, err) => {
     const fsx = { readFileSync: () => { if (err) throw Object.assign(new Error(err), { code: err }); return ''; } };
     const env = { fs: fsx, path, keptTest: () => (p) => String(p) === '4100', procsOf: () => [], rung: { policy: true }, keeperSaid: null, keeper: null, child: null, nap: async () => { }, isKeeper: () => false,
-      stopping: 'SIGTERM', keeps: false, statOf: () => null, bootId: () => 'b', scopeRows: () => null, termOnce: () => false, scopeTerm: async () => false, stopAt: 0, stopMs: 1, forceScope: async () => { }, stopTree: [], same: () => false, scopeDir: '/fake/scope' };
+      stopping: 'SIGTERM', keeps: false, statOf: () => null, bootId: () => 'b', scopeRows: () => null, termOnce: () => false, scopeTerm: async () => false, stopAt: 0, stopMs: 1, forceScope: async () => { }, stopTree: [], same: () => false, scopeDir: '/fake/scope', mainWasHub: false };
     const gone = src.slice(src.indexOf('const GONE_LIST = new Set('), src.indexOf('\n', src.indexOf('const GONE_LIST = new Set(')));
     return new Function(...Object.keys(env), `let listUnread = ''; ${gone}\n${fnOf(src, 'function procsOrNull(dir) {')}\n${fnOf(src, 'async function drainScope() {')}\nreturn drainScope;`)(...Object.values(env))();   // eslint-disable-line no-new-func
   };
@@ -760,7 +760,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   // CONTROL (the refusal cut, in a copy): the stop goes on (marked — the stub stops the rest there)
   const onStopOf = (src, kept) => {
     const seen = [];
-    const env = { seen, mainKept: () => kept, sayMainKept: (sig) => seen.push('said ' + sig), markStopping: () => { throw new Error('MARKED'); } };
+    const env = { seen, mainKept: () => kept, sayMainKept: (sig) => seen.push('said ' + sig), mainWasHub: false, sayHubLeft: (sig) => seen.push('hub-left ' + sig), markStopping: () => { throw new Error('MARKED'); } };   // B-2c5c unit 1: the latch, off here (test-job-hub-main drives it)
     const f = new Function(...Object.keys(env), `let stopping = null, stopAt = 0, stopBy = '', refusedAt = 0; ${fnOf(src, 'function onStop(sig, at, by) {')}\nreturn (s, a, b) => { try { onStop(s, a, b); } catch (e) { seen.push(e.message); } return { seen: seen.join(), stopping, refusedAt }; };`)(...Object.values(env));   // eslint-disable-line no-new-func
     return f('SIGTERM', 1234, 'signal');
   };
@@ -824,7 +824,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   ok(W.split(FORCED).length === 2, 'control setup: the end\'s «by force» asks the force\'s own answer — found once');
   const raceOf = async (src) => {
     const env = { fs: { readFileSync: () => '4200\n' }, path, keptTest: () => null, procsOf: () => ['4200'], rung: { policy: true }, keeperSaid: null, keeper: null, child: null, nap: async () => { }, isKeeper: () => false,
-      stopping: null, keeps: false, statOf: () => null, bootId: () => 'b', scopeRows: () => [], termOnce: () => true, scopeTerm: async () => false, stopAt: 0, stopMs: 1, forceScope: async () => false, stopTree: [], same: () => false, scopeDir: '/fake/scope' };
+      stopping: null, keeps: false, statOf: () => null, bootId: () => 'b', scopeRows: () => [], termOnce: () => true, scopeTerm: async () => false, stopAt: 0, stopMs: 1, forceScope: async () => false, stopTree: [], same: () => false, scopeDir: '/fake/scope', mainWasHub: false };
     const gone = src.slice(src.indexOf('const GONE_LIST = new Set('), src.indexOf('\n', src.indexOf('const GONE_LIST = new Set(')));
     return new Function(...Object.keys(env), `let listUnread = ''; ${gone}\n${fnOf(src, 'function procsOrNull(dir) {')}\n${fnOf(src, 'async function drainScope() {')}\nreturn drainScope;`)(...Object.values(env))();   // eslint-disable-line no-new-func
   };
