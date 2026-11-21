@@ -643,6 +643,35 @@ This file is the engineers' record of every release: the lanes, the verification
 - Its follow (the cure's own fresh read, 主开发 r1422): no landing lifts a door's «not saved» mark while that door's change still waits to be handed; only the stop's own flush means exiting; one bound a point, its header inside it; a door whose change a read dropped answers «appeared»; the autosaves keep one durable wait at a time; the bound on an injected clock.
 - Gate: scripts/test-store-write-census.mjs ⑭ (i)–(k), (v)–(z) and (aa)–(al) with their reds (the bytes made at the flush, the sequence mark, a refused first create kept by the hold's `owe`, a refused point let go, the generation; a write only queued said as queued, a point only queued waited for again, the owed words lifted only when nothing newer is owed, one waiting copy of the desktops a mark); scripts/test-store-held-page.mjs the page's words for a write only queued (code «queued»: not taken in time, never «refused»), ⑪ (e)/(m) on the writer's road; scripts/scratch.mjs `landingWriter()` for the suites whose world reads the files at the call.
 
+### bl-scratch B-1747 part 2 — the guard of every inline assertion helper, as a tool the integrator applies (the coordinator's r1166; NOT TAKEN at r1347, cured)
+- THE TOOL (scripts/guard-inline-helpers.mjs, tests and tools only): it acts on each inline helper the census judges and finds unguarded, IN CODE, and only where its body asks its condition true or false.
+  - It puts the census's own guard on the opening line; an expression arrow gets a block made of it, on the same lines.
+  - It wraps each operand that is not a boolean by its operator in THE GUARDED COERCION of the shared checker, `verdictOf( … )` (scripts/lib/check.mjs), imported on the file's last code line. A comparison stays outside every wrap.
+  - It tells code from text by the parser's tokens and by scope-by-scope bindings; a census suite's plants are said, never edited.
+  - It runs its own self-check over the text as written, and a second run must plan nothing. It lowers the one-way list.
+  - The writes are all or nothing on disk: every file goes to a temp first, then all are renamed.
+  - `--apply` needs `--coordinator-word` (a word the integrator types, not a check): the integrator applies it on the block's assembled tip as a generated commit. This unit applies nothing.
+- THE MUST OF r1347, cured: a plain `!!( … )` would have made every vacuous leg of the tree invisible for good (an un-awaited promise becomes `true`, the guard accepts it, the list falls from 1051 to 16). `verdictOf` FAILS a promise or a function handed as a verdict, red by name, so the applied tree's first run LISTS the vacuous legs it held. Any other value coerces as `!!` would: coerced, not audited.
+- WITH IT: a file that binds its own `verdictOf` imports the coercion as `verdictOfGuard` (only the imported name counts as a coercion there); a comma expression is wrapped with its parentheses (the dry run's self-check refused three files where it was not); a function helper's own `arguments` is a value use (left by rule); the wall-clock self-check reads with the product's span fields; the list is counted over §7b's own file set; the generator's suite skeleton takes `checker()`.
+- THE DRY RUN AT a117cebb8:
+  - 1103 helpers guarded in 1034 files: 1074 arrow blocks, 13 functions, and all 16 arrow expressions. The 17th of the earlier text count is test-ssh-key-dialog's `ok`, a plant in a page script's text.
+  - The census reads 1119 unguarded before and 16 after.
+  - Of 80 432 calls, 42 061 are wrapped and 38 371 are untouched as booleans by their operator.
+  - 13 helpers are left by rule: exported 1, handed on as a value 9, a call by spread 1, a direct eval in the file 2. There are 3 plants.
+  - 1 helper is guarded but no longer read by the census, said by name: test-conversation-index line 10, whose body opens `{c?…}`. The suite is heavy, so it is not rewritten by hand.
+  - 0 self-check failures; the second run plans nothing.
+  - The list goes from 1051 rows / 1121 to 16 / 16.
+- ITS READ (a fresh reader with probes; every finding cured in the tool and given a fixture):
+  - A named function expression is left by rule.
+  - A body that uses its condition as more than true or false is left, and so is a helper that hands its condition back where a call reads the value. Both rules form one fixpoint with the guarded set, so a second run reads the same.
+  - A bound inside an && chain is no longer put under a `!` (the wall-clock census read it as a literal).
+  - A name declared twice in one scope is left, and so is a file with a direct eval.
+  - A spread anywhere in a call is left.
+  - A call inside another call's condition composes (insertions only).
+  - The headline no longer says APPLIED when the second run refused.
+  - NOT CAUGHT, said: a swap whose name is a variable.
+- LEGS: test-guard-inline-helpers (fast). It runs fixtures of each helper shape and call kind, each guarantee with an anchored mutant of the tool as its RED, plus a scratch repo's dry run / apply / second run. test-ci-gate-tiers §7b: the list's leg asks that the list was read, no longer that it is long (it falls to 16 at the apply).
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
