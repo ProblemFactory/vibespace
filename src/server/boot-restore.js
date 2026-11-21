@@ -122,6 +122,10 @@ function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   const dialBridge = mk(getDialBridge);
   const exitProxyRef = mk(getExitProxy); // B-92a4: a session the re-probe un-adopts ends its exit pairs + waiting asks like any ended one
   const ensureDir = (p) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };
+  // B-526c unit 2 (r1070): the pin record at a LOCAL restore — each pool's folder listed ONCE this boot; the record's decision
+  // written back into the meta (paced: the record stays); a record that cannot be read said by name
+  const pinListings = new Map();
+  const pinAtBoot = (sockFile) => ({ listing: pinListings, write: (m) => writeSessionMeta(sockFile, { ...m }), say: (line) => console.warn(line) });
   // THE CLASSIFIER REROUTE SURVIVES A RESTART (2026-09-13 r3 §7). The stamp
   // says "the CLI is answering with a model we did not ask for"; it is
   // announced ONCE and `scope:"session"`, so it can never be re-learned from
@@ -888,7 +892,7 @@ function restoreSessions() {
     // it said between the catch-up and the connect (session-stdout setupSessionPty `fence`); an older wrapper is attached as before
     if (restoreBuf && wrapperObs && wrapperObs.caps && wrapperObs.caps.fence === SJ.FENCE_VERSION) restoreBuf.fence = true;
 
-    PinRecord.pinAtBoot(path.dirname(META_DIR), meta, sockFile);   // B-526c unit 2: the person's pin record, when newer than the meta's
+    PinRecord.restorePin(path.dirname(META_DIR), meta, sockFile, pinAtBoot(sockFile));   // B-526c unit 2 (r1070): the record decides, written back into the meta
     const session = sessionFromMeta(meta, { // transport-only + per-path facts (win over the shared ones)
       mode: sessionMode,
       pty: null,
@@ -1161,7 +1165,7 @@ function restoreAgentdPipeSessions() {
     const id = 'sess-' + sockFile.replace(/^cw-/, '');
     if (activeSessions.has(id)) continue;
     persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }); // r5
-    PinRecord.pinAtBoot(path.dirname(META_DIR), meta, sockFile);   // B-526c unit 2: the person's pin record, when newer than the meta's
+    PinRecord.restorePin(path.dirname(META_DIR), meta, sockFile, pinAtBoot(sockFile));   // B-526c unit 2 (r1070): the record decides, written back into the meta
     const session = sessionFromMeta(meta, { // transport-only + per-path facts (win over the shared ones)
       mode: 'chat', backend: meta.backend || 'claude',
       name: meta.name || 'Session', sockName: sockFile,

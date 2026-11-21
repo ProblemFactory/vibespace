@@ -7490,12 +7490,12 @@ function pinNotice(poolId, sid, s, kind, { member = null, target = null } = {}, 
  *  lane lg-group-parents (B-526c unit 2): AT ITS PACE — the pin's durable record is data/pool-pins (src/pool-pin-record.js),
  *  written before the answer; the boot takes the newer of the two. (Its durable write was dropped by its one caller: the
  *  answer never waited for it.) */
-function persistPoolPin(session) {
+function persistPoolPin(session, cleared = null) {   // r1070: `cleared` = a clear's record — its COPY is the meta's `poolPin` (no pin to an older reader)
   try {
     if (!session || !session.sockName) return;
     const prev = sessionMetaStore.readSessionMeta?.(session.sockName);
     if (prev === undefined || prev === null || typeof prev !== 'object') return; // not wired / no meta — memory only (never create one here)
-    return sessionMetaStore.writeSessionMeta?.(session.sockName, { ...prev, poolPin: session._poolPin || null });   // B-526c unit 2: paced — the record (PinRecord) is the pin's durable half
+    return sessionMetaStore.writeSessionMeta?.(session.sockName, { ...prev, poolPin: session._poolPin || (cleared ? PinRecord.copyOf(cleared) : null) });   // B-526c unit 2: paced — the record (PinRecord) is the pin's durable half
   } catch (e) { console.warn('[pool] pin not persisted:', e.message); }
 }
 /** THE ONE WRITER of a conversation's pin. `memberId` = a member of the conversation's pool, or
@@ -7518,12 +7518,13 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
   // keyed by the conversation's meta name; a conversation with no meta has nothing a boot restores (memory only, as before). A
   // record that cannot be written refuses the pin BY NAME — nothing changed
   const pin = memberId ? { memberId, at: now, by } : null;
+  const rec = pin || { cleared: true, at: now, by };   // r1070: a clear WRITES its mark — the record says what the person last chose, both ways
   if (s.sockName) {
-    try { PinRecord.write(accounts.dataDir, poolId, s.sockName, pin); }
+    try { PinRecord.write(accounts.dataDir, poolId, s.sockName, rec); }
     catch (e) { return { ok: false, status: 503, code: 'pin_not_saved', error: `the pin could not be saved (${(e && e.code) || (e && e.message) || 'the write failed'}) — nothing changed; try again` }; }
   }
   s._poolPin = pin;
-  persistPoolPin(s);
+  persistPoolPin(s, pin ? null : rec);
   const caps = capsOf(a.backend);
   const own = hasOwnPoolLink(poolId, sid);
   let current = null; try { current = own ? accounts.poolCurrentFor(poolId, sid) : (heldPoolMemberFor(s, poolId) || accounts.poolCurrent(poolId)); } catch { }

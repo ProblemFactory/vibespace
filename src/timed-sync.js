@@ -27,6 +27,8 @@ const row = (kind, store, file, sites = []) => Object.freeze({ kind, store, file
 const STORES = Object.freeze({
   'session-meta.write': row('write', 'session-meta/<sock>', 'src/server/session-stdout.js', ['writeSessionMeta']),
   'session-meta.read': row('read', 'session-meta/<sock>', 'src/server/session-stdout.js'),
+  'pool-pin.write': row('write', 'pool-pins/<pool>/<sock>', 'src/pool-pin-record.js', ['write']),   // lane lg-group-parents B-526c unit 2: the person's pin, before its answer
+  'pool-pin.read': row('read', 'pool-pins/<pool>', 'src/pool-pin-record.js'),
   'session-status.write': row('write', 'session-status', 'src/session-status.js', ['_save']),   // through the store writer (lane hub-loop-stalls commit 2)
   'reset-claims.write': row('write', 'usage-reset-claims', 'src/usage-reset-claim.js', ['save']),   // through the store writer (lane account-reset-door K2)
   'door-reads.write': row('write', 'usage-cache/.door-reads-<account>', 'src/door-reads.js', ['bumpDoorRead']),   // through the store writer, awaited before the read (lane usage-predict, law A3)

@@ -2297,7 +2297,7 @@ await (async () => {
   ck('gather: "Move every conversation here now" moves the unpinned one and SKIPS the pinned one (pin > everything)', g.code === 200 && w.on('s-b') === 'martin' && w.on('s-a') === 'fish');
   // (7) clearing: automatic again, nothing moves at the clear
   const cl = w.pin('s-a', null);
-  ck('clear: "Automatic" clears the pin and moves NOTHING at the clear', cl.code === 200 && cl.body.pinned === null && cl.body.reason === 'automatic' && w.on('s-a') === 'fish' && w.sessions.get('s-a')._poolPin === null && w.metas.get('cw-s-a').poolPin === null);
+  ck('clear: "Automatic" clears the pin and moves NOTHING at the clear', cl.code === 200 && cl.body.pinned === null && cl.body.reason === 'automatic' && w.on('s-a') === 'fish' && w.sessions.get('s-a')._poolPin === null && ((m) => !!(m && m.cleared === true && !m.memberId))(w.metas.get('cw-s-a').poolPin));   // lane lg-group-parents B-526c unit 2 (r1070): a clear's meta copy is the stamped `{cleared, at, by}` (an older reader sees no pin)
   ck('clear: …the words: `… is placed automatically again.`', w.notices.some((n) => n.t === 'Pool "全部": conversation "conv s-a" is placed automatically again.'));
   // (8) pinning an EXHAUSTED member: the pin is kept, it waits
   w.wr('uci', 0.99, 0.2, 5 * 86400);
