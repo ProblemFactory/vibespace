@@ -202,6 +202,7 @@ scripts/lib/fit-ladder.mjs — THE WIDTH LADDER (lane ui-phone-and-fit pick 0): 
 scripts/test-foryou-fit.mjs (fast) + test-foryou-fit-chrome.mjs (heavy) (lane ui-phone-and-fit pick 0) — the owner's case: every option whole at every width of its door, the strip opens in place in ONE ORDER; the census over every option rule, the doors on the width ladder ⇒
 scripts/lib/css-rules.mjs — cssRules / selectorList / lastCompound: every innermost rule of a sheet, read for the fit censuses ⇒
 scripts/lib/check.mjs — THE ONE ASSERTION HELPER (B-1747, lane bl-tests-e): checker() ok(cond, name, detail) THROWS on a non-boolean condition or a non-string name; helperDefs / swappedCalls = test-ci-gate-tiers §7b's census over every script ⇒
+scripts/guard-inline-helpers.mjs — B-1747 part 2 (lane bl-scratch): the TOOL the integrator applies on a train tip: the census's guard on each judged helper's opening line, !!( … ) where a condition is no boolean, plants told from code, its own self-check; twice = once ⇒
 src/lib/rail-row.js — railRow (lane ui-phone-and-fit M2): ONE row shape for a narrow column — name beside its controls, else the controls on the next line; > 3 controls fold into «⋯» (rowActionsFold), a data-rail-fold="always" one always does (B-db5d); gated by test-ui-fit + -chrome ⇒
 scripts/lib/oat-fixture.mjs — the measured-record fixture read as it stood (B-5e52, lane bl-tests-e): versionsBefore(versions, v), RECORD_SHA256 (the ONE row a new Claude Code build adds), recordSha, SPELLED_BUILDS_RE (test-cli-caps' census) ⇒
 src/lib/row-fold-model.js — PURE (lane phone-roster-fold) rowActionsFold: ≤ ROW_INLINE_MAX (3) buttons inline; the rest, and what the width cannot hold, fold into ONE «…» (a primary never folds); an `always` item folds at every width, uncounted, refused with primary (B-db5d) ⇒
@@ -16000,6 +16001,59 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
 - **swappedCalls(src)** → every call of the file's own helper whose CONDITION slot is ONE WHOLE string literal while its name slot is not (`'a' === x` and `'k' in o` are conditions), judged by the nearest definition above the call; a call quoted in a whole-line comment is skipped. `callArgs` splits the first two arguments aware of strings, templates with nested `${…}`, regex literals (after an operator or `return` / `typeof` / `case` …) and comments.
 - **The census** (test-ci-gate-tiers §7b, fast): no swapped call in any `scripts/*.mjs` or `scripts/lib/*.mjs`; the unguarded inline helpers listed BY FILE in scripts/fixtures/unguarded-helpers.json (1020 in 1016 files on 2.369.407), ONE-WAY: a file that adds one is red by name and the red prints the row that admits it; a file whose helper went is never red (its stale row is only said) — forty-six lanes merge into one train. On 2.369.407 it found EIGHT vacuous legs: test-record-shape ×2, test-queue-steer ×3 (one the catch of ⑪'s browser leg — a THROWING leg passed), test-voice-follow-chrome ×1, test-path-field-chrome ×2 (bail paths before exit 1). RED control: a mutant copy of the lib without its two guard lines lets the swap pass.
 - **Not caught (said):** a name passed as a variable (`ok(label, cond)` against a condition-first helper) — only the lib's runtime guard catches it, and on 2.369.407 no suite takes the lib yet (the batcher's plan: the helper and the census now, the thousand-suite move by attrition); a block-scoped twin helper of the other order (none in the tree); helpers under names off the list (`pin`, `failPass` — one each; `ck` / `leg` / `assert` are read since .412) and forwarding wrappers whose order cannot be read (test-title-chips-ui's `ok` → `okBase`, the two `okc`).
+
+### scripts/guard-inline-helpers.mjs + scripts/test-guard-inline-helpers.mjs (B-1747 part 2, lane bl-scratch, 2026-11-21 — the guard of every inline helper, as a tool)
+- **Why:** about 1100 inline assertion helpers did not refuse a condition that is not a boolean; only the one-way list (§7b) held them. A change of ~1050 files cannot ride as a pick, because it meets every lane's unit in flight. So the integrator runs this TOOL on a train tip as a generated commit, on the coordinator's word (`--apply --coordinator-word`). The dry run is the default, and `--list` names every edit. The whole fast and heavy tiers at the applied tip are its run-time proof.
+- **Code is told from text:** acorn's string, regex and template-text tokens, and its comments. A helper the census reads inside them (a census suite's plant) is a PLANT: said, never edited. Definitions, calls and every other use are read from the parse tree SCOPE BY SCOPE: a call reaches a helper only through its binding, so a parameter or an inner block of the same name is another function.
+- **The edit (insertions only):**
+  - The guard is the census's own `if (typeof c !== 'boolean') throw new TypeError(…)`, placed right after the body's `{` ON THE OPENING LINE, so no line moves.
+  - An arrow with an EXPRESSION body gets a block made of it, on the same lines: `=> { <guard> return (<the expression>); }`.
+  - In every call, each operand of an && / || chain (and each branch of a ?:) that is not a boolean BY ITS OPERATOR (true / false, `!`, a comparison, instanceof / in) gets `!!( … )`. So a comparison never stands under a `!`, which the wall-clock census reads a bound through.
+  - A call inside another call's condition composes.
+- **When a wrap is exact:** a helper is guarded only if its body asks its condition TRUE OR FALSE: an if / while / ?: test, a `!`, or an && / || in a test or a statement. A helper that hands its condition back is guarded only where every call reads the value as true or false. A condition a guarded call wraps counts as read so, which is the same reading a second run makes; both rules form one fixpoint over the guarded set. There, a call passes exactly when it passed before, and the guard never throws on a call that was there.
+- **Left by rule, by name:**
+  - a destructured, defaulted or rest condition parameter;
+  - an exported helper;
+  - a helper handed on as a value (passed, stored, reassigned, `.call`, a tag, exported by name);
+  - a named function expression;
+  - a name declared twice in one scope;
+  - a file with a direct eval or a `with` statement;
+  - a body that uses its condition as more than true or false (`c === true`, `typeof c`, printed, stored, passed on, `c ?? x`);
+  - a call with no condition argument, or by spread;
+  - a call that hands it a STRING where the condition goes (whole or joined with `+`), or holds a condition in its name slot: a swap, so cure the call first;
+  - a call of it inside another call's name argument.
+- **Its own proof (selfCheck), over the text as written:**
+  - the line count is unchanged; the text is the plan applied, and it only inserts; it parses;
+  - no edit point lies inside a string, a template's text, a regex or a comment;
+  - every wrapped call reads back from the NEW text's parse as planned, and is a boolean by its operator;
+  - its name argument is byte-identical, with no edit inside it;
+  - the census reads every guarded helper as guarded with its order unchanged. The exception, said by name, is a helper whose body opens with its test (`{c?…}`): the census no longer reads its order and counts it neither way, and its runtime guard judges every call;
+  - the wall-clock census reads a file the same when a wrap there holds a comparison.
+
+  If any file fails, or a SECOND RUN over the texts it would write plans anything, nothing is written and the run exits 1.
+- **The list:** scripts/fixtures/unguarded-helpers.json is LOWERED to what the census reads after the run. A row only falls; it is never added or raised. §7b's leg asks that the list was READ (its `files` map), no longer that it is long.
+- **At 2.369.414 (a117cebb8), the dry run** (1378 scripts; about 30 s on one core):
+  - It guards 1103 helpers in 1034 files: 1074 arrow blocks, 13 functions, 16 arrow expressions.
+  - The census reads 1119 unguarded before and 16 after.
+  - Of 80 432 calls, 42 061 are wrapped (around 67 167 operands) and 38 371 are booleans by their operator.
+  - Left by rule: 13 (exported 1: ci-gate-kit's `ok`, which the test-ci-gate-* suites share; handed on as a value 9; a call by spread 1; a direct eval 2).
+  - Plants: 3. Guarded but no longer read by the census: 1 (test-conversation-index line 10).
+  - Self-check failures: 0. The second run plans nothing.
+  - The list goes from 1051 rows / 1121 to 16 / 16.
+- **Not caught (said):** a swap whose name is a VARIABLE (`check(cond, label)` against a name-first helper). The tool wraps `label`, and the leg stays as vacuous as it was before.
+- **test-guard-inline-helpers (fast):** fixtures of each shape (an arrow block; a name-first function called above its hoisted definition; two expression arrows; a shadowing parameter and an inner block; plants in a string, a template, a line comment and a block comment; two helpers, one inside the other's condition; a helper that hands its condition back; a clock bound in an && chain) and each call kind. Every guarantee has an ANCHORED mutant of the tool as its RED:
+  - the edit applied;
+  - no line moves;
+  - a name argument is byte-identical;
+  - a whole string is never wrapped;
+  - plants are told apart, and the self-check refuses an edit inside a string or inside a name;
+  - run twice = run once, a later tip guards only what is new, and the guarded set is fed back into the body rules;
+  - every fixture's tally is the same before and after, and a swapped call now throws;
+  - the wall-clock census reads the bound the same;
+  - every left-by-rule case, including the value-use and hands-back rules;
+  - scope by scope.
+
+  Plus a scratch repo's dry run / apply / second run («NOTHING TO DO»), with the list lowered, and the CLI's refusal.
 
 ### scripts/lib/oat-fixture.mjs (B-5e52, lane bl-tests-e — a new CLI build is one row)
 - **Why:** each new Claude Code build's record in scripts/fixtures/oat-in-file.json edited about nine lines in four suites (test-cli-caps, test-oat-materialize, test-account-pool, test-account-verdicts): every red control that replays «the fixture before build v» spelled each LATER build by hand in a destructuring, and the version lists were literals. One missed line kept a newer record in a fixture named for an older one (test-account-verdicts' «fx-to-2.1.308» still held 2.1.321); 2.1.308 and 2.1.321 had no sha pin.

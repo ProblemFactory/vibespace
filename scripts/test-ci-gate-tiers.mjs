@@ -337,7 +337,11 @@ console.log('\n§7b a leg never passes by its name: no swapped call anywhere, on
   // a first reading of helpers the tree already held, none new). ONE-WAY (主开发 2026-11-17, the batch-36 readers): a file that ADDS one is red by name — a new suite takes
   // `import { checker } from './lib/check.mjs'` — and the red prints the row that admits it on purpose; a file whose helper is
   // gone or guarded is NEVER red (forty-six lanes merge suites into one train), its stale row is only said.
-  const LISTED = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'unguarded-helpers.json'), 'utf-8')).files || {};
+  // B-1747 part 2 (lane bl-scratch, 2026-11-21): scripts/guard-inline-helpers.mjs, applied by the integrator, guards ~1100 of them
+  // and LOWERS this list to the few it leaves by rule (plants, helpers handed on, exported…) — so the leg asks that the list was
+  // READ (its «files» map), never that it is long.
+  const LIST_JSON = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'unguarded-helpers.json'), 'utf-8'));
+  const LIST_READ = !!LIST_JSON && typeof LIST_JSON.files === 'object' && LIST_JSON.files !== null && !Array.isArray(LIST_JSON.files), LISTED = LIST_READ ? LIST_JSON.files : {};
   const self = path.basename(fileURLToPath(import.meta.url));
   const dir = path.join(REPO, 'scripts');
   const files = [...fs.readdirSync(dir).filter((f) => f.endsWith('.mjs') && f !== self), ...fs.readdirSync(path.join(dir, 'lib')).filter((f) => f.endsWith('.mjs')).map((f) => 'lib/' + f)];
@@ -351,7 +355,7 @@ console.log('\n§7b a leg never passes by its name: no swapped call anywhere, on
   ok(files.length > 1000 && defs > 900, `${files.length} scripts read, ${defs} inline ${C.HELPER_NAMES.join(' / ')} helpers found (non-vacuous; this file exempts itself)`);
   ok(swapped.length === 0, `no call hands its own helper a string where the condition goes${swapped.length ? ' — ' + swapped.slice(0, 12).join(' · ') : ''}`);
   const added = Object.entries(perFile).filter(([f, ls]) => ls.length > (LISTED[f] || 0)), fell = Object.keys(LISTED).filter((f) => (perFile[f] || []).length < LISTED[f]);
-  ok(Object.keys(LISTED).length > 900 && added.length === 0, `the inline helpers without the swap guard only fall (${unguarded.length} in ${Object.keys(perFile).length} files, the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)})${added.length ? ' — ADDED by ' + added.map(([f, ls]) => `${f}:${ls.join(',')} (import { checker } from './lib/check.mjs', or give the helper a guard line — if (typeof c !== 'boolean') throw new TypeError(…); on purpose: "${f}": ${ls.length} in scripts/fixtures/unguarded-helpers.json)`).join(' · ') : ''}`);
+  ok(LIST_READ && added.length === 0, `the inline helpers without the swap guard only fall (${unguarded.length} in ${Object.keys(perFile).length} files, the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)})${added.length ? ' — ADDED by ' + added.map(([f, ls]) => `${f}:${ls.join(',')} (import { checker } from './lib/check.mjs', or give the helper a guard line — if (typeof c !== 'boolean') throw new TypeError(…); on purpose: "${f}": ${ls.length} in scripts/fixtures/unguarded-helpers.json)`).join(' · ') : ''}`);
   if (fell.length) console.log(`    (${fell.length} listed file(s) no longer carry an unguarded helper — not red; drop their rows when convenient: ${fell.slice(0, 8).join(', ')}${fell.length > 8 ? ', …' : ''})`);
   // the one-way rule over plants: an added helper is red by name, a removed one is not
   const judge = (per, listed) => ({ added: Object.entries(per).filter(([f, ls]) => ls.length > (listed[f] || 0)).map(([f]) => f), fell: Object.keys(listed).filter((f) => (per[f] || []).length < listed[f]) });
