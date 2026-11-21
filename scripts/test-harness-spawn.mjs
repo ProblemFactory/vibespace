@@ -803,6 +803,96 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   try { fs.rmSync(DATA, { recursive: true, force: true }); } catch { }
 }
 
+// ── B-d578 P1-a (the coordinator's ruling r1126): OPENCODE'S ROAD — only what OpenCode's PUBLISHED pages carry (the one file's
+// documented fields, the key's NAME never its value, the model per conversation), against a STAND-IN program that records
+// what it was given; the road stays NOT OFFERED (no picker row) until the probe — one switch, the probe fixture's alone ──
+console.log('P1-a OpenCode: the one file from the published pages, the key\'s name only, the road not offered (one switch: the probe\'s fixture)');
+{
+  const OC = require(path.join(REPO, 'src/opencode-provider-config.js'));
+  const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
+  const PS = require(path.join(REPO, 'src/server/provider-store.js'));
+  const PSP = require(path.join(REPO, 'src/server/provider-spawn.js'));
+  const MP = require(path.join(REPO, 'src/model-providers.js'));
+  const crypto = require('node:crypto');
+  const { spawnSync } = require('node:child_process');
+  const DATA = scratchDir('hspawn-oc');
+  const vault = VE.create({ dataDir: DATA, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {}, error() {} }, idleTimer: false, register: false });
+  await vault.setup('correct horse battery staple', {});
+  const store = PS.create({ dataDir: DATA, vault: () => vault, log: () => {} });
+  const KEY = ['sk-', 'open', 'code-', 'probe-', '7c2e91'].join('');   // built at runtime (never a token-shaped literal)
+  const lab = (await store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', model: 'qwen3-coder', label: 'Lab', wire: 'openai-chat' })).provider;
+  const ant = (await store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/anthropic', model: 'glm-4.6', label: 'Anth', wire: 'anthropic-messages' })).provider;
+  const resp = (await store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', model: 'm1', label: 'Resp', wire: 'openai-responses' })).provider;
+  // THE FILE — every key a documented one (the pages quoted in src/opencode-provider-config.js)
+  const DOC_FIELDS = { top: ['$schema', 'providers', 'model'], provider: ['name', 'env', 'package', 'settings', 'models'], settings: ['baseURL'], model: ['name', 'limit'], limit: ['context', 'output'] };
+  const c = OC.configOf(lab), e = c.ok ? c.doc.providers[lab.id] : null;
+  const undocumented = [];
+  if (c.ok) {
+    for (const k of Object.keys(c.doc)) if (!DOC_FIELDS.top.includes(k)) undocumented.push(k);
+    for (const k of Object.keys(e)) if (!DOC_FIELDS.provider.includes(k)) undocumented.push('providers.*.' + k);
+    for (const k of Object.keys(e.settings)) if (!DOC_FIELDS.settings.includes(k)) undocumented.push('settings.' + k);
+    for (const m of Object.values(e.models)) { for (const k of Object.keys(m)) if (!DOC_FIELDS.model.includes(k)) undocumented.push('models.*.' + k); for (const k of Object.keys(m.limit || {})) if (!DOC_FIELDS.limit.includes(k)) undocumented.push('limit.' + k); }
+  }
+  console.log('    judged file: ' + JSON.stringify(c.doc));
+  ok(c.ok && c.doc.$schema === 'https://opencode.ai/config.json' && c.doc.model === `${lab.id}/qwen3-coder` && e.package === '@opencode/ai/providers/openai-compatible' && e.settings.baseURL === 'http://127.0.0.1:9/v1' && JSON.stringify(e.env) === '["VIBESPACE_PROVIDER_KEY"]' && e.models['qwen3-coder'] && !undocumented.length,
+    'the one file (providers page + config page): providers.<pv id> {name, env: [the key\'s VARIABLE], package openai-compatible, settings.baseURL, models} and model «<pv id>/<model>» — every key a documented one', undocumented);
+  const ca = OC.configOf(ant), cr = OC.configOf(resp);
+  ok(ca.ok && ca.doc.providers[ant.id].package === '@opencode/ai/providers/anthropic-compatible' && !cr.ok && cr.code === 'wire-undocumented' && /published pages name a runtime for Anthropic-compatible and OpenAI-compatible/.test(cr.message),
+    '…an Anthropic-compatible record takes the anthropic-compatible runtime; a Responses-API record is REFUSED by name (no runtime for it on the pages)', cr);
+  // THE ROAD IS NOT OFFERED — no picker row: fitsHarness says no (code «later»), the product's spawn road refuses it
+  const fit = MP.fits(lab).opencode;
+  const plain = PSP.create({ providers: store, dataDir: DATA });
+  let refused = null; try { plain(lab.id, 'opencode'); } catch (x) { refused = x.code; }
+  const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), wiring = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
+  const createCalls = wiring.split('\n').filter((l) => l.includes("require('./provider-spawn.js').create("));
+  ok(fit && fit.code === 'later' && !MP.fitsHarness(lab, 'opencode') && !MP.SPAWN_HARNESSES.includes('opencode') && refused === 'provider-unfit' && createCalls.length === 1 && createCalls.every((l) => !l.includes('probeRoads')),
+    'NOT OFFERED: opencode is no spawn harness (fits «later» — no picker row), the product\'s road refuses it (provider-unfit), and the product\'s ONE create (src/server/account-usage-routes.js) hands no probeRoads', { fit, refused, createCalls: createCalls.length });
+  const PSRC = fs.readFileSync(path.join(REPO, 'src/server/provider-spawn.js'), 'utf8');
+  // every file that builds or hands the spawn road (the server tree, the account manager, the create) — read, not walked
+  const roadFiles = [...fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => /\.js$/.test(f)).map((f) => 'server/' + f), 'accounts.js', 'ws-create.js'];
+  const switchUsers = roadFiles.filter((f) => fs.readFileSync(path.join(REPO, 'src', f), 'utf8').includes('probeRoads'));
+  ok(JSON.stringify(switchUsers) === JSON.stringify(['server/provider-spawn.js']) && !srv.includes('probeRoads') && PSRC.includes("const probe = probeRoads && typeof probeRoads[backend] === 'function' && (MP.fits(p)[backend] || {}).code === 'later' ? probeRoads[backend] : null;"),
+    'ONE switch: `probeRoads` is read in src/server/provider-spawn.js only (src/server, accounts.js, ws-create.js and server.js read), opens only a road model-providers marks «later», and no product file hands it', switchUsers);
+  // THE SWITCH TURNED (the probe's fixture): the plan runs, the file is written under the provider's own home, 0600, no value in it
+  const probe = PSP.create({ providers: store, dataDir: DATA, probeRoads: { opencode: OC.opencodeProviderSpawn } });
+  const sp = probe(lab.id, 'opencode');
+  const home = path.join(DATA, 'provider-homes', lab.id, 'opencode'), file = path.join(home, OC.CONFIG_REL);
+  const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const mode = fs.existsSync(file) ? (fs.statSync(file).mode & 0o777) : null;
+  ok(text && JSON.parse(text).model === `${lab.id}/qwen3-coder` && mode === 0o600 && !text.includes(KEY) && text.includes('VIBESPACE_PROVIDER_KEY') && sp.argv.length === 0 && !JSON.stringify(sp.argv).includes(KEY) && sp.localEnv.VIBESPACE_PROVIDER_KEY === KEY && sp.localEnv.HOME === home && sp.secret.var === 'VIBESPACE_PROVIDER_KEY',
+    'the switch turned: the file lands under the provider\'s own home (0600) naming the key\'s VARIABLE only; the value rides the env (the secret channel), no argv; HOME = that home', { mode: mode && mode.toString(8), argv: sp.argv });
+  let outside = null; const bad = PSP.create({ providers: store, dataDir: DATA, probeRoads: { opencode: () => ({ localEnv: {}, argv: [], secret: null, plainEnv: {}, files: [{ rel: '../../escape.json', text: '{}' }] }) } });
+  try { bad(lab.id, 'opencode'); } catch (x) { outside = x.code; }
+  const codexOpen = PSP.create({ providers: store, dataDir: DATA, probeRoads: { codex: OC.opencodeProviderSpawn } });
+  let codexRef = null; try { codexOpen(lab.id, 'codex'); } catch (x) { codexRef = x.code; }
+  ok(outside === 'plan-file-outside' && !fs.existsSync(path.join(DATA, 'provider-homes', lab.id, 'escape.json')) && codexRef === 'provider-unfit',
+    'CONTROLS: a plan naming a file outside its home is refused by name (nothing written there); the switch opens no road that is not «later» (codex on a Chat Completions record stays unfit)', { outside, codexRef });
+  // THE STAND-IN PROGRAM — records what it was given (argv, cwd, HOME, the file it finds at ~/.config/opencode, the env value its
+  // `env` names resolve to — as a digest, never the value). It is NOT OpenCode: what the real program does is UNPROVEN (below).
+  const BIN = scratchDir('hspawn-oc-bin'), REC = path.join(BIN, 'record.json'), STAND = path.join(BIN, 'opencode-standin.cjs'), CWDO = scratchDir('hspawn-oc-cwd');
+  fs.writeFileSync(STAND, [
+    "const fs = require('fs'), path = require('path'), crypto = require('crypto');",
+    "const f = path.join(process.env.HOME || '/nonexistent', '.config', 'opencode', 'opencode.json');",
+    "let doc = null; try { doc = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { }",
+    "const pid = doc && doc.model ? String(doc.model).split('/')[0] : null, ent = doc && doc.providers ? doc.providers[pid] : null;",
+    "const name = ent && Array.isArray(ent.env) ? ent.env.find((n) => process.env[n]) : null;",
+    "fs.writeFileSync(process.env.STANDIN_RECORD, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), home: process.env.HOME, found: !!doc, model: doc && doc.model, baseURL: ent && ent.settings && ent.settings.baseURL, keyVar: name, keyDigest: name ? crypto.createHash('sha256').update(process.env[name]).digest('hex') : null }));",
+  ].join('\n'));
+  const run = spawnSync(process.execPath, [STAND, 'acp'], { cwd: CWDO, env: { PATH: process.env.PATH, ...sp.localEnv, STANDIN_RECORD: REC }, timeout: 15000 });
+  const rec = fs.existsSync(REC) ? JSON.parse(fs.readFileSync(REC, 'utf8')) : null;
+  console.log('    judged stand-in record: ' + JSON.stringify(rec));
+  ok(run.status === 0 && rec && rec.found && rec.home === home && JSON.stringify(rec.argv) === '["acp"]' && rec.cwd === CWDO && rec.model === `${lab.id}/qwen3-coder` && rec.baseURL === 'http://127.0.0.1:9/v1' && rec.keyVar === 'VIBESPACE_PROVIDER_KEY' && rec.keyDigest === crypto.createHash('sha256').update(KEY).digest('hex'),
+    'the stand-in, run as the spawn gives it (argv «acp», the conversation\'s cwd, the plan\'s env): it finds the one file at ~/.config/opencode under the provider\'s HOME, its provider at the loopback address, the key through the named variable', rec);
+  // THE MODEL PER CONVERSATION — ACP's documented option (configId «model», «provider/model»): the wrapper's own initial-model road
+  const ACPW = fs.readFileSync(path.join(REPO, 'data/bin/acp-wrapper.js'), 'utf8');
+  const planOf = OC.opencodeProviderSpawn({ provider: lab, key: KEY, home });   // the plan itself (the spawn account carries no function)
+  ok(planOf.modelRef() === `${lab.id}/qwen3-coder` && planOf.modelRef('qwen3-coder-plus') === `${lab.id}/qwen3-coder-plus` && OC.modelRefOf(ant, 'glm-4.6') === `${ant.id}/glm-4.6` && ACPW.includes("request('session/set_config_option', { sessionId: meta.sessionId, configId, value }"),
+    'the model per conversation is «<pv id>/<model>» — what ACP\'s session/set_config_option `model` takes (acp page) and the ACP wrapper already sends for ACP_WEBUI_MODEL');
+  console.log('    UNPROVEN until the probe (the owner\'s word — no OpenCode on this box): ' + OC.UNPROVEN.map((u, i) => `(${i + 1}) ${u}`).join(' · '));
+  ok(OC.UNPROVEN.length === 5 && Object.values(OC.PAGES).every((u) => /^https:\/\/opencode\.ai\/docs\//.test(u)), 'what the real program does is SAID UNPROVEN by name (5 facts), and every page the file is built from is named');
+  try { fs.rmSync(DATA, { recursive: true, force: true }); fs.rmSync(BIN, { recursive: true, force: true }); fs.rmSync(CWDO, { recursive: true, force: true }); } catch { }
+}
+
 H.unregister('acme'); H.unregister('acme-nopool'); H.unregister('acme-perseat');
 for (const d of [SOCK, BUF, CWD]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 ok(capsOf('acme').pool === false && !H.has('acme'), 'unregister() takes the contributed caps row with it');
