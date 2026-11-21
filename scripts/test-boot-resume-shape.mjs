@@ -340,7 +340,7 @@ const PLANTS = {
 // 'restore' turn since the round's follow; the attaches' localAttach); the forking backfill's callback is the planted code in
 // the restore file
 const PLANT_NAMES = {
-  'one-pass-attach': { re: /^restore\b|session-stdout\.js/, what: 'the restore\'s turn of the listen step (the attaches\' localAttach)' },
+  'one-pass-attach': { re: /^restore(?: · |$)|session-stdout\.js/, what: 'the restore\'s turn of the listen step (the attaches\' localAttach)' },
   'forking-backfill': { re: null, what: 'the planted backfill\'s own lines in the restore file' },   // its line range is set at the plant (below)
 };
 const plant = (name) => {

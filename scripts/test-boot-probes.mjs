@@ -396,6 +396,24 @@ try {
       && /return s && \(s\.pty !== null \|\| typeof s\._attachPending === 'function'\) \? null : \{ cause: 'not-running'/.test(fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8')),
       'a survivor whose attach spent its retries: ONE card at the conversation, and a send answers «could not be reconnected after the restart (its words)»; the permission answer asks the attach first; the deliverer\'s wake gate counts a waiting survivor as running (r587) — pinned by text');
   }
+  console.log('⑥b B-cd4b (the round\'s follow): the catch-up\'s close is said when it fails, never swallowed (test-fd-close-census\'s law)');
+  {
+    // the descriptor's close answers EBADF once (the real close done first: nothing leaks) — the catch-up still returns what it read,
+    // and SAYS the close's errno and the file. RED: the empty catch put back ⇒ the same return, nothing said
+    const fc = path.join(dataDir('close'), 'buffers', 'fc.buf');
+    fs.writeFileSync(fc, '{"type":"a"}\n{"ty'); const rbc = BR.restoreBufOf(fc, fs.readFileSync(fc)); fs.appendFileSync(fc, 'pe":"b"}\n');
+    const failClose = async (Mod) => {
+      const c0 = fs.closeSync; let n = 0;
+      fs.closeSync = (fd) => { c0(fd); if (!n++) { const e = new Error('EBADF: bad file descriptor, close'); e.code = 'EBADF'; throw e; } };
+      try { return await logged(async () => Mod.restoreCatchUp(rbc)); } finally { fs.closeSync = c0; }
+    };
+    const SAID = "catch (e) { console.warn(`[boot-restore] the catch-up could not close its descriptor of ${rb.file} (${(e && e.code) || (e && e.message) || e})`); }";
+    const cg6 = await failClose(BR), cr6 = await failClose(require(M.write('src/server/boot-restore.js', anchored(brSrc, SAID, 'catch { }', 'b-cd4b-close-swallowed'), 'cd4b-close-swallowed')));
+    const saidRe = /^\[boot-restore\] the catch-up could not close its descriptor of \S*fc\.buf \(EBADF\)$/;
+    const read6 = (x) => !!x.r && x.r.text === '{"type":"b"}\n' && x.r.drop === '{"ty';
+    ok(read6(cg6) && cg6.lines.filter((l) => saidRe.test(l)).length === 1, `a failed close is said once (${JSON.stringify(cg6.lines)}) and the catch-up still returns what it read (${JSON.stringify(cg6.r)})`, cg6);
+    ok(read6(cr6) && !cr6.lines.some((l) => /could not close/.test(l)), 'RED: the empty catch put back ⇒ the same return, the failed close unheard', cr6);
+  }
   console.log('⑦ B-cd4b (the round\'s follow): one job a loop turn — the listen step in turns of its own, the restore\'s batches in the same queue');
   {
     // src/server/loop-turns.js — asked from a TIMERS callback (the listen callback ran in one: the restore's probes ended on their
@@ -415,6 +433,22 @@ try {
     const lr2 = await seq(require(M.write('src/server/loop-turns.js', anchored(ltSrc, '  const fn = queue.shift();\n  try { if (fn) fn(); }', '  const fn = () => { while (queue.length) queue.shift()(); };\n  try { if (fn) fn(); }', 'b-cd4b-turn-all'), 'cd4b-turn-all')));
     ok(lg.join() === 'timer,job1,imm1,job2', `one job a loop turn: asked from a timers callback, the first job runs after the next timers phase (${lg.join(' → ')}), the second a turn after the first`, lg);
     ok(lr1.indexOf('job1') < lr1.indexOf('timer') && lr2.indexOf('job2') < lr2.indexOf('imm1'), `RED: a hop by setImmediate alone ⇒ the job before the timer (${lr1.join(' → ')}); every job in one hop ⇒ the second before the first's immediate (${lr2.join(' → ')})`, { lr1, lr2 });
+    // a job that THROWS (planted; the process's uncaught handler hears it, as the hub's own does): the job asked after it still runs.
+    // RED: the re-arm taken out of the finally ⇒ the queue stops at the throw (the next job never runs)
+    const thrownSeq = async (T) => {
+      const heard = [], ran = [];
+      const onU = (e) => { if (e && e.message === 'planted: a job that throws') heard.push(1); else throw e; };
+      process.on('uncaughtException', onU);
+      try {
+        T.turn(() => { throw new Error('planted: a job that throws'); }); T.turn(() => ran.push('after'));
+        const tEnd = Date.now() + 300; while (!ran.length && Date.now() < tEnd) await new Promise((r) => setTimeout(r, 5));
+        return { heard: heard.length, ran: ran.length };
+      } finally { process.removeListener('uncaughtException', onU); }
+    };
+    const tg7 = await thrownSeq(require(path.join(REPO, 'src/server/loop-turns.js')));
+    const tr7 = await thrownSeq(require(M.write('src/server/loop-turns.js', anchored(ltSrc, '  try { if (fn) fn(); } finally { if (queue.length) hop(); else armed = false; }', '  if (fn) fn();\n  if (queue.length) hop(); else armed = false;', 'b-cd4b-turn-no-rearm'), 'cd4b-turn-no-rearm')));
+    ok(tg7.heard === 1 && tg7.ran === 1, `a job that throws: the throw reaches the process and the job after it still runs (${tg7.ran} ran)`, tg7);
+    ok(tr7.heard === 1 && tr7.ran === 0, `RED: the re-arm out of the finally ⇒ the queue stops at the throw (${tr7.ran} ran after it)`, tr7);
     // server.js (pinned by text: it is not loaded here): the listen callback's restore in a turn of its own ('restore'), the rest of
     // the step in the turn after it ('listen'); the person's CLI index configured in that last turn (its boot write lists the
     // survivors); the hub's turns named through the boot trace; the front holds new connections until the last turn (test-tls-demux §6)

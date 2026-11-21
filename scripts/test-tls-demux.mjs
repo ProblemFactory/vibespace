@@ -271,6 +271,53 @@ try {
     ok(b6.ok && b6.answered >= 110 && b6.answered < b6.ended && b6.warns.some((l) => /the boot's listen step held new connections 120 ms — handed over now/.test(l)),
       `THE BOUND: a step that does not end lets go at 120 ms, said (answered at ${b6.answered} ms, the step ended at ${b6.ended} ms: «${b6.warns[0] || 'nothing said'}»)`, b6);
     ok(c6.ok && c6.answered >= c6.ended, `its control: a bound past the step ⇒ answered only once the step ended (answered at ${c6.answered} ms, the step at ${c6.ended} ms)`, c6);
+    // a THROW inside a step turn (planted; the process's uncaught handler hears it — the hub's ends the hub): the hold is lifted at once,
+    // in the turn's finally. RED: the count moved out of the finally ⇒ the port stays held after the throw
+    const withCopy = (text, tag) => { const f = path.join(DIR, `tls-control-${tag}.js`); fs.writeFileSync(f, anchored(anchored(text, "require('../tls-plan.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/tls-plan.js')) + ')', `${tag}-plan`), "require('./loop-turns.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/server/loop-turns.js')) + ')', `${tag}-turns`)); return require(f); };
+    const throwScene = async (Mod, tag) => {
+      const heard = [];
+      const onU = (e) => { if (e && e.message === 'planted: a throw in a step turn') heard.push(1); else throw e; };
+      process.on('uncaughtException', onU);
+      try {
+        const r = rig(Mod, { env: {}, dataDir: path.join(DIR, 'd9' + tag), tailscaleBin: null, holdMaxMs: 60000 });
+        await listen(r.hub); closers.push(r.hub.front);
+        r.hub.turn(() => { throw new Error('planted: a throw in a step turn'); }, 'restore');
+        const before = r.hub.holding(), tEnd = Date.now() + 2000;
+        while (!heard.length && Date.now() < tEnd) await sleep(5);
+        return { before, heard: heard.length, after: r.hub.holding() };
+      } finally { process.removeListener('uncaughtException', onU); }
+    };
+    const t8 = await throwScene(TLS, 'g');
+    const t8r = await throwScene(withCopy(anchored(src, "    require('./loop-turns.js').turn(() => { try { step(name, fn); } finally { if (!--stepTurns) letGo(); } });", "    require('./loop-turns.js').turn(() => { step(name, fn); if (!--stepTurns) letGo(); });", 'b-cd4b-tls-count-out'), 'b-cd4b-tls-count-out'), 'r');
+    ok(t8.before && t8.heard === 1 && !t8.after, `a throw inside a step turn: it reaches the process and the hold is lifted at once (held before ${t8.before}, after ${t8.after})`, t8);
+    ok(t8r.heard === 1 && t8r.after === true, 'RED: the count moved out of the finally ⇒ the port stays held after the throw', t8r);
+    // a socket that ERRORS while held (the client resets after its first byte): dropped as before the first byte, no unhandled error.
+    // RED: the drop listener removed at the first byte (as at the base) ⇒ the reset is an unhandled error
+    const resetScene = async (Mod, tag) => {
+      const unheard = [];
+      const onU = (e) => { unheard.push(String((e && e.code) || (e && e.message) || e)); };
+      process.on('uncaughtException', onU);
+      let open = true;
+      try {
+        const r = rig(Mod, { env: {}, dataDir: path.join(DIR, 'd10' + tag), tailscaleBin: null, holdMaxMs: 60000 });
+        const port = await listen(r.hub); closers.push(r.hub.front);
+        let srv = null; r.hub.front.on('connection', (s) => { srv = s; });
+        const keep = () => { if (open) r.hub.turn(keep, 'listen'); }; r.hub.turn(keep, 'restore');
+        const c = net.connect(port, '127.0.0.1'); c.on('error', () => { });
+        await new Promise((res) => c.on('connect', res));
+        c.write('G');
+        const t1 = Date.now() + 2000; while (!(srv && srv.bytesRead > 0) && Date.now() < t1) await sleep(5);   // the front has its first byte: held
+        const heldThen = r.hub.holding();
+        c.resetAndDestroy();
+        let closed = false; if (srv) srv.once('close', () => { closed = true; });
+        const t2 = Date.now() + 2000; while (!closed && !unheard.length && Date.now() < t2) await sleep(5);
+        return { heldThen, read: !!srv && srv.bytesRead > 0, closed, unheard };
+      } finally { open = false; process.removeListener('uncaughtException', onU); }
+    };
+    const e9 = await resetScene(TLS, 'g');
+    const e9r = await resetScene(withCopy(anchored(src, "      socket.removeListener('timeout', drop); socket.setTimeout(0);\n", "      socket.removeListener('error', drop); socket.removeListener('timeout', drop); socket.setTimeout(0);\n", 'b-cd4b-tls-drop-gone'), 'b-cd4b-tls-drop-gone'), 'r');   // stale-pins: kept (the red plants the base's first-byte handler)
+    ok(e9.heldThen && e9.read && e9.closed && e9.unheard.length === 0, `a held socket reset by its client: dropped (closed ${e9.closed}), no unhandled error (${JSON.stringify(e9.unheard)})`, e9);
+    ok(e9r.read && e9r.unheard.some((x) => /ECONNRESET/.test(x)), `RED: the drop listener removed at the first byte ⇒ the reset is an unhandled error (${JSON.stringify(e9r.unheard)})`, e9r);
   }
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e && e.stack)); }
 finally {

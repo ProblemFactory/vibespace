@@ -8,6 +8,7 @@
 // boot's listen step (src/server/tls.js `turn`, from server.js's listen callback) and the restore's attach batches
 // (src/server/boot-restore.js drainSurvivorAttaches) — ONE queue, so a batch and a step of the listen never share a turn.
 // A job that throws: the jobs after it still run (their turn is armed first); the throw goes on to the process as it did.
+// The hub's `turn` (tls.js) is the BOOT's alone: a later caller would hold the port again; any other job asks this queue directly.
 const queue = [];
 let armed = false;
 
@@ -24,4 +25,4 @@ function turn(fn) {
   if (!armed) hop();
 }
 
-module.exports = { turn, pending: () => queue.length };
+module.exports = { turn };
