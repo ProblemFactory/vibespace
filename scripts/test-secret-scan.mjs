@@ -153,7 +153,7 @@ const B = commit(repo, { [REL]: `// the rel263 shape: the PEM header shares the 
 const calls = () => { try { return fs.readFileSync(CALLS, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l).mode); } catch { return []; } };
 const runHook = (stdin, env = {}, hook = path.join(repo, 'pre-push')) => {
   try { fs.unlinkSync(CALLS); } catch { }
-  const r = spawnSync('bash', [hook, 'origin', 'git@example.invalid:x/y.git'], { cwd: repo, input: stdin, encoding: 'utf-8', env: { ...GIT_ENV, ...env } });
+  const r = spawnSync('bash', [hook, 'origin', 'git@example.invalid:x/y.git'], { cwd: repo, input: stdin, encoding: 'utf-8', env: { ...GIT_ENV, VIBESPACE_HOOK_NODE_DIR: path.join(ROOT, 'hook-node'), ...env } });   // B-e381: the tiers' node folder in this run's scratch
   return { status: r.status, out: (r.stdout || '') + (r.stderr || ''), calls: calls() };
 };
 const push = (local, remote = ZERO, branch = 'main') => `refs/heads/${branch} ${local} refs/heads/${branch} ${remote}\n`;

@@ -102,10 +102,11 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
   // `hook` is a parameter so a PRE-FIX COPY of the real hook can be driven
   // through the exact same fixture: every round-4 leg below states the answer
   // the shipped hook gives AND the answer the defect gave, or it proves nothing.
+  const hookNodeDir = path.join(mktmp('e381-hook-node'), 'root');
   const runHookRefs = (stdin, env = {}, hook = path.join(repo, 'pre-push')) => {
     try { fs.unlinkSync(path.join(repo, 'calls.ndjson')); } catch {}
     const r = spawnSync('bash', [hook, 'origin', 'git@example.invalid:x/y.git'], {
-      cwd: repo, input: stdin, encoding: 'utf-8', env: { ...GIT_ENV, ...env },
+      cwd: repo, input: stdin, encoding: 'utf-8', env: { ...GIT_ENV, VIBESPACE_HOOK_NODE_DIR: hookNodeDir, ...env },   // B-e381: the tiers' node folder in this run's scratch, never the machine's
     });
     return { status: r.status, out: (r.stdout || '') + (r.stderr || ''), calls: calls() };
   };
@@ -182,20 +183,28 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
     const realNode = fs.realpathSync(process.execPath), nodeDir = path.dirname(process.execPath);
     const shellBin = mktmp('e381-shell-bin'), agentBin = mktmp('e381-agent-bin');   // real dirs, no node in them
     const PLANT = { PATH: `${shellBin}:${agentBin}:${nodeDir}:/usr/bin:/bin`, NODE_OPTIONS: '--max-old-space-size=64', VIBESPACE_SESSION_TOKEN: 'vsst_' + 'planted', VIBESPACE_CI_OAT: 'oat-' + 'planted', E381_SHELL_ADDITION: '1', VIBESPACE_CI_FAST_LANES: '2', LC_TIME: 'C.UTF-8' };
-    const privateBin = path.join(fs.realpathSync(path.join(repo, '.git')), 'vs-tier-node');
-    const tierPath = `${privateBin}:/usr/local/bin:/usr/bin:/bin`, hookTZ = ({ ...GIT_ENV, ...PLANT }).TZ;
-    const clean = (c) => !!c && c.path === tierPath && !c.keys.includes('NODE_OPTIONS') && !c.keys.includes('VIBESPACE_SESSION_TOKEN') && !c.keys.includes('VIBESPACE_CI_OAT') && !c.keys.includes('E381_SHELL_ADDITION')
+    const keyed = new RegExp(`^${hookNodeDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\d+$`), hookTZ = ({ ...GIT_ENV, ...PLANT }).TZ;   // ONE folder per node, in this run's scratch
+    const tierPathOf = (c) => (c && c.path ? c.path.split(':') : []);
+    const clean = (c) => !!c && keyed.test(tierPathOf(c)[0]) && tierPathOf(c).slice(1).join(':') === '/usr/local/bin:/usr/bin:/bin' && !c.keys.includes('NODE_OPTIONS') && !c.keys.includes('VIBESPACE_SESSION_TOKEN') && !c.keys.includes('VIBESPACE_CI_OAT') && !c.keys.includes('E381_SHELL_ADDITION')
       && !c.keys.some((k) => /^GIT_/.test(k)) && c.keys.includes('VS_NO_REAL_CLI') && c.keys.includes('VIBESPACE_SKIP_AGENT_HOOKS') && c.keys.includes('VIBESPACE_CI_FAST_LANES') && c.keys.includes('LC_TIME') && (!hookTZ || c.keys.includes('TZ'));
     const B = commit(repo, 'src/e381.js', '//e381\n', 'E381 — a push from an interactive-looking shell');
     const rEnv = runHook(B, ZERO, PLANT);
     const fe = fastOf(rEnv)[0], he = rEnv.calls.find((c) => c.mode === 'heavy-launch');
     const said = (rEnv.out.split('\n').find((l) => l.startsWith("[ci] the tiers run in the hook's own env:")) || '');
+    const privateBin = tierPathOf(fe)[0] || '', tierPath = fe ? fe.path : '';
     const linked = (() => { try { return fs.readlinkSync(path.join(privateBin, 'node')); } catch { return null; } })();
+    const holds = (() => { try { return fs.readdirSync(privateBin).sort(); } catch { return []; } })();
     console.log(`    judged (the tier env): ${said} · fast PATH ${fe && fe.path} · heavy-launch PATH ${he && he.path} · fast keys ${fe ? fe.keys.join(',') : '(none)'} · ${privateBin}/node → ${linked}`);
-    ok(rEnv.status === 0 && clean(fe) && clean(he) && linked === realNode,
+    ok(rEnv.status === 0 && clean(fe) && clean(he) && he.path === fe.path && linked === realNode && holds.includes('node') && holds.every((n) => ['node', 'npm', 'npx'].includes(n)),
       'B-e381: a push from an interactive-looking shell — its data/bin and agent-programs dirs, NODE_OPTIONS, a session token, the real turn\'s token, a shell variable — reaches neither the fast tier nor the full launcher: both are born with a private folder holding only node (its real file) + the system folders, the service env\'s names + TZ, the tier\'s knob by name and the cut scripts\' two switches', { status: rEnv.status, fast: fe, heavy: he, linked });
     ok(said === `[ci] the tiers run in the hook's own env: node ${realNode} (${process.version}) · PATH ${tierPath}${hookTZ ? ` · TZ=${hookTZ}` : ''} (B-e381: no shell additions)`,
       'B-e381: the hook says in ONE line which node (its version) and which search path its tiers run under', said);
+    const altDir = mktmp('e381-other-node'), alt = path.join(altDir, 'node');
+    fs.writeFileSync(alt, `#!/bin/sh\nexec ${JSON.stringify(realNode)} "$@"\n`); fs.chmodSync(alt, 0o755);
+    const rAlt = runHook(B, ZERO, { ...PLANT, PATH: `${altDir}:${PLANT.PATH}` });
+    const fa = fastOf(rAlt)[0], altBin = tierPathOf(fa)[0] || '';
+    ok(rAlt.status === 0 && keyed.test(altBin) && altBin !== privateBin && fs.readlinkSync(path.join(altBin, 'node')) === alt && fs.readlinkSync(path.join(privateBin, 'node')) === realNode,
+      'B-e381: a push with ANOTHER node gets its own folder — the first one\'s link (a full tier may still run on it) is never swapped', { altBin, privateBin });
     const passThrough = preFixHook('e381-pass-through',
       ['      "${tier_env[@]}" node scripts/ci.mjs $kg || {', '      node scripts/ci.mjs $kg || {'],
       ['  "${tier_env[@]}" node scripts/ci.mjs --heavy-launch', '  node scripts/ci.mjs --heavy-launch']);

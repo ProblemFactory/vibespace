@@ -2551,7 +2551,7 @@ export function failLegs(stdout, stderr) {
 // never retried as a flake. envRedOf(stdout, stderr) → { paths, n } | null: the suite printed at least one guard refusal
 // («[mount-guard] fn(path) from site refused», src/server/sync-fs-witness.js) AND every ✗ line of its output carries the guard's
 // own refusal (its code EVSMOUNTSYNC, its words, or the guard's line). A red with no ✗ line (a crash) or with one ✗ line of
-// another kind is the product's; so is a refusal of a path inside the run's own roots (`roots`: the gated tree, /tmp, TMPDIR —
+// another kind is the product's; so is a refusal of a path inside the run's own roots (`roots`: the gated tree, /tmp, /var/tmp, TMPDIR —
 // a suite's fixture mount), a refusal line a ✓ / ✗ label QUOTES (the guard's line counts only at a line's start), and a red that
 // hung, timed out or died of a signal (runSuiteAsync never asks then). The incident's 183 downstream ✗ lines (timeouts, missing
 // elements) stay the product's: the ruling is «ONLY the guard's refusals». PURE.
@@ -2866,7 +2866,7 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       // the suite's OWN watchdog wrote the report before this clock ran (its digest is in the stdout tail): the row names the file
       const own = !asked && hr.armed && (() => { try { return fs.statSync(hr.file).mtimeMs >= t - 1000; } catch { return false; } })() ? hr.file : '';
       // B-9dd0 (r321 should 5): a row that FAILED and opened sockets keeps them in its result — its green retry cannot hide them
-      const er = !signal && !(error && error.code === 'ETIMEDOUT') && !hl && !own ? envRedOf(stdout, stderr, { roots: [root, '/tmp', process.env.TMPDIR] }) : null;   // B-e381: an ENVIRONMENT red (its only failed lines are the mount guard's refusals); a hang / timeout / signal is the product's
+      const er = !signal && !(error && error.code === 'ETIMEDOUT') && !hl && !own ? envRedOf(stdout, stderr, { roots: [root, '/tmp', '/var/tmp', process.env.TMPDIR] }) : null;   // B-e381: an ENVIRONMENT red (its only failed lines are the mount guard's refusals); a hang / timeout / signal is the product's
       resolve({ ok: false, ms, load, ...(er ? { envRed: er } : {}), ...(opened.length || lostN ? { egress: egressRows } : {}), killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
         `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${egressNote}${er ? ` — ENVIRONMENT red: ${envRedWords(er)}` : ''}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
         stdout.split('\n').slice(-40).join('\n'),

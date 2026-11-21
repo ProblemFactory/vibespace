@@ -26,6 +26,9 @@
 #     whatever we skip)
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
+# THE NODE THIS PUSH RUNS (B-e381): every step below — the secret scan, the heavy verdict, the tiers — needs one; none ⇒ refused
+# by name before anything (never a «could not read» or a GATE RED about the tree)
+command -v node >/dev/null 2>&1 || { echo "[ci] REFUSED — no node on this push's PATH: the gate cannot run, nothing was judged" >&2; exit 1; }
 
 # read ref updates (also keeps stdin drained for chained callers)
 mapfile -t REFS || true
@@ -260,27 +263,31 @@ fi
 # long-lived child (src/agent-env.js serviceEnv):
 #  - the search path is a PRIVATE folder holding only the node this push resolves first (its real file) and its npm / npx,
 #    then the system folders — never that node's own folder (an npm -g bin: an agent CLI lives there), never a checkout's
-#    data/bin, never the agent programs' ~/.local/bin. The folder is the repository's own (inside its git dir), so the
-#    detached full tier keeps it after this hook exits. The tree pins no node: this is the pushing shell's, said below.
+#    data/bin, never the agent programs' ~/.local/bin. The folder is on local disk, this user's own (0700), ONE per node
+#    (keyed by its real path), made whole and moved in at once, never relinked — so the detached full tier keeps it after
+#    this hook exits and a second push with another node never swaps it. The tree pins no node: the pushing shell's, said.
 #  - the names kept are the service env's (HOME, LANG, LC_*, TMPDIR, XDG_RUNTIME_DIR, TERM) + USER / LOGNAME + TZ (a push
 #    that mirrors the hosted runner's zone keeps it) + VS_CHROME + the tier's own knobs BY NAME (never a token: the real
-#    turn's VIBESPACE_CI_OAT stays out); the switches are the cut scripts': VS_NO_REAL_CLI=1 (the one real vendor turn is
+#    turn's VIBESPACE_CI_OAT stays out, and VIBESPACE_CI_RUN, ci.mjs's own); the switches are the cut scripts': VS_NO_REAL_CLI=1 (the one real vendor turn is
 #    skipped by name, as at a cut) and VIBESPACE_SKIP_AGENT_HOOKS=1.
-# Nothing here reads or sources a person's shell files. No node on the push's PATH ⇒ refused by name (nothing judged).
+# Nothing here reads or sources a person's shell files. (No node on the push's PATH is refused at the hook's top.)
 tier_node="$(command -v node 2>/dev/null || true)"
-case "$tier_node" in /*) ;; *) echo "[ci] REFUSED — no node on this push's PATH: the tiers cannot run, nothing was judged" >&2; exit 1 ;; esac
 tier_real="$(readlink -f "$tier_node" 2>/dev/null || true)"; [ -n "$tier_real" ] || tier_real="$tier_node"
-tier_git="$(git rev-parse --git-common-dir 2>/dev/null || true)"
-tier_bin="$( (cd "${tier_git:-.git}" 2>/dev/null && pwd -P) || true)/vs-tier-node"
-if ! mkdir -p "$tier_bin" 2>/dev/null || ! ln -sfn "$tier_real" "$tier_bin/node" 2>/dev/null; then
-  echo "[ci] REFUSED — the tiers' private node folder $tier_bin could not be written: nothing was judged" >&2; exit 1
+tier_root="${VIBESPACE_HOOK_NODE_DIR:-/var/tmp/vs-tier-node-$(id -u)}"   # local disk (never a checkout's git dir: it may sit on a guarded mount), this user's own
+if ! mkdir -p -m 0700 "$tier_root" 2>/dev/null || [ ! -O "$tier_root" ]; then
+  echo "[ci] REFUSED — the tiers' private node folder $tier_root is not this user's own: nothing was judged" >&2; exit 1
 fi
-for t in npm npx; do
-  if [ -e "$(dirname "$tier_real")/$t" ]; then ln -sfn "$(dirname "$tier_real")/$t" "$tier_bin/$t"; else rm -f "$tier_bin/$t"; fi
-done
+tier_bin="$tier_root/$(printf '%s' "$tier_real" | cksum | cut -d' ' -f1)"   # ONE folder per node: two pushes with two nodes never share one
+if [ "$(readlink "$tier_bin/node" 2>/dev/null)" != "$tier_real" ]; then
+  tier_new="$(mktemp -d "$tier_root/.new.XXXXXX" 2>/dev/null)" || { echo "[ci] REFUSED — the tiers' private node folder could not be made in $tier_root: nothing was judged" >&2; exit 1; }
+  ln -s "$tier_real" "$tier_new/node"
+  for t in npm npx; do [ -e "$(dirname "$tier_real")/$t" ] && ln -s "$(dirname "$tier_real")/$t" "$tier_new/$t"; done
+  mv -T "$tier_new" "$tier_bin" 2>/dev/null || rm -rf "$tier_new"   # made whole, then moved in at once — a racing push's own stays
+fi
+[ "$(readlink "$tier_bin/node" 2>/dev/null)" = "$tier_real" ] || { echo "[ci] REFUSED — $tier_bin does not hold this push's node ($tier_real): nothing was judged" >&2; exit 1; }
 tier_path="$tier_bin:/usr/local/bin:/usr/bin:/bin"
 tier_env=(env -i "PATH=$tier_path" VS_NO_REAL_CLI=1 VIBESPACE_SKIP_AGENT_HOOKS=1)
-for v in HOME USER LOGNAME LANG TMPDIR XDG_RUNTIME_DIR TERM TZ VS_CHROME VIBESPACE_CI_FAST_LANES VIBESPACE_CI_HEAVY_LOCK VIBESPACE_CI_LANE_ROOT VIBESPACE_CI_REAP_PROCFS VIBESPACE_CI_REAPER_LOCK VIBESPACE_CI_DIR_SWEEP VIBESPACE_CI_SCRATCH_ROOTS; do
+for v in HOME USER LOGNAME LANG TMPDIR XDG_RUNTIME_DIR TERM TZ VS_CHROME VIBESPACE_CI_FAST_LANES VIBESPACE_CI_LANES VIBESPACE_CI_HEAVY_LOCK VIBESPACE_CI_LANE_ROOT VIBESPACE_CI_REAP_PROCFS VIBESPACE_CI_REAPER_LOCK VIBESPACE_CI_DIR_SWEEP VIBESPACE_CI_SCRATCH_ROOTS VIBESPACE_CI_REMOTE_RUN VIBESPACE_CI_MODEL; do
   [ -n "${!v:-}" ] && tier_env+=("$v=${!v}")
 done
 for v in $(compgen -e); do
