@@ -750,6 +750,7 @@ const CATALOG = {
   'src/server/mounts-plugins-wiring.js:vaultRun': { kind: 'eval', why: 'the run door, real over the scratch vault' },
   'src/server/mounts-plugins-wiring.js:vaultPaste': { kind: 'eval', why: 'the paste door, real over the scratch vault' },
   'src/server/mounts-plugins-wiring.js:vaultJobSecrets': { kind: 'eval', why: 'B-ef1b: the retired job-secrets notice\'s door, real over the scratch vault + data dir (its route is a person\'s)' },
+  'src/server/mounts-plugins-wiring.js:vaultJob': { kind: 'eval', why: 'lane vault-job-approval: the Background job\'s vault door, real over the scratch vault, THE grants store and THE For-you store — no timer, no process (its routes, the card\'s answer and the ✕, are a person\'s; no job in the census)' },
   'src/server/mounts-plugins-wiring.js:vaultTotp': { kind: 'eval', why: 'the two-step codes, real over the scratch vault' },
   'src/server/mounts-plugins-wiring.js:browserLogins': { kind: 'eval', why: 'the website logins, real over the scratch vault' },
   'src/server/mounts-plugins-wiring.js:browserProxyLogins': { kind: 'eval', why: 'B-8b87: a browser proxy\'s logins, real over the scratch vault (names only; its one reader is the keeper\'s forwarder, absent here) — no timer, no process, no network' },

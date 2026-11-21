@@ -1185,7 +1185,10 @@ class JobManager {
     // themselves when the storage answers late (the route's reply says «not on disk yet»: record-clear's persisted); a kill first
     // leaves the old record, the question still asked
     if (askGone.length) this._ride(this.file, 'the cleared asks', () => { for (const j of askGone) { this._resolveAns(j); try { this.d.resolveJobAsk && this.d.resolveJobAsk(j.id); } catch { } } });
-    this._vaultGone([...liveHits, ...archHits].filter((j) => gone.has(j.id))); // lane vault-job-approval: a cleared job's approval goes with its words — its next start asks again (ONE write)
+    // lane vault-job-approval: a cleared job's approval goes with its words — its next start asks again (ONE write), riding the
+    // landing like the cleared asks (a kill first: the record comes back whole, its approval kept)
+    const vaultCleared = [...liveHits, ...archHits].filter((j) => gone.has(j.id) && VJ.refsOf(j).length);
+    if (vaultCleared.length) this._ride(this.file, 'the cleared approvals', () => this._vaultGone(vaultCleared));
     if (out.cleared.length) { try { this.d.broadcast('jobs-updated', { cleared: out.cleared }); } catch { } }
     return out;
   }
@@ -2829,7 +2832,8 @@ class JobManager {
     // a SCHEDULE's approval is the cron's (D4): its run that is up holds the value too — stopped with it (the second adversarial
     // read: stop() of a cron settles only its WAITING runs)
     if (job.kind === 'cron') for (const k of [...this.jobs.values()]) if (k.cronParent === job.id && ['up', 'starting', 'awaiting-user'].includes(k.state)) this.stop(k);
-    this.stop(job);
+    const s = this.stop(job);
+    if (s && s.code === 'hub-is-main') return false;   // B-2c5c: the hub running as this job is never stopped from inside — never said «stopped» (its approval is taken back all the same)
     this._touch(job, { what: String(words || 'stopped: its vault value was taken back'), alarm: true });
     this._notifyOwner(job, { what: String(words || 'stopped: its vault value was taken back') });
     this._save();
@@ -4536,9 +4540,7 @@ class JobManager {
     if (alive && orphan) this.d.log(`[jobs] ${job.id} ORPHANED by request — live pid abandoned`);
     const last = job.runs && job.runs[job.runs.length - 1];
     if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was removed'); // lane vault-job-road: a removed cron's waiting run never starts
-    this._vaultAskOver(job); // lane vault-job-approval: a removed job leaves no open approval card…
     this.jobs.delete(job.id); this._dirty = true; this._save();
-    this._vaultGone([job]); // …and no approval: its id leaves every vault-job row (a new job asks again) — AFTER it left the registry, so nothing re-judges it
     (this._removalOwed || (this._removalOwed = new Map())).set(job.id, job);   // its logs stay in the sweep's keep set until the landing
     // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING, no roll back): what cannot be undone — its kept processes
     // ended, its For-you items resolved — runs once jobs.json holds the removal; a kill first brings the job back whole. The
@@ -4547,6 +4549,11 @@ class JobManager {
       if (this._removalOwed && this._removalOwed.get(job.id) === job) this._removalOwed.delete(job.id);
       if (last && last.endedAt) this._clearKept(job, last).catch(() => { }); // round 5: a removed service keeps nothing running
       try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id, { onlyAsk: false }); } catch { } // removed job leaves no orphan inbox items
+      // lane vault-job-approval: a removed job leaves no open approval card, and no approval — its id leaves every vault-job row (a
+      // new job asks again), AFTER it left the registry so nothing re-judges it; both ride the landing (a kill first: the job back
+      // whole, its card and its approval kept)
+      this._vaultAskOver(job);
+      this._vaultGone([job]);
     });
     try { this.d.broadcast('jobs-updated', { id: job.id, removed: true }); } catch { }
     return { ok: true };

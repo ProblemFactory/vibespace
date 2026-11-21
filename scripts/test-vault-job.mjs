@@ -82,7 +82,7 @@ const ROOTS = new Set(), PREFIX = `vs-vjob-${process.pid}-`;
 const ours = () => { try { return fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith(PREFIX)).map((n) => path.join(os.tmpdir(), n)); } catch { return []; } };   // the review: counted in the tmp dir, never only in the set
 const sweepRoots = () => { for (const r of new Set([...ROOTS, ...ours()])) { try { fs.rmSync(r, { recursive: true, force: true }); } catch { } } return ours().length; };
 process.on('exit', () => { sweepRoots(); });
-async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir = null, vault = null, doorSrc = null, grants: grants0 = null } = {}) {
+async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir = null, vault = null, doorSrc = null, grants: grants0 = null, held = false } = {}) {
   const root = dataDir ? path.dirname(dataDir) : fs.mkdtempSync(path.join(os.tmpdir(), `${PREFIX}${tag}-`));
   ROOTS.add(root);
   const dd = dataDir || path.join(root, 'data');
@@ -94,10 +94,13 @@ async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir
   const v = vault || VE.create({ dataDir: dd, kdf: { N: 1024, r: 8, p: 1 }, log: { log() { }, warn() { } }, idleTimer: false, register: false });
   if (!vault) await v.setup(PW);
   const grants = grants0 || GS.create({ memory: true });
-  const todos = new UserTodoManager({ dataDir: dd, expirySweepMs: 0 });   // lane vault-job-approval: a wait for approval files its card here
+  if (held) fs.mkdirSync(path.join(dd, 'user-todos.json'));   // B-44f3: a READ that fails (EISDIR) — For you HELD unread; the leg lifts it itself
+  const todos = new UserTodoManager({ dataDir: dd, expirySweepMs: 0, ...(held ? { unreadRetry: { firstMs: 60e3, maxMs: 60e3 } } : {}) });   // lane vault-job-approval: a wait for approval files its card here
   const frames = [], journal = [], told = [];   // told: what the owner conversation is messaged (lane vault-job-approval — a revoke says it once)
   const JM = jmOf(jobs);
-  const jm = new JM({ dataDir: dd, broadcast: (t, p) => frames.push(JSON.stringify(p || {})), notifyUser() { return { ok: true }; }, log: (...a) => journal.push(a.join(' ')), memoryRungs: [],
+  // archivePolicy as the hub's wiring gives it (the settings' defaults): without it the engine reads «no policy» as archive-off
+  // (Number(null) = 0 hours) and ⑩c's archive sweep moves nothing — the first two gates on the moved tip
+  const jm = new JM({ dataDir: dd, broadcast: (t, p) => frames.push(JSON.stringify(p || {})), notifyUser() { return { ok: true }; }, log: (...a) => journal.push(a.join(' ')), memoryRungs: [], archivePolicy: () => ({ doneAfterHours: 24, failedAfterDays: 7 }),
     deliverToConversation: async (cid, text) => { told.push({ cid, text: String(text) }); return { ok: true, lane: 'message', peerName: 'owner' }; }, notifyGlobal: () => true, peerReachable: () => true, groupNotifyFor: () => null });
   jm.init();
   const door = doorOf(doorSrc).create({ vault: v, grants: () => grants, userTodos: todos, nameOf: (cid) => (cid === 'conv-a' ? 'Chat A' : null) }), built = [];
@@ -307,8 +310,9 @@ async function legCaps(doorSrc = null) {
   row(cards(W).length === 4 && states.slice(0, 4).every((s) => s === 'waiting') && states[4] === 'failed' && /Background Work jobs waiting for the user's approval/.test(String(made[4].error)), 'FOUR open cards per conversation: the fifth job is refused by name (too_many_asks) — never a silent wait', { n: cards(W).length, states, err: made[4].error });
   const first = W.jm.jobs.get(made[0].job.id), fa = ((cards(W).find((i) => i.action.jobId === first.id)) || {}).action || {};
   W.jm.rm(first);
+  const overAt = await W.untilMs(() => resolvedOf(W, fa.askId).resolvedBy === 'ask-over', 8000);   // the card closes at the removal's LANDING (it rides it)
   const late = W.door.answer(fa.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
-  row(resolvedOf(W, fa.askId).resolvedBy === 'ask-over' && cards(W).length === 3 && !late.ok && late.code === 'ask_settled' && W.grants.rowsFor('vault-job', fa.entry).length === 0 && jobLines(W).some((l) => l.includes('"op":"over"') && l.includes(fa.askId)), 'a waiting job REMOVED ⇒ its card closes (ask-over) — never an orphan card; a late 允许 writes nothing', { by: resolvedOf(W, fa.askId).resolvedBy, late });
+  row(overAt.ok && resolvedOf(W, fa.askId).resolvedBy === 'ask-over' && cards(W).length === 3 && !late.ok && late.code === 'ask_settled' && W.grants.rowsFor('vault-job', fa.entry).length === 0 && jobLines(W).some((l) => l.includes('"op":"over"') && l.includes(fa.askId)), 'a waiting job REMOVED ⇒ its card closes (ask-over) — never an orphan card; a late 允许 writes nothing', { by: resolvedOf(W, fa.askId).resolvedBy, late });
   rows[rows.length - 1].push(jobLines(W).filter((l) => l.includes(fa.askId)));   // the lines it judged — printed green or red (2.369.413 lesson b)
   const second = W.jm.jobs.get(made[1].job.id), sa = ((cards(W).find((i) => i.action.jobId === second.id)) || {}).action || {};
   W.jm.stop(second);
@@ -471,10 +475,12 @@ async function legGone() {
   const jobsOf = () => (((W.grants.rowsFor('vault-job', a.entry)[0] || {}).to || [])[0] || {}).jobs || [];
   const before = jobsOf().slice();
   W.jm.rm(j1);
+  const rmLanded = await W.untilMs(() => jobsOf().length < 2, 8000);   // the approval leaves at the removal's LANDING (it rides it)
   const afterRm = jobsOf().slice();
   W.jm.clearJobs([j2.id], { by: 'owner' });
-  row(JSON.stringify(before) === JSON.stringify([j1.id, j2.id]) && JSON.stringify(afterRm) === JSON.stringify([j2.id]) && W.grants.rowsFor('vault-job', a.entry).length === 0 && jobLines(W).filter((l) => l.includes('"op":"gone"')).length === 2,
-    'a job REMOVED takes its id out of the row; a job whose content is CLEARED too (its next start asks again) — the last one out, the row is gone', { before, afterRm, left: W.grants.rowsFor('vault-job', a.entry) });
+  const clearLanded = await W.untilMs(() => W.grants.rowsFor('vault-job', a.entry).length === 0, 8000);   // …and at the clear's
+  row(JSON.stringify(before) === JSON.stringify([j1.id, j2.id]) && rmLanded.ok && JSON.stringify(afterRm) === JSON.stringify([j2.id]) && clearLanded.ok && W.grants.rowsFor('vault-job', a.entry).length === 0 && jobLines(W).filter((l) => l.includes('"op":"gone"')).length === 2,
+    'a job REMOVED takes its id out of the row; a job whose content is CLEARED too (its next start asks again) — the last one out, the row is gone (each at its landing)', { before, rmLanded, afterRm, clearLanded, left: W.grants.rowsFor('vault-job', a.entry) });
   rows[rows.length - 1].push(jobLines(W).filter((l) => l.includes('"op":"gone"')));   // the lines it judged — printed green or red (2.369.413 lesson b)
   W.end();
   return rows;
@@ -507,7 +513,7 @@ async function legPasteDelete(pasteSrc = null) {
   const up = await W.untilMs(() => W.got().length >= 1 && job.state === 'up', 4000);
   const del = paste.dropEntry(String(add.entry || '').replace(/^secret:/, ''), { by: 'user' });
   await W.untilMs(() => job.state !== 'up' && job.state !== 'starting', 3000);
-  rows.desired = job.desiredUp;
+  rows.desired = job.desiredUp; rows.acted = !!(add.ok && up.ok && del.ok);   // a control reads its intent only over a delete that HAPPENED on a running job
   row(add.ok && up.ok && (W.got()[0] || {}).v === S && del.ok && W.grants.rowsFor('vault-job', a.entry).length === 0 && job.desiredUp === false && !['up', 'starting'].includes(job.state) && W.told.some((x) => /deleted its vault entry «Bot token»/.test(x.text)),
     'THE REAL ROAD: a key the owner stored, a job approved on it and running — the Vault window\'s 删除 (vault-paste-door dropEntry) removes its approval row and STOPS the job, its owner told («Bot token» deleted)', { add: add.ok, up: up.ok, del, state: job.state });
   W.release(); W.end();
@@ -525,11 +531,33 @@ async function legAgentDelete(pasteSrc = null) {
   const t0 = W.told.length;
   const del = paste.dropAgentEntry('agent:conv-a/tok', { by: 'user', who: 'the test' });
   const stopped = await W.untilMs(() => job.state !== 'up' && job.state !== 'starting', 3000);
-  rows.desired = job.desiredUp;
+  rows.desired = job.desiredUp; rows.acted = !!(up && del.ok);   // a control reads its intent only over a delete that HAPPENED on a running job
   if (pasteSrc) { W.release(); W.end(); return rows; }
   row(up && del.ok && W.grants.rowsFor('vault-job', a.entry).length === 0 && stopped.ok && job.desiredUp === false && !['up', 'starting'].includes(job.state) && W.told.slice(t0).filter((x) => /deleted its vault entry «/.test(x.text)).length === 1,
     'THE AGENT\'S ENTRY DELETED (B-3fb5\'s 删除 — vault-paste-door dropAgentEntry): its approval row removed, the approved service running on it STOPPED, its owner told once', { up, del, state: job.state, desired: job.desiredUp, stopped, told: W.told.slice(t0) });
   W.release(); W.end();
+  return rows;
+}
+// ⑩d FOR YOU HELD UNREAD (B-44f3, the train's store-read law): while the tray's file cannot be read no card can be filed — the job
+// WAITS (never refused for it: a refusal fails it and ends a schedule's next fire), a card's answer is refused by name
+// (todos-unread), and at the read the job is judged again and its card filed
+async function legHeld(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(doorSrc ? 'heldm' : 'held', { held: true, doorSrc });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const job = W.jm.jobs.get(W.create({ name: 'held' }).job.id);
+  const settled = await W.untilMs(() => job.state === 'failed' || (job.state === 'waiting' && job.waitFor === 'approval'), 8000);
+  rows.state = job.state;
+  if (doorSrc) { W.end(); return rows; }
+  const held = W.todos.isHeldUnread();
+  const ans = W.door.answer('vj-' + '0'.repeat(16), { answer: 'allow', reauthed: true, by: 'user', person: true });
+  row(held && settled.ok && job.state === 'waiting' && job.waitFor === 'approval' && cards(W).length === 0 && ans.code === 'todos-unread' && /For you cannot read its saved list/.test(String(ans.words || '')),
+    'FOR YOU HELD UNREAD (B-44f3): the job WAITS for its approval (never refused for it), no card is filed over an unread list, and a card\'s answer is refused BY NAME (todos-unread, the store\'s own words)', { held, settled, state: job.state, waitFor: job.waitFor, ans });
+  const f = path.join(W.dd, 'user-todos.json'); fs.rmdirSync(f); fs.writeFileSync(f, JSON.stringify({ items: [] }));
+  const lifted = await W.todos.readAgain();
+  const filed = await W.untilMs(() => cards(W).filter((i) => i.action.jobId === job.id).length === 1, 8000);
+  row(lifted === true && filed.ok && job.state === 'waiting' && job.waitFor === 'approval', 'at the READ the waiting job is judged again and its ONE card is filed (against the file\'s open items)', { lifted, filed, state: job.state, cards: cards(W).length });
+  W.end();
   return rows;
 }
 // ── ⑪ WHAT THE OWNER SEES (lane vault-job-approval L2): the Vault row's jobs, a job's uses, its starts counted ────────────────
@@ -612,8 +640,9 @@ async function legRmNoRefile() {
   W.door.answer(first.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });   // approved on one entry, still waiting on the other
   const waits = job.state === 'waiting' && job.waitFor === 'approval';
   W.jm.rm(job);
-  row(waits && cards(W).filter((i) => i.action.jobId === job.id).length === 0 && W.grants.rowsFor('vault-job', first.entry).length === 0 && jobLines(W).filter((l) => l.includes('"op":"ask"') && l.includes(job.id)).length === 2,
-    'a job REMOVED while approved on one entry and waiting on another leaves NO open card — its id leaves the row after it left the registry, so nothing re-judges it and no card is filed again', { waits, open: cards(W).filter((i) => i.action.jobId === job.id).length });
+  const landed = await W.untilMs(() => cards(W).filter((i) => i.action.jobId === job.id).length === 0 && W.grants.rowsFor('vault-job', first.entry).length === 0, 8000);   // at the removal's LANDING
+  row(waits && landed.ok && cards(W).filter((i) => i.action.jobId === job.id).length === 0 && W.grants.rowsFor('vault-job', first.entry).length === 0 && jobLines(W).filter((l) => l.includes('"op":"ask"') && l.includes(job.id)).length === 2,
+    'a job REMOVED while approved on one entry and waiting on another leaves NO open card — its id leaves the row after it left the registry, so nothing re-judges it and no card is filed again', { waits, landed, open: cards(W).filter((i) => i.action.jobId === job.id).length });
   rows[rows.length - 1].push(jobLines(W).filter((l) => l.includes('"op":"ask"') && l.includes(job.id)));   // the lines it judged — printed green or red (2.369.413 lesson b)
   W.end();
   return rows;
@@ -625,11 +654,14 @@ async function legArchivePrune() {
   const job = W.jm.jobs.get(W.create({ name: 'one-shot' }).job.id);
   const a = ((cards(W).find((i) => i.action.jobId === job.id)) || {}).action || {};
   W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
-  await W.untilMs(() => job.state === 'done', 4000);
-  await W.untilMs(() => !W.jm._verifyAlive(W.jm._readStamp(job)), 4000);   // the sweep keeps a job whose wrapper still lives (its last ms after the run's end)
+  // each wait for WHAT HAPPENED, its outcome in the row (the first gate on the moved tip: 4 s bounds at load 67 — the run not yet
+  // done or its wrapper still alive, the sweep archived nothing and the row did not say which)
+  const done = await W.untilMs(() => job.state === 'done', 20000);
+  const exited = await W.untilMs(() => !W.jm._verifyAlive(W.jm._readStamp(job)), 20000);   // the sweep keeps a job whose wrapper still lives (its last ms after the run's end)
   const named0 = JSON.stringify((((W.grants.rowsFor('vault-job', a.entry)[0] || {}).to || [])[0] || {}).jobs || []);
-  const sw = W.jm.archiveSweep({ now: Date.now() + 30 * 86400e3, why: 'test' });
-  row(named0 === JSON.stringify([job.id]) && (sw.archived || []).includes(job.id) && W.grants.rowsFor('vault-job', a.entry).length === 0, 'an ARCHIVED one-shot runs no more — its approval leaves the row (it never holds one of the member\'s 64 places for ever)', { named0, sw });
+  const at = Date.now() + 30 * 86400e3, verdict = M.archiveVerdict(job, { now: at, alive: false, ...W.jm._archivePolicy() });   // the verdict under the ENGINE's policy (what the sweep reads)
+  const sw = W.jm.archiveSweep({ now: at, why: 'test' });
+  row(done.ok && exited.ok && named0 === JSON.stringify([job.id]) && (sw.archived || []).includes(job.id) && W.grants.rowsFor('vault-job', a.entry).length === 0, 'an ARCHIVED one-shot runs no more — its approval leaves the row (it never holds one of the member\'s 64 places for ever)', { done, exited, state: job.state, verdict, named0, sw });
   W.grants.set('vault-job', a.entry, { to: [{ kind: 'conversation', key: 'conv-a', jobs: ['jb-deadbeef'] }] }, 'test');   // an id an older version left behind
   const j2 = W.jm.jobs.get(W.create({ name: 'next' }).job.id);
   const a2 = ((cards(W).find((i) => i.action.jobId === j2.id)) || {}).action || {};
@@ -839,6 +871,8 @@ const MUT_PASTE = pmut('    if (vaultJob) { try { vaultJob.entryGone(rowId, { la
 const MUT_AGENT_DEL = pmut('    if (vaultJob) { try { vaultJob.entryGone(id, { label }); }', '    if (false) { try { vaultJob.entryGone(id, { label }); }');
 const [revoke, gone, jgone, lockRuns, pdel, adel, revokeMut, goneMut, lockMut, pdelMut, adelMut] = await Promise.all([legRevoke(), legEntryGone(), legGone(), legLockRuns(), legPasteDelete(), legAgentDelete(),
   MUT_REVOKE ? legRevoke(MUT_REVOKE) : {}, MUT_GONE ? legEntryGone(MUT_GONE) : {}, MUT_LOCK ? legLockRuns(MUT_LOCK) : {}, MUT_PASTE ? legPasteDelete(MUT_PASTE) : {}, MUT_AGENT_DEL ? legAgentDelete(MUT_AGENT_DEL) : {}]);
+const MUT_HELD = dmut('    if (userTodos.isHeldUnread?.()) {\n', '    if (false) {\n');   // ⑩d's control: the door files over a held tray
+const [held, heldMut] = await Promise.all([legHeld(), MUT_HELD ? legHeld(MUT_HELD) : {}]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
@@ -869,10 +903,12 @@ print('⑩ TAKEN BACK = STOPPED · A LOCK STOPS NOTHING (lane vault-job-approval
 console.log('⑩b MUTANTS (each a copy of the door — RED)');
 ok(!!MUT_REVOKE && revokeMut.desired === true, 'CONTROL — a ✕ that leaves the job running (the stop removed): still meant to run (desiredUp) — RED on the copy', MUT_REVOKE ? revokeMut.desired : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_GONE && goneMut.desired === true, 'CONTROL — a deleted entry that leaves its job running (the stop removed): still meant to run — RED on the copy', MUT_GONE ? goneMut.desired : 'the copy could not be built (its anchor is missing)');
-ok(!!MUT_PASTE && pdelMut.desired === true, 'CONTROL — the Vault window\'s delete that never tells the job door (vault-paste-door\'s entryGone call removed): the job runs on — RED on the copy', MUT_PASTE ? pdelMut.desired : 'the copy could not be built (its anchor is missing)');
-ok(!!MUT_AGENT_DEL && adelMut.desired === true, 'CONTROL — the agent entry\'s delete that never tells the job door (dropAgentEntry\'s entryGone call removed): the job runs on — RED on the copy', MUT_AGENT_DEL ? adelMut.desired : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_PASTE && pdelMut.acted === true && pdelMut.desired === true, 'CONTROL — the Vault window\'s delete that never tells the job door (vault-paste-door\'s entryGone call removed): the job runs on — RED on the copy', MUT_PASTE ? { acted: pdelMut.acted, desired: pdelMut.desired } : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_AGENT_DEL && adelMut.acted === true && adelMut.desired === true, 'CONTROL — the agent entry\'s delete that never tells the job door (dropAgentEntry\'s entryGone call removed): the job runs on — RED on the copy', MUT_AGENT_DEL ? { acted: adelMut.acted, desired: adelMut.desired } : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_LOCK && lockMut.desired === false, 'CONTROL — a lock that stops the jobs (a lock hook planted): the service is stopped (desiredUp false) — RED on the copy', MUT_LOCK ? lockMut.desired : 'the copy could not be built (its anchor is missing)');
 print('⑩c THE SECOND READ\'S CURES — a schedule\'s revoke stops its running run, rm files nothing again, an archived job leaves the row, an allow prunes', [...cronRevoke, ...rmNoRefile, ...archivePrune]);
+print('⑩d FOR YOU HELD UNREAD (B-44f3) — the job waits, the answer is refused by name, the card is filed at the read', held);
+ok(!!MUT_HELD && heldMut.state === 'failed', 'CONTROL — the door filing over a held tray (its held branch removed): the add is refused, the job is FAILED for it — RED on the copy', MUT_HELD ? heldMut.state : 'the copy could not be built (its anchor is missing)');
 print('⑪ WHAT THE OWNER SEES (L2) — the Vault row\'s jobs, a job\'s uses, the starts counted, the chips', [...surfaces, ...chips]);
 ok(!!MUT_STARTS && surfacesMut.starts === 0, 'CONTROL — the Vault row\'s starts never counted (the door\'s tally removed): «started 0×» for a job that started — RED on the copy', MUT_STARTS ? surfacesMut.starts : 'the copy could not be built (its anchor is missing)');
 console.log('⑦ MUTANTS');

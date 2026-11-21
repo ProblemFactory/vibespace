@@ -13304,7 +13304,6 @@ export default {
   "Taken back — its next start asks you again": "已收回——它下次启动时会再问你",
   "Uses from the vault:": "使用保险库里的：",
   "waiting for your approval — its card is in For you": "等你批准——卡片在「待你处理」里",
-  "Open For you": "打开「待你处理」",
   "That entry is not in the vault any more": "这个条目已不在保险库里",
   "The description is at most 400 characters": "描述最多 400 个字符",
   "The description is one paragraph — no line breaks": "描述只能是一段 — 不能换行",

@@ -13303,7 +13303,6 @@ export default {
   "Taken back — its next start asks you again": "取り消しました — 次の起動でもう一度確認します",
   "Uses from the vault:": "保管庫から使用:",
   "waiting for your approval — its card is in For you": "承認待ち — カードは「あなた宛て」にあります",
-  "Open For you": "「あなた宛て」を開く",
   "That entry is not in the vault any more": "そのエントリはもう保管庫にありません",
   "The description is at most 400 characters": "説明は 400 文字までです",
   "The description is one paragraph — no line breaks": "説明は 1 段落です — 改行はできません",

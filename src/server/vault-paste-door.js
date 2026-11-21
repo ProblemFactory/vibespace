@@ -466,11 +466,11 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const r = vault.secretDrop(e);
     if (!r || !r.ok) { if (vaultJob) { try { vaultJob.entryGone(id, { label, why: 'revoked' }); } catch { } } return named('store_failed'); }   // its approvals are gone already — its jobs stop (taken back)
     if (r.already) return named('entry_unknown_id');
-    if (vaultJob) { try { vaultJob.entryGone(id, { label }); } catch (x) { log(`${e}: its Background jobs could not be stopped — ${x.message}`); } }
     if (vaultRun && typeof vaultRun.forgetEntry === 'function') { try { vaultRun.forgetEntry(id); } catch (x) { log(`${e}: the run door could not forget it — ${x.message}`); } }
     index(); for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'gone');   // its words card answers nothing now
     const rf = VR.refFor('secrets', e, P.ENTRY_FIELD);
-    audit('vault-agent-secret-deleted', { who: who ? String(who).slice(0, 80) : null, ip, by: String(by).slice(0, 40), entry: e, why: e, ...(rf ? { ref: rf.ref } : {}) });   // the name and who — never a value (`why`: the engine's own line names it, as mint / put do)
+    audit('vault-agent-secret-deleted', { who: who ? String(who).slice(0, 80) : null, ip, by: String(by).slice(0, 40), entry: e, why: e, ...(rf ? { ref: rf.ref } : {}) });
+    if (vaultJob) { try { vaultJob.entryGone(id, { label }); } catch (x) { log(`${e}: its Background jobs could not be stopped — ${x.message}`); } }   // every job that names it stops (after the delete's own line, as a free entry's)   // the name and who — never a value (`why`: the engine's own line names it, as mint / put do)
     return { ok: true, entry: e };
   }
   // ── THE WORDS OF AN ENTRY (lane vault-entry-description) ──

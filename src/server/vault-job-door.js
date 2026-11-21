@@ -156,7 +156,9 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
 
   function blocked(actor) { try { return vault.blocked(actor, 'start'); } catch { return false; } }
 
+  const changeFns = [];   // the engine's re-judge (vaultChanged) — also run once For you has READ after a hold (B-44f3, below)
   function onChange(fn) {
+    if (typeof fn === 'function') changeFns.push(fn);
     try { vault.onUnlock(() => fn('vault-unlocked')); } catch { }
     const g = store();
     try { if (g && typeof g.onChange === 'function') g.onChange((c) => { if (c && c.door === VJ.DOOR && !narrowing) fn('vault-approved'); }); } catch { }
@@ -179,6 +181,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   /** the open cards, re-read from the For-you store — the item IS the ask (one filed before a restart is answered after it) */
   function index() {
     if (!userTodos || typeof userTodos.snapshot !== 'function') return;
+    if (userTodos.isHeldUnread?.()) return;   // B-44f3: For you held unread — its list is empty because it is unread: never frozen as the index (built from the FILE after the read)
     let open = [];
     try { open = typeof userTodos.openItems === 'function' ? userTodos.openItems() : ((userTodos.snapshot() || {}).open || []); } catch { open = []; }   // the open items only (a snapshot sorts and previews the whole tray)
     const live = new Set();
@@ -208,8 +211,16 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   /** A WAIT FOR `approval` (the engine, at a spawn — every re-judge of a waiting job asks here): ONE card per job × entry the
    *  verdict misses (`v.missing`), an open one never filed again. → `{ok:true, filed}` | a refusal by name (the caps, a Deny's
    *  quiet, the tray refused it — the engine refuses the job in these words) */
+  let heldAsk = false;   // ONE waiter while For you is held (every re-judge of every waiting job asks here)
   function ask(job, v = {}) {
     if (!userTodos || typeof userTodos.add !== 'function') { log(`[vault-job] no For-you store is wired — the approval card of ${VJ.askJobIdOf(job)} is not filed (the job waits)`); return { ok: true, filed: 0 }; }   // a door built without the tray (a scripted engine): the L1a wait, said in the journal
+    // B-44f3 (For you HELD UNREAD — its file could not be read): no card can be filed and the open ones are unread — the job WAITS
+    // (never refused for it: a refusal would fail it and end a schedule's next fire); at the read every waiting job is judged
+    // again (the engine's re-judge), and the cards are filed then, against the FILE's open ones
+    if (userTodos.isHeldUnread?.()) {
+      if (!heldAsk && typeof userTodos.whenRead === 'function') { heldAsk = true; userTodos.whenRead(() => { heldAsk = false; for (const fn of changeFns) { try { fn('vault-approved'); } catch (e) { log(`[vault-job] the re-judge at For you's read failed (${(e && e.message) || e})`); } } }, 'the Background jobs\' approval cards'); }
+      return { ok: true, filed: 0, held: true };
+    }
     index();
     const o = VJ.ownerOf(job), conv = o.conv || o.scope, jobId = VJ.askJobIdOf(job);
     if (!jobId) return named('ask_unfiled');
@@ -267,6 +278,8 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   function answer(askId, { answer: a, reauthed = false, by = 'user', person = false } = {}) {
     const id = String(askId || '');
     if (!VJ.ASK_ID_RE.test(id)) return named('ask_unknown');
+    // B-44f3: the held store — never «that request is gone» over an unread list: refused by name (503), try once it reads
+    if (userTodos && userTodos.isHeldUnread?.()) return { ok: false, code: 'todos-unread', words: userTodos.unreadRefusal("answering a Background job's approval card") };
     index();
     const q = asks.get(id);
     if (!q) return named(settled.has(id) ? 'ask_settled' : 'ask_unknown');

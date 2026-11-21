@@ -195,9 +195,14 @@
   "why": "wait ended; re-judged at boot"
  },
  {
-  "key": "jobs · src/jobs.js · JobManager._vaultGate · _save()",
+  "key": "jobs · src/jobs.js · JobManager._vaultRefuse · _save()",
   "verdict": "none",
-  "why": "refusal re-judged; error answered"
+  "why": "refusal re-judged; card filed again"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.vaultRevoked · _save()",
+  "verdict": "none",
+  "why": "stopped first; the act's last step"
  },
  {
   "key": "jobs · src/jobs.js · JobManager._waitFor · _save()",
