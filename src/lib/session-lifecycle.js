@@ -1,7 +1,7 @@
 // Session lifecycle: create/attach/resume/fork/view/kill + billing switcher + openSpec replay (mixin split from app.js, 2.82.0 audit seam).
 import { ChatView } from './chat-view.js';
 import { namedModel } from '../model-providers.js'; // THE model door (lane fable-52-cli-321 r6) — the hub refuses what it refuses
-import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor, accountBound } from './agent-meta.js';
+import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor, accountBound, oatDeadFor } from './agent-meta.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { unknownRowOf } from './resume-pacer.js'; // B-f64b cure: a row still being checked is never started unasked
@@ -1791,11 +1791,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       const v = vOf(a);
       if (v) { // verdict is authoritative — render it verbatim
         // Belt vs a stale server: an expired oat must not be pickable (the
-        // pick kills the session, then the create refuses — window gone)
-        if (v.usable) return (v.how === 'oat' && a.oatDaysLeft <= 0)
-          ? t('“{name}”’s long-lived token has expired — re-mint it', { name: a.name })
-          : null;
-        if (v.reason === 'oat-expired') return t('“{name}”’s long-lived token has expired — re-mint it', { name: a.name });
+        // pick kills the session, then the create refuses — window gone).
+        // B-8703 follow: the ONE verdict Session Properties reads too
+        if (oatDeadFor(a, v)) return t('“{name}”’s long-lived token has expired — re-mint it', { name: a.name });
+        if (v.usable) return null;
         if (v.reason === 'held-identity-mismatch') return t('The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.', { host: rHostName, name: a.name, email: v.dirEmail || '?' });
         if (v.reason === 'not-on-this-host') {
           // signed in SOMEWHERE — just not on the machine this session runs on
@@ -1833,7 +1832,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // dir login (the server drops the dead secret), so it must fall
         // through to the normal ladder instead of a false hard-block
         if (!expired) return null;
-        if (!a.loggedIn) return t('“{name}”’s long-lived token has expired — re-mint it', { name: a.name });
+        if (oatDeadFor(a, null)) return t('“{name}”’s long-lived token has expired — re-mint it', { name: a.name });   // B-8703 follow: the ONE verdict (expired and not signed in here)
         // logged-in + expired oat → the ordinary rules below tell the truth
       }
       if (!a.loggedIn && !(rHostId && (hostLinked(a) || hostSubHeld(a)))) {

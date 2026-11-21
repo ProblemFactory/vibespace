@@ -2521,7 +2521,7 @@ class AccountManager {
       // the CLI 401 opaquely mid-session (a long-lived 401 has no self-heal).
       // loggedIn + expired-oat just drops the secret — the dir login works
       // locally and the remote paths give their normal actionable errors.
-      if (!loginInDir && a.oatEnc && oatExpired) throw new Error(`the long-lived token for ${a.name} has expired — re-mint it in Manage agents (⋯ → Long-lived token)`);
+      if (!loginInDir && a.oatEnc && oatExpired) throw new Error(`the long-lived token for ${a.name} has expired — re-mint it in Manage agents with «Long-lived token (expired)…» on its row`);
       if (!loginInDir) throw new Error('subscription not logged in: ' + a.name);
       return {
         id: a.id, name: a.name, kind: 'subscription', oatExpired: oatExpired || undefined, ...(oatSecret ? { oatGen: a.oatMintedAt || null } : {}),

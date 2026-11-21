@@ -609,6 +609,15 @@ console.log('§5 the roster words');
     'zh says fix r3\'s words: 这段对话的 token 来路未知，不参与身份判断 · 身份未验证——…确认或改绑');
   const ph = (s) => (String(s).match(/\{\w+\}/g) || []).sort().join();
   ok(KS.every((k) => zh[k] && ja[k] && ph(zh[k]) === ph(k) && ph(ja[k]) === ph(k)), 'every new word has zh + ja with its placeholders', KS.filter((k) => !(zh[k] && ja[k] && ph(zh[k]) === ph(k) && ph(ja[k]) === ph(k))));
+  // B-8703 unit 2's round (wm7dw6lr6): a sentence that sends the person to a menu item by its words must name one that EXISTS — every
+  // «…» item a Manage Agents sentence names is a t() label of the file, and each zh / ja value quotes that label's own value
+  const MAS = read('src/lib/manage-agents.js');
+  const namedIn = (text) => [...text.matchAll(/t\('([^']*«([^»]*…)»[^']*)'/g)].map((m) => ({ s: m[1], item: m[2] }));
+  const named = namedIn(MAS), missing = named.filter((n) => !MAS.includes(`t('${n.item}')`)).map((n) => n.item);
+  const apartL = named.filter((n) => ![zh, ja].every((D) => typeof D[n.s] === 'string' && typeof D[n.item] === 'string' && D[n.s].includes(`「${D[n.item]}」`))).map((n) => n.s);
+  ok(named.length >= 10 && missing.length === 0 && apartL.length === 0, `every menu item a Manage Agents sentence names exists under those words (${[...new Set(named.map((n) => n.item))].join(' · ')}; ${named.length} sentences), and its zh / ja values quote the item's own words`, { missing, apart: apartL });
+  const ghost = namedIn(MAS + "\nt('Re-mint it in «Token settings…».')").filter((n) => !MAS.includes(`t('${n.item}')`)).map((n) => n.item);
+  ok(ghost.length === 1 && ghost[0] === 'Token settings…', 'CONTROL: a sentence naming a menu item the file does not hold («Token settings…») is named', ghost);
   let MA = null, why = null;
   try {
     const esbuild = require(path.join(REPO, 'node_modules/esbuild'));

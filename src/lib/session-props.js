@@ -2,7 +2,7 @@ import { UI_ICONS } from './icons.js';
 import { escHtml, copyText, showConfirmDialog, stripCwdHostLabel, taskGroupColor, fetchJson, showToast, showContextMenu } from './utils.js';
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a status entry's menu + the cleared sentence
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
-import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow, hasEffortMenu } from './agent-meta.js';
+import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow, hasEffortMenu, oatDeadFor } from './agent-meta.js';
 import { loadInto, renderInto } from './permission-rules-view.js';
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when, stampAt as whenAt } from './page-time.js';
@@ -366,6 +366,9 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
     const subBlocked = (x) => {
       if (x.type === 'provider') return !!rHost;   // a third-party provider runs on this machine only (lane lg-providers U5 r1)
       const v = vOf(x);
+      // B-8703 follow (主开发 r919): ONE verdict with the billing menu — a dead long-lived token is not offered as a choice, a
+      // LOCAL conversation's too (it was offered there with no word, saved for the resume, then refused by the server)
+      if (oatDeadFor(x, v)) return true;
       if (v) return !v.usable; // verdict is authoritative — the same call the spawn makes
       return (x.oat && !(x.oatDaysLeft <= 0)) ? false : (rHost
         && (!bill.apiKeys || x.type === 'subscription')
@@ -380,7 +383,7 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
       if (v?.reason === 'held-identity-mismatch') return [t('host login belongs to {email}', { email: v.dirEmail || '?' }), t('The login held on this machine for this account belongs to someone else — re-run “Log in on host as this account”.')];
       if (v?.reason === 'not-on-this-host') return [t('not logged in on this machine'), t('This account is signed in elsewhere — log it in on this machine, or run the session where it is signed in.')];
       if (v?.reason === 'never-signed-in') return [t('never finished signing in'), t('Complete this account’s login in Manage agents first.')];
-      if (v?.reason === 'oat-expired') return [t('long-lived token expired'), t('Re-mint it with «Re-mint “{name}”’s long-lived token…» on this line.', { name: x.name || '?' })];
+      if (oatDeadFor(x, v)) return [t('long-lived token expired'), t('Re-mint it with «Re-mint “{name}”’s long-lived token…» on this line.', { name: x.name || '?' })];
       if (v?.reason === 'pool-local-only') return [t('this machine only'), t('Pooled accounts run on the local machine only.')];
       if (verdictsCold) {
         return warmState === 'error'
@@ -401,9 +404,10 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
     acctSel.value = [...acctSel.options].some(o => o.value === (savedCfg.account || '')) ? (savedCfg.account || '') : '';
     acctSel.onchange = () => sidebar.setSessionConfig?.(s, { ...(sidebar.getSessionConfig?.(s) || {}), account: acctSel.value });
     acctRow.appendChild(acctSel);
-    // B-8703 unit 2 (主开发 r700): an account whose long-lived token EXPIRED is a disabled option (its tooltip says so) — the door is a
+    // B-8703 unit 2 (主开发 r700): an account whose long-lived token EXPIRED (oatDeadFor, the billing menu's own verdict) is a disabled
+    // option (its tooltip says so) — the door is a
     // labelled button on THIS line that opens that account's own long-lived token dialog (the Manage Agents row menu's item opens it too)
-    for (const x of accts) if (vOf(x)?.reason === 'oat-expired') { const b = document.createElement('button'); b.type = 'button'; b.className = 'mounts-btn need-door'; b.dataset.door = 'oat-remint'; b.textContent = t('Re-mint “{name}”’s long-lived token…', { name: x.name || '?' }); b.onclick = () => app._oatDialog?.(x.id, x); acctRow.appendChild(b); }
+    for (const x of accts) if (oatDeadFor(x, vOf(x))) { const b = document.createElement('button'); b.type = 'button'; b.className = 'mounts-btn need-door'; b.dataset.door = 'oat-remint'; b.textContent = t('Re-mint “{name}”’s long-lived token…', { name: x.name || '?' }); b.onclick = () => app._oatDialog?.(x.id, x); acctRow.appendChild(b); acctRow.classList.add('sp-doors'); }
     bilSec.appendChild(acctRow);
 
     // ── Agent browser (agent browser P1, §3.2.5's EXPLAINING surface; named for the face since direction B) ──

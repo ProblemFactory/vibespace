@@ -3234,7 +3234,7 @@ export default {
   "Pooled accounts run on the local machine only.": "プールされたアカウントはローカルマシンでのみ動作します。",
   "Prices not saved: {msg}": "単価を保存できませんでした：{msg}",
   "Quota refresh failed for {n} target(s): {details}": "{n} 件の対象でクォータ更新に失敗しました：{details}",
-  "Re-mint it with «Re-mint “{name}”’s long-lived token…» on this line.": "この行の「「{name}」の長期トークンを再発行…」で再発行してください。",
+  "Re-mint it with «Re-mint “{name}”’s long-lived token…» on this line.": "この行の「『{name}』の長期トークンを再発行…」で再発行してください。",
   "Re-mint “{name}”’s long-lived token…": "「{name}」の長期トークンを再発行…",
   "Re-scan sessions on this host": "このホストのセッションを再スキャン",
   "Re-scanning {host}…": "{host} を再スキャン中…",

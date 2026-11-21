@@ -225,7 +225,7 @@ export const URL_MIN_PX = 120;
    *  and the touch Keyboard button (3). */
 /*  lane browser-resume B (§3.9, the owner's ruling 2): "Hand back and continue…" folds with the URL (2) — before the badge
    *  (which folds last); the toggle's own Hand back stays the never-fold act; folded, it is a ⋯ row with its own words and act. */
-export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, agentBrowser: 0, close: 0, badge: 1, bind: 1, continue: 2, url: 2, open: 2, fit: 2, copy: 2, viewers: 3, rec: 3, kbd: 3, kbdBtn: 3, quit: 3, backend: 4, backendLabel: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
+export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, close: 0, agentBrowser: 1, badge: 1, bind: 1, continue: 2, url: 2, open: 2, fit: 2, copy: 2, viewers: 3, rec: 3, kbd: 3, kbdBtn: 3, quit: 3, backend: 4, backendLabel: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
 /** lane J r2: how long the bar's "input sent · n" stays bright after an act, and a ripple lives. */
 const ECHO_MS = 1600;
 const RIPPLE_MS = 650;
@@ -471,8 +471,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const reBtn = document.createElement('button'); reBtn.className = 'file-tool-btn browser-live-reconnect'; reBtn.textContent = t('Reconnect'); reBtn.style.display = 'none';
   // B-8703 unit 2 (主开发 r700): a browser VibeSpace stopped starting is stopped in «Agent browser…» — that door stands on this window's
   // bar beside the status that names it (the gear menu's own item: app.openBrowserProfiles), never a path to it
-  // — a fold item at Reconnect's rank (LIVE_BAR_PRIORITY: never folds), so a narrow bar counts it and never clips it
-  const abBtn = document.createElement('button'); abBtn.type = 'button'; abBtn.className = 'file-tool-btn browser-live-agent-browser'; abBtn.dataset.door = 'agent-browser'; abBtn.textContent = t('Agent browser…'); abBtn.style.display = 'none'; abBtn.onclick = () => { if (typeof app.openBrowserProfiles === 'function') app.openBrowserProfiles(); };
+  // — a fold item at the badge's rank (主开发 r919: it folds after the address, the open and the fit doors, so the bar's floor stays
+  // the release's and the ⋯ is never cut); folded, it is the ⋯'s FIRST row. Pressed, the profiles window opens ON the browser
+  // the words ask the person to stop (the focus the other doors of this file pass)
+  const abBtn = document.createElement('button'); abBtn.type = 'button'; abBtn.className = 'file-tool-btn browser-live-agent-browser'; abBtn.dataset.door = 'agent-browser'; abBtn.textContent = t('Agent browser…'); abBtn.style.display = 'none'; abBtn.onclick = () => { const pid = st.target && st.target.profileId ? st.target.profileId : (profileId || null); if (typeof app.openBrowserProfiles === 'function') app.openBrowserProfiles({ focus: pid }); };
   // P4 (§7.4) → the rebuilt switch dialog (2026-09-27): the profile's BROWSER NAME (`Chromium` / an engine's name, the digest's
   // fact in words — never a version or a plan). A BUTTON opening the switch dialog only when another browser is available
   // for this profile (`app.browserChoicesFor`), else the same words as a plain label; neither for the temporary browser.
@@ -2151,6 +2153,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const out = fold.folded();
     const rows = [];
     const check = (pane, btn) => (st.sidePane === pane ? '✓ ' : '') + btn.textContent;
+    if (out.includes('agentBrowser')) rows.push({ label: abBtn.textContent, action: () => abBtn.onclick() });   // B-8703 follow: the door the status names, FIRST
     for (const key of out) {
       if (key === 'badge') rows.push({ caption: modeBadge.title || modeBadge.textContent, title: modeBadge.title }); // who drives, in full (an info row — the toggle is the act)
       else if (key === 'kbd') rows.push({ caption: kbdChip.textContent, title: kbdChip.title }); // lane J r2's chip, folded: an info row

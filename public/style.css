@@ -5326,6 +5326,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .session-detail-path { font-family: var(--font-mono, monospace); font-size: 11px; word-break: break-all; }
 .session-detail-row.sp-wrap { align-items: flex-start; }
 .session-detail-row.sp-wrap .session-detail-value { white-space: normal; overflow: visible; text-overflow: clip; }
+.session-props .session-detail-row.sp-doors { flex-wrap: wrap; row-gap: 4px; }   /* B-8703 follow (r919): «On resume»'s re-mint doors wrap under the choice (two accounts, a phone) */
 /* lane S2: the Agent browser row prints THE browser fact's line — amber when the pin and the browser in use differ */
 .session-props-browser-line.amber { color: var(--yellow, #e5c07b); }
 /* the row wraps BETWEEN its parts, never inside the browser's name or its chip ("wor / k") */

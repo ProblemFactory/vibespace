@@ -987,9 +987,13 @@ const fn = (m, k) => !!(CL && CL[m] && typeof CL[m][k] === 'function');
   const SLS = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8'), SPS = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
   // the read's catch: the predicate itself is LIFTED too (a leg handed oatDead stays green if the source's own test never matches)
   const deadM = /\n      (const oatDead = !!block && block\.startsWith\(t\('“\{name\}”’s long-lived token has expired — re-mint it', \{ name: a\.name \}\)\);)\n/.exec(SLS);
-  const deadKeys = [...SLS.matchAll(/t\('(“\{name\}”’s long-lived token has expired[^']*)'/g)].map((m) => m[1]);   // the three block sites + the predicate
+  const deadKeys = [...SLS.matchAll(/t\('(“\{name\}”’s long-lived token has expired[^']*)'/g)].map((m) => m[1]);   // the two block sites + the predicate (B-8703 follow: both sites ask oatDeadFor)
   const doorM = /offDoor: (oatDead \? \{ label: t\('Long-lived token \(expired\)…'\), action: \(\) => this\._oatDialog\?\.\(a\.id, a\) \} : \{ label: t\('Manage agents…'\), action: \(\) => this\._showAgentsDialog\?\.\(\{ opener: 'billing' \}\) \})/.exec(SLS);
-  const loopM = /\n(    for \(const x of accts\) if \(vOf\(x\)\?\.reason === 'oat-expired'\) \{[^\n]*\}\n)/.exec(SPS);
+  const loopM = /\n(    for \(const x of accts\) if \(oatDeadFor\(x, vOf\(x\)\)\) \{[^\n]*\}\n)/.exec(SPS);
+  // B-8703 follow (主开发 r919): THE ONE VERDICT, lifted from its own source (src/lib/agent-meta.js) — every leg below runs the real rule
+  const AMS = fs.readFileSync(path.join(REPO, 'src/lib/agent-meta.js'), 'utf8');
+  const odM = /\nexport function oatDeadFor\(a, v\) \{\n([\s\S]*?)\n\}\n/.exec(AMS);
+  const oatDeadFor = odM ? new Function('a', 'v', odM[1]) : () => false;
   const opened = [], agents = [];
   const app = { _oatDialog: (id, a) => opened.push([id, a && a.name]), _showAgentsDialog: (o) => agents.push(o) };
   const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
@@ -1000,17 +1004,70 @@ const fn = (m, k) => !!(CL && CL[m] && typeof CL[m][k] === 'function');
   const dM = offDoor(tt('The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.', { host: 'the-host', name: A.name, email: 'x@example.invalid' }));
   if (dD) dD.action(); if (dM) dM.action();
   const row = new Nd('div');
-  const lineOf = (accts, reason) => { const r = new Nd('div'); if (loopM) new Function('accts', 'vOf', 'document', 't', 'acctRow', 'app', loopM[1])(accts, (x) => ({ reason: reason(x) }), DOC, tt, r, app); return r; };
+  const lineOf = (accts, reason) => { const r = new Nd('div'); if (loopM) new Function('accts', 'vOf', 'document', 't', 'acctRow', 'app', 'oatDeadFor', loopM[1])(accts, (x) => ({ reason: reason(x) }), DOC, tt, r, app, oatDeadFor); return r; };
   const L1 = lineOf([{ id: 'acct-x', name: 'Work Max' }, { id: 'acct-y', name: 'Home' }], (x) => (x.id === 'acct-x' ? 'oat-expired' : 'not-on-this-host'));
   const b = L1.children[0];
   if (b && typeof b.onclick === 'function') b.onclick();
   const L0 = lineOf([{ id: 'acct-y', name: 'Home' }], () => 'not-on-this-host');
   console.log('    B-8703 unit 2, the facts judged: ' + JSON.stringify({ lifted: { dead: !!deadM, door: !!doorM, loop: !!loopM }, deadKeys: deadKeys.length, deadKeysOne: new Set(deadKeys).size === 1, dead: dD && dD.label, cold: dU && dU.label, other: dM && dM.label, line: L1.children.map((c) => [c.tagName, c.textContent, c.dataset && c.dataset.door]), none: L0.children.length, opened, agents }));
-  ok(!!deadM && !!doorM && deadKeys.length === 4 && new Set(deadKeys).size === 1 && !!dD && dD.label === 'Long-lived token (expired)…' && !!dU && dU.label === 'Long-lived token (expired)…' && opened.some(([id, n]) => id === 'acct-x' && n === 'Work Max'),
-    'B-8703 unit 2: the billing menu\'s EXPIRED-token row offers «Long-lived token (expired)…» (the row menu\'s own item) — the block sentence its three sites write, alone or with the cold «unconfirmed» suffix, decided by the source\'s own oatDead; PRESSED, that account\'s own dialog (_oatDialog)', { door: dD && dD.label, cold: dU && dU.label, deadKeys, opened });
+  ok(!!deadM && !!doorM && deadKeys.length === 3 && new Set(deadKeys).size === 1 && !!dD && dD.label === 'Long-lived token (expired)…' && !!dU && dU.label === 'Long-lived token (expired)…' && opened.some(([id, n]) => id === 'acct-x' && n === 'Work Max'),
+    'B-8703 unit 2: the billing menu\'s EXPIRED-token row offers «Long-lived token (expired)…» (the row menu\'s own item) — the block sentence its two sites write, alone or with the cold «unconfirmed» suffix, decided by the source\'s own oatDead; PRESSED, that account\'s own dialog (_oatDialog)', { door: dD && dD.label, cold: dU && dU.label, deadKeys, opened });
   ok(!!loopM && L1.children.length === 1 && b && b.tagName === 'BUTTON' && b.textContent === 'Re-mint “Work Max”’s long-lived token…' && b.dataset.door === 'oat-remint' && opened.filter(([id]) => id === 'acct-x').length === 2,
     'B-8703 unit 2: the session properties\' account line gains «Re-mint “{name}”’s long-lived token…» for the account whose token expired — PRESSED, the same dialog for that account', { line: L1.children.map((c) => c.textContent), opened });
   ok(!!dM && dM.label === 'Manage agents…' && agents.length === 1 && L0.children.length === 0, 'CONTROL B-8703 unit 2: any other block keeps «Manage agents…» (pressed: Manage agents), and a line with no expired token gains no button', { other: dM && dM.label, agents, none: L0.children.length });
+}
+// B-8703 follow (主开发 r914 / r919): ONE VERDICT FOR BOTH LISTS — the billing menu's subBlock and Session Properties' subBlocked /
+// blockedNote, each LIFTED from its source and run over ONE fixture (a local conversation, then a remote one with host verdicts):
+// an account offered by one is offered by the other, and a dead long-lived token is refused by both — the billing menu's sentence,
+// Properties' mark. RED CONTROL: Properties' rule before the follow (its oatDeadFor line taken out) — the two lists apart, by name
+{
+  const SLS = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8'), SPS = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
+  const AMS = fs.readFileSync(path.join(REPO, 'src/lib/agent-meta.js'), 'utf8');
+  const odM = /\nexport function oatDeadFor\(a, v\) \{\n([\s\S]*?)\n\}\n/.exec(AMS);
+  const oatDeadFor = odM ? new Function('a', 'v', odM[1]) : null;
+  const sbM = /\n    const subBlock = \(a\) => \{\n([\s\S]*?)\n    \};\n    const items = \[\];/.exec(SLS);
+  const spM = /\n    const subBlocked = \(x\) => \{\n([\s\S]*?)\n    \};\n/.exec(SPS);
+  const bnM = /\n    const blockedNote = \(x\) => \{\n([\s\S]*?)\n    \};\n/.exec(SPS);
+  const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
+  const no = () => false, bill = { apiKeys: false, hostLogin: false };
+  const billing = (a, host, verdicts) => new Function('a', 't', 'vOf', 'oatDeadFor', 'rHostId', 'rHostName', 'bill', 'hostLinked', 'hostSubHeld', 'rTransport', 'shipSubs', 'shipBlocked', sbM[1])
+    .call({ _hostNamesKnown: {} }, a, tt, (x) => (host ? verdicts[x.id] : null) || null, oatDeadFor, host, host || '', bill, no, no, host ? 'ssh' : null, false, false);
+  const props = (body) => (x, host, verdicts) => new Function('x', 'vOf', 'oatDeadFor', 'rHost', 'bill', 'hostLinked', 'hostSubHeld', 'rTransport', 'shipSubs', body)
+    (x, (y) => (host ? verdicts[y.id] : null) || null, oatDeadFor, host, bill, no, no, host ? 'ssh' : null, false);
+  const note = (x, host, verdicts) => new Function('x', 'vOf', 'oatDeadFor', 't', 'verdictsCold', 'warmState', bnM[1])(x, (y) => (host ? verdicts[y.id] : null) || null, oatDeadFor, tt, false, null);
+  const sub = (id, o) => ({ id, name: id, type: 'subscription', backend: 'claude', ...o });
+  const LOCAL = [sub('dead', { oat: true, oatDaysLeft: -2, loggedIn: false }), sub('dead-signed-in', { oat: true, oatDaysLeft: -2, loggedIn: true }), sub('live', { oat: true, oatDaysLeft: 30, loggedIn: false })];
+  const REMOTE = [sub('r-expired', { oat: true, oatDaysLeft: -1 }), sub('r-stale', { oat: true, oatDaysLeft: -1 }), sub('r-linked', { loggedIn: true })];
+  const V = { 'r-expired': { usable: false, reason: 'oat-expired' }, 'r-stale': { usable: true, how: 'oat' }, 'r-linked': { usable: true, how: 'host-login' } };
+  const judge = (pb) => [...LOCAL.map((a) => [a, null, {}]), ...REMOTE.map((a) => [a, 'host-b', V])].map(([a, h, vs]) => {
+    const block = billing(a, h, vs), off = pb(a, h, vs);
+    return { id: a.id, billing: block === null ? 'offered' : block, props: off ? 'refused' : 'offered', mark: off ? note(a, h, vs)[0] : null, dead: oatDeadFor(a, h ? vs[a.id] || null : null) };
+  });
+  const apart = (rows) => rows.filter((r) => (r.billing === 'offered') !== (r.props === 'offered')).map((r) => r.id);
+  const lifted = !!(oatDeadFor && sbM && spM && bnM);
+  const now = lifted ? judge(props(spM[1])) : [];
+  const preBody = spM ? spM[1].replace(/\n      if \(oatDeadFor\(x, v\)\) return true;/, '') : '';
+  const pre = lifted && preBody !== spM[1] ? judge(props(preBody)) : [];
+  console.log('    B-8703 follow, one verdict for both lists — the facts judged: ' + JSON.stringify({ lifted, now, preApart: apart(pre) }));
+  const DEAD = '“{name}”’s long-lived token has expired — re-mint it';
+  ok(lifted && now.length === 6 && apart(now).length === 0 && now.filter((r) => r.dead).map((r) => r.id).join() === 'dead,r-expired,r-stale'
+    && now.filter((r) => r.dead).every((r) => r.billing === tt(DEAD, { name: r.id }) && r.mark === 'long-lived token expired'),
+    'B-8703 follow: ONE verdict for both lists — over the same six accounts (local and remote) the billing menu and Session Properties offer and refuse the same ones; a dead long-lived token (local and not signed in, the host\'s «oat-expired», a usable-oat verdict whose days ran out) is refused by both, with the menu\'s sentence and Properties\' mark', { now, apart: apart(now) });
+  ok(pre.length === 6 && apart(pre).join() === 'dead,r-stale', 'CONTROL: Session Properties\' rule before the follow (its oatDeadFor line out) — the two lists apart on the local dead token and the stale usable verdict, by name', apart(pre));
+  // r919 item 4: the «On resume» row WRAPS when doors join it (two accounts, a phone) — the row the door loop draws carries sp-doors, the
+  // sheet wraps that row. The tooltip names the button by its own words (the round's catch: one source of the label)
+  const loopM = /\n(    for \(const x of accts\) if \(oatDeadFor\(x, vOf\(x\)\)\) \{[^\n]*\}\n)/.exec(SPS);
+  const line = (accts) => { const r = new Nd('div'); if (loopM) new Function('accts', 'vOf', 'document', 't', 'acctRow', 'app', 'oatDeadFor', loopM[1])(accts, () => null, DOC, tt, r, {}, oatDeadFor); return r; };
+  const two = line([LOCAL[0], { ...LOCAL[0], id: 'dead-2', name: 'Second' }]), none = line([LOCAL[1], LOCAL[2]]);
+  const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
+  const tipM = /t\('Re-mint it with «([^»]*)» on this line\.'/.exec(SPS), btnM = /b\.textContent = t\('([^']*)', \{ name: x\.name \|\| '\?' \}\)/.exec(SPS);
+  const tipKey = tipM && `Re-mint it with «${tipM[1]}» on this line.`, vv = (k) => VALUES.get(k) || {};
+  const quoted = tipM && btnM && tipM[1] === btnM[1] && ['zh', 'ja'].every((l) => { const lab = vv(btnM[1])[l], s = vv(tipKey)[l]; return typeof lab === 'string' && typeof s === 'string' && (s.includes(lab) || s.includes(lab.replace('「{name}」', '『{name}』'))); });
+  console.log('    B-8703 follow, the «On resume» row: ' + JSON.stringify({ buttons: two.children.map((c) => c.textContent), cls: two.className, none: [none.children.length, none.className], quoted }));
+  ok(!!loopM && two.children.length === 2 && /\bsp-doors\b/.test(two.className) && none.children.length === 0 && !/\bsp-doors\b/.test(none.className || '')
+    && /\.session-props \.session-detail-row\.sp-doors \{ flex-wrap: wrap;/.test(css),
+    'B-8703 follow: the «On resume» row carries sp-doors when a door joins it, and the sheet WRAPS that row (two expired accounts, a phone); a row with no door stays as it was', { cls: two.className });
+  ok(!!quoted, 'B-8703 follow: the disabled option\'s tooltip names the button by its own words, in en, zh and ja', { tip: tipM && tipM[1], button: btnM && btnM[1] });
 }
 // B-8703 unit 2: the live browser window's status «… Stop it in «Agent browser…» …» (a browser VibeSpace stopped starting) has its DOOR on
 // the window's bar beside it — lifted from its source and PRESSED (the gear menu's own target: app.openBrowserProfiles); shown only for
@@ -1021,21 +1078,24 @@ const fn = (m, k) => !!(CL && CL[m] && typeof CL[m][k] === 'function');
   const showM = /const setStatus = \(text, \{ error = false, reconnect = false, hide = false, agentBrowser = false \} = \{\}\) => \{\n    statusEl\.textContent = text \|\| '';\n    (abBtn\.style\.display = agentBrowser \? '' : 'none';)/.exec(BLW);
   const passes = (BLW.match(/agentBrowser: m\.code === 'browser_unstable'/g) || []).length;
   const opened = []; const app = { openBrowserProfiles: (o) => opened.push(o === undefined ? 'opened' : o) };
-  let btn = null; try { btn = abM ? new Function('document', 't', 'app', abM[1] + '\nreturn abBtn;')(DOC, (k) => k, app) : null; } catch (e) { btn = null; }
-  if (btn && typeof btn.onclick === 'function') btn.onclick();
+    // B-8703 follow (r919 item 2): pressed, the profiles window opens ON the browser the words ask to stop (the shown target's profile,
+  // else the view's own) — the focus the other doors of the file pass
+  const ST = { target: { profileId: 'prof-shown' } };
+  let btn = null; try { btn = abM ? new Function('document', 't', 'app', 'st', 'profileId', abM[1] + '\nreturn abBtn;')(DOC, (k) => k, app, ST, 'prof-own') : null; } catch (e) { btn = null; }
+  if (btn && typeof btn.onclick === 'function') { btn.onclick(); ST.target = null; btn.onclick(); }
   const shown = (on) => { const b = { style: {} }; if (showM) new Function('abBtn', 'agentBrowser', showM[1])(b, on); return b.style.display; };
   console.log('    B-8703 unit 2 (Agent browser), the facts judged: ' + JSON.stringify({ lifted: !!abM, label: btn && btn.textContent, door: btn && btn.dataset && btn.dataset.door, opened, shownOn: shown(true), shownOff: shown(false), passes }));
-  ok(!!btn && btn.tagName === 'BUTTON' && btn.textContent === 'Agent browser…' && btn.dataset.door === 'agent-browser' && opened.length === 1 && !!showM && shown(true) === '' && passes === 1,
+  ok(!!btn && btn.tagName === 'BUTTON' && btn.textContent === 'Agent browser…' && btn.dataset.door === 'agent-browser' && opened.length === 2 && opened[0].focus === 'prof-shown' && opened[1].focus === 'prof-own' && !!showM && shown(true) === '' && passes === 1,
     'B-8703 unit 2: a browser VibeSpace stopped starting — «Agent browser…» stands on the live window\'s bar beside the status that names it; PRESSED, it opens the gear menu\'s own target (app.openBrowserProfiles); only the unstable status shows it', { opened, passes });
   ok(!!showM && shown(false) === 'none', 'CONTROL B-8703 unit 2: any other status hides «Agent browser…» (setStatus without agentBrowser)', shown(false));
   // the read's catch: «only the unstable status shows it» was a count of ONE passer's text — every mention of agentBrowser in the file is
-  // one of its five known forms and abBtn's display is set twice (made hidden; setStatus), so no other call can show it. CONTROL: a
+  // one of its six known forms (the follow: its rank, its folded row) and abBtn's display is set twice (made hidden; setStatus), so no other call can show it. CONTROL: a
   // planted setStatus(…, { agentBrowser: true }) is named
-  const KNOWN = ['agentBrowser: 0', 'agentBrowser = false', "agentBrowser ? '' : 'none'", "agentBrowser: m.code === 'browser_unstable'", 'agentBrowser: abBtn'];
+  const KNOWN = ['agentBrowser: 1', "agentBrowser'", 'agentBrowser = false', "agentBrowser ? '' : 'none'", "agentBrowser: m.code === 'browser_unstable'", 'agentBrowser: abBtn'];
   const passers = (text) => { const all = (text.match(/\bagentBrowser\b[^,;)}\n]*/g) || []).map((x) => x.trim()); return { all: all.length, others: all.filter((x) => !KNOWN.includes(x)), shows: (text.match(/\babBtn\.style\.display\s*=/g) || []).length }; };
   const pa = passers(BLW), pp = passers(BLW + "\nsetStatus('x', { agentBrowser: true });\n");
   console.log('    B-8703 unit 2 (Agent browser), who can show it: ' + JSON.stringify({ tip: pa, planted: pp }));
-  ok(pa.all === 5 && pa.others.length === 0 && pa.shows === 2, 'B-8703 unit 2: no other road shows «Agent browser…» — every mention of agentBrowser is one of its five known forms, abBtn\'s display set only at its making and in setStatus', pa);
+  ok(pa.all === 6 && pa.others.length === 0 && pa.shows === 2, 'B-8703 unit 2: no other road shows «Agent browser…» — every mention of agentBrowser is one of its six known forms, abBtn\'s display set only at its making and in setStatus', pa);
   ok(pp.others.length === 1 && pp.others[0] === 'agentBrowser: true', 'CONTROL B-8703 unit 2: a planted setStatus(…, { agentBrowser: true }) is named', pp);
 }
 // B-8703 part 3 (主开发 r533): THE OPEN USAGE POPUP IS REDRAWN THE MOMENT spend.allowOverageTurns FLIPS — the real meter (installUsageMeter,
