@@ -332,7 +332,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   { const fpG = path.join(projDir, 'gap-only.jsonl'); C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); try { await C.jsonlGapInfoAsync(fpG); } catch { }
     ok(!C.fileRefused(fpG), 'a gap read\'s plain refusal notes nothing of the file (only a history read\'s refusal or the storage\'s does)'); }
   C._setSlicedForTest({ storageRetryMs: 60 });
-  fs.writeFileSync(claudeFp, lines.slice(0, 400).join('\n') + '\n');
+  fs.writeFileSync(claudeFp, lines.slice(0, 250).join('\n') + '\n');   // SHORTER than the copy (7) loaded (300): a rewrite, the warm asks the pool for the whole read (400 was an append the warm folds in)
   const Hg = refusing({ status: 503, code: 'path-hung' }); C._setTranscriptPoolForTest(Hg);
   await SS0.warmSessionJsonlAsync(sid, cwd);   // the storage's (the cache was behind: the pool asked, refused)
   const g0 = tails(Hg);
