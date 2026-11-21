@@ -3845,6 +3845,52 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     const OVX = await overScene(() => mutantCopies('swc-pl-nogiveup', REPO).load(PREL, anchored(PSRC, GIVE_A, "        w.durable(file, { answer: (ok2) => settle(file, ok2, then) });   // MUTANT: no give-up at once\n", 'pl-no-giveup')), 'nogiveup');
     ok(typeof OVX.threw === 'string' && /call stack/i.test(OVX.threw), 'CONTROL (the give-up cut, in a copy): the wait again answers into itself — the stack overflows (red)', OVX);
 
+    // (am) A DROPPED CHANGE REPLIES «APPEARED» (r1478, round wg6jz85ye): a door past its bound whose change a read again WHOLE dropped
+    // meanwhile (a file appeared where the start found none) is answered UNMARKED — its door says the appeared refusal (409), no
+    // «queued» word, nothing owed. RED: the generation's check at the bound cut (the dropped change marked owed: 503 «queued»)
+    const dropScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-drop-' + tag); roots.push(d); seed(d);   // NO layouts.json at the start
+      const LF = path.join(d, 'layouts.json'), HD = path.join(d, 'layout-history');
+      fs.mkdirSync(HD, { recursive: true }); fs.writeFileSync(path.join(HD, 'layout-x.json'), J({ at: 1, layouts: L0 }));   // a rollback point to restore
+      const g = gatedWriter(); const told = [];
+      const R = setupP(fresh(load), d, g.W, told, []);
+      R.readLayouts();
+      R.writeLayouts(JSON.parse(J(L0))); await tick2();
+      const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
+      R.writeLayouts(shape); await tick2();                       // point 1 in flight
+      const p1 = g.flying().find((f) => /layout-history/.test(f) && !/\.meta\.json$/.test(f));
+      R.flushLayouts();                                            // an autosave: it waits for point 1
+      const out = call(R, 'post', '/api/layout-history/:id/restore', { body: { rid: 'r-drop' }, params: { id: 'layout-x.json' } });   // the door waits for its own point(s)
+      fs.writeFileSync(LF, J({ ...L0, desktopMeta: [{ id: 'd9', name: 'appeared' }] }));   // a file appears (a late mount)
+      g.landOnly((f) => f === p1); g.landOnly((f) => /\.meta\.json$/.test(f) && f.startsWith(p1.replace(/\.json$/, '')));   // the autosave meets the appeared file: read again WHOLE
+      g.fireBounds((w) => w === 'door');                          // the door's bound: its change was dropped meanwhile
+      const held = call(R, 'get', '/api/stores/held');
+      return { status: out.status, code: out.body && out.body.code, words: told.filter((x) => x.type === 'store-unsaved').length, unsaved: (held.body && held.body.unsaved) || [], onDisk: JSON.parse(fs.readFileSync(LF, 'utf8')).desktopMeta.map((m) => m.id) };
+    };
+    const DP = await dropScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(DP.status === 409 && DP.code === 'store_appeared' && DP.words === 0 && DP.unsaved.length === 0 && J(DP.onDisk) === J(['d9']), '⑭am a door past its bound whose change a read again whole dropped replies the «appeared» refusal (409) — unmarked: no «queued» word, nothing owed, the appeared file kept', DP);
+    const DGEN_A = "      if (gen === _layoutsGen) {\n";
+    ok(PSRC.split(DGEN_A).length === 2, 'control setup: the door\'s generation check at its bound is found once');
+    const DPX = await dropScene(() => mutantCopies('swc-pl-dropmarked', REPO).load(PREL, anchored(PSRC, DGEN_A, "      if (true) {   // MUTANT: the generation's check at the bound cut\n", 'pl-drop-marked')), 'dropmarked');
+    ok(DPX.status === 503 && DPX.words === 1, 'CONTROL (the generation\'s check at the bound cut, in a copy): a dropped change is marked owed and «queued» — the door says «kept, written by itself» for a change that will never be written (red)', DPX);
+
+    // (an) EVERY REPLY IS HANDED — THE WAITING COUNTER's ONE DECREMENT (r1478, round wg6jz85ye): a door past its bound is counted until
+    // landLayouts hands its flush (no landing lifts a mark meanwhile); a road that ended a door's flush elsewhere would keep «not saved»
+    // up for ever. The pin: ONE `_doorsWaiting--`, inside the reply's `handed`; ONE `.handed()` call, landLayouts' own over every reply;
+    // flushLayouts never answers a flush itself. REDs (planted in copies): a road answering outside landLayouts; a second decrement
+    const handedPin = (src) => {
+      const body = (name) => { const i = src.indexOf('function ' + name + '('); return i < 0 ? '' : src.slice(i, src.indexOf('\n  }\n', i)); };
+      const fl = body('flushLayouts'), ll = body('landLayouts'), ba = body('boundedAnswer');
+      return (src.match(/_doorsWaiting--/g) || []).length === 1 && /once\.handed = \(\) => \{[^\n]*_doorsWaiting--/.test(ba)
+        && (src.match(/\.handed\(\)/g) || []).length === 1 && /for \(const a of f\.answers\) if \(a && typeof a\.handed === 'function'\) a\.handed\(\);/.test(ll)
+        && (fl.match(/\banswer\(/g) || []).length === 0;
+    };
+    ok(handedPin(PSRC), '⑭an every reply is handed: the waiting counter has ONE decrement (the reply\'s handed), called ONCE (landLayouts over every reply), and flushLayouts never answers a flush itself — every road ends in landLayouts');
+    const HND_A = "    if (answer) answer = boundedAnswer(answer, press, _layoutsGen);\n";
+    const planted1 = anchored(PSRC, HND_A, HND_A + "    if (stop && answer && !_layoutsCache) { answer(true); return; }   // PLANTED: a road answering a flush outside landLayouts\n", 'handed-road');
+    const planted2 = anchored(PSRC, "    if (f.gen !== _layoutsGen) return done(false);", "    if (f.gen !== _layoutsGen) { _doorsWaiting--; return done(false); }   // PLANTED: a second decrement", 'handed-twice');
+    ok(!handedPin(planted1) && !handedPin(planted2), 'CONTROL (planted in a copy\'s text): a road that answers a flush outside landLayouts, and a second decrement of the counter — each red');
+
     // (ac) THE OWED WORDS LIFT ONLY AT A LANDING THAT LEAVES NOTHING NEWER OWED (the first fresh read's small; the second's should: its
     // leg): a press said «unsaved», then two changes; the first lands while the second is still owed — no «saved» until the second lands.
     // RED: lifted at any landing

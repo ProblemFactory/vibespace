@@ -235,7 +235,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // the writer's own bound (its durable bound: 60 s, or the one a writer states) — past it «not taken in time»: the store marked owed
   // and QUEUED first (its words, at once for a press), then the answer false. The flush is KEPT: it still lands after its point, and
   // that landing lifts the mark (the hold's onSaved: every page told it landed). Unref'd: a stop never waits on it
-  const boundMs = () => { const w = storeW(); return w && Number.isFinite(w.durableMs) && w.durableMs > 0 ? w.durableMs : 60000; };
+  const boundMs = () => { const w = storeW(); return w && Number.isFinite(w.durableMs) && w.durableMs > 0 ? w.durableMs : 60000; };   // the writer's durableMs, exported beside its grace (60 s: a writer that hands none)
   /** THE ONE BOUND's clock: the writer's own (`onBound(fn, what)` — a suite's stand-in fires it by hand: an injected clock), else a
    *  timer of the writer's bound, unref'd (a stop never waits on it) → its cancel */
   function onBound(fn, what) {

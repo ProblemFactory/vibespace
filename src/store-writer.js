@@ -632,7 +632,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function stop() { stopped = true; if (timer) clearTimeout(timer); timer = null; const w = worker; worker = null; try { w && w.terminate(); } catch { } const k = keeperT; keeperT = null; try { k && k.terminate(); } catch { } }
   if (keeperOn) startKeeper();   // a suite's own writer may ask for one; the server's is started by bootKeeper() at its boot
   const waits = () => ({ timedOut: waitsTimedOut });   // round 6's amend: waits that ended by their poll, not the write's end
-  return { LATER, dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, stop, graceMs, _now: now };
+  return { LATER, dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, stop, graceMs, durableMs, _now: now };   // durableMs: the bound a durable() waits by default (B-0248: the desktops' doors and points read it)
 }
 
 /** THE process's writer (one thread, one queue for every store) */
