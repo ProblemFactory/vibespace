@@ -106,7 +106,7 @@ const ROWS = [
   ["src/fixture-ledger-purge.js", "*", 9, "local-only", "every path is under dataDir (migrations.js one-shot passes <checkout>/data): usage-history/, usage-anchors/, archive/"],
   ["src/gmail-sync.js", "GmailSync._syncOnce", 2, "guarded", "the gmail folder's state file (a LOCAL folder: filesystem:false row); under a FUSE mount the guard refuses it"],
   ["src/gmail-sync.js", "GmailSync._saveState", 2, "guarded", "the gmail folder's state file (a LOCAL folder: filesystem:false row); under a FUSE mount the guard refuses it"],
-  ["src/gmail-sync.js", "GmailSync._writeMessage", 3, "guarded", "a gmail message file in its folder (a LOCAL folder: filesystem:false row); under a FUSE mount the guard refuses it"],
+  ["src/gmail-sync.js", "GmailSync._writeMessage", 1, "guarded", "a gmail message file in its folder (a LOCAL folder: filesystem:false row); under a FUSE mount the guard refuses it"],
   ["src/harness-config.js", "*", 21, "local-only", "the vendor CLI's own config files: path.join(home||os.homedir(), ...rel) (~/.claude/settings.json, ~/.codex/config.toml, hooks.json), rel = bare segments; a symlink's target = the user's dotfile; +3 B-b83c: the hook's node in its stable spelling (a readlink of the runtime's own `current` link, the realpath of a stored and a wanted hook node: local binaries)"],
   ["src/hosts.js", "HostManager._persistDiscovery", 2, "local-only", "tmp/this._discFile = <dataDir>/remote-sessions-cache.json(.tmp); dataDir = <checkout>/data (new HostManager at server.js:1164)."],
   ["src/hosts.js", "HostManager.migrateDialTokenFile", 3, "local-only", "only caller server.js:1170 passes path.join(AGENTD_DIR, 'dial-tokens.json'); AGENTD_DIR = <checkout>/data/agentd."],

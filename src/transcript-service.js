@@ -441,6 +441,18 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     }
     await new Promise((res, rej) => out.end((e) => (e ? rej(e) : res())));
     if (!replaced && !skipped) { try { fs.unlinkSync(tmp); fs.unlinkSync(backup); } catch { } return { replaced: 0, skipped: 0, lines, sizeBefore, sizeAfter: sizeBefore, backup: null }; }
+    // B-ddf3 (THE LAW of B-9275: a file's new bytes are on disk before its name points at them): the backup and the rewritten
+    // transcript are synced before the swap, on the thread pool (never the loop), so a power loss cannot leave the person's
+    // transcript, or its only copy, empty. A failed sync is a failed rescue, said by name: nothing is swapped.
+    for (const p of [backup, tmp]) {
+      let h = null, fault = null;
+      try { h = await fs.promises.open(p, 'r+'); await h.sync(); } catch (e) { fault = e; }
+      if (h) { try { await h.close(); } catch (e) { fault = fault || e; } }   // a failed close fails the rescue too, said below
+      if (fault) {
+        await fs.promises.unlink(tmp).catch(() => { });
+        throw new Error(`rescue: ${p === tmp ? 'the rewritten transcript' : 'its backup'} could not be put on disk (${fault.code || fault.message}) — nothing was replaced, the transcript is as it was${p === tmp ? ' (its backup: ' + backup + ')' : ''}`);
+      }
+    }
     fs.renameSync(tmp, fp);
     try { fs.chmodSync(fp, 0o600); } catch { }
     return { replaced, skipped, lines, sizeBefore, sizeAfter: fs.statSync(fp).size, backup };

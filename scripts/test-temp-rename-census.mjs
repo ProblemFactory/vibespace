@@ -112,7 +112,7 @@ export function renameSites(rel, src, AC) {
 // ── THE FAMILIES: each goes THROUGH THE WRITER, or is NAMED with its reason, or is A CURE OWED with its row ─────────────────────
 const FAMILIES = {
   writer: { verdict: 'through the writer', classes: ['synced'], why: 'the store writer\'s thread (src/store-writer-worker.js writeJob): every store the writer holds — the temp synced before the rename since B-9275 unit 1' },
-  'self-synced': { verdict: 'named', classes: ['synced'], why: 'its own writer syncs the temp before the rename, and a sync that fails fails the write (a private credential file, the device identity, a sealed app secret, a webhook\'s store, the usage ledger\'s rewrite)' },
+  'self-synced': { verdict: 'named', classes: ['synced'], why: 'its own writer syncs the temp before the rename, and a sync that fails fails the write (since B-ddf3 the person\'s files the hub cures one by one: a mail message\'s copy, a rescued transcript; a private credential file, the device identity, a sealed app secret, a webhook\'s store, the usage ledger\'s rewrite)' },
   'self-synced-best-effort': { verdict: 'named', classes: ['synced'], why: 'its own writer syncs the temp before the rename BEST EFFORT: a sync that FAILS (EIO, ENOSPC) is swallowed and the temp is still renamed — the vault\'s files, its TOTP and run-door stores, the automation store (round wl2wglpsq: rare, said here as it is)' },
   secret: { verdict: 'cured', row: 'B-dc3f', classes: ['unsynced', 'synced'], why: 'the secret-bearing replace (src/secret-file.js): CURED in the hotfix 2.369.415 by another lane (row B-dc3f: synced, renamed, its folder synced) — it reads unsynced until that hotfix is under this tree, synced after; either is this row UNTIL THEN: once the hotfix is under this tree its classes narrow to synced (one word here), so a regression of the cure is red' },
   store: { verdict: 'owed', row: 'B-574d', classes: ['unsynced', 'move'], why: 'a store or a record of the HUB written by its own temp + rename with no sync: after a power loss its name can point at an empty file, read back as damaged. The cure: through the store writer (synced since B-9275 unit 1) or one shared synced replace' },
@@ -187,7 +187,7 @@ const ROWS = [
   ["src/exit-proxy.js", "synced", "self-synced", "", "ExitProxyManager._transferHeld"],
   ["src/fixture-ledger-purge.js", "unsynced", "store", "", "_writeAtomic"],
   ["src/gmail-sync.js", "unsynced", "store", "", "GmailSync._saveState"],
-  ["src/gmail-sync.js", "unsynced", "person", "the person's local mail copy: the folder's file NAMES are the seen index — a torn copy is never fetched again (round wl2wglpsq's must)", "GmailSync._writeMessage"],
+  ["src/gmail-sync.js", "synced", "self-synced", "the person's local mail copy: the folder's file NAMES are the seen index (a torn copy would never be fetched again) — written, synced and renamed off the loop since B-ddf3 unit 1", "GmailSync._writeMessage"],
   ["src/harness-config.js", "unsynced", "person", "a CLI's own settings file (the person's)", "commitWrite", "commitCreate"],
   ["src/harnesses/claude-home.js", "move", "move", "", "moveUser", "moveUser", "relinkLegacy"],
   ["src/harnesses/codex-models.js", "unsynced", "derived", "a cache of the CLI's model list", "models"],
@@ -306,7 +306,7 @@ const ROWS = [
   ["src/task-groups.js", "unsynced", "derived", "a Task Group's mirror file, written again from the group's state", "TaskGroupManager._runMirror"],
   ["src/task-groups.js", "unsynced", "store", "", "TaskGroupManager._archiveClear", "TaskGroupManager._importArchive"],
   ["src/task-groups.js", "unsynced", "person", "an export the person asked for", "TaskGroupManager.exportToFile"],
-  ["src/transcript-service.js", "unsynced", "person", "a conversation transcript rescued in place (its backup kept)", "createTranscriptService > rescue"],
+  ["src/transcript-service.js", "synced", "self-synced", "a conversation transcript rescued in place: it and its backup synced before the swap since B-ddf3 unit 1", "createTranscriptService > rescue"],
   ["src/usage-cache-write.js", "unsynced", "store", "", "atomicWrite"],
   ["src/usage-history.js", "unsynced", "store", "", "UsageHistory._writeAtomic"],
   ["src/usage-hold-road.js", "move", "move", "", "UsageHoldRoad._setAsideFile"],
@@ -322,7 +322,7 @@ const ROWS = [
   ["src/webdav.js", "unsynced", "person", "a DAV upload (PUT)", "registerWebdav > route:USE /dav"],
   ["src/webdav.js", "move", "move", "", "registerWebdav > route:USE /dav"]
 ];
-const OWED_MAX = 150;   // the sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
+const OWED_MAX = 148;   // B-ddf3 unit 1 (lane bl-scratch): 150 → 148 — the Gmail copy and the rescued transcript synced. The sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
 // THE RATCHET (round wl2wglpsq): OWED_MAX is an EQUALITY with the census (a cure lowers it in the cure's own commit). A commit
 // could raise it and stay green here, so a rise above the KEPT baseline is red by name unless RISES names it with its row
 const OWED_BASELINE = 150;   // kept at the census's acceptance (round wl2wglpsq's cure: 148 + the Gmail copy + the outbox folder)

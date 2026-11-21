@@ -490,8 +490,18 @@ class GmailSync {
     const destDir = sub ? path.join(w.cfg.dir, sub) : w.cfg.dir;
     fs.mkdirSync(destDir, { recursive: true });
     const tmp = path.join(destDir, `.tmp-${id}`);
-    fs.writeFileSync(tmp, raw);
-    fs.renameSync(tmp, path.join(destDir, `${stamp}_${slug}_${id}.eml`));
+    // B-ddf3 (THE LAW of B-9275: a file's new bytes are on disk before its name points at them): the message's file NAME is its
+    // «seen» mark, so an empty copy after a power loss would stay empty for good. Written, synced ONCE at its end and renamed on
+    // the thread pool (never the hub's loop); a failed write or sync is said by name, nothing renamed, the message not marked seen
+    // (the next pass fetches it again).
+    let h = null, fault = null;
+    try { h = await fs.promises.open(tmp, 'w'); await h.writeFile(raw); await h.sync(); } catch (e) { fault = e; }
+    if (h) { try { await h.close(); } catch (e) { fault = fault || e; } }   // a failed close is a failed copy too, said below
+    if (fault) {
+      await fs.promises.unlink(tmp).catch(() => { });
+      throw new Error(`gmail: message ${id} could not be put on disk (${fault.code || fault.message}) — not saved, fetched again on the next pass`);
+    }
+    await fs.promises.rename(tmp, path.join(destDir, `${stamp}_${slug}_${id}.eml`));
     seen.add(id);
     w.count = seen.size;
     return Number(msg.internalDate) || null;
