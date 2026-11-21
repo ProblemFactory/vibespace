@@ -116,6 +116,11 @@ const CID_A = 'e2e00000-0000-4000-8000-0000000000a1', CID_B = 'e2e00000-0000-400
   ok(unread.code === 'groups_unreadable' && /could not be read/.test(unread.why) && !/not yours|drives|watch|browses|dialog|turn is/.test(unread.why) && unread.why.includes(B.STOP_DOOR), '① HOLD LAW: a holder whose Task Groups could not be read refuses BY NAME (groups_unreadable), before any live fact — never «it is not yours»', unread);
   ok(B.stopVerdict({ ...idle, holders: [{ turn: 'idle', granted: false, unreadable: true }, { turn: 'idle', granted: false }] }).code === 'not_granted' && B.stopVerdict({ ...idle, holders: [{ turn: 'idle', granted: true }, { turn: 'idle', granted: false, unreadable: true }] }).code === 'groups_unreadable',
     '① HOLD LAW: a holder plainly outside the reach answers not_granted beside an unreadable one; a reached holder beside an unreadable one is still unknown by name');
+  // round wztkervx5 (a): a holder the grant EXCEPTS is refused in the exception's OWN words (the reach's), with the grant's reach — as
+  // the neighbouring doors say it — never «it is not yours», and nothing of the live facts behind it
+  const EXC_WHY = 'the owner left that conversation out of this grant\'s reach (an exception on the key\'s row in the Vault window) — ask the owner to lift it';
+  const exw = B.stopVerdict({ ...idle, holders: [{ turn: 'running', granted: false, excepted: { why: EXC_WHY, reach: 'instance' } }], takenOver: true, inFlight: 'a page dialog' });
+  ok(exw.code === 'excepted' && exw.why.includes(EXC_WHY) && exw.reach === 'instance' && !/not yours|drives|dialog|turn is/.test(exw.why) && exw.why.includes(B.STOP_DOOR), '① an EXCEPTED holder is refused in the exception\'s own words (excepted, the grant\'s reach named) — never «it is not yours», no live fact said', exw);
   const lone = B.stopVerdict({ ...idle, holders: [{ unknown: true }] });
   ok(lone.code === 'not_granted' && !/not running here/.test(lone.why), '① «a holder is not running here» is said only to a key that reaches a holder — to any other it is simply not its own', lone);
   const far = B.stopVerdict({ ...idle, kind: 'remote', takenOver: true });

@@ -676,7 +676,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
           const ops = O.automationVerbs({ activeSessions: new Map([['w-0001', { claudeSessionId: 'k1', backend: 'claude', name: 'child' }]]), groupsOf: () => ['tg-c'], lineageOf,
             browsers: { rows: () => [row], stop: async () => { stopped++; return { freed: true }; } } });
           const r = await ops['browsers.stop']({ id: row.id }, ctx);
-          return { judged, code: r.ok ? 'stopped' : r.code, stopped };
+          return { judged, code: r.ok ? 'stopped' : r.code, why: r.why || null, stopped };
         };
         const SRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf-8');
         const STOP_AT = "}, glr === null ? null : lineageOfIds(gl))); } catch { v = null; }   // the stop's reach (as the end verb's)";
@@ -687,7 +687,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
           const OPSR = require('../src/server/conversation-ops.js');
           const exc = await stopDoor(OPSR, EXC, READS), thr = await stopDoor(OPSR, EXC, THROWS), par = await stopDoor(OPSR, PAR, READS), excR = await stopDoor(REDO, EXC, READS), parR = await stopDoor(REDO, PAR, READS);
           for (const [n, x] of [['stop, except-parent', exc], ['stop, lineage throws', thr], ['stop, grant to the parent', par], ['RED stop, except-parent', excR], ['RED stop, grant to the parent', parR]]) console.log(`    judged (${n}): ${J(x)}`);
-          ok(J(exc.judged) === J(['excepted']) && exc.code === 'not_granted' && exc.stopped === 0, 'the STOP door: a key «everyone except the parent» does not stop a browser held by the CHILD\'s conversation — refused, nothing stopped', exc);
+          ok(J(exc.judged) === J(['excepted']) && exc.code === 'excepted' && /left that conversation out of this grant/.test(exc.why || '') && !/not yours/.test(exc.why || '') && exc.stopped === 0, 'the STOP door: a key «everyone except the parent» does not stop a browser held by the CHILD\'s conversation — refused in the EXCEPTION\'s own words (excepted, round wztkervx5 (a)), nothing stopped', exc);
           ok(J(thr.judged) === J(['groups_unreadable']) && thr.code === 'groups_unreadable' && thr.stopped === 0, 'the STOP door, a lineage read that THROWS: refused groups_unreadable BY NAME (never «it is not yours»), nothing stopped', thr);
           ok(J(par.judged) === J(['ok']) && par.code === 'stopped' && par.stopped === 1, 'the STOP door, a key granted to the PARENT group: the child\'s browser nobody uses is stopped', par);
           ok(J(excR.judged) === J(['ok']) && excR.code === 'stopped' && excR.stopped === 1, 'RED CONTROL: the stop door without the ancestors — «everyone except the parent» STOPS the child\'s browser: the harm the law closes', excR);

@@ -2491,7 +2491,8 @@ function idleReleaseVerdict({ live = false, turn = null, idleSince = null, now =
  * EVERY UNKNOWN REFUSES. → { stop, code, why } — `code` null when it may stop. A person's own Stop overrides all of it.
  *   live           true | false | null
  *   holders        [{ turn, granted, unknown, unreadable }] — the conversations holding it (`unknown`: not running here;
- *                  `unreadable`: its Task Groups could not be read, so the reach could not decide — piece 6 meets the hold laws)
+ *                  `unreadable`: its Task Groups could not be read, so the reach could not decide — piece 6 meets the hold laws;
+ *                  `excepted`: {why, reach} — the grant's EXCEPTION left it out, said in the exception's own words, as the neighbouring doors)
  *   kind           'own' | 'helper' | 'profile' | 'external' | 'remote' — THIS MACHINE ONLY for now (主开发's ruling): a paired
  *                  machine's browser is refused by name after reach, before anything is stopped (its road moves with the separation)
  *   takenOver / watched / personBrowsing — true | false | null
@@ -2508,6 +2509,9 @@ function stopVerdict({ live = null, holders = null, kind = null, takenOver = nul
   if (!Array.isArray(holders)) return no('holder_unknown', 'which conversations hold it is unknown');
   if (holders.length === 0) return no('no_holder', 'no conversation holds it — its own idle clock stops it');
   const known = holders.filter((h) => h && !h.unknown);
+  // round wztkervx5 (a): a holder the grant EXCEPTS is refused in the exception's own words (the reach's), as the neighbouring doors say it
+  const exc = known.find((h) => h.granted !== true && h.excepted && typeof h.excepted.why === 'string' && h.excepted.why);
+  if (exc) return { ...no('excepted', exc.excepted.why), ...(exc.excepted.reach ? { reach: exc.excepted.reach } : {}) };
   if (known.some((h) => h.granted !== true && h.unreadable !== true)) return no('not_granted', 'it is not yours: a conversation outside this key\'s reach holds it');
   // piece 6 meets the hold laws: a holder whose Task Groups could not be read is UNKNOWN by name — never «it is not yours»
   if (known.some((h) => h.unreadable === true)) return no('groups_unreadable', 'the Task Groups of a conversation holding it could not be read just now, so whether it is yours to stop is unknown — try again in a moment');

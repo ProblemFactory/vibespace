@@ -233,6 +233,9 @@ const CODES = Object.freeze({
   // lane key-grant-everyone r2: the caller's Task Groups could not be read while a grant's Task Group (in `to` or «除了»)
   // decides — never judged as «in no Task Group» (that admitted a conversation left out of All agents); call again
   groups_unreadable: 409,
+  // the manager design's piece 6 (browsers.stop, round wztkervx5 (b)): the browser registry could not be read just now — the keeper refuses
+  // by name while it is held (as the browser routes answer it: 503); nothing was stopped, call again
+  store_unread: 503,
   // the manager design's piece 4 (conversations.resume): the conversation is running · archived · resumes only in a window a person
   // opens · its kept record shows an active goal / a CLI timer mark / an unknown goal on a harness that continues one by itself (a
   // resume could start a billed turn nobody pressed) · this key's ten waiting resumes · the create refused (its own reason named)

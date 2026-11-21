@@ -45,7 +45,7 @@ console.log('§1 an UNREADABLE registry is HELD — nothing written over it, the
     out.pin = (() => { try { return k.pinForCreate({ priorKey: 'vs-bk-aaaaaaaaaaaa', resume: true }); } catch (e) { return { threw: e && e.code }; } })();
     // piece 6 (browsers.stop) meets this law: the running browsers and the manager's stop refuse by name (never «none runs»)
     out.stopRows = (() => { try { const rows = k.stopRows(); return Array.isArray(rows) ? `listed ${rows.length}` : 'answered'; } catch (e) { return (e && e.code) || 'threw'; } })();
-    out.managerStop = await codeOf(() => k.managerStop('bp-0000b001'));
+    out.managerStop = await codeOf(() => k.managerStop('bp-0000b001'));   // a refusal's code — or, in a copy without it, the code the stop itself answers
     const b = await k.boot().catch((e) => ({ threw: e && e.message }));
     out.boot = b && b.held ? 'held' : 'ran';
     out.keptWhileHeld = bodyOf(F) === (asRoot ? '(a folder)' : BODY);
@@ -85,7 +85,7 @@ console.log('§1 an UNREADABLE registry is HELD — nothing written over it, the
   ok(KSRC.split(SR).length === 2 && KSRC.split(MS).length === 2, 'control setup: the stop\'s two held refusals are found once each');
   const rs = await scene(MJ.load('src/server/browser-keeper.js', anchored(anchored(KSRC, SR, '    ensureLoaded(); /* MUTANT: no held refusal */', 'rows-held-cut'), MS, '    /* MUTANT: no held refusal */', 'stop-held-cut'), 'stop-held-cut'), 'held-stop-cut', { lift: false });
   ok(r.stopRows === 'store_unread' && r.managerStop === 'store_unread', 'while held the running browsers (browsers.stop\'s rows, the list\'s browsers) and the manager\'s stop are refused by name (store_unread)', { rows: r.stopRows, stop: r.managerStop });
-  ok(rs.stopRows === 'listed 0' && rs.managerStop !== 'store_unread', 'CONTROL (both refusals cut, in a copy): «none runs» from the EMPTY unread registry, and the stop runs without saying why — RED', { rows: rs.stopRows, stop: rs.managerStop });
+  ok(rs.stopRows === 'listed 0' && rs.managerStop === 'not-found', 'CONTROL (both refusals cut, in a copy): «none runs» from the EMPTY unread registry, and the stop RUNS on it — the keeper\'s own stop answers «no browser record» (not-found) for a profile that may be running — RED (round wztkervx5, lens 2: the cut copy\'s outcome asserted, not only «not store_unread»)', { rows: rs.stopRows, stop: rs.managerStop });
   if (asRoot) rootSkip('the held file is kept byte for byte (the boot wrote nothing over it)'); else ok(r.keptWhileHeld, 'nothing is written over the held file', r);
   ok(r.lifted && r.profile && r.lifts === 1 && r.file === 1 && r.rewritten, 'read again OFF the loop: the hold lifts, the profile is back, the OWED boot runs (its commit re-saves the file — the writer stamped), the steps after the boot run once (onReadAgain), the file still holds its profile', r);
   // its read r1 (N3a): a copy whose read skips the owed boot — the file is never re-saved by the boot (nothing judged after the read)

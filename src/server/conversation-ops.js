@@ -701,12 +701,13 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
         // and the ancestors of the holder's groups; a group read that fails (groupsOfLive null) is refused unreadable BY NAME
         const glr = groupsOfLive(s, h.sessionId), gl = glr || [];
         let v = null; try { v = ctx.reach(targetOf({ conversationId: idOf(s), webuiId: h.sessionId, groups: gl, ...require('./groups-hold.js').fact() }, glr === null ? null : lineageOfIds(gl))); } catch { v = null; }   // the stop's reach (as the end verb's)
-        return { turn: h && h.turn !== undefined ? h.turn : null, granted: !!(v && v.ok), ...(v && v.code === 'groups_unreadable' ? { unreadable: true } : {}) };
+        return { turn: h && h.turn !== undefined ? h.turn : null, granted: !!(v && v.ok), ...(v && v.code === 'groups_unreadable' ? { unreadable: true } : {}),
+          ...(v && v.code === 'excepted' ? { excepted: { why: String(v.why || 'the owner left that conversation out of this grant\'s reach'), ...(v.reach ? { reach: v.reach } : {}) } } : {}) };   // round wztkervx5 (a): the exception's own words
       });
       const v = require('../browser-profiles.js').stopVerdict({ live: true, holders, kind: row.kind || null, takenOver: typeof row.takenOver === 'boolean' ? row.takenOver : null,
         watched: Number.isInteger(row.viewers) ? row.viewers > 0 : null, personBrowsing: typeof row.personBrowsing === 'boolean' ? row.personBrowsing : null,
         inFlight: row.inFlight || null, tabsKept: row.tabsKept === true, closeTabs: args.closeTabs === true });
-      if (!v.stop) return { ok: false, code: v.code, why: v.why, target: row.name || row.id };
+      if (!v.stop) return { ok: false, code: v.code, why: v.why, target: row.name || row.id, ...(v.reach ? { reach: v.reach } : {}) };   // an exception's refusal names the grant's reach, as reached() does
       let r = null;
       try { r = await browsers.stop(row.id); } catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, target: row.name || row.id }; return { ok: false, code: 'not_freed', why: `the keeper could not stop it — ${(e && e.message) || 'no reason given'}; nothing was freed`, target: row.name || row.id }; }
       // THE ANSWER TELLS THE TRUTH ABOUT WHAT WAS FREED: «not freed» is not ok
