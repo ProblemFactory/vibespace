@@ -1149,6 +1149,24 @@ console.log('\n§2n B-9dd0: a fast suite\'s sockets past the loopback are a red 
   const ob = [S.verdict({ host: '192.0.2.9', o: null }, OWN), S.verdict({ host: '192.0.2.1', o: null }, OWN), S.answered(null, '192.0.2.9', OWN), S.answered(null, [{ address: '192.0.2.9' }, { address: '192.0.2.1' }], OWN), S.LOCAL('[192.0.2.9]', OWN)];
   okd(ob[0] === 'skip' && ob[1] === 'count' && ob[2] === null && ob[3] === '192.0.2.1' && ob[4] === true, 'the box\'s OWN address never leaves the box: a literal of one is skipped, an answer of one is not counted — any other address is', JSON.stringify(ob));
 }
+{ // B-9dd0 (主开发 r1521): THE BELT IS PROBED IN THE CHROME UNDER TEST — every suite that launches a Chrome of its own with
+  // chromeBelt(…) proves the belt by reachFrom(<THAT Chrome's CDP port>), never by a second Chrome it starts with the belt itself
+  // (taking the belt off the suite's own Chrome would stay green). RED: the release's form planted (a second belted Chrome probed)
+  const SD = path.join(REPO, 'scripts'), rdS = (f) => fs.readFileSync(path.join(SD, f), 'utf-8');
+  const beltOwn = (src) => {
+    const ports = src.split('\n').filter((l) => /\bspawn\(CHROME, \[/.test(l) && /\.\.\.chromeBelt\(/.test(l)).map((l) => (/--remote-debugging-port=\$\{(\w+)\}/.exec(l) || [])[1]).filter(Boolean);
+    if (!ports.length) return 'no Chrome of its own launched with the belt';
+    if (/chromeReach\([^\n]*args:\s*chromeBelt\(/.test(src)) return 'a SECOND Chrome started with the belt is probed';
+    const missed = ports.filter((p) => !new RegExp(`\\breachFrom\\(${p}\\b`).test(src));
+    return missed.length ? `its own Chrome (port ${missed.join(', ')}) is never probed` : null;
+  };
+  const belted = fs.readdirSync(SD).filter((f) => f.endsWith('.mjs') && f !== 'scratch.mjs' && /\.\.\.chromeBelt\(/.test(rdS(f)));
+  const bad = belted.map((f) => [f, beltOwn(rdS(f))]).filter(([, v]) => v);
+  okd(belted.length >= 2 && !bad.length, `B-9dd0 (r1521): every suite that launches its Chrome with the belt probes THAT Chrome (reachFrom on its own CDP port): ${belted.join(', ')}`, bad.map(([f, v]) => `${f}: ${v}`).join('\n'));
+  const relForm = rdS('test-https-hub-chrome.mjs').replace('const beltR = await reachFrom(CDP_PORT);', () => "const beltR = await chromeReach(CHROME, { args: chromeBelt([IP]), dir: path.join(chromeDir, 'belt') });");
+  const unprobed = rdS('test-plugin-consent-chrome.mjs').replace('const beltR = await reachFrom(CDP_PORT);', () => 'const beltR = { own: \'refused\', vendor: \'refused\', testnet: \'refused\' };');
+  okd(beltOwn(relForm) === 'a SECOND Chrome started with the belt is probed' && /never probed/.test(String(beltOwn(unprobed))), `RED: the release's form (a second Chrome started with the belt) and a suite whose own Chrome is never probed are each red by name — «${beltOwn(relForm)}» · «${beltOwn(unprobed)}»`);
+}
 // ── §2j A SUITE READS NO HISTORY MASTER DOES NOT HAVE (B-4291, lane int361, 2.369.369: test-stash-strip's r5 leg read
 // `git show 280ccd2e:…` — a LANE-BRANCH commit only the production repo had — so the push gate alone ran the leg, red at four
 // pushes in a row and called a flake, while every lane, the runner (depth 1) and each by-hand rerun SKIPPED it and said green) ──

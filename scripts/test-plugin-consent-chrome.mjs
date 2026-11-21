@@ -43,7 +43,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, CHROME_QUIET, chromeBelt, chromeReach } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, CHROME_QUIET, chromeBelt, chromeReach, reachFrom } from './scratch.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 
 const require = createRequire(import.meta.url);
@@ -146,10 +146,11 @@ await cdp('Runtime.enable'); await cdp('Page.enable');
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'zh'); localStorage.setItem('vibespace.uiScale', '100'); } catch {}" });
 await cdp('Emulation.setDeviceMetricsOverride', { width: 1000, height: 600, deviceScaleFactor: 1, mobile: false });
-// B-9dd0's remainder (2): THE BELT and its CONTROL (r1246), each a Chrome of its own on a blank page: with the belt the box's own
-// NAME, a vendor's name and a TEST-NET address are each refused; with NO belt the own name is reached (the leg can fail)
+// B-9dd0's remainder (2): THE BELT, probed IN THE CHROME UNDER TEST (r1521: a fresh blank tab of the suite's own Chrome — take
+// the belt off it and this leg is red): the box's own NAME, a vendor's name and a TEST-NET address are each refused; its CONTROL
+// (r1246), a Chrome of its own with NO belt: the own name is reached (the leg can fail)
 {
-  const beltR = await chromeReach(CHROME, { args: chromeBelt(), env: { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun, DISPLAY: '' }, dir: path.join(ROOT, 'chrome-belt') });
+  const beltR = await reachFrom(CDP_PORT);
   const bareR = await chromeReach(CHROME, { env: { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun, DISPLAY: '' }, dir: path.join(ROOT, 'chrome-bare') });
   check('B-9dd0: Chrome\'s belt — the box\'s own NAME (a listener of this suite), a vendor\'s name and a TEST-NET address are each REFUSED (a dead proxy, a resolver that finds no name)', beltR.own === 'refused' && beltR.vendor === 'refused' && beltR.testnet === 'refused', beltR);
   if (bareR.own === 'reached') check('CONTROL: with NO belt the box\'s own name is REACHED — the belt leg above can fail', true, bareR);

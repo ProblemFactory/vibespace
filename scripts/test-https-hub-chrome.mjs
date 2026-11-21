@@ -25,7 +25,7 @@ import crypto from 'node:crypto';
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, endRootedProcesses, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET, chromeBelt, chromeReach } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, endRootedProcesses, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET, chromeBelt, chromeReach, reachFrom } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -141,9 +141,10 @@ try {
   await boot('files', { VIBESPACE_TLS_CERT: LEAF.c, VIBESPACE_TLS_KEY: LEAF.k }, path.join(fx, 'data-files'));
   check('the boot banner names both addresses', await waitLog(new RegExp(`running at http://localhost:${PORT} and https://${IP.replace(/\./g, '\\.')}:${PORT}`)), log().split('\n').find((l) => /running at/.test(l)));
   const HTTPS = `https://${IP}:${PORT}`, HTTP = `http://${IP}:${PORT}`;
-  // B-9dd0's remainder (2): THE BELT and its CONTROL (r1246), each a Chrome of its own on a blank page: with the belt the box's own
-  // NAME, a vendor's name and a TEST-NET address are each refused; with NO belt the own name is reached (the leg can fail)
-  const beltR = await chromeReach(CHROME, { args: chromeBelt([IP]), dir: path.join(chromeDir, 'belt') });
+  // B-9dd0's remainder (2): THE BELT, probed IN THE CHROME UNDER TEST (r1521: a fresh blank tab of the suite's own Chrome — take
+  // the belt off it and this leg is red): the box's own NAME, a vendor's name and a TEST-NET address are each refused; its CONTROL
+  // (r1246), a Chrome of its own with NO belt: the own name is reached (the leg can fail)
+  const beltR = await reachFrom(CDP_PORT);
   const bareR = await chromeReach(CHROME, { dir: path.join(chromeDir, 'bare') });
   check('B-9dd0: Chrome\'s belt — the box\'s own NAME (a listener of this suite), a vendor\'s name and a TEST-NET address are each REFUSED (a dead proxy, a resolver that finds no name)', beltR.own === 'refused' && beltR.vendor === 'refused' && beltR.testnet === 'refused', beltR);
   if (bareR.own === 'reached') check('CONTROL: with NO belt the box\'s own name is REACHED — the belt leg above can fail', true, bareR);
