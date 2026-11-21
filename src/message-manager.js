@@ -2700,6 +2700,7 @@ class MessageManager extends MessageWindow {
       ...(isAskUser && { kind: 'user_input', questions: raw.request.input?.questions || [] }),
     };
     if (autoResolved === 'unknown') this._noteOutcomeDrift(rblock.output, emit);
+    if (this._lateWaiting) this._lateWaiting.delete(existing.id);   // r1296 (1): a RE-ASK forgets the old ask's wait — the fresh ask owes nothing yet
     (this._askIds || (this._askIds = new Set())).add(existing.id); // the pending-asks level reads only the cards that ever asked
     if (emit) this._emit({ op: 'edit', id: existing.id, fields: { permission: existing.permission } });
   }
@@ -2797,7 +2798,7 @@ class MessageManager extends MessageWindow {
         return;
       }
     }
-    try { global.__vsEvent?.('cli-late-allow-unmatched', reason); } catch {}
+    if (emit) { try { global.__vsEvent?.('cli-late-allow-unmatched', reason); } catch {} }   // r1296 (3): once, live — a rebuild re-reads the same record
   }
 
   /** (r1257 (a)) A late Allow still WAITING when the turn ends — an interrupted turn, an error result, a program that never followed up —
@@ -2807,12 +2808,13 @@ class MessageManager extends MessageWindow {
     if (!this._lateWaiting || !this._lateWaiting.size) return;
     for (const id of [...this._lateWaiting]) {
       const m = this.messageIndex.get(id), p = m && m.permission;
-      if (!p) { this._lateWaiting.delete(id); continue; }
+      if (!p || !p.late || p.late.state !== 'waiting') { this._lateWaiting.delete(id); continue; }   // only a card that STILL waits
       p.lateUnsaid = true;
       if (this._lateSettle(m) && emit) this._emit({ op: 'edit', id: m.id, fields: { permission: p } });
     }
   }
-  /** THE CONVERSATION STOPPED (src/server/helper-asks.js forget: the kill and exit paths): its waiting late Allows say so. */
+  /** THE CONVERSATION STOPPED: its waiting late Allows say so — src/server/main-asks.js forget (the kill and exit paths), and the
+   *  View History road of a stopped conversation (src/ws-handler.js), so a reload of a dead conversation says it too (r1296 (2)). */
   endLateAllows(emit = true) { this._endLateWaits(emit); }
 
   /** THE ONE JUDGE of a late Allow (B-9ff2's remainder): re-reads the card — our answer, the cancel's statement, the not-run record, the

@@ -2220,9 +2220,26 @@ console.log('⑱h (B-9ff2\'s remainder, the coordinator\'s r1210) A LATE ALLOW S
     /^Allowed late — the agent never said whether it ran$/.test(UNSAID || '') && same(ended, (r) => r.late === 'unsaid' && r.words === UNSAID) && same(endedErr, (r) => r.late === 'unsaid') && same(endedThen, (r) => r.late === 'not-run'));
   const sx = { _normalizer: new MessageManager('sess-la-stop'), _subNormalizers: new Map(), _taskRecords: {}, _webuiId: 'sess-la-stop', backend: 'claude' };
   for (const r of [use, ask, cancel, allow]) sx._normalizer.processLive(JSON.parse(JSON.stringify(r)));
-  HA.forget(sx);   // THE CONVERSATION STOPPED: the kill and exit paths' forget
+  const MA = require(path.join(REPO, 'src/server/main-asks.js'));
+  MA.forget(sx);   // THE CONVERSATION STOPPED: the kill and exit paths' forget of its OWN asks (r1296 (2): main-asks, not helper-asks)
   const sxCard = sx._normalizer.messages.find((m) => m.permission && m.permission.requestId === 'req-la');
-  check('⑱h (a) …and when the CONVERSATION STOPS (helper-asks forget, the kill and exit paths) a waiting late Allow says the agent never said', !!sxCard && sxCard.permission.late && sxCard.permission.late.state === 'unsaid', sxCard && sxCard.permission);
+  check('⑱h (a) …and when the CONVERSATION STOPS (main-asks forget, the kill and exit paths) a waiting late Allow says the agent never said', !!sxCard && sxCard.permission.late && sxCard.permission.late.state === 'unsaid', sxCard && sxCard.permission);
+  // r1296 (2): THE STOP'S WORD SURVIVES A REBUILD — a dead conversation reopens by the View History road, which says it again
+  const viewed = new MessageManager('sess-la-view'); viewed.convertHistory(JSON.parse(JSON.stringify([use, ask, cancel, allow])));
+  const vWas = (viewed.messages.find((m) => m.permission && m.permission.requestId === 'req-la') || {}).permission;
+  const vWasState = vWas && vWas.late && vWas.late.state;
+  viewed.endLateAllows(false);
+  const vNow = (viewed.messages.find((m) => m.permission && m.permission.requestId === 'req-la') || {}).permission;
+  const WS = read('src/ws-handler.js'), viewAt = WS.indexOf('await convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId })');
+  check('⑱h (2) THE STOP\'S WORD SURVIVES A REBUILD: a stopped conversation\'s history, rebuilt, still waits («' + vWasState + '») until the View History road (src/ws-handler.js) closes it — the road calls endLateAllows right after its conversion — «unsaid»',
+    vWasState === 'waiting' && vNow && vNow.late && vNow.late.state === 'unsaid' && viewAt > 0 && /^[^\n]*\n\s*try \{ if \(typeof mm\.endLateAllows === 'function'\) mm\.endLateAllows\(false\); \} catch \{ \}/.test(WS.slice(viewAt)));
+  // r1296 (1): A RE-ASK FORGETS THE OLD WAIT — at the next turn's end the NEW ask is not «never said», and a late Allow on it waits
+  const cancel2 = { ...cancel, request_id: 'req-la2' };
+  const reask = both(MessageManager, [use, ask, cancel, allow, ask2, turnEnd, cancel2, allow2], 'reask');
+  check('⑱h (1) A RE-ASK FORGETS THE OLD WAIT: ask one waits, the program re-asks, the turn ends, then a late Allow on ask TWO reads «' + WAIT + '» (not «never said»): ' + JSON.stringify(reask), same(reask, (r) => r.ask === 'req-la2' && r.late === 'waiting' && r.words === WAIT));
+  // r1296 (3): THE TRACE ONCE — a live record leaves it, a rebuild of the same history does not
+  const reTrace = events(() => run(MessageManager, MUST, 'sess-la-must-rr', 'history'));
+  check('⑱h (3) the unmatched trace is written ONCE for a live record, never again at a rebuild of the history (0 lines there)', reTrace.got.filter(([n]) => n === 'cli-late-allow-unmatched').length === 0, reTrace.got);
   check('⑱h the unsaid words in zh and ja', zhHas(UNSAID) && jaHas(UNSAID));
   // RED CONTROLS of the round: each half put back as the 74d62ec63 tip had it
   const MATCH = '      if (byAsk ? p.requestId === raw.request_id : (!!raw.tool_use_id && call === raw.tool_use_id)) {\n';
@@ -2237,6 +2254,12 @@ console.log('⑱h (B-9ff2\'s remainder, the coordinator\'s r1210) A LATE ALLOW S
   check('⑱h RED CONTROL (the 74d62ec63 tip: «else by call» + not-run before the result): THE MUST\'s scene reads «' + tipMust.words + '» — a call that RAN shown not run', tipMust.words === NOTRUN, tipMust);
   check('⑱h RED CONTROL (the matcher alone, «else by call»): the record about ask one lands on ask two — «' + orNoRes.words + '»', orNoRes.late === 'not-run' && orNoRes.ask === 'req-la2', orNoRes);
   check('⑱h RED CONTROL (the order alone, not-run before the result): the same ask\'s good result is outranked — «' + firstLast.words + '»', firstLast.words === NOTRUN, firstLast);
+  const FORGET = '    if (this._lateWaiting) this._lateWaiting.delete(existing.id);   // r1296 (1): a RE-ASK forgets the old ask\'s wait — the fresh ask owes nothing yet\n';
+  const STILL = "      if (!p || !p.late || p.late.state !== 'waiting') { this._lateWaiting.delete(id); continue; }   // only a card that STILL waits\n";
+  const OLD_END = '      if (!p) { this._lateWaiting.delete(id); continue; }\n';   // stale-pins: kept — the red control rebuilds the eb18f84d3 line
+  const NoForget = MR.load('src/message-manager.js', anchored(anchored(mmSrcR, FORGET, '', 'no-forget'), STILL, OLD_END, 'no-still'), 'no-forget').MessageManager;
+  const staleWait = run(NoForget, [use, ask, cancel, allow, ask2, turnEnd, cancel2, allow2], 'sess-la-noforget');
+  check('⑱h RED CONTROL (r1296 (1), as eb18f84d3 had it): the old wait marks the NEW ask at the turn\'s end, and its late Allow reads «' + staleWait.words + '» at once', staleWait.late === 'unsaid', staleWait);
 
   // RED CONTROL: the a117cebb8 release — no late-Allow judge — reads the same late Allow «Allowed», as if done
   const mmSrc = read('src/message-manager.js'), JUDGE = 'function lateAllowOf(perm, res) {\n';

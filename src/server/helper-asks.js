@@ -192,8 +192,6 @@ function reconcileAll() {
 function forget(session) {
   if (!session) return 0;
   forgotten.add(session);
-  // B-9ff2's remainder (r1257 (a)): a main card's late Allow still waiting says the agent never said whether it ran — the session is gone
-  try { const mm = session._normalizer; if (mm && typeof mm.endLateAllows === 'function') mm.endLateAllows(true); } catch { }
   const st = perSession.get(session);
   if (st) { for (const e of st.values()) if (e && e.timer) clearTimeout(e.timer); perSession.delete(session); }
   if (!deps) return 0;
