@@ -64,6 +64,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Opening the Diagnostics report on a slow data folder no longer makes VibeSpace stop answering for seconds while it reads its event files.
 - Opening VibeSpace, or its System panel, no longer makes it pause while it lists the machine's processes.
 - On a paired machine, the folder field lists the folder you type even while another folder there hangs, and says when its other suggestions are held.
+- In a desktop app window, Chrome's own «Can't update Chrome» notice no longer appears or takes the keyboard; Chrome outside VibeSpace still shows it.
 
 ## 2.369.415 — 2026-11-21
 
