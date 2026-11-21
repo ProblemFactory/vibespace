@@ -269,17 +269,21 @@ fi
 #    data/bin, never the agent programs' ~/.local/bin. The folder is on local disk, this user's own (0700), ONE per node
 #    (keyed by its real path), made whole and moved in at once, never relinked — so the detached full tier keeps it after
 #    this hook exits and a second push with another node never swaps it. The tree pins no node: the pushing shell's, said.
+#    VIBESPACE_HOOK_NODE_DIR moves the folder's root — the test seam: the suites that run this hook point it into their scratch.
+#    A node that does not run under this env (a version manager's shim) is refused at the banner, by name.
 #  - the names kept are the service env's (HOME, LANG, LC_*, TMPDIR, XDG_RUNTIME_DIR, TERM) + USER / LOGNAME + TZ (a push
 #    that mirrors the hosted runner's zone keeps it) + VS_CHROME + the tier's own knobs BY NAME (never a token: the real
 #    turn's VIBESPACE_CI_OAT stays out, and VIBESPACE_CI_RUN, ci.mjs's own); the switches are the cut scripts': VS_NO_REAL_CLI=1 (the one real vendor turn is
-#    skipped by name, as at a cut) and VIBESPACE_SKIP_AGENT_HOOKS=1.
+#    skipped by name, as at a cut) and VIBESPACE_SKIP_AGENT_HOOKS=1. A suite that looks for a real agent program (claude, codex,
+#    agent-browser) finds none on this path and takes its NAMED skip in these tiers; those rows are proven by the hosted run and
+#    the integrator's runs.
 # Nothing here reads or sources a person's shell files. (No node on the push's PATH is refused at the hook's top.)
 tier_node="$(command -v node 2>/dev/null || true)"
 tier_real="$(readlink -f "$tier_node" 2>/dev/null || true)"; [ -n "$tier_real" ] || tier_real="$tier_node"
 tier_root="${VIBESPACE_HOOK_NODE_DIR:-/var/tmp/vs-tier-node-$(id -u)}"   # local disk (never a checkout's git dir: it may sit on a guarded mount), this user's own
 # the root: a real folder (never a link — `-O` would follow it), this user's own, writable by nobody else
 if [ -L "$tier_root" ] || ! mkdir -p -m 0700 "$tier_root" 2>/dev/null || [ -L "$tier_root" ] || [ ! -O "$tier_root" ] || (( (8#$(stat -c %a "$tier_root" 2>/dev/null || echo 777) & 8#022) != 0 )); then
-  echo "[ci] REFUSED — the tiers' private node folder $tier_root is a link, writable by others or not this user's own: nothing was judged" >&2; exit 1
+  echo "[ci] REFUSED — the tiers' private node folder $tier_root is a link, writable by others or not this user's own: nothing was judged — remove it (or set VIBESPACE_HOOK_NODE_DIR to a folder of your own) and push again" >&2; exit 1
 fi
 # a node's folder is trusted only when it holds EXACTLY its links — node → this push's node, npm / npx → beside it — and nothing else
 tier_holds() {
@@ -293,6 +297,9 @@ tier_holds() {
       *) return 1 ;;
     esac
   done
+  for e in npm npx; do   # one that sits beside node NOW and is missing here (a folder made before it came) is not trusted
+    if [ -e "$(dirname "$tier_real")/$e" ] && [ ! -L "$d/$e" ]; then return 1; fi
+  done
 }
 tier_bin="$tier_root/$(printf '%s' "$tier_real" | cksum | cut -d' ' -f1)"   # ONE folder per node: two pushes with two nodes never share one
 if ! tier_holds "$tier_bin"; then
@@ -301,7 +308,7 @@ if ! tier_holds "$tier_bin"; then
   for t in npm npx; do [ -e "$(dirname "$tier_real")/$t" ] && ln -s "$(dirname "$tier_real")/$t" "$tier_new/$t"; done
   mv -T "$tier_new" "$tier_bin" 2>/dev/null || rm -rf "$tier_new"   # made whole, then moved in at once — a racing push's own stays
 fi
-tier_holds "$tier_bin" || { echo "[ci] REFUSED — $tier_bin does not hold exactly this push's node ($tier_real) and its npm / npx: nothing was judged" >&2; exit 1; }
+tier_holds "$tier_bin" || { echo "[ci] REFUSED — $tier_bin does not hold exactly this push's node ($tier_real) and its npm / npx: nothing was judged — remove $tier_bin and push again" >&2; exit 1; }
 tier_path="$tier_bin:/usr/local/bin:/usr/bin:/bin"
 tier_env=(env -i "PATH=$tier_path" VS_NO_REAL_CLI=1 VIBESPACE_SKIP_AGENT_HOOKS=1)
 for v in HOME USER LOGNAME LANG TMPDIR XDG_RUNTIME_DIR TERM TZ VS_CHROME VIBESPACE_CI_FAST_LANES VIBESPACE_CI_LANES VIBESPACE_CI_HEAVY_LOCK VIBESPACE_CI_LANE_ROOT VIBESPACE_CI_REAP_PROCFS VIBESPACE_CI_REAPER_LOCK VIBESPACE_CI_DIR_SWEEP VIBESPACE_CI_SCRATCH_ROOTS VIBESPACE_CI_REMOTE_RUN VIBESPACE_CI_MODEL; do
@@ -310,7 +317,9 @@ done
 for v in $(compgen -e); do
   case "$v" in LC_*) tier_env+=("$v=${!v}") ;; esac
 done
-echo "[ci] the tiers run in the hook's own env: node $tier_real ($("$tier_real" --version 2>/dev/null || echo '?')) · PATH $tier_path${TZ:+ · TZ=$TZ} (B-e381: no shell additions)" >&2
+tier_ver="$(env -i "PATH=$tier_path" HOME="${HOME:-/}" "$tier_bin/node" --version 2>/dev/null || true)"
+case "$tier_ver" in v[0-9]*) ;; *) echo "[ci] REFUSED — the node this push resolves ($tier_node → $tier_real) does not run under the tiers' own env (a version manager's shim needs its manager on PATH): point PATH at a real node and push again — nothing was judged" >&2; exit 1 ;; esac
+echo "[ci] the tiers run in the hook's own env: node $tier_real ($tier_ver) · PATH $tier_path${TZ:+ · TZ=$TZ} (B-e381: no shell additions)" >&2
 
 # GREEN MARKER (2.369.51): scripts/ci.mjs writes .git/ci-green = "<sha> <epoch-ms>"
 # after a green run on a CLEAN tree. If it names HEAD and is < 60 min old the gate

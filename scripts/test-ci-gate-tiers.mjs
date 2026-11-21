@@ -937,41 +937,46 @@ console.log('\n§8g a version-only bump is no global input; --rules names the on
     'WIRING: --list-affected --tier=fast lists the FAST rows; --rules prints the report (the count on stderr); without it the comma-joined names as before');
 }
 
-// ── §8i AN ENVIRONMENT RED (B-e381 part 3 — 主开发's RULING, r962) ──
-// A red whose ONLY failed lines are the mount guard's own refusals is the environment's: said by that name with the refused
-// path, still BLOCKING (in `reds` / `failed`), never counted as the product's, never retried as a flake. The verdict's table;
-// the real runner over two planted suites (an environment red, a product red) through the real refusal; the closings; the
-// heavy loop's branch and its marker field by their text. CONTROLS: the release's refusal (no environment clause) retries it,
-// the release's closing call (no envReds) lists it among the product's reds.
-console.log('\n§8i an ENVIRONMENT red — the mount guard\'s refusals only: said apart, still red, never retried (B-e381, 主开发 r962)');
+// ── §8i A MOUNT-GUARD RED (B-e381 part 3 — 主开发's RULING r962, CHANGED r1039 on round wyx4vuerd) ──
+// A red whose EVERY failed line IS the mount guard's own refusal line is said by that name with each refused path; it BLOCKS
+// (in `reds` / `failed`); it is NOT retried as a flake; whose it is the reader decides from the path (the hook builds its own env,
+// so a refusal that remains may be the product's own). The recogniser's table (only a failed line that IS the guard's line, every
+// other failure form an ordinary red); the real runner over two planted suites; the closings; checkHeavy driven; the heavy loop's
+// branch and marker field by their text. CONTROLS: the release's refusal retries it, the release's closing call counts it among
+// the others, the old ALL GREEN line does not count a by-name skip.
+console.log('\n§8i a MOUNT-GUARD red — every failed line the guard\'s own refusal: said with its paths, still red, not retried (B-e381, 主开发 r962 → r1039)');
 {
   const ci = await import('./ci.mjs');
-  const REF = '[mount-guard] statSync(/srv/storage/data/bin/tmux) from src/session-store.js:120 refused — use SafeFs/async; the mount «/srv/storage»';
-  const XL = '  ✗ the session lists its tmux — Error EVSMOUNTSYNC: refused: a synchronous fs call on a storage mount from the main thread';
+  const P0 = '/srv/storage/data/bin/tmux';
+  const GX = `  ✗ [mount-guard] statSync(${P0}) from src/session-store.js:120 refused — use SafeFs/async; the mount «/srv/storage»`;
+  const gx = (p) => GX.replace(P0, p), CLOSE = (n) => `${n} FAILED (0 passed)`;
+  const WORDS = '  ✗ the session lists its tmux — Error EVSMOUNTSYNC: refused: a synchronous fs call on a storage mount from the main thread';
   const T = [
-    ['a refusal + every ✗ line the guard\'s', [REF, XL].join('\n'), '', { paths: ['/srv/storage/data/bin/tmux'], n: 1 }],
-    ['the refusal said on stderr, the ✗ line on stdout', XL, REF, { paths: ['/srv/storage/data/bin/tmux'], n: 1 }],
-    ['one ✗ line of another kind ⇒ the product\'s', [REF, XL, '  ✗ the count is 3 — got 2'].join('\n'), '', null],
-    ['no guard refusal printed ⇒ the product\'s', XL, '', null],
-    ['no ✗ line (a crash) ⇒ the product\'s', REF, 'TypeError: x is undefined', null],
-    ['the log-only twin («ran on the mount») is no refusal', '[mount-guard] statSync(/srv/storage/x) from src/a.js:1 ran on the mount «/srv/storage» — … is off (log only)\n' + XL, '', null],
-    ['six paths ⇒ five named, the count kept', [1, 2, 3, 4, 5, 6].map((i) => REF.replace('tmux', 'p' + i)).concat([XL]).join('\n'), '', { paths: [1, 2, 3, 4, 5].map((i) => '/srv/storage/data/bin/p' + i), n: 6 }],
+    ['every failed line IS the guard\'s own refusal line', [GX, '', CLOSE(1)].join('\n'), '', {}, { paths: [P0], n: 1 }],
+    ['a failed line that merely CONTAINS the guard\'s code and words ⇒ ordinary', [WORDS, CLOSE(1)].join('\n'), '', {}, null],
+    ['one failed line of another kind beside them ⇒ ordinary', [GX, '  ✗ the count is 3 — got 2', CLOSE(2)].join('\n'), '', {}, null],
+    ['an uncaught throw beside them (its stack) ⇒ ordinary', [GX, CLOSE(1)].join('\n'), 'TypeError: x is undefined\n    at f (/srv/x.js:1:2)', {}, null],
+    ['a FAIL line beside them ⇒ ordinary', [GX, 'FAIL: the wrapper', CLOSE(1)].join('\n'), '', {}, null],
+    ['output after the last failed line (no count close) ⇒ ordinary', [GX, 'done'].join('\n'), '', {}, null],
+    ['an exit other than the suite\'s own 1 ⇒ ordinary', [GX, CLOSE(1)].join('\n'), '', { status: 2 }, null],
+    ['no failed line (a crash) ⇒ ordinary', 'starting', 'boom', {}, null],
+    ['a ✓ label quoting the guard\'s line is no failed line', ['  ✓ the guard said: [mount-guard] statSync(/srv/x) from a.js:1 refused', '  ✗ the count — got 2', CLOSE(1)].join('\n'), '', {}, null],
+    ['a refusal of a path inside the run\'s own roots (a fixture mount) ⇒ ordinary', [gx('/tmp/vs-fixture/store/x'), CLOSE(1)].join('\n'), '', { roots: ['/tmp'] }, null],
+    ['six paths ⇒ five named, the count kept', [1, 2, 3, 4, 5, 6].map((i) => gx('/srv/storage/p' + i)).concat([CLOSE(6)]).join('\n'), '', {}, { paths: [1, 2, 3, 4, 5].map((i) => '/srv/storage/p' + i), n: 6 }],
   ];
-  for (const [what, out, err, want] of T) ok(JSON.stringify(ci.envRedOf(out, err)) === JSON.stringify(want), `B-e381 envRedOf: ${what}`, ci.envRedOf(out, err));
-  ok(ci.envRedWords({ paths: ['/a', '/b'], n: 3 }) === 'the mount guard refused /a, /b (and 1 more)', 'B-e381: its words name the refused paths and the count past them');
-  // the guard's own words are what it matches (src/server/sync-fs-witness.js — its REFUSAL and its refusal line)
+  for (const [what, out, err, opts, want] of T) ok(JSON.stringify(ci.envRedOf(out, err, opts)) === JSON.stringify(want), `B-e381 envRedOf: ${what}`, ci.envRedOf(out, err, opts));
+  ok(ci.envRedWords({ paths: ['/a', '/b'], n: 3 }) === "every failed line of this suite is the mount guard's own refusal — /a, /b (and 1 more)", 'B-e381: its words claim only what the check knows (r1039: never «not the product\'s»), the paths and the count past them');
   const sw = fs.readFileSync(path.join(REPO, 'src', 'server', 'sync-fs-witness.js'), 'utf-8');
-  ok(sw.includes("const REFUSAL = 'refused: a synchronous fs call on a storage mount from the main thread';") && sw.includes("code: 'EVSMOUNTSYNC'") && sw.includes('`[mount-guard] ${fn}(${curPath}) from ${site} refused — use SafeFs/async;'),
-    'B-e381: the verdict reads the mount guard\'s OWN words — its REFUSAL, its code, its refusal line (src/server/sync-fs-witness.js)');
-  // THE RUNNER: an environment red is red, named apart, and never retried — a product red is retried as before
+  ok(sw.includes('`[mount-guard] ${fn}(${curPath}) from ${site} refused — use SafeFs/async;'), 'B-e381: the recogniser reads the mount guard\'s OWN line (src/server/sync-fs-witness.js)');
+  // THE RUNNER: a mount-guard red is red, named apart, its row says it, NOT retried — an ordinary red is retried as before
   const root = mktmp('envred');
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
   const tries = (n) => { try { return fs.readFileSync(path.join(root, n + '.tries'), 'utf-8').length; } catch { return 0; } };
   const plant = (n, lines) => fs.writeFileSync(path.join(root, 'scripts', n + '.mjs'), `import fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(path.join(root, n + '.tries'))}, 'x');\n${lines.map((l) => `console.log(${JSON.stringify(l)});`).join('\n')}\nprocess.exit(1);\n`);
-  plant('test-er-env', [REF, XL, '1 FAILED']);
-  plant('test-er-product', ['  ✗ the count is 3 — got 2', '1 FAILED']);
+  plant('test-er-env', [GX, CLOSE(1)]);
+  plant('test-er-product', ['  ✗ the count is 3 — got 2', CLOSE(1)]);
   const row = (name) => ({ name, tier: 'fast', budgetMs: 8000 });
-  const drive = async (refusal, tag) => {
+  const drive = async (refusal) => {
     for (const n of ['test-er-env', 'test-er-product']) fs.rmSync(path.join(root, n + '.tries'), { force: true });
     const said = [], rows = [], inflight = new Set();
     const res = await ci.runFastLanes({ parallel: [row('test-er-env'), row('test-er-product')], serial: [] }, {
@@ -979,56 +984,45 @@ console.log('\n§8i an ENVIRONMENT red — the mount guard\'s refusals only: sai
       run: (s, { lane }) => ci.runSuiteAsync(s, { root, sha: 'e381e381e381', lane, inflight }),
       after: async (r) => { rows.push(r.lines.join('\n')); },
     });
-    return { ...res, said, rows, tries: { env: tries('test-er-env'), product: tries('test-er-product') }, tag };
+    return { ...res, said, rows, tries: { env: tries('test-er-env'), product: tries('test-er-product') } };
   };
-  const now = await drive(ci.fastRetryRefusal, 'now');
+  const now = await drive(ci.fastRetryRefusal);
   const envRow = now.rows.find((l) => /✗ test-er-env FAILED/.test(l)) || '';
   console.log(`    judged (the runner): reds ${now.reds.join(',')} · envReds ${JSON.stringify(now.envReds)} · tries ${JSON.stringify(now.tries)} · ${now.said.filter((l) => /not retried|retrying/.test(l)).join(' | ')}`);
-  ok(now.reds.join(',') === 'test-er-env,test-er-product' && JSON.stringify(now.envReds) === JSON.stringify([{ name: 'test-er-env', paths: ['/srv/storage/data/bin/tmux'], n: 1 }])
-    && now.tries.env === 1 && now.tries.product === 2 && now.said.includes(`  · test-er-env is not retried — ${ci.ENV_RED_NO_RETRY}`) && / — ENVIRONMENT red: the mount guard refused \/srv\/storage\/data\/bin\/tmux/.test(envRow),
-    'B-e381: the environment red is RED (in reds), named apart (envReds, its refused path), its row says ENVIRONMENT, and it is NOT retried (one try); the product red beside it is retried as before (two tries)', { reds: now.reds, envReds: now.envReds, tries: now.tries });
-  const before = await drive((s, r) => ci.fastRetryRefusal(s, { ...r, envRed: undefined }), 'release');
-  ok(before.tries.env === 2, 'B-e381 CONTROL (the release\'s refusal — no environment clause): the same environment red is retried as a flake (two tries)', before.tries);
-  // THE CLOSINGS: apart, still red; the release's call (no envReds) lists it among the product's
+  ok(now.reds.join(',') === 'test-er-env,test-er-product' && JSON.stringify(now.envReds) === JSON.stringify([{ name: 'test-er-env', paths: [P0], n: 1 }])
+    && now.tries.env === 1 && now.tries.product === 2 && now.said.includes(`  · test-er-env is not retried — ${ci.ENV_RED_NO_RETRY}`) && envRow.includes(` — MOUNT-GUARD red: every failed line of this suite is the mount guard's own refusal — ${P0}`),
+    'B-e381: the mount-guard red is RED (in reds), named apart with its path, its row says MOUNT-GUARD, and it is NOT retried (one try); the ordinary red beside it is retried as before (two tries)', { reds: now.reds, envReds: now.envReds, tries: now.tries });
+  const before = await drive((s, r) => ci.fastRetryRefusal(s, { ...r, envRed: undefined }));
+  ok(before.tries.env === 2, 'B-e381 CONTROL (the release\'s refusal — no mount-guard clause): the same red is retried as a flake (two tries)', before.tries);
+  // THE CLOSINGS: apart, still red, the keep-going line and the hosted annotation name it; the release's call counts it among the others
+  const errs = (c) => c.out.filter(([w]) => w === 'err').map(([, l]) => l.trim());
   const c1 = ci.fastClosing({ reds: now.reds, envReds: now.envReds, ran: 2, hangDir: '/x', env: {} });
   const c2 = ci.fastClosing({ reds: ['test-er-env'], envReds: now.envReds, ran: 1, hangDir: '/x', env: {} });
   const c0 = ci.fastClosing({ reds: now.reds, ran: 2, hangDir: '/x', env: {} });
-  const errs = (c) => c.out.filter(([w]) => w === 'err').map(([, l]) => l.trim());
-  ok(c1.code === 1 && errs(c1).includes("[ci] ENVIRONMENT red — not the product's, never retried as a flake (主开发 r962): test-er-env (the mount guard refused /srv/storage/data/bin/tmux)") && errs(c1).includes('✗ test-er-product · ENVIRONMENT: test-er-env — release gate is RED, do not push')
-    && c2.code === 1 && errs(c2).includes('✗ no product red · ENVIRONMENT: test-er-env — release gate is RED, do not push'),
-    'B-e381: the fast closing says the environment red APART (its path), never among the product\'s, and it still BLOCKS — alone too (exit 1)', { c1: errs(c1), c2: errs(c2) });
-  ok(c0.code === 1 && errs(c0).includes('✗ test-er-env, test-er-product — release gate is RED, do not push'), 'B-e381 CONTROL (the release\'s closing call, no envReds): the environment red is listed among the product\'s reds', errs(c0));
-  // r1 (the adversarial read's MUST 1): the verdict reads the guard's OWN line at a line's start — never a ✓ / ✗ label that QUOTES
-  // it — and a refused path inside the run's own roots (the gated tree, /tmp, TMPDIR: a suite's fixture mount) is the suite's
-  const QUOTE = '  ✓ the guard said it: ' + REF;
-  ok(ci.envRedOf([QUOTE, XL].join('\n'), '') === null, 'B-e381 r1: a ✓ label that QUOTES the guard\'s line is no refusal (test-fs-canary prints one on every run) — the product\'s', ci.envRedOf([QUOTE, XL].join('\n'), ''));
-  const INROOT = REF.replace('/srv/storage/data/bin/tmux', '/tmp/vs-fixture-mount/store/x');
-  ok(ci.envRedOf([INROOT, XL].join('\n'), '', { roots: ['/tmp'] }) === null && JSON.stringify(ci.envRedOf([INROOT, REF, XL].join('\n'), '', { roots: ['/tmp'] })) === JSON.stringify({ paths: ['/srv/storage/data/bin/tmux'], n: 1 }),
-    'B-e381 r1: a refusal of a path inside the run\'s own roots (a fixture mount under /tmp) is the suite\'s own — only paths outside them count');
-  // THE HEAVY BLOCK'S WORDS, driven: a red marker on this tree's HEAD with an environment entry — checkHeavy blocks (exit 1) and
-  // says the environment reds apart; a hand-edited field of another shape never throws inside it
+  const kg = ci.fastClosing({ reds: now.reds, envReds: now.envReds, keepGoing: true, ran: 2, hangDir: '/x', env: { GITHUB_ACTIONS: 'true' } });
+  ok(c1.code === 1 && errs(c1).includes(`[ci] MOUNT-GUARD red — blocking, not retried as a flake (主开发 r1039); whose it is, read from its path: test-er-env (every failed line of this suite is the mount guard's own refusal — ${P0})`)
+    && errs(c1).includes('✗ test-er-product · MOUNT-GUARD: test-er-env — release gate is RED, do not push') && c2.code === 1 && errs(c2).includes('✗ no other red · MOUNT-GUARD: test-er-env — release gate is RED, do not push')
+    && kg.out.some(([, l]) => l.includes('--keep-going: 2 red of 2 suites that ran — test-er-env, test-er-product (of them MOUNT-GUARD: test-er-env)')) && kg.out.some(([, l]) => l === '::error title=fast::2 red: test-er-env, test-er-product (of them MOUNT-GUARD: test-er-env)'),
+    'B-e381: the fast closing says the mount-guard red APART (its path; whose it is, the reader decides), still BLOCKING — alone too (exit 1); the --keep-going line and the hosted ::error name it', { c1: errs(c1), c2: errs(c2) });
+  ok(c0.code === 1 && errs(c0).includes('✗ test-er-env, test-er-product — release gate is RED, do not push'), 'B-e381 CONTROL (the release\'s closing call, no envReds): it is listed among the others', errs(c0));
+  // THE HEAVY BLOCK'S WORDS, driven: a red marker on this tree's HEAD naming a mount-guard red — checkHeavy blocks (exit 1), says it;
+  // a hand-edited field of another shape never throws inside it
   {
     const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf-8', env: GIT_ENV }).stdout.trim();
     const md = mktmp('e381-markers');
-    const mark = (env) => fs.writeFileSync(path.join(md, `${head}.red`), JSON.stringify({ sha: head, result: 'red', failed: ['test-er-env', 'test-er-product'], environment: env, endedAt: Date.now(), ms: 1000, suites: 2 }));
-    const said = (env) => { mark(env); const errs = [], e0 = console.error; console.error = (...a) => errs.push(a.join(' ')); let code; try { code = ci.checkHeavy({ dir: md, head }); } finally { console.error = e0; } return { code, errs }; };
-    const a = said([{ name: 'test-er-env', paths: ['/srv/storage/data/bin/tmux'], n: 1 }]), b = said([null, { name: 7 }, { name: 'test-er-env', paths: 'x' }]);
-    ok(head && a.code === 1 && a.errs.some((l) => l.includes("     of them ENVIRONMENT reds (not the product's — B-e381): test-er-env (the mount guard refused /srv/storage/data/bin/tmux)")) && b.code === 1,
-      'B-e381: checkHeavy BLOCKS on a red marker naming an environment red and says it apart; a field of another shape is read defensively (no throw, still blocked)', { a: a.errs.filter((l) => /ENVIRONMENT/.test(l)), b: b.code });
+    const said = (mg) => { fs.writeFileSync(path.join(md, `${head}.red`), JSON.stringify({ sha: head, result: 'red', failed: ['test-er-env', 'test-er-product'], mountGuard: mg, endedAt: Date.now(), ms: 1000, suites: 2 })); const e = [], e0 = console.error; console.error = (...a) => e.push(a.join(' ')); let code; try { code = ci.checkHeavy({ dir: md, head }); } finally { console.error = e0; } return { code, e }; };
+    const a = said([{ name: 'test-er-env', paths: [P0], n: 1 }]), b = said([null, { name: 7 }, { name: 'test-er-env', paths: 'x' }]);
+    ok(head && a.code === 1 && a.e.some((l) => l.includes(`     of them MOUNT-GUARD reds (B-e381 — whose, read from the path): test-er-env (every failed line of this suite is the mount guard's own refusal — ${P0})`)) && b.code === 1,
+      'B-e381: checkHeavy BLOCKS on a red marker naming a mount-guard red and says it; a field of another shape is read defensively (no throw, still blocked)', { a: a.e.filter((l) => /MOUNT-GUARD/.test(l)), b: b.code });
   }
-  // the keep-going line and the hosted annotation name them too (the read's NIT)
-  const kgc = ci.fastClosing({ reds: now.reds, envReds: now.envReds, keepGoing: true, ran: 2, hangDir: '/x', env: { GITHUB_ACTIONS: 'true' } });
-  ok(kgc.out.some(([, l]) => l.includes('--keep-going: 2 red of 2 suites that ran — test-er-env, test-er-product (of them ENVIRONMENT: test-er-env)')) && kgc.out.some(([, l]) => l === '::error title=fast::2 red: test-er-env, test-er-product (of them ENVIRONMENT: test-er-env)'),
-    'B-e381 r1: the --keep-going line and the hosted ::error annotation name the environment reds too', kgc.out.map(([, l]) => l.trim()));
-  // THE HEAVY LOOP (driven by test-ci-heavy-launch's real runs; here its text): an environment red is never retried, stays in
-  // `failed` (the marker blocks exactly as before), is named in the marker's `environment`, and the closing and the block say it
+  // THE HEAVY LOOP (its text): not retried, still in `failed` (the block unchanged), named in the marker's `mountGuard`, said at the close
   const cs = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
   const hv = cs.slice(cs.indexOf('async function heavyGate('), cs.indexOf('function checkHeavy('));
   const branch = hv.indexOf('        if (!r.ok && r.envRed) {'), retry = hv.indexOf('// RETRY ONCE.');
   ok(branch > 0 && branch < retry && /if \(!r\.ok && r\.envRed\) \{[^\n]*\n {10}failed\.push\(s\.name\); envFailed\.push\(\{ name: s\.name, paths: r\.envRed\.paths, n: r\.envRed\.n \}\);\n {10}console\.log\(`  · \$\{s\.name\} is not retried — \$\{ENV_RED_NO_RETRY\}`\);\n {8}\} else if \(!r\.ok\) \{/.test(hv)
-    && /\n {6}environment: envFailed\.length \? envFailed : undefined,/.test(hv) && /if \(envFailed\.length\) console\.log\(`\[ci:heavy\] ENVIRONMENT red/.test(hv)
-    && /if \(Array\.isArray\(blocker\.environment\) && blocker\.environment\.length\) console\.error\(/.test(cs),
-    'B-e381: the HEAVY loop never retries an environment red, keeps it in `failed` (the block unchanged), names it in the marker\'s `environment`; the heavy closing and the PUSH BLOCKED words say it');
+    && /\n {6}mountGuard: envFailed\.length \? envFailed : undefined,/.test(hv) && /if \(envFailed\.length\) console\.log\(`\[ci:heavy\] MOUNT-GUARD red/.test(hv)
+    && /if \(Array\.isArray\(blocker\.mountGuard\) && blocker\.mountGuard\.length\) console\.error\(/.test(cs),
+    'B-e381: the HEAVY loop does not retry a mount-guard red, keeps it in `failed` (the block unchanged), names it in the marker\'s `mountGuard`; the heavy closing and the PUSH BLOCKED words say it');
   const noBranch = cs.replace('        if (!r.ok && r.envRed) {', '        if (false) {');
   ok(noBranch !== cs && !/if \(!r\.ok && r\.envRed\) \{/.test(noBranch.slice(noBranch.indexOf('async function heavyGate('), noBranch.indexOf('function checkHeavy('))),
     'B-e381 CONTROL: the heavy pin is refused by a copy without its branch (its anchor is in the source once)');
@@ -1175,7 +1169,7 @@ console.log('\n§8h a green suite\'s SKIP lines are counted on its row and named
   const skSaid = ci.fastClosing({ reds: [], skippedLegs: SK2, env: {} });
   const skRed = ci.fastClosing({ reds: ['test-sk-red'], skippedLegs: SK2, env: {} });
   let noReds = ''; try { ci.fastClosing({ env: {} }); } catch (e) { noReds = e && e.name; }
-  ok(/ suites ran; \$\{absent\.length\} not present at that commit` : ''\}\$\{skipCount\(skippedLegs\)\}`\);/.test(src)
+  ok(/ suites ran; \$\{absent\.length\} not present at that commit` : ''\}\$\{skippedByName\.length \? ` — SKIPPED by name, not run and not passed: \$\{skippedByName\.join\(', '\)\}` : ''\}\$\{skipCount\(skippedLegs\)\}`\);/.test(src)
     && skSaid.code === null && same(skSaid.out, [['log', SKLINE]])
     && skRed.code === 1 && same(skRed.out, [['log', SKLINE], ['err', '\n✗ test-sk-red — release gate is RED, do not push · SKIP 3 leg(s) in 2 suite(s): test-sk-mid (2), test-sk-end (1)\n']])
     && same(ci.fastClosing({ reds: [], env: {} }).out, []) && noReds === 'TypeError'

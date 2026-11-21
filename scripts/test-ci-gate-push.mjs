@@ -234,10 +234,20 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
     const bare = hookSrc.replace('"${tier_env[@]}" node scripts/ci.mjs --isolate', 'node scripts/ci.mjs --isolate');
     ok(bare !== hookSrc && unprefixed(bare).length === 1 && /--isolate/.test(unprefixed(bare)[0]), 'B-e381 census CONTROL: the hook with the isolated call outside tier_env is refused, naming that line');
     // no node on the push's path ⇒ refused by name, nothing judged (never a «GATE RED» about the tree)
-    const sysNode = ['/usr/local/bin', '/usr/bin', '/bin'].some((d) => fs.existsSync(path.join(d, 'node')));
-    if (sysNode) console.log('    (the no-node leg is not driven here: this machine has a node in its system folders)');
-    else { const rNoNode = runHookRefs(`refs/heads/main ${B} refs/heads/main ${ZERO}\n`, { PATH: '/usr/bin:/bin' });
-    ok(rNoNode.status === 1 && /REFUSED — no node on this push's PATH: the tiers cannot run, nothing was judged/.test(rNoNode.out) && !fastOf(rNoNode).length, 'B-e381: no node on the push\'s path is REFUSED by name (no tier ran, no false GATE RED)', { status: rNoNode.status, out: rNoNode.out.slice(-300) }); }
+    // no node on the push's path ⇒ REFUSED by name at the hook's TOP — DRIVEN on every machine (主开发 r1039's law): a planted search
+    // path holding only bash and git (the hook's first line needs git; nothing else runs before the refusal), never a node.
+    // CONTROL: the hook with that refusal cut does not say it (its secret scan then dies on the missing node: another failure)
+    const noNodeBin = mktmp('e381-no-node-bin');
+    for (const t of ['bash', 'git']) { const at = ['/usr/local/bin', '/usr/bin', '/bin'].map((d) => path.join(d, t)).find((f) => fs.existsSync(f)); if (at) fs.symlinkSync(at, path.join(noNodeBin, t)); }
+    const NOREF = "[ci] REFUSED — no node on this push's PATH: the gate cannot run, nothing was judged";
+    const rNoNode = runHookRefs(`refs/heads/main ${B} refs/heads/main ${ZERO}\n`, { PATH: noNodeBin });
+    ok(fs.existsSync(path.join(noNodeBin, 'git')) && rNoNode.status === 1 && rNoNode.out.includes(NOREF) && !rNoNode.calls.length,
+      'B-e381: no node on the push\'s path is REFUSED by name at the hook\'s top — no step ran (no false GATE RED, no «could not read»), driven on every machine', { status: rNoNode.status, out: rNoNode.out.slice(-300) });
+    const cutRefusal = preFixHook('e381-no-node-cut', [`command -v node >/dev/null 2>&1 || { echo "${NOREF}" >&2; exit 1; }\n`, '']);
+    if (cutRefusal) {
+      const rCut = runHookRefs(`refs/heads/main ${B} refs/heads/main ${ZERO}\n`, { PATH: noNodeBin }, cutRefusal);
+      ok(!rCut.out.includes(NOREF) && rCut.status !== 0, 'B-e381 CONTROL (the top refusal cut, in a copy of the hook): the same push says no such words — it fails elsewhere, for another reason', { status: rCut.status, out: rCut.out.slice(-200) });
+    }
   }
   ok(r1.calls.map((c) => c.mode).join(',') === 'check-heavy,fast,heavy-launch',
     `the hook checks the heavy verdict FIRST, then runs fast, then launches heavy (got: ${r1.calls.map((c) => c.mode).join(',')})`);
