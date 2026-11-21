@@ -114,8 +114,11 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchU
   // ONE slot the consumer registered second REPLACES this stamp — the consumer
   // keeps streaming and ptyQuietSince reads "silent" for a relaying bridge
   // (B-ae4b; test-pty-duck is the census).
-  session._ptyOpenedAt = Date.now(); // THIS bridge's birth (verify r1): `ptyQuietSince(session, _ptyOpenedAt)` = "this pty never spoke" — the broken-stdin detector re-sends only then
-  ptyProcess.onData(() => { session._lastPtyDataAt = Date.now(); });
+  // B-1217 — A BRIDGE'S LIFE SIGNS ARE ITS OWN: its birth is strictly AFTER its predecessor's last byte (a byte in the birth's own
+  // millisecond reads «spoke» by ptyQuietSince's tie), and only the CURRENT bridge stamps — a replaced bridge's late bytes (a killed
+  // dtach client's «[detached]» goodbye, landing after the new birth) count for nobody, so the successor that never spoke still reads so
+  session._ptyOpenedAt = Math.max(Date.now(), (Number(session._lastPtyDataAt) || 0) + 1); // THIS bridge's birth (verify r1): `ptyQuietSince(session, _ptyOpenedAt)` = "this pty never spoke" — the broken-stdin detector re-sends only then
+  ptyProcess.onData(() => { if (session.pty === ptyProcess) session._lastPtyDataAt = Date.now(); });
   if (session._bridgeHeldInputs && session._bridgeHeldInputs.pty === null) replayHeldInputs(session, ptyProcess, session._bridgeHeldInputs.lines);   // the onExit ladder's carry (B-c20d verify r1)
 
   // B-cd4b (round wzvgb5033): a RESTORE's attach hands what the survivor wrote between the restore's read and this attach

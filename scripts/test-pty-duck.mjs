@@ -21,7 +21,7 @@ import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp ro
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-const { scratch } = await import(path.join(REPO, 'scripts/scratch.mjs'));
+const { scratch, anchored } = await import(path.join(REPO, 'scripts/scratch.mjs'));
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? `\n      ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : '')); } };
@@ -246,6 +246,96 @@ console.log('— §4 the healer on an R6-shaped session: it refuses the pipe duc
   const r6 = (/\} else if \(r6Handle\) \{([\s\S]*?)setupSessionPty\(session, id, pipePtyShim\(r6Handle\)\);/.exec(wsc) || [])[1] || '';
   ok(/^\s*session\.socketPath = null;/m.test(r6), 'ws-create\'s r6Handle branch nulls the socketPath it never creates (the braces: no detector, no dead-bridge watch on a pipe)');
   ok(/^\s*_pipe: true,/m.test(read('src/pty-duck.js')), 'pipePtyShim marks its duck `_pipe` (what the healer refuses)');
+}
+
+// ── § 5 A BRIDGE'S LIFE SIGNS ARE ITS OWN (B-1217, lane lg-recovery) ──────────────
+// setupSessionPty stamped `_lastPtyDataAt` from ANY pty it ever wired, and a bridge's birth could share a millisecond with its
+// predecessor's last byte (ptyQuietSince reads that tie as «spoke»). So a killed dtach client's goodbye («[detached]», which
+// dtach's attach client prints when it is ended — the shape test-fork-groups records), landing AFTER the new bridge's birth,
+// made the new bridge read «it spoke»: B-c20d's hold of what a person typed and the never-spoke detector stood down for exactly
+// the bridge they guard, and the dead-bridge watch read it alive — after a heal the held keystrokes were not replayed. The pair
+// of stand-ins below goes through the REAL setupSessionPty / writeSessionInput / reattachLocalPty; the RED is a copy of the
+// release's two lines.
+console.log('— §5 a bridge\'s life signs are its own: a replaced bridge\'s goodbye never speaks for its successor (B-1217) —');
+{
+  const SS = read('src/server/session-stdout.js');
+  const CURE = "  session._ptyOpenedAt = Math.max(Date.now(), (Number(session._lastPtyDataAt) || 0) + 1);";
+  const STAMP = "  ptyProcess.onData(() => { if (session.pty === ptyProcess) session._lastPtyDataAt = Date.now(); });";
+  ok(SS.includes(CURE) && SS.includes(STAMP), 'the two lines stand in setupSessionPty (the birth after the predecessor\'s last byte; the stamp only from the current bridge)');
+  const releaseSS = anchored(anchored(SS, CURE, '  session._ptyOpenedAt = Date.now();' /* stale-pins: kept — the release's line, this control's plant */, 'release: the birth at now'),
+    STAMP, '  ptyProcess.onData(() => { session._lastPtyDataAt = Date.now(); });' /* stale-pins: kept — the release's line, this control's plant */, 'release: any pty stamps');
+  const MUT5 = (await import(path.join(REPO, 'scripts/mutant-copy.mjs'))).mutantCopies('pty-duck-b1217', REPO);
+  // the heal's new attach: a stand-in for `dtach -a` that takes the replay and says nothing (the leg reads what the heal HOLDS for it)
+  const STANDIN = path.join(ROOT, 'stand-in-dtach'); fs.writeFileSync(STANDIN, '#!/bin/sh\nexec sleep 30\n', { mode: 0o755 });
+  const SOCK = path.join(ROOT, 'cw-b1217-never-created');
+  const engFrom = (mod) => mod.create({
+    rootDir: REPO, BUFFERS_DIR: path.join(ROOT, 'buffers'), META_DIR: path.join(ROOT, 'meta'),
+    DTACH_CMD: STANDIN, USAGE_SCANNER_PATH: '', CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(),
+    activeSessions, engine: {}, checkClaudeGoalStatus: () => { }, broadcastToSession: () => { }, broadcastActiveSessions: () => { },
+    noteModelSeen: () => { }, noteHarnessModels: () => { }, recordUsageAttribution: () => { },
+    daemonPtyShim: dial.daemonPtyShim, agentEnv: () => process.env, sbSeenFirst: () => { },
+    getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => null, getTelemetry: () => null,
+    getNoConvoRef: () => null, getDeliver: () => null, getPages: () => null, getPermissionRules: () => null,
+  });
+  const E5 = engFrom(require(path.join(REPO, 'src/server/session-stdout.js'))), R5 = engFrom(MUT5.load('src/server/session-stdout.js', releaseSS, 'release'));
+  // a local stand-in (node-pty's listener SET) or a paired machine's bridge (dial.daemonPtyShim over a handle) — each with a way to speak
+  const local = () => { const L = duck.ptyListeners(); return { pty: { pid: 11, onData: (cb) => L.on(cb), onExit: () => ({ dispose() { } }), write() { }, resize() { }, kill() { } }, say: (t) => L.emit(t) }; };
+  const paired = () => { const h = { pid: 12, write() { }, resize() { }, kill() { } }; const p = dial.daemonPtyShim(h); return { pty: p, say: (t) => h.onData(Buffer.from(t)) }; };
+  const GOODBYE = '\x1b[999H\r\n[detached]\r\n';
+  let n5 = 0;
+  // A speaks, B is wired in its place (the heal's wiring), A's goodbye lands AFTER B's birth, a person types, then the heal
+  const scene = async (E, mk, { frozen = false } = {}) => {
+    const id = 'sess-b1217-' + (++n5);
+    const session = { mode: 'terminal', backend: 'shell', clients: new Map(), buffer: '', socketPath: SOCK, cwd: ROOT };
+    activeSessions.set(id, session);
+    const realNow = Date.now, T = realNow();
+    if (frozen) Date.now = () => T;                    // a stall placed: the whole replacement inside ONE millisecond
+    const r = {};
+    try {
+      const A = mk(); E.setupSessionPty(session, id, A.pty); A.say('prompt$ '); r.lastReal = session._lastPtyDataAt;
+      const B = mk(); E.setupSessionPty(session, id, B.pty);
+      let C = null;
+      if (frozen) { C = mk(); E.setupSessionPty(session, id, C.pty); }   // replaced TWICE in that millisecond
+      if (!frozen) await sleep(5);                        // the goodbye comes on a later turn, after the new birth
+      A.say(GOODBYE); if (C) B.say(GOODBYE);
+      r.lastOutput = session._lastPtyDataAt;
+      r.neverSpoke = E.ptyQuietSince(session, Number(session._ptyOpenedAt) || 0);
+      E.writeSessionInput(session, 'echo HELD');
+      r.held = session._bridgeHeldInputs ? session._bridgeHeldInputs.lines.slice() : null;
+      E.reattachLocalPty(id, session, 'test: B-1217 heal');
+      r.replay = session._bridgeHeldInputs && session._bridgeHeldInputs.replaying ? session._bridgeHeldInputs.lines.slice() : [];
+      r.speaker = mk === local ? 'local' : 'paired';
+    } finally {
+      Date.now = realNow;
+      activeSessions.delete(id);                         // the stand-in attach's exit must not run the ladder on a stub engine
+      try { session.pty?.kill?.(); } catch { }
+    }
+    return r;
+  };
+  if (duck) {
+    const cured = await scene(E5, local), rel = await scene(R5, local);
+    ok(cured.neverSpoke === true && JSON.stringify(cured.held) === '["echo HELD"]' && JSON.stringify(cured.replay) === '["echo HELD"]',
+      'THE GOODBYE: the replaced bridge\'s «[detached]» after the new birth counts for nobody — the new bridge still reads never-spoke, holds what the person typed, and the heal replays it', cured);
+    ok(rel.neverSpoke === false && rel.held === null && rel.replay.length === 0, 'RED (a copy of the release\'s two lines): the goodbye makes the new bridge read «spoke» — nothing held, nothing replayed', rel);
+    const twice = await scene(E5, local, { frozen: true }), twiceRel = await scene(R5, local, { frozen: true });
+    ok(twice.neverSpoke === true && JSON.stringify(twice.replay) === '["echo HELD"]', 'A BRIDGE REPLACED TWICE IN ONE MILLISECOND (the clock held): the third bridge is born after the first one\'s last byte, the goodbyes of both count for nobody, the heal replays', twice);
+    ok(twiceRel.neverSpoke === false && twiceRel.replay.length === 0, 'RED (the release\'s lines, the same millisecond): the tie and the goodbyes read «spoke» — nothing replayed', twiceRel);
+    const pair = await scene(E5, paired), pairRel = await scene(R5, paired);
+    ok(pair.neverSpoke === true && JSON.stringify(pair.replay) === '["echo HELD"]' && pairRel.neverSpoke === false && pairRel.replay.length === 0,
+      'A PAIRED MACHINE\'S BRIDGE (dial.daemonPtyShim pair): the same law — its predecessor\'s goodbye never speaks for it (RED on the release\'s lines)', { pair, pairRel });
+    ok(cured.lastReal > 0 && cured.lastOutput === cured.lastReal && rel.lastOutput > rel.lastReal,
+      'the SESSION\'s last output across the heal is its program\'s last byte: kept (never reset at a birth), and a dying client\'s goodbye does not move it (RED: the release\'s goodbye moved it)', { cured: [cured.lastReal, cured.lastOutput], rel: [rel.lastReal, rel.lastOutput] });
+    // the current bridge's own byte still stamps (readers of the session's last output and the bridge's liveness both move)
+    {
+      const id = 'sess-b1217-own'; const session = { mode: 'terminal', backend: 'shell', clients: new Map(), buffer: '', socketPath: null, cwd: ROOT };
+      activeSessions.set(id, session);
+      const A = local(); E5.setupSessionPty(session, id, A.pty); await sleep(2);
+      const t0 = Date.now(); A.say('more output');
+      ok(E5.ptyQuietSince(session, t0) === false && Number(session._lastPtyDataAt) >= t0, 'the CURRENT bridge\'s byte stamps as before (the session\'s last output and its liveness both move)', { stamp: session._lastPtyDataAt, t0 });
+      activeSessions.delete(id);
+    }
+  }
+  ok(MUT5.files.every((f) => !f.startsWith(REPO)), 'the release copy lives outside the tree');
 }
 
 console.log(fail ? `\nFAIL (${fail} failed, ${pass} passed)` : `\nALL PASS (${pass})`);

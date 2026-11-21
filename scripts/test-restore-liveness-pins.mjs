@@ -28,8 +28,8 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
   const stdoutSrc = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf-8');
   ok((stdoutSrc.match(/pty\.spawn\(DTACH_CMD/g) || []).length === 2,
     'WIRING PIN: exactly two local dtach spawns remain (the first attach + the ONE healer)');
-  ok(/ptyProcess\.onData\(\(\) => \{ session\._lastPtyDataAt = Date\.now\(\); \}\);/.test(stdoutSrc),
-    'WIRING PIN: the liveness stamp is registered in setupSessionPty — the one place every pty is wired');
+  ok(/ptyProcess\.onData\(\(\) => \{ if \(session\.pty === ptyProcess\) session\._lastPtyDataAt = Date\.now\(\); \}\);/.test(stdoutSrc),
+    'WIRING PIN: the liveness stamp is registered in setupSessionPty — the one place every pty is wired — and only the CURRENT bridge stamps (B-1217)');
 }
 
 console.log(fail ? `\nFAIL (${fail} failed, ${pass} passed)` : `\nALL PASS (${pass})`);
