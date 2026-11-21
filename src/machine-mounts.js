@@ -24,7 +24,8 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
-const { execFile, spawn } = require('child_process');
+const { execFile } = require('child_process');   // (B-323e: its two probe children — ls, realpath — ride THE STARTER)
+const PI = require('./proc-identity.js');   // B-323e: a probe child's end the hub may never hear, asked of /proc by its pid
 const MW = require('./mount-error-words.js'); // B-af94: every refusal and row words BY CODE — the page words them in its language
 const DM = require('./device-mount'); // the pull chain (B-fcc7: read at each call — test-pull-refresh §15 drives the manager over a stub chain)
 // cure 4 (the readers' should): a pull the person REMOVED while the mount it was asked for waited is refused to the caller
@@ -40,18 +41,39 @@ const PROBE_STUCK_MS = 60000;   // 主开发's small 2: a probe child still aliv
 /** THE one `ls` child of this file (spawn-env-census: one probe site) — never node fs on a mount point. `names` asks `ls -A`
  *  for the folder's entries (B-fcc7: is a released pull's bare folder empty?). Bounded (8 s), ended by its handle.
  *  → { ok, empty } (empty: null unless `names`). */
-function lsChild(mp, { names = false, ms = 8000 } = {}) {   // → ok: true / false (no answer in time, an error) / null (it could not start); exited: the child's own end
-  let exitedRes; const exited = new Promise((r) => { exitedRes = r; });
-  return new Promise((res) => {
-    let out = '', done = false, spawned = false, t = null;
-    const end = (v) => { if (!done) { done = true; clearTimeout(t); res({ ...v, exited }); } };
-    let c; try { c = spawn('ls', names ? ['-A', mp] : [mp], { stdio: ['ignore', names ? 'pipe' : 'ignore', 'ignore'] }); } catch { exitedRes(); return end({ ok: null, empty: null }); }   // could not start: no verdict
-    t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } end({ ok: false, empty: null }); }, ms);
-    c.on('spawn', () => { spawned = true; });
-    if (names) c.stdout.on('data', (d) => { if (out.length < 4096) out += d; });
-    c.on('close', (code) => { exitedRes(); end({ ok: code === 0, empty: names && code === 0 ? out.length === 0 : null }); });   // a name of spaces is a name
-    c.on('error', () => { exitedRes(); end({ ok: spawned ? false : null, empty: null }); });   // an error before it started (EAGAIN, ENOENT): no verdict
-  });
+/** B-323e (its reader's M2): a child of THE STARTER whose end this hub may NEVER hear — killed at its bound and asleep in the kernel
+ *  (a dead mount), or started by a starter that then stopped answering; a fault ends the starter, never its children — so its pid and
+ *  start time are kept and its end is asked of /proc when it is owed, as mounts.js _probeMountpoint's held mark (B-91aa): no such
+ *  process, a zombie, or that pid now another process's ⇒ ended; a /proc this hub cannot read says nothing (still held).
+ *  (its re-read's S1) ENDED ALREADY when kept (no such process, a zombie) ⇒ gone for good — its pid may go to another; with
+ *  `notAfter` (the ask's instant + a slack), a process that STARTED after it is not this ask's child (the pid reused) ⇒ gone */
+function heldChild(pid, notAfter = 0) {
+  const st0 = pid ? PI.statOf(pid) : null;
+  if (st0 === null || (st0 && st0[0] === 'Z')) return { pid: pid || 0, gone: () => true };
+  const start = st0 ? st0[1] : null;
+  if (notAfter && start != null) { const w = PI.wallStartOf(start); if (w != null && w > notAfter) return { pid, gone: () => true }; }
+  return { pid, gone() { const st = PI.statOf(pid); return st === null || (!!st && (st[0] === 'Z' || (start != null && st[1] !== start))); } };
+}
+const ASK_SLACK_MS = 2000;   // a child starts within this of its ask (the starter's turn); one that started later is another's
+function lsChild(mp, { names = false, ms = 8000 } = {}) {   // → ok: true / false (no answer in time, an error) / null (it could not start, or no answer from the starter); exited: the child's own end
+  // B-323e (its mount half, lane bl-machines-b): THE STARTER runs it (src/server/child-starter.js — a fork of a few MB, never the hub's
+  // 4.5–5 GB process; the pull sweep asks it every 90 s for each live pull). Its answers read as the release read its own child:
+  // ended 0 = ok, ended else or killed at its bound = false, never started or NO ANSWER from the starter = null (no verdict: a slow
+  // starter is never «the mount is down»); the names captured past the release's 4096 characters end the child (more names than that
+  // = not empty). `exited` = the child's own end: at the answer, or — killed at its bound and still asleep — when it ends at last;
+  // `held` = such a child, kept for its owner to ask /proc (heldChild) when its end may never be heard
+  let exitedRes, held = null; const exited = new Promise((r) => { exitedRes = r; });
+  const S = require('./server/child-starter').childStarter(), askedAt = Date.now();
+  return S.run('ls', names ? ['-A', mp] : [mp], { timeoutMs: ms, capture: names, maxBuffer: 4096, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => { held = heldChild(pid, askedAt + ASK_SLACK_MS); }, onLateExit: () => exitedRes() })
+    .then((r) => {
+      if (r && r.unknown && r.pid) return { ok: null, empty: null, exited, held: heldChild(r.pid, askedAt + ASK_SLACK_MS) };   // started, then no answer: it may still run
+      // (said: a no answer with no pid — the starter froze before its «started» line — is let go at once: its child, if any, is not known)
+      if (!r || r.unknown || !r.started) { exitedRes(); return { ok: null, empty: null, exited }; }
+      if (r.timedOut) return { ok: false, empty: null, exited, held: held || heldChild(r.pid, askedAt + ASK_SLACK_MS) };   // its end comes through onLateExit, or of /proc
+      exitedRes();
+      if (r.overflow) return { ok: true, empty: names ? false : null, exited };
+      return { ok: r.code === 0 && !r.error, empty: names && r.code === 0 && !r.error ? String(r.stdout || '').length === 0 : null, exited };   // a name of spaces is a name
+    }, () => { exitedRes(); return { ok: null, empty: null, exited }; });
 }
 
 // B-02f6 remainder (1) (主开发 r1160 / r1178): the PROOF that a writer refused under a pull record whose real folder never resolved
@@ -75,18 +97,23 @@ const proofSig = (rec) => rec.id + '\u0000' + path.resolve(String(rec.mountpoint
 /** B-844b: a folder's REAL path — symlinks resolved — by a child `realpath -m` (never node fs on a path that may be a mount
  *  point), bounded (6 s); a host without GNU realpath (the child refuses) takes the path as written (resolved); a child that did
  *  not ANSWER in time (a wedged FUSE target) is no answer — null, so the next check asks again (r5: never cached as written). */
-function realpathChild(p, { ms = 6000, onExit = null } = {}) {   // r6: onExit — the child's own end (a stuck child is never doubled)
+function realpathChild(p, { ms = 6000, onExit = null, onHeld = null } = {}) {   // r6: onExit — the child's own end (a stuck child is never doubled); onHeld — one whose end may never be heard (heldChild)
+  // B-323e (its mount half): THE STARTER runs it, as lsChild; no answer from the starter = no answer (null, asked again)
   const lex = path.resolve(String(p || '/'));
-  return new Promise((res) => {
-    let out = '', done = false, t = null, gone = false;
-    const exited = () => { if (!gone) { gone = true; try { onExit && onExit(); } catch { } } };
-    const end = (v) => { if (!done) { done = true; clearTimeout(t); res(v); } };
-    let c; try { c = spawn('realpath', ['-m', '--', lex], { stdio: ['ignore', 'pipe', 'ignore'] }); } catch { exited(); return end(null); }
-    t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } end(null); }, ms);
-    c.stdout.on('data', (d) => { if (out.length < 8192) out += d; });
-    c.on('close', (code) => { exited(); const r = out.replace(/\n$/, ''); end(code === 0 && r.startsWith('/') ? r : lex); });
-    c.on('error', (e) => { exited(); end(e && e.code === 'ENOENT' ? lex : null); });   // r7: no realpath on this host ⇒ as written (final); another error ⇒ no answer
-  });
+  let gone = false; const exited = () => { if (!gone) { gone = true; try { onExit && onExit(); } catch { } } };
+  const S = require('./server/child-starter').childStarter();
+  const askedAt = Date.now(), keep = (pid) => { try { onHeld && onHeld(heldChild(pid, askedAt + ASK_SLACK_MS)); } catch { } };
+  return S.run('realpath', ['-m', '--', lex], { timeoutMs: ms, capture: true, maxBuffer: 8192, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => keep(pid), onLateExit: exited })
+    .then((r) => {
+      if (r && r.unknown && r.pid) { keep(r.pid); return null; }   // started, then no answer: it may still run
+      if (!r || r.unknown) { exited(); return null; }
+      if (!r.started) { exited(); return r.error === 'ENOENT' ? lex : null; }   // r7: no realpath on this host ⇒ as written (final); another error ⇒ no answer
+      if (r.timedOut) return null;   // its end comes through onLateExit
+      exited();
+      if (r.overflow) return null;
+      const out = String(r.stdout || '').replace(/\n$/, '');
+      return r.code === 0 && out.startsWith('/') ? out : lex;
+    }, () => { exited(); return null; });
 }
 
 const RCLONE_PIN = 'v1.69.3'; // ≥1.66 brings `rclone nfsmount` (macOS without macFUSE); 2.369.12
@@ -834,9 +861,12 @@ class MachineMounts {
   /** B-844b: every pull record's real path resolved (children, in parallel — never one wedged mount point after another) */
   async _resolveReals() {
     const kids = (this._realKids = this._realKids || new Set());   // r6 (read 5 #5): ONE child per record at a time — one stuck in the kernel is never doubled
+    const kidHeld = (this._realKidHeld = this._realKidHeld || new Map()), kidTok = (this._realKidTok = this._realKidTok || new Map());
+    for (const [id, h] of kidHeld) if (h.gone()) { kids.delete(id); kidHeld.delete(id); kidTok.delete(id); }   // B-323e: an end this hub could not hear, asked of /proc
     const todo = this._state.mounts.filter((m) => m.dir === 'pull' && !this._realMp.has(m.id) && !kids.has(m.id));
     todo.forEach((m) => kids.add(m.id));
-    const reals = await Promise.all(todo.map((m) => (this._realpath || realpathChild)(m.mountpoint, { onExit: () => kids.delete(m.id) })));
+    const reals = await Promise.all(todo.map((m) => { const tok = {}; kidTok.set(m.id, tok);
+      return (this._realpath || realpathChild)(m.mountpoint, { onExit: () => { if (kidTok.get(m.id) !== tok) return; kidTok.delete(m.id); kidHeld.delete(m.id); kids.delete(m.id); }, onHeld: (h) => { if (kidTok.get(m.id) === tok) kidHeld.set(m.id, h); } }); }));
     const learned = [];
     todo.forEach((m, i) => { if (reals[i]) { this._realMp.set(m.id, reals[i]); learned.push(m.id); } });   // r5: a child that did not answer is asked again at the next check
     // r8 (read 7 #3): a path learned on ANY road — its «could not be checked» words go here (a pair it forms is the callers' re-check)
@@ -1107,6 +1137,9 @@ class MachineMounts {
   async _probeBare(rec) {
     this._bare = this._bare || new Map(); this._probing = this._probing || new Set();
     const pending = !!rec && !!this._releasing && this._releasing.has(this._markKey(rec));   // the boot's release of it still runs
+    // B-323e (its reader's M2): a probe child whose end this hub may never hear (asleep in the kernel, its starter then replaced) is
+    // asked of /proc — ended ⇒ its single flight ends here and the folder is asked again
+    if (rec && this._probing.has(rec.id) && this._probingHeld?.get(rec.id)?.gone()) { this._probing.delete(rec.id); this._probingAt?.delete(rec.id); this._probeSaid?.delete(rec.id); this._probingHeld.delete(rec.id); this._probingTok?.delete(rec.id); }
     if (rec && this._probing.has(rec.id)) {
       (this._reprobe = this._reprobe || new Set()).add(rec.id);   // asked while one runs: again once that child exits (read 6: a multi-select delete)
       // 主开发's small 2: a probe child that never ends (an `ls` asleep in the kernel) — bounded: its folder is not judged meanwhile
@@ -1121,8 +1154,10 @@ class MachineMounts {
     if (!rec || rec.dir !== 'pull' || this._live.has(rec.id) || this._mounting.has(rec.id) || pending || this._held.has(rec.id) || DM.unmountStuckOf?.(rec.mountpoint)) return this._bare.get(rec && rec.id) || null;   // read 2: a held record is never probed (its folder may be its holder's live mount)
     this._probing.add(rec.id);   // one probe child per folder while it LIVES (a wedged `ls` is not stacked by every sweep)
     (this._probingAt = this._probingAt || new Map()).set(rec.id, Date.now());
+    const tok = {}; (this._probingTok = this._probingTok || new Map()).set(rec.id, tok);
     const r = await lsChild(rec.mountpoint, { names: true, ms: this._probeMs || 8000 });
-    Promise.resolve(r.exited).then(() => { this._probing.delete(rec.id); this._probingAt.delete(rec.id); this._probeSaid?.delete(rec.id); if (this._reprobe?.delete(rec.id)) this._probeBare(rec).catch(() => { }); });
+    if (r.held && this._probingTok.get(rec.id) === tok) (this._probingHeld = this._probingHeld || new Map()).set(rec.id, r.held);
+    Promise.resolve(r.exited).then(() => { if (this._probingTok.get(rec.id) !== tok) return; this._probingTok.delete(rec.id); this._probingHeld?.delete(rec.id); this._probing.delete(rec.id); this._probingAt.delete(rec.id); this._probeSaid?.delete(rec.id); if (this._reprobe?.delete(rec.id)) this._probeBare(rec).catch(() => { }); });
     if (this._live.has(rec.id) || this._mounting.has(rec.id) || !this._state.mounts.some((m) => m.id === rec.id)) return null;   // it moved meanwhile
     if (r.ok === null) return this._bare.get(rec.id) || null;   // ls could not start: the verdict stands
     if (r.ok) this._bare.set(rec.id, r.empty ? 'empty' : 'not-empty'); else this._bare.delete(rec.id);

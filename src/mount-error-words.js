@@ -69,6 +69,7 @@ const WORDS = Object.freeze({
   root_denied: i18nKey('This token can’t list the account root (it’s bucket-scoped) — add a submount with a specific bucket under it.'),
   storage_not_connected: i18nKey('the storage did not connect'),
   mp_no_permission: i18nKey('No permission to create the mount point {mp} — pick a writable location, or create it yourself first: sudo mkdir -p \'{mp}\' && sudo chown {owner} \'{mp}\''),
+  mp_unanswered: i18nKey('The mount point {mp} could not be checked — this machine did not answer in time; try again in a moment'),   // B-323e (its mount half): the starter's no answer is no verdict
   mp_not_writable: i18nKey('The mount point {mp} exists but is not writable by VibeSpace — fix ownership: sudo chown {owner} \'{mp}\''),
   mp_not_empty: i18nKey('The mount point {mp} is not empty ({names}) — these were written while the storage was disconnected; move them away, then reconnect'),   // the release's words, byte for byte (主开发 09:24Z: a sentence a person reads is not changed for a test — test-bundle-globals is taught instead)
   mp_not_recreated: i18nKey('Moved stranded files to {dest} but could not recreate the mount point {mp}: {detail}'),

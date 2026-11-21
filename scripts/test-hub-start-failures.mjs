@@ -367,7 +367,7 @@ try {
     const FIX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/spawn-listener-debt.json'), 'utf8')), DEBT = FIX.pipeFirst, SURV = FIX.survives;
     // FOUNDING, a count a FILE (cure 3, the read's SHOULD: a sum let one file grow while another fell): raising one is an edit here
     const FOUNDING = {
-      pipeFirst: { 'src/routes/files.js': 3, 'src/machine-mounts.js': 2, 'src/remote-fs.js': 1 },   // B-147f: desktop-display (2) and node-runtime (1) cured — out
+      pipeFirst: { 'src/routes/files.js': 3, 'src/remote-fs.js': 1 },   // B-147f: desktop-display (2) and node-runtime (1) cured — out; B-323e: machine-mounts' two ride the starter — out
       survives: { 'src/mounts.js': 2, 'src/plugins/frp.js': 1, 'src/plugins/tailscale.js': 2, 'src/vnc.js': 1, 'src/routes/files.js': 4, 'src/remote-fs.js': 1, 'src/claude-oat-probe.js': 1, 'src/device-mount.js': 1 },
     };
     const SURV_MARK = 'ckpt61 cure 2: the hub survives a start that fails';
@@ -418,7 +418,6 @@ try {
       ["the node runtime's child (its pipes first)", sitesOf("src/node-runtime.js", anchored(rd("src/node-runtime.js"), "    child.on('error', (e) => { take(String(e && e.message)); end(-1); });\n    child.on('close', (code) => end(code == null ? -1 : code));\n    if (child.stdout) child.stdout.on('data', take); if (child.stderr) child.stderr.on('data', take);\n", "    child.stdout.on('data', take); child.stderr.on('data', take);\n    child.on('error', (e) => { take(String(e && e.message)); end(-1); });\n    child.on('close', (code) => end(code == null ? -1 : code));\n", "b147f-5")).filter((x) => x.bad).length > 0 ? 1 : 0],
       ["the window helper (its pipes first)", sitesOf("src/agentd/stream-window-source.js", anchored(rd("src/agentd/stream-window-source.js"), "      c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('helper_missing', `the window helper did not start (${e && (e.code || e.message)})`); });   // B-147f: the listener first\n", "", "b147f-m0")).filter((x) => x.bad).length > 0 ? 1 : 0],
       ["the sound helper (its pipes first)", sitesOf("src/desktop-sound.js", anchored(rd("src/desktop-sound.js"), "      hc.on('error', (e) => { hcErr = e; });   // B-147f: heard at once (the promise below answers it in its own words); its pipes guarded\n      r.helper = hc;\n      if (hc.stdin) hc.stdin.on('error', () => { });\n      if (hc.stdout) hc.stdout.pipe(enc.stdin);\n", "      r.helper = hc;\n      hc.stdin.on('error', () => { });\n      hc.stdout.pipe(enc.stdin);\n", "b147f-m1")).filter((x) => x.bad).length > 0 ? 1 : 0],
-      ['the cache count (its pipe first)', sitesOf('src/mounts.js', anchored(rd('src/mounts.js'), "      c.on('error', end); c.on('close', end);\n      if (c.stdout) c.stdout.on(", "      c.stdout.on(", 'class-cache-count')).filter((x) => x.bad).length],
     ];
     const kept = Object.entries(keep).map(([w, src]) => [w, sitesOf('kept.js', src).filter((x) => x.bad).length]);
     ok(mods.length > 100 && mods.includes('src/agentd/client.js') && mods.includes('src/mounts.js') && agentMods.includes('src/agentd/agentd.js') && agentMods.includes('src/node-runtime.js') && sites.length > 100 && !newBad.length && DEBT.every((d) => debtNow[d.file] <= d.n) && survOk && reds.every(([, n]) => n === 1) && kept.every(([, n]) => n === 0),

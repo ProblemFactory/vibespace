@@ -1477,7 +1477,7 @@ try {
         const l1 = await m._resolveReals(); const kept1 = m._realMp.has('mm-na');
         m._realpath = async (pX, o) => { if (o && o.onExit) o.onExit(); return '/the/real/' + path.basename(pX); };
         const l2 = await m._resolveReals();
-        check('§17 r5/r8c (reads 4 #6, 8 #1): a realpath child that did not ANSWER is no answer — nothing kept (never the path as written); the next check asks again and keeps the real answer', !kept1 && l1.length === 0 && m._realMp.get('mm-na') === '/the/real/h' && l2.includes('mm-na') && MMSRC.includes("t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } end(null); }, ms);"), JSON.stringify({ kept1, l1, l2, got: m._realMp.get('mm-na') }));
+        check('§17 r5/r8c (reads 4 #6, 8 #1): a realpath child that did not ANSWER is no answer — nothing kept (never the path as written); the next check asks again and keeps the real answer', !kept1 && l1.length === 0 && m._realMp.get('mm-na') === '/the/real/h' && l2.includes('mm-na') && MMSRC.includes("return S.run('realpath', ['-m', '--', lex], { timeoutMs: ms,") && MMSRC.includes("if (r.timedOut) return null;   // its end comes through onLateExit"), JSON.stringify({ kept1, l1, l2, got: m._realMp.get('mm-na') }));
       }
       // an add refused for a removed machine's row names the right action
       const mm7 = mkMM('pairs-g', [{ id: 'mm-orph7', dir: 'pull', hostId: 'h-removed', remotePath: '/Users/a', mountpoint: mpFree, createdAt: 1 }]);

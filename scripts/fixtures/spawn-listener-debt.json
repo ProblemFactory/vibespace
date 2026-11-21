@@ -2,7 +2,6 @@
   "law": "ckpt61 (test-hub-program-starts ④j): starting a helper never ends the hub — every spawn / fork start in a module the hub loads attaches its 'error' listener before its first unguarded pipe touch. A count a file only FALLS; a site in a file not named here is red.",
   "pipeFirst": [
     { "file": "src/routes/files.js", "n": 3, "sites": "the whole-archive extract and its entry counter (startExtract, lister), the folder zip download", "owner": "bl-loop-a, the next unit (2.369.413)" },
-    { "file": "src/machine-mounts.js", "n": 2, "sites": "the mount point's ls probe, the realpath ask", "owner": "bl-loop-a, the next unit (2.369.413)" },
     { "file": "src/remote-fs.js", "n": 1, "sites": "the ssh write (writeFile)", "owner": "bl-loop-a, the next unit (2.369.413)" }
   ],
   "survives": [

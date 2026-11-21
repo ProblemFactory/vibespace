@@ -1212,11 +1212,10 @@ class MountManager {
   /** Probe whether this record's token can list the account ROOT. */
   _probeRootDenied(m) {
     const { env } = this._rcloneFor(m);
-    return new Promise((resolve) => {
-      execFile(this.rcloneBin(), ['lsf', 'VS:', '--max-depth', '1', '--retries', '1', '--low-level-retries', '1'],
-        { env, timeout: 20000 },
-        (err, _o, stderr) => resolve(err ? /AccessDenied|Access Denied|status code: 403/i.test(String(stderr || err.message)) : false));
-    });
+    // B-323e (its mount half): by THE STARTER with the record's whole env (rcloneEnv), as the sweep's probes; DENIED only by an ended
+    // run's own words — no answer, a run that never started or one ended at its bound says nothing (never «denied»)
+    return this._rcloneProbeRun(['lsf', 'VS:', '--max-depth', '1', '--retries', '1', '--low-level-retries', '1'], env, 20000)
+      .then((r) => !!r && !r.unknown && !!r.started && !r.timedOut && r.code !== 0 && /AccessDenied|Access Denied|status code: 403/i.test(String(r.stderr || '')), () => false);
   }
 
   async mount(id) {
@@ -1307,12 +1306,11 @@ class MountManager {
     // tokens require V4, so those need rclone 1.63–1.69 (v1 SDK + the flag)
     // or an un-proxied endpoint — fail with a message that says so.
     if (isS3 && m.v2Auth === undefined) {
-      const probe = (extraEnv) => new Promise((resolve) => {
-        execFile(this.rcloneBin(), ['lsf', remote, '--max-depth', '1', '--retries', '1', '--low-level-retries', '1',
-          ...(this._rcloneSupportsAcceptEncodingFlag() ? ['--s3-use-accept-encoding-gzip=false'] : [])],
-          { env: { ...env, ...extraEnv }, timeout: 20000 },
-          (err, _o, stderr) => resolve(err ? String(stderr || err.message) : null));
-      });
+      // B-323e (its mount half): by THE STARTER with the record's whole env, as the sweep's probes; an ended 0 = signed fine (null),
+      // anything else its words (no answer / never started / ended at its bound: no verdict word — the record stays undecided)
+      const probe = (extraEnv) => this._rcloneProbeRun(['lsf', remote, '--max-depth', '1', '--retries', '1', '--low-level-retries', '1',
+        ...(this._rcloneSupportsAcceptEncodingFlag() ? ['--s3-use-accept-encoding-gzip=false'] : [])], { ...env, ...extraEnv }, 20000)
+        .then((r) => (r && !r.unknown && r.started && !r.timedOut && r.code === 0 ? null : String((r && (r.stderr || r.error)) || (r && r.unknown ? 'no answer' : 'failed'))), (e) => String((e && e.message) || e));
       const v4err = await probe({});
       if (!v4err) { m.v2Auth = false; }
       else if (/AccessDenied|Access Denied/i.test(v4err)) {
@@ -1440,15 +1438,12 @@ class MountManager {
   /** Files in a mount's VFS cache dir, counted by a CHILD `find` (never a
    *  walk on the event loop), stopped at `cap`. */
   _countCacheFiles(dir, cap) {
-    return new Promise((resolve) => {
-      let n = 0, done = false;
-      const end = () => { if (!done) { done = true; resolve({ n: Math.min(n, cap), capped: n >= cap }); } };
-      const c = spawn('find', [dir, '-type', 'f', '-printf', '.'], { stdio: ['ignore', 'pipe', 'ignore'] });
-      // ckpt61 cure 2: the error listener first — a start that fails at once (a full file table) has no pipe and its 'error' queued:
-      // a pipe touched first threw, and the error then found no listener (the hub ended). It answers as a failed count does today
-      c.on('error', end); c.on('close', end);
-      if (c.stdout) c.stdout.on('data', (b) => { n += b.length; if (n >= cap) { try { c.kill('SIGKILL'); } catch {} end(); } });
-    });
+    // B-323e (its mount half): THE STARTER counts (a fork of a few MB, never the hub's): its dots captured up to the cap — past it the
+    // child is ended (an overflow = the cap reached); bounded by the start's own ceiling; no answer = a failed count (0), as before.
+    // (Said: a count ended at the ceiling answers 0 — the starter keeps no output past a bound — and stderr past the cap reads as capped)
+    const T = this._startingT || MountManager.STARTING;
+    return require('./server/child-starter').childStarter().run('find', [dir, '-type', 'f', '-printf', '.'], { timeoutMs: T.ceilingMs, capture: true, maxBuffer: cap, envAdd: { PATH: process.env.PATH || '' } })
+      .then((r) => { const n = r && !r.unknown && r.overflow ? cap : String((r && !r.unknown && r.stdout) || '').length; return { n: Math.min(n, cap), capped: n >= cap }; }, () => ({ n: 0, capped: false }));
   }
 
   async _startSettled(m, mp, r, opts = {}) {
@@ -2200,8 +2195,11 @@ class MountManager {
     // A crashed daemon leaves a dead fuse endpoint ("Transport endpoint is
     // not connected") that blocks the fresh mount — clear it first.
     if (rowFor(this, m).daemon !== false) {
-      await new Promise((res) => execFile('fusermount3', ['-uz', mp], () =>
-        execFile('fusermount', ['-uz', mp], () => res())));
+      // B-323e (its mount half): the clearing pair by THE STARTER (a mount that stays down is retried every 10 minutes — never a
+      // fork of the hub), in turn, whatever each says (as the release); each bounded (10 s), so a wedged one never holds the reconnect
+      const S = require('./server/child-starter').childStarter(), envAdd = { PATH: process.env.PATH || '' };
+      await S.run('fusermount3', ['-uz', mp], { timeoutMs: 10000, envAdd }).catch(() => null);
+      await S.run('fusermount', ['-uz', mp], { timeoutMs: 10000, envAdd }).catch(() => null);
     }
     const ok = await this.mount(m.id).catch(() => false);
     if (ok) this._reconnects.delete(m.id); // mount() already cleared the error
@@ -2502,14 +2500,20 @@ class MountManager {
    *  error). Ownership is normalized to the service user so the unprivileged
    *  fuse daemon can use the dir. */
   async _ensureMountpointDir(mp, { quarantine = false } = {}) {
-    const run = (cmd, args) => new Promise((resolve) =>
-      execFile(cmd, args, { timeout: 8000 }, (err, stdout, stderr) => resolve({ ok: !err, stdout: String(stdout || ''), stderr: String(stderr || (err && err.message) || '') })));
+    // B-323e (its mount half): by THE STARTER (a connect, and the sweep's reconnect of a mount that stays down); NO ANSWER from it is no
+    // verdict — never «no permission» — said by its own code (mp_unanswered), and the reconnect asks again by itself
+    const S = require('./server/child-starter').childStarter();
+    const run = (cmd, args) => S.run(cmd, args, { timeoutMs: 8000, capture: true, envAdd: { PATH: process.env.PATH || '' } }).then((r) => (!r || r.unknown
+      ? { ok: false, unknown: true, stdout: '', stderr: '' }
+      : { ok: !!r.started && !r.timedOut && r.code === 0 && !r.error, stdout: String(r.stdout || ''), stderr: String(r.stderr || r.error || (r.timedOut ? 'no answer in time' : '')) }), () => ({ ok: false, unknown: true, stdout: '', stderr: '' }));
     const owner = `${typeof process.getuid === 'function' ? process.getuid() : 0}:${typeof process.getgid === 'function' ? process.getgid() : 0}`;
-    let made = await run('mkdir', ['-p', mp]);
+    // every no answer is no verdict (its reader's S1): never «no permission», «not writable», «not empty» nor «moved» on a guess
+    const ask = async (cmd, args) => { const x = await run(cmd, args); if (x.unknown) throw MW.refusal('mp_unanswered', { mp }); return x; };
+    let made = await ask('mkdir', ['-p', mp]);
     if (!made.ok && /permission denied|not permitted/i.test(made.stderr)) {
-      const su = await run('sudo', ['-n', 'mkdir', '-p', mp]);
+      const su = await ask('sudo', ['-n', 'mkdir', '-p', mp]);
       if (su.ok) {
-        await run('sudo', ['-n', 'chown', owner, mp]);
+        await ask('sudo', ['-n', 'chown', owner, mp]);
         global.__vsEvent?.('mount-mkdir-sudo');
         made = { ok: true };
       }
@@ -2518,10 +2522,10 @@ class MountManager {
       throw MW.refusal('mp_no_permission', { mp, owner });
     }
     // Writability check catches a PRE-EXISTING root-owned dir too.
-    let w = await run('test', ['-w', mp]);
+    let w = await ask('test', ['-w', mp]);
     if (!w.ok) {
-      const su = await run('sudo', ['-n', 'chown', owner, mp]);
-      if (su.ok) { global.__vsEvent?.('mount-mkdir-sudo'); w = await run('test', ['-w', mp]); }
+      const su = await ask('sudo', ['-n', 'chown', owner, mp]);
+      if (su.ok) { global.__vsEvent?.('mount-mkdir-sudo'); w = await ask('test', ['-w', mp]); }
     }
     if (!w.ok) throw MW.refusal('mp_not_writable', { mp, owner });
     if (!quarantine) return null;
@@ -2531,14 +2535,16 @@ class MountManager {
     // the mount), so move the directory aside as a sibling — never delete,
     // never merge — and tell the user where it went. A dead fuse endpoint
     // makes `ls` fail/time out ⇒ falls through to the stale-daemon kill.
-    const ls = await run('ls', ['-A', mp]);
+    const ls = await ask('ls', ['-A', mp]);
     const names = ls.ok ? ls.stdout.split('\n').filter(Boolean) : [];
     if (!names.length) return null;
     const dest = `${mp}.stranded-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 13)}`;
-    let mv = await run('mv', [mp, dest]);
-    if (!mv.ok) mv = await run('sudo', ['-n', 'mv', mp, dest]);
+    // a move with no answer may have run (the starter gone before its end): the destination itself says whether it did
+    const moved = async (x) => (x.unknown ? { ok: !(await ask('test', ['-e', mp])).ok && (await ask('test', ['-e', dest])).ok } : x);   // its source gone AND its destination there (a same-minute destination of an earlier move is not this one's)
+    let mv = await moved(await run('mv', [mp, dest]));
+    if (!mv.ok) mv = await moved(await run('sudo', ['-n', 'mv', mp, dest]));
     if (!mv.ok) throw MW.refusal('mp_not_empty', { mp, names: `${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}` });
-    const re = await run('mkdir', ['-p', mp]);
+    const re = await ask('mkdir', ['-p', mp]);
     if (!re.ok) throw MW.refusal('mp_not_recreated', { dest, mp, detail: String(re.stderr || '') });
     const text = `${mp} held ${names.length} item${names.length === 1 ? '' : 's'} written while the storage was disconnected (${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}) — moved to ${dest}. Nothing was deleted; merge them into the storage yourself.`;
     console.warn(`[mounts] stranded content quarantined: ${text}`);
@@ -2589,13 +2595,16 @@ class MountManager {
         }
         resolve(finish(ok));
       };
-      execFile('fusermount3', ['-uz', mp], (err) => {
-        if (!err) return ensureDaemonGone(true);
-        execFile('fusermount', ['-uz', mp], (err2) => {
-          if (!err2) return ensureDaemonGone(true);
-          execFile('umount', ['-l', mp], () => ensureDaemonGone(!this.isMounted(m)));
-        });
-      });
+      // B-323e (its mount half, its reader's S4): the lazy-unmount trio by THE STARTER — the sweep's own road into a dead daemon's unmount
+      // (every 60 s) and a person's Disconnect; in turn as before (the next only when one did not end 0), each bounded 10 s
+      const S = require('./server/child-starter').childStarter(), envAdd = { PATH: process.env.PATH || '' };
+      const ended0 = (r) => !!r && !r.unknown && !!r.started && !r.timedOut && r.code === 0 && !r.error;
+      (async () => {
+        if (ended0(await S.run('fusermount3', ['-uz', mp], { timeoutMs: 10000, envAdd }).catch(() => null))) return ensureDaemonGone(true);
+        if (ended0(await S.run('fusermount', ['-uz', mp], { timeoutMs: 10000, envAdd }).catch(() => null))) return ensureDaemonGone(true);
+        await S.run('umount', ['-l', mp], { timeoutMs: 10000, envAdd }).catch(() => null);
+        return ensureDaemonGone(!this.isMounted(m));
+      })();
     });
   }
 
