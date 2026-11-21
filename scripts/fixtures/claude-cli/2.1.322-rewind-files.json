@@ -1,0 +1,95 @@
+{
+ "_note": "MEASURED by scripts/measure-claude-rewind-files.mjs — never edited by hand. Read from the program file as bytes; nothing was run.",
+ "cli": "2.1.322",
+ "programSha256": "bfb3703ad5380242328459bc62ada4bde8ae7ba57c6e1eeadb9c00e08874c478",
+ "programBytes": 341914128,
+ "how": "patterns over the minified bundle (each fact keeps its excerpt); the CLI was never started",
+ "request": {
+  "type": "control_request",
+  "subtype": "rewind_files",
+  "fields": [
+   "dry_run",
+   "user_message_id"
+  ]
+ },
+ "reply": {
+  "dryRun": [
+   "canRewind",
+   "filesChanged",
+   "insertions",
+   "deletions"
+  ],
+  "press": [
+   "canRewind",
+   "skippedLinks"
+  ],
+  "successWhen": "canRewind or a dry run",
+  "otherwise": "the control's error reply with the words (else «Unexpected error»)"
+ },
+ "words": {
+  "checkpoints-off": "File rewinding is not enabled.",
+  "no-checkpoint": "No file checkpoint found for this message.",
+  "failedPrefix": "Failed to rewind"
+ },
+ "gate": {
+  "switch": "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
+  "disable": "CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING",
+  "setting": "fileCheckpointingEnabled",
+  "settingDefault": true,
+  "roads": "one road reads the switch, the other the setting — which one is ours, the probe's checkpoint pair measures (row B-437e U0)"
+ },
+ "dryRunList": {
+  "form": "paths (strings), once each",
+  "deletions": "listed like the rest — a file with no backup that exists now is DELETED by a press",
+  "fn": "D9t"
+ },
+ "pressReply": {
+  "skippedLinks": "a count",
+  "allFailed": "«No files were restored: …» (the error reply)",
+  "someFailed": "success — the CLI says nothing of the files that failed"
+ },
+ "wordsWrapper": {
+  "fn": "Lse",
+  "rule": "the fallback words only where its session test says so; the words themselves otherwise",
+  "test": "Nm"
+ },
+ "gateDetail": {
+  "earlyOff": [
+   "vt",
+   "q"
+  ],
+  "roadTest": "ye",
+  "switchReader": "lir",
+  "note": "the early «off» tests and the road test are named, not read — which road ours is, the probe's checkpoint pair measures (row B-437e U0)"
+ },
+ "rows": {
+  "types": [
+   "file-history-snapshot",
+   "file-history-delta"
+  ],
+  "snapshotRow": [
+   "type",
+   "messageId",
+   "snapshot",
+   "isSnapshotUpdate"
+  ],
+  "backupEntry": [
+   "backupFileName",
+   "version",
+   "backupTime",
+   "realParentDir"
+  ]
+ },
+ "excerpts": {
+  "handler": ".request.subtype===\"rewind_files\"){let oe=w(),Ee=await LB(K.request.user_message_id,oe,K.request.dry_run??!1);if(Ee.error!==void 0)Ji(\"rewind_files\",Ee.error);if(Ee.canRewind||K.request.dry_run)Dt(K,((Fe)=>{if(!Nm(e))ret",
+  "ask": "{let oe=w(),Ee=await LB(K.request.user_message_id,oe,K.request.dry_run??!1);if(Ee.error!==void 0)Ji(\"rewind_files\",Ee.error);if(Ee.canRewind||K.request.dry_run)",
+  "fn": "async function LB(e,n,r){if(!HH())return{canRewind:!1,error:\"File rewinding is not enabled.\"};if(!M9t(n.fileHistory,e))return{canRewind:!1,error:\"No file checkpoint found for this message.\"};if(r){let h=await D9t(n.fileHistory,e);return{canRewind:!0,filesChang",
+  "gate": "function HH(){if(vt())return!1;if(q())return!1;if(ye())return lir();return Oi(\"fileCheckpointingEnabled\",!0).value&&!i.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING}function lir(){return i.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINT",
+  "switch": "function lir(){return i.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING&&!i.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING}async function Cut(e,n,r,s){if(!HH()){n({kind:\"touc",
+  "dryAggregate": "async function D9t(e,n){if(!HH())return;let r=e.snapshots.findLast((w)=>w.messageId===n);if(!r)return;let s=await Promise.all(Array.from(e.trackedFiles,async(w)=>{try{let H=_re(w),K=Vr(r.trackedFileBa",
+  "press": "async function Pxn(e,n){if(!HH())return;let r=e();if(!r)return;let s=r.snapshots.findLast((w)=>w.messageId===n);if(!s)throw a(Error(`FileHistory: Snapshot for ${n} not found`)),l(\"tengu_file_history_r",
+  "wrapper": "function Lse(e,r,o){return Nm(e)?o:r}·export{am,Nm,n0e,rji,oji,h0n,hws,Io,Mho,E7",
+  "snapshotRow": "type:\"file-history-snapshot\",messageId:e,snapshot:n,isSnapshotUpdate:r};if(h===void 0||h===this.store.getSessionId()){aw",
+  "backupEntry": "{backupFileName:null,version:ne,backupTime:new Date,realParentDir:await WY(H)}),l(\"tengu_file_histor"
+ }
+}
