@@ -79,6 +79,15 @@ const { createBrowserFacts, sanitizeProbeEnv } = require('../src/browser-facts.j
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const REPO = new URL('..', import.meta.url).pathname;
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -954,8 +963,8 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
     // PRE-FIX CONTROL: the v2-r3 composition (the layered config whole, only EPHEMERAL_DENY dropped) in a patched copy of
     // the PURE module carries the verifier's raw port and user agent into the generated config
     const bsrc = read('src/browser-profiles.js');
-    const pre = bsrc.replace("const r = VERBS.sanctionedConfig({ user: userConfig, project: projectConfig, deny: Object.keys(EPHEMERAL_DENY) });",
-      "const lay = layerProjectConfig(userConfig, projectConfig); const cfg0 = { ...lay }; for (const k of deniedKeys(lay)) delete cfg0[k]; const r = { config: cfg0, dropped: { project: [], keys: [], args: [] } };");
+    const pre = editAnchor(bsrc, "const r = VERBS.sanctionedConfig({ user: userConfig, project: projectConfig, deny: Object.keys(EPHEMERAL_DENY) });",
+      "const lay = layerProjectConfig(userConfig, projectConfig); const cfg0 = { ...lay }; for (const k of deniedKeys(lay)) delete cfg0[k]; const r = { config: cfg0, dropped: { project: [], keys: [], args: [] } };", "src/browser-profiles.js");
     const m0 = { exports: {} }; new Function('module', 'exports', 'require', pre)(m0, m0.exports, (x) => require(x.startsWith('./') ? path.join(REPO, 'src', x) : x));
     const pc = m0.exports.generatedConfig({ userConfig: JSON.parse(fs.readFileSync(path.join(H13r, '.agent-browser', 'config.json'), 'utf8')), projectConfig: JSON.parse(fs.readFileSync(path.join(PR, 'agent-browser.json'), 'utf8')) });
     ok(pre !== bsrc && /--remote-debugging-port=42945/.test(pc.args) && pc.userAgent === 'R3-UA-LAYERED' && pc.executablePath === '/x/dumpchrome',

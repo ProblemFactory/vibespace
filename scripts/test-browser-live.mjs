@@ -115,6 +115,15 @@ const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 25) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(every); } return pred(); };
@@ -640,7 +649,7 @@ async function legTypedKinds() {
   // THE RED CONTROL: the shipped CLI without its read-back, beside the modules it loads (a copy outside any checkout)
   const CLI_SRC = fs.readFileSync(path.join(repo, 'data/bin/vibespace-browser'), 'utf8');
   const HOOK = '    if (code === 0 && readPlan && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit) {';
-  fs.writeFileSync(path.join(CTL, 'vibespace-browser'), CLI_SRC.replace(HOOK, '    if (false) { // CONTROL: no read-back'), { mode: 0o755 });
+  fs.writeFileSync(path.join(CTL, 'vibespace-browser'), editAnchor(CLI_SRC, HOOK, '    if (false) { // CONTROL: no read-back', "data/bin/vibespace-browser"), { mode: 0o755 });
   for (const [from, to] of [['src/browser-verbs.js', 'vibespace-browser-verbs.js'], ['src/cli-call.js', 'cli-call.js'], ['src/browser-stuck.js', 'vibespace-browser-stuck.js'], ['src/browser-passkey.js', 'vibespace-browser-passkey.js'], ['src/browser-read-back.js', 'vibespace-browser-read-back.js']]) fs.copyFileSync(path.join(repo, from), path.join(CTL, to));
   const Ctl = cliAt(path.join(CTL, 'vibespace-browser'));
   const page = async () => { const r = await A(['eval', 'JSON.stringify({ t: document.querySelector("#t").value, n: document.querySelector("#n").value, d: document.querySelector("#d").value, tm: document.querySelector("#tm").value, a1: document.querySelector("#a1").value, a2: document.querySelector("#a2").value, focused: document.activeElement && document.activeElement.id, up: document.querySelector("#f").contentDocument.querySelector("#up").files.length, up2: document.querySelector("#f2").contentDocument.querySelector("#up2").files.length, log: window.__log })']); try { let v = JSON.parse(String(r.out).trim().split('\n').filter(Boolean).pop()); if (typeof v === 'string') v = JSON.parse(v); return v; } catch { return { raw: r.out + r.err }; } };

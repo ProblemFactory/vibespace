@@ -25,6 +25,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const S = require(path.join(REPO, 'src/channel-store.js'));
 const ROOT = scratch('chanstore');
@@ -225,7 +234,7 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
 // isolate r2 and r4; r5 owes and has its OWN control (⑤j).
 {
   const shipped = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-  const src = shipped.replace("if (strict && e.code !== 'ENOENT') throw e; ", '').replace("if (strict) throw e; ", '');
+  const src = editAnchor(editAnchor(shipped, "if (strict && e.code !== 'ENOENT') throw e; ", '', "src/channel-store.js", 'first'), "if (strict) throw e; ", '', "src/channel-store.js", 'first');
   ok(src !== shipped && (src.match(/throw e/g) || []).length === (shipped.match(/throw e/g) || []).length - 2,
     'NEGATIVE CONTROL setup: r5 (the strict rebuild) is stripped from both arms — it would otherwise refuse both fixtures before the set exists');
   const R2_ONLY = src
@@ -306,8 +315,8 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
 // back for the r2 `appendFileSync` must lose v4 for ever.
 {
   const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-  const PRE = src.replace("      healed = appendLines(fp, fresh.map((r) => JSON.stringify(r)).join('\\n') + '\\n');",
-                          "      healed = false; fs.appendFileSync(fp, fresh.map((r) => JSON.stringify(r)).join('\\n') + '\\n');");
+  const PRE = editAnchor(src, "      healed = appendLines(fp, fresh.map((r) => JSON.stringify(r)).join('\\n') + '\\n');",
+                          "      healed = false; fs.appendFileSync(fp, fresh.map((r) => JSON.stringify(r)).join('\\n') + '\\n');", "src/channel-store.js");
   ok(PRE !== src, 'NEGATIVE CONTROL setup: the r2 writer was reconstructed from the shipped bytes');
   const pf = MUTCS.write('src/channel-store.js', PRE, 'prefix');
   try {
@@ -405,7 +414,7 @@ function boundaryRetry(PS, name, land, { restart = false } = {}) {
 // it must be fine on the mid-record cut, which is why ⑤g never saw this.
 {
   const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-  const PRE = src.replace("      dedup.delete(`${adapterId}/${convId}`);   // r4: the log is the only witness now\n", "");
+  const PRE = editAnchor(src, "      dedup.delete(`${adapterId}/${convId}`);   // r4: the log is the only witness now\n", "", "src/channel-store.js");
   ok(PRE !== src, 'NEGATIVE CONTROL setup: the r3 spelling (the set kept across the throw) was reconstructed from the shipped bytes');
   const pf = MUTCS.write('src/channel-store.js', PRE, 'prefix');
   try {
@@ -510,7 +519,7 @@ function rebuildUnderFault(PS, name, code) {
 // return {appended:2} on the faulted first call and serve v5 TWICE for ever.
 {
   const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-  const PRE = src.replace("if (strict && e.code !== 'ENOENT') throw e; ", '').replace("if (strict) throw e; ", '');
+  const PRE = editAnchor(editAnchor(src, "if (strict && e.code !== 'ENOENT') throw e; ", '', "src/channel-store.js", 'first'), "if (strict) throw e; ", '', "src/channel-store.js", 'first');
   ok(PRE !== src && (PRE.match(/throw e/g) || []).length === (src.match(/throw e/g) || []).length - 2, 'NEGATIVE CONTROL setup: the r4 spelling (every read error is an empty read) was reconstructed from the shipped bytes');
   const pf = MUTCS.write('src/channel-store.js', PRE, 'prefix');
   try {
@@ -560,7 +569,7 @@ function rebuildUnderFault(PS, name, code) {
 // (the r2 shape) must strand the oldest records and forget them in the set.
 {
   const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-  const PRE = src.replace('      while (end > 0 && out.length < want) {', '      while (end === size) {');
+  const PRE = editAnchor(src, '      while (end > 0 && out.length < want) {', '      while (end === size) {', "src/channel-store.js");
   ok(PRE !== src, 'NEGATIVE CONTROL setup: the one-window reader was reconstructed from the shipped bytes');
   const pf = MUTCS.write('src/channel-store.js', PRE, 'prefix');
   try {
@@ -901,14 +910,14 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
   const G = "      try { compacted = trimSide(adapterId, convId, { liveIds: null }); sideCompactFailedAt.delete(ck); }";
   const W = "    const tail = sideTail(sidePath(adapterId, convId), Math.max(64 * 1024, Number(maxBytes) || SIDE_READ_BYTES));";
   ok(src.split(G).length === 2 && src.split(W).length === 2, 'CONTROL setup: the growth compaction and the tail window are each present once');
-  const PG = require(MUTCS.write('src/channel-store.js', src.replace(G, '      try { }'), 'side-nocompact'));
+  const PG = require(MUTCS.write('src/channel-store.js', editAnchor(src, G, '      try { }', "src/channel-store.js"), 'side-nocompact'));
   const sg = PG.createChannelStore({ dir: path.join(ROOT, 'side-nocompact') });
   sg.appendRecords('a', 'c', [rec('c', 1)]);
   for (let i = 0; i < 20000; i += 100) { const batch = []; for (let j = i; j < i + 100; j++) batch.push(mkD(j)); sg.appendSide('a', 'c', batch); }
   const gSize = fs.statSync(sg.sidePath('a', 'c')).size;
   ok(gSize > 2 * S.SIDE_COMPACT_BYTES && fs.readFileSync(sg.sidePath('a', 'c'), 'utf-8').split('\n').filter(Boolean).length === 20000, `CONTROL: the copy without the growth compaction keeps all 20 000 lines (${(gSize / 1048576).toFixed(1)} MiB) — the growth leg would be red`);
   sg.close();
-  const PW = require(MUTCS.write('src/channel-store.js', src.replace(W, "    const tail = { text: fs.readFileSync(sidePath(adapterId, convId), 'utf-8'), cut: false };"), 'side-wholeread'));
+  const PW = require(MUTCS.write('src/channel-store.js', editAnchor(src, W, "    const tail = { text: fs.readFileSync(sidePath(adapterId, convId), 'utf-8'), cut: false };", "src/channel-store.js"), 'side-wholeread'));
   const sw = PW.createChannelStore({ dir: path.join(ROOT, 'side-wholeread') });
   sw.appendRecords('a', 'c', [rec('c', 1), rec('c', 2)]);
   const swp = sw.sidePath('a', 'c'); fs.mkdirSync(path.dirname(swp), { recursive: true }); fs.copyFileSync(sp, swp);
@@ -965,7 +974,7 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
   const BOUND = '      if (from < groups.length && bytes + b > SIDE_KEEP_BYTES) break;';
   const ORDER = '    const order = [...byMsg.keys()].sort((a, b) => last.get(a) - last.get(b));';
   ok(src.split(BOUND).length === 2 && src.split(ORDER).length === 2, 'CONTROL setup: the output bound and the recency order are each present once');
-  const PT = require(MUTCS.write('src/channel-store.js', src.replace(BOUND, '      if (false) break;').replace(ORDER, '    const order = [...byMsg.keys()];'), 'side-unbounded-compaction'));
+  const PT = require(MUTCS.write('src/channel-store.js', editAnchor(editAnchor(src, BOUND, '      if (false) break;', "src/channel-store.js"), ORDER, '    const order = [...byMsg.keys()];', "src/channel-store.js"), 'side-unbounded-compaction'));
   const pre = run(PT, 'side-thrash-pre', 20);
   // (verify r2: the compaction's INPUT is the read window now, so even the pre-fix compaction can no longer fold a new
   // reaction into a line outside the window — the visibility half has a second belt; the THRASH half is still this
@@ -975,7 +984,7 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
 // NEGATIVE CONTROL — a copy that REMEMBERS the side keys BEFORE the bytes: one failed write makes the line a phantom duplicate
 {
   const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-  const PRE = src.replace("      inBatch.add(k);\n      fresh.push(x);\n    }\n    if (!fresh.length) return { appended: 0, duplicates, msgs: [] };", "      inBatch.add(k); set.add(k);\n      fresh.push(x);\n    }\n    if (!fresh.length) return { appended: 0, duplicates, msgs: [] };").replace("    catch (e) { sideDedup.delete(`${adapterId}/${convId}`); throw e; }", '    catch (e) { throw e; }');
+  const PRE = editAnchor(editAnchor(src, "      inBatch.add(k);\n      fresh.push(x);\n    }\n    if (!fresh.length) return { appended: 0, duplicates, msgs: [] };", "      inBatch.add(k); set.add(k);\n      fresh.push(x);\n    }\n    if (!fresh.length) return { appended: 0, duplicates, msgs: [] };", "src/channel-store.js"), "    catch (e) { sideDedup.delete(`${adapterId}/${convId}`); throw e; }", '    catch (e) { throw e; }', "src/channel-store.js");
   ok(PRE !== src, 'NEGATIVE CONTROL setup: the remember-before-the-bytes side writer was reconstructed from the shipped bytes');
   const PS = require(MUTCS.write('src/channel-store.js', PRE, 'side-prefix'));
   const R = require(path.join(REPO, 'src/channel-record.js'));
@@ -1120,10 +1129,10 @@ console.log('\n⑫ the side-log cost census — bounded reads, append-only write
   ok(!inWindow(preBad) && preBad[2].perEvent >= 2 * preBad[0].perEvent, `CONTROL (i): the pre-r2 store under a failing compaction reads the WHOLE growing log per event — more than a window, more as it grows (${fmt(preBad)}) — (b) would be red`);
   // CONTROL (ii): a store bound to the pre-r1 QUADRATIC compactSide (a closed world: the store copy requires the copy)
   const rxSrc = fs.readFileSync(path.join(REPO, 'src/channel-reactions.js'), 'utf-8');
-  const qSrc = rxSrc
-    .replace('    const order = new Set();   // first appearance, never removed (a key that fell to 0 and came back keeps its place)', '    const order = [];')
-    .replace('      if (count > 0) { state.set(e.key, { count, by }); order.add(e.key); }', '      if (count > 0) { state.set(e.key, { count, by }); order.push(e.key); }')
-    .replace('        if (!s) { s = { count: 0, by: [] }; state.set(x.key, s); order.add(x.key); }', '        if (!s) { s = { count: 0, by: [] }; state.set(x.key, s); if (!order.includes(x.key)) order.push(x.key); }');
+  const qSrc = editAnchor(editAnchor(editAnchor(rxSrc,
+    '    const order = new Set();   // first appearance, never removed (a key that fell to 0 and came back keeps its place)', '    const order = [];', "src/channel-reactions.js"),
+    '      if (count > 0) { state.set(e.key, { count, by }); order.add(e.key); }', '      if (count > 0) { state.set(e.key, { count, by }); order.push(e.key); }', "src/channel-reactions.js"),
+    '        if (!s) { s = { count: 0, by: [] }; state.set(x.key, s); order.add(x.key); }', '        if (!s) { s = { count: 0, by: [] }; state.set(x.key, s); if (!order.includes(x.key)) order.push(x.key); }', "src/channel-reactions.js");
   ok((qSrc.match(/order\.push/g) || []).length === 2 && qSrc.includes('order.includes(x.key)'), 'CONTROL (ii) setup: the pre-r1 quadratic compactSide was reconstructed (3 edits)');
   const qPath = MUTCS.write('src/channel-reactions.js', qSrc, 'compact-quadratic');
   const IMP = "const { compactSide } = require('./channel-reactions.js');";
@@ -1234,7 +1243,7 @@ console.log('\n⑬ lane lark-threads: the place door (widen-only)');
   ok(pp.appended === 1 && pp.widened.length === 1 && st5.readTail('a', 'h', { limit: 5 }).find((r) => r.vendorId === 'v10').threadKey === 'omt_old', '⑬ the backfill (prependRecords) offers its duplicates to the door as well', JSON.stringify(pp));
   // CONTROL: the pre-lane append — a duplicate offered to nobody — keeps the key-less first copy for ever
   const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-  const PRE = src.replace("if (set.has(r.vendorId) || inBatch.has(r.vendorId)) { duplicates++; if (set.has(r.vendorId) && (r.threadKey || r.root)) offers.push(r); continue; }", "if (set.has(r.vendorId) || inBatch.has(r.vendorId)) { duplicates++; continue; }");
+  const PRE = editAnchor(src, "if (set.has(r.vendorId) || inBatch.has(r.vendorId)) { duplicates++; if (set.has(r.vendorId) && (r.threadKey || r.root)) offers.push(r); continue; }", "if (set.has(r.vendorId) || inBatch.has(r.vendorId)) { duplicates++; continue; }", "src/channel-store.js", 'first');
   ok(PRE !== src, '⑬ CONTROL setup: the pre-lane append (duplicates offered to nobody) was reconstructed from the shipped bytes');
   const PS = require(MUTCS.write('src/channel-store.js', PRE, 'place-pre-lane'));
   const sc = PS.createChannelStore({ dir: path.join(ROOT, 'place-ctl') });
@@ -1304,11 +1313,11 @@ console.log('\n⑬ the incremental index write (B-f32b verify r1): an async upda
   const REBORN = /\n      if \(layout && layout\.chunkOf\.has\(key\)\) touchAll\([^\n]*/;
   const TOUCH = /  function touch\(key\) \{[^\n]*/;
   ok(src.includes(DONE) && CYCLE.test(src) && REBORN.test(src) && TOUCH.test(src), '⑬ fixture: the three rules are where the controls cut them');
-  const ma = await legs(require(MUTCS.write('src/channel-store.js', src.replace(DONE, 'const done = () => { curTouch = null; if (t.all) fire(null); else for (const k of t) fire(k); };'), 'ir1-nore-mark')), 'm-async');
+  const ma = await legs(require(MUTCS.write('src/channel-store.js', editAnchor(src, DONE, 'const done = () => { curTouch = null; if (t.all) fire(null); else for (const k of t) fire(k); };', "src/channel-store.js"), 'ir1-nore-mark')), 'm-async');
   ok(ma.async === 1, `⑬ CONTROL: the rows NOT marked again at the update's end — the disk keeps the row as the await left it (v=${ma.async}) — red`);
-  const mb = await legs(require(MUTCS.write('src/channel-store.js', src.replace(CYCLE, ''), 'ir1-nocount')), 'm-born');
+  const mb = await legs(require(MUTCS.write('src/channel-store.js', editAnchor(src, CYCLE, '', "src/channel-store.js"), 'ir1-nocount')), 'm-born');
   ok(!mb.born, '⑬ CONTROL: the sweep without the cycle-end count — the row born past the door never reaches the disk — red');
-  const mc = await legs(require(MUTCS.write('src/channel-store.js', src.replace(REBORN, '').replace(TOUCH, '  function touch(key) { touchKey(String(key)); }'), 'ir1-noorder')), 'm-order');
+  const mc = await legs(require(MUTCS.write('src/channel-store.js', editAnchor(editAnchor(src, REBORN, '', "src/channel-store.js"), TOUCH, '  function touch(key) { touchKey(String(key)); }', "src/channel-store.js"), 'ir1-noorder')), 'm-order');
   ok(!mc.reborn && !mc.early, `⑬ CONTROL: without the re-birth / missing-row touch rules the file's order departs from the whole-file bytes (re-born ${mc.reborn}, touched early ${mc.early}) — red`);
   if (verifyEnv !== undefined) process.env.VIBESPACE_CHANNELS_INDEX_VERIFY = verifyEnv;
 }

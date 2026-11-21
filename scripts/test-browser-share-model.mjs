@@ -50,6 +50,15 @@ const express = require('express');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CMDLINE_RE = /`?vibespace-browser \w/; // a refusal on these paths never hands the user (or the agent's Ask-user card) a command line
@@ -226,8 +235,8 @@ try {
   // CONTROL (scripts/mutant-copy.mjs): the PRE-RULING route — the pin re-points conversation 2's own config at the
   // directory and a bare command falls to its own browser ⇒ a second Chrome on work's directory: exit 21 SingletonLock
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
-  const preRepoint = rsrc.replace('  const repoint = clearPinnedDir(k, f);\n', "  let repoint = null;\n  try { repoint = ctx.browserEnv?.()?.repointPin?.(f.browserKey, p ? p.dir : null) || null; } catch (e) { repoint = { ok: false, why: String(e && e.message) }; }\n")
-    .replace("    if (v.ok && v.kind === 'pin') v = await attachPin(k, f, v, verb);\n", "    if (v.ok && v.kind === 'pin') v = { ...v, kind: 'none' };\n"); // integration 2.369.192: the route threads S2's refused verb through attachPin
+  const preRepoint = editAnchor(editAnchor(rsrc, '  const repoint = clearPinnedDir(k, f);\n', "  let repoint = null;\n  try { repoint = ctx.browserEnv?.()?.repointPin?.(f.browserKey, p ? p.dir : null) || null; } catch (e) { repoint = { ok: false, why: String(e && e.message) }; }\n", "src/routes/browser.js"),
+    "    if (v.ok && v.kind === 'pin') v = await attachPin(k, f, v, verb);\n", "    if (v.ok && v.kind === 'pin') v = { ...v, kind: 'none' };\n", "src/routes/browser.js"); // integration 2.369.192: the route threads S2's refused verb through attachPin
   ok(preRepoint !== rsrc && preRepoint.includes("repointPin?.(f.browserKey, p ? p.dir : null)") && preRepoint.includes("v = { ...v, kind: 'none' };"), 'control: the patched copy carries both pre-ruling edits (the directory re-point, no pin branch)');
   {
     const Rpre = M.load('src/routes/browser.js', preRepoint, 'pre-ruling');
@@ -701,7 +710,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-key.js'), 'utf8');
   const EARLY = "    if (session && B.isBrowserKey(session._browserKey)) return { ok: true, key: session._browserKey, minted: false };\n";
   const LADDER = 'const bk = B.browserKeyFor({ prior: v.reuse, resume: true, fork: false, mint: mintKey });';
-  const twice = src.replace(EARLY, '').replace(LADDER, 'const bk = B.browserKeyFor({ prior: v.reuse, resume: false, fork: false, mint: mintKey });');
+  const twice = editAnchor(editAnchor(src, EARLY, '', "src/server/browser-key.js"), LADDER, 'const bk = B.browserKeyFor({ prior: v.reuse, resume: false, fork: false, mint: mintKey });', "src/server/browser-key.js");
   // ONE judge for both engines: two calls for one keyless session — the second must answer the first's key, minting nothing
   const idempotent = (engX, id, conv) => {
     const s = keyless(id, 'Twice ' + id, { conv });
@@ -1463,7 +1472,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
     for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(pR.dir, n)); } catch { } }
     kR.shutdown();
     if (!(process.getuid && process.getuid() === 0)) {
-      const noPost = ksrc.replace('const left = F.singletonLeft(dir);', 'const left = []; /* CONTROL: no post-check */');
+      const noPost = editAnchor(ksrc, 'const left = F.singletonLeft(dir);', 'const left = []; /* CONTROL: no post-check */', "src/server/browser-keeper.js", 'first');
       ok(noPost !== ksrc, '④d control setup: the post-check is where the control cuts');
       const DATA_P = path.join(ROOT, 'data-nopost'); fs.mkdirSync(DATA_P, { recursive: true });
       const kP = mkKeeper(M.load('src/server/browser-keeper.js', noPost, 'no-post-check'), { dataDir: DATA_P, log: klog });
@@ -1703,7 +1712,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
   else {
     const r = await runF1(K, 'product');
     ok(r.err === 'profile_locked' && /could not remove the lock \(EACCES\)/.test(r.msg) && /its own browser, ended now/.test(r.msg) && /rm -f '/.test(r.msg) && r.launched === 0 && r.left === 3 && r.ended && r.said.some((x) => /could NOT be removed \(EACCES\)/.test(x)), '④g F1 our orphan ended under a previous name, its lock could NOT be removed (EACCES) ⇒ profile_locked naming the errno and the one command, no launch, said in the journal', r);
-    const noPost = ksrcG.replace("    if (left.includes('SingletonLock')) {\n      const f = (removed.failed || []).find((x) => x.name === 'SingletonLock');\n      const refusal = B.profileLockedRefusal({ label: p.label, dir, verdict: { kind: 'ended-unremovable'", "    if (false && left.includes('SingletonLock')) { /* CONTROL: no post-check after the ended orphan's clear */\n      const f = (removed.failed || []).find((x) => x.name === 'SingletonLock');\n      const refusal = B.profileLockedRefusal({ label: p.label, dir, verdict: { kind: 'ended-unremovable'");
+    const noPost = editAnchor(ksrcG, "    if (left.includes('SingletonLock')) {\n      const f = (removed.failed || []).find((x) => x.name === 'SingletonLock');\n      const refusal = B.profileLockedRefusal({ label: p.label, dir, verdict: { kind: 'ended-unremovable'", "    if (false && left.includes('SingletonLock')) { /* CONTROL: no post-check after the ended orphan's clear */\n      const f = (removed.failed || []).find((x) => x.name === 'SingletonLock');\n      const refusal = B.profileLockedRefusal({ label: p.label, dir, verdict: { kind: 'ended-unremovable'", "src/server/browser-keeper.js");
     ok(noPost !== ksrcG, '④g F1 control setup: the post-check is where the control cuts');
     const c = await runF1(M.load('src/server/browser-keeper.js', noPost, 'no-postcheck-ended-clear'), 'control');
     // (the fake binary dies on the read-only directory — its own SingletonLock.fake — and the post-launch judgement (F3) then names
@@ -1759,9 +1768,9 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
   }
   // ── T1 (c) the SWAP control: the clear BEFORE the end — the ④e shape (a live orphan under a previous name) leaves its lock ──
   {
-    const swapped = ksrcG
-      .replace("    if (v.kind === 'own-orphan') {\n      const r = await endProcess(v.pid, facts.holder.starttime);", "    if (v.kind === 'own-orphan') {\n      const c0 = clearEndedOrphanLock(p, p.dir, v.pid); /* CONTROL: the clear swapped before the end */\n      const r = await endProcess(v.pid, facts.holder.starttime);")
-      .replace("      if (r === 'ended' || r === 'gone') { const c = clearEndedOrphanLock(p, p.dir, v.pid); if (!c.ok) return { ok: false, ...c.refusal };", "      if (r === 'ended' || r === 'gone') { const c = c0; if (!c.ok) return { ok: false, ...c.refusal };");
+    const swapped = editAnchor(editAnchor(ksrcG,
+      "    if (v.kind === 'own-orphan') {\n      const r = await endProcess(v.pid, facts.holder.starttime);", "    if (v.kind === 'own-orphan') {\n      const c0 = clearEndedOrphanLock(p, p.dir, v.pid); /* CONTROL: the clear swapped before the end */\n      const r = await endProcess(v.pid, facts.holder.starttime);", "src/server/browser-keeper.js"),
+      "      if (r === 'ended' || r === 'gone') { const c = clearEndedOrphanLock(p, p.dir, v.pid); if (!c.ok) return { ok: false, ...c.refusal };", "      if (r === 'ended' || r === 'gone') { const c = c0; if (!c.ok) return { ok: false, ...c.refusal };", "src/server/browser-keeper.js");
     ok(swapped !== ksrcG && swapped.includes('const c = c0;'), '④g T1 swap-control setup: the clear and the end are where the control swaps');
     const dd = path.join(ROOT, 'data-g-swap'); fs.mkdirSync(dd, { recursive: true });
     const kk = mkKeeper(M.load('src/server/browser-keeper.js', swapped, 'clear-before-end'), { dataDir: dd, log: klogG });
@@ -1810,7 +1819,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
       const MARK_CARRY = '      if (prev && prev.mark) rec.mark = prev.mark;\n';
       const LINEAGE_CARRY = /^      \{ const lh = launchHostsFor\(prev, p\.dir \|\| null\); if \(lh\.length\) \{ rec\.hosts = lh;[^\n]*\n/m;
       const noCarry = ksrcG.includes(MARK_CARRY) && LINEAGE_CARRY.test(ksrcG)
-        ? ksrcG.replace(MARK_CARRY, '      /* CONTROL: a refused ephemeral start carries nothing */\n').replace(LINEAGE_CARRY, '') : ksrcG;
+        ? editAnchor(editAnchor(ksrcG, MARK_CARRY, '      /* CONTROL: a refused ephemeral start carries nothing */\n', "src/server/browser-keeper.js"), LINEAGE_CARRY, '', "src/server/browser-keeper.js") : ksrcG;
       ok(noCarry !== ksrcG, '④g F5 control setup: the carry onto the new record is where the control cuts');
       const DATA_C5 = path.join(ROOT, 'data-g-eph-ctl'); fs.mkdirSync(DATA_C5, { recursive: true });
       const beC = BE.create({ dataDir: DATA_C5, homeDir: HOME, serverSetting: (x) => settings[x], log: quiet, socketDirBase: path.join(ROOT, 'sock-g-ctl'), env: { XDG_RUNTIME_DIR: XDG } }); const envC = beC.envFor({ browserKey: KG, cwd: HOME });
@@ -2152,7 +2161,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     ok(literalNoTok !== literal, '④i control setup: the marker read is where the second cut is');
     const c5 = await runSpell(M.load('src/server/browser-keeper.js', literalNoTok, 'literal-dir-key-no-marker'), 'ctl5');
     ok(c5.S42.rememberedUnder === 'LINK' && c5.S42.err === 'profile_locked' && c5.S42.left === 3 && c5.S42b.err === 'profile_locked', '④i CONTROL 5: a keeper that keys the lineage by the spelling as given AND reads no marker orphans it at the personalization (remembered under the symlink spelling, read under the real one — refused as foreign; the r4-era file never re-keyed) — S42 / S42b catch it', { under: c5.S42.rememberedUnder, err: c5.S42.err, left: c5.S42.left, b: c5.S42b.err }); }
-  { const noIno = ksrcI.replace("const dirInoOf = (dir) => { try {", "const dirInoOf = (dir) => { return null; /* CONTROL: no inode witness */ try {").replace("const mintDirTok = (dir, { fresh = false } = {}) => { const have = fresh ? null : dirTokOf(dir); if (have) return have;", "const mintDirTok = (dir, { fresh = false } = {}) => { return null; /* CONTROL: no marker minted */ const have = fresh ? null : dirTokOf(dir); if (have) return have;");
+  { const noIno = editAnchor(editAnchor(ksrcI, "const dirInoOf = (dir) => { try {", "const dirInoOf = (dir) => { return null; /* CONTROL: no inode witness */ try {", "src/server/browser-keeper.js"), "const mintDirTok = (dir, { fresh = false } = {}) => { const have = fresh ? null : dirTokOf(dir); if (have) return have;", "const mintDirTok = (dir, { fresh = false } = {}) => { return null; /* CONTROL: no marker minted */ const have = fresh ? null : dirTokOf(dir); if (have) return have;", "src/server/browser-keeper.js");
     ok(noIno !== ksrcI && noIno.includes('no marker minted'), '④i control setup: the inode witness and the marker mint are where the control cuts');
     const c6 = await runNamed(M.load('src/server/browser-keeper.js', noIno, 'no-inode-witness'), 'ctl6');
     ok(c6.S32a.err === null && c6.S32a.launched === 1 && c6.S38b.err === null && c6.S38b.launched === 1, '④i CONTROL 6: a keeper with NEITHER witness (no inode, no marker — the r4 keeper) hands a forgotten directory\'s lineage to a fresh directory at its path (S32a catches it; a copy is taken over there as here)', { a: c6.S32a.err, b: c6.S38b.err }); }
@@ -2162,7 +2171,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     ok(noTok !== ksrcI, '④i control setup: the marker read is where the control cuts');
     const c7 = await runR6(M.load('src/server/browser-keeper.js', noTok, 'no-marker-read'), 'ctl7');
     ok(c7.S44.err === 'profile_locked' && c7.S44.left === 3 && c7.S44.launched === 0 && c7.S54.err === 'profile_locked' && c7.S54.launched === 0, '④i CONTROL 7: a keeper that never reads the directory\'s marker (the inode alone — r5\'s rule) refuses the RESTORED directory and the MOVED one as foreign — S44 / S54 catch it', { a: c7.S44.err, b: c7.S54.err }); }
-  { const psrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8'); const noMarker = psrc.replace("if (asked && isLineageToken(e.tok)) {\n      if (e.tok === t) return", "if (false) { /* CONTROL: the marker is not asked */\n      if (e.tok === t) return").replace("const k = Object.keys(m).find((x) => x !== d && m[x] && m[x].tok === t);", "const k = null; /* CONTROL: no search by token */");
+  { const psrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8'); const noMarker = editAnchor(editAnchor(psrc, "if (asked && isLineageToken(e.tok)) {\n      if (e.tok === t) return", "if (false) { /* CONTROL: the marker is not asked */\n      if (e.tok === t) return", "src/browser-profiles.js"), "const k = Object.keys(m).find((x) => x !== d && m[x] && m[x].tok === t);", "const k = null; /* CONTROL: no search by token */", "src/browser-profiles.js");
     ok(noMarker !== psrc && noMarker.includes('no search by token'), '④i control setup: the marker rule and the search by token are where the control cuts (the r5 rule: the inode alone)');
     const c8 = pureRows(M.load('src/browser-profiles.js', noMarker, 'no-marker-rule'));
     ok(c8.reuse.length === 1 && c8.stranger.length === 1 && c8.restore.length === 0, '④i CONTROL 8: the PURE rule without the marker hands a forgotten directory\'s lineage to a fresh directory with a REUSED inode and to a stranger\'s, and orphans a RESTORED one — S43p catches it', { reuse: c8.reuse, stranger: c8.stranger, restore: c8.restore }); }

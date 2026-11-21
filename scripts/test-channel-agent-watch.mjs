@@ -44,6 +44,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 500) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const F = require(path.join(REPO, 'src/channel-filter.js'));
 const ACL = require(path.join(REPO, 'src/channel-acl.js'));
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
@@ -87,7 +96,7 @@ function pureLegs(FF) {
 { const bad = pureLegs(F); ok(!bad.length, 'deliveryModeOf · origin · validateWatchers / grainOf / effectiveGrants by the inherited rule', bad.join('; ')); }
 { // CONTROL: the filter as it was — a watcher judged by its own grain's access only
   const src = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf8');
-  const cut = src.split('const keys = eligibleKeys({ access, inherited });').join('const keys = eligibleKeys({ access });');
+  const cut = editAnchor(src, 'const keys = eligibleKeys({ access, inherited });', 'const keys = eligibleKeys({ access });', "src/channel-filter.js", 'join');
   const FF = MUT.load('src/channel-filter.js', cut, 'no-inherited');
   const bad = pureLegs(FF);
   ok(cut !== src && bad.includes('account access above ⇒ valid (the owner\'s ask 3)'), 'CONTROL: a filter judging a watcher by its own grain only FAILS ① (the owner\'s symptom)', bad.join('; '));
@@ -235,7 +244,7 @@ async function oneStateLeg(ENGM, name, settleTicks = 200) {   // r9: 5 ms ticks 
   // CONTROL: the engine without the hook — the request stays open for ever behind an item that ended
   const src = engineSource(REPO);
   const anchor = "    userTodos.onStatus((it, { status, by } = {}) => {\n      if (status === 'open') return;";
-  const cut = src.split(anchor).length === 2 ? src.replace(anchor, "    userTodos.onStatus((it) => {\n      return;") : src;
+  const cut = src.split(anchor).length === 2 ? editAnchor(src, anchor, "    userTodos.onStatus((it) => {\n      return;", "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)") : src;
   const E3 = MUT.load('src/server/channels-engine.js', cut, 'no-one-state');
   const r = await oneStateLeg(E3, 'e3b-red', 4);
   ok(cut !== src && r.expired.item === 'expired' && r.expired.request === 'open' && r.again.already, `CONTROL: an engine without the hook — the expired item leaves its request OPEN (${r.expired.request}) and the agent's next ask is «already filed» behind an item nobody can see`, J2s(r));
@@ -277,7 +286,7 @@ try {
   // CONTROL: the engine whose pointer never comes back (resurface cut) — a hidden pointer stays hidden over an open request
   const src = engineSource(REPO);
   const anchor = '  function resurface(req) {\n';
-  const cut = src.split(anchor).length === 2 ? src.replace(anchor, '  function resurface(req) { return false;\n') : src;
+  const cut = src.split(anchor).length === 2 ? editAnchor(src, anchor, '  function resurface(req) { return false;\n', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)") : src;
   const E4 = MUT.load('src/server/channels-engine.js', cut, 'no-resurface');
   const r = await pointerLeg(E4, 'e4c-red');
   ok(cut !== src && r.hidden.status === 'dismissed' && !r.back.resurfaced && r.back.status === 'dismissed' && r.atBoot.status === 'dismissed', 'CONTROL: an engine without the resurface — the agent\'s re-ask and the boot leave the pointer hidden over an open request', J2s({ back: r.back, atBoot: r.atBoot }));
@@ -350,7 +359,7 @@ try {
   // CONTROL: the engine whose asks never end (the base: no lifetime) — 8 days on, the ask is open for ever and the bound stays full
   const src = engineSource(REPO);
   const anchor = 'const askEndOf = (r) => (Number(r && r.expiresAt) > 0 ? Number(r.expiresAt) : Number(r && r.at) + F.WATCH_REQUEST_TTL_MS);';
-  const cut = src.split(anchor).length === 2 ? src.replace(anchor, 'const askEndOf = () => Infinity;') : src;
+  const cut = src.split(anchor).length === 2 ? editAnchor(src, anchor, 'const askEndOf = () => Infinity;', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)") : src;
   const E5 = MUT.load('src/server/channels-engine.js', cut, 'no-lifetime');
   const r = await lifetimeLeg(E5, 'e4d-red');
   ok(cut !== src && r.ended.request === 'open' && r.next.code === 'watch-request-limit' && r.boot.legacy === 'open', 'CONTROL: an engine whose asks never end — 7 days on the ask is still OPEN, the agent\'s next ask refused at the bound, the 8-day-old one still open after the boot', J2s({ ended: r.ended, next: r.next, legacy: r.boot.legacy }));
@@ -762,7 +771,7 @@ async function deliveryLeg(ENGM, name) {
   ok(/Ops room/.test(r.stashText), 'the stashed block is the same block a wake carries (names the conversation)', r.stashText.slice(0, 200));
   // CONTROL: the dispatch without its next-turn branch bills the next-turn watcher
   const src = engineSource(REPO);
-  const cut = src.replace("if (F.deliveryModeOf(w) === 'next-turn') { runs.push(stashHits(rec, convId, hits, { item, pk, batch })); continue; }", '');
+  const cut = editAnchor(src, "if (F.deliveryModeOf(w) === 'next-turn') { runs.push(stashHits(rec, convId, hits, { item, pk, batch })); continue; }", '', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)");
   const E2 = MUT.load('src/server/channels-engine.js', cut, 'no-next-turn');
   const rc = await deliveryLeg(E2, 'e5c');
   ok(cut !== src && rc.toAgent1Billed >= 1, 'CONTROL: an engine without the next-turn branch BILLS the next-turn watcher (the leg above would be red)', JSON.stringify(rc));
@@ -856,7 +865,7 @@ async function removalLeg(ENGM, name) {
 }
 { // CONTROL: an engine without the removed-by-user check lets the agent write its row back
   const src = engineSource(REPO);
-  const cut = src.replace("if (blk && d !== 'wake') return { ok: false, code: 'removed-by-user'", "if (false) return { ok: false, code: 'removed-by-user'");
+  const cut = editAnchor(src, "if (blk && d !== 'wake') return { ok: false, code: 'removed-by-user'", "if (false) return { ok: false, code: 'removed-by-user'", "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)");
   const E3 = MUT.load('src/server/channels-engine.js', cut, 'no-removed-mark');
   const r = await removalLeg(E3, 'e7c');
   ok(cut !== src && r.again.ok && r.again.set && r.row(), 'CONTROL: without the check the removed row comes BACK (the leg above would be red)', JSON.stringify(r.again));
@@ -886,7 +895,7 @@ async function selfWatchLeg(ENGM, name) {
   ok(r.set && r.afterSelf === 0, 'the owner\'s own \'inc-…\' reply (author.isSelf) is NO hit: nothing stashed, nobody woken', JSON.stringify(r));
   ok(r.afterPeer >= 1, 'userW\'s \'inc-…\' message IS a hit (the watch still works)', JSON.stringify(r));
   const src = engineSource(REPO);
-  const cut = src.replace('            if (FO.selfRead(r, selfId)) continue;\n', '');
+  const cut = editAnchor(src, '            if (FO.selfRead(r, selfId)) continue;\n', '', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)");
   const E8 = MUT.load('src/server/channels-engine.js', cut, 'no-self-skip');
   const rc = await selfWatchLeg(E8, 'e8c');
   ok(cut !== src && rc.afterSelf >= 1, 'CONTROL: the watch without its self skip hits on the owner\'s own words (B-c91b; the leg above would be red)', JSON.stringify(rc));
@@ -930,7 +939,7 @@ for (const [label, pr] of [['a GROUP of A + B', GRP], ['ALL AGENTS', { kind: 'ev
   const src = engineSource(REPO);
   // lane grants-unify: the fan-out also takes THE wake admission (`admit`) — the mutant drops only the filter reader
   // (lane lg-group-parents U3c: the admission also takes each target's lineage, `tg.inherited`)
-  const cut = src.replace("{ filterOf: (w) => (w && w.mode === 'filtered' ? filterFor(w.filterId) : null), admit: (item, tg) => admit(item)(tg.cid, tg.groups, tg.inherited) }", '{ admit: (item, tg) => admit(item)(tg.cid, tg.groups, tg.inherited) }');
+  const cut = editAnchor(src, "{ filterOf: (w) => (w && w.mode === 'filtered' ? filterFor(w.filterId) : null), admit: (item, tg) => admit(item)(tg.cid, tg.groups, tg.inherited) }", '{ admit: (item, tg) => admit(item)(tg.cid, tg.groups, tg.inherited) }', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)");
   const E9 = MUT.load('src/server/channels-engine.js', cut, 'group-not-per-member');
   const rc = await replyLeg(E9, 'e9c', GRP);
   ok(cut !== src && !(rc.s2 === 'agent-1,agent-1' && rc.s3 === 'agent-1,agent-1,agent-2'), 'CONTROL: an engine judging the group row as ONE round-robin item hands a reply to the wrong member — the group leg above would be red', JSON.stringify(rc));
@@ -1076,7 +1085,7 @@ async function parityLeg(ENGM, name) {
   ok(o.other.ok && !(o.other.watches || []).length, 'another agent reads none of these rows');
   // CONTROL: a SECOND SCHEMA at the door (the pre-parity keywords-only body) instead of the one grammar — ⑩ goes red
   const src = engineSource(REPO);
-  const cut = src.replace('    const sp = WS.watchSpecOfBody(body);', "    const sp = { ok: true, spec: { delivery: body.delivery || 'next-turn', notify: 'wake', mode: (body.keywords || []).length ? 'filtered' : 'all', ...((body.keywords || []).length ? { filter: { match: 'any', rules: body.keywords.map((value) => ({ kind: 'keyword', value })) } } : {}), dailyWakeCap: 40, why: '' } };");
+  const cut = editAnchor(src, '    const sp = WS.watchSpecOfBody(body);', "    const sp = { ok: true, spec: { delivery: body.delivery || 'next-turn', notify: 'wake', mode: (body.keywords || []).length ? 'filtered' : 'all', ...((body.keywords || []).length ? { filter: { match: 'any', rules: body.keywords.map((value) => ({ kind: 'keyword', value })) } } : {}), dailyWakeCap: 40, why: '' } };", "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)");
   const E10 = MUT.load('src/server/channels-engine.js', cut, 'second-schema');
   const c = await parityLeg(E10, 'e10c');
   const crow = c.show && c.show.rows && c.show.rows[0];
@@ -1321,7 +1330,7 @@ try {
   const src = engineSource(REPO);
   const fixed = 'const next = Array.isArray(access) && except === undefined && stored ? covers(stored) : null;';
   const raw = "const next = Array.isArray(access) && except === undefined ? covers(access.filter((x) => x && typeof x === 'object' && x.principal)) : null;";
-  const cut = src.split(fixed).length === 2 ? src.replace(fixed, raw) : src;
+  const cut = src.split(fixed).length === 2 ? editAnchor(src, fixed, raw, "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)") : src;
   const r = await storedRowsLeg(MUT.load('src/server/channels-engine.js', cut, 'raw-rows'), 'e9-stored-red');
   ok(cut !== src && r.target === 200 && r.afterBearer.live.includes('g-x'), `CONTROL «the gate fed raw rows»: the same write through a gate that keys the BODY's rows ⇒ ${r.target}, the inert group wake LIVE with no click (${J2s(r.afterBearer)}) — the census names it`, J2s(r));
 } catch (e) { ok(false, '⑦ (a) threw on this tree: ' + ((e && e.stack) || e)); }
@@ -1366,7 +1375,7 @@ try {
   `(b) removing the rule RESOLVES its held card: «${g.words}» (no person mark — nobody decided); the request settled, its 30 rows dropped, a late Deliver refused by name (${g.press.code}), nothing pushed into pending for nobody (db19b0a2: the card stayed «30 … deliver or discard», Deliver pushed 30 rows into pending, toasted «they go with its next delivery» and recorded «delivered»)`, J2s(g));
   const src = engineSource(REPO);
   const call = '    await pruneHeld(adapterId);\n';
-  const cut = src.split(call).length === 2 ? src.replace(call, '') : src;
+  const cut = src.split(call).length === 2 ? editAnchor(src, call, '', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)") : src;
   const r = await goneLeg(MUT.load('src/server/channels-engine.js', cut, 'no-prune-held'), 'e9-gone-red');
   ok(cut !== src && r.request === 'open' && r.item === 'open' && !r.press.ok && r.press.code === 'rule-gone' && r.pending === 0, `CONTROL: a prune that never reaches the held store — the card stays OPEN after its rule is removed (r10: Deliver's own read of the rule then ends it by name, ${r.press.code}, ${r.pending} rows pushed for nobody — r9 pushed 30)`, J2s(r));
 } catch (e) { ok(false, '⑦ (b) threw on this tree: ' + ((e && e.stack) || e)); }

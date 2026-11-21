@@ -70,6 +70,15 @@ const express = require('express');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const REPO = new URL('..', import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms = 5000, step = 20) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(step); } return !!(await pred()); };
@@ -1147,7 +1156,7 @@ function envSweepLeg(BEmod, tag) {
   const kCut = ' && (B.sameDir(p.dir, dir) || F.sameRealDir(p.dir, dir) !== false)); },';
   const aCut = ' && (B.sameDir(x.dir, d) || F.sameRealDir(x.dir, d) !== false));';
   ok(kSrc.includes(kCut) && kSrc.includes(aCut), 'control setup: the keeper\'s two identity compares are where the control cuts');
-  const Km = M.load('src/server/browser-keeper.js', kSrc.replace(kCut, ' && B.sameDir(p.dir, dir)); },').replace(aCut, ' && B.sameDir(x.dir, d));'), 'lexical-keeper');
+  const Km = M.load('src/server/browser-keeper.js', editAnchor(editAnchor(kSrc, kCut, ' && B.sameDir(p.dir, dir)); },', "src/server/browser-keeper.js"), aCut, ' && B.sameDir(x.dir, d));', "src/server/browser-keeper.js"), 'lexical-keeper');
   const KKm = await keeperIdentityLeg(Km, 'control');
   ok(KKm.registeredSlashes === false && KKm.resume !== 'resume_adopted' && KKm.forget === 'deleted' && !KKm.dirStays, 'CONTROL: a keeper comparing strings deletes a registered profile\'s directory on Forget and lets Resume relaunch over it — the KEEPER leg catches it', KKm);
   const eSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');

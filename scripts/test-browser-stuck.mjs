@@ -46,6 +46,15 @@ const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, ms = 3000, step = 10) { const t0 = Date.now(); for (;;) { let v; try { v = fn(); } catch { v = false; } if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(step); } }
 const ROOT = scratch('bstuck');
@@ -264,7 +273,7 @@ function invisibleLeak(mod) {
   const needle = src.match(/^const INVISIBLE_RE = .*$/m)[0];
   const cneedle = '\\u007f-\\u009f\\u2028';
   ok(needle.includes('\\p{Cf}') && src.includes(cneedle), 'control setup: the invisible set and the C1 range are found in src/browser-stuck.js');
-  const r1 = MUT.load('src/browser-stuck.js', src.replace(needle, 'const INVISIBLE_RE = /[\\u00AD\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]/g;').replace(cneedle, '\\u007f\\u2028'), 'r2-1-r1-set');
+  const r1 = MUT.load('src/browser-stuck.js', editAnchor(editAnchor(src, needle, 'const INVISIBLE_RE = /[\\u00AD\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]/g;', "src/browser-stuck.js"), cneedle, '\\u007f\\u2028', "src/browser-stuck.js"), 'r2-1-r1-set');
   ok(invisibleLeak(r1).length >= 4, 'CONTROL: the r1 set (zero-width + bidi only, no C1) lets the tag copy, the CSI and the fillers through — the leg above reddens on it', invisibleLeak(r1));
 }
 // VERIFY r2 #1 (reproduced): the MESSAGE_MAX cut split a surrogate pair — a lone high half reached the agent's sentence as
@@ -1596,7 +1605,7 @@ try {
   await until(() => dialogs.factFor({ profileId: EPH, browserKey: KEY, ephemeral: true, consume: false }).open, 1000);
   const repNeedle = "if (dlg && dlg.open && !DIALOG_PASS.has(words0[0] || '')) {";
   ok(cliSrc.includes(repNeedle), 'control setup: the repeat is found in data/bin/vibespace-browser');
-  const noRep = MUT.write('data/bin/vibespace-browser', cliSrc.replace(repNeedle, 'if (false) {').replace(pollNeedle, 'if (false) {\n    (async () => {'), 'no-repeat'); // the poll off too: it would cut the spawned child before its first line
+  const noRep = MUT.write('data/bin/vibespace-browser', editAnchor(editAnchor(cliSrc, repNeedle, 'if (false) {', "data/bin/vibespace-browser"), pollNeedle, 'if (false) {\n    (async () => {', "data/bin/vibespace-browser"), 'no-repeat'); // the poll off too: it would cut the spawned child before its first line
   fs.writeFileSync(LOG, '');
   setPlan({ snapshot: { out: '- document' } });
   r = await runCli(['snapshot'], { cli: noRep });
@@ -1858,7 +1867,7 @@ async function sharedTwo(BSmod, { withA = true } = {}) {
   const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
   const needle = '(browserKey ? r.browserKey === browserKey : r.sessionId === sessionId)';
   ok(bsrc.includes(needle) && bsrc.includes('if (!browserKey && !sessionId) return [];'), 'control setup: the one-conversation rule is found in src/server/browser-stream.js');
-  const old = MUT.load('src/server/browser-stream.js', bsrc.replace('if (!browserKey && !sessionId) return [];', '').replace(needle, '(!sessionId || r.sessionId === sessionId)'), 'r2-3-every-relay');
+  const old = MUT.load('src/server/browser-stream.js', editAnchor(editAnchor(bsrc, 'if (!browserKey && !sessionId) return [];', '', "src/server/browser-stream.js"), needle, '(!sessionId || r.sessionId === sessionId)', "src/server/browser-stream.js"), 'r2-3-every-relay');
   const c = await sharedTwo(old, { withA: false });
   ok(c.chipA === "B's page: transfer 900 to Carol?", 'CONTROL: the r1 bridge (every relay when no session is named) puts B\'s dialog — its page text — on A\'s chip (the reproduced leak); the legs above redden on it', c);
 }

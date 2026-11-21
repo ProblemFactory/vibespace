@@ -111,6 +111,15 @@ const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // r3: the suite's OWN base environment carries no AGENT_BROWSER_* — a VibeSpace session shell (where this
@@ -883,7 +892,7 @@ if (AB && CHROME) {
         const r1 = await viaFile(path.join(REPO, 'data/bin/vibespace-browser'), ['pdf', './frame.pdf']);
         ok(r1.ok && pdfAt(path.join(Bd, 'frame.pdf')) && !fs.existsSync(path.join(A, 'frame.pdf')), 'lane L r5 F1 (the REAL ' + abVer + ' daemon, started in A): `vibespace-browser pdf ./frame.pdf` from B writes B/frame.pdf — the path it judged — and nothing in A', JSON.stringify({ r1: [r1.ok, r1.so.slice(-200), r1.se.slice(-300)], inB: fs.existsSync(path.join(Bd, 'frame.pdf')), inA: fs.existsSync(path.join(A, 'frame.pdf')) }));
         const src = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
-        const pre = src.replace("const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", "const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];"); // the hand-over line since the 2.369.182 integration (lane H's close --all filter over the in-frame argv)
+        const pre = editAnchor(src, "const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", "const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];", "data/bin/vibespace-browser"); // the hand-over line since the 2.369.182 integration (lane H's close --all filter over the in-frame argv)
         const ctl = path.join(ROOT, 'ctl-frame', 'bin'); fs.mkdirSync(ctl, { recursive: true });
         fs.writeFileSync(path.join(ctl, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(ctl, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(ctl, 'cli-call.js'));
         const r2 = await viaFile(path.join(ctl, 'vibespace-browser'), ['pdf', './frame2.pdf']);
@@ -1118,7 +1127,7 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
         // r5: the new layer (a lost, unhealed browser refused `browser_closed` by name) is stripped from this r4 control too
         const LB = '    if (rec.browserLost) { const p = profile(profileId); return {';
         if (ksrc.includes(HB) && ksrc.includes(LB)) {
-          const KkNo = Mh.load('src/server/browser-keeper.js', ksrc.replace(HB, HB + '    return Promise.resolve(null);\n').replace(LB, '    if (false) { const p = profile(profileId); return {'), 'no-heal');
+          const KkNo = Mh.load('src/server/browser-keeper.js', editAnchor(editAnchor(ksrc, HB, HB + '    return Promise.resolve(null);\n', "src/server/browser-keeper.js"), LB, '    if (false) { const p = profile(profileId); return {', "src/server/browser-keeper.js"), 'no-heal');
           const kc = KkNo.create({ dataDir: path.join(KR, 'data-ctl'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live4, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, tickMs: 3600e3 });
           try {
             const b2 = kc.createProfile({ label: 'Bank ctl' }, { owner: { kind: 'instance', id: null } });
