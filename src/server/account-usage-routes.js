@@ -193,10 +193,10 @@ app.post('/api/telemetry/ingest', (req, res) => {
     res.json({ success: true, n });
   } catch { res.json({ success: true, n: 0 }); }
 });
-app.get('/api/telemetry/central-summary', (req, res) => {
+app.get('/api/telemetry/central-summary', async (req, res) => {   // B-360d unit 2: the fleet's read and summing in the telemetry-summary worker
   try {
-    res.json({ collector: !!TELEMETRY_INGEST_TOKEN, ...telemetry.centralSummary({ days: Math.min(parseInt(req.query.days) || 14, 90) }) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ collector: !!TELEMETRY_INGEST_TOKEN, ...(await telemetry.centralSummary({ days: Math.min(parseInt(req.query.days) || 14, 90) })) });
+  } catch (e) { res.status(e && e.status === 503 ? 503 : 500).json({ error: e && e.status === 503 ? `the fleet's telemetry files did not answer in time (${e.message})` : e.message }); }
 });
 
 app.get('/api/usage-stats', async (req, res) => {

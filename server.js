@@ -828,11 +828,11 @@ app.post('/api/telemetry', (req, res) => {
     res.json({ success: true });
   } catch { res.json({ success: true }); }
 });
-app.get('/api/telemetry/summary', (req, res) => {
+app.get('/api/telemetry/summary', async (req, res) => {   // B-360d unit 2: the read and the summing in the telemetry-summary worker
   try {
     telemetry.flush();
-    res.json({ ...telemetry.summary({ days: Math.min(parseInt(req.query.days) || 14, 90) }), ...(req.query.drift === '1' ? { driftLedger: driftLedgerRows(), attended: (() => { try { return spendGuard.snapshot().attended; } catch { return null; } })() } : {}) }); // ?drift=1 = ⚙ Diagnostics: the drift ledger (lane record-oracle-2-1-296)
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ...(await telemetry.summary({ days: Math.min(parseInt(req.query.days) || 14, 90) })), ...(req.query.drift === '1' ? { driftLedger: driftLedgerRows(), attended: (() => { try { return spendGuard.snapshot().attended; } catch { return null; } })() } : {}) }); // ?drift=1 = ⚙ Diagnostics: the drift ledger (lane record-oracle-2-1-296)
+  } catch (e) { res.status(e && e.status === 503 ? 503 : 500).json({ error: e && e.status === 503 ? `the Diagnostics report's files did not answer in time (${e.message})` : e.message }); }
 });
 // ── Account + usage routes (src/server/account-usage-routes.js, decomposition #9) ──
 require('./src/server/account-usage-routes.js').create({

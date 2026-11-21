@@ -5733,7 +5733,7 @@ console.log('§B-64c1 the attended tally, worded for the Diagnostics report (a r
     judge64(A.SPEND_REASONS).length === 0 && JSON.stringify([...W64.ATTENDED_REASONS].sort()) === JSON.stringify(ATT) && planted.length === 1 && planted[0] === 'a-planted-press', { reasons: ATT, planted });
   // THE ROUTE AND THE PAGE (a read only, the owner's page): the field rides the report's own query, behind the cookie gate
   const SRV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), SF = fs.readFileSync(path.join(REPO, 'src/lib/setup-flows.js'), 'utf8'), AU = fs.readFileSync(path.join(REPO, 'src/auth.js'), 'utf8');
-  const routeLine = SRV.split('\n').find((l) => l.includes("res.json({ ...telemetry.summary(")) || '';
+  const routeLine = SRV.split('\n').find((l) => l.includes("res.json({ ...(await telemetry.summary(")) || '';   // B-360d unit 2: the summary is awaited (its worker)
   const pins = {
     onlyWithDrift: /\.\.\.\(req\.query\.drift === '1' \? \{ driftLedger: driftLedgerRows\(\), attended: \(\(\) => \{ try \{ return spendGuard\.snapshot\(\)\.attended; \} catch \{ return null; \} \}\)\(\) \} : \{\}\)/.test(routeLine),
     behindTheCookieGate: !AU.includes("'/api/telemetry/summary'") && !/p\.startsWith\('\/api\/telemetry/.test(AU),

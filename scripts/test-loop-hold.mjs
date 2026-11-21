@@ -844,7 +844,7 @@ console.log('⑬ the number — the held seconds per day by cause, from the tele
     const rows2 = rowsAt(NOW2);
     for (const r of rows2) fs.appendFileSync(tel._shard(r.ts), JSON.stringify(r) + '\n');
     const shards = fs.readdirSync(path.join(tmp, 'telemetry')).filter((f) => f.startsWith('events-')).sort();
-    const s1 = tel.summary({ days: 1, now: NOW2 }), s14 = tel.summary({ days: 14, now: NOW2 });
+    const s1 = await tel.summary({ days: 1, now: NOW2 }), s14 = await tel.summary({ days: 14, now: NOW2 });   // B-360d unit 2: the summary is read in its worker
     ok(J(s1.loopHeld) === J(expect(NOW2)) && J(s14.loopHeld) === J(expect(NOW2)) && J(shards) === J(['events-2026-10.ndjson', 'events-2026-11.ndjson']) && s1.loopHeld?.week?.from === '2026-10-27',
       `(3) GET /api/telemetry/summary's loopHeld = the rows' number, read from ${shards.join(' + ')}, the same with days=1 and days=14 (the summary's own window never cuts the seven days)`, s1.loopHeld);
     ok(s14.metrics['srv-loop-hold-ms'] && s14.metrics['srv-loop-hold-ms'].count === 9 && s14.byName['metric:srv-loop-hold-ms'] === 9 && s14.byName['event:srv-loop-hold-ms'] === 1,

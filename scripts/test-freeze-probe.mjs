@@ -280,7 +280,10 @@ console.log(JSON.stringify(out));`;
   if (base) ok(!wired(base) && /track\('error', \(e\.error && e\.error\.message\) \|\| e\.message \|\| 'window\.onerror'/.test(base), 'B-402f RED CONTROL: the release b06f36e90\'s listener tracked EVERY window error as an error (the note included)');
   else console.log('  · SKIP: the release b06f36e90 is not in this clone');
   // the hub's summary: a stored note (an older page sent it as kind «error») is no error group; a real one is
-  const summarize = (Tele) => {
+  // B-360d unit 2: the summary reads and sums in its worker (src/telemetry-summary-worker.js); this leg judges the AGGREGATE — the
+  // module's own PURE summarizeEvents over the shards the instance wrote (a copy's aggregate is the copy's)
+  const summarize = (Mod) => {
+    const Tele = Mod.Telemetry || Mod;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-browser-note-'));
     try {
       const T = new Tele({ dataDir: dir, version: 'x' });
@@ -290,11 +293,12 @@ console.log(JSON.stringify(out));`;
       T.record({ kind: 'error', name: 'x is not a function', detail: 'bundle.js:1', t: now });
       T.record({ kind: 'event', name: BN.BROWSER_NOTE, detail: CHROME, t: now });
       T.flush();
-      const r = T.summary({ days: 1 });
+      const td = path.join(dir, 'telemetry'), texts = fs.readdirSync(td).filter((f) => Mod.SHARD_RE.events.test(f)).sort().slice(-3).map((f) => fs.readFileSync(path.join(td, f), 'utf8'));
+      const r = Mod.summarizeEvents(texts, { days: 1 });
       return (r.errors || []).reduce((a, g) => a + (g.count || 0), 0) + ':' + (r.errors || []).map((g) => g.name).join('|');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   };
-  const live = summarize(req('../src/telemetry.js').Telemetry || req('../src/telemetry.js'));
+  const live = summarize(req('../src/telemetry.js'));
   ok(live === '1:x is not a function', 'B-402f: the summary the Diagnostics badge sums counts the real error only — two stored notes and a note event add nothing', live);
   const rel = 'src/telemetry.js', tsrc = fs.readFileSync(path.join(REPO, rel), 'utf8');
   const needle = "        if ((r.kind === 'error' || r.kind === 'server-error') && !(r.kind === 'error' && isBrowserNote(r.name))) {";
@@ -303,7 +307,7 @@ console.log(JSON.stringify(out));`;
   const mut = MUT.write(rel, tsrc.split(needle).join("        if (r.kind === 'error' || r.kind === 'server-error') {"), 'no-note-filter');
   for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: 'B-402f ' })) ok(row.pass, row.name, row.detail);
   const M = req(mut);
-  const red = summarize(M.Telemetry || M);
+  const red = summarize(M);
   ok(red === '3:' + [CHROME, 'x is not a function'].sort((a, b) => (a === CHROME ? -1 : 1)).join('|') || red.startsWith('3:'), 'B-402f RED CONTROL: the summary without the filter counts the two stored notes as errors (the red badge)', red);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

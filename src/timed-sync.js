@@ -77,7 +77,7 @@ const STORES = Object.freeze({
   'otel-truth.append': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),   // through the store writer (usage-cpu U4: was an appendFileSync per post)
   'otel-truth-pending.write': row('write', 'usage-history/otel-truth.pending', 'src/server/otel-ingest.js', ['create']),   // the spill: posts waiting behind the boot replay (usage-cpu U4), through the store writer
   'otel-truth.read': row('read', 'usage-history/otel-truth', 'src/server/otel-ingest.js'),
-  'telemetry.read': row('read', 'telemetry/events-<month>', 'src/telemetry.js'),
+  'telemetry.read': row('read', 'telemetry/.instance-id', 'src/telemetry.js'),   // B-360d unit 2: the summaries' shard reads left the loop (their worker); the one read of the folder left on it is the instance id (once a life)
 });
 const NAMES = Object.freeze(Object.keys(STORES));
 

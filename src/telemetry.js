@@ -12,17 +12,19 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
+const { timedSync } = require('./timed-sync.js'); // PURE: the store-read clock (design 011 lane 1, store-timing) — the instance id's one read
 const { isBrowserNote } = require('./browser-notes.js'); // B-402f: the browser's ResizeObserver loop note — never an error group (older pages sent it as one)
 
 class Telemetry {
-  constructor({ dataDir, version, getForwardUrl, getForwardToken }) {
+  constructor({ dataDir, version, getForwardUrl, getForwardToken, summaryTimeoutMs = 0 }) {
     this.dir = path.join(dataDir, 'telemetry');
     this.version = version;
     this._getForwardUrl = getForwardUrl || (() => '');
     this._getForwardToken = getForwardToken || (() => '');
     this._buf = [];
     this._flushTimer = null;
+    this._asks = new Map();   // B-360d unit 2: the summary asks in flight, one a window
+    this._summaryMs = Number(summaryTimeoutMs) > 0 ? Number(summaryTimeoutMs) : SUMMARY_TIMEOUT_MS;   // the worker's deadline (a suite places a short one)
     try { fs.mkdirSync(this.dir, { recursive: true }); } catch {}
   }
 
@@ -127,53 +129,31 @@ class Telemetry {
     return n;
   }
 
-  // Fleet aggregate for the diagnostics report: per-instance totals + errors
-  // grouped across instances. Reads central-* shards only (local events stay
-  // in summary()) — user-initiated, so per-call reads are fine like summary().
-  centralSummary({ days = 14 } = {}) {
-    const from = Date.now() - days * 86400000;
-    const instances = {}; // id → { total, errors, lastTs, versions:{} }
-    const errors = [];
-    let total = 0;
-    let files = [];
-    try { files = fs.readdirSync(this.dir).filter((f) => /^central-\d{4}-\d{2}\.ndjson$/.test(f)).sort().slice(-3); } catch {}
-    for (const fn of files) {
-      let data = '';
-      try { data = fs.readFileSync(path.join(this.dir, fn), 'utf-8'); } catch { continue; }
-      for (const line of data.split('\n')) {
-        if (!line) continue;
-        let r; try { r = JSON.parse(line); } catch { continue; }
-        if (r.ts < from) continue;
-        total++;
-        const g = instances[r.inst] || (instances[r.inst] = { total: 0, errors: 0, lastTs: 0, versions: {} });
-        g.total++;
-        g.lastTs = Math.max(g.lastTs, r.ts);
-        if (r.version) g.versions[r.version] = (g.versions[r.version] || 0) + 1;
-        if ((r.kind === 'error' || r.kind === 'server-error') && !(r.kind === 'error' && isBrowserNote(r.name))) {   // B-402f: the browser's note is no error in the fleet view either
-          g.errors++;
-          errors.push({ ts: r.ts, inst: r.inst, name: r.name, detail: r.detail, stack: r.stack, version: r.version });
-        }
-      }
-    }
-    const grouped = new Map();
-    for (const e of errors) {
-      const k = `${e.name}|${(e.stack || e.detail || '').slice(0, 200)}`;
-      const g = grouped.get(k);
-      if (g) { g.count++; g.lastTs = Math.max(g.lastTs, e.ts); g.instances[e.inst] = (g.instances[e.inst] || 0) + 1; }
-      else grouped.set(k, { ...e, count: 1, lastTs: e.ts, instances: { [e.inst]: 1 } });
-    }
-    return {
-      days, total,
-      instances: Object.fromEntries(Object.entries(instances).sort((a, b) => b[1].lastTs - a[1].lastTs)),
-      errors: [...grouped.values()].sort((a, b) => b.lastTs - a.lastTs).slice(0, 50),
-    };
+  // ── THE TWO SUMMARIES OFF THE LOOP (B-360d unit 2, lane bl-keys-misc — the owner's hub on 2.369.413: ONE loop hold of 5.7 s at
+  //    the Diagnostics report's read, the folder listed and up to three monthly files read and parsed line by line on the data
+  //    folder's mount). The listing, the reads and the summing run in the «telemetry-summary» worker (src/telemetry-summary-worker.js
+  //    on a pool of one, a deadline: SUMMARY_TIMEOUT_MS); the answer is the same object as before, field for field (the PURE
+  //    summarizeEvents / summarizeCentral, moved verbatim). ONE IN FLIGHT a window: a second ask meanwhile waits for the same
+  //    answer. → a Promise; a worker that does not answer in time rejects 503 (the route says it). ──
+  summary({ days = 14, now = Date.now() } = {}) {
+    return this._offLoop('telemetrySummary', { dir: this.dir, days, now }).then((r) => ({ ...r, instance: this._instanceId() }));
+  }
+  centralSummary({ days = 14, now = Date.now() } = {}) {   // the fleet aggregate: per-instance totals + errors over the central-* shards
+    return this._offLoop('centralSummary', { dir: this.dir, days, now });
+  }
+  _offLoop(op, payload) {
+    const k = `${op}|${payload.days}`, was = this._asks.get(k);
+    if (was) return was;
+    const p = summaryPool().call(op, payload, { timeoutMs: this._summaryMs }).finally(() => { if (this._asks.get(k) === p) this._asks.delete(k); });
+    this._asks.set(k, p);
+    return p;
   }
 
   _instanceId() {
     // Stable anonymous id per instance (not per user identity).
     if (this._iid) return this._iid;
     const f = path.join(this.dir, '.instance-id');
-    try { this._iid = fs.readFileSync(f, 'utf-8').trim(); } catch {}
+    try { this._iid = timedSync('telemetry.read', () => fs.readFileSync(f, 'utf-8')).trim(); } catch {}   // the folder's one read left on the loop (timed)
     if (!this._iid) {
       this._iid = 'vs-' + require('crypto').randomBytes(6).toString('hex');
       try { fs.writeFileSync(f, this._iid); } catch {}
@@ -181,9 +161,56 @@ class Telemetry {
     return this._iid;
   }
 
-  // Aggregate for the report: totals by kind/name/version/day + recent errors.
-  // `now` = the clock the window and the days are read against (a suite hands in its own).
-  summary({ days = 14, now = Date.now() } = {}) {
+  /** THE HELD SECONDS PER DAY BY CAUSE (lane hub-loop-stalls, «the number»: the owner's hub, 2026-11-16) — PURE, DERIVED
+   *  from the rows the hub already keeps; no file, no notice, no budget of its own. The rows: kind 'metric', name
+   *  'srv-loop-hold-ms' — ONE a hold of a second or more, written by src/server/loop-holds.js onHold as the loop turns again:
+   *  `value` = the hold's ms, `detail` = «verdict · frame» (« · (the boot)» after a boot's own hold). THE CAUSE = the hourly
+   *  report's own key (src/loop-day-report.js causeOf — loop-day-report R5: the day and its hours key alike): a tie's fixed word
+   *  (r116 / r147), else the hub's code location in the frame, else the verdict's fixed words (none ⇒ NO_CAUSE); a BOOT's hold is apart — `boot` {ms, count} of
+   *  each period, never in its ms, count or causes. THE DAY CUT IS UTC: a row's day = the UTC date of its `ts` (as byDay and the monthly shards) — so a hold
+   *  across midnight counts on the day it ended; today = the UTC date of `now`, yesterday = the UTC date before it, the
+   *  seven days = today and the six UTC dates before it (a row dated after today counts nowhere). Each period:
+   *  {from, to, ms, count, causes: [{cause, ms, count}] — the larger ms first}; `ms` = the plain sum of the rows' values. */
+  static heldDays(rows, now = Date.now()) {
+    const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
+    const today = dayOf(now), yesterday = dayOf(now - 86400000), weekFrom = dayOf(now - 6 * 86400000);
+    const period = (from, to) => ({ from, to, ms: 0, count: 0, by: new Map(), boot: { ms: 0, count: 0 } });
+    const LDR = require('./loop-day-report.js');
+    const out = { today: period(today, today), yesterday: period(yesterday, yesterday), week: period(weekFrom, today) };
+    for (const r of Array.isArray(rows) ? rows : []) {
+      if (!r || r.kind !== 'metric' || r.name !== HOLD_ROW || !Number.isFinite(r.ts) || !Number.isFinite(r.value) || r.value < 0) continue;
+      const day = dayOf(r.ts);
+      let d = typeof r.detail === 'string' ? r.detail : '';
+      const boot = d.endsWith(' · (the boot)');
+      if (boot) d = d.slice(0, -' · (the boot)'.length);
+      const noOurs = d.endsWith(' · (no frame of ours)');   // the hold book's mark (a row with no frame of the tree): the hour's cause
+      if (noOurs) d = d.slice(0, -' · (no frame of ours)'.length);
+      const cut = d.indexOf(' · ');
+      const verdict = (cut < 0 ? d : d.slice(0, cut)).trim(), frame = cut < 0 ? null : d.slice(cut + 3);
+      const cause = verdict || frame ? LDR.causeOf({ verdict: verdict || null, frame, noOurs }) : NO_CAUSE;
+      for (const p of Object.values(out)) {
+        if (day < p.from || day > p.to) continue;
+        if (boot) { p.boot.ms += r.value; p.boot.count++; continue; }
+        p.ms += r.value; p.count++;
+        const c = p.by.get(cause) || { cause, ms: 0, count: 0 };
+        c.ms += r.value; c.count++;
+        p.by.set(cause, c);
+      }
+    }
+    const done = ({ by, ...p }) => ({ ...p, causes: [...by.values()].sort((a, b) => b.ms - a.ms || (a.cause < b.cause ? -1 : 1)) });
+    return { cut: 'UTC', today: done(out.today), yesterday: done(out.yesterday), week: done(out.week) };
+  }
+}
+/** the main loop's hold row (src/server/loop-holds.js) and the cause of one that names none */
+const HOLD_ROW = 'srv-loop-hold-ms';
+const NO_CAUSE = '(no cause recorded)';
+
+/** B-360d unit 2 — THE REPORT'S AGGREGATE, PURE (moved verbatim from Telemetry#summary: the totals by kind / name / version / day, the
+ *  recent errors grouped, the metrics' percentiles, the harness drift, the held seconds) over the TEXTS of the newest monthly event
+ *  files (`events-YYYY-MM.ndjson`, the three newest, in name order — the worker reads them). `now` = the clock the window and the days
+ *  are read against. */
+function summarizeEvents(texts, { days = 14, now = Date.now() } = {}) {
+  {
     const from = now - days * 86400000;
     const byName = {}; const byDay = {}; const byVersion = {};
     const errors = [];
@@ -197,12 +224,8 @@ class Telemetry {
     let total = 0;
     const held = [];   // the main loop's hold rows of the last seven UTC days, whatever `days` is (Telemetry.heldDays)
     const heldFrom = Telemetry.heldDays([], now).week.from;
-    let files = [];
-    try { files = fs.readdirSync(this.dir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort().slice(-3); } catch {}
-    for (const fn of files) {
-      let data = '';
-      try { data = timedSync('telemetry.read', () => fs.readFileSync(path.join(this.dir, fn), 'utf-8')); } catch { continue; }
-      for (const line of data.split('\n')) {
+    for (const data of texts) {
+      for (const line of String(data || '').split('\n')) {
         if (!line) continue;
         let r; try { r = JSON.parse(line); } catch { continue; }
         if (r && r.name === HOLD_ROW && r.kind === 'metric' && Number.isFinite(r.ts) && new Date(r.ts).toISOString().slice(0, 10) >= heldFrom) held.push(r);
@@ -258,53 +281,59 @@ class Telemetry {
       errors: [...grouped.values()].sort((a, b) => b.lastTs - a.lastTs).slice(0, 50),
       drift: [...drift.values()].sort((a, b) => b.lastTs - a.lastTs).slice(0, 100).map((g) => ({ ...g, versions: [...g.versions].sort() })),
       loopHeld: Telemetry.heldDays(held, now),   // ⚙ Diagnostics «Main loop held»: the held seconds per day by cause
-      instance: this._instanceId(),
     };
   }
+}
 
-  /** THE HELD SECONDS PER DAY BY CAUSE (lane hub-loop-stalls, «the number»: the owner's hub, 2026-11-16) — PURE, DERIVED
-   *  from the rows the hub already keeps; no file, no notice, no budget of its own. The rows: kind 'metric', name
-   *  'srv-loop-hold-ms' — ONE a hold of a second or more, written by src/server/loop-holds.js onHold as the loop turns again:
-   *  `value` = the hold's ms, `detail` = «verdict · frame» (« · (the boot)» after a boot's own hold). THE CAUSE = the hourly
-   *  report's own key (src/loop-day-report.js causeOf — loop-day-report R5: the day and its hours key alike): a tie's fixed word
-   *  (r116 / r147), else the hub's code location in the frame, else the verdict's fixed words (none ⇒ NO_CAUSE); a BOOT's hold is apart — `boot` {ms, count} of
-   *  each period, never in its ms, count or causes. THE DAY CUT IS UTC: a row's day = the UTC date of its `ts` (as byDay and the monthly shards) — so a hold
-   *  across midnight counts on the day it ended; today = the UTC date of `now`, yesterday = the UTC date before it, the
-   *  seven days = today and the six UTC dates before it (a row dated after today counts nowhere). Each period:
-   *  {from, to, ms, count, causes: [{cause, ms, count}] — the larger ms first}; `ms` = the plain sum of the rows' values. */
-  static heldDays(rows, now = Date.now()) {
-    const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
-    const today = dayOf(now), yesterday = dayOf(now - 86400000), weekFrom = dayOf(now - 6 * 86400000);
-    const period = (from, to) => ({ from, to, ms: 0, count: 0, by: new Map(), boot: { ms: 0, count: 0 } });
-    const LDR = require('./loop-day-report.js');
-    const out = { today: period(today, today), yesterday: period(yesterday, yesterday), week: period(weekFrom, today) };
-    for (const r of Array.isArray(rows) ? rows : []) {
-      if (!r || r.kind !== 'metric' || r.name !== HOLD_ROW || !Number.isFinite(r.ts) || !Number.isFinite(r.value) || r.value < 0) continue;
-      const day = dayOf(r.ts);
-      let d = typeof r.detail === 'string' ? r.detail : '';
-      const boot = d.endsWith(' · (the boot)');
-      if (boot) d = d.slice(0, -' · (the boot)'.length);
-      const noOurs = d.endsWith(' · (no frame of ours)');   // the hold book's mark (a row with no frame of the tree): the hour's cause
-      if (noOurs) d = d.slice(0, -' · (no frame of ours)'.length);
-      const cut = d.indexOf(' · ');
-      const verdict = (cut < 0 ? d : d.slice(0, cut)).trim(), frame = cut < 0 ? null : d.slice(cut + 3);
-      const cause = verdict || frame ? LDR.causeOf({ verdict: verdict || null, frame, noOurs }) : NO_CAUSE;
-      for (const p of Object.values(out)) {
-        if (day < p.from || day > p.to) continue;
-        if (boot) { p.boot.ms += r.value; p.boot.count++; continue; }
-        p.ms += r.value; p.count++;
-        const c = p.by.get(cause) || { cause, ms: 0, count: 0 };
-        c.ms += r.value; c.count++;
-        p.by.set(cause, c);
+
+/** …and the fleet's (moved verbatim from Telemetry#centralSummary), over the central-* shards' texts. */
+function summarizeCentral(texts, { days = 14, now = Date.now() } = {}) {
+  {
+    const from = now - days * 86400000;
+    const instances = {}; // id → { total, errors, lastTs, versions:{} }
+    const errors = [];
+    let total = 0;
+    for (const data of texts) {
+      for (const line of String(data || '').split('\n')) {
+        if (!line) continue;
+        let r; try { r = JSON.parse(line); } catch { continue; }
+        if (r.ts < from) continue;
+        total++;
+        const g = instances[r.inst] || (instances[r.inst] = { total: 0, errors: 0, lastTs: 0, versions: {} });
+        g.total++;
+        g.lastTs = Math.max(g.lastTs, r.ts);
+        if (r.version) g.versions[r.version] = (g.versions[r.version] || 0) + 1;
+        if ((r.kind === 'error' || r.kind === 'server-error') && !(r.kind === 'error' && isBrowserNote(r.name))) {   // B-402f: the browser's note is no error in the fleet view either
+          g.errors++;
+          errors.push({ ts: r.ts, inst: r.inst, name: r.name, detail: r.detail, stack: r.stack, version: r.version });
+        }
       }
     }
-    const done = ({ by, ...p }) => ({ ...p, causes: [...by.values()].sort((a, b) => b.ms - a.ms || (a.cause < b.cause ? -1 : 1)) });
-    return { cut: 'UTC', today: done(out.today), yesterday: done(out.yesterday), week: done(out.week) };
+    const grouped = new Map();
+    for (const e of errors) {
+      const k = `${e.name}|${(e.stack || e.detail || '').slice(0, 200)}`;
+      const g = grouped.get(k);
+      if (g) { g.count++; g.lastTs = Math.max(g.lastTs, e.ts); g.instances[e.inst] = (g.instances[e.inst] || 0) + 1; }
+      else grouped.set(k, { ...e, count: 1, lastTs: e.ts, instances: { [e.inst]: 1 } });
+    }
+    return {
+      days, total,
+      instances: Object.fromEntries(Object.entries(instances).sort((a, b) => b[1].lastTs - a[1].lastTs)),
+      errors: [...grouped.values()].sort((a, b) => b.lastTs - a.lastTs).slice(0, 50),
+    };
   }
 }
-/** the main loop's hold row (src/server/loop-holds.js) and the cause of one that names none */
-const HOLD_ROW = 'srv-loop-hold-ms';
-const NO_CAUSE = '(no cause recorded)';
+
+/** the newest monthly shards of a kind in the telemetry folder, in name order (the worker's listing: `events-` / `central-`) */
+const SHARD_RE = Object.freeze({ events: /^events-\d{4}-\d{2}\.ndjson$/, central: /^central-\d{4}-\d{2}\.ndjson$/ });
+const SUMMARY_TIMEOUT_MS = 20000;   // a report that has not answered in 20 s is said (503); the worker that hung is ended and replaced
+let _summaryPool = null;
+function summaryPool() {
+  if (_summaryPool) return _summaryPool;
+  const { SafeFs } = require('./safe-fs.js');
+  _summaryPool = new SafeFs({ workerPath: path.join(__dirname, 'telemetry-summary-worker.js'), name: 'telemetry-summary', poolSize: 1, timeouts: { default: SUMMARY_TIMEOUT_MS } });
+  return _summaryPool;
+}
 
 /** THE COLLECTOR'S VERDICT — the telemetry ingest door's, and (lane feedback-forward) the maintainer hub's two feedback
  *  doors': the shared Bearer token is both the on-switch and the whole gate. No token configured ⇒ 404 `collector disabled`;
@@ -318,4 +347,4 @@ function collectorVerdict(authorization, token) {
   return { ok: true };
 }
 
-module.exports = { Telemetry, collectorVerdict };
+module.exports = { Telemetry, collectorVerdict, summarizeEvents, summarizeCentral, SHARD_RE, SUMMARY_TIMEOUT_MS };
