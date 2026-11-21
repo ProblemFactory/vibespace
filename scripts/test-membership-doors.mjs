@@ -23,6 +23,7 @@
 //   ⑩ the meeting with B-df5f (restack 2.369.412): another machine's conversation is matched as written, its cwd never read,
 //     waited for or flagged; the hub's own is (the control).
 // Run: node scripts/test-membership-doors.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

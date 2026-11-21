@@ -6,6 +6,7 @@
 // thread or a person there. PURE functions, every branch a leg, the pre-fix / base
 // rule as the negative control. 2.369.343 (lane vault-slow-load — inc-mvk5jyv3 «保险库操作好像加载时间有点长» carried no
 // timing at all) the page's last 20 requests: fetchTimingOf + the ring the incident snapshot carries.
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import { selfGapIsFreeze, jankStormVerdict, paintGapKind } from '../src/lib/telemetry-client.js';
 import * as tc from '../src/lib/telemetry-client.js';
 import fs from 'node:fs';

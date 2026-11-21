@@ -5,6 +5,7 @@
 // app.js, the sidebar row, the route, the kill switch, the control plugin, the strings' zh / ja, the docs). Each reads the file
 // it pins BY NAME, so ci.mjs's affected rule selects this suite on a change of that file.
 // Run: node scripts/test-opencode-plugin-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

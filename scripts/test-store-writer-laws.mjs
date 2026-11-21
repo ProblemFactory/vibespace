@@ -9,6 +9,7 @@
 //   ⑧ round 3 — law 1: THE QUEUE HAS TWO STATED BOUNDS (a seeded walk of the pure scheduler); law 2: THE EXIT never
 //      writes a moved store on the main thread and always ends; law 4: the journal's tail is whole before the next append
 // Run: node scripts/test-store-writer-laws.mjs
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

@@ -42,6 +42,7 @@
 //      was stopped first) — and the product's own road, a detach and then the retire, ends it (1 CLI close, the daemon ended).
 //   ④ L3's lifecycle, pinned: a sub-agent's child handle — and its record — lives exactly as long as its parent conversation
 //      is carried (newChild; reconcile §3.7); only a job's handle is dropped earlier (dropChild). The pile is the parent's.
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

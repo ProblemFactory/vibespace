@@ -30,6 +30,7 @@
 //       RED CONTROL, today's unlink: W1 removes X's live lock and takes it — two holders at once.
 //   ⑬ the wiring + the copies census. An exit guard ends every child by its own handle (r518 point 2).
 // Real processes (node children over the copies); all scenes run side by side, each in its own folder, none near the box's real lock.
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -17,6 +17,7 @@
 //      main thread (a real SafeFs pool) vs the old synchronous walk — the same folder edits + turns, byte-identical
 //      deliveries; the stale path (a read past its bound tells nothing new and moves no mark; the next turn tells all)
 // Run: node scripts/test-seen-marks.mjs
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

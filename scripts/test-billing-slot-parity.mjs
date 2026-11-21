@@ -11,6 +11,7 @@
 // (b) THE DIFFERENTIAL (with stage 1): seeded transition histories through the real accounts + engine — every resolver still
 //     standing answers what the ONE answer answers at that instant. Not in this commit.
 // RED CONTROL: a call planted in an in-memory copy of a tracked file is red by name; a removed call is a dead row.
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

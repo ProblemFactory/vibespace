@@ -8,6 +8,7 @@
 // and the CLI's two fallback lists, ⑤'s generatedConfigParts rule (src/browser-profiles.js, src/server/browser-env.js). Each file is read BY NAME, so
 // ci.mjs's affected rule selects this suite on a change of any of them.
 // Run: node scripts/test-browser-stuck-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

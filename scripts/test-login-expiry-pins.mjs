@@ -7,6 +7,7 @@
 // pins BY NAME (src/accounts.js, src/server/usage-pool-engine.js, src/account-pool-auto.js, server.js, src/usage-routes.js, …), so
 // ci.mjs's affected rule selects this suite on any change of one of them; the negative controls moved with their legs.
 // Run: node scripts/test-login-expiry-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);

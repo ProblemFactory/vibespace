@@ -17,6 +17,7 @@
 //   ⑦ THE RATCHET — scripts/id-branch-census.mjs counts the `foryou` family (the registry is its owner) and the baseline holds it
 //   RED COPIES: a row removed ⇒ the census names the orphan type (a literal one, a constant one, a client-only one)
 // Run: node scripts/test-foryou-actions-census.mjs
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -43,6 +43,12 @@ const CONVERSATION_TELEMETRY_ENV = Object.freeze(['OTEL_EXPORTER_OTLP_ENDPOINT',
  *  §112 holds this list EQUAL to the descriptors' answer both ways (the writes are computed keys no writer shape sees). */
 const CONVERSATION_ACCOUNT_ENV = Object.freeze(['AGY_ADC_AUTH', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
   'GEMINI_API_KEY', 'GOOGLE_GEMINI_BASE_URL', 'VIBESPACE_PROVIDER_KEY']);
+/** THE HUB'S OWN FAMILY on the floor (B-ba47 pick B's re-land, 主开发 r1043 item 3): the VIBESPACE_* names agentEnv keeps from
+ *  the hub's own env (src/agent-env.js AGENT_ENV_KEEP, beside the conversation's names above) — the keeper's folder, the
+ *  instance's name, the device and daemon roots, the retired task id. Roads on the plain sanitized env (the OpenCode serve and its
+ *  terminal, the Desktop start, a multiplexer's attach, the plugin loader) write no mark and hand only these; the floor takes
+ *  them, so a suite started from such a shell carries none. §112 holds this list EQUAL to agent-env.js's, both ways. */
+const CONVERSATION_HUB_ENV = Object.freeze(['VIBESPACE_AGENTD_ROOT', 'VIBESPACE_DEVICE_ROOT', 'VIBESPACE_INSTANCE_NAME', 'VIBESPACE_KEEPER_DIR', 'VIBESPACE_TASK_ID']);
 /** The families: every `<FAMILY>WEBUI_*` name an adapter or a wrapper sets, and the conversation's browser (`AGENT_BROWSER_*`:
  *  its profile, its daemon's socket, a lease's CDP address — the browser env of a session comes from the hub, never inherited). */
 const CONVERSATION_ENV_FAMILIES = Object.freeze(['CLAUDE_WEBUI_', 'CODEX_WEBUI_', 'AGY_WEBUI_', 'ACP_WEBUI_', 'AGENT_BROWSER_']);
@@ -51,7 +57,7 @@ const CONVERSATION_MARKS = Object.freeze(['CLAUDE_WEBUI_SESSION_ID', 'VIBESPACE_
 /** What the sites ALSO set that is the person's session, not the conversation: never removed from a suite. */
 const GENERIC_SESSION_ENV = Object.freeze(['PATH', 'TERM', 'COLORTERM', 'DISPLAY', 'XAUTHORITY', 'EDITOR']);
 
-const EXACT = new Set([...CONVERSATION_ENV, ...CONVERSATION_TELEMETRY_ENV, ...CONVERSATION_ACCOUNT_ENV]), GENERIC = new Set(GENERIC_SESSION_ENV);
+const EXACT = new Set([...CONVERSATION_ENV, ...CONVERSATION_TELEMETRY_ENV, ...CONVERSATION_ACCOUNT_ENV, ...CONVERSATION_HUB_ENV]), GENERIC = new Set(GENERIC_SESSION_ENV);
 const MARKS = new Set(CONVERSATION_MARKS);
 /** Is `name` one of the conversation's own names? (The person's session names never are.) */
 function isConversationName(name) {
@@ -109,5 +115,5 @@ function withoutConversationNames(env = {}, { keepMarks = false, floorToo = fals
   return { env: out, dropped: dropped.sort(), kept: kept.sort(), by: has ? 'mark' : 'floor' };
 }
 
-module.exports = { CONVERSATION_ENV, CONVERSATION_TELEMETRY_ENV, CONVERSATION_ACCOUNT_ENV, CONVERSATION_ENV_FAMILIES, CONVERSATION_MARKS,
+module.exports = { CONVERSATION_ENV, CONVERSATION_TELEMETRY_ENV, CONVERSATION_ACCOUNT_ENV, CONVERSATION_HUB_ENV, CONVERSATION_ENV_FAMILIES, CONVERSATION_MARKS,
   HANDED_MARK, PERSON_SESSION_ENV, isConversationName, withoutConversationNames, handedNames, markOf, withHandedMark, namesOfMark };

@@ -3,6 +3,7 @@
 // scripts/test-webhook-routes.mjs (its behaviour legs and every mutant / browser CONTROL stay there): §0 the pins — the webhook exemption as ONE line of src/door.js (the door class, lifted out of src/auth.js by the separation's B3a), the own-body paths of server.js.
 // Each block reads the file it pins BY NAME, so ci.mjs's affected rule selects this suite on a change of that file.
 // Run: node scripts/test-webhook-routes-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 const repo = path.resolve(new URL('..', import.meta.url).pathname);

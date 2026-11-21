@@ -28,7 +28,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-import { scratch, stopWrapper, withoutVendorKeys, endRootedProcesses } from './scratch.mjs';
+import { scratch, stopWrapper, withoutVendorKeys, endRootedProcesses, handedCliCandidates } from './scratch.mjs';
 import { judge, wrapperRequestSites, wrapperConsumed, measuredTables, installedCodexVersion, WRAPPER, cmpVersion, retiredRowVerdict } from './codex-protocol-census.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 import { writeStub } from './codex-app-server-stub.mjs';
@@ -191,9 +191,12 @@ const versionVerdict = (installed, tables) => {
   return hit ? { ok: true, table: hit.version } : { ok: false, why: `codex-cli ${installed} is installed, but the protocol tables measure ${tables.map((t) => t.version).join(', ')} — nobody measured this version. Run \`node scripts/measure-codex-protocol.mjs\`, read the diff against ${tables[tables.length - 1].version}, fix every method the census names in ${WRAPPER}, commit the new table WITH the fix.` };
 };
 {
-  const inst = installedCodexVersion({ env: withoutVendorKeys(process.env) });
+  // the INSTALLED codex is the one VibeSpace would run: found by the HANDED env (B-ba47 pick B's real-CLI accessor — a re-homed
+  // suite's own PATH is built, so `command -v` would find the system's copy instead); its version is READ, it is never started
+  const handedBin = handedCliCandidates('codex').find((c) => { try { return fs.statSync(c).isFile(); } catch { return false; } }) || null;
+  const inst = handedBin ? installedCodexVersion({ bin: handedBin, env: withoutVendorKeys(process.env) }) : null;
   const v = versionVerdict(inst && inst.version, TABLES);
-  if (v.skip) console.log('  SKIP: no `codex` on PATH — the version gate did not run (② still judges the wrapper against every measured table)');
+  if (v.skip) console.log('  SKIP: no `codex` on the handed PATH — the version gate did not run (② still judges the wrapper against every measured table)');
   else ok(v.ok, `the installed codex-cli ${inst.version} (${path.basename(inst.how)}) has a measured table`, v.why);
   const c = versionVerdict('9.99.0', TABLES);
   ok(!c.ok && /codex-cli 9\.99\.0 is installed/.test(c.why) && /measure-codex-protocol/.test(c.why), 'CONTROL: an unmeasured version FAILS by name, with the remedy', c.why);

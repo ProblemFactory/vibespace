@@ -21,6 +21,7 @@
 //      write (the previous version kept, the change retried); the sync off the hub's loop (a gate only the loop releases, and its
 //      control on the main-only road); RED: today's writeJob
 // Run: node scripts/test-store-writer-r4.mjs
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

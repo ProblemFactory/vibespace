@@ -9,6 +9,7 @@
 // 主开发 18:26Z (the base: piece 7's taken 8867c2da9): the bound proposal door over piece 7's REAL jobs engine — one card per proposer
 // and job, refreshed not multiplied; the approval is the person's press through the jobs wiring's own door; a plain agent's direct
 // write stays refused by name and the refusal names the propose door (each with its red control); the page's one press (④b, ⑥).
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

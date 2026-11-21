@@ -13,6 +13,7 @@
  * construction, whatever spelling it reads its home by ($HOME, os.homedir(), XDG_*, a value naming a path under it).
  */
 const { isUnder, trimSlash } = require('./server-root.js');
+const { CONVERSATION_MARKS } = require('./conversation-env.js');   // PURE too: the process marks a suite keeps (主开发 r863)
 
 const isAbs = (p) => typeof p === 'string' && p.startsWith('/');
 const rootsOf = (tmpRoots) => (Array.isArray(tmpRoots) ? tmpRoots : []).filter(isAbs).map(trimSlash);
@@ -190,6 +191,9 @@ const ENV_ROWS = Object.freeze([
   R('VIBESPACE_CI_DIR_SWEEP', 'word', "the tier runner's directory-sweep switch, set for each suite"),
   R('VIBESPACE_SUITE_BUDGET_MS', 'word', "the tier runner's budget for the suite it runs"),
   R('VIBESPACE_SUITE_HANG_REPORT', 'path', "where the tier runner asks a suite's hang report to go — a path, judged three ways"),
+  // THE PROCESS MARKS (B-ba47's follow-up, 主开发 r863 MUST 2): ids, no route and no credential — how the person's Stop and a
+  // job's stop find what a suite's children left behind; the scratch import keeps them, so the built env carries them too
+  ...CONVERSATION_MARKS.map((n) => R(n, 'word', "a process MARK (src/conversation-env.js CONVERSATION_MARKS): an id the person's Stop or a job's stop finds escapees by — no route, no credential")),
   P('VS_', "the SUITES' namespace: their knobs, carried by shape"),
   P('GITHUB_', "the hosted runner's"), P('RUNNER_', "the hosted runner's"),
 ]);

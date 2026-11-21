@@ -252,9 +252,9 @@ export function measuredTables(repo) {
 /** The INSTALLED codex-cli version, launch-free first: the npm package.json
  *  beside the `codex` on PATH; else `codex --version` under a throwaway
  *  CODEX_HOME (no login, no network use). → {version, bin, how} | null */
-export function installedCodexVersion({ env = process.env, scratchHome = null } = {}) {
-  let bin = '';
-  try { bin = execFileSync('sh', ['-c', 'command -v codex'], { encoding: 'utf8', env }).trim(); } catch { }
+export function installedCodexVersion({ env = process.env, scratchHome = null, bin: given = null } = {}) {
+  let bin = given || '';   // a caller that found the binary itself (B-ba47 pick B: the HANDED env's codex, through the real-CLI accessor)
+  if (!bin) try { bin = execFileSync('sh', ['-c', 'command -v codex'], { encoding: 'utf8', env }).trim(); } catch { }
   if (!bin) return null;
   try {
     let d = path.dirname(fs.realpathSync(bin));

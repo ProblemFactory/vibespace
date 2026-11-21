@@ -30,6 +30,7 @@
 //     presence ask the service env, never the hub's whole env — each with its RED control
 //  ⑥ THE SPAWN CENSUS ROW: the whole env handed in _rcloneProbeRun is a WHOLE_ROWS row; RED a second one elsewhere ⇒ UNLISTED,
 //     a row with no request ⇒ DEAD
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

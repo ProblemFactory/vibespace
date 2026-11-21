@@ -6,6 +6,7 @@
 // callers with the typing sender's agent refusal. Each reads the file BY NAME, so ci.mjs's affected rule selects this suite on a
 // change of one of them.
 // Run: node scripts/test-auto-resume-loop-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

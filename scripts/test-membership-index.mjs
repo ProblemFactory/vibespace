@@ -34,6 +34,7 @@
 // doubt's fallback out, another machine's path through the hub's realpath (B-df5f) — each RED at its own leg; ⑨c carries two more
 // through mutant copies: task-membership's membershipCwds keeping the hub's real path for every row, the row builder without
 // its guard; an anchor no longer in the file is a RED, never a skip.
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

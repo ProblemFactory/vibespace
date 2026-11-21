@@ -17,6 +17,7 @@
 // reported "not stored" for a stored item; `--priority` the older server
 // ignores is SAID, never claimed (add + edit, with a no-check control).
 // Run: node scripts/test-backlog-no-truncation.mjs
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

@@ -21,6 +21,7 @@
 //      the SAME STATE AFTER EACH HOUR'S WHOLE RUN — the same placements, the same refusals (conversation, reason) in that hour,
 //      the same blocked notices — and that the day reaches its walls (refusals and notices, both non-empty). Not a per-event
 //      equality: between whole runs another conversation moves at its own stop, a wall, a kick or the tick.
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

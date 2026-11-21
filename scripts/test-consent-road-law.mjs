@@ -5,5 +5,6 @@
 // searches until the seeded driver finds its race (159 / 3 / 59 / 46 seeds at ac70cf7ee, up to three times the law's seeds), 8 of
 // the fast row's 19 s. Nothing else differs: this file runs the whole suite with CR_LAW=full — its own legs, its own checker, its
 // own exit code (the suite ends with process.exit).
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 process.env.CR_LAW = 'full';
 await import('./test-consent-road.mjs');

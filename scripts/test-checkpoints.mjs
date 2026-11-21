@@ -33,6 +33,7 @@
 //      while a turn runs says so and opens no dialog; the confirm names the count and that files stay; ONE ws frame; the
 //      answer puts the words back only into an empty box; every refusal reason has its words; every word in zh + ja; the
 //      CSS slot and the touch rule
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

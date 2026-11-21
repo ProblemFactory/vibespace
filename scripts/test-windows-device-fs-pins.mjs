@@ -5,6 +5,7 @@
 // is red until it has a row; a row whose site moved is stale). The rows name the files they classify, so ci.mjs's affected
 // rule selects this suite on a change of one; the tracked-file list makes it a tree-wide reader.
 // Run: node scripts/test-windows-device-fs-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';

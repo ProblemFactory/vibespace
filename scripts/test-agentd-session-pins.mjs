@@ -8,6 +8,7 @@
 // `if (!fs.existsSync('/proc/self/environ'))`, so a host without procfs skipped them with the environ legs. They read only
 // source text, which every host has, so here they run on every host.
 // Run: node scripts/test-agentd-session-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

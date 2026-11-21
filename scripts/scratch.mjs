@@ -267,7 +267,7 @@ function endAll() { for (const d of ENDS) { try { fs.rmSync(d, { recursive: true
  *  linked by name into the new home's own .vs-bin (binLinks; an agent CLI never). Every hub the suite starts with its env — spread, inherited, or
  *  HOME read from it — inherits the temp home by construction. A home already under a temp root (the lane env's) is
  *  left alone, so on a lane nothing changes. One stderr line says it: the NAMES dropped, never a value.
- *  test-architecture §108 holds every hub-booting suite to this module and every boot site's env to its class. */
+ *  test-architecture §113 holds every hub-booting suite to this module and every boot site's env to its class. */
 const HV = require('../src/home-verdict.js');
 /** What the process was handed — before the re-home: its home, PATH and CLI pins (the REAL-CLI ALLOW LIST's), and the node
  *  it was started with. */
@@ -336,7 +336,7 @@ const isFile = (f) => { try { return fs.statSync(f).isFile(); } catch { return f
 /** THE SEAM (主开发 23:36Z, on three conditions): `VS_REHOME_NOT_TEMP=<a folder a suite made under a temp root>` — that
  *  folder is NOT a temp root for the verdict, so a stand-in home made in it is re-homed. It can only turn a re-home ON;
  *  a value outside every temp root is ignored; the line names it when used. Set by test-home-verdict (and a reader's
- *  probe) only — test-architecture §108 pins that nothing in the product or the wrappers sets or reads it. */
+ *  probe) only — test-architecture §113 pins that nothing in the product or the wrappers sets or reads it. */
 export const NOT_TEMP_ENV = 'VS_REHOME_NOT_TEMP';
 const SEAM_AT = (() => {
   const v = process.env[NOT_TEMP_ENV]; if (!v || !v.startsWith('/')) return null;
@@ -469,7 +469,7 @@ export function isRowCaller(me, rows, { scriptsDir = SCRIPTS_DIR, resolve = (f) 
 }
 /** THE WATCHERS (主开发 17:06Z item C): a suite whose law is «the person's home is untouched» READS the handed home on
  *  purpose — through this ONE accessor, which answers only a process whose main file resolves to a row's file in this
- *  checkout, and throws for every other. A row may READ, never write. test-architecture §108 holds every caller to a row;
+ *  checkout, and throws for every other. A row may READ, never write. test-architecture §113 holds every caller to a row;
  *  each watcher is RED (never a skip) when the accessor fails. */
 export const HOME_WATCHERS = Object.freeze([
   Object.freeze({ suite: 'test-fixture-isolation.mjs', why: "READS the real transcript folder (~/.claude/projects) — the standing sweep for fixture litter the gate runs last on purpose" }),
@@ -482,15 +482,17 @@ export function handedHome() {
 /** THE REAL-CLI ALLOW LIST (主开发's rulings, 2026-11-14): a script that runs a REAL agent CLI found on the HANDED env (the
  *  one it was started with, before the re-home) is a row here with its reason. A SUITE row is FENCED — a home of its own,
  *  no person's sign-in, no turn beyond the one the hosted run is sanctioned for — and the CLI is its point; a BY-HAND row
- *  is never a gate. handedCliCandidates() answers only a process whose main file resolves to a row's file in this checkout; test-architecture §108 holds every caller to one. */
+ *  is never a gate. handedCliCandidates() answers only a process whose main file resolves to a row's file in this checkout; test-architecture §113 holds every caller to one. */
 export const REAL_CLI_ALLOW = Object.freeze([
   Object.freeze({ suite: 'test-claude-steer-chrome.mjs', kind: 'suite', why: "§A, the fenced leg: the real claude behind the real wrapper, under the leg's own scratch HOME, talking only to a loopback mock of POST /v1/messages — nothing billed, no sign-in read" }),
   // row 2 (主开发 2026-11-14 12:20Z): KEPT on three conditions — its reason below; no tier, suite or other script names or
-  // imports it (test-architecture §108); nobody in a lane runs it (it reads pool members' sign-ins — the owner's word per run)
+  // imports it (test-architecture §113); nobody in a lane runs it (it reads pool members' sign-ins — the owner's word per run)
   Object.freeze({ suite: 'dbg-oat-pool-live.mjs', kind: 'by-hand', why: "by hand only, on the owner's word for that run; never a gate — the LIVE pool test (real subscriptions, the owner's quota): its throwaway hub runs on a temp home and is handed the real claude as CLAUDE_CMD; the sign-in goes by value (CLAUDE_CODE_OAUTH_TOKEN) and by the creds it copies from data/subs" }),
   // rows 3–5 (主开发 17:08Z): the three suites that look for the real CLI — each judged by what it DOES with it
   Object.freeze({ suite: 'test-chat-e2e.mjs', kind: 'suite', why: "a WHOLE TURN — the ONE haiku turn through the product's own chat pipe (the fast tier's EXCEPTION row): on a scratch home of its own, signed in by the CI token alone (VIBESPACE_CI_OAT, by value), the turn the hosted run is sanctioned for — the real CLI is its point" }),
   Object.freeze({ suite: 'test-init-frame.mjs', kind: 'suite', why: "READS the installed CLI's bytes (its init-frame schema) — never spawned for a turn, no sign-in: it tells us when the CLI's frames change — the CLI is its point" }),
+  // row 6 (the re-land, 2026-11-21): the train's codex protocol drift gate reads the installed version
+  Object.freeze({ suite: 'test-codex-protocol-drift.mjs', kind: 'suite', why: "READS the installed codex's version off its package.json — the codex VibeSpace would run, by the handed env — to pick the measured protocol table: never started, no sign-in, the CLI is its point" }),
   Object.freeze({ suite: 'test-stdout-registry.mjs', kind: 'suite', why: "greps the installed CLI's bytes and asks `--version` — no turn (its one real turn lives in scripts/probe-claude-stdout.mjs), no sign-in: the stdout consumers against the CLI's own strings — the CLI is its point" }),
 ]);
 /** The REAL `cli` a row may run: the first of handedCliCandidates that resolves to a file, resolved — or null. A row only. */

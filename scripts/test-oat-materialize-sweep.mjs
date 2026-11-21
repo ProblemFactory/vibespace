@@ -10,6 +10,7 @@
 //   RED controls: a writer that goes synchronous on the member path (the spy sees it); a sweep that starts every row in one turn
 //        (the work count reads N); the r1 sweep with every act on the loop (the stall passes 3 × the control, the count 2 × N).
 // In-process, no network, no real CLI. The checker is scripts/lib/check.mjs (a swapped ok() throws).
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

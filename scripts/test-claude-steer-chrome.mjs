@@ -682,7 +682,7 @@ console.log('§A the real claude CLI behind the real wrapper, a local mock of th
 const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1';
 const claudeBin = NO_REAL_CLI ? null : (() => {
   // B-ba47 pick B: the HANDED env's candidates — this suite is the one row of scratch.mjs REAL_CLI_ALLOW (a suite handed a
-  // non-temp home runs re-homed, so its own PATH / HOME no longer name the person's CLI; test-architecture §108)
+  // non-temp home runs re-homed, so its own PATH / HOME no longer name the person's CLI; test-architecture §113)
   const cands = handedCliCandidates('claude');
   for (const c of cands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile() && fs.statSync(real).size > 10 * 1048576) return real; } catch { } }
   return null;

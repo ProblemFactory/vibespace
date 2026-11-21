@@ -13,7 +13,7 @@
  * ended the create — ws-create returns on it). No `break;` crosses the seam (a stray one would be a
  * SyntaxError here, not a silent change of the do{}while(0) exit).
  */
-const { REMOTE_PRELUDE, buildRemoteExec, buildRemoteShellPrelude } = require('../remote-shell');
+const { REMOTE_PRELUDE, buildRemoteExec, buildRemoteShellPrelude, acctFolderAssign, keeperRunTail } = require('../remote-shell');
 const { sweepWriters } = require('../writer-sweep');
 const SPRI = require('../server/spawn-priority.js'); // B-460d's remainder (its ssh half): the ONE start verdict, fed by the machine's own answer
 const { priorityArgv, withPriority } = require('./line.js'); // …and the ONE composer (PURE): the line from the hub's own constants
@@ -165,7 +165,7 @@ function sshLadder(c) {
             // Point the CLI at it and skip the ship gate entirely (nothing
             // crosses machines; the §ban-safety concern doesn't apply).
             if (spawnAccount._hostSubReady && spawnAccount.remoteCreds) {
-              return `${spawnAccount.remoteCreds.envVar}="$HOME/.vibespace/${spawnAccount.remoteCreds.dirName}" `;
+              return acctFolderAssign(spawnAccount.remoteCreds.envVar, `$HOME/.vibespace/${spawnAccount.remoteCreds.dirName}`);
             }
             // API key: ship the single value to a 0600 file, reference via a
             // shell prefix assignment (the VALUE never enters any argv). API
@@ -223,7 +223,7 @@ function sshLadder(c) {
             // and silently spawn with missing creds. Non-GNU hosts fail LOUD.
             const script = [`umask 077`, `mkdir -p "${rdir}"`, ...heal, `tar -x --keep-newer-files -C "${rdir}"`, ...(rc.ensureTargets || []), ...links].join('; ');
             await execFileAsync('ssh', [...hosts.sshArgs(h), '--', script], { env: hosts.sshEnv(), input: tar, timeout: 20000 });
-            return `${rc.envVar}="${rdir}" `;
+            return acctFolderAssign(rc.envVar, rdir);
           };
   async function terminal() {
             // locally-resolved binary paths mean nothing on the remote
@@ -330,8 +330,8 @@ function sshLadder(c) {
             session.keeperSid = keeperSid || id;
             const cPri = keeperSid ? null : sshPri();   // an attach to a surviving process starts nothing: no step, no fact (B-460d (4))
             const runTail = keeperSid
-              ? ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(keeperSid)} __VS_OFFSET__`
-              : ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(id)} __VS_OFFSET__ -- ` + [...priorityArgv(cPri && cPri.priority), rcmd, ...rargs.map(shq)].join(' ');
+              ? keeperRunTail({ sid: keeperSid, shq })
+              : keeperRunTail({ sid: id, shq, cmd: [...priorityArgv(cPri && cPri.priority), rcmd, ...rargs.map(shq)] });
             // ── The session runs as a persistent PIPE SESSION inside the
             // standing remote device daemon; the local chat-wrapper spawns the
             // agentd-attach bridge (SAME contract as `keeper run`: raw bytes +

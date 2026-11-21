@@ -26,6 +26,7 @@
 //   ④ THE PAGE + THE ROUTES — the held words drawn where «Nothing needs you» / «all clear» would stand (zh + ja rows); every route
 //     that reads or writes the list answers 503 todos-unread by name.
 // FAST, in-process.
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

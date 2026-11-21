@@ -427,6 +427,7 @@ const I_RECV = {
   'src/server/account-usage-routes.js|row': ['account', 'a pool member\'s roster row (accounts.poolRoster) — its account name in the gather route\'s refusal (lane pool-silent-members acceptance r2)'],
   'src/lib/aes-fallback.js|key.algorithm': ['crypto key', 'the imported AES key\'s algorithm name (AES-CBC / AES-ECB) in a mismatch Error — a constant of the fallback, never a record (lane mac-ard-signin; int259 seam)'],
   'src/browser-profiles.js|f': ['launch fatal row', 'a fixed reason code of LAUNCH_FATALS (lane browser-tmpdir-socket-length)'],
+  'src/home-verdict.js|r': ['tool row', 'a TOOL_ROWS row of the re-home (B-ba47): a fixed PROGRAM name (node, npm, …) a row names — none of the five kinds a clear reaches'],
   'src/browser-profiles.js|existing': ['browser profile', 'a profile label'], 'src/browser-profiles.js|profile': ['browser profile', 'a profile label'], 'src/browser-profiles.js|row': ['browser profile', 'a profile label'],
   'src/browser-switch.js|profile': ['browser profile', 'a profile label'], 'src/browser-trace.js|profile': ['browser profile', 'a profile label'],
   // lane browser-surfaces: a browser KERNEL's prompt (VibeSpace.surfaceOpened) — the page's words through ST.pageText, never one of the five kinds

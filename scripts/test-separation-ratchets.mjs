@@ -15,6 +15,7 @@
 //      the head says an edited line reads as new and removed sites are not listed
 //   ④ the day-0 snapshot is whole: per counter its total = the sum of its per-file fingerprints; its release named
 // Run: node scripts/test-separation-ratchets.mjs [--quiet]
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -33,6 +33,7 @@
 // to the list (①), the fold folding split ids into outside (①), a split file back on an owner's rule (②), a split row with
 // one owner (②), peer-text back on the helpers' list (①s), each small back on its old owner (①s).
 // Run: TZ=UTC node scripts/test-loop-census.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

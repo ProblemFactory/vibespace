@@ -12,6 +12,7 @@
 //   §3 the card's words (src/lib/jobs-layout.js nodeHeapWords) in en, zh and ja — each CONDITIONAL on a Node program in the job —
 //      and the panel's row. The CLI's line (`show`) is driven in scripts/test-jobs-cli-body.mjs (heavy: it starts the real CLI —
 //      round wrpdo2eev 6). Round wrpdo2eev: a quoted own heap (§1), the card and the spawn read ONE number (§2)
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';

@@ -8,6 +8,7 @@
 // so ci.mjs's affected rule selects this suite on a change of any of them. Also ⑥ the card-store census (src/lib/chat-needs-card.js) with its RED
 // copies and the tray row's decidedStamp pin (src/lib/user-todos-row.js).
 // Run: node scripts/test-wake-approve-card-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

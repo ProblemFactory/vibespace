@@ -26,6 +26,7 @@
 //      compared but never shown), the body's keys, kinds and identity fields, the count requests, every call by its count — else
 //      DIFFERENT + stop; heads matched by kind, not place; a turn that did not finish is INCOMPLETE; then ALREADY-ON / NO-EFFECT;
 //      RED CONTROLS (anchored copies): the only-with branch emptied, calls by name, heads by place, no turn check
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import os from 'node:os';
 import crypto from 'node:crypto';

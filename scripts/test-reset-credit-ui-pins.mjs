@@ -7,6 +7,7 @@
 // §5 the new keys' zh / ja. Each reads the file it pins BY NAME (the census walks src/ and data/bin), so ci.mjs's affected
 // rule selects this suite on a change of that file.
 // Run: node scripts/test-reset-credit-ui-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);

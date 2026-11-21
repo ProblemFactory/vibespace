@@ -29,6 +29,7 @@
 //     chip before the Split door; no compact step), fitSwitcherRow over the real layout (the ⋯ and the ✕ never yield), the
 //     yielded rows in the window menu (a refused Split OFF with its why; the billing row), the registry's row, i18n
 // Run: node scripts/test-phone-split.mjs
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

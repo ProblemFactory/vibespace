@@ -12,6 +12,7 @@
 //   §7 the agent's wiring.   RED CONTROLS (anchored, each proving its plant).
 // The gate legs (the REAL gateDialUpgrade answering «retired» with the proof, the tombstone, the one answer to anyone else)
 // live in test-dial-link-kept.
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';

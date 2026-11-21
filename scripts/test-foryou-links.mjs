@@ -11,6 +11,7 @@
 //      (the one writer). CONTROL: the old file-without-them behaviour (a patched route) ⇒ RED
 //   §4 THE CLI (data/bin/vibespace-ask) against that route: the parse, one line per bad attachment, exit 2, the last line
 //   §5 CENSUSES with RED controls: ONE path grammar · no innerHTML of raw text · a chip opens through THE ONE artifact door
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

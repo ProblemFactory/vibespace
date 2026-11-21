@@ -7,6 +7,7 @@
 // vibespace-agentd.js), §8's relay pins (src/server/stream-relay-rfb.js, src/server/stream-relay-xpra.js) and §bdisp's keeper pin
 // (src/server/desktop-app-keeper.js). Each reads the file it pins BY NAME, so ci.mjs's affected rule selects this suite on a change.
 // Run: node scripts/test-desktop-serve-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

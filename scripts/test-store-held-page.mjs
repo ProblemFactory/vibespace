@@ -11,6 +11,7 @@
 // opened during the hold (the SCRATCH SURFACE) and an open page (its STALE BASE, the lift's re-read) on the real LayoutManager +
 // DesktopManager · §7 THE WRITERS' CENSUS: every page door that writes a held store WHOLE names its landed read. Each law has its
 // RED control (anchored, in a copy).
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

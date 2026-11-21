@@ -3,6 +3,7 @@
 // or by the product's own sentences, is a link wherever the owner reads words; a click opens Settings on that row and WRITES NOTHING.
 // The owner, after a For-you item could only describe the way to a ceiling in words: «…或者至少你应该能提供一个 vibespace://settings/
 // 之类的链接可以让我点了之后直通对应的选项来改». PURE + in-process (the heavy twin, test-setting-links-chrome, presses the links).
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

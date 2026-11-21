@@ -102,6 +102,15 @@ function buildRemoteExec({ cwd, shq, pre = '', browser = '', resolve = '', token
     + 'exec env ' + parts.join(' ') + tail;
 }
 
+/** THE ACCOUNT ASSIGNMENT SHAPES of the remote roads, ONE spelling each (B-ba47 pick B's re-land, 主开发 r1043 item 4: the class
+ *  leg drives these, never pairs of its own): the folder an account lives in, double-quoted so a `$HOME/…` expands on the far
+ *  side; a secret read from its 0600 file by $(cat), never a value in argv. Both ride buildRemoteExec's acctEnv / tokenAssign. */
+const acctFolderAssign = (envVar, dir) => `${envVar}="${dir}" `;
+const acctSecretAssign = (name, file) => `${name}="$(cat "${file}")" `;
+/** THE KEEPER ROAD'S TAIL (ssh chat's keeper fallback): ` node <keeper> run <sid> __VS_OFFSET__` — a resume — or with ` -- <cmd> …`
+ *  a start (`cmd` = the program and its args, each already quoted by the caller). */
+const keeperRunTail = ({ sid, shq, cmd = null }) => ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(sid)} __VS_OFFSET__` + (cmd ? ' -- ' + cmd.join(' ') : '');
+
 /** THE REMOTE ROADS' MARK (B-ba47's follow-up, 主开发 r979): the names THIS command writes into the remote child's env — the cwd
  *  export, the token / account `$(cat)` assignments, the browser prelude's export, every pre-quoted `NAME=` pair before the
  *  program — handed to the child as VIBESPACE_HANDED (names only, never a value), so a suite run inside that remote
@@ -139,4 +148,4 @@ function agentNodeOf(info) {
   return p.startsWith('/') ? p : null;
 }
 
-module.exports = { REMOTE_PRELUDE, TOOLS_ON_PATH, nodeFinder, agentNodeOf, buildRemoteShellPrelude, buildRemoteExec, remoteWrittenNames, AMBIENT_OAT_UNSET, sessionCwdExport };
+module.exports = { REMOTE_PRELUDE, TOOLS_ON_PATH, nodeFinder, agentNodeOf, buildRemoteShellPrelude, buildRemoteExec, remoteWrittenNames, acctFolderAssign, acctSecretAssign, keeperRunTail, AMBIENT_OAT_UNSET, sessionCwdExport };

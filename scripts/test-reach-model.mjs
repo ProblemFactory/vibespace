@@ -59,10 +59,14 @@ console.log('§1 the token derivation (three real suites, their closures)');
   // scripts/scratch-run.mjs put ci.mjs, reach-model.mjs and affected-model.mjs in the harness, so every ci.mjs change would have
   // selected every heavy suite). By name, two ways: no file of RM.TOOLING is in the derived harness, and no harness file's code
   // (comments stripped) quotes one as a module path — a static import, a dynamic one, a new URL. CONTROL: line 46's own spelling.
-  const toolNamed = (src) => { const code = RM.stripComments(src); return RM.TOOLING.filter((t) => new RegExp(`['"\`](?:\\.{1,2}/|[^'"\`\\s]*/)?${path.basename(t).replace(/\./g, '\\.')}['"\`]`).test(code)); };
+  // a DATA ROW that names a gate file as a MAIN file by its `file:` key (scripts/scratch.mjs NOT_REHOMED: «ci.mjs re-homes nothing
+  // itself») is no module path — every other quote still counts (B-ba47 pick B's re-land; CONTROL below)
+  const toolNamed = (src) => { const code = RM.stripComments(src).replace(/\bfile:\s*(['"`])[\w.-]+\.mjs\1/g, 'file: 0'); return RM.TOOLING.filter((t) => new RegExp(`['"\`](?:\\.{1,2}/|[^'"\`\\s]*/)?${path.basename(t).replace(/\./g, '\\.')}['"\`]`).test(code)); };
   const toolsIn = RM.TOOLING.filter((t) => rc.harness.has(t));
   const naming = [...rc.harness].filter((f) => !RM.TOOLING.includes(f)).map((f) => { let src = ''; try { src = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { } return [f, toolNamed(src)]; }).filter(([, n]) => n.length);
   ok(toolsIn.length === 0 && naming.length === 0, `the harness imports nothing of the gate's (${RM.TOOLING.join(' ')}) — in the harness: ${toolsIn.join(' ') || 'none'}; a harness file quoting one: ${naming.map(([f, n]) => `${f} → ${n.join(' ')}`).join(' · ') || 'none'} (${rc.harness.size} harness files read)`);
+  ok(!toolNamed("const NOT_REHOMED = [{ file: 'ci.mjs', why: 'the tier runner' }];").length && toolNamed("const NOT_REHOMED = [{ file: 'ci.mjs' }]; await import('./ci.mjs');").join() === 'scripts/ci.mjs',
+    'CONTROL: a data row naming a gate file by its `file:` key is no module path; the same file imported beside it still is');
   ok(toolNamed("export async function f() { const { scratchRootOf } = await import('./ci.mjs'); return scratchRootOf; }").join() === 'scripts/ci.mjs' && toolNamed("import { x } from '../scripts/reach-model.mjs';").join() === 'scripts/reach-model.mjs'
     && toolNamed("const u = new URL('./affected-model.mjs', import.meta.url);").join() === 'scripts/affected-model.mjs' && toolNamed("// const { x } = await import('./ci.mjs');\nconsole.error('run node scripts/ci.mjs --reap');").length === 0,
     'CONTROL: line 46\'s spelling (a dynamic import of ./ci.mjs), a static import of reach-model.mjs and a new URL of affected-model.mjs are named; a comment and a message naming a command are not');

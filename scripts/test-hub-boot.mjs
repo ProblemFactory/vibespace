@@ -541,7 +541,7 @@ console.log('— the computed mark (B-ba47 follow-up, r979): every road × every
   const MP = req(path.join(REPO, 'src/model-providers.js'));
   const { agentEnv } = req(path.join(REPO, 'src/agent-env.js'));
   const { sessionSpawnLine } = req(path.join(REPO, 'src/spawn/line.js'));
-  const { buildRemoteExec } = req(path.join(REPO, 'src/remote-shell.js'));
+  const { buildRemoteExec, acctFolderAssign, acctSecretAssign, keeperRunTail } = req(path.join(REPO, 'src/remote-shell.js'));   // the remote roads' own shapes (主开发 r1043 item 4)
   const { jobRunEnv } = req(path.join(REPO, 'src/jobs.js'));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-handed-'));
   process.on('exit', () => { try { fs.rmSync(root, { recursive: true, force: true }); } catch { } });
@@ -551,8 +551,12 @@ console.log('— the computed mark (B-ba47 follow-up, r979): every road × every
   const CHILD = `await import(${JSON.stringify(SCRATCH_URL2)}); process.stdout.write(JSON.stringify(process.env));`;
   // THE HUB a conversation starts from: its own family (the keeper's folder, the instance, the device and daemon roots — 主开发
   // r985: each is a road to the hub's own keeper or daemon), a name the person set on it that no road touches, the session
+  // the person's OWN homes for two harnesses, set on their machine (r1043 item 4): a machine-login conversation never touches them,
+  // so they stay — the true form of «the machine login's home stays»; an account kind that sets one replaces (and so marks) it
+  const PERSON_HOMES = { CODEX_HOME: path.join(root, 'person-codex-home'), CLAUDE_CONFIG_DIR: path.join(root, 'person-claude-config') };
+  const keptHomes = (kenv) => Object.fromEntries(Object.entries(PERSON_HOMES).filter(([n]) => !(n in kenv)));
   const HUB = { PATH: '/usr/bin:/bin', HOME: path.join(root, 'home'), LANG: 'C.UTF-8', VIBESPACE_KEEPER_DIR: path.join(root, SV('keeper')),
-    VIBESPACE_INSTANCE_NAME: SV('inst'), VIBESPACE_DEVICE_ROOT: path.join(root, SV('dev')), VIBESPACE_AGENTD_ROOT: path.join(root, SV('agentd')), PERSON_OWN_NAME: 'person-kept' };
+    VIBESPACE_INSTANCE_NAME: SV('inst'), VIBESPACE_DEVICE_ROOT: path.join(root, SV('dev')), VIBESPACE_AGENTD_ROOT: path.join(root, SV('agentd')), PERSON_OWN_NAME: 'person-kept', ...PERSON_HOMES };
   const probeProvider = (auth) => ({ id: 'pv-standin', kind: 'self-hosted', label: 'stand-in', preset: 'other', baseUrl: `https://${SV('prov')}.invalid/v1`, auth, wire: 'anthropic-messages', models: [{ id: SV('model') }], defaultModel: '', aliases: {} });
   // THE ACCOUNT KINDS, from each descriptor's own creds: the machine login (no account), an account folder (spawnEnvVar), an
   // isolated home (creds.spawnEnv), each key name (keyEnvVars), the provider plan under every auth the tree knows (MP.AUTHS)
@@ -579,14 +583,36 @@ console.log('— the computed mark (B-ba47 follow-up, r979): every road × every
     const base = agentEnv(HUB);
     const env = sessionSpawnLine({ node: process.execPath, wrapper: 'w.js', bufFile: 'b', metaFile: 'm', exe: 'x', env: { ...base, TERM: 'xterm-256color', COLORTERM: 'truecolor', ...names, ...fam, ...k.env },
       pairs: [`PATH=${path.join(root, 'agent-bin')}:${HUB.PATH}`, 'EDITOR=/usr/bin/true'], handedFrom: base }).env;
-    CASES.push({ road: 'local', harness: d.id, kind: k.kind, env, handed: CE.handedNames(env, base), values: [...vals(k.env), ...vals(names), ...vals(fam), HUB.VIBESPACE_KEEPER_DIR, HUB.VIBESPACE_INSTANCE_NAME, HUB.VIBESPACE_DEVICE_ROOT, HUB.VIBESPACE_AGENTD_ROOT], keep: { PERSON_OWN_NAME: 'person-kept', LANG: 'C.UTF-8' } });
-    // ROAD (b) — the remote command, as the five remote builders call it: pre-quoted pairs and the token by $(cat), run by sh
-    const tokFile = path.join(root, SV('tokfile'));
-    const tok = SV('rtok'); fs.writeFileSync(tokFile, tok, { mode: 0o600 });
-    const pairs = Object.entries({ ...names, ...fam, ...k.env }).filter(([n]) => n !== 'VIBESPACE_SESSION_TOKEN').map(([n, v]) => shq(`${n}=${v}`));
-    const cmd = buildRemoteExec({ cwd: root, shq, tokenAssign: `VIBESPACE_SESSION_TOKEN="$(cat ${shq(tokFile)})" `, parts: [...pairs, shq(process.execPath), '--input-type=module', '-e', shq(CHILD)] });
-    CASES.push({ road: 'remote', harness: d.id, kind: k.kind, sh: cmd, env: { PATH: HUB.PATH, HOME: HUB.HOME, LANG: 'C.UTF-8', REMOTE_OWN_NAME: 'remote-kept' },
-      handed: [...new Set(['VIBESPACE_SESSION_CWD', 'VIBESPACE_SESSION_TOKEN', ...Object.keys({ ...names, ...fam, ...k.env })])].filter((n) => !CE.PERSON_SESSION_ENV.includes(n)), values: [tok, ...vals({ ...names, ...fam, ...k.env }).filter((v) => v !== names.VIBESPACE_SESSION_TOKEN)], keep: { REMOTE_OWN_NAME: 'remote-kept' } });
+    CASES.push({ road: 'local', harness: d.id, kind: k.kind, env, handed: CE.handedNames(env, base), values: [...vals(k.env), ...vals(names), ...vals(fam), HUB.VIBESPACE_KEEPER_DIR, HUB.VIBESPACE_INSTANCE_NAME, HUB.VIBESPACE_DEVICE_ROOT, HUB.VIBESPACE_AGENTD_ROOT], keep: { PERSON_OWN_NAME: 'person-kept', LANG: 'C.UTF-8', ...keptHomes(k.env) } });
+    // ROAD (b) — the remote command in the remote roads' OWN shapes (r1043 item 4): the token and a key by the dial road's $(cat) form
+    // (acctSecretAssign), an account's folder by the quoted folder form (acctFolderAssign, its $HOME expanding on the far side);
+    // the session's and the adapter's names as pre-quoted pairs. A provider plan has no remote road («runs on this machine only»).
+    if (!/provider plan/.test(k.kind)) {
+      const tokFile = path.join(root, SV('tokfile'));
+      const tok = SV('rtok'); fs.writeFileSync(tokFile, tok, { mode: 0o600 });
+      const secrets = [], folders = [], secretVals = [];
+      for (const [n, v] of Object.entries(k.env)) {
+        if (/^key /.test(k.kind)) { const kf = path.join(root, SV('keyfile')); fs.writeFileSync(kf, v, { mode: 0o600 }); secrets.push(acctSecretAssign(n, kf)); secretVals.push(v); }
+        else if (!CE.PERSON_SESSION_ENV.includes(n)) folders.push(acctFolderAssign(n, `$HOME/.vibespace/${SV('subs')}`));
+      }
+      const pairs = Object.entries({ ...names, ...fam }).filter(([n]) => n !== 'VIBESPACE_SESSION_TOKEN').map(([n, v]) => shq(`${n}=${v}`));
+      const cmd = buildRemoteExec({ cwd: root, shq, tokenAssign: secrets.join('') + acctSecretAssign('VIBESPACE_SESSION_TOKEN', tokFile), acctEnv: folders.join(''), parts: [...pairs, shq(process.execPath), '--input-type=module', '-e', shq(CHILD)] });
+      const kNames = Object.keys(k.env).filter((n) => !CE.PERSON_SESSION_ENV.includes(n));
+      CASES.push({ road: 'remote', harness: d.id, kind: k.kind, sh: cmd, env: { PATH: HUB.PATH, HOME: HUB.HOME, LANG: 'C.UTF-8', REMOTE_OWN_NAME: 'remote-kept', ...PERSON_HOMES },
+        handed: [...new Set(['VIBESPACE_SESSION_CWD', 'VIBESPACE_SESSION_TOKEN', ...Object.keys({ ...names, ...fam }), ...kNames])].filter((n) => !CE.PERSON_SESSION_ENV.includes(n)),
+        values: [tok, ...secretVals, ...vals({ ...names, ...fam }).filter((v) => v !== names.VIBESPACE_SESSION_TOKEN)], keep: { REMOTE_OWN_NAME: 'remote-kept', ...keptHomes(k.env) } });
+    }
+  }
+  // ROAD (b′) — the keeper road's TAIL (keeperRunTail): the command ends in ` node <keeper> run <sid> __VS_OFFSET__ -- <cmd>`; a
+  // stand-in keeper (the remote machine's) runs what follows its «--» with the env it was born with
+  {
+    const kbin = path.join(HUB.HOME, '.vibespace', 'bin'); fs.mkdirSync(kbin, { recursive: true });
+    fs.writeFileSync(path.join(kbin, 'vibespace-remote-keeper'), "const a = process.argv, i = a.indexOf('--'); const r = require('child_process').spawnSync(a[i + 1], a.slice(i + 2), { stdio: 'inherit' }); process.exit(r.status == null ? 1 : r.status);\n");
+    const names = sessionNames(), tokFile = path.join(root, SV('tokfile')), tok = SV('ktok'); fs.writeFileSync(tokFile, tok, { mode: 0o600 });
+    const pairs = Object.entries(names).filter(([n]) => n !== 'VIBESPACE_SESSION_TOKEN').map(([n, v]) => shq(`${n}=${v}`));
+    const cmd = buildRemoteExec({ cwd: root, shq, tokenAssign: acctSecretAssign('VIBESPACE_SESSION_TOKEN', tokFile), parts: pairs, tail: keeperRunTail({ sid: SV('ksid'), shq, cmd: [shq(process.execPath), '--input-type=module', '-e', shq(CHILD)] }) });
+    CASES.push({ road: 'remote', harness: '-', kind: 'the keeper road\'s tail', sh: cmd, env: { PATH: `${path.dirname(process.execPath)}:${HUB.PATH}`, HOME: HUB.HOME, LANG: 'C.UTF-8', REMOTE_OWN_NAME: 'remote-kept', ...PERSON_HOMES },
+      handed: ['VIBESPACE_SESSION_CWD', ...Object.keys(names)], values: [tok, ...vals(names).filter((v) => v !== names.VIBESPACE_SESSION_TOKEN)], keep: { REMOTE_OWN_NAME: 'remote-kept', ...PERSON_HOMES } });
   }
   // ROAD (c) — a job's run (src/jobs.js jobRunEnv): the owner's own words (a VIBESPACE_* switch among them) and the hub's additions,
   // the vault plan's names marked (主开发 r985 4 (ii))

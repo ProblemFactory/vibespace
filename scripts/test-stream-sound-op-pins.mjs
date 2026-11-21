@@ -3,6 +3,7 @@
 // scripts/test-stream-sound-op.mjs (its behaviour legs and every mutant / browser CONTROL stay there): §0 the helpers' sources (src/mic-helper-source.js's `loopback` verb, the Mac screen helper tools/vibespace-screen/vibespace-screen.swift riding src/agentd/mac-helper-source.js) and the client's THREE-TOUCH pin (src/agentd/client.js).
 // Each block reads the file it pins BY NAME, so ci.mjs's affected rule selects this suite on a change of that file.
 // Run: node scripts/test-stream-sound-op-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

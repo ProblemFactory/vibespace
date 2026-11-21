@@ -19,6 +19,7 @@
 //      mount_down refusal carries its DOOR — «Show in Remote» opens the sidebar through its one show door (`_railShow`) and asks for
 //      the mount's row until the panel has drawn it (RED: no door); the frame-before-wait order's check goes red on a copy with the
 //      order swapped
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import { checker } from './lib/check.mjs';

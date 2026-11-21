@@ -12,6 +12,7 @@
 //      (a text pin: the real daemon's pty road is the heavy suites').
 //   ④ B-b968: the SAME rule (src/utf8-stream.js, SHARED) on the hub's pty OUTPUT (the real daemonPtyShim over a stand-in handle,
 //      every cut; CONTROL: the release's per-frame shim ⇒ U+FFFD) and on the device chat tail's read edge (a text pin).
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

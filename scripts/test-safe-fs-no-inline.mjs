@@ -16,6 +16,7 @@
 //      runner IS entered (the main thread runs the stall). The gap the main thread lost is MEASURED and printed (a count is
 //      asserted, never a clock).
 //   ② the pool still answers once a worker is back (the refusal is no lasting fault).
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';

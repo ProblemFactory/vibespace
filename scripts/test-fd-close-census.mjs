@@ -32,6 +32,7 @@
 // (agentd.js open(): `for (const fd of [inFd, outFd, errFd])` is tied to no row); a descriptor kept in an array or an object literal;
 // a close helper that closes its argument, called twice; member descriptors (this.x = openSync) in the closer rule (none in the tree);
 // close / open destructured from fs and called bare, and fs.close on an alias outside FSLIKE (none in src, server.js or data/bin).
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';

@@ -16,6 +16,7 @@
 // ~/.claude — the 2026-09-09 lesson), and the negative controls that keep the
 // lookup from inventing cards: a typed prompt, a body-less server-posted
 // origin, a uuid the transcript never carries, a remote-host session.
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

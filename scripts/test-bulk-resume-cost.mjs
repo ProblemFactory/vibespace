@@ -15,6 +15,7 @@
 //   §6 the ORCH gather (src/server/bulk-resume-routes.js estimateFor) over a fake ledger / cache / sessions: a
 //      conversation's context from ITS sid, a member's window from ITS acct since resetsAt − 5 h up to the reading,
 //      an unresolved host bucket left out
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

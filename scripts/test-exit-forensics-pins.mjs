@@ -7,6 +7,7 @@
 // the resume words in src/lib/i18n-zh.js / src/lib/i18n-ja.js, and server.js's one heal entry point with its callers' census.
 // Each reads the file it pins BY NAME, so ci.mjs's affected rule selects this suite on a change of one of them.
 // Run: node scripts/test-exit-forensics-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';

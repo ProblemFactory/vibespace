@@ -16,6 +16,7 @@
 //   ⑥ CONTROLS: a planted key per shape is RED by name; a fold occurrence moved out of its fold is RED; a door built outside is
 //      counted; a baseline row that shrank is RED.
 // `node scripts/test-plain-words.mjs --print-baseline` prints the baseline the tree holds now (to shrink it after a cure).
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

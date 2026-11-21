@@ -1820,6 +1820,8 @@ console.log('— B-ddb9 a suite that runs the real agent CLI honours VS_NO_REAL_
   const WALK = [
     new RegExp(String.raw`\bsplit\(\s*['"]:['"]\s*\)[^;\n]*path\.join\(\s*[\w$]+\s*,\s*['"](?:${PROGS.join('|')})['"]\s*\)`),
     new RegExp(String.raw`\bprocess\.env\.VS_(?:${PROGS.map((p) => p.toUpperCase()).join('|')})_BIN\b`),
+    // B-ba47 pick B: the real-CLI accessor IS the lookup (scripts/scratch.mjs handedCli / handedCliCandidates walk the HANDED PATH)
+    new RegExp(String.raw`\bhandedCli(?:Candidates)?\(\s*['"\`](?:${PROGS.join('|')})['"\`]`),
   ];
   const code = (src) => src.split('\n').filter((l) => !/^\s*(?:\/\/|\*)/.test(l));
   const byName = (src) => !!REAL_CLI && code(src).some((l) => REAL_CLI.test(l));
@@ -1845,6 +1847,8 @@ console.log('— B-ddb9 a suite that runs the real agent CLI honours VS_NO_REAL_
     'test-harness-honesty.mjs': ['run', 'the fixture-vs-live schema diff (`codex app-server generate-json-schema`)'],
     'test-harness-settings.mjs': ['run', 'the codex load leg (--version, `features list`)'],
     'test-init-frame.mjs': ['read', 'the init schema read off the installed binary (its `command -v` is a lookup, nothing is started)'],
+    'test-codex-protocol-drift.mjs': ['read', 'the installed codex\'s version read off its package.json, through the handed env (pick B\'s accessor) — nothing is started'],
+    'test-home-verdict.mjs': ['read', 'the real-CLI accessor\'s own suite: it asks handedCliCandidates for claude to see its refusal and its candidates over a stand-in home — nothing is started'],
     'test-opencode-s9.mjs': ['run', 'a real `opencode serve` (a command the caller names in OPENCODE_CMD is its own)'],
     'test-permission-rules.mjs': ['run', 'the live oracle run (codex `login status`, `mcp list`)'],
   };

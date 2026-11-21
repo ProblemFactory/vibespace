@@ -9,6 +9,7 @@
 //   ⑤ the dialogs: both take onClose and say 'done' only after their own saves (never at Cancel) — read on their text
 //   ⑥ the wiring: the profiles panel registers them with the real dialogs and the profiles list; docs/plugins.md names them
 //   RED CONTROL (it proves its plant first, through anchored()): a copy whose close always says 'done' ⇒ ②'s cancel leg is red
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

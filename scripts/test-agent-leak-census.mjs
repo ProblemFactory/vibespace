@@ -60,6 +60,7 @@
 //      regex route are read as such; a blank or stale `unmounted` row, a construction with no row, a registering export
 //      used where the boot never runs, a site that starts a program ⇒ each RED. A site runs without the try / if around
 //      it in the wiring: the world shows what the boot CAN mount (it errs toward more routes, never fewer).
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

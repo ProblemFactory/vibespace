@@ -4,6 +4,7 @@
 // spawn goes through reExecArgv, (d) the daemon lands the repoint through repointCurrent and says a failed landing, (f) the hand-over and
 // the listen wiring — all pins of src/agentd/agentd.js. The file is read BY NAME, so ci.mjs's affected rule selects this suite on a change of it.
 // Run: node scripts/test-agentd-reexec-argv-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

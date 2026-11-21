@@ -195,6 +195,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { WORK_ROOT, REHOME_PREFIX } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 import { procStat, procBootMs, procBornMs, machineBootId, readRunRecord, runOwnerState, stampScratchRun, SCRATCH_ROOT_RE, SCRATCH_ROOTS_ENV, extraRootPatterns, extraRootRes, passwdHome, scratchRootOf } from './scratch-run.mjs';
 export { SCRATCH_ROOT_RE, SCRATCH_ROOTS_ENV, extraRootPatterns, passwdHome, scratchRootOf };   // the scratch roots' ONE implementation is scratch-run.mjs's (the reach cure)

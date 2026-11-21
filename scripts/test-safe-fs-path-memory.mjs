@@ -13,6 +13,7 @@
 //      a clock. (At the release this leg IS the proof: K ends.)
 //   ② THE COST, measured and printed (never asserted): the memory and the threads one more worker holds, and the container's
 //      process limit where parked threads end.
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';

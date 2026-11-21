@@ -4,6 +4,7 @@
 // §8 (f) the keeper source spells no rung and looks the recipe UP. It reads the files it pins BY NAME, so ci.mjs's affected
 // rule selects this suite on a change of either.
 // Run: node scripts/test-desktop-app-keeper-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

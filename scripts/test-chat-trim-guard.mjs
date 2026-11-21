@@ -8,6 +8,7 @@
 // shorter than ~2 viewports, the cap grows to 600 instead of trimming.
 // DOM-heavy machinery has no functional harness — these pins keep the guard
 // (and its symmetry) from being refactored away silently.
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import { judgeGesture, PAGE_UP_BAND_PX, DELIVERY_MIN_FRACTION, KEEP_ZONE_VIEWPORTS, SNAP_SOURCE } from './paging-gesture-rules.mjs';

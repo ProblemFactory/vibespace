@@ -21,6 +21,7 @@
 // call site — the census cannot see it; a unit that brings one names it as a site of its own (kb); (e) a why is the row's OWN
 // law — it never borrows another suite's (no suite named in it).
 // Run: node scripts/test-deferred-save-census.mjs
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import path from 'node:path';
 import { deferredSaveSites, siteOfFile, rowKeyOf, judgeRows } from './deferred-save-census.mjs';

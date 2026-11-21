@@ -13,7 +13,7 @@
  * ended the create — ws-create returns on it). No `break;` crosses the seam (a stray one would be a
  * SyntaxError here, not a silent change of the do{}while(0) exit).
  */
-const { buildRemoteExec, nodeFinder, agentNodeOf, buildRemoteShellPrelude } = require('../remote-shell');
+const { buildRemoteExec, nodeFinder, agentNodeOf, buildRemoteShellPrelude, acctFolderAssign, acctSecretAssign } = require('../remote-shell');
 const { sweepWriters } = require('../writer-sweep');
 const { S0_SH } = require('../login-shell'); // the login-shell ladder, spelled once (lane cli-shell-truth)
 const SPRI = require('../server/spawn-priority.js'); // B-460d's remainder: a paired machine's start, the hub's SAME verdict
@@ -127,7 +127,7 @@ function dialLadder(c) {
                 await dm.fsWrite(kf, Buffer.from(spawnAccount.secret.value), { by });
                 await dm.runCmd('sh', ['-c', `chmod 600 "${kf}"`], { timeoutMs: 6000, by }).catch(() => {});
               }
-              acctAssign = `${spawnAccount.secret.var}="$(cat "${kf}")" `;
+              acctAssign = acctSecretAssign(spawnAccount.secret.var, kf);
             }
             if (!integrationOn) return { envPairs: [], tokenAssign: acctAssign };
             return {
@@ -149,7 +149,7 @@ function dialLadder(c) {
           // dial guards below must not reject it (they used to, with a
           // misleading "shipping not implemented" error). Empty otherwise.
           const dialAcctAssign = (spawnAccount?._hostSubReady && spawnAccount.remoteCreds)
-            ? `${spawnAccount.remoteCreds.envVar}="$HOME/.vibespace/${spawnAccount.remoteCreds.dirName}" ` : '';
+            ? acctFolderAssign(spawnAccount.remoteCreds.envVar, `$HOME/.vibespace/${spawnAccount.remoteCreds.dirName}`) : '';
   async function terminal() {
             // TERMINAL-on-dial (B-0d70): the device runs claude/codex in a
             // node-pty via the daemon's open-session, proxied through the

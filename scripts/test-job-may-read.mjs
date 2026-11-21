@@ -23,6 +23,7 @@
 // route's acts are derived from its source, each driven on a granted job); an owner-less job takes no grant (§1c, §2); the grant
 // read back after the records reload, a sibling created after a «siblings» grant, a granted job archived later (§2, §3, §6);
 // «archived, read only»; «mine» inside a job; a read verb POSTed on itself
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';

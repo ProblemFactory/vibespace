@@ -13,6 +13,7 @@
 //      «自动继续：开/关», «因用量上限/过载停止 (N)», «将开启 37 个会话；已开启 3 个», «恢复了 29 个 · 跳过 8 个（仍在用量上限内）· 拒绝 0»,
 //      «没有因用量上限停止的会话» — and every WORD_KEYS key in zh AND ja with its {params} kept
 //   §6 wiring pins (the fact's writer, clearers, restore, the live list, the card, the filter, the descriptors' rows)
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';

@@ -7,6 +7,7 @@
 // ⑩'s words gone + its wiring pins, ⑩b's wiring pins. Each reads the file it pins BY NAME, so ci.mjs's affected rule selects this
 // suite on any change of one of them.
 // Run: node scripts/test-conversation-needs-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

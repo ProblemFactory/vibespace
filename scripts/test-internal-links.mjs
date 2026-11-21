@@ -5,6 +5,7 @@
 // the unknown chip, the vendor's conversation:// untouched, a hand-drawn span stripped), THE PRESS over a recorded page (every plan's
 // act is the page's own door; a press never sends, ends, archives or grants), the words (three languages, never «sleep»), the
 // agents' teaching (the manual's paragraph; nothing added to the session intro). Every law has its red control.
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

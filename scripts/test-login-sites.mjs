@@ -6,6 +6,7 @@
 // over a REAL vault engine on scratch data and the grants store in memory. Every law a leg with a red control by mutation:
 // a site added but not on the login's list never fills; a pair of site and user in two logins is refused; the four rows, each with a
 // leg; a merge loses no grant and widens none; the secret never in an audit line; today's one-site logins read as they are.
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

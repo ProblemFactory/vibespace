@@ -1,4 +1,4 @@
-// THE HUB-HOME CENSUS (B-ba47 pick B, lane cli-update-needs-nothing, 2026-11-14) — test-architecture §108 runs it.
+// THE HUB-HOME CENSUS (B-ba47 pick B, lane cli-update-needs-nothing, 2026-11-14) — test-architecture §113 runs it.
 // NOT a test-*.mjs on purpose (the tier census would demand a tier), like mount-reader-census.mjs.
 //
 // scripts/scratch.mjs re-homes a suite or a debug script at import (src/home-verdict.js); a hub the suite starts gets
@@ -20,7 +20,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { builtinModules } from 'node:module';
 
-// ── THE ONE READER OF «A server.js SPAWN» (moved here from test-architecture §57, 2026-11-14, so §57 and §108 read the
+// ── THE ONE READER OF «A server.js SPAWN» (moved here from test-architecture §57, 2026-11-14, so §57 and §113 read the
 // same sites): SPAWN, walk and dataRanges as §57 wrote them; a range now carries its kind as a third element
 // ('comment' · 'string' · 'regex' · 'template') — §57 reads the first two.
 export const SPAWN = /\b(?:spawn|fork)\(\s*(?:(?:process\.execPath|'node'|"node")\s*,\s*\[[^\]]*?|[A-Za-z_$][\w$.]*\s*,\s*\[[^\]]*?(?:process\.execPath|'node'|"node")\s*,[^\]]*?)(?:['"`]server\.js['"`]|path\.join\([^)]*?['"`]server\.js['"`]\s*\))\s*\]/g;

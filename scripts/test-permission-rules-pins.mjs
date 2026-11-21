@@ -5,6 +5,7 @@
 // source pins, the codex consumer's comment, «comments state what the code does» (round 3, with its control), the resolver's one
 // reader. Each reads the file it pins BY NAME, so ci.mjs's affected rule selects this suite on a change of that file.
 // Run: node scripts/test-permission-rules-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';

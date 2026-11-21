@@ -22,6 +22,7 @@
 //      ⑱ a hold with NO FRAME OF OURS (主开发 2026-11-18 12:20Z) is counted apart (no-ours-holds / no-ours-held) and booked in top
 //        under «(no frame of ours)», never under a verdict's word — in the line and in the day; RED: the release's cause.
 // Run: node scripts/test-loop-day-report.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

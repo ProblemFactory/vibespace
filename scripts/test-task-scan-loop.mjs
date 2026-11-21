@@ -20,6 +20,7 @@
 //     planted back (an append, a split line, a mid-line trim, a kept map landing late; each guard's mutant RED)
 //  ⑦b (the cure) the position indexes the merges keep are counted in the transcript tails' census row (RED: cadb07780's row)
 // Runs in a CHILD with a fake HOME (findSessionJsonlPath resolves into a throwaway projects dir — never the real ~/.claude).
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

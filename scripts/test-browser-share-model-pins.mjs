@@ -8,6 +8,7 @@
 // the ladder's order in the keeper's source, ④g THE CENSUS OF SAID THINGS, and ④k r9 (⑤) the lineage ledger's one product reader (git grep).
 // Each file is read BY NAME (a census walks src/ and src/lib), so ci.mjs's affected rule selects this suite on a change of any of them.
 // Run: node scripts/test-browser-share-model-pins.mjs
+import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';

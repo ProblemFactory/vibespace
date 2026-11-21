@@ -35,6 +35,7 @@ const HV = require(path.join(REPO, 'src/home-verdict.js'));
 
 let pass = 0, fail = 0;
 function ok(cond, name, detail) {
+  if (typeof name !== 'string') throw new TypeError(`ok(): the name must be a string (a swapped call?) — got ${typeof name}`);   // the swap guard (test-ci-gate-tiers §7b)
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); }
 }
@@ -181,6 +182,9 @@ const envTable = (mod) => {
     ['HOME is the new home, PATH is BUILT', e.HOME === '/tmp/vs-rehome-7' && e.PATH === `/tmp/vs-rehome-7/.vs-bin:${SYS}` && r.binDir === '/tmp/vs-rehome-7/.vs-bin'],
     ['CARRIED, by name and shape: CI, GITHUB_WORKSPACE (the checkout), LANG, TZ, USER, VIBESPACE_CI_OAT (a named row of the product\'s prefix), VS_HV_SHOTS, XDG_DATA_DIRS — nothing else', JSON.stringify(r.carried) === JSON.stringify(['CI', 'GITHUB_WORKSPACE', 'LANG', 'TZ', 'USER', 'VIBESPACE_CI_OAT', 'VS_HV_SHOTS', 'XDG_DATA_DIRS'])],
     ["cure 2: the PRODUCT's own namespace is carried only by named rows — the caller's token and address, a job's token, a paired machine's device root: not rows", ['VIBESPACE_SESSION_TOKEN', 'VIBESPACE_API', 'VIBESPACE_JOB_TOKEN', 'VIBESPACE_DEVICE_ROOT'].every((k) => nc[k] === 'not a row')],
+    // B-ba47's follow-up (主开发 r863 MUST 2): the three PROCESS MARKS are named rows — ids, no route, no credential — so a re-homed
+    // suite's children still carry them and the person's Stop / a job's stop still find what they left behind
+    ["the PROCESS MARKS are carried by name (CLAUDE_WEBUI_SESSION_ID, VIBESPACE_JOB_ID, VIBESPACE_JOB_RUN: src/conversation-env.js CONVERSATION_MARKS), the token beside them is not", (() => { const MK = { CLAUDE_WEBUI_SESSION_ID: 'sid-1', VIBESPACE_JOB_ID: 'jb-1', VIBESPACE_JOB_RUN: 'jb-1:1700000000000' }; const r2 = mod.rehomeEnv({ ...IN, ...MK }, { oldHome: H, newHome: '/tmp/vs-rehome-7', resolve: RSof(mod), checkout: CO }); return Object.entries(MK).every(([k, v]) => r2.env[k] === v && r2.carried.includes(k)) && !('VIBESPACE_SESSION_TOKEN' in r2.env); })()],
     ['cure 1: a PINNED agent CLI (VS_CLAUDE_BIN, VS_CODEX_BIN — the suites\' own pin form) is never carried', /PINNED agent CLI/.test(nc.VS_CLAUDE_BIN || '') && /PINNED agent CLI/.test(nc.VS_CODEX_BIN || '')],
     ["7: a name that only BEGINS like the suites' prefix (VSX_HV) is no row", nc.VSX_HV === 'not a row'],
     ['amendment 1: THE DESKTOP SESSION is not carried — DISPLAY, XAUTHORITY, DBUS_SESSION_BUS_ADDRESS, XDG_RUNTIME_DIR, SSH_AUTH_SOCK', ['DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'SSH_AUTH_SOCK'].every((k) => /DESKTOP SESSION/.test(nc[k] || ''))],
@@ -307,13 +311,14 @@ console.log("— ④d the accessors answer a row's FILE in this checkout (主开
 console.log('— ⑤ purity');
 const src = fs.readFileSync(path.join(REPO, 'src/home-verdict.js'), 'utf8');
 const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-ok([...code.matchAll(/\brequire\s*\(\s*'([^']+)'\s*\)/g)].map((m) => m[1]).join() === './server-root.js' && !/^\s*import\b|\bprocess\.|\bfs\.|\bos\.|Date\.now|new Date/m.test(code),
-  'src/home-verdict.js requires ./server-root.js alone and reads no env, fs, os or clock (PURE — the callers read the facts)');
+ok([...code.matchAll(/\brequire\s*\(\s*'([^']+)'\s*\)/g)].map((m) => m[1]).join() === './server-root.js,./conversation-env.js' && !/^\s*import\b|\bprocess\.|\bfs\.|\bos\.|Date\.now|new Date/m.test(code),
+  'src/home-verdict.js requires ./server-root.js and ./conversation-env.js alone (both PURE: the process marks it carries are the one list\u2019s) and reads no env, fs, os or clock (PURE — the callers read the facts)');
 
 console.log('— ⑥ mutant copies of src/home-verdict.js (a weakened rule must turn named rows red)');
 const M = mutantCopies('home-verdict', REPO);
 const all = (mod) => [...suiteTable(mod), ...hubTable(mod), ...walkTable(mod), ...pathTable(mod), ...shapeTable(mod), ...envTable(mod), ...binTable(mod)];
 const CONTROLS = [
+  { what: "the process marks not rows (主开发 r863 MUST 2: a re-homed suite would lose them)", needle: "  ...CONVERSATION_MARKS.map((n) => R(n, 'word', ", repl: "  ...[].map((n) => R(n, 'word', ", reds: ["env: the PROCESS MARKS are carried by name (CLAUDE_WEBUI_SESSION_ID, VIBESPACE_JOB_ID, VIBESPACE_JOB_RUN: src/conversation-env.js CONVERSATION_MARKS), the token beside them is not"] },
   { what: 'the far-side boundary cut', needle: "const underOne = (q, keys) => keys.some((h) => q === h || q.startsWith(h + '/'));", repl: 'const underOne = (q, keys) => keys.some((h) => q.startsWith(h));', reds: ['three ways: SEGMENT BOUNDARY: /home/ux', 'three ways: SEGMENT BOUNDARY: /home/u.bak'] },
   { what: 'WAY 1 cut: the kernel walk', needle: "['as the kernel walks it', k], ", repl: '', reds: ['three ways: THE KERNEL: parent steps that climb OUT of the home, then a link back IN from beside it (the fold and the parent stay outside)'] },
   { what: '8b cut: the fold not walked through links', needle: "['folded by spelling', resolve(noLinks(sp))], ", repl: "['folded by spelling', noLinks(sp)], ", reds: ['three ways: THE FOLD, walked through links: a folded path that is itself a link into the home (8b)'] },
@@ -336,7 +341,7 @@ const CONTROLS = [
 ];
 for (const c of CONTROLS) {
   ok(src.split(c.needle).length === 2, `control "${c.what}": the needle is in the shipped source once (a stale control would prove nothing)`);
-  const mod = M.load('src/home-verdict.js', src.replace(c.needle, c.repl), c.what.replace(/\W+/g, '-').slice(0, 24));
+  const mod = M.load('src/home-verdict.js', SM.anchored(src, c.needle, c.repl, `control «${c.what}»`), c.what.replace(/\W+/g, '-').slice(0, 24));   // a gone needle throws by name
   const red = all(mod).filter((r) => !r.good).map((r) => r.name);
   ok(c.reds.every((n) => red.includes(n)), `control "${c.what}": the named rows go RED on the weakened copy (${red.length} red)`, red);
 }
@@ -442,7 +447,7 @@ const mutant = (tag, needle, repl) => {
   const d = path.join(DIR, 'mut', tag), sd = path.join(d, 'scripts');
   fs.mkdirSync(sd, { recursive: true });
   fs.symlinkSync(path.join(REPO, 'src'), path.join(d, 'src')); fs.symlinkSync(path.join(REPO, 'scripts/scratch-run.mjs'), path.join(sd, 'scratch-run.mjs'));
-  fs.writeFileSync(path.join(sd, 'scratch.mjs'), SCR_SRC.replace(needle, repl));
+  fs.writeFileSync(path.join(sd, 'scratch.mjs'), SM.anchored(SCR_SRC, needle, repl, `mutant scratch.mjs «${tag}»`));   // a gone needle throws by name
   return { url: pathToFileURL(path.join(sd, 'scratch.mjs')).href, probe: path.join(sd, `test-hv-${tag}.mjs`), present: SCR_SRC.split(needle).length === 2 };
 };
 const runA1 = (s, url = SCRATCH_URL, file = path.join(DIR, `test-hv-a1-${path.basename(s.seam)}.mjs`), kids = true, o = {}) => start(file, { ...s.env, ...(kids ? { HV_KIDS: '1' } : {}), ...(o.env || {}) }, A1_PROBE(url), { exec: o.exec || s.node, clean: true, cwd: o.cwd });
@@ -592,14 +597,17 @@ const legsLate = (r) => {
 { const r = await KIDS.late; for (const l of legsLate(r)) ok(l.good, l.name, l.good ? undefined : (r.j || r.err.slice(0, 400))); }
 ok(!fs.existsSync(STANDIN), 'the handed stand-in home was never made by anything above');
 const under = (p, s) => typeof p === 'string' && (p === s.home || p.startsWith(s.home + '/') || p.startsWith(path.join(s.seam, 'homelink') + '/'));
+// a STAND-IN is what the leg planted (under the handed home, beside its node); a CLI in one of the system's own folders the
+// built PATH keeps (/usr/local/bin …) is the machine's install — «a system-wide install is the hub resolver's to find»
+const standIns = (list) => (Array.isArray(list) ? list : []).filter((p) => !SYSDIRS.includes(path.dirname(p)));
 const legsA1 = (j, s) => {
   const R = (j && j.rehomed) || {}, n = R.node || {}, k = (j && j.kid) || {}, g = k.next || {};
   return [
     ['A1: the suite runs on its OWN node, out of the home — a COPY (execPath and argv[0] moved to it)', !!R.node && n.file === j.exec && j.argv0 === j.exec && !under(j.exec, s)],
     ['A1: the module folders were re-read (Module._initPaths) — RED BY NAME if this node has none', R.initPaths === true],
     ['A1: the CJS global folders name nothing under the handed home', Array.isArray(j && j.gpaths) && j.gpaths.length > 0 && j.gpaths.every((p) => !under(p, s))],
-    ['A1: a CHILD started the house way (PATH from its node) finds no stand-in CLI and runs outside the home', Array.isArray(k.found) && k.found.length === 0 && typeof k.exec === 'string' && !under(k.exec, s) && (k.gpaths || []).every((p) => !under(p, s))],
-    ['A1: …and its GRANDCHILD, started the same way, the same', Array.isArray(g.found) && g.found.length === 0 && typeof g.exec === 'string' && !under(g.exec, s)],
+    ['A1: a CHILD started the house way (PATH from its node) finds no stand-in CLI and runs outside the home', Array.isArray(k.found) && standIns(k.found).length === 0 && typeof k.exec === 'string' && !under(k.exec, s) && (k.gpaths || []).every((p) => !under(p, s))],
+    ['A1: …and its GRANDCHILD, started the same way, the same', Array.isArray(g.found) && standIns(g.found).length === 0 && typeof g.exec === 'string' && !under(g.exec, s)],
     ['(a) npm\'s global folder is the re-homed home\'s own (it dies with the run)', !!R.home && j.npmPrefix === path.join(R.home, '.npm-global')],
   ].map(([name, good]) => ({ name, good }));
 };
@@ -625,7 +633,7 @@ const legsD1 = (j) => { const h = (j && j.rehomed && j.rehomed.home) || '', b = 
 ].map(([name, good]) => ({ name, good })); };
 const ncOf = (err) => (lineOf(err).match(/ — not carried: (.*?); a tool missing there/) || [])[1];
 const legsNC = (r) => [{ name: "item 4: the line's PATH «not carried» names are exactly the handed entries (~/.local/bin, ~/.nvm/bin, /opt/vs-hv-nowhere/bin)", good: ncOf(r.err) === '~/.local/bin, ~/.nvm/bin, /opt/vs-hv-nowhere/bin' }];
-const legsLine = (r) => [{ name: "the line says the node is a COPY of its own, names every not-carried name with its reason (the desktop session, the caller's conversation, …), and the seam by name", good: /node: its own \(\S+, a copy\), out of the home; /.test(r.err) && /DISPLAY[^;]*\(the desktop session\)/.test(lineOf(r.err)) && /VIBESPACE_SESSION_TOKEN[^;]*\(not a row\)/.test(lineOf(r.err)) && /VS_CLAUDE_BIN[^;]*\(a pinned agent CLI\)/.test(lineOf(r.err)) && /; the seam VS_REHOME_NOT_TEMP made \S+ not a temp root$/.test(lineOf(r.err)) && !lineOf(r.err).includes('stand-in-token') && !lineOf(r.err).includes('stand-in-pw') }];
+const legsLine = (r) => [{ name: "the line says the node is a COPY of its own, names every not-carried name with its reason (the desktop session, the caller's conversation, …), and the seam by name", good: /node: its own \(\S+, a copy\), out of the home; /.test(r.err) && /DISPLAY[^;]*\(the desktop session\)/.test(lineOf(r.err)) && /the caller's conversation names are not carried: [^\n]*VIBESPACE_SESSION_TOKEN/.test(r.err)   /* said by the import's own line, before the re-home (B-ba47's follow-up) */ && /VS_CLAUDE_BIN[^;]*\(a pinned agent CLI\)/.test(lineOf(r.err)) && /; the seam VS_REHOME_NOT_TEMP made \S+ not a temp root$/.test(lineOf(r.err)) && !lineOf(r.err).includes('stand-in-token') && !lineOf(r.err).includes('stand-in-pw') }];
 const legsRefusal = (r) => [{ name: '(3) THE REFUSAL THROUGH THE IMPORT: a node file that cannot run outside its own folder ⇒ the suite REFUSES by name with the two doors (exit 1), never going on with the home\'s node', good: !!r && r.status === 1 && /it does not run out of the home \(ENOENT\) — it REFUSES to run there: run it with a node outside the home \(a system node\), or through the lane's environment/.test(r.err) }];
 const legsTouch = (r, s) => [{ name: '(3) THE TOUCH: a node folder reused is touched — its last use read against a fixed old time', good: !!r && r.status === 0 && !!(r.j && r.j.rehomed && r.j.rehomed.node && r.j.rehomed.node.file.startsWith(s.final + '/')) && fs.statSync(s.final).mtimeMs > OLD.getTime() }];
 const notAdopted = (r, s) => !!(r.j && r.j.rehomed && r.j.rehomed.node) && !r.j.rehomed.node.file.startsWith(s.final + '/');

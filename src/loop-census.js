@@ -124,6 +124,7 @@ const OWNERS = Object.freeze([
       name('ckpt-switch'),   // row B-437e U0: the checkpoint switch's PURE verdict (the probe, the release road, their suites)
       name('claude-route-names'),   // B-e7c0 cure: the CLI's route / credential names (PURE) the managed rule and the merge both read
       name('conversation-env'),   // B-ba47's follow-up: the names the create and the spawns write into a conversation's child (PURE; the suites' scratch import and §112 read it — no hub path loads it, so no helper slot: 主开发 r863's should)
+      name('home-verdict'),   // B-ba47 pick B: whose home a process runs on, and the env a re-homed one hands on (PURE; the suites' scratch import reads it, the hub's own boot will — shape H; no hub path loads it today, so no helper slot)
       name('claude-level-signal'),   // B-24e2: the background signal's declaration + the build's identity, out of the catalog (PURE; the catalog, the device's scan)
       name('left-behind|left-behind-door|left-behind-line'),   // B-69a7: what a stopped turn's command tool left running — the read (SHARED; the hub and the device agent) and the hub's door
       name('managed-claude-settings'),   // lane lg-providers (主开发 23:45Z): does the machine's managed Claude settings set a key helper, credential or address (the create, the provider Test)
