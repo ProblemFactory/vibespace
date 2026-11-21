@@ -447,12 +447,14 @@ function mainAskSettledWords(resolved, t = fmt) {
 }
 
 /** How a LATE Allow's card reads (B-9ff2's remainder, the coordinator's r1210): what the program says became of it — not run, ran, or
- *  waiting for its word — never «Allowed» as if done. `late` = message-manager lateAllowOf's { state }. null = no late Allow. */
+ *  waiting for its word, and unsaid once the turn ended without one — never «Allowed» as if done. `late` = message-manager lateAllowOf's
+ *  { state }. null = no late Allow. */
 function lateAllowWords(late, t = fmt) {
   const s = late && late.state;
   if (s === 'not-run') return { icon: '✗', cls: 'denied', text: t('Allowed too late — not run') };
   if (s === 'ran') return { icon: '✓', cls: 'allowed', text: t('Allowed late — it ran') };
   if (s === 'waiting') return { icon: '…', cls: 'unknown', text: t('Allowed late — waiting for the agent to say whether it ran') };
+  if (s === 'unsaid') return { icon: '?', cls: 'unknown', text: t('Allowed late — the agent never said whether it ran') };   // the turn ended (or the conversation stopped) with no word
   return null;
 }
 

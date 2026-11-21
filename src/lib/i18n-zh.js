@@ -5998,6 +5998,7 @@ export default {
   "Allowed too late — not run": "允许得太晚——未运行",
   "Allowed late — it ran": "较晚允许——已运行",
   "Allowed late — waiting for the agent to say whether it ran": "较晚允许——正在等代理说明是否已运行",
+  "Allowed late — the agent never said whether it ran": "较晚允许——代理始终没有说明是否已运行",
   "Already ended — reason unknown. Nothing was sent.": "已经结束——原因未知。这次没有发送任何内容。",
   // R4 (2026-09-27): access and notification — two operations, access first; compose (B-6acc)
   "That rule no longer exists": "这条规则已经不存在了",

@@ -5997,6 +5997,7 @@ export default {
   "Allowed too late — not run": "許可が遅すぎました——実行されていません",
   "Allowed late — it ran": "遅れて許可——実行されました",
   "Allowed late — waiting for the agent to say whether it ran": "遅れて許可——実行されたかどうか、エージェントの返答を待っています",
+  "Allowed late — the agent never said whether it ran": "遅れて許可——実行されたかどうか、エージェントは答えませんでした",
   "Already ended — reason unknown. Nothing was sent.": "すでに終了——理由不明。何も送信されませんでした。",
   // R4 (2026-09-27): access and notification — two operations, access first; compose (B-6acc)
   "That rule no longer exists": "そのルールはもう存在しません",

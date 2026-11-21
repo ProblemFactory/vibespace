@@ -1602,8 +1602,9 @@ class MessageManager extends MessageWindow {
     // list that carries a call id (tool_use_id) used to skip all three — the breadcrumb, the record-kinds count, the card — and then
     // fall through the task path below, which matches only task_*: dropped. 2.1.328's late_allow_not_run (request_id, tool_use_id,
     // reason) was one, unlisted. Now it is the fall-back card by its own rule, with its record-kinds count; and EVERY subtype off the
-    // handled list is COUNTED by the breadcrumb, a call id or not — a declared card-less one (late_allow_not_run, permission_check_status)
-    // as the card-less ones without a call id always were.
+    // handled list is COUNTED by the breadcrumb, a call id or not — a declared card-less one (permission_check_status) as the card-less
+    // ones without a call id always were. (late_allow_not_run itself is HANDLED since B-9ff2's remainder: the late-Allow card, and a
+    // not-run record that finds no card leaves its own trace — _processLateAllowNotRun.)
     if (raw.subtype && !HANDLED_SYSTEM_SUBTYPES.has(raw.subtype)) {
       const unknown = !KNOWN_IGNORED_SYSTEM_SUBTYPES.has(raw.subtype);
       if (!MessageManager._seenUnknownSubtypes.has(raw.subtype)) {
@@ -2510,6 +2511,7 @@ class MessageManager extends MessageWindow {
 
   _processResult(raw, emit) {
     this._noteTurnEnded(); // lane midturn-order: what is afloat now lands at the next turn's first card at the latest
+    this._endLateWaits(emit); // r1257 (a): a late Allow still waiting at the turn's end says the agent never said whether it ran
     this._finalizeStreaming(emit);
     // Flush any pending tool calls that never got results (interrupted)
     // But preserve tool calls with unresolved permissions — they're still waiting for user input
@@ -2777,21 +2779,41 @@ class MessageManager extends MessageWindow {
   }
 
   /** 2.1.328's `system/late_allow_not_run` {request_id, tool_use_id, reason}: «why no late Allow runs the call» (its own text; «treat any
-   *  other word as did not run too»). The card it names — by its request id, else by its call (the record says the request id is not
-   *  checked) — keeps the reason; the one judge says «Allowed too late — not run» on a card the person allowed. */
+   *  other word as did not run too»). A WORD ABOUT ONE ASK NEVER LANDS ON ANOTHER ASK (the round wntdotqs8's must, r1257): a record that
+   *  carries an ask's id is matched BY THAT ID ONLY — a card whose current ask has another id (the program re-asked the same call: its ask
+   *  is replaced in place) is left alone, the record is the older ask's; the match by call is only for a record that carries NO ask id.
+   *  The card keeps the reason; the one judge says «Allowed too late — not run» on a card the person allowed. A record that finds no
+   *  card (a helper's ask lives on its Agent card; an ask the program replaced) is never dropped without a trace: one telemetry line. */
   _processLateAllowNotRun(raw, emit) {
     const reason = typeof raw.reason === 'string' && raw.reason ? raw.reason.slice(0, 40) : 'not_run';
+    const byAsk = typeof raw.request_id === 'string' && raw.request_id !== '';
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const m = this.messages[i], p = m.permission;
       if (!p) continue;
       const call = Array.isArray(m.content) && m.content[0] ? m.content[0].toolCallId : null;
-      if ((raw.request_id && p.requestId === raw.request_id) || (raw.tool_use_id && call === raw.tool_use_id)) {
+      if (byAsk ? p.requestId === raw.request_id : (!!raw.tool_use_id && call === raw.tool_use_id)) {
         p.lateNotRun = reason;
         if (this._lateSettle(m) && emit) this._emit({ op: 'edit', id: m.id, fields: { permission: p } });
         return;
       }
     }
+    try { global.__vsEvent?.('cli-late-allow-unmatched', reason); } catch {}
   }
+
+  /** (r1257 (a)) A late Allow still WAITING when the turn ends — an interrupted turn, an error result, a program that never followed up —
+   *  or when the conversation stops says the truth: the agent never said whether it ran. A later word of the program still wins (a
+   *  not-run record, the call's own result). The cards that wait are kept in a set (no walk of the whole chat per turn). */
+  _endLateWaits(emit) {
+    if (!this._lateWaiting || !this._lateWaiting.size) return;
+    for (const id of [...this._lateWaiting]) {
+      const m = this.messageIndex.get(id), p = m && m.permission;
+      if (!p) { this._lateWaiting.delete(id); continue; }
+      p.lateUnsaid = true;
+      if (this._lateSettle(m) && emit) this._emit({ op: 'edit', id: m.id, fields: { permission: p } });
+    }
+  }
+  /** THE CONVERSATION STOPPED (src/server/helper-asks.js forget: the kill and exit paths): its waiting late Allows say so. */
+  endLateAllows(emit = true) { this._endLateWaits(emit); }
 
   /** THE ONE JUDGE of a late Allow (B-9ff2's remainder): re-reads the card — our answer, the cancel's statement, the not-run record, the
    *  call's own result — every record calls it, live or rebuilt; true when the card's late state changed (the caller emits). */
@@ -2799,8 +2821,10 @@ class MessageManager extends MessageWindow {
     const p = m && m.permission;
     if (!p) return false;
     const res = Array.isArray(m.content) && m.content[0] && m.content[0].type === 'tool_result' ? m.content[0] : null;
-    const late = lateAllowOf(p, res), was = p.late ? JSON.stringify(p.late) : null, now = late ? JSON.stringify(late) : null;
-    if (was === now) return false;
+    const late = lateAllowOf(p, res);
+    if (late && late.state === 'waiting') (this._lateWaiting || (this._lateWaiting = new Set())).add(m.id); else if (this._lateWaiting) this._lateWaiting.delete(m.id);
+    const was = p.late || null;
+    if ((was && was.state) === (late && late.state) && (was && was.reason) === (late && late.reason)) return false;
     if (late) p.late = late; else delete p.late;
     return true;
   }
@@ -2820,7 +2844,7 @@ class MessageManager extends MessageWindow {
         if (m.permission.resolved !== 'stopped' && !ran) m.permission.resolved = 'cancelled';
         // B-9ff2's remainder: a cancel that STATES the late-Allow road (2.1.328's takes_late_allow) makes an Allow of ours that crosses it
         // a late Allow; a cancel without the field (an older program) states nothing, and the card stays as today
-        if (typeof raw.takes_late_allow === 'boolean') { m.permission.lateAllowStated = true; m.permission.takesLateAllow = raw.takes_late_allow; }
+        if (typeof raw.takes_late_allow === 'boolean') m.permission.lateAllowStated = true;   // its value is not judged: read by name only (no describe text)
         this._lateSettle(m);
         if (emit) this._emit({ op: 'edit', id: m.id, fields: { permission: m.permission } });
         break;
@@ -2839,12 +2863,15 @@ class MessageManager extends MessageWindow {
 // late Allow runs the call». The card says the program's truth: NOT RUN (that record), RAN (the call's own result proves it: ok, or
 // stopped while it ran), and until either, WAITING on the program — never «Allowed» as if done. No guess where the program is silent:
 // a cancel without the field (an older program) and no not-run record keep today's card. PURE → { state, reason? } | null.
+// THE CALL'S OWN RESULT IS THE LAST WORD (r1257): a not-run mark and that call's good result on the same ask read «ran». A wait the turn's
+// end (or the conversation's stop) closed reads UNSAID — «the agent never said whether it ran» — until a later word of the program.
 function lateAllowOf(perm, res) {
   if (!perm || perm.answer !== 'allow') return null;   // only a card the person ALLOWED
-  if (perm.lateNotRun) return { state: 'not-run', reason: perm.lateNotRun };
+  const ran = !!res && (res.status === 'ok' || res.stoppedWhileRunning === true);
+  if (perm.lateNotRun) return ran ? { state: 'ran' } : { state: 'not-run', reason: perm.lateNotRun };
   if (!perm.lateAllowStated) return null;              // no cancel that states the late-Allow road: today's card
-  if (res && (res.status === 'ok' || res.stoppedWhileRunning === true)) return { state: 'ran' };
-  return { state: 'waiting' };
+  if (ran) return { state: 'ran' };
+  return perm.lateUnsaid ? { state: 'unsaid' } : { state: 'waiting' };
 }
 
 // THE DRIFT LEDGER (lane record-oracle-2-1-296; since lane drift-card-restore BESIDE the chat card, owner 2026-10-15): a KNOWN record

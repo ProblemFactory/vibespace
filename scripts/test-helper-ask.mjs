@@ -2160,11 +2160,11 @@ console.log('⑱h (B-9ff2\'s remainder, the coordinator\'s r1210) A LATE ALLOW S
   const run = (MMx, recs, id, how = 'live') => {
     const mm = new MMx(id);
     if (how === 'live') for (const r of recs) mm.processLive(JSON.parse(JSON.stringify(r))); else mm.convertHistory(JSON.parse(JSON.stringify(recs)));
-    const c = mm.messages.find((m) => m.permission && m.permission.requestId === 'req-la');
+    const c = mm.messages.find((m) => m.permission && Array.isArray(m.content) && m.content[0] && m.content[0].toolCallId === 'toolu_la');
     const p = c ? c.permission : null;
     // the renderer's choice (chat-renderers' settled main card): the late speller first, then the outcome word
     const w = p && ((p.late && H.lateAllowWords(p.late)) || H.mainAskSettledWords(p.resolved));
-    return { resolved: p && p.resolved, late: p && p.late ? p.late.state : null, reason: p && p.late && p.late.reason || null, words: w ? w.text : null };
+    return { ask: p && p.requestId, resolved: p && p.resolved, late: p && p.late ? p.late.state : null, reason: p && p.late && p.late.reason || null, words: w ? w.text : null };
   };
   const both = (MMx, recs, tag) => ({ live: run(MMx, recs, 'sess-la-l-' + tag), rebuilt: run(MMx, recs, 'sess-la-r-' + tag, 'history') });
   const same = (x, f) => f(x.live) && f(x.rebuilt);
@@ -2176,14 +2176,14 @@ console.log('⑱h (B-9ff2\'s remainder, the coordinator\'s r1210) A LATE ALLOW S
     'the Allow, the cancel, then «not run»': [use, ask, allow, cancel, notRun('expired')],
     'the cancel (it takes a late Allow), the Allow, then the result': [use, ask, cancel, allow, ran],
     'no cancel: the Allow, then «not run» (the program moved on)': [use, ask, allow, notRun('call_gone')],
-    '«not run» naming the call, its request id another (the record says it is not checked)': [use, ask, allow, notRun('withdrawn', 'req-elsewhere')],
+    '«not run» with NO request id (not the 2.1.328 shape — the rule for one): matched by its call': [use, ask, allow, (() => { const r = notRun('withdrawn'); delete r.request_id; return r; })()],
     'a cancel that takes no late Allow, then the Allow': [use, ask, cancelNo, allow],
   };
   const g = Object.fromEntries(Object.entries(scenes).map(([k, v], i) => [k, both(MessageManager, v, 'h' + i)]));
   const k = Object.keys(scenes);
   check('⑱h WAITING: a late Allow the program has said nothing of reads «' + WAIT + '» in either order, live and rebuilt — never «Allowed»: ' + JSON.stringify([g[k[0]], g[k[1]], g[k[7]]]),
     [k[0], k[1], k[7]].every((x) => same(g[x], (r) => r.late === 'waiting' && r.words === WAIT)) && /^Allowed late — waiting/.test(WAIT));
-  check('⑱h NOT RUN: «' + NOTRUN + '» when the program says the late Allow did not run the call — in either order, with no cancel at all, and by the call when the request id is another; the reason kept: ' + JSON.stringify([g[k[2]], g[k[3]], g[k[5]], g[k[6]]]),
+  check('⑱h NOT RUN: «' + NOTRUN + '» when the program says the late Allow did not run the call — in either order, with no cancel at all, and by the call for a record with no request id; the reason kept: ' + JSON.stringify([g[k[2]], g[k[3]], g[k[5]], g[k[6]]]),
     same(g[k[2]], (r) => r.late === 'not-run' && r.reason === 'turn_running' && r.words === NOTRUN) && same(g[k[3]], (r) => r.late === 'not-run' && r.reason === 'expired') && same(g[k[5]], (r) => r.late === 'not-run' && r.reason === 'call_gone') && same(g[k[6]], (r) => r.late === 'not-run' && r.reason === 'withdrawn'));
   check('⑱h RAN: «' + RAN + '» when the cancel takes a late Allow and the call\'s own result follows: ' + JSON.stringify(g[k[4]]), same(g[k[4]], (r) => r.late === 'ran' && r.words === RAN));
   const old = both(MessageManager, [use, ask, cancelOld, allow], 'old'), oldNot = both(MessageManager, [use, ask, allow, cancelOld], 'old2');
@@ -2196,8 +2196,48 @@ console.log('⑱h (B-9ff2\'s remainder, the coordinator\'s r1210) A LATE ALLOW S
   for (const r of scenes[k[2]]) N.feedLive(sd, JSON.parse(JSON.stringify(r)));
   const devCard = sd._normalizer.messages.find((m) => m.permission && m.permission.requestId === 'req-la');
   check('⑱h the session feed (the device stream\'s road) reaches the SAME judge: «not run» there too', !!devCard && devCard.permission.late && devCard.permission.late.state === 'not-run', devCard && devCard.permission);
-  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-  check('⑱h the three words in zh and ja', [WAIT, NOTRUN, RAN].every((w) => zh.includes(JSON.stringify(w) + ':') && ja.includes(JSON.stringify(w) + ':')));
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js'), zhHas = (w) => zh.includes(JSON.stringify(w) + ':'), jaHas = (w) => ja.includes(JSON.stringify(w) + ':');
+  check('⑱h the three words in zh and ja', [WAIT, NOTRUN, RAN].every((w) => zhHas(w) && jaHas(w)));
+  // ─── THE ROUND wntdotqs8 (r1257): A WORD ABOUT ONE ASK NEVER LANDS ON ANOTHER ASK; THE CALL'S OWN RESULT IS THE LAST WORD ───
+  const ask2 = { ...ask, request_id: 'req-la2' };   // the program asks AGAIN for the SAME call: the card's ask is replaced in place
+  const allow2 = { type: 'control_response', response: { subtype: 'success', request_id: 'req-la2', response: { behavior: 'allow', updatedInput: {} } } };
+  const turnEnd = { type: 'result', subtype: 'success', is_error: false, duration_ms: 1, num_turns: 1, result: 'done', session_id: conv, uuid: 'u-la-end' };
+  const errRes = { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_la', content: 'make: *** [release] Error 2', is_error: true }] }, uuid: 'u-la-err' };
+  const events = (fn) => { const prev = global.__vsEvent, got = []; global.__vsEvent = (n, d) => { got.push([n, d]); if (prev) try { prev(n, d); } catch { } }; try { return { r: fn(), got }; } finally { global.__vsEvent = prev; } };
+  const MUST = [use, ask, cancel, ask2, allow2, notRun('asked_again'), ran];
+  const mustLive = events(() => run(MessageManager, MUST, 'sess-la-must')), mustRe = run(MessageManager, MUST, 'sess-la-must-r', 'history');
+  check('⑱h THE MUST: ask one, its cancel, ask TWO for the same call, the Allow of two in time, the not-run record of ONE, a good result ⇒ the card reads anything but «not run» («' + mustLive.r.words + '»), live and rebuilt: ' + JSON.stringify([mustLive.r.words, mustRe.words]),
+    mustLive.r.ask === 'req-la2' && mustLive.r.late === null && mustLive.r.words === 'Allowed' && mustRe.late === null && mustRe.words === 'Allowed');
+  check('⑱h …and the record about ask one, finding no card that holds its id, is NEVER dropped without a trace: ONE telemetry line, cli-late-allow-unmatched (asked_again)', mustLive.got.filter(([n, d]) => n === 'cli-late-allow-unmatched' && d === 'asked_again').length === 1, mustLive.got);
+  const onlyOne = run(MessageManager, [use, ask, cancel, allow, ask2, notRun('asked_again')], 'sess-la-one');
+  check('⑱h the twin with the Allow on ask ONE only: the re-asked card asks again (ask two, its buttons, no word of ask one\'s Allow on it): ' + JSON.stringify(onlyOne), onlyOne.ask === 'req-la2' && onlyOne.resolved === null && onlyOne.late === null && onlyOne.words === null);
+  check('⑱h …and with no re-ask (the Allow on ask one only, its not-run record) «' + NOTRUN + '» is right: ' + JSON.stringify(g[k[2]].live.words), g[k[2]].live.words === NOTRUN);
+  const lastWord = both(MessageManager, [use, ask, cancel, allow, notRun('card_open'), ran], 'last');
+  check('⑱h THE CALL\'S OWN RESULT IS THE LAST WORD: a not-run mark and that call\'s good result on the SAME ask read «' + RAN + '»: ' + JSON.stringify(lastWord), same(lastWord, (r) => r.late === 'ran' && r.words === RAN));
+  const UNSAID = (H.lateAllowWords({ state: 'unsaid' }) || {}).text;
+  const ended = both(MessageManager, [use, ask, cancel, allow, turnEnd], 'end'), endedErr = both(MessageManager, [use, ask, cancel, allow, errRes, turnEnd], 'enderr'), endedThen = both(MessageManager, [use, ask, cancel, allow, turnEnd, notRun('expired')], 'endthen');
+  check('⑱h (a) THE WAIT ENDS: at the turn\'s end a late Allow the program never spoke of reads «' + UNSAID + '» — after an error result too — and a later word of the program still wins (not run): ' + JSON.stringify([ended, endedErr, endedThen]),
+    /^Allowed late — the agent never said whether it ran$/.test(UNSAID || '') && same(ended, (r) => r.late === 'unsaid' && r.words === UNSAID) && same(endedErr, (r) => r.late === 'unsaid') && same(endedThen, (r) => r.late === 'not-run'));
+  const sx = { _normalizer: new MessageManager('sess-la-stop'), _subNormalizers: new Map(), _taskRecords: {}, _webuiId: 'sess-la-stop', backend: 'claude' };
+  for (const r of [use, ask, cancel, allow]) sx._normalizer.processLive(JSON.parse(JSON.stringify(r)));
+  HA.forget(sx);   // THE CONVERSATION STOPPED: the kill and exit paths' forget
+  const sxCard = sx._normalizer.messages.find((m) => m.permission && m.permission.requestId === 'req-la');
+  check('⑱h (a) …and when the CONVERSATION STOPS (helper-asks forget, the kill and exit paths) a waiting late Allow says the agent never said', !!sxCard && sxCard.permission.late && sxCard.permission.late.state === 'unsaid', sxCard && sxCard.permission);
+  check('⑱h the unsaid words in zh and ja', zhHas(UNSAID) && jaHas(UNSAID));
+  // RED CONTROLS of the round: each half put back as the 74d62ec63 tip had it
+  const MATCH = '      if (byAsk ? p.requestId === raw.request_id : (!!raw.tool_use_id && call === raw.tool_use_id)) {\n';
+  const ORDER = "  if (perm.lateNotRun) return ran ? { state: 'ran' } : { state: 'not-run', reason: perm.lateNotRun };\n";
+  const OR_MATCH = '      if ((raw.request_id && p.requestId === raw.request_id) || (raw.tool_use_id && call === raw.tool_use_id)) {\n';   // stale-pins: kept — the red controls rebuild the 74d62ec63 tip's lines
+  const NOTRUN_FIRST = "  if (perm.lateNotRun) return { state: 'not-run', reason: perm.lateNotRun };\n";   // stale-pins: kept — the red controls rebuild the 74d62ec63 tip's lines
+  const mmSrcR = read('src/message-manager.js'), MR = mutantCopies('late-allow-round', REPO);
+  const Tip = MR.load('src/message-manager.js', anchored(anchored(mmSrcR, MATCH, OR_MATCH, 'tip-match'), ORDER, NOTRUN_FIRST, 'tip-order'), 'tip-74d62ec63').MessageManager;
+  const OrOnly = MR.load('src/message-manager.js', anchored(mmSrcR, MATCH, OR_MATCH, 'or-match'), 'or-match').MessageManager;
+  const FirstOnly = MR.load('src/message-manager.js', anchored(mmSrcR, ORDER, NOTRUN_FIRST, 'notrun-first'), 'notrun-first').MessageManager;
+  const tipMust = run(Tip, MUST, 'sess-la-tip'), orNoRes = run(OrOnly, [use, ask, cancel, ask2, allow2, notRun('asked_again')], 'sess-la-or'), firstLast = run(FirstOnly, [use, ask, cancel, allow, notRun('card_open'), ran], 'sess-la-first');
+  check('⑱h RED CONTROL (the 74d62ec63 tip: «else by call» + not-run before the result): THE MUST\'s scene reads «' + tipMust.words + '» — a call that RAN shown not run', tipMust.words === NOTRUN, tipMust);
+  check('⑱h RED CONTROL (the matcher alone, «else by call»): the record about ask one lands on ask two — «' + orNoRes.words + '»', orNoRes.late === 'not-run' && orNoRes.ask === 'req-la2', orNoRes);
+  check('⑱h RED CONTROL (the order alone, not-run before the result): the same ask\'s good result is outranked — «' + firstLast.words + '»', firstLast.words === NOTRUN, firstLast);
+
   // RED CONTROL: the a117cebb8 release — no late-Allow judge — reads the same late Allow «Allowed», as if done
   const mmSrc = read('src/message-manager.js'), JUDGE = 'function lateAllowOf(perm, res) {\n';
   const NoJudge = mutantCopies('late-allow-unjudged', REPO).load('src/message-manager.js', anchored(mmSrc, JUDGE, JUDGE + '  return null;\n', 'late-allow-unjudged'), 'late-allow-unjudged').MessageManager;
