@@ -559,14 +559,14 @@ const armTilePress = async (tag, n, id, p) => {   // `p` = the point the press w
   return { onTile: top.tile === id, armed };
 };
 const readTilePress = () => evalJs(`(() => { const r = window.__tilePress; if (!r) return null; r.off(); window.__tilePress = null; return { ev: r.ev, redraws: r.redraws }; })()`).catch((e) => ({ unread: e.message }));
-/** B-6cf9 FACT (主开发 r1141: «the first tile press that does not take under load: the leg or the product»). The recorder has seen
- *  no miss since it landed (its kept runs: every first press took), so the PRODUCT road is driven on purpose, once per run: a
- *  window title that changes between the press and its release. A changed title is a new structKey, so updateTaskbar rebuilds
- *  #taskbar-items (innerHTML = '', src/lib/taskbar.js), and a press whose down and up meet two different tiles may never reach
- *  the tile's handler. setTitle runs on the 5 s identity sync for every window, and a chat's title can arrive late under load.
- *  The control first: the same press with no title change minimizes the window (the handler's road for an active, reachable
- *  window). Then the plant: the title changes in the press's own mousedown. Each press's record is printed whole; a fact, not
- *  a verdict (the check judges only that the plant happened, a rebuild between the press and its release). */
+/** B-6cf9 (主开发 r1141 → r1479): a window title that changes between a tile's press and its release, driven on purpose, once
+ *  per run. THE FACT (R1, 37cbfad62 on test machine 1): a changed title was a new key of the whole strip, so updateTaskbar
+ *  rebuilt #taskbar-items, the press's up landed on a new tile, no click fired — the planted press did NOT take, the control
+ *  did, and try 1's one real red had the same shape. THE CHECK (the cure: src/lib/taskbar.js paints a title IN PLACE, the strip
+ *  rebuilt on its STRUCTURE only): the planted press TAKES with 0 rebuilds between its press and release. The control first:
+ *  the same press with no title change minimizes the window (the handler's road for an active, reachable window). Then the
+ *  plant: the title changes in the press's own mousedown (proven: the title after the press is the planted one). Each press's
+ *  record is printed whole. setTitle runs on the 5 s identity sync for every window, and a chat's title can arrive late. */
 const stripRebuildFact = async (id) => {
   const ready = async () => { await evalJs(`(() => { const w = app.wm.windows.get(${J(id)}); if (w && w.isMinimized && app.wm.restoreWindow) app.wm.restoreWindow(${J(id)}); app.wm.revealWindow && app.wm.revealWindow(${J(id)}); app.wm.focusWindow(${J(id)}); return true; })()`); await sleep(400); };
   const stateOf = () => evalJs(`(() => { const w = app.wm.windows.get(${J(id)}); return { active: app.wm.activeWindowId === ${J(id)}, min: !!(w && w.isMinimized), title: w ? w.title : null }; })()`);
@@ -582,9 +582,10 @@ const stripRebuildFact = async (id) => {
     let rec = null;
     try { await click(pt); await sleep(500); } finally { rec = await readTilePress(); }
     const after = await stateOf();
+    const planted = plant ? after.title === String(title0) + ' ·' : null;   // the plant fired: the title changed in the press
     if (plant) await evalJs(`app.wm.setTitle(${J(id)}, ${J(title0)})`).catch(() => {});
     const down = rec && rec.ev ? rec.ev.find((e) => e.type === 'mousedown') : null, up = rec && rec.ev ? rec.ev.find((e) => e.type === 'mouseup') : null;
-    return { n, plant, pressed: true, took: !before.min && after.min, before: { active: before.active, min: before.min }, after: { active: after.active, min: after.min }, rebuiltBetween: !!(down && up && up.redraws > down.redraws), rec };
+    return { n, plant, pressed: true, took: !before.min && after.min, planted, before: { active: before.active, min: before.min }, after: { active: after.active, min: after.min }, rebuiltBetween: !!(down && up && up.redraws > down.redraws), rebuilds: down && up ? up.redraws - down.redraws : null, rec };
   };
   const control = await pressOnce(1, false);
   const planted = await pressOnce(2, true);
@@ -767,11 +768,11 @@ const runViewport = async ([VW, VH], font) => {
   await step(`${tag} ① the release never buries a window`, async () => {
     const d = await legDragOverTaskbar(tag);
     check(`① ${tag}: Quad — a title bar released over the taskbar keeps ${d.after.bar[0]}×${d.after.bar[1]} of it inside the workspace (≥ 80×32) (P2-1)`, reachableBar(d.after), d.after);
-    if (!B6CF9_FACT_SEEN && !/RED/.test(tag)) {   // B-6cf9 FACT, once per run (the first real face): does a strip rebuilt between the press and its release lose it?
+    if (!B6CF9_FACT_SEEN && !/RED/.test(tag)) {   // B-6cf9, once per run (the first real face): a title changed inside a tile's press — the press still takes
       B6CF9_FACT_SEEN = true;
       const f = await stripRebuildFact(d.id);
-      console.log(`  ⓘ B-6cf9 FACT ${tag}: the CONTROL press (no title change) ${f.control.pressed ? (f.control.took ? 'TOOK (minimized)' : 'did NOT take') : 'was not made: ' + f.control.why} · the PLANTED press (its title changed in its own mousedown) ${f.planted.pressed ? (f.planted.took ? 'TOOK (minimized)' : 'did NOT take') + (f.planted.rebuiltBetween ? ', the strip rebuilt between its press and release' : ', no rebuild between its press and release') : 'was not made: ' + f.planted.why} — the control's record ${J(f.control.rec)} · the plant's record ${J(f.planted.rec)}`);
-      check(`① ${tag}: B-6cf9 FACT — the plant happened: the strip was rebuilt between the press and its release (the press ${f.planted.took ? 'TOOK' : 'did NOT take'}; the control's ${f.control.took ? 'took' : 'did NOT take'})`, f.control.pressed && f.planted.pressed && f.planted.rebuiltBetween, f);
+      console.log(`  ⓘ B-6cf9 ${tag}: the CONTROL press (no title change) ${f.control.pressed ? (f.control.took ? 'TOOK (minimized)' : 'did NOT take') : 'was not made: ' + f.control.why} · the PLANTED press (its title changed in its own mousedown) ${f.planted.pressed ? (f.planted.took ? 'TOOK (minimized)' : 'did NOT take') + (f.planted.rebuiltBetween ? ', the strip rebuilt between its press and release' : ', no rebuild between its press and release') : 'was not made: ' + f.planted.why} — the control's record ${J(f.control.rec)} · the plant's record ${J(f.planted.rec)}`);
+      check(`① ${tag}: B-6cf9 — a tile press whose window's title changes in its own mousedown TAKES (minimized), the strip NOT rebuilt between its press and release (${f.planted.rebuilds} rebuilds), as the control's press (${f.control.took ? 'took' : 'did NOT take'}) — the title is painted in place (the base rebuilt every tile and lost the press)`, f.control.pressed && f.control.took && f.planted.pressed && f.planted.planted === true && f.planted.took && f.planted.rebuilds === 0, f);
     }
     check(`① ${tag}: …and its tile, clicked twice, leaves it reachable (${d.afterTiles.bar[0]}×${d.afterTiles.bar[1]})`, d.pressed && reachableBar(d.afterTiles) && !d.afterTiles.min, d.pressed ? d.afterTiles : { notPressed: 'the tile was not on screen', strip: d.strip });
     await layout('freeform');
