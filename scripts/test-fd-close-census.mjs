@@ -538,7 +538,7 @@ fsp.open = async (...a) => { const h = await open.apply(fsp, a); if (String(a[0]
   const cl = await cliScene(path.join(REPO, 'data/bin/vibespace-channels'), 'real');
   ok(cl.code === 1 && cl.closes === 1 && cl.said && !cl.kept, '⑤b the channels CLI\'s attachment (the real CLI, a child): its close refused is SAID and the command exits 1, nothing kept — the handle forgotten BEFORE the awaited close, so it is closed ONCE', cl);
   { const d = scratchDir('fdc-cli-red-bin'); const cli = path.join(d, 'vibespace-channels');
-    fs.writeFileSync(cli, anchored(FILES['data/bin/vibespace-channels'], /^ {6}\{ const h = fh; fh = null; await h\.close\(\); \}[^\n]*\n/m, '      await fh.close(); fh = null;   // MUTANT: the release\'s order\n', 'cli-order'));
+    fs.writeFileSync(cli, anchored(FILES['data/bin/vibespace-channels'], /^ {6}\{ const saving = fh; fh = null; await saving\.close\(\); \}[^\n]*\n/m, '      await fh.close(); fh = null;   // MUTANT: the release\'s order\n', 'cli-order'));
     for (const [from, to] of [['src/cli-call.js', 'cli-call.js'], ['src/agent-cli-text.js', 'agent-cli-text.js'], ['src/fd-close.js', 'fd-close.js']]) fs.copyFileSync(path.join(REPO, from), path.join(d, to));
     const xcl = await cliScene(cli, 'red');
     ok(xcl.code === 1 && xcl.closes === 2, 'CONTROL (the release\'s order — the handle forgotten only AFTER its awaited close, in a copy): the catch closes it a SECOND time — red', xcl); }

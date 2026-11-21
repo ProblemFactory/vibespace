@@ -597,7 +597,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
         for (let off = 0; off < value.length;) off += (await fh.write(value, off, value.length - off)).bytesWritten;
       }
       if (got !== declared) throw new Error(`the answer ended at ${got} of its declared ${declared} bytes — nothing kept`);
-      { const h = fh; fh = null; await h.close(); }   // B-15ac follow: forgotten BEFORE the awaited close — the catch never closes it a second time (a failed close throws into it and is said there)
+      { const saving = fh; fh = null; await saving.close(); }   // B-15ac follow: forgotten BEFORE the awaited close — the catch never closes it a second time (a failed close throws into it and is said there)
       const dest = out || agentAttachmentPath({ root: cacheRoot, adapterId: conv.slice(0, i), convId: conv.slice(i + 1), msg: msgId, attId, mime: info.mime, head });
       fs.renameSync(part, dest);   // a rename REPLACES a planted symlink at the target, it never writes through it
       const trimmed = out ? 0 : trimAttachmentCache(cacheRoot, { keep: dest });   // the cache's bound, said
