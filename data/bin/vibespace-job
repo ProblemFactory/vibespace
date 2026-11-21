@@ -132,6 +132,8 @@ function budgetLine(j) {
   const bud = j.memoryBudget;
   if (!bud || !bud.budgetMb) return '';
   if (bud.unmeasured) return ` · the instance's memory budget for jobs: ${sizeWords(bud.budgetMb)} — not judged right now (the memory of ${bud.unmeasured} running job${bud.unmeasured === 1 ? '' : 's'} could not be read)`;
+  // r924: a job that names no memory is judged at most at HALF the budget — the line says what its start is judged with
+  if (bud.askHalf) return ` · the instance's memory budget for jobs: ${sizeWords(bud.budgetMb)} — ${sizeWords(bud.usedMb || 0)} in use by ${bud.running} running job${bud.running === 1 ? '' : 's'} · this job names no memory: a start of it is judged at ${sizeWords(bud.askMb)}, half the budget`;
   return ` · the instance's memory budget for jobs: ${sizeWords(bud.budgetMb)} — ${sizeWords(bud.usedMb || 0)} in use by ${bud.running} running job${bud.running === 1 ? '' : 's'}`;
 }
 // B-d73c: the heap the job's Node gets — 75 % of the memory it names (handed as --max-old-space-size beside its own NODE_OPTIONS),

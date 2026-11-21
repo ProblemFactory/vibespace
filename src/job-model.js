@@ -498,6 +498,15 @@ function budgetVerdict({ limitMb, running = [], askedMb, nowMs, ageMs = BUDGET.a
   const out = { judged: true, budgetMb, usedMb, holders, askedMb: asked };
   return usedMb + asked <= budgetMb ? { ...out, ok: true } : { ...out, ok: false, refused: true, roomMb: Math.max(0, budgetMb - usedMb) };
 }
+/** B-b14a (the coordinator's r924): WHAT A START IS JUDGED WITH — a job that NAMED its memory (the ladder's source «job»): what it
+ *  names (its effective bound); any other (the owner's setting — «unbounded» included, the cluster's, the default): at most HALF
+ *  the budget. The bound it RUNS under does not change — only what its start is judged with (the product's own guess of a job's
+ *  need never refuses it alone: a second job that names nothing starts while the first uses little) */
+function budgetAskOf(mem, budgetMb) {
+  const bound = Math.max(0, Math.floor(Number(mem && mem.mb) || 0)), named = !!(mem && mem.source === 'job');
+  const half = budgetMb ? Math.floor(Number(budgetMb) / 2) : null;
+  return !named && half !== null && bound > half ? { mb: half, named, halved: true, boundMb: bound } : { mb: bound, named, halved: false, boundMb: bound };
+}
 const budgetSize = (mb) => { const n = Math.max(0, Math.floor(Number(mb) || 0)); return n < 1024 ? `${n} MB` : `${Math.round((n / 1024) * 10) / 10} GB`; };
 /** THE REFUSAL'S WORDS (English: the CLI prints them; the event line carries them). THE PRIVACY LAW (round wh9e7xe8i, MUST 1): a
  *  holder is NAMED only to a reader who may VIEW it (`own` on the holder = this reader may view it — the engine judges it against
@@ -515,7 +524,16 @@ function budgetRefusalWords(v, { id, create = false, named = true } = {}) {
   const ended = named ? 'wait until one of them ends' : `${create ? 'run' : 'start'} it again once a running job has ended`;
   const recipe = [stop, lower].filter(Boolean).join(', or ') + (!named && lower ? `, or ${ended}` : '') || ended;
   const n = v.holders.length, held = [list, rest].filter(Boolean).join('; ');
-  return `${create ? 'not created' : 'not started'}: the instance's memory budget for jobs is ${budgetSize(v.budgetMb)}, and ${budgetSize(v.usedMb)} of it is in use by ${n} running job${n === 1 ? '' : 's'}${held ? ` (${held})` : ''}; this job's bound is ${budgetSize(v.askedMb)}. To start it: ${recipe}${create || !named ? '' : ', then start it again'}`;
+  const judged = v.halved ? `this job names no memory, so its start is judged at ${budgetSize(v.askedMb)} — half the budget (it would run under ${budgetSize(v.boundMb)})` : `this job's bound is ${budgetSize(v.askedMb)}`;   // r924: what it was judged with
+  return `${create ? 'not created' : 'not started'}: the instance's memory budget for jobs is ${budgetSize(v.budgetMb)}, and ${budgetSize(v.usedMb)} of it is in use by ${n} running job${n === 1 ? '' : 's'}${held ? ` (${held})` : ''}; ${judged}. To start it: ${recipe}${create || !named ? '' : ', then start it again'}`;
+}
+/** B-b14a r931: what an AGENT that pressed Start is told when its press — answered «it starts once its last run is stopped» — was
+ *  refused by the budget LATER (in its own conversation, through the owner notice's door): NO holder named (the count and the sum),
+ *  under the notice's 200-character line; `vibespace-job start` again names what it may view and the room left */
+function budgetLaterWords(v, { id } = {}) {
+  const b = v || {}, n = (b.holders || []).length;
+  const asks = b.halved ? `is judged at ${budgetSize(b.askedMb)} (it names no memory)` : `asks ${budgetSize(b.askedMb)}`;
+  return `not started after all: the memory budget for jobs (${budgetSize(b.budgetMb)}) had ${budgetSize(b.usedMb)} in use by ${n} running job${n === 1 ? '' : 's'}; this job ${asks}. vibespace-job start ${id || '<id>'} says which`;
 }
 /** WHICH LIMIT capped (round 4), by the cgroup that holds it: «/» — the root a container sees (a pod's cgroup namespace) — is
  *  the instance; user.slice / user-<uid>.slice the user slice; any other cgroup its own name (the hub's unit, a slice) */
@@ -1358,7 +1376,7 @@ module.exports = { jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,
   NODE_HEAP, nodeHeapOf, withNodeHeap,   // B-d73c
-  BUDGET, budgetMbOf, budgetVerdict, budgetRefusalWords,   // B-b14a
+  BUDGET, budgetMbOf, budgetAskOf, budgetVerdict, budgetRefusalWords, budgetLaterWords,   // B-b14a
   MEMORY, MEMORY_CAUSES, RUN_CAUSES, awayFactsOf, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, boundWords, leftRecord, leftRecordFault, leftWords, runEndWords, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,

@@ -1014,7 +1014,9 @@ function staticRed({ routes, jobs, model, others = {} }) {
   for (const v of viewSites) if (!EXPECT[v.f]) red.push(`${v.f}:${v.line} calls visibleJobs( — no row`);
   for (const c of ['digestFor', 'updatesFor']) { const b = bodyOf(jobs, new RegExp(`^ {2}${c}\\(caller[^)]*\\) \\{`, 'm')) || ''; if (/\bvisibleJobs\(/.test(b) && !/\bM\.addressedTo\(/.test(b)) red.push(`src/jobs.js ${c}: visibleJobs( without M.addressedTo`); }
   // (d) every call of a job-item renderer (a block that shows a job item): a new call site is red by name
-  const RENDER_ROWS = { 'src/jobs.js': { renderJobsUpdate: 2, renderJobsDigest: 1, fitDigest: 1, renderOwnerNotify: 4 }, 'src/agent-routes.js': { renderNotifStash: 1 }, 'src/server/stash-handover.js': { renderNotifStash: 1 } };
+  // B-b14a r931 (the coordinator's ruling): +1 renderOwnerNotify — a refused PRESS told to the conversation that PRESSED (addressed by its
+  // own act, a caller that may still view the job; _tellRefused), once, naming no holder
+  const RENDER_ROWS = { 'src/jobs.js': { renderJobsUpdate: 2, renderJobsDigest: 1, fitDigest: 1, renderOwnerNotify: 5 }, 'src/agent-routes.js': { renderNotifStash: 1 }, 'src/server/stash-handover.js': { renderNotifStash: 1 } };
   const files = { 'src/jobs.js': jobs, 'src/agent-routes.js': routes, ...others };
   for (const [f, s] of Object.entries(files)) {
     for (const r of ['renderJobsUpdate', 'renderJobsDigest', 'fitDigest', 'renderOwnerNotify', 'renderNotifStash', 'jobLine']) {

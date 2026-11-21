@@ -12907,6 +12907,8 @@ export default {
   "If this job runs a Node program, its heap is {size} — set by the job’s own options": "若此任务运行 Node 程序，它的堆为 {size} — 由任务自己的选项设定",
   "If this job runs a Node program, Node’s own default heap under this bound is about {size} — set the memory bound here to give it 75% of the bound": "若此任务运行 Node 程序，此上限下 Node 自带的默认堆约为 {size} — 在这里设定内存上限，可让它用到上限的 75%",
   "The instance’s memory budget for jobs: {budget} — {used} in use by {n} running job(s)": "实例给任务的内存预算：{budget} — {n} 个运行中的任务正在使用 {used}",
+  "This job names no memory: its start is judged at {ask}, half the budget": "此任务未指定内存：它的启动按预算的一半 {ask} 来判断",
+  "This job names no memory: its start is judged at {ask}, half the budget — it would run under {bound}.": "此任务未指定内存：它的启动按预算的一半 {ask} 来判断 — 它运行时的上限是 {bound}。",
   "The instance’s memory budget for jobs: {budget} — not judged right now: the memory of {n} running job(s) could not be read": "实例给任务的内存预算：{budget} — 目前不做判断：{n} 个运行中任务的内存暂时读不到",
   "Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them, or lower this job’s memory bound to {room} or less.": "未启动：实例给任务的内存预算为 {budget}，其中 {used} 正被 {n} 个运行中的任务使用（{holders}）；此任务需要 {asked}。请停止其中一个，或把此任务的内存上限降到 {room} 以下。",
   "Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them first.": "未启动：实例给任务的内存预算为 {budget}，其中 {used} 正被 {n} 个运行中的任务使用（{holders}）；此任务需要 {asked}。请先停止其中一个。",

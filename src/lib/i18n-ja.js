@@ -12906,6 +12906,8 @@ export default {
   "If this job runs a Node program, its heap is {size} — set by the job’s own options": "このジョブが Node プログラムを実行する場合、ヒープは {size} — ジョブ自身のオプションによる設定",
   "If this job runs a Node program, Node’s own default heap under this bound is about {size} — set the memory bound here to give it 75% of the bound": "このジョブが Node プログラムを実行する場合、この上限での Node 標準のヒープは約 {size} — ここでメモリ上限を設定すると上限の 75% を使えます",
   "The instance’s memory budget for jobs: {budget} — {used} in use by {n} running job(s)": "インスタンスのジョブ用メモリ予算：{budget} — 実行中の {n} 件のジョブが {used} を使用中",
+  "This job names no memory: its start is judged at {ask}, half the budget": "このジョブはメモリを指定していません：開始は予算の半分 {ask} で判定されます",
+  "This job names no memory: its start is judged at {ask}, half the budget — it would run under {bound}.": "このジョブはメモリを指定していません：開始は予算の半分 {ask} で判定されます — 実行時の上限は {bound} です。",
   "The instance’s memory budget for jobs: {budget} — not judged right now: the memory of {n} running job(s) could not be read": "インスタンスのジョブ用メモリ予算：{budget} — 今は判定しません：実行中の {n} 件のジョブのメモリを読めませんでした",
   "Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them, or lower this job’s memory bound to {room} or less.": "開始していません：インスタンスのジョブ用メモリ予算は {budget} で、そのうち {used} を実行中の {n} 件のジョブが使用中です（{holders}）。このジョブは {asked} を求めます。どれかを停止するか、このジョブのメモリ上限を {room} 以下に下げてください。",
   "Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them first.": "開始していません：インスタンスのジョブ用メモリ予算は {budget} で、そのうち {used} を実行中の {n} 件のジョブが使用中です（{holders}）。このジョブは {asked} を求めます。先にどれかを停止してください。",

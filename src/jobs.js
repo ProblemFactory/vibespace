@@ -2608,8 +2608,21 @@ class JobManager {
     if (!this._pending(job, run)) { go(); return Promise.resolve(); }
     // B-b14a: a DEFERRED start the budget refused (it waited for its last run's reap) is a service's failed start too — on its
     // ladder, exactly like the start that went at once (the restart policy's catch); a person's press is said on its events
-    // round wh9e7xe8i: a PRESS deferred that way and refused later is undone (the record as it was) and told to the person who pressed
-    const p = job._starting = this._clearBefore(job, run, trigger).then((clear) => { delete job._starting; if (!clear) return; try { go(); } catch (e) { if (e && e.code === 'memory-budget' && trigger === 'manual' && typeof opts.onRefused === 'function') opts.onRefused(e); else if (e && e.code === 'memory-budget' && job.kind === 'service' && trigger !== 'manual') this._budgetLadder(job, e); else this.d.log(`[jobs] ${trigger} start of ${job.id} refused:`, e.message); } });
+    // round wh9e7xe8i + r931: the presses waiting on this start (one record: the state before the FIRST press since the last Stop,
+    // and every presser) are UNDONE when the budget refuses it and each presser is told once; then an automatic start's refusal
+    // counts on the service's ladder (over the restored supervision)
+    const p = job._starting = this._clearBefore(job, run, trigger).then((clear) => {
+      delete job._starting;
+      if (!clear) { delete job._press; return; }
+      try { go(); delete job._press; } catch (e) {
+        if (e && e.code === 'memory-budget') {
+          const pr = this._undoRefusedPress(job);
+          if (pr) this._tellRefused(job, e, pr.by);
+          if (job.kind === 'service' && trigger !== 'manual') this._budgetLadder(job, e);
+          else if (!pr) this.d.log(`[jobs] ${trigger} start of ${job.id} refused:`, e.message);
+        } else { delete job._press; this.d.log(`[jobs] ${trigger} start of ${job.id} refused:`, e.message); }
+      }
+    });
     return p;
   }
   /** round 7: its last run's wrapper STILL RUNS (a boot that could not read its pid.json judged that run ended) — never a run
@@ -2926,7 +2939,7 @@ class JobManager {
     if (!vet.ok) { this._refuseRun(job, vet, trigger); throw new Error(vet.error); }
     // B-b14a: THE BUDGET — a start whose bound does not fit beside what the running jobs MEASURABLY use is refused by name (no
     // measure ⇒ not judged: a boot replay, whose jobs were never measured, is never refused here)
-    { const bv = this._budgetVerdict(job, M.memoryMbOf(job, this._memoryCtx({ hub: true })).mb, caller); if (bv.refused) throw this._budgetRefusal(job, bv, trigger, caller); }
+    { const bv = this._budgetVerdict(job, M.memoryMbOf(job, this._memoryCtx({ hub: true })), caller); if (bv.refused) throw this._budgetRefusal(job, bv, trigger, caller); }
     // THE VAULT VALUES (lane vault-job-road): a job that declared --vault starts WITH its values or not at all — locked or
     // unapproved ⇒ it WAITS (no run, no counted failure; an unlock or an approval starts it — vaultChanged); an entry gone ⇒ refused
     const vj = VJ.refsOf(job).length ? this._vaultGate(job, trigger) : null;
@@ -3600,10 +3613,12 @@ class JobManager {
   /** B-b14a: THE VERDICT for a start of `job` asking `askedMb` — the OTHER running jobs' measures. Round wh9e7xe8i (MUST 1, THE
    *  PRIVACY LAW): a holder is `own` (named) only when the CALLER may VIEW it — never judged against the job's owner; no caller (a
    *  restart policy, a schedule, a boot, a replay) ⇒ nobody is named */
-  _budgetVerdict(job, askedMb, caller = null) {
+  _budgetVerdict(job, mem, caller = null) {
     const lim = this._instanceLimit();
+    const ask = M.budgetAskOf(mem, M.budgetMbOf(lim && lim.mb));   // r924: a job that named no memory is judged at most at HALF the budget
     const running = [...this.jobs.values()].filter((j) => j !== job && j.id !== job.id && this._holdsBudget(j)).map((j) => ({ id: j.id, name: this.labelOf(j), use: j._use || null, own: caller ? M.canView(j, caller) : false }));
-    const v = M.budgetVerdict({ limitMb: lim && lim.mb, running, askedMb, nowMs: now() });
+    const v = M.budgetVerdict({ limitMb: lim && lim.mb, running, askedMb: ask.mb, nowMs: now() });
+    if (v.judged) Object.assign(v, { halved: ask.halved, boundMb: ask.boundMb });   // the words say what it was judged with
     if (v.holders) { const own = new Map(running.map((r) => [r.id, r.own])); v.holders = v.holders.map((h) => ({ ...h, own: !!own.get(h.id) })); }
     return v;
   }
@@ -3640,6 +3655,13 @@ class JobManager {
       this._save();
     } catch (err) { try { this.d.log(`[jobs] ${job && job.id}: the budget's ladder failed:`, err && err.message); } catch { } }
   }
+  /** B-b14a (r924): what a start of THIS job is judged with, for the doors — only when it is not its bound (a job that names no
+   *  memory, its bound past half the budget): {askMb, askHalf} */
+  _askFacts(job, b) {
+    if (!job || job.kind === 'cron' || !b || !b.budgetMb) return {};
+    const a = M.budgetAskOf(M.memoryMbOf(job, this._memoryCtx({ hub: true })), b.budgetMb);
+    return a.halved ? { askMb: a.mb, askHalf: true } : {};
+  }
   /** B-b14a: the PERSON's copy's fields (the For-you tray is the person's, who may view every job): the budget and its holders by
    *  name, each clipped */
   _budgetCopyParams(e) {
@@ -3647,11 +3669,32 @@ class JobManager {
     const holders = hs.slice(0, M.BUDGET.namedHolders).map((h) => `${String(h.name || h.id).slice(0, 40)} ${M.memoryWords(h.mb)}`).join(', ') + (hs.length > M.BUDGET.namedHolders ? ', …' : '');
     return { budget: M.memoryWords(v.budgetMb), holders };
   }
-  /** B-b14a round wh9e7xe8i: a PERSON's press answered «it starts once its last run is stopped», refused by the budget LATER —
-   *  the person is told where they look (the For-you tray: a failed action of a person reaches the person); an agent's press is
-   *  said on the job's event line (its owner and subscribers read it) */
-  _tellRefused(job, e, caller) {
-    try { if (caller && caller.isUser) this._forYou(job, M.forYouCopy(job, 'refused-budget', this._budgetCopyParams(e))); } catch (err) { this.d.log(`[jobs] ${job.id}: the refusal's notice failed:`, err && err.message); }
+  /** B-b14a: THE PRESS RECORD UNDONE — the state before the first press since the last Stop (wanted-up, the supervision), saved;
+   *  → the record ({was, by}) or null. ONE line restores (a red copy removes it) */
+  _undoRefusedPress(job) {
+    const p = job._press;
+    if (!p) return null;
+    delete job._press;
+    job.desiredUp = p.was.desiredUp; job.supervise = p.was.supervise;
+    this._touch(job); this._save();
+    return p;
+  }
+  /** B-b14a round wh9e7xe8i + r931: presses answered «it starts once its last run is stopped», refused by the budget LATER — each
+   *  presser told ONCE where it looks: a PERSON in the For-you tray (the person views every job: the holders by name); an AGENT
+   *  in its own conversation by the road that tells a job's owner (_deliverTo), naming NO holder (the count and the sum) — the
+   *  answer it was given went untrue */
+  _tellRefused(job, e, by) {
+    const told = new Set();
+    for (const c of by || []) {
+      try {
+        if (c && c.isUser) { if (!told.has('person')) { told.add('person'); this._forYou(job, M.forYouCopy(job, 'refused-budget', this._budgetCopyParams(e))); } continue; }
+        const cid = c && c.conversationId;
+        if (!cid || told.has(cid) || !M.canView(job, c)) continue;   // the presser must still VIEW the job (a control grant alone names nothing to it)
+        told.add(cid);
+        const owner = M.isOwner(job, c), ev = { what: M.budgetLaterWords(e && e.budget, { id: job.id }), wake: 'result', at: now() };
+        this._deliverTo(cid, job, ev, { subscriber: !owner, text: M.renderOwnerNotify(job, ev, { name: this.labelOf(job), ...(owner ? {} : { context: '' }) }) });
+      } catch (err) { this.d.log(`[jobs] ${job.id}: the refusal's notice failed:`, err && err.message); }
+    }
   }
   /** B-b14a: THE BUDGET'S FACT for the doors (numbers only — a viewer may see none of the holders): worked out ONCE per second */
   _budgetFacts() {
@@ -4506,7 +4549,7 @@ class JobManager {
       ...(mr.grant ? { mayRead: mr.grant } : {}),   // B-3992: what this job's token may READ beside itself (read only)
     };
     if (job.kind !== 'cron') {   // B-b14a: past the budget ⇒ refused by name, NOTHING created (a schedule is judged at each fire)
-      const bv = this._budgetVerdict(job, M.memoryMbOf(job, this._memoryCtx({ hub: true })).mb, caller);   // named: what the CALLER may view
+      const bv = this._budgetVerdict(job, M.memoryMbOf(job, this._memoryCtx({ hub: true })), caller);   // named: what the CALLER may view
       if (bv.refused) { this.d.log(`[jobs] create of «${this.labelOf(job)}» refused: the instance's memory budget (${bv.usedMb} + ${bv.askedMb} > ${bv.budgetMb} MB)`); return { error: M.budgetRefusalWords(bv, { create: true }), code: 'memory-budget', budget: bv }; }
     }
     this.jobs.set(job.id, job);
@@ -4537,6 +4580,8 @@ class JobManager {
     // not said stopping, its service not marked down); the press and the agent's stop are answered with the words
     { const run0 = job.runs && job.runs[job.runs.length - 1]; if (this._runLive(job, run0) && this._hubIsMain(job, run0)) return this._hubMainRefusal(job, run0, force ? 'a forced stop' : 'the stop'); }
     delete job._startAfterStop;   // B-cac2: a stop pressed after a remembered start (or a restart) means stopped — it starts no more
+    delete job._press;   // B-b14a r931: a Stop ends the presses waiting on a start — the next press retakes the snapshot (its undo never restores over this Stop)
+    if (job.kind === 'cron') delete job._budgetSkips;   // …and a schedule's stretch of skipped fires
     if (job.kind === 'service' || job.kind === 'cron') { job.desiredUp = false; }
     job._stopRequested = true;
     if (job.kind === 'service') this._teardownPublish(job);
@@ -4577,9 +4622,13 @@ class JobManager {
       return { ok: true, pending: true, words: (left != null ? `still stopping (${left} s left) — it starts when the stop ends` : 'still stopping — it starts when the stop ends') + ' (a VibeSpace restart before then forgets it: start it again)' };   // 主开发 21:46Z (b): said where the person is told
     }
     // B-b14a round wh9e7xe8i (MUST 2): A REFUSED START LEAVES THE RECORD EXACTLY AS IT WAS — the budget refuses after these writes,
-    // so a refusal UNDOES them (a service left wanted-up would start unjudged at the next boot's replay, beside the set it did not fit)
-    const was = { desiredUp: job.desiredUp, supervise: job.supervise };
-    const undo = () => { job.desiredUp = was.desiredUp; job.supervise = was.supervise; this._touch(job); this._save(); };
+    // so a refusal UNDOES them (a service left wanted-up would start unjudged at the next boot's replay, beside the set it did not fit).
+    // r931: ONE press record a pending start — the state before the FIRST press since the last Stop (a press that JOINS a start in
+    // flight never retakes it: its own snapshot would hold an earlier press's write) and every presser, each told once
+    if (job.kind !== 'cron') {
+      const pr = job._press || (job._press = { was: { desiredUp: job.desiredUp, supervise: job.supervise }, by: [] });
+      if (caller && !pr.by.some((c) => c === caller || (c.isUser && caller.isUser) || (c.conversationId && c.conversationId === caller.conversationId))) pr.by.push(caller);
+    }
     job.desiredUp = true;
     job.supervise = { consecutiveFails: 0, parkedAt: null };
     // lane jobs-memory-bound: the owner acted — a cron parked for its child's out-of-memory ends counts its child afresh
@@ -4587,6 +4636,7 @@ class JobManager {
     if (job.kind === 'cron') {
       const vet = M.vetSpec(job); // B-f8c7: a cron spawns only at its next fire — reviving one the vet refuses answers NOW
       if (!vet.ok) { this._refuseRun(job, vet, 'manual'); return { error: vet.error }; }
+      delete job._budgetSkips;   // B-b14a: a schedule the owner started again begins a new stretch of skipped fires (its first raises the alarm)
       job.state = 'scheduled'; job.nextFireAt = M.nextFire(job.schedule, now(), undefined, null); this._touch(job); this._save(); // lane int361: from now, no fire to remember
       const vaultWait = this._cronVaultWait(job); // round 2: its fires would wait — said, never a bare «ok»
       return { ok: true, ...(vaultWait ? { vaultWait } : {}) }; }
@@ -4600,9 +4650,9 @@ class JobManager {
       if (!vet.ok) { this._refuseRun(job, vet, 'manual'); return { error: vet.error }; }
       if (this._besideLive(job, 'manual')) return { error: `${job.id}'s last run is still running — stop it first` }; // round 7
       const last = job.runs && job.runs[job.runs.length - 1]; // round 8: its doubt checked first, never beside it
-      // a press DEFERRED behind its last run's reap and refused later: undone, and the PERSON who pressed is told (round wh9e7xe8i)
-      const onRefused = (e) => { undo(); this._tellRefused(job, e, caller); };
-      try { this._startAfter(job, 'manual', () => job.desiredUp && !['up', 'starting'].includes(job.state), { caller, onRefused }); } catch (e) { if (e && e.code === 'memory-budget') undo(); return { error: e.message, ...(e && e.code ? { code: e.code } : {}), ...(e && e.budget ? { budget: e.budget } : {}) }; }   // B-b14a
+      // a press DEFERRED behind its last run's reap and refused later: undone, and every presser told (_startAfter's settle)
+      try { this._startAfter(job, 'manual', () => job.desiredUp && !['up', 'starting'].includes(job.state), { caller }); } catch (e) { if (e && e.code === 'memory-budget') this._undoRefusedPress(job); else delete job._press; return { error: e.message, ...(e && e.code ? { code: e.code } : {}), ...(e && e.budget ? { budget: e.budget } : {}) }; }   // B-b14a
+      if (!job._starting) delete job._press;   // nothing pending: the press is settled (started, or refused above)
       this._save();
       if (['up', 'starting'].includes(job.state)) return { ok: true };
       if (job.state === 'waiting') return this._waitAnswer(job); // lane vault-job-road r2: it waits for its values — nothing is «stopped first»
@@ -4618,7 +4668,8 @@ class JobManager {
       if (vw) return { ok: true, state: 'waiting', waitFor: vw.waitFor, after: `${after} — and its vault values would wait now: ${vw.words}` };
       return { ok: true, after };
     }
-    try { this._spawn(job, 'manual', { caller }); } catch (e) { if (e && e.code === 'memory-budget') undo(); return { error: e.message, ...(e && e.code ? { code: e.code } : {}), ...(e && e.budget ? { budget: e.budget } : {}) }; } // B-f8c7: the run-time vet's refusal is an answer · B-b14a: the budget's too
+    try { this._spawn(job, 'manual', { caller }); } catch (e) { if (e && e.code === 'memory-budget') this._undoRefusedPress(job); else delete job._press; return { error: e.message, ...(e && e.code ? { code: e.code } : {}), ...(e && e.budget ? { budget: e.budget } : {}) }; } // B-f8c7: the run-time vet's refusal is an answer · B-b14a: the budget's too
+    delete job._press;
     this._save();
     return job.state === 'waiting' ? this._waitAnswer(job) : { ok: true }; // lane vault-job-road r2: a wait is said as one
   }
@@ -4888,7 +4939,7 @@ class JobManager {
       // full creation parameters (2.347.0, owner ask: agents must be able to
       // re-inspect what they registered) — env VALUES stay out (names only)
       cmd: job.cmd ? { argv: job.cmd.argv, cwd: job.cmd.cwd || null, envKeys: Object.keys(job.cmd.env || {}) } : null,
-      ...((b) => (b ? { memoryBudget: b } : {}))(this._budgetFacts()),   // B-b14a: the instance's budget for running jobs — numbers only ({budgetMb, running, usedMb} or {…, unmeasured}); NO field without a limit
+      ...((b) => (b ? { memoryBudget: { ...b, ...this._askFacts(job, b) } } : {}))(this._budgetFacts()),   // B-b14a: the instance's budget for running jobs — numbers only ({budgetMb, running, usedMb} or {…, unmeasured}); NO field without a limit
       mayRead: M.mayReadOf(job),   // B-3992: the jobs this job's token may READ beside itself (null: only itself)
       vault: VJ.refsOf(job).map((r) => ({ name: r.name, ref: r.ref })), waitFor: job.state === 'waiting' ? job.waitFor || null : null, waitWords: job.state === 'waiting' ? VJ.waitWords(job.waitFor) : null, // lane vault-job-road: REFERENCES only, never a value
       // a cron's action TYPE (an enum: 'notify' | 'spawn-task' | null) — the panel words what --notify-user does per kind

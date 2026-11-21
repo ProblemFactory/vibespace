@@ -262,7 +262,8 @@ export function budgetWords(j, t) {
   const b = j && j.memoryBudget;
   if (!b || !b.budgetMb) return '';
   if (b.unmeasured) return t('The instance’s memory budget for jobs: {budget} — not judged right now: the memory of {n} running job(s) could not be read', { budget: memoryWords(b.budgetMb), n: b.unmeasured });
-  return t('The instance’s memory budget for jobs: {budget} — {used} in use by {n} running job(s)', { budget: memoryWords(b.budgetMb), used: memoryWords(b.usedMb || 0), n: b.running || 0 });
+  const fact = t('The instance’s memory budget for jobs: {budget} — {used} in use by {n} running job(s)', { budget: memoryWords(b.budgetMb), used: memoryWords(b.usedMb || 0), n: b.running || 0 });
+  return b.askHalf ? `${fact} · ${t('This job names no memory: its start is judged at {ask}, half the budget', { ask: memoryWords(b.askMb) })}` : fact;   // r924: what this job's start is judged with
 }
 /** B-b14a: THE PERSON'S REFUSAL — a press of Start / Restart, or a create — every holder by name (the person sees every job),
  *  this job's bound and the recipe; `create`: nothing was created */
@@ -270,8 +271,9 @@ export function budgetRefusalPersonWords(b, t, { create = false } = {}) {
   const hs = Array.isArray(b && b.holders) ? b.holders : [];
   const holders = hs.slice(0, 4).map((h) => `${String(h.name || h.id).slice(0, 40)} ${memoryWords(h.mb)}`).join(', ') + (hs.length > 4 ? ', …' : '');   // each name bounded like the agent's (round wh9e7xe8i)
   const p = { budget: memoryWords(b.budgetMb), used: memoryWords(b.usedMb), n: hs.length, holders, asked: memoryWords(b.askedMb), room: memoryWords(b.roomMb) };
-  if (create) return b.roomMb >= 256 ? t('Not created: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them, or give this job a memory bound of {room} or less.', p) : t('Not created: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them first.', p);
-  return b.roomMb >= 256 ? t('Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them, or lower this job’s memory bound to {room} or less.', p) : t('Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them first.', p);
+  const half = b.halved ? ' ' + t('This job names no memory: its start is judged at {ask}, half the budget — it would run under {bound}.', { ask: memoryWords(b.askedMb), bound: memoryWords(b.boundMb) }) : '';   // r924: what it was judged with
+  if (create) return (b.roomMb >= 256 ? t('Not created: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them, or give this job a memory bound of {room} or less.', p) : t('Not created: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them first.', p)) + half;
+  return (b.roomMb >= 256 ? t('Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them, or lower this job’s memory bound to {room} or less.', p) : t('Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them first.', p)) + half;
 }
 /** WHAT A RUN'S JOB LEFT RUNNING (round 5 — the ruling of 2026-10-27: a job's scope IS the job): a task's were stopped (by
  *  force past the grace), a service's kept while it runs — «left 1 running — stopped; to keep a daemon, run it as a service

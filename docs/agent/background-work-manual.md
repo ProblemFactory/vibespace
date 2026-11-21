@@ -382,9 +382,12 @@ it, a limit on the user slice does (`show` names which).
   that is refused creates nothing («not created: … give it --memory 3G or less»). Only the jobs YOU may view are named;
   the others are counted («1 of other conversations 3 GB»). The job's event line names none of them. A refused start
   changes nothing on the job: a service you start that does not fit stays as it was (not started at the next restart
-  of VibeSpace either).
+  of VibeSpace either). A start answered «it starts once its last run is stopped» and refused LATER is said to you in
+  your conversation («not started after all: …»).
   - It counts what the running jobs USE — each job's own processes, read every 5 s — never their bounds: idle jobs hold
     almost nothing, so many small jobs still start.
+  - A job that names no memory (`--memory` not given) has its START judged at no more than half the budget; it still RUNS
+    under its full bound. Name its memory to be judged on what you name. The budget is a guard at the start, not a ceiling.
   - A schedule's fire that does not fit is skipped and said on the schedule (one alarm for a run of skips); its next
     fire is as scheduled — a one-time schedule (`--at`) has none: schedule it again. A service's
     restart that does not fit counts as a failed start on its restart ladder; 6 in a row park it, and the user is told
@@ -394,7 +397,9 @@ it, a limit on the user slice does (`show` names which).
     refused by it.
   - It is a guard at the START, not a ceiling: jobs that grow after they started can still fill the instance together.
     Give each job a bound it fits in. The measure can miss memory (a child started by another thread, a process that
-    detached itself away), which only makes the budget more generous; on a cgroup-v1 machine there is no budget at all.
+    detached itself away; on a kernel with no /proc children file every job measures 0), which only makes the budget more
+    generous; on a cgroup-v1 machine, or where the limit sits only on a parent group the instance cannot see, there is no
+    budget at all.
   - On a machine with no memory limit there is no budget: nothing changes. `show`'s memory line says the budget and what
     the running jobs use («the instance's memory budget for jobs: 9 GB — 6 GB in use by 2 running jobs»).
 

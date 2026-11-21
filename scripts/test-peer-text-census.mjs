@@ -1145,7 +1145,7 @@ const PRINTS = {
     // B-d73c: nodeHeapLine(j) — the heap the job's Node gets (the hub's src/job-model.js nodeHeapOf: an enum and a number of MB)
     'j.nodeHeap': `${V}:the record {by, mb} the hub computed (nodeHeapOf)`, 'nh.mb': `${V}:a number of MB`,
     // B-b14a: budgetLine(j) — the instance's memory budget for running jobs (numbers only: src/jobs.js _budgetFacts)
-    'j.memoryBudget': `${V}:the hub's numbers {budgetMb, running, usedMb | unmeasured}`, 'bud.budgetMb': `${V}:a number of MB`, 'bud.unmeasured': `${V}:a count`, 'bud.usedMb': `${V}:a number of MB`, 'bud.running': `${V}:a count`,
+    'j.memoryBudget': `${V}:the hub's numbers {budgetMb, running, usedMb | unmeasured}`, 'bud.budgetMb': `${V}:a number of MB`, 'bud.unmeasured': `${V}:a count`, 'bud.usedMb': `${V}:a number of MB`, 'bud.running': `${V}:a count`, 'bud.askMb': `${V}:a number of MB`,
     'j.memoryMb': `${V}:a number of MB`, 'j.memorySource': `${V}:an enum (job | setting | cluster | default)`, 'j.memoryBound': `${V}:the rung record {mb, by, why} the wrapper measured`, 'b.by': `${V}:an enum (cgroup | rlimit-data | none)`,
     'b.why': `${V}:the wrapper's own sentence (a fixed vocabulary + the scope's unit name VibeSpace built)`, 'b.mb': `${V}:a number of MB`, 'j.parkedFor': `${V}:an enum`, 'j.cronParent': `${V}:a job id`, 'r.memoryMb': `${V}:a number of MB`, 'r.memorySource': `${V}:an enum`,
     // acceptance round 3: THE INSTANCE'S CAP — the asked bound beside the effective one, and the cap {limitMb, hubMb} the hub read off its own cgroup
