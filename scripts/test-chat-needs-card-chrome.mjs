@@ -57,6 +57,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1125)
 import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
@@ -245,6 +246,10 @@ const WebSocket = require('ws');
 const FA = require(path.join(repo, 'src/foryou-actions.js')); // r11: newestFirst — the stack's and the dock's ONE order
 let seq = 0; let mutant = null;
 const pageErrors = [];
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1125; test-ci-gate §2o): ONE front state for the suite's pages — the page connected last
+// is in front (the launch's first tab, then the tab Target.createTarget opened), front() moves it; every picture goes through
+// frontShot (its page brought to the front only when it is not there, bounded, one retry said, the front handed back). (① opens page B with Target.createTarget, then A's pictures.)
+const FS = frontState();
 async function connect(target) {
   const sock = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => sock.on('open', r));
@@ -294,8 +299,10 @@ async function connect(target) {
   };
   const centre = (sel) => evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView?.({ block: 'nearest' }); const b = e.getBoundingClientRect(); return b.width && b.height ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null; })()`);
   const press = async (sel, { touch = true } = {}) => { const p = await centre(sel); if (!p) throw new Error('press: nothing at ' + sel); await (touch ? tapAt(p.x, p.y) : clickAt(p.x, p.y)); };
-  const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
-  return { cdp, evalJs, waitFor, device, load, tapAt, clickAt, press, shot, front: () => cdp('Page.bringToFront'), close: () => { try { sock.close(); } catch { } } };
+  const key = target.id || target.targetId || target.webSocketDebuggerUrl, bring = () => cdp('Page.bringToFront');
+  becameFront(FS, key, bring);
+  const shot = async (name) => { try { const r = await frontShot(FS, key, bring, () => cdp('Page.captureScreenshot', { format: 'png' }), { name: `the picture ${name}` }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
+  return { cdp, evalJs, waitFor, device, load, tapAt, clickAt, press, shot, front: async () => { await bring(); becameFront(FS, key, bring); }, close: () => { try { sock.close(); } catch { } } };
 }
 // ── ⑩b's RED CONTROL: THIS source without the pressed-row clause of the moved-verb stamp (round 5 — the line alone) ──
 let ROW_BUNDLE = null, ROW_ERR = '';
