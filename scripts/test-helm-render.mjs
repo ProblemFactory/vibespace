@@ -66,7 +66,8 @@
 //   --reuse-values) renders the SAME Secret; both set ⇒ presets.relayUrl; presets.volume=false ⇒ nothing (byte-identical
 //   to no relay); a relay dropped from the values leaves the Secret and override/ (the 3-way model of H).
 // N THE NOTES (helm install --dry-run=client against a fake API that answers the four discovery GETs only — no cluster,
-//   nothing written): the old key ⇒ a WARNING naming presets.relayUrl / the cluster Secret's `fleet` key; presets.volume
+//   nothing written, every request a discovery read over ZERO requests too: Helm 3 reads discovery first, Helm 4 contacts no
+//   API — B-e31b; Helm 4's behaviour and each version's planted write by a stand-in for helm): the old key ⇒ a WARNING naming presets.relayUrl / the cluster Secret's `fleet` key; presets.volume
 //   =false with a relay ⇒ a WARNING that no relay page reaches the pod; the new key alone / the default ⇒ no warning.
 // M THE MAINTAINERS' KEY (lane fleet-feedback-marks — the owner's option B: the maintainers mark a pod's agent feedback
 //   from the cluster side): maintainerKeySha empty (the default) ⇒ no VIBESPACE_MAINTAINER_KEY_SHA, the Deployment
@@ -483,7 +484,7 @@ console.log('P the fleet\'s custom browser kernel (customBrowser.* → override/
     'values.yaml names the ONE road for the fleet (the cluster Secret, followed live) and this block as one release\'s pin; deploy/README.md carries the section');
 }
 
-console.log('N the install / upgrade NOTES (helm install --dry-run=client; a fake API answering the four discovery GETs)');
+console.log('N the install / upgrade NOTES (helm install --dry-run=client; a fake API answering the four discovery GETs: Helm 3 reads them, Helm 4 asks nothing)');
 {
   const ANS = { '/version': { major: '1', minor: '31', gitVersion: 'v1.31.0', platform: 'linux/amd64' }, '/api': { kind: 'APIVersions', versions: ['v1'], serverAddressByClientCIDRs: [] }, '/apis': { kind: 'APIGroupList', apiVersion: 'v1', groups: [] }, '/api/v1': { kind: 'APIResourceList', groupVersion: 'v1', resources: [] } };
   const asked = [];
@@ -503,7 +504,53 @@ console.log('N the install / upgrade NOTES (helm install --dry-run=client; a fak
   ok(nOld.status === 0 && /WARNING: oauthRelayUrl is deprecated/.test(nOld.notes) && /presets\.relayUrl/.test(nOld.notes) && /`fleet` key/.test(nOld.notes) && /override\/fleet\.json/.test(nOld.notes), 'the old key ⇒ the NOTES WARN: deprecated, move it to presets.relayUrl or the cluster Secret\'s fleet key', nOld.notes || nOld.err);
   ok(nNew.status === 0 && nDef.status === 0 && !/WARNING/.test(nNew.notes) && !/WARNING/.test(nDef.notes), 'presets.relayUrl alone, and the default: no warning', JSON.stringify([nNew.notes, nDef.notes, nNew.err]));
   ok(nOff.status === 0 && /WARNING: presets\.volume=false/.test(nOff.notes) && /gets none/.test(nOff.notes), 'presets.volume=false with a relay ⇒ the NOTES WARN that no relay page reaches the pod', nOff.notes || nOff.err);
-  ok(asked.length > 0 && asked.every((x) => /^GET \/(version|api|apis|api\/v1)$/.test(x)), `the fake API saw discovery GETs only — nothing was written (${[...new Set(asked)].join(', ')})`);
+  // THE LAW BY THE HELM THAT RAN (B-e31b). «Nothing was written to the cluster's API» = every request this fake API saw is a
+  // discovery read, over ZERO requests too. «It saw discovery reads» is Helm 3's premise alone: Helm 3's --dry-run=client reads
+  // the cluster's discovery first (Helm 3.22.1 on the ubuntu-24.04 image asked the four GETs: int361's .386 mirror 42403343901),
+  // Helm 4's contacts no API (Helm 4.3.1 on ubuntu-26.04: an empty list, so the old «asked.length > 0» leg was red there every
+  // time: mirror 42411569027). A Helm 3 that asked nothing never reached this fake API, so its law would be vacuous: red by name.
+  const DISCOVERY = /^GET \/(version|api|apis|api\/v1)$/;
+  const apiVerdict = (seen, major) => {
+    const bad = [], beyond = [...new Set(seen.filter((x) => !DISCOVERY.test(x)))];
+    if (!(major >= 3)) bad.push(`no helm major read (${major})`);
+    if (beyond.length) bad.push(`written, or read beyond discovery: ${beyond.join(', ')}`);
+    if (major === 3 && !seen.length) bad.push('Helm 3 asked no discovery read — it never reached this fake API');
+    return bad;
+  };
+  const HELM_MAJOR = Number((/^v(\d+)\./.exec(hv.stdout.trim()) || [])[1]);
+  const vReal = apiVerdict(asked, HELM_MAJOR);
+  ok(!vReal.length, `the fake API saw ${asked.length ? 'discovery GETs only' : 'no request'} under helm ${HELM_MAJOR} — nothing was written (${[...new Set(asked)].join(', ') || 'none'})`, vReal.join('; '));
+  // HELM 4's BEHAVIOUR, and each version's red, by a STAND-IN for helm: no helm 4 binary is fetched, here or on a test machine.
+  // It is spawned as the suite spawns helm (the same install argv, the same KUBECONFIG and driver env) and prints a NOTES block.
+  // By its mode it asks this fake API what Helm 3 asks (the four discovery GETs) or nothing (Helm 4), and, the planted write,
+  // one POST after either. Each plant is proved to have taken before its verdict is read.
+  const STAND = path.join(ROOT, 'helm-stand-in.mjs');
+  fs.writeFileSync(STAND, [
+    "import fs from 'node:fs';",
+    "const mode = process.env.HELM_STAND_IN_MODE || '';",
+    "const server = (/server: \"([^\"]+)\"/.exec(fs.readFileSync(process.env.KUBECONFIG, 'utf8')) || [])[1];",
+    "const ask = (p, method = 'GET') => fetch(server + p, { method, body: method === 'GET' ? undefined : '{}' }).then((r) => r.text());",
+    "if (mode.startsWith('v3')) for (const p of ['/version', '/api', '/apis', '/api/v1']) await ask(p);",
+    "if (mode.endsWith('-write')) await ask('/api/v1/namespaces/default/secrets', 'POST');",
+    "console.log('NAME: u-stand-in\\nNOTES:\\nthe stand-in (' + mode + ')');",
+  ].join('\n') + '\n');
+  const standIn = (mode) => new Promise((res) => {
+    asked.length = 0;
+    const f = path.join(ROOT, `values-${++n}.json`); fs.writeFileSync(f, JSON.stringify(C));
+    const c = spawn(process.execPath, [STAND, 'install', 'u-' + C.user, CHART, '--dry-run=client', '-f', f], { env: { ...process.env, KUBECONFIG: kc, HELM_DRIVER: 'memory', HELM_MEMORY_DRIVER_DATA: rel, HELM_STAND_IN_MODE: mode } });
+    let o = '', e = ''; c.stdout.on('data', (d) => { o += d; }); c.stderr.on('data', (d) => { e += d; });
+    c.on('close', (status) => res({ status, notes: o, err: e.split('\n')[0], seen: [...asked] }));
+  });
+  const WRITE = 'POST /api/v1/namespaces/default/secrets';
+  const s3 = await standIn('v3'), s3w = await standIn('v3-write'), s4 = await standIn('v4'), s4w = await standIn('v4-write');
+  const ranAll = [s3, s3w, s4, s4w].every((s) => s.status === 0 && /NOTES:/.test(s.notes));
+  ok(ranAll && s3.seen.length === 4 && s3.seen.every((x) => DISCOVERY.test(x)) && s4.seen.length === 0 && s3w.seen.includes(WRITE) && s4w.seen.includes(WRITE),
+    `the stand-in's plants took first: Helm 3's four discovery GETs (${s3.seen.join(', ')}), Helm 4's nothing (${s4.seen.length} requests), the write after each (${s3w.seen.includes(WRITE)} / ${s4w.seen.includes(WRITE)})`,
+    JSON.stringify([s3, s3w, s4, s4w].map((s) => ({ status: s.status, err: s.err, seen: s.seen }))));
+  const g3 = apiVerdict(s3.seen, 3), g4 = apiVerdict(s4.seen, 4), r3 = apiVerdict(s3w.seen, 3), r4 = apiVerdict(s4w.seen, 4), old4 = apiVerdict(s4.seen, 3);
+  ok(!g3.length && !g4.length, 'the law is GREEN on both behaviours: Helm 3\'s discovery reads and Helm 4\'s zero requests', JSON.stringify({ g3, g4 }));
+  ok(r3.some((x) => x.includes(WRITE)) && r4.some((x) => x.includes(WRITE)), `the law is RED with a write planted, under either major, the write named (${r4.join('; ')})`, JSON.stringify({ r3, r4 }));
+  ok(old4.some((x) => /asked no discovery read/.test(x)), `Helm 4's empty list judged by Helm 3's premise is red by name: the 26.04 red this law replaces (${old4.join('; ')})`);
   await new Promise((res) => api.close(res));
 }
 
