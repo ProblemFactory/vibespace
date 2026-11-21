@@ -1825,21 +1825,105 @@ function compileForms(secrets) {
   const re = texts.length ? new RegExp(texts.map(reEscape).join('|'), 'g') : null;
   const maxLen = texts.length ? texts[0].length : 1;
   const W = maxLen - 1;
-  return Object.freeze({ [COMPILED]: true, table, texts, re, W, size: texts.length });
+  // THE REGEX HOLDS NO LONG LITERAL (the budget's second read, G1 — r1068): a long literal is compared as deep as the text follows
+  // it, from whichever end the engine likes, and no count can see inside one exec. The run's scan asks a regex of HEADS — each
+  // form's first SCRUB_HEAD characters — and a head that begins a longer form is VERIFIED by a counted compare: at a position the
+  // longest form there is still the find (every key that matches there is a prefix of the longest key that does)
+  const HEAD = SCRUB_HEAD, longOf = new Map(), shortIn = new Map();
+  for (const t of texts) if (t.length > HEAD) { const k = t.slice(0, HEAD); let l = longOf.get(k); if (!l) longOf.set(k, l = []); l.push(t); }
+  const keys = [...new Set(texts.map((t) => (t.length > HEAD ? t.slice(0, HEAD) : t)))].sort((a, b) => b.length - a.length);
+  const shorts = texts.filter((t) => t.length <= HEAD);
+  for (const k of keys) { const s = shorts.find((t) => k.startsWith(t)); if (s) shortIn.set(k, s); }
+  const hre = keys.length ? new RegExp(keys.map(reEscape).join('|'), 'g') : null;
+  return Object.freeze({ [COMPILED]: true, table, texts, re, W, size: texts.length, keys, hre, longOf, shortIn });
 }
 /** Is `x` a compiled set (compileForms), not a secrets list? */
 const isCompiledForms = (x) => !!(x && x[COMPILED] === true);
-function createRunMasker(secrets, streams = ['out', 'err']) {
+/** THE SCAN'S BUDGET (主开发 r1068 — the law: THE SCAN'S WORK A PUSH IS BOUNDED BY CONSTRUCTION, WHATEVER THE INPUT): every loop
+ *  of a turn (a push, or the end) counts its steps — a character a read reads, a regex call, a group or a range the cuts visit;
+ *  past SCRUB_STEPS_PUSH in one turn or SCRUB_STEPS_RUN in the run, the run FAILS CLOSED: a sticky mark, every stream's held text
+ *  masked whole under the cut's placeholder, these words said once by name, and nothing handed on after. */
+const SCRUB_STEPS_PUSH = 1 << 25, SCRUB_STEPS_RUN = 1 << 29, SCRUB_STEPS_A_CHAR = 64, SCRUB_HEAD = 64;   // the run's figure grows by SCRUB_STEPS_A_CHAR a character it read (a job's log has no bound: its masker may live for gigabytes — the second read, G4); SCRUB_HEAD: the longest literal the regex holds
+const SCRUB_OVER_WORDS = '\n[vault: the rest of this output is withheld — scrubbing it passed the work a run is allowed (scrub_work_bound)]\n';
+/** THE CUTS SETTLED IN ONE SWEEP (主开发 r1068, the readers' cure: two fixpoints walked a chain of overlapping groups back one group
+ *  a pass — groups² a turn). `lists` = each group's ranges [[stream, a, b], …]; `cut` (stream → offset) falls to the greatest cuts
+ *  under it that split no group: a group not wholly before the cuts moves every cut it starts before back to its start. A cut only
+ *  falls, so a group is moved at most once and looked at once a stream it covers (its ranges sorted by their end, one pointer a
+ *  stream): about N log N. The answer is the fixpoint's — the greatest fixed point under the cuts, whatever the order of the moves
+ *  (each move is forced at the cuts it is made at, and the cuts only fall). `spend(n)` counts the steps. */
+/** THE COMPARES A CHARACTER CAN COST (the budget's read, F1): the regex compares an alternative at a position as deep as the text
+ *  follows it, and only a text that REPEATS an alternative's repeating head can drive that thousands deep at every position (a value
+ *  of 8 191 «A» and a «B», printed as a run of «A»). Once a compiled set: each alternative's longest head that repeats itself three
+ *  times or more (a KMP prefix function), its period d and length h. A look then charges, beyond its characters, each run of the TEXT
+ *  with period d whose pattern is that head's (a rotation): its length × min(h, its length) — what the regex can compare there. A
+ *  head of period over 64 is charged flat (h / d a character: few, as such a head is long). Random values charge nothing more. */
+const HEADS = new WeakMap();
+function repeatingHeads(texts) {
+  const byD = new Map();
+  let flat = 0;
+  for (const t of texts) {
+    const n = Math.min(t.length, 1 << 16), pi = new Int32Array(n);
+    let bh = 0, bd = 0;
+    for (let i = 1, k = 0; i < n; i++) { while (k > 0 && t[i] !== t[k]) k = pi[k - 1]; if (t[i] === t[k]) k++; pi[i] = k; const h = i + 1, d = h - k; if (h >= 3 * d && h > bh) { bh = h; bd = d; } }
+    if (!bh) continue;
+    if (bd > 64) { flat += Math.ceil(bh / bd); continue; }
+    let l = byD.get(bd); if (!l) byD.set(bd, l = []); l.push({ pp: t.slice(0, bd).repeat(2), h: bh });
+  }
+  return { byD: [...byD], flat };
+}
+/** → the compares a look over `sk` can cost the regex, at most (its characters, and the runs that repeat a repeating head) */
+function deepCost(sk, heads) {
+  let c = sk.length * (1 + heads.flat + heads.byD.length);
+  for (const [d, hs] of heads.byD) {
+    let s = -1;
+    const close = (e) => { const r = e - s; if (r >= 2 * d) { const q = sk.slice(s, s + d); let h = 0; c += hs.length * (2 * d + 1); for (const x of hs) if (x.pp.includes(q)) h += x.h; if (h) c += r * Math.min(h, r); } };   // its own work counts too (the second read, G6)
+    for (let i = d; i < sk.length; i++) { if (sk.charCodeAt(i) === sk.charCodeAt(i - d)) { if (s < 0) s = i - d; } else if (s >= 0) { close(i); s = -1; } }
+    if (s >= 0) close(sk.length);
+  }
+  return c;
+}
+function settleCuts(lists, cut, spend = () => {}) {
+  const by = new Map();
+  let n = 0;
+  for (const rs of lists) for (const r of rs) { let l = by.get(r[0]); if (!l) by.set(r[0], l = []); l.push([r[2], rs]); n++; }
+  spend(n * (2 + Math.ceil(Math.log2(n + 2))));
+  for (const l of by.values()) l.sort((x, y) => y[0] - x[0]);
+  const at = new Map(), todo = [], moved = new Set();
+  const reach = (k) => { const l = by.get(k); if (!l) return; let i = at.get(k) || 0; const c = cut.get(k); while (i < l.length && l[i][0] > c) todo.push(l[i++][1]); at.set(k, i); };   // every group whose range in k now ends past k's cut: it is not wholly before the cuts
+  for (const k of by.keys()) reach(k);
+  while (todo.length) {
+    const rs = todo.pop();
+    spend(rs.length);
+    if (moved.has(rs)) continue;
+    if (!rs.some(([k, a]) => a < cut.get(k))) continue;   // it starts at or past every cut it covers: it is kept back whole already (and stays so — the cuts only fall)
+    moved.add(rs);
+    for (const [k, a] of rs) if (a < cut.get(k)) { cut.set(k, a); reach(k); }
+  }
+  return cut;
+}
+function createRunMasker(secrets, streams = ['out', 'err'], opts = {}) {
   const C = isCompiledForms(secrets) ? secrets : compileForms(secrets);   // lane vault-masker-once: a compiled set is used as it is (shared, read-only)
   const { table, texts, re, W } = C;
   const names = [...streams];
   let held = [];   // [[stream, text]] in arrival order — what the run has not handed on yet
   const st = { hits: 0, bytes: 0, byForm: {}, scanned: 0 };   // scanned: the characters every scan read (the suites' cost count)
+  Object.assign(st, { steps: 0, runSteps: 0, maxSteps: 0, over: false, withheld: 0, inTurn: false, fresh: 0, read: 0 });   // THE SCAN'S BUDGET: this turn's steps, the run's, the longest turn, the sticky mark, what was withheld after it
+  const limit = { push: (opts.steps && opts.steps.push) || SCRUB_STEPS_PUSH, run: (opts.steps && opts.steps.run) || SCRUB_STEPS_RUN };   // THE SCAN'S BUDGET: the figures (a suite may plant smaller ones)
+  if (!HEADS.has(C)) HEADS.set(C, repeatingHeads(C.keys || texts));   // THE SCAN'S BUDGET: the heads the regex holds (≤ SCRUB_HEAD characters each)
+  const hre = C.hre || re, longOf = C.longOf || new Map(), shortIn = C.shortIn || new Map();   // THE SCAN'S BUDGET
+  const resolve = (sk, m) => { const k = m[0], longs = longOf.get(k); if (longs) for (const t of longs) { spend(t.length); if (sk.startsWith(t, m.index)) return t; } return shortIn.has(k) ? shortIn.get(k) : null; };   // THE SCAN'S BUDGET: a head → the longest form at that place, a long one VERIFIED by a counted compare (null: none is there)
+  const heads = HEADS.get(C), charge = 1 + heads.flat + heads.byD.reduce((n, [, hs]) => n + hs.reduce((m, x) => m + x.h, 0), 0);   // THE SCAN'S BUDGET: the repeating heads (the read's F1); `charge` = the most a character can cost, for the suites' figures
+  const OVER = Symbol('vault-run.scrub-over');   // THE SCAN'S BUDGET
+  const spend = (n) => { st.steps += n; st.runSteps += n; if (st.steps > limit.push || st.runSteps > limit.run + SCRUB_STEPS_A_CHAR * st.read) throw OVER; };   // THE SCAN'S BUDGET: every loop of a turn counts here — past a figure the turn stops where it is
+  const none = () => { const o = {}; for (const k of names) o[k] = ''; return o; };   // THE SCAN'S BUDGET
+  const overrun = () => { st.over = true; const out = none(), own = new Map(); for (const [k, x] of held) own.set(k, (own.get(k) || '') + x); for (const [k, x] of own) if (x) { out[k] += CUT_PH; st.hits++; st.bytes += bytesOf(x); } out[names.includes('err') ? 'err' : names[0]] += SCRUB_OVER_WORDS; held = []; return out; };   // THE SCAN'S BUDGET: FAILS CLOSED — everything held under the cut's placeholder, the words once, by name
+  const turn = (fn) => { st.inTurn = true; st.steps = 0; const keep = [st.hits, st.bytes, { ...st.byForm }], heldAt = held; try { return fn(); } catch (e) { if (e !== OVER) throw e; [st.hits, st.bytes, st.byForm] = keep; held = heldAt; return overrun(); } finally { st.inTurn = false; if (st.steps > st.maxSteps) st.maxSteps = st.steps; } };   // THE SCAN'S BUDGET: one push, or the end, is ONE counted turn
   /** ONE text read plainly and through every view → { safe (what is decided), finds [{ s, e, ph, form }], spans [[s, e]] }.
    *  `at` (the arrival order's): each character's index in its own stream's held text — a find's PLACE, the same in every read. */
   function scan(buf, final, at) {
     const L = buf.length;
     st.scanned += L;
+    spend(L);   // THE SCAN'S BUDGET: the plain read
     let safe = final ? L : L - W;
     const views = [];
     for (const vw of VIEWS) {
@@ -1848,6 +1932,7 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
         if (vw.pairs) { let j = k; while (j > 0 && buf[j - 1] === buf[k]) j--; k = j + 2 * Math.floor((k - j) / 2); }   // the last pair boundary of the run (a run is read in pairs from its start)
         end = k; break;
       }
+      spend(end);   // THE SCAN'S BUDGET: a view reads the text
       const r = readView(vw, buf, end, final);
       if (!final) { const len = r ? r.sk.length : end, ss = len - W; safe = Math.min(safe, ss <= 0 ? 0 : !r ? ss : ss < len ? r.at[ss] : r.end); }
       if (r) views.push([vw, r]);
@@ -1855,14 +1940,18 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
     safe = Math.max(0, safe);
     const finds = [], spans = [];
     const look = (sk, r, form) => {
+      const re = hre;   // THE SCAN'S BUDGET: the regex of heads (≤ SCRUB_HEAD characters a literal: the second read's G1)
       re.lastIndex = 0;
       let m;
+      spend(deepCost(sk, heads));   // THE SCAN'S BUDGET: the regex reads the text once — and as deep as a run of it repeats a repeating head (the read's F1)
       const vEnd = new Map();   // THE SCRUBBER'S OVERLAP (r858): each value's last find's end, in the read's own text
       let gStart = -1, gEnd = -1, gAt = -1;   // THE SCRUBBER'S OVERLAP: the current group of overlapping finds (its first start and its union's end in the read's own text, its last find's place)
       const G = 4 * (W + 1);   // THE SCRUBBER'S OVERLAP: the grid a long group breaks on
       while ((m = re.exec(sk)) !== null) {
+        spend(1);   // THE SCAN'S BUDGET: a regex call (asked again inside a match, every position may be one)
         const s = r ? r.at[m.index] : m.index;
         if (s >= safe) break;
+        { const full = resolve(sk, m); if (full === null) { re.lastIndex = m.index + 1; continue; } m[0] = full; }   // THE SCAN'S BUDGET: the head the regex matched → the longest form there (no form there: ask at the next position)
         const t = table.get(m[0]);
         const p = at ? at[s] : s;   // THE SCRUBBER'S OVERLAP: the find's place in its stream's held text — every read of one step (plain, each view, the arrival order) gives one occurrence the same place
         if (!final && m.index < gEnd && gEnd - gStart > 2 * (W + 1) && Math.floor(p / G) > Math.floor(gAt / G)) { finds.push({ s, e: r ? r.to[m.index + m[0].length - 1] : m.index + m[0].length, ph: t.ph, form: form || t.form }); vEnd.set(t.v, m.index + m[0].length); re.lastIndex = Math.max(gEnd, m.index + m[0].length); gStart = gEnd = gAt = -1; continue; }   // THE SCRUBBER'S OVERLAP: while text is held back (never in a final read, which holds nothing: read 5), a group past 2 × (W + 1) — only values that tile a repeating text make one — BREAKS at the first find past each multiple of 4 × (W + 1) of the place: that find is taken and jumped past, as the release jumped past every match. The place is the same in every read, so the reads past 2 × (W + 1) that see that occurrence break at it, and the finds step joins across them stop there too (read 4: a break at each read's own length was bridged by another read after a line end or a stderr line, and one that skipped its find left that find's tail in the clear). Lines shorter than 2 × (W + 1) still bridge (read 5; said in the engineering log)
@@ -1879,11 +1968,13 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
    *  rangesOf(a, b) → each stream's [k, a, b] in that stream's own kept text. */
   function arrivalOf(list) {
     const all = list.map((x) => x[1]).join(''), streamAt = [], idxAt = [], seen = new Map();
+    spend(2 * all.length);   // THE SCAN'S BUDGET: the arrival order joined and placed
     for (const [k, x] of list) for (let j = 0; j < x.length; j++) { const i = seen.get(k) || 0; streamAt.push(k); idxAt.push(i); seen.set(k, i + 1); }
-    const rangesOf = (a, b) => { const m = new Map(); for (let i = a; i < b; i++) { const k = streamAt[i], x = m.get(k); if (x) x[2] = idxAt[i] + 1; else m.set(k, [k, idxAt[i], idxAt[i] + 1]); } return [...m.values()]; };
+    const rangesOf = (a, b) => { spend(b - a); const m = new Map(); for (let i = a; i < b; i++) { const k = streamAt[i], x = m.get(k); if (x) x[2] = idxAt[i] + 1; else m.set(k, [k, idxAt[i], idxAt[i] + 1]); } return [...m.values()]; };
     return { all, streamAt, idxAt, rangesOf };
   }
   function step(final) {
+    if (!st.inTurn) return turn(() => step(final));   // THE SCAN'S BUDGET
     const out = {}; for (const k of names) out[k] = '';
     if (!held.length) return out;
     const own = new Map();   // stream → its kept-back text
@@ -1905,17 +1996,13 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
       for (const f of sc.finds) groups.push({ r: rangesOf(f.s, f.e), ph: f.ph, form: f.form });
       for (const [a, b] of sc.spans) groups.push({ r: rangesOf(a, b), tok: true });
     }
-    if (!final) for (let moved = true; moved;) {   // never cut inside a group: one not wholly before the cuts is kept back whole
-      moved = false;
-      for (const g of groups) {
-        if (g.r.every(([k, , b]) => b <= cut.get(k))) continue;
-        for (const [k, a] of g.r) if (a < cut.get(k)) { cut.set(k, a); moved = true; }
-      }
-    }
+    if (!final) settleCuts(groups.map((g) => g.r), cut, spend);   // THE ONE SWEEP (主开发 r1068): never cut inside a group — one not wholly before the cuts is kept back whole; the cuts settled in one sweep (was a fixpoint that walked a chain of groups back one a pass)
+    spend(groups.length * (names.length + 2));   // THE SCAN'S BUDGET: the masks, a stream at a time
     for (const [k, x] of own) {
       const c = cut.get(k);
       const masks = groups.filter((g) => !g.tok && g.r.every(([j, , b]) => b <= cut.get(j))).flatMap((g) => g.r.filter(([j]) => j === k).map(([, a, b]) => ({ a, b, ph: g.ph, form: g.form })));
       masks.sort((p, q) => p.a - q.a || q.b - p.b);
+      spend(masks.length * (2 + Math.ceil(Math.log2(masks.length + 2))));   // THE SCAN'S BUDGET: this stream's masks, sorted and walked
       let i = 0, last = null;
       for (const m of masks) {
         if (last && m.a < last.b) { if (m.b > last.b) { st.bytes += bytesOf(x.slice(last.b, m.b)); last.b = m.b; i = m.b; } continue; }   // overlapping finds: one placeholder
@@ -1946,8 +2033,9 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
   function cutTailStart(buf) {
     const L = buf.length;
     if (!L) return L;
-    const isPrefix = (sfx, broken) => { if (!sfx || /^\uFFFD+$/.test(sfx)) return false; for (const t of texts) if (t.length > sfx.length && t.startsWith(sfx) && (!broken || t.charCodeAt(sfx.length) >= 0x80)) return true; return false; };   // a NON-EMPTY proper prefix of some spelled form — never one of only U+FFFD (a broken character is no value's character, though a non-ASCII value's UTF-16 form, read as UTF-8, may begin with one: read 4); before a BROKEN character, only a head whose next character is not ASCII — the character the cut broke was the value's own (read 5: a one-character head, NUL or `%` or a hex digit, before a binary tail's U+FFFD counted a hit)
-    const prefixStart = (str, n = str.length, broken = false) => { for (let q = Math.max(0, n - W); q < n; q++) if (isPrefix(str.slice(q, n), broken)) return q; return n; };   // earliest offset whose suffix up to n is a value prefix (W bounds the search)
+    spend(2 * L * (1 + VIEWS.length));   // THE SCAN'S BUDGET: the cut's reads — the text through every view, the broken characters' walk
+    const isPrefix = (sfx, broken) => { if (!sfx) return false; for (const t of texts) if (t.length > sfx.length && t.startsWith(sfx) && (!broken || t.charCodeAt(sfx.length) >= 0x80)) return true; return false; };   // a NON-EMPTY proper prefix of some spelled form; before a BROKEN character, only a head whose next character is not ASCII — the character the cut broke was the value's own (read 5: a one-character head, NUL or `%` or a hex digit, before a binary tail's U+FFFD counted a hit). A suffix of only U+FFFD is never asked (prefixStart skips it): a broken character is no value's character
+    const prefixStart = (str, n = str.length, broken = false) => { let f = n; while (f > 0 && str.charCodeAt(f - 1) === 0xFFFD) f--; const q0 = Math.max(0, n - W); spend(W * (texts.length + 1) + (n - f) + deepCost(str.slice(q0, n), heads)); for (let q = q0; q < Math.min(n, f); q++) if (isPrefix(str.slice(q, n), broken)) return q; return n; };   // earliest offset whose suffix up to n is a value prefix (W bounds the search); a suffix of only U+FFFD (q ≥ f) is no value's head — the run walked once (the second read, G3: a test of every suffix was the window squared)
     // THE ENDS a half value may run off (r858, the scrubber's reads): the text's own end; the start of a trailing UNFINISHED view token
     // (its first trigger within the last vw.max − 1 characters — a colour code, a `=`, a `\x` cut short: its decode is unknown, so it is
     // uncertain from there); and the start of a trailing run of U+FFFD (the 2 MiB bound counts BYTES: a character cut there is decoded
@@ -1978,6 +2066,8 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
   // pulls the tail of every stream it covers back to its start there (to a fixpoint), and the certain prefixes keep the arrival order.
   // A tail outside every find is unchanged; a run that is not cut never comes here.
   function endStep(cut) {
+    if (st.over) return none();   // THE SCAN'S BUDGET: the end after the mark gives nothing — the run past its figure had said the words twice
+    if (!st.inTurn) return turn(() => endStep(cut));   // THE SCAN'S BUDGET
     if (!cut || !re) return step(true);   // a COMPLETE stream (or no secrets): flush all, every complete match masked — no partial to fear
     const own = new Map(); for (const [k, x] of held) own.set(k, (own.get(k) || '') + x);
     const start = new Map(); for (const [k, x] of own) start.set(k, cutTailStart(x));
@@ -1991,13 +2081,7 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
     const finds = [];
     for (const [k, x] of own) for (const f of scan(x, true).finds) finds.push([[k, f.s, f.e]]);
     if (ar) for (const f of scan(ar.all, true, ar.idxAt).finds) finds.push(ar.rangesOf(f.s, f.e));
-    for (let moved = true; moved;) {
-      moved = false;
-      for (const rs of finds) {
-        if (!rs.some(([k, , b]) => b > start.get(k))) continue;   // wholly before every tail: the flush below masks it
-        for (const [k, a] of rs) if (a < start.get(k)) { start.set(k, a); moved = true; }
-      }
-    }
+    settleCuts(finds, start, spend);   // THE ONE SWEEP (主开发 r1068): a find that reaches into a tail pulls the tail of every stream it covers back to its start there — one sweep (was a fixpoint, a find a pass)
     // the CERTAIN prefixes, in arrival order — step(true) masks every complete value in them (one split between the pipes too)
     const used = new Map(), next = [];
     for (const [k, x] of held) {
@@ -2014,10 +2098,15 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
     push(stream, chunk) {
       if (!names.includes(stream)) throw new TypeError(`no such stream: ${stream}`);
       const t = String(chunk == null ? '' : chunk);
+      if (st.over) { st.withheld += t.length; return none(); }   // THE SCAN'S BUDGET: after the mark nothing is handed on (and nothing kept)
       if (t) { const last = held[held.length - 1]; if (last && last[0] === stream) last[1] += t; else held.push([stream, t]); }
+      st.fresh += t.length; st.read += t.length;   // THE SCAN'S BUDGET
+      if (st.fresh <= W) return none();   // THE SCAN'S BUDGET: a push no longer than the window waits for a window's worth (the read's F2: each turn rescans the window, ~3 × a long value's bytes — a log in short reads paid a window a line and met the run's figure on an ordinary run); the parts are joined at the end, the output is the same
+      st.fresh = 0;   // THE SCAN'S BUDGET
       return step(false);
     },
     end: (cut = false) => endStep(cut),
+    get steps() { return st.steps; }, get maxSteps() { return st.maxSteps; }, get runSteps() { return st.runSteps; }, get over() { return st.over; }, get withheld() { return st.withheld; }, get charge() { return charge; },   // THE SCAN'S BUDGET: the counts, and the mark
     get hits() { return st.hits; }, get bytes() { return st.bytes; }, get byForm() { return { ...st.byForm }; }, get scanned() { return st.scanned; }, window: W, streams: names,
   };
 }
@@ -2025,10 +2114,10 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
  *  (compileForms). → { push(chunk) → text, end() → text, hits, bytes, byForm, window }. */
 function createMasker(secrets) {
   const m = createRunMasker(secrets, ['out']);
-  return { push: (chunk) => m.push('out', chunk).out, end: (cut) => m.end(cut).out, get hits() { return m.hits; }, get bytes() { return m.bytes; }, get byForm() { return m.byForm; }, window: m.window };
+  return { push: (chunk) => m.push('out', chunk).out, end: (cut) => m.end(cut).out, get hits() { return m.hits; }, get bytes() { return m.bytes; }, get byForm() { return m.byForm; }, get over() { return m.over; }, window: m.window };   // over: the scan's budget's mark (r1068)
 }
 /** One whole text scrubbed (a card's command, a short output, the output belt's sink text) — `secrets` a list or a compiled set. */
-function maskText(text, secrets) { const m = createMasker(secrets); return m.push(text) + m.end(); }
+function maskText(text, secrets) { const m = createMasker(secrets), t = String(text == null ? '' : text); let out = ''; for (let i = 0; i < t.length; i += 65536) out += m.push(t.slice(i, i + 65536)); return out + m.end(); }   // in 64 KiB pieces (the budget's read, F9: a whole text of megabytes in ONE turn met the turn's figure — the output belt's text became the withheld words)
 const VIEW_TRIGGER_RE = /[=\\&\x1b\r\n]/;
 /** Memoizable text scrubber built ONCE per secret-set change (lane vault-login-chrome r5 MAJOR A + r6 MINOR E' + r7 MAJOR 2:
  *  never rebuild formsOf + RegExp per string node on the event loop). `fn(text)` matches `maskText(text, secrets)` across all
@@ -2205,4 +2294,5 @@ module.exports = {
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
   shapeOf, shapeKeyOf, commandCandidateOf, PIN_GRAMMAR, PIN_WHY, PIN_ENV, pinOf, wildcardToolOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_LOCAL_PROGRAM_KW, SSH_KW_ALIAS, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, compileForms, isCompiledForms, createMasker, createRunMasker, maskText, compileTextScrubber,
+  settleCuts, SCRUB_STEPS_PUSH, SCRUB_STEPS_RUN,   // 主开发 r1068: the cuts settled in one sweep (the suite's equivalence leg reads it against the fixpoint), the scan's two figures
 };

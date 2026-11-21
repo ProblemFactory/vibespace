@@ -23,6 +23,7 @@
 //      to another host ⇒ ask once/deny (why another-host, the card's two hosts), a pass per entry × host; no --for / a dotless
 //      one / a lookalike ⇒ another host; the owner's entry and a mix ⇒ today's road (why not-own; «always» and «seen» never
 //      pass a host); the plan's refusals, the lock and the 8-byte floor still first
+//   (⑥ and ⑥b below, with their red controls, run in the heavy twin test-vault-run-model-deep since 主开发 r1068 — moved verbatim)
 //   ⑥ THE SCRUBBER — 7 values × 50 printings (Node's own encoders are the oracle; lane vault-scrub-forms: + UTF-16 LE/BE,
 //      base32, quoted-printable, \xNN / octal / \u{…} escapes, HTML entities, colour escapes, wrapped base64 — each a real
 //      producer's) masked whole; every split point and three chunkings equal the one-shot; text without a value passes byte
@@ -52,6 +53,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { createRequire } from 'node:module';
 import * as GHG from './gen-gh-grammar.mjs';   // round 5: the gh grammar's ONE generator — the census (⑤c) re-runs its parse against the live gh and diffs the shipped table
 import { scratchDir, anchored } from './scratch.mjs';
+import { scrubLegs } from './vault-run-scrub-legs.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, ghPin = '';   // round 5: the gh grammar census names itself in the total (a SKIP changes the count)
@@ -1107,208 +1109,8 @@ console.log('⑤d THE GENERATORS OWN HYGIENE (round 7/8/9) — the census walk, 
   ok(GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], keys: K, shippedKeys: K }) === null, '5d: no change to the allow set (same 32 keys) writes freely');
 }
 
-console.log('⑥ THE SCRUBBER — a value and its forms (FORMS: spelled and read), over ONE window per run');
-const LABEL = 'mounts/m1/secretKey', PH = `[vault:${LABEL}]`;
-const VALUES = [
-  'planted-VALUE-0001',
-  'p/l+a=n t?e&d#9%~*',
-  'quote"back\\slash<tag>&amp\u007f',
-  'pässwörd-日本-🔑-x',
-  '-----BEGIN KEY-----\nMIIBplanted\nline2==\n-----END KEY-----\n',
-  'abcdefgh',
-  crypto.createHash('sha512').update('vault-run-model').digest('base64').repeat(40),
-];
-const b64 = (s) => Buffer.from(s).toString('base64');
-const enc = (v, keep, up = true) => [...Buffer.from(v)].map((b) => (b < 128 && keep.test(String.fromCharCode(b)) ? String.fromCharCode(b) : '%' + b.toString(16).padStart(2, '0')[up ? 'toUpperCase' : 'toLowerCase']())).join('');
-const pyAscii = (v) => JSON.stringify(v).replace(/[\u007f-\uffff]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
-// lane vault-scrub-forms — how a REAL producer spells a value, built with Node's own codecs or written out from the spec (never
-// the module's code): the oracle the new forms are judged by
-const streamText = (buf) => { const d = new StringDecoder('utf8'); return d.write(buf) + d.end(); };   // what the door's decoder hands on
-const cps = (v) => [...v];
-const B32A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-const b32 = (v) => { const bits = [...Buffer.from(v)].map((b) => b.toString(2).padStart(8, '0')).join(''); let s = ''; for (let i = 0; i < bits.length; i += 5) s += B32A[parseInt(bits.slice(i, i + 5).padEnd(5, '0'), 2)]; return s + '='.repeat((8 - (s.length % 8)) % 8); };
-// RFC 2045 §6.7: a printable byte as is (not '='), any other =XX; a soft line break lands wherever the 76th column falls — here INSIDE the value
-const qpOf = (v, { every = false, lower = false, soft = '=\r\n' } = {}) => { const p = [...Buffer.from(v)].map((b) => (!every && b >= 33 && b <= 126 && b !== 61 ? String.fromCharCode(b) : '=' + b.toString(16).padStart(2, '0')[lower ? 'toLowerCase' : 'toUpperCase']())), h = p.length >> 1; return p.slice(0, h).join('') + soft + p.slice(h).join(''); };
-// Python repr(bytes): printable ASCII as is (\\ and the quote escaped), \t \n \r, every other byte \xNN
-const pyBytes = (v) => "b'" + [...Buffer.from(v)].map((b) => (b === 92 ? '\\\\' : b === 39 ? "\\'" : b === 9 ? '\\t' : b === 10 ? '\\n' : b === 13 ? '\\r' : b >= 32 && b < 127 ? String.fromCharCode(b) : '\\x' + b.toString(16).padStart(2, '0'))).join('') + "'";
-// Python ascii(str): \xNN / \uXXXX / \UXXXXXXXX by CODE POINT
-const pyStr = (v) => "'" + cps(v).map((c) => { const p = c.codePointAt(0); return c === '\\' ? '\\\\' : c === "'" ? "\\'" : c === '\n' ? '\\n' : c === '\t' ? '\\t' : c === '\r' ? '\\r' : p >= 32 && p < 127 ? c : p < 0x100 ? '\\x' + p.toString(16).padStart(2, '0') : p < 0x10000 ? '\\u' + p.toString(16).padStart(4, '0') : '\\U' + p.toString(16).padStart(8, '0'); }).join('') + "'";
-const everyX = (v) => [...Buffer.from(v)].map((b) => '\\x' + b.toString(16).padStart(2, '0').toUpperCase()).join('');   // strace -xx, a C literal
-const rustU = (v) => cps(v).map((c) => '\\u{' + c.codePointAt(0).toString(16) + '}').join('');                      // Rust escape_unicode
-const octal = (v) => [...Buffer.from(v)].map((b) => (b >= 127 || b < 32 ? '\\' + b.toString(8).padStart(3, '0') : b === 92 ? '\\\\' : String.fromCharCode(b))).join('');   // git core.quotePath, bash $'…'
-const htmlEscape = (v) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');   // Python html.escape, Jinja
-const htmlEvery = (v) => cps(v).map((c) => `&#${c.codePointAt(0)};`).join('');
-const owasp = (v) => cps(v).map((c) => (/[A-Za-z0-9]/.test(c) ? c : `&#x${c.codePointAt(0).toString(16).toUpperCase()};`)).join('');
-const sgrEvery4 = (v) => cps(v).map((c, i) => (i && i % 4 === 0 ? '\x1b[0m' : '') + c).join('');   // escapes BETWEEN the characters
-const grepColor = (v) => { const a = cps(v), h = a.length >> 1; return a.slice(0, 3).join('') + '\x1b[01;31m\x1b[K' + a.slice(3, h).join('') + '\x1b[m\x1b[K' + a.slice(h).join(''); };
-const tputBold = (v) => { const a = cps(v), h = a.length >> 1; return a.slice(0, h).join('') + '\x1b[1m' + a.slice(h, h + 2).join('') + '\x1b(B\x1b[m' + a.slice(h + 2).join(''); };
-const wrapAt = (s, n) => s.match(new RegExp(`[\\s\\S]{1,${n}}`, 'g')).join('\n');
-// [name, value → { text, L, R }]: L / R = how many characters of the printing may stay beside the placeholder (the bytes
-// around the value + the ONE character that mixes a neighbour's bits with the value's + the padding)
-const around = (pre, post) => ({ L: Math.ceil((8 * pre) / 6), R: Math.ceil((8 * post) / 6) + 3 });
-const PRINTS = [
-  ['raw', (v) => ({ text: v, L: 0, R: 0 })],
-  ['base64', (v) => ({ text: b64(v), L: 0, R: 0 })],
-  ['base64, no padding', (v) => ({ text: b64(v).replace(/=+$/, ''), L: 0, R: 0 })],
-  ['base64url', (v) => ({ text: Buffer.from(v).toString('base64url'), L: 0, R: 0 })],
-  ['base64url, padded', (v) => ({ text: b64(v).replace(/\+/g, '-').replace(/\//g, '_'), L: 0, R: 0 })],
-  ['base64 of x + value + yz (byte 1)', (v) => ({ text: b64('x' + v + 'yz'), ...around(1, 2) })],
-  ['Basic base64(user:value) (byte 2)', (v) => ({ text: b64('user:' + v), ...around(5, 0) })],
-  ['base64 of abc + value (byte 0)', (v) => ({ text: b64('abc' + v), ...around(3, 0) })],
-  ['base64url of ab + value + c (byte 2)', (v) => ({ text: Buffer.from('ab' + v + 'c').toString('base64url'), ...around(2, 1) })],
-  ['encodeURIComponent', (v) => ({ text: encodeURIComponent(v), L: 0, R: 0 })],
-  ['percent, lower-case hex', (v) => ({ text: encodeURIComponent(v).replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()), L: 0, R: 0 })],
-  ['a WHATWG form (URLSearchParams)', (v) => ({ text: new URLSearchParams({ k: v }).toString().slice(2), L: 0, R: 0 })],
-  ['RFC 3986 (!\'()* too)', (v) => ({ text: enc(v, /[A-Za-z0-9\-_.~]/), L: 0, R: 0 })],
-  ['Python quote (keeps /)', (v) => ({ text: enc(v, /[A-Za-z0-9\-_.~/]/), L: 0, R: 0 })],
-  ['every byte %XX', (v) => ({ text: enc(v, /(?!)/), L: 0, R: 0 })],
-  ['every byte %xx', (v) => ({ text: enc(v, /(?!)/, false), L: 0, R: 0 })],
-  ['JSON.stringify', (v) => ({ text: JSON.stringify(v), L: 1, R: 1 })],
-  ['JSON with \\/', (v) => ({ text: JSON.stringify(v).replace(/\//g, '\\/'), L: 1, R: 1 })],
-  ['Python json.dumps (ensure_ascii)', (v) => ({ text: pyAscii(v), L: 1, R: 1 })],
-  ['Python ensure_ascii, upper-case hex', (v) => ({ text: pyAscii(v).replace(/\\u([0-9a-f]{4})/g, (m, h) => '\\u' + h.toUpperCase()), L: 1, R: 1 })],
-  ['Go json (HTML-safe)', (v) => ({ text: JSON.stringify(v).replace(/[<>&]/g, (c) => '\\u00' + c.charCodeAt(0).toString(16)), L: 1, R: 1 })],
-  ['JSON inside a JSON log line', (v) => ({ text: JSON.stringify({ msg: 'auth', token: v }), L: '{"msg":"auth","token":"'.length, R: 2 })],
-  ['hex', (v) => ({ text: Buffer.from(v).toString('hex'), L: 0, R: 0 })],
-  ['HEX', (v) => ({ text: Buffer.from(v).toString('hex').toUpperCase(), L: 0, R: 0 })],
-  ['an Authorization header (curl -v)', (v) => ({ text: `> Authorization: Bearer ${v}\r\n`, L: 24, R: 2 })],
-  ['twice on one line', (v) => ({ text: `${v} and ${v}`, L: 0, R: 5 + PH.length })],
-  // lane vault-scrub-forms (q-043 verify M1): what a REAL producer prints by itself — the label's head is the form
-  ['utf16: UTF-16LE (PowerShell 5 > / Out-File, reg export)', (v) => ({ text: streamText(Buffer.from(v, 'utf16le')), L: 0, R: 0 })],
-  ['utf16: UTF-16BE (Java writeChars)', (v) => ({ text: streamText(Buffer.from(v, 'utf16le').swap16()), L: 0, R: 0 })],
-  ['base32: RFC 4648 (oathtool -v)', (v) => ({ text: b32(v), L: 0, R: 0 })],
-  ['base32: no padding, lower-case (an otpauth secret)', (v) => ({ text: b32(v).replace(/=+$/, '').toLowerCase(), L: 0, R: 0 })],
-  ['qp: a quoted-printable mail body (=XX, a soft break inside)', (v) => ({ text: qpOf(v), L: 0, R: 0 })],
-  ['qp: every byte =xx, =\\n soft break', (v) => ({ text: qpOf(v, { every: true, lower: true, soft: '=\n' }), L: 0, R: 0 })],
-  ['escape: Python repr(bytes) b\'…\\xNN…\'', (v) => ({ text: pyBytes(v), L: 2, R: 1 })],
-  ['escape: Python ascii(str) \\xNN \\uXXXX \\U…', (v) => ({ text: pyStr(v), L: 1, R: 1 })],
-  ['escape: every byte \\xNN (strace -xx)', (v) => ({ text: everyX(v), L: 0, R: 0 })],
-  ['escape: a run of escaped backslashes, then every byte \\xNN (pairs read from the run\'s start)', (v) => ({ text: '\\\\'.repeat(5) + everyX(v), L: 10, R: 0 })],
-  ['escape: Rust escape_unicode \\u{…}', (v) => ({ text: rustU(v), L: 0, R: 0 })],
-  ['escape: git / bash octal \\NNN', (v) => ({ text: octal(v), L: 0, R: 0 })],
-  ['entity: html.escape (& < > " \' as entities)', (v) => ({ text: htmlEscape(v), L: 0, R: 0 })],
-  ['entity: every character &#NN;', (v) => ({ text: htmlEvery(v), L: 0, R: 0 })],
-  ['entity: non-alphanumerics &#xHH; (OWASP encoder)', (v) => ({ text: owasp(v), L: 0, R: 0 })],
-  ['ansi: an SGR escape every 4 characters', (v) => ({ text: sgrEvery4(v), L: 0, R: 0 })],
-  ['ansi: grep --color highlighting a part', (v) => ({ text: grepColor(v), L: 0, R: 0 })],
-  ['ansi: bold, then tput sgr0 (\\x1b(B\\x1b[m)', (v) => ({ text: tputBold(v), L: 0, R: 0 })],
-  ['wrap: base64 at 76 columns (a MIME body) — the value across a line break', (v) => ({ text: wrapAt(b64('x'.repeat(48) + v), 76), L: 64, R: 4 })],
-  ['wrap: openssl base64 (64 columns)', (v) => ({ text: wrapAt(b64(v), 64), L: 0, R: 0 })],
-];
-const secretsOf = (v) => [{ label: LABEL, value: v }];
-/** null when the printing is scrubbed: before + (≤ L chars) + THE PLACEHOLDER + (≤ R chars) + after, and the raw value gone. */
-function leakOf(Vm, v, p) {
-  const { text, L, R } = p(v);
-  const out = Vm.maskText(`before ${text} after`, secretsOf(v));
-  const m = new RegExp(`^before ([\\s\\S]*?)${PH.replace(/[[\]]/g, '\\$&')}([\\s\\S]*) after$`).exec(out);
-  return !m || m[1].length > L || m[2].length > R || out.includes(v) ? out.slice(0, 300) : null;
-}
-function scrubLeaks(Vm) { const out = []; for (const v of VALUES) for (const [name, p] of PRINTS) { const l = leakOf(Vm, v, p); if (l !== null) out.push([v.slice(0, 24), name, l]); } return out; }
-// the shipped module's legs are run ONCE (the mutants below each compare against them — the suite's time budget)
-const SHIPPED = new Map(); const once = (key, f) => { if (!SHIPPED.has(key)) SHIPPED.set(key, f()); return SHIPPED.get(key); };
-const READ_ROWS = PRINTS.filter(([n]) => /^(qp|escape|entity|ansi|wrap): /.test(n));
-function chunked(Vm, text, v, sizes) { const m = Vm.createMasker(secretsOf(v)); let out = '', i = 0, k = 0; while (i < text.length) { const n = sizes[k++ % sizes.length]; out += m.push(text.slice(i, i + n)); i += n; } return out + m.end(); }
-/** every split point (values ≤ 64 bytes) and 1 / 3 / 7-character chunks; the long value at 211 and 4096 */
-function chunkEscapes(Vm, rows = PRINTS) {
-  const out = [];
-  for (const v of VALUES) for (const [name, p] of rows) {
-    const text = `before ${p(v).text} after`, whole = Vm.maskText(text, secretsOf(v));
-    const short = Buffer.byteLength(v) <= 64;
-    if (short) for (let i = 0; i <= text.length; i++) { const got = chunked(Vm, text, v, [i, text.length]); if (got !== whole) { out.push([v.slice(0, 24), name, `split at ${i}`]); break; } }
-    for (const sizes of short ? [[1], [3], [7, 2]] : [[211], [4096, 13]]) { const got = chunked(Vm, text, v, sizes); if (got !== whole) out.push([v.slice(0, 24), name, `chunks ${sizes}`]); }
-  }
-  return out;
-}
-{
-  const t0 = Date.now();
-  const leaks = once('scrub', () => scrubLeaks(V));
-  ok(!leaks.length, `${VALUES.length} values × ${PRINTS.length} printings (Node's own encoders): each becomes ${PH} with at most the neighbours' characters beside it — raw, base64 (± padding, URL-safe, inside a longer run at all three byte alignments: Basic user:pass), percent (upper / lower, encodeURIComponent / RFC 3986 / Python / WHATWG form / every byte), JSON (\\/, ensure_ascii, HTML-safe, nested in a log line), hex`, leaks.slice(0, 4));
-  const forms = new Set(V.formsOf('p/l+a=n t?e&d#9%~*"é').map((f) => f.form));
-  const spelled = V.FORM_ROWS.filter((r) => r.how === 'spelled').map((r) => r.form), read = V.FORM_ROWS.filter((r) => r.how === 'read').map((r) => r.form);
-  ok(eq([...forms].sort(), [...spelled].sort()) && eq(V.VIEWS.map((x) => x.form), read) && eq(V.FORMS, V.FORM_ROWS.map((r) => r.form)) && V.FORMS.length === 12
-    && V.FORM_ROWS.every((r) => typeof r.producer === 'string' && r.producer.length > 20) && new Set(PRINTS.map(([n]) => (/^(\w+): /.exec(n) || [])[1]).filter(Boolean)).size === 7,
-    `FORMS is THE ONE LIST (${V.FORMS.join(', ')}): the spelled ones are exactly what formsOf builds, the read ones exactly the VIEWS, each row names its real producer — and every NEW form has printings here`);
-  const esc = once('chunk', () => chunkEscapes(V));
-  ok(!esc.length, `THE CHUNK WINDOW: the same ${VALUES.length * PRINTS.length} texts cut at EVERY split point (values ≤ 64 bytes) and fed 1 / 3 / 7+2 characters at a time (the 2 560-byte value at 211 and 4096+13) scrub exactly as the whole text does`, esc.slice(0, 4));
-  const m = V.createMasker(secretsOf(VALUES[0])), W = m.window;
-  const first = m.push('x'.repeat(100) + VALUES[0].slice(0, 5)), second = m.push(VALUES[0].slice(5) + ' ok'), last = m.end();
-  ok(W === Math.max(...V.formsOf(VALUES[0]).map((f) => f.text.length)) - 1 && first === 'x'.repeat(105 - W) && second === 'x'.repeat(105 + 13 + 3 - W - first.length) && last === 'x'.repeat(100 - first.length - second.length) + PH + ' ok' && m.hits === 1 && m.byForm.raw === 1 && m.bytes === Buffer.byteLength(VALUES[0]), 'the window: push hands on all but the last (longest form − 1) characters — a value that STARTS inside them waits for the next chunk or the end; end flushes; hits / bytes (UTF-8, the audit\'s count) / byForm count', { W, first: first.length, second, last, bytes: m.bytes });
-  const PLAIN = ['plain text, no value here: ünïcödé 🔑 vault://mounts/m1/secretKey [vault:x] %41 \\u0041', 'x'.repeat(5000)];
-  ok(PLAIN.every((t) => chunked(V, t, VALUES[1], [1]) === t && chunked(V, t, VALUES[1], [17, 3]) === t && V.maskText(t, secretsOf(VALUES[1])) === t), 'text without a value passes byte for byte, chunked or whole (references and placeholders included)');
-  let threw = null; try { V.createMasker([{ label: LABEL, value: 'abcdefg' }]); } catch (e) { threw = e.code; }
-  ok(threw === 'entry_too_short_to_mask' && !!V.createMasker([{ label: LABEL, value: 'éééé' }]) && !!V.createMasker([{ label: LABEL, value: 'abcdefgh' }]), 'a value under 8 bytes cannot be scrubbed: createMasker refuses it by name (8 bytes — four é — is enough)');
-  const two = [{ label: 'mounts/a/k', value: 'planted-VALUE-0001' }, { label: 'mounts/b/k', value: 'planted-VALUE-0001-and-more' }];
-  ok(V.maskText('1 planted-VALUE-0001-and-more 2 planted-VALUE-0001 3', two) === '1 [vault:mounts/b/k] 2 [vault:mounts/a/k] 3', 'two values, one inside the other: the longest form wins where both match');
-  ok(V.maskText('k=planted-VALUE-0001', [{ ref: V.parseRef(M2), value: 'planted-VALUE-0001' }]) === 'k=[vault:mounts/m2/secretKey]' && V.maskText('k=planted-VALUE-0001', [{ ref: M2, value: 'planted-VALUE-0001' }]) === 'k=[vault:mounts/m2/secretKey]', 'a secret named by its parsed reference or its vault:// string wears that placeholder');
-  // THE SIEVE (§8.6 ③) — the named holes pass on purpose; these are controls, not wishes
-  const v = VALUES[0], rev = [...v].reverse().join(''), sha = crypto.createHash('sha256').update(v).digest('hex');
-  const so = V.createMasker(secretsOf(v)), se = V.createMasker(secretsOf(v));
-  const split = so.push(v.slice(0, 9)) + so.end() + '|' + se.push(v.slice(9)) + se.end();
-  // ONE window per run (the desk's M1): the run's ONE masker is fed by both pipes in arrival order — the same split is masked,
-  // each character handed back to the stream it came on, the placeholder on the stream the value began on
-  const both = (feed) => { const m = V.createRunMasker(secretsOf(v)), acc = { out: '', err: '' }; const add = (o) => { acc.out += o.out; acc.err += o.err; }; for (const [k, c] of feed) add(m.push(k, c)); add(m.end()); return acc; };
-  const one = both([['out', 'a ' + v.slice(0, 9)], ['err', v.slice(9) + ' b'], ['out', ' c']]);
-  ok(one.out === 'a ' + PH + ' c' && one.err === PH + ' b' && split === v.slice(0, 9) + '|' + v.slice(9), 'ONE WINDOW PER RUN: a value split between stdout and stderr is masked by the run\'s one masker (stdout «a [vault:…] c», stderr «[vault:…] b» — each pipe shows where its part was) — two maskers, one per stream, let the same split by (the control)', [one, split.slice(0, 40)]);
-  // …and reading the pipes in arrival order never costs a value inside ONE pipe: the other pipe's chunk between its halves
-  const h = v.length >> 1, inter = both([['out', '<' + v.slice(0, h)], ['err', '<' + v.slice(0, h)], ['out', v.slice(h) + '>'], ['err', v.slice(h) + '>']]);
-  ok(inter.out === '<' + PH + '>' && inter.err === '<' + PH + '>', 'a value written to EACH pipe in two pieces, the other pipe\'s piece arriving between them, is masked on both (each pipe is read on its own too)', inter);
-  // a seeded fuzz over the two pipes: values whole on one pipe or split between them, other output around, every chunking
-  let seed = 7; const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
-  const fuzzBad = [];
-  for (let round = 0; round < 60; round++) {
-    const val = VALUES[rnd(4)], prints = PRINTS.filter(([n]) => !/twice/.test(n)), [pn, p] = prints[rnd(prints.length)], txt = p(val).text;
-    const feed = [];
-    for (let j = 0; j < 3; j++) feed.push([rnd(2) ? 'out' : 'err', 'noise ' + j + ' ']);
-    const k = rnd(2) ? 'out' : 'err', cutAt = rnd(txt.length - 1) + 1;
-    if (rnd(2)) feed.push([k, txt.slice(0, cutAt)], [k === 'out' ? 'err' : 'out', 'between '], [k, txt.slice(cutAt)]);   // one pipe, the other's chunk inside
-    else feed.push([k, txt.slice(0, cutAt)], [k === 'out' ? 'err' : 'out', txt.slice(cutAt)]);                       // split between the pipes
-    feed.push([rnd(2) ? 'out' : 'err', ' tail']);
-    for (const size of [1, 3, 1e9]) {
-      const fine = feed.flatMap(([s, c]) => { const o = []; for (let i = 0; i < c.length; i += size) o.push([s, c.slice(i, i + size)]); return o; });
-      const r = both(fine), joined = [r.out + r.err, r.err + r.out];
-      if (!r.out.includes(PH) && !r.err.includes(PH) || joined.some((j) => j.includes(val) || (Buffer.byteLength(val) <= 64 && j.includes(val.slice(0, 12))))) fuzzBad.push([pn, size, JSON.stringify(r).slice(0, 160)]);
-    }
-  }
-  ok(!fuzzBad.length, 'A SEEDED FUZZ over the two pipes (60 rounds × 3 chunkings — a value whole on one pipe with the other\'s chunk inside it, or split between the pipes; noise around): every round masked, no 12 characters of a value on either pipe or both joined', fuzzBad.slice(0, 3));
-  const bs = V.createMasker(secretsOf(v)), bsOut = bs.push('\\'.repeat(65536)).length;
-  ok(bsOut >= 65536 - 2 * bs.window - 12, `a 64 KiB run of backslashes is handed on as it comes (${bsOut} characters before the end — the escape view keeps back its window of pairs (2 × window) and one unfinished token from the run's last pair boundary, never the whole run)`, bsOut);
-  const swap = (s) => s[0] === s[0].toUpperCase() ? s[0].toLowerCase() + s.slice(1) : s[0].toUpperCase() + s.slice(1);
-  const gz = zlib.gzipSync(Buffer.from(v)).toString('base64'), spaced = cps(v).join(' '), apart = both([['out', v.slice(0, 9)], ['out', ' other output '], ['err', v.slice(9)]]);
-  ok(V.maskText(rev, secretsOf(v)) === rev && V.maskText(sha, secretsOf(v)) === sha && V.maskText(v.slice(-4), secretsOf(v)) === v.slice(-4) && V.maskText(gz, secretsOf(v)) === gz && V.maskText(spaced, secretsOf(v)) === spaced && V.maskText(swap(v), secretsOf(v)) === swap(v) && apart.out + apart.err === v.slice(0, 9) + ' other output ' + v.slice(9),
-    'THE SIEVE\'S NAMED HOLES pass (controls): a reversal, a hash, the last four characters, gzip + base64 (a compressed stream is not a spelling), the characters spaced, one case swapped, a value split between the pipes with other output between the halves — invented, never what a tool prints by itself');
-  const head = fs.readFileSync(SRC, 'utf8').split('\nconst VI = ')[0];
-  ok(/THE SCRUBBER IS A SIEVE/.test(head) && /WRITE-THEN-CAT DEFEATS IT/.test(head) && /NOT isolation/.test(head) && /a tool can SEND the value somewhere/.test(head) && /refusal table is a belt, not a proof/.test(head) && /THE FLOOR/.test(head) && /ONE window per run/.test(head), 'the module\'s header says so: the scrubber is a sieve, write-then-cat defeats it, same-uid is not isolation, a tool can send the value out, the refusal table is a belt — and it states THE FLOOR and the one window per run');
-  console.log(`  (the scrubber legs ran in ${Date.now() - t0} ms)`);
-}
-
-console.log('⑥b THE REAL PRODUCERS\' TABLE — every printing × a 21-character value × start / middle / end of a chunk × a cut inside it');
-{
-  const t0 = Date.now();
-  const V21 = 'sk-Live_9f=Q/2u+Zt7wX';
-  const POS = { start: (x) => [x + ' ' + 'y'.repeat(200), 0], middle: (x) => ['x'.repeat(100) + ' ' + x + ' ' + 'y'.repeat(100), 101], end: (x) => ['x'.repeat(200) + ' ' + x, 201] };
-  const bad = [];
-  let legs = 0;
-  for (const [name, p] of PRINTS) {
-    const { text, L, R } = p(V21);
-    for (const [pos, place] of Object.entries(POS)) {
-      const [chunk, at] = place(text);
-      const whole = V.maskText(chunk, secretsOf(V21));
-      const head = chunk.slice(0, at), tail = chunk.slice(at + text.length);
-      const i = whole.indexOf(PH);
-      const okWhole = whole.startsWith(head) && whole.endsWith(tail) && i >= head.length && i - head.length <= L && whole.length - tail.length - (i + PH.length) <= R && !whole.includes(V21) && !whole.includes(V21.slice(0, 10)) && !whole.includes(V21.slice(-10));
-      if (!okWhole) { bad.push([name, pos, 'whole', JSON.stringify(whole).slice(0, 160)]); continue; }
-      for (let c = at + 1; c < at + text.length; c++) {   // the stream cut at EVERY point inside the printed value
-        legs++;
-        const m = V.createMasker(secretsOf(V21)), got = m.push(chunk.slice(0, c)) + m.push(chunk.slice(c)) + m.end();
-        if (got !== whole) { bad.push([name, pos, `cut at ${c - at}`, JSON.stringify(got).slice(0, 160)]); break; }
-      }
-    }
-  }
-  ok(!bad.length, `${PRINTS.length} printings × the 21-character value × start / middle / end of a 200-character chunk: each masked WHOLE (the placeholder where the printing was, only its quotes / prefix beside it, 0 characters of the value), and the stream cut at every point inside the printed value (${legs} cuts) hands on exactly the one-shot`, bad.slice(0, 4));
-  const frag = V21.slice(0, 7), fragText = `a ${frag} b ${V21.slice(-4)} c`;
-  ok(V.maskText(fragText, secretsOf(V21)) === fragText && Buffer.byteLength(frag) === V.MIN_MASK_BYTES - 1, `THE FLOOR (by rule): a 7-byte fragment of a value (${V.MIN_MASK_BYTES - 1} bytes, under MIN_MASK_BYTES) and its last four characters are NOT masked — the scrubber masks a whole value in a spelling, never a part of one`);
-  console.log(`  (the producers' table ran in ${Date.now() - t0} ms)`);
-}
+// ⑥ THE SCRUBBER and ⑥b THE REAL PRODUCERS' TABLE — the deep legs (every split point of 322 texts, every printing × a value),
+// moved verbatim with their red controls into the heavy twin test-vault-run-model-deep (主开发 r1068: the fast suite under 10 s)
 
 console.log('⑦ THE CLI\'S WORDS — parseRunArgs');
 {
@@ -1505,234 +1307,7 @@ function foldLeg27(M) {
   return out;
 }
 console.log('⑦g THE SCRUBBER\'S THREE FAULTS (lane lg-vault-file, r858): a cut inside a value, a value split between the pipes at a cut, a value inside another\'s match — and nothing else changes');
-/** the RELEASE's cutTailStart, its own lines (the release copy puts them back) */
-const RELEASE_CUT_TAIL_START = "  function cutTailStart(buf) {\n    const L = buf.length;\n    if (!L) return L;\n    const isPrefix = (sfx) => { if (!sfx) return false; for (const t of texts) if (t.length > sfx.length && t.startsWith(sfx)) return true; return false; };   // a NON-EMPTY proper prefix of some spelled form\n    const prefixStart = (str) => { const n = str.length; for (let q = Math.max(0, n - W); q < n; q++) if (isPrefix(str.slice(q))) return q; return n; };   // earliest offset whose suffix-to-the-end is a value prefix (W bounds the search)\n    let start = prefixStart(buf);                                  // a raw / encoded form half present at the tail\n    for (const vw of VIEWS) {\n      for (let q = Math.max(0, L - vw.max + 1); q < L; q++) if (vw.triggers.includes(buf[q])) { if (q < start) start = q; break; }   // a trailing INCOMPLETE view token (its first trigger within the last vw.max-1 chars) — its decode is unknown ⇒ uncertain from there\n      const r = readView(vw, buf, L, false);\n      if (r) { const ps = prefixStart(r.sk); if (ps < r.sk.length) { const raw = r.at[ps]; if (raw != null && raw < start) start = raw; } }   // a complete-token VIEW decode whose tail is a value prefix — mapped back to a raw offset\n    }\n    return start;\n  }\n";   // stale-pins: kept (the release's own lines, put back)
-const SCRUB = (() => {
-  const seeded = (seed) => () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-  const B62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  /** the longest run of v present in o (a value «in the clear» = 8 characters or more of it) */
-  const clearRun = (o, v) => { let best = 0; for (let i = 0; i + best < v.length; i++) while (i + best < v.length && o.includes(v.slice(i, i + best + 1))) best++; return best; };
-  const bytes = (s) => Buffer.byteLength(s, 'utf8');
-  /** SCENE 2 (the likeliest by accident): a value printed, then the run CUT (the 2 MiB bound, a timeout, a lock, a gone caller) —
-   *  the two scenes the reads measured, then 120 seeded values with three line ends. → the values with ≥ 8 characters in the clear */
-  const cutLeg = (Vm, n = 120) => {
-    const rnd = seeded(4242), tok = (k) => Array.from({ length: k }, () => B62[Math.floor(rnd() * 62)]).join('');
-    const scenes = [
-      ['a value ending in its own first character, echoed', 'q' + tok(38) + 'q', (v) => 'export TOKEN=' + v + '\n'],
-      ['a colour code inside a value near its end', 'tk-live-' + tok(18), (v) => 'token: ' + v.slice(0, 20) + '\x1b[1m' + v.slice(20)],
-      ...Array.from({ length: n }, (_, i) => [`random value ${i}`, ['tk_', 'key-', ''][i % 3] + tok(20 + Math.floor(rnd() * 60)), (v) => 'export TOKEN=' + v + ['\n', '\r\n', ''][i % 3]]),
-      // the scrubber's read: the cut lands inside an UNFINISHED token right after a value's head — a colour code, a soft break's `=`, a `\x` escape cut short
-      ...Array.from({ length: n }, (_, i) => [`a head then a ${['colour code', '`=`', '`\\x`'][i % 3]} cut short ${i}`, 'tk-live-' + tok(18 + Math.floor(rnd() * 30)), (v) => 'token: ' + v.slice(0, 20) + ['\x1b[1', '=', '\\x4'][i % 3]]),
-      // the third read: a head coloured in pieces (`grep --color`), the cut inside the NEXT colour code — only a view's decode, read to that code's start, holds the head
-      ...Array.from({ length: Math.ceil(n / 3) }, (_, i) => [`a head coloured in pieces, cut inside the next code ${i}`, 'tk-live-' + tok(34 + Math.floor(rnd() * 20)), (v) => 'token: \x1b[31m' + v.slice(0, 10) + '\x1b[0m' + v.slice(10, 40) + '\x1b[3']),
-      // the scrubber's second read: the 2 MiB bound counts BYTES — a value's character cut there decodes as U+FFFD
-      ...Array.from({ length: Math.ceil(n / 3) }, (_, i) => [`a CJK value cut inside a character ${i}`, Array.from({ length: 12 + Math.floor(rnd() * 12) }, () => '密码钥匙令牌证书服务器部署生产环境数据库账号用户口令安全'[Math.floor(rnd() * 25)]).join(''), (v) => '令牌：' + v.slice(0, 10) + '\uFFFD']),
-    ];
-    const out = []; let clear = 0;
-    for (const [name, v, print] of scenes) {
-      const m = Vm.createRunMasker(Vm.compileForms([{ label: 'cut', value: v }]), ['out']);
-      const o = m.push('out', print(v)).out + m.end(true).out, c = clearRun(o, v);
-      if (c >= 8) { out.push(`${name}: ${c} of its ${v.length} characters in the clear`); clear += c; }
-    }
-    return { scenes: scenes.length, out, clear };
-  };
-  /** SCENE 1: a value the program SPLIT between the pipes — its head on stdout, the rest on stderr (then « ok» on stdout), or only its
-   *  MIDDLE on stderr (the run cut before its last characters) — and the run cut. → the values with ≥ 8 characters in the clear */
-  const cut2Leg = (Vm, n = 120) => {
-    const rnd = seeded(777), tok = (k) => Array.from({ length: k }, () => B62[Math.floor(rnd() * 62)]).join('');
-    const out = []; let clear = 0;
-    for (let i = 0; i < n; i++) {
-      const v = ['tk_', 'key-', ''][i % 3] + tok(21 + Math.floor(rnd() * 40)), at = 4 + Math.floor(rnd() * (v.length - 8));
-      const m = Vm.createRunMasker(Vm.compileForms([{ label: 'cut2', value: v }]), ['out', 'err']);
-      const acc = { out: '', err: '' }, add = (o) => { acc.out += o.out || ''; acc.err += o.err || ''; };
-      const way = i % 3;   // 0: the rest then « ok» · 1: the rest · 2: the middle only (cut before its last 1–3 characters)
-      add(m.push('out', v.slice(0, at))); add(m.push('err', way === 2 ? v.slice(at, v.length - 1 - Math.floor(rnd() * 3)) : v.slice(at))); if (way === 0) add(m.push('out', ' ok\n'));
-      add(m.end(true));
-      const c = clearRun(acc.out, v) + clearRun(acc.err, v);
-      if (c >= 8) { out.push(`value ${i} split at ${at}${['', ', the rest only', ', the middle only'][way]}: ${c} of its ${v.length} characters in the clear`); clear += c; }
-    }
-    return { values: n, out, clear };
-  };
-  /** SCENE 3: two values where B begins inside A's end, printed overlapping — through the run's scan (maskText, the output belt), and
-   *  through the browser dialog scrubber (its plain pass, its spelled pass, its spelled pass through a view). → tagged leaks */
-  const overlapLeg = (Vm, n = 60) => {
-    const rnd = seeded(31337), pick = (k) => Math.floor(rnd() * k), tok = (k) => Array.from({ length: k }, () => B62[pick(62)]).join('');
-    const bad = []; let clear = 0;
-    for (let i = 0; i < n; i++) {
-      const k = 4 + pick(6), a = 'acct-' + tok(10 + pick(10)), b = a.slice(-k) + tok(14 + pick(12));
-      const secrets = [{ label: 'a', value: a }, { label: 'b', value: b }], text = 'x ' + a + b.slice(k) + ' y';
-      const viaView = 'x ' + a + b.slice(k, k + 2) + '\x1b[1m' + b.slice(k + 2) + ' y';   // B whole only through the colour-code view
-      const sc = Vm.compileTextScrubber(secrets);
-      for (const [road, o] of [['run', Vm.maskText(text, secrets)], ['dialog', sc(text)], ['spelled', sc.spelled(text)], ['spelled-view', sc.spelled(viaView)]]) {
-        const c = clearRun(o, b);
-        if (c >= 8) { bad.push(`${road}: pair ${i}: ${c} of B's ${b.length} characters in the clear`); clear += c; }
-      }
-      // the scrubber's second read: B starts inside A's OWN overlap (A a run of one character), and two values under ONE label (a web login's passwords)
-      const za = String(pick(10)).repeat(8), zb = za.slice(0, 6) + tok(14 + pick(8)), zt = 'x ' + za + za.slice(0, 4) + zb.slice(6) + ' y';
-      const zs = [{ label: 'a', value: za }, { label: 'b', value: zb }], zsc = Vm.compileTextScrubber(zs);
-      for (const [road, o] of [['self-run', Vm.maskText(zt, zs)], ['self-dialog', zsc(zt)]]) { const c = clearRun(o, zb); if (c >= 8) { bad.push(`${road}: pair ${i}: ${c} of B's ${zb.length} characters in the clear`); clear += c; } }
-      const same = [{ label: 'login', value: a }, { label: 'login', value: b }], co = clearRun(Vm.maskText(text, same), b);
-      if (co >= 8) { bad.push(`same-label: pair ${i}: ${co} of B's ${b.length} characters in the clear`); clear += co; }
-    }
-    return { pairs: n, bad, clear };
-  };
-  /** THE FIXPOINT'S SECOND PASS (the scrubber's read): a CHAIN — C's end overlaps B's head, B's end overlaps A's head — and the run
-   *  cut inside A (A ends with its own first character, so the tail starts at A's last one). A pulls the tail to its start, B then
-   *  straddles it, and C straddles B's: each later pass masks one more (a view's repeated finds can make a pass do two, never three).
-   *  → the chains with ≥ 8 characters of B or C in the clear */
-  const chainLeg = (Vm, n = 40) => {
-    const rnd = seeded(8086), tok = (k) => Array.from({ length: k }, () => B62[Math.floor(rnd() * 62)]).join('');
-    const out = [];
-    for (let i = 0; i < n; i++) {
-      const a = 'q' + tok(24) + 'q', b = 'pre-' + tok(12) + a.slice(0, 6), c = 'cc-' + tok(12) + b.slice(0, 6);
-      const text = c.slice(0, c.length - 6) + b.slice(0, b.length - 6) + a;   // no line end: the tail starts at A's last character
-      const m = Vm.createRunMasker(Vm.compileForms([{ label: 'a', value: a }, { label: 'b', value: b }, { label: 'c', value: c }]), ['out']);
-      const o = m.push('out', text).out + m.end(true).out, cl = Math.max(clearRun(o, b), clearRun(o, c));
-      if (cl >= 8) out.push(`chain ${i}: ${cl} characters of B or C in the clear`);
-    }
-    return out;
-  };
-  /** THE SAME VALUE OVERLAPPING ITSELF (read 7): a value of one repeated character printed as a long run (`xxd -p` of a zeroed file) —
-   *  asked again inside its own match, its finds would chain into one placeholder. → the whole output and its placeholders (the
-   *  release tiles it: one placeholder a tile), the characters not yet handed on when the end came (the masked characters counted
-   *  before end(): every character is the value's), and the characters scanned, for 4 KiB in 512-character pushes */
-  const selfLeg = (Vm) => {
-    const v = '0'.repeat(8), m = Vm.createRunMasker(Vm.compileForms([{ label: 'zeros', value: v }]), ['out']), text = '0'.repeat(4096);
-    let out = '';
-    for (let at = 0; at < text.length; at += 512) out += m.push('out', text.slice(at, at + 512)).out;
-    const held = text.length - m.bytes;
-    out += m.end().out;
-    return { out, hits: m.hits, held, W: m.window, scanned: m.scanned, size: text.length, clear: clearRun(out, v) };
-  };
-  /** TWO VALUES THAT TILE ONE REPEATING TEXT (the third and fourth reads): B = A rotated by half, the output A back to back — asked
-   *  inside every match their finds chain over the whole output, and the release's model keeps a straddling chain back. Three runs in
-   *  512-character pushes: A × 60 on one pipe; A × 30, a line end, A × 60 (the plain read restarts after it, the line-joining view does
-   *  not); A × 38 on stdout, one stderr line, A × 60 more (the arrival order restarts after it). → for each, the most characters NOT
-   *  yet handed on after any push (the text so far less the masked characters counted and less its clean characters handed on —
-   *  overlapping finds are one placeholder, so the output's LENGTH says nothing of it), against W; and the most characters of either
-   *  value in the clear. Then five whole texts through maskText, where a long group ENDS: A × 13, A × 38, A × 12 then a third value
-   *  C = A's first half + 20 other characters, A × 15 with a third value of 45 characters stored (its W puts the grid out of the
-   *  pair's phase: read 5), and A × 13 then 200 clean characters (the break's own find — A at 480 — is the last occurrence, handed on
-   *  before the end) → the most characters of a value in the clear. SAID, NOT CURED (read 5): A × 90 wrapped in lines of 239
-   *  characters (under 2 × (W + 1): the plain read never breaks and sees no occurrence across a line end, so its finds bridge the
-   *  view's breaks) → the characters not yet handed on when the end came, printed, never asserted */
-  const rotLeg = (Vm) => {
-    const rnd = seeded(6174), tok = (k) => Array.from({ length: k }, () => B62[Math.floor(rnd() * 62)]).join(''), a = tok(40), b = a.slice(20) + a.slice(0, 20), c = a.slice(0, 20) + tok(20);
-    const two = [{ label: 'a', value: a }, { label: 'b', value: b }], forms = Vm.compileForms(two), W = Vm.createRunMasker(forms, ['out']).window;
-    const run = (parts) => {
-      const m = Vm.createRunMasker(forms, ['out', 'err']);
-      let out = '', size = 0, most = 0, held = 0;
-      const heldNow = () => size - m.bytes - (out.match(/\n|warning: x/g) || []).reduce((n, x) => n + x.length, 0);
-      for (const [k, x] of parts) for (let at = 0; at < x.length; at += 512) { const piece = x.slice(at, at + 512), o = m.push(k, piece); size += piece.length; out += o.out + o.err; held = heldNow(); most = Math.max(most, held); }
-      const e = m.end(); out += e.out + e.err;
-      return { size, most, held, clear: Math.max(clearRun(out, a), clearRun(out, b)) };
-    };
-    const runs = { plain: run([['out', a.repeat(60)]]), line: run([['out', a.repeat(30) + '\n' + a.repeat(60)]]), stderr: run([['out', a.repeat(38)], ['err', 'warning: x\n'], ['out', a.repeat(60)]]) };
-    const wrapped = run([['out', a.repeat(90).match(/[^]{1,239}/g).join('\n')]]);   // SAID, NOT CURED (read 5): printed, never asserted
-    const whole = (t, vals) => { const o = Vm.maskText(t, vals); return Math.max(...vals.map((x) => clearRun(o, x.value))); };
-    const texts = { a13: whole(a.repeat(13), two), a38: whole(a.repeat(38), two), third: whole(a.repeat(12) + c + '\n', [...two, { label: 'c', value: c }]), phase: whole(a.repeat(15), [...two, { label: 'd', value: tok(45) }]), mid: whole(a.repeat(13) + '.'.repeat(200), two) };
-    return { W, runs, wrapped, texts, most: Math.max(...Object.values(runs).map((r) => r.most)), clear: Math.max(...Object.values(runs).map((r) => r.clear), ...Object.values(texts)) };
-  };
-  /** A BINARY OUTPUT CUT AT THE BOUND (read 4): its decoded tail ends in U+FFFD (a character the byte bound broke) and no value is in
-   *  it — 50 tails «bin: <20 characters>» + one character + one to three U+FFFD, cut there: the one character a space, or a form's
-   *  first character (NUL — a UTF-16 BE form's —, `%`, the hex form's, the base64 form's, an ASCII value's own: a head whose NEXT character
-   *  is ASCII, so the broken character was not the value's; read 5); stored, never printed: an ASCII value, then a CJK value whose
-   *  UTF-16 form read as UTF-8 begins with U+FFFD. → the hits counted (each a placeholder where no value was) */
-  const binLeg = (Vm, n = 50) => {
-    const rnd = seeded(4099), tok = (k) => Array.from({ length: k }, () => B62[Math.floor(rnd() * 62)]).join('');
-    const one = (value) => {
-      const heads = [' ', '\u0000', '%', Buffer.from(value).toString('hex')[0], Buffer.from(value).toString('base64')[0], ...(value.charCodeAt(0) < 0x80 ? [value[0]] : [])];   // a CJK value's own first character before a broken one IS a head: its next character is not ASCII
-      let hits = 0;
-      for (let i = 0; i < n; i++) { const m = Vm.createRunMasker(Vm.compileForms([{ label: 'v', value }]), ['out']); m.push('out', 'bin: ' + tok(20) + heads[i % heads.length] + '\uFFFD'.repeat(1 + (i % 3))); m.end(true); hits += m.hits; }
-      return hits;
-    };
-    return { ascii: one(tok(24)), cjk: one('\u5bc6\u7801\u662f\u4fdd\u7ba1\u7bb1\u7684\u94a5\u5319') };
-  };
-  /** THE DIALOG SCRUBBER'S PARITY with the run's (the scrubber's second read): a value of one repeated digit, a run of it — the dialog
-   *  scrubber and maskText give the same text. → the texts that differ */
-  const parityLeg = (Vm, n = 20) => {
-    const rnd = seeded(2718), out = [];
-    for (let i = 0; i < n; i++) {
-      const v = String(Math.floor(rnd() * 10)).repeat(8), text = 'pin ' + v[0].repeat(8 + Math.floor(rnd() * 80)) + ' end', s = [{ label: 'pin', value: v }];
-      const a = Vm.maskText(text, s), b = Vm.compileTextScrubber(s)(text);
-      if (a !== b) out.push(`run ${i}: the dialog «${b.slice(0, 60)}» vs the run «${a.slice(0, 60)}»`);
-    }
-    return out;
-  };
-  /** THE RELEASE'S FUNCTION, rebuilt from this file by putting its own lines back (each anchored: a moved line fails BY NAME) */
-  const releaseCopy = () => {
-    const dir = scratchDir('vault-run-scrub-release');
-    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-    for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
-    let t = fs.readFileSync(SRC, 'utf8');
-    const back = (from, to, name) => { t = anchored(t, from, to, `⑦g the release's ${name}`); };
-    t = anchored(t, /\n[^\n]*\/\/ THE SCRUBBER'S OVERLAP[^\n]*/, '', "⑦g the release's run scan", { count: 7 });   // its seven marked lines: each value's last find, the group, the grid, the find's place, the group's break, the same-value skip, the re-ask
-    back('  function scan(buf, final, at) {\n', '  function scan(buf, final) {\n', "scan's head");   // stale-pins: kept (the release's own head)
-    back('      const sc = scan(all, final, idxAt);\n', '      const sc = scan(all, final);\n', 'arrival scan');   // stale-pins: kept (the release's own call)
-    t = anchored(t, /\n[^\n]*\/\/ the dialog scrubber's overlap[^\n]*/, '', "⑦g the release's dialog scrubber", { count: 3 });
-    t = anchored(t, /\n[^\n]*\/\/ its spelled pass(?: \(r858\)|:)[^\n]*/, '', "⑦g the release's spelled pass", { count: 3 });
-    t = anchored(t, /\n[^\n]*\/\/ its spelled pass through a view(?: \(r858\)|:)[^\n]*/, '', "⑦g the release's spelled view pass", { count: 3 });
-    back('      const { all, streamAt, idxAt, rangesOf } = arrivalOf(held);\n',
-      "      const all = held.map((x) => x[1]).join(''), streamAt = [], idxAt = [], seen = new Map();\n      for (const [k, x] of held) for (let j = 0; j < x.length; j++) { const i = seen.get(k) || 0; streamAt.push(k); idxAt.push(i); seen.set(k, i + 1); }\n      const rangesOf = (a, b) => { const m = new Map(); for (let i = a; i < b; i++) { const k = streamAt[i], x = m.get(k); if (x) x[2] = idxAt[i] + 1; else m.set(k, [k, idxAt[i], idxAt[i] + 1]); } return [...m.values()]; };\n", 'arrival order in step');   // stale-pins: kept (the release's own lines, put back to rebuild its function)
-    const a = t.indexOf("    const start = new Map(); for (const [k, x] of own) start.set(k, cutTailStart(x));"), z = t.indexOf("    for (const [k, x] of own) { const s = start.get(k); if (s < x.length) {");
-    if (a < 0 || z < a) throw new Error('ANCHOR GONE «⑦g the release\'s endStep» — the cut\'s new body is not where the copy expects it');
-    t = t.slice(0, a) + "    const keepFrom = new Map(); for (const [k, x] of own) keepFrom.set(k, cutTailStart(x));\n    held = [];\n    for (const [k, x] of own) { const sIdx = keepFrom.get(k); if (sIdx > 0) held.push([k, x.slice(0, sIdx)]); }\n    const out = step(true);\n" + t.slice(z);   // stale-pins: kept (the release's own lines, put back to rebuild its function)
-    if (t.includes('const start = new Map(); for (const [k, x] of own) start.set(k, cutTailStart(x));')) throw new Error('⑦g the release\'s endStep: the copy still holds the new tails');
-    t = anchored(t, "    for (const [k, x] of own) { const s = start.get(k); if (s < x.length) { out[k] = (out[k] || '') + CUT_PH; st.hits++; st.bytes += bytesOf(x.slice(s)); } }", "    for (const [k, x] of own) { const sIdx = keepFrom.get(k); if (sIdx < x.length) { out[k] = (out[k] || '') + CUT_PH; st.hits++; st.bytes += bytesOf(x.slice(sIdx)); } }", "⑦g the release's cut placeholder line");   // stale-pins: kept (the release's own line, put back)
-    const ctA = t.indexOf('  function cutTailStart(buf) {'), ctZ = t.indexOf("  // THE CUT'S TWO FAULTS (lane lg-vault-file, r858");
-    if (ctA < 0 || ctZ < ctA) throw new Error('ANCHOR GONE «⑦g the release\'s cutTailStart» — the function is not where the copy expects it');
-    t = t.slice(0, ctA) + RELEASE_CUT_TAIL_START + t.slice(ctZ);
-    const f = path.join(dir, 'src', 'vault-run-release.js');
-    fs.writeFileSync(f, t);
-    return require(f);
-  };
-  /** A RUN WITH NO CUT changes nothing: seeded values (each its own head, so none starts inside another's match — scene 3 changes on
-   *  purpose) printed every way among noise, cut into seeded chunks on both pipes, end() — the release's function and this one,
-   *  output byte for byte, hits and bytes. → { seed, trials, differ } */
-  const diffLeg = (Vr, Vm, seed = 20261121, trials = 300) => {
-    const rnd = seeded(seed), pick = (k) => Math.floor(rnd() * k), tok = (k) => Array.from({ length: k }, () => B62[pick(62)]).join('');
-    const printings = [(v) => v, (v) => Buffer.from(v).toString('base64'), (v) => Buffer.from(v).toString('hex'), (v) => encodeURIComponent(v + '/+'), (v) => JSON.stringify({ token: v }), (v) => '\x1b[1m' + v + '\x1b[0m', (v) => v.slice(0, 5) + '\\x' + v.charCodeAt(5).toString(16) + v.slice(6)];
-    const differ = [];
-    for (let i = 0; i < trials; i++) {
-      const SPEC = '/+=&<"\\% ';   // characters every encoding spells its own way (base64 / percent / JSON / entity / escape)
-      const vals = Array.from({ length: 1 + pick(3) }, (_, j) => (i % 10 === 9 && j === 0 ? String(pick(10)).repeat(8 + pick(8)) : `k${i}${'ABC'[j]}_` + Array.from({ length: 20 + pick(30) }, () => (pick(5) ? B62[pick(62)] : SPEC[pick(SPEC.length)])).join('')));   // every tenth run: a value of one repeated digit (it overlaps itself), printed as a run
-      const secrets = vals.map((v, j) => ({ label: `v${j}`, value: v }));
-      let text = '';
-      for (let p = 0; p < 4 + pick(8); p++) text += pick(3) ? `line ${p}: ${tok(pick(40))}\n` : printings[pick(printings.length)](vals[pick(vals.length)]) + (pick(2) ? '\n' : ' ');
-      if (i % 10 === 9) text += vals[0][0].repeat(40 + pick(160)) + '\n';   // the self-overlapping value as a long run
-      const chunks = []; for (let at = 0; at < text.length;) { const n = 1 + pick(40); chunks.push([pick(3) ? 'out' : 'err', text.slice(at, at + n)]); at += n; }
-      const run = (M) => { const m = M.createRunMasker(M.compileForms(secrets), ['out', 'err']), acc = { out: '', err: '' }; for (const [k, c] of chunks) { const o = m.push(k, c); acc.out += o.out; acc.err += o.err; } const o = m.end(); acc.out += o.out; acc.err += o.err; return { ...acc, hits: m.hits, bytes: m.bytes, byForm: JSON.stringify(Object.entries(m.byForm).sort()) }; };
-      const a = run(Vr), b = run(Vm);
-      if (a.out !== b.out || a.err !== b.err || a.hits !== b.hits || a.bytes !== b.bytes || a.byForm !== b.byForm) differ.push({ i, release: a, now: b });
-    }
-    return { seed, trials, differ };
-  };
-  /** THE COST on a 2 MiB output (the scrubber runs on the hub, in the run's own pushes): the characters every scan read and the
-   *  regex's exec calls, the release's function and this one — a log with the value 6 times in it, and the value printed back to back;
-   *  64 KiB pushes, then the cut (the 2 MiB bound) */
-  const costLeg = (Vr, Vm) => {
-    const rnd = seeded(5150), tok = (k) => Array.from({ length: k }, () => B62[Math.floor(rnd() * 62)]).join('');
-    const v = 'tk_' + tok(37);
-    const line = (i) => `${String(i).padStart(7, '0')} GET /api/items?page=${i} 200 ${tok(24)}\n`;
-    let logText = ''; for (let i = 0; logText.length < 2 * 1024 * 1024; i++) logText += i % 6000 === 0 ? `token=${v}\n` : line(i);
-    const packed = v.repeat(Math.ceil(2 * 1024 * 1024 / v.length)), soft = 'token=' + v + '\n' + '=\n'.repeat(128 * 1024);
-    const one = (M, text, two = false) => {
-      let execs = 0;
-      class CountRe extends RegExp { exec(s) { execs++; return super.exec(s); } }
-      const C = M.compileForms([{ label: 'cost', value: v }]), Cc = { ...C, re: new CountRe(C.re.source, C.re.flags) };
-      const m = M.createRunMasker(Cc, ['out', 'err']);
-      let out = '';
-      if (two) out += m.push('err', 'warning: a short line first\n').err;
-      for (let at = 0; at < text.length; at += 65536) out += m.push('out', text.slice(at, at + 65536)).out;
-      const e = m.end(true); out += e.out + e.err;
-      return { scanned: m.scanned, execs, outBytes: bytes(out), clear: clearRun(out, v), window: m.window };
-    };
-    return { log: { release: one(Vr, logText), now: one(Vm, logText) }, packed: { release: one(Vr, packed), now: one(Vm, packed) }, soft: { release: one(Vr, soft), now: one(Vm, soft) }, soft2: { release: one(Vr, soft, true), now: one(Vm, soft, true) }, size: [bytes(logText), bytes(packed), bytes(soft)] };
-  };
-  let releaseOnce = null;
-  const release = () => releaseOnce || (releaseOnce = releaseCopy());   // ONE copy of the release's function for the legs and the controls
-  return { cutLeg, cut2Leg, overlapLeg, chainLeg, selfLeg, parityLeg, rotLeg, binLeg, release, diffLeg, costLeg, bytes };
-})();
+const SCRUB = scrubLegs({ REPO, SRC, scratchDir, anchored, require });   // the run scrubber's legs (r858, r1068): scripts/vault-run-scrub-legs.mjs, shared with the deep twin
 {
   const Vr = SCRUB.release();
   // the three scenes: what reaches the caller's output in the RELEASE and NOW (characters of the value in the clear, counted — never a value)
@@ -1756,6 +1331,23 @@ const SCRUB = (() => {
   const bn = SCRUB.binLeg(V), bnr = SCRUB.binLeg(Vr);
   console.log(`    judged — 50 binary tails cut inside a character, no value in them: ${bn.ascii} hits with an ASCII value stored (the release: ${bnr.ascii}), ${bn.cjk} with a CJK value (the release: ${bnr.cjk})`);
   ok(bn.ascii === 0 && bn.cjk === 0, `a binary output cut inside a character: ${bn.ascii} + ${bn.cjk} placeholders where no value was (an ASCII, a CJK value stored) — red controls: «a broken character's run taken as the tail», «a head before a broken character taken whatever follows it», «a broken character read as a value's head»`, { bn, bnr });
+  // THE ONE SWEEP (主开发 r1068): the cuts the fixpoint gave, in one sweep
+  const sw = SCRUB.sweepLeg(V);
+  console.log(`    judged — the one sweep against the fixpoint it replaced: 2000 seeded sets of groups (one stream or two, chains), ${sw.length} differ`);
+  ok(sw.length === 0, `THE ONE SWEEP settles the cuts the fixpoint did — 2000 seeded sets of groups, one stream or two, chains: ${sw.length} differ; red controls: «the sweep moves no cut», «the sweep follows no cut it moved», «the sweep's ranges unsorted»`, sw.slice(0, 3));
+  // THE LONGEST TURN (主开发 r1068): linear in the text held, never the fixpoint's square
+  const tl = SCRUB.turnLeg(V), tline = (x) => `${x.maxSteps} steps (${x.most} characters held at most; the run ${x.runSteps})${x.over ? ', FAILED CLOSED' : ''}`;
+  console.log(`    judged — the longest turn, 16 KiB in 4 KiB pushes: two values tiling one text wrapped in lines of 239, ${tline(tl.rot)}; a value of one repeated character in a hex dump of zeros, ${tline(tl.zeros)}; the figure 32 steps (× the masker's charge a character) a character a turn reads (the most held + a push) + 65 536`);
+  ok([tl.rot, tl.zeros].every((x) => !x.over && x.maxSteps <= 32 * x.charge * (x.most + x.push + x.W) + 65536), `THE LONGEST TURN on the two holds the release's model makes (two values tiling one text wrapped in short lines; a hex dump of zeros with a value of zeros): ${tline(tl.rot)} · ${tline(tl.zeros)} — at most 32 steps (× the charge a character) a character a turn reads (the most held + a push) + 65 536, and no fail-closed; red control: «the two fixpoints put back»`, tl);
+  // THE COMPARES A CHARACTER CAN COST (the budget's read, F1): a run of a repeating head is charged as deep as the regex goes
+  const pl = SCRUB.periodLeg(V), pline = (x) => `${x.over ? 'failed closed' : 'not failed closed'}, ${x.maxSteps} steps the longest turn`;
+  console.log(`    judged — THE REGEX HOLDS NO LONG LITERAL (its longest ${pl.tail.longest} characters): a stored 2 047 «A» + «B», 8 KiB of «A» — ${pline(pl.tail)}; (2 047 «A» + «B») × 3 + 2 047 «A» — ${pline(pl.thrice)}; «AAAA» + «B» + 8 187 «A» — ${pline(pl.inner)}; that value beside an ordinary log — ${pline(pl.beside)}; 64 «A» stored, 32 KiB of «A» under a planted turn's figure of 2^19 — ${pline(pl.short)}`);
+  ok([pl.tail, pl.thrice, pl.inner, pl.beside, pl.short].every((x) => x.longest <= 64) && (pl.tail.over || pl.tail.maxSteps > 1 << 23) && pl.thrice.over && !pl.inner.over && pl.inner.maxSteps < 1 << 20 && !pl.beside.over && pl.short.over,
+    `THE COMPARES A CHARACTER CAN COST (the reads' F1 and G1): the regex holds no literal over 64 characters, and a long form is verified by a counted compare — the two runs that follow a long form's head are counted at every verify (${pl.tail.maxSteps} steps: over 2^23, or failed closed) and fail closed (${pl.thrice.maxSteps}), a run inside a form that never follows its head costs little (${pl.inner.maxSteps}), an ordinary log beside the same value does not fail closed (${pl.beside.maxSteps}), and a short repeating head is charged as deep as it is compared (${pl.short.maxSteps} steps past a planted 2^19); red controls: «a long form verified uncounted», «a character charged once»`, pl);
+  // THE SCAN'S BUDGET (主开发 r1068): a planted input past each figure fails closed, by name
+  const bd = SCRUB.budgetLeg(V), bline = (x) => `${x.over ? `failed closed at push ${x.at}` : 'did NOT fail closed'}, the words ${x.said ? 'said by name' : 'NOT said'}, the held text ${x.masked ? 'under the cut\'s placeholder' : 'NOT masked'}, ${x.clear} characters of the value in a row, ${x.after} handed on after the mark, ${x.withheld} withheld`;
+  console.log(`    judged — the budget planted small: a turn's figure — ${bline(bd.turn)}; the run's figure — ${bline(bd.run)}`);
+  ok([bd.turn, bd.run].every((x) => x.over && x.said && x.masked && x.clear < 8 && x.after === 0 && x.withheld > 0), `THE SCAN'S BUDGET fails closed past a turn's figure and past the run's: everything held under the cut's placeholder, the words by name (scrub_work_bound), nothing of the value in the clear, nothing handed on after — a turn: ${bline(bd.turn)}; the run: ${bline(bd.run)}; red controls: «the budget cut», «the overrun hands the held text on», «the mark not sticky», «the end after the mark speaks again»`, bd);
   // the dialog scrubber and the run's scan agree on a value overlapping itself
   const pa = SCRUB.parityLeg(V);
   console.log(`    judged — the dialog scrubber vs maskText on 20 runs of a self-overlapping value: ${pa.length} differ`);
@@ -1763,18 +1355,12 @@ const SCRUB = (() => {
   // the fixpoint's second pass: B overlaps the head of A, A is cut inside its colour code — only a second pass masks B
   const chR = SCRUB.chainLeg(Vr), ch = SCRUB.chainLeg(V);
   console.log(`    judged — a chain of three overlapping values, cut inside the last: the release ${chR.length} of 40 chains leak, now ${ch.length}`);
-  ok(chR.length > 0 && ch.length === 0, `a chain of three values (each one's end over the next one's head), the run cut inside the last: ${ch.length} of 40 chains with 8 characters of the first two in the clear (the release: ${chR.length}); red control: «the cut's fixpoint stops after one pass»`, ch.slice(0, 3));
+  ok(chR.length > 0 && ch.length === 0, `a chain of three values (each one's end over the next one's head), the run cut inside the last: ${ch.length} of 40 chains with 8 characters of the first two in the clear (the release: ${chR.length}); red control: «the sweep follows no cut it moved»`, ch.slice(0, 3));
   // the same value overlapping itself (read 7): it tiles as the release did — the release's own output, handed on as it comes
   const sf = SCRUB.selfLeg(V), sfr = SCRUB.selfLeg(Vr);
   console.log(`    judged — a value of one repeated character, 4 KiB of it: the output ${sf.out === sfr.out ? 'the release\'s, byte for byte' : 'NOT the release\'s'} (${sf.hits} placeholders; the release ${sfr.hits}), ${sf.held} characters not yet handed on when the end came (the release: ${sfr.held}), ${sf.scanned} scanned (the release: ${sfr.scanned})`);
   ok(sf.out === sfr.out && sf.hits === sfr.hits && sf.held <= 2 * (sf.W + 1) && sf.scanned <= 2 * sfr.scanned + 4096 && sf.clear < 8, `a value overlapping itself, printed as a 4 KiB run: the release's output and ${sf.hits} placeholders (the release ${sfr.hits}), ${sf.held} of ${sf.size} characters not yet handed on when the end came, ${sf.scanned} characters scanned (the release: ${sfr.scanned}) — it tiles as the release did; red control: «the same value asked inside its own match»`, { sf: { ...sf, out: sf.out.length }, sfr: { ...sfr, out: sfr.out.length } });
-  // the cost on a 2 MiB output, counted: characters scanned and regex exec calls (the release's function and this one)
-  const k = SCRUB.costLeg(Vr, V), ln = (x) => `${x.scanned} characters scanned, ${x.execs} exec calls`;
-  console.log(`    judged — 2 MiB (${k.size[0]} B log, the value 6 times in it): the release ${ln(k.log.release)}; now ${ln(k.log.now)} · 2 MiB (${k.size[1]} B) the value back to back: the release ${ln(k.packed.release)}; now ${ln(k.packed.now)} · ${k.size[2]} B of soft line breaks after a value (held whole by the release): the release ${ln(k.soft.release)}; now ${ln(k.soft.now)}`);
-  console.log(`    judged — the same soft breaks on two pipes (a short stderr line first): the release ${ln(k.soft2.release)}; now ${ln(k.soft2.now)}`);
-  // the cut reads the WHOLE held text again (each stream's, and on two pipes their arrival order): at most twice the held text more
-  ok([k.log, k.packed, k.soft, k.soft2].every((x) => x.now.scanned <= 1.5 * x.release.scanned + 65536 && x.now.execs <= x.release.execs + 64 && x.now.clear < 8 && x.release.outBytes > 0),
-    `the cost cut at the end: characters scanned now / the release — the 2 MiB log ${k.log.now.scanned} / ${k.log.release.scanned}, the packed values ${k.packed.now.scanned} / ${k.packed.release.scanned}, the held soft breaks ${k.soft.now.scanned} / ${k.soft.release.scanned}, on two pipes ${k.soft2.now.scanned} / ${k.soft2.release.scanned} (bound: 1.5 × + 64 KiB); exec calls ${k.log.now.execs} / ${k.log.release.execs}, ${k.packed.now.execs} / ${k.packed.release.execs}, ${k.soft.now.execs} / ${k.soft.release.execs}, ${k.soft2.now.execs} / ${k.soft2.release.execs}`, k);
+  // THE COST on a 2 MiB output and THE LONGEST TURN near the bound: the deep twin (test-vault-run-model-deep — 主开发 r1068)
 }
 
 console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
@@ -1799,17 +1385,8 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     if (!f1.always.offered && f1.always.why != null && !M.ALWAYS_WHY.includes(f1.always.why)) out.push(['always.why', f1.always.why]);
     return out; };
   const LEGS = [
-    ['the scrubber without base64', '\n    ...base64Forms(bytes),\n', '\n    ...[],\n', (Vm) => (Vm === V ? once('scrub', () => scrubLeaks(V)) : scrubLeaks(Vm)).filter(([, n]) => /base64|Basic/.test(n) && !/^wrap: /.test(n))],
     ['argv allowed by default', 'const argvOpen = !!allowArgv && !!(row && row.argvOnly);', 'const argvOpen = true;', argvLeg],
     ['a print-class tool not refused', 'const REFUSING = TOOL_ROWS;', "const REFUSING = TOOL_ROWS.filter((r) => r.cls !== 'print');", printLeg],
-    ['a value split across chunks escaping (no window)', '  const W = maxLen - 1;\n', '  const W = 0;\n', (Vm) => (Vm === V ? once('chunk', () => chunkEscapes(V)) : chunkEscapes(Vm))],
-    // lane vault-scrub-forms: each NEW form dropped ⇒ its printings leak; a view's held tail ignored ⇒ a value cut inside its escapes leaks
-    ...[['utf16', ', ...utf16Forms(v)', ''], ['base32', ', ...base32Forms(bytes)', ''],
-      ['qp', "re: /=(?:\\r?\\n|[0-9A-Fa-f]{2})/g", 're: /(?!)/g'], ['escape', "re: /\\\\(?:x[0-9A-Fa-f]{2}", 're: /(?!)\\\\(?:x[0-9A-Fa-f]{2}'],
-      ['entity', "re: /&(?:#[0-9]{1,7};", 're: /(?!)&(?:#[0-9]{1,7};'], ['ansi', "re: /\\x1b(?:", 're: /(?!)\\x1b(?:'], ['wrap', 're: /[\\r\\n]/g', 're: /(?!)/g']]
-      .map(([form, from, to]) => [`the scrubber without the ${form} form`, from, to, (Vm) => (Vm === V ? once('scrub', () => scrubLeaks(V)) : scrubLeaks(Vm)).filter(([, n]) => n.startsWith(form + ': '))]),
-    ['a backslash run held whole', 'k = j + 2 * Math.floor((k - j) / 2);', 'k = j;', (Vm) => { const m = Vm.createMasker(secretsOf(VALUES[0])), n = m.push('\\'.repeat(65536)).length; return n >= 65536 - 2 * m.window - 12 ? [] : [['held', n]]; }],
-    ['a view\'s held tail ignored', 'if (!final) { const len = r ? r.sk.length : end, ss = len - W;', 'if (false) { const len = r ? r.sk.length : end, ss = len - W;', (Vm) => (Vm === V ? once('chunk', () => chunkEscapes(V)).filter(([, n]) => READ_ROWS.some(([r]) => r === n)) : chunkEscapes(Vm, READ_ROWS))],
     // lane vault-agent-own: each rule of the own road, broken in a copy ⇒ its rows RED
     ['an own stored entry still asks', "  if (!why.length) return { ok: true, by: away0.length ? 'always' : 'own' };\n", '\n', ownRoad],
     ['an own entry still needs the switch', 'if (e.open !== true && e.own !== true) return e.ended', 'if (e.open !== true) return e.ended', ownRoad],   // (B-a14b moved the line: the refusal is entry_not_runnable or grant_expired)
@@ -1876,10 +1453,18 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['a program inside the folder folding the prefix AGAIN (r27 — the r12 acceptance: 24.9 KB past the store\'s bound)', "folderRaw && pathRaw.startsWith(folderRaw + '/') ?", 'false ?', foldLeg27],
     ['a long reason reference clipped with no marker (r27 — b034bdf64)', "away: away.map((a) => ({ ...clipFold('ref', a.ref || ''),", "away: away.map((a) => ({ ref: clipStr(a.ref || '').text,", foldLeg27],
     // lane lg-vault-file (r858): THE RED CONTROLS of ⑦g — each cure put back the release's way
-    ['the cut tail splits a value', '        if (!rs.some(([k, , b]) => b > start.get(k))) continue;   // wholly before every tail: the flush below masks it', '        continue;', (Vm) => SCRUB.cutLeg(Vm, 60).out],
+    ['the sweep moves no cut', '    if (!rs.some(([k, a]) => a < cut.get(k))) continue;   // it starts at or past every cut it covers', '    continue;   // it starts at or past every cut it covers', (Vm) => SCRUB.cutLeg(Vm, 60).out],
     ['the cut tail ignores the arrival order\'s finds', '    if (ar) for (const f of scan(ar.all, true, ar.idxAt).finds) finds.push(ar.rangesOf(f.s, f.e));', '', (Vm) => SCRUB.cut2Leg(Vm, 60).out],
     ['the cut ignores the arrival order\'s own tail', '      const q = cutTailStart(ar.all);', '      const q = ar.all.length;', (Vm) => SCRUB.cut2Leg(Vm, 60).out],
-    ['the cut\'s fixpoint stops after one pass', '    for (let moved = true; moved;) {\n      moved = false;\n      for (const rs of finds) {', '    for (let moved = true, pass = 0; moved && pass++ < 1;) {\n      moved = false;\n      for (const rs of finds) {', (Vm) => SCRUB.chainLeg(Vm, 20)],
+    ['the sweep follows no cut it moved', '{ cut.set(k, a); reach(k); }', '{ cut.set(k, a); }', (Vm) => SCRUB.chainLeg(Vm, 20)],
+    ['the sweep\'s ranges unsorted', 'l.sort((x, y) => y[0] - x[0]);', 'l.sort((x, y) => x[0] - y[0]);', (Vm) => SCRUB.sweepLeg(Vm, 300)],
+    ['the two fixpoints put back', '    if (!final) settleCuts(groups.map((g) => g.r), cut, spend);   // THE ONE SWEEP (主开发 r1068): never cut inside a group — one not wholly before the cuts is kept back whole; the cuts settled in one sweep (was a fixpoint that walked a chain of groups back one a pass)', '    if (!final) for (let moved = true; moved;) { moved = false; for (const g of groups) { spend(1); if (g.r.every(([k, , b]) => b <= cut.get(k))) continue; for (const [k, a] of g.r) if (a < cut.get(k)) { cut.set(k, a); moved = true; } } }', (Vm) => { const r = SCRUB.turnLeg(Vm); return [r.rot, r.zeros].filter((x) => x.over || x.maxSteps > 32 * x.charge * (x.most + x.push + x.W) + 65536).map((x) => `${x.maxSteps} steps in one turn, ${x.most} characters held${x.over ? ', failed closed' : ''}`); }],
+    ['a character charged once', '      spend(deepCost(sk, heads));', '      spend(sk.length);', (Vm) => { const r = SCRUB.periodLeg(Vm, ['short']); return r.short.over ? [] : [`32 KiB of «A» with 64 «A» stored charged ${r.short.maxSteps} steps and not failed closed`]; }],
+    ['a long form verified uncounted', 'for (const t of longs) { spend(t.length); if', 'for (const t of longs) { if', (Vm) => { const r = SCRUB.periodLeg(Vm, ['thrice']); return r.thrice.over ? [] : [`a long form verified at every position of 8 KiB of «A», ${r.thrice.maxSteps} steps, not failed closed`]; }],
+    ['the budget cut', '> limit.run + SCRUB_STEPS_A_CHAR * st.read) throw OVER; };', '> limit.run + SCRUB_STEPS_A_CHAR * st.read) void 0; };', (Vm) => { const r = SCRUB.budgetLeg(Vm); return [r.turn, r.run].filter((x) => !x.over).map(() => 'the planted input ran past its figure and did not fail closed'); }],
+    ['the overrun hands the held text on', 'if (x) { out[k] += CUT_PH; st.hits++; st.bytes += bytesOf(x); }', 'if (x) { out[k] += x; }', (Vm) => { const r = SCRUB.budgetLeg(Vm); return [r.turn, r.run].filter((x) => x.clear >= 8).map((x) => `${x.clear} characters of the value in the clear`); }],
+    ['the mark not sticky', '      if (st.over) { st.withheld += t.length; return none(); }', '      void 0;', (Vm) => { const r = SCRUB.budgetLeg(Vm); return [r.turn, r.run].filter((x) => x.after > 0).map((x) => `${x.after} characters handed on after the mark`); }],
+    ['the end after the mark speaks again', "    if (st.over) return none();   // THE SCAN'S BUDGET: the end after the mark gives nothing", "    void 0;   // THE SCAN'S BUDGET: the end after the mark gives nothing", (Vm) => { const r = SCRUB.budgetLeg(Vm); return [r.turn, r.run].filter((x) => x.after > 0).map((x) => `${x.after} characters handed on after the mark`); }],
     ['a value\'s head before an unfinished token unread', '{ if (q < start) start = q; ends.add(q); break; }', '{ if (q < start) start = q; break; }', (Vm) => SCRUB.cutLeg(Vm, 30).out],   // stale-pins: kept (the replacement IS the release's reading)
     ['the cut rebuilt stream by stream', "      if (keep) { const p = next[next.length - 1]; if (p && p[0] === k) p[1] += keep; else next.push([k, keep]); }\n    }\n    held = next;\n    const out = step(true);", "    }\n    held = [...own].map(([k, x]) => [k, x.slice(0, start.get(k))]).filter(([, x]) => x);\n    const out = step(true);", (Vm) => SCRUB.cut2Leg(Vm, 60).out],   // stale-pins: kept (the replacement IS the release's cut)
     ['the run\'s scan jumps past a match', 'vEnd.set(t.v, m.index + m[0].length); if (m.index >= gEnd) gStart = m.index; gEnd = Math.max(gEnd, m.index + m[0].length); gAt = p; re.lastIndex = m.index + 1;   // THE SCRUBBER\'S OVERLAP', 'vEnd.set(t.v, m.index + m[0].length); if (m.index >= gEnd) gStart = m.index; gEnd = Math.max(gEnd, m.index + m[0].length); gAt = p;   // THE SCRUBBER\'S OVERLAP', (Vm) => SCRUB.overlapLeg(Vm, 30).bad.filter((x) => x.startsWith('run:'))],
@@ -1894,7 +1479,7 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['a break that skips its find', '{ finds.push({ s, e: r ? r.to[m.index + m[0].length - 1] : m.index + m[0].length, ph: t.ph, form: form || t.form }); vEnd.set(t.v, m.index + m[0].length); re.lastIndex = Math.max(gEnd, m.index + m[0].length); gStart = gEnd = gAt = -1; continue; }', '{ re.lastIndex = gEnd; gStart = gEnd = gAt = -1; continue; }', (Vm) => { const r = SCRUB.rotLeg(Vm); return Math.max(...Object.values(r.texts)) >= 8 ? [`maskText leaves ${Object.values(r.texts).join(' / ')} characters of a value in the clear`] : []; }],
     ['a broken character\'s run taken as the tail', 'if (p < e && p < start) start = p;', 'if (p < start) start = p;', (Vm) => { const r = SCRUB.binLeg(Vm); return r.ascii > 0 ? [`${r.ascii} placeholders where no value was`] : []; }],
     ['a head before a broken character taken whatever follows it', ' && (!broken || t.charCodeAt(sfx.length) >= 0x80)', '', (Vm) => { const r = SCRUB.binLeg(Vm); return r.ascii > 0 ? [`${r.ascii} placeholders where no value was`] : []; }],
-    ['a broken character read as a value\'s head', 'if (!sfx || /^\\uFFFD+$/.test(sfx)) return false;', 'if (!sfx) return false;', (Vm) => { const r = SCRUB.binLeg(Vm); return r.cjk > 0 ? [`${r.cjk} placeholders where no value was`] : []; }],   // stale-pins: kept (the replacement IS the release's reading)
+    ['a broken character read as a value\'s head', 'for (let q = q0; q < Math.min(n, f); q++)', 'for (let q = q0; q < n; q++)', (Vm) => { const r = SCRUB.binLeg(Vm); return r.cjk > 0 ? [`${r.cjk} placeholders where no value was`] : []; }],   // stale-pins: kept (the replacement IS the release's reading)
     ['the dialog scrubber jumps past a match', "vEnd.set(t.v, m.index + m[0].length); re.lastIndex = m.index + 1;   // the dialog scrubber's overlap", "vEnd.set(t.v, m.index + m[0].length);   // the dialog scrubber's overlap", (Vm) => SCRUB.overlapLeg(Vm, 30).bad.filter((x) => x.startsWith('dialog:'))],
     ['its spelled pass jumps past a match', "vEnd.set(t.v, m.index + m[0].length); re.lastIndex = m.index + 1;   // its spelled pass (r858)", "vEnd.set(t.v, m.index + m[0].length);   // its spelled pass (r858)", (Vm) => SCRUB.overlapLeg(Vm, 30).bad.filter((x) => x.startsWith('spelled:'))],
     ['its spelled view pass jumps past a match', "vEnd.set(t.v, m.index + m[0].length); re.lastIndex = m.index + 1;   // its spelled pass through a view", "vEnd.set(t.v, m.index + m[0].length);   // its spelled pass through a view", (Vm) => SCRUB.overlapLeg(Vm, 30).bad.filter((x) => x.startsWith('spelled-view:'))],
