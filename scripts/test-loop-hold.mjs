@@ -28,6 +28,15 @@ const LH = require(path.join(REPO, 'src/loop-hold.js'));
 const MC = require(path.join(REPO, 'src/memory-census.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const ROOT = '/srv/app/vibespace';
 
 // ── ① LAW G ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1020,7 +1029,7 @@ console.log('⑮ B-7c97 — a hold never names the measuring wrapper; every coun
       'a record with NO ringed gap is dropped whatever the late read of the beat says (1.15 s, 2.65 s); a ringed gap and the boot are kept; only a ring that overflowed since the record opened is estimated, and kept past the bar', rows);
     const SRC1 = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8');
     const m = { exports: {} }; const from1 = '  if (lostSinceOpen > 0) return isGapHold(msHi, beatMs, holdMs) ? \'estimate\' : \'drop\';';
-    if (SRC1.split(from1).length === 2) vm.compileFunction(SRC1.replace(from1, '  return isGapHold(msHi, beatMs, holdMs) ? \'estimate\' : \'drop\';'), ['module', 'exports', 'require'], { filename: 'loop-hold-7c97-f1.js' })(m, m.exports, require);
+    if (SRC1.split(from1).length === 2) vm.compileFunction(editAnchor(SRC1, from1, '  return isGapHold(msHi, beatMs, holdMs) ? \'estimate\' : \'drop\';', "src/loop-hold.js"), ['module', 'exports', 'require'], { filename: 'loop-hold-7c97-f1.js' })(m, m.exports, require);
     const mut = m.exports.holdEndVerdict ? m.exports.holdEndVerdict({ beatMs: B, holdMs: H, msHi: 1150 }) : null;
     ok(mut === 'estimate', `RED CONTROL: judged by the late read of the beat (7089a8ee5's candidate rule), the 900 ms stall read a beat late is kept as a hold (${mut})`, mut);
   }
@@ -1045,7 +1054,7 @@ console.log('⑮ B-7c97 — a hold never names the measuring wrapper; every coun
     const J = LH.judgeAsks([{ postedAt: 400, answeredAt: 1290, state: 'asleep', kernel: 'anon_pipe_read in read', answer: mnt, beat: 3 }], { beat0: 3, holdEnd: 1300 });
     const fj2 = LH.foldHold({ from: 0, to: 1300, ms: 1300, d: null, samples: J.samples, after: J.after && J.after.words, afterKey: J.after && J.after.key, afterKeyWords: J.after && J.after.keyWords, afterModule: J.after && J.after.module });
     const SRC2 = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8'), from2 = ', ...(answer.module ? { module: answer.module } : {}) } : null;';
-    const m2 = { exports: {} }; if (SRC2.split(from2).length === 2) vm.compileFunction(SRC2.replace(from2, ' } : null;'), ['module', 'exports', 'require'], { filename: 'loop-hold-7c97-f4.js' })(m2, m2.exports, require);
+    const m2 = { exports: {} }; if (SRC2.split(from2).length === 2) vm.compileFunction(editAnchor(SRC2, from2, ' } : null;', "src/loop-hold.js"), ['module', 'exports', 'require'], { filename: 'loop-hold-7c97-f4.js' })(m2, m2.exports, require);
     const J0 = m2.exports.judgeAsks ? m2.exports.judgeAsks([{ postedAt: 400, answeredAt: 1290, state: 'asleep', kernel: 'anon_pipe_read in read', answer: mnt, beat: 3 }], { beat0: 3, holdEnd: 1300 }) : null;
     const f0 = J0 ? m2.exports.foldHold({ from: 0, to: 1300, ms: 1300, d: null, samples: J0.samples, after: J0.after && J0.after.words, afterKey: J0.after && J0.after.key, afterKeyWords: J0.after && J0.after.keyWords, afterModule: J0.after && J0.after.module }) : null;
     ok(J.after && J.after.module === 'child_process' && fj2.frameKey === 'src/mounts.js:1466 (starting a child process)' && f0 && f0.frameKey === '(asleep: anon_pipe_read in read)',

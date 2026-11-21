@@ -37,6 +37,15 @@ const TEL = require(path.join(REPO, 'src/telemetry.js'));
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const T0 = Date.UTC(2026, 10, 16, 20, 0, 0);   // 2026-11-16T20:00Z
 const quietLog = (lines) => ({ log: (x) => lines.push(String(x)), warn() { }, error() { } });
 
@@ -483,7 +492,7 @@ console.log('⑱ a hold with NO FRAME OF OURS is counted apart — booked under 
   }
   const SRC = fs.readFileSync(path.join(REPO, 'src/loop-day-report.js'), 'utf8'), CUT = '  if (noOurs === true) return NO_OURS;\n';
   const m = { exports: {} };
-  if (SRC.split(CUT).length === 2) vm.compileFunction(SRC.replace(CUT, ''), ['module', 'exports', 'require'], { filename: 'loop-day-report-no-mark.js' })(m, m.exports, require);
+  if (SRC.split(CUT).length === 2) vm.compileFunction(editAnchor(SRC, CUT, '', "src/loop-day-report.js"), ['module', 'exports', 'require'], { filename: 'loop-day-report-no-mark.js' })(m, m.exports, require);
   const red = m.exports.newHour ? book(m.exports) : null;
   ok(red && /top="JavaScript 2\.7s; src\/agy-store-fs\.js:24 2\.5s"/.test(red.line) && !red.line.includes('(no frame of ours)'),
     '⑱ RED CONTROL: the release\'s cause (no mark) books those holds under the verdict «JavaScript» — mixed with every JavaScript hold of the hour', red && red.line.slice(0, 260));

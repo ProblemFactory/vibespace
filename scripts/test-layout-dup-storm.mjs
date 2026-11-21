@@ -44,6 +44,15 @@ const require = createRequire(import.meta.url);
 const member = (w, tabs) => ({ ...w, tabChain: { tabs: [...tabs], active: 0, layout: 'tabs', order: [...tabs] }, isTabGuest: tabs[0] !== w.winId });
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : J(extra)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const section = async (title, fn) => { console.log('— ' + title); try { await fn(); } catch (e) { ok(false, title + ' — threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e)); } };
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 function pureLegs(DR, { quiet = false } = {}) {
@@ -1943,7 +1952,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const lp = 'liveSessionOf(ws, activeSessions); // the restore\'s ladder (see the terminal branch — r10)\n', lt = '          const activeMatch = liveSessionOf(ws, activeSessions);\n\n';
     if (ok(L10.includes(lp) && L10.includes(lt), 'mutant r10-preset-two-rungs: the patched lines exist in layout.js')) {
       const two = (pad) => `let activeMatch = null;\n${pad}if (backendSessionId) activeMatch = activeSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.claudeSessionId) === backendSessionId);\n${pad}if (!activeMatch && ws.serverSessionId) activeMatch = activeSessions.find(s => s.id === ws.serverSessionId);\n`;
-      const LMp = (await import(pathToFileURL(M.write('src/lib/layout.js', L10.replace('const activeMatch = ' + lp, two('          ')).replace(lt, '          ' + two('          ') + '\n'), 'r10-preset-two-rungs', { esm: true })).href)).LayoutManager;
+      const LMp = (await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(editAnchor(L10, 'const activeMatch = ' + lp, two('          '), "src/lib/layout.js"), lt, '          ' + two('          ') + '\n', "src/lib/layout.js"), 'r10-preset-two-rungs', { esm: true })).href)).LayoutManager;
       const fl = await r10Legs({ LM: LMp, install: install10, quiet: true, legs: ['p'] });
       ok(fl.length === 1 && fl[0].startsWith('§R10 (p):'), `mutant r10-preset-two-rungs (9d11dd973's loadPreset: its own ladder, no recipe rung): the rows named by their recipe attach nothing — (p) RED (${fl.length})`);
     }
@@ -1974,7 +1983,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const a = '  for (const id of unplaced) if (!unexplained.includes(id)) unexplained.push(id);\n', b = ' || dup.length || unplaced.length) return';
     if (ok(PSRC.includes(a) && PSRC.includes(b), 'mutant pr-belt-blind: the patched lines exist in desktop-record.js')) {
-      const Mx = M.load('src/lib/desktop-record.js', PSRC.replace(a, '').replace(b, ' || dup.length) return'), 'pr-belt-blind');
+      const Mx = M.load('src/lib/desktop-record.js', editAnchor(editAnchor(PSRC, a, '', "src/lib/desktop-record.js"), b, ' || dup.length) return', "src/lib/desktop-record.js"), 'pr-belt-blind');
       const f = await prLegs({ PURE: Mx, WSH: loadHandler({ shrinkVerdict: Mx.shrinkVerdict }), quiet: true, legs: ['d'] });
       ok(f.some((n) => n.startsWith('§PR (d) PURE shrinkVerdict: THE 11:30:40 SHAPE')) && f.some((n) => n.startsWith('§PR (d) THE REAL ws-handler')), `mutant pr-belt-blind (a5dedfed1's shrinkVerdict: a write that drops positions is accepted): (d) RED (${f.length})`);
     }
@@ -2001,7 +2010,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
   {
     const a = "    if (nextBy.has(id) || !hasBox(w)) continue;\n", b = " || (conversationOf(w) && freshBoxless.has(conversationOf(w)))) unplaced.push(id);";
     if (ok(PSRC.includes(a) && PSRC.includes(b), 'mutant pr2-belt-reads-evidence: the patched lines exist in desktop-record.js')) {
-      const Mx = M.load('src/lib/desktop-record.js', PSRC.replace(a, "    if (nextBy.has(id) || !hasBox(w) || !ev.has(id)) continue;\n").replace(b, " || (r === 'closed' && conversationOf(w) && freshBoxless.has(conversationOf(w)))) unplaced.push(id);"), 'pr2-belt-reads-evidence');
+      const Mx = M.load('src/lib/desktop-record.js', editAnchor(editAnchor(PSRC, a, "    if (nextBy.has(id) || !hasBox(w) || !ev.has(id)) continue;\n", "src/lib/desktop-record.js"), b, " || (r === 'closed' && conversationOf(w) && freshBoxless.has(conversationOf(w)))) unplaced.push(id);", "src/lib/desktop-record.js"), 'pr2-belt-reads-evidence');
       const f = await pr2Legs({ PURE: Mx, quiet: true, legs: ['n3p'] });
       ok(f.length === 1 && f[0].startsWith('§PR2 (n3) PURE shrinkVerdict'), `mutant pr2-belt-reads-evidence (461b41f78's belt: the shape counted only with 'closed' evidence): (n3) PURE RED (${f.length})`);
     }
@@ -2147,7 +2156,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
     ['pr4-second-view-any', '    if (other) { this._fenceSays(', '    if (false) { this._fenceSays(', 'f5', /^§PR4 \(f5\) N5 A SECOND VIEW IS OF THE CONVERSATION/, "5033f0a06's _closeSecondView: any id it is handed"],
   ]) {
     if (ok(LSRC.includes(a), `mutant ${tag}: the patched line exists in session-lifecycle.js`)) {
-      const src = tag === 'pr4-close-holds' ? LSRC.replace("    winInfo?._listenerCtl?.signal?.addEventListener?.('abort', () => { settled('closed'); cancelReq?.(); }, { once: true });\n", '') : LSRC; // r5 N1: the close releases the wait itself too
+      const src = tag === 'pr4-close-holds' ? editAnchor(LSRC, "    winInfo?._listenerCtl?.signal?.addEventListener?.('abort', () => { settled('closed'); cancelReq?.(); }, { once: true });\n", '', "src/lib/session-lifecycle.js") : LSRC; // r5 N1: the close releases the wait itself too
       const f = await pr4Legs({ install: await loadLifecycle(src.replace(a, b)), quiet: true, legs: [road], ends: road === 'rel' ? [{ 'pr4-timeout-holds': 'timeout', 'pr4-reqless-holds': 'reqless', 'pr4-reconnect-holds': 'reconnect', 'pr4-close-holds': 'closed', 'pr4-join-silent': 'join' }[tag]] : null });
       const n = tag === 'pr4-loud-bulk' ? 3 : tag === 'pr4-fence-unmarked' ? 2 : 1;
       ok(f.length === n && f.every((x) => want.test(x)), `mutant ${tag} (${why}): (${road}) RED${n > 1 ? ' ×' + n : ''} (${f.length})`, f);

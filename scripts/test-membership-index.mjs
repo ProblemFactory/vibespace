@@ -47,6 +47,15 @@ process.on('exit', () => { for (const d of locked) { try { fs.chmodSync(d, 0o755
 let passed = 0, failed = 0;
 const say = console.log.bind(console);
 function ok(c, name, detail) { if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + String(detail).slice(0, 700)}`); } return !!c; }
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // a virtual clock for the 4 s bound (the store's caches read Date.now)
 const realNow = Date.now.bind(Date);
@@ -345,7 +354,7 @@ function patched(tag) {
   if (TG.split(from).length !== 2) return null;
   const M = path.join(ROOT, 'patch-' + tag);
   fs.mkdirSync(path.join(M, 'src'), { recursive: true });
-  for (const e of fs.readdirSync(path.join(REPO, 'src'))) { const dst = path.join(M, 'src', e); if (e === 'task-groups.js') fs.writeFileSync(dst, TG.replace(from, to)); else fs.symlinkSync(path.join(REPO, 'src', e), dst); }
+  for (const e of fs.readdirSync(path.join(REPO, 'src'))) { const dst = path.join(M, 'src', e); if (e === 'task-groups.js') fs.writeFileSync(dst, editAnchor(TG, from, to, "src/task-groups.js")); else fs.symlinkSync(path.join(REPO, 'src', e), dst); }
   for (const f of ['package.json', 'node_modules']) fs.symlinkSync(path.join(REPO, f), path.join(M, f));
   return M;
 }

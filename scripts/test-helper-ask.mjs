@@ -65,6 +65,15 @@ const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.
 
 let passed = 0, failed = 0;
 const check = (name, cond, extra) => { if (cond) { passed++; console.log(`  ✓ ${name}`); } else { failed++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : ''}`); } return !!cond; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
 const FIX = read('scripts/fixtures/helper-ask-2.1.281/parent-stream.ndjson').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((o) => !o._about);
@@ -620,7 +629,7 @@ function inboxLegs(HAmod) {
   const MutA = M10.load('src/server/helper-asks.js', haSrc.replace(needleA, '    if (false && twin && fileItem(session, twin)) {'), 'no-twin');
   const ca = inboxLegs(MutA);
   check('⑩ CONTROL: without the re-point the shared item is resolved while the twin still waits (the pointer gone)', ca.oneShared === true && ca.keptWhileTwinWaits === false, ca);
-  const MutB = M10.load('src/server/helper-asks.js', haSrc.replace(needleB, '    for (const [rid, a] of live) {').replace("  } catch (e) { deps.log?.warn?.(`[helper-ask] sync failed", "    resolveItems(session, live, st, now);\n  } catch (e) { deps.log?.warn?.(`[helper-ask] sync failed"), 'resolve-after');
+  const MutB = M10.load('src/server/helper-asks.js', editAnchor(editAnchor(haSrc, needleB, '    for (const [rid, a] of live) {', "src/server/helper-asks.js"), "  } catch (e) { deps.log?.warn?.(`[helper-ask] sync failed", "    resolveItems(session, live, st, now);\n  } catch (e) { deps.log?.warn?.(`[helper-ask] sync failed", "src/server/helper-asks.js"), 'resolve-after');
   const cb = inboxLegs(MutB);
   check('⑩ CONTROL: resolving AFTER the filing loop leaves the capped ask unfiled in that sync (one answer late)', cb.capOne === true && cb.roomFilled === false, cb);
   check('⑩ the copies live outside the tree', M10.files.every((f) => !f.startsWith(REPO)));
@@ -1585,7 +1594,7 @@ console.log('⑱e (2.1.319) an Agent call its process ended under reads stopped,
     const poSrc = read('src/permission-outcome.js'), rowLines = poSrc.split('\n'), iOU = rowLines.findIndex((l) => l.startsWith("  row('OU', "));
     const poNo = iOU > 0 ? MX.write('src/permission-outcome.js', rowLines.filter((_, i) => i !== iOU && i !== iOU + 1).join('\n'), 'no-ou') : null;
     const mmSrc = read('src/message-manager.js'), REQ = "require('./permission-outcome.js')", SWL = mmSrc.split('\n').filter((l) => l.startsWith("  'session_writes_lost',"));
-    const MMx = poNo && mmSrc.split(REQ).length === 2 && SWL.length === 1 ? require(MX.write('src/message-manager.js', mmSrc.replace(REQ, 'require(' + JSON.stringify(poNo) + ')').replace(SWL[0] + '\n', '').replace("if (raw.subtype === 'session_writes_lost') {", 'if (false) {'), 'mm-383')).MessageManager : null;
+    const MMx = poNo && mmSrc.split(REQ).length === 2 && SWL.length === 1 ? require(MX.write('src/message-manager.js', editAnchor(editAnchor(editAnchor(mmSrc, REQ, 'require(' + JSON.stringify(poNo) + ')', "src/message-manager.js"), SWL[0] + '\n', '', "src/message-manager.js"), "if (raw.subtype === 'session_writes_lost') {", 'if (false) {', "src/message-manager.js"), 'mm-383')).MessageManager : null;
     const xL = MMx && live(MMx, [use, ask, res()], 'sess-o9-x'), xc = xL && cardOf(xL)[0], xh = html(xc), xs = MMx && line(MMx, {}, 'sess-swl-x');
     check('⑱e RED CONTROL: on a copy with the .383 table + lists the same records read UNKNOWN with a drift card on the Agent\'s ask, its card a red «Error»; session_writes_lost is an unknown-record the chat never draws — the lost write says nothing', !!xc && xc.permission.resolved === 'unknown' && drift(xL) === 1 && !xc.content[0].agentCutOff && /chat-tool-error-label/.test(xh) && !xh.includes(CUT) && !!xs && xs.kind === 'unknown-record' && xs.html === '', { p: xc && xc.permission, xs });
     check('⑱e the copies live outside the tree', MX.files.every((f) => !f.startsWith(REPO)));

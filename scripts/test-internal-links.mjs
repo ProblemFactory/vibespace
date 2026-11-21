@@ -14,6 +14,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, name, info) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', typeof info === 'string' ? info.slice(0, 900) : JSON.stringify(info).slice(0, 900)); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const L = require(path.join(REPO, 'src/internal-link.js'));
 const KEY = 'claude:0e0e0e0e-1111-4222-8333-444455556666', DESK = 'desk-mh3k2-a1b', SETK = 'chat.uploadDir';
@@ -69,7 +78,7 @@ console.log('② THE TABLE OF PRESSES (PURE pressPlan): a press only navigates')
   for (const [f, want, name] of T) ok(P(f) === want, `conversation: ${name}`, P(f));
   ok(L.pressPlan('desktop', { has: true }) === 'switch' && L.pressPlan('desktop', { has: false }) === 'unknown' && L.pressPlan('setting', {}) === 'settings' && L.pressPlan('window', {}) === 'unknown', 'desktop: switch / unknown; a setting: Settings on its row; no third target');
   const src = read('src/internal-link.js');
-  const mut = src.replace("  if (row.ended) return 'menu';", "  if (row.ended) return 'resume';");
+  const mut = editAnchor(src, "  if (row.ended) return 'menu';", "  if (row.ended) return 'resume';", "src/internal-link.js");
   const M = {}; new Function('module', 'require', mut)(M, createRequire(path.join(REPO, 'src/internal-link.js')));   // the mutant reads its own imports from src/
   ok(mut !== src && M.exports.pressPlan('conversation', { row: { ended: true } }) !== 'menu', 'RED CONTROL: a table that starts an ENDED conversation on a press reads red on the leg above');
 }

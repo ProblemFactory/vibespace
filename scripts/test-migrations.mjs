@@ -15,6 +15,15 @@ const { runMigrations } = require('../src/migration-runner.js');
 const { create } = require('../src/server/migrations.js');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-mig-'));
 // EVERY create() here NAMES the home it gets. One of these migrations (the
@@ -2370,7 +2379,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const src = fs.readFileSync(path.join(REPO_ROOT, 'src', 'server', 'grants-migration.js'), 'utf-8');
       const LINE = "    const bad = probes.filter((pr) => !!oldOf(pr) !== !!newOf(pr)).map((pr) => pr.label);";
       ok(src.split(LINE).length === 2, 'CONTROL setup: the judge line is found exactly once');
-      const GMZ = MZ.load('src/server/grants-migration.js', src.replace(LINE, '    const bad = [];').replace("const off = probes.filter((pr) => oldLevel(pr.ctx, target, oldGrants) !== newLevel(pr.ctx, target, newGrants)).map((pr) => pr.label);", 'const off = [];'), 'no-judge');
+      const GMZ = MZ.load('src/server/grants-migration.js', editAnchor(editAnchor(src, LINE, '    const bad = [];', "src/server/grants-migration.js"), "const off = probes.filter((pr) => oldLevel(pr.ctx, target, oldGrants) !== newLevel(pr.ctx, target, newGrants)).map((pr) => pr.label);", 'const off = [];', "src/server/grants-migration.js"), 'no-judge');
       const rC = mk('gu-ctl'); fixture(rC, { mirrorBroken: true });
       const stC = GS.create({ memory: true });
       let threw = null; try { GMZ.migrate({ dataDir: path.join(rC, 'data'), store: stC }); } catch (e) { threw = e; }
@@ -3405,7 +3414,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const applyRow = '      for (const [row, v] of Object.entries(plan.set)) if (!str(next[row]).trim() || next[row] === v) next[row] = v;';
       const readSeeds = "      const T = readJson(seedsFile, `data/plugins-state/${CLOAK_PLUGIN_ID}/seeds.json`);";
       ok(srcC.split(keepRow).length === 2 && srcC.split(applyRow).length === 2 && srcC.split(readSeeds).length === 2, 'CONTROL scope: the lines the patched copies change are present once each');
-      const over = MC.load('src/server/migrations.js', srcC.replace(keepRow, '      if (oldExe.trim())').replace(applyRow, '      for (const [row, v] of Object.entries(plan.set)) next[row] = v;'), 'overwrite');
+      const over = MC.load('src/server/migrations.js', editAnchor(editAnchor(srcC, keepRow, '      if (oldExe.trim())', "src/server/migrations.js"), applyRow, '      for (const [row, v] of Object.entries(plan.set)) next[row] = v;', "src/server/migrations.js"), 'overwrite');
       const wc = seedC('mut-over', { reg: world(), settings: { 'browser.cloak.executablePath': '/opt/old/chrome', [EXE]: '/home/u/cloak/chrome' } });
       over.create({ rootDir: wc.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: { add: () => ({ id: 'x' }), flush() { } } }).runLocalMigrations({ only: [ID] });
       ok((wc.J('settings.json') || {})[EXE] === '/opt/old/chrome', 'NEGATIVE CONTROL: a copy without the never-overwrite rule writes over the plugin\'s own program row — M4 goes red');

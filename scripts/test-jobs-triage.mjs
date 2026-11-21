@@ -25,6 +25,15 @@ const M = require(path.join(ROOT, 'src/job-model.js'));
 const wiring = require(path.join(ROOT, 'src/server/jobs-wiring.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const H = 3600e3, D = 86400e3;
 const T0 = Date.now(); // the ONE clock; everything below is relative to it
 const dirs = [];
@@ -410,7 +419,7 @@ console.log('§10 r6 D-F5: monotonic panel identity, the answer names its panel,
   const seqLines = "    const version = M.nextInteractionSeq(job.interaction);\n    job.interaction.seq = version;\n";
   const gateLines = "    const vv = M.answerVersionVerdict(p, answers);\n    if (!vv.ok) return { error: vv.error, code: vv.code, ...(p ? { version: p.version } : {}) };\n";
   ok(jsrc.split(seqLines).length === 2 && jsrc.split(gateLines).length === 2, 'r6 D-F5 control setup: the seq and the answer\'s verdict are each wired once');
-  const JMod = MJ.load('src/jobs.js', jsrc.replace(seqLines, "    const version = ((job.interaction && job.interaction.pending && job.interaction.pending.version) || 0) + 1; // MUTANT: pre-fix\n").replace(gateLines, "    if (!p) return { error: 'no pending panel' };\n    if (answers.version && answers.version !== p.version) return { error: 'stale panel version — reopen the panel' }; // MUTANT: pre-fix\n"), 'pre-fix');
+  const JMod = MJ.load('src/jobs.js', editAnchor(editAnchor(jsrc, seqLines, "    const version = ((job.interaction && job.interaction.pending && job.interaction.pending.version) || 0) + 1; // MUTANT: pre-fix\n", "src/jobs.js"), gateLines, "    if (!p) return { error: 'no pending panel' };\n    if (answers.version && answers.version !== p.version) return { error: 'stale panel version — reopen the panel' }; // MUTANT: pre-fix\n", "src/jobs.js"), 'pre-fix');
   const dir5 = mkDir('jobs-triage-panel-mut');
   const JX = new JMod.JobManager({ dataDir: dir5, broadcast: () => { }, notifyUser: () => { }, log: () => { }, archivePolicy: () => policy });
   JX.init();
@@ -558,8 +567,8 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   const dropLine = "      if (this.jobs.size) { const held = new Set(this.archive.map((r) => r.id)); for (const [id, j] of this.jobs) if (LS.isSkeleton(j) && held.has(id)) { this.jobs.delete(id); dropped++; } }\n";
   const guardLine = "      if (LS.isSkeleton(moved[i]) && archIds.has(id)) { this.jobs.delete(id); this._dirty = true; moved.splice(i, 1); }\n      else if (!this.jobs.has(id)) moved.splice(i, 1);\n";
   ok([accLine, dropLine, guardLine].every((x) => jsrc.split(x).length === 2), 'B-ef97 / B-2204 control setup: the read-back access, the archive\'s drop and the sweep\'s guard are each written once');
-  const JMod = MJ.load('src/jobs.js', jsrc.replace(owedLine, '    // MUTANT: the release — skeletons in memory only\n').replace(viewLine, "access: { view: 'all', control: 'session' }, runs: [] }); // MUTANT: the release\n")
-    .replace(accLine, 'const skeletonAccess = (j) => j; // MUTANT: no read-back\n').replace(dropLine, '      // MUTANT: no drop\n').replace(guardLine, '      if (!this.jobs.has(id)) moved.splice(i, 1); // MUTANT: no guard\n'));
+  const JMod = MJ.load('src/jobs.js', editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(jsrc, owedLine, '    // MUTANT: the release — skeletons in memory only\n', "src/jobs.js"), viewLine, "access: { view: 'all', control: 'session' }, runs: [] }); // MUTANT: the release\n", "src/jobs.js"),
+    accLine, 'const skeletonAccess = (j) => j; // MUTANT: no read-back\n', "src/jobs.js"), dropLine, '      // MUTANT: no drop\n', "src/jobs.js"), guardLine, '      if (!this.jobs.has(id)) moved.splice(i, 1); // MUTANT: no guard\n', "src/jobs.js"));
   const d12c = mkDir('jobs-triage-torn-mut');
   seedTorn(d12c);
   const mk = () => { const J = new JMod.JobManager({ dataDir: d12c, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); J.init(); return J; };
@@ -802,10 +811,10 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok([readLine, archLine, saveLine].every((x) => jsrc.split(x).length === 2), 'B-f276 control setup: the two reads and the store\'s write hold are each one line');
   const release = (r, f) => `((r) => (r.state === 'unreadable' && fs.existsSync(${f}) ? { ...r, state: 'corrupt' } : r))(${r})`;   // MUTANT: the release
   // (the moved line's must 1: the release had no producer guard either — the bytes refused while held at the write, cut too)
-  const JMod = MJ.load('src/jobs.js', anchored(jsrc
-    .replace(readLine, `this._loadAnswer(${release('SR.storeAnswer(read, { valid: STORE_SHAPE })', 'this.file')});`)
-    .replace(archLine, `this._archiveAnswer(${release('SR.storeAnswer(read, { valid: Array.isArray })', 'this.archiveFile')});`)
-    .replace(saveLine, "if (true) {"), "  _recordsBytes() { if (this._unread && this._unread.store) throw", "  _recordsBytes() { if (false) throw", 'the release: no producer guard'));
+  const JMod = MJ.load('src/jobs.js', anchored(editAnchor(editAnchor(editAnchor(jsrc,
+    readLine, `this._loadAnswer(${release('SR.storeAnswer(read, { valid: STORE_SHAPE })', 'this.file')});`, "src/jobs.js"),
+    archLine, `this._archiveAnswer(${release('SR.storeAnswer(read, { valid: Array.isArray })', 'this.archiveFile')});`, "src/jobs.js"),
+    saveLine, "if (true) {", "src/jobs.js"), "  _recordsBytes() { if (this._unread && this._unread.store) throw", "  _recordsBytes() { if (false) throw", 'the release: no producer guard'));
   if (!asRoot) {
   const dX = mkDir('jobs-triage-unread-mut'), XF = path.join(dX, 'jobs.json');
   fs.writeFileSync(XF, body); fs.chmodSync(XF, 0o000);
@@ -892,7 +901,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const armL = "    this._unreadRetrySoon(which);   // the next try first: whatever this one does\n";
   const liftL = "      if (a.state === 'data') this._unreadLift(which, was).catch((e) => this.d.log(`[jobs] ${base}: its note could not be lifted:`, e && e.message));\n      else this._unreadEnded(which, was, a, pre).catch((e) => this.d.log(`[jobs] ${base}: its end could not be said:`, e && e.message));\n";   // cure 2: the lift ONLY on a whole read
   ok([dropL, adoptL, armL, liftL].every((x) => jsrc.split(x).length === 2), 'B-f276 cure control setup: the drop, the late adoption, the armed next try and the lift are each one line');
-  const JC = MJ.load('src/jobs.js', jsrc.replace(dropL, '        // MUTANT: no drop\n').replace(adoptL, '        // MUTANT: no late adoption\n').replace(armL, '    // MUTANT: the next try only after an answer\n').replace(liftL, '      // MUTANT: no lift\n'), 'cure');
+  const JC = MJ.load('src/jobs.js', editAnchor(editAnchor(editAnchor(editAnchor(jsrc, dropL, '        // MUTANT: no drop\n', "src/jobs.js"), adoptL, '        // MUTANT: no late adoption\n', "src/jobs.js"), armL, '    // MUTANT: the next try only after an answer\n', "src/jobs.js"), liftL, '      // MUTANT: no lift\n', "src/jobs.js"), 'cure');
   const drx = await dropScene(JC, 'jobs-triage-reread-drop-mut');
   ok(drx.skel && drx.real, 'B-f276 cure CONTROL (no drop, in a copy): the skeleton of the earlier answer stays beside the records', drx);
   const enx = await endScene(JC, 'jobs-triage-reread-ended-mut');
@@ -1140,7 +1149,7 @@ console.log('§15 B-6c1a: a record whose runs is not a list never breaks the lis
   ok(DETAIL.every((a) => WSRC.split(a).length === 2), 'B-6c1a control setup: the anchors of the detail\'s control (its two runs reads) are in the source');
   ok(WSRC.split(NEW_RUNS).length === 2, 'B-6c1a control setup: the guarded runs read is in jobs-wiring once (the plant the control swaps)');
   const MJ6 = mutantCopies('jobs-runs-shape-6c1a', ROOT);
-  const old = await scene(MJ6.load('src/server/jobs-wiring.js', WSRC.replace(NEW_RUNS, '(j.runs || []).map((r) => ({').replace(DETAIL[0], 'runs: rec.runs } });').replace(DETAIL[1], 'runs: job.runs } });'), 'release'), 'jobs-triage-runs-shape-mut');   // stale-pins: kept — the control writes the release's runs read back into a copy
+  const old = await scene(MJ6.load('src/server/jobs-wiring.js', editAnchor(editAnchor(editAnchor(WSRC, NEW_RUNS, '(j.runs || []).map((r) => ({', "src/server/jobs-wiring.js"), DETAIL[0], 'runs: rec.runs } });', "src/server/jobs-wiring.js"), DETAIL[1], 'runs: job.runs } });', "src/server/jobs-wiring.js"), 'release'), 'jobs-triage-runs-shape-mut');   // stale-pins: kept — the control writes the release's runs read back into a copy
   ok(!(old.list && old.list.status === 200) || !(old.arch && old.arch.status === 200), 'B-6c1a CONTROL (the release\'s runs read, in a copy): the list FAILS on such a record', { list: old.list && (old.list.status || old.list.threw), arch: old.arch && (old.arch.status || old.arch.threw) });
   ok(!recordsOnly(old.detail['jb-6c1a0001']) && !recordsOnly(old.detail['jb-6c1a0003']), 'B-6c1a CONTROL (the release\'s detail, in the same copy): the detail serves the object as it is and the list with its null', old.detail);
   for (const r of copiesCensus(MJ6.files, MJ6.dir, ROOT, { minCopies: 1, label: 'B-6c1a ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));

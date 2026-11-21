@@ -16,6 +16,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, name, info) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', typeof info === 'string' ? info.slice(0, 900) : JSON.stringify(info).slice(0, 900)); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const loadMutated = (rel, mutate, requireOf = null) => { const file = path.join(REPO, rel); const m = { exports: {} }; const base = createRequire(file); new Function('module', 'exports', 'require', '__filename', '__dirname', mutate(read(rel)))(m, m.exports, requireOf ? (id) => requireOf(id, base) : base, file, path.dirname(file)); return m.exports; };
 const BL = require(path.join(REPO, 'src/browser-login.js'));
@@ -466,7 +475,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const A = v.logins.list().entries.find((e) => e.name === BL.entryName(LMS, 'jdoe'));
     const M = await load();
     const own = M.ownRowOf(A, 'any-account'), other = (A.grants || []).find((g) => g.resource === `${SSO}#*`);
-    const R = await load((src) => src.replace("  return want ? ((e.grants || []).find((g) => g && !g.unknown && g.scope === scope && g.resource === want) || null) : null;", "  return want ? ((e.grants || []).find((g) => g && !g.unknown && g.scope === scope) || null) : null;"));
+    const R = await load((src) => editAnchor(src, "  return want ? ((e.grants || []).find((g) => g && !g.unknown && g.scope === scope && g.resource === want) || null) : null;", "  return want ? ((e.grants || []).find((g) => g && !g.unknown && g.scope === scope) || null) : null;", "src/lib/use-login-words.js"));
     const ownR = R.ownRowOf(A, 'any-account');
     ok(other && own === null && M.chipSiteOf(A, other) === 'sso.school.test' && (A.grants || []).some((g) => g.resource === '*') && M.chipSiteOf(A, (A.grants || []).find((g) => g.resource === '*')) === null && ownR && ownR.resource === `${SSO}#*`,
       'THE GRANT PICKER READS ITS OWN ROW ON ITS OWN SITE: another login\'s «any account on sso» row rides this login\'s list, the picker\'s «any account» reads the course site\'s row (none here) and the chip of that row names sso — RED CONTROL: a first-scope match reads (and could untick) the other site\'s row', { own, ownR: ownR && ownR.resource, other: other && other.resource });
