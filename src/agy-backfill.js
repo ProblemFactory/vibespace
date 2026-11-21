@@ -277,6 +277,11 @@ const historyInflight = new Map();
 const accountOf = (session) => (session && session._accountId) || null;
 const convIdOf = (session) => { const id = session && (session.backendSessionId || session.claudeSessionId); return AS.isId(id) ? id : null; };
 const yieldTurn = () => new Promise((r) => setImmediate(r));
+// B-299b (the history warm, MEASURED: 30 conversations warmed at once — a restart — held the loop 608 ms, 10 held 181 ms): each warm
+// yields after its PARSE_SLICE_MS slice, but N warms' yields land in the SAME loop turn, so their slices ran back to back. ONE warm
+// reads and parses at a time across conversations: the longest hold is one slice (+ one chunk's split) again, whatever N.
+let _warmTail = Promise.resolve();
+const oneWarm = (fn) => { const p = _warmTail.then(fn, fn); _warmTail = p.catch(() => { }); return p; };
 /** The sub a step of a conversation's kept transcript created («Created the following subagent: …»), or null. */
 function createdSub(convId, step) { const e = historyCache.get(convId); return (e && e.created.get(Number(step))) || null; }
 function pruneHistory() {
@@ -289,7 +294,7 @@ function pruneHistory() {
 function warmHistory(id, { session = null, dataDir = null, remote = false, log, maxBytes = HISTORY_MAX_BYTES } = {}) {
   if (remote || !AS.isId(id) || (session && session.host && session.host !== 'local')) return Promise.resolve(false);
   if (historyInflight.has(id)) return historyInflight.get(id);
-  const p = (async () => {
+  const p = oneWarm(async () => {
     const t0 = Date.now();
     const home = homeOf(session || {}, { dataDir });
     if (!home) return false;
@@ -315,7 +320,7 @@ function warmHistory(id, { session = null, dataDir = null, remote = false, log, 
     pruneHistory();
     if (got.capped && typeof log === 'function') log(`agy history ${id}: the transcript is over the ${maxBytes} B read budget — steps after ${last} are drawn from the journal only`);
     return true;
-  })().catch(() => false).finally(() => historyInflight.delete(id));
+  }).catch(() => false).finally(() => historyInflight.delete(id));
   historyInflight.set(id, p);
   return p;
 }

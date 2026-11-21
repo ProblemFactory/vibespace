@@ -717,6 +717,28 @@ console.log('— ⑬ the whole history: the steps before the journal\'s 800 KB r
       if (await BF.warmHistory(id, { session: sess({ backendSessionId: id }) })) warmedN++;
     }
     ok(warmedN === BF.HISTORY_CACHE_MAX + 3 && BF._historyCache.size === BF.HISTORY_CACHE_MAX, `the kept transcripts are bounded: ${warmedN} conversations warmed, ${BF._historyCache.size} kept (the oldest dropped)`);
+    // B-299b (the history warm — MEASURED: 30 conversations warmed at once held the loop 608 ms, their 8 ms slices stacking in one loop
+    // turn): ONE warm parses at a time across conversations. A clock that moves 10 ms a call makes every slice check due (each warm yields
+    // every 64 lines); two warms asked at once parse ONE after the other; CONTROL a copy without the queue interleaves them
+    const BSRC = fs.readFileSync(path.join(REPO, 'src/agy-backfill.js'), 'utf8');
+    const BQ = mutantCopies('agy-warm-unqueued', REPO).load('src/agy-backfill.js', anchored(BSRC, '  const p = oneWarm(async () => {', /* stale-pins: kept — the control's PLANT (the warm unqueued), not a pin */ '  const p = (async (fn) => fn())(async () => {', 'the warm without its queue'), 'unqueued');
+    const parsedOrder = async (B, tag) => {
+      const ids = ['a', 'b'].map((k) => `c0de0000-0000-4000-8000-00000000${tag}${k}0`), seq = [];
+      for (const [n, id] of ids.entries()) {
+        const f = path.join(H13, '.gemini', 'antigravity-cli', 'brain', id, SG, 'logs', 'transcript.jsonl');
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.writeFileSync(f, Array.from({ length: 640 }, (_, i) => JSON.stringify({ ...stepLine(4 * i + 1), step_index: i, content: `warm-${n} ${i}` })).join('\n') + '\n');
+      }
+      const realStep = AS.transcriptStepOf, realNow = Date.now; let clock = realNow();
+      AS.transcriptStepOf = (line) => { seq.push(String(line).includes('"warm-0 ') ? 0 : 1); return realStep(line); };
+      Date.now = () => (clock += 10);
+      try { await Promise.all(ids.map((id) => B.warmHistory(id, { session: sess({ backendSessionId: id }) }))); } finally { AS.transcriptStepOf = realStep; Date.now = realNow; }
+      let switches = 0; for (let i = 1; i < seq.length; i++) if (seq[i] !== seq[i - 1]) switches++;
+      return { lines: seq.length, switches };
+    };
+    const oneAt = await parsedOrder(BF, 'e1'), both = await parsedOrder(BQ, 'e2');
+    ok(oneAt.lines === 1280 && oneAt.switches === 1 && both.lines === 1280 && both.switches > 1,
+      'two conversations warmed at once: ONE warm parses at a time (1 280 lines, one hand-over from the first to the second, each slice its own loop turn); CONTROL a copy without the queue interleaves their slices', { queued: oneAt, unqueued: both });
   } finally { process.env.HOME = preHome; }
   // the base ACP reader is UNCHANGED (only agy has a transcript)
   ok(!/historySplice|warmHistory|transcript/.test(fs.readFileSync(path.join(REPO, 'src/acp-message-manager.js'), 'utf8').split('class AcpSessionMessages')[1].split('\nAcpMessageManager._seen')[0]), 'the base AcpSessionMessages is unchanged (no transcript read — the backfill lives in the agy subclass)');
