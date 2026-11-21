@@ -47,6 +47,13 @@
 //   walk                at its start (never for --version) walks UP from its cwd to / the way 2.1.321 does (its clean trace):
 //                       CLAUDE.md, CLAUDE.local.md, AGENTS.md, .mcp.json read, .claude/ listed (+ its CLAUDE.md, AGENTS.md), .git
 //                       looked at (+ its HEAD read) at EVERY ancestor — what a run's place puts in reach
+// …and THE CHECKPOINT SWITCH (row B-437e, the files tier, U0 — the probe's ckpt-off / ckpt-on pair), `good` otherwise:
+//   ckpt          each turn streams with the Read and Edit tools and RUNS the mock's tool calls (Read the note, then Edit it), one
+//                 request a step; with CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=true it first backs the note up under
+//                 $HOME/.claude/file-history/<session>/ (one file, `<16 hex>@v1`, as the vendor names its own) — nothing it sends
+//                 differs with the switch (the measurement must say SAME)
+//   ckpt-header   the same, plus ONE header (`x-fake-ckpt: 1`) only with the switch — what it sends differs (must say DIFFERENT, STOP)
+//   ckpt-always   the same, but backs up WITHOUT the switch too (must say ALREADY-ON: the road keeps checkpoints already)
 // `--version` says 9.9.9 (Fake Claude), so a fixture it produces never names a real CLI.
 // It talks only to $ANTHROPIC_BASE_URL (the measurement's loopback mock).
 import fs from 'node:fs';
@@ -58,6 +65,7 @@ import os from 'node:os';
 import readline from 'node:readline';
 import dgram from 'node:dgram';
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 
 const mode = process.argv[2];
 const KIND = String(mode || '').split(':')[0], ARG = String(mode || '').slice(KIND.length + 1);
@@ -159,12 +167,53 @@ if (KIND === 'walk' && !process.argv.includes('--version')) {
 }
 let misbehaved = false, dropped = false;
 const emit = (o) => process.stdout.write(JSON.stringify(o) + '\n');
+// THE CHECKPOINT MODES (header): one turn = the mock's plan run step by step; a backup only where the vendor would keep one
+const CKPT = KIND === 'ckpt' || KIND === 'ckpt-header' || KIND === 'ckpt-always';
+const SWITCHED = process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING === 'true';
+const toolOf = (sseBody) => {   // the stream's tool_use block (its input from the json deltas) | null
+  let tool = null, json = '';
+  for (const chunk of String(sseBody || '').split('\n\n')) {
+    const data = (/^data: (.*)$/m.exec(chunk) || [])[1]; if (!data) continue;
+    let e = null; try { e = JSON.parse(data); } catch { continue; }
+    if (e.type === 'content_block_start' && e.content_block && e.content_block.type === 'tool_use') tool = { id: e.content_block.id, name: e.content_block.name };
+    if (e.type === 'content_block_delta' && e.delta && e.delta.type === 'input_json_delta') json += e.delta.partial_json || '';
+  }
+  if (tool) { try { tool.input = JSON.parse(json || '{}'); } catch { tool.input = {}; } }
+  return tool;
+};
+const backUp = (file) => {
+  if (!(SWITCHED || KIND === 'ckpt-always')) return;
+  const dir = path.join(process.env.HOME || '/', '.claude', 'file-history', `fake-${process.pid}`);
+  const to = path.join(dir, crypto.createHash('sha256').update(file).digest('hex').slice(0, 16) + '@v1');
+  try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); if (!fs.existsSync(to)) fs.copyFileSync(file, to); } catch { }
+};
+async function ckptTurn(c) {
+  const tools = [{ name: 'Read', input_schema: { type: 'object' } }, { name: 'Edit', input_schema: { type: 'object' } }];
+  const messages = [{ role: 'user', content: [{ type: 'text', text: 'turn' }] }];
+  let last = { status: 0 };
+  for (let i = 0; i < 4; i++) {
+    const headers = { authorization: 'Bearer ' + c.accessToken, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'oauth-2025-04-20', ...(KIND === 'ckpt-header' && SWITCHED ? { 'x-fake-ckpt': '1' } : {}) };
+    last = await post('/v1/messages?beta=true', headers, { model: 'claude-fake', max_tokens: 64, stream: true, tools, messages });
+    if (last.status !== 200) return last;
+    const tool = toolOf(last.body);
+    if (!tool) return last;
+    let out = '';
+    try {
+      if (tool.name === 'Read') out = fs.readFileSync(tool.input.file_path, 'utf8');
+      else if (tool.name === 'Edit') { backUp(tool.input.file_path); const t = fs.readFileSync(tool.input.file_path, 'utf8'); fs.writeFileSync(tool.input.file_path, t.replace(tool.input.old_string, tool.input.new_string)); out = 'edited'; }
+      else out = 'unknown tool';
+    } catch (e) { out = `error ${(e && e.code) || e}`; }
+    messages.push({ role: 'assistant', content: [{ type: 'tool_use', id: tool.id, name: tool.name, input: tool.input }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: tool.id, content: out }] });
+  }
+  return last;
+}
 
 async function onTurn() {
   if (!misbehaved) { misbehaved = true; if (/^tamper-/.test(KIND)) MISBEHAVE.tamper(); else if (MISBEHAVE[KIND] && KIND !== 'forbid-read') await MISBEHAVE[KIND](); else if (/^forbid-read:/.test(mode || '')) { try { fs.readFileSync(mode.slice('forbid-read:'.length)); } catch { } } }
   const c = current();
   if (!c || !c.accessToken) return emit({ type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login' });
   if (c.refreshToken && c.expiresAt && Date.now() + 300e3 >= c.expiresAt) await post('/v1/oauth/token', {}, { grant_type: 'refresh_token', refresh_token: c.refreshToken });
+  if (CKPT) { const rc = await ckptTurn(c); return emit({ type: 'result', subtype: 'success', is_error: rc.status !== 200, result: rc.status === 200 ? 'ok' : `API Error: ${rc.status}` }); }
   const r = await post('/v1/messages?beta=true', { authorization: 'Bearer ' + c.accessToken, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'oauth-2025-04-20' }, { model: 'claude-fake', max_tokens: 64, stream: false, messages: [{ role: 'user', content: 'x' }] }, mode === 'keepalive-drop' && !dropped && (dropped = true));
   if (r.status === 401 && mode === 'rewrite401' && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     const o = JSON.parse(fs.readFileSync(file, 'utf8'));

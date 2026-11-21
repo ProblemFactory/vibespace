@@ -507,6 +507,16 @@
    "sites": 3
   },
   {
+   "id": "ckpt-record-own-build",
+   "file": "src/ckpt-switch.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the checkpoint switch's record is read only for the build it names (ckptSwitchOf: cliVersionOf(rec.cliVersion) === v, row B-437e U0); today only the release road prints it — U1 sets the switch per build behind ONE server setting (off as shipped), and a new build's pair rides the hub's own check of a new CLI (src/server/cli-self-measure.js, as the oat gate does), never a release (asked of 主开发 with U0)",
+   "suite": "test-cli-self-measure",
+   "match": "version-compare",
+   "sites": 1
+  },
+  {
    "id": "oat-file-caps",
    "file": "src/accounts.js",
    "keyedOn": "version",

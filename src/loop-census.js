@@ -119,6 +119,7 @@ const OWNERS = Object.freeze([
       name('settings-merge|settings-merge-device'),   // B-e7c0 (paired machine): the create's ONE bounded ask of a paired machine's agent to merge the person's settings file there
       name('utf8-stream'),   // B-b968: ONE UTF-8 decoder per terminal / conversation output stream (PURE; pty-duck, the re-attach shim, the agent's chat tail)
       name('helper-fact'),   // B-bc9f: a Claude settings file's key-helper fact — ONE rule for the create and a paired machine's probe (PURE)
+      name('ckpt-switch'),   // row B-437e U0: the checkpoint switch's PURE verdict (the probe, the release road, their suites)
       name('claude-route-names'),   // B-e7c0 cure: the CLI's route / credential names (PURE) the managed rule and the merge both read
       name('claude-level-signal'),   // B-24e2: the background signal's declaration + the build's identity, out of the catalog (PURE; the catalog, the device's scan)
       name('left-behind|left-behind-door|left-behind-line'),   // B-69a7: what a stopped turn's command tool left running — the read (SHARED; the hub and the device agent) and the hub's door

@@ -46,6 +46,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 const { OAT_VARIANTS, OAT_IN_FILE_GATE, MINT_VARIANT, cliVersionOf, mintScopesIn } = require('./cli-caps.js');
+const { CKPT_VARIANTS, CKPT_SWITCH, ckptVerdict } = require('./ckpt-switch.js'); // row B-437e U0: the checkpoint switch's pair + its PURE verdict
 
 // the measurement's own version: a change to what it measures bumps it, and a hub re-runs a FAIL once (a PASS stays)
 const PROBE_VERSION = 2; // 2 (the incident of 2026-11-11): the hub's run lives outside every guarded root — a cannot-run measured by 1 runs again
@@ -60,7 +61,8 @@ const GUARDED = Object.freeze([
 const ENV_ALLOW = Object.freeze(['PATH', 'HOME', 'TMPDIR', 'USER', 'LANG', 'TERM', 'ANTHROPIC_BASE_URL', 'USE_LOCAL_OAUTH', 'CLAUDE_LOCAL_OAUTH_API_BASE', 'CLAUDE_LOCAL_OAUTH_APPS_BASE', 'CLAUDE_LOCAL_OAUTH_CONSOLE_BASE',
   'CLAUDE_CODE_ENABLE_TELEMETRY', 'OTEL_METRICS_EXPORTER', 'OTEL_LOGS_EXPORTER', 'OTEL_EXPORTER_OTLP_PROTOCOL', 'OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_LOGS_EXPORT_INTERVAL', 'CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS',
   'DISABLE_AUTOUPDATER', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy', 'NO_PROXY', 'no_proxy', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN',
-  'BROWSER']); // BROWSER (lane oat-add-door): the mint variant's only — the `false` binary (assertEnv), so `setup-token` never runs the box's opener
+  'BROWSER', // BROWSER (lane oat-add-door): the mint variant's only — the `false` binary (assertEnv), so `setup-token` never runs the box's opener
+  'CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING']); // row B-437e U0: the ckpt-on variant's only — the checkpoint switch, `true` (assertEnv), the measurement's subject
 
 const BASE_KEYS = ['ANTHROPIC_BASE_URL', 'CLAUDE_LOCAL_OAUTH_API_BASE', 'CLAUDE_LOCAL_OAUTH_APPS_BASE', 'CLAUDE_LOCAL_OAUTH_CONSOLE_BASE'];
 const PROXY_KEYS = ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy'];
@@ -167,7 +169,7 @@ function preflight({ root, guarded = GUARDED, forbid = [], strace = 'strace', se
 }
 
 /** G3: the env a CLI spawn carries — EXACTLY the allowlist, every base / proxy the mock's origin, the only token the run's fake */
-function assertEnv(env, { base, root, oat, proxied }) {
+function assertEnv(env, { base, root, oat, proxied, variant = null }) {
   const bad = (k, why) => { throw refusal('env', `${k}: ${why}`); };
   for (const k of Object.keys(env)) if (!ENV_ALLOW.includes(k)) bad(k, 'not in the allowlist');
   for (const k of BASE_KEYS) if (env[k] !== base) bad(k, 'not the loopback mock');
@@ -177,6 +179,8 @@ function assertEnv(env, { base, root, oat, proxied }) {
   if (env.CLAUDE_CODE_OAUTH_TOKEN !== undefined && env.CLAUDE_CODE_OAUTH_TOKEN !== oat) bad('CLAUDE_CODE_OAUTH_TOKEN', 'not this run\'s fake');
   if (env.DISABLE_AUTOUPDATER !== '1') bad('DISABLE_AUTOUPDATER', 'the CLI may update itself');
   if (env.BROWSER !== undefined && env.BROWSER !== NO_BROWSER) bad('BROWSER', 'an opener that could open the URL');
+  if (env[CKPT_SWITCH] !== undefined && env[CKPT_SWITCH] !== 'true') bad(CKPT_SWITCH, 'the checkpoint switch takes `true` only (the measured value)');
+  if (env[CKPT_SWITCH] !== undefined && variant !== 'ckpt-on') bad(CKPT_SWITCH, 'the checkpoint switch rides the ckpt-on variant only');
   if (env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC !== '1') bad('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'the CLI\'s optional traffic is on');
 }
 
@@ -486,7 +490,7 @@ async function measure(o = {}) {
   const OAT = `${OAT_PFX}-FAKE-O-${crypto.randomBytes(43).toString('hex').slice(0, 86)}AA`;
 
   // ── the mock ──────────────────────────────────────────────────────────────
-  const M = { reqs: [], heads: [], otel: [], oauth: [], other: [], escapes: [], foreign: [], mode: { reject429: new Set(), fail401: new Set() }, gen: { A: 1, B: 1 } };
+  const M = { reqs: [], heads: [], ctHeads: [], otel: [], oauth: [], other: [], escapes: [], foreign: [], mode: { reject429: new Set(), fail401: new Set() }, gen: { A: 1, B: 1 } };
   const acctOf = (tok) => { if (tok && tok === OAT) return 'O'; const m = /FAKE-([AB])-/.exec(String(tok || '')); return m ? m[1] : null; };
   // a credential in any output = its label (member + generation), never its bytes
   const label = (tok) => { if (!tok) return tok; if (tok === OAT) return '<O oat>'; const m = /FAKE-([AB])-(r?)(\d+)$/.exec(String(tok)); return m ? `<${m[1]} ${m[2] ? 'refresh' : 'token'} ${m[3]}>` : '<unknown token>'; };
@@ -586,10 +590,13 @@ async function measure(o = {}) {
       if (url.startsWith('/v1/messages')) {
         const rec = { t: now(), path: url.split('?')[0], acct: a, scheme, tok: tok ? tok.slice(-8) : null, model: j?.model || null, stream: !!j?.stream, org: req.headers['x-organization-uuid'] || null, status: 200 };
         M.reqs.push(rec);
-        if (!url.includes('count_tokens')) {
-          // the whole head, the credential as its label (oat-env's byte diff reads these)
+        {
+          // the whole head, the credential as its label (oat-env's byte diff reads these); count_tokens heads kept apart (row
+          // B-437e U0: the checkpoint pair compares those too)
           const headers = Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, k === 'authorization' ? `${scheme === 'bearer' ? 'Bearer ' : ''}${label(tok)}` : k === 'x-api-key' ? label(tok) : String(v)]).sort(([x], [y]) => (x < y ? -1 : 1)));
-          M.heads.push({ t: rec.t, method: req.method, path: url, acct: a, stream: rec.stream, headers, body: j ? { keys: Object.keys(j).sort(), model: j.model || null, max_tokens: j.max_tokens ?? null, betas: j.betas || null, thinking: j.thinking ? Object.keys(j.thinking).sort().join(',') : null, tools: Array.isArray(j.tools) ? j.tools.length : null, system: Array.isArray(j.system) ? j.system.length : typeof j.system } : null });
+          const sid = String(req.headers['x-claude-code-session-id'] || '');
+          const head = { t: rec.t, method: req.method, path: url, acct: a, stream: rec.stream, headers, body: j ? { keys: Object.keys(j).sort(), model: j.model || null, max_tokens: j.max_tokens ?? null, betas: j.betas || null, thinking: j.thinking ? Object.keys(j.thinking).sort().join(',') : null, tools: Array.isArray(j.tools) ? j.tools.length : null, system: Array.isArray(j.system) ? j.system.length : typeof j.system, stream: !!j.stream, toolNames: Array.isArray(j.tools) ? j.tools.map((x) => x && x.name).filter(Boolean).map(String).sort() : null, metadataKeys: j.metadata && typeof j.metadata === 'object' ? Object.keys(j.metadata).sort() : null, systemHead: Array.isArray(j.system) && j.system.length ? crypto.createHash('sha256').update(JSON.stringify(j.system[0])).digest('hex').slice(0, 16) : typeof j.system === 'string' ? crypto.createHash('sha256').update(j.system).digest('hex').slice(0, 16) : null, userId: j.metadata && typeof j.metadata.user_id === 'string' ? (sid ? j.metadata.user_id.split(sid).join('<session>') : j.metadata.user_id).slice(0, 300) : null, toolChoice: j.tool_choice === undefined ? null : JSON.stringify(j.tool_choice).slice(0, 200), contextManagement: j.context_management === undefined ? null : JSON.stringify(j.context_management).slice(0, 300) } : null };
+          (url.includes('count_tokens') ? M.ctHeads : M.heads).push(head);
         }
         if (url.includes('count_tokens')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"input_tokens":12}'); return; }
         if (a && M.mode.fail401.has(a)) { rec.status = 401; res.writeHead(401, { 'content-type': 'application/json', 'request-id': 'req_401' }); res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'OAuth token has expired. Please obtain a new token or refresh your existing token.' } })); return; }
@@ -661,8 +668,8 @@ async function measure(o = {}) {
     CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', DISABLE_AUTOUPDATER: '1',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', // the CLI's optional traffic off — on EVERY rung (assertEnv requires it)
   });
-  const resetMock = () => { M.reqs = []; M.heads = []; M.otel = []; M.oauth = []; M.other = []; M.foreign = []; M.mode.reject429.clear(); M.mode.fail401.clear(); M.mode.slowMs = 0; M.mode.turnPlan = null; M.gen = { A: 1, B: 1 }; };
-  const mark = (out) => ({ reqs: M.reqs.length, heads: M.heads.length, otel: M.otel.length, oauth: M.oauth.length, other: M.other.length, escapes: M.escapes.length, out: out.length });
+  const resetMock = () => { M.reqs = []; M.heads = []; M.ctHeads = []; M.otel = []; M.oauth = []; M.other = []; M.foreign = []; M.mode.reject429.clear(); M.mode.fail401.clear(); M.mode.slowMs = 0; M.mode.turnPlan = null; M.gen = { A: 1, B: 1 }; };
+  const mark = (out) => ({ reqs: M.reqs.length, heads: M.heads.length, ctHeads: M.ctHeads.length, otel: M.otel.length, oauth: M.oauth.length, other: M.other.length, escapes: M.escapes.length, out: out.length });
 
   // ── strace: one parsed line per syscall; connect() classified ──────────────
   const day = new Date(); const ymd = [day.getFullYear(), day.getMonth(), day.getDate()];
@@ -683,7 +690,7 @@ async function measure(o = {}) {
   // group while its handle lives — the kernel ends every tracee with it, law C) ──
   const ESCAPED = [];
   function launch({ args, env, cwd, variant, errFile, onEscape = () => { }, pty = false }) {
-    assertEnv(env, { base: BASE, root: ROOT, oat: OAT, proxied: !NETNS || env.HTTPS_PROXY !== undefined }); // law 3 G3: the allowlist, or no spawn
+    assertEnv(env, { base: BASE, root: ROOT, oat: OAT, proxied: !NETNS || env.HTTPS_PROXY !== undefined, variant }); // law 3 G3: the allowlist, or no spawn
     const child = spawn('setpriv', ['--pdeathsig', 'KILL', '--', STRACE, '--kill-on-exit', '--always-show-pid', '-f', '-tt', '-q', '-y', '-s', '256', '-e', `trace=${TRACE_SET}`, '-e', 'inject=io_uring_setup:error=ENOSYS', '-e', `inject=${DENIED_DOORS.join(',')}:error=EPERM`, process.execPath, '--no-warnings', TRAMP, errFile, ...(pty ? ['--pty'] : []), CLAUDE, ...args],
     { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     child.on('error', (e) => console.warn(`[oat-probe] the probe's tracer could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
@@ -712,10 +719,10 @@ async function measure(o = {}) {
   }
   /** the record of one launch, judged whole: the grammar, and whether it accounts for every call (recordGap) */
   const recordOf = (h) => { const p = parseTrace(h.rec.text); const r = p.lines.map((s) => ({ pid: s.pid, t: toMs(s.tt), call: s.call, args: s.args, result: s.result, line: s.line })); r.unparsed = p.unparsed; r.fragment = p.fragment; r.joined = p.joined; r.cut = p.cut; r.deaths = p.deaths; r.gap = recordGap(p, { ended: h.rec.ended, killed: h.rec.killed, oversize: h.rec.oversize }); return r; };
-  function startCli({ dir, env, variant }) {
+  function startCli({ dir, env, variant, extraArgs = [] }) {
     const waiters = [];
     const errFile = path.join(dir, 'cli.stderr'); // the binary's own stderr (diagnostics only — never judged)
-    const h = launch({ args: ['--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio'], env, errFile, cwd: path.join(dir, 'cwd'), variant, onEscape: () => { for (const w of waiters.splice(0)) w(null); } });
+    const h = launch({ args: ['--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio', ...extraArgs], env, errFile, cwd: path.join(dir, 'cwd'), variant, onEscape: () => { for (const w of waiters.splice(0)) w(null); } });
     const { child } = h;
     const out = []; let buf = '';
     child.stdout.on('data', (d) => {
@@ -1001,6 +1008,92 @@ async function measure(o = {}) {
     return r;
   }
 
+  // ── THE CHECKPOINT SWITCH (row B-437e, the files tier, U0 — 主开发 r1080 (A); src/ckpt-switch.js CKPT_VARIANTS / ckptVerdict): the
+  // SAME short turn — the mock's plan answers Read then Edit of a scratch note in the CLI's own cwd — WITHOUT the switch
+  // (ckpt-off) and WITH CKPT_SWITCH=true (ckpt-on), each a fresh process with the same fake member O (its long-lived token in its
+  // file, the link → O) and the same `--permission-mode acceptEdits` (the note is the CLI's own cwd). What the CLI SENT — every
+  // request's head (sign-in values as labels), its body's keys and kinds, the calls, the OTel event names — is compared by
+  // ckptVerdict; the scratch home's checkpoint files are COUNTED (their names kept, never their bytes). Every fence of every variant
+  // (the one launcher, the belt, the guarded reads, the record's gaps, the foreign tokens) judges it as it judges the oat runs ──
+  const filesUnder = (top, cap = 200) => {
+    const out = [];
+    const walk = (d, depth) => {
+      if (out.length >= cap || depth > 6) return;
+      let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p, depth + 1); else out.push(path.relative(top, p)); if (out.length >= cap) return; }
+    };
+    walk(top, 0);
+    return out.sort();
+  };
+  async function runCkpt(name) {
+    VARIANT = name;
+    const dir = path.join(ROOT, name === 'ckpt-on' ? 'ckpt-b' : 'ckpt-a');   // equal-length paths: every byte count the two runs send compares
+    fs.rmSync(dir, { recursive: true, force: true });
+    const home = path.join(dir, 'home'), O = path.join(dir, 'subs', 'sub-O');
+    const linkDir = path.join(dir, 'pool-links', 'pool-t'), link = path.join(linkDir, 'sess-1');
+    for (const d of [home, O, linkDir, path.join(dir, 'cwd'), path.join(dir, 'tmp')]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    homeConfig(home);
+    const credO = path.join(O, '.credentials.json');
+    fs.writeFileSync(credO, oatCreds(Date.now() + OAT_TTL_MS, true), { mode: 0o600 });
+    fs.symlinkSync(O, link);
+    const note = path.join(dir, 'cwd', 'note.txt');
+    fs.writeFileSync(note, 'before\n', { mode: 0o600 });
+    resetMock();
+    M.mode.turnPlan = { n: 0, steps: [
+      { tool: { name: 'Read', input: { file_path: note } } },
+      { tool: { name: 'Edit', input: { file_path: note, old_string: 'before', new_string: 'after' } } },
+    ] };
+    const env = { ...cliEnv(home), ...PROXY_ENV, CLAUDE_SECURESTORAGE_CONFIG_DIR: link, ...(name === 'ckpt-on' ? { [CKPT_SWITCH]: 'true' } : {}) };
+    const cli = startCli({ dir, env, variant: name, extraArgs: ['--permission-mode', 'acceptEdits'] });
+    const m0 = mark(cli.out), o0 = M.otel.length;
+    const t = await cli.turn('edit the note');
+    await sleep(FLUSH_MS);
+    await cli.stop();
+    const m1 = mark(cli.out), o1 = M.otel.length;   // after the stop: what the CLI sends as it ends is compared too
+    const heads = M.heads.slice(m0.heads, m1.heads), countHeads = M.ctHeads.slice(m0.ctHeads, m1.ctHeads);
+    const turnOk = !!t && !!t.result && typeof t.result === 'object' && !t.result.is_error;
+    // every call with its COUNT (repeats kept): the messages calls with who and how, OAuth, other paths, OTel events with their
+    // attributes, and the refused escapes (a CONNECT, an absolute-form request to another host)
+    const calls = [
+      ...M.reqs.slice(m0.reqs, m1.reqs).map((q) => `${q.path} ${q.stream ? 'stream' : 'ns'} ${q.model || '-'} ${q.acct || '-'} ${q.scheme} ${q.status}`),
+      ...M.oauth.slice(m0.oauth, m1.oauth).map((x) => `oauth ${x.kind} ${x.acct || '-'} ${x.scheme || '-'}`),
+      ...M.other.slice(m0.other, m1.other).map((x) => `${x.method} ${x.path} ${x.acct || '-'}`),
+      ...M.otel.slice(o0, o1).map((x) => `otel ${x.event || '?'} org=${x.org || '-'} acct=${x.acct || '-'} email=${x.email || '-'}`),
+      ...M.escapes.slice(m0.escapes, m1.escapes).map((x) => `escape ${x.via} ${x.what}`),
+    ].sort();
+    let edited = false; try { edited = fs.readFileSync(note, 'utf8').includes('after'); } catch { }
+    const files = filesUnder(path.join(home, '.claude', 'file-history'));
+    const pick = (h) => ({ path: h.path, headers: h.headers, body: h.body });
+    const summary = { heads: heads.map(pick), countHeads: countHeads.map(pick), calls, files: files.length, edited, turnOk };
+    const lines = cli.record();
+    const r = {
+      variant: name, version, switch: name === 'ckpt-on' ? `${CKPT_SWITCH}=true` : 'unset',
+      result: t && typeof t.result === 'object' ? { subtype: t.result.subtype, is_error: !!t.result.is_error } : t && t.result,
+      requests: heads.length, countRequests: countHeads.length, calls, edited, turnOk, checkpointFiles: files.slice(0, 20), checkpointCount: files.length,
+      heads: heads.map((h) => ({ path: h.path, headers: h.headers, body: h.body })),
+      outboundConnects: afterPass(lines), stderrTail: cli.stderr().slice(-400), events: eventsOf(name, []),
+    };
+    if (name === 'ckpt-off') {
+      r.verdict = edited && heads.length > 0 && turnOk ? 'RAN' : 'FAIL';
+      r.note = `${heads.length} request(s), the turn ${turnOk ? 'finished' : 'did NOT finish'}, the note ${edited ? 'edited' : 'NOT edited'}, ${files.length} checkpoint file(s) without the switch — ckpt-on is compared with it`;
+    } else {
+      const off = RESULTS['ckpt-off'];
+      const v = ckptVerdict(off && off.summary, summary);
+      r.ckpt = v;
+      r.verdict = v.verdict === 'SAME' ? 'PASS' : v.stop ? 'STOP' : 'FAIL';
+      r.note = `${v.verdict}: ${v.findings.join('; ').slice(0, 900) || 'nothing the CLI sent differs with the switch'}${v.files ? ` · checkpoint files ${v.files.off} without / ${v.files.on} with it` : ''}`;
+    }
+    // the fences judge it as every variant (law 3 P1 + P4, the record's gaps, the doors)
+    r.foreignTokens = M.foreign.length; r.guardedReads = guardedReadsOf(lines, [...(o.guarded || GUARDED).map((g) => g.path), ...(o.forbid || [])], { deny: DENY, allow: ALLOW });
+    if (r.foreignTokens || r.guardedReads.length) { r.void = r.foreignTokens ? 'foreign-token' : 'guarded-read'; r.note += ` · VOID: ${r.foreignTokens ? `${r.foreignTokens} request(s) carried a token this run did not make` : `it read ${r.guardedReads.join(', ')}`}`; }
+    else if (lines.gap) { r.void = lines.gap.void; r.traceGap = lines.gap.why; r.note += ` · VOID: ${lines.gap.why}`; }
+    else { const doors = doorsOpenedOf(lines); if (doors.length) { r.void = 'door'; r.doors = doors; r.note += ` · VOID: a door the trace cannot see through opened (${doors.join(', ')})`; } }
+    if (r.void && name === 'ckpt-on') r.verdict = 'FAIL';   // a void run proves nothing either way
+    r.traceJoined = lines.joined || 0; r.ioUringSetups = lines.filter((x) => x.call === 'io_uring_setup').length; r.cutCalls = (lines.cut || []).map((c) => c.call);   // the evidence the oat runs keep
+    RESULTS[name] = { r, summary };
+    return r;
+  }
+
   // THE AFTER-PASS (acceptance r2 (c)): a variant's record, judged once its run ended — the netlink lines counted ONCE per call
   // (the belt counts none), the off-loopback connects in words. ONE implementation: the oat variants and the mint (lane oat-add-door)
   const afterPass = (lines) => {
@@ -1148,7 +1241,8 @@ async function measure(o = {}) {
 
 
   // ── the run: the gate first (law 1, ruling R1 — the hub places on the gate's verdict; the record completes behind it) ──
-  const want = VERSION_RUN.void ? [] : orderOf(o.variants || []);
+  const want0 = VERSION_RUN.void ? [] : orderOf(o.variants || []);
+  const want = [...want0.filter((v) => !CKPT_VARIANTS.includes(v)), ...CKPT_VARIANTS.filter((v) => want0.includes(v))];   // row B-437e U0: the pair last, off before on
   if (VERSION_RUN.void) log(`[measure] VOID before any variant: the --version run ${VERSION_RUN.void === 'guarded-read' ? `read ${VERSION_RUN.guardedReads.join(', ')}` : VERSION_RUN.void === 'launcher-changed' ? 'found the launcher changed' : 'left a trace line the fence cannot read'}\n`);
   const results = [];
   let gateSaid = false;
@@ -1163,6 +1257,13 @@ async function measure(o = {}) {
       results.push(r);
       log(`[oat] ${name}: ${r.verdict} — ${r.note}\n`);
       if (!gateSaid && OAT_IN_FILE_GATE.every((g) => results.some((x) => x.variant === g))) { gateSaid = true; if (typeof o.onGate === 'function') { try { o.onGate(gateOf(results, { cli: cliVersionOf(version), binary: BINARY, aborted: ESCAPED.length > 0, ms: Date.now() - T0, void: VERSION_RUN.void })); } catch { } } }
+      continue;
+    }
+    if (CKPT_VARIANTS.includes(name)) {
+      const r = await runCkpt(name);
+      VARIANT = null;
+      results.push(r);
+      log(`[ckpt] ${name}: ${r.verdict} — ${r.note}\n`);
       continue;
     }
     if (name === MINT_VARIANT) {

@@ -25,6 +25,11 @@
 // process and no run dir (every pid this suite signals is proven the fake's by comm + argv).
 // Round 3 (acceptance r2): a threaded canary read VOIDS (split lines joined); the --version run is fenced; /proc of an unrelated
 // process VOIDS and that process survives; the measurement child SIGKILLed leaves nothing (the kernel's pdeathsig + EXITKILL chain).
+// THE CHECKPOINT SWITCH (row B-437e, the files tier, U0 — 主开发 r1080 (A)): `--variant ckpt` over the fake's ckpt modes — the SAME
+// turn (Read then Edit of a scratch note) without and with the switch: `ckpt` ⇒ SAME (PASS; one checkpoint file with it, none
+// without; the fixture says SAME for 9.9.9 only; no token bytes anywhere); RED CONTROLS: `ckpt-header` (one header more with the
+// switch) ⇒ DIFFERENT, STOP, the header named; `ckpt-always` (a backup without it) ⇒ ALREADY-ON; --write-ckpt-fixture without
+// both variants is REFUSED. The REAL CLI's run of this pair is the integrator's (ordered by 主开发), never a lane's.
 // Heavy only because the measurement runs strace (THE TIER RULE); the reader's own table is
 // test-cli-caps (fast). No strace on the machine ⇒ SKIP with the reason.
 import fs from 'node:fs';
@@ -40,6 +45,7 @@ let pass = 0, fail = 0, skip = 0;
 if (process.env.VS_OAT_FAKE_LOG) { const tee = fs.openSync(process.env.VS_OAT_FAKE_LOG, 'a'); for (const k of ['log', 'error']) { const o = console[k].bind(console); console[k] = (...a) => { o(...a); try { fs.writeSync(tee, a.join(' ') + '\n'); } catch { } }; } }
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const C = require(path.join(REPO, 'src/cli-caps.js'));
+const K = require(path.join(REPO, 'src/ckpt-switch.js')); // row B-437e U0: the checkpoint switch's verdict + its per-version reader
 const SCRIPT = path.join(REPO, 'scripts/measure-claude-cred-read.mjs');
 const PROBE = path.join(REPO, 'src/claude-oat-probe.js'); // lane cli-self-measure: the measurement's ONE implementation (the script and the hub call it)
 const P = require(PROBE); // its pure exports (OPEN_CALLS …) for the round-4 legs
@@ -123,11 +129,12 @@ if (!haveStrace) {
   ok("the census: each error path named once; 15 .on('error') listeners for 1 spawn() (THE ONE LAUNCHER: every variant and the --version read, law D — the version run's own process listener is the 11th; + the mint variant's three on its own launch, lane oat-add-door; + the launcher's own tracer start failure, 0c2513b59 ckpt61 cure 2 — its two child listeners named apart) + 1 createServer() + the canary socket (lane cli-self-measure: the sudo spawn stays in the script) (a new one moves a count)", missing.length === 0 && count(/\.on\('error', /g) === 15 && count(/\bspawn\(/g) === 1 && count(/createServer\(/g) === 1, `missing ${JSON.stringify(missing)}; .on('error') ${count(/\.on\('error', /g)}, spawn( ${count(/\bspawn\(/g)}, createServer( ${count(/createServer\(/g)}`);
 
   // a PATCHED MODULE beside the real script (lane cli-self-measure: the measurement lives in src/claude-oat-probe.js; the
-  // script requires ../src/cli-caps.js + ../src/claude-oat-probe.js, the module ./cli-caps.js); swaps must all land
+  // script requires ../src/cli-caps.js + ../src/ckpt-switch.js + ../src/claude-oat-probe.js, the module ./cli-caps.js + ./ckpt-switch.js); swaps must all land
   const copy = (tag, swaps) => {
     const d = path.join(tmp, tag), f = path.join(d, 'scripts', 'measure.mjs');
     fs.mkdirSync(path.dirname(f), { recursive: true }); fs.mkdirSync(path.join(d, 'src'));
     fs.copyFileSync(SCRIPT, f); fs.symlinkSync(path.join(REPO, 'src', 'cli-caps.js'), path.join(d, 'src', 'cli-caps.js'));
+    fs.symlinkSync(path.join(REPO, 'src', 'ckpt-switch.js'), path.join(d, 'src', 'ckpt-switch.js')); // row B-437e U0: the script and the module both require it
     fs.symlinkSync(path.join(REPO, 'src', 'claude-oat-trampoline.js'), path.join(d, 'src', 'claude-oat-trampoline.js')); // the module's trampoline beside it (r4)
     let t = src, n = 0;
     for (const [re, to] of swaps) t = t.replace(re, (...m) => { n++; return to.replace('$1', m[1] ?? ''); });
@@ -339,6 +346,41 @@ else {
   let R2 = null; try { R2 = JSON.parse(fs.readFileSync(mrec, 'utf8')); } catch { }
   const m2 = R2 && R2.results.find((x) => x.variant === 'oat-mint-scopes');
   ok('a fake whose URL names no scope ⇒ FAIL, no scopes, the run NOT void (a mechanical miss never voids the gate)', r2.status === 0 && !!m2 && m2.verdict === 'FAIL' && m2.scopes === null && !R2.void, m2 && m2.note);
+}
+
+// ── THE CHECKPOINT SWITCH over the fake (row B-437e U0; the verdict's own table is test-cli-caps ⑨, fast) ──
+console.log('the checkpoint switch over the FAKE claude (row B-437e U0: what the CLI sends, without and with the switch)');
+if (!haveStrace) { skip++; console.log('  SKIP the checkpoint runs: no strace on this machine'); }
+else {
+  const runCkpt = (mode, tag, extra = []) => {
+    const fxc = path.join(tmp, `ckpt-fx-${tag}.json`), recc = path.join(tmp, `ckpt-rec-${tag}.json`);
+    const r = measure(['--claude', wrap(mode), '--variant', 'ckpt', '--write-ckpt-fixture', '--ckpt-fixture', fxc, '--out', recc, ...extra]);
+    let F = null, R = null;
+    try { F = JSON.parse(fs.readFileSync(fxc, 'utf8')); } catch { }
+    try { R = JSON.parse(fs.readFileSync(recc, 'utf8')); } catch { }
+    const off = R && R.results.find((x) => x.variant === 'ckpt-off'), on = R && R.results.find((x) => x.variant === 'ckpt-on');
+    return { r, F, R, off, on };
+  };
+  const g = runCkpt('ckpt', 'good');
+  console.log(`    (ckpt-on: ${g.on ? `${g.on.verdict} — ${g.on.note}` : 'no result'}${g.r.status ? ` · exit ${g.r.status}: ${String(g.r.stderr).slice(-300)}` : ''})`);
+  ok('the honest fake: nothing it sends differs with the switch; one checkpoint file with it, none without ⇒ SAME (PASS); the run is not void, nothing left loopback',
+    g.r.status === 0 && !!g.on && g.on.verdict === 'PASS' && g.on.ckpt.verdict === 'SAME' && g.on.checkpointCount === 1 && !!g.off && g.off.checkpointCount === 0 && g.off.edited && g.on.edited && !g.R.void && !g.R.aborted && g.R.escapes.length === 0,
+    g.on && g.on.note);
+  ok('…both runs made the same three requests (Read, Edit, the end) and the record keeps sign-in values as labels only (no token bytes in the record or the fixture)',
+    !!g.on && g.on.requests === 3 && g.off.requests === 3 && !!g.F && !/sk-ant-o[ar]t01-FAKE/.test(JSON.stringify(g.R)) && !/sk-ant-o[ar]t01-FAKE/.test(JSON.stringify(g.F)) && g.on.heads.every((h) => /^Bearer <O oat>$/.test(h.headers.authorization || '')),
+    g.on && JSON.stringify(g.on.heads.map((h) => h.headers.authorization)));
+  ok('…the fixture: {versions: {"9.9.9": {verdict SAME, files {off 0, on 1}}}} — ckptSwitchOf reads it for 9.9.9 only',
+    !!g.F && K.ckptSwitchOf('9.9.9', g.F) === 'SAME' && K.ckptSwitchOf('2.1.322', g.F) === null && JSON.stringify(g.F.versions['9.9.9'].files) === '{"off":0,"on":1}' && g.F.versions['9.9.9'].script === 'scripts/measure-claude-cred-read.mjs',
+    g.F && JSON.stringify(g.F).slice(0, 400));
+  const h = runCkpt('ckpt-header', 'header');
+  ok('RED CONTROL: a fake that sends one header more with the switch ⇒ DIFFERENT, STOP, the header and its request named; the fixture says DIFFERENT',
+    !!h.on && h.on.verdict === 'STOP' && h.on.ckpt.stop === true && h.on.ckpt.findings.some((x) => /^request \d header only with the switch: x-fake-ckpt$/.test(x)) && !!h.F && K.ckptSwitchOf('9.9.9', h.F) === 'DIFFERENT' && h.F.versions['9.9.9'].stop === true,
+    h.on && h.on.note);
+  const a = runCkpt('ckpt-always', 'always');
+  ok('RED CONTROL: a fake that keeps a checkpoint WITHOUT the switch ⇒ ALREADY-ON (the road keeps them already), never SAME',
+    !!a.on && a.on.ckpt.verdict === 'ALREADY-ON' && a.on.verdict === 'FAIL' && a.off.checkpointCount === 1, a.on && a.on.note);
+  const lone = measure(['--claude', wrap('ckpt'), '--variant', 'ckpt-on', '--write-ckpt-fixture', '--ckpt-fixture', path.join(tmp, 'ckpt-fx-lone.json'), '--out', path.join(tmp, 'ckpt-rec-lone.json')]);
+  ok('--write-ckpt-fixture without both variants in the run is REFUSED before anything runs (exit 2, no fixture)', lone.status === 2 && /needs both checkpoint variants/.test(lone.stderr) && !fs.existsSync(path.join(tmp, 'ckpt-fx-lone.json')), `exit ${lone.status}: ${String(lone.stderr).slice(-200)}`);
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed${skip ? `, ${skip} skipped` : ''})` : `ALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);

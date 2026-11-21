@@ -38,6 +38,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/claude-oat-probe.js', 'measure', 'child:execFileSync', 2, OFF, 'the measurement runs only in the FORKED child (the hub requires the module for its constants alone)'],
     ['src/claude-oat-probe.js', 'preflight', 'child:execFileSync', 3, OFF, 'the forked measurement child (preflight runs inside measure)'],
     ['src/claude-oat-probe.js', 'preflight > walk', 'walk', 1, OFF, 'the forked measurement child: the walk of its own new scratch'],
+    ['src/claude-oat-probe.js', 'measure > filesUnder > walk', 'walk', 1, OFF, 'the forked measurement child (row B-437e U0): the count of the checkpoint files under the checkpoint pair\'s scratch home, bounded (200 names, 6 deep)'],
     ['src/safe-fs-worker.js', 'contextFiles > walk', 'walk', 1, DEBT, 'per act — a context listing; a WORKER thread only since B-3b03 (SafeFs.call never runs it on the main thread — with no live worker it refuses by name); still a row here: OFF is another PROCESS'],
     ['src/safe-fs-worker.js', 'folderCensus > walk', 'walk', 1, DEBT, 'per act — a folder census; a WORKER thread only since B-3b03 (never the main thread); still a row here: OFF is another PROCESS'],
     ['src/proc-identity.js', 'psOf', 'child:spawnSync', 1, FALLBACK, 'NO-/proc fallback only (macOS / BSD): /proc is the rung above it (test-architecture\'s process-table allowlist)'],

@@ -21,6 +21,11 @@
 //   ⑦ (pool-oat-materialize verify r1 F9) machine-probes.cliVersion: the FIRST line that parses as a
 //      version (a warning printed before the number is skipped), 'unparsed' for an answer with none,
 //      null for no answer — over fake #! binaries (never the real CLI)
+//   ⑨ (row B-437e, the files tier, U0 — 主开发 r1080 (A)) src/ckpt-switch.js ckptVerdict, PURE: the checkpoint switch changes nothing
+//      the CLI sends — every header's name and value (the sign-in ones as the mock's labels, the per-request ids by name, a raw one
+//      compared but never shown), the body's keys, kinds and identity fields, the count requests, every call by its count — else
+//      DIFFERENT + stop; heads matched by kind, not place; a turn that did not finish is INCOMPLETE; then ALREADY-ON / NO-EFFECT;
+//      RED CONTROLS (anchored copies): the only-with branch emptied, calls by name, heads by place, no turn check
 import fs from 'node:fs';
 import os from 'node:os';
 import crypto from 'node:crypto';
@@ -29,6 +34,7 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { versionsBefore, recordSha, byVersion, RECORD_SHA256, SPELLED_BUILDS_RE } from './lib/oat-fixture.mjs'; // B-5e52
 import { anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, skip = 0;
@@ -356,6 +362,62 @@ console.log('⑧ B-ec25: machine-probes starts no agent CLI it found by itself u
     const v4 = await withEnv({ VS_NO_REAL_CLI: '1', CLAUDE_CMD: LN }, () => P.cliVersion(CL));
     ok('a stand-in named through a SYMLINK is the same file ⇒ it runs (the realpath decides, not the spelling)', v4 === '2.1.300 (Claude Code)' && runs().join('|') === 'ec25-claude --version', JSON.stringify([v4, runs()]));
   } finally { console.log = log0; }
+}
+
+// ── ⑨ the checkpoint switch's verdict (row B-437e U0) ──
+console.log('⑨ ckptVerdict — the switch changes nothing the CLI sends, or the tier STOPS');
+{
+  const K = require(path.join(REPO, 'src/ckpt-switch.js'));
+  const head = (i, over = {}) => ({ path: '/v1/messages?beta=true', headers: { 'anthropic-beta': 'oauth-2025-04-20', 'anthropic-version': '2023-06-01', authorization: 'Bearer <O oat>', 'content-length': String(400 + i), 'user-agent': 'claude-cli/9.9.9 (external, sdk-cli)', 'x-app': 'cli', 'x-claude-code-session-id': 'sid-a', 'x-client-request-id': `rq-${i}`, ...(over.headers || {}) }, body: { keys: ['max_tokens', 'messages', 'metadata', 'model', 'stream', 'system', 'tools'], model: 'claude-x', max_tokens: 32000, stream: true, betas: null, thinking: null, tools: 2, toolNames: ['Edit', 'Read'], system: 2, systemHead: 'a1b2c3d4e5f60718', metadataKeys: ['user_id'], userId: 'user_dev_account_acct-O_session_<session>', toolChoice: null, contextManagement: null, ...(over.body || {}) } });
+  const side = (over = {}) => ({ path: '/v1/messages?beta=true', headers: { 'anthropic-version': '2023-06-01', authorization: 'Bearer <O oat>', 'content-length': '120', ...(over.headers || {}) }, body: { keys: ['max_tokens', 'messages', 'model'], model: 'claude-small', max_tokens: 512, stream: false, betas: null, thinking: null, tools: null, toolNames: null, system: 1, systemHead: '0011223344556677', metadataKeys: null, userId: null, toolChoice: null, contextManagement: null, ...(over.body || {}) } });
+  const CALLS = ['/v1/messages stream claude-x O bearer 200', '/v1/messages stream claude-x O bearer 200', '/v1/messages stream claude-x O bearer 200', 'otel api_request org=- acct=- email=-', 'otel tool_result org=- acct=- email=-'];
+  const run = (o = {}) => ({ heads: o.heads || [head(1, o.h1), head(2, o.h2), head(3, o.h3)].slice(0, o.n || 3), countHeads: o.countHeads || [], calls: o.calls || CALLS, files: o.files ?? 0, edited: o.edited ?? true, turnOk: o.turnOk ?? true });
+  const OFF = run(), ON = run({ files: 1 });
+  const legs = (V) => [
+    ['the same turn, one checkpoint file with the switch ⇒ SAME', V(OFF, ON), 'SAME', false],
+    ['a header only with the switch ⇒ DIFFERENT, STOP', V(OFF, run({ files: 1, h2: { headers: { 'x-new': '1' } } })), 'DIFFERENT', true],
+    ['a header only without it ⇒ DIFFERENT', V(run({ h1: { headers: { 'x-old': '1' } } }), ON), 'DIFFERENT', true],
+    ['a kind value (anthropic-beta) ⇒ DIFFERENT', V(OFF, run({ files: 1, h1: { headers: { 'anthropic-beta': 'oauth-2025-04-20,files-api-2025' } } })), 'DIFFERENT', true],
+    ['the credential\'s label (another member, another scheme) ⇒ DIFFERENT', V(OFF, run({ files: 1, h1: { headers: { authorization: 'Bearer <A token 2>' } } })), 'DIFFERENT', true],
+    ['a body byte count (content-length: the two runs\' paths are of equal length) ⇒ DIFFERENT', V(OFF, run({ files: 1, h3: { headers: { 'content-length': '999' } } })), 'DIFFERENT', true],
+    ['the system\'s first block (the client\'s identity prefix) ⇒ DIFFERENT', V(OFF, run({ files: 1, h1: { body: { systemHead: 'ffffffffffffffff' } } })), 'DIFFERENT', true],
+    ['the metadata\'s user id (its account or device) ⇒ DIFFERENT', V(OFF, run({ files: 1, h2: { body: { userId: 'user_dev_account_acct-A_session_<session>' } } })), 'DIFFERENT', true],
+    ['a tool choice ⇒ DIFFERENT', V(OFF, run({ files: 1, h2: { body: { toolChoice: '{"type":"auto"}' } } })), 'DIFFERENT', true],
+    ['a top-level body key ⇒ DIFFERENT', V(OFF, run({ files: 1, h3: { body: { keys: [...head(1).body.keys, 'context_management'].sort() } } })), 'DIFFERENT', true],
+    ['a tool name ⇒ DIFFERENT (another kind of request: the counts by kind differ)', V(OFF, run({ files: 1, h1: { body: { toolNames: ['Edit', 'Read', 'Rewind'], tools: 3 } } })), 'DIFFERENT', true],
+    ['a count request only with the switch ⇒ DIFFERENT', V(OFF, run({ files: 1, countHeads: [side()] })), 'DIFFERENT', true],
+    ['a call twice instead of once (the counts, not the names) ⇒ DIFFERENT', V(OFF, run({ files: 1, calls: [...CALLS, 'otel tool_result org=- acct=- email=-'] })), 'DIFFERENT', true],
+    ['a refused escape only with the switch ⇒ DIFFERENT', V(OFF, run({ files: 1, calls: [...CALLS, 'escape CONNECT files.example.invalid:443'] })), 'DIFFERENT', true],
+    ['one request fewer ⇒ DIFFERENT', V(OFF, run({ files: 1, n: 2 })), 'DIFFERENT', true],
+    ['the per-request ids differ (the session id, the request id), every name the same ⇒ SAME', V(OFF, run({ files: 1, h1: { headers: { 'x-claude-code-session-id': 'sid-b', 'x-client-request-id': 'rq-x' } } })), 'SAME', false],
+    ['a side request racing the main ones (another place in the order) ⇒ SAME — matched by path, stream and tools', V(run({ heads: [side(), head(1), head(2), head(3)] }), run({ files: 1, heads: [head(1), head(2), side(), head(3)] })), 'SAME', false],
+    ['the turn did not finish with the switch ⇒ INCOMPLETE (never «the switch changes what is sent»)', V(OFF, run({ files: 1, n: 1, turnOk: false })), 'INCOMPLETE', false],
+    ['checkpoint files WITHOUT the switch ⇒ ALREADY-ON', V(run({ files: 2 }), ON), 'ALREADY-ON', false],
+    ['no checkpoint file with it ⇒ NO-EFFECT', V(OFF, run({ files: 0 })), 'NO-EFFECT', false],
+    ['the note not edited ⇒ INCOMPLETE', V(OFF, run({ files: 1, edited: false })), 'INCOMPLETE', false],
+    ['one run missing ⇒ INCOMPLETE', V(null, ON), 'INCOMPLETE', false],
+  ];
+  for (const [n, r, want, stop] of legs(K.ckptVerdict)) ok(`${n}${r.findings.length ? ` — ${r.findings[0]}` : ''}`, r.verdict === want && !!r.stop === stop, JSON.stringify(r).slice(0, 300));
+  const named = K.ckptVerdict(OFF, run({ files: 1, h2: { headers: { 'x-new': '1' } } }));
+  ok('a DIFFERENT names the request (its kind and place) and the header', named.findings.length === 1 && /^request \/v1\/messages\?beta=true stream \["Edit","Read"\] #2 header only with the switch: x-new$/.test(named.findings[0]), JSON.stringify(named.findings));
+  const secret = K.ckptVerdict(run({ h1: { headers: { cookie: 'sid=AAAA-raw' } } }), run({ files: 1, h1: { headers: { cookie: 'sid=BBBB-raw' } } }));
+  ok('a header the mock keeps raw (cookie) is compared — and its value is NEVER shown', secret.verdict === 'DIFFERENT' && secret.findings.some((x) => /header cookie differs \(its value is not shown\)$/.test(x)) && !/AAAA|BBBB/.test(JSON.stringify(secret)), JSON.stringify(secret.findings));
+  ok('ckptSwitchOf: the version\'s measured verdict; null for one not measured, a null fixture, a bare record, a record under the key naming another version',
+    K.ckptSwitchOf('9.9.9 (Claude Code)', { versions: { '9.9.9': { cliVersion: '9.9.9', verdict: 'SAME' } } }) === 'SAME' && K.ckptSwitchOf('9.9.8', { versions: { '9.9.9': { cliVersion: '9.9.9', verdict: 'SAME' } } }) === null
+    && K.ckptSwitchOf('9.9.9', null) === null && K.ckptSwitchOf('9.9.9', { verdict: 'SAME' }) === null && K.ckptSwitchOf('9.9.9', { versions: { '9.9.9': { cliVersion: '9.9.8', verdict: 'SAME' } } }) === null);
+  ok('the switch, its pair and the lists are one spelling, frozen', K.CKPT_SWITCH === 'CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING' && JSON.stringify(K.CKPT_VARIANTS) === '["ckpt-off","ckpt-on"]' && [K.CKPT_VARIANTS, K.CKPT_VOLATILE, K.CKPT_SECRET, K.CKPT_BODY_KINDS].every(Object.isFrozen));
+  // RED CONTROLS (anchored copies of src/ckpt-switch.js through mutantCopies: each copy's require is the original's, so its one
+  // import — src/cli-caps.js — is the real one)
+  const KSRC = fs.readFileSync(path.join(REPO, 'src/ckpt-switch.js'), 'utf8'), KM = mutantCopies('cli-caps-ckpt', REPO);
+  const ck = (label, from, to) => KM.load('src/ckpt-switch.js', anchored(KSRC, from, to, `ckptVerdict: ${label}`), label.replace(/\W+/g, '-')).ckptVerdict;
+  const noOnly = ck('no only-with', "          else if (!own(ha, n)) f.push(`${at} header only with the switch: ${n}`);\n", "          else if (!own(ha, n)) { }\n");
+  ok('RED CONTROL: the only-with branch emptied ⇒ a header only with the switch reads SAME', noOnly(OFF, run({ files: 1, h2: { headers: { 'x-new': '1' } } })).verdict === 'SAME');
+  const noCount = ck('calls by name', "const tally = (L) => { const m = new Map(); for (const c of L.map(String)) m.set(c, (m.get(c) || 0) + 1); return m; };", "const tally = (L) => { const m = new Map(); for (const c of L.map(String)) m.set(c, 1); return m; };");
+  ok('RED CONTROL: calls compared by name only ⇒ a call twice instead of once reads SAME', noCount(OFF, run({ files: 1, calls: [...CALLS, 'otel tool_result org=- acct=- email=-'] })).verdict === 'SAME');
+  const byPlace = ck('heads by place', "const kindOf = (h) => `${String((h && h.path) || '')} ${h && h.body && h.body.stream ? 'stream' : 'ns'} ${JSON.stringify((h && h.body && h.body.toolNames) || null)}`;", "const kindOf = () => 'all';");
+  ok('CONTROL: heads matched by their place alone ⇒ the racing side request reads DIFFERENT (why they are matched by kind)', byPlace(run({ heads: [side(), head(1), head(2), head(3)] }), run({ files: 1, heads: [head(1), head(2), side(), head(3)] })).verdict === 'DIFFERENT');
+  const noTurn = ck('no turn check', "  if (off.turnOk !== true || on.turnOk !== true) return", "  if (false) return");
+  ok('CONTROL: without the turn check a turn that did not finish reads DIFFERENT — a STOP the switch did not cause', noTurn(OFF, run({ files: 1, n: 1, turnOk: false })).verdict === 'DIFFERENT');
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed${skip ? `, ${skip} skipped` : ''})` : `ALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);
