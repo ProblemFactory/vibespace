@@ -383,11 +383,12 @@ it, a limit on the user slice does (`show` names which).
   the others are counted («1 of other conversations 3 GB»). The job's event line names none of them. A refused start
   changes nothing on the job: a service you start that does not fit stays as it was (not started at the next restart
   of VibeSpace either). A start answered «it starts once its last run is stopped» and refused LATER is said to you in
-  your conversation («not started after all: …»).
+  your conversation («not started after all: …») while you may view the job.
   - It counts what the running jobs USE — each job's own processes, read every 5 s — never their bounds: idle jobs hold
     almost nothing, so many small jobs still start.
   - A job that names no memory (`--memory` not given) has its START judged at no more than half the budget; it still RUNS
-    under its full bound. Name its memory to be judged on what you name. The budget is a guard at the start, not a ceiling.
+    under its full bound — a memory set to unbounded names no number and is judged the same way. Name its memory (a
+    number) to be judged on what you name. The budget is a guard at the start, not a ceiling.
   - A schedule's fire that does not fit is skipped and said on the schedule (one alarm for a run of skips); its next
     fire is as scheduled — a one-time schedule (`--at`) has none: schedule it again. A service's
     restart that does not fit counts as a failed start on its restart ladder; 6 in a row park it, and the user is told

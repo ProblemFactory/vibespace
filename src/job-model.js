@@ -503,9 +503,13 @@ function budgetVerdict({ limitMb, running = [], askedMb, nowMs, ageMs = BUDGET.a
  *  the budget. The bound it RUNS under does not change — only what its start is judged with (the product's own guess of a job's
  *  need never refuses it alone: a second job that names nothing starts while the first uses little) */
 function budgetAskOf(mem, budgetMb) {
-  const bound = Math.max(0, Math.floor(Number(mem && mem.mb) || 0)), named = !!(mem && mem.source === 'job');
+  // r1033: «NAMED» MEANS A NUMBER — a job whose own memory the person set to «unbounded» (0: the cap turns it into the whole budget)
+  // names no number, and is judged like a job that names none
+  const bound = Math.max(0, Math.floor(Number(mem && mem.mb) || 0));
+  const own = mem && mem.source === 'job' ? Number(mem.askedMb !== undefined ? mem.askedMb : mem.mb) || 0 : null;
+  const named = own !== null && own > 0, unbounded = own === 0;
   const half = budgetMb ? Math.floor(Number(budgetMb) / 2) : null;
-  return !named && half !== null && bound > half ? { mb: half, named, halved: true, boundMb: bound } : { mb: bound, named, halved: false, boundMb: bound };
+  return !named && half !== null && bound > half ? { mb: half, named, halved: true, boundMb: bound, ...(unbounded ? { unbounded: true } : {}) } : { mb: bound, named, halved: false, boundMb: bound };
 }
 const budgetSize = (mb) => { const n = Math.max(0, Math.floor(Number(mb) || 0)); return n < 1024 ? `${n} MB` : `${Math.round((n / 1024) * 10) / 10} GB`; };
 /** THE REFUSAL'S WORDS (English: the CLI prints them; the event line carries them). THE PRIVACY LAW (round wh9e7xe8i, MUST 1): a
@@ -524,7 +528,7 @@ function budgetRefusalWords(v, { id, create = false, named = true } = {}) {
   const ended = named ? 'wait until one of them ends' : `${create ? 'run' : 'start'} it again once a running job has ended`;
   const recipe = [stop, lower].filter(Boolean).join(', or ') + (!named && lower ? `, or ${ended}` : '') || ended;
   const n = v.holders.length, held = [list, rest].filter(Boolean).join('; ');
-  const judged = v.halved ? `this job names no memory, so its start is judged at ${budgetSize(v.askedMb)} — half the budget (it would run under ${budgetSize(v.boundMb)})` : `this job's bound is ${budgetSize(v.askedMb)}`;   // r924: what it was judged with
+  const judged = v.halved ? `this job names no memory${v.unbounded ? ' (its own memory is set to unbounded: no number)' : ''}, so its start is judged at ${budgetSize(v.askedMb)} — half the budget (it would run under ${budgetSize(v.boundMb)})` : `this job's bound is ${budgetSize(v.askedMb)}`;   // r924: what it was judged with
   return `${create ? 'not created' : 'not started'}: the instance's memory budget for jobs is ${budgetSize(v.budgetMb)}, and ${budgetSize(v.usedMb)} of it is in use by ${n} running job${n === 1 ? '' : 's'}${held ? ` (${held})` : ''}; ${judged}. To start it: ${recipe}${create || !named ? '' : ', then start it again'}`;
 }
 /** B-b14a r931: what an AGENT that pressed Start is told when its press — answered «it starts once its last run is stopped» — was

@@ -7,7 +7,7 @@
 // `measureJobUse` seam) over a FAKE limit (the `memoryLimitDir` seam), never real load — but ONE leg of the REAL measure, which
 // spawns two small processes for a second (a stand-in wrapper whose child holds 48 MB). Rounds wh9e7xe8i and r924 / r931 added
 // the privacy legs, the refused press (a second engine over the same data folder), the deferred presses (a person, an agent, the
-// undo's edge), what a start of a job that names no memory is judged with — each with its red copy (eleven copies in all):
+// undo's edge), what a start of a job that names no memory is judged with — each with its red copy (twelve copies in all):
 //   §1 PURE src/job-model.js budgetVerdict / budgetRefusalWords: the table (idle jobs, a full instance, unmeasured, stale, no limit)
 //      and the agent's words (the holders the caller may view named, the others counted) — a RED copy that judges a missing measure
 //   §2 THE ENGINE (the real JobManager, a stand-in wrapper): every start road — a create past the budget creates NOTHING; a start
@@ -89,6 +89,7 @@ for (const [n, c, f] of verdictRows(M)) ok(c, n, f);
   ok(same(A({ mb: 4096, source: 'job' }, 5376), { mb: 4096, named: true, halved: false, boundMb: 4096 }), 'a job that NAMED 4 GB is judged on 4 GB — even past half the budget (2.6 GB)', A({ mb: 4096, source: 'job' }, 5376));
   ok(same(A({ mb: 4096, source: 'default' }, 9216), { mb: 4096, named: false, halved: false, boundMb: 4096 }), 'a bound already within half the budget is judged on itself (nothing halved, nothing said)', A({ mb: 4096, source: 'default' }, 9216));
   ok(A({ mb: 4096, source: 'default' }, null).mb === 4096, 'no budget (no limit): the bound, untouched');
+  ok(same(A(M.memoryMbOf({ memoryMb: 0 }, { instanceMb: 4096 }), 3072), { mb: 1536, named: false, halved: true, boundMb: 3072, unbounded: true }), 'r1033: «NAMED» MEANS A NUMBER — a job whose own memory the person set to «unbounded» (0, capped to the whole budget) is judged at half, like one that names none', A(M.memoryMbOf({ memoryMb: 0 }, { instanceMb: 4096 }), 3072));
   const v = { ...M.budgetVerdict({ nowMs: T0, limitMb: 4096, running: [R('a', 1600)], askedMb: 1536 }), halved: true, boundMb: 3072 };
   const w = M.budgetRefusalWords(v, { id: 'jb-7', named: false });
   ok(w.includes("this job names no memory, so its start is judged at 1.5 GB — half the budget (it would run under 3 GB)") && !w.includes("this job's bound is"), 'the words say what a start was JUDGED with, and the bound it would run under', w);
@@ -229,6 +230,35 @@ const deferredRows = (p, a, e) => [
   ['DEFERRED PRESS (an AGENT, a groupmate by the control grant — r931): the refusal reaches ITS conversation ONCE by the owner notice\'s road, «not started after all», naming no holder and no context of the owner\'s', !!a.ans && a.ans.ok === true && a.desiredUp === false && a.sent.length === 1 && /not started after all: the memory budget for jobs \(9 GB\) had 5\.9 GB in use by 1 running job; this job asks 4 GB/.test(a.sent[0]) && !/hold-agent|Context you attached/.test(a.sent[0])],
   ['THE UNDO\'S EDGE (r931): wanted-up and down, then Start, Stop, Start inside the reap — the refusal restores what the STOP left (not wanted up): the next boot starts nothing', !!e.ans && e.desiredUp === false && e.state === 'down'],
 ];
+// r1033 (THE MUST): A PRESS THAT NEVER BECAME A PENDING START LEAVES NO PRESS RECORD — a groupmate's Start on a service that is UP is
+// answered «already running»; hours later the service (crash-looping since: its live count 3) exits, its automatic restart waits
+// behind the reap and the budget refuses it: nobody is told of a press, and the ladder counts on the LIVE count (3 → 4)
+async function staleScene(JM) {
+  const je = engine(`stale-${++runN}`, { limit: limitDir(MB12G), JM });
+  mk(je, 'hold-stale', '4G');
+  const sv = je.create({ kind: 'service', name: 'svc-stale', cmd: { argv: ['sh', '-c', 'sleep 1'], cwd: TMP }, memoryMb: '1G', owner, access: { view: 'group', control: 'group' } }, caller);
+  const s1 = sv.job ? je.jobs.get(sv.job.id) : null;
+  if (!s1) return { error: sv.error };
+  s1.memoryMb = 4096;
+  const ans = je.start(s1, { caller: OTHER });
+  const stale = !!s1._press;
+  s1.supervise = { consecutiveFails: 3, parkedAt: null };
+  const r = s1.runs[s1.runs.length - 1]; r.endedAt = Date.now(); r._scopeEmpty = true; s1.state = 'down'; s1.desiredUp = true;
+  MEASURE.set('hold-stale', 6000);
+  await je._sampleUse();
+  let release; const gate = new Promise((x) => { release = x; });
+  je._pending = () => true; je._clearBefore = () => gate;
+  const d0 = delivered.length, s0 = said.length;
+  je._startAfter(s1, 'restart-policy', () => s1.desiredUp && s1.state === 'down');
+  release(true); await sleep(30);
+  delete je._pending; delete je._clearBefore;
+  s1.desiredUp = false;   // its ladder's retry timer then finds nothing to start
+  return { ans: ans.error || 'ok', stale, fails: s1.supervise && s1.supervise.consecutiveFails, sent: delivered.slice(d0).filter((x) => x.cid === 'conv-other').length, copies: said.slice(s0).filter((x) => x.jobId === s1.id && x.fact === 'refused-budget').length };
+}
+const staleRows = (r) => [
+  ['STALE (r1033): a Start on a service that is UP is answered «already running» and leaves NO press record', /already running/.test(r.ans) && r.stale === false],
+  ['STALE (r1033): its later automatic restart, deferred behind the reap and refused by the budget, tells NOBODY of a press (no notice to that agent, no For-you line) and the ladder counts on the LIVE count (3 → 4, never put back)', r.sent === 0 && r.copies === 0 && r.fails === 4],
+];
 const measureOk = (r) => r.ready && Number.isFinite(r.mb) && r.mb >= 40 && r.mb < 400;
 
 // r924: A START OF A JOB THAT NAMES NO MEMORY IS JUDGED AT MOST AT HALF THE BUDGET
@@ -256,16 +286,28 @@ async function askScene(JM) {
   await j7._sampleUse();
   const named = mk(j7, 'named-4g', '4G'), unnamed = mkd(j7, 'w-2');
   out.named = { named: named.error || 'ok', unnamed: unnamed.error || 'ok' };
+  // r1033: a job whose OWN memory the person set to «unbounded» (the person alone may) — the 4 GB pod again
+  const ju = engine(`ask-own0-${++runN}`, { limit: limitDir(LIM4G), JM });
+  const own0 = (n) => ju.create({ kind: 'task', name: n, cmd: { argv: ['sh', '-c', 'sleep 1'], cwd: TMP }, memoryMb: 0, owner }, PERSON);
+  mkd(ju, 'o-1'); MEASURE.set('o-1', 100);
+  await ju._sampleUse();
+  const o2 = own0('o-own0');
+  MEASURE.set('o-1', 1600); MEASURE.set('o-own0', 100);
+  await ju._sampleUse();
+  const o3 = own0('o-own0-b');
+  out.own0 = { second: o2.error || 'ok', third: o3.error || 'ok' };
   return out;
 }
-const askRows = (r) => [
+const askRowsBase = (r) => [
   ['ASK: a 4 GB pod (budget 3 GB, under the default bound): the SECOND job that names no memory STARTS beside the first using 100 MB (judged at half: 1.5 GB) — it runs under its full bound (3 GB)', r.default.first === 'ok' && r.default.second === 'ok' && r.default.bound === 3072],
   ['ASK: …and a THIRD is refused once the measured use (1.7 GB) plus half the budget passes it — the words say what it was judged with', /^not created: .*this job names no memory, so its start is judged at 1\.5 GB — half the budget \(it would run under 3 GB\)/.test(r.default.third)],
   ['ASK: the owner\'s «UNBOUNDED» setting the same (its bound capped to the whole budget): the second starts, the third is refused', r.unbounded.first === 'ok' && r.unbounded.second === 'ok' && /^not created: .*judged at 1\.5 GB/.test(r.unbounded.third)],
   ['ASK: a job that NAMED 4 GB is judged on 4 GB (refused beside 2 GB on a 5.25 GB budget); one that names none starts (judged at 2.6 GB)', /^not created: .*this job's bound is 4 GB\./.test(r.named.named) && r.named.unnamed === 'ok'],
   ['ASK: the doors\' fact for such a job: its start is judged at half the budget (askMb 1536, askHalf)', !!r.default.snap && r.default.snap.askHalf === true && r.default.snap.askMb === 1536],
 ];
-const ASK_HALF_ROWS = [0, 2, 3];   // the rows a copy that asks the WHOLE bound turns red (row 3 by its unnamed half)
+const askRows = (r) => [...askRowsBase(r), ...askMore(r)];
+const askMore = (r) => [['ASK (r1033): a job whose OWN memory the person set to «unbounded» names no number — judged at half like one that names none: the second starts, the third is refused and its words say so', r.own0.second === 'ok' && /its own memory is set to unbounded: no number\), so its start is judged at 1\.5 GB — half the budget \(it would run under 3 GB\)/.test(r.own0.third)]];
+const ASK_HALF_ROWS = [0, 2, 3, 5];   // the rows a copy that asks the WHOLE bound turns red (row 3 by its unnamed half)
 
 // ── the real engine ──
 {
@@ -363,6 +405,10 @@ const DEF_ROWS = deferredRows({}, {}, {}).map(([n]) => n);
   const r = [await deferredScene(JobManager, 'person'), await deferredScene(JobManager, 'agent'), await deferredScene(JobManager, 'edge')];
   for (const [n, c] of deferredRows(...r)) ok(c, n, r);
 }
+{
+  const r = await staleScene(JobManager);
+  for (const [n, c] of staleRows(r)) ok(c, n, r);
+}
 // THE REAL MEASURE (round wh9e7xe8i: the seam replaced it everywhere)
 {
   const r = await measureScene(JobManager);
@@ -421,6 +467,12 @@ const SPAWN_VERDICT = '{ const bv = this._budgetVerdict(job, M.memoryMbOf(job, t
   const r = [await deferredScene(JX.JobManager, 'person'), await deferredScene(JX.JobManager, 'agent'), await deferredScene(JX.JobManager, 'edge')];
   const red = deferredRows(...r).filter(([, c]) => !c).map(([n]) => n);
   ok(same(red, DEF_ROWS.slice(0, 2)), 'CONTROL (a deferred press refused later told to nobody, in a copy): the person\'s and the agent\'s rows go red — the edge row stays green', red);
+}
+{
+  const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), '    job.desiredUp = true;\n    job.supervise = { consecutiveFails: 0, parkedAt: null };\n    // lane jobs-memory-bound: the owner acted', '    joinPress();   /* MUTANT: the record made before the returns (75f566aad) */\n    job.desiredUp = true;\n    job.supervise = { consecutiveFails: 0, parkedAt: null };\n    // lane jobs-memory-bound: the owner acted', 'where the press record is made'), 'record-before-returns');
+  const r = await staleScene(JX.JobManager);
+  const red = staleRows(r).filter(([, c]) => !c).length;
+  ok(red === 2 && r.stale === true && r.sent === 1 && r.fails !== 4, 'CONTROL (the press record made before the returns, in a copy — 75f566aad): «already running» leaves a record; the later refusal undoes it (the count put back) and wakes that agent with «not started after all»', r);
 }
 {
   const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), '    delete job._press;   // B-b14a r931: a Stop ends the presses waiting on a start', '    /* MUTANT: a Stop keeps the first press\'s snapshot */   // B-b14a r931: a Stop ends the presses waiting on a start', 'the Stop\'s end of the press record'), 'stop-keeps-press');

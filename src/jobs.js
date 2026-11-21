@@ -3618,7 +3618,7 @@ class JobManager {
     const ask = M.budgetAskOf(mem, M.budgetMbOf(lim && lim.mb));   // r924: a job that named no memory is judged at most at HALF the budget
     const running = [...this.jobs.values()].filter((j) => j !== job && j.id !== job.id && this._holdsBudget(j)).map((j) => ({ id: j.id, name: this.labelOf(j), use: j._use || null, own: caller ? M.canView(j, caller) : false }));
     const v = M.budgetVerdict({ limitMb: lim && lim.mb, running, askedMb: ask.mb, nowMs: now() });
-    if (v.judged) Object.assign(v, { halved: ask.halved, boundMb: ask.boundMb });   // the words say what it was judged with
+    if (v.judged) Object.assign(v, { halved: ask.halved, boundMb: ask.boundMb, ...(ask.unbounded ? { unbounded: true } : {}) });   // the words say what it was judged with
     if (v.holders) { const own = new Map(running.map((r) => [r.id, r.own])); v.holders = v.holders.map((h) => ({ ...h, own: !!own.get(h.id) })); }
     return v;
   }
@@ -4625,10 +4625,11 @@ class JobManager {
     // so a refusal UNDOES them (a service left wanted-up would start unjudged at the next boot's replay, beside the set it did not fit).
     // r931: ONE press record a pending start — the state before the FIRST press since the last Stop (a press that JOINS a start in
     // flight never retakes it: its own snapshot would hold an earlier press's write) and every presser, each told once
-    if (job.kind !== 'cron') {
-      const pr = job._press || (job._press = { was: { desiredUp: job.desiredUp, supervise: job.supervise }, by: [] });
-      if (caller && !pr.by.some((c) => c === caller || (c.isUser && caller.isUser) || (c.conversationId && c.conversationId === caller.conversationId))) pr.by.push(caller);
-    }
+    // r1033 (THE MUST): the record is made or joined only where the start GOES AHEAD — never before a return that answers
+    // «already running», a vet's refusal or «stop it first» (a stale record would be undone, and its presser woken, by a later
+    // automatic start's refusal); the snapshot is this press's state BEFORE its writes
+    const before = { desiredUp: job.desiredUp, supervise: job.supervise };
+    const joinPress = () => { const pr = job._press || (job._press = { was: before, by: [] }); if (caller && !pr.by.some((c) => c === caller || (c.isUser && caller.isUser) || (c.conversationId && c.conversationId === caller.conversationId))) pr.by.push(caller); };
     job.desiredUp = true;
     job.supervise = { consecutiveFails: 0, parkedAt: null };
     // lane jobs-memory-bound: the owner acted — a cron parked for its child's out-of-memory ends counts its child afresh
@@ -4651,6 +4652,7 @@ class JobManager {
       if (this._besideLive(job, 'manual')) return { error: `${job.id}'s last run is still running — stop it first` }; // round 7
       const last = job.runs && job.runs[job.runs.length - 1]; // round 8: its doubt checked first, never beside it
       // a press DEFERRED behind its last run's reap and refused later: undone, and every presser told (_startAfter's settle)
+      joinPress();
       try { this._startAfter(job, 'manual', () => job.desiredUp && !['up', 'starting'].includes(job.state), { caller }); } catch (e) { if (e && e.code === 'memory-budget') this._undoRefusedPress(job); else delete job._press; return { error: e.message, ...(e && e.code ? { code: e.code } : {}), ...(e && e.budget ? { budget: e.budget } : {}) }; }   // B-b14a
       if (!job._starting) delete job._press;   // nothing pending: the press is settled (started, or refused above)
       this._save();
@@ -4668,6 +4670,7 @@ class JobManager {
       if (vw) return { ok: true, state: 'waiting', waitFor: vw.waitFor, after: `${after} — and its vault values would wait now: ${vw.words}` };
       return { ok: true, after };
     }
+    joinPress();
     try { this._spawn(job, 'manual', { caller }); } catch (e) { if (e && e.code === 'memory-budget') this._undoRefusedPress(job); else delete job._press; return { error: e.message, ...(e && e.code ? { code: e.code } : {}), ...(e && e.budget ? { budget: e.budget } : {}) }; } // B-f8c7: the run-time vet's refusal is an answer · B-b14a: the budget's too
     delete job._press;
     this._save();
