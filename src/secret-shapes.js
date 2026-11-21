@@ -625,7 +625,13 @@ function holderVerdict(k) {
 // quantifier — r2's `[closers]+$` over a 64 KiB value backtracked: 1.9 s at 60 000 dots, verify r4 F1's shape); a HOLDER's value is
 // read by a code scan to the next `& # ; ' " < >` or blank and masked, a PUBLIC name's value is walked ON (the scan resumes right after
 // its `=`), so a holder nested in it (`?password_reset_url=https://app/reset?token=…`) is masked and the public name stays (r3 C)
-const QUERY_HEAD_RE = /([?&;#])([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)(?=[^&#;\s"'<>])/g;
+// r1554 / r1658 (主开发, a find of paced-wake-retry's generator — beside line 246's stretch law, R9 before R7): on a FREE TEXT a
+// query VALUE ends where the stretch ends — a blank, `& # ;`, a quote, `< >`, a backtick, and EVERY character outside ASCII (every
+// MESSAGE_STOPS member is one): a value glued to unspaced Chinese prose is the value alone, never the prose after it, a mail
+// address in it or a second URL. A URL carries its own non-ASCII percent-encoded (ASCII), so an encoded value is read whole as
+// before; a value a person QUOTES in guillemets (`?password=«Summer1!»`, the name rule's head) is read from its « to its »; a
+// head whose value starts with any other character outside ASCII is no head (no empty mark before the prose)
+const QUERY_HEAD_RE = /([?&;#])([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)(?=«|[^&#;\s"'<>`\u0080-\uffff])/g;
 const isBlankCode = (c) => (c >= 9 && c <= 13) || c === 32 || c === 0xA0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200A) || c === 0x2028 || c === 0x2029 || c === 0x202F || c === 0x205F || c === 0x3000 || c === 0xFEFF;   // `\s`'s set
 // r3 (G): what the PROSE opened before the head (in its blank-free run) — a closer that ends a holder's value goes outside the mask
 // ONLY when it closes one of these (the `)` of `[label](` / `(`, the `」` of `「`), or as ONE sentence-final `.` / `,` before a blank or
@@ -656,10 +662,12 @@ function queryTail(text, vs, ve, opens) {
   for (; j > i; j--) { const c = CLOSE_AT.get(text.charCodeAt(j)); if (c === undefined || opens[c] <= 0) break; opens[c]--; k++; }   // the prose's own wrapper
   return k;
 }
-const QUERY_VALUE_RE = /[^&#;\s"'<>]{1,65536}/y;   // ONE class run, nothing after it: native and linear (no backtracking)
+// …and as the stretch reads it, the belts' own mark «redacted» is read WHOLE inside a value (R9 runs first: a nested address whose
+// pass-phrase R9 already masked stays ONE value for hidesHolder to judge, masked whole as r5 has it); any other « or » ends it
+const QUERY_VALUE_RE = /«[^&#;\s"'<>`«»\u0080-\uffff]{1,65536}»?|(?:[^&#;\s"'<>`\u0080-\uffff]|«redacted»){1,65536}/y;   // one class run (the mark one unit; or one value quoted in « »), nothing after it: each unit's first character decides its branch — linear, no backtracking; r1554: ASCII and the mark
 /** r4: does a PUBLIC value hide a holder — a nested `?name=` / `&name=` whose name HOLDS, or a userinfo — once percent-decoded?
  *  r5: a userinfo WITH A PASSWORD, anywhere in the decoded value; a nested holder head anywhere in it (the whole value read). */
-const NESTED_HEAD_RE = /[?&;#]([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)(?=[^&#;\s"'<>])/g;
+const NESTED_HEAD_RE = /[?&;#]([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)(?=«|[^&#;\s"'<>`\u0080-\uffff])/g;   // r1554: as QUERY_HEAD_RE
 const ENC_HEAD_RE = /%(?:3F|26|3B|23)/i;   // an encoded `? & ; #` — the only escapes that can open a nested head once decoded
 const AT_RE = /@|%40/i;                    // r5: a userinfo needs an `@`, raw or encoded — no `@`, no userinfo (and no decode for it)
 function hidesHolder(value) {

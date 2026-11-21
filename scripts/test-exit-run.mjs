@@ -49,7 +49,7 @@ import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { judgeInChild } from './work-meter.mjs';
-import { scratch, stampScratchRun } from './scratch.mjs';
+import { scratch, stampScratchRun, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const XS = require(path.join(REPO, 'src/exit-shell.js'));
@@ -321,6 +321,19 @@ await section('§2b PURE secret-shapes: what a stored head never keeps (verify r
   // 137 ms at 16 384 dots + `x`, 1.9 s at 60 000), one ending in them, and a
   // storm of PUBLIC names (each value walked on) — linear by the count like every R7 shape
   for (const [k, mk] of Object.entries({ queryStorm: (n) => ['?to', 'ken='].join('').repeat(n / 7), queryName: (n) => '?' + 'a'.repeat(n), runStorm: (n) => ('aB1' + 'x'.repeat(27) + ' ').repeat(n / 31), runWhole: (n) => 'aB1/'.repeat(n / 4), closerDots: (n) => ['?to', 'ken='].join('') + '.'.repeat(n - 8) + 'x', closerParenDot: (n) => ['?to', 'ken='].join('') + ').'.repeat((n - 8) / 2) + 'x', closerDotsEnd: (n) => ['?to', 'ken='].join('') + '.'.repeat(n - 7), publicStorm: (n) => '?type='.repeat(n / 6), addrPctStorm: (n) => 'x?' + '&token_url=%'.repeat(n / 12), publicPctStorm: (n) => '?next=%41'.repeat(n / 9), publicEncHeadStorm: (n) => '?next=%3Fa%3D'.repeat(n / 13), publicUserinfoStorm: (n) => '?next=' + 'a://b:c'.repeat((n - 7) / 7) + '@', publicAtStorm: (n) => '?a=b@'.repeat(n / 5) })) { const v = stepsOf(mk, 16384, 4, { runs: true }); r7Steps[k] = v; ok(v.ok, `R7 / R8 linear on ${k} by the count: ${stepsLine(v)} at ×4 input`, v); }
+  // r2064 / r2106 (the block's hosted run 44980743210 on 61a1c21f5: «R7 / R8 linear on publicUserinfoStorm … ×4.51»): line 246's order
+  // runs R9 before R7, and R9's mark («redacted», nine characters longer than the `c` it hides) pushed the storm's query value at the
+  // leg's ×4 size (65 528 → 65 537 characters) past R7's value class bound {1,65536}: the value was read CUT, its at-sign outside, so it
+  // was not hidden whole (r5) and the rows after it read the whole storm (2 140 105 → 9 657 872 steps). R7's value class (r1554 / r1658)
+  // reads the mark as ONE unit: the value stays whole, the table above reads ×4.000 (2 140 109 → 8 560 407). RED: the tip's value
+  // class planted back over today's order (an anchored copy), the same storm, the same call
+  {
+    const ssSrc = fs.readFileSync(SS_FILE, 'utf8');
+    const NOW = ssSrc.split('\n').find((l) => l.startsWith('const QUERY_VALUE_RE = ')).split('   //')[0];
+    const tipFile = mutantCopies('r2064-tip-value', REPO).write('src/secret-shapes.js', anchored(ssSrc, NOW, "const QUERY_VALUE_RE = /[^&#;\\s\"'<>]{1,65536}/y;", 'r2064: the tip value class'), 'the tip value class');   // stale-pins: kept (the red control plants the tip's value class back)
+    const v = stepsOf((n) => '?next=' + 'a://b:c'.repeat((n - 7) / 7) + '@', 16384, 4, { runs: true, module: tipFile });
+    ok(!v.err && !v.ok && r7Steps.publicUserinfoStorm && r7Steps.publicUserinfoStorm.ok, `RED CONTROL (r2064): the tip's value class over line 246's order reads publicUserinfoStorm past its bound again — ${stepsLine(v)} (this tree: ${stepsLine(r7Steps.publicUserinfoStorm)})`, v);
+  }
   // r3 (A): a ratio alone reads a uniformly huge cost as linear (r2: 270 M → 1 035 M steps, ×3.83) — closers before the value's last
   // character cost what the same closers at its end cost, by the count (≤ ×2 at the same length)
   ok(r7Steps.closerDots && r7Steps.closerDotsEnd && r7Steps.closerDots.w1 <= 2 * r7Steps.closerDotsEnd.w1 && r7Steps.closerParenDot.w1 <= 2 * r7Steps.closerDotsEnd.w1, `r3 (A): closers then a letter cost what closers at the end cost — ${r7Steps.closerDots && r7Steps.closerDots.w1} / ${r7Steps.closerParenDot && r7Steps.closerParenDot.w1} vs ${r7Steps.closerDotsEnd && r7Steps.closerDotsEnd.w1} steps at 16 KiB (≤ ×2)`);

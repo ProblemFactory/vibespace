@@ -1018,7 +1018,7 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   // over-mask (r1510) are drawn on purpose, each with what it hides BY CONSTRUCTION, and counted: (A) a host and port glued to a later
   // at-sign with no blank (the port and the glued word hidden; the mention after stays whole); (B) an image reference's tag; (C) a raw
   // at-sign's widening (a pass-phrase URL glued to a later at-sign: the host and the glued word hidden with it)
-  const genDraws = (S, { seed = 0x5eed1504, draws = 2400 } = {}) => {
+  const genDraws = (S, { seed = 0x5eed1504, draws = 2400, onDraw = null } = {}) => {   // onDraw(text, its secrets hidden by construction): a second judge of the same draws (r2106)
     let st = seed >>> 0;
     const rnd = () => { st = (st + 0x6D2B79F5) >>> 0; let t = st; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
     const pick = (a) => a[Math.floor(rnd() * a.length)];
@@ -1040,8 +1040,8 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
     for (let k = 0; k < draws; k++) {
       cover.draws++;
       let t = '', want = '', qAt = -1, laterAt = false;
-      const passes = [];
-      const put = (x) => { if (qAt >= 0 && x.includes('@')) laterAt = true; t += x; want += x; }, hide = (x) => { if (qAt >= 0 && x.includes('@')) laterAt = true; t += x; want += REDACTED; };
+      const passes = [], secrets = [];
+      const put = (x) => { if (qAt >= 0 && x.includes('@')) laterAt = true; t += x; want += x; }, hide = (x) => { secrets.push(x); if (qAt >= 0 && x.includes('@')) laterAt = true; t += x; want += REDACTED; };
       const r = rnd();
       if (r < 0.06) {   // (A) a host and port glued to a later at-sign, no blank — the port and the glued word hidden by construction
         classes.A++;
@@ -1079,6 +1079,7 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
       // (D, the coordinator's r1553): a query value glued to unspaced Chinese prose with a later at-sign in the same run is
       // R7's to read (the release's r5: its value runs to the next & # ; or blank and hides it whole when the prose holds a userinfo). Its
       // check is weaker: no byte of any pass-phrase in the output, and nothing before that query value differs
+      if (onDraw) onDraw(t, secrets);
       const classD = qAt >= 0 && laterAt;
       let fired = false;
       for (const [road, f] of [['head', (x) => S.redactSecrets(x).text], ['message', (x) => S.redactSecrets(x, { message: true }).text], ['name', (x) => S.redactByValue(x).text]]) {
@@ -1147,11 +1148,74 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   const leakBad = LEAKS.filter(([, t, frags]) => { const pre = t.slice(0, t.indexOf('?')).split(frags[0]).join(REDACTED);
     return [SS.redactSecrets(t).text, SS.redactSecrets(t, { message: true }).text, SS.redactByValue(t).text, SS.redactByValue(t, { typed: true }).text, belt.maskForSink(t, { message: true })].some((o) => frags.some((f) => o.includes(f)) || !o.startsWith(pre)); });
   ok(!leakBad.length, `R9 BEFORE R7 — the generator's leak, named: an address with a query glued to unspaced Chinese prose that later holds a URL with a userinfo — on five roads no byte of either pass-phrase is out, and nothing before the query value differs${leakBad.length ? ' — wrong: ' + leakBad.map(([w]) => w).join(' · ') : ''}`);
-  const R7FIRST = mutantCopies('da2d-r7first', REPO).load('src/secret-shapes.js', anchored(SRC, R9S + Q7, Q7 + R9S, 'R7 before R9 (the order of the tip before)'), 'r7first');
+  // r1554 / r1658 (lane mask-value-shape): R7's value now ends where the stretch ends (a character outside ASCII ends it), so the ORDER
+  // alone no longer leaks this text: the control plants the order of 4e85efb11 WITH the release's value class (the two together were
+  // the leak); the order alone under today's value class is checked to leak nothing (a second fence, not a red)
+  const VAL_NOW = SRC.split('\n').find((l) => l.startsWith('const QUERY_VALUE_RE = ')).split('   //')[0];
+  const R7ORDER = anchored(SRC, R9S + Q7, Q7 + R9S, 'R7 before R9 (the order of the tip before)');
+  // r2106 (主开发: the R7 follow takes test-exit-run's hosted red): NOTHING THIS FOLLOW LETS THROUGH THAT LINE 246 HIDES. The
+  // generator's draws through line 246's masker (this tree with R7's three expressions as the train's tip had them: an anchored copy)
+  // and through this tree's, on three roads: every secret the generator hides by construction that line 246 does not show, this tree
+  // does not show either (the follow shows MORE prose after a query value, never a secret). RED: this tree without R9's two calls
+  // (line 246's own rule gone) shows the pass-phrases line 246 hides
+  {
+    const lineOf = (src, k) => src.split('\n').find((l) => l.startsWith(k)).split('   //')[0];
+    const TIP3 = [['const QUERY_HEAD_RE = ', "const QUERY_HEAD_RE = /([?&;#])([A-Za-z0-9_.\\-\\[\\]%]{1,80})=(?!«)(?=[^&#;\\s\"'<>])/g;"],   // stale-pins: kept (line 246's masker: the tip's expressions, planted to compare)
+      ['const QUERY_VALUE_RE = ', "const QUERY_VALUE_RE = /[^&#;\\s\"'<>]{1,65536}/y;"],   // stale-pins: kept (line 246's masker: the tip's expressions, planted to compare)
+      ['const NESTED_HEAD_RE = ', "const NESTED_HEAD_RE = /[?&;#]([A-Za-z0-9_.\\-\\[\\]%]{1,80})=(?!«)(?=[^&#;\\s\"'<>])/g;"]];   // stale-pins: kept (line 246's masker: the tip's expressions, planted to compare)
+    let s246 = SRC; for (const [k, v] of TIP3) s246 = anchored(s246, lineOf(s246, k), v, 'line 246 ' + k.trim());
+    const L246 = mutantCopies('r2106-line246', REPO).load('src/secret-shapes.js', s246, 'line246');
+    const R9_CALLS = SRC.split('\n').filter((l) => l.trim().startsWith('text = redactUserinfo(text,'));
+    let noR9 = SRC; for (const l of R9_CALLS) noR9 = anchored(noR9, l + '\n', '', 'no R9 ' + l.trim().slice(0, 40));
+    const NO_R9 = mutantCopies('r2106-no-r9', REPO).load('src/secret-shapes.js', noR9, 'no-r9');
+    const ROADS = [(S, t) => S.redactSecrets(t).text, (S, t) => S.redactSecrets(t, { message: true }).text, (S, t) => S.redactByValue(t).text];
+    const judge = (M) => { let draws = 0, secrets = 0; const shown = []; genDraws(SS, { onDraw: (t, sec) => { draws++; secrets += sec.length; for (const f of ROADS) { const a = f(L246, t), b = f(M, t); for (const x of sec) if (!a.includes(x) && b.includes(x)) shown.push({ t, x }); } } }); return { draws, secrets, shown }; };
+    const nl = judge(SS), nlr = judge(NO_R9);
+    ok(R9_CALLS.length === 2 && nl.draws >= 2000 && nl.secrets > 500 && nl.shown.length === 0 && nlr.shown.length > 10,
+      `NOTHING THE R7 FOLLOW LETS THROUGH THAT LINE 246 HIDES: ${nl.draws} draws, ${nl.secrets} secrets hidden by construction × 3 roads — ${nl.shown.length} shown here that line 246 hides${nl.shown.length ? ' — ' + nl.shown.slice(0, 3).map((x) => J(x.x)).join(' · ') : ''}; RED (no R9: line 246's rule gone): ${nlr.shown.length} shown`);
+  }
+  const R7FIRST = mutantCopies('da2d-r7first', REPO).load('src/secret-shapes.js', anchored(R7ORDER, VAL_NOW, "const QUERY_VALUE_RE = /[^&#;\\s\"'<>]{1,65536}/y;", 'the release value class beside the old order'), 'r7first');   // stale-pins: kept (the red control plants the release's value class back)
+  const ORDER_ONLY = mutantCopies('da2d-order-only', REPO).load('src/secret-shapes.js', R7ORDER, 'order-only');
+  ok(!ORDER_ONLY.redactSecrets(LEAKS[0][1]).text.includes('U).8-3'), 'R7 before R9 under R7\'s value-end law (r1554): the later pass-phrase stays hidden whole (the value ends at the prose, R9 then reads the address)');
   const tailOut = R7FIRST.redactSecrets(LEAKS[0][1]).text;
   ok(tailOut.includes('U).8-3') && !SS.redactSecrets(LEAKS[0][1]).text.includes('U).8-3'), 'RED CONTROL — R7 BEFORE R9 (the order of 4e85efb11 and before): the later pass-phrase\'s tail after the «;» is left in plain (' + J(tailOut.slice(tailOut.indexOf('?'))) + ')');
   const NOMARK = mutantCopies('da2d-nomark', REPO).load('src/secret-shapes.js', anchored(SRC, "      if (c === 0xAB && d.startsWith(REDACTED, j)) { j += REDACTED.length - 1; continue; }   // the belts' own mark, read WHOLE\n", '', 'the mark not read whole'), 'nomark');
   ok(NOMARK.redactSecrets(MUSER).text.includes(pw), 'RED CONTROL — THE MARK ENDS THE WALK (« outside the alphabet): a user masked before lets its password through (' + J(NOMARK.redactSecrets(MUSER).text.replace(pw, '<the password>')) + ')');
+}
+
+console.log('r1554 / r1658 (a find of paced-wake-retry\'s generator; beside line 246\'s stretch law): a query value on a FREE TEXT ends where the stretch ends — a blank, a quote, < >, a backtick, any character outside ASCII');
+{
+  const SS = r('src/secret-shapes.js'), J = JSON.stringify;
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const SRC = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
+  const T = crypto.randomBytes(9).toString('hex'), PW = crypto.randomBytes(6).toString('hex');
+  // the find's shapes: a holder's value glued to unspaced Chinese prose that later holds a mail address, a userinfo (and an EMPTY
+  // user before an at-sign) and a second URL; a public value glued the same way with a password userinfo after it
+  const CASES = [
+    { t: `看这里https://a.example/cb?token=${T}后面是说明，请发到ops@example.com或打开https://b.example/x?q=1再试`, gone: [T], kept: ['后面是说明', 'ops@example.com', 'https://b.example/x?q=1', '再试'] },
+    { t: `回调地址https://a.example/cb?access_token=${T}然后用ftp://deploy:${PW}@files.example/拉取`, gone: [T], kept: ['然后用ftp://', 'files.example/拉取'] },
+    { t: `链接?sig=${T}，空用户:${PW}@host.example 之后`, gone: [T], kept: ['，空用户', 'host.example 之后'] },
+    { t: `搜索https://s.example/?q=hello世界https://u:${PW}@h.example/`, gone: [], kept: ['?q=hello世界'] },
+    { t: '见`https://a.example/?token=' + T + '`说明在后', gone: [T], kept: ['`说明在后'] },   // a markdown code span: the value ends at its backtick
+  ];
+  const judge = (SSx, o) => CASES.map((c) => { const out = SSx.redactSecrets(c.t, o).text; return { out, ok: c.gone.every((g) => !out.includes(g)) && c.kept.every((k) => out.includes(k)) }; });
+  for (const [mode, o] of [['line', {}], ['message', { message: true }]]) {
+    const rows = judge(SS, o), bad = rows.filter((x) => !x.ok);
+    ok(bad.length === 0, `${mode.toUpperCase()} MODE: a query value glued to unspaced prose is the value ALONE — the prose, a mail address, a userinfo's words and a second URL after it stay (${rows.length} cases)${bad.length ? ' — wrong: ' + bad.map((x) => J(x.out)).join(' · ') : ''}`);
+  }
+  console.log(`  · judged: ${J(judge(SS, {}).map((x) => x.out.slice(0, 90)))}`);
+  // unchanged where no free text runs on: an ASCII URL's holder value whole, its neighbour kept; a percent-encoded UTF-8 value read whole
+  const ENC = `https://a.example/?token=${T}%E5%AF%86%E7%A0%81&lang=zh`;
+  ok(SS.redactSecrets(`https://a.example/?token=${T}&x=1`).text === `https://a.example/?token=${REDACTED}&x=1` && SS.redactSecrets(ENC).text === `https://a.example/?token=${REDACTED}&lang=zh`,
+    'an ASCII URL is read as before: its holder value masked whole (a percent-encoded non-ASCII value too), its neighbour kept');
+  // a head whose value starts outside ASCII is no head (no empty mark is ever written before the prose)
+  ok(SS.redactSecrets('设置 ?token=密码在这里').text === '设置 ?token=密码在这里', 'a head whose value starts outside ASCII is no head: no empty mark before the prose');
+  ok(SS.redactSecrets(SS.redactSecrets(CASES[0].t).text).text === SS.redactSecrets(CASES[0].t).text, 'idempotent');
+  // RED CONTROL: the release's value class (up to the next & # ; ' " < > or blank) — the prose, the mail and the second URL masked
+  const VAL = "const QUERY_VALUE_RE = /«[^&#;\\s\"'<>`«»\\u0080-\\uffff]{1,65536}»?|(?:[^&#;\\s\"'<>`\\u0080-\\uffff]|«redacted»){1,65536}/y;";
+  const rel = mutantCopies('r1554-r7', REPO).load('src/secret-shapes.js', anchored(SRC, VAL, "const QUERY_VALUE_RE = /[^&#;\\s\"'<>]{1,65536}/y;", 'r1554-release-value'), 'release-value');   // stale-pins: kept (the red control plants the release's value class back)
+  const redRows = judge(rel, {});
+  ok(redRows.filter((x) => !x.ok).length >= 4, `RED CONTROL (the release's value class): ${redRows.filter((x) => !x.ok).length} of ${CASES.length} cases mask the prose after the value — ${J(redRows[0].out.slice(0, 90))}`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
