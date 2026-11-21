@@ -422,6 +422,7 @@ function joinRefusal(r, from) {
   let named = null; try { named = r.body ? JSON.parse(r.body).code : null; } catch { named = null; }
   if (r.status === 409 && named === 'code-used') return { code: 'code-used', error: `${from} says this code was already used — nothing was written; ask for a new code` };
   if (r.status === 401) return { code: 'code-unknown', error: `${from} does not know this code (expired there, replaced by a newer code, or altered) — nothing was written; ask for a new code` };
+  if (r.status === 503 && named === 'store-blocked') return { code: 'peer-paused', error: `${from}'s channels are paused (a file of theirs could not be read) — nothing was written and the code is not spent: try the same code again once it reads` };   // B-f276 1c follow (r1588 (6))
   if (r.status === 429) return { code: 'rate-limited', error: `${from} is refusing calls from this address for now — try again in a few minutes` };
   if (r.status === 403 && named === 'pair-wake-held') return { code: 'pair-wake-held', error: `${from}'s path now holds a wake — a code not minted on its owner's page is refused there; nothing was written — ask its owner for a new code from their page` };   // r6
   return { code: 'pair-refused', error: `the other side refused the pairing (${r.status ? `HTTP ${r.status}` : r.error || r.code || 'unreachable'}) — nothing was written; ask for a new code` };

@@ -1670,7 +1670,7 @@ export function renderChannelsPanel(app, c) {
         const held = q.done && q.to ? t("{file} was started empty — its damaged bytes are kept as {where}", { file: q.file, where: q.to })
           : q.loadedAt ? t('{file} read again and is loaded', { file: q.file })
           : q.kind === 'damaged' ? t("{file} could not be read as itself (damaged) — it is held: nothing set aside or written over; start it empty from For you, or put a good copy back", { file: q.file })
-          : q.kind === 'appeared' ? t("{file} appeared since the start — it is kept as it is and loaded at the next start of VibeSpace", { file: q.file })
+          : q.kind === 'appeared' ? t("{file} appeared since the start (or its storage does not keep file numbers stable) — it is kept as it is and loaded at the next start of VibeSpace", { file: q.file })
           : q.file === 'index.json' && !q.readsAt ? t('Channels paused: {file} could not be read — nothing is fetched or sent until it reads again; once it reads, restart VibeSpace to load it', { file: q.file })
           : q.lifts === 'next-start'
             ? (q.readsAt ? t('{file} reads again — restart VibeSpace to load it', { file: q.file }) : t('{file} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace', { file: q.file }))

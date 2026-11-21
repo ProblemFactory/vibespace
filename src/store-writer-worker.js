@@ -62,8 +62,14 @@ function dropTemp(fs, tmp) {
 // B-f276 1b (its read r1 S3): an EEXIST whose file IS the temp (an NFS retransmit of our own link, its first answer lost) is our link landed
 const sameFile = (fs, a, b) => { try { const [x, y] = [a, b].map((p) => fs.statSync(p, { bigint: true })); return x.ino === y.ino && x.dev === y.dev; } catch { return false; } };   // bigint: an NTFS id passes 2^53
 // B-f276 1c (主开发 r1143 (1)): file → the own numbers {dev, ino} of the file THIS road made for a store that may write only over its own
-// file (`m.ownOnly`: its store read the file missing and has not read it since). A later whole write renames only over that file; a later
-// append opens only that file. The job carries the store's last known numbers too (`m.own`: a thread that started again)
+// file (`m.ownOnly`: its store read the file missing and has not read it since). A later whole write CHECKS, just before its rename, that
+// the file there is that one; a later append opens only that file, never creating it. The job carries the store's last known numbers
+// (`m.own`), asked FIRST, then this thread's map: a file EITHER names is the store's own (its round whfrsuwsp, 主开发 r1588 (3)). The
+// store's cell comes from every road (the thread's replies and the main thread's own writes), so a thread that started again — or the
+// main thread writing while it could not — never refuses the store's own file over the map of an older life; the thread's map is the
+// fresher one for a job sent before the last reply came back (its own write just landed here). TWO NARROW LIMITS (kb): a file that takes the name between the check and the rename is renamed
+// over (no rename primitive closes that window; a mount over the whole folder takes the temp with it: ENOENT), and a file removed and
+// copied back under a running hub can be given the freed inode number again (ext4), so it reads as the store's own
 const OWN = new Map();
 const idOf = (fs, p) => { try { const s = fs.statSync(p, { bigint: true }); return { dev: s.dev, ino: s.ino }; } catch (e) { if (e && e.code === 'ENOENT') return null; throw e; } };
 const notOwn = (file) => Object.assign(new Error(`${file} is not the file its store made (a mount that came late?) — not written over`), { code: 'EEXIST' });
@@ -146,19 +152,22 @@ function writeJob(m, fs = FS) {
   if (m.append) {
     sweepTemps(fs, m.file, m.tmp);   // row B-360d: a rewrite killed mid-copy left its temp beside an APPEND store — the first append of the file in this process removes another process's, and (主开发 r1939 (2)) this road's OWN temp left by an earlier life of the thread: the sweep runs once a file, so an append first must not leave it for the whole write's
     // B-f276 1c (r1143 (1)): an own-only store's FIRST append is an exclusive create; every later one is checked by the open file's numbers
-    const fl = m.ownOnly && !OWN.get(m.file) && !m.own ? 'ax' : 'a';
+    // …and a LATER own-only open never creates the file (its round whfrsuwsp's follow, judged): a journal gone since is not this store's to
+    // make again — refused as not its own (its store holds the family), never an empty file made in a folder that may be a mount's
+    const fl = m.ownOnly ? (!OWN.get(m.file) && !m.own ? 'ax' : FS.constants.O_WRONLY | FS.constants.O_APPEND) : 'a';
     // the ONE open of an append (made again after a ring's rotation); a missing parent directory is made here, on the writer's
     // thread, ONLY for a store that asks (`m.makeDir` — B-48a4: the hub's audit rings, whose old main-thread code made it per line)
     const openA = () => {
       try { return fs.openSync(m.file, fl, m.mode == null ? 0o666 : m.mode); }
       catch (e) { if (!e || e.code !== 'ENOENT' || !m.makeDir) throw e; fs.mkdirSync(path.dirname(m.file), { recursive: true, mode: 0o700 }); return fs.openSync(m.file, fl, m.mode == null ? 0o666 : m.mode); }
     };
-    let fd = openA();
+    let fd;
+    try { fd = openA(); } catch (e) { if (m.ownOnly && typeof fl === 'number' && e && e.code === 'ENOENT') throw Object.assign(notOwn(m.file), { gone: true }); throw e; }
     if (m.ownOnly) {
       let st;
       try { st = fs.fstatSync(fd, { bigint: true }); } catch (e) { try { fs.closeSync(fd); } catch (ce) { e.closeError = ce.code || String(ce); } throw e; }   // B-f276 1c (its read r1 S1): no fd left open
-      const mine = OWN.get(m.file) || m.own || null;
-      if (mine && !(st.ino === mine.ino && st.dev === mine.dev)) { let ce = null; try { fs.closeSync(fd); } catch (e) { ce = e; } throw Object.assign(notOwn(m.file), ce ? { closeError: ce.code || String(ce) } : {}); }   // the close's error rides the refusal
+      const mine = [m.own, OWN.get(m.file)].filter(Boolean);   // the store's own cell, then the thread's map (r1588 (3)): a file either names is its own
+      if (mine.length && !mine.some((x) => st.ino === x.ino && st.dev === x.dev)) { let ce = null; try { fs.closeSync(fd); } catch (e) { ce = e; } throw Object.assign(notOwn(m.file), ce ? { closeError: ce.code || String(ce) } : {}); }   // the close's error rides the refusal
       res = { own: { dev: st.dev, ino: st.ino } }; OWN.set(m.file, res.own);
     }
     let err = null, size0 = null;
@@ -201,11 +210,12 @@ function writeJob(m, fs = FS) {
   if (err) throw err;   // the caller removes the temp: the store keeps its previous whole version
   // `mode` applies when the temp file is CREATED; a leftover temp from a killed write keeps its old bits
   if (m.mode != null) { try { fs.chmodSync(m.tmp, m.mode); } catch { /* a filesystem without modes */ } }
-  // B-f276 1c (主开发 r1143 (1)): an own-only store renames only over the file it made itself (a different file there: not its own,
+  // B-f276 1c (主开发 r1143 (1)): an own-only store renames only over the file it made itself — CHECKED JUST BEFORE THE RENAME (the
+  // narrow window between the two: the head comment above) (a different file there: not its own,
   // refused — its store reads and keeps it); a file gone since is created exclusively again
   if (m.ownOnly && !m.exclusive) {
-    const cur = idOf(fs, m.file), mine = OWN.get(m.file) || m.own || null;
-    if (cur && !(mine && cur.ino === mine.ino && cur.dev === mine.dev)) throw notOwn(m.file);
+    const cur = idOf(fs, m.file), mine = [m.own, OWN.get(m.file)].filter(Boolean);   // the store's own cell, then the thread's map (r1588 (3))
+    if (cur && !mine.some((x) => cur.ino === x.ino && cur.dev === x.dev)) throw notOwn(m.file);
     const made0 = !cur ? idOf(fs, m.tmp) : null;   // B-f276 1c (S2): the temp's own numbers, read BEFORE the link (after it: the same inode)
     if (!cur && linkedHere(fs, m.tmp, m.file)) { res = { own: made0 }; OWN.set(m.file, made0); return res; }
   }

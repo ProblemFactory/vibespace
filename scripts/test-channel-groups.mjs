@@ -611,6 +611,54 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     ok(lr.kind === 'appeared' && lr.kept, 'r2 S3: a poll-stamps.log that APPEARED while the stamps read missing is kept byte for byte — its first open is an exclusive create; the stamps held at once', JSON.stringify(lr));
     const lrx = await logRun(MC.load('src/channel-store.js', anchored(SSRC, "psLoad.readMissing && !journalWas ? 'ax' : 'a'", "'a'", 'the journal opened for append'), 'r2-s3').createChannelStore, 'cut');
     ok(!lrx.kept, 'r2 S3 CONTROL (the journal opened for append): this life\'s stamp is appended to the journal that came — red', JSON.stringify(lrx));
+    // B-f276 1c FOLLOW (its round whfrsuwsp, 主开发 r1588 (2) and (6)): the journal's first open FAILS (EIO: the stamp stays in memory)
+    // and the side file's first write lands (missing false; readMissing stays true for the life). (2) a journal that appears AFTER
+    // that is met by the life-long flag: the stamps held by name, never a once-a-minute retry nobody hears of; (6a) a journal that
+    // appears BEFORE that landing is never truncated by its fold (this life never read nor opened it)
+    const stampsLateRun = async (mk, tag, before) => {
+      const d = path.join(ROOT, `store-stampslate-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const s16 = mk({ dir: d, log: qlog });
+      const lg = path.resolve(path.join(d, 'poll-stamps.log')), realOpen = fs.openSync;
+      let failed = 0;
+      fs.openSync = function (p, ...a) { if (!failed && path.resolve(String(p)) === lg) { failed++; throw Object.assign(new Error('EIO'), { code: 'EIO' }); } return realOpen.call(this, p, ...a); };
+      try { s16.stamps.set('fake/a', { lastPollAt: 1795000000000 }); } finally { fs.openSync = realOpen; }
+      if (before) fs.writeFileSync(lg, LOG);   // (6a) a journal came before the side file landed
+      s16.stamps.flush();   // the side file's first write: the exclusive create lands — its fold meets a journal this life never opened
+      if (!before) { fs.writeFileSync(lg, LOG); s16.stamps.set('fake/b', { lastPollAt: 1795000001000 }); }   // (2) a journal came after: its 'ax' open answers EEXIST
+      const q = (s16.quarantined || []).find((x) => x.file === 'poll-stamps.json') || {};
+      s16.close();
+      return { failed, json: fs.existsSync(path.join(d, 'poll-stamps.json')), kind: q.kind || null, kept: fs.existsSync(lg) && fs.readFileSync(lg, 'utf8') === LOG };
+    };
+    const sl = await stampsLateRun(createChannelStore, 'head', false);
+    ok(sl.failed === 1 && sl.json && sl.kind === 'appeared' && sl.kept, 'B-f276 1c follow (r1588 (2)): a poll-stamps.log that appears AFTER the side file\'s first write landed is met by the life-long flag — the stamps held «appeared» by name, the journal kept byte for byte', JSON.stringify(sl));
+    const slx = await stampsLateRun(MC.load('src/channel-store.js', anchored(SSRC, "if (e && e.code === 'EEXIST' && (psLoad.missing || psLoad.readMissing)) {", "if (e && e.code === 'EEXIST' && psLoad.missing) {", 'the old flag'), 'f-stampslate').createChannelStore, 'cut', false);   // stale-pins: kept (the control restores the 1c tip's text)
+    ok(slx.json && slx.kind !== 'appeared', 'B-f276 1c follow (r1588 (2)) CONTROL (the branch asks the old flag, the 1c tip): the stamps are never held — the journal retried once a minute, the person never told — red', JSON.stringify(slx));
+    const sf = await stampsLateRun(createChannelStore, 'fold', true);
+    ok(sf.failed === 1 && sf.json && sf.kept, 'B-f276 1c follow (r1588 (6)): THE STAMPS FOLD\'S GUARD — a journal that appeared before the side file landed is never truncated by the fold (this life never read nor opened it)', JSON.stringify(sf));
+    const sfx = await stampsLateRun(MC.load('src/channel-store.js', anchored(SSRC, "    if (journalFd === null && psLoad.readMissing && !journalWas) return;", "    if (false) return;", 'no fold guard'), 'f-foldguard').createChannelStore, 'foldcut', true);
+    ok(sfx.json && !sfx.kept, 'B-f276 1c follow (r1588 (6)) CONTROL (no fold guard): the fold truncates by name the journal that came — red', JSON.stringify(sfx));
+    // (6b): a family STARTED EMPTY by the damaged door is own-only again — after its first write lands, a file that is not its own
+    // takes the name: the next write is refused by name, the file kept
+    const doorOwnRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-doorown-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const ixf = path.join(d, 'index.json');
+      fs.writeFileSync(ixf, '{"v":1,"conversations":{');   // torn: held as damaged, its one door
+      const s18 = mk({ dir: d, log: qlog });
+      const door = await s18.startDamagedEmpty('index.json');
+      await s18.index.update(() => { const en = s18.index.entry('fake', 'p'); en.title = 'first'; });
+      try { s18.index.flush(); } catch { }   // its first write: the exclusive create, landed
+      const first = fs.existsSync(ixf) && /first/.test(fs.readFileSync(ixf, 'utf8'));
+      fs.writeFileSync(ixf + '.other', IX); fs.renameSync(ixf + '.other', ixf);   // another index.json takes the name (a file of its own)
+      await s18.index.update(() => { const en = s18.index.entry('fake', 'p'); en.title = 'second'; }).catch(() => { });
+      try { s18.index.flush(); } catch { }
+      const q = (s18.quarantined || []).find((x) => x.file === 'index.json' && x.kind === 'appeared') || {};
+      s18.close();
+      return { door: door && door.state, first, kind: q.kind || null, kept: fs.readFileSync(ixf, 'utf8') === IX };
+    };
+    const dn = await doorOwnRun(createChannelStore, 'head');
+    ok(dn.door === 'pass' && dn.first && dn.kind === 'appeared' && dn.kept, 'B-f276 1c follow (r1588 (6)): a family STARTED EMPTY by the damaged door is own-only again — its first write lands, a file not its own that takes the name is never written over (held «appeared», kept)', JSON.stringify(dn));
+    const dnx = await doorOwnRun(MC.load('src/channel-store.js', anchored(anchored(SSRC, 'fam.missing = true; fam.readMissing = true; fam.appearing = null;', 'fam.missing = true; fam.appearing = null;', 'the door keeps readMissing as read (1)'), '      fam.readMissing = true; if (fam === psLoad) journalWas = false;', '      if (fam === psLoad) journalWas = false;', 'the door keeps readMissing as read (2)'), 'f-doorown').createChannelStore, 'cut');
+    ok(dnx.first && !dnx.kept, 'B-f276 1c follow (r1588 (6)) CONTROL (the door leaves the family «read»): the second write renames over the index that came — red', JSON.stringify(dnx));
     // S2 + S3: the writer's thread — a temp left as a second name is never opened again; our own link answered EEXIST is our link landed
     const WSRC = fs.readFileSync(path.join(REPO, 'src/store-writer-worker.js'), 'utf-8');
     const workerRun = (WK, tag) => {
@@ -669,6 +717,59 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     ok(sw.code === 'EIO' && sw.whole, 'lens 3: a temp of THIS road left by an earlier life of the thread (a second name of the store) is removed at the first sweep — a write that then fails part-way leaves the store whole', JSON.stringify(sw));
     const swx = sweepRun(MC.load('src/store-writer-worker.js', anchored(WSRC, ' || path.join(dir, n) === ownTmp)) {', ')) {', 'no own-temp sweep'), 'lens3-sweep'), 'cut');
     ok(!swx.whole, 'lens 3 CONTROL (only other pids\' temps swept): the open truncates the live store through its second name — red', JSON.stringify(swx));
+    // B-f276 1c FOLLOW (its round whfrsuwsp lens 3 — 1c's line said this leg was there; it was not): the own-temp sweep's FAILED
+    // unlink marks the temp a second name (LINKED) — never opened again: the write is refused by name, the store whole
+    const unlinkRun = (WK, tag) => {
+      const d = path.join(ROOT, `store-ownsweep-fail-${tag}`); fs.mkdirSync(d, { recursive: true });
+      const f = path.join(d, 'y.json'), t = `${f}.tmp-${process.pid}-w`;
+      fs.writeFileSync(f, '{"v":1,"a":"whole"}');
+      fs.linkSync(f, t);   // an earlier life left its temp as a SECOND NAME of the store
+      const FW = Object.assign(Object.create(fs), { unlinkSync: (p) => { if (path.resolve(String(p)) === path.resolve(t)) throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); return fs.unlinkSync(p); }, writeSync: () => { throw Object.assign(new Error('EIO'), { code: 'EIO' }); } });
+      let code = null; try { WK.writeJob({ file: f, tmp: t, parts: ['{"v":1,"a":"next"}'] }, FW); } catch (e) { code = (e && e.code) || 'threw'; }
+      try { fs.unlinkSync(t); } catch { }
+      return { code, whole: fs.readFileSync(f, 'utf8') === '{"v":1,"a":"whole"}' };
+    };
+    const uf = unlinkRun(fresh('unlink'), 'head');
+    ok(uf.code === 'ETEMPLINKED' && uf.whole, 'B-f276 1c follow (lens 3): the own-temp sweep\'s FAILED unlink marks the temp a second name — the write through it refused by name (ETEMPLINKED), the store whole', JSON.stringify(uf));
+    const ufx = unlinkRun(MC.load('src/store-writer-worker.js', anchored(WSRC, " && sameFile(fs, ownTmp, file)) LINKED.add(ownTmp); } }", " && false) LINKED.add(ownTmp); } }", 'the failed unlink marks nothing'), 'f-unlink'), 'cut');
+    ok(!ufx.whole, 'B-f276 1c follow (lens 3) CONTROL (the failed unlink marks nothing): the open truncates the store through its second name — red', JSON.stringify(ufx));
+    // (3) THE OWN NUMBERS (主开发 r1588 (3)): the store's own cell (m.own) first, the thread's map second — two lives of the thread
+    // (one started again between two writes of the other) rewrite the store's own file 24 times: never refused
+    const lifeOf = (src, tag) => MC.load('src/store-writer-worker.js', anchored(src, 'module.exports = { writeJob, writeAll, sweepTemps, linkedHere };', `module.exports = { writeJob, writeAll, sweepTemps, linkedHere };   // a life of the thread (${tag})`, `life ${tag}`), `life-${tag}`);
+    const ownRun = (LA, LB, tag) => {
+      const d = path.join(ROOT, `store-ownorder-${tag}`); fs.mkdirSync(d, { recursive: true });
+      const f = path.join(d, 'z.json'), t = `${f}.tmp-${process.pid}-w`;
+      let own = null, refused = 0, landed = 0;
+      const hist = [];
+      for (let i = 0; i < 24; i++) {
+        const WK = i % 3 === 1 ? LB : LA;
+        const give = i % 6 === 3 && hist.length > 1 ? hist[hist.length - 2] : own;   // every sixth: a job sent before the last reply came back (its cell one write old)
+        try { const r = WK.writeJob({ file: f, tmp: t, parts: [`{"v":1,"n":${i}}`], ownOnly: true, exclusive: i === 0, own: give }); if (r && r.own) { own = r.own; hist.push(r.own); } landed++; } catch (e) { if (e && e.code === 'EEXIST') refused++; else throw e; }
+      }
+      return { landed, refused, last: fs.readFileSync(f, 'utf8') };
+    };
+    const on = ownRun(lifeOf(WSRC, 'own-a'), lifeOf(WSRC, 'own-b'), 'head');
+    ok(on.landed === 24 && on.refused === 0 && on.last === '{"v":1,"n":23}', 'B-f276 1c follow (r1588 (3)): THE OWN NUMBERS — the store\'s own file, rewritten 24 times by two lives of the thread (one started again between the other\'s writes), is never refused', JSON.stringify(on));
+    const ONE = (first) => anchored(anchored(anchored(anchored(WSRC, 'const mine = [m.own, OWN.get(m.file)].filter(Boolean);', `const mine = ${first} || null;`, 'one cell (append)'), 'if (mine.length && !mine.some((x) => st.ino === x.ino && st.dev === x.dev)) {', 'if (mine && !(st.ino === mine.ino && st.dev === mine.dev)) {', 'one cell (append check)'), 'mine = [m.own, OWN.get(m.file)].filter(Boolean);   // the store', `mine = ${first} || null;   // the store`, 'one cell (whole)'), 'if (cur && !mine.some((x) => cur.ino === x.ino && cur.dev === x.dev)) throw notOwn(m.file);', 'if (cur && !(mine && cur.ino === mine.ino && cur.dev === mine.dev)) throw notOwn(m.file);', 'one cell (whole check)');   // stale-pins: kept (the controls restore the one-cell forms)
+    const OLD = ONE('OWN.get(m.file) || m.own');   // stale-pins: kept (the control restores the 1c tip's text)
+    const onx = ownRun(lifeOf(OLD, 'own-old-a'), lifeOf(OLD, 'own-old-b'), 'cut');
+    ok(onx.refused > 0, 'B-f276 1c follow (r1588 (3)) CONTROL (the thread\'s map first, the 1c tip): the first life refuses the store\'s own file once the other rewrote it — the family held for nothing — red', JSON.stringify(onx));
+    const onc = ownRun(lifeOf(ONE('m.own || OWN.get(m.file)'), 'own-cell-a'), lifeOf(ONE('m.own || OWN.get(m.file)'), 'own-cell-b'), 'cell');   // stale-pins: kept (the control restores cc8630c77's text)
+    ok(onc.refused > 0, 'B-f276 1c follow (r1588 (3)) CONTROL (the store\'s cell alone, cc8630c77): a job sent before the last reply came back refuses the store\'s own file — red', JSON.stringify(onc));
+    // judged (the r1568 road-by-road read): a LATER own-only append never creates the file — a journal gone since is refused as not
+    // its own (its store holds the family), never made again empty in a folder that may be a mount's
+    const goneRun = (WK, tag) => {
+      const d = path.join(ROOT, `store-owngone-${tag}`); fs.mkdirSync(d, { recursive: true });
+      const f = path.join(d, 'acts.ndjson');
+      const r1 = WK.writeJob({ file: f, append: true, parts: ['{"seq":1}\n'], ownOnly: true });   // its first append: the exclusive create
+      fs.unlinkSync(f);   // the journal gone since
+      let code = null; try { WK.writeJob({ file: f, append: true, parts: ['{"seq":2}\n'], ownOnly: true, own: r1 && r1.own }); } catch (e) { code = e && e.code; }
+      return { own: !!(r1 && r1.own), code, made: fs.existsSync(f) };
+    };
+    const gn = goneRun(fresh('gone'), 'head');
+    ok(gn.own && gn.code === 'EEXIST' && !gn.made, 'B-f276 1c follow (judged): a journal gone since an own-only store made it — the next append refused as not its own, NOTHING made in its place', JSON.stringify(gn));
+    const gnx = goneRun(MC.load('src/store-writer-worker.js', anchored(WSRC, "'ax' : FS.constants.O_WRONLY | FS.constants.O_APPEND) : 'a';", "'ax' : 'a') : 'a';", 'the later open creates'), 'f-gone'), 'cut');
+    ok(gnx.made, 'B-f276 1c follow (judged) CONTROL (the later open creates, the 1c tip): an empty journal is made where none was — red', JSON.stringify(gnx));
     // lens 3: a PACED change (no durable door, a stamp or a row's bookkeeping) that meets an index that appeared — never written over it;
     // the index held at once, its file kept (a person's act takes the durable road: refused by name, ixAppearRun above)
     const pacedRun = async (mk, tag) => {
@@ -801,7 +902,7 @@ console.log('§1e the PACE rules (PURE) — r3 findings 4 + 5');
 }
 
 // ── the engine fixture: the REAL store + the REAL ladder + a recording authorizer
-function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info() {}, warn() {}, log() {} }, onCleared = undefined, ge = GE, heldRetry = null } = {}) {
+function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info() {}, warn() {}, log() {} }, onCleared = undefined, ge = GE, heldRetry = null, liveness = undefined } = {}) {
   const dataDir = path.join(ROOT, name);
   fs.mkdirSync(dataDir, { recursive: true });
   const store = createChannelStore({ dir: path.join(dataDir, 'channels'), heldRetry });
@@ -823,7 +924,7 @@ function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info
     noteSpend: () => {}, releaseSpend: () => {},
   });
   let t = T0;
-  const eng = ge.create({ store, deliver, broadcast: (m) => bcasts.push(m), now: () => (t += 1000), roster: () => roster, groupSetting: () => 'none', log, ...(paceClock ? { paceClock } : {}), ...(onCleared ? { onCleared } : {}) });
+  const eng = ge.create({ store, deliver, broadcast: (m) => bcasts.push(m), now: () => (t += 1000), roster: () => roster, groupSetting: () => 'none', log, ...(paceClock ? { paceClock } : {}), ...(onCleared ? { onCleared } : {}), ...(liveness ? { liveness } : {}) });
   return { store, eng, deliver, sessions, auths, posts, cards, bcasts, dataDir, roster, close: () => { try { deliver.flush(); } catch {} store.close(); } };
 }
 
@@ -3030,7 +3131,19 @@ console.log('§bl-msg B-3e61 a message arrives whole — the value masked, the r
 
 console.log('§P B-f276 (lane bl-windows, 主开发 r487): a HELD groups.json pauses the agent groups — every door refused BY NAME, nothing granted, nothing sent');
 {
-  const pausedRun = async (ge, tag) => {
+  // B-f276 1c FOLLOW (its round whfrsuwsp lens 3, 主开发 r1588 (5)): THE HUNG SEND (its read r1 M4) BY BEHAVIOUR — the real route over the
+  // held engine replies 503 store-blocked and RETURNS (a refused door inside the async route had hung `vibespace-msg send`)
+  const ARM = require(path.join(REPO, 'src/agent-routes.js'));
+  const routeSend = async (eng, AR0) => {
+    const ss = new Map([['w-r1', { agentToken: 'vsst_route', claudeSessionId: A, name: 'alpha', cwd: '/tmp', mode: 'chat', backend: 'claude' }]]);
+    const rts = {}; const ap = { get: (p, h) => { rts['GET ' + p] = h; }, post: (p, h) => { rts['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+    AR0.setupAgentRoutes({ app: ap, activeSessions: ss, tasks: { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => ({ externalVisibility: 'none' }) },
+      sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' }, userTodos: {}, sessionStatusKey: (x) => 'claude:' + x.claudeSessionId, serverSetting: () => undefined,
+      integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null, getGroups: () => eng });
+    const call = new Promise((resolve) => { let status = 200; const res = { status(x) { status = x; return res; }, set() { return res; }, json(o) { resolve({ status, code: o && o.code }); } }; Promise.resolve(rts['POST /api/agent/msg/send']({ headers: { authorization: 'Bearer vsst_route' }, body: { to: 'beta', text: 'while held' }, query: {} }, res)).catch((e) => resolve({ status: 'threw', code: e && e.code })); });
+    return Promise.race([call, new Promise((z) => setTimeout(() => z({ status: 'hung' }), 300))]);
+  };
+  const pausedRun = async (ge, tag, arx = null) => {
     const name = `groups-held-${tag}`;
     const gj = path.join(ROOT, name, 'channels', 'groups.json');
     fs.mkdirSync(gj, { recursive: true }); fs.writeFileSync(path.join(gj, 'x'), 'x');   // the read of groups.json fails (EISDIR)
@@ -3050,6 +3163,7 @@ console.log('§P B-f276 (lane bl-windows, 主开发 r487): a HELD groups.json pa
     r.heldPaced = f.deliver.heldWhyOf({ cid: B, producer: 'stash-wake', held: { why: 'paced' } });
     r.paused = f.eng.pausedState();
     r.posts = f.posts.length;
+    if (arx) { r.route = await routeSend(f.eng, ARM); r.routeX = await routeSend(f.eng, arx); }   // (5): the real route, and a copy that asks no pause
     // groups.json reads again: the store takes it in, the doors answer again
     fs.rmSync(gj, { recursive: true, force: true }); fs.writeFileSync(gj, JSON.stringify({ v: 1, groups: {} }));
     let read = false; f.store.whenRead(['groups.json'], () => { read = true; });
@@ -3058,7 +3172,11 @@ console.log('§P B-f276 (lane bl-windows, 主开发 r487): a HELD groups.json pa
     f.close();
     return r;
   };
-  const r = await pausedRun(GE, 'head');
+  const MPF = mutantCopies('groups-paused-f', REPO);
+  const { anchored: anchoredF } = await import('./scratch.mjs');
+  const ARSRC = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
+  const ARX = MPF.load('src/agent-routes.js', anchoredF(ARSRC, "  if (!who) return;\n  if (msgPausedRefused(res)) return;   // B-f276 1c (M4)\n", "  if (!who) return;\n", 'the send asks no pause'), 'send-no-pause');
+  const r = await pausedRun(GE, 'head', ARX);
   console.log(`    facts: ${JSON.stringify(r)}`);
   const refused = (x) => x === 'threw:store-blocked' || x === 'answer:store-blocked';
   ok(refused(r.send) && refused(r.create) && r.posts === 0, 'a message to an agent and a new group while groups.json is held: refused BY NAME (store-blocked, «paused»), nothing posted, nothing woken', JSON.stringify(r));
@@ -3068,6 +3186,8 @@ console.log('§P B-f276 (lane bl-windows, 主开发 r487): a HELD groups.json pa
   ok(r.pace && r.pace.reason === 'store-blocked' && r.pace.retryInMs > 0, 'the pace every producer asks answers a WAIT (parked and asked again) — never a grant over floors nobody read', JSON.stringify(r.pace));
   ok(r.paused && r.paused.code === 'store-blocked' && /the agent groups are paused: groups\.json could not be read/.test(r.paused.error), 'the pause says itself by name (pausedState — the routes and the CLI word it)', JSON.stringify(r.paused));
   ok(r.after.read && r.after.paused === null && /^answer:/.test(r.after.send) && !refused(r.after.send), 'groups.json reads again: taken in, the pause lifts, a message is sent again', JSON.stringify(r.after));
+  ok(r.route && r.route.status === 503 && r.route.code === 'store-blocked', 'B-f276 1c follow (r1588 (5)): THE SEND ROUTE over a held engine replies 503 store-blocked and RETURNS — never a hung `vibespace-msg send`', JSON.stringify(r.route));
+  ok(r.routeX && !(r.routeX.status === 503 && r.routeX.code === 'store-blocked'), 'B-f276 1c follow (r1588 (5)) CONTROL (the route asks no pause, in a copy): the refused door inside the async route — no 503 by name (hung or thrown) — red', JSON.stringify(r.routeX));
   // r566 #6: reportsForTurn answers NOTHING while paused (no marker moves) — the first turn after the lift carries the reports ONCE
   {
     const src0 = fixture('groups-rep-src');
@@ -3107,6 +3227,45 @@ console.log('§P B-f276 (lane bl-windows, 主开发 r487): a HELD groups.json pa
   const hk = await pausedRun(MP.load('src/server/groups-engine.js', anchoredP(anchoredP(anchoredP(gsrc, "{ held: () => groupsPaused(), render: owedWords,", '{ render: owedWords,', 'no owed hold'), "Object.assign((sender) => pacerFor(sender), { held: () => groupsPaused() })", '(sender) => pacerFor(sender)', 'no pace hold'), "return { ok: false, reason: 'store-blocked', why: groupsPausedWords(), rule: 'paused', retryInMs: 60_000 };", "return { reason: 'store-blocked', why: groupsPausedWords(), rule: 'paused', retryInMs: 60_000 };", 'force without ok:false'), 'groups-hold-cut'), 'holdcut');   // stale-pins: kept — the cut's own text
   ok(!hk.heldOwed && !hk.heldPaced && !(hk.force && hk.force.ok === false), 'B-f276 1c CONTROL (no hold hooks, the force without ok:false — the 1c tip before its read): the deliverer attempts the wakes toward their fall and reads the force as a grant — red', JSON.stringify({ owed: hk.heldOwed, paced: hk.heldPaced, force: hk.force }));
   ok(!refused(c.listFor) && !refused(c.resolve) && !(c.pace && c.pace.reason === 'store-blocked'), 'CONTROL (the pause cut — today\'s engine over a held groups.json): the list answers empty («no groups»), the target «no such group», the pace grants — red', JSON.stringify({ listFor: c.listFor, resolve: c.resolve, pace: c.pace }));
+  // B-f276 1c FOLLOW (its round whfrsuwsp lens 2, 主开发 r1588 (4)): a conversation that ENDS while groups.json is held is dropped by the
+  // paused end door — THE END SWEEP runs again once the families read: its pair is closed, once
+  const endsLiftRun = async (gex, tag) => {
+    const name = `groups-endlift-${tag}`;
+    const f0 = fixture(name);
+    const s0 = await f0.eng.sendToAgent({ from: A, to: B, text: 'before the hold' });
+    const gid = s0 && s0.group && s0.group.id;
+    f0.close();
+    const gj = path.join(ROOT, name, 'channels', 'groups.json');
+    const good = fs.readFileSync(gj, 'utf8');
+    fs.rmSync(gj); fs.mkdirSync(gj); fs.writeFileSync(path.join(gj, 'x'), 'x');   // held (EISDIR)
+    const gone = new Set();
+    const f = fixture(name, { ge: gex, heldRetry: { firstMs: 5, maxMs: 10 }, liveness: (cid) => (gone.has(cid) ? { state: 'archived' } : { state: 'running' }) });
+    gone.add(B);
+    const during = await f.eng.onConversationEnded(B, { why: 'archived' });   // the paused end door: nothing done
+    fs.rmSync(gj, { recursive: true, force: true }); fs.writeFileSync(gj, good);
+    let read = false; f.store.whenRead(['groups.json'], () => { read = true; });
+    const end = Date.now() + 5000; while (!read && Date.now() < end) await new Promise((z) => setTimeout(z, 5));   // the bound is a red line, never the wait
+    const end2 = Date.now() + 500; while (Date.now() < end2 && !(f.eng.get(gid) && f.eng.get(gid).closed)) await new Promise((z) => setTimeout(z, 5));
+    const g = f.eng.get(gid);
+    const out = { pair: !!gid, paused: !!(during && during.paused), read, closed: !!(g && g.closed), why: (g && g.closed && g.closed.why) || null };
+    f.close();
+    return out;
+  };
+  const el = await endsLiftRun(GE, 'head');
+  ok(el.pair && el.paused && el.read && el.closed && el.why === 'archived', 'B-f276 1c follow (r1588 (4)): a conversation that ENDED while groups.json was held — the paused end door did nothing; at the lift the end sweep runs again and its pair is closed', JSON.stringify(el));
+  const elx = await endsLiftRun(MP.load('src/server/groups-engine.js', anchoredP(gsrc, 'say: sayPausedDoor });', 'say: sayGroupsPaused });', 'no end sweep at the lift'), 'groups-no-endlift'), 'cut');   // stale-pins: kept (the control restores the 1c tip's text)
+  ok(elx.read && !elx.closed, 'B-f276 1c follow (r1588 (4)) CONTROL (no end sweep at the lift, the 1c tip): the pair stays open over a conversation that ended — red', JSON.stringify(elx));
+  // lens 3 (1c's line said this leg was there; it was not): the agent's session start and reminder say the channels are PAUSED
+  {
+    const REG = require(path.join(REPO, 'src/agent-cli-registry.js'));
+    const row = REG.ROWS.find((x) => x.name === 'vibespace-channels');
+    const rem = row.teach.reminder({ reach: 'paused' }), st = row.teach.sessionStart({ reach: 'paused' });
+    ok(/PAUSED now/.test(rem) && /PAUSED now/.test(st), 'B-f276 1c follow (lens 3): reach `paused` — the agent\'s session start and reminder say the channels are PAUSED now, never the «read» reach', JSON.stringify({ rem, st }));
+    const RSRC = fs.readFileSync(path.join(REPO, 'src/agent-cli-registry.js'), 'utf8');
+    const RX = MP.load('src/agent-cli-registry.js', anchoredP(RSRC, " || reach === 'paused' ? reach : 'read'", " ? reach : 'read'", 'paused read as read'), 'reminder-paused-cut');
+    const rowx = RX.ROWS.find((x) => x.name === 'vibespace-channels');
+    ok(!/PAUSED now/.test(rowx.teach.reminder({ reach: 'paused' })), 'B-f276 1c follow (lens 3) CONTROL (paused read as the «read» reach): the reminder says nothing of the pause — red', rowx.teach.reminder({ reach: 'paused' }));
+  }
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

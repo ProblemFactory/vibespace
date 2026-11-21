@@ -176,6 +176,12 @@ function create({
   const groupsPausedError = () => { const e = new Error(groupsPausedWords()); e.code = 'store-blocked'; e.status = 503; e.paused = true; return e; };
   const groupsPausedAnswer = () => ({ ok: false, code: 'store-blocked', paused: true, error: groupsPausedWords() });
   let groupsPausedSaid = false;
+  // B-f276 1c follow (its round whfrsuwsp lens 2, 主开发 r1588 (4)): a conversation that ENDED while a group family was held was dropped
+  // by the paused end door (its held frames kept, its rows un-ended, the wiring's signature taken over the empty answer) — the END
+  // SWEEP runs again once the families read, as the orphan scan does; armed once a hold
+  let endsOwed = false;
+  const endsAtLift = () => { if (endsOwed || !store.whenRead) return; endsOwed = true; store.whenRead(GROUP_FAMILIES, () => { endsOwed = false; sweepEnded().catch((e) => (log.warn || log.log || (() => {})).call(log, `[groups] the end sweep after the lift failed: ${(e && e.message) || e}`)); }); };
+  const sayPausedDoor = (door) => { sayGroupsPaused(); if (door === 'onConversationEnded' || door === 'sweepEnded') endsAtLift(); };
   const sayGroupsPaused = () => { if (groupsPausedSaid) return; groupsPausedSaid = true; (log.warn || log.log || (() => {})).call(log, `[groups] ${groupsPausedWords()}`); if (store.whenRead) store.whenRead(GROUP_FAMILIES, () => { groupsPausedSaid = false; }); };   // N7: said again after a lift
   // lane roster-per-pass: a synchronous pass over groups / members reads ONE roster (checked once at its start —
   // src/server/roster-pass.js); a plain roster function (a drill's) has no passes: each read is its own
@@ -1979,9 +1985,9 @@ function create({
   // is a row (scripts/test-channel-groups.mjs is red on a key without one); THE ONE WRAPPER (src/channel-store.js pauseDoorsOf).
   const GROUP_HELD_DOORS = {
     pausedState: ['allow', 'sync', 'the pause itself: the held families by name — never a verdict on what they hold'],
-    onConversationEnded: ['paused', 'async', 'a conversation ended: drops its held frames and rewrites its rows — never over a list nobody read'],
+    onConversationEnded: ['paused', 'async', 'a conversation ended: drops its held frames and rewrites its rows — never over a list nobody read; the end sweep runs again at the lift (r1588 (4))'],
     onConversationRevived: ['paused', 'async', 'a conversation back: rewrites its rows in groups.json'],
-    sweepEnded: ['paused', 'async', 'the boot / user-state sweep: ends rows of conversations it finds ended'],
+    sweepEnded: ['paused', 'async', 'the boot / user-state sweep: ends rows of conversations it finds ended — asked again at the lift (r1588 (4))'],
     endedOf: ['refused', 'sync', 'refused while paused (no allow row): an ended conversation’s mark — while held it answers not ended, which ends nothing'],
     endedRefusal: ['refused', 'sync', 'refused while paused (no allow row): the words of an ended member — read only'],
     readWaiting: ['refused', 'async', 'what waits for a conversation — refused, so the wait-watch’s reading fails and it ends nothing (never an empty answer)'],
@@ -2030,7 +2036,7 @@ function create({
     rename: renameGroup, archive: archiveGroup, setNotify, post, sendToAgent, findPair, findOrCreatePair, read, clearMessages, clearedCopies, clearedCopiesAsync,
     reportsForTurn, commitReports,
     WAKE_BUDGET, TURN_BUDGET, MIN_REPORT_ROOM,
-  }, GROUP_HELD_DOORS, { held: groupsPaused, error: groupsPausedError, answer: groupsPausedAnswer, say: sayGroupsPaused });
+  }, GROUP_HELD_DOORS, { held: groupsPaused, error: groupsPausedError, answer: groupsPausedAnswer, say: sayPausedDoor });
 }
 
 module.exports = { create, WAKE_BUDGET, TURN_BUDGET, MIN_REPORT_ROOM, TEXT_MAX, ASIDE_LINE };

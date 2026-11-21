@@ -73,7 +73,7 @@ for (let n = 11; n <= 34; n++) NAMES[cidOf(n)] = 'm' + n;   // the wide legs' me
 let seq = 0;
 
 /** the rig: the REAL engine, store, ladder and park; a stub inbox; ONE manual clock for the park, the pace and the records */
-function rig(name, { refuse = new Set(), peerOf = null, post = null, guard = null, hosts = null, GE = GE0, DELIVER = DELIVER0, dir = null, shared = null } = {}) {
+function rig(name, { refuse = new Set(), peerOf = null, post = null, guard = null, hosts = null, GE = GE0, DELIVER = DELIVER0, dir = null, shared = null, heldRetry = null } = {}) {
   const dataDir = dir || path.join(ROOT, name + '-' + (++seq));
   fs.mkdirSync(dataDir, { recursive: true });
   const c = shared || { now: T0, timers: [] };
@@ -96,7 +96,7 @@ function rig(name, { refuse = new Set(), peerOf = null, post = null, guard = nul
     authorizeSpend: (q) => { R.auths.push({ reason: q.reason, cid: q.cid }); if (guard) return guard.authorize(q); return refuse.has(q.cid) ? { ok: false, why: 'hour-cap', detail: 'hour cap reached', limits: { perIdentityHour: 1 } } : { ok: true, identity: { key: 'slot-1', name: 'Personal' }, hold: 'h' + R.auths.length }; },
     noteSpend: (q) => { R.notes.push(q); if (guard) guard.note(q); }, releaseSpend: (q) => { R.releases.push(q); if (guard) guard.release(q); },
   });
-  R.store = createChannelStore({ dir: path.join(dataDir, 'channels'), log: quiet });
+  R.store = createChannelStore({ dir: path.join(dataDir, 'channels'), log: quiet, ...(heldRetry ? { heldRetry } : {}) });
   R.todos = new UserTodoManager({ dataDir, now: () => c.now });
   R.eng = GE.create({ store: R.store, deliver: R.deliver, broadcast: () => { }, now: () => c.now, paceClock: () => c.now, roster: () => roster, groupSetting: () => 'none', log: quiet, userTodos: R.todos });
   R.settle = async () => { await R.deliver.settleRetries(2000); await sleep(1); await R.deliver.settleRetries(2000); };
@@ -2816,6 +2816,42 @@ await leg(148, async () => {
   ok(cf.posts > 0, 'B-f276 1a FORCE CONTROL (the force\'s answer ignored, as before): the wake is posted past a refused force — a billed turn — red', JSON.stringify(cf));
   const cc = await forceRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, '          if (p.forceRefused) {\n', '          if (false) {\n', 'the refused force clamped to the bound'), 'force-clamped'), 'clamp');
   ok(cc.forced > 18 || cc.belted > 0, 'B-f276 1a FORCE CONTROL (the refused force clamped to the passed bound, as shape A): re-forced on the belt\'s 30 s — red', JSON.stringify(cc));
+});
+
+await leg(149, async () => {
+  // B-f276 1c FOLLOW (its round whfrsuwsp lens 3, 主开发 r1588 (1) — MONEY): a GROUP's wake parked while groups.json is held, the hold
+  // lifted, is posted EXACTLY ONCE — never dropped, never twice (the real groups engine over its real store: the hold read off the file)
+  const DSRC1 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
+  const liftRun = async (DL, tag) => {
+    const c = { now: T0, timers: [] };
+    const R1 = rig(`held1c-glift-${tag}`, { shared: c, DELIVER: DL });
+    const g = await R1.group('lift', A, [B]);
+    await R1.at(100); await R1.say(g, A, '@beta one');   // woken at once
+    await R1.at(5100); await R1.say(g, A, '@beta two');  // inside the pace: parked
+    const parked = R1.owed(B).length;
+    R1.close(); c.timers.length = 0;
+    const gj = path.join(R1.dataDir, 'channels', 'groups.json');
+    const good = fs.readFileSync(gj, 'utf8');
+    fs.rmSync(gj); fs.mkdirSync(gj); fs.writeFileSync(path.join(gj, 'x'), 'x');   // the read of groups.json fails (EISDIR): held
+    const R2 = rig(`held1c-glift-${tag}-2`, { shared: c, dir: R1.dataDir, DELIVER: DL, heldRetry: { firstMs: 5, maxMs: 10 } });
+    await R2.advanceTo(T0 + 40 * 60e3);   // far past the pace: held, so never posted, never fallen
+    const during = { posts: R2.posts.length, owed: R2.owed(B).length, paused: !!R2.eng.pausedState() };
+    fs.rmSync(gj, { recursive: true, force: true }); fs.writeFileSync(gj, good);
+    let read = false; R2.store.whenRead(['groups.json'], () => { read = true; });
+    const end = Date.now() + 5000; while (!read && Date.now() < end) await sleep(5);   // the bound is a red line, never the wait
+    await R2.advanceTo(T0 + 80 * 60e3);
+    const after = { read, posts: R2.posts.length, carried: R2.posts.filter((p) => /two/.test(p.text)).length, owed: R2.owed(B).length };
+    await R2.advanceTo(T0 + 200 * 60e3);
+    const later = R2.posts.length;
+    R2.close();
+    return { parked, during, after, later };
+  };
+  const gl = await liftRun(DELIVER0, 'head');
+  ok(gl.parked === 1 && gl.during.posts === 0 && gl.during.owed === 1 && gl.during.paused, 'B-f276 1c follow (r1588 (1)): a group wake parked, then groups.json held across a restart — never posted while held, never fallen (still owed)', JSON.stringify(gl));
+  ok(gl.after.read && gl.after.posts === 1 && gl.after.carried === 1 && gl.after.owed === 0 && gl.later === 1, 'B-f276 1c follow (r1588 (1)) MONEY: the hold lifts — the wake is posted EXACTLY ONCE (never dropped, never twice)', JSON.stringify(gl));
+  const MHF = mutantCopies('paced-held-1cf', REPO);
+  const glx = await liftRun(MHF.load('src/server/conversation-deliver.js', anchored(DSRC1, '      if (!e.waitsHeld) continue;\n', '      continue;\n', 'the door never lifts'), 'door-never-lifts-f'), 'cut');
+  ok(glx.after.posts === 0, 'B-f276 1c follow (r1588 (1)) CONTROL (the door never lifts, in a copy): the wake is never posted after the lift (dropped) — red', JSON.stringify(glx));
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

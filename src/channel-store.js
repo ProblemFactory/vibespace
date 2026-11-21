@@ -531,7 +531,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     warn(`[channels] ${fam.blocked}`);
   }
   function holdAppeared(fam) {
-    fam.held = true; fam.blocked = `${fam.name} appeared since the start (it was not there when it was read) — it is kept as it is and loaded at the next start; every change to it is refused until then`;
+    fam.held = true; fam.blocked = `${fam.name} appeared since the start (it was not there when it was read — or its storage does not keep file numbers stable) — it is kept as it is and loaded at the next start; every change to it is refused until then`;
     fam.q = { file: fam.name, to: null, why: 'appeared since the start', kind: 'appeared', at: now(), held: true, lifts: 'next-start', readsAt: null, loadedAt: null };
     quarantined.push(fam.q);
   }
@@ -566,7 +566,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     })();
     return fam.appearing;
   }
-  const appearedError = (fam) => Object.assign(new Error(`${fam.name} appeared since the start — ${fam.big ? 'it is kept as it is and loaded at the next start' : 'it is read and kept'}; this change was not made`), { code: 'store-appeared', status: 409 });
+  const appearedError = (fam) => Object.assign(new Error(`${fam.name} appeared since the start (or its storage does not keep file numbers stable) — ${fam.big ? 'it is kept as it is and loaded at the next start' : 'it is read and kept'}; this change was not made`), { code: 'store-appeared', status: 409 });
   /** THE DAMAGED DOOR (主开发 r809: torn bytes follow the store hold — held, ONE door): a person's choice to start a damaged family EMPTY:
    *  its bytes are set aside under a dated name (never deleted), the family starts empty IN PLACE (nothing of it was loaded — empty for
    *  empty, the index too), and its first write is the exclusive create. → { ok, state: 'pass' | 'none', aside? } */
@@ -606,6 +606,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       holds.delete(fam.file);
       fam.value = fam.empty(); fam.blocked = null; fam.held = false; fam.missing = true; fam.readMissing = true; fam.appearing = null;   // its first write: the exclusive create
       fam.readMissing = true; if (fam === psLoad) journalWas = false;   // B-f276 1c: its first write (and the stamps' first journal open) is an exclusive create again
+      if (fam === ixLoad) actsAtStart = false;   // B-f276 1c follow (judged): the index's journal moved aside with it — its next one is own-only too
       if (fam.adopt) { try { fam.adopt(fam.value); } catch (e) { warn(`[channels] ${fam.name}: its empty store was not taken in: ${(e && e.message) || e}`); } }
       if (fam.q) { fam.q.to = path.basename(aside); fam.q.loadedAt = now(); fam.q.done = true; }
       warn(`[channels] ${fam.name} was damaged — a person started it empty; its bytes were set aside as ${path.basename(aside)}${(COMPANIONS[fam.name] || []).length ? ` (its ${COMPANIONS[fam.name].join(', ')} beside it, under the same name)` : ''} — nothing deleted`);
@@ -1380,7 +1381,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return { append: fresh.map((x) => x.text).join('') };
   }
   function actsWritten(ok, err) {
-    if (!ok && err && err.code === 'EEXIST' && ixLoad.readMissing) { tookAppeared(ixLoad); return; }   // B-f276 1c: the journal there is not the one this store made — the index held, the journal kept
+    if (!ok && err && err.code === 'EEXIST' && ixLoad.readMissing) { actsWriting = null; tookAppeared(ixLoad); return; }   // B-f276 1c: the journal there is not the one this store made — the index held, the journal kept
     const w = actsWriting; actsWriting = null;
     // round 3 (law 4): THE JOURNAL'S TAIL IS ALWAYS A WHOLE LINE BEFORE THE NEXT APPEND — after ANY failed append its tail is
     // unknown (the thread truncates back, but a truncate can fail too: ENOSPC after 4 KB + ftruncate EIO left a fragment the
@@ -2751,7 +2752,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       while (o < b.length) o += fs.writeSync(journalFd, b, o, b.length - o);
       journalTorn = false; journalStats.lines += Array.isArray(keys) ? keys.length : 1; journalStats.bytes += b.length;
     } catch (e) {
-      if (e && e.code === 'EEXIST' && psLoad.missing) { tookAppeared(psLoad); return; }   // the journal APPEARED: the stamps held at once (loaded at the next start)
+      if (e && e.code === 'EEXIST' && (psLoad.missing || psLoad.readMissing)) { tookAppeared(psLoad); return; }   // B-f276 1c follow (r1588 (2)): the life-long flag the open asks — never a once-a-minute retry nobody hears of   // the journal APPEARED: the stamps held at once (loaded at the next start)
       journalTorn = true;
       if (now() - journalSaidAt >= 60e3) { journalSaidAt = now(); warn(`[channels] poll-stamps.log not written (${(e && e.code) || (e && e.message) || e}) — the stamp is kept in memory and in the side file's next write`); }
     }
@@ -2953,7 +2954,7 @@ function pauseDoorsOf(api, table, { held, error, answer, say = () => {} }) {
     const cls = row ? row[0] : 'refused';
     if (cls === 'allow') continue;
     const kind = row ? row[1] : (v.constructor && v.constructor.name === 'AsyncFunction' ? 'async' : 'sync');
-    if (cls === 'paused') api[name] = (...a) => { if (!held()) return v(...a); say(); return kind === 'async' ? Promise.resolve(answer()) : answer(); };
+    if (cls === 'paused') api[name] = (...a) => { if (!held()) return v(...a); say(name); return kind === 'async' ? Promise.resolve(answer()) : answer(); };
     else api[name] = (...a) => { if (!held()) return v(...a); const e = error(); if (kind === 'async') return Promise.reject(e); throw e; };
   }
   return api;

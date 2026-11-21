@@ -253,7 +253,7 @@ try {
       return { made: mk.status, joinStatus: join.status, joinCode: join.j && join.j.code, stored, again: again.status, after: I.callers(`pz-${tag}`).length };
     };
     const pp = await pausedPair(A, 'head');
-    ok(pp.made === 200 && pp.joinStatus !== 200 && pp.stored === 0 && pp.again === 200 && pp.after === 1, 'B-f276 1c (r1143 (4)): a pairing completed while A is PAUSED is refused by name — no caller stored, the code not spent; once A reads again the same code pairs', JSON.stringify(pp));
+    ok(pp.made === 200 && pp.joinStatus === 502 && pp.joinCode === 'peer-paused' && pp.stored === 0 && pp.again === 200 && pp.after === 1, 'B-f276 1c (r1143 (4); its follow, r1588 (6)): a pairing completed while A is PAUSED is refused BY NAME — A answers 503 store-blocked, B says `peer-paused` — no caller stored, the code not spent; once A reads again the same code pairs', JSON.stringify(pp));
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const { anchored } = await import('./scratch.mjs');
     const WSRC = fs.readFileSync(routePath, 'utf8');

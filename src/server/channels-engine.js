@@ -556,7 +556,7 @@ function create(deps = {}) {
   const PAUSED_WORDS = 'the channels are paused: the list of conversations (index.json) could not be read — nothing is fetched or sent until it reads again and VibeSpace is restarted (it is loaded at the next start)';
   const pausedWords = () => {
     const first = store.heldOf(CHAN_FAMILIES)[0] || 'index.json';
-    if (store.familyKind && store.familyKind(first) === 'appeared') return `the channels are paused: ${first === 'index.json' ? 'the list of conversations (index.json)' : first} appeared since the start — it is kept as it is; nothing is fetched or sent until VibeSpace is restarted (it is loaded then)`;   // B-f276 1b (its reads r1 N1, r2 N5)
+    if (store.familyKind && store.familyKind(first) === 'appeared') return `the channels are paused: ${first === 'index.json' ? 'the list of conversations (index.json)' : first} appeared since the start (or its storage does not keep file numbers stable) — it is kept as it is; nothing is fetched or sent until VibeSpace is restarted (it is loaded then)`;   // B-f276 1b (its reads r1 N1, r2 N5)
     if (first === 'index.json') return store.familyState && store.familyState(first) === 'a-person' ? 'the channels are paused: the list of conversations (index.json) could not be read as itself (damaged) — nothing is fetched or sent until a person starts it empty (For you) or puts a good copy back and restarts VibeSpace' : PAUSED_WORDS;
     const how = store.familyState ? store.familyState(first) : 'by-itself';
     if (how === 'a-person') return `the channels are paused: ${first} could not be read as itself (damaged) — nothing is fetched or sent until a person starts it empty (For you) or puts a good copy back`;
@@ -602,7 +602,7 @@ function create(deps = {}) {
   // B-f276 1b (r809): torn bytes are HELD (damaged — one door: a person starts it empty), a file that appeared since the start is kept
   const DAMAGED_HEAD = i18nKey("Channels: {file} could not be read as itself (damaged) — every change to it is refused");
   const DAMAGED_DETAIL = i18nKey("Nothing was set aside or written over. Put a good copy back while VibeSpace is stopped, or press Start it empty: its bytes are set aside under a dated name (nothing is deleted) and it starts empty.");
-  const APPEARED_HEAD = i18nKey("Channels: {file} appeared since the start — it is kept as it is and loaded at the next start");
+  const APPEARED_HEAD = i18nKey("Channels: {file} appeared since the start (or its storage does not keep file numbers stable) — it is kept as it is and loaded at the next start");   // r1588 (7): the other cause named
   const APPEARED_DETAIL = i18nKey("Every change to it is refused until then: restart VibeSpace to load it.");
   const EMPTIED_HEAD = i18nKey("Channels: {file} started empty — its damaged bytes are kept as {where}");
   const PAUSED_HEAD_START = i18nKey("Channels paused: {file} could not be read — nothing is fetched or sent until it reads again and VibeSpace restarts");
