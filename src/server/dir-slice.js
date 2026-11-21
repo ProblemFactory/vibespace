@@ -248,7 +248,9 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     if (c && (!files || c.entry.files) && now() - c.at < LIST_FRESH_MS) return Promise.resolve({ ok: c.entry });
     return once(`list:${files ? 'f' : ''}:${a}`, 'rows', a, () => {
       const c0 = listCache.get(a), base = c0 && (!files || c0.entry.files) ? c0 : null;   // `same` answers THIS entry
-      return call('dirSlice', { path: a, dirs: [{ path: a, known: base ? base.entry.mtime : undefined }], files }, IDLE_ONLY).then((r) => {
+      // B-1c27: a RACY listing (read within a timestamp tick of the folder's mtime — a kid made in that tick left the mtime as it was)
+      // is never kept by its mtime: no `known`, the folder is listed again
+      return call('dirSlice', { path: a, dirs: [{ path: a, known: base && !base.entry.racy ? base.entry.mtime : undefined }], files }, IDLE_ONLY).then((r) => {
         const d = ((r && r.dirs) || [])[0] || null;
         if (!d) return null;
         if (d.same) { if (!base) return null; listCache.set(a, { at: now(), entry: base.entry }); return base.entry; }

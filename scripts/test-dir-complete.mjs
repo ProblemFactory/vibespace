@@ -21,6 +21,8 @@
 //     kid's facts (git, package.json, a link's kind) come from its own call behind the answer (factsLate); RED: the release's listing
 //   ④ the listing cache per folder with mtime invalidation: a second ask < 2 s lists nothing again; later the worker is
 //     asked with `known` and a same mtime answers `same` (no re-read); a new folder (a new mtime) is listed fresh
+//     · B-1c27: a listing read within a timestamp tick of its folder's mtime is RACY (no `known` sent back): a folder made in that
+//     tick is listed once the window passes — RED the exact compare
 //   ⑤ the host rung with a FAKE machine (the real HostManager, its ssh rung stubbed to run the same sh here under a Mac's
 //     HOME, uname = Darwin, mdls = the OS display names): the same listing for that machine — its home, a group folder
 //     probed there (present) and one absent, the one declared for it (`h-mac::/…`), 文稿 for ~/Documents (an alias),
@@ -651,6 +653,9 @@ console.log('\n── ④ the listing cache per folder, mtime invalidation ─�
   const DS = require('../src/server/dir-slice.js');
   let clock = 1e12; const calls = [];
   const ds = DS.create({ home: HOME, repoDir: REPO, now: () => clock, call: async (op, p) => { calls.push({ op, dirs: (p.dirs || []).map((d) => ({ path: d.path, known: d.known })) }); return (await runOp(op, p)).result; } });
+  // (B-1c27: a listing read within a timestamp tick of its folder's mtime is RACY and sends no `known` — ~/work's mtime set a minute
+  // back first, so this leg states the cache, never the tick: a suite that has just made the fixture would read it racy)
+  { const back = new Date(Date.now() - 60e3); fs.utimesSync(path.join(HOME, 'work'), back, back); }
   await ds.slice({ text: '~/work/', bases: [] });
   const work = path.join(HOME, 'work');
   const listedFirst = calls.filter((c) => c.op === 'dirSlice' && c.dirs.some((d) => d.path === work)).length;
@@ -679,6 +684,32 @@ console.log('\n── ④ the listing cache per folder, mtime invalidation ─�
   const past = await ds.slice({ text: '~/work/reuse-window/al', bases: [] });
   const kidsRU = (r) => ((r && r.listing && r.listing.dirs['~/work/reuse-window']) || {}).kids || [];
   ok(`the hub's listing reuse BY NAME: LIST_FRESH_MS ${DS.LIST_FRESH_MS} ms (pinned at 2000) — a folder made inside it after a listing is not in the rows yet while the line states it at once (…/al completes to …/alpha); past it the rows list it`, DS.LIST_FRESH_MS === 2000 && !kidsRU(inWin).includes('alpha') && !!inWin.verdict && inWin.verdict.kind === 'exists' && inWin.verdict.path === '~/work/reuse-window/alpha' && kidsRU(past).includes('alpha'), { window: DS.LIST_FRESH_MS, inWindow: { kids: kidsRU(inWin), verdict: inWin.verdict }, past: { kids: kidsRU(past), verdict: past.verdict } });
+}
+
+// B-1c27 — A FOLDER MADE IN THE SAME TIMESTAMP TICK AS ITS PARENT'S LISTING (a coarse clock: the parent's mtime did not move) is in the
+// rows once the reuse window passes: a listing read within a tick of its folder's mtime is RACY — the hub sends no `known`, the folder
+// is listed again. Placed, no load: the folder's mtime set to a whole second of now (a coarse tick), listed, a kid made, the mtime set
+// back to that same second (the tick did not move); the hub's clock past LIST_FRESH_MS. RED CONTROL: the exact compare (the release's):
+// `same`, the kid out of the rows until the folder changes again
+{
+  const DS = require('../src/server/dir-slice.js'), work = path.join(HOME, 'work');
+  const EXACT = mutantCopies('dir-complete-1c27-exact', REPO).load('src/server/dir-slice.js', anchored(read('src/server/dir-slice.js'), 'known: base && !base.entry.racy ? base.entry.mtime : undefined', 'known: base ? base.entry.mtime : undefined', "the exact compare (the release's)"), 'ds-1c27-exact');   // stale-pins: kept (the red control writes the release's exact compare back)
+  const sameTick = async (D2, name) => {
+    let ck = 1e12; const sent = [];
+    const RT = path.join(work, name); fs.mkdirSync(RT);
+    const d = D2.create({ home: HOME, repoDir: REPO, now: () => ck, call: async (op, p) => { if (op === 'dirSlice') for (const x of p.dirs || []) if (x.path === RT) sent.push(x.known); return (await runOp(op, p)).result; } });
+    const sec = Math.floor(Date.now() / 1000); fs.utimesSync(RT, sec, sec);   // the folder's mtime: a whole second of now (a coarse tick)
+    const kidsOf = (r) => ((r.listing.dirs[`~/work/${name}`]) || {}).kids || [];
+    const first = await d.slice({ text: `~/work/${name}/`, bases: [] });
+    const racy = !!((d._caches.listCache.get(RT) || {}).entry || {}).racy;
+    fs.mkdirSync(path.join(RT, 'made-in-the-tick')); fs.utimesSync(RT, sec, sec);   // made in the same tick: the folder's mtime did not move
+    ck += DS.LIST_FRESH_MS + 1;
+    const again = await d.slice({ text: `~/work/${name}/`, bases: [] });
+    return { racy, first: kidsOf(first), again: kidsOf(again), known: sent.slice(1), mtime: sec * 1000 };
+  };
+  const [real, rel] = [await sameTick(DS, 'tick-real'), await sameTick(EXACT, 'tick-exact')];
+  ok(`B-1c27: a folder made in the same timestamp tick as its parent's listing is in the rows once the window passes — the listing was read RACY (${real.racy}), no \`known\` sent again (${JSON.stringify(real.known)}), the kid listed`, real.racy && !real.first.includes('made-in-the-tick') && real.again.includes('made-in-the-tick') && real.known.length >= 1 && real.known.every((k) => k === undefined), real);
+  ok('B-1c27 RED CONTROL (the exact compare, the release\'s): the cached mtime sent back as `known`, the worker answers `same` — the kid stays out of the rows', !rel.again.includes('made-in-the-tick') && rel.known.includes(rel.mtime), rel);
 }
 
 console.log('\n── ⑤ the host rung with a FAKE machine (the real HostManager, its ssh rung run here) ──');

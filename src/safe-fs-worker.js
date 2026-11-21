@@ -35,6 +35,11 @@ function goneOf(e) { return e && (e.code === 'ENOENT' || e.code === 'ENOTDIR') ?
 // a folder's own facts, read INSIDE it (the folder's own listing, its probe, or its own `facts` call — B-5561): a .git there; its
 // package.json name (the instance's own checkout is the one named vibespace)
 const gitOf = (d) => { try { fs.statSync(path.join(d, '.git')); return true; } catch { return false; } };
+// B-1c27 — A LISTING READ WITHIN ONE TIMESTAMP TICK OF ITS FOLDER'S MTIME IS RACY (the git racy-index shape): a folder's timestamps
+// come from a coarse clock (a jiffy on a local disk; 1-2 s on some shares and FAT), so a kid made in the same tick as the listing
+// leaves the folder's mtime where it was. The hub never sends a racy listing's mtime as `known` — the next re-statement lists the
+// folder again. A mtime AHEAD of the read (another machine's clock) is racy too: listed again, never trusted.
+const RACY_TICK_MS = 2000;
 const pkgOf = (d) => { try { const f = path.join(d, 'package.json'); if (fs.statSync(f).size > 65536) return {}; const n = JSON.parse(fs.readFileSync(f, 'utf8')).name; return typeof n === 'string' ? { pkg: n.slice(0, 80) } : {}; } catch { return {}; } };
 
 function splitCsvLine(line, sep) {
@@ -170,7 +175,8 @@ const OPS = {
 
   // THE PATH FIELD'S SLICE (lane path-field — GET /api/dir-complete): each asked folder listed ONCE — its folders, its files
   // (`files: true`, name/size/mtime; else only counted), `git` (a .git inside the listed folder itself), the folder's own mtime; a
-  // folder whose mtime equals `known` answers `same` (the hub's listing cache keeps it). `probes` = paths stated only (a Task Group's
+  // folder whose mtime equals `known` answers `same` (the hub's listing cache keeps it; a listing read within a tick of its mtime says
+  // `racy` — B-1c27: its mtime is never sent back as `known`). `probes` = paths stated only (a Task Group's
   // folder, a recent one, a name-derived one): exists / isDir / git / mtime / fileCount. Bounded: `maxKids` entries per folder
   // (`more`). Never walks.
   // A LISTING READS NAMES AND TYPES ONLY (B-5561): no call reaches under a kid (its .git, its package.json, a link's target), so a dead
@@ -200,7 +206,8 @@ const OPS = {
           if (files) { let t = null; try { t = fs.statSync(path.join(d, e.name)); } catch { } fl.push({ name: e.name, size: t ? t.size : 0, mtime: t ? t.mtimeMs : 0 }); }
         }
       }
-      out.push({ path: d, exists: true, isDir: true, mtime: st.mtimeMs, git: gitOf(d), kids, ...(files ? { files: fl } : {}), fileCount, more });
+      const racy = Date.now() - st.mtimeMs < RACY_TICK_MS;
+      out.push({ path: d, exists: true, isDir: true, mtime: st.mtimeMs, ...(racy ? { racy: true } : {}), git: gitOf(d), kids, ...(files ? { files: fl } : {}), fileCount, more });
     }
     const pr = [];
     for (const p of probes) {
