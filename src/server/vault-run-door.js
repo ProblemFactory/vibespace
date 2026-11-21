@@ -2272,7 +2272,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
           }
           const st = standing.get(r.id) || {};
           if (!refused && st.ok === true && memberUsable(d, r.id, st.id)) return null;
-          return `no standing approval of the user's lets this conversation use it for ${dest.hosts.length ? dest.hosts.join(', ') : 'a command whose destination cannot be read'} (a once-only or a pasted approval is not read in a run that names a shared entry)`;
+          return `no standing approval of the user's lets this conversation use it for ${dest.hosts.length ? dest.hosts.join(', ') : 'a command whose destination cannot be read'} (an approval of a request — once or for 8 hours — or a pasted one is not read in a run that names a shared entry)`;
         };
         const r0 = spec.refs.find((r) => whyNot(r) !== null);
         if (r0) { const why = whyNot(r0); note('run_not_admitted', { ...head, ref: r0.ref, why }); return named('run_not_admitted', { ref: r0.ref, why, words: `«${r0.ref}» is not admitted in this run: ${why}. ${MORE_WORDS.run_not_admitted}` }); }

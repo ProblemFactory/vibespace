@@ -422,7 +422,7 @@ console.log('②c B-bc3b — the owner SHARES an agent\'s own entry through its 
   s.door.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });
   const MIXED = ['--env', `T=${REF}`, '--env', 'U=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/items'];
   const mixed = await s.runAs('conv-2', MIXED);
-  ok(mixed.code === 'run_not_admitted' && mixed.ref === 'vault://mounts/m1/secretKey' && /^«vault:\/\/mounts\/m1\/secretKey» is not admitted in this run: no standing approval of the user's lets this conversation use it for api\.example\.com \(a once-only or a pasted approval is not read in a run that names a shared entry\)\. /.test(mixed.words || '') && !cardsOf(s.w).length,
+  ok(mixed.code === 'run_not_admitted' && mixed.ref === 'vault://mounts/m1/secretKey' && /^«vault:\/\/mounts\/m1\/secretKey» is not admitted in this run: no standing approval of the user's lets this conversation use it for api\.example\.com \(an approval of a request — once or for 8 hours — or a pasted one is not read in a run that names a shared entry\)\. /.test(mixed.words || '') && !cardsOf(s.w).length,
     'a MIXED run naming the shared entry (+ a free entry with no grant for conv-2) ⇒ run_not_admitted naming the FREE entry (the one not admitted) and why, NO card — a card there could widen the share', { code: mixed.code, ref: mixed.ref, words: mixed.words, cards: cardsOf(s.w).length });
   // B-bc3b (the cure, 主开发 r840) — THE CALLER'S OWN ENTRY + A SHARED ONE: each admitted by its own rule (ownership · the grant row)
   const OWN_ROWS = [{ entry: 'agent:conv-2/own-put', field: 'secret', label: 'Agent secret · own-put', bytes: 30, v: 'conv2-put-value-0123456789ab' },
@@ -463,15 +463,16 @@ console.log('②c B-bc3b — the owner SHARES an agent\'s own entry through its 
       const first = await bounded(p, 5000, 'the card was never settled (5 s)');   // a bound: a card left waiting is a red by name, never a hang
       const mixW = await bounded(hw.runAs('conv-2', MIX3), 5000, 'the mixed run never settled (5 s)');
       const wl = runLines(hw.w).pop() || {};
+      const notice = !!mixW.receipt && hw.w.logs.some((l) => l.includes(`a run under the 1-hour approval (${mixW.receipt})`));   // no client in the world: the window's one notice per use is its log line
       clk += R('src/vault-use-grant.js').WINDOW_MS + 1000;   // past the hour's end (the PURE grant's own length), by the one clock
       const late = await bounded(hw.runAs('conv-2', MIX3), 5000, 'the late run never settled (5 s)');
       const cardsLate = cardsOf(hw.w).length;
       for (const x of cardsOf(hw.w)) { try { hw.door.answer(x.action.askId, { answer: 'deny', reauthed: true, person: true }); } catch { } }   // a red's card is closed here: its run never outlives the leg by the real 60 s
-      return { card: !!c, answered: !!(ans && ans.ok), first, mixW, wl, late, cardsLate };
+      return { card: !!c, answered: !!(ans && ans.ok), first, mixW, wl, notice, late, cardsLate };
     }
     {
       const r = await windowMix(DOOR);
-      ok(r.card && r.first.ok && r.mixW.ok && r.mixW.by === 'grant' && r.wl.scope === 'window' && Number(r.wl.windowLeft) >= 1, 'shared + own + the owner\'s entry under its 1-HOUR WINDOW ⇒ runs, and the run line says scope «window» with the minutes left (the window\'s one notice per use is kept in a mixed run)', { card: r.card, answered: r.answered, first: r.first.ok && r.first.by, mix: r.mixW.ok && r.mixW.by, code: r.mixW.code, scope: r.wl.scope, left: r.wl.windowLeft });
+      ok(r.card && r.first.ok && r.mixW.ok && r.mixW.by === 'grant' && r.wl.receipt === r.mixW.receipt && r.wl.scope === 'window' && Number(r.wl.windowLeft) === 60 && r.notice, 'shared + own + the owner\'s entry under its 1-HOUR WINDOW ⇒ runs, its OWN run line says scope «window» with the minutes left (60 on the one clock), and the window\'s one notice per use is said (kept in a mixed run)', { card: r.card, answered: r.answered, first: r.first.ok && r.first.by, mix: r.mixW.ok && r.mixW.by, code: r.mixW.code, receipt: r.mixW.receipt, line: r.wl.receipt, scope: r.wl.scope, left: r.wl.windowLeft, notice: r.notice });
       ok(r.late.code === 'run_not_admitted' && r.late.ref === 'vault://mounts/m1/secretKey' && /is not admitted in this run: no standing approval of the user's/.test(r.late.words || '') && r.cardsLate === 0,
         'the same mixed run AFTER the hour (the one clock past its end) ⇒ run_not_admitted naming the owner\'s entry, no card — the window ends in a mixed run as it does alone', { code: r.late.code, ref: r.late.ref, words: r.late.words, cards: r.cardsLate });
       // RED — the mixed block's window lines taken away: the same mixed run still runs by:grant (the plant proves itself) but its
@@ -479,7 +480,7 @@ console.log('②c B-bc3b — the owner SHARES an agent\'s own entry through its 
       const SRCw = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
       const noWin = M.load('src/server/vault-run-door.js', anchored(SRCw, '        if (winsM.length) {', '        if (false) {', 'test-vault-run ②c bc3b-no-window'), 'bc3b-no-window');
       const rw = noWin ? await windowMix(noWin) : null;
-      ok(!!noWin && rw && rw.first.ok && rw.mixW.ok && rw.mixW.by === 'grant' && rw.wl.scope !== 'window', 'RED — the mixed block\'s window lines off: the mixed run under the window still RUNS by:grant (the plant is where it claims) but its run line says no «window» — the window leg goes red there', rw && { first: rw.first.ok, mix: rw.mixW.ok && rw.mixW.by, scope: rw.wl.scope });
+      ok(!!noWin && rw && rw.first.ok && rw.mixW.ok && rw.mixW.by === 'grant' && rw.wl.receipt === rw.mixW.receipt && rw.wl.scope !== 'window' && !rw.notice, 'RED — the mixed block\'s window lines off: the mixed run under the window still RUNS by:grant (the plant is where it claims) but its OWN run line says no «window» and no notice is said — the window leg goes red there', rw && { first: rw.first.ok, mix: rw.mixW.ok && rw.mixW.by, line: rw.wl.receipt === rw.mixW.receipt, scope: rw.wl.scope, notice: rw.notice });
     }
     // RED — the release's rule (a run naming a shared entry is refused, naming the shared entry, whenever the verdict asks)
     const SRCm = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
