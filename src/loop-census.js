@@ -113,6 +113,7 @@ const OWNERS = Object.freeze([
       name('model-core'),   // batch 21's cure: a Claude model id's core — the catalog's name rule the lock's verdict shares (PURE)
       name('settings-file-words'),   // B-8dcf part two: a person's own settings file at a claude start (PURE; the adapter, the create, jobs wiring)
       name('attach-read'),   // lane resume-all-paced L3: every attach reads a codex history off the loop, acked while it waits (ws-handler)
+      name('bulk-read'),   // B-cd4b r1062: the bulk mark's ONE place — a paced resume's FIRST history read only (PURE; transcript-service, ws-handler)
       name('billing-pick'),   // unit «billing pick alive»: a subscription pick sets the machine's key helper aside (PURE; the create)
       name('settings-merge|settings-merge-device'),   // B-e7c0 (paired machine): the create's ONE bounded ask of a paired machine's agent to merge the person's settings file there
       name('utf8-stream'),   // B-b968: ONE UTF-8 decoder per terminal / conversation output stream (PURE; pty-duck, the re-attach shim, the agent's chat tail)

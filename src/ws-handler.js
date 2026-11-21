@@ -10,6 +10,8 @@ const { createMessageManager, feedLive, feedPeerCard, rebuildHistory, seedHelper
 const { chipAsksOf } = require('./helper-ask.js'); // PURE (lane S1): the pending asks, per harness — the ONE function the chip and the wait watch read
 const { createWsHeartbeat } = require('./server/ws-heartbeat');
 const { readOffLoop, ATTACH_ACK_MS } = require('./attach-read'); // lane resume-all-paced L3: every attach reads a codex history off the loop, acked while it waits
+const BULK = require('./bulk-read');   // B-cd4b r1062: the bulk mark's ONE place (isBulk / landed / personAct)
+const { addressableId } = require('./claude-lock-capture');   // the id a live session may be addressed by (a pending fork's borrowed id is nobody's)
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir, findSessionJsonlPath } = require('./session-store');
@@ -263,7 +265,7 @@ async function warmTaskStateFor(session) {
   try {
     const wts = harnessOf(session.backend || 'claude').store?.warmTaskState;
     if (!wts) return;
-    await Promise.race([Promise.resolve().then(() => wts(session.claudeSessionId || session.backendSessionId, session.cwd, { bulk: !!session._bulkRead })).catch(() => { }), new Promise((r) => { t = setTimeout(r, ATTACH_TASK_WARM_MS); })]);   // r935: a bulk resume's first attach warms in the bulk line
+    await Promise.race([Promise.resolve().then(() => wts(session.claudeSessionId || session.backendSessionId, session.cwd, { bulk: BULK.isBulk(session) })).catch(() => { }), new Promise((r) => { t = setTimeout(r, ATTACH_TASK_WARM_MS); })]);   // r935: a bulk resume's first attach warms in the bulk line
   } catch { } finally { if (t) clearTimeout(t); }
 }
 
@@ -1626,7 +1628,7 @@ function registerWsHandler(wss, ctx) {
               // normalizer with partial buffer data before any client connected.
               // the first attach of a conversation a paced «Resume all» created reads in the hub's BULK line, behind every person's
               // window (lane resume-all-paced L3 cure); every later attach is a person's
-              const bulkRead = !!session._bulkRead; session._bulkRead = false;
+              const bulkRead = BULK.isBulk(session);   // r1062: read through the one place; consumed when this attach's history LANDS (below)
               if (session._normalizer && !session._historyLoaded) {
                 // 2.235.0: warm the JSONL parse cache in the transcript worker
                 // FIRST — the sync rebuild below then reads a warm cache
@@ -1664,6 +1666,7 @@ function registerWsHandler(wss, ctx) {
                   // L3: its turn in the hub's line — a person's window first, the first attach of a bulk resume's conversation after them
                   await readOffLoop(sm, { bulk: bulkRead, label: data.sessionId });
                   await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null }); // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
+                  BULK.landed(session);   // B-cd4b r1062: the attach's history landed — the conversation's later reads are a person's
                 }
                 finally { clearInterval(progressTimer); }
                 // A kill / CLI exit can land during the (now non-blocking)
@@ -1941,6 +1944,7 @@ function registerWsHandler(wss, ctx) {
             // its worker parse cache, codex reads a MISSING rollout through
             // thread/read (B-21e4 item 5, local only) — a dead 0.153 thread whose
             // history lives only in codex's paginated store still opens read-only.
+            for (const [, s] of activeSessions) if (addressableId(s) === backendSessionId) BULK.personAct(s);   // B-cd4b r1062: View History is a person's own act on the conversation it names (its own address: a pending fork carrying the id is not it)
             try { const warm = harnessOf(data.backend || 'claude').store?.warmTranscript; if (warm) await warm(backendSessionId, data.cwd || '', { remote: !!data.host }); } catch {}
             const sm = createSessionMessages({
               backend: data.backend || 'claude',

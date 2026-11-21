@@ -223,6 +223,63 @@ try {
     ok(/if \(bulk\) \{\s*let told = false;\s*const tell = \(\) => \{ if \(told \|\| !chatView\._historyInFlight\) return; told = true; fetch\(`\/api\/session-messages\?[^`]*&person=1/.test(slSrc) && /chatView\._personAct = tell;\s*winInfo\.content\?\.addEventListener\?\.\('pointerdown', tell, \{ once: true \}\);/.test(slSrc)
       && /focus\(\) \{\s*if \(this\._chatInput\) this\._chatInput\.focus\(\);\s*this\._personAct\?\.\(\);/.test(cvSrc), 'the page: a bulk resume\'s window tells the hub once (person=1) at a press in it or the app going to it, while its history waits');
   }
+
+  console.log('— ⑩ THE MARK\'S WHOLE LIFE (主开发 r1062): bulk is the FIRST history read only — every road that warms or reads, driven twice');
+  {
+    // THE TABLE: each road over the real service, with one conversation a paced «Resume all» marked: its FIRST read asks in the bulk
+    // line (every warm and raw read it makes says bulk), and the read after that one LANDED asks as a person's. RED: the mark left set
+    // after the landing (src/bulk-read.js `landed` cut) ⇒ the second read is bulk again. THE CENSUS: no road reads the mark but
+    // through src/bulk-read.js — a member read of `_bulkRead` anywhere else under src/ fails BY NAME (its set in ws-create and its
+    // schema row aside); planted control. The socket's attach (ws-handler) is not loaded here: pinned by text
+    const H = require(path.join(REPO, 'src/harnesses'));
+    const tsSrc10 = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8'), brSrc10 = fs.readFileSync(path.join(REPO, 'src/bulk-read.js'), 'utf8');
+    const ROADS = [
+      ['the history route\'s first page (view)', 'claude', (svc, ref) => svc.page(ref, { offset: 0, limit: 50 })],
+      ['the paging read with an offset', 'claude', (svc, ref) => svc.page(ref, { offset: 20, limit: 50 })],
+      ['the search\'s read', 'claude', (svc, ref) => svc.searchIndexed(ref, 'needle')],
+      ['the turnmap', 'claude', (svc, ref) => svc.turnmap(ref)],
+      ['the status (with its task warm)', 'claude', (svc, ref) => svc.status(ref)],
+      ['the todos read (the task warm)', 'claude', (svc, ref) => svc.taskState(ref)],
+      ['codex\'s raw read (its view)', 'codex', (svc, ref) => svc.page(ref, { offset: 0, limit: 50 })],
+    ];
+    const table = async (TSm) => {
+      const rows = [];
+      for (let k = 0; k < ROADS.length; k++) {
+        const [name, backend, drive] = ROADS[k];
+        const sid = `a0b10000-0000-4000-8000-00000010${String(k).padStart(4, '0')}`, seen = [];
+        const live = { backend, claudeSessionId: backend === 'claude' ? sid : null, backendSessionId: sid, host: null, _bulkRead: true };
+        const st = H.get(backend).store, w0 = st.warmTranscript, hadT = Object.prototype.hasOwnProperty.call(st, 'warmTaskState'), t0 = st.warmTaskState;
+        st.warmTranscript = async (id, cwd, o) => { seen.push(!!(o && o.bulk)); return true; };
+        if (hadT) st.warmTaskState = async (id, cwd, o) => { seen.push(!!(o && o.bulk)); return true; };
+        const sm = () => ({ raw: () => [], rawAsync: async (o) => { seen.push(!!(o && o.bulk)); }, chatStatus: () => ({}), taskState: () => ({}) });
+        const svc = TSm.createTranscriptService({ activeSessions: new Map([['w10', live]]), createSessionMessages: sm, hosts: null });
+        try {
+          const ref = () => ({ backend, sessionId: sid, cwd: CWD, memo: {} });
+          let n = seen.length; await drive(svc, ref()); const first = seen.slice(n);
+          n = seen.length; await drive(svc, ref()); const second = seen.slice(n);
+          rows.push({ name, first, second });
+        } finally { st.warmTranscript = w0; if (hadT) st.warmTaskState = t0; }
+      }
+      return rows;
+    };
+    const g10 = await table(require(path.join(REPO, 'src/transcript-service.js')));
+    const noLanding = M.write('src/bulk-read.js', anchored(brSrc10, 'function landed(session) { if (session && session._bulkRead) session._bulkRead = false; }', 'function landed(session) { }', 'bulk-no-landing'), 'bulk-no-landing');
+    const r10 = await table(require(M.write('src/transcript-service.js', anchored(tsSrc10, "const BULK = require('./bulk-read');", `const BULK = require(${JSON.stringify(noLanding)});`, 'ts-bulk-no-landing'), 'ts-bulk-no-landing')));
+    for (const row of g10) ok(row.first.length > 0 && row.first.every((b) => b === true) && row.second.length > 0 && row.second.every((b) => b === false), `${row.name}: its first read is bulk (${row.first.join(',')}), the read after its landing a person's (${row.second.join(',')})`, row);
+    ok(r10.every((row) => row.second.some((b) => b === true)), `RED: the mark left set after the landing ⇒ the second read is bulk again on every road (${r10.map((x) => x.second.join(',')).join(' · ')})`, r10);
+    // THE CENSUS — a member read of the mark outside the one place, by name
+    const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+    const READ = /\.\s*_bulkRead\b|\[\s*['"]_bulkRead['"]\s*\]/;
+    const ALLOWED = new Set(['src/bulk-read.js', 'src/ws-create.js', 'src/session-schema.js']);
+    const census = (files) => files.filter(([f, t]) => !ALLOWED.has(f) && READ.test(strip(t))).map(([f]) => f);
+    const walk = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.posix.join(d, e.name); if (e.isDirectory()) walk(r, out); else if (e.name.endsWith('.js')) out.push(r); } return out; };
+    const tree = walk('src').map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]);
+    const outside = census(tree), planted = census([['src/planted-road.js', 'function read(s) { return !!s._bulkRead; }'], ['src/planted-comment.js', '// a comment naming s._bulkRead is no read']]);
+    ok(outside.length === 0 && planted.join() === 'src/planted-road.js', `THE CENSUS: no road reads the mark but through src/bulk-read.js (${tree.length} files; outside: ${outside.join(', ') || 'none'}); CONTROL a planted road named, a comment not (${planted.join(', ')})`, { outside, planted });
+    const ws10 = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+    ok(/const bulkRead = BULK\.isBulk\(session\);/.test(ws10) && /await rebuildHistory\(session, data\.sessionId, sm\.raw\(\)[^\n]*\n\s*BULK\.landed\(session\);/.test(ws10) && /\{ bulk: BULK\.isBulk\(session\) \}/.test(ws10) && /if \(addressableId\(s\) === backendSessionId\) BULK\.personAct\(s\);   \/\/ B-cd4b r1062: View History/.test(ws10),
+      'the socket\'s attach (pinned by text): its first attach reads the mark through the one place and consumes it when its history lands; its task warm the same; View History is a person\'s own act on the conversation it names (its own address)');
+  }
 } catch (e) { fail++; console.log('  ✗ threw: ' + ((e && e.stack) || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

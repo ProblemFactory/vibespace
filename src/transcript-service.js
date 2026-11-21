@@ -48,6 +48,7 @@ function picturePool() {
 }
 const isDeviceHandle = (fp) => typeof fp === 'string' && fp.startsWith(DEVICE_HANDLE);
 
+const BULK = require('./bulk-read');   // B-cd4b r1062: the bulk mark's ONE place
 function createTranscriptService({ activeSessions, createSessionMessages, hosts }) {
   // ── R3 SWITCHOVER (2.292.0): remote reads are served BY THE MACHINE THAT
   // HOLDS THE BYTES (the daemon's `transcript-op`, dark since 2.285.0 with a
@@ -175,7 +176,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
    *  read of a conversation a paced «Resume all» created (its live session's `_bulkRead`, set by ws-create) is bulk on EVERY road
    *  that warms: the socket's first attach (ws-handler), this service's view and task warm, and codex's raw read — until a person's
    *  own act on it (personAsk, below; or the socket's first attach, which reads it and clears it as before). */
-  function bulkOf(r) { const live = liveSession(r); return !!(live && live._bulkRead); }
+  function bulkOf(r) { return BULK.isBulk(liveSession(r)); }   // r1062: through the one place (src/bulk-read.js) — consumed at the read's landing
   /** A PERSON'S OWN ACT on a conversation whose history still waits (the creating page's quiet window: its pointer press, or the
    *  app going to it — src/lib/session-lifecycle.js): the conversation's bulk mark is cleared, and its warm is asked as a person's —
    *  it joins the one in flight for the file and moves it into the person's line (src/session-store.js promoteWarm). Never waits,
@@ -184,7 +185,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   function personAsk(ref) {
     const r = norm(ref);
     const live = liveSession(r);
-    if (live) live._bulkRead = false;
+    BULK.personAct(live);
     try { const warm = harnessOf(r.backend || 'claude').store?.warmTranscript; if (warm) Promise.resolve(warm(r.sessionId, r.cwd, { remote: !!r.host, ...(live ? { session: live } : {}) })).catch(() => { }); } catch { }
     return { ok: true, live: !!live };
   }
@@ -211,6 +212,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const mm = createMessageManager(r.backend, 'api', { threadId: r.sessionId }); // the rendered conversation's id (codex ledger key)
     await mm.convertHistoryAsync(sm.raw());
+    BULK.landed(session);   // r1062: the history read LANDED — the conversation's later reads are a person's
     if (r.memo) r.memo.view = { mm, session };
     return { mm, session };
   }
@@ -271,6 +273,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (session?._permissionMode && chatStatus && !chatStatus.permissionMode) {
       chatStatus.permissionMode = session._permissionMode;
     }
+    BULK.landed(session);   // r1062: the status read landed
     return { chatStatus, taskState: sm.taskState?.() || null };
   }
 
@@ -290,6 +293,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     const sm = await sideFileOf(createSessionMessages(sessionShape(r, live), liveIdOf(live)));   // B-952b: the live session's id — its wrapper's side file holds codex's plan, read off the loop
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const st = sm.taskState() || {};
+    BULK.landed(live);   // r1062: the todos read landed
     return hostFetchError || lastCopy ? { ...st, hostFetchError: hostFetchError || lastCopy, ...(lastCopy ? { hostOffline: true } : {}) } : st;   // hostOffline: the page words it in the reader's language
   }
 
