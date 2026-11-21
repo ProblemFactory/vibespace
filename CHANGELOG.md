@@ -12,10 +12,17 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - `vibespace-vault uses` keeps ended approvals across a restart and while the agent cannot use the entry, and says «used» for a one-time run past its hours.
 - On a paired machine with more than 500 project folders, the newest conversations now show in its list; they could be missing.
 - Manage agents: long-lived token notes name the menu item to use; an account whose token expired offers «Long-lived token (expired)…» where it is refused.
-- When VibeSpace stops starting a browser, its live window shows «Agent browser…» right beside the message, instead of a menu path.
+- When VibeSpace stops starting a browser, its live window shows «Agent browser…» on its bar, instead of a menu path.
+- Session properties no longer offers an account whose long-lived token expired; it shows the mark and «Re-mint…» beside it, as the billing menu does.
 - Settings: the Local diagnostics row offers «Diagnostics report…» and the Customize mode rows offer «Customize UI…» on the row itself, instead of a menu path.
 - A conversation can now use its own vault entry together with one you shared with it in the same command; that command was refused before.
 - On a paired machine, picking a subscription now keeps your own Claude settings file's hooks and deny rules: the machine merges it itself.
+- An agent driving a desktop app by its pictures can now pick a window the app opened, such as a sign-in popup, and click and type in it.
+- Pressing «End them» again after a stopped turn now shows only the latest result, instead of adding a new one each time.
+- On a phone or tablet the code editor's font size works above 16 px again, shows the size it draws, and says why it goes no lower than 16.
+- A window change made just before a page reloads while its connection to VibeSpace is down is no longer lost.
+- A machine that answered is no longer called unreachable when its list is late or could not be read; the remote list and search say why it is old.
+- A remote machine's conversation list no longer empties when it refreshes on its own (after a conversation there ends or changes); it stayed empty until ⟳.
 
 ## 2.369.415 — 2026-11-21
 
