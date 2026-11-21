@@ -79,8 +79,8 @@ const hits = [];
 // the cure (round wudero5nj, M3): every page reports its OWN keydowns (/key?w=<which>&k=<key>) — a key on the popup's handle must
 // arrive in the popup and none in the main; the main's own «x» closes both popups (the CONTROL key, and the leg's clean-up)
 const KEYS_JS = (w) => `<script>addEventListener('keydown', (e) => { fetch('/key?w=${w}&k=' + encodeURIComponent(e.key)); if (${JSON.stringify(w)} === 'main' && e.key === 'x') { for (const p of (window.__pops || [])) { try { p.close(); } catch {} } } });</script>`;
-const POPUPS_HTML = '<!doctype html><title>Popups</title><button id="open" style="position:fixed;inset:0;width:100%;height:100%;font-size:40px" onclick="window.__pops = [window.open(\'/p1\', \'p1\', \'left=0,top=0,width=520,height=620\'), window.open(\'/p2\', \'p2\', \'left=3200,top=2400,width=420,height=320\')]">Open the sign-in windows</button>' + KEYS_JS('main');
-const page = http.createServer((req, res) => { hits.push({ url: req.url, ua: req.headers['user-agent'] || '' }); res.setHeader('Content-Type', 'text/html'); if (String(req.url).startsWith('/popups')) return res.end(POPUPS_HTML); if (/^\/p[12]\b/.test(String(req.url))) return res.end(`<!doctype html><title>Sign in – stand-in ${String(req.url).slice(2, 3)}</title><h1>Sign in</h1>${KEYS_JS('p' + String(req.url).slice(2, 3))}`); res.end('<!doctype html><title>E2A rung page</title><h1>Hello rung</h1><button>Press me</button>'); });
+const POPUPS_HTML = '<!doctype html><title>Popups</title><button id="open" style="position:fixed;inset:0;width:100%;height:100%;font-size:40px" onclick="var n = (window.__n = (window.__n || 0) + 1); (window.__pops = window.__pops || []).push(n === 1 ? window.open(\'/p1\', \'p1\', \'left=0,top=0,width=520,height=620\') : window.open(\'/p2\', \'p2\', \'left=3200,top=2400,width=420,height=320\'))">Open the sign-in windows</button>' + KEYS_JS('main');
+const page = http.createServer((req, res) => { hits.push({ url: req.url, ua: req.headers['user-agent'] || '' }); res.setHeader('Content-Type', 'text/html; charset=utf-8'); if (String(req.url).startsWith('/popups')) return res.end(POPUPS_HTML); if (/^\/p[12]\b/.test(String(req.url))) return res.end(`<!doctype html><title>Sign in – stand-in ${String(req.url).slice(2, 3)}</title><h1>Sign in</h1>${KEYS_JS('p' + String(req.url).slice(2, 3))}`); res.end('<!doctype html><title>E2A rung page</title><h1>Hello rung</h1><button>Press me</button>'); });
 await new Promise((r) => page.listen(PAGE_PORT, '127.0.0.1', r));
 const appsOf = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(wt, 'data/desktop-apps.json'), 'utf8')).apps); } catch { return []; } };
 let cleaned = false;
@@ -283,10 +283,14 @@ try {
   // app is either IN the image or NAMED with its own handle (never a silent stay on the first window), and a named window's own
   // handle gives THAT window's image. Printed whole (a MEASURE of where xpra puts a popup the page placed)
   {
+    // the box run (int361 row 39, 5b4176f46): a real Chrome's popup blocker lets ONE window.open use a click's activation — the
+    // second never opened (the server saw /p1 alone). The page opens one popup a click; the leg clicks twice, each popup waited for
     const hits0 = hits.length;
     const ckP = await cli('vibespace-window', ['click', H2, '--at', '960,540']);
-    const opened = await until(async () => (hits.slice(hits0).some((h) => /^\/p1\b/.test(h.url)) && hits.slice(hits0).some((h) => /^\/p2\b/.test(h.url)) ? true : null), 30000, 500);
-    check(`B-dbb4 stand-in: a REAL click on the page opened its two top-level popups (the server saw /p1 and /p2 load)`, ckP.code === 0 && !!opened, { ckP, hits: hits.slice(hits0).map((h) => h.url) });
+    const opened1 = await until(async () => (hits.slice(hits0).some((h) => /^\/p1\b/.test(h.url)) ? true : null), 30000, 500);
+    const ckP2 = await cli('vibespace-window', ['click', H2, '--at', '960,540']);
+    const opened = opened1 && await until(async () => (hits.slice(hits0).some((h) => /^\/p2\b/.test(h.url)) ? true : null), 30000, 500);
+    check(`B-dbb4 stand-in: two REAL clicks on the page opened its two top-level popups, one each (the server saw /p1, then /p2 load)`, ckP.code === 0 && ckP2.code === 0 && !!opened, { ckP, ckP2, hits: hits.slice(hits0).map((h) => h.url) });
     const shotP = path.join(PNG_DIR || scratch('da-rung-png'), 'dbb4-popups.png'); let ssP = null, acc = null;
     await until(async () => {
       ssP = await cli('vibespace-window', ['screenshot', H2, '--out', shotP]);
@@ -302,7 +306,7 @@ try {
     console.log(`    MEASURE B-dbb4 (not a proof): each named window's own screenshot: ${JSON.stringify(own)}`);
     // the cure (wudero5nj): the leg cannot pass on nothing — at least one NAMED window is the stand-in's own popup, BY ITS TITLE,
     // and its own handle gave its own image
-    const popNamed = ((ssP && ssP.out) || '').match(/«Sign in – stand-in ([12])» \d+x\d+ at [^;]*? its own handle `([^`]+)`/);
+    const popNamed = ((ssP && ssP.out) || '').match(/«Sign in – stand-in ([12])(?: - [^»]*)?» \d+x\d+ at [^;]*? its own handle `([^`]+)`/); // the title as the window bar has it: + the browser's own suffix
     const popOwn = popNamed ? own.find((x) => x.h === popNamed[2]) : null;
     check(`B-dbb4 unit 2 on the real chromium: a NAMED window is the stand-in's own popup by its title (${popNamed ? `«Sign in – stand-in ${popNamed[1]}» as ${popNamed[2]}` : 'none named'}) and its OWN handle gives its own image; every other named window's too (${own.length} named)`, !!popNamed && !!popOwn && popOwn.code === 0 && popOwn.subject && !!popOwn.dims && own.every((x) => (x.code === 0 && x.subject && x.dims) || /\[window_not_visible\]/.test(x.err)), { popNamed, own });
     // M3: a key on the popup's OWN handle arrives in THAT popup (its page reads its own keydown) and the main window gets none;
