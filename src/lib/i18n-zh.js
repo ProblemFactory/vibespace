@@ -2806,9 +2806,12 @@ export default {
   "the storage did not connect": "存储没有连上",
   "No permission to create the mount point {mp} — pick a writable location, or create it yourself first: sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'": "没有权限创建挂载位置 {mp}——请选一个可写的位置，或先自己创建：sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'",
   "The mount point {mp} exists but is not writable by VibeSpace — fix ownership: sudo chown {owner} '{mp}'": "挂载位置 {mp} 已存在，但 VibeSpace 无法写入——请修正所有者：sudo chown {owner} '{mp}'",
-  "The mount point {mp} could not be checked — this machine did not answer in time; try again in a moment": "挂载位置 {mp} 暂时无法检查——这台机器没有及时回应；请稍后再试",   // B-323e (lane bl-machines-b)
+  "The mount point {mp} could not be checked — VibeSpace did not get an answer in time; try again in a moment": "挂载位置 {mp} 暂时无法检查——VibeSpace 没有及时得到回应；请稍后再试",   // B-323e (lane bl-machines-b)
+  "Files written while the storage was disconnected may have been moved from {mp} to {dest} — VibeSpace got no answer; look in {dest}": "存储断开期间写入的文件可能已从 {mp} 移到 {dest}——VibeSpace 没有得到回应；请到 {dest} 查看",   // B-323e (lane bl-machines-b)
   "The mount point {mp} is not empty ({names}) — these were written while the storage was disconnected; move them away, then reconnect": "挂载位置 {mp} 不是空的（{names}）——这些是在存储断开期间写入的；请先移走它们，再重新连接",
   "Moved stranded files to {dest} but could not recreate the mount point {mp}: {detail}": "已把滞留的文件移到 {dest}，但无法重新创建挂载位置 {mp}：{detail}",
+  "Moved stranded files to {dest}, but VibeSpace got no answer while recreating the mount point {mp} — try again in a moment": "已把滞留的文件移到 {dest}，但重新创建挂载位置 {mp} 时 VibeSpace 没有得到回应——请稍后再试",   // B-323e (lane bl-machines-b)
+  "The mount point {mp} could not be read — files written there while the storage was disconnected could be hidden by the mount; check the folder": "无法读取挂载位置 {mp}——存储断开期间写入那里的文件可能会被挂载遮住；请检查该文件夹",   // B-323e (lane bl-machines-b)
   "this share was minted by this same VibeSpace (self-mount deadlocks the server) — open the shared folder directly instead": "这个共享是由同一个 VibeSpace 生成的（挂载自己会让服务器死锁）——请直接打开那个共享文件夹",
   "OneDrive token unreadable — re-run the sign-in": "OneDrive 令牌无法读取——请重新登录",
   "OneDrive token expired before the drive could be resolved — sign in again (\"Re-authorize OneDrive…\" in the edit dialog)": "在确定网盘之前 OneDrive 令牌已过期——请重新登录（编辑对话框里的“重新授权 OneDrive…”）",
@@ -9205,6 +9208,7 @@ export default {
   "Agent messages": "智能体消息",
   "Storage {name} stopped answering and was disconnected to keep VibeSpace responsive — it reconnects by itself": "存储 {name} 停止响应，为保持 VibeSpace 响应已断开 — 会自动重新连接",
   "Files written into {path} while storage {name} was disconnected were moved to {dest} — nothing was deleted": "存储 {name} 断开期间写入 {path} 的文件已移到 {dest} — 没有删除任何文件",
+  "Files written into {path} while storage {name} was disconnected may have been moved to {dest} — VibeSpace got no answer; nothing was deleted": "存储 {name} 断开期间写入 {path} 的文件可能已移到 {dest} — VibeSpace 没有得到回应；没有删除任何文件",   // B-323e (lane bl-machines-b)
   "Storage: the preset «{preset}» signs in with another OAuth client now — {n} mount(s) still on the old one; re-authorize each": "存储：预设「{preset}」现在用另一个 OAuth 客户端登录——还有 {n} 个挂载在用旧的；请逐个重新授权",
   "These mounts keep refreshing with the client they signed in with until it is deleted: {names}.": "这些挂载会继续用登录时的客户端刷新，直到它被删除：{names}。",
   "These mounts keep refreshing with the client they signed in with until it is deleted: {names} and {more} more.": "这些挂载会继续用登录时的客户端刷新，直到它被删除：{names}，另外还有 {more} 个。",

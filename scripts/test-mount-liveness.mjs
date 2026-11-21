@@ -417,7 +417,7 @@ async function killedLegs(MM, tag) {   // the merged B-f230: a hung process stop
   ok(!K.err && K.stranded && K.stranded[0] === 'stranded' && K.stranded[2] === '/x/od.stranded-20261117T2340' && typeof K.stranded[3] === 'string' && K.stranded[3].length > 0, '⑦ (B-f230) stranded files moved aside ⇒ the producer told where (kept in For-you, not a toast only)', JSON.stringify(K.stranded || K.err));
   const msrc = fs.readFileSync(MOUNTS, 'utf8');
   ok(/console\.warn\(`\[mounts\] \$\{r\} daemon on \$\{mp\} \(never mounted\) — killed`\);\n\s*await this\._killMountDaemon\(mp\);\n\s*this\._noteReconnectBackoff\(id\);\n\s*this\._saidKilled\(m\);/.test(msrc)
-    && /if \(v\.verdict === 'dead' \|\| v\.verdict === 'unreachable'\) this\._saidKilled\(live\);/.test(msrc) && /const dest = await this\._ensureMountpointDir\(mp, \{ quarantine: true \}\);[^\n]*\n\s*if \(dest\) this\._noteStranded\(m, dest\);/.test(msrc),
+    && /if \(v\.verdict === 'dead' \|\| v\.verdict === 'unreachable'\) this\._saidKilled\(live\);/.test(msrc) && /const dest = await this\._ensureMountpointDir\(mp, \{ quarantine: true \}\)\.catch\(\(e\) => \{ this\._strandedRefused\(m, e\); this\._errors\.set\(id, this\._sayE\(id, e\)\); this\._notify\(\); throw e; \}\);[^\n]*\n\s*if \(dest\) this\._noteStranded\(m, dest\);/.test(msrc),
     '⑦ (B-f230) every road that stops a mount\'s process says it: the STARTING hung / ceiling kill, the dead and the unreachable-ceiling teardowns; a CephFS mount\'s stranded files too (r1 #4, #19)');
   const os = require('node:os');
   const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
@@ -443,7 +443,7 @@ async function killedLegs(MM, tag) {   // the merged B-f230: a hung process stop
   const FA = require(path.join(REPO, 'src/foryou-actions.js'));
   const MP = require(path.join(REPO, 'src/server/mount-for-you.js'));
   const row = FA.ROW_OF['mount-reconnect'] || { checkSaid: {} };
-  const keys = [row.checkAgain, row.checkLabel, ...['done', 'started', 'none', 'failed'].map((k) => row.checkSaid[k]), MP.TEXT, MP.TEXT_NOPROV, MP.DETAIL, MP.KILLED, MP.STRANDED, require(path.join(REPO, 'src/mount-door.js')).PARKED];
+  const keys = [row.checkAgain, row.checkLabel, ...['done', 'started', 'none', 'failed'].map((k) => row.checkSaid[k]), MP.TEXT, MP.TEXT_NOPROV, MP.DETAIL, MP.KILLED, MP.STRANDED, MP.STRANDED_MAYBE, require(path.join(REPO, 'src/mount-door.js')).PARKED];
   const miss = keys.filter((k) => typeof k !== 'string' || !Z[k] || !J[k]);
   ok(miss.length === 0, '⑦ every word of the mounts\' items and the door is in the zh and ja dictionaries', miss.join(' | '));
   const UTA = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf8');

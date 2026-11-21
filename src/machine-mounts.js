@@ -38,23 +38,29 @@ const { rcloneMountArgs, shellWords, SSH_HOST_WEBDAV_ROW } = require('./mount-ar
 const PAIR_GRACE_MS = 120000;   // B-844b r4: after a start, the mount that worked LAST (else the elder) keeps its folder while the machines redial; then a held record that can mount takes over from a holder that cannot
 const LET_GO_MS = 20000;   // B-844b r4: how long a heal waits for a pull REMOVED from its folder to let it go
 const PROBE_STUCK_MS = 60000;   // 主开发's small 2: a probe child still alive past this is said once (its folder not judged meanwhile)
+/** B-323e (its reader's M2): a child of THE STARTER whose end this hub may NEVER hear — killed at its bound and asleep in the kernel
+ *  (a dead mount), or started by a starter that then stopped answering; a fault ends the starter, never its children — so its pid and
+ *  start time are kept and its end is asked of /proc when it is owed (as mounts.js _probeMountpoint's held mark, B-91aa — but see no
+ *  /proc below): no such process, a zombie, or that pid now another process's (its start differs) ⇒ ended.
+ *  THE ANCHOR IS THE STARTER'S REPLY, NEVER A CLOCK (主开发 r1284 (3)): kept at its «timeout» (onTimeout — the child it just killed is
+ *  still there, so the process at that pid IS the child) or at the no answer itself; a child already ended when kept (no such process,
+ *  a zombie) is gone for good. NO /proc (r1284 (4)): /proc's silence is no evidence — there the KERNEL is asked by signal 0 (a
+ *  syscall, no child started) — and so for a pid /proc says nothing of: the child still there ⇒ held (until its late end or its end),
+ *  none (or a pid not ours) ⇒ gone; a late end that can never come (its starter faulted) never holds a flight for good (its
+ *  re-read's M1). mounts.js's held mark reads /proc's silence as gone — this file asks the kernel instead. LEFT: the kernel's
+ *  witness has no identity — a pid another process of this user took holds the flight for that process's life (said in the kb) */
+function heldChild(pid) {
+  if (!pid) return { pid: 0, gone: () => true };
+  const kernel = () => { try { process.kill(pid, 0); return false; } catch { return true; } };   // signal 0: a syscall, no child started
+  if (!PI.hasProc()) return { pid, gone: kernel };   // no /proc: the kernel by signal 0
+  const st0 = PI.statOf(pid);
+  if (st0 === null || (st0 && st0[0] === 'Z')) return { pid, gone: () => true };
+  const start = st0 ? st0[1] : null;
+  return { pid, gone() { const st = PI.statOf(pid); if (st === undefined) return kernel(); return st === null || (!!st && (st[0] === 'Z' || (start != null && st[1] !== start))); } };   // a read that says nothing for it: the kernel (its re-read)
+}
 /** THE one `ls` child of this file (spawn-env-census: one probe site) — never node fs on a mount point. `names` asks `ls -A`
  *  for the folder's entries (B-fcc7: is a released pull's bare folder empty?). Bounded (8 s), ended by its handle.
  *  → { ok, empty } (empty: null unless `names`). */
-/** B-323e (its reader's M2): a child of THE STARTER whose end this hub may NEVER hear — killed at its bound and asleep in the kernel
- *  (a dead mount), or started by a starter that then stopped answering; a fault ends the starter, never its children — so its pid and
- *  start time are kept and its end is asked of /proc when it is owed, as mounts.js _probeMountpoint's held mark (B-91aa): no such
- *  process, a zombie, or that pid now another process's ⇒ ended; a /proc this hub cannot read says nothing (still held).
- *  (its re-read's S1) ENDED ALREADY when kept (no such process, a zombie) ⇒ gone for good — its pid may go to another; with
- *  `notAfter` (the ask's instant + a slack), a process that STARTED after it is not this ask's child (the pid reused) ⇒ gone */
-function heldChild(pid, notAfter = 0) {
-  const st0 = pid ? PI.statOf(pid) : null;
-  if (st0 === null || (st0 && st0[0] === 'Z')) return { pid: pid || 0, gone: () => true };
-  const start = st0 ? st0[1] : null;
-  if (notAfter && start != null) { const w = PI.wallStartOf(start); if (w != null && w > notAfter) return { pid, gone: () => true }; }
-  return { pid, gone() { const st = PI.statOf(pid); return st === null || (!!st && (st[0] === 'Z' || (start != null && st[1] !== start))); } };
-}
-const ASK_SLACK_MS = 2000;   // a child starts within this of its ask (the starter's turn); one that started later is another's
 function lsChild(mp, { names = false, ms = 8000 } = {}) {   // → ok: true / false (no answer in time, an error) / null (it could not start, or no answer from the starter); exited: the child's own end
   // B-323e (its mount half, lane bl-machines-b): THE STARTER runs it (src/server/child-starter.js — a fork of a few MB, never the hub's
   // 4.5–5 GB process; the pull sweep asks it every 90 s for each live pull). Its answers read as the release read its own child:
@@ -63,13 +69,13 @@ function lsChild(mp, { names = false, ms = 8000 } = {}) {   // → ok: true / fa
   // = not empty). `exited` = the child's own end: at the answer, or — killed at its bound and still asleep — when it ends at last;
   // `held` = such a child, kept for its owner to ask /proc (heldChild) when its end may never be heard
   let exitedRes, held = null; const exited = new Promise((r) => { exitedRes = r; });
-  const S = require('./server/child-starter').childStarter(), askedAt = Date.now();
-  return S.run('ls', names ? ['-A', mp] : [mp], { timeoutMs: ms, capture: names, maxBuffer: 4096, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => { held = heldChild(pid, askedAt + ASK_SLACK_MS); }, onLateExit: () => exitedRes() })
+  const S = require('./server/child-starter').childStarter();
+  return S.run('ls', names ? ['-A', mp] : [mp], { timeoutMs: ms, capture: names, maxBuffer: 4096, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => { held = heldChild(pid); }, onLateExit: () => exitedRes() })
     .then((r) => {
-      if (r && r.unknown && r.pid) return { ok: null, empty: null, exited, held: heldChild(r.pid, askedAt + ASK_SLACK_MS) };   // started, then no answer: it may still run
+      if (r && r.unknown && r.pid) return { ok: null, empty: null, exited, held: heldChild(r.pid) };   // started, then no answer: it may still run
       // (said: a no answer with no pid — the starter froze before its «started» line — is let go at once: its child, if any, is not known)
       if (!r || r.unknown || !r.started) { exitedRes(); return { ok: null, empty: null, exited }; }
-      if (r.timedOut) return { ok: false, empty: null, exited, held: held || heldChild(r.pid, askedAt + ASK_SLACK_MS) };   // its end comes through onLateExit, or of /proc
+      if (r.timedOut) return { ok: false, empty: null, exited, held: held || heldChild(r.pid) };   // its end comes through onLateExit, or of /proc
       exitedRes();
       if (r.overflow) return { ok: true, empty: names ? false : null, exited };
       return { ok: r.code === 0 && !r.error, empty: names && r.code === 0 && !r.error ? String(r.stdout || '').length === 0 : null, exited };   // a name of spaces is a name
@@ -102,7 +108,7 @@ function realpathChild(p, { ms = 6000, onExit = null, onHeld = null } = {}) {   
   const lex = path.resolve(String(p || '/'));
   let gone = false; const exited = () => { if (!gone) { gone = true; try { onExit && onExit(); } catch { } } };
   const S = require('./server/child-starter').childStarter();
-  const askedAt = Date.now(), keep = (pid) => { try { onHeld && onHeld(heldChild(pid, askedAt + ASK_SLACK_MS)); } catch { } };
+  const keep = (pid) => { try { onHeld && onHeld(heldChild(pid)); } catch { } };
   return S.run('realpath', ['-m', '--', lex], { timeoutMs: ms, capture: true, maxBuffer: 8192, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => keep(pid), onLateExit: exited })
     .then((r) => {
       if (r && r.unknown && r.pid) { keep(r.pid); return null; }   // started, then no answer: it may still run
@@ -1139,7 +1145,7 @@ class MachineMounts {
     const pending = !!rec && !!this._releasing && this._releasing.has(this._markKey(rec));   // the boot's release of it still runs
     // B-323e (its reader's M2): a probe child whose end this hub may never hear (asleep in the kernel, its starter then replaced) is
     // asked of /proc — ended ⇒ its single flight ends here and the folder is asked again
-    if (rec && this._probing.has(rec.id) && this._probingHeld?.get(rec.id)?.gone()) { this._probing.delete(rec.id); this._probingAt?.delete(rec.id); this._probeSaid?.delete(rec.id); this._probingHeld.delete(rec.id); this._probingTok?.delete(rec.id); }
+    if (rec && this._probing.has(rec.id) && this._probingHeld?.get(rec.id)?.gone()) { this._probing.delete(rec.id); this._probingAt?.delete(rec.id); this._probeSaid?.delete(rec.id); this._probingHeld.delete(rec.id); this._probingTok?.delete(rec.id); this._reprobe?.delete(rec.id); }
     if (rec && this._probing.has(rec.id)) {
       (this._reprobe = this._reprobe || new Set()).add(rec.id);   // asked while one runs: again once that child exits (read 6: a multi-select delete)
       // 主开发's small 2: a probe child that never ends (an `ls` asleep in the kernel) — bounded: its folder is not judged meanwhile

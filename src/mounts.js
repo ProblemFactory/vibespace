@@ -1291,7 +1291,7 @@ class MountManager {
     const mp = this.pathOf(m);
     let dest = null;
     try { dest = await this._ensureMountpointDir(mp, { quarantine: true }); }
-    catch (e) { this._errors.set(id, this._sayE(id, e)); this._notify(); throw e; } // mount()'s finally clears _connecting
+    catch (e) { this._strandedRefused(m, e); this._errors.set(id, this._sayE(id, e)); this._notify(); throw e; } // mount()'s finally clears _connecting
     if (dest) this._noteStranded(m, dest);
     await this._rcloneFlagsReady();   // B-323e: the help text through THE STARTER first — the argv's flag checks below then read the cache
     const { env, remote } = this._rcloneFor(m);
@@ -1479,9 +1479,21 @@ class MountManager {
 
   /** Stray files moved aside at connect: said on the row (the move itself
    *  broadcasts the level-2 server-notice). */
-  _noteStranded(m, dest) {
-    (this._stranded = this._stranded || new Map()).set(m.id, dest);
-    try { this.onStranded?.(m, { dest, path: this.pathOf(m) }); } catch (e) { console.warn(`[mounts] ${m.id}: the stranded notice was not filed: ${e.message}`); }   // B-5ce7 (merged B-f230): kept in For-you, not a toast only
+  _noteStranded(m, dest, { maybe = false } = {}) {
+    if (!maybe) (this._stranded = this._stranded || new Map()).set(m.id, dest);   // the row's «were moved» line: a move KNOWN to have run
+    try { this.onStranded?.(m, { dest, path: this.pathOf(m), ...(maybe ? { maybe: true } : {}) }); } catch (e) { console.warn(`[mounts] ${m.id}: the stranded notice was not filed: ${e.message}`); }   // B-5ce7 (merged B-f230): kept in For-you, not a toast only
+  }
+
+  /** B-323e (its re-read's S1/S3): a refusal AFTER the files may have moved — the move got no answer (mp_move_unanswered: «may
+   *  have been moved») or the re-make after a known move failed (mp_not_recreated / mp_remake_unanswered) — is FILED For-you with the folder it names,
+   *  never only a row error the next reconnect erases */
+  _strandedRefused(m, e) {
+    const dest = e && e.params && e.params.dest;
+    if (!dest) return;
+    if (e.code === 'mp_move_unanswered') {   // the journal names EVERY such folder (one For-you item a mount names only the latest)
+      console.warn(`[mounts] mount ${m.id}: files may have been moved from ${e.params.mp} to ${dest} — no answer; filed For-you`);
+      this._noteStranded(m, dest, { maybe: true });
+    } else if (e.code === 'mp_not_recreated' || e.code === 'mp_remake_unanswered') this._noteStranded(m, dest);   // a known move (its quarantine line is journalled already)
   }
 
   /** The fuse mount exists: IO health probe, unblock, access check. */
@@ -2184,8 +2196,11 @@ class MountManager {
     const mp = this.pathOf(m);
     if (this.pathBlocked(mp) || this._connecting?.has(m.id) || this._starting?.has(m.id)) return; // connect/start/teardown in flight
     if (m.expiresAt && Date.now() > m.expiresAt) return;             // expired — user must re-import
-    const err = this._errors.get(m.id) || '';
-    if (/denied|revoked|expired|AccessDenied|SignatureDoesNotMatch|self-mount|bucket-scoped|credential|log ?in|invalid_grant|unauthorized|401|403/i.test(err)) return;
+    const err = this._errors.get(m.id) || '', said = this._errorCodes && this._errorCodes.get(m.id);
+    // B-323e (its re-read): a mount point's OWN refusal (mp_*) is never an auth verdict — its words carry paths and a destination's
+    // stamp («…0401…» read as «401»); the words are tested only when the row's error is not one
+    const mpOwn = !!said && said.words === err && /^mp_/.test(String(said.code || ''));
+    if (!mpOwn && /denied|revoked|expired|AccessDenied|SignatureDoesNotMatch|self-mount|bucket-scoped|credential|log ?in|invalid_grant|unauthorized|401|403/i.test(err)) return;
     const st = this._reconnects?.get(m.id);
     if (st && Date.now() < st.nextAt) return;
     this._noteReconnectBackoff(m.id);
@@ -2231,7 +2246,7 @@ class MountManager {
   async _mountCephfs(id) {
     const m = this._get(id);
     const mp = this.pathOf(m);
-    const dest = await this._ensureMountpointDir(mp, { quarantine: true }); // sudo -n fallback covers root-owned parents
+    const dest = await this._ensureMountpointDir(mp, { quarantine: true }).catch((e) => { this._strandedRefused(m, e); this._errors.set(id, this._sayE(id, e)); this._notify(); throw e; }); // sudo -n fallback covers root-owned parents
     if (dest) this._noteStranded(m, dest);   // B-5ce7 (B-f230, r1 #19): a CephFS mount's stranded files reach For-you too
     await this._ensureModprobeShim(); // 3.5.0-class images lack kmod — see above
     // `sudo mount -t ceph <mons>:<path> <mp> -o name=<user>,secret=<key>,mds_namespace=<fs>`
@@ -2503,17 +2518,21 @@ class MountManager {
     // B-323e (its mount half): by THE STARTER (a connect, and the sweep's reconnect of a mount that stays down); NO ANSWER from it is no
     // verdict — never «no permission» — said by its own code (mp_unanswered), and the reconnect asks again by itself
     const S = require('./server/child-starter').childStarter();
-    const run = (cmd, args) => S.run(cmd, args, { timeoutMs: 8000, capture: true, envAdd: { PATH: process.env.PATH || '' } }).then((r) => (!r || r.unknown
-      ? { ok: false, unknown: true, stdout: '', stderr: '' }
-      : { ok: !!r.started && !r.timedOut && r.code === 0 && !r.error, stdout: String(r.stdout || ''), stderr: String(r.stderr || r.error || (r.timedOut ? 'no answer in time' : '')) }), () => ({ ok: false, unknown: true, stdout: '', stderr: '' }));
+    // r1284 (6): a child KILLED AT ITS BOUND (a dead endpoint) is no verdict either; (1) an output past its bound is kept as `overflow`
+    // (read FIRST: a listing past its bound is not empty, even when its end came at the bound); its re-read: a child that NEVER STARTED
+    // (the starter's table full, EAGAIN, EMFILE) is no answer either — never «empty», «no permission» nor «not writable» on a guess;
+    // `pid`: a child that may still run (a move is judged by it); the C locale, so an answered failure's words read as written
+    const run = (cmd, args) => S.run(cmd, args, { timeoutMs: 8000, capture: true, envAdd: { PATH: process.env.PATH || '', LC_ALL: 'C' } }).then((r) => (!r || r.unknown || !r.started || (r.timedOut && !r.overflow)
+      ? { ok: false, unknown: true, started: false, never: !!r && !r.unknown && !r.started, pid: (r && r.pid) || 0, stdout: '', stderr: '' }
+      : { ok: !r.timedOut && r.code === 0 && !r.error, started: true, overflow: !!r.overflow, stdout: String(r.stdout || ''), stderr: String(r.stderr || r.error || '') }), () => ({ ok: false, unknown: true, started: false, pid: 0, stdout: '', stderr: '' }));
     const owner = `${typeof process.getuid === 'function' ? process.getuid() : 0}:${typeof process.getgid === 'function' ? process.getgid() : 0}`;
     // every no answer is no verdict (its reader's S1): never «no permission», «not writable», «not empty» nor «moved» on a guess
     const ask = async (cmd, args) => { const x = await run(cmd, args); if (x.unknown) throw MW.refusal('mp_unanswered', { mp }); return x; };
     let made = await ask('mkdir', ['-p', mp]);
     if (!made.ok && /permission denied|not permitted/i.test(made.stderr)) {
-      const su = await ask('sudo', ['-n', 'mkdir', '-p', mp]);
+      const su = await run('sudo', ['-n', 'mkdir', '-p', mp]);   // a rescue with no answer: the plain step's answered verdict stands (its re-read's S2)
       if (su.ok) {
-        await ask('sudo', ['-n', 'chown', owner, mp]);
+        await run('sudo', ['-n', 'chown', owner, mp]);
         global.__vsEvent?.('mount-mkdir-sudo');
         made = { ok: true };
       }
@@ -2524,7 +2543,7 @@ class MountManager {
     // Writability check catches a PRE-EXISTING root-owned dir too.
     let w = await ask('test', ['-w', mp]);
     if (!w.ok) {
-      const su = await ask('sudo', ['-n', 'chown', owner, mp]);
+      const su = await run('sudo', ['-n', 'chown', owner, mp]);   // (the same: its rescue's no answer leaves «not writable»)
       if (su.ok) { global.__vsEvent?.('mount-mkdir-sudo'); w = await ask('test', ['-w', mp]); }
     }
     if (!w.ok) throw MW.refusal('mp_not_writable', { mp, owner });
@@ -2534,22 +2553,42 @@ class MountManager {
     // refuses "not empty" (and --allow-non-empty would only hide them under
     // the mount), so move the directory aside as a sibling — never delete,
     // never merge — and tell the user where it went. A dead fuse endpoint
-    // makes `ls` fail/time out ⇒ falls through to the stale-daemon kill.
+    // answers ENOTCONN at once — it goes on as before (the reconnect's clearing pair, the stale-daemon belt); a listing with no answer
+    // is «could not be checked», any other ANSWERED failure (EIO, ESTALE, EACCES…) «could not be read» (B-323e: never «empty» on a guess)
     const ls = await ask('ls', ['-A', mp]);
-    const names = ls.ok ? ls.stdout.split('\n').filter(Boolean) : [];
+    if (!ls.ok && !ls.overflow && !/Transport endpoint is not connected/i.test(ls.stderr)) { console.warn(`[mounts] the mount point ${mp} could not be listed: ${ls.stderr.trim().slice(0, 200)}`); throw MW.refusal('mp_unreadable', { mp }); }
+    const names = ls.ok || ls.overflow ? ls.stdout.split('\n').filter(Boolean) : [];   // r1284 (1): more names than the listing holds = NOT empty (the release mounted over them)
+    if (ls.overflow && !names.length) names.push('…');
+    const many = ls.overflow ? '+' : '';
     if (!names.length) return null;
     const dest = `${mp}.stranded-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 13)}`;
     // a move with no answer may have run (the starter gone before its end): the destination itself says whether it did
-    const moved = async (x) => (x.unknown ? { ok: !(await ask('test', ['-e', mp])).ok && (await ask('test', ['-e', dest])).ok } : x);   // its source gone AND its destination there (a same-minute destination of an earlier move is not this one's)
+    // its source gone AND its destination there (a same-minute destination of an earlier move is not this one's); r1284 (2): when the
+    // checks get no answer either, the files may already sit at the destination — the refusal names it (mp_move_unanswered)
+    const moved = async (x, { sudo = false } = {}) => {
+      if (!x.unknown) return x;
+      // a move that NEVER STARTED never ran (its third read): no folder to name — the plain move «could not be checked», the sudo one
+      // as sudo absent (not moved)
+      if (x.never) { if (sudo) return { ok: false }; throw MW.refusal('mp_unanswered', { mp }); }
+      const unk = (y) => y.unknown;   // (a check that never started is no answer: run reads it so)
+      const src = await run('test', ['-e', mp]), dst = await run('test', ['-e', dest]);
+      // a child of the move MAY STILL RUN (its pid kept): only «source gone, destination there» is a verdict — anything else may yet land
+      if (x.pid) { if (!unk(src) && !unk(dst) && !src.ok && dst.ok) return { ok: true }; throw MW.refusal('mp_move_unanswered', { mp, dest }); }
+      if (!unk(dst) && !dst.ok) return { ok: false };   // its destination answered ABSENT and no child of the move may still run: the rename never ran (a rename is whole)
+      if (unk(dst) || unk(src)) throw MW.refusal('mp_move_unanswered', { mp, dest });
+      return { ok: !src.ok && dst.ok };
+    };
     let mv = await moved(await run('mv', [mp, dest]));
-    if (!mv.ok) mv = await moved(await run('sudo', ['-n', 'mv', mp, dest]));
+    if (!mv.ok) mv = await moved(await run('sudo', ['-n', 'mv', mp, dest]), { sudo: true });
     if (!mv.ok) throw MW.refusal('mp_not_empty', { mp, names: `${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}` });
-    const re = await ask('mkdir', ['-p', mp]);
-    if (!re.ok) throw MW.refusal('mp_not_recreated', { dest, mp, detail: String(re.stderr || '') });
-    const text = `${mp} held ${names.length} item${names.length === 1 ? '' : 's'} written while the storage was disconnected (${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}) — moved to ${dest}. Nothing was deleted; merge them into the storage yourself.`;
+    const text = `${mp} held ${names.length}${many} item${names.length === 1 && !many ? '' : 's'} written while the storage was disconnected (${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}) — moved to ${dest}. Nothing was deleted; merge them into the storage yourself.`;
     console.warn(`[mounts] stranded content quarantined: ${text}`);
     global.__vsEvent?.('mount-stranded-quarantine');
     this.broadcast({ type: 'server-notice', key: `mount-stranded:${dest}`, text, level: 2 });
+    // the re-make AFTER the notice (its re-read's S1): the files are already moved, so its failure — no answer included — names where
+    const re = await run('mkdir', ['-p', mp]);
+    if (re.unknown) throw MW.refusal('mp_remake_unanswered', { dest, mp });
+    if (!re.ok) throw MW.refusal('mp_not_recreated', { dest, mp, detail: String(re.stderr || '') });
     return dest;
   }
 

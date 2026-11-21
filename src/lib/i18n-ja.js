@@ -2806,9 +2806,12 @@ export default {
   "the storage did not connect": "ストレージに接続できませんでした",
   "No permission to create the mount point {mp} — pick a writable location, or create it yourself first: sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'": "マウント先 {mp} を作成する権限がありません — 書き込める場所を選ぶか、先に自分で作成してください: sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'",
   "The mount point {mp} exists but is not writable by VibeSpace — fix ownership: sudo chown {owner} '{mp}'": "マウント先 {mp} はありますが VibeSpace から書き込めません — 所有者を直してください: sudo chown {owner} '{mp}'",
-  "The mount point {mp} could not be checked — this machine did not answer in time; try again in a moment": "マウント先 {mp} を確認できませんでした — このマシンが時間内に応答しませんでした。少し待ってからもう一度お試しください",   // B-323e (lane bl-machines-b)
+  "The mount point {mp} could not be checked — VibeSpace did not get an answer in time; try again in a moment": "マウント先 {mp} を確認できませんでした — VibeSpace が時間内に応答を受け取れませんでした。少し待ってからもう一度お試しください",   // B-323e (lane bl-machines-b)
+  "Files written while the storage was disconnected may have been moved from {mp} to {dest} — VibeSpace got no answer; look in {dest}": "ストレージの切断中に書き込まれたファイルは {mp} から {dest} へ移動された可能性があります — VibeSpace に応答がありませんでした。{dest} を確認してください",   // B-323e (lane bl-machines-b)
   "The mount point {mp} is not empty ({names}) — these were written while the storage was disconnected; move them away, then reconnect": "マウント先 {mp} は空ではありません（{names}）— ストレージが切断されている間に書き込まれたものです。移動してから再接続してください",
   "Moved stranded files to {dest} but could not recreate the mount point {mp}: {detail}": "取り残されたファイルを {dest} に移動しましたが、マウント先 {mp} を作り直せませんでした: {detail}",
+  "Moved stranded files to {dest}, but VibeSpace got no answer while recreating the mount point {mp} — try again in a moment": "取り残されたファイルを {dest} に移動しましたが、マウント先 {mp} を作り直す間に VibeSpace が応答を受け取れませんでした — 少し待ってからもう一度お試しください",   // B-323e (lane bl-machines-b)
+  "The mount point {mp} could not be read — files written there while the storage was disconnected could be hidden by the mount; check the folder": "マウント先 {mp} を読み取れませんでした — ストレージの切断中にそこへ書き込まれたファイルがマウントで隠れるおそれがあります。フォルダーを確認してください",   // B-323e (lane bl-machines-b)
   "this share was minted by this same VibeSpace (self-mount deadlocks the server) — open the shared folder directly instead": "この共有は同じ VibeSpace で作成されたものです（自分自身をマウントするとサーバーがデッドロックします）— 共有フォルダーを直接開いてください",
   "OneDrive token unreadable — re-run the sign-in": "OneDrive のトークンを読み取れません — サインインし直してください",
   "OneDrive token expired before the drive could be resolved — sign in again (\"Re-authorize OneDrive…\" in the edit dialog)": "ドライブを特定する前に OneDrive のトークンが期限切れになりました — サインインし直してください（編集ダイアログの「OneDrive を再認可…」）",
@@ -9204,6 +9207,7 @@ export default {
   "Agent messages": "エージェントのメッセージ",
   "Storage {name} stopped answering and was disconnected to keep VibeSpace responsive — it reconnects by itself": "ストレージ {name} が応答しなくなり、VibeSpace の応答を保つため切断しました — 自動で再接続します",
   "Files written into {path} while storage {name} was disconnected were moved to {dest} — nothing was deleted": "ストレージ {name} の切断中に {path} へ書き込まれたファイルを {dest} に移動しました — 何も削除していません",
+  "Files written into {path} while storage {name} was disconnected may have been moved to {dest} — VibeSpace got no answer; nothing was deleted": "ストレージ {name} の切断中に {path} へ書き込まれたファイルは {dest} に移動された可能性があります — VibeSpace に応答がありませんでした。何も削除していません",   // B-323e (lane bl-machines-b)
   "Storage: the preset «{preset}» signs in with another OAuth client now — {n} mount(s) still on the old one; re-authorize each": "ストレージ：プリセット「{preset}」は別の OAuth クライアントでサインインするようになりました——{n} 件のマウントがまだ古いクライアントです。それぞれ再認証してください",
   "These mounts keep refreshing with the client they signed in with until it is deleted: {names}.": "これらのマウントは、削除されるまでサインイン時のクライアントで更新を続けます：{names}。",
   "These mounts keep refreshing with the client they signed in with until it is deleted: {names} and {more} more.": "これらのマウントは、削除されるまでサインイン時のクライアントで更新を続けます：{names}、ほか {more} 件。",

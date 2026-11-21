@@ -24,6 +24,8 @@ const DETAIL = i18nKey('A reconnect usually hangs it again, so VibeSpace does no
 //           person's to look at; dismissed by the person.
 const KILLED = i18nKey('Storage {name} stopped answering and was disconnected to keep VibeSpace responsive — it reconnects by itself');
 const STRANDED = i18nKey('Files written into {path} while storage {name} was disconnected were moved to {dest} — nothing was deleted');
+// B-323e (lane bl-machines-b): the move got NO ANSWER — the files may sit in {mp} or in {dest}; the person looks (never «moved» on a guess)
+const STRANDED_MAYBE = i18nKey('Files written into {path} while storage {name} was disconnected may have been moved to {dest} — VibeSpace got no answer; nothing was deleted');
 // B-e40d's remainder — A REPLACED CLIENT IS SAID (B-166e part 2's shape, the rule shared: src/client-swap-step.js). A Drive /
 // Gmail mount keeps the OAuth client its token was minted under when another client is put under its preset's key (B-e40d);
 // the admin must re-authorize each before deleting the old client. ONE item per preset key, naming every mount still on the
@@ -111,7 +113,8 @@ function create({ getUserTodos, mountCount = () => 0, log = () => { }, onReopen 
     // ONE stranded notice per mount (adversarial r1 #15: each names a new folder, and the key's open items are capped): its
     // itemKey keeps one item, naming the latest folder; the earlier folders stay named in the journal lines of their quarantine
     const params = { path: String(info.path || ''), name: String(m.name || m.id), dest: String(info.dest) };
-    const r = t.add(ITEM_KEY, { origin: 'server', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Storage', text: fill(STRANDED, params), i18n: { text: { key: STRANDED, params } }, facts: { mountId: m.id, why: 'stranded' }, itemKey: `stranded:${m.id}`, openCap: cap() });
+    const key = info.maybe ? STRANDED_MAYBE : STRANDED;   // B-323e: a move with no answer says «may have been moved»
+    const r = t.add(ITEM_KEY, { origin: 'server', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Storage', text: fill(key, params), i18n: { text: { key, params } }, facts: { mountId: m.id, why: 'stranded' }, itemKey: `stranded:${m.id}`, openCap: cap() });
     return (r && (r.id || (r.item && r.item.id))) || null;
   }
   /** The record is REMOVED: every open item of it resolves (its park, a stopped process, stranded files). → how many. */
@@ -189,4 +192,4 @@ function create({ getUserTodos, mountCount = () => 0, log = () => { }, onReopen 
   return { park, unpark, killed, answered, stranded, removed, clientSwaps };
 }
 
-module.exports = { create, itemOf, ITEM_KEY, TYPE, TEXT, TEXT_NOPROV, DETAIL, KILLED, STRANDED, SWAP_TYPE, SWAP, SWAP_L1, SWAP_L2 };
+module.exports = { create, itemOf, ITEM_KEY, TYPE, TEXT, TEXT_NOPROV, DETAIL, KILLED, STRANDED, STRANDED_MAYBE, SWAP_TYPE, SWAP, SWAP_L1, SWAP_L2 };
