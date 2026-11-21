@@ -18,6 +18,7 @@ import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
+import { loadPage } from './cdp-page-load.mjs';   // 主开发 r1291 (the hotfix's hosted run 44903979657: load 2 red «app is not defined»)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -78,9 +79,11 @@ const shot = async (name, clip) => {
 
 try {
   await cdp('Page.enable');
-  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
-  await sleep(1500);
-  await evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })' /* in-page poll (2.369.118): the heavy tier went red with "no app" in two chrome lanes at once — one probe 1.5 s after navigate is a bet on load speed */);
+  // THE ONE PAGE LOAD (scripts/cdp-page-load.mjs): the wait is tied to THIS navigation's document, a slow boot waits, a real non-boot
+  // is a NAMED red; each load prints its time and its asks (主开发 r1291 — loads 2 and 3 slept 1.5 s and read `app` bare)
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });   // (§47: before the first load's text)
+  const LOAD = async (n) => { const r = await loadPage(cdp, `http://127.0.0.1:${PORT}/`, { who: `test-ui-scale load ${n}` }); console.log(`  · load ${n}: the app booted in ${r.ms} ms (${r.asks} ask(s))`); return r; };
+  await LOAD(1);
   await sleep(500);
 
   // ── 1. Locked-model badge restyle (real CSS, injected markup) ────────────
@@ -115,9 +118,7 @@ try {
 
   // ── 2. UI scale (DPI): zoom + layout compensation + drag accuracy ────────
   await evalJs(`localStorage.setItem('vibespace.uiScale', '125'); localStorage.setItem('vibespace.uiFontScale', '120'); true`);
-  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
-  await sleep(1500);
-  await evalJs('app.ready');
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await LOAD(2);
   await sleep(600);
 
   check('body zoom applied (1.25)', await evalJs(`document.body.style.zoom`) === '1.25');
@@ -209,9 +210,7 @@ try {
 
   // ── 3. reset to 100% clears the zoom ─────────────────────────────────────
   await evalJs(`localStorage.removeItem('vibespace.uiScale'); localStorage.removeItem('vibespace.uiFontScale'); true`);
-  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
-  await sleep(1500);
-  await evalJs('app.ready');
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await LOAD(3);
   check('reset clears body zoom', await evalJs(`document.body.style.zoom`) === '');
   const lbl2 = await evalJs(`(() => { const el = document.querySelector('.desktop-preview-label'); return el ? parseFloat(getComputedStyle(el).fontSize) : null; })()`);
   if (lbl2 != null) check(`label font back to base (${lbl2}px)`, lbl2 <= 8);

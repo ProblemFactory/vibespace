@@ -59,6 +59,7 @@ import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_QUIET } from './scratch.mjs';
 import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1125)
 import { loadPage } from './cdp-page-load.mjs';
+import { buildClientBundle } from './client-bundle.mjs';   // 主开发 r1291: a changed bundle is built as the product builds its own (minified)
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 import { chatNeedsKit, loadDesk } from './chat-needs-kit.mjs';
@@ -172,8 +173,7 @@ try {
   fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT, 'node_modules'));
   const sub = (rel, from, to) => { const f = path.join(MUT, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`mutant anchor ${rel}: ${from.slice(0, 60)}`); fs.writeFileSync(f, s.replace(from, to)); };
   sub('src/lib/chat-view.js', '    this._needsCards = new NeedsCards(this);\n    this._needsCards.start(winInfo?._listenerCtl?.signal);\n', '');
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT });
-  MUT_BUNDLE = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));
+  MUT_BUNDLE = buildClientBundle({ repo, root: MUT, outFile: path.join(MUT, 'bundle-mut.js') }).buf;
 } catch (e) { MUT_ERR = String(e && e.message || e).split('\n')[0]; }
 // ── ②b's RED CONTROL: THIS source without the press arm's re-stamp on scroll (the old stamp: a row pass only) ──
 let ARM_BUNDLE = null, ARM_ERR = '';
@@ -185,8 +185,7 @@ try {
   const from = "    if (want) document.addEventListener('scroll', onArmScroll, { capture: true, passive: true });\n"; // round 3 (m4): armed only while a stamped button is on the page
   if (s.split(from).length !== 2) throw new Error('mutant anchor src/lib/user-todos-panel.js: the scroll re-stamp');
   fs.writeFileSync(f, s.replace(from, '    if (want) void 0; // RED: never listening\n'));
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT2 });
-  ARM_BUNDLE = fs.readFileSync(path.join(MUT2, 'bundle-mut.js'));
+  ARM_BUNDLE = buildClientBundle({ repo, root: MUT2, outFile: path.join(MUT2, 'bundle-mut.js') }).buf;
 } catch (e) { ARM_ERR = String(e && e.message || e).split('\n')[0]; }
 
 // ── ⑥'s RED CONTROL: THIS source with the accordion's open slot cut — every waiting card whole (the first commit's shape) ──
@@ -200,8 +199,7 @@ try {
   const from = 'fold: x.item.id !== openSlot';
   if (s.split(from).length !== 2) throw new Error('mutant anchor src/lib/chat-needs-card.js: the open slot');
   fs.writeFileSync(f, s.replace(from, 'fold: false'));
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT3 });
-  FOLD_BUNDLE = fs.readFileSync(path.join(MUT3, 'bundle-mut.js'));
+  FOLD_BUNDLE = buildClientBundle({ repo, root: MUT3, outFile: path.join(MUT3, 'bundle-mut.js') }).buf;
 } catch (e) { FOLD_ERR = String(e && e.message || e).split('\n')[0]; }
 // ── ⑥c's guard's RED CONTROL: THIS source without the card's refusal of a verb an open moved under the pointer (round 4) ──
 let GUARD_BUNDLE = null, GUARD_ERR = '';
@@ -213,8 +211,7 @@ try {
   const from = 'if (unfold(ev) || card._openedAt == null';
   if (s.split(from).length !== 2) throw new Error('mutant anchor src/lib/chat-needs-card.js: the moved-verb refusal');
   fs.writeFileSync(f, s.replace(from, 'if (unfold(ev) || true'));
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT4 });
-  GUARD_BUNDLE = fs.readFileSync(path.join(MUT4, 'bundle-mut.js'));
+  GUARD_BUNDLE = buildClientBundle({ repo, root: MUT4, outFile: path.join(MUT4, 'bundle-mut.js') }).buf;
 } catch (e) { GUARD_ERR = String(e && e.message || e).split('\n')[0]; }
 
 // ── throwaway server in a worktree (the tree's src/ + built public/ + data/bin — the CLIs the stub runs) ──
@@ -286,7 +283,9 @@ async function connect(target) {
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: mouse ? 'hover' : 'none' }, { name: 'pointer', value: mouse ? 'fine' : 'coarse' }] });
   };
   const load = async () => {
-    await loadPage(cdp, ORIGIN + '/');   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
+    const lp = await loadPage(cdp, ORIGIN + '/');   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
+    // (主开发 r1291) a load of a suite-built bundle PRINTS its time and its asks, so the margin shows on a green run
+    if (mutant?.bundle) console.log(`  · a mutant load (the suite's own ${mutant.bundle.length}-byte bundle): the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
     await waitFor(`!document.getElementById('loading-screen')`, 15000); await sleep(900);
   };
   const tapAt = async (x, y) => {
@@ -315,8 +314,7 @@ try {
   const from = 'Math.abs(landed - before) > 1 || under) el._openedAt';
   if (s.split(from).length !== 2) throw new Error('mutant anchor src/lib/chat-needs-card.js: the pressed-row clause');
   fs.writeFileSync(f, s.replace(from, 'Math.abs(landed - before) > 1) el._openedAt'));
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT5 });
-  ROW_BUNDLE = fs.readFileSync(path.join(MUT5, 'bundle-mut.js'));
+  ROW_BUNDLE = buildClientBundle({ repo, root: MUT5, outFile: path.join(MUT5, 'bundle-mut.js') }).buf;
 } catch (e) { ROW_ERR = String(e && e.message || e).split('\n')[0]; }
 
 const targets = async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).filter((x) => x.type === 'page');
