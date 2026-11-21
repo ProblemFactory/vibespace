@@ -3,8 +3,9 @@
 // the gate guards and why). 主开发 r1063 (round wv9ioupy1): «no false row and no debt word on a checkout row: SPLIT» — the unit's
 // legs left test-ci-gate-push §4 and test-ci-gate-tiers §8i for this suite, over the kit's pre-push hook rig (hookRig, moved there
 // from -push §4, which still drives it). §A the push hook's tiers run in its OWN env (env -i, an allowlist, a private node folder)
-// and every refusal it adds — no node, a link root, a folder holding more, a manager's shim, a folder made before npm came — is
-// DRIVEN and goes red for its own reason when cut · §B the push's own ALL GREEN line counts a by-name skip (r1037).
+// and every refusal it adds — no node, a root that is a link, writable by others, not one's own or unwritable, a folder holding
+// more, a manager's shim, a folder made before npm came, a tier path without the bound's timeout — is DRIVEN and goes red for its
+// own reason when cut · §B the push's own ALL GREEN line counts a by-name skip (r1037).
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO, GIT_ENV, ok, tmpDirs, mktmp, commit, hookRig, report } from './ci-gate-kit.mjs';
@@ -73,6 +74,79 @@ console.log('\n§A the push hook\'s tiers run in its own env — every refusal d
       ok(rc.status === 0 && !rc.out.includes('does not hold exactly this push') && fastOf(rc).length === 1 && tierPathOf(fastOf(rc)[0])[0] === privateBin,
         'B-e381 r6 CONTROL (tier_holds\' «nothing else» arm cut, in a copy of the hook): the folder holding the planted git is trusted — the tiers run with it first on their path', { status: rc.status });
     }
+    // r6 FOLLOW (主开发 r1121): the root's two OTHER checks and the «could not be made» refusal, each DRIVEN on the real hook, each
+    // with its own cut. (The link's control above cuts the whole block: a link's own mode reads 777, so its mode test would refuse
+    // it too.) As root every folder is one's own and writable — the legs cannot be driven there: a red with its reason, never a skip.
+    const ROOTREF = "is a link, writable by others or not this user's own: nothing was judged — remove it (or set VIBESPACE_HOOK_NODE_DIR to a folder of your own) and push again";
+    const stdinB = `refs/heads/main ${B} refs/heads/main ${ZERO}\n`;
+    if (typeof process.getuid === 'function' && process.getuid() === 0) {
+      ok(false, 'B-e381 r6 follow: this run is root — no folder can be another user\'s or unwritable, so the root\'s checks cannot be driven here');
+    } else {
+      // (a) writable by others: a real folder of this user's, mode 0777
+      const wideRoot = path.join(mktmp('e381-wide-root'), 'root');
+      fs.mkdirSync(wideRoot); fs.chmodSync(wideRoot, 0o777);
+      const rWide = runHook(B, ZERO, { ...PLANT, VIBESPACE_HOOK_NODE_DIR: wideRoot });
+      ok(rWide.status === 1 && rWide.out.includes(`[ci] REFUSED — the tiers' private node folder ${wideRoot} ${ROOTREF}`) && !fastOf(rWide).length,
+        'B-e381 r6 follow: a private-folder root writable by others (0777) is REFUSED by name, with its way out — no tier ran', { status: rWide.status, out: rWide.out.slice(-200) });
+      const wideCut = preFixHook('e381-wide-cut', [' || (( (8#$(stat -c %a "$tier_root" 2>/dev/null || echo 777) & 8#022) != 0 )); then', '; then']);
+      if (wideCut) {
+        const rc = runHookRefs(stdinB, { ...PLANT, VIBESPACE_HOOK_NODE_DIR: wideRoot }, wideCut);
+        ok(rc.status === 0 && !rc.out.includes(ROOTREF) && fastOf(rc).length === 1 && tierPathOf(fastOf(rc)[0])[0].startsWith(wideRoot + '/'),
+          'B-e381 r6 follow CONTROL (the mode test cut, in a copy of the hook): the 0777 root is used — the tiers run from a folder in it', { status: rc.status });
+      }
+      // (b) not this user's own: a system folder another user owns, writable by nobody else (never written: the hook refuses first)
+      const unwritable = (d) => { try { fs.accessSync(d, fs.constants.W_OK); return false; } catch { return true; } };   // never a folder this run CAN write (a capability would let a cut control write there)
+      const foreign = ['/usr', '/etc', '/'].find((d) => { try { const st = fs.lstatSync(d); return st.isDirectory() && st.uid !== process.getuid() && (st.mode & 0o022) === 0 && unwritable(d); } catch { return false; } });
+      ok(!!foreign, `B-e381 r6 follow: a folder another user owns, that this run cannot write, is there to plant as the root (${foreign || 'none of /usr, /etc, /'})`);
+      if (foreign) {
+        const rForeign = runHook(B, ZERO, { ...PLANT, VIBESPACE_HOOK_NODE_DIR: foreign });
+        ok(rForeign.status === 1 && rForeign.out.includes(`[ci] REFUSED — the tiers' private node folder ${foreign} ${ROOTREF}`) && !fastOf(rForeign).length,
+          `B-e381 r6 follow: a private-folder root that is not this user's own (${foreign}) is REFUSED by name — no tier ran`, { status: rForeign.status, out: rForeign.out.slice(-200) });
+        const ownCut = preFixHook('e381-own-cut', [' || [ ! -O "$tier_root" ]', '']);
+        if (ownCut) {
+          const rc = runHookRefs(stdinB, { ...PLANT, VIBESPACE_HOOK_NODE_DIR: foreign }, ownCut);
+          ok(rc.status === 1 && !rc.out.includes(ROOTREF) && rc.out.includes(`[ci] REFUSED — the tiers' private node folder could not be made in ${foreign}: nothing was judged`),
+            'B-e381 r6 follow CONTROL (the owner test cut, in a copy of the hook): the foreign root passes the root\'s checks — it fails later, for another reason (nothing can be made in it)', { status: rc.status, out: rc.out.slice(-200) });
+        }
+      }
+      // (c) «could not be made»: a real folder of this user's that cannot be written (0500) — the root passes, its node folder cannot be made
+      const roRoot = path.join(mktmp('e381-ro-root'), 'root');
+      fs.mkdirSync(roRoot); fs.chmodSync(roRoot, 0o500);
+      ok(unwritable(roRoot), 'B-e381 r6 follow: a 0500 folder of this user\'s is not writable to this run (the «could not be made» leg rests on it)');
+      const MADE = `[ci] REFUSED — the tiers' private node folder could not be made in ${roRoot}: nothing was judged`;
+      const rRo = runHook(B, ZERO, { ...PLANT, VIBESPACE_HOOK_NODE_DIR: roRoot });
+      ok(rRo.status === 1 && rRo.out.includes(MADE) && !fastOf(rRo).length,
+        'B-e381 r6 follow: a private-folder root that cannot be written (0500) is REFUSED by name — «could not be made», no tier ran', { status: rRo.status, out: rRo.out.slice(-200) });
+      const madeCut = preFixHook('e381-made-cut', ['|| { echo "[ci] REFUSED — the tiers\' private node folder could not be made in $tier_root: nothing was judged" >&2; exit 1; }', '|| tier_new="$tier_root/.e381-not-made"']);
+      if (madeCut) {
+        const rc = runHookRefs(stdinB, { ...PLANT, VIBESPACE_HOOK_NODE_DIR: roRoot }, madeCut);
+        ok(rc.status === 1 && !rc.out.includes('could not be made') && rc.out.includes('does not hold exactly this push\'s node'),
+          'B-e381 r6 follow CONTROL (that refusal cut, in a copy of the hook): the same root fails later, for another reason (the folder it holds is not this push\'s)', { status: rc.status, out: rc.out.slice(-200) });
+      }
+      fs.chmodSync(roRoot, 0o700);
+    }
+    // the bound's own program: a tier path without `timeout` is refused by THAT name, never as a manager's shim. Driven in a copy of
+    // the hook whose ONE data line — the tier path's system folders — is an empty folder; CONTROL: the same copy with the check cut
+    // says the shim's words (the wrong cause, the one the check exists to name)
+    const noTimeSys = mktmp('e381-no-timeout-sys');
+    const PATH_LINE = 'tier_path="$tier_bin:/usr/local/bin:/usr/bin:/bin"', NOTIME_LINE = /\(PATH="\$tier_path"; type -P timeout\) >\/dev\/null 2>&1 \|\| \{ echo "\[ci\] REFUSED — timeout[^\n]*\n/;
+    const noTime = preFixHook('e381-no-timeout', [PATH_LINE, `tier_path="$tier_bin:${noTimeSys}"`]);
+    if (noTime) {
+      const r = runHookRefs(stdinB, PLANT, noTime);
+      ok(r.status === 1 && r.out.includes("[ci] REFUSED — timeout (coreutils: the bound on the version call) is not on the tiers' path (") && r.out.includes(`:${noTimeSys}): nothing was judged`) && !r.out.includes("does not run under the tiers' own env") && !fastOf(r).length,
+        'B-e381 r6 follow: a tier path without the bound\'s own program (timeout) is REFUSED by THAT name — not as a manager\'s shim; no tier ran', { status: r.status, out: r.out.slice(-250) });
+    }
+    const noTimeCut = preFixHook('e381-no-timeout-cut', [PATH_LINE, `tier_path="$tier_bin:${noTimeSys}"`], [NOTIME_LINE, '']);
+    if (noTimeCut) {
+      const r = runHookRefs(stdinB, PLANT, noTimeCut);
+      ok(r.status === 1 && !r.out.includes('timeout (coreutils') && r.out.includes("does not run under the tiers' own env"),
+        'B-e381 r6 follow CONTROL (the check cut too): the same path is refused with the shim\'s words — the wrong cause', { status: r.status, out: r.out.slice(-200) });
+    }
+    // the bound itself, pinned as text (a sleeping node would cost its 10 s): the version call runs under `timeout -k 2 10`, once
+    const BOUND = 'timeout -k 2 10 "$tier_bin/node" --version';
+    const bounded = (src) => src.split('\n').filter((l) => l.startsWith('tier_ver="$(env -i "PATH=$tier_path"') && l.includes(BOUND)).length === 1;
+    ok(bounded(hookSrc), 'B-e381 r6 follow: the banner\'s version call is bounded — `timeout -k 2 10`, on its one line');
+    ok(!bounded(hookSrc.replace(BOUND, '"$tier_bin/node" --version')), 'B-e381 r6 follow CONTROL: the call without its bound is refused by the pin');
     const passThrough = preFixHook('e381-pass-through',
       ['      "${tier_env[@]}" node scripts/ci.mjs $kg || {', '      node scripts/ci.mjs $kg || {'],
       ['  "${tier_env[@]}" node scripts/ci.mjs --heavy-launch', '  node scripts/ci.mjs --heavy-launch']);
