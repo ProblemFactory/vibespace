@@ -680,18 +680,19 @@ else await (async () => {
       ok(await until(() => P2.ev('app.layoutManager._unacked.length === 0'), 3000), 'Q: the re-send was acked — nothing owed', J(await P2.ev('(() => { const lm = app.layoutManager; return { unacked: lm._unacked, serverAcks: lm._serverAcks, timer: !!lm._ackTimer, now: Date.now(), carried: [...lm._carried] }; })()')));
       // CONTROL (an old server): B ignores acks and forgets it ever saw one — the 2 s fallback stamps at the send (today's rule);
       // the same swallow + reconnect reverses the drag, and B does not hang (its next drag still reaches the server)
-      await P2.ev(`(() => { const lm = app.layoutManager; lm._serverAcks = false; lm._onLayoutAnswer = () => {}; app.ws.ws.send = () => {}; return true; })()`);
+      // PLACED (主开发 r966 — a control goes red by placement, never by a race): the swallowing send COUNTS the layout saves it swallows
+      await P2.ev(`(() => { const lm = app.layoutManager; lm._serverAcks = false; lm._onLayoutAnswer = () => {}; window.__qSwallowed = 0; app.ws.ws.send = (d) => { try { if (JSON.parse(d).type === 'layout-sync') window.__qSwallowed++; } catch { } }; return true; })()`);
       const tb2 = await P2.titleBar('win-hr-2-q');
       await P2.drag(tb2.l + 80, tb2.y, tb2.l + 80 - 200, tb2.y - 100);
-      await sleep(800); // the save "left"; no ack
+      ok(await until(() => P2.ev('window.__qSwallowed >= 1 && app.layoutManager._unacked.length >= 1'), 6000), 'Q control (placed): the drag\'s save LEFT on the swallowing socket — counted there, owed on B (no ack will come)', J(await P2.ev('[window.__qSwallowed, app.layoutManager._unacked.length]')));
       const dropped2 = await box(P2, 'win-hr-2-q');
-      ok(await until(() => P2.ev('app.layoutManager._unacked.length === 0'), 4000), 'Q control: without acks B falls back to the send stamp after ACK_WAIT_MS (an old server never hangs a hold)', J(await P2.ev('(() => { const lm = app.layoutManager; return { unacked: lm._unacked, serverAcks: lm._serverAcks, timer: !!lm._ackTimer, now: Date.now(), carried: [...lm._carried], dirty: [...app.desktopManager._dirtyDesks] }; })()')));
+      ok(await until(() => P2.ev('app.layoutManager._unacked.length === 0'), 6000), 'Q control: without acks B falls back to the send stamp after ACK_WAIT_MS (an old server never hangs a hold)', J(await P2.ev('(() => { const lm = app.layoutManager; return { unacked: lm._unacked, serverAcks: lm._serverAcks, timer: !!lm._ackTimer, now: Date.now(), carried: [...lm._carried], dirty: [...app.desktopManager._dirtyDesks] }; })()')));
       const c1 = await P2.ev('app.layoutManager._connects');
       await P2.wsClose();
       ok(await until(async () => !(await P2.wsConnected()), 3000, 50), 'Q control: B\'s socket is down');
       ok(await until(() => P2.wsConnected(), 8000, 100) && await until(() => P2.ev(`app.layoutManager._connects === ${c1 + 1}`), 3000, 50), 'Q control: B reconnected (the open was told)');
-      await sleep(1500);
-      const after2 = await box(P2, 'win-hr-2-q');
+      let after2 = null;   // the re-read (250 ms after the open) and its apply — WAITED FOR (bounded), never slept on
+      await until(async () => { after2 = await box(P2, 'win-hr-2-q'); return !!after2 && (Math.abs(after2[0] - dropped2[0]) > 40 || Math.abs(after2[1] - dropped2[1]) > 40); }, 6000, 100);
       ok(after2 && (Math.abs(after2[0] - dropped2[0]) > 40 || Math.abs(after2[1] - dropped2[1]) > 40) && Math.abs(after2[0] - after[0]) < 8, 'Q control: …so the re-read reverses the swallowed drag — today\'s loss, by design of the fallback (RED without the ack)', J([dropped2, after2, after, await srvBox('win-hr-2-q'), await P2.ev('(() => { const lm = app.layoutManager, w = app.wm.windows.get("win-hr-2-q"); return { gb: w.gridBounds, boundsAt: w._boundsAt, carried: [...lm._carried], movesSentAt: lm._movesSentAt, unacked: lm._unacked.length }; })()')]));
       const hr1 = await srvBox('win-hr-1-q');
       await P2.nudge(); // a real drag of the first shown window (hr-1)
