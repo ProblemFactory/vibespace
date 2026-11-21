@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -458,7 +459,7 @@ ok('a workflow row opens its run directly (as the single-workflow chip did)', /i
     r.feed = (raw) => mm.processLive(raw);
     // ONE patch PASS: the patcher's own cadence (one pass per frame, at most one per 150 ms per
     // view) — wait for its timer to fire, then run the frame it queued
-    r.pass = async () => { for (let i = 0; i < 40 && view._wfPatchTimer; i++) await sleep(10); return flushFrame(); };
+    r.pass = async () => { for (let i = 0; i < 40 && view._wfPatchTimer; i++) await sleep(10); if (view._wfPatchTimer) markTimedOut(true, 40 * 10, 'pass (the workflow patch timer done)'); return flushFrame(); };   // a wait that runs out says so (r1372; test-ci-gate §2p)
     r.cardId = () => view._messages.find((m) => m.content?.[0]?.toolCallId === TUID)?.id;
     r.card = () => view._elements.get(r.cardId());
     r.msg = () => view._messages.find((m) => m.id === r.cardId());
