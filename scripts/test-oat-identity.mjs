@@ -587,11 +587,11 @@ console.log('§5 the roster words');
   ok(zh[HINT] === '这枚 token 看起来属于 {other}——确认或改绑' && zh[UNV] === '身份未验证', 'zh says the fix brief\'s words: 这枚 token 看起来属于 <row>——确认或改绑 · 身份未验证', [zh[HINT], zh[UNV]]);
   const KS = [DOOR, HINT, UNV, 'Its usage matches {other}.', 'Re-bind to', 'Re-bind', 'Re-bind failed', 'Token moved to {name}', 'No other subscription row can take it — add the account it belongs to first, or re-mint it below.',
     'This token’s usage window differs from the one confirmed for {name} — not saved. Remove {name}’s token first to confirm another account.',
-    'Its first usage reading carried another account’s weekly window, so it bills that account, not this one. Conversations already running on it continue; pools place nothing new on it. Fix it in ⋯ → Long-lived token.',
+    'Its first usage reading carried another account’s weekly window, so it bills that account, not this one. Conversations already running on it continue; pools place nothing new on it. Fix it in «Long-lived token (active)…».',
     'Its usage window moved away from the one this token was confirmed with — confirm or re-bind it',
-    'This row has no usage window of its own, and the token’s first reading carried {other}’s weekly window. Two accounts can share a reset hour by chance, so nothing was marked and pools keep using it. Answer in ⋯ → Long-lived token.',
-    'The account’s usage window moved by this token’s own readings, so the move cannot vouch for the token. Nothing was marked and pools keep using it. Answer in ⋯ → Long-lived token.',
-    'No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-bind it, or re-mint it while signed in as this account, in ⋯ → Long-lived token.',
+    'This row has no usage window of its own, and the token’s first reading carried {other}’s weekly window. Two accounts can share a reset hour by chance, so nothing was marked and pools keep using it. Answer in «Long-lived token (active)…».',
+    'The account’s usage window moved by this token’s own readings, so the move cannot vouch for the token. Nothing was marked and pools keep using it. Answer in «Long-lived token (active)…».',
+    'No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-bind it, or re-mint it while signed in as this account, in «Long-lived token (active)…».',
     'It is {name}’s', 'Not {name}’s', 'Confirmed: the token is {name}’s', 'Marked: the token is not {name}’s', 'Could not save the answer',
     "{account}'s long-lived token belongs to another account (its usage matches {other}) — re-mint it or re-bind it in Manage Agents", "{account}'s long-lived token belongs to another account — re-mint it or re-bind it in Manage Agents",
     "{account}'s long-lived token looks like {other}'s — confirm it is {account}'s, or re-bind it in Manage Agents",
@@ -600,7 +600,7 @@ console.log('§5 the roster words');
     'This conversation’s token road is unknown — it takes no part in the identity check',
     'A conversation restored after a restart from a record older than this version cannot say whether it runs on this long-lived token or on the sign-in, so its usage readings never judge the token. Its next start (a resume or a new conversation) records the road.',
     'Identity unverified — the usage window can no longer say whose this token is: confirm or re-bind it',
-    'This row’s usage window was last written by a step that could not tell this account’s sign-in from its long-lived token, so nothing proves whose the token is. Nothing was marked and pools keep using it. Answer in ⋯ → Long-lived token.',
+    'This row’s usage window was last written by a step that could not tell this account’s sign-in from its long-lived token, so nothing proves whose the token is. Nothing was marked and pools keep using it. Answer in «Long-lived token (active)…».',
     "{account}'s long-lived token is unverified: its usage window can no longer say whose it is — confirm the token is {account}'s, or re-bind it in Manage Agents"];
   ok(zh['This conversation’s token road is unknown — it takes no part in the identity check'] === '这段对话的 token 来路未知，不参与身份判断' && /^身份未验证——/.test(zh['Identity unverified — the usage window can no longer say whose this token is: confirm or re-bind it']),
     'zh says fix r3\'s words: 这段对话的 token 来路未知，不参与身份判断 · 身份未验证——…确认或改绑');
@@ -624,7 +624,7 @@ console.log('§5 the roster words');
     const rowOf = (x) => ({ type: 'subscription', oat: true, oatDaysLeft: 300, ...x });
     const tag = MA.oatTagHtml(rowOf({ oatIdentity: 'mismatch', oatIdentityOther: 'Work <b>Max</b>' }));
     ok(tag.includes(DOOR) && /color:var\(--red/.test(tag) && /acct-oat-foreign/.test(tag) && /Work &lt;b&gt;Max&lt;\/b&gt;/.test(tag) && !/<b>Max/.test(tag), 'a foreign token\'s row says it in the owner\'s words with the door, red, the matched row named (escaped)', tag);
-    ok(/⋯ → Long-lived token/.test(tag), '…its tooltip names where the door is (⋯ → Long-lived token)');
+    ok(/«Long-lived token \(active\)…»/.test(tag) && !/⋯ →/.test(tag), '…its tooltip names the row menu\'s own item, the door («Long-lived token (active)…»; B-8703: no «⋯ →» path)');
     const hint = MA.oatTagHtml(rowOf({ oatIdentity: 'hint', oatIdentityOther: 'Held <i>x</i>' }));
     ok(/acct-oat-ask/.test(hint) && /This long-lived token looks like Held &lt;i&gt;x&lt;\/i&gt;’s — confirm or re-bind it/.test(hint) && /color:var\(--warn-text\)/.test(hint) && !/--red/.test(hint) && /nothing was marked/.test(hint), 'F4: a hint\'s row says it in amber (no red — nothing is marked), naming the row (escaped), its tooltip says why', hint);
     const anc = MA.oatTagHtml(rowOf({ oatIdentity: 'anchor' }));

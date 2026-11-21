@@ -1767,7 +1767,7 @@ console.log('— §10 login × long-lived token (oat-only)');
       console.log('    en noted: [' + noted.soft + ']\n    en last: chip [' + last.chip.trim() + '] token tags [' + tokenTags(last).join('|') + ']');
       ck('BROWSER r2: a quiet row\'s note starts at once — no orphan «·» after the clock («' + (noted.soft || '').trim() + '»)', quietRow(noted, 'long-lived token only') && (noted.soft || '').trim() === '3548 09');
       ck('BROWSER r2: the token\'s LAST DAY is said once — the chip «long-lived token only · ends in 20 h» (its re-login door), no countdown tag beside it, the countdown\'s sentence at the end of the chip\'s hover, the note behind it',
-        last.chip.trim() === 'long-lived token only · ends in 20 h' && tokenTags(last).length === 0 && last.chipRole === 'button/0' && /expires in 0\.8 days — re-mint it in ⋯ → Long-lived token\.$/.test(last.chipTitle) && (last.soft || '').trim() === '· 3548 09');
+        last.chip.trim() === 'long-lived token only · ends in 20 h' && tokenTags(last).length === 0 && last.chipRole === 'button/0' && /expires in 0\.8 days — re-mint it in «Long-lived token \(active\)…»\.$/.test(last.chipTitle) && (last.soft || '').trim() === '· 3548 09');
       const twice = await look('twice-en');
       ck('BROWSER r2: RED control — with the step-aside cut, the last day is said twice (the countdown tag beside the chip)', tokenTags(twice.full.last).join('|') === '· long-lived token · 0.8d left');
       // RED control (lane oat-chip-icon): the quiet return cut — the same rows draw today's words on the line

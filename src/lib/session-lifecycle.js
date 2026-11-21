@@ -1793,9 +1793,9 @@ export function installSessionLifecycle(App, ctx = {}) {
         // Belt vs a stale server: an expired oat must not be pickable (the
         // pick kills the session, then the create refuses — window gone)
         if (v.usable) return (v.how === 'oat' && a.oatDaysLeft <= 0)
-          ? t('“{name}”’s long-lived token has expired — re-mint it in Manage agents (⋯ → Long-lived token).', { name: a.name })
+          ? t('“{name}”’s long-lived token has expired — re-mint it', { name: a.name })
           : null;
-        if (v.reason === 'oat-expired') return t('“{name}”’s long-lived token has expired — re-mint it in Manage agents (⋯ → Long-lived token).', { name: a.name });
+        if (v.reason === 'oat-expired') return t('“{name}”’s long-lived token has expired — re-mint it', { name: a.name });
         if (v.reason === 'held-identity-mismatch') return t('The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.', { host: rHostName, name: a.name, email: v.dirEmail || '?' });
         if (v.reason === 'not-on-this-host') {
           // signed in SOMEWHERE — just not on the machine this session runs on
@@ -1833,7 +1833,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // dir login (the server drops the dead secret), so it must fall
         // through to the normal ladder instead of a false hard-block
         if (!expired) return null;
-        if (!a.loggedIn) return t('“{name}”’s long-lived token has expired — re-mint it in Manage agents (⋯ → Long-lived token).', { name: a.name });
+        if (!a.loggedIn) return t('“{name}”’s long-lived token has expired — re-mint it', { name: a.name });
         // logged-in + expired oat → the ordinary rules below tell the truth
       }
       if (!a.loggedIn && !(rHostId && (hostLinked(a) || hostSubHeld(a)))) {
@@ -2011,7 +2011,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       // speak with the server's authority.
       if (block && verdictsCold) block += ' ' + t('(unconfirmed — {host} hasn’t answered the availability check yet)', { host: rHostName });
       // lane ui-controls-and-bugs (the walk: two accounts greyed, no reason): the why ON the row, and the door where sign-in lives
-      if (block && !cur) { items.push({ label: a.name + suffix, off: block, offDoor: { label: t('Manage agents…'), action: () => this._showAgentsDialog?.({ opener: 'billing' }) } }); continue; }
+      // B-8703 unit 2 (主开发 r700): an account whose long-lived token EXPIRED — the door on this line is that account's own
+      // «Long-lived token…» dialog (the Manage Agents row menu's item), never a path to it; every other block keeps «Manage agents…»
+      const oatDead = !!block && block.startsWith(t('“{name}”’s long-lived token has expired — re-mint it', { name: a.name }));
+      if (block && !cur) { items.push({ label: a.name + suffix, off: block, offDoor: oatDead ? { label: t('Long-lived token…'), action: () => this._oatDialog?.(a.id, a) } : { label: t('Manage agents…'), action: () => this._showAgentsDialog?.({ opener: 'billing' }) } }); continue; }
       // LINKED pick sends the REAL account id (2.241.0): the server's
       // email-linked rescue (ws-handler create, 2.240.2) maps it onto the
       // host's own login — zero creds ship — while session._accountId keeps

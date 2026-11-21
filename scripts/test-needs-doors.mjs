@@ -119,7 +119,7 @@ for (const c of C) {
     // each family's count only falls: B-d073 0 (主开发's ruling (a), 2026-11-18 23:33Z, was 4 — B-d073 built their doors); B-8703 29
     // (主开发 r533, 2026-11-20: unit 1 LISTS what the closed path net and the zh / ja value net newly catch — 22 menu paths, 7 values;
     // unit 2 makes doors of them where a helper that exists makes it one line)
-    const OWED_CEILING = Object.freeze({ 'B-d073': 0, 'B-8703': 29 });
+    const OWED_CEILING = Object.freeze({ 'B-d073': 0, 'B-8703': 17 });   // B-8703 unit 2: 29 → 17 — the 12 the long-lived-token words and doors met (主开发 r700)
     const owedBy = (f) => (c.T.DOORS_OWED || []).filter((r) => r.family === f).length;
     // a B-8703 row names its file(s), and each file it names says the sentence it claims (the list is honest about where)
     const named = (r) => { const fs8 = (/^((?:src\/[\w./-]+\.js)(?:, src\/[\w./-]+\.js)*): /.exec(r.why) || [])[1]; const got = c.owed.filter((x) => x.row === r); return !!fs8 && got.length > 0 && got.every((x) => fs8.split(', ').every((f) => (words.get(x.s) || new Set()).has(f))); };
@@ -966,6 +966,33 @@ try {
 } catch (e) { ok(false, 'the client bundles and imports under the minimal DOM', String(e && e.message).slice(0, 600)); }
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 const fn = (m, k) => !!(CL && CL[m] && typeof CL[m][k] === 'function');
+// B-8703 unit 2 (主开发 r700): THE TWO LINES AWAY FROM THE MANAGE AGENTS ROW GAIN A DOOR — each lifted from its own source by its text and
+// PRESSED: the billing menu's expired-token row offers «Long-lived token…» (its act opens that account's own dialog, _oatDialog); the
+// session properties' account line gains «Re-mint “{name}”’s long-lived token…» for an account whose token expired (pressed: the same
+// dialog). RED CONTROLS: a block that is not the expired token keeps «Manage agents…»; an account that has not expired gains no button
+{
+  const SLS = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8'), SPS = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
+  const doorM = /offDoor: (oatDead \? \{ label: t\('Long-lived token…'\), action: \(\) => this\._oatDialog\?\.\(a\.id, a\) \} : \{ label: t\('Manage agents…'\), action: \(\) => this\._showAgentsDialog\?\.\(\{ opener: 'billing' \}\) \})/.exec(SLS);
+  const loopM = /\n(    for \(const x of accts\) if \(vOf\(x\)\?\.reason === 'oat-expired'\) \{[^\n]*\}\n)/.exec(SPS);
+  const opened = [], agents = [];
+  const app = { _oatDialog: (id, a) => opened.push([id, a && a.name]), _showAgentsDialog: (o) => agents.push(o) };
+  const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
+  const offDoor = (dead) => (doorM ? new Function('oatDead', 't', 'a', `return (${doorM[1]});`).call(app, dead, tt, { id: 'acct-x', name: 'Work Max' }) : null);
+  const dD = offDoor(true), dM = offDoor(false);
+  if (dD) dD.action(); if (dM) dM.action();
+  const row = new Nd('div');
+  const lineOf = (accts, reason) => { const r = new Nd('div'); if (loopM) new Function('accts', 'vOf', 'document', 't', 'acctRow', 'app', loopM[1])(accts, (x) => ({ reason: reason(x) }), DOC, tt, r, app); return r; };
+  const L1 = lineOf([{ id: 'acct-x', name: 'Work Max' }, { id: 'acct-y', name: 'Home' }], (x) => (x.id === 'acct-x' ? 'oat-expired' : 'not-on-this-host'));
+  const b = L1.children[0];
+  if (b && typeof b.onclick === 'function') b.onclick();
+  const L0 = lineOf([{ id: 'acct-y', name: 'Home' }], () => 'not-on-this-host');
+  console.log('    B-8703 unit 2, the facts judged: ' + JSON.stringify({ lifted: { door: !!doorM, loop: !!loopM }, dead: dD && dD.label, other: dM && dM.label, line: L1.children.map((c) => [c.tagName, c.textContent, c.dataset && c.dataset.door]), none: L0.children.length, opened, agents }));
+  ok(!!doorM && !!dD && dD.label === 'Long-lived token…' && opened.some(([id, n]) => id === 'acct-x' && n === 'Work Max'),
+    'B-8703 unit 2: the billing menu\'s EXPIRED-token row offers «Long-lived token…» — PRESSED, it opens that account\'s own dialog (_oatDialog)', { door: dD && dD.label, opened });
+  ok(!!loopM && L1.children.length === 1 && b && b.tagName === 'BUTTON' && b.textContent === 'Re-mint “Work Max”’s long-lived token…' && b.dataset.door === 'oat-remint' && opened.filter(([id]) => id === 'acct-x').length === 2,
+    'B-8703 unit 2: the session properties\' account line gains «Re-mint “{name}”’s long-lived token…» for the account whose token expired — PRESSED, the same dialog for that account', { line: L1.children.map((c) => c.textContent), opened });
+  ok(!!dM && dM.label === 'Manage agents…' && agents.length === 1 && L0.children.length === 0, 'CONTROL B-8703 unit 2: any other block keeps «Manage agents…» (pressed: Manage agents), and a line with no expired token gains no button', { other: dM && dM.label, agents, none: L0.children.length });
+}
 // B-8703 part 3 (主开发 r533): THE OPEN USAGE POPUP IS REDRAWN THE MOMENT spend.allowOverageTurns FLIPS — the real meter (installUsageMeter,
 // _setupUsage, _renderUsage; in the one client bundle) over the minimal DOM, the popup OPEN with an in-use Credits chip; the switch flipped
 // through the settings' own listeners; the chip's tip and the door read AT ONCE (no poll in this leg: _pollUsage is a no-op). RED CONTROL:

@@ -184,7 +184,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   ok('…the members dialog filters members by the POOL\'s backend and uses the same effective-hot rule', /\(x\.backend \|\| 'claude'\) === be && !x\.pooled/.test(ma) && /const effHot = a\?\.hotSupported !== false && !!a\?\.hot;/.test(ma) && /if \(!effHot\) for \(const sess of \(r\.affected \|\| \[\]\)\) this\._poolColdRestart/.test(ma));
   ok('…ONE create-pool dialog for both rosters (api(), so a refused create is a visible error)', count(ma, /_createPoolDialog\(/g) === 3 && /await api\('\/api\/accounts\/pool', \{ method: 'POST'/.test(ma) && !/fetchJson\('\/api\/accounts\/pool'/.test(ma));
   ok('…EVERY roster sorts with the shared rosterSort (pool → login → key): claude, codex and the isolated-home one (antigravity, lane antigravity-harness)', count(ma, /\.sort\(rosterSort\)/g) === 3 && /export const rosterSort/.test(ma));
-  ok('…the codex roster draws the POOL glyph (shared ROSTER_ICONS, SVG) and shows → target + the target\'s usage', /const \{ CROWN, GLOBE, POOL, STAR_F, STAR_O, DOTS \} = ROSTER_ICONS;/.test(ma) && count(ma, /isPool \? POOL : /g) === 2 && /no target — pick a ChatGPT account in ⋯/.test(ma) && /this\._codexAccountUsage\[a\.current\], this\._usageEstimates\?\.\[a\.current\]/.test(ma));
+  ok('…the codex roster draws the POOL glyph (shared ROSTER_ICONS, SVG) and shows → target + the target\'s usage', /const \{ CROWN, GLOBE, POOL, STAR_F, STAR_O, DOTS \} = ROSTER_ICONS;/.test(ma) && count(ma, /isPool \? POOL : /g) === 2 && /no target — pick a ChatGPT account in «Members & placement…»/.test(ma) && /this\._codexAccountUsage\[a\.current\], this\._usageEstimates\?\.\[a\.current\]/.test(ma));
   ok('…codex pool rows never get the set-email item (identity is the member\'s)', /if \(!a\?\.pooled && a\?\.loggedIn && \(!a\.email \|\| a\.emailDeclared\)\) items\.push/.test(ma));
   // the three wrong-icon/label surfaces
   const sv = read('server.js');
@@ -248,7 +248,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   // i18n: every new human-visible string has zh + ja entries
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = ['Hot switch unavailable — every switch restarts the session', 'All ChatGPT accounts', 'Pool set to all ChatGPT accounts (incl. future ones)',
-    'no target — pick a ChatGPT account in ⋯', 'Pooled account — one billing identity auto-switching across your ChatGPT accounts', 'Pooled account — {name}', 'ChatGPT account — {name}', 'ChatGPT login (the machine’s own)',
+    'no target — pick a ChatGPT account in «Members & placement…»', 'Pooled account — one billing identity auto-switching across your ChatGPT accounts', 'Pooled account — {name}', 'ChatGPT account — {name}', 'ChatGPT login (the machine’s own)',
     'The pool switches between these ChatGPT accounts. Not-signed-in accounts are skipped until they log in.'];
   const missing = keys.filter((k) => !zh.includes(`"${k}":`) || !ja.includes(`"${k}":`));
   ok('zh + ja dictionaries carry every new pool-UI key', missing.length === 0, missing.join(' | '));
