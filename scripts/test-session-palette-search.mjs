@@ -1,5 +1,6 @@
 // Palette search: userW's real regression (inc-msjro90z-n6y3) + guards.
 // "cmd+K 搜 best ever 搜不到 best ever toB signing 的 session，只能搜到 vendor session"
+import './scratch.mjs';
 import fs from 'node:fs';
 const src = fs.readFileSync(new URL('../src/lib/session-palette.js', import.meta.url), 'utf-8');
 // lift the two pure helpers out of the ES module (no DOM needed)

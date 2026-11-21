@@ -11,6 +11,7 @@
 // r6 (the acceptance of d2ff4026): what this suite spawns is stopped on EVERY path — one cleanup (each daemon by its own
 // pid, every scratch dir) run by the process's exit and by a signal (d2ff4026: a probe that threw skipped the kill — both
 // detached daemons kept running).
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { execFileSync } from 'node:child_process';

@@ -5,6 +5,7 @@
 // first → nothing on no change → <vibespace-task-update> diff on change →
 // full "was UPDATED" fallback with the toggle off → ONE layered multi-context
 // when several groups arrive at once. Run: node scripts/test-prompt-context.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

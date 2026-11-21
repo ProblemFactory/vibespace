@@ -4,6 +4,7 @@
 // migration MUST be lossless (devices in the field hold the raw tokens — a
 // lost hash locks every daemon out permanently) and idempotent (a crash
 // mid-way re-runs cleanly). Pure unit test — no server boot.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

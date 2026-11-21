@@ -128,6 +128,7 @@
 //     live generation is decided first — the last _set-aside slot is the live set's, and a live set that cannot be moved
 //     fails the hold before anything of an older set is decided or said
 // In-process, no server; sparse files for every big shape (fs.truncateSync / a write at an offset — no disk, no load).
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

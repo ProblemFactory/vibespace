@@ -3,6 +3,7 @@
 // groups must be deterministic (same id → same color, every client/restart)
 // and well-spread (many groups stay distinguishable); the 'none' sentinel is
 // explicitly neutral; the server sanitizer accepts arbitrary hex + 'none'.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

@@ -5,6 +5,7 @@
 // a 25ms-cadence probe measures the MAIN thread's max scheduling delay. The
 // point of the feature is that heavy transcript work stops blocking the loop —
 // so the test asserts exactly that, plus result parity vs the sync originals.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

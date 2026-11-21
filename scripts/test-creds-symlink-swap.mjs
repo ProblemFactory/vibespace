@@ -11,6 +11,7 @@
 //     mkdir → resolving through the symlink hits the SAME real lock as a
 //     normal session of that account ⇒ refresh stays mutually excluded
 //   · mtime changes on re-point ⇒ the CLI's credential cache invalidates
+import './scratch.mjs';
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'; import crypto from 'node:crypto';
 const R = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-symswap-'));
 const A = path.join(R, 'acct-A'), B = path.join(R, 'acct-B'), S = path.join(R, 'session-1');

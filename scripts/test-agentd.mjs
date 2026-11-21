@@ -6,6 +6,7 @@
 // version → multi-connection (a second concurrent server). Everything runs
 // against a THROWAWAY VIBESPACE_AGENTD_ROOT — never the real ~/.vibespace.
 // Run: node scripts/test-agentd.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { execFileSync, spawnSync } from 'node:child_process';

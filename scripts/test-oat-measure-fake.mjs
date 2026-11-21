@@ -32,6 +32,7 @@
 // both variants is REFUSED. The REAL CLI's run of this pair is the integrator's (ordered by 主开发), never a lane's.
 // Heavy only because the measurement runs strace (THE TIER RULE); the reader's own table is
 // test-cli-caps (fast). No strace on the machine ⇒ SKIP with the reason.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

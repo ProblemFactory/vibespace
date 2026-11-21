@@ -2,6 +2,7 @@
 // Conversation-location index (R3 tail): host-inference / dead-host rescue can
 // locate a conversation the raw transcript cache has never seen (ownership
 // recorded from discovery AND fetches). Ambiguity stays honest.
+import './scratch.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);

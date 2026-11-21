@@ -1,5 +1,6 @@
 // R3/R5 switchover ladders: the device is PRIMARY, every fallback rung still
 // works, and the live-session overlay is never bypassed.
+import './scratch.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);

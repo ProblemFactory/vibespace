@@ -3,6 +3,7 @@
 // 127.0.0.1 + a patched API base exercises seed sync, filename shape (RFC2047
 // subject), dedup-by-directory, incremental history sync, and expired-history
 // reseed. Run: node scripts/test-gmail-sync.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

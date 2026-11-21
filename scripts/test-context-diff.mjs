@@ -8,6 +8,7 @@
 // backlog parks as ONE count line, and every cut (the 5000 / 6500 B blocks,
 // a full context's cap) dropping the OLDEST lines — each with a RED control of
 // the pop-from-the-end it replaced. Run: node scripts/test-context-diff.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

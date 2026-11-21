@@ -5,6 +5,7 @@
 // server's own normalizer derives from the same bytes (R0 content-derived
 // mids — the whole reason step 3 can ever be trusted); (3) the stream starts
 // at NOW (no history replay); (4) codex/exited sessions are skipped.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

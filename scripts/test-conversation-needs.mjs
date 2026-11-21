@@ -25,6 +25,7 @@
 //     key is a SURFACES row saying whether it reads `about`; the deferred ones are rows (the title-bar badge, the mini inbox,
 //     the session row's marker); RED: a surface dropped, a deferred one claimed as done, a deferred one that starts reading it
 // Run: node scripts/test-conversation-needs.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

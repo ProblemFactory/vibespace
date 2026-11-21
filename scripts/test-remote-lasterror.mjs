@@ -4,6 +4,7 @@
 // must record the child's last stderr line (or exit code) in meta.remote and
 // on the _remote_state stdout line, so the status-bar chip tooltip can name
 // the concrete failure instead of a bare attempt counter.
+import './scratch.mjs';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';

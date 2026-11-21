@@ -46,6 +46,7 @@
 //      the lane (AbortSignal) and over the route (its response closed before the answer)
 // RED on b7092c4d: ⑩ the declared extent's cuts (1 048 573 rows, 768 columns, 7 columns) and ⑥'s 35 001; ⑪ B killed at
 // its leftover (timeouts 1, restarts 1) and the waiter sent; ⑫ B parsed inside the blocked mount; ⑬ the gone ones parsed first.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

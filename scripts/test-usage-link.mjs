@@ -2,6 +2,7 @@
 // Smoke for the global↔named usage-account link (usage-routes ingestPassiveUsage):
 // org-uuid evidence must beat a stale ~/.claude.json email, and a proven-different
 // org must BREAK an email match. Runs setupUsage against a temp cache dir + fake deps.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

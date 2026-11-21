@@ -15,6 +15,7 @@
 // whose OWN node ($ROOT/node) is older than the pin gets the pinned one in its place (verified, no leftovers), a second
 // run downloads nothing, an older pin never downgrades it, a failed download keeps it, and a node the machine HAD (on
 // PATH, or --node) is never touched. RED CONTROL = the 2.369.340 installer: the pin moved and its own node stayed.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -7,6 +7,7 @@
 // re-init would fork the remote thread), byte-offset continuation, and the
 // _remote_exit sentinel finalizing the wrapper.
 // Run: node scripts/test-codex-remote-wrapper.mjs
+import './scratch.mjs';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

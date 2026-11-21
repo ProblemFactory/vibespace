@@ -15,6 +15,7 @@
 // its own sudo / visudo / debootstrap / Xvfb (nothing installed — the PREP refuses by name when one is missing), its
 // uid-1000 user, and rung A from ITS BAKED /usr/share/vibespace/sysroot-minbase.tar.gz (the driver keeps a tarball it found).
 // Run: node scripts/test-app-system-enter.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';

@@ -4,6 +4,7 @@
 // login"). VibeSpace records which account it spawned a remote session with —
 // the ingest just discarded it. Now it resolves by-time like local events,
 // and ONLY sessions VibeSpace never spawned keep the host bucket.
+import './scratch.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);

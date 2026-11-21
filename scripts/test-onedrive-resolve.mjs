@@ -4,6 +4,7 @@
 // add flow has no rclone-config step to resolve them. This exercises the
 // Graph resolution helper + the re-auth token write-back accepting onedrive,
 // with a mocked Graph endpoint (no network, no rclone).
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

@@ -9,6 +9,7 @@
 // same misjudgment made kill-pipe-session a no-op). Fix = exec-proof
 // startTime identity + an adopted-child liveness watcher (keeper parity).
 // Run: node scripts/test-agentd-adopt.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { execFileSync } from 'node:child_process';

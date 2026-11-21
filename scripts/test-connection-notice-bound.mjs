@@ -7,6 +7,7 @@
 // socket was owed: ≤ max(A, owed) + A + 2·Pr (+ Pr at the cut). Searched: 3 random seeds × 10 000 profiles (ten families), a constant grid of 21 600, the ratchet,
 // a stall-and-catch-up reader; each 30 min of model time. Then THE PRICE: no reader that keeps up (any margin ≥ 0, owed 8 MB) is cut for its backlog, and the
 // declared deep-buffer limit, as measured. RED on 4a34eed82: 61 / 66 / 74 random profiles over, the ratchet never cut at 31 MiB, the 5 % / 19 % lines cut.
+import './scratch.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const REPO = path.resolve(process.env.REPO || new URL('..', import.meta.url).pathname);

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+import './scratch.mjs';
 /**
  * THE REAL-TOOL PARITY CENSUS (lane vault-use-grants round 4 item 1 — the BLOCKER's lasting gate; round 5 item 5 + the census
  * MINOR harden it). HEAVY: it starts a loopback listener and runs the REAL curl / wget / git over a pinned table of URL and

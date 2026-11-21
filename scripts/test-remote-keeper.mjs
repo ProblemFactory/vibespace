@@ -4,6 +4,7 @@
 // life: attach, lose the pipe (ssh drop), reattach with a byte offset, and the
 // final _remote_exit sentinel. The "claude" stand-in echoes stdin lines and
 // exits on "quit". Run: node scripts/test-remote-keeper.mjs
+import './scratch.mjs';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

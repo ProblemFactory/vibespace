@@ -19,6 +19,7 @@
 //   §7 verify-r2: the agent's shell probe — bounded, async, a shell counts only if it RAN a POSIX line, re-measured at
 //      every hello (one installed later is seen at the next link); an old agent's hub-side probe judges the same way; the
 //      Files refusals travel as CODES the client words (zh / ja); du's bound and a cross-drive move say what is left where.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

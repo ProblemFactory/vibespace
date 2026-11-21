@@ -1,5 +1,6 @@
 // Dead-reckoning data foundation: identity key precedence (survives sub
 // remove+re-add), anchor dedup by fetchedAt, cost-delta pairing.
+import './scratch.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);

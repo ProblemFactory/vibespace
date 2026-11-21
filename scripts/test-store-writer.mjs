@@ -27,6 +27,7 @@
 //      (E3 b, CPU ticks); the install tree + the data dir hanging; MUTANT «the keeper kills after a stop» red by name; a
 //      process that is not the server has no keeper (E3 c); the crash road's order; round 4's whole matrix
 // Run: node scripts/test-store-writer.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -3,6 +3,7 @@
 // byte-channel data, and CREDIT flow control (a fat transfer must not starve a
 // concurrent stream: the design's stated requirement). Uses an in-memory
 // duplex pair. Run: node scripts/test-mux.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { Mux, INITIAL_WINDOW } = require('../src/agentd/mux.js');

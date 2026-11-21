@@ -16,6 +16,7 @@
 //      (sigStale), the loop still free; once the read lands the next turn tells it
 // The report quotes the printed numbers (the hook path's main-thread ms over a slow root, base vs now).
 // Run: node scripts/test-hook-loop-hold.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { performance } from 'node:perf_hooks';

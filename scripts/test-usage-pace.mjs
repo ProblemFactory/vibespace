@@ -1,4 +1,5 @@
 // Parity test for src/lib/usage-pace.js vs claude-swap's pace.py logic (B-87fe).
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { computePace, projectedExhaustionTs } = require('../src/lib/usage-pace.js');

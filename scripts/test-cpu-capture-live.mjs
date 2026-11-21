@@ -27,6 +27,7 @@
 //      guard cleared at the budget; the write's guard removed) are RED by name. THE READ'S PREMISE, asserted by name: each
 //      capture samples the install's code (a function to name) — the loop is busy half the time, not 10 %
 // Run: node scripts/test-cpu-capture-live.mjs        (VS_NODE22=/path/to/node22 for Ⓘ; VS_CC_LEGS=A,C… a maintainer's subset)
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

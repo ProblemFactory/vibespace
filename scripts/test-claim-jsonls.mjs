@@ -7,6 +7,7 @@
  *
  * Run: node scripts/test-claim-jsonls.mjs
  */
+import './scratch.mjs';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { claimJsonls } = require('../src/session-store.js');

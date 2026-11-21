@@ -6,6 +6,7 @@
  *
  *   node scripts/test-ssh-key.mjs
  */
+import './scratch.mjs';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';

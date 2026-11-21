@@ -7,6 +7,7 @@
 // verb, then the normalizer (AcpMessageManager) + store reader shapes, and
 // the wiring pins (stdout consumer, spawn gate, picker, permission card).
 // Run: node scripts/test-acp-harness.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

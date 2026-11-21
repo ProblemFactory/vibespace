@@ -3,6 +3,7 @@
 // agent delegation). Fake express + real TaskGroupManager in a temp dir.
 // Asserts the DOUBLE GATE (setting + per-session designation), the path
 // allowlist, all five verbs, and the audit trail. Run: node scripts/test-group-admin.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

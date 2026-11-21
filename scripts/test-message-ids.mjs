@@ -12,6 +12,7 @@
 //      stream by construction.
 //   3. Replay overlap collapses (same tool_use twice = one message).
 //   4. Keyless records (hash fallback) stay stable and never collide.
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { MessageManager } = require('../src/message-manager.js');

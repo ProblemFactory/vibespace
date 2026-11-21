@@ -31,6 +31,7 @@
 // B-1409 follow-up: (B) judges only the runs whose asks ALL landed inside the sync child's own start / end stamps (an ask
 // within JS_FAST_MS of its end counts as outside) — the rest a NAMED, COUNTED skip, with the asks and the child's stamps
 // Run: node scripts/test-loop-hold-live.mjs        (VS_NODE22=/path/to/node22 for leg ⑧)
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

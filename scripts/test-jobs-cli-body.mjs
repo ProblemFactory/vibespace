@@ -41,6 +41,7 @@
 //       version has no approval writer) — print a FIRST line that says waiting + the door that exists now, exit 0; `start`
 //       on a waiting job says the same; a schedule whose fires would wait says so beside «scheduled». CONTROL: a job that
 //       runs prints «started» at its run and at its start.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -26,6 +26,7 @@
 // the network refused ⇒ ONE SKIP line naming the reason; the verdict path is unchanged.
 // And the measurement pins the host's resolver ON lo inside its own namespace (so the
 // runner measures again); the namespace stays CLOSED — an open one is RED, never a skip.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

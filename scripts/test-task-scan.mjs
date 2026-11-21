@@ -10,6 +10,7 @@
 //  (c) Incremental byte cursor: appended records picked up without a rescan.
 // Runs in a CHILD with a fake HOME so findSessionJsonlPath resolves into a
 // throwaway projects dir — never touches the real ~/.claude.
+import './scratch.mjs';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

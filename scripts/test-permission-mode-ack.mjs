@@ -8,6 +8,7 @@
 // bypassPermissions because the session was not launched with
 // --dangerously-skip-permissions'}}` otherwise. This test pins the adapter
 // shape + the server-side bookkeeping contract.
+import './scratch.mjs';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { ClaudeCodeAdapter } = require('../src/adapters/claude-code.js');

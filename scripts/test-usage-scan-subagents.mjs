@@ -4,6 +4,7 @@
 // 15-agent review, measured), which poisoned dead-reckoning rates (calib
 // caught a 3-4× hot 5h rate). Events attribute to the PARENT session id;
 // requestId dedup absorbs parent-sidechain overlap.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

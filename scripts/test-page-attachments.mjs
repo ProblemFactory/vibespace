@@ -15,6 +15,7 @@
 //  - JSONL single isMeta record → ONE imageAttachment message
 //  - a REAL user image paste (typed / no synthetic flags) is untouched
 //  - a following real user message ends the coalesce run
+import './scratch.mjs';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { MessageManager } = require('../src/message-manager.js');

@@ -11,6 +11,7 @@
 //   over 5 000 seeded dropped runs (paced, off the loop, said twice) · P5 a restart in the middle · the rules (age = newest
 //   file, skeleton, reap-held, archive) · the five removers through the worker (the ✕ answered after the disk) · the PURE
 //   verdict + its mutant copies · the static census of jobs.js.
+import './scratch.mjs';
 process.env.VIBESPACE_JOBS_GRACE_MS = '1000';
 import fs from 'node:fs';
 import os from 'node:os';

@@ -9,6 +9,7 @@
 // fully landed (the loss-window fix: a link death mid-transfer leaves the
 // cursor put, re-emit + rid-dedup absorb); (3) the committed cursor makes the
 // next op incremental; (4) an append is picked up.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

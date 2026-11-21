@@ -5,6 +5,7 @@
 // session for the SAME claudeSessionId → two sidebar cards (userW's local
 // double-writer class). restoreSessions keeps ONE socket per conversation.
 // Run: node scripts/test-dedup-sockets.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { dedupWebuiSockets } = require('../src/session-store.js');

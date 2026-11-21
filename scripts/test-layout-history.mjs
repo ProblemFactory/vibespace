@@ -5,6 +5,7 @@
 // (the real incident: two desktops emptied, their windows unidentifiable).
 // Every layout write now leaves the previous SHAPE on disk. This drives the
 // real persistence module over a temp data dir.
+import './scratch.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { createRequire } from 'node:module';
 import { landingWriter } from './scratch.mjs';   // B-0248 (a)+(b): the route's stores land at the call here (the release's timing; the off-loop road is test-store-write-census ⑭'s)

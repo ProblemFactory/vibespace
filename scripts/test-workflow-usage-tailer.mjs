@@ -4,6 +4,7 @@
 // arm on a dir that does not exist yet. Also covers offset persistence,
 // partial-line handling, streamed re-emission (same rid growing), and
 // teardown on session death.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

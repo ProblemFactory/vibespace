@@ -4,6 +4,7 @@
 // deliberately NOT exercised (§ban-safety: no test may contact Anthropic) —
 // every gate that stops a call from happening IS: humanGated refusal,
 // missing-creds honesty, expired-token honesty, daemon-side throttle.
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { execFileSync } from 'node:child_process';

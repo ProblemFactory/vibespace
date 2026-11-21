@@ -8,6 +8,7 @@
 // path AND a session-meta file — one session's metadata (name,
 // claudeSessionId, account, taskId) silently overwrites the other's.
 // This pins the invariant STRUCTURALLY: one captured value feeds both.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);

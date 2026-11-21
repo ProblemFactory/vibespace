@@ -4,6 +4,7 @@
 // condition (limit banner observed in live session stdout AND no orchestrator
 // connection), logs it, and reports on reconnect. Single-brain preserved:
 // with a server CONNECTED the reflex must NOT fire.
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { execFileSync } from 'node:child_process';

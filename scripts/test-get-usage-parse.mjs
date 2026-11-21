@@ -1,6 +1,7 @@
 // B-7edc: get_usage control-request builder + rate_limits→cache parser.
 // Pure pieces — the LIVE ws-correlation is validated separately on a real
 // chat session (the control_response envelope nesting is the open unknown).
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { ClaudeCodeAdapter } = require('../src/adapters/claude-code.js');

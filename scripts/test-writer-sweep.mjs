@@ -11,6 +11,7 @@
 // This test drives the SAME sweepWriters() against a fake local device and a
 // fake remote device and demands identical behaviour — which is only
 // meaningful because there is now one implementation to drive.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

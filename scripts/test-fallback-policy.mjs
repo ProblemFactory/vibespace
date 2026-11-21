@@ -9,6 +9,7 @@
 // --settings false); (3) the normalizer renders model_refusal_no_fallback
 // (the record a disabled session dead-ends with) in BOTH key casings —
 // unrendered it is a silent failure.
+import './scratch.mjs';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { ClaudeCodeAdapter } = require('../src/adapters/claude-code.js');

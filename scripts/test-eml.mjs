@@ -1,4 +1,5 @@
 // Unit tests for src/lib/eml.js — run: node scripts/test-eml.mjs
+import './scratch.mjs';
 import { parseEml } from '../src/lib/eml.js';
 
 let failed = 0;

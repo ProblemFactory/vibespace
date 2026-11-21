@@ -12,6 +12,7 @@
 // every healthy one must not — with the chat viewport heights this window
 // actually had (the incident's viewport was 2195x1100; a chat window's list
 // is roughly 600-900px tall).
+import './scratch.mjs';
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 

@@ -4,6 +4,7 @@
 // tail-id case), the sweep's output through the DEVICE snapshot must equal
 // the local scan's output. LATENCY: the snapshot round trip is metered and
 // must come in under the sweep's own 4.5s cache TTL by a wide margin.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

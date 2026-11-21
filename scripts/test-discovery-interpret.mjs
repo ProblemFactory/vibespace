@@ -6,6 +6,7 @@
 // lines → the exact session-card set, covering the claim algorithm's tricky
 // cases (resumed session via tail-id, N-parallel-in-one-cwd, lock-with-no-
 // jsonl, stopped transcript, codex rollout, keeper adoption).
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

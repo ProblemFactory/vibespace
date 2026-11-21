@@ -16,6 +16,7 @@
 // A one-sided edit (a new op, a renamed param, a changed result key) fails
 // here BEFORE it can ship as a feature that works on one machine and not
 // another.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

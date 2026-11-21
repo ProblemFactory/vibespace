@@ -6,6 +6,7 @@
 // flattened the layout). This pins the two halves of the fix as pure logic:
 // (1) the snapshot CARRIES the desktop; (2) the resume MOVES the window back
 // only when the desktop still exists and differs.
+import './scratch.mjs';
 import fs from 'node:fs'; import path from 'node:path'; import { createRequire } from 'node:module';
 const src = fs.readFileSync(new URL('../src/lib/session-lifecycle.js', import.meta.url), 'utf8');
 let pass=0, fail=0; const ok=(c,n,e)=>{if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};
