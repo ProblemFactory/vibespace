@@ -364,6 +364,13 @@ This file is the engineers' record of every release: the lanes, the verification
 - A fresh reader's round (1 BLOCKER: a person's edit hidden between two agent edits read «same» under the tail-only check; 2 MAJOR: an unreadable dry-run list read as empty, no re-check at the press; MINORs) cured before the line.
 - scripts/measure-claude-rewind-files.mjs captures the CLI's rewind_files from its program file as bytes into scripts/fixtures/claude-cli/<v>-rewind-files.json — run ONCE on 主开发's word (r1104 / r1189: after «pushed», under the look lock, niced; 2026-11-21 11:30Z at load 5.70): the 2.1.322 program file (341 914 128 B, sha256 bfb3703a…) read as bytes, nothing run; the capture's own sha256 e5846b6f…. New fast suite test-rewind-files (PURE; six anchored controls; judged against the capture).
 
+### lg-rewind B-437e files tier U2, the pure part's fourth follow (主开发 r1330 + r1332 + r1336, on the taken 0cbe6cfcf)
+- THE CONNECTOR PREFIX ROW OUT (r1330): no recorded frame holds a connector call, so every `mcp__…` call reads «could not be checked».
+- r1332: a typed command whose name starts with a digit is read; EVERY command tag in a message is read; the shell's why names its window (five seconds before the edit, one after: inside it a time-preserving copy or a background writer reads «same»); the watcher (Monitor) takes the shell's why; two listed or edited paths equal but for letter case: every file `case-twins`; the conversation's own init's skills are helpers whatever the table says (`skills`, handed by the server half).
+- r1336: an edit call with no readable path proves nothing: every file «could not be checked» (`unknown-tool`).
+- Five red controls more (27): a narrow name pattern, the first tag alone, case twins passed, an edit with no path passed, the conversation's own skills ignored.
+- A fresh reader's round (1 MAJOR, 2 MINOR, NITs) before lining: a typed name is ANY name up to a space (`/部署`, `/a+b` were missed); twins also fold a composed vs a decomposed letter and a trailing dot or space; the conversation's skills in another shape fail closed (`{name}` rows read as names); an EMPTY edit path is an edit with no path; the shell's why is built from the judge's own slack constants; the connector row's leftover words gone. The skills are handed by the server half's next commit (the kept copy's).
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
