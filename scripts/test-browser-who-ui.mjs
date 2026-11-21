@@ -37,6 +37,7 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, deadPort, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1125)
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop names for the server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -290,6 +291,10 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   for (let i = 0; i < 120 && !first; i++) { try { first = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((x) => x.type === 'page'); } catch { } if (!first) await sleep(250); }
   if (!ok(!!first, 'chrome exposed a CDP page target')) return;
   /** One page = one CDP connection with its own helpers. */
+  // A PICTURE IS OF THE PAGE IN FRONT (主开发 r1125; test-ci-gate §2o): ONE front state for p1 and p2 — the page made last is in front
+  // (the launch's tab, then the tab /json/new opened), front() and load() move it; every picture goes through frontShot (its page
+  // brought to the front only when it is not there, bounded, one retry said, the front handed back): p2's pictures after p1.front()
+  const FS = frontState();
   async function pageOf(target) {
     const cdp = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 256 * 1024 * 1024 });
     await new Promise((r) => cdp.on('open', r));
@@ -304,12 +309,14 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await send('Page.addScriptToEvaluateOnNewDocument', { source: FONT_SOURCE });
     await send('Page.addScriptToEvaluateOnNewDocument', { source: `(${PAGE_WRAPPERS.toString()})(); window.__who.stubs = ${J(STUBS)};` });
     let langScript = null;
+    const key = target.id || target.webSocketDebuggerUrl, bring = () => send('Page.bringToFront');
+    becameFront(FS, key, bring);
     const P = {
       send, ev, errors,
       /** The tab this leg drives is the visible one (a hidden tab gets no animation frames). */
-      front: () => send('Page.bringToFront'),
+      front: async () => { await bring(); becameFront(FS, key, bring); },
       async load(lang, w, h, mobile = false) {
-        await send('Page.bringToFront');
+        await P.front();
         if (langScript) await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: langScript });
         langScript = (await send('Page.addScriptToEvaluateOnNewDocument', { source: lang === 'en' ? "try { localStorage.removeItem('vibespace.lang'); } catch {}" : `try { localStorage.setItem('vibespace.lang', ${J(lang)}); } catch {}` })).result.identifier;
         await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile });
@@ -335,7 +342,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
       async shot(file, sel = null) {
         let clip;
         if (sel) { const r = await ev(`(() => { const el = document.querySelector(${J(sel)}); if (!el) return null; const b = el.getBoundingClientRect(); return { x: b.left, y: b.top, width: b.width, height: b.height }; })()`); if (r) clip = { x: Math.max(0, r.x - 4), y: Math.max(0, r.y - 4), width: r.width + 8, height: r.height + 8, scale: 1 }; }
-        const img = await send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip } : {}) });
+        const img = await frontShot(FS, key, bring, () => send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip } : {}) }), { name: `the picture ${file}` });
         if (img.result && img.result.data) fs.writeFileSync(path.join(SHOTS, file + '.png'), Buffer.from(img.result.data, 'base64'));
       },
       rects: (o) => ev(`(${RECTS.toString()})(${J(o)})`),
