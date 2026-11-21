@@ -215,6 +215,30 @@ done
 
 [ "${VIBESPACE_SKIP_CI:-}" = "1" ] && { echo "[ci] VIBESPACE_SKIP_CI=1 — gate bypassed" >&2; exit 0; }
 
+# ── THE TIERS' OWN ENV (B-e381, 主开发 r962, 2026-11-21) ──────────────────────
+# A tier this hook launches ran in WHATEVER env the pushing shell had: a full tier launched from an interactive shell
+# (PATH = git's exec-path + the production checkout's data/bin + …) showed 26 mount-guard refusals and 183 failed lines for
+# a sha the hosted runner and the integrator's lane env ran green — such a run is no verdict. So every tier it launches
+# (the fast calls and the full launcher below) runs under `env -i` with an ALLOWLIST, as the tree's service env does for a
+# long-lived child (src/agent-env.js serviceEnv): the search path is the node this push resolves FIRST, then the system
+# folders — nothing of an interactive shell's additions (no checkout's data/bin, no agent programs' folder); the names
+# kept are the service env's (HOME, LANG, LC_*, TMPDIR, XDG_RUNTIME_DIR, TERM) + USER / LOGNAME + the tier's own knobs
+# (VIBESPACE_CI_*); the switches are the ones the cut scripts set: VS_NO_REAL_CLI=1 (no real vendor turn) and
+# VIBESPACE_SKIP_AGENT_HOOKS=1. Nothing here reads or sources a person's shell files. It works for every checkout's
+# ci.mjs (it only narrows the env), so a worktree older than this hook keeps working.
+tier_node="$(command -v node 2>/dev/null || true)"
+case "$tier_node" in /*) ;; *) tier_node="" ;; esac
+tier_path="/usr/local/bin:/usr/bin:/bin"
+[ -n "$tier_node" ] && tier_path="$(dirname "$tier_node"):$tier_path"
+tier_env=(env -i "HOME=${HOME:-}" "PATH=$tier_path" VS_NO_REAL_CLI=1 VIBESPACE_SKIP_AGENT_HOOKS=1)
+for v in USER LOGNAME LANG TMPDIR XDG_RUNTIME_DIR TERM; do
+  [ -n "${!v:-}" ] && tier_env+=("$v=${!v}")
+done
+for v in $(compgen -e); do
+  case "$v" in LC_*|VIBESPACE_CI_*) tier_env+=("$v=${!v}") ;; esac
+done
+echo "[ci] the tiers run in the hook's own env: node ${tier_node:-(none found on the push PATH)} · PATH $tier_path (B-e381: no shell additions)" >&2
+
 # ── HEAVY-TIER VERDICT FIRST (2026-09-07) ─────────────────────────────────
 # A heavy run that went RED on a commit that is an ANCESTOR of what we are
 # about to push means the last push shipped a regression the fast tier cannot
@@ -357,10 +381,10 @@ if [ "$skip_fast" = "0" ]; then
     ref="$(ref_for_sha "$sha")"
     if [ "$sha" = "$head_sha" ]; then
       echo "[ci] release gate — fast tier (VIBESPACE_SKIP_CI=1 to bypass in an emergency)…" >&2
-      node scripts/ci.mjs $kg || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
+      "${tier_env[@]}" node scripts/ci.mjs $kg || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
     else
       echo "[ci] $ref tips at $(echo "$sha" | cut -c1-8), which is NOT the commit you have checked out — the fast tier runs in an ISOLATED worktree at that commit (a verdict about the tree you have is not a verdict about the tree you are publishing)…" >&2
-      node scripts/ci.mjs --isolate $kg --sha="$sha" || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
+      "${tier_env[@]}" node scripts/ci.mjs --isolate $kg --sha="$sha" || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
     fi
     ran_fast=1
   done
@@ -380,7 +404,7 @@ if [ "$skip_fast" = "0" ]; then
   # about a list we do not have.
   if [ "$ran_fast" = "0" ]; then
     echo "[ci] release gate — fast tier (VIBESPACE_SKIP_CI=1 to bypass in an emergency)…" >&2
-    node scripts/ci.mjs $kg || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
+    "${tier_env[@]}" node scripts/ci.mjs $kg || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
   fi
 fi
 
@@ -401,6 +425,6 @@ fi
 # an affected green clears a red only for the suites it actually ran.
 for sha in "${PUSHED_SHAS[@]:-}"; do
   [ -z "$sha" ] && continue
-  node scripts/ci.mjs --heavy-launch "$sha" --range="$(range_for_sha "$sha")" >&2 || true
+  "${tier_env[@]}" node scripts/ci.mjs --heavy-launch "$sha" --range="$(range_for_sha "$sha")" >&2 || true
 done
 exit 0

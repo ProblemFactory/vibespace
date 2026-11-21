@@ -90,8 +90,8 @@ if (argv.includes('--check-heavy')) {
   process.exit(0);
 }
 const li = argv.indexOf('--heavy-launch');
-if (li >= 0) { note({ mode: 'heavy-launch', sha: argv[li + 1], range: (argv.find((a) => a.startsWith('--range=')) || '').slice(8) }); process.exit(0); }
-note({ mode: 'fast', isolate: argv.includes('--isolate'), keepGoing: argv.includes('--keep-going'), sha: (argv.find((a) => a.startsWith('--sha=')) || '').slice(6) || null });
+if (li >= 0) { note({ mode: 'heavy-launch', sha: argv[li + 1], range: (argv.find((a) => a.startsWith('--range=')) || '').slice(8), path: process.env.PATH, keys: Object.keys(process.env).sort() }); process.exit(0); }
+note({ mode: 'fast', isolate: argv.includes('--isolate'), keepGoing: argv.includes('--keep-going'), sha: (argv.find((a) => a.startsWith('--sha=')) || '').slice(6) || null, path: process.env.PATH, keys: Object.keys(process.env).sort() });
 process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
 `);
   fs.copyFileSync(path.join(REPO, 'scripts', 'git-hooks', 'pre-push'), path.join(repo, 'pre-push'));
@@ -172,6 +172,38 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
   fs.writeFileSync(stubPath, stubSrc);
   ok(stubSrc.includes("const KNOWN = ['keep-going'];") && rOld.status === 0 && fastOf(rOld).length === 1 && fastOf(rOld)[0].keepGoing === false && /has no --keep-going \(an older tree\) — its fast tier stops at the first red/.test(rOld.out),
     'B-6e71: a checkout whose ci.mjs predates the flag runs the fast tier WITHOUT it (no false GATE RED) and says so', { status: rOld.status, calls: rOld.calls });
+  // B-e381 part 1 (主开发 r962): THE TIERS RUN IN THE HOOK'S OWN ENV. A push from an interactive shell — its search path carrying
+  // a checkout's data/bin and the agent programs' folder, its own NODE_OPTIONS, a session token, a shell's own variable — must
+  // not reach a tier: every fast call and the full launcher are born under `env -i` with the allowlist (node's own dir first,
+  // then the system folders; the service env's names + the tier's VIBESPACE_CI_* knobs; VS_NO_REAL_CLI=1 and
+  // VIBESPACE_SKIP_AGENT_HOOKS=1 as the cut scripts set them), and the hook says which node and which path in one line.
+  // RED: a copy of the hook with today's pass-through (no env prefix) hands the planted env through.
+  {
+    const nodeDir = path.dirname(process.execPath);
+    const shellBin = mktmp('e381-shell-bin'), agentBin = mktmp('e381-agent-bin');   // real dirs, no node in them
+    const PLANT = { PATH: `${shellBin}:${agentBin}:${nodeDir}:/usr/bin:/bin`, NODE_OPTIONS: '--max-old-space-size=64', VIBESPACE_SESSION_TOKEN: 'vsst_' + 'planted', E381_SHELL_ADDITION: '1', VIBESPACE_CI_FAST_LANES: '2', LC_TIME: 'C.UTF-8' };
+    const tierPath = `${nodeDir}:/usr/local/bin:/usr/bin:/bin`;
+    const clean = (c) => !!c && c.path === tierPath && !c.keys.includes('NODE_OPTIONS') && !c.keys.includes('VIBESPACE_SESSION_TOKEN') && !c.keys.includes('E381_SHELL_ADDITION')
+      && !c.keys.some((k) => /^GIT_/.test(k)) && c.keys.includes('VS_NO_REAL_CLI') && c.keys.includes('VIBESPACE_SKIP_AGENT_HOOKS') && c.keys.includes('VIBESPACE_CI_FAST_LANES') && c.keys.includes('LC_TIME');
+    const B = commit(repo, 'src/e381.js', '//e381\n', 'E381 — a push from an interactive-looking shell');
+    const rEnv = runHook(B, ZERO, PLANT);
+    const fe = fastOf(rEnv)[0], he = rEnv.calls.find((c) => c.mode === 'heavy-launch');
+    const said = (rEnv.out.split('\n').find((l) => l.startsWith("[ci] the tiers run in the hook's own env:")) || '');
+    console.log(`    judged (the tier env): ${said} · fast PATH ${fe && fe.path} · heavy-launch PATH ${he && he.path} · fast keys ${fe ? fe.keys.join(',') : '(none)'}`);
+    ok(rEnv.status === 0 && clean(fe) && clean(he),
+      'B-e381: a push from an interactive-looking shell — its data/bin and agent-programs dirs, NODE_OPTIONS, a session token, a shell variable — reaches neither the fast tier nor the full launcher: both are born with node\'s dir + the system folders, the service env\'s names, the tier\'s VIBESPACE_CI_* knob and the cut scripts\' two switches', { status: rEnv.status, fast: fe, heavy: he });
+    ok(said === `[ci] the tiers run in the hook's own env: node ${path.join(nodeDir, 'node')} · PATH ${tierPath} (B-e381: no shell additions)`,
+      'B-e381: the hook says in ONE line which node and which search path its tiers run under', said);
+    const passThrough = preFixHook('e381-pass-through',
+      ['      "${tier_env[@]}" node scripts/ci.mjs $kg || {', '      node scripts/ci.mjs $kg || {'],
+      ['  "${tier_env[@]}" node scripts/ci.mjs --heavy-launch', '  node scripts/ci.mjs --heavy-launch']);
+    if (passThrough) {
+      const rOldEnv = runHookRefs(`refs/heads/main ${B} refs/heads/main ${ZERO}\n`, PLANT, passThrough);
+      const fo = fastOf(rOldEnv)[0], ho = rOldEnv.calls.find((c) => c.mode === 'heavy-launch');
+      ok(!!fo && !!ho && fo.path.startsWith(`${shellBin}:${agentBin}:`) && fo.keys.includes('NODE_OPTIONS') && fo.keys.includes('VIBESPACE_SESSION_TOKEN') && ho.keys.includes('E381_SHELL_ADDITION'),
+        'B-e381 CONTROL (today\'s pass-through, in a copy of the hook): the planted shell env — its search path, NODE_OPTIONS, the token, the shell variable — reaches the tiers', { fast: fo && fo.path, heavy: ho && ho.keys });
+    }
+  }
   ok(r1.calls.map((c) => c.mode).join(',') === 'check-heavy,fast,heavy-launch',
     `the hook checks the heavy verdict FIRST, then runs fast, then launches heavy (got: ${r1.calls.map((c) => c.mode).join(',')})`);
   ok(r1.calls.find((c) => c.mode === 'heavy-launch')?.sha === A, 'the heavy run is launched for the sha being PUSHED');

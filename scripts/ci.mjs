@@ -2544,6 +2544,30 @@ export function failLegs(stdout, stderr) {
     + xs.slice(0, FAIL_LINES_MAX).map((l) => (l.length > FAIL_LINE_CHARS ? l.slice(0, FAIL_LINE_CHARS) + '…' : l)).join('\n')
     + (more > 0 ? `\n  [ci] … ${more} more ✗ line(s) not shown` : '');
 }
+// AN ENVIRONMENT RED (B-e381 part 3 — 主开发's RULING, r962, 2026-11-21). A full tier the push hook launched from an interactive
+// shell showed 26 mount-guard refusals and 183 failed lines for a sha the hosted runner ran green: a red whose ONLY failed lines
+// are the mount guard's own refusals is the environment's, not the product's. It is SAID by that name with the refused path;
+// it still BLOCKS (a skip is not a green, an environment red is not a green either); it is never counted as the product's and
+// never retried as a flake. envRedOf(stdout, stderr) → { paths, n } | null: the suite printed at least one guard refusal
+// («[mount-guard] fn(path) from site refused», src/server/sync-fs-witness.js) AND every ✗ line of its output carries the guard's
+// own refusal (its code EVSMOUNTSYNC, its words, or the guard's line). A red with no ✗ line (a crash) or with one ✗ line of
+// another kind is the product's. PURE.
+export const MOUNT_GUARD_REFUSED = /\[mount-guard\] \w+\(([^)\n]*)\) from .* refused\b/;
+export const MOUNT_GUARD_WORDS = /\bEVSMOUNTSYNC\b|refused: a synchronous fs call on a storage mount|\[mount-guard\] .* refused\b/;
+export function envRedOf(stdout, stderr) {
+  const lines = `${stdout || ''}\n${stderr || ''}`.split('\n');
+  const paths = [];
+  let n = 0;
+  for (const l of lines) { const m = MOUNT_GUARD_REFUSED.exec(l); if (m && !paths.includes(m[1])) { n++; if (paths.length < 5) paths.push(m[1]); } }
+  if (!n) return null;
+  const xs = lines.filter((l) => /^\s*✗ /.test(l));
+  if (!xs.length || !xs.every((l) => MOUNT_GUARD_WORDS.test(l))) return null;
+  return { paths, n };
+}
+export const envRedWords = (e) => `the mount guard refused ${(e.paths || []).join(', ')}${e.n > (e.paths || []).length ? ` (and ${e.n - e.paths.length} more)` : ''}`;
+export const ENV_RED_NO_RETRY = "an ENVIRONMENT red — its only failed lines are the mount guard's refusals (主开发 r962): never retried as a flake";
+/** the closing's words for the environment reds (both tiers): «a (the mount guard refused /x), b (…)» */
+export const envRedsSaid = (list) => (list || []).map((x) => `${x.name} (${envRedWords(x)})`).join(', ');
 // A FAILED RUN'S WHOLE OUTPUT, kept: <dir>/<sha8>.<suite>.<try>.log, said on its own line → the file, or null. The heavy
 // tier's <markers>/fail-logs since lane ci-aidev-desktop-batch; the FAST tier's FAST_FAIL_LOGS since lane
 // ci-mirror-hygiene (its hang reports there too) — ci.yml's fast job uploads it on a red, as the heavy shards do theirs.
@@ -2559,7 +2583,7 @@ export const FAST_NO_RETRY = Object.freeze([
  *  named (with --keep-going: the count of what ran, then the red line); on the hosted runner (GITHUB_ACTIONS) ONE `::error`
  *  annotation names every red on the run page; and ANY red is exit 1 — a keep-going part that ran to its end is never a green.
  *  → { out: [['log' | 'err', line]], code: 1 | null } (null: no red — the caller goes on to its other checks) */
-export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env } = {}) {
+export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env, envReds = [] } = {}) {
   if (!Array.isArray(reds)) throw new TypeError('fastClosing: reds is not a list — a closing never reads a missing fact as «no red»');   // (the verdict's own fact has no default: the run crashes, exit 1)
   const out = [];
   if (keepGoing && reds.length) out.push(['err', `\n[ci] --keep-going: ${reds.length} red of ${ran} suites that ran — ${reds.join(', ')} (each one's whole output: ${hangDir})`]);
@@ -2568,6 +2592,10 @@ export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = fa
   // a workflow command's message escapes %, CR and LF (GitHub's rule); suite names hold none, the escape keeps it so
   const ghEsc = (t) => String(t).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
   if (reds.length && env && env.GITHUB_ACTIONS) out.push(['log', `::error title=fast${part ? ` ${part.i}/${part.n}` : ''}::${ghEsc(`${reds.length} red: ${reds.join(', ')}`)}`]);
+  // B-e381: an ENVIRONMENT red still blocks — said apart, by name with the refused path, never among the product's reds
+  const envNames = new Set((envReds || []).map((x) => x.name)), productReds = reds.filter((n) => !envNames.has(n));
+  if (envNames.size) out.push(['err', `\n[ci] ENVIRONMENT red — not the product's, never retried as a flake (主开发 r962): ${envRedsSaid(envReds)}`]);
+  if (envNames.size && reds.length) { out.push(['err', `\n✗ ${productReds.length ? productReds.join(', ') : 'no product red'} · ENVIRONMENT: ${[...envNames].join(', ')} — release gate is RED, do not push${skipCount(skippedLegs)}\n`]); return { out, code: 1 }; }
   if (reds.length) { out.push(['err', `\n✗ ${reds.join(', ')} — release gate is RED, do not push${skipCount(skippedLegs)}\n`]); return { out, code: 1 }; } // (B-4829: the verdict line carries the skip count)
   return { out, code: null };
 }
@@ -2580,6 +2608,7 @@ export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = fa
 export function fastRetryRefusal(s, r, { noRetry = FAST_NO_RETRY } = {}) {
   const row = noRetry.find((x) => x.name === (s && s.name));
   if (row) return row.why;
+  if (r && r.envRed) return ENV_RED_NO_RETRY;   // B-e381
   if (r && Array.isArray(r.egress) && r.egress.length) {
     if (r.egress.some((x) => x.host === EGRESS_UNLOADED)) return 'its egress reader did not load (B-9dd0) — its sockets were never counted, and a second try is not the first';
     if (r.egress.some((x) => x.host === EGRESS_LOST)) return 'its egress reader lost a host line (B-9dd0) — what the first try dialed is not known, and a second try is not the first';
@@ -2832,8 +2861,9 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       // the suite's OWN watchdog wrote the report before this clock ran (its digest is in the stdout tail): the row names the file
       const own = !asked && hr.armed && (() => { try { return fs.statSync(hr.file).mtimeMs >= t - 1000; } catch { return false; } })() ? hr.file : '';
       // B-9dd0 (r321 should 5): a row that FAILED and opened sockets keeps them in its result — its green retry cannot hide them
-      resolve({ ok: false, ms, load, ...(opened.length || lostN ? { egress: egressRows } : {}), killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
-        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${egressNote}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
+      const er = envRedOf(stdout, stderr);   // B-e381: an ENVIRONMENT red (its only failed lines are the mount guard's refusals)
+      resolve({ ok: false, ms, load, ...(er ? { envRed: er } : {}), ...(opened.length || lostN ? { egress: egressRows } : {}), killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
+        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${egressNote}${er ? ` — ENVIRONMENT red: ${envRedWords(er)}` : ''}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
         stdout.split('\n').slice(-40).join('\n'),
         stderr || ''] });
     };
@@ -4539,7 +4569,7 @@ function falseRowsVerb() {
  * → { reds, flaky, absent, skipped, timings, parMs, serMs, stoppedBy }
  */
 export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, after = async () => {}, skip = () => '', inflight = new Set(), failDir = null, ledger = null, sha = '', log = console.log, refusal = fastRetryRefusal } = {}) {
-  const reds = [], flaky = [], absent = [], skipped = [], timings = [], skippedLegs = [];
+  const reds = [], flaky = [], absent = [], skipped = [], timings = [], skippedLegs = [], envReds = [];   // envReds (B-e381): reds that are the environment's — still red
   let stoppedBy = null; // fail-fast only: the red that stopped the tier
   // B-4829: a green that skipped a leg is named (its count, its first reason) and its whole output kept beside the reds'
   const noteSkips = (s, r, attempt) => { if (r.skips) skippedLegs.push({ name: s.name, n: r.skips.n, first: r.skips.first, file: failDir ? writeSkipLog(failDir, sha, s, r, attempt, { log }) : null }); };
@@ -4575,6 +4605,7 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
         if (again.ok) { flaky.push(s.name); timings.push({ name: s.name, ms: again.ms, lane: String(lane) }); noteSkips(s, again, 2); continue; }
       }
       reds.push(s.name);
+      if (r.envRed) envReds.push({ name: s.name, paths: r.envRed.paths, n: r.envRed.n });
       if (!keepGoing && !stoppedBy) {
         stoppedBy = s.name;
         const others = [...inflight];
@@ -4588,7 +4619,7 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
   await Promise.all(Array.from({ length: Math.max(1, Math.min(lanes, parallelQ.length)) }, (_, i) => laneWorker(parallelQ, i + 1)));
   const parMs = Date.now() - tPar, tSer = Date.now();
   if (!stoppedBy && plan.serial.length) await laneWorker([...plan.serial], 'S');
-  return { reds, flaky, absent, skipped, skippedLegs, timings, parMs, serMs: Date.now() - tSer, stoppedBy };
+  return { reds, flaky, absent, skipped, skippedLegs, envReds, timings, parMs, serMs: Date.now() - tSer, stoppedBy };
 }
 
 /**
@@ -4635,7 +4666,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
     const hangDir = fastFailDir(); // the fast tier's fail-log dir: a timed-out suite's hang report (ci-hang-report) + a red suite's whole output (ci-mirror-hygiene)
     const pruned = pruneFailLogs(hangDir); // B-c327: the newest FAIL_LOGS_KEEP commits' logs stay, nothing else of ours
     if (pruned.length) console.log(`[ci] fail logs: ${pruned.length} file(s) of commits older than the newest ${FAIL_LOGS_KEEP} removed from ${hangDir}`);
-    const { reds, flaky, absent, skipped: skippedByName, skippedLegs, timings, parMs, serMs } = await runFastLanes(plan, {
+    const { reds, flaky, absent, skipped: skippedByName, skippedLegs, envReds, timings, parMs, serMs } = await runFastLanes(plan, {
       lanes, keepGoing, inflight, failDir: hangDir, sha, ledger: path.join(repo, ...FAST_RERUNS.split('/')),
       // VS_NO_REAL_CLI=1 (r6, §ban-safety): the real-turn row is not started at all — SKIPPED by name (the wire leg skips inside its suite).
       // Only a suite PRESENT in the tree being gated (r7c): an absent one stays ABSENT, so a commit that contains none of
@@ -4652,7 +4683,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
       },
     });
     dirPace.boundary("the fast tier's end"); // B-9ec9: whatever the pace left since its last sweep
-    const closing = fastClosing({ reds, flaky, skippedLegs, keepGoing, ran: fast.length - absent.length - skippedByName.length, hangDir, part, env: process.env });
+    const closing = fastClosing({ reds, flaky, skippedLegs, keepGoing, ran: fast.length - absent.length - skippedByName.length, hangDir, part, env: process.env, envReds });
     for (const [w, l] of closing.out) (w === 'err' ? console.error : console.log)(l);
     if (closing.code === 1) return 1;
     // NOTHING RAN IS NOT A PASS. An old tag or a commit that predates the gate
@@ -4891,7 +4922,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // the round-2 supersede cost one step earlier.
     let abandonedWhy = abandoned();
     const build = abandonedWhy ? { ok: false } : noteChildResult(runBuild({ cwd: runRoot, reuse: !isolate }));   // a built IN-PLACE tree is not rebuilt (THE BUILD STAMP); an --isolate checkout is fresh: no stamp asked, nothing hashed
-    const failed = [], flaky = [], timings = [], absent = [], selfSkipped = [], skippedLegs = []; // skippedLegs: B-4829, the greens that skipped a leg (selfSkipped: B-479e, the ones that ran nothing)
+    const failed = [], flaky = [], timings = [], absent = [], selfSkipped = [], skippedLegs = [], envFailed = [];   // envFailed (B-e381): of `failed`, the environment's // skippedLegs: B-4829, the greens that skipped a leg (selfSkipped: B-479e, the ones that ran nothing)
     let laneN = 0, serialNames = [];
     const dirPace = dirSweepPacer();
     // The build is the first thing a supersede kill lands on, so ask before
@@ -4943,7 +4974,10 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
         // not counted in `timings` — a marker that named 97 suites when 42 of
         // them do not exist at that sha is a claim nobody made.
         if (r.absent) { absent.push(s.name); if (par) { parInFlight--; overlapCheck(); } continue; }
-        if (!r.ok) {
+        if (!r.ok && r.envRed) {   // B-e381: an ENVIRONMENT red — still red (in `failed`: the marker blocks as before), never retried
+          failed.push(s.name); envFailed.push({ name: s.name, paths: r.envRed.paths, n: r.envRed.n });
+          console.log(`  · ${s.name} is not retried — ${ENV_RED_NO_RETRY}`);
+        } else if (!r.ok) {
           // …BUT NEVER RETRY A SUITE WE OURSELVES KILLED. Supersession SIGTERMs
           // the process GROUP, so the suite in flight dies with the runner's
           // own kill — and `noteChildResult` has just recorded that. Asking
@@ -5026,6 +5060,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     }
     const rec = {
       sha, result: failed.length ? 'red' : 'green', failed,
+      environment: envFailed.length ? envFailed : undefined,   // B-e381: which of `failed` are ENVIRONMENT reds (the mount guard's refusals)
       flaky: flaky.length ? flaky : undefined,
       skippedLegs: skippedLegs.length ? skippedLegs.map(({ name, n, first }) => ({ name, n, first })) : undefined, // B-4829: the greens that skipped a leg
       startedAt: t0, endedAt: Date.now(), ms: Date.now() - t0,
@@ -5080,6 +5115,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     console.log('\n' + verdict + (scope === 'affected' ? ` — AFFECTED scope: ${heavy.length} of ${all.length} heavy suites selected by ${range}; a FULL run is still owed once per 24 h` : '') + (shard ? ` — SHARD ${shard.i}/${shard.n} of the tier (${all.length} heavy suites over ${shard.n} shards)` : '') + (noVerdict ? ` — NO VERDICT WRITTEN (${noVerdict})` : ''));
     if (absent.length) console.log(`[ci:heavy] SKIPPED (absent at ${shortSha(sha)}, not run and not judged): ${absent.join(', ')}`);
     if (flaky.length) console.log(`[ci:heavy] FLAKY (failed, passed on retry — not blocking, but they did fail once): ${flaky.join(', ')}`);
+    if (envFailed.length) console.log(`[ci:heavy] ENVIRONMENT red — of the failed, not the product's, never retried as a flake (主开发 r962); still blocking: ${envRedsSaid(envFailed)}`);
     for (const l of skippedLegsSaid('ci:heavy', skippedLegs)) console.log(l); // B-4829: every suite that skipped a leg, by name
     // AN ABORTED TIER MUST NEVER EXIT 0 (round 4 finding). `failed` is empty
     // for an abandoned run by construction — it stopped instead of judging —
@@ -5309,6 +5345,7 @@ export function checkHeavy({ dir, head } = {}) {
   const when = blocker.endedAt ? new Date(blocker.endedAt).toLocaleString() : '?';
   console.error(`\n[ci] PUSH BLOCKED — the heavy tier went RED on ${shortSha(blocker.commit || blocker.sha)} (${when}), which is an ancestor of HEAD${blocker.commit && blocker.commit !== blocker.sha && !blocker.commit.startsWith(blocker.sha) ? ` (the marker ${path.basename(blocker.file || '')} names it in its sha field)` : ''}.`);
   console.error(`     failed: ${(blocker.failed || []).join(', ') || '(no suite names recorded)'}`);
+  if (Array.isArray(blocker.environment) && blocker.environment.length) console.error(`     of them ENVIRONMENT reds (not the product's — B-e381): ${envRedsSaid(blocker.environment)}`);
   if (blocker.unreadable) console.error(`     its marker ${path.relative(repo, blocker.file)} is UNREADABLE (${blocker.unreadable}) — it blocks until a FULL green on a descendant`);
   console.error(`     log:    ${path.relative(repo, path.join(markerDir(dir), blocker.sha + '.log'))}`);
   // The recovery has to be REACHABLE. It used to also offer "or wait for the
