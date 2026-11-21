@@ -1736,8 +1736,9 @@ function repairIdentityAnchors(why = 'boot', { since } = {}) {
   let list = [];   // B-6a92 r7: in scope for the finally's warm (read below, on the decision road)
   try {
     const { repairSidecarsByApiPhase } = require('../reading-repair.js');
-    // the identity keys it decides read the DECISION road (B-360d, round wldn7whag): its callers await the sign-in facts' settle and
-    // hand its `since`; a row not confirmed carries no email — the repair fails toward «not repaired» (the hourly run repairs)
+    // the rows it keys on are the DECISION road's (B-360d): its callers settle the sign-in facts first and hand the settle's
+    // `since` (boot and hourly: the timer's settle; the person's press: read now within the person's bound) — a row not
+    // confirmed carries no email and is never grouped by one
     list = (accounts.decisionList && accounts.decisionList(since != null ? { since } : {}).accounts) || [];
     const rep = repairSidecarsByApiPhase({ dataDir: path.join(rootDir, 'data'), accounts: list, id: 'identity-repair:' + why, ownIdsOf: usageIdentityAccountIds });   // B-6a92 r8: the row's own group is the row
     _ownWin = null; _ownWinAt = 0;

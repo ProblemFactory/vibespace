@@ -386,6 +386,21 @@ export function factsWordsHtml(a) {
   }
   return `<span class="acct-linked-hint">${escHtml(t('sign-in not read yet'))}</span>`;
 }
+/** B-360d: a same-account fold that could not compare rows (their sign-in could not be read in time) is SAID, never silent — the
+ *  finish's answer and a host's accounts answer, one set of words; '' when every row it compares was read */
+export function foldUnjudgedWords(list) {
+  if (!Array.isArray(list) || !list.length) return '';
+  return t('Could not compare with {names} — their sign-in could not be read; if this login is one of them, two rows now name one account', { names: list.map((x) => x.name || x.id).join(', ') });
+}
+// a host's accounts answer is read at every render of its view and every login poll: its words are said once a change (B-360d
+// follow, 主开发 r1574) — host → the words last said; an answer with every row compared forgets them
+const _hostFoldSaid = new Map();
+export function sayHostFoldUnjudged(hostId, r) {
+  const said = foldUnjudgedWords(r && r.foldUnjudged);   // not `words`: test-plain-words reads a file's first `const words = …(` as a dialog's builder
+  if (!said) { _hostFoldSaid.delete(hostId); return; }
+  if (_hostFoldSaid.get(hostId) === said) return;
+  _hostFoldSaid.set(hostId, said); showToast(said, { duration: 10000 });
+}
 export function subIdentHtml(a, { email = '', hostSub = false, hostTag = '', local = true } = {}) {
   if (signinUnread(a)) return factsWordsHtml(a) + (hostTag ? ` ${hostTag}` : '');   // B-360d: no claim until read
   // A ROW WHOSE FILE IS ITS LONG-LIVED TOKEN never signed in (acceptance r1 item 5): never «logged in» — its address and the
@@ -914,7 +929,7 @@ export function installManageAgents(App, ctx = {}) {
           else if (r.merged) showToast(t('✓ Recognized as existing account “{name}” — merged (freshest login kept)', { name: r.account?.name || '' }), { duration: 7000 });
           else showToast(t('✓ Added {name}', { name: r.name || t('subscription') }));
           // B-360d: the same-account fold could not compare these rows (their sign-in could not be read in time) — SAID, never silent
-          if (!r.merged && Array.isArray(r.foldUnjudged) && r.foldUnjudged.length) showToast(t('Could not compare with {names} — their sign-in could not be read; if this login is one of them, two rows now name one account', { names: r.foldUnjudged.map((x) => x.name || x.id).join(', ') }), { duration: 10000 });
+          if (!r.merged && foldUnjudgedWords(r.foldUnjudged)) showToast(foldUnjudgedWords(r.foldUnjudged), { duration: 10000 });
         } else if (r?.loginFailed) {
           clearInterval(iv);
           showToast(t('Subscription login could not be saved. Check the login terminal for details, then try again.'), { type: 'error', duration: 8000 });
@@ -1688,6 +1703,7 @@ export function installManageAgents(App, ctx = {}) {
       }
       let cur = null;
       try { cur = await fetchJson(`/api/hosts/${encodeURIComponent(hostId)}/accounts-status`); } catch { return; }
+      sayHostFoldUnjudged(hostId, cur);   // B-360d: the host's fold could not compare these rows — said
       if (accountId && loginAttempt) {
         const loginStatus = cur?.hostSubLoginStatus?.[accountId];
         // A named-account helper owns its exact completion signal (PR #23).
@@ -2472,6 +2488,7 @@ export function installManageAgents(App, ctx = {}) {
       let racct = null;
       if (selectedHost) { try { racct = await withHostKeyTail(selectedHost, await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`)); } catch {} }   // B-ee0a: its CLI-key tail, the person's read
       if (stale() || !body.isConnected) return;
+      if (selectedHost) sayHostFoldUnjudged(selectedHost, racct);   // B-360d: the host's fold could not compare these rows — said
       body.querySelector('.ob-loading')?.remove();
       const actx = { body, selectedHost, hostLabel, done, run, refresh, st, stale, racct };
       // the B-f276 family (主开发 r2947 (3)): accounts that could not be read are never shown as none — the panel says so above the rosters

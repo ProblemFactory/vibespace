@@ -434,7 +434,7 @@ function ingestPassiveUsage() {
     const actualEmail = _rateLimitCache?.orgEmail || null;
     linkUndecided = !m && !!em && !emailMatch && unsureOf(droster) && !(gOrg && roster.some((a) => _accountUsage[a.id]?.orgUuid === gOrg));
     // the same gate as codex: a KEPT link counts only while its address is the machine login's present one
-    if (linkUndecided && String(_usageGlobalLink.email || '').toLowerCase() !== em) _usageGlobalLink = { ..._usageGlobalLink, email: st.email || null, loggedIn: !!st.loggedIn, accountId: null };
+    if (linkUndecided && String(_usageGlobalLink.email || '').toLowerCase() !== em) _usageGlobalLink = { email: st.email || null, loggedIn: !!st.loggedIn, accountId: null, actualEmail: null, identityMismatch: false };   // a fresh object: the old login's mismatch was judged against the old address
     if (!linkUndecided) _usageGlobalLink = {
       email: st.email || null, loggedIn: !!st.loggedIn, accountId: m ? m.id : null,
       // Stale-identity surfacing: what the token ACTUALLY belongs to, when the
@@ -1718,7 +1718,9 @@ app.post('/api/usage/repair-identity', async (req, res) => {
   const auth = String(req.headers.authorization || '');
   if (/^Bearer\s+(vsst_|jbt_)/i.test(auth)) return res.status(403).json({ error: 'human-triggered only', code: 'agent-forbidden' });
   if (typeof repairIdentityAnchors !== 'function') return res.status(503).json({ error: 'identity repair unavailable', code: 'no-engine' });
-  let settled = null; try { settled = await accounts.signinFactsSettled(); } catch { }   // the decision road's facts first (B-360d)
+  // a PERSON's press (B-360d follow, 主开发 r1574): the sign-in facts read now within the person's bound, its reads at the head of
+  // the keeper's queue — never the timer's unbounded settle
+  let settled = null; try { settled = await accounts.signinFactsNow(null); } catch { }
   const rep = repairIdentityAnchors('manual', { since: settled && settled.since });
   if (rep && rep.error) return res.status(500).json({ error: 'identity repair failed: ' + rep.error, code: 'repair-failed' });
   try { reloadRateLimitCache(); } catch { }

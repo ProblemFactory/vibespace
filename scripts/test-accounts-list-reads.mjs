@@ -385,12 +385,68 @@ console.log('\n⑧ the cures\' behaviour (round wldn7whag):');
   mClaude = 'someone-new@example.test'; mCodex = 'cx-new@example.test';
   u = await usageNow();
   ck('(c) a machine login signed in as ANOTHER identity while a row cannot be read: undecided — the old link is NOT kept (both harnesses)', u.globalLogin.accountId === null && u.codexGlobalLogin.accountId === null, JSON.stringify({ c: u.globalLogin, x: u.codexGlobalLogin }));
-  const usrc = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
-  ck('(c) …and an undecided pass merges nothing on either harness (the merges read the undecided flags)', usrc.includes('const gid = linkUndecided ? null : _usageGlobalLink.accountId;') && usrc.includes('const gid = _codexLinkUndecided ? null : _codexUsageGlobalLink.accountId;'));
   mClaude = emailOf(81); mCodex = 'ca@example.test';
   u = await usageNow();
   ck('(c) the same address again (a row still unreadable): the match among the rows read decides — A again', u.globalLogin.accountId === LA && u.codexGlobalLogin.accountId === CA, JSON.stringify({ c: u.globalLogin.accountId, x: u.codexGlobalLogin.accountId }));
   door.deadUnder.clear();
+  // (c) …AN UNDECIDED PASS MERGES NOTHING, by behaviour (主开发 r1574 (3)): a KEPT link (its address the machine login's present one)
+  // on a pass that cannot decide writes NO other account's cache file on either harness; the same files on a DECIDED pass are
+  // merged (the leg's control — the merge is there to be seen)
+  {
+    const usageWrite = require(path.join(REPO, 'src/usage-cache-write.js'));
+    const { normalizeCodexRateLimit } = require(path.join(REPO, 'src/usage-routes.js'));
+    const MD = fs.mkdtempSync(path.join(ROOT, 'merge-'));
+    const amM = new AccountManager({ dataDir: path.join(MD, 'data'), safeFs: door, platform: 'linux' });
+    const MA = amM.createSubscription({ name: 'Merge A' }).id; signIn(amM, MA, 91);
+    const MB = amM.createSubscription({ name: 'Merge B' }).id; signIn(amM, MB, 92);
+    const cxOn = (id, email) => fs.writeFileSync(path.join(amM.codexSubDir(id), 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: ACCESS, id_token: `${b64u({ alg: 'none' })}.${b64u({ email, 'https://api.openai.com/auth': { chatgpt_plan_type: 'plus' } })}.sig` } }));
+    const XA = amM.createCodexSubscription({ name: 'Merge Cx A' }).id; cxOn(XA, 'xa@example.test');
+    const XB = amM.createCodexSubscription({ name: 'Merge Cx B' }).id; cxOn(XB, 'xb@example.test');
+    for (const id of [MA, MB, XA, XB]) amM.displayRefresh(id);
+    await amM.displaySettled();
+    amM.subscriptionStatus = () => ({ loggedIn: true, email: emailOf(91) });
+    amM.codexGlobalStatus = () => ({ loggedIn: true, email: 'xa@example.test' });
+    const cacheM = path.join(MD, 'data', 'usage-cache'); fs.mkdirSync(cacheM, { recursive: true });
+    const machineFile = path.join(MD, 'data', 'usage-cache.json');
+    // codex: the machine login's reading is NEWER than A's own — a merge writes it onto A's file
+    const tA = Date.now() - 60000, tG = Date.now() - 1000, rs = Math.floor(Date.now() / 1000) + 3600;
+    const cxSnap = (pct, at) => normalizeCodexRateLimit({ limit_id: 'codex', primary: { used_percent: pct, window_minutes: 300, resets_at: rs }, secondary: { used_percent: pct, window_minutes: 10080, resets_at: rs + 86400 } }, at);
+    const wA = usageWrite.writeCacheObject({ cacheDir: cacheM, key: XA, obj: cxSnap(11, tA), source: 'codex-rate-limits', backend: 'codex' });
+    const wG = usageWrite.writeCacheObject({ cacheDir: cacheM, key: '__global_codex__', obj: cxSnap(22, tG), source: 'codex-rate-limits', backend: 'codex' });
+    const atOf = (f) => { try { const o = JSON.parse(fs.readFileSync(f, 'utf8')); return Number((o && o.claude ? o.claude : o).fetchedAt) || 0; } catch { return 0; } };
+    const xaAt = () => atOf(usageWrite.cacheFileFor(cacheM, XA));
+    const mkUsage = async () => {
+      const r = {}, out = {};
+      await quiet(async () => setupUsage({ app: { get: (p, h) => { r['GET ' + p] = h; }, post: (p, h) => { r['POST ' + p] = h; }, put() { }, delete() { }, use() { }, locals: {} }, accounts: amM, hosts: null, usageHistory: null, activeSessions: new Map(), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: machineFile, USAGE_CACHE_DIR: cacheM, CODEX_SESSIONS_DIR: path.join(MD, 'codex-sessions'), META_DIR: path.join(MD, 'data', 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(MD, 'data', 'session-buffers'), probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: '/nonexistent/claude', repairIdentityAnchors: (why, o = {}) => { out.repairSince = o.since; return { counts: { restamped: 0 }, ms: 0, identities: [] }; } }));
+      return { usage: () => quiet(() => new Promise((resolve) => r['GET /api/usage']({ headers: {}, query: {} }, { json: resolve, status() { return this; } }))), r, get repairSince() { return out.repairSince; } };
+    };
+    const X = await mkUsage();   // its first pass (at setup) DECIDES: A on both harnesses
+    await amM.signinFactsSettled();
+    door.deadUnder.add(amM.subDir(MA)); door.deadUnder.add(amM.codexSubDir(XA));
+    await amM.signinFactsSettled([MA, XA], { withinMs: 0 });
+    const aAt = Date.now() - 500;   // claude: A's own reading, newer than any the machine login holds — a merge writes it onto the machine login's file
+    fs.writeFileSync(usageWrite.cacheFileFor(cacheM, MA), JSON.stringify({ fetchedAt: aAt, five_hour: { utilization: 33, resets_at: new Date(Date.now() + 36e5).toISOString() } }));
+    let um = await X.usage();
+    ck('(c) an UNDECIDED pass on a KEPT link (A, its address the machine login\'s present one, A\'s sign-in unreadable) merges NOTHING: claude — the machine login\'s file takes no reading of A; codex — A\'s file takes no reading of the machine login',
+      um.globalLogin.accountId === MA && um.codexGlobalLogin.accountId === XA && atOf(machineFile) !== aAt && xaAt() === tA && wA.ok && wG.ok,
+      JSON.stringify({ links: [um.globalLogin.accountId === MA, um.codexGlobalLogin.accountId === XA], machine: atOf(machineFile) === aAt ? 'A WRITTEN' : 'not A', xa: xaAt() === tA ? 'own' : xaAt(), seeds: [wA.ok, wG.ok, wA.why, wG.why] }));
+    door.deadUnder.clear();
+    await amM.signinFactsSettled([MA, XA], { withinMs: 0 });
+    um = await X.usage();   // claude has no memo: the same instance decides and merges
+    const Y = await mkUsage();   // codex's summary is a 30 s memo: a second instance's first pass, decided
+    um = await Y.usage();
+    ck('(c) …the control: the SAME files on a DECIDED pass are merged (claude: A\'s newer reading onto the machine login\'s file; codex: the machine login\'s newer reading onto A\'s file)',
+      atOf(machineFile) === aAt && xaAt() === tG, JSON.stringify({ machine: atOf(machineFile) === aAt, xa: xaAt() === tG ? 'merged' : xaAt() }));
+    // (e) THE MANUAL IDENTITY REPAIR (主开发 r1574 (1)) is a person's press: it reads the sign-in facts NOW within the person's bound,
+    // its reads at the head of the keeper's queue (signinFactsNow — the bound itself is ⑦(f)'s), and hands that read's `since` to
+    // the repair; never the timer's unbounded settle
+    const seen = { now: [], settled: 0 };
+    amM.signinFactsNow = async (ids) => { seen.now.push(ids); return { since: 4242, facts: new Map() }; };
+    amM.signinFactsSettled = async () => { seen.settled++; return { since: 1, facts: new Map() }; };
+    const pressed = await new Promise((resolve) => X.r['POST /api/usage/repair-identity']({ headers: {}, body: {} }, { json: (b) => resolve(b), status() { return this; } }));
+    delete amM.signinFactsSettled; delete amM.signinFactsNow;
+    ck('(e) the manual identity repair is a person\'s press: ONE bounded read-now (signinFactsNow) whose `since` the repair is handed, no timer settle', pressed && pressed.success === true && seen.now.length === 1 && seen.settled === 0 && X.repairSince === 4242, JSON.stringify({ pressed: pressed && pressed.success, seen, since: X.repairSince }));
+  }
   // (d) THE TICK: one at a time; a sign-in not read is never probed; a door refusal «sign-in-unknown» gives the attempt back
   const { createAutoCliLoop } = require(path.join(REPO, 'src/server/auto-cli-loop.js'));
   const NOW = Date.now();
@@ -453,13 +509,15 @@ const CENSUS = [
   { f: 'src/server/oat-shape-routes.js', kind: 'DISPLAY', who: 'the shape dialog\'s row (one row by its id)', has: ['accounts.rowOf(id)'], not: ['accounts.list()'], unread: 'the row\'s facts', unreadable: 'the row\'s facts' },
   { f: 'src/server/usage-pool-engine.js', kind: 'TURN', who: 'a reading\'s and a rejection\'s slot (readingSlotFor / rejectionSlotFor)', has: ['function readingSlotFor(session', 'function rejectionSlotFor(session'], unread: 'never the list', unreadable: 'never the list' },
   { f: 'src/server/account-usage-routes.js', kind: 'PERSON', who: 'a sign-in\'s same-account fold (finalize dupOf)', has: ['await accounts.signinFactsNow(compared)', 'foldUnjudged = rowsNow.filter('], unread: 'read now (the folders it compares), bounded', unreadable: 'never folded into (both kept) — and SAID (foldUnjudged)' },
-  { f: 'src/server/account-usage-routes.js', kind: 'PERSON', who: 'a host\'s email backfill and fold (accounts-status)', has: ['const readNow = (x) => !x.facts || x.facts.state === \'read\';'], unread: 'read now, awaited', unreadable: 'no backfill, no fold' },
+  { f: 'src/server/account-usage-routes.js', kind: 'PERSON', who: 'a host\'s email backfill and fold (accounts-status)', has: ['const readNow = (x) => !x.facts || x.facts.state === \'read\';'], unread: 'read now, awaited', unreadable: 'no backfill, no fold — and SAID (foldUnjudged)' },
+  { f: 'src/lib/manage-agents.js', kind: 'DISPLAY', who: 'the host\'s «could not compare» where Manage Agents reads the host\'s accounts answer (client; the finish\'s words)', has: ['export function sayHostFoldUnjudged(hostId, r)', 'sayHostFoldUnjudged(hostId, cur);', 'if (selectedHost) sayHostFoldUnjudged(selectedHost, racct);', 'if (!r.merged && foldUnjudgedWords(r.foldUnjudged)) showToast('], unread: 'said once a change', unreadable: 'said once a change' },
   { f: 'src/usage-routes.js', kind: 'PERSON', who: '⟳ and the tick\'s pick (refreshViaCliPanel) + the token road\'s same-account email', has: ['await accounts.signinFactsNow([key])', 'await accounts.signinFactsNow(compared)', 'const rowsNow = accounts.decisionList({ since }).accounts || [];'], unread: 'read now, awaited', unreadable: 'refused by name, no spawn, never «re-login»' },
   { f: 'src/server/auto-cli-loop.js', kind: 'TIMER', who: 'the automatic usage read\'s tick', has: ['await d.accounts.signinFactsSettled();', 'd.accounts.decisionList({ since: factsSince })', 'probeEligibility(a) === SIGNIN_UNKNOWN) continue;', 'if (ticking) return;'], not: ['d.accounts.list().accounts'], unread: 'NO probe this tick', unreadable: 'NO probe this tick' },   // stale-pins: kept — `not` checks the release's read is GONE
   { f: 'src/server/login-expiry-watch.js', kind: 'TIMER', who: 'the login-expiry sweep (its notices)', has: ['accounts.decisionLoginStateOf(a.id, t, ', 'accounts.signinFactsSettled()', 'sweep({ since: settled && settled.since })'], not: ['accounts.loginStateOf(a.id, t)'], unread: 'no notice, no retraction', unreadable: 'no notice, no retraction' },   // stale-pins: kept — `not` checks the release's read is GONE
   { f: 'src/usage-routes.js', kind: 'TIMER', who: 'the machine login\'s link and merge (ingestPassiveUsage)', has: ['const dec = accounts.decisionList().accounts || [];', 'const gid = linkUndecided ? null : _usageGlobalLink.accountId;', 'const gid = _codexLinkUndecided ? null : _codexUsageGlobalLink.accountId;', 'const ingestConfirmed = () => accounts.signinFactsSettled()'], unread: 'no link decided, no merge', unreadable: 'no link decided, no merge' },
-  { f: 'src/server/usage-pool-engine.js', kind: 'TIMER', who: 'the boot / hourly / manual identity repair (its identity keys)', has: ['accounts.decisionList(since != null ? { since } : {})'], unread: 'no email: «not repaired» (the hourly run repairs)', unreadable: 'the same' },
+  { f: 'src/server/usage-pool-engine.js', kind: 'TIMER', who: 'the boot / hourly / manual identity repair (the rows it keys on)', has: ['accounts.decisionList(since != null ? { since } : {})'], unread: 'no email: never grouped by one', unreadable: 'the same' },
   { f: 'server.js', kind: 'TIMER', who: 'the boot and hourly repairs await the facts first', has: ["repairIdentityAnchors('boot', { since: settled && settled.since })", "repairIdentityAnchors('hourly', { since: settled && settled.since })"], unread: '—', unreadable: '—' },
+  { f: 'src/usage-routes.js', kind: 'PERSON', who: 'the manual identity repair (a person\'s press: read now, bounded, at the head of the queue)', has: ['settled = await accounts.signinFactsNow(null)', "repairIdentityAnchors('manual', { since: settled && settled.since })"], unread: 'read now within the person\'s bound', unreadable: 'no email: never grouped by one' },
   { f: 'src/server/usage-pool-engine.js', kind: 'TIMER', who: 'the identity groups\' email key', has: ['const roster = accounts.decisionList({ withinMs: 60000 }).accounts || [];'], unread: 'its own identity (no merge)', unreadable: 'its own identity (no merge)' },
   { f: 'server.js', kind: 'TIMER', who: 'OTel\'s org→account email fallback (per record, no wait)', has: ['listAccounts: () => accounts.decisionList().accounts || [],'], unread: '«unknown org» (counted), the rid not remembered', unreadable: 'the same' },
   { f: 'src/lib/manage-agents.js', kind: 'DISPLAY', who: 'the accounts dialog\'s rows (client)', has: ['export function factsWordsHtml(a)', "t('sign-in not read yet')", "t('sign-in could not be read ({why})', { why })"], unread: '«sign-in not read yet»', unreadable: '«sign-in could not be read (why)»' },

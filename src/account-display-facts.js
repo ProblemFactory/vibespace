@@ -143,6 +143,8 @@ function create({ safeFs = () => null, timeoutMs = 5000, maxSize = 16 << 20, onL
     if (f.inflight) { if (urgent) promote(f); return f.startedAt >= after ? f.inflight : f.inflight.then(() => refresh(folder, files, parse, { link, after, keep, urgent, identity })); }
     const sf = door();
     if (!sf) { f.state = 'unreadable'; f.reason = 'no-reader'; f.at = now(); f.from = clock(); return Promise.resolve(f); }
+    // the read's «since» is stamped when it is ASKED, before its turn at the two slots: a decider never takes a read as newer than
+    // it is; a read asked before a writer's seed and run after it lands as dropped (f.from > from) and the seed's own confirmation reads
     const from = clock();
     f.startedAt = from;
     const specs = (files || []).map(specOf);
