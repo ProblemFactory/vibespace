@@ -176,16 +176,19 @@ try {
       SM.jsonlCacheClear?.(); const real = codex.readJsonlBoundedParsedPagedAsync; let n = 0;
       codex.readJsonlBoundedParsedPagedAsync = function (fp, o) { if (!n++) return Promise.reject(new Error('planted: the worker died mid-pages')); return real.call(this, fp, o); };
       try {
-        let rb = null; const pa = SM.warmSessionJsonlAsync(A, CWD), pb = SM.warmSessionJsonlAsync(Bb, CWD); pb.then((v) => { rb = v; });
-        const ra = await pa; const tEnd = Date.now() + 1500; while (rb === null && Date.now() < tEnd) await new Promise((r) => setTimeout(r, 5));
-        return { ra, rb };
+        const pa = SM.warmSessionJsonlAsync(A, CWD), pb = SM.warmSessionJsonlAsync(Bb, CWD);
+        // what happened, never a clock (r1093's small): the line is let go in microtasks — by the next turn the warm behind has asked
+        // its read, or it never will (a held line has nothing left to pump it)
+        const ra = await pa; await new Promise((r) => setImmediate(r));
+        const asked = n, rb = asked >= 2 ? await pb : null;
+        return { ra, rb, asked };
       } finally { codex.readJsonlBoundedParsedPagedAsync = real; }
     };
     const g8 = await rej(S, 'a');
     const held = require(M.write('src/session-store.js', anchored(ssSrc, 'Promise.resolve().then(() => warmTurn(job.fp, job.fresh)).then(job.resolve, job.reject).finally(() => { _warmQ.busy = false; pumpWarm(); });', 'Promise.resolve().then(() => warmTurn(job.fp, job.fresh)).then((v) => { job.resolve(v); _warmQ.busy = false; pumpWarm(); }, job.reject);', 'warm-held-on-reject'), 'warm-held-on-reject'));
     const r8 = await rej(held, 'b');
-    ok(g8.ra === false && g8.rb === true, `a warm whose read rejects answers false (its caller reads the old road) and the warm behind it runs (${g8.rb})`, g8);
-    ok(r8.ra === false && r8.rb === null, 'RED: the line let go only on success ⇒ the warm behind a rejected one never runs', r8);
+    ok(g8.ra === false && g8.asked === 2 && g8.rb === true, `a warm whose read rejects answers false (its caller reads the old road) and the warm behind it asks its read and runs (${g8.rb})`, g8);
+    ok(r8.ra === false && r8.asked === 1 && r8.rb === null, 'RED: the line let go only on success ⇒ the warm behind a rejected one never asks its read', r8);
   }
 
   console.log('— ⑨ THE CONVERSATION DECIDES (主开发 r1035): a bulk resume\'s conversation is bulk on the HISTORY road too, until a person\'s own act');
@@ -224,61 +227,176 @@ try {
       && /focus\(\) \{\s*if \(this\._chatInput\) this\._chatInput\.focus\(\);\s*this\._personAct\?\.\(\);/.test(cvSrc), 'the page: a bulk resume\'s window tells the hub once (person=1) at a press in it or the app going to it, while its history waits');
   }
 
-  console.log('— ⑩ THE MARK\'S WHOLE LIFE (主开发 r1062): bulk is the FIRST history read only — every road that warms or reads, driven twice');
+  console.log('— ⑩ THE DOORS (主开发 r1093): the mark is consumed where a door REPLIES, never inside a road — every door by every source, driven twice');
   {
-    // THE TABLE: each road over the real service, with one conversation a paced «Resume all» marked: its FIRST read asks in the bulk
-    // line (every warm and raw read it makes says bulk), and the read after that one LANDED asks as a person's. RED: the mark left set
-    // after the landing (src/bulk-read.js `landed` cut) ⇒ the second read is bulk again. THE CENSUS: no road reads the mark but
-    // through src/bulk-read.js — a member read of `_bulkRead` anywhere else under src/ fails BY NAME (its set in ws-create and its
-    // schema row aside); planted control. The socket's attach (ws-handler) is not loaded here: pinned by text
+    // THE CENSUS: every export of the service is a row of ENTRIES by name (an entry added later with no row is red by name); the
+    // consume (src/bulk-read.js replied / personAct) is called nowhere but at the doors (a call inside a road is red by name; the
+    // module is required whole, as BULK); every `attached` reply of the socket is classified, each door's consume right after its
+    // send; no road reads the mark's field but through the one place. THE TABLE: each door, one marked conversation, for EACH SOURCE
+    // of its reply — the local read, the paired machine's reply (a stand-in device), the device's failure then the local fallback,
+    // a paired machine's copy fetched (view: it never asks the device), the hub's own copy (a live normalizer holding the whole
+    // history) — driven twice: the first is bulk, the one after its reply a person's. RED: the tip's shape (the consume inside three
+    // roads) ⇒ the device's reply leaves the mark. A REPLY THAT FAILS (a throw: the pager's bound; the asker gone) keeps the mark: the
+    // retry is still the first read. ONE REQUEST, ONE FIRST READ: the withStatus composite on one memo reads in one line; RED: the
+    // verdict not the request's ⇒ its status warms as a person's.
     const H = require(path.join(REPO, 'src/harnesses'));
-    const tsSrc10 = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8'), brSrc10 = fs.readFileSync(path.join(REPO, 'src/bulk-read.js'), 'utf8');
-    const ROADS = [
-      ['the history route\'s first page (view)', 'claude', (svc, ref) => svc.page(ref, { offset: 0, limit: 50 })],
-      ['the paging read with an offset', 'claude', (svc, ref) => svc.page(ref, { offset: 20, limit: 50 })],
-      ['the search\'s read', 'claude', (svc, ref) => svc.searchIndexed(ref, 'needle')],
-      ['the turnmap', 'claude', (svc, ref) => svc.turnmap(ref)],
-      ['the status (with its task warm)', 'claude', (svc, ref) => svc.status(ref)],
-      ['the todos read (the task warm)', 'claude', (svc, ref) => svc.taskState(ref)],
-      ['codex\'s raw read (its view)', 'codex', (svc, ref) => svc.page(ref, { offset: 0, limit: 50 })],
-    ];
-    const table = async (TSm) => {
-      const rows = [];
-      for (let k = 0; k < ROADS.length; k++) {
-        const [name, backend, drive] = ROADS[k];
-        const sid = `a0b10000-0000-4000-8000-00000010${String(k).padStart(4, '0')}`, seen = [];
-        const live = { backend, claudeSessionId: backend === 'claude' ? sid : null, backendSessionId: sid, host: null, _bulkRead: true };
-        const st = H.get(backend).store, w0 = st.warmTranscript, hadT = Object.prototype.hasOwnProperty.call(st, 'warmTaskState'), t0 = st.warmTaskState;
-        st.warmTranscript = async (id, cwd, o) => { seen.push(!!(o && o.bulk)); return true; };
-        if (hadT) st.warmTaskState = async (id, cwd, o) => { seen.push(!!(o && o.bulk)); return true; };
-        const sm = () => ({ raw: () => [], rawAsync: async (o) => { seen.push(!!(o && o.bulk)); }, chatStatus: () => ({}), taskState: () => ({}) });
-        const svc = TSm.createTranscriptService({ activeSessions: new Map([['w10', live]]), createSessionMessages: sm, hosts: null });
-        try {
-          const ref = () => ({ backend, sessionId: sid, cwd: CWD, memo: {} });
-          let n = seen.length; await drive(svc, ref()); const first = seen.slice(n);
-          n = seen.length; await drive(svc, ref()); const second = seen.slice(n);
-          rows.push({ name, first, second });
-        } finally { st.warmTranscript = w0; if (hadT) st.warmTaskState = t0; }
-      }
-      return rows;
+    const TS10 = require(path.join(REPO, 'src/transcript-service.js'));
+    const tsSrc10 = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8');
+    const DEV = '\u0000device:', HOST = 'h10', Q = 'needle';
+    const ANSWER = { page: { messages: [], total: 0 }, turnmap: { turns: [], total: 0 }, searchIndexed: { matches: [], total: 0 }, status: { chatStatus: {}, taskState: null }, taskState: { todos: [] },
+      gapInfo: { hasFile: true, gap: null }, gapSlab: { messages: [] }, searchFull: { matches: [], truncated: false }, fullTurnmap: { turns: [] } };
+    let CUR = null, K = 0;
+    // one conversation a paced «Resume all» marked, its own service, one source of the reply
+    const conv = (TSm, backend, source, { failRead = 0 } = {}) => {
+      const sid = `a0b10000-0000-4000-8000-0000001${String(K++).padStart(5, '0')}`;
+      fs.copyFileSync(FX['one under a page'], path.join(PROJ, sid + '.jsonl'));   // the gap family reads the file itself
+      const remote = source !== 'local' && source !== 'hub-copy', asksDevice = source === 'device' || source === 'device-failed';
+      const live = { backend, claudeSessionId: backend === 'claude' ? sid : null, backendSessionId: sid, host: remote ? HOST : null, _bulkRead: true };
+      if (source === 'hub-copy') { live._normalizer = { total: 1, messages: [{ uuid: 'u-0' }], tailWindow: () => [], slice: () => [], turnMap: () => [], search: () => [] }; live._historyLoaded = true; }
+      const c = { sid, live, seen: [], served: [], device: asksDevice };
+      let fails = failRead;
+      const sm = () => ({ raw: () => [], rawAsync: async (o) => { c.seen.push(!!(o && o.bulk)); if (fails > 0) { fails--; throw new Error('planted: the pager\'s bound'); } }, chatStatus: () => ({}), taskState: () => ({}) });
+      const hosts = { fetchTranscript: async () => { }, linkState: () => 'online',
+        deviceBounded: async () => (c.device ? { connect: async () => ({ info: { capabilities: ['transcript-op'] } }),
+          transcriptOp: async (method) => { c.served.push(live._bulkRead === true); if (source === 'device-failed') throw new Error('planted: the device hung up'); return ANSWER[method]; } } : null) };
+      c.svc = TSm.createTranscriptService({ activeSessions: new Map([['w10-' + sid, live]]), createSessionMessages: sm, hosts });
+      c.ref = (o = {}) => ({ backend, sessionId: sid, cwd: CWD, host: live.host, memo: {}, ...o });
+      c.fp = () => (live.host ? DEV + HOST : path.join(PROJ, sid + '.jsonl'));
+      c.local = () => { c.device = false; live.host = null; delete live._normalizer; live._historyLoaded = false; };   // the read after: here, by the local road
+      return c;
     };
-    const g10 = await table(require(path.join(REPO, 'src/transcript-service.js')));
-    const noLanding = M.write('src/bulk-read.js', anchored(brSrc10, 'function landed(session) { if (session && session._bulkRead) session._bulkRead = false; }', 'function landed(session) { }', 'bulk-no-landing'), 'bulk-no-landing');
-    const r10 = await table(require(M.write('src/transcript-service.js', anchored(tsSrc10, "const BULK = require('./bulk-read');", `const BULK = require(${JSON.stringify(noLanding)});`, 'ts-bulk-no-landing'), 'ts-bulk-no-landing')));
-    for (const row of g10) ok(row.first.length > 0 && row.first.every((b) => b === true) && row.second.length > 0 && row.second.every((b) => b === false), `${row.name}: its first read is bulk (${row.first.join(',')}), the read after its landing a person's (${row.second.join(',')})`, row);
-    ok(r10.every((row) => row.second.some((b) => b === true)), `RED: the mark left set after the landing ⇒ the second read is bulk again on every road (${r10.map((x) => x.second.join(',')).join(' · ')})`, r10);
-    // THE CENSUS — a member read of the mark outside the one place, by name
-    const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
-    const READ = /\.\s*_bulkRead\b|\[\s*['"]_bulkRead['"]\s*\]/;
-    const ALLOWED = new Set(['src/bulk-read.js', 'src/ws-create.js', 'src/session-schema.js']);
-    const census = (files) => files.filter(([f, t]) => !ALLOWED.has(f) && READ.test(strip(t))).map(([f]) => f);
+    const stubbed = async (fn) => {
+      const saved = ['claude', 'codex'].map((b) => { const st = H.get(b).store; return [st, Object.prototype.hasOwnProperty.call(st, 'warmTranscript'), st.warmTranscript, Object.prototype.hasOwnProperty.call(st, 'warmTaskState'), st.warmTaskState]; });
+      const warns = [], w0 = console.warn; console.warn = (...a) => { warns.push(a.map(String).join(' ')); };
+      for (const [st, , , hadT] of saved) { st.warmTranscript = async (id, cwd, o) => { CUR && CUR.seen.push(!!(o && o.bulk)); return true; }; if (hadT) st.warmTaskState = async (id, cwd, o) => { CUR && CUR.seen.push(!!(o && o.bulk)); return true; }; }
+      try { return { out: await fn(), warns }; } finally { console.warn = w0; for (const [st, hadW, w, hadT, t] of saved) { if (hadW) st.warmTranscript = w; else delete st.warmTranscript; if (hadT) st.warmTaskState = t; } }
+    };
+    const ALL = ['local', 'device', 'device-failed', 'hub-copy'], FAM = ['local', 'device', 'device-failed'];
+    const DOORS = {   // which door reads in a line (asks `bulk`): the gap family reads the file itself, in none
+      view: { sources: ['local', 'remote-copy', 'hub-copy'], line: true, drive: (c) => c.svc.view(c.ref()) },
+      page: { sources: ALL, line: true, drive: (c) => c.svc.page(c.ref(), { offset: 0, limit: 50 }) },
+      turnmap: { sources: ALL, line: true, drive: (c) => c.svc.turnmap(c.ref()) },
+      searchIndexed: { sources: ALL, line: true, drive: (c) => c.svc.searchIndexed(c.ref(), Q) },
+      status: { sources: FAM, line: true, drive: (c) => c.svc.status(c.ref()) },   // no hub copy: it reads its reader (one request rides its memo, below)
+      taskState: { sources: FAM, line: true, drive: (c) => c.svc.taskState(c.ref()) },
+      gapInfo: { sources: FAM, line: false, drive: (c) => c.svc.gapInfo(c.ref()) },
+      gapSlab: { sources: FAM, line: false, drive: (c) => c.svc.gapSlab(c.ref(), c.fp(), 0, 4) },
+      searchFull: { sources: FAM, line: false, drive: (c) => c.svc.searchFull(c.ref(), c.fp(), Q) },
+      searchFullStream: { sources: FAM, line: false, drive: (c) => c.svc.searchFullStream(c.ref(), c.fp(), Q, () => { }, {}) },
+      fullTurnmap: { sources: FAM, line: false, drive: (c) => c.svc.fullTurnmap(c.ref(), c.fp()) },
+    };
+    const ROWS = [...Object.entries(DOORS).flatMap(([door, d]) => d.sources.map((source) => ({ door, backend: 'claude', source, d }))),
+      ...['local', 'device'].map((source) => ({ door: 'page', backend: 'codex', source, d: DOORS.page }))];   // codex's raw read, its own line
+    const table = (TSm) => stubbed(async () => {
+      const rows = [];
+      for (const { door, backend, source, d } of ROWS) {
+        const c = conv(TSm, backend, source); CUR = c;
+        let n = c.seen.length; await d.drive(c); const first = c.seen.slice(n), served = c.served.slice(), consumed = c.live._bulkRead === false;
+        c.local(); n = c.seen.length; await d.drive(c); const second = c.seen.slice(n);
+        rows.push({ name: `${door}${backend === 'codex' ? ' (codex)' : ''} by ${source}`, door, source, line: d.line, first, served, consumed, second });
+      }
+      CUR = null; return rows;
+    });
+    const good = await table(TS10);
+    const rowOk = (x) => x.consumed && (x.source !== 'device' || (x.served.length > 0 && x.served.every((b) => b === true)))
+      && x.first.every((b) => b === true) && x.second.every((b) => b === false) && (!x.line || (x.second.length > 0 && (x.source === 'device' || x.first.length > 0)));
+    for (const x of good.out) ok(rowOk(x), `${x.name}: the first reply ${x.source === 'device' ? `served while bulk (${x.served.join(',')})` : `read bulk (${x.first.join(',') || 'no line: the file itself'})`}, consumed at its reply; the read after a person's (${x.second.join(',') || 'no line'})`, x);
+    ok(good.out.filter((x) => x.source === 'device-failed').length === good.warns.filter((w) => /device read failed for h10/.test(w)).length,
+      `every device that failed was SAID once (${good.warns.length} saying(s)), its local fallback then replied`, good.warns);
+    // RED: THE TIP'S SHAPE — the consume inside three roads (view after its conversion, status, the todos read), no door
+    const tip = anchored(anchored(anchored(anchored(tsSrc10,
+      'const reply = (out) => { if (!(r.gone && r.gone())) BULK.replied(live()); return out; };', 'const reply = (out) => out;', 'tip-no-door'),
+      '    await mm.convertHistoryAsync(sm.raw());\n', '    await mm.convertHistoryAsync(sm.raw());\n    BULK.replied(session);\n', 'tip-view'),
+      '    return { chatStatus, taskState: sm.taskState?.() || null };', '    BULK.replied(session);\n    return { chatStatus, taskState: sm.taskState?.() || null };', 'tip-status'),
+      '    const st = sm.taskState() || {};\n', '    const st = sm.taskState() || {};\n    BULK.replied(live);\n', 'tip-todos');
+    const red = await table(require(M.write('src/transcript-service.js', tip, 'ts-tip-shape')));
+    const redDev = red.out.filter((x) => x.source === 'device'), redLocal = red.out.filter((x) => x.source === 'local' && x.line);
+    ok(redDev.length >= 10 && redDev.every((x) => !x.consumed && x.second.some((b) => b === true) === x.line) && redLocal.every((x) => x.consumed),
+      `RED: the tip's shape ⇒ the device's reply leaves the mark on every door (${redDev.map((x) => x.name).join(' · ')}), the next read bulk again; its local roads consume (${redLocal.length})`, { redDev, redLocal });
+    // A REPLY THAT FAILS keeps the mark — a throw (the pager's bound), the asker gone: the retry is still the first read
+    const fails = await stubbed(async () => {
+      const cT = conv(TS10, 'claude', 'local', { failRead: 1 }); CUR = cT;
+      let threw = null; try { await cT.svc.page(cT.ref(), { offset: 0, limit: 50 }); } catch (e) { threw = e.message; }
+      const keptT = cT.live._bulkRead === true; let n = cT.seen.length; await cT.svc.page(cT.ref(), { offset: 0, limit: 50 }); const retryT = cT.seen.slice(n), afterT = cT.live._bulkRead;
+      const cG = conv(TS10, 'claude', 'local'); CUR = cG;
+      await cG.svc.status(cG.ref({ gone: () => true })); const keptG = cG.live._bulkRead === true;
+      n = cG.seen.length; await cG.svc.status(cG.ref()); const retryG = cG.seen.slice(n), afterG = cG.live._bulkRead;
+      CUR = null; return { threw, keptT, retryT, afterT, keptG, retryG, afterG };
+    });
+    const f = fails.out;
+    ok(f.threw === 'planted: the pager\'s bound' && f.keptT && f.retryT.length > 0 && f.retryT.every((b) => b === true) && f.afterT === false && f.keptG && f.retryG.length > 0 && f.retryG.every((b) => b === true) && f.afterG === false,
+      `a reply that FAILS keeps the mark: a throw (${f.threw}) and an asker gone (its status replied to nobody) — each retry still reads bulk (${f.retryT.join(',')} · ${f.retryG.join(',')}) and its reply consumes`, f);
+    // ONE REQUEST, ONE FIRST READ: the history route's withStatus composite (page, status, turnmap on ONE memo)
+    const oneReq = async (TSm) => (await stubbed(async () => {
+      const c = conv(TSm, 'claude', 'local'); CUR = c;
+      const req = async () => { const ref = c.ref(), n = c.seen.length; await c.svc.page(ref, { offset: 0, limit: 50 }); await c.svc.status(ref); await c.svc.turnmap(ref); return c.seen.slice(n); };
+      const r1 = await req(), r2 = await req(); CUR = null; return { r1, r2 };
+    })).out;
+    const o1 = await oneReq(TS10);
+    const perRead = anchored(tsSrc10, "function bulkOf(r) { return r.memo && typeof r.memo.bulk === 'boolean' ? r.memo.bulk : BULK.isBulk(liveSession(r)); }", 'function bulkOf(r) { return BULK.isBulk(liveSession(r)); }', 'ts-verdict-per-read');   // stale-pins: kept (the red plants r1062's per-read verdict)
+    const o1r = await oneReq(require(M.write('src/transcript-service.js', perRead, 'ts-verdict-per-read')));
+    ok(o1.r1.length >= 4 && o1.r1.every((b) => b === true) && o1.r2.length >= 4 && o1.r2.every((b) => b === false),
+      `one request, one first read: the withStatus composite reads in one line (${o1.r1.join(',')}), the next request a person's (${o1.r2.join(',')})`, o1);
+    ok(o1r.r1[0] === true && o1r.r1.some((b) => b === false), `RED: the verdict not the request's ⇒ its status and turnmap warm as a person's (${o1r.r1.join(',')})`, o1r);
+    // THE ENTRIES: every export by name — a door, or not one (its reason in NOT_DOORS); the ones that are not consume nothing
+    const ENTRIES = { view: 'door', page: 'door', turnmap: 'door', searchIndexed: 'door', status: 'door', taskState: 'door', gapInfo: 'door', gapSlab: 'door', searchFull: 'door', searchFullStream: 'door', fullTurnmap: 'door',
+      filePath: 'not', refreshRemote: 'not', rescue: 'not', picture: 'not', pictureHere: 'not', personAsk: 'not', bulkOf: 'not' };
+    const entriesCensus = (keys) => ({ unlisted: keys.filter((k) => !Object.prototype.hasOwnProperty.call(ENTRIES, k)), dead: Object.keys(ENTRIES).filter((k) => !keys.includes(k)) });
+    const keys = Object.keys(TS10.createTranscriptService({ activeSessions: new Map(), createSessionMessages: () => ({}), hosts: null }));
+    const ec = entriesCensus(keys), ecPlanted = entriesCensus([...keys, 'plantedEntry']);
+    const notDoors = ((tsSrc10.match(/const NOT_DOORS = \{([\s\S]*?)\n  \};/) || [])[1] || '').split('\n').map((l) => (l.match(/^\s+(\w+):/) || [])[1]).filter(Boolean);
+    const nd = (await stubbed(async () => { const c = conv(TS10, 'claude', 'local'); c.svc.filePath(c.ref()); await c.svc.refreshRemote(c.ref()); const b = c.svc.bulkOf(c.ref()); const kept = c.live._bulkRead === true; c.svc.personAsk(c.ref()); return { b, kept, acted: c.live._bulkRead === false }; })).out;
+    ok(!ec.unlisted.length && !ec.dead.length && ecPlanted.unlisted.join() === 'plantedEntry' && notDoors.slice().sort().join() === Object.keys(ENTRIES).filter((k) => ENTRIES[k] === 'not').sort().join()
+      && Object.keys(ENTRIES).filter((k) => ENTRIES[k] === 'door').every((k) => good.out.some((x) => x.door === k)) && nd.b === true && nd.kept && nd.acted,
+      `THE ENTRIES: every export of the service is a row by name (${keys.length}; unlisted ${ec.unlisted.join(', ') || 'none'}, dead ${ec.dead.join(', ') || 'none'}); CONTROL a planted entry named (${ecPlanted.unlisted.join()}); NOT_DOORS = the table's not-doors (${notDoors.join(', ')}), each consuming nothing; personAsk acts`, { ec, notDoors, nd });
+    // THE CONSUME'S CALL SITES and the field's reads — by name, comments stripped (line numbers kept)
+    const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, '')).replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
     const walk = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.posix.join(d, e.name); if (e.isDirectory()) walk(r, out); else if (e.name.endsWith('.js')) out.push(r); } return out; };
     const tree = walk('src').map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]);
-    const outside = census(tree), planted = census([['src/planted-road.js', 'function read(s) { return !!s._bulkRead; }'], ['src/planted-comment.js', '// a comment naming s._bulkRead is no read']]);
-    ok(outside.length === 0 && planted.join() === 'src/planted-road.js', `THE CENSUS: no road reads the mark but through src/bulk-read.js (${tree.length} files; outside: ${outside.join(', ') || 'none'}); CONTROL a planted road named, a comment not (${planted.join(', ')})`, { outside, planted });
-    const ws10 = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-    ok(/const bulkRead = BULK\.isBulk\(session\);/.test(ws10) && /await rebuildHistory\(session, data\.sessionId, sm\.raw\(\)[^\n]*\n\s*BULK\.landed\(session\);/.test(ws10) && /\{ bulk: BULK\.isBulk\(session\) \}/.test(ws10) && /if \(addressableId\(s\) === backendSessionId\) BULK\.personAct\(s\);   \/\/ B-cd4b r1062: View History/.test(ws10),
-      'the socket\'s attach (pinned by text): its first attach reads the mark through the one place and consumes it when its history lands; its task warm the same; View History is a person\'s own act on the conversation it names (its own address)');
+    const CONSUME = /\bBULK\s*\.\s*(?:replied|personAct)\s*\(/, REQ = /require\(\s*['"][./]+(?:[\w-]+\/)*bulk-read(?:\.js)?['"]\s*\)/;
+    const SITES = [
+      ['src/transcript-service.js', 'BULK.replied(live())', 1],   // THE DOOR: every export but NOT_DOORS, when it replies
+      ['src/transcript-service.js', 'BULK.personAct(live)', 1],   // personAsk: a person's own act
+      ['src/ws-handler.js', 'if (ws.readyState === WS_OPEN) BULK.replied(session);', 2],   // the socket's attach doors: a chat attach, a terminal's
+      ['src/ws-handler.js', 'BULK.replied(s);', 1],   // View History's door
+    ];
+    const sitesCensus = (files) => {
+      const found = [];
+      for (const [f, t] of files) { if (f === 'src/bulk-read.js') continue; strip(t).split('\n').forEach((ln, i) => { if (CONSUME.test(ln) || (REQ.test(ln) && !/\bconst BULK = require\(/.test(ln))) found.push({ f, i: i + 1, ln: ln.trim() }); }); }
+      const unlisted = found.filter((h) => !SITES.some(([f, needle]) => f === h.f && h.ln.includes(needle))).map((h) => `${h.f}:${h.i}`);
+      const wrong = SITES.map(([f, needle, want]) => [f, needle, want, found.filter((h) => h.f === f && h.ln.includes(needle)).length]).filter(([, , want, got]) => want !== got).map(([f, needle, want, got]) => `${f} «${needle}» ${got} of ${want}`);
+      return { unlisted, wrong };
+    };
+    const sc = sitesCensus(tree);
+    const inRoad = anchored(tsSrc10, '    await mm.convertHistoryAsync(sm.raw());\n', '    await mm.convertHistoryAsync(sm.raw());\n    BULK.replied(session);\n', 'planted-road-consume');
+    const scPlanted = sitesCensus([...tree.filter(([f]) => f !== 'src/transcript-service.js'), ['src/transcript-service.js', inRoad], ['src/planted-road.js', "const { replied } = require('./bulk-read');\nreplied(s);"]]);
+    ok(!sc.unlisted.length && !sc.wrong.length && scPlanted.unlisted.length === 2 && scPlanted.unlisted[1] === 'src/planted-road.js:1' && /^src\/transcript-service\.js:\d+$/.test(scPlanted.unlisted[0]),
+      `THE CONSUME is called at the doors only (${tree.length} files; unlisted ${sc.unlisted.join(', ') || 'none'}, ${sc.wrong.join(', ') || 'every door once'}); CONTROL a consume planted inside view's road and a destructured require are named (${scPlanted.unlisted.join(', ')})`, { sc, scPlanted });
+    const READ = /\.\s*_bulkRead\b|\[\s*['"]_bulkRead['"]\s*\]|\{[^{}]*\b_bulkRead\b[^{}]*\}\s*=[^=>]/;
+    const ALLOWED = new Set(['src/bulk-read.js', 'src/ws-create.js', 'src/session-schema.js']);
+    const fieldCensus = (files) => files.filter(([f, t]) => !ALLOWED.has(f) && READ.test(strip(t))).map(([f]) => f);
+    const outside = fieldCensus(tree), planted = fieldCensus([['src/planted-road.js', 'function read(s) { return !!s._bulkRead; }'], ['src/planted-pick.js', 'const { _bulkRead } = s;'], ['src/planted-comment.js', '// a comment naming s._bulkRead is no read']]);
+    ok(outside.length === 0 && planted.join() === 'src/planted-road.js,src/planted-pick.js', `THE FIELD: no road reads the mark but through src/bulk-read.js (outside: ${outside.join(', ') || 'none'}); CONTROL a planted member read and a destructured one named, a comment not (${planted.join(', ')})`, { outside, planted });
+    // THE SOCKET'S HISTORY REPLIES (ws-handler is not loaded here): every `attached` send classified; each door's consume right after it
+    const wsS = strip(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'));
+    const SENDS = [
+      ['attachedFrameText(livePayload', 1, /ws\.send\(attachedFrameText\(livePayload, resume, \(\) => \(\{[\s\S]{0,600}?\}\)\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) BULK\.replied\(session\);/],   // a chat attach
+      ["buffer: session.buffer || ''", 1, /buffer: session\.buffer \|\| '' \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) BULK\.replied\(session\);/],   // a terminal's attach
+      ["name: data.name || '', cwd: data.cwd || '', mode: 'chat'", 1, /viewOnly: true \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) for \(const \[, s\] of activeSessions\) if \(addressableId\(s\) === backendSessionId\) BULK\.replied\(s\);/],   // View History
+      ['sessionId: subId', 3, null],   // NOT A DOOR: a subagent's own transcript — a virtual session no create marks
+    ];
+    const sendsCensus = (t) => {
+      const sends = t.split('\n').map((ln, i) => [i + 1, ln]).filter(([, ln]) => /ws\.send\(/.test(ln) && /type: 'attached'|attachedFrameText\(/.test(ln));
+      const unlisted = sends.filter(([, ln]) => !SENDS.some(([needle]) => ln.includes(needle))).map(([i]) => `src/ws-handler.js:${i}`);
+      const wrong = SENDS.filter(([needle, want, door]) => sends.filter(([, ln]) => ln.includes(needle)).length !== want || (door && !door.test(t))).map(([needle]) => needle);
+      return { n: sends.length, unlisted, wrong };
+    };
+    const ss = sendsCensus(wsS), ssPlanted = sendsCensus(wsS + "\n      ws.send(JSON.stringify({ type: 'attached', sessionId: planted }));");
+    ok(!ss.unlisted.length && !ss.wrong.length && ss.n === 6 && ssPlanted.unlisted.length === 1 && /const bulkRead = BULK\.isBulk\(session\);/.test(wsS) && /\{ bulk: BULK\.isBulk\(session\) \}/.test(wsS),
+      `THE SOCKET: its ${ss.n} history replies classified — a chat attach, a terminal's attach and View History consume right after their send, while the socket is open (a hang-up keeps the mark); the subagents' three are no door (${ss.wrong.join(', ') || 'each as pinned'}); CONTROL a planted reply named (${ssPlanted.unlisted.join()}); its first attach and task warm read through isBulk`, { ss, ssPlanted });
+    const rsSrc = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
+    ok((rsSrc.match(/gone: \(\) => !!\(req\.socket && req\.socket\.destroyed\)/g) || []).length === 2 && /result = await transcripts\.searchFull\(ref, fp, req\.query\.search\);/.test(rsSrc),
+      'the routes (pinned by text): the history route and the todos route tell the door when the asker hung up; the plain full search awaits its answer (ALSO CURED: it spread a Promise and replied no match)');
   }
 } catch (e) { fail++; console.log('  ✗ threw: ' + ((e && e.stack) || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

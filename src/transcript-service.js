@@ -93,6 +93,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     host: ref.host || null,
     memo: ref.memo && typeof ref.memo === 'object' ? ref.memo : null,   // ONE REQUEST, ONE READ (lane resume-all-paced L3 cure)
     webuiId: typeof ref.webuiId === 'string' && ref.webuiId ? ref.webuiId : null,   // B-952b smalls: the window's OWN conversation (a fork's)
+    gone: typeof ref.gone === 'function' ? ref.gone : null,   // B-cd4b r1093: the asker hung up — a door that replies to nobody consumes no mark
   });
   // B-952b: a LIVE conversation's reader gets the session's own id (its key in activeSessions — the webui id the hub spawned its
   // wrapper with): the wrapper's side file is BUFFERS_DIR/<that id>.json (codex: its plan — the Properties «Agent steps» — its
@@ -174,9 +175,11 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   }
   /** B-cd4b unit 2's follow (主开发 r1035): WHO IS BULK IS DECIDED BY THE CONVERSATION, not by the road that asks — the first history
    *  read of a conversation a paced «Resume all» created (its live session's `_bulkRead`, set by ws-create) is bulk on EVERY road
-   *  that warms: the socket's first attach (ws-handler), this service's view and task warm, and codex's raw read — until a person's
-   *  own act on it (personAsk, below; or the socket's first attach, which reads it and clears it as before). */
-  function bulkOf(r) { return BULK.isBulk(liveSession(r)); }   // r1062: through the one place (src/bulk-read.js) — consumed at the read's landing
+   *  that warms: the socket's first attach (ws-handler), this service's view and task warm, and codex's raw read — until a door
+   *  replied it (THE DOORS, at the end of this factory) or a person's own act (personAsk, below). r1093: ONE REQUEST, ONE FIRST READ —
+   *  the verdict is the request's, taken at its first door (`memo.bulk`): the history route's withStatus composite (page, status,
+   *  turnmap on one memo) reads in one line. */
+  function bulkOf(r) { return r.memo && typeof r.memo.bulk === 'boolean' ? r.memo.bulk : BULK.isBulk(liveSession(r)); }   // through the one place (src/bulk-read.js)
   /** A PERSON'S OWN ACT on a conversation whose history still waits (the creating page's quiet window: its pointer press, or the
    *  app going to it — src/lib/session-lifecycle.js): the conversation's bulk mark is cleared, and its warm is asked as a person's —
    *  it joins the one in flight for the file and moves it into the person's line (src/session-store.js promoteWarm). Never waits,
@@ -212,7 +215,6 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const mm = createMessageManager(r.backend, 'api', { threadId: r.sessionId }); // the rendered conversation's id (codex ledger key)
     await mm.convertHistoryAsync(sm.raw());
-    BULK.landed(session);   // r1062: the history read LANDED — the conversation's later reads are a person's
     if (r.memo) r.memo.view = { mm, session };
     return { mm, session };
   }
@@ -273,7 +275,6 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (session?._permissionMode && chatStatus && !chatStatus.permissionMode) {
       chatStatus.permissionMode = session._permissionMode;
     }
-    BULK.landed(session);   // r1062: the status read landed
     return { chatStatus, taskState: sm.taskState?.() || null };
   }
 
@@ -293,7 +294,6 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     const sm = await sideFileOf(createSessionMessages(sessionShape(r, live), liveIdOf(live)));   // B-952b: the live session's id — its wrapper's side file holds codex's plan, read off the loop
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const st = sm.taskState() || {};
-    BULK.landed(live);   // r1062: the todos read landed
     return hostFetchError || lastCopy ? { ...st, hostFetchError: hostFetchError || lastCopy, ...(lastCopy ? { hostOffline: true } : {}) } : st;   // hostOffline: the page words it in the reader's language
   }
 
@@ -454,7 +454,32 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     return out.ok ? { ok: true, mediaType: out.mediaType, b64: out.b64 } : out;
   }
 
-  return { view, page, turnmap, searchIndexed, status, taskState, filePath, gapInfo, gapSlab, searchFull, searchFullStream, fullTurnmap, refreshRemote, rescue, picture, pictureHere, personAsk, bulkOf };
+  // THE DOORS (B-cd4b, 主开发 r1093): THE MARK IS CONSUMED AT THE DOORS, NEVER INSIDE A ROAD. Every entry this service answers that
+  // replies a conversation's history or its facts consumes its bulk mark WHEN IT REPLIES (src/bulk-read.js `replied`), whatever served
+  // the reply — the local read, the hub's own copy (a live normalizer holding the whole history), the paired machine, a fallback — so
+  // an early return, or an entry added later, cannot skip it: EVERY export is a door but the ones NOT_DOORS names, each with its
+  // reason. A door whose reply FAILS (it throws: a refusal, the pager's bound) or whose asker is gone (`gone`) consumes nothing: the
+  // retry is still the first read. The request's verdict is taken at its first door (bulkOf, above).
+  const NOT_DOORS = {
+    filePath: 'the file\'s place on this machine — it reads none of it',
+    refreshRemote: 'pulls the paired machine\'s copy into the cache — it replies an error or nothing, never the history',
+    rescue: 'a person\'s repair of the file (POST) — it replies what it rewrote; the page then reads the history through a door',
+    picture: 'one picture\'s bytes out of a message the page already shows (its history replied first)',
+    pictureHere: 'the picture read on this machine (the same)',
+    personAsk: 'a person\'s own act (bulk-read personAct) — it reads nothing',
+    bulkOf: 'the verdict\'s reader',
+  };
+  const door = (fn) => (ref, ...rest) => {
+    const r = norm(ref || {});
+    const live = () => (r.sessionId ? liveSession(r) : null);
+    if (r.memo && typeof r.memo.bulk !== 'boolean') r.memo.bulk = BULK.isBulk(live());   // the request's verdict, before any road reads
+    const reply = (out) => { if (!(r.gone && r.gone())) BULK.replied(live()); return out; };   // THE consume — here and nowhere in a road
+    const out = fn(ref, ...rest);
+    return out && typeof out.then === 'function' ? out.then(reply) : reply(out);
+  };
+  const api = { view, page, turnmap, searchIndexed, status, taskState, filePath, gapInfo, gapSlab, searchFull, searchFullStream, fullTurnmap, refreshRemote, rescue, picture, pictureHere, personAsk, bulkOf };
+  for (const k of Object.keys(api)) if (!Object.prototype.hasOwnProperty.call(NOT_DOORS, k)) api[k] = door(api[k]);
+  return api;
 }
 
 module.exports = { createTranscriptService };

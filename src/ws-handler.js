@@ -10,7 +10,7 @@ const { createMessageManager, feedLive, feedPeerCard, rebuildHistory, seedHelper
 const { chipAsksOf } = require('./helper-ask.js'); // PURE (lane S1): the pending asks, per harness — the ONE function the chip and the wait watch read
 const { createWsHeartbeat } = require('./server/ws-heartbeat');
 const { readOffLoop, ATTACH_ACK_MS } = require('./attach-read'); // lane resume-all-paced L3: every attach reads a codex history off the loop, acked while it waits
-const BULK = require('./bulk-read');   // B-cd4b r1062: the bulk mark's ONE place (isBulk / landed / personAct)
+const BULK = require('./bulk-read');   // B-cd4b: the bulk mark's ONE place (isBulk / replied at the doors / personAct)
 const { addressableId } = require('./claude-lock-capture');   // the id a live session may be addressed by (a pending fork's borrowed id is nobody's)
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
@@ -1628,7 +1628,7 @@ function registerWsHandler(wss, ctx) {
               // normalizer with partial buffer data before any client connected.
               // the first attach of a conversation a paced «Resume all» created reads in the hub's BULK line, behind every person's
               // window (lane resume-all-paced L3 cure); every later attach is a person's
-              const bulkRead = BULK.isBulk(session);   // r1062: read through the one place; consumed when this attach's history LANDS (below)
+              const bulkRead = BULK.isBulk(session);   // read through the one place; consumed when this attach REPLIES (its door, below)
               if (session._normalizer && !session._historyLoaded) {
                 // 2.235.0: warm the JSONL parse cache in the transcript worker
                 // FIRST — the sync rebuild below then reads a warm cache
@@ -1666,7 +1666,6 @@ function registerWsHandler(wss, ctx) {
                   // L3: its turn in the hub's line — a person's window first, the first attach of a bulk resume's conversation after them
                   await readOffLoop(sm, { bulk: bulkRead, label: data.sessionId });
                   await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null }); // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
-                  BULK.landed(session);   // B-cd4b r1062: the attach's history landed — the conversation's later reads are a person's
                 }
                 finally { clearInterval(progressTimer); }
                 // A kill / CLI exit can land during the (now non-blocking)
@@ -1873,6 +1872,7 @@ function registerWsHandler(wss, ctx) {
                 messages: session._normalizer ? session._normalizer.tailWindow(attachWindowOpts(data.slab)) : [],
                 turnMap: session._normalizer ? session._normalizer.turnMap() : [],
               })));
+              if (ws.readyState === WS_OPEN) BULK.replied(session);   // B-cd4b r1093, THE DOOR: the attach replied the history (whatever served it: its read, the hub's copy, a replay) — a socket gone first keeps the mark
               armResume(session, ws);
               // ASK THE ONE PROCESS THAT KNOWS (2026-09-09, the ghost-row
               // incident). We just told the client our queue is a GUESS, so
@@ -1908,6 +1908,7 @@ function registerWsHandler(wss, ctx) {
               }
             } else {
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));
+              if (ws.readyState === WS_OPEN) BULK.replied(session);   // B-cd4b r1093, THE DOOR: a terminal's attach replied its history (the buffer)
               // A Ctrl+G edit still in flight (helper script blocking on its
               // signal file, claude on "Save and close editor to continue…")
               // exists only as a one-shot broadcast — re-deliver it so a page
@@ -1944,7 +1945,6 @@ function registerWsHandler(wss, ctx) {
             // its worker parse cache, codex reads a MISSING rollout through
             // thread/read (B-21e4 item 5, local only) — a dead 0.153 thread whose
             // history lives only in codex's paginated store still opens read-only.
-            for (const [, s] of activeSessions) if (addressableId(s) === backendSessionId) BULK.personAct(s);   // B-cd4b r1062: View History is a person's own act on the conversation it names (its own address: a pending fork carrying the id is not it)
             try { const warm = harnessOf(data.backend || 'claude').store?.warmTranscript; if (warm) await warm(backendSessionId, data.cwd || '', { remote: !!data.host }); } catch {}
             const sm = createSessionMessages({
               backend: data.backend || 'claude',
@@ -1972,6 +1972,7 @@ function registerWsHandler(wss, ctx) {
             await convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId }), { artifacts: artifactDeriveOpts({ backend: data.backend || 'claude', cwd: data.cwd || '' }) }); // lane artifacts-model: its deliverable cards, derived at the read // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once); its browser-session cards by time (2026-09-27)
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: data.name || '', cwd: data.cwd || '', mode: 'chat',
               messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true })); // the slab asked for, as the live attach (perf r1)
+            if (ws.readyState === WS_OPEN) for (const [, s] of activeSessions) if (addressableId(s) === backendSessionId) BULK.replied(s);   // B-cd4b r1093, THE DOOR: View History replied the history of the live conversation it names (its own address: a pending fork carrying the id is not it)
           } else {
             // Include sessionId so the requesting ChatView can correlate the
             // failure (otherwise it waits forever on a blank window)

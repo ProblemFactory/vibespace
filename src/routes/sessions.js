@@ -47,7 +47,7 @@ function setup(ctx) {
     const { backend, backendSessionId, claudeSessionId, cwd, offset, limit, search } = req.query;
     const resolvedSessionId = backendSessionId || claudeSessionId;
     if (!resolvedSessionId) return res.status(400).json({ error: 'backendSessionId or claudeSessionId required' });
-    const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, host: req.query.host, memo: {} };   // one request, one read of its history (lane resume-all-paced L3)
+    const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, gone: () => !!(req.socket && req.socket.destroyed), host: req.query.host, memo: {} };   // one request, one read of its history (lane resume-all-paced L3); B-cd4b r1093: a page that hung up got no reply — the mark stays
     try {
       if (req.query.person === '1') return res.json(transcripts.personAsk(ref));   // B-cd4b r1035: a person's own act on a conversation whose history still waits (never a read)
       if (req.query.turnmap) return res.json(await transcripts.turnmap(ref));
@@ -114,7 +114,7 @@ function setup(ctx) {
         return res.end();
       }
       let result = { matches: [], truncated: false };
-      try { result = transcripts.searchFull(ref, fp, req.query.search); } catch {}
+      try { result = await transcripts.searchFull(ref, fp, req.query.search); } catch {}   // ALSO CURED (B-cd4b r1093): an async search spread as a Promise replied no match at all
       return res.json({ ...result, ...gap });
     }
 
@@ -747,7 +747,7 @@ function setup(ctx) {
       // the machine for EVERY harness (hostId is a parameter, never a branch); the service decides what it is asked for: a harness
       // whose task state reads its transcript (the descriptor's taskStateFromTranscript — claude) is asked of that machine, another's
       // state (codex: the wrapper's side file) is read here, as the release did — never a local thread start (B-952b: codex's empty steps)
-      const st = await transcripts.taskState({ backend: b, sessionId: rid, cwd, host: host || null, webuiId: typeof req.query.webuiId === 'string' ? req.query.webuiId : null });   // B-952b smalls: the window's own conversation
+      const st = await transcripts.taskState({ backend: b, sessionId: rid, cwd, host: host || null, webuiId: typeof req.query.webuiId === 'string' ? req.query.webuiId : null, gone: () => !!(req.socket && req.socket.destroyed) });   // B-952b smalls: the window's own conversation (B-cd4b r1093: a hung-up asker keeps the mark)
       res.json({ todos: st.todos || [], ...(st.hostFetchError ? { hostFetchError: String(st.hostFetchError) } : {}), ...(st.hostOffline ? { hostOffline: true } : {}) });   // B-5cf8: an unreachable machine is said, never «no steps»
     } catch (e) { res.json({ todos: [], error: (e && e.message) || String(e) }); }
   });
