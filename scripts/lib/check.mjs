@@ -46,12 +46,24 @@ const safeJson = (v) => { try { return JSON.stringify(v); } catch { return Strin
 // truthy): the leg FAILS, red by name — this line names the suite and the kind, the helper's own ✗ line names the leg — so
 // the first run of the applied tree lists every vacuous leg it held. Any other value coerces exactly as !!value does (a match,
 // a length, a string).
+// THE FINDS ARE COUNTED (the coordinator's r1385): a vacuous operand can sit beside a real one (`ok(p || x === 1, …)`) and the
+// leg still passes, so a list made from red suites would miss it — every find prints its own line AND the process prints its
+// total at exit («N vacuous verdict(s)»): the apply's proof reads those lines, never exit codes. A `then` that cannot be read (a
+// throwing getter, a revoked Proxy) is no promise: the value coerces as !! did. Any OTHER object whose `then` is a function
+// counts as a promise (a query builder, a catch-all mock) — said in the tool's limits.
+let vacuousFinds = 0, exitSaid = false;
+const VACUOUS_HINT = { 'a promise': 'await it, and compare what it gives', 'a function': 'if the leg asks that it exists, compare typeof x === \'function\'; else call it and compare what it gives' };
 export function verdictOf(value) {
-  const kind = typeof value === 'function' ? 'a function' : value !== null && typeof value === 'object' && typeof value.then === 'function' ? 'a promise' : null;
+  let kind = typeof value === 'function' ? 'a function' : null;
+  if (!kind && value !== null && typeof value === 'object') { try { if (typeof value.then === 'function') kind = 'a promise'; } catch { /* an unreadable then: no promise */ } }
   if (!kind) return !!value;
-  console.error(`  ✗ ${String(process.argv[1] || '').split('/').pop()}: ${kind} handed as a verdict — the leg named next proves nothing (${kind === 'a promise' ? 'await it' : 'call it'}, and compare what it gives)`);
+  if (!vacuousFinds++ && !exitSaid) { exitSaid = true; process.once('exit', () => { if (vacuousFinds) console.error(`  ✗ ${suiteName()}: ${vacuousFinds} vacuous verdict(s) — a promise or a function handed as a verdict (B-1747: each counts as false)`); }); }
+  console.error(`  ✗ ${suiteName()}: ${kind} handed as a verdict — it counts as false (${VACUOUS_HINT[kind]})`);
   return false;
 }
+const suiteName = () => String(process.argv[1] || '').split('/').pop();
+/** The finds counted so far, and the count cleared — for a suite that plants vacuous verdicts on purpose and reads them. */
+export function takeVacuousFinds() { const n = vacuousFinds; vacuousFinds = 0; return n; }
 
 // ── the census (PURE over a file's text) ──────────────────────────────────────────────────────────────────────────────
 // A helper definition = a const / let / var binding of the name to an arrow function of two or more parameters, or a

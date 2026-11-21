@@ -127,6 +127,7 @@ const LEFT = {
   nameCond: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "const label = 'x';", 'ok(label, 1 === 1);'), /^a call holds a condition in its NAME slot/],
   argumentsUse: [lines(HEAD, F + ' check(n, c) { if (!c) fail++; else pass++; extra.push(arguments[1]); }', "check('a value', 3);"), /^it uses its condition as more than true or false/],
   collision: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const verdictOf = (x) => x;', 'const verdictOfGuard = (x) => x;', "ok(2, 'a value');"), /^the file binds both verdictOf and verdictOfGuard/],
+  inPage: [lines(HEAD, 'const page = { evaluate: (f) => f() };', "page.evaluate(() => { " + K + " check = (c, n) => { if (!c) throw new Error(n); }; check(1, 'in the page'); });"), /^its body is inside a function serialised into a page/],
   nestedInName: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "ok(1, 'outer ' + ok(2, 'inner'));"), /^a call of it stands inside another call's NAME argument/],
 };
 const RUNNABLE = ['arrowBlock', 'functionNameFirst', 'arrowExpression', 'scope', 'plants', 'opensWithTest', 'twoHelpers', 'handsBack', 'nestedHands', 'clock', 'comma', 'aliased'];
@@ -230,7 +231,7 @@ function verdicts(G, only = null) {
   });
   judge('left', () => {
     const r = Object.entries(LEFT).map(([k, [t, why]]) => { const p = plan(t); return [k, p.edits.length === 0 && p.left.length >= 1 && p.left.every((x) => why.test(x.why)), p.left.length ? p.left.map((x) => x.why).join(' / ') : 'NOT LEFT']; });
-    const asBefore = ['handed', 'valueUse', 'handsRead', 'namedExpr', 'nameCond', 'nestedInName', 'argumentsUse', 'collision'].filter((k) => run(LEFT[k][0]) !== run(G.applyEdits(LEFT[k][0], plan(LEFT[k][0]).edits)));
+    const asBefore = ['handed', 'valueUse', 'handsRead', 'namedExpr', 'nameCond', 'nestedInName', 'argumentsUse', 'collision', 'inPage'].filter((k) => run(LEFT[k][0]) !== run(G.applyEdits(LEFT[k][0], plan(LEFT[k][0]).edits)));
     say.left = `each helper the guard could make throw, or a wrap change, is LEFT by name: ${r.map(([k, y, w]) => `${k} ${y ? '✓' : '✗ ' + w.slice(0, 70)}`).join(' · ')}; they run as before${asBefore.length ? ' — NOT: ' + asBefore.join(', ') : ''}`;
     return r.every(([, y]) => y) && asBefore.length === 0;
   });
@@ -245,10 +246,11 @@ function verdicts(G, only = null) {
     const said = [], err0 = console.error;
     console.error = (...a) => { said.push(a.join(' ')); };
     let was, now;
-    try { was = run(FIX.vacuous); now = run(R.vacuous.o); } finally { console.error = err0; }
+    let counted = -1;
+    try { C.takeVacuousFinds(); was = run(FIX.vacuous); now = run(R.vacuous.o); counted = C.takeVacuousFinds(); } finally { console.error = err0; }
     const kinds = ['a promise handed as a verdict', 'a function handed as a verdict'].map((k) => said.some((l) => l.includes(k)));
-    say.vacuous = `before ${was} → after ${now}; said: ${said.map((l) => l.trim().slice(0, 90)).join(' | ') || 'NOTHING'}`;
-    return was === JSON.stringify({ pass: 4, fail: 0, extra: [] }) && now === JSON.stringify({ pass: 2, fail: 2, extra: [] }) && kinds.every(Boolean);
+    say.vacuous = `before ${was} → after ${now}; the checker counted ${counted}; said: ${said.map((l) => l.trim().slice(0, 90)).join(' | ') || 'NOTHING'}`;
+    return was === JSON.stringify({ pass: 4, fail: 0, extra: [] }) && now === JSON.stringify({ pass: 2, fail: 2, extra: [] }) && kinds.every(Boolean) && counted === 2;
   });
   judge('clock', () => {
     const read = (t) => JSON.stringify(W.wallClockFindings(t, { fields: W.productSpanFields(t) }).map((f) => [f.line, f.kind, f.boundMs]));
@@ -275,7 +277,8 @@ function scratchRepo(name) {
 async function treeFault(G, name) {
   const { dir, read } = scratchRepo(name), logs = [];
   let n = 0;
-  const io = { writeFile: (p, t) => { if (/\.guard-tmp$/.test(p) && ++n === 2) throw Object.assign(new Error('ENOSPC: a planted full disk'), { code: 'ENOSPC' }); fs.writeFileSync(p, t); }, rename: (a, b) => fs.renameSync(a, b), unlink: (p) => fs.unlinkSync(p) };
+  // the second temp writes SOME bytes, then the disk is full: its partial temp must go too
+  const io = { dirty: () => [], writeFile: (p, t) => { if (/\.guard-tmp$/.test(p) && ++n === 2) { fs.writeFileSync(p, String(t).slice(0, 40)); throw Object.assign(new Error('ENOSPC: a planted full disk'), { code: 'ENOSPC' }); } fs.writeFileSync(p, t); }, rename: (a, b) => fs.renameSync(a, b), unlink: (p) => fs.unlinkSync(p) };
   const T = await G.runTree(dir, { apply: true, log: (l) => logs.push(l), io });
   const same = Object.entries(TREE_FILES).every(([rel, t]) => read(rel) === t) && JSON.stringify(JSON.parse(read('scripts/fixtures/unguarded-helpers.json')).files) === JSON.stringify(TREE_LISTED);
   const temps = [];
@@ -288,7 +291,7 @@ async function treeRun(G, name) {
   const { dir, read } = scratchRepo(name), files = TREE_FILES, listed = TREE_LISTED, logs = [[], [], []];
   const dry = await G.runTree(dir, { log: (l) => logs[0].push(l) });
   const dryKept = Object.entries(files).every(([rel, t]) => read(rel) === t) && JSON.parse(read('scripts/fixtures/unguarded-helpers.json')).files['a.mjs'] === 1;
-  const applied = await G.runTree(dir, { apply: true, log: (l) => logs[1].push(l) });
+  const applied = await G.runTree(dir, { apply: true, log: (l) => logs[1].push(l), io: { dirty: () => [] } });
   const wrote = read('scripts/a.mjs') !== files['scripts/a.mjs'] && read('scripts/lib/d.mjs') !== files['scripts/lib/d.mjs'] && read('scripts/b.mjs') === files['scripts/b.mjs'];
   const list = JSON.parse(read('scripts/fixtures/unguarded-helpers.json'));
   const again = await G.runTree(dir, { log: (l) => logs[2].push(l) });
@@ -347,6 +350,33 @@ console.log('    ' + tr.say);
 const tf = await treeFault(G0, 'guard-inline-repo-fault');
 ok(tf.verdict, '⑨ ALL OR NOTHING ON DISK: a temp write that fails at the second file changes nothing, leaves no temp, and is said', tf.say);
 console.log('    ' + tf.say);
+// a tree with an uncommitted change under scripts/ is REFUSED by name; a rename that fails midway is put back by the tool
+async function treeDirty(G, name) {
+  const { dir, read } = scratchRepo(name), logs = [];
+  const T = await G.runTree(dir, { apply: true, log: (l) => logs.push(l), io: { dirty: () => ['scripts/z-mine.mjs'] } });
+  const same = Object.entries(TREE_FILES).every(([rel, t]) => read(rel) === t), said = logs.find((l) => /APPLY/.test(l)) || '';
+  return { verdict: same && T.written === false && /APPLY REFUSED: scripts\/ holds uncommitted changes \(scripts\/z-mine\.mjs\)/.test(said), say: `${said.slice(0, 150)} · every file as it was: ${same}` };
+}
+async function treeRestore(G, name) {
+  const { dir, read } = scratchRepo(name), logs = [];
+  let n = 0;
+  const io = { dirty: () => [], rename: (a, b) => { if (++n === 2) throw Object.assign(new Error('EIO: a planted failed rename'), { code: 'EIO' }); fs.renameSync(a, b); } };
+  const T = await G.runTree(dir, { apply: true, log: (l) => logs.push(l), io });
+  const same = Object.entries(TREE_FILES).every(([rel, t]) => read(rel) === t), said = logs.find((l) => /APPLY/.test(l)) || '';
+  const temps = []; const walkDir = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, e.name); if (e.isDirectory()) walkDir(q); else if (/\.guard-tmp$/.test(e.name)) temps.push(e.name); } };
+  walkDir(path.join(dir, 'scripts'));
+  return { verdict: same && temps.length === 0 && T.written === false && /a rename failed \(EIO\) after 1 of \d+ files: 1 put back from the originals it held, every temp removed — NOTHING CHANGED/.test(said), say: `${said.slice(0, 170)} · every file as it was: ${same} · temps left: ${temps.length}` };
+}
+const td = await treeDirty(G0, 'guard-inline-repo-dirty');
+ok(td.verdict, '⑨ a tree with an uncommitted change under scripts/ is REFUSED by name, nothing written', td.say);
+const tdRed = await treeDirty(await mutant('red-dirty', ['if (writes) { dirty = io.dirty(repo); if (dirty.length) writes = false; }', '']), 'guard-inline-repo-dirty-red');
+ok(tdRed.verdict === false, 'RED «no clean-tree check»: the apply writes over a tree that holds another edit', tdRed.say);
+const tr2 = await treeRestore(G0, 'guard-inline-repo-restore');
+ok(tr2.verdict, '⑨ a rename that fails midway: the tool puts back what it renamed from the originals it held, every temp removed', tr2.say);
+const tr2Red = await treeRestore(await mutant('red-no-restore', ['for (let j = 0; j < k; j++) { try { io.writeFile(made[j], all[j][2]); back.push(made[j]); } catch { stuck.push(path.relative(repo, made[j])); } }', '']), 'guard-inline-repo-restore-red');
+ok(tr2Red.verdict === false, 'RED «nothing put back»: the first renamed file stays edited', tr2Red.say);
+const tfPartial = await treeFault(await mutant('red-partial-temp', ['for (const p of [...made, (all[made.length] || [])[0]].filter(Boolean))', 'for (const p of made)']), 'guard-inline-repo-fault-partial');
+ok(tfPartial.verdict === false, 'RED «the failing file\'s partial temp kept»: a temp is left while the refusal says every temp removed', tfPartial.say);
 const tfRed = await treeFault(await mutant('red-direct-write', ["io.writeFile(p + '.guard-tmp', out); made.push(p);", "io.writeFile(p, out); made.push(p);"]), 'guard-inline-repo-fault-red');
 ok(tfRed.verdict === false, 'RED «each file written in place, no temp first»: a failure at the second file leaves the first one changed', tfRed.say);
 const trRed = await treeRun(mutants['red-twice-5'], 'guard-inline-repo-red');

@@ -47,6 +47,15 @@
 // call reads the value; a call with no condition argument, or by spread; a call that hands it a string where the condition
 // goes, or holds a condition in its name slot (a swap: cure the call first); a call of it inside another call's name
 // argument; a file the parser cannot read. scripts/lib/check.mjs (the census and the one guarded checker) is not a target.
+// THE LIMITS, said (the coordinator's r1385): the first list of vacuous legs is not the whole class.
+//   · a promise wrapped by a `Boolean(…)` call stays unseen (Boolean(x) is a boolean by its call; the old `!!` hid it the same);
+//   · a promise in the TEST of a ?: inside a condition is never wrapped (only the branches are);
+//   · ANY object whose `then` is a function counts as a promise (a query builder, a catch-all mock) — red by name;
+//   · an existence leg that hands a function («the module exports it») turns red: its hint is «compare typeof x === 'function'»;
+//   · a `then` that cannot be read (a throwing getter, a revoked Proxy) coerces as !! did; a boxed Boolean(false) stays true;
+//   · a helper inside a function serialised into a page is left by rule (PAGE_CALLS) — one serialised some other way
+//     (`String(fn)`, `fn.toString()`) is not seen: the applied tip's whole tier is where it would show, loudly (a ReferenceError).
+// These will be most of the first list; each is cured or named before the apply is taken.
 // RUN TWICE = RUN ONCE: a guarded helper is never a target again and its calls are never re-read, so at an applied tip the
 // run finds nothing and says so; at any later tip it guards only a helper that is new, and wraps only that helper's calls.
 //   node scripts/guard-inline-helpers.mjs [<repo>]                              the DRY RUN: counts, the self-check, writes nothing
@@ -58,6 +67,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const PARSE_OPTS = Object.freeze({ ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowImportExportEverywhere: true, preserveParens: true });
@@ -112,9 +122,12 @@ function patternIds(p, out = []) {
 const unparen = (n) => { while (n && n.type === 'ParenthesizedExpression') n = n.expression; return n; };
 // → { at: Map(identifier start → { id, fn, exported, expr, twice }), calls: [{ node, bind }], uses: [{ id, bind, how }],
 //     dynamic: null | 'a direct eval' | 'a with statement' } for `names` only
+// a function handed to one of these is SERIALISED INTO A PAGE (its text runs in the browser): a helper defined inside it would
+// call a verdictOf the page does not have — left by rule (the coordinator's r1385)
+export const PAGE_CALLS = new Set(['evaluate', 'evaluateHandle', '$eval', '$$eval', 'addInitScript', 'evaluateOnNewDocument', 'waitForFunction']);
 export function bindingsOf(ast, names) {
   const at = new Map(), calls = [], uses = [], stack = [];
-  let dynamic = null;
+  let dynamic = null, pageDepth = 0;
   const open = () => { const S = new Map(); stack.push(S); return S; };
   const resolve = (name) => { for (let k = stack.length - 1; k >= 0; k--) if (stack[k].has(name)) return stack[k].get(name); return null; };
   const def = (S, id, fn = null, exported = false, expr = false) => {
@@ -123,7 +136,7 @@ export function bindingsOf(ast, names) {
     if (!names.has(id.name)) return;
     const twice = !!was && was !== id;
     if (twice && at.has(was.start)) at.get(was.start).twice = true;
-    at.set(id.start, { id, fn: fn && FN.has(fn.type) ? fn : null, exported: exported || !!(at.get(id.start) || {}).exported, expr, twice: twice || !!(at.get(id.start) || {}).twice });
+    at.set(id.start, { id, fn: fn && FN.has(fn.type) ? fn : null, exported: exported || !!(at.get(id.start) || {}).exported, expr, twice: twice || !!(at.get(id.start) || {}).twice, inPage: pageDepth > 0 || !!(at.get(id.start) || {}).inPage });
   };
   const use = (id, how) => { if (names.has(id.name)) uses.push({ id, bind: resolve(id.name), how }); };
   function hoistVars(n, S) {
@@ -178,7 +191,8 @@ export function bindingsOf(ast, names) {
         if (n.callee.name === 'eval') dynamic = dynamic || 'a direct eval';
         if (names.has(n.callee.name)) calls.push({ node: n, bind: resolve(n.callee.name) });
       } else walk(n.callee);
-      for (const a of n.arguments) walk(a);
+      const page = n.callee.type === 'MemberExpression' && !n.callee.computed && n.callee.property.type === 'Identifier' && PAGE_CALLS.has(n.callee.property.name);
+      for (const a of n.arguments) { if (page && FN.has(a.type)) { pageDepth++; walk(a); pageDepth--; } else walk(a); }
       return;
     }
     if (t === 'MemberExpression') { walk(n.object); if (n.computed) walk(n.property); return; }
@@ -381,6 +395,7 @@ export function planFile(src, { C, acorn, file = '' }) {
     if (!b || !b.fn) { leave('the census reads a helper where the parser binds no function'); continue; }
     if (b.expr) { leave('a named function expression: its calls go through another binding'); continue; }
     if (b.twice) { leave('its name is declared twice in one scope'); continue; }
+    if (b.inPage) { leave('its body is inside a function serialised into a page (page.evaluate and the like): the page has no verdictOf'); continue; }
     const p = b.fn.params[slot];
     if (!p || p.type !== 'Identifier' || p.name !== d.params[slot]) { leave('its condition parameter is destructured, defaulted or a rest'); continue; }
     if (b.exported) { leave('exported: its calls live in other files'); continue; }
@@ -546,7 +561,14 @@ export const LIST_FILE = path.join('scripts', 'fixtures', 'unguarded-helpers.jso
 // when every temp stands are they renamed into place, the list last. A failed temp write removes every temp: nothing changed.
 // A failed rename (after the first) is said with the one restore step: `git checkout -- scripts` (the tree is a git checkout).
 // `io` is the test's seam (a planted failure); the tool itself uses fs.
-export async function runTree(repo, { apply = false, list = false, log = (l) => console.log(l), io = { writeFile: (p, t) => fs.writeFileSync(p, t), rename: (a, b) => fs.renameSync(a, b), unlink: (p) => fs.unlinkSync(p) } } = {}) {
+// THE TREE MUST BE CLEAN (the coordinator's r1385): --apply refuses by name while scripts/ holds an uncommitted change (git status
+// --porcelain -- scripts; a tree git cannot read refuses too), so a restore never touches another edit.
+export function gitDirty(repo) {
+  try { return execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', 'scripts'], { encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'] }).split('\n').filter(Boolean).map((l) => l.slice(3)); }
+  catch (e) { return [`(git cannot read this tree: ${String(e.message).split('\n')[0].slice(0, 80)})`]; }
+}
+export async function runTree(repo, { apply = false, list = false, log = (l) => console.log(l), io = {} } = {}) {
+  io = { writeFile: (p, t) => fs.writeFileSync(p, t), rename: (a, b) => fs.renameSync(a, b), unlink: (p) => fs.unlinkSync(p), dirty: gitDirty, ...io };
   const C = await import(pathToFileURL(path.join(repo, 'scripts', 'lib', 'check.mjs')).href);
   const acorn = createRequire(path.join(repo, 'package.json'))('acorn');
   const wcc = path.join(repo, 'scripts', 'wall-clock-census.mjs'), W = fs.existsSync(wcc) ? await import(pathToFileURL(wcc).href) : null;
@@ -574,7 +596,7 @@ export async function runTree(repo, { apply = false, list = false, log = (l) => 
         for (const w of plan.wraps) T.pieces += w.pieces;
         if (plan.coerce && plan.coerce !== VERDICT && plan.edits.some((e) => e.kind === 'import')) T.aliased.push(f);
         if (list) { for (const g of plan.guards) log(`    guard  ${f} line ${g.line} ${g.name} (${g.order}, ${g.shape})`); for (const w of plan.wraps) log(`    wrap   ${f} line ${w.line} ${w.name}(${w.cond} …) — ${VERDICT}( … ) around ${w.pieces} operand(s)`); }
-        if (apply) T.writes.push([p, out]);
+        if (apply) T.writes.push([p, out, src]);
         now = out;
         // RUN TWICE = RUN ONCE, over the very text it would write: a second run plans nothing
         const again = planFile(out, { C, acorn, file: f });
@@ -586,22 +608,29 @@ export async function runTree(repo, { apply = false, list = false, log = (l) => 
   const listPath = path.join(repo, LIST_FILE), listJson = JSON.parse(fs.readFileSync(listPath, 'utf8')), listed = listJson.files || {};
   const lowered = lowerList(listed, counts), sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
   const listMoves = JSON.stringify(lowered) !== JSON.stringify(listed);
-  let writes = apply && !T.failed.length && !T.second.files.length, ioFault = null;
+  let writes = apply && !T.failed.length && !T.second.files.length, ioFault = null, dirty = [];
+  if (writes) { dirty = io.dirty(repo); if (dirty.length) writes = false; }
   if (writes) {
-    const all = [...T.writes, ...(listMoves ? [[listPath, JSON.stringify({ ...listJson, files: lowered }, null, 1) + '\n']] : [])], made = [];
+    // every file whole to a temp first (the originals held in memory); only when every temp stands are they renamed in
+    const all = [...T.writes, ...(listMoves ? [[listPath, JSON.stringify({ ...listJson, files: lowered }, null, 1) + '\n', fs.readFileSync(listPath, 'utf8')]] : [])], made = [];
     try { for (const [p, out] of all) { io.writeFile(p + '.guard-tmp', out); made.push(p); } } catch (e) {
-      for (const p of made) { try { io.unlink(p + '.guard-tmp'); } catch { } }
+      for (const p of [...made, (all[made.length] || [])[0]].filter(Boolean)) { try { io.unlink(p + '.guard-tmp'); } catch { } }   // the failing file's partial temp too
       writes = false; ioFault = `a temp could not be written (${e.code || e.message}) at ${path.relative(repo, (all[made.length] || [''])[0])}: every temp removed, NOTHING CHANGED`;
     }
     if (writes) {
       let k = 0;
       try { for (; k < made.length; k++) io.rename(made[k] + '.guard-tmp', made[k]); } catch (e) {
-        writes = false; ioFault = `a rename failed (${e.code || e.message}) after ${k} of ${made.length} files: RESTORE with \`git checkout -- scripts\` and remove every *.guard-tmp left (${made.length - k})`;
+        writes = false;
+        // the tool holds every original: it puts back the k files it renamed itself, then removes the temps left
+        const back = [], stuck = [];
+        for (let j = 0; j < k; j++) { try { io.writeFile(made[j], all[j][2]); back.push(made[j]); } catch { stuck.push(path.relative(repo, made[j])); } }
+        for (let j = k; j < made.length; j++) { try { io.unlink(made[j] + '.guard-tmp'); } catch { } }
+        ioFault = `a rename failed (${e.code || e.message}) after ${k} of ${made.length} files: ${back.length} put back from the originals it held, every temp removed${stuck.length ? ` — NOT put back: ${stuck.join(' ')} (restore them with: git checkout -- ${stuck.join(' ')})` : ' — NOTHING CHANGED'}`;
       }
     }
   }
   const n = (o) => Object.entries(o).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'none';
-  log(`guard-inline-helpers — ${apply ? (writes ? 'APPLIED' : ioFault ? `APPLY FAILED: ${ioFault}` : 'APPLY REFUSED (a self-check or the second run failed; nothing written)') : 'DRY RUN (nothing written)'} over ${T.files} scripts of ${repo}`);
+  log(`guard-inline-helpers — ${apply ? (writes ? 'APPLIED' : ioFault ? `APPLY FAILED: ${ioFault}` : dirty.length ? `APPLY REFUSED: scripts/ holds uncommitted changes (${dirty.slice(0, 6).join(' ')}${dirty.length > 6 ? ' …' : ''}) — commit them or set them aside first; nothing written` : 'APPLY REFUSED (a self-check or the second run failed; nothing written)') : 'DRY RUN (nothing written)'} over ${T.files} scripts of ${repo}`);
   log(T.edited ? `  it guards ${T.guards} helpers in ${T.edited} files — by shape: ${n(T.byShape)}` : '  NOTHING TO DO: every helper the census judges in code is guarded or left by rule (an applied tip, or nothing new since)');
   log(`  the census (test-ci-gate-tiers §7b, that file aside) reads ${T.before} unguarded helpers before, ${T.after} after`);
   log(`  guarded, but its order no longer read by the census (counted neither way): ${T.unread.length}${T.unread.length ? ' — ' + T.unread.slice(0, 4).map((x) => x.replace(/ once guarded.*$/, '')).join(' | ') : ''}`);
@@ -613,7 +642,7 @@ export async function runTree(repo, { apply = false, list = false, log = (l) => 
   log(`  SELF-CHECK (lines, parse, text spans, read-back of every condition and name, the census) failed in: ${T.failed.length}${T.failed.length ? ' — ' + T.failed.slice(0, 6).join(' | ') : ''}`);
   log(`  A SECOND RUN over the texts it writes: ${T.second.files.length ? `${T.second.guards} guards and ${T.second.wraps} wraps more in ${T.second.files.join(', ')} — NOT IDEMPOTENT` : 'nothing to do (run twice = run once)'}`);
   log(`  the one-way list ${LIST_FILE}: ${Object.keys(listed).length} rows / ${sum(listed)} → ${Object.keys(lowered).length} rows / ${sum(lowered)}${listMoves ? '' : ' (no row falls)'}`);
-  if (writes) log('  NEXT (the apply\'s proof): this dry run again says NOTHING TO DO · the stale-pin scan over the applied diff · the whole fast tier in both zones · every heavy suite it edited · the vacuous legs the first run lists (✗ «a promise / a function handed as a verdict»), each cured or named');
+  if (writes) log('  NEXT (the apply\'s proof; the integrator runs each, the tool runs none): this dry run again says NOTHING TO DO · the stale-pin scan over the applied diff · the whole fast tier in both zones · every heavy suite it edited · THE VACUOUS LEGS, read from the checker\'s own lines («handed as a verdict» and each suite\'s «N vacuous verdict(s)» total — never from exit codes: a vacuous operand beside a real one still passes), each cured or named');
   return { ...T, listBefore: listed, listAfter: lowered, written: writes, ioFault };
 }
 
