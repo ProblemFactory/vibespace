@@ -851,22 +851,46 @@ console.log('P1-a OpenCode: the one file from the published pages, the key\'s na
   // every file that builds or hands the spawn road (the server tree, the account manager, the create) — read, not walked
   const roadFiles = [...fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => /\.js$/.test(f)).map((f) => 'server/' + f), 'accounts.js', 'ws-create.js'];
   const switchUsers = roadFiles.filter((f) => fs.readFileSync(path.join(REPO, 'src', f), 'utf8').includes('probeRoads'));
-  ok(JSON.stringify(switchUsers) === JSON.stringify(['server/provider-spawn.js']) && !srv.includes('probeRoads') && PSRC.includes("const probe = probeRoads && typeof probeRoads[backend] === 'function' && (MP.fits(p)[backend] || {}).code === 'later' ? probeRoads[backend] : null;"),
-    'ONE switch: `probeRoads` is read in src/server/provider-spawn.js only (src/server, accounts.js, ws-create.js and server.js read), opens only a road model-providers marks «later», and no product file hands it', switchUsers);
+  ok(JSON.stringify(switchUsers) === JSON.stringify(['server/provider-spawn.js']) && !srv.includes('probeRoads') && PSRC.includes("const probe = probeRoads && PROBE_ROADS.includes(backend) && typeof probeRoads[backend] === 'function' && (MP.fits(p)[backend] || {}).code === 'later' ? probeRoads[backend] : null;") && PSRC.includes("const PROBE_ROADS = Object.freeze(['opencode']);"),
+    'ONE switch: `probeRoads` is read in src/server/provider-spawn.js only (src/server, accounts.js, ws-create.js and server.js read), opens OpenCode BY NAME (PROBE_ROADS) and only while model-providers marks it «later», and no product file hands it', switchUsers);
   // THE SWITCH TURNED (the probe's fixture): the plan runs, the file is written under the provider's own home, 0600, no value in it
   const probe = PSP.create({ providers: store, dataDir: DATA, probeRoads: { opencode: OC.opencodeProviderSpawn } });
   const sp = probe(lab.id, 'opencode');
   const home = path.join(DATA, 'provider-homes', lab.id, 'opencode'), file = path.join(home, OC.CONFIG_REL);
   const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const mode = fs.existsSync(file) ? (fs.statSync(file).mode & 0o777) : null;
-  ok(text && JSON.parse(text).model === `${lab.id}/qwen3-coder` && mode === 0o600 && !text.includes(KEY) && text.includes('VIBESPACE_PROVIDER_KEY') && sp.argv.length === 0 && !JSON.stringify(sp.argv).includes(KEY) && sp.localEnv.VIBESPACE_PROVIDER_KEY === KEY && sp.localEnv.HOME === home && sp.secret.var === 'VIBESPACE_PROVIDER_KEY',
-    'the switch turned: the file lands under the provider\'s own home (0600) naming the key\'s VARIABLE only; the value rides the env (the secret channel), no argv; HOME = that home', { mode: mode && mode.toString(8), argv: sp.argv });
+  ok(text && JSON.parse(text).model === `${lab.id}/qwen3-coder` && mode === 0o600 && !text.includes(KEY) && text.includes('VIBESPACE_PROVIDER_KEY') && sp.argv.length === 0 && !JSON.stringify(sp.argv).includes(KEY) && sp.localEnv.VIBESPACE_PROVIDER_KEY === KEY && sp.localEnv.HOME === home && sp.secret.var === 'VIBESPACE_PROVIDER_KEY'
+    && Object.entries(OC.XDG).every(([k, rel]) => sp.localEnv[k] === `${home}/${rel}` && sp.plainEnv[k] === `${home}/${rel}`) && !Object.values(sp.plainEnv).includes(KEY),
+    'the switch turned: the file lands under the provider\'s own home (0600) naming the key\'s VARIABLE only; the value rides the env (the secret channel), no argv; HOME and the XDG config / data / state / cache folders all under that home (r1159 item 2)', { mode: mode && mode.toString(8), argv: sp.argv });
   let outside = null; const bad = PSP.create({ providers: store, dataDir: DATA, probeRoads: { opencode: () => ({ localEnv: {}, argv: [], secret: null, plainEnv: {}, files: [{ rel: '../../escape.json', text: '{}' }] }) } });
   try { bad(lab.id, 'opencode'); } catch (x) { outside = x.code; }
+  const escaped = path.resolve(home, '../../escape.json');   // WHERE the bad name resolves (r1159 item 3: look there)
   const codexOpen = PSP.create({ providers: store, dataDir: DATA, probeRoads: { codex: OC.opencodeProviderSpawn } });
   let codexRef = null; try { codexOpen(lab.id, 'codex'); } catch (x) { codexRef = x.code; }
-  ok(outside === 'plan-file-outside' && !fs.existsSync(path.join(DATA, 'provider-homes', lab.id, 'escape.json')) && codexRef === 'provider-unfit',
-    'CONTROLS: a plan naming a file outside its home is refused by name (nothing written there); the switch opens no road that is not «later» (codex on a Chat Completions record stays unfit)', { outside, codexRef });
+  // another harness marked «later» (gemini on a Google API record) is NOT opened by the switch: OpenCode by name only
+  const gRec = { id: 'pv-g-probe', kind: 'google-api', label: 'G', baseUrl: 'https://x.example/v1', models: [{ id: 'g1' }], defaultModel: 'g1' };
+  const gOpen = PSP.create({ providers: { thirdParty: () => [gRec], keyOf: () => ({ ok: true, value: KEY }) }, dataDir: DATA, harnessOf: () => ({ label: 'Gemini', creds: null }), probeRoads: { gemini: OC.opencodeProviderSpawn } });
+  let gRef = null; try { gOpen(gRec.id, 'gemini'); } catch (x) { gRef = x.code; }
+  ok(outside === 'plan-file-outside' && escaped === path.join(DATA, 'provider-homes', 'escape.json') && !fs.existsSync(escaped) && codexRef === 'provider-unfit' && (MP.fits(gRec).gemini || {}).code === 'later' && gRef === 'provider-unfit',
+    'CONTROLS: a plan naming a file outside its home is refused by name and nothing lands where that name RESOLVES (data/provider-homes/escape.json); the switch opens no road that is not «later» (codex on a Chat Completions record), and no «later» road but OpenCode\'s (gemini on a Google API record stays unfit)', { outside, escaped: path.relative(DATA, escaped), codexRef, gRef });
+  // THE WRITE IS A TEMP AND A RENAME, and a failed one leaves no temp (r1159 item 3) — watched at the fs calls the road makes
+  const watch = (fn) => { const calls = [], w0 = fs.writeFileSync, r0 = fs.renameSync; fs.writeFileSync = (p2, ...a) => { calls.push(['write', String(p2)]); return w0.call(fs, p2, ...a); }; fs.renameSync = (a1, b1) => { calls.push(['rename', String(a1), String(b1)]); return r0.call(fs, a1, b1); }; let err = null; try { fn(); } catch (x) { err = x; } finally { fs.writeFileSync = w0; fs.renameSync = r0; } return { calls, err }; };
+  const tmpOk = (calls) => { const wi = calls.findIndex(([k, p2]) => k === 'write' && p2.startsWith(file + '.tmp-')); return wi >= 0 && !calls.some(([k, p2]) => k === 'write' && p2 === file) && calls.some(([k, a1, b1], i) => k === 'rename' && i > wi && a1 === calls[wi][1] && b1 === file); };
+  const w1 = watch(() => probe(lab.id, 'opencode'));
+  const PSRC2 = fs.readFileSync(path.join(REPO, 'src/server/provider-spawn.js'), 'utf8');
+  const MPS = mutantCopies('hspawn-oc', REPO);
+  const direct = MPS.load('src/server/provider-spawn.js', anchored(PSRC2, "  try { fs.writeFileSync(tmp, String((f && f.text) || ''), { mode: 0o600 }); fs.renameSync(tmp, abs); }\n", "  try { fs.writeFileSync(abs, String((f && f.text) || ''), { mode: 0o600 }); }\n", 'the plan file written directly'), 'oc-direct');
+  const w2 = watch(() => direct.create({ providers: store, dataDir: DATA, probeRoads: { opencode: OC.opencodeProviderSpawn } })(lab.id, 'opencode'));
+  ok(!w1.err && tmpOk(w1.calls) && !w2.err && !tmpOk(w2.calls), 'the plan\'s file is written to a temp name and RENAMED onto its place (never written in place) — CONTROL: a copy writing it directly fails this check', { real: w1.calls.slice(-2).map((c) => c.map((x) => path.relative(DATA, x) || x)), direct: w2.calls.slice(-1).map((c) => c.map((x) => path.relative(DATA, x) || x)) });
+  fs.rmSync(file, { force: true }); fs.mkdirSync(file, { recursive: true });   // a folder where the file goes ⇒ the rename fails
+  let wf = null; try { probe(lab.id, 'opencode'); } catch (x) { wf = x.code; }
+  const tmpsLeft = fs.readdirSync(path.dirname(file)).filter((n) => n.includes('.tmp-'));
+  const keepTmp = MPS.load('src/server/provider-spawn.js', anchored(PSRC2, "  catch (e) { try { fs.rmSync(tmp, { force: true }); } catch { } throw named('plan-file-unwritten',", "  catch (e) { throw named('plan-file-unwritten',", 'the failed write leaves its temp'), 'oc-keeptmp');
+  let wf2 = null; try { keepTmp.create({ providers: store, dataDir: DATA, probeRoads: { opencode: OC.opencodeProviderSpawn } })(lab.id, 'opencode'); } catch (x) { wf2 = x.code; }
+  const tmpsLeft2 = fs.readdirSync(path.dirname(file)).filter((n) => n.includes('.tmp-'));
+  fs.rmSync(file, { recursive: true, force: true }); for (const n of tmpsLeft2) fs.rmSync(path.join(path.dirname(file), n), { force: true });
+  probe(lab.id, 'opencode');   // the file back in its place for the stand-in below
+  ok(wf === 'plan-file-unwritten' && tmpsLeft.length === 0 && wf2 === 'plan-file-unwritten' && tmpsLeft2.length === 1, 'a write that fails is refused by name («plan-file-unwritten», nothing started) and leaves NO temp behind — CONTROL: a copy without the clean-up leaves one', { wf, tmpsLeft, tmpsLeft2 });
   // THE STAND-IN PROGRAM — records what it was given (argv, cwd, HOME, the file it finds at ~/.config/opencode, the env value its
   // `env` names resolve to — as a digest, never the value). It is NOT OpenCode: what the real program does is UNPROVEN (below).
   const BIN = scratchDir('hspawn-oc-bin'), REC = path.join(BIN, 'record.json'), STAND = path.join(BIN, 'opencode-standin.cjs'), CWDO = scratchDir('hspawn-oc-cwd');
@@ -882,14 +906,14 @@ console.log('P1-a OpenCode: the one file from the published pages, the key\'s na
   const rec = fs.existsSync(REC) ? JSON.parse(fs.readFileSync(REC, 'utf8')) : null;
   console.log('    judged stand-in record: ' + JSON.stringify(rec));
   ok(run.status === 0 && rec && rec.found && rec.home === home && JSON.stringify(rec.argv) === '["acp"]' && rec.cwd === CWDO && rec.model === `${lab.id}/qwen3-coder` && rec.baseURL === 'http://127.0.0.1:9/v1' && rec.keyVar === 'VIBESPACE_PROVIDER_KEY' && rec.keyDigest === crypto.createHash('sha256').update(KEY).digest('hex'),
-    'the stand-in, run as the spawn gives it (argv «acp», the conversation\'s cwd, the plan\'s env): it finds the one file at ~/.config/opencode under the provider\'s HOME, its provider at the loopback address, the key through the named variable', rec);
+    'the stand-in, run with what the PLAN gives (its env, the argv «acp», a cwd this leg picks — not the ACP road\'s own spawn, which the road being unoffered does not build): what the plan hands a program is enough to find the one file at ~/.config/opencode under the provider\'s HOME, its provider at the loopback address, the key through the named variable', rec);
   // THE MODEL PER CONVERSATION — ACP's documented option (configId «model», «provider/model»): the wrapper's own initial-model road
   const ACPW = fs.readFileSync(path.join(REPO, 'data/bin/acp-wrapper.js'), 'utf8');
   const planOf = OC.opencodeProviderSpawn({ provider: lab, key: KEY, home });   // the plan itself (the spawn account carries no function)
   ok(planOf.modelRef() === `${lab.id}/qwen3-coder` && planOf.modelRef('qwen3-coder-plus') === `${lab.id}/qwen3-coder-plus` && OC.modelRefOf(ant, 'glm-4.6') === `${ant.id}/glm-4.6` && ACPW.includes("request('session/set_config_option', { sessionId: meta.sessionId, configId, value }"),
     'the model per conversation is «<pv id>/<model>» — what ACP\'s session/set_config_option `model` takes (acp page) and the ACP wrapper already sends for ACP_WEBUI_MODEL');
   console.log('    UNPROVEN until the probe (the owner\'s word — no OpenCode on this box): ' + OC.UNPROVEN.map((u, i) => `(${i + 1}) ${u}`).join(' · '));
-  ok(OC.UNPROVEN.length === 5 && Object.values(OC.PAGES).every((u) => /^https:\/\/opencode\.ai\/docs\//.test(u)), 'what the real program does is SAID UNPROVEN by name (5 facts), and every page the file is built from is named');
+  ok(OC.UNPROVEN.length === 7 && /INSTALLED OpenCode build accepts this shape/.test(OC.UNPROVEN[0]) && /XDG/.test(OC.UNPROVEN[6]) && Object.values(OC.PAGES).every((u) => /^https:\/\/opencode\.ai\/docs\//.test(u)), 'what the real program does is SAID UNPROVEN by name (7 facts — first, that the INSTALLED build accepts this shape; last, its use of HOME or XDG unread), and every page the file is built from is named');
   try { fs.rmSync(DATA, { recursive: true, force: true }); fs.rmSync(BIN, { recursive: true, force: true }); fs.rmSync(CWDO, { recursive: true, force: true }); } catch { }
 }
 

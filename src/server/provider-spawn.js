@@ -17,6 +17,7 @@ const path = require('path');
 const MP = require('../model-providers.js');
 
 const named = (code, message) => Object.assign(new Error(message), { code });
+const PROBE_ROADS = Object.freeze(['opencode']);   // the harnesses `probeRoads` may open — by name (r1159), nothing else
 // A PLAN'S FILE (B-d578 P1-a: OpenCode's one config, src/opencode-provider-config.js): under the provider's own home only,
 // 0600, written whole (tmp + rename); the plan puts no value in it (the key's NAME only — its value rides the env)
 function writePlanFile(home, f) {
@@ -25,13 +26,14 @@ function writePlanFile(home, f) {
   if (!rel || path.isAbsolute(rel) || !abs.startsWith(root + path.sep)) throw named('plan-file-outside', `a spawn plan named a file outside its provider home (${rel || 'no name'})`);
   fs.mkdirSync(path.dirname(abs), { recursive: true, mode: 0o700 });
   const tmp = `${abs}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, String((f && f.text) || ''), { mode: 0o600 });
-  fs.renameSync(tmp, abs);
+  try { fs.writeFileSync(tmp, String((f && f.text) || ''), { mode: 0o600 }); fs.renameSync(tmp, abs); }
+  catch (e) { try { fs.rmSync(tmp, { force: true }); } catch { } throw named('plan-file-unwritten', `the provider's file ${rel} could not be written (${(e && e.code) || e}) — nothing was started`); }   // a failed write leaves no temp behind (r1159)
 }
 const homeOf = (dataDir, id, backend) => path.join(dataDir, 'provider-homes', id, backend);
-// `probeRoads` (B-d578 P1-a, the coordinator's ruling r1126): THE ONE SWITCH of a road the published pages carry but no probe
-// has measured — { opencode: plan }. A harness model-providers marks «later» (not offered: no picker row) is reached ONLY
-// with a plan handed in here, and only the probe's fixture hands one: server.js's create names none.
+// `probeRoads` (B-d578 P1-a, the coordinator's rulings r1126 / r1159): THE ONE SWITCH of the road the published pages carry but
+// no probe has measured — { opencode: plan }, OpenCode BY NAME (PROBE_ROADS) and only while model-providers marks it «later»
+// (not offered: no picker row). The product's one create (src/server/account-usage-routes.js) hands none; no probe exists yet —
+// today only test-harness-spawn's «P1-a OpenCode» leg hands it.
 function create({ providers, dataDir, harnessOf = (id) => require('../harnesses').get(id), probeRoads = null } = {}) {
   /** → the spawn account | throws a named Error (code: provider-unknown · provider-unfit · provider-remote ·
    *  provider-no-address · vault_locked · vault_not_set_up · key-unreadable · no-key) */
@@ -41,7 +43,7 @@ function create({ providers, dataDir, harnessOf = (id) => require('../harnesses'
     let h = null;
     try { h = harnessOf(backend); } catch { h = null; }
     const label = (h && h.label) || backend;
-    const probe = probeRoads && typeof probeRoads[backend] === 'function' && (MP.fits(p)[backend] || {}).code === 'later' ? probeRoads[backend] : null;
+    const probe = probeRoads && PROBE_ROADS.includes(backend) && typeof probeRoads[backend] === 'function' && (MP.fits(p)[backend] || {}).code === 'later' ? probeRoads[backend] : null;
     if (!probe && (!MP.fitsHarness(p, backend) || !h || !h.creds || typeof h.creds.providerSpawn !== 'function')) throw named('provider-unfit', `${p.label} does not offer what ${label} needs`);
     if (opts.remote) throw named('provider-remote', `${p.label} runs on this machine only for now — start the conversation on this machine`);
     if (!p.baseUrl) throw named('provider-no-address', `${p.label} has no address — set it in Manage agents`);
