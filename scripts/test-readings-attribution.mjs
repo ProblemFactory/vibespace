@@ -1470,8 +1470,8 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.11) < 1e-9, JSON.stringify(w.readCache(w.SPARE).sevenDay));
     ok('§14 …and it SAYS SO, naming both accounts and how late the response was (a write that moves money is not silent)',
       lines.some((l) => /after the link moved to/.test(l) && /window-of-previous-slot/.test(l)), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 220));
-    // the anchors follow the cache, so the estimator trains on the right stream
-    w.eng.sweepUsageAnchors();
+    // the anchors follow the cache, so the estimator trains on the right stream (B-360d U1: a sweep that reads off the loop is awaited)
+    await w.eng.sweepUsageAnchors();
     const anchorsOf = (id) => {
       const dir = path.join(w.dataDir, 'usage-anchors');
       let out = [];

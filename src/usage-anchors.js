@@ -30,15 +30,80 @@ function identityKeyFor({ accountId, cache, email }) {
   return 'acct:' + (accountId || '__global__');
 }
 
+// THE LAST LINE KEPT (B-360d part 3 U1, 主开发 r1459 — the 60-s anchor sweep read EVERY identity's whole anchors file, a file
+// kept forever, to take its LAST line, on the loop and on the data share): each store keeps every file's last record as
+// lastAnchor reads it — read ONCE, off the loop, by prime() (its tail only), then kept by this store's own append (maybeRecord,
+// the files' one appender). A file only this process rewrites, by its own repairs and migrations (src/reading-repair.js
+// repairAnchors / repairAnchorsByWindow, src/fixture-ledger-purge.js): each says so here at its write (noteAnchorsRewritten),
+// and the kept lines are read again, off the loop. No other process writes these files.
+const _storesByDir = new Map();   // anchors folder → the stores over it (noteAnchorsRewritten reaches each)
+const TAIL_FIRST_BYTES = 64 * 1024;
+/** A file's last record as lastAnchor's whole read answers it (the last line after the newline before the final character;
+ *  a partial or unreadable last line ⇒ null; no file ⇒ null), from its TAIL, off the loop: the tail grows until it holds that
+ *  newline or reaches the head. */
+async function lastRecordOf(fp) {
+  let fh = null;
+  try {
+    fh = await fs.promises.open(fp, 'r');
+    const size = (await fh.stat()).size;
+    for (let want = Math.min(size, TAIL_FIRST_BYTES); ; want = Math.min(size, want * 2)) {
+      const buf = Buffer.alloc(want);
+      let got = 0;
+      while (got < want) { const r = await fh.read(buf, got, want - got, size - want + got); if (!r.bytesRead) break; got += r.bytesRead; }
+      const text = buf.toString('utf-8', 0, got);
+      const nl = text.lastIndexOf('\n', text.length - 2);
+      if (nl === -1 && want < size) continue;
+      try { return JSON.parse(text.slice(nl + 1)); } catch { return null; }
+    }
+  } catch { return null; } finally { if (fh) { try { await fh.close(); } catch { } } }
+}
+/** A repair or a migration of THIS process rewrote anchors files under `dir`: every store over it reads its kept last lines
+ *  again (off the loop); until that read lands, lastAnchor answers as before it (a whole read). */
+function noteAnchorsRewritten(dir) {
+  const set = _storesByDir.get(path.resolve(String(dir || '')));
+  if (!set) return 0;
+  for (const st of set) st._rewritten();
+  return set.size;
+}
+
 class UsageAnchors {
   constructor({ dataDir }) {
     this.dir = path.join(dataDir, 'usage-anchors');
     this._last = new Map(); // identityKey → last recorded fetchedAt (dedup)
+    this._kept = new Map();   // file name → its last record as lastAnchor reads it (null: none, partial, or no file)
+    this._ready = false; this._primeP = null; this._epoch = 0; this._since = new Map();
+    this.syncReads = 0;       // lastAnchor's whole reads (before a prime landed, or after a rewrite until its read did)
+    const d = path.resolve(this.dir); let set = _storesByDir.get(d); if (!set) _storesByDir.set(d, set = new Set()); set.add(this);
   }
   _file(key) { return path.join(this.dir, 'anchors-' + anchorSlug(key) + '.ndjson'); }
+  _name(key) { return 'anchors-' + anchorSlug(key) + '.ndjson'; }
+  /** Every file's last line is kept: lastAnchor reads no file. */
+  ready() { return this._ready; }
+  /** THE ONE READ, off the loop: the folder listed, each file's tail read for its last record; a record this store appended
+   *  meanwhile is newer than what the read saw. → true when it landed (false: a rewrite noted meanwhile — its own read lands). */
+  prime() {
+    if (this._primeP) return this._primeP;
+    const epoch = this._epoch;
+    this._since = new Map();
+    const p = (async () => {
+      const kept = new Map();
+      let names = [];
+      try { names = (await fs.promises.readdir(this.dir)).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch { names = []; }
+      for (const name of names) kept.set(name, await lastRecordOf(path.join(this.dir, name)));
+      if (epoch !== this._epoch) return false;
+      for (const [name, rec] of this._since) kept.set(name, rec);
+      this._kept = kept; this._ready = true;
+      return true;
+    })().finally(() => { if (this._primeP === p) this._primeP = null; });
+    this._primeP = p;
+    return p;
+  }
+  _rewritten() { this._epoch++; this._ready = false; this._kept = new Map(); this._primeP = null; this.prime().catch(() => { }); }
   // Last recorded anchor for a key (tail line) — used by the engine to compute
   // the cost delta window and by future prediction code as the base point.
   lastAnchor(key) {
+    if (this._ready) { const r = this._kept.get(this._name(key)); return r ? JSON.parse(JSON.stringify(r)) : null; }
+    this.syncReads++;
     try {
       const data = fs.readFileSync(this._file(key), 'utf-8');
       const nl = data.lastIndexOf('\n', data.length - 2);
@@ -98,6 +163,9 @@ class UsageAnchors {
       fs.mkdirSync(this.dir, { recursive: true });
       fs.appendFileSync(this._file(identityKey), JSON.stringify(rec) + '\n');
       this._last.set(identityKey, cache.fetchedAt);
+      // the file's new last line, kept as lastAnchor's read would answer it (and over a prime still reading)
+      const kept = JSON.parse(JSON.stringify(rec));
+      this._kept.set(this._name(identityKey), kept); this._since.set(this._name(identityKey), kept);
       return true;
     } catch { return false; }
   }
@@ -608,4 +676,4 @@ const PRIME_COUNT_STEP = 4000; // interval versions counted per step (2 binary s
 function _firstTs(usageHistory) { try { for (const ev of usageHistory._events(undefined, undefined)) return ev.ts || 0; } catch { } return 0; } // the whole-ledger sweep's first slice starts at the oldest row
 const PRIME_SYNC_MAX_ROWS = 50000; // ≈ 20–40 ms of sweep: below it the first learn needs no «loading» window at all
 
-module.exports = { UsageAnchors, identityKeyFor, anchorSlug, costBetween, costBetweenMulti, primeCosts, primeCostsStepped, costMemoEpoch, costMemoCensus, HOURS_MAX_BYTES, HOUR_BLOCK_BYTES };
+module.exports = { UsageAnchors, noteAnchorsRewritten, identityKeyFor, anchorSlug, costBetween, costBetweenMulti, primeCosts, primeCostsStepped, costMemoEpoch, costMemoCensus, HOURS_MAX_BYTES, HOUR_BLOCK_BYTES };

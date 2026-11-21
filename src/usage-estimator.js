@@ -384,6 +384,16 @@ const PROOF_WIN = 64, PROOF_SAMPLES = 8, PROOF_MAX = 24;
 /** A file's signature: what a reader may trust for «unchanged» without its bytes (round 3, small 2: ctime moves with every
  *  write and cannot be set back — a same-size rewrite with the mtime restored is not «unchanged»). */
 const sigOf = (st) => st ? `${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}:${st.birthtimeMs || 0}` : 'absent';
+/** A view's bytes at [pos, pos+len) copied into buf at off → how many (a short count at the end of the file, as a read gives),
+ *  or -1 when the view does not hold them (the B-360d U1 view: the whole file, or its parts). */
+function viewCopy(v, buf, off, len, pos) {
+  const size = v.st ? v.st.size : 0;
+  if (pos >= size) return 0;
+  const want = Math.min(len, size - pos);
+  if (v.whole) { const n = v.whole.copy(buf, off, pos, pos + want); return n; }
+  for (const p of v.parts) if (p.off <= pos && pos + want <= p.off + p.buf.length) return p.buf.copy(buf, off, pos - p.off, pos - p.off + want);
+  return -1;
+}
 /** What the account walk and the estimate need of an identity's lines (round 3 — kept per identity, tiny, whether or not the
  *  cache keeps the lines): its named account ids, the last record by fetchedAt, the newest ts and the newest __global__ ts. */
 function linesMeta(lines, predictSince = -Infinity) {
@@ -659,7 +669,7 @@ class UsageEstimator {
   _file(key) { return path.join(this.dir, 'anchors-' + String(key).replace(/[^\w.@-]/g, '_').slice(0, 80) + '.ndjson'); }
   lines(identityKey) {
     const fp = this._file(identityKey);
-    let st; try { st = RR.stat(fp); } catch { this._lastRead = { key: identityKey, sig: 'absent' }; if (this._meta) this._meta.delete(identityKey); return []; }
+    let st; try { st = this._stat(fp); } catch { this._lastRead = { key: identityKey, sig: 'absent' }; if (this._meta) this._meta.delete(identityKey); return []; }
     const c = this._lineCache.get(identityKey);
     if (c && c.sig === sigOf(st)) { this._lineCache.delete(identityKey); this._lineCache.set(identityKey, c); c.usedAt = Date.now(); this._readDone(identityKey, st, c.lines, c.wins, c.endsNl); return c.lines; }
     const parse = (l) => { try { return JSON.parse(l); } catch { return null; } }, byAt = (a, b) => (a.fetchedAt || 0) - (b.fetchedAt || 0);
@@ -674,13 +684,13 @@ class UsageEstimator {
     if (c && c.wins && c.ino === st.ino && (c.btime || 0) === (st.birthtimeMs || 0) && st.size > c.size && c.endsNl) {
       let fd = null;
       try {
-        fd = fs.openSync(fp, 'r');
+        fd = this._openRead(fp);
         let proven = true;
-        for (const [off, want] of c.wins) { const got = Buffer.alloc(want.length); if (fs.readSync(fd, got, 0, want.length, off) !== want.length || !got.equals(want)) { proven = false; break; } }
+        for (const [off, want] of c.wins) { const got = Buffer.alloc(want.length); if (fd.read(got, 0, want.length, off) !== want.length || !got.equals(want)) { proven = false; break; } }
         if (!proven) this.tailRefused = (this.tailRefused || 0) + 1;
         else {
           const len = st.size - c.size, buf = Buffer.alloc(len); let got = 0;
-          while (got < len) { const n = fs.readSync(fd, buf, got, len - got, c.size + got); if (!n) break; got += n; }
+          while (got < len) { const n = fd.read(buf, got, len - got, c.size + got); if (!n) break; got += n; }
           const text = buf.toString('utf-8', 0, got);
           if (got === len && text.endsWith('\n')) {
             const add = text.split('\n').filter(Boolean).map(parse).filter(Boolean), last = c.lines.length ? (c.lines[c.lines.length - 1].fetchedAt || 0) : -Infinity;
@@ -692,12 +702,12 @@ class UsageEstimator {
             this.tailReads = (this.tailReads || 0) + 1;
           }
         }
-      } catch { lines = null; } finally { if (fd !== null) { try { fs.closeSync(fd); } catch { } } }
+      } catch { lines = null; } finally { if (fd !== null) fd.close(); }
     }
     let endsNl = true;
     if (!lines) {
       lines = []; wins = [];
-      try { const buf = fs.readFileSync(fp); const text = buf.toString('utf-8'); endsNl = !text.length || text.endsWith('\n'); lines = text.split('\n').filter(Boolean).map(parse).filter(Boolean); wins = proofWindows(buf, 0, buf.length, PROOF_SAMPLES); } catch { wins = null; }
+      try { const buf = this._readAll(fp); const text = buf.toString('utf-8'); endsNl = !text.length || text.endsWith('\n'); lines = text.split('\n').filter(Boolean).map(parse).filter(Boolean); wins = proofWindows(buf, 0, buf.length, PROOF_SAMPLES); } catch { wins = null; }
       lines.sort(byAt);
       this.wholeReads = (this.wholeReads || 0) + 1;
       if (!this.wholeReadsOf) this.wholeReadsOf = new Map(); this.wholeReadsOf.set(identityKey, (this.wholeReadsOf.get(identityKey) || 0) + 1);
@@ -721,7 +731,7 @@ class UsageEstimator {
   }
   /** The identity's meta now: by its file's signature (one stat), else one read of its lines. */
   _metaOf(key) {
-    let st = null; try { st = RR.stat(this._file(key)); } catch { }
+    let st = null; try { st = this._stat(this._file(key)); } catch { }
     const m = this._meta && this._meta.get(key);
     if (m && m.sig === sigOf(st)) return m;
     if (!st) return null;
@@ -737,10 +747,10 @@ class UsageEstimator {
   _metaTail(key, m, st) {
     let fd = null;
     try {
-      fd = fs.openSync(this._file(key), 'r');
-      for (const [off, want] of m.wins) { const got = Buffer.alloc(want.length); if (fs.readSync(fd, got, 0, want.length, off) !== want.length || !got.equals(want)) return null; }
+      fd = this._openRead(this._file(key));
+      for (const [off, want] of m.wins) { const got = Buffer.alloc(want.length); if (fd.read(got, 0, want.length, off) !== want.length || !got.equals(want)) return null; }
       const len = st.size - m.size, buf = Buffer.alloc(len); let got = 0;
-      while (got < len) { const n = fs.readSync(fd, buf, got, len - got, m.size + got); if (!n) break; got += n; }
+      while (got < len) { const n = fd.read(buf, got, len - got, m.size + got); if (!n) break; got += n; }
       const text = buf.toString('utf-8', 0, got); if (got !== len || !text.endsWith('\n')) return null;
       const add = []; for (const l of text.split('\n')) { if (!l) continue; try { add.push(JSON.parse(l)); } catch { } }
       const named = new Set(m.named); let { lastTs, lastGlobalTs, last } = m;
@@ -754,7 +764,7 @@ class UsageEstimator {
       if (this._predictMemo) this._predictMemo.clear();
       this._meta.set(key, nm); this.metaTailReads = (this.metaTailReads || 0) + 1;
       return nm;
-    } catch { return null; } finally { if (fd !== null) { try { fs.closeSync(fd); } catch { } } }
+    } catch { return null; } finally { if (fd !== null) fd.close(); }
   }
   /** The census row (anchor-file bytes; the parsed lines cost ~1.6× that, measured on the owner's snapshot). */
   /** B-360d (A) (主开发 r1358): the memory census's tick — the idle trim with no newcomer (a cache drop; the live set is the put's). */
@@ -869,7 +879,7 @@ class UsageEstimator {
       // learn-time LIVE cost recomputation (see extractPairs) — the frozen costSince snapshots under-count fast burns whose ledger
       // events land after the sweep; the live ledger heals them retroactively (while loading: the frozen ones only)
       f.steps = _extractPairsSteps(lines, { costFn: loading ? null : this._costFn(f.ids), priors: this.priorsFor(f.key) }, RELEARN_CHUNK_LINES);
-      if ((this.wholeReads || 0) !== w0) { let sz = 0; try { sz = RR.stat(this._file(identityKey)).size; } catch { } this._coldSpent(sz); } // this turn's cold reads (a budget of COLD_READ_TURN_BYTES)
+      if ((this.wholeReads || 0) !== w0) { let sz = 0; try { sz = this._stat(this._file(identityKey)).size; } catch { } this._coldSpent(sz); } // this turn's cold reads (a budget of COLD_READ_TURN_BYTES)
     };
     f.late = () => { // round 3 (small 1): a row of its accounts that ARRIVED mid-fold with a ts inside its anchors' span (the hub's own session rows bring no invalidation) — the landing is a mix of two ledger states: stale at once
       if (f.loading || f.seq0 == null || !uh || typeof uh.arrivalsFor !== 'function') return false;
@@ -962,11 +972,64 @@ class UsageEstimator {
    *  cold read, bound by the turn's budget (round 5, small: the 4 MB stop did not bind a cached identity's open after a rewrite). */
   _readsNoFile(key) {
     const e = this._lineCache.get(key); if (!e) return false;
-    let st = null; try { st = RR.stat(this._file(key)); } catch { return false; }
+    let st = null; try { st = this._stat(this._file(key)); } catch { return false; }
     return e.sig === sigOf(st) || (e.ino === st.ino && (e.btime || 0) === (st.birthtimeMs || 0) && st.size > e.size && e.endsNl);
   }
+  // ── THE VIEW (B-360d part 3 U1, 主开发 r1459: the 60-s sweep's step reads no file on the loop, a stat included) ──
+  // viewFor(key) reads OFF the loop what this estimator's synchronous readers will ask of ONE identity's anchors file — its stat
+  // and the bytes its line cache and its meta prove they need (their proof windows and the appended tail; the whole file when
+  // either has no entry or cannot prove an append) — and rates.json while it is unread; withView(view, fn) serves those reads
+  // from it while fn runs. Without a view, and for any other file, every read is the file's, as before. A byte a view does
+  // not hold is read from the file and COUNTED (viewMisses): the sweep's legs hold it at 0.
+  _stat(fp) { const v = this._view && this._view.files.get(fp); if (v) { if (!v.st) throw Object.assign(new Error(`ENOENT: no such file (the view): ${fp}`), { code: 'ENOENT' }); return v.st; } return RR.stat(fp); }
+  _readAll(fp) {
+    const v = this._view && this._view.files.get(fp);
+    if (v) { if (!v.st) throw Object.assign(new Error(`ENOENT: no such file (the view): ${fp}`), { code: 'ENOENT' }); if (v.whole) return v.whole; this.viewMisses = (this.viewMisses || 0) + 1; }
+    return fs.readFileSync(fp);
+  }
+  _openRead(fp) {
+    const v = this._view && this._view.files.get(fp);
+    let fd = null;
+    const real = () => (fd === null ? (fd = fs.openSync(fp, 'r')) : fd);
+    if (!v) real();
+    return {
+      read: (buf, off, len, pos) => {
+        if (v) { const n = viewCopy(v, buf, off, len, pos); if (n !== -1) return n; this.viewMisses = (this.viewMisses || 0) + 1; }
+        return fs.readSync(real(), buf, off, len, pos);
+      },
+      close: () => { if (fd !== null) { try { fs.closeSync(fd); } catch { } fd = null; } },
+    };
+  }
+  async viewFor(identityKey) {
+    const fsp = fs.promises, files = new Map(), fp = this._file(identityKey);
+    let st = null; try { st = await fsp.stat(fp); } catch { st = null; }
+    const e = { st, whole: null, parts: [] };
+    if (st) {
+      const sig = sigOf(st), c = this._lineCache.get(identityKey), m = this._meta && this._meta.get(identityKey);
+      const proves = (x) => !!(x && x.wins && x.ino === st.ino && (x.btime || 0) === (st.birthtimeMs || 0) && st.size > x.size && x.endsNl);
+      const need = [c, m].filter((x) => !(x && x.sig === sig));
+      if (need.some((x) => !proves(x))) e.whole = await fsp.readFile(fp);
+      else if (need.length) {
+        const fh = await fsp.open(fp, 'r');
+        try {
+          const at = async (off, len) => { const b = Buffer.alloc(len); let got = 0; while (got < len) { const r = await fh.read(b, got, len - got, off + got); if (!r.bytesRead) break; got += r.bytesRead; } return { off, buf: b.subarray(0, got) }; };
+          for (const x of need) for (const [off, want] of x.wins) e.parts.push(await at(off, want.length));
+          const from = Math.min(...need.map((x) => x.size));
+          e.parts.push(await at(from, st.size - from));
+        } finally { await fh.close(); }
+      }
+    }
+    files.set(fp, e);
+    if (!this._seeded || !this._ratesAll) {
+      const rf = path.join(this.dir, 'rates.json');
+      let rst = null, whole = null; try { rst = await fsp.stat(rf); whole = await fsp.readFile(rf); } catch { rst = null; whole = null; }
+      files.set(rf, { st: rst, whole, parts: [] });
+    }
+    return { key: identityKey, files };
+  }
+  withView(view, fn) { const was = this._view; this._view = view || null; try { return fn(); } finally { this._view = was; } }
   /** The identity's anchor file's signature now (one stat). */
-  _sigNow(key) { let st = null; try { st = RR.stat(this._file(key)); } catch { } return sigOf(st); }
+  _sigNow(key) { let st = null; try { st = this._stat(this._file(key)); } catch { } return sigOf(st); }
   /** The rates of `key` landed: its version moves — an estimate memoized on an older version (or on none) is never served again. */
   _ratesLanded(key) { if (!this._ratesVer) this._ratesVer = new Map(); this._ratesVer.set(key, (this._ratesVer.get(key) || 0) + 1); this.basisGen = (this.basisGen || 0) + 1; } // basisGen (lane account-reset-door K1): the pools' basis is decided again at its next read
   _ratesVerOf(key) { return (this._ratesVer && this._ratesVer.get(key)) || 0; }
@@ -986,7 +1049,7 @@ class UsageEstimator {
    *  first ask serves them while its relearn folds the new ones. */
   _seedRates() {
     this._seeded = true;
-    let all = null; try { all = JSON.parse(fs.readFileSync(path.join(this.dir, 'rates.json'), 'utf-8')); } catch { return; }
+    let all = null; try { all = JSON.parse(this._readAll(path.join(this.dir, 'rates.json')).toString('utf-8')); } catch { return; }
     let n = 0;
     for (const [k, v] of Object.entries(all || {})) { if (!v || !v.buckets || this._rateCache.has(k)) continue; this._rateCache.set(k, { rates: v.buckets, at: 0, stale: true, seeded: true }); n++; }
     this.ratesSeeded = (this.ratesSeeded || 0) + n;
@@ -1179,7 +1242,7 @@ class UsageEstimator {
     // copy read before a migration never writes back what it dropped.
     try {
       const fp = path.join(this.dir, 'rates.json');
-      if (!this._ratesAll) { let all = {}; try { all = JSON.parse(fs.readFileSync(fp, 'utf-8')) || {}; } catch { } this._ratesAll = all; fs.mkdirSync(this.dir, { recursive: true }); }
+      if (!this._ratesAll) { let all = {}; try { all = JSON.parse(this._readAll(fp).toString('utf-8')) || {}; } catch { } this._ratesAll = all; fs.mkdirSync(this.dir, { recursive: true }); }
       this._ratesAll[identityKey] = { computedAt: Date.now(), nAnchors, buckets: rates };
       require('./store-writer.js').storeWriter().dirty(fp, { name: 'usage-rates.write', produce: () => JSON.stringify(this._ratesAll, null, 1) });
     } catch { }
@@ -1363,7 +1426,9 @@ function calibMetricRows(calib, { account } = {}) {
 //   estimator — { accountIdsFor, ratesFor, invalidate }
 //   costBetween(ids, fromMs, toMs), darkHosts(allIds) → [host], metric(name, value, detail)
 // Returns { fresh, recorded, metrics } (the rows it emitted).
-function sweepAnchorGroup({ identityKey, group, anchors, estimator, costBetween, darkHosts, metric }) {
+/** ONE GROUP'S «IS THERE A NEW READING» — the step's own rule, asked by the engine's sweep too (B-360d U1: a group with a
+ *  fresh reading has its estimator view read off the loop first) → { fresh, cache, prev } */
+function anchorGroupFresh({ identityKey, group, anchors }) {
   // «no 5h limit» is the identity's to keep (lane no-5h-window r5): its freshest file may be a SIBLING still holding a
   // 5h window, and an anchor carrying it is estimated back onto the member whose own file tombstoned it — `tomb5h` is
   // the group's file that stands «no 5h limit» (usageIdentityGroups); none ⇒ the freshest file as it is
@@ -1374,6 +1439,10 @@ function sweepAnchorGroup({ identityKey, group, anchors, estimator, costBetween,
   // sibling cache — there is nothing to compare against, so no cost walk, no
   // calibration, no metric.
   const fresh = !!cache?.fetchedAt && (!prev || Number(cache.fetchedAt) > (Number(prev.fetchedAt) || 0));
+  return { fresh, cache, prev };
+}
+function sweepAnchorGroup({ identityKey, group, anchors, estimator, costBetween, darkHosts, metric }) {
+  const { fresh, cache, prev } = anchorGroupFresh({ identityKey, group, anchors });
   if (!fresh) return { fresh: false, recorded: false, metrics: [] };
   const allIds = estimator.accountIdsFor(identityKey, group.accountIds);
   const costSince = prev ? costBetween(allIds, prev.fetchedAt, cache.fetchedAt) : null;
@@ -1462,7 +1531,7 @@ function wholeLedgerGate({ ledger, log = () => {}, onWhole = () => {}, prime = n
   return {
     loading,
     holds() { const l = loading(); if (!l) return false; held = true; wait(l); return true; },
-    run(fn) { const l = loading(); if (!l) { fn(); return 'ran'; } if (!queued.includes(fn)) queued.push(fn); wait(l); return 'waiting'; },
+    run(fn) { const l = loading(); if (!l) { const v = fn(); return v && typeof v.then === 'function' ? v : 'ran'; } if (!queued.includes(fn)) queued.push(fn); wait(l); return 'waiting'; },
   };
 }
 
@@ -1471,7 +1540,7 @@ module.exports = {
   PRIOR_WEIGHT_DU,
   normU, scopedKey, scopedFamily, costForKey,
   extractPairs, learnRates, estimateBuckets, overlayCache, predictCalib,
-  CALIB_METRIC, calibMetricRows, sweepAnchorGroup, cliRefreshDrift, wholeLedgerGate,
+  CALIB_METRIC, calibMetricRows, sweepAnchorGroup, anchorGroupFresh, cliRefreshDrift, wholeLedgerGate,
   burnRates, BURN_WINDOW_MS, rateTtlMs, RELEARN_STEP_LINES, _extractPairsSteps, _fitRates, // the stepped fold's two halves (a suite drives them against learnRates)
   UsageEstimator,
 };

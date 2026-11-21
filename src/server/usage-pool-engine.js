@@ -242,8 +242,9 @@ function quotaBackendFor(key, session) {
 }
 const { quotaVerdict, THRESH: VERDICT_THRESH, lapseCleared, serveAfterFailure, SERVE_LAPSED, memberLapsed, readingFingerprint } = require('../account-pool-auto.js'); // THE account-usability verdict (2.369.0, owner-designed)
 const { loginUsable, loginBucketLabel, loginAgeText, loginWallPhrase } = require('../login-expiry.js'); // PURE: is this member's LOGIN SESSION still alive (2026-09-07)
-const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, sweepAnchorGroup, wholeLedgerGate } = require('../usage-estimator.js');
+const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, sweepAnchorGroup, anchorGroupFresh, wholeLedgerGate } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
+usageAnchors.prime().catch(() => { });   // B-360d U1: every anchors file's last line, read once off the loop (the sweep waits for it)
 // READ-ONLY view of the transition ledger. The single WRITER is accounts.js
 // (every re-point goes through ensureSessionPoolLink / setPoolTarget — spawn,
 // engine, manual route, signed-out self-heal, account removal), so no caller
@@ -473,7 +474,14 @@ function sweepUsageAnchorsNow() {
   // ONE STEP PER GROUP = usage-estimator's `sweepAnchorGroup` (B-a5c0): no new
   // reading ⇒ no ledger walk, no calibration, no metric; a new anchor ⇒ the
   // calib metric once per moved bucket, attributed {account, bucket}.
-  for (const [identityKey, g] of usageIdentityGroups()) {
+  // B-360d part 3 U1 (主开发 r1459): THE SWEEP'S STEPS READ NO FILE ON THE LOOP. The last anchor of every identity is kept
+  // (src/usage-anchors.js: read once off the loop, then kept by its own append); a group with a FRESH reading has its
+  // estimator view (its anchors file's stat and the bytes the estimator will ask) read off the loop first, ONE identity at a
+  // time: its step runs in the same synchronous run as that read's answer, so nothing lands between the decision and the
+  // append. A sweep that needs no read runs whole now, as before; one sweep at a time.
+  if (_anchorSweep) return _anchorSweep;
+  const groups = [...usageIdentityGroups()];
+  const step = (identityKey, g) => {
     try {
       sweepAnchorGroup({
         identityKey, group: g, anchors: usageAnchors, estimator: usageEstimator,
@@ -482,8 +490,22 @@ function sweepUsageAnchorsNow() {
         metric: (name, value, detail) => global.__vsMetric?.(name, value, detail),
       });
     } catch { }
-  }
+  };
+  const fresh = (identityKey, g) => { try { return anchorGroupFresh({ identityKey, group: g, anchors: usageAnchors }).fresh; } catch { return false; } };
+  if (usageAnchors.ready() && !groups.some(([k, g]) => fresh(k, g))) { for (const [k, g] of groups) step(k, g); return undefined; }
+  const run = (async () => {
+    for (let n = 0; !usageAnchors.ready() && n < 3; n++) { try { await usageAnchors.prime(); } catch { } }
+    for (const [k, g] of groups) {
+      if (!fresh(k, g)) { step(k, g); continue; }
+      let view = null;
+      try { view = await usageEstimator.viewFor(k); } catch { view = null; }
+      usageEstimator.withView(view, () => step(k, g));
+    }
+  })().catch(() => { }).finally(() => { if (_anchorSweep === run) _anchorSweep = null; });
+  _anchorSweep = run;
+  return run;
 }
+let _anchorSweep = null;   // the sweep reading off the loop (one at a time: a second ask joins it)
 // boot-time sealed-orders push: a restarted server re-arms every pool's
 // device-side fallback snapshot AND collects executions from its own down
 // window (the report rides the pool-orders reply)
@@ -8545,7 +8567,7 @@ function maybeStopOnFallback(session, id, from, to) {
     sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
     _wallRing, _sessionWalls, _sessionWallLanes, noteSessionWall, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
     _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, poolKickRerun, _poolDecisions, _basisOf, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
-    sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
+    sessionModelFor, sweepUsageAnchors, usageAnchors, usageCacheKeyFor,
     usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
     writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
     estOverlayCache, predictCalib,

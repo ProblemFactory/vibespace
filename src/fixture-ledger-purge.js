@@ -212,6 +212,8 @@ function purgeFixtureLedger({ dataDir, id, now = Date.now(), dryRun = false }) {
       report.anchorFiles++; report.anchorsVoided += voided;
       if (!dryRun) _writeAtomic(fp, out.join('\n') + '\n');
     }
+    // B-360d U1: the anchors stores of this process keep each file's last line — a rewrite says so at its write
+    if (report.anchorFiles && !dryRun) require('./usage-anchors.js').noteAnchorsRewritten(anchorsDir);
     // The learned rates are derived from the pairs we just changed.
     const rates = path.join(anchorsDir, 'rates.json');
     const cur = _readJson(rates);

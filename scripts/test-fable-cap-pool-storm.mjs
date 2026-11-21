@@ -410,8 +410,8 @@ function playWall(w, { banner = FABLE_BANNER, rawType = 'seven_day', member = 'w
     ok('§2 auto-resume arms on the SCOPED bucket — the wall it will wait for is the one that exists',
       !!arm && arm.wall.bucket === 'scoped' && arm.wall.scopedName === 'fable', JSON.stringify(arm && arm.wall));
 
-    // the ANCHOR stream is the estimator's ground truth and it must agree
-    w.eng.sweepUsageAnchors();
+    // the ANCHOR stream is the estimator's ground truth and it must agree (B-360d U1: a sweep that reads off the loop is awaited)
+    await w.eng.sweepUsageAnchors();
     const aDir = path.join(w.dataDir, 'usage-anchors');
     const rows = (fs.existsSync(aDir) ? fs.readdirSync(aDir) : []).filter((f) => f.endsWith('.ndjson')).flatMap((f) => fs.readFileSync(path.join(aDir, f), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)));
     const wRow = rows.filter((r) => r.accountId === w.id.wmax).pop();
@@ -3405,7 +3405,7 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
     }
   }
   // ── r5 (acceptance r4 #1): THE ESTIMATED VIEW after a real 60-s anchor sweep — the engine's poolReadCache ────────
-  const estWorld = (engineModule = engMod) => {
+  const estWorld = async (engineModule = engMod) => {
     const w = mkWorld({ sameDeadline: true, engineModule });
     if (!w) return null;
     // the pool reads an estimate only where this instance's verdict is ON (usage-predict P5): stated on, so the leg is the overlay's own
@@ -3416,14 +3416,14 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
     // the org-merged machine login: FRESHER, still holding a 90.5 % 5h window (its session never saw the lift)
     w.writeCache('__global__', { fetchedAt: Date.now() - 1000, source: 'passive', orgUuid: 'org-n5h-est', fiveHour: { utilization: 0.905, resetsAt: w.nowSec + 3 * 3600 }, sevenDay: { utilization: 0.6, resetsAt: w.resets.wmax }, scopedWeekly: [] });
     const before = w.eng.poolReadCache(w.P)(w.id.wmax);
-    w.eng.sweepUsageAnchors();
+    await w.eng.sweepUsageAnchors();
     const after = w.eng.poolReadCache(w.P)(w.id.wmax);
     let anchor = null;
     try { const t = fs.readFileSync(path.join(w.dataDir, 'usage-anchors', 'anchors-org_org-n5h-est.ndjson'), 'utf8').trim().split('\n'); anchor = JSON.parse(t[t.length - 1]); } catch { }
     return { w, before, after, anchor };
   };
   { // ㉑3i
-    const E = estWorld();
+    const E = await estWorld();
     if (!E) ok('㉑3i SKIP — pools unsupported on this platform', true);
     else {
       ok('㉑3i setup: a lifted member and its org-merged machine login are ONE identity, the sibling is fresher and holds a 90.5 % 5h window; before any sweep the pool reads the member with no 5h bucket (r4)',
@@ -3477,7 +3477,7 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
     const mEng = mE.hit ? mutate('src/server/usage-pool-engine.js', 'r5est', [["require('../usage-estimator.js')", `require(${JSON.stringify(mE.file || '')})`]]) : { hit: false, why: mE.why };
     ok('㉑3i NEGATIVE CONTROL setup: the estimator\'s three guards removed, wired into a copy of the engine', mE.hit === true && mEng.hit === true, (mE.why || '') + (mEng.why || ''));
     if (mEng.hit) {
-      const E = estWorld(mEng.mod);
+      const E = await estWorld(mEng.mod);
       ok('㉑3i CONTROL: an estimator that ignores the member\'s tombstone puts the sibling\'s 90.5 % 5h window back on the lifted member after the sweep — ㉑3i RED there',
         !!E && !!E.after.fiveHour && E.after.fiveHour.utilization > 0.9, JSON.stringify(E && E.after.fiveHour));
     }
