@@ -246,6 +246,22 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
 }
 C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
 
+// ── THE TRANSCRIPT POOL REMEMBERS A HUNG TRANSCRIPT (B-23e5's memory, by the pool's own key `fp`): a REAL pool and worker, an op held
+// past its deadline (the worker's __hold: a placed stall, never a clock guess) ⇒ that file is refused by name at the pool's door,
+// no worker sent into it again; the control, a pool without the key: nothing remembered (the release: a fresh worker every ask) ──
+{
+  const { SafeFs } = require(path.join(REPO, 'src/safe-fs.js'));
+  const mkPool = (pathKeys) => new SafeFs({ workerPath: path.join(REPO, 'src/transcript-worker.js'), name: 'transcript-leg', poolSize: 1, timeouts: { default: 200 }, ...(pathKeys ? { pathKeys } : {}) });
+  const held = async (P) => { let e = null; try { await P.call('__hold', { fp: claudeFp, sab: new SharedArrayBuffer(4), ms: 4000 }); } catch (x) { e = x; } return e; };
+  const P1 = mkPool(['fp']), P0 = mkPool(null);
+  try {
+    const e1 = await held(P1), e0 = await held(P0);
+    let next = null; try { await P1.call('jsonlTail', { fp: claudeFp, dropSubagent: true }); } catch (x) { next = x; }
+    ok(!!e1 && e1.safeFsTimeout === true && !!next && next.code === 'path-hung' && next.status === 503 && !!P1._hungOf({ fp: claudeFp }, 'jsonlTail', 200) && !P0._hungOf({ fp: claudeFp }, 'jsonlTail', 200) && !!e0 && e0.safeFsTimeout === true,
+      `a transcript read that ran out its deadline is REMEMBERED by the transcript pool (its key fp): the next read of that file is refused by name (${next && next.code}), no worker sent into it; the control (no key): nothing remembered`, { e1: e1 && (e1.code || e1.message), next: next && next.code, p0Hung: !!P0._hungOf({ fp: claudeFp }, 'jsonlTail', 200) });
+  } finally { P1.close(); P0.close(); }
+}
+
 // ── THE PAGE'S WIRING (the page's words are drawn by the chrome suites; these pins hold the roads that say them) ──
 {
   const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), csr = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8'), sl = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');

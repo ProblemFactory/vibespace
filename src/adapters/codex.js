@@ -663,6 +663,7 @@ function _transcriptPoolGet() {
       _transcriptPool = new SafeFs({
         workerPath: path.join(__dirname, '..', 'transcript-worker.js'), name: 'transcript',
         poolSize: 2,
+        pathKeys: ['fp'],   // row B-422c: every op names its transcript `fp` — a blocked mount refused by name, a deadline remembered (B-23e5)
         laneOpts: { history: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB } } },
         // B-3b03: no inlineRun — the pool never runs an op on the main thread (a refusal reaches its callers; their own sync
         // fallback after ANY pool failure is theirs — SILENT but for parseCodexSessionJsonl's codex-parse-on-loop: row B-422c)

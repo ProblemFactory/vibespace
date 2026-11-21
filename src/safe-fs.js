@@ -31,8 +31,8 @@ const { trackWorker } = require('./worker-memory');
 const DOOR = require('./mount-door');
 // The payload keys that name a path (src/safe-fs-worker.js OPS).
 const PATH_KEYS = ['path', 'oldPath', 'newPath', 'src', 'dest'];
-// B-23e5's remainder: a call's paths — its keys, and the folder rule's own look (`paths`: two dead children looked at with no follow)
-const pathsOf = (payload) => [...PATH_KEYS.map((k) => payload[k]), ...(Array.isArray(payload.paths) ? payload.paths : [])].filter((p) => typeof p === 'string' && p);
+// B-23e5's remainder: a call's paths — its keys (a pool's own, row B-422c: the transcript pool's `fp`), and the folder rule's own look (`paths`: two dead children looked at with no follow)
+const pathsOf = (payload, keys = PATH_KEYS) => [...keys.map((k) => payload[k]), ...(Array.isArray(payload.paths) ? payload.paths : [])].filter((p) => typeof p === 'string' && p);
 // r1442 (E): a press's join is named by its op and its paths (+ its small fields) — a write's `content` (up to 10 MB) never: it never joins
 const pressKeyOf = (op, payload) => (!payload || payload.content != null ? null : op + '\u0000' + JSON.stringify(payload));
 const CLIMB_LOOK_MS = 1500;   // (b): the no-follow look's own deadline — and the most it waits for an IDLE worker (never behind a live call)
@@ -175,6 +175,9 @@ class SafeFs {
     this._downSaid = false;               // B-3b03 follow-up: a streak of failed starts was said (cleared at the next answer)
     // B-3b03: `opts.inlineRun` (the release's in-main fallback, 2.235.0) is no longer read — the pool never runs an op inline
     this._blockedOf = opts.blocked || DOOR.blocked;   // B-afc4: (path) → blocked mount root | false
+    // row B-422c: the payload keys that NAME a path (the door's blocked check, B-23e5's memory, its forgiving) — PATH_KEYS, plus a
+    // pool's own (the transcript pool names its file `fp`: a transcript read that ran out its deadline is remembered like any path)
+    this._pathKeys = Array.isArray(opts.pathKeys) && opts.pathKeys.length ? [...new Set([...PATH_KEYS, ...opts.pathKeys])] : PATH_KEYS;
     this._hungMs = opts.hungMs === 0 ? 0 : opts.hungMs > 0 ? opts.hungMs : HUNG_MS;   // B-23e5: how long a path that ended a worker at its deadline is not asked (0 = no memory: a pool that must keep asking)
     this._hung = new Map();                                  // B-23e5: path → { until, exact, op, bound } (one memory with the lanes)
     this._mountsText = typeof opts.mountsText === 'function' ? opts.mountsText : () => fs.promises.readFile(MOUNTINFO, 'utf8');   // B-23e5: the mount table, read off the loop
@@ -306,7 +309,7 @@ class SafeFs {
    * deadline) so routes can map to the "storage not responding" response.
    */
   _blocked(payload) {
-    for (const p of payload ? pathsOf(payload) : []) {   // the folder rule's look (`paths`) too — never into a blocked mount
+    for (const p of payload ? pathsOf(payload, this._pathKeys) : []) {   // the folder rule's look (`paths`) too — never into a blocked mount
       const mp = this._blockedOf(p);
       if (mp) return mp;
     }
@@ -326,7 +329,7 @@ class SafeFs {
     const out = [];
     if (!this._hung || !this._hung.size || !payload) return out;   // a pool built without its constructor (a suite's stand-in) has no memory
     const now = this._clock(), wide = WIDE_OPS.has(op), key = opKeyOf(op, payload);
-    for (const k of PATH_KEYS) {
+    for (const k of this._pathKeys) {
       const p = payload[k];
       if (typeof p !== 'string' || !p) continue;
       for (const [h, m] of this._hung) {
@@ -350,7 +353,7 @@ class SafeFs {
     if (!payload || !this._hungMs || !this._hung || SIZE_OPS.has(op)) return Promise.resolve();
     const look = op === 'lstatKinds';   // (b), r1378 (4): the look's own hang is remembered like any op — and never climbs (it IS a climb's)
     const now0 = this._clock(), bound = Number.isFinite(ms) ? (early ? 1 : 1.5) * ms : Infinity, key = opKeyOf(op, payload);
-    const mine = new Set(pathsOf(payload));   // one call's two paths (a rename) are one sibling
+    const mine = new Set(pathsOf(payload, this._pathKeys));   // one call's two paths (a rename) are one sibling
     const climbs = [];
     for (const p of mine) {
       if (look && this._hung.has(p)) continue;   // the look's own hang names no strike on a path already remembered (its folder is named by it)
@@ -383,7 +386,7 @@ class SafeFs {
   _forgive(payload, op) {
     if (!payload || !this._hung || !this._hung.size) return;
     const wide = WIDE_OPS.has(op), key = opKeyOf(op, payload);
-    for (const k of PATH_KEYS) {
+    for (const k of this._pathKeys) {
       const p = payload[k];
       if (typeof p !== 'string' || !p) continue;
       for (const [h, m] of [...this._hung]) {
