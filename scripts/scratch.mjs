@@ -58,14 +58,50 @@ export const CHROME_QUIET = Object.freeze(['--disable-background-networking', '-
 // B-9dd0's remainder (2) (主开发 r1134): THE BELT, for a Chrome whose page must reach only the suite's OWN targets — a dead proxy
 // (127.0.0.1:9; Chrome never proxies the loopback) bypassed only for `own`, and a resolver that answers every NAME «not found»
 // but the loopback's and `own`'s. `own` = the suite's own targets past the loopback (test-https-hub-chrome: the box's LAN address
-// its hub serves on). BELT_REACH_JS = the page-side proof: a vendor's name and a TEST-NET address are each REFUSED (an opaque
-// no-cors fetch resolves only when something answered), within 5 s — evaluated on a page with NO app CSP (the blank page Chrome
-// opens on): the app's report-only policy reports the probe's own fetches, and a suite fails on a CSP report.
+// its hub serves on). THE GAP, named: the dead proxy and the resolver map do not cover the browser's direct UDP (WebRTC / STUN to
+// an address literal). chromeReach (below) = the proof and its CONTROL, from a blank page (no app CSP to report the probes).
 export const chromeBelt = (own = []) => {
   const list = [...new Set([...own].map((h) => String(h || '')).filter(Boolean))];
   return Object.freeze(['--proxy-server=http://127.0.0.1:9', ...(list.length ? [`--proxy-bypass-list=${list.join(';')}`] : []), `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE [::1], EXCLUDE localhost${list.map((h) => `, EXCLUDE ${h}`).join('')}`]);
 };
-export const BELT_REACH_JS = `Promise.all(['https://vendor.example/', 'https://192.0.2.1/'].map((u) => Promise.race([fetch(u, { mode: 'no-cors', cache: 'no-store' }).then(() => u + ' reached', () => u + ' refused'), new Promise((r) => setTimeout(() => r(u + ' timed out'), 5000))])))`;
+/** B-9dd0's remainder (2) and the round's CONTROL (主开发 r1246): ONE headless Chrome with `args` (CHROME_QUIET first), its blank
+ *  page asked three probes (`args`: the switches beyond CHROME_QUIET + CHROME_STORE — the belt, or none) → { own, vendor, testnet } each 'reached' | 'refused' | 'timed out' (an opaque no-cors fetch resolves only
+ *  when something answered), or { error }:
+ *    own     — the box's OWN NAME at a listener of this process (0.0.0.0, a free port): a name that resolves and answers and is no
+ *              target — the probe that tells a belt from no belt;
+ *    vendor  — https://vendor.example/ (a reserved name: it never resolves, belt or not);
+ *    testnet — https://192.0.2.1/ (often refused by the box's routing alone).
+ *  The belt's leg: all three refused WITH the belt; its CONTROL: `own` REACHED with no belt — where it is not, this box cannot
+ *  show the belt and the suite says so by name (a SKIP), never a green it did not earn. Chrome is killed by its handle at the end. */
+export async function chromeReach(chromeBin, { args = [], env = process.env, dir, timeoutMs = 20000 } = {}) {
+  const { spawn } = await import('node:child_process');
+  const http = (await import('node:http')).default, os = (await import('node:os')).default;
+  const srv = http.createServer((q, r) => { r.writeHead(204, { 'access-control-allow-origin': '*' }); r.end(); });
+  await new Promise((res, rej) => { srv.once('error', rej); srv.listen(0, '0.0.0.0', res); });
+  const ownUrl = `http://${os.hostname()}:${srv.address().port}/`;
+  const cdpPort = await freePort();
+  fs.mkdirSync(dir, { recursive: true });
+  const ch = spawn(chromeBin, [...CHROME_QUIET, ...CHROME_STORE, ...args, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore', env });
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    let target = null;
+    for (const end = Date.now() + timeoutMs; !target && Date.now() < end;) { try { target = (await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json()).find((x) => x.type === 'page'); } catch { /* not yet */ } if (!target) await sleep(150); }
+    if (!target) return { error: 'chrome never exposed a CDP page target', ownUrl };
+    const WebSocket = require('ws');
+    const sock = new WebSocket(target.webSocketDebuggerUrl);
+    await new Promise((res, rej) => { sock.once('open', res); sock.once('error', rej); });
+    const urls = [ownUrl, 'https://vendor.example/', 'https://192.0.2.1/'];
+    const expression = `Promise.all(${JSON.stringify(urls)}.map((u) => Promise.race([fetch(u, { mode: 'no-cors', cache: 'no-store' }).then(() => 'reached', () => 'refused'), new Promise((r) => setTimeout(() => r('timed out'), 5000))])))`;
+    const got = await new Promise((resolve) => { const t = setTimeout(() => resolve(null), 9000); sock.on('message', (d) => { let m = null; try { m = JSON.parse(String(d)); } catch { return; } if (m.id === 1) { clearTimeout(t); resolve(m.result && m.result.result ? m.result.result.value : null); } }); sock.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } })); });
+    try { sock.close(); } catch { /* gone */ }
+    return Array.isArray(got) ? { own: got[0], vendor: got[1], testnet: got[2], ownUrl } : { error: 'the probe did not answer', ownUrl };
+  } finally {
+    try { ch.kill('SIGKILL'); } catch { /* gone */ }
+    await new Promise((r) => { if (ch.exitCode !== null || ch.signalCode) return r(); ch.once('exit', r); setTimeout(r, 3000); });
+    try { srv.closeAllConnections && srv.closeAllConnections(); } catch { /* none */ }
+    await new Promise((r) => srv.close(() => r()));
+  }
+}
 /** THE ONE RELAY of a server broadcast to a page (主开发 2026-11-20 04:54Z, lane bl-tests-chrome — 2.369.413's fourth hosted run:
  *  test-channel-window-render ⑫c walked the page's LIVE handler list and skipped the open picker's handler, right after a stale
  *  one that took itself out). Page-side JS source that hands ONE message object to every global handler over a SNAPSHOT of the

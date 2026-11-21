@@ -872,6 +872,7 @@ export const SUITES = [
   { name: 'test-webhook-pair', tier: 'fast', why: 'in-process · 294 ms (PURE pairing verdicts + RED mutant, then two real engines and two copies of the real routes on loopback: code, join, spent, expired, http, a frame on /hook, re-pair; + the pending code across a restart, the join\'s named refusals, the GET / broadcast / file census, 4 RED controls)' }, // lane webhook-l3-cli-pair + webhook-pair-join
   { name: 'test-webhook-verify-r1', tier: 'fast', why: 'in-process · 416 ms (the credential-class verify r1 rulings on rel249, each a leg + a RED in-memory mutant: opaque replyId, vswp_ / decoded credentials at the door + withheld at the read, one client address + allow-list everywhere, the stranger gate, commit-after-persist, /hook one shape, raw belted, budget words, IPv6 families, no ghost, card words)' }, // int248 r2
   { name: 'test-webhook-cli', tier: 'fast', why: 'in-process · 605 ms (the real vibespace-channels against a stub server: reply --to, ambiguous rows, compose --caller, read callers header; the no-mint verb census and the vswh_ output door, RED controls)' }, // lane webhook-l3-cli-pair
+  { name: 'test-egress-census', tier: 'heavy', reads: ['src/', 'server.js', 'data/bin/', 'scripts/egress-carried-rows.json'], why: 'slow for the fast tier (its stated sum sits at FAST_SUM_CAP_MS) — in-process · 3.9 s (B-9dd0 r1246: the census over every ci.mjs row through the tree\'s own impact scope, measured 3937 / 3074 ms on the test machine); an unlisted row carries nothing, so a drift between heavy runs is never a changed command line' }, // B-9dd0: the rows whose node children the egress reader may carry into, re-derived; red when scripts/egress-carried-rows.json drifts
   { name: 'test-egress-fence', tier: 'fast', why: 'in-process · 565 ms (loopback stub servers only; every address class, a rebinding resolver asked once, 3xx never followed, lost vs refused, 64 KiB)' }, // lane webhook-l1-server
   { name: 'test-channel-placement', tier: 'fast', why: 'in-process · 408 ms (restated 2026-10-20, was 200 ms) (the real engine over two scripted vendors, no vendor call; five patched copies)' }, // lane channel-threads, placement round (2026-09-28, the owner: "the boolean is Lark-shaped"): WHERE A REPLY LANDS — chat / quote / thread / thread+chat declared per adapter in its threads cap row (+ rootReply, the vendor's norm); the PURE table per vendor (Lark / Gmail / Agents / the fake shipped, Slack + Telegram as fixture rows), the caps-row census (grep-derived, a planted module found), the registry's send contract, the engine end to end (refused before a proposal exists, stored with the inThread alias, sent, receipted), the words zh/ja/en + wiring pins, controls: PL3 blind to the parent, PL5 / PL4 removed, the declaration unclamped, the unguarded send
   { name: 'test-channel-quote-topic', tier: 'fast', why: 'in-process · 809 ms (restated 2026-10-20, was 500 ms) (the real engine over a Lark-shaped scripted adapter + the fake accounts, no vendor call; five patched copies)' }, // lane channel-threads, the QUOTE-vs-TOPIC round (owner 2026-09-28, both rulings "是"): a Lark reply without a thread id is a QUOTE, never a thread — ONE PURE classifier (src/channel-thread.js placeKindOf: plain / quote / topic-root / topic-reply / topic-quote) read by the render (strip / chip / tag), the agent's words ("quotes …"), the engine's placement default + its thread read + its walk (not-a-thread, zero vendor calls); the table over the naive pass's real-shape fixtures through the REAL Lark normalizer + the fake-poll rooms (shot 03); zh 话题 never 线程 over every channels surface (a grep-derived key census + a named non-channel list), ja ONE word スレッド, the i18n check; controls: a chain-is-topic classifier, the pre-fix render pair (the shot reproduced) with each layer alone holding, the engine's own parent rule, the walk without its refusal, planted 线程 / トピック
@@ -2770,25 +2771,30 @@ export function egressOf(file) {
   let text = '';
   const rows = [];
   try { text = fs.readFileSync(file, 'utf8'); } catch { rows.loaded = false; return rows; }
-  const by = new Map();
+  const by = new Map(), unread = new Map();
   let loaded = false;
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     let r = null; try { r = JSON.parse(line); } catch { r = { host: '(an unreadable line)', port: 0 }; }
     if (r && r.sentinel === 'egress-sampler') { loaded = true; continue; }
+    // B-9dd0 (主开发 r1246): a child the reader did NOT follow — counted by reason, never a host row (the row stays as it is) and never silent
+    if (r && typeof r.unread === 'string') { unread.set(r.unread, (unread.get(r.unread) || 0) + 1); continue; }
     const k = `${r.host}:${r.port}`;
     by.set(k, { host: String(r.host), port: Number(r.port) || 0, n: ((by.get(k) || {}).n || 0) + 1 });
   }
   rows.push(...[...by.values()].sort((a, b) => b.n - a.n || a.host.localeCompare(b.host)));
   rows.loaded = loaded;
+  rows.unread = [...unread].map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n || a.reason.localeCompare(b.reason));
   return rows;
 }
 export const egressWords = (rows) => rows.map((r) => `${r.host}:${r.port} ×${r.n}`).join(', ');
+/** the children a row's reader did not follow, said on the row (green or red): «· B-9dd0: 3 children not read (census ×2, shell ×1)» */
+export const egressUnreadTail = (rows) => { const u = (rows && rows.unread) || []; const n = u.reduce((a, x) => a + x.n, 0); return n ? ` · B-9dd0: ${n} child${n === 1 ? '' : 'ren'} not read by the egress reader (${u.map((x) => `${x.reason} ×${x.n}`).join(', ')})` : ''; };
 // the sampler's own spelling (scripts/egress-sampler.cjs LOST_MARK — test-ci-gate §2n holds them equal) and the two rows a
 // result carries when the count itself failed
 export const EGRESS_LOST_MARK = '[egress-sampler] LOST';
 export const EGRESS_UNLOADED = '(the reader did not load)', EGRESS_LOST = '(a host line was lost)';
-export const EGRESS_NOT_WATCHED = 'not watched: a child that is not the running node (Chrome, a shell command, a stand-in) or one given its own node flags or another reader\'s file, a bare DNS ask, UDP, a name ending «.localhost» (taken as the loopback)';
+export const EGRESS_NOT_WATCHED = 'not watched: a child of a census row (its product judges command lines), a child that is not the running node (Chrome, a shell command, a stand-in) or one given its own node flags or another reader\'s file — each counted on the row, a bare DNS ask, UDP, a name ending «.localhost» (taken as the loopback)';
 // ONE private folder per runner process (mkdtemp: never a predictable name another user could hold), removed at its exit
 let EGRESS_DIR = null;
 const egressFileFor = (name, lane) => {
@@ -2849,12 +2855,12 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
         + (unloaded ? ' — its egress reader did not load (B-9dd0: the sampler\'s sentinel line is missing — its sockets were not counted)' : '');
       const egressRows = [...opened, ...(lostN ? [{ host: EGRESS_LOST, port: 0, n: lostN }] : []), ...(unloaded ? [{ host: EGRESS_UNLOADED, port: 0, n: 1 }] : [])];
       if (status === 0 && egressRows.length) {
-        resolve({ ok: false, ms, load, egress: egressRows, full: stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [`\n✗ ${s.name} FAILED (${ms}ms) ${tag} ${ld}${egressNote}`, stdout.split('\n').slice(-40).join('\n'), stderr || ''] });
+        resolve({ ok: false, ms, load, egress: egressRows, ...((opened.unread || []).length ? { unread: opened.unread } : {}), full: stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [`\n✗ ${s.name} FAILED (${ms}ms) ${tag} ${ld}${egressNote}${egressUnreadTail(opened)}`, stdout.split('\n').slice(-40).join('\n'), stderr || ''] });
         return;
       }
       if (status === 0) {
         const sk = skipsOf(stdout, stderr); // B-4829: a SKIP said anywhere in the output is counted on the row, never only the last line (selfSkip: B-479e's whole-suite skip, beside it)
-        resolve({ ok: true, ms, load, selfSkip, ...(sk ? { skips: sk, full: stdout + (stderr ? '\n── stderr ──\n' + stderr : '') } : {}), lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(last || 'ok').slice(0, 80)}${skipTail(sk)}`] });
+        resolve({ ok: true, ms, load, selfSkip, ...((opened.unread || []).length ? { unread: opened.unread } : {}), ...(sk ? { skips: sk, full: stdout + (stderr ? '\n── stderr ──\n' + stderr : '') } : {}), lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(last || 'ok').slice(0, 80)}${skipTail(sk)}${egressUnreadTail(opened)}`] });
         return;
       }
       const r = { status, signal, error };
@@ -2864,7 +2870,7 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       const own = !asked && hr.armed && (() => { try { return fs.statSync(hr.file).mtimeMs >= t - 1000; } catch { return false; } })() ? hr.file : '';
       // B-9dd0 (r321 should 5): a row that FAILED and opened sockets keeps them in its result — its green retry cannot hide them
       resolve({ ok: false, ms, load, ...(opened.length || lostN ? { egress: egressRows } : {}), killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
-        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${egressNote}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
+        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${egressNote}${egressUnreadTail(opened)}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
         stdout.split('\n').slice(-40).join('\n'),
         stderr || ''] });
     };

@@ -17,10 +17,10 @@
 // connects keeps its own function, and is counted once per connect).
 // THE BOX'S OWN ADDRESSES (B-9dd0's remainder, 2026-11-21): an address of one of this box's own interfaces (its LAN or tailnet
 // address — a stand-in of the suite's own listening there) never leaves the box: judged as the loopback, literal or answered.
-// A NODE CHILD IS READ TOO (the same remainder, `installChildren()` below): every node child the process spawns — a scratch hub
-// through startHub, a CLI through execFile / spawnSync — is handed a `--require` of a SHIM beside the egress file in its ARGV
-// (never NODE_OPTIONS, never its env); the shim names the file, so a child given a scrubbed env still writes there, and its own
-// children are read the same way, down the tree. fork() and Worker threads inherit execArgv, as before.
+// A NODE CHILD IS READ TOO — ONLY IN A CARRIED ROW (the same remainder; 主开发 r1246's law below, `installChildren()`): every node
+// child of the running node is handed a `--require` of a SHIM beside the egress file in its ARGV (never NODE_OPTIONS, never its
+// env), and its own children are read the same way, down the tree. A row the census does not name as carried — the rows whose
+// product judges command lines, and any new suite — keeps the reader in its OWN process, and counts every child it does not follow.
 // What it does NOT watch (the runner's red words say it too): a child that is not the RUNNING node by its binary (Chrome, a
 // shell command, a script started by its shebang, another node binary, a stand-in named node), one given its own node flags (a fork's or a Worker's execArgv, the permission model) or
 // another reader's file, a bare DNS ask with no socket (dns.lookup / dns.resolve alone), UDP (dgram), and a name ending
@@ -118,62 +118,124 @@ function install(file = FILE) {
   return true;
 }
 
-// ── A NODE CHILD IS READ TOO (B-9dd0's remainder (1), 主开发 r1134) ───────────────────────────────────────────────────────
-/** THE RUNNING NODE, and only it (the first gate's two reds: a STAND-IN `bin/node` — a shell script that answers `--version` by
- *  its first word — was handed the shim and answered the real node's version): the binary is this process's own node by its
- *  REAL path (an absolute or relative path, or a bare `node` found first on the child's PATH). Another node binary, or a stand-in
- *  named node, is left alone (named). */
+// ── A NODE CHILD IS READ TOO (B-9dd0's remainder (1), 主开发 r1134) — NEVER where the product judges a command line (r1246) ──
+// THE LAW (主开发 r1246, round wl8qjzhxs): THE READER NEVER CHANGES WHAT THE PRODUCT UNDER TEST CAN SEE OF ITS OWN PROCESSES. The
+// shim rides in a child's ARGUMENTS, and the product judges processes by their arguments (/proc/<pid>/cmdline and `ps … args`:
+// process identity, the writer sweep, discovery, the device agent, the mounts, the browser facts …). So in a CENSUS ROW — a suite
+// the tree's own impact scope (ci.mjs affectedSuites) says drives a product file that reads another process's command line
+// — the reader stays in the suite's OWN process: a node child is handed no shim, a fork() that names no execArgv is handed the execArgv it would have with no
+// reader, and each is COUNTED unread. Outside the census no product code reads a command line, and every child of the running node
+// is carried, down the tree. THE LIST IS OF THE ROWS THAT MAY CARRY (scripts/egress-carried-rows.json, the rows the census
+// does NOT name — derived; test-egress-census re-derives it and is red when it drifts): a row it does not name, a new suite
+// included, reads its children not at all — the safe side. NODE_OPTIONS is no road either: the product reads it (agent-env and jobs drop it, job-model composes it).
+// EVERY CHILD THE READER DOES NOT FOLLOW IS COUNTED — an `unread` line in the file, by reason; ci.mjs prints them on the row, green
+// or red, and the suite's own process says them on stderr at its exit: 'census' · 'own-flags' (a fork or a Worker that names its own
+// execArgv) · 'permission' · 'other-file' (its env names another reader's file) · 'unread-on-purpose' (an empty one) · 'other-node'
+// (another node binary, or a stand-in named node) · 'shebang' (a node script started as itself) · 'shell' (a shell command that
+// names node) · 'no-shim' (the shim could not be made). A child that is no node at all (git, Chrome, a shell without node) is no
+// reader's to follow and is not counted.
+const CARRIED_ROWS = (() => { try { return new Set(JSON.parse(fs.readFileSync(path.join(__dirname, 'egress-carried-rows.json'), 'utf8')).carried || []); } catch { return new Set(); } })();
+const SUITE_PROCESS = !globalThis[FILE_OF];   // loaded by the runner's own argv (never by a child's shim)
+const SUITE_NAME = SUITE_PROCESS ? path.basename(String(process.argv[1] || ''), '.mjs') : '';
+const CENSUS_ROW = SUITE_PROCESS && !CARRIED_ROWS.has(SUITE_NAME);   // not named as carried ⇒ a census row (the safe side)
 let execReal = null;
 const realOf = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
-function NODE_BIN(f, { envPath = process.env.PATH, cwd = process.cwd() } = {}) {
+const isNodeName = (s) => /^node(js)?(\.exe)?$/i.test(path.basename(String(s || '')));
+/** WHAT A CHILD'S BINARY IS (remembered per binary, search path and cwd — the round's should: no file checks again at the next
+ *  spawn): 'running' (this process's own node, by its REAL path; a bare `node` first on the child's PATH included), 'other-node'
+ *  (a node-named binary that is not it: another node, or a STAND-IN — the first gate's two reds were stand-in bin/node scripts
+ *  answering `--version` by their first word), 'shebang' (a script whose first line names node), 'other'. */
+const kindCache = new Map();
+function binKind(f, { envPath = process.env.PATH, cwd = process.cwd() } = {}) {
   const s = String(f || '');
-  if (!s) return false;
-  if (s === process.execPath) return true;
-  if (!/^node(js)?$/.test(path.basename(s))) return false;
+  if (!s) return 'other';
+  if (s === process.execPath) return 'running';
+  const key = `${s}\0${s.includes('/') ? cwd : envPath}`;
+  if (kindCache.has(key)) return kindCache.get(key);
   let p = null;
   if (s.includes('/')) p = path.resolve(String(cwd || process.cwd()), s);
   else for (const d of String(envPath || '').split(':')) { if (!d) continue; const c = path.resolve(String(cwd || process.cwd()), d, s); try { fs.accessSync(c, fs.constants.X_OK); p = c; break; } catch { /* next */ } }
-  if (!p) return false;
-  if (execReal === null) execReal = realOf(process.execPath) || process.execPath;
-  return realOf(p) === execReal;
+  let k = isNodeName(s) ? 'other-node' : 'other';
+  if (p) {
+    if (execReal === null) execReal = realOf(process.execPath) || process.execPath;
+    if (realOf(p) === execReal) k = 'running';
+    else if (k === 'other') { try { const fd = fs.openSync(p, 'r'); try { const b = Buffer.alloc(128); const n = fs.readSync(fd, b, 0, 128, 0); if (/^#![^\n]*\bnode\b/.test(b.subarray(0, n).toString('latin1'))) k = 'shebang'; } finally { fs.closeSync(fd); } } catch { /* unreadable: other */ } }
+  }
+  if (kindCache.size >= 1024) kindCache.clear();
+  kindCache.set(key, k);
+  return k;
 }
+const NODE_BIN = (f, o) => binKind(f, o) === 'running';
 const envOfPairs = (pairs, key) => { if (!Array.isArray(pairs)) return undefined; const e = pairs.find((x) => typeof x === 'string' && x.startsWith(key + '=')); return e === undefined ? undefined : e.slice(key.length + 1); };
+const envOfObj = (env, key) => (env && Object.prototype.hasOwnProperty.call(env, key) ? String(env[key]) : undefined);
+const SHELLS = /^(sh|bash|dash|zsh|ksh|ash)$/;
+const NODE_IN_SHELL = /(^|[\s;&|(/])node(js)?(\s|$)/;   // a shell command that names node: the reader cannot follow it
+const isReaderArg = (a, shim) => a === __filename || (shim && a === shim) || /\.child\.cjs$/.test(String(a)) || /(^|\/)egress-sampler\.cjs$/.test(String(a));
 /** PURE: a node child's argv (`args` = [the binary, ...], as ChildProcess.spawn holds it) → the same argv with `--require <shim>`
- *  right after the binary, or null: LEFT ALONE when it already carries a reader (this file or the shim), runs under the
- *  permission model (`--permission`), or its env names ANOTHER egress file or an EMPTY one (`envFile`: what the child's env
- *  holds for KEY, undefined = nothing) — a runner that reads it itself, or runs it unread on purpose (scripts/ci.mjs's
- *  `egress: false`). */
+ *  right after the binary, or null (already carrying a reader, the permission model, another or an empty egress file, no file). */
 function carry(args, { file, shim, envFile, self = __filename } = {}) {
   if (!Array.isArray(args) || !args.length || !file || !shim) return null;
   if (envFile !== undefined && envFile !== file) return null;
   if (args.some((a) => a === self || a === shim || /^--(experimental-)?permission$/.test(String(a)))) return null;
   return [args[0], '--require', shim, ...args.slice(1)];
 }
-const envFileOfPairs = (pairs) => { if (!Array.isArray(pairs)) return undefined; const e = pairs.find((x) => typeof x === 'string' && x.startsWith(KEY + '=')); return e === undefined ? undefined : e.slice(KEY.length + 1); };
-const envFileOfObj = (env) => (env && Object.prototype.hasOwnProperty.call(env, KEY) ? String(env[KEY]) : undefined);
-/** The shim beside the egress file (made once, 0600): it names the file and loads this reader. It lives as long as the file's
- *  private folder; it sets no variable in the child's env. */
+/** PURE: what the reader does with one child → { carry: true } | { unread: <reason> } | {} (no node child: nothing to follow, or one
+ *  already carrying a reader). `kind` = binKind's; `args` = its argv with the binary first; `envFile` = what its env names for KEY. */
+function childVerdict({ kind, args = [], file, envFile, census = false, self = __filename } = {}) {
+  if (kind === 'other-node' || kind === 'shebang') return { unread: kind };
+  if (kind !== 'running') {
+    const b = path.basename(String(args[0] || ''));
+    const i = args.indexOf('-c');
+    return SHELLS.test(b) && i > 0 && NODE_IN_SHELL.test(String(args[i + 1] || '')) ? { unread: 'shell' } : {};
+  }
+  if (args.some((a) => isReaderArg(a) || a === self)) return {};
+  if (envFile !== undefined && envFile !== file) return { unread: envFile === '' ? 'unread-on-purpose' : 'other-file' };
+  if (args.some((a) => /^--(experimental-)?permission$/.test(String(a)))) return { unread: 'permission' };
+  if (census) return { unread: 'census' };
+  return { carry: true };
+}
+/** argv without the reader's own `--require <this file | a shim>` (a census row's fork gets what it would have with no reader) */
+function withoutReader(execArgv) {
+  const out = [];
+  for (let i = 0; i < execArgv.length; i++) {
+    const a = String(execArgv[i]);
+    if ((a === '--require' || a === '-r') && isReaderArg(execArgv[i + 1])) { i++; continue; }
+    if (/^--require=/.test(a) && isReaderArg(a.slice('--require='.length))) continue;
+    out.push(execArgv[i]);
+  }
+  return out;
+}
+const sayUnread = (file, reason, bin) => {
+  try { fs.appendFileSync(file, JSON.stringify({ unread: reason, bin: path.basename(String(bin || '')).slice(0, 80), pid: process.pid }) + '\n'); }
+  catch (e) { lost++; try { process.stderr.write(`${LOST_MARK} an unread line could not be written (${(e && e.code) || e}): ${reason}\n`); } catch { /* the suite is ending */ } }
+};
+/** The shim beside the egress file (made once, 0600, remembered): it names the file and loads this reader. It lives as long as the
+ *  file's private folder (a child started after its runner ended would not start: only a leftover can); no env variable is set. */
+let shimMade = null;
 function shimFor(file) {
+  if (shimMade) return shimMade;
   const p = `${file}.child.cjs`;
   try {
     fs.writeFileSync(p, `'use strict';\n// B-9dd0: a node child of a suite, read by the egress reader — it names the suite's file\nglobalThis[Symbol.for('vibespace.egress.file')] = ${JSON.stringify(file)};\nrequire(${JSON.stringify(__filename)});\n`, { flag: 'wx', mode: 0o600 });
   } catch (e) { if (!e || e.code !== 'EEXIST') return null; }
-  return p;
+  return (shimMade = p);
 }
-/** Every node child this process spawns is handed the shim in its ARGV: the async road (spawn / execFile / exec's node — every
- *  one goes through ChildProcess.prototype.spawn) and the sync one (spawnSync / execFileSync). fork() is left alone (it inherits
- *  execArgv, or keeps the node flags it names on purpose). */
-function installChildren(file = FILE) {
+/** Every child this process spawns is judged once (childVerdict): the async road (spawn / execFile / exec — every one goes through
+ *  ChildProcess.prototype.spawn), the sync one (spawnSync / execFileSync), fork() and worker_threads' Worker. */
+function installChildren(file = FILE, { census = CENSUS_ROW } = {}) {
   const cp = require('child_process');
   const CP = cp.ChildProcess && cp.ChildProcess.prototype;
   if (!file || !CP || typeof CP.spawn !== 'function' || CP.spawn.__vsEgress) return false;
   let forking = 0;
+  const judge = (bin, args, envFile, envPath, cwd) => childVerdict({ kind: binKind(bin, { envPath, cwd }), args, file, envFile, census });
   const origSpawn = CP.spawn;
   const spawnW = function spawn(options) {
     try {
-      if (!forking && options && NODE_BIN(options.file, { envPath: envOfPairs(options.envPairs, 'PATH'), cwd: options.cwd })) {
-        const shim = shimFor(file), a = shim && carry(options.args, { file, shim, envFile: envFileOfPairs(options.envPairs) });
-        if (a) options = { ...options, args: a };
+      if (!forking && options) {
+        const ef = envOfPairs(options.envPairs, KEY);
+        const v = judge(options.file, options.args || [], ef, envOfPairs(options.envPairs, 'PATH'), options.cwd);
+        if (v.carry) { const shim = shimFor(file), a = shim && carry(options.args, { file, shim, envFile: ef }); if (a) options = { ...options, args: a }; else sayUnread(file, 'no-shim', options.file); }
+        else if (v.unread) sayUnread(file, v.unread, options.file);
       }
     } catch { /* never the suite's spawn */ }
     return origSpawn.call(this, options);
@@ -181,25 +243,63 @@ function installChildren(file = FILE) {
   spawnW.__vsEgress = true;
   CP.spawn = spawnW;
   const origFork = cp.fork;
-  cp.fork = function fork(...a) { forking++; try { return origFork.apply(this, a); } finally { forking--; } };
+  cp.fork = function fork(modulePath, args, options) {
+    forking++;
+    try {
+      let a = args, o = options;
+      if (a != null && !Array.isArray(a)) { o = a; a = undefined; }
+      const named = o && Array.isArray(o.execArgv);
+      try {
+        if (named && !o.execArgv.some((x) => isReaderArg(x))) sayUnread(file, 'own-flags', 'fork');
+        else if (!named && census) { sayUnread(file, 'census', 'fork'); return origFork.call(this, modulePath, a || [], { ...(o || {}), execArgv: withoutReader(process.execArgv) }); }
+      } catch { /* never the suite's fork */ }
+      return origFork.apply(this, arguments);
+    } finally { forking--; }
+  };
   for (const name of ['spawnSync', 'execFileSync']) {
     const orig = cp[name];
     cp[name] = function (f, args, options) {
       try {
-        const opts0 = Array.isArray(args) || args == null ? options : args;
-        if (NODE_BIN(f, { envPath: ((opts0 && opts0.env) || process.env).PATH, cwd: opts0 && opts0.cwd })) {
-          const list = Array.isArray(args) ? args : [], opts = opts0;
-          const shim = shimFor(file), a = shim && carry([f, ...list], { file, shim, envFile: envFileOfObj((opts && opts.env) || process.env) });
-          if (a) return orig.call(this, f, a.slice(1), opts);
-        }
+        const opts = Array.isArray(args) || args == null ? options : args, list = Array.isArray(args) ? args : [];
+        const env = (opts && opts.env) || process.env, ef = envOfObj(env, KEY);
+        const v = judge(f, [f, ...list], ef, env.PATH, opts && opts.cwd);
+        if (v.carry) { const shim = shimFor(file), a = shim && carry([f, ...list], { file, shim, envFile: ef }); if (a) return orig.call(this, f, a.slice(1), opts); sayUnread(file, 'no-shim', f); }
+        else if (v.unread) sayUnread(file, v.unread, f);
       } catch { /* never the suite's spawn */ }
       return orig.apply(this, arguments);
     };
   }
+  // execSync reaches node's own spawnSync, past both exports above: its shell command is judged here, once
+  const origExecSync = cp.execSync;
+  cp.execSync = function execSync(command) {
+    try { if (NODE_IN_SHELL.test(String(command || ''))) sayUnread(file, 'shell', 'execSync'); } catch { /* never the suite's */ }
+    return origExecSync.apply(this, arguments);
+  };
+  try {
+    const wt = require('worker_threads'), W0 = wt.Worker;
+    if (typeof W0 === 'function' && !W0.__vsEgress) {
+      const W = class Worker extends W0 { constructor(f, o) { try { if (o && Array.isArray(o.execArgv) && !o.execArgv.some((x) => isReaderArg(x))) sayUnread(file, 'own-flags', 'Worker'); } catch { /* never the suite's */ } super(f, o); } };
+      W.__vsEgress = true;
+      wt.Worker = W;
+    }
+  } catch { /* no worker_threads */ }
   try { require('module').syncBuiltinESMExports(); } catch { /* an older node: CJS callers only */ }
   return true;
+}
+/** the suite's own process says, at its exit, every child the reader did not follow (all processes' lines: one count per reason) */
+function sayUnreadAtExit(file = FILE) {
+  if (!SUITE_PROCESS || !file) return;
+  process.on('exit', () => {
+    try {
+      const by = new Map();
+      for (const l of fs.readFileSync(file, 'utf8').split('\n')) { if (!l.includes('"unread"')) continue; try { const r = JSON.parse(l); if (r && r.unread) by.set(r.unread, (by.get(r.unread) || 0) + 1); } catch { /* not ours */ } }
+      const n = [...by.values()].reduce((x, y) => x + y, 0);
+      if (n) process.stderr.write(`[egress-sampler] ${n} child${n === 1 ? '' : 'ren'} not read by the egress reader (B-9dd0, each named): ${[...by].map(([k, v]) => `${k} ×${v}`).join(', ')}${CENSUS_ROW ? ' — a census row: its product judges command lines, so its children carry no reader' : ''}\n`);
+    } catch { /* the file is gone: the runner says it */ }
+  });
 }
 
 install();
 installChildren();
-module.exports = { install, installChildren, carry, NODE_BIN, LOOPBACK, LOCAL, target, verdict, answered, LOST_MARK };
+sayUnreadAtExit();
+module.exports = { install, installChildren, carry, childVerdict, withoutReader, binKind, NODE_BIN, LOOPBACK, LOCAL, target, verdict, answered, LOST_MARK, CENSUS_ROW, SUITE_NAME };

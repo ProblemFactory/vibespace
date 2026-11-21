@@ -25,7 +25,7 @@ import crypto from 'node:crypto';
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, endRootedProcesses, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET, chromeBelt, BELT_REACH_JS } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, endRootedProcesses, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET, chromeBelt, chromeReach } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -141,11 +141,13 @@ try {
   await boot('files', { VIBESPACE_TLS_CERT: LEAF.c, VIBESPACE_TLS_KEY: LEAF.k }, path.join(fx, 'data-files'));
   check('the boot banner names both addresses', await waitLog(new RegExp(`running at http://localhost:${PORT} and https://${IP.replace(/\./g, '\\.')}:${PORT}`)), log().split('\n').find((l) => /running at/.test(l)));
   const HTTPS = `https://${IP}:${PORT}`, HTTP = `http://${IP}:${PORT}`;
-  // B-9dd0's remainder (2): THE BELT, proved from the blank page Chrome opened on (no app page yet: the app's report-only CSP
-  // would report the probe's own fetches) — past the loopback and the box's own address nothing answers; the hub's page at the
-  // box's LAN address loads next (the leg after)
-  const reach = await evalJs(BELT_REACH_JS).catch((e) => [String(e && e.message)]);
-  check('B-9dd0: Chrome\'s belt — a vendor\'s name and a TEST-NET address are each REFUSED (a dead proxy, a resolver that finds no name); the box\'s own address stays reachable (the next leg loads the hub there)', Array.isArray(reach) && reach.length === 2 && reach.every((x) => / refused$/.test(x)), reach);
+  // B-9dd0's remainder (2): THE BELT and its CONTROL (r1246), each a Chrome of its own on a blank page: with the belt the box's own
+  // NAME, a vendor's name and a TEST-NET address are each refused; with NO belt the own name is reached (the leg can fail)
+  const beltR = await chromeReach(CHROME, { args: chromeBelt([IP]), dir: path.join(chromeDir, 'belt') });
+  const bareR = await chromeReach(CHROME, { dir: path.join(chromeDir, 'bare') });
+  check('B-9dd0: Chrome\'s belt — the box\'s own NAME (a listener of this suite), a vendor\'s name and a TEST-NET address are each REFUSED (a dead proxy, a resolver that finds no name)', beltR.own === 'refused' && beltR.vendor === 'refused' && beltR.testnet === 'refused', beltR);
+  if (bareR.own === 'reached') check('CONTROL: with NO belt the box\'s own name is REACHED — the belt leg above can fail', true, bareR);
+  else console.log(`  ⊘ SKIP the belt's CONTROL: with no belt this box did not reach its own name (${JSON.stringify(bareR)}) — the belt leg is not shown discriminating here`);
   await go(HTTPS + '/login');
   check('the https page loads (Chrome trusts exactly the test leaf)', await waitFor(`location.protocol === 'https:' && document.readyState === 'complete'`, 15000), await evalJs('location.href').catch(() => null));
   check('sign-in over https', (await signIn()) === 200);

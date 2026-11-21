@@ -43,7 +43,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, CHROME_QUIET, chromeBelt, BELT_REACH_JS } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, CHROME_QUIET, chromeBelt, chromeReach } from './scratch.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 
 const require = createRequire(import.meta.url);
@@ -146,9 +146,15 @@ await cdp('Runtime.enable'); await cdp('Page.enable');
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'zh'); localStorage.setItem('vibespace.uiScale', '100'); } catch {}" });
 await cdp('Emulation.setDeviceMetricsOverride', { width: 1000, height: 600, deviceScaleFactor: 1, mobile: false });
-// B-9dd0's remainder (2): THE BELT, proved from the blank page Chrome opened on (no app page yet: the app's report-only CSP
-// would report the probe's own fetches) — past the loopback nothing answers; the hub's page on the loopback loads next
-{ const reach = await evalJs(BELT_REACH_JS).catch((e) => [String(e && e.message)]); check('B-9dd0: Chrome\'s belt — a vendor\'s name and a TEST-NET address are each REFUSED (a dead proxy, a resolver that finds no name)', Array.isArray(reach) && reach.length === 2 && reach.every((x) => / refused$/.test(x)), reach); }
+// B-9dd0's remainder (2): THE BELT and its CONTROL (r1246), each a Chrome of its own on a blank page: with the belt the box's own
+// NAME, a vendor's name and a TEST-NET address are each refused; with NO belt the own name is reached (the leg can fail)
+{
+  const beltR = await chromeReach(CHROME, { args: chromeBelt(), env: { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun, DISPLAY: '' }, dir: path.join(ROOT, 'chrome-belt') });
+  const bareR = await chromeReach(CHROME, { env: { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun, DISPLAY: '' }, dir: path.join(ROOT, 'chrome-bare') });
+  check('B-9dd0: Chrome\'s belt — the box\'s own NAME (a listener of this suite), a vendor\'s name and a TEST-NET address are each REFUSED (a dead proxy, a resolver that finds no name)', beltR.own === 'refused' && beltR.vendor === 'refused' && beltR.testnet === 'refused', beltR);
+  if (bareR.own === 'reached') check('CONTROL: with NO belt the box\'s own name is REACHED — the belt leg above can fail', true, bareR);
+  else console.log(`  ⊘ SKIP the belt's CONTROL: with no belt this box did not reach its own name (${JSON.stringify(bareR)}) — the belt leg is not shown discriminating here`);
+}
 await cdp('Page.navigate', { url: origin + '/' });
 await evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 40000) return rej(new Error("no app after 40s")); setTimeout(w, 200); })(); })');
 await waitFor(`!document.getElementById('loading-screen')`, 30000);
