@@ -264,7 +264,7 @@ const missing = await dm.transcriptOp('gapInfo', { backend: 'claude', sessionId:
 ok(missing.hasFile === false && missing.gap === null, 'missing transcript answers honestly (hasFile:false), not an error');
 
 // B-9a2e part 1 — THE HUB'S ROWS ON THE PAIRED MACHINE. The hub's read (its record installed as the PURE module's source) and the
-// REAL agent's read handed {id: rows} by THE ONE HELPER (sent-provenance sentFor; the agent's hand → release) are byte-identical:
+// REAL agent's read handed {id: rows} by THE ONE HELPER (sent-provenance sentFor; held as the op's own table, holdFor) are byte-identical:
 // VibeSpace's continue keeps its origin on both. The parity of this suite is the law: the agent runs the same shared module.
 {
   const SP = require(REPO + '/src/sent-provenance.js');
@@ -301,6 +301,7 @@ ok(missing.hasFile === false && missing.gap === null, 'missing transcript answer
     if (viaRoad !== hubY2) console.error('    diff ' + firstDiff(hubY2, viaRoad));
     await sentParity('claude page', ref(SR.C, 'claude'), 'page', {});
     await sentParity('claude turnmap', ref(SR.C, 'claude'), 'turnmap', {});
+    await sentParity('claude fullTurnmap', ref(SR.C, 'claude'), 'fullTurnmap', {});
     const bareC2 = await bareOf(ref(SR.C2, 'claude'), 'page');
     ok(!bareC2.includes('auto-resume') && bareC2.includes('"typed":true'), 'B-9a2e CONTROL (claude): the op without the rows — the continue reads as typed by the person');
   } finally { SP.setSource(null); }

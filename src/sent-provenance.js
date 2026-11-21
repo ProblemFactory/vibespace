@@ -63,46 +63,40 @@ let source = null, scoped = null;
 const setSource = (fn) => { source = typeof fn === 'function' ? fn : null; };
 // THE HANDED ROWS (B-9a2e part 1 — a stopped conversation read ON ITS PAIRED MACHINE): the device has no record of its own. The hub
 // hands each transcript op {id: rows} — the rows of every id the read may consult that the hub can name, built by ONE helper
-// (sentFor, below; src/transcript-service.js tryDevice sends it to an agent naming 'sent-rows') — and the device keeps them HERE for
-// THAT OP ALONE (hand → release, src/agentd/agentd.js): ops run concurrently, so each id's rows are counted by the ops holding them
-// and dropped when the last one ends — a later op never reads rows an earlier one was handed. Checked row by row, bounded.
+// (sentFor, below; src/transcript-service.js tryDevice sends it to an agent naming 'sent-rows') — and the device keeps them in THAT
+// OP'S OWN TABLE (holdFor; round ww0zvz7tw's third small): the agent runs the op inside an async scope whose getter it installs here
+// (setScope, src/agentd/agentd.js), so two ops at once — two hubs handing one id — never read each other's rows, and a table dies
+// with its op. An id the read consulted with nothing handed (a fork the hub could not name) is noted in that op's table (`unhanded`):
+// the op's ack names them and the hub may hand them in ONE more ask. Checked row by row, bounded.
 const ID_RE = /^[A-Za-z0-9_.:-]{1,128}$/;   // a conversation id (the hub's store keys by the same shape)
 const HAND_IDS_MAX = 16, HAND_ROWS_MAX = 100;
 const okRow = (r) => !!r && Number.isFinite(r.at) && Number.isInteger(r.n) && r.n > 0 && typeof r.h === 'string' && /^[0-9a-f]{16}$/.test(r.h) && KINDS.includes(r.k);
-const handed = new Map();   // id → { rows, refs } — refs = the ops holding it
-/** An op's `params.sent` ({id: rows}) kept for that op's reads on this side → release() (call once the op ended; a second call does nothing). */
-function hand(sent) {
-  const ids = [];
+let scopeOf = null;
+/** THE DEVICE: the getter of the running op's table (holdFor's) — an AsyncLocalStorage's getStore. */
+const setScope = (fn) => { scopeOf = typeof fn === 'function' ? fn : null; };
+/** An op's `params.sent` ({id: rows}) as THAT op's own table → { rows: Map id → rows, unhanded: Set of ids read with nothing handed }. */
+function holdFor(sent) {
+  const rows = new Map(), unhanded = new Set();
   if (sent && typeof sent === 'object' && !Array.isArray(sent)) {
-    for (const [id, rows] of Object.entries(sent)) {
-      if (ids.length >= HAND_IDS_MAX) break;
-      if (!ID_RE.test(id) || !Array.isArray(rows)) continue;
-      const ok = rows.filter(okRow).slice(-HAND_ROWS_MAX).map((r) => ({ at: r.at, n: r.n, h: r.h, k: r.k }));
-      if (!ok.length) continue;
-      const e = handed.get(id);
-      if (e) { e.rows = ok; e.refs++; } else handed.set(id, { rows: ok, refs: 1 });   // the newest hand's rows (the hub's newest)
-      ids.push(id);
+    for (const [id, list] of Object.entries(sent)) {
+      if (rows.size >= HAND_IDS_MAX) break;
+      if (!ID_RE.test(id) || !Array.isArray(list)) continue;
+      const ok = list.filter(okRow).slice(-HAND_ROWS_MAX).map((r) => ({ at: r.at, n: r.n, h: r.h, k: r.k }));
+      if (ok.length) rows.set(id, ok);
     }
   }
-  let done = false;
-  return () => { if (done) return; done = true; for (const id of ids) { const e = handed.get(id); if (e && --e.refs <= 0) handed.delete(id); } };
+  return { rows, unhanded };
 }
-const handedOf = (conv) => { const e = typeof conv === 'string' ? handed.get(conv) : null; if (e) return e.rows; noteUnhanded(conv); return null; };
-// THE IDS READ WITH NOTHING HANDED (the device's side of the parity): a read may consult an id the hub could not name (a fork made
-// outside VibeSpace, or before the links were kept). The device notes each such id; an op's answer names those noted since it began
-// (unhandedSince(mark)) and the hub hands the ones it holds rows for in ONE more ask (src/transcript-service.js tryDevice). An op
-// running beside it may add an id of its own — the hub then hands rows its read never consults: never a different answer.
-const UNHANDED_MAX = 256;
-const unhanded = new Map();   // id → the note's sequence number (the newest last)
-let unhandedSeq = 0;
-function noteUnhanded(conv) {
-  if (typeof conv !== 'string' || !ID_RE.test(conv)) return;
-  unhanded.delete(conv); unhanded.set(conv, ++unhandedSeq);
-  while (unhanded.size > UNHANDED_MAX) unhanded.delete(unhanded.keys().next().value);
+/** The running op's rows for `conv` (null outside an op, or none handed — then the id is noted in the op's table). */
+function handedOf(conv) {
+  let t = null;
+  try { t = scopeOf ? scopeOf() : null; } catch { t = null; }
+  if (!t || !(t.rows instanceof Map) || !(t.unhanded instanceof Set) || typeof conv !== 'string') return null;
+  const r = t.rows.get(conv);
+  if (r) return r;
+  if (ID_RE.test(conv) && t.unhanded.size < HAND_IDS_MAX) t.unhanded.add(conv);
+  return null;
 }
-/** The mark an op takes when it begins → unhandedSince(mark): the ids read with nothing handed since (≤ HAND_IDS_MAX, the newest). */
-const unhandedMark = () => unhandedSeq;
-const unhandedSince = (mark) => [...unhanded].filter(([, n]) => n > mark).map(([id]) => id).slice(-HAND_IDS_MAX);
 function rowsFor(conv) {
   if (scoped) return scoped;
   if (typeof conv !== 'string' || !conv) return null;
@@ -136,6 +130,19 @@ function sentFor(conv, from = []) {
   for (const id of idsFor(conv, from)) { const rows = rowsOf(id); if (Array.isArray(rows) && rows.length) out[id] = rows.slice(-HAND_ROWS_MAX); }
   return out;
 }
+// THE ONE MORE ASK's GATE (the hub side, round ww0zvz7tw's first small): an id the agent names as read with nothing handed is handed
+// only if the hub links it to THIS conversation (idsFor), or never noted it for a conversation of ANOTHER machine (the hub's store
+// installs where each conversation's sends were noted — setPlaces: '' = this hub, a machine id, undefined = never noted) — an agent's
+// mistake (a bad parse of a parent id) never fetches another machine's conversation's rows.
+let places = null;
+const setPlaces = (fn) => { places = typeof fn === 'function' ? fn : null; };
+function mayHandMore(id, conv, host) {
+  if (typeof id !== 'string' || !ID_RE.test(id)) return false;
+  if (idsFor(conv).includes(id)) return true;
+  let p;
+  try { p = places ? places(id) : undefined; } catch { p = undefined; }
+  return p === undefined || p === null || p === String(host || '');
+}
 /** Run `fn` with `rows` as the ONLY rows (a worker's one conversation); restored after, sync or async. */
 function withRows(rows, fn) {
   const prev = scoped;
@@ -149,4 +156,4 @@ function withRows(rows, fn) {
 /** The rows' signature (a scan's cache key): what changes when a row is added or leaves. */
 const sigOf = (rows) => (Array.isArray(rows) && rows.length ? `${rows.length}:${rows[rows.length - 1].at}:${rows[0].at}` : '');
 
-module.exports = { KINDS, WINDOW_MS, SKEW_MS, ID_RE, HAND_IDS_MAX, HAND_ROWS_MAX, fold, digestOf, rowOf, okRow, matchKind, setSource, setLinks, rowsOf, kindFor, withRows, sigOf, hand, idsFor, sentFor, unhandedMark, unhandedSince };
+module.exports = { KINDS, WINDOW_MS, SKEW_MS, ID_RE, HAND_IDS_MAX, HAND_ROWS_MAX, fold, digestOf, rowOf, okRow, matchKind, setSource, setLinks, setPlaces, setScope, rowsOf, kindFor, withRows, sigOf, holdFor, idsFor, sentFor, mayHandMore };

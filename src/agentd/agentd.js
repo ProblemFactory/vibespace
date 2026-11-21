@@ -203,6 +203,13 @@ const SO = require('./../sealed-orders.js'); // (lane pool-provider-latents, q-0
 // here: the daemon serves TRANSCRIPT truth; the server merges its own stdout
 // buffer overlay (the 2.74.0 merge) until the session brain moves.
 let _transcriptSvc = null;
+// B-9a2e: each transcript op's own table of the rows the hub handed — an async scope (node's AsyncLocalStorage), installed once as
+// the shared module's getter, so the op's reads find its table and no other op's
+let _sentScope = null;
+function sentScope() {
+  if (!_sentScope) { _sentScope = new (require('async_hooks').AsyncLocalStorage)(); require('./../sent-provenance.js').setScope(() => _sentScope.getStore()); }
+  return _sentScope;
+}
 function getTranscriptService() {
   if (_transcriptSvc) return _transcriptSvc;
   const { createTranscriptService } = require('./../transcript-service.js');
@@ -2438,47 +2445,46 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       if (msg.op === 'transcript-op') {
         (async () => {
           const rid = msg.id;
-          let release = () => { };
           try {
             const svc = getTranscriptService();
             const m = String(msg.method || '');
             const ref = { backend: msg.ref?.backend, sessionId: msg.ref?.sessionId, cwd: msg.ref?.cwd };
-            // B-9a2e part 1: what VibeSpace sent ({id: rows}, the hub's record) held for THIS op's reads by the shared module — the
-            // person's own rows keep their origin here as on the hub; released when the read ends (a later op never reads them).
-            // The ack names the ids the read consulted with nothing handed (`unhanded`, an op that carried `sent` only): the hub
-            // hands the ones it holds rows for in one more ask
-            const SPd = require('../sent-provenance.js'), sentMark = SPd.unhandedMark();
-            release = SPd.hand(msg.params?.sent);
+            // B-9a2e part 1: what VibeSpace sent ({id: rows}, the hub's record) as THIS op's own table, its reads run inside the
+            // op's async scope (sentScope) so the shared module finds it there and nowhere else — two ops at once (two hubs) never
+            // share one; the table dies with the op. The ack names the ids the read consulted with nothing handed (`unhanded`, an
+            // op that carried `sent` only): the hub may hand them in one more ask
+            const held = require('../sent-provenance.js').holdFor(msg.params?.sent);
             let result;
-            if (m === 'page') result = await svc.page(ref, msg.params || {});
-            else if (m === 'turnmap') result = await svc.turnmap(ref);
-            else if (m === 'searchIndexed') result = await svc.searchIndexed(ref, String(msg.params?.q || ''));
-            else if (m === 'status') result = await svc.status(ref);
-            else if (m === 'taskState') result = await svc.taskState(ref);
-            else if (m === 'gapInfo') { const g = await svc.gapInfo(ref); result = { gap: g.gap, hasFile: !!g.fp }; }
-            else if (m === 'gapSlab') {
-              const g = await svc.gapInfo(ref);
-              if (!g.fp) result = { messages: [] };
-              else result = { messages: await svc.gapSlab(ref, g.fp, Number(msg.params?.fromLine) || 0, Number(msg.params?.toLine) || 0) };
-            }
-            else if (m === 'searchFull') {
-              const g = await svc.gapInfo(ref);
-              // AWAIT: searchFull became async when the seek family switched
-              // (2.293.0) — an un-awaited Promise serializes as `{}` and the
-              // parity suite caught exactly that. Any service method that
-              // gains async-ness must be re-checked at THIS call site.
-              result = g.fp ? await svc.searchFull(ref, g.fp, String(msg.params?.q || '')) : { matches: [], truncated: false };
-            }
-            else if (m === 'fullTurnmap') {
-              const g = await svc.gapInfo(ref);
-              result = { turns: g.fp ? await svc.fullTurnmap(ref, g.fp) : [], ...(g.gap || {}) };
-            }
-            // lane chat-attachments-persist (the cut): a picture read from the record it came in, by the SAME reader the hub
-            // runs (src/transcript-picture.js); the hub asks only an agent whose hello-ack names 'transcript-picture'
-            else if (m === 'picture') result = await svc.pictureHere(ref, { agent: msg.params?.agent || null, key: String(msg.params?.key || ''), n: Number(msg.params?.n) });
-            else throw new Error('unknown transcript method: ' + m);
-            release();
-            const unhanded = msg.params && msg.params.sent ? SPd.unhandedSince(sentMark) : [];
+            await sentScope().run(held, async () => {
+              if (m === 'page') result = await svc.page(ref, msg.params || {});
+              else if (m === 'turnmap') result = await svc.turnmap(ref);
+              else if (m === 'searchIndexed') result = await svc.searchIndexed(ref, String(msg.params?.q || ''));
+              else if (m === 'status') result = await svc.status(ref);
+              else if (m === 'taskState') result = await svc.taskState(ref);
+              else if (m === 'gapInfo') { const g = await svc.gapInfo(ref); result = { gap: g.gap, hasFile: !!g.fp }; }
+              else if (m === 'gapSlab') {
+                const g = await svc.gapInfo(ref);
+                if (!g.fp) result = { messages: [] };
+                else result = { messages: await svc.gapSlab(ref, g.fp, Number(msg.params?.fromLine) || 0, Number(msg.params?.toLine) || 0) };
+              }
+              else if (m === 'searchFull') {
+                const g = await svc.gapInfo(ref);
+                // AWAIT: searchFull became async when the seek family switched
+                // (2.293.0) — an un-awaited Promise serializes as `{}` and the
+                // parity suite caught exactly that. Any service method that
+                // gains async-ness must be re-checked at THIS call site.
+                result = g.fp ? await svc.searchFull(ref, g.fp, String(msg.params?.q || '')) : { matches: [], truncated: false };
+              }
+              else if (m === 'fullTurnmap') {
+                const g = await svc.gapInfo(ref);
+                result = { turns: g.fp ? await svc.fullTurnmap(ref, g.fp) : [], ...(g.gap || {}) };
+              }
+              // lane chat-attachments-persist (the cut): a picture read from the record it came in, by the SAME reader the hub
+              // runs (src/transcript-picture.js); the hub asks only an agent whose hello-ack names 'transcript-picture'
+              else if (m === 'picture') result = await svc.pictureHere(ref, { agent: msg.params?.agent || null, key: String(msg.params?.key || ''), n: Number(msg.params?.n) });
+              else throw new Error('unknown transcript method: ' + m);
+            });
+            const unhanded = msg.params && msg.params.sent ? [...held.unhanded] : [];
             const buf = Buffer.from(JSON.stringify(result), 'utf-8');
             mux.control({ op: 'fs-result', id: rid, size: buf.length, sending: buf.length, ...(unhanded.length ? { unhanded } : {}) });
             let sent = 0;
@@ -2491,7 +2497,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               else await new Promise((r2) => setImmediate(r2));
             }
             mux.control({ op: 'fs-done', id: rid, chan: msg.chan, sent });
-          } catch (e) { release(); mux.control({ op: 'fs-result', id: msg.id, error: e.message }); }
+          } catch (e) { mux.control({ op: 'fs-result', id: msg.id, error: e.message }); }
         })();
         return;
       }
