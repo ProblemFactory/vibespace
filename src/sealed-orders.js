@@ -90,4 +90,16 @@ function reportOf(text) {
   }
   return { events, torn };
 }
-module.exports = { providerAware, recordedProviderOf, deviceFallback, orderProviderFields, reportOf };
+// B-5278 unit 2, the last piece: THE POOL's REPORT IS BOUNDED AT ITS WRITE — at most POOL_LOG_EVENTS_MAX records and
+// POOL_LOG_BYTES_MAX bytes; a record past it is not written but counted (the agent's pool-orders-dropped, said with the report)
+const POOL_LOG_EVENTS_MAX = 2000, POOL_LOG_BYTES_MAX = 1024 * 1024;
+/** PURE: may `line` (one record, its newline included) join the report `text` (null: a report past its bound)? → { ok, lead } —
+ *  `lead` is the newline a torn last line needs, so the record is never glued to it */
+function appendVerdict(text, line) {
+  if (text == null) return { ok: false, lead: '' };
+  const t = String(text), n = t.split('\n').filter(Boolean).length, lead = t.length && !t.endsWith('\n') ? '\n' : '';
+  if (n >= POOL_LOG_EVENTS_MAX || Buffer.byteLength(t) + Buffer.byteLength(lead + String(line)) > POOL_LOG_BYTES_MAX) return { ok: false, lead };
+  return { ok: true, lead };
+}
+
+module.exports = { providerAware, recordedProviderOf, deviceFallback, orderProviderFields, reportOf, POOL_LOG_EVENTS_MAX, POOL_LOG_BYTES_MAX, appendVerdict };

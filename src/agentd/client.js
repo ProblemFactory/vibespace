@@ -847,7 +847,7 @@ class DeviceManager {
       conn.pending.set(id, (m, bytes) => {
         // lane lg-remote-hardening (B-7f0b D8): an answer over its op's cap (src/agentd/answer-caps.js — the largest its own code
         // can make) is refused BY NAME, the link kept — a runaway or malformed device never hands its caller more than that
-        const cap = AC.capOf(payload.op);
+        const cap = AC.capOf(payload.op, conn.info && conn.info.capabilities);   // B-5278: the lowered row for an agent saying producer-bounds
         if (Number(bytes) > cap) {
           if (line) this._act(payload, { ok: false, code: 'answer-too-large', ms: Date.now() - t0, ...askFacts(facts) });
           return reject(Object.assign(new Error(`${this._machineName() || 'the machine'}: its answer to ${payload.op} is ${AC.sizeOf(bytes)} — over the ${AC.sizeOf(cap)} this op may answer; refused (answer-too-large)`), { code: 'answer-too-large', op: payload.op, bytes: Number(bytes), cap, params: { op: payload.op, size: AC.sizeOf(bytes), cap: AC.sizeOf(cap) } }));
@@ -1261,6 +1261,7 @@ class DeviceManager {
     if (!conn.info?.capabilities?.includes?.('pool-orders')) throw new Error('daemon lacks pool-orders (capabilities gate)');
     const r = await this._request({ op: 'pool-orders', orders, timeoutMs: 15000, by });
     if (r?.error) throw new Error(r.error);
+    if (Number(r?.eventsDropped) > 0 || r?.eventsCut) this._saidLeftOnce('pool', `the pool's report ${r.eventsCut ? 'was read to its bound only' : ''}${r.eventsCut && Number(r.eventsDropped) > 0 ? ', and ' : ''}${Number(r.eventsDropped) > 0 ? `${Number(r.eventsDropped)} switch record(s) were not written (more than 2000, or 1 MiB)` : ''}`);
     if (r?.events?.length && this._onPoolOrdersExecuted) this._onPoolOrdersExecuted(r.events);
     return r?.events || [];
   }
@@ -1274,7 +1275,9 @@ class DeviceManager {
    *  Old daemons don't know these ops — callers bound with a timeout and
    *  fall back to the legacy ssh scripts. */
   probeCli(helper = null, { level = false, version = null } = {}) { return this._request({ op: 'probe-cli', timeoutMs: 9000, ...(helper ? { helper } : {}), ...(level ? { level: true, ...(version ? { version } : {}) } : {}) }); }   // B-77ed: a start's cwd and own file; B-24e2: `level` — an older agent ignores it (no new op)
-  probeCreds() { return this._request({ op: 'probe-creds', timeoutMs: 9000 }); }
+  probeCreds() { return this._request({ op: 'probe-creds', timeoutMs: 9000 }).then((r) => { const n = Number(r && r.facts && r.facts.hostSubsLeft) || 0; if (n > 0) this._saidLeftOnce('subs', `${n} held login folder(s) left out of its accounts answer (more than 500)`); return r; }); }
+  // B-5278 unit 2, the last piece: what a bounded producer left out is said ONCE a kind for this machine (this DeviceManager's life)
+  _saidLeftOnce(kind, words) { if (!this._leftSaid) this._leftSaid = new Set(); if (this._leftSaid.has(kind)) return; this._leftSaid.add(kind); try { this._log(`[bounds] ${this._machineName() || 'the machine'}: ${words}`); } catch { } }
   /** R3 transcript.* — run one transcript-service method ON the device and
    *  return the parsed JSON result. The result streams on a byte channel with
    *  the read-range count-gating contract (never resolve on the done marker:
@@ -1795,6 +1798,7 @@ class DeviceManager {
     try { r = await this._request({ op: 'quota-refresh', subDir, humanGated, timeoutMs: 40000 }); }
     catch (e) { const why = quotaReasonOf(e); if (why && !e.code) e.code = why; throw e; }
     if (r.error) throw new Error(r.error);
+    if (Number(r.passiveLeft) > 0) this._saidLeftOnce('passive', `${Number(r.passiveLeft)} passive usage reading(s) left out (more than 64 files, or one over 64 KiB)`);
     return { usage: r.usage, roles: r.roles, passive: r.passive || null, refused: quotaReasonOf(r) };
   }
 

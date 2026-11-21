@@ -523,7 +523,7 @@ for (const [rel, a] of Object.entries(ALLOW)) {
   // (the real op is driven in test-device-secret-quota)
   const reasons = (t) => {
     const b = t.slice(t.indexOf("msg.op === 'quota-refresh'"), t.indexOf("msg.op === 'probe-cli'"));
-    return (b.match(/\{ refused: 'no-valid-login' \}/g) || []).length === 2 && b.includes("passive, ...(bearerOk ? {} : { refused: 'long-lived' }) });") && b.includes("error: e.message, ...(e.refused ? { refused: e.refused } : {}) });");
+    return (b.match(/\{ refused: 'no-valid-login' \}/g) || []).length === 2 && b.includes("passive, ...(passiveLeft ? { passiveLeft } : {}), ...(bearerOk ? {} : { refused: 'long-lived' }) });") && b.includes("error: e.message, ...(e.refused ? { refused: e.refused } : {}) });");
   };
   ok(reasons(text), 'agentd quota-refresh (B-5e0d): its answer names its reason — «long-lived» beside the passive cache, «no-valid-login» on both no-login errors');
   ok(!reasons(anchored(text, "error: e.message, ...(e.refused ? { refused: e.refused } : {}) });", 'error: e.message });', 'B-5e0d: the reason dropped from the error answer')),

@@ -47,8 +47,32 @@ const CAPS = Object.freeze({
   'usage-events-watch': SMALL, 'usage-scan': SMALL, 'window-pin': SMALL, 'window-track': SMALL, 'window-untrack': SMALL,
 });
 
-/** the cap of an op's answer in bytes (an op with no row: the line itself — the census keeps that set empty) */
-const capOf = (op) => (Object.prototype.hasOwnProperty.call(CAPS, op) ? CAPS[op] : LINE_MAX);
+// B-5278 unit 2, the last piece (the coordinator's ruling on Q2): THE CAPS LOWERED TO THE COMPUTED BOUNDS — only for an agent that
+// says it bounds its producers ('producer-bounds' among its hello's capabilities). An older agent keeps the release's rows (CAPS):
+// its producers have no bound of their own. Each row rests on its producer's bound, in the comment; the suite holds every row at
+// or under the release's, and every op of this table in CAPS.
+const PRODUCER_BOUNDS = 'producer-bounds';
+const BOUNDED_CAPS = Object.freeze({
+  'discovery-snapshot': 20 * MiB,  // the child's answer ≤ 16 MiB (discovery-facts DISCOVERY_CHILD_MAX_BYTES) + the reply's envelope
+  'discovery-claims': 20 * MiB,    // rows of that same bounded snapshot
+  'quota-refresh': 8 * MiB,        // passive ≤ PASSIVE_FILES_MAX × PASSIVE_FILE_MAX = 4 MiB + two vendor bodies (< 256 Ki units each), escaped
+  'pool-orders': 2 * MiB,          // the log ≤ 2000 events / 1 MiB at its write (sealed-orders POOL_LOG_*), escaped
+  'probe-creds': SMALL,            // ≤ 500 folders × (a 255-byte name + a 320-unit email + an 80-unit attempt) ≈ 0.4 MB
+  'desktop-serve': 8 * MiB,        // its code's own bounds: 56 records, 300 witness rows, the catalog (the inventory's §6)
+});
+// the passive usage readings an agent answers (quota-refresh `passive`): the ssh twin's own bound (hosts.js PASSIVE_PEEK_*) —
+// the first PASSIVE_FILES_MAX by name, none over PASSIVE_FILE_MAX; the rest counted (`passiveLeft`)
+const PASSIVE_FILES_MAX = 64, PASSIVE_FILE_MAX = 64 * 1024;
+/** PURE: which usage-cache files a passive reading reads → { take: [name], left } (the readings and their order: the twin's) */
+function passivePick(names) {
+  const ok = (Array.isArray(names) ? names : []).filter((f) => typeof f === 'string' && f.endsWith('.json') && !f.startsWith('__models__')).sort();
+  return { take: ok.slice(0, PASSIVE_FILES_MAX), left: Math.max(0, ok.length - PASSIVE_FILES_MAX) };
+}
+/** the cap of an op's answer in bytes (an op with no row: the line itself — the census keeps that set empty); an agent that says
+ *  'producer-bounds' gets the lowered row where there is one */
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const capOf = (op, capabilities) => (Array.isArray(capabilities) && capabilities.includes(PRODUCER_BOUNDS) && hasOwn(BOUNDED_CAPS, op) ? BOUNDED_CAPS[op]
+  : hasOwn(CAPS, op) ? CAPS[op] : LINE_MAX);
 /** bytes as a person reads them (KiB / MiB, one decimal) */
 const sizeOf = (n) => { const b = Number(n) || 0; return b >= MiB ? `${(b / MiB).toFixed(1)} MiB` : b >= 1024 ? `${(b / 1024).toFixed(1)} KiB` : `${b} B`; };
 /** THE AGENT'S REFUSAL of an over-long line (mux.js `overLong`): an answer becomes a refusal of that ONE op by name (its id
@@ -183,4 +207,4 @@ function droppedSaid(machine, n, road) {
   return `[usage] ${machine || 'a machine'}: ${n} usage record${n === 1 ? '' : 's'} left out of its ${road || 'walk'} — an id longer than 256 bytes is no vendor id (B-5278); ${n === 1 ? 'its' : 'their'} tokens are not counted`;
 }
 
-module.exports = { MiB, FRAME_MAX, LINE_MAX, SMALL, CAPS, capOf, sizeOf, refusalOf, PUSH_LINES, PUSH_TEXT, PUSH_WALK_BYTES, PUSH_WALK_MS, PUSH_ACK_WAIT_MS, PUSH_WALK_TIMEOUT_MS, pushChunksOf, usagePushWalked, usagePushWaitMs, usagePushAcked, usagePushLoop, droppedSaid, cursorsWithoutSid, oversizeOf };
+module.exports = { MiB, FRAME_MAX, LINE_MAX, SMALL, CAPS, BOUNDED_CAPS, PRODUCER_BOUNDS, PASSIVE_FILES_MAX, PASSIVE_FILE_MAX, passivePick, capOf, sizeOf, refusalOf, PUSH_LINES, PUSH_TEXT, PUSH_WALK_BYTES, PUSH_WALK_MS, PUSH_ACK_WAIT_MS, PUSH_WALK_TIMEOUT_MS, pushChunksOf, usagePushWalked, usagePushWaitMs, usagePushAcked, usagePushLoop, droppedSaid, cursorsWithoutSid, oversizeOf };

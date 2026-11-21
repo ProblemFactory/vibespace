@@ -242,6 +242,12 @@ function readAtMost(p, max) {
   try { const b = Buffer.alloc(max + 1); const n = fs.readSync(fd, b, 0, max + 1, 0); return n > max ? null : b.subarray(0, n).toString('utf-8'); }
   finally { fs.closeSync(fd); }
 }
+// …and its first max bytes (an older agent's file past a bound is read to that bound only)
+function readHeadOf(p, max) {
+  const fd = fs.openSync(p, 'r');
+  try { const b = Buffer.alloc(max); const n = fs.readSync(fd, b, 0, max, 0); return b.subarray(0, n).toString('utf-8'); }
+  finally { fs.closeSync(fd); }
+}
 function computeDiscoverySnapshot() {
   const home = os.homedir();
   const locks = [];
@@ -1275,6 +1281,23 @@ const SESS_DIR = path.join(STATE, 'sessions');
 // reconciles the billing. ──
 const ORDERS_FILE = path.join(STATE, 'pool-orders.json');
 const ORDERS_LOG = path.join(STATE, 'pool-orders-log.ndjson');
+const ORDERS_DROPPED = path.join(STATE, 'pool-orders-dropped');   // B-5278 unit 2: the records past the report's bound, counted
+// B-5278 unit 2, the last piece: one switch's record into the pool's report — within its bound (sealed-orders POOL_LOG_*: a record
+// past it is counted in ORDERS_DROPPED and said with the report), never glued to a torn last line (find 2's follow), and the
+// report is never read past its bound
+function appendOrderEvent(ev) {
+  const line = JSON.stringify(ev) + '\n';
+  let text = '';
+  try { text = readAtMost(ORDERS_LOG, SO.POOL_LOG_BYTES_MAX); } catch (e) { if (!e || e.code !== 'ENOENT') { text = null; log(`sealed-orders: the pool's report could not be read (${(e && e.code) || e}): this record is counted, not written`); } }
+  const v = SO.appendVerdict(text, line);
+  if (!v.ok) {
+    let n = 0; try { n = Number(fs.readFileSync(ORDERS_DROPPED, 'utf-8')) || 0; } catch (e) { if (!e || e.code !== 'ENOENT') log('sealed-orders: the dropped count could not be read: ' + e.message); }
+    fs.writeFileSync(ORDERS_DROPPED, String(n + 1));
+    return false;
+  }
+  fs.appendFileSync(ORDERS_LOG, v.lead + line);
+  return true;
+}
 let authedServers = 0; // live orchestrator connections
 const sealedOrders = {
   pools: new Map(), // poolId → {poolId, linkPath, ranked:[{id,dir,creds}], currentId}
@@ -1379,14 +1402,25 @@ const sealedOrders = {
       repointPoolSymlink(actLink, next.dir, next.creds || null);
       this._lastActAt = Date.now();
       const ev = { ts: Date.now(), poolId: o2.poolId, sid, banner: banner.kind, from: currentDir, to: next.id, link: actLink };
-      // B-5278 unit 2 (find 2's follow): a torn last line (a crash mid-append, no newline) never swallows the next record
-      try { let lead = ''; try { const st = fs.statSync(ORDERS_LOG); if (st.size > 0) { const fd = fs.openSync(ORDERS_LOG, 'r'); try { const b = Buffer.alloc(1); fs.readSync(fd, b, 0, 1, st.size - 1); if (b[0] !== 10) lead = '\n'; } finally { fs.closeSync(fd); } } } catch (e) { if (!e || e.code !== 'ENOENT') log(`sealed-orders: the report's last byte was not read (${(e && e.code) || e}): the record is appended as it is`); } fs.appendFileSync(ORDERS_LOG, lead + JSON.stringify(ev) + '\n'); } catch { }
+      // B-5278 unit 2: the record joins the report within its bound, never glued to a torn last line (appendOrderEvent)
+      try { appendOrderEvent(ev); } catch (e) { log('sealed-orders: the pool\'s report was not written: ' + e.message); }
       log(`sealed-orders EXECUTED: pool ${o2.poolId} → ${next.id} (banner ${banner.kind} in ${sid}, no orchestrator)`);
     } catch (e) { log('sealed-orders execute failed: ' + e.message); }
   },
   // B-5278 unit 2 (find 2): read line by line (sealed-orders.js reportOf) — a torn line is left out and said, never every report hidden
-  pendingReport() { try { const r = SO.reportOf(fs.readFileSync(ORDERS_LOG, 'utf-8')); if (r.torn && !this._tornSaid) { this._tornSaid = true; log(`sealed-orders: ${r.torn} torn line(s) in the pool's report left out`); } return r.events; } catch { return []; } },
-  clearReport() { try { fs.rmSync(ORDERS_LOG, { force: true }); } catch { } },
+  // (the last piece) read within the report's bound: an older agent's report past it is read to its bound only (`cut`); the
+  // records not written are counted (`dropped`)
+  pendingReport() {
+    let dropped = 0; try { dropped = Number(fs.readFileSync(ORDERS_DROPPED, 'utf-8')) || 0; } catch { }
+    try {
+      let text = readAtMost(ORDERS_LOG, SO.POOL_LOG_BYTES_MAX), cut = false;
+      if (text == null) { text = readHeadOf(ORDERS_LOG, SO.POOL_LOG_BYTES_MAX); cut = true; }
+      const r = SO.reportOf(text);
+      if (r.torn && !this._tornSaid) { this._tornSaid = true; log(`sealed-orders: ${r.torn} torn line(s) in the pool's report left out`); }
+      return { events: r.events.slice(0, SO.POOL_LOG_EVENTS_MAX), dropped, cut };
+    } catch { return { events: [], dropped, cut: false }; }
+  },
+  clearReport() { try { fs.rmSync(ORDERS_LOG, { force: true }); } catch { } try { fs.rmSync(ORDERS_DROPPED, { force: true }); } catch { } },
 };
 sealedOrders.load();
 const pipeSessions = {
@@ -2122,7 +2156,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'settings-merge' /* B-e7c0: a subscription pick's merge of the person's own settings file, made HERE */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'browser-stop-facts' /* B-e799: the stop answers its outcome in fields */, 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'peer-post-wait' /* B-95fc U2: peer-post's waitMs — the machine waits for its own registry record, then posts */, 'sent-rows' /* B-9a2e: a transcript op's params may carry {id: rows} — what VibeSpace sent, held for that op's reads */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'producer-bounds' /* B-5278 unit 2: each producer bounded by construction — the hub lowers its caps for this agent (answer-caps BOUNDED_CAPS) */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'settings-merge' /* B-e7c0: a subscription pick's merge of the person's own settings file, made HERE */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'browser-stop-facts' /* B-e799: the stop answers its outcome in fields */, 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'peer-post-wait' /* B-95fc U2: peer-post's waitMs — the machine waits for its own registry record, then posts */, 'sent-rows' /* B-9a2e: a transcript op's params may carry {id: rows} — what VibeSpace sent, held for that op's reads */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2506,7 +2540,8 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           sealedOrders.set(msg.orders || null);
           // executions from a server-down window ride the reply — pushing at
           // hello RACED the client's control-routing installation (observed)
-          mux.control({ op: 'pool-orders-ok', id: msg.id, events: sealedOrders.pendingReport() });
+          const rep = sealedOrders.pendingReport();   // B-5278 unit 2: bounded; what was not written, or cut, said with it
+          mux.control({ op: 'pool-orders-ok', id: msg.id, events: rep.events, ...(rep.dropped ? { eventsDropped: rep.dropped } : {}), ...(rep.cut ? { eventsCut: true } : {}) });
         } catch (e) { mux.control({ op: 'pool-orders-ok', id: msg.id, error: e.message }); }
         return;
       }
@@ -2886,15 +2921,22 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             // B-0f13 read path: ship the PASSIVE statusline cache alongside —
             // pure file reads (the remote vibespace-usage hook writes them),
             // zero extra vendor calls. The server merges fetchedAt-guarded.
+            // B-5278 unit 2, the last piece: the ssh twin's own bound (answer-caps passivePick: the first 64 by name, none over
+            // 64 KiB, read through a bounded read); what was left out is counted (`passiveLeft`)
             const passive = {};
+            let passiveLeft = 0;
             try {
               const cdir = path.join(home, '.vibespace', 'usage-cache');
-              for (const f of fs.readdirSync(cdir)) {
-                if (!f.endsWith('.json') || f.startsWith('__models__')) continue;
-                try { const j = JSON.parse(fs.readFileSync(path.join(cdir, f), 'utf-8')); if (j && j.fetchedAt) passive[f.slice(0, -5)] = j; } catch { }
+              const ACq = require('./answer-caps.js'), pick = ACq.passivePick(fs.readdirSync(cdir));
+              passiveLeft = pick.left;
+              for (const f of pick.take) {
+                // (r1082's law, here too) one file that cannot be read costs no other its read; a reading gone since the listing is not left out
+                let text = null; try { text = readAtMost(path.join(cdir, f), ACq.PASSIVE_FILE_MAX); } catch (err) { if (!err || err.code !== 'ENOENT') passiveLeft++; continue; }
+                if (text == null) { passiveLeft++; continue; }
+                try { const j = JSON.parse(text); if (j && j.fetchedAt) passive[f.slice(0, -5)] = j; } catch { }
               }
             } catch { }
-            mux.control({ op: 'quota-result', id: msg.id, usage, roles, passive, ...(bearerOk ? {} : { refused: 'long-lived' }) });
+            mux.control({ op: 'quota-result', id: msg.id, usage, roles, passive, ...(passiveLeft ? { passiveLeft } : {}), ...(bearerOk ? {} : { refused: 'long-lived' }) });
           } catch (e) { mux.control({ op: 'quota-result', id: msg.id, error: e.message, ...(e.refused ? { refused: e.refused } : {}) }); }
         })();
         return;

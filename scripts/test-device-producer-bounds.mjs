@@ -32,6 +32,9 @@
 //   ⑨ the next part (r1044): the reply bounded BY CONSTRUCTION (so its parse and its reply on the agent's loop are): at most 1000
 //     live locks of at most 64 KiB, the newest — the agent's REAL child on 1003 fixture locks (RED: the release's loop reads every
 //     one whole); at most 1000 open codex rollouts; the child's answer at 16 MiB; each kind left out said once by the hub.
+//   ⑩ the unit's last piece: the pool's report bounded at its write (the agent's own appendOrderEvent / pendingReport run on
+//     temp files), the passive readings at the ssh twin's bound, the held logins at 500 folders and a 320-unit email (the device's
+//     real credsFacts on a fixture home), the caps lowered only for an agent that says producer-bounds (one picker).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -207,7 +210,7 @@ console.log('⑤ find 2: the pool\'s report is read line by line — one torn li
   const before = RelS.reportOf(text), after = SO.reportOf(text);
   ok(before.events.length === 0, `THE FAULT, on the release's parse (a copy): one torn line (a crash mid-append) among three whole ones ⇒ ${before.events.length} events reported — the hub acks nothing, the torn line stays, every later report hidden`);
   ok(after.events.length === 3 && after.torn === 1 && after.events.map((e) => e.to).join() === 'a,b,c', `the tree's parse: the three whole switches reported (${after.events.map((e) => e.to).join()}), the torn line left out and counted (${after.torn})`);
-  ok(AGSRC.includes("pendingReport() { try { const r = SO.reportOf(fs.readFileSync(ORDERS_LOG, 'utf-8'));"), 'the agent reads its pool report through that parse, and says a torn line once');
+  ok(AGSRC.includes('      const r = SO.reportOf(text);\n      if (r.torn && !this._tornSaid)'), 'the agent reads its pool report through that parse (within its bound: ⑩), and says a torn line once');
 }
 
 console.log('⑥ r951, THE LAW of item 4: a machine that replied is never called unreachable ANYWHERE its list is drawn; the device\'s own reply is remembered through the hub\'s fallback and said');
@@ -326,12 +329,14 @@ console.log('⑥ r951, THE LAW of item 4: a machine that replied is never called
   const NoKill = M.load('src/discovery-facts.js', anchored(DSRC3, "    try { if (kept.inflight.child && typeof kept.inflight.child.kill === 'function') kept.inflight.child.kill('SIGKILL'); } catch { }\n", '    // (the kill cut)\n', 'let-go-kill-cut'), 'let-go-kill-cut');
   const g3 = await landing(NoKill);
   ok(g3.kills.length === 0, 'CONTROL (the kill cut, in a copy): the let-go child is only forgotten, never ended — RED');
-  // SMALL (3): the agent's pool append never glues its record to a torn last line (the statement itself, run on a temp file)
+  // SMALL (3): the agent's pool append never glues its record to a torn last line (its own function, run on a temp file)
   const SO = require('../src/sealed-orders.js');
-  const stmt = (AGSRC.split('\n').find((l) => l.includes("try { let lead = ''; try { const st = fs.statSync(ORDERS_LOG);")) || '').trim();
-  const appendWith = (code) => { const f = path.join(fs.mkdtempSync(path.join(tmp, 'pool-')), 'pool-orders-log.ndjson'); fs.writeFileSync(f, JSON.stringify({ ts: 1, poolId: 'p1', to: 'a' }) + '\n{"ts":2,"poolId":"p1","to":'); new Function('fs', 'ORDERS_LOG', 'ev', 'log', code)(fs, f, { ts: 3, poolId: 'p1', to: 'b' }, () => { }); return SO.reportOf(fs.readFileSync(f, 'utf8')); };
-  const now3 = appendWith(stmt), rel3 = appendWith("try { fs.appendFileSync(ORDERS_LOG, JSON.stringify(ev) + '\\n'); } catch { }");   // the release's line, quoted (stale-pins: kept)
-  ok(stmt && now3.events.map((e) => e.to).join() === 'a,b' && now3.torn === 1 && rel3.events.map((e) => e.to).join() === 'a',
+  const fnSrc = (name) => { const a = AGSRC.indexOf('function ' + name + '('), b = AGSRC.indexOf('\n}\n', a); return a >= 0 && b > a ? AGSRC.slice(a, b + 2) : ''; };
+  const APPEND = fnSrc('readAtMost') + fnSrc('appendOrderEvent') + 'return appendOrderEvent(ev);';
+  const appendWith = (code, seed) => { const d = fs.mkdtempSync(path.join(tmp, 'pool-')), f = path.join(d, 'pool-orders-log.ndjson'), dr = path.join(d, 'pool-orders-dropped'); fs.writeFileSync(f, seed); new Function('fs', 'ORDERS_LOG', 'ORDERS_DROPPED', 'SO', 'log', 'ev', code)(fs, f, dr, SO, () => { }, { ts: 3, poolId: 'p1', to: 'b' }); return { ...SO.reportOf(fs.readFileSync(f, 'utf8')), dropped: fs.existsSync(dr) ? Number(fs.readFileSync(dr, 'utf8')) : 0 }; };
+  const TORN = JSON.stringify({ ts: 1, poolId: 'p1', to: 'a' }) + '\n{"ts":2,"poolId":"p1","to":';
+  const now3 = appendWith(APPEND, TORN), rel3 = appendWith("try { fs.appendFileSync(ORDERS_LOG, JSON.stringify(ev) + '\\n'); } catch { }", TORN);   // the release's line, quoted (stale-pins: kept)
+  ok(APPEND.includes('function appendOrderEvent(ev)') && now3.events.map((e) => e.to).join() === 'a,b' && now3.torn === 1 && rel3.events.map((e) => e.to).join() === 'a',
     `the agent's own append after a torn last line: its record whole (${now3.events.map((e) => e.to).join()}, the torn one counted); the release's line glued it to the torn one and lost it (${rel3.events.map((e) => e.to).join()}) — RED`);
 }
 
@@ -502,6 +507,57 @@ console.log('⑨ the next part (r1044): the agent\'s reply is bounded BY CONSTRU
   D9._request = async () => ({ locks: [], jsonls: [], left: { locks: 3, codexOpen: 2 } });
   await D9.discoverySnapshot(); await D9.discoverySnapshot();
   ok(logs9.filter((l) => /lock file\(s\) left out/.test(l)).length === 1 && logs9.filter((l) => /open codex rollout\(s\) left out/.test(l)).length === 1, 'the hub says each kind left out ONCE (lock files, open codex rollouts)', logs9);
+}
+
+console.log('⑩ the unit\'s last piece: the other producers bounded by construction (the pool\'s report at its write, the passive readings, the held logins), and the caps lowered for an agent that says producer-bounds');
+{
+  const AC = require('../src/agentd/answer-caps.js'), SO = require('../src/sealed-orders.js');
+  const fnSrc = (name) => { const a = AGSRC.indexOf('function ' + name + '('), b = AGSRC.indexOf('\n}\n', a); return a >= 0 && b > a ? AGSRC.slice(a, b + 2) : ''; };
+  // THE POOL's REPORT, bounded at its write — the agent's own appendOrderEvent and pendingReport, run on temp files
+  const pool = (seed) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'pool10-')), f = path.join(d, 'pool-orders-log.ndjson'), dr = path.join(d, 'pool-orders-dropped');
+    if (seed != null) fs.writeFileSync(f, seed);
+    const deps = ['fs', 'ORDERS_LOG', 'ORDERS_DROPPED', 'SO', 'log'], vals = [fs, f, dr, SO, () => { }];
+    const append = (ev) => new Function(...deps, 'ev', fnSrc('readAtMost') + fnSrc('appendOrderEvent') + 'return appendOrderEvent(ev);')(...vals, ev);
+    const a = AGSRC.indexOf('  pendingReport() {'), b = AGSRC.indexOf('\n  },\n', a);
+    const report = () => new Function(...deps, fnSrc('readAtMost') + fnSrc('readHeadOf') + 'return ({' + AGSRC.slice(a, b + 4) + '}).pendingReport();')(...vals);
+    return { append, report, size: () => (fs.existsSync(f) ? fs.statSync(f).size : 0) };
+  };
+  const ev = (i) => ({ ts: i, poolId: 'p1', sid: 's', banner: 'limit', from: '/home/u/.vibespace/subs/a', to: 'b', link: '/home/u/.claude' });
+  const full = SO.POOL_LOG_EVENTS_MAX === 2000 && SO.POOL_LOG_BYTES_MAX === 1024 * 1024 ? Array.from({ length: 2000 }, (_, i) => JSON.stringify(ev(i))).join('\n') + '\n' : '';
+  const p1 = pool(full), wrote = p1.append(ev(9001)), r1 = p1.report();
+  ok(full && wrote === false && r1.events.length === 2000 && r1.dropped === 1 && !r1.cut, `a report holding 2000 records: the next switch is NOT written, it is counted (${r1.dropped}) and said with the report (${r1.events.length} events)`, { wrote, n: r1.events.length, dropped: r1.dropped });
+  const big = ('x'.repeat(1000) + '\n').repeat(1100);   // an older agent's report past the bound (1.05 MiB), no record whole
+  const p2 = pool(big), w2 = p2.append(ev(1)), r2 = p2.report();
+  ok(w2 === false && p2.size() === big.length && r2.cut === true && r2.dropped === 1, 'an older agent\'s report past its bound: never read past it, nothing appended to it, the record counted; its report read to the bound only (cut)');
+  const p3 = pool(null), w3 = p3.append(ev(1)), r3 = p3.report();
+  ok(w3 === true && r3.events.length === 1 && !r3.dropped && !r3.cut, 'no report yet: the first record is written and reported');
+  ok(AGSRC.includes("...(rep.dropped ? { eventsDropped: rep.dropped } : {}), ...(rep.cut ? { eventsCut: true } : {}) });") && AGSRC.includes("try { fs.rmSync(ORDERS_DROPPED, { force: true }); } catch { }"), 'the reply carries what was not written (eventsDropped) or cut; the hub\'s ack clears both');
+  // THE PASSIVE READINGS: the ssh twin's own bound, one picker
+  const names = [...Array.from({ length: 70 }, (_, i) => `sub-${String(i).padStart(3, '0')}.json`), '__models__x.json', 'notes.txt', '__global__.json'];
+  const pk = AC.passivePick(names), HS10 = read('src/hosts.js');
+  ok(pk.take.length === 64 && pk.left === 7 && pk.take[0] === '__global__.json' && !pk.take.some((n) => n.startsWith('__models__') || !n.endsWith('.json'))
+    && /const PASSIVE_PEEK_FILES = 64, PASSIVE_PEEK_BYTES = 65536,/.test(HS10) && AC.PASSIVE_FILES_MAX === 64 && AC.PASSIVE_FILE_MAX === 65536,
+    `the passive readings an agent answers: the first 64 by name, none over 64 KiB — the ssh twin's own bound (hosts.js PASSIVE_PEEK_*), 72 files ⇒ ${pk.take.length} read, ${pk.left} counted`);
+  ok(AGSRC.includes("const ACq = require('./answer-caps.js'), pick = ACq.passivePick(fs.readdirSync(cdir));") && AGSRC.includes("text = readAtMost(path.join(cdir, f), ACq.PASSIVE_FILE_MAX);") && AGSRC.includes('...(passiveLeft ? { passiveLeft } : {})'),
+    'the agent reads them through that picker and a bounded read, and says what it left out (passiveLeft)');
+  // THE HELD LOGINS (probe-creds): the device's real credsFacts in a child, on a fixture home of 502 folders and one long email
+  const h10 = homeOf('f10'), SUBS = path.join(h10, '.vibespace', 'subs');
+  for (let i = 0; i < 502; i++) { const d = path.join(SUBS, `acct-${String(i).padStart(3, '0')}`); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: i === 3 ? 'a'.repeat(330) + '@example.test' : `user${i}@example.test` } })); }
+  const MP = path.join(REPO, 'src/machine-probes.js');
+  const cr = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(MP)}).credsFacts().then((f) => process.stdout.write(JSON.stringify({ n: Object.keys(f.hostSubEmails).length, left: f.hostSubsLeft || 0, long: f.hostSubEmails['acct-003'] || null, last: Object.keys(f.hostSubEmails).sort().pop() })))`], { encoding: 'utf8', env: { ...process.env, HOME: h10 }, timeout: 20000 });
+  let cf = null; try { cf = JSON.parse(cr.stdout); } catch { }
+  ok(cf && cf.n === 499 && cf.left === 2 && cf.long === null && cf.last === 'acct-499', `the held logins the device answers: at most 500 folders by name (502 ⇒ ${cf && cf.left} counted), an email over 320 units none (${cf && cf.long}) — ${String(cr.stderr || '').slice(0, 200)}`, cf);
+  // THE CAPS: lowered only for an agent that says producer-bounds; each row at or under the release's; the agent says it
+  const B = AC.BOUNDED_CAPS, rowsB = Object.keys(B);
+  ok(rowsB.length === 6 && rowsB.every((op) => Object.prototype.hasOwnProperty.call(AC.CAPS, op) && B[op] <= AC.CAPS[op]) && !Object.prototype.hasOwnProperty.call(B, 'opencode-serve'),
+    `the lowered table: ${rowsB.map((op) => `${op} ${AC.sizeOf(B[op])}`).join(', ')} — every row in the release's table and at or under it (opencode-serve keeps its row until its own part)`);
+  ok(AC.capOf('quota-refresh', ['probe', AC.PRODUCER_BOUNDS]) === 8 * AC.MiB && AC.capOf('quota-refresh', ['probe']) === AC.CAPS['quota-refresh'] && AC.capOf('quota-refresh') === AC.CAPS['quota-refresh'] && AC.capOf('fs-op', [AC.PRODUCER_BOUNDS]) === AC.CAPS['fs-op'],
+    'ONE picker: an agent saying producer-bounds gets the lowered row; an older agent (or none said) keeps the release\'s row; an op with no lowered row keeps its own');
+  ok(B['discovery-snapshot'] >= require('../src/discovery-facts.js').DISCOVERY_CHILD_MAX_BYTES + 1024 * 1024 && B['pool-orders'] >= SO.POOL_LOG_BYTES_MAX * 1.5 && B['quota-refresh'] >= AC.PASSIVE_FILES_MAX * AC.PASSIVE_FILE_MAX + 2 * 262144 * 6,
+    'each lowered row sits above its producer\'s own bound (the discovery child, the pool\'s report escaped, the passive readings + two vendor bodies escaped)');
+  ok(/'answer-bounds' \/\*[^*]*\*\/, 'producer-bounds' \/\*/.test(AGSRC) && read('src/agentd/client.js').includes('const cap = AC.capOf(payload.op, conn.info && conn.info.capabilities);'),
+    'the agent says producer-bounds in its hello; the hub picks the cap by what this agent said');
 }
 
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);

@@ -1,4 +1,6 @@
 'use strict';
+// B-5278 unit 2, the last piece: probe-creds' own bounds (answer-caps BOUNDED_CAPS 'probe-creds' rests on them)
+const SUBS_MAX = 500, EMAIL_MAX = 320;
 /**
  * Machine fact probes — ONE node implementation for every machine
  * (R1 of docs/design-three-tier.md, the `probe.*` op family).
@@ -313,6 +315,10 @@ async function credsFacts() {
   const subsRoot = path.join(home, '.vibespace', 'subs');
   let dirs = [];
   try { dirs = fs.readdirSync(subsRoot); } catch { }
+  // B-5278 unit 2, the last piece: at most SUBS_MAX folders (by name), an email at most EMAIL_MAX units (else none); the rest counted
+  dirs.sort();
+  const hostSubsLeft = Math.max(0, dirs.length - SUBS_MAX);
+  dirs = dirs.slice(0, SUBS_MAX);
   for (const d of dirs) {
     const dp = path.join(subsRoot, d);
     const c = readJson(path.join(dp, '.credentials.json'));
@@ -323,7 +329,7 @@ async function credsFacts() {
     }
     const idc = readJson(path.join(dp, '.claude.json'));
     const em = idc?.oauthAccount?.emailAddress || idc?.emailAddress;
-    if (em) hostSubEmails[d] = em;
+    if (typeof em === 'string' && em && em.length <= EMAIL_MAX) hostSubEmails[d] = em;
   }
 
   let subLoggedIn = !!(creds?.claudeAiOauth?.accessToken || creds?.accessToken);
@@ -339,7 +345,7 @@ async function credsFacts() {
     codex: { email: codexEmail, plan: codexPlan },
     credsMtime: statMtime(path.join(home, '.claude', '.credentials.json')),
     codexAuthMtime: statMtime(path.join(home, '.codex', 'auth.json')),
-    hostSubs, hostSubLoginStatus, hostSubEmails,
+    hostSubs, hostSubLoginStatus, hostSubEmails, ...(hostSubsLeft ? { hostSubsLeft } : {}),
   };
 }
 
@@ -447,4 +453,4 @@ async function cliBinaryIdentity(cmd) {
   try { const real = await fs.promises.realpath(p); const st = await fs.promises.stat(real); return { path: real, cmd: p, size: st.size, identity: `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}:${Math.round(st.ctimeMs)}` }; } catch { return null; }
 }
 
-module.exports = { settingsMergeOp, sweepMergedSettings, SETTINGS_KEEP_MS, cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, cliLevel, _levelReset, _levelInFlight, realCliRefusal, sayNotRun, startHelperFact, forgetLoginDir, useShellsSaid };
+module.exports = { settingsMergeOp, sweepMergedSettings, SETTINGS_KEEP_MS, SUBS_MAX, EMAIL_MAX, cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, cliLevel, _levelReset, _levelInFlight, realCliRefusal, sayNotRun, startHelperFact, forgetLoginDir, useShellsSaid };
