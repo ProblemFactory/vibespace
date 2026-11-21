@@ -109,6 +109,19 @@ This file is the engineers' record of every release: the lanes, the verification
 - ITS OWN READ (one fresh agent) folded: a belt for a refused store inside the admission (a shared entry is never admitted over it — RED: both guards removed ⇒ it runs); fail closed when the verdict names no hosts; an entry admitted by its 1-hour window says so in a mixed run too (scope, minutes left, its notice); the refusal words true for a once-only or pasted approval; legs for an own value minted for the run's own host, the owner's entry under a standing grant (two grants on the run line) and under a window, and an own + shared run under a refused store.
 - NOT CHANGED, said for the integrator's ruling: a run naming a shared entry has no card, and its grant judges the run's hosts and command, never the agent-chosen inputs beside the shared value — a literal env name a tool obeys as a program (CLOUDSDK_PYTHON, RCLONE_PASSWORD_COMMAND, KUBE_EDITOR — not on the denylist) or the agent's own `--file KUBECONFIG=@template` (an exec plugin) reaches a shared run on the release already; this unit's own put value fills the same slots with the same power, so the cure widens nothing — a fence over the shared road is its own ruling.
 
+### B-e31b part 1 — test-helm-render's API law is the helm version's own (lane chrome-157; 主开发 r896, 2026-11-21)
+- **Why.** The hosted runner's image moved to Ubuntu 26.04 with Helm 4.3.1 on 2026-11-07, and the workflow has been pinned to ubuntu-24.04 since 2.369.386 as a seam. Section N's last leg read «the fake API saw discovery GETs only — nothing was written» as `asked.length > 0 && every request a discovery GET`. Helm 3's `install --dry-run=client` reads the cluster's discovery first; Helm 4's contacts no API at all, so the empty list was red every time (int361's .386 mirrors: Helm 3.22.1 green on 24.04, Helm 4.3.1 red ×2 on 26.04).
+- **The law, by the helm that ran.**
+  - Nothing is written: every request the fake API saw is a discovery read, over ZERO requests too.
+  - «It saw discovery reads» is Helm 3's premise alone. A Helm 3 that asked nothing never reached this fake API, so its law would be vacuous, and that is red by name.
+  - The major is read from `helm version --short`, and the leg prints every request it judged.
+- **Helm 4's behaviour without a Helm 4.** No helm binary is fetched, here or on a test machine. A stand-in for helm (a small module the suite writes into its scratch folder) is spawned as the suite spawns helm, with the same install argv, KUBECONFIG and driver env. By its mode it asks what Helm 3 asks (the four discovery GETs) or nothing (Helm 4), and, the planted write, one POST after either.
+  - Each plant is proved to have taken first.
+  - The law is green on both behaviours.
+  - It is red with the write planted, under either major, and the write is named.
+  - Helm 4's empty list judged by Helm 3's premise is red by name: the 26.04 red this replaces.
+- **Not in this part.** Running the whole heavy tier once on the newer image, and the unpin, are a hosted run through the coordinator and lane bl-ci, after 2.369.414 is pushed.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
