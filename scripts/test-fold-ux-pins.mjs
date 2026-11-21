@@ -5,6 +5,7 @@
 // 2.355.0 lesson): src/lib/chat-view.js, src/lib/workflow-detail.js, the dictionaries src/lib/i18n-zh.js / src/lib/i18n-ja.js. Each
 // reads the file BY NAME, so ci.mjs's affected rule selects this suite on a change of one of them.
 // Run: node scripts/test-fold-ux-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

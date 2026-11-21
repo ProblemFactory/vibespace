@@ -11,6 +11,7 @@
 //      only the delta (incremental, byte-identical result)
 //   S4 usage harvest: scanner streamed through the daemon returns NDJSON
 // Usage: node scripts/test-agentd-switchover.mjs <hostId>
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import fs from 'node:fs';

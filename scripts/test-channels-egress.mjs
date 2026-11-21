@@ -36,6 +36,7 @@
 // artefacts (a 64 MB rclone under data/bin) and this census reads SOURCE.
 // When git cannot answer for this tree the census SKIPS with git's own words,
 // never fails (an export/tarball is not an offender).
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -28,6 +28,7 @@
 //      conversations (its condition is the session.fork command's). RED CONTROLS: the window's Fork row deleted, a card command
 //      with no row, a window Fork row narrowed to live conversations
 //   ⑥ THE WORDS: every sentence and door in zh and ja; the release's vague sentence is gone; no native dialog in Locate
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

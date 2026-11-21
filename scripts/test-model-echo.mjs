@@ -17,6 +17,7 @@
 //   ③ WIRING PINS (the 2.355.0 unstaged-wiring lesson): the card label calls the
 //      helper and no inline `Set model to` regex is left anywhere in src/; since
 //      lane fable-52-cli-321 r4 the status bar and the server read NO echo at all.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

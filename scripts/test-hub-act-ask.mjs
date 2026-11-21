@@ -19,6 +19,7 @@
 //      list as it applies; the PATCH writes the third list alone; a list change re-judges the cards that are up
 //   ⑥ the card in the For-you row (renderRow in node): its words above Allow once / Always on this machine / Deny
 //   ⑦ the census: both remote device clients carry the gate, this machine's own daemon never; the gate sits at the send point
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

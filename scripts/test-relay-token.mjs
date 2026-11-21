@@ -25,6 +25,7 @@
 //      frpc spawn env is RT.relayEnv(process.env, …) in src/plugins/frp.js, which copies process.env nowhere; src/relay-token.js
 //      requires nothing
 // Run: node scripts/test-relay-token.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';

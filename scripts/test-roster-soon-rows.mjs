@@ -8,6 +8,7 @@
 // Member M at 4h34m) and one member, and the second-soonest member went dark.
 // The rule now skips rows flagged data-pooled; the pool keeps its label.
 // Real markSoonRows over a fake list (manage-agents.js imports in node).
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);

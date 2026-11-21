@@ -19,6 +19,7 @@
 //      read) — a 3840-choice matrix over every harness; CONTROL: a plan that drops the tick is caught. The right column READS the left
 //      (groupReach), the phone's accordion lines (resourceSummary), a group grant's 「除了」 on its account row
 // Run: node scripts/test-new-session-form.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

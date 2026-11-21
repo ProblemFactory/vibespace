@@ -13,6 +13,7 @@
 //      action turns the setting off; the user's own open (the card's click) never passes quiet.
 //   CONTROLS (patched copies, each RED): createWindow focusing a quiet open; _onArtifactCard opening without quiet;
 //   the toast without its device mark.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

@@ -3,6 +3,7 @@
 // hub legs and every mutant CONTROL stay there): ONE placement — showContextMenu (src/lib/utils.js) and the file explorer's builder (src/lib/file-explorer-ops.js) both end in placeMenu. Each reads the file it pins BY NAME, so ci.mjs's affected rule
 // selects this suite on a change of that file.
 // Run: node scripts/test-menu-bounds-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs'; import path from 'node:path';
 const ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 let failed = 0, passed = 0;

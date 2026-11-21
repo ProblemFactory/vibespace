@@ -12,6 +12,7 @@
 //   ④ interrupted results change nothing; ⑤ a buffer whose HEAD was trimmed mid-line; ⑥ a resume (restarted / carried)
 //   ⑦ the figure's thousands mark (the page's language's number format); ⑧ ONE fold — no source adds a total again.
 // PURE + in-process (no server, no browser). RED on 66c6d99c0: ①–⑥ read 945 / 840 / the raw totals, ⑦ «$63854.44».
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

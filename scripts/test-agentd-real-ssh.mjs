@@ -5,6 +5,7 @@
 // This is the real-machine proof of the M2 architecture (the the devbox test box).
 // Usage: node scripts/test-agentd-real-ssh.mjs <hostId>
 //   (hostId from data/hosts.json; needs key auth + node on the host)
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { execFileSync } from 'node:child_process';

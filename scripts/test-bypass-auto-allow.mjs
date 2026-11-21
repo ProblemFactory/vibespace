@@ -7,6 +7,7 @@
 // console-ring audit row and a per-session count. The switch `permissions.bypassAnswersAsks` (default ON); never in
 // any other mode; the mode read per ask. Every rule a leg + a RED control (patched copies of the door).
 // In-process, the REAL normalizer (createMessageManager), no network.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import Module, { createRequire } from 'node:module';

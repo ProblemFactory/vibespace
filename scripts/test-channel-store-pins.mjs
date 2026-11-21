@@ -5,6 +5,7 @@
 // route-error words (src/lib/channel-words.js) and the no-once-only-flag pin. Each reads the file BY NAME, so ci.mjs's affected rule
 // selects this suite on a change of one of them.
 // Run: node scripts/test-channel-store-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

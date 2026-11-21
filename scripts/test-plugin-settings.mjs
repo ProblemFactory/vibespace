@@ -6,6 +6,7 @@
 // manifest rows through the same validator ③ the one-time migration (config present/absent × settings present/absent)
 // ④ the engines read the settings rows — a plugins.json `config` plant is NOT seen (RED on the base's plugin file)
 // ⑤ writes go through the one writer (a foreign key refused, a default dropped) ⑥ a plugin-config row re-applies.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

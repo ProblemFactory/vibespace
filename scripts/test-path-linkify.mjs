@@ -17,6 +17,7 @@
 // ⑧ (lane agy-links-file-url, the owner 2026-10-21 in an Antigravity conversation: «文件链接怎么都点不了»): a path is a
 // path whatever syntax the harness writes it in — a `file:` URL (an anchor's, or bare), `<a href="/home/…">` — and
 // whatever script its first letter is (`标书研究/方案.md`); RED CONTROL = the base (the anchor dead, the path plain).
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

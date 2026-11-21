@@ -6,6 +6,7 @@
 // SingletonSocket — the verdict's dir binds, the pre-fix data path FAILS (the arithmetic judged by the kernel, not a
 // constant), and the 62/63-byte boundary · ③ launchFatalOf names the FATAL, never a profile lock · ④ the maker: 0700,
 // a planted symlink refused, the why said once · ⑤ the REAL browser-env + keeper wiring. Scratch dirs only, no browser.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

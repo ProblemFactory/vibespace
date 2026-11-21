@@ -3,6 +3,7 @@
 // output (2026-08-11, claude 2.1.x). This is the ⟳ ladder's rung 2 — the only
 // no-live-session channel that carries model-scoped weeklies — so format
 // drift must fail HERE, not silently degrade every refresh to the token read.
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { parseCliUsageText } = require('../src/usage-routes.js');

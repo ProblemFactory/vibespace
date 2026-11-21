@@ -23,6 +23,7 @@
 //      2.369.313 ones; the HDR floor row; the mapper worker's p010 road = the function
 //   §6 THE REAL LEG'S TWO FINDINGS: a browser's mDNS candidate is told apart (the agent never hands one to werift — its 10 s multicast
 //      wait sat inside the answer); the power-throttling opt-out script (ProcessPowerThrottling, EXECUTION_SPEED off, the pids only)
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

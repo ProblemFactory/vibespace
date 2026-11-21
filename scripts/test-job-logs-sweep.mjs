@@ -3,6 +3,7 @@
 // directory (src/job-logs-sweep.js runVerdict) as a table + its mutant copies, the keep set's shapes, the words, and the STATIC
 // census of src/jobs.js / the child / the wiring / the routes / the CLI / the panel / the setting. Every leg that forks the
 // remover's child, runs the real job wrapper or kills a hub is scripts/test-job-logs-sweep-heavy.mjs (heavy).
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

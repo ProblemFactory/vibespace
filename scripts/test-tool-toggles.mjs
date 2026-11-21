@@ -4,6 +4,7 @@
 // disabled feature is neither TAUGHT (context tools section, baseline intro,
 // per-turn reminder, stop nudge) nor SERVED (write endpoints refuse with
 // skip-and-continue guidance). Run: node scripts/test-tool-toggles.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

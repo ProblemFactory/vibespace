@@ -15,6 +15,7 @@
 //   ⑥ THE CHECK ROW (M6): the row rule comes after `.dialog-body label` at its weight; no class a check-row label wears
 //      (70-odd labels the client builds around a checkbox or a radio) stacks the row (a column, centred text, a block)
 // Each census has its RED control (a planted site / rule, or the base's shape) printed beside it.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

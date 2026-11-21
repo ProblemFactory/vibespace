@@ -19,6 +19,7 @@
 //      the route falls to the isolated panel instead of saying success
 //   ③ apiWitnessEligibility: OTel disagreement vetoes only a session the pool
 //      never re-pointed since spawn (a hot-switched session's OTel is spawn-time)
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

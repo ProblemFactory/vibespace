@@ -31,6 +31,7 @@
 // THE TABLE (family × surface: ✓ present in the tree · ⚙ VibeSpace uses it itself · — not this kind's · ⏳ deferred · ✗ missing)
 // is printed on every run, then the words of every — / ⚙ / ⏳ cell.
 // Run: node scripts/test-vault-kinds-census.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

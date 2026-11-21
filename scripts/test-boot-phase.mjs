@@ -21,6 +21,7 @@
 //     from app.js) replayed over fake timers — two reconnects 300 ms apart ⇒ ONE reload, the notice only from the
 //     reloaded page and only while its bundle is still stale; RED: the round-1 stamp, written 800 ms before the reload.
 // Run: node scripts/test-boot-phase.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

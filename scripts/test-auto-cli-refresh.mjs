@@ -3,6 +3,7 @@
 // function is the whole policy — pin the owner's requirements: fast workflow
 // bursts refresh within minutes (drift trigger), idle accounts are NEVER
 // polled (the ban-postmortem's signal stays impossible), floors serialize.
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { decideCliRefresh } = require('../src/account-pool-auto.js');

@@ -14,6 +14,7 @@
 //   §8 Layer 1's slots — the status line + the base-change line + the interrupted banner (PURE tables)
 //   §9 THE WORD CENSUS — no deb / apt / AppImage / root / sha256 / sudo in any string this lane wrote, en/zh/ja (planted controls)
 //   §10 every new key has zh + ja and is a t() literal   §11 an app with no cwd starts in HOME (a real /bin/pwd spawn)
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

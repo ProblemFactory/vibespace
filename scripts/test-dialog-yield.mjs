@@ -5,6 +5,7 @@
 // focus may enter it) as tables, each beside a MUTANT copy that is RED on its row; the wiring of the shell, the host, the
 // window manager's per-client rules and the shared CSS pinned in their sources. The census of every call is
 // test-architecture §103; the rendering (a real Chrome, the base RED) is test-dialog-yield-chrome.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

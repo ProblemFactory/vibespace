@@ -12,6 +12,7 @@
 //   §4 the measurement on the owner's shape (6 groups, 500 Activity entries WITH detail, 750 members): bytes per
 //      Activity line and per status, base vs now, and which open windows repaint for an Activity line (printed)
 // Run: node scripts/test-task-group-fanout.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

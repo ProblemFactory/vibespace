@@ -11,6 +11,7 @@
 //   §4 the auto-cli idle rung keeps probing a lapsed member at its 30–60 min cadence (no failure backoff to hours)
 //   §5 wiring: the reader every gate consults, the act list, the auth-failure path, the evidence edge, the ⟳ route
 //   §6 the words: roster chip, pool submenu, zh/ja
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

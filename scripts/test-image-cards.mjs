@@ -18,6 +18,7 @@
 //   ⑥ ACP/claude inline image blocks keep their data: URL inside the same wrapper
 //   ⑦ wiring: capture-phase error delegate (broken thumbnails), fold hides the
 //      card's DOM (lazy thumbnails never fetch), i18n, ci registration
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';

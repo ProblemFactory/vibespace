@@ -17,6 +17,7 @@
 // failing / passing pair; what the schema cannot carry (excess cells, an attributed tag) stays raw; a 5th control: the
 // literal rule stubbed ⇒ the trigger leg + fixture 32 go red.
 // Run: node scripts/test-doc-wheel.mjs
+import './scratch.mjs';
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'; import { fileURLToPath, pathToFileURL } from 'node:url';
 const { Transform } = await import('@tiptap/pm/transform');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

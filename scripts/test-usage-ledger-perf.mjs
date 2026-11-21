@@ -6,6 +6,7 @@
 // request slow, heartbeat terminations, reconnect storms. This suite pins the
 // fix: a sorted view with binary-searched intervals, a 1s readdir throttle,
 // and an interval memo — with brute-force parity so the numbers never drift.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

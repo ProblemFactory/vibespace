@@ -5,6 +5,7 @@
 // real-shaped — Lark contact/v3/users, Slack users.info), each adapter's call under a stub vendor (paced BEFORE every
 // request, metered, the scope refused BY NAME, the bytes bounded at 256 KiB, NO token to the picture host), the
 // route's bounds + the engine's order as a census of the source, and patched copies that must turn it red.
+import './scratch.mjs';
 import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';

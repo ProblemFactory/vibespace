@@ -20,6 +20,7 @@
 //      title, the policy a chip, the method + URL + sha256 in the fold above Approve)
 //   ⑤ RED controls: a raw sha / mime / id PLANTED outside the fold of each of the three is RED by name; each fold's mark
 //      stripped is RED; the .270 words (the old attachment meta, the old image meta, the old For-you item) are RED
+import './scratch.mjs';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';

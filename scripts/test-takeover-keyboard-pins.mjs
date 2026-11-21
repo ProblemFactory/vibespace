@@ -6,6 +6,7 @@
 // src/lib/terminal.js, src/lib/form-window.js, src/lib/vault-reveal.js, src/lib/i18n-zh.js, src/lib/i18n-ja.js and public/index.html BY NAME,
 // so ci.mjs's affected rule selects this suite on a change of any of them.
 // Run: node scripts/test-takeover-keyboard-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');

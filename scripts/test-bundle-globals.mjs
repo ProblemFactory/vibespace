@@ -14,6 +14,7 @@
 // esbuild could not resolve to a binding — i.e. a free variable. Cross that
 // with the symbols our own source actually defines and the check becomes
 // exact: no browser needed, no false positives from grammar/base64 blobs.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 

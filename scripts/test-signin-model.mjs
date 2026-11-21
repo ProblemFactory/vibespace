@@ -12,6 +12,7 @@
 //     path / pty / parse leaks); signinShowVerdict (stale / older-run / show).
 //  ⑥ (lane door-signin-fixes) the last line is cut at the code prompt; the fixed sentence of a
 //     silent death after a code; the card's «why» masks what followed the prompt; signinWallOf.
+import './scratch.mjs';
 import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';

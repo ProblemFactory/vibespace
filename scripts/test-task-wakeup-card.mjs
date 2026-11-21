@@ -5,6 +5,7 @@
 // (promptSource ⇒ user's own words ⇒ never a notification card) made it render
 // as an invisible "You" bubble. origin.kind (authoritative, JSONL top-level)
 // must win; the text-shape check covers transports without the origin field.
+import './scratch.mjs';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { MessageManager } = require('../src/message-manager.js');

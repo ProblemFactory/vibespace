@@ -4,6 +4,7 @@
 // the box — so this pin ran nowhere without one): the mail frame's applied height re-judges the live set. It reads the file
 // it pins BY NAME, so ci.mjs's affected rule selects this suite on a change of it.
 // Run: node scripts/test-channels-aggregate-ui-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

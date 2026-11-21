@@ -8,6 +8,7 @@
 // ⑨ (int254, the leg the lane left): the ENGINE (src/server/apps-engine.js) over that machine half — register of an unwitnessed
 // exec = ONE For-you item, Accept records it with its variants; a witnessed Flatpak recorded directly; sudo / pkexec ⇒ needs_root on
 // every path; remove = a proposal whose Accept runs the registered recipe (a PATH stub) and the row leaves; the witness drops covered rows.
+import './scratch.mjs';
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';

@@ -8,6 +8,7 @@
 //   ① who-may-use: the 36-cell table (scopeOf / mayAttach / whoMayUse / useStamp / usePatchVerdict / agentUseOf),
 //      join-vs-launch, the window verdicts, the cap — and the refusal WORDS census (no command line in any refusal).
 //   ③a the late-key verdict's order + its words (the lineage of a keyless / forked / remote / held-elsewhere session).
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');

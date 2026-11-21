@@ -12,6 +12,7 @@
 //   ⑤ the sign count over the store's own rules (bump → reconcile): every signature's count strictly above the last
 //   ⑥ the re-check (never trusting the kernel): algSupported, clientDataVerdict, requestVerdict — one example per row
 //   ⑦ PURE: the module imports nothing
+import './scratch.mjs';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';

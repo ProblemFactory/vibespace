@@ -4,6 +4,7 @@
 // machine's dialog. It reads the file it pins BY NAME, so ci.mjs's affected rule selects this suite on a change of it (the
 // name drops «-chrome»: no fast suite carries a chrome name — test-ci-gate).
 // Run: node scripts/test-mac-ard-signin-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);

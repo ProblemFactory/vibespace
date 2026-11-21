@@ -25,7 +25,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import { format as formatArgs } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
-import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, reachesScratch, lateLoads, envCensus, outsideReaders, OUTSIDE_ROW, SELF_LOOKUP, KIT_HANDED, KIT_HANDED_READ, kitNamesOf } from './hub-home-census.mjs';   // §57 + §113: the one reader of a server.js spawn
+import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, reachesScratch, lateLoads, envCensus, outsideReaders, OUTSIDE_ROW, PICK_C, outsideByTier, SELF_LOOKUP, KIT_HANDED, KIT_HANDED_READ, kitNamesOf } from './hub-home-census.mjs';   // §57 + §113: the one reader of a server.js spawn
 import { trackedFiles } from './tracked-files.mjs';   // lane grants-unify: §97 (b) lists src via git ls-files
 import * as acorn from 'acorn';   // lane grants-unify (verify F3): §97 (a) judges each reader's function body, not its lines
 import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';
@@ -8588,6 +8588,15 @@ await section(async () => {
   const outs = outsideReaders(path.join(REPO, 'scripts'), ord.outside);
   ok(outs.length > 0 && outs.length <= OUTSIDE_ROW.max && OUTSIDE_ROW.why.length > 40,
     `§113 THE ROW: ${outs.length} of the ${ord.outside.length} suite / debug files with no path to scratch.mjs load a home-reading product module or read the home themselves (≤ ${OUTSIDE_ROW.max}): ${OUTSIDE_ROW.why}`, outs.length);
+  // (e6) PICK C (主开发 r1222: EVERY FILE, one line a file, no «pure» class): every test-* / dbg-* file takes the scratch import
+  // first. The fast part is in: nothing outside is a fast row or a file of no row; what is left is HEAVY rows (their own commit,
+  // a hosted proof first), and the count may only fall
+  const byTier = outsideByTier(ord.outside, read('scripts/ci.mjs'));
+  const tierCtl = outsideByTier(['test-a.mjs', 'test-b.mjs', 'dbg-c.mjs'], "  { name: 'test-a', tier: 'fast', why: '' },\n  { name: 'test-b', tier: 'heavy', why: '' },");
+  ok(byTier.fast.length === 0 && byTier.other.length === 0 && byTier.none.length === 0 && byTier.heavy.length <= PICK_C.heavyLeft && PICK_C.why.length > 40
+    && tierCtl.fast.join() === 'test-a.mjs' && tierCtl.heavy.join() === 'test-b.mjs' && tierCtl.none.join() === 'dbg-c.mjs',
+    `§113 PICK C: ${ord.reach.length} of the ${ord.files.length} suite / debug files take the scratch import first; outside it: ${byTier.fast.length} fast rows, ${byTier.none.length} files of no row, ${byTier.heavy.length} heavy rows (≤ ${PICK_C.heavyLeft}: ${PICK_C.why}) — CONTROL: a planted fast row, heavy row and file of no row are told apart`,
+    JSON.stringify({ fast: byTier.fast, other: byTier.other, none: byTier.none }));
   // (d) ONE VERDICT: scratch.mjs decides by src/home-verdict.js, and no copy of its functions lives anywhere else
   const copies = ['server.js', ...fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => 'src/' + f), ...fs.readdirSync(path.join(REPO, 'scripts')).map((f) => 'scripts/' + f)]
     .filter((f) => /\.(m?js)$/.test(f) && f !== 'src/home-verdict.js' && /\b(?:function\s+|(?:const|let)\s+)(?:suiteRehome|hubRehome|rehomeEnv|namesUnder)\b/.test(read(f)));

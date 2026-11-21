@@ -9,6 +9,7 @@
 //      rules + the hub's re-judge   §5 the capability gate (+ RED control: the gate removed sends the op)   §6 the access
 //      layer: cache, single flight, hello, install, old agent, a Linux machine   §7 the route   §8 the dialog (list,
 //      filter, keyed rows, Examples / Recent, the update words) + the action-row rule (RED control: the base CSS)
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

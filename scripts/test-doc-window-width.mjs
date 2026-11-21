@@ -44,6 +44,7 @@
 //      Pins: one door (toolbar / Ctrl+K / the bar), the bar keyed to the caret, read-only opens, the palette steps aside for
 //      [data-own-mod-k], SafeLink autolink/paste only for a URL with its scheme. The chrome half = test-doc-window.mjs §14.
 // Run: node scripts/test-doc-window-width.mjs   (in-process, ~0.06 s; the chrome half = scripts/test-doc-window.mjs §10)
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

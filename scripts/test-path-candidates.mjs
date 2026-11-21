@@ -23,6 +23,7 @@
 //     completion; skipped with its time), the law seeded over 1500 cases — RED CONTROLS: a late one called absent, a completion that
 //     stops the walk, a failed one called absent
 // Run: node scripts/test-path-candidates.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const api = require('../src/path-candidates.js');

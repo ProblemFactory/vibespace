@@ -9,6 +9,7 @@
 // the stub is a SHELL, and on that box one free call took 14.9 s — the half stub had not printed when the hub's 300 ms bound
 // answered TIMEOUT (0 bytes, honestly: nothing had arrived). No row judges whether a shell starts within a bound any more: a
 // stub that ANSWERS gets 60 s (the bound answers only for `sleep`), and §1's hold lasts until the child HAS answered.
+import './scratch.mjs';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';

@@ -13,6 +13,7 @@
 // tab / minimized / desktop compose; suspended while any holds, the settle +
 // pinned re-tail runs when the last clears) and WindowManager.syncHiddenViews
 // derives the three from the classes it owns at every site that changes them.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

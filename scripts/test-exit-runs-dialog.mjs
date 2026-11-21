@@ -53,6 +53,7 @@
 //      only); two failures ⇒ one note, one 15-s timer; two re-renders over one note ⇒ one ask; the dots probe only on screen.
 //      CONTROLS (p) a probe that rebuilds, (q) _autoTestHosts swapping the row, (r) a note made again, (s) asked every pass
 // Run: node scripts/test-exit-runs-dialog.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

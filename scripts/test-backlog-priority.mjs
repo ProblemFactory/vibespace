@@ -27,6 +27,7 @@
 // numbering; (4b) the unclaimed-HIGH line's byte budget, shared across
 // groups, and claimants no longer running — each with a control.
 // Run: node scripts/test-backlog-priority.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

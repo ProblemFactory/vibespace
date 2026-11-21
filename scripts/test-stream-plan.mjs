@@ -24,6 +24,7 @@
 //      same feedback: the vector's packets missing, a phantom per run, the last run renumbered from the base); sendEstimator: a
 //      lossless 9.6 Mbps burst stream ⇒ ~9.6 Mbps, a 4.8 Mbps bottleneck ⇒ ~4.8, a still picture's trickle ⇒ nothing yet (RED
 //      CONTROL: werift's estimator fed as its sender feeds it — each packet noted under the burst's LAST number ⇒ ~1/10)
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';

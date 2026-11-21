@@ -27,6 +27,7 @@
 //     the archive already holds the copies), the line reader's handle (alone: thrown named; after a read error: its closeError),
 //     an archive append whose destination cannot open (the source closed, nothing leaks)
 // Sparse files only (fs.truncateSync — no disk, no load).
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -8,6 +8,7 @@
 // pattern; a client `:id` matches only a route parameter). The census is printed; a path no router serves is RED.
 // Controls: the pre-fix router (the three owner routes commented out) is RED by name; a route registered AFTER `:id`
 // that `:id` swallows (adopt-prefill below GET …/apps/:id) is RED too. PURE text, in-process, ~100 ms.
+import './scratch.mjs';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

@@ -16,6 +16,7 @@
 //      own, a pooled one's member); the whole catalog when no query (next()); the answer never names where a key lives;
 //      the refresh door: an agent's token / another site ⇒ 403 (the fake unhit), the vault ⇒ 423, the minute ⇒ 429 +
 //      Retry-After, a person ⇒ 200
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -12,6 +12,7 @@
 //   §3 THE SPIES: no token byte on any outbound path of a merge — console, stdout/stderr, the roster broadcast, the
 //      merge's answer, the archive's name — and OUR token in no file; a planted leak per path is caught
 // In-process, no network, no real CLI; token shapes built at runtime (never a literal).
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

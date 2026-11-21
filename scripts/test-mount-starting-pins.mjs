@@ -4,6 +4,7 @@
 // Each block reads the file it pins BY NAME, so ci.mjs's affected rule selects this suite on a change of that file (the two dictionaries
 // spelled whole — a path built in a template literal is invisible to that rule; 主开发's 00:49Z verdict on lg-text-legs-2-u1u2).
 // Run: node scripts/test-mount-starting-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);

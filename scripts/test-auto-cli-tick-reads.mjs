@@ -17,6 +17,7 @@
 //   §4 the WORK (synchronous fs calls a tick makes) is linear in the conversations and the members, never their
 //      product, and the LOOP leg (each fs call made 150 µs slow, the NFS shape) holds the tick's synchronous
 //      segment under 250 ms — the reverted copy reads it red on both.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

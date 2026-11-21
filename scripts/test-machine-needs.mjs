@@ -12,6 +12,7 @@
 //      its agent…») — every code an agent-version sentence is keyed on opens it, the pairing sheet for a paired dial device and
 //      Manage agents › Machines otherwise, as a button and as a toast's action; CONTROLS: the door's code check emptied ⇒ the codes
 //      leg RED; the runs dialog stripped of its door ⇒ the surface leg RED
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

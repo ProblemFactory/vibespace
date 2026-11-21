@@ -15,6 +15,7 @@
 //   ⑤ RED CONTROLS (patched sources, never src/): a new file reading shards, a new scope reading shards in a rowed file,
 //      a new file reaching into the cache — each red; a reader row whose function is gone — red
 // Run: node scripts/test-ledger-readers-census.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

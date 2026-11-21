@@ -12,6 +12,7 @@
 //   alone — census + RED control), the join box keeps no state, every refusal the routes can name has words (a drift census
 //   over the server's codes + a RED control), the words themselves, the menu row and the mint door.
 // Heavy twin: test-webhook-ui-e2e (a real server + Chrome). Run: node scripts/test-webhook-ui.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

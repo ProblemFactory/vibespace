@@ -11,6 +11,7 @@
 //   ⑤ the old dead-end pitch line is gone.
 //   ⑥ (lane signin-card-real-screen) the guided modal's terminal re-attaches on a socket reconnect (the naive41 dead modal);
 //   ⑦ the Advanced road's Claude «Log in» = the card's own login run on its raw screen (one run per account).
+import './scratch.mjs';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

@@ -11,6 +11,7 @@
 //     (a URL a person or a plugin manifest names) call safeFetch and never fetch(); an unlisted site is RED — RED: a raw
 //     fetch planted in plugin-install
 // Run: node scripts/test-fetch-encoding.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';

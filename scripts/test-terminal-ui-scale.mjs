@@ -8,6 +8,7 @@
 // 1) with the font size scaled back up so nothing visible changes. This suite
 // pins the wiring; scripts/test-terminal-zoom-select.mjs (heavy, chrome) drives
 // real mouse events through the fix. Run: node scripts/test-terminal-ui-scale.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

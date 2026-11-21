@@ -19,6 +19,7 @@
 //      the REAL window registry over the menu's own ctx — in the regular class: a files window holds none (the folded ⚙'s
 //      «Global settings» is no reason), a conversation, a download viewer and every window of the compact class do; a gone
 //      window holds nothing (the PURE rule + its RED control: test-phone-split ⑩)
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

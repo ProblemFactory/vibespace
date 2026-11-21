@@ -13,6 +13,7 @@
 // blocked ⇒ the LAST spent bucket's reset, free ⇒ the EARLIEST, the same
 // B-8b12 refusal, and a spent bucket whose reset passed blocks nothing.
 // Run: node scripts/test-usage-eta.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

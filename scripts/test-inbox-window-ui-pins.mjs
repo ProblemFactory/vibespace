@@ -4,6 +4,7 @@
 // stay there: ⑳ the run card and the agent's request card render VERBATIM, never markdown. They read the window module BY
 // NAME, so ci.mjs's affected rule selects this suite on a change of it.
 // Run: node scripts/test-inbox-window-ui-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

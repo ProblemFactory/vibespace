@@ -12,6 +12,7 @@
 //   convCaps    a CACHE with a TTL and an honest degrade
 //   offers      both halves must allow it; `unknown` ⇒ not offered + a reason
 //   freshness   answers "how long ago", so it reads the clock it is HANDED
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

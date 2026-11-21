@@ -11,6 +11,7 @@
 // Lane artifacts-by-intent: the fixture's rows carry the server's verdict (src/artifacts.js intentOf — real blocks);
 // ①–④ pin the KIND grouping (now a secondary choice: the stored view says kind), ⑩ the INTENT default — the bands, the
 // folder heads, the distinguishing names, the 最近 rule, the phone ⋯ / ✕.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

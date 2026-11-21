@@ -6,6 +6,7 @@
 // with "pooled target is not logged in" — a pool whose entire purpose is to
 // route around an unusable account had turned into a hard stop with no way
 // forward from the UI. A dead target must RE-POINT, not throw.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

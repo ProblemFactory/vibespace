@@ -5,6 +5,7 @@
 // with ties — stable and deterministic; recentOf (code included) + the band rule; rowWords per kind (services say their
 // state); countLine; sortRows / railOf / railRows (the window's); listPlan; listPlan LINEAR in WORK at 250 → 500 → 1 000 rows (scripts/work-meter.mjs; the ms only printed). Each table row
 // has a control.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

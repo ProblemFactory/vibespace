@@ -15,6 +15,7 @@
 //      changes nothing; the person's reveal still goes there first, also while its switch is QUEUED; a switch hands the focus to the
 //      shown desktop's front window, never to an agent's that arrived unasked; controls for each.
 // The census (every singleton's re-open + every open-or-focus site goes through the door) is test-architecture §62/§62c.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

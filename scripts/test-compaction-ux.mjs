@@ -6,6 +6,7 @@
 // the attach meta carries it, the client guards Stop with a two-step confirm
 // during it, and the error renders as a guidance card with a Compact-now
 // button that sends through the live input.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

@@ -3,6 +3,7 @@
 // hub legs and every mutant CONTROL stay there): data/bin/agent-browser exists, is executable, is a node script carrying src/browser-verbs.js's SHIM_MARKER, and reads no env, opens no network, spawns nothing. Each reads the file it pins BY NAME, so ci.mjs's affected rule
 // selects this suite on a change of that file.
 // Run: node scripts/test-browser-verbs-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

@@ -7,6 +7,7 @@
 // It reads every src/lib file BY NAME (src/lib/app.js, src/lib/desktop-manager.js, … — the walk names the directory 'src/lib'), so ci.mjs's affected
 // rule selects this suite on a change of any of them.
 // Run: node scripts/test-phone-desktop-sync-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 let pass = 0, fail = 0, skipped = 0;

@@ -7,6 +7,7 @@
 //   3. server.js's registerWsHandler call site passes EVERY contract key
 // A new dependency added to the destructure without updating the contract (or
 // the call site) fails here instead of surfacing as `undefined` mid-create.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

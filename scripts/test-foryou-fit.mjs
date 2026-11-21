@@ -13,6 +13,7 @@
 //      height (_dockOver); the open item stays the strip's item while it waits (law 7); its detail is open (_dockDetail)
 //   ④ THE WIDTH LADDER is ONE shared helper (scripts/lib/fit-ladder.mjs): the nine widths, the phone's, a verdict source that
 //      evaluates, and the door suite uses it
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

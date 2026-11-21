@@ -4,6 +4,7 @@
 // codex ⟳ refreshes codex, auto-resume's continue prompt is labelled, a 0%
 // bucket says "not started". Functional where the code is a module; pins for
 // the client + wrapper text.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

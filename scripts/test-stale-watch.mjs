@@ -34,6 +34,7 @@
 //      the ONE capture listener, the four composers that rebuild carry the mark — text pins, each site with its own red
 //      · the press marks the box (主开发 04:04Z / 04:19Z): «Draft from my recent decisions»'s OWN press code run over a fetch stand-in —
 //      the billed proposal holds; RED: the same code without its mark · every mark is imported where it is called (each with its red)
+import './scratch.mjs';
 import { STALE_RETRY_MS, STALE_HOLD_MS, STALE_WORDS, staleRetryWait, staleVerdict, staleNotice, staleLook, heldWords, markTyped, markLanded, wasTyped, markLandedOnSave, carryUnsaved } from '../src/lib/stale-watch.js';
 import { waitServerReady, STARTING_CAP_MS } from '../src/lib/boot-ladder.js';
 import fs from 'node:fs';

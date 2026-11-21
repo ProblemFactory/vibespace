@@ -11,6 +11,7 @@
 //     settles VC_SETTLE_MS, makes the sidebar / nav / windows what a fresh load builds; the window manager refits and the
 //     rail leaves with its words — RED CONTROL: the base's frozen `this.isMobile = window.matchMedia(...)` is caught
 // Run: node scripts/test-viewport-class.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

@@ -12,6 +12,7 @@
 //      a running source stopped through the keeper's own Stop (a scratch `sleep` is its browser) before the copy, a leased
 //      one refused by the holder's name, an agent token refused.
 // Run: node scripts/test-browser-profile-clone.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

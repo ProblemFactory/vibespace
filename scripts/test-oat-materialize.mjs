@@ -28,6 +28,7 @@
 // the slot law, the capability gate) and per verify-r1 finding. The secret's spies + the one-writer
 // census (behaviour + structure) live in test-oat-mint §8. In-process, no network, no real CLI.
 // The store's file acts are ASYNC (one queue, fs.promises): every act here is awaited (so / nv / co).
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

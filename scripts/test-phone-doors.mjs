@@ -23,6 +23,7 @@
 //     §6b guard 10 holds across a switch, the bar's bottom section starts with Desktops, i18n zh / ja (the chrome legs:
 //     test-duo-layout ⑧)
 // Run: node scripts/test-phone-doors.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

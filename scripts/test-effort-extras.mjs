@@ -17,6 +17,7 @@
 //      server (effortExtras: []) ⇒ absent
 //   ④ CONTROL: a patched copy with the replace restored ⇒ ③ goes red
 // Run: node scripts/test-effort-extras.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

@@ -4,6 +4,7 @@
 // incident: linked / host-held / both (held wins) / identity-mismatch /
 // never-signed-in / ship gate / dial / api-key. Six incidents happened
 // because this matrix only ever ran in users' browsers; now it runs here.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

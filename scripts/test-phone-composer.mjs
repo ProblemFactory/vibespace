@@ -8,6 +8,7 @@
 // lane phone-take-photo (owner 2026-11-09 «为啥我在手机上添加图片的时候不能拍照»): the sheet's rows are 拍照 / 照片 / 文件 /
 // 文件夹 — 拍照 = the camera door's OWN input (images, capture="environment", one shot), shown only on a finger device
 // (isTouchDevice), its shot on the picked image's road; the gallery input keeps `multiple` and never gains capture.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

@@ -11,6 +11,7 @@
 //      dialog with no Save is not counted; a helper that opens another dialog is not followed
 //   ③ the shell's wiring pin: ✕, the backdrop and Escape (the overlay's and the idle one) go through the guard's
 //      `dismiss` — MUTANT ✕ straight to `close` ⇒ RED
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';

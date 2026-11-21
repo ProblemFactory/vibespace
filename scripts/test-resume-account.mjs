@@ -15,6 +15,7 @@
 //   ⑤ RED control = the old path: no verdict ⇒ every refusing row goes straight to the create ⇒ the toast shape
 //     (`Account error: <message>`, no door); the last-resort toast now names both doors; the press census (chat-view
 //     asks before it resumes) with a planted copy that does not ask
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

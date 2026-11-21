@@ -9,6 +9,7 @@
 //   ⑥ the table's edits (find / drop / policy / switch / a removed profile) and the card's data (P2's contract)
 //   ⑦ lane passkey-sink (a kernel with `webauthn`): the row VibeSpace makes there (its shape), kernelFlags (UV only when the owner
 //      decided THIS ceremony), signOrder, the three new reasons
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

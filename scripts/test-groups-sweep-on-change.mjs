@@ -17,6 +17,7 @@
 //   ⑧ THE BENCH at the owner's shape (358 groups, 724 member rows, 561 ended ids): ms per user-state write, before / after.
 // ⑥ and ⑦ are green on master (every write swept there); their red controls are PATCHES THIS SUITE CARRIES on this tree's
 // channels-wiring.js — the members out of the signature, the ledger out of it, the ten-minute bound out — never a lane branch.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

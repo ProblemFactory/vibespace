@@ -29,6 +29,7 @@
 //   (the whole path); the kind word as a substring; the Path sort by the path's tail; the host on every remote row;
 //   the suffix kept inside a folder head; (r3) the reader's r2 type rule; the showing not sticky forward; a folder keyed
 //   by its tail; the names' r2 host rule; the plan ignoring a peek.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -5,6 +5,7 @@
 // sender, never becomes one), the caller's text through channel-record's belt (a frame tag inerted), `raw` = the first
 // 8 KiB said when cut, the record id the repo's `${adapterId}:${convId}:${vendorId}`, a `vswh_` body refused at the door,
 // the `fact` rule over the mapped facts only. Fast, PURE. Run: node scripts/test-webhook-record.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const WR = require('../src/webhook-record.js');

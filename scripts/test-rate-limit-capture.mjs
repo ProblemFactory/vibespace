@@ -4,6 +4,7 @@
 // this pins the parse + the identity-group cache discipline that the server
 // wiring depends on. Real captured-sample shapes + the anti-poison fetchedAt
 // rule (a resetsAt-only event must not promote a stale file to "freshest").
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

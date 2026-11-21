@@ -12,6 +12,7 @@
 // 后端 popover row paints pixels) is test-sidebar-scroll's, heavy. Measured against Chrome (an <img> of each fixture,
 // lane backend-icons): every RED fixture below is a load error there too except the DOCTYPE (a policy, stricter than
 // Chrome); every GREEN one loads.
+import './scratch.mjs';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';

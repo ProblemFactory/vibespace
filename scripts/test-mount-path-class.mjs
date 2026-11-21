@@ -20,6 +20,7 @@
 //      ROUND 2 (law 3 made exact): a storage mount or product row BELOW a view's source is storage through the view; equal
 //      mount points ⇒ the last row before the view; rows after it inside it never its source; no depth rule; disk words
 // Run: node scripts/test-mount-path-class.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

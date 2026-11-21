@@ -17,6 +17,7 @@
 //      name they make (a typed name wins), the seed as people paste it, the standard's defaults and 高级's choices, the body
 //      each way sends (never both ways' fields), every refusal by name with its field (no link, a hotp link, a short seed, a
 //      non-base32 seed, no name, a bad name, 5 digits), and the model computes no code (no hmac reaches it)
+import './scratch.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';

@@ -12,6 +12,7 @@
 //     the body under it (the body class IS the contract)
 //   CONTROLS: the pre-fix session-props.js — the base 2.369.348 file (`git show c1dfc1af:…`, when this clone has it)
 //   and a patched copy of today's file with the fix taken back out (always) — is RED on ①; planted CSS forks are RED on ②
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';

@@ -4,6 +4,7 @@
 // the fading boot splash takes no clicks — pointer-events none in the statement that starts the fade (src/client.js), with its text-only
 // CONTROL. The file is read BY NAME, so ci.mjs's affected rule selects this suite on a change of it.
 // Run: node scripts/test-browser-live-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 let pass = 0, fail = 0, skipped = 0;

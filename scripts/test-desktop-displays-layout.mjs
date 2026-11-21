@@ -15,6 +15,7 @@
 //   §8 THE PER-MACHINE CAP: a stream per display + one (a phone), at most 4 — 1 display ⇒ 2 (as before), 2 ⇒ 3, 3+ ⇒ 4;
 //      the daemon judges it with streamCapOf (src/agentd/stream-host.js — before the source and again with its displays)
 //   §9 (commit 2) ② asks each stream to `share` (2–4): the hub's parse of the start body keeps it for a display, drops the rest
+import './scratch.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';

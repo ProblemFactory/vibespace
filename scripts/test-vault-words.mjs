@@ -17,6 +17,7 @@
 //   ④ THE AGENT'S WORDS — every `agentWords(<what>)` names where (the TOLD clause is the function's own, src/vault-blocked.js)
 //   ⑤ MUTANTS (the census over a patched copy of the text, in memory): a new hand-written locked sentence; the channels card
 //      without its TOLD; the pty-wrapper wait without its facts; an agentWords without where; a dead row ⇒ each RED
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';

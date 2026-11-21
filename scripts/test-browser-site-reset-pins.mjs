@@ -3,6 +3,7 @@
 // scripts/test-browser-site-reset.mjs (its behaviour legs and every mutant / browser CONTROL stay there): the CLI prints THE shared-loop sentence on a failed or timed-out verb (data/bin/vibespace-browser + src/browser-stuck.js).
 // Each block reads the file it pins BY NAME, so ci.mjs's affected rule selects this suite on a change of that file.
 // Run: node scripts/test-browser-site-reset-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

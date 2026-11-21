@@ -53,6 +53,7 @@
 //
 // Every leg runs its NEGATIVE CONTROL first on a planted source / dictionary: it must go red; the same plant worded through
 // t() must stay green. Run: node scripts/test-ui-language.mjs [--lower] [--print]
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

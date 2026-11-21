@@ -10,6 +10,7 @@
 //      stash branch says "Sent" goes red.
 //   §3 every word has zh + ja; the strip's wiring: a row's ➤ = send([row]) beside ✕, Send all = send(every row), ONE send
 //      door painting the label, rows held still while out, the toast carries the words.
+import './scratch.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { createRequire } from 'node:module'; import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dictEntries } from './i18n-extract.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

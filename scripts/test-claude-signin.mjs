@@ -45,6 +45,7 @@
 //      cue within N, the code still logs in; ONE run per account (a second start JOINS); a run's TTL
 //      kills its own helper tree only — another PTY on the SAME account dir (the tour's terminal)
 //      and another account's run live on.
+import './scratch.mjs';
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';

@@ -5,6 +5,7 @@
 // through one rule, the producer's refused-shape sentence, the re-authorize dialog's reconnect read and Escape / close seams.
 // Each reads the file it pins BY NAME, so ci.mjs's affected rule selects this suite on a change of that file.
 // Run: node scripts/test-lark-refresh-stall-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);

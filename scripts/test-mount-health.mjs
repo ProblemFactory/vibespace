@@ -4,6 +4,7 @@
 // step filing per strike, a verdict pausing a person's read — each must read RED by the same judge) + ONE fixture-driven
 // engine leg: a fake SafeFs whose stat hangs on one mountpoint drives the REAL canary → the episode → ONE item → the
 // usage walk / discovery gates skip (counters) while a person's read runs → the mount answers → resumed. No real FUSE.
+import './scratch.mjs';
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';

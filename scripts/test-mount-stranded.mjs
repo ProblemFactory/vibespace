@@ -11,6 +11,7 @@
 //      p but is not mounted (files.js refuses ops under it with 503);
 //   ③ the TASK.md mirror skips shadowed context folders and retries on
 //      mounts-updated.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

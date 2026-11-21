@@ -19,6 +19,7 @@
 //     user-todos-row's own agoText) at all three sites, and nothing in the card draws an age of its own (+ its control); on the phone a
 //     row's meta that does not fit beside the age takes a SECOND line, never cut (chat.css's phone block; + its control)
 // PURE + in-process.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

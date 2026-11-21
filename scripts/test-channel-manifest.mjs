@@ -5,6 +5,7 @@
 // other module is the shipped one, untouched): its settings rows reach the schema, its integration row the registry
 // (with its own validator), the engine registers its module whole (consent row, raw-API fence, blocks rung, glyph,
 // option row read by role) — then register() refuses a malformed vendor by name.
+import './scratch.mjs';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';

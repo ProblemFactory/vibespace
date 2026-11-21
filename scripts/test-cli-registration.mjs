@@ -17,6 +17,7 @@
 //      test-architecture §94: the draft child is a serviceEnv site (a MUTANT with no env is RED)
 //   ⑤ the hosted runner's build (B-9ff2): ci.yml's fast job (part 1) runs the --auto road over the runner's own claude file and
 //      keeps the draft as an artifact — never a run, never a gate; CONTROL: no step, or a step that can fail the job, is RED by name
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

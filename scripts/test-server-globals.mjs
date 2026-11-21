@@ -8,6 +8,7 @@
 // catches. This gate does a REAL scope analysis (acorn, already a transitive
 // dep) over every server-tier file: any identifier read that resolves to no
 // binding and no known global fails the build.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -31,6 +31,7 @@
 //     gap is swept within the gap (the kb: «after an archive, a sender waiting on that conversation is told after at most
 //     the sweep already running, 5 s, and one more sweep»).
 // The scratch lives under os.tmpdir() (HOME is the drill's: no real transcript is read); nothing listens, no CLI runs.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

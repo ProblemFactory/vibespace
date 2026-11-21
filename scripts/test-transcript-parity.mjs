@@ -12,6 +12,7 @@
 //
 // The ops are DARK: this suite is their only caller until the switchover
 // round; production keeps reading through the server-hosted service.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

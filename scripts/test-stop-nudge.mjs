@@ -8,6 +8,7 @@
 //   §1 the PURE table: every `why`, the first-rule order, no turn start ⇒ the time rule; control = the verdict without the first rule
 //   §2 the route over a real express app with fixture sessions (claude + codex shaped); a free stop never asks the spend authorizer
 //   §3 the census: every agent bookkeeping write route stamps the witness (reads named exempt); control = a cut stamp
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

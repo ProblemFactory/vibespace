@@ -9,6 +9,7 @@
 // head (compression()) and a WebSocket push 15 ms after it finished — reaches the client answer-then-push, as plain
 // listen does; keep-alive, half-open, an upgrade whose head buffer carries a frame. CONTROL: a copy without acceptAs
 // (the bare front: Nagle on) ⇒ the answer waits ~40 ms for the delayed ACK and lands AFTER the push (RED).
+import './scratch.mjs';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';

@@ -13,6 +13,7 @@
 //   ⑦ wiring pins (cli-env install + broadcast, server.js hook, createReader dispatch, transcript-service
 //      prepare, ws-create fork-before-spawn, app.js caps merge + live update, arch/ci/docs registration)
 // Run: node scripts/test-opencode-serve.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

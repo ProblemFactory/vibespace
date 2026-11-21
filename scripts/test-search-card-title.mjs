@@ -12,6 +12,7 @@
 //      is MODEL/WEB-controlled and syncs to every client.
 //   ③ source pins: every search-card header path calls the one chip helper;
 //      the fold summary line in chat-view is untouched.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

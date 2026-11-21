@@ -5,6 +5,7 @@
 // files over Tailscale, the setting's off, every word in zh + ja. CONTROL: a copy without the trailing-dot strip is RED.
 // lane tls-pass-retry (2026-10-13): status-unreadable, the pass cadence (boot miss → 60 s → 300 s → 3600 s; a miss after a
 // served pass → 3600 s) and the raw probe line; CONTROL: a cadence that ignores "served since boot" is RED.
+import './scratch.mjs';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';

@@ -17,6 +17,7 @@
 // the person's pick); §6 F2 the child env is an allowlist (the verify's 28
 // planted names, 0 reach; the blocklist = RED control); §7 F3 the boot sweep +
 // stopAll on SIGTERM.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -10,6 +10,7 @@
 // ⑤ the setting (default OFF, said in its description, zh/ja words).
 // lane agent-window-no-pop (owner incident inc-mvhebl4n-rkvr, 2026-10-21 「design还是被强行弹出了」): an agent never changes
 // the arrangement of the desk a person is using — beside ONLY where he looks at that chat; else the chat's card + badge.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

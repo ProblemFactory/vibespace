@@ -8,6 +8,7 @@
 // proves: newer-wins both directions, sha-equal skip (no echo ping-pong),
 // traversal guard, capped skips are REPORTED not silent, and the ssh-only
 // rsync fallback triggers exactly when the device link is down.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

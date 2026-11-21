@@ -13,6 +13,7 @@
 //      list); a comment that names osascript is no site (control)
 //   §4 the wiring: the agent hands the window look + the screen table THE helper (`mac: macWindowLook`, its facts =
 //      streamScreenOf().look); a Mac's look / table have no argv under node; the pin is LaunchServices (`open -b`)
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

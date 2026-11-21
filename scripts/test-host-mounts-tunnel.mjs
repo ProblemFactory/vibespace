@@ -10,6 +10,7 @@
 // 127.0.0.1 → MachineMounts.mountPush (must pick via='tunnel') → independent
 // ssh verifies our files appear + read through the mount → unmount + cleanup.
 // Usage: node scripts/test-host-mounts-tunnel.mjs <hostId>
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import express from 'express';

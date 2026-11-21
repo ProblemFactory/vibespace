@@ -10,6 +10,7 @@
 //   ⑤ the picture memo keys (account, kind, id): a person's key unchanged, chat~ / bot~, the caps row's kinds + why
 //   ⑥ the badge is PAINT ON TOP (a CSS pin: z-index, the picture inserted before the badge); the brand marks exist,
 //     monochrome, no script
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

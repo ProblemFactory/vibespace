@@ -19,6 +19,7 @@
 //   §6 wiring census + RED controls
 //   §7 the REAL producer (usage-pool-engine recordRateLimitEvent): F1a / F1b on the env road, the FILE road (our
 //      materialized token file, a re-mint in place), F2 (a hot switch's in-flight reading) + its positive control
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

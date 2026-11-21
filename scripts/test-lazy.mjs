@@ -3,6 +3,7 @@
 // resolve live, methods bind, and — the incident — ASSIGNMENTS reach the real
 // singleton (a get-only Proxy silently swallowed `portForwards.plugins = x`
 // for 17 releases; publish was dead the whole time).
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { mk } = require('../src/server/lazy.js');

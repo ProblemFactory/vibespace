@@ -3,6 +3,7 @@
 // hub legs and every mutant CONTROL stay there): ④ — a pure composer with an unstaged call site is dead code: chat-view, chat-renderers, chat-input, chat-run-summary and chat.css call the PURE collab module. Each reads the file it pins BY NAME, so ci.mjs's affected rule
 // selects this suite on a change of that file.
 // Run: node scripts/test-collab-live-counter-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

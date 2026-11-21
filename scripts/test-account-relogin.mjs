@@ -3,6 +3,7 @@
 // command must target the EXISTING account dir (identity/pool membership
 // survive), and the attempt-baseline plumbing must never throw on accounts
 // that have no login-status file yet.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

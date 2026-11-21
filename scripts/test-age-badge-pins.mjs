@@ -3,6 +3,7 @@
 // hub legs and every mutant CONTROL stay there): the tree carries the cure (public/style.css: one line, each badge clear of its ring's label) and the taskbar badge draws the compact mark (src/lib/usage-meter.js). Each reads the file it pins BY NAME, so ci.mjs's affected rule
 // selects this suite on a change of that file.
 // Run: node scripts/test-age-badge-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');

@@ -3,6 +3,7 @@
 // each top process group, self-resolving), a conversation's own Chrome is told, a browser VibeSpace launches keeps its
 // daemon scratch off the RAM-backed /tmp, and a profile's disk budget is a reported verdict. PURE tables + one stubbed
 // watch run + a patched-copy control (a step that files per sample must read RED here).
+import './scratch.mjs';
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';

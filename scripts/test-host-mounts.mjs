@@ -8,6 +8,7 @@
 // Usage: node scripts/test-host-mounts.mjs <hostId> [publicHost]
 //   publicHost = the address the remote uses to reach us (default: Tailscale
 //   IP 100.87.42.107). Requires the remote to have /dev/fuse + curl + unzip.
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import express from 'express';

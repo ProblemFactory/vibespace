@@ -19,6 +19,7 @@
 //   §9 THE ONE COMPONENT: both windows mount src/lib/stream-stats.js with their chip as the summary and their picture box as
 //      the pin's frame; the numbers element left the strip (the chip's title carries the sentence); the details are a
 //      createPopover; the drags go through the ONE drag feed; the pill decides by class; no chart library
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

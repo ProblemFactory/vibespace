@@ -2,6 +2,7 @@
 // (prior blend → observation dominance), window-roll estimation semantics,
 // overlay, calibration prediction, and the stateful class (memo/invalidate)
 // against a temp anchor dir + a fake usageHistory ledger.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

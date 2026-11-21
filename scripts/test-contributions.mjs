@@ -39,6 +39,7 @@
 //      legacy builders are gone, the client's ws `error` consumers stay
 //      id-gated, the plugin host API exposes the three register* calls under
 //      the plugin's signal, docs + ci carry it (the 2.355.0 unstaged-wiring class).
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

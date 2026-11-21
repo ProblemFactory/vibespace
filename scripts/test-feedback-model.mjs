@@ -10,6 +10,7 @@
 //   ⑤ setStatus / publicRow / isMine / byNewest / openCount / paceVerdict — lane feedback-handled-verb: a handled record
 //      names the release that shipped the fix + a note (refused by name when malformed); a reopen clears them
 // Run: node scripts/test-feedback-model.mjs
+import './scratch.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';

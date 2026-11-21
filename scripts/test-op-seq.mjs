@@ -6,6 +6,7 @@
 // verbatim splice that puts the ring's frames into an `attached` payload.
 // Table-tested here; the wiring (real normalizers + the real broadcast + fake
 // ws clients) is test-attach-rebuild's §④, the browser end test-reconnect-storm.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

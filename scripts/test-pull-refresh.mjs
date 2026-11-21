@@ -3,6 +3,7 @@
 // The real chain (agentd + rclone + held readers) is test-device-mount-rclone's
 // B-35e3 leg; this suite pins the rules it cannot make deterministic.
 // Run: node scripts/test-pull-refresh.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import fs from 'node:fs';

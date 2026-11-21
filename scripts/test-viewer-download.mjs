@@ -10,6 +10,7 @@
 //   ④ the title-bar menu's Download is the same helper, offered on windows that carry a file
 //   controls: patched copies — the hex viewer unwired, the viewer's re-seat after ⟳ dropped, an unlisted kind — go RED
 // Run: node scripts/test-viewer-download.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

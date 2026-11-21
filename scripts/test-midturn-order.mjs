@@ -21,6 +21,7 @@
 //   §9 nothing else moves: streaming text under an afloat message edits its card; the turn's meta reaches its cards; a
 //      codex / acp normalizer never floats; every card writer places through `_place`
 //   §10 the kept chip says what happens next — en / zh / ja
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

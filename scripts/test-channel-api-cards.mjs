@@ -6,6 +6,7 @@
 // controls: each rule taken out of a mutant copy turns its row red. ④ (lane inline-receipts-compose-api): a proposal whose
 // CLI waits on it (`api … --wait` / `api wait`) is read INLINE — its receipt message is never filed; a CLI that stopped
 // waiting leaves it to the message road (the fallback).
+import './scratch.mjs';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';

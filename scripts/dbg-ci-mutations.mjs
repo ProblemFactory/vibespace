@@ -31,6 +31,7 @@
 // tool mutated and did not restore, and nothing else can look like it.
 // (The other half of the containment is the gate itself: a dirty tree earns no
 // `.git/ci-green` and `--heavy` refuses a verdict at t=0.)
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

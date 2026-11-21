@@ -10,6 +10,7 @@
 //     last-resort stash); the tree is clean after it, twice in a row; an admin's bare `git pull --ff-only` after it succeeds;
 //     a FAILED build leaves the tree clean too (the EXIT trap) and says so.
 // Run: node scripts/test-update-clean.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

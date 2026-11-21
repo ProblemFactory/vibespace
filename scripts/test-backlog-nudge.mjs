@@ -31,6 +31,7 @@
 //     `note: <nudge text>` on add / edit / claim, plus source pins;
 // (5) the setting row + its zh/ja keys + the wiring pins.
 // Run: node scripts/test-backlog-nudge.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';

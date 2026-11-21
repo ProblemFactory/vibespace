@@ -33,6 +33,7 @@
 //   ⑭ the chat: the CLI's LIVE «Not logged in» (`signin-wall`) → the card (one per conversation);
 //      «Send my message again» on a live wall STOPS the CLI first (kill → exited → resume); «/login»
 //      typed → the card (Codex / remote: the CLI's own answer); the server consumer names the record
+import './scratch.mjs';
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';

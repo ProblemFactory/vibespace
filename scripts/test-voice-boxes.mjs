@@ -14,6 +14,7 @@
 //   cancelled; out of the phone's tab order), ONE implementation (one MediaRecorder, one dictate fetch), absent when
 //   off (html.voice-absent + the plugins-updated broadcast), an idle mic holds no document listener.
 // RED controls: a planted textarea, a dropped attach call, a dead row, a planted focus() — each must turn the census red.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

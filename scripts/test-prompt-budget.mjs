@@ -11,6 +11,7 @@
 // (8 picked lines + the digest naming every session left out + the others'-backlog line) stays ≤ 4 096 B a group, three
 // groups under their 6 500 B block, each beside the per-turn reminder and a 500 B extra with ≥ 1 KB room under the cap.
 // Run: node scripts/test-prompt-budget.mjs
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';

@@ -46,6 +46,7 @@
 // the engine's own in-flight reap — never a polling window; ㉚'s ladder bounds are out of real time's reach and the leg
 // ADVANCES the run's clock a step, then a wedge step.
 // Load: none — no process is started; scratch dataDirs under os.tmpdir(), removed at the end.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

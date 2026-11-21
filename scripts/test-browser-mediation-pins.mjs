@@ -4,6 +4,7 @@
 // words about a takeover — it INTERRUPTS the agent, says browser_interrupted, never «not script evaluation». It reads the file BY
 // NAME, so ci.mjs's affected rule selects this suite on a change of it.
 // Run: node scripts/test-browser-mediation-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 let pass = 0, fail = 0;

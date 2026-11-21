@@ -24,6 +24,7 @@
 //   ⑪ ROUND 3 (acceptance r1 M2): a DIGIT-FIRST Team ID — codesign's dumper quotes it (SYNTHETIC from the rule: no such capture
 //      yet), the agent compares MEANING (requirementTokens), designatedRequirement emits the dumper's form, the release script's
 //      own check too (both evaluated in bash); two RED controls (bytes-only compare; round 2's bare emission = a0d876c5f).
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

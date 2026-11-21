@@ -17,6 +17,7 @@
 //     worker that only tails the shards misses it (red by construction)
 //  §3 the same parity under a second time zone with a DST change inside the
 //     ledger (America/St_Johns, −03:30/−02:30) — a child of this suite
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

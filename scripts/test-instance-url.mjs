@@ -14,6 +14,7 @@
 // manager's door, and THE CENSUS of the object server.js hands this module (every member it reads is on it — from
 // 2.369.214 a `providerId` it never carried made every read throw, read as «not configured»; this suite's fake answered
 // status() whatever the id, so it passed); a failed read NAMED; the lock's refusal; THE UNLOCK'S RE-TRY (one cycle).
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

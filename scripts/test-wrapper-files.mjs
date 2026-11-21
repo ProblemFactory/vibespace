@@ -4,6 +4,7 @@
 // whose socket name and wrapper-env id diverged (the 设备运维大师 incident:
 // boot-restore read a nonexistent sidecar into catch{} on every restart and
 // silently lost streaming/goal/todos/buffer for those sessions).
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

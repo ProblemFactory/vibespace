@@ -15,6 +15,7 @@
 //      line is never counted as the actor's failure (src/vault-use.js counts — a refusal of the actor's still is)
 //   ⑥ MUTANTS — each rule's copy (compiled at the real path) is RED: a lock that goes, a minted value as the agent's own, an
 //      approval of any job, the values at fd 3, the approval's r1 words
+import './scratch.mjs';
 import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';

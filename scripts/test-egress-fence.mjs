@@ -6,6 +6,7 @@
 // answer judged (one private answer refuses the lot), a 3xx answered but never followed, `lost` (sent, no answer) vs
 // `refused` (nothing left), the response cut at 64 KiB. Loopback stub servers only — no outbound network.
 // Run: node scripts/test-egress-fence.mjs
+import './scratch.mjs';
 import http from 'node:http';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);

@@ -17,6 +17,7 @@
 //   ⑤ the index: renderIndex names every row, docs/agent/index-manual.md's generated block equals it, AGENT_DOC_TOPICS is
 //      the rows', `vibespace-docs` with no argument asks for it; a closed gate omits its row from every surface
 // Run: node scripts/test-cli-registry.mjs            (--write-index rewrites index-manual.md's block from the rows)
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';

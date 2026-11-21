@@ -7,6 +7,7 @@
 // all persisted. So the lifecycle must derive from those two, or every resume
 // loses every background card. Fixture shapes are copied from the real
 // transcript (fixtures-from-real-data law).
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

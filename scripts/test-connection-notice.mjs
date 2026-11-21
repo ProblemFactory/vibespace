@@ -16,6 +16,7 @@
 // behaviour (726 rows for 363 cycles). RED for the slow-link pick: `REPO=<the notice pick's tree with its clock, a5644f599>` — ⑩ (the slow client cut, the flood
 // never bounded) and ⑭. CONTROL for ⑬: `REPO=<a git archive of round 1, 08aebf78e>` — every cycle counted, ⑬ alone red.
 // RED for round 3's two durations: `REPO=<round 2, cde2d80b8>` — «down 5 h», «down 2 h».
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

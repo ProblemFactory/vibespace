@@ -3,6 +3,7 @@
 // (its rollback store legs stay there): the rollback row names the change that followed it (src/lib/setup-flows.js). The file is read BY NAME, so
 // ci.mjs's affected rule selects this suite on a change of it.
 // Run: node scripts/test-layout-history-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs'; import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass=0, fail=0; const ok=(c,n,e)=>{ if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)');if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};

@@ -19,6 +19,7 @@
 //      (lane design-kit-287, shipped in .200) cannot survive the integration that deletes the kit;
 //   ⑦ controls: planted variants of the real texts and planted hits (in memory — nothing is written) each go RED by
 //      the rule they break, so every census above is what catches its plant.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

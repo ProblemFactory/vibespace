@@ -87,6 +87,7 @@
 //     cannot classify «结果未知 · <code>»; the press reads a late Allow. RED CONTROL: 2a5e9ce8 threw from 2 001 characters and
 //     skipped every late settle (the card stayed open with its buttons)
 // Run: node scripts/test-wake-approve-card.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

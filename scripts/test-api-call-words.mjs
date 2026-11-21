@@ -10,6 +10,7 @@
 //   ④ the generated table: in sync with scripts/gen-api-call-words.mjs over the SHA-pinned scripts/api-specs/; the
 //      coverage PRINTED; 12 sample titles across vendors; the missing words PINNED; RED = the table emptied ⇒ generic;
 //      no network anywhere on this path
+import './scratch.mjs';
 import path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';

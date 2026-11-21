@@ -21,6 +21,7 @@
 //   ⑥ A WALL IS NAMED BY WHAT IS TRUE NOW — the unlock drops the locked facts and re-sweeps.
 //   ⑦ ONE SENTENCE PER SENTENCE — «Refresh all» groups by what it says; the server's door per cause = the client's.
 //   ⑧ WIRING — every engine read of the usage cache is the door or a named stamp read; the lane's walls lift by lane.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

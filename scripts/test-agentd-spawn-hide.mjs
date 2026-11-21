@@ -23,6 +23,7 @@
 //      newly requires with an unhidden spawn ⇒ RED (the closure is derived); a dead exception row ⇒ RED; a literal POSIX
 //      tool and a regex's `.exec(` need nothing; a local VALUE named like a call (`const execFile = '…'`) hides no site.
 // Run: node scripts/test-agentd-spawn-hide.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

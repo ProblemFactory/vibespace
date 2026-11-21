@@ -28,6 +28,7 @@
 //      old one is still exiting is a crash, not a stop)
 //   ⑦ an uploaded .vsp is removed even when the source whitelist rejects first
 //   ⑧ the install audit/copy never blocks the event loop (async by law)
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

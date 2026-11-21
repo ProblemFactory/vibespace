@@ -16,6 +16,7 @@
 // real engine — the race matrix, the intruder, the patched-copy control that
 // stores a stranger's consent without the check — stays in
 // test-channels-accounts (heavy).
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

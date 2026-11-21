@@ -4,6 +4,7 @@
 // there: §4 the singleton Desktop window opts into the reconnect ladder. It reads the file it pins BY NAME, so ci.mjs's
 // affected rule selects this suite on a change of it.
 // Run: node scripts/test-desktop-stream-keepalive-pins.mjs
+import './scratch.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');

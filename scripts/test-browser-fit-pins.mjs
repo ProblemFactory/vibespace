@@ -5,6 +5,7 @@
 // and its sticky chip), ⑤ the hiders that re-report the pane, ⑥ the trace view's words. Each reads the file it pins BY NAME,
 // so ci.mjs's affected rule selects this suite on a change of that file.
 // Run: node scripts/test-browser-fit-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');

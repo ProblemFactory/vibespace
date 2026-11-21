@@ -18,6 +18,7 @@
 // CLIENT: the probe imports libsecret's introspection for python3-gi (Ubuntu / Debian: gir1.2-secret-1), tried FIRST, so a
 // machine that has everything the feature needs but not the client skips BY NAME instead of going red at its first step
 // (主开发 + the owner 2026-11-17, the test machine's first whole tier: «Namespace Secret not available»).
+import './scratch.mjs';
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';

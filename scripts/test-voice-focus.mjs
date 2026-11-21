@@ -20,6 +20,7 @@
 //      input through a helper the census must derive) each judged as the predicate says; a predicate MUTANT that forgets
 //      type=password turns the vault's password a target ⇒ RED; a census that reads comments would count the comment
 //      plants ⇒ RED
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

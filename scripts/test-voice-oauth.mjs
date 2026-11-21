@@ -10,6 +10,7 @@
 //   ③ refresh: rotates, the old refresh re-used is REFUSED by the fake; two concurrent callers = ONE refresh (single
 //     flight); a write failure ⇒ the old pair kept and the new token never used; a 401 after one refresh ⇒ reconnect
 //   ④ a cluster preset (clientId + relayUrl) ⇒ the relay callback, no registration
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import http from 'node:http';

@@ -14,6 +14,7 @@
 // NOT SCOPE-AWARE (said): the alias table is per FILE — a destructured alias's name (`const { spawnSync: s } = …`) flags an unrelated
 // variable of the same name elsewhere in that file as a site: a FALSE site (a row to argue), never a missed one.
 // Run: node scripts/test-loop-child-census.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 

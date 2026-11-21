@@ -5,6 +5,7 @@
 // function_call twin was), invisible sub-agents, and a live status bar that
 // could not show context% until re-attach. Shapes below are verbatim from
 // the real rollout (ids sanitized).
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const path = await import('node:path');

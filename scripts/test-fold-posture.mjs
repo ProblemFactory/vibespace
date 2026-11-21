@@ -14,6 +14,7 @@
 //     persists the state, counts a pending timeout; `pending` has no rule in the stylesheet; book / laptop rules exist
 //     only under the regular class
 // Run: node scripts/test-fold-posture.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

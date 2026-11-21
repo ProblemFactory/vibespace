@@ -15,6 +15,7 @@
 //      scaleRgba (2×2 averages, alpha-weighted), the display-facts hdr field (script + parser), hdrShown (true only on a
 //      measured hdr: true — false / unknown say nothing) and the three cursor anchors in the built bundle; lane stream-cursor:
 //      pointerShown (a pointer image with nothing to see ⇒ the viewer's own arrow) + the own-pointer anchor (vsOwnPointer)
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

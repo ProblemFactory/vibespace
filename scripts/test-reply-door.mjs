@@ -13,6 +13,7 @@
 //   §3 THE CENSUS: every caller of the typing path names its door (`door:` or the composer's `steer:`); the machine's caller
 //      (the dispatch's compact) says `origin: 'dispatch'` — a planted caller with neither is RED
 //   §4 RED CONTROLS: the release fd4acdc61 (a COUNTED skip without it) and this tree with the reply route's door removed
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

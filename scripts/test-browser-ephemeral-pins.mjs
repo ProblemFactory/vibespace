@@ -4,6 +4,7 @@
 // there: ④ r2 L5 the trace-status wiring (chat-view hands the status to the loader, its empty card says why) and ⑥ r5 the
 // profile row's Stop. Each reads the file it pins BY NAME, so ci.mjs's affected rule selects this suite on a change of it.
 // Run: node scripts/test-browser-ephemeral-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 let pass = 0, fail = 0;

@@ -11,6 +11,7 @@
 //      single-flight for concurrent attaches, _historyLoaded only after success
 //   ③ the heartbeat skips terminating on a stalled tick; the kill handler
 //      acknowledges the requester; the client re-sends kills until acked
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

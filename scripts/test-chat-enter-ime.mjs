@@ -20,6 +20,7 @@
 //      autofill / saved passwords dispatch a bare Event('keydown')) — is the word "(fill)", never a throw; CONTROL: the
 //      guard removed ⇒ the incident's «reading 'length'».
 // The real textarea under CDP Input.imeSetComposition is scripts/test-chat-enter-ime-chrome.mjs (heavy).
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

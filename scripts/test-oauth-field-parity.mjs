@@ -52,6 +52,7 @@
 // Every SHARED row is asserted on BOTH sides: a spelling the channel side
 // carries by importing the module (the renderer's own classes) is asserted
 // through that import, never by the channel files writing it (§6 forbids it).
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 

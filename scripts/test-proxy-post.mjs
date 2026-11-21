@@ -11,6 +11,7 @@
 // proxy — never an open proxy). This suite runs the REAL unblocker module in
 // the same [auth-position → skip-json → unblocker] chain shape and asserts
 // the round trip; a wiring pin holds server.js to the pattern.
+import './scratch.mjs';
 import http from 'http';
 import fs from 'fs';
 import net from 'net';

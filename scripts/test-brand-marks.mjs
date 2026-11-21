@@ -4,6 +4,7 @@
 // <style>/<script>) and the colour-analysis gaps pinned on the PATH DATA — a tiny in-process flattener says every gap centre
 // line (GAPS, the table scripts/measure-brand-marks.mjs measures as pixels at 14 / 10 px) is background with ink on both
 // sides. The raster proof (edge IoU vs the official colour mark, DPR 1 / 2) stays in measure-brand-marks.mjs.
+import './scratch.mjs';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { GAPS } from './measure-brand-marks.mjs';

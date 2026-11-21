@@ -23,6 +23,7 @@
 //   §5 the wiring in agentd.js: the console step before the singleton, the successor marked, the mark one hop (daemonEnv
 //      drops it), the task step async on win32 only, both one-shots hidden + bounded.
 // Run: node scripts/test-agentd-hidden-start.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

@@ -18,6 +18,7 @@
 //   the TYPE_ICONS literal and layout.js's TRANSIENT_WINDOW_TYPES set are
 //   gone (a kind added to one of them again would be invisible to the
 //   registry — the 2.355.0 UNSTAGED-WIRING class); ci.mjs carries this suite.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

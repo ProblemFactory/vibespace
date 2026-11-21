@@ -22,6 +22,7 @@
 //    read by wrapperCaps; shredded/missing/nested frame files and unparseable
 //    raw lines all produce a task_failed event (LOUD), never a silent drop;
 //    and the ws-handler gate is transport + capability only.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

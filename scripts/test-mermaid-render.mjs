@@ -11,6 +11,7 @@
 //      control: an unlisted new consumer); no CDN script anywhere in src/ (RED control: the shipped CDN line); mermaid is
 //      imported only by its lazy entry; the build, the stamped link, the CSP unchanged
 //   §8 THE WORDS — zh + ja for the card
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';

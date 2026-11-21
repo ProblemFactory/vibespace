@@ -19,6 +19,7 @@
 //      switch off ⇒ nothing automatic while the door works
 //   ⑧ THE ROUTES: owner only (a bearer 403), the door answers the table, 409 / 503 by name; a kept file by its NAME only
 // Run: node scripts/test-cpu-capture.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

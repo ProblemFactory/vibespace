@@ -14,6 +14,7 @@
 //   §5 the frames: state-ack to the sender only (its listener hears nothing), `from` + `basedOn` on the broadcast
 //   §6 CONTROLS: the pre-fix client (every remote op lands on arrival) crosses ≥ 1 offset and holds older than acked;
 //      a per-STORE verdict loses another key's op
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

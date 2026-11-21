@@ -22,6 +22,7 @@
 //     tray head's ⤢ keeps the tray's scope; a tray row's body tap opens it in place; the Duo's bar has For you  [P1-1 P2-4 P3-2 P3-7 P3-8]
 //     + the touch scale (one block, 16 px fields), ONE row shape on a phone (the folded row, its door, one open at a time) and
 //     the phone's first screen's doors (a reload keeps the window; the badge and the drawer's first row open the page)
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

@@ -7,6 +7,7 @@
 // renderer), the notification-steer rule's call-site pins, and the permission-key PARITY between the shipped wrapper and the PURE
 // src/permission-rules.js. Each reads the file it pins BY NAME, so ci.mjs's affected rule selects this suite on any change of one.
 // Run: node scripts/test-codex-p2-wrapper-pins.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

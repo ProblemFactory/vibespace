@@ -23,6 +23,7 @@
 // The reject box's real Enter under CDP Input.imeSetComposition: test-channels-e2e ⑩ (heavy).
 // Its COST is a census of what it parses + a CPU ratio against one module's bare parse in the same process — never a
 // millisecond bound (lane mirror-flake-hardening: the old `< 3 s` read 4335 ms on ubuntu-latest and stopped the fast tier).
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';

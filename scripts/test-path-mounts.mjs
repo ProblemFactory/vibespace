@@ -2,6 +2,7 @@
 // Path mounts (2.358.0): /svc/<name>/ reverse proxy — REAL http round trips
 // against a live target: prefix strip, X-Forwarded-Prefix, Location rewrite,
 // honest 404/502, no-trailing-slash canonical redirect, ws upgrade splice.
+import './scratch.mjs';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';

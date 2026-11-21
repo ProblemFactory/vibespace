@@ -17,6 +17,7 @@
 //     index.json 12/12 drawn, every shot's own negative control undrawn, every
 //     PNG present; the same predicate refuses a planted undrawn record
 //   ④ the design doc says B SHIPPED (zh + en); ⑤ ci.mjs carries this suite (fast)
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

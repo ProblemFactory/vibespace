@@ -10,6 +10,7 @@
 //   ⑦ THE STATE MACHINE + THE STATE TABLE: every row of keyVerdict
 //   ⑧ the password door's shape: text only, ≥ 8 code points, ≤ 1024
 //   ⑨ no secret in an answer: a refusal object carries a code only
+import './scratch.mjs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { createRequire } from 'node:module';

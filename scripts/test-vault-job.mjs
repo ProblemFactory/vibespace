@@ -35,6 +35,7 @@
 //      MUTANTS (a copy of the door each — RED): no reauth check · a card per re-judge · a Deny that leaves its job · no bound
 //   THE SCRATCH — every root a leg makes carries THIS run's pid in its name and is removed at the end (a failed leg too: the
 //   exit hook); the last line counts what is left of THIS run's prefix in the tmp dir — registered or not (0)
+import './scratch.mjs';
 import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';

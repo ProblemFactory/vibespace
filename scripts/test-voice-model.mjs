@@ -18,6 +18,7 @@
 //      the ledger; ≤ 2 000 words, oldest out; RULE 1 is ONE function (evidenceRule); the PACING clock (one open item ⇒
 //      merge; a day after a dismissal; no clock ⇒ wait); THE MEASURED FIXTURE replayed — before 20 items / CLAUDE.md 7×,
 //      after (no new dictation between) CLAUDE.md ONCE; MUTANT a copy that subtracts only `known` ⇒ RED
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

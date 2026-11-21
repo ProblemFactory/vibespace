@@ -42,6 +42,7 @@
 //    file says nothing more
 // ⑥ CONTROLS: a planted (e, items) call, a planted clear-await-append render, a latestRender without its generation check —
 //    each RED by the same checker
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

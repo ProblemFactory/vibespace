@@ -11,6 +11,7 @@
 //      store keeps a card EXACTLY (the digest of the stored card is the digest of the view)
 //   §5 the row renderer escapes every interpolated piece of a card (an app's name and an agent's why are peer text)
 // Run: node scripts/test-app-card.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

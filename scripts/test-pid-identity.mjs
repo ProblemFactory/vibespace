@@ -7,6 +7,7 @@
 // B-5ee1 (lane pid-identity-close): + the sh twin vs_same_proc on a REAL scratch sleep (true / wrong / gone), the keeper's
 // SHIPPED TWIN parity pin, the REAL keeper's stop over a stub child (true birth / wrong birth / legacy meta + rerecord),
 // the serve record's birth through stop({killRecorded}), and mutant copies (compare nothing / signal an unprovable record).
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

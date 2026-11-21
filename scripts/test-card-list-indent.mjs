@@ -15,6 +15,7 @@
 // The layout itself — every card's items and ::markers measured through the page — is test-card-list-indent-chrome (heavy).
 // On 27a0bf89e (the base — run this file on a `git archive` copy) ② is RED by name (5 rows).
 // Run: node scripts/test-card-list-indent.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

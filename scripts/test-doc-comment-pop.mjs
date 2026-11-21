@@ -5,6 +5,7 @@
 // none; blur ⇒ none and not offered again for that selection; Esc (the data-popover protocol) ⇒ none; an outside press —
 // in the text too — ⇒ none; the button ⇒ gone + the note box. Wiring pins (the plugin's every-update sync + settled offer,
 // blur, the pane's scroll, the close, app.js's Esc sweep); three patched copies of the keeper go RED.
+import './scratch.mjs';
 import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;

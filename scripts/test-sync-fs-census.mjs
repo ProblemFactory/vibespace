@@ -21,6 +21,7 @@
 //      project-dir decode never probes below a storage root; the other hot sites ask storageRootOf before their sync call
 //   ⑤ every via-safefs file is started by its launcher (the launcher names it)
 // Run: node scripts/test-sync-fs-census.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

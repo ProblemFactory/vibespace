@@ -9,6 +9,7 @@
 // this box's LAN hostname everywhere. utils.absUrl is now the single joiner
 // and it prefers the instance's public address; the design row additionally
 // prefers the server's own absolute URL over re-joining a path.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 let pass = 0, fail = 0;

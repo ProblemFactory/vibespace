@@ -20,6 +20,7 @@
 //   ⑤ RED controls on the same bundle text: the base's rule (every block a Copy + Wrap toolbar laid after it) fails ① and ②
 //      by name; a table that drops Copy from code fails ①
 // Run: node scripts/test-chat-pre-tools.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

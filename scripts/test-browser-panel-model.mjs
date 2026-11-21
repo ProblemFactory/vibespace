@@ -11,6 +11,7 @@
 //   ⑤ the grid: style.css's template = GRID (the minimums the stacked re-flow is judged by); orphanOrder;
 //   ⑥ words: every t() literal of the model has zh + ja; the module is PURE (no import, no DOM).
 // Run: node scripts/test-browser-panel-model.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

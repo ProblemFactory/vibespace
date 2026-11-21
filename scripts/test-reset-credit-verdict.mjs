@@ -11,6 +11,7 @@
 //   §6 NEGATIVE CONTROLS: patched copies of the module (a dropped precondition, a
 //      floor that ignores the credit count, a knee off by one) turn the tables red
 //   §7 WIRING PINS: engine, both normalizers, auto-resume, server.js
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

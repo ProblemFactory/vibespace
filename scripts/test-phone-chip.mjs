@@ -8,6 +8,7 @@
 //   ④ wiring: the status bar's billing chip is a row of «⚙ 对话设置» (lane mask-value-shape, the strip's step two — it
 //      was fitted on the strip by `pillMode`), its value there the FULL form's words; the switcher row fits by `chipMode`;
 //      both draw `billingPillHtml` and say the full words in title + aria-label.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';

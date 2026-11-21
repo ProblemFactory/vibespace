@@ -450,7 +450,19 @@ export function kitNamesOf(text) {
 }
 export const KIT_HANDED = Object.freeze(['HOME', 'LANG', 'PATH', 'TZ', 'TMPDIR', 'XDG_RUNTIME_DIR', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_SUITE_EGRESS_FILE',
   'VS_NO_REAL_CLI', 'VIBESPACE_CI_DIR_SWEEP', 'VIBESPACE_CI_LANES', 'VIBESPACE_CI_LANE_ROOT', 'VIBESPACE_CI_REMOTE_RUN']);
-export const OUTSIDE_ROW = Object.freeze({ max: 194, why: 'in-process suites / debug scripts with no path to scratch.mjs that load a home-reading product module or read the home themselves — restated 153 → 194 by the wider loader reader (any string literal naming src/<x>.js or server.js, 主开发 17:06Z BOUNDARY-4): pick C gives them the import; the count may only fall; a NEW one takes the import (scratch.mjs first)' });
+export const OUTSIDE_ROW = Object.freeze({ max: 43, why: 'in-process suites / debug scripts with no path to scratch.mjs that load a home-reading product module or read the home themselves — restated 153 → 194 by the wider loader reader (any string literal naming src/<x>.js or server.js, 主开发 17:06Z BOUNDARY-4); 153 → 43 by pick C\'s fast part (2026-11-21: every fast row and every file of no row took the import; the 43 left are heavy rows, their own commit): the count may only fall; a NEW one takes the import (scratch.mjs first)' });
+/** PICK C (B-ba47, 主开发 r1222: EVERY FILE, one line a file — no «pure» class: a census that proves a file pure is one more reader
+ *  that can be blind). The fast part gave every FAST row and every file of no row `import \'./scratch.mjs\';` as its first import;
+ *  what is left outside is HEAVY rows only — their own commit, a hosted proof first — and the count may only fall. */
+export const PICK_C = Object.freeze({ heavyLeft: 65, why: 'the heavy rows still without the import after pick C\'s fast part (2026-11-21; test-account-reset-door-controls took it there: it loads the fast test-account-reset-door, which now imports it, so THE ORDER needed it first): each takes it in its own commit, PROVE … HOSTED, read by the block\'s first hosted run' });
+/** PURE: the files of `outside` by the tier of their ci.mjs row (read from ci.mjs's TEXT: `{ name: \'x\', tier: \'y\'` — this module
+ *  never imports the runner) → { fast, heavy, other, none } (none = no row: a debug script, a build check, an EXCLUDED suite). */
+export function outsideByTier(outside, ciText) {
+  const tier = new Map([...String(ciText || '').matchAll(/\{\s*name:\s*'([\w.-]+)',\s*tier:\s*'(\w+)'/g)].map((m) => [m[1], m[2]]));
+  const out = { fast: [], heavy: [], other: [], none: [] };
+  for (const f of outside || []) { const t = tier.get(String(f).replace(/\.mjs$/, '')); (t === 'fast' ? out.fast : t === 'heavy' ? out.heavy : t ? out.other : out.none).push(f); }
+  return out;
+}
 
 // ── THE ENVIRONMENT'S TABLE, HELD BOTH WAYS (B-ba47, 主开发 01:23Z amendment 7) ─────────────────────────────────────────
 // Every name a test-* / dbg-* file reads from the environment IN ITS OWN CODE (a read inside a string or template — the stub

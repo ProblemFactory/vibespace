@@ -4,6 +4,7 @@
 // bucket) and DROPPED every exhaustion marker; snapshots never persisted (14-
 // day amnesia) and codex was excluded from the anchors→estimator stack.
 // Shapes below are verbatim from real rollouts / the live app-server push.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
