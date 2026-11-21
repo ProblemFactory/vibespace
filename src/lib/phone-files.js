@@ -119,7 +119,7 @@ export function explorerPhoneBits(ex) {
   crumbs.className = 'file-crumbs';
   crumbs.addEventListener('click', (e) => {
     const c = e.target.closest('.file-crumb');
-    if (c && c.dataset.path && c.dataset.path !== ex.currentPath) ex.navigate(c.dataset.path);
+    if (c && c.dataset.path && c.dataset.path !== ex.currentPath) ex.navigate(c.dataset.path, { attended: true });   // B-23e5: a breadcrumb pressed
   });
   const newHere = document.createElement('button');
   newHere.className = 'file-new-here';

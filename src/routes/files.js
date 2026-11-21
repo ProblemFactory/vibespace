@@ -63,11 +63,18 @@ function remoteStream(res, fn) {
 // err.status===503 → the routes map that to a "storage not responding" reply.
 const { parseArchiveListing, fsErrorBody } = require('../remote-fs'); // verify-r2: a Files refusal travels as a code the client words
 const { contentDisposition, fileNameOf } = require('../file-disposition');
-// B-23e5, 主开发's r275 / r316: A PERSON'S OWN PRESS IS TRIED — the page marks ONE press with this header, the Files window's Refresh
-// (its toolbar button, its folded menu, its context menu); such a call is asked ONCE despite the pool's memory of a dead path. Every
-// other request — an open, a save, a poll, a watcher, an agent's loop — carries no mark and is refused as built
+// B-23e5, 主开发's r275 / r316 / r1368: A PERSON'S OWN PRESS IS TRIED — the page marks a person's press with this header (the Files
+// window's Refresh, a folder / a bookmark opened, the path field's Enter, Up, the context menu's Open, the code editor's open / pressed
+// reload / save, the document window's and the pane editor's saves — test-safe-fs-path-memory's door census); such a call is asked
+// ONCE despite the pool's memory of a dead path. Every other request — a poll, a watcher, an auto reload, an agent's loop — carries
+// none. THE MARK IS A PERSON'S PRESS AND NOTHING ELSE (r1368 / r1396): the header, AND no bearer (an agent's, a job's or an automation
+// key's token never sets it), AND not a FOREIGN page (write-origin.js `foreignPageWhy`: a stated site must be same-origin, a stated origin
+// ours; neither stated — a plain-http LAN address — the custom header itself is the proof: no other site can send it without a preflight
+// the hub never grants). It buys ONE try despite the memory and nothing else: no deadline, size or count, never an access door.
+const { pressBearer, foreignPageWhy, ownOriginOf } = require('../write-origin');
 const ATTENDED_HEADER = 'x-vibespace-attended';
-const attendedOf = (req) => !!(req && typeof req.get === 'function' && req.get(ATTENDED_HEADER) === '1');
+const attendedOf = (req) => !!(req && typeof req.get === 'function' && req.get(ATTENDED_HEADER) === '1'
+  && !pressBearer(req.headers) && !foreignPageWhy(req.headers, ownOriginOf(req.headers, { encrypted: !!(req.socket && req.socket.encrypted) })));
 /** the pool with NO mark — for a helper built once that closes over its first request (the folder field's dir slice): it must never
  *  read the mark from that request (r336) */
 function sfsPlain(req) {
@@ -118,6 +125,9 @@ router.use((req, res, next) => {
 const FILE_POOL_REFUSED = require('../safe-fs').noWorkerRefusal('the file pool').message.split(' is running')[0];   // «no worker of the file pool» — another pool's refusal keeps its own words
 const PATH_HUNG_HEAD = require('../safe-fs').PATH_HUNG.message.split(' {s}')[0];   // B-23e5: «this folder or file did not answer in time and is not asked again for»
 const STORAGE_PATH_HUNG = 'this folder or file did not answer in time — try again in {s} s';
+// B-23e5's remainder (r1378 (2)): a call at or under a path a person's press is still trying — one worker on it, never two
+const PATH_TRYING_HEAD = require('../safe-fs').PATH_TRYING.message.split(': {path}')[0];
+const STORAGE_PATH_TRYING = 'this folder or file is still being tried — wait for the answer to the first press';
 const STORAGE_NO_WORKER = 'the file readers are restarting — try again in a moment';   // a deadline kill, a crash, a worker that could not start — each is retried (no pool at all: server.js's boot line)
 router.use((req, res, next) => {
   const json = res.json;
@@ -126,7 +136,7 @@ router.use((req, res, next) => {
     else if (body && typeof body.error === 'string' && !body.code && body.error.startsWith(PATH_HUNG_HEAD)) {   // B-23e5: a dead path the pool remembers
       const s = Number((/not asked again for (\d+) s/.exec(body.error) || [])[1]) || 30;
       body = { ...body, error: STORAGE_PATH_HUNG.replace('{s}', String(s)), code: 'storage_path_hung', params: { s } };
-    }
+    } else if (body && typeof body.error === 'string' && !body.code && body.error.startsWith(PATH_TRYING_HEAD)) body = { ...body, error: STORAGE_PATH_TRYING, code: 'storage_path_trying' };
     return json.call(this, body);
   };
   next();
@@ -431,7 +441,7 @@ router.get('/api/file/raw', async (req, res) => {
   // can't be pooled without a rewrite); a missing file (non-503) falls through
   // to sendFile's own 404 so behaviour is unchanged for the normal cases.
   try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
-  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'no-worker' || e.code === 'path-hung' ? e.message : e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's); B-3b03 follow-up: the pool's refusal goes to the router's words (storage_no_worker)
+  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'no-worker' || e.code === 'path-hung' || e.code === 'path-trying' ? e.message : e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's); B-3b03 follow-up: the pool's refusal goes to the router's words (storage_no_worker)
   const named = contentDisposition(fileNameOf(filePath), 'inline');
   // dotfiles 'allow' (r2): without it send's LEGACY rule answered 404 for any basename starting
   // with '.', so `.env.png` could not be previewed — this route serves the paths the user opens
@@ -458,7 +468,7 @@ router.get('/api/download', async (req, res) => {
   if (R) return remoteStream(res, () => R.fs.downloadTo(R.host, remotePath(req.query.path), res, { attachment: true }));
   const filePath = safePath(req.query.path);
   try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
-  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'no-worker' || e.code === 'path-hung' ? e.message : e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's); B-3b03 follow-up: the pool's refusal goes to the router's words (storage_no_worker)
+  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'no-worker' || e.code === 'path-hung' || e.code === 'path-trying' ? e.message : e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's); B-3b03 follow-up: the pool's refusal goes to the router's words (storage_no_worker)
   try {
     res.download(filePath, { dotfiles: 'allow' }); // r2: a `.env` Download was send's legacy-dotfile 404
   } catch (err) { res.status(400).json({ error: err.message }); }

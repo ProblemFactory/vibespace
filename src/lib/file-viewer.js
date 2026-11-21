@@ -1,6 +1,7 @@
 import { marked } from 'marked';
 import { HexViewer } from './hex-viewer.js';
 import { CodeEditor } from './code-editor.js';
+import { ATTENDED_HEADERS } from './file-explorer-ops.js';   // B-23e5's remainder: the open's first call carries a person's press
 import { formatSize, escHtml, showConfirmDialog, showInputDialog, showToast, uiScale } from './utils.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { hasDedicatedViewer, getViewerType, getFileIcon, urlViewerKind, parseDelimited } from './file-types.js';
@@ -30,11 +31,14 @@ class FileViewer {
     const host = opts.host || '';
     const hq = host ? '&host=' + encodeURIComponent(host) : '';
 
-    // Check file info first (size, binary detection)
+    // Check file info first (size, binary detection). B-23e5's remainder (r1396 / r1442 (B)): THE OPEN'S FIRST CALL carries a person's
+    // press (opts.attended) — every viewer behind it (hex, HTML, the rendered ones, the editor) rides that one try; when the storage
+    // refuses it (503) the press is SPENT: the window opens as at the release and its own reads go unmarked (the memory's words in it)
     let fileInfo = { size: 0, isBinary: false };
     try {
-      const res = await fetch(`/api/file/info?path=${encodeURIComponent(filePath)}${hq}`);
+      const res = await fetch(`/api/file/info?path=${encodeURIComponent(filePath)}${hq}`, opts.attended ? { headers: ATTENDED_HEADERS } : undefined);
       fileInfo = await res.json();
+      if (res.status === 503 && opts.attended) opts = { ...opts, attended: false };   // r1442 (B): the press is SPENT — the rest of this open goes unmarked (no second try)
     } catch {}
 
     // Restoration provenance (stage workspaces / layout replay): a window
@@ -77,7 +81,7 @@ class FileViewer {
     if (viewerType === 'html-editor') {
       const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'editor', syncId: opts.syncId, openSpec, intoChain: opts.intoChain, quiet: !!opts.quiet });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
-      new CodeEditor(winInfo, filePath, fileName, app, { host, line: opts.line, view: !opts.line });
+      new CodeEditor(winInfo, filePath, fileName, app, { host, line: opts.line, view: !opts.line, attended: !!opts.attended });   // B-23e5: the press rides through
       return;
     }
 
@@ -103,6 +107,10 @@ class FileViewer {
     // every render (Word: beside "Open in LibreOffice"), else floating beside the ⟳
     const btnDownload = wireFileDownload(winInfo, { path: filePath, host });
     btnReload.onclick = async () => {
+      // B-23e5's remainder (r1442): a PRESS — its first call is the file's info, marked: an answer forgives a remembered path (the re-render's
+      // own reads are asked); a storage refusal says its words and leaves the view as it was (one press, one try)
+      const chk = await fetch(`/api/file/info?path=${encodeURIComponent(filePath)}${host ? '&host=' + encodeURIComponent(host) : ''}`, { headers: ATTENDED_HEADERS }).then((r) => (r.status === 503 ? r.json().catch(() => ({})) : null), () => null);
+      if (chk) { showToast(t('{name} — {why}', { name: fileName, why: chk.error ? fsErrorText(chk) : t('Error') }), { type: 'error' }); return; }   // a failed act: typed error (test-desktop-small LAW 2)
       container._bustTs = Date.now();
       container.innerHTML = '';
       await FileViewer.renderInto(container, filePath, fileName, app, host);
@@ -423,7 +431,7 @@ class FileViewer {
               const r = await fetch('/api/archive/extract-entry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, entry: e.name, ...(host ? { host } : {}) }) });
               const d = await r.json().catch(() => ({}));
               if (!r.ok) { showToast(t('Open failed: {msg}', { msg: (d.error && fsErrorText(d)) || '' }), { type: 'error' }); return; }
-              app.openFile(d.path, e.name.split('/').pop(), { via: { kind: 'archive-entry', archive: filePath, entry: e.name }, ...(host ? { host } : {}) });
+              app.openFile(d.path, e.name.split('/').pop(), { via: { kind: 'archive-entry', archive: filePath, entry: e.name }, ...(host ? { host } : {}), attended: true });   // B-23e5: an archive's entry pressed
             } finally { row.style.opacity = ''; }
           };
         }

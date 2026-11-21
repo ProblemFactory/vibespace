@@ -215,6 +215,33 @@ console.log('② the same-origin verdict table (PURE crossSiteVerdict — every 
     const v = WO.crossSiteVerdict(req, OWN);
     ok(v.ok === want && v.why === why, `${what} ⇒ ${want ? 'allowed' : 'REFUSED'} (${why})`, v);
   }
+  // B-23e5's remainder (r1396): IS IT A FOREIGN PAGE? (PURE foreignPageWhy — the files router's mark of a person's press asks it with the
+  // mark's own custom header and no bearer): a stated site must be same-origin, a stated origin ours; NEITHER stated (a plain-http LAN
+  // address, a same-origin read) is not foreign — every Sec-Fetch-Site × Origin against its oracle, then the named roads
+  const fOracle = (s, o) => (s !== undefined && s !== 'same-origin' ? s : o !== undefined && o !== OWN && o !== 'HTTPS://BOX.TAIL0.TS.NET:443' ? 'origin' : null);
+  const fBad = []; let fRows = 0;
+  for (const s of SITES) for (const [on, o] of Object.entries(ORIGINS)) {
+    const headers = {};
+    if (s !== undefined) headers['sec-fetch-site'] = s;
+    if (o !== undefined) headers.origin = o;
+    const got = WO.foreignPageWhy(headers, OWN), want = fOracle(s, o); fRows++;
+    if (got !== want) fBad.push({ s, on, got, want });
+  }
+  ok(fRows === SITES.length * Object.keys(ORIGINS).length && !fBad.length, `foreignPageWhy: ${fRows} combinations (${SITES.length} Sec-Fetch-Site × ${Object.keys(ORIGINS).length} Origin) match the oracle — a stated site other than same-origin is named, then a stated Origin not ours`, fBad.slice(0, 4));
+  const fNamed = [
+    ['our page over https (the browser states same-origin)', { 'sec-fetch-site': 'same-origin', origin: OWN }, OWN, null],
+    ['our page on a plain-http LAN address (a GET: nothing stated)', {}, 'http://192.0.2.20:3456', null],
+    ['an old browser on our page (our Origin, no site)', { origin: 'http://192.0.2.20:3456' }, 'http://192.0.2.20:3456', null],
+    ['the browser states Same-Origin in capitals', { 'sec-fetch-site': 'Same-Origin' }, OWN, null],
+    ['another site\'s page', { 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' }, OWN, 'cross-site'],
+    ['a sibling pod of the fleet', { 'sec-fetch-site': 'same-site', origin: 'https://other.tail0.ts.net' }, OWN, 'same-site'],
+    ['a foreign Origin with no site stated', { origin: 'https://evil.example' }, OWN, 'origin'],
+    ['a sandboxed frame (Origin null)', { origin: 'null' }, OWN, 'origin'],
+    ['any Origin when ours is unknown (a host that is no host)', { origin: 'http://192.0.2.20:3456' }, '', 'origin'],
+    ['our Origin with a foreign site stated (the site decides)', { 'sec-fetch-site': 'cross-site', origin: OWN }, OWN, 'cross-site'],
+  ];
+  for (const [what, headers, own, want] of fNamed) { const got = WO.foreignPageWhy(headers, own); ok(got === want, `foreignPageWhy: ${what} ⇒ ${want || 'not foreign'}`, { got }); }
+  ok(WO.foreignPageWhy(null, OWN) === null && WO.foreignPageWhy(undefined, OWN) === null, 'foreignPageWhy: no headers at all ⇒ not foreign (nothing stated)');
 }
 
 // ── ③ THE REQUEST'S OWN ORIGIN ON THE DEPLOYMENTS ───────────────────────────────────────────────────────────────────

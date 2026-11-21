@@ -38,6 +38,7 @@ class FileExplorer {
   constructor(winInfo, app, startPath) {
     this.winInfo = winInfo; this.app = app; this.currentPath = ''; this.items = [];
     this._startPath = startPath || null;
+    this._startPressed = !!winInfo._explorerPressed;   // B-23e5's remainder: opened by a person's press — never a restore or a replay
     this._host = winInfo._explorerHost || ''; // '' = local; else host id (Files cross-host)
     this._viewMode = 'list'; // 'list' or 'icon'
     this._renderLimit = 100; // initial batch size for large folders
@@ -70,7 +71,7 @@ class FileExplorer {
 
     // Toolbar
     const toolbar = document.createElement('div'); toolbar.className = 'file-toolbar';
-    const btnUp = this._btn('\u2191', t('Go up')); btnUp.onclick = () => this.navigateUp();
+    const btnUp = this._btn('\u2191', t('Go up')); btnUp.onclick = () => this.navigateUp({ attended: true });   // B-23e5: a door a person presses
     // Host selector (Files cross-host): Local + each registered ssh host.
     // Switching re-browses that host's filesystem from its home dir.
     this._hostSelect = document.createElement('select');
@@ -120,7 +121,7 @@ class FileExplorer {
     // (View first, Upload last); Go up, the machine and the path never fold. The phone keeps the icons (its own layout).
     // each tool's ACT takes the place it was pressed from: its own button, or the ⋯ when it is folded (a View / Upload popover
     // opens there — never against a hidden button at the viewport's corner)
-    const tools = { up: { el: btnUp, word: t('Go up'), act: () => this.navigateUp() }, refresh: { el: btnRefresh, word: t('Refresh'), act: () => this.refresh({ attended: true }) },
+    const tools = { up: { el: btnUp, word: t('Go up'), act: () => this.navigateUp({ attended: true }) }, refresh: { el: btnRefresh, word: t('Refresh'), act: () => this.refresh({ attended: true }) },
       view: { el: btnView, word: t('View'), act: (a) => this._showViewMenu(a) }, newFile: { el: btnNewFile, word: t('New file'), act: () => this.createFile() },
       newDir: { el: btnNewDir, word: t('New folder'), act: () => this.createDir() }, upload: { el: btnUpload, word: t('Upload'), act: (a) => this._triggerUpload(a) } };
     for (const { el: b, word, act } of Object.values(tools)) { b.onclick = () => act(b); const w = document.createElement('span'); w.className = 'ftw-word'; w.textContent = word; b.appendChild(w); b.classList.add('file-tool-word'); if (app.isMobile) b.classList.add('ftw-compact'); }
@@ -290,7 +291,7 @@ class FileExplorer {
     this.app.ws.onGlobal(this._bkHandler);
     this._offBkLift = onStoreLift('bookmarks.json', () => this._loadBookmarks());   // B-225b: read again at the lift (a word said while this page was away too)
 
-    if (this._startPath) this.navigate(this._startPath);
+    if (this._startPath) this.navigate(this._startPath, { attended: this._startPressed });   // B-23e5: marked only when a press opened the window
     else this._loadHome();
   }
 
@@ -384,7 +385,7 @@ class FileExplorer {
         badge.textContent = this._hostName(bkHost);
         item.appendChild(badge);
       }
-      item.onclick = () => { this.setHost(bkHost, { navigate: false }); this.navigate(bk.path); };
+      item.onclick = () => { this.setHost(bkHost, { navigate: false }); this.navigate(bk.path, { attended: true }); };   // B-23e5: a bookmark pressed
       // Drag to reorder
       item.draggable = true;
       item.addEventListener('dragstart', (e) => {
@@ -422,8 +423,8 @@ class FileExplorer {
       item.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         showContextMenu(e.clientX, e.clientY, [
-          { label: t('Open'), action: () => { this.setHost(bkHost, { navigate: false }); this.navigate(bk.path); } },
-          { label: t('Open in new window'), action: () => this.app.openFileExplorer(bk.path, { host: bkHost || undefined }) },
+          { label: t('Open'), action: () => { this.setHost(bkHost, { navigate: false }); this.navigate(bk.path, { attended: true }); } },
+          { label: t('Open in new window'), action: () => this.app.openFileExplorer(bk.path, { host: bkHost || undefined, attended: true }) },   // B-23e5: pressed
           { label: t('Remove from bookmarks'), action: () => {
             this._bookmarks.splice(i, 1);
             this._saveBookmarks(); this._renderBookmarks();
@@ -749,7 +750,7 @@ class FileExplorer {
       if (seq !== this._navSeq) return; // a newer navigation superseded this one
       if (data.error) {
         // If path is a file (not a directory), open it in a viewer
-        if (info && !info.isDirectory) { this.app.openFile(dirPath, dirPath.split('/').pop(), { host: this._host || undefined }); return; }
+        if (info && !info.isDirectory) { this.app.openFile(dirPath, dirPath.split('/').pop(), { host: this._host || undefined, attended }); return; }   // B-23e5: a pressed path that is a file opens by the same press
         throw Object.assign(new Error(fsErrorText(data)), { agentOld: isAgentOld(data.code) }); // verify-r2: a refusal in the reader's language; B-bd27 X1: an old agent's refusal keeps its door
       }
       if (this.currentPath !== data.path) { this._selection.clear(); this._selAnchor = null; if (this._selectMode) this._exitSelectMode(); }
@@ -1072,8 +1073,8 @@ class FileExplorer {
       cell.addEventListener('click', (e) => this._onItemClick(e, item));
       cell.addEventListener('dblclick', () => {
         if (this._selectMode) return; // every tap toggles in Select mode (verifier r2: a quick double-tap navigated and dropped the mode)
-        if (item.isDirectory) this.navigate(fullPath);
-        else this.app.openFile(fullPath, item.name, { host: this._host || undefined });
+        if (item.isDirectory) this.navigate(fullPath, { attended: true });   // B-23e5: a folder or a file opened by a person's double-click
+        else this.app.openFile(fullPath, item.name, { host: this._host || undefined, attended: true });
       });
       return cell;
     } else {
@@ -1112,14 +1113,14 @@ class FileExplorer {
       row.addEventListener('click', (e) => this._onItemClick(e, item));
       row.addEventListener('dblclick', () => {
         if (this._selectMode) return; // every tap toggles in Select mode (verifier r2: a quick double-tap navigated and dropped the mode)
-        if (item.isDirectory) this.navigate(fullPath);
-        else this.app.openFile(fullPath, item.name, { host: this._host || undefined });
+        if (item.isDirectory) this.navigate(fullPath, { attended: true });   // B-23e5: a folder or a file opened by a person's double-click
+        else this.app.openFile(fullPath, item.name, { host: this._host || undefined, attended: true });
       });
       return row;
     }
   }
 
-  navigateUp() { this.navigate(this.currentPath.replace(/\/[^/]+\/?$/, '') || '/'); }
+  navigateUp({ attended = false } = {}) { this.navigate(this.currentPath.replace(/\/[^/]+\/?$/, '') || '/', { attended }); }   // B-23e5: the Up press passes attended
   refresh({ attended = false } = {}) { this.navigate(this.currentPath, { attended }); }   // the Refresh button's press passes attended; a refresh after a delete, a host change: none
 
   
@@ -1244,7 +1245,8 @@ class FileExplorer {
     this._pathField = pathField(this.pathInput, {
       host: () => this._host || null, kind: 'folder', create: 'never', picker: false, id: 'file-explorer-path',
       bases: () => (this.currentPath ? [{ path: this.currentPath, label: t('this folder') }] : []),
-      onCommit: (info) => { if (info && info.path && info.path !== this.currentPath) this.navigate(info.path); },
+      // B-23e5: the field's Enter and a picked row are a person's press (marked); leaving the field (blur) and an api set are not
+      onCommit: (info) => { if (info && info.path && info.path !== this.currentPath) this.navigate(info.path, { attended: info.how === 'enter' || info.how === 'pick' }); },
     });
   }
 

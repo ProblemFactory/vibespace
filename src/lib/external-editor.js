@@ -7,7 +7,8 @@
 import { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEditorSettings, editorLightTheme, activeLineSelectionPatch, editorFontFace, editorFontTheme, sayFingerFloor } from './code-editor.js';
 import { isTouchDevice } from './utils.js';
 import { t } from './i18n.js';
-import { fsErrorText } from './file-explorer-ops.js';   // B-3b03 follow-up: the pane's refused save in the reader's language
+import { showConfirmDialog } from './utils.js';
+import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';   // B-3b03 follow-up: the pane's refused save in the reader's language; B-23e5: its save marked
 import { Resizer } from './resizer.js';
 import { lateFocus, openClock } from './late-focus.js'; // B-c87d: the terminal takes its keys back through THE door (the keyboard stays where the person last put it)
 import { EditorView, basicSetup } from 'codemirror';
@@ -116,6 +117,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
   // Create the editor pane
   const editorPane = document.createElement('div');
   editorPane.className = 'editor-container';
+  editorPane.dataset.signal = signalPath;   // B-23e5: the CLI's close of THIS pane removes this pane, never another left in the window
   editorPane.style.flex = '1';
   editorPane.style.borderTop = '2px solid var(--accent)';
   editorPane.style.minHeight = '150px';
@@ -203,6 +205,27 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
         parent: editorBody,
       });
       if (targetWinInfo._editorState) targetWinInfo._editorState.editorView = editorView; // for closeExternalEditor teardown
+      // B-23e5's remainder (r1442 (D)): the pane's text lives only here until a save lands — the TERMINAL WINDOW asks before a close drops it
+      // (its ✕, a tab's, a group's close-all: requestClose), with the tree's own dialog; the reload guard and the stage hear it (_editorDirty)
+      // ONE guard a window, over EVERY pane it holds (a pane left behind by an interrupted CLI counts too): a pane whose text is not on
+      // disk and whose editor is still in the window is unsaved; a removed pane never is (its delta read: no guard over a guard, none lost)
+      const panes = targetWinInfo._editorPanes || (targetWinInfo._editorPanes = new Set());
+      panes.add({ view: editorView, name: String(filePath).split('/').pop() || filePath, dirty: () => editorView.dom.isConnected && editorView.state.doc.toString() !== content });
+      if (!targetWinInfo._editorPaneGuard) {
+        targetWinInfo._editorPaneGuard = true;
+        const prevDirty = targetWinInfo._editorDirty, prevAsk = targetWinInfo.onCloseRequest;
+        const unsavedPane = () => { const names = []; for (const x of panes) { if (!x.view.dom.isConnected) panes.delete(x); else if (x.dirty()) names.push(x.name); } return names.length ? { name: names.join(', ') } : null; };   // every unsaved pane named
+        targetWinInfo._editorDirty = () => !!unsavedPane() || (typeof prevDirty === 'function' && prevDirty());
+        targetWinInfo.onCloseRequest = (o) => {
+          const d = unsavedPane();
+          if (d && !(o && o.discardAsked)) {
+            showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name: d.name }), confirmText: t('Discard'), danger: true })
+              .then((ok) => { if (ok) app.wm.requestClose(targetWinInfo.id, { ...(o || {}), discardAsked: true }); });
+            return false;
+          }
+          return typeof prevAsk === 'function' ? prevAsk(o) : true;
+        };
+      }
       setTimeout(() => lateFocus(editorView, { win: targetWinInfo, since: openAt }), 50);   // B-c87d: the pane takes the keys only if the person did nothing elsewhere since it began opening
 
       // Wire up editor settings buttons
@@ -235,16 +258,16 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
         const at = openClock();   // B-c87d: the close began NOW (the person's Save & Close); the save answers later
         const newContent = editorView.state.doc.toString();
         try {
-          const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: filePath, content: newContent, host: host || undefined }) });
+          const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body: JSON.stringify({ path: filePath, content: newContent, host: host || undefined }) });   // B-23e5: a person's save, marked
           const data = await res.json().catch(() => ({}));
           if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);   // B-3b03 follow-up: a refusal in the reader's language
           await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }) });
         } catch (err) {
           // Write failed — keep the editor open with the user's edits instead
           // of tearing down and unblocking Claude with a stale file
-          saveBtn.textContent = `✕ ${err.message || 'Save failed'} — retry`;
-          saveBtn.style.background = 'var(--red)';
-          setTimeout(() => { saveBtn.textContent = 'Save & Close'; saveBtn.style.background = ''; }, 4000);
+          saveBtn.textContent = '✕ ' + t('{name} is not saved — {why}', { name: String(filePath).split('/').pop() || filePath, why: err.message || t('Error') }) + ' — ' + t('retry');   // B-23e5 (the save law): where it is not saved
+          saveBtn.style.background = 'var(--red)';   // r1378 (3): the words STAY until the next press (no reset) — the CLI is not told «done»
+          pathSpan.textContent = t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name: String(filePath).split('/').pop() || filePath, why: err.message || t('Error') }); pathSpan.style.color = 'var(--red)';
           return;
         }
         // Remove editor pane + resizer, restore terminal to full height
@@ -304,7 +327,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
 export function closeExternalEditor(app, signalPath) {
   for (const [, win] of app.wm.windows) {
     if (win._editorState?.signalPath === signalPath) {
-      const editorPane = win.content.querySelector('.editor-container');
+      const editorPane = [...win.content.querySelectorAll('.editor-container')].find((el) => el.dataset.signal === signalPath);   // B-23e5: this pane, never an older one left behind
       const termContainer = win.content.querySelector('.terminal-container');
       if (editorPane) {
         win._editorState?.editorView?.destroy?.(); // release the CodeMirror instance (leaked per remote close)

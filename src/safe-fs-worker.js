@@ -514,6 +514,11 @@ const OPS = {
 
   // the frame host's preview folder (lane frame-host-preview): a file's REAL path — a symlink out of the folder is judged
   // by where it lands, never by its name
+  // B-23e5's remainder (b): two dead children's kinds with NO follow — a symlink entry answers from its folder's own storage (its
+  // target is never touched); a path with nothing there is no link
+  lstatKinds({ paths = [] }) {
+    return { result: { links: paths.map((p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } }) } };   // the loop posts `result` (the read: a bare object posted nothing)
+  },
   realpath({ path: p }) {
     return { result: { path: fs.realpathSync(p) } };
   },

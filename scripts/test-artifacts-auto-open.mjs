@@ -215,7 +215,7 @@ function cardRig(body, { phone = false, setting = true, store = new Map() } = {}
   ok(/if \(quiet\) return true;[^\n]*\n\s*this\.wm\.revealWindow\(id\);/.test(fc), 'a file already in the chat\'s chain: a quiet open moves nothing (no revealWindow)');
   const fv = read('src/lib/file-viewer.js');
   ok((fv.match(/intoChain: opts\.intoChain, quiet: !!opts\.quiet \}\)/g) || []).length === 4 && /type: 'editor', syncId: opts\.syncId, openSpec, intoChain: opts\.intoChain, quiet: !!opts\.quiet \}\);/.test(AP), 'FileViewer.open\'s four createWindow calls and openEditor pass quiet');
-  ok(/if \(!quiet\) app\.wm\.revealWindow\(w\.id, \{ replay: !!syncId \}\);/.test(DW) && /type: 'doc', syncId, openSpec, intoChain, quiet, width: 900/.test(DW) && /export function openDoc\(app, \{ host = '', path = '', from = '', syncId, intoChain, quiet = false \} = \{\}\)/.test(DW), 'openDoc: a quiet open of a doc already open reveals nothing; a new one is created quiet');
+  ok(/if \(!quiet\) app\.wm\.revealWindow\(w\.id, \{ replay: !!syncId \}\);/.test(DW) && /type: 'doc', syncId, openSpec, intoChain, quiet, width: 900/.test(DW) && /export function openDoc\(app, \{ host = '', path = '', from = '', syncId, intoChain, quiet = false, attended = false \} = \{\}\)/.test(DW), 'openDoc: a quiet open of a doc already open reveals nothing; a new one is created quiet');
 }
 
 console.log('④ the switch: Settings → Chat words + the chip\'s row');

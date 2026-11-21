@@ -28,7 +28,7 @@ import prettierYaml from 'prettier/plugins/yaml';
 import prettierGraphql from 'prettier/plugins/graphql';
 import { onFileChanged, sameFile } from './file-changed.js'; // §7.9: the server's file-changed signal
 import { writeFrame, hostAddress } from './frame-host.js'; // lane frame-host-preview: the HTML preview's frame
-import { fsErrorText } from './file-explorer-ops.js'; // lane file-preview-mount r2: a load / save refusal in the reader's language
+import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js'; // lane file-preview-mount r2: a load / save refusal in the reader's language; B-23e5: a person's press marked
 import { saveCloseDoors } from './refusal-doors.js'; // B-3b03 follow-up: a save-and-close window closes only after its save landed
 
 const PRETTIER_PLUGINS = [prettierBabel, prettierEstree, prettierHtml, prettierCss, prettierMarkdown, prettierTypescript, prettierYaml, prettierGraphql];
@@ -181,6 +181,9 @@ class CodeEditor {
   constructor(winInfo, filePath, fileName, app, opts = {}) {
     this.winInfo = winInfo; this.filePath = filePath; this.app = app;
     this._host = opts.host || ''; // '' = local; else host id (Files cross-host)
+    // B-23e5: opened by a PERSON's press (a double-click, the context menu's Open / Edit, the doc window's Raw press) — its first load is
+    // marked, ONCE (a layout restore, a replay, the doc window's automatic raw view, the Ctrl+G pane pass no `attended`: no press)
+    this._openPressed = !!opts.attended;
     this._fromWin = opts.fromWin || null; // lane artifacts-model: the chat window this file was opened from (its save → artifact-touch)
     // Stage/layout machinery reads dirty state through the window record —
     // an editor with unsaved changes must never be auto-closed (LRU eviction).
@@ -359,7 +362,8 @@ class CodeEditor {
     let content = initialContent;
     if (content === undefined) {
       try {
-        const res = await fetch(`/api/file/content?path=${encodeURIComponent(this.filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
+        const pressed = this._openPressed; this._openPressed = false;
+        const res = await fetch(`/api/file/content?path=${encodeURIComponent(this.filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`, pressed ? { headers: ATTENDED_HEADERS } : undefined);
         const data = await res.json();
         if (data.error) {
           this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(fsErrorText(data))}</div>`;
@@ -436,6 +440,15 @@ class CodeEditor {
     const doors = this.onSaveAndClose ? saveCloseDoors({ save: () => this.save(), text: () => this.editorView.state.doc.toString(), signal: () => this.onSaveAndClose(), close: () => this.app?.wm?.closeWindow?.(this.winInfo.id), ready: () => !!this.editorView,
       confirmDiscard: () => showConfirmDialog({ title: t('Close without saving?'), message: t('Your edits were not saved: {msg}. Close the editor and discard them?', { msg: this._lastSaveError || t('Error') }), confirmText: t('Discard'), danger: true, cancelDefault: true }) }) : null;
     if (doors) { const prevAsk = this.winInfo.onCloseRequest; this.winInfo.onCloseRequest = (o) => (typeof prevAsk === 'function' && prevAsk(o) === false ? false : doors.onCloseRequest()); }
+    // B-23e5's remainder (r1378 (3)): THE DIRTY MARK STAYS ON THE WINDOW — a window holding unsaved text ASKS before it closes (its ✕, a
+    // tab's ✕, a group's close-all, whose question names no unsaved text): never a silent loss; a save-and-close window asks by its doors
+    else { const prevAsk = this.winInfo.onCloseRequest; this.winInfo.onCloseRequest = (o) => {
+      if (typeof prevAsk === 'function' && prevAsk(o) === false) return false;
+      if (!this.modified || (o && o.discardAsked)) return true;
+      showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name: String(this.filePath).split('/').pop() || this.filePath }), confirmText: t('Discard'), danger: true })
+        .then((ok) => { const wm = this.app && this.app.wm; if (ok && wm) wm.requestClose(this.winInfo.id, { discardAsked: true }); });
+      return false;
+    }; }
     this.winInfo.onClose = () => {
       if (this._themeObserver) this._themeObserver.disconnect();
       if (doors) doors.onClose();
@@ -494,7 +507,8 @@ class CodeEditor {
     }
     this._reloading = true;
     try {
-      const res = await fetch(`/api/file/content?path=${encodeURIComponent(this.filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
+      // B-23e5: a PRESSED reload (the button, the disk chip) is a person's press — marked; the freshness watch's `{auto}` reload never
+      const res = await fetch(`/api/file/content?path=${encodeURIComponent(this.filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`, opts.auto ? undefined : { headers: ATTENDED_HEADERS });
       const data = await res.json();
       if (data.error) throw new Error(fsErrorText(data));
       const content = data.content || '';
@@ -610,10 +624,12 @@ class CodeEditor {
       // fetch only rejects on network errors — server-side write failures
       // (permission denied, read-only fs) return 400 with {error} and used to
       // show "✓ Saved" while silently dropping the edits
-      const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path:this.filePath,content,host:this._host||undefined}) });
+      // B-23e5: a save is a person's press (the button, Mod-s, save-and-close) — marked: tried once despite the pool's memory
+      const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body:JSON.stringify({path:this.filePath,content,host:this._host||undefined}) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
       // B-3b03 follow-up (its read's S1): text typed while the save was out is NOT saved — its unsaved mark stays
+      this.saveIndicator.title = '';   // B-23e5: a refusal's hover goes with the good save
       if (this.editorView.state.doc.toString() === content) { this.modified = false; this.saveIndicator.textContent = '✓ ' + t('Saved'); this.saveIndicator.style.color = 'var(--green)'; }
       else { this.saveIndicator.textContent = '● ' + t('Unsaved'); this.saveIndicator.style.color = 'var(--yellow)'; }   // its read's S2: the mark stays true
       this._diskChip.style.display = 'none';
@@ -622,7 +638,11 @@ class CodeEditor {
       setTimeout(() => { if (!this.modified && this._saveSeq === seq) this.saveIndicator.textContent = ''; }, 2000);
       return true;
     } catch (err) {
-      this.saveIndicator.textContent = `✕ ${err.message || t('Error')}`; this.saveIndicator.style.color = 'var(--red)';
+      // B-23e5 (the save law): the text stays in the editor, the editor stays open, and the words say WHERE it is not saved
+      this.saveIndicator.textContent = '✕ ' + t('{name} is not saved — {why}', { name: String(this.filePath).split('/').pop() || this.filePath, why: err.message || t('Error') }); this.saveIndicator.style.color = 'var(--red)';
+      this.saveIndicator.title = t('{path} is not saved — {why}', { path: this.filePath, why: err.message || t('Error') });
+      // r1378 (3): where the text IS and what the person can do — said once as a toast; the dirty mark stays (a close asks, below)
+      showToast(t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name: String(this.filePath).split('/').pop() || this.filePath, why: err.message || t('Error') }), { type: 'error', duration: 8000 });
       this._lastSaveError = err.message || t('Error');
       return false;   // B-3b03 follow-up: the save-and-close door reads it (never «done» over a refused save)
     }

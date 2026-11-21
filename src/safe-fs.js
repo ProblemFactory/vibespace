@@ -31,6 +31,11 @@ const { trackWorker } = require('./worker-memory');
 const DOOR = require('./mount-door');
 // The payload keys that name a path (src/safe-fs-worker.js OPS).
 const PATH_KEYS = ['path', 'oldPath', 'newPath', 'src', 'dest'];
+// B-23e5's remainder: a call's paths — its keys, and the folder rule's own look (`paths`: two dead children looked at with no follow)
+const pathsOf = (payload) => [...PATH_KEYS.map((k) => payload[k]), ...(Array.isArray(payload.paths) ? payload.paths : [])].filter((p) => typeof p === 'string' && p);
+// r1442 (E): a press's join is named by its op and its paths (+ its small fields) — a write's `content` (up to 10 MB) never: it never joins
+const pressKeyOf = (op, payload) => (!payload || payload.content != null ? null : op + '\u0000' + JSON.stringify(payload));
+const CLIMB_LOOK_MS = 1500;   // (b): the no-follow look's own deadline — and the most it waits for an IDLE worker (never behind a live call)
 // B-23e5 (lane hub-loop-stalls, the coordinator's ruling 2026-11-20): ONE DEAD THING, ONE CALL. A path whose call ended a worker AT
 // ITS DEADLINE is remembered for HUNG_MS; a call naming that path or one under it is REFUSED BY NAME at the pool's door, without
 // a worker — never sent to a fresh worker that the same hung syscall would end again (each end parks one thread a real hung mount
@@ -120,6 +125,10 @@ const START_FAILS_SAID = 3;
 // refused at once by name — never sent to wait inside a busy worker (a worker held by a hung listing holds every call queued in it)
 const NO_IDLE = Object.freeze({ code: 'no-idle-worker', message: 'every worker of {pool} is busy — the call was not sent' });
 const noIdleRefusal = (pool = 'the file pool') => Object.assign(new Error(NO_IDLE.message.replace('{pool}', pool)), { status: 503, code: NO_IDLE.code });
+// B-23e5's remainder (r1378 (2)): ONE TRY MEANS ONE — a call at or under a path a person's press is still trying is told so (never a
+// second worker parked on it); the same press again joins the first
+const PATH_TRYING = Object.freeze({ code: 'path-trying', message: 'this folder or file is still being tried — the first press on it has not answered yet: {path}' });
+const pathTryingRefusal = (p) => Object.assign(new Error(PATH_TRYING.message.replace('{path}', String(p || ''))), { status: 503, code: PATH_TRYING.code, tryingPath: p });
 const noWorkerRefusal = (pool = 'the file pool') => Object.assign(new Error(NO_WORKER.message.replace('{pool}', pool)), { status: 503, code: NO_WORKER.code });   // its read (S4): no `noWorker` flag — in `_wait` that flag means «no worker ever took a call»
 
 // Per-op deadlines (ms). A deadline hit under a hung mount is exactly the case
@@ -234,6 +243,7 @@ class SafeFs {
     const call = rec.inflight.get(msg.id);
     if (!call) return; // already timed out & rejected + worker being replaced
     rec.inflight.delete(msg.id);
+    if (rec.looking === msg.id) rec.looking = 0;   // its look answered: the worker takes calls again
     this._forgive(call.payload, call.op);   // r275 / r316: the path answered — what its entry's kind lets this reply clear leaves
     if (rec.inflight.size === 0) rec.worker?.unref?.();
     clearTimeout(call.timer);
@@ -277,12 +287,14 @@ class SafeFs {
       call.reject(e);
     }
     rec.inflight.clear();
+    rec.looking = 0;
   }
 
   _pick() {
     let best = null;
     for (const rec of this._workers) {
       if (!rec.alive || !rec.worker) continue;
+      if (rec.looking) continue;   // r1442 (E): a worker running the folder rule's look takes no other call (a look on a dead share ends it)
       if (!best || rec.inflight.size < best.inflight.size) best = rec;
     }
     return best;
@@ -294,9 +306,8 @@ class SafeFs {
    * deadline) so routes can map to the "storage not responding" response.
    */
   _blocked(payload) {
-    for (const k of PATH_KEYS) {
-      const p = payload && payload[k];
-      const mp = typeof p === 'string' && p ? this._blockedOf(p) : false;
+    for (const p of payload ? pathsOf(payload) : []) {   // the folder rule's look (`paths`) too — never into a blocked mount
+      const mp = this._blockedOf(p);
       if (mp) return mp;
     }
     return false;
@@ -308,8 +319,12 @@ class SafeFs {
    *  missed a 5 s read is still listed in 15 s). AT OR UNDER (`under`: a one-target end, a named folder) refuses that path and what is
    *  under it; THE PATH ITSELF (`self`: a listing, a Properties stat, the root / the home) refuses the op that hung within its own
    *  bound and, a listing's, every listing of that exact path. The bound passed ⇒ it leaves. */
-  _hungOf(payload, op = null, timeoutMs = Infinity) {
-    if (!this._hung || !this._hung.size || !payload) return null;   // a pool built without its constructor (a suite's stand-in) has no memory
+  _hungOf(payload, op = null, timeoutMs = Infinity) { return this._hungAll(payload, op, timeoutMs, true)[0] || null; }
+  /** Every remembered entry that refuses this call — r1442 (A): a press tried despite the memory is held under EACH (a dead file and the
+   *  folder its climb named after it both refuse a press on that file: a press on its sibling must hear «still trying»). */
+  _hungAll(payload, op = null, timeoutMs = Infinity, firstOnly = false) {
+    const out = [];
+    if (!this._hung || !this._hung.size || !payload) return out;   // a pool built without its constructor (a suite's stand-in) has no memory
     const now = this._clock(), wide = WIDE_OPS.has(op), key = opKeyOf(op, payload);
     for (const k of PATH_KEYS) {
       const p = payload[k];
@@ -320,10 +335,10 @@ class SafeFs {
         const under = m.under != null && timeoutMs <= m.under && (p === h || p.startsWith(h.endsWith('/') ? h : h + '/'));
         // THE PATH ITSELF (a listing, a Properties stat, the root / the home): the op that hung — and, a listing's, every listing
         const self = p === h && selfRefuses(m.self, wide, key, timeoutMs);
-        if (under || self) return { path: h, ms: m.until - now };
+        if (under || self) { out.push({ path: h, ms: m.until - now }); if (firstOnly) return out; }
       }
     }
-    return null;
+    return out;
   }
   /** B-23e5: remember the paths of the op that ended its worker at its deadline (`ms` = that deadline, or with `early` the time it
    *  had run when a call queued behind it ended the worker; the oldest leaves past HUNG_KEEP). TWO SIBLINGS DEAD ⇒ THEIR FOLDER: a
@@ -333,16 +348,21 @@ class SafeFs {
    *  Returns the climb's promise (callers ignore it; a suite waits on it). */
   _noteHung(payload, op, ms = Infinity, { early = false } = {}) {
     if (!payload || !this._hungMs || !this._hung || SIZE_OPS.has(op)) return Promise.resolve();
+    const look = op === 'lstatKinds';   // (b), r1378 (4): the look's own hang is remembered like any op — and never climbs (it IS a climb's)
     const now0 = this._clock(), bound = Number.isFinite(ms) ? (early ? 1 : 1.5) * ms : Infinity, key = opKeyOf(op, payload);
-    const mine = new Set(PATH_KEYS.map((k) => payload[k]).filter((p) => typeof p === 'string' && p));   // one call's two paths (a rename) are one sibling
+    const mine = new Set(pathsOf(payload));   // one call's two paths (a rename) are one sibling
     const climbs = [];
     for (const p of mine) {
+      if (look && this._hung.has(p)) continue;   // the look's own hang names no strike on a path already remembered (its folder is named by it)
       const until = now0 + this._spanOf(p, now0);   // r275: the time doubles on a repeat end of this path (capped)
       const exact = WIDE_OPS.has(op) || key === 'stat+entryCount' || guardedPath(p);
       this._putHung(p, exact ? { until, under: null, self: { [key]: bound }, ...(early ? { early: true } : {}) } : { until, under: bound, self: {}, ...(early ? { early: true } : {}) });
       const dir = path.dirname(p), was = this._hung.get(dir), now = this._clock();
-      if (!exact && !early && dir && dir !== p && !guardedPath(dir) && (!was || was.under == null || was.until <= now)) {   // a folder whose LISTING hung may still be named; an EARLY end never names one
-        for (const [q, m] of this._hung) if (q !== p && !mine.has(q) && m.under != null && !m.early && m.until > now && path.dirname(q) === dir) { climbs.push(this._climb(dir, p, q, { until: now0 + this._hungMs, under: bound, self: {} })); break; }
+      if (!look && !exact && !early && dir && dir !== p && !guardedPath(dir) && (!was || was.under == null || was.until <= now)) {   // a folder whose LISTING hung may still be named; an EARLY end never names one
+        // EVERY remembered dead sibling is looked at with it (at most 7): a link among them never stops two real dead children (its read)
+        const qs = []; for (const [q, m] of this._hung) if (q !== p && !mine.has(q) && m.under != null && !m.early && m.until > now && path.dirname(q) === dir) qs.push(q);
+        qs.splice(0, Math.max(0, qs.length - 7));   // the NEWEST seven (the map keeps the oldest first): old links never crowd out new dead children
+        if (qs.length) climbs.push(this._climb(dir, p, qs, { until: now0 + this._hungMs, under: bound, self: {} }));
       }
     }
     return Promise.all(climbs);
@@ -392,16 +412,43 @@ class SafeFs {
   }
   /** B-23e5: name the folder of two dead siblings only on ONE storage — the mount table read off the loop, by path text; an automounter's
    *  folder never; unreadable ⇒ no climb. What is under a named folder is refused with it, other mounts too: they are reached through it. */
-  _climb(dir, p, q, m) {
+  _climb(dir, p, qs, m) {
     return Promise.resolve().then(() => this._mountsText()).then((text) => {
-      const a = mountFactsOf(dir, text), b = mountTargetOf(p, text), c = mountTargetOf(q, text);
-      if (!a || !b || !c || a.target !== b || b !== c) return;   // a mount point of its own (or two storages): the folder stays asked
+      const a = mountFactsOf(dir, text), b = mountTargetOf(p, text), same = qs.filter((q) => { const c = mountTargetOf(q, text); return !!c && c === b; });
+      if (!a || !b || a.target !== b || !same.length) return;   // a mount point of its own (or two storages): the folder stays asked
       if (a.fstype === 'autofs') return;   // an automounter's folder: a dead key has no line yet (its mount is what hangs) — never named
-      if (!this._hung || this._clock() >= m.until) return;
-      this._putHung(dir, m);
+      // B-23e5's remainder (b): a child reached through a SYMLINK lies where its link points, not on this folder's storage — two links into
+      // dead mounts never name their healthy folder. Each child looked at with NO follow (one pool call, short, past the memory): TWO
+      // children that are no link (a file, nothing there) name it; no answer in time (a really dead share) names it; links keep it asked
+      // one look a folder at a time (r1442 (E)): a sibling that ends while a look is out WAITS for it, then looks with what is known —
+      // never a second worker at once, never a sibling dropped (its delta read: two ends together, the first look saw one of them)
+      const prev = (this._lookingDirs = this._lookingDirs || new Map()).get(dir);
+      if (prev) return prev.then(() => { const n = this._hung && this._hung.get(dir); if (n && n.under != null && n.until > this._clock()) return; return this._climb(dir, p, qs, m); });
+      // only the children STILL remembered dead are looked at (one that answered meanwhile — a press tried and forgiven — never counts)
+      const live = [p, ...same].filter((x) => { const e = this._hung && this._hung.get(x); return !!e && e.under != null && !e.early && e.until > this._clock(); });   // the sibling rule's own test
+      if (live.length < 2) return;
+      const look = this._lookIdle({ paths: live }).then((r) => {
+        if (!r) return;   // no idle worker within the bound (or refused): the folder stays asked — named by a later sibling
+        if (!r.timedOut && !(Array.isArray(r.links) && r.links.filter((x) => !x).length >= 2)) return;
+        if (!this._hung || this._clock() >= m.until) return;
+        this._putHung(dir, m);
+      }).finally(() => { if (this._lookingDirs.get(dir) === look) this._lookingDirs.delete(dir); });
+      this._lookingDirs.set(dir, look);
+      return look;
     }, () => {});
   }
 
+  /** (b) the folder rule's no-follow look on an IDLE worker only — never queued behind a live call (its short deadline would end that
+   *  call's worker): no idle one ⇒ tried again every 100 ms up to CLIMB_LOOK_MS; its own deadline is a deadline (remembered, r1378 (4)).
+   *  A timeout answers { timedOut } (the children are on dead storage: their folder is named); any other refusal null. */
+  _lookIdle(payload) {
+    const t0 = performance.now();
+    const once = () => this.call('lstatKinds', payload, { timeoutMs: CLIMB_LOOK_MS, look: true, idleOnly: true }).then((r) => r || { links: [] }, (e) => {
+      if (e && (e.code === 'no-idle-worker' || e.code === 'no-worker') && !this._closed && performance.now() - t0 < CLIMB_LOOK_MS) return new Promise((res) => setTimeout(res, 100)).then(once);
+      return e && e.safeFsTimeout ? { links: [], timedOut: true } : null;
+    });
+    return once();
+  }
   /** The lane `name` (LANES) — a SafeFs of its own beside this pool, the same worker script / door / deadlines. */
   lane(name) {
     let l = this._lanes.get(name);
@@ -422,11 +469,14 @@ class SafeFs {
   call(op, payload = {}, opts = {}) {
     if (this._closed) return Promise.reject(Object.assign(new Error('safeFs closed'), { status: 503 }));
     // r316's should: two presses of the same thing at once JOIN one call in flight — never two workers for one person's hand; the
-    // joined caller rides the FIRST caller's deadline and signal (harmless with this door: the same listing, the same route)
-    if (opts.attended && !opts.joined && this._pressing) {
-      const k = op + '\u0000' + JSON.stringify(payload), j = this._pressing.get(k);
+    // joined caller rides the FIRST caller's deadline and signal (harmless with this door: the same listing, the same route). A join is
+    // named by the op and its paths (r1442 (E)) — never by content: a write (its `content`) never joins and is never stringified
+    const k = opts.attended && !opts.joined && this._pressing ? pressKeyOf(op, payload) : null;
+    if (k) {
+      const j = this._pressing.get(k);
       if (j) return j;
-      const p = this.call(op, payload, { ...opts, joined: true }), off = () => { if (this._pressing.get(k) === p) this._pressing.delete(k); };
+      const p = this.call(op, payload, { ...opts, joined: true });
+      const off = () => { if (this._pressing.get(k) === p) this._pressing.delete(k); };
       this._pressing.set(k, p); p.then(off, off);
       return p;
     }
@@ -439,8 +489,14 @@ class SafeFs {
     const timeoutMs = opts.timeoutMs || this.timeouts[op] || this.timeouts.default;
     // B-23e5: a path that ended a worker at its deadline is not asked again until its bound — r275 / r316: A PERSON'S OWN PRESS IS
     // TRIED (`attended`: the files router's mark of the Files window's Refresh, pressed — the one door): asked ONCE despite the memory
-    const hp = opts.attended ? null : this._hungOf(payload, op, timeoutMs);
-    if (hp) return Promise.reject(pathHungRefusal(hp.path, hp.ms));
+    const hp = opts.look ? null : this._hungOf(payload, op, timeoutMs);   // `look`: the folder rule's own no-follow look (its paths are remembered)
+    if (hp && !opts.attended) return Promise.reject(pathHungRefusal(hp.path, hp.ms));
+    // r1378 (2) / r1442 (A): ONE TRY A REMEMBERED PATH — a press the memory WOULD refuse is tried despite it, one at a time per remembered
+    // path: another press that same path refuses while that try is out is told «still trying» (never a second parked thread). A press the
+    // memory does not refuse is never held and never refused (a healthy listing, a save, Mod-s twice: as at the release)
+    const held = hp ? [...new Map(this._hungAll(payload, op, timeoutMs).map((x) => [x.path, x])).values()] : [];   // each remembered path refusing this press, once
+    const busy = this._trying ? held.find((x) => this._trying.has(x.path)) : null;
+    if (busy) return Promise.reject(pathTryingRefusal(busy.path));
     const rec = this._pick();
     if (this._serial && opts.signal?.aborted) return Promise.reject(gone());
     if (this._serial && (!rec || rec.inflight.size || this._waiting.length)) return this._wait(op, payload, timeoutMs, opts);
@@ -454,7 +510,9 @@ class SafeFs {
     // `idleOnly` (B-d833 H9): the least busy live worker has a call in flight ⇒ no worker is idle ⇒ refused at once, never queued
     // (a lane's op waits by its lane's own rule: serial lanes never take this option)
     if (opts.idleOnly && rec.inflight.size) return Promise.reject(noIdleRefusal(this._words));
-    return this._send(rec, op, payload, timeoutMs, !!opts.attended);
+    const sent = this._send(rec, op, payload, timeoutMs, !!opts.attended, !!opts.look);
+    if (held.length) { const off = () => { for (const x of held) if (this._trying && this._trying.get(x.path) === sent) this._trying.delete(x.path); }; for (const x of held) (this._trying = this._trying || new Map()).set(x.path, sent); sent.then(off, off); }
+    return sent;
   }
 
   // A lane's op while one runs (or while its worker respawns): it waits in main (never in the worker). r3: TWO clocks —
@@ -465,7 +523,7 @@ class SafeFs {
   // the route's response closed before its answer) leaves the queue, never sent; a RUNNING one finishes (one worker).
   _wait(op, payload, timeoutMs, opts = {}) {
     return new Promise((resolve, reject) => {
-      const job = { op, payload, timeoutMs, resolve, reject, signal: opts.signal || null, attended: !!opts.attended };
+      const job = { op, payload, timeoutMs, resolve, reject, signal: opts.signal || null, attended: !!opts.attended, look: !!opts.look };
       const leave = (e) => {
         const i = this._waiting.indexOf(job);
         if (i < 0) return;
@@ -498,19 +556,20 @@ class SafeFs {
       // a worker that would hang inside it
       const mp = this._blocked(job.payload);
       if (mp) { job.reject(DOOR.refusal(mp)); continue; }
-      const hp = job.attended ? null : this._hungOf(job.payload, job.op, job.timeoutMs);   // B-23e5: a path that ended a worker while the job waited is refused the same way (a person's press is tried)
+      const hp = job.attended || job.look ? null : this._hungOf(job.payload, job.op, job.timeoutMs);   // B-23e5: a path that ended a worker while the job waited is refused the same way (a person's press is tried)
       if (hp) { job.reject(pathHungRefusal(hp.path, hp.ms)); continue; }
       this._send(rec, job.op, job.payload, job.timeoutMs, job.attended).then(job.resolve, job.reject);
     }
   }
 
-  _send(rec, op, payload, timeoutMs, attended = false) {
+  _send(rec, op, payload, timeoutMs, attended = false, look = false) {
     const id = this._seq++;
     this._ran = true;   // a worker of this pool TOOK a call — sticky: a killed worker's respawn wait is never «no worker» (the sessions sweep's -cure, its read's M1)
     const p = new Promise((resolve, reject) => {
       const timer = setTimeout(() => this._onTimeout(rec, id), timeoutMs);
       timer.unref?.();
       rec.inflight.set(id, { resolve, reject, timer, op, payload, timeoutMs, sentAt: monoNow(), attended });   // B-23e5: its paths are remembered if it ends at its deadline
+      if (look) rec.looking = id;   // r1442 (E): this worker takes no other call while its look is out
       try {
         rec.worker.postMessage({ id, op, payload });
         // Hold the event loop open while work is in flight — workers are
@@ -521,6 +580,7 @@ class SafeFs {
       } catch (e) {
         clearTimeout(timer);
         rec.inflight.delete(id);
+        if (rec.looking === id) rec.looking = 0;
         reject(Object.assign(new Error('storage dispatch failed: ' + e.message), { status: 503 }));
       }
     });
@@ -535,6 +595,7 @@ class SafeFs {
     const running = rec.inflight.size ? rec.inflight.values().next().value : null;   // B-23e5: the op the worker is RUNNING — the oldest it took
     if (!call) return;
     rec.inflight.delete(id);
+    if (rec.looking === id) rec.looking = 0;
     this._timeouts++;
     try { global.__vsMetric?.('srv-safefs-timeout', 1); } catch {}
     const e = new Error('Storage not responding (operation timed out).');
@@ -587,4 +648,4 @@ class SafeFs {
   }
 }
 
-module.exports = { SafeFs, NO_WORKER, noWorkerRefusal, NO_IDLE, noIdleRefusal, PATH_HUNG, pathHungRefusal, HUNG_MS, WIDE_OPS, SIZE_OPS, mountTargetOf, mountFactsOf };
+module.exports = { SafeFs, NO_WORKER, noWorkerRefusal, NO_IDLE, noIdleRefusal, PATH_HUNG, pathHungRefusal, PATH_TRYING, pathTryingRefusal, HUNG_MS, WIDE_OPS, SIZE_OPS, mountTargetOf, mountFactsOf };

@@ -36,6 +36,7 @@ export function fsErrorText(d) {
   if (d && d.code === 'parse_busy') return t('another document is being parsed — try again in a moment'); // the parse lane's turn never came (src/safe-fs.js LANES)
   // B-3b03: the file pool had no live worker (its readers restart after a storage that did not answer) — refused, never run on the hub's loop
   if (d && d.code === 'storage_no_worker') return t('the file readers are restarting — try again in a moment');
+  if (d && d.code === 'storage_path_trying') return t('this folder or file is still being tried — wait for the answer to the first press');   // B-23e5's remainder: one press, one worker
   if (d && d.code === 'storage_path_hung') return t('this folder or file did not answer in time — try again in {s} s', { s: (d.params && d.params.s) || 30 });   // B-23e5
   // B-5ce7's cure: a PARKED storage's folder — its name and its doors, in the reader's language (src/routes/files.js storage_parked)
   if (d && d.code === 'storage_parked') return t('“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.', { name: p.name || '' });
@@ -112,12 +113,12 @@ export function installExplorerOps(FileExplorer) {
     }
 
     if (isDir) {
-      items.push({ label: t('Open'), action: () => this.navigate(fullPath) });
-      items.push({ label: t('Open in new window'), action: () => this.app.openFileExplorer(fullPath) });
+      items.push({ label: t('Open'), action: () => this.navigate(fullPath, { attended: true }) });   // B-23e5: the context menu's Open, pressed
+      items.push({ label: t('Open in new window'), action: () => this.app.openFileExplorer(fullPath, { attended: true }) });   // B-23e5: pressed
     } else {
-      items.push({ label: t('Open'), action: () => this.app.openFile(fullPath, dataset.name, { host: this._host || undefined }) });
-      items.push({ label: t('Edit'), action: () => this.app.openEditor(fullPath, dataset.name, { host: this._host || undefined }) });
-      items.push({ label: t('Open as Hex'), action: () => this.app.openFile(fullPath, dataset.name, { hex: true, host: this._host || undefined }) });
+      items.push({ label: t('Open'), action: () => this.app.openFile(fullPath, dataset.name, { host: this._host || undefined, attended: true }) });
+      items.push({ label: t('Edit'), action: () => this.app.openEditor(fullPath, dataset.name, { host: this._host || undefined, attended: true }) });
+      items.push({ label: t('Open as Hex'), action: () => this.app.openFile(fullPath, dataset.name, { hex: true, host: this._host || undefined, attended: true }) });
       // §7.9 "Open with LibreOffice" — the file's REAL path on ITS machine (`fullPath` + `this._host`, never the window's
       // host-labelled title): the app runs where the file is. LibreOffice absent there ⇒ ONE plain sentence + "Install
       // LibreOffice on <machine>…" (app.officeMenuItems — never a greyed row); an answer that arrives after the menu

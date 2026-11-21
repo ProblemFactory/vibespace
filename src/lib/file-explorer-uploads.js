@@ -75,7 +75,7 @@ export function installExplorerUploads(FileExplorer) {
         const row2 = document.createElement('div'); row2.className = 'upload-hist-row2';
         row2.textContent = `${formatSize(entry.size)} · ${this._formatDate(entry.date)}`;
         item.append(row1, row2);
-        item.onclick = () => { pop.remove(); if (entry.path) this.app.openFile(entry.path, entry.name); };
+        item.onclick = () => { pop.remove(); if (entry.path) this.app.openFile(entry.path, entry.name, { attended: true }); };   // B-23e5: an upload's row pressed
         pop.appendChild(item);
       }
       if (historyData.length > 0) {

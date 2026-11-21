@@ -2437,12 +2437,13 @@ class App {
     return false;
   }
 
-  openFileExplorer(startPath, { syncId, host, from, intoChain } = {}) {
+  openFileExplorer(startPath, { syncId, host, from, intoChain, attended = false } = {}) {
     if (from && this._focusOpenInChain(from, { path: startPath, host, dir: true })) return this.wm.windows.get(this.wm.activeWindowId);
     this._hideWelcome();
     const openSpec = { action: 'openFileExplorer', path: startPath, host: host || undefined };
     const winInfo = this.wm.createWindow({ title: t('File Explorer'), type: 'files', syncId, openSpec, intoChain: intoChain || (from ? this.linkPlacement(from) : undefined) });
     if (host) winInfo._explorerHost = host; // read by FileExplorer constructor
+    if (attended) winInfo._explorerPressed = true; // B-23e5: a person's press opened it (Open in new window) — its first listing is tried
     const explorer = new FileExplorer(winInfo, this, startPath);
     winInfo._explorer = explorer;
     winInfo.onClose = () => { explorer.dispose(); this._checkWelcome(); };
@@ -2719,7 +2720,7 @@ class App {
     // view and a derived temp file keep the editor's door. `from` (a window id) → the chat session it shows = the owner witness
     if (/\.(md|markdown)$/i.test(fileName || filePath) && !opts.line && !opts.hex && !opts._tempFile && !opts.via) {
       if (opts.from && this._focusOpenInChain(opts.from, { path: filePath, host: opts.host, quiet: !!opts.quiet })) return;
-      return this.openDoc({ host: opts.host || '', path: filePath, from: (opts.from && this.sessions.get(opts.from)?.sessionId) || '', intoChain: opts.from ? this.linkPlacement(opts.from) : opts.intoChain, syncId: opts.syncId, ...(opts.quiet ? { quiet: true } : {}) });
+      return this.openDoc({ host: opts.host || '', path: filePath, from: (opts.from && this.sessions.get(opts.from)?.sessionId) || '', intoChain: opts.from ? this.linkPlacement(opts.from) : opts.intoChain, syncId: opts.syncId, ...(opts.quiet ? { quiet: true } : {}), ...(opts.attended ? { attended: true } : {}) });   // B-23e5: a press rides into the doc window's first read
     }
     if (opts.from) {
       if (this._focusOpenInChain(opts.from, { path: filePath, host: opts.host, line: opts.line, quiet: !!opts.quiet })) return;

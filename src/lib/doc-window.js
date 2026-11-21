@@ -21,7 +21,7 @@ import { UI_ICONS } from './icons.js';
 let editorLoad = null;
 const loadEditor = () => editorLoad || (editorLoad = import(new URL('/doc-editor.js', location.origin).href).catch((e) => { editorLoad = null; throw e; }));
 
-export function openDoc(app, { host = '', path = '', from = '', syncId, intoChain, quiet = false } = {}) { // `quiet`: app.openFile's (an automatic open — never the focus)
+export function openDoc(app, { host = '', path = '', from = '', syncId, intoChain, quiet = false, attended = false } = {}) { // `quiet`: app.openFile's (an automatic open — never the focus)
   const p = foldPath(path), h = host && host !== 'local' ? String(host) : '';
   if (!p.startsWith('/')) return null;
   for (const w of app.wm.windows.values()) {
@@ -38,11 +38,19 @@ export function openDoc(app, { host = '', path = '', from = '', syncId, intoChai
   const root = document.createElement('div'); root.className = 'doc-window'; root.textContent = t('Loading…');
   winInfo.content.appendChild(root);
   const signal = winInfo._listenerCtl.signal;
-  const makeRaw = (pane) => { const sub = Object.create(winInfo); sub.content = pane; return new CodeEditor(sub, p, name, app, { host: h }); };
+  const makeRaw = (pane, { attended = false } = {}) => { const sub = Object.create(winInfo); sub.content = pane; return new CodeEditor(sub, p, name, app, { host: h, attended }); };   // B-23e5: a raw pane opened by a press reads once marked
   const deps = { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, createBarFold, icons: UI_ICONS, sanitizeHtml, copyText, Marked, saveDraft, loadDraft, getStateSync, isPhone: () => !!app.isMobile }; // the class's live answer (lane duo-build-1)
-  loadEditor().then((mod) => { if (!signal.aborted) { root.textContent = ''; mod.mountDocWindow({ root, winInfo, host: h, path: p, name, from: from || '', signal, deps }); } },
+  loadEditor().then((mod) => { if (!signal.aborted) { root.textContent = ''; mod.mountDocWindow({ root, winInfo, host: h, path: p, name, from: from || '', signal, deps, attended }); } },
     () => { root.textContent = t('Could not load the document editor — reload the page'); });
   winInfo.onClose = () => { try { winInfo._docClose?.(); } catch { } app._checkWelcome?.(); };
+  // B-23e5's remainder (r1378 (3)): a doc window holding unsaved text ASKS before it closes (its ✕, a group's close-all) — never a silent loss
+  winInfo.onCloseRequest = (o) => {
+    const dirty = typeof winInfo._editorDirty === 'function' && winInfo._editorDirty();
+    if (!dirty || (o && o.discardAsked)) return true;
+    showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name }), confirmText: t('Discard'), danger: true })
+      .then((ok) => { if (ok) app.wm.requestClose(winInfo.id, { discardAsked: true }); });
+    return false;
+  };
   return winInfo;
 }
 

@@ -32,6 +32,7 @@ import { clockOf } from './page-time.js'; // lane ui-language: the ONE formatter
 import { Plugin, NodeSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import M from '../doc-model.js';
+import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';   // B-23e5: a refused save in the reader's language; a person's save marked
 import { schema, extensions, loadDoc, saveDoc, sourceLine, docFidelity, safeHref, safeImageSrc } from './doc-markdown.js';
 import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, rawReading, colsBand, rawCommentAnchor, rawCommentTarget, RAW_KIND_WORD, linkBarModel, linkPlan, sendAllLabel, sendWords } from './doc-window-model.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
@@ -224,7 +225,8 @@ export function commentOffer(open) {
   };
 }
 
-export function mountDocWindow({ root, winInfo, host, path, name, from, signal, deps }) {
+export function mountDocWindow({ root, winInfo, host, path, name, from, signal, deps, attended = false }) {
+  let pressedFirst = !!attended;   // B-23e5's remainder: opened by a person's press — its FIRST read carries the mark, once
   const { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, isPhone, createBarFold, icons: I, sanitizeHtml, copyText, Marked, saveDraft, loadDraft, getStateSync } = deps;
   if (!document.getElementById('doc-window-css')) { const st = mk('style'); st.id = 'doc-window-css'; st.textContent = CSS; document.head.appendChild(st); }
   let widthPref = 'fit'; try { widthPref = widthChoice(localStorage.getItem(WIDTH_KEY)); } catch { } // a DEVICE's choice
@@ -375,8 +377,8 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   const setDirty = (d) => { if (S.dirty !== d) { S.dirty = d; renderStatus(); } };
   winInfo._editorDirty = () => S.dirty || !!(S.raw && S.raw.modified);
   const info = async () => { const r = await fetchJson('/api/file/info?' + q(host, path)); return r && !r.error && r.modified ? new Date(r.modified).getTime() || 0 : 0; };
-  const read = async () => {
-    const r = await fetchJson('/api/file/content?' + q(host, path));
+  const read = async ({ pressed = false } = {}) => {
+    const r = await fetchJson('/api/file/content?' + q(host, path), pressed ? { headers: ATTENDED_HEADERS } : undefined);
     if (!r || r.error) throw new Error((r && r.error) || t('the server did not answer'));
     return String(r.content || '');
   };
@@ -842,10 +844,10 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   // Raw: the formatting tools step out of the bar (display none = absent for the fold), Raw + comments stay
   const tools = (on) => { for (const x of BAR) if (x.key !== 'raw' && x.key !== 'comments') x.el.style.display = on && !(x.key === 'width' && isPhone()) ? '' : 'none'; };
   const showRich = () => { S.mode = 'rich'; pane.hidden = false; rawPane.hidden = true; btnRaw.setAttribute('aria-pressed', 'false'); tools(true); refreshBar(); };
-  const showRaw = () => {
+  const showRaw = ({ pressed = false } = {}) => {
     S.mode = 'raw'; pane.hidden = true; rawPane.hidden = false; btnRaw.setAttribute('aria-pressed', 'true'); tools(false); showConflict(false); placeGrips(null);
     if (!S.raw) {
-      S.raw = makeRaw(rawPane); S.rawBefore = S.source;
+      S.raw = makeRaw(rawPane, { attended: pressed }); S.rawBefore = S.source;   // B-23e5's remainder: the Raw press's first read carries the mark
       const orig = S.raw.save.bind(S.raw);
       S.raw.save = async () => {
         await orig();
@@ -860,10 +862,12 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   const fidelityWords = (v) => t('Editing raw — {why}', { why: (v && whyWords()[v.code]) || t('line {n}', { n: (v && v.line) || 0 }) });
 
   /** Read the disk and show it: lossless ⇒ the rendered view; else raw + the chip. */
-  async function load({ first = false } = {}) {
+  async function load({ first = false, pressed: byPress = false } = {}) {
     S.busy = true;
     try {
-      const [src, m] = await Promise.all([read(), info()]);
+      // B-23e5's remainder: a PRESSED first read goes ALONE (one press, one worker) and its info after it; else the two in parallel
+      const pressed = (first && pressedFirst) || byPress; pressedFirst = false;   // a press: the window opened by one, its Reload, the way back from Raw
+      const [src, m] = pressed ? await (async () => { const a = await read({ pressed: true }); return [a, await info()]; })() : await Promise.all([read(), info()]);
       S.source = src; S.base = m; S.kept = 0; S.confirmed = 0; conflict.hidden = true; S.at = hhmm();
       S.verdict = docFidelity(src);
       if (!S.verdict.ok) { say(fidelityWords(S.verdict)); if (S.mode !== 'raw') showRaw(); else if (!first && S.raw && !S.raw.modified) S.raw.reloadFromDisk?.({ auto: true }); setDirty(false); }
@@ -891,11 +895,11 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   }
 
   async function toggleRaw() {
-    if (S.mode === 'rich') { if (S.dirty) { say(t('Save first — the raw editor opens the file as it is on disk')); return; } showRaw(); return; }
+    if (S.mode === 'rich') { if (S.dirty) { say(t('Save first — the raw editor opens the file as it is on disk')); return; } showRaw({ pressed: true }); return; }
     if (S.raw && S.raw.modified) { say(t('Save first — the raw editor has unsaved edits')); return; }
     const v = docFidelity(S.raw && S.raw.editorView ? S.raw.editorView.state.doc.toString() : S.source);
     if (!v.ok) { say(fidelityWords(v)); return; }
-    showRich(); await load();
+    showRich(); await load({ pressed: true });
   }
 
   // ── save + the edit note ──
@@ -906,20 +910,24 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     const text = patched.text;
     S.busy = true;
     try {
-      const disk = await info();
+      // B-23e5's remainder (r1442 (C)): the save's OWN check is the press's one try (marked); refused by the storage ⇒ the save ends here
+      // with the words — never a write after it (one press, one try); the text stays in the editor, marked unsaved
+      const chk = await fetch('/api/file/info?' + q(host, path), { headers: ATTENDED_HEADERS }).then(async (res) => ({ status: res.status, body: await res.json().catch(() => ({})) }), () => null);
+      if (chk && chk.status === 503) throw new Error(chk.body && chk.body.error ? fsErrorText(chk.body) : t('the server did not answer'));
+      const disk = chk && chk.body && !chk.body.error && chk.body.modified ? new Date(chk.body.modified).getTime() || 0 : 0;
       if (M.saveVerdict({ disk, base: S.base, confirmed: S.confirmed }) === 'ask') {
         const ok = await showConfirmDialog({ title: t('Overwrite the agent\'s newer version?'), message: t('The agent changed this file after you opened it. Saving replaces its version with yours.'), confirmText: t('Overwrite'), danger: true });
         if (!ok) return;
         S.confirmed = disk;
       }
-      const res = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, content: text, host: host || undefined }) });
+      const res = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json', ...ATTENDED_HEADERS }, body: JSON.stringify({ path, content: text, host: host || undefined }) });   // B-23e5: a person's save, marked
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
       const before = S.source;
       S.source = text; S.loaded = loadDoc(text); S.base = await info(); S.kept = 0; S.confirmed = 0; conflict.hidden = true;
       S.at = hhmm(); S.note = t('Saved {time}', { time: S.at }); S.dirty = false; renderStatus();
       noteEdit(before, text);
-    } catch (e) { say(t('Save failed: {why}', { why: e.message })); } finally { S.busy = false; }
+    } catch (e) { say(t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name: String(path).split('/').pop() || path, why: e.message })); } finally { S.busy = false; }   // B-23e5 (the save law): the text stays, the window stays, the words say where
   }
   saveDot.addEventListener('click', () => { if (S.dirty) save(); }, { signal });
   async function noteEdit(before, after) {
@@ -937,7 +945,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     if (v === 'repaint') await load();
     else if (v === 'bar') showConflict(true);
   }
-  btnReload.addEventListener('click', () => { setDirty(false); load(); }, { signal });
+  btnReload.addEventListener('click', () => { setDirty(false); load({ pressed: true }); }, { signal });   // B-23e5: the Reload pressed
   btnKeep.addEventListener('click', async () => { S.kept = await info(); showConflict(false); }, { signal });
   const timer = host ? 0 : setInterval(check, POLL_MS);
   window.addEventListener('focus', check, { signal });
