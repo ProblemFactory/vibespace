@@ -169,7 +169,11 @@ app owns. Refused by name:
 - `window_subject_pixels` — the tree verbs (`snapshot`, `@refs`) take the app's own handle, never a window's;
 - `window_subject_shared` — on a desktop shared with the user's own windows no window has a handle of its own: use the
   app's own handle, and ask the user about the other windows (they see them in the live view);
-- `window_not_visible` — the window has no pixels yet (nobody shows it): the user's live view shows it.
+- `window_not_visible` — the window has no pixels yet (nobody shows it): the user's live view shows it;
+- `window_not_ready` — the app is still starting: its windows are listed once it is ready;
+- `window_subject_verb` — `attach`, `detach`, `size`, `mode`, `stop` and `watch` take the app's own handle, never a window's.
+
+Every verb meets ONE check of a window's handle before anything else runs: it acts on THAT window or is refused by name, and nothing is injected or recorded as done when it is refused.
 
 A **handle** is the window's id from `list` (`da-…`); `open` prints it. A
 **lease** is what `attach` takes: one holder per window, and every reading or

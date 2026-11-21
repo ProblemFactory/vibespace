@@ -542,12 +542,40 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (trustPid && pidAlive(pid)) return DESK.desktopRecord({ handle: DESK.desktopHandle(pid), label: `pid ${pid} (not listed since the restart — \`vibespace-window list\` names it)`, pid, pids: [pid] });
     return null;
   }
+  /** B-dbb4 (r946): THE ONE DOOR for a typed subject. Every verb that takes a handle calls it FIRST; no verb and no record kind
+   *  reads a subject by itself, and none can return before it. `subjectVerb` = a verb that acts on a window's own pixels
+   *  (screenshot, click --at, type, key, scroll); every other verb (attach, detach, size, mode, stop, watch, snapshot, a tree
+   *  verb with @ref) is refused by name on a window's handle. A subject is resolved here (the lease, a desktop the app owns, the
+   *  record ready, the window in the app's own list) or refused by name — audited as refused, nothing injected, nothing done. */
+  async function subjectDoor(handle0, facts, verb, { subjectVerb = false, tree = false } = {}) {
+    const { handle, sub } = splitSubject(handle0);
+    if (sub == null) return { handle, sub: null };
+    const subH = String(handle0);
+    const refuse = (code, why, extra = {}) => { const rec0 = liveAny(handle); audit({ sessionId: facts && facts.sessionId, browserKey: facts && facts.browserKey, handle: rec0 ? rec0.id : handle, subject: subH, verb, by: 'subject', ok: false, code }); return namedError(code, why, { handle: subH, ...extra }); };
+    if (!subjectVerb) throw refuse('window_subject_verb', `${subH} is one window of the app — \`${verb}\` takes the app's own handle ${handle}; a window's own handle takes only screenshot, click --at, type, key and scroll`);
+    if (tree) throw refuse('window_subject_pixels', `${subH} is one window of the app, reached by its pixels — \`screenshot\`, \`click --at\`, \`type\`, \`key\`, \`scroll\`; the tree verbs (@refs) take the app's own handle ${handle}`);
+    const rec0 = liveAny(handle); // the record KIND first — a shared desktop has no window handles, lease or not
+    if (rec0 && (rec0.origin === 'desktop' || !capsOf(rec0).ownsDisplay)) throw refuse('window_subject_shared', `${subH}: a window's own handle exists only on a desktop the app owns — this one is shared with the person's own windows; use the app's own handle ${rec0.id}`);
+    const { rec, lease } = requireLease(handle, facts, verb);
+    if (rec.state !== 'ready') throw refuse('window_not_ready', `${subH}: the app is still starting — its windows are listed once it is ready; nothing was done`);
+    let plan = null;
+    try { plan = await planFor(rec, sub); } catch (e) { throw refuse(e && e.code ? e.code : 'window_list_unreadable', (e && e.message) || `${subH}: the app's window list could not be read just now — nothing was done`); }
+    return { handle, sub, rec, lease, plan };
+  }
   /** B-dbb4 unit 2: `<handle>.w<hex X id>` = one window of that app as the call's subject; the whole handle a record wins. */
   function splitSubject(h0) {
     const h = String(h0 || '');
     if (liveAny(h)) return { handle: h, sub: null };
     const m = UN.SUB_RE.exec(h);
     return m && liveAny(m[1]) ? { handle: m[1], sub: parseInt(m[2], 16) } : { handle: h, sub: null };
+  }
+  /** The door's sync half for a verb that never takes a subject (attach, detach, size, stop, watch, mode). */
+  function refuseSubjectSync(handle0, facts, verb) {
+    const { handle, sub } = splitSubject(handle0);
+    if (sub == null) return;
+    const rec0 = liveAny(handle);
+    audit({ sessionId: facts && facts.sessionId, browserKey: facts && facts.browserKey, handle: rec0 ? rec0.id : handle, subject: String(handle0), verb, by: 'subject', ok: false, code: 'window_subject_verb' });
+    throw namedError('window_subject_verb', `${handle0} is one window of the app — \`${verb}\` takes the app's own handle ${handle}; a window's own handle takes only screenshot, click --at, type, key and scroll`, { handle: String(handle0) });
   }
   function liveAny(handle) { const h = String(handle || ''); return liveRecord(h) || liveDesktop(h, { trustPid: leases.has(h) }); }
   /** Every lease on the desktop class goes when the switch is off — the user's decision always wins, before any takeover is asked for. */
@@ -837,6 +865,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    *  pins any window from its menu). The record's fact, written by the keeper's one record writer (setPin: saved +
    *  broadcast — the showing clients re-fit in place). */
   async function setSize(handle, size, facts) {
+    refuseSubjectSync(handle, facts, 'size'); // B-dbb4 (r946): the one door — a window's own handle never reaches this verb
     load();
     const rec = liveRecord(handle);
     if (!rec) throw namedError('not-found', notFoundMsg(handle));
@@ -851,6 +880,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    *  other window is `not_your_window`: a window the user shared stays the user's to set (its menu). A browser with no
    *  accessibility tree stays pixels (PURE launchModeVerdict says why); `auto` re-runs the probe now. E2b's pin untouched. */
   async function setLaunchMode(handle, mode, facts) {
+    refuseSubjectSync(handle, facts, 'mode'); // B-dbb4 (r946): the one door — a window's own handle never reaches this verb
     load();
     const rec = liveRecord(handle);
     if (!rec) throw namedError('not-found', notFoundMsg(handle));
@@ -869,6 +899,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     return { handle: rec.id, mode: modeInfo(rec.id), why: res ? res.why : v.why, changed: r.changed };
   }
   async function stopOwn(handle, facts) {
+    refuseSubjectSync(handle, facts, 'stop'); // B-dbb4 (r946): the one door — a window's own handle never reaches this verb
     load();
     const rec = liveRecord(handle);
     if (!rec) throw namedError('not-found', notFoundMsg(handle));
@@ -901,6 +932,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     return rec ? { handle: rec.id } : null;
   }
   function attach(handle, facts) {
+    refuseSubjectSync(handle, facts, 'attach'); // B-dbb4 (r946): the one door — a window's own handle never reaches this verb
     load();
     if (DESK.isDesktopHandle(handle)) requireConsent();
     const rec = liveAny(handle);
@@ -981,6 +1013,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     return true;
   }
   function detach(handle, facts) {
+    refuseSubjectSync(handle, facts, 'detach'); // B-dbb4 (r946): the one door — a window's own handle never reaches this verb
     load();
     { const live = liveRecord(handle); if (live) { try { requireReach(live, facts, 'detach'); } catch (e) { if (e.code !== 'reach_unreadable') throw e; } } } // lane E: a revoked holder's lease is already gone — said by name; r2 (L4): giving a window up never waits on the Task Group store
     const rec = keeper.get(String(handle || ''));
@@ -1209,6 +1242,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
 
   // ── snapshot ──
   async function snapshot(handle, facts, { budget, text = true } = {}) {
+    await subjectDoor(handle, facts, 'snapshot', { subjectVerb: true, tree: true }); // B-dbb4 (r946): the one door — a tree verb on a window's handle is refused
     const { rec, lease } = requireLease(handle, facts, 'snapshot');
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: rec.origin || ORIGIN };
     gateMode(rec, lease, 'snapshot', false, who); // lane E (D7): an explicit pixel share refuses the tree by name; auto snapshots AS the probe
@@ -1251,12 +1285,11 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   const nodeLine = (e, action) => ({ role: e.role, name: e.name, ...(action ? { action } : {}) });
   async function act(handle0, facts, body = {}) {
     const verb = String(body.verb || '');
-    const { handle, sub } = splitSubject(handle0);
+    const { handle, sub } = await subjectDoor(handle0, facts, verb || 'act', { subjectVerb: ['click', 'type', 'key', 'scroll'].includes(verb), tree: !!body.ref }); // B-dbb4 (r946): the one door
     const { rec, lease } = requireLease(handle, facts, verb || 'act');
     // B-dbb4 M3: the chosen window IS the plan's main (its own plan) — keys and text focus it and go to its X window
     const subjectWin = (px) => (sub != null && px && px.plan && px.plan.subject && px.plan.main ? px.plan.main : null);
     const centreOf = (m) => ({ x: m.x + Math.min(20, Math.floor(m.w / 2)), y: m.y + Math.min(20, Math.floor(m.h / 2)) });
-    if (sub != null && (body.ref || ['snapshot'].includes(verb))) throw namedError('window_subject_pixels', `${UN.subHandle(rec.id, sub)} is one window of the app, reached by its pixels — \`screenshot\`, \`click --at\`, \`type\`, \`key\`, \`scroll\`; the tree verbs (@refs) take the app's own handle ${rec.id}`, { handle: UN.subHandle(rec.id, sub) });
     if (rec.origin === AGENT_BROWSER_ORIGIN) { try { keeper.noteInput?.(rec.id); } catch { /* the idle clock only */ } } // lane e2a r3 (#7): an agent driving its own browser is not idle
     const base = WT.treeEnvOf(rec, env()); // lane app-display-a11y-bus: the node verbs act on THIS app's a11y bus
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, ...(sub != null ? { subject: UN.subHandle(rec.id, sub) } : {}), origin: rec.origin || ORIGIN };
@@ -1377,7 +1410,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
         fromHelper(r, { verb: 'type', by: 'inject', chars: text.length, ...(e ? { node: nodeLine(e), focusedBy: 'tree' } : dw ? { focusedBy: subjectWin(px) ? 'subject' : 'window' } : {}), ...line, backend: px.backends.injection.backend });
         return { ok: true, handle: rec.id, did: { verb: 'type', by: 'inject', ...(e ? { ref: e.ref } : {}), chars: text.length, replaced: !!body.replace } };
       };
-      if (!body.ref && (pixelShare || sub != null)) return injected(null, { mode: rr ? rr.mode : null, ...(sub != null ? { subject: true } : {}) }); // B-dbb4 M2: a chosen window is typed into by its keys, under any share — never the app's focused field
+      if (!body.ref && (pixelShare || sub != null)) return injected(null, { mode: rr ? rr.mode : null }); // B-dbb4 M2: a chosen window is typed into by its keys, under any share — never the app's focused field
       let e = null;
       if (body.ref) e = refEntry();
       else {
@@ -1448,7 +1481,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   // ── screenshot (the pixel road's read) ──
   async function screenshot(handle0, facts) {
-    const { handle, sub } = splitSubject(handle0);
+    const { handle, sub } = await subjectDoor(handle0, facts, 'screenshot', { subjectVerb: true }); // B-dbb4 (r946): the one door — before the desktop record's own early return
     const { rec, lease } = requireLease(handle, facts, 'screenshot');
     if (rec.origin === 'desktop') return desktopScreenshot(rec, facts);
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, ...(sub != null ? { subject: UN.subHandle(rec.id, sub) } : {}) };
@@ -1514,6 +1547,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
 
   // ── watch: the live view, in its window-live form ──
   function watch(handle, facts) {
+    refuseSubjectSync(handle, facts, 'watch'); // B-dbb4 (r946): the one door — a window's own handle never reaches this verb
     load();
     if (DESK.isDesktopHandle(handle)) {
       requireConsent();

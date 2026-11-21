@@ -571,6 +571,62 @@ console.log('CONTROLS (patched copies)');
     ok(UN.titleOf({ title: 'Sign\u0007in\u001b[31m\u0085x' }) === 'Sign in [31m x' && UN.titleOf({ cls: 'chromium' }) === 'chromium', 'ONE title helper: every control character (C0, DEL, C1) a space, the class when there is no title', UN.titleOf({ title: 'Sign\u0007in\u001b[31m\u0085x' }));
     const auditRows = fs.readFileSync(EP.auditFile, 'utf8').split('\n').filter((l) => l.includes('"verb":"key"') && l.includes('"subject":"da-pop.w2"'));
     ok(auditRows.length >= 1, 'the audit row of a call on a chosen window carries its subject (da-pop.w2)', fs.readFileSync(EP.auditFile, 'utf8').split('\n').filter((l) => l.includes('"verb":"key"')).slice(-3));
+    // ── r946: THE TABLE, NOT A LIST — every verb the CLI has × every record kind × the subject's state. Each cell is «acted on
+    // that window» or «refused by name, nothing injected, nothing recorded as done»; a CLI verb nobody wrote a cell for is red by
+    // its name. The audit row of every cell carries the window's own handle as its subject (one assertion over the table) ──
+    const CLI_SRC = read('data/bin/vibespace-window');
+    const CLI_VERBS = [...new Set([...CLI_SRC.matchAll(/if \(verb === '([a-z]+)'\)/g)].map((m) => m[1]))];
+    const NO_HANDLE = new Set(['list', 'open']); // they take no handle: no cell
+    const PIXEL_VERBS = new Set(['screenshot', 'click', 'type', 'key', 'scroll']);
+    const OTHER_CODE = { attach: 'window_subject_verb', detach: 'window_subject_verb', size: 'window_subject_verb', mode: 'window_subject_verb', stop: 'window_subject_verb', watch: 'window_subject_verb', snapshot: 'window_subject_pixels' };
+    const unwritten = CLI_VERBS.filter((v) => !NO_HANDLE.has(v) && !PIXEL_VERBS.has(v) && !(v in OTHER_CODE));
+    ok(CLI_VERBS.length >= 14 && unwritten.length === 0, `the table's verbs are the CLI's own (${CLI_VERBS.length}: ${CLI_VERBS.join(' ')}) — a verb nobody wrote a cell for is red by name`, unwritten);
+    const scrollsP = []; wtP.injectScroll = async (o) => { scrollsP.push({ x: o.x, y: o.y }); return { ok: true, did: { verb: 'scroll', direction: o.direction, by: o.by } }; };
+    const CALL = { screenshot: (E, h) => E.screenshot(h, fP), click: (E, h) => E.act(h, fP, { verb: 'click', at: '10,20' }), type: (E, h) => E.act(h, fP, { verb: 'type', text: 't' }), key: (E, h) => E.act(h, fP, { verb: 'key', chord: 'Return' }), scroll: (E, h) => E.act(h, fP, { verb: 'scroll', direction: 'down' }),
+      snapshot: (E, h) => E.snapshot(h, fP), attach: (E, h) => E.attach(h, fP), detach: (E, h) => E.detach(h, fP), size: (E, h) => E.setSize(h, '800x600', fP), mode: (E, h) => E.setLaunchMode(h, 'pixels', fP), stop: (E, h) => E.stopOwn(h, fP), watch: (E, h) => E.watch(h, fP) };
+    // the record kinds: an app on a rung that owns its display (xpra), the person's own desktop (a record of origin «desktop»), a tree share
+    const recDk = { id: 'da-dsk', label: 'Desktop', exec: 'x', state: 'ready', origin: 'desktop', display: ':0', pids: { app: 4747 }, backend: 'xpra', startedAt: Date.now(), readyAt: Date.now() };
+    const keeperT = { ...keeperP, listApps: () => [recP, recDk], get: (id) => (id === recP.id ? recP : id === recDk.id ? recDk : null), windows: async (id) => keeperP.windows(id) };
+    const tableRun = async (E, label) => {
+      const cells = [], miss = [];
+      for (const kind of ['xpra', 'desktop', 'tree']) for (const state of ['found', 'unreadable', 'gone', 'launching']) for (const verb of CLI_VERBS.filter((v) => !NO_HANDLE.has(v))) {
+        const h = (kind === 'desktop' ? 'da-dsk' : 'da-pop') + (state === 'gone' ? '.w99' : '.w2');
+        if (!CALL[verb]) { miss.push(verb); continue; }
+        E.setShareMode('da-pop', kind === 'tree' ? 'tree' : 'pixels');
+        const winsT = keeperP.windows; if (state === 'unreadable') keeperP.windows = async () => ({ ok: false, error: 'the table: unreadable' });
+        if (state === 'launching') recP.state = 'launching';
+        const before = { inj: clicksP.length + keysP.length + typedP.length + scrollsP.length + shotsP.length, audit: fs.readFileSync(E.auditFile, 'utf8').length };
+        let res = null, err = null; try { res = await CALL[verb](E, h); } catch (e) { err = e; }
+        keeperP.windows = winsT; recP.state = 'ready';
+        const after = clicksP.length + keysP.length + typedP.length + scrollsP.length + shotsP.length;
+        const rows = fs.readFileSync(E.auditFile, 'utf8').slice(before.audit).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+        const want = !PIXEL_VERBS.has(verb) ? OTHER_CODE[verb] : kind === 'desktop' ? 'window_subject_shared' : state === 'unreadable' ? 'window_list_unreadable' : state === 'gone' ? 'window_gone' : state === 'launching' ? 'window_not_ready' : 'acted';
+        const acted = !err && after > before.inj && (verb !== 'screenshot' || (res && res.subject && res.subject.handle === h));
+        const pass = want === 'acted' ? acted : (!!err && err.code === want && after === before.inj && !rows.some((r) => r.ok === true));
+        const own = rows.filter((r) => r.verb === verb || r.by === 'subject'); // the cell's OWN rows (a share switch between cells audits its own)
+        const subjOk = own.length >= 1 && own.every((r) => r.subject === h);
+        cells.push({ cell: `${kind}·${state}·${verb}`, want, got: err ? err.code : 'acted', pass, subjOk, rows: rows.length });
+      }
+      E.setShareMode('da-pop', 'pixels');
+      return { cells, miss, label };
+    };
+    const ET = ENGINE.create({ keeper: keeperT, dataDir: path.join(dir, 'dbb4-table'), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 });
+    for (const id of ['da-pop', 'da-dsk']) { ET.grantReach(id, { kind: 'session', id: 's1' }); ET.setShareMode(id, 'pixels'); try { ET.attach(id, fP); } catch { /* the desktop record's own rule */ } }
+    const T1 = await tableRun(ET, 'the cure');
+    const bad = T1.cells.filter((c) => !c.pass), noSubj = T1.cells.filter((c) => !c.subjOk);
+    console.log(`  · r946 the table: ${T1.cells.length} cells (${CLI_VERBS.length - NO_HANDLE.size} verbs × 3 kinds × 4 states); refused ${T1.cells.filter((c) => c.want !== 'acted').length}, acted ${T1.cells.filter((c) => c.want === 'acted').length}`);
+    ok(T1.cells.length >= 144 && bad.length === 0 && T1.miss.length === 0, 'r946 THE TABLE: every CLI verb × record kind (an app owning its display, the person\'s own desktop, a tree share) × subject state (found, the list unreadable, gone since the list, still launching) — each cell acted on THAT window, or refused by name with nothing injected and nothing recorded as done', bad.slice(0, 12));
+    ok(noSubj.length === 0, 'r946: the audit row of EVERY cell carries the window\'s own handle as its subject (one assertion over the table)', noSubj.slice(0, 12));
+    // RED CONTROLS: the door taken out of one verb (screenshot); a record kind's early return put back before the door
+    const EST = read(ENGINE_REL);
+    const noDoor = EST.replace("const { handle, sub } = await subjectDoor(handle0, facts, 'screenshot', { subjectVerb: true }); // B-dbb4 (r946): the one door — before the desktop record's own early return", "const { handle, sub } = splitSubject(handle0);"); // stale-pins: kept (a RED control plants the pre-door text)
+    const earlyBack = EST.replace("  async function screenshot(handle0, facts) {\n", "  async function screenshot(handle0, facts) {\n    { const r0 = liveAny(splitSubject(handle0).handle); if (r0 && r0.origin === 'desktop') return { handle: r0.id, file: null, w: 1, h: 1, coords: 'display', planted: 'the early return before the door' }; }\n");
+    ok(noDoor !== EST && earlyBack !== EST, 'controls planted: screenshot without the door; the desktop record\'s early return put back before it');
+    const tableCopy = async (src, tag) => { const EC = MUT.load(ENGINE_REL, src, tag); const E2 = EC.create({ keeper: keeperT, dataDir: path.join(dir, 'dbb4-table-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 }); for (const id of ['da-pop', 'da-dsk']) { E2.grantReach(id, { kind: 'session', id: 's1' }); E2.setShareMode(id, 'pixels'); try { E2.attach(id, fP); } catch { /* */ } } return tableRun(E2, tag); };
+    const R1 = await tableCopy(noDoor, 'no-door'), R2 = await tableCopy(earlyBack, 'early-back');
+    const tRed1 = R1.cells.filter((c) => !c.pass && c.cell.endsWith('·screenshot')), tRed2 = R2.cells.filter((c) => !c.pass && c.cell.startsWith('desktop·') && c.cell.endsWith('·screenshot'));
+    ok(tRed1.length > 0, `RED CONTROL: screenshot without the door — its cells go red by name (${tRed1.map((c) => c.cell).slice(0, 4).join(', ')})`, tRed1.slice(0, 4));
+    ok(tRed2.length > 0, `RED CONTROL: the desktop record's early return before the door — the person's own desktop's screenshot cells go red (${tRed2.map((c) => c.cell).slice(0, 4).join(', ')})`, tRed2.slice(0, 4));
     // THROUGH THE REAL ROUTE AND THE SHIPPED CLI: the header carries a title outside latin-1 (escaped), the CLI prints the words
     const appP = express(); appP.use(express.json()); ROUTES.setup({ engine: EP }); appP.use(ROUTES.router);
     const srvP = await new Promise((res) => { const s0 = appP.listen(0, '127.0.0.1', () => res(s0)); });
