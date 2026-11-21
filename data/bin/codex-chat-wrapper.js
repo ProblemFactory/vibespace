@@ -28,6 +28,7 @@ function log(msg) {
 function writeRecord(record) {
   const line = JSON.stringify(record);
   buffer += `${line}\n`;
+  if (JOURNAL) { JOURNAL.add(`${line}\n`); JOURNAL.flush(); }   // B-cd4b: in the file (the said journal's append) before it is said
   if (buffer.length > MAX_BUFFER) {
     const idx = buffer.indexOf('\n', buffer.length - MAX_BUFFER);
     if (idx > 0) buffer = buffer.slice(idx + 1);
@@ -475,6 +476,24 @@ const meta = {
 let buffer = '';
 const MAX_BUFFER = 800000;
 let writeTimer = null;
+// THE SAID JOURNAL (row B-cd4b, the wrapper's hold — 主开发 r1132; src/said-journal.js says the law): every record this wrapper SAYS
+// is APPENDED to the file before it is said, between the timer's whole rewrites — a hub that restarts, or a kill of this process,
+// never beats it. A tree without the module keeps the timer alone, and adverts no fence.
+let SJ = null; try { SJ = require(path.join(__dirname, '..', '..', 'src', 'said-journal.js')); } catch { SJ = null; }
+const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => { if (writeTimer) { clearTimeout(writeTimer); } persistBuffer(); }, say: log }) : null;
+if (JOURNAL) meta.caps.fence = SJ.FENCE_VERSION;   // a restoring hub asks this wrapper's fence (session-stdout's gate)
+// THE FENCE (row B-cd4b — src/said-journal.js; the hub's half is src/server/session-stdout.js setupSessionPty `fence`): the answer to
+// a restoring hub's `webui_fence` is in the file AT ITS PLACE before it is said; it rides the ring for FENCE_KEEP_MS, then leaves it
+// (src/codex-message-manager.js skips the record).
+const FENCE_KEEP_MS = 10000;
+function sayFence(id) {
+  const line = SJ.fenceLine(id);
+  buffer += `${line}\n`;
+  JOURNAL.add(`${line}\n`); JOURNAL.flush();
+  try { process.stdout.write(`${line}\n`); } catch {}
+  const t = setTimeout(() => { const at = buffer.indexOf(`${line}\n`); if (at < 0) return; buffer = buffer.slice(0, at) + buffer.slice(at + line.length + 1); schedulePersist(); }, FENCE_KEEP_MS);
+  if (t && t.unref) t.unref();
+}
 let metaTimer = null;
 let nextId = 1;
 let pendingRequests = new Map();
@@ -495,10 +514,15 @@ const readyPromise = new Promise((resolve, reject) => {
 
 function persistBuffer() {
   writeTimer = null;
+  // B-cd4b (ALSO CURED): tmp + rename, as the claude wrapper's — a restarting hub that read this file between an in-place write's
+  // truncate and its bytes restored an EMPTY or half history; the said journal's descriptor named the file the rename replaced
+  const tmp = `${bufferFile}.${process.pid}.tmp`;
   try {
     fs.mkdirSync(path.dirname(bufferFile), { recursive: true });
-    fs.writeFileSync(bufferFile, buffer);
-  } catch {}
+    fs.writeFileSync(tmp, buffer);
+    fs.renameSync(tmp, bufferFile);
+    if (JOURNAL) JOURNAL.rewritten();
+  } catch { try { fs.unlinkSync(tmp); } catch {} }
 }
 
 // replaced, never rewritten in place (ci358-reds item 7): a hub read between writeFileSync's truncate and its bytes saw an
@@ -3748,6 +3772,7 @@ async function boot() {
       if (receipt) writeReceipt(ack);
       try { process.stdout.write(JSON.stringify(ack) + '\n'); } catch {}
       if (!msg || typeof msg !== 'object') { rejectStdinLine(line); continue; }
+      if (msg.type === 'webui_fence') { if (JOURNAL) sayFence(msg.id); continue; }   // B-cd4b: a restoring hub's fence — never codex's
       // Large-frame FILE BYPASS: the payload rides the filesystem, stdin only
       // carries the pointer. Resolved HERE (not inside handleInput) so the file
       // is consumed + unlinked immediately, before the ready gate.

@@ -18,6 +18,8 @@ const { exitFacts, tombExpired, awaitsWrapper, WRAPPER_SETTLE_MS, WRAPPER_SETTLE
 const fs = require('fs');
 const { noteTurnFlight } = require('../turn-state.js'); // PURE: the turn's send instant (lane cache-warmth-tiles r3)
 const { timedSync } = require('../timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
+const SJ = require('../said-journal.js'); // B-cd4b: the fence's words and its gap (PURE fenceGap) — the restore's last gap
+const FENCE_WAIT_MS = 3000, FENCE_HELD_MAX = 4 * 1024 * 1024;   // B-cd4b: the fence's bounds (a wrapper answers within its next stdin read)
 const path = require('path');
 const pty = require('node-pty');
 const { spawn } = require('child_process');
@@ -98,7 +100,7 @@ function updateSessionTodos(session, todos) {
   } catch { }
 }
 
-function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchUp = null } = {}) {
+function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchUp = null, fence = null } = {}) {
   session.pty = ptyProcess;
 
   // LIVENESS STAMP — the ONE place every pty (local node-pty, daemonPtyShim,
@@ -121,8 +123,21 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchU
   // before its first byte — the stream consumer parses it as the records it would have relayed (a permission request, a
   // result, an idle state), whole lines: the read's partial last line (`drop`) leaves the buffer first and comes back once
   const caught = catchUp && catchUp.text ? [] : null;
-  const onDataOwn = caught ? Object.getOwnPropertyDescriptor(ptyProcess, 'onData') : null;
-  if (caught) { const realOn = ptyProcess.onData; Object.defineProperty(ptyProcess, 'onData', { configurable: true, writable: true, value: (cb) => { caught.push(cb); return realOn.call(ptyProcess, cb); } }); }
+  // B-cd4b (the wrapper's hold, 主开发 r1132): THE FENCE — what the survivor said between that catch-up's read and this attach's
+  // CONNECT, which dtach dropped. A wrapper whose sidecar adverts `caps.fence` (src/said-journal.js) writes every line it says to its
+  // file before saying it, and answers `webui_fence` with a record that is in the file at its place: this pty's consumers are held
+  // behind ONE listener from the first byte (dtach's preamble: connected, raw — never an echoed ask) until the fence comes back;
+  // then the file past the catch-up, up to the fence, minus what the live stream brought since the connect (PURE SJ.fenceGap), is
+  // fed FIRST, the held bytes after it, and the fence record never. Bounded (FENCE_WAIT_MS, FENCE_HELD_MAX): past it the held
+  // bytes are fed as they came and that is SAID. Chat only; the local road only (a restore's attach takes it).
+  const gate = fence && fence.rb && typeof fence.read === 'function' && session.mode === 'chat' ? { cbs: [], held: '', open: false, id: null, timer: null } : null;
+  const onDataOwn = (caught || gate) ? Object.getOwnPropertyDescriptor(ptyProcess, 'onData') : null;
+  const realOn = (caught || gate) ? ptyProcess.onData : null;
+  if (caught || gate) Object.defineProperty(ptyProcess, 'onData', { configurable: true, writable: true, value: (cb) => {
+    if (caught) caught.push(cb);
+    if (gate) { gate.cbs.push(cb); return { dispose() { const i = gate.cbs.indexOf(cb); if (i >= 0) gate.cbs.splice(i, 1); } }; }
+    return realOn.call(ptyProcess, cb);
+  } });
   if (session.mode === 'chat') {
     // Dispatch by DECLARED protocol (P4 → S5): the harness descriptor's caps
     // row NAMES the stream protocol (capsOf() IS that row — harness-contract
@@ -184,8 +199,44 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchU
     });
   }
 
+  if (caught || gate) { if (onDataOwn) Object.defineProperty(ptyProcess, 'onData', onDataOwn); else delete ptyProcess.onData; }
+  if (gate) {
+    const feedAll = (text) => { for (const cb of gate.cbs.slice()) { try { cb(text); } catch (e) { console.warn(`[${id}] the restore's fence: a consumer threw (${e && e.message})`); } } };
+    const openGate = (why) => {
+      if (gate.open) return;
+      gate.open = true; if (gate.timer) { clearTimeout(gate.timer); gate.timer = null; }
+      const held = gate.held; gate.held = '';
+      if (why) console.warn(`[${id}] the restore's fence: ${why} — what the survivor said between its catch-up and its connect was not read`);
+      if (held) feedAll(held);
+    };
+    realOn.call(ptyProcess, (data) => {
+      if (gate.open) { feedAll(data); return; }
+      gate.held += data;
+      if (!gate.id) {   // the first byte: dtach's client is connected and raw — the ask is never echoed
+        gate.id = `${process.pid.toString(36)}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        try { ptyProcess.write(SJ.fenceAsk(gate.id) + '\n'); } catch (e) { openGate(`its fence could not be asked (${(e && e.message) || e})`); return; }
+      }
+      const fl = SJ.fenceLine(gate.id), k = gate.held.indexOf(fl);
+      if (k < 0) { if (gate.held.length > FENCE_HELD_MAX) openGate(`${gate.held.length} bytes came before its fence`); return; }
+      let end = k + fl.length; if (gate.held[end] === '\r') end++; if (gate.held[end] === '\n') end++;
+      const before = gate.held.slice(0, k), after = gate.held.slice(end);
+      gate.held = ''; gate.open = true; if (gate.timer) { clearTimeout(gate.timer); gate.timer = null; }
+      let gap; try { gap = SJ.fenceGap(fence.read(fence.rb), fl, before); } catch (e) { gap = { skipped: `its file could not be read (${(e && e.message) || e})` }; }
+      if (gap.skipped) console.warn(`[${id}] the restore's fence: ${gap.skipped} — what the survivor said between its catch-up and its connect was not read`);
+      else if (gap.lost) {
+        if (gap.drop && session.buffer.endsWith(gap.drop)) session.buffer = session.buffer.slice(0, session.buffer.length - gap.drop.length);
+        const lastAt = session._lastPtyDataAt;
+        feedAll(gap.lost);
+        session._lastPtyDataAt = lastAt;   // the file's, not a byte of this bridge
+      }
+      if (before) feedAll(before);
+      if (after) feedAll(after);
+    });
+    gate.timer = setTimeout(() => openGate(`no fence came back in ${FENCE_WAIT_MS} ms`), FENCE_WAIT_MS);
+    if (gate.timer.unref) gate.timer.unref();
+    try { ptyProcess.onExit(() => openGate(null)); } catch { }
+  }
   if (caught) {
-    if (onDataOwn) Object.defineProperty(ptyProcess, 'onData', onDataOwn); else delete ptyProcess.onData;
     if (session.mode === 'chat') {
       if (catchUp.drop && session.buffer.endsWith(catchUp.drop)) session.buffer = session.buffer.slice(0, session.buffer.length - catchUp.drop.length);
       const lastAt = session._lastPtyDataAt;
@@ -727,7 +778,7 @@ function repaintFromBuf(id, session) {
 
 // Attach a PTY to an existing dtach socket for I/O.
 // opts.repaint (the RE-attach path): repaintFromBuf above.
-function attachToDtach(id, socketPath, session, { repaint = false, restore = false, catchUp = null } = {}) {
+function attachToDtach(id, socketPath, session, { repaint = false, restore = false, catchUp = null, fence = null } = {}) {
   const repaintClients = () => { if (repaint) repaintFromBuf(id, session); };
   // Arm the liveness probe for THIS attach: if the bridge produced no byte at
   // all, heal it locally. The confirm stage exists because a blocked event
@@ -774,7 +825,7 @@ function attachToDtach(id, socketPath, session, { repaint = false, restore = fal
       name: 'xterm-256color', cols: 120, rows: 30,
       env: { ...agentEnv(), TERM: 'xterm-256color', COLORTERM: 'truecolor' },
     });
-    setupSessionPty(session, id, attachPty, { catchUp });   // B-cd4b: a restore's catch-up (the local road only: a restore takes it)
+    setupSessionPty(session, id, attachPty, { catchUp, fence });   // B-cd4b: a restore's catch-up and its fence (the local road only: a restore takes them)
     repaintClients();
     armProbe(attachPty, 'local');
   };

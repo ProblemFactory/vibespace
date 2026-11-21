@@ -177,6 +177,12 @@ const CLAUDE_HOLD_VERBS = ['remove', 'reorder', 'edit'];
 // asks (`webui_receipt` — the person's CLI never stays attached; never the replay buffer) and refuses a TORN line with `_stdin_nack`
 const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_HOLD_VERBS, queueResync: true }, queue: [] };
 meta.caps.receipts = true;   // lane human-cli: the receipts road (an ack by id, a torn line's nack — <id>.receipts beside the buffer)
+// THE SAID JOURNAL (row B-cd4b, the wrapper's hold — 主开发 r1132; src/said-journal.js says the law): every line this wrapper SAYS is
+// APPENDED to the file before it is said (one write per input), between the timer's whole rewrites — a hub that restarts, or a kill
+// of this process, never beats it. A tree without the module keeps the timer alone, and adverts no fence. Set BEFORE the boot write of the sidecar (below): its caps say the fence from the first write.
+let SJ = null; try { SJ = require(path.join(__dirname, '..', '..', 'src', 'said-journal.js')); } catch { SJ = null; }
+const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => persistNow(), say: log }) : null;
+if (JOURNAL) meta.caps.fence = SJ.FENCE_VERSION;   // a restoring hub asks this wrapper's fence (session-stdout's gate)
 // THE CONVERSATION'S FACTS, KEPT WHERE THEY ARE BORN (lane conversation-facts, majordomo piece 2 — 主开发's ruling, road A):
 // this process reads every record from the CLI's first line and outlives every hub restart, so it keeps what a restarted hub
 // cannot read back — OBSERVATIONS only (it never updates; the hub judges them at read time): whether it saw the CLI's first
@@ -235,7 +241,7 @@ function persistBuffer() {
   // B-5a4d (its reader): tmp + rename, as the sidecar — a hub that restarts reads this file once, and a person's CLI follows it by
   // its path: a reader sees the whole old file or the whole new one, never a truncated one mid-write (write-through made it often)
   const tmp = `${bufferFile}.${process.pid}.tmp`;
-  try { fs.writeFileSync(tmp, buffer); fs.renameSync(tmp, bufferFile); }
+  try { fs.writeFileSync(tmp, buffer); fs.renameSync(tmp, bufferFile); if (JOURNAL) JOURNAL.rewritten(); }   // the journal's descriptor named the file the rename replaced
   catch (e) { try { fs.unlinkSync(tmp); } catch {} if (!persistBuffer.said) { persistBuffer.said = true; log(`history buffer write failed: ${e.message}`); } }
 }
 
@@ -307,11 +313,12 @@ function persistNow() {
 // then are its lines said upward, in their order. On disk before said; never N full rewrites before a Stop reaches the CLI, nor one
 // between an interrupted result and the follow-up's init that is interrupted in the same tick.
 let batchDepth = 0, batchOut = [], durableDue = false;
-function say(line) { if (batchDepth) batchOut.push(line); else { try { process.stdout.write(line + '\n'); } catch {} } }
+function say(line) { if (batchDepth) batchOut.push(line); else { if (JOURNAL) JOURNAL.flush(); try { process.stdout.write(line + '\n'); } catch {} } }   // B-cd4b: on disk (the journal's append) before it is said
 function beginBatch() { batchDepth++; }
 function endBatch() {
   if (--batchDepth > 0) return;
   if (durableDue) { durableDue = false; trimBuffer(); persistNow(); }
+  if (JOURNAL) JOURNAL.flush();   // B-cd4b: the input's said lines in the file (ONE append) before any of them is said
   const out = batchOut; batchOut = [];
   if (out.length) { try { process.stdout.write(out.join('\n') + '\n'); } catch {} }
 }
@@ -320,8 +327,24 @@ function durable() { if (batchDepth) durableDue = true; else { trimBuffer(); per
 function record(type, fields = {}) {
   const line = JSON.stringify({ type, ...fields });
   buffer += line + '\n';
+  if (JOURNAL) JOURNAL.add(line + '\n');   // B-cd4b: a said line — in the file before it is said
   if (DURABLE_RECORDS.has(type)) durable(); else schedulePersist();
   say(line);
+}
+
+// THE FENCE (row B-cd4b — src/said-journal.js; the hub's half is src/server/session-stdout.js setupSessionPty `fence`): a restoring hub,
+// once its attach is connected, asks `webui_fence`; the answer is in the file AT ITS PLACE before it is said, so the hub reads what was
+// said between its catch-up and its connect (dtach dropped it) and nothing its live stream also brings. It rides the ring for
+// FENCE_KEEP_MS — a whole rewrite in that window keeps it at its place — then leaves it; every reader ignores the record
+// (src/message-manager.js KNOWN_IGNORED_RECORD_TYPES).
+const FENCE_KEEP_MS = 10000;
+function sayFence(id) {
+  const line = SJ.fenceLine(id);
+  buffer += line + '\n';
+  JOURNAL.add(line + '\n');
+  say(line);
+  const t = setTimeout(() => { const at = buffer.indexOf(line + '\n'); if (at < 0) return; buffer = buffer.slice(0, at) + buffer.slice(at + line.length + 1); schedulePersist(); }, FENCE_KEEP_MS);
+  if (t && t.unref) t.unref();
 }
 
 // THE TURN GATE — the predicate that decides held vs forwarded (every number measured on 2.1.308, a local mock; the rows
@@ -1233,6 +1256,7 @@ function processLine(line) {
   // idle (a state word lost; a text-only turn sends nothing that says it runs until its end). The lines that only fill a turn (its
   // text, a tool's output) keep the timer: the stream brings the next ones and the file catches up.
   buffer += line + '\n';
+  if (JOURNAL) JOURNAL.add(line + '\n');   // B-cd4b: EVERY line the CLI says is in the file before it is said (a permission ask among them)
   if (msg && (msg.type === 'result' || (msg.type === 'system' && (msg.subtype === 'init' || msg.subtype === 'session_state_changed' || msg.subtype === 'compact_boundary')))) durable();
   say(line);
   // …and only THEN the next held frame: the turn end is on the wire before the queue that follows it (not while the CLI
@@ -1365,11 +1389,13 @@ function finalize(exitCode, signal) {
     try {
       JSON.parse(rest);
       buffer += rest + '\n';
+      if (JOURNAL) { JOURNAL.add(rest + '\n'); JOURNAL.flush(); }   // B-cd4b: on disk before it is said
       try { process.stdout.write(rest + '\n'); } catch {}
     } catch {}
   }
   if (writeTimer) { clearTimeout(writeTimer); }
   persistBuffer();
+  if (JOURNAL) JOURNAL.close();   // the last whole rewrite closed it, or (it failed) this does: once
   meta.streaming = false;
   // Mark all running tasks as unknown (process died — can't know real state)
   for (const t of Object.values(meta.tasks)) {
@@ -1502,6 +1528,7 @@ try {
       }
       // Immediately ack on stdout so the server knows stdin is alive — before claude processes the message, so it works
       // even when the model takes 30+ seconds to respond. A receipt's key is the CLI's ask, never Claude's: stripped.
+      if (parsed.type === 'webui_fence') { if (JOURNAL) sayFence(parsed.id); continue; }   // B-cd4b: a restoring hub's fence — never acked, never the CLI's
       const receipt = parsed.webui_receipt === true;
       if (receipt) { delete parsed.webui_receipt; line = JSON.stringify(parsed); }
       ackLine(parsed.webui_msg_id || parsed.request_id || null, receipt);

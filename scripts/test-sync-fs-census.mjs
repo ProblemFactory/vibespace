@@ -353,6 +353,7 @@ const ROWS = [
   ["src/store-hold.js", "*", 11, "local-only", "file = <checkout>/data/<store>.json (the persistence stores: layouts, user-state, bookmarks, custom-themes, settings) — the read at the start, the one write (pid temp, exclusive create), the read back of a file that appeared"],
   ["src/kept-copies.js", "writeKept", 3, "local-only", "the WRAPPER's side only (data/bin/chat-wrapper.js — its own process per session, never the hub's loop): a kept picture written once into <buffersDir>/<id>.img beside its buffer"],
   ["src/kept-copies.js", "dropFiles", 1, "local-only", "the WRAPPER's side only: a settled copy's kept files unlinked from its own <id>.img folder"],
+  ["src/said-journal.js", "create > flush", 1, "local-only", "B-cd4b (the wrapper's hold): the WRAPPER's side only (data/bin/chat-wrapper.js, codex-chat-wrapper.js — its own process per session, never the hub's loop): its own <id>.buf opened for append, a said line written before it is said"],
   ["src/kept-copies.js", "capDir", 3, "local-only", "the WRAPPER's side only: its own <id>.img folder listed, statted and its oldest files evicted past the 64 MB cap"],
   ["src/session-store.js", "probeCandidate", 1, "guarded", "the project-dir decode's ONE probe: a storage path never reaches the existsSync (storageRootOf answers: a mount point is there, below it is not probed); a home / network path is witnessed"],
   ["src/session-store.js", "tmuxOnPath", 1, "local-only", "the hub process's PATH dirs + \"tmux\" (TTL-memoized)"],

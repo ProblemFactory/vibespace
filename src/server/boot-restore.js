@@ -9,6 +9,7 @@ const os = require('os');
 const path = require('path');
 const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): the kinds a governing file covers, for a restored session
 const { restoredStreaming } = require('../turn-state.js'); // PURE (lane parked-ask-stall): the ring's last turn-state record
+const SJ = require('../said-journal.js'); // B-cd4b (the wrapper's hold): which wrapper answers a fence (its sidecar's caps.fence)
 const pty = require('node-pty');
 const { createMessageManager } = require('../normalizers');
 const { costResume, resultsIn } = require('../cost-segments.js'); // PURE (2.369.402): the conversation's cost fold
@@ -668,8 +669,10 @@ function drainSurvivorAttaches(queue, { tRestore, tBuilt, regTurns = null }) {
     if (activeSessions.get(id) !== session || session.pty) { release(entry); return; }   // ended or replaced, or attached by another road
     const cu = restoreCatchUp(session._restoreBuf);   // the SAME turn as the attach below (the round's law: one turn, as at the release)
     if (cu && cu.skipped) console.warn(`[boot-restore] ${session.name || id}: what it wrote since the restore's read is not caught up — ${cu.skipped}`);
+    // B-cd4b (the wrapper's hold): its fence reads on from where THIS catch-up's read ended (or the registration's, nothing written since)
+    const rb0 = session._restoreBuf, fence = rb0 && rb0.fence && !(cu && cu.skipped) ? { rb: (cu && cu.rb) || rb0, read: restoreCatchUp } : null;
     try {
-      attachToDtach(id, socketPath, session, { restore: true, catchUp: cu && cu.text ? cu : null });
+      attachToDtach(id, socketPath, session, { restore: true, catchUp: cu && cu.text ? cu : null, fence });
       release(entry);
       session._restoreBuf = null; session._attachFailed = null;
       if (cu && cu.text) caught++;
@@ -872,6 +875,9 @@ function restoreSessions() {
     let savedBuffer = '', restoreBuf = null;
     // B-cd4b (round wzvgb5033): where this read ENDS — the attach that follows in a later batch catches up from it (restoreCatchUp)
     try { const raw = fs.readFileSync(wrapperFiles.buf); savedBuffer = raw.toString('utf-8'); restoreBuf = restoreBufOf(wrapperFiles.buf, raw); } catch {}
+    // B-cd4b (the wrapper's hold): a wrapper that writes every said line before saying it answers a FENCE — its attach then reads what
+    // it said between the catch-up and the connect (session-stdout setupSessionPty `fence`); an older wrapper is attached as before
+    if (restoreBuf && wrapperObs && wrapperObs.caps && wrapperObs.caps.fence === SJ.FENCE_VERSION) restoreBuf.fence = true;
 
     const session = sessionFromMeta(meta, { // transport-only + per-path facts (win over the shared ones)
       mode: sessionMode,
@@ -1310,7 +1316,7 @@ async function readoptOrphanKeeperSessions() {
 // byte (session-stdout setupSessionPty `catchUp`). THE FILE IS NOT A TEE (round wed0m8jzl): the chat wrapper keeps its ring in
 // memory and REWRITES the file whole (tmp + rename) on a timer (2 s; 250 ms while a CLI follows it); only the queue's own records
 // (its DURABLE_RECORDS) are written BEFORE they are said. So a line said inside the window and not yet written at the attach (a
-// permission ask rides the timer) is still lost, as at the release — its own unit (row B-cd4b's detail). No record is read twice:
+// permission ask rode the timer) was still lost, as at the release — cured by THE WRAPPER'S HOLD (src/said-journal.js: every said line in the file before it is said; the fence below reads the read→connect gap). No record is read twice:
 // the order is read, then spawn, then connect, and dtach drops what is said before the client connects. The file also holds lines
 // the live output never carries (a held copy of a person's frame): the catch-up feeds them as the registration's read holds them.
 // A ring rewritten meanwhile (trimmed: shorter, the same size, or its bytes before that point changed) is searched for the read's
@@ -1342,7 +1348,10 @@ function restoreCatchUp(rb, { max = RESTORE_CATCHUP_MAX } = {}) {
     if (start < 0) return { skipped: `its buffer was rewritten (${rb.len} → ${size} bytes) and the read's end is not in it` };
     if (size - start > max) return { skipped: `${size - start} bytes since the read — over the ${max}-byte bound` };
     const text = read(start, size - start).toString('utf-8');
-    return text.length > rb.partial.length ? { text, drop: text.startsWith(rb.partial) ? rb.partial : '' } : null;
+    // B-cd4b (the wrapper's hold): where THIS read ends — the fence reads on from it (restoreBufOf's shape, from the bytes read)
+    const tailAt = Math.max(0, size - Math.max(RESTORE_GUARD * 4, 65536)), tail = read(tailAt, size - tailAt), nl = tail.lastIndexOf(10);
+    const rbEnd = nl < 0 && tailAt > 0 ? null : { file: rb.file, len: size, lineAt: tailAt + nl + 1, guard: Buffer.from(tail.subarray(Math.max(0, nl + 1 - RESTORE_GUARD), nl + 1)), partial: tail.subarray(nl + 1).toString('utf-8') };
+    return text.length > rb.partial.length ? { text, drop: text.startsWith(rb.partial) ? rb.partial : '', rb: rbEnd } : null;
   } catch (e) { return { skipped: `its buffer could not be read (${(e && e.code) || (e && e.message) || e})` }; }
   finally {   // one owner, closed once, the number forgotten at its close; a failed close is SAID (its errno and the file), never swallowed — what was read is returned whatever the close answered (test-fd-close-census)
     if (fd !== null) { try { fs.closeSync(fd); } catch (e) { console.warn(`[boot-restore] the catch-up could not close its descriptor of ${rb.file} (${(e && e.code) || (e && e.message) || e})`); } fd = null; }

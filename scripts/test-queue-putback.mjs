@@ -608,7 +608,9 @@ console.log('§6b claude, live — a held message, its edit, removal and hand-ov
     fs.mkdirSync(path.join(ctlDir, 'data', 'bin'), { recursive: true });
     fs.symlinkSync(path.join(REPO, 'src'), path.join(ctlDir, 'src'));
     const TEE6 = "  if (msg && (msg.type === 'result' || (msg.type === 'system' && (msg.subtype === 'init' || msg.subtype === 'session_state_changed' || msg.subtype === 'compact_boundary')))) durable();\n";
-    fs.writeFileSync(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), anchored(anchored(cwSrc6b, PLANT, 'const DURABLE_RECORDS = new Set();', 'the queue records wait for the 2 s timer'), TEE6, '', 'a turn\'s start and end wait for the 2 s timer'));
+    // B-cd4b (the wrapper's hold): the base is the timer ALONE — the said journal (every said line on disk before it is said) cut too
+    const JOURNAL6 = "const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => persistNow(), say: log }) : null;";
+    fs.writeFileSync(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), anchored(anchored(anchored(cwSrc6b, PLANT, 'const DURABLE_RECORDS = new Set();', 'the queue records wait for the 2 s timer'), TEE6, '', 'a turn\'s start and end wait for the 2 s timer'), JOURNAL6, 'const JOURNAL = null;', 'the said journal cut'));
     const C = await lifeOf(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'));
     ok(!C.said.copy && !C.said.queueRecord && !C.at50.bubbles.some((b) => /HELD-F/.test(b.text)), 'MUTANT RED (the base\'s 2 s timer): the hold is said with neither the copy nor its queue record in the file — a hub restarting at +50 ms draws NO bubble and no strip row', { said: C.said, at50: C.at50 });
     fs.rmSync(ctlDir, { recursive: true, force: true });
@@ -634,7 +636,7 @@ console.log('§6b claude, live — a held message, its edit, removal and hand-ov
   };
   const T1 = await turnOf(path.join(REPO, 'data/bin/chat-wrapper.js'));
   ok(T1.some((s) => s.kind === 'init') && T1.some((s) => s.kind === 'state:running') && T1.some((s) => s.kind === 'result') && T1.every((s) => s.inFile),
-    '§6b a turn\'s START (its init, its «running» state word) and its END (its result) are each in the wrapper\'s file the moment they are said — the lines that only fill a turn keep the timer', T1);
+    '§6b a turn\'s START (its init, its «running» state word) and its END (its result) are each in the wrapper\'s file the moment they are said (since B-cd4b\'s said journal every said line is: test-wrapper-said-journal)', T1);
   const cwT = read('data/bin/chat-wrapper.js');
   const TEE = "  if (msg && (msg.type === 'result' || (msg.type === 'system' && (msg.subtype === 'init' || msg.subtype === 'session_state_changed' || msg.subtype === 'compact_boundary')))) durable();\n";
   ok(cwT.split(TEE).length === 2, '§6b ANCHOR: the tee\'s write-through of a turn\'s start and end, spelled once (the control below plants there)');
@@ -642,7 +644,8 @@ console.log('§6b claude, live — a held message, its edit, removal and hand-ov
     const ctlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-putback-turn-life-ctl-'));
     fs.mkdirSync(path.join(ctlDir, 'data', 'bin'), { recursive: true });
     fs.symlinkSync(path.join(REPO, 'src'), path.join(ctlDir, 'src'));
-    fs.writeFileSync(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), anchored(anchored(cwT, TEE, '', 'a turn\'s start and end wait for the 2 s timer'), PLANT, 'const DURABLE_RECORDS = new Set();', 'the queue records wait for the 2 s timer'));
+    const JOURNALT = "const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => persistNow(), say: log }) : null;";   // B-cd4b: the timer ALONE
+    fs.writeFileSync(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), anchored(anchored(anchored(cwT, TEE, '', 'a turn\'s start and end wait for the 2 s timer'), PLANT, 'const DURABLE_RECORDS = new Set();', 'the queue records wait for the 2 s timer'), JOURNALT, 'const JOURNAL = null;', 'the said journal cut'));
     const T0 = await turnOf(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'));
     ok(T0.some((s) => s.kind === 'result' && !s.inFile), 'MUTANT RED (the timer alone): the turn\'s result is said with nothing of it in the file — a hub restarting then draws a turn with no end, the page «still working»', T0);
     fs.rmSync(ctlDir, { recursive: true, force: true });

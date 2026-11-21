@@ -3013,6 +3013,7 @@ function unknownRecordJson(raw) {
 const KNOWN_IGNORED_RECORD_TYPES = new Set([
   // live stream, consumed by the server consumer
   'tool_progress', 'set_in_progress_tool_use_ids', 'rate_limit_event', 'compact_progress', 'command_lifecycle', 'stream_event', 'keep_alive',
+  '_fence',   // B-cd4b: a wrapper's answer to a restoring hub's fence (src/said-journal.js) — the catch-up's mark, never content
   '_stdin_ack', '_stdin_nack', '_remote_state',   // _stdin_nack: a torn stdin line's receipt (lane human-cli r2) — its warning is a system/informational record
   // transcript bookkeeping (JSONL-only rows the CLI writes beside the conversation)
   'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', // (pr-link is ROUTED since 2026-09-21 — the same fact as system/code_change_published; last-prompt since B-437e: a rewound:true row is the CLI's rewind anchor)
