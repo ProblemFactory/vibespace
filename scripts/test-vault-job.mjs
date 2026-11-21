@@ -402,7 +402,7 @@ async function legDenyVaultWait(jobs = null) {
   const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never', name: 'dlock' }).job.id);
   await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   const a = ((cards(W).find((i) => i.action.jobId === job.id)) || {}).action || {};
-  W.vault.lock('door');
+  W.vault.lock('boot', { quiet: true });   // THE LOCKED BOOT'S STATE — no lock ACT (a restart is none: its card, filed before, stays open); a lock ACT withdraws the cards (B-a08e r1665, ⑩e)
   W.jm.start(job);   // a re-judge while locked (a boot's replay reads the same): the approval wait is now a VAULT wait — its card still open
   const before = job.waitFor;
   const d = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
@@ -526,8 +526,33 @@ async function legLockRuns(doorSrc = null) {
   for (let i = 0; i < 8; i++) { try { await W.jm._sweep(); } catch { } await nap(15); }
   rows.desired = job.desiredUp;
   const code = DOOR_SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');   // the door's CODE (a comment naming the hook is no hook)
-  row(up && W.vault.state() === 'locked' && job.state === 'up' && job.desiredUp !== false && job.runs.length === 1 && !/\bonLock\b/.test(code), 'A LOCK STOPS NOTHING RUNNING (decision ③): the vault locked, the approved service runs on — its one run untouched; the job door has no lock road at all', { up, state: job.state, runs: job.runs.length });
+  const lockAt = code.indexOf('vault.onLock('), lockRoad = lockAt < 0 ? '' : code.slice(lockAt, code.indexOf('\n  });', lockAt));   // B-a08e (主开发 r1665): its ONE lock road — the cards' withdraw
+  row(up && W.vault.state() === 'locked' && job.state === 'up' && job.desiredUp !== false && job.runs.length === 1 && (code.match(/\bonLock\(/g) || []).length === 1 && /withdrawAll\(\)/.test(lockRoad) && !/\bjm\b/.test(lockRoad), 'A LOCK STOPS NOTHING RUNNING (decision ③): the vault locked, the approved service runs on — its one run untouched; the job door\'s ONE lock road withdraws cards and touches no job', { up, state: job.state, runs: job.runs.length });
   W.release(); W.end();
+  return rows;
+}
+// B-a08e (主开发 r1665 — the lock's «asks» consequence, test-vault-engine's census): A LOCK WITHDRAWS EVERY UNANSWERED APPROVAL CARD —
+// closed «vault_locked» by the door itself (never «closed elsewhere»: its job is NOT refused); the job keeps WAITING (a lock stops no
+// job) and at the unlock it is judged again and ONE new card is filed
+async function legLockWithdraw(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('lkwd', { doorSrc });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const job = W.jm.jobs.get(W.create({}).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
+  const a = (cards(W)[0] || {}).action || {};
+  W.vault.lock('door');
+  await W.door.factsLanded();
+  const res = resolvedOf(W, a.askId);
+  rows.locked = { open: cards(W).length, by: res.resolvedBy || null, state: job.state, waitFor: job.waitFor };
+  row(!!a.askId && cards(W).length === 0 && res.resolvedBy === 'vault_locked' && job.state === 'waiting', 'a LOCK withdraws the open approval card — closed «vault_locked» by the door — and its job keeps WAITING (never refused: a lock stops no job)', rows.locked);
+  await W.vault.unlock(PW);
+  await W.door.factsLanded();
+  const b = (cards(W)[0] || {}).action || {};
+  row(cards(W).length === 1 && VJ.ASK_ID_RE.test(String(b.askId)) && b.askId !== a.askId && b.jobId === job.id && job.state === 'waiting', 'at the UNLOCK the waiting job is judged again and ONE new card is filed (a new ask)', { n: cards(W).length, before: a.askId, after: b.askId, state: job.state });
+  const au = jobLines(W).filter((l) => l.includes(`"askId":"${a.askId}"`) && l.includes('"why":"locked"'));
+  row(au.length === 1, 'ONE vault-job audit line says the card was withdrawn by the lock (ids only)', au.length);
+  W.end();
   return rows;
 }
 // the REAL road of a delete: the Vault window's 删除 of a free entry (src/server/vault-paste-door.js dropEntry) over the real job door
@@ -1115,6 +1140,8 @@ const MUT_LOCK = dmut('  const bindJobs = (engine) => { jm = engine || null; };'
 const pmut = (from, to) => { try { return swap(PASTE_SRC, from, to); } catch { return null; } };   // a copy of the paste door — its anchor gone ⇒ null, the control RED by name
 const MUT_PASTE = pmut('    if (vaultJob) { try { vaultJob.entryGone(rowId, { label }); }', '    if (false) { try { vaultJob.entryGone(rowId, { label }); }');
 const MUT_AGENT_DEL = pmut('    if (vaultJob) { try { vaultJob.entryGone(id, { label }); }', '    if (false) { try { vaultJob.entryGone(id, { label }); }');
+const MUT_NOWITHDRAW = dmut("  if (typeof vault.onLock === 'function') vault.onLock(() => {\n", "  if (false) vault.onLock(() => {\n");   // B-a08e's control: the door without its lock road
+const [lockWithdraw, lockWithdrawMut] = await Promise.all([legLockWithdraw(), MUT_NOWITHDRAW ? legLockWithdraw(MUT_NOWITHDRAW) : {}]);
 const [revoke, gone, jgone, lockRuns, pdel, adel, revokeMut, goneMut, lockMut, pdelMut, adelMut] = await Promise.all([legRevoke(), legEntryGone(), legGone(), legLockRuns(), legPasteDelete(), legAgentDelete(),
   MUT_REVOKE ? legRevoke(MUT_REVOKE) : {}, MUT_GONE ? legEntryGone(MUT_GONE) : {}, MUT_LOCK ? legLockRuns(MUT_LOCK) : {}, MUT_PASTE ? legPasteDelete(MUT_PASTE) : {}, MUT_AGENT_DEL ? legAgentDelete(MUT_AGENT_DEL) : {}]);
 const MUT_HELD = (() => { try { return swap(swap(DOOR_SRC, '    if (userTodos.isHeldUnread?.()) {\n', '    if (false) {\n'), '    if (userTodos.isHeldUnread?.()) return void ask(', '    if (false) return void ask('); } catch { return null; } })();   // ⑩d's control: the door files over a held tray (both held branches cut)
@@ -1157,6 +1184,8 @@ ok(!!MUT_DEDUPE && cardMutDedupe.rejudge > 1, 'CONTROL — a card per re-judge (
 ok(!!MUT_DENY && denyMut.state === 'waiting', 'CONTROL — a Deny that leaves its job (the refusal removed): the job still waits — RED on the copy', MUT_DENY ? denyMut.state : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_CAP && capsMut.n === 5, 'CONTROL — no per-conversation bound: a fifth card — RED on the copy', MUT_CAP ? capsMut.n : 'the copy could not be built (its anchor is missing)');
 print('⑩ TAKEN BACK = STOPPED · A LOCK STOPS NOTHING (lane vault-job-approval — decisions ④ ③)', [...revoke, ...gone, ...jgone, ...lockRuns, ...pdel, ...adel]);
+print('⑩e A LOCK WITHDRAWS THE CARDS (B-a08e, 主开发 r1665) — the job waits, the unlock asks again', lockWithdraw);
+ok(!!MUT_NOWITHDRAW && !!lockWithdrawMut.locked && lockWithdrawMut.locked.open === 1, 'CONTROL — the door without its lock road: the card stays OPEN over a locked vault — RED on the copy', MUT_NOWITHDRAW ? lockWithdrawMut.locked : 'the copy could not be built (its anchor is missing)');
 console.log('⑩b MUTANTS (each a copy of the door — RED)');
 ok(!!MUT_REVOKE && revokeMut.desired === true, 'CONTROL — a ✕ that leaves the job running (the stop removed): still meant to run (desiredUp) — RED on the copy', MUT_REVOKE ? revokeMut.desired : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_GONE && goneMut.desired === true, 'CONTROL — a deleted entry that leaves its job running (the stop removed): still meant to run — RED on the copy', MUT_GONE ? goneMut.desired : 'the copy could not be built (its anchor is missing)');

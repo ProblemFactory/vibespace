@@ -83,6 +83,7 @@ const PRODUCERS = {
   'src/server/apps-engine.js': { origin: 'apps', scope: 'mixed', types: ['app-install'] },
   'src/server/oat-identity.js': { origin: 'login', scope: 'group', types: [] },
   'src/server/cli-unmeasured-notice.js': { origin: 'pool', scope: 'group', types: ['cli-check-again'] }, // lane cli-self-measure: a FAIL / cannot-run / stopped check's item carries «Check again»
+  'src/server/vault-job-door.js': { origin: 'vault', scope: 'conversation', types: ['vault-job-ask'] },   // B-a08e (lane vault-job-approval): a Background job's approval card, filed under its owner conversation
   'src/server/vault-paste-door.js': { origin: 'vault', scope: 'conversation', types: ['secret-request', 'vault-words-ask'] },   // + lane vault-entry-description: an agent's proposal of an entry's words
   'src/server/feedback-forward.js': { origin: 'server', scope: 'group', types: [] },
   'src/server/wait-watch.js': { origin: 'agent', scope: 'conversation', types: ['messages-waiting'] },   // lane queued-is-not-woke laws 2 + 3 (shape C): the «messages waiting» item, under the conversation's own key

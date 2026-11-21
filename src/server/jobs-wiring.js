@@ -292,6 +292,10 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
 
   // ── user REST (cookie-authed): the panel sees and controls everything ──
   // B-f276 cure r1: while jobs.json cannot be read — the words (the panel words its own from `code` + `why`), never an empty list
+  // B-a08e (主开发 r1665, test-jobs-triage): EVERY job snapshot carries `vaultUses` (lane vault-job-approval: the card's «Uses from the
+  // vault», the entries' Vault names — the person's view only): the live list, the archive list, a read by id live or archived — one
+  // shape (an archived job's approvals left with it: its uses say «not approved»)
+  const vaultUsesOf = (j) => (typeof jm.vaultUsesOf === 'function' ? jm.vaultUsesOf(j) : []);
   const unreadAnswer = () => ({ error: jm.unreadWords(), code: 'records-unread', why: (jm._unread.store && jm._unread.store.code) || 'unknown' });
   app.get('/api/jobs', (req, res) => {
     if (!jm.ready) return res.status(503).json({ error: jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting' });
@@ -299,10 +303,10 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // ?archived=1 = the archive list, SAME snapshot shape + archivedAt/archivedWhy
     // (triage §13 rule 5) — fetched by the panel only when the user asks
     if (req.query.archived) {
-      return res.json({ archived: true, jobs: jm.archivedList().map((r) => ({ ...jm.snapshotArchived(r), access: r.access, ownerSession: ownerOf(r), runs: runsOf(r) })) });
+      return res.json({ archived: true, jobs: jm.archivedList().map((r) => ({ ...jm.snapshotArchived(r), access: r.access, ownerSession: ownerOf(r), runs: runsOf(r), vaultUses: vaultUsesOf(r) })) });   // vaultUses: B-a08e (主开发 r1665) — the archived card names the entries it used, as the live one does
     }
     res.json({
-      jobs: [...jm.jobs.values()].map((j) => ({ ...enrichPublished(jm.snapshot(j), j), access: j.access, envKeys: Object.keys(j.cmd?.env || {}), envFrom: j.envFrom || [], ownerSession: ownerOf(j), runs: runsOf(j), vaultUses: typeof jm.vaultUsesOf === 'function' ? jm.vaultUsesOf(j) : [] })),   // vaultUses: lane vault-job-approval — the card's «Uses from the vault» (the entries' Vault names: the person's view only)
+      jobs: [...jm.jobs.values()].map((j) => ({ ...enrichPublished(jm.snapshot(j), j), access: j.access, envKeys: Object.keys(j.cmd?.env || {}), envFrom: j.envFrom || [], ownerSession: ownerOf(j), runs: runsOf(j), vaultUses: vaultUsesOf(j) })),   // vaultUses: lane vault-job-approval — the card's «Uses from the vault» (the entries' Vault names: the person's view only)
       archivedCount: jm.archivedCount(),
       held: jm.heldDigest(),
     });
@@ -340,10 +344,10 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       // READ-THROUGH to the archive (triage §13 rule 5): housekeeping must
       // never turn an id somebody holds into a 404
       const rec = jm.archivedById(req.params.id);
-      if (rec) return res.json({ job: { ...jm.snapshotArchived(rec, { tail }), access: rec.access, interaction: rec.interaction, runs: runsWhole(rec) } });
+      if (rec) return res.json({ job: { ...jm.snapshotArchived(rec, { tail }), access: rec.access, interaction: rec.interaction, runs: runsWhole(rec), vaultUses: vaultUsesOf(rec) } });
       return res.status(jm._unread && jm._unread.store ? 503 : 404).json(jm._unread && jm._unread.store ? unreadAnswer() : { error: 'no such job' });   // B-f276 cure r1: never «no such job» while the records are unread
     }
-    res.json({ job: { ...enrichPublished(jm.snapshot(job, { tail }), job), access: job.access, interaction: job.interaction, runs: runsWhole(job) } });
+    res.json({ job: { ...enrichPublished(jm.snapshot(job, { tail }), job), access: job.access, interaction: job.interaction, runs: runsWhole(job), vaultUses: vaultUsesOf(job) } });
   });
   // BATCH ACKNOWLEDGE (2.369.121, owner: 批量已读): the panel's "Mark all seen"
   // sends every ackable id once; each terminal one-shot not yet seen is

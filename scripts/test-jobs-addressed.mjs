@@ -390,7 +390,7 @@ console.log(`    the census: ${SITES.length} producer site(s) of a ring event in
 const CLASS = {
   'announce#1': 'event', '_reapOnce#1': 'event', '_reapOnce#2': 'event', '_reapOnce#3': 'event', '_reapSaid#1': 'event',
   '_clearKeptOnce#1': 'event', '_clearKeptOnce#2': 'event', '_besideLive#1': 'event', '_doubtBlocks#1': 'event', '_stopDoubt#1': 'event',
-  '_stopDoubt#2': 'event', '_clearBefore#1': 'event', '_refuseRun#1': 'alarm', '_settleWait#1': 'event', '_vaultGate#1': 'alarm',
+  '_stopDoubt#2': 'event', '_clearBefore#1': 'event', '_refuseRun#1': 'alarm', '_settleWait#1': 'event', '_vaultRefuse#1': 'alarm',   // B-a08e: the vault refusal (failed) is _vaultRefuse's, reached from the gate and from a Deny
   '_waitFor#1': 'event', '_adoptAndReplay#1': 'event', '_bootNoExit#1': 'alarm', '_bootNoExit#2': 'alarm', '_bootNoExit#3': 'event',
   '_parkForMemory#1': 'alarm', '_finalizeRun#1': 'event', '_finalizeRun#2': 'event', '_finalizeRun#3': 'event', '_finalizeRun#4': 'alarm',
   '_finalizeRun#5': 'end', '_sweepPass#1': 'event', '_sweepPass#2': 'event', '_sweepPass#3': 'event', '_untilScan#1': 'event', '_cronTick#1': 'alarm',
@@ -410,6 +410,7 @@ const CLASS = {
   // failures raise the alarm — a service parked by its ladder, a schedule's fire skipped; a ladder's retry is an event
   '_budgetRefusal#1': 'event', '_budgetLadder#1': 'alarm', '_budgetLadder#2': 'event', '_fireCron#2': 'alarm',
   '_fireCron#3': 'event',   // round wh9e7xe8i: ONE alarm a stretch of skipped fires — the first; the later ones are events
+  'vaultRevoked#1': 'alarm',   // B-a08e (lane vault-job-approval, decision ④): the person took back a job's use of a vault entry — the job STOPPED, said once
 };
 for (const s of SITES) ok(CLASS[s.key], `census row: ${s.key} (src/jobs.js:${s.line}) has a class`, s.src);
 ok(Object.keys(CLASS).every((k) => SITES.some((s) => s.key === k)), 'every class row names a site that exists (a removed producer leaves no stale row)', Object.keys(CLASS).filter((k) => !SITES.some((s) => s.key === k)));
@@ -461,7 +462,8 @@ const DRIVERS = {
   '_refuseRun#1': async () => { const j = task('drv-refuse'); jm._refuseRun(j, { error: 'refused: a vendor pattern' }, 'manual'); return j; },
   '_hubMainRefusal#1': async () => { const j = task('drv-hubmain'), r = run0(j); jm._hubMainRefusal(j, r, 'its time limit'); return j; },
   '_settleWait#1': async () => { const j = task('drv-settle'); j.state = 'waiting'; jm._settleWait(j, 'the vault was never unlocked'); return j; },
-  '_vaultGate#1': async () => { const j = task('drv-vaultgate'); const un = stub(jm, { _vaultJob: { gate: () => ({ code: 'vault_refused', words: 'a value it names is gone' }) } }); try { jm._vaultGate(j, 'manual'); } catch { } un(); return j; },
+  '_vaultRefuse#1': async () => { const j = task('drv-vaultgate'); const un = stub(jm, { _vaultJob: { gate: () => ({ code: 'vault_refused', words: 'a value it names is gone' }) } }); try { jm._vaultGate(j, 'manual'); } catch { } un(); return j; },
+  'vaultRevoked#1': async () => { const j = svc('drv-vaultrevoked'); const un = stub(jm, { _vaultLive: () => true, stop: () => ({ ok: true }) }); try { jm.vaultRevoked(j.id, 'stopped: its vault value was taken back'); } finally { un(); } return j; },
   '_waitFor#1': async () => { const j = task('drv-waitfor'); jm._waitFor(j, 'vault', null); return j; },
   '_adoptAndReplay#1': async () => { const j = svc('drv-adopt'); j.state = 'up'; run0(j); const un = stub(jm, { _readStamp: () => ({ pid: 4244 }), _verifyAlive: () => false, _readExit: () => null, _reapScope: async () => true, _bootJudge: () => null }); const keep = new Map(jm.jobs); jm.jobs.clear(); jm.jobs.set(j.id, j); try { jm._adoptAndReplay(); } catch { } jm.jobs.clear(); for (const [k, v] of keep) jm.jobs.set(k, v); un(); return j; },
   '_bootNoExit#1': async () => { const j = svc('drv-boot-oom-svc'), r = run0(j); const un = stub(jm, { _countEnd: () => ({ count: 1, park: false }) }); jm._bootNoExit(j, r, { cause: 'oom', at: Date.now(), jobAnonMb: 900, anonMb: 1000, limitMb: 1024 }); un(); return j; },

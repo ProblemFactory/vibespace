@@ -289,7 +289,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     for (const id of [...asks.keys()]) if (!live.has(id)) asks.delete(id);
   }
   const forget = (q) => { asks.delete(q.askId); settled.add(q.askId); while (settled.size > 256) settled.delete(settled.values().next().value); };
-  /** close a card by THIS door (`end` = one of its row's ends: allowed | denied | ask-over), the person's mark on a decision */
+  /** close a card by THIS door (`end` = one of its row's ends: allowed | denied | ask-over | vault_locked), the person's mark on a decision */
   function settle(q, end, fact = null) {
     forget(q);
     if (!userTodos || !q.todoId) return;
@@ -470,7 +470,22 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     });
   }
 
-  // ── TAKEN BACK (lane vault-job-approval, decision ④ — revoke / delete STOPS; a lock stops nothing: this file has no lock hook) ──
+  // A LOCK WITHDRAWS EVERY UNANSWERED CARD (主开发 r1665 — the lock's «asks» consequence, decision ③ of lane vault-manual-and-lock;
+  // test-vault-engine's census): each open approval card closes «vault_locked» by THIS door (its own close: never «closed elsewhere»,
+  // so its job is not refused); the job keeps WAITING — a lock stops no job (decision ④) — and at the unlock the engine judges it
+  // again (onChange's 'vault-unlocked') and files ONE new card. A card being answered finishes its answer. While For you is held
+  // unread the withdraw is OWED to its read (one, in memory: a restart is no lock act — the paste door's rule)
+  let lockAtRead = false;
+  const withdrawAll = () => {
+    index();
+    for (const q of [...asks.values()]) if (!answering.has(q.askId)) { settle(q, 'vault_locked'); audit({ op: 'over', job: q.jobId, entry: q.ref, askId: q.askId, why: 'locked' }); }
+  };
+  if (typeof vault.onLock === 'function') vault.onLock(() => {
+    if (userTodos && userTodos.isHeldUnread?.() && typeof userTodos.whenRead === 'function') { if (!lockAtRead) { lockAtRead = true; userTodos.whenRead(() => { lockAtRead = false; withdrawAll(); }, "the vault lock's withdraw of the Background jobs' approval cards"); } return; }
+    withdrawAll();
+  });
+
+  // ── TAKEN BACK (lane vault-job-approval, decision ④ — revoke / delete STOPS; a lock stops NO job: its lock road above only withdraws the cards) ──
   const JOB_RE = /^jb-[0-9a-f]{8}$/;
   // a NARROWING write (a take-back, a removed job, a deleted entry) re-judges nothing: it can start no job, and a re-judge
   // there would file again the cards of the very job being removed or stopped (the second adversarial read)
