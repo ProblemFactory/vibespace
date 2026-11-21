@@ -13,6 +13,9 @@
 //     RED: the bound taken away (one batch of all) ⇒ all 80 in the restore's one turn.
 //   ② 20 survivors: all registered when restoreSessions returns (a small restore is what it always was).
 //   ③ loop-turns `first`: a job asked first from inside a running job runs before the jobs already queued; RED: `first` ignored.
+//   ⑦ THE ONE-PASS BACKFILL (r1487, box row 54): five chat survivors' billing sources written back although a feed armed inside the
+//     attach loop (the wrapper's hold's gate: its 3 s bound) cut every buffer before the backfill ran; RED: the backfill reading the
+//     buffer then ⇒ none written.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -134,6 +137,41 @@ try {
       ok(g6.atReturn === 8 && g6.after === 0 && g6.live === 0, `40 dead sockets: ${40 - g6.atReturn} retired in the restore's turn (${g6.atReturn} left at its return), all after its turns`, g6);
       ok(r6.atReturn === 0, `RED: a retire not counted ⇒ all 40 retired in the restore's one turn (${r6.atReturn} left)`, r6);
     } finally { process.env.PATH = PATH0; }
+  }
+  console.log('⑦ THE ONE-PASS BACKFILL (r1487, box row 54): a small restore\'s billing sources are written back whatever is fed after the attach');
+  {
+    // FIVE chat survivors (one turn, one attach batch: the one-pass road), each ring ending in turns whose init says its billing source.
+    // Each fake attach arms, as the wrapper's hold's gate does, a 3 s timer that feeds 800 KB of records with NO billing source into the
+    // session's buffer and cuts it as the claude consumer does (750 K → 500 K) — armed inside the attach loop, BEFORE finish() arms the
+    // backfill's, so it fires first. RED: the backfill reading the buffer then (the shape before) ⇒ no source written
+    const FEED = '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"' + 'x'.repeat(2000) + '"}]}}\n';
+    const chatRun = async (BRm, tag) => {
+      const feeds = [];
+      const X = instance(BRm, dataDir(tag), { onAttach: (id, s) => { const t = setTimeout(() => { let b = s.buffer; while (b.length < 800000 + s.buffer.length) b += FEED; s.buffer = b.length > 750000 ? b.slice(-500000) : b; feeds.push(id); }, 3000); feeds.timers = (feeds.timers || []).concat(t); } });
+      const d = path.join(ROOT, tag), ids = [];
+      for (let i = 0; i < 5; i++) {
+        const sock = `cw-${900 + i}-${1760490000000 + i * 1000}`, id = 'sess-' + sock.slice(3), cid = `7a11ce00-0000-4000-8000-${String(900 + i).padStart(12, '0')}`;
+        fs.writeFileSync(path.join(d, 'sockets', sock), '');
+        fs.writeFileSync(path.join(d, 'meta', sock + '.json'), JSON.stringify({ webuiSessionId: id, name: `chat ${i}`, cwd: '/srv/work/app', backend: 'claude', mode: 'chat', claudeSessionId: cid, createdAt: 1760490000000 + i * 1000 }));
+        fs.writeFileSync(path.join(d, 'buffers', id + '.json'), JSON.stringify({ mode: 'chat' }));
+        let ring = ''; while (ring.length < 300000) ring += '{"type":"system","subtype":"init","session_id":"' + cid + '","apiKeySource":"none"}\n' + FEED.repeat(20);
+        fs.writeFileSync(path.join(d, 'buffers', id + '.buf'), ring);
+        ids.push({ id, sock });
+      }
+      const t0 = Date.now();
+      X.api.restoreSessions();
+      const billed = () => ids.filter((x) => { try { return JSON.parse(fs.readFileSync(path.join(d, 'meta', x.sock + '.json'), 'utf8')).apiKeySource === 'none'; } catch { return false; } }).length;
+      // until every buffer was fed AND either every source is written or the backfill's own 3 s turn has passed (+ 400 ms): a RED
+      // writes nothing, so its end is that turn — bounded at 6 s
+      { const tEnd = t0 + 6000; while ((feeds.length < ids.length || (billed() < ids.length && Date.now() - t0 < 3400)) && Date.now() < tEnd) await new Promise((r) => setTimeout(r, 20)); }
+      for (const t of feeds.timers || []) clearTimeout(t);
+      return { live: X.activeSessions.size, attached: X.attached.length, fed: feeds.length, billed: billed(), of: ids.length };
+    };
+    const before = anchored(brSrc, "      const src = billingRead.has(s) ? billingRead.get(s) : lastApiKeySource(typeof s.buffer === 'string' ? s.buffer : '');", "      const src = lastApiKeySource(typeof s.buffer === 'string' ? s.buffer : '');", 'r1487-backfill-reads-buffer');   // stale-pins: kept (the red plants the old shape)
+    const BRr = require(M.write('src/server/boot-restore.js', before, 'r1487-backfill-reads-buffer'));
+    const { r: [g7, r7] } = await logged(() => Promise.all([chatRun(BR, 'bill-g'), chatRun(BRr, 'bill-r')]));   // the base and its RED at once (each waits the backfill's 3 s turn), ONE capture of the restores' lines
+    ok(g7.live === 5 && g7.attached === 5 && g7.fed === 5 && g7.billed === 5, `5 chat survivors (the one-pass road): every billing source written back (${g7.billed} of ${g7.of}) although every buffer was fed 800 KB and cut before the backfill (${g7.fed} fed)`, g7);
+    ok(r7.fed === 5 && r7.billed === 0, `RED: the backfill reading the buffer after the attach (the shape before) ⇒ ${r7.billed} of ${r7.of} written (the feed came first: ${r7.fed})`, r7);
   }
 } catch (e) { fail++; console.error('  ✗ threw: ' + ((e && e.stack) || e)); }
 

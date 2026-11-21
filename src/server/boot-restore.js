@@ -803,6 +803,13 @@ function restoreSessions() {
 
   const attachQueue = [], tRestore = performance.now();   // B-cd4b: every survivor in the live set at once, its attach queued
   const regTurns = { n: 0, longest: 0 };   // B-cd4b unit 3: the registration's turns (said in the restore's line)
+  // r1487 (box row 54: a one-pass restore wrote back 0 of 80 billing sources): EACH SURVIVOR'S BILLING SOURCE IS TAKEN FROM THE
+  // REGISTRATION'S OWN READ, at the registration (PURE lastIndexOf over the ≤ 500 KB ring already in hand), and the backfill writes
+  // THAT. It used to read `s.buffer` 3 s later, after the attach — and the wrapper's hold feeds a survivor's held bytes into that
+  // buffer when its fence comes back or at its 3 s bound; on the ONE-PASS road (every restore of ATTACH_BATCH survivors or fewer)
+  // those 3 s timers are armed inside the attach loop, BEFORE finish() arms the backfill's, so they fire first, and the consumer's
+  // cut (750 K → 500 K) can leave the buffer without the ring's last init. Nothing fed after the attach reaches this map
+  const billingRead = new Map();   // session → the LAST `apiKeySource` of the ring this restore read for it
   function* registerEach() {   // B-cd4b unit 3: ONE survivor a step — the batches below take REGISTER_BATCH of them a turn
   for (const sockFile of sockets) {
     const socketPath = path.join(SOCKETS_DIR, sockFile);
@@ -966,6 +973,7 @@ function restoreSessions() {
       });
     }
     session._restoreBuf = restoreBuf;   // B-cd4b: the read's end, for its attach's catch-up (cleared once attached)
+    if (!session._apiKeySource && savedBuffer) { const src = lastApiKeySource(savedBuffer); if (src) billingRead.set(session, src); }   // r1487: read here, written by the backfill
     activeSessions.set(id, session);
     require('./sent-record.js').restoredFor(session);   // B-9a2e part 2: its id was reported before the restart (unless it may still change)
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
@@ -1012,7 +1020,9 @@ function restoreSessions() {
     let changed = false;
     for (const [, s] of activeSessions) {
       if (!s.backend || capsOf(s.backend).streamProtocol !== 'stream-json' || s._apiKeySource) continue;   // the live stream said it (its own word wins)
-      const src = lastApiKeySource(typeof s.buffer === 'string' ? s.buffer : '');
+      // r1487: the registration's own read FIRST — whatever was fed into the buffer after the attach cannot take it away; a session
+      // this restore did not read (an R6 pipe re-open, a re-adopted remote keeper session) falls back to the copy it holds
+      const src = billingRead.has(s) ? billingRead.get(s) : lastApiKeySource(typeof s.buffer === 'string' ? s.buffer : '');
       if (src) {
         s._apiKeySource = src;
         if (s.sockName) { try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), apiKeySource: src }); } catch { } }
@@ -1025,6 +1035,7 @@ function restoreSessions() {
         } catch { }
       }
     }
+    billingRead.clear();
     if (changed) broadcastActiveSessions();
   }, 3000);
 

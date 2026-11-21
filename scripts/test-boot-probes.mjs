@@ -363,8 +363,8 @@ try {
     // the backfill (PURE): the LAST source a buffer holds; none ⇒ unset; it reads the restore's own copy, never `<id>.buf` by name
     ok(BR.lastApiKeySource('{"apiKeySource":"none"}\n{"apiKeySource":"ANTHROPIC_API_KEY"}\n') === 'ANTHROPIC_API_KEY' && BR.lastApiKeySource('{"apiKeySource":"ANTHROPIC_API_KEY"}\n{"apiKeySource":"none"}\n') === 'none' && BR.lastApiKeySource('{"type":"system","subtype":"init"}\n') === null && BR.lastApiKeySource('') === null,
       'the backfill: the LATER of two billing sources wins (both orders); a buffer with none ⇒ unset (no meta write follows a null)');
-    ok(/const src = lastApiKeySource\(typeof s\.buffer === 'string' \? s\.buffer : ''\);/.test(brSrc) && /if \(src\) \{\n\s*s\._apiKeySource = src;/.test(brSrc),
-      'the backfill reads the copy the restore holds (`s.buffer`: the file resolveWrapperFiles named, a counter collision included) and writes only for a source it found — pinned by text');
+    ok(/const src = billingRead\.has\(s\) \? billingRead\.get\(s\) : lastApiKeySource\(typeof s\.buffer === 'string' \? s\.buffer : ''\);/.test(brSrc) && /const src = lastApiKeySource\(savedBuffer\); if \(src\) billingRead\.set\(session, src\);/.test(brSrc) && /if \(src\) \{\n\s*s\._apiKeySource = src;/.test(brSrc),
+      'the backfill writes the source the REGISTRATION read (r1487: nothing fed after the attach takes it away), else the copy the restore holds (`s.buffer`: the file resolveWrapperFiles named, a counter collision included), and only a source it found — pinned by text');
     // THE CONSUMER SIDE (src/server/session-stdout.js setupSessionPty `catchUp`, the REAL claude consumer): the caught-up records are
     // parsed before the pty's first byte, the buffer holds them once (the partial line not doubled). RED: the feed taken away
     const anyFn = () => new Proxy(function () { }, { get: (t, k) => (k === 'then' || typeof k === 'symbol' ? undefined : anyFn()), apply: () => undefined });
