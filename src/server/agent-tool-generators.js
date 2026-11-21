@@ -521,7 +521,6 @@ function agentHooksStatus() {
 // at the next writer (verify r1 F1: an unreadable .git and a worktree whose
 // checkout was removed both shipped as `checkout` — every writer wrote).
 const serverRoot = require('../server-root');
-const { TMP_ROOTS } = require('../fixture-guard');
 // B-1425 (主开发 r640 / r647): THE ROOT FACTS ARE READ OFF THE HUB'S LOOP. On production the checkout sits on a network mount, and
 // the release read it with statSync / readFileSync / realpathSync on the loop — once a minute at most, but at EVERY call while the
 // last read erred, and the realpaths at every call — from every remote conversation start, the hooks routes and the timers: a
@@ -545,7 +544,7 @@ const onRootLanded = (fn) => { if (typeof fn === 'function') _landedListeners.ad
 // r872 (the gate's box zone): the read in flight was told LATE to a waiting caller — the cache then answers late too. A flag, never the
 // clock again: the deadline timer and Date.now() can differ by a millisecond, and «not judged yet» must never follow a late answer
 let _rootReadLate = false;
-const tmpSpellings = () => [os.tmpdir(), ...TMP_ROOTS];   // the judgment's temp roots, as spelled (their real paths are read with the facts)
+const tmpSpellings = () => require('./throwaway-root.js').tmpRootsOf({ home: os.homedir(), realpath: (p) => p });   // THE one list of temp roots (B-ba47 shape H r1278: absolute, never the disk's root, never the variable's folder that holds the home), as spelled — their real paths are read with the facts, off the loop (B-1425)
 const realOr = async (p) => { try { return await _rootFsp.realpath(p); } catch { return p; } };
 async function readRootFacts(root) {
   if (DOOR.blocked(path.resolve(root))) return { root: path.resolve(root), gitDir: null, gitCommonDir: null, error: DOOR.sentenceFor(path.resolve(root)) };   // B-afc4

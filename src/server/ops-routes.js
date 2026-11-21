@@ -4,9 +4,8 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync, spawn } = require('child_process');
-const { tmpRootUnder } = require('../server-root.js');   // B-9dd0: the one «under a temp root» verdict (segment boundary, real paths)
 
-function create({ app, rootDir, wss, WS_OPEN, bootPhase = null, tmpRoots = [require('os').tmpdir(), '/tmp', '/var/tmp'] }) {
+function create({ app, rootDir, wss, WS_OPEN, bootPhase = null, throwaway = () => require('./throwaway-root.js').throwaway(rootDir) }) {   // `throwaway`: THE ONE TEST (B-ba47 shape H r1278), a seam for the suites
 // ── Version / update visibility (⚙ menu shows current + latest at the Update entry) ──
 // Latest = the canonical repo's master package.json — fetched LAZILY on
 // request only (never a background timer), cached 6h, best-effort: offline
@@ -20,12 +19,12 @@ const versionInfo = { fetchedAt: 0, latest: null, commit: null };
 // an older canonical without it.
 const CANONICAL_RAW = 'https://raw.githubusercontent.com/ProblemFactory/vibespace/master/';
 let saidOffline = false, tmpJudged = null;
-const realOr = (p) => fs.promises.realpath(p).catch(() => p);
-const absTmp = () => tmpRoots.filter((t) => typeof t === 'string' && path.isAbsolute(t));   // B-9dd0 r528: a relative spelling is never resolved (it is the hub's own folder)
-const tmpRootOf = () => (tmpJudged = tmpJudged || Promise.all([realOr(rootDir), ...absTmp().map(realOr)]).then(([r, ...real]) => {
-  const t = tmpRootUnder({ root: rootDir, realRoot: r, tmpRoots: absTmp(), realTmps: real });
-  return t ? `the hub's root ${rootDir} lies under the temp folder ${t} (server-root rule 3: never a person's instance)` : null;
-}));
+// THE ONE TEST (B-ba47 shape H, 主开发 r1278: rule 3 asks it): a THROWAWAY copy — a linked worktree wherever it sits, or a temp root
+// handed a temp home — answers offline; a person's own clone under a temp root, run with their own home, asks. Judged once; a judge
+// that throws is never «online».
+const tmpRootOf = () => (tmpJudged = tmpJudged || Promise.resolve().then(() => (throwaway() === false ? null
+  : `the hub's root ${rootDir} is a throwaway copy (src/server/throwaway-root.js: a linked worktree, or a temp folder handed a temp home — never a person's instance)`))
+  .catch((e) => `the hub's root ${rootDir} could not be judged (${(e && e.message) || e}) — never online on a guess`));
 async function canonicalFile(name, timeoutMs) {
   const fixtureDir = process.env.VIBESPACE_CHANGELOG_FIXTURE_DIR;
   if (fixtureDir) {
@@ -34,13 +33,13 @@ async function canonicalFile(name, timeoutMs) {
   }
   // B-9dd0 (lane bl-scratch, 2026-11-17): A GATE NEVER ASKS GITHUB. A scratch hub under a suite answered /api/version by
   // fetching this file (an acceptance's socket sampler saw raw.githubusercontent.com during a chrome suite) — an egress a test
-  // must never make. A hub whose root lies under a temp root (src/server-root.js rule 3: never the person's instance — every
-  // suite's scratch hub, flag or not, the push gate and the mirror too) or that runs under VS_NO_REAL_CLI=1 (every lane env,
+  // must never make. A THROWAWAY hub (src/server/throwaway-root.js, the one test — every lane's worktree hub and every suite's
+  // scratch hub, flag or not, the push gate and the mirror too) or one that runs under VS_NO_REAL_CLI=1 (every lane env,
   // acceptance run, the test machine) answers offline (status 0: the menu shows the local version only); a suite that needs
   // the files hands the fixture dir above.
-  // B-9dd0 cure (the readers, 08:54Z): the root and the temp roots are judged as rule 3's real caller judges them — each realpath'd
-  // (agent-tool-generators realOr), so a scratch hub reached through a linked temp path is one too — read once, async; the first
-  // offline answer says why in one journal line (a person's hub under a temp folder sees no «latest» and is told so here)
+  // B-9dd0 cure (the readers, 08:54Z) → B-ba47 shape H r1278: ONE judge for every gate — the boot's verdict, the root and the
+  // temp roots realpath'd there (a scratch hub reached through a linked temp path is one too); the first offline answer says why
+  // in one journal line
   const offline = process.env.VS_NO_REAL_CLI === '1' ? 'VS_NO_REAL_CLI=1' : await tmpRootOf();
   if (offline) { if (!saidOffline) { saidOffline = true; console.log(`[version] the canonical repo is not asked (answered offline): ${offline}`); } return { ok: false, status: 0, text: null }; }
   const ctl = new AbortController();

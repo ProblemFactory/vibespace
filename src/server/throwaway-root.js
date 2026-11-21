@@ -6,8 +6,13 @@
 // scratch copy.
 //   THE ONE TEST «is this root throwaway» (src/server-root.js isThrowaway over the root verdict): the root is a LINKED WORKTREE
 //   (git's fact: every scratch copy VibeSpace's tooling makes is one; a person's clone, or a tree with no .git, never is,
-//   wherever it lives), or it lies under a temp root — rule 3 (B-9dd0 r528: a root under a temp root) unchanged until the coordinator rules whether it asks the handed home too.
-//   The gates ask it: git identity, both home-rename migrations, the throwaway Xvnc stop, the owner CLI-config writes.
+//   wherever it lives), or it lies under a temp root AND was handed a temp home (a test's scratch clone). A person's own clone
+//   under a temp root, run with their own home, is neither: a real hub. EVERY gate asks it (主开发 r1278: «every gate asks ONE
+//   function» — rule 3 too): the update check's offline answer and the boot's runtime check (src/server/ops-routes.js,
+//   runtime-boot.js), git identity, both home-rename migrations, the throwaway Xvnc stop, the owner CLI-config writes.
+//   THE LAW (r1278): the owner's production hub — a clone, its own data folder, started by the service — is never judged
+//   throwaway by any input it can be handed: a temp variable at the disk's root, relative, at or above its home; an env name a
+//   parent left; a symlinked checkout; a .git that cannot be read (no answer is never «throwaway»).
 //   THE RE-HOME needs the FIRST sign, never the place: a linked worktree handed a home outside every temp root is re-homed at the boot's
 //   FIRST act (runtime-boot.boot, after the runtime switch) to <root>/.home (0700), unless VIBESPACE_REAL_INSTALL=1, which is
 //   printed. Its environment is BUILT, as a re-homed suite's is (src/home-verdict.js rehomeEnv), from the HUB's rows: the
@@ -32,17 +37,37 @@ const hub = () => hubRoot;
 const OWN_HOME_DIR = '.home';
 const OVERRIDE_ENV = 'VIBESPACE_REAL_INSTALL';
 const realOr = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(String(p)); } };
-const tmpRoots = () => [...new Set([realOr(os.tmpdir()), ...TMP_ROOTS.map(realOr)])];
+/** THE TEMP ROOTS the one test compares a root and its handed home with (B-9dd0 r468 / r528, B-ba47 shape H r1278): the fixed
+ *  temp folders (fixture-guard's TMP_ROOTS) and the temp VARIABLE's folder (os.tmpdir()) — ABSOLUTE spellings only (a relative
+ *  one would resolve to the hub's own folder), never the disk's root, and the variable's folder never when it holds the handed
+ *  home (TMPDIR=$HOME, or a folder above it, is no proof of a throwaway copy); each with its real path beside its spelling.
+ *  PURE over its inputs (`realpath` the caller's). */
+function tmpRootsOf({ fixed = TMP_ROOTS, tmpdir = os.tmpdir(), home = null, realpath = realOr } = {}) {
+  const abs = (p) => typeof p === 'string' && p.startsWith('/') && path.resolve(p) !== '/';
+  const h = abs(home) ? path.resolve(home) : null;
+  const holdsHome = (t) => { const r = path.resolve(t); return !!h && (h === r || h.startsWith(r + '/')); };
+  const vars = abs(tmpdir) && !holdsHome(tmpdir) && !holdsHome(realpath(tmpdir) || tmpdir) ? [tmpdir] : [];
+  const out = new Set();
+  for (const t of [...(fixed || []), ...vars].filter(abs)) {
+    const r = realpath(t);
+    if (typeof r === 'string' && path.resolve(r) === '/') continue;   // the disk's root by another name is never a temp root (r468)
+    out.add(path.resolve(t)); if (abs(r)) out.add(path.resolve(r));
+  }
+  return [...out];
+}
+const tmpRoots = (home = process.env.HOME || null) => tmpRootsOf({ home });
 /** THE HUB's OWN NAMED DROP beyond its rows (a suite keeps it: its ssh legs dial with the person's agent on purpose). It is a
  *  NOT of the suite's too (the desktop session), so the built env never carries it; it is named here for the boot line. */
 const HUB_DROPS = Object.freeze([
   Object.freeze({ name: 'SSH_AUTH_SOCK', why: "the person's ssh-agent — their keys are their identity; a throwaway hub dials, if at all, through its own ssh on its own files (sshOnOwnFiles)" }),
 ]);
 
-/** THE ONE TEST, for a root and the home it was handed. */
-function judge(root, handed) {
+/** THE ONE TEST, for a root and the home it was handed (`roots`: the temp roots, tmpRootsOf's by default — a seam for the
+ *  suites' tables). The home is judged by its real path too; an unread home is never a «temp» one (no answer is never throwaway). */
+function judge(root, handed, { roots = tmpRoots(handed) } = {}) {
   const facts = readRootFacts(root);
-  const v = SR.rootVerdict({ ...facts, root: realOr(root), tmpRoots: tmpRoots(), home: handed });
+  const home = typeof handed === 'string' && handed.startsWith('/') ? realOr(handed) : null;
+  const v = SR.rootVerdict({ ...facts, root: realOr(root), tmpRoots: roots, home });
   return { facts, rootVerdict: v, throwaway: SR.isThrowaway(v), linkedWorktree: SR.isLinkedWorktree(facts.gitDir, facts.gitCommonDir) };
 }
 /** Is this root throwaway? — the boot's answer for the declared hub, else judged now (no hub declared ⇒ false). */
@@ -65,7 +90,7 @@ function rehomeAtBoot({ root, env = process.env, execPath = process.execPath } =
   const mctx = { mountRoots: MPC.rootsOf({ mounts, rootDir: hubRoot }), rootDir: hubRoot };
   const onMount = (p) => !!MPC.rootOf(p, mctx);
   const resolve = HL.makeResolver({ refuse: onMount });
-  const v = HV.hubRehome({ root: hubRoot, home: handed, tmpRoots: tmpRoots(), resolve, linkedWorktree: j.linkedWorktree, override });
+  const v = HV.hubRehome({ root: hubRoot, home: handed, tmpRoots: tmpRoots(handed), resolve, linkedWorktree: j.linkedWorktree, override });
   // the override is the person's word «this copy is my real install»: no re-home, and every gate treats it as real
   verdict = { root: hubRoot, throwaway: j.throwaway && !override, sign: j.linkedWorktree ? 'worktree' : j.throwaway ? 'scratch-clone' : null, override, ...v };
   if (!v.rehome) return verdict;
@@ -117,4 +142,4 @@ function unruledLine(v = verdict) {
   return `[throwaway] handed ${v.unruled.length} name${v.unruled.length === 1 ? '' : 's'} that ${v.unruled.length === 1 ? 'is' : 'are'} neither a hub row nor a named NOT (src/home-verdict.js HUB_ROWS / HUB_NOT; not carried): ${v.unruled.join(', ')} — one the hub needs: add it to src/hub-env-knobs.json (its code must read it)`;
 }
 
-module.exports = { setHubRoot, hub, OWN_HOME_DIR, OVERRIDE_ENV, HUB_DROPS, sshOnOwnFiles, tmpRoots, judge, throwaway, rehomeAtBoot, boot, bootLine, unruledLine };
+module.exports = { setHubRoot, hub, OWN_HOME_DIR, OVERRIDE_ENV, HUB_DROPS, sshOnOwnFiles, tmpRootsOf, tmpRoots, judge, throwaway, rehomeAtBoot, boot, bootLine, unruledLine };

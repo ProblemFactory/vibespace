@@ -105,7 +105,11 @@ function rootVerdict({ root, gitCommonDir = null, gitDir = null, tmpRoots = [], 
     refused = { ok: false, kind: 'worktree', root: r, checkout, why: `this server runs from a git worktree of ${checkout}` };
   } else {
     const tmp = tmpRootUnder({ root: r, tmpRoots: roots });
-    if (tmp) refused = { ok: false, kind: 'tmp', root: r, tmpRoot: tmp, why: `this server runs from a temporary folder (${r} is under ${tmp})` };
+    // B-ba47 shape H (主开发 r1278: rule 3 asks THE ONE TEST): under a temp root is a TEST'S scratch copy only when the home it was
+    // handed is a temp one too; a person's own clone under a temp root, run with their own home, is a real hub (its update check
+    // works, its hooks register). An unread home is never a «temp» one: no answer is never throwaway.
+    const h0 = trimSlash(home), tempHome = isAbs(h0) && h0 !== '/' && roots.some((t) => isUnder(h0, t));
+    if (tmp && tempHome) refused = { ok: false, kind: 'tmp', root: r, tmpRoot: tmp, why: `this server runs from a temporary folder (${r} is under ${tmp})` };
     else if (envOverride === true) refused = { ok: false, kind: 'override', root: r, why: `${OVERRIDE_ENV}=1 is set for this server` };
   }
   if (!refused) return { ok: true, kind: 'checkout', root: r };
@@ -148,8 +152,8 @@ function registeredAfterErrorLine({ time = '?', error = '' } = {}) {
   return `VibeSpace registered the agent hooks at ${time} after an earlier read error (${String(error || '').slice(0, 200)}) — sessions started since then have the tools; sessions started during the error pick them up after a restart or compaction.`;
 }
 
-/** THE ONE TEST «is this root throwaway» (B-ba47 shape H): a linked worktree, or a copy under a temp root (rule 3, B-9dd0 r528 —
- *  whether it asks the handed home too is the coordinator's to rule) — the root verdict's 'worktree' and 'tmp' kinds. Every gate that keeps a throwaway copy away from the person's state asks it
+/** THE ONE TEST «is this root throwaway» (B-ba47 shape H; rule 3 asks it — 主开发 r1278): a linked worktree, or a copy under a temp
+ *  root handed a temp home — the root verdict's 'worktree' and 'tmp' kinds. Every gate that keeps a throwaway copy away from the person's state asks it
  *  (src/server/throwaway-root.js throwaway): git identity, both home-rename migrations, its Xvnc stopped, no owner CLI-config write. */
 const isThrowaway = (v) => !!v && (v.kind === 'worktree' || v.kind === 'tmp');
 module.exports = { OVERRIDE_ENV, FORCE_ENV, KINDS, isThrowaway, REJUDGE_BACKOFF_MS, ROOT_FACTS_TTL_MS, trimSlash, isUnder, tmpRootUnder, parseGitFile, checkoutOfCommonDir, isLinkedWorktree, rootVerdict, refusalLine, nextRejudgeDelay, unknownNoticeDue, registeredAfterErrorLine };

@@ -46,11 +46,14 @@ const ROWS = [
   ['a --separate-git-dir clone is a checkout', { root: CO, gitDir: '/home/u/gits/vibespace.git', gitCommonDir: '/home/u/gits/vibespace.git', tmpRoots: TMP }, 'checkout'],
   ['a gitdir equal to <common>/worktrees itself is not a worktree', { root: CO, gitDir: CO + '/.git/worktrees', gitCommonDir: CO + '/.git', tmpRoots: TMP }, 'checkout'],
   ['a gitdir under ANOTHER repo\'s worktrees/ is not this common dir\'s worktree', { root: CO, gitDir: '/x/.git/worktrees/a', gitCommonDir: CO + '/.git', tmpRoots: TMP }, 'checkout'],
-  ['a plain copy under /tmp/vs-* (no git)', { root: '/tmp/vs-rail-9', tmpRoots: TMP }, 'tmp', (v) => v.tmpRoot === '/tmp'],
-  ['a plain dir under /var/tmp', { root: '/var/tmp/x/vibespace', tmpRoots: TMP }, 'tmp', (v) => v.tmpRoot === '/var/tmp'],
-  ['the root IS a tmp root', { root: '/tmp', tmpRoots: TMP }, 'tmp'],
-  ['a custom os.tmpdir() the caller passed (TMPDIR=/run/user/1000/tmp)', { root: '/run/user/1000/tmp/vs-y', tmpRoots: [...TMP, '/run/user/1000/tmp'] }, 'tmp'],
-  ['a tmp root with a trailing slash still judges', { root: '/scratch/a', tmpRoots: ['/scratch/'] }, 'tmp'],
+  ['a plain copy under /tmp/vs-* (no git), handed a temp home (a suite\'s scratch copy)', { root: '/tmp/vs-rail-9', tmpRoots: TMP, home: '/tmp/vs-rail-9-home' }, 'tmp', (v) => v.tmpRoot === '/tmp'],
+  ['a plain dir under /var/tmp, handed a temp home', { root: '/var/tmp/x/vibespace', tmpRoots: TMP, home: '/var/tmp/x/home' }, 'tmp', (v) => v.tmpRoot === '/var/tmp'],
+  ['r1278: a person\'s CLONE under /var/tmp, run with their OWN home, is a real hub (rule 3 asks the one test: both signs)', { root: '/var/tmp/x/vibespace', gitDir: '/var/tmp/x/vibespace/.git', gitCommonDir: '/var/tmp/x/vibespace/.git', tmpRoots: TMP, home: '/home/u' }, 'checkout'],
+  ['r1278: a copy under /tmp with NO home read is never «tmp» (no answer is never throwaway)', { root: '/tmp/vs-z', tmpRoots: TMP }, 'checkout'],
+  ['r1278: …nor with the disk\'s root as its home', { root: '/tmp/vs-z', tmpRoots: TMP, home: '/' }, 'checkout'],
+  ['the root IS a tmp root (a temp home)', { root: '/tmp', tmpRoots: TMP, home: '/tmp/h' }, 'tmp'],
+  ['a custom os.tmpdir() the caller passed (TMPDIR=/run/user/1000/tmp), a home under it', { root: '/run/user/1000/tmp/vs-y', tmpRoots: [...TMP, '/run/user/1000/tmp'], home: '/run/user/1000/tmp/h' }, 'tmp'],
+  ['a tmp root with a trailing slash still judges', { root: '/scratch/a', tmpRoots: ['/scratch/'], home: '/scratch/h' }, 'tmp'],
   ['SEGMENT BOUNDARY: /tmpx is not under /tmp', { root: '/tmpx/vibespace', tmpRoots: TMP }, 'checkout'],
   ['SEGMENT BOUNDARY: /var/tmpfoo is not under /var/tmp', { root: '/var/tmpfoo/vibespace', tmpRoots: TMP }, 'checkout'],
   ['a vs- name OUTSIDE the tmp roots is a user\'s folder, not judged', { root: '/home/u/vs-tools/vibespace', gitDir: '/home/u/vs-tools/vibespace/.git', gitCommonDir: '/home/u/vs-tools/vibespace/.git', tmpRoots: TMP }, 'checkout'],
@@ -63,7 +66,7 @@ const ROWS = [
   ['FORCE under a scratch HOME lifts a worktree refusal (a suite registering into its own home)', { root: `${TMP[0]}/vs-it-1`, gitDir: CO + '/.git/worktrees/vs-it-1', gitCommonDir: CO + '/.git', tmpRoots: TMP, force: true, home: `${TMP[0]}/vs-it-1-home` }, 'forced'],
   ['FORCE under the lane\'s scratch HOME (/var/tmp/…/home) lifts a tmp refusal', { root: '/var/tmp/l/wt', tmpRoots: TMP, force: true, home: '/var/tmp/l/home' }, 'forced'],
   ['FORCE with the REAL HOME is ignored — a worktree still refused, and the why says so', { root: '/home/u/wt', gitDir: CO + '/.git/worktrees/wt', gitCommonDir: CO + '/.git', tmpRoots: TMP, force: true, home: '/home/u' }, 'worktree', (v) => /honoured only under a scratch HOME — \/home\/u is not one/.test(v.why)],
-  ['FORCE with no HOME is ignored', { root: '/tmp/vs-a', tmpRoots: TMP, force: true }, 'tmp', (v) => /this HOME is not one/.test(v.why)],
+  ['FORCE with no HOME: no home read is never «tmp» (r1278), so a copy under /tmp is a checkout and FORCE changes nothing', { root: '/tmp/vs-a', tmpRoots: TMP, force: true }, 'checkout'],
   ['FORCE under a scratch HOME also lifts the override', { root: CO, tmpRoots: TMP, envOverride: true, force: true, home: '/tmp/vs-h' }, 'forced'],
   ['FORCE on a plain checkout changes nothing', { root: CO, tmpRoots: TMP, force: true, home: '/home/u' }, 'checkout'],
   ['FORCE must be a boolean true', { root: '/tmp/vs-a', tmpRoots: TMP, force: '1', home: '/tmp/h' }, 'tmp'],
@@ -195,8 +198,8 @@ console.log('— ⑤ wiring + the words: the status surfaces say the refusal, ne
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const srv = read('server.js'), gen = read('src/server/agent-tool-generators.js'), sync = read('src/server/harness-config-sync.js');
 ok(/rootVerdict\(\{\s*\.\.\.f,\s*tmpRoots: f\.tmpRoots \|\| tmpSpellings\(\),\s*envOverride: process\.env\[serverRoot\.OVERRIDE_ENV\] === '1',\s*force: process\.env\[serverRoot\.FORCE_ENV\] === '1',\s*home: f\.home \|\| os\.homedir\(\),/.test(gen)
-  && /const tmpSpellings = \(\) => \[os\.tmpdir\(\), \.\.\.TMP_ROOTS\];/.test(gen) && /for \(const t of tmpSpellings\(\)\) tmp\.push\(await realOr\(t\)\);\n\s*facts\.tmpRoots = tmp; facts\.home = await realOr\(os\.homedir\(\)\);/.test(gen),
-  "the ORCH reads os.tmpdir() + fixture-guard's TMP_ROOTS, both env flags as booleans, and the real HOME — realpath'd in the facts' own read (B-1425: off the loop)");
+  && gen.includes("const tmpSpellings = () => require('./throwaway-root.js').tmpRootsOf({ home: os.homedir(), realpath: (p) => p });") && !/\bTMP_ROOTS\b/.test(gen) && /for \(const t of tmpSpellings\(\)\) tmp\.push\(await realOr\(t\)\);\n\s*facts\.tmpRoots = tmp; facts\.home = await realOr\(os\.homedir\(\)\);/.test(gen),
+  "the ORCH reads THE one list of temp roots as spelled (src/server/throwaway-root.js tmpRootsOf — B-ba47 shape H r1278), both env flags as booleans, and the real HOME — realpath'd in the facts' own read (B-1425: off the loop)");
 ok(/if \(st\.isDirectory\(\)\) \{ facts\.gitDir = facts\.gitCommonDir = await realOr\(dotGit\); return facts; \}/.test(gen) && /path\.join\(facts\.gitDir, 'commondir'\)/.test(gen) && !/execFileSync\('git'/.test(gen.slice(gen.indexOf('function readRootFacts'), gen.indexOf('function rootVerdict'))),
   'the facts come from fs: .git dir → checkout, .git file → gitdir + commondir (never a git child at boot)');
 ok(/const k = r && !r\.pending \? `\$\{r\.kind\}\|\$\{r\.why\}` : null;\n  if \(k && _refusalSaid !== k\) \{ _refusalSaid = k; console\.log\(r\.line\); \}/.test(gen), 'ONE journal line per refusal: the first refused writer says it, the latch keeps the rest quiet — never spent on «not judged yet» (B-1425 r827)');
@@ -355,13 +358,14 @@ ok(/if \(integrationEnabled\(\)\) hookRootWatch\.sync\(\);/.test(srv) && /if \(!
   // r528 (ruled in): rule 3 of rootVerdict is the same rule — the disk's root as a temp root (the incident's own hub, TMPDIR=/) never
   // makes a person's checkout «kind tmp» (its CLI hooks would never be registered); CONTROL: a real temp root above it still does
   const ck = { root: '/home/u/vibespace', gitCommonDir: '/home/u/vibespace/.git', gitDir: '/home/u/vibespace/.git' };
-  const vRoot = SR.rootVerdict({ ...ck, tmpRoots: ['/', '/tmp'] }), vCtl = SR.rootVerdict({ ...ck, tmpRoots: ['/home', '/tmp'] });
+  const vRoot = SR.rootVerdict({ ...ck, tmpRoots: ['/', '/tmp'], home: '/home/u' }), vCtl = SR.rootVerdict({ ...ck, tmpRoots: ['/home', '/tmp'], home: '/home/u' });   // r1278: the control's home lies under its temp root too
   console.log(`  (rootVerdict with tmpRoots [/, /tmp]: ${vRoot.kind} — ${vRoot.why || 'ok'}; with [/home, /tmp]: ${vCtl.kind})`);
   ok(vRoot.kind !== 'tmp' && vCtl.kind === 'tmp' && vCtl.tmpRoot === '/home', 'B-9dd0 r528: rootVerdict\'s rule 3 never calls a checkout «tmp» for the disk\'s root (TMPDIR=/); CONTROL: a temp root above the checkout still does');
   ok(/const tmp = tmpRootUnder\(\{ root: r, tmpRoots: roots \}\);/.test(fs.readFileSync(path.join(REPO, 'src/server-root.js'), 'utf8')), 'B-9dd0 r528: rule 3 IS tmpRootUnder (one rule, no second spelling)');
   const ops = fs.readFileSync(path.join(REPO, 'src/server/ops-routes.js'), 'utf8'), rb = fs.readFileSync(path.join(REPO, 'src/server/runtime-boot.js'), 'utf8');
-  ok(/tmpRootUnder\(\{ root: rootDir, realRoot: r, tmpRoots: absTmp\(\), realTmps: real \}\)/.test(ops) && /\.\.\.absTmp\(\)\.map\(realOr\)/.test(ops) && /SR\.tmpRootUnder\(\{ root: path\.resolve\(rootDir\), realRoot, tmpRoots: abs, realTmps \}\)/.test(rb) && /const abs = tmpRoots\.filter\(\(t\) => typeof t === 'string' && path\.isAbsolute\(t\)\);/.test(rb) && !/startsWith\(path\.resolve\(t\)/.test(rb),
-    'B-9dd0: the update check and the boot\'s runtime check both ask tmpRootUnder (one verdict, no second spelling)');
+  ok(/throwaway = \(\) => require\('\.\/throwaway-root\.js'\)\.throwaway\(rootDir\)/.test(ops) && /throwaway\(\) === false \? null/.test(ops) && /throwawayOf = \(r\) => require\('\.\/throwaway-root\.js'\)\.throwaway\(r\)/.test(rb) && /throwawayOf\(rootDir\) === false/.test(rb)
+    && !/tmpRootUnder/.test(ops) && !/tmpRootUnder/.test(rb),
+    'B-9dd0 → B-ba47 shape H (主开发 r1278: rule 3 asks THE ONE TEST): the update check and the boot\'s runtime check both ask src/server/throwaway-root.js throwaway — one verdict for every gate, no second spelling; only a judged «false» is online');
 }
 
 // ── ⑧ B-1425 (主开发 r640 / r647): THE ROOT FACTS OFF THE HUB'S LOOP — LAW 1 (one read in flight, ever), LAW 2 (who waits) ──
@@ -599,5 +603,61 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
   clearInterval(keep8);
 }
 
+
+// ── B-ba47 shape H, 主开发 r1278 ── (1) RULE 3 ASKS THE ONE TEST — THE ROW EITHER WAY: over real layouts, the boot's runtime check
+// (the update check's own verdict) is ARMED exactly when the one test says REAL, and never for a throwaway one: a linked worktree
+// anywhere and a temp root handed a temp home are offline; a person's own clone under a temp root, run with their own home, is a
+// real hub and asks (the incident's second half). RED at the tip before this move: there the check judged the place alone.
+// (2) THE LAW: the owner's production hub — a clone, its own data folder, started by the service — is never judged throwaway by
+// any input it can be handed: a temp variable at the disk's root, relative, above its checkout or holding its home; no home; a
+// symlinked checkout; a .git that cannot be read (no answer is never «throwaway»); an env name a parent left.
+{
+  const TR = require(path.join(REPO, 'src/server/throwaway-root.js')), RB = require(path.join(REPO, 'src/server/runtime-boot.js'));
+  const L = fs.mkdtempSync(path.join('/tmp', 'vs-srvroot-h-')); process.on('exit', () => { try { fs.chmodSync(path.join(L, 'locked'), 0o700); } catch { } try { fs.rmSync(L, { recursive: true, force: true }); } catch { } });
+  const T = path.join(L, 'tmpA'), OUT = path.join(L, 'out'), PERSON = '/home/vs-srvroot-person-nonexistent';
+  const mkClone = (d) => { fs.mkdirSync(path.join(d, '.git'), { recursive: true }); return d; };
+  const mkWt = (d) => { const gd = path.join(L, 'common', '.git', 'worktrees', path.basename(d)); fs.mkdirSync(gd, { recursive: true }); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(gd, 'commondir'), '../..\n'); fs.writeFileSync(path.join(d, '.git'), `gitdir: ${gd}\n`); return d; };
+  fs.mkdirSync(path.join(T, 'home'), { recursive: true }); fs.mkdirSync(OUT, { recursive: true });
+  // a tree before r1278 has no tmpRootsOf: its own list is read instead, so its rows run and say by name where it differs
+  const rootsOf = TR.tmpRootsOf || (() => TR.tmpRoots());
+  const roots = rootsOf({ fixed: [T], tmpdir: '/' });   // THE TEMP ROOTS of this table: tmpA alone (the lane's own /tmp is «outside» here)
+  const rows = [
+    ['a linked worktree OUTSIDE every temp root, a person\'s home (a lane\'s hub never calls out)', mkWt(path.join(OUT, 'wt1')), PERSON, true],
+    ['a linked worktree under a temp root, a temp home', mkWt(path.join(T, 'wt2')), path.join(T, 'home'), true],
+    ['a scratch clone under a temp root, a temp home (a suite\'s hub)', mkClone(path.join(T, 'clone3')), path.join(T, 'home'), true],
+    ['a person\'s CLONE under a temp root, their OWN home — a real hub: its update check works', mkClone(path.join(T, 'clone4')), PERSON, false],
+    ['a person\'s clone outside every temp root', mkClone(path.join(OUT, 'clone5')), PERSON, false],
+  ];
+  for (const [what, root, home, want] of rows) {
+    const j = TR.judge(root, home, { roots }), v = await RB.runtimeCheckArmed({ rootDir: root, env: {}, throwawayOf: (r) => TR.judge(r, home, { roots }).throwaway });
+    ok(j.throwaway === want && v.armed === !want, `r1278 THE ROW EITHER WAY — ${what}: the one test ${j.throwaway ? 'THROWAWAY (' + j.rootVerdict.kind + ')' : 'REAL'}, the runtime check ${v.armed ? 'ARMED' : 'off'}`, { kind: j.rootVerdict.kind, armed: v.armed, why: v.why });
+  }
+  // (2) THE LAW: a production-shaped clone outside every temp root, each input it can be handed
+  const PROD = mkClone(path.join(OUT, 'vibespace')), LINK = path.join(T, 'linked-checkout'); fs.symlinkSync(PROD, LINK);
+  const locked = path.join(L, 'locked'), BAD = path.join(OUT, 'unreadable'); fs.mkdirSync(path.join(locked, 'gd'), { recursive: true }); fs.mkdirSync(BAD, { recursive: true });
+  fs.writeFileSync(path.join(BAD, '.git'), `gitdir: ${path.join(locked, 'gd')}\n`); fs.chmodSync(locked, 0o000);
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+  const LAW = [
+    ['a temp variable set to the disk\'s root (TMPDIR=/)', PROD, PERSON, { tmpdir: '/' }],
+    ['a RELATIVE temp variable (TMPDIR=.) — never resolved to the hub\'s own folder', PROD, PERSON, { tmpdir: '.' }],
+    ['a temp variable ABOVE the checkout (TMPDIR=its parent)', PROD, PERSON, { tmpdir: OUT }],
+    ['a temp variable that HOLDS the home (TMPDIR=/home)', PROD, PERSON, { tmpdir: '/home' }],
+    ['no home handed (HOME unset)', PROD, undefined, { tmpdir: OUT }],
+    ['the disk\'s root as its home', PROD, '/', { tmpdir: OUT }],
+    ['a SYMLINKED checkout: spelled under a temp root, it lies outside', LINK, PERSON, {}],
+    ['a .git that cannot be read (no answer is never «throwaway»)', BAD, PERSON, { tmpdir: OUT }],
+  ];
+  for (const [what, root, home, o] of LAW) {
+    const r = rootsOf({ fixed: [T], home, realpath: real, ...o }), j = TR.judge(root, home, { roots: r });
+    ok(j.throwaway === false && !r.includes('/') && r.every((t) => t.startsWith('/')), `r1278 THE LAW — the production hub is never throwaway: ${what} ⇒ ${j.rootVerdict.kind}`, { roots: r, kind: j.rootVerdict.kind, why: j.rootVerdict.why });
+  }
+  { // an env name a parent left: the one test reads HOME, the temp variable and VIBESPACE_REAL_INSTALL alone — nothing else it is handed
+    const child = execFileSync(process.execPath, ['-e', `process.stdout.write(String(require(${JSON.stringify(path.join(REPO, 'src/server/throwaway-root.js'))}).throwaway(${JSON.stringify(PROD)})))`],
+      { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: PERSON, TMPDIR: '/', VIBESPACE_FORCE_AGENT_HOOKS: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_REAL_INSTALL: '0', VIBESPACE_API: 'http://127.0.0.1:1', NODE_ENV: 'test' } });
+    ok(child === 'false', 'r1278 THE LAW — env names a parent left (the hook switches, an override that is not «1», a conversation\'s address) make the production hub nothing but real', child);
+  }
+  const rf = fs.readFileSync(path.join(REPO, 'src/server/root-facts.js'), 'utf8');
+  ok(!/['"`]data['"`]|dataDir/.test(rf), 'r1278 THE LAW — the one test reads the root\'s .git alone: no data folder (a slow or silent mount there answers nothing it asks)');
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

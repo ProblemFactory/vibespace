@@ -2,7 +2,7 @@
 // B-ba47 shape H — THE GUARD (fast; in-process + node children). 主开发's GO 2026-11-14 16:52Z on the second page, re-landed on
 // pick B's BUILT env 2026-11-21 (主开发 r1222: the hub's rows = the suite's + its own knobs, derived; THE BOUND ③ below):
 // a hub is THROWAWAY by ONE test (src/server-root.js isThrowaway over the root verdict: a LINKED WORKTREE, or a copy under a
-// temp root — rule 3, B-9dd0 r528, until the coordinator rules whether it asks the handed home too), and RE-HOMED at the boot's
+// temp root handed a temp home — every gate asks it, rule 3 too: 主开发 r1278), and RE-HOMED at the boot's
 // first act (src/server/runtime-boot.js → src/server/throwaway-root.js rehomeAtBoot) only on the worktree sign, by
 // src/home-verdict.js's verdict and value rule over the hub's rows.
 //   ① the boot in REAL children over real git layouts (a linked worktree, a clone), handed a POISONED home (a path outside
@@ -10,7 +10,7 @@
 //      (a) a worktree is re-homed to <root>/.home; the boot line names its own home, the two doors, the NAMES dropped —
 //          no path of the handed home; ssh's agent socket dropped for a hub; nothing of the home read at require time;
 //          the boot's touches of it are the two named ones (its other spelling; the tool probes in dropped PATH dirs)
-//      (b) a person's CLONE under a temp root, their own home: NOT re-homed (its gates rule 3's until the ruling)
+//      (b) a person's CLONE under a temp root, their own home: NOT re-homed and NOT throwaway — real for every gate
 //      (c) a clone under a temp root handed a temp home (a test's scratch clone): throwaway for every gate, not re-homed
 //      (d) an installed root: real, nothing touched   (e) a worktree with VIBESPACE_REAL_INSTALL=1: real, printed
 //   ② THE NAMED EXCEPTIONS: every passwd read in the product — src, server.js, data/bin's .js files AND its extensionless
@@ -126,8 +126,8 @@ const NOT_CARRIED = ['CLAUDE_CONFIG_DIR', 'CLAUDE_WEBUI_PORT', 'SSH_AUTH_SOCK', 
 { // (b) a person's CLONE under a temp root, their own home
   const root = mkClone('clone-b');
   const j = bootIn(root, { HOME: POISON });
-  ok(j.verdict && j.verdict.rehome === false && j.verdict.why === 'not-worktree' && j.throwaway === true && j.home === POISON && !fs.existsSync(path.join(root, '.home')) && !tline(j),
-    "(b) a person's CLONE under a temp root, run with their own home, is NOT re-homed — the sign is the worktree, never the place (the readers' REACH-5) — and says nothing; its gates stay rule 3's (B-9dd0 r528: under a temp root ⇒ throwaway) until the coordinator rules whether rule 3 asks the handed home too", j.verdict || j);
+  ok(j.verdict && j.verdict.rehome === false && j.verdict.why === 'not-worktree' && j.throwaway === false && j.home === POISON && !fs.existsSync(path.join(root, '.home')) && !tline(j),
+    "(b) a person's CLONE under a temp root, run with their own home, is NOT re-homed and NOT throwaway — a real hub for every gate, rule 3 too (主开发 r1278), silently (the readers' REACH-5)", j.verdict || j);
 }
 { // (c) a test's scratch clone: under a temp root, handed a temp home
   const root = mkClone('clone-c'), tmpHome = path.join(DIR, 'suite-home');

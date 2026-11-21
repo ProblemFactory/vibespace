@@ -87,30 +87,34 @@ const mut = src.replace('  const low = below(t, tripleOf(row.floor));', '  const
 const red = run(M.load('src/runtime-floor.js', mut, 'lexical')).filter(([, s, w, ws, ww]) => s !== ws || w !== ww);
 ok(mut !== src && red.some(([n]) => n.startsWith('v22.9.9')), `RED: a copy that compares versions as TEXT reads 22.9.9 as fixed (${red.length} rows red)`, red.map((r) => r[0]));
 
-// B-9dd0 (主开发 r321): THE BOOT'S RUNTIME CHECK (it asks nodejs.org) is armed only for a person's root — never under a suite's
-// switch, NO_AUTO_UPDATE, or a root under a temp folder (src/server-root.js tmpRootUnder over the REAL paths: the update check's
-// verdict); the real paths come from an injected reader here (no disk read)
+// B-9dd0 (主开发 r321) → B-ba47 shape H (主开发 r1278: rule 3 asks THE ONE TEST): THE BOOT'S RUNTIME CHECK (it asks nodejs.org)
+// is armed only for a REAL hub — never under a suite's switch, NO_AUTO_UPDATE, or a THROWAWAY copy (src/server/throwaway-root.js
+// throwaway: the judge is a seam here, no disk read); the temp roots that judge reads are tmpRootsOf's (r468 / r528 below)
 {
   const RB = require(path.join(REPO, 'src/server/runtime-boot.js'));
-  const links = { '/srv/link/wt': '/tmp/real/wt', '.': '/home/u/vibespace' };   // «.» as the hub's cwd would resolve it
-  const real = async (p) => links[p] || p;
-  const T = ['/tmp', '/var/tmp'];
+  const TR = require(path.join(REPO, 'src/server/throwaway-root.js'));
+  const say = (b) => () => b, boom = () => { throw new Error('the judge broke'); };
   const scenes = [
-    ['a person\'s root', { rootDir: '/home/u/vibespace', env: {}, tmpRoots: T }, true],
-    ['a lane worktree under /var/tmp', { rootDir: '/var/tmp/vs-lane/wt', env: {}, tmpRoots: T }, false],
-    ['/var/tmpfoo (not under /var/tmp)', { rootDir: '/var/tmpfoo/wt', env: {}, tmpRoots: T }, true],
-    ['a root reached through a link into /tmp', { rootDir: '/srv/link/wt', env: {}, tmpRoots: T }, false],
-    ['a suite\'s hub (VS_NO_REAL_CLI=1)', { rootDir: '/home/u/vibespace', env: { VS_NO_REAL_CLI: '1' }, tmpRoots: T }, false],
-    ['NO_AUTO_UPDATE', { rootDir: '/home/u/vibespace', env: { NO_AUTO_UPDATE: '1' }, tmpRoots: T }, false],
-    ['RED CONTROL: the same /var/tmp root with /var/tmp left out of the list', { rootDir: '/var/tmp/vs-lane/wt', env: {}, tmpRoots: ['/tmp'] }, true],
-    ['r468: a temp folder variable set to the disk\'s root (TMPDIR=/) — a person\'s root stays armed', { rootDir: '/home/u/vibespace', env: {}, tmpRoots: ['/', '/tmp', '/var/tmp'] }, true],
-    ['r528: a RELATIVE temp spelling (TMPDIR=.) is never resolved — the hub\'s own folder stays armed', { rootDir: '/home/u/vibespace', env: {}, tmpRoots: ['.', '/tmp', '/var/tmp'] }, true],
+    ['a REAL hub (the one test says false)', { rootDir: '/home/u/vibespace', env: {}, throwawayOf: say(false) }, true],
+    ['a THROWAWAY copy (the one test says true: a lane\'s worktree)', { rootDir: '/var/tmp/vs-lane/wt', env: {}, throwawayOf: say(true) }, false],
+    ['a suite\'s hub (VS_NO_REAL_CLI=1), even a real one', { rootDir: '/home/u/vibespace', env: { VS_NO_REAL_CLI: '1' }, throwawayOf: say(false) }, false],
+    ['NO_AUTO_UPDATE, even a real one', { rootDir: '/home/u/vibespace', env: { NO_AUTO_UPDATE: '1' }, throwawayOf: say(false) }, false],
+    ['a judge that THROWS is never armed (no throwaway hub online on a guess)', { rootDir: '/home/u/vibespace', env: {}, throwawayOf: boom }, false],
+    ['a judge that answers anything but false is never armed', { rootDir: '/home/u/vibespace', env: {}, throwawayOf: say(undefined) }, false],
   ];
   for (const [what, arg, want] of scenes) {
-    const v = await RB.runtimeCheckArmed({ ...arg, realpath: real });
-    ok(v.armed === want, `B-9dd0 the boot's runtime check — ${what}: ${v.armed ? 'ARMED' : 'off (' + v.why + ')'}`, JSON.stringify(v));
+    const v = await RB.runtimeCheckArmed(arg).catch((e) => ({ armed: false, why: `rejected: ${e.message}` }));
+    ok(v.armed === want, `B-9dd0 / r1278 the boot's runtime check — ${what}: ${v.armed ? 'ARMED' : 'off (' + v.why + ')'}`, JSON.stringify(v));
   }
-  ok(RB.TMP_ROOTS().includes('/var/tmp') && RB.TMP_ROOTS().includes('/tmp'), `B-9dd0 the boot judges /tmp and /var/tmp beside os.tmpdir() (${RB.TMP_ROOTS().join(', ')})`);
+  // r468 / r528, now the one test's temp roots (tmpRootsOf, PURE over its inputs; the real paths from an injected reader)
+  const links = { '/srv/tmp-link': '/', '/srv/tmp-real': '/scratch/t' }, real = (p) => links[p] || p;
+  const R = (o) => TR.tmpRootsOf({ fixed: ['/tmp', '/var/tmp'], realpath: real, ...o });
+  const has = (r, t) => r.includes(t);
+  ok(!has(R({ tmpdir: '/' }), '/') && has(R({ tmpdir: '/' }), '/tmp'), `r468: a temp folder variable set to the disk's root (TMPDIR=/) is never a temp root (${R({ tmpdir: '/' }).join(', ')})`);
+  ok(R({ tmpdir: '.' }).every((t) => t.startsWith('/')) && !R({ tmpdir: '.' }).some((t) => t === process.cwd()), `r528: a RELATIVE temp spelling (TMPDIR=.) is never resolved — the hub's own folder is never a temp root (${R({ tmpdir: '.' }).join(', ')})`);
+  ok(!has(R({ tmpdir: '/srv/tmp-link' }), '/') && !has(R({ tmpdir: '/srv/tmp-link' }), '/srv/tmp-link') && has(R({ tmpdir: '/srv/tmp-real' }), '/scratch/t') && has(R({ tmpdir: '/srv/tmp-real' }), '/srv/tmp-real'), 'r468: …nor a temp variable whose REAL path is the disk\'s root (neither spelling counts); a real path beside its spelling counts');
+  ok(!has(R({ tmpdir: '/home', home: '/home/u' }), '/home') && !has(R({ tmpdir: '/home/u', home: '/home/u' }), '/home/u') && has(R({ tmpdir: '/scratch/t', home: '/home/u' }), '/scratch/t'),
+    'r1278: the temp VARIABLE\'s folder never counts when it holds the handed home (TMPDIR=$HOME or above it); a folder beside it does');
   const bootSrc = fs.readFileSync(path.join(REPO, 'src/server/runtime-boot.js'), 'utf8');
   const bootFn = bootSrc.slice(bootSrc.indexOf('function boot('), bootSrc.indexOf('const answer ='));
   ok(/runtimeCheckArmed\(\{ rootDir, env \}\)\.then\(\(v\) => \{ if \(!v\.armed\) \{ log\(`[^`\n]*`\); return; \} const t = setTimeout\(/.test(bootFn) && (bootFn.match(/setTimeout\(/g) || []).length === 1,

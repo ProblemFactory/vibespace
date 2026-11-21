@@ -14,23 +14,19 @@ const path = require('path');
 const { spawn } = require('child_process');
 const RF = require('../runtime-floor');
 const NR = require('../node-runtime');
-const SR = require('../server-root.js');
 
-// B-9dd0: the temp roots the boot's runtime check judges (the update check's own list, src/server/ops-routes.js)
-const TMP_ROOTS = () => [require('os').tmpdir(), '/tmp', '/var/tmp'];
-/** B-9dd0 (主开发 r321): is the boot's runtime check ARMED for this root? It asks nodejs.org, so never under a suite
- *  (VS_NO_REAL_CLI=1 — the test machines, a suite's scratch hub), never with NO_AUTO_UPDATE, never for a root under a temp
- *  folder (the lanes' /var/tmp worktrees too) — judged by src/server-root.js tmpRootUnder over the REAL paths, the update
- *  check's own verdict. The switches are read at the call (before any await). → Promise<{armed, why}> */
-function runtimeCheckArmed({ rootDir, env = process.env, tmpRoots = TMP_ROOTS(), realpath = (p) => require('fs').promises.realpath(p).catch(() => p) } = {}) {
+/** B-9dd0 (主开发 r321) → B-ba47 shape H (主开发 r1278: rule 3 asks THE ONE TEST): is the boot's runtime check ARMED for this root?
+ *  It asks nodejs.org, so never under a suite (VS_NO_REAL_CLI=1 — the test machines, a suite's scratch hub), never with
+ *  NO_AUTO_UPDATE, never for a THROWAWAY copy (src/server/throwaway-root.js throwaway: a linked worktree wherever it sits — a lane's
+ *  hub never calls out — or a temp root handed a temp home). A person's own clone under a temp root, run with their own home, is
+ *  a real hub: armed. The temp roots it is judged against are tmpRootsOf's (r468 / r528: absolute, never the disk's root).
+ *  The switches are read at the call; a judge that throws is never «armed». → Promise<{armed, why}> */
+function runtimeCheckArmed({ rootDir, env = process.env, throwawayOf = (r) => require('./throwaway-root.js').throwaway(r) } = {}) {
   if (env.NO_AUTO_UPDATE) return Promise.resolve({ armed: false, why: 'NO_AUTO_UPDATE' });
   if (env.VS_NO_REAL_CLI === '1') return Promise.resolve({ armed: false, why: 'VS_NO_REAL_CLI=1' });
-  // only ABSOLUTE temp spellings are resolved: a relative one («.», TMPDIR=.) would resolve to the hub's own folder (主开发 r528)
-  const abs = tmpRoots.filter((t) => typeof t === 'string' && path.isAbsolute(t));
-  return Promise.all([realpath(rootDir), ...abs.map((t) => realpath(t))]).then(([realRoot, ...realTmps]) => {
-    const t = SR.tmpRootUnder({ root: path.resolve(rootDir), realRoot, tmpRoots: abs, realTmps });
-    return t ? { armed: false, why: `the root lies under the temp folder ${t}` } : { armed: true, why: null };
-  });
+  return Promise.resolve().then(() => (throwawayOf(rootDir) === false
+    ? { armed: true, why: null }
+    : { armed: false, why: 'a throwaway copy (a linked worktree, or a temp folder handed a temp home)' }));
 }
 
 function create({ rootDir, switched = { state: 'none' }, version = process.version, execPath = process.execPath, log = (l) => console.log(l), spawnFn = spawn } = {}) {
@@ -103,12 +99,12 @@ function boot({ rootDir, env = process.env, log = (l) => console.log(l) } = {}) 
   booted = create({ rootDir, switched, log });
   const said = [TR.bootLine(), TR.unruledLine()].filter(Boolean);   // the unruled names: THE BOUND (主开发 r1222), said once
   setImmediate(() => { log(booted.line()); for (const l of said) log(l); });
-  // B-9dd0: a suite's hub (VS_NO_REAL_CLI=1) or a root under any temp folder never runs the runtime check — it would ask
-  // nodejs.org (runtimeCheckArmed: the update check's own verdict); the timer is set only when armed
+  // B-9dd0 / B-ba47 shape H: a suite's hub (VS_NO_REAL_CLI=1) or a THROWAWAY copy (the one test) never runs the runtime check —
+  // it would ask nodejs.org (runtimeCheckArmed: the update check's own verdict); the timer is set only when armed
   const b = booted;
   runtimeCheckArmed({ rootDir, env }).then((v) => { if (!v.armed) { log(`[runtime] the boot's runtime check is off: ${v.why}`); return; } const t = setTimeout(() => b.afterListen({ autoUpdate: true }), 20000); if (t.unref) t.unref(); }, () => { });
   return booted;
 }
 const answer = () => (booted ? booted.answer() : create({ rootDir: path.resolve(__dirname, '..', '..') }).answer());
 
-module.exports = { create, boot, answer, runtimeCheckArmed, TMP_ROOTS };
+module.exports = { create, boot, answer, runtimeCheckArmed };

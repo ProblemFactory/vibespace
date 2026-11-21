@@ -130,7 +130,7 @@ ok(planted !== pi && red.some((l) => /plugin-install\.js: 1 fetch\(\) site/.test
     delete process.env.VIBESPACE_CHANGELOG_FIXTURE_DIR;
     globalThis.fetch = async (u) => { asked.push(String(u)); return { ok: true, status: 200, text: async () => JSON.stringify({ version: '9.9.9' }) }; };
     const OPS = require(path.join(REPO, 'src/server/ops-routes.js'));
-    const ops = OPS.create({ app, rootDir: root, wss: { clients: new Set() }, WS_OPEN: 1, tmpRoots: [] });   // the flag alone decides here
+    const ops = OPS.create({ app, rootDir: root, wss: { clients: new Set() }, WS_OPEN: 1, throwaway: () => false });   // a REAL hub by the one test: the flag alone decides here
     ops.versionInfo.commit = '';   // the scratch root is no checkout: no git asked
     const version = async () => { let out = null; await routes['GET /api/version']({ query: { fresh: '1' } }, { json: (o) => { out = o; } }); return out; };
     process.env.VS_NO_REAL_CLI = '1';
@@ -140,21 +140,28 @@ ok(planted !== pi && red.some((l) => /plugin-install\.js: 1 fetch\(\) site/.test
     const on = await version();
     ok(offAsked === 0 && off && off.version === '1.0.0' && off.latest === null, `B-9dd0: under VS_NO_REAL_CLI=1 the update check answers offline and asks nothing (${offAsked} request(s), latest ${off && off.latest})`);
     ok(asked.length === 1 && /^https:\/\/raw\.githubusercontent\.com\//.test(asked[0]) && on && on.latest === '9.9.9', `CONTROL B-9dd0: the flag unset, the same route asks the canonical repo once (red without the guard): ${JSON.stringify(asked)}`);
-    // …and a hub whose ROOT lies under a temp root (every suite's scratch hub, the flag set or not) asks nothing either
+    // …and a THROWAWAY hub (the one test, B-ba47 shape H r1278: every suite's scratch hub and every lane's worktree hub, the flag set or not) asks nothing either
     const routes2 = {}; const app2 = { get: (p, h) => { routes2['GET ' + p] = h; }, post: () => {} };
-    const ops2 = OPS.create({ app: app2, rootDir: root, wss: { clients: new Set() }, WS_OPEN: 1, tmpRoots: [path.dirname(root)] });
+    const ops2 = OPS.create({ app: app2, rootDir: root, wss: { clients: new Set() }, WS_OPEN: 1, throwaway: () => true });
     ops2.versionInfo.commit = '';
     const before = asked.length; let out2 = null;
     await routes2['GET /api/version']({ query: { fresh: '1' } }, { json: (o) => { out2 = o; } });
-    ok(asked.length === before && out2 && out2.latest === null, `B-9dd0: a hub rooted under a temp root answers offline without the flag (${asked.length - before} request(s))`);
-    // B-9dd0 cure (the readers, 08:54Z): the root is judged as rule 3's real caller judges it — REALPATH'd — so a root reached
-    // through a LINK into a temp root is one too (red without the cure: its literal path lies outside that root); the first
+    ok(asked.length === before && out2 && out2.latest === null, `B-9dd0 / r1278: a hub the one test calls THROWAWAY answers offline without the flag (${asked.length - before} request(s))`);
+    // …and a judge that THROWS never lets the hub online (no throwaway hub online on a guess)
+    const routes2b = {}; const app2b = { get: (p, h) => { routes2b['GET ' + p] = h; }, post: () => {} };
+    const ops2b = OPS.create({ app: app2b, rootDir: root, wss: { clients: new Set() }, WS_OPEN: 1, throwaway: () => { throw new Error('the judge broke'); } });
+    ops2b.versionInfo.commit = ''; const before2b = asked.length; let out2b = null; const log2 = console.log; console.log = () => {};
+    try { await routes2b['GET /api/version']({ query: { fresh: '1' } }, { json: (o) => { out2b = o; } }); } finally { console.log = log2; }
+    ok(asked.length === before2b && out2b && out2b.latest === null, `r1278: a judge that THROWS answers offline, never online on a guess (${asked.length - before2b} request(s))`);
+    // B-9dd0 cure (the readers, 08:54Z) → r1278: the root is judged by THE ONE TEST — REALPATH'd there — so a scratch hub reached
+    // through a LINK into a temp root (handed a temp home) is throwaway too (its literal path lies outside that root); the first
     // offline answer says why in ONE journal line
     const T = path.join(root, 'troot'), L = path.join(root, 'link');   // inside this leg's own root (removed below)
     fs.mkdirSync(path.join(T, 'hub'), { recursive: true }); fs.mkdirSync(L); fs.writeFileSync(path.join(T, 'hub', 'package.json'), JSON.stringify({ version: '1.0.0' }));
     fs.symlinkSync(path.join(T, 'hub'), path.join(L, 'hub'));
     const routes3 = {}; const app3 = { get: (p, h) => { routes3['GET ' + p] = h; }, post: () => {} };
-    const ops3 = OPS.create({ app: app3, rootDir: path.join(L, 'hub'), wss: { clients: new Set() }, WS_OPEN: 1, tmpRoots: [T] });
+    const TRm = require(path.join(REPO, 'src/server/throwaway-root.js')); fs.mkdirSync(path.join(T, 'home'), { recursive: true });
+    const ops3 = OPS.create({ app: app3, rootDir: path.join(L, 'hub'), wss: { clients: new Set() }, WS_OPEN: 1, throwaway: () => TRm.judge(path.join(L, 'hub'), path.join(T, 'home'), { roots: [T] }).throwaway });
     ops3.versionInfo.commit = '';
     const said = [], log0 = console.log, before3 = asked.length; let out3 = null, out3b = null;
     console.log = (...a) => { said.push(a.join(' ')); };
@@ -165,7 +172,7 @@ ok(planted !== pi && red.some((l) => /plugin-install\.js: 1 fetch\(\) site/.test
     } finally { console.log = log0; }
     const lines3 = said.filter((l) => l.startsWith('[version]'));
     ok(asked.length === before3 && out3 && out3.latest === null && out3b && out3b.latest === null, `B-9dd0 cure: a root reached through a LINK into a temp root is judged by its real path and asks nothing (${asked.length - before3} request(s); its literal path lies outside ${T})`);
-    ok(lines3.length === 1 && lines3[0].includes(T) && /rule 3/.test(lines3[0]), `B-9dd0 cure: the first offline answer says why in ONE journal line, the second says nothing (${JSON.stringify(lines3)})`);
+    ok(lines3.length === 1 && lines3[0].includes(path.join(L, 'hub')) && /a throwaway copy/.test(lines3[0]), `B-9dd0 cure: the first offline answer says why in ONE journal line, the second says nothing (${JSON.stringify(lines3)})`);
   } finally {
     globalThis.fetch = prev.fetch;
     if (prev.flag === undefined) delete process.env.VS_NO_REAL_CLI; else process.env.VS_NO_REAL_CLI = prev.flag;

@@ -62,7 +62,7 @@ try { require('./src/opslog').setupOpslog(require('./package.json').version); } 
 // turn, right after update.sh had pulled; it is gone with its module. NO_AUTO_UPDATE (the images) still turns off the boot's
 // runtime check (src/server/runtime-boot.js, a child 20 s after listen); «a newer version exists» is GET /api/version (the gear
 // menu's vX → vY), which never applies anything.
-// A THROWAWAY server — B-ba47 shape H's ONE test (src/server/throwaway-root.js, decided at the boot's first act): a linked worktree, or a root under a temp root
+// A THROWAWAY server — B-ba47 shape H's ONE test (src/server/throwaway-root.js, decided at the boot's first act): a linked worktree, or a temp root handed a temp home
 const throwawayRoot = require('./src/server/throwaway-root.js').throwaway(__dirname);
 
 const PORT = process.env.PORT || 3456;
