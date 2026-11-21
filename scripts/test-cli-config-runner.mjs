@@ -154,6 +154,23 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
     const kAfter = JSON.parse(fs.readFileSync(sf, 'utf8'));
     ok(stK.installed === true && stK.stale === false && rk.claude && rk.claude.ok === true && ['SessionStart', 'UserPromptSubmit', 'Stop'].every((ev) => cmdOf(kAfter, ev) === keptCmd) && !said.some((l) => l.startsWith('Hook command rewritten')),
       '(d) a kept spelling reads installed (the check starts nothing for it), and a registration over it keeps it, rewrites nothing and reads ok', { stK, rk, said });
+    // THE REMOVAL (the Integration switch off, «Remove hooks»): the helper's --uninstall strips ONLY our entries, never a managed key
+    const HC2 = require(path.join(REPO, 'src/harness-config.js'));
+    const oursIn = (root) => Object.values((root && root.hooks) || {}).some((gs) => (gs || []).some((g) => (g.hooks || []).some((h) => String(h && h.command).includes(HC2.HOOK_MARKER))));
+    const notHooks = (root) => Object.fromEntries(Object.entries(flat(root)).filter(([key]) => !key.startsWith('hooks.')));
+    const stripLeg = async (S) => {
+      await SYNC.applyThisMachine({ reason: 'boot' });   // our entries in place first (the real road)
+      const was = JSON.parse(fs.readFileSync(sf, 'utf8'));
+      const l = await S.applyThisMachine({ reason: 'hooks removed', strip: true });
+      const now = JSON.parse(fs.readFileSync(sf, 'utf8'));
+      return { ok: l.ok, had: oursIn(was), left: oursIn(now), others: JSON.stringify(notHooks(was)) === JSON.stringify(notHooks(now)) };
+    };
+    const sl = await stripLeg(SYNC);
+    ok(sl.ok && sl.had && !sl.left && sl.others, 'the REMOVAL through the helper (--uninstall): our entries gone, every other key of the file as it was (the managed key included)', sl);
+    const SM = require(MC.write(SYNC_REL, anchored(src(SYNC_REL), 'planFor({ hooks: strip ? true : hooks })', 'planFor({ hooks: strip ? false : hooks })', 'a strip plan without its hook rows'), 'strip-no-hooks'));
+    const mkS = (M) => M.create({ serverSetting: () => undefined, harnesses: require(path.join(REPO, 'src/harnesses/index.js')), adapterRegistry: { get: () => null }, activeSessions: new Map(), hookRegistrationSafe: () => true, home, helperPath: path.join(genRoot, 'data', 'bin', 'vibespace-hook-register.mjs'), starter, hooksWanted: () => true, log: () => {}, warn: () => {} });
+    const slm = await stripLeg(mkS(SM));
+    ok(slm.had && slm.left, 'RED (a strip plan without its hook rows — this line\'s first build): the removal «lands» and strips nothing', slm);
     const SJ = src('server.js'), hc = SJ.slice(SJ.indexOf('function checkAgentHookHealth()'), SJ.indexOf('function checkAgentHookHealth()') + 1600);
     ok(/if \(info\.stale \|\| !info\.installed \|\| scriptMissing\) \{[\s\S]*?ensureAgentHooks\(\{ auto: true \}\)/.test(hc) && (hc.match(/ensureAgentHooks\(/g) || []).length === 1,
       'WIRING (d): the six-hourly check asks the helper only inside «stale, not installed, or the hook script missing»');

@@ -136,7 +136,8 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
   /** THE ONE WRITE ROAD of this machine's CLI config → Promise<landing> ({ ok, receipts, created, why } | a refusal) */
   function applyThisMachine({ reason = 'apply', hooks = hooksWanted(), strip = false } = {}) {
     if (!cliRunner) return Promise.resolve({ ok: false, receipts: [], created: [], why: 'no helper road on this server (no helper path given): nothing written' });
-    return cliRunner.apply(() => encodePlan(planFor({ hooks: strip ? false : hooks })), reason, { uninstall: strip });
+    // a STRIP keeps the plan's hook rows: the applier's --uninstall strips only the files whose plan names our hooks (never a managed key)
+    return cliRunner.apply(() => encodePlan(planFor({ hooks: strip ? true : hooks })), reason, { uninstall: strip });
   }
   /** THE SPAWN GATE (r1407 (a)): null when this machine's config has landed (or nothing was asked: a refused or skipped
    *  server), else { late | failed, why } once the bound passes — the start goes on either way and says it once. A failed

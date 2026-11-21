@@ -2593,15 +2593,15 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const HCREL = 'src/server/harness-config-sync.js', HCSRC = fs.readFileSync(path.join(REPO, HCREL), 'utf8');
       const SYMH = Symbol.for('vibespace.settings-held');
       let cliHomes = 0;
-      const syncRun = (M) => { const lines = []; const m = M.create({ serverSetting: (k) => (k === SYMH ? { kind: 'unreadable', code: 'EIO' } : undefined), harnesses: { list: () => [], get: () => null }, adapterRegistry: new Map(), activeSessions: new Map(), hookRegistrationSafe: () => false, home: (() => { const d = scratchDir('swc-cli-home-' + (++cliHomes)); roots.push(d); return d; })(), log: (l) => lines.push(String(l)), warn: (l) => lines.push(String(l)) }); let r; try { r = m.syncCliConfig({ reason: 'boot' }); } catch (e) { r = { threw: e.message }; } return { r, lines }; };
-      const sr = syncRun(require(path.join(REPO, HCREL)));
+      const syncRun = async (M) => { const lines = []; const m = M.create({ serverSetting: (k) => (k === SYMH ? { kind: 'unreadable', code: 'EIO' } : undefined), harnesses: { list: () => [], get: () => null }, adapterRegistry: new Map(), activeSessions: new Map(), hookRegistrationSafe: () => false, home: (() => { const d = scratchDir('swc-cli-home-' + (++cliHomes)); roots.push(d); return d; })(), log: (l) => lines.push(String(l)), warn: (l) => lines.push(String(l)) }); let r; try { r = await m.syncCliConfig({ reason: 'boot' }); } catch (e) { r = { threw: e.message }; } return { r, lines }; };   // B-ddf3 unit 2 line 1: the sync answers a Promise
+      const sr = await syncRun(require(path.join(REPO, HCREL)));
       ok(!!sr.r && sr.r.skipped === true && !!sr.r.settingsHeld && sr.r.settingsHeld.kind === 'unreadable' && sr.lines.some((l) => /no CLI config is written until they read/.test(l)),
         '⑪ (j) the CLI-config sync writes NOTHING while the settings are held (said once in the journal) — the person\'s own CLI files are never written on values that are not theirs', sr);
-      const HC_A = "    if (held) { log(`[cli-config] skipped (${reason}): the settings could not be read (${held.kind}${held.code ? ', ' + held.code : ''}) — no CLI config is written until they read`); return { skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }; }";
-      const srx = syncRun(mutantCopies('swc-cli-held', REPO).load(HCREL, anchored(HCSRC, HC_A, '', 'cli-held-cut'), 'cli-held-cut'));
+      const HC_A = "    if (held) { log(`[cli-config] skipped (${reason}): the settings could not be read (${held.kind}${held.code ? ', ' + held.code : ''}) — no CLI config is written until they read`); return Promise.resolve({ skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }); }";
+      const srx = await syncRun(mutantCopies('swc-cli-held', REPO).load(HCREL, anchored(HCSRC, HC_A, '', 'cli-held-cut'), 'cli-held-cut'));
       ok(!!srx.r && !srx.r.settingsHeld && !!srx.r.refused, 'CONTROL (the sync\'s held guard cut, in a copy): the sync goes PAST the hold to its next gate (here the copy\'s own refusal stops it before any file; a hub would write the CLI configs on rows that are not the person\'s) — red', srx.r);
       const AG = fs.readFileSync(path.join(REPO, 'src/server/agent-tool-generators.js'), 'utf8');
-      ok(/const held = settingsHeldNow\(\);\n  if \(held\) \{ replayAtLift\(\); return \{ skipped: true, settingsHeld:/.test(AG) && /function stripAgentHookEntries\(\) \{\n  if \(refuseOwnerWrite\(\)\) return;[^\n]*\n  if \(settingsHeldNow\(\)\) return;/.test(AG),
+      ok(/const held = settingsHeldNow\(\);\n  if \(held\) \{ replayAtLift\(\); return Promise\.resolve\(\{ skipped: true, settingsHeld:/.test(AG) && /function stripAgentHookEntries\(\) \{\n  if \(refuseOwnerWrite\(\)\) return Promise\.resolve\(null\);[^\n]*\n  if \(settingsHeldNow\(\)\) return Promise\.resolve\(null\);/.test(AG),
         '⑪ (j) the hooks: neither registered nor stripped while the settings are held (the person\'s ~/.claude and ~/.codex configs untouched), the registration replayed at the lift by the person\'s own switch (a pin: the writers need a real home)');
       // (k) A PERSON'S REFUSED ACT IS SAID AT THE PRESS (主开发 r552): while the settings are held Manage Agents' «Apply» (POST
       // /api/cli-config/apply, src/server/hooks-late.js — DRIVEN, both readings of the switch) and «Install» (POST
@@ -2637,7 +2637,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         const inst = SV.slice(SV.indexOf("app.post('/api/agent-hooks/install'"), SV.indexOf("app.post('/api/agent-hooks/install'") + 2400);
         const INST_HOLD = /\{ const sh = typeof persistenceRouter\.settingsHeld === 'function' \? persistenceRouter\.settingsHeld\(\) : null; if \(sh\) return res\.status\(503\)\.json\(\{ error: `the settings could not be read [^\n]*nothing was written`, code: 'store_unread', held: sh \}\); \} if \(!integrationEnabled\(\)\) return res\.status\(400\)/;
         const INST_SKIP = /if \(results\.skipped && results\.settingsHeld\) return res\.status\(503\)\.json\(\{ error: 'the settings could not be read — the hooks were not installed; nothing was written', code: 'store_unread', held: \{ file: 'settings\.json', kind: results\.settingsHeld\.kind/;
-        const HEAL = /const healed = ensureAgentHooks\(\{ auto: true \}\);[^\n]*\n\s*if \(!\(healed && healed\.skipped\) && !hookRootWatch\.saidRecoveryInstead\(info, scriptMissing\)\) serverNotice\(`hook-health-\$\{key\}`,/;
+        const HEAL = /Promise\.resolve\(ensureAgentHooks\(\{ auto: true \}\)\)\.then\(\(healed\) => \{[^\n]*\n\s*if \(!\(healed && healed\.skipped\) && !\(healed && healed\[key\] && healed\[key\]\.ok === false\) && !hookRootWatch\.saidRecoveryInstead\(info, scriptMissing\)\) serverNotice\(`hook-health-\$\{key\}`,/;   // B-ddf3 unit 2 line 1: the heal lands later (the shipped helper)
         const instPin = (t) => INST_HOLD.test(t) && INST_SKIP.test(t);
         ok(instPin(inst) && inst.search(INST_HOLD) < inst.indexOf('createHookHelper();') && HEAL.test(SV),
           '⑪ (k) «Install» while the settings are held answers the hold BY NAME (503 store_unread, the held fact) BEFORE the switch\'s own refusal and before any write; a skip the writer reports is the same answer; the hook health check reads the skip — no «has been repaired» over a write that never ran (pins: server.js is not loaded here)');
@@ -2655,30 +2655,30 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         ok(oldPage !== MA && !PAGE_INST.test(oldPage), 'CONTROL (the pin over the old Install toast): the page that reads only the per-CLI results is red (it said «installed» for a refusal)');
         // the root watch reads the skip: no recovery said, the backoff armed again
         const RWREL = 'src/server/hook-root-watch.js', RWSRC = fs.readFileSync(path.join(REPO, RWREL), 'utf8');
-        const watchSkip = (RW) => {
+        const watchSkip = async (RW) => {
           const d = scratchDir('swc-root-watch-' + (++cliHomes)); roots.push(d);
           const timers = [], memo = path.join(d, RW.MEMO_FILE); fs.writeFileSync(memo, JSON.stringify({ cause: 'an earlier unknown root' }));
           const w = RW.create({ dataDir: d, ensureAgentHooks: () => ({ skipped: true, settingsHeld: { ...HELD } }), rootRecovery: () => ({ registeredAfterError: { at: 0, error: 'EIO' } }), ownerWriteRefusal: () => null, serverNotice: () => 1, setTimer: (fn, ms) => { timers.push(ms); return { unref() { } }; }, log: () => { } });
-          w._state.attempt = 3; w.sync();
+          w._state.attempt = 3; await w.sync();   // B-ddf3 unit 2 line 1: the watch's sync answers at the registration's landing
           return { memoKept: fs.existsSync(memo), said: w._state.said, armed: timers.length, attempt: w._state.attempt };
         };
-        const rw = watchSkip(require(path.join(REPO, RWREL)));
+        const rw = await watchSkip(require(path.join(REPO, RWREL)));
         ok(rw.memoKept && rw.said === false && rw.armed === 1 && rw.attempt === 4, '⑪ (k) the hook-root watch reads a held skip as NOTHING registered: no recovery (the memo kept, no «registered after an earlier read error»), its backoff armed to read again', rw);
-        const RW_A = /^ {4}else if \(r && r\.skipped && r\.settingsHeld\) arm\(\);[^\n]*\n/m;
-        const xrw = watchSkip(mutantCopies('swc-root-watch-skip', REPO).load(RWREL, anchored(RWSRC, RW_A, '', 'root-watch-skip'), 'root-watch-skip'));
+        const RW_A = /^ {6}else if \(r && r\.skipped && r\.settingsHeld\) arm\(\);[^\n]*\n/m;
+        const xrw = await watchSkip(mutantCopies('swc-root-watch-skip', REPO).load(RWREL, anchored(RWSRC, RW_A, '', 'root-watch-skip'), 'root-watch-skip'));
         ok(!xrw.memoKept && xrw.said === true && xrw.armed === 0, 'CONTROL (the watch\'s skip read cut, in a copy): a skip is taken for a recovery — the memo dropped, «registered after an earlier read error» said over a write that never ran (red)', xrw);
         // the lift REPLAYS the skipped sync whatever its rows say (every row at its default: no row differs from no «before»)
-        const replay = (M) => {
+        const replay = async (M) => {
           let held = { ...HELD }; const lines = [];
           const m = M.create({ serverSetting: (k) => (k === SYMH ? held : undefined), harnesses: { list: () => [], get: () => null }, adapterRegistry: new Map(), activeSessions: new Map(), hookRegistrationSafe: () => false, home: (() => { const d = scratchDir('swc-cli-home-' + (++cliHomes)); roots.push(d); return d; })(), log: (l) => lines.push(String(l)), warn: (l) => lines.push(String(l)) });
-          const boot = m.syncCliConfig({ reason: 'boot' }); held = null;
+          const boot = await m.syncCliConfig({ reason: 'boot' }); held = null;
           m.onSettingsWrite({}, {}); m.onSettingsWrite({}, {});
           return { bootSkipped: !!(boot && boot.skipped && boot.settingsHeld), replays: lines.filter((l) => /^\[cli-config\] skipped \(the settings read again\): /.test(l)).length, lines };
         };
-        const rp = replay(require(path.join(REPO, HCREL)));
+        const rp = await replay(require(path.join(REPO, HCREL)));
         ok(rp.bootSkipped && rp.replays === 1, '⑪ (k) THE LIFT REPLAYS the CLI-config sync the hold skipped — with every row at its default (no row differs from an empty «before») it runs ONCE at the lift (here to its own next gate, the copy\'s refusal — never a file), and not again on the next unchanged write', rp);
-        const REPLAY_A = /^ {4}if \(heldSkipped\) syncCliConfig\(\{ reason: 'the settings read again' \}\);[^\n]*\n {4}else /m;
-        const xrp = replay(mutantCopies('swc-cli-replay', REPO).load(HCREL, anchored(HCSRC, REPLAY_A, '    ', 'cli-replay-cut'), 'cli-replay-cut'));
+        const REPLAY_A = /^ {4}if \(heldSkipped\) landing = syncCliConfig\(\{ reason: 'the settings read again' \}\);[^\n]*\n {4}else /m;
+        const xrp = await replay(mutantCopies('swc-cli-replay', REPO).load(HCREL, anchored(HCSRC, REPLAY_A, '    ', 'cli-replay-cut'), 'cli-replay-cut'));
         ok(xrp.bootSkipped && xrp.replays === 0, 'CONTROL (the replay cut, in a copy): the lift with every row at its default never syncs — the boot\'s skipped sync is never replayed (red)', xrp);
         // the integration switch: OFF in the held view (the strict table; persistence's heldSettingsView spreads strictValues)
         const SHREL = 'src/settings-held-strict.js', SHSRC = fs.readFileSync(path.join(REPO, SHREL), 'utf8');

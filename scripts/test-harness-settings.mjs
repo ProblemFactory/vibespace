@@ -512,21 +512,25 @@ console.log('§9 onSettingsWrite');
   const adapterRegistry = { get: (id) => (id === 'claude' ? { formatSetFallbackPolicy: (v) => JSON.stringify({ fb: v }) } : id === 'codex' ? {} : null) };
   const home = path.join(root, 'home3'); fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{}');
-  const sync = createSync({ serverSetting: (k) => store[k], harnesses, adapterRegistry, activeSessions, hookRegistrationSafe: () => true, home, log: () => {}, warn: () => {} });
+  // B-ddf3 unit 2 line 1: THIS machine's CLI config is written by the SHIPPED helper (the tracked data/bin copy) through the
+  // starter — here a stand-in that runs it with this node, as the starter does; the write's landing is awaited
+  const { spawn } = await import('node:child_process');
+  const STANDIN = { run: (cmd, args, o = {}) => new Promise((resolve) => { let out = '', err = ''; const c = spawn(cmd, args, { env: { ...process.env, ...(o.envAdd || {}) }, stdio: ['ignore', 'pipe', 'pipe'] }); c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; }); c.on('error', (e) => resolve({ started: false, error: String(e && e.code), stdout: out, stderr: err })); c.on('close', (code) => resolve({ started: true, code, stdout: out, stderr: err })); }) };
+  const sync = createSync({ serverSetting: (k) => store[k], harnesses, adapterRegistry, activeSessions, hookRegistrationSafe: () => true, home, helperPath: path.join(repo, 'data', 'bin', 'vibespace-hook-register.mjs'), starter: STANDIN, log: () => {}, warn: () => {} });
   sync.onSettingsWrite({ 'claude.disableModelFallback': true }, {});
   ok('live verb goes to claude CHAT sessions with a pty only (never terminal, never pty-less, never another harness)', writes.length === 1 && writes[0] === 'claude:{"fb":true}', writes);
   writes.length = 0;
   sync.onSettingsWrite({ 'claude.disableModelFallback': true }, { 'claude.disableModelFallback': true });
   ok('no change ⇒ nothing written', writes.length === 0);
   store['claude.transcriptRetentionDays'] = 365;
-  sync.onSettingsWrite({ 'claude.transcriptRetentionDays': 365 }, { 'claude.transcriptRetentionDays': 36500 });
+  await sync.onSettingsWrite({ 'claude.transcriptRetentionDays': 365 }, { 'claude.transcriptRetentionDays': 36500 });
   const j = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'));
   ok('a cli-config key change re-applies the plan on this machine (365 written; codex toml missing dir reported, not created)', j.cleanupPeriodDays === 365 && !fs.existsSync(path.join(home, '.codex')));
   const st = sync.cliConfigStatus();
   ok('cliConfigStatus after a write: fresh receipt applied + in-memory lastWrite with its reason', st.receipts.find((r) => r.key === 'transcriptRetentionDays')?.state === 'applied' && st.lastWrite?.reason === 'settings change' && st.safe === true);
   const unsafe = createSync({ serverSetting: (k) => store[k], harnesses, adapterRegistry, activeSessions, hookRegistrationSafe: () => false, home, log: () => {}, warn: () => {} });
   fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{"cleanupPeriodDays":1}');
-  ok('an UNSAFE server (temp root) never writes: syncCliConfig skipped, file untouched', unsafe.syncCliConfig().skipped === true && fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8') === '{"cleanupPeriodDays":1}');
+  ok('an UNSAFE server (temp root) never writes: syncCliConfig skipped, file untouched', (await unsafe.syncCliConfig()).skipped === true && fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8') === '{"cleanupPeriodDays":1}');
   const warns = [];
   store['codex.historyPersistence'] = 'bogus';
   const noisy = createSync({ serverSetting: (k) => store[k], harnesses, adapterRegistry, activeSessions, hookRegistrationSafe: () => false, home, log: () => {}, warn: (m) => warns.push(m) });
