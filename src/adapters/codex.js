@@ -616,6 +616,8 @@ const PAGE_LINES = 8192, PAGE_BYTES = 4 * 1048576;
 /** tests only (test-codex-history-bound): the history lane's heap bound — its hard limit is read when the pool is made, its soft
  *  check at each page; `soft: false` sends no soft check (the red control: the hard limit alone, under a parent heap flag) */
 function _setHistoryHeapMbForTest(mb, { soft = true } = {}) { HISTORY_HEAP_MB = mb; HISTORY_SOFT_CHECK = soft; }
+/** row B-422c's legs: a stand-in transcript pool (`{call, inPlace?}`) in the real one's place; null = build the real one again */
+function _setTranscriptPoolForTest(p) { _workerScript = true; _transcriptPool = p || null; _poolFails = 0; _poolRetryAt = 0; }
 // what the paged reads did (the legs assert the paged road was taken; a field hub's numbers): pages served, reads done in pages,
 // snapshots found gone, one-shot reads, reads that gave up (each with its reason, onFail)
 const _pagedStats = { pages: 0, reads: 0, gone: 0, oneShot: 0, failed: 0 };
@@ -669,7 +671,7 @@ function _transcriptPoolGet() {
       if (_poolFails) console.log(`[transcript-worker] the pool is up (try ${_poolFails + 1})`);
     } catch (e) {
       _transcriptPool = false; _poolFails++; _poolRetryAt = Date.now() + POOL_RETRY_MS;
-      console.error(`[transcript-worker] pool unavailable (try ${_poolFails} of ${POOL_RETRY_MAX}${_poolFails < POOL_RETRY_MAX ? `, tried again in ${POOL_RETRY_MS / 1000} s` : ', staying inline'}):`, e.message);
+      console.error(`[transcript-worker] pool unavailable (try ${_poolFails} of ${POOL_RETRY_MAX}${_poolFails < POOL_RETRY_MAX ? `, tried again in ${POOL_RETRY_MS / 1000} s` : ' — not tried again: until a restart every transcript read is refused by name, nothing read on the main loop (row B-422c)'}):`, e.message);
     }
   }
   return _transcriptPool || null;
@@ -720,11 +722,15 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
  *  bytes }, as `jsonlTail` answers; its one-shot read on the general pool is the fallback for EVERY refusal, the heap bound too (a warm
  *  refused by the history lane is read as before the unit, never parsed on the loop), `onFail` told why; `dropSubagent` is the
  *  worker's own line rule (slot 'warm').
- *  → the records (or, with `entry`, { entry, mode, bytes }), or null (the caller parses on the loop, said) */
+ *  Row B-422c: `onFail(why, refusal)` — `refusal` = the reader's refusal by name when the POOL failed (closed, no worker, a deadline,
+ *  a hung path, the lane's bound or wait; never on the device's in-place road), null when the op itself failed (the caller's own road).
+ *  → the records (or, with `entry`, { entry, mode, bytes }), or null */
 async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false } = {}) {
-  const said = (why) => { _pagedStats.failed++; try { onFail?.(why); } catch { } return null; };
+  let refusal = null;   // the LAST pool failure on this road (a later op error clears it: then the op's failure is the answer)
+  const seen = (e) => { refusal = pool && !pool.inPlace && isPoolFailure(e) ? readerRefusal(e) : null; };
+  const said = (why) => { _pagedStats.failed++; try { onFail?.(why, refusal); } catch { } return null; };
   const pool = _transcriptPoolGet();
-  if (!pool) return said('no transcript pool on this process');
+  if (!pool) { refusal = readerRefusal(null); return said('no transcript pool on this process'); }
   let why = null;
   for (let tries = 0; tries < 2; tries++) {
     try {
@@ -744,6 +750,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
       if (!gone) { _pagedStats.reads++; return out; }
     } catch (e) {
       const code = e && e.code;
+      seen(e);
       if (code === 'heap_bound' && !entry) return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
       why = code === 'heap_bound' ? `the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}` : code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`;
       break;
@@ -751,8 +758,12 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
   }
   _pagedStats.oneShot++;
   if (entry) { try { onFail?.(`${why} — the entry read in one piece on the general pool`); } catch { } }   // B-cd4b unit 2: a warm refused by the history lane (its heap bound too) is read as before the unit, never parsed on the loop
-  const r = entry ? await readJsonlTailAsync(fp, { dropSubagent }) : await readJsonlBoundedParsedAsync(fp, { tailOnly, dropSubagent });
-  return r == null ? said(`${why}; then the one-shot read failed too (both pool workers down, or its own failure)`) : r;
+  // row B-422c: the one-shot read never parses on this loop — the warm's entry through readJsonlTailAsync (a pool failure there
+  // refuses BY NAME, thrown: the warm notes it), the records through the pool's own op (its failure seen: the refusal by name)
+  if (entry) { const e1 = await readJsonlTailAsync(fp, { dropSubagent }); return e1 == null ? said(`${why}; then the one-shot read answered nothing`) : e1; }
+  let r = null;
+  try { r = await pool.call('boundedParsed', { fp, tailOnly, dropSubagent: !!dropSubagent }); } catch (e) { seen(e); why = `${why}; then the one-shot read failed too (${(e && e.message) || e})`; return said(why); }
+  return r == null ? said(`${why}; then the one-shot read answered nothing`) : r;
 }
 /** B-f3f9: a codex conversation's WHOLE history read, parsed and MERGED in the transcript worker's `history` lane (its fork
  *  ancestry's files in order, its own last — `files` = [{fp, threadId, untilOrdinal}]), THEN the live buffer merged last:
@@ -1537,6 +1548,7 @@ class CodexAdapter extends BackendAdapter {
 // transcriptPool: the pool itself (test-codex-attach-off-loop ⑤ reads its routing)
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
+  _setTranscriptPoolForTest, // row B-422c's legs
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,

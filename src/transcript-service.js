@@ -250,43 +250,47 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const mm = createMessageManager(r.backend, 'api', { threadId: r.sessionId }); // the rendered conversation's id (codex ledger key)
     await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine's transcript read here: the device road's gate
-    if (r.memo) r.memo.view = { mm, session };
-    return { mm, session };
+    // row B-422c: a history the transcript reader refused (its kept copy, or the live buffer alone) is SAID in every answer built on
+    // it — `notLoaded`, the page's «not loaded yet» — never a short history passed off as the whole one
+    const notLoaded = sm.notLoaded || null;
+    if (r.memo) r.memo.view = { mm, session, notLoaded };
+    return { mm, session, notLoaded };
   }
+  const saidOf = (v) => (v && v.notLoaded ? { notLoaded: v.notLoaded } : {});
 
   async function page(ref, { offset, limit, untilUuid } = {}) {
     const r0 = norm(ref);
     const viaDev = await tryDevice(r0, 'page', { offset, limit, untilUuid });
     if (viaDev) return viaDev;
-    const { mm } = await view(ref);
+    const v = await view(ref), { mm } = v;
     if (untilUuid) {
       const idx = mm.messages.findIndex((m) => m.uuid === untilUuid);
       const upto = idx >= 0 ? idx + 1 : mm.total;
       const start = Math.max(0, upto - 50);
-      return { messages: mm.messages.slice(start, upto), total: upto };
+      return { messages: mm.messages.slice(start, upto), total: upto, ...saidOf(v) };
     }
     if (offset !== undefined || limit !== undefined) {
-      return { messages: mm.slice(parseInt(offset) || 0, parseInt(limit) || 50), total: mm.total };
+      return { messages: mm.slice(parseInt(offset) || 0, parseInt(limit) || 50), total: mm.total, ...saidOf(v) };
     }
     // THE DEFAULT PAGE = the attach slab's rule (src/text-window.js) — the HTTP
     // withStatus read AND the daemon's `transcript-op page` (agentd bundles this
     // service), byte-identical by test-transcript-parity. An OLD daemon answers
     // tail(50); the client renders any N (nothing assumes 50).
-    return { messages: mm.tailWindow(), total: mm.total };
+    return { messages: mm.tailWindow(), total: mm.total, ...saidOf(v) };
   }
 
   async function turnmap(ref) {
     const viaDev = await tryDevice(norm(ref), 'turnmap', {});
     if (viaDev) return viaDev;
-    const { mm } = await view(ref);
-    return { turns: mm.turnMap(), total: mm.total };
+    const v = await view(ref), { mm } = v;
+    return { turns: mm.turnMap(), total: mm.total, ...saidOf(v) };
   }
 
   async function searchIndexed(ref, q) {
     const viaDev = await tryDevice(norm(ref), 'searchIndexed', { q });
     if (viaDev) return viaDev;
-    const { mm } = await view(ref);
-    return { matches: mm.search(q), total: mm.total };
+    const v = await view(ref), { mm } = v;
+    return { matches: mm.search(q), total: mm.total, ...saidOf(v) };
   }
 
   /** chatStatus + taskState + turnMap composite (the withStatus attach shape).

@@ -2743,7 +2743,7 @@ class ChatView {
     return data.messages || [];
   }
 
-  async _fetchMessagePage(offset, limit, { withStatus = false, applyTotal = true } = {}) {
+  async _fetchMessagePage(offset, limit, { withStatus = false, applyTotal = true, quietRefusal = false } = {}) {
     const { backend, backendSessionId, cwd, host } = this._getSessionIds();
     if (!backendSessionId) return { messages: [], total: 0 };
     const query = new URLSearchParams({
@@ -2763,6 +2763,12 @@ class ChatView {
     // the scroll paths can surface a retry row (静默失败零容忍).
     if (!res.ok) throw new Error(t('Server error {code}', { code: res.status }));
     const data = await res.json();
+    // row B-422c: a history the transcript reader refused (its kept copy, or nothing) is a FAILED fetch — the view that stands is never
+    // replaced by a short one; the person is told «try again» (a toast, at most one each few seconds; the 2 s poll stays quiet)
+    if (data && data.notLoaded) {
+      if (!quietRefusal) this._sayReaderRestarting();
+      throw Object.assign(new Error(t('The transcript reader is restarting — try again in a moment.')), { code: data.notLoaded });
+    }
     if (applyTotal && typeof data.total === 'number') this._total = data.total; // (a tail fetch applies its own once its slab is the view — r4)
     return data;
   }
@@ -3500,10 +3506,10 @@ class ChatView {
 
   /** row B-422c (主开发 r1006 item 3): the history WAITS ON THE TRANSCRIPT READER — said in plain words where it would be (never an
    *  empty pane), once per attach that says so */
-  _sayHistoryNotLoaded(code) {
-    if (!code || this._historyNotLoadedSaid === code + (this._lastAttachedAt || 0)) return;
+  _sayHistoryNotLoaded(code, { again = false } = {}) {
+    if (!code || (!again && this._historyNotLoadedSaid === code + (this._lastAttachedAt || 0))) return;
     this._historyNotLoadedSaid = code + (this._lastAttachedAt || 0);
-    this._renderers.appendSystem(t('The history is not loaded yet — the transcript reader is restarting. Open this conversation again in a moment to see it.'));
+    this._renderers.appendSystem(t('The history is not loaded yet, or not all of it — the transcript reader is restarting. Open this conversation again in a moment to see all of it.'));
   }
 
   // ── Whole-conversation minimap for gapped (huge) sessions ──
@@ -6364,6 +6370,7 @@ class ChatView {
     const q = new URLSearchParams({ backend: backend || 'codex', threadId: backendSessionId });
     if (host) q.set('host', host);
     const r = await fetchJson(`/api/subagents?${q.toString()}`);
+    if (r?.reason === 'transcript_reader_restarting') { this._sayReaderRestarting(); return; }   // row B-422c: in the page's words, never the server's
     if (r?.error) { showToast(r.error, { type: 'error' }); return; }
     const list = Array.isArray(r?.subagents) ? r.subagents : [];
     const hit = list.find((s) => s.agentPath === agentPath)
@@ -6551,7 +6558,7 @@ class ChatView {
       if (document.hidden) { this._readOnlyPollTimer = setTimeout(tick, 30000); return; }
       try {
         const nextOffset = this._windowEnd || 0;
-        const page = await this._fetchMessagePage(nextOffset, 200, { withStatus: true });
+        const page = await this._fetchMessagePage(nextOffset, 200, { withStatus: true, quietRefusal: true });   // row B-422c: a refused history throws — nothing applied
         const msgs = page.messages || [];
         if (page.chatStatus) this.applyStatus(page.chatStatus);
         if (page.taskState) this._applyTaskState(page.taskState);
@@ -7090,6 +7097,7 @@ class ChatView {
     // next attach asks for no seq and rebuilds from the full rung
     try {
       this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, msg);
+      if (msg && msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { again: true });   // row B-422c: the reset removed the line — said again over the new slab
       // the slab is the truth now: a poisoned watermark is healed (perf r1) —
       // only when the rebuild itself ran through (a throw above keeps it poisoned)
       this._seqPoisoned = false;

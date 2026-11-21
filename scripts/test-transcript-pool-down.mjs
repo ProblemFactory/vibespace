@@ -3,8 +3,8 @@
 // TRANSCRIPT-POOL FAILURE A READER READS NOTHING ON THE HUB'S LOOP AND SAYS SO BY NAME. The REAL pool made to refuse
 // (src/adapters/codex.js transcriptPool().close(): every call answers 503), each road driven over a placed transcript in a
 // scratch HOME; the transcript's SYNCHRONOUS reads on the main thread counted (readFileSync, openSync + readSync, statSync,
-// lstatSync, readdirSync, existsSync of its path or folder), each road's longest loop turn printed. The six roads (census:
-// /var/tmp/vibespace-lanes/hub-loop-stalls/b422c/census.md):
+// lstatSync, readdirSync, existsSync of its path or folder), each road's longest loop turn printed. The six roads (the row's
+// census of every reader that fell back after a pool failure):
 //   ① the gap read (jsonlGapInfoAsync) ② the slab read (readJsonlLineRangeAsync) ③ the turn map (scanJsonlUserTurnsAsync)
 //   ④ the Claude history (warmSessionJsonlAsync, then SessionMessages) ⑤ the codex history (CodexSessionMessages.rawAsync)
 //   ⑥ the codex thread-metas walk (collectCodexThreadMetasAsync — the 5 s poll's listing)
@@ -13,6 +13,11 @@
 // two histories answer «not loaded yet» (or their kept copy); the walk answers its kept listing (or «not known»). A stat or an
 // existsSync of the file and the codex rollout FINDER's walk run with the pool up too (the finder is row B-a60e's): printed, not
 // judged here. RED: the base (c80f44e8b-20261121043050-box: every road read the transcript).
+// THEN, by stand-ins in the real pool's place (_setTranscriptPoolForTest): ④b the HTTP road (transcript-service page) says
+// «not loaded»; EVERY refusal kind (no worker, no idle worker, a deadline, a hung path, the history lane's bound and wait) is the
+// refusal by name, a deadline / hung path the STORAGE's; an op's own error and the device's IN-PLACE road are no pool failure
+// (⑤b: the codex history reads the old road there, «not loaded» on the hub's pool); ④c the Claude history's kept copy BEHIND the
+// file is answered tagged «not loaded»; the note ends on any warm's end but the refusal; a hung path ⇒ the parse asks no warm.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -119,8 +124,85 @@ const R5 = await road('⑤ the codex history (rawAsync)', async () => {
   return { records: Array.isArray(all) ? all.length : null, notLoaded: m.notLoaded || null };
 });
 const R6 = await road('⑥ the codex thread-metas walk', () => CS.collectCodexThreadMetasAsync());
+// ④b THE HTTP ROAD (/api/session-messages → transcript-service page): the answer built on a refused reader SAYS it
+const TS = require(path.join(REPO, 'src/transcript-service.js'));
+const svc = TS.createTranscriptService({ activeSessions: new Map(), createSessionMessages: (shape, id) => new SS0.SessionMessages(shape, id || 'api', {}), hosts: null });
+const R4b = await road('④b the Claude history over HTTP (transcript-service page)', () => svc.page({ backend: 'claude', sessionId: sid, cwd, memo: {} }));
 
 for (const r of [R1, R2, R3]) ok(content(r).length === 0 && byName(r), `${r.name}: reads NOTHING of the transcript on the loop after the pool's refusal and refuses by name (${content(r).length} content reads, the longest turn ${r.longest} ms)`, { reads: r.reads.slice(0, 6), err: r.err, out: r.out });
 for (const r of [R4, R5]) ok(content(r).length === 0 && !!(r.out && r.out.notLoaded), `${r.name}: reads NOTHING of the transcript on the loop and answers «not loaded yet» (${content(r).length} content reads, the longest turn ${r.longest} ms)`, { reads: r.reads.slice(0, 6), out: r.out, err: r.err });
-ok(walks(R6).length === 0 && content(R6).length === 0, `${R6.name}: walks NOTHING on the loop — the kept listing, or «not known» (${walks(R6).length} folder reads, the longest turn ${R6.longest} ms)`, { reads: R6.reads.slice(0, 6), out: Array.isArray(R6.out) ? R6.out.length : R6.out, err: R6.err });
+ok(walks(R6).length === 0 && content(R6).length === 0 && !R6.err && R6.out === null, `${R6.name}: walks NOTHING on the loop — answers its kept listing: none yet, «not known» (null, never a throw; ${walks(R6).length} folder reads, the longest turn ${R6.longest} ms)`, { reads: R6.reads.slice(0, 6), out: Array.isArray(R6.out) ? R6.out.length : R6.out, err: R6.err });
+ok(content(R4b).length === 0 && !R4b.err && R4b.out && R4b.out.notLoaded === 'transcript_reader_restarting' && Array.isArray(R4b.out.messages), `${R4b.name}: reads NOTHING on the loop and its answer carries «not loaded yet» (notLoaded — the page's fetch fails, the view that stands kept; ${content(R4b).length} content reads)`, { reads: R4b.reads.slice(0, 6), out: R4b.out && { notLoaded: R4b.out.notLoaded, n: (R4b.out.messages || []).length }, err: R4b.err });
+
+// ── EVERY REFUSAL KIND, by stand-ins in the real pool's place (src/adapters/codex.js _setTranscriptPoolForTest) ──
+console.log('every refusal kind of the pool, and what is NOT a pool failure');
+const refusing = (shape, extra = {}) => ({ calls: [], ...extra, call(op) { this.calls.push(op); return Promise.reject(Object.assign(new Error(`a stand-in's ${shape.code || (shape.safeFsTimeout ? 'deadline' : 'refusal')}`), shape)); } });
+const KINDS = [
+  ['no worker', { status: 503, code: 'no-worker' }, false], ['no idle worker', { status: 503, code: 'no-idle' }, false],
+  ['a deadline', { status: 503, safeFsTimeout: true }, true], ['a hung path', { status: 503, code: 'path-hung' }, true],
+  ['the history lane\'s heap bound', { code: 'heap_bound' }, false], ['the history lane busy past its wait', { code: 'history_busy' }, false],
+];
+for (const [name, shape, hung] of KINDS) {
+  C._setTranscriptPoolForTest(refusing(shape));
+  let e = null; try { await C.jsonlGapInfoAsync(claudeFp); } catch (x) { e = x; }
+  ok(!!e && e.code === 'transcript_reader_restarting' && e.status === 503 && e.storageHung === hung, `${name} ⇒ the refusal by name (transcript_reader_restarting, 503, the storage's: ${hung})`, { code: e && e.code, status: e && e.status, storageHung: e && e.storageHung });
+}
+{
+  C._setTranscriptPoolForTest(refusing({ code: 'EACCES' }));
+  let e = null; try { await C.jsonlGapInfoAsync(claudeFp); } catch (x) { e = x; }
+  ok(!!e && e.code === 'EACCES', 'an error of the op itself (EACCES) stays what it was — never named a pool failure', { code: e && e.code });
+  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' }, { inPlace: true }));
+  e = null; try { await C.jsonlGapInfoAsync(claudeFp); } catch (x) { e = x; }
+  ok(!!e && e.code === 'no-worker', 'the device\'s IN-PLACE road (no worker script: its own loop) is no pool failure — its error passes as before', { code: e && e.code });
+}
+// the codex history: the pool's refusal ⇒ «not loaded yet», nothing parsed here; on the in-place road and for the op's own error ⇒
+// the old road (the sync parse, said) — as before this row
+{
+  const parse = (pool) => { C._setTranscriptPoolForTest(pool); return CS.parseCodexSessionJsonlAsync(tid, { fp: codexFp }); };
+  const Rb = await road('⑤b the codex history, the heap bound on the hub\'s pool', () => parse(refusing({ code: 'heap_bound' })).then((r) => ({ n: r.length, notLoaded: r.notLoaded || null })));
+  ok(content(Rb).length === 0 && Rb.out && Rb.out.n === 0 && Rb.out.notLoaded === 'transcript_reader_restarting', `${Rb.name}: «not loaded yet», nothing parsed on the loop (${content(Rb).length} content reads)`, { out: Rb.out, err: Rb.err });
+  const ip = await parse(refusing({ code: 'heap_bound' }, { inPlace: true }));
+  ok(ip.length > 1000 && !ip.notLoaded, `the same bound on the device's IN-PLACE road ⇒ the old road (its own loop): ${ip.length} records, as before this row`, { n: ip.length, notLoaded: ip.notLoaded });
+  const oe = await parse(refusing({ code: 'EIO' }));
+  ok(oe.length > 1000 && !oe.notLoaded, `an error of the op itself (EIO) on the hub's pool ⇒ the old road, said: ${oe.length} records`, { n: oe.length, notLoaded: oe.notLoaded });
+}
+
+// ── THE CLAUDE HISTORY'S NOTE: a kept copy, the storage's refusal, the note's end ──
+console.log('the Claude history\'s note');
+const TW = require(path.join(REPO, 'src/transcript-worker.js'));
+const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); } });
+{
+  const P = up(); C._setTranscriptPoolForTest(P);
+  const warmed = await SS0.warmSessionJsonlAsync(sid, cwd);   // the pool answers: the cache holds the 3 MB tail, the note (road ④'s) cleared
+  const whole = SS0.parseSessionJsonl(sid, cwd);
+  ok(warmed === true && Array.isArray(whole) && whole.length > 1000 && !whole.notLoaded, `the pool answering: the warm reads it, the note ends — ${whole.length} records, loaded`, { warmed, n: whole.length, notLoaded: whole.notLoaded });
+  // the file REWRITTEN (not an append — the warm asks the pool for a full read), the pool then refusing: the kept copy is BEHIND
+  const lines = fs.readFileSync(claudeFp, 'utf8').split('\n').filter(Boolean);
+  fs.writeFileSync(claudeFp, lines.slice(0, 2000).join('\n') + '\n');
+  const N = refusing({ status: 503, code: 'no-worker' }); C._setTranscriptPoolForTest(N);
+  const tails = (P) => P.calls.filter((o) => o === 'jsonlTail').length;
+  const Rk = await road('④c the Claude history, its kept copy behind the file', async () => {
+    const w = await SS0.warmSessionJsonlAsync(sid, cwd), asked = tails(N);
+    const m = new SS0.SessionMessages({ backend: 'claude', claudeSessionId: sid, cwd, buffer: '' }, sid, {});
+    m._ensureParsed();
+    await new Promise((res) => setImmediate(res));
+    return { warmed: w, records: Array.isArray(m._all) ? m._all.length : null, notLoaded: m.notLoaded || null, warmAsks: asked, afterParse: tails(N) };
+  });
+  ok(content(Rk).length === 0 && Rk.out && Rk.out.records === whole.length && Rk.out.notLoaded === 'transcript_reader_restarting', `${Rk.name}: the kept copy (${Rk.out && Rk.out.records} records) is answered TAGGED «not loaded» — the attach keeps the history unloaded, the next reads again (${content(Rk).length} content reads)`, { out: Rk.out, err: Rk.err });
+  ok(!!Rk.out && Rk.out.warmAsks === 1 && Rk.out.afterParse === 2, `a refusal that is not the storage's ⇒ the parse asks the warm again, off the loop (${Rk.out && Rk.out.afterParse - Rk.out.warmAsks} more ask)`, Rk.out);
+  // the note ENDS on any end but the refusal: an op's own error (EACCES) — the next parse is the old road's (no «not loaded»)
+  C._setTranscriptPoolForTest(refusing({ code: 'EACCES' }));
+  await SS0.warmSessionJsonlAsync(sid, cwd);
+  const after = SS0.parseSessionJsonl(sid, cwd);
+  ok(Array.isArray(after) && !after.notLoaded && after.length === 2000, `the note ends when a warm ends in anything but the refusal (an op's own EACCES): the parse is the old road again (${after.length} records, no «not loaded»)`, { n: after.length, notLoaded: after.notLoaded });
+  // THE STORAGE'S REFUSAL: a hung path — the parse asks NO warm (its find and stat would run on this loop); the next attach's warm asks
+  fs.writeFileSync(claudeFp, lines.slice(0, 1500).join('\n') + '\n');   // rewritten again (never an append — that one is folded in inline): the warm asks the pool
+  const H = refusing({ status: 503, code: 'path-hung' }); C._setTranscriptPoolForTest(H);
+  await SS0.warmSessionJsonlAsync(sid, cwd);
+  const asked0 = tails(H);
+  SS0.parseSessionJsonl(sid, cwd); SS0.parseSessionJsonl(sid, cwd);
+  await new Promise((res) => setImmediate(res));
+  ok(asked0 === 1 && tails(H) === asked0, `a hung path (the storage's) ⇒ the parse asks no warm again (${tails(H) - asked0} more asks after two parses; the warm itself asked ${asked0})`, { asked0, asked1: tails(H) });
+}
+C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
 report();

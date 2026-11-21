@@ -15108,5 +15108,5 @@ export default {
   "They are handed over when each conversation can take them. Update VibeSpace’s device agent on {machine} so it can say whether its conversations run.": "每个对话能接收时就会交给它。请更新{machine}上的 VibeSpace 设备代理，让它能说明自己的对话是否在运行。",
   "They are handed over when each conversation can take them. Pair {machine} with VibeSpace’s device agent so it can say whether its conversations run.": "每个对话能接收时就会交给它。请用 VibeSpace 设备代理配对{machine}，让它能说明自己的对话是否在运行。",
   "The transcript reader is restarting — try again in a moment.": "转录读取器正在重启——请稍后再试。",
-  "The history is not loaded yet — the transcript reader is restarting. Open this conversation again in a moment to see it.": "历史记录尚未加载——转录读取器正在重启。稍后重新打开此对话即可看到。",
+  "The history is not loaded yet, or not all of it — the transcript reader is restarting. Open this conversation again in a moment to see all of it.": "历史记录尚未加载，或只加载了一部分——转录读取器正在重启。稍后重新打开此对话即可看到全部。",
 };

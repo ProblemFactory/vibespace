@@ -577,7 +577,8 @@ export function installSessionLifecycle(App, ctx = {}) {
               .then(r => r.json())
               .then(data => {
                 if (data.messages?.length) chatView.loadHistory(data.messages, data.total);
-                if (data.chatStatus) chatView.applyStatus(data.chatStatus);
+                if (data.notLoaded) chatView._sayHistoryNotLoaded?.(data.notLoaded);   // row B-422c: a resumed history the reader refused says so
+                else if (data.chatStatus) chatView.applyStatus(data.chatStatus);
               })
               .catch(() => {})
               // Send the fork's first message AFTER history renders, so the

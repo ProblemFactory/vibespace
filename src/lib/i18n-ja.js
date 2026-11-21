@@ -15107,5 +15107,5 @@ export default {
   "They are handed over when each conversation can take them. Update VibeSpace’s device agent on {machine} so it can say whether its conversations run.": "各会話が受け取れるときに渡されます。{machine} の VibeSpace デバイスエージェントを更新すると、会話が動いているかを伝えられるようになります。",
   "They are handed over when each conversation can take them. Pair {machine} with VibeSpace’s device agent so it can say whether its conversations run.": "各会話が受け取れるときに渡されます。{machine} を VibeSpace デバイスエージェントでペアリングすると、会話が動いているかを伝えられるようになります。",
   "The transcript reader is restarting — try again in a moment.": "記録の読み取りが再起動中です。少し後でもう一度お試しください。",
-  "The history is not loaded yet — the transcript reader is restarting. Open this conversation again in a moment to see it.": "履歴はまだ読み込まれていません。記録の読み取りが再起動中です。少し後でこの会話を開き直すと表示されます。",
+  "The history is not loaded yet, or not all of it — the transcript reader is restarting. Open this conversation again in a moment to see all of it.": "履歴はまだ読み込まれていないか、一部だけです。記録の読み取りが再起動中です。少し後でこの会話を開き直すとすべて表示されます。",
 };

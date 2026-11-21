@@ -676,9 +676,10 @@ function* mergeCodexRecordsSteps(historyRecords, liveRecords) {
 }
 
 /** parseCodexSessionJsonl OFF THE LOOP (lane resume-all-paced, L2): a present rollout parsed in the transcript worker (its
- *  boundedParsed parse — the same tail-only read and line parse), handed back in pages; a missing one, or a pool that is down, the
- *  sync parse — and a parse that goes back on the loop SAYS WHY (L3 cure, 主开发 23:16Z: the paged read's own reason — gone twice,
- *  the lane busy, the worker died, its heap bound, no pool — counted and logged by parseCodexSessionJsonl). */
+ *  boundedParsed parse — the same tail-only read and line parse), handed back in pages. Row B-422c: a POOL refusal (closed, no
+ *  worker, a deadline, a hung path, the lane's heap bound or wait, no pool) ⇒ «not loaded yet», nothing parsed on the loop; a
+ *  missing rollout (the thread/read copy), the op's own failure or the device's in-place road ⇒ the sync parse, which SAYS WHY
+ *  (L3 cure, 主开发 23:16Z — counted and logged by parseCodexSessionJsonl). */
 const NOT_LOADED = 'transcript_reader_restarting';
 const _notLoadedSaid = new Set();
 function noteNotLoadedOnce(threadId, why) {
@@ -693,17 +694,21 @@ async function parseCodexSessionJsonlAsync(threadId, { fp: known } = {}) {
   else { try { fp = findCodexSessionJsonlPath(threadId); } catch { fp = null; } }
   let why = 'its rollout was not found (the thread/read copy is read)';
   if (fp) {
+    let refusal = null;
     try {
       const { readJsonlBoundedParsedPagedAsync } = require('./adapters/codex');
-      const r = await readJsonlBoundedParsedPagedAsync(fp, { tailOnly: true, onFail: (w) => { why = w; } });   // in pages: the loop free between them
+      const r = await readJsonlBoundedParsedPagedAsync(fp, { tailOnly: true, onFail: (w, refused) => { why = w; refusal = refused || null; } });   // in pages: the loop free between them
       if (Array.isArray(r)) return r;
     } catch (e) { why = 'the off-loop read threw: ' + ((e && e.message) || e); }
-    // ROW B-422c (主开发 r1006 — A for every road): the off-loop read FAILED (the pool closed, no worker, a deadline, a lane busy or
-    // bounded): NOTHING is parsed on the loop — «not loaded yet» (an empty list tagged; the reader says it, the page shows it)
-    noteNotLoadedOnce(threadId, why);
-    return Object.assign([], { notLoaded: NOT_LOADED, why });
+    // ROW B-422c (主开发 r1006 — A for every road): the POOL refused (closed, no worker, a deadline, a hung path, the lane's bound or
+    // wait): NOTHING is parsed on the loop — «not loaded yet» (an empty list tagged; the reader says it, the page shows it). The op's
+    // own failure, and the device's in-place road (its own loop, by design), read as before.
+    if (refusal) {
+      noteNotLoadedOnce(threadId, why);
+      return Object.assign([], { notLoaded: NOT_LOADED, why, storageHung: !!refusal.storageHung });
+    }
   }
-  return parseCodexSessionJsonl(threadId, { why, fp });   // no rollout on disk: the thread/read copy (no file read), never a second walk
+  return parseCodexSessionJsonl(threadId, { why, fp });   // no rollout on disk: the thread/read copy (no file read), never a second walk; an op's own failure: the old road, said
 }
 
 /** B-f3f9: the files a conversation's merged read names — its fork ancestry's rollouts in order, its own last — `files` null when
@@ -1016,9 +1021,9 @@ async function threadMetasOffLoop() {
 }
 
 /** The 5s-poll listing (S3): walk + head reads + the /proc scan run in the
- *  transcript worker; only the assembly touches the main thread. Worker
- *  down ⇒ the metas walk runs inline (identical result, no isolation); the LIVENESS walk never does (B-f64b: the
- *  kept answer, else liveness: 'unknown' on the rows). */
+ *  transcript worker; only the assembly touches the main thread. The pool refusing ⇒ the metas walk's KEPT listing (row
+ *  B-422c: none before the first answer — no discovered rows until the walk answers, said once in the journal), never the walk
+ *  inline; the LIVENESS walk never runs inline either (B-f64b: the kept answer, else liveness: 'unknown' on the rows). */
 async function listCodexThreadsAsync({ activeSessions } = {}) {
   const [facts, openThreadIds] = await Promise.all([
     threadMetasOffLoop(),   // row B-422c: the kept listing on a refusal, never the walk inline

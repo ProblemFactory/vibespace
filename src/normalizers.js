@@ -175,6 +175,10 @@ function feedPeerCardNow(session, card) {
   return true;
 }
 const HELD_PEER_CARDS_CAP = 32;
+/** Row B-422c: the normalizer a person sees was REBUILT — the history loaded, or the transcript reader refused it (the rebuild ran
+ *  over the live buffer; `_historyNotLoaded`): a card is placed in it live. Its next rebuild places it again from its own source
+ *  (the ring, the trace markers, the proposals' source) — and the held peer cards are kept for it (rebuildHistory). */
+const rebuiltView = (session) => !!(session && (session._historyLoaded || session._historyNotLoaded));
 
 // ── THE GROUP-CARD DOOR (lane group-report-card; the owner, 2026-09-28: "怎么在那个对话里看不到你发了消息？") ──────
 // Every card that carries a group message passes here — a next-turn report's (groups-engine commitReports, emitted
@@ -209,7 +213,7 @@ function feedGroupCard(session, card) {
   const mm = session._normalizer;
   if (!mm) return true;
   if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'gcard', card: stored }); return true; }
-  if (!session._historyLoaded) return true;   // the first attach's rebuild places it from the ring
+  if (!rebuiltView(session)) return true;   // the first attach's rebuild places it from the ring
   return !!placeGroupCard(mm, stored, { emit: true });
 }
 /** A card placer's push (lane midturn-order, THE DELIVERY ORDER): through the normalizer's own `_place` — above the
@@ -319,7 +323,7 @@ function feedProposalCard(session, block) {
   const mm = session && session._normalizer;
   if (!mm || !isProposalBlock(block)) return false;
   if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'pcard', card: block }); return true; }
-  if (!session._historyLoaded) return false;
+  if (!rebuiltView(session)) return false;
   return patchProposalCard(mm, block) || !!placeProposalCard(mm, block, { emit: true });
 }
 // ── DELIVERABLE CARDS (lane artifacts-model) — ONE card per deliverable row (src/artifacts.js cardBlock), placed where
@@ -503,7 +507,7 @@ function feedBrowserCard(session, card) {
   const mm = session && session._normalizer;
   if (!mm || !browserCardBlock(card)) return false;
   if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'bcard', card }); return true; }
-  if (!session._historyLoaded) return false;
+  if (!rebuiltView(session)) return false;
   return !!placeBrowserCard(mm, card, { emit: true });
 }
 /** verify r6 (S2, MEDIUM — the replay vs the transcript's own record): a card the delivery ladder emitted after a
@@ -699,7 +703,7 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
       // verify r6: a card whose delivery the transcript RECORDED is answered by the rendered record (replayCard), never twice
       const ctx = replayContext(mm);
       for (const card of session._heldPeerCards || []) { try { replayCard(mm, card, ctx); } catch (err) { console.error('[normalizer] held card replay skipped:', err.message); } }
-      session._heldPeerCards = null;
+      if (!notLoaded) session._heldPeerCards = null;   // row B-422c: a history the reader refused is rebuilt again — its held cards with it
       drainQueue(session, mm, ctx);
       if (ctx.skipped) console.log(`[normalizer] ${sessionId}: ${ctx.skipped} delivered card(s) rendered from the transcript's own record, not replayed`);
       // lane group-report-card: a group WAKE's transcript record is drawn as the group card it was live (after the held
