@@ -68,6 +68,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Refreshing Codex usage while the only running Codex conversation cannot be tied to an account now says so, instead of «no session is running».
 - Opening many conversations at once is lighter on VibeSpace: a chat window no longer fetches every background job just to show its waiting notifications.
 - Beside the conversation list on a tablet-sized screen, the state in the top bar now shows whole or as a coloured dot, never cut.
+- In a stopped conversation on a paired machine, VibeSpace's own continue after a usage limit no longer shows as a message you typed, once its agent updates.
+- When a resume or fork starts a new conversation, the first message VibeSpace sends into it is no longer shown as one you typed.
 
 ## 2.369.415 — 2026-11-21
 
