@@ -975,11 +975,19 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   // escapee scan lists a /proc path that does not exist (every other /proc read of the wrapper stays real). CONTROL: the copy without the line
   const NP = "  try { ents = fs.readdirSync('/proc').filter((e) => /^\\d+$/.test(e))";
   const noProc = anchored(WRAP, NP, "  try { ents = fs.readdirSync('/proc/b-d8f4-none').filter((e) => /^\\d+$/.test(e))", 'd8f4-no-proc');
+  const noList = anchored(WRAP, NP, "  try { ents = fs.readdirSync('/proc/self/stat').filter((e) => /^\\d+$/.test(e))", 'd8f4-no-list');   // r902: the OTHER branch — a listing that fails with another errno (placed: ENOTDIR)
   const NPW = "    if (o && o.none && stopping && !saidNone) {";
   const noProcSilent = anchored(noProc, NPW, "    if (false) {", 'd8f4-no-proc-silent');
   // the eight scenes are INDEPENDENT (their own folders, managers, marks and processes): they run together — the suite's time is the
   // slowest scene's, not their sum (it measured 9.9 s alone with them in a row; the fast tier's bound is 10 s)
-  const [sa, sx, sr, fa, fx, fj, la, lx, ox, np, npx] = await Promise.all([
+  // r902: the drain's early returns — nothing alive at the drain (a tree member in a group of its own that the stop step's SIGTERM ended at
+  // once: a bare sleep has no handler), and the exit record still counts what the stop reached. CONTROL: the fold cut (the release's returns)
+  const foldScene = timed(async (wrapperText, tag) => jobScene(wrapperText, tag, { argv: ['sh', '-c', 'setsid sleep 337 & wait'],
+    ready: (tree) => tree.some((m) => m.comm === 'sleep'),
+    before: ({ jm }) => { const job = [...jm.jobs.values()][0]; return { after: async () => ({ left: (job && job.runs[job.runs.length - 1] || {}).left || null }) }; } }));
+  const FOLD = "  if (!left.length && !out.length && !stepReached.length) return {};";
+  const foldCut = anchored(WRAP, FOLD, "  if (!left.length && !out.length) return {};   /* MUTANT: the release's early return */", 'd8f4-fold-cut');
+  const [sa, sx, sr, fa, fx, fj, la, lx, ox, np, npx, nl, fo, fox] = await Promise.all([
     escScene(WRAP, 'esc-stop', { viewMod: viewCut }),
     escScene(relEsc, 'esc-stop-mut'),
     escScene(anyRun, 'esc-run-mut'),
@@ -990,11 +998,16 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
     launchScene(anchored(WRAP, KA, "    if (kept && kept(e)) continue;   // MUTANT: no ancestors kept", 'b7ca1-ancestors-cut'), 'esc-launcher-mut'),
     escScene(oldCount, 'esc-count-mut'),
     escScene(noProc, 'esc-no-proc'),
-    escScene(noProcSilent, 'esc-no-proc-mut')
+    escScene(noProcSilent, 'esc-no-proc-mut'),
+    escScene(noList, 'esc-no-list'),
+    foldScene(WRAP, 'fold'),
+    foldScene(foldCut, 'fold-mut')
   ]);
   // B-d8f4 (7): the stop step names the tree's members outside its group it signalled (`timeout` and its `sleep`, in timeout's own group) —
   // K, read from the job's log; «outside» = the re-parented child + those K, whatever the drain still finds alive, and never above n
-  const treeOutOf = (r) => Number(((r && r.log) || '').match(/stop: (\d+) process(?:es)? it started outside its group/)?.[1] || 0);
+  // 主开发 r902 (its round's race): the count the product keeps is what the stop step's signal HEARD — the line's total less its «(N could
+  // not be signalled: gone, or not ours)» (the timeout program may end its sleep before the wrapper's own signal reads it again)
+  const treeOutOf = (r) => { const m = ((r && r.log) || '').match(/stop: (\d+) process(?:es)? it started outside its group \([^)]*\) hears? it from the wrapper(?: \((\d+) could not be signalled)?/); return m ? Number(m[1]) - Number(m[2] || 0) : 0; };
   const kSa = treeOutOf(sa), kOx = treeOutOf(ox);
   console.log(`    facts (B-d8f4 (7)) ${JSON.stringify({ sa: { left: sa.after && sa.after.left, k: kSa }, ox: { left: ox.after && ox.after.left, k: kOx } })}`);
   ok(sa.after && !sa.after.inTree && sa.after.ownGroup && !sa.after.alive && sa.state === 'interrupted' && sa.after.left && kSa >= 1 && sa.after.left.outside === 1 + kSa && sa.after.left.outside <= sa.after.left.n,
@@ -1002,6 +1015,11 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   ok(ox.after && !ox.after.alive && ox.after.left && kOx >= 1 && ox.after.left.outside === 1 && ox.after.left.n >= 1 + kOx, 'CONTROL (B-d8f4 (7), the count before it, in a copy): the stop reached its tree\'s members outside the group, counted in n but NOT «outside» — the count low (red)', { left: ox.after && ox.after.left, k: kOx });
   ok(np.after && np.after.alive && /this machine has no process file system \(\/proc\)/.test(np.log), 'B-d8f4 (10): where the escapee scan cannot list /proc (placed: the copy\'s path does not exist) the re-parented child is not found — and the job\'s log SAYS so', { alive: np.after && np.after.alive, log: (np.log || '').slice(-400) });
   ok(npx.after && npx.after.alive && !/no process file system/.test(npx.log || ''), 'CONTROL (B-d8f4 (10), the line cut, in a copy): the child is left running and nothing says why (red)', { alive: npx.after && npx.after.alive });
+  ok(nl.after && nl.after.alive && /it could not list the processes in \/proc \(ENOTDIR\) — what left its group cannot be found/.test(nl.log || ''), 'B-d8f4 (10, 主开发 r902): a listing that fails with ANOTHER errno (placed: ENOTDIR) — said with its errno, never as «no process file system»', { alive: nl.after && nl.after.alive, log: (nl.log || '').slice(-300) });
+  const kFo = treeOutOf(fo), kFox = treeOutOf(fox);
+  console.log(`    facts (r902 fold) ${JSON.stringify({ fo: { left: fo.after && fo.after.left, k: kFo }, fox: { left: fox.after && fox.after.left, k: kFox } })}`);
+  ok(fo.after && kFo === 1 && fo.after.left && fo.after.left.n === 1 && fo.after.left.outside === 1, 'B-d8f4 (主开发 r902): nothing alive at the drain — the stop step\'s SIGTERM ended the tree\'s member in a group of its own at once — and the exit record still counts it (n 1, outside 1)', { left: fo.after && fo.after.left, k: kFo });
+  ok(fox.after && kFox === 1 && !(fox.after.left && fox.after.left.n), 'CONTROL (the fold cut, in a copy): the release\'s early return — the record has no count at all (red)', { left: fox.after && fox.after.left, k: kFox });
   ok(sa.after && sa.after.strangerOwn && sa.after.stranger && sa.after.left && sa.after.left.escaped === 1, 'B-7ca1 (its read\'s MUST): a process carrying the job\'s mark but ANOTHER run\'s (an earlier run\'s leftover\'s fork) is NOT ended by this run\'s stop — said «left its group — not stopped»', sa.after);
   ok(sa.after && sa.after.view && sa.after.view.outside === sa.after.left.outside, 'B-7ca1: the API\'s view of the run (the card\'s row) carries what was stopped outside its group — its walk found the view dropped it (a list of named fields)', sa.after && sa.after.view);
   ok(sa.after && sa.after.left && sa.after.left.outside >= 1 && sa.after.viewCut && !sa.after.viewCut.threw && sa.after.view && sa.after.viewCut.n === sa.after.view.n && !sa.after.viewCut.outside, 'CONTROL (the view without `outside`, in a copy — over the same run): the run records it but the card\'s row never sees it — RED', sa.after && sa.after.viewCut);
@@ -1043,7 +1061,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
     const cut = engineKill(real, 'mark-cut', { members: [STR], scan: { scanned: 5, total: 9, cut: true } });
     ok(/its mark's scan read 5 of 9 processes: what left its group may be left/.test(cut.said), 'B-d8f4 (8): a mark scan cut at its bound is said with its count — «its mark\'s scan read 5 of 9 processes»', cut.said);
     const unread = engineKill(real, 'mark-unread', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
-    ok(/its mark's scan could not list the processes \(EMFILE\): what left its group may be left/.test(unread.said), 'B-d8f4 (10): a force stop whose mark scan could not list the processes says so with its errno (the hub\'s log)', unread.said);
+    ok(/its forced end — its mark's scan could not list the processes \(EMFILE\): what left its group may be left/.test(unread.said) && !/killed 0/.test(unread.said), 'B-d8f4 (10): a force stop whose mark scan could not list the processes says so with its errno (the hub\'s log); 主开发 r902: nothing killed never opens with «killed 0»', unread.said);
     const unreadX = engineKill(noMark, 'mark-unread-mut', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
     ok(!/could not list the processes/.test(unreadX.said), 'CONTROL (the words cut, in §11\'s engine copy): a failed listing and nothing said (red)', unreadX.said);
   }

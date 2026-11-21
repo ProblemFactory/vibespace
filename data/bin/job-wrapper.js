@@ -995,7 +995,10 @@ async function drainGroup() {
   // B-c134: a STOP's tree — what of it the stop step read outside our group and is still there is the stop's to end, with the rest
   const outKeys = new Set();   // B-d8f4 (7): every process outside our group that is THIS stop's to end — counted «outside» once the stop reached it, whichever pass found it
   { const g = new Set(left.map(termKey)); for (const p of stopping ? stopTree.filter(same) : []) if (!g.has(termKey(p))) { left.push(p); g.add(termKey(p)); outKeys.add(termKey(p)); } }
-  if (!left.length && !out.length) return {};
+  // B-d8f4 (主开发 r902): what the stop step reached outside our group is the stop's even when NOTHING is alive at the drain — the exit
+  // record still carries its count (the early returns kept none)
+  const stepReached = taskStop ? [...stopEsc.keys(), ...stopTreeOut.keys()].filter((k) => termed.has(k)) : [];
+  if (!left.length && !out.length && !stepReached.length) return {};
   // round 10c: EVERY COUNT IN THE RECORD IS THE SIZE OF ONE SET of processes (`pid:start`) — one both scans saw (it left our group
   // between them) is one process, never two
   const inGroup = new Set(left.map(termKey)), outside = out.filter((p) => !inGroup.has(termKey(p))), runOut = outside.filter(ours);
@@ -1004,7 +1007,7 @@ async function drainGroup() {
   const rows = keeps ? [...left, ...outside] : taskStop ? [...left, ...runOut] : left, n = rows.length;
   const kept = keeps ? { kept: true, pids: rows.slice(0, 64), boot: bootId(), ...(outside.length ? { escaped: outside.length } : {}), ...(n > 64 ? { recorded: 64 } : {}) } : null;
   if (keeps && !stopping) return { left: { n, ...kept } }; // kept: named by identity for the engine (its stop, park, removal, next start)
-  if (!n) return { left: { n: 0, escaped: outside.length } }; // a task's that left its group: said, not stopped
+  if (!n && !stepReached.length) return { left: { n: 0, escaped: outside.length } }; // a task's that left its group: said, not stopped
   if (mine) left.push(...outside); else if (taskStop) left.push(...runOut);
   // round 7: what our SIGTERM reaches only now hears it now (the group's and a stopped service's escapees' heard it at the stop).
   // Round 8: A STOP HAS ONE CLOCK — its grace runs from the stop, for every process: one first seen at the drain gets what is LEFT
