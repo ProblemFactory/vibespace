@@ -279,7 +279,11 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     const CO = [["tr(\"No company OAuth client on this instance — ask your admin. Meanwhile the built-in client works, and your own avoids rclone's shared quota.\")", "tr('The built-in client connects right away; its quota is shared with everyone, so for heavy use bring your own client.')"],
       ["tr('No company OAuth client on this instance — ask your admin, or provide your own (it needs the gmail.readonly scope).')", "tr('Gmail needs your own OAuth client here (with the gmail.readonly scope).')"]];
     const co = CO.filter(([a]) => baseSm.includes(a)).length; for (const [a, b] of CO) baseSm = baseSm.split(a).join(b);
-    ok(co === 2, '⑤ the base client’s two «ask your admin» hints are given the new words (2)', co); }
+    ok(co === 2, '⑤ the base client’s two «ask your admin» hints are given the new words (2)', co);
+    // B-8703 unit 2 (主开发 r700): the Drive scope hint's words changed on purpose — the folder path field stands beside it, so
+    // «the folder path above» says no direction — the base client is given the new words; every field's behaviour is still compared
+    const DA = "the folder path above is inside it.", DB = "the folder path is inside it.", dn = baseSm.split(DA).length - 1; baseSm = baseSm.split(DA).join(DB);
+    ok(dn === 1, '⑤ the base client’s Drive scope hint is given the new words (1 — «the folder path above» → «the folder path»)', dn); }
   if (!baseSm) console.log('  SKIP ⑤ differential base-vs-tree client — f02c9dfa9 not in this clone (shallow)');
   else {
     const TYPES = PROV.rows.map((r) => r.id);

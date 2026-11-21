@@ -119,7 +119,7 @@ for (const c of C) {
     // each family's count only falls: B-d073 0 (主开发's ruling (a), 2026-11-18 23:33Z, was 4 — B-d073 built their doors); B-8703 29
     // (主开发 r533, 2026-11-20: unit 1 LISTS what the closed path net and the zh / ja value net newly catch — 22 menu paths, 7 values;
     // unit 2 makes doors of them where a helper that exists makes it one line)
-    const OWED_CEILING = Object.freeze({ 'B-d073': 0, 'B-8703': 17 });   // B-8703 unit 2: 29 → 17 — the 12 the long-lived-token words and doors met (主开发 r700)
+    const OWED_CEILING = Object.freeze({ 'B-d073': 0, 'B-8703': 7 });   // B-8703 unit 2: 29 → 7 — the long-lived-token words and doors (12), the beside sentences said without their direction (8), the Agent browser door (2); the 7 left keep their row with the reason (主开发 r700)
     const owedBy = (f) => (c.T.DOORS_OWED || []).filter((r) => r.family === f).length;
     // a B-8703 row names its file(s), and each file it names says the sentence it claims (the list is honest about where)
     const named = (r) => { const fs8 = (/^((?:src\/[\w./-]+\.js)(?:, src\/[\w./-]+\.js)*): /.exec(r.why) || [])[1]; const got = c.owed.filter((x) => x.row === r); return !!fs8 && got.length > 0 && got.every((x) => fs8.split(', ').every((f) => (words.get(x.s) || new Set()).has(f))); };
@@ -992,6 +992,23 @@ const fn = (m, k) => !!(CL && CL[m] && typeof CL[m][k] === 'function');
   ok(!!loopM && L1.children.length === 1 && b && b.tagName === 'BUTTON' && b.textContent === 'Re-mint “Work Max”’s long-lived token…' && b.dataset.door === 'oat-remint' && opened.filter(([id]) => id === 'acct-x').length === 2,
     'B-8703 unit 2: the session properties\' account line gains «Re-mint “{name}”’s long-lived token…» for the account whose token expired — PRESSED, the same dialog for that account', { line: L1.children.map((c) => c.textContent), opened });
   ok(!!dM && dM.label === 'Manage agents…' && agents.length === 1 && L0.children.length === 0, 'CONTROL B-8703 unit 2: any other block keeps «Manage agents…» (pressed: Manage agents), and a line with no expired token gains no button', { other: dM && dM.label, agents, none: L0.children.length });
+}
+// B-8703 unit 2: the live browser window's status «… Stop it in «Agent browser…» …» (a browser VibeSpace stopped starting) has its DOOR on
+// the window's bar beside it — lifted from its source and PRESSED (the gear menu's own target: app.openBrowserProfiles); shown only for
+// that status (setStatus's agentBrowser), which the unstable branch alone passes. CONTROL: any other status hides it
+{
+  const BLW = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  const abM = /\n  (const abBtn = document\.createElement\('button'\);[^\n]*)\n/.exec(BLW);
+  const showM = /const setStatus = \(text, \{ error = false, reconnect = false, hide = false, agentBrowser = false \} = \{\}\) => \{\n    statusEl\.textContent = text \|\| '';\n    (abBtn\.style\.display = agentBrowser \? '' : 'none';)/.exec(BLW);
+  const passes = (BLW.match(/agentBrowser: m\.code === 'browser_unstable'/g) || []).length;
+  const opened = []; const app = { openBrowserProfiles: (o) => opened.push(o === undefined ? 'opened' : o) };
+  let btn = null; try { btn = abM ? new Function('document', 't', 'app', abM[1] + '\nreturn abBtn;')(DOC, (k) => k, app) : null; } catch (e) { btn = null; }
+  if (btn && typeof btn.onclick === 'function') btn.onclick();
+  const shown = (on) => { const b = { style: {} }; if (showM) new Function('abBtn', 'agentBrowser', showM[1])(b, on); return b.style.display; };
+  console.log('    B-8703 unit 2 (Agent browser), the facts judged: ' + JSON.stringify({ lifted: !!abM, label: btn && btn.textContent, door: btn && btn.dataset && btn.dataset.door, opened, shownOn: shown(true), shownOff: shown(false), passes }));
+  ok(!!btn && btn.tagName === 'BUTTON' && btn.textContent === 'Agent browser…' && btn.dataset.door === 'agent-browser' && opened.length === 1 && !!showM && shown(true) === '' && passes === 1,
+    'B-8703 unit 2: a browser VibeSpace stopped starting — «Agent browser…» stands on the live window\'s bar beside the status that names it; PRESSED, it opens the gear menu\'s own target (app.openBrowserProfiles); only the unstable status shows it', { opened, passes });
+  ok(!!showM && shown(false) === 'none', 'CONTROL B-8703 unit 2: any other status hides «Agent browser…» (setStatus without agentBrowser)', shown(false));
 }
 // B-8703 part 3 (主开发 r533): THE OPEN USAGE POPUP IS REDRAWN THE MOMENT spend.allowOverageTurns FLIPS — the real meter (installUsageMeter,
 // _setupUsage, _renderUsage; in the one client bundle) over the minimal DOM, the popup OPEN with an in-use Credits chip; the switch flipped

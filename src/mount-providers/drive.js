@@ -199,7 +199,7 @@ module.exports = {
       { key: 'clientSecret', label: i18nKey('Custom OAuth client secret'), type: 'password', when: { clientChoice: 'custom' } },
       { key: 'driveMode', label: i18nKey('Cloud-side scope'), type: 'select',
         options: [['mydrive', 'My Drive'], ['shared-with-me', i18nKey('Shared with me')], ['shared-drive', i18nKey('Shared drive (team)')]],
-        hint: i18nKey('“Shared with me” and Shared drives are separate spaces in Google Drive — this picks which one the mount shows; the folder path above is inside it.') },
+        hint: i18nKey('“Shared with me” and Shared drives are separate spaces in Google Drive — this picks which one the mount shows; the folder path is inside it.') },
       { key: 'teamDriveId', label: i18nKey('Shared drive'), placeholder: i18nKey('click “List shared drives” (needs access above) or paste an id') },
       { key: 'rootFolderId', label: i18nKey('Folder ID (advanced — mount ONE shared folder)'), placeholder: '1AbC…', advanced: true,
         hint: i18nKey('From the folder’s Drive URL. Mounts just that folder — the way to mount a single folder someone shared with you (keep scope = My Drive).') },

@@ -469,6 +469,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const traceBtn = document.createElement('button'); traceBtn.className = 'file-tool-btn browser-live-side-btn'; traceBtn.dataset.pane = 'trace';
   const timeline = createTraceTimeline(app, { sessionId, browserKey: H ? H.key : null }); // BROWSE YOURSELF: his window's Actions pane = HIS recorded acts (by his key)
   const reBtn = document.createElement('button'); reBtn.className = 'file-tool-btn browser-live-reconnect'; reBtn.textContent = t('Reconnect'); reBtn.style.display = 'none';
+  // B-8703 unit 2 (主开发 r700): a browser VibeSpace stopped starting is stopped in «Agent browser…» — that door stands on this window's
+  // bar beside the status that names it (the gear menu's own item: app.openBrowserProfiles), never a path to it
+  const abBtn = document.createElement('button'); abBtn.type = 'button'; abBtn.className = 'file-tool-btn browser-live-agent-browser need-door'; abBtn.dataset.door = 'agent-browser'; abBtn.textContent = t('Agent browser…'); abBtn.style.display = 'none'; abBtn.onclick = () => { if (typeof app.openBrowserProfiles === 'function') app.openBrowserProfiles(); };
   // P4 (§7.4) → the rebuilt switch dialog (2026-09-27): the profile's BROWSER NAME (`Chromium` / an engine's name, the digest's
   // fact in words — never a version or a plan). A BUTTON opening the switch dialog only when another browser is available
   // for this profile (`app.browserChoicesFor`), else the same words as a plain label; neither for the temporary browser.
@@ -498,7 +501,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const closeBtn = document.createElement('button'); closeBtn.className = 'file-tool-btn browser-live-close'; closeBtn.style.display = 'none';
   const quitBtn = document.createElement('button'); quitBtn.className = 'file-tool-btn browser-live-quit'; quitBtn.style.display = 'none';
   const kbdBtn = document.createElement('button'); kbdBtn.className = 'file-tool-btn browser-live-kbd-btn'; kbdBtn.style.display = 'none'; kbdBtn.innerHTML = KBD_SVG; { const s0 = document.createElement('span'); s0.textContent = t('Keyboard'); kbdBtn.appendChild(s0); } kbdBtn.title = t('Show the keyboard to type into the page');
-  bar.append(modeBadge, takeBtn, handBtn, contBtn, closeBtn, quitBtn, kbdChip, kbdBtn, echoEl, bindBtn, urlEl, openBtn, viewersEl, recEl, fitChip, copyChip, backendBtn, backendLabelEl, tabsBtn, consBtn, traceBtn, reBtn, moreBtn);
+  bar.append(modeBadge, takeBtn, handBtn, contBtn, closeBtn, quitBtn, kbdChip, kbdBtn, echoEl, bindBtn, urlEl, openBtn, viewersEl, recEl, fitChip, copyChip, backendBtn, backendLabelEl, tabsBtn, consBtn, traceBtn, reBtn, abBtn, moreBtn);
   // BROWSE YOURSELF: THE ADDRESS ROW (his windows only) — Back · Forward · Reload · the address (web addresses only); the
   // daemon's own verbs under HIS session (the screencast has no omnibox: without this a fresh profile is a blank page)
   const addrRow = document.createElement('div'); addrRow.className = 'browser-live-address'; addrRow.style.display = 'none';
@@ -796,8 +799,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const want = words ? '' : 'none';
     if (shareLine.style.display !== want) shareLine.style.display = want;
   }
-  const setStatus = (text, { error = false, reconnect = false, hide = false } = {}) => {
+  const setStatus = (text, { error = false, reconnect = false, hide = false, agentBrowser = false } = {}) => {
     statusEl.textContent = text || '';
+    abBtn.style.display = agentBrowser ? '' : 'none';
     statusEl.style.display = hide ? 'none' : '';
     statusEl.classList.toggle('error', !!error);
     reBtn.style.display = reconnect ? '' : 'none';
@@ -2381,7 +2385,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
           // stays greyed, the badge names why; `browser_unstable` = it kept closing and VibeSpace stopped restarting it
           // lane H verify r6 MINOR 1: `unstable: 'failing'` = every ask to start it again failed — it never came back to close
           st.error = m; st.stopped = m.code; noteStop(); st.stoppedHow = m.unstable || null; renderMode(); maybeShowSessions();
-          setStatus(m.code === 'browser_unstable' ? (m.unstable === 'failing' ? t('This browser could not be started — VibeSpace stopped trying. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh') : t('This browser keeps closing — VibeSpace stopped starting it again. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh')) : t('Closed — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true, error: m.code === 'browser_unstable' });
+          setStatus(m.code === 'browser_unstable' ? (m.unstable === 'failing' ? t('This browser could not be started — VibeSpace stopped trying. Stop it in «Agent browser…», then the next command starts it fresh') : t('This browser keeps closing — VibeSpace stopped starting it again. Stop it in «Agent browser…», then the next command starts it fresh')) : t('Closed — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true, error: m.code === 'browser_unstable', agentBrowser: m.code === 'browser_unstable' });
         } else if (m.state === 'error') { st.error = m; if (m.code === 'not-found') st.sessionEnded = true; setStatus(t('Live view unavailable: {why}', { why: String(m.error || m.code || '') }), { error: true, reconnect: true }); maybeShowSessions(); }
         else if (m.state === 'connecting') setStatus(t('Starting the browser stream…'));
         else if (m.state === 'upstream-open') { st.connected = true; st.reconnects = 0; st.openAt = Date.now(); if (st.stopped) { st.stopped = false; renderMode(); } setStatus(st.frames ? '' : t('Connected — waiting for the first frame…'), { hide: !!st.frames }); renderKbd(); syncKeyboard(); renderPicture(); }

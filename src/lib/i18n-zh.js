@@ -2011,7 +2011,7 @@ export default {
   "this machine": "本机",
   "Why API billing? apiKeyHelper is set on the machine": "为什么是 API 计费？机器上配置了 apiKeyHelper",
   "VibeSpace agent integration (master switch)": "VibeSpace agent 集成（总开关）",
-  "Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every option below only applies while this is ON.": "管辖 AGENT 能看到或用到的一切 VibeSpace 集成。开（默认）：会话获得 VibeSpace hook（任务组上下文、每轮提醒、停止提醒）和 PATH 上的 vibespace-status/ask/task 工具。关：模型得到原汁原味的 claude/codex——立即从 ~/.claude/settings.json 和 ~/.codex/hooks.json 摘除 hook 注册（重新打开时恢复，除非你曾在 Manage Agents 里手动移除过 hook），新会话不再带任何 VibeSpace 环境变量和工具，已在运行的会话也不再收到注入的上下文、提醒和任务读取。模型不可见的管道两种状态下都照常工作：被动用量采集（statusline）、计费/账号环境变量、Ctrl+G 编辑器、会话持久化和远程传输。下方所有选项仅在此开关打开时生效。",
+  "Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every other option in this section only applies while this is ON.": "管辖 AGENT 能看到或用到的一切 VibeSpace 集成。开（默认）：会话获得 VibeSpace hook（任务组上下文、每轮提醒、停止提醒）和 PATH 上的 vibespace-status/ask/task 工具。关：模型得到原汁原味的 claude/codex——立即从 ~/.claude/settings.json 和 ~/.codex/hooks.json 摘除 hook 注册（重新打开时恢复，除非你曾在 Manage Agents 里手动移除过 hook），新会话不再带任何 VibeSpace 环境变量和工具，已在运行的会话也不再收到注入的上下文、提醒和任务读取。模型不可见的管道两种状态下都照常工作：被动用量采集（statusline）、计费/账号环境变量、Ctrl+G 编辑器、会话持久化和远程传输。本节其他所有选项仅在此开关打开时生效。",
   "New remote sessions ship no tools and register no hook. Anything shown above is residue from earlier sessions — inert without the session env; Remove deletes it from the host.": "新的远程会话不再船运工具、不再注册 hook。上方显示的都是此前会话留下的残留——没有会话环境变量时完全惰性；点 Remove 可从主机上删除。",
   "Stop nudge: staleness threshold (minutes)": "停止提醒：状态过期阈值（分钟）",
   "Stop nudge: cooldown per session (minutes)": "停止提醒：每会话冷却时间（分钟）",
@@ -2496,7 +2496,7 @@ export default {
   "Cloud-side scope": "云端范围",
   "Shared with me": "与我共享",
   "Shared drive (team)": "共享云端硬盘（团队）",
-  "“Shared with me” and Shared drives are separate spaces in Google Drive — this picks which one the mount shows; the folder path above is inside it.": "“与我共享”和共享云端硬盘在 Google Drive 里是独立空间——这里选择挂载展示哪一个；上面的文件夹路径在所选空间内。",
+  "“Shared with me” and Shared drives are separate spaces in Google Drive — this picks which one the mount shows; the folder path is inside it.": "“与我共享”和共享云端硬盘在 Google Drive 里是独立空间——这里选择挂载展示哪一个；文件夹路径在所选空间内。",
   "Shared drive": "共享云端硬盘",
   "click “List shared drives” (needs access above) or paste an id": "点击“列出共享云端硬盘”（需先完成上方授权）或粘贴 id",
   "Folder ID (advanced — mount ONE shared folder)": "文件夹 ID（高级——只挂载某个共享文件夹）",
@@ -3477,7 +3477,7 @@ export default {
   "Message from “{name}”": "来自「{name}」的消息",
   "Message from another session": "来自其他会话的消息",
   "published": "已发布",
-  "Managed under Active forwards above": "已在上方“活跃转发”中管理",
+  "Managed under Active forwards": "已在“活跃转发”中管理",
   "Processes": "进程",
   "CPU": "CPU",
   "MEM": "内存",
@@ -4928,8 +4928,8 @@ export default {
   "Browser closed": "浏览器已关闭",
   "Browser keeps closing": "浏览器反复关闭",
   "Browser could not start": "浏览器无法启动",
-  "This browser could not be started — VibeSpace stopped trying. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh": "这个浏览器无法启动——VibeSpace 已不再尝试启动它。请在 ⚙ → 工具 → Agent 浏览器… 中停止它,之后的下一条命令会重新启动它",
-  "This browser keeps closing — VibeSpace stopped starting it again. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh": "这个浏览器反复关闭——VibeSpace 已不再自动重新启动它。请在 ⚙ → 工具 → Agent 浏览器… 中停止它,之后的下一条命令会重新启动它",
+  "This browser could not be started — VibeSpace stopped trying. Stop it in «Agent browser…», then the next command starts it fresh": "这个浏览器无法启动——VibeSpace 已不再尝试启动它。请在「Agent 浏览器…」中停止它,之后的下一条命令会重新启动它",
+  "This browser keeps closing — VibeSpace stopped starting it again. Stop it in «Agent browser…», then the next command starts it fresh": "这个浏览器反复关闭——VibeSpace 已不再自动重新启动它。请在「Agent 浏览器…」中停止它,之后的下一条命令会重新启动它",
   "Closed — the agent's next browser command starts it again, and this view reconnects then": "已关闭——agent 的下一条浏览器命令会再次启动它,届时这个视图会自动重新连接",
   "Stop this profile's browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)": "立即停止这个配置的浏览器——登录状态保留在配置中;下一条命令会再次启动它(这也会重置一个反复关闭的浏览器)",
   "Live view unavailable: {why}": "实时视图不可用: {why}",
@@ -7670,7 +7670,7 @@ export default {
   "Only you can do this, not an agent.": "只有你本人可以这样做，agent 不行。",
   "New profile…": "新建配置…",
   "Create a profile: its name, which browser, the computer it runs on and who can use it": "创建一个配置：名字、用哪个浏览器、在哪台电脑上运行、谁能使用",
-  "No profiles yet — create one with New profile… above; an agent can make one too, or keep a conversation's browser from its session card.": "还没有配置——用上方的“新建配置…”创建一个；agent 也可以创建，或者从会话卡片保留某个会话的浏览器。",
+  "No profiles yet — create one with New profile…; an agent can make one too, or keep a conversation's browser from its session card.": "还没有配置——用“新建配置…”创建一个；agent 也可以创建，或者从会话卡片保留某个会话的浏览器。",
   "Chrome build": "Chrome 版本",
   "Change build…": "更换版本…",
   "Choose which installed Chrome build this profile runs": "选择这个配置使用哪个已安装的 Chrome 版本",
@@ -9793,7 +9793,7 @@ export default {
   "Only the judge": "只用判断模型",
   "Only the fixed rules": "只用固定规则",
   "How \"needs attention\" is decided": "怎么判断需关注",
-  "A shortcut that sets the switches below. Change any switch and this shows the mix you have.": "一键设置下面的开关。改了任何一个开关，这里会显示你现在的组合。",
+  "A shortcut that sets this section's switches. Change any switch and this shows the mix you have.": "一键设置本节的开关。改了任何一个开关，这里会显示你现在的组合。",
   "Someone wrote to me directly and I have not read it": "有人直接发给我、我还没读的",
   "A one-to-one chat with unread messages from the last 24 hours (an app or bot never counts).": "24 小时内有未读消息的单聊（应用或机器人发来的不算）。",
   "A message waiting for my approval to send": "等我批准才发出去的消息",
@@ -10012,7 +10012,7 @@ export default {
   "Judging model": "判断模型",
   "Language model (OpenAI / OpenRouter)": "语言模型（OpenAI / OpenRouter）",
   "Needs-attention threshold": "需关注阈值",
-  "The model behind the four switches above. Example: openai/gpt-6-luna-decisions on OpenRouter. Empty = the model the cluster chose when you use the cluster's key, otherwise the provider's default (gpt-6-luna on OpenAI, openai/gpt-6-luna-decisions on OpenRouter). The Test on the Language model card asks this model.": "上面四个开关背后的模型。例如 OpenRouter 上的 openai/gpt-6-luna-decisions。留空 = 用集群的钥匙时用集群选的模型，否则用提供方的默认模型（OpenAI 为 gpt-6-luna，OpenRouter 为 openai/gpt-6-luna-decisions）。「语言模型」卡片上的测试问的就是这个模型。",
+  "The model behind this card's four switches. Example: openai/gpt-6-luna-decisions on OpenRouter. Empty = the model the cluster chose when you use the cluster's key, otherwise the provider's default (gpt-6-luna on OpenAI, openai/gpt-6-luna-decisions on OpenRouter). The Test on the Language model card asks this model.": "这张卡片四个开关背后的模型。例如 OpenRouter 上的 openai/gpt-6-luna-decisions。留空 = 用集群的钥匙时用集群选的模型，否则用提供方的默认模型（OpenAI 为 gpt-6-luna，OpenRouter 为 openai/gpt-6-luna-decisions）。「语言模型」卡片上的测试问的就是这个模型。",
   "The model “Draft from my verdicts” asks to rewrite your block from your ✓ / ✗ answers. Example: Sonnet 5.5 words the lines better for about $0.02 a draft. It is sent only the short digests the judging model already saw and your block, through OpenRouter's zero-data-retention endpoints; the draft card names the model. At most $0.10 a day, inside the daily limit.": "“从我的判定起草”用来根据你的 ✓ / ✗ 改写你那段话的模型。例如 Sonnet 5.5 写得更好，每次约 $0.02。只发送判断模型已经看过的简短摘要和你那段话，经由 OpenRouter 的零数据保留端点；草稿卡片上会写出模型名。每天最多 $0.10，算在每日上限之内。",
   "Uses a language model through your OpenAI or OpenRouter key for the features you turn on in its settings: picking out the messages that need you, notification rules written as a sentence, handing messages out by what they say, the For-you order, and drafting “What matters to me”. It never spends more per day than the limit you set.": "通过你的 OpenAI 或 OpenRouter 钥匙使用语言模型，只做你在它的设置里打开的功能：挑出需要你的消息、用一句话写的通知规则、按内容分派消息、For-you 托盘的排序、起草「我在乎什么」。每天花费不会超过你设的上限。",
   "What matters to me": "我在乎什么",
@@ -10503,7 +10503,7 @@ export default {
   "Set a second password first — stored values are shown only behind it": "请先设置第二密码——存储的值只在它之后显示", // lane vault-contents-window
   "That stored value could not be opened": "该存储值无法打开", // lane vault-contents-window
   "That stored value is not there any more": "该存储值已不存在", // lane vault-contents-window
-  "The vault is locked — Unlock… above shows what it holds (For you names what is waiting on it).": "保险库已锁定——点上方的「解锁…」后才能查看其中内容（「待你处理」里写明了在等它的事）。", // lane vault-contents-window
+  "The vault is locked — Unlock… shows what it holds (For you names what is waiting on it).": "保险库已锁定——点「解锁…」后才能查看其中内容（「待你处理」里写明了在等它的事）。", // lane vault-contents-window
   "Token": "令牌", // lane vault-contents-window
   "Too many values shown — try again in {n} s": "查看次数过多——请 {n} 秒后再试", // lane vault-contents-window
   "Values hidden again — the 5 minutes are over": "5 分钟已到，值已重新隐藏", // lane vault-contents-window
@@ -14219,7 +14219,7 @@ export default {
   "{n} of {m} account(s)": "{m} 个账号中 {n} 个",
   "{n} profile(s) · {m} saved login(s)": "{n} 个配置 · {m} 个已存登录",
   "proxy password not in the vault": "代理密码不在保险库", // B-8b87: a browser profile's proxy and its login
-  "Its proxy address carries its password, which is never used — «Move the password to the vault» in ⋯": "它的代理地址里带着密码，这个密码从不使用——在 ⋯ 里点「把密码移入保险库」", // B-8b87: a browser profile's proxy and its login
+  "Its proxy address carries its password, which is never used — «Move the password to the vault»": "它的代理地址里带着密码，这个密码从不使用——点「把密码移入保险库」", // B-8b87: a browser profile's proxy and its login
   "proxy": "代理", // B-8b87: a browser profile's proxy and its login
   "Through its proxy {address}, with its login from the vault": "经它的代理 {address}，登录信息来自保险库", // B-8b87: a browser profile's proxy and its login
   "Through its proxy {address}": "经它的代理 {address}", // B-8b87: a browser profile's proxy and its login

@@ -1181,7 +1181,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     for (const h of [t('Profile'), t('State'), t('Who can use it'), t('Disk · records'), '']) head.appendChild(el('span', 'bprof-th', h));
     table.appendChild(head);
     const rows = v.profiles || [];
-    if (!rows.length) prof.appendChild(el('div', 'bprof-empty chat-status-dim', t('No profiles yet — create one with New profile… above; an agent can make one too, or keep a conversation\'s browser from its session card.')));
+    if (!rows.length) prof.appendChild(el('div', 'bprof-empty chat-status-dim', t('No profiles yet — create one with New profile…; an agent can make one too, or keep a conversation\'s browser from its session card.')));
     const seen = new Set();
     for (const r of rows) {
       seen.add(r.id);

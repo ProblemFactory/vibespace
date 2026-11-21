@@ -59,7 +59,7 @@ const PLUGIN_SETTINGS = {
       // default of the provider — src/server/decision-engine.js `credential`
       { key: 'judgeModel', type: 'string', default: '', maxLength: 200, apply: 'server',
         label: t('Judging model'),
-        description: t('The model behind the four switches above. Example: openai/gpt-6-luna-decisions on OpenRouter. Empty = the model the cluster chose when you use the cluster\'s key, otherwise the provider\'s default (gpt-6-luna on OpenAI, openai/gpt-6-luna-decisions on OpenRouter). The Test on the Language model card asks this model.') },
+        description: t('The model behind this card\'s four switches. Example: openai/gpt-6-luna-decisions on OpenRouter. Empty = the model the cluster chose when you use the cluster\'s key, otherwise the provider\'s default (gpt-6-luna on OpenAI, openai/gpt-6-luna-decisions on OpenRouter). The Test on the Language model card asks this model.') },
       // lane llm-plugin-rename: the OWN switch of the drafter — ON by default (a draft costs nothing until the owner clicks;
       // the four switches above stay OFF because they bill by themselves); off ⇒ no 「从我的判定起草」 button and the
       // named refusal of the learn route `learn-off`

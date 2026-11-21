@@ -2011,7 +2011,7 @@ export default {
   "this machine": "このマシン",
   "Why API billing? apiKeyHelper is set on the machine": "なぜ API 課金？マシンに apiKeyHelper が設定されています",
   "VibeSpace agent integration (master switch)": "VibeSpace エージェント連携（マスタースイッチ）",
-  "Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every option below only applies while this is ON.": "エージェントから見える・使える VibeSpace 連携すべてを統括します。オン（既定）：セッションは VibeSpace フック（タスクグループのコンテキスト、ターンごとのリマインダー、停止ナッジ）と PATH 上の vibespace-status/ask/task ツールを利用します。オフ：モデルは素の claude/codex を得ます — フック登録は ~/.claude/settings.json と ~/.codex/hooks.json から即座に削除され（再度オンにすると復元。ただし Manage Agents で手動削除していた場合を除く）、新しいセッションには VibeSpace の環境変数・ツールが一切付かず、実行中のセッションもコンテキスト注入・ナッジ・タスク読み取りを受け取らなくなります。モデルから見えない配管はどちらの状態でも動き続けます：受動的な使用量キャプチャ（statusline）、課金/アカウント環境変数、Ctrl+G エディタ、セッション永続化、リモート転送。以下のオプションはすべてこのスイッチがオンの間のみ有効です。",
+  "Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every other option in this section only applies while this is ON.": "エージェントから見える・使える VibeSpace 連携すべてを統括します。オン（既定）：セッションは VibeSpace フック（タスクグループのコンテキスト、ターンごとのリマインダー、停止ナッジ）と PATH 上の vibespace-status/ask/task ツールを利用します。オフ：モデルは素の claude/codex を得ます — フック登録は ~/.claude/settings.json と ~/.codex/hooks.json から即座に削除され（再度オンにすると復元。ただし Manage Agents で手動削除していた場合を除く）、新しいセッションには VibeSpace の環境変数・ツールが一切付かず、実行中のセッションもコンテキスト注入・ナッジ・タスク読み取りを受け取らなくなります。モデルから見えない配管はどちらの状態でも動き続けます：受動的な使用量キャプチャ（statusline）、課金/アカウント環境変数、Ctrl+G エディタ、セッション永続化、リモート転送。以下のオプションはすべてこのスイッチがオンの間のみ有効です。",
   "New remote sessions ship no tools and register no hook. Anything shown above is residue from earlier sessions — inert without the session env; Remove deletes it from the host.": "新しいリモートセッションはツールを配布せず、フックも登録しません。上に表示されているのは過去のセッションの残留物です — セッション環境変数がなければ不活性。Remove でホストから削除できます。",
   "Stop nudge: staleness threshold (minutes)": "停止ナッジ：ステータス失効しきい値（分）",
   "Stop nudge: cooldown per session (minutes)": "停止ナッジ：セッションごとのクールダウン（分）",
@@ -2497,7 +2497,7 @@ export default {
   "Cloud-side scope": "クラウド側の範囲",
   "Shared with me": "共有アイテム",
   "Shared drive (team)": "共有ドライブ（チーム）",
-  "“Shared with me” and Shared drives are separate spaces in Google Drive — this picks which one the mount shows; the folder path above is inside it.": "「共有アイテム」と共有ドライブは Google Drive では別空間です——ここでマウントに表示する空間を選びます。上のフォルダパスは選んだ空間の中です。",
+  "“Shared with me” and Shared drives are separate spaces in Google Drive — this picks which one the mount shows; the folder path is inside it.": "「共有アイテム」と共有ドライブは Google Drive では別空間です——ここでマウントに表示する空間を選びます。フォルダパスは選んだ空間の中です。",
   "Shared drive": "共有ドライブ",
   "click “List shared drives” (needs access above) or paste an id": "「共有ドライブを一覧」をクリック（上の認可が必要）、または id を貼り付け",
   "Folder ID (advanced — mount ONE shared folder)": "フォルダ ID（上級——共有フォルダを 1 つだけマウント）",
@@ -3477,7 +3477,7 @@ export default {
   "Message from “{name}”": "「{name}」からのメッセージ",
   "Message from another session": "他のセッションからのメッセージ",
   "published": "公開中",
-  "Managed under Active forwards above": "上の「アクティブな転送」で管理中",
+  "Managed under Active forwards": "「アクティブな転送」で管理中",
   "Processes": "プロセス",
   "CPU": "CPU",
   "MEM": "メモリ",
@@ -4927,8 +4927,8 @@ export default {
   "Browser closed": "ブラウザは閉じられています",
   "Browser keeps closing": "ブラウザが繰り返し閉じています",
   "Browser could not start": "ブラウザを起動できません",
-  "This browser could not be started — VibeSpace stopped trying. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh": "このブラウザを起動できません — VibeSpace は起動の再試行をやめました。⚙ → ツール → エージェントブラウザ… で停止すると、次のコマンドで新たに起動します",
-  "This browser keeps closing — VibeSpace stopped starting it again. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh": "このブラウザは繰り返し閉じています — VibeSpace は自動での再起動をやめました。⚙ → ツール → エージェントブラウザ… で停止すると、次のコマンドで新たに起動します",
+  "This browser could not be started — VibeSpace stopped trying. Stop it in «Agent browser…», then the next command starts it fresh": "このブラウザを起動できません — VibeSpace は起動の再試行をやめました。「エージェントブラウザ…」で停止すると、次のコマンドで新たに起動します",
+  "This browser keeps closing — VibeSpace stopped starting it again. Stop it in «Agent browser…», then the next command starts it fresh": "このブラウザは繰り返し閉じています — VibeSpace は自動での再起動をやめました。「エージェントブラウザ…」で停止すると、次のコマンドで新たに起動します",
   "Closed — the agent's next browser command starts it again, and this view reconnects then": "閉じられています — エージェントの次のブラウザコマンドで再び起動し、そのときこのビューは自動で再接続します",
   "Stop this profile's browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)": "このプロファイルのブラウザを今すぐ停止します — ログインはプロファイルに残り、次のコマンドで再び起動します(繰り返し閉じるブラウザもこれでリセットされます)",
   "Live view unavailable: {why}": "ライブビューを利用できません: {why}",
@@ -7669,7 +7669,7 @@ export default {
   "Only you can do this, not an agent.": "これはあなた自身にしかできません。エージェントにはできません。",
   "New profile…": "新しいプロファイル…",
   "Create a profile: its name, which browser, the computer it runs on and who can use it": "プロファイルを作成します：名前、使うブラウザ、動かすコンピュータ、使える会話",
-  "No profiles yet — create one with New profile… above; an agent can make one too, or keep a conversation's browser from its session card.": "まだプロファイルはありません。上の「新しいプロファイル…」で作成できます。エージェントが作ることも、セッションカードから会話のブラウザを残すこともできます。",
+  "No profiles yet — create one with New profile…; an agent can make one too, or keep a conversation's browser from its session card.": "まだプロファイルはありません。「新しいプロファイル…」で作成できます。エージェントが作ることも、セッションカードから会話のブラウザを残すこともできます。",
   "Chrome build": "Chrome ビルド",
   "Change build…": "ビルドを変更…",
   "Choose which installed Chrome build this profile runs": "このプロファイルで使う、インストール済みの Chrome ビルドを選びます",
@@ -9792,7 +9792,7 @@ export default {
   "Only the judge": "判定モデルだけ",
   "Only the fixed rules": "固定ルールだけ",
   "How \"needs attention\" is decided": "「要対応」の決め方",
-  "A shortcut that sets the switches below. Change any switch and this shows the mix you have.": "下のスイッチをまとめて設定する近道です。どれかを変えると、今の組み合わせがここに出ます。",
+  "A shortcut that sets this section's switches. Change any switch and this shows the mix you have.": "この欄のスイッチをまとめて設定する近道です。どれかを変えると、今の組み合わせがここに出ます。",
   "Someone wrote to me directly and I have not read it": "誰かが私に直接送ってきて、まだ読んでいないもの",
   "A one-to-one chat with unread messages from the last 24 hours (an app or bot never counts).": "直近 24 時間に未読メッセージがある 1 対 1 のチャット（アプリやボットは数えません）。",
   "A message waiting for my approval to send": "送信に私の承認を待っているメッセージ",
@@ -10011,7 +10011,7 @@ export default {
   "Judging model": "判定モデル",
   "Language model (OpenAI / OpenRouter)": "言語モデル（OpenAI / OpenRouter）",
   "Needs-attention threshold": "要対応のしきい値",
-  "The model behind the four switches above. Example: openai/gpt-6-luna-decisions on OpenRouter. Empty = the model the cluster chose when you use the cluster's key, otherwise the provider's default (gpt-6-luna on OpenAI, openai/gpt-6-luna-decisions on OpenRouter). The Test on the Language model card asks this model.": "上の 4 つのスイッチが使うモデル。例：OpenRouter の openai/gpt-6-luna-decisions。空欄 = クラスターのキーを使うときはクラスターが選んだモデル、それ以外はプロバイダーの既定（OpenAI は gpt-6-luna、OpenRouter は openai/gpt-6-luna-decisions）。言語モデルのカードのテストはこのモデルに尋ねます。",
+  "The model behind this card's four switches. Example: openai/gpt-6-luna-decisions on OpenRouter. Empty = the model the cluster chose when you use the cluster's key, otherwise the provider's default (gpt-6-luna on OpenAI, openai/gpt-6-luna-decisions on OpenRouter). The Test on the Language model card asks this model.": "このカードの 4 つのスイッチが使うモデル。例：OpenRouter の openai/gpt-6-luna-decisions。空欄 = クラスターのキーを使うときはクラスターが選んだモデル、それ以外はプロバイダーの既定（OpenAI は gpt-6-luna、OpenRouter は openai/gpt-6-luna-decisions）。言語モデルのカードのテストはこのモデルに尋ねます。",
   "The model “Draft from my verdicts” asks to rewrite your block from your ✓ / ✗ answers. Example: Sonnet 5.5 words the lines better for about $0.02 a draft. It is sent only the short digests the judging model already saw and your block, through OpenRouter's zero-data-retention endpoints; the draft card names the model. At most $0.10 a day, inside the daily limit.": "「判定から下書き」が ✓ / ✗ の回答をもとにあなたの文を書き直すときに使うモデル。例：Sonnet 5.5 はより良い文になり、1 回約 $0.02。送るのは判定モデルがすでに見た短い要約とあなたの文だけで、OpenRouter のゼロデータ保持エンドポイントを通ります。下書きカードにモデル名が出ます。1 日最大 $0.10、1 日の上限の内側です。",
   "Uses a language model through your OpenAI or OpenRouter key for the features you turn on in its settings: picking out the messages that need you, notification rules written as a sentence, handing messages out by what they say, the For-you order, and drafting “What matters to me”. It never spends more per day than the limit you set.": "OpenAI か OpenRouter のキーで言語モデルを使い、設定でオンにした機能だけを行います：対応が必要なメッセージの選び出し、一文で書く通知ルール、内容に応じたメッセージの振り分け、For-you トレイの並べ替え、「私にとって大事なこと」の下書き。1 日の上限を超えて使うことはありません。",
   "What matters to me": "私にとって大事なこと",
@@ -10502,7 +10502,7 @@ export default {
   "Set a second password first — stored values are shown only behind it": "先に第二パスワードを設定してください — 保存された値はその後ろでだけ表示されます", // lane vault-contents-window
   "That stored value could not be opened": "その保存値は開けませんでした", // lane vault-contents-window
   "That stored value is not there any more": "その保存値はもうありません", // lane vault-contents-window
-  "The vault is locked — Unlock… above shows what it holds (For you names what is waiting on it).": "保管庫はロック中です — 上の「ロック解除…」で中身を表示できます（待っているものは「あなた宛て」に載っています）。", // lane vault-contents-window
+  "The vault is locked — Unlock… shows what it holds (For you names what is waiting on it).": "保管庫はロック中です — 「ロック解除…」で中身を表示できます（待っているものは「あなた宛て」に載っています）。", // lane vault-contents-window
   "Token": "トークン", // lane vault-contents-window
   "Too many values shown — try again in {n} s": "表示が多すぎます — {n} 秒後にもう一度お試しください", // lane vault-contents-window
   "Values hidden again — the 5 minutes are over": "5 分が過ぎたので、値を再び隠しました", // lane vault-contents-window
@@ -14218,7 +14218,7 @@ export default {
   "{n} of {m} account(s)": "{m} アカウント中 {n} 件",
   "{n} profile(s) · {m} saved login(s)": "プロファイル {n} 件 · 保存済みログイン {m} 件",
   "proxy password not in the vault": "プロキシのパスワードが保管庫にありません", // B-8b87: a browser profile's proxy and its login
-  "Its proxy address carries its password, which is never used — «Move the password to the vault» in ⋯": "このプロキシのアドレスにはパスワードが含まれていますが、使われることはありません——⋯ の「パスワードを保管庫へ移す」で移せます", // B-8b87: a browser profile's proxy and its login
+  "Its proxy address carries its password, which is never used — «Move the password to the vault»": "このプロキシのアドレスにはパスワードが含まれていますが、使われることはありません——「パスワードを保管庫へ移す」で移せます", // B-8b87: a browser profile's proxy and its login
   "proxy": "プロキシ", // B-8b87: a browser profile's proxy and its login
   "Through its proxy {address}, with its login from the vault": "プロキシ {address} 経由（ログイン情報は保管庫から）", // B-8b87: a browser profile's proxy and its login
   "Through its proxy {address}": "プロキシ {address} 経由", // B-8b87: a browser profile's proxy and its login
