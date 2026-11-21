@@ -11,7 +11,7 @@ import { showToast, showContextMenu, copyText } from './utils.js';
 import { pressPlan, linkOf } from '../internal-link.js'; // PURE (CJS): THE grammar + THE table of presses
 import { sessionRowOf } from './user-todos-actions.js'; // THE row a conversation key names (the sidebar's own key derivation, exported once)
 import { agentOptsOf } from './session-card.js'; // a row's resume / view options (ONE definition)
-import { openClock } from './late-focus.js'; // B-c87d: the other-desktop go-to lands after the switch: it asks the late-focus door from the press's start
+import { startNow } from './late-focus.js'; // B-c87d: the other-desktop go-to lands after the switch: it asks the late-focus door from the press's start
 
 const backendOf = (key) => { const i = String(key || '').indexOf(':'); return i > 0 ? String(key).slice(0, i) : ''; };
 const idOf = (key) => { const i = String(key || '').indexOf(':'); return i > 0 ? String(key).slice(i + 1) : ''; };
@@ -72,7 +72,8 @@ export function pressLink(app, kind, ref, at = {}, io = IO) {
   const dm = app?.desktopManager;
   const s = f.s;
   if (plan === 'win') app.goToWinId(f.win);
-  else if (plan === 'desk') { const at = openClock(); Promise.resolve(dm.switchTo(f.heldDesk)).then(() => { const w = f.held && app.wm?.windows?.get(f.held.id) ? f.held.id : builtWindowOf(app, ref, s); if (w) app.goToWinId(w, { since: at }); }); }
+  else if (plan === 'desk') { const at = startNow();   // B-c87d r945: the link's press hands its start (a composer left on the old desktop must not drop this go-to's focus)
+    Promise.resolve(dm.switchTo(f.heldDesk)).then(() => { const w = f.held && app.wm?.windows?.get(f.held.id) ? f.held.id : builtWindowOf(app, ref, s); if (w) app.goToWinId(w, { since: at }); }); }
   else if (plan === 'attach') {
     app.attachSession(s.webuiId, s.webuiName || nameOfRow(app, s), s.cwd, { mode: s.webuiMode, ...agentOptsOf(s) });
     const desk = (dm?.desktops || []).find((d) => d && d.id === dm.activeDesktopId);

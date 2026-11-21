@@ -90,6 +90,16 @@ export function isTypingField(el) {
   return tag === 'INPUT' && !/^(button|checkbox|radio|range|file|submit|reset|image|color|hidden)$/i.test(String(el.type || 'text'));
 }
 
+/** is `el` VISIBLE now (r945: a window of another virtual desktop is hidden by visibility, its box kept): the browser's own
+ *  checkVisibility (display, visibility, content-visibility), else the computed visibility; true where neither is to be had */
+const seenNow = (el) => {
+  try {
+    if (typeof el.checkVisibility === 'function') return el.checkVisibility({ visibilityProperty: true, checkVisibilityCSS: true });
+    if (typeof getComputedStyle === 'function') return getComputedStyle(el).visibility !== 'hidden';
+  } catch { }
+  return true;
+};
+
 export function mayTakeKeys({ win = null, since = PAGE_START } = {}) {
   try { if (lateFocusVerdict(document.querySelectorAll(DIALOG_ROOTS), document.activeElement) !== 'take') return false; } catch { return false; }
   // a press INTO an embedded page (the browser window, a plugin's panel, a viewer) is never stamped by the page's listeners: the keys
@@ -98,7 +108,7 @@ export function mayTakeKeys({ win = null, since = PAGE_START } = {}) {
   if (ae && String(ae.tagName || '').toUpperCase() === 'IFRAME' && !insideWindow(win, ae)) return false;
   const s = asStart(since) || { at: PAGE_START, by: null }, a = lastPersonAct();
   // the field the person is in, outside the opening window — only one still in the page and drawn (r871: a hidden or gone field is no field)
-  const field = !!ae && fieldHoldsKeys({ typing: isTypingField(ae), connected: ae.isConnected !== false, drawn: typeof ae.getClientRects === 'function' ? ae.getClientRects().length > 0 : true, inside: insideWindow(win, ae) });
+  const field = !!ae && fieldHoldsKeys({ typing: isTypingField(ae), connected: ae.isConnected !== false, drawn: typeof ae.getClientRects === 'function' ? ae.getClientRects().length > 0 : true, visible: seenNow(ae), inside: insideWindow(win, ae) });
   return lateFocusTakes({ since: s.at, handed: !!s.by, field, act: a ? { at: a.at, inside: actInside(win, a) } : null }) === 'take';
 }
 

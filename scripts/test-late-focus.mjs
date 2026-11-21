@@ -97,14 +97,18 @@ const FIELD_ROWS = [
   ['a typing field outside the opening window, in the page and drawn: it holds the keys', { typing: true, connected: true, drawn: true, inside: false }, true],
   ['…the same field HIDDEN (a dialog hid with the person\'s Enter in it): no field', { typing: true, connected: true, drawn: false, inside: false }, false],
   ['…the same field GONE from the page: no field', { typing: true, connected: false, drawn: true, inside: false }, false],
+  ['…the same field on ANOTHER virtual desktop (its box kept, hidden by visibility): no field', { typing: true, connected: true, drawn: true, visible: false, inside: false }, false],
   ['a field inside the opening window: not elsewhere', { typing: true, connected: true, drawn: true, inside: true }, false],
   ['no typing field (a button, the body): no field', { typing: false, connected: true, drawn: true, inside: false }, false],
 ];
 const badField = FIELD_ROWS.filter(([, a, w]) => KY.fieldHoldsKeys(a) !== w).map(([n]) => n);
 ok(badField.length === 0, `the field fact's ${FIELD_ROWS.length} rows: only a field still in the page and drawn, outside the opening window, holds the person's keys`, badField);
-const CURE_RULE = (a) => !!a.typing && !a.inside;   // the round before (a field counted whether or not it was drawn)
+const CURE_RULE = (a) => !!a.typing && !a.inside;   // r673's rule (a field counted whether or not it was drawn)
 const fieldFails = FIELD_ROWS.filter(([, a, w]) => CURE_RULE(a) !== w).map(([n]) => n);
-ok(fieldFails.length === 2 && fieldFails.every((n) => /HIDDEN|GONE/.test(n)), `RED: the round before's rule (a field drawn or not) is refused by the hidden and the gone rows — ${fieldFails.join(' · ')}`, fieldFails);
+ok(fieldFails.length === 3 && fieldFails.every((n) => /HIDDEN|GONE|ANOTHER/.test(n)), `RED: r673's rule (a field drawn or not) is refused by the hidden, the gone and the other desktop's rows — ${fieldFails.join(' · ')}`, fieldFails);
+const DRAWN_RULE = (a) => !!a.typing && a.connected !== false && a.drawn !== false && !a.inside;   // r871's rule (drawn, but not «visible»)
+const drawnFails = FIELD_ROWS.filter(([, a, w]) => DRAWN_RULE(a) !== w).map(([n]) => n);
+ok(drawnFails.length === 1 && /ANOTHER/.test(drawnFails[0]), `RED (r945): «drawn» without «visible» (r871's rule) is refused by the other desktop's row — ${drawnFails.join(' · ')}`, drawnFails);
 
 console.log('§2 where an act lands (late-focus.js insideWindow)');
 class N {
@@ -214,7 +218,7 @@ const pressRoads = ({ cv, sl, lj, ut, ap, ma, sf, ai, rp }) => {
     ['r671: the For-you reply reads it before its network wait and hands it to the reopened conversation', beforeAwait(pr, 'const at = app._openStartNow?.();') && (pr.match(/openReopened\(r, at\)/g) || []).length === 2 && orp.includes('openAt: at };')],
     ['r671: the «already live» answer attaches with the create\'s start and its quiet', sl.includes('            openAt, ...(quiet ? { quiet: true } : {}),')],
     ['r871: New Session\'s Create reads its start at the press, before the path\'s commit, and hands it to the create', (() => { const b = ap.slice(ap.indexOf("document.querySelector('#dialog-new-session .btn-create').addEventListener('click', async (ev) => {")); const d = b.indexOf('const openAt = this._openStartNow?.();'), w = b.indexOf('await '); return d > 0 && d < w && b.includes('this._nsCreated?.(msg, { channels }); }, openAt });'); })()],
-    ['r871: Fork reads it before the harness offer\'s wait', (() => { const b = body(sl, '  async _doForkSession('); const d = b.indexOf('const openAt = this._openStartNow();'), w = b.indexOf('await '); return d > 0 && d < w && /this\.createSession\(\{\n\s+cwd: sessionInfo\.cwd,\n\s+name: forkName,\n\s+resumeId,\n\s+mode,\n\s+openAt,/.test(b); })()],
+    ['r871: Fork reads it before the harness offer\'s wait (r945: and again after an offer the person pressed)', (() => { const b = body(sl, '  async _doForkSession('); const d = b.indexOf('let openAt = this._openStartNow();'), w = b.indexOf('await '), again = b.indexOf("{ const again = this._openStartNow(); if (again && again.by === 'act') openAt = again; }"); if (!(again > w)) return false; return d > 0 && d < w && /this\.createSession\(\{\n\s+cwd: sessionInfo\.cwd,\n\s+name: forkName,\n\s+resumeId,\n\s+mode,\n\s+openAt,/.test(b); })()],
     ['r871: the agents\' two probe terminals read it at their press', (ma.match(/const doTest = \(model = ''\) => \{[^\n]*\n        const openAt = this\._openStartNow\?\.\(\);/g) || []).length === 2 && (ma.match(/mode: 'terminal', cwd: '', openAt, accountId: id, ephemeral: true/g) || []).length === 2],
     ['r871: the setup flow reads it before the folder\'s commit', /const go = async \(mode\) => \{\n\s+const openAt = this\._openStartNow\?\.\(\);[\s\S]{0,700}this\.createSession\(\{ cwd, mode, backend: 'claude', openAt \}\);/.test(sf)],
     ['r871: the app install dialog reads it before the prompt\'s network wait', (() => { const b = ai.slice(ai.lastIndexOf('  form.onsubmit = async (e) => {', ai.indexOf('/api/apps/helper-prompt'))); const d = b.indexOf('const openAt = app._openStartNow?.();'), w = b.indexOf('await '); return d > 0 && d < w && b.includes("app.createSession({ cwd: '', openAt, name:"); })()],
@@ -308,6 +312,8 @@ const pressRoads = ({ cv, sl, lj, ut, ap, ma, sf, ai, rp }) => {
   ok(LF.lateFocus(vH, { win: WC, since: LF.openStart(app0) }) === true && vH.n === 1, 'r871: the focus left on a HIDDEN input (its dialog hid): no field — the unhanded open takes the keys (the person never types into nothing)');
   const gone = new N('ns-name', 'INPUT'); gone.type = 'text'; gone.isConnected = false; globalThis.document.activeElement = gone; const vG = view();
   ok(LF.lateFocus(vG, { win: WC, since: LF.openStart(app0) }) === true && vG.n === 1, '…and on an input GONE from the page: no field — taken');
+  const away = new N('composer', 'TEXTAREA'); away.getClientRects = () => [{ width: 10, height: 10 }]; away.checkVisibility = () => false; globalThis.document.activeElement = away; const vV = view();
+  ok(LF.lateFocus(vV, { win: WC, since: LF.openStart(app0) }) === true && vV.n === 1, 'r945: the focus left in a composer on ANOTHER virtual desktop (its box kept, hidden by visibility): no field — the unhanded open takes the keys');
   hidden.getClientRects = () => [{ width: 10, height: 10 }]; globalThis.document.activeElement = hidden; const vH2 = view();
   ok(LF.lateFocus(vH2, { win: WC, since: LF.openStart(app0) }) === false && vH2.n === 0, 'CONTROL: the same input DRAWN is a field the person is in — the unhanded open drops');
   globalThis.document.activeElement = null;
@@ -353,6 +359,27 @@ const lateFocusesOf = (file, src) => { const hit = PARSED.get(file); if (hit && 
 // function that is CALLED from such a place or registered BY NAME (`ws.onGlobal(this._handler)`) — followed within its file to a
 // fixpoint (the upload's insert after the upload's await; a reply's dispatch). A call inside the door's own arguments
 // (`lateFocus({ focus: () => … })`) is through the door; the name `focus` itself is never followed (every focus call is one).
+// r945: a bare start in ANY spelling — a read of the clock itself (openClock() / pageClock()), and a door's `since` or a maker's `openAt`
+// (or the standing focus' `at`) given a plain number, Date.now() or performance.now(); counted on the tree the census already parsed
+function bareStartsIn(ast) {
+  const DOORS = new Set(['lateFocus', 'mayTakeKeys', 'goToWinId']), MAKERS = new Set(['createSession', 'attachSession', 'resumeSession', '_attachInRow', 'attachTmuxSession', '_focusExistingSession', '_focusPendingAttach']);
+  const nowCall = (v) => !!v && v.type === 'CallExpression' && v.callee.type === 'MemberExpression' && !v.callee.computed && v.callee.property && v.callee.property.name === 'now' && v.callee.object && (v.callee.object.name === 'Date' || v.callee.object.name === 'performance');
+  const plain = (v) => !!v && ((v.type === 'Literal' && typeof v.value === 'number') || nowCall(v));
+  let n = 0;
+  (function walk(node) {
+    if (!node || typeof node.type !== 'string') return;
+    if (node.type === 'CallExpression') {
+      const c = node.callee, name = c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && c.property ? c.property.name : null;
+      if (name === 'openClock' || name === 'pageClock') n++;
+      if (DOORS.has(name) || MAKERS.has(name)) for (const arg of node.arguments) if (arg && arg.type === 'ObjectExpression') for (const p of arg.properties) {
+        const k = p.key && (p.key.name || p.key.value);
+        if ((k === 'since' || k === 'openAt' || (k === 'at' && MAKERS.has(name))) && plain(p.value)) n++;
+      }
+    }
+    for (const k of Object.keys(node)) { if (k === 'loc') continue; const v = node[k]; if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v.type === 'string') walk(v); }
+  })(ast);
+  return n;
+}
 function lateFocusesRead(src) {
   let ast; try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true }); } catch (e) { return { parseError: e.message, calls: [] }; }
   const fns = [], byName = new Set();
@@ -386,7 +413,7 @@ function lateFocusesRead(src) {
     for (const f of fns) { const fnLate = f.lateRoot || (f.name && late.has(f.name)); for (const k of f.calls) if ((k.late || fnLate) && !late.has(k.name) && fns.some((g) => g.name === k.name)) { late.add(k.name); changed = true; } } }
   const calls = [];
   for (const f of fns) { const fnLate = f.lateRoot || (f.name && late.has(f.name)); for (const x of f.focuses) if (x.lexLate || fnLate) calls.push({ line: x.line, text: x.text }); }
-  return { calls };
+  return { calls, bare: bareStartsIn(ast) };
 }
 const CLASS_FILES = new Set(["src/lib/session-lifecycle.js", "src/lib/app.js", "src/lib/chat-view.js", "src/lib/chat-input.js", "src/lib/chat-renderers.js", "src/lib/chat-status-bar.js", "src/lib/chat-minimap.js", "src/lib/terminal.js", "src/lib/external-editor.js", "src/lib/desktop-app-window.js", "src/lib/xpra-view.js", "src/lib/vnc-view.js", "src/lib/internal-link-ui.js", "src/lib/taskbar.js", "src/lib/command-mode.js", "src/lib/window.js", "src/lib/tab-group.js", "src/lib/desktop-manager.js", "src/lib/layout.js", "src/lib/design-window.js", "src/lib/channel-thread-pane.js", "src/lib/doc-window-ui.js", "src/lib/browser-live-window.js", "src/lib/browser-replay-window.js", "src/lib/machine-desktop.js", "src/lib/search-window.js", "src/lib/inbox-window.js"]);
 const NAMED = [   // [file, the call's words, how many times, why] — the window, chat and terminal code (measured: r364)
@@ -555,18 +582,23 @@ const BARE = {
   'src/lib/chat-view.js': [1, 'the rewind answer\'s start, read at the press and kept across a reload in the tab\'s storage; the press is in the window\'s own message, so no field elsewhere holds the keys'],
   'src/lib/desktop-app-window.js': [4, 'the first connect\'s start (the window\'s own making — a restore or a press) and the satellite\'s (the app showed a window, nobody pressed): unhanded ON PURPOSE; «Resume here» and «Take over» are read at the press (the press is inside the window)'],
   'src/lib/external-editor.js': [3, 'the pane\'s open on the CLI\'s signal: unhanded ON PURPOSE (no person\'s press; the pane sits in the terminal\'s own window); its two closes are read at the person\'s press, inside that window'],
-  'src/lib/internal-link-ui.js': [1, 'the link\'s other-desktop go-to, read at the link\'s press (the press leaves no field focused)'],
   'src/lib/terminal.js': [4, 'the terminal\'s paste roads, read at the paste or the tap (the terminal itself holds the keys: inside its window); the pad\'s fallback is unhanded'],
-};
+};   // r945: the link door reads its start through the act (it left this table)
 {
-  const bareOf = (src) => (src.match(/\bopenClock\(\)/g) || []).length;
-  const files = [...PAGE.keys()].filter((f) => f !== 'src/lib/late-focus.js');
-  const seen = files.map((f) => [f, bareOf(PAGE.get(f))]).filter(([, n]) => n > 0);
-  const off = seen.filter(([f, n]) => !BARE[f] || BARE[f][0] !== n).map(([f, n]) => `${f} ×${n}${BARE[f] ? ` (named ×${BARE[f][0]})` : ' (NOT NAMED)'}`);
-  const stale = Object.keys(BARE).filter((f) => !seen.some(([g]) => g === f));
-  ok(off.length === 0 && stale.length === 0, `r871: every bare clock start in the page's code is named with its why (${seen.reduce((n, [, k]) => n + k, 0)} reads in ${seen.length} files)`, { off, stale });
-  const planted = new Map(PAGE); planted.set('src/lib/zz-bare-plant.js', 'export const at = openClock();\n');
-  const offP = [...planted.keys()].filter((f) => f !== 'src/lib/late-focus.js').map((f) => [f, bareOf(planted.get(f))]).filter(([f, n]) => n > 0 && (!BARE[f] || BARE[f][0] !== n));
-  ok(offP.length === 1 && offP[0][0] === 'src/lib/zz-bare-plant.js', 'CONTROL: a NEW bare clock start in a file the table does not name is red by its file', offP);
+  // a bare start in ANY spelling (r945): counted on the census's own parse of each file (bareStartsIn), cached with it — never by a word
+  const bareOf = (src, f = 'src/lib/zz-probe.js') => { const r = lateFocusesOf(f, src); return r.parseError ? -1 : r.bare; };
+  const tableOf = (pages) => [...pages.keys()].filter((f) => f !== 'src/lib/late-focus.js' && f !== 'src/lib/utils.js').map((f) => [f, bareOf(pages.get(f), f)]).filter(([, n]) => n !== 0);
+  const offOf = (seen) => seen.filter(([f, n]) => !BARE[f] || BARE[f][0] !== n).map(([f, n]) => `${f} ×${n}${BARE[f] ? ` (named ×${BARE[f][0]})` : ' (NOT NAMED)'}`);
+  const seen = tableOf(PAGE), off = offOf(seen), stale = Object.keys(BARE).filter((f) => !seen.some(([g]) => g === f));
+  ok(off.length === 0 && stale.length === 0, `every bare start in the page's code, in any spelling, is named with its why (${seen.reduce((n, [, k]) => n + k, 0)} in ${seen.length} files; the link door reads through the act)`, { off, stale });
+  const plants = [
+    ['a new file reading the clock', 'export const at = openClock();\n'],
+    ['a door given performance.now()', "export function f(v, win) { lateFocus(v, { win, since: performance.now() }); }\n"],
+    ['a maker given a plain number', "export function g(app) { app.createSession({ cwd: '', openAt: 1234 }); }\n"],
+    ['a door given Date.now()', "export function h(v) { mayTakeKeys({ since: Date.now() }); }\n"],
+  ];
+  const plantOut = plants.map(([n, code]) => { const m = new Map(PAGE); m.set('src/lib/zz-bare-plant.js', code); const o = offOf(tableOf(m)); return { n, red: o.length === 1 && o[0].startsWith('src/lib/zz-bare-plant.js ×1') }; });
+  ok(plantOut.every((x) => x.red), `CONTROL: a bare start in a file the table does not name is red by its file, in each spelling — ${plantOut.map((x) => `${x.n}: ${x.red ? 'red' : 'GREEN'}`).join(' · ')}`, plantOut);
+  ok(bareOf("const s = { openAt: 0, navAt: 0 };\n", 'src/lib/zz-state-probe.js') === 0, 'the census reads a door\'s or a maker\'s start only: a state field named openAt (the live view\'s) is no start');
 }
 report();
