@@ -1909,11 +1909,11 @@ console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, 
   const op0 = procWalks(() => TW0.runOp('codexOpenThreads', {}));
   ok(op0.n >= 1, 'CONTROL (B-f64b): the op without its guard walks /proc on the main thread (RED for the leg above)', { n: op0.n });
 }
-// ⑦ B-3767 unit 2 (主开发 11:40Z): THE TWO PER-USER FOLDERS ARE JUDGED BEFORE USE (sock-path ensureSocketDir — 0700, a folder, not
+// ⑧ B-3767 unit 2 (主开发 11:40Z): THE TWO PER-USER FOLDERS ARE JUDGED BEFORE USE (sock-path ensureSocketDir — 0700, a folder, not
 // a link, this uid's, no group/other bits). A link planted at the per-user name (a stray, or another user's) is refused BY NAME
 // with the way out, and nothing goes through it: the zst cache throws EZSTCACHE and writes no twin there; the ssh control folder
 // turns connection sharing off (no ControlPath into it). RED controls: the release's mkdir-in-a-catch, then used.
-console.log('⑦ the zst cache and the ssh control folder are judged before use (B-3767 unit 2)');
+console.log('⑧ the zst cache and the ssh control folder are judged before use (B-3767 unit 2)');
 {
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const M = mutantCopies('zst-own', REPO);
