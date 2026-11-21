@@ -279,6 +279,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - WHAT WAS LEFT: the watch-follows-its-browser half shipped in .410 (3ab31de2b: the CDP url cached per RUN of the browser, a failed socket re-armed while a view watches, a browser started again under an open view armed at once). Two roads still said «not watching» (or «cannot watch») of a running browser: (1) while the re-arms were COMING — `down()` deletes the watch, so between a failed socket and its next re-arm (2 s, doubling to 32 s) the view's fact was `not-watched`; the bridge re-reads it 2.5 s after a down, just past the FIRST re-arm, so a first re-arm that also failed showed the line for the rest of the backoff; (2) a re-arm whose ENDPOINT was refused (a daemon between runs answering no CDP url yet) ENDED the tries: the view then said «cannot watch» until the next command.
 - THE CURE (src/server/browser-dialogs.js): while a re-arm is coming (`rearmPending`: one pending or one asking its endpoint, the tries not run out) `passkeyFactOf` says nothing, as while a socket connects. A refused re-arm keeps the backoff while the keeper's record says the browser runs (`browserRuns`); a browser that does not run keeps its refusal said. After REARM_TRIES the given-up line stands (its Retry door).
 - LEGS (test-browser-passkey, fast): a socket closed under an open view whose first re-arms fail — every read of the view's fact in that window says nothing, then watched again (CONTROL: the release's fact says not-watched — RED); a refused endpoint under a running browser — the tries go on, the view silent, watched when it answers (CONTROL: the release's re-arm ends at one ask and says «cannot watch» — RED); the accepted rule: a browser that does not run keeps its refusal. kb-file-structure «B-346d law 1, the watch»; en/zh/ja Fixed line.
+- **The follow (主开发 r1195, after the row was taken):**
+  - the folder's close sits inside its sync's best effort, so a landed write is never reported failed;
+  - the two local roads and the sign-in page are matched as the router matches them (`routeKey`);
+  - the boot's sign-in line comes from `auth.bootLine()` and says HELD by name;
+  - the password dialog shows the held words (src/lib/setup-flows.js `refusalText`);
+  - the kb says what a shut instance does to a running conversation's doors and hooks: no hook of ours fails closed.
 
 ## 2.369.415 — 2026-11-21
 
