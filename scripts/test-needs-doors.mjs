@@ -962,7 +962,15 @@ Object.assign(globalThis, {
 });
 Object.defineProperty(globalThis, 'navigator', { value: { language: 'en', languages: ['en'], userAgent: 'node', maxTouchPoints: 0, clipboard: null }, configurable: true, writable: true });
 const realFetch = globalThis.fetch;
-let FETCH = async () => { throw new Error('no fetch in this leg'); };
+// A LEG LEAVES NOTHING IN FLIGHT (主开发 r1101, 2026-11-21 — the release mirror of 2.369.414, run 44886765836: the suite died on
+// «hd.hosts is not iterable at Sb2._renderMountsOnce», a redraw the machines-1 (verifier #2) leg had started and left behind, served
+// by a LATER leg's stand-in that answered every address «fine»). Every stand-in fetch answers ONLY its own leg's addresses; any
+// other call is REFUSED BY NAME (a 404 whose error names the leg) and RECORDED with the leg it landed in, so a stray call is red
+// where it happens (the census at the end of this section), never a silent answer. `stray(leg)` = that refusal.
+const STRAYS = [];
+const stray = (leg) => (url, o) => { const u = String(url); STRAYS.push(`${leg}: ${(o && o.method) || 'GET'} ${u}`); return { ok: false, status: 404, json: async () => ({ error: `not an address of the leg «${leg}»: ${u}` }) }; };
+const noFetch = async (url, o) => { STRAYS.push(`between legs: ${(o && o.method) || 'GET'} ${String(url)}`); throw new Error('no fetch in this leg'); };
+let FETCH = noFetch;
 globalThis.fetch = (...a) => FETCH(...a);
 // ── the client, bundled ONCE (one module instance: one i18n, one utils) ──
 const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
@@ -1183,7 +1191,7 @@ if (CL) {
     sb._showAddHostDialog = (hd, from) => opened.push([hd, from]);
     const nav = globalThis.navigator;
     const press = async (answer, clip = { writeText: async (x) => { clip.got = x; } }, exec = false) => {
-      FETCH = answer instanceof Error ? async () => { throw answer; } : async () => ({ ok: answer.status === 200, status: answer.status, json: async () => answer.body });
+      FETCH = async (url, o) => { if (!/\/public-key$/.test(String(url))) return stray('machines-1 (reader #4)')(url, o); if (answer instanceof Error) throw answer; return { ok: answer.status === 200, status: answer.status, json: async () => answer.body }; };
       nav.clipboard = clip; EXEC_COPY = exec;
       const row = DOC.createElement('div'); DOC.body.appendChild(row);
       const more = DOC.createElement('details'); row.appendChild(more);
@@ -1229,7 +1237,8 @@ if (CL) {
     const val = (d, k) => (d && (d.fields.find((x) => x.key === k) || {}).value) || '';
     const note = dA ? dA.fields.filter((x) => x.type === 'note').map((x) => x.value).join(' ') : '';
     const posts = [];
-    FETCH = async (url, o) => { posts.push([String(url), o && o.body ? JSON.parse(o.body) : null]); return { ok: true, status: 200, json: async () => (String(url) === '/api/hosts' ? { success: true, id: 'h2' } : { ok: true }) }; };
+    // its addresses: the Add (POST /api/hosts) and the saved machine's connectivity test (POST /api/hosts/<id>/test, D6's «still tested»)
+    FETCH = async (url, o) => { const u = String(url); if (u !== '/api/hosts' && !/^\/api\/hosts\/[^/]+\/test$/.test(u)) return stray('machines-1 (verifier #3) and D6')(url, o); posts.push([u, o && o.body ? JSON.parse(o.body) : null]); return { ok: true, status: 200, json: async () => (u === '/api/hosts' ? { success: true, id: 'h2' } : { ok: true }) }; };
     if (dA) await dA.onSubmit({ name: val(dA, 'name'), user: val(dA, 'user'), host: val(dA, 'host'), port: val(dA, 'port'), keyChoice: 'default' }, { close() {}, err: { isConnected: true } }).catch(() => {});
     const sent = (posts.find(([u]) => u === '/api/hosts') || [])[1];
     ok(handed && handed.id === 'h1' && dA && ['name', 'user', 'host', 'port'].map((k) => val(dA, k)).join('|') === 'gpu-01|ubuntu|gpu-01.example|2222' && /replaces “gpu-01”/.test(note) && /replace/i.test(dA.submit)
@@ -1248,7 +1257,7 @@ if (CL) {
     for (let i = 0; i < 50 && !addEnded; i++) await new Promise((r) => setImmediate(r));
     ok(addEnded && posts.some(([u]) => u === '/api/hosts/h2/test'),
       'lg-remote-hardening D6: a first-contact Host key dialog that fails to open ends the Add\'s wait — the saved machine is still tested (never an Add that hangs)', posts.map(([u]) => u).join(' '));
-    FETCH = async () => { throw new Error('no fetch in this leg'); };
+    FETCH = noFetch;
   }
   // machines-1 (verifier #2): the public-key door's answer is the PANEL's, per machine — a Machines re-render (the hosts-updated /
   // mounts-updated broadcast) puts it back on the machine's row; its «Dismiss» ends it, as do the machine's removal and a re-test that passes
@@ -1267,7 +1276,8 @@ if (CL) {
     const KEY2 = 'ssh-ed25519 AAAAC3fake needs-doors-2';
     FETCH = async (url) => {
       const u = String(url);
-      const body = u === '/api/mounts' ? { mounts: [], shares: [], rcloneAvailable: true } : u === '/api/hosts' ? { hosts: hostsNow, key: { exists: true } } : u === '/api/mount-tokens' ? { tokens: [] } : u === '/api/machine-mounts' ? { mounts: [] } : /\/public-key$/.test(u) ? { ok: true, keys: [{ publicKey: KEY2, source: 'file' }] } : {};
+      const body = u === '/api/mounts' ? { mounts: [], shares: [], rcloneAvailable: true } : u === '/api/hosts' ? { hosts: hostsNow, key: { exists: true } } : u === '/api/mount-tokens' ? { tokens: [] } : u === '/api/machine-mounts' ? { mounts: [] } : /\/public-key$/.test(u) ? { ok: true, keys: [{ publicKey: KEY2, source: 'file' }] } : null;
+      if (!body) return stray('machines-1 (verifier #2)')(url);
       return { ok: true, status: 200, json: async () => body };
     };
     globalThis.navigator.clipboard = { writeText: async () => { throw new Error('denied'); } }; EXEC_COPY = false;
@@ -1275,7 +1285,22 @@ if (CL) {
     const answerOf = () => { const r = rowOf(); const a = r && r.querySelector('.mounts-key-shown'); return a ? `${a.dataset.code}:${(a.querySelector('textarea') || {}).value || ''}` : null; };
     const doorOf = (root, name) => (root ? root.querySelectorAll('.need-door').find((b) => b.dataset.door === name) || null : null);
     const ask = async () => { const d = doorOf(rowOf(), 'public-key'); if (d) d.click(); await tick(10); };
-    const render = async (ev) => { if (ev && onGlobal) onGlobal({ type: ev }); else await sb2._renderMounts(); await tick(10); };
+    // A BROADCAST'S ASSERT READS THE REDRAW IT CAUSES: the panel coalesces a broadcast's redraw (src/lib/sidebar-mounts.js
+    // _renderMountsSoon: coalesce(…, 250), a trailing timer); every redraw of THIS panel is kept (its promise), and a broadcast
+    // waits, inside its own bound, for the redraw it caused and for that redraw to land in THIS leg's stand-in
+    const renders = [], ownRender = sb2._renderMounts;
+    sb2._renderMounts = function (...a) { const r = ownRender.apply(this, a); renders.push(r); return r; };
+    const COALESCE_WAIT_MS = 3000;
+    const render = async (ev) => {
+      if (ev && onGlobal) {
+        const n = renders.length, t0 = Date.now();
+        onGlobal({ type: ev });
+        while (renders.length === n && Date.now() - t0 < COALESCE_WAIT_MS) await tick(20);
+        if (renders.length === n) throw new Error(`the ${ev} broadcast caused no redraw within ${COALESCE_WAIT_MS / 1000} s`);
+        await renders[renders.length - 1];
+      } else await sb2._renderMounts();
+      await tick(10);
+    };
     let err2 = null;
     const seen2 = {};
     try {
@@ -1289,10 +1314,15 @@ if (CL) {
       await ask(); sb2._hostStatus.h1 = { ok: true, latencyMs: 5, at: Date.now() }; await render(); sb2._hostStatus.h1 = failing(); await render(); seen2.afterPass = answerOf();
       await ask(); hostsNow = []; await render(); hostsNow = [H1]; await render(); seen2.afterRemove = answerOf();
     } catch (e) { err2 = String((e && e.stack) || e).slice(0, 400); }
+    // NOTHING LEFT IN FLIGHT: the panel's tab is put away (a coalesced timer still pending draws nothing: its callback asks for the
+    // mounts tab) and every redraw it started has landed in its OWN stand-in, before the list and the stand-in go
+    sb2._activeTab = null;
+    const landed = await Promise.allSettled(renders);
+    seen2.redraws = renders.length; seen2.redrawsRejected = landed.filter((x) => x.status === 'rejected').length;
     sb2.listEl.remove();
-    ok(!err2 && seen2.answered === 'copy_refused:' + KEY2 && seen2.hostsUpdated === seen2.answered && seen2.mountsUpdated === seen2.answered && seen2.dismissed === null && seen2.dismissedRerender === null && seen2.afterPass === null && seen2.afterRemove === null,
+    ok(!err2 && seen2.redrawsRejected === 0 && seen2.answered === 'copy_refused:' + KEY2 && seen2.hostsUpdated === seen2.answered && seen2.mountsUpdated === seen2.answered && seen2.dismissed === null && seen2.dismissedRerender === null && seen2.afterPass === null && seen2.afterRemove === null,
       'machines-1 (verifier #2): the public-key door\'s answer (here the key in its field) survives a Machines re-render — the hosts-updated and mounts-updated broadcasts put it back on the machine\'s row; its «Dismiss» ends it, and so do a re-test that passes and the machine\'s removal (r.dcd495a1f: gone at the next render)', { err2, seen2 });
-    FETCH = async () => { throw new Error('no fetch in this leg'); };
+    FETCH = noFetch;
   }
   // for-you-2: the For-you window's door DRAWN and PRESSED (reader #4), the tray row's closer and its door (reader #4 / #10)
   {
@@ -1407,7 +1437,7 @@ if (CL) {
     const okBtn = async () => { for (let i = 0; i < 50; i++) { await tick(2); const b = DOC.body.querySelectorAll('button.btn-create').pop(); if (b) return b; } return null; };
     const lineOf = () => DOC.body.querySelectorAll('.desktop-adopt-witness').pop() || null;
     const doorIn = (line, name) => (line ? line.querySelectorAll('.need-door').find((x) => x.dataset.door === name) || null : null);
-    FETCH = async (url) => { const u = String(url); sent.push(u); const forget = /\/forget$/.test(u); return { ok: forget, status: forget ? 200 : 500, json: async () => (forget ? { ok: true } : { ok: false, code: 'failed', error: 'the recipe exited 100', output: 'E: frob is held' }) }; };
+    FETCH = async (url, o) => { const u = String(url); if (!u.startsWith('/api/desktop/')) return stray('desktop-apps (remove, forget)')(url, o); sent.push(u); const forget = /\/forget$/.test(u); return { ok: forget, status: forget ? 200 : 500, json: async () => (forget ? { ok: true } : { ok: false, code: 'failed', error: 'the recipe exited 100', output: 'E: frob is held' }) }; };
     nav.clipboard = clip;
     const row = { id: 'app-frob', label: 'Frob', remove: { exec: 'apt-get', args: ['remove', '-y', 'frob'] } };
     const open = async () => { sent.length = 0; if (!fn('DAL', 'removeRegistered')) return null; const p = DAL.removeRegistered(row, { onDone: async () => ({ registry: [] }) }); const c = await okBtn(); if (c) c.click(); await p; return lineOf(); };
@@ -1424,14 +1454,14 @@ if (CL) {
     ok(asked.join() === '/api/desktop/apps/app-frob/remove' && !!fg && fg.textContent === 'Forget it' && confirmWords === 'Forget' && forgot.length === 1 && !!l2 && !l2.isConnected,
       'remove-failed (closure 3, item 2): «Forget it» PRESSED reaches its act — its own confirm («Forget»), then the forget request for THIS entry (…/app-frob/forget); the failed dialog closes', { asked, door: fg && fg.textContent, confirmWords, sent: sent.slice(0, 4), open: !!(l2 && l2.isConnected) });
     ok(!!copied && /apt-get remove -y frob/.test(copied) && stays && closed, 'remove-failed (closure 3, item 2): «Copy the command» PRESSED puts the recipe on the clipboard (the dialog stays); «Close» PRESSED closes it and sends nothing', { copied, stays, closed });
-    FETCH = async () => { throw new Error('no fetch in this leg'); }; nav.clipboard = null;
+    FETCH = noFetch; nav.clipboard = null;
     if (!hadElement) delete globalThis.Element;
   }
   // settings-13: «Takes effect after a reload» against the value this PAGE LOADED with, re-judged on the store's change event (reader #4 / #13)
   {
     const path13 = Object.keys(SS.SETTINGS_SCHEMA).find((p) => { const r = SS.SETTINGS_SCHEMA[p]; return r && !r.liveApply && r.type === 'boolean' && !r.store; });
     const sch = SS.SETTINGS_SCHEMA[path13];
-    const loadWith = async (vals) => { FETCH = async () => ({ ok: true, status: 200, json: async () => ({ ...vals }) }); const m = new SET.SettingsManager(); await m.load(); FETCH = async () => ({ ok: true, status: 200, json: async () => ({}) }); return m; };
+    const loadWith = async (vals) => { FETCH = async (url, o) => (/^\/api\/settings\b/.test(String(url)) ? { ok: true, status: 200, json: async () => ({ ...vals }) } : stray('settings-13')(url, o)); const m = new SET.SettingsManager(); await m.load(); FETCH = async (url, o) => (/^\/api\/settings\b/.test(String(url)) ? { ok: true, status: 200, json: async () => ({}) } : stray('settings-13')(url, o)); return m; };
     const line = (m) => { if (!fn('SU', 'SettingsUI') || typeof SU.SettingsUI.prototype._reloadLine !== 'function') return null; const ui = Object.create(SU.SettingsUI.prototype); ui.settings = m; ui.app = {}; const l = ui._reloadLine(path13, sch); if (l) DOC.body.appendChild(l); return l; };
     const m = await loadWith({});
     const l = line(m);
@@ -1456,13 +1486,14 @@ if (CL) {
     // the stores' debounced saves (500 ms after a set) leave with the leg — else their POST /api/settings lands in a LATER leg's
     // stub (channels-accounts-4 read two of them once the bundling legs after this one moved the clock: B-1e9a's move, the meeting)
     for (const x of [m, m2, m3]) if (x && x._saveTimer) { clearTimeout(x._saveTimer); x._saveTimer = null; }
-    FETCH = async () => { throw new Error('no fetch in this leg'); };
+    FETCH = noFetch;
   }
   // settings-13 (verifier #1): the reload lines' store listeners leave with the surface that bound them — a Settings window opened on
   // the row, drawn again twice (a re-render, a search keystroke) and closed: ONE listener for the row while it is drawn, NONE after the close
   {
     const path1 = Object.keys(SS.SETTINGS_SCHEMA).find((p) => { const r = SS.SETTINGS_SCHEMA[p]; return r && !r.liveApply && r.type === 'boolean' && !r.store; });
-    FETCH = async () => ({ ok: true, status: 200, json: async () => ({}) });
+    // its addresses: the settings store, and the channel adapters the Settings window it opens asks for (answered {} as before)
+    FETCH = async (url, o) => (/^\/api\/settings\b/.test(String(url)) || String(url) === '/api/channels/adapters' ? { ok: true, status: 200, json: async () => ({}) } : stray('settings-13 (verifier #1)')(url, o));
     const m = new SET.SettingsManager(); await m.load();
     const wins = new Map();
     let win = null;
@@ -1485,7 +1516,7 @@ if (CL) {
     } catch (e) { err1 = String((e && e.stack) || e).slice(0, 400); }
     ok(!err1 && drawn && JSON.stringify(counts) === '[1,1,1,0]',
       `settings-13 (verifier #1): the reload line's store listener (${path1}) leaves with the surface that bound it — one while the row is drawn (open, a re-render, a search keystroke), none after the window closes (r.dcd495a1f: one more per render, kept after the close)`, { err1, drawn, counts });
-    FETCH = async () => { throw new Error('no fetch in this leg'); };
+    FETCH = noFetch;
   }
   // B-7aef (B-8703's remainder, items 3–4): A SETTINGS ROW WHOSE WORDS NAME A COMMAND ELSEWHERE CARRIES ITS DOOR on the row's own line
   // (src/lib/settings-ui.js SETTINGS_DOORS — a row's `door` names one). Every schema row with a `door` is drawn by the REAL SettingsUI
@@ -1568,7 +1599,7 @@ if (CL) {
   // Connect block SAYS it, with the ONE press that heals it: PUT /api/integrations/<row> {use:'cluster'}, then a redraw
   {
     const puts = []; let redrawn = 0;
-    FETCH = async (url, o) => { puts.push([String(url), o && o.method, o && o.body ? JSON.parse(o.body) : null]); return { ok: true, status: 200, json: async () => ({ ok: true }) }; };
+    FETCH = async (url, o) => { if (!String(url).startsWith('/api/integrations/')) return stray('B-1e9a cure')(url, o); puts.push([String(url), o && o.method, o && o.body ? JSON.parse(o.body) : null]); return { ok: true, status: 200, json: async () => ({ ok: true }) }; };
     const decl = { label: 'Connect', words: { shadowed: 'An earlier Connect hides the cluster settings' }, whys: { 'self-hosted': 'x' } };
     const box = DOC.createElement('div');
     OCR.renderConnectRow(box, decl, { presetShadowed: 'dropline', connectVia: 'relay', account: {} }, () => { redrawn++; }, {});
@@ -1580,7 +1611,7 @@ if (CL) {
     ok(!!sh && /hides the cluster settings/.test(sh.textContent) && !!use && puts.length === 1 && puts[0][0] === '/api/integrations/dropline' && puts[0][1] === 'PUT' && JSON.stringify(puts[0][2]) === '{"use":"cluster"}' && redrawn === 1
       && !plain.querySelector('.oauth-use-cluster'),
       'B-1e9a cure: a person\'s row hiding the cluster\'s settings is SAID on the Connect block with its one press — «Use the cluster\'s settings» = PUT /api/integrations/dropline {use:"cluster"}, then a redraw; with nothing hidden there is no such press', { puts, redrawn, words: sh && sh.textContent });
-    FETCH = async () => { throw new Error('no fetch in this leg'); };
+    FETCH = noFetch;
   }
   // B-1e9a cure 3 (4): SEVERAL cluster settings and none the default — the block draws the status's CHOICES as its picker (PUT
   // {clusterKey}, then a redraw), never the one press the store would refuse; a refusal or an unreachable hub is said in the
@@ -1615,7 +1646,7 @@ if (CL) {
       // the toasts this drive made leave the page — each toast, and a stack it made (a later leg reads every toast body there)
       for (const b of DOC.body.querySelectorAll('.global-toast-body').filter((x) => !toastsBefore.has(x))) if (b.parentNode) Nd.prototype.remove.call(b.parentNode);
       for (const n of DOC.body.children.filter((c) => !before.has(c))) Nd.prototype.remove.call(n);
-      FETCH = async () => { throw new Error('no fetch in this leg'); };
+      FETCH = noFetch;
       return { pick: !!pick, press: !!press, opts, puts, redrawn, said, after };
     };
     const OK = await drive(OCR, { ok: true }), NO = await drive(OCR, STORE_NO), NUL = await drive(OCR, null);
@@ -1666,7 +1697,7 @@ if (CL) {
     let pressed = null;
     if (RT && typeof CAD.showRemoveRefusedDialog === 'function') {
       const seen = [], before = new Set(DOC.body.children);
-      FETCH = async (url) => { seen.push(String(url)); return { ok: true, status: 200, json: async () => ({ adapter: { id: 'mail-1', label: 'Mail', patterns: [] } }) }; };
+      FETCH = async (url, o) => { if (!/^\/api\/channels\/adapters\//.test(String(url))) return stray('channels-accounts-4 (verifier #2)')(url, o); seen.push(String(url)); return { ok: true, status: 200, json: async () => ({ adapter: { id: 'mail-1', label: 'Mail', patterns: [] } }) }; };
       CAD.showRemoveRefusedDialog({}, acct, [rRule]);
       const line = DOC.body.querySelectorAll('[data-ref-kind="access"]')[0] || null;
       const door = line ? line.querySelector('button') : null;
@@ -1674,7 +1705,7 @@ if (CL) {
       for (let i = 0; i < 20 && !DOC.body.querySelectorAll('.global-toast-body').some((x) => /That rule no longer exists/.test(x.textContent)); i++) await tick(10);
       pressed = { door: door ? door.textContent : null, fetched: seen, said: DOC.body.querySelectorAll('.global-toast-body').map((x) => x.textContent) };
       for (const n of DOC.body.children.filter((c) => !before.has(c))) Nd.prototype.remove.call(n);   // the refusal dialog, the toast
-      FETCH = async () => { throw new Error('no fetch in this leg'); };
+      FETCH = noFetch;
     }
     ok(tg.length === 3 && tg[0].kind === 'pattern' && tg[0].id === 'pat-1' && tg[0].adapter === acct && tg[1].kind === 'account' && tg[2].kind === 'conversation' && tg[2].conv.id === 'c9'
       && !!pressed && pressed.door === 'Release…' && pressed.fetched.join() === '/api/channels/adapters/mail-1/view' && pressed.said.some((x) => /That rule no longer exists/.test(x))
@@ -1697,6 +1728,32 @@ if (CL) {
       && /const noneLine = body\.appendChild\(!hostsHeld \? needLine\(\{ words: t\('No machines yet/.test(MA),   // the B-f276 remainder's meeting: this line unless the list is HELD (then why none are listed, no door)
       'agents-accounts-6 (verifier #6, picks 3–6): «Add an SSH machine…» that cannot open the form SAYS why on its line (sayOnLine: one .need-said, role=alert, replaced, taken away) — the hub\'s error, or «Could not reach the server»', { n1, n2, n3, said: a2 && a2.textContent });
   }
+  // THE CENSUS of this section's stand-ins (A LEG LEAVES NOTHING IN FLIGHT): no call landed outside its own leg's addresses.
+  // ITS CONTROL first, the hosted run's shape made: a panel like machines-1 (verifier #2)'s fires ONE broadcast and is torn down at
+  // once, its tab left set — its coalesced redraw comes ~250 ms later under ANOTHER leg's stand-in, and the census names it there
+  {
+    const before = STRAYS.length;
+    class SbC {}
+    SM.installSidebarMounts(SbC);
+    const sc = new SbC();
+    let onG = null;
+    sc.app = { ws: { onGlobal: (f) => { onG = f; } } };
+    sc.listEl = DOC.createElement('div'); DOC.body.appendChild(sc.listEl);
+    sc._activeTab = 'mounts';
+    FETCH = async (url) => { const u = String(url); const body = u === '/api/mounts' ? { mounts: [], shares: [], rcloneAvailable: true } : u === '/api/hosts' ? { hosts: [], key: { exists: true } } : u === '/api/mount-tokens' ? { tokens: [] } : u === '/api/machine-mounts' ? { mounts: [] } : null; return body ? { ok: true, status: 200, json: async () => body } : stray('the census control (its panel)')(url); };
+    await sc._renderMounts();
+    if (onG) onG({ type: 'hosts-updated' });
+    await tick(10);
+    sc.listEl.remove();
+    FETCH = async (url, o) => stray('the census control (the next leg)')(url, o);   // the next leg's stand-in: none of its addresses is the panel's
+    for (let i = 0; i < 100 && STRAYS.length === before; i++) await tick(20);
+    sc._activeTab = null;
+    await tick(30);
+    const planted = STRAYS.splice(before);
+    FETCH = noFetch;
+    ok(planted.length > 0 && planted.every((x) => x.startsWith('the census control (the next leg): GET /api/')), `CONTROL (the census): a panel torn down inside its broadcast's coalesce leaves a redraw in flight — it lands under the NEXT leg's stand-in and is named there (${planted.length}: ${planted.slice(0, 2).join(' · ')})`, planted);
+  }
+  ok(STRAYS.length === 0, `A LEG LEAVES NOTHING IN FLIGHT: no stand-in of this section was asked an address that is not its leg's (a stray call is refused by name where it lands)${STRAYS.length ? ' — ' + STRAYS.slice(0, 8).join(' · ') : ''}`, STRAYS);
 }
 globalThis.fetch = realFetch;
 

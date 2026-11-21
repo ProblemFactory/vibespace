@@ -111,6 +111,12 @@ window.wsReady = () => sock.readyState === 1;`;
   const env = { ...process.env, HOME: home, XDG_RUNTIME_DIR: xdg }; delete env.DISPLAY; delete env.WAYLAND_DISPLAY;
   chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=1100,820', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore', env });
   const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms); if (t.unref) t.unref(); })]);
+  // THE PAGE IN FRONT (主开发 r1101, 2026-11-21 — the release mirror of 2.369.414, run 44886765836: A.shot('code.png') timed out
+  // at 30 s: page A had been a BACKGROUND tab since page B was opened with /json/new, and a picture waits for a frame of its
+  // page). `front` is the page in front; toFront() brings a page there; a picture brings ITS page to the front first (bounded,
+  // one retry said by name) and hands the front back to the page that had it, so every other leg runs as it did.
+  let front = null;
+  const toFront = async (P) => { await P.cdp('Page.bringToFront'); front = P; await sleep(150); };
   let list = null;
   list = await waitPageList(CDP_PORT, { polls: 80, everyMs: 200 }); // B-fcae: the one waiter (a miss always waits)
   if (!list) throw new Error('chrome never came up on the devtools port');
@@ -127,12 +133,29 @@ window.wsReady = () => sock.readyState === 1;`;
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1100, height: 820, deviceScaleFactor: 1, mobile: false });
     await cdp('Page.navigate', { url: ORIGIN + page });
     await waitFor('typeof window.openOat === "function" && window.wsReady()');
-    const shot = async (file) => { const s = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(PNG, file), Buffer.from(s.data, 'base64')); };
-    return { cdp, ev, waitFor, shot, errors, close: () => sock.close() };
+    const shot = async (file) => {
+      const was = front;
+      for (let i = 0; i < 2; i++) {
+        await toFront(me);
+        try {
+          const s = await race(cdp('Page.captureScreenshot', { format: 'png' }), 10000, `the picture ${file}`);
+          fs.writeFileSync(path.join(PNG, file), Buffer.from(s.data, 'base64'));
+          if (i) console.log(`    (the picture ${file} came on its one retry)`);
+          break;
+        } catch (e) {
+          if (i) throw new Error(`the picture ${file} did not come twice, its page brought to the front each time — ${e.message}`);
+          console.log(`    (the picture ${file}: ${e.message} — once more, its page brought to the front again)`);
+        }
+      }
+      if (was && was !== me) await toFront(was);
+    };
+    const me = { cdp, ev, waitFor, shot, errors, close: () => sock.close() };
+    return me;
   };
   const tB = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json/new?about:blank', { method: 'PUT' })).json();
   const A = await connect(list.find((t) => t.type === 'page'));
   const B = await connect(tB);
+  front = B;   // /json/new opened B in front: A is the background tab (the placement's read, and the hosted red's own shape)
   const phase = (P) => P.ev('document.querySelector("#oat-mint")?.dataset.phase || null');
   const fakeFacts = () => (fs.existsSync(rec) ? fs.readFileSync(rec, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
@@ -242,7 +265,7 @@ window.wsReady = () => sock.readyState === 1;`;
   ok(JSON.stringify(opts) === JSON.stringify([['Work Max', true], ['Home Pro', false]]), 'the picker lists the subscription rows, the dialog\'s row preselected', opts);
   ok(await A.ev('document.querySelector("#oat-keep")?.textContent') === '保存' && await A.ev('document.querySelector("#oat-drop")?.textContent') === '不保存' && !am.getOat(acct), '保存 / 不保存; nothing stored before the answer');
   ok(!(await A.ev('document.documentElement.outerHTML')).includes(TOKEN.slice(13, 40)), 'the held token is not on the page');
-  await A.cdp('Page.bringToFront'); await sleep(150);
+  await toFront(A);
   await A.shot('confirm.png');
   await A.ev('document.querySelector("#oat-keep").click()');
   ok(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "saved"') && am.getOat(acct) === TOKEN, '保存 ⇒ saved under the picked row');
