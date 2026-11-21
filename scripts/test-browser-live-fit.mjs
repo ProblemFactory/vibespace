@@ -55,10 +55,15 @@ const F = require('../src/browser-facts.js');
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+// r1100 (1): A WAIT THAT NEVER SAW ITS STATE SAYS SO BY NAME — `until` keeps every wait of the current group that timed out (a
+// group = the waits since the last judge), and a RED judge after them says «the state never came in N s»: the read a wait fell
+// through to is never read as the product's verdict (the 2.369.414 mirror's red in test-browser-resume-ui §9 was one)
+const waits = { missed: [], judged: false };
+const missNote = () => waits.missed.length ? ` — THE STATE NEVER CAME: the wait before this judge timed out (${waits.missed.map((ms) => `${ms / 1000} s`).join(', ')}), so this red is that, not a verdict on the product` : '';
+const ok = (c, n, extra) => { const note = c ? '' : missNote(); waits.judged = true; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + note + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await pred()) return true; } catch { } await sleep(every); } try { return !!(await pred()); } catch { return false; } };
+const until = async (pred, ms, every = 100) => { if (waits.judged) { waits.missed = []; waits.judged = false; } const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await pred()) return true; } catch { } await sleep(every); } let r = false; try { r = !!(await pred()); } catch { } if (!r) waits.missed.push(ms); return r; };
 const done = () => { console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})` : `\nALL PASS (${pass}${skipped ? ', ' + skipped + ' skipped' : ''})`); process.exit(fail ? 1 : 0); };
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -71,6 +76,10 @@ if (!dtachOk) { skip('dtach is not installed — a local session cannot be creat
 if (!REAL_AB || !abVer) { skip(`the real agent-browser is not resolvable here (${REAL_AB || 'only the VibeSpace shim / nothing on PATH'})`); done(); }
 if (!/\b0\.(3[2-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) { skip(`agent-browser ${abVer} is below 0.32 — no stream server`); done(); }
 if (!fs.existsSync(realBrowsers)) { skip(`the real agent-browser has no installed browser under ${realBrowsers} (the leg never downloads one)`); done(); }
+{ // r1100 CONTROL: the mark can be read — a wait that times out is named by the next red judge
+  await until(() => false, 30, 10); const note = missNote(); waits.missed = []; waits.judged = false;
+  ok(/THE STATE NEVER CAME/.test(note) && note.includes('0.03 s'), 'r1100 CONTROL: a wait that times out is NAMED by the next red judge («the state never came in N s»), never read as the product\'s verdict', note);
+}
 
 const ROOT = scratch('browser-live-fit');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
@@ -91,6 +100,41 @@ function cleanup() {
 }
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(130); });
+// r1100 (the 2.369.414 box rows: this leg left a driver and its headless Chrome behind, nine processes started in the suite's
+// last second — the exit's reaper above is ONE synchronous scan): THE LEG ENDS WHAT IT STARTED, on every road out of it (an
+// early return too). The server and the client Chrome are ended first (nothing they run can start another driver after), then
+// every process this suite's evidence names (the scratch HOME or ROOT in its environ, its command line or its cwd) is ended,
+// scanned again every 250 ms until two scans in a row find none (bounded 10 s); what it ended is printed, one still left is RED
+const ancestors = (() => { const a = new Set(); for (let q = process.pid; q > 1 && !a.has(q);) { a.add(q); try { const st = fs.readFileSync(`/proc/${q}/stat`, 'latin1'); q = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]); } catch { break; } } return a; })();
+const legProcs = () => {
+  const out = [], under = (x) => x === ROOT || x.startsWith(ROOT + '/') || x === HOME || x.startsWith(HOME + '/');
+  let ds = []; try { ds = fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)); } catch { return out; }
+  for (const d of ds) {
+    if (ancestors.has(Number(d))) continue;
+    try {
+      const e = fs.readFileSync(`/proc/${d}/environ`, 'utf8'), c = fs.readFileSync(`/proc/${d}/cmdline`, 'utf8');
+      let cwd = ''; try { cwd = fs.readlinkSync(`/proc/${d}/cwd`); } catch { }
+      if (!(e.includes(ROOT + '/') || e.includes(HOME + '/') || e.includes('HOME=' + HOME + '\0') || c.includes(ROOT + '/') || c.includes(HOME + '/') || under(cwd))) continue;
+      let comm = '?'; try { comm = fs.readFileSync(`/proc/${d}/comm`, 'utf8').trim(); } catch { }
+      out.push({ pid: Number(d), comm });
+    } catch { }
+  }
+  return out;
+};
+async function endLeg() {
+  for (const p of procs) { try { p.kill('SIGKILL'); } catch { } }
+  await Promise.race([Promise.all([...procs].map((p) => (p.exitCode !== null || p.signalCode !== null) ? null : new Promise((r) => p.once('exit', r)))), sleep(5000)]);
+  const ended = new Map(), t0 = Date.now(); let empty = 0;
+  while (Date.now() - t0 < 10000 && empty < 2) {
+    const found = legProcs();
+    if (!found.length) empty++; else { empty = 0; for (const f of found) { ended.set(f.pid, f.comm); try { process.kill(f.pid, 'SIGKILL'); } catch { } } }
+    await sleep(250);
+  }
+  const left = legProcs();
+  const names = (xs) => { const n = {}; for (const c of xs) n[c] = (n[c] || 0) + 1; return Object.entries(n).map(([c, k]) => `${c} ×${k}`).join(', ') || 'none'; };
+  console.log(`    the leg's end: ${ended.size} process(es) of this suite ended after the server stopped (${names([...ended.values()])}); ${left.length} left`);
+  ok(left.length === 0, `r1100: the leg ENDS WHAT IT STARTED — no driver, Chrome or other process of this suite is left after its end (${ended.size} ended: ${names([...ended.values()])})`, JSON.stringify(left));
+}
 
 // the collector: a white grid page with a "Pricing" link that reports its own viewport, the link's box and every press
 const vps = new Map(), clicks = [];
@@ -466,13 +510,21 @@ await (async () => {
     await Ph.evaluate(`(() => { const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(s2.sessionId)}); if (cw) window.app.goToWinId(cw.id); return true; })()`);
     if (await phoneChip(lang)) await closeFold();
   }
-  // cleanup of this leg's browsers: the sessions' own `close`, then the reaper by evidence
-  await s1.vb(['close'], 30000).catch(() => { });
-  await s2.vb(['close'], 30000).catch(() => { });
+  // cleanup of this leg's browsers: the sessions' own `close`, then the reaper by evidence (endLeg, below the leg)
+  // r1100: DON'T START WHAT IT WON'T USE — a `close` goes to the real driver only for a browser the hub says is RUNNING (its own
+  // answer, no driver call): a driver command to a stopped browser spawns a daemon to answer it (0.38.1 — kb-bugfix «A LIVE VIEW
+  // STARTED BROWSERS»), and an ephemeral browser can be stopped by its idle time before the leg's end
+  for (const s of [s1, s2]) {
+    let st = null; try { st = await (await fetch(`http://127.0.0.1:${PORT}/api/browser/session/${s.sessionId}`)).json(); } catch { }
+    const eph = st && st.ephemeral, live = !!(eph && eph.live);
+    console.log(`    the leg's end: ${s.name}'s own browser ${eph ? eph.state + (live ? ' — closed by its own `close`' : ' — not running: no `close` is sent (it would start a driver to answer)') : 'unread — no `close` is sent (the reaper ends what is left)'}`);
+    if (live) await s.vb(['close'], 30000).catch(() => { });
+  }
   Dk.close(); Ph.close();
   try { for (const id of created) wsMain.send(JSON.stringify({ type: 'kill', sessionId: id })); } catch { }
   await sleep(1200);
   try { wsMain.close(); } catch { }
 })().catch((e) => ok(false, 'the real-rung leg threw', e && (e.stack || e.message)));
+await endLeg();
 
 done();

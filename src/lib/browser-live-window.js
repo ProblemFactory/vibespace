@@ -1472,7 +1472,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     for (const [id, v] of Object.entries(st.tabNames || {})) { const n = (v && v.sessionId ? nameOfSession(String(v.sessionId)) : '') || (v && v.name ? String(v.name) : ''); if (n) out[id] = n; }
     return out;
   }
-  let tabRaf = 0;
+  let tabRaf = 0, tabRo = null; const tabRoSeen = new WeakSet(); // r1111: the row's ONE observer (made below the fit) + the chips and dividers it already watches
   function renderTabRow() {
     if (st.closed) return;
     const driving = st.mode === 'takeover' && st.mine;
@@ -1570,7 +1570,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       const w2 = prev ? prev.nextSibling : tabRowList.firstChild;
       if (w2 !== bl) tabRowList.insertBefore(bl, w2);
     }
-    for (const [id, el] of have) if (!keep.has(id)) el.remove();
+    for (const [id, el] of have) if (!keep.has(id)) { if (tabRo) tabRo.unobserve(el); el.remove(); } // r1111: a chip gone is watched no more
     if (st.watch) renderWatchLine(); // live-watch-polish G2: the line names the tabs — a retitled or moved tab re-says it
     const q = quitRowOf();
     const qw = q ? '' : 'none'; if (tabRowQuit.style.display !== qw) tabRowQuit.style.display = qw;
@@ -1582,6 +1582,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       tabRaf = 0;
       if (st.closed || tabRow.style.display === 'none' || !st.tabRow) return;
       const chips = [...tabRowList.children].filter((c) => c.dataset.target), dividers = [...tabRowList.children].filter((c) => !c.dataset.target);
+      // r1111: every chip and divider the fit measures is watched ONCE (observe() again would reset its last size and report it anew: a loop)
+      if (tabRo) for (const c of [...chips, ...dividers]) if (!tabRoSeen.has(c)) { tabRoSeen.add(c); tabRo.observe(c); }
       for (const c of [...chips, ...dividers]) c.style.display = '';
       for (const c of chips) { c.style.maxWidth = ''; c.classList.remove('bare'); } // B-e674: a cut is re-judged from the chips' whole widths
       const widths = {}; for (const c of chips) widths[c.dataset.target] = c.offsetWidth + 3;
@@ -1610,7 +1612,17 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       tabRowMore.classList.toggle('front-foreign', !!fr);
     });
   }
-  if (typeof ResizeObserver === 'function') { const ro2 = new ResizeObserver(() => refoldTabs()); ro2.observe(tabRow); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => ro2.disconnect()); }
+  // r1111 (the 2.369.414 release's red, placed): THE ROW IS FITTED TO WHAT IS DRAWN, WHENEVER WHAT IT MEASURED CHANGES — not only
+  // the row's own box. The fit also measures the end button, the pill and each chip and divider, and their size changes while the
+  // row's does not: the end button's .file-tool-btn rule animates every property, so a new face or font size is grown into over
+  // 0.15 s AFTER the fit read its old width; a late face; a longer label. So the ONE observer watches all of them (the chips and
+  // dividers as the fit first meets them, once each). HOW IT ENDS: the fit writes only the chips (display, cut, bare), the
+  // dividers' display and the pill's words, display and edge, and reads none of them as they stand (the row's width, the end
+  // button, each chip and divider after its own reset, the pill measured with each text set; its edge is colour only). A fit
+  // after its own writes reads the same numbers, writes the same row, every box keeps its size and the observer is silent: ONE
+  // fit more. A growing end button refits once a frame (refoldTabs is one per frame) until it stops growing. A FOLDED chip is not
+  // drawn, so its own change alone is not seen; a face or font change also changes the drawn pill, which is.
+  if (typeof ResizeObserver === 'function') { tabRo = new ResizeObserver(() => refoldTabs()); tabRo.observe(tabRow); tabRo.observe(tabRowQuit); tabRo.observe(tabRowMore); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => tabRo.disconnect()); }
   tabRowMore.onclick = (e) => {
     e.stopPropagation();
     const r = tabRowMore.getBoundingClientRect();

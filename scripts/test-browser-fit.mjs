@@ -60,9 +60,14 @@ const { WebSocket, WebSocketServer } = require('ws');
 const FIX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/browser-stream/fit-0.38.1.json'), 'utf8'));
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
+// r1100 (1): A WAIT THAT NEVER SAW ITS STATE SAYS SO BY NAME — `until` keeps every wait of the current group that timed out (a
+// group = the waits since the last judge), and a RED judge after them says «the state never came in N s»: the read a wait fell
+// through to is never read as the product's verdict (the 2.369.414 mirror's red in test-browser-resume-ui §9 was one)
+const waits = { missed: [], judged: false };
+const missNote = () => waits.missed.length ? ` — THE STATE NEVER CAME: the wait before this judge timed out (${waits.missed.map((ms) => `${ms / 1000} s`).join(', ')}), so this red is that, not a verdict on the product` : '';
+const ok = (c, n, extra) => { const note = c ? '' : missNote(); waits.judged = true; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + note + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const until = async (pred, ms, every = 20) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
+const until = async (pred, ms, every = 20) => { if (waits.judged) { waits.missed = []; waits.judged = false; } const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } const r = !!(await pred()); if (!r) waits.missed.push(ms); return r; };
 const ROOT = scratch('browser-fit');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 const cleanups = [];
@@ -78,6 +83,10 @@ function jpegOf(w, h, tag = '') {
   return Buffer.from(bytes).toString('base64');
 }
 
+{ // r1100 CONTROL: the mark can be read — a wait that times out is named by the next red judge
+  await until(() => false, 30, 10); const note = missNote(); waits.missed = []; waits.judged = false;
+  ok(/THE STATE NEVER CAME/.test(note) && note.includes('0.03 s'), 'r1100 CONTROL: a wait that times out is NAMED by the next red judge («the state never came in N s»), never read as the product\'s verdict', note);
+}
 // ═══ ① PURE ═══════════════════════════════════════════════════════════════
 console.log('— ① the PURE rules (src/browser-fit.js) over the measured 0.38.1 shapes');
 {

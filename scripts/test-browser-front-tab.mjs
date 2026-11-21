@@ -612,6 +612,16 @@ console.log('— ⑤ the fit: a foreign front is never folded by width — this 
   const n = (txt, x) => txt.split(x).length - 1;
   const miss = PINS.filter(([, x]) => n(LW, x) !== 1).map(([w, x]) => ({ w, x, n: n(LW, x) }));
   ok(miss.length === 0, `the client's fit wiring, each line ONCE (${PINS.length} pins)`, miss);
+  // r1111: THE ROW IS FITTED TO WHAT IS DRAWN, WHENEVER WHAT IT MEASURED CHANGES — the observer watches the end button and the pill
+  // as well as the row's own box (the heavy leg: test-browser-resume-ui ⑨ grows the end button alone and reads the row fitted again)
+  const REFIT = 'tabRo.observe(tabRow); tabRo.observe(tabRowQuit); tabRo.observe(tabRowMore);';
+  const EACH = 'if (tabRo) for (const c of [...chips, ...dividers]) if (!tabRoSeen.has(c)) { tabRoSeen.add(c); tabRo.observe(c); }';
+  const GONE = 'if (!keep.has(id)) { if (tabRo) tabRo.unobserve(el); el.remove(); }';
+  ok(n(LW, REFIT) === 1, 'r1111: the row is fitted again when the end button or the pill changes size, not only when the row\'s own box does', REFIT);
+  ok(n(LW, EACH) === 1 && n(LW, GONE) === 1, 'r1111: …and when a chip or a divider does — each watched ONCE as the fit first meets it (observe() again would report it anew: a loop), unwatched when it goes', { EACH: n(LW, EACH), GONE: n(LW, GONE) });
+  // RED CONTROL: the release's wiring (the row's own box only) fails that pin
+  const rel = anchored(LW, REFIT, 'tabRo.observe(tabRow);', 'r1111 the release\'s observer');
+  ok(n(rel, REFIT) === 0, 'RED CONTROL: the release\'s observer (the row\'s own box only) is read as missing the refit — the pin above can go red');
 }
 
 // ═══ ⑥ THE CLIENT'S WIRING (B-e674 unit 2, its round's should 5: only the heavy ⑨ read it) ═══════════════════════

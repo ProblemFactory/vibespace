@@ -54,10 +54,15 @@ const require = createRequire(import.meta.url);
 const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1400) : '')); } return !!c; };
+// r1100 (1): A WAIT THAT NEVER SAW ITS STATE SAYS SO BY NAME — `until` keeps every wait of the current group that timed out (a
+// group = the waits since the last judge), and a RED judge after them says «the state never came in N s»: the read a wait fell
+// through to is never read as the product's verdict (the 2.369.414 mirror's red in test-browser-resume-ui §9 was one)
+const waits = { missed: [], judged: false };
+const missNote = () => waits.missed.length ? ` — THE STATE NEVER CAME: the wait before this judge timed out (${waits.missed.map((ms) => `${ms / 1000} s`).join(', ')}), so this red is that, not a verdict on the product` : '';
+const ok = (c, n, extra) => { const note = c ? '' : missNote(); waits.judged = true; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + note + (extra ? '\n    ' + String(extra).slice(0, 1400) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const until = async (pred, ms, every = 80) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await pred()) return true; } catch { } await sleep(every); } try { return !!(await pred()); } catch { return false; } };
+const until = async (pred, ms, every = 80) => { if (waits.judged) { waits.missed = []; waits.judged = false; } const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await pred()) return true; } catch { } await sleep(every); } let r = false; try { r = !!(await pred()); } catch { } if (!r) waits.missed.push(ms); return r; };
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const FIX = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/browser-stream/session-0.32.0.json'), 'utf8'));
 const FRAME = FIX.server_to_client.frame;
@@ -143,6 +148,10 @@ let dtachOk = false; try { execFileSync('/usr/bin/which', ['dtach'], { stdio: 'i
 if (!CHROME) skip('no chrome/chromium on this box — every leg needs one');
 else if (!dtachOk) skip('dtach is not installed — a local session cannot be created here');
 else await (async () => {
+  { // r1100 CONTROL: the mark can be read — a wait that times out is named by the next red judge
+    await until(() => false, 30, 10); const note = missNote(); waits.missed = []; waits.judged = false;
+    ok(/THE STATE NEVER CAME/.test(note) && note.includes('0.03 s'), 'r1100 CONTROL: a wait that times out is NAMED by the next red judge («the state never came in N s»), never read as the product\'s verdict', note);
+  }
   fakeHome = scratchHome('browser-resume-ui-home', fs);
   const wt = path.join(ROOT, 'wt'); const BIN = path.join(ROOT, 'bin'); fs.mkdirSync(BIN, { recursive: true });
   const AB = path.join(ROOT, 'ab-state'); fs.mkdirSync(AB, { recursive: true });
@@ -239,8 +248,8 @@ else await (async () => {
     const kept = await until(async () => { const k = (await j('GET', '/api/browser/kept')).json; const e = k && (k.kept || []).find((x) => x.browserKey === bk); return !!(e && e.tabs.length === 3 && e.stoppedWhy === 'user'); }, 8000);
     ok(kept, 'the kept store holds its three tabs (stopped by the user)', S((await j('GET', '/api/browser/kept')).json).slice(0, 600));
     const offered = await until(() => ev('const l = L(); const s = l && l.state(); return !!(s && s.stopped && s.resumeOffer && s.resumeText);'), 12000, 150);
-    const s2 = await ev('const l = L(); const s = l.state(); const b = l.el().querySelector(".browser-live-reconnect"); return { stopped: s.stopped, frames: s.frames, resumeOffer: s.resumeOffer, resumeText: s.resumeText, statusText: s.statusText, btn: b && b.style.display !== "none" ? { rect: rect(b), sw: b.scrollWidth, cw: b.clientWidth, svg: !!b.querySelector("svg"), mode: b.dataset.mode } : null, fact: row() && row().browserFact && row().browserFact.own };');
-    ok(offered && s2.resumeText === 'Resume' && s2.btn && s2.btn.mode === 'resume' && s2.btn.svg && s2.btn.sw <= s2.btn.cw + 1, 'the stopped view keeps its last frame and offers RESUME in place of Reconnect — the play glyph + its word, whole on the bar (no greyed control)', S(s2));
+    const s2 = await ev('const l = L(); const s = l.state(); const b = l.el().querySelector(".browser-live-reconnect"); return { stopped: s.stopped, frames: s.frames, resumeOffer: s.resumeOffer, resumeText: s.resumeText, statusText: s.statusText, btn: b && b.style.display !== "none" ? { rect: rect(b), sw: b.scrollWidth, cw: b.clientWidth, right: rect(b).left + rect(b).width, barRight: (rect(l.el().querySelector(".browser-live-bar")).left + rect(l.el().querySelector(".browser-live-bar")).width), svg: !!b.querySelector("svg"), mode: b.dataset.mode } : null, fact: row() && row().browserFact && row().browserFact.own };');
+    ok(offered && s2.resumeText === 'Resume' && s2.btn && s2.btn.mode === 'resume' && s2.btn.svg && s2.btn.sw <= s2.btn.cw + 1 && s2.btn.right <= s2.btn.barRight + 1, 'the stopped view keeps its last frame and offers RESUME in place of Reconnect — the play glyph + its word, whole and INSIDE the bar (no greyed control)', S(s2));
     ok(/3 tab\(s\) and its logins are kept/.test(s2.statusText || '') && s2.fact && s2.fact.kept && s2.fact.kept.tabs === 3, 'its status line says what is kept ("… 3 tab(s) and its logins are kept …") — THE fact\'s own.kept', S({ status: s2.statusText, own: s2.fact }));
     const nBefore = cmds().length;
     fs.writeFileSync(path.join(AB, 'hold-switch'), ''); // the Resume's LAST step (the switch back to the tab on show) waits in the fake
@@ -295,8 +304,8 @@ else await (async () => {
     const dictWord = (lang, key) => { const l = fs.readFileSync(path.join(repo, `src/lib/i18n-${lang}.js`), 'utf8').split('\n').find((x) => x.startsWith('  ' + JSON.stringify(key) + ': ')); return l ? JSON.parse(l.slice(l.indexOf(': ') + 2).replace(/,\s*$/, '')) : null; };
     const TITLE_EN = 'Hand back — the agent reads it when its next turn starts';
     const TITLES = { en: TITLE_EN, zh: dictWord('zh', TITLE_EN), ja: dictWord('ja', TITLE_EN) };
-    const dw = await ev(`const a = document.activeElement; const o = a && a.closest('.dialog-overlay, .dialog-form'); const lab = a && a.closest('label'); const fw = o && o.closest('.window'); const tt = fw ? fw.querySelector('.window-titlebar .window-title') : (o && o.querySelector('.dialog-header h3')); const cx = document.createElement('canvas').getContext('2d'); if (tt) cx.font = getComputedStyle(tt).font; const mw = (x) => Math.ceil(cx.measureText(x).width); return { title: tt && tt.textContent, sw: tt && tt.scrollWidth, cw: tt && tt.clientWidth, font: tt && getComputedStyle(tt).font, label: lab && lab.textContent.trim(), ok: o && (o.querySelector('button.btn-create') || {}).textContent, w: Object.fromEntries(Object.entries(${S(TITLES)}).map(([k, x]) => [k, mw(x)])), box: fw ? rect(fw) : (o ? rect(o) : null) };`);
-    ok(dw && dw.title === TITLES.en && dw.sw <= dw.cw + 1, '…the dialog\'s title says when the agent reads it, whole in its window\'s title bar: "' + TITLES.en + '"', S(dw && { title: dw.title, sw: dw.sw, cw: dw.cw }));
+    const dw = await ev(`const a = document.activeElement; const o = a && a.closest('.dialog-overlay, .dialog-form'); const lab = a && a.closest('label'); const fw = o && o.closest('.window'); const tt = fw ? fw.querySelector('.window-titlebar .window-title') : (o && o.querySelector('.dialog-header h3')); const cx = document.createElement('canvas').getContext('2d'); if (tt) cx.font = getComputedStyle(tt).font; const mw = (x) => Math.ceil(cx.measureText(x).width); const tb = tt && tt.closest('.window-titlebar, .dialog-header'); return { title: tt && tt.textContent, sw: tt && tt.scrollWidth, cw: tt && tt.clientWidth, right: tt ? rect(tt).left + rect(tt).width : null, barRight: tb ? rect(tb).left + rect(tb).width : null, font: tt && getComputedStyle(tt).font, label: lab && lab.textContent.trim(), ok: o && (o.querySelector('button.btn-create') || {}).textContent, w: Object.fromEntries(Object.entries(${S(TITLES)}).map(([k, x]) => [k, mw(x)])), box: fw ? rect(fw) : (o ? rect(o) : null) };`);
+    ok(dw && dw.title === TITLES.en && dw.sw <= dw.cw + 1 && dw.barRight !== null && dw.right <= dw.barRight + 1, '…the dialog\'s title says when the agent reads it, whole and inside its window\'s title bar: "' + TITLES.en + '"', S(dw && { title: dw.title, sw: dw.sw, cw: dw.cw, right: dw.right, barRight: dw.barRight }));
     ok(dw && TITLES.zh && TITLES.ja && dw.w.zh <= dw.cw + 1 && dw.w.ja <= dw.cw + 1, '…and the zh / ja titles fit the same bar in its font (' + S(dw && dw.w) + ' ≤ ' + (dw && dw.cw) + ' px)', S(dw && { w: dw.w, cw: dw.cw, font: dw.font }));
     ok(dw && dw.label === 'A note for the agent (optional). Nothing is sent now. To have the agent continue right away: hand back, then press “Hand over now” on the strip above the composer (it starts a turn), or send it a message.' && dw.ok === 'Hand back', '…its label says that nothing is sent now and how to make the agent continue right away (the strip\'s Hand over now, or a message); the confirm says Hand back', S(dw && { label: dw.label, ok: dw.ok }));
     if (PNG_DIR && dw && dw.box) await png('handback-dialog-en.png', dw.box);
@@ -350,7 +359,7 @@ else await (async () => {
       await click(centre(b2));
       await until(() => ev('const s = L().state(); return s.connected && !s.stopped && s.contShown;'), 20000, 150);
       await sleep(400);
-      const zc = await ev('const l = L(); l.layoutBar && l.layoutBar(); const s = l.state(); const c = l.el().querySelector(".browser-live-continue"); const onBar = c && c.style.display !== "none" && !s.folded.includes("continue"); return { contShown: s.contShown, contText: s.contText, onBar, fit: onBar ? c.scrollWidth <= c.clientWidth + 1 : null, row: s.foldedRows.find((x) => x.label === s.contText) || null, folded: s.folded };');
+      const zc = await ev('const l = L(); l.layoutBar && l.layoutBar(); const s = l.state(); const c = l.el().querySelector(".browser-live-continue"); const onBar = c && c.style.display !== "none" && !s.folded.includes("continue"); return { contShown: s.contShown, contText: s.contText, onBar, fit: onBar ? c.scrollWidth <= c.clientWidth + 1 && rect(c).left + rect(c).width <= (rect(l.el().querySelector(".browser-live-bar")).left + rect(l.el().querySelector(".browser-live-bar")).width) + 1 : null, row: s.foldedRows.find((x) => x.label === s.contText) || null, folded: s.folded };');
       ok(zc.contShown && zc.contText === contWord && zc.onBar && zc.fit, `${lang}: "${contWord}" is offered after the Resume — WHOLE ON THE BAR of the 360 px window (never folded into the ⋯ row)`, S(zc));
       if (PNG_DIR) await png(`handback-bar-${lang}.png`, await ev('return rect(L().el().querySelector(".browser-live-bar"));'));
     }
@@ -530,14 +539,18 @@ else await (async () => {
       await ev('const w = live(); const el = w.element; el.style.width = "900px"; el.style.height = "620px"; window.dispatchEvent(new Event("resize")); return true;');
       const feed = `const w = L().ws(); w.onmessage({ data: ${S(S({ type: 'tabs', tabs }))} }); w.onmessage({ data: ${S(S(rec))} });`;
       const read = `const root = L().el(); const pane = root.querySelector('.browser-live-tabs'); const btn = root.querySelector('.browser-live-side-btn[data-pane="tabs"]'); if (pane.style.display === 'none') btn.click();
-        await new Promise((r) => setTimeout(r, 400));
+        const t0 = Date.now(); while (Date.now() - t0 <= 3000 && !(root.querySelectorAll('.browser-live-tabrow-list > .browser-live-tabchip').length >= 2 && pane.querySelector('.browser-live-tabgroup'))) await new Promise((r) => setTimeout(r, 25));
+        const waitedMs = Date.now() - t0, timedOut = waitedMs > 3000;
         const kids = [...root.querySelectorAll('.browser-live-tabrow-list > *')].filter((e) => e.style.display !== 'none').map((e) => e.dataset.target ? 'chip:' + e.dataset.target.slice(0, 1) : 'div:' + e.textContent);
         const pk = [...pane.children].map((e) => e.classList.contains('browser-live-tabgroup') ? 'head:' + e.textContent : 'tab:' + String(e.dataset.key || '').slice(2, 3) + (e.classList.contains('in-group') ? '>' : ''));
         const words = [...root.querySelectorAll('.browser-live-tabrow-divider, .browser-live-tabgroup')].map((e) => e.textContent + ' ' + e.title).join(' | ') + ' | ' + btn.textContent;
-        return { kids, pk, btn: btn.textContent, words, row: rect(root.querySelector('.browser-live-tabrow')), pane: rect(pane) };`;
+        return { kids, pk, btn: btn.textContent, words, waitedMs, timedOut, row: rect(root.querySelector('.browser-live-tabrow')), pane: rect(pane) };`;
+      // r1100 (4), the same class outside §9: the read WAITS for the row's chips and the pane's heads (bounded 3 s, was a fixed
+      // 400 ms) and says when they never came — that red is «the state never came», not the product's verdict
       const g8 = await ev(feed + read);
-      ok(S(g8.kids) === S(['chip:A', 'div:企业助手 的窗口', 'chip:B']), '⑧ zh ROW: this window\'s chip first, a divider naming 企业助手\'s window, then its chip (the blank anchors are no chips)', S(g8));
-      ok(S(g8.pk) === S(['head:本窗口 · +1 个空白页', 'tab:A>', 'head:企业助手 的窗口 · +1 个空白页', 'tab:B>']) && g8.btn === '标签页 (2 · +2 个空白页)', '⑧ zh PANE: 本窗口 then 企业助手 的窗口, each head folding its blank ("+1 个空白页"), the rows indented; the count says "标签页 (2 · +2 个空白页)"', S(g8));
+      const never8 = g8.timedOut ? ' — THE STATE NEVER CAME in 3 s (no two chips and a window head were drawn): this red is that, not a verdict on the product' : '';
+      ok(!g8.timedOut && S(g8.kids) === S(['chip:A', 'div:企业助手 的窗口', 'chip:B']), '⑧ zh ROW: this window\'s chip first, a divider naming 企业助手\'s window, then its chip (the blank anchors are no chips)' + never8, S(g8));
+      ok(S(g8.pk) === S(['head:本窗口 · +1 个空白页', 'tab:A>', 'head:企业助手 的窗口 · +1 个空白页', 'tab:B>']) && g8.btn === '标签页 (2 · +2 个空白页)', '⑧ zh PANE: 本窗口 then 企业助手 的窗口, each head folding its blank ("+1 个空白页"), the rows indented; the count says "标签页 (2 · +2 个空白页)"' + never8, S(g8));
       ok(!/\d{6,}/.test(g8.words), '⑧ no window number in any word of the row or the pane', g8.words);
       // KEYED (R4): a second identical record patches in place — the pane's first node is the same node
       const k8 = await ev('const pane = L().el().querySelector(".browser-live-tabs"); const a = pane.firstChild, b = pane.children[1]; ' + feed + ' await new Promise((r) => setTimeout(r, 200)); return pane.firstChild === a && pane.children[1] === b;');
@@ -564,30 +577,51 @@ else await (async () => {
       const base = { type: 'tab-owners', owners: { [A]: 'agent', [E]: 'other', [N]: 'orphan' }, titles: {}, names: { [E]: { sessionId: null, name: '企业助手' } }, windows: { [A]: WA, [E]: WA, [N]: WA }, leases: [{ windowId: WA, word: 'agent', sessionId: null, name: null }], mediated: false, adoptable: false };
       const frontE = { state: 'foreign', windowId: WA, targetId: E, owner: 'other' }, frontN = { state: 'foreign', windowId: WA, targetId: N, owner: 'orphan' };
       const feedOf = (rec) => `const w = L().ws(); w.onmessage({ data: ${S(S({ type: 'tabs', tabs }))} }); w.onmessage({ data: ${S(S(rec))} });`;
+      // r1100 + r1111 (the 2.369.414 release mirror's red, placed to its mechanism by the coordinator's probe runs on the box: the
+      // r943 CONTROL judged a fit that RAN at the end button's OLD width — that button's .file-tool-btn rule animates every property,
+      // so the planted spacing was grown into over 0.15 s after the fit, and nothing refitted when it had grown; the first hosted run
+      // that passed, 74 of 74, passed only because its frame came late): (2) a leg that judges the fit PROVES A FIT RAN — after a
+      // feed or a plant it waits for real frames (bounded) and prints whether one came and the page's visibility; the feed's own
+      // result or exception is READ; a planted face is judged only AFTER IT SETTLED (settledJs, bounded, red by name when it does
+      // not). (1) A wait that never sees its state SAYS SO: it returns {r, timedOut, ms}; its judge is red «the state never came in
+      // N s», never the product's.
+      const FRAMES = (ms) => `const fr = await new Promise((res) => { let n = 0; const t = setTimeout(() => res(n), ${ms}); const tick = () => { n++; if (n >= 2) { clearTimeout(t); res(n); } else requestAnimationFrame(tick); }; requestAnimationFrame(tick); });`;
+      const feedRun = (rec, ms = 3000) => ev(`let fed = true, error = null; try { ${feedOf(rec)} } catch (e) { fed = false; error = String((e && e.message) || e); } ${FRAMES(ms)} return { fed, error, frames: fr, visibility: document.visibilityState };`);
+      // r1111 B: WHAT WAS PLANTED HAS SETTLED — the end button's box the same over two frames with no animation running (bounded)
+      const settledJs = (ms) => `const q = L().el().querySelector('.browser-live-tabrow-quit'); const frame = () => new Promise((r) => { const t = setTimeout(r, 100); requestAnimationFrame(() => { clearTimeout(t); r(); }); }); const t0 = Date.now(); let last = null, same = 0; for (;;) { await frame(); const w = q && q.offsetParent ? Math.round(q.getBoundingClientRect().width * 10) / 10 : null; const anim = q && q.getAnimations ? q.getAnimations().length : 0; if (w === last && !anim) { if (++same >= 2) return { settled: true, ms: Date.now() - t0, w, anim }; } else same = 0; last = w; if (Date.now() - t0 > ${ms}) return { settled: false, ms: Date.now() - t0, w, anim }; }`;
+      const untilJs = (readerBody, cond, ms) => `const read = () => { ${readerBody} }; const t0 = Date.now(); for (;;) { const r = read(); const a = r; if (${cond}) return { r, timedOut: false, ms: Date.now() - t0 }; if (Date.now() - t0 > ${ms}) return { r, timedOut: true, ms: Date.now() - t0 }; await new Promise((q) => setTimeout(q, 25)); }`;
+      const judged = (w, fr, name, judge, ms, sd = null) => {
+        if (sd && !sd.settled) return ok(false, `${name} — WHAT IT PLANTED NEVER SETTLED in ${sd.ms / 1000} s (the end button still changing: ${sd.w} px, ${sd.anim} animation(s) running): the row is judged only after it settles, so this is no verdict on the product`, S(w && w.r));
+        const noFit = !!fr && (!fr.fed || !fr.frames);
+        if (!w || w.timedOut || noFit) return ok(false, `${name} — THE STATE NEVER CAME in ${ms / 1000} s (the feed ${fr ? (fr.fed ? 'ran' : 'threw ' + fr.error) : '?'}; frames after it ${fr ? fr.frames : '?'}; the page ${fr ? fr.visibility : '?'}): ${noFit ? 'no fit ran to be judged' : 'the last read below is the wait\'s'}, so this is no verdict on the product`, S(w && w.r));
+        return ok(!!judge(w.r), name, S(w.r));
+      };
       // B-e674 unit 2 (its round's should 5): no fixed sleep — the read WAITS for the chips it expects (≤ 2 s), then says what it saw
-      const chipsUntil = (cond) => `const read = () => [...L().el().querySelectorAll('.browser-live-tabrow-list > .browser-live-tabchip')].filter((e) => e.style.display !== 'none').map((e) => ({ id: e.dataset.target.slice(0, 1), front: e.classList.contains('front-foreign'), here: (e.querySelector('.browser-live-tabchip-here') || {}).textContent || '', tip: e.title }));
-        for (let i = 0; i < 80; i++) { const a = read(); if (${cond}) return a; await new Promise((r) => setTimeout(r, 25)); } return read();`;
+      const chipsUntil = (cond) => `const readA = () => [...L().el().querySelectorAll('.browser-live-tabrow-list > .browser-live-tabchip')].filter((e) => e.style.display !== 'none').map((e) => ({ id: e.dataset.target.slice(0, 1), front: e.classList.contains('front-foreign'), here: (e.querySelector('.browser-live-tabchip-here') || {}).textContent || '', tip: e.title }));
+        const t0 = Date.now(); for (;;) { const a = readA(); if (${cond}) return { r: a, timedOut: false, ms: Date.now() - t0 }; if (Date.now() - t0 > 2000) return { r: a, timedOut: true, ms: Date.now() - t0 }; await new Promise((r) => setTimeout(r, 25)); }`; // r1100 (1): a timed-out mark
       await ev('const w = live(); const el = w.element; el.style.width = "900px"; el.style.height = "620px"; window.dispatchEvent(new Event("resize")); return true;');
-      const f1 = await ev(feedOf({ ...base, front: frontE }) + chipsUntil("a.some((x) => x.id === 'E' && x.front)"));
-      const cE = (f1 || []).find((x) => x.id === 'E');
-      ok(!!cE && cE.front && cE.here === '在此窗口最前面' && cE.tip.includes('企业助手 的标签页在此窗口最前面') && cE.tip.includes('不会为它移动或关闭任何标签页') && f1.filter((x) => x.front).length === 1,
-        '⑨ zh: 企业助手\'s tab in front of this window — ITS chip says «在此窗口最前面», its tip whose it is and that nothing is moved or closed', S(f1));
-      const f0 = await ev(feedOf(base) + chipsUntil('!a.some((x) => x.front)'));
-      ok(Array.isArray(f0) && !f0.some((x) => x.front) && !f0.some((x) => x.id === '9'), '⑨ CONTROL: the same record without the verdict marks no chip, and the blank nobody holds stays hidden', S(f0));
-      const f2 = await ev(feedOf({ ...base, front: frontN }) + chipsUntil("a.some((x) => x.id === '9' && x.front)"));
-      const cN = (f2 || []).find((x) => x.id === '9');
-      ok(!!cN && cN.front && cN.tip.includes('无人持有的标签页在此窗口最前面'), '⑨ zh: a blank NOBODY holds in front of this window is drawn and marked', S(f2));
+      const fr1 = await feedRun({ ...base, front: frontE });
+      const w1 = await ev(chipsUntil("a.some((x) => x.id === 'E' && x.front)"));
+      judged(w1, fr1, '⑨ zh: 企业助手\'s tab in front of this window — ITS chip says «在此窗口最前面», its tip whose it is and that nothing is moved or closed',
+        (f1) => { const cE = (f1 || []).find((x) => x.id === 'E'); return !!cE && cE.front && cE.here === '在此窗口最前面' && cE.tip.includes('企业助手 的标签页在此窗口最前面') && cE.tip.includes('不会为它移动或关闭任何标签页') && f1.filter((x) => x.front).length === 1; }, 2000);
+      const fr0 = await feedRun(base);
+      const w0 = await ev(chipsUntil('!a.some((x) => x.front)'));
+      judged(w0, fr0, '⑨ CONTROL: the same record without the verdict marks no chip, and the blank nobody holds stays hidden', (f0) => Array.isArray(f0) && !f0.some((x) => x.front) && !f0.some((x) => x.id === '9'), 2000);
+      const fr2 = await feedRun({ ...base, front: frontN });
+      const w2 = await ev(chipsUntil("a.some((x) => x.id === '9' && x.front)"));
+      judged(w2, fr2, '⑨ zh: a blank NOBODY holds in front of this window is drawn and marked', (f2) => { const cN = (f2 || []).find((x) => x.id === '9'); return !!cN && cN.front && cN.tip.includes('无人持有的标签页在此窗口最前面'); }, 2000);
       // B-e674 (the coordinator's r608): THE ROW AT 390 AND 1280 px, JUDGED — not only pictured. Line 97's 390 picture folded
       // the front chip into «▾+1» with nothing said: the law is its chip whole (this view's own chip cuts first), else the fold
       // names it IN WORDS («▾+N · 最前面», the front's words in its tip). Then the picture (where VIBESPACE_TABS_PNG_DIR names a dir).
+      // r1100 (3): a chip's «whole» = it ends INSIDE the row's list and nothing of it is clipped (shown is not whole)
       const rowAt = `const root = L().el(); const vis = (e) => !!e && e.style.display !== 'none' && e.getBoundingClientRect().width > 0; const fc = root.querySelector('.browser-live-tabchip.front-foreign'); const more = root.querySelector('.browser-live-tabrow-more'); const own = root.querySelector('.browser-live-tabchip.active');
         const list = root.querySelector('.browser-live-tabrow-list'); const listRight = list ? Math.round(list.getBoundingClientRect().right) : 0;
-        return { chip: vis(fc) ? { id: String(fc.dataset.target || '').slice(0, 1), here: (fc.querySelector('.browser-live-tabchip-here') || {}).textContent || '', w: Math.round(fc.getBoundingClientRect().width) } : null, more: vis(more) ? { text: more.textContent, marked: more.classList.contains('front-foreign'), tip: more.title } : null,
+        return { chip: vis(fc) ? { id: String(fc.dataset.target || '').slice(0, 1), here: (fc.querySelector('.browser-live-tabchip-here') || {}).textContent || '', w: Math.round(fc.getBoundingClientRect().width), right: Math.round(fc.getBoundingClientRect().right), whole: Math.round(fc.getBoundingClientRect().right) <= listRight + 1 && fc.scrollWidth <= fc.clientWidth + 1 } : null, more: vis(more) ? { text: more.textContent, marked: more.classList.contains('front-foreign'), tip: more.title } : null,
           own: own ? { w: Math.round(own.getBoundingClientRect().width), cut: own.style.maxWidth || '', bare: own.classList.contains('bare'), scroll: own.scrollWidth, client: own.clientWidth, right: Math.round(own.getBoundingClientRect().right), parts: [...own.querySelectorAll('.browser-live-tabchip-here, .browser-live-tabchip-mark')].filter((e) => vis(e) && getComputedStyle(e).display !== 'none').map((e) => ({ s: e.scrollWidth, c: e.clientWidth, right: Math.round(e.getBoundingClientRect().right) })) } : null, listRight, row: rect(root.querySelector('.browser-live-tabrow')) };`;
       for (const wpx of [390, 1280]) {
         await send('Emulation.setDeviceMetricsOverride', { width: wpx, height: 900, deviceScaleFactor: 1, mobile: false });
         await ev(`const w = live(); const el = w.element; el.style.left = "0px"; el.style.width = "${wpx - 10}px"; el.style.height = "520px"; window.dispatchEvent(new Event("resize")); return true;`);
-        await ev(feedOf({ ...base, front: frontE }) + 'return true;');
+        const frW = await feedRun({ ...base, front: frontE }); // r1100 (2): the feed's own result, and whether a frame came after it
         // line 100's cure (r618): the wait is for THE STATE THIS FEED ASKS FOR — 企业助手's own chip, or a fold whose tip names 企业助手 —
         // never «any marked fold» (the scene before left one behind); bounded, and the judge below is red by name when it never comes
         // r943 (the 2.369.414 candidate's hosted red, twice): at 1280 px the read was the 390 px SCENE's row — the own chip still cut
@@ -595,31 +629,65 @@ else await (async () => {
         // what 390 left behind: on the runner's slower draw the wait ended on it before the 1280 fit. Where there is room the wait
         // asks for THAT width's state (the front's chip whole), bounded 5 s; the judge below is red by name when it never comes
         const wantChip = wpx === 1280;
-        const seen = await ev(`const read = () => { ${rowAt} }; for (let i = 0; i < 200; i++) { const r = read(); if ((r.chip && r.chip.id === 'E' && r.chip.here) || (${wantChip ? 'false' : 'true'} && r.more && r.more.marked && r.more.tip.includes('企业助手 的标签页'))) return r; await new Promise((q) => setTimeout(q, 25)); } return read();`);
-        console.log(`    ⑨ the row at ${wpx} px: ${S(seen)}`);
-        const said = !!(seen && ((seen.chip && seen.chip.here === '在此窗口最前面') || (seen.more && seen.more.marked && seen.more.text.includes('最前面') && seen.more.tip.includes('企业助手 的标签页在此窗口最前面'))));
-        ok(said, `⑨ zh at ${wpx} px: the foreign front is SAID — its chip whole («在此窗口最前面»), or the fold names it in words (r608: never folded unsaid)`, S(seen));
-        if (wpx === 1280) ok(!!(seen && seen.chip && seen.chip.here === '在此窗口最前面'), '⑨ zh at 1280 px: there is room — the front\'s own chip, whole', S(seen));
+        // r1100 (1): the wait returns its mark — a timed-out read is red as «the state never came», never judged as the product
+        const ww = await ev(untilJs(rowAt, `(r.chip && r.chip.id === 'E' && r.chip.here && r.chip.whole) || (${wantChip ? 'false' : 'true'} && r.more && r.more.marked && r.more.tip.includes('企业助手 的标签页'))`, 5000));
+        const seen = ww && ww.r;
+        console.log(`    ⑨ the row at ${wpx} px (the feed ${frW.fed ? 'ran' : 'threw ' + frW.error}; frames after it ${frW.frames}; the page ${frW.visibility}; waited ${ww && ww.ms} ms${ww && ww.timedOut ? ', TIMED OUT' : ''}): ${S(seen)}`);
+        judged(ww, frW, `⑨ zh at ${wpx} px: the foreign front is SAID — its chip whole inside the list («在此窗口最前面»), or the fold names it in words (r608: never folded unsaid)`, (r) => !!((r.chip && r.chip.here === '在此窗口最前面' && r.chip.whole) || (r.more && r.more.marked && r.more.text.includes('最前面') && r.more.tip.includes('企业助手 的标签页在此窗口最前面'))), 5000);
+        if (wpx === 1280) judged(ww, frW, '⑨ zh at 1280 px: there is room — the front\'s own chip, whole inside the list', (r) => !!(r.chip && r.chip.here === '在此窗口最前面' && r.chip.whole), 5000);
         if (wpx === 1280) {
           // r943 THE LAW, whatever face the machine draws zh with: a PLANTED WIDE FACE (every CJK glyph a quarter wider, by the row's
           // own letter-spacing) — the fit measures the text as drawn, so where there is room the front's chip is still whole; CONTROL:
           // a face so wide the room is gone — the chip cannot be whole there (the fold says it), so this judge can go red
           const plant = async (em) => ev(`let st = document.getElementById('r943-face'); if (!st) { st = document.createElement('style'); st.id = 'r943-face'; document.head.appendChild(st); } st.textContent = ${JSON.stringify('')} + (${em} ? '.browser-live-tabrow, .browser-live-tabrow * { letter-spacing: ${em}em !important; }' : ''); window.dispatchEvent(new Event('resize')); return true;`);
-          const settle = async (want) => { const cond = want === 'chip' ? '(r.chip && r.chip.id === \'E\' && r.chip.here)' : '(r.more && r.more.marked)'; return ev(`const read = () => { ${rowAt} }; for (let i = 0; i < 200; i++) { const r = read(); if (${cond}) return r; await new Promise((q) => setTimeout(q, 25)); } return read();`); };
-          await plant(0.25); await ev(feedOf({ ...base, front: frontE }) + 'return true;');
-          const wide = await settle('chip');
-          console.log(`    ⑨ the row at 1280 px under a planted WIDE face (letter-spacing 0.25em): ${S(wide)}`);
-          ok(!!(wide && wide.chip && wide.chip.here === '在此窗口最前面' && wide.own && wide.own.scroll <= wide.own.client + 1), 'r943: under a planted WIDER zh face (0.25em more per glyph) at 1280 px there is still room — the front\'s own chip, whole, and this view\'s own chip unclipped (the fit measures the text as drawn)', S(wide));
-          await plant(6); await ev(feedOf({ ...base, front: frontE }) + 'return true;');
-          const huge = await settle('fold');
-          console.log(`    ⑨ the row at 1280 px under a CONTROL face with no room (letter-spacing 6em): ${S(huge)}`);
-          ok(!!(huge && !(huge.chip && huge.chip.here) && huge.more && huge.more.marked && huge.more.tip.includes('企业助手 的标签页在此窗口最前面')), 'r943 CONTROL: a face so wide there is no room — the front\'s chip is not whole (the judge above would read red) and the fold names it in words', S(huge));
-          await plant(0); await ev(feedOf({ ...base, front: frontE }) + 'return true;');
+          // r1100 + r1111: each plant is fed and proves a frame came after it, then WAITS FOR WHAT IT PLANTED TO SETTLE (the end button
+          // grows into a new spacing over its 0.15 s transition), then asks for ITS face's state (bounded 5 s) with a mark: the
+          // 2.369.414 mirror's red was the CONTROL judging the row of a fit run at the button's old width, nothing refitting after
+          const facePlace = (fr, w, sd) => `the feed ${fr.fed ? 'ran' : 'threw ' + fr.error}; frames after it ${fr.frames}; the page ${fr.visibility}; ${sd.settled ? 'settled' : 'NOT SETTLED'} in ${sd.ms} ms (the end button ${sd.w} px); waited ${w && w.ms} ms${w && w.timedOut ? ', TIMED OUT' : ''}`;
+          await plant(0.25); const frA = await feedRun({ ...base, front: frontE }); const sdA = await ev(settledJs(3000));
+          const wA = await ev(untilJs(rowAt, "r.chip && r.chip.id === 'E' && r.chip.here && r.chip.whole", 5000));
+          const wide = wA && wA.r;
+          console.log(`    ⑨ the row at 1280 px under a planted WIDE face (letter-spacing 0.25em; ${facePlace(frA, wA, sdA)}): ${S(wide)}`);
+          judged(wA, frA, 'r943: under a planted WIDER zh face (0.25em more per glyph) at 1280 px there is still room — the front\'s own chip, whole inside the list, and this view\'s own chip unclipped (the fit measures the text as drawn)', (r) => !!(r.chip && r.chip.here === '在此窗口最前面' && r.chip.whole && r.own && r.own.scroll <= r.own.client + 1), 5000, sdA);
+          await plant(6); const frB = await feedRun({ ...base, front: frontE }); const sdB = await ev(settledJs(3000));
+          const wB = await ev(untilJs(rowAt, "r.more && r.more.marked && !(r.chip && r.chip.whole)", 5000));
+          const huge = wB && wB.r;
+          console.log(`    ⑨ the row at 1280 px under a CONTROL face with no room (letter-spacing 6em; ${facePlace(frB, wB, sdB)}): ${S(huge)}`);
+          judged(wB, frB, 'r943 CONTROL: a face so wide there is no room — the front\'s chip is not whole inside the list (the judge above would read red) and the fold names it in words', (r) => !(r.chip && r.chip.whole) && !!(r.more && r.more.marked && r.more.tip.includes('企业助手 的标签页在此窗口最前面')), 5000, sdB);
+          await plant(0); const frR = await feedRun({ ...base, front: frontE }); const sdR = await ev(settledJs(3000));
+          const wR = await ev(untilJs(rowAt, "r.chip && r.chip.id === 'E' && r.chip.here && r.chip.whole", 5000));
+          judged(wR, frR, 'r1111: the face put back, the row is fitted back — the front\'s own chip whole inside the list', (r) => !!(r.chip && r.chip.here === '在此窗口最前面' && r.chip.whole), 5000, sdR);
+          // r1111 A: THE ROW IS FITTED TO WHAT IS DRAWN, WHENEVER WHAT IT MEASURED CHANGES. Fitted with the front's chip whole, the END
+          // BUTTON ALONE grows (a planted min-width with no transition: no feed, no resize, the row's own box unchanged) — the row is
+          // fitted again: the front no longer fits whole and the fold says it. RED on the release (its observer watched the row's own
+          // box only): nothing refits and the chip stays as it was. Then the button back to its size: fitted again, the chip whole.
+          // (the page prelude declares app, wm, rect, sidOf, chatWin, live, L and row: a page string here declares none of them)
+          const endOf = `const rw = L().el().querySelector('.browser-live-tabrow'), q = L().el().querySelector('.browser-live-tabrow-quit'); return { frames: typeof fr === 'number' ? fr : null, visibility: document.visibilityState, row: rect(rw), endW: q && q.offsetParent ? Math.round(q.getBoundingClientRect().width) : null };`;
+          const grow = async (px) => ev(`let st = document.getElementById('r1111-end'); if (!st) { st = document.createElement('style'); st.id = 'r1111-end'; document.head.appendChild(st); } st.textContent = ${px ? JSON.stringify(`.browser-live-tabrow > .browser-live-tabrow-quit { min-width: ${px}px !important; transition: none !important; }`) : "''"}; ${FRAMES(3000)} ${endOf}`);
+          const before = await ev(`const fr = null; ${endOf}`);
+          const g = await grow(Math.max(200, Math.round((before.row && before.row.width) || 0) - 160));
+          const wG = await ev(untilJs(rowAt, "r.more && r.more.marked && !(r.chip && r.chip.whole)", 3000));
+          const boxSame = !!(g.row && before.row && Math.abs(g.row.width - before.row.width) <= 1 && Math.abs(g.row.height - before.row.height) <= 1);
+          console.log(`    ⑨ r1111: the end button alone grown ${before.endW} → ${g.endW} px, the row's box ${S(before.row)} → ${S(g.row)} (frames after it ${g.frames}; the page ${g.visibility}; waited ${wG && wG.ms} ms${wG && wG.timedOut ? ', TIMED OUT' : ''}): ${S(wG && wG.r)}`);
+          ok(!!(before.endW && g.endW > before.endW + 100 && boxSame && g.frames), 'r1111 the leg\'s own ground: the end button alone grew after the fit (no feed, no resize) and the row\'s own box did not change', S({ before, g }));
+          ok(!!(wG && !wG.timedOut && wG.r.more && wG.r.more.marked && wG.r.more.tip.includes('企业助手 的标签页在此窗口最前面') && !(wG.r.chip && wG.r.chip.whole)), 'r1111: the end button grew after the fit with the row\'s box the same — THE ROW IS FITTED AGAIN: the front no longer fits whole and the fold says it in words (red on the release: nothing refits)' + (wG && wG.timedOut ? ' — NOT FITTED AGAIN in 3 s: the row stayed as it was' : ''), S(wG && wG.r));
+          await grow(0);
+          const wS = await ev(untilJs(rowAt, "r.chip && r.chip.id === 'E' && r.chip.here && r.chip.whole", 3000));
+          ok(!!(wS && !wS.timedOut && wS.r.chip && wS.r.chip.whole), 'r1111: …and the end button back to its size, the row is fitted again — the front\'s own chip whole inside the list' + (wS && wS.timedOut ? ' — NOT FITTED AGAIN in 3 s' : ''), S(wS && wS.r));
+          // …and a CHIP alone grows (the front's chip, a planted min-width: no feed, no resize, the row's box the same): fitted again,
+          // the fold says it. (A folded chip is not drawn, so its own change alone is not seen; a face or font change also changes
+          // the pill, which is — so the way back is a feed here.) RED on the release: nothing watched the chip.
+          const growChip = async (px) => ev(`let st = document.getElementById('r1111-chip'); if (!st) { st = document.createElement('style'); st.id = 'r1111-chip'; document.head.appendChild(st); } st.textContent = ${px ? JSON.stringify(`.browser-live-tabchip.front-foreign { min-width: ${px}px !important; }`) : "''"}; ${FRAMES(3000)} ${endOf}`);
+          const gc = await growChip(Math.max(300, Math.round((before.row && before.row.width) || 0) - 100));
+          const wC = await ev(untilJs(rowAt, "r.more && r.more.marked && !(r.chip && r.chip.whole)", 3000));
+          console.log(`    ⑨ r1111: the front's chip alone grown, the row's box ${S(gc.row)} (frames after it ${gc.frames}; waited ${wC && wC.ms} ms${wC && wC.timedOut ? ', TIMED OUT' : ''}): ${S(wC && wC.r)}`);
+          ok(!!(gc.row && before.row && Math.abs(gc.row.width - before.row.width) <= 1 && gc.frames && wC && !wC.timedOut && wC.r.more && wC.r.more.marked && wC.r.more.tip.includes('企业助手 的标签页在此窗口最前面')), 'r1111: a chip grew after the fit with the row\'s box the same — THE ROW IS FITTED AGAIN: the front folded and said in words (red on the release: nothing watched the chip)' + (wC && wC.timedOut ? ' — NOT FITTED AGAIN in 3 s: the row stayed as it was' : ''), S({ row: gc.row, read: wC && wC.r }));
+          await growChip(0); await feedRun({ ...base, front: frontE });
         }
         // line 100's cure (r618): NO PART of this view's own chip is clipped — only its title gives way; its «here» words and owner's mark
         // are whole (or not shown at all: bare), and the chip ends inside the row's list
         const o9 = seen && seen.own;
-        ok(!!(o9 && o9.scroll <= o9.client + 1 && o9.right <= seen.listRight + 1 && o9.parts.every((q) => q.s <= q.c + 1 && q.right <= seen.listRight + 1)), `⑨ zh at ${wpx} px: no part of this view's own chip is clipped (its scroll width ${o9 && o9.scroll} ≤ its width ${o9 && o9.client}; it ends at ${o9 && o9.right} ≤ the list's ${seen && seen.listRight}${o9 && o9.bare ? '; bare — its parts shown not at all' : ''})`, S(o9));
+        judged(ww, frW, `⑨ zh at ${wpx} px: no part of this view's own chip is clipped (its scroll width ${o9 && o9.scroll} ≤ its width ${o9 && o9.client}; it ends at ${o9 && o9.right} ≤ the list's ${seen && seen.listRight}${o9 && o9.bare ? '; bare — its parts shown not at all' : ''})`, (r) => { const o = r.own; return !!(o && o.scroll <= o.client + 1 && o.right <= r.listRight + 1 && o.parts.every((q) => q.s <= q.c + 1 && q.right <= r.listRight + 1)); }, 5000);
         if (PNG_DIR) {
           const r = seen && seen.row;
           const shot = r && r.width > 0 ? await send('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, r.left), y: Math.max(0, r.top), width: Math.max(1, Math.min(r.width, wpx)), height: Math.max(1, r.height), scale: 1 } }) : null;
