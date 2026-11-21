@@ -39,6 +39,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After VibeSpace restarts, a conversation whose last turn had ended is no longer treated as still working until you open its window.
 - A command Claude Code answers by itself, such as /cost or /model, no longer leaves its conversation marked as working.
 - An Allow pressed just as the agent moved on now says what became of it: not run, ran, still waiting, or the agent never said — never «Allowed» as if it ran.
+- On a phone, a pop-up wider than the screen now stays inside it, and what does not fit scrolls sideways inside it.
 
 ### Changed
 - The chat window's status bar is arranged by what you need: one row on a wide window, the same two rows on a narrow one, nothing hidden behind «⋯».
