@@ -2252,6 +2252,7 @@ class JobManager {
     if (!run || run.endedAt) return false;
     const latch = this._hubMainRuns || (this._hubMainRuns = new WeakSet());
     if (latch.has(run)) return true;   // its read (SHOULD 3): proven once, true for this process's life — a wrapper killed later moves our parent, not the fact
+    if (run.hubMain && run.hubMainAt === this._bootAt) return true;   // B-2c5c unit 2: proven by THIS process (its boot) — the persisted fact, this generation's
     const st = this._readStamp(job);
     if (!st || !(Number(st.pid) > 1) || st.bootId !== bootId()) return false;
     // its read (SHOULD 2): the hub IS the main, or runs UNDER it (a launcher: `./run.sh`, `npm start` — a stop of the launcher ends or
@@ -2259,7 +2260,7 @@ class JobManager {
     // parent (`d.hubParentPid`) is the one hop it names, proven alive by the stamp
     const seam = Number(this.d.hubParentPid);
     const yes = seam ? seam === Number(st.pid) && this._verifyAlive(st) : PI.keptByChain(process.ppid, new Map([[Number(st.pid), Number(st.starttime) || -1]]));
-    if (yes) latch.add(run);
+    if (yes) { latch.add(run); if (!run.hubMain || run.hubMainAt !== this._bootAt) { run.hubMain = true; run.hubMainAt = this._bootAt; this._dirty = true; } }   // B-2c5c unit 2: kept on the run (jobs.json) — a later hub reads it after this one is gone
     return yes;
   }
   /** B-2c5c (THE MAIN DOOR): the refusal by name — said once a run and a road in the run's own log and the hub's; the job is not said
@@ -3431,6 +3432,9 @@ class JobManager {
         const stamp = this._readStamp(job);
         if (this._verifyAlive(stamp)) {
           this.d.log(`[jobs] adopted ${job.id} pid=${stamp.pid}`);
+          // B-2c5c unit 2: IS THIS HUB THAT RUN'S MAIN? asked once here, while our parent chain still reaches its wrapper (a run started
+          // after this boot can never be its main) — the answer is kept on the run (a wrapper killed later moves our parent, not the fact)
+          { const run0 = job.runs && job.runs[job.runs.length - 1]; if (this._hubIsMain(job, run0)) this.d.log(`[jobs] ${job.id}: its main process is this VibeSpace hub (started as this job)`); }
           if (job.kind === 'service' && job.publish && (job.ports || []).length) setTimeout(() => this._ensurePublish(job), 8000); // ports manager restores at +5.5s
           continue;
         }
@@ -3814,7 +3818,14 @@ class JobManager {
     // THE PARK LAW (lane jobs-memory-bound): EVERY judged end counts — the sweep's, and the boot's (a run that ended while the
     // server was down is judged here at its boot exactly like a run judged live; the base never counted a boot's) — _countEnd
     const memPark = windowEnd ? null : this._countEnd(job, run.cause);
-    if (job.kind === 'service' && windowEnd) {
+    // B-2c5c unit 2: A SERVICE WHOSE RUN'S MAIN WAS THE HUB is never restarted by itself — not by its policy, not by a boot's replay: a
+    // restart would start a second hub beside the one that runs (it cannot bind its port and parks). Not wanted up any more, said; a
+    // person's Start is theirs
+    const hubMainEnd = job.kind === 'service' && (exit.hubMain === true || run.hubMain === true);
+    if (hubMainEnd) {
+      job.state = 'down'; job.desiredUp = false; this._teardownPublish(job);
+      this._touch(job, { what: 'its main process was the VibeSpace hub — not restarted by itself: a restart would start a second hub beside the one that runs (start it again by hand if you mean to)' });
+    } else if (job.kind === 'service' && windowEnd) {
       job.state = 'down'; this._touch(job, { what: 'down (update_window: it started while VibeSpace was updating itself and never ran — the restarted server starts it again)' }); // never a crash of the supervisor's count: the boot replay starts a desiredUp service
     } else if (job.kind === 'service' && memPark && memPark.park) {
       this._parkForMemory(job, run);
@@ -3928,6 +3939,12 @@ class JobManager {
       if (stamp && job._stopRequested && this._verifyAlive(stamp)) {
         if (job._stopForce) this._escalate(job, this._runScope(job, run), undefined, run); // round 4: on the cgroup rung, the scope
         else if (!job._termAt) { if (this._termRun(job, run)) job._termAt = now(); } // its kill step: THE LADDER below
+      }
+      // B-2c5c unit 2: a run whose MAIN IS THIS HUB (proven at this boot) whose wrapper was killed has NOT ended — its main is this
+      // process, which runs: never judged ended, never restarted beside itself (said once)
+      if (stamp && !this._verifyAlive(stamp) && !this._readExit(job, run) && this._hubIsMain(job, run)) {
+        if (!run._wrapperGoneSaid) { run._wrapperGoneSaid = true; const what = 'its wrapper is gone, but its main process is this VibeSpace hub, which runs — the run is not ended (nothing restarted beside it)'; this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what }); }
+        continue;
       }
       if (stamp && !this._verifyAlive(stamp)) {
         const exit = this._readExit(job, run) || { code: null, endedAt: now() };

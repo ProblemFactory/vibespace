@@ -26,6 +26,11 @@
   "why": "records read already on disk"
  },
  {
+  "key": "jobs · src/jobs.js · JobManager._hubIsMain · _dirty = true",
+  "verdict": "none",
+  "why": "a kept fact; nothing irreversible follows"
+ },
+ {
   "key": "jobs · src/jobs.js · JobManager._archiveAnswer · _dirty = true",
   "verdict": "none",
   "why": "skeleton drop, re-decided at load"

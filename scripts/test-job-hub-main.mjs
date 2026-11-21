@@ -9,6 +9,10 @@
 //      folder; the main is a stand-in hub (node — its own pid in the folder's server.pid, as a hub writes it; a child in the job's
 //      process group, as a hub's helper) that ends by itself once the wrapper has said it latched. RED: a copy of the wrapper with the
 //      latch cut — the drain SIGTERMs the hub's child
+//   §2 (the row's (2)) such a run whose WRAPPER IS KILLED: the hub's boot proves it is that run's main (its parent chain reaches the
+//      run's wrapper) and keeps it on the run; the sweep then never judges the run ended (its main is this hub, which runs), and ANY
+//      end of a hub-main service is never restarted by itself (its policy, a boot's replay): never a second hub beside the one that
+//      runs. RED: the sweep's guard cut; the no-restart rule cut
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -123,6 +127,74 @@ async function hubEndScene(wrapperText, tag, capMs) {
   const words = M.leftWords({ n: 2, hubMain: true }), rec = M.leftRecord({ n: 2, hubMain: true, kept: false });
   ok(words === 'its main process was the VibeSpace hub — the 2 processes it left are the hub\'s (its conversations and helpers): left running, never stopped by this job' && rec && rec.hubMain === true && !rec.kept,
     'the model\'s words and record for it (the wrapper\'s twin says the same — the job\'s log above)', { words, rec });
+}
+
+// ════════ §2 THE WRAPPER OF A HUB-MAIN RUN KILLED ════════
+console.log('§2 a run whose main IS this hub, its wrapper killed — never judged ended, never restarted beside itself');
+const OWNER = { conversation: { backend: 'claude', id: 'conv-hm' }, sessionId: 'sess-hm', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
+const CALLER = { conversationId: 'conv-hm', sessionId: 'sess-hm', sessionCreatedAt: 1, groups: new Set() };
+/** the scene: engine 1 starts a SERVICE through the real wrapper and shuts down (its wrapper and main run on); engine 2 boots over the
+ *  same folder as that run's own hub (the `hubParentPid` seam: its parent is that wrapper) — then the wrapper is killed */
+async function wrapperKilledScene(JM2, tag) {
+  const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), WRAP);
+  const { JobManager } = require(path.join(ROOT, 'src/jobs.js'));
+  const deps = { dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, apiBase: 'http://127.0.0.1:9', memoryRungs: [] };
+  const j1 = new JobManager(deps); j1.init();
+  const r = j1.create({ kind: 'service', name: 'hub-svc', cmd: { argv: ['sleep', '300'] }, owner: OWNER }, CALLER);
+  const id = r.job && r.job.id;
+  let st = null; await until(() => { const j = j1.jobs.get(id); st = j && j1._readStamp(j); return !!st && j1._verifyAlive(st); }, 8000);
+  const wrapperId = st ? { ...PI.identityOf(Number(st.pid)) } : null;
+  let mainId = null; try { const kid = Number(String(fs.readFileSync(`/proc/${st.pid}/task/${st.pid}/children`, 'utf8')).trim().split(/\s+/)[0]); if (kid > 1) mainId = PI.identityOf(kid); } catch { }
+  if (wrapperId) mine.push(wrapperId); if (mainId) mine.push(mainId);
+  const lock = j1.lockFile; j1.shutdown(); await until(() => !fs.existsSync(lock), 5000);
+  const logs = [];
+  const j2 = new JM2({ ...deps, log: (...a) => logs.push(a.join(' ')), hubParentPid: st ? Number(st.pid) : 0 }); j2.init();
+  for (const t of j2._timers || []) clearInterval(t); j2._timers = [];
+  const job = j2.jobs.get(id), run = job && job.runs[job.runs.length - 1];
+  const latched = !!run && run.hubMain === true;
+  if (wrapperId) PI.signalIdentity(wrapperId, 'SIGKILL');   // the wrapper killed — its main (this hub's stand-in) runs on
+  await until(() => !!wrapperId && PI.aliveIdentity(wrapperId) !== true, 3000);
+  await j2._sweep(); await j2._sweep();
+  const out = { readOnly: !!j2.readOnly, latched, state: job && job.state, ended: !!(run && run.endedAt), desiredUp: job && job.desiredUp, runs: job && job.runs.length, said: logs.filter((l) => l.includes(id)).join(' | ') };
+  try { j2.shutdown(); } catch { }
+  return out;
+}
+{
+  const SWEEP = "      if (stamp && !this._verifyAlive(stamp) && !this._readExit(job, run) && this._hubIsMain(job, run)) {";
+  const JX = MJ.load('src/jobs.js', anchored(JSRC, SWEEP, '      if (false) {   /* MUTANT: the sweep judges it as any run */', 'b2c5c-u2-sweep-cut'), 'b2c5c-u2-sweep-cut');
+  const [real, red] = await Promise.all([wrapperKilledScene(require(path.join(ROOT, 'src/jobs.js')).JobManager, 'wk'), wrapperKilledScene(JX.JobManager, 'wk-mut')]);
+  ok(!real.readOnly && real.latched === true && /its main process is this VibeSpace hub \(started as this job\)/.test(real.said),
+    'the hub\'s boot asks, for each run it adopts, whether IT is that run\'s main (its parent is the run\'s wrapper) — proven, kept on the run (run.hubMain) and said', real);
+  ok(real.state === 'up' && real.ended === false && real.runs === 1 && /its wrapper is gone, but its main process is this VibeSpace hub, which runs — the run is not ended/.test(real.said),
+    'ITS WRAPPER KILLED: the sweep never judges the run ended (its main is this hub, which runs) — no second run, nothing restarted beside it; said', real);
+  ok(red.latched === true && red.ended === true, 'CONTROL (the sweep\'s guard cut, in a copy): the sweep judges the run ended — the road to a restart beside the running hub — RED', red);
+}
+{
+  // a hub-main SERVICE's end is never restarted by itself: its policy and a boot's replay start no second hub (driven through the engine's
+  // own judgment over a stand-in wrapper's open run — nothing spawned again)
+  const STANDIN = "const fs = require('fs'); const [ctl, spec] = process.argv.slice(2); try { fs.unlinkSync(spec); } catch { }\n";
+  const endScene = (JM2, tag, exitExtra, runExtra = {}) => {
+    const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true }); fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), STANDIN);
+    const jm = new JM2({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, deliverToConversation: async () => ({ ok: true, lane: 'message' }), groupNotifyFor: () => null, notifyGlobal: () => true, peerReachable: () => true });
+    jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
+    const r = jm.create({ kind: 'service', name: 'hub-svc', cmd: { argv: ['sh', '-c', 'sleep 1'], cwd: dd }, owner: OWNER }, CALLER);
+    const job = jm.jobs.get(r.job.id), run = job.runs[job.runs.length - 1];
+    Object.assign(run, runExtra);
+    jm._finalizeRun(job, run, { code: 0, endedAt: Date.now(), ...exitExtra }, 'sweep');
+    const out = { state: job.state, desiredUp: job.desiredUp, said: jm.events.filter((e) => e.jobId === job.id).map((e) => e.what).join(' | ') };
+    try { jm.shutdown(); } catch { }
+    return out;
+  };
+  const JMr = require(path.join(ROOT, 'src/jobs.js')).JobManager;
+  const byExit = endScene(JMr, 'end-exit', { hubMain: true }), byRun = endScene(JMr, 'end-run', {}, { hubMain: true }), plain = endScene(JMr, 'end-plain', {});
+  ok(byExit.state === 'down' && byExit.desiredUp === false && /its main process was the VibeSpace hub — not restarted by itself: a restart would start a second hub beside the one that runs/.test(byExit.said)
+    && byRun.desiredUp === false && plain.desiredUp === true,
+    'a hub-main SERVICE\'s end (the wrapper\'s record says it, or the run was proven at its boot) is NOT restarted by itself — not wanted up any more, said by name; an ordinary service stays wanted up (its restart policy)', { byExit, byRun, plain });
+  const RULE = "    const hubMainEnd = job.kind === 'service' && (exit.hubMain === true || run.hubMain === true);";
+  const JY = MJ.load('src/jobs.js', anchored(JSRC, RULE, "    const hubMainEnd = false;   /* MUTANT: restarted as any service */", 'b2c5c-u2-restart-cut'), 'b2c5c-u2-restart-cut');
+  const redEnd = endScene(JY.JobManager, 'end-mut', { hubMain: true });
+  ok(redEnd.desiredUp === true, 'CONTROL (the rule cut, in a copy): the hub-main service stays wanted up — its policy (and a boot\'s replay) would start a second hub — RED', redEnd);
 }
 
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'B-2c5c ' })) ok(r.pass === true, r.name + (r.pass ? '' : ' — ' + r.detail));
