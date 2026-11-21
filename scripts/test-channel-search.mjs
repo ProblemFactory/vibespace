@@ -117,8 +117,12 @@ ok(/Re-authorize/.test(SR.statusText({ state: 'refused', code: 'needs-scope' }))
   const g1 = get(s, { query: ' BUDGET plan', now: T0 + 5000 });
   ok(g1.answer && g1.answer.hits.length === 1 && g1.answer.next === 'p:10' && g1.answer.ageMs === 5000 && g1.answer.askedAt === T0, 'memo: the same words (another case, other spaces) read the entry with its age');
   ok(!get(s, { query: 'budget plan', scopes: ['set:1:x'] }).answer && get(s, { query: 'budget plan', scopes: ['set:1:x', 'all'] }).answer, 'memo: a scope reads its own entries only — an agent lists the owner\'s ("all") beside its own');
-  const late = get(s, { query: 'budget plan', now: T0 + 365 * 86400e3 });
-  ok(SR.SEARCH_MEMO_TTL_MS === undefined && late.answer && late.answer.ageMs === 365 * 86400e3 && late.state.entries.size === 2, 'memo (lane search-card-open): NO TTL — a year later the entry still answers, with its age');
+  // B-5b32 (report fb-460926fdbc): THE LIFE — an ASK is answered only inside SEARCH_MEMO_LIFE_MS from the account's answer
+  const L10 = get(s, { query: 'budget plan', now: T0 + SR.SEARCH_MEMO_LIFE_MS }), L11 = get(s, { query: 'budget plan', now: T0 + 11 * 60e3 });
+  const late = get(s, { query: 'budget plan', now: T0 + 365 * 86400e3 }), lateLook = get(s, { query: 'budget plan', now: T0 + 365 * 86400e3, look: true });
+  const back1 = get(s, { query: 'budget plan', now: T0 - 1000 });
+  ok(SR.SEARCH_MEMO_LIFE_MS === 10 * 60e3 && L10.answer && L10.answer.ageMs === SR.SEARCH_MEMO_LIFE_MS && L10.answer.lifeMs === SR.SEARCH_MEMO_LIFE_MS && !L10.answer.past && L11.answer === null && late.answer === null && back1.answer === null, 'memo (B-5b32): an ask is answered only inside the life — at 10 min yes; at 11 min, a year later, or with the clock gone back past the answer: null (the account is asked again)', JSON.stringify({ L10: L10.answer && L10.answer.ageMs, L11: !!L11.answer, late: !!late.answer, back1: !!back1.answer }));
+  ok(lateLook.answer && lateLook.answer.past === true && lateLook.answer.ageMs === 365 * 86400e3 && lateLook.state.entries.size === 2 && late.state.entries.size === 2, 'memo (B-5b32 + lane search-card-open): a LOOK still reads a page past its life, with its true age and `past` — no age drops an entry', JSON.stringify(lateLook.answer && { past: lateLook.answer.past, ageMs: lateLook.answer.ageMs }));
   s = SR.searchMemo(s, { op: 'put', scope: 'all', query: 'budget plan', page: 'p:10', now: T0 + 60000, hits: [{ convId: 'c', vendorId: 'w', at: 0 }], next: null }).state;
   const pg = get(s, { query: 'budget plan', page: 'p:10', now: T0 + 61000 });
   const stray = SR.searchMemo(s, { op: 'put', scope: 'all', query: 'budget plan', page: 'p:99', now: T0 + 62000, hits: [], next: null });
@@ -218,6 +222,7 @@ function counted(kind, { search = true, fetch = true } = {}) {
     impl.search = async (o) => {
       calls.search++;
       if (inject.rate > 0) { inject.rate--; throw new CH.ChannelError('rate-limited', 'fake search: too many requests', { retryable: true, detail: { retryAfterSec: 30 } }); }
+      if (inject.before) await inject.before(o);   // B-5b32 §L: an account that answers LATE (the placed clock moved inside the call)
       const r = await s0(o);
       if (inject.extra) r.hits = [inject.extra, ...r.hits].slice(0, 10);
       return r;
@@ -422,7 +427,7 @@ console.log('§M the memo: one ask per (account, scope, query) — a repeat, a r
   ok(m5.next && m6.ok && !m6.memo && m6b.memo && S.calls.search === 2 * PP + 1, 'the scroll\'s next page = one call, appended to the entry; asked again it is remembered', JSON.stringify({ calls: S.calls.search }));
   tick(3 * 86400e3);
   const m7 = await eng.searchVendor('srch', 'budget');
-  ok(m7.ok && m7.memo && S.calls.search === 2 * PP + 1, 'lane search-card-open: NO TTL — three days later the same words are still answered from the memo (0 calls)', JSON.stringify({ calls: S.calls.search, m7: m7.code }));
+  ok(m7.ok && !m7.memo && S.calls.search === 3 * PP + 1, 'B-5b32: three days later the same words ASK the account again (a page past its life is not served) — one press\'s pages', JSON.stringify({ calls: S.calls.search, m7: m7.code || !!m7.memo }));
   await eng.setAccess('srch', { kind: 'conversation', convId: 'srch-ops' }, [{ principal: { kind: 'agent', id: 'agent-M', name: 'M' } }]);
   const AGm = { kind: 'agent', id: 'agent-M', name: 'M', groups: [] };
   const c8 = S.calls.search;
@@ -477,6 +482,67 @@ console.log('§M the memo: one ask per (account, scope, query) — a repeat, a r
   const i2 = await I2.eng.searchVendor('srch', 'budget', { peek: true });
   ok(held && held.email === 'ada@example.com' && i2.unasked && !fs.existsSync(ifile), 'the file names whose account answered; read under another identity it is dropped, never shown', JSON.stringify({ held, i2: i2.code || i2.unasked }));
   I2.eng.stop && I2.eng.stop();
+}
+
+// ── §L THE LIFE (B-5b32, HIGH; report fb-460926fdbc) ───────────────────────
+// An agent's `--full` was answered from a page 45 HOURS old while the note said «remembered for 10 min»: since .233 the memo
+// had no life. THE LAW (the coordinator, 2026-11-21): a remembered page is served only inside its stated life, counted from
+// when the account answered. Past it, the account is asked again on the caller's own ask (never by a timer), and the note
+// states the true age and the true life. A placed clock and the stand-in vendor; RED = the release's road.
+console.log('§L the life: a page 11 minutes old is not served; a look still reads it; the age counts from the answer');
+const lifeLegs = async (name, ENGmod) => {
+  const { eng, S, tick } = await mkEngine(name, ENGmod);
+  const r = {};
+  await eng.searchVendor('srch', 'budget');
+  tick(SR.SEARCH_MEMO_LIFE_MS);
+  const o2 = await eng.searchVendor('srch', 'budget');
+  r.at10 = { memo: !!o2.memo, ageMs: o2.memo && o2.memo.ageMs, lifeMs: o2.memo && o2.memo.lifeMs, calls: S.calls.search };
+  tick(60e3);
+  const o3 = await eng.searchVendor('srch', 'budget', { peek: true });
+  r.look11 = { memo: !!o3.memo, past: !!(o3.memo && o3.memo.past), ageMs: o3.memo && o3.memo.ageMs, calls: S.calls.search };
+  const o4 = await eng.searchVendor('srch', 'budget');
+  r.press11 = { ok: o4.ok, memo: !!o4.memo, calls: S.calls.search };
+  tick(3000);
+  const o5 = await eng.searchVendor('srch', 'budget');
+  r.after = { memo: !!o5.memo, ageMs: o5.memo && o5.memo.ageMs, calls: S.calls.search };
+  // an agent: its --full is always an ask
+  await eng.setAccess('srch', { kind: 'conversation', convId: 'srch-ops' }, [{ principal: { kind: 'agent', id: 'agent-L', name: 'L' } }]);
+  const AGl = { kind: 'agent', id: 'agent-L', name: 'L', groups: [] };
+  const c0 = S.calls.search;
+  const a1 = await eng.searchFor(AGl, 'kickoff', { full: true, adapterId: 'srch' });
+  tick(2 * 60e3);
+  const a2 = await eng.searchFor(AGl, 'kickoff', { full: true, adapterId: 'srch' });
+  tick(9 * 60e3);
+  const a3 = await eng.searchFor(AGl, 'kickoff', { full: true, adapterId: 'srch' });
+  r.agent = { a1: !!a1.remembered, a2: a2.remembered || null, a3: !!a3.remembered, a3ok: a3.ok, calls: S.calls.search - c0 };
+  // the age counts from the ACCOUNT'S ANSWER: an account that answers 5 min after the press, asked again 6 min later
+  S.inject.before = () => { S.inject.before = null; tick(5 * 60e3); };
+  const c1 = S.calls.search;
+  await eng.searchVendor('srch', 'roadmap');
+  const first = S.calls.search - c1;   // the stand-in's pages for these words (fewer than a press's when no next page)
+  tick(6 * 60e3);
+  const s2 = await eng.searchVendor('srch', 'roadmap');
+  r.slow = { memo: !!s2.memo, ageMs: s2.memo && s2.memo.ageMs, first, calls: S.calls.search - c1 };
+  eng.stop && eng.stop();
+  return r;
+};
+{
+  const PP = fake.FAKE_SEARCH.pagesPerPress;
+  const r = await lifeLegs('eng-life', ENG);
+  ok(r.at10.memo && r.at10.ageMs === SR.SEARCH_MEMO_LIFE_MS && r.at10.lifeMs === SR.SEARCH_MEMO_LIFE_MS && r.at10.calls === PP, 'B-5b32: at 10 min (the life) the same press is answered from memory, its age and its life said — 0 calls', JSON.stringify(r.at10));
+  ok(r.look11.memo && r.look11.past && r.look11.ageMs === 11 * 60e3 && r.look11.calls === PP, 'B-5b32: at 11 min the dialog\'s LOOK (it never asks) still shows the page, its true age and `past` — 0 calls (what an agent found still opens, .233)', JSON.stringify(r.look11));
+  ok(r.press11.ok && !r.press11.memo && r.press11.calls === 2 * PP && r.after.memo && r.after.ageMs === 3000 && r.after.calls === 2 * PP, 'B-5b32: at 11 min the PRESS is not answered from memory — the account is asked again (one press), and that answer is remembered from its own instant', JSON.stringify({ press11: r.press11, after: r.after }));
+  ok(r.agent.a1 === false && r.agent.a2 && r.agent.a2.ageSec === 120 && r.agent.a2.lifeSec === 600 && r.agent.a3 === false && r.agent.a3ok && r.agent.calls === 2, 'B-5b32: an agent\'s --full — inside the life the remembered answer with its age and its life (120 s of 600 s); at 11 min the account is asked again (2 calls in all)', JSON.stringify(r.agent));
+  ok(r.slow.memo && r.slow.ageMs === 6 * 60e3 && r.slow.first >= 1 && r.slow.calls === r.slow.first, 'B-5b32: the life counts from the ACCOUNT\'S ANSWER — an account that answered 5 min after the press: 6 min later its page is 6 min old and served (11 min from the press)', JSON.stringify(r.slow));
+  // RED CONTROLS, in copies
+  const rel = await lifeLegs('eng-life-release', patched('src/server/channels-engine.js', 'now: t, look: !!peek && !pageToken })', 'now: t, look: true })', 'release-no-life'));
+  ok(rel.press11.memo && rel.press11.calls === PP && rel.agent.a3 === true && rel.agent.calls === 1, 'CONTROL (the release\'s road: every read answered whatever its age): the 11-minute press and the agent\'s 11-minute --full are answered from memory — the legs above would be RED', JSON.stringify({ press11: rel.press11, agent: rel.agent }));
+  const prs = await lifeLegs('eng-life-press', patched('src/server/channels-engine.js', 'now: answeredAt || t,', 'now: t,', 'life-from-press'));
+  ok(!prs.slow.memo && prs.slow.first >= 1 && prs.slow.calls === 2 * prs.slow.first, 'CONTROL: an engine that counts the life from the PRESS asks the slow account again 6 min after its answer — the answer-instant leg would be RED', JSON.stringify(prs.slow));
+  const PL = patched('src/channel-search.js', 'if (past && !ev.look) continue;', 'if (false) continue;', 'pure-no-life');
+  const pl = PL.searchMemo(undefined, { op: 'put', scope: 'all', query: 'q', page: null, now: 1e6, hits: [], next: null }).state;
+  const plGet = (M, st) => M.searchMemo(st, { op: 'get', scopes: ['all'], query: 'q', page: null, now: 1e6 + 11 * 60e3 }).answer;
+  ok(plGet(PL, pl) && plGet(SR, SR.searchMemo(undefined, { op: 'put', scope: 'all', query: 'q', page: null, now: 1e6, hits: [], next: null }).state) === null, 'CONTROL: the memo without its life row answers an 11-minute ask — the PURE leg would be RED');
 }
 
 // ── §K PATCHED-COPY CONTROLS ───────────────────────────────────────────────

@@ -17,7 +17,9 @@
  *   coverageText / statusText / sectionHead   the dialog's words (the caller's `t`; zh / ja in src/lib/i18n-*.js)
  *   searchMemo(state, ev)       THE MEMO (lane vendor-search-memo, .230): a vendor search is asked ONCE per (account,
  *                               scope, normalized query) and remembered — memoText says its age. Lane search-card-open
- *                               (.233): no TTL (bounded by size / LRU only), an answer fanned per conversation (what one
+ *                               (.233): bounded by size / LRU; B-5b32: it answers an ASK only inside its LIFE
+ *                               (SEARCH_MEMO_LIFE_MS from the account's answer — past it the account is asked again;
+ *                               a look reads it with its age), an answer fanned per conversation (what one
  *                               searcher found for a conversation answers that conversation), memoToDisk / memoFromDisk
  *                               = the per-account file's PURE round trip
  *   searchAnswer(facts)         THE AGENT'S WORDS (lane channels-search-says-hidden): what `--full` added beyond the
@@ -155,14 +157,24 @@ function fullSearchVerdict(f = {}) {
 // (`hits` = the already-merged, snippet-bearing rows), the first press's instant (`askedAt` — a later page appends, it
 // never renews it), who asked (`by`). LRU by Map order.
 // Lane search-card-open (.233; the owner 2026-10-07: 「既然 agent 进行了搜索说明 vibespace 已经获取到了相关 data，为啥我点不开？」
-// + 「缓存其实不用失效吧，反正搜索结果也只会出现新的而不会更改旧的？而新的都会被我们系统收到？」): NO TTL — a search over
+// + 「缓存其实不用失效吧，反正搜索结果也只会出现新的而不会更改旧的？而新的都会被我们系统收到？」): NO TTL (until B-5b32, below) — a search over
 // history only gains newer messages and every newer one lands in the saved copy, so an entry is bounded by size / LRU
 // only (the engine persists it per account and drops it with the account's identity). A put FANS its page's hits by
 // conversation: a derived entry per conversation (`conv:<id>`, at most SEARCH_MEMO_FAN of them) and — when the searched
 // scope covered every conversation of the account (`covers`) — under 'all'; a derived entry has no page token (the
 // token belongs to the ORIGINAL scope's next page only), never replaces an original entry, and leaves with its origin.
+// B-5b32 (2026-11-21, HIGH; report fb-460926fdbc: an agent's `--full` was answered from a page 45 HOURS old while its note
+// said «remembered for 10 min» — those were .230's words, and .233 had removed the life): THE LIFE. A remembered page answers
+// an ASK (a press, the scroll's next page, an agent's --full) only inside SEARCH_MEMO_LIFE_MS, counted from the ACCOUNT'S
+// ANSWER (`askedAt` = the instant its first page landed). Past it, or with the clock gone back past that instant, the scope
+// is passed, so the caller's own ask reaches the account again under today's table; nothing is ever asked by a timer.
+// A LOOK (`look`: the dialog opening, which never asks) still reads it, with its true age and `past`, so what an agent
+// found still opens (.233). The size / LRU bound stands, and no age drops an entry.
 const SEARCH_MEMO_MAX = 64;
 const SEARCH_MEMO_BYTES = 2 * 1024 * 1024;
+/** B-5b32: how long a remembered page answers an ASK, counted from the account's answer. This is the stated life: the CLI's
+ *  note words it from the answer's `lifeMs` / `lifeSec`, never from a literal. */
+const SEARCH_MEMO_LIFE_MS = 10 * 60e3;
 const MEMO_ALL = 'all';
 /** A put derives at most this many conversation entries (the most hits first) — one put never fills the LRU. */
 const SEARCH_MEMO_FAN = 16;
@@ -198,8 +210,10 @@ function unshownOf(v) {
 /**
  * ONE STEP of an account's memo → { state, answer }. `state` = `{ entries: Map, bytes }` (undefined = empty); a new
  * state each step (the old one untouched).
- *   { op: 'get', scopes, query, page, now }  → answer `{ scope, askedAt, ageMs, hits, next, by, derived, unshown }` of the first
- *        scope holding an entry with that page (a hit moves it to the newest); none ⇒ null. No age drops an entry.
+ *   { op: 'get', scopes, query, page, now, look }  → answer `{ scope, askedAt, ageMs, lifeMs, past?, hits, next, by, derived,
+ *        unshown }` of the first scope holding an entry with that page (a hit moves it to the newest); none ⇒ null.
+ *        B-5b32: for an ask, an entry outside its life (older than SEARCH_MEMO_LIFE_MS, or answered after `now`) is passed;
+ *        `look: true` reads it (`past: true`). No age drops an entry.
  *   { op: 'put', scope, query, page, now, hits, next, by, covers, unshown } → page null: the entry (re)born; a token: appended to
  *        the entry whose last page's `next` is that token (else nothing). Then THE FAN (above). An entry over the byte
  *        cap is not kept; the oldest leave first past SEARCH_MEMO_MAX entries or SEARCH_MEMO_BYTES (the one just put
@@ -221,8 +235,10 @@ function searchMemo(state, ev = {}) {
       if (!x) continue;
       const p = x.pages.find((pg) => pg.token === page);
       if (!p) continue;
+      const age = now - Number(x.askedAt), past = !(age >= 0 && age <= SEARCH_MEMO_LIFE_MS);   // B-5b32: NaN or a clock gone back = outside
+      if (past && !ev.look) continue;   // B-5b32: an ask past the life is not answered from memory — the account is asked again
       entries.delete(k); entries.set(k, x);
-      return done({ scope: scope || MEMO_ALL, askedAt: x.askedAt, ageMs: Math.max(0, now - x.askedAt), hits: p.hits, next: p.next, by: x.by || 'owner', derived: !!x.from, unshown: unshownOf(p.unshown) });
+      return done({ scope: scope || MEMO_ALL, askedAt: x.askedAt, ageMs: Math.max(0, age) || 0, lifeMs: SEARCH_MEMO_LIFE_MS, ...(past ? { past: true } : {}), hits: p.hits, next: p.next, by: x.by || 'owner', derived: !!x.from, unshown: unshownOf(p.unshown) });
     }
     return done(null);
   }
@@ -341,8 +357,8 @@ function statusText(s, { t = defaultT, vendor = '' } = {}) {
   if (v.state === 'failed') return t("{vendor}'s search did not answer — the saved results are shown", { vendor: V });
   return '';
 }
-/** A remembered answer's age (lane vendor-search-memo): INFORMATION, never a reason to re-ask (lane search-card-open:
- *  the memo does not expire) — minutes for the first hour, then the day it was asked (`date`, the caller's own words for
+/** A remembered answer's age (lane vendor-search-memo), as a LOOK says it. B-5b32: an ASK is answered from the memo only
+ *  inside SEARCH_MEMO_LIFE_MS, but the dialog's look still shows an older page. Minutes for the first hour, then the day it was asked (`date`, the caller's own words for
  *  `askedAt`); `by: 'agent'` says the agent asked. "Search again" beside it asks anew. */
 function memoWhen(ageMs, { t = defaultT, date = '' } = {}) {
   const n = Math.floor(Math.max(0, Number(ageMs) || 0) / 60e3);
@@ -442,7 +458,7 @@ module.exports = {
   matchParts,
   SNIPPET_MAX, SNIPPET_READ_MAX, SNIPPET_KEYS, SEARCH_VIA, SEARCH_CONTEXT, SEARCH_MATCH, SEARCH_ADDS, OWNER_FLOOR_MS, AGENT_FLOOR_MS, AROUND_MAX, QUERY_MAX,
   snippetOf, snippetShape, holdsQuery, isCjk, mergeVendorHits, coverageOf, fullSearchVerdict, coverageText, statusText, sectionHead,
-  SEARCH_MEMO_MAX, SEARCH_MEMO_BYTES, SEARCH_MEMO_FAN, MEMO_ALL, memoQuery, memoScope, memoConv, isMemoScope, searchMemo, memoToDisk, memoFromDisk,
+  SEARCH_MEMO_MAX, SEARCH_MEMO_BYTES, SEARCH_MEMO_FAN, SEARCH_MEMO_LIFE_MS, MEMO_ALL, memoQuery, memoScope, memoConv, isMemoScope, searchMemo, memoToDisk, memoFromDisk,
   memoWhen, memoText, forgottenText,
   searchAnswer, searchSaidKind, SHARE_DOOR, HIDDEN_TEXT, STORE_MATCH, unshownOf,
 };

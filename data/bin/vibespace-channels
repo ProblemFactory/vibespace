@@ -866,7 +866,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     for (const m of added) console.log(`${m.key} — ${m.title}  [${when(m.at)}] (not saved here): ${String(m.text || '').replace(/\n/g, ' ').slice(0, 200)}  (id ${m.vendorId})`);
     if (added.length) console.log(`context: vibespace-channels read <conv> --around <id>  (two requests; not saved)`);
     said(f, added.length ? null : f.adds === 'unsaved' ? `the account's own search found nothing you can see that is not saved here for "${q}".` : `the account's own search found nothing older that you can see for "${q}".`, rows.length);   // the local `old` is the fallback for a server that sends no key; `saved` words «beyond the N saved hits»
-    if (f.remembered) console.log(`(the account's own search answered these ${f.remembered.ageSec < 60 ? 'less than a minute' : `${Math.floor(f.remembered.ageSec / 60)} min`} ago — remembered for 10 min, not asked again)`);   // lane vendor-search-memo
+    if (f.remembered) console.log(`(the account's own search answered these ${f.remembered.ageSec < 60 ? 'less than a minute' : `${Math.floor(f.remembered.ageSec / 60)} min`} ago — ${Number(f.remembered.lifeSec) > 0 ? `remembered for ${Math.round(f.remembered.lifeSec / 60)} min, not asked again until then` : 'remembered, not asked again'})`);   // lane vendor-search-memo; B-5b32: the life is the reply's (lifeSec), never a literal
     else console.log(`(asked the account's own search — one page per call within your share; narrow the words for more)`);
     return;
   }

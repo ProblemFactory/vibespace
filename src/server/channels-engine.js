@@ -7642,7 +7642,8 @@ function create(deps = {}) {
    * paced + metered through `vendor()` and charged to `by`, then the merge (a stored hit dropped). A RATE refusal
    * backs the ENDPOINT off for the account — the change feed shares it and waits with it (its card says so as today).
    * THE MEMO (lane vendor-search-memo, .230 — `SR.searchMemo`; lane search-card-open, .233: PER ACCOUNT, PERSISTED in
-   * `<account>/search-memo.json` (`memoOf` / `memoKeep`), no TTL, dropped with the account — dropLive's disconnect /
+   * `<account>/search-memo.json` (`memoOf` / `memoKeep`), a LIFE for an ask (B-5b32: SR.SEARCH_MEMO_LIFE_MS from the
+   * account's answer; the dialog's look reads an older page with its age), dropped with the account — dropLive's disconnect /
    * removal — or when the file names another identity): an answer is remembered per (scope, normalized query, page)
    * and FANNED per conversation (+ 'all' when an agent's scope `covers` the account); a press, a reopen (`peek`) or an
    * agent's repeat (it reads the owner's 'all' first, then its own conversation set's) is answered from it — 0 vendor
@@ -7692,7 +7693,9 @@ function create(deps = {}) {
     const agentReserve = sd && by === 'agent' ? sd.pagesPerPress : 0;
     const reads = by === 'agent' ? (scope === SR.MEMO_ALL ? [SR.MEMO_ALL] : [SR.MEMO_ALL, scope]) : Array.isArray(memoScopes) && memoScopes.length ? memoScopes : [scope];
     if (e && again && !pageToken) memoKeep(rec, SR.searchMemo(memoOf(rec), { op: 'clear', scopes: reads, query }).state, true);
-    const mq = e && !(again && !pageToken) ? SR.searchMemo(memoOf(rec), { op: 'get', scopes: reads, query, page: pageToken, now: t }) : null;
+    // B-5b32: an ask (a press, the scroll's next page, an agent's --full) is answered only inside the page's life; the
+    // dialog's LOOK (`peek`: it never asks) reads an older page with its true age
+    const mq = e && !(again && !pageToken) ? SR.searchMemo(memoOf(rec), { op: 'get', scopes: reads, query, page: pageToken, now: t, look: !!peek && !pageToken }) : null;
     if (mq) memoKeep(rec, mq.state);
     const kept = mq && mq.answer;
     const v = SR.fullSearchVerdict({
@@ -7717,7 +7720,7 @@ function create(deps = {}) {
       const om = { oldest: new Map(), older: 0, unknown: 0 };
       const mg = SR.mergeVendorHits(kept.hits, { stored: (cid, vid, at) => storedTally(cid, vid, at, om) });
       const own = kept.scope === scope && !kept.derived;   // a page token belongs to the searcher who asked
-      return { ok: true, sd, hits: mg.hits, next: own ? kept.next : null, stored: mg.stored, repeated: mg.repeated, pages: 0, memo: { askedAt: kept.askedAt, ageMs: kept.ageMs, by: kept.by }, storedIn: [...storedIn], unshown: kept.unshown || [] };
+      return { ok: true, sd, hits: mg.hits, next: own ? kept.next : null, stored: mg.stored, repeated: mg.repeated, pages: 0, memo: { askedAt: kept.askedAt, ageMs: kept.ageMs, lifeMs: kept.lifeMs, ...(kept.past ? { past: true } : {}), by: kept.by }, storedIn: [...storedIn], unshown: kept.unshown || [] };
     }
     if (v.act === 'unasked') return { ok: true, sd, hits: [], next: null, stored: 0, repeated: 0, pages: 0, unasked: true };
     if (v.act !== 'ask') {
@@ -7737,7 +7740,7 @@ function create(deps = {}) {
     e.searchFlights.add(fkey);
     const prevBy = e.chargeBy; e.chargeBy = by === 'agent' ? 'agent' : 'owner';
     const hits = [], facts = [], unshown = new Map();
-    let next = pageToken, pages = 0, failure = null;
+    let next = pageToken, pages = 0, failure = null, answeredAt = 0;   // B-5b32: answeredAt = when the account's first page landed
     // design 010 S6 (lane channels-followups): two HINTS for an adapter that reads each hit's details one request at a
     // time (Gmail's metadata read): what the local copy already holds (its stored instant — section one shows it, no
     // read) and, for an agent, which conversations it may be shown (`shows` — none ⇒ no read: neither its units nor its
@@ -7749,6 +7752,7 @@ function create(deps = {}) {
         e.searchCalls = Feed.minuteAt(e.searchCalls, now()).calls.concat([now()]);
         const page = await vendor(rec, e, () => e.adapter.search({ query, pageToken: next, storedAt, shows }));
         pages++;
+        if (pages === 1) answeredAt = now();   // B-5b32: the life counts from the account's answer, not the press
         if (outlived(rec, e)) throw new ChannelError('account-changed', 'the account changed while the vendor searched — nothing was kept', { retryable: true });
         hits.push(...page.hits);
         if (page.facts) facts.push(page.facts);
@@ -7770,7 +7774,7 @@ function create(deps = {}) {
     const mg = SR.mergeVendorHits(hits, { stored: (cid, vid, at) => storedTally(cid, vid, at, memo) });
     const sum = (k) => facts.reduce((a, f) => a + (Number(f[k]) || 0), 0);
     measureFullSearch(rec, { pages, hits: hits.length, older: memo.older, unknown: memo.unknown, shape: (facts.find((f) => f.shape && f.shape.form !== 'absent') || {}).shape || null, cjk: SR.isCjk(query), of: sum('of'), holding: sum('holding') });
-    if (!failure && !outlived(rec, e)) memoKeep(rec, SR.searchMemo(memoOf(rec), { op: 'put', scope, query, page: pageToken, now: t, hits: mg.hits, next: next || null, by, covers: !!covers, unshown: [...unshown] }).state, true);
+    if (!failure && !outlived(rec, e)) memoKeep(rec, SR.searchMemo(memoOf(rec), { op: 'put', scope, query, page: pageToken, now: answeredAt || t, hits: mg.hits, next: next || null, by, covers: !!covers, unshown: [...unshown] }).state, true);
     return { ok: true, sd, hits: mg.hits, next: failure ? null : next || null, stored: mg.stored, repeated: mg.repeated, pages, storedIn: [...storedIn], unshown: [...unshown], ...(failure ? { partial: failure.code } : {}) };
   }
   /** THE OWNER'S FULL SEARCH (GET /api/channels/search/full): a press (no token: ≤ pagesPerPress pages) or the scroll's

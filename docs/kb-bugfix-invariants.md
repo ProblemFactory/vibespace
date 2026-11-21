@@ -9647,7 +9647,7 @@ The owner's conversation held 43 deliverables and 174 code files; the chip's pop
 ## THE OWNER COULD NOT OPEN WHAT THE AGENT FOUND (lane search-card-open, 2.369.233, 2026-10-07)
 
 The owner: 「既然 agent 进行了搜索说明 vibespace 已经获取到了相关 data，为啥我点不开？」 — the dialog from the agent's search row said "1 of the agent's hits are not in the saved copy" and "press Search". Cause: the memo was keyed by the AGENT's visible-set scope while the dialog peeked `all`; and the missing hits were counted, not shown.
-- **不变量** = what one searcher found for a conversation is remembered for that conversation (and its own scope, which the card row names); a remembered hit is shown, with its context, never a count. The memo does not expire (history only gains newer messages; the saved copy receives them); it is bounded by size / LRU, persisted per account, dropped with the account or another identity.
+- **不变量** = what one searcher found for a conversation is remembered for that conversation (and its own scope, which the card row names); a remembered hit is shown, with its context, never a count. Since B-5b32 (2026-11-21) an ASK is answered from the memo only inside its life (`SEARCH_MEMO_LIFE_MS`, 10 min from the account's answer), and a LOOK still reads an older page with its age; the memo is bounded by size / LRU, persisted per account, dropped with the account or another identity.
 - **Gate:** test-channel-search §A fan legs + §M owner-opens-agent-row (0 vendor calls) + controls (no fan ⇒ miss; a derived token ⇒ red).
 
 
@@ -10577,3 +10577,23 @@ Each has a red control in a copy.
 ## A WINDOW THAT FINISHED OPENING TOOK THE KEYBOARD FROM THE WINDOW THE PERSON CLICKED MEANWHILE (B-c87d, 2026-11-20)
 Found by reading during the 2.369.412 release red of test-internal-links-chrome (bl-chat-b): a conversation opened from a link, the person clicked back into the window they came from, and the attach's answer (`lateFocus(chatView)` in src/lib/session-lifecycle.js) put the caret in the new window's composer — under the window the person was in. What they typed went there, unseen. The old guard asked only whether an app dialog was open (lane mirror-green-228) and, for an unpressed resume, `quiet`; a PRESSED open took the keys whatever the person did since. The same shape stood at every focus after an await: the composer after a picture's read, the terminal's paste roads, the external editor, the desktop app's take-over and connect, a late go-to, the thread pane, a replay. **Invariant:** a focus after an await goes through src/lib/late-focus.js (`lateFocus` / `mayTakeKeys`) with the moment its open began; the PURE verdict drops it when the person pressed or typed elsewhere after that moment; a replay's or a boot restore's start is the page's. Gates: test-late-focus (the verdict's table, the door driven, the census of every focus after an await with a red control per site kind), test-late-focus-chrome (where the text went).
 
+
+## A REMEMBERED SEARCH PAGE WAS SERVED 45 HOURS OLD WHILE ITS NOTE SAID «REMEMBERED FOR 10 MIN» (B-5b32, the daily agent feedback check 2026-11-21, report fb-460926fdbc; lane gmail-connect-wall)
+
+- **What happened.** On five accounts an agent's `vibespace-channels search … --full` printed «the account's own search answered these 2717 min ago — remembered for 10 min, not asked again». The same words had been asked about 45 hours before.
+- **Which it was, from the code.** The page outlived its life. The age was true (counted from the press, a moment before the account answered).
+  - 2.369.230 (vendor-search-memo) gave the memo a 10-minute TTL, and the CLI's note said so.
+  - 2.369.233 (search-card-open) removed the TTL so that the owner's dialog could open what an agent found, but the note kept the old words.
+  - From then on every ask of the same words was answered from the first answer for as long as the entry stayed in the LRU. An agent has no «Search again».
+- **The fix.** `SR.SEARCH_MEMO_LIFE_MS` (10 min).
+  - An ASK (a press, the scroll's next page, an agent's `--full`) is answered from the memo only inside the life. The life counts from the account's answer: the instant its first page landed.
+  - Past it, or with the clock gone back past that instant, the scope is passed, so the caller's own ask reaches the account again under today's table. Nothing is asked by a timer.
+  - A LOOK (the dialog opening, which never asks) still reads an older page, with its true age and `past`.
+  - The agent's answer carries `remembered: {ageSec, lifeSec}`, and the CLI's note states both from it, never from a literal.
+- **不变量** = a remembered vendor answer is served to an ask only inside the life it states, counted from the vendor's answer. The words about a memory's life are read from the code that enforces it.
+- **Gates.**
+  - test-channel-search:
+    - the PURE life: at 10 min yes; at 11 min, a year later or with the clock gone back, no; a look yes, with `past`;
+    - §L over the stand-in vendor with a placed clock: the 11-minute press and the agent's 11-minute `--full` ask again, and a slow account's page counts from its answer;
+    - RED controls: the release's road (every read a look), the life counted from the press, and the PURE row removed.
+  - test-channels-agent-cli ㉒: the CLI's note inside the life, then the account asked again 11 minutes later.

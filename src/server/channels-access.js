@@ -783,7 +783,7 @@ function create(engineCtx) {
     }
     const adds = searchRowOf(registry.capsOf(rec.kind)).adds;
     const saidKind = SR.searchSaidKind({ hitsSeen: results.length, hiddenMatch: hid, adds, saved });   // lane search-no-group-log: a KEY, never the caller's query
-    return { ok: true, results, truncated: results.length >= limit, full: true, adapterId: rec.id, adds, hiddenMatch: hid, saidKind, memoScope: scope, ...(r.memo ? { remembered: { ageSec: Math.floor(r.memo.ageMs / 1000) } } : {}) };   // F2: the CLI words its line by the row; `memoScope` = the card row's key (the route keeps it off the answer)
+    return { ok: true, results, truncated: results.length >= limit, full: true, adapterId: rec.id, adds, hiddenMatch: hid, saidKind, memoScope: scope, ...(r.memo ? { remembered: { ageSec: Math.floor(r.memo.ageMs / 1000), lifeSec: Math.floor(r.memo.lifeMs / 1000) } } : {}) };   // F2: the CLI words its line by the row; `memoScope` = the card row's key (the route keeps it off the answer)
   }
   /** THE AGENT'S `read <conv> --around <msg>` (design 010): reach first (the uniform not-found), the message's instant
    *  from the log (a stored one) or from this agent's own `--full` answer, the agents' share, ONE `around` read (two

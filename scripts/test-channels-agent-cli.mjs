@@ -921,6 +921,12 @@ console.log('\n㉒ lane channels-search-says-hidden: --full prints the saved hit
   clock += 21000;
   const f3 = await run(['search', 'Acmenet install', '--full', '--account', A]);
   ok(f3.code === 0 && f3.out.split(SR.HIDDEN_TEXT).length === 2 && /the account's own search found nothing you can read for "Acmenet install" either\./.test(f3.out) && !LEAK.test(f3.out), '--full where only a hidden conversation matches: the existence sentence once, «found nothing you can read … either», nothing of the match', f3.out);
+  // B-5b32 (report fb-460926fdbc): the note states the TRUE age and the TRUE life; a page 11 minutes old is not served
+  clock += 21000;
+  const f4 = await run(['search', 'quarterly', '--full', '--account', A]);
+  clock += 11 * 60e3;
+  const f5 = await run(['search', 'quarterly', '--full', '--account', A]);
+  ok(f4.code === 0 && /^\(the account's own search answered these less than a minute ago — remembered for 10 min, not asked again until then\)$/m.test(f4.out) && f5.code === 0 && !/answered these/.test(f5.out) && /^\(asked the account's own search/m.test(f5.out) && /\(not saved here\): .*[Qq]uarterly/.test(f5.out), 'B-5b32: --full inside the life prints the remembered note with its true age and the life the hub sent; 11 minutes later the account is asked again', JSON.stringify([f4.out, f5.out]));
   // CONTROL: the base's --full — no plain search first — prints no saved hit for the words the plain search finds
   const CLI_SRC = fs.readFileSync(CLI, 'utf-8');
   const PLAIN = "    const r = await call('GET', '/api/agent/channels/search?' + qs);\n";

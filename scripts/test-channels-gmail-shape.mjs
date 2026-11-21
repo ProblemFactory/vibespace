@@ -1249,7 +1249,7 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
     const lists = v.calls.filter((c) => c.path.endsWith('/messages') && c.q.q === 'deploy').map((c) => ({ max: c.q.maxResults, page: c.q.pageToken || null }));
     await E.setReach('gmail', 'thr_ops_0001', { principal: { kind: 'agent', id: AG.id, name: AG.name }, level: 'visible' });
     // lane vendor-search-memo (.230): the owner's answer to these words is remembered and an agent reads it first — the
-    // memo forgotten (lane search-card-open: it no longer expires) the agent's --full asks the vendor itself (the hints
+    // memo forgotten (B-5b32: it answers inside its 10-minute life) the agent's --full asks the vendor itself (the hints
     // are what this leg measures)
     clock += 25e3; E.forgetSearchMemo('gmail'); v.calls.length = 0;
     const ag = await E.searchFor(AG, 'deploy', { full: true, adapterId: 'gmail' });
