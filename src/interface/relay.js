@@ -154,7 +154,12 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
   function upgrade(req, socket, head, facts = {}) {
     if (!facts.addr) { socket.destroy(); return; }
     const sock = openChan('upgrade', req, facts);
-    if (!sock) { stats.noOwner++; try { socket.end('HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json; charset=utf-8\r\nconnection: close\r\n\r\n' + JSON.stringify(exhausted ? SPENT : NO_OWNER)); } catch { } return; }
+    if (!sock) {   // no owner: answered by name — and, as a refused upgrade's words, the socket goes once they are written, or after UPGRADE_LINGER_MS (r1097)
+      stats.noOwner++;
+      const t = setTimeout(() => socket.destroy(), UPGRADE_LINGER_MS); t.unref?.();
+      try { socket.end('HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json; charset=utf-8\r\nconnection: close\r\n\r\n' + JSON.stringify(exhausted ? SPENT : NO_OWNER), () => { clearTimeout(t); socket.destroy(); }); } catch { socket.destroy(); }
+      return;
+    }
     stats.upgrades++; Object.assign(live.get(keyOf(sock)) || {}, { page: socket }); socket.once('close', live.get(keyOf(sock)).done);
     socket.on('error', () => { });
     sock.write(head && head.length ? Buffer.concat([headOf(req), head]) : headOf(req));   // ONE write: the bytes that came with the head reach the party with it, as its own 'upgrade' head

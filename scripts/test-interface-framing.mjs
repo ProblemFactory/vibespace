@@ -65,6 +65,7 @@ function compileAt(rel, src) { const file = path.join(REPO, rel); const m = new 
 function mutant(rel, needle, into) { const src = read(rel); if (src.split(needle).length !== 2) throw new Error(`CONTROL needle not found exactly once in ${rel}: ${needle.slice(0, 80)}`); return compileAt(rel, src.replace(needle, into)); }
 const { Mux } = require(path.join(REPO, 'src/agentd/mux.js'));
 const RELAY = require(path.join(REPO, 'src/interface/relay.js'));
+const LP = require(path.join(REPO, 'src/link-proof.js'));
 const FRONT = require(path.join(REPO, 'src/interface/front.js'));
 const D = require(path.join(REPO, 'src/door.js'));
 const secretPair = () => { const s = crypto.randomBytes(32).toString('hex'); return { secret: s, digest: crypto.createHash('sha256').update(s).digest('hex') }; };
@@ -107,7 +108,7 @@ const get = (port, p, { agent = false, headers = {} } = {}) => new Promise((reso
 async function fakeInterface(server, partyMod, { onData, onClose } = {}) {
   const sockPath = path.join(T, `x${++nBoot}.sock`), k = secretPair(), journal = [];
   let side = null;
-  const srv = net.createServer((s) => { side = new Mux(s, { heartbeat: false, closeAfterQueue: true, onControl: (m) => { if (m && m.op === 'hello') side.control({ op: 'hello-ack', protoVersion: 1, party: 'interface', capabilities: [] }); }, onData: (c, b) => { if (onData) onData(c, b); side.credit(c, b.length); }, onClose: (c) => { if (onClose) onClose(c); } }); }).listen(sockPath);
+  const srv = net.createServer((s) => { side = new Mux(s, { heartbeat: false, closeAfterQueue: true, onControl: (m) => { if (m && m.op === 'hello') side.control({ op: 'hello-ack', protoVersion: 2, party: 'interface', capabilities: [] }); }, onData: (c, b) => { if (onData) onData(c, b); side.credit(c, b.length); }, onClose: (c) => { if (onClose) onClose(c); } }); side.control({ op: 'challenge', protoVersion: 2, nonce: LP.challenge() }); }).listen(sockPath);   // the greeting opens with a challenge (this fake admits any proof)
   await new Promise((r) => srv.once('listening', r));
   const party = await (partyMod || require(path.join(REPO, 'src/server/interface-party.js'))).join({ start: { party: 'hub', secret: k.secret, link: sockPath }, server, log: { error: (l) => journal.push(String(l)) } });
   return { side: () => side, party, journal, close: () => { try { party.mux.destroy(); } catch { } srv.close(); } };
@@ -305,8 +306,7 @@ console.log('— ④ THE HUB OBEYS NO CLASS');
   const I = require(path.join(REPO, 'src/interface/index.js')).create(); const where = await I.listen(0, '127.0.0.1');
   const recSrv = net.createServer((s) => I.attachLink(s)).listen(recSock); await new Promise((r) => recSrv.once('listening', r));
   I.admit({ party: 'hub', digest: k.digest });
-  const ls = net.connect(recSock); const mx = new Mux(ls, { heartbeat: false, closeAfterQueue: true, onControl: (m) => { if (m && m.op === 'open') lines.push(m); }, onData: (c, b) => mx.credit(c, b.length) });
-  ls.on('connect', () => mx.control({ op: 'hello', protoVersion: 1, party: 'hub', secret: k.secret }));
+  const ls = net.connect(recSock); const mx = new Mux(ls, { heartbeat: false, closeAfterQueue: true, onControl: (m) => { if (m && m.op === 'challenge') { mx.control({ op: 'hello', protoVersion: 2, party: 'hub', proof: LP.proofOf(k.digest, m.nonce, 'hub') }); return; } if (m && m.op === 'open') lines.push(m); }, onData: (c, b) => mx.credit(c, b.length) });
   await until(() => I.stats().linked, 2000);
   const q = http.get({ host: '127.0.0.1', port: where.port, path: '/api/x', agent: false, headers: { 'x-vs-stamp': '{"class":"door","secure":true}' } }); q.on('error', () => { });
   await until(() => lines.length > 0, 2000); q.destroy();

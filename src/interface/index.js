@@ -8,6 +8,8 @@
 // design's sentence as r922 amends it), and no synchronous disk call once it listens (scripts/test-interface-relay.mjs
 // and scripts/test-interface-framing.mjs hold each as a law). Its link to a party is the tree's own frame code
 // (src/agentd/mux.js); a same-machine link runs with the heartbeat OFF (a silent party is late, never dead).
+// THE GREETING, VERSION 2 (主开发 r1087): every link opens with a fresh challenge from here, and a party's hello PROVES its start
+// value (a proof keyed by the digest it was admitted by — ../link-proof.js), never sends it: no start value is on any link.
 // Piece B2b: a link is a PARTY only once its hello is admitted (./admission.js — the start secret the supervisor minted for
 // this start; lane readings' contract v1 §3). Until then nothing is relayed to it and its bytes are credited and dropped;
 // a refused hello is answered {op:'auth-fail'} and the link ends; a link that says no hello within HELLO_MS is ended. A
@@ -20,6 +22,7 @@ const front = require('./front.js');
 const relay = require('./relay.js');
 const owners = require('./owners.js');
 const admission = require('./admission.js');
+const { challenge } = require('../link-proof.js');   // the greeting's fresh challenge (version 2: the start value never crosses a link)
 
 const HELLO_MS = 10000;          // a link that names no party in this long is ended (an accident, never a party)
 const MAX_CONTROL = 64 * 1024;   // contract v1 §3: an outer control line over 64 KiB is a protocol error
@@ -34,11 +37,12 @@ function create({ ownerOf = owners.ownerOf, firstByteMs, handshakeMs, helloMs = 
   const said = { refused: 0, lastRefused: null, certRefused: 0, lastCertRefused: null };
   function attachLink(stream) {
     let party = null, rh = null;
+    const nonce = challenge();   // THIS link's challenge: a proof answers it once, and is worth nothing on another link
     const link = new Mux(stream, {
       heartbeat: false, closeAfterQueue: true, maxControl: MAX_CONTROL,
       onControl: (m) => {
         if (!party) {
-          const v = gate.check(m);
+          const v = gate.check(m, nonce);
           if (!v.ok) { said.refused++; said.lastRefused = v.why; try { link.control({ op: 'auth-fail' }); } catch { } link.destroy(); return; }
           clearTimeout(timer);
           const old = links.get(v.party);
@@ -58,6 +62,7 @@ function create({ ownerOf = owners.ownerOf, firstByteMs, handshakeMs, helloMs = 
       onWritable: (chan) => { if (rh) rh.onWritable(chan); },
       onDead: (why) => { clearTimeout(timer); if (rh) rh.onDead(why); if (party && links.get(party) === link) links.delete(party); },
     });
+    try { link.control({ op: 'challenge', protoVersion: admission.PROTO_VERSION, nonce }); } catch { }   // the greeting opens with the challenge, before any hello
     const timer = setTimeout(() => { if (!party) { said.refused++; said.lastRefused = 'no-hello'; link.destroy(); } }, helloMs);
     timer.unref?.();
     return link;

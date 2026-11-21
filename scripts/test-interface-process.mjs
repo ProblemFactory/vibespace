@@ -7,7 +7,8 @@
 //   ② NO SYNCHRONOUS DISK CALL once it listens: the hub's join and 10 page exchanges through the port — 0 fs *Sync calls.
 //     RED CONTROL: a stat planted on the admit road is counted.
 //   ③ A PREVIOUS GENERATION'S HELLO IS REFUSED: two admits for the hub — the old start's secret gets auth-fail, the new one's
-//     is admitted. RED CONTROL: the secret's check cut ⇒ the old generation is admitted.
+//     is admitted (each PROVES its start value — the greeting's version 2 — never sends it). RED CONTROL: the proof's check
+//     cut ⇒ the old generation is admitted.
 //   ④ END OF FILE ON FD 3 ⇒ THE INTERFACE EXITS (the supervisor is gone): exit(0), the port and the link socket closed; and
 //     as a child on a real fd 3, the process is gone once the parent closes its end. RED CONTROL: the end's handler cut ⇒
 //     no exit.
@@ -73,7 +74,7 @@ function graph(entry, srcOf = read) {
 {
   const g = graph('src/interface/main.js');
   const FORBIDDEN = /engine|vault|secret|store|normali[sz]er|message-manager|accounts|channel|auth\b|session/;
-  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/chan-socket.js', 'src/agentd/mux.js', 'src/interface/admission.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/main.js', 'src/interface/owners.js', 'src/interface/relay.js', 'src/pairing-token.js', 'src/start-pipe.js']) && g.files.every((f) => !FORBIDDEN.test(f)) && g.builtins.every((b) => builtinModules.includes(b)),
+  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/chan-socket.js', 'src/agentd/mux.js', 'src/interface/admission.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/main.js', 'src/interface/owners.js', 'src/interface/relay.js', 'src/link-proof.js', 'src/start-pipe.js']) && g.files.every((f) => !FORBIDDEN.test(f)) && g.builtins.every((b) => builtinModules.includes(b)),
     `the process's graph: ${g.files.join(', ')}; built-ins ${g.builtins.join(', ')} — no engine, vault, secret-box, store or normaliser module`, g);
   const planted = graph('src/interface/main.js', (rel) => (rel === 'src/interface/main.js' ? once(rel, "const { create } = require('./index.js');") + "\nrequire('../vault.js');\n" : read(rel)));
   ok(planted.files.includes('src/vault.js'), 'RED CONTROL — a planted require of the vault is caught in the graph', planted.files);
@@ -120,12 +121,12 @@ async function generations(mainMod) {
 {
   const law = await generations(require(path.join(REPO, 'src/interface/main.js')));
   ok(/auth-fail/.test(law.try1) && law.try2 === 'admitted', `the previous start's secret: «${law.try1}»; this start's: ${law.try2}`, law);
-  const CHECK = "    if (!tokenMatches(hello.secret, digest)) return { ok: false, why: 'secret' };   // a wrong secret, or a previous generation's\n";
+  const CHECK = "    if (!proofMatches(hello.proof, digest, nonce, party)) return { ok: false, why: 'proof' };   // a wrong proof: another start value, or a previous generation's\n";
   globalThis.__vsAdmission = compileAt('src/interface/admission.js', once('src/interface/admission.js', CHECK).replace(CHECK, ''));
   globalThis.__vsIndex = compileAt('src/interface/index.js', read('src/interface/index.js').replace("require('./admission.js')", 'globalThis.__vsAdmission'));
   const lax = compileAt('src/interface/main.js', once('src/interface/main.js', "const { create } = require('./index.js');").replace("const { create } = require('./index.js');", 'const { create } = globalThis.__vsIndex;'));
   const red = await generations(lax);
-  ok(red.try1 === 'admitted', `RED CONTROL — the secret's check cut: the previous generation is admitted (${red.try1})`, red);
+  ok(red.try1 === 'admitted', `RED CONTROL — the proof's check cut: the previous generation is admitted (${red.try1})`, red);
 }
 
 console.log('— ④ END OF FILE ON FD 3 ⇒ THE INTERFACE EXITS');

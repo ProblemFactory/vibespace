@@ -21,6 +21,7 @@
 const fs = require('fs');
 const net = require('net');
 const { START_LINE_MS, MAX_START_LINE, takeWord, firstLine, whyText } = require('../start-pipe.js');
+const { digestOf } = require('../link-proof.js');   // PURE, crypto only: the digest every join proves with
 
 let claimed = null;   // the boot's start, TAKEN at server.js line 5 (claim): the word, the one line, the pipe CLOSED
 /** THE hub's own end: its normal SIGTERM shutdown (the stores flushed) — ONE site for every end this module makes (§85's row) */
@@ -112,6 +113,14 @@ function endBadStart(decision, { end = endSelf, log = console } = {}) {
 let wired = null, earlyPem;
 function certificate(pem) { if (wired) wired.pushCertificate(pem); else earlyPem = pem || null; }
 
+/** THE HUB OUTLIVES ITS INTERFACE (主开发 r1060): when the interface's link dies, the hub waits this long for a NEW interface's
+ *  link (the same path, the same admit — the supervisor writes it before the new interface starts), proving its start value
+ *  again with the digest alone; past it, it ends by name exactly as before. What ends with the link: every channel (the
+ *  pages reconnect, as after any start). What survives: this process, its unlocked vault, its conversations. */
+const REJOIN_MS = 30000;
+const REJOIN_FIRST_MS = 50;        // the first re-join try after the link's death
+const REJOIN_STEP_MAX_MS = 2000;   // the longest wait between tries (the wait doubles up to it)
+
 /** the ONE seam of the plain form: the hub's own listener (B2c deletes it) */
 function plainListen(hub, port, host, cb) { return hub.listen(port, host, cb); }
 
@@ -119,8 +128,8 @@ function plainListen(hub, port, host, cb) { return hub.listen(port, host, cb); }
  *  it joins the link and runs the same callback. → { bound(), form, pushCertificate(pem | null) } — the PIPED form pushes the
  *  hub's live certificate (src/server/tls.js plans and renews it, starting children; the interface starts none) over the
  *  link as {op:'certificate', cert, key}; one that comes before the join waits for it. The PLAIN form serves its own. */
-function wire(decision, { hub, server, join = require('./interface-party.js').join, end = endSelf, log = console } = {}) {
-  let record = { form: decision.form, listened: false }, party = null, pendingPem;
+function wire(decision, { hub, server, join = require('./interface-party.js').join, end = endSelf, log = console, rejoinMs = REJOIN_MS } = {}) {
+  let record = { form: decision.form, listened: false }, party = null, pendingPem, lastPem;
   const listenOwn = hub.listen;
   const push = (pem) => { try { party.mux.control(pem ? { op: 'certificate', cert: String(pem.cert), key: String(pem.key) } : { op: 'certificate' }); } catch { } };
   if (decision.form === 'plain') {
@@ -128,16 +137,39 @@ function wire(decision, { hub, server, join = require('./interface-party.js').jo
   } else {
     hub.listen = (port, host, cb) => {   // PIPED: the port is the interface's — this hub never listens on it
       if (!decision.start) { if (!decision.ended) { badStart = true; try { log.error?.(`[hub-port] ${whyText(decision)} — this hub cannot join and ends`); } catch { } end(); } return hub; }   // each bad start BY NAME (never the line), once
-      join({ start: decision.start, server, onDead: () => { try { log.error?.('[hub-port] the interface\'s link ended — this hub ends (never its own listener)'); } catch { } end(); } })
-        .then((p) => { party = p; record = { form: 'piped', listened: false, link: decision.start.link }; try { log.log?.(`[hub-port] ${JSON.stringify(record)}`); } catch { } if (pendingPem !== undefined) push(pendingPem); cb && cb(); },
+      // the start value is held only until its digest is made: every join proves with the digest (src/link-proof.js), and
+      // a re-join holds nothing more — the start value is on no link and, from here, in no structure of this module
+      const start = { party: decision.start.party || 'hub', link: decision.start.link, digest: digestOf(decision.start.secret) };
+      decision.start = { party: start.party, link: start.link };
+      const onDead = () => {   // the interface's link ended: every channel with it; this hub waits for a NEW interface (r1060)
+        party = null;
+        try { log.error?.(`[hub-port] the interface's link ended — this hub waits up to ${rejoinMs / 1000} s for a new interface (never its own listener)`); } catch { }
+        const until = Date.now() + rejoinMs; let step = REJOIN_FIRST_MS, tries = 0;
+        const attempt = () => {
+          tries++;
+          const answerMs = Math.max(REJOIN_FIRST_MS, Math.min(require('./interface-party.js').JOIN_ANSWER_MS, until - Date.now()));   // a try never runs past the bound
+          join({ start, server, onDead, answerMs }).then((p) => {
+            party = p;
+            try { log.log?.(`[hub-port] a new interface took this hub (try ${tries}) — it goes on: the same process, its vault and conversations kept`); } catch { }
+            if (lastPem !== undefined) push(lastPem);   // the new interface has no certificate until this hub pushes it again
+          }, (e) => {
+            if (e && /auth-fail/.test(e.message)) { try { log.error?.(`[hub-port] the new interface refused this hub (${e.message}) — it ends`); } catch { } end(); return; }   // not this generation: it never tries again
+            if (Date.now() + step > until) { try { log.error?.(`[hub-port] no interface took this hub within ${rejoinMs / 1000} s — this hub ends (never its own listener)`); } catch { } end(); return; }
+            setTimeout(attempt, step); step = Math.min(step * 2, REJOIN_STEP_MAX_MS);
+          });
+        };
+        setTimeout(attempt, REJOIN_FIRST_MS);
+      };
+      join({ start, server, onDead })
+        .then((p) => { party = p; record = { form: 'piped', listened: false, link: start.link }; try { log.log?.(`[hub-port] ${JSON.stringify(record)}`); } catch { } if (pendingPem !== undefined) push(pendingPem); cb && cb(); },
           (e) => { try { log.error?.(e && e.code === 'no-answer' ? `[hub-port] ${e.message} — this hub ends` : `[hub-port] the interface refused this hub (${(e && e.message) || 'refused'}) — it ends`); } catch { } end(); });
       return hub;
     };
   }
-  const pushCertificate = (pem) => { if (decision.form !== 'piped') return; if (party) push(pem); else pendingPem = pem || null; };
+  const pushCertificate = (pem) => { if (decision.form !== 'piped') return; lastPem = pem || null; if (party) push(pem); else pendingPem = pem || null; };
   wired = { form: decision.form, bound: () => ({ ...record }), pushCertificate };
   if (earlyPem !== undefined) { const pem = earlyPem; earlyPem = undefined; pushCertificate(pem); }   // the pair tls.js served before this wiring
   return wired;
 }
 
-module.exports = { claim, decide, endBadStart, exitStatus, EXIT_BAD_START, certificate, wire, plainListen };
+module.exports = { claim, decide, endBadStart, exitStatus, EXIT_BAD_START, certificate, wire, plainListen, REJOIN_MS };

@@ -2,8 +2,10 @@
 // TODAY'S HUB AS ONE PARTY OF THE INTERFACE'S LINK (the separation, M1 — lane B, piece B2b; lane readings' contract v1,
 // /var/tmp/vibespace-lanes/scf/cs/contract-A.md §3–§4). The supervisor starts the hub with a start pipe it names (VIBESPACE_START_FD); its first
 // line `{op:'start', party:'hub', secret, link}` names the interface's link socket and this start's secret. join() connects
-// there and says the hello `{op:'hello', protoVersion:1, party, secret}`. Only an answer `hello-ack` makes it a party.
-// `auth-fail` (an unknown name, no admit, a wrong or an old generation's secret) or a link that ends first is refused,
+// there, waits for the interface's challenge, and PROVES the secret (the greeting's version 2, the contract's dated line of
+// 2026-11-21: `{op:'hello', protoVersion:2, party, proof}`, a proof keyed by the secret's digest — the secret itself is on
+// no link). Only an answer `hello-ack` makes it a party.
+// `auth-fail` (an unknown name, no admit, a wrong proof or an old generation's) or a link that ends first is refused,
 // and the caller exits. AN INTERFACE THAT ACCEPTS AND NEVER ANSWERS is refused too, by name, after JOIN_ANSWER_MS
 // (主开发 00:02Z, law 3: every bad start ends by name in bounded time — the interface's own HELLO_MS bounds only the
 // other direction).
@@ -15,8 +17,9 @@
 const net = require('net');
 const { Mux } = require('../agentd/mux.js');
 const { createChanSockets } = require('../agentd/chan-socket.js');
+const { digestOf, proofOf } = require('../link-proof.js');   // the greeting, version 2: the start value never crosses a link
 
-const PROTO_VERSION = 1;
+const PROTO_VERSION = 2;
 const MAX_CONTROL = 64 * 1024;
 const JOIN_ANSWER_MS = 5000;
 
@@ -44,8 +47,14 @@ function oneExchange(server, log = console) {
   server[EXCHANGE] = true;
 }
 
+/** THE GREETING, VERSION 2 (主开发 r1087): the interface's first line is `{op:'challenge', protoVersion:2, nonce}`; this party
+ *  answers `{op:'hello', protoVersion:2, party, proof}` — a proof keyed by its DIGEST (src/link-proof.js), never its start
+ *  value: no start value is on any frame of any link. `start` names the link and either the start value (`secret`, the
+ *  first join: its digest is derived here) or its `digest` alone (a re-join holds nothing more). */
 function join({ start, server, connect = (p) => net.connect(p), onDead = () => { }, answerMs = JOIN_ANSWER_MS, log = console } = {}) {
-  if (!start || typeof start.link !== 'string' || typeof start.secret !== 'string') return Promise.reject(new Error('join: the start line names no link or secret'));
+  const digest = start && typeof start.digest === 'string' ? start.digest : start && typeof start.secret === 'string' ? digestOf(start.secret) : null;
+  if (!start || typeof start.link !== 'string' || !digest) return Promise.reject(new Error('join: the start line names no link or secret'));
+  const party = start.party || 'hub';
   oneExchange(server, log);
   return new Promise((resolve, reject) => {
     const sock = connect(start.link);
@@ -54,6 +63,7 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
       heartbeat: false, closeAfterQueue: true, maxControl: MAX_CONTROL,
       onControl: (m) => {
         if (!admitted) {
+          if (m && m.op === 'challenge' && typeof m.nonce === 'string') { try { mux.control({ op: 'hello', protoVersion: PROTO_VERSION, party, proof: proofOf(digest, m.nonce, party) }); } catch { } return; }   // the proof, never the start value
           if (m && m.op === 'hello-ack') { clearTimeout(silent); admitted = true; resolve({ mux, router, capabilities: Array.isArray(m.capabilities) ? m.capabilities : [] }); }
           else if (m && m.op === 'auth-fail') { clearTimeout(silent); reject(new Error('the interface refused this party (auth-fail)')); try { mux.destroy(); } catch { } }
           return;
@@ -61,6 +71,7 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
         if (m && m.op === 'open' && Number.isInteger(m.chan)) {
           // A CHANNEL WITH NO ADDRESS IS REFUSED: the channel socket reads a missing address as the local one, and two doors of the
           // hub trust the local address — the interface never sends one without it, and the default fails closed (r1057 item 2)
+          // (a malformed address STRING is left, deliberately, to the doors that read it: this check fails closed on a missing one only)
           if (!m.stamp || typeof m.stamp.addr !== 'string' || !m.stamp.addr) {
             try { log.error?.(`[interface-party] an open line with no address (chan ${m.chan}) is refused — a channel is never read as the local one`); } catch { }
             try { mux.closeChan(m.chan); } catch { }
@@ -81,7 +92,7 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
       const e = new Error(`the interface never answered this party's hello within ${answerMs / 1000} s`); e.code = 'no-answer';
       reject(e); try { mux.destroy(); } catch { }
     }, answerMs);
-    sock.on('connect', () => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, party: start.party || 'hub', secret: start.secret }));
+    // (no hello on connect: the interface speaks first, with its challenge — an interface that never does is refused at answerMs)
   });
 }
 

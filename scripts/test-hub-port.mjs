@@ -78,16 +78,17 @@ const stubPort = process.pid % 50000 + 1024;   // the port a STUB hub is asked t
 const pipeWith = (...lines) => { const p = new PassThrough(); for (const l of lines) p.write(JSON.stringify(l) + '\n'); return p; };
 
 /** the hub's boot through `mod`: a stub hub (its own listener counted), a stub join, the lines the module said */
-async function bootThrough(mod, decision, { joinResult = 'ack', deathAfter = false, joinWith = null, settleMs = 10 } = {}) {
+async function bootThrough(mod, decision, { joinResult = 'ack', joinPlan = null, rejoinMs, deathAfter = false, joinWith = null, settleMs = 10 } = {}) {
   const calls = { own: [], join: [], ended: 0, cb: 0, endedAt: null }, lines = [];
   const hub = { listen: (port, host, cb) => { calls.own.push([port, host]); setImmediate(() => cb && cb()); return hub; } };
   let dead = null;
-  const join = joinWith || (({ start, onDead }) => { calls.join.push(start && start.link); dead = onDead; return joinResult === 'ack' ? Promise.resolve({}) : Promise.reject(new Error('the interface refused this party (auth-fail)')); });
+  // the stub join: each try answers by `joinPlan(n)` (the n-th try) — ack, refused (auth-fail), or gone (no interface at the path)
+  const join = joinWith || (({ start, onDead }) => { calls.join.push(start && start.link); dead = onDead; const r = joinPlan ? joinPlan(calls.join.length) : joinResult; return r === 'ack' ? Promise.resolve({}) : r === 'gone' ? Promise.reject(new Error('the link ended before the interface answered (ECONNREFUSED)')) : Promise.reject(new Error('the interface refused this party (auth-fail)')); });
   const log = { log: (l) => lines.push(String(l)), error: (l) => lines.push(String(l)) };
-  const w = mod.wire(decision, { hub, server: {}, join, end: () => { calls.ended++; calls.endedAt = Date.now(); }, log });
+  const w = mod.wire(decision, { hub, server: {}, join, end: () => { calls.ended++; calls.endedAt = Date.now(); }, log, ...(rejoinMs ? { rejoinMs } : {}) });
   hub.listen(stubPort, '0.0.0.0', () => { calls.cb++; });
   if (joinWith) await until(() => calls.ended > 0 || calls.cb > 0, settleMs); else await sleep(settleMs);   // a real join: wait for the end or the boot callback, bounded
-  if (deathAfter && dead) { dead('stream closed'); await sleep(10); }
+  if (deathAfter && dead) { dead('stream closed'); await until(() => calls.ended > 0 || (joinPlan && calls.join.length > 1 && lines.some((l) => l.includes('took this hub'))), (rejoinMs || 100) * 6); }
   return { calls, lines, record: w.bound() };
 }
 
@@ -111,17 +112,24 @@ console.log('— ② PLAIN: no start pipe — the hub listens on the port and ne
   ok(planted.calls.join.length === 1, `RED CONTROL — a join planted in the plain form: the join is called (${planted.calls.join.length})`, planted.calls);
 }
 
-console.log('— ③ NO FALLBACK: a piped hub whose link dies or is refused ends — never its own listener');
+console.log('— ③ NO FALLBACK: a piped hub whose link dies waits for a new interface within its bound, then ends — never its own listener');
 {
-  const d = await HP.decide({ pipe: pipeWith(START) });
-  const died = await bootThrough(HP, d, { deathAfter: true });
-  ok(died.calls.ended === 1 && died.calls.own.length === 0, `the link dies after the join: the hub ends (${died.calls.ended}) and its own listener is never called (${died.calls.own.length})`, died.calls);
+  const fresh = async () => HP.decide({ pipe: pipeWith(START) });
+  const REJOIN = 150;   // the bound this suite hands the wiring (the product's is REJOIN_MS, 30 s)
+  ok(HP.REJOIN_MS === 30000, `the re-join's bound is said by name: REJOIN_MS = ${HP.REJOIN_MS} ms`);
+  const died = await bootThrough(HP, await fresh(), { deathAfter: true, rejoinMs: REJOIN, joinPlan: (n) => (n === 1 ? 'ack' : 'gone') });
+  ok(died.calls.ended === 1 && died.calls.own.length === 0 && died.calls.join.length >= 2 && died.lines.some((l) => l.includes('no interface took this hub within 0.15 s — this hub ends')), `the link dies and no interface comes back: ${died.calls.join.length - 1} re-join tries, then the hub ends by name (${died.calls.ended}) — its own listener never called (${died.calls.own.length})`, died);
+  const back = await bootThrough(HP, await fresh(), { deathAfter: true, rejoinMs: REJOIN, joinPlan: (n) => (n === 2 ? 'gone' : 'ack') });
+  ok(back.calls.ended === 0 && back.calls.cb === 1 && back.calls.own.length === 0 && back.lines.some((l) => l.includes('a new interface took this hub (try 2)')), `the link dies and a new interface takes the hub at its second try: it goes on (ended ${back.calls.ended}), the boot callback ran once (${back.calls.cb})`, back);
+  const turned = await bootThrough(HP, await fresh(), { deathAfter: true, rejoinMs: REJOIN, joinPlan: (n) => (n === 1 ? 'ack' : 'refused') });
+  ok(turned.calls.ended === 1 && turned.calls.join.length === 2 && turned.lines.some((l) => l.includes('the new interface refused this hub')), `the new interface refuses this hub (not its generation): it ends at once by name, after ONE try (${turned.calls.join.length - 1})`, turned);
+  const d = await fresh();
   const refused = await bootThrough(HP, d, { joinResult: 'refused' });
   ok(refused.calls.ended === 1 && refused.calls.own.length === 0 && refused.calls.cb === 0, 'a refused join (auth-fail): the hub ends, no boot callback, no listener', refused.calls);
   const noStart = await bootThrough(HP, await HP.decide({ pipe: pipeWith({ op: 'admit', party: 'hub', digest: 'x' }) }));
   ok(noStart.calls.ended === 1 && noStart.calls.own.length === 0 && noStart.calls.join.length === 0, 'a start pipe whose first line is no start: piped, it cannot join — it ends, never its own listener', noStart.calls);
-  const fallback = await bootThrough(mutant("      join({ start: decision.start, server, onDead: () => { try { log.error?.('[hub-port] the interface\\'s link ended — this hub ends (never its own listener)'); } catch { } end(); } })\n",
-    "      join({ start: decision.start, server, onDead: () => { listenOwn.apply(hub, [port, host, () => { }]); end(); } })\n"), d, { deathAfter: true });
+  const ONDEAD = "      const onDead = () => {   // the interface's link ended: every channel with it; this hub waits for a NEW interface (r1060)\n";
+  const fallback = await bootThrough(mutant(ONDEAD, ONDEAD + "        listenOwn.apply(hub, [port, host, () => { }]);\n"), await fresh(), { deathAfter: true, rejoinMs: REJOIN, joinPlan: (n) => (n === 1 ? 'ack' : 'gone') });
   ok(fallback.calls.own.length === 1, `RED CONTROL — a fallback listen planted on the link's death: the hub's own listener is called (${fallback.calls.own.length})`, fallback.calls);
 }
 

@@ -54,6 +54,7 @@ import { fileURLToPath } from 'node:url';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { Mux, INITIAL_WINDOW } = require(path.join(REPO, 'src/agentd/mux.js'));
+const LP = require(path.join(REPO, 'src/link-proof.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 500) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -98,10 +99,11 @@ const HUB_SECRET = crypto.randomBytes(32).toString('hex');
 const HUB_DIGEST = crypto.createHash('sha256').update(HUB_SECRET).digest('hex');
 function farJoin(sockPath, secret = HUB_SECRET) {
   return new Promise((resolve) => {
-    const s = net.connect(sockPath, () => { if (secret !== null) mux.control({ op: 'hello', protoVersion: 1, party: 'hub', secret }); resolve(); });
+    const s = net.connect(sockPath, () => resolve());
     const mux = new Mux(s, {
       heartbeat: false,
       onControl: (m) => {
+        if (m && m.op === 'challenge') { if (secret !== null) mux.control({ op: 'hello', protoVersion: 2, party: 'hub', proof: LP.proofOf(LP.digestOf(secret), m.nonce, 'hub') }); return; }   // the greeting, version 2: a proof, never the start value
         if (m && m.op === 'hello-ack') { far.acked = m; return; }
         if (m && m.op === 'auth-fail') { far.refused = true; return; }
         if (m && m.op === 'certificate-ack') { far.certAcks.push(m); return; }
@@ -205,8 +207,8 @@ console.log('— ① THE MODULE GRAPH');
   };
   const g = graph('src/interface/index.js');
   const FORBIDDEN = /engine|vault|secret|store|normali[sz]er|message-manager|accounts|channel|auth\b|session/;
-  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/chan-socket.js', 'src/agentd/mux.js', 'src/interface/admission.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/owners.js', 'src/interface/relay.js', 'src/pairing-token.js']) && g.files.every((f) => !FORBIDDEN.test(f)),
-    `its module graph: ${g.files.join(', ')} — no engine, vault, secret-box, store or normaliser module (src/pairing-token.js: the constant-time compare of the admission, crypto only; src/agentd/chan-socket.js: a channel as a socket, the framing unit's)`, g.files);
+  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/chan-socket.js', 'src/agentd/mux.js', 'src/interface/admission.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/owners.js', 'src/interface/relay.js', 'src/link-proof.js']) && g.files.every((f) => !FORBIDDEN.test(f)),
+    `its module graph: ${g.files.join(', ')} — no engine, vault, secret-box, store or normaliser module (src/link-proof.js: the greeting's proof, crypto only; src/agentd/chan-socket.js: a channel as a socket, the framing unit's)`, g.files);
   ok(JSON.stringify(g.builtins) === JSON.stringify(['crypto', 'http', 'net', 'stream', 'tls']), `node built-ins only: ${g.builtins.join(', ')} (http: Node's own parser and writer of each head — the framing unit)`, g.builtins);
   const planted = graph('src/interface/index.js', (rel) => (rel === 'src/interface/relay.js' ? read(rel).replace("const crypto = require('crypto');", "const crypto = require('crypto'); require('../server/vault-engine.js');") : read(rel)));
   ok(planted.files.includes('src/server/vault-engine.js') && planted.files.some((f) => FORBIDDEN.test(f)), 'RED CONTROL — a vault module planted in the relay is caught by the walk', planted.files);
@@ -496,16 +498,16 @@ async function admission(I, secret, admits = [HUB_DIGEST], opts = {}) {
   const right = await admission(IDX, HUB_SECRET);
   ok(right.acked && Array.isArray(right.capabilities) && right.opens === 1, `the admitted secret: hello-ack (${(right.capabilities || []).join(', ')}) and the page relayed`, right);
   const wrong = await admission(IDX, crypto.randomBytes(32).toString('hex'));
-  ok(wrong.refused && wrong.linkEnded && wrong.opens === 0 && wrong.pageClosed && /^HTTP\/1\.1 503 .*«no-owner»$/.test(wrong.pageGot) && wrong.lastRefused === 'secret', `a wrong secret: auth-fail, the link ended, and a page arriving meanwhile answered by name with no link (${wrong.pageGot}) and closed — nothing relayed (${wrong.lastRefused})`, wrong);
+  ok(wrong.refused && wrong.linkEnded && wrong.opens === 0 && wrong.pageClosed && /^HTTP\/1\.1 503 .*«no-owner»$/.test(wrong.pageGot) && wrong.lastRefused === 'proof', `a wrong secret: auth-fail, the link ended, and a page arriving meanwhile answered by name with no link (${wrong.pageGot}) and closed — nothing relayed (${wrong.lastRefused})`, wrong);
   const none = await admission(IDX, HUB_SECRET, []);
   ok(none.refused && none.lastRefused === 'not-admitted' && none.opens === 0, `no admit line for the hub: refused (${none.lastRefused})`, none);
   const S2 = crypto.randomBytes(32).toString('hex'), D2 = crypto.createHash('sha256').update(S2).digest('hex');
   const old = await admission(IDX, HUB_SECRET, [HUB_DIGEST, D2]);
   const fresh = await admission(IDX, S2, [HUB_DIGEST, D2]);
-  ok(old.refused && old.lastRefused === 'secret' && fresh.acked, 'a later admit replaces the earlier: the PREVIOUS generation\'s secret is refused, this start\'s is admitted', { old, fresh });
+  ok(old.refused && old.lastRefused === 'proof' && fresh.acked, 'a later admit replaces the earlier: the PREVIOUS generation\'s secret is refused, this start\'s is admitted', { old, fresh });
   const silentParty = await admission(IDX, null, [HUB_DIGEST], { helloMs: 60 });
   ok(silentParty.linkEnded && !silentParty.acked && silentParty.lastRefused === 'no-hello', `a link that says no hello is ended at the interface's own bound (60 ms here; ${silentParty.lastRefused})`, silentParty);
-  const ADM = 'src/interface/admission.js', CHECK = "    if (!tokenMatches(hello.secret, digest)) return { ok: false, why: 'secret' };   // a wrong secret, or a previous generation's\n";
+  const ADM = 'src/interface/admission.js', CHECK = "    if (!proofMatches(hello.proof, digest, nonce, party)) return { ok: false, why: 'proof' };   // a wrong proof: another start value, or a previous generation's\n";
   const lax = await admission(interfaceWith({ admission: mutant(ADM, CHECK, '') }), HUB_SECRET, [HUB_DIGEST, D2]);
   ok(lax.acked && lax.opens === 1, 'RED CONTROL — the secret\'s check cut: the PREVIOUS generation is admitted and pages are relayed to it', lax);
 }
