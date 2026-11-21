@@ -29,6 +29,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Pasting a picture into a terminal conversation no longer holds up the other windows, and a paste the clipboard does not take now says why.
 - In Channels, an account's own search repeated after ten minutes now asks the account again, and an agent is told how old a remembered result is.
 - The tab row of an agent browser's live view now fits itself again when the font or font size changes, so a tab in front is no longer cut off at its edge.
+- Scrubbing a command's output no longer holds VibeSpace for minutes; past a set limit the rest of the output is held back, and the agent is told.
 
 ## 2.369.415 — 2026-11-21
 
