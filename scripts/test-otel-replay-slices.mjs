@@ -57,6 +57,18 @@ const mods = {
   oldest: M.load('src/server/otel-ingest.js', anchored(SRC, '    truth.set(rid, acct); order.push(rid);\n' + CAP_LINE, '    if (truth.size >= MAX_TRUTH) return;   // MUTANT: the cap keeps the OLDEST rids\n    truth.set(rid, acct); order.push(rid);', 'the cap keeps the oldest'), 'oldest'),
 };
 const NODEDUPE = M.write('src/server/otel-ingest.js', anchored(SRC, '      const dup = truth.has(rec.rid);', '      const dup = false;   // MUTANT: no rid dedupe', 'the rid dedupe'), 'nodedupe');
+const NOLEDGER = M.load('src/server/otel-ingest.js', anchored(SRC, '    if (!ran) { console.log(', '    if (false) { console.log(', 'the ledger asked'), 'noledger');
+const SYNCREWRITE = M.load('src/server/otel-ingest.js', anchored(SRC, '    const trim = trimOwed && !(o && o.sync) ? trimOwed : null;', '    const trim = trimOwed ? trimOwed : null;   // MUTANT: a synchronous flush rewrites too', 'the sync flush guard'), 'syncrewrite');
+const FAILED200 = M.load('src/server/otel-ingest.js', anchored(SRC, '        if (!onDisk && trimFailed) return res.status(503)', '        if (false) return res.status(503)', 'a failed trim answered «retry»'), 'failed200');
+const REC = (rid) => ({ timeUnixNano: String(NOW - 60000) + '000000', body: { stringValue: 'claude_code.api_request' }, attributes: Object.entries({ 'session.id': { stringValue: 'sess-p' }, 'organization.id': { stringValue: ORG }, 'event.name': { stringValue: 'api_request' }, model: { stringValue: 'm' }, input_tokens: { intValue: 1 }, output_tokens: { intValue: 1 }, cost_usd: { doubleValue: 0 }, request_id: { stringValue: rid } }).map(([key, value]) => ({ key, value })) });
+const PAYLOAD = (recs) => ({ resourceLogs: [{ resource: { attributes: [] }, scopeLogs: [{ scope: { name: 'x' }, logRecords: recs }] }] });
+/** THE ROUTE (POST /otel/v1/logs) with one record: its answer, and whether its line was on disk when it was answered */
+const callLogs = (oi, stash, rid) => new Promise((resolve) => {
+  const tok = oi.envFor().OTEL_EXPORTER_OTLP_HEADERS.split('=')[1];
+  const req = { socket: { remoteAddress: '127.0.0.1' }, headers: { 'x-vibespace-otel': tok }, body: PAYLOAD([REC(rid)]) };
+  const res = { code: 200, status(x) { this.code = x; return this; }, set() { return this; }, json(b) { let t = ''; try { t = fs.readFileSync(stash, 'utf8'); } catch { } resolve({ code: this.code, onDisk: countIn(t, rid), error: b && b.error }); return this; } };
+  Promise.resolve(oi.logs(req, res)).catch((e) => resolve({ err: String(e) }));
+});
 const make = (mod, dataDir) => mod.create({ dataDir, PORT: 0, getUsageHistory: () => null, identityGroups: () => groups, listAccounts: () => [], serverSetting: () => undefined });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rec = (rid, ts = NOW - 60e3) => ({ event: 'api_request', ts, rid, sid: 'sess-1', orgUuid: ORG, accountUuid: null, email: null, model: 'm', i: 1, o: 1, cr: 0, cw: 0, costUsd: 0, cliVersion: '2.1.235' });
@@ -100,13 +112,14 @@ const keepA = new Set(knownA.slice(-CAP)); for (let k = 0; k < NA; k++) if (kind
 const expectA = []; for (let k = 0; k < NA; k++) if (keepA.has(k)) expectA.push(partsA[k].endsWith('\n') ? partsA[k] : partsA[k] + '\n');
 const keptA = expectA.join(''), SPILL_A = 50;
 const bodyS = partsA.slice(0, 80000).join('');   // a smaller stash (~5.8 MB: past a read, under FILE_MAX — no trim) for the read and map controls
-const placeA = (tag, { ledger = true, body = bodyA } = {}) => {
+const RAN = { applied: { [BACKFILL]: NOW - DAY }, reports: { [BACKFILL]: { at: NOW - DAY, stash: 0 } } };   // run, 0 rows: an instance born after it
+const placeA = (tag, { ledger = RAN, body = bodyA } = {}) => {
   const d = path.join(ROOT, 'a-' + tag), h = path.join(d, 'usage-history');
   fs.mkdirSync(h, { recursive: true });
   fs.writeFileSync(path.join(h, 'otel-truth.ndjson'), body);
   const s = []; for (let k = 0; k < SPILL_A; k++) s.push(JSON.stringify(rec('req_spill' + String(k).padStart(4, '0'))) + '\n');
   fs.writeFileSync(path.join(h, 'otel-truth.pending.ndjson'), s.join(''));
-  if (ledger) fs.writeFileSync(path.join(d, 'migrations.json'), JSON.stringify({ applied: { [BACKFILL]: NOW - DAY } }));
+  if (ledger) fs.writeFileSync(path.join(d, 'migrations.json'), JSON.stringify(ledger));
   return d;
 };
 /** one start of `mod` over a placed dir, probed: the reads of the stash and the spill, whole reads, joined buffers, the bytes
@@ -185,17 +198,63 @@ ok(R.uncapped.mapPeak > CAP && R.release.mapPeak > CAP, `② RED CONTROLS: a cop
   ok(C.said.filter((l) => l.includes('the stash trimmed by its writer')).length === 1, '③ …said once in the journal', C.said.filter((l) => l.includes('[otel]')).slice(0, 4));
 }
 ok(!R.release.rewritten && R.release.text.length > bodyA.length, `③ RED CONTROL (the release): its trim did not land on the busy start — the stash still ${R.release.text.length} bytes (the drain appended while it wrote)`, brief(R.release));
+{ // ③b THE KEEP RULE asks the ledger: no record ⇒ kept WHOLE; recorded with 0 rows over rows from before the law ⇒ kept WHOLE
+  const decide = async (mod, d) => {
+    const said = [], w0 = console.warn, l0 = console.log, dz = SW.dirty; let owed = false;
+    SW.dirty = function (f, o) { if (o && o.name === 'otel-truth.write') owed = true; return dz.call(this, f, o); };
+    console.warn = (...a) => { said.push(a.join(' ')); }; console.log = (...a) => { said.push(a.join(' ')); };
+    try { const oi = make(mod, d); await oi.replayed; } finally { SW.dirty = dz; console.warn = w0; console.log = l0; }
+    forget(d);
+    return { owed, whole: said.filter((l) => l.includes('kept WHOLE')).length, said: said.filter((l) => l.includes('[otel]')).slice(0, 2) };
+  };
+  const k1 = await decide(mods.cure, placeA('noledger', { ledger: null })), k1r = await decide(NOLEDGER, placeA('noledger-red', { ledger: null }));
+  ok(!k1.owed && k1.whole === 1, '③b the ledger does not record the backfill migration as run: no trim owed, the stash kept WHOLE, said once', k1);
+  ok(k1r.owed, '③b RED CONTROL (a copy that trims without asking the ledger): a trim owed over rows that migration may still read', k1r);
+  const preLaw = JSON.stringify({ rid: 'req_prelaw', ts: Date.UTC(2026, 7, 1), acct: 'sub-0', acctKnown: true }) + '\n';
+  const k2 = await decide(mods.cure, placeA('zero-rows', { body: preLaw + bodyA }));
+  ok(!k2.owed && k2.whole === 1 && /0 rows/.test(k2.said.join(' ')), '③b recorded as run with 0 rows over a stash holding a known row from before 2026-09-07 (the release\'s reader failed on it): kept WHOLE, said', k2);
+}
+{ // ③c the exit's synchronous flush is never handed the rewrite (the next start trims)
+  const syncAsk = async (mod, tag) => {
+    const d = placeA('sync-' + tag), stash = path.join(d, 'usage-history', 'otel-truth.ndjson'), ino = fs.statSync(stash).ino, dz = SW.dirty;
+    let first;
+    SW.dirty = function (f, o) {
+      if (f === stash && o && typeof o.produce === 'function' && !o.produce.syncProbe) { const p0 = o.produce; const w = (...a) => { if (first === undefined) { first = p0({ sync: true }); return first; } return p0(...a); }; w.syncProbe = true; o = { ...o, produce: w }; }
+      return dz.call(this, f, o);
+    };
+    try { const oi = make(mod, d); await oi.replayed; for (let k = 0; k < 80 && first === undefined; k++) await sleep(25); await SW.durable(stash).catch(() => false); } finally { SW.dirty = dz; }
+    const out = { rewrite: !!(first && first.rewrite), append: !!(first && first.append != null && String(first.append).includes('req_spill0049')), renamed: fs.statSync(stash).ino !== ino };
+    forget(d);
+    return out;
+  };
+  const y = await syncAsk(mods.cure, 'cure'), yr = await syncAsk(SYNCREWRITE, 'red');
+  ok(!y.rewrite && y.append && !y.renamed, '③c a synchronous flush (the exit) is handed the drained lines as an APPEND, never the rewrite — the stash not renamed', y);
+  ok(yr.rewrite, '③c RED CONTROL (a copy whose synchronous flush rewrites too): it was handed the rewrite', yr);
+}
 
 console.log('④ a failed trim');
 {
-  const d = placeA('fail'), stash = path.join(d, 'usage-history', 'otel-truth.ndjson'), tmp = `${stash}.tmp-${process.pid}-w`;
-  fs.mkdirSync(tmp);   // the writer's temp cannot be opened: the rewrite fails on its thread
-  const P = await startOver(mods.cure, d);
-  for (let k = 0; k < 160 && countIn(fs.readFileSync(stash, 'utf8'), 'req_spill0049') === 0; k++) await sleep(25);   // the drained lines' own append (after the writer's back-off)
-  const t = fs.readFileSync(stash, 'utf8');
-  ok(!P.rewritten && t.startsWith(bodyA) && countIn(t.slice(bodyA.length), 'req_spill0000') === 1 && countIn(t.slice(bodyA.length), 'req_spill0049') === 1 && P.said.filter((l) => l.includes('trim FAILED')).length === 1,
-    `④ the stash stays whole as it was (${bodyA.length} bytes first), the failure said once, the ${SPILL_A} drained lines landed after it, alone`, { rewritten: P.rewritten, size: t.length, said: P.said.filter((l) => l.includes('[otel]')).slice(0, 3) });
-  fs.rmSync(tmp, { recursive: true, force: true }); forget(d);
+  const run4 = async (mod, tag, { settle = true } = {}) => {
+    const d = placeA('fail-' + tag), stash = path.join(d, 'usage-history', 'otel-truth.ndjson'), tmp = `${stash}.tmp-${process.pid}-w`, ino = fs.statSync(stash).ino;
+    fs.mkdirSync(tmp);   // the writer's temp cannot be opened: the rewrite fails on its thread
+    const said = [], w0 = console.warn, l0 = console.log;
+    console.warn = (...a) => { said.push(a.join(' ')); }; console.log = (...a) => { said.push(a.join(' ')); };
+    let ans;
+    try {
+      const oi = make(mod, d);
+      const post = callLogs(oi, stash, 'req_post_fail');   // a post before the replay ended: it waits, its line rides the trim's job
+      await oi.replayed; ans = await post;
+      for (let k = 0; settle && k < 160 && countIn(fs.readFileSync(stash, 'utf8'), 'req_post_fail') === 0; k++) await sleep(25);   // its line's own append (after the writer's back-off)
+      if (settle) await SW.durable(stash).catch(() => false);
+    } finally { console.warn = w0; console.log = l0; }
+    const t = fs.readFileSync(stash, 'utf8');
+    fs.rmSync(tmp, { recursive: true, force: true }); forget(d);
+    return { ans, renamed: fs.statSync(stash).ino !== ino, whole: t.startsWith(bodyA), drained: countIn(t.slice(bodyA.length), 'req_spill0049'), post: countIn(t.slice(bodyA.length), 'req_post_fail'), said: said.filter((l) => l.includes('trim FAILED')).length };
+  };
+  const f = await run4(mods.cure, 'cure'), fr = await run4(FAILED200, 'red', { settle: false });
+  ok(!f.renamed && f.whole && f.drained === 1 && f.post === 1 && f.said === 1, `④ a failed trim: the stash stays whole as it was (${bodyA.length} bytes first), the failure said once, the drained lines and the post's line land after it, alone`, f);
+  ok(f.ans && f.ans.code === 503 && f.ans.onDisk === 0, `④ the post whose line rode the failed trim is answered «retry» (${f.ans && f.ans.code}), never 200 for a line not on disk`, f.ans);
+  ok(fr.ans && fr.ans.code === 200 && fr.ans.onDisk === 0, `④ RED CONTROL (a copy that reads a failed trim as a failing storage): answered ${fr.ans && fr.ans.code} with its line not on disk (${fr.ans && fr.ans.onDisk}) — a kill there loses a row the exporter never sends again`, fr.ans);
 }
 
 console.log('⑤ taken once');
@@ -349,7 +408,28 @@ console.log('⑧ the writer\'s rewrite job (src/store-writer-worker.js rewriteJo
   let n = 0; const shortFs = { ...fs, writeSync: (...a) => (++n > 1 ? 0 : fs.writeSync(...a)) };
   const a = tryJob(shortFs, job()), b = tryJob(fs, job({ rewrite: { ranges: Float64Array.from([3, 7]), size: 400 } })), c = tryJob(fs, job({ rewrite: { ranges: Float64Array.from([3, 30]), size: 17 } }));
   ok(a.code === 'ESHORT' && a.whole && b.code === 'ESHRUNK' && b.whole && c.code === 'EBADRANGE' && c.whole, `every byte or nothing: a short write (${a.code}), a file shorter than the bytes its ranges came from (${b.code}), a range out of it (${c.code}) — each fails, the file whole as it was`, { a, b, c });
+  fs.writeFileSync(f, 'a1\nb22\n'); fs.appendFileSync(f, 'E5');   // 7 bytes read; an append past them that ended torn
+  const p2 = partsOf({ rewrite: { ranges: Float64Array.from([0, 3]), size: 7 }, then: 'F6\n' });
+  writeJob({ file: f, tmp, parts: p2.parts, append: false, rewrite: p2.rewrite });
+  ok(fs.readFileSync(f, 'utf8') === 'a1\nE5\nF6\n', 'bytes past the read that end torn get their newline before the job\'s own lines');
   let bad = null; try { partsOf({ rewrite: { ranges: [3, 7], size: 17 } }); } catch (e) { bad = e.code; }
   ok(bad === 'EBADBYTES', `a rewrite whose ranges are not a Float64Array of pairs is that store's failed write (${bad})`);
+}
+console.log('⑨ a torn tail');
+{
+  const tornRun = async (mod, tag, tail) => {
+    const d = path.join(ROOT, 'i-' + tag), h = path.join(d, 'usage-history'); fs.mkdirSync(h, { recursive: true });
+    const stash = path.join(h, 'otel-truth.ndjson');
+    fs.writeFileSync(stash, JSON.stringify({ rid: 'req_i0', ts: NOW - 3600e3, acct: 'sub-true', acctKnown: true }) + '\n' + tail);
+    const oi = make(mod, d); await oi.replayed;
+    const a = await callLogs(oi, stash, 'req_post_torn');
+    const line = fs.readFileSync(stash, 'utf8').split('\n').find((l) => l.includes('req_post_torn')) || '';
+    let own = false; try { own = JSON.parse(line).rid === 'req_post_torn'; } catch { }
+    forget(d);
+    return { code: a.code, own };
+  };
+  const t1 = await tornRun(mods.cure, 'short', '{"rid":"req_torn","ts":'), t2 = await tornRun(mods.cure, 'long', 'x'.repeat(READ + 1024)), tr = await tornRun(mods.release, 'release', '{"rid":"req_torn","ts":');
+  ok(t1.own && t2.own && t1.code === 200 && t2.code === 200, `⑨ a stash ending in a torn line — short, or longer than a read (skipped whole) — gets the next post's line on a line of its own`, { t1, t2 });
+  ok(!tr.own, '⑨ RED CONTROL (the release): its first append was glued onto the torn tail — the record unreadable', tr);
 }
 report();

@@ -76,8 +76,10 @@ function linkedHere(fs, tmp, file) {
  *  r725 a): the kept byte ranges of the file's first `size` bytes, then every byte past `size` (appended after the ranges were
  *  read — in order, since no append of this file runs beside this job), then the job's own parts (the appends owed with it),
  *  copied to the temp in pieces of at most PIECE bytes, fsync'd, closed and renamed over the file. A range ending at size + 1
- *  is the file's unterminated last line: the newline it lacks is written after it. A file shorter than `size` (not the bytes
- *  the ranges were read from), a short read or a short write FAILS the job: the caller removes the temp, the file stays whole. */
+ *  is the file's unterminated last line: the newline it lacks is written after it; bytes past `size` that end torn get one too,
+ *  before the job's own lines. A file shorter than `size` (not the bytes the ranges were read from), a short read or a short
+ *  write FAILS the job: the caller removes the temp, the file stays whole. After the rename the DIRECTORY is fsync'd: the lines
+ *  the job carried are on disk with the rename, as an append's are (a storage that refuses a directory fsync is let be). */
 const PIECE = 4 * 1024 * 1024;
 function rewriteJob(m, fs) {
   sweepTemps(fs, m.file, m.tmp);   // B-f276 1b's: this road's own temp left by an earlier life of its thread
@@ -90,14 +92,14 @@ function rewriteJob(m, fs) {
     if (now < size) throw Object.assign(new Error(`the file is ${now} bytes, shorter than the ${size} its kept lines were read from`), { code: 'ESHRUNK' });
     out = fs.openSync(m.tmp, 'w', m.mode == null ? 0o666 : m.mode);
     const buf = Buffer.allocUnsafe(PIECE);
-    let o = 0;
+    let o = 0, last = 10;
     const flush = () => { for (let w = 0; w < o;) { const n = fs.writeSync(out, buf, w, o - w); if (!(n > 0)) throw Object.assign(new Error(`a short write: ${w} of ${o} bytes written, then ${n}`), { code: 'ESHORT' }); w += n; } o = 0; };
     const copy = (a, e) => {
       for (let at = a; at < e;) {
         if (o === PIECE) flush();
         const n = fs.readSync(src, buf, o, Math.min(PIECE - o, e - at), at);
         if (!(n > 0)) throw Object.assign(new Error(`a short read at ${at} of the ${e} bytes to keep`), { code: 'ESHORTREAD' });
-        o += n; at += n;
+        o += n; at += n; last = buf[o - 1];
       }
     };
     for (let k = 0; k < ranges.length; k += 2) {
@@ -106,6 +108,7 @@ function rewriteJob(m, fs) {
       if (e > size) { copy(a, size); if (o === PIECE) flush(); buf[o++] = 10; } else copy(a, e);
     }
     copy(size, now);
+    if (now > size && last !== 10) { if (o === PIECE) flush(); buf[o++] = 10; }   // a torn tail past the read: the job's lines start on a new line
     flush();
     writeAll(fs, out, m.parts);
     fs.fsyncSync(out);
@@ -115,6 +118,15 @@ function rewriteJob(m, fs) {
   if (err) throw err;   // the caller removes the temp: the file keeps its whole old version
   if (m.mode != null) { try { fs.chmodSync(m.tmp, m.mode); } catch { /* a filesystem without modes */ } }
   fs.renameSync(m.tmp, m.file);   // the commit point: the old whole file or the new one
+  const UNSYNCABLE = ['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'EISDIR', 'EPERM', 'EACCES'];   // a storage that refuses a directory's fsync (some FUSE / network mounts)
+  let dfd = null;
+  try { dfd = fs.openSync(path.dirname(m.file), 'r'); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) throw e; }
+  if (dfd != null) {
+    let syncErr = null;
+    try { fs.fsyncSync(dfd); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) syncErr = e; }
+    fs.closeSync(dfd);   // its failure is the job's
+    if (syncErr) throw syncErr;
+  }
 }
 /** ONE job. A whole-file write: temp, every byte, fsync (B-9275), close (its error is the write's), rename — NOTHING is renamed
  *  over the store unless every byte was written, synced and the temp closed without error. An APPEND (the acts journal): every byte,

@@ -222,9 +222,11 @@ const PAYLOAD = (recs) => ({
     fs.unlinkSync(ledger3);
     fs.appendFileSync(stash3, JSON.stringify({ rid: 'req_old2', ts: Date.now() - 40 * 86400e3, acct: 'sub-true', acctKnown: true }) + '\n');
     const st1 = fs.statSync(stash3), said = [], log0 = console.log; console.log = (...a) => { said.push(a.join(' ')); };
-    try { await mk3().replayed; } finally { console.log = log0; }
+    const SWk = require(REPO + '/src/store-writer.js').storeWriter(), dzk = SWk.dirty; let owedK = false;
+    SWk.dirty = function (f, o) { if (o && o.name === 'otel-truth.write') owedK = true; return dzk.call(this, f, o); };   // a trim owed to the writer = a rewrite on its way
+    try { await mk3().replayed; } finally { console.log = log0; SWk.dirty = dzk; }
     await new Promise((r) => setTimeout(r, 300));
-    ok(fs.statSync(stash3).ino === st1.ino && fs.statSync(stash3).size === st1.size && fs.readFileSync(stash3, 'utf8').includes('req_old2') && said.filter((l) => l.includes('kept WHOLE')).length === 1,
+    ok(!owedK && fs.statSync(stash3).ino === st1.ino && fs.statSync(stash3).size === st1.size && fs.readFileSync(stash3, 'utf8').includes('req_old2') && said.filter((l) => l.includes('kept WHOLE')).length === 1,
       'row B-360d: the ledger backfill migration NOT recorded as run ⇒ a stash with a line past the horizon is kept WHOLE (that migration reads every old row), said once', said.join(' | '));
     fs.writeFileSync(ledger3, ran3);
   }
@@ -327,7 +329,9 @@ const PAYLOAD = (recs) => ({
       // (主开发 r584 — the candidate's box zone, Node 24: the CONTROL's first 20 ms slice read all 40 000 rows, so its replay never
       // entered the loop's body and never reached the hold; the leg's own slice had read 38399 of them in the same run) THE SEAM HOLDS AT
       // A ROW COUNT, never at the clock: while the hold is armed a slice is bounded by -Infinity, so it ends at its first check (255
-      // lines) and the hold is reached after one slice on any machine — the leg and its control alike
+      // lines) and the hold is reached after one slice on any machine — the leg and its control alike. (row B-360d: the reader reads
+      // `sliceMs` ONCE, when the replay's read starts; the hold is armed before the copy starts, so every slice of that replay is
+      // bounded so — 255 lines each; a turn after a READ, before any row, is not the hold: the hold waits for rows)
       const hold8 = src8.split(SEAM).length === 2 ? src8.replace(SEAM, () => 'const STASH_READ = { readBytes: READ_BYTES, maxLine: READ_BYTES, get sliceMs() { return globalThis.__u4SliceHold ? -Infinity : REPLAY_SLICE_MS; }, turn: async () => { const h = globalThis.__u4SliceHold && globalThis.__u4SliceHold(); if (h) await h; await nextTurn(); } };') : null;
       const sliced = async (src, tag) => {
         const M8 = mutantCopies(`otel-truth-u4-${tag}`, REPO).load('src/server/otel-ingest.js', src, tag);

@@ -71,6 +71,7 @@ const READ_BYTES = 4 * 1024 * 1024;
 // rows the OTel path billed from 2.361.0 to the 2026-09-07 law). Until the migrations' own ledger records it as run, the trim
 // keeps the stash WHOLE (r738 Q1: never the 30-day cut before that migration has read its rows)
 const BACKFILL_ID = '2026-09-backfill-ledger-by-slot';
+const BACKFILL_LAW_MS = Date.UTC(2026, 8, 7);   // the rows it needs were billed before the 2026-09-07 attribution law
 // boot-replay slice (lane ci-351-reds, 2026-10-24): a TIME bound — the 20 000-line count (B-1319: ~20 ms here) took 31 ms
 // on the measured boot and its first slice rode the listen tick (the read resolves in a poll-phase callback; ONE
 // setImmediate from there runs in that same loop iteration). Lines are taken until REPLAY_SLICE_MS of the real clock;
@@ -117,10 +118,15 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   // (src/store-writer-worker.js rewriteJob) — in order with every append, so «the file grew meanwhile» cannot happen and
   // nothing is skipped. A failed trim leaves the stash whole as it was, said; the appends go on alone. A synchronous flush
   // (the exit) never rewrites the stash: the next start trims.
-  let trimOwed = null, trimWriting = null;
+  // a FAILED trim is not a failing storage (its lines were never written — the job copies, then renames): until the next write
+  // lands, a post whose line rode it is answered «retry», never 200 (the adversarial read's finding 1)
+  let trimOwed = null, trimWriting = null, trimFailed = false;
   // a write the writer never confirmed (its thread restarted and asked again) is OFFERED AGAIN with what came since — on a new
   // line (a torn tail never glues the next row to it; a line written twice is one rid twice: the replay keeps one)
   const produceStash = (o) => {
+    // a trim the writer never confirmed (its thread restarted and asks again): the rename may or may not have landed — said, the
+    // re-offered lines go as an append on a new line (a line written twice is one rid twice: the replay keeps one)
+    if (trimWriting) { console.warn('[otel] the stash\'s trim was not confirmed (the store writer\'s thread restarted) — the stash is the trimmed file or the old one, whole; the next start trims'); trimWriting = null; }
     const again = stashWriting, batch = (again || []).concat(stashOwed);
     stashOwed = [];
     const trim = trimOwed && !(o && o.sync) ? trimOwed : null;
@@ -138,11 +144,11 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     const w = stashWriting, t = trimWriting; stashWriting = null; trimWriting = null;
     if (t) {
       if (ok) console.log(`[otel] the stash trimmed by its writer: ${t.size} → ${t.kept} bytes (+ this start's appends) — ${t.what}`);
-      else console.warn(`[otel] the stash's trim FAILED (${(err && (err.code || err.message)) || 'an error'}) — the stash stays whole as it was; the next start trims it`);
+      else { trimFailed = true; console.warn(`[otel] the stash's trim FAILED (${(err && (err.code || err.message)) || 'an error'}) — the stash stays whole as it was; the next start trims it`); }
     }
     if (!w) return;
     if (!ok) { if (!t) stashTorn = true; stashOwed = w.concat(stashOwed); return; }   // a failed REWRITE left the file as it was: no torn tail
-    stashTorn = false;
+    stashTorn = false; trimFailed = false;
     const done = new Set(w.map((x) => x.spill).filter(Boolean));
     if (done.size) { for (let k = spilled.length - 1; k >= 0; k--) if (done.has(spilled[k])) spilled.splice(k, 1); writeSpill(); }
   };
@@ -194,11 +200,12 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   };
   // THE COUNT RULE's lines while it replays, as byte ranges of the file (each with its newline): the newest MAX_TRUTH known
   // ones inside the horizon (a ring) and every unknown-org one inside it (adjacent ones joined)
-  const ring = new Float64Array(2 * MAX_TRUTH), unknownAt = [];
-  let ringN = 0, unknownN = 0, lastEnd = -1;
+  let ring = new Float64Array(2 * MAX_TRUTH), unknownAt = [];   // released once the trim is decided
+  let ringN = 0, unknownN = 0, oldestKnown = Infinity;
   const onStashLine = (buf, a, nl, at) => {
-    lastEnd = at + (nl - a);
+    const lastEnd = at + (nl - a);
     let r; try { r = JSON.parse(buf.toString('utf8', a, nl)); } catch { return; }
+    if (r && r.acctKnown && r.ts > 0 && r.ts < oldestKnown) oldestKnown = r.ts;
     if (!r || !r.rid || (r.ts || 0) < replay.cutoff) return;
     if (r.acctKnown) { replayRid(r.rid, r.acct ?? null); const k = (ringN++ % MAX_TRUTH) * 2; ring[k] = at; ring[k + 1] = lastEnd + 1; return; }
     unknownN++;
@@ -215,12 +222,19 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     }
     return { ranges: Float64Array.from(out), kept };
   };
+  /** the migrations' own ledger on the backfill → {ran, rows: the stash rows its report says it read (null: no report)} */
   const backfillRan = async () => {
-    try { const L = JSON.parse(await fs.promises.readFile(path.join(dataDir, 'migrations.json'), 'utf8')); return !!(L && L.applied && L.applied[BACKFILL_ID]); } catch { return false; }
+    try {
+      const L = JSON.parse(await fs.promises.readFile(path.join(dataDir, 'migrations.json'), 'utf8')), rep = L && L.reports && L.reports[BACKFILL_ID];
+      return { ran: !!(L && L.applied && L.applied[BACKFILL_ID]), rows: rep && Number.isFinite(rep.stash) ? rep.stash : null };
+    } catch { return { ran: false, rows: null }; }
   };
   /** the stash read to its end (`st`): the trim it owes its writer, by the keep rule */
-  const oweTrim = (st, ran) => {
+  const oweTrim = (st, { ran, rows }) => {
     if (st.bytes <= FILE_MAX) return;
+    // recorded as run with NO rows over a stash that holds known rows from before the law: the release's reader failed on it (its one
+    // string past the runtime's longest) and answered «no stash» — those rows were never read: kept whole (the adversarial read's 6)
+    if (ran && rows === 0 && oldestKnown < BACKFILL_LAW_MS) { console.log(`[otel] the stash is kept WHOLE (${st.bytes} bytes): the migration ${BACKFILL_ID} is recorded as run with 0 rows, yet the stash holds known rows from before 2026-09-07 (the oldest of ${new Date(oldestKnown).toISOString().slice(0, 10)}) — it never read them`); return; }
     if (!ran) { console.log(`[otel] the stash is kept WHOLE (${st.bytes} bytes): the migration ${BACKFILL_ID} is not recorded as run in data/migrations.json — it reads every old row; once it has run, the trim keeps the newest ${MAX_TRUTH} known lines inside 30 days`); return; }
     const { ranges, kept } = keptRanges();
     if (kept === st.bytes) return;   // the kept lines ARE the file: nothing to write
@@ -254,8 +268,11 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
       finally { await fh.close().catch((e) => console.warn(`[otel] the stash's descriptor did not close after its replay (${e && e.message})`)); }
     }
     if (head) { order.splice(0, head); head = 0; }
-    if (st && lastEnd === st.bytes) stashTorn = true;   // a last line with no newline (a torn tail): the first append starts on a new line, never glued to it
+    // a stash whose last byte is not a newline (a torn tail, or a line too long to read), or one whose read failed: the first append
+    // starts on a new line, never glued to it
+    if (fh && (!st || (st.bytes > 0 && st.last !== 10))) stashTorn = true;
     if (st) oweTrim(st, await backfillRan());   // before the drain: the waiting posts' lines ride the trim's own job
+    ring = null; unknownAt = null;
     replay.done = true;
     drain();
   })().catch((e) => { // a replay that throws still ends: the waiting posts go on over the map as far as it was read, said once
@@ -395,6 +412,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
         // second. During a FAILING storage a 503 buys nothing: every record of this post is already held (take() put it in the truth
         // map and owed its line to the stash) and its line lands with the writer's retry — answered 200 (a kill inside that outage
         // loses those lines, as the release's failed append did). A QUEUE (the writer healthy, busy) answers 503 «retry».
+        if (!onDisk && trimFailed) return res.status(503).set('Retry-After', '1').json({ error: 'the usage truth stash is not on disk yet — send the post again' });   // a failed TRIM is not a failing storage: its lines were never written (B-360d)
         if (!onDisk && !(why && why.why === 'failed')) return res.status(503).set('Retry-After', '1').json({ error: 'the usage truth stash is not on disk yet — send the post again' });
       }
       res.json({ partialSuccess: {} });

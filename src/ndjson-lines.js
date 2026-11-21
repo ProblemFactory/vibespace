@@ -11,8 +11,8 @@
 // onLine(buf, a, nl, at): ONE non-empty line, the bytes [a, nl) of `buf` (valid only during the call; the newline excluded) and
 // its offset in the file, `at`. A last line with no newline is a line too. A line longer than a read (no newline inside
 // `maxLine` bytes) is skipped whole and COUNTED, never grown into one allocation. A read that fails THROWS: the caller says
-// what that means (never «empty»). → {bytes, lines, long}: the bytes read (the file's size as the read saw it), the lines
-// handed, the long lines skipped. SHARED by src/server/otel-ingest.js and src/ledger-slot-backfill.js.
+// what that means (never «empty»). → {bytes, lines, long, last}: the bytes read (the file's size as the read saw it), the lines
+// handed, the long lines skipped, the file's last byte (10 when it ends with a newline; a torn tail otherwise). SHARED by src/server/otel-ingest.js and src/ledger-slot-backfill.js.
 const READ_BYTES = 4 * 1024 * 1024;
 const defaultTurn = () => new Promise((r) => setImmediate(() => setImmediate(r)));   // past the next timers phase
 
@@ -46,7 +46,7 @@ function skipLong(c, end) {
 }
 /** the reader's state: ONE buffer that holds a read and the line it carries (max(readBytes, maxLine)); each read asks at most
  *  readBytes; a carried line of maxLine bytes or more is a LONG line */
-const state = (readBytes, maxLine) => ({ buf: Buffer.allocUnsafe(Math.max(64, readBytes, maxLine)), readBytes: Math.max(1, readBytes), maxLine: Math.max(1, maxLine), have: 0, base: 0, pos: 0, skipping: false, st: { bytes: 0, lines: 0, long: 0 } });
+const state = (readBytes, maxLine) => ({ buf: Buffer.allocUnsafe(Math.max(64, readBytes, maxLine)), readBytes: Math.max(1, readBytes), maxLine: Math.max(1, maxLine), have: 0, base: 0, pos: 0, skipping: false, st: { bytes: 0, lines: 0, long: 0, last: null } });
 const roomOf = (c) => Math.min(c.readBytes, c.buf.length - c.have);
 
 /** ASYNC: every line of the file behind FileHandle `fh`, from offset 0 to the first read that answers nothing */
@@ -54,6 +54,7 @@ async function eachLine(fh, onLine, { readBytes = READ_BYTES, maxLine = READ_BYT
   const c = state(readBytes, maxLine);
   for (;;) {
     const { bytesRead } = await fh.read(c.buf, c.have, roomOf(c), c.pos);
+    if (bytesRead > 0) c.st.last = c.buf[c.have + bytesRead - 1];
     c.pos += bytesRead; c.st.bytes = c.pos;
     const end = c.have + bytesRead, eof = bytesRead === 0;
     await turn();
@@ -74,6 +75,7 @@ function eachLineSync(fd, onLine, { readBytes = READ_BYTES, maxLine = READ_BYTES
   const c = state(readBytes, maxLine);
   for (;;) {
     const bytesRead = fs.readSync(fd, c.buf, c.have, roomOf(c), c.pos);
+    if (bytesRead > 0) c.st.last = c.buf[c.have + bytesRead - 1];
     c.pos += bytesRead; c.st.bytes = c.pos;
     const end = c.have + bytesRead, eof = bytesRead === 0;
     let a = 0;
