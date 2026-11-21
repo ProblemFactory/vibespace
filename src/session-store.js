@@ -567,7 +567,7 @@ function _jsonlCachePut(id, entry) {
  *  chain's cure: that memory was out of sight) — an index lives beside its tail's array, so the row counts it with them. */
 function jsonlCacheCensus() {
   const ix = jsonlPosCensus(), ts = taskStateCensus();
-  const row = cacheRow('transcript tails', { bytes: _jsonlResident + ix.bytes + ts.bytes, count: _jsonlCache.size, unit: 'entries', ceiling: JSONL_CACHE_MAX_BYTES, basis: `tail bytes + their position indexes (${ix.keys} keys, ${ix.ords} ordinals ≈ ${Math.round(ix.bytes / 1024)} KB, estimated at ${POS_KEY_BYTES} B a key + ${POS_ORD_BYTES} B an ordinal) + the kept task-state answers (${ts.answers}, ${ts.rows} entries ≈ ${Math.round(ts.bytes / 1024)} KB at ${TASK_ROW_BYTES} B an entry) (128 MB floor for idle tails; the live set ≤ ${JSONL_LIVE_MAX_BYTES / 1048576} MB${_jsonlLiveEvicted ? ', ' + _jsonlLiveEvicted + ' live tails evicted past it' : ''})`, live: _jsonlLive });
+  const row = cacheRow('transcript tails', { bytes: _jsonlResident + ix.bytes + ts.bytes, count: _jsonlCache.size, unit: 'entries', ceiling: JSONL_CACHE_MAX_BYTES, basis: `tail bytes + their position indexes (${ix.keys} keys, ${ix.ords} ordinals ≈ ${Math.round(ix.bytes / 1024)} KB, estimated at ${POS_KEY_BYTES} B a key + ${POS_ORD_BYTES} B an ordinal) + the kept task-state answers (${ts.answers}, ${ts.rows} entries ≈ ${Math.round(ts.bytes / 1024)} KB at ${TASK_ROW_BYTES} B an entry; an answer whose tail was evicted while a reader still holds its records lives with that reader, uncounted) (128 MB floor for idle tails; the live set ≤ ${JSONL_LIVE_MAX_BYTES / 1048576} MB${_jsonlLiveEvicted ? ', ' + _jsonlLiveEvicted + ' live tails evicted past it' : ''})`, live: _jsonlLive });
   row.over = !!(JSONL_CACHE_MAX_BYTES && _jsonlResident > JSONL_CACHE_MAX_BYTES);   // its read (S3): OVER is judged on what the bound counts (the tails), never on the index estimate
   return row;
 }
@@ -818,7 +818,7 @@ const _taskWarming = new Map();
 // moves), and kept only while the kept task events (the entry, its seq and length: they only grow) and the wrapper's start (the
 // phantom rule reads it) are the ones it was built from. A WeakMap by the records array: it dies with them (the transcript
 // tails' census row counts it). Every caller gets its own copy.
-const _taskStateMemo = new WeakMap();   // the reader's merged records array → { kept, seq, n, wStart, answer }
+const _taskStateMemo = new WeakMap();   // the reader's merged records array → { keptRef (a WeakRef of the task-event entry), seq, n, wStart, answer }
 const _taskScanCounts = { scans: 0, kept: 0, records: 0 };   // what taskState walked / answered from the kept answer (test-task-scan-loop ⑧ counts them)
 const TASK_ROW_BYTES = 160;   // a kept answer's entry ≈ a small object of a few short strings (an estimate, stated)
 function copyTaskState(st) {
@@ -1428,7 +1428,7 @@ class SessionMessages {
       const kept0 = (hid0 ? (_taskEventCache.get(hid0) || (this._session?.claudeSessionId && _taskEventCache.get(this._session.claudeSessionId))) : null) || null;
       key = { kept: kept0, seq: kept0 ? kept0.seq : -1, n: kept0 && Array.isArray(kept0.events) ? kept0.events.length : -1, wStart: Number(this.wrapperMeta()?.startedAt) || 0 };
       const was = this._all ? _taskStateMemo.get(this._all) : null;
-      if (was && was.kept === key.kept && was.seq === key.seq && was.n === key.n && was.wStart === key.wStart) { _taskScanCounts.kept++; return copyTaskState(was.answer); }
+      if (was && (was.keptRef ? was.keptRef.deref() : null) === key.kept && was.seq === key.seq && was.n === key.n && was.wStart === key.wStart) { _taskScanCounts.kept++; return copyTaskState(was.answer); }
     } catch { key = null; }
     _taskScanCounts.scans++; _taskScanCounts.records += (this._all || []).length;
     const tasks = {};
@@ -1575,7 +1575,8 @@ class SessionMessages {
     if (!todos.length && taskList.size) {
       todos.push(...[...taskList.entries()].sort((a, b) => Number(a[0]) - Number(b[0])).map(([, v]) => v));
     }
-    if (key && this._all) _taskStateMemo.set(this._all, { ...key, answer: copyTaskState({ tasks, todos }) });
+    // the task-event entry by a WEAK reference (the round's should): an entry the LRU evicts is never held by a kept answer
+    if (key && this._all) _taskStateMemo.set(this._all, { keptRef: key.kept ? new WeakRef(key.kept) : null, seq: key.seq, n: key.n, wStart: key.wStart, answer: copyTaskState({ tasks, todos }) });
     return { tasks, todos };
   }
 }

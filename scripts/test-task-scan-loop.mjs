@@ -675,8 +675,8 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
   {
     const { anchored } = await import('./scratch.mjs');
     const SRC8 = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8');
-    const KEPT_HIT = "      if (was && was.kept === key.kept && was.seq === key.seq && was.n === key.n && was.wStart === key.wStart) { _taskScanCounts.kept++; return copyTaskState(was.answer); }\n";
-    const KEPT_SET = "    if (key && this._all) _taskStateMemo.set(this._all, { ...key, answer: copyTaskState({ tasks, todos }) });\n";
+    const KEPT_HIT = "      if (was && (was.keptRef ? was.keptRef.deref() : null) === key.kept && was.seq === key.seq && was.n === key.n && was.wStart === key.wStart) { _taskScanCounts.kept++; return copyTaskState(was.answer); }\n";
+    const KEPT_SET = "    if (key && this._all) _taskStateMemo.set(this._all, { keptRef: key.kept ? new WeakRef(key.kept) : null, seq: key.seq, n: key.n, wStart: key.wStart, answer: copyTaskState({ tasks, todos }) });\n";
     const SUPERSEDE = "            if (syn.id) for (const k of byTaskId.get(syn.id) || []) { const tk = tasks[k]; if (tk && tk.id === syn.id && tk.status === 'running') tk.status = 'completed'; }\n";
     const REL_SUPERSEDE = "            if (syn.id) for (const tk of Object.values(tasks)) { if (tk.id === syn.id && tk.status === 'running') tk.status = 'completed'; }\n";   // stale-pins: kept (the release's own line, planted back as the oracle's)
     const M8 = mutantCopies('b360d-task-state', REPO);
@@ -720,6 +720,9 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       for (const t of Object.values(mine.tasks)) t.status = 'changed by its caller';
       mine.todos.push({ content: 'pushed by its caller' });
       read('the attach after that caller');
+      fs.appendFileSync(fp8, asst(299, [{ type: 'text', text: 'a plain reply, no task tool' }]) + '\n');
+      await M.warmSessionJsonlAsync(sid8, cwd);
+      read('after an append of a plain record only (the records grow, the task events do not)');
       fs.appendFileSync(fp8, asst(300, [{ type: 'tool_use', id: 'tu2', name: 'TaskUpdate', input: { taskId: '1', status: 'completed' } }]) + '\n' + user(301, '<task-notification>\n<task-id>b228</task-id>\n<tool-use-id>tb228</tool-use-id>\n<status>completed</status>\n</task-notification>') + '\n');
       await M.warmSessionJsonlAsync(sid8, cwd);
       read('after an append (a task completed, a command notified)');
@@ -730,15 +733,19 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       M._taskEventCache.delete(sid8);
       await M.warmSessionJsonlAsync(sid8, cwd);
       read('after the kept task events were read again from the start');
+      // the kept task events CHANGE while the records stay the same array (the entry replaced: its last completion gone)
+      const e0 = M._taskEventCache.get(sid8);
+      M._taskEventCache.set(sid8, { ...e0, events: e0.events.filter((ev) => !(ev.kind === 'update' && ev.input && ev.input.status === 'completed')), uuids: new Set(e0.uuids), pending: new Map(e0.pending) });
+      read('after the kept task events changed, the records the same');
       return steps;
     };
     const cure = await scenario(SS), rel = await scenario(release);
     const same = cure.length === rel.length && cure.every((s, i) => s.answer === rel[i].answer);
-    ok(same && cure.length === 8, `⑧ at every step (${cure.map((s) => s.step).join(' · ')}) the answer is the release's own scan's`, cure.map((s, i) => s.answer === rel[i].answer ? `${s.step}: =` : `${s.step}: ${s.answer.slice(0, 160)} ≠ ${rel[i].answer.slice(0, 160)}`));
+    ok(same && cure.length === 10, `⑧ at every step (${cure.map((s) => s.step).join(' · ')}) the answer is the release's own scan's`, cure.map((s, i) => s.answer === rel[i].answer ? `${s.step}: =` : `${s.step}: ${s.answer.slice(0, 160)} ≠ ${rel[i].answer.slice(0, 160)}`));
     const first = JSON.parse(cure[0].answer);
     ok(first.tasks.tw1 && first.tasks.tw1.status === 'completed' && first.tasks.tw2 && first.tasks.tw2.status === 'running' && (!first.tasks.tsys || first.tasks.tsys.status === 'completed') && Object.keys(first.tasks).length > 30, `⑧ the RESUMED workflow: its first launch completed, the last one running (${Object.keys(first.tasks).length} tasks in the window)`, { tw1: first.tasks.tw1, tw2: first.tasks.tw2, tsys: first.tasks.tsys || null });
-    const want = [[1, 0], [0, 1], [0, 1], [0, 1], [1, 0], [1, 0], [1, 0], [1, 0]];
-    ok(cure.every((s, i) => s.scans === want[i][0] && s.kept === want[i][1]), `⑧ COUNTS — walked / kept per step: ${cure.map((s) => `${s.scans}/${s.kept}`).join(' · ')} (a re-attach of an unchanged conversation walks nothing; an append, the live buffer, the wrapper's restart and the task events read again each rescan)`, cure.map((s) => [s.step, s.scans, s.kept]));
+    const want = [[1, 0], [0, 1], [0, 1], [0, 1], [1, 0], [1, 0], [1, 0], [1, 0], [1, 0], [1, 0]];
+    ok(cure.every((s, i) => s.scans === want[i][0] && s.kept === want[i][1]), `⑧ COUNTS — walked / kept per step: ${cure.map((s) => `${s.scans}/${s.kept}`).join(' · ')} (a re-attach of an unchanged conversation walks nothing; a plain append, a task append, the live buffer, the wrapper's restart, the task events read again and the task events changed each rescan)`, cure.map((s) => [s.step, s.scans, s.kept]));
     ok(cure[3].answer === cure[0].answer, '⑧ a caller that changes its copy changes nobody else\'s: the next attach answers the first answer');
     const ts = SS._taskStateCensus(), row = SS.jsonlCacheCensus();
     ok(ts.answers >= 1 && ts.rows > 0 && ts.bytes === ts.rows * 160 && /kept task-state answers \(\d+, \d+ entries/.test(row.basis), `⑧ the kept answers are in the transcript tails' census row (${ts.answers} kept, ${ts.rows} entries ≈ ${ts.bytes} B): «${row.basis.slice(0, 200)}»`, ts);
@@ -746,9 +753,11 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     const R1 = await scenario(M8.load('src/session-store.js', anchored(SRC8, KEPT_HIT, '', 'no kept answer'), 'no-kept-answer'));
     ok(R1[1].scans === 1 && R1[1].kept === 0, `⑧ RED CONTROL no kept answer: the re-attach of the unchanged conversation walks it again (${R1[1].scans} walk)`, R1[1]);
     const R2 = await scenario(M8.load('src/session-store.js', anchored(SRC8, KEPT_HIT, KEPT_HIT.replace(' && was.wStart === key.wStart', ''), 'a key without the wrapper start'), 'no-wrapper-start'));
-    ok(R2[6].answer !== rel[6].answer && R2[6].scans === 0, '⑧ RED CONTROL a kept answer that ignores the wrapper\'s start: after the restart its phantom launches still run (the release dropped them)', { red: R2[6].answer.slice(0, 200), release: rel[6].answer.slice(0, 200) });
-    const R3 = await scenario(M8.load('src/session-store.js', anchored(SRC8, KEPT_HIT, KEPT_HIT.replace('was.kept === key.kept && was.seq === key.seq && was.n === key.n && ', ''), 'a key without the kept events'), 'no-kept-events'));
-    ok(R3[7].scans === 0 && R3[7].kept === 1, '⑧ RED CONTROL a kept answer that ignores the kept task events: read again from the start, they are not rescanned', R3[7]);
+    ok(R2[7].answer !== rel[7].answer && R2[7].scans === 0, '⑧ RED CONTROL a kept answer that ignores the wrapper\'s start: after the restart its phantom launches still run (the release dropped them)', { red: R2[7].answer.slice(0, 200), release: rel[7].answer.slice(0, 200) });
+    const R3 = await scenario(M8.load('src/session-store.js', anchored(SRC8, KEPT_HIT, KEPT_HIT.replace('(was.keptRef ? was.keptRef.deref() : null) === key.kept && was.seq === key.seq && was.n === key.n && ', ''), 'a key without the kept events'), 'no-kept-events'));
+    ok(R3[9].scans === 0 && R3[9].answer !== rel[9].answer, '⑧ RED CONTROL a kept answer that ignores the kept task events: after they CHANGED (the records the same) it answers the old state — not the release\'s', { red: R3[9].answer.slice(0, 200), release: rel[9].answer.slice(0, 200) });
+    const R5 = await scenario(M8.load('src/session-store.js', anchored(SRC8, KEPT_HIT, KEPT_HIT.replace('return copyTaskState(was.answer);', 'return was.answer;'), 'a kept answer handed out without a copy'), 'no-copy'));
+    ok(R5[3].answer !== rel[3].answer, '⑧ RED CONTROL a kept answer handed out without a copy: the caller that changed its answer changed the next attach\'s', { red: R5[3].answer.slice(0, 200), release: rel[3].answer.slice(0, 200) });
     const R4 = await scenario(M8.load('src/session-store.js', anchored(SRC8, SUPERSEDE, SUPERSEDE.replace('byTaskId.get(syn.id) || []', '[]'), 'a supersede that finds nothing'), 'no-supersede'));
     ok(R4[0].answer !== rel[0].answer && JSON.parse(R4[0].answer).tasks.tw1.status === 'running', '⑧ RED CONTROL a supersede that finds nothing: the resumed workflow\'s first launch still runs — not the release\'s answer', JSON.parse(R4[0].answer).tasks.tw1);
   }
