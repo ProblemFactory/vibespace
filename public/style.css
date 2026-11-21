@@ -8759,10 +8759,11 @@ label.chan-cap-row { cursor: default; }
    that drew a 0 px line whose text overlapped the next one and ran off the phone); the two notes sit between the scrolling
    body and the footer, always on screen; every body part keeps its height and the body scrolls instead of squeezing */
 .bwho-body > * { flex-shrink: 0; }
-/* r600 (3) — the grant picker's OPTION LIST on a finger device or a phone-width window: three 44 px rows, and it scrolls — the bigger
-   targets of the finger rule never push a dialog's parts past its box (test-browser-who-ui ⑧ at 360 × 740). Every surface's list,
-   written once here, after each surface's own list height. */
-@media (pointer: coarse), (max-width: 480px) {
+/* r600 (3), r767 — the grant picker's OPTION LIST where there is NO ROOM for the finger rule's bigger rows: three 44 px rows, and it
+   scrolls, so a dialog's parts never leave its box (test-browser-who-ui ⑧ at 360 × 740). THE BOUND FOLLOWS THE ROOM, NOT THE FINGER:
+   a phone-width window, or a finger device in a window too short for the dialog; a wide and tall finger device keeps each surface's
+   own list height. Every surface's list, written once here, after each surface's own list height. */
+@media (max-width: 480px), (pointer: coarse) and (max-height: 800px) {
   .pp-list, .pp-pop .pp-list, .pp-except-picker .pp-list, .bwho-dialog .pp-list { max-height: 140px; }
 }
 .bwho-notes { flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; padding: 0 14px 8px; }

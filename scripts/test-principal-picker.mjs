@@ -331,6 +331,8 @@ console.log('⑮ the chain\'s cure (B1): what a chip SAYS a Task Group entry adm
     // the option list on a finger device: three 44 px rows (it scrolls) — the bigger targets never push a dialog's parts past its box
     const listRule = coarse.find((r) => r.sels.includes('.pp-list') && r.sels.includes('.bwho-dialog .pp-list') && (px(r.decl['max-height']) || 999) <= 140);
     if (!listRule) bad.push('the picker\'s option list keeps its desktop height on a finger device (its bigger rows push a dialog\'s parts past its box)');
+    // r767: THE BOUND FOLLOWS THE ROOM — a phone-width window or a SHORT finger window; never every finger device (a tall tablet keeps its list)
+    else if (/(^@media|,)\s*\(pointer:\s*coarse\)\s*(,|$)/.test(listRule.media) || !/\(max-height:\s*\d+px\)/.test(listRule.media)) bad.push('the option list\'s three-row bound follows the finger, not the room (a tall finger window gets it too)');
     else for (const r of R) if (r.at > listRule.at && r.sels.some((x) => /(^|\s)\.pp-list$/.test(x)) && (px(r.decl['max-height']) || 0) > 140) bad.push(`«${r.sels.join(', ')}» raises the option list past three rows after the finger rule`);
     const ex = (/IM_TARGET_EXEMPT\s*=\s*([^;]+);/.exec(i18nSuite) || [])[1] || '';
     if (/pp-chip|pp-row|pp-input|pp-trigger/.test(ex)) bad.push('test-channels-i18n exempts a picker control from the target census');
@@ -343,9 +345,13 @@ console.log('⑮ the chain\'s cure (B1): what a chip SAYS a Task Group entry adm
   const fr0 = css.indexOf('@media (pointer: coarse), (max-width: 480px) {\n  .pp-input, .pp-trigger, .pp-except-toggle, .pp-chip-door, .pp-row { min-height: 44px; }'), fr1 = css.indexOf('\n}\n', fr0) + 3;
   const noRule = fr0 > 0 ? anchored(css, css.slice(fr0, fr1), '', 'finger-rule-gone') : css;
   const dlg = anchored(css, "  /* r600 (3): the exit dialog's own copies of the picker's phone targets are gone", "  .exit-access-dialog .pp-chip { min-height: 36px; }\n  /* r600 (3): the exit dialog's own copies of the picker's phone targets are gone", 'dialog-undercut');   // stale-pins: kept (the RED plants the dialog's old 36 px copy back)
+  const LM = '@media (max-width: 480px), (pointer: coarse) and (max-height: 800px) {\n  .pp-list, .pp-pop .pp-list';
+  const rC = fingerFailures(anchored(css, LM, '@media (pointer: coarse), (max-width: 480px) {\n  .pp-list, .pp-pop .pp-list', 'list-bound-by-finger'), i18n);   // stale-pins: kept (the RED plants the finger-only media back)
   const rA = fingerFailures(noRule, i18n), rB = fingerFailures(dlg, i18n);
   console.log(`    judged (RED: the finger rule removed): ${JSON.stringify(rA.slice(0, 3))} · (RED: a dialog's 36 px copy planted back): ${JSON.stringify(rB)}`);
   ok(fr0 > 0 && rA.some((b) => /^\.pp-chip-only: no coarse-pointer rule/.test(b)), 'NEGATIVE CONTROL: the stylesheet without the finger rule fails — the «仅本组» switch has no 44 px target', rA);
+  console.log(`    judged (RED r767: the list's bound by the finger): ${JSON.stringify(rC)}`);
+  ok(rC.some((b) => /follows the finger, not the room/.test(b)), 'NEGATIVE CONTROL (r767): the option list bounded for EVERY finger device fails — a tall tablet would get a three-row list', rC);
   ok(rB.some((b) => /exit-access-dialog \.pp-chip/.test(b)), 'NEGATIVE CONTROL: a dialog\'s own 36 px copy of the chip planted back fails — it outranks the picker\'s rule', rB);   // stale-pins: kept (the RED plants the dialog's old 36 px copy back)
 }
 
