@@ -1904,7 +1904,7 @@ console.log('§18 B-bfe6 — a BROWSER as a desktop app: its OWN profile dir (cr
   ok(a.browser === 'chromium' && a.profileDir === prof && a.keepProfile === false && a.url === 'https://example.com/vs-bfe6', 'the record names the family, its OWN profile dir (data/desktop-apps/<id>/profile), the URL and keepProfile false', a);
   ok(fs.existsSync(prof) && (fs.statSync(prof).mode & 0o777) === 0o700, 'the profile dir exists before the app starts, mode 0700');
   ok(!prof.startsWith(fakeHome + path.sep) && !prof.startsWith(process.env.HOME + path.sep), `the profile is NOT under $HOME (the apps' HOME ${fakeHome}, nor the real one) — it lives in the keeper's data dir`);
-  ok(same(a.args, [`--user-data-dir=${prof}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', 'https://example.com/vs-bfe6']), 'the record\'s argv: the profile flags (+ desktop lane E\'s accessibility switch), THEN the URL', a.args);
+  ok(same(a.args, [`--user-data-dir=${prof}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', '--disable-features=OutdatedBuildDetector', 'https://example.com/vs-bfe6']), /* B-2a93: + the app Chrome's own outdated-build notice off */ 'the record\'s argv: the profile flags (+ desktop lane E\'s accessibility switch), THEN the URL', a.args);
   const ready = await until(() => { const r = k.get(a.id); return r.state === 'ready' || r.state === 'failed' ? r : null; });
   ok(ready && ready.state === 'ready', 'the browser session reaches ready on the private display', ready && ready.lastError);
   const argvFile = await until(() => { try { return fs.readFileSync(path.join(prof, 'argv.txt'), 'utf8'); } catch { return null; } }, 8000);

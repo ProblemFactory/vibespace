@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -837,12 +838,28 @@ console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pi
   // the argv: the profile flags, then the URL — no automation flag, ever
   const P = '/tmp/vs-da/desktop-apps/da-1/profile';
   const ac = M.browserArgv({ ...cr, exec: 'google-chrome' }, { profileDir: P, url: 'https://example.com/a?b=1' });
-  ok(ac.ok && same(ac.argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', 'https://example.com/a?b=1']), 'chromium argv: --user-data-dir=<the session\'s profile> --no-first-run --no-default-browser-check --password-store=basic --force-renderer-accessibility (lane E, D4: the page\'s tree for a shared browser), THEN the URL (last)', ac);
+  ok(ac.ok && same(ac.argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', '--disable-features=OutdatedBuildDetector', 'https://example.com/a?b=1']), 'chromium argv: --user-data-dir=<the session\'s profile> --no-first-run --no-default-browser-check --password-store=basic --force-renderer-accessibility (lane E, D4: the page\'s tree for a shared browser), THEN the URL (last)', ac);
   // (the .197 integration: Chrome 154 — measured — registers on the AT-SPI bus only with an accessibility env beside the flag)
   ok(M.BROWSER_A11Y_FLAG === '--force-renderer-accessibility' && same(Object.keys(ac.env || {}), ['ACCESSIBILITY_ENABLED']) && ac.env.ACCESSIBILITY_ENABLED === '1' && M.browserArgv({ browser: 'firefox', args: [] }, { profileDir: P }).env.GNOME_ACCESSIBILITY === '1' && !M.isForbiddenBrowserArg(M.BROWSER_A11Y_FLAG), 'lane E (D4): the accessibility switch — chromium the flag AND ACCESSIBILITY_ENABLED=1 (Chrome ≥ 154: the flag alone no longer registers it on AT-SPI), firefox GNOME_ACCESSIBILITY=1 in the answer\'s env — and it is no forbidden (automation) flag');
   const af = M.browserArgv(fx, { profileDir: P, url: 'http://127.0.0.1:8080/' });
   ok(af.ok && same(af.argv, ['--new-instance', '-profile', P, 'http://127.0.0.1:8080/']), 'firefox argv: --new-instance -profile <the session\'s profile>, THEN the URL', af);
-  ok(same(M.browserArgv(cr, { profileDir: P }).argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility']), 'no URL ⇒ no URL argument (the browser opens its own start page)');
+  ok(same(M.browserArgv(cr, { profileDir: P }).argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', '--disable-features=OutdatedBuildDetector']), 'no URL ⇒ no URL argument (the browser opens its own start page)');
+  // B-2a93: an application window's Chrome is started WITHOUT its own outdated-build notice (the «Can't update Chrome» bubble that took
+  // the person's keyboard): ONE --disable-features, the row's own list merged in (Chrome reads only the last copy of a switch), the
+  // name the vendor's source makes of kOutdatedBuildDetector; firefox untouched. RED: the release's argv (the switch cut, in a copy)
+  {
+    const dfOf = (argv) => argv.filter((x) => /^--disable-features(=|$)/.test(x));
+    const own = M.browserArgv({ ...cr, args: ['--disable-features=A,B', '--lang=fr'] }, { profileDir: P }).argv;
+    const two = M.browserArgv({ ...cr, args: ['--disable-features=Old', '--disable-features=A,OutdatedBuildDetector'] }, { profileDir: P }).argv;
+    const fxa = M.browserArgv({ ...fx, args: ['--disable-features=A'] }, { profileDir: P }).argv;
+    ok(M.CHROMIUM_NO_UPDATE_BUBBLE === 'OutdatedBuildDetector' && same(dfOf(own), ['--disable-features=A,B,OutdatedBuildDetector']) && own[0] === '--lang=fr' && same(dfOf(two), ['--disable-features=A,OutdatedBuildDetector']) && same(fxa.slice(0, 1), ['--disable-features=A']) && !fxa.includes('--disable-features=OutdatedBuildDetector'),
+      'B-2a93: chromium starts with ONE --disable-features carrying OutdatedBuildDetector — a row\'s own list kept (its LAST copy, as Chrome reads it), the name never twice; firefox untouched', { own, two, fxa });
+    const bsrc = fs.readFileSync(path.join(repo, 'src/desktop-browser-app.js'), 'utf8');
+    const MR = mutantCopies('dapps-b2a93', repo);
+    const REL = MR.load('src/desktop-browser-app.js', anchored(bsrc, "'--password-store=basic', BROWSER_A11Y_FLAG, nf.flag]", "'--password-store=basic', BROWSER_A11Y_FLAG]", 'b2a93-release-argv'), 'b2a93-release-argv');   /* stale-pins: kept — the RED re-creates the release's argv on purpose */
+    const rel = REL.browserArgv(cr, { profileDir: P }).argv;
+    ok(!rel.some((x) => /OutdatedBuildDetector/.test(x)), 'B-2a93 RED: the release\'s argv (the switch cut, in a copy) starts the app\'s Chrome WITH its outdated-build notice — the bubble that took the keyboard', rel);
+  }
   ok(same(M.browserArgv(cr, { profileDir: '/tmp/vs-da/desktop-apps/./da-1/x/../profile' }).argv[0], `--user-data-dir=${P}`), 'the profile path is normalised (`.` / `..` folded) before it reaches argv');
   const AUTOMATION = /^--?(remote-debugging|enable-automation|headless|marionette|remote-allow|start-debugger-server|load-extension)/;
   ok([ac, af].every((a) => a.argv.every((x) => !AUTOMATION.test(x))), 'no automation flag in either family\'s argv (remote-debugging / enable-automation / headless / marionette / debugger server / extensions)');

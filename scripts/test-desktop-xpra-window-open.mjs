@@ -634,6 +634,10 @@ try {
         // Chrome rewrites its own /proc cmdline into ONE space-joined string (measured: `/opt/google/chrome/chrome --user-data-dir=… …`) — tokenised back here
         const cmd = (() => { try { return fs.readFileSync(`/proc/${recB.pids.app}/cmdline`, 'utf8').split('\0').filter(Boolean).join(' ').split(' ').filter(Boolean); } catch { return []; } })();
         check(`${row.id}: the RUNNING browser process (pid ${recB.pids.app}) carries that profile and that URL in its argv — and no automation flag`, cmd.some((a) => a === `--user-data-dir=${profWant}` || a === profWant) && cmd.includes(url) && !cmd.some((a) => /^--?(remote-debugging|enable-automation|headless|marionette)/.test(a)), cmd);
+        // B-2a93: the app's Chrome runs WITHOUT its own outdated-build notice — the «Can't update Chrome» bubble that took the keyboard a
+        // moment after a click on an aging build: its OWN argv carries ONE --disable-features with OutdatedBuildDetector (the name the
+        // vendor's source makes of kOutdatedBuildDetector). The focus leg after the click and the keyboard legs below are the proof that nothing takes the keys any more.
+        if (recB.browser !== 'firefox') check(`${row.id}: B-2a93 — the RUNNING Chrome (pid ${recB.pids.app}) carries ONE --disable-features holding OutdatedBuildDetector`, cmd.filter((a) => /^--disable-features=/.test(a)).length === 1 && cmd.some((a) => /^--disable-features=(?:.*,)?OutdatedBuildDetector(?:,|$)/.test(a)), cmd.filter((a) => /disable-features/.test(a)));
         // the window maps (our xpra client draws it) and the title bar carries the PAGE title xpra reports
         const winB = await until(async () => { const s = await p1.evalJs(WIN(recB.id)); return s && s.status === 'Connected' && s.windows.length && s.title && s.title.includes(PAGE_TITLE) ? s : null; }, TITLE_DEADLINE_MS, 400);
         const winAny = winB || await p1.evalJs(WIN(recB.id));
@@ -653,6 +657,15 @@ try {
           const wk = await p1.evalJs(WIN(recB.id));
           await trustedClickAt(p1, wk.pane.x + wk.pane.w / 2, wk.pane.y + wk.pane.h * 0.3); // the text box: the page's top 45 % under Chrome's own bar
           await sleep(500);
+          // B-2a93, its second half: on the aging build the bubble took the page's focus about 1.3 s after this click (the placing
+          // lane's three clocked runs agree; the page blurred with document.hasFocus() false and never came back). So the leg
+          // waits past that time — 3 s from the click in all — and reads the page's OWN last word on its focus: the text box's and
+          // the window's focus / blur events, which the page above logs. The last one is a focus, never a blur. RED on a build
+          // that raises the bubble: its blur comes last, with no focus after it, and every key after it goes to the bubble.
+          await sleep(2500);
+          const focusEvents = keyLog().filter((e) => e.ty === 'focus' || e.ty === 'wfocus' || e.ty === 'blur' || e.ty === 'wblur');
+          const lastFocusEvent = focusEvents[focusEvents.length - 1];
+          check(`${row.id}: B-2a93 — 3 s after the click (the bubble took the focus at about 1.3 s) the page still has the focus: its last focus event is a focus, never a blur (${focusEvents.slice(-4).map((e) => e.ty + (e.doc === false ? ' [document unfocused]' : '')).join(' ') || 'no focus event at all'})`, !!lastFocusEvent && (lastFocusEvent.ty === 'focus' || lastFocusEvent.ty === 'wfocus'), { last: focusEvents.slice(-6) });
           const before = keyLog().length;
           for (const ch of 'wsxd') { const k = keyOf(ch); await p1.cdp('Input.dispatchKeyEvent', { type: 'keyDown', ...k }); await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', ...k }); await sleep(60); }
           const downs = await until(() => { const d = keyLog().slice(before).filter((e) => e.ty === 'keydown'); return d.length >= 4 ? d : null; }, 10000, 200) || keyLog().slice(before).filter((e) => e.ty === 'keydown');

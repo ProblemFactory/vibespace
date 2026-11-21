@@ -119,6 +119,27 @@ function profileDirVerdict(dir, { home = null, ownedRoot = null, confinement = n
  * Refused by name: not a browser row, a forbidden (profile / automation) flag in the row, a bad profile dir, a bad URL.
  * Returns `{ ok, argv, url, env, code, error }`.
  */
+/**
+ * B-2a93 — AN APPLICATION WINDOW'S CHROME NEVER RAISES ITS OWN OUTDATED-BUILD NOTICE OVER THE PERSON'S PAGE. PLACED by lane
+ * bl-tests-chrome (three facts rounds, Google Chrome 154.0.8037.57 under xpra): a build older than its age line that cannot update
+ * itself opens its own «Can't update Chrome» bubble about a second after a click, and the bubble TAKES THE KEYBOARD — what the person
+ * types is lost. READ in the vendor's own source at that version (chrome/browser/upgrade_detector/upgrade_detector_impl.cc, tag
+ * 154.0.8037.57): the whole check runs only while the feature `kOutdatedBuildDetector` is on, and a two-argument BASE_FEATURE's name
+ * drops the k (base/feature_internal.h: `#feature` .substr(1)) ⇒ «OutdatedBuildDetector», turned off with Chrome's own
+ * --disable-features (a build without that feature ignores the name). A MACHINE policy would reach the person's own Chrome, and
+ * --disable-background-networking would stop more of their browsing's background work: neither. Chrome keeps only the LAST copy of a
+ * switch, so a row's own --disable-features is MERGED into ONE (its last list kept, ours added once). Only this window's Chrome, on
+ * its own profile — never the person's own Chrome; the agent browser's launches are not this road.
+ */
+const CHROMIUM_NO_UPDATE_BUBBLE = 'OutdatedBuildDetector';
+const DISABLE_FEATURES_RE = /^--disable-features(?:=(.*))?$/;
+/** PURE: the row's args without any --disable-features, and ONE merged --disable-features carrying `feature`. */
+function withFeatureDisabled(args, feature) {
+  const rest = [], lists = [];
+  for (const a of Array.isArray(args) ? args : []) { const m = DISABLE_FEATURES_RE.exec(String(a)); if (m) lists.push(m[1] || ''); else rest.push(a); }
+  const kept = lists.length ? lists[lists.length - 1].split(',').map((x) => x.trim()).filter(Boolean) : [];   // Chrome reads the last copy only
+  return { rest, flag: `--disable-features=${(kept.includes(feature) ? kept : [...kept, feature]).join(',')}` };
+}
 function browserArgv(row, { profileDir, url = null } = {}) {
   const kind = row && BROWSER_KINDS[row.browser];
   if (!kind) return { ok: false, argv: null, url: null, code: 'not-a-browser', error: `${row && row.label ? row.label : 'this row'} is not a browser row` };
@@ -129,8 +150,10 @@ function browserArgv(row, { profileDir, url = null } = {}) {
   if (!d) return { ok: false, argv: null, url: null, code: 'profile-not-owned', error: 'a desktop-app browser needs its own absolute profile directory' };
   let u = null;
   if (url !== null && url !== undefined && url !== '') { const v = validateBrowserUrl(url); if (!v.ok) return { ok: false, argv: null, url: null, code: v.code, error: v.error }; u = v.url; }
-  const profile = row.browser === 'firefox' ? ['--new-instance', '-profile', d] : [`--user-data-dir=${d}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', BROWSER_A11Y_FLAG];
-  return { ok: true, argv: [...own, ...profile, ...(u ? [u] : [])], url: u, env: row.browser === 'firefox' ? { ...BROWSER_A11Y_ENV } : { ...CHROMIUM_A11Y_ENV }, code: null, error: null };
+  // B-2a93: the chromium family's own flags end with ONE --disable-features carrying OutdatedBuildDetector (the row's own list merged in)
+  const nf = row.browser === 'firefox' ? null : withFeatureDisabled(own, CHROMIUM_NO_UPDATE_BUBBLE);
+  const profile = row.browser === 'firefox' ? ['--new-instance', '-profile', d] : [`--user-data-dir=${d}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', BROWSER_A11Y_FLAG, nf.flag];
+  return { ok: true, argv: [...(nf ? nf.rest : own), ...profile, ...(u ? [u] : [])], url: u, env: row.browser === 'firefox' ? { ...BROWSER_A11Y_ENV } : { ...CHROMIUM_A11Y_ENV }, code: null, error: null };
 }
 /**
  * LANE D (a) item C — CHROME DRAWS ITS OWN FRAME (MEASURED 2026-09-25, Google Chrome 153.0.8010.47 under xpra 6.5.3,
@@ -222,4 +245,5 @@ function singletonLockFact(target, { hostname = null } = {}) {
 module.exports = {
   CHROMIUM_FAMILY_RE, FIREFOX_FAMILY_RE, browserFamilyOf, DEFAULT_PROFILE_DIRS, defaultProfileDirOf, singletonLockFact, // lane app-launch-singleton
   BROWSER_KINDS, A11Y_MEASURED_KINDS, BROWSER_BINS, isForbiddenBrowserArg, browserRowFor, URL_MAX, validateBrowserUrl, within, REAL_BROWSER_ROOTS, profileDirVerdict, browserArgv, CHROMIUM_FRAME_MARKER, chromiumFramePrefs, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV, CHROMIUM_A11Y_ENV, firefoxUserJs,
+  CHROMIUM_NO_UPDATE_BUBBLE, // B-2a93: the feature an application window's Chrome is started without
 };
