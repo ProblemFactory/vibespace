@@ -142,11 +142,17 @@ function limitsEditor(initial, data, now = null) {
   add.type = 'button';
   here.append(up, pathIn, add);
   const dirs = el('div', 'vw-ak-dirs');
-  let cur = '';
+  let cur = '', goSeq = 0;
+  // B-1217 (5): a listing lands only if it is the LAST one asked (an earlier answer coming late never draws over a later one), and
+  // it never overwrites a path typed while it was on its way (a folder pasted before a slow hub's first listing answered was
+  // replaced by that listing's folder, and 加入 added the wrong folder to the key's limits)
   const go = async (p) => {
+    const mine = ++goSeq, typed = pathIn.value;
     const r = await fetchJson(`/api/files${p ? `?path=${encodeURIComponent(p)}` : ''}`);
+    if (mine !== goSeq) return;
     if (!r || r.error || !Array.isArray(r.items)) { showToast(failWords({ error: r && r.error }), { type: 'error' }); return; }
-    cur = String(r.path || p || '/'); pathIn.value = cur;
+    cur = String(r.path || p || '/');
+    if (pathIn.value === typed) pathIn.value = cur;
     dirs.replaceChildren(...r.items.filter((i) => i && i.isDirectory).slice(0, 300).map((i) => {
       const b = el('button', 'vw-ak-dir', i.name);
       b.type = 'button'; b.dataset.path = joinPath(cur, i.name);

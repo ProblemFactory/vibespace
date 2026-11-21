@@ -45,7 +45,8 @@
 //      runs at once on the existing grant (no card: its audit line was never asked); taken away ⇒ the next call refused by
 //      name (verb_not_in_scope) · ⑨c 「所有路径」: 铸造… offers it above the browser (red, its title says your home is in it) ⇒
 //      the record holds exactly ['/'], the row says 「文件夹: 所有路径」, the first-use card says 所有路径; 编辑… round-trips it
-//      (一个文件夹 及子文件夹 ⇔ 所有路径); a folder chip and the row say 及子文件夹
+//      (一个文件夹 及子文件夹 ⇔ 所有路径); a folder chip and the row say 及子文件夹; the browser's first listing HELD (CDP Fetch):
+//      a folder typed meanwhile keeps the typed words when it comes, 加入 adds that folder (B-1217 (5))
 //   ⑪ MANY GRANTS (lane vault-key-row-compact — the owner 2026-10-21 05:4xZ: 「授权很多的时候，这个界面需要优化一下」): a key holding every
 //      verb and unrestricted limits, granted to 2 then 12 (8 Task Groups, the live conversation, 3 ended conversations) — the row
 //      does not grow (measured desk / phone, 2 vs 12), folded ≤ 120 px, never names the permission modes (任何, the names in the title),
@@ -477,6 +478,34 @@ try {
   await clickWait('.vw-ak-edit-save');
   const backAll = await (async () => { for (let i = 0; i < 40; i++) { const k = (await keysNow()).find((x) => x.name === 'Anywhere'); if (k && k.limits.cwdRoots[0] === '/') return k.limits.cwdRoots; await sleep(250); } return null; })();
   check('…所有路径 again ⇒ exactly ["/"] (the round trip)', JSON.stringify(backAll) === '["/"]', backAll);
+  // B-1217 (5) ALSO: THE FIRST LISTING HELD — the picker's own answer comes late on purpose: a folder typed while it is on its way
+  // keeps the typed words when it comes (the late answer wrote its own folder over them, and 加入 added that one to the key's limits)
+  {
+    const heldIds = [], HELD = '/held-listing';
+    const onPaused = (d) => { try { const m = JSON.parse(d); if (m.method === 'Fetch.requestPaused') heldIds.push(m.params.requestId); } catch { /* not ours */ } };
+    await closeWindows(); await openWindow();
+    sock.on('message', onPaused);
+    await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/api/files*', requestStage: 'Request' }] });
+    let n = 0, landed = false, field = null;
+    try {
+      await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => (x.querySelector('.vw-label') || {}).textContent === 'Anywhere'); const b = r && r.querySelector('.vw-ak-edit'); if (!b) return false; b.click(); return true; })()`, 10000);
+      for (let i = 0; i < 60 && !heldIds.length; i++) await sleep(150);
+      await clickWait('#vault-ak-edit .vw-ak-somepaths input');
+      await evalJs(`(() => { const i = document.querySelector('#vault-ak-edit .vw-ak-path'); i.value = ${JSON.stringify(SUB)}; return true; })()`);
+      n = heldIds.length;
+      if (!n) console.log('    (the first listing was never seen held in 9 s — the leg below judges what came)');
+      for (const id of heldIds.splice(0)) await cdp('Fetch.fulfillRequest', { requestId: id, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(JSON.stringify({ path: HELD, items: [{ name: 'came-late', isDirectory: true }] })).toString('base64') });
+    } finally { await cdp('Fetch.disable').catch(() => {}); sock.off('message', onPaused); }
+    landed = !!(await until(`!!document.querySelector('#vault-ak-edit .vw-ak-dir[data-path="${HELD}/came-late"]')`, 8000));
+    field = await evalJs(`(document.querySelector('#vault-ak-edit .vw-ak-path') || {}).value`);
+    check('a folder typed while the browser\'s first listing is held keeps the typed words when that listing comes (its folders drawn below)', n > 0 && landed && field === SUB, { held: n, landed, field });
+    await clickWait('#vault-ak-edit .vw-ak-add-root');
+    const chips = await until(`(() => { const c = [...document.querySelectorAll('#vault-ak-edit .vw-ak-root')].map((x) => x.dataset.root); return c.length ? c : null; })()`, 8000);
+    check('…and 加入 adds the typed folder, never the late listing\'s', JSON.stringify(chips) === JSON.stringify([SUB]), chips);
+    await evalJs(`(() => { const b = document.querySelector('#vault-ak-edit .dialog-close'); if (b) b.click(); return true; })()`);
+    await until(`(() => { const b = [...document.querySelectorAll('#vault-ak-edit .dialog-unsaved button')].find((x) => x.textContent.trim() === '放弃'); if (!b) return false; b.click(); return true; })()`, 5000);
+    check('…放弃 leaves the key on 所有路径 (nothing written)', !!(await until(`!document.querySelector('#vault-ak-edit')`, 5000)) && JSON.stringify(((await keysNow()).find((x) => x.name === 'Anywhere') || { limits: {} }).limits.cwdRoots) === '["/"]');
+  }
   check('no greyed control anywhere in the automation section or its dialogs', (await evalJs(`document.querySelectorAll('.vw-row[data-store="automation"] [disabled], .vw-ak [disabled], .vw-ak-dialog [disabled]').length`)) === 0);
 
   console.log('⑪ MANY GRANTS — the row stays short (lane vault-key-row-compact — the owner 2026-10-21 05:4xZ: 「授权很多的时候，这个界面需要优化一下」)');
