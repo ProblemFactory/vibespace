@@ -1208,10 +1208,19 @@ function registerWsHandler(wss, ctx) {
 
         case 'rewind-files': {   // B-437e files tier: the confirm's facts (dryRun) or a press with its choice — src/server/rewind-files-door.js; the PERSON only
           const session = activeSessions.get(data.sessionId), D = require('./server/rewind-files-door.js'), by = ws._personPage === true ? byOfWs(ws) : null;
-          const job = data.dryRun === true ? D.filesConfirmOf({ session, msgId: data.msgId, by, hosts })
-            : D.pressFiles({ session, msgId: data.msgId, by, hosts, choice: data.choice, drawn: data.drawn || null, lastSeenUuid: data.lastSeenUuid, expectTaken: Number.isFinite(data.expectTaken) ? data.expectTaken : null, reqId: typeof data.reqId === 'string' ? data.reqId : null });
+          const conv = typeof data.sessionId === 'string' ? data.sessionId : null;   // the conversation's own folder (the kept copies)
+          const job = data.dryRun === true ? D.filesConfirmOf({ session, msgId: data.msgId, by, hosts, conv })
+            : D.pressFiles({ session, msgId: data.msgId, by, hosts, conv, choice: data.choice, drawn: data.drawn || null, lastSeenUuid: data.lastSeenUuid, expectTaken: Number.isFinite(data.expectTaken) ? data.expectTaken : null, reqId: typeof data.reqId === 'string' ? data.reqId : null });
           const reply = (r) => { try { ws.send(JSON.stringify({ type: 'rewind-files-result', sessionId: data.sessionId, reqId: data.reqId ?? null, msgId: data.msgId ?? null, ...r })); } catch { } };
           job.then(reply, (e) => { console.error('[rewind-files] the door failed:', e && e.message); reply({ ok: false, reason: 'door-failed', cls: 'failed' }); });   // a throw is said, never a silent page
+          break;
+        }
+
+        case 'rewind-files-put-back': {   // B-437e the kept copy: «put my files back as they were» — the plan (dryRun) or the act; the PERSON only; files only
+          const session = activeSessions.get(data.sessionId), by = ws._personPage === true ? byOfWs(ws) : null;
+          const reply = (r) => { try { ws.send(JSON.stringify({ type: 'rewind-files-put-back-result', sessionId: data.sessionId, reqId: data.reqId ?? null, press: data.press ?? null, ...r })); } catch { } };
+          require('./server/rewind-kept-door.js').putBack({ session, conv: typeof data.sessionId === 'string' ? data.sessionId : null, press: data.press, by, hosts, dryRun: data.dryRun === true, expect: Array.isArray(data.expect) ? data.expect : null })
+            .then(reply, (e) => { console.error('[rewind-files] the put-back failed:', e && e.message); reply({ ok: false, reason: 'door-failed', cls: 'failed' }); });
           break;
         }
 

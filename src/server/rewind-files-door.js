@@ -31,6 +31,9 @@
 //   or an agent that refuses it, = «could not be checked: unreadable») — its bound is the machine's connect (STAT_MS) and
 //   then JUDGE_MS for the stats. The agent's edit times are the CLI's own result times (`resultAt`), the clock of the machine its files are on.
 //   WHO: the person only — the page verdict at the socket's handshake (ws-handler `_personPage`) and {kind: 'human'}.
+//   THE KEPT COPY (r1247 (2), r1304, r1327 — src/server/rewind-kept-door.js): the confirm says each file that cannot be kept
+//   (and then draws «the conversation only»); the press KEEPS every listed file before the CLI's rewind_files and goes only when
+//   every copy is kept and read back — a keep that fails refuses `not-kept` with nothing sent. The result names the copies.
 //   DARK: the files choices are absent unless `session._fileCheckpoints === true` — the fact U1 sets when the CLI starts with the
 //   switch (row B-437e U1, behind the owner's setting, off as shipped). Until then this door answers the conversation only.
 
@@ -42,6 +45,7 @@ const { capsOf } = require('../backend-caps.js');
 const { rewindFilesRoad } = require('../harnesses/index.js');
 const { cliVersionOf } = require('../cli-caps.js');
 const { rewindStateOf, rewindOut, conversationOut, setFilesOut, filesOutOf, requestRewind } = require('./rewind-requests.js');
+const KD = require('./rewind-kept-door.js');
 
 const DRY_MS = 15000;          // one dry run of the CLI
 const PRESS_MS = 60000;        // the press's answer (the CLI copies every file back before it answers)
@@ -156,7 +160,7 @@ async function judgeOf(session, f, { hosts = null, stat = null, dryMs = DRY_MS }
 
 /** THE CONFIRM'S FACTS for one of the person's own messages → {ok, choices, default, files, plus, minus, said?} | a refusal.
  *  The files choices are drawn only where they can work (choicesOf); the conversation's own refusals are tier one's */
-async function filesConfirmOf({ session, msgId, by, hosts = null, stat = null, dryMs = DRY_MS, now = Date.now() } = {}) {
+async function filesConfirmOf({ session, msgId, by, hosts = null, stat = null, dryMs = DRY_MS, now = Date.now(), conv = null, keepOpts = {} } = {}) {
   const f = factsOf(session, msgId, by);
   if (f.ok === false) return f;
   const plain = { ok: true, choices: ['conversation'], default: 'conversation', files: [], plus: 0, minus: 0 };
@@ -168,13 +172,14 @@ async function filesConfirmOf({ session, msgId, by, hosts = null, stat = null, d
   if (j.ok === false) return { ...plain, said: j.reason };   // the dry run did not answer: the conversation only, and why
   const choices = F.choicesOf({ checkpoints: true, dry: j.dry });
   if (choices.length === 1) return { ...plain, said: j.dry.ok ? (j.dry.filesKnown ? null : 'files-unknown') : j.dry.reason };
-  return { ok: true, choices, default: F.defaultChoiceOf(choices, j.judged), files: j.judged, plus: j.dry.plus, minus: j.dry.minus };
+  const keep = await KD.keepableOf({ session, conv, files: j.dry.files, hosts, by, ...keepOpts });   // can every file be kept?
+  return { ok: true, choices, default: keep.ok ? F.defaultChoiceOf(choices, j.judged) : 'conversation', files: j.judged, plus: j.dry.plus, minus: j.dry.minus, keep };
 }
 
 /** THE PRESS with a choice → {ok, steps, outcome, results} | a refusal. «both» = tier one's dry run first (nothing written when
  *  the conversation step would be refused), the files, then the conversation; the files step asks the dry run again and refuses
  *  `changed-since` when it is not what the confirm drew (`drawn`) */
-async function pressFiles({ session, msgId, by, choice, drawn = null, lastSeenUuid = null, expectTaken = null, reqId = null, hosts = null, stat = null, dryMs = DRY_MS, pressMs = PRESS_MS, holdMs = PRESS_HOLD_MS } = {}) {
+async function pressFiles({ session, msgId, by, choice, drawn = null, lastSeenUuid = null, expectTaken = null, reqId = null, conv = null, keepOpts = {}, hosts = null, stat = null, dryMs = DRY_MS, pressMs = PRESS_MS, holdMs = PRESS_HOLD_MS } = {}) {
   const f = factsOf(session, msgId, by);
   if (f.ok === false) return f;
   if (typeof choice !== 'string' || !Object.prototype.hasOwnProperty.call(F.STEPS, choice)) return { ok: false, reason: 'not-a-choice', cls: F.FILES_REFUSALS['not-a-choice'] };
@@ -210,6 +215,10 @@ async function pressFiles({ session, msgId, by, choice, drawn = null, lastSeenUu
     }
     mark.at = Date.now();   // the person's fence counts from the press itself (the dry run and the stats came before it)
     const results = {};
+    // THE LAW (r1247 (2)): every listed file KEPT and read back before anything is put back — else nothing is sent
+    const kept = await KD.keepFor({ session, conv, files: j.dry.files, hosts, by, ...keepOpts });
+    if (!kept.ok) return { ok: false, reason: 'not-kept', cls: 'cannot', keep: kept.refusals };
+    results.kept = { press: kept.press, where: kept.where, machine: kept.machine, check: kept.check };
     const onLate = (answer) => {   // the press's answer after its bound: journalled, and the mark is released
       clearTimeout(hold);
       try { console.warn(`[rewind-files] the press's late answer (${String(mark.id).slice(0, 40)}): ${JSON.stringify(answer).slice(0, 200)}`); } catch { }

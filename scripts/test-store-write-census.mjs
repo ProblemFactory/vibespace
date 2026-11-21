@@ -230,6 +230,7 @@ const ROWS = [
   ["src/server/hook-root-watch.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/host-tokens.js","*",7,"durable","—","NOT idempotent: money / authority / a credential","a machine's token (authority) — must be on disk before the answer; + lane lg-remote-hardening D3b: THIS hub's own key before the vault (data/agentd/hub-identity.pem: an exclusive first mint, the person's renew)"],
   ["src/server/incident-freeze-worker.js","*",1,"not-main","—","—","the incident freeze worker thread"],
+  ["src/server/rewind-keep-worker.js","*",12,"not-main","—","—","the kept copy's keep worker thread (row B-437e): src/server/rewind-kept-door.js's one-worker «rewind-keep» SafeFs pool — the press folder and its mark, each kept copy, the manifest, the sweep's removal, a put-back by a temp name"],
   ["src/server/incident-wiring.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/instance-url.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/integration-store.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],

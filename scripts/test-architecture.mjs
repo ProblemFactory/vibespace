@@ -200,6 +200,7 @@ const PURE = new Set(['src/provider-ids.js' /* B-d578 P1-b (lane lg-providers): 
   'src/helper-fact.js', // B-bc9f: a Claude settings file's key-helper fact — ONE rule for this machine's start and a paired machine's probe (bundled)
   'src/rewind-files.js', // row B-437e, the files tier (lane lg-rewind): the files door's PURE decisions — imports only the PURE rewind-door.js
   'src/ckpt-switch.js', // row B-437e U0 (lane lg-rewind): the checkpoint switch's PURE verdict — its own module so the device bundle (cli-caps rides it via machine-probes) carries none of it
+  'src/rewind-kept.js', // row B-437e, the files tier (lane lg-rewind): the kept copy's PURE decisions (bounds, kinds, read-back, sweep, put-back plan) — imports nothing
   'src/cli-caps.js', // lane pool-oat-measure (q-035): oatInFile(version, fixture) — a measured CLI version gates a long-lived token in a pool member's creds file
   // lane dc-browser-backends: every browser backend file (and the folder's registration list) is PURE — the folder is
   // read, so a new backend adds no line here

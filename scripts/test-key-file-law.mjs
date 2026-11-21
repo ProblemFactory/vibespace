@@ -831,6 +831,7 @@ try {
     'src/claude-oat-probe.js', 'src/ctx-sync.js', 'src/desktop-mic.js', 'src/exit-proxy.js', 'src/incident.js', 'src/jobs.js',
     'src/gmail-sync.js', // B-e40d: sha256 of a sign-in's refresh token keys keepSignIn's IN-MEMORY map (a day, at most 16) — never written; the file's writers are the mail folder's own
     'src/kept-copies.js', 'src/mounts.js', 'src/node-runtime.js', 'src/plugins/frp.js',
+    'src/server/rewind-keep-worker.js', // row B-437e the kept copy: sha256 of a listed file's OWN bytes (its copy's read-back, recorded in the press's manifest) — no secret of the hub's; the person's file itself is what the kept copy keeps (0600 in a 0700 folder, as the CLI's own file-history keeps it)
     'src/search-index-worker.js', // B-b291: sha256 of a cleared group message's folded words (compared in memory, never written) + the cleared set's signature over card keys (no words, no secret) in the index's meta
     'src/server/automation-engine.js', 'src/server/browser-cloak-install.js', 'src/server/browser-logins.js', 'src/server/channel-api-cards.js',
     'src/server/channel-api.js', 'src/server/channels-attention.js', 'src/server/cli-self-measure.js', 'src/server/decision-engine.js',
