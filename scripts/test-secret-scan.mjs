@@ -284,7 +284,7 @@ const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const hook = read('scripts/git-hooks/pre-push'), ci = read('scripts/ci.mjs'), wf = read('.github/workflows/secret-scan.yml'), ciYml = read('.github/workflows/ci.yml');
 const scanAt = hook.indexOf('node scripts/secret-scan.mjs --range="$(range_for_sha "$sha")"');
 ok(scanAt > 0, 'caller 1, the pre-push hook: `node scripts/secret-scan.mjs --range=<what the ref publishes>`');
-ok(scanAt < hook.indexOf('[ "${VIBESPACE_SKIP_CI:-}" = "1" ]') && scanAt < hook.indexOf('--check-heavy') && scanAt < hook.indexOf('node scripts/ci.mjs $kg ||'), '…before the bypass, the heavy verdict and the fast tier');
+ok(scanAt < hook.indexOf('[ "${VIBESPACE_SKIP_CI:-}" = "1" ]') && scanAt < hook.indexOf('node scripts/ci.mjs --check-heavy --head=') && scanAt < hook.indexOf('node scripts/ci.mjs $kg ||'), '…before the bypass, the heavy verdict and the fast tier');
 const fastGate = ci.slice(ci.indexOf('async function fastGate('), ci.indexOf('async function heavyGate('));
 ok(ci.includes("const script = path.join(cwd, 'scripts', 'secret-scan.mjs');") && ci.includes("[script, '--tree', '--quiet']"), 'caller 2, scripts/ci.mjs: runSecretScan spawns scripts/secret-scan.mjs --tree');
 ok(fastGate.includes('runSecretScan({ cwd: runRoot, sha })') && fastGate.indexOf('await runFastLanes(plan, {') > 0 && fastGate.indexOf('runSecretScan(') < fastGate.indexOf('await runFastLanes(plan, {'), '…in the FAST tier, after the build and before the first suite (the Actions fast job runs `node scripts/ci.mjs` too)');
