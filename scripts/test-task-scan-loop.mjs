@@ -523,6 +523,16 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       `chatStatus after the warm: ${n} and ${n2} probes of a helper folder (a conversation with helpers, one without), the field empty as on every other harness (no client, CLI or doc reads it)`);
     ok(nRel >= 31 && rst && rst.subagentMetas.length === 1 && rst.subagentMetas[0].agentId === 'a1', `RED CONTROL — the release's walk for a conversation with no helper folder: ${nRel} probes on the main thread (one per project folder), for a field nothing reads (with one, it carried ${rst && rst.subagentMetas.length} meta)`);
   }
+  console.log('⑥b the transcript\'s find (B-299b, its folder probe — MEASURED: 1 000 project folders, one call 17 ms, 30 in a loop turn 508 ms): the cwd\'s own path first');
+  {
+    const lists = (fn) => { let n = 0; const real = fs.readdirSync; fs.readdirSync = function (p0, ...a) { if (p0 === projects) n++; return real.call(this, p0, ...a); }; let r = null; try { r = fn(); } finally { fs.readdirSync = real; } return { n, r }; };
+    const hit = lists(() => SS.findSessionJsonlPath(sid, cwd)), bare = lists(() => SS.findSessionJsonlPath(sid, '')), away = lists(() => SS.findSessionJsonlPath(sid, '/tmp/somewhere-else'));
+    const { anchored } = await import('./scratch.mjs');
+    const SR = mutantCopies('find-lists-first', REPO).load('src/session-store.js', anchored(fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8'), '  if (own) { const hit = firstThere([own]); if (hit) return hit; }\n', '', 'the release order: the folder listed first'), 'listsfirst');
+    const red = lists(() => SR.findSessionJsonlPath(sid, cwd));
+    ok(hit.r === fp && hit.n === 0 && bare.r === fp && bare.n === 1 && away.r === fp && away.n === 1 && red.r === fp && red.n === 1,
+      'a find with its cwd lists NO project folder (its own path answers); with no cwd, or a conversation that moved, the folders are walked once and it is found; CONTROL the release\'s order lists on every find', { withCwd: hit.n, noCwd: bare.n, moved: away.n, release: red.n });
+  }
   console.log('⑦ the merge (B-299b A5): a reader after one new buffer record parses that record, never the whole buffer, and builds no position map — the RELEASE\'s merge planted back beside it');
   {
     // r2 (its read, M1 + S1): the control is the release's OWN _ensureParsed (7b89ef14c, the checkpoint 2.369.410's text,

@@ -403,15 +403,18 @@ function transcriptPathOf(claudeSessionId, cwd) {
   return path.join(os.homedir(), '.claude', 'projects', cwdToProjectDir(cwd), claudeSessionId + '.jsonl');
 }
 
+// B-299b (its folder probe, MEASURED on the test machine: with 1 000 project folders ONE call took 17 ms even when the cwd's own path held
+// the transcript — the folder was listed, and every candidate de-duplicated against the list, before that path was asked; 30 calls in one
+// loop turn 508 ms; 300 folders: 1.5 ms, 48 ms): the cwd's own path is asked FIRST — a hit lists no folder; only a miss (no cwd, a
+// conversation that moved) walks the project folders and the remote cache, in the same order as before.
 function findSessionJsonlPath(claudeSessionId, cwd) {
+  const firstThere = (list) => { for (const fp of list) { try { if (fs.existsSync(fp)) return fp; } catch {} } return null; };
+  const own = cwd ? transcriptPathOf(claudeSessionId, cwd) : null;
+  if (own) { const hit = firstThere([own]); if (hit) return hit; }
   const projectsDir = path.join(os.homedir(), '.claude', 'projects');
   const candidates = [];
-  if (cwd) candidates.push(transcriptPathOf(claudeSessionId, cwd));
   try {
-    for (const dir of fs.readdirSync(projectsDir)) {
-      const fp = path.join(projectsDir, dir, claudeSessionId + '.jsonl');
-      if (!candidates.includes(fp)) candidates.push(fp);
-    }
+    for (const dir of fs.readdirSync(projectsDir)) candidates.push(path.join(projectsDir, dir, claudeSessionId + '.jsonl'));
   } catch {}
   // Remote-host transcripts fetched over ssh (hosts.fetchSessionJsonl) land in
   // data/remote-jsonl/<hostId>/<id>.jsonl — session ids are UUIDs, so scanning
@@ -422,10 +425,7 @@ function findSessionJsonlPath(claudeSessionId, cwd) {
       candidates.push(path.join(cacheRoot, hostDir, claudeSessionId + '.jsonl'));
     }
   } catch {}
-  for (const fp of candidates) {
-    try { if (fs.existsSync(fp)) return fp; } catch {}
-  }
-  return null;
+  return firstThere(candidates);
 }
 
 /** lane roster-per-pass: what `findSessionJsonlPath(id)` (no cwd) would find, read ONCE for a liveness sweep — the TOP

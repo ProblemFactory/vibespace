@@ -739,6 +739,29 @@ console.log('— ⑬ the whole history: the steps before the journal\'s 800 KB r
     const oneAt = await parsedOrder(BF, 'e1'), both = await parsedOrder(BQ, 'e2');
     ok(oneAt.lines === 1280 && oneAt.switches === 1 && both.lines === 1280 && both.switches > 1,
       'two conversations warmed at once: ONE warm parses at a time (1 280 lines, one hand-over from the first to the second, each slice its own loop turn); CONTROL a copy without the queue interleaves their slices', { queued: oneAt, unqueued: both });
+    // 主开发 r839: the store's read has no deadline of its own — a warm whose read NEVER returns holds the queue's head at most WARM_HEAD_MS:
+    // the next warm goes on, said ONCE; CONTROL a copy whose head is unbounded keeps the next one waiting
+    const hangId = 'c0de0000-0000-4000-8000-00000000e3a0', nextId = 'c0de0000-0000-4000-8000-00000000e3b0';
+    for (const id of [hangId, nextId]) { const f = path.join(H13, '.gemini', 'antigravity-cli', 'brain', id, SG, 'logs', 'transcript.jsonl'); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(stepLine(0)) + '\n'); }
+    const HANG = '    const reader = storeReader(home, { log });\n';
+    const hung = (to) => anchored(BSRC, HANG, `    const reader = id === '${hangId}' ? { linesFrom: () => new Promise(() => { }) } : storeReader(home, { log });\n`, 'a read that never returns' + to);
+    const BH = mutantCopies('agy-warm-hang', REPO).load('src/agy-backfill.js', hung(''), 'hang');
+    const BU = mutantCopies('agy-warm-hang-unbounded', REPO).load('src/agy-backfill.js', anchored(hung(' (unbounded)'), '      release();\n    }, WARM_HEAD_MS);', /* stale-pins: kept — the control's PLANT (the head unbounded), not a pin */ '    }, WARM_HEAD_MS);', 'the head unbounded'), 'hangunbounded');
+    const behindHang = async (B) => {
+      B._setWarmHeadMsForTest(50);
+      const said = [], realWarn = console.warn; console.warn = (...x) => said.push(x.join(' '));
+      try {
+        B.warmHistory(hangId, { session: sess({ backendSessionId: hangId }) }); // never settles
+        const next = B.warmHistory(nextId, { session: sess({ backendSessionId: nextId }) });
+        const won = await Promise.race([next.then(() => 'next'), new Promise((r) => setTimeout(() => r('still waiting'), 400))]);
+        B.warmHistory('c0de0000-0000-4000-8000-00000000e3c0', { session: sess({ backendSessionId: 'c0de0000-0000-4000-8000-00000000e3c0' }) });
+        await new Promise((r) => setTimeout(r, 120));
+        return { won, said: said.filter((m) => /history warm has not settled/.test(m)).length };
+      } finally { console.warn = realWarn; }
+    };
+    const bounded = await behindHang(BH), unbounded = await behindHang(BU);
+    ok(bounded.won === 'next' && bounded.said === 1 && unbounded.won === 'still waiting',
+      'a warm whose store read never returns holds the queue\'s head 50 ms at most here (10 s on the hub): the next warm goes on, said ONCE; CONTROL a copy with the head unbounded keeps the next one waiting', { bounded, unbounded });
   } finally { process.env.HOME = preHome; }
   // the base ACP reader is UNCHANGED (only agy has a transcript)
   ok(!/historySplice|warmHistory|transcript/.test(fs.readFileSync(path.join(REPO, 'src/acp-message-manager.js'), 'utf8').split('class AcpSessionMessages')[1].split('\nAcpMessageManager._seen')[0]), 'the base AcpSessionMessages is unchanged (no transcript read — the backfill lives in the agy subclass)');

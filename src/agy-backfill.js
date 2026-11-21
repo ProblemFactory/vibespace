@@ -280,8 +280,28 @@ const yieldTurn = () => new Promise((r) => setImmediate(r));
 // B-299b (the history warm, MEASURED: 30 conversations warmed at once — a restart — held the loop 608 ms, 10 held 181 ms): each warm
 // yields after its PARSE_SLICE_MS slice, but N warms' yields land in the SAME loop turn, so their slices ran back to back. ONE warm
 // reads and parses at a time across conversations: the longest hold is one slice (+ one chunk's split) again, whatever N.
+// 主开发 r839: the store reader's read (agy-store-fs linesFrom — fs.promises realpath / open / read) has NO deadline of its own, so a warm
+// whose read never returns would hold every later warm behind it: the queue's HEAD is bounded — the next warm starts when the head has
+// not settled in WARM_HEAD_MS (said once a process); the late one still ends (or not) on its own.
+let WARM_HEAD_MS = 10000, _warmLateSaid = false;
 let _warmTail = Promise.resolve();
-const oneWarm = (fn) => { const p = _warmTail.then(fn, fn); _warmTail = p.catch(() => { }); return p; };
+function oneWarm(fn) {
+  let release = null;
+  const released = new Promise((r) => { release = r; }), prev = _warmTail;
+  _warmTail = released;
+  return prev.then(() => {
+    const timer = setTimeout(() => {
+      if (!_warmLateSaid) { _warmLateSaid = true; console.warn(`[agy] a conversation's history warm has not settled in ${WARM_HEAD_MS / 1000} s (its store read is not answering) — the next warms go on without waiting for it (said once)`); }
+      release();
+    }, WARM_HEAD_MS);
+    if (timer.unref) timer.unref();
+    const p = Promise.resolve().then(fn);
+    p.then(() => { clearTimeout(timer); release(); }, () => { clearTimeout(timer); release(); });
+    return p;
+  });
+}
+/** tests only: the queue head's bound */
+function _setWarmHeadMsForTest(ms) { WARM_HEAD_MS = ms; _warmLateSaid = false; }
 /** The sub a step of a conversation's kept transcript created («Created the following subagent: …»), or null. */
 function createdSub(convId, step) { const e = historyCache.get(convId); return (e && e.created.get(Number(step))) || null; }
 function pruneHistory() {
@@ -351,4 +371,4 @@ class AgySessionMessages extends AcpSessionMessages {
 
 module.exports = { homeOf, refresh, refreshAsync, warmCards, withCards, afterTurn, spawnsOf, AgySessionMessages, REREAD_MS, LIVE_AFTER_MS, MAX_SPAWNS,
   CARD_CHUNK, CARDS_WAIT_MS, CARDS_VIEW_WAIT_MS, CARDS_RETRY_MS, NOT_FOUND_MS, CARDS_RUN_MS, CARDS_QUEUE_MS, CARD_CACHE_MAX,
-  warmHistory, historyOf, withHistory, HISTORY_MAX_BYTES, HISTORY_CACHE_MAX, _historyCache: historyCache, _cardCache: cardCache, _cardsInflight: cardsInflight, _cardsPool: cardsPool };
+  warmHistory, historyOf, withHistory, HISTORY_MAX_BYTES, HISTORY_CACHE_MAX, _setWarmHeadMsForTest, _historyCache: historyCache, _cardCache: cardCache, _cardsInflight: cardsInflight, _cardsPool: cardsPool };
