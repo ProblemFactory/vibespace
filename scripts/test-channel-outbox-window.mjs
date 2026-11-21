@@ -737,43 +737,84 @@ console.log(`PNGs: ${SHOTS}`);
   // the route's status (answer3): 409 for a refusal the card draws (mentions-changed, changed-since-shown, …), 400 bad-proposal
   const statusOf = (r) => (r && r.ok ? 200 : (r && r.code) === 'not-found' ? 404 : ['mentions-changed', 'changed-since-shown', 'bad-state', 'send-not-available', 'wake-count-mismatch'].includes(r && r.code) ? 409 : (r && r.code) === 'bad-proposal' ? 400 : 500);
   const OBW = "[...app.wm.windows.values()].find((x) => x.type === 'channel-outbox')";
-  const editRoad = async ({ kind, first, edited, bundle = null }) => {
-    const D = dressed26(kind); const eng = await engineFor(D);
-    const r = await eng.propose(AGENT26, 'fake-poll', 'fake-poll-ops', { text: first });
-    if (!r.ok) { eng.stop(); return { err: r.code }; }
-    const id = r.proposal.id, presses = [];
+  const P26 = R26('src/channel-policy.js');
+  // ONE page over ONE engine: the card of proposal `id`, pressed the way a person can (r1065 (4): the arming waited for by what
+  // happened — the card's arming class gone —, the press only when the button is the TOPMOST element at its centre)
+  const roadFor = async (D, { first, bundle = null } = {}) => {
+    const eng = await engineFor(D), presses = [];
+    const made = await eng.propose(AGENT26, 'fake-poll', 'fake-poll-ops', { text: first });
+    let id = made.ok ? made.proposal.id : null;   // proposed BEFORE the page: the window reads the outbox when it opens
     const pg = await newPage({ outbox: () => eng.outboxView(), api: APIS, approve: async (pid, b) => { const a = await eng.approve(pid, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: b.deliver || null, shown: b.shown, withoutFiles: b.withoutFiles === true }); presses.push(a.code || 'ok'); return [statusOf(a), a]; }, ...(bundle ? { bundle } : {}) });
-    const opened = await openOutbox(pg);
-    const CARD = `(() => { const w = ${OBW}; return w && w.element.querySelector('.chan-prop[data-proposal=${JSON.stringify(id)}]'); })()`;
-    const step1 = await pg.evaljs(`(async () => { const w = ${OBW}; const rv = w && w.element.querySelector('.chan-orow[data-orow=${JSON.stringify(id)}] [data-review]'); if (rv) rv.click(); await new Promise((r) => setTimeout(r, 300));
-      const c = ${CARD}; if (!c) return { err: 'no card' }; const eb = [...c.querySelectorAll('.chan-prop-actions button')].find((b) => /^(编辑|Edit)/.test(b.textContent.trim())); if (!eb) return { err: 'no edit button' }; eb.click(); await new Promise((r) => setTimeout(r, 100));
-      const ta = c.querySelector('textarea.chan-prop-edit'); if (!ta) return { err: 'no editor' }; ta.value = ${JSON.stringify(edited)}; ta.dispatchEvent(new Event('input', { bubbles: true }));
-      c.querySelector('.chan-prop-actions button[data-approve]').click(); return { ok: true }; })()`);
-    await until(() => presses.length >= 1, 8000); await sleep(400);
-    const after1 = await pg.evaljs(`(() => { const c = ${CARD}; if (!c) return null; const ch = c.querySelector('.chan-prop-changed'); return { changed: ch ? ch.textContent : null, editor: !!c.querySelector('textarea.chan-prop-edit'), shows: c.textContent.includes(${JSON.stringify(edited)}), arming: c.classList.contains('chan-prop-arming') }; })()`);
-    const sends1 = D.sends.length;
-    await sleep(800);   // past the arming time: the redrawn card is a new card, armed again
-    await pg.evaljs(`(() => { const c = ${CARD}; const b = c && c.querySelector('.chan-prop-actions button[data-approve]'); if (b) b.click(); return 1; })()`);
-    await until(() => presses.length >= 2, 8000); await sleep(300);
-    const out = { opened, step1, after1, presses: presses.slice(), sends1, sends: D.sends.slice() };
-    pg.close(); eng.stop(); return out;
+    const opened = !!id && await openOutbox(pg);
+    const CARD = () => `(() => { const w = ${OBW}; return w && w.element.querySelector('.chan-prop[data-proposal=${JSON.stringify(id)}]'); })()`;
+    const R = {
+      eng, pg, presses, opened,
+      async openCard() { return pg.evaljs(`(async () => { for (let i = 0; i < 40; i++) { const w = ${OBW}; const rv = w && w.element.querySelector('.chan-orow[data-orow=${JSON.stringify(id)}] [data-review]'); if (rv) { rv.click(); break; } await new Promise((r) => setTimeout(r, 150)); } for (let i = 0; i < 40; i++) { if (${CARD()}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`); },
+      async edit(text) { return pg.evaljs(`(async () => { const c = ${CARD()}; if (!c) return 'no card'; let ta = c.querySelector('textarea.chan-prop-edit'); if (!ta) { const eb = c.querySelector('.chan-prop-actions button[data-edit]'); if (!eb) return 'no edit button'; eb.click(); await new Promise((r) => setTimeout(r, 80)); ta = c.querySelector('textarea.chan-prop-edit'); } if (!ta) return 'no editor'; if (${JSON.stringify(text)} !== null) { ta.value = ${JSON.stringify(text)}; ta.dispatchEvent(new Event('input', { bubbles: true })); } return 'ok'; })()`); },
+      async press() {
+        const n = presses.length;
+        const armed = await until(() => pg.evaljs(`(() => { const c = ${CARD()}; return !!c && !c.classList.contains('chan-prop-arming'); })()`), 6000);
+        const hit = await pg.evaljs(`(() => { const c = ${CARD()}; const b = c && c.querySelector('.chan-prop-actions button[data-approve]'); if (!b || b.disabled) return { top: false }; b.scrollIntoView({ block: 'center' }); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); const top = !!e && (e === b || b.contains(e)); if (top) b.click(); return { top }; })()`);
+        await until(() => presses.length > n, 8000); await sleep(300);
+        return { armed: !!armed, top: !!(hit && hit.top), code: presses[n] || null };
+      },
+      card() { return pg.evaljs(`(() => { const c = ${CARD()}; if (!c) return null; const ch = c.querySelector('.chan-prop-changed'); const ta = c.querySelector('textarea.chan-prop-edit'); return { changed: ch ? ch.textContent : null, editor: !!ta, typed: ta ? ta.value : null, kept: c.__mark === 1 }; })()`); },
+      mark() { return pg.evaljs(`(() => { const c = ${CARD()}; if (c) c.__mark = 1; return !!c; })()`); },
+      broadcast() { return pg.evaljs(`(() => { app.ws.ws.onmessage({ data: ${J(J({ type: 'channel-outbox-updated', changed: [id], outbox: eng.outboxView() }))} }); return 1; })()`); },
+      shown() { return P26.shownDigest(eng.outboxView({ ids: [id] }).proposals[0]); },
+      get id() { return id; },
+      done() { pg.close(); eng.stop(); },
+    };
+    return R;
   };
-  // the RED bundle: this tree's card with the redraw cut (the card kept, as the round had it)
+  // THE RED BUNDLES: this tree's card with (a) the redraw cut (the card kept, as round wfgpbe038 had it), (b) the stale answer cut
+  // (a changed-since-shown press keeps the stale card, as round wke4s5jp9 had it)
   const obx26 = fs.readFileSync(OBX, 'utf-8');
-  const REDRAW = obx26.split('\n').find((l) => l.startsWith('      if (r.changed) { const fresh = renderProposalCard('));
-  ok(!!REDRAW && obx26.split(REDRAW).length === 2, '㉖ the control has its line to cut: the card drawn again from the reply of a changed decision (once)');
-  fs.writeFileSync(OBX, obx26.replace(REDRAW, '      if (r.changed) { lock(false); return; }'));
+  const RB = obx26.indexOf('      if (r.changed || r.stale) {\n'), RE = RB < 0 ? -1 : obx26.indexOf('\n        return;\n      }\n', RB);
+  const STALE = obx26.split('\n').find((l) => l.startsWith("  if (r && r.code === 'changed-since-shown' && r.proposal"));
+  ok(RB > 0 && RE > RB && obx26.split('      if (r.changed || r.stale) {\n').length === 2 && !!STALE && obx26.split(STALE).length === 2, '㉖ the controls have their lines to cut: the card drawn again from the reply (once), the stale answer handed back (once)');
+  fs.writeFileSync(OBX, obx26.slice(0, RB) + '      if (r.changed || r.stale) { lock(false); return; }' + obx26.slice(RE + '\n        return;\n      }'.length));
   build('public/bundle-keep.js');
+  fs.writeFileSync(OBX, obx26.replace(STALE + '\n', ''));
+  build('public/bundle-stale.js');
   fs.writeFileSync(OBX, obx26);
   const ZW = `<at user_id="${ZS.id}">张三</at> 和 <at user_id="${LS.id}">李四</at> 请看`;
-  const l26 = await editRoad({ kind: 'lark', first: '@张三 请看', edited: '@张三 和 @李四 请看' });
-  ok(l26.opened && l26.step1 && l26.step1.ok && J(l26.presses) === J(['mentions-changed', 'ok']) && l26.sends1 === 0 && l26.after1 && /这条消息会通知的人变了/.test(l26.after1.changed || '') && l26.after1.editor === false && l26.after1.shows && l26.after1.arming && l26.sends.length === 1 && l26.sends[0] === ZW,
-    `㉖ MUST 1 (Lark, the REAL page): the edit adding @李四 — the press stores it and sends NOTHING; the card is drawn AT ONCE from the reply: the edited text, «${l26.after1 && l26.after1.changed}», the editor closed, armed again; the next press sends ONE message tagged at the stored places («${l26.sends[0]}»)`, l26);
-  const l26R = await editRoad({ kind: 'lark', first: '@张三 请看', edited: '@张三 和 @李四 请看', bundle: 'bundle-keep.js' });
+  // MUST 1 + (4): the edit that changes the decision — shown, not sent; an editor opened on the redrawn card; the broadcast after it
+  // keeps the card and the open editor; the next press sends ONE message at the stored places
+  const l26 = await (async () => { const D = dressed26('lark'); const R = await roadFor(D, { first: '@张三 请看' }); const o = { opened: R.opened && await R.openCard() };
+    o.e1 = await R.edit('@张三 和 @李四 请看'); o.p1 = await R.press(); o.after1 = await R.card(); o.sends1 = D.sends.length;
+    await R.mark(); o.reopen = await R.edit(null); await R.broadcast(); await sleep(500); o.afterB = await R.card();
+    o.p2 = await R.press(); o.presses = R.presses.slice(); o.sends = D.sends.slice(); R.done(); return o; })();
+  ok(l26.opened && l26.e1 === 'ok' && l26.p1.armed && l26.p1.top && l26.p1.code === 'mentions-changed' && l26.sends1 === 0 && l26.after1 && /这条消息会通知的人变了/.test(l26.after1.changed || '') && l26.after1.editor === false,
+    `㉖ MUST 1 (Lark, the REAL page): the edit adding @李四 — pressed armed and topmost, stored and NOTHING sent; the card drawn AT ONCE from the reply: «${l26.after1 && l26.after1.changed}», the editor closed`, l26);
+  ok(l26.reopen === 'ok' && l26.afterB && l26.afterB.kept && l26.afterB.editor && l26.afterB.changed !== null, '㉖ r1065 (4): the reply followed by the BROADCAST, driven in the page — the card is kept (the same node), and an editor opened on it meanwhile stays open', l26.afterB);
+  ok(l26.p2.armed && l26.p2.top && l26.p2.code === 'ok' && l26.sends.length === 1 && l26.sends[0] === ZW, `㉖ …the next press (armed, topmost) sends ONE message tagged at the stored places («${l26.sends[0]}»)`, l26);
+  const l26R = await (async () => { const D = dressed26('lark'); const R = await roadFor(D, { first: '@张三 请看', bundle: 'bundle-keep.js' }); const o = { opened: R.opened && await R.openCard() };
+    o.e1 = await R.edit('@张三 和 @李四 请看'); o.p1 = await R.press(); o.after1 = await R.card(); o.p2 = await R.press(); o.presses = R.presses.slice(); o.sends = D.sends.slice(); R.done(); return o; })();
   ok(l26R.after1 && l26R.after1.changed === null && l26R.after1.editor === true && J(l26R.presses) === J(['mentions-changed', 'changed-since-shown']) && l26R.sends.length === 0,
-    '㉖ RED CONTROL: the card kept (the round as it was) — no «changed» line, the old editor still open, the next press refused (changed-since-shown): the owner\'s own road cannot send', l26R);
-  const s26 = await editRoad({ kind: 'slack', first: '@bob please look', edited: '@bob and @alice please look' });
-  ok(J(s26.presses) === J(['mentions-changed', 'ok']) && s26.sends1 === 0 && s26.after1 && s26.after1.editor === false && !!s26.after1.changed && s26.sends.length === 1 && s26.sends[0] === '<@U0BOB0001> and <@U0ALICE02> please look',
+    '㉖ RED CONTROL: the card kept (round wfgpbe038 as it was) — no «changed» line, the old editor open, the next press refused: the owner\'s own road cannot send', l26R);
+  // r1065 (2): A REFUSED PRESS LEAVES A WAY FORWARD AND LOSES NOTHING TYPED — this device's editor is open when another device's edit
+  // lands; its press is refused (changed-since-shown) WITH the record: the card is drawn from it and the typed text goes back into an
+  // open editor; the next presses are judged against what the card shows, and ONE message leaves
+  const staleRoad = async (bundle = null) => { const D = dressed26('lark'); const R = await roadFor(D, { first: '@张三 请看', ...(bundle ? { bundle } : {}) }); const o = { opened: R.opened && await R.openCard() };
+    o.e1 = await R.edit('@张三 请再看一下');
+    const other = await R.eng.approve(R.id, { text: '@张三 和 @李四 请看', by: 'user', shown: R.shown() });   // ANOTHER DEVICE's edit lands meanwhile
+    o.other = other.code || 'ok';
+    o.p1 = await R.press(); o.after1 = await R.card(); o.sends1 = D.sends.length;
+    o.p2 = await R.press(); o.after2 = await R.card();
+    if (o.p2.code === 'mentions-changed') o.p3 = await R.press();
+    o.presses = R.presses.slice(); o.sends = D.sends.slice(); R.done(); return o; };
+  const st26 = await staleRoad();
+  ok(st26.other === 'mentions-changed' && st26.p1.code === 'changed-since-shown' && st26.sends1 === 0 && st26.after1 && st26.after1.editor === true && st26.after1.typed === '@张三 请再看一下' && st26.after1.changed !== null,
+    `㉖ r1065 (2): another device's edit lands while this editor is open — the press is refused (changed-since-shown) WITH the record: the card drawn from it, its rows and line, and the person's typed text back in an open editor («${st26.after1 && st26.after1.typed}»)`, st26);
+  ok(st26.p2.code === 'mentions-changed' && st26.after2 && st26.after2.editor === false && st26.p3 && st26.p3.code === 'ok' && st26.sends.length === 1 && st26.sends[0] === `<at user_id="${ZS.id}">张三</at> 请再看一下`,
+    `㉖ …judged against what the card now shows: the typed edit is decided and shown (mentions-changed), and the next press sends ONE message («${st26.sends[0]}»)`, st26);
+  const st26R = await staleRoad('bundle-stale.js');
+  ok(J(st26R.presses) === J(['changed-since-shown', 'changed-since-shown']) && st26R.sends.length === 0 && st26R.after1 && st26R.after1.changed === null,
+    '㉖ RED CONTROL: today\'s stale card (round wke4s5jp9 as it was) — an error toast, the stale card kept, every later press refused until a reload', st26R);
+  const s26 = await (async () => { const D = dressed26('slack'); const R = await roadFor(D, { first: '@bob please look' }); const o = { opened: R.opened && await R.openCard() };
+    o.e1 = await R.edit('@bob and @alice please look'); o.p1 = await R.press(); o.after1 = await R.card(); o.sends1 = D.sends.length; o.p2 = await R.press(); o.presses = R.presses.slice(); o.sends = D.sends.slice(); R.done(); return o; })();
+  ok(J(s26.presses) === J(['mentions-changed', 'ok']) && s26.sends1 === 0 && s26.after1 && s26.after1.editor === false && !!s26.after1.changed && s26.p2.top && s26.sends.length === 1 && s26.sends[0] === '<@U0BOB0001> and <@U0ALICE02> please look',
     `㉖ MUST 1 (a Slack-shaped channel, the REAL page): an edit that adds a name — two presses, ONE message («${s26.sends[0]}»)`, s26);
 }
 

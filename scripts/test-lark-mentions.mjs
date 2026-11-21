@@ -42,6 +42,7 @@ const A1 = { id: 'ou_ann0000009', name: 'Ann' }, W1 = { id: 'ou_wangwei001', nam
 const LI = { id: 'ou_li00000001', name: '李四' }, JEAN = { id: 'ou_jean0000001', name: 'Jean' }, JP = { id: 'ou_jeanp000001', name: 'Jean-Pierre' };
 const ZW1 = { id: 'ou_zw00000001', name: '张伟' }, ZW2 = { id: 'ou_zw00000002', name: '张伟' };
 const dec = (text, known = [], members = null, LMM = LM) => LMM.decideMentions({ text, known, members });
+const LMS_WIRE = (LMM, t, d) => LMM.wireText(t, d.places);
 const WHOLE = (list) => ({ list, whole: true, why: null });
 const ids = (d) => d.mentions.map((m) => m.id);
 const mSrc = fs.readFileSync(path.join(REPO, 'src/channels/lark/mentions.js'), 'utf8');
@@ -55,7 +56,7 @@ const BEST = '    const best = longest && top.some(ends) ? longest : 0;\n';
 const WHO = '    const who = [...new Set(top.filter(ends).map((c) => c.id))];\n';
 const LM_FILTER = MUT.load('src/channels/lark/mentions.js', anchored(anchored(mSrc, BEST, '    const best = whole ? cands.filter(ends).reduce((n, c) => Math.max(n, c.len), 0) : (longest && top.some(ends) ? longest : 0);\n', 'filter-then-longest'), WHO, '    const who = [...new Set(cands.filter((c) => c.len === best && ends(c)).map((c) => c.id))];\n', 'filter-then-longest-who'), 'mentions-filter-longest');   // stale-pins: kept (the RED plants the line as it was)
 // RED of small 6: the closed list of characters that may stand before an at-word put back
-const ATRE = "const AT_RE = /(?<![A-Za-z0-9._%+\\-])@/g;";
+const ATRE = "const AT_RE = /(?<![A-Za-z0-9._%+\\-/])@/g;";
 const LM_STARTERS = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, ATRE, "const AT_RE = /(^|[\\s(\\[{,;:!?\"'“‘（「，。、：；！？])@/gu;", 'closed-starters'), 'mentions-closed-starters');   // stale-pins: kept (the RED plants the starters as they were)
 
 console.log('① the one decision and the wire (PURE, src/channels/lark/mentions.js)');
@@ -113,8 +114,15 @@ console.log('① the one decision and the wire (PURE, src/channels/lark/mentions
   const LM_KNOWNWHOLE = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, PPL, "  const ppl = peopleOf([...(Array.isArray(known) ? known : []), ...listed]);\n", 'records-join-the-whole-list'), 'mentions-records-whole');   // stale-pins: kept (the RED plants the line as it was)
   ok(J(ids(dec('@Gina, the notes', [GINA], WHOLE([A1]), LM_KNOWNWHOLE))) === J([GINA.id]), 'RED CONTROL: the records joined to the whole list — Gina, who is no member, notified');
   // round wke4s5jp9 (6): an at-sign starts an at-word UNLESS the character before it belongs to a mail address's first part
-  const starts = ['请@张三看一下', '（@张三）', '**@张三**', 'a/@张三，', '「@张三」', '#@张三，', '\u200b@张三，'].map((t) => [t, dec(t, [], WHOLE([ZHANG]))]);
-  ok(starts.every(([, r]) => r.mentions.length + r.plain.length >= 1) && J(ids(starts[0][1])) === J([ZHANG.id]) && J(ids(starts[1][1])) === J([ZHANG.id]) && dec('mail a@张三.com and x.y@b', [], WHOLE([ZHANG])).mentions.length === 0, `(6) an at-word starts after ANY character but a mail address's (a CJK sentence with no space, a full-width bracket, a bold mark, a slash, a symbol, a zero-width space): ${starts.map(([t, r]) => `${J(t)}→${J(ids(r).length ? 'mention' : r.plain)}`).join(' ')}`, J(starts));
+  const starts = ['请@张三看一下', '（@张三）', '**@张三**', '「@张三」', '#@张三，', '\u200b@张三，'].map((t) => [t, dec(t, [], WHOLE([ZHANG]))]);
+  ok(starts.every(([, r]) => r.mentions.length + r.plain.length >= 1) && J(ids(starts[0][1])) === J([ZHANG.id]) && J(ids(starts[1][1])) === J([ZHANG.id]) && dec('mail a@张三.com and x.y@b', [], WHOLE([ZHANG])).mentions.length === 0, `(6) an at-word starts after ANY character but a mail address's or a slash (a CJK sentence with no space, a full-width bracket, a bold mark, a symbol, a zero-width space): ${starts.map(([t, r]) => `${J(t)}→${J(ids(r).length ? 'mention' : r.plain)}`).join(' ')}`, J(starts));
+  // the follow (r1065): a SLASH never starts an at-word — site/@handle is an address: no mention inside it, no everyone, the address whole
+  const ADDR = 'see https://x.example/@张三 and https://x.example/@all today';
+  const ad = dec(ADDR, [], WHOLE([ZHANG]));
+  ok(ad.mentions.length === 0 && !ad.everyone && ad.places.length === 0 && LM.wireText(ADDR, ad.places) === ADDR, 'the follow (1): an address «site/@handle» with a member\'s handle, and one ending in the everyone word — nobody notified, no everyone, the address whole on the wire');
+  const LM_SLASH = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, ATRE, 'const AT_RE = /(?<![A-Za-z0-9._%+\\-])@/g;', 'slash-starts'), 'mentions-slash-starts');   // stale-pins: kept (the RED plants round wke4s5jp9's rule as it was)
+  const adR = dec(ADDR, [], WHOLE([ZHANG]), LM_SLASH);
+  ok(J(ids(adR)) === J([ZHANG.id, 'all']) && adR.everyone === true, `RED CONTROL: the slash as a starter (round wke4s5jp9's rule) — a mention INSIDE the address and EVERYONE notified (${J(ids(adR))}); the address breaks on the wire («${LMS_WIRE(LM_SLASH, ADDR, adR)}»)`);
   ok(dec('请@张三看一下', [], WHOLE([ZHANG]), LM_STARTERS).mentions.length === 0 && dec('**@张三**', [], WHOLE([ZHANG]), LM_STARTERS).plain.length === 0, 'RED CONTROL: the closed list of starters put back — a CJK sentence with no space before the at-sign is silent (no mention, nothing said)');
   // round wke4s5jp9 (5): a TYPED tag inside code never goes raw on the wire (Lark parses it anywhere): its label, in plain words
   const CODE_TAGS = 'see `<at user_id="ou_ann0000009">Ann</at>` and\n```\n<at user_id="all"></at>\n```';
@@ -122,7 +130,17 @@ console.log('① the one decision and the wire (PURE, src/channels/lark/mentions
   ok(!/<at /.test(wc) && /`@Ann`/.test(wc) && /\n@all\n/.test(wc), `(5) typed tags inside a backtick span and a fenced block are no decided places: their labels go as plain words, never a raw tag on the wire («${wc.replace(/\n/g, '⏎')}»)`);
   const TAGSCAN = '  for (const m of s.matchAll(TAG_RE)) events.push({ at: m.index, end: m.index + m[0].length, tag: true, id: m[1], label: m[2] });\n';
   const LM_CODETAG = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, TAGSCAN, '  for (const m of blankCode(s).matchAll(TAG_RE)) events.push({ at: m.index, end: m.index + m[0].length, tag: true, id: m[1], label: m[2] });\n', 'tags-scanned-without-code'), 'mentions-code-tags');   // stale-pins: kept (the RED plants the scan as it was)
-  ok(/<at user_id="ou_ann0000009">/.test(LM_CODETAG.wireText(CODE_TAGS, [])), 'RED CONTROL: the tags scanned outside code only (the round as it was) — the typed tag inside code goes RAW on the wire: Lark notifies while the card said nobody');
+  const wcR = LM_CODETAG.wireText(CODE_TAGS, []);
+  ok(!/`@Ann`/.test(wcR), `RED CONTROL: the tags scanned outside code only (the round as it was) — the tag inside code is no label in plain words («${wcR.replace(/\n/g, '⏎')}»; the follow's opener rule now keeps even that from being a tag)`);
+  // the follow (r1065) (3): a TYPED TAG AROUND A TYPED TAG — after the inner one is rewritten, no tag opener stands on the wire outside a
+  // decided place: the outer opener is written with a full-width bracket (plain words), never a valid tag for a member no card showed
+  const NEST = '<at user_id="ou_ann0000009"><at user_id="ou_zzzz0000001">Eve</at></at> hi';
+  const nd = dec(NEST, [A1], WHOLE([A1])), nwire = LM.wireText(NEST, nd.places);
+  ok(nd.mentions.length === 0 && !/<\s*at\b/i.test(nwire) && nwire.startsWith('\uff1cat user_id="ou_ann0000009">@Eve</at>'), `the follow (3): a typed tag around a typed tag — the inner goes as its label, and NO tag opener stands on the wire outside a decided place («${nwire}»)`);
+  const OPEN_RULE = "  const words = (x) => String(x).replace(/<(\\s*at\\b)/gi, '\\uff1c$1');\n";
+  const LM_NOWORDS = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, OPEN_RULE, '  const words = (x) => String(x);\n', 'tag-opener-in-words'), 'mentions-opener-words');
+  const nwR = LM_NOWORDS.wireText(NEST, nd.places);
+  ok(/<at user_id="ou_ann0000009">@Eve<\/at>/.test(nwR), `RED CONTROL: the opener rule cut — the outer tag stands VALID on the wire for a member no card showed («${nwR}»)`);
   // past fifty people in one message: their own row (`over`), no place on the wire
   { const fifty = Array.from({ length: 55 }, (_, i) => ({ id: `ou_p${String(i).padStart(8, '0')}`, name: `P${i}` }));
     const r = dec(fifty.map((p) => `@${p.name},`).join(' '), [], WHOLE(fifty));
@@ -608,7 +626,7 @@ console.log('⑥ THE GENERATED ORACLE of rule A (written from its sentences, nev
   //   the text, a line end, the sentence marks of both scripts, a closing bracket or quote, another at-sign» (an ASCII mark or
   //   quote only when no letter or digit follows it — the lane's stated detail); «over a whole list a name ends at an ender or a
   //   space, and a CJK name may abut CJK text»; «the everyone word by the same rule» (over a whole list a space too).
-  const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u, CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u, MAILCH = /[A-Za-z0-9._%+\-]/;
+  const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u, CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u, MAILCH = /[A-Za-z0-9._%+\-/]/;   // the follow (r1065): a slash never starts one either
   const ORACLE_ENDERS_ALWAYS = new Set(['\n', '\r', ' ', ' ', '@', ...'，。、；：！？）」』】》〉］｝〕']);
   const ORACLE_ENDERS_ASCII = new Set([...',.;:!?)]}"\'”’…']);
   const ORACLE_SPACES = new Set([' ', '\t', ' ', '　']);

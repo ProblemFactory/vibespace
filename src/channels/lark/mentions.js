@@ -21,7 +21,7 @@ const EVERYONE_WORDS = Object.freeze(['所有人', 'all', 'everyone']);
  *  goes as its label in plain words (never a mention the card did not show). */
 const TAG_RE = /<at\s+user_id\s*=\s*"([^"<>\s]{1,80})"\s*>([^<>\n]{0,80})<\/at>/g;
 /** An `@` at a word start (the line's start, a space, or an opening / CJK punctuation mark); `a@b` is no mention. */
-const AT_RE = /(?<![A-Za-z0-9._%+\-])@/g;   // round wke4s5jp9 (6): an at-sign starts an at-word UNLESS the character before it belongs to a mail address's first part — the closed list is of what does NOT start one (a CJK sentence with no space, a bracket, a bold mark, a slash: each starts one)
+const AT_RE = /(?<![A-Za-z0-9._%+\-/])@/g;   // round wke4s5jp9 (6) + its follow (r1065): an at-sign starts an at-word UNLESS the character before it belongs to a mail address's first part or is a SLASH (site/@handle is an address, never a mention) — the closed list is of what does NOT start one (a CJK sentence with no space, a bracket, a bold mark: each starts one)
 const NAME_MAX = 80, NAMES_MAX = 50, PEOPLE_MAX = 2000, MENTIONS_MAX = 50;
 const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 const WORD_RE = /[\p{L}\p{N}]/u;
@@ -196,19 +196,22 @@ function wireText(text, places) {
   for (const m of s.matchAll(TAG_RE)) events.push({ at: m.index, end: m.index + m[0].length, tag: true, id: m[1], label: m[2] });
   for (const p of ps) if (p.tag !== true) events.push({ at: p.at, end: p.at + 1 + p.len, tag: false, id: p.id });
   events.sort((a, b) => a.at - b.at);
+  // the follow (r1065): NO TAG OPENER stands on the wire outside a decided place — a typed tag around a typed tag left the outer one a
+  // valid tag for a member no card showed once the inner was rewritten; an opener in the words is written with a full-width bracket
+  const words = (x) => String(x).replace(/<(\s*at\b)/gi, '\uff1c$1');
   let out = '', from = 0;
   for (const e of events) {
     if (e.at < from) continue;
     if (e.tag) {
       const tp = tagPlace.get(e.at);
-      out += s.slice(from, e.at) + (tp && tp.id === e.id ? s.slice(e.at, e.end) : `@${String(e.label).trim() || e.id}`);
+      out += words(s.slice(from, e.at)) + (tp && tp.id === e.id ? s.slice(e.at, e.end) : `@${String(e.label).trim() || e.id}`);
     } else {
       if (s[e.at] !== '@' || e.end > s.length || /[\n\r]/.test(s.slice(e.at, e.end))) continue;   // not this text's place: its characters
-      out += s.slice(from, e.at) + (e.id === 'all' ? '<at user_id="all"></at>' : `<at user_id="${e.id}">${s.slice(e.at + 1, e.end)}</at>`);
+      out += words(s.slice(from, e.at)) + (e.id === 'all' ? '<at user_id="all"></at>' : `<at user_id="${e.id}">${s.slice(e.at + 1, e.end)}</at>`);
     }
     from = e.end;
   }
-  return out + s.slice(from);
+  return out + words(s.slice(from));
 }
 
 /** round wwb543hm7 MUST 2 — THE RECONCILE'S COMPARISON, one form on both sides: OUR wire (`<at user_id="X">label</at>` → «@{X}»)

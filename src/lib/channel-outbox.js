@@ -528,6 +528,9 @@ function approveProposal(p, body) {
  *  language. Any other refusal: its words as an error, and null (as `post` answers). */
 function approveAnswer(r) {
   if (r && r.code === 'mentions-changed' && r.proposal && typeof r.proposal === 'object') { showToast(routeErrorText(r), { type: 'info' }); return { changed: true, proposal: r.proposal }; }
+  // the follow (r1065): a press refused because the record changed under this card (another device's edit; the press that waited) comes
+  // with the record — a way forward: the card is drawn from it, and what the person typed is kept (the caller's editor goes back)
+  if (r && r.code === 'changed-since-shown' && r.proposal && typeof r.proposal === 'object' && r.proposal.state === 'awaiting-approval') { showToast(routeErrorText(r), { type: 'warn' }); return { stale: true, proposal: r.proposal }; }
   if (!r || r.error) { showToast(routeErrorText(r), { type: 'error' }); return null; }
   return r;
 }
@@ -750,6 +753,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
     const reject = btn(t('Reject…'), null);
     reject.dataset.reject = '1';
     const edit = btn(t('Edit…'), null);
+    edit.dataset.edit = '1';   // B-82c2 follow: a card drawn again after a refused press reopens its editor by this mark
     edit.dataset.edit = '1';
     // a reaction has no text to edit and never wakes anyone (spec §5.3): plain Reject / Approve, the receipt rides the next turn
     // (lane channels-proposals-recall: a recall the same — Approve takes the message back, Reject keeps it)
@@ -813,7 +817,22 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       // round wke4s5jp9 MUST 1: the decision changed — THIS card is drawn again from the reply's record: the stored text with its
       // decision and the one «changed» line, the editor CLOSED (the stored text is the card's text now; another change opens Edit
       // again); a new card arms again, and its next press carries the digest of the record it shows — that press sends it
-      if (r.changed) { const fresh = renderProposalCard(app, r.proposal, { compact, line, onLine, onJump }); fresh.dataset.sig = cardSig(r.proposal, compact, line); fresh.dataset.fateSig = fateSig(r.proposal); fresh.dataset.state = r.proposal.state; if (line && !card.classList.contains('chan-prop-shut')) setLineOpen(fresh, true); card.replaceWith(fresh); return; }
+      if (r.changed || r.stale) {
+        // round wke4s5jp9 MUST 1 + its follow (r1065): the press found the record changed — its decision (mentions-changed) or the record
+        // itself (changed-since-shown: another device's edit, the press that waited). THIS card is drawn again at once from the reply's
+        // record (a new card, armed again; an open line card stays open). A decision that changed closes the editor (the stored text is
+        // the card's text now); a refused press LOSES NOTHING TYPED: the person's edit goes back into an open editor on the new card, and
+        // the next press is judged against what that card shows
+        const fresh = renderProposalCard(app, r.proposal, { compact, line, onLine, onJump });
+        fresh.dataset.sig = cardSig(r.proposal, compact, line); fresh.dataset.fateSig = fateSig(r.proposal); fresh.dataset.state = r.proposal.state;
+        if (line && !card.classList.contains('chan-prop-shut')) setLineOpen(fresh, true);
+        card.replaceWith(fresh);
+        if (r.stale && text !== null) {
+          const eb = fresh.querySelector('.chan-prop-actions button[data-edit]');
+          if (eb) { eb.click(); const ta = fresh.querySelector('textarea.chan-prop-edit'); if (ta) { ta.value = text; ta.dispatchEvent(new Event('input', { bubbles: true })); } }
+        }
+        return;
+      }
       const sent = !!(r.proposal && r.proposal.state === 'sent');
       const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
       // lane lark-send-hold: a send waiting the vendor's reset is approved — the toast says when it goes, never "Not sent"
