@@ -2176,7 +2176,11 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
     const cu = new URL(flow.consentUrl);
     await new Promise((resolve) => http.get(`${flow.redirectUri}/?state=${cu.searchParams.get('state')}&code=${code}`, (res) => { res.resume(); res.on('end', resolve); }).on('error', resolve));
     for (let i = 0; i < 40; i++) { const st = eng.oauthStatus(flow.flowId); if (st.done) return st; await sleep(10); }
-    return eng.oauthStatus(flow.flowId);
+    // A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): a flow that never finished is MARKED and said here, so a later
+    // red reads «the sign-in never finished», never a verdict on what came after it
+    const last = eng.oauthStatus(flow.flowId);
+    console.log(`    (land: the sign-in flow did not finish in 0.4 s — THE STATE NEVER CAME; its last status ${JSON.stringify(last).slice(0, 200)})`);
+    return { ...last, timedOut: 'the sign-in flow did not finish in 0.4 s' };
   };
   // (b) the engine's list, per TYPE (Gmail borrows Google clients; Lark borrows none)
   const lm = eng.mountClientsFor('gmail');
@@ -2189,7 +2193,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   ok(st.credentialKey === 'custom' && new URL(st.url).searchParams.get('client_id') === CID && !JSON.stringify(st).includes(CSEC), `start {fromMount} begins the consent under the MOUNT's client id (${new URL(st.url).searchParams.get('client_id')}) — the answer carries no secret`);
   ok(!disk(edir).includes(CID), 'and NO record exists yet (the transient flow: Connect creates it)');
   const s1 = await land(st.flow, 'code-p');
-  ok(s1.done && s1.ok && s1.token === st.flowId, 'the redirect lands; the sign-in finished', JSON.stringify(s1));
+  ok(s1.done && s1.ok && s1.token === st.flowId, 'the redirect lands; the sign-in finished' + (s1.timedOut ? ` — THE STATE NEVER CAME: ${s1.timedOut}, so this red is that, not a verdict on the product` : ''), JSON.stringify(s1));
   const ex = calls.find((c) => c.form && c.form.grant_type === 'authorization_code' && c.form.code === 'code-p');
   ok(ex && ex.form.client_id === CID && ex.form.client_secret === CSEC, 'the code exchange carried the mount\'s id AND secret — the one place the secret leaves: the vendor call itself');
   const c1 = await eng.connect('gmail', { flowId: st.flowId, name: 'borrowed mail', fromMount: P });
