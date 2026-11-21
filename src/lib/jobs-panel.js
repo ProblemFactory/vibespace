@@ -17,7 +17,7 @@ import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
 import { registerWindowType } from './window-types.js';
 import { nameOrGone } from './plain-words.js'; // lane ui-plain-words M2a: a gone conversation / group is named in words, its id in the tooltip
-import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, nodeHeapWords, runLeftWords } from './jobs-layout.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, nodeHeapWords, budgetWords, budgetRefusalPersonWords, runLeftWords } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', waiting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
@@ -157,6 +157,7 @@ async function jobAction(app, j, act, refresh) {
   if (act === 'rm' && r?.logsKept === 'running') showToast(t('Removed. One of its runs is still running; its log files are deleted 14 days after it ends.')); // round 2: the ✕'s promise is true or not made
   if (act === 'rm' && r?.logsKept === 'unjudgeable') showToast(t('Removed. One of its runs could not be checked; its log files are deleted once VibeSpace can tell it has ended.'));
   if (r?.code === 'hub-is-main') r.error = t('This job is the running VibeSpace: it is not stopped here');   // B-2c5c: the job IS this VibeSpace — its stop refused by name, in the reader's language
+  if (r?.error && r.code === 'memory-budget' && r.budget) r.error = budgetRefusalPersonWords(r.budget, t);   // B-b14a: the press is attended — who uses what, and the recipe
   if (r?.error && r.code === 'not-on-disk') r.error = t('Not started: its run could not be saved first (the storage is slow or failing) — nothing was started. Start it again once the storage answers.');   // by its code (lane lg-store-writes, the moved2 cure 2): a start refused because its run could not be saved first
   if (r?.error) showToast(r.error, { type: 'error' });
   refresh?.();
@@ -333,7 +334,7 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
     for (const p of j.ports || []) { const c = document.createElement('span'); c.className = 'jobs-chip'; c.textContent = ':' + p; l2.appendChild(c); }
     // lane jobs-memory-bound: the bound and the rung that holds it — «4 GB · cgroup» / «4 GB · rlimit» / «unbounded — …»
     const memText = !compact && j.kind !== 'cron' ? memoryChip(j, t) : '';
-    if (memText) { const mc = document.createElement('span'); mc.className = 'jobs-chip jobs-chip-mem' + (/^\d/.test(memText) ? '' : ' jobs-chip-mem-none'); mc.textContent = memText; mc.title = j.memoryBound?.why || ''; l2.appendChild(mc); }
+    if (memText) { const mc = document.createElement('span'); mc.className = 'jobs-chip jobs-chip-mem' + (/^\d/.test(memText) ? '' : ' jobs-chip-mem-none'); mc.textContent = memText; mc.title = [j.memoryBound?.why || '', budgetWords(j, t)].filter(Boolean).join(' · '); l2.appendChild(mc); }   // B-b14a: the budget's fact on the chip's title
     if (j.publishedUrl) { const u = document.createElement('button'); u.className = 'jobs-chip jobs-chip-url'; u.textContent = '↗ ' + j.publishedUrl.replace(/^https?:\/\//, ''); u.onclick = (ev) => { ev.stopPropagation(); app.openBrowser?.(j.publishedUrl) || window.open(j.publishedUrl); }; l2.appendChild(u); }
     for (const g of (j.owner?.groups || []).slice(0, 2)) { const c = document.createElement('span'); c.className = 'jobs-chip jobs-chip-grp'; c.textContent = nameOrGone('group', g, ((app.sidebar && app.sidebar._tasks) || []).find((x) => x && x.id === g)?.title); c.title = g; l2.appendChild(c); }
     if (!compact && j.context?.payload) { const cx = document.createElement('span'); cx.className = 'jobs-ctx'; cx.textContent = j.context.payload.split('\n')[0].slice(0, 90); l2.appendChild(cx); }
@@ -474,7 +475,10 @@ async function expandDetail(app, el, j, refresh) {
   // B-d73c: the heap the job's Node gets — 75% of a bound the job names, its own NODE_OPTIONS' heap, or Node's own default (said)
   const memHeap = document.createElement('span'); memHeap.className = 'jobs-memory-fact jobs-memory-heap';
   memHeap.textContent = nodeHeapWords(job, t);
-  memRow.append(memLbl, memIn, memSet, memFact, memEff, memHeap);
+  // B-b14a: the instance's budget for running jobs — where the person decides this job's bound
+  const memBudget = document.createElement('span'); memBudget.className = 'jobs-memory-fact jobs-memory-budget';
+  memBudget.textContent = budgetWords(job, t);
+  memRow.append(memLbl, memIn, memSet, memFact, memEff, memHeap, memBudget);
   d.appendChild(memRow);
   // the manager design's piece 7: THE PERSON'S GRANT — this job or schedule may resume its conversation after that conversation
   // was ended on purpose (default no; said once here and it holds). Written through the person's own door (a press on this
@@ -591,6 +595,7 @@ function openCreateDialog(app, onDone) {
     const task = { cmd: { argv: ['sh', '-c', f.cmd.value], cwd: f.cwd.value || undefined }, restart: 'on-failure' };
     const body2 = { kind: schedule ? 'cron' : kind, name: f.name.value || 'job', context: f.ctx.value ? { payload: f.ctx.value } : null, access: { view: 'group', control: 'session' }, ...(schedule ? { schedule, action: { type: 'spawn-task', task } } : task) };
     const r = await fetchJson('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body2) });
+    if (r?.error && r.code === 'memory-budget' && r.budget) r.error = budgetRefusalPersonWords(r.budget, t, { create: true });   // B-b14a: nothing was created
     if (r?.error) return showToast(r.error, { type: 'error' });
     close(); onDone?.();
   };

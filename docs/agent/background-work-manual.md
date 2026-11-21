@@ -372,6 +372,25 @@ it, a limit on the user slice does (`show` names which).
   - A job that names no memory keeps Node's own default. `show` says which, for a Node program in the job if it runs one:
     «a Node program in this job: heap 6 GB (75 % of the job's bound …)», or «… gets Node's own default heap under this
     bound: about 2 GB — name the memory it already has (vibespace-job memory <id> 4G) to give it 75 % of the bound».
+- **On an instance with a memory limit (a cluster pod), the jobs share a BUDGET at their start.** The budget is the
+  instance's limit less the hub's share — the same figure as the cap above (9 GB on a 12 GB pod). A start — `run`,
+  `start`, a restart, a schedule's fire — is refused by name when what the jobs running NOW use, plus THIS job's bound,
+  would pass it: «not started: the instance's memory budget for jobs is 9 GB, and 6 GB of it is in use by 2 running jobs
+  (build 3 GB; 1 of other conversations 3 GB); this job's bound is 4 GB. To start it: stop one of yours (vibespace-job
+  stop <id>), or lower this job's bound to 3 GB or less (vibespace-job memory <id> 3G), then start it again». A `run`
+  that is refused creates nothing («not created: … give it --memory 3G or less»).
+  - It counts what the running jobs USE — each job's own processes, read every 5 s — never their bounds: idle jobs hold
+    almost nothing, so many small jobs still start.
+  - A schedule's fire that does not fit is skipped and said on the schedule; its next fire is as scheduled. A service's
+    restart that does not fit counts as a failed start on its restart ladder; 6 in a row park it, and the user is told
+    it was the budget.
+  - When a running job's memory cannot be read (just after VibeSpace starts, or a read that failed or is older than
+    15 s), nothing is refused, and `show` says «not judged right now». The replay after VibeSpace restarts is never
+    refused by it.
+  - It is a guard at the START, not a ceiling: jobs that grow after they started can still fill the instance together.
+    Give each job a bound it fits in.
+  - On a machine with no memory limit there is no budget: nothing changes. `show`'s memory line says the budget and what
+    the running jobs use («the instance's memory budget for jobs: 9 GB — 6 GB in use by 2 running jobs»).
 
 ## 8. Permissions model (why you can't see some jobs)
 

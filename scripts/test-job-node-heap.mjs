@@ -134,7 +134,7 @@ console.log('§3 the card\'s words (jobs-layout nodeHeapWords) in en, zh and ja;
   ok(keys.every((k) => typeof ZH[k] === 'string' && ZH[k].includes('{size}') && typeof JA[k] === 'string' && JA[k].includes('{size}')), 'all three sentences have zh and ja words (each keeps {size})', keys.filter((k) => !ZH[k] || !JA[k]));
   ok(L.nodeHeapWords(J({ by: 'node-default', mb: 2048 }), zh).startsWith('若此任务运行 Node 程序，此上限下 Node 自带的默认堆约为 2 GB') && L.nodeHeapWords(J({ by: 'bound', mb: 3072 }), ja).startsWith('このジョブが Node プログラムを実行する場合、ヒープは 3 GB'), 'the words read in zh and ja with the size in them', { zh: L.nodeHeapWords(J({ by: 'node-default', mb: 2048 }), zh), ja: L.nodeHeapWords(J({ by: 'bound', mb: 3072 }), ja) });
   const panel = read('src/lib/jobs-panel.js');
-  ok(panel.includes('memHeap.textContent = nodeHeapWords(job, t);') && panel.includes('memRow.append(memLbl, memIn, memSet, memFact, memEff, memHeap);'), 'WIRING: the panel\'s Memory bound row carries the sentence (jobs-panel memHeap)');
+  ok(panel.includes('memHeap.textContent = nodeHeapWords(job, t);') && panel.includes('memRow.append(memLbl, memIn, memSet, memFact, memEff, memHeap, memBudget);'), 'WIRING: the panel\'s Memory bound row carries the sentence (jobs-panel memHeap)');
 }
 
 for (const r of copiesCensus(MJ.files, MJ.dir, REPO, { minCopies: 2, label: 'B-d73c ' })) ok(r.pass === true, r.name + (r.pass ? '' : ' — ' + r.detail));

@@ -12,7 +12,8 @@
  *   pruneFolds(folds, layout)           the persisted fold map, minus keys no group holds
  *   heldText(digest, {t})               the held-notification sentence, words by the device's own t()
  *   memoryChip(job, t) · memoryEndWords(job, t) · memorySourceWords(job, t) · memoryWords(mb) · memoryFieldValue(job) ·
- *   memorySetValue(job, typed) · memoryCapWords(cap, t) · memoryEffectiveWords(job, t) · nodeHeapWords(job, t) · runLeftWords(run, t)
+ *   memorySetValue(job, typed) · memoryCapWords(cap, t) · memoryEffectiveWords(job, t) · nodeHeapWords(job, t) · budgetWords(job, t) ·
+ *   budgetRefusalPersonWords(budget, t, {create}) · runLeftWords(run, t)
  *                                       the memory bound's chip, its named end / park, where it comes from (lane jobs-memory-bound);
  *                                       what a run's job left running (round 5)
  *
@@ -253,6 +254,24 @@ export function nodeHeapWords(j, t) {
   if (h.by === 'bound') return t('If this job runs a Node program, its heap is {size} — 75% of the job’s bound', { size });
   if (h.by === 'node-default') return t('If this job runs a Node program, Node’s own default heap under this bound is about {size} — set the memory bound here to give it 75% of the bound', { size });
   return '';
+}
+/** B-b14a: THE BUDGET'S FACT beside the Memory bound and on the chip's title (the snapshot's `memoryBudget`: numbers only — a
+ *  viewer may see none of the holders): the instance's budget for running jobs and what they use, or that it is not judged
+ *  right now; '' on a machine with no limit (nothing changes there) */
+export function budgetWords(j, t) {
+  const b = j && j.memoryBudget;
+  if (!b || !b.budgetMb) return '';
+  if (b.unmeasured) return t('The instance’s memory budget for jobs: {budget} — not judged right now: the memory of {n} running job(s) could not be read', { budget: memoryWords(b.budgetMb), n: b.unmeasured });
+  return t('The instance’s memory budget for jobs: {budget} — {used} in use by {n} running job(s)', { budget: memoryWords(b.budgetMb), used: memoryWords(b.usedMb || 0), n: b.running || 0 });
+}
+/** B-b14a: THE PERSON'S REFUSAL — a press of Start / Restart, or a create — every holder by name (the person sees every job),
+ *  this job's bound and the recipe; `create`: nothing was created */
+export function budgetRefusalPersonWords(b, t, { create = false } = {}) {
+  const hs = Array.isArray(b && b.holders) ? b.holders : [];
+  const holders = hs.slice(0, 4).map((h) => `${h.name || h.id} ${memoryWords(h.mb)}`).join(', ') + (hs.length > 4 ? ', …' : '');
+  const p = { budget: memoryWords(b.budgetMb), used: memoryWords(b.usedMb), n: hs.length, holders, asked: memoryWords(b.askedMb), room: memoryWords(b.roomMb) };
+  if (create) return b.roomMb >= 256 ? t('Not created: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them, or give this job a memory bound of {room} or less.', p) : t('Not created: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them first.', p);
+  return b.roomMb >= 256 ? t('Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them, or lower this job’s memory bound to {room} or less.', p) : t('Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them first.', p);
 }
 /** WHAT A RUN'S JOB LEFT RUNNING (round 5 — the ruling of 2026-10-27: a job's scope IS the job): a task's were stopped (by
  *  force past the grace), a service's kept while it runs — «left 1 running — stopped; to keep a daemon, run it as a service

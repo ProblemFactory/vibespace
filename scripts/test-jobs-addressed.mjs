@@ -402,6 +402,9 @@ const CLASS = {
   // lane lg-store-writes (the U4/U5 cure and cure 2, met at the move): a start REFUSED because its run could not be recorded on disk
   // (the alarm the refusal raises), and a one-shot schedule whose fire was refused for that (parked failed, said)
   '_spawn#1': 'alarm', '_cronTick#2': 'alarm',
+  // B-b14a (the instance's memory budget for running jobs): a start the budget refused is an EVENT (the job did not end); its
+  // failures raise the alarm — a service parked by its ladder, a schedule's fire skipped; a ladder's retry is an event
+  '_budgetRefusal#1': 'event', '_budgetLadder#1': 'alarm', '_budgetLadder#2': 'event', '_fireCron#2': 'alarm',
 };
 for (const s of SITES) ok(CLASS[s.key], `census row: ${s.key} (src/jobs.js:${s.line}) has a class`, s.src);
 ok(Object.keys(CLASS).every((k) => SITES.some((s) => s.key === k)), 'every class row names a site that exists (a removed producer leaves no stale row)', Object.keys(CLASS).filter((k) => !SITES.some((s) => s.key === k)));
@@ -428,6 +431,8 @@ const PANEL = { title: 'pick', blocks: [{ type: 'choice', id: 'c', options: ['a'
 const svc = (n) => mkJob(jm, { kind: 'service', name: n, restart: 'on-failure' });
 const task = (n) => mkJob(jm, { kind: 'task', name: n });
 // THE DRIVERS: each runs its site's enclosing method on a crafted record (collaborators stubbed on the instance)
+const BUDGET_V = () => M.budgetVerdict({ limitMb: 12288, running: [{ id: 'jb-holder', name: 'holder', use: { mb: 6000, at: Date.now() } }], askedMb: 4096, nowMs: Date.now() });
+const BUDGET_E = () => { const v = BUDGET_V(); return Object.assign(new Error(M.budgetRefusalWords(v, { id: 'jb-x' })), { code: 'memory-budget', budget: v }); };
 const DRIVERS = {
   'announce#1': async () => { const j = task('drv-announce'); jm.announce(j, 'found 3 new threads'); return j; },
   '_reapOnce#1': async () => { const j = svc('drv-reap-alive'), r = run0(j, { endedAt: Date.now(), _reap: { unprovenSaid: true } }); const un = stub(jm, { _runScope: () => SCOPE, _ctlJson: () => null, _wrapperUnproven: () => 'alive' }); await jm._reapOnce(j, r); un(); return j; },
@@ -477,6 +482,17 @@ const DRIVERS = {
   'ask#1': async () => { const j = task('drv-ask'); j.state = 'up'; jm.ask(j, PANEL); return j; },
   'answerPanel#1': async () => { const j = task('drv-answer'); j.state = 'up'; const r = jm.ask(j, PANEL); jm.answerPanel(j, { version: r.version, c: 'a', button: 'OK' }); return j; },
   'withdrawAsk#1': async () => { const j = task('drv-withdraw'); j.state = 'up'; jm.ask(j, PANEL); jm.withdrawAsk(j); return j; },   // B-8bd5
+  // B-b14a: the budget's producers — a verdict past a 9 GB budget (12 GB limit), a refusal as _spawn throws it
+  '_budgetRefusal#1': async () => { const j = task('drv-budget-refused'); jm._budgetRefusal(j, BUDGET_V(), 'manual'); return j; },
+  '_budgetLadder#1': async () => { const j = svc('drv-budget-park'); j.desiredUp = true; j.supervise = { consecutiveFails: M.SUPERVISE.failCap - 1, parkedAt: null }; jm._budgetLadder(j, BUDGET_E()); return j; },
+  '_budgetLadder#2': async () => { const j = svc('drv-budget-retry'); j.desiredUp = true; j.supervise = { consecutiveFails: 0, parkedAt: null }; jm._budgetLadder(j, BUDGET_E()); j.desiredUp = false; return j; },   // its retry timer then finds nothing to start
+  '_fireCron#2': async () => {
+    const j = mkJob(jm, { kind: 'cron', name: 'drv-fire-budget', schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'true'] } } } });
+    const un = stub(jm, { _spawn: () => { throw BUDGET_E(); } });
+    try { jm._fireCron(j, 'cron'); } finally { un(); }
+    for (const k of [...jm.jobs.values()]) if (k.cronParent === j.id) jm.jobs.delete(k.id);   // the fire's child never started: nothing of it stays
+    return j;
+  },
   '_startAskedAtStop#1': async () => { const j = task('drv-start-asked'); const un = stub(jm, { start: () => ({ error: 'refused for the driver' }) }); jm._startAskedAtStop(j, true); await new Promise((r) => setImmediate(r)); un(); return j; },   // B-cac2 cure r1
 };
 const driven = [];   // {key, site, job, t0, alarm}

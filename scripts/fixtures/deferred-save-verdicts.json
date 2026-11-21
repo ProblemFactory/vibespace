@@ -190,6 +190,21 @@
   "why": "refusal re-judged; error answered"
  },
  {
+  "key": "jobs · src/jobs.js · JobManager._budgetRefusal · _save()",
+  "verdict": "none",
+  "why": "refusal said; nothing started"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._budgetLadder · _save()",
+  "verdict": "none",
+  "why": "ladder counted; nothing follows"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._fireCron · _save()",
+  "verdict": "none",
+  "why": "skipped fire said; nothing follows"
+ },
+ {
   "key": "jobs · src/jobs.js · JobManager._settleWait · _save()",
   "verdict": "none",
   "why": "wait ended; re-judged at boot"

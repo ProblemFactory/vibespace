@@ -587,6 +587,28 @@ console.log('(B-d73c) the CLI\'s memory line: a Node program\'s heap, and doors 
   hs.close();
 }
 
+// ── B-b14a: `show`'s memory line says the instance's memory budget for jobs — what the running jobs USE (numbers only), or that it
+// is not judged right now (a running job's memory could not be read); a hub with no limit says nothing (the owner's box) ──
+console.log('(B-b14a) the CLI\'s memory line: the instance\'s budget for running jobs');
+{
+  const base = { kind: 'task', state: 'up', name: 'build', mine: true, cmd: { argv: ['sh', '-c', 'make'], cwd: '/w', envKeys: [] }, envFrom: [], schedule: null, restart: 'on-failure', timeoutMs: null, untilOutput: null, singleInstance: true, notifyOk: false, notifyUser: false,
+    access: { view: 'group', control: 'session' }, notify: 'inherit', subscribersCount: 0, memorySource: 'job', memoryAskedMb: 4096, memoryMb: 4096, memoryCap: null };
+  const BJ = {
+    'jb-used': { ...base, id: 'jb-used', memoryBudget: { budgetMb: 9216, running: 2, usedMb: 6144 } },
+    'jb-unread': { ...base, id: 'jb-unread', memoryBudget: { budgetMb: 9216, running: 3, unmeasured: 1 } },
+    'jb-nolimit': { ...base, id: 'jb-nolimit', memoryBudget: null },
+  };
+  const hs = http.createServer((req, res) => { const id = decodeURIComponent((/^\/api\/agent\/jobs\/([^/?]+)/.exec(req.url) || [])[1] || ''); res.writeHead(BJ[id] ? 200 : 404, { 'content-type': 'application/json' }); res.end(JSON.stringify(BJ[id] ? { success: true, job: BJ[id] } : { error: 'no job' })); });
+  await new Promise((r) => hs.listen(0, '127.0.0.1', r));
+  const show = (id) => new Promise((resolve) => { const p = spawn(process.execPath, [CLI, 'show', id], { env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: tmp, VIBESPACE_API: `http://127.0.0.1:${hs.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_budget' } }); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.on('close', (code) => resolve({ code, out, err })); });
+  const [u, n, x] = await Promise.all(['jb-used', 'jb-unread', 'jb-nolimit'].map(show));
+  const memOf = (r) => r.out.split('\n').find((l) => l.startsWith('memory: ')) || '';
+  ok(u.code === 0 && memOf(u).endsWith(" · the instance's memory budget for jobs: 9 GB — 6 GB in use by 2 running jobs"), '(B-b14a) the budget and what the running jobs USE, on the memory line', memOf(u) || u.err);
+  ok(n.code === 0 && memOf(n).endsWith(" · the instance's memory budget for jobs: 9 GB — not judged right now (the memory of 1 running job could not be read)"), '(B-b14a) a running job unmeasured: «not judged right now», said', memOf(n) || n.err);
+  ok(x.code === 0 && memOf(x) !== '' && !memOf(x).includes('budget'), '(B-b14a) CONTROL: no limit (memoryBudget null) — the line as it was, no budget word', memOf(x) || x.err);
+  hs.close();
+}
+
 // ── teardown: the engines' stores flush synchronously; nothing outlives the scratch dir ──
 server.close();
 for (const E of [CENSUS, REAL, NOHAND, OLD, NOBELT, WIRED, VWL, VWU]) E.jm.shutdown();

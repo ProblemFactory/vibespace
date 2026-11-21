@@ -295,7 +295,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     const b = req.body || {};
     const spec = { ...b, owner: { conversation: null, sessionId: null, sessionCreatedAt: 0, createdBy: 'user', groupsSnapshot: [] } };
     const r = jm.create(spec, USER);
-    if (r.error) return res.status(400).json({ error: r.error });
+    if (r.error) return res.status(400).json({ error: r.error, ...(r.code ? { code: r.code } : {}), ...(r.budget ? { budget: r.budget } : {}) });   // B-b14a: a create past the memory budget is named in the reader's language
     jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, job: r.job, renamed: r.renamed, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // lane lg-store-writes U4: the answer waits for the store, never the loop
   });
   app.get('/api/jobs/:id', (req, res) => {
@@ -369,7 +369,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         return void jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, access: job.access, notify: job.notify || 'inherit', ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // an authority change: answered once on disk
       }
       else return res.status(400).json({ error: `unknown action "${act}"` });
-      if (r.error) return res.status(r.code === 'stale-panel' ? 409 : 400).json({ error: r.error, ...(r.code ? { code: r.code } : {}), ...(Number.isInteger(r.version) ? { version: r.version } : {}) }); // r6 D-F5: a refused answer is named (stale-panel / version-required)
+      if (r.error) return res.status(r.code === 'stale-panel' ? 409 : 400).json({ error: r.error, ...(r.code ? { code: r.code } : {}), ...(r.budget ? { budget: r.budget } : {}), ...(Number.isInteger(r.version) ? { version: r.version } : {}) }); // r6 D-F5: a refused answer is named (stale-panel / version-required)
       jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID
     } catch (e) { res.status(e && e.code === 'EVSNOTONDISK' ? 503 : 400).json({ error: e.message, ...(e && e.code === 'EVSNOTONDISK' ? { code: 'not-on-disk' } : {}) }); }   // a person's start refused because its run could not be saved first: worded on the page by its code (the moved2 cure 2)
   });

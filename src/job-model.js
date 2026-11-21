@@ -473,6 +473,45 @@ function withNodeHeap(cmdEnv, heap) {
   env.NODE_OPTIONS = (own ? own + ' ' : '') + `--max-old-space-size=${heap.mb}`;
   return env;
 }
+// B-b14a: THE INSTANCE'S MEMORY BUDGET FOR RUNNING JOBS (the coordinator's ruling r777). The per-job cap (instanceCapOf) lets
+// two jobs at the cap fill an instance together — on a pod that ends the hub. THE LAW: a start is refused BY NAME only when the
+// MEASURED memory of the jobs running now, plus THIS job's own bound, would pass the budget = the instance's limit less the hub's
+// share (the per-job cap's own figure). Never their bounds (idle jobs hold almost nothing: counting bounds refused the third
+// idle job of a pod and would park a boot replay of thirty small services). A running job whose measure is missing or older
+// than ageMs ⇒ the start is NOT JUDGED (no refusal on a guess) and the doors say so; no limit (the owner's box) ⇒ no budget.
+// WHAT IT IS NOT: a guard at the START (a mistake's guard), not a ceiling — jobs that grow together after their starts can
+// still fill an instance where no group limit can be set.
+const BUDGET = Object.freeze({ sampleMs: 5000, ageMs: 15000, perJobPids: 256, readBoundMs: 1000, namedHolders: 4 });
+/** the budget in MB: the instance's limit less the hub's share — null where the instance has no limit */
+const budgetMbOf = (limitMb) => { const c = instanceCapOf(limitMb); return c ? c.capMb : null; };
+/** THE VERDICT at a start. `running`: [{id, name, use: {mb, at}}] — every OTHER job running now with its measure.
+ *  → { judged: false, why: 'no-limit' } · { judged: false, why: 'unmeasured', budgetMb, unmeasured: [{id, name}] }
+ *    · { judged: true, ok: true, budgetMb, usedMb, holders, askedMb } · { judged: true, ok: false, refused: true, …, roomMb } */
+function budgetVerdict({ limitMb, running = [], askedMb, nowMs, ageMs = BUDGET.ageMs } = {}) {
+  const budgetMb = budgetMbOf(limitMb);
+  if (!budgetMb) return { judged: false, why: 'no-limit' };
+  const fresh = (r) => r && r.use && Number.isFinite(Number(r.use.mb)) && Number(r.use.at) > Number(nowMs) - ageMs;
+  const stale = running.filter((r) => !fresh(r));
+  if (stale.length) return { judged: false, why: 'unmeasured', budgetMb, unmeasured: stale.map((r) => ({ id: r.id, name: r.name })) };
+  const holders = running.map((r) => ({ id: r.id, name: r.name, mb: Math.max(0, Math.round(Number(r.use.mb))) })).sort((a, b) => b.mb - a.mb);
+  const usedMb = holders.reduce((a, h) => a + h.mb, 0), asked = Math.max(0, Math.floor(Number(askedMb) || 0));
+  const out = { judged: true, budgetMb, usedMb, holders, askedMb: asked };
+  return usedMb + asked <= budgetMb ? { ...out, ok: true } : { ...out, ok: false, refused: true, roomMb: Math.max(0, budgetMb - usedMb) };
+}
+const budgetSize = (mb) => { const n = Math.max(0, Math.floor(Number(mb) || 0)); return n < 1024 ? `${n} MB` : `${Math.round((n / 1024) * 10) / 10} GB`; };
+/** the AGENT's refusal (the CLI prints it; English): the holders BY MEASURE — only the starting job's OWN conversation's by name
+ *  (`own`: another conversation's jobs are counted and summed, never named to an agent), this job's bound, and the recipe with
+ *  its verbs. `create`: the words of a `run` refused before anything was created */
+function budgetRefusalWords(v, { id, create = false } = {}) {
+  const own = v.holders.filter((h) => h.own !== false), others = v.holders.filter((h) => h.own === false);
+  const named = own.slice(0, BUDGET.namedHolders).map((h) => `${clip(String(h.name || h.id), 40)} ${budgetSize(h.mb)}`).join(', ') + (own.length > BUDGET.namedHolders ? ', …' : '');
+  const rest = others.length ? `${others.length} of other conversations ${budgetSize(others.reduce((a, h) => a + h.mb, 0))}` : '';
+  const arg = v.roomMb % 1024 === 0 ? `${v.roomMb / 1024}G` : `${v.roomMb}M`;
+  const lower = v.roomMb >= MEMORY.minMb ? (create ? `give it --memory ${arg} or less` : `lower this job's bound to ${budgetSize(v.roomMb)} or less (vibespace-job memory ${id || '<id>'} ${arg})`) : '';
+  const stop = own.length ? 'stop one of yours (vibespace-job stop <id>)' : '';
+  const recipe = [stop, lower].filter(Boolean).join(', or ') || 'wait until one of them ends';
+  return `${create ? 'not created' : 'not started'}: the instance's memory budget for jobs is ${budgetSize(v.budgetMb)}, and ${budgetSize(v.usedMb)} of it is in use by ${v.holders.length} running job${v.holders.length === 1 ? '' : 's'} (${[named, rest].filter(Boolean).join('; ')}); this job's bound is ${budgetSize(v.askedMb)}. To start it: ${recipe}${create ? '' : ', then start it again'}`;
+}
 /** WHICH LIMIT capped (round 4), by the cgroup that holds it: «/» — the root a container sees (a pod's cgroup namespace) — is
  *  the instance; user.slice / user-<uid>.slice the user slice; any other cgroup its own name (the hub's unit, a slice) */
 function limitHolder(cg) {
@@ -903,6 +942,8 @@ const FOR_YOU_WORDS = Object.freeze({
   // lane jobs-memory-bound (the seam with job-notify-user r3): a doubted previous run, a park for memory
   doubt: '{name}: cannot prove the previous run is gone ({why}) — not restarted; if it is gone: {ifGone}, then start it again; if it runs: it keeps running',
   'parked-memory': '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again',
+  // B-b14a: a service whose automatic restarts the instance's memory budget refused, parked by its ladder — never «crash-looped»
+  'parked-budget': '{name}: parked — not restarted {count} times in a row: the instance’s memory budget for jobs ({budget}) is in use by other running jobs ({holders}). Stop one of them or lower this job’s memory bound, then start it again',
   // B-2566 (主开发 r327/r339): a FAILURE of a job whose owner conversation is not running (ended, archived) reaches a PERSON by name — ONE
   // item a job (a cron's: its schedule's), renewed with its count while it is open, never once a failure; «what failed» is the engine's
   // own words (its exit and cause token), never a line of the run's output
@@ -970,7 +1011,7 @@ function forYouCopy(job, kind, opts = {}) {
   return c;
 }
 function forYouWords(job, kind, opts) {
-  const { text = null, cause = null, urgency = null, error = null, why = null, ifGone = null, file = null, store = null, note = null, when = null, until = null, exit = null, count = null, since = null, renew = false } = opts || {};
+  const { text = null, cause = null, urgency = null, error = null, why = null, ifGone = null, file = null, store = null, note = null, when = null, until = null, exit = null, count = null, since = null, renew = false, budget = null, holders = null } = opts || {};
   if (opts && typeof opts === 'object' && Object.prototype.hasOwnProperty.call(opts, 'shape')) return { fact: null, words: null, urgency: null, copy: String(kind).slice(0, 24) === 'stray' ? 'stray' : 'shaped', refused: `a For-you copy carries the engine's own words — a shape handed to forYouCopy is refused (a filing outside the one door is journaled with its caller, never laundered through it)` };
   const name = String((job && (job.name || job.id)) || 'job');
   const tok = (v, n) => String(v == null || v === '' ? 'unknown' : v).toLowerCase().replace(/[^a-z0-9._()-]/g, '-').slice(0, n);
@@ -980,6 +1021,7 @@ function forYouWords(job, kind, opts) {
   if (kind === 'missed') return { fact: 'missed', words: { key: FOR_YOU_WORDS.missed, params: { name } }, urgency: 'high' };
   if (kind === 'doubt') return { fact: 'doubt', words: { key: FOR_YOU_WORDS.doubt, params: { name, why: String(why), ifGone: String(ifGone) } }, urgency: 'normal' };
   if (kind === 'parked-memory') return { fact: 'parked-memory', words: { key: FOR_YOU_WORDS['parked-memory'], params: { name } }, urgency: 'normal' };
+  if (kind === 'parked-budget') return { fact: 'parked-budget', words: { key: FOR_YOU_WORDS['parked-budget'], params: { name, count: String(count == null ? SUPERVISE.failCap : count), budget: String(budget || 'unknown'), holders: String(holders || 'unknown') } }, urgency: 'normal' };   // B-b14a
   if (kind === 'fire') return { fact: 'fire', words: { key: FOR_YOU_WORDS.fire, params: { text: String(text || name) } }, urgency: urgency || 'normal' };
   if (kind === 'engine-failed') return { fact: 'engine-failed', words: { key: FOR_YOU_WORDS['engine-failed'], params: { error: String(error) } }, urgency: 'high' };
   if (kind === 'store-corrupt') return { fact: 'store-corrupt', words: { key: FOR_YOU_WORDS['store-corrupt'], params: { file: String(file || 'the store file') } }, urgency: 'high' };
@@ -1308,6 +1350,7 @@ module.exports = { jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,
   NODE_HEAP, nodeHeapOf, withNodeHeap,   // B-d73c
+  BUDGET, budgetMbOf, budgetVerdict, budgetRefusalWords,   // B-b14a
   MEMORY, MEMORY_CAUSES, RUN_CAUSES, awayFactsOf, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, boundWords, leftRecord, leftRecordFault, leftWords, runEndWords, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,

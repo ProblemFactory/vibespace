@@ -125,7 +125,14 @@ function memLine(j) {
   const end = run.cause === 'oom-bound' ? ` · its last run was stopped: used more than ${sizeWords((b && b.mb) || j.memoryMb)}` : run.cause === 'oom' ? ' · its last run was killed: the instance ran out of memory' : '';
   const park = j.parkedFor === 'memory' ? ` · PARKED (out of memory twice): raise it (vibespace-job memory ${j.cronParent || j.id} ${sizeArg(Math.max(8192, 2 * (j.memoryMb || 0)))}) or fix the job, then vibespace-job start ${j.cronParent || j.id}`
     : j.oomEnds ? ` · ${j.oomEnds} out-of-memory end in a row (2 park it)` : '';
-  return head + rung + end + park + nodeHeapLine(j);
+  return head + rung + end + park + nodeHeapLine(j) + budgetLine(j);
+}
+// B-b14a: the instance's memory budget for running jobs — numbers only (the hub's facts), or that it is not judged right now
+function budgetLine(j) {
+  const bud = j.memoryBudget;
+  if (!bud || !bud.budgetMb) return '';
+  if (bud.unmeasured) return ` · the instance's memory budget for jobs: ${sizeWords(bud.budgetMb)} — not judged right now (the memory of ${bud.unmeasured} running job${bud.unmeasured === 1 ? '' : 's'} could not be read)`;
+  return ` · the instance's memory budget for jobs: ${sizeWords(bud.budgetMb)} — ${sizeWords(bud.usedMb || 0)} in use by ${bud.running} running job${bud.running === 1 ? '' : 's'}`;
 }
 // B-d73c: the heap the job's Node gets — 75 % of the memory it names (handed as --max-old-space-size beside its own NODE_OPTIONS),
 // its own NODE_OPTIONS' heap, or Node's own default under the bound, with the door that changes it (the hub's facts, worded here)
