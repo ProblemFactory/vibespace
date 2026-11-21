@@ -74,13 +74,13 @@ const TR = require(${JSON.stringify(path.join(REPO, 'src/server/throwaway-root.j
 const home = require('os').homedir();
 const pm = require(${JSON.stringify(path.join(REPO, 'src/peer-messaging.js'))}).REGISTRY_DIR;   // a home CAPTURED WHEN A MODULE LOADS, loaded after line 1 (§113 (i))
 const kid = require('child_process').spawnSync(process.execPath, ['-e', 'process.stdout.write(require("os").homedir())'], { encoding: 'utf8' }).stdout;
-setImmediate(() => console.log(JSON.stringify({ rec, home, pm, view: TR.view(), kid, env: Object.fromEntries(['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'SSH_AUTH_SOCK', 'PATH', 'LANG', 'PORT', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'CLAUDE_WEBUI_PORT', 'VIBESPACE_PASSWORD', 'VIBESPACE_APP_SYSTEM', 'HUBGUARD_PLANTED'].map((k) => [k, process.env[k] ?? null])), lines, verdict: TR.boot(), throwaway: TR.throwaway(process.argv[2]) })));
+setImmediate(() => console.log(JSON.stringify({ rec, home, pm, view: TR.view(), kid, env: Object.fromEntries(['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'SSH_AUTH_SOCK', 'PATH', 'LANG', 'PORT', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'CLAUDE_WEBUI_PORT', 'VIBESPACE_PASSWORD', 'VIBESPACE_APP_SYSTEM', 'HUBGUARD_PLANTED', 'SSL_CERT_FILE'].map((k) => [k, process.env[k] ?? null])), lines, verdict: TR.boot(), throwaway: TR.throwaway(process.argv[2]) })));
 `);
 const NODE_BIN = path.dirname(process.execPath);
 const SYS = createRequire(import.meta.url)('../src/home-verdict.js').SYSTEM_PATHS[process.platform === 'darwin' ? 'darwin' : 'linux'].join(':');
 const SECRETISH = ['cfg', 'val', String(process.pid)].join('-');
-const bootIn = (root, env) => {
-  const r = spawnSync(process.execPath, ['-r', PRELOAD, CHILD, root], { encoding: 'utf8', timeout: 30000, env: { PATH: `${POISON}/.local/bin:${NODE_BIN}:/usr/bin:/bin`, LANG: 'C.UTF-8', ...env } });
+const bootIn = (root, env, pre = []) => {
+  const r = spawnSync(process.execPath, ['-r', PRELOAD, ...pre.flatMap((f) => ['-r', f]), CHILD, root], { encoding: 'utf8', timeout: 30000, env: { PATH: `${POISON}/.local/bin:${NODE_BIN}:/usr/bin:/bin`, LANG: 'C.UTF-8', ...env } });
   try { return JSON.parse(r.stdout.trim().split('\n').pop()); } catch { return { err: r.stderr + r.stdout }; }
 };
 const tline = (j) => (j.lines || []).find((l) => l.startsWith('[throwaway] ') && !l.startsWith('[throwaway] handed '));
@@ -151,6 +151,31 @@ const NOT_CARRIED = ['CLAUDE_CONFIG_DIR', 'CLAUDE_WEBUI_PORT', 'SSH_AUTH_SOCK', 
   ok(e.verdict && e.verdict.rehome === false && e.verdict.why === 'override' && e.throwaway === false && e.home === POISON && !fs.existsSync(path.join(root, '.home'))
     && (tline(e) || '') === `[throwaway] this copy runs from a git worktree (${root}) but VIBESPACE_REAL_INSTALL=1 is set: it uses the home it was handed, as an installed copy does`,
     "(e) a worktree with VIBESPACE_REAL_INSTALL=1 (the person's word: «this is my real install») is real for every gate and not re-homed — and says so", e.verdict || e);
+}
+
+{ // (f) THE WALK NEVER STEPS ON A MOUNT (主开发 r1607, the third condition of the boot's synchronous read): the first act reads
+  // /proc/self/mountinfo (procfs) and the re-home's resolver refuses every path under a FUSE, network or storage mount root BEFORE
+  // its lstat — could not look, so the value rule does not carry it. PLANTED: a mountinfo naming a folder an rclone mount, and a
+  // carried path row (SSL_CERT_FILE) under it; a second preload records every fs call on that folder in the child
+  const M = path.join(DIR, 'mnt-remote'), CERT = path.join(M, 'certs', 'ca.pem');
+  fs.mkdirSync(path.dirname(CERT), { recursive: true }); fs.writeFileSync(CERT, 'not a certificate\n');
+  const LINE = `901 30 0:99 / ${M} rw,nosuid,nodev - fuse.rclone remote:share rw,user_id=1000\n`;
+  const mountPre = (planted) => { const f = path.join(DIR, `mount-preload-${planted ? 'on' : 'off'}.cjs`); fs.writeFileSync(f, `'use strict';
+const fs = require('fs'), M = ${JSON.stringify(M)}, LINE = ${JSON.stringify(LINE)}, PLANTED = ${planted ? 'true' : 'false'}, rec = global.__rec; rec.mount = [];
+for (const k of Object.keys(fs)) { const f = fs[k]; if (typeof f !== 'function' || /^[A-Z]/.test(k)) continue;
+  const w = function (...a) { const s = typeof a[0] === 'string' ? a[0] : '';
+    if (s === M || s.startsWith(M + '/')) rec.mount.push(rec.phase + ' ' + k + ' ' + s.slice(M.length));
+    if (PLANTED && k === 'readFileSync' && s === '/proc/self/mountinfo') return a[1] === undefined ? Buffer.from(LINE) : LINE;
+    return f.apply(this, a); };
+  for (const p of Object.keys(f)) w[p] = f[p]; fs[k] = w; }
+`); return f; };
+  const on = bootIn(mkWorktree('wt-f-on'), { ...STAND_IN, SSL_CERT_FILE: CERT }, [mountPre(true)]);
+  const off = bootIn(mkWorktree('wt-f-off'), { ...STAND_IN, SSL_CERT_FILE: CERT }, [mountPre(false)]);
+  const touched = (j) => ((j.rec || {}).mount || []).filter((t) => t.startsWith('boot '));
+  ok(on.verdict && on.verdict.rehome === true && on.env && on.env.SSL_CERT_FILE === null && touched(on).length === 0,
+    "(f) THE WALK SKIPS A MOUNT (r1607): a carried path (SSL_CERT_FILE) under a folder /proc/self/mountinfo names a FUSE storage mount is never touched by the boot's re-home — no lstat, no readlink — and so it is not carried (could not look)", { env: on.env && on.env.SSL_CERT_FILE, touched: touched(on), err: on.err });
+  ok(off.verdict && off.verdict.rehome === true && off.env && off.env.SSL_CERT_FILE === CERT && touched(off).length >= 1,
+    "(f) CONTROL: the same start with no mount there walks the path (its touches recorded) and carries it — the skip is the mount's, never the name's", { env: off.env && off.env.SSL_CERT_FILE, touched: touched(off), err: off.err });
 }
 
 console.log('— ② THE NAMED EXCEPTIONS: every passwd read in the product is a row; ssh is the one row more');
