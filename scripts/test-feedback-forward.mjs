@@ -363,7 +363,7 @@ console.log('⑩ controls (patched copies) and the wiring');
   const wiring = read('src/server/mounts-plugins-wiring.js');
   ok(/onNew: \(row\) => feedbackForward\.enqueue\(row\)/.test(wiring) && /^feedbackForward\.start\(\);$/m.test(wiring) && /selfKeyId: \(\) => feedbackForward\.keyId\(\)/.test(wiring) && /collectorToken: \(\) => process\.env\.VIBESPACE_TELEMETRY_INGEST_TOKEN \|\| ''/.test(wiring) && /t\.forwardTarget\(\)/.test(wiring) && /applyMarks: \(marks\) => feedback\.applyMarks\(marks\), backlog: \(\) => feedback\.list\(\)\.reports,/.test(wiring),
     'the wiring: a new report → the forwarder; started at boot; the target is the telemetry forward target (settings, then env); the hub\'s doors are on with VIBESPACE_TELEMETRY_INGEST_TOKEN; the marks land in the store; the backfill reads the store\'s reports');
-  ok(/req\.method === 'POST' && p === '\/api\/feedback\/forward'\) \|\| \(req\.method === 'GET' && p === '\/api\/feedback\/forward\/marks'\)\) return next\(\);/.test(read('src/auth.js')), 'the auth layer\'s doors: POST /api/feedback/forward and GET /api/feedback/forward/marks, method-exact');
+  ok(/req\.method === 'POST' && p === '\/api\/feedback\/forward'\) \|\| \(req\.method === 'GET' && p === '\/api\/feedback\/forward\/marks'\)\) return next\(\);/.test(read('src/door.js')), 'the auth layer\'s (src/door.js (the door class: lifted verbatim out of src/auth.js by B3a)) doors: POST /api/feedback/forward and GET /api/feedback/forward/marks, method-exact');
 }
 
 console.log('⑪ THE NO-DOOR PAUSE (lane feedback-forward-404): the target is a telemetry collector with no feedback door');

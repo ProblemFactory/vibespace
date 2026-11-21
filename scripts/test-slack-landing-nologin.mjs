@@ -27,7 +27,7 @@ const express = require('express');
 const M = require(path.join(REPO, 'src/channels/slack-manifest.js'));
 // int214 (dc-channels-consent): the route sends :kind's DECLARED consent page — the real Slack adapter's row
 const SLACK = require(path.join(REPO, 'src/channels/slack.js'));
-const AUTH = 'src/auth.js', ROUTES = 'src/routes/channels.js';
+const AUTH = 'src/auth.js', DOOR = 'src/door.js', ROUTES = 'src/routes/channels.js';   // DOOR: the door lines, lifted verbatim out of AUTH by B3a
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const MUT = mutantCopies('slack-landing-nologin', REPO);
@@ -160,9 +160,10 @@ console.log('④ the owner\'s finish line names who landed (DOM-free)');
 
 console.log('⑤ patched-copy controls (never src/)');
 {
-  const asrc = fs.readFileSync(path.join(REPO, AUTH), 'utf-8');
+  const asrc = fs.readFileSync(path.join(REPO, DOOR), 'utf-8');   // the exemption lives in the door class; a copy without it, under a copy of the auth layer that requires that copy
   const ex = asrc.split('\n').filter((l) => /oauth\\\/cb\\\//.test(l) && /return next\(\)/.test(l));
-  const noEx = MUT.load(AUTH, asrc.split('\n').filter((l) => !ex.includes(l)).join('\n'), 'no-exemption');
+  const noDoor = MUT.write(DOOR, asrc.split('\n').filter((l) => !ex.includes(l)).join('\n'), 'no-exemption');
+  const noEx = MUT.load(AUTH, fs.readFileSync(path.join(REPO, AUTH), 'utf-8').replace("require('./door.js')", `require(${JSON.stringify(noDoor)})`), 'no-exemption');
   const I = await instance('password', { authMod: noEx });
   const L = await hit(I.base, cb(stateAt()));
   ok(ex.length === 1 && !landed(L) && L.status === 302 && L.loc === '/login' && I.eng.calls.length === 0, 'the exemption removed ⇒ the no-cookie landing is redirected to /login (① red by the same assert), the engine never reached', JSON.stringify({ ex: ex.length, status: L.status, loc: L.loc }));

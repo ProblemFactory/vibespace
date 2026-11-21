@@ -437,7 +437,7 @@ const PAYLOAD = (recs) => ({
     ok(/!session\.host && SP\.otelExport && typeof otelEnv === 'function'/.test(wc) && H.ids().filter((id) => H.spawnOf(id).otelExport === true).join() === 'claude',
       'ws-create: OTEL env injection gated local-only on the declared spawn.otelExport row (claude alone declares it)'); }
   ok(read('src/ws-handler.js').includes("'otelEnv',"), 'ws contract carries otelEnv');
-  ok(/p\.startsWith\('\/otel\/'\)/.test(read('src/auth.js')), 'auth middleware exempts /otel/ (module gate is the only door)');
+  ok(/p\.startsWith\('\/otel\/'\)/.test(read('src/door.js')), 'the door class (src/door.js, lifted out of the auth middleware by B3a) exempts /otel/ (module gate is the only door)');
   const sv = read('server.js');
   const oi0 = read('src/server/otel-ingest.js');
   ok(sv.includes('otelIngest.registerRoutes(app)') && sv.includes('otelEnv: otelIngest.envFor'), 'server.js wires routes + spawn env');

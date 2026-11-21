@@ -260,7 +260,7 @@ ok('a fresh instance reloads the persisted store', pages2.list().length === 1 &&
 
 // 10. wiring pins (the unstaged-wiring class)
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
-ok('auth.js exempts /p/ (per-page gate doctrine)', read('src/auth.js').includes("p.startsWith('/p/')"));
+ok('the door class exempts /p/ (per-page gate doctrine; src/door.js, lifted verbatim out of src/auth.js by B3a)', read('src/door.js').includes("p.startsWith('/p/')"));
 ok('server.js wires create + registerRoutes', read('server.js').includes("published-pages.js').create") && read('server.js').includes('publishedPages.registerRoutes(app)'));
 const fe = read('src/lib/file-explorer-ops.js');
 ok('explorer offers Publish page… for local html', /Publish page(…|\\u2026)/.test(fe) && fe.includes('_publishPageDialog'));

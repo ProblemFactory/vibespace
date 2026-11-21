@@ -213,7 +213,7 @@ try {
   const shapes = [await call('POST', '/hook/ci/', { headers: { Authorization: 'Bearer x' }, body: {} }), await call('POST', '/hook/CI', { headers: { Authorization: 'Bearer x' }, body: {} }), await call('POST', '/hook/ci/x', { headers: { Authorization: 'Bearer x' }, body: {} }), await call('POST', '/hook', { headers: { Authorization: 'Bearer x' }, body: {} })];
   const g405 = await call('GET', '/hook/ci/x');
   ok(shapes.every((x) => x.status === 401 && x.body === DOOR_401 && x.cc === 'no-store') && g405.status === 405 && g405.body === JSON.stringify(A.ANSWERS['method-not-allowed'].body), '#6 /hook/ci/ · /hook/CI · /hook/ci/x · /hook ⇒ the door\'s own 401 (no-store); GET /hook/ci/x ⇒ the door\'s 405', shapes.map((x) => x.status));
-  ok(/if \(\/\^\\\/hook\(\?:\\\/\|\$\)\/\.test\(p\) \|\|/.test(read('src/auth.js')), '#6 src/auth.js exempts the whole /hook prefix (the door answers every miss)');
+  ok(/if \(\/\^\\\/hook\(\?:\\\/\|\$\)\/\.test\(p\) \|\|/.test(read('src/door.js')), '#6 src/door.js (the door class, from src/auth.js) exempts the whole /hook prefix (the door answers every miss)');
   const callM6 = await rig(mutant(ROUTE, [["router.all(/^\\/hook(?:\\/.*)?$/, (req, res) => { const m = /^\\/hook\\/([^/]+)$/.exec(req.path); hookDoor(req, res, m ? m[1] : '')", "router.all('/hook/:slug', (req, res) => { hookDoor(req, res, req.params.slug)"]]));
   const m6 = await callM6('POST', '/hook/ci/x', { headers: { Authorization: 'Bearer x' }, body: {}, from: '198.51.100.40' });
   ok(m6.status === 404, '#6 RED CONTROL: the pre-r2 route (/hook/:slug) leaves /hook/ci/x to a second shape (404)', m6.status);

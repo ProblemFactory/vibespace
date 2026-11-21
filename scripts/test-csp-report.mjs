@@ -1103,7 +1103,7 @@ console.log('⑧ foreign HTML in the frame host — the code editor\'s preview, 
   const otherTok = await req(`/frame-host/f/${'Z'.repeat(24)}/a.css`), badTok = await req('/frame-host/f/short/a.css'), anonApi = await req('/frame-host/f/short/a.css', { headers: { accept: 'application/json' } }), post = await req(F + 'a.css', { method: 'POST', headers: { cookie: '' } });
   ok(otherTok.status === 404 && badTok.status === 302 && anonApi.status === 401 && [401, 403].includes(post.status), 'an unknown token ⇒ 404; a malformed one is no door (the gate: /login, 401); a POST to the folder ⇒ the gate — the door is GET only', { other: otherTok.status, bad: badTok.status, api: anonApi.status, post: post.status });
   await new Promise((c) => srv.close(c)); fhPool.close();
-  ok(/if \(req\.method === 'GET' && \/\^\\\/frame-host\\\/f\\\/\[A-Za-z0-9_-\]\{24\}\\\/\/\.test\(p\)\) return next\(\);/.test(readRepo('src/auth.js')), 'src/auth.js: the folder door is GET + /frame-host/f/<24 token characters>/ exactly (no prefix, no other method)');
+  ok(/if \(req\.method === 'GET' && \/\^\\\/frame-host\\\/f\\\/\[A-Za-z0-9_-\]\{24\}\\\/\/\.test\(p\)\) return next\(\);/.test(readRepo('src/door.js')), 'src/door.js (the door class: lifted verbatim out of src/auth.js by B3a): the folder door is GET + /frame-host/f/<24 token characters>/ exactly (no prefix, no other method)');
   // THE CENSUS — every frame src/lib makes for foreign HTML: no `allow-same-origin`, no srcdoc — a site only with a reason row
   const libFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => `src/lib/${f}`);
   const code = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');

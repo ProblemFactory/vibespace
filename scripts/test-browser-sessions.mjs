@@ -405,7 +405,7 @@ console.log('— ⑤ GET /api/browser/sessions');
   const p = await get(`?profile=${P1}`);
   ok(p.status === 200 && p.body.sessions.length === 4 && (await get('?profile=ephemeral')).body.sessions.length === 1, 'by profile alone: every conversation\'s sessions on it (the Agent browser panel\'s Replay…)');
   ok((await get('')).status === 400 && (await get('?session=bs-1&sessionId=s-a')).status === 400 && (await get('?browserKey=nope')).status === 400 && (await get('?sessionId=s-a&host=h1')).body.code === 'unsupported-host', 'nothing asked / a bad session id / a bad key are 400; a host is refused by name');
-  const auth = fs.readFileSync(path.join(REPO, 'src/auth.js'), 'utf8');
+  const auth = fs.readFileSync(path.join(REPO, 'src/door.js'), 'utf8');   // the door class, lifted verbatim out of src/auth.js by B3a
   ok(/if \(p\.startsWith\('\/api\/agent\/'\)\) return next\(\);/.test(auth) && !fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8').includes('/api/agent/browser/sessions'), 'cookie only: the route is not under /api/agent/ (the only prefix the bearer tokens pass) and the agent routes got nothing new');
 }
 

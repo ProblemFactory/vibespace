@@ -197,8 +197,8 @@ const get = async (u, h = {}) => { const r = await fetch(S1.base + u, { headers:
   ok(types.every((x) => x.s === 415 && x.j?.code === 'type'), 'the type only from an OWN entry of the closed table: «constructor», image/svg+xml, «__proto__» ⇒ 415, no bytes sent', types.map((x) => x.s));
   const bearer = await get(`/api/chat-picture/${TX}/${U(1)}/0`, { Authorization: 'Bearer ' + ['vsst', 'x'.repeat(20)].join('_') });
   ok(bearer.s === 403 && bearer.j?.code === 'bearer_refused' && /bearer token is refused/.test(bearer.j?.error || ''), 'a request carrying a bearer is refused BY NAME (the owner\'s cookie only)', bearer.j);
-  const auth = read('src/auth.js');
-  ok(!/chat-picture|chat-attachments/.test(auth), 'auth.js opens no door for /api/chat-picture or /api/chat-attachments — an agent or job bearer never reaches them');
+  const auth = read('src/auth.js') + read('src/door.js');   // the auth layer AND its door class (lifted out by B3a): a gone-check must read both
+  ok(!/chat-picture|chat-attachments/.test(auth), 'auth.js (and its door class) opens no door for /api/chat-picture or /api/chat-attachments — an agent or job bearer never reaches them');
 }
 
 console.log('④ the device — never asked without its capability');
