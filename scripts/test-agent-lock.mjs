@@ -173,7 +173,7 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   const H = path.join(T, 'home'); fs.mkdirSync(H, { recursive: true });
   const HOOK = path.join(H, '.vibespace-init.sh');
   const mkDev = (name, withFiles = true) => { const R = path.join(H, '.vibespace', name); fs.mkdirSync(path.join(R, 'state'), { recursive: true }); fs.mkdirSync(path.join(R, 'current'), { recursive: true }); if (withFiles) { fs.writeFileSync(path.join(R, 'state', 'dial.json'), '{"url":"wss://hub.invalid/api/device-dial"}'); fs.writeFileSync(path.join(R, 'current', 'vibespace-device.js'), '// stand-in'); } return R; };
-  const node = path.join(T, 'node'); fs.writeFileSync(node, `#!/bin/sh\necho "STARTED $VIBESPACE_DEVICE_ROOT env=\${VIBESPACE_HUB_ONLY:-clean}" >> ${JSON.stringify(path.join(T, 'started'))}\nenv > "$VIBESPACE_DEVICE_ROOT/state/agent.env"\n`, { mode: 0o755 });
+  const node = path.join(T, 'node'); fs.writeFileSync(node, `#!/bin/sh\necho "STARTED $VIBESPACE_DEVICE_ROOT env=\${VIBESPACE_HUB_ONLY:-clean}" >> ${JSON.stringify(path.join(T, 'started'))}\nenv > "$VIBESPACE_DEVICE_ROOT/state/agent.env.tmp" && mv "$VIBESPACE_DEVICE_ROOT/state/agent.env.tmp" "$VIBESPACE_DEVICE_ROOT/state/agent.env"\n`, { mode: 0o755 });
   const R1 = mkDev('device@a'), R2 = mkDev('device@b'), R3 = mkDev('device@c', false);
   for (const R of [R1, R2, R3]) fs.writeFileSync(path.join(R, 'state', 'node-path'), node);
   const fns = (fnsText) => { const f = path.join(T, 'fns-' + (fns.n = (fns.n || 0) + 1) + '.sh'); fs.writeFileSync(f, fnsText); return f; };
@@ -196,8 +196,11 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   const tok = ['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join('_');   // a credential NAME, built at runtime (no secret-shaped fixture)
   const BOOT_ENV = { PATH: process.env.PATH, HOME: H, LANG: 'C.UTF-8', VIBESPACE_HUB_ONLY: 'leaked', VIBESPACE_INSTANCE_NAME: 'pod-1', HTTPS_PROXY: 'http://proxy.invalid:3128', NODE_EXTRA_CA_CERTS: '/etc/ssl/company-ca.pem', npm_config_cache: '/tmp/npm', PORT: '3456', NODE_OPTIONS: '--max-old-space-size=64', [tok]: 'x', AGENT_BROWSER_PROFILE: 'p' };
   const boot = spawnSync('bash', [HOOK], { encoding: 'utf8', env: BOOT_ENV });
-  let started = ''; for (let t = 0; t < 40 && started.split('\n').filter(Boolean).length < 2; t++) { await sleep(50); try { started = fs.readFileSync(path.join(T, 'started'), 'utf8'); } catch { } }
-  ok(`the hook run as the entrypoint runs it STARTS each registered agent from its own files (the stand-in node), and skips a root without them — ${JSON.stringify(started)} · own-line ${/own-line/.test(boot.stdout)}`,
+  // (主开发 r1324: the hook starts each agent in the BACKGROUND — setsid … & — so its lines come when the stand-in runs: waited on the wall
+  // clock, bounded, the wait said; never a count of looks)
+  const tS = Date.now(); let started = ''; while (Date.now() - tS < 10000 && started.split('\n').filter(Boolean).length < 2) { await sleep(50); try { started = fs.readFileSync(path.join(T, 'started'), 'utf8'); } catch { } }
+  const startedMs = Date.now() - tS;
+  ok(`the hook run as the entrypoint runs it STARTS each registered agent from its own files (the stand-in node), and skips a root without them — ${JSON.stringify(started)} · own-line ${/own-line/.test(boot.stdout)} (its lines waited ${startedMs} ms)`,
     boot.status === 0 && /own-line/.test(boot.stdout) && started.includes(`STARTED ${R1}`) && started.includes(`STARTED ${R2}`) && !started.includes(R3), { started, status: boot.status });
   ok('…and a VIBESPACE_* name of the entrypoint\'s own (the hub\'s) never reaches the agent',
     started.split('\n').filter(Boolean).length === 2 && !started.includes('env=leaked') && (started.match(/env=clean/g) || []).length === 2, started);
@@ -206,9 +209,16 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   // the hub's VIBESPACE_*, npm_*, AGENT_BROWSER_* and the operational / credential names go) — name for name
   const AGE = require(path.join(REPO, 'src/agent-env.js'));
   const envOfAgent = (R) => { const o = {}; try { for (const l of fs.readFileSync(path.join(R, 'state', 'agent.env'), 'utf8').split('\n')) { const i = l.indexOf('='); if (i > 0) o[l.slice(0, i)] = l.slice(i + 1); } } catch { } return o; };
+  // THE STAND-IN'S ENVIRONMENT, WAITED FOR — NEVER ONE READ (主开发 r1324: on the hotfix's release mirror 44910004129, fast 2/2 at load 6.6–7.1,
+  // the RED CONTROL read agent.env the instant the stand-in's `env > file` had created it EMPTY: every name «lacked», the root too). The
+  // stand-in writes its STARTED line first and its environment after, through a shell redirection that creates the file before `env` fills
+  // it — the file's EXISTING is not the fact. The fact: the file holds names EVERY start keeps (PATH, HOME and the root — the short allow
+  // list keeps them too) and reads the same twice, 50 ms apart. Bounded (10 s), the wait said in the leg. And the stand-in writes it WHOLE
+  // (a temp file renamed): an env that writes line by line (uutils' — this box's /usr/bin/env) can pause mid-dump past two equal reads
+  const envSettled = async (R) => { const t0 = Date.now(); let prev = null; while (Date.now() - t0 < 10000) { let txt = ''; try { txt = fs.readFileSync(path.join(R, 'state', 'agent.env'), 'utf8'); } catch { } if (txt && txt === prev && /^PATH=/m.test(txt) && /^HOME=/m.test(txt) && /^VIBESPACE_DEVICE_ROOT=/m.test(txt)) return { settled: true, ms: Date.now() - t0 }; prev = txt; await sleep(50); } return { settled: false, ms: Date.now() - t0 }; };
   const parity = (got) => { const want = AGE.daemonEnv(BOOT_ENV), off = []; for (const k of Object.keys(BOOT_ENV)) if ((k in got) !== (k in want)) off.push(`${k}: agent ${k in got ? 'has' : 'lacks'}, rule ${k in want ? 'keeps' : 'drops'}`); if (got.VIBESPACE_DEVICE_ROOT !== R1) off.push('root'); return off; };
-  const g1 = envOfAgent(R1), off1 = parity(g1);
-  ok(`the boot start carries what the device agent's own env rule keeps (daemonEnv), name for name: the proxy, the CA store, the locale kept; the hub's VIBESPACE_*, npm_*, AGENT_BROWSER_*, PORT, NODE_OPTIONS and the credential name dropped — ${off1.length ? off1.join(' · ') : 'all ' + Object.keys(BOOT_ENV).length + ' names agree'}`, Object.keys(g1).length > 0 && off1.length === 0 && g1.HTTPS_PROXY === BOOT_ENV.HTTPS_PROXY && g1.NODE_EXTRA_CA_CERTS === BOOT_ENV.NODE_EXTRA_CA_CERTS, off1);
+  const e1 = await envSettled(R1), g1 = envOfAgent(R1), off1 = parity(g1);
+  ok(`the boot start carries what the device agent's own env rule keeps (daemonEnv), name for name: the proxy, the CA store, the locale kept; the hub's VIBESPACE_*, npm_*, AGENT_BROWSER_*, PORT, NODE_OPTIONS and the credential name dropped — ${off1.length ? off1.join(' · ') : 'all ' + Object.keys(BOOT_ENV).length + ' names agree'} (its environment waited ${e1.ms} ms${e1.settled ? '' : ', NEVER SETTLED'})`, e1.settled && Object.keys(g1).length > 0 && off1.length === 0 && g1.HTTPS_PROXY === BOOT_ENV.HTTPS_PROXY && g1.NODE_EXTRA_CA_CERTS === BOOT_ENV.NODE_EXTRA_CA_CERTS, off1);
   const caseLine = (re) => { const m = re.exec(FNS); return m ? m[1].split('|') : null; };
   const shKeep = caseLine(/\n\s+(VIBESPACE_API\|[A-Z_|]+)\) ;;\n/), shDrop = caseLine(/\n\s+VIBESPACE_\*\|npm_\*\|AGENT_BROWSER_\*\|([A-Z_|]+)\) unset /);
   const sameSet = (a, b) => !!a && a.length === b.length && b.every((x) => a.includes(x));
@@ -269,7 +279,10 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   const R4 = mkDev('device@d'); fs.writeFileSync(path.join(R4, 'state', 'node-path'), stay);
   const waitHook = '#!/bin/bash\nsleep 0.2 &\nwait\necho own-after-wait\n';
   const stopStay = () => { let pid = 0; try { pid = Number(fs.readFileSync(stayPid, 'utf8').trim()); } catch { } let comm = ''; try { comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); } catch { } if (pid > 1 && comm === 'sleep') { try { process.kill(pid, 'SIGTERM'); } catch { } } fs.rmSync(stayPid, { force: true }); return { pid, comm }; };   // ours: the stand-in this hook started, by its own pid file and its name
-  const bootWait = async (f) => { fs.writeFileSync(HOOK, waitHook); fs.rmSync(stayPid, { force: true }); reg(f, R4, 'device-d'); const t0 = Date.now(); const b = spawnSync('bash', [HOOK], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: H }, timeout: 4000 }); const ms = Date.now() - t0; for (let t = 0; t < 20 && !fs.existsSync(stayPid); t++) await sleep(50); const started = fs.existsSync(stayPid); return { status: b.status, signal: b.signal, timedOut: !!(b.error && b.error.code === 'ETIMEDOUT'), ms, said: /own-after-wait/.test(b.stdout || ''), started, stopped: stopStay() }; };
+  // (主开发 r1324's same look: the stand-in's pid file is written by `echo $$ > file` — created EMPTY before the echo — and the stand-in is
+  // its script (comm node-stay) until its `exec sleep`: «started» is the FACT, the file holding a pid whose process is the stand-in's sleep, waited on the wall
+  // clock, bounded 10 s and said (runningMs); never «the file exists» within twenty looks)
+  const bootWait = async (f) => { fs.writeFileSync(HOOK, waitHook); fs.rmSync(stayPid, { force: true }); reg(f, R4, 'device-d'); const t0 = Date.now(); const b = spawnSync('bash', [HOOK], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: H }, timeout: 4000 }); const ms = Date.now() - t0; const tR = Date.now(); let started = false; while (!started && Date.now() - tR < 10000) { let pid = 0; try { pid = Number(fs.readFileSync(stayPid, 'utf8').trim()) || 0; } catch { } try { started = pid > 1 && fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim() === 'sleep'; } catch { } if (!started) await sleep(50); } return { status: b.status, signal: b.signal, timedOut: !!(b.error && b.error.code === 'ETIMEDOUT'), ms, said: /own-after-wait/.test(b.stdout || ''), started, runningMs: Date.now() - tR, stopped: stopStay() }; };
   const w1 = await bootWait(F);
   ok(`a person's hook ending in \`wait\` RETURNS while the registered agent runs on (the block's subshell) — ${JSON.stringify(w1)}`, w1.status === 0 && !w1.timedOut && w1.said && w1.started && w1.stopped.comm === 'sleep', w1);   // returned by its status and no spawn timeout (an agent left holding the hook's stdout keeps the pipe open: status 0 with ETIMEDOUT) — no wall-clock bound (the ratchet is at 0)
   const AS1 = ANCHOR(FNS, '( R=$R\n', 'agent as the hook\'s child'), AS2 = ANCHOR(FNS, '  fi )\n# <<< vibespace-device $KEY <<<', 'agent as the hook\'s child');
@@ -294,9 +307,10 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
     const AL = ANCHOR(FNS, '    if [ -n "\\$N" ]; then\n      VIBESPACE_DEVICE_ROOT=', 'allow-list start');
     const FA = AL ? fns(FNS.split(AL).join('    if [ -n "\\$N" ]; then\n      exec env -i HOME="\\$HOME" PATH="\\$PATH" LANG="\\${LANG:-C.UTF-8}" VIBESPACE_DEVICE_ROOT=')) : null;
     fs.writeFileSync(HOOK, handWritten); fs.rmSync(path.join(R1, 'state', 'agent.env'), { force: true });
-    if (FA) { reg(FA, R1, 'device-a'); spawnSync('bash', [HOOK], { env: BOOT_ENV }); for (let t = 0; t < 40 && !fs.existsSync(path.join(R1, 'state', 'agent.env')); t++) await sleep(50); }
+    let wA = { settled: false, ms: 0 };
+    if (FA) { reg(FA, R1, 'device-a'); spawnSync('bash', [HOOK], { env: BOOT_ENV }); wA = await envSettled(R1); }   // the FACT, never «the file exists»
     const gA = envOfAgent(R1);
-    ok(`RED CONTROL: the start with the short allow list (the tip before this) — the agent comes back WITHOUT the proxy and the CA store (${gA.HTTPS_PROXY ? 'has' : 'lacks'} HTTPS_PROXY)`, !!FA && Object.keys(gA).length > 0 && !gA.HTTPS_PROXY && parity(gA).length > 0, parity(gA));
+    ok(`RED CONTROL: the start with the short allow list (the tip before this) — the agent comes back WITHOUT the proxy and the CA store (${gA.HTTPS_PROXY ? 'has' : 'lacks'} HTTPS_PROXY; its environment waited ${wA.ms} ms${wA.settled ? '' : ', NEVER SETTLED'})`, !!FA && wA.settled && Object.keys(gA).length > 0 && !gA.HTTPS_PROXY && parity(gA).length > 0, parity(gA));
   }
   // RED CONTROL: a registration that writes no block — the container start starts nothing
   const A = ANCHOR(FNS, 'hook_block > "$T.vs-blk.$$"', 'no block written');
