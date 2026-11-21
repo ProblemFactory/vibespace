@@ -513,6 +513,25 @@ async function legPasteDelete(pasteSrc = null) {
   W.release(); W.end();
   return rows;
 }
+// …and the AGENT's own entry's 删除 (B-3fb5 — vault-paste-door dropAgentEntry): the same two steps — its approval row first, then
+// every job naming it stops (a value the hub minted, approved and running)
+async function legAgentDelete(pasteSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const tag = pasteSrc ? 'adelm' : 'adel';
+  const W = await world(tag);
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 });
+  const { job, a, ok: up } = await approvedService(W, tag);
+  const paste = pasteOf(pasteSrc).create({ vault: W.vault, userTodos: W.todos, vaultJob: W.door, log: () => { } });
+  const t0 = W.told.length;
+  const del = paste.dropAgentEntry('agent:conv-a/tok', { by: 'user', who: 'the test' });
+  const stopped = await W.untilMs(() => job.state !== 'up' && job.state !== 'starting', 3000);
+  rows.desired = job.desiredUp;
+  if (pasteSrc) { W.release(); W.end(); return rows; }
+  row(up && del.ok && W.grants.rowsFor('vault-job', a.entry).length === 0 && stopped.ok && job.desiredUp === false && !['up', 'starting'].includes(job.state) && W.told.slice(t0).filter((x) => /deleted its vault entry «/.test(x.text)).length === 1,
+    'THE AGENT\'S ENTRY DELETED (B-3fb5\'s 删除 — vault-paste-door dropAgentEntry): its approval row removed, the approved service running on it STOPPED, its owner told once', { up, del, state: job.state, desired: job.desiredUp, stopped, told: W.told.slice(t0) });
+  W.release(); W.end();
+  return rows;
+}
 // ── ⑪ WHAT THE OWNER SEES (lane vault-job-approval L2): the Vault row's jobs, a job's uses, its starts counted ────────────────
 async function legSurfaces(doorSrc = null) {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
@@ -817,8 +836,9 @@ const MUT_GONE = dmut('try { if (jm.vaultEntryGone(job.id, words)) n++; }', 'try
 const MUT_LOCK = dmut('  const bindJobs = (engine) => { jm = engine || null; };', '  const bindJobs = (engine) => { jm = engine || null; try { vault.onLock(() => { for (const j of [...jm.jobs.values()]) if (VJ.refsOf(j).length) jm.stop(j); }); } catch { } };');
 const pmut = (from, to) => { try { return swap(PASTE_SRC, from, to); } catch { return null; } };   // a copy of the paste door — its anchor gone ⇒ null, the control RED by name
 const MUT_PASTE = pmut('    if (vaultJob) { try { vaultJob.entryGone(rowId, { label }); }', '    if (false) { try { vaultJob.entryGone(rowId, { label }); }');
-const [revoke, gone, jgone, lockRuns, pdel, revokeMut, goneMut, lockMut, pdelMut] = await Promise.all([legRevoke(), legEntryGone(), legGone(), legLockRuns(), legPasteDelete(),
-  MUT_REVOKE ? legRevoke(MUT_REVOKE) : {}, MUT_GONE ? legEntryGone(MUT_GONE) : {}, MUT_LOCK ? legLockRuns(MUT_LOCK) : {}, MUT_PASTE ? legPasteDelete(MUT_PASTE) : {}]);
+const MUT_AGENT_DEL = pmut('    if (vaultJob) { try { vaultJob.entryGone(id, { label }); }', '    if (false) { try { vaultJob.entryGone(id, { label }); }');
+const [revoke, gone, jgone, lockRuns, pdel, adel, revokeMut, goneMut, lockMut, pdelMut, adelMut] = await Promise.all([legRevoke(), legEntryGone(), legGone(), legLockRuns(), legPasteDelete(), legAgentDelete(),
+  MUT_REVOKE ? legRevoke(MUT_REVOKE) : {}, MUT_GONE ? legEntryGone(MUT_GONE) : {}, MUT_LOCK ? legLockRuns(MUT_LOCK) : {}, MUT_PASTE ? legPasteDelete(MUT_PASTE) : {}, MUT_AGENT_DEL ? legAgentDelete(MUT_AGENT_DEL) : {}]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
@@ -845,11 +865,12 @@ ok(!!MUT_REAUTH && !!cardMutReauth.unauthed && cardMutReauth.unauthed.ok === tru
 ok(!!MUT_DEDUPE && cardMutDedupe.rejudge > 1, 'CONTROL — a card per re-judge (the open-card check removed): a second card — RED on the copy', MUT_DEDUPE ? cardMutDedupe.rejudge : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_DENY && denyMut.state === 'waiting', 'CONTROL — a Deny that leaves its job (the refusal removed): the job still waits — RED on the copy', MUT_DENY ? denyMut.state : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_CAP && capsMut.n === 5, 'CONTROL — no per-conversation bound: a fifth card — RED on the copy', MUT_CAP ? capsMut.n : 'the copy could not be built (its anchor is missing)');
-print('⑩ TAKEN BACK = STOPPED · A LOCK STOPS NOTHING (lane vault-job-approval — decisions ④ ③)', [...revoke, ...gone, ...jgone, ...lockRuns, ...pdel]);
+print('⑩ TAKEN BACK = STOPPED · A LOCK STOPS NOTHING (lane vault-job-approval — decisions ④ ③)', [...revoke, ...gone, ...jgone, ...lockRuns, ...pdel, ...adel]);
 console.log('⑩b MUTANTS (each a copy of the door — RED)');
 ok(!!MUT_REVOKE && revokeMut.desired === true, 'CONTROL — a ✕ that leaves the job running (the stop removed): still meant to run (desiredUp) — RED on the copy', MUT_REVOKE ? revokeMut.desired : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_GONE && goneMut.desired === true, 'CONTROL — a deleted entry that leaves its job running (the stop removed): still meant to run — RED on the copy', MUT_GONE ? goneMut.desired : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_PASTE && pdelMut.desired === true, 'CONTROL — the Vault window\'s delete that never tells the job door (vault-paste-door\'s entryGone call removed): the job runs on — RED on the copy', MUT_PASTE ? pdelMut.desired : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_AGENT_DEL && adelMut.desired === true, 'CONTROL — the agent entry\'s delete that never tells the job door (dropAgentEntry\'s entryGone call removed): the job runs on — RED on the copy', MUT_AGENT_DEL ? adelMut.desired : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_LOCK && lockMut.desired === false, 'CONTROL — a lock that stops the jobs (a lock hook planted): the service is stopped (desiredUp false) — RED on the copy', MUT_LOCK ? lockMut.desired : 'the copy could not be built (its anchor is missing)');
 print('⑩c THE SECOND READ\'S CURES — a schedule\'s revoke stops its running run, rm files nothing again, an archived job leaves the row, an allow prunes', [...cronRevoke, ...rmNoRefile, ...archivePrune]);
 print('⑪ WHAT THE OWNER SEES (L2) — the Vault row\'s jobs, a job\'s uses, the starts counted, the chips', [...surfaces, ...chips]);

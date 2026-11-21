@@ -456,10 +456,17 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!V.AGENT_NS_RE.test(e)) return named('entry_unknown_id');
     // an agent row's field is 'secret' too (src/vault-inventory.js secretRowOf) — the grant row's id is the row's id
     if (useGrants) { let dr = null; try { dr = useGrants.drop(`secrets:${e}#${P.ENTRY_FIELD}`, { by }); } catch (x) { log(`${e}: its vault-use grant row could not be removed — ${x.message}`); return named('store_failed'); } if (dr && !dr.ok) return named(dr.code === 'vault_locked' ? 'vault_locked' : 'store_failed'); }
-    const r = vault.secretDrop(e);
-    if (!r || !r.ok) return named('store_failed');
-    if (r.already) return named('entry_unknown_id');
+    // lane vault-job-approval (decision ④, the agent's entry as the free one): the Background jobs approved to use it (a value
+    // the hub minted asks the owner) — their vault-job row goes FIRST or the delete is refused by name; after the drop every job
+    // that names it stops, its own put ones too (its value is gone: a waiting one is refused, a running one stopped and told once)
     const id = `secrets:${e}#${P.ENTRY_FIELD}`;
+    let label = e.slice(e.lastIndexOf('/') + 1);
+    try { const s = (vault.secretNames() || []).find((x) => x && x.name === e); const row = s ? VI.secretRowOf(s) : null; if (row && row.label) label = String(row.label); } catch { }
+    if (vaultJob) { let jd = null; try { jd = vaultJob.dropRow(id, { by }); } catch (x) { log(`${e}: its Background-job approvals could not be removed — ${x.message}`); return named('store_failed'); } if (jd && !jd.ok) return named('store_failed'); }
+    const r = vault.secretDrop(e);
+    if (!r || !r.ok) { if (vaultJob) { try { vaultJob.entryGone(id, { label, why: 'revoked' }); } catch { } } return named('store_failed'); }   // its approvals are gone already — its jobs stop (taken back)
+    if (r.already) return named('entry_unknown_id');
+    if (vaultJob) { try { vaultJob.entryGone(id, { label }); } catch (x) { log(`${e}: its Background jobs could not be stopped — ${x.message}`); } }
     if (vaultRun && typeof vaultRun.forgetEntry === 'function') { try { vaultRun.forgetEntry(id); } catch (x) { log(`${e}: the run door could not forget it — ${x.message}`); } }
     index(); for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'gone');   // its words card answers nothing now
     const rf = VR.refFor('secrets', e, P.ENTRY_FIELD);

@@ -37,7 +37,7 @@
  *   · TAKEN BACK = STOPPED (decision ④; a LOCK stops nothing — decision ③: this file has no lock road): `revoke(entry, job)` (a
  *     person's ✕ — the route's person()) takes the job out of the entry's row through the ONE writer and STOPS it (the engine's
  *     vaultRevoked: desiredUp false, its owner told once); `dropRow` + `entryGone` — an entry deleted (the paste door's
- *     dropEntry): its row goes first (a write that fails refuses the delete), then every job naming it stops (a waiting one is
+ *     dropEntry, and an agent's own entry's dropAgentEntry): its row goes first (a write that fails refuses the delete), then every job naming it stops (a waiting one is
  *     refused entry_unknown); `jobGone(job)` — a job removed or its content cleared: its id leaves every row.
  * Nothing here returns a value to a caller but the frame to the spawner; nothing is logged but codes and ids.
  */
@@ -367,7 +367,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     try { stopped = !!(jm && jm.vaultRevoked(j, VJ.stopWords('revoked', entryLabelOf(VJ.entryOfRow(id))))); } catch (e) { log(`[vault-job] the revoke of ${j} could not stop it (${(e && e.message) || e})`); }
     return { ok: true, outcome: 'revoked', job: j, stopped };
   }
-  /** AN ENTRY IS DELETED (the Vault window's 删除 — src/server/vault-paste-door.js dropEntry), in two steps around the engine's
+  /** AN ENTRY IS DELETED (the Vault window's 删除 — src/server/vault-paste-door.js dropEntry / dropAgentEntry), in two steps around the engine's
    *  secretDrop: `dropRow(id)` FIRST — the entry's vault-job row is removed (a delete never leaves an approval dangling; a write
    *  that fails refuses the whole delete, as the vault-use row's does) → {ok, jobs:[ids]}; then `entryGone(id)` — every job that
    *  names the entry stops (a running one: stopped, its owner told once; a waiting one: refused `entry_unknown`, its card over). */
