@@ -375,6 +375,8 @@ class App {
     // («Not now» said ONCE a hold — each refused row says it at the row; a toast per change was noise)
     this.settings.onHeld = (h, o) => { noteStoreHeld(h); const once = h ? `${h.file}|${h.since}` : ''; if (o && o.refused && h && h.rung !== 'silent' && this._notNowSaid !== once) { this._notNowSaid = once; showToast(t('Not now — VibeSpace cannot read your settings right now; this change was not saved.'), { type: 'error' }); } };
     if (this.settings.held) noteStoreHeld(this.settings.held);   // a refusal its boot read met before this line
+    // B-ddf3 unit 2 (r1407 (b)): a settings save is answered at the landing on this machine's CLI files — one that did not land is said by name
+    this.settings.onCliConfig = (c) => { showToast(t("Saved in VibeSpace, but not yet in this machine's CLI files: {why}", { why: String((c && c.why) || '') }), { type: 'warn' }); };
     onStoreLift('settings.json', () => { try { this.settings.refetch(); } catch { } });
     onStoreLift('custom-themes.json', () => { try { this._loadCustomThemes(); } catch { } });
     onStoreLift('user-state.json', () => { try { this.sidebar?._fetchUserState?.(); } catch { } });

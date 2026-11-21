@@ -79,7 +79,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
     try { planB64 = typeof job.planOf === 'function' ? job.planOf() : job.planOf; } catch (e) { planB64 = null; }
     inFlight = (planB64 == null
       ? Promise.resolve({ at: Date.now(), reason: job.reason, ok: false, receipts: [], created: [], why: 'the plan could not be built' })
-      : runOnce(planB64, { reason: job.reason, uninstall: job.uninstall }))
+      : runOnce(planB64, { reason: job.reason, uninstall: job.uninstall }).catch((e) => ({ at: Date.now(), reason: job.reason, ok: false, receipts: [], created: [], why: `the run broke (${(e && e.message) || e}) — nothing is known to have landed` })))
       .then((landing) => {
         settle(landing);
         if (landing.ok) for (const c of landing.created) journal(`[cli-config] created ~/${c.rel} (the CLI had never written one) (${job.reason})`);

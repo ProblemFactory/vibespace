@@ -45,6 +45,7 @@ class SettingsManager {
     this._landed = false;
     this.held = null;
     this.onHeld = null;      // (held, { refused: [paths] }?) → the page's ONE strip, and «not now» said for a refused save (app.js)
+    this.onCliConfig = null; // B-ddf3 unit 2 (r1407 (b)): ({ landed: false, why }) → a save whose CLI-config change did not land on this machine, said (app.js)
     this._failHeld = new Set();   // the failed paths a HOLD refused (past its silent rungs): their row says «Not now», never «the server did not answer»
     this._landListeners = new Set();
     this._liftListeners = new Set();
@@ -387,6 +388,8 @@ class SettingsManager {
         let j = null;
         try { j = await res.json(); } catch { j = null; }
         if (j && j.spend && typeof j.spend === 'object') this._live = { spend: j.spend };
+        // B-ddf3 unit 2 (r1407 (b)): the answer came at the LANDING on this machine's CLI files — one that did not land says why
+        if (j && j.cliConfig && j.cliConfig.landed === false) { try { this.onCliConfig?.(j.cliConfig); } catch { /* the page's own */ } }
         // a row the server SET ASIDE keeps its stored value there (the server's copy says so); its words wait at the row
         for (const [p, why] of Object.entries((j && j.refused && typeof j.refused === 'object') ? j.refused : {})) { this._server[p] = before[p]; this._refused.set(p, { code: String((why && why.code) || '') }); }
       }
