@@ -370,11 +370,12 @@ function create(engineCtx) {
    *  just replaced. The hold is set synchronously when the replace is called,
    *  so at apply time it is either visible (skip) or the replace's check will
    *  read this write (refused before anything is made). */
-  async function transition(id, to, by, patch = null, { unless = null } = {}) {
+  async function transition(id, to, by, patch = null, { unless = null, unlessWhy = null } = {}) {
     let verdict = { ok: false, why: 'no such proposal' }, linkedOf = null;
     await store.outbox.update((ob) => {
       const p = ob.proposals[id];
       if (!p) return;
+      if (typeof unless === 'function' && unlessWhy && unless(p)) { verdict = { ok: false, why: unlessWhy, changed: true }; return; }   // round wke4s5jp9 (4): the press that waited, refused by its own words
       if (typeof unless === 'function' && unless(p)) { verdict = { ok: false, why: 'held: a replace of this proposal is in flight', held: true }; return; }
       verdict = P.canTransition(p.state, to, by);
       if (!verdict.ok) return;
@@ -1241,8 +1242,11 @@ function create(engineCtx) {
     // r4: a THROW after the grant (the transition's or the send's store
     // write refused) gives the slot back unless the request may have left
     try {
-      const tr = await transition(id, 'sending', by, (p) => { if (leftOut) p.filesLeftOut = leftOut; p.approvedBy = by; if (edited) { p.text = text; p.edited = true; } if (prepared) p.prepared = prepared; delete p.decisionChanged; stampReceiptChoice(p, receiptChoice); });
-      if (!tr.ok) { wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id); return { ok: false, code: 'bad-state', error: tr.why }; }
+      // round wke4s5jp9 (4) — THE PRESS THAT WAITS: this press checked p0 (its text, its decision) before the awaits above; an edit
+      // from another device that landed meanwhile changed the record — the step that moves it to sending refuses, nothing is sent
+      const tr = await transition(id, 'sending', by, (p) => { if (leftOut) p.filesLeftOut = leftOut; p.approvedBy = by; if (edited) { p.text = text; p.edited = true; } if (prepared) p.prepared = prepared; delete p.decisionChanged; stampReceiptChoice(p, receiptChoice); },
+        { unless: (p) => p.text !== p0.text || P.decisionSummary(p.prepared) !== P.decisionSummary(p0.prepared), unlessWhy: 'this proposal changed while the press waited — nothing was sent; read it again, then decide' });
+      if (!tr.ok) { wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id); return tr.changed ? { ok: false, code: 'changed-since-shown', error: tr.why, proposal: proposalView(store.outbox.snapshot().proposals[id]) } : { ok: false, code: 'bad-state', error: tr.why }; }
       auditOutbox(store.outbox.snapshot().proposals[id], 'approve');
       await sendNow(id, { pressed });
     } catch (err) {

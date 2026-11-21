@@ -177,7 +177,7 @@ ok(await until(async () => (await fetch(`${BASE}/api/home`)).ok, 40000), 'the sc
 // ── CHROME ──
 const WebSocket = require('ws');
 await until(async () => (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).ok, 20000);
-async function newPage({ control = false, outbox = OUTBOX, api = APIS, lang = 'zh' } = {}) {
+async function newPage({ control = false, outbox = OUTBOX, api = APIS, lang = 'zh', approve = null, bundle = null } = {}) {
   const tgt = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tgt.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((res) => ws.on('open', res));
@@ -192,13 +192,18 @@ async function newPage({ control = false, outbox = OUTBOX, api = APIS, lang = 'z
   on.set('Fetch.requestPaused', (p) => {
     const u = new URL(p.request.url);
     const reply = (type, body) => cdp('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: type }, { name: 'Cache-Control', value: 'no-store' }], body });
-    if (p.request.method === 'GET' && u.pathname === '/api/channels/outbox') { served.outbox++; return reply('application/json', b64(outbox)); }
+    if (p.request.method === 'GET' && u.pathname === '/api/channels/outbox') { served.outbox++; return reply('application/json', b64(typeof outbox === 'function' ? outbox() : outbox)); }
+    // B-82c2 round wke4s5jp9: a page whose Outbox is a REAL engine in this process — its approve press goes to that engine (the
+    // route's own arguments; the route's status: 409 for a refusal the card draws, as answer3 maps them)
+    const am = /^\/api\/channels\/outbox\/([^/]+)\/approve$/.exec(u.pathname);
+    if (approve && p.request.method === 'POST' && am) return Promise.resolve(approve(decodeURIComponent(am[1]), JSON.parse(p.request.postData || '{}'))).then(([status, body]) => cdp('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: status, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, { name: 'Cache-Control', value: 'no-store' }], body: b64(body) }));
+    if (bundle && u.pathname === '/bundle.js') return reply('application/javascript', fs.readFileSync(path.join(wt, 'public', bundle)).toString('base64'));
     if (p.request.method === 'GET' && u.pathname === '/api/channels/api') { served.api++; return reply('application/json', b64({ cards: api })); }
     if (control && u.pathname === '/bundle.js') return reply('application/javascript', fs.readFileSync(path.join(wt, 'public/bundle-control.js')).toString('base64'));
     if (control && u.pathname === '/style.css') return reply('text/css', fs.readFileSync(path.join(wt, 'public/style-control.css')).toString('base64'));
     return cdp('Fetch.continueRequest', { requestId: p.requestId });
   });
-  await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/api/channels/outbox*', requestStage: 'Request' }, { urlPattern: '*/api/channels/api', requestStage: 'Request' }, ...(control ? [{ urlPattern: '*/bundle.js*', requestStage: 'Request' }, { urlPattern: '*/style.css*', requestStage: 'Request' }] : [])] });
+  await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/api/channels/outbox*', requestStage: 'Request' }, { urlPattern: '*/api/channels/api', requestStage: 'Request' }, ...(control || bundle ? [{ urlPattern: '*/bundle.js*', requestStage: 'Request' }, { urlPattern: '*/style.css*', requestStage: 'Request' }] : [])] });
   const evaljs = async (expr) => {
     const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
     if (r.result && r.result.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 600));
@@ -685,5 +690,92 @@ ok(s25p && s25p.barH === null && s25p.margin === '0px' && s25p.headTop >= s25p.l
 p5.close();
 
 console.log(`PNGs: ${SHOTS}`);
+// ── ㉖ B-82c2 round wke4s5jp9 MUST 1 — THE PAGE HALF OF RULE C, through the REAL page: the Outbox window's card over a REAL engine in this
+// process (its read and its approve press routed there by the page's own requests; the route's arguments and statuses). An edit whose
+// mention decision changed: the press stores it and sends nothing (mentions-changed) — the page draws AT ONCE, from the reply, the stored
+// text with its decision and the one «changed» line, the editor CLOSED; the next press sends exactly that: ONE message, tagged at the
+// stored places. RED: the card kept (the round as it was) — the old card stays, every later press is refused, nothing is sent.
+{
+  const R26 = (rel) => require(path.join(wt, rel));
+  const ENG26 = R26('src/server/channels-engine.js'), CH26 = R26('src/channels/index.js'), fake26 = R26('src/channels/fake.js'), LM26 = R26('src/channels/lark/mentions.js');
+  const { UserTodoManager: UTM26 } = R26('src/user-todos.js');
+  const AGENT26 = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: ['g1'], msgLevelFor: () => 'none' };
+  const ZS = { id: 'ou_zhang00001', name: '张三' }, LS = { id: 'ou_li00000001', name: '李四' }, SL = { alice: 'U0ALICE02', bob: 'U0BOB0001' };
+  // a channel dressed with a mention contract: Lark's (the one decision over a whole stand-in member list, the wire at the decided
+  // places) or Slack's shape (its own ids; @name → <@ID> for a decided name)
+  const dressed26 = (kind) => {
+    const registry = CH26.createChannelRegistry();
+    const base = fake26.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'] });
+    const sends = [];
+    const mod = { ...base, caps: { ...base.caps, prepareSend: true, mentionId: kind === 'lark' ? LM26.MENTION_ID : '^[A-Z0-9][A-Z0-9_]{1,40}$' } };
+    mod.create = (rec, deps) => {
+      const impl = base.create(rec, deps);
+      return { ...impl,
+        async prepareSend(c, { text } = {}) {
+          if (kind === 'lark') return { text, ...LM26.decideMentions({ text, known: [], members: { list: [ZS, LS], whole: true, why: null } }), tooLong: false, sendMax: null, at: Date.now() };
+          const mentions = [], notifies = [];
+          for (const m of String(text).matchAll(/(^|\s)@([a-z]+)/g)) if (SL[m[2]] && !mentions.some((x) => x.id === SL[m[2]])) { mentions.push({ name: m[2], id: SL[m[2]] }); notifies.push(m[2]); }
+          return { text, mentions, notifies, unresolved: [], plain: [], over: [], tooLong: false, sendMax: null, at: Date.now() };
+        },
+        async send(c, args) {
+          const pr = args.prepared || {};
+          sends.push(kind === 'lark' ? LM26.wireText(args.text, pr.places) : String(args.text).replace(/(^|\s)@([a-z]+)/g, (all, sp, n) => ((pr.mentions || []).some((x) => x.name === n) ? `${sp}<@${SL[n]}>` : all)));
+          return impl.send(c, args);
+        } };
+    };
+    registry.register(mod);
+    return { registry, sends };
+  };
+  const DELIVER26 = { async deliverToConversation() { return { ok: true }; }, stashFor() {}, onStash() { return () => {}; }, onRetry() { return () => {}; }, retryEvent() {}, drain() { return []; }, stashPeek() { return []; }, forget() {} };
+  const engineFor = async (D) => {
+    const dataDir = fs.mkdtempSync(path.join(ROOT, 'eng26-'));
+    const eng = ENG26.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry: D.registry, broadcast: () => {}, userTodos: new UTM26({ dataDir }), deliver: DELIVER26, log: { log() {}, warn() {}, error() {} }, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }] });
+    await eng.pass('fake-poll', { force: true }); await eng.refresh('fake-poll', 'fake-poll-ops'); await eng.pass('fake-poll', { force: true });
+    await eng.setReach('fake-poll', 'fake-poll-ops', { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, level: 'visible' });
+    return eng;
+  };
+  // the route's status (answer3): 409 for a refusal the card draws (mentions-changed, changed-since-shown, …), 400 bad-proposal
+  const statusOf = (r) => (r && r.ok ? 200 : (r && r.code) === 'not-found' ? 404 : ['mentions-changed', 'changed-since-shown', 'bad-state', 'send-not-available', 'wake-count-mismatch'].includes(r && r.code) ? 409 : (r && r.code) === 'bad-proposal' ? 400 : 500);
+  const OBW = "[...app.wm.windows.values()].find((x) => x.type === 'channel-outbox')";
+  const editRoad = async ({ kind, first, edited, bundle = null }) => {
+    const D = dressed26(kind); const eng = await engineFor(D);
+    const r = await eng.propose(AGENT26, 'fake-poll', 'fake-poll-ops', { text: first });
+    if (!r.ok) { eng.stop(); return { err: r.code }; }
+    const id = r.proposal.id, presses = [];
+    const pg = await newPage({ outbox: () => eng.outboxView(), api: APIS, approve: async (pid, b) => { const a = await eng.approve(pid, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: b.deliver || null, shown: b.shown, withoutFiles: b.withoutFiles === true }); presses.push(a.code || 'ok'); return [statusOf(a), a]; }, ...(bundle ? { bundle } : {}) });
+    const opened = await openOutbox(pg);
+    const CARD = `(() => { const w = ${OBW}; return w && w.element.querySelector('.chan-prop[data-proposal=${JSON.stringify(id)}]'); })()`;
+    const step1 = await pg.evaljs(`(async () => { const w = ${OBW}; const rv = w && w.element.querySelector('.chan-orow[data-orow=${JSON.stringify(id)}] [data-review]'); if (rv) rv.click(); await new Promise((r) => setTimeout(r, 300));
+      const c = ${CARD}; if (!c) return { err: 'no card' }; const eb = [...c.querySelectorAll('.chan-prop-actions button')].find((b) => /^(编辑|Edit)/.test(b.textContent.trim())); if (!eb) return { err: 'no edit button' }; eb.click(); await new Promise((r) => setTimeout(r, 100));
+      const ta = c.querySelector('textarea.chan-prop-edit'); if (!ta) return { err: 'no editor' }; ta.value = ${JSON.stringify(edited)}; ta.dispatchEvent(new Event('input', { bubbles: true }));
+      c.querySelector('.chan-prop-actions button[data-approve]').click(); return { ok: true }; })()`);
+    await until(() => presses.length >= 1, 8000); await sleep(400);
+    const after1 = await pg.evaljs(`(() => { const c = ${CARD}; if (!c) return null; const ch = c.querySelector('.chan-prop-changed'); return { changed: ch ? ch.textContent : null, editor: !!c.querySelector('textarea.chan-prop-edit'), shows: c.textContent.includes(${JSON.stringify(edited)}), arming: c.classList.contains('chan-prop-arming') }; })()`);
+    const sends1 = D.sends.length;
+    await sleep(800);   // past the arming time: the redrawn card is a new card, armed again
+    await pg.evaljs(`(() => { const c = ${CARD}; const b = c && c.querySelector('.chan-prop-actions button[data-approve]'); if (b) b.click(); return 1; })()`);
+    await until(() => presses.length >= 2, 8000); await sleep(300);
+    const out = { opened, step1, after1, presses: presses.slice(), sends1, sends: D.sends.slice() };
+    pg.close(); eng.stop(); return out;
+  };
+  // the RED bundle: this tree's card with the redraw cut (the card kept, as the round had it)
+  const obx26 = fs.readFileSync(OBX, 'utf-8');
+  const REDRAW = obx26.split('\n').find((l) => l.startsWith('      if (r.changed) { const fresh = renderProposalCard('));
+  ok(!!REDRAW && obx26.split(REDRAW).length === 2, '㉖ the control has its line to cut: the card drawn again from the reply of a changed decision (once)');
+  fs.writeFileSync(OBX, obx26.replace(REDRAW, '      if (r.changed) { lock(false); return; }'));
+  build('public/bundle-keep.js');
+  fs.writeFileSync(OBX, obx26);
+  const ZW = `<at user_id="${ZS.id}">张三</at> 和 <at user_id="${LS.id}">李四</at> 请看`;
+  const l26 = await editRoad({ kind: 'lark', first: '@张三 请看', edited: '@张三 和 @李四 请看' });
+  ok(l26.opened && l26.step1 && l26.step1.ok && J(l26.presses) === J(['mentions-changed', 'ok']) && l26.sends1 === 0 && l26.after1 && /这条消息会通知的人变了/.test(l26.after1.changed || '') && l26.after1.editor === false && l26.after1.shows && l26.after1.arming && l26.sends.length === 1 && l26.sends[0] === ZW,
+    `㉖ MUST 1 (Lark, the REAL page): the edit adding @李四 — the press stores it and sends NOTHING; the card is drawn AT ONCE from the reply: the edited text, «${l26.after1 && l26.after1.changed}», the editor closed, armed again; the next press sends ONE message tagged at the stored places («${l26.sends[0]}»)`, l26);
+  const l26R = await editRoad({ kind: 'lark', first: '@张三 请看', edited: '@张三 和 @李四 请看', bundle: 'bundle-keep.js' });
+  ok(l26R.after1 && l26R.after1.changed === null && l26R.after1.editor === true && J(l26R.presses) === J(['mentions-changed', 'changed-since-shown']) && l26R.sends.length === 0,
+    '㉖ RED CONTROL: the card kept (the round as it was) — no «changed» line, the old editor still open, the next press refused (changed-since-shown): the owner\'s own road cannot send', l26R);
+  const s26 = await editRoad({ kind: 'slack', first: '@bob please look', edited: '@bob and @alice please look' });
+  ok(J(s26.presses) === J(['mentions-changed', 'ok']) && s26.sends1 === 0 && s26.after1 && s26.after1.editor === false && !!s26.after1.changed && s26.sends.length === 1 && s26.sends[0] === '<@U0BOB0001> and <@U0ALICE02> please look',
+    `㉖ MUST 1 (a Slack-shaped channel, the REAL page): an edit that adds a name — two presses, ONE message («${s26.sends[0]}»)`, s26);
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

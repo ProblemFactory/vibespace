@@ -520,7 +520,16 @@ async function post(pathname, body) {
  *  digest of the record the card was drawn from (r6 verify F6). The reaction / recall road had its own POST without it:
  *  two roads, one drifted. test-channel-outbox's census holds every outbox approve POST in the client tree to this one. */
 function approveProposal(p, body) {
-  return post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...body, shown: P.shownDigest(p) });
+  return fetchJson(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ ...body, shown: P.shownDigest(p) }) }).then(approveAnswer);
+}
+/** B-82c2 round wke4s5jp9 MUST 1 — THE PAGE HALF OF RULE C: a press whose mention decision CHANGED (`mentions-changed`, a 409 with
+ *  its own words row) is no error: nothing was sent, the record holds the text and its new decision — the reply carries that
+ *  proposal, and the caller draws it AT ONCE (never waiting for the broadcast); the words are information in the person's
+ *  language. Any other refusal: its words as an error, and null (as `post` answers). */
+function approveAnswer(r) {
+  if (r && r.code === 'mentions-changed' && r.proposal && typeof r.proposal === 'object') { showToast(routeErrorText(r), { type: 'info' }); return { changed: true, proposal: r.proposal }; }
+  if (!r || r.error) { showToast(routeErrorText(r), { type: 'error' }); return null; }
+  return r;
 }
 
 /**
@@ -801,6 +810,10 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       // refuses the approval (409 changed-since-shown, nothing sent) when the proposal is no longer that record
       const r = await approveProposal(p, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: (Number(p.wakes) || 0) + woke, ...(toAgent ? { deliver } : {}), ...(noFile ? { withoutFiles: true } : {}) });
       if (!r) { lock(false); return; }
+      // round wke4s5jp9 MUST 1: the decision changed — THIS card is drawn again from the reply's record: the stored text with its
+      // decision and the one «changed» line, the editor CLOSED (the stored text is the card's text now; another change opens Edit
+      // again); a new card arms again, and its next press carries the digest of the record it shows — that press sends it
+      if (r.changed) { const fresh = renderProposalCard(app, r.proposal, { compact, line, onLine, onJump }); fresh.dataset.sig = cardSig(r.proposal, compact, line); fresh.dataset.fateSig = fateSig(r.proposal); fresh.dataset.state = r.proposal.state; if (line && !card.classList.contains('chan-prop-shut')) setLineOpen(fresh, true); card.replaceWith(fresh); return; }
       const sent = !!(r.proposal && r.proposal.state === 'sent');
       const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
       // lane lark-send-hold: a send waiting the vendor's reset is approved — the toast says when it goes, never "Not sent"

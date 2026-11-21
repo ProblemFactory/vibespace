@@ -8396,6 +8396,7 @@ export default {
   "{names} — sent as plain words, nobody is notified: the chat's members were not looked up": "{names} —— 普通の文字として送信され、誰にも通知されません：チャットのメンバーを照会していません",   // B-82c2 round wn462wr7s
   "Changed": "変更あり",   // B-82c2 round wfgpbe038
   "Who this message notifies changed — nothing was sent; read the rows below, then approve again": "このメッセージが通知する相手が変わりました —— 送信していません。下の行を確認してから、もう一度承認してください",   // B-82c2 round wfgpbe038
+  "Who this message notifies changed — nothing was sent; the card shows it now: read it, then approve again": "このメッセージが通知する相手が変わりました —— 送信していません。カードに今の内容が表示されています：確認してから、もう一度承認してください",   // B-82c2 round wke4s5jp9
   "Not checked": "未確認",   // B-82c2 round wfgpbe038
   "{names} — taken from this chat; the whole member list was not read, so another member may bear this name: {why}": "{names} —— このチャットから取得。メンバー一覧をすべて読めなかったため、同じ名前の別のメンバーがいるかもしれません：{why}",   // B-82c2 round wfgpbe038
   "Not read": "未読み取り",   // B-82c2 round wfgpbe038

@@ -21,8 +21,8 @@ const EVERYONE_WORDS = Object.freeze(['所有人', 'all', 'everyone']);
  *  goes as its label in plain words (never a mention the card did not show). */
 const TAG_RE = /<at\s+user_id\s*=\s*"([^"<>\s]{1,80})"\s*>([^<>\n]{0,80})<\/at>/g;
 /** An `@` at a word start (the line's start, a space, or an opening / CJK punctuation mark); `a@b` is no mention. */
-const AT_RE = /(^|[\s(\[{,;:!?"'“‘（「，。、：；！？])@/gu;
-const NAME_MAX = 80, NAMES_MAX = 50, PEOPLE_MAX = 2000;
+const AT_RE = /(?<![A-Za-z0-9._%+\-])@/g;   // round wke4s5jp9 (6): an at-sign starts an at-word UNLESS the character before it belongs to a mail address's first part — the closed list is of what does NOT start one (a CJK sentence with no space, a bracket, a bold mark, a slash: each starts one)
+const NAME_MAX = 80, NAMES_MAX = 50, PEOPLE_MAX = 2000, MENTIONS_MAX = 50;
 const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 const WORD_RE = /[\p{L}\p{N}]/u;
 const lower = (s) => String(s).toLocaleLowerCase('en');
@@ -84,13 +84,11 @@ const blankCode = (s) => String(s).replace(/```[\s\S]*?(?:```|$)/g, (m) => m.rep
  *  space («Ann Lee»); ≤ 40 characters. */
 function writtenWord(rest, from = 0) {
   const s = String(rest);
-  let i = 0;
-  while (i < s.length && i < 40 && !SPACE_RE.test(s[i]) && !LINE_ENDS.has(s[i]) && (i < from || !endsHere(s.slice(i)))) i++;
-  if (from > 0 && i === from && s[i] === ' ' && /[\p{Lu}]/u.test(s[i + 1] || '') || (from > 0 && i === from && s[i] === ' ' && CJK_RE.test(s[i + 1] || ''))) {
-    i++;
-    while (i < s.length && i < 40 && !SPACE_RE.test(s[i]) && !LINE_ENDS.has(s[i]) && !endsHere(s.slice(i))) i++;
-  }
-  return s.slice(0, i).replace(/[\s]+$/, '');
+  let i = Math.min(Math.max(0, from), s.length);   // the matched name is written whole, spaces in it too
+  const run = () => { while (i < s.length && i < 40 && !SPACE_RE.test(s[i]) && !LINE_ENDS.has(s[i]) && !endsHere(s.slice(i))) i++; };
+  run();
+  if (from > 0 && i === from && s[i] === ' ' && (/\p{Lu}/u.test(s[i + 1] || '') || CJK_RE.test(s[i + 1] || ''))) { i++; run(); }
+  return s.slice(0, i).replace(/\s+$/, '');
 }
 
 /**
@@ -115,16 +113,22 @@ function decideMentions({ text, known = null, members = null } = {}) {
   const s = String(text == null ? '' : text);
   const listed = members && Array.isArray(members.list) ? members.list : [];
   const whole = !!(members && members.whole === true && !members.why);
-  const ppl = peopleOf([...(Array.isArray(known) ? known : []), ...listed]);
+  // round wke4s5jp9 (3): over a WHOLE list the candidates are the MEMBERS only (rule B: the whole list decides) — a person known only
+  // from the records (someone who left) is «not a member here», never a mention
+  const ppl = peopleOf(whole ? listed : [...(Array.isArray(known) ? known : []), ...listed]);
   const ids = new Set(ppl.map((p) => p.id));
   const nameOf = new Map(ppl.map((p) => [p.id, p.name]));   // the name a mention notifies: the member list's, else the newest known
   for (const p of peopleOf(listed)) nameOf.set(p.id, p.name);
-  const out = { mentions: [], notifies: [], unresolved: [], plain: [], open: [], openWhy: null, everyone: false, unchecked: [], uncheckedWhy: null, places: [], unread: 0 };
+  const out = { mentions: [], notifies: [], unresolved: [], plain: [], open: [], openWhy: null, everyone: false, unchecked: [], uncheckedWhy: null, places: [], unread: 0, over: [] };
   const addMention = (name, id, place) => {   // one notify name a mention, in the same order; every decided PLACE recorded
+    // round wke4s5jp9: past MENTIONS_MAX people in one message the rest go as plain words — their own row (`over`, «Past the
+    // mark limit»), never a place on the wire
+    const have = out.mentions.some((m) => m.id === id && m.name === name);
+    if (!have && out.mentions.length >= MENTIONS_MAX) { if (!out.over.includes(name)) { if (out.over.length < NAMES_MAX) out.over.push(name); else out.unread++; } return; }
     out.places.push(place);
     if (id === 'all') out.everyone = true;
     else if (!whole && !out.unchecked.includes(name) && out.unchecked.length < NAMES_MAX) out.unchecked.push(name);   // decided without a whole list: the card says so
-    if (out.mentions.some((m) => m.id === id && m.name === name)) return;
+    if (have) return;
     out.mentions.push({ name, id });
     out.notifies.push(id === 'all' ? name : (nameOf.get(id) || name));
   };
@@ -149,13 +153,16 @@ function decideMentions({ text, known = null, members = null } = {}) {
     for (const p of ppl) if (beginsWith(rest, p.name)) cands.push({ len: p.name.length, id: p.id });
     for (const w of EVERYONE_WORDS) if (beginsWith(rest, w)) cands.push({ len: w.length, id: 'all' });
     const ends = (c) => (c.id === 'all' ? everyoneEnds(tailOf(c.len), whole) : whole ? endsWhole(tailOf(c.len), rest.slice(0, c.len)) : endsHere(tailOf(c.len)));
+    // round wke4s5jp9 MUST 2 — ONE SENTENCE FOR BOTH MODES: the LONGEST candidate name that begins here is the only one that may
+    // decide; it decides when it ends here by its mode's enders; when it does not, the word is plain (a whole list) or open (none),
+    // said on the card — A SHORTER NAME IS NEVER TRIED (@Ann Lee's draft never notifies Ann)
     const longest = cands.reduce((n, c) => Math.max(n, c.len), 0);
-    // over a whole list the longest name that ENDS there; without one the longest name there, decided only when it ends
-    const best = whole ? cands.filter(ends).reduce((n, c) => Math.max(n, c.len), 0) : (cands.filter((c) => c.len === longest).some(ends) ? longest : 0);
+    const top = cands.filter((c) => c.len === longest);
+    const best = longest && top.some(ends) ? longest : 0;
     if (!best) { add(whole ? out.plain : out.open, writtenWord(rest, longest)); continue; }
-    const who = [...new Set(cands.filter((c) => c.len === best && ends(c)).map((c) => c.id))];
+    const who = [...new Set(top.filter(ends).map((c) => c.id))];
     const typed = rest.slice(0, best);
-    if (who.length === 1) addMention(who[0] === 'all' ? typed : typed, who[0], { at: at - 1, len: best, id: who[0] });
+    if (who.length === 1) addMention(typed, who[0], { at: at - 1, len: best, id: who[0] });
     else add(out.unresolved, typed);
   }
   out.plain = out.plain.filter(Boolean);
@@ -184,7 +191,9 @@ function wireText(text, places) {
   const ps = (Array.isArray(places) ? places : []).filter((p) => p && Number.isInteger(p.at) && p.at >= 0 && Number.isInteger(p.len) && p.len > 0 && typeof p.id === 'string' && ID_RE.test(p.id));
   const tagPlace = new Map(ps.filter((p) => p.tag === true).map((p) => [p.at, p]));
   const events = [];
-  for (const m of blankCode(s).matchAll(TAG_RE)) events.push({ at: m.index, end: m.index + m[0].length, tag: true, id: m[1], label: m[2] });
+  // round wke4s5jp9 (5): the typed tags are found in the text WITH its code — Lark's text body has no code form and the vendor parses
+  // a tag anywhere: a tag that is not at a decided place goes as its label in plain words, inside a backtick span or a fence too
+  for (const m of s.matchAll(TAG_RE)) events.push({ at: m.index, end: m.index + m[0].length, tag: true, id: m[1], label: m[2] });
   for (const p of ps) if (p.tag !== true) events.push({ at: p.at, end: p.at + 1 + p.len, tag: false, id: p.id });
   events.sort((a, b) => a.at - b.at);
   let out = '', from = 0;

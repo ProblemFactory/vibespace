@@ -8397,6 +8397,7 @@ export default {
   "{names} — sent as plain words, nobody is notified: the chat's members were not looked up": "{names} —— 作为普通文字发送，不会通知任何人：没有查找群成员",   // B-82c2 round wn462wr7s
   "Changed": "已变更",   // B-82c2 round wfgpbe038
   "Who this message notifies changed — nothing was sent; read the rows below, then approve again": "这条消息会通知的人变了 —— 没有发送；看一下下面几行，再批准一次",   // B-82c2 round wfgpbe038
+  "Who this message notifies changed — nothing was sent; the card shows it now: read it, then approve again": "这条消息会通知的人变了 —— 没有发送；卡片上现在写着新的结果：看一下，再批准一次",   // B-82c2 round wke4s5jp9
   "Not checked": "未核对",   // B-82c2 round wfgpbe038
   "{names} — taken from this chat; the whole member list was not read, so another member may bear this name: {why}": "{names} —— 取自本群；没有读到完整的成员名单，可能还有别的成员同名：{why}",   // B-82c2 round wfgpbe038
   "Not read": "未读取",   // B-82c2 round wfgpbe038

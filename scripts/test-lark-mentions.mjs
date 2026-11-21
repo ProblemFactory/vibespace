@@ -50,6 +50,13 @@ const larkSrc = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8')
 // space and a capital letter) — a planted copy whose `endsHere` reads that list instead of the enders
 const ENDS = "function endsHere(tail) {\n  const t = String(tail || '');\n  if (!t) return true;\n";
 const LM_CONT = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, ENDS, "function endsHere(tail) {\n  const t = String(tail || '');\n  if (!t || (!/[\\p{L}\\p{N}]/u.test(t[0]) && !(t[0] === ' ' && /\\p{Lu}/u.test(t[1] || '')))) return true;\n", 'continuers-put-back'), 'mentions-continuers');
+// RED of MUST 2 (round wke4s5jp9): the filter put back — over a whole list the longest name THAT ENDS (a shorter name tried)
+const BEST = '    const best = longest && top.some(ends) ? longest : 0;\n';
+const WHO = '    const who = [...new Set(top.filter(ends).map((c) => c.id))];\n';
+const LM_FILTER = MUT.load('src/channels/lark/mentions.js', anchored(anchored(mSrc, BEST, '    const best = whole ? cands.filter(ends).reduce((n, c) => Math.max(n, c.len), 0) : (longest && top.some(ends) ? longest : 0);\n', 'filter-then-longest'), WHO, '    const who = [...new Set(cands.filter((c) => c.len === best && ends(c)).map((c) => c.id))];\n', 'filter-then-longest-who'), 'mentions-filter-longest');   // stale-pins: kept (the RED plants the line as it was)
+// RED of small 6: the closed list of characters that may stand before an at-word put back
+const ATRE = "const AT_RE = /(?<![A-Za-z0-9._%+\\-])@/g;";
+const LM_STARTERS = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, ATRE, "const AT_RE = /(^|[\\s(\\[{,;:!?\"'“‘（「，。、：；！？])@/gu;", 'closed-starters'), 'mentions-closed-starters');   // stale-pins: kept (the RED plants the starters as they were)
 
 console.log('① the one decision and the wire (PURE, src/channels/lark/mentions.js)');
 {
@@ -92,6 +99,34 @@ console.log('① the one decision and the wire (PURE, src/channels/lark/mentions
   ok(n3.notifies.length === n3.mentions.length && J(n3.notifies) === J(['所有人', '张三', '李四']), 'one notify name a mention, in the same order', J(n3));
   const two = dec('@Annie, and @Ann Lee, hi', [{ id: ANN.id, name: 'Ann Lee' }, { id: ANN.id, name: 'Annie' }]);
   ok(J(ids(two)) === J([ANN.id, ANN.id]) && two.open.length === 0, 'one person known by TWO names keeps both pairs: @Annie and @Ann Lee are each that person', J(two));
+  // round wke4s5jp9 MUST 2 — THE LONGEST NAME THAT BEGINS IS THE ONLY ONE THAT MAY DECIDE, in every mode: it decides when it ends,
+  // else the word is plain (a whole list) or open (none) — a shorter name is never tried
+  const POSS = "@Ann Lee's draft is ready";
+  const pz = dec(POSS, [], WHOLE([A1, ANN])), pz2 = dec('@Ann Lee-2 and @Ann Lee2 too', [], WHOLE([A1, ANN]));
+  ok(pz.mentions.length === 0 && J(pz.plain) === J(["Ann Lee's"]) && pz2.mentions.length === 0 && J(pz2.plain) === J(['Ann Lee-2', 'Ann Lee2']), 'MUST 2: over a whole list of Ann and Ann Lee, «@Ann Lee\'s draft» notifies NOBODY and the word is said (Ann Lee does not end at the apostrophe; Ann is never tried) — a hyphen or a digit after the longer name the same', J({ pz, pz2 }));
+  ok(J(ids(dec(POSS, [], WHOLE([A1, ANN]), LM_FILTER))) === J([A1.id]), 'RED CONTROL: the filter put back (the longest name THAT ENDS) — Ann notified for «Ann Lee\'s draft»');
+  // round wke4s5jp9 (3): over a whole list the candidates are the MEMBERS only — one known from the records alone is no member here
+  const GINA = { id: 'ou_gina000001', name: 'Gina' };
+  const gn = dec('@Gina, the notes', [GINA], WHOLE([A1])), gn0 = dec('@Gina, the notes', [GINA]);
+  ok(gn.mentions.length === 0 && J(gn.plain) === J(['Gina']) && J(ids(gn0)) === J([GINA.id]), '(3) over a whole list a person known only from the records (who left) is «not a member here», never a mention; with no list the records\' name decides (said as not checked)', J({ gn, gn0 }));
+  const PPL = "  const ppl = peopleOf(whole ? listed : [...(Array.isArray(known) ? known : []), ...listed]);\n";
+  const LM_KNOWNWHOLE = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, PPL, "  const ppl = peopleOf([...(Array.isArray(known) ? known : []), ...listed]);\n", 'records-join-the-whole-list'), 'mentions-records-whole');   // stale-pins: kept (the RED plants the line as it was)
+  ok(J(ids(dec('@Gina, the notes', [GINA], WHOLE([A1]), LM_KNOWNWHOLE))) === J([GINA.id]), 'RED CONTROL: the records joined to the whole list — Gina, who is no member, notified');
+  // round wke4s5jp9 (6): an at-sign starts an at-word UNLESS the character before it belongs to a mail address's first part
+  const starts = ['请@张三看一下', '（@张三）', '**@张三**', 'a/@张三，', '「@张三」', '#@张三，', '\u200b@张三，'].map((t) => [t, dec(t, [], WHOLE([ZHANG]))]);
+  ok(starts.every(([, r]) => r.mentions.length + r.plain.length >= 1) && J(ids(starts[0][1])) === J([ZHANG.id]) && J(ids(starts[1][1])) === J([ZHANG.id]) && dec('mail a@张三.com and x.y@b', [], WHOLE([ZHANG])).mentions.length === 0, `(6) an at-word starts after ANY character but a mail address's (a CJK sentence with no space, a full-width bracket, a bold mark, a slash, a symbol, a zero-width space): ${starts.map(([t, r]) => `${J(t)}→${J(ids(r).length ? 'mention' : r.plain)}`).join(' ')}`, J(starts));
+  ok(dec('请@张三看一下', [], WHOLE([ZHANG]), LM_STARTERS).mentions.length === 0 && dec('**@张三**', [], WHOLE([ZHANG]), LM_STARTERS).plain.length === 0, 'RED CONTROL: the closed list of starters put back — a CJK sentence with no space before the at-sign is silent (no mention, nothing said)');
+  // round wke4s5jp9 (5): a TYPED tag inside code never goes raw on the wire (Lark parses it anywhere): its label, in plain words
+  const CODE_TAGS = 'see `<at user_id="ou_ann0000009">Ann</at>` and\n```\n<at user_id="all"></at>\n```';
+  const wc = LM.wireText(CODE_TAGS, dec(CODE_TAGS, [A1]).places);
+  ok(!/<at /.test(wc) && /`@Ann`/.test(wc) && /\n@all\n/.test(wc), `(5) typed tags inside a backtick span and a fenced block are no decided places: their labels go as plain words, never a raw tag on the wire («${wc.replace(/\n/g, '⏎')}»)`);
+  const TAGSCAN = '  for (const m of s.matchAll(TAG_RE)) events.push({ at: m.index, end: m.index + m[0].length, tag: true, id: m[1], label: m[2] });\n';
+  const LM_CODETAG = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, TAGSCAN, '  for (const m of blankCode(s).matchAll(TAG_RE)) events.push({ at: m.index, end: m.index + m[0].length, tag: true, id: m[1], label: m[2] });\n', 'tags-scanned-without-code'), 'mentions-code-tags');   // stale-pins: kept (the RED plants the scan as it was)
+  ok(/<at user_id="ou_ann0000009">/.test(LM_CODETAG.wireText(CODE_TAGS, [])), 'RED CONTROL: the tags scanned outside code only (the round as it was) — the typed tag inside code goes RAW on the wire: Lark notifies while the card said nobody');
+  // past fifty people in one message: their own row (`over`), no place on the wire
+  { const fifty = Array.from({ length: 55 }, (_, i) => ({ id: `ou_p${String(i).padStart(8, '0')}`, name: `P${i}` }));
+    const r = dec(fifty.map((p) => `@${p.name},`).join(' '), [], WHOLE(fifty));
+    ok(r.mentions.length === 50 && r.over.length === 5 && r.places.length === 50, `past fifty people in one message the rest go as plain words on their own row (over: ${r.over.length}), never a place on the wire (${r.places.length} places)`); }
   // CODE is no text: at-words in a backtick span or a fenced block are not at-words (no read, no row)
   const code = dec('see `@Override` and\n```\n@Component\nclass X {}\n```\n@Ann, done', [A1]);
   ok(J(ids(code)) === J([A1.id]) && code.open.length === 0 && !LM.hasAtWords('see `@Override`\n```\n@Component\n```') && LM.hasAtWords('hi @x') && !LM.hasAtWords('mail a@b.example'), 'at-words in a backtick span or a fenced block are not at-words (no member read is asked for them); an address is none either', J(code));
@@ -177,7 +212,7 @@ const REFUSED = { code: 99991672, msg: 'Access denied. One of the following scop
   ok(tw.ids.length === 0 && J(tw.unresolved) === J(['张伟']) && tw.reads === 1, `MUST 2: two 张伟 in the members, one in the records — the read is asked (${tw.reads}) and the name is SAID as two people's (refused by name), never guessed`, J(tw));
   ok(J(twR.ids) === J([ZW1.id]) && twR.reads === 0, 'RED CONTROL: the records-only shortcut put back (no read when nothing is open) — the 张伟 who wrote here is notified, a guess the card cannot show', J(twR));
   // the whole name through the adapter — RED: whole taken from the caller
-  const CALLER_WHOLE = MUT.load('src/channels/lark.js', anchored(larkSrc, B_LINE, '    members = { list: [], whole: true };\n', 'known-taken-as-whole'), 'lark-known-whole');
+  const CALLER_WHOLE = MUT.load('src/channels/lark.js', anchored(larkSrc, B_LINE, '    members = { list: Array.isArray(known) ? known : [], whole: true };\n', 'known-taken-as-whole'), 'lark-known-whole');
   const wholeLeg = async (LARK, text, known, members) => { const { a, calls } = mkLark(LARK, (c) => jsonRes(200, isMembers(c) ? MEMBERS(members) : SENT())); const r = await a.prepareSend('oc_x', { text, known }); return { ids: ids(r), reads: calls.filter(isMembers).length, open: r.open }; };
   const wc = await wholeLeg(lark, '@王伟强 看一下', [W1], [W1, W3]), wcR = await wholeLeg(CALLER_WHOLE, '@王伟强 看一下', [W1], [W1, W3]);
   ok(J(wc.ids) === J([W3.id]) && wc.reads === 1, `THE WHOLE NAME (CJK): only 王伟 known, the text holds 王伟强 — the read decides the WHOLE name 王伟强 (${J(wc.ids)})`, J(wc));
@@ -191,7 +226,7 @@ const REFUSED = { code: 99991672, msg: 'Access denied. One of the following scop
     ok(r.mentions.length === 0 && J(r.open) === J(['Jean-Pierre']) && r.openWhy === 'members-unreadable', 'MUST 1 (the adapter): Jean known, the member read refused — @Jean-Pierre stays OPEN and is said, never Jean', J(r)); }
   // SCENE TWO: a read that ends at ten pages with a page mark left is NOT whole
   const filler = (k) => Array.from({ length: 100 }, (_, i) => ({ id: `ou_fill${String(k * 1000 + i).padStart(6, '0')}`, name: `Member ${k}-${i}` }));
-  const bigChat = (c) => { const tok = new URL(c.url).searchParams.get('page_token'); const k = tok ? Number(tok.slice(1)) : 0; return jsonRes(200, MEMBERS(k === 10 ? [ANN, W3] : filler(k), k < 10 ? `p${k + 1}` : null)); };
+  const bigChat = (c) => { const tok = new URL(c.url).searchParams.get('page_token'); const k = tok ? Number(tok.slice(1)) : 0; return jsonRes(200, MEMBERS(k === 10 ? [ANN, W3] : k === 0 ? [A1, W1, ...filler(k)] : filler(k), k < 10 ? `p${k + 1}` : null)); };   // Ann and 王伟 on page one; Ann Lee and 王伟强 past page ten
   const sceneTwo = async (LARK, text, known) => { const { a, calls } = mkLark(LARK, (c) => (isMembers(c) ? bigChat(c) : jsonRes(200, SENT()))); const r = await a.prepareSend('oc_x', { text, known }); return { ids: ids(r), open: r.open, why: r.openWhy, reads: calls.filter(isMembers).length }; };
   const s2l = await sceneTwo(lark, '@Ann Lee please look', [A1]), s2c = await sceneTwo(lark, '@王伟强 看一下', [W1]);
   ok(s2l.ids.length === 0 && J(s2l.open) === J(['Ann Lee']) && s2l.why === 'members-partial' && s2l.reads === 10 && s2c.ids.length === 0 && J(s2c.open) === J(['王伟强']), `SCENE TWO: a member read that ends at ten pages with a page mark left is NOT whole — @Ann Lee / @王伟强 stay open, said («${s2l.why}», ${s2l.reads} pages)`, J({ s2l, s2c }));
@@ -302,12 +337,12 @@ const A = 'fake-poll', C = 'fake-poll-ops';
  *  `members` = an array (a whole list), a function of the read's index (→ the read's `{list, whole, why}`), or null (no read);
  *  the ONE decision over the engine's `known` (+ the stand-in records' people `records`). Its send writes the wire with Lark's
  *  own wireText at the decision's places. `withPrepare: false` = the release (Lark declared no prepare step). */
-function dressed({ members = [], taken = null, withPrepare = true, LMM = LM, lost = false, records = [] } = {}) {
+function dressed({ members = [], taken = null, withPrepare = true, LMM = LM, lost = false, records = [], prepare = null } = {}) {
   const registry = CH.createChannelRegistry();
   const base = fake.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'] });
   const log = { sends: [], known: [], reads: 0, reconciles: [] };
   const mod = { ...base, caps: withPrepare ? { ...base.caps, prepareSend: true, mentionId: LM.MENTION_ID } : base.caps };
-  const state = { members, records };
+  const state = { members, records, hold: null };   // `hold`: a placed wait inside the chat's capabilities read (an approve awaits it)
   mod.create = (rec, deps) => {
     const impl = base.create(rec, deps);
     const out = {
@@ -322,7 +357,10 @@ function dressed({ members = [], taken = null, withPrepare = true, LMM = LM, los
       },
     };
     out.reconcile = async (c, o = {}) => { log.reconciles.push(o); return { landed: true, vendorMessageId: 'v-rec', at: Date.now() }; };
-    if (withPrepare) out.prepareSend = async (c, { text, known } = {}) => {
+    out.convCaps = async (...a) => { if (state.hold) await state.hold; return impl.convCaps(...a); };
+    // `prepare`: the engine's prepare step IS another adapter's (the REAL Lark adapter over a stand-in fetch, round wke4s5jp9 (7))
+    if (withPrepare && prepare) out.prepareSend = async (c, o = {}) => { log.known.push(Array.isArray(o.known) ? o.known : null); return prepare(c, o); };
+    else if (withPrepare) out.prepareSend = async (c, { text, known } = {}) => {
       log.known.push(Array.isArray(known) ? known : null);
       const k = [...(Array.isArray(known) ? known : []), ...state.records];
       let fact = null;
@@ -389,6 +427,10 @@ const KEEP_LOOP = [
 const ENG_KEEP = engWithOutbound(anchored(outSrc, FRESH_TAIL, KEEP_LOOP, 'keep-loop-put-back'), 'keep-loop');
 const C_GATE = '      if (prepared && P.decisionSummary(prepared) !== P.decisionSummary(p0.prepared)) {\n';
 const ENG_ONEPRESS = engWithOutbound(anchored(outSrc, C_GATE, '      if (false) {\n', 'one-press-send'), 'one-press');
+const WAIT_GUARD = "        { unless: (p) => p.text !== p0.text || P.decisionSummary(p.prepared) !== P.decisionSummary(p0.prepared), unlessWhy: 'this proposal changed while the press waited — nothing was sent; read it again, then decide' });\n";
+const ENG_NOGUARD = engWithOutbound(anchored(outSrc, WAIT_GUARD, '        {});\n', 'waiting-press-unguarded'), 'no-wait-guard');
+const KEY_PASS = ", ...(p0.prepared && typeof p0.prepared.readKey === 'string' ? { readKey: p0.prepared.readKey } : {}) }); }";
+const ENG_NOKEY = engWithOutbound(anchored(outSrc, KEY_PASS, ' }); }', 'edit-without-the-read-key'), 'no-read-key');
 {
   const D = dressed({ members: [ZHANG] });
   const x = await proposeSend(D, 'please look @张三');
@@ -444,6 +486,36 @@ const ENG_ONEPRESS = engWithOutbound(anchored(outSrc, C_GATE, '      if (false) 
   const apb = r5b.proposal && r5b.proposal.prepared;
   ok(r5b.ok && apb && J(apb.open) === J(['Zed']) && apb.openWhy === 'members-unreadable' && J(apb.unchecked) === J(['张三']) && apb.uncheckedWhy === 'members-unreadable', 'A READ THAT FAILS NEVER REFUSES: the proposal is created; the agent\'s answer names the open word and the name decided without the members, each with the reason', J(apb));
   eng5b.stop();
+  // round wke4s5jp9 (4) — THE PRESS THAT WAITS: a press checks the record, then waits on the chat's capabilities; another device's
+  // edit lands in that wait (placed: the stand-in holds the read; the edit is written to the store meanwhile) — the press refuses
+  const waitLeg = async (ENGM) => {
+    const DW = dressed({ members: [ZHANG, LI] }); const eng = await primed(DW.registry, ENGM);
+    const r = await eng.propose(AGENT, A, C, { text: '@张三 请看' });
+    let release; DW.state.hold = new Promise((res) => { release = res; });
+    const n0 = DW.log.sends.length;
+    const press = eng.approve(r.proposal.id, {});
+    await new Promise((res) => setTimeout(res, 30));
+    await eng.store.outbox.update((ob) => { const p = ob.proposals[r.proposal.id]; p.text = '@李四 请看'; p.prepared = { ...p.prepared, mentions: [{ name: '李四', id: LI.id }], notifies: ['李四'], places: [{ at: 0, len: 2, id: LI.id }] }; });
+    DW.state.hold = null; release();
+    const a = await press;
+    const out = { a: a.code || 'ok', sent: DW.log.sends.slice(n0).map((x) => x.wire) }; eng.stop(); return out;
+  };
+  const wt0 = await waitLeg(ENG), wtR = await waitLeg(ENG_NOGUARD);
+  ok(wt0.a === 'changed-since-shown' && wt0.sent.length === 0, `(4) THE PRESS THAT WAITS: another device's edit lands while the press waits on the chat's capabilities — the step that moves it to sending refuses (${wt0.a}), nothing is sent`, J(wt0));
+  ok(wtR.sent.length === 1 && /ou_li00000001/.test(wtR.sent[0]), `RED CONTROL: the guard cut — the first press sends the NEW text with a decision no card of its own showed («${wtR.sent[0]}»)`, J(wtR));
+  // round wke4s5jp9 (7) — THE KEPT READ THROUGH THE ENGINE: the engine's prepare step is the REAL Lark adapter (a stand-in fetch, its own
+  // clock): one proposal and two edits ten minutes apart make ONE members call; RED: the read's key cut from the edit road
+  const keptEngine = async (ENGM) => {
+    let t = T0; const { a: lk, calls } = mkLark(lark, (c) => jsonRes(200, isMembers(c) ? MEMBERS([ZHANG, LI, W1]) : SENT()), () => t);
+    const DK = dressed({ prepare: (c, o) => lk.prepareSend('oc_x', o) }); const eng = await primed(DK.registry, ENGM);
+    const r = await eng.propose(AGENT, A, C, { text: '@张三 请看' });
+    t += 5 * 60e3; const e1 = await eng.approve(r.proposal.id, { text: '@张三 和 @李四 请看' });
+    t += 5 * 60e3; const e2 = await eng.approve(r.proposal.id, { text: '@王伟 请看' });
+    const out = { reads: calls.filter(isMembers).length, codes: [e1.code, e2.code], key: (stored(eng, r.proposal.id).prepared || {}).readKey || null }; eng.stop(); return out;
+  };
+  const ke = await keptEngine(ENG), keR = await keptEngine(ENG_NOKEY);
+  ok(ke.reads === 1 && J(ke.codes) === J(['mentions-changed', 'mentions-changed']) && /^rk-/.test(ke.key || ''), `(7) RULE B THROUGH THE REAL ENGINE over the real Lark adapter: a proposal and two edits ten minutes apart — ONE members call (${ke.reads}), the read's key stored with the decision`, J(ke));
+  ok(keR.reads === 3, `RED CONTROL: the read's key cut from the edit road — every edit reads the members again (${keR.reads})`);
   const x6 = await proposeSend(dressed({ members: [] }), '@所有人 deploy at 5');
   ok(x6.p.prepared.everyone === true && x6.send.wire === '<at user_id="all"></at> deploy at 5', 'EVERYONE IN THE CHAT: decided as its own case, sent in Lark\'s form', J(x6.p.prepared));
   const x7 = await proposeSend(dressed({ members: [ZHANG, ANN], taken: 1 }), '@张三 and @Ann Lee');
@@ -510,50 +582,65 @@ console.log('⑥ THE GENERATED ORACLE of rule A (written from its sentences, nev
   const CLASSES = [
     'abcxyz', 'ABLMZ', 'ДжЯ', 'λΩ', '强花请看', 'のを', 'カスミ', '한국', 'عم', '́', '0279', '０７',
     '-‐–—', '·・‧•', '_', "'’", ',.;:!?…', '，。、；：！？', '()[]{}', '（）「」【】《》', '"“”‘', '#$+=©%&*~^|\\/', '🙂👍', ' ', '　 \t', '\n', '\r\n',
+    '​', '‍', '️', '‎‏', '`',   // round wke4s5jp9 (8): a zero-width space, a joiner, a variation selector, the two direction marks, a backtick
   ];
   const pick = (r, xs) => xs[Math.floor(r() * xs.length)];
   const chr = (r) => { const c = pick(r, CLASSES); const cs = [...c]; return c === '\r\n' ? c : pick(r, cs); };
   const follower = (r) => { const k = Math.floor(r() * 4); return Array.from({ length: k }, () => chr(r)).join(''); };
   const subset = (r, xs, p) => xs.filter(() => r() < p);
+  // at-signs after EVERY class (round wke4s5jp9 (6)): what stands before each at-sign is drawn too
   function genText(r) {
     const n = 1 + Math.floor(r() * 3);
-    let text = pick(r, ['', 'hi ', '请 ']); const at = [];
+    let text = '';
     for (let i = 0; i < n; i++) {
-      at.push(text.length);
-      text += '@' + pick(r, WRITTEN) + (r() < 0.12 && i < n - 1 ? '' : follower(r));
-      if (i < n - 1) text += pick(r, [' ', ' and ', ' 和 ', '\n']);
+      const before = i === 0 ? pick(r, ['', '', 'hi ', '请', () => chr(r)]) : pick(r, [' ', ' and ', '\n', ' 和 ', () => chr(r), () => chr(r) + ' ']);
+      text += (typeof before === 'function' ? before() : before) + '@' + pick(r, WRITTEN) + follower(r);
     }
-    return { text, at };
+    return { text };
   }
-  // THE ORACLE — the rule's sentences, written here: «without a whole member list a known name is decided only when what follows
-  // it is in a CLOSED list of things that END a name for sure: the end of the text, a line end, the sentence marks of both
-  // scripts, a closing bracket or quote, another at-sign» (an ASCII mark or quote only when no letter or digit follows it — the
-  // lane's stated detail); «over a whole list a name ends at an ender or a space, and a CJK name may abut CJK text»; «the
-  // everyone word by the same rule» (over a whole list a space too). The longest name there; two people under it: said.
-  const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u, CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+  // THE ORACLE — the rules' sentences, written here (never the module's loop):
+  //  «an at-sign starts an at-word UNLESS the character before it belongs to a mail address's first part (an ASCII letter, a digit,
+  //   a dot, an underscore, a percent, a plus, a hyphen)»; «at-words inside a fenced block (``` to the next ``` or the end) or a
+  //   backtick span (a backtick, one or more characters that are neither a backtick nor a line end, a backtick) are not at-words»;
+  //  «over a whole list the candidates are the members only»; «AT AN AT-SIGN, THE LONGEST CANDIDATE NAME THAT BEGINS THERE IS THE
+  //   ONLY ONE THAT MAY DECIDE; it decides when it ends there by its mode's enders; when it does not, the word is plain (a whole
+  //   list) or open (none); a shorter name is never tried»; «without a whole member list the enders are a CLOSED list: the end of
+  //   the text, a line end, the sentence marks of both scripts, a closing bracket or quote, another at-sign» (an ASCII mark or
+  //   quote only when no letter or digit follows it — the lane's stated detail); «over a whole list a name ends at an ender or a
+  //   space, and a CJK name may abut CJK text»; «the everyone word by the same rule» (over a whole list a space too).
+  const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u, CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u, MAILCH = /[A-Za-z0-9._%+\-]/;
   const ORACLE_ENDERS_ALWAYS = new Set(['\n', '\r', ' ', ' ', '@', ...'，。、；：！？）」』】》〉］｝〕']);
   const ORACLE_ENDERS_ASCII = new Set([...',.;:!?)]}"\'”’…']);
   const ORACLE_SPACES = new Set([' ', '\t', ' ', '　']);
   const endsO = (after) => { const cps = [...after]; if (!cps.length) return true; const c = cps[0]; if (ORACLE_ENDERS_ALWAYS.has(c)) return true; if (ORACLE_SPACES.has(c)) { let i = 0; while (i < cps.length && ORACLE_SPACES.has(cps[i])) i++; return cps[i] === '@'; } if (ORACLE_ENDERS_ASCII.has(c)) return !cps[1] || !LETTER_OR_DIGIT.test(cps[1]); return false; };
   const endsWholeO = (after, typed) => { const c = [...after][0]; return endsO(after) || ORACLE_SPACES.has(c) || (!!c && CJK.test(c) && CJK.test([...typed].pop())); };
-  function oracle({ text, at }, known, members) {
+  function codeBlankO(text) {
+    let out = '', i = 0;
+    while (i < text.length) { if (text.startsWith('```', i)) { const j = text.indexOf('```', i + 3); const end = j === -1 ? text.length : j + 3; out += text.slice(i, end).replace(/[^\n]/g, ' '); i = end; } else { out += text[i]; i++; } }
+    let res = '', k = 0;
+    while (k < out.length) { if (out[k] === '`') { let j = k + 1; while (j < out.length && out[j] !== '`' && out[j] !== '\n') j++; if (j < out.length && out[j] === '`' && j > k + 1) { res += ' '.repeat(j - k + 1); k = j + 1; continue; } } res += out[k]; k++; }
+    return res;
+  }
+  function oracle({ text }, known, members) {
     const whole = !!(members && members.whole);
-    const people = [...known, ...(members ? members.list : [])];
+    const people = whole ? members.list : [...known, ...(members ? members.list : [])];
     const EVERY = ['所有人', 'all', 'everyone'];
     const mentions = new Set(), unresolved = new Set(), unchecked = new Set();
-    for (const i of at) {
-      const rest = text.slice(i + 1);
+    const b = codeBlankO(text);
+    for (let i = 0; i < b.length; i++) {
+      if (b[i] !== '@' || (i > 0 && MAILCH.test(b[i - 1]))) continue;
+      const rest = b.slice(i + 1);
       const cands = [];
       for (const p of people) if (rest.slice(0, p.name.length).toLowerCase() === p.name.toLowerCase()) cands.push({ len: p.name.length, id: p.id });
       for (const w of EVERY) if (rest.slice(0, w.length).toLowerCase() === w) cands.push({ len: w.length, id: 'all' });
+      const longest = cands.reduce((n, c) => Math.max(n, c.len), 0);
+      if (!longest) continue;
       const endsC = (c) => { const after = rest.slice(c.len); return c.id === 'all' ? (endsO(after) || (whole && ORACLE_SPACES.has([...after][0]))) : whole ? endsWholeO(after, rest.slice(0, c.len)) : endsO(after); };
-      let best = 0;
-      if (whole) for (const c of cands) { if (endsC(c) && c.len > best) best = c.len; }
-      else { const longest = cands.reduce((n, c) => Math.max(n, c.len), 0); if (longest && cands.some((c) => c.len === longest && endsC(c))) best = longest; }
-      if (!best) continue;   // (a) plain words; (b) open — never a person
-      const who = new Set(cands.filter((c) => c.len === best && endsC(c)).map((c) => c.id));
-      const typed = rest.slice(0, best);
-      if (who.size === 1) { const id = [...who][0]; mentions.add(`${typed}\n${id}`); if (!whole && id !== 'all') unchecked.add(typed); } else unresolved.add(typed);   // the same name twice: said, never guessed
+      const top = cands.filter((c) => c.len === longest && endsC(c));
+      if (!top.length) continue;   // the longest does not end: plain (a whole list) or open (none) — never a shorter name
+      const who = new Set(top.map((c) => c.id));
+      const typed = rest.slice(0, longest);
+      if (who.size === 1) { const id = [...who][0]; mentions.add(`${typed}\n${id}`); if (!whole && id !== 'all') unchecked.add(typed); } else unresolved.add(typed);
     }
     return { mentions, unresolved, unchecked };
   }
@@ -561,7 +648,7 @@ console.log('⑥ THE GENERATED ORACLE of rule A (written from its sentences, nev
   const asSet = (d) => new Set(d.mentions.map((m) => `${m.name}\n${m.id}`));
   const eqSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
   const wrong = [], tally = { whole: 0, 'not-whole': 0, none: 0, mentions: 0, unresolved: 0, open: 0, plain: 0, unchecked: 0 };
-  let redCallerWhole = 0, redContinuers = 0;
+  let redCallerWhole = 0, redContinuers = 0, redFilter = 0, redStarters = 0;
   for (const seed of SEEDS) {
     const r = rng(seed);
     for (let k = 0; k < 300; k++) {
@@ -573,19 +660,26 @@ console.log('⑥ THE GENERATED ORACLE of rule A (written from its sentences, nev
         if (!good) wrong.push({ seed, cond, text: g.text, known: known.map((p) => p.name), list: members && members.list.map((p) => p.name), got: { m: d.mentions, u: d.unresolved, o: d.open, p: d.plain, c: d.unchecked }, want: { m: [...o.mentions], u: [...o.unresolved], c: [...o.unchecked] } });
         if (cond === 'not-whole') { const dw = dec(g.text, known, { list: members.list, whole: true }); if (!eqSet(asSet(dw), o.mentions)) redCallerWhole++; }
         if (cond !== 'whole') { const dc = dec(g.text, known, members, LM_CONT); if (!eqSet(asSet(dc), o.mentions)) redContinuers++; }
+        if (cond === 'whole') { const df = dec(g.text, known, members, LM_FILTER); if (!eqSet(asSet(df), o.mentions)) redFilter++; }
+        { const ds = dec(g.text, known, members, LM_STARTERS); if (!eqSet(asSet(ds), o.mentions) || !eqSet(new Set(ds.unresolved), o.unresolved)) redStarters++; }
       }
     }
   }
   ok(wrong.length === 0 && tally.mentions > 100 && tally.unresolved > 10 && tally.open > 100 && tally.plain > 50 && tally.unchecked > 50, `THE ORACLE over ${SEEDS.length * 900} decisions (${tally.whole} whole, ${tally['not-whole']} not whole, ${tally.none} none; followers from every character class): (a) over a whole list the longest member name that ENDS at its place, the same name twice said; (b) without one a person only before an ENDER, and every such name SAID as not checked — ${tally.mentions} mentions, ${tally.unresolved} said twice, ${tally.open} open, ${tally.plain} plain, ${tally.unchecked} unchecked`, J(wrong.slice(0, 3)));
   ok(redContinuers > 20, `RED CONTROL: the continuers rule put back — ${redContinuers} decisions without a whole list name a person the oracle does not (unlisted followers)`);
   ok(redCallerWhole > 20, `RED CONTROL: whole taken from the caller — the same lists not whole, handed as whole: ${redCallerWhole} decisions name a person the oracle does not`);
+  ok(redFilter > 5, `RED CONTROL: the filter put back (the longest name that ENDS, over a whole list) — ${redFilter} decisions name a shorter person the oracle never tries`);
+  ok(redStarters > 20, `RED CONTROL: the closed list of starters put back — ${redStarters} decisions miss an at-word the oracle sees (at-signs after every class)`);
 
   // THE EDIT ROAD through the real engine: a generated proposal decided under one member fact, edited under another — the
   // stored decision equals deciding the edited text alone (the one call, the earlier mentions as pairs), and it is SENT at that
   // press only when it is the decision the card showed (rule C)
   const REG_WHYS = new Set(['members-unreadable', 'chat-dissolved', 'members-no-answer', 'members-partial', 'members-signed-out', 'not-read']);
   const pairsOf = (pr) => (pr && Array.isArray(pr.mentions) ? pr.mentions : []).filter((m) => m && m.id !== 'all').map((m) => ({ id: m.id, name: m.name }));
-  const viewOf = (d) => ({ mentions: d.mentions, notifies: d.notifies, plain: d.plain, open: d.open && d.open.length ? d.open : undefined, openWhy: d.open && d.open.length && REG_WHYS.has(d.openWhy) ? d.openWhy : undefined, places: d.places && d.places.length ? d.places : undefined, unchecked: d.unchecked && d.unchecked.length ? d.unchecked : undefined, uncheckedWhy: d.unchecked && d.unchecked.length && REG_WHYS.has(d.uncheckedWhy) ? d.uncheckedWhy : undefined });
+  // the registry's NAME DOOR bounds every stored name (peerName: invisible characters out, ≤ 100) — the expectation passes through it too
+  const { peerName } = require(path.join(REPO, 'src/channel-record.js'));
+  const door = (xs) => (Array.isArray(xs) ? xs : []).map((x) => peerName(x, 100)).filter(Boolean);
+  const viewOf = (d0) => { const d = { ...d0, mentions: d0.mentions.map((m) => ({ name: peerName(m.name, 100), id: m.id })), notifies: door(d0.notifies), plain: door(d0.plain), open: door(d0.open), unchecked: door(d0.unchecked) }; return ({ mentions: d.mentions, notifies: d.notifies, plain: d.plain, open: d.open && d.open.length ? d.open : undefined, openWhy: d.open && d.open.length && REG_WHYS.has(d.openWhy) ? d.openWhy : undefined, places: d.places && d.places.length ? d.places : undefined, unchecked: d.unchecked && d.unchecked.length ? d.unchecked : undefined, uncheckedWhy: d.unchecked && d.unchecked.length && REG_WHYS.has(d.uncheckedWhy) ? d.uncheckedWhy : undefined }); };
   const editRoad = async (ENGM, seed, n) => {
     const r = rng(seed ^ 0x5eed);
     const D = dressed({ members: null }), eng = await primed(D.registry, ENGM);
