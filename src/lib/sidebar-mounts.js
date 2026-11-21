@@ -433,6 +433,23 @@ export function installSidebarMounts(Sidebar) {
           }
         }
         root.appendChild(hlist);
+        // B-7f0b (r1220 (2)): «Pin all N» — every ssh machine not pinned, at once, when there are several (each pins the key this hub
+        // already trusts for it; one with none keeps its Host key… dialog)
+        const unpinned = hostsHeld ? [] : hd.hosts.filter((x) => x.transport !== 'dial' && !(x.hostKeys && x.hostKeys.length) && !(this._hostStatus?.[x.id] && /^host-key-/.test(this._hostStatus[x.id].code || '')));
+        if (unpinned.length >= 2) {
+          const all = document.createElement('button');
+          all.className = 'mounts-action mounts-pin-all';
+          all.innerHTML = `<span class="mounts-action-icon">${MI.key}</span><span>${escHtml(tr('Pin all {n}', { n: unpinned.length }))}</span>`;
+          all.title = tr('Pin the key this hub already trusts for every machine that is not pinned');
+          all.onclick = async () => {
+            all.disabled = true;
+            const r = { pinned: 0, unknown: 0, failed: 0 };
+            for (const x of unpinned) r[await this._pinKnown(x)]++;
+            showToast(r.unknown || r.failed ? tr('{n} pinned; {m} not yet: this hub trusts no key for them — open each one\'s Host key… to check the key it shows now.', { n: r.pinned, m: r.unknown + r.failed }) : tr('{n} pinned.', { n: r.pinned }), r.unknown || r.failed ? { type: 'warn' } : {});
+            this._renderMounts();
+          };
+          root.appendChild(all);
+        }
         this._mountsHostList = hlist; // B-a31a cure (a): the dots' timer re-probes THIS list's stale rows
         // (the render's own probe runs at its END, through the on-screen gate, once the list is on the page — _mountsDotsNow)
       }
@@ -1194,6 +1211,17 @@ export function installSidebarMounts(Sidebar) {
       else if (h.deviceKeyRefused) top.appendChild(pinChip('error', h.deviceKeyRefused.code === 'device-key-missing' && !h.deviceKey
         ? { text: tr('no device key proved'), title: tr('Its agent proved no device key, and this machine\'s record asks for one — Host key… says what to do.') }
         : { text: tr('device key changed'), title: pairingDoorOf(h) === 'pairing' ? tr('Its agent did not prove the device key VibeSpace pinned — this hub\'s link to its agent is refused until you pair it again or forget the key (Host key…).') : tr('Its agent did not prove the device key VibeSpace pinned — this hub\'s link to its agent is refused until you forget the key (Host key…).') })); // lane lg-remote-hardening (D3): the words by code and by the row's own door
+      // B-7f0b (the coordinator's r1220 (2)): an ssh machine with NO host-key pin SAYS so on its row (it showed only inside the
+      // dialog), and ONE PRESS pins the key this hub already trusts for it (its known_hosts line); none ⇒ the dialog's scan-and-confirm
+      if (!isDial && !(h.hostKeys && h.hostKeys.length) && !(st && /^host-key-/.test(st.code || ''))) {
+        top.appendChild(pinChip('stale', { text: tr('not pinned'), title: tr('VibeSpace trusts the key this machine showed the first time it connected. One press pins it: a different key is refused from then on.') }));
+        const pb = document.createElement('button');
+        pb.className = 'mounts-pin-btn';
+        pb.textContent = tr('Pin key');
+        pb.title = tr('Pin the key this hub already trusts for {name}', { name: h.name });
+        pb.onclick = async (ev) => { ev.stopPropagation(); pb.disabled = true; try { await this._pinKnown(h, { one: true }); } finally { pb.disabled = false; } };
+        top.appendChild(pb);
+      }
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
       const ibtn = (svg, title, fn, cls = '') => {
@@ -2662,6 +2690,20 @@ export function installSidebarMounts(Sidebar) {
     // lane lg-remote-hardening (B-7f0b, q-042 D6): THE HOST-KEY PIN of an ssh machine — what is pinned, what the machine
     // shows now, pin it / remove the pin. The person compares the fingerprint with the machine's own (the recipe is shown);
     // the hub pins only a key the machine shows again at that moment (src/hosts.js pinHostKeys).
+    /** B-7f0b (r1220 (2)): ONE press pins the key this hub already trusts for a machine (POST …/host-keys/known). → 'pinned' |
+     *  'unknown' (the hub trusts no key for it: a single press opens the Host key… dialog's scan-and-confirm) | 'failed' */
+    async _pinKnown(h, { one = false } = {}) {
+      try {
+        await api(`/api/hosts/${encodeURIComponent(h.id)}/host-keys/known`, { method: 'POST' });
+        if (one) { showToast(tr('{name}: pinned to the key this hub already trusts.', { name: h.name })); this._renderMounts(); }
+        return 'pinned';
+      } catch (e) {
+        if (e && e.code === 'host-key-not-known') { if (one) { showToast(tr('This hub trusts no key for {name} yet — check the key it shows now.', { name: h.name })); this._showHostKeyDialog(h, { scanNow: true }); } return 'unknown'; }
+        if (one) showToast(hostKeyErrorWords(h, e) || tr('Failed'), { type: 'error' });
+        return 'failed';
+      }
+    },
+
     async _showHostKeyDialog(h, { scanNow = false, done = null } = {}) {
       // the reader of unit 3 (a must): an item's jump hands {id, name} — the dialog draws from the machine's WHOLE record (its
       // transport, its device key, a refusal), so a partial one is read from the hosts route first (fresh, never this tab's cache)

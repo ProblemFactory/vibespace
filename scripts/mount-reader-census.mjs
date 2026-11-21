@@ -175,7 +175,7 @@ export const ROWS = [
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],
   ['src/server/device-alerts.js', 'own-tree', 2, null, DATA], // lane lg-store-writes (主开发 2026-11-20 03:10Z) +1: the held ledger's read again (fs.promises, off the loop) // lane device-act-audit: the three urgent items' dedup ledger (data/device-alerts.json)
   ['src/server/dial-health-watch.js', 'own-tree', 1, null, DATA], // lane host-stale-dialer: data/dial-health.json (the For-you ledger)
-  ['src/host-keys.js', 'own-tree', 1, null, DATA], // lane lg-remote-hardening: data/ssh/known_hosts.d/<id> (a pin file it writes, read to skip an unchanged write)
+  ['src/host-keys.js', 'own-tree', 2, null, `${DATA}; lane lg-remote-hardening +1 (B-7f0b r1220 (2)): knownKeysOf — the hub user's own ~/.ssh/known_hosts (ssh's own file at its fixed place in the passwd home, never a path anyone names; read async within 4 MiB)`], // lane lg-remote-hardening: data/ssh/known_hosts.d/<id> (a pin file it writes, read to skip an unchanged write)
   ['src/server/dial-pairing.js', 'own-tree', 2, null, DATA], // lane mac-repair-retires-stale +1: data/agentd/hub-id (this hub's id, read once)
   ['src/server/exit-hook.js', 'own-tree', 2, null, PROC], // lane usage-fold-worker-exit-hook: /proc/self/task (a worker's thread named at spawn, listed at the join)
   ['src/server/exit-routes.js', 'own-tree', 1, null, DATA],

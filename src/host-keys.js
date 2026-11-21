@@ -151,4 +151,33 @@ function hostKeyRefusal(h, stderr) {
 /** The page's view of a record's pin (no key text: the fingerprints say it). */
 const pinView = (h) => (pinned(h) ? { hostKeys: keysOf(h).map((k) => ({ type: k.type, fp: fingerprintOf(k.key) })), hostKeysAt: h.hostKeysAt || null } : { hostKeys: null });
 
-module.exports = { fingerprintOf, pinFileOf, pinned, aliasOf, namesOf, pinText, aliasWhy, pinWhy, nameWhy, pinUnusable, pinRefusal, NAME_DOOR, DOOR, writePinFile, hostKeyOpts, scanOpts, keysOfScan, hostKeyWords, hostKeyRefusal, pinView, HOSTKEY_RE };
+/** B-7f0b (the coordinator's r1220 (2)): THE KEYS THIS HUB ALREADY TRUSTS for a record — the hub user's own known_hosts lines
+ *  (ssh's accept-new wrote them at the machine's first dial), under the name ssh looks the record up by (`host`, or `[host]:port`
+ *  off port 22; a hashed name matched by its HMAC). Read async within KNOWN_FILE_MAX; EACH LINE judged alone by THE parser (a
+ *  marker, a wildcard or a bad line elsewhere in the file costs no other line its read, and is never a pin). No new trust: nothing
+ *  is asked of the machine. → [{type, key, fp}] ([] when the hub trusts no key for it, or has no such file) */
+const KNOWN_FILE_MAX = 4 * 1024 * 1024;
+async function knownKeysOf(h, { file } = {}) {
+  const port = Number(h && h.port) || 22;
+  const want = SKF.knownHostName(port !== 22 ? `${aliasOf(h)}:${port}` : aliasOf(h));
+  if (!want || !file) return [];
+  let text = '';
+  try {
+    const fh = await fs.promises.open(file, 'r');
+    try { const b = Buffer.alloc(KNOWN_FILE_MAX + 1); const { bytesRead } = await fh.read(b, 0, b.length, 0); if (bytesRead > KNOWN_FILE_MAX) return []; text = b.subarray(0, bytesRead).toString('utf-8'); }
+    finally { await fh.close(); }
+  } catch (e) { if (e && e.code === 'ENOENT') return []; throw e; }
+  const out = [], had = new Set();
+  for (const line of text.split('\n')) {
+    const p = SKF.parseKnownHosts(line + '\n');
+    if (!p.ok || p.keys.length !== 1) continue;
+    const k = p.keys[0];
+    const hit = (k.names || []).includes(want) || (k.hashed || []).some(({ salt, hash }) => { try { return crypto.createHmac('sha1', Buffer.from(salt, 'base64')).update(want).digest('base64') === hash; } catch { return false; } });
+    if (!hit || had.has(k.type + ' ' + k.key)) continue;
+    had.add(k.type + ' ' + k.key);
+    out.push({ type: k.type, key: k.key, fp: fingerprintOf(k.key) });
+  }
+  return out;
+}
+
+module.exports = { knownKeysOf, KNOWN_FILE_MAX, fingerprintOf, pinFileOf, pinned, aliasOf, namesOf, pinText, aliasWhy, pinWhy, nameWhy, pinUnusable, pinRefusal, NAME_DOOR, DOOR, writePinFile, hostKeyOpts, scanOpts, keysOfScan, hostKeyWords, hostKeyRefusal, pinView, HOSTKEY_RE };

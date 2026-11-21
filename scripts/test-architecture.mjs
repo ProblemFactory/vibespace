@@ -4001,13 +4001,15 @@ await section(async () => {
   // the screenshot allow-list. A third site, or one of these without its reason, is red.
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : (e.name.endsWith('.js') || e.name.endsWith('.mjs') ? [path.join(d, e.name)] : [])));
   const srcScope = [...walk('src'), 'server.js'];
-  // ONE reasoned src site (lane cli-self-measure, acceptance r1 law E): the measurement of a new Claude Code DENIES the person's real
+  // the reasoned src sites — ONE (lane cli-self-measure, acceptance r1 law E): the measurement of a new Claude Code DENIES the person's real
   // home — the CLI reads getpwuid's home whatever $HOME says, so the fence's root must be that one; a PATH compared, never opened
-  const SRC_ALLOW = { 'src/claude-oat-probe.js': [/THE REAL HOME IS A DENY ROOT/, 1] };
+  // A SECOND (lane lg-remote-hardening, B-7f0b r1220 (2)): the one-press pin reads the key this hub already trusts from the hub
+  // user's known_hosts, and ssh reads THAT from the passwd home whatever $HOME says — read for its lines, never written
+  const SRC_ALLOW = { 'src/claude-oat-probe.js': [/THE REAL HOME IS A DENY ROOT/, 1], 'src/hosts.js': [/SSH READS THE PASSWD HOME/, 1] };
   const srcHits = srcScope.map((f) => [f, judge(fs.readFileSync(f, 'utf8')).filter((h) => h.includes('userInfo().homedir'))]).filter(([, h]) => h.length);
   const srcBad = srcHits.filter(([f, h]) => !(SRC_ALLOW[f] && h.length === SRC_ALLOW[f][1] && SRC_ALLOW[f][0].test(fs.readFileSync(f, 'utf8'))));
   ok(srcScope.length >= 300, `§68 src census scope is non-vacuous (${srcScope.length} files)`);
-  ok(srcBad.length === 0 && Object.keys(SRC_ALLOW).every((f) => srcHits.some(([g]) => g === f)), `§68 src/ + server.js read no passwd home (the product reaches a home through $HOME / os.homedir() only) — but for the ONE reasoned site (${Object.keys(SRC_ALLOW).join(', ')}: exactly ${Object.values(SRC_ALLOW).map((a) => a[1]).join(', ')} read, its reason in the file)${srcBad.length ? ' — ' + srcBad.map(([f, h]) => f + ' [' + h.join(' ; ') + ']').join(' | ') : ''}`);
+  ok(srcBad.length === 0 && Object.keys(SRC_ALLOW).every((f) => srcHits.some(([g]) => g === f)), `§68 src/ + server.js read no passwd home (the product reaches a home through $HOME / os.homedir() only) — but for its reasoned sites (${Object.keys(SRC_ALLOW).join(', ')}: exactly ${Object.values(SRC_ALLOW).map((a) => a[1]).join(', ')} read, its reason in the file)${srcBad.length ? ' — ' + srcBad.map(([f, h]) => f + ' [' + h.join(' ; ') + ']').join(' | ') : ''}`);
   const BIN_ALLOW = { 'data/bin/vibespace-browser': /THE ACCOUNT'S HOME, never \$HOME/, 'data/bin/vibespace-window': /SHOT_HOMES/ };
   const binFiles = fs.readdirSync('data/bin').filter((f) => { try { return fs.statSync(path.join('data/bin', f)).isFile(); } catch { return false; } }).map((f) => 'data/bin/' + f);
   const binHits = binFiles.map((f) => { const src = fs.readFileSync(f, 'utf8'); return [f, judge(src).filter((h) => h.includes('userInfo().homedir')), src]; }).filter(([, h]) => h.length);

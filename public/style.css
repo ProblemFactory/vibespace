@@ -4799,6 +4799,10 @@ label.mounts-key-shown > .need-door { align-self: flex-start; }   /* verifier #2
 }
 .mounts-action:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
 .mounts-action:disabled { opacity: 0.45; cursor: default; }
+/* B-7f0b (r1220 (2)): a machine row's one-press pin, beside its «not pinned» chip */
+.mounts-pin-btn { font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; flex: none; }
+.mounts-pin-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.mounts-pin-btn:disabled { opacity: 0.45; cursor: default; }
 .mounts-action-icon { display: inline-flex; width: 15px; justify-content: center; color: var(--text-dim); }
 .mounts-action:hover:not(:disabled) .mounts-action-icon { color: var(--accent); }
 .mounts-note { font-size: 10px; color: var(--text-dim); line-height: 1.5; padding: 0 2px; }

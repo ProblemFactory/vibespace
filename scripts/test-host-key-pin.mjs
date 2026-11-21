@@ -314,7 +314,7 @@ console.log('— the page: the door, the dialog, the words in zh + ja —');
   ok(addAt > 0 && testAt > addAt, 'a NEW machine: its key is shown for a pin (a scan, nothing trusted) BEFORE the first test dials it — the first-connection window D6 closes');
   // the pictures' second take (2026-11-18): the row's red line and the Test / Add toasts word a refused key (and a pin that cannot be
   // used) in the PAGE's language — the route hands code + fp + pinned; the server's English sentence was printed as it came
-  ok(/function hostKeyErrorWords\(h, e\)/.test(sm) && (sm.match(/hostKeyErrorWords\(/g) || []).length === 6 && /code: e\.code, fp: e\.fp \|\| null, pinned: !!e\.pinned/.test(read('src/server/exit-routes.js')) && /st\.code === 'host-key-name' \? tr\('pin cannot be used'\)/.test(sm),
+  ok(/function hostKeyErrorWords\(h, e\)/.test(sm) && (sm.match(/hostKeyErrorWords\(/g) || []).length === 7 /* B-7f0b (r1220 (2)): the one-press pin (_pinKnown) words its refusals by the same door */ && /code: e\.code, fp: e\.fp \|\| null, pinned: !!e\.pinned/.test(read('src/server/exit-routes.js')) && /st\.code === 'host-key-name' \? tr\('pin cannot be used'\)/.test(sm),
     'a refused host key and a pin that cannot be used are worded by the PAGE on the row (its own chip) and in the Test / Add toasts, never the server\'s English as it came; the sentence ends on the door\'s own «…» (no fourth dot)');
   // the reader of unit 3 (a must): an item's jump hands {id, name}; the dialog reads the machine's WHOLE record (transport, device
   // key, refusal) from the hosts route before it draws — or a device-kind item showed the ssh view, without «Forget the device key»

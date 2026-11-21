@@ -2440,9 +2440,15 @@ class HostManager {
     const seen = await this.hostKeyScan(id);
     const keep = seen.filter((k) => want.has(k.fp));
     if (!keep.length) throw Object.assign(new Error(`${h0.name} does not show the key you chose any more (it shows ${seen.map((k) => k.fp).join(', ')}) — look again before pinning`), { code: 'host-key-not-seen', hostId: h0.id });
+    return this._pinTheseKeys(id, keep);
+  }
+
+  /** ONE pin's tail (a confirmed scan's keys, or the keys this hub already trusts): the record, landed or undone, then its pin file
+   *  and its connections. → the record's pin view */
+  async _pinTheseKeys(id, keys) {
     const h = this.get(id);
     const was = { hostKeys: h.hostKeys, hostKeysAt: h.hostKeysAt };
-    h.hostKeys = keep.map(({ type, key, fp }) => ({ type, key, fp }));
+    h.hostKeys = keys.map(({ type, key, fp }) => ({ type, key, fp }));
     h.hostKeysAt = Date.now();
     this._save();
     await this._landedOrUndo(h, was, 'pinned'); // 主开发's hunt (2.369.411's hosts store writes off the loop): told «pinned» only once it landed
@@ -2453,6 +2459,24 @@ class HostManager {
     try { this.onHostKeyPinned?.(h); } catch { }
     return HK.pinView(h);
   }
+
+  /** B-7f0b (the coordinator's r1220 (2)): ONE PRESS of a person pins the key(s) this hub ALREADY trusts for a machine — its own
+   *  known_hosts lines (HK.knownKeysOf: the line ssh wrote at the first dial). No new trust and nothing asked of the machine; a
+   *  record with no such line is refused BY NAME (host-key-not-known): its Host key… dialog's scan-and-confirm stays its road.
+   *  Nothing pins by itself: only this press. `file` is a suite's stand-in (never a caller's word: the route passes none). */
+  async pinKnownHostKeys(id, { file = null } = {}) {
+    const h0 = this.get(id);
+    if (h0.transport === 'dial') throw Object.assign(new Error(`${h0.name} dials out — it has no ssh host key to pin`), { code: 'host-key-no-ssh', hostId: h0.id });
+    if (HK.pinned(h0)) return HK.pinView(h0);
+    const bad = HK.nameWhy(h0);
+    if (bad) throw HK.pinRefusal(h0, bad);
+    const keys = await HK.knownKeysOf(h0, { file: file || this._knownHostsFile() });
+    if (!keys.length) throw Object.assign(new Error(`this hub trusts no key for ${h0.name} yet — open its Host key… to check the key it shows now`), { code: 'host-key-not-known', hostId: h0.id, params: { name: h0.name } });
+    return this._pinTheseKeys(h0.id, keys);
+  }
+  /** the hub user's own known_hosts. SSH READS THE PASSWD HOME (getpwuid), whatever $HOME says, so the key a first dial trusted
+   *  is in THAT home's file (test-architecture §68's reasoned site): a PATH read for its lines (knownKeysOf), never written. */
+  _knownHostsFile() { return path.join(require('os').userInfo().homedir, '.ssh', 'known_hosts'); }
 
   /** lane lg-remote-hardening (the reader's should 8): a pin decided ⇒ no connection accepted before it rides on — the record's
    *  ControlMaster is told to exit (%C does not change with the alias) and its cached device link is rebuilt with the new options. */

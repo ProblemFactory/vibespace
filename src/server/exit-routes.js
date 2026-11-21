@@ -338,6 +338,13 @@ app.get('/api/hosts/:id/host-keys', async (req, res) => {
     res.json({ ...pin, seen, match });
   } catch (e) { hostKeyFail(res, e); }
 });
+// B-7f0b (the coordinator's r1220 (2)): ONE PRESS pins the key(s) this hub ALREADY trusts for the machine (its known_hosts line);
+// none ⇒ host-key-not-known, and the page opens the Host key… dialog's scan-and-confirm
+app.post('/api/hosts/:id/host-keys/known', async (req, res) => {
+  if (hostKeyHumanOnly(req, res)) return;
+  try { const v = await hosts.pinKnownHostKeys(req.params.id); bcastAll({ type: 'hosts-updated' }); res.json({ success: true, ...v }); }
+  catch (e) { hostKeyFail(res, e); }
+});
 app.post('/api/hosts/:id/host-keys', async (req, res) => {
   if (hostKeyHumanOnly(req, res)) return;
   try { const v = await hosts.pinHostKeys(req.params.id, (req.body || {}).fps); bcastAll({ type: 'hosts-updated' }); res.json({ success: true, ...v }); }
