@@ -250,14 +250,19 @@ function computeDiscoverySnapshot() {
       // PID-reuse guard (discovery-facts, 2.278.0): liveness alone let
       // a recycled pid surface a phantom "running" session — the hole
       // the LOCAL sweep closed years ago and this snapshot never had.
-      if (!pidLooksClaude(pid)) continue;
-      try { const st = fs.statSync(path.join(sdir, f)); live.push({ name: f, pid, size: st.size, mtimeMs: st.mtimeMs }); } catch { }
+      let claude = false; try { claude = pidLooksClaude(pid); } catch { }
+      if (!claude) continue;
+      // (r1082) every per-file step fails for THAT file only; an entry that is not a file is no lock
+      try { const st = fs.statSync(path.join(sdir, f)); if (st.isFile()) live.push({ name: f, pid, size: st.size, mtimeMs: st.mtimeMs }); } catch { }
     }
     // B-5278 unit 2, part 3: at most DISCOVERY_LOCKS_MAX live locks, none over DISCOVERY_LOCK_FILE_MAX — read within that bound
     const pick = pickLockFiles(live);
     locksLeft = pick.left;
     for (const e of pick.take) {
-      const text = readAtMost(path.join(sdir, e.name), DISCOVERY_LOCK_FILE_MAX);
+      // (r1082, THE LAW) ONE LOCK THAT CANNOT BE READ NEVER COSTS ANOTHER LOCK ITS READ: the read and the parse fail for this file
+      // only. A lock gone since the pick is a conversation that ended (not counted); one unreadable for another reason is counted.
+      let text = null;
+      try { text = readAtMost(path.join(sdir, e.name), DISCOVERY_LOCK_FILE_MAX); } catch (err) { if (!err || err.code !== 'ENOENT') locksLeft++; continue; }
       if (text == null) { locksLeft++; continue; }
       try { locks.push({ pid: e.pid, ...JSON.parse(text) }); } catch { }
     }

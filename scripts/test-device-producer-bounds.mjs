@@ -249,6 +249,18 @@ console.log('⑥ r951, THE LAW of item 4: a machine that replied is never called
     const missing = keys.filter((k) => !T.includes(JSON.stringify(k) + ':'));
     ok(keys.length === 17 && missing.length === 0, `…every sentence of the door (${keys.length}) has its ${lang} row`, missing);
   }
+  // (r1096) THE HEAD CHIP's AGE KEEPS ITS CASE: the zone's head uppercases its text, and the chip sat in it — «as of 26M ago»
+  // (an «M» reads as months) beside the row's «as of 26m ago». The drawn text, and the rule that keeps it under that head:
+  const CSS = read('public/style.css');
+  const ruleOf = (css, sel) => { const m = css.match(new RegExp('(?:^|\\n)' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\{([^}]*)\\}')); return m ? m[1] : ''; };
+  const keepsCase = (css) => /text-transform:\s*uppercase/.test(ruleOf(css, '.wb-zone-head')) && /text-transform:\s*none/.test(ruleOf(css, '.host-state-chip'));
+  const U = await import(pathToFileURL(path.join(REPO, 'src/lib/utils.js')).href);
+  const mkC = (tag) => ({ tagName: tag, className: '', textContent: '', title: '', style: {}, classList: { add() { } } });
+  const hadDocC = 'document' in globalThis; if (!hadDocC) globalThis.document = { createElement: mkC };
+  let drawn = ''; try { drawn = U.hostStateChip('stale', { age: Date.now() - 26 * 60 * 1000 }).textContent; } finally { if (!hadDocC) delete globalThis.document; }
+  const noKeep = CSS.replace('flex: none; text-transform: none; }', 'flex: none; }');   // the chip's rule before the cure, quoted (stale-pins: kept)
+  ok(/26m\b/.test(drawn) && keepsCase(CSS) && !keepsCase(noKeep),
+    `the head chip draws «${drawn}» and keeps that case under the zone's uppercased head (the chip's own rule); RED: without it the head's capitals reach the chip («${drawn.toUpperCase()}»)`);
   // THE HUB'S FALLBACK, DRIVEN (a HostManager in a temp folder; the device and ssh stood in): a device that replied «still walking»
   const { HostManager, lastKnownRows } = require('../src/hosts.js');
   const walking = () => Promise.reject(Object.assign(new Error('the discovery walk is still running (past 8 s); what it finds is kept for the next ask'), { code: 'discovery-slow' }));
@@ -401,15 +413,15 @@ console.log('⑦ r1044, the follow: the door\'s default, a re-scan keeps its cod
 console.log('⑧ r1044, the next part: a device that said its walk is still running is never walked a second time (no snapshot ask joining it, no ssh walk of the same home)');
 {
   const { HostManager, NO_SECOND_WALK } = require('../src/hosts.js');
-  const refuse = (code) => () => Promise.reject(Object.assign(new Error(`the device refused (${code})`), { code }));
-  const road = async (HM, code) => {
+  const refuse = (code) => () => Promise.reject(code ? Object.assign(new Error(`the device refused (${code})`), { code }) : new Error('device-claims deadline'));
+  const road = async (HM, code, { last = true } = {}) => {
     const m = new HM({ dataDir: fs.mkdtempSync(path.join(tmp, 'walk2-')) });
     m._state.hosts.push({ id: 'hW', name: 'gpu-a', transport: 'dial' });
     const asked = { claims: 0, snapshot: 0, ssh: 0 };
     m.deviceBounded = async () => ({ connect: async () => ({ info: { capabilities: ['discovery-claims'] } }),
       discoveryClaims: () => { asked.claims++; return refuse(code)(); }, discoverySnapshot: () => { asked.snapshot++; return refuse(code)(); } });
     m._ssh = async () => { asked.ssh++; throw new Error('ssh: connect to host gpu-a port 22: Connection timed out'); };
-    m._discoveryCache.set('hW', { at: 5000, sessions: [{ sessionId: 's1' }] });
+    if (last) m._discoveryCache.set('hW', { at: 5000, sessions: [{ sessionId: 's1' }] });
     let rows = null, err = null;
     try { rows = await m.discoverSessions('hW', { ttlMs: 0 }); } catch (e) { err = e; }
     return { ...asked, why: rows && rows[0].staleWhy, err: err && err.message };
@@ -424,8 +436,15 @@ console.log('⑧ r1044, the next part: a device that said its walk is still runn
     ok(!NO_SECOND_WALK.has(code) && r.snapshot === 1 && r.ssh === 1 && r.why === code,
       `…a child that failed or could not start («${code}»): the other roads are still tried — the snapshot ask and the ssh rung's shell walk (${JSON.stringify(r)})`);
   }
+  // (r1082's shoulds) with NO last list: «still walking» waits on that same walk once more (joining it is no second walk) and
+  // never walks over ssh; a walk that ran out of its bound or answered too much keeps the ssh road (a home never listed has no other)
+  const nl = {}; for (const code of ['discovery-slow', 'discovery-timeout', 'discovery-too-large']) nl[code] = await road(HostManager, code, { last: false });
+  ok(nl['discovery-slow'].snapshot === 1 && nl['discovery-slow'].ssh === 0 && nl['discovery-timeout'].snapshot === 1 && nl['discovery-timeout'].ssh === 1 && nl['discovery-too-large'].ssh === 1,
+    `no last list: «still walking» joins the same walk once more and never walks over ssh; a timed-out or too-large walk keeps the ssh road (${JSON.stringify(nl)})`);
+  const quiet = await road(HostManager, null);
+  ok(quiet.snapshot === 1 && quiet.ssh === 1 && quiet.why === undefined, `a device that does not reply (a deadline, no code): every road is tried, and the last list says unreachable (${JSON.stringify(quiet)})`);
   const HSRC3 = read('src/hosts.js');
-  const Twice = M.load('src/hosts.js', anchored(anchored(HSRC3, "          if (NO_SECOND_WALK.has(deviceWhy)) throw deviceErr;   // (r1044) the snapshot ask would join the same walk\n", '', 'second-walk-snapshot'), "      if (out == null && NO_SECOND_WALK.has(deviceWhy)) throw deviceErr;   // (r1044) never a second walk of the same home\n", '', 'second-walk-ssh'), 'second-walk');
+  const Twice = M.load('src/hosts.js', anchored(anchored(HSRC3, "          if (NO_SECOND_WALK.has(deviceWhy) && this._hasLastList(id)) throw deviceErr;\n", '', 'second-walk-snapshot'), "      if (out == null && (deviceWhy === 'discovery-slow' || (NO_SECOND_WALK.has(deviceWhy) && this._hasLastList(id)))) throw deviceErr;\n", '', 'second-walk-ssh'), 'second-walk');
   const red = await road(Twice.HostManager, 'discovery-slow');
   ok(red.snapshot === 1 && red.ssh === 1, `CONTROL (the release's rungs, in a copy): after «still walking» the hub asks the same walk again and walks the same home over ssh (${JSON.stringify(red)}) — RED`);
 }
@@ -447,7 +466,7 @@ console.log('⑨ the next part (r1044): the agent\'s reply is bounded BY CONSTRU
     fs.writeFileSync(f, i === 7 ? JSON.stringify({ sessionId: sidOf(i), cwd: '/w', pad: 'x'.repeat(70 * 1024) }) : JSON.stringify({ sessionId: sidOf(i), cwd: `/home/u/p${i}`, startedAt: 1700000000000 + i }));
     fs.utimesSync(f, 1700000000 + i, 1700000000 + i);
   }
-  const waive = (src, tag) => anchored(anchored(src, '      let alive = false; try { process.kill(pid, 0); alive = true; } catch { }\n', '      let alive = true;\n', tag + '-alive'), '      if (!pidLooksClaude(pid)) continue;\n', '', tag + '-claude');
+  const waive = (src, tag) => anchored(anchored(src, '      let alive = false; try { process.kill(pid, 0); alive = true; } catch { }\n', '      let alive = true;\n', tag + '-alive'), /      (?:if \(!pidLooksClaude\(pid\)\) continue;|let claude = false; try \{ claude = pidLooksClaude\(pid\); \} catch \{ \}\n      if \(!claude\) continue;)\n/, '', tag + '-claude');   // a quoted older form (stale-pins: kept)
   const tree = snapshotOf(M.write('src/agentd/agentd.js', waive(AGSRC, 'locks-bounded'), 'locks-bounded'), h);
   const relLoop = "      try { locks.push({ pid, ...JSON.parse(fs.readFileSync(path.join(home, '.claude', 'sessions', f), 'utf-8')) }); } catch { }\n    }\n  } catch { }\n";   // the release's lock loop, quoted (stale-pins: kept)
   const AG_REL = anchored(AGSRC, /  const locks = \[\];\n  let locksLeft = 0;\n[\s\S]*?\n  } catch \{ \}\n(?=  const jsonls = \[\];)/, "  const locks = [];\n  let locksLeft = 0;\n  try {\n    for (const f of fs.readdirSync(path.join(home, '.claude', 'sessions'))) {\n      if (!f.endsWith('.json')) continue;\n      const pid = Number(f.slice(0, -5));\n      let alive = false; try { process.kill(pid, 0); alive = true; } catch { }\n      if (!alive) continue;\n      if (!pidLooksClaude(pid)) continue;\n" + relLoop, 'release-locks');
@@ -456,6 +475,21 @@ console.log('⑨ the next part (r1044): the agent\'s reply is bounded BY CONSTRU
   ok(tree.code === 0 && tl && tl.length === 1000 && tree.snap.left && tree.snap.left.locks === 3 && !tl.some((l) => l.pad) && tl.some((l) => l.sessionId === sidOf(1002)),
     `the agent's own child: ${tl && tl.length} locks, the newest; the 70 KiB file and the two oldest left out and counted (left.locks ${tree.snap && tree.snap.left && tree.snap.left.locks}) — ${tree.err}`);
   ok(rel.code === 0 && rl && rl.length === 1003 && rl.some((l) => l.pad), `CONTROL (the release's lock loop, in a copy): every lock read whole — ${rl && rl.length}, the 70 KiB one among them, nothing counted — RED`);
+  // (r1082, THE LAW) ONE LOCK THAT CANNOT BE READ NEVER COSTS ANOTHER LOCK ITS READ — a lock that vanishes between the pick and the
+  // read (placed: one seam in a copy removes the second-newest picked lock there), and an entry that is a folder with a lock's name
+  const hr = homeOf('f9r'), SR = path.join(hr, '.claude', 'sessions');
+  fs.mkdirSync(SR, { recursive: true });
+  for (let i = 0; i < 6; i++) { const f = path.join(SR, `${300000 + i}.json`); fs.writeFileSync(f, JSON.stringify({ sessionId: sidOf(300 + i), cwd: `/home/u/q${i}` })); fs.utimesSync(f, 1700000000 + i, 1700000000 + i); }
+  const dirLock = path.join(SR, '300099.json'); fs.mkdirSync(dirLock); fs.utimesSync(dirLock, 1700009999, 1700009999);   // the newest entry: a folder
+  const raced = (src, tag) => anchored(src, '    const pick = pickLockFiles(live);\n', '    const pick = pickLockFiles(live);\n    try { const gone = pick.take.filter((x) => x.name !== \'300099.json\')[1]; if (gone) fs.rmSync(path.join(sdir, gone.name)); } catch { }\n', tag);
+  const race = snapshotOf(M.write('src/agentd/agentd.js', raced(waive(AGSRC, 'race'), 'race-seam'), 'race-seam'), hr);
+  const TIP_READ = "      let text = null;\n      try { text = readAtMost(path.join(sdir, e.name), DISCOVERY_LOCK_FILE_MAX); } catch (err) { if (!err || err.code !== 'ENOENT') locksLeft++; continue; }\n";
+  const tipSrc = anchored(anchored(AGSRC, TIP_READ, '      const text = readAtMost(path.join(sdir, e.name), DISCOVERY_LOCK_FILE_MAX);\n', 'tip-read'), 'if (st.isFile()) live.push(', 'live.push(', 'tip-stat');   // the tip's loop (f05abb93a), quoted (stale-pins: kept)
+  const raceTip = snapshotOf(M.write('src/agentd/agentd.js', raced(waive(tipSrc, 'race-tip'), 'race-tip-seam'), 'race-tip-seam'), hr);
+  const rl2 = race.snap && race.snap.locks, tl2 = raceTip.snap && raceTip.snap.locks;
+  ok(race.code === 0 && rl2 && rl2.length === 5 && !(race.snap.left && race.snap.left.locks) && rl2.some((l) => l.sessionId === sidOf(300)),
+    `a lock gone between the pick and the read, and a folder with a lock's name: every other lock is read (${rl2 && rl2.length} of the 5 left), the ended one not counted, the folder no lock — ${race.err}`);
+  ok(raceTip.code === 0 && tl2 && tl2.length < 5, `CONTROL (the tip's loop, in a copy — f05abb93a): the first that cannot be read ends the loop — ${tl2 && tl2.length} lock(s) read, every running conversation after it listed as stopped, nothing said — RED`);
   // the open codex rollouts and the child's answer: their bounds, wired
   const n = (t) => AGSRC.split(t).length - 1;
   ok(DF.DISCOVERY_CODEX_OPEN_MAX === 1000 && DF.DISCOVERY_CHILD_MAX_BYTES === 16 * 1024 * 1024 && n('codexOpen = codexOpen.slice(0, DISCOVERY_CODEX_OPEN_MAX)') === 1 && n('maxBuffer: DISCOVERY_CHILD_MAX_BYTES, env: spawnEnv() }, cb);') === 2 && n('maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);') === 0   // an absence check (stale-pins: kept)

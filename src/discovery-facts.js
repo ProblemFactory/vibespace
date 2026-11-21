@@ -925,7 +925,9 @@ function synthesizeDiscoveryLines(snap) {
   return lines.join('\n');
 }
 
-// B-5278 unit 2, its third part (r1044: the agent's parse of a big reply on its own loop): THE REPLY IS BOUNDED BY CONSTRUCTION, so
+// B-5278 unit 2, its third part (r1044: the agent's parse of a big reply on its own loop): THE REPLY IS BOUNDED — each kind of row
+// where it is made, and the whole by the child's DISCOVERY_CHILD_MAX_BYTES (their worst sum passes it: that bound, with its named
+// refusal, is the true cap; a real home answers about 100 KB), so
 // its parse (snapshotChildVerdict) and its re-serialization (the reply line) on the agent's loop are bounded too. Measured on the test
 // machine at load 44 (probe run e02fea655-20261121054147-box): a 4 MiB answer = parse 15 ms, reply 41 ms, the claims road 93 ms; the
 // old 64 MiB bound = 192 / 612 / 936 ms. The rows are bounded where they are made: the newest 200 conversations (60 with head facts),

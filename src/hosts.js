@@ -3532,6 +3532,8 @@ class HostManager {
   /** the live row's own field (server.js activeSessionsPayload): another machine's conversation carries its machine's real path */
   hostRealFieldsOf(s) { let r = null; try { r = s && s.host ? this.realCwdOf(s.host, s.cwd) : null; } catch { r = null; } return r ? { hostRealCwd: r } : {}; }
 
+  /** B-5278 (r1082): a last list of this machine the hub could answer (its cache or the one kept on disk) */
+  _hasLastList(id) { const last = this._discoveryCache.get(id) || this._persistedDisc[id]; return !!(last && Array.isArray(last.sessions)); }
   async discoverSessions(id, { ttlMs = 15000 } = {}) {
     const h = this.get(id);
     const hit = this._discoveryCache.get(id);
@@ -3696,13 +3698,18 @@ ${codexOpenRolloutsShell()}
             if (!claimed.some((s) => s && s.stale)) this._persistDiscovery(id, claimed);   // an OLD list is never kept as the last-known one
             return claimed;
           }
-          if (NO_SECOND_WALK.has(deviceWhy)) throw deviceErr;   // (r1044) the snapshot ask would join the same walk
+          // (r1044) the snapshot ask would join the same walk: skipped when there is a last list to answer; (r1082's should) with none,
+          // waiting on that same walk once more is the person's only road — joining it is no second walk
+          if (NO_SECOND_WALK.has(deviceWhy) && this._hasLastList(id)) throw deviceErr;
           const snap = await deadline(dm.discoverySnapshot(), 12000, 'device-discovery');
           out = synthesizeDiscoveryLines(snap); // shared with the device's own discovery.v2 chain
           snapStale = snap && snap.stale ? snap.stale : null;
         } catch (e2) { out = null; if (discoveryCodeOf(e2)) { deviceWhy = discoveryCodeOf(e2); deviceErr = e2; } /* legacy fallback below */ }
       }
-      if (out == null && NO_SECOND_WALK.has(deviceWhy)) throw deviceErr;   // (r1044) never a second walk of the same home
+      // (r1044) never a second walk of the same home while its first walks on («still walking»); after a walk that ran out of its
+      // bound or answered too much, the ssh road is skipped only when there is a last list — (r1082's should) a home never listed
+      // keeps that road
+      if (out == null && (deviceWhy === 'discovery-slow' || (NO_SECOND_WALK.has(deviceWhy) && this._hasLastList(id)))) throw deviceErr;
       if (out == null) out = await this._ssh(h, script, { timeoutMs: 20000 });
     } catch (e) {
       // Host unreachable — serve LAST-KNOWN (expired memory cache, else the

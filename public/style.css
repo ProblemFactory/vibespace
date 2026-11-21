@@ -6535,7 +6535,9 @@ button.am-cap { cursor: pointer; }
 /* Host-scoped transition-state chips (2.272.1 campaign primitive): the ONE
    visual language for checking / stale / unreachable across every surface
    that talks to a machine — sidebar zones, account rosters, mounts, ports. */
-.host-state-chip { font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 999px; white-space: nowrap; flex: none; }
+/* (B-5278, r1096) the chip keeps its own case wherever it sits: an age's unit letter (m / h / d) never turns capital under an
+   uppercased head (the zone's «as of 26M ago» read as months) */
+.host-state-chip { font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 999px; white-space: nowrap; flex: none; text-transform: none; }
 .host-state-pending { color: var(--text-dim); background: color-mix(in srgb, var(--text-dim) 14%, transparent); animation: host-chip-pulse 1.4s ease-in-out infinite; }
 .host-state-stale { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); }
 .host-state-error { color: var(--red, #e55); background: color-mix(in srgb, var(--red, #e55) 14%, transparent); }
