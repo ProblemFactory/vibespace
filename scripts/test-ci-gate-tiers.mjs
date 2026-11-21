@@ -310,7 +310,7 @@ console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
 // helper defined ok(condition, name) — a non-empty string is truthy, so the suite read ALL PASS (67) and four census plants
 // stayed green. Both orders live in the tree, every suite with its own copy. This census reads every script's OWN
 // assertion helper — every name in scripts/lib/check.mjs HELPER_NAMES: ok, check, and since B-1747's remainder (2.369.412) the
-// ck / leg / assert a shape survey found — (its order = the parameter its body tests, helperDefs) and fails a call whose
+// ck / leg / assert a shape survey found, and since B-1747 part 1 the pin / failPass families (judged by a verdict in the body) — (its order = the parameter its body tests, helperDefs) and fails a call whose
 // CONDITION slot holds a string literal while its name slot does not: on 2.369.407 eight such legs, in test-record-shape,
 // test-queue-steer (the catch of ⑪'s browser leg: a THROWING leg passed), test-voice-follow-chrome and
 // test-path-field-chrome. The one helper (scripts/lib/check.mjs checker) THROWS on a non-boolean condition and a
@@ -365,13 +365,34 @@ console.log('\n§7b a leg never passes by its name: no swapped call anywhere, on
   // and still finds an ok swap (the copy is the old census, never a copy that reads nothing)
   const CK = `${K} ck = (n, c) => { if (c) { pass++; } else { fail++; } };\n`, LG = 'function le' + 'g(c, n) { if (c) { pass++; } else { fail++; } }\n';
   const AS = `${K} assert = (cond, name) => {\n  if (!cond) failed++;\n};\n`;
-  ok(C.HELPER_NAMES.join() === 'ok,check,ck,leg,assert' && sw(CK + "ck(x === 1, 'the leg');\n") === '2' && sw(LG + "leg('the leg', y);\n") === '2' && sw(AS + "assert('the leg', y);\n") === '4', 'NEG: a ck, leg or assert helper handed a swap is found (the names the shape survey found: ok, check, ck, leg, assert)');
-  const LIB = fs.readFileSync(path.join(REPO, 'scripts', 'lib', 'check.mjs'), 'utf-8'), NAMES_LINE = "export const HELPER_NAMES = Object.freeze(['ok', 'check', 'ck', 'leg', 'assert']);";
+  ok(C.HELPER_NAMES.join() === 'ok,check,ck,leg,assert,pin,failPass' && sw(CK + "ck(x === 1, 'the leg');\n") === '2' && sw(LG + "leg('the leg', y);\n") === '2' && sw(AS + "assert('the leg', y);\n") === '4', 'NEG: a ck, leg or assert helper handed a swap is found (the names the shape survey found: ok, check, ck, leg, assert)');
+  const LIB = fs.readFileSync(path.join(REPO, 'scripts', 'lib', 'check.mjs'), 'utf-8'), NAMES_LINE = "export const HELPER_NAMES = Object.freeze(['ok', 'check', 'ck', 'leg', 'assert', 'pin', 'failPass']);";
   ok(LIB.split(NAMES_LINE).length === 2, 'the anchor of the RED CONTROL (the names line) is in the source (scripts/lib/check.mjs)');
   if (LIB.split(NAMES_LINE).length === 2) {
     const OLD = await import(pathToFileURL(mutantCopies('cigate7b-lib', REPO).write('scripts/lib/check.mjs', LIB.replace(NAMES_LINE, "export const HELPER_NAMES = Object.freeze(['ok', 'check']);"), 'old-names')).href);
     ok(OLD.swappedCalls(NF + "ok(x === 1, 'the leg');\n").length === 1, 'the RED CONTROL proves itself first: the old copy still finds an ok helper\'s swap (it is the census as it was, not a copy that reads nothing)');
     ok(OLD.swappedCalls(CK + "ck(x === 1, 'the leg');\n").length === 0 && OLD.swappedCalls(LG + "leg('the leg', y);\n").length === 0 && OLD.swappedCalls(AS + "assert('the leg', y);\n").length === 0, 'RED CONTROL: the census as it was (ok / check only) reads no ck, leg or assert helper — their swaps pass unseen');
+  }
+  // B-1747 part 1 (lane bl-scratch, 2.369.415's list): THE pin AND failPass FAMILIES ARE READ — a definition of either name is
+  // JUDGED only when its body states a verdict (scripts/lib/check.mjs VERDICT_RE); a pin that builds a row and a failPass that
+  // keeps a simulated engine's backoff test a parameter too and are `unknown`, never judged. NEG: each family's assertion helper
+  // handed a swap is found; each family's other shape is never judged. RED CONTROLS, one a family, PROVING THEMSELVES FIRST: the
+  // census before part 1 (an anchored copy of the library without the two names) still finds a ck swap — and misses that family's
+  const PIN_A = `${K} pin = (n, c) => {\n  if (!c) { console.error('  ✗ ' + n); process.exitCode = 1; } else console.log('  ✓ ' + n);\n};\n`;
+  const PIN_D = `${K} pin = (f, re, words) => ({ f, re, words });\n`;
+  const FP_A = `${K} failPass = (cond, name) => { if (!cond) failed++; else passed++; };\n`;
+  const FP_S = `${K} failPass = (pv, code) => { W.backoff.failures++; if (!pv.wasInBackoff) W.backoff.epoch++; };\n`;
+  ok(C.VERDICT_FAMILIES.join() === 'pin,failPass' && kinds(PIN_A) === 'name-first' && kinds(PIN_D) === 'unknown' && kinds(FP_A) === 'cond-first' && kinds(FP_S) === 'unknown',
+    'the pin and failPass families are read: an assertion helper of each (a verdict in its body) is judged by its order; a pin that builds a row and a failPass that keeps a simulated backoff are unknown, never judged');
+  ok(sw(PIN_A + "pin(x === 1, 'the leg');\n") === '4' && sw(FP_A + "failPass('the leg', y);\n") === '2' && sw(PIN_D + "pin('a', /x/, 'w');\n") === '',
+    'NEG: a pin or failPass assertion helper handed a swap is found; a pin that builds a row, called with a string first, is not');
+  {
+    const { anchored } = await import('./scratch.mjs');
+    const PRE1 = anchored(LIB, NAMES_LINE, "export const HELPER_NAMES = Object.freeze(['ok', 'check', 'ck', 'leg', 'assert']);", 'B-1747 part 1: the census before the pin / failPass families');
+    const OLD1 = await import(pathToFileURL(mutantCopies('cigate7b-lib1', REPO).write('scripts/lib/check.mjs', PRE1, 'pre-part1')).href);
+    ok(OLD1.swappedCalls(CK + "ck(x === 1, 'the leg');\n").length === 1, 'the part-1 RED CONTROLS prove themselves first: the census before part 1 still finds a ck helper\'s swap (it is that census, not a copy that reads nothing)');
+    ok(OLD1.swappedCalls(PIN_A + "pin(x === 1, 'the leg');\n").length === 0, 'RED CONTROL (pin): the census before part 1 reads no pin helper — its swapped leg passed unseen');
+    ok(OLD1.swappedCalls(FP_A + "failPass('the leg', y);\n").length === 0, 'RED CONTROL (failPass): the census before part 1 reads no failPass helper — its swapped leg passed unseen');
   }
   ok(sw(NF + "ok('a' === x, 'the leg');\n") === '2' && sw(CF + "ok('the leg', 'a' === x);\n") === '2', 'NEG: a condition that OPENS with a quote is still found in the name\'s place — the slot is judged as one whole literal, not by its first character');
   ok(sw(CF + "ok('k' in o, label);\n// never write ok('the leg', cond)\n * ok('in a doc block', x)\n") === '' && sw(CF + "ok(f(() => { return /a'b(/.test(s); }), 'leg');\nok('swapped', y);\n") === '3',

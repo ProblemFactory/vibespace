@@ -43,10 +43,16 @@ const safeJson = (v) => { try { return JSON.stringify(v); } catch { return Strin
 // wrapper with its own contract. HELPER_NAMES: ok and check (2.369.408), and since B-1747's remainder (2.369.412) the names
 // a shape survey of every script found (a two-parameter helper that tests a parameter as its condition and counts a fail,
 // or hands it on): ck (13 helpers, 13 files), leg (65 in 17 files: wrappers handing (c, n) to ok, row-pushers — the 7
-// (name, fn) runners also spelled so test no parameter: order unknown, never judged), assert (2). LEFT, said: pin (1 —
-// too common a word for a name census), failPass (1); okc's two hand their pair on to ok, so their order cannot be
-// read. (This comment spells no definition: the census reads comments too.)
-export const HELPER_NAMES = Object.freeze(['ok', 'check', 'ck', 'leg', 'assert']);
+// (name, fn) runners also spelled so test no parameter: order unknown, never judged), assert (2); and since B-1747 part 1 (bl-scratch, 2.369.415's list) the pin and failPass FAMILIES: VERDICT_FAMILIES — a
+// definition of those names is JUDGED only when its body states a verdict (VERDICT_RE: a pass / fail counter, the exit code,
+// a ✓ / ✗ line, or a hand-off to a helper of the census); a pin that builds a row or a failPass that keeps a simulated
+// engine's backoff tests a parameter too and is read as `unknown`, never judged — «pin» is too common a word to judge by
+// name alone. okc's two hand their pair on to ok, so their order cannot be read. (This comment spells no definition: the
+// census reads comments too.)
+export const HELPER_NAMES = Object.freeze(['ok', 'check', 'ck', 'leg', 'assert', 'pin', 'failPass']);
+/** The families judged only by a verdict in the body (B-1747 part 1): their names name data and simulations as often. */
+export const VERDICT_FAMILIES = Object.freeze(['pin', 'failPass']);
+export const VERDICT_RE = /\b(?:pass(?:ed|es)?|fail(?:ed|s)?|bad|good)\s*\+\+|\+\+\s*(?:pass|fail)|process\.exitCode\s*=\s*1\b|['"`]\s*[✓✗]|(?<![\w$.])(?:ok|check|ck|leg|assert)\s*\(/;
 const NAMES_ALT = HELPER_NAMES.join('|');
 const FIND_RE = new RegExp(`\\b(?:${NAMES_ALT})\\b`, 'g'), KW_BEFORE = /(?:^|[^\w$.])(const|let|var|function)\s+$/; // the cheap scan (a keyword-led alternation over 60 MB costs 3×); DEF_RE then reads each hit in place
 const DEF_RE = new RegExp(`(?:(?:const|let|var)\\s+(${NAMES_ALT})\\s*=\\s*(?:async\\s*)?\\(\\s*([A-Za-z_$][\\w$]*)\\s*,\\s*([A-Za-z_$][\\w$]*)[^)]*\\)\\s*=>|function\\s+(${NAMES_ALT})\\s*\\(\\s*([A-Za-z_$][\\w$]*)\\s*,\\s*([A-Za-z_$][\\w$]*))`, 'y');
@@ -78,7 +84,7 @@ export function helperDefs(src) {
     const at = m.index + m[0].indexOf(name, m[0].search(/const|let|var|function/));
     const body = defBody(src, at);
     const ta = tests(a, body), tb = tests(b, body);
-    const order = ta && !tb ? 'cond-first' : tb && !ta ? 'name-first' : 'unknown';
+    const order = VERDICT_FAMILIES.includes(name) && !VERDICT_RE.test(body) ? 'unknown' : ta && !tb ? 'cond-first' : tb && !ta ? 'name-first' : 'unknown';
     const condP = order === 'cond-first' ? a : order === 'name-first' ? b : null, nameP = order === 'cond-first' ? b : order === 'name-first' ? a : null;
     const refuses = (p, t) => new RegExp(`typeof\\s+${p}\\s*!==?\\s*['"]${t}['"][^)]*\\)\\s*\\{?\\s*(?:throw\\b|fail(?:ed)?\\s*\\+\\+|\\+\\+\\s*fail)`).test(body);
     const guarded = !!condP && (refuses(condP, 'boolean') || refuses(nameP, 'string'));
