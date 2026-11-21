@@ -47,6 +47,15 @@ const CC = require(path.join(REPO, 'src/cli-caps.js'));
 const LE = require(path.join(REPO, 'src/login-expiry.js'));
 let pass = 0, fail = 0;
 const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oat-add-door-'));
 const OAT = ['sk', '-ant-oat01-'].join('') + 'ADDfake_' + 'k3P9'.repeat(12) + '-qq';
 const MAP = 'new Map([["claude_max","max"],["claude_pro","pro"],["claude_enterprise","enterprise"],["claude_team","team"]])';
@@ -115,7 +124,7 @@ console.log('§4 a person\'s typeless shape is a shape');
   ok(LE.materializeVerdict({ ...base, shape: sh }, NOW).verdict === 'materialize' && LE.materializeVerdict({ ...base, shape: null }, NOW).verdict === 'no-scopes' && LE.materializeVerdict({ ...base, shape: { scopes: ['user:inference'] } }, NOW).verdict === 'no-scopes', 'materializeVerdict: the person\'s typeless shape ⇒ materialize; no shape / scopes without a type or the typeless mark ⇒ no-scopes');
   // RED CONTROL: the verdict without the typeless clause
   const src = fs.readFileSync(path.join(REPO, 'src/login-expiry.js'), 'utf8');
-  const red = src.replace("(!!sh.subscriptionType || sh.typeless === true)", '!!sh.subscriptionType');
+  const red = editAnchor(src, "(!!sh.subscriptionType || sh.typeless === true)", '!!sh.subscriptionType', "src/login-expiry.js");
   ok(red !== src, 'RED CONTROL: the typeless clause is where the verdict reads it');
   const f = path.join(tmp, 'login-expiry-red.js'); fs.writeFileSync(f, red.replace(/require\('\.\//g, `require('${REPO}/src/`));
   const LR = require(f);
@@ -149,7 +158,7 @@ console.log('§5 the plan values ride the streamed read');
   ok(MC.READER_VERSION === 3, 'the reader\'s version moved (2: the plan values; 3, lane level-signal-2b: the background level signal): a binary read before them is read once more');
   // RED CONTROL: the reader without the scanner's feed
   const src = fs.readFileSync(path.join(REPO, 'src/server/cli-model-catalog.js'), 'utf8');
-  const red = src.replace("        plans.feed(buf.subarray(carry, carry + bytesRead).toString('latin1'));\n", '');
+  const red = editAnchor(src, "        plans.feed(buf.subarray(carry, carry + bytesRead).toString('latin1'));\n", '', "src/server/cli-model-catalog.js");
   ok(red !== src, 'RED CONTROL: the feed line is where the read hands the bytes over');
   const rf = path.join(tmp, 'cmc-red.js'); fs.writeFileSync(rf, red.replace(/require\('\.\.\//g, `require('${REPO}/src/`).replace(/require\('\.\//g, `require('${REPO}/src/server/`));
   const RR = require(rf); const er = await RR.readBinary(big, { version: '9.9.9' });

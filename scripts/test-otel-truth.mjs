@@ -20,6 +20,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // Sanitized copy of the REAL captured api_request record (2.1.235): key names,
 // nesting and value encodings verbatim; uuids/email replaced.
@@ -215,7 +224,7 @@ const PAYLOAD = (recs) => ({
     const oisrc = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
     const FIRST = "    await nextTurn();   // never on the tick the read resolved on\n", BOUND = 'replayTake(performance.now() + REPLAY_SLICE_MS)';
     ok(oisrc.split(FIRST).length === 2 && oisrc.split(BOUND).length === 2, 'SLICED REPLAY premise: the first hop and the time bound are each one site of the module');
-    const OnePass = mutantCopies('otel-truth-slice', REPO).load('src/server/otel-ingest.js', oisrc.replace(FIRST, '').replace(BOUND, 'replayTake()'), 'one-pass');
+    const OnePass = mutantCopies('otel-truth-slice', REPO).load('src/server/otel-ingest.js', editAnchor(editAnchor(oisrc, FIRST, '', "src/server/otel-ingest.js"), BOUND, 'replayTake()', "src/server/otel-ingest.js"), 'one-pass');
     const now = Date.now(), rows = [];
     for (let k = 0; k < 90000; k++) {
       const old = k % 7 === 3, known = k % 5 !== 1;

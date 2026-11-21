@@ -29,6 +29,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n) => { skipped++; console.log('  - SKIP ' + n); };   // B-7f97 cure: a skip is NEVER a pass — named, and counted apart in the summary
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** block THIS loop synchronously — the shape of a busy server (load 100+ on the owner's box) */
@@ -1293,7 +1302,7 @@ async function legA(CDx, label) {
   RJ.jm._stashNotif(RJ.cid, RJ.job, { what: 'real 31', at: RJ.now() }, 'unreachable', { stampLast: false, held: { kind: 'not-reachable' } });
   ok(RJ.jm.peekNotifs(RJ.cid).length === 30 && RJ.jm.peekNotifs(RJ.cid)[0].text === 'real 2', '(a) …with no copy to give way, the oldest real entry falls as before');
   // CONTROL: the cap without the first pass evicts the oldest real entry for the copy
-  const pre = CD_SRC.replace("for (const pass of [(e) => !!(e.held && e.held.maybeDelivered), () => true]) {", "for (const pass of [() => true]) {");
+  const pre = editAnchor(CD_SRC, "for (const pass of [(e) => !!(e.held && e.held.maybeDelivered), () => true]) {", "for (const pass of [() => true]) {", "src/server/conversation-deliver.js");
   if (pre === CD_SRC) ok(false, '(a) CONTROL: the cap pass anchor moved');
   else { const c = await legA(M4.load('src/server/conversation-deliver.js', pre, 'cap-no-pass'), 'ctl'); ok(!c.kept && !c.gone, '(a) CONTROL: without the first pass the copy stays and the oldest real entry is gone (the r3 reproduction)', JSON.stringify(c)); }
 }
@@ -1315,7 +1324,7 @@ async function legB(CDx, label) {
 {
   const b = await legB(CD, '');
   ok(b.first && b.postedAt === 1 && b.floors === 0 && b.said === 1 && !b.fell, '(b) a landed post, the clock back 2 h, a new miss: the floor witness is dropped (said once) and the notice rides the first attempt', JSON.stringify({ ...b, fell: b.fell && b.fell.extra.reason }));
-  const pre = CD_SRC.replace("    for (const [cid, at] of lastPostAt) {\n      if (!(at > now)) continue;", "    for (const [cid, at] of []) {\n      if (!(at > now)) continue;");
+  const pre = editAnchor(CD_SRC, "    for (const [cid, at] of lastPostAt) {\n      if (!(at > now)) continue;", "    for (const [cid, at] of []) {\n      if (!(at > now)) continue;", "src/server/conversation-deliver.js");
   if (pre === CD_SRC) ok(false, '(b) CONTROL: the lastPostAt re-base anchor moved');
   else { const c = await legB(M4.load('src/server/conversation-deliver.js', pre, 'floor-no-rebase'), 'ctl'); ok(c.postedAt == null && c.floors >= 100 && c.fell && c.fell.extra.expired === true, '(b) CONTROL: without the re-base the floor holds for the whole step and the notice expires unposted', JSON.stringify({ postedAt: c.postedAt, floors: c.floors, fell: c.fell && c.fell.extra.reason })); }
   // the jobs engine's own floor (R5's witness) has the same clock rule
@@ -1351,7 +1360,7 @@ async function legC(CDx, label) {
   const c = await legC(CD, '');
   ok(c.inflight0 === 1 && c.duringPosts === 0 && c.duringLedger === 0 && c.afterA.posts.length === 1 && /e1/.test(c.afterA.posts[0]) && c.afterA.park === 1, '(c) a turn end during a frame\'s flight posts nothing — it waits for the frame, then the floor holds the newcomer', JSON.stringify({ inflight0: c.inflight0, duringPosts: c.duringPosts, afterA: { ...c.afterA, posts: c.afterA.posts.length } }));
   ok(c.final.posts === 2 && c.final.ledger === 2 && c.final.park === 0 && c.final.authorized === 2, '(c) …the newcomer rides 30 s later in its own frame: two notices, two posts 30 s apart, one charge each (its own hold converted)', JSON.stringify(c.final));
-  const pre = CD_SRC.replace("    while (attempting.has(cid)) { try { await attempting.get(cid); } catch { } }\n", "");
+  const pre = editAnchor(CD_SRC, "    while (attempting.has(cid)) { try { await attempting.get(cid); } catch { } }\n", "", "src/server/conversation-deliver.js");
   if (pre === CD_SRC) ok(false, '(c) CONTROL: the single-flight anchor moved');
   else { const k = await legC(M4.load('src/server/conversation-deliver.js', pre, 'no-single-flight'), 'ctl'); ok(k.duringPosts === 1 && k.duringLedger === 1 && k.afterA.posts.length === 2, '(c) CONTROL: without the wait the second frame lands during the first one\'s flight (the r3 reproduction)', JSON.stringify({ duringPosts: k.duringPosts, afterA: k.afterA.posts.length })); }
 }
@@ -1371,7 +1380,7 @@ async function legC(CDx, label) {
   ok(fell2.length === 1 && fell2[0].extra.evicted === true && /n-2\b/.test(R.deliver.stashPeek(R.cid)[0].text) && R.deliver.retryPeek(R.cid)[0].maybeDelivered === true, '(d) …the thirty-second evicts the oldest REAL waiting entry (n-2), never the may-have-landed one', JSON.stringify({ fell: fell2.map((e) => e.extra.kind + ':' + !!e.extra.evicted), stash: R.deliver.stashPeek(R.cid).map((e) => e.text.slice(-4)) }));
   await R.advance(0);
   ok(R.deliver.stashPeek(R.cid).some((e) => e.held && e.held.maybeDelivered) && R.deliver.retryPeek(R.cid).every((e) => !e.maybeDelivered), '(d) …and the sweep hands it to the stash with its own word');
-  const pre = CD_SRC.replace("filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);", "filter((x) => x && !x.inflight && !x.ho);");
+  const pre = editAnchor(CD_SRC, "filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);", "filter((x) => x && !x.inflight && !x.ho);", "src/server/conversation-deliver.js", 'first');
   if (pre === CD_SRC) ok(false, '(d) CONTROL: the waiting filter anchor moved');
   else {
     const K = rigOver(M4.load('src/server/conversation-deliver.js', pre, 'cap-counts-maybe'), 'r3d-ctl');

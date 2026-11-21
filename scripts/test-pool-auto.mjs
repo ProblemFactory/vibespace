@@ -16,6 +16,15 @@ const withoutNames = (d) => { if (!d || typeof d !== 'object') return d; const {
 
 let pass = 0, fail = 0;
 const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ck(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 // B-0d3e: a red control's anchor judged BY NAME — `n` = its count in the file; any count but one is a red row naming the anchor
 // and the file (the helper then answers { hit: false }: the caller's «… hits once» row reds too, nothing crashes)
 const okAnchor = (n, tag, file, from) => { if (n !== 1) ck(`ANCHOR (${tag}, ${file}): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the mutant builds nothing`, false); return n === 1; };
@@ -2510,7 +2519,7 @@ await (async () => {
     const rsrc = fs.readFileSync(path.resolve('src/server/account-usage-routes.js'), 'utf8');
     const a1 = 'if (engineDecided.has(sid) || ownLink(sid)) continue;', a2 = 'if (before !== after && !nobody) {';
     ck('r1 affected control: the patch (the two clauses removed) hits', rsrc.split(a1).length === 2 && rsrc.split(a2).length === 2);
-    const oldRoutes = MA.load('src/server/account-usage-routes.js', rsrc.replace(a1, '').replace(a2, 'if (before !== after) {'), 'allaffected');
+    const oldRoutes = MA.load('src/server/account-usage-routes.js', editAnchor(editAnchor(rsrc, a1, '', "src/server/account-usage-routes.js"), a2, 'if (before !== after) {', "src/server/account-usage-routes.js"), 'allaffected');
     const wo = nobodyWorld({ routesMod: oldRoutes });
     const ro = narrow(wo);
     ck('r1 affected control: unfiltered, the client is handed all three — the two the engine left in place AND the one on Fish (what verify r1 measured)', JSON.stringify(ro.body.affected.map((x) => x.serverId)) === '["a-1","a-2","a-3"]' && ro.body.evicted.held === 2, JSON.stringify(ro.body.affected.map((x) => x.serverId)));
@@ -2744,7 +2753,7 @@ await (async () => {
     const l1 = "const poolId = data.accountId || (defaultIdField ? st[defaultIdField] : null) || null;", l2 = "if (typeof p.poolId === 'string' && p.poolId && p.poolId !== poolId) return null;";
     ck('r1 resume control: the patch (the two clauses as they were) hits', wsrc.split(l1).length === 2 && wsrc.split(l2).length === 2);
     const MRP = mutantCopies('poolpin-r1resume', path.resolve('.'));
-    const old = MRP.load('src/ws-create.js', wsrc.replace(l1, 'const poolId = data.accountId || st.defaultAccountId || null;').replace(l2, ''), 'claudedefault');
+    const old = MRP.load('src/ws-create.js', editAnchor(editAnchor(wsrc, l1, 'const poolId = data.accountId || st.defaultAccountId || null;', "src/ws-create.js"), l2, '', "src/ws-create.js"), 'claudedefault');
     ck('r1 resume control: as it was, the codex pin on the default pool is DROPPED and the pin made on 全部 is accepted on 工作 (what verify r1 measured)', old.resumePoolPin({ poolPin: { memberId: XB, at: 5, poolId: CP } }, ram, 'codex') === null && got(old.resumePoolPin({ accountId: P2, poolPin: { memberId: B, at: 5, poolId: P1 } }, ram, 'claude'), P2, B));
     // the client's carrier names the pool
     const sl2 = fs.readFileSync(path.resolve('src/lib/session-lifecycle.js'), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
@@ -2829,7 +2838,7 @@ await (async () => {
     ck('r1 spawn control: the patch (the chooser without the membership fact) hits', esrc.split(c1).length === 2 && esrc.split(c2).length === 2);
     const c3 = 'return (d && d.to) || (staleDefault ? ((d && d.holdTo) || fallbackDefaultTarget(poolId, cur) || null) : cur);'; // verify r2's fallback: stripped too (the chooser as r1 found it)
     ck('r1 spawn control: …and the r2 fallback clause hits', esrc.split(c3).length === 2);
-    const wo = staleWorld(MS.load('src/server/usage-pool-engine.js', esrc.replace(c1, 'if (!fam) return cur;').replace(c2, c2.replace(' membership,', '')).replace(c3, 'return (d && d.to) || cur;'), 'nomembership'));
+    const wo = staleWorld(MS.load('src/server/usage-pool-engine.js', editAnchor(editAnchor(editAnchor(esrc, c1, 'if (!fam) return cur;', "src/server/usage-pool-engine.js"), c2, c2.replace(' membership,', ''), "src/server/usage-pool-engine.js"), c3, 'return (d && d.to) || cur;', "src/server/usage-pool-engine.js"), 'nomembership'));
     ck('r1 spawn control: without it the new conversation starts on the REMOVED member (what verify r1 measured)', where(wo, 'claude-fable-5-1') === 'martin' && where(wo, null) === 'martin');
   }
   // ── verify r2 (identity, words): WHAT A PINNED CONVERSATION IS TOLD WHEN THE AUTOMATIC RULES MOVE IT ──────────
@@ -2907,7 +2916,7 @@ await (async () => {
     ck('r2 default control: the patch (the engine\'s fallback removed) hits', esrc2.split(e1).length === 2 && esrc2.split(e2).length === 2);
     const { mutantCopies: mcD } = await import('./mutant-copy.mjs');
     const MD = mcD('poolpin-r2default', path.resolve('.'));
-    const noFb = MD.load('src/server/usage-pool-engine.js', esrc2.replace(e1, 'const fb = null;').replace(e2, 'return (d && d.to) || cur;').replace('memberRemoved, decideDefaultTarget, fallbackDefaultTarget,', 'memberRemoved, decideDefaultTarget,'), 'nofallback');
+    const noFb = MD.load('src/server/usage-pool-engine.js', editAnchor(editAnchor(editAnchor(esrc2, e1, 'const fb = null;', "src/server/usage-pool-engine.js"), e2, 'return (d && d.to) || cur;', "src/server/usage-pool-engine.js"), 'memberRemoved, decideDefaultTarget, fallbackDefaultTarget,', 'memberRemoved, decideDefaultTarget,', "src/server/usage-pool-engine.js"), 'nofallback');
     const cr = viaRoute(spentWorld(noFb)), cs = viaSweep(spentWorld(noFb));
     ck('r2 default control: without it the route lands on list[0] (UCI) and the sweep leaves the default on the REMOVED member, where a new conversation starts', nm(cr, cr.am.poolCurrent(cr.P)) === 'uci' && nm(cs, cs.am.poolCurrent(cs.P)) === 'martin' && newConv(cs) === 'martin', [nm(cr, cr.am.poolCurrent(cr.P)), nm(cs, cs.am.poolCurrent(cs.P)), newConv(cs)]);
   }
@@ -3662,7 +3671,7 @@ await (async () => {
     const SOA = "const next = ranked.find((m) => m.provider != null && String(m.provider) === provider) || null;";
     ck('M1 mutant: the anchor (the device\'s provider filter) hits once', soSrc.split(SOA).length === 2);
     if (soSrc.split(SOA).length === 2) {
-      const SOm = ML.load('src/sealed-orders.js', soSrc.replace(SOA, 'const next = ranked[0] || null; // PATCHED: the provider filter dropped'), 'filter-dropped');
+      const SOm = ML.load('src/sealed-orders.js', editAnchor(soSrc, SOA, 'const next = ranked[0] || null; // PATCHED: the provider filter dropped', "src/sealed-orders.js"), 'filter-dropped');
       const bad = pickIn(SOm, order, '/l/p/s2', 'b');
       ck('M1 mutant RED: the filter dropped ⇒ the device moves the DeepSeek conversation onto the Claude member (the cross-provider reflex the order forbids)', bad.next && bad.next.id === 'a' && q2.next === null, J(bad));
     }
@@ -3806,7 +3815,7 @@ await (async () => {
       const AMA = "const sameProv = (mid) => goneKey == null || this._providerKeyOf(this.memberProviderOf(mid)) === goneKey;";
       ck('M2 mutant: the anchor (the heal\'s provider filter) hits once', amSrc.split(AMA).length === 2);
       if (amSrc.split(AMA).length === 2) {
-        const { AccountManager: Old } = ML.load('src/accounts.js', amSrc.replace(AMA, 'const sameProv = () => true; // PATCHED: the old re-point (any provider)'), 'old-repoint');
+        const { AccountManager: Old } = ML.load('src/accounts.js', editAnchor(amSrc, AMA, 'const sameProv = () => true; // PATCHED: the old re-point (any provider)', "src/accounts.js"), 'old-repoint');
         const wm = lworld({ members: [['Member A', Q], ['Member B', R], ['Member C', null]], def: 2, AM: Old });
         wm.mk('t', wm.ids[0], 'deepseek-chat');
         wm.quietly(() => wm.del(wm.ids[0]));
@@ -3907,7 +3916,7 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
   // helper whose ask is the call itself, swapped in for the count) — so they stay EXACT; the memo's own law is
   // test-pool-pass-reads'.
   const RRm = require(path.resolve('src/run-reads.js'));
-  const RR_OFF = (() => { const src = fs.readFileSync(path.resolve('src/run-reads.js'), 'utf8'); const needle = 'function ask(kind, p, fn) {\n'; if (src.split(needle).length !== 2) throw new Error('the run-reads ask needle moved'); const f = path.join(scr, 'run-reads-off.cjs'); fs.writeFileSync(f, src.replace(needle, needle + '  return fn();\n')); return require(f); })();
+  const RR_OFF = (() => { const src = fs.readFileSync(path.resolve('src/run-reads.js'), 'utf8'); const needle = 'function ask(kind, p, fn) {\n'; if (src.split(needle).length !== 2) throw new Error('the run-reads ask needle moved'); const f = path.join(scr, 'run-reads-off.cjs'); fs.writeFileSync(f, editAnchor(src, needle, needle + '  return fn();\n', "src/run-reads.js")); return require(f); })();
   const memoOff = (fn) => { const saved = {}; for (const k of ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat', 'signature']) { saved[k] = RRm[k]; RRm[k] = RR_OFF[k]; } try { return fn(); } finally { Object.assign(RRm, saved); } };
   const probe = await world(engMod);
   if (!probe) ck('r2 roster SKIP — pools unsupported on this platform', true);

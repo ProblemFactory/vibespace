@@ -21,6 +21,15 @@ const ok = (name, cond, detail) => {
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + JSON.stringify(detail).slice(0, 400) : ''}`); }
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const DESK_ROW = 'attachBtn, attachInput, this._voice.btn, uploadBtn, fileInput, dirInput, this._textarea, expandBtn, this._slashDropdown, this._voice.chip';
 const PHONE_ROW = 'plusBtn, camera.input, attachInput, fileInput, dirInput, field, this._slashDropdown, this._voice.chip';
@@ -118,7 +127,7 @@ ok('wiring: the status bar no longer folds by phoneBarFold (nothing folds; the b
   !/phoneBarFold/.test(sb) && /inDoor\('billing', [^\n]*value: forms\.full \}\);/.test(sb), null);
 { // RED control: the billing chip foldable again (the base's rule) — the runner row folds it
   const tc = read('src/lib/title-chips.js'), f = path.join(os.tmpdir(), `vs-phonebar-red-${process.pid}.mjs`);
-  fs.writeFileSync(f, tc.replace("'turnstate', 'health', 'billing']", "'turnstate', 'health']"));
+  fs.writeFileSync(f, editAnchor(tc, "'turnstate', 'health', 'billing']", "'turnstate', 'health']", "src/lib/title-chips.js"));
   try { const red = await import(pathToFileURL(f).href), r = plan(red.phoneBarFold, 74, { full: 121, compact: 64, icon: 19 }); ok('RED: billing out of the never-fold set ⇒ the runner row folds it', r.folded.split(',').includes('billing'), r); }
   finally { fs.rmSync(f, { force: true }); }
 }
@@ -285,21 +294,21 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
     const ruleAbs = pathToFileURL(path.join(REPO, 'src/image-attach-rule.js')).href;
     const doorSrc = read('src/lib/image-attach.js').replace("from '../image-attach-rule.js'", `from ${JSON.stringify(ruleAbs)}`);
     const noRule = path.join(tmp, 'door-no-rule.mjs');
-    fs.writeFileSync(noRule, doorSrc.replace("const v = judgeImage({ size: file && file.size, head }, { total: (Number(held()) || 0) + inFlight, limits: lim });", "const v = { ok: true, mediaType: file.type || 'image/png', b64: 0 };"));
+    fs.writeFileSync(noRule, editAnchor(doorSrc, "const v = judgeImage({ size: file && file.size, head }, { total: (Number(held()) || 0) + inFlight, limits: lim });", "const v = { ok: true, mediaType: file.type || 'image/png', b64: 0 };", "src/lib/image-attach.js"));
     const red = await runDoor(await import(pathToFileURL(noRule).href));
     ok('RED: a door with no rule takes the HEIC, the empty file, the text, the tall page, and reads the big file whole', red.added.length === 7 && red.reads.includes('big.png') && !red.refusals.length, { added: red.added.length, reads: red.reads });
     const ruleSrc = read('src/image-attach-rule.js');
     const noCap = path.join(tmp, 'rule-no-cap.cjs'), noTotal = path.join(tmp, 'rule-no-total.cjs');
     const capLine = "  if (perPicture && b64 > perPicture) return { ok: false, code: 'too_big', size: n };\n", totalLine = "  if (request && (Number(total) || 0) + b64 > request) return { ok: false, code: 'too_much', size: n };\n";
     ok('setup: the size cap and the total are ONE line each in the rule (the mutants below cut them)', ruleSrc.split(capLine).length === 2 && ruleSrc.split(totalLine).length === 2);
-    fs.writeFileSync(noCap, ruleSrc.replace(capLine, ''));
-    fs.writeFileSync(noTotal, ruleSrc.replace(totalLine, ''));
+    fs.writeFileSync(noCap, editAnchor(ruleSrc, capLine, '', "src/image-attach-rule.js"));
+    fs.writeFileSync(noTotal, editAnchor(ruleSrc, totalLine, '', "src/image-attach-rule.js"));
     ok('RED: a rule with no size cap takes the 4.5 MB screenshot claude\'s API refuses', req(noCap).judgeImage({ size: 4.5e6, head: PNG }, { limits: CL }).ok === true);
     ok('RED: a rule with no total takes a picture past claude\'s request size', req(noTotal).judgeImage({ size: 3e6, head: PNG }, { total: REQ, limits: CL }).ok === true);
     // batch 20 cure's RED: the release's shape — ONE vendor's numbers for every harness — refuses the codex photo the cure takes
     const allClaude = path.join(tmp, 'rule-claude-for-all.cjs'), perLine = "  const perPicture = limitOf(limits, 'b64PerPicture'), side = limitOf(limits, 'sidePx'), request = limitOf(limits, 'requestB64');\n";
     ok('setup: the rule reads its three numbers on ONE line', ruleSrc.split(perLine).length === 2);
-    fs.writeFileSync(allClaude, ruleSrc.replace(perLine, "  const perPicture = limitOf(limits, 'b64PerPicture') || 5 * 1024 * 1024, side = limitOf(limits, 'sidePx') || 8000, request = limitOf(limits, 'requestB64') || 32e6;\n"));
+    fs.writeFileSync(allClaude, editAnchor(ruleSrc, perLine, "  const perPicture = limitOf(limits, 'b64PerPicture') || 5 * 1024 * 1024, side = limitOf(limits, 'sidePx') || 8000, request = limitOf(limits, 'requestB64') || 32e6;\n", "src/image-attach-rule.js"));
     ok('RED: a rule that applies the Claude API\'s numbers to a harness that states none refuses the 4.6 MB phone photo codex takes', req(allClaude).judgeImage({ size: 4.6e6, head: JPEG }, { limits: BC.imageLimitsOf('codex') }).code === 'too_big');
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }

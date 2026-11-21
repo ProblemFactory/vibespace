@@ -29,6 +29,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 // ── registry rows ──
@@ -402,7 +411,7 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const RULE = '    const v = registryIdentityOk(rec, pr);\n';
   const CHOICE = '    if (!best || startedOf(rec) > startedOf(best.rec)) best = { rec, identity: v.identity };\n';
   const M = mutantCopies('peerid-deliv', REPO);
-  const Old = M.load('src/peer-messaging.js', src.replace(RULE, "    const v = rec.messagingSocketPath && pidAlive(rec.pid) ? { ok: true, reasons: [], identity: 'pid-only' } : { ok: false, reasons: ['pid-gone'] };\n").replace(CHOICE, '    if (!best) best = { rec, identity: v.identity };\n'), 'pidonly');
+  const Old = M.load('src/peer-messaging.js', editAnchor(editAnchor(src, RULE, "    const v = rec.messagingSocketPath && pidAlive(rec.pid) ? { ok: true, reasons: [], identity: 'pid-only' } : { ok: false, reasons: ['pid-gone'] };\n", "src/peer-messaging.js"), CHOICE, '    if (!best) best = { rec, identity: v.identity };\n', "src/peer-messaging.js"), 'pidonly');
   put([[`${process.pid}.json`, stale], [`9${process.pid}.json`, live]]);
   const n0 = got.length;
   const G = mk({ findPeer: (c) => Old.findPeer(c, reg), postToPeer: PM.postToPeer });
@@ -435,7 +444,7 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const wsrc = read('data/bin/agy-wrapper.js');
   const ADVERT = 'caps: { frameFile: true, peerMessage: true, notificationSteer: false,';
   const RED = path.join(D, 'red', 'data', 'bin', 'agy-wrapper.js');
-  fs.writeFileSync(RED, wsrc.replace(ADVERT, 'caps: { frameFile: true, peerMessage: false,'));
+  fs.writeFileSync(RED, editAnchor(wsrc, ADVERT, 'caps: { frameFile: true, peerMessage: false,', "data/bin/agy-wrapper.js"));
   // …and the same red copy with the PRE-.358 sidecar write (in place: truncate, then the bytes) — ④'s negative control
   const ATOMIC = 'fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, metaFile);';
   fs.mkdirSync(path.join(D, 'inplace', 'data', 'bin'), { recursive: true });

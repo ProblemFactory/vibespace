@@ -23,6 +23,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const P = require(path.join(REPO, 'src/park-step.js'));
 const { STATES, EVENTS, TERMINAL, parkStep, canonical, freshEntry, stored } = P;
@@ -280,16 +289,16 @@ console.log('\n§4 controls');
   const M = mutantCopies('parkstep', REPO);
   const PS = fs.readFileSync(path.join(REPO, 'src/park-step.js'), 'utf-8');
   // (i) the table without the may-have-landed-first rule: an attempt on a may-have-landed entry posts it — the walk is red
-  const m1 = PS.replace("    if (e.s === 'maybeDelivered') return out({ leave: 'stash'", "    if (false) return out({ leave: 'stash'");
+  const m1 = editAnchor(PS, "    if (e.s === 'maybeDelivered') return out({ leave: 'stash'", "    if (false) return out({ leave: 'stash'", "src/park-step.js");
   if (m1 === PS) ok(false, '(i) CONTROL anchor moved');
   else { const Pm = M.load('src/park-step.js', m1, 'no-maybe-first'); const rnd = prng(3); let v = []; for (const ev of EVENTS) for (const ev2 of EVENTS) v.push(...walk(Pm, 'maybeDelivered', [ev, ev2], rnd)); ok(v.some((x) => /a post from maybeDelivered|posts .* > attempts/.test(x)), '(i) CONTROL: a table that lets an attempt post a may-have-landed entry breaks the walk (' + v.length + ' violations)', v.slice(0, 2).join(' | ')); }
   // (ii) the table with a silent eviction: the walk is red on "a drop not said by id"
-  const m2 = PS.replace("say: `the retry park holds 30 waiting per conversation — ${id} (the oldest waiting) falls to the stash, evicted`", "say: null");
+  const m2 = editAnchor(PS, "say: `the retry park holds 30 waiting per conversation — ${id} (the oldest waiting) falls to the stash, evicted`", "say: null", "src/park-step.js");
   if (m2 === PS) ok(false, '(ii) CONTROL anchor moved');
   else { const Pm = M.load('src/park-step.js', m2, 'silent-evict'); const v = walk(Pm, 'waiting', ['cap'], prng(5)); ok(v.some((x) => /not said by id/.test(x)), '(ii) CONTROL: a silent eviction breaks "every drop is said by id"', v.join(' | ')); }
   // (iii) the ENGINE without r3 ④ (the cap counts a may-have-landed entry): the cell maybeDelivered × cap disagrees
   const CDS = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
-  const m3 = CDS.replace("filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);", "filter((x) => x && !x.inflight && !x.ho);");
+  const m3 = editAnchor(CDS, "filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);", "filter((x) => x && !x.inflight && !x.ho);", "src/server/conversation-deliver.js", 'first');
   if (m3 === CDS) ok(false, '(iii) CONTROL anchor moved');
   else { const CDm = M.load('src/server/conversation-deliver.js', m3, 'cap-counts-maybe'); const ctx = await enter(CDm, 'maybeDelivered'); const got = await fire(ctx, 'cap'); ok(got.state === 'evicted', '(iii) CONTROL: the engine without r3 ④ evicts the may-have-landed entry at the cap — the cell disagrees with the table', JSON.stringify(got)); }
   // (iv) the ENGINE without the may-have-landed-first fall (r1 N2): maybeDelivered × turn-end posts it again
@@ -305,16 +314,16 @@ console.log('\n§4b cell-level controls');
   const PS = fs.readFileSync(path.join(REPO, 'src/park-step.js'), 'utf-8');
   const anchor = "  if (isClear) {\n";
   // (v) cleared × clear-single un-clears (one cell): the walk's invariants are blind to it — the ENGINE comparison is red
-  const m1 = PS.replace(anchor, anchor + "    if (e.s === 'cleared' && event === 'clear-single') return out({ entry: { s: 'waiting', cleared: false } });\n");
+  const m1 = editAnchor(PS, anchor, anchor + "    if (e.s === 'cleared' && event === 'clear-single') return out({ entry: { s: 'waiting', cleared: false } });\n", "src/park-step.js");
   if (m1 === PS) ok(false, '(v) CONTROL anchor moved');
   else { const Pm = M.load('src/park-step.js', m1, 'cell-unclear'); const rnd = prng(11); let v = []; for (const ev of EVENTS) v.push(...walk(Pm, 'cleared', ['clear-single', ev], rnd)); const want = Pm.parkStep(Pm.canonical('cleared', NOW), 'clear-single', { now: NOW }); const ctx = await enter(CD, 'cleared'); const got = await fire(ctx, 'clear-single'); ok(v.length === 0 && want.entry.s === 'waiting' && got.state === 'cleared', '(v) CONTROL: a cell mutant (cleared × clear-single → waiting) passes the walk (' + v.length + ' violations) and is caught by the engine comparison (engine ' + got.state + ' ≠ mutant table ' + want.entry.s + ')'); }
   // (vi) waiting × timer converts a hold that no longer exists (one cell): red only by I5b (it was green before r4)
   const anchor2 = "    return out({ now, post: true, authorize: 'hold', entry: { s: 'inflight', attempts, posts: e.posts + 1 }, persist: true });\n";
-  const m2 = PS.replace("    const holdValid = hold && now - e.holdAt <= HOLD_TTL_MS;\n", "    const holdValid = hold && now - e.holdAt <= HOLD_TTL_MS;\n    if (e.s === 'waiting' && event === 'timer' && !holdValid) return out({ now, post: true, authorize: 'hold', entry: { s: 'inflight', attempts, posts: e.posts + 1 }, persist: true });\n");
+  const m2 = editAnchor(PS, "    const holdValid = hold && now - e.holdAt <= HOLD_TTL_MS;\n", "    const holdValid = hold && now - e.holdAt <= HOLD_TTL_MS;\n    if (e.s === 'waiting' && event === 'timer' && !holdValid) return out({ now, post: true, authorize: 'hold', entry: { s: 'inflight', attempts, posts: e.posts + 1 }, persist: true });\n", "src/park-step.js");
   if (m2 === PS || !PS.includes(anchor2)) ok(false, '(vi) CONTROL anchor moved');
   else { const Pm = M.load('src/park-step.js', m2, 'cell-stale-hold'); const booted = Pm.parkStep(Pm.canonical('waiting', NOW), 'boot-inflight', { now: NOW }).entry; const cellM = Pm.parkStep(booted, 'timer', { now: NOW }); const cellP = P.parkStep(P.parkStep(canonical('waiting', NOW), 'boot-inflight', { now: NOW }).entry, 'timer', { now: NOW }); let v = []; for (let seed = 1; seed <= 20; seed++) v.push(...walk(Pm, 'waiting', ['boot-inflight', 'timer'], prng(seed))); ok(cellM.authorize === 'hold' && cellP.authorize === 'fresh' && v.some((x) => /a hold converted past its TTL or without one/.test(x)), '(vi) CONTROL: a cell mutant that converts a forgotten hold (waiting × timer after a boot: hold where the table says fresh) is red under I5b', JSON.stringify({ mutant: cellM.authorize, table: cellP.authorize, v: v.slice(0, 2) })); }
   // (vii) claimed × post-ok charges the park for a hand-over's landing (one cell): red under I5
-  const m3 = PS.replace("    if (event === 'post-ok') return e.s === 'inflight' ? landedByPark() : landedByHandover();", "    if (event === 'post-ok' && e.s === 'claimed') return out({ leave: 'landed', charge: true, entry: { holds: false } });\n    if (event === 'post-ok') return e.s === 'inflight' ? landedByPark() : landedByHandover();");
+  const m3 = editAnchor(PS, "    if (event === 'post-ok') return e.s === 'inflight' ? landedByPark() : landedByHandover();", "    if (event === 'post-ok' && e.s === 'claimed') return out({ leave: 'landed', charge: true, entry: { holds: false } });\n    if (event === 'post-ok') return e.s === 'inflight' ? landedByPark() : landedByHandover();", "src/park-step.js");
   if (m3 === PS) ok(false, '(vii) CONTROL anchor moved');
   else { const Pm = M.load('src/park-step.js', m3, 'cell-charge-handover'); const v = walk(Pm, 'claimed', ['post-ok'], prng(17)); ok(v.some((x) => /a charge outside the park's own landing/.test(x)), '(vii) CONTROL: a cell mutant that charges a hand-over\'s landing is red under I5', v.join(' | ')); }
 }

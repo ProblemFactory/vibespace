@@ -16,6 +16,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (pred, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(100); } return !!(await pred()); };
 
@@ -298,7 +307,7 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   const LS = fs.readFileSync(path.join(REPO, 'src/server/plugin-loader.js'), 'utf8');
   const anchor = "const fleetTrust = !!f && f.plugin === r.id && ";
   ok(LS.includes(anchor), 'control: D2\'s id check is in plugin-loader.js');
-  const Lx = mutantCopies('plugin-loader-d2', REPO).load('src/server/plugin-loader.js', LS.replace(anchor, 'const fleetTrust = !!f && ').replace('return !!(f && f.plugin === id && ', 'return !!(f && '), 'any-id');
+  const Lx = mutantCopies('plugin-loader-d2', REPO).load('src/server/plugin-loader.js', editAnchor(editAnchor(LS, anchor, 'const fleetTrust = !!f && ', "src/server/plugin-loader.js"), 'return !!(f && f.plugin === id && ', 'return !!(f && ', "src/server/plugin-loader.js"), 'any-id');
   const R4 = path.join(groot, 'root4'); fs.mkdirSync(path.join(R4, 'data', 'plugins'), { recursive: true });
   const lx = Lx.create({ rootDir: R4, app: null, autoStart: false, hostVersion: '2.369.356', log: quiet, gitBin: FX.WRAP, fleetEngine: () => fleet2 });
   const ix = await lx.install({ source: 'git', value: URL_HTTPS, ref: shaA, credential: 'auto', by: 'fleet' });
