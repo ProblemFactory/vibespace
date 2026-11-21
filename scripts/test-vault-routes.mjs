@@ -38,7 +38,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const express = require(path.join(REPO, 'node_modules/express'));
@@ -739,6 +739,147 @@ console.log('⑮ (lane vault-standing-request r11, MINOR 2) THE «谁可以用�
   ok(!!(suU.status === 200 && putU && putU.ok && seedU && seedU.ok && old.status === 409 && old.json.code === 'except_unnamed' && old.json.error === UGC.WORDS.except_unnamed && old.json.principal === 'conversation:cid-left-out' && excepted()), '⑮b the WIRE (the real route, the real writer): an older page\'s Save leaving the stored 除了 out unnamed ⇒ HTTP 409 except_unnamed WITH the writer\'s sentence, naming who is left out — nothing written (7e99ef689: 400 and the bare code; the page said «Could not reach the vault — except_unnamed»)', { setup: suU.status, status: old.status, json: old.json });
   const named = await hit('/api/vault/use-grants', { port: pU, headers: pageU, body: { id: EIDU, to: [ALLX], except: [], removeExcept: ['conversation:cid-left-out'] } });
   ok(!!(named.status === 403 && named.json.code === 'reveal_needs_password' && excepted()), '⑮c control: the same Save NAMING the removal (removeExcept, through the route) is a widening — 403 reveal_needs_password without this page\'s 验证是你; still excepted', { status: named.status, code: named.json.code });
+  // ⑯ B-f212's remainder (主开发 r1163 / r1177): THE ROW'S STAMP AT THE ONE WRITE — two clients over the REAL route, the real writer
+  // and the run door. A Save over a row its page never saw is REFUSED BY NAME (409 row_changed, nothing written, the row that
+  // holds answered with its stamp); ONE member added by a run card's «Always» (addMember) is not a whole-row write — never judged —
+  // but it moves the stamp, so a dialog's next Save over the old one is refused with that member in the answer; a stamp that is
+  // not an integer is no stamp the row could have; a page with no stamp (from before this release) is written as before, for
+  // this one release; a Save naming members for an entry deleted meanwhile is refused entry_unknown. REDs: the writer that judges
+  // no stamp (the release: B's Save over A's lands, A's member lost; the dialog's Save drops the card's member); a stamp read as
+  // a number; a Save for a deleted entry written
+  const J = JSON.stringify;
+  const stampHub = async (UG, tag, DM = DOOR) => {
+    const dd = path.join(ROOT, `stamp-${tag}`), dr = path.join(ROOT, `stamp-run-${tag}`);
+    for (const d of [dd, dr]) fs.mkdirSync(d, { recursive: true });
+    const v = VE.create({ dataDir: dd, kdf: { N: 1024, r: 8, p: 1 }, log, idleTimer: false, register: false, signInPassword: (p) => auth.verifyPassword(p), bcast: () => {} });
+    const g = GSU.create({ dataDir: dd });
+    const ug = UG.create({ grants: () => g, vault: v, dataDir: dd, log: () => {} });
+    const door = DM.create({ dataDir: dd, vault: v, userTodos: new UserTodoManager({ dataDir: dd, expirySweepMs: 3600e3 }), sources: { secrets: () => VC.secretSource({ vault: v }) }, instanceKind: () => 'cluster', runRoot: () => dr, useGrants: ug, log: () => {} });
+    const contents = VC.create({ vault: v, sources: { secrets: () => VC.secretSource({ vault: v }) }, runFacts: (row) => door.rowFacts(row) });   // the contents door: 验证是你's window (reveal-session) rides it
+    const a = express(); a.use(auth.middleware()); a.use(express.json());
+    RT.registerVaultRoutes(a, { vault: v, activeSessions: new Map(), run: door, contents });
+    const s = await new Promise((r) => { const x = a.listen(0, '127.0.0.1', () => r(x)); });
+    const port = s.address().port, page = { cookie: COOKIE, 'sec-fetch-site': 'same-origin', origin: `http://127.0.0.1:${port}` };
+    const su = await hit('/api/vault/setup', { port, headers: page, body: { password: PW } });
+    const nm = 'secret:' + crypto.randomBytes(5).toString('hex'), id = `secrets:${nm}#secret`;
+    const put = v.secretPut(nm, ['stamp', 'value', crypto.randomBytes(6).toString('hex')].join('-'), { prov: 'owner', label: 'Stamp key', kind: 'api-key', hosts: [] });
+    const until = Date.now() + 30 * 86400e3, mem = (key, host) => ({ kind: 'conversation', key, name: key, scopes: [{ host, until }] });
+    const seed = ug.setRow(id, { to: [mem('cid-a', 'a.example'), mem('cid-b', 'b.example'), mem('cid-d', 'd.example')], except: [] }, { reauthed: true });
+    const keys = () => ((ug.publicFor(id) || {}).to || []).map((m) => m.key).sort();
+    let pageId = null;   // both clients' pages hold their 验证是你 window (a widening never stops a Save here: the stamp is what is judged)
+    const save = (to, rev) => hit('/api/vault/use-grants', { port, headers: page, body: { id, to, except: [], ...(rev !== undefined ? { rev } : {}), page: pageId } });
+    const pageRev = () => ((door.rowFacts({ id, store: 'secrets', kind: 'api-key', label: 'Stamp key', hosts: [] }) || {}).use || {}).rev;   // what a page reads: the contents row's `use`
+    const keysOf = (x) => (x && x.json && x.json.use && Array.isArray(x.json.use.to) ? x.json.use.to.map((m) => m.key).sort() : null);
+    const rsA = await hit('/api/vault/reveal-session', { port, headers: page, body: { password: PW } });   // the pages' 验证是你 window
+    pageId = rsA.json && rsA.json.page;
+    const r0 = pageRev();   // clients A and B both opened «Who may use it…» here: a, b, d
+    const a1 = await save([mem('cid-a', 'a.example'), mem('cid-b', 'b.example'), mem('cid-d', 'd.example'), mem('cid-e', 'e.example')], r0);   // A adds e (a widening: its 验证是你)
+    const b1 = await save([mem('cid-a', 'a.example'), mem('cid-d', 'd.example')], r0);   // B, over the row it read, takes b out (a click) — e it never saw
+    const afterB = keys();
+    const b2 = b1.json && b1.json.use ? await save([mem('cid-a', 'a.example'), mem('cid-d', 'd.example'), mem('cid-e', 'e.example')], b1.json.use.rev) : null;   // B again, its change kept over the row the refusal answered
+    const afterB2 = keys(), r2 = pageRev();
+    const card = ug.addMember(id, { kind: 'conversation', key: 'cid-f', name: 'cid-f' }, { hosts: ['f.example'], until });   // a run card's «Always» while a dialog is open: ONE member, never judged
+    const afterCard = keys(), r3 = pageRev();
+    const c1 = await save([mem('cid-a', 'a.example'), mem('cid-d', 'd.example'), mem('cid-e', 'e.example')], r2);   // the dialog that read r2 saves over it (f it never saw)
+    const afterC = keys();
+    const typed = await save([mem('cid-a', 'a.example'), mem('cid-d', 'd.example'), mem('cid-e', 'e.example')], String(pageRev()));   // a stamp as a string
+    const afterTyped = keys();
+    const old = await save([mem('cid-a', 'a.example'), mem('cid-d', 'd.example')]);   // a page from before this release: no stamp
+    const afterOld = keys();
+    // the read: an entry DELETED while a dialog is open (its row dropped — the stamp moves); a Save naming members for it, even
+    // over the stamp it now has, is refused by name — no row is left waiting for the next entry stored under that name
+    const dropped = v.secretDrop(nm), dropRow = ug.drop(id);
+    const gone = await save([mem('cid-a', 'a.example')], pageRev());
+    const afterGone = keys();
+    // the narrow read: A RESTART — a row whose last member was ✕'d (the row removed, the stamp moved) and a NEW writer over the same
+    // data, with no row on disk to load the sidecar through: the stamp it hands a page is the one it judges
+    const nm2 = 'secret:' + crypto.randomBytes(5).toString('hex'), id2 = `secrets:${nm2}#secret`;
+    const put2 = v.secretPut(nm2, ['stamp', 'two', crypto.randomBytes(6).toString('hex')].join('-'), { prov: 'owner', label: 'Stamp two', kind: 'api-key', hosts: [] });
+    const seed2 = ug.setRow(id2, { to: [mem('cid-a', 'a.example')], except: [] }, { reauthed: true }), cut2 = ug.revoke(id2, 'conversation:cid-a');
+    const knownRev = (ug.publicFor(id2) || {}).rev;
+    const gR = GSU.create({ dataDir: dd }), ugR = UG.create({ grants: () => gR, vault: v, dataDir: dd, log: () => {} });   // the hub restarted
+    const restartRev = (ugR.publicFor(id2) || {}).rev;
+    const rSave = ugR.setRow(id2, { to: [mem('cid-a', 'a.example')], except: [], rev: restartRev }, { reauthed: true });
+    const restart = { put2: !!(put2 && put2.ok), seed2: !!(seed2 && seed2.ok), cut2: !!(cut2 && cut2.ok), knownRev, restartRev, save: rSave && rSave.ok ? 'ok' : (rSave && rSave.code) || null };
+    await new Promise((r) => setTimeout(r, 20)); s.close(); v.close();
+    return { restart, setup: su.status, put: !!(put && put.ok), seed: !!(seed && seed.ok), reveal: !!(rsA.json && rsA.json.page), r0, a1: { status: a1.status, code: a1.json.code || null, rev: a1.json.use ? a1.json.use.rev : null },
+      b1: { status: b1.status, code: b1.json.code || null, error: b1.json.error || null, use: keysOf(b1), rev: b1.json.use ? b1.json.use.rev : null }, afterB, b2: b2 ? { status: b2.status, code: b2.json.code || null } : null, afterB2, r2,
+      card: !!(card && card.ok), afterCard, r3, c1: { status: c1.status, code: c1.json.code || null, use: keysOf(c1) }, afterC, typed: { status: typed.status, code: typed.json.code || null }, afterTyped,
+      old: { status: old.status, code: old.json.code || null }, afterOld, dropped: !!(dropped && dropped.ok !== false), dropRow: !!(dropRow && dropRow.ok), gone: { status: gone.status, code: gone.json.code || null }, afterGone };
+  };
+  const st = await stampHub(UGC, 'real');
+  const ABDE = ['cid-a', 'cid-b', 'cid-d', 'cid-e'], ADE = ['cid-a', 'cid-d', 'cid-e'], ADEF = ['cid-a', 'cid-d', 'cid-e', 'cid-f'];
+  ok(st.setup === 200 && st.put && st.seed && st.reveal && Number.isSafeInteger(st.r0) && st.a1.status === 200 && st.a1.rev > st.r0
+    && st.b1.status === 409 && st.b1.code === 'row_changed' && st.b1.error === UGC.WORDS.row_changed && J(st.b1.use) === J(ABDE) && st.b1.rev === st.a1.rev && J(st.afterB) === J(ABDE)
+    && st.b2 && st.b2.status === 200 && J(st.afterB2) === J(ADE),
+  `⑯a B-f212's remainder — TWO CLIENTS over the real route: A's Save lands (e added; the stamp moves), B's Save over the row it read (b out — e it never saw) is REFUSED 409 row_changed by name, nothing written, A's row answered with its stamp; B again over that stamp lands (b out, e kept) — ${J(st)}`, st);
+  ok(st.card && J(st.afterCard) === J(ADEF) && st.r3 > st.r2 && st.c1.status === 409 && st.c1.code === 'row_changed' && J(st.c1.use) === J(ADEF) && J(st.afterC) === J(ADEF),
+    `⑯b a run card's «Always» (ONE member, addMember) is never judged — it lands while a dialog is open and moves the stamp; that dialog's Save over the old stamp is refused with the card's member in the row it answers (kept) — ${J({ card: st.card, afterCard: st.afterCard, r2: st.r2, r3: st.r3, c1: st.c1, afterC: st.afterC })}`, st);
+  ok(st.typed.status === 409 && st.typed.code === 'row_changed' && J(st.afterTyped) === J(ADEF) && st.old.status === 200 && J(st.afterOld) === J(['cid-a', 'cid-d']),
+    `⑯c a stamp sent as a string is no stamp the row could have (refused, nothing written); a page with NO stamp (from before this release) is written as before, for this one release — ${J({ typed: st.typed, afterTyped: st.afterTyped, old: st.old, afterOld: st.afterOld })}`, st);
+  ok(st.dropped && st.dropRow && st.gone.status === 404 && st.gone.code === 'entry_unknown' && J(st.afterGone) === J([]),
+    `⑯e the read: an entry deleted while a dialog is open — a Save naming members for it is refused entry_unknown, no row left for it — ${J({ dropped: st.dropped, dropRow: st.dropRow, gone: st.gone, afterGone: st.afterGone })}`, st);
+  ok(st.restart.put2 && st.restart.seed2 && st.restart.cut2 && Number.isSafeInteger(st.restart.knownRev) && st.restart.knownRev > 0 && st.restart.restartRev === st.restart.knownRev && st.restart.save === 'ok',
+    `⑯f the narrow read: A RESTART — the row's last member ✕'d (its row gone, the stamp moved), a new writer over the same data hands a page the stamp it judges (the sidecar read once), and a Save over it lands — ${J(st.restart)}`, st.restart);
+  const UG_REL = 'src/server/vault-use-grants.js', UGsrc = fs.readFileSync(path.join(REPO, UG_REL), 'utf8');
+  const DOOR_REL0 = 'src/server/vault-run-door.js', DOORsrc = fs.readFileSync(path.join(REPO, DOOR_REL0), 'utf8');
+  const mdir = path.join(ROOT, 'stamp-mutant'); fs.mkdirSync(mdir, { recursive: true });
+  const mutant = (rel, name, src) => { const f = path.join(mdir, name); fs.writeFileSync(f, at(rel)(src)); return require(f); };
+  const UGnone = mutant(UG_REL, 'vault-use-grants-none.js', anchored(UGsrc, "    if (rev !== undefined && !(Number.isSafeInteger(rev) && rev === revOf(id))) return named('row_changed', { use: landedUse(id) });\n", '', '⑯ RED the writer judges no stamp'));
+  const sr = await stampHub(UGnone, 'red');
+  ok(sr.b1.status === 200 && J(sr.afterB) === J(['cid-a', 'cid-d']) && sr.c1.status === 200 && J(sr.afterC) === J(ADE),
+    `RED control: the writer that judges no stamp (the release) ⇒ B's Save over a row it never saw lands — A's member e lost — and the dialog's Save drops the card's member f — ${J({ b1: sr.b1, afterB: sr.afterB, c1: sr.c1, afterC: sr.afterC })}`, sr);
+  const UGtyped = mutant(UG_REL, 'vault-use-grants-typed.js', anchored(UGsrc, '!(Number.isSafeInteger(rev) && rev === revOf(id))', 'Number(rev) !== revOf(id)', '⑯ RED a stamp read as a number'));
+  const sr2 = await stampHub(UGtyped, 'red-typed');
+  ok(sr2.typed.status === 200, `RED control: a stamp read as a number ⇒ the string stamp is taken as the row's — ${J({ typed: sr2.typed })}`, sr2.typed);
+  const DOORgone = mutant(DOOR_REL0, 'vault-run-door-gone.js', anchored(DOORsrc, "    if (vaultState() === 'unlocked' && Array.isArray(to) && to.length && !(sref && rowOf(sref))) return named('entry_unknown');\n", '', '⑯ RED a Save for a deleted entry written'));
+  const UGmem = mutant(UG_REL, 'vault-use-grants-memory.js', anchored(UGsrc, '  const revSeen = (id) => { if (!genLoaded) loadGen(); return revNow(id); };', '  const revSeen = (id) => revNow(id);', '⑯ RED the page\'s stamp from memory alone'));
+  const sr4 = await stampHub(UGmem, 'red-memory');
+  ok(sr4.restart.restartRev === 0 && sr4.restart.save === 'row_changed', `RED control: the page's stamp from memory alone ⇒ after a restart the page is handed 0 and its Save is refused over a stamp it was given — ${J(sr4.restart)}`, sr4.restart);
+  const sr3 = await stampHub(UGC, 'red-gone', DOORgone);
+  ok(sr3.gone.status === 200 && J(sr3.afterGone) === J(['cid-a']), `RED control: a Save for a deleted entry written ⇒ a row is left for it, waiting for the next entry stored under that name — ${J({ gone: sr3.gone, afterGone: sr3.afterGone })}`, sr3.gone);
+  // ⑯d CENSUS (主开发 r1177): EVERY CALLER OF THE WHOLE-ROW WRITE at this tip — each sends the stamp, or is a named EXCEPTION with
+  // its reason; a write of ONE member is not a whole-row write (never judged; it moves the stamp). Every row printed; a caller
+  // the table does not name, a count that moved, a row that drops its stamp: red. REDs: an unnamed caller planted; the route's
+  // stamp dropped
+  const WHOLE_ROW = [
+    { file: 'src/lib/vault-use-row.js', at: "post('/api/vault/use-grants', {", n: 1, stamp: '...(rev != null ? { rev } : {})', why: 'the «Who may use it…» dialog: sends the stamp of the row it last landed' },
+    { file: 'src/routes/vault.js', at: "app.post('/api/vault/use-grants', ", n: 1, stamp: "...('rev' in b ? { rev: b.rev } : {})", why: 'the route: hands the page\'s stamp to the door (a body with none — a page from before this release — is written as before for one release)' },
+    { file: 'src/server/vault-run-door.js', at: 'useGrants.setRow(String(id), {', n: 1, stamp: '...(rev !== undefined ? { rev } : {})', why: 'saveRow, the route\'s door: hands the stamp to the writer' },
+    { file: 'src/server/vault-run-door.js', at: 'rawSetRow(id, row, opts)', n: 1, stamp: 'rawSetRow(id, row, opts)', why: 'the resume wrapper around the one writer: the row passes as it came, its stamp in it' },
+    { file: 'src/server/vault-run-door.js', at: 'useGrants.restoreRow(', n: 1, stamp: null, why: 'EXCEPTION — the run door\'s all-or-nothing puts back the row it snapshotted for its OWN write a moment before (no page read that row)' },
+    { file: 'src/server/vault-run-door.js', at: 'useGrants.carry(', n: 1, stamp: null, why: 'EXCEPTION — the boot carry of the old «always» rows into the grants (a migration: no page)' },
+    { file: 'src/server/vault-run-door.js', at: 'useGrants.carryWildcards(', n: 1, stamp: null, why: 'EXCEPTION — the boot carry of the legacy wildcard grants (a migration: no page)' },
+    { file: 'src/server/migrations.js', at: "g.set('vault-use', raw.resource,", n: 1, stamp: null, why: 'EXCEPTION — the boot migration reshapes each row to per-scope members IN PLACE, beneath the one writer (the same meaning, the same marks; at boot, before any page)' },
+  ];
+  const ONE_MEMBER = ['addMember', 'revoke', 'revokeWindow', 'pruneWindows', 'drop'];   // never judged: each moves the stamp
+  const WRITE_RE = /\b(setRow|saveRow|rawSetRow|restoreRow|carryWildcards)\(|\.carry\(|\/api\/vault\/use-grants['"`]|\.(set|remove)\((U\.DOOR|['"]vault-use['"])/;   // + a grants-store write of the door anywhere but the one writer itself
+  const wrFiles = (() => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = `${d}/${e.name}`; if (e.isDirectory()) walk(r); else if (e.isFile()) out.push(r); } }; walk('src'); walk('data/bin'); return out.concat(['server.js']).sort(); })();
+  const wrText = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { return ''; } };
+  const censusOf = (textOf) => {
+    const unnamed = [], noStamp = [], counts = new Map(WHOLE_ROW.map((w) => [w, 0]));
+    for (const f of wrFiles) {
+      String(textOf(f) || '').split('\n').forEach((l, i) => {
+        const tl = l.trim();
+        if (!WRITE_RE.test(l) || /^(\/\/|\*|\/\*)/.test(tl) || /^(async )?function (setRow|saveRow|restoreRow|carry|carryWildcards)\(/.test(tl)) return;
+        if (f === 'src/server/vault-use-grants.js' && /\.(set|remove)\(U\.DOOR/.test(l) && !/\b(setRow|saveRow|rawSetRow|restoreRow|carryWildcards)\(|\.carry\(/.test(l)) return;   // the one writer's own store writes (each inside a named function above)
+        const w = WHOLE_ROW.filter((x) => x.file === f && l.includes(x.at));
+        if (!w.length) { unnamed.push(`${f}:${i + 1}`); return; }
+        for (const x of w) { counts.set(x, counts.get(x) + 1); if (x.stamp && !l.includes(x.stamp)) noStamp.push(`${f}:${i + 1}`); }
+      });
+    }
+    return { unnamed, noStamp, miscounted: WHOLE_ROW.filter((w) => counts.get(w) !== w.n).map((w) => `${w.file} «${w.at}» ${counts.get(w)}≠${w.n}`), counts };
+  };
+  const cz = censusOf(wrText);
+  for (const w of WHOLE_ROW) console.log(`  · whole-row write: ${w.file} «${w.at}» ×${cz.counts.get(w)} — ${w.stamp ? 'SENDS THE STAMP' : 'named exception'}: ${w.why}`);
+  console.log(`  · not a whole-row write (never judged, each moves the stamp): ${ONE_MEMBER.join(', ')} — src/server/vault-use-grants.js`);
+  ok(!cz.unnamed.length && !cz.noStamp.length && !cz.miscounted.length, `⑯d CENSUS: every caller of the whole-row write at this tip is named — ${WHOLE_ROW.filter((w) => w.stamp).length} send the stamp, ${WHOLE_ROW.filter((w) => !w.stamp).length} named exceptions; ${wrFiles.length} files read — ${J({ unnamed: cz.unnamed, noStamp: cz.noStamp, miscounted: cz.miscounted })}`, cz);
+  const DOOR_REL = 'src/server/vault-run-door.js', ROUTE_REL = 'src/routes/vault.js';
+  const sneak = anchored(wrText(DOOR_REL), '  function windowTakenBack(pk, until) {', '  function sneakRow(id) { return grantsW.setRow(String(id), { to: [], except: [] }, {}); }\n  function windowTakenBack(pk, until) {', '⑯d RED an unnamed caller');
+  const czR = censusOf((f) => (f === DOOR_REL ? sneak : wrText(f)));
+  const bare = anchored(wrText(ROUTE_REL), "...('rev' in b ? { rev: b.rev } : {}) }", ' }', '⑯d RED the route drops the stamp');
+  const czR2 = censusOf((f) => (f === ROUTE_REL ? bare : wrText(f)));
+  ok(czR.unnamed.length === 1 && czR.unnamed[0].startsWith(DOOR_REL) && czR2.noStamp.length === 1 && czR2.noStamp[0].startsWith(ROUTE_REL), `RED control: one more whole-row caller planted is named unnamed; the route without the stamp is named — ${J({ unnamed: czR.unnamed, noStamp: czR2.noStamp })}`, { czR, czR2 });
   await new Promise((r) => setTimeout(r, 20));
   sU.close(); vU.close();
 }

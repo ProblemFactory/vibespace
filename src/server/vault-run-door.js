@@ -1251,9 +1251,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  member it leaves out that held a LIVE window takes that window back, and the press's record is told as on both ✕ roads
    *  («… · revoked HH:MM»). → the writer's answer (+ `told`). r10: `removeExcept` — the exceptions the Save names as taken away
    *  (the writer refuses one left out unnamed, `except_unnamed`). */
-  function saveRow(id, { to = [], except = [], removeExcept = [] } = {}, { by = 'user', reauthed = false } = {}) {
+  function saveRow(id, { to = [], except = [], removeExcept = [], rev } = {}, { by = 'user', reauthed = false } = {}) {
     if (!useGrants) return { ok: false, code: 'no_use_grants' };
-    const r = useGrants.setRow(String(id), { to, except, removeExcept }, { by, reauthed });
+    // B-f212's remainder (the read): a Save that names members for an entry the vault no longer holds is refused by name, nothing
+    // written — a row left for a deleted entry would wait for the next one stored under that name (setRunnable's own rule for an
+    // ON); taking every member out stays a click on any entry
+    const sref = VI.parseRef(String(id || ''));
+    if (vaultState() === 'unlocked' && Array.isArray(to) && to.length && !(sref && rowOf(sref))) return named('entry_unknown');
+    const r = useGrants.setRow(String(id), { to, except, removeExcept, ...(rev !== undefined ? { rev } : {}) }, { by, reauthed });   // B-f212's remainder: the page's stamp, judged by the writer
     let told = 0;
     if (r && r.ok) for (const g of r.windowsGone || []) told += windowTakenBack(String(g.principal), Number(g.until));
     return told ? { ...r, told } : r;

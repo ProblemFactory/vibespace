@@ -1781,6 +1781,9 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     pol: ['const polWas = polLanded, polNow = base.policy;', "const polWas = globalThis.__f212red === 'pol' ? ((u.policy && u.policy.text) || '') : polLanded, polNow = base.policy;"],   // the policy compared with the open's words, not what landed
     drawn: ['const v = hostsViewOf(ms), kept = describes(prev, ms);', "const v = hostsViewOf(ms), kept = globalThis.__f212red !== 'drawn' && describes(prev, ms);"],   // the hosts this dialog's own Save wrote redrawn from the landed row
     onlyrow: ['  const fieldsNow = () => Object.fromEntries(FIELDS.map((f) => [f.name, f.read()]));', "  if (globalThis.__f212red === 'onlyrow') FIELDS.splice(FIELDS.findIndex((f) => f.name === 'only'), 1);\n  const fieldsNow = () => Object.fromEntries(FIELDS.map((f) => [f.name, f.read()]));"],   // r513: «仅本组» left out of the dialog's field table
+    stampless: ['...(rev != null ? { rev } : {})', "...(rev != null && globalThis.__f212red !== 'stampless' ? { rev } : {})"],   // ㉘: the Save sends no stamp (the release)
+    refusal: ["if (r && r.code === 'row_changed' && r.use && Array.isArray(r.use.to) && !r.use.unknown && !r.use.unverified) {", "if (globalThis.__f212red !== 'refusal' && r && r.code === 'row_changed' && r.use && Array.isArray(r.use.to) && !r.use.unknown && !r.use.unverified) {"],   // ㉘: the hub's refusal is not landed
+    kept: ['keptPress = null; if (refused) return false; return doSave();', "keptPress = null; if (refused && globalThis.__f212red !== 'kept') return false; return doSave();"],   // ㉘ (the read): a press kept over a refusal posts at once
     off: ['offContents = () => { try { app.ws.offGlobal(onContents); } catch { } };', "offContents = () => { if (globalThis.__f212red === 'off') return; try { app.ws.offGlobal(onContents); } catch { } };"],   // the listener outlives the dialog
   };
   const mutantVU = await bundleVU((src) => Object.entries(REDS).reduce((acc, [name, [from, to]]) => anchored(acc, from, to, `㉗ RED ${name}`), src));
@@ -2076,6 +2079,66 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   // RED: «仅本组» left out of the dialog's field table — a change of it alone is not unsaved, and a landing closes over it
   const ro1 = await asRed('onlyrow', onlyGuard), ro3 = await asRed('onlyrow', onlyInFlight);
   ok(!ro1.flipped && ro3.closed === 1 && ro3.asks === 0, 'r513 RED — «仅本组» left out of the field table: switching it alone counts as no change, and the landing closes the dialog over it, no ask', { guard: ro1, landing: { closed: ro3.closed, asks: ro3.asks, only: ro3.only } });
+  // ═══ ㉘ B-f212's remainder (主开发 r1163 / r1177): THE ROW'S STAMP — while this dialog is open a run card's «Always» adds ONE member
+  // in the hub (not a whole-row write: never judged; it moves the row's stamp). The dialog never heard it; its Save over the old
+  // stamp is REFUSED BY NAME and the row that holds lands with the person's own edit kept (still unsaved, the words said, open);
+  // Save again sends the new stamp and keeps both. REDs (the one mutant bundle): no stamp sent ⇒ the hub writes the dialog's row
+  // over the card's member (the release: the last writer wins); the refusal not landed ⇒ the card's member is never shown and the
+  // next Save is refused again
+  console.log('㉘ B-f212\'s remainder: a Save over a row the dialog never saw is refused by name; the row that holds lands with the person\'s own change kept');
+  const ceeLive = { kind: 'conversation', key: 'cid-cee', principal: 'conversation:cid-cee', name: 'Cee', hosts: ['c.example'], scopes: [{ kind: 'host', host: 'c.example', until: now + 30 * 86400e3 }] };
+  const stampHub28 = (members) => {
+    const H = hubOf(members); H.rev = 7; const inner = H.routes;
+    const useNow = () => ({ ...H.row, to: H.row.to.map((m) => ({ ...m })), rev: H.rev });
+    H.routes = async (url, method, body) => {
+      if (url === '/api/vault/use-grants' && method === 'POST' && body && body.rev !== undefined && body.rev !== H.rev) { H.posts.push(body); if (H.hold) { const h = H.hold; H.hold = null; await null; await h(); } return { ok: false, code: 'row_changed', error: 'someone changed who may use it since this page read it', use: useNow() }; }   // the hub's refusal (src/server/vault-use-grants.js setRow)
+      const r = await inner(url, method, body);
+      if (url === '/api/vault/use-grants' && method === 'POST' && r && r.ok) { H.rev++; return { ...r, use: { ...r.use, rev: H.rev } }; }
+      return r;
+    };
+    H.card = (m) => { H.row = { ...H.row, to: [...H.row.to, { ...m }] }; H.rev++; };   // a run card's «Always»: ONE member (addMember) — never judged, the stamp moves
+    return H;
+  };
+  const stampFlow = async (show) => {
+    const H = stampHub28([ada]);
+    const P = newPage({ routes: H.routes, roster: ROSTER27 });
+    show({ id: ENTRY, label: 'API key', run: { use: { to: H.row.to.map((m) => ({ ...m })), except: [], entryHosts: [], rev: H.rev } } }, { app: VU_APP, refresh: () => { } });
+    const q = (c) => byCls(P.shell.body, c), endSel = q('vw-use-end'), errEl = q('vault-secret-error');
+    endSel.value = '8h'; endSel.fire('change');   // the person's own edit: «8 hours»
+    H.card(ceeLive);   // …and while the dialog is open, a run card's «Always» for Cee lands in the hub
+    const said = await saved(P, P.shell.opts.unsaved.save());
+    const sentOf = (b) => (!b ? null : b.rev === undefined ? 'none' : b.rev);
+    const first = { sent: sentOf(H.posts[0]), said, picked: setOf(P.pickers[0].selected()), end: endSel.value, dirty: !!P.shell.opts.unsaved.isDirty(), closed: P.closed, err: errEl ? errEl.textContent : null, stored: H.row.to.map((m) => m.key).sort() };
+    const said2 = await saved(P, P.shell.opts.unsaved.save());
+    return { ...first, second: { sent: sentOf(H.posts[1]), posted: keysTo(H.posts[1]), said: said2, closed: P.closed, stored: H.row.to.map((m) => m.key).sort(), rev: H.rev } };
+  };
+  const WORDS28 = 'Someone changed who may use it while you were editing — this shows it as it is now, with your own changes kept; Save again to keep them';
+  const sf = await stampFlow(real);
+  ok(sf.sent === 7 && J(sf.picked) === J([K_ADA, K_CEE]) && sf.end === '8h' && sf.dirty && sf.closed === 0 && sf.err === WORDS28 && J(sf.stored) === J(['cid-ada', 'cid-cee'])
+    && sf.second.sent === 8 && J(sf.second.posted) === J(['cid-ada', 'cid-cee']) && J(sf.second.stored) === J(['cid-ada', 'cid-cee']) && sf.second.closed === 1,
+  `㉘ a Save over a row the dialog never saw (a card's «Always» for Cee landed meanwhile) is refused by name: the row that holds lands — Cee in — with the person's «8 hours» kept and unsaved, the words said, the dialog open; Save again sends the new stamp and keeps both — ${J(sf)}`, sf);
+  const sfN = await asRed('stampless', stampFlow), sfR = await asRed('refusal', stampFlow);
+  // the read: a press KEPT while the refused Save was out is not posted — the person sees the row that holds first (with their
+  // change kept) and the words; their next press is their own. RED: the kept press posts the merged row at once (the refusal
+  // never seen: a value the other client set is written over silently)
+  const keptFlow = async (show) => {
+    const H = stampHub28([ada]);
+    const P = newPage({ routes: H.routes, roster: ROSTER27 });
+    show({ id: ENTRY, label: 'API key', run: { use: { to: H.row.to.map((m) => ({ ...m })), except: [], entryHosts: [], rev: H.rev } } }, { app: VU_APP, refresh: () => { } });
+    const q = (c) => byCls(P.shell.body, c), endSel = q('vw-use-end'), errEl = q('vault-secret-error');
+    endSel.value = '8h'; endSel.fire('change');
+    H.card(ceeLive);
+    let kept = null; H.hold = () => { kept = P.shell.opts.unsaved.save(); };   // the person presses Save again while the post is out
+    const said = await saved(P, P.shell.opts.unsaved.save());
+    const saidKept = kept ? await saved(P, kept) : 'no kept press';
+    return { said, saidKept, posts: H.posts.length, closed: P.closed, dirty: !!P.shell.opts.unsaved.isDirty(), err: errEl ? errEl.textContent : null, picked: setOf(P.pickers[0].selected()), stored: H.row.to.map((m) => m.key).sort() };
+  };
+  const kf = await keptFlow(real), kfR = await asRed('kept', keptFlow);
+  ok(kf.posts === 1 && kf.closed === 0 && kf.dirty && kf.err === WORDS28 && J(kf.picked) === J([K_ADA, K_CEE]) && kf.saidKept === false,
+    `the read: a press kept while the refused Save was out is NOT posted — one post, the dialog open, the row that holds shown with the person's change kept, the words said — ${J(kf)}`, kf);
+  ok(kfR.posts === 2 && kfR.closed === 1, `RED control: the kept press posts at once ⇒ two posts, the dialog closed — the refusal never seen — ${J(kfR)}`, kfR);
+  ok(sfN.sent === 'none' && J(sfN.stored) === J(['cid-ada']) && !sfR.picked.includes(K_CEE) && sfR.second.sent === 7 && sfR.second.closed === 0,
+    `RED control: no stamp sent ⇒ the hub writes the dialog's row over the card's member (Cee lost — the release's last writer wins); the refusal not landed ⇒ Cee never shown and the next Save refused again — ${J({ stampless: { sent: sfN.sent, stored: sfN.stored }, refusal: { picked: sfR.picked, err: sfR.err, second: sfR.second } })}`, { sfN, sfR });
   globalThis.__hx.real = realWas;
 }
 

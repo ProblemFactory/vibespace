@@ -13195,6 +13195,7 @@ export default {
   // lane vault-standing-request r10 («Who may use it…»'s Save) — on plain lines (see r9 above)
   "{name} will no longer be excluded": "{name} は除外されなくなります",
   "This grant changed while the dialog was open — close it and open it again": "ダイアログを開いている間にこの許可が変わりました — 閉じてもう一度開いてください",
+  "Someone changed who may use it while you were editing — this shows it as it is now, with your own changes kept; Save again to keep them": "編集中に、誰が使えるかが変更されました — 今の内容に、あなたの変更を残して表示しています。もう一度保存すると反映されます",
   // lane held-except-doors r2 (the picker's kept 除了 line) — on plain lines (see r9 above)
   "Kept from an earlier grant — left out:": "以前の許可から残っている除外：",
   "Stop leaving {name} out": "{name} を除外しない",

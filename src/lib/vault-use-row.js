@@ -138,7 +138,7 @@ export function exceptRemovedOf(held = [], next = []) {
 export function saveWordsOf(r, plan = null, nameOfM = (m) => m.name || '') {
   const code = r && r.code;
   const named = r && r.principal && plan ? (plan.to || []).find((m) => pkOf(m) === r.principal) : null;
-  if (code === 'except_unnamed' || (code === 'hosts_required' && named && !(named.scopes || []).length)) return t('This grant changed while the dialog was open — close it and open it again');
+  if (code === 'row_changed' || code === 'entry_unknown' || code === 'except_unnamed' || (code === 'hosts_required' && named && !(named.scopes || []).length)) return t('This grant changed while the dialog was open — close it and open it again');   // B-f212's remainder: a refusal with no row to land
   if (code === 'hosts_required') return named ? t('Name the hosts {name} may use it for — a host name or address each (never «any host»)', { name: nameOfM(named) }) : t('Name the hosts it may be used for — a host name or address each (never «any host»)');   // r9 (MINOR C): the hub's refusal names the member
   if (code === 'tool_required') return t('A wildcard host (like *.example.com) is scoped to the tool that first used it — add it from a run card with «Always», not here');
   if (code === 'bad_principal') return t('A host is a host name or address (no wildcard, no address with a path)');
@@ -260,6 +260,10 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // the row as a Save LANDED it (`landRow`: the hub's answer names it — null for an older hub's answer: every next Save then
   // posts the row whole); `held` = its 除了 as picker keys (r10)
   let snap = { to: members, except: u.except || [] }, held = stored.except;
+  // B-f212's remainder (主开发 r1163): THE ROW'S STAMP — of the row this dialog last knew (the open, then every landing); every
+  // Save sends it, the hub refuses one over a row this dialog never saw (`row_changed`). An older hub's row has none: none sent
+  const revOfUse = (x) => (x && Number.isSafeInteger(x.rev) ? x.rev : null);
+  let rev = revOfUse(u);
   // B-f212: the instant a chosen end counts from — the press's own now, then the Save that LANDED (a repeated Save posts the same
   // ends, never later ones; the read: pinned at the open, a dialog left open an hour posted «8 hours» as seven, a day as one past).
   // r13: the pin holds only while the OWNER'S inputs (who, 除了, the hosts, the end) are what landed — planNow, for the preview and
@@ -456,7 +460,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   const landRow = (r, base) => {
     const lu = r && r.use && Array.isArray(r.use.to) ? r.use : null;
     snap = lu ? { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] } : null;
-    if (lu) { stale.textContent = ''; stale.hidden = true; }   // the hub just answered the row: it was read
+    if (lu) { stale.textContent = ''; stale.hidden = true; rev = revOfUse(lu); }   // the hub just answered the row: it was read (and its stamp)
     land(base, lu ? { ...rowFields(lu, base), end: base.end } : asPressed(base));
   };
   const asPressed = (base) => Object.fromEntries(FIELDS.filter((f) => f.name !== 'policy').map((f) => [f.name, base[f.name]]));
@@ -465,9 +469,12 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // So every reply lands in the order the hub took the posts, and the dialog closes only when no post is out and nothing is
   // unsaved (two posts out, released in the other order, closed the dialog on «removed» while the hub held the access)
   let saving = null, keptPress = null;
+  // B-f212's remainder (the read): a press kept while a Save the hub REFUSED (`row_changed`) was out is not posted — the person
+  // first sees the row that holds with their changes kept over it, and the words; their next press is their own
+  let refused = false;
   function doSave() {
-    if (!saving) { saving = saveOnce().finally(() => { saving = null; }); return saving; }
-    if (!keptPress) { const next = () => { keptPress = null; return doSave(); }; keptPress = saving.then(next, next); }
+    if (!saving) { refused = false; saving = saveOnce().finally(() => { saving = null; }); return saving; }
+    if (!keptPress) { const next = () => { keptPress = null; if (refused) return false; return doSave(); }; keptPress = saving.then(next, next); }
     return keptPress;
   }
   async function saveOnce() {
@@ -484,13 +491,25 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     const polWas = polLanded, polNow = base.policy;
     // r10 (主开发's acceptance of r9, MAJOR (2)): the ROW is posted only when it changed — a Save that sets only the policy never
     // rewrites the row behind the 验证是你 the owner gives for the policy
-    const send = () => post('/api/vault/use-grants', { id: row.id, to, except: pick.except, ...(removed.length ? { removeExcept: removed.map(pkOf) } : {}) }, revealLeftMs() ? revealHeaders() : {});
+    const send = () => post('/api/vault/use-grants', { id: row.id, to, except: pick.except, ...(removed.length ? { removeExcept: removed.map(pkOf) } : {}), ...(rev != null ? { rev } : {}) }, revealLeftMs() ? revealHeaders() : {});
     let r = { ok: true }, rowSaved = false;
     flying++;
     try {
       if (changed) {
         r = await send();
         if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
+        // B-f212's remainder: THE HUB REFUSED A SAVE OVER A ROW THIS DIALOG NEVER SAW (another client's Save, a run card's
+        // «Always», a ✕ elsewhere) — the row that holds lands by the landing law over what this dialog last knew (`clean`): the
+        // person's own changes are kept over it and stay unsaved; the dialog stays open and says so; Save again sends its stamp
+        if (r && r.code === 'row_changed' && r.use && Array.isArray(r.use.to) && !r.use.unknown && !r.use.unverified) {
+          const lu = r.use;
+          refused = true;
+          snap = { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] }; rev = revOfUse(lu);
+          if (stale.textContent !== t('«{name}» was removed from the vault', { name: row.label })) { stale.textContent = ''; stale.hidden = true; }   // a row the hub answered was read — but an entry this dialog read as removed stays said
+          land(clean, rowFields(lu, clean));
+          err.textContent = t('Someone changed who may use it while you were editing — this shows it as it is now, with your own changes kept; Save again to keep them');
+          return false;
+        }
         if (r && r.ok) { rowSaved = true; landRow(r, base); endPin = at; landedInputs = inputsKeyOf(clean); previewNow(); }   // B-f212: the landed row's instant pins the next Save's ends (r13: every landing moves it, with the inputs it landed)
       } else land(base, asPressed(base));   // B-f212: no row to post — the row as stored IS what this press would write (hosts typed in another order, the same row)
       if (r && r.ok && polNow !== polWas) {   // R4: the policy rides the same Save (a non-empty one asks 验证是你 too)
@@ -543,7 +562,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
           : !x ? t('«{name}» was removed from the vault', { name: row.label })
             : !lu || lu.unknown || !Array.isArray(lu.to) ? t('Who may use it could not be read just now — this shows it as last read') : '';
       stale.textContent = word; stale.hidden = !word;
-      if (!word) { snap = { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] }; land(clean, rowFields(lu, clean, { policy: true })); }
+      if (!word) { snap = { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] }; rev = revOfUse(lu); land(clean, rowFields(lu, clean, { policy: true })); }   // B-f212's remainder: and its stamp
     }
     if (owed && !flying) readRow();
   }

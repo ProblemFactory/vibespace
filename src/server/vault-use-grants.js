@@ -26,6 +26,14 @@
  *     back the window ONLY (its chip's ✕ — the host / command scopes stay); `revoke` returns the end of the live window it
  *     took (the door tells the press's record); every write prunes the row's ENDED windows (U.withoutEndedWindows), and
  *     `pruneWindows(id)` is the door's hour-end write (nothing to prune ⇒ nothing written).
+ *   · THE ROW'S STAMP (B-f212's remainder, 主开发 r1163): `rev` — the row's own GENERATION (below: every write of this one writer
+ *     moves it; the boot migration that reshapes rows in place, src/server/migrations.js, writes beneath it before any page)
+ *     — rides publicFor and every Save's answer; setRow judges it FIRST, before any write and with nothing awaited
+ *     between: a Save over a stamp the row no longer has (another client's Save, a run card's «Always», a ✕, the hour's prune,
+ *     a restore since the page read it) is refused `row_changed` 409 by name, nothing written, the row that holds answered (`use`,
+ *     its stamp in it) for the page to land with the person's own edit kept. A Save with NO stamp (a page from before this release)
+ *     is written as before for this one release. A write of ONE member (addMember, revoke, revokeWindow, pruneWindows, drop) is
+ *     not a whole-row write and is never judged — it moves the stamp, so the next whole-row Save over the old one is refused;
  *   · `verdictFor(id, facts, run)` — the run door's question before it draws a card (src/server/vault-run-door.js);
  *   · `publicFor(id, counts)` — the row as the window draws it: each member's grant id (`grant` — r11: beside its principal's
  *     own fields, never over a Task Group's `id`), hosts, end, «used N× by M conversations»; a landed `setRow` answers it
@@ -47,8 +55,9 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(tmp, file);
 }
 
-const STATUS = Object.freeze({ except_unnamed: 409, window_end_required: 400, window_card_only: 400, window_too_long: 400, window_excepted: 409, command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
+const STATUS = Object.freeze({ row_changed: 409, except_unnamed: 409, window_end_required: 400, window_card_only: 400, window_too_long: 400, window_excepted: 409, command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
 const WORDS = Object.freeze({
+  row_changed: 'someone changed who may use it since this page read it — nothing was written; the row as it is now is answered (use): save again over it',   // B-f212's remainder
   hosts_required: 'name the hosts it may be used for — a host name or address each (or «the hosts it was stored for»), or the command it may run; never «any host»',
   command_unreadable: 'that command could not be read as a program and its script — name them as they run (the program and its first argument)',
   too_many_commands: `at most ${GM.COMMANDS_MAX} commands per member`,
@@ -110,11 +119,13 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   let genByRes = Object.create(null);   // resource → the generation its row was last written at
   let genSeq = 0;                       // the global monotonic counter (the newest generation minted)
   let markGen = 0;                      // the newest sidecar generation this hub read/wrote (in-life anti-replay)
+  let genLoaded = false;                // B-f212's remainder: the sidecar was read once while unlocked (the pages' stamps are memory after)
   const staleNoted = new Set();         // resources a `grant_stale` For-you row already named (once, until the owner re-grants)
   const exceptCanon = (except) => (Array.isArray(except) ? except : []).map((x) => GM.principalKey(x)).filter(Boolean).sort();
   const genBody = (seq, res) => JSON.stringify({ v: 1, gen: Number(seq) || 0, res: Object.fromEntries(Object.keys(res).sort().map((k) => [k, Number(res[k]) || 0])) });
   const loadGen = () => {
     if (!MARK_FILE || !unlocked()) return;
+    genLoaded = true;
     let raw = null; try { raw = JSON.parse(fs.readFileSync(MARK_FILE, 'utf-8')); } catch { return; }   // no sidecar yet / unreadable ⇒ keep our in-memory view (an unverifiable sidecar never lowers a generation — fail closed)
     if (!raw || typeof raw !== 'object') return;
     const res = raw.res && typeof raw.res === 'object' && !Array.isArray(raw.res) ? Object.fromEntries(Object.keys(raw.res).filter((k) => GM.resourceShapeOk(U.DOOR, k)).map((k) => [k, Number(raw.res[k]) || 0])) : {};
@@ -130,6 +141,14 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   // BEFORE the write, so a refused 257th member (too_many) or a failed grants.json write invalidated every existing member of
   // the entry (their macs were made at the old generation, which no longer verified) ⇒ a false «forged» alarm.
   const nextGen = () => { loadGen(); return Math.max(genSeq, markGen) + 1; };
+  // B-f212's remainder (主开发 r1163): THE ROW'S STAMP is its generation. A Save is judged against it read fresh (`revOf`); a page is
+  // given it from memory once the sidecar was read in this life (`revSeen` — the first page of a hub after a restart loads it, so a
+  // row with no members left never hands a page a stamp the judgment would not match; after that every write of this one writer
+  // keeps memory true, and a contents list reads no file per row). While locked the sidecar cannot be read: the stamp is the
+  // last one this hub knew, and a Save is refused vault_locked anyway
+  const revNow = (id) => Number(genByRes[String(id)]) || 0;
+  const revOf = (id) => { loadGen(); return revNow(id); };
+  const revSeen = (id) => { if (!genLoaded) loadGen(); return revNow(id); };
   const commitGen = (id, gen) => { const g = Number(gen) || 0; genSeq = Math.max(genSeq, g); genByRes[String(id)] = g; staleNoted.delete(String(id)); saveGen(); return g; };   // a fresh owner write clears the stale notice for this resource
 
   // lane vault-standing-request: a member's COMMANDS and its SOURCE (+ its `at`) are under the mac too — appended ONLY when the
@@ -194,9 +213,15 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
    *  `removeExcept` (principal keys) lists every one this Save takes away (a widening: 验证是你); one left out unnamed (a page
    *  that never showed it as removed) is refused `except_unnamed`, nothing written. A member sent with NO scope that the hub
    *  holds nothing live for (its 1-hour window ended, or the hour-end sweep already took it) is dropped — `swept` names it. */
-  function setRow(id, { to = [], except = [], removeExcept = [] } = {}, { by = 'user', reauthed = false } = {}) {
+  function setRow(id, { to = [], except = [], removeExcept = [], rev } = {}, { by = 'user', reauthed = false } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');   // round 4 (item 4): a locked vault never writes mac:null — refuse by name
+    // B-f212's remainder (主开发 r1163): A SAVE OVER A ROW IT NEVER SAW IS REFUSED BY NAME — `rev` is the stamp of the row the page
+    // read; another write since moved it ⇒ `row_changed`, nothing written, the row that holds answered with its stamp. Judged
+    // here, before anything else this Save does, and nothing is awaited from here to the write below. A stamp is an integer (a
+    // string, a null or a boolean is no stamp the row could have: refused the same). No stamp at all (a page from before this release):
+    // written as before, for this one release
+    if (rev !== undefined && !(Number.isSafeInteger(rev) && rev === revOf(id))) return named('row_changed', { use: landedUse(id) });
     const was = rowOf(id);
     // r7: a WINDOW scope is the CARD's (its «Allow for 1 hour») — a Save never mints one or moves its end (a page naming one the
     // stored member does not hold with that end is refused `window_card_only`). r8 (the r7 acceptance MINOR 4/5): the Save
@@ -401,15 +426,15 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     return { ok: true, healed, legacy, failed };
   }
   /** The row as the window draws it (+ «used N× by M conversations» per member, from `counts` = VU.countsOf's entry row). */
-  const landedUse = (id) => { try { const p = publicFor(String(id)); return { to: p.to || [], except: p.except || [] }; } catch { return null; } };
+  const landedUse = (id) => { try { const p = publicFor(String(id)); return { to: p.to || [], except: p.except || [], rev: p.rev, ...(p.unknown ? { unknown: true } : {}), ...(p.unverified ? { unverified: true } : {}) }; } catch { return null; } };   // B-f212's remainder: with its stamp — and a row that could not be read says so (never landed as an empty one)
   function publicFor(id, counts = null) {
     const raw = rowOf(id);
     // round 6 (MINOR item 6): while locked the members cannot be verified — list them «unverified until unlocked» (names/hosts,
     // never the value, never as a held grant), so a hand-written data/grants.json member is not shown as a real grant.
-    if (raw && !unlocked()) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; }
+    if (raw && !unlocked()) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, rev: revSeen(id), to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; }
     const p = U.publicGrants(verifiedRow(raw), { now: now() });
     const by = (counts && counts.grants) || {};
-    return { ...p, to: p.to.map((e) => ({ ...e, uses: (by[e.grant] && by[e.grant].uses) || 0, convs: (by[e.grant] && by[e.grant].convs) || 0 })) };   // r11: by its grant id (`grant`)
+    return { ...p, rev: revSeen(id), to: p.to.map((e) => ({ ...e, uses: (by[e.grant] && by[e.grant].uses) || 0, convs: (by[e.grant] && by[e.grant].convs) || 0 })) };   // r11: by its grant id (`grant`); B-f212's remainder: the row's stamp (`rev`) a Save sends back
   }
   /** Every entry THIS caller holds a live member of (`vibespace-vault list`): [{id, grant, hosts, until}]. */
   function heldBy(facts = {}) {
