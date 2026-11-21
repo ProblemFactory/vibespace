@@ -4,6 +4,9 @@
 //      readOffLoop and then read (activePendingPermissions, raw — the re-attach of a conversation whose history is loaded) opens its
 //      transcript ZERO times on this thread; RED CONTROL: a copy whose reader has no door — readOffLoop passes it by and the read
 //      parses the tail here (it opens the transcript on this thread)
+//   D) THE CENSUS (主开发 r1355 D): every product read of a transcript reader goes through the door first (a door between its
+//      maker and its first synchronous read); the synchronous parse has exactly its named callers — a new one is red by name
+//      (the parse itself stays); RED CONTROLS: a planted read with no door, a planted caller — each named
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,4 +73,74 @@ console.log('A) the claude reader\'s door: a re-attach reads its transcript off 
   }
   ok(!!x && x.v.took === false && x.v.rows > 0 && x.n >= 1, `RED CONTROL (a claude reader with no door — the road before this unit): readOffLoop passes it by, the read opens its transcript ${x ? x.n : '?'} time(s) on this thread`, x || why);
 }
+console.log('D) the census: every product read of a transcript reader goes through the door; a new caller of the synchronous parse is red by name');
+const srcFiles = (() => { const out = []; out.push('server.js');   // the hub's entry file, read (never started)
+  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) { if (rel !== 'src/public' && rel !== 'src/lib') walk(rel); } else if (e.name.endsWith('.js')) out.push(rel); } }; walk('src'); return out.filter((rel) => fs.existsSync(path.join(REPO, rel))); })();
+const KW = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'else']);
+const FN = /^\s*(?:async\s+)?function\s+(\w+)\s*\(|^\s{2}(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{\s*$|^\s*(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/;
+const fnOf = (L, i) => { for (let j = i; j >= 0; j--) { const m = FN.exec(L[j]); if (m) { const n = m[1] || m[2] || m[3]; if (!KW.has(n)) return n; } } return null; };
+const isCode = (l) => !/^\s*(\/\/|\*|\/\*)/.test(l);
+// a worker thread's file reads where it runs — never the hub's loop
+const OFF_LOOP_FILES = new Set(['src/transcript-worker.js', 'src/search-index-worker.js', 'src/sessions-sweep-worker.js', 'src/safe-fs-worker.js']);
+const SYNC_PARSE = /\b(parseSessionJsonl|parseCodexSessionJsonl|readJsonlTail|readJsonlBounded)\(/g;
+const MAKER = /\b(createSessionMessages|readerFor)\(|\.createReader\(|new (?:\w+\.)?(?:Codex)?SessionMessages\(/g;
+const READS = '\\??\\.(?:raw|chatStatus|activePendingPermissions|slice|tail|all|helperResults|taskState|wrapperMeta|search)(?:\\?\\.)?\\(|\\??\\.total\\b|\\??\\.pendingPermissions\\b';
+// the synchronous parse's callers (and the raw tail reads under it), each with why it stands — a NEW caller is red by name; the
+// parse itself stays: a refusal would turn a rare stall into a failed read (主开发 r1355 D)
+const SYNC_CALLERS = {
+  'src/session-store.js|_ensureParsed': 'the claude reader\'s own parse — after the door a cache hit (the worker parsed the tail)',
+  'src/session-store.js|parseSessionJsonl': 'the claude parse\'s own tail read (an append folded in, or the cold read when the pool is down)',
+  'src/session-store.js|warmOnce': 'the warm\'s inline fold of an append (≤ WARM_INLINE_APPEND_MAX) — the bytes the file grew by (the train moved it into warmOnce)',
+  'src/codex-session-store.js|_ensureParsed': 'the codex reader\'s sync road — every product read takes the door first; said in the hub\'s log by name',
+  'src/codex-session-store.js|parseCodexSessionJsonlAsync': 'the off-loop read\'s fallback when the worker failed (counted and said)',
+  'src/adapters/codex.js|parseCodexSessionJsonl': 'the codex parse\'s own bounded tail read',
+};
+// a reader's MAKERS (the readers they make are judged where they are read); a harness descriptor's `createReader:` is one too
+const FACTORIES = { 'src/agentd/agentd.js|getTranscriptService': 'the device agent\'s service', 'src/server/mounts-plugins-wiring.js|createSessionMessages': 'the hub\'s reader factory', 'src/transcript-service.js|readerFor': 'the service\'s own maker' };
+function census(files) {   // {rel: text} → { sync, unnamedSync, doorless, sites }
+  const sync = [], unnamedSync = [], doorless = [], sites = [];
+  for (const [rel, text] of Object.entries(files)) {
+    if (OFF_LOOP_FILES.has(rel)) continue;
+    const L = text.split('\n');
+    L.forEach((l, i) => {
+      if (!isCode(l)) return;
+      for (const m of l.matchAll(SYNC_PARSE)) {
+        if (new RegExp(`function\\s+${m[1]}\\s*\\(`).test(l)) continue;
+        const key = `${rel}|${fnOf(L, i)}`;
+        sync.push(key);
+        if (!SYNC_CALLERS[key]) unnamedSync.push(`${rel}:${i + 1} ${key}`);
+      }
+      for (const m of l.matchAll(MAKER)) {
+        if (/function\s+(createSessionMessages|readerFor)\s*\(/.test(l) || /\bcreateReader\s*:\s*(?:async\s*)?\(/.test(l)) continue;
+        if (FACTORIES[`${rel}|${fnOf(L, i)}`]) continue;
+        sites.push(`${rel}:${i + 1}`);
+        const v = /(?:const|let)\s+(\w+)\s*=/.exec(l) || /(\w+)\s*=\s*createSessionMessages/.exec(l);
+        const name = v ? v[1] : null;
+        if (!name) { doorless.push(`${rel}:${i + 1} (no reader variable)`); continue; }
+        const rd = new RegExp(`\\b${name}(?:${READS})`);
+        let j = -1, kind = '';
+        const own = rd.exec(l.slice(m.index + m[0].length));
+        if (own) { j = i; kind = own[0]; }
+        for (let k = i + 1; j < 0 && k < Math.min(L.length, i + 200); k++) { if (!isCode(L[k])) continue; const r = rd.exec(L[k]); if (r) { j = k; kind = r[0]; } }
+        // the window: the maker's line to the first read, CODE lines only (a comment naming the door is no door); a task-state read's
+        // door may stand just before its maker (its task warm, five code lines)
+        const win = L.slice(i, (j >= 0 ? j : i) + 1).filter(isCode).join('\n');
+        const before = L.slice(Math.max(0, i - 5), i).filter(isCode).join('\n');
+        const door = new RegExp(`readOffLoop\\(${name}\\b|\\b${name}\\.rawAsync\\(`).test(win) || (/taskState/.test(kind) && /taskWarmOf\(/.test(before + '\n' + win));
+        if (!door) doorless.push(`${rel}:${i + 1} ${name} → ${kind || 'no read in sight'}`);
+      }
+    });
+  }
+  return { sync, unnamedSync, doorless, sites };
+}
+const files = Object.fromEntries(srcFiles.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf8')]));
+const c = census(files);
+ok(c.unnamedSync.length === 0 && c.sync.length === 8 && c.doorless.length === 0 && c.sites.length === 8,   // on 2.369.417 the train's code adds one caller of the sync parse (the parse's own inline fold, parseSessionJsonl) and two read sites; every site goes through the door (none doorless)
+  `every product read of a transcript reader goes through the door (${c.sites.length} sites: ${c.sites.join(', ')}); the synchronous parse has exactly its named callers (${[...new Set(c.sync)].join(', ')})`, c);
+const planted = { ...files,
+  'src/transcript-service.js': files['src/transcript-service.js'] + '\nfunction plantedRead(r) { const sm = readerFor(r, null); return sm.chatStatus(); }\n',
+  'src/session-store.js': files['src/session-store.js'] + '\nfunction plantedParse() { return parseSessionJsonl(\'x\', \'/w\'); }\n' };
+const p = census(planted);
+ok(p.doorless.some((d) => d.includes('sm → sm.chatStatus(')) && p.unnamedSync.some((d) => d.includes('plantedParse')),
+  `RED CONTROLS (a planted read with no door, a planted caller of the synchronous parse): each named — ${[...p.doorless, ...p.unnamedSync].join(' · ')}`, p);
 report();
