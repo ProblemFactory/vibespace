@@ -636,7 +636,7 @@ const PAGE_LINES = 8192, PAGE_BYTES = 4 * 1048576;
  *  check at each page; `soft: false` sends no soft check (the red control: the hard limit alone, under a parent heap flag) */
 function _setHistoryHeapMbForTest(mb, { soft = true } = {}) { HISTORY_HEAP_MB = mb; HISTORY_SOFT_CHECK = soft; }
 /** row B-422c's legs: a stand-in transcript pool (`{call, inPlace?}`) in the real one's place; null = build the real one again */
-function _setTranscriptPoolForTest(p) { _workerScript = true; _transcriptPool = p || null; _poolFails = 0; _poolRetryAt = 0; }
+function _setTranscriptPoolForTest(p) { _workerScript = true; _transcriptPool = p === false ? false : (p || null); _poolFails = p === false ? POOL_RETRY_MAX : 0; _poolRetryAt = 0; }   // false: no pool on this process, its build's tries spent (poolGone)
 // what the paged reads did (the legs assert the paged road was taken; a field hub's numbers): pages served, reads done in pages,
 // snapshots found gone, one-shot reads, reads that gave up (each with its reason, onFail)
 const _pagedStats = { pages: 0, reads: 0, gone: 0, oneShot: 0, failed: 0 };
@@ -777,7 +777,13 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
   const seen = (e, ownCall) => { if (pool && !pool.inPlace && isPoolFailure(e)) { refusal = readerRefusal(e, fp, { ownCall }); notePoolRefusing(e); if (note) noteFileRefusal(fp, refusal, { history: true }); } };
   const said = (why) => { _pagedStats.failed++; try { onFail?.(why, refusal); } catch { } return null; };
   const pool = _transcriptPoolGet();
-  if (!pool) { refusal = readerRefusal(null); notePoolRefusing(refusal); if (note) noteFileRefusal(fp, refusal, { history: true }); return said('no transcript pool on this process'); }
+  if (!pool) {
+    refusal = readerRefusal(null); notePoolRefusing(refusal); if (note) noteFileRefusal(fp, refusal, { history: true });
+    // the WARM's road (`entry`) is told by the refusal THROWN, as its one-shot would (its caller's catch reads the main process's slices
+    // when the guard allows — the move's read: a null said here ended that road, and a history stayed «not loaded» until a restart)
+    if (entry) { refusal.retryAt = nextReadAt(fp); refusal.readerGone = poolGone(); throw refusal; }
+    return said('no transcript pool on this process');
+  }
   let why = null;
   for (let tries = 0; tries < 2; tries++) {
     let token = null;   // set once page 0 answered: a page with it parses the snapshot in memory (seen in the catch below)
@@ -798,9 +804,10 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
       if (!gone) { _pagedStats.reads++; poolAnswered(fp, 'boundedParsedPage'); return out; }
     } catch (e) {
       const code = e && e.code;
-      seen(e, !token);
+      // the warm's road: the history LANE's own bound or wait says nothing of the file — its one-shot read follows by design
+      if (!(entry && (code === 'heap_bound' || code === 'history_busy'))) seen(e, !token);
       if (code === 'heap_bound' && !entry) return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
-      if (refusal && (refusal.storageHung || fileStorageHung(fp))) return said(`its storage hung (${(e && e.message) || e}) — no one-shot read sent into it`);   // nothing more tried there (a retry of a storage file is ONE call)
+      if (refusal && (refusal.storageHung || fileStorageHung(fp))) { if (entry) { refusal.retryAt = nextReadAt(fp); refusal.readerGone = poolGone(); throw refusal; } return said(`its storage hung (${(e && e.message) || e}) — no one-shot read sent into it`); }   // the warm's road: thrown, its catch reads it as the storage's   // nothing more tried there (a retry of a storage file is ONE call)
       why = code === 'heap_bound' ? `the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}` : code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`;
       break;
     }

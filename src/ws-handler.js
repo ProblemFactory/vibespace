@@ -1546,7 +1546,7 @@ function registerWsHandler(wss, ctx) {
             sm = createSessionMessages({ backend: data.backend || 'claude', backendSessionId: bsid, claudeSessionId: data.claudeSessionId || bsid, cwd: data.cwd || '', buffer: '' });
             viewHid = SSH.getHistorySessionId({ backendSessionId: bsid, claudeSessionId: data.claudeSessionId || bsid });
           } else break;
-          await readOffLoop(sm, { label: `history-ask ${data.sessionId}`, wanted: current });
+          await readOffLoop(sm, { label: `history-ask ${data.sessionId}`, wanted: current, bulk: live ? BULK.isBulk(live) : false });   // the mark read through its one place (never consumed here)
           if (!current()) break;
           let parsed = true;
           try { sm.raw(); } catch (e) { parsed = false; console.warn(`[ws] history-ask ${data.sessionId}: its read failed — ${(e && e.message) || e}`); }   // a reader with no off-loop read (claude's): its parse — the warm's copy, or the refusal from memory
@@ -1960,7 +1960,7 @@ function registerWsHandler(wss, ctx) {
                 messages: session._normalizer ? session._normalizer.tailWindow(attachWindowOpts(data.slab)) : [],
                 turnMap: session._normalizer ? session._normalizer.turnMap() : [],
               })));
-              if (ws.readyState === WS_OPEN) BULK.replied(session);   // B-cd4b r1093, THE DOOR: the attach replied the history (whatever served it: its read, the hub's copy, a replay) — a socket gone first keeps the mark
+              if (ws.readyState === WS_OPEN && !livePayload.historyNotLoaded) BULK.replied(session);   // B-cd4b r1093, THE DOOR: the attach replied the history (whatever served it: its read, the hub's copy, a replay) — a socket gone first keeps the mark   // row B-422c at the move: a «not loaded» reply is a refusal said — it consumes nothing (bulk-read.js: the retry is still the first read)
               armResume(session, ws);
               // ASK THE ONE PROCESS THAT KNOWS (2026-09-09, the ghost-row
               // incident). We just told the client our queue is a GUESS, so
@@ -2063,7 +2063,7 @@ function registerWsHandler(wss, ctx) {
             if (sm.notLoaded) _viewWaiters.note(SSH.getHistorySessionId({ backendSessionId, claudeSessionId: data.claudeSessionId || backendSessionId }), ws, data.sessionId);   // r1461 (2): this view waits on it — told at its readable
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: data.name || '', cwd: data.cwd || '', mode: 'chat',
               messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true, historyNotLoaded: sm.notLoaded || null, historyNotLoadedInfo: sm.notLoaded ? withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone }) : null }));   // row B-422c // the slab asked for, as the live attach (perf r1)
-            if (ws.readyState === WS_OPEN) for (const [, s] of activeSessions) if (addressableId(s) === backendSessionId) BULK.replied(s);   // B-cd4b r1093, THE DOOR: View History replied the history of the live conversation it names (its own address: a pending fork carrying the id is not it)
+            if (ws.readyState === WS_OPEN && !sm.notLoaded) for (const [, s] of activeSessions) if (addressableId(s) === backendSessionId) BULK.replied(s);   // B-cd4b r1093, THE DOOR: View History replied the history of the live conversation it names (its own address: a pending fork carrying the id is not it)
           } else {
             // Include sessionId so the requesting ChatView can correlate the
             // failure (otherwise it waits forever on a blank window)

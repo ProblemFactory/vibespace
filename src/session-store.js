@@ -718,6 +718,9 @@ function warmPaged(fp, { fresh = null, bulk = false } = {}) {
   pumpWarm();
   return { p, job };
 }
+// r935 (a)'s rule for every put of a WHOLE read that waited (the main process's slices, the storage's retry — the move's read): never
+// over a NEWER entry of the same file (the same inode, a size at least the read's: an append folded in meanwhile stays)
+const putUnlessNewer = (id, entry) => { const c = _jsonlCache.get(id); if (!(c && entry && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0))) _jsonlCachePut(id, entry); };
 const promoteWarm = (job) => { if (!job || !job.bulk) return; const i = _warmQ.bulk.indexOf(job); if (i < 0) return; _warmQ.bulk.splice(i, 1); job.bulk = false; _warmQ.person.push(job); };
 // ONE WARM A SESSION AT A TIME: a second ask while one is in flight joins it (the parse's 2 s re-warm, an attach, a page) — never a
 // second history read of the same file sent to the pool (the whole-state read: unjoined re-warms queued reads whose deadlines ended
@@ -750,10 +753,10 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
     const t0 = performance.now();
     let r = null;
     if (C().poolGone()) { try { r = await C().readJsonlTailSliced(known, { dropSubagent: true, storageRetry: true }); } catch { return false; } }
-    else { try { r = await C().readJsonlTailAsync(known, { dropSubagent: true }); } catch { return false; } }
+    else { try { r = await warmPaged(known, { bulk }).p; } catch { return false; } }   // B-cd4b's pager in its person-first line (the move's read): the entry in pages, never one clone; a storage still hung refuses at its first page
     if (!r || !r.entry) return false;
     _stampJsonlParse(r.bytes, performance.now() - t0);
-    _jsonlCachePut(claudeSessionId, r.entry);
+    putUnlessNewer(claudeSessionId, r.entry);
     await warmTaskEvents(claudeSessionId, known, { ino: r.entry.ino, size: r.entry.size });   // the storage answers again: the task scan beside it
     return true;
   }
@@ -807,7 +810,7 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
       const t1 = performance.now();
       try {
         const r2 = await C().readJsonlTailSliced(fp, { dropSubagent: true });
-        if (r2 && r2.entry) { _stampJsonlParse(r2.bytes, performance.now() - t1); _jsonlCachePut(claudeSessionId, r2.entry); return true; }
+        if (r2 && r2.entry) { _stampJsonlParse(r2.bytes, performance.now() - t1); putUnlessNewer(claudeSessionId, r2.entry); return true; }
       } catch { }
       return false;
     }

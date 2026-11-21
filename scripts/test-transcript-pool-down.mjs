@@ -575,6 +575,25 @@ console.log('r1461: the page\'s re-ask decision, the push\'s waiters, the two pa
   const t0 = Date.now(), atFresh = C.nextReadAt(fresh), atZst = C.nextReadAt(path.join(projDir, 'never.jsonl.zst'));
   ok(atFresh - t0 >= 9500 && atFresh < atZst && atZst - t0 >= 59000, `nextReadAt: a fresh refusal ⇒ when the main process's read opens (+${atFresh - t0} ms); a compressed rollout ⇒ a minute (+${atZst - t0} ms)`);
 }
+{
+  // (i) NO POOL ON THIS PROCESS (its build's tries spent — the pool GONE, never an object): a Claude history refused and stood past
+  // the stated time IS read on the main process, the warm's road through B-cd4b's pager told by the refusal THROWN. RED at the move's
+  // first form 4e0cca88e: the pager answered null there, the warm ended «false» before its catch — «not loaded» until a restart.
+  // CONTROL: the same with the stated time not yet passed — «not loaded» (the guard decides, not the leg)
+  const sidN = '91111111-2222-4333-8444-555555555555', fpN = path.join(projDir, sidN + '.jsonl');
+  fs.writeFileSync(fpN, fs.readFileSync(claudeFp, 'utf8').split('\n').filter(Boolean).slice(0, 40).join('\n') + '\n');
+  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' }));
+  try { await C.readJsonlTailAsync(fpN, { dropSubagent: true }); } catch { }   // refused once: the file's record
+  C._setTranscriptPoolForTest(false);
+  C._setSlicedForTest({ afterMs: 3600000 });
+  const ctl = await SS0.warmSessionJsonlAsync(sidN, cwd);
+  C._setSlicedForTest({ afterMs: 0 });
+  const got = await SS0.warmSessionJsonlAsync(sidN, cwd);
+  const parsed = SS0.parseSessionJsonl(sidN, cwd);
+  ok(C.poolGone() && ctl === false && got === true && Array.isArray(parsed) && !parsed.notLoaded && parsed.length > 0,
+    `no pool on this process: the warm reads the history on the main process (${got}; the parse answers ${parsed.length} records, loaded) — CONTROL: before the stated time, «not loaded» (${ctl})`, { gone: C.poolGone(), ctl, got, n: parsed.length, notLoaded: parsed.notLoaded || null });
+  C._setSlicedForTest({});
+}
 C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
 
 // ── THE PAGE'S WIRING (the page's words are drawn by the chrome suites; these pins hold the roads that say them) ──
@@ -601,7 +620,7 @@ C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
     ['the minimap fallback draws nothing from it', /if \(d\.turns\?\.length && !d\.notLoaded\) this\._chatMinimap\.render\(d\.turns\)/.test(cv)],
     ['/api/subagents\' reason in the page\'s words — the reader gone\'s with no time promised', /if \(r\?\.reason === 'transcript_reader_restarting'\) \{ this\._sayReaderRestarting\(\{ readerGone: !!r\.readerGone \}\); return; \}/.test(cv) && /: t\('The transcript reader is not running\.'\)\);/.test(cv)],
     ['a VIEW hears its own history-ready (the hub notes the view waiting at its view attach and its ask, and tells it at the readable)', /this\._historyReadyOff = this\.ws\.onGlobal\(\(m\) => \{ if \(m && m\.type === 'history-ready' && m\.sessionId === vid && !this\._disposed\) this\._onHistoryReady\(\); \}\);/.test(cv) && /for \(const \[vws, vsid\] of _viewWaiters\.take\(historyId, \(w\) => w\.readyState === WS_OPEN\)\)/.test(ws) && /if \(sm\.notLoaded\) _viewWaiters\.note\(SSH\.getHistorySessionId\(\{ backendSessionId, claudeSessionId: data\.claudeSessionId \|\| backendSessionId \}\), ws, data\.sessionId\);/.test(ws) && /if \(viewHid\) _viewWaiters\.note\(viewHid, ws, data\.sessionId\);/.test(askCase)],
-    ['the hub\'s ask: a newer ask of the same window supersedes an older one before it reads; a read that failed is never «ready»', /await readOffLoop\(sm, \{ label: `history-ask \$\{data\.sessionId\}`, wanted: current \}\);/.test(askCase) && /if \(!parsed\) \{ reply\(\{ type: 'history-not-loaded', historyNotLoaded: 'transcript_reader_restarting', historyNotLoadedInfo: null \}\); break; \}/.test(askCase)],
+    ['the hub\'s ask: a newer ask of the same window supersedes an older one before it reads; a read that failed is never «ready»', /await readOffLoop\(sm, \{ label: `history-ask \$\{data\.sessionId\}`, wanted: current, bulk: live \? BULK\.isBulk\(live\) : false \}\);/.test(askCase) && /if \(!parsed\) \{ reply\(\{ type: 'history-not-loaded', historyNotLoaded: 'transcript_reader_restarting', historyNotLoadedInfo: null \}\); break; \}/.test(askCase)],
     ['a search of it says the door\'s words (the storage\'s, the reader gone\'s, the reader restarting\'s), never «No results»', /this\._searchStatus\.textContent = data\.storageHung \? t\("This conversation's file is not answering — trying again at \{time\}\.", \{ time: when \}\)\n\s+: data\.readerGone \? t\('The transcript reader is not running — trying again at \{time\}\.', \{ time: when \}\)/.test(csr)],
     ['the resume road says the line', /if \(data\.notLoaded\) chatView\._sayHistoryNotLoaded\?\.\(data\.notLoaded, \{ info: \{ storageHung: !!data\.storageHung, readerGone: !!data\.readerGone, retryAt: data\.retryAt \|\| null, retryIn: data\.retryIn \?\? null \} \}\);/.test(sl)],
     ['the REBUILD alone sets _historyNotLoaded (never an attach that joined it)', /session\._historyNotLoaded = notLoaded \|\| null;/.test(fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8')) && !/session\._historyNotLoaded = /.test(ws)],   // stale-pins: kept (the absence check: ws-handler writes it no more)

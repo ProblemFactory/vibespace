@@ -305,7 +305,7 @@ try {
       `every device that failed was SAID once (${good.warns.length} saying(s)), its local fallback then replied`, good.warns);
     // RED: THE TIP'S SHAPE — the consume inside three roads (view after its conversion, status, the todos read), no door
     const tip = anchored(anchored(anchored(anchored(tsSrc10,
-      'const reply = (out) => { if (!(r.gone && r.gone())) BULK.replied(live()); return out; };', 'const reply = (out) => out;', 'tip-no-door'),
+      'const reply = (out) => { if (!(r.gone && r.gone()) && !(out && out.notLoaded)) BULK.replied(live()); return out; };', 'const reply = (out) => out;', 'tip-no-door'),
       '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n', '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n    BULK.replied(session);\n', 'tip-view'),
       '    return { chatStatus, taskState: sm.taskState?.() || null };', '    BULK.replied(session);\n    return { chatStatus, taskState: sm.taskState?.() || null };', 'tip-status'),
       '    const st = sm.taskState() || {};\n', '    const st = sm.taskState() || {};\n    BULK.replied(live);\n', 'tip-todos');
@@ -357,7 +357,8 @@ try {
     const SITES = [
       ['src/transcript-service.js', 'BULK.replied(live())', 1],   // THE DOOR: every export but NOT_DOORS, when it replies
       ['src/transcript-service.js', 'BULK.personAct(live)', 1],   // personAsk: a person's own act
-      ['src/ws-handler.js', 'if (ws.readyState === WS_OPEN) BULK.replied(session);', 2],   // the socket's attach doors: a chat attach, a terminal's
+      ['src/ws-handler.js', 'if (ws.readyState === WS_OPEN) BULK.replied(session);', 1],   // a terminal's attach
+      ['src/ws-handler.js', 'if (ws.readyState === WS_OPEN && !livePayload.historyNotLoaded) BULK.replied(session);', 1],   // a chat attach (row B-422c: a «not loaded» reply consumes nothing)   // the socket's attach doors: a chat attach, a terminal's
       ['src/ws-handler.js', 'BULK.replied(s);', 1],   // View History's door
     ];
     const sitesCensus = (files) => {
@@ -380,9 +381,9 @@ try {
     // THE SOCKET'S HISTORY REPLIES (ws-handler is not loaded here): every `attached` send classified; each door's consume right after it
     const wsS = strip(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'));
     const SENDS = [
-      ['attachedFrameText(livePayload', 1, /ws\.send\(attachedFrameText\(livePayload, resume, \(\) => \(\{[\s\S]{0,600}?\}\)\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) BULK\.replied\(session\);/],   // a chat attach
+      ['attachedFrameText(livePayload', 1, /ws\.send\(attachedFrameText\(livePayload, resume, \(\) => \(\{[\s\S]{0,600}?\}\)\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN && !livePayload\.historyNotLoaded\) BULK\.replied\(session\);/],   // a chat attach
       ["buffer: session.buffer || ''", 1, /buffer: session\.buffer \|\| '' \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) BULK\.replied\(session\);/],   // a terminal's attach
-      ["name: data.name || '', cwd: data.cwd || '', mode: 'chat'", 1, /viewOnly: true(?:, historyNotLoaded: [^\n]*?)? \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) for \(const \[, s\] of activeSessions\) if \(addressableId\(s\) === backendSessionId\) BULK\.replied\(s\);/],   // View History (row B-422c: its not-loaded info rides the same send)
+      ["name: data.name || '', cwd: data.cwd || '', mode: 'chat'", 1, /viewOnly: true(?:, historyNotLoaded: [^\n]*?)? \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN && !sm\.notLoaded\) for \(const \[, s\] of activeSessions\) if \(addressableId\(s\) === backendSessionId\) BULK\.replied\(s\);/],   // View History (row B-422c: its not-loaded info rides the same send)
       ['sessionId: subId', 3, null],   // NOT A DOOR: a subagent's own transcript — a virtual session no create marks
     ];
     const sendsCensus = (t) => {
