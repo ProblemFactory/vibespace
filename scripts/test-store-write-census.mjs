@@ -2921,7 +2921,7 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
   // by the leg: ONE write of a file in flight at a time, its bytes made when it starts (produce — the latest state), landed only when
   // the leg says so; then its waiters (a version at or before the landed one) are answered, then onWritten, then the next version
   // starts — made NOW. A failed landing keeps the change owed and answers its waiters false (the writer's own failure road)
-  const gatedWriter = ({ lateProduce = false } = {}) => {   // lateProduce: the bytes made at the LANDING (a writer busy with another store)
+  const gatedWriter = ({ lateProduce = false, durableMs = undefined } = {}) => {   // lateProduce: the bytes made at the LANDING (a writer busy with another store)
     const S = new Map(), names = [], landedLog = [];
     const st = (f) => { if (!S.has(f)) S.set(f, { v: 0, wv: 0, flight: null, dirty: false, o: null, waiters: [] }); return S.get(f); };
     const start = (s) => { if (s.flight || !s.dirty) return; s.dirty = false; if (lateProduce) { s.flight = { v: s.v, bytes: null }; return; } const b = s.o.produce(); s.flight = { v: s.v, bytes: Array.isArray(b) ? b.join('') : String(b) }; };
@@ -2936,6 +2936,7 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       whyNotDurable: (f) => { const s = S.get(f); return s && s.why === 'queued' ? { why: 'queued', code: null } : { why: 'failed', code: 'EIO' }; },   // (timeout below: a write only QUEUED past the writer's bound)
       flushSync(files) { for (const f of files || [...S.keys()]) { const s = S.get(f); for (let i = 0; s && (s.flight || s.dirty) && i < 10; i++) land1(f, true); } return { written: [], left: [] }; },
       forget: (f) => { S.delete(f); },
+      durableMs,   // (B-0248 r1353 (4): a door's own bound is the writer's — undefined ⇒ the product's 60 s)
     };
     function land1(gwFile, ok = true) {
       const s = S.get(gwFile); if (!s) return; if (!s.flight) start(s); const fl = s.flight; if (!fl) return;
@@ -3492,6 +3493,7 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     // (i)–(k) B-0248 (a)+(b): THE DESKTOPS AND THEIR ROLLBACK POINTS — the release's 500 ms debounce kept, then an act; R10 by LANDING
     const L0 = { current: null, autoSave: null, saved: {}, customGrids: [], desktopMeta: [{ id: 'd0', name: 'One' }, { id: 'd1', name: 'Two' }], desktops: { d0: { autoSave: { windows: [{ winId: 'w0' }, { winId: 'w1' }, { winId: 'w2' }] } }, d1: { autoSave: { windows: [{ winId: 'w3', x: 0 }] } } } };
     const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+    const tick2 = () => new Promise((r) => setImmediate(() => setImmediate(r)));   // the next turn's hand-off (setImmediate) — exact, never a wall clock
     const layScene = async (load, tag) => {
       const d = scratchDir('swc-pl-lay-' + tag); roots.push(d); seed(d);
       const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
@@ -3502,7 +3504,7 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);   // a window closed: its rollback point, then the desktops
       R.writeLayouts(shape);
       await sleepMs(60); out.pointInFlight = g.inFlight(); out.layoutsAt60 = g.W.pending(LF);
-      await sleepMs(560); out.layoutsAfterDebounce = g.W.pending(LF);   // the release's 500 ms debounce fired: the point is not on disk yet
+      R.flushLayouts(); out.layoutsAfterDebounce = g.W.pending(LF);   // the debounce's own flush (its timing is THE BOUND's leg below): the point is not on disk yet
       g.land(); out.layoutsAfterPoint = g.W.pending(LF);                // the point landed, its header in flight
       g.land(); out.layoutsAfterHead = g.W.pending(LF);                 // the header landed: the desktops handed now
       g.land();
@@ -3510,15 +3512,15 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       out.onDisk = JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d0.autoSave.windows.map((w) => w.winId);
       const geo = JSON.parse(J(shape)); geo.desktops.d1.autoSave.windows[0].x = 40;   // a GEOMETRY change: no point
       R.writeLayouts(geo);
-      await sleepMs(300); out.geoAt300 = g.W.pending(LF);
-      await sleepMs(300); out.geoAt600 = g.W.pending(LF);
+      await sleepMs(150); out.geoAt150 = g.W.pending(LF);   // (margins wide enough for a busy runner: 150 ms under the 500, 400 over it)
+      await sleepMs(750); out.geoAt900 = g.W.pending(LF);
       g.land(); out.geoOnDisk = JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d1.autoSave.windows[0].x;
       return out;
     };
     const LY = await layScene(() => require(path.join(REPO, PREL)), 'real');
     ok(LY.pointInFlight >= 1 && LY.layoutsAt60 === false && LY.layoutsAfterDebounce === false && LY.layoutsAfterPoint === false && LY.layoutsAfterHead === true && J(LY.order) === J(['point', 'header', 'layouts.json']) && J(LY.onDisk) === J(['w1', 'w2']),
       '⑭i R10 BY LANDING: a window closed — its rollback point handed at the next turn; at the release\'s 500 ms debounce the desktops are NOT handed while the point (then its header) is not on disk; they land third: point, header, layouts.json', LY);
-    ok(LY.geoAt300 === false && LY.geoAt600 === true && LY.geoOnDisk === 40, '⑭i THE BOUND: a window moved is handed to the writer at the release\'s own 500 ms debounce (not at 300 ms, at 600 ms) — a hub that dies loses no more than the release did', { at300: LY.geoAt300, at600: LY.geoAt600, onDisk: LY.geoOnDisk });
+    ok(LY.geoAt150 === false && LY.geoAt900 === true && LY.geoOnDisk === 40, '⑭i THE BOUND: a window moved is handed to the writer at the release\'s own 500 ms debounce (not at 150 ms, by 900 ms) — the paced write waits no longer than the release\'s', { at150: LY.geoAt150, at900: LY.geoAt900, onDisk: LY.geoOnDisk });
     const WAIT_A = "    if (!pointsLeftUpTo(upTo)) { landLayouts(f); return; }\n";
     ok(PSRC.split(WAIT_A).length === 2, 'control setup: the desktops\' wait for their points is found once');
     const LYX = await layScene(() => mutantCopies('swc-pl-nowaitpoints', REPO).load(PREL, anchored(PSRC, WAIT_A, "    landLayouts(f); return;   // MUTANT: the desktops handed without waiting for their points\n", 'pl-no-wait-points')), 'nowait');
@@ -3526,7 +3528,7 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     const DEB_A = "    _layoutsSaveTimer = setTimeout(flushLayouts, 500);\n  }\n";
     ok(PSRC.split(DEB_A).length === 2, 'control setup: writeLayouts\' 500 ms debounce is found once');
     const LYD = await layScene(() => mutantCopies('swc-pl-debounce1s', REPO).load(PREL, anchored(PSRC, DEB_A, "    _layoutsSaveTimer = setTimeout(flushLayouts, 1000);   // MUTANT: a debounce of 1 s\n  }\n", 'pl-debounce-1s')), 'debounce1s');
-    ok(LYD.geoAt600 === false, 'CONTROL (a debounce of 1 s, in a copy): a window moved is NOT handed at 600 ms — past the release\'s 500 ms bound (red)', { at600: LYD.geoAt600 });
+    ok(LYD.geoAt900 === false, 'CONTROL (a debounce of 1 s, in a copy): a window moved is NOT handed by 900 ms — past the release\'s 500 ms bound (red)', { at900: LYD.geoAt900 });
 
     // (j) THE LOOP NO LONGER WAITS for the desktops: the real store writer, 300 ms placed in each main-thread rename / fsync — RED: the
     // release's write at the call (in a copy)
@@ -3559,9 +3561,9 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     const OWE_A = "    try { layoutsHold.owe(f.doc, { name: 'layouts.write', bytes: () => f.text }); }\n";
     ok(PSRC.split(OWE_A).length === 2, 'control setup: the desktops\' hand-off to the writer is found once');
     const LLX = await layLoop(() => mutantCopies('swc-pl-layatcall', REPO).load(PREL, anchored(PSRC, OWE_A, "    try { layoutsHold.write(f.doc, f.text); }   // MUTANT: the release's write at the call\n", 'pl-layouts-at-call')), 'atcall');
-    const HP_A = "  function handPoint(p, done) {\n    const w = storeW();\n";
+    const HP_A = "  function handPoint(p, done, late = () => { }) {\n    const w = storeW();\n";
     ok(PSRC.split(HP_A).length === 2, 'control setup: the point\'s hand-off is found once');
-    const LLP = await layLoop(() => mutantCopies('swc-pl-pointsatcall', REPO).load(PREL, anchored(PSRC, HP_A, "  function handPoint(p, done) {\n    { fs.mkdirSync(path.dirname(p.pointFile), { recursive: true }); for (const [f, t] of [[p.pointFile, p.pointText], [p.metaFile, p.metaText]]) { const tmp = f + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, t); fs.renameSync(tmp, f); } done(true); return; }   // MUTANT: the release's points at the call\n    const w = storeW();\n", 'pl-points-at-call')), 'pointsatcall');
+    const LLP = await layLoop(() => mutantCopies('swc-pl-pointsatcall', REPO).load(PREL, anchored(PSRC, HP_A, "  function handPoint(p, done, late = () => { }) {\n    { fs.mkdirSync(path.dirname(p.pointFile), { recursive: true }); for (const [f, t] of [[p.pointFile, p.pointText], [p.metaFile, p.metaText]]) { const tmp = f + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, t); fs.renameSync(tmp, f); } done(true); return; }   // MUTANT: the release's points at the call\n    const w = storeW();\n", 'pl-points-at-call')), 'pointsatcall');
     console.log(`  ⊙ ⑭j the reds' own figures: the desktops at the call ${LLX.gap} ms, the points at the call ${LLP.gap} ms; the tree ${LL.gap} ms`);
     // (r1053's rule for a fast suite on a busy machine: judged against the red's own figure, under half of it)
     ok(LL.onDisk === 2 && LL.points === 1 && LL.gap * 2 < Math.min(LLX.gap, LLP.gap), `⑭j the loop no longer waits for the desktops or their point: the longest turn ${LL.gap} ms — under half of each red's own figure (${LLX.gap} / ${LLP.gap} ms); both on disk`, { tree: LL, desktopsAtCall: LLX.gap, pointsAtCall: LLP.gap });
@@ -3605,7 +3607,7 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       R.readLayouts();
       const geo = JSON.parse(J(L0)); geo.desktops.d1.autoSave.windows[0].x = 40;
       R.writeLayouts(geo);
-      await sleepMs(600);                                      // the debounce fired: the desktops owed, their bytes not made yet
+      R.flushLayouts();                                        // the debounce's flush: the desktops owed, their bytes not made yet
       R.readLayouts().desktops.d1.autoSave.windows[0].x = 99;  // the socket's apply edits the cache in place (a later change)
       g.land();
       return { x: JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d1.autoSave.windows[0].x };
@@ -3624,17 +3626,17 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       const R = setupP(fresh(load), d, g.W, [], []);
       R.readLayouts();
       const one = JSON.parse(J(L0)); one.desktops.d0.autoSave.windows.splice(0, 1);   // shape change 1: point 1
-      let flushed = null; R.writeLayouts(one); await sleepMs(30);
+      let flushed = null; R.writeLayouts(one); await tick2();
       const p1 = g.flying().find((f) => /layout-history/.test(f));
       R.flushLayouts({}, (ok) => { flushed = ok; });           // the flush: it waits for point 1
       const two = JSON.parse(J(one)); two.desktops.d0.autoSave.windows.splice(0, 1);   // shape change 2: point 2, after the flush
-      R.writeLayouts(two); await sleepMs(30);
+      R.writeLayouts(two); await tick2();
       g.landOnly((f) => f === p1); g.landOnly((f) => /\.meta\.json$/.test(f) && f.startsWith(p1.replace(/\.json$/, '')));   // point 1 and its header land; point 2 still in flight
       return { handedWhilePoint2: g.W.pending(LF), point2InFlight: g.flying().some((f) => /layout-history/.test(f) && f !== p1), flushed };
     };
     const SQ = await seqScene(() => require(path.join(REPO, PREL)), 'real');
     ok(SQ.point2InFlight === true && SQ.handedWhilePoint2 === true, '⑭w a flush waits only for the points handed up to its own call: with point 1 landed and a LATER change\'s point 2 still in flight, the desktops are handed', SQ);
-    const SEQ_A = "  const pointsLeftUpTo = (upTo) => { for (const id of _pointsOutIds) if (id <= upTo) return true; return false; };\n";
+    const SEQ_A = "  const pointsLeftUpTo = (upTo) => { for (const id of _pointsOutIds) if (id <= upTo && !_pointsLate.has(id)) return true; return false; };\n";
     ok(PSRC.split(SEQ_A).length === 2, 'control setup: the flush\'s own mark is found once');
     const SQX = await seqScene(() => mutantCopies('swc-pl-allpoints', REPO).load(PREL, anchored(PSRC, SEQ_A, "  const pointsLeftUpTo = (upTo) => _pointsOutIds.size > 0;   // MUTANT: every outstanding point counted\n", 'pl-all-points')), 'allpoints');
     ok(SQX.handedWhilePoint2 === false, 'CONTROL (every outstanding point counted, in a copy): the desktops wait for a later change\'s point — shape changes in a row would starve them (red)', SQX);
@@ -3690,10 +3692,10 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       let out;
       try {
         const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
-        R.writeLayouts(shape); await sleepMs(30);
+        R.writeLayouts(shape); await tick2();
         const pf = g.flying().find((f) => /layout-history/.test(f));
         g.landOnly((f) => f === pf, false);                   // the storage refuses the point
-        await sleepMs(560);                                   // the debounce: the desktops' write goes on
+        R.flushLayouts();                                     // the debounce's flush: the desktops' write goes on
         out = { pointOwed: g.W.pending(pf), header: g.flying().some((f) => /\.meta\.json$/.test(f)), handed: g.W.pending(LF), said: warns.filter((l) => /snapshot FAILED/.test(l)).length };
       } finally { console.warn = cw; }
       return out;
@@ -3713,9 +3715,9 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       const g = gatedWriter();
       const R = setupP(fresh(load), d, g.W, [], []);
       R.readLayouts();
-      R.writeLayouts(JSON.parse(J(L0))); await sleepMs(10);
+      R.writeLayouts(JSON.parse(J(L0))); await tick2();
       const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
-      R.writeLayouts(shape); await sleepMs(30);                 // point 1 in flight: the first flush waits for it
+      R.writeLayouts(shape); await tick2();                 // point 1 in flight: the first flush waits for it
       let a = null, b = null;
       R.flushLayouts({}, (ok) => { a = ok; });
       // a second shape change: point 2 — the second flush waits for ITS OWN mark (two waiting flushes, never one shared: ⑭ad)
@@ -3744,15 +3746,15 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       const R = setupP(fresh(load), d, g.W, told, []);
       R.readLayouts();
       const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
-      R.writeLayouts(shape); await sleepMs(30);
+      R.writeLayouts(shape); await tick2();
       for (let i = 0; i < 4 && g.flying().length; i++) g.land();   // the point and its header land
       R.flushLayouts(); for (let i = 0; i < 4 && g.flying().length; i++) g.land();
       const pt = R.listLayoutHistory()[0];
       const out = call(R, 'post', '/api/layout-history/:id/restore', { body: { rid: 'r-q' }, params: { id: pt.id } });
-      await sleepMs(10);
+      await tick2();
       for (let i = 0; i < 4 && g.flying().some((f) => /layout-history/.test(f)); i++) g.landOnly((f) => /layout-history/.test(f));   // the restore's own point
       g.timeout((f) => f === LF);                                 // the writer's bound passes: layouts.json still queued
-      await sleepMs(10);
+      await tick2();
       const restored = told.find((x) => x.type === 'layout-restored' && x.rid === 'r-q');
       const unsavedWords = told.filter((x) => x.type === 'store-unsaved');
       g.land();                                                   // it lands
@@ -3767,8 +3769,9 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     const QDX = await holdIn(mutantCopies('swc-pl-queuednocode', REPO).load(SHREL_X, anchored(SHSRC_X, QCODE_A, "code: nd.code || null,   /* MUTANT: the queued code dropped */", 'pl-queued-nocode')), () => queuedScene(() => require(path.join(REPO, PREL)), 'nocode'));
     ok(QDX.status === 503 && /could not be written \(write failed\)/.test(QDX.body.error) && QDX.body.unsaved.code === null, 'CONTROL (the queued answer owed with no code, in a copy): the restore says «could not be written (write failed)» for a write only queued, and the pages get no code (red)', { error: QDX.body && QDX.body.error, unsaved: QDX.body && QDX.body.unsaved });
 
-    // (ab) A ROLLBACK POINT ONLY QUEUED PAST THE WRITER'S BOUND is waited for again (the second fresh read's should) — never let go: it
-    // lands late, its header follows, the desktops after both; nothing said. RED: the wait again cut (the point forgotten as refused)
+    // (ab) THE DESKTOPS WAIT FOR THEIR POINTS WITHIN ONE BOUND (主开发 r1353, the one design): a point only QUEUED past the writer's
+    // bound no longer holds them — the desktops are handed; the late point stays handed, lands when it can, its header after it;
+    // nothing let go, no «FAILED». REDs: the late release cut (waited for with no end: the desktops never handed); the wait again cut
     const queuedPointScene = async (load, tag) => {
       const d = scratchDir('swc-pl-qpt-' + tag); roots.push(d); seed(d);
       const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
@@ -3778,25 +3781,27 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       const warns = []; const cw = console.warn; console.warn = (...a) => warns.push(a.join(' '));
       try {
         const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
-        R.writeLayouts(shape); await sleepMs(30);
+        R.writeLayouts(shape); await tick2();
         const pf = g.flying().find((f) => /layout-history/.test(f) && !/\.meta\.json$/.test(f));
-        g.timeout((f) => f === pf);                                 // the bound passes: the point still queued
-        await sleepMs(560);                                         // the debounce: the flush waits for the point
-        const handedBefore = g.W.pending(LF);
-        g.landOnly((f) => f === pf); g.landOnly((f) => /\.meta\.json$/.test(f));   // the point lands late, then its header
-        const handedAfter = g.W.pending(LF);
-        g.land();
-        return { handedBefore, handedAfter, pointOnDisk: !!pf && fs.existsSync(pf), said: warns.filter((l) => /snapshot FAILED/.test(l)).length, order: g.log() };
+        R.flushLayouts();                                           // the debounce's flush: it waits for the point (within its bound)
+        const handedInBound = g.W.pending(LF);
+        g.timeout((f) => f === pf);                                 // the writer's bound passes: the point is only late
+        const handedPastBound = g.W.pending(LF);
+        g.landOnly((f) => f === LF);                                // the desktops land (the point still in flight)
+        const desktopsLanded = J(JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d0.autoSave.windows.map((w) => w.winId));
+        g.landOnly((f) => f === pf); g.landOnly((f) => /\.meta\.json$/.test(f));   // the late point lands, then its header
+        return { handedInBound, handedPastBound, desktopsLanded, pointOnDisk: !!pf && fs.existsSync(pf), headerOnDisk: !!pf && fs.existsSync(pf.replace(/\.json$/, '.meta.json')), said: warns.filter((l) => /snapshot FAILED/.test(l)).length, order: g.log() };
       } finally { console.warn = cw; }
     };
     const QP = await queuedPointScene(() => require(path.join(REPO, PREL)), 'real');
-    const qpi = (o, re) => o.findIndex((n) => re.test(n));
-    ok(QP.handedBefore === false && QP.handedAfter === true && QP.pointOnDisk === true && QP.said === 0 && qpi(QP.order, /^layout-.*\.json$/) >= 0 && qpi(QP.order, /^layout-.*\.json$/) < QP.order.indexOf('layouts.json'),
-      '⑭ab a rollback point only QUEUED past the writer\'s bound is waited for again: it lands late, its header follows, and the desktops are handed only then — nothing said, nothing let go', QP);
-    const REWAIT_A = "      if (why && why.why === 'queued') { w.durable(file, { answer: (ok2) => settle(file, ok2, then) }); return; }\n";
-    ok(PSRC.split(REWAIT_A).length === 2, 'control setup: the point\'s wait again is found once');
-    const QPX = await queuedPointScene(() => mutantCopies('swc-pl-norewait', REPO).load(PREL, anchored(PSRC, REWAIT_A, "      /* MUTANT: the wait again cut */\n", 'pl-no-rewait')), 'norewait');
-    ok(QPX.handedBefore === true && QPX.pointOnDisk === false && QPX.said === 1, 'CONTROL (the point\'s wait again cut, in a copy): a point only queued is let go as refused — never on disk, the desktops written without it (red)', QPX);
+    ok(QP.handedInBound === false && QP.handedPastBound === true && QP.desktopsLanded === J(['w1', 'w2']) && QP.pointOnDisk === true && QP.headerOnDisk === true && QP.said === 0,
+      '⑭ab within ONE bound: the desktops wait for their point while it is merely slow; past the writer\'s bound (the point only late) they are handed and land — the late point stays handed, lands after, its header after it; nothing let go, no «FAILED»', QP);
+    const LATE_A = "      if (why && why.why === 'queued' && !exiting()) { late(); w.durable(file, { answer: (ok2) => settle(file, ok2, then) }); return; }\n";
+    ok(PSRC.split(LATE_A).length === 2, 'control setup: the late point\'s release and its wait again are found once');
+    const QPU = await queuedPointScene(() => mutantCopies('swc-pl-nolate', REPO).load(PREL, anchored(PSRC, LATE_A, "      if (why && why.why === 'queued' && !exiting()) { w.durable(file, { answer: (ok2) => settle(file, ok2, then) }); return; }   // MUTANT: waited for with no end\n", 'pl-no-late')), 'nolate');
+    ok(QPU.handedPastBound === false, 'CONTROL (the late release cut — the point waited for with no end, in a copy): past the bound the desktops are still not handed; a stalled storage would hold them unwritten and unsaid (red)', QPU);
+    const QPX = await queuedPointScene(() => mutantCopies('swc-pl-norewait', REPO).load(PREL, anchored(PSRC, LATE_A, "      /* MUTANT: the wait again cut */\n", 'pl-no-rewait')), 'norewait');
+    ok(QPX.handedPastBound === true && QPX.pointOnDisk === false && QPX.said === 1, 'CONTROL (the point\'s wait again cut, in a copy): a point only late is let go as refused — never on disk, «FAILED» said (red)', QPX);
 
     // (ac) THE OWED WORDS LIFT ONLY AT A LANDING THAT LEAVES NOTHING NEWER OWED (the first fresh read's small; the second's should: its
     // leg): a press said «unsaved», then two changes; the first lands while the second is still owed — no «saved» until the second lands.
@@ -3836,7 +3841,7 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       const R = setupP(fresh(load), d, g.W, [], []);
       R.readLayouts();
       const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
-      R.writeLayouts(shape); await sleepMs(30);                   // a point in flight
+      R.writeLayouts(shape); await tick2();                   // a point in flight
       const pf = g.flying().find((f) => /layout-history/.test(f) && !/\.meta\.json$/.test(f));
       const answers = [];
       for (const x of [11, 12, 13]) { const v = JSON.parse(J(shape)); v.desktops.d1.autoSave.windows[0].x = x; R.writeLayouts(v); R.flushLayouts({}, (ok) => answers.push(ok)); }
@@ -3852,6 +3857,121 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     ok(PSRC.split(MERGE_A).length === 2, 'control setup: the shared waiting flush is found once');
     const MKX = await markScene(() => mutantCopies('swc-pl-nomerge', REPO).load(PREL, anchored(PSRC, MERGE_A, "    /* MUTANT: each flush waits with its own copy */\n", 'pl-no-merge')), 'nomerge');
     ok(MKX.handed === 3, 'CONTROL (each flush waiting with its own copy, in a copy): three whole copies of the desktops wait and are handed — one for each flush (red)', MKX);
+
+    // (ae) A DOOR'S ANSWER WITHIN ITS BOUND (主开发 r1353 (4)): a restore whose own rollback point stalls (never answered) is answered at
+    // the writer's bound — 503 by name, the store owed and QUEUED (said at once: a press), its broadcast carries it; the flush is KEPT:
+    // when the point lands the desktops land after it and «saved» is said. RED: the door's bound cut (no answer while the point stalls)
+    const doorScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-door-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter({ durableMs: 80 }); const told = [];
+      const R = setupP(fresh(load), d, g.W, told, []);
+      R.readLayouts();
+      const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
+      R.writeLayouts(shape); await tick2();
+      for (let i = 0; i < 4 && g.flying().length; i++) g.land();   // the first point and its header land
+      R.flushLayouts(); for (let i = 0; i < 4 && g.flying().length; i++) g.land();
+      const pt = R.listLayoutHistory()[0];
+      const logFrom = g.log().length;
+      const out = call(R, 'post', '/api/layout-history/:id/restore', { body: { rid: 'r-door' }, params: { id: pt.id } });
+      const pointOut = g.flying().filter((f) => /layout-history/.test(f) && !/\.meta\.json$/.test(f)).length;   // the restore's own point: stalled
+      await sleepMs(200);                                         // past the door's bound (80 ms); the point never answered
+      const atBound = { answered: out.answered, status: out.status, code: out.body && out.body.code, unsaved: out.body && out.body.unsaved, handed: g.W.pending(LF) };
+      const restored = told.find((x) => x.type === 'layout-restored' && x.rid === 'r-door');
+      const words = told.filter((x) => x.type === 'store-unsaved').map((x) => x.code);
+      for (let i = 0; i < 6 && g.flying().length; i++) g.land();   // the storage comes back: the point, its header, then the desktops
+      const order = g.log().slice(logFrom).map((f) => (/\.meta\.json$/.test(f) ? 'header' : /^layout-/.test(f) ? 'point' : f));
+      return { pointOut, atBound, restoredUnsaved: restored && restored.unsaved, words, order, saved: told.filter((x) => x.type === 'store-saved').length, onDisk: JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d0.autoSave.windows.map((w) => w.winId) };
+    };
+    const DR = await doorScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(DR.pointOut >= 1 && DR.atBound.answered === true && DR.atBound.status === 503 && DR.atBound.code === 'store_unsaved' && DR.atBound.unsaved && DR.atBound.unsaved.code === 'queued' && DR.atBound.handed === false
+      && DR.restoredUnsaved && DR.restoredUnsaved.code === 'queued' && J(DR.words) === J(['queued']) && DR.order.length >= 3 && DR.order[DR.order.length - 1] === 'layouts.json' && DR.order.slice(0, -1).every((x) => x === 'point' || x === 'header') && DR.order.indexOf('header') > DR.order.indexOf('point') && DR.saved === 1 && J(DR.onDisk) === J(['w0', 'w1', 'w2']),
+      '⑭ae a restore whose own point stalls is answered at the door\'s bound — 503 «not taken in time» (the store owed and queued, said at once, its broadcast carries it) while the desktops still wait; the flush is kept: the point, its header, then the restored desktops land, and «saved» is said', DR);
+    const BOUND_A = "    if (answer) answer = boundedAnswer(answer, press);\n";
+    ok(PSRC.split(BOUND_A).length === 2, 'control setup: the door\'s bound is found once');
+    const DRX = await doorScene(() => mutantCopies('swc-pl-nobound', REPO).load(PREL, anchored(PSRC, BOUND_A, "    /* MUTANT: the door's bound cut */\n", 'pl-no-bound')), 'nobound');
+    ok(DRX.atBound.answered === false, 'CONTROL (the door\'s bound cut, in a copy): the restore gets NO answer while its point stalls — «Restoring…» for as long as the storage does (red)', DRX.atBound);
+
+    // (af) AT A STOP (主开发 r1353 (5)): the desktops are handed in the round after their point's — at the point's own write (landed or
+    // not), never behind its header's; a point only late is never waited for again once stopping (the exit's pass is the last write).
+    // REDs: the stop's release cut (the desktops wait for the header); the exit's guard cut (a late point waited for again)
+    const stopPointScene = async (load, tag, how) => {
+      const d = scratchDir('swc-pl-stoppt-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter();
+      const R = setupP(fresh(load), d, g.W, [], []);
+      R.readLayouts();
+      const warns = []; const cw = console.warn; console.warn = (...a) => warns.push(a.join(' '));
+      try {
+        const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
+        R.writeLayouts(shape); await tick2();
+        const pf = g.flying().find((f) => /layout-history/.test(f) && !/\.meta\.json$/.test(f));
+        R.flushLayouts({ stop: true });                             // the hub's stop flush: the point not tried yet
+        const handedAtStop = g.W.pending(LF);
+        if (how === 'land') g.landOnly((f) => f === pf);            // the exit's pass tries the point: it lands (its header now owed)
+        else g.timeout((f) => f === pf);                            // …or its bound passes, still queued
+        return { handedAtStop, handedAfterPoint: g.W.pending(LF), headerInFlight: g.flying().some((f) => /\.meta\.json$/.test(f)), pointOwed: !!pf && g.W.pending(pf), said: warns.filter((l) => /snapshot FAILED/.test(l)).length };
+      } finally { console.warn = cw; }
+    };
+    const SP = await stopPointScene(() => require(path.join(REPO, PREL)), 'real', 'land');
+    ok(SP.handedAtStop === false && SP.handedAfterPoint === true && SP.headerInFlight === true, '⑭af at the stop the desktops are handed in the round after their point\'s write — the point landed, its header still to come: the desktops go with it, never behind it', SP);
+    const SGQ = await stopPointScene(() => require(path.join(REPO, PREL)), 'realq', 'queued');
+    ok(SGQ.handedAfterPoint === true && SGQ.pointOwed === false && SGQ.said === 1, '⑭af at the stop a point still queued is not waited for again (the exit\'s pass is the last write): let go and said, the desktops handed', SGQ);
+    const STOP_A = "      if (_layoutsStopping) late();   // (5) AT A STOP: its write was tried in the exit's pass, landed or not — the desktops go in the round after it\n";
+    ok(PSRC.split(STOP_A).length === 2, 'control setup: the stop\'s release is found once');
+    const SPX = await stopPointScene(() => mutantCopies('swc-pl-nostoprelease', REPO).load(PREL, anchored(PSRC, STOP_A, "      /* MUTANT: the stop's release cut */\n", 'pl-no-stop-release')), 'nostop', 'land');
+    ok(SPX.handedAfterPoint === false, 'CONTROL (the stop\'s release cut, in a copy): the desktops wait behind the header\'s write — one exit round more, and none at all for a point the exit never answers (red)', SPX);
+    const EXIT_A = "    const exiting = () => _layoutsStopping || (typeof w.exitStartedAt === 'function' && w.exitStartedAt() != null);\n";
+    ok(PSRC.split(EXIT_A).length === 2, 'control setup: the exit\'s guard is found once');
+    const SGX = await stopPointScene(() => mutantCopies('swc-pl-noexitguard', REPO).load(PREL, anchored(PSRC, EXIT_A, "    const exiting = () => false;   // MUTANT: the exit's guard cut\n", 'pl-no-exit-guard')), 'noexit', 'queued');
+    ok(SGX.pointOwed === true && SGX.said === 0, 'CONTROL (the exit\'s guard cut, in a copy): at the stop a queued point is waited for again — after the exit\'s last pass a durable answers at once, and the wait recurses (red)', SGX);
+
+    // (ag) THE IMPORT WAITS FOR THE DESKTOPS IT WROTE (the round's lens 3: a fix with no leg): a config import with a layouts section is
+    // answered only once layouts.json landed. RED: the desktops' landing cut from the import's stores
+    const importScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-imp-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter();
+      const R = setupP(fresh(load), d, g.W, [], []);
+      R.readLayouts();
+      const geo = JSON.parse(J(L0)); geo.desktops.d1.autoSave.windows[0].x = 77;   // the same shape: no point
+      const imp = call(R, 'post', '/api/config/import', { body: { file: { app: 'vibespace-config', sections: { layouts: geo } }, sections: ['layouts'] } });
+      await tick2();
+      const before = { answered: imp.answered, handed: g.W.pending(LF) };
+      for (let i = 0; i < 4 && g.flying().length; i++) g.land();
+      await tick2();
+      return { before, answered: imp.answered, status: imp.status, x: JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d1.autoSave.windows[0].x };
+    };
+    const IM = await importScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(IM.before.answered === false && IM.before.handed === true && IM.answered === true && IM.status === 200 && IM.x === 77, '⑭ag a config import with a layouts section is answered only once layouts.json landed (in flight: no answer)', IM);
+    const IMP_L = "['layouts', layoutsLanding], ";
+    ok(PSRC.split(IMP_L).length === 2, 'control setup: the import\'s desktops landing is found once');
+    const IMX = await importScene(() => mutantCopies('swc-pl-impnolayouts', REPO).load(PREL, anchored(PSRC, IMP_L, "/* MUTANT: the desktops' landing cut */ ", 'pl-imp-no-layouts')), 'nolayouts');
+    ok(IMX.before.answered === true, 'CONTROL (the desktops\' landing cut from the import, in a copy): the import answers while layouts.json is still in flight (red)', IMX.before);
+
+    // (ah) AN AUTOSAVE NOBODY WAITS ON KEEPS NO WAITER (the round's small): a debounced flush with no answer registers no durable wait
+    // (its landing is the hold's onWritten); a door's flush does. RED: the skip cut
+    const waiterScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-wait-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter(); let waits = 0;
+      const dur = g.W.durable; g.W.durable = (f, o) => { if (f === LF) waits++; return dur(f, o); };
+      const R = setupP(fresh(load), d, g.W, [], []);
+      R.readLayouts();
+      const geo = JSON.parse(J(L0)); geo.desktops.d1.autoSave.windows[0].x = 5;
+      R.writeLayouts(geo); R.flushLayouts();
+      const auto = waits;
+      R.flushLayouts({}, () => { });
+      const door = waits - auto;
+      g.land(); g.land();
+      return { auto, door, x: JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d1.autoSave.windows[0].x };
+    };
+    const WT = await waiterScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(WT.auto === 0 && WT.door === 1 && WT.x === 5, '⑭ah an autosave nobody waits on registers no durable wait (it lands all the same); a flush that carries an answer does', WT);
+    const SKIP_A = "    if (!f.answers.length && !f.stop) return;   // (the round's small) an autosave nobody waits on keeps no waiter: its landing is the hold's onWritten\n";
+    ok(PSRC.split(SKIP_A).length === 2, 'control setup: the autosave\'s skip is found once');
+    const WTX = await waiterScene(() => mutantCopies('swc-pl-autowait', REPO).load(PREL, anchored(PSRC, SKIP_A, "    /* MUTANT: every flush waits */\n", 'pl-auto-wait')), 'autowait');
+    ok(WTX.auto === 1, 'CONTROL (the skip cut, in a copy): every debounced autosave keeps a 60 s durable wait nobody reads (red)', WTX);
 
     // (e) THE STOP lands every store moved here: the REAL writer's exit (beginExit + exitFlush) right after three acts, before any landing
     const stopScene = async (load, tag) => {

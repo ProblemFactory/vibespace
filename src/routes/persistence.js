@@ -176,6 +176,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   let _layoutsGen = 0;   // B-0248 (a): a read again WHOLE (lift, appeared) ends every flush still waiting: its change was not made
   function layoutsAgain(why) {
     _layoutsGen++;
+    try { layoutsHold.owedEnd(`read again whole (${why})`); } catch { /* the hold's */ }   // every waiting flush ends (its generation): nothing it owed is owed now
     if (_layoutsSaveTimer) { clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = null; }
     _layoutsCache = null; _lastGood = null; _lastShape = null;
     try { readLayouts(); } catch (e) { console.warn(`[layouts] the desktops could not be read again (${why}): ${(e && e.message) || e}`); return; }
@@ -227,8 +228,25 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // moves while a point is in flight on a stalled storage) share ONE waiting flush — the newest bytes take the older's place, every
   // answer told at its landing; so a stalled point holds one copy of the desktops for each mark, never one for each flush
   let _layoutsWaiting = null;   // the newest flush still waiting for its points: { upTo, gen, doc, text, press, stop, answers }
+  // (4) A DOOR'S ANSWER WITHIN ITS BOUND (主开发 r1353): a flush that carries an answer (both restores, the import) is answered within
+  // the writer's own bound (its durable bound: 60 s, or the one a writer states) — past it «not taken in time»: the store marked owed
+  // and QUEUED first (its words, at once for a press), then the answer false. The flush is KEPT: it still lands after its point, and
+  // that landing lifts the mark (the hold's onSaved: every page told it landed). Unref'd: a stop never waits on it
+  const doorBoundMs = () => { const w = storeW(); return w && Number.isFinite(w.durableMs) && w.durableMs > 0 ? w.durableMs : 60000; };
+  function boundedAnswer(answer, press) {
+    let told = false;
+    const t = setTimeout(() => {
+      if (told) return; told = true;
+      try { layoutsHold.owedQueued({ press }); } catch { /* the hold's */ }
+      try { answer(false); } catch (e) { console.warn('[layouts] a flush answer failed:', (e && e.message) || e); }
+    }, doorBoundMs());
+    if (t && typeof t.unref === 'function') t.unref();
+    return (ok) => { if (told) return; told = true; clearTimeout(t); answer(ok); };
+  }
   function flushLayouts({ press = false, stop = false } = {}, answer = null) {
     if (_layoutsSaveTimer) { clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = null; }
+    if (stop) _layoutsStopping = true;   // (5): from here a point's write tried in the exit's pass hands the desktops in the round after it
+    if (answer) answer = boundedAnswer(answer, press);
     // THE BYTES ARE MADE NOW (the fresh read's MUST): the desktops as they stand at THIS flush — every rollback point handed so far
     // preserves an older state, and lands before them; a point made after this flush is a LATER change's, and the flush that writes
     // past it waits for it in its turn (the cache is edited IN PLACE by the socket's apply: bytes made late would hold that change)
@@ -250,6 +268,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     catch (e) { if (e && e.code === 'store_appeared') layoutsAgain('a file appeared where the start found none'); return done(false); }   // a refusal BY NAME (held, not read, appeared): nothing written
     // (a write the STORAGE refuses is never thrown here: a store NOT THERE whose exclusive create is refused is KEPT on the hold's own
     // ladder by its owe — B-225b's second half — and the answer below reads it as owed: not on disk, said at once for a press)
+    if (!f.answers.length && !f.stop) return;   // (the round's small) an autosave nobody waits on keeps no waiter: its landing is the hold's onWritten
     layoutsHold.after((landed) => {
       if (!landed && f.stop) { const o = layoutsHold.owed(); console.error(`[layouts] layouts.json could NOT be written at the stop (${unsavedHow(o)}) — the desktops changed since ${o ? new Date(o.since).toISOString() : 'this flush'} are not on disk: the next start reads the older file`); }
       done(landed);
@@ -371,8 +390,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       if (notes && Array.isArray(notes.refused) && notes.refused.length) seen.refused = notes.refused.splice(0);
       wordlessTitles(snap); // a rollback point is a layout record too (the disk belt above may read what an older build wrote)
       // B-225b R10: OWED, in order — B-0248 (b): handed to THE STORE WRITER at the next turn, or by the layouts.json flush BEFORE it
-      // hands its own write (whichever first); that write follows the point's LANDING. The job makes the point's bytes (main thread,
-      // as the release's job did) and hands nothing itself: pointsThen does
+      // hands its own write (whichever first); that write follows the point's LANDING (within one bound: handPoint). The job makes the
+      // point's bytes (main thread, as the release's job did) and hands nothing itself: handPointsOwed does
       _pointsOwed.push(() => {
         const before = layoutSummary(snap);
         // UNIQUE filename: ISO stamps have millisecond resolution and a burst
@@ -389,7 +408,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         // tiny sidecar header (the panic-button path lists without parsing 40 whole layouts) lands AFTER its point
         return { pointFile: path.join(HISTORY_DIR, file), pointText: JSON.stringify({ ...head, layouts: snap }, null, 2), metaFile: path.join(HISTORY_DIR, file.replace(/\.json$/, '.meta.json')), metaText: JSON.stringify(head, null, 2) };
       });
-      setImmediate(() => pointsThen(() => { }));
+      setImmediate(handPointsOwed);   // (the round's small: the next turn's hand-off keeps no waiter of its own)
     } catch {}
   }
   /** the owed rollback points, handed in the order they were made (each its own try — one that fails never holds the next) */
@@ -400,46 +419,59 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
    *  writer's answer road (never a promise's .then: at the hub's stop they run inside its exit flush, its later rounds) */
   //  A FLUSH WAITS FOR THE POINTS HANDED UP TO ITS OWN CALL (a sequence mark — the fresh read's should): a point handed later is a later
   //  change's, its own flush waits for it; so shape changes in a row never starve the desktops' write
+  //  WITHIN ONE BOUND (主开发 r1353, the one design): a point only LATE (past the writer's own «queued» bound) no longer holds the
+  //  desktops — it stays handed and lands when it can, its header after it; the flushes that waited for it are handed now
   let _pointSeq = 0;
   const _pointsOutIds = new Set();
+  const _pointsLate = new Set();   // handed, not landed, past the bound (or tried at the stop): they hold no flush
   const _pointsWaiters = [];   // { upTo, cb, ok }
-  const pointsLeftUpTo = (upTo) => { for (const id of _pointsOutIds) if (id <= upTo) return true; return false; };
+  let _layoutsStopping = false;   // the hub's stop flush ran: a point's write tried in the exit's pass releases the desktops
+  const pointsLeftUpTo = (upTo) => { for (const id of _pointsOutIds) if (id <= upTo && !_pointsLate.has(id)) return true; return false; };
   /** every rollback point owed, handed to the writer now (in order) → the sequence mark of the last one handed */
   function handPointsOwed() {
     for (const job of _pointsOwed.splice(0)) {
       let p = null;
       try { p = job(); } catch (e) { pointFailed(e); }
-      if (p) { const id = ++_pointSeq; _pointsOutIds.add(id); handPoint(p, (ok) => pointDone(id, ok)); }
+      if (p) { const id = ++_pointSeq; _pointsOutIds.add(id); handPoint(p, (ok) => pointDone(id, ok), () => pointLate(id)); }
     }
     return _pointSeq;
   }
-  function pointsThen(cb) {
-    const upTo = handPointsOwed();
-    if (!pointsLeftUpTo(upTo)) { cb(true); return; }
-    _pointsWaiters.push({ upTo, cb, ok: true });
-  }
-  function pointDone(id, ok) {
-    _pointsOutIds.delete(id);
+  /** the flushes whose points (up to their marks) are all landed, refused or late: handed now, in the order they waited */
+  function pointsRelease(failedId = null) {
     const ready = [];
     for (let k = 0; k < _pointsWaiters.length; k++) {
       const w = _pointsWaiters[k];
-      if (!ok && id <= w.upTo) w.ok = false;
+      if (failedId != null && failedId <= w.upTo) w.ok = false;
       if (!pointsLeftUpTo(w.upTo)) { ready.push(w); _pointsWaiters.splice(k--, 1); }
     }
-    if (!_pointsOutIds.size) pruneHistory().catch(() => {});
     for (const w of ready) { try { w.cb(w.ok); } catch (e) { console.warn('[layout-history] a wait for the points failed:', (e && e.message) || e); } }
+  }
+  function pointDone(id, ok) {
+    _pointsOutIds.delete(id); _pointsLate.delete(id);
+    if (!_pointsOutIds.size) pruneHistory().catch(() => {});
+    pointsRelease(ok ? null : id);
+  }
+  /** a point that no longer holds the desktops: past the writer's bound (still handed: it lands when it can), or tried at the stop */
+  function pointLate(id) {
+    if (!_pointsOutIds.has(id) || _pointsLate.has(id)) return;
+    _pointsLate.add(id);
+    pointsRelease();
   }
   /** ONE rollback point to the store writer (its folder made by the writer when missing): the point's whole bytes, then — at its
    *  landing — its header; each act's bytes let go once on disk (the writer keeps its entry, never the layouts in it). A point the
    *  storage REFUSES is let go (the release dropped a failed point: its bytes are never kept for the process's life) and said once;
-   *  one only still QUEUED past the writer's bound is waited for again */
-  function handPoint(p, done) {
+   *  one only still QUEUED past the writer's bound is LATE: `late()` hands the desktops that waited for it, and it is waited for
+   *  again — it lands when it can, its header after it. Once the writer is exiting nothing is waited for again (its last pass is the
+   *  last write: after it a durable answers at once) */
+  function handPoint(p, done, late = () => { }) {
     const w = storeW();
     let point = p.pointText, head = p.metaText;
+    const exiting = () => _layoutsStopping || (typeof w.exitStartedAt === 'function' && w.exitStartedAt() != null);
     const settle = (file, ok, then) => {
+      if (_layoutsStopping) late();   // (5) AT A STOP: its write was tried in the exit's pass, landed or not — the desktops go in the round after it
       if (ok) { then(); return; }
       const why = w.whyNotDurable ? w.whyNotDurable(file) : null;
-      if (why && why.why === 'queued') { w.durable(file, { answer: (ok2) => settle(file, ok2, then) }); return; }
+      if (why && why.why === 'queued' && !exiting()) { late(); w.durable(file, { answer: (ok2) => settle(file, ok2, then) }); return; }
       try { w.forget(file); } catch { /* the writer's */ }
       pointFailed(why); done(false);
     };

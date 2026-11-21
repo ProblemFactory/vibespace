@@ -630,6 +630,12 @@ console.log('§8 a write the storage refused: the strip says «not being saved»
   const UQX = await esmCopy('src/lib/utils.js', anchored(read('src/lib/utils.js'), "  if (u && u.code === 'queued') return t(", "  if (false) return t(", 'queued-words-cut'), 'queued-words-cut');
   const qmx = UQX.storeUnsavedWords(UNS('layouts.json', 'queued'));
   ok(/refused the write/.test(qmx), 'CONTROL (the queued words cut, in a copy): the strip says «the storage refused the write» for a write only queued (red)', J(qmx));
+  // the round's small: each of the other two queued branches gets its own red — the strip's row, the restoring page's words
+  const SKX = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), "unsaved: (code) => (code === 'queued' ? t('not saved yet — the storage has not taken the write in time') : t('not being saved — the storage refused the write')),", "unsaved: (code) => t('not being saved — the storage refused the write'),   /* MUTANT: the row's queued words cut */", 'row-queued-cut'), 'row-queued-cut');
+  const skm = SKX.stripModel([], { unsaved: [UNS('layouts.json', 'queued')] });
+  ok(!!skm && /refused the write/.test(skm.rows[0].kindWords), 'CONTROL (the strip row\'s queued words cut, in a copy): the row says «refused» for a write only queued (red)', J(skm && skm.rows[0].kindWords));
+  const URX = await esmCopy('src/lib/utils.js', anchored(read('src/lib/utils.js'), "if (code === 'queued') return t(", "if (false) return t(", 'restore-queued-cut'), 'restore-queued-cut');
+  ok(/refused the write/.test(URX.storeRestoreUnsavedWords('queued')), 'CONTROL (the restore\'s queued words cut, in a copy): the restoring page says «refused» for a write only queued (red)', J(URX.storeRestoreUnsavedWords('queued')));
   const APP = read('src/lib/app.js'), SF = read('src/lib/setup-flows.js');
   ok(APP.includes("else if (msg.type === 'store-unsaved') noteStoreUnsaved(msg);") && APP.includes("else if (msg.type === 'store-saved') noteStoreSaved(msg.file);")
     && /if \(own && msg\.rid && msg\.rid === own\.rid\) \{ if \(msg\.unsaved\) \{ noteStoreUnsaved\(msg\.unsaved\); own\.unsaved\(msg\.unsaved\); \} else own\.landed\(\); return; \}/.test(APP)

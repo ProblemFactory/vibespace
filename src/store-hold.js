@@ -239,10 +239,11 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     owed.tries++; owed.code = code || owed.code; owed.why = why;
     if (owed.rung === 'silent' && owed.tries >= silentMs.length) say();
   }
-  /** an answer that is NOT on disk (failed, or past the writer's bound while queued): owed (its words), said at once for a press */
-  function notOnDiskOwed(press) {
+  /** an answer that is NOT on disk (failed, or past the writer's bound while queued): owed (its words), said at once for a press.
+   *  `nd`: the caller's own verdict (a door's bound passed while its write still waits to be handed: queued) */
+  function notOnDiskOwed(press, nd0 = null) {
     if (!onUnsaved) return;
-    if (!owed) { const nd = notDurable() || {}, queued = nd.why === 'queued'; owed = { produce: null, code: nd.code || (queued ? 'queued' : null), why: queued ? 'its write is still queued behind the storage' : (nd.why || 'not on disk'), since: now(), rung: 'silent', tries: 0 }; }   // (a write still QUEUED keeps the code «queued» — the page-facing fact — and is said as queued, never «could not be written»)
+    if (!owed) { const nd = nd0 || notDurable() || {}, queued = nd.why === 'queued'; owed = { produce: null, code: nd.code || (queued ? 'queued' : null), why: queued ? 'its write is still queued behind the storage' : (nd.why || 'not on disk'), since: now(), rung: 'silent', tries: 0 }; }   // (a write still QUEUED keeps the code «queued» — the page-facing fact — and is said as queued, never «could not be written»)
     if (press && owed.rung !== 'said') say();
   }
   /** why the store's last act is not on disk yet ({ why, code, ahead, lastMs }) — the door's 503 words — or null */
@@ -338,6 +339,11 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     readAtStart, readAgain, answer, refuseIfHeld, write, set, adoptRead, takeText, setAside, stop, flush, owedAgain, owe, after, notDurable,
     /** r1092: the value whose bytes the writer took and did NOT land yet (in flight, or failed and owed) — undefined when none */
     inFlight: () => (producedSeq > toldSeq ? producedValue : undefined),
+    /** B-0248 (r1353 (4)): a door's own bound passed while its change still waits to be handed (behind a late rollback point): the
+     *  store is owed and QUEUED (its words; at once for a press) — the landing that leaves nothing newer owed lifts it */
+    owedQueued: ({ press = false } = {}) => notOnDiskOwed(press, { why: 'queued' }),
+    /** the store read again WHOLE (a file that appeared, a lift): what it owed is owed no more — ended without a landing */
+    owedEnd: (why) => { endOwed(why); },
     owed: owedFacts,   // the owed write's facts ({ file, code, why, since, rung }), or null
     held: () => (held ? { file: path.basename(file), kind: held.kind, code: held.code, since: held.since, rung: held.rung } : null),
     isMissing: () => missing, file,
