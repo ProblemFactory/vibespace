@@ -80,6 +80,15 @@ const http = require('http');
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 400) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n, why) => { skipped++; console.log(`  - SKIP ${n}: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 10000, step = 100) => { const t = Date.now() + ms; while (Date.now() < t) { const v = await fn(); if (v) return v; await sleep(step); } return null; };
@@ -664,7 +673,7 @@ console.log('§D014 the whole desktop over a real agent: the probe through its t
     const FIX_H = 'const handle = { chan, get onData() { return dataFn; }, set onData(f) { dataFn = f; drain(); }, get onClose() { return closeFn; }, set onClose(f) { closeFn = f; drain(); } };';
     const FIX_S = 'conn.sessions.set(chan, { onData: (b) => { if (dataFn && !early.length) dataFn(b); else early.push(b); }, onClose: () => { closed = true; drain(); }, onWritable: () => { try { handle.onWritable?.(); } catch { } } });';   // the session line as the separation's piece 1 left it (its onWritable: a write that said false hears the drain)
     ok(cText.split(FIX_H).length === 2 && cText.split(FIX_S).length === 2, 'CONTROL setup: the client spells the early-chunk handle and its session once each');
-    const preC = MT.load('src/agentd/client.js', cText.replace(FIX_H, 'const handle = { chan, onData: null, onClose: null };').replace(FIX_S, 'conn.sessions.set(chan, { onData: (b) => handle.onData?.(b), onClose: () => handle.onClose?.() });'), 'pretcp');
+    const preC = MT.load('src/agentd/client.js', editAnchor(editAnchor(cText, FIX_H, 'const handle = { chan, onData: null, onClose: null };', "src/agentd/client.js"), FIX_S, 'conn.sessions.set(chan, { onData: (b) => handle.onData?.(b), onClose: () => handle.onClose?.() });', "src/agentd/client.js"), 'pretcp');
     const home8 = scratchHome('dsremote-home8', fs, ['.vibespace']);
     process.on('exit', () => { killDaemon(home8); try { fs.rmSync(home8, { recursive: true, force: true }); } catch { } });
     process.env.HOME = home8; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home8);

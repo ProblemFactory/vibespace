@@ -64,6 +64,15 @@ const ok = (c, n, extra) => {
   else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); }
   return !!c;
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, ms = 6000, step = 25) {
@@ -323,9 +332,9 @@ try {
     const EVIL_N1 = evilPagesN1.origin;
     const EVIL_RAPID = evilPagesRapid.origin;
     const bdSrcRapid = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
-    const BD_M12_SHARED = MUT.load('src/server/browser-dialogs.js', bdSrcRapid
-      .replace('const myActiveFill = !checkOnly ? {', 'const myActiveFill = false ? {')
-      .replace('if (myActiveFill) {\n          if (myActiveFill.crossNav) {', 'if (false && myActiveFill) {\n          if (myActiveFill.crossNav) {'),
+    const BD_M12_SHARED = MUT.load('src/server/browser-dialogs.js', editAnchor(editAnchor(bdSrcRapid,
+      'const myActiveFill = !checkOnly ? {', 'const myActiveFill = false ? {', "src/server/browser-dialogs.js"),
+      'if (myActiveFill) {\n          if (myActiveFill.crossNav) {', 'if (false && myActiveFill) {\n          if (myActiveFill.crossNav) {', "src/server/browser-dialogs.js"),
     'r26-active-fill-fence-removed');
     const USER = 'alice@example.test';
     const PW = pwOf('chrome-pw');
@@ -1128,23 +1137,23 @@ try {
         "function liveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '', holdReason = '' } = {}) {",
         "function liveFillVerdict() { return { ok: true }; }\nfunction _deadLiveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '', holdReason = '' } = {}) {",
       ), 'read-fence-removed');
-      const LF_M3 = MUT.load('src/server/browser-login-fill.js', lfSrc
-        .replaceAll("const wantSecretPw = Boolean(secret && slot !== 'otp');", 'const wantSecretPw = false;')
-        .replace('async function wipeTabTypedInputs(', 'async function wipeTabTypedInputs() { return { ok: true, wiped: 0 }; }\nasync function _deadWipeTabTypedInputs('),
+      const LF_M3 = MUT.load('src/server/browser-login-fill.js', editAnchor(editAnchor(lfSrc,
+        "const wantSecretPw = Boolean(secret && slot !== 'otp');", 'const wantSecretPw = false;', "src/server/browser-login-fill.js", 'all'),
+        'async function wipeTabTypedInputs(', 'async function wipeTabTypedInputs() { return { ok: true, wiped: 0 }; }\nasync function _deadWipeTabTypedInputs(', "src/server/browser-login-fill.js"),
       'mask-wipe-removed');
-      const BD_M4 = MUT.load('src/server/browser-dialogs.js', bdSrc
-        .replace("if (media.startsWith('multipart/') || (!media && /^--[^\\r\\n]{1,128}\\r?\\ncontent-disposition:/i.test(bodyText))) {", 'if (false) {')
-        .replace("return { carries: false, undecodable: true, reason: `unsupported_content_type:${media || 'unknown'}` };", "return { carries: false, undecodable: false, reason: 'none' };"),
+      const BD_M4 = MUT.load('src/server/browser-dialogs.js', editAnchor(editAnchor(bdSrc,
+        "if (media.startsWith('multipart/') || (!media && /^--[^\\r\\n]{1,128}\\r?\\ncontent-disposition:/i.test(bodyText))) {", 'if (false) {', "src/server/browser-dialogs.js"),
+        "return { carries: false, undecodable: true, reason: `unsupported_content_type:${media || 'unknown'}` };", "return { carries: false, undecodable: false, reason: 'none' };", "src/server/browser-dialogs.js"),
       'multipart-branch-removed');
       const VE_M5 = MUT.load('src/server/vault-engine.js', veSrc.replace(', ...(Number.isInteger(b.rev) && b.rev >= 1 ? { rev: b.rev } : {})', ''), 'secretNames-without-rev');
-      const LF_M8 = MUT.load('src/server/browser-login-fill.js', lfSrc
-        .replace("if (typeof setTimeout === 'function') {", "if (false && typeof setTimeout === 'function') {")
-        .replaceAll('try { node.inert = true; } catch {}', '/* inert prop disabled */')
-        .replaceAll("try { if (node.setAttribute) node.setAttribute('inert', ''); } catch {}", '/* inert attr disabled */')
-        .replace("window.addEventListener('focusin', onTypingFocusGuard, true);", '/* focusin guard disabled */')
-        .replace("window.addEventListener('focus', onTypingFocusGuard, true);", '/* focus guard disabled */')
-        .replace("el.addEventListener('blur', onTargetBlurGuard, true);", '/* blur guard disabled */')
-        .replace("const ins = await send('Input.insertText', { text: val });", "await new Promise((r) => setTimeout(r, 25)); const ins = await send('Input.insertText', { text: val });"),
+      const LF_M8 = MUT.load('src/server/browser-login-fill.js', editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(lfSrc,
+        "if (typeof setTimeout === 'function') {", "if (false && typeof setTimeout === 'function') {", "src/server/browser-login-fill.js"),
+        'try { node.inert = true; } catch {}', '/* inert prop disabled */', "src/server/browser-login-fill.js", 'all'),
+        "try { if (node.setAttribute) node.setAttribute('inert', ''); } catch {}", '/* inert attr disabled */', "src/server/browser-login-fill.js", 'all'),
+        "window.addEventListener('focusin', onTypingFocusGuard, true);", '/* focusin guard disabled */', "src/server/browser-login-fill.js"),
+        "window.addEventListener('focus', onTypingFocusGuard, true);", '/* focus guard disabled */', "src/server/browser-login-fill.js"),
+        "el.addEventListener('blur', onTargetBlurGuard, true);", '/* blur guard disabled */', "src/server/browser-login-fill.js"),
+        "const ins = await send('Input.insertText', { text: val });", "await new Promise((r) => setTimeout(r, 25)); const ins = await send('Input.insertText', { text: val });", "src/server/browser-login-fill.js"),
       'async-focus-seam');
       const BD_M_EXFIL_ALLOW = MUT.load('src/server/browser-dialogs.js', bdSrc.replace(
         'if (crossOrigin && (carries || undecodable)) {',

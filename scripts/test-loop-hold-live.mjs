@@ -39,6 +39,15 @@ import { spawn } from 'node:child_process';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, cpuMs = 0;
 const ok = (c, n, d) => { siteArmed = false; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 // B-1409: a leg the BOX could not feed (the watchdog thread itself late on two shared cores: too few asks inside a native
 // call) ends as a NAMED and COUNTED skip — never a green: the summary line prints the count, and the release's self-hosted
 // claim runs the same legs on a box that can
@@ -992,7 +1001,7 @@ async function legRound4(node, tag, tree = null) {
     // asleep branch words the ask as a SAMPLED native one folds the canonical asleep hold to a form asleepTrue refuses
     const vmM = (await import('node:vm')).default, SRCL = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8'), CUTA = "  if (state === 'asleep') {";
     const mut = { exports: {} };
-    if (SRCL.split(CUTA).length === 2) vmM.compileFunction(SRCL.replace(CUTA, "  if (state === 'asleep') return { cls: 'native', words: ASK_WORDS.native, key: '(native)', keyWords: '(native)', after };\n  if (false) {"), ['module', 'exports', 'require'], { filename: 'loop-hold-asleep-sampled-mutant.js' })(mut, mut.exports, () => ({}));
+    if (SRCL.split(CUTA).length === 2) vmM.compileFunction(editAnchor(SRCL, CUTA, "  if (state === 'asleep') return { cls: 'native', words: ASK_WORDS.native, key: '(native)', keyWords: '(native)', after };\n  if (false) {", "src/loop-hold.js"), ['module', 'exports', 'require'], { filename: 'loop-hold-asleep-sampled-mutant.js' })(mut, mut.exports, () => ({}));
     const fold = (L) => { const J = L.judgeAsks([{ postedAt: 1000, answeredAt: 1300, state: 'asleep', kernel: L.RUNNING_KERNEL_WORDS, answer: { kind: 'js', words: 'pbkdfHog (src/hogs.js:24)', key: 'src/hogs.js:24', keyWords: 'pbkdfHog (src/hogs.js:24)' }, beat: 7 }], { beat0: 7, holdEnd: 1400 }); return L.foldHold({ from: 900, to: 1400, fromM: 900, toM: 1400, ms: 500, samples: J.samples, outside: J.outside, d: { wallMs: 500, ranMs: 480, userMs: 470, kernelMs: 10, waitMs: 0 } }); };
     const real = fold(LH), lie = mut.exports.foldHold ? fold(mut.exports) : null;
     ok(asleepTrue(real.verdict, { userMs: 470, kernelMs: 10 }) && lie && !asleepTrue(lie.verdict, { userMs: 470, kernelMs: 10 }),

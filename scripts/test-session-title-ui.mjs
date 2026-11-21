@@ -33,6 +33,15 @@ const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1200) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -308,7 +317,7 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
     // the page bundle takes an ESM rendering of the copy (a CJS copy carries mutant-copy's createRequire prologue — node only)
     const cjsTail = 'module.exports = { sessionDisplayName, sessionGivenName };';
     if (!ok(src.includes(cjsTail), 'the module ends in the export line the ESM rendering swaps')) return;
-    const mut = MUT.write(path.join(repo, 'src/session-name.js'), src.replace("'use strict';", '').replace(rung, "return ''; // NEGATIVE CONTROL: no CLI-title rung").replace(cjsTail, 'export { sessionDisplayName, sessionGivenName };'), 'no-cli-title', { esm: true });
+    const mut = MUT.write(path.join(repo, 'src/session-name.js'), editAnchor(editAnchor(editAnchor(src, "'use strict';", '', "src/session-name.js"), rung, "return ''; // NEGATIVE CONTROL: no CLI-title rung", "src/session-name.js"), cjsTail, 'export { sessionDisplayName, sessionGivenName };', "src/session-name.js"), 'no-cli-title', { esm: true });
     await bundle(mut);
     const K = await create('k', 'claude', path.join(ROOT, 'control'));
     if (!ok(K.sid && K.cli, 'a control session was created on the fake claude')) return;
@@ -335,7 +344,7 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
     const guard = "export function mayTakeKeys({ win = null, since = PAGE_START } = {}) {\n  try { if (lateFocusVerdict(document.querySelectorAll(DIALOG_ROOTS), document.activeElement) !== 'take') return false; } catch { return false; }"; // lane dialog-yield r2: ONE predicate — an open decision, or a form the person works in
     if (!ok(src.includes(guard), 'the answer sites\' focus guard is where the control cuts')) return;
     // the copy lives outside the tree: its relative imports name the scratch worktree's modules (the bundle's own sources)
-    const cut = src.replace(guard, 'export function mayTakeKeys() { return true; } // NEGATIVE CONTROL: the answer takes the keys whatever holds them\nfunction mayTakeKeysCut({ win = null, since = PAGE_START } = {}) {')
+    const cut = editAnchor(src, guard, 'export function mayTakeKeys() { return true; } // NEGATIVE CONTROL: the answer takes the keys whatever holds them\nfunction mayTakeKeysCut({ win = null, since = PAGE_START } = {}) {', "src/lib/late-focus.js")
       .replace(/from '\.\/([^']+)'/g, (m, f) => `from ${S(path.join(wt, 'src/lib', f))}`).replace(/from '\.\.\/([^']+)'/g, (m, f) => `from ${S(path.join(wt, 'src', f))}`);
     await bundle(null, MUT.write(path.join(repo, 'src/lib/late-focus.js'), cut, 'no-late-focus-guard', { esm: true }));
     pageErrors.length = 0;

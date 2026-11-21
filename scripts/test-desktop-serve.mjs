@@ -119,6 +119,15 @@ const EARLY_MS = 100;
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 300) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const root = scratch('dserve'); fs.mkdirSync(root, { recursive: true });
 // (verify r5 L3) the install lock's directory is named by the UID, never the environment: /run/user/<uid> when it is a
 // writable directory this user owns, else /tmp/vibespace-<uid>. $XDG_RUNTIME_DIR is set to a SCRATCH dir for the whole
@@ -524,12 +533,12 @@ console.log('§8 lane C2 — the bridge\'s ONE change: streamEndpointFor');
   const sSrc = read('src/server/desktop-stream.js');
   const fixA = "      socket.once('close', e.release);\n", fixB = '      if (socket.destroyed || !socket.readable || !socket.writable) { e.release(); try { socket.destroy(); } catch { /* gone */ } return; }';
   ok(sSrc.split(fixA).length === 2 && sSrc.split(fixB).length === 2, 'CONTROL setup: the two release guards are spelled once');
-  const Smut = MUT.load('src/server/desktop-stream.js', sSrc.replace(fixA, '\n').replace(fixB, '      if (socket.destroyed) { e.release(); return; }'), 'halfclose');
+  const Smut = MUT.load('src/server/desktop-stream.js', editAnchor(editAnchor(sSrc, fixA, '\n', "src/server/desktop-stream.js"), fixB, '      if (socket.destroyed) { e.release(); return; }', "src/server/desktop-stream.js"), 'halfclose');
   const mHalf = await racing(Smut, 'half');
   ok(mHalf.refs === 1 && mHalf.rel === 0, `CONTROL: the pre-fix bridge (release only on the ws close, a destroyed-only guard) LEAKS that reference (refs ${mHalf.refs}, releases ${mHalf.rel})`, mHalf);
   const fixP = "    socket.on('error', parkedError);\n", fixQ = "      socket.removeListener('error', parkedError); // ws attaches its own, synchronously, at the top of handleUpgrade\n";
   ok(sSrc.split(fixP).length === 2 && sSrc.split(fixQ).length === 2, 'CONTROL setup (F1): the parked socket\'s error listener is attached once and handed to ws once');
-  const Srst = MUT.load('src/server/desktop-stream.js', sSrc.replace(fixP, '\n').replace(fixQ, '\n'), 'parkedrst');
+  const Srst = MUT.load('src/server/desktop-stream.js', editAnchor(editAnchor(sSrc, fixP, '\n', "src/server/desktop-stream.js"), fixQ, '\n', "src/server/desktop-stream.js"), 'parkedrst');
   const mRst = await racing(Srst, 'rst');
   ok(mRst.uncaught.some((x) => /ECONNRESET/.test(x)), `CONTROL: the pre-fix bridge (no listener while parked) lets the reset escape as an uncaught ${JSON.stringify(mRst.uncaught)} — the hub's exit`, mRst);
   // (§8's relay pins: MOVED to the fast scripts/test-desktop-serve-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -728,7 +737,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   ok(rl.busyAfter === null && rl.lines.some((l) => /the install slot on this machine is free again — the timed-out install ended — this machine reports the install process gone, exit 0/.test(l)), 'layer A\'s held slot frees when the MACHINE reports the install gone — the line names that evidence', rl.lines.filter((l) => /slot/.test(l)));
   const runningLine = "      const running = facts && facts.installing && facts.installing.pid ? facts.installing : null;\n";
   ok(accSrc.split(runningLine).length === 2, 'CONTROL setup: the re-attach verdict is spelled once');
-  const AccPre = MUT.load('src/server/desktop-access.js', accSrc.replace(runningLine, '      const running = null;\n').replace(launchLine, '    const launch = argv;\n'), 'noslot');
+  const AccPre = MUT.load('src/server/desktop-access.js', editAnchor(editAnchor(accSrc, runningLine, '      const running = null;\n', "src/server/desktop-access.js"), launchLine, '    const launch = argv;\n', "src/server/desktop-access.js"), 'noslot');
   const rlPre = await reLayer(AccPre, 'pre');
   ok(rlPre.n === 2, `CONTROL: the pre-fix layer (the slot in memory only, the install a direct child) starts a SECOND install beside the running one after a re-create (${rlPre.n} started)`, { n: rlPre.n, rB: rlPre.rB && (rlPre.rB.code || rlPre.rB.ok) });
 
@@ -861,12 +870,12 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // the controls' patched copies (scripts/mutant-copy.mjs), each edit spelled once
   const m1Reset = lineOf("'  pid=; s=', // M1"), m1Verify = lineOf('! gone "$pid" "$s" || pid=');
   ok(m1Reset && m1Verify && appsSrc.split(m1Reset).length === 2 && appsSrc.split(m1Verify).length === 2, 'CONTROL setup: the winner\'s pid reset and the pre-tail verification are spelled once each');
-  const appsPreM1 = MUT.write('src/install-slot.js', appsSrc.replace(m1Reset, '\n').replace(m1Verify, "  '  r=$pid;',\n"), 'm1pre');
+  const appsPreM1 = MUT.write('src/install-slot.js', editAnchor(editAnchor(appsSrc, m1Reset, '\n', "src/install-slot.js"), m1Verify, "  '  r=$pid;',\n", "src/install-slot.js"), 'm1pre');
   ok(accSrc.split("const SLOT = require('../install-slot.js');").length === 2, 'CONTROL setup: the access layer requires the package slot once (the closed world re-binds it)');
   const AccPreM1 = MUT.load('src/server/desktop-access.js', accSrc.replace("const SLOT = require('../install-slot.js');", `const SLOT = require(${JSON.stringify(appsPreM1)});`), 'accm1pre');
   const flockTake = lineOf("'    if flock -n 9; then'"), flockGuard = lineOf("'flock -n 9 2>/dev/null ||");
   ok(flockTake && flockGuard && appsSrc.split(flockTake).length === 2 && appsSrc.split(flockGuard).length === 2, 'CONTROL setup: the launcher\'s lock and the runner\'s re-assertion are spelled once each');
-  const AppsNoFlock = MUT.load('src/install-slot.js', appsSrc.replace(flockTake, flockTake.replace('if flock -n 9; then', 'if true; then')).replace(flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||')), 'noflock');
+  const AppsNoFlock = MUT.load('src/install-slot.js', editAnchor(editAnchor(appsSrc, flockTake, flockTake.replace('if flock -n 9; then', 'if true; then'), "src/install-slot.js"), flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||'), "src/install-slot.js"), 'noflock');
   const AppsNoGuard = MUT.load('src/install-slot.js', appsSrc.replace(flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||')), 'noguard');
   const setsidLine = lineOf('command -v setsid'), flockCheck = lineOf('command -v flock');
   ok(setsidLine && flockCheck && appsSrc.split(setsidLine).length === 2 && appsSrc.split(flockCheck).length === 2, 'CONTROL setup: the setsid and flock checks are spelled once each');
@@ -980,7 +989,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   };
   const t3Line = lineOf("'  T=/run/user/$u;"), t3Check = lineOf('is not a directory this user owns');
   ok(t3Line && t3Check && appsSrc.split(t3Line).length === 2 && appsSrc.split(t3Check).length === 2, 'CONTROL setup: the uid-named directory and its ownership check are spelled once each');
-  const AppsEnvRoot = MUT.load('src/install-slot.js', appsSrc.replace(t3Line, "  '  T=${XDG_RUNTIME_DIR:-/tmp}; [ -d \"$T\" ] && [ -w \"$T\" ] || T=/tmp',\n").replace(t3Check, '\n'), 'envroot');
+  const AppsEnvRoot = MUT.load('src/install-slot.js', editAnchor(editAnchor(appsSrc, t3Line, "  '  T=${XDG_RUNTIME_DIR:-/tmp}; [ -d \"$T\" ] && [ -w \"$T\" ] || T=/tmp',\n", "src/install-slot.js"), t3Check, '\n', "src/install-slot.js"), 'envroot');
   const AppsNoOwnCheck = MUT.load('src/install-slot.js', appsSrc.replace(t3Check, '\n'), 'noowncheck');
   // a fake uid (an `id` that answers -u with it): /run/user/<n> does not exist ⇒ the per-uid /tmp dir, created 0700
   const fakeUid = 4000000000 + (process.pid % 1000000) * 4;
@@ -1023,7 +1032,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // keep it there — the alignment is evidence in the result either way.
   const exitLine1 = lineOf('fin() { echo "$1 $(date +%s%N) $K"'), t0Line1 = lineOf("'  t0=$(date +%s%N);"), cmpLine1 = lineOf('-gt "$t0" ]');
   ok(exitLine1 && t0Line1 && cmpLine1 && [exitLine1, t0Line1, cmpLine1].every((l) => appsSrc.split(l).length === 2), 'CONTROL setup: the exit instant, the start instant and their comparison are spelled once each');
-  const AppsWholeSec = MUT.load('src/install-slot.js', appsSrc.replace(exitLine1, exitLine1.replace('$(date +%s%N)', '$(date +%s)')).replace(t0Line1, t0Line1.replace('$(date +%s%N)', '$(date +%s)')).replace(cmpLine1, cmpLine1.replace('-gt "$t0" ]', '-ge "$t0" ]')), 'wholesec');
+  const AppsWholeSec = MUT.load('src/install-slot.js', editAnchor(editAnchor(editAnchor(appsSrc, exitLine1, exitLine1.replace('$(date +%s%N)', '$(date +%s)'), "src/install-slot.js"), t0Line1, t0Line1.replace('$(date +%s%N)', '$(date +%s)'), "src/install-slot.js"), cmpLine1, cmpLine1.replace('-gt "$t0" ]', '-ge "$t0" ]'), "src/install-slot.js"), 'wholesec');
   const sameSecond = async (Mod, tag, unit) => {
     let last = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -1089,7 +1098,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // fd closed: envNoFd9): the fix answers 125 «did not start»; the pre-M1 copy keeps the stale pid, ends its follow on `gone`
   // at once and answers 199 «ended without recording its exit». m1b (the old control's slot in the batch) is unused.
   void m1b; void AccPreM1; void M1_PRE_MS;
-  const AppsPreM1 = MUT.load('src/install-slot.js', appsSrc.replace(m1Reset, '\n').replace(m1Verify, "  '  r=$pid;',\n"), 'm1pre-mod');
+  const AppsPreM1 = MUT.load('src/install-slot.js', editAnchor(editAnchor(appsSrc, m1Reset, '\n', "src/install-slot.js"), m1Verify, "  '  r=$pid;',\n", "src/install-slot.js"), 'm1pre-mod');
   const m1Refuse = async (Mod, tag) => {
     const st = path.join(root, `st-m1r-${tag}`); fs.mkdirSync(st, { recursive: true }); fs.writeFileSync(path.join(st, M.INSTALL_FILES.pid), `${process.pid} 1\n`);
     const r = await launch(Mod, ['sh', '-c', 'echo never'], st, 'start', { env: envNoFd9, killAfter: 8000 });

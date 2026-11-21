@@ -32,6 +32,15 @@ const MUTRC = mutantCopies('rcui', REPO);
 
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) { console.error('src/lib/build-version.js is missing — run `npm run build` first'); process.exit(1); }
 const RC = require(path.join(REPO, 'src/reset-credit.js'));
@@ -423,7 +432,7 @@ console.log('\n§3 the route over the real engine');
       const hsrc = read('src/codex-reset-helper.js');
       const fromT = "    let child = null, settled = false, buf = '', nextId = 1, timer = null;";
       ok('helper CONTROL: the timer patch hits the product source', hsrc.includes(fromT) && hsrc.includes('    timer = setTimeout(() => finish(out.stage === \'consume\''));
-      const preT = require(MUTRC.write('src/codex-reset-helper.js', hsrc.replace(fromT, "    let child = null, settled = false, buf = '', nextId = 1;").replace("    timer = setTimeout(() => finish(out.stage === 'consume'", "    const timer = setTimeout(() => finish(out.stage === 'consume'").replace('      if (timer) clearTimeout(timer);', '      clearTimeout(timer);'), 'tdz'));
+      const preT = require(MUTRC.write('src/codex-reset-helper.js', editAnchor(editAnchor(editAnchor(hsrc, fromT, "    let child = null, settled = false, buf = '', nextId = 1;", "src/codex-reset-helper.js"), "    timer = setTimeout(() => finish(out.stage === 'consume'", "    const timer = setTimeout(() => finish(out.stage === 'consume'", "src/codex-reset-helper.js"), '      if (timer) clearTimeout(timer);', '      clearTimeout(timer);', "src/codex-reset-helper.js"), 'tdz'));
       const ctl = await preT.consumeResetCreditViaAppServer({ idempotencyKey: '', env: { CODEX_HOME: SDIR }, codexCmd: STUB, pressedBy: 'person' }).then(() => 'resolved', (e) => String(e));
       ok('helper CONTROL: with the wall declared below finish, the same refusal REJECTS (Cannot access timer) — the row above sees the rule', /Cannot access 'timer'/.test(ctl), ctl);
     }
@@ -440,7 +449,7 @@ console.log('\n§3 the route over the real engine');
       const hsrc = read('src/codex-reset-helper.js');
       const fromG = "      child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], env, cwd: cwd || undefined, detached: true });";
       ok('helper belts CONTROL: the group patch hits the product source', hsrc.includes(fromG) && hsrc.includes('process.kill(-child.pid, sig)'));
-      const preG = require(MUTRC.write('src/codex-reset-helper.js', hsrc.replace(fromG, "      child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], env, cwd: cwd || undefined });").replace('process.kill(-child.pid, sig)', 'child.kill(sig)'), 'nogroup'));
+      const preG = require(MUTRC.write('src/codex-reset-helper.js', editAnchor(editAnchor(hsrc, fromG, "      child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], env, cwd: cwd || undefined });", "src/codex-reset-helper.js"), 'process.kill(-child.pid, sig)', 'child.kill(sig)', "src/codex-reset-helper.js"), 'nogroup'));
       const mark2 = String(process.pid) + '2';
       await preG.consumeResetCreditViaAppServer({ idempotencyKey: 'k-g2', env: { PATH: process.env.PATH, CODEX_HOME: SDIR, MARK: mark2 }, codexCmd: gstub, wallMs: 300, pressedBy: 'person' });
       await new Promise((r) => setTimeout(r, 2600));
@@ -871,9 +880,9 @@ console.log('\n§3 the route over the real engine');
       const fromP1 = "  return !!(armed && now - armed >= floorMs); // a sent attempt past the floor whose timer has not run is unsettled by the clock\n";
       const fromP2 = "  if (t.reportsSent === false && now - at >= ackMs) return at; // the ack timer's `unknown`, from the write, by the clock\n";
       ok('clock CONTROL: the two patches hit the PURE source', psrc.includes(fromP1) && psrc.includes(fromP2));
-      const purePre = MUTRC.write('src/reset-credit.js', psrc.replace(fromP1, '  return false;\n').replace(fromP2, ''), 'timeronly');
+      const purePre = MUTRC.write('src/reset-credit.js', editAnchor(editAnchor(psrc, fromP1, '  return false;\n', "src/reset-credit.js"), fromP2, '', "src/reset-credit.js"), 'timeronly');
       const fromE = "const resetCredit = require('../reset-credit.js');";
-      const engPre = require(MUTRC.write('src/server/usage-pool-engine.js', esrcF.replace(fromF, 'const RESET_CREDIT_FLOOR_MS = 300;').replace(fromE, `const resetCredit = require(${JSON.stringify(purePre)});`), 'timeronly-eng'));
+      const engPre = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(editAnchor(esrcF, fromF, 'const RESET_CREDIT_FLOOR_MS = 300;', "src/server/usage-pool-engine.js"), fromE, `const resetCredit = require(${JSON.stringify(purePre)});`, "src/server/usage-pool-engine.js"), 'timeronly-eng'));
       const wc = world({ engine: engPre });
       wc.quietly(() => wc.call('POST', wc.A, { body: { sessionId: 'cx1' } }));
       spin(350);
@@ -1361,7 +1370,7 @@ console.log('\n§4c the held ring, its replay and the late-wall notice (verify r
   const fromItem = '  if (HELD_WALL_KINDS.includes(what)) fileLateWallItem(session, b, what, v);\n';
   ok('§4c CONTROLS: the four patches hit the product source', esrc8.includes(fromBelt) && esrc8.includes(fromAsOf) && esrc8.includes(fromRing) && esrc8.includes(fromItem));
   const engNoBelt = require(MUTRC.write('src/server/usage-pool-engine.js', esrc8.replace(fromBelt, '    if (false) { continue; }'), 'r8-nobelt'));
-  const engNoAsOf = require(MUTRC.write('src/server/usage-pool-engine.js', esrc8.replace(fromBelt, '    if (false) { continue; }').replace(fromAsOf, '(at) => recordCodexQuotaSignal(session, payload, rec)'), 'r8-noasof'));
+  const engNoAsOf = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(editAnchor(esrc8, fromBelt, '    if (false) { continue; }', "src/server/usage-pool-engine.js"), fromAsOf, '(at) => recordCodexQuotaSignal(session, payload, rec)', "src/server/usage-pool-engine.js"), 'r8-noasof'));
   const engRingAny = require(MUTRC.write('src/server/usage-pool-engine.js', esrc8.replace(fromRing, '      let i = 0;'), 'r8-ringany'));
   const engNoItem = require(MUTRC.write('src/server/usage-pool-engine.js', esrc8.replace(fromItem, ''), 'r8-noitem'));
   // ② a held wall + reading, a NEWER reading of the account from another conversation, the declaration
@@ -1509,7 +1518,7 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
   const fromCatchUp = "function catchUpResetCreditFromBuffer(session, id) {\n  if (!session || !id || session.host) return null;";
   ok('§4e CONTROLS: the three patches hit the product source', esrc10.includes(fromGuess) && esrc10.includes(fromPersist) && esrc10.includes(fromPersist2) && esrc10.includes(fromCatchUp));
   const engNoGuess = require(MUTRC.write('src/server/usage-pool-engine.js', esrc10.replace(fromGuess, "function revivedReadFirstWaiting(t) { return !!(t && t.outcome === 'unknown' && t.revivedAt && t.readFirst === true); }"), 'r10-noguess'));
-  const engPersistFirst = require(MUTRC.write('src/server/usage-pool-engine.js', esrc10.replace(fromPersist, "  t.prior = resetCredit.supersede(t.prior, now, clockOpts(now));\n  persistResetCreditTries();\n  if (!t.charged) {").replace(fromPersist2, "  if (t.outcome) return; // a late \"sent\" after the attempt ended: charged, nothing left to wait for"), 'r10-persistfirst'));
+  const engPersistFirst = require(MUTRC.write('src/server/usage-pool-engine.js', editAnchor(editAnchor(esrc10, fromPersist, "  t.prior = resetCredit.supersede(t.prior, now, clockOpts(now));\n  persistResetCreditTries();\n  if (!t.charged) {", "src/server/usage-pool-engine.js"), fromPersist2, "  if (t.outcome) return; // a late \"sent\" after the attempt ended: charged, nothing left to wait for", "src/server/usage-pool-engine.js"), 'r10-persistfirst'));
   const engNoCatchUp = require(MUTRC.write('src/server/usage-pool-engine.js', esrc10.replace(fromCatchUp, "function catchUpResetCreditFromBuffer(session, id) {\n  return null;"), 'r10-nocatchup'));
   const J = []; const jl = (fn) => { const o = console.log; console.log = (...a) => J.push(a.join(' ')); try { return fn(); } finally { console.log = o; } };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

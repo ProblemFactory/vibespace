@@ -49,6 +49,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let BYPASS_COPY = null;   // ⑫: the (h) control copy — a receipt started outside the ONE door
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // item 7 (store-writer follow-up): a census «in NO file» reads what the stores still OWE too. The channels index and its
 // acts journal are the store writer's paced stores (500 ms): a walk right after the act reads the version before it, so
@@ -2697,7 +2706,7 @@ process.exit(0);
     const srcG16 = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
     const RES = "    return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };";
     ok(srcG16.split(RES).length === 2 && esrc.split('const REAL_ADAPTERS = Object.freeze(VendorList.MANIFESTS.map(adapterOf));').length === 2, 'CONTROL setup (16): the resolver\'s return and the engine\'s gmail require are present once');
-    const gKeep = MUTE.write('src/channels/gmail.js', srcG16.replace(RES, "    HELD16.push(r.values); return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };").replace("'use strict';", "'use strict'; const HELD16 = [];"), 'keeps-client', { esm: false });
+    const gKeep = MUTE.write('src/channels/gmail.js', editAnchor(editAnchor(srcG16, RES, "    HELD16.push(r.values); return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };", "src/channels/gmail.js"), "'use strict';", "'use strict'; const HELD16 = [];", "src/channels/gmail.js"), 'keeps-client', { esm: false });
     const p16a = patchPath('src/server', 'channels-engine');
     writeCopy(p16a, esrc.replace('const REAL_ADAPTERS = Object.freeze(VendorList.MANIFESTS.map(adapterOf));', `const REAL_ADAPTERS = Object.freeze(VendorList.MANIFESTS.map((m) => (m.kind === 'gmail' ? require(${JSON.stringify(gKeep)}) : adapterOf(m))));`));
     const c1h = runStages(p16a, 'ctl1', ['refreshed', 'removed']);
@@ -3677,7 +3686,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   const thrSrc = fs.readFileSync(path.join(REPO, 'src/channel-thread.js'), 'utf-8');
   const L1 = "      replies: all.length > THREAD_REPLIES_MAX ? all.slice(all.length - THREAD_REPLIES_MAX) : all,";
   const L2 = '  let replies = (e.all || e.replies).map((id) => ix.byId.get(id)).filter(Boolean);';
-  const thrCopy = MUTE.write('src/channel-thread.js', thrSrc.replace(L1, '      replies: all.slice(0, THREAD_REPLIES_MAX),').replace(L2, '  let replies = e.replies.map((id) => ix.byId.get(id)).filter(Boolean);'), 'oldest-500');
+  const thrCopy = MUTE.write('src/channel-thread.js', editAnchor(editAnchor(thrSrc, L1, '      replies: all.slice(0, THREAD_REPLIES_MAX),', "src/channel-thread.js"), L2, '  let replies = e.replies.map((id) => ix.byId.get(id)).filter(Boolean);', "src/channel-thread.js"), 'oldest-500');
   const esrcB = engineSource(REPO);
   const IMP = "const Thr = require('../channel-thread.js');";
   ok(thrSrc.split(L1).length === 2 && thrSrc.split(L2).length === 2 && esrcB.split(IMP).length === 3, 'CONTROL setup: the newest-500 list, the full-list view and the engine family\'s two imports of the index (the engine + channels-outbound.js) are each present once');
@@ -4339,7 +4348,7 @@ async function stashRevokeRun(EM, DM, tag, { revoke = true } = {}) {
   const G1 = '  function stashEntries(cid) { gateQueue(cid); return (stash[cid] || []).filter((e) => !isKept(cid, e)); }';   // B-f276: a kept entry is not handed out
   const G2 = '  function stashPeek(cid) { gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }';
   ok(dsrc.split(G1).length === 2 && dsrc.split(G2).length === 2, 'CONTROL setup: both reads ask the gate, once each');
-  const noGate = await stashRevokeRun(ENG, MUTE.load('src/server/conversation-deliver.js', dsrc.replace(G1, '  function stashEntries(cid) { return (stash[cid] || []).slice(); }').replace(G2, '  function stashPeek(cid) { return (stash[cid] || []).map((e) => ({ ...e })); }'), 'no-stash-gate'), 'nogate');
+  const noGate = await stashRevokeRun(ENG, MUTE.load('src/server/conversation-deliver.js', editAnchor(editAnchor(dsrc, G1, '  function stashEntries(cid) { return (stash[cid] || []).slice(); }', "src/server/conversation-deliver.js"), G2, '  function stashPeek(cid) { return (stash[cid] || []).map((e) => ({ ...e })); }', "src/server/conversation-deliver.js"), 'no-stash-gate'), 'nogate');
   ok(noGate.read === 'not-found' && noGate.leaks(noGate.injected) && /launch code is 0417/.test(noGate.injected), 'CONTROL: a ladder that never asks the gate hands the revoked agent the message text, the title and the vendor id (the reproduction) — the asserts above would be red', JSON.stringify(noGate.injected).slice(0, 300));
   const esrc = engineSource(REPO);
   const aboutSites = esrc.match(/, about: stashAbout\(/g) || [];
@@ -5083,7 +5092,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   {
     // the copy of the PURE module without the ceiling, under the real engine (the engine copy re-bound to it)
     const feedNoCeil = MUTE.pathFor('feed-no-ceiling', '.js');
-    fs.writeFileSync(feedNoCeil, fsrcF.replace(CEILL, "    if (false) return { ok: false, park: 'time-range-ignored', why: `the window has run to"));
+    fs.writeFileSync(feedNoCeil, editAnchor(fsrcF, CEILL, "    if (false) return { ok: false, park: 'time-range-ignored', why: `the window has run to", "src/channel-feed.js"));
     const engOnCopy = MUTE.load('src/server/channels-engine.js', esrcF.replace("require('../channel-feed.js')", `require(${JSON.stringify(feedNoCeil)})`), 'feed-engine-no-ceiling');
     const el0 = await endless(engOnCopy, 'mut');
     ok(el0.searches >= 380 && el0.state !== 'refused' && el0.inFlight, `CONTROL: the copy without the ceiling pages the endless window for the whole 40 minutes (${el0.searches} pages, still in flight, the card "${el0.words}") — the production's 8 043 pages`, JSON.stringify(el0));
@@ -5139,7 +5148,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     const TRIML = 't - Number(e[0]) <= UNREADABLE_RECENT_MS && Number(e[0]) <= t)';
     ok(fsrcF.split(TRIML).length === 2, 'CONTROL setup: the ring\'s hour is spelled once');
     const feedNoTrim = MUTE.pathFor('feed-ring-no-trim', '.js');
-    fs.writeFileSync(feedNoTrim, fsrcF.replace(TRIML, 'true)').replace('if (a > t || t - a > UNREADABLE_RECENT_MS) continue;', ''));
+    fs.writeFileSync(feedNoTrim, editAnchor(editAnchor(fsrcF, TRIML, 'true)', "src/channel-feed.js"), 'if (a > t || t - a > UNREADABLE_RECENT_MS) continue;', '', "src/channel-feed.js"));
     const stT = await stray(MUTE.load('src/server/channels-engine.js', esrcF.replace("require('../channel-feed.js')", `require(${JSON.stringify(feedNoTrim)})`), 'feed-engine-ring-no-trim'), 'mutt');
     ok(stT.after.words === '12 search hits could not be read in the last hour (missing or unreadable: meta_data.chat_id)', `CONTROL: the copy whose ring never forgets still says "${stT.after.words}" an hour of clean pages later — the r2 line above would be red`, JSON.stringify(stT.after));
   }
