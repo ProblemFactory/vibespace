@@ -19,7 +19,7 @@ function create({ rootDir, port, onHookFileCreated = null, applyThisMachine = nu
 const { list: listHarnesses } = require('../harnesses');
 const { buildConfigPlan } = require('../harness-settings');                // PURE: the plan builder (the helper's embedded hooks-only DEFAULT_PLAN)
 const { configPlanSpecs } = require('./harness-config-sync');              // ORCH: descriptor facts → plan specs (ONE spelling, shared with cliConfigPlan)
-const { findOurHookIn, stableNodePath } = require('../harness-config'); // SHARED: the CAS writer + the hook-entry mutators the remote helper embeds
+const { findOurHookIn, stableNodePath, keepsHookCommand } = require('../harness-config'); // SHARED: the CAS writer + the hook-entry mutators the remote helper embeds
 // ── Create editor helper script ──
 // Communicates via HTTP (not terminal output) so Claude Code treats it as a GUI editor
 // and does NOT clear the screen. The server broadcasts via WebSocket to the client.
@@ -477,6 +477,7 @@ const _findOurHookIn = findOurHookIn;
 function agentHooksStatus() {
   // the spelling the SHIPPED HELPER writes on this machine (B-ddf3 unit 2 line 1, r1407 (e)): the stable node path (B-b83c)
   const hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
+  const sameRunner = (c) => c === hookCmd || keepsHookCommand(c, hookCmd);
   const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE), refused: ownerWriteRefusal(), registeredAfterError: _registeredAfterError }; // verify r2 ①: the chip says "registered at HH:MM after an earlier read error"
   for (const [key, def] of Object.entries(HOOK_FILES)) {
     const file = def.file();
@@ -493,8 +494,8 @@ function agentHooksStatus() {
       dirExists,                                                               // the CLI has run here (its config directory exists)
       creatable: !fileExists && dirExists && def.createIfMissing === 'dir-exists', // missing, and the next registration creates it (lane hooks-create)
       parseError,
-      installed: found.every(h => h && h.command === hookCmd),
-      stale: found.some(h => h && h.command !== hookCmd) || (found.some(Boolean) && !found.every(Boolean)),
+      installed: found.every(h => h && sameRunner(h.command)),   // r1407 (d): a spelling the applier KEEPS reads installed — the six-hourly check starts no run for it
+      stale: found.some(h => h && !sameRunner(h.command)) || (found.some(Boolean) && !found.every(Boolean)),
     };
   }
   return out;
@@ -676,17 +677,27 @@ function ensureAgentHooks({ auto = false } = {}) {
   if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return Promise.resolve({ optedOut: true });
   if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
   if (typeof applyThisMachine !== 'function') return Promise.resolve(Object.fromEntries(Object.keys(HOOK_FILES).map((k) => [k, { ok: false, error: 'no helper road on this server: nothing written' }])));
-  return applyThisMachine({ reason: auto ? 'hooks' : 'hooks (asked)', hooks: true }).then(async (landing) => {
+  const fsp = fs.promises, hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`;
+  // (r1407 (e)) our entries' commands as they stand BEFORE the run, read off the loop: a rewrite of the spelling is journalled by name
+  const ourCmds = async (key, file) => { try { const root = JSON.parse(await fsp.readFile(file, 'utf8')); return Object.fromEntries(HOOK_EVENTS_FOR(key).map((ev) => { const h = _findOurHookIn(root && root.hooks && root.hooks[ev]); return [ev, h ? h.command : null]; })); } catch { return null; } };
+  return Promise.all(Object.entries(HOOK_FILES).map(([key, def]) => ourCmds(key, def.file()).then((c) => [key, c]))).then((pairs) => {
+    const before = Object.fromEntries(pairs);
+    return applyThisMachine({ reason: auto ? 'hooks' : 'hooks (asked)', hooks: true }).then((landing) => ({ landing, before }));
+  }).then(async ({ landing, before }) => {
     // the helper prints KEY receipts only: each hook file is VERIFIED here, off the loop (fs.promises), after the landing
-    const fsp = fs.promises, hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`, results = {};
+    const results = {};
     for (const [key, def] of Object.entries(HOOK_FILES)) {
       const rel = def.rel.join('/'), file = def.file(), dir = path.dirname(file);
       if (!landing || !landing.ok) { console.log(`Hook registration (${key}) not done on this machine: ${landing && landing.why}`); results[key] = { ok: false, error: (landing && landing.why) || 'no landing' }; continue; }
       let dirThere = true; try { await fsp.stat(dir); } catch { dirThere = false; }
       if (!dirThere) { const why = `~/${path.dirname(rel)} not found — the CLI has not run on this machine; nothing is created`; console.log(`Hook registration (${key}) skipped:`, why); results[key] = { ok: false, error: why, missing: 'no-dir' }; continue; }
       let root = null; try { root = JSON.parse(await fsp.readFile(file, 'utf8')); } catch (e) { const why = e && e.code === 'ENOENT' ? `~/${rel} does not exist and was not created` : `~/${rel} cannot be read as JSON`; console.log(`Hook registration (${key}) skipped:`, why); results[key] = { ok: false, error: why }; continue; }
-      const ours = HOOK_EVENTS_FOR(key).every((ev) => { const h = _findOurHookIn(root && root.hooks && root.hooks[ev]); return !!h && h.command === hookCmd; });
+      const now = Object.fromEntries(HOOK_EVENTS_FOR(key).map((ev) => { const h = _findOurHookIn(root && root.hooks && root.hooks[ev]); return [ev, h ? h.command : null]; }));
+      // ours = the stable command, or a stored spelling the run left as it was (the same applier KEPT it: keepsHookCommand — the same node)
+      const was = before[key], ours = Object.keys(now).every((ev) => now[ev] === hookCmd || (!!now[ev] && !!was && was[ev] === now[ev]));
       if (!ours) { const why = `our hook entries are not in ~/${rel} after the helper ran`; console.log(`Hook registration (${key}) skipped:`, why); results[key] = { ok: false, error: why }; continue; }
+      const moved = was ? Object.keys(now).filter((ev) => was[ev] && was[ev] !== now[ev]) : [];
+      if (moved.length) console.log(`Hook command rewritten in ~/${rel} (${moved.join(', ')}): ${was[moved[0]]} → ${now[moved[0]]} — the stable spelling, once; only those entries' "command" changed, nothing else in the file`);
       if ((landing.created || []).some((c) => c.rel === rel)) {
         // THE FILE THE CLI NEVER WROTE (lane hooks-create): created because its directory proves the CLI has run ('dir-exists');
         // a session already running snapshotted its hooks without ours — the caller tells them

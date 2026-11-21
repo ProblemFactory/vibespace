@@ -127,12 +127,35 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
     const planted = { ...j, model: 'opus', permissions: { allow: ['Bash(ls:*)'] } };
     for (const ev of ['SessionStart', 'UserPromptSubmit', 'Stop']) planted.hooks[ev][0].hooks[0].command = `"/opt/old-node/bin/node" ${GEN.HOOK_CMD}`;
     fs.writeFileSync(sf, JSON.stringify(planted, null, 2) + '\n');
-    await SYNC.applyThisMachine({ reason: 'boot' });
+    // through the generator the boot runs (its refusals lifted as test-claude-retention §7 does), the journal read
+    const said = [], log0 = console.log;
+    const hooks = async () => { process.env.VIBESPACE_FORCE_AGENT_HOOKS = '1'; console.log = (...a) => { said.push(a.join(' ')); }; try { return await GEN.ensureAgentHooks({ auto: true }); } finally { console.log = log0; delete process.env.VIBESPACE_FORCE_AGENT_HOOKS; } };
+    const rh = await hooks();
     const after = JSON.parse(fs.readFileSync(sf, 'utf8'));
     const flat = (o, p = '', out = {}) => { if (o && typeof o === 'object') { for (const k of Object.keys(o)) flat(o[k], p ? `${p}.${k}` : k, out); } else out[p] = o; return out; };
     const fb = flat(planted), fa = flat(after), moved = [...new Set([...Object.keys(fb), ...Object.keys(fa)])].filter((k) => fb[k] !== fa[k]);
-    ok(moved.length === 3 && moved.every((k) => /^hooks\.(SessionStart|UserPromptSubmit|Stop)\.0\.hooks\.0\.command$/.test(k) && fa[k] === stable),
-      '(e) a stored command naming another node is rewritten to the stable spelling — the three hook commands only; every other key of the file as it was', moved);
+    ok(rh.claude && rh.claude.ok === true && moved.length === 3 && moved.every((k) => /^hooks\.(SessionStart|UserPromptSubmit|Stop)\.0\.hooks\.0\.command$/.test(k) && fa[k] === stable),
+      '(e) a stored command naming another node is rewritten to the stable spelling — the three hook commands only; every other key of the file as it was', { moved, rh });
+    const line = `Hook command rewritten in ~/.claude/settings.json (SessionStart, UserPromptSubmit, Stop): "/opt/old-node/bin/node" ${GEN.HOOK_CMD} → ${stable} — the stable spelling, once; only those entries' "command" changed, nothing else in the file`;
+    ok(said.filter((l) => l.startsWith('Hook command rewritten')).length === 1 && said.includes(line), '(e) …journalled by name: the file, the entries, the spelling before and after, and that nothing else moved', said);
+    said.length = 0;
+    const rh2 = await hooks();
+    ok(rh2.claude && rh2.claude.ok === true && !said.some((l) => l.startsWith('Hook command rewritten')), '(e) …ONCE: the next registration finds the stable spelling and rewrites nothing', said);
+    // (d) the six-hourly check reads the status and starts a run only when it reads stale or not installed: a spelling the
+    // applier KEEPS (the same node, one real file — keepsHookCommand) reads installed, and a registration over it leaves it
+    const link = path.join(ROOT, 'node-link'); fs.symlinkSync(process.execPath, link);
+    const keptCmd = `${JSON.stringify(link)} ${GEN.HOOK_CMD}`, k = JSON.parse(fs.readFileSync(sf, 'utf8'));
+    for (const ev of ['SessionStart', 'UserPromptSubmit', 'Stop']) k.hooks[ev][0].hooks[0].command = keptCmd;
+    fs.writeFileSync(sf, JSON.stringify(k, null, 2) + '\n');
+    const stK = GEN.agentHooksStatus().claude;
+    said.length = 0;
+    const rk = await hooks();
+    const kAfter = JSON.parse(fs.readFileSync(sf, 'utf8'));
+    ok(stK.installed === true && stK.stale === false && rk.claude && rk.claude.ok === true && ['SessionStart', 'UserPromptSubmit', 'Stop'].every((ev) => cmdOf(kAfter, ev) === keptCmd) && !said.some((l) => l.startsWith('Hook command rewritten')),
+      '(d) a kept spelling reads installed (the check starts nothing for it), and a registration over it keeps it, rewrites nothing and reads ok', { stK, rk, said });
+    const SJ = src('server.js'), hc = SJ.slice(SJ.indexOf('function checkAgentHookHealth()'), SJ.indexOf('function checkAgentHookHealth()') + 1600);
+    ok(/if \(info\.stale \|\| !info\.installed \|\| scriptMissing\) \{[\s\S]*?ensureAgentHooks\(\{ auto: true \}\)/.test(hc) && (hc.match(/ensureAgentHooks\(/g) || []).length === 1,
+      'WIRING (d): the six-hourly check asks the helper only inside «stale, not installed, or the hook script missing»');
   } finally { process.env.HOME = HOME0; }
 }
 
