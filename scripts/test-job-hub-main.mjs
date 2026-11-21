@@ -13,6 +13,12 @@
 //      run's wrapper) and keeps it on the run; the sweep then never judges the run ended (its main is this hub, which runs), and ANY
 //      end of a hub-main service is never restarted by itself (its policy, a boot's replay): never a second hub beside the one that
 //      runs. RED: the sweep's guard cut; the no-restart rule cut
+//   §3 (the row's (5)) a hub started inside a job KEEPS NONE OF THAT JOB'S NAMES: its jobs engine drops every VIBESPACE_JOB_* at its
+//      construction (where B-7ca1 drops the run mark), so no child the hub starts on its own env takes the job's id (a vibespace-job
+//      with no id there speaks as the job) or its bearer. THE SCENE: the real engine starts a task through the real wrapper; its
+//      main is a stand-in hub that constructs the jobs engine, as a hub's boot does, and writes down — before and after — the job's
+//      names in its own env, in a child started on its own env (a probe's road) and in a conversation's env (agentEnv). RED: a copy
+//      of the engine with the drop cut — the child after it still takes the job's id and bearer
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -195,6 +201,65 @@ async function wrapperKilledScene(JM2, tag) {
   const JY = MJ.load('src/jobs.js', anchored(JSRC, RULE, "    const hubMainEnd = false;   /* MUTANT: restarted as any service */", 'b2c5c-u2-restart-cut'), 'b2c5c-u2-restart-cut');
   const redEnd = endScene(JY.JobManager, 'end-mut', { hubMain: true });
   ok(redEnd.desiredUp === true, 'CONTROL (the rule cut, in a copy): the hub-main service stays wanted up — its policy (and a boot\'s replay) would start a second hub — RED', redEnd);
+}
+
+// ════════ §3 A HUB STARTED INSIDE A JOB KEEPS NONE OF THE JOB'S NAMES ════════
+console.log('§3 a hub started inside a job hands none of that job\'s names (its id, its bearer) to what it starts');
+const JOB_NAMES = ['VIBESPACE_JOB_CWD', 'VIBESPACE_JOB_ID', 'VIBESPACE_JOB_RUN', 'VIBESPACE_JOB_TOKEN'];
+/** the scene: the real engine starts a TASK through the real wrapper; its main is a stand-in hub (node) that constructs the jobs
+ *  engine of `jobsPath` over a folder of its own (as a hub's boot does) and writes down, before and after: the job's names in its own
+ *  env, in a child it starts on its OWN env (no env handed: a probe's road) and in the env a conversation is built with (agentEnv) */
+async function insideScene(jobsPath, tag) {
+  const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true }); fs.mkdirSync(path.join(dd, 'inner'), { recursive: true });
+  fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), WRAP);
+  const rec = path.join(dd, 'rec.json');
+  const hub = [
+    "const cp = require('child_process'), fs = require('fs');",
+    `const A = require(${JSON.stringify(path.join(ROOT, 'src/agent-env.js'))});`,
+    "const jobNames = (keys) => keys.filter((k) => k.startsWith('VIBESPACE_JOB_')).sort();",
+    "const childNames = () => jobNames(JSON.parse(String(cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(Object.keys(process.env)))'], { encoding: 'utf8', timeout: 8000 }))));",
+    "const look = () => ({ own: jobNames(Object.keys(process.env)), child: childNames(), conv: jobNames(Object.keys(A.agentEnv(process.env))), id: process.env.VIBESPACE_JOB_ID || null });",
+    'const before = look();',
+    `const { JobManager } = require(${JSON.stringify(jobsPath)});`,
+    `new JobManager({ dataDir: ${JSON.stringify(path.join(dd, 'inner'))}, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, memoryRungs: [] });`,
+    'const after = look();',
+    // a DAEMON it double-forks on its own env (sh puts it in the background and ends: re-parented, never the hub's child) — does the
+    // job's mark find it? (a service's stop of that job ends what its mark finds: src/jobs.js, the kept clear) — then ended at once
+    "const sh = cp.spawnSync('/bin/sh', ['-c', 'sleep 300 >/dev/null 2>&1 & echo $!'], { encoding: 'utf8', timeout: 8000 }), dpid = Number(String(sh.stdout || '').trim()) || 0;",
+    `const PI = require(${JSON.stringify(path.join(ROOT, 'src/proc-identity.js'))});`,
+    "const marked = dpid > 1 && before.id ? PI.membersOf({ mark: 'VIBESPACE_JOB_ID=' + before.id }) : [];",
+    'const daemon = { pid: dpid, byMark: marked.some((x) => Number(x.pid) === dpid) };',
+    "if (dpid > 1) { try { process.kill(dpid, 'SIGKILL'); } catch { } }",
+    `fs.writeFileSync(${JSON.stringify(rec)}, JSON.stringify({ before, after, daemon }));`,
+  ].join('\n');
+  const { JobManager } = require(path.join(ROOT, 'src/jobs.js'));
+  const jm = new JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, apiBase: 'http://127.0.0.1:9', memoryRungs: [] });
+  jm.init();
+  const r = jm.create({ kind: 'task', name: 'hub-inside', cmd: { argv: [process.execPath, '-e', hub], cwd: dd }, owner: OWNER }, CALLER);
+  const job = jm.jobs.get(r.job.id);
+  await until(async () => { await jm._sweep(); return ['interrupted', 'failed', 'done'].includes(job.state); }, 20000);
+  let out = null; try { out = JSON.parse(fs.readFileSync(rec, 'utf8')); } catch { }
+  const run = job.runs[job.runs.length - 1];
+  let log = ''; try { log = fs.readFileSync(path.join(dd, 'job-logs', job.id, String(run.startedAt), 'current.log'), 'utf8'); } catch { }
+  try { jm.shutdown(); } catch { }
+  return { jobId: job.id, state: job.state, ...(out || { log: log.slice(-600) }) };
+}
+{
+  const DROP = "    for (const k of Object.keys(process.env)) if (k.startsWith('VIBESPACE_JOB_')) delete process.env[k];\n";
+  ok(JSRC.split(DROP).length === 2 && JSRC.indexOf(DROP) < JSRC.indexOf('    // THE ONE FOR-YOU DOOR, at run time too'), 'WIRING: the jobs engine drops every VIBESPACE_JOB_* once, at its construction (beside B-7ca1\'s reason)');
+  const cut = MJ.write('src/jobs.js', anchored(JSRC, DROP, '    delete process.env.VIBESPACE_JOB_RUN;   /* MUTANT: the release — the run mark alone */\n', 'b2c5c-u5-drop-cut'), 'b2c5c-u5-drop-cut');
+  const [real, red] = await Promise.all([insideScene(path.join(ROOT, 'src/jobs.js'), 'inside'), insideScene(cut, 'inside-mut')]);
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  ok(!!real.before && real.before.id === real.jobId && same(real.before.own, JOB_NAMES) && same(real.before.child, JOB_NAMES),
+    'the scene: the job\'s spawn handed the stand-in hub (its main) the job\'s names — its id, run mark, bearer, directory — and a child it started on its own env took them all', real);
+  ok(!!real.after && same(real.after.own, []) && same(real.after.child, []),
+    'A HUB STARTED INSIDE A JOB: after its jobs engine is built, its env holds none of the job\'s names and a child it starts on its own env takes none (no id a vibespace-job there would speak as, no bearer)', real.after);
+  ok(!!real.before && same(real.before.conv, []) && same(real.after.conv, []),
+    'what the row feared for a CONVERSATION was never the road: the env a conversation is built with (agentEnv) dropped the job\'s names before and after (every VIBESPACE_* outside its keep set)', { before: real.before && real.before.conv, after: real.after && real.after.conv });
+  ok(!!real.daemon && real.daemon.pid > 1 && real.daemon.byMark === false,
+    'and a DAEMON it double-forks on its own env carries no job\'s mark: the job\'s mark scan (a service\'s stop ends what it finds) never finds it', real.daemon);
+  ok(!!red.after && same(red.after.child, ['VIBESPACE_JOB_CWD', 'VIBESPACE_JOB_ID', 'VIBESPACE_JOB_TOKEN']) && !!red.daemon && red.daemon.byMark === true,
+    'CONTROL (the release\'s drop — the run mark alone — in a copy of the engine): the hub\'s child still takes the job\'s id, its bearer and its directory, and the job\'s mark finds the hub\'s daemon — RED', { after: red.after, daemon: red.daemon });
 }
 
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'B-2c5c ' })) ok(r.pass === true, r.name + (r.pass ? '' : ' — ' + r.detail));

@@ -200,8 +200,13 @@ class JobManager {
    *          groupNotifyFor?(job)→true|false|null, notifyGlobal?()→bool }        // toggle resolution */
   constructor(deps) {
     // B-7ca1 (its read r2, S1): a hub started INSIDE a job inherited that job's run mark — it never hands it on (a daemon the hub
-    // double-forks, re-parented outside the job's group, would read as that run's escapee and end with the job's stop)
-    delete process.env.VIBESPACE_JOB_RUN;
+    // double-forks, re-parented outside the job's group, would read as that run's escapee and end with the job's stop).
+    // B-2c5c (5): nor ANY name that job's spawn handed it — its id (VIBESPACE_JOB_ID: a vibespace-job with no id speaks as that
+    // job), its bearer (VIBESPACE_JOB_TOKEN), its directory: every child the hub starts on its OWN env (the spawn-env census's
+    // raw rows: a probe, a module's default when its caller hands none) took them. The builders (agentEnv / daemonEnv / serviceEnv / jobEnv / wrapperEnv)
+    // drop every VIBESPACE_* outside their keep sets, so no conversation took them. The hub reads none of them (its own knobs are
+    // VIBESPACE_JOBS_*, plural); each job it starts is handed its own at its spawn
+    for (const k of Object.keys(process.env)) if (k.startsWith('VIBESPACE_JOB_')) delete process.env[k];
     // THE ONE FOR-YOU DOOR, at run time too (lane job-notify-user r4, accept-r3 unverified 0): the For-you store's dep is held
     // HERE and reached through _forYou alone; `this.d.notifyUser` is the STRAY door — a filing that skipped _forYou (a merge
     // that kept an older direct call) still reaches the store with its own shape, and the store's verdict is JOURNALED on

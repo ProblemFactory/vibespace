@@ -937,7 +937,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   ok(lx.after && !lx.after.launcher, 'CONTROL (the hub\'s ancestors not kept, in a copy): the stop ends the hub\'s launcher — RED', lx.after);
   // a hub started INSIDE a job never hands that run's mark to what it starts (its env loses it at the engine's construction)
   const envOf = (Mod, tag) => { const d = path.join(D, tag); fs.mkdirSync(d, { recursive: true }); process.env.VIBESPACE_JOB_RUN = 'jb-0000aaaa:1'; let threw = null; try { new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, memoryRungs: [] }); } catch (e) { threw = String((e && e.message) || e); } const had = 'VIBESPACE_JOB_RUN' in process.env; delete process.env.VIBESPACE_JOB_RUN; return threw ? `threw: ${threw}` : had; };   // its round: a constructor that throws is a red, never «dropped»
-  const STRIP = "    delete process.env.VIBESPACE_JOB_RUN;";
+  const STRIP = "    for (const k of Object.keys(process.env)) if (k.startsWith('VIBESPACE_JOB_')) delete process.env[k];";   // B-2c5c (5): every job name, the run mark among them
   ok(envOf(require(path.join(ROOT, 'src/jobs.js')), 'env-strip') === false && envOf(MJ.load('src/jobs.js', anchored(JSRC, STRIP, '    /* MUTANT: the mark kept */', 'b7ca1-env-strip-cut'), 'b7ca1-env-strip-cut'), 'env-strip-mut') === true,
     'B-7ca1 (its read r2, S1): the hub drops an inherited VIBESPACE_JOB_RUN (a hub started inside a job: its double-forked daemons never read as that run\'s escapees); CONTROL (the drop cut, in a copy): kept — RED');
 }

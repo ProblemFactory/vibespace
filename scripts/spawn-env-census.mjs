@@ -18,6 +18,11 @@
 //   default   a factory's default when no env is handed in — every production caller hands a builder's env (named)
 //   self      the hub restarting itself: its successor needs the hub's whole config env
 //   debt      a LONG-LIVED child that still inherits — named, its `next:` in the why (主开发 decides the lane)
+// EVERY RAW ROW HANDS ON THE HUB'S ENV WITHOUT A JOB'S NAMES (B-7ca1; B-2c5c (5)): a hub started INSIDE a Background Work job
+// (its main) drops every VIBESPACE_JOB_* that job's spawn handed it — the run mark, the id, the bearer, the directory — at the
+// jobs engine's construction (src/jobs.js), so no probe / upstream / default / self / debt child above inherits that job's id (a
+// vibespace-job with no id there would speak as the job) or its bearer; every builder drops them too (VIBESPACE_* outside its
+// keep set). test-job-hub-main §3 drives it (a stand-in hub inside a real job) and test-stop-tree pins the line
 // A raw group with no row, a row whose sites are gone (DEAD) or whose count differs, a copy with no row, a FIXED site that
 // is not on its builder ⇒ RED. Rows are [file, cmd (the call's first argument, as written), kind, count, why].
 // THE SSH ROADS (lane spawn-env-debts, 2026-10-20): every call whose first argument names ssh / rsync / scp / sftp — made by
