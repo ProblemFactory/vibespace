@@ -50,6 +50,8 @@ const SIGNIN_TTL_MS = 10 * 60e3;
 // phone switched to the mail app for the sign-in link) before it is cancelled
 const SIGNIN_ORPHAN_MS = 3 * 60e3;
 const SCRATCH_PREFIX = 'vs-signin-';
+// the scratch's opener — byte for byte what every release wrote (r1275: it proves an older release's UNMARKED folder the product's)
+const OPENER = '#!/bin/sh\nexit 0\n';
 // mirror of data/bin/vibespace-claude-subscription-login.mjs LOGIN_STATUS_FILE
 // (the helper writes { state:'success'|'error'|'running' } there on exit)
 const LOGIN_STATUS_FILE = '.vibespace-login-status.json';
@@ -156,7 +158,7 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
     // this hub's to sweep; a mark that fails removes the folder and fails as a failed mkdtemp does
     try { OM.writeMark(scratch, ownerId); } catch (e) { OM.removeMarked(scratch); throw e; }   // a torn mark is its only file: removed with the folder
     const opener = path.join(scratch, 'open-url');
-    try { fs.writeFileSync(opener, '#!/bin/sh\nexit 0\n', { mode: 0o700 }); } catch { }
+    try { fs.writeFileSync(opener, OPENER, { mode: 0o700 }); } catch { }
     const e = mintEnvOf(agentEnv(env), { home: scratch, configDir: dir, browser: opener });
     const m = { id, accountId, dir, scratch, phase: 'starting', url: null, email: null, error: null, rev: 0, startedAt: now(), endedAt: null, pty: null, parse: initialSigninParse(), lastLine: '', timer: null, codeSent: false, holders: null, orphanTimer: null, screen: initialRawScreen(), outputAt: 0, rawTimer: null, stalled: false, rawHint: null };
     runs.set(accountId, m);
@@ -240,7 +242,8 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
   // PROVE IS ITS OWN DEAD THING): only a folder that carries this product's owner mark AND whose owner (pid and start) is proven
   // gone, AND older than the life plus five minutes (the release's age bar, kept: a run in another pid space reads as gone here,
   // yet a live run is never that old — its TTL ends it); an unmarked folder of the name is LEFT (another program's, a suite's, a
-  // second hub's before its mark) — age alone took a suite's scratch of the name once it was that old
+  // second hub's before its mark) — unless r1275: an OLDER release's, taken by its prefix, its opener's exact bytes and its age (the
+  // opener goes second to last) — age alone took a suite's scratch of the name once it was that old
   function sweep() {
     let n = 0, names = [];
     try { names = fs.readdirSync(tmpRoot); } catch { }
@@ -250,8 +253,8 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
       try {
         const st = fs.lstatSync(p);
         if (!st.isDirectory() || (process.getuid && st.uid !== process.getuid()) || now() - st.mtimeMs < sweepAgeMs) continue;
-        if (!OM.provenDead(p)) continue;
-        OM.removeMarked(p); n++;
+        if (!OM.sweepable(p, { name: 'open-url', bytes: OPENER })) continue;   // r1275 (1): an older release's unmarked folder, proven by its opener
+        OM.removeMarked(p, { last: 'open-url' }); n++;
       } catch { }
     }
     if (n) log(`[claude-signin] boot sweep: removed ${n} orphaned sign-in scratch dir(s)`);
@@ -286,4 +289,4 @@ function registerSigninRoutes(app, { signin, isAgentBearer }) {
   app.delete('/api/accounts/:id/signin', (req, res) => { if (refuse(req, res)) return; answer(res, signin.cancel(req.params.id)); });
 }
 
-module.exports = { create, registerSigninRoutes, socketHold, socketClosed, SIGNIN_TTL_MS, SIGNIN_ORPHAN_MS, SCRATCH_PREFIX, LOGIN_STATUS_FILE };
+module.exports = { create, registerSigninRoutes, socketHold, socketClosed, SIGNIN_TTL_MS, SIGNIN_ORPHAN_MS, SCRATCH_PREFIX, OPENER, LOGIN_STATUS_FILE };

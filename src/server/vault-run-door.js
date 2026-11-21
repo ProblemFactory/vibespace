@@ -329,15 +329,27 @@ function endMarked(mark) {
   }
   return n;
 }
+/** r1275 (2): one entry of a run folder — a file is shredded; a FOLDER the run's program made is shredded ONE level down (its files
+ *  overwritten and unlinked, then the folder removed once that left it empty); anything deeper stays and keeps the run folder MARKED
+ *  (judged again at every start), as the kb says. */
+function shredEntry(p) {
+  let st = null;
+  try { st = fs.lstatSync(p); } catch { return; }
+  if (!st.isDirectory()) { shredFile(p); return; }
+  let inner = [];
+  try { inner = fs.readdirSync(p); } catch { }
+  for (const n of inner) shredFile(path.join(p, n));
+  try { fs.rmdirSync(p); } catch { }
+}
 function shredDir(dir) {
   let names = [];
   try { names = fs.readdirSync(dir); } catch { }
   // r1152: the door's MARK goes LAST — a hub ended mid-shred (a kill, a crash) leaves a folder that still carries its mark, so the
   // next start's sweep (which judges only a marked folder) finishes the job; shredded first, its values would be left unmarked forever
-  for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));
-  // r1213 (a): …and only when NOTHING ELSE is left (the folder read again): a file whose unlink failed, or a sub-folder the run's
-  // program made (shredFile unlinks files only), keeps the folder MARKED, so every later start's sweep judges it again — never an
-  // unmarked folder with something in it, which the law would keep for ever
+  for (const n of names) if (n !== OWNER_FILE) shredEntry(path.join(dir, n));
+  // r1213 (a): …and only when NOTHING ELSE is left (the folder read again): a file whose unlink failed, or what the run's program
+  // left deeper than shredEntry's one level (or a sub-folder it made unreadable), keeps the folder MARKED, so every later start's
+  // sweep judges it again — never an unmarked folder with something in it, which the law would keep for ever
   let left = null; try { left = fs.readdirSync(dir); } catch { left = null; }
   if (left && left.length === 1 && left[0] === OWNER_FILE) shredFile(path.join(dir, OWNER_FILE));
   try { fs.rmdirSync(dir); } catch { }

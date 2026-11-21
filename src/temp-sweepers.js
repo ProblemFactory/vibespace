@@ -16,8 +16,8 @@
  */
 const ROWS = Object.freeze([
   Object.freeze({ file: 'src/server/vault-run-door.js', export: 'RUN_DIR_PREFIX', prefix: 'vs-vault-run-', proof: 'the run folder\'s first file is the door\'s owner mark (its pid and start; the write checked); the start sweep shreds only a marked folder whose owner is proven gone, the mark last and only once nothing else is left (its own shredDir)' }),
-  Object.freeze({ file: 'src/server/claude-signin.js', export: 'SCRATCH_PREFIX', prefix: 'vs-signin-', proof: 'src/owner-mark.js: the scratch folder\'s first file is the hub\'s owner mark; the start sweep removes only a marked folder whose owner is proven gone, the mark last' }),
-  Object.freeze({ file: 'src/server/oat-mint.js', export: 'SCRATCH_PREFIX', prefix: 'vs-oat-mint-', proof: 'src/owner-mark.js: the scratch folder\'s first file is the hub\'s owner mark; the start sweep removes only a marked folder whose owner is proven gone, the mark last' }),
+  Object.freeze({ file: 'src/server/claude-signin.js', export: 'SCRATCH_PREFIX', prefix: 'vs-signin-', proof: 'src/owner-mark.js: the scratch folder\'s first file is the hub\'s owner mark; the start sweep removes a marked folder whose owner is proven gone, or an older release\'s unmarked one taken by its opener\'s exact bytes — past its age bar; the opener second to last, the mark last' }),
+  Object.freeze({ file: 'src/server/oat-mint.js', export: 'SCRATCH_PREFIX', prefix: 'vs-oat-mint-', proof: 'src/owner-mark.js: the scratch folder\'s first file is the hub\'s owner mark; the start sweep removes a marked folder whose owner is proven gone, or an older release\'s unmarked one taken by its opener\'s exact bytes — past its age bar; the opener second to last, the mark last' }),
 ]);
 
 /** The row whose prefix a folder named `name` (its whole basename) would wear, or null. */

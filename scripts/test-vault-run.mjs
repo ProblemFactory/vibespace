@@ -1000,33 +1000,41 @@ console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program o
     };
     const ul = await unlinkOrder(DOOR);
     ok(ul.n === 1 && ul.gone && ul.order.length === 3 && ul.order[2] === DOOR.OWNER_FILE, 'r1152: a dead folder is shredded MARK LAST — every value file first, then .owner, then the folder', ul);
-    const FOR_LINE = "  for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));\n", MARK_ANY = "  if (names.includes(OWNER_FILE)) shredFile(path.join(dir, OWNER_FILE));\n", LEFT_LINE = "  if (left && left.length === 1 && left[0] === OWNER_FILE) shredFile(path.join(dir, OWNER_FILE));\n";   // stale-pins: kept (MARK_ANY is the r1152 line, a RED's replacement — gone from the door on purpose)
+    const FOR_LINE = "  for (const n of names) if (n !== OWNER_FILE) shredEntry(path.join(dir, n));\n", MARK_ANY = "  if (names.includes(OWNER_FILE)) shredFile(path.join(dir, OWNER_FILE));\n", LEFT_LINE = "  if (left && left.length === 1 && left[0] === OWNER_FILE) shredFile(path.join(dir, OWNER_FILE));\n";   // stale-pins: kept (MARK_ANY is the r1152 line, a RED's replacement — gone from the door on purpose)
     const markFirst = M.load('src/server/vault-run-door.js', anchored(anchored(SRCs, FOR_LINE, MARK_ANY + FOR_LINE, 'test-vault-run ⑥b r1152 mark-first'), LEFT_LINE, '', 'test-vault-run ⑥b r1152 mark-first (its last line)'), 'r1152-mark-first');
     const ulR = await unlinkOrder(markFirst);
     ok(ulR.n === 1 && ulR.order.length === 3 && ulR.order[0] === DOOR.OWNER_FILE, 'RED — a shred that takes the mark FIRST (its plant proves itself: three files were unlinked): the mark-last leg goes red there', ulR);
-    // r1213 (a): THE MARK GOES ONLY WHEN NOTHING ELSE IS LEFT (the folder read again) — a file whose unlink failed, or a sub-folder
-    // the run's program made, keeps the folder MARKED, so the next start's sweep judges it again (an unmarked folder with something
-    // in it would be kept for ever by the law)
+    // r1213 (a): THE MARK GOES ONLY WHEN NOTHING ELSE IS LEFT (the folder read again) — a file whose unlink failed, or what the run's
+    // program left deeper than one level, keeps the folder MARKED, so the next start's sweep judges it again (an unmarked folder with
+    // something in it would be kept for ever by the law). r1275 (2): a sub-folder the program made is shredded ONE level down — a value
+    // copied into it is overwritten and gone, and the folder with it
     const leftOf = async (doorMod) => {
       const w = await world({ doorMod });
       const d = path.join(w.runRoot, DOOR.RUN_DIR_PREFIX + 'gone04'); fs.mkdirSync(d, { mode: 0o700 });
       fs.writeFileSync(path.join(d, DOOR.OWNER_FILE), JSON.stringify(deadId)); for (const f of ['f0', 'f1']) fs.writeFileSync(path.join(d, f), VALUE, { mode: 0o600 });
-      const sd = path.join(w.runRoot, DOOR.RUN_DIR_PREFIX + 'gone05'); fs.mkdirSync(path.join(sd, 'made-by-the-program'), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(path.join(sd, DOOR.OWNER_FILE), JSON.stringify(deadId)); fs.writeFileSync(path.join(sd, 'f0'), VALUE, { mode: 0o600 });
-      const un0 = fs.unlinkSync; let refused = 0;
+      const sd = path.join(w.runRoot, DOOR.RUN_DIR_PREFIX + 'gone05'); fs.mkdirSync(path.join(sd, 'made-by-the-program', 'deeper'), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(path.join(sd, DOOR.OWNER_FILE), JSON.stringify(deadId)); fs.writeFileSync(path.join(sd, 'f0'), VALUE, { mode: 0o600 }); fs.writeFileSync(path.join(sd, 'made-by-the-program', 'deeper', 'x'), 'two levels down');
+      const od = path.join(w.runRoot, DOOR.RUN_DIR_PREFIX + 'gone06'); fs.mkdirSync(path.join(od, 'made-by-the-program'), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(path.join(od, DOOR.OWNER_FILE), JSON.stringify(deadId)); fs.writeFileSync(path.join(od, 'f0'), VALUE, { mode: 0o600 }); fs.writeFileSync(path.join(od, 'made-by-the-program', 'copy-of-f0'), VALUE, { mode: 0o600 });
+      const outside = path.join(w.dir, 'outside-the-run.txt'); fs.writeFileSync(outside, 'keep me'); fs.symlinkSync(outside, path.join(od, 'made-by-the-program', 'link-out'));   // a link inside the sub-folder: never followed
+      const un0 = fs.unlinkSync, op0 = fs.openSync; let refused = 0, copyOverwritten = false;
       fs.unlinkSync = function (q, ...rest) { if (String(q) === path.join(d, 'f1')) { refused++; throw Object.assign(new Error('EBUSY (the leg refuses this one unlink)'), { code: 'EBUSY' }); } return un0.call(this, q, ...rest); };
-      let n1 = null; try { n1 = w.door.sweep(); } finally { fs.unlinkSync = un0; }
-      const at1 = { dMark: fs.existsSync(path.join(d, DOOR.OWNER_FILE)), dF1: fs.existsSync(path.join(d, 'f1')), dF0: fs.existsSync(path.join(d, 'f0')), sMark: fs.existsSync(path.join(sd, DOOR.OWNER_FILE)), sSub: fs.existsSync(path.join(sd, 'made-by-the-program')), sF0: fs.existsSync(path.join(sd, 'f0')) };
+      fs.openSync = function (q, flags, ...rest) { if (String(q) === path.join(od, 'made-by-the-program', 'copy-of-f0') && typeof flags === 'number' && (flags & fs.constants.O_WRONLY)) copyOverwritten = true; return op0.call(this, q, flags, ...rest); };   // shredFile overwrites before it unlinks
+      let n1 = null; try { n1 = w.door.sweep(); } finally { fs.unlinkSync = un0; fs.openSync = op0; }
+      const at1 = { dMark: fs.existsSync(path.join(d, DOOR.OWNER_FILE)), dF1: fs.existsSync(path.join(d, 'f1')), dF0: fs.existsSync(path.join(d, 'f0')), sMark: fs.existsSync(path.join(sd, DOOR.OWNER_FILE)), sDeep: fs.existsSync(path.join(sd, 'made-by-the-program', 'deeper', 'x')), sF0: fs.existsSync(path.join(sd, 'f0')), odGone: !fs.existsSync(od), odCopy: fs.existsSync(path.join(od, 'made-by-the-program', 'copy-of-f0')), copyOverwritten, outsideKept: fs.readFileSync(outside, 'utf8') === 'keep me' };
       const n2 = w.door.sweep();   // the next start: the unlink works again
       return { refused, n1, at1, n2, dGone: !fs.existsSync(d), sMark2: fs.existsSync(path.join(sd, DOOR.OWNER_FILE)) };
     };
     const lf = await leftOf(DOOR);
-    ok(lf.refused === 1 && lf.n1 === 2 && lf.at1.dMark && lf.at1.dF1 && !lf.at1.dF0 && lf.at1.sMark && lf.at1.sSub && !lf.at1.sF0 && lf.n2 === 2 && lf.dGone && lf.sMark2,
-      'r1213 (a): the mark is shredded only when NOTHING ELSE is left — a file whose unlink failed, or a sub-folder the run\'s program made, keeps its folder MARKED (its other value files gone); the next start\'s sweep judges both again and finishes the first', lf);
+    ok(lf.refused === 1 && lf.n1 === 3 && lf.at1.dMark && lf.at1.dF1 && !lf.at1.dF0 && lf.at1.sMark && lf.at1.sDeep && !lf.at1.sF0 && lf.at1.odGone && lf.at1.copyOverwritten && lf.at1.outsideKept && lf.n2 === 2 && lf.dGone && lf.sMark2,
+      'r1213 (a) + r1275 (2): the mark is shredded only when NOTHING ELSE is left — a file whose unlink failed, or what the program left two levels down, keeps its folder MARKED (its other value files gone) and the next start\'s sweep judges it again; a value copied ONE level down is OVERWRITTEN and unlinked with its sub-folder (a link inside it never followed: the file it names kept), and that folder is gone', lf);
     const anyLeft = M.load('src/server/vault-run-door.js', anchored(SRCs, LEFT_LINE, MARK_ANY, 'test-vault-run ⑥b r1213 mark-with-something-left'), 'r1213-mark-any');
     const lfR = anyLeft ? await leftOf(anyLeft) : null;
-    ok(!!anyLeft && lfR && lfR.refused === 1 && lfR.at1.dF1 && !lfR.at1.dMark && lfR.at1.sSub && !lfR.at1.sMark && lfR.n2 === 0 && !lfR.dGone,
-      'RED — the r1152 line (the mark shredded whatever is left; its plant proves itself: one unlink was refused): both folders are left UNMARKED with something in them, and the next sweep never judges them again — the leg above goes red there', lfR);
+    ok(!!anyLeft && lfR && lfR.refused === 1 && lfR.at1.dF1 && !lfR.at1.dMark && lfR.at1.sDeep && !lfR.at1.sMark && lfR.n2 === 0 && !lfR.dGone,
+      'RED — the r1152 line (the mark shredded whatever is left; its plant proves itself: one unlink was refused): the folders are left UNMARKED with something in them, and the next sweep never judges them again — the leg above goes red there', lfR);
+    const flat = M.load('src/server/vault-run-door.js', anchored(SRCs, FOR_LINE, "  for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));\n", 'test-vault-run ⑥b r1275 no level down'), 'r1275-flat');   // stale-pins: kept (the r1213 loop: this RED's replacement)
+    const lfF = flat ? await leftOf(flat) : null;
+    ok(!!flat && lfF && lfF.at1.odCopy && !lfF.at1.odGone, 'RED — r1213\'s loop (no level down; its plant proves itself: the copy was written): the value copied one level down STAYS, its folder kept marked for ever — the leg above goes red there', lfF && lfF.at1);
   }
   // THE ORDER THE LAW STANDS ON (pinned): in a run folder the door's mark is the FIRST file made — before any value file — so a
   // folder with no mark never holds a value of the door's. Every O_CREAT open under the world's run root is recorded

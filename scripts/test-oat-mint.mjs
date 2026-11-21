@@ -558,34 +558,37 @@ console.log('§7 F3 — orphaned scratch dirs are swept at boot; an orderly exit
   // r1213 (主开发's law — A SWEEP REMOVES ONLY WHAT IT CAN PROVE IS ITS OWN DEAD THING): a folder MARKED by a hub that is gone AND
   // older than the life + 5 min (the release's age bar, kept) is removed (its whole tree); a gone hub's marked folder that is FRESH
   // stays (a run in another pid space reads as gone, yet a live run is never that old); a LIVE hub's marked folder stays, whatever
-  // its age; a folder of the name with NO mark is LEFT, however old; a non-mint dir stays
+  // its age; a folder of the name with NO mark is LEFT, however old — but an OLDER release's (r1275) taken by its prefix, its opener's
+  // exact bytes and its age; a non-mint dir stays
   const OMk = require(path.join(REPO, 'src/owner-mark.js')), PIm = require(path.join(REPO, 'src/proc-identity.js'));
   const deadId = JSON.parse(require('child_process').execFileSync(process.execPath, ['-e', `console.log(JSON.stringify(require(${JSON.stringify(path.join(REPO, 'src/proc-identity.js'))}).identityOf(process.pid)))`], { encoding: 'utf8' }));
   const liveKid = require('child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
   try {
     const liveId = PIm.identityOf(liveKid.pid);
-    const SRC7 = fs.readFileSync(ORCH, 'utf8');
+    const SRC7 = fs.readFileSync(ORCH, 'utf8'), OPEN7 = loadOrch().OPENER;
     const hourAgo = (Date.now() - 3600e3) / 1000;
     const plant = (root) => {
       fs.mkdirSync(root);
-      const d = { old: path.join(root, 'vs-oat-mint-OLD1'), fresh: path.join(root, 'vs-oat-mint-FRESH1'), live: path.join(root, 'vs-oat-mint-LIVE1'), unmarked: path.join(root, 'vs-oat-mint-NOMARK1'), other: path.join(root, 'vs-other-OLD') };
+      const d = { old: path.join(root, 'vs-oat-mint-OLD1'), fresh: path.join(root, 'vs-oat-mint-FRESH1'), live: path.join(root, 'vs-oat-mint-LIVE1'), unmarked: path.join(root, 'vs-oat-mint-NOMARK1'), other: path.join(root, 'vs-other-OLD'), legacyOld: path.join(root, 'vs-oat-mint-LEGACY1'), legacyYoung: path.join(root, 'vs-oat-mint-LEGACY2'), torn: path.join(root, 'vs-oat-mint-TORN1') };
       for (const x of Object.values(d)) { fs.mkdirSync(x); fs.writeFileSync(path.join(x, 'browser-url'), 'https://claude.example/x\n'); }
+      for (const x of [d.legacyOld, d.legacyYoung, d.torn]) fs.writeFileSync(path.join(x, 'open-url'), OPEN7);   // r1275 (1): an OLDER release's folder — no mark, the product's own opener
+      fs.writeFileSync(path.join(d.torn, OMk.OWNER_FILE), '{"pid":12');   // a TORN mark: never judged by its contents
       OMk.writeMark(d.old, deadId); fs.mkdirSync(path.join(d.old, '.claude')); fs.writeFileSync(path.join(d.old, '.claude', 'left.json'), '{}');   // a tree, as a CLI leaves one
       OMk.writeMark(d.fresh, deadId); OMk.writeMark(d.live, liveId);
-      for (const x of [d.old, d.live, d.unmarked, d.other]) fs.utimesSync(x, hourAgo, hourAgo);   // FRESH stays fresh
+      for (const x of [d.old, d.live, d.unmarked, d.other, d.legacyOld, d.torn]) fs.utimesSync(x, hourAgo, hourAgo);   // FRESH and LEGACY2 stay fresh
       return d;
     };
-    const left = (d) => ({ old: fs.existsSync(d.old), fresh: fs.existsSync(path.join(d.fresh, OMk.OWNER_FILE)), live: fs.existsSync(path.join(d.live, OMk.OWNER_FILE)), unmarked: fs.existsSync(path.join(d.unmarked, 'browser-url')), other: fs.existsSync(d.other) });
+    const left = (d) => ({ old: fs.existsSync(d.old), fresh: fs.existsSync(path.join(d.fresh, OMk.OWNER_FILE)), live: fs.existsSync(path.join(d.live, OMk.OWNER_FILE)), unmarked: fs.existsSync(path.join(d.unmarked, 'browser-url')), other: fs.existsSync(d.other), legacyOld: fs.existsSync(d.legacyOld), legacyYoung: fs.existsSync(path.join(d.legacyYoung, 'open-url')), torn: fs.existsSync(path.join(d.torn, 'open-url')) });
     const dN = plant(path.join(tmpBase, 'sweep-none'));
     loadOrch(SRC7.replace('  sweep();\n', '')).create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep-none'), log: () => { } });
     ok(fs.existsSync(dN.old), 'RED control: without the boot sweep the gone hub\'s marked folder stays');
     const d = plant(path.join(tmpBase, 'sweep')), logs = [];
     loadOrch().create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep'), log: (l) => logs.push(l) });
     const L = left(d);
-    ok(!!liveId && !L.old && L.fresh && L.live && L.unmarked && L.other && logs.some((l) => /boot sweep: removed 1 /.test(l)),
-      'r1213: the boot sweep removes the folder a GONE hub marked that is older than the TTL + 5 min (its whole tree); a gone hub\'s FRESH marked folder, a LIVE hub\'s marked folder and an UNMARKED folder of the name stay (the last two an hour old); a non-mint dir stays', { L, logs });
+    ok(!!liveId && !L.old && L.fresh && L.live && L.unmarked && L.other && !L.legacyOld && L.legacyYoung && L.torn && logs.some((l) => /boot sweep: removed 2 /.test(l)),
+      'r1213 + r1275 (1): the boot sweep removes the folder a GONE hub marked and an OLDER release\'s unmarked folder its opener proves the product\'s, each older than the TTL + 5 min (their whole trees); a gone hub\'s FRESH marked folder, a LIVE hub\'s, an UNMARKED folder of the name, an older release\'s YOUNG one and one with a TORN mark stay; a non-mint dir stays', { L, logs });
     // RED (a) — the release's sweep by AGE alone (the mark test cut; its anchor found once): the hour-old UNMARKED folder is removed
-    const A7 = "        if (!OM.provenDead(p)) continue;\n        OM.removeMarked(p); n++;\n", B7 = "        fs.rmSync(p, { recursive: true, force: true }); n++;\n";   // stale-pins: kept (a RED's replacement text — the release's line, gone from the product on purpose)
+    const A7 = "        if (!OM.sweepable(p, { name: 'open-url', bytes: OPENER })) continue;   // r1275 (1): an older release's unmarked folder, proven by its opener\n        OM.removeMarked(p, { last: 'open-url' }); n++;\n", B7 = "        fs.rmSync(p, { recursive: true, force: true }); n++;\n";   // stale-pins: kept (a RED's replacement text — the release's line, gone from the product on purpose)
     const AGE7 = "        if (!st.isDirectory() || (process.getuid && st.uid !== process.getuid()) || now() - st.mtimeMs < sweepAgeMs) continue;\n", NOAGE7 = "        if (!st.isDirectory() || (process.getuid && st.uid !== process.getuid())) continue;\n";
     const fA = SRC7.split(A7).length - 1, fG = SRC7.split(AGE7).length - 1;
     const dA = plant(path.join(tmpBase, 'sweep-red-age')); if (fA === 1) loadOrch(SRC7.split(A7).join(B7)).create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep-red-age'), log: () => { } });
@@ -595,6 +598,35 @@ console.log('§7 F3 — orphaned scratch dirs are swept at boot; an orderly exit
     const dB = plant(path.join(tmpBase, 'sweep-red-mark')); if (fG === 1) loadOrch(SRC7.split(AGE7).join(NOAGE7)).create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep-red-mark'), log: () => { } });
     const LB = left(dB);
     ok(fG === 1 && !LB.fresh && LB.unmarked, 'RED (b) — the mark test alone without the age bar (its anchor found once): the gone hub\'s FRESH marked folder is removed (a live mint in another pid space would be) — the leg above goes red there', { fG, LB });
+    // RED (c) — r1213's rule (no proof by the opener): the older release's old folder is KEPT for ever — the leg above goes red there
+    const LEG7 = "OM.sweepable(p, { name: 'open-url', bytes: OPENER })", fL = SRC7.split(LEG7).length - 1;
+    const dC = plant(path.join(tmpBase, 'sweep-red-legacy')); if (fL === 1) loadOrch(SRC7.split(LEG7).join('OM.sweepable(p, null)')).create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep-red-legacy'), log: () => { } });
+    const LC = left(dC);
+    ok(fL === 1 && LC.legacyOld && !LC.old, 'RED (c) — without the opener\'s proof (its anchor found once; the plant proves itself: the dead-marked one went): the older release\'s hour-old folder is KEPT for ever — the leg above goes red there', { fL, LC });
+    // r1275 (3): A MARK THAT FAILS FAILS THE MINT'S START — written one byte short, or a write that throws: start throws (its route
+    // answers 500, as a failed mkdtemp) and NO folder is left; RED — an owner-mark copy with the write unchecked, under a mint copy
+    const Module = require('node:module'), OMP = path.join(REPO, 'src/owner-mark.js'), OMSRC = fs.readFileSync(OMP, 'utf8');
+    const withOwnerMark = (omSrc, fn) => { const real = require.cache[OMP], m = new Module(OMP, null); m.filename = OMP; m.paths = Module._nodeModulePaths(path.dirname(OMP)); m._compile(omSrc, OMP); m.loaded = true; require.cache[OMP] = m; try { return fn(); } finally { if (real) require.cache[OMP] = real; else delete require.cache[OMP]; } };
+    const accF = am.createSubscription({ name: 'Mark fail' }).id;
+    let rootN = 0;
+    const failOf = (O, mode) => {
+      const root = path.join(tmpBase, 'markfail-' + (++rootN)); fs.mkdirSync(root);
+      const saved = { openSync: fs.openSync, writeSync: fs.writeSync }, fake = { onData() { }, onExit() { }, write() { }, kill() { } };
+      let markFd = null, hit = 0, threw = null, st = null;
+      const M2 = O.create({ accounts: am, claudeCmd: '/opt/claude', env: baseEnv(), tmpRoot: root, log: () => { }, spawnPty: () => fake });
+      fs.openSync = function (q, ...rest) { const fd = saved.openSync.call(this, q, ...rest); if (markFd == null && path.basename(String(q)) === OMk.OWNER_FILE && String(q).startsWith(root + path.sep)) markFd = fd; return fd; };
+      fs.writeSync = function (fd, buf, ...rest) { if (markFd != null && fd === markFd) { markFd = -1; hit++; if (mode === 'throw') throw Object.assign(new Error('EIO (the leg)'), { code: 'EIO' }); const b = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf)); return saved.writeSync.call(this, fd, b, 0, b.length - 1); } return saved.writeSync.call(this, fd, buf, ...rest); };
+      try { st = M2.start({ accountId: accF }); } catch (e) { threw = e.code || e.message; } finally { Object.assign(fs, saved); }
+      const leftN = fs.readdirSync(root).filter((n) => n.startsWith('vs-oat-mint-')).length;
+      M2.stopAll();
+      return { hit, threw, started: !!(st && st.ok), left: leftN };
+    };
+    const f1 = failOf(loadOrch(), 'short'), f2 = failOf(loadOrch(), 'throw');
+    ok(f1.hit === 1 && f1.threw === 'ESHORTMARK' && !f1.started && f1.left === 0 && f2.hit === 1 && f2.threw === 'EIO' && !f2.started && f2.left === 0,
+      'r1275 (3): a mint\'s mark written one byte short (ESHORTMARK) or a write that throws fails the start, and NO folder is left', { short: f1, throw: f2 });
+    const UNCHK = "    if (n !== b.length) throw Object.assign(new Error(`the owner mark was written short (${n} of ${b.length} bytes)`), { code: 'ESHORTMARK' });\n", fU = OMSRC.split(UNCHK).length - 1;
+    const fR = fU === 1 ? withOwnerMark(OMSRC.split(UNCHK).join(''), () => failOf(loadOrch(SRC7), 'short')) : null;
+    ok(!!fR && fR.hit === 1 && fR.started, 'RED — the mark\'s write unchecked (an owner-mark copy under a mint copy; its anchor found once; the plant proves itself: the write was made short): the mint STARTS over a torn mark — the leg above goes red there', fR);
     // r1213: THE MARK IS THE FOLDER'S FIRST FILE — a mint's scratch carries this hub's identity before anything else is made in it
     const orderOf = (O, rootO) => {
       fs.mkdirSync(rootO);

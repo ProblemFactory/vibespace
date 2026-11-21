@@ -54,6 +54,8 @@ const OM = require('../owner-mark.js');   // r1213: the scratch folder's owner m
 
 const MINT_TTL_MS = 10 * 60e3;
 const SCRATCH_PREFIX = 'vs-oat-mint-';
+// the scratch's opener — byte for byte what every release wrote (r1275: it proves an older release's UNMARKED folder the product's)
+const OPENER = '#!/bin/sh\nprintf \'%s\\n\' "$1" > "$(dirname "$0")/browser-url"\nexit 0\n';
 
 function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spawnPty = null, env = process.env,
   tmpRoot = os.tmpdir(), ttlMs = MINT_TTL_MS, ttlTimer = setTimeout, now = () => Date.now(), log = (...a) => console.log(...a),
@@ -206,7 +208,7 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
     // this hub's to sweep; a chmod or a mark that fails removes the folder and fails as a failed mkdtemp does
     try { fs.chmodSync(dir, 0o700); OM.writeMark(dir, ownerId); } catch (e) { OM.removeMarked(dir); throw e; }   // empty, or a torn mark its only file: removed with the folder
     const opener = path.join(dir, 'open-url');
-    fs.writeFileSync(opener, '#!/bin/sh\nprintf \'%s\\n\' "$1" > "$(dirname "$0")/browser-url"\nexit 0\n', { mode: 0o700 });
+    fs.writeFileSync(opener, OPENER, { mode: 0o700 });
     const e = childEnv(dir);
     const m = { id, accountId, phase: 'starting', url: null, localUrl: null, error: null, startedAt: now(), endedAt: null, mintedAt: null, pty: null, dir: dir, parse: initialMintParse(), lastLine: '', screen: initialRawScreen(), outputAt: 0, rawTimer: null, stalled: false, rawHint: null };
     mints.set(id, m);
@@ -299,8 +301,9 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   // carries this product's owner mark AND whose owner (pid and start) is proven
   // gone, AND older than the TTL + 5 min (the release's age bar, kept: a mint in
   // another pid space reads as gone here, yet a live one is never that old); an
-  // unmarked folder of the name is LEFT — age alone took a suite's scratch of the
-  // name once it was that old.
+  // unmarked folder of the name is LEFT — unless r1275: an OLDER release's, taken
+  // by its prefix, its opener's exact bytes and its age (the opener goes second
+  // to last) — age alone took a suite's scratch of the name once it was that old.
   function sweep() {
     let n = 0, names = [];
     try { names = fs.readdirSync(tmpRoot); } catch { }
@@ -310,8 +313,8 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
       try {
         const st = fs.lstatSync(p);
         if (!st.isDirectory() || (process.getuid && st.uid !== process.getuid()) || now() - st.mtimeMs < sweepAgeMs) continue;
-        if (!OM.provenDead(p)) continue;
-        OM.removeMarked(p); n++;
+        if (!OM.sweepable(p, { name: 'open-url', bytes: OPENER })) continue;   // r1275 (1): an older release's unmarked folder, proven by its opener
+        OM.removeMarked(p, { last: 'open-url' }); n++;
       } catch { }
     }
     if (n) log(`[oat-mint] boot sweep: removed ${n} orphaned sign-in scratch dir(s)`);
@@ -350,4 +353,4 @@ function registerMintRoutes(app, { mint, isAgentBearer }) {
   app.post('/api/accounts/:id/oat/mint/:mid/confirm', (req, res) => { if (refuse(req, res)) return; if (!own(req, res)) return; const b = req.body || {}; answer(res, mint.confirm(req.params.mid, { save: b.save === true, accountId: typeof b.accountId === 'string' ? b.accountId : null })); });
 }
 
-module.exports = { create, registerMintRoutes, panelProbeVia, MINT_TTL_MS, SCRATCH_PREFIX };
+module.exports = { create, registerMintRoutes, panelProbeVia, MINT_TTL_MS, SCRATCH_PREFIX, OPENER };
