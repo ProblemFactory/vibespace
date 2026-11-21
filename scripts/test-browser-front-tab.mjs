@@ -447,9 +447,18 @@ async function keeperCreateLeg(X, KTid, tbId) {
   M.winOf.set(M.aTab, 1); M.winOf.set(M.bTab, 2); // B's window lives: its later tab is made IN it (openTabInWindow)
   const KM = F2(0xBF);
   M.hooks.openTabInWindow = async () => { await sleep(250); M.edit(M.NS, (s) => { s.tabs.push({ tabId: 'tbf', targetId: KM, url: 'about:blank', title: 'Page blank', label: null, opener: null }); }); M.winOf.set(KM, 2); return { ok: true, targetId: KM, windowId: 2 }; };
+  // THE ACT'S OWN LINES (主开发 r1125, placed: a UTC pass of two whole-list runs read TWO lines): world() makes keeper creates of its
+  // own before this leg acts (k.browse, k.attach ×2 — each a spawned stand-in agent-browser), and with markSayMs 60 a loaded runner
+  // lets one of THOSE cross 60 ms and say its own line. The leg judges only the lines said DURING its act (from j0 on), prints them
+  const j0 = M.journal.length;
   let mr = null; try { mr = await M.k.agentTabAct({ browserKey: KB, argv: ['tab', 'new', 'https://b.example/slow'] }); } catch (e) { mr = { threw: String(e && e.message) }; }
   M.hooks.openTabInWindow = null;
-  const said = M.journal.filter((l) => /a tab the keeper creates is still in flight after \d+ s \(1 on this browser\) — every tab born on it meanwhile is stamped for nobody until it settles/.test(l));
+  const IN_FLIGHT = /a tab the keeper creates is still in flight after \d+ s \(1 on this browser\) — every tab born on it meanwhile is stamped for nobody until it settles/;
+  const said = M.journal.slice(j0).filter((l) => IN_FLIGHT.test(l)), before = M.journal.slice(0, j0).filter((l) => IN_FLIGHT.test(l));
+  console.log(`    r694 (4) judged the act's ${said.length} line(s): ${JSON.stringify(said)} · said before the act (world's own creates, not judged): ${before.length}`);
+  // CONTROL: a line of the world's own create, planted before the act — the old whole-journal count reads it, the act's window does not
+  const planted = [...M.journal.slice(0, j0), '[browser] bp-planted: a tab the keeper creates is still in flight after 0 s (1 on this browser) — every tab born on it meanwhile is stamped for nobody until it settles', ...M.journal.slice(j0)];
+  ok(planted.filter((l) => IN_FLIGHT.test(l)).length === said.length + before.length + 1 && planted.slice(j0 + 1).filter((l) => IN_FLIGHT.test(l)).length === said.length, `CONTROL (r694 (4)'s window): a setup create's line, planted before the act, is counted by the whole journal (${planted.filter((l) => IN_FLIGHT.test(l)).length}) and NOT by the act's window (${said.length})`);
   const quietW = W.journal.filter((l) => /a tab the keeper creates is still in flight/.test(l));
   ok(said.length === 1 && quietW.length === 0, 'r694 (4): a keeper create still in flight past the stated time is said in ONE journal line (every birth there is stamped for nobody meanwhile); CONTROL: the creates that settled in time said nothing', { said, quietW: quietW.length, mr: mr && (mr.threw || (mr.opened && mr.opened.targetId)) });
   M.k.shutdown();
