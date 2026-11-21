@@ -45,7 +45,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, runFontLegs, runnerFontEnv, drawnFace, CHROME_QUIET } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, runFontLegs, runnerFontEnv, drawnFace, CHROME_QUIET, realClicker } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv();
@@ -459,15 +459,26 @@ try {
   check(`it streams on while pinned: the pin holds through ${samples.length} samples, each at the bottom, the window defined (we = total)`,
     samples.every((g) => g.pin === true && g.sh - g.st - g.ch < 60 && Number.isFinite(g.total) && g.we === g.total) && samples[samples.length - 1].total > samples[0].total && !r11.some((e) => e.tag === 'unpin'), samples);
   check('…the stream\'s tool cards fold under run headers', await evalJs(`${L2}.querySelectorAll('.chat-run-header').length`) > 0);
-  // a run header press — open, then close — never unpins
+  // a run header press — open, then close — never unpins. B-1217 (6): ONE run, named by its first card (the header is rebuilt
+  // each pass, always before that card), pressed twice through the real-click door (measured, hit-tested at the press, aimed
+  // 40 px in, never scrolled: it is in view). The base re-found «the last header in view» for the close — the stream can add a
+  // newer run in the 700 ms between, so the second press OPENED that one (no runClose in the fine trace, 1 red in 11) — and
+  // pressed where the header HAD been while the pinned list moved under it
   m11 = await seq2();
-  let hdr = await evalJs(`(() => { const l = ${L2}, lr = l.getBoundingClientRect(); const hs = [...l.querySelectorAll('.chat-run-header')].filter((h) => { const r = h.getBoundingClientRect(); return r.height > 0 && r.top > lr.top + 4 && r.bottom < lr.bottom - 4; }); const h = hs[hs.length - 1]; if (!h) return null; const r = h.getBoundingClientRect(); return { x: Math.round(r.x + Math.min(40, r.width / 2)), y: Math.round(r.y + r.height / 2) }; })()`);
-  check('a run header is in view to press', !!hdr, hdr);
-  if (hdr) { await press(hdr.x, hdr.y); await sleep(700); }
-  const gOpen = await geo2();
-  hdr = await evalJs(`(() => { const l = ${L2}, lr = l.getBoundingClientRect(); const hs = [...l.querySelectorAll('.chat-run-header')].filter((h) => { const r = h.getBoundingClientRect(); return r.height > 0 && r.top > lr.top + 4 && r.bottom < lr.bottom - 4; }); const h = hs[hs.length - 1]; if (!h) return null; const r = h.getBoundingClientRect(); return { x: Math.round(r.x + Math.min(40, r.width / 2)), y: Math.round(r.y + r.height / 2) }; })()`);
-  if (hdr) { await press(hdr.x, hdr.y); await sleep(700); }
+  const runMid = await evalJs(`(() => { const l = ${L2}, lr = l.getBoundingClientRect(); const hs = [...l.querySelectorAll('.chat-run-header')].filter((h) => { const r = h.getBoundingClientRect(); return r.height > 0 && r.top > lr.top + 4 && r.bottom < lr.bottom - 4 && h.nextElementSibling && h.nextElementSibling.dataset.msgId; }); const h = hs[hs.length - 1]; return h ? h.nextElementSibling.dataset.msgId : null; })()`);
+  check('a run header is in view to press', !!runMid, runMid);
+  const RUN_HDR = `([...${L2}.querySelectorAll('.chat-run-header')].find((h) => h.nextElementSibling && h.nextElementSibling.dataset.msgId === ${JSON.stringify(runMid)}) || null)`;
+  const runIsOpen = () => evalJs(`(() => { const h = ${RUN_HDR}; return h ? h.classList.contains('open') : null; })()`);
+  const RCK = realClicker({ evalJs, cdp });
+  const runWas = await runIsOpen();
+  const press1 = runMid ? await RCK(RUN_HDR, { scroll: 'if-needed', aimLeft: 40 }) : false; const miss1 = RCK.lastMiss;
+  await sleep(700);
+  const runThen = await runIsOpen(); const gOpen = await geo2();
+  const press2 = runMid ? await RCK(RUN_HDR, { scroll: 'if-needed', aimLeft: 40 }) : false; const miss2 = RCK.lastMiss;
+  await sleep(700);
+  const runAfter = await runIsOpen();
   const gClose = await geo2(); r11 = await ring2(m11);
+  check(`…the SAME run's header pressed twice through the real-click door toggles it and back (${runWas} → ${runThen} → ${runAfter})`, press1 === true && press2 === true && typeof runWas === 'boolean' && runThen === !runWas && runAfter === runWas, { runMid, press1, miss1, press2, miss2, runWas, runThen, runAfter });
   check('a run header pressed open and closed while it streams never unpins (the owner opened one at 13:21:59)', gOpen.pin === true && gClose.pin === true && !r11.some((e) => e.tag === 'unpin'), { gOpen, gClose, tags: r11.filter((e) => /pin|run/i.test(e.tag)) });
 
   console.log('⑪ a real wheel up unpins; scrolling back to the end re-pins; ↓ pins at the live tail');
