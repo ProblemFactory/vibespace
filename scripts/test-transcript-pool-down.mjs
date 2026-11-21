@@ -208,6 +208,41 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   // …and a warm while the storage's note stands (an attach's, a page's) runs NOTHING on this loop — no find, no stat: the pool alone
   const Rh = await road('④d a warm while the storage\'s note stands', () => SS0.warmSessionJsonlAsync(sid, cwd));
   ok(Rh.reads.length === 0 && Rh.out === false && tails(H) === asked0 + 1, `${Rh.name}: ${Rh.reads.length} sync calls of any kind on the transcript (no find, no stat) — the pool alone was asked (${tails(H) - asked0} ask), refused again`, { reads: Rh.reads.slice(0, 6), out: Rh.out });
+  // THE STORAGE'S NOTE STAYS THE STORAGE'S: its own retry refused by another kind (no worker — between a deadline kill and the
+  // respawn) ⇒ still no re-warm from the parse
+  const Nw = refusing({ status: 503, code: 'no-worker' }); C._setTranscriptPoolForTest(Nw);
+  await SS0.warmSessionJsonlAsync(sid, cwd);
+  const w0 = tails(Nw);
+  SS0.parseSessionJsonl(sid, cwd);
+  await new Promise((res) => setImmediate(res));
+  ok(w0 === 1 && tails(Nw) === w0, `the hung storage's retry refused as «no worker» ⇒ the note stays the storage's: the parse asks no warm (${tails(Nw) - w0} more)`, { w0, w1: tails(Nw) });
+  // the hung note's two ENDS: the pool answers (the note ends, the history loads) …
+  C._setTranscriptPoolForTest(up());
+  const okEnd = await SS0.warmSessionJsonlAsync(sid, cwd), loaded = SS0.parseSessionJsonl(sid, cwd);
+  ok(okEnd === true && !loaded.notLoaded && loaded.length === 1500, `the hung note ends when the pool answers its retry: the history loads (${loaded.length} records, no «not loaded»)`, { okEnd, n: loaded.length, notLoaded: loaded.notLoaded });
+  // … or the op's own error (the note ends; the parse is the old road)
+  fs.writeFileSync(claudeFp, lines.slice(0, 1200).join('\n') + '\n');
+  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' })); await SS0.warmSessionJsonlAsync(sid, cwd);
+  C._setTranscriptPoolForTest(refusing({ code: 'EACCES' })); await SS0.warmSessionJsonlAsync(sid, cwd);
+  const opEnd = SS0.parseSessionJsonl(sid, cwd);
+  ok(!opEnd.notLoaded && opEnd.length === 1200, `the hung note ends on its retry's own op error (EACCES): the old road (${opEnd.length} records)`, { n: opEnd.length, notLoaded: opEnd.notLoaded });
+  // THE RACE: a refusal that comes back AFTER another warm read the same file notes nothing (the history is loaded)
+  fs.writeFileSync(claudeFp, lines.slice(0, 1000).join('\n') + '\n');
+  let release = null;
+  const D = { calls: [], call(op, payload) { this.calls.push(op); if (op === 'jsonlTail') return new Promise((_, rej) => { release = () => rej(Object.assign(new Error('a stand-in held, then refused'), { status: 503, code: 'no-worker' })); }); return Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); } };
+  C._setTranscriptPoolForTest(D);
+  const late = SS0.warmSessionJsonlAsync(sid, cwd);
+  await new Promise((res) => setImmediate(res));
+  C._setTranscriptPoolForTest(up());
+  const read2 = await SS0.warmSessionJsonlAsync(sid, cwd);
+  if (release) release();
+  const lateOut = await late, raced = SS0.parseSessionJsonl(sid, cwd);
+  ok(!!release && read2 === true && lateOut === false && !raced.notLoaded && raced.length === 1000, `a refusal that lands after another warm READ the file notes nothing — the history stays loaded (${raced.length} records, no «not loaded»)`, { held: !!release, read2, lateOut, n: raced.length, notLoaded: raced.notLoaded });
+  // ONE TAGGED TWIN per kept entry (the merge memo keys on the array): two parses under one note answer the SAME list
+  fs.writeFileSync(claudeFp, lines.slice(0, 800).join('\n') + '\n');
+  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); await SS0.warmSessionJsonlAsync(sid, cwd);
+  const t1 = SS0.parseSessionJsonl(sid, cwd), t2 = SS0.parseSessionJsonl(sid, cwd);
+  ok(t1 === t2 && t1.notLoaded === 'transcript_reader_restarting' && t1.length === 1000, `the kept copy's tagged twin is ONE per cache entry (the same list twice: the merge memo hits; ${t1.length} records, tagged)`, { same: t1 === t2, n: t1.length, notLoaded: t1.notLoaded });
 }
 C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
 
@@ -222,6 +257,7 @@ C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
     ['/api/subagents\' reason in the page\'s words', /if \(r\?\.reason === 'transcript_reader_restarting'\) \{ this\._sayReaderRestarting\(\); return; \}/.test(cv)],
     ['a search of it says «try again», never «No results»', /if \(data && data\.notLoaded\) \{ if \(!stale\(\)\) this\._searchStatus\.textContent = t\('The transcript reader is restarting — try again in a moment\.'\); return; \}/.test(csr)],
     ['the resume road says the line', /if \(data\.notLoaded\) chatView\._sayHistoryNotLoaded\?\.\(data\.notLoaded\);/.test(sl)],
+    ['the REBUILD alone sets _historyNotLoaded (never an attach that joined it)', /session\._historyNotLoaded = notLoaded \|\| null;/.test(fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8')) && !/session\._historyNotLoaded = /.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'))],   // stale-pins: kept (the absence check: ws-handler writes it no more)
   ];
   for (const [name, held] of pins) ok(held, `the page: ${name}`);
 }

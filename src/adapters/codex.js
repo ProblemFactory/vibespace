@@ -684,7 +684,7 @@ function _transcriptPoolGet() {
 // in-place road (a bundle with no worker script: its own loop, by design) is no pool failure.
 const READER_RESTARTING = 'the transcript reader is restarting — try again in a moment';
 const isPoolFailure = (e) => !!e && (e.status === 503 || e.code === 'heap_bound' || e.code === 'history_busy');
-const isStorageHung = (e) => !!e && (e.safeFsTimeout === true || e.code === 'path-hung');
+const isStorageHung = (e) => !!e && (e.safeFsTimeout === true || e.code === 'path-hung' || e.code === 'storage-blocked');   // + a mount the door holds blocked (src/mount-door.js)
 function readerRefusal(e) {
   return Object.assign(new Error(READER_RESTARTING), { code: 'transcript_reader_restarting', status: 503, why: (e && (e.code || e.message)) || 'no transcript pool on this process', storageHung: isStorageHung(e) });
 }

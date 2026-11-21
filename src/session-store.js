@@ -660,9 +660,11 @@ function jsonlCacheClear() { _jsonlCache.clear(); _jsonlResident = 0; }
 const _historyRefused = new Map();   // claudeSessionId → {at, why, storageHung, fp, retryAt}
 const RETRY_WARM_MS = 2000;
 const NOT_LOADED = 'transcript_reader_restarting';
-function noteHistoryRefused(id, e, fp) {
+function noteHistoryRefused(id, e, fp, { stillHung = false } = {}) {
   const was = _historyRefused.get(id);
-  _historyRefused.set(id, { at: Date.now(), why: (e && e.why) || (e && e.message) || 'refused', storageHung: !!(e && e.storageHung), fp: fp || (was && was.fp) || null, retryAt: was ? was.retryAt : 0 });
+  // `stillHung`: a refusal of the hung storage's own retry stays the STORAGE's whatever its kind (a no-worker answer between a
+  // deadline kill and the respawn is the same hung storage) — never back to the 2 s re-warm and its find + stat on this loop
+  _historyRefused.set(id, { at: Date.now(), why: (e && e.why) || (e && e.message) || 'refused', storageHung: stillHung || !!(e && e.storageHung), fp: fp || (was && was.fp) || null, retryAt: was ? was.retryAt : 0 });
 }
 const notLoadedList = () => Object.assign([], { notLoaded: NOT_LOADED });
 // the kept copy's tagged twin, ONE per cache entry (an entry's list never changes in place): the merge memo keys on the array
@@ -712,16 +714,21 @@ const promoteWarm = (job) => { if (!job || !job.bulk) return; const i = _warmQ.b
 async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
   let tasks = null, refusedNow = false;
   const bulk = !!(opts && opts.bulk === true);   // r935: a bulk resume's first attach (ws-handler `_bulkRead`); every other ask is a person's
-  const hung = _historyRefused.get(claudeSessionId);
+  const hung = _historyRefused.get(claudeSessionId), noteAtStart = hung;
   if (hung && hung.storageHung && hung.fp) {
-    // row B-422c: the STORAGE hung under this transcript (a deadline, a path the pool remembers hung) — NO find and NO stat on this
-    // loop: the pool alone is asked again (its path memory refuses at once while it remembers; then a worker tries, off the loop)
+    // row B-422c: the STORAGE hung under this transcript (a deadline, a path the pool remembers hung, a blocked mount) — NO find and
+    // NO stat on this loop: the pool alone is asked again for the noted path (its path memory refuses at once while it remembers;
+    // then a worker tries, off the loop). Only the note this warm found is touched (another warm may have read or noted meanwhile).
+    const mine = () => _historyRefused.get(claudeSessionId) === hung;
+    const t0 = performance.now();
     let r = null;
     try { r = await require('./adapters/codex').readJsonlTailAsync(hung.fp, { dropSubagent: true }); }
-    catch (e) { if (e && e.code === NOT_LOADED) noteHistoryRefused(claudeSessionId, e, hung.fp); else _historyRefused.delete(claudeSessionId); return false; }
-    _historyRefused.delete(claudeSessionId);
+    catch (e) { if (mine()) { if (e && e.code === NOT_LOADED) noteHistoryRefused(claudeSessionId, e, hung.fp, { stillHung: true }); else _historyRefused.delete(claudeSessionId); } return false; }
+    if (mine()) _historyRefused.delete(claudeSessionId);
     if (!r || !r.entry) return false;
+    _stampJsonlParse(r.bytes, performance.now() - t0);
     _jsonlCachePut(claudeSessionId, r.entry);
+    await warmTaskEvents(claudeSessionId, hung.fp, { ino: r.entry.ino, size: r.entry.size });   // the storage answers again: the task scan beside it, as the normal road
     return true;
   }
   try {
@@ -770,7 +777,7 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
       return false;
     }
     return ok;
-  } catch { return false; } finally { if (!refusedNow) _historyRefused.delete(claudeSessionId); if (tasks) await tasks; }   // row B-422c: any end but the refusal clears the note (the file gone, an op's own error, an append folded in)
+  } catch { return false; } finally { if (!refusedNow && _historyRefused.get(claudeSessionId) === noteAtStart) _historyRefused.delete(claudeSessionId); if (tasks) await tasks; }   // row B-422c: any end but the refusal clears the note it found (the file gone, an op's own error, an append folded in) — never one another warm took meanwhile
 }
 
 function parseSessionJsonl(claudeSessionId, cwd) {
