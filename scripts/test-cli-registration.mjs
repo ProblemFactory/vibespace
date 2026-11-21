@@ -268,7 +268,9 @@ console.log('\n⑤ THE HOSTED RUNNER\'S CLAUDE CODE (B-28b1, the coordinator\'s 
   // never typed in the workflow, never bare. Law 2: the newest is installed BESIDE it (its own npm prefix), READ by the tree's --auto road
   // (strings, never run), kept as the artifact, said in one line; never a gate, never a turn. (B-9ff2 step 1's dump of the installed build
   // is that look-ahead now: the installed build IS the pin.)
-  const PIN = 'run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)\n';
+  // r1682: the pin is READ IN ITS OWN ASSIGNMENT — a failed read stops the step before any install (a `$(…)` inside an argument does not)
+  const PIN = 'run: pin="$(node scripts/ci-claude.mjs pin)" && bash scripts/ci-npm.sh install -g "@anthropic-ai/claude-code@$pin"\n';
+  const PIN_RUN = PIN.slice('run: '.length, -1), LATEST_RUN = 'bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@latest';
   const LOOK = '        run: node scripts/ci-claude.mjs look-ahead --bin "$RUNNER_TEMP/claude-newest/bin/claude" --data "$RUNNER_TEMP/cli-dump"\n';
   const NEWEST = '        run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@latest\n';
   const fastOf = (yml) => { const at = yml.indexOf('\n  fast:\n'), end = yml.indexOf('\n  heavy-shards:\n', at); return at < 0 ? '' : yml.slice(at, end < 0 ? undefined : end); };
@@ -276,12 +278,13 @@ console.log('\n⑤ THE HOSTED RUNNER\'S CLAUDE CODE (B-28b1, the coordinator\'s 
   const wiring = (yml) => {
     const f = fastOf(yml), h = heavyOf(yml), bad = [];
     // every install of claude in the workflow is the pin: none typed, none bare (the look-ahead's @latest, in its own step, is the one other)
-    const installs = [...yml.matchAll(/^\s*(?:- )?(?:run: )?bash scripts\/ci-npm\.sh install -g (@anthropic-ai\/claude-code[^\n]*?)\s*$/gm)].map((m) => m[1]);
-    const other = installs.filter((x) => x !== '@anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)' && x !== '@anthropic-ai/claude-code@latest');
+    // every line that installs claude, whole (the run's value): the pin's one form, or the look-ahead's newest
+    const installs = yml.split('\n').filter((l) => /scripts\/ci-npm\.sh install -g "?@anthropic-ai\/claude-code/.test(l)).map((l) => l.trim().replace(/^- /, '').replace(/^run: /, ''));
+    const other = installs.filter((x) => x !== PIN_RUN && x !== LATEST_RUN);
     if (!f.includes(PIN)) bad.push('the fast job does not install the tree\'s pinned build');
     if (!h.includes(PIN)) bad.push('the heavy shards do not install the tree\'s pinned build');
     for (const x of other) bad.push(`an install of claude that is not the pin: ${x}`);
-    if (installs.filter((x) => x === '@anthropic-ai/claude-code@latest').length !== 1) bad.push(`the registry's newest is installed ${installs.filter((x) => x === '@anthropic-ai/claude-code@latest').length} time(s), not once (the look-ahead)`);
+    if (installs.filter((x) => x === LATEST_RUN).length !== 1) bad.push(`the registry's newest is installed ${installs.filter((x) => x === LATEST_RUN).length} time(s), not once (the look-ahead)`);
     // two steps, each ONE plain line (test-ci-gate §2g): the newest installed beside the pin, then read
     const inst = /( {6}- name: Look ahead — install the registry's newest claude beside the pin[^\n]*\n(?: {8}.*\n)+)/.exec(f);
     const look = /( {6}- name: Look ahead — read the newest beside the pin[^\n]*\n(?: {8}.*\n)+)/.exec(f), up = /( {6}- name: Upload the runner's claude dump[^\n]*\n(?: {8}.*\n)+)/.exec(f);
@@ -310,13 +313,42 @@ console.log('\n⑤ THE HOSTED RUNNER\'S CLAUDE CODE (B-28b1, the coordinator\'s 
   ok('the look-ahead\'s ONE line says how far ahead: «' + lines.ahead + '» · the same build «nothing ahead» · an older one said · a failed read said — every one naming the pin, none a gate', /newest is 9\.9\.999, ahead of the pinned/.test(lines.ahead) && /54 change\(s\)/.test(lines.ahead) && /nothing registers itself/.test(lines.ahead) && /IS the pinned .* nothing ahead/.test(lines.same) && /OLDER than the pinned/.test(lines.older) && /could not be read — no claude binary/.test(lines.broken) && Object.values(lines).every((l) => l.includes(P0)), lines);
   // CONTROLS — each planted fault named
   const typed = yml.replace(PIN, 'run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@' + P0 + '\n');
+  // stale-pins: kept — the 96a0db36d form, the pin read inside the install's argument (r1682's red)
+  const inArg = yml.replace(PIN, 'run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)\n');
   const bare = yml.replace(PIN, 'run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code\n');
   const asGate = yml.replace(/( {6}- name: Look ahead — read the newest beside the pin[^\n]*\n(?: {8}(?!continue-on-error).*\n)*) {8}continue-on-error: true\n/, '$1');
   const overPin = yml.replace('          NPM_CONFIG_PREFIX: ${{ runner.temp }}/claude-newest\n', '');
   const noLook = yml.replace(/ {6}- name: Look ahead — install the registry's newest claude beside the pin[^\n]*\n(?: {8}.*\n)+/, '').replace(/ {6}- name: Look ahead — read the newest beside the pin[^\n]*\n(?: {8}.*\n)+/, '');
-  const CTL = { typed: [typed, /an install of claude that is not the pin: @anthropic-ai\/claude-code@\d/], bare: [bare, /an install of claude that is not the pin: @anthropic-ai\/claude-code$/], asGate: [asGate, /the look-ahead can fail the job/], overPin: [overPin, /installs over the pin/], noLook: [noLook, /keeps no look-ahead/] };
+  const CTL = { typed: [typed, /an install of claude that is not the pin: bash scripts\/ci-npm\.sh install -g @anthropic-ai\/claude-code@\d/], bare: [bare, /an install of claude that is not the pin: bash scripts\/ci-npm\.sh install -g @anthropic-ai\/claude-code$/], inArg: [inArg, /an install of claude that is not the pin: bash scripts\/ci-npm\.sh install -g @anthropic-ai\/claude-code@\$\(node scripts\/ci-claude\.mjs pin\)$/], asGate: [asGate, /the look-ahead can fail the job/], overPin: [overPin, /installs over the pin/], noLook: [noLook, /keeps no look-ahead/] };
   const seen = Object.fromEntries(Object.entries(CTL).map(([k, [t, re]]) => [k, t !== yml && wiring(t).some((x) => re.test(x))]));
-  ok('CONTROL: a typed version, a bare install, a look-ahead that can fail the job, one that installs over the pin, and none at all — each RED by name', Object.values(seen).every(Boolean), seen);
+  ok('CONTROL: a typed version, a bare install, the pin read inside the install\'s argument (the 96a0db36d form), a look-ahead that can fail the job, one that installs over the pin, and none at all — each RED by name', Object.values(seen).every(Boolean), seen);
+  // THE PIN IS CHECKED AS A VERSION (r1682): pinOf names a read that throws and a value that is not x.y.z
+  const okPin = CC.pinOf(() => '2.1.328'), thrown = CC.pinOf(() => { throw new Error("Cannot find module 'a-module-npm-ci-brings'"); }), notV = ['', undefined, '2.1', 'latest', '2.1.328 '].map((v) => CC.pinOf(() => v));
+  ok('pinOf: the pin is a version x.y.z or an ERROR named — a read that throws («could not be read», its first line said) and a value that is not x.y.z (empty, none, 2.1, latest, a trailing blank)', okPin.version === '2.1.328' && !okPin.error && /could not be read .*Cannot find module 'a-module-npm-ci-brings'/.test(thrown.error) && notV.every((r) => !r.version && /is not a version x\.y\.z/.test(r.error)), { okPin, thrown, notV });
+  // THE STEP's OWN LINE under GitHub's shell (bash -eo pipefail), in a stub tree: the real ci-claude.mjs, a recorder for scripts/ci-npm.sh,
+  // and a src/record-shape.js that throws (a require only `npm ci` brings) or that holds the pin
+  {
+    const stubAt = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cli-reg-pin-')), rec = path.join(stubAt, 'installs.txt');
+    try {
+      for (const d of ['scripts', 'src']) fs.mkdirSync(path.join(stubAt, d));
+      fs.copyFileSync(path.join(REPO, 'scripts/ci-claude.mjs'), path.join(stubAt, 'scripts/ci-claude.mjs'));
+      fs.writeFileSync(path.join(stubAt, 'scripts/ci-npm.sh'), 'printf "%s\\n" "$*" >> "$VS_PIN_REC"\n');
+      const stepRun = (line, shape) => {
+        fs.writeFileSync(path.join(stubAt, 'src/record-shape.js'), shape);
+        try { fs.rmSync(rec, { force: true }); } catch { }
+        const r = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', line], { cwd: stubAt, env: { PATH: path.dirname(process.execPath) + ':/usr/bin:/bin', VS_PIN_REC: rec }, encoding: 'utf8', timeout: 30000 });
+        let installed = null; try { installed = fs.readFileSync(rec, 'utf8').trim(); } catch { }
+        return { status: r.status, installed, stderr: (r.stderr || '').trim().split('\n')[0] };
+      };
+      const THROWS = "require('a-module-only-npm-ci-brings');\n", HOLDS = `module.exports = { SCHEMA_CLI_VERSION: '${P0}' };\n`, NOTV = "module.exports = { SCHEMA_CLI_VERSION: undefined };\n";
+      const IN_ARG = 'bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)';
+      const good = stepRun(PIN_RUN, HOLDS), broken = stepRun(PIN_RUN, THROWS), unset = stepRun(PIN_RUN, NOTV), old = stepRun(IN_ARG, THROWS);
+      ok(`the workflow's pin step, its own line under bash -eo pipefail: a readable pin installs @anthropic-ai/claude-code@${P0}; a pin that cannot be read FAILS the step (exit ${broken.status}) and installs NOTHING, saying why (${broken.stderr.slice(0, 120)}); a value that is not a version the same`,
+        good.status === 0 && good.installed === `install -g @anthropic-ai/claude-code@${P0}` && broken.status !== 0 && broken.installed === null && /ci-claude pin: the tree's pinned build could not be read/.test(broken.stderr) && unset.status !== 0 && unset.installed === null, { good, broken, unset });
+      ok('…RED CONTROL: the 96a0db36d line (the pin read inside the install\'s argument), with the same unreadable pin, exits 0 and installs `@anthropic-ai/claude-code@` — an EMPTY version, the registry\'s newest under the pin\'s name (r1682\'s red)',
+        old.status === 0 && old.installed === 'install -g @anthropic-ai/claude-code@', old);
+    } finally { try { fs.rmSync(stubAt, { recursive: true, force: true }); } catch { } }
+  }
 }
 
 console.log(fail ? `\n✗ (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

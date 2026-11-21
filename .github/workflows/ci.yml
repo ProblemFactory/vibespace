@@ -112,9 +112,11 @@ jobs:
       # THE TREE'S PINNED BUILD (B-28b1, the coordinator's r238, 2026-11-20 — Known K44): the version is the tree's own
       # SCHEMA_CLI_VERSION, printed by scripts/ci-claude.mjs (it requires nothing: this runs before npm ci) — never typed here, so
       # the record oracle is STRICT on every hosted run and the one real turn runs on a build the tree registered.
+      # THE PIN IS READ IN ITS OWN ASSIGNMENT (r1682): a `$(…)` inside an argument that fails does not stop a step, and npm would install
+      # the registry's newest under this step's name; `pin` refuses anything but x.y.z (exit 3), and `&&` never reaches the install then.
       - name: Install claude CLI, the tree's pinned build (chat E2E; subscription oat auth is the
           officially documented CI channel — docs/en/github-actions)
-        run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)
+        run: pin="$(node scripts/ci-claude.mjs pin)" && bash scripts/ci-npm.sh install -g "@anthropic-ai/claude-code@$pin"
         timeout-minutes: 5
       # THE NEWEST AS A LOOK-AHEAD (B-28b1 law 2; it replaces B-9ff2 step 1's dump of the installed build — that is the pin now): the
       # registry's newest is installed BESIDE the pin (its own npm prefix, through the one npm door), the tree's --auto road READS it
@@ -272,7 +274,7 @@ jobs:
         run: bash scripts/ci-fonts.sh --system
         timeout-minutes: 6
       - name: Install claude CLI, the tree's pinned build (B-28b1, scripts/ci-claude.mjs pin, as the fast job)
-        run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)
+        run: pin="$(node scripts/ci-claude.mjs pin)" && bash scripts/ci-npm.sh install -g "@anthropic-ai/claude-code@$pin"
         timeout-minutes: 5
       # B-ba47 pick B (the coordinator's r1139): the run NAMES the claude it installed, by the handed VS_CLAUDE_BIN — the fenced
       # legs (test-claude-steer-chrome §A, test-claude-wrapper-queue §A) that do not find a NAMED program are RED, never a skip

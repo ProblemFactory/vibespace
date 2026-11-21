@@ -22,6 +22,15 @@ const require = createRequire(import.meta.url);
 
 /** The tree's pinned Claude Code build — the newest build src/record-shape.js was verified against. */
 export const pinnedBuild = () => require(path.join(HERE, '..', 'src', 'record-shape.js')).SCHEMA_CLI_VERSION;
+/** PURE (the coordinator's r1682, round wynbby0e0): the pin, CHECKED AS A VERSION before anything uses it — {version} or {error}, named.
+ *  A read that throws (src/record-shape.js gaining a require of node_modules: `pin` runs before `npm ci`) or a value that is not
+ *  x.y.z is an error: the step that installs it must fail, never install the registry's newest under the pin's name. */
+export function pinOf(read = pinnedBuild) {
+  let v;
+  try { v = read(); } catch (e) { return { error: `the tree's pinned build could not be read (src/record-shape.js SCHEMA_CLI_VERSION): ${String((e && e.message) || e).split('\n')[0]}` }; }
+  if (typeof v !== 'string' || !/^\d+\.\d+\.\d+$/.test(v)) return { error: `the tree's pinned build is not a version x.y.z: ${JSON.stringify(v)}` };
+  return { version: v };
+}
 
 const vcmp = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 
@@ -37,9 +46,9 @@ export function lookAheadLine(pinned, r) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [cmd, ...a] = process.argv.slice(2);
   const opt = (k) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : null; };
-  if (cmd === 'pin') { process.stdout.write(pinnedBuild() + '\n'); process.exit(0); }
+  if (cmd === 'pin') { const p = pinOf(); if (p.error) { console.error(`ci-claude pin: ${p.error} — nothing is printed, so the step that installs it fails`); process.exit(3); } process.stdout.write(p.version + '\n'); process.exit(0); }
   if (cmd === 'look-ahead') {
-    const pinned = pinnedBuild();
+    const pinned = pinOf().version || '(unreadable)';
     let r;
     try { const { autoDraft } = await import('./claude-cli-dump.mjs'); r = autoDraft({ bin: opt('--bin'), dataDir: opt('--data'), force: true }); } catch (e) { r = { error: String((e && e.message) || e).slice(0, 300) }; }
     const line = lookAheadLine(pinned, r);

@@ -690,9 +690,12 @@ console.log('\n§2f ci.yml installs through scripts/ci-apt.sh (a repository we d
 console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never');
 {
   const WF_DIR = path.join(REPO, '.github', 'workflows');
-  // B-28b1: the claude install names the tree's pin by its ONE reader, `@anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)` —
-  // the door's one form with a command in it (no other `$(…)` passes: a step that runs anything else is no door step)
-  const DOOR = /^bash scripts\/ci-npm\.sh (?:ci|install -g(?: (?:[@\w./-]+|@anthropic-ai\/claude-code@\$\(node scripts\/ci-claude\.mjs pin\)))+)$/;
+  // B-28b1: the claude install names the tree's pin by its ONE reader — since r1682 READ IN ITS OWN ASSIGNMENT,
+  // `pin="$(node scripts/ci-claude.mjs pin)" && bash scripts/ci-npm.sh install -g "@anthropic-ai/claude-code@$pin"`: the door's one form
+  // with a command in it. The read INSIDE an argument (`…@$(node scripts/ci-claude.mjs pin)`) is RED by name: a failed read does not
+  // stop the step, and npm installs the registry's newest under the pin's name.
+  const DOOR = /^(?:bash scripts\/ci-npm\.sh (?:ci|install -g(?: [@\w./-]+)+)|pin="\$\(node scripts\/ci-claude\.mjs pin\)" && bash scripts\/ci-npm\.sh install -g "@anthropic-ai\/claude-code@\$pin")$/;
+  const PIN_IN_ARG = /(?<!\bpin=")\$\(node scripts\/ci-claude\.mjs pin\)/;   // any read of the pin but its own assignment's
   const INSTALL = /\bnpm\s+(?:ci|i|install|add)\b/;
   const SUITE_LINE = /^node scripts\/ci\.mjs(?: [^;&|<>`()\n]*)?$/;
   const verdictOf = (files) => {
@@ -703,6 +706,7 @@ console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never
         let ciAt = -1, suites = 0;
         for (const [s, st] of steps.entries()) {
           const run = st.run ?? '';
+          if (PIN_IN_ARG.test(run)) bad.push(`${name} job ${k + 1}: the pin read inside an argument (a failed read installs the registry's newest): ${run.split('\n')[0].trim()}`);
           if (DOOR.test(run)) { doorSteps++; if (/ ci$/.test(run) && ciAt < 0) ciAt = s; } else if (INSTALL.test(st.text)) bad.push(`${name} job ${k + 1}: an install outside the door: ${(st.run ?? st.text).split('\n')[0].trim()}`);
           if (!/scripts\/ci\.mjs/.test(st.text)) continue;
           suites++; suiteSteps++;
@@ -726,6 +730,8 @@ console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never
   const MUTANTS = [
     ['the fast job\'s npm ci bare again', (t) => t.replace('run: bash scripts/ci-npm.sh ci', 'run: npm ci'), /an install outside the door: npm ci$/m],
     ['the claude CLI installed bare', (t) => t.replace('run: bash scripts/ci-npm.sh install -g', 'run: npm i -g'), /an install outside the door: npm i -g @anthropic-ai\/claude-code/],
+    // stale-pins: kept — the 96a0db36d form of the pin step, rebuilt for this control (r1682)
+    ['the pin read inside an argument (the 96a0db36d form)', (t) => t.replace('run: pin="$(node scripts/ci-claude.mjs pin)" && bash scripts/ci-npm.sh install -g "@anthropic-ai/claude-code@$pin"', 'run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)'), /the pin read inside an argument \(a failed read installs the registry's newest\): bash scripts\/ci-npm\.sh install -g @anthropic-ai\/claude-code@\$\(node/],
     ['an `npm install` fallback after the door', (t) => t.replace('run: bash scripts/ci-npm.sh ci', 'run: bash scripts/ci-npm.sh ci || npm install'), /an install outside the door: bash scripts\/ci-npm\.sh ci \|\| npm install/],
     ['ci.mjs in a for loop', (t) => t.replace(FAST_RUN, '      - run: for i in 1 2 3; do node scripts/ci.mjs && break; sleep 20; done\n'), /not ONE plain line: run: for i in 1 2 3/],
     ['the heavy shard run twice by ||', (t) => t.replace(HEAVY_RUN, '$1$2 || $2'), /not ONE plain line: run: node scripts\/ci\.mjs --heavy .* \|\| node/],

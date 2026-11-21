@@ -78,6 +78,27 @@ function arrowReads(text, name) {
   }
   return false;
 }
+// THE FLAG STANDS AS A POSITIVE CONJUNCT (the coordinator's r1682, round wynbby0e0): the condition is an `&&` chain at its top level
+// (no `||` / `??` there; a comma's last operand is the condition) and ONE conjunct IS the flag — bare, `!!f` or `f===!0`. A flag
+// merely present (`!c&&…`, `c||…`) is a bundle where the law is FALSE: the corrections written for a call that was NOT running.
+function flagConjunct(cond, flag) {
+  const c = String(cond), parts = [];
+  let depth = 0, cur = '', q = null;
+  for (let i = 0; i < c.length; i++) {
+    const ch = c[i];
+    if (q) { cur += ch; if (ch === '\\') { cur += c[i + 1] || ''; i++; } else if (ch === q) q = null; continue; }
+    if (ch === '"' || ch === "'" || ch === '`') { q = ch; cur += ch; continue; }
+    if ('([{'.includes(ch)) depth++;
+    else if (')]}'.includes(ch)) depth--;
+    if (depth === 0 && (c.startsWith('||', i) || c.startsWith('??', i))) return false;
+    if (depth === 0 && ch === ',') { parts.length = 0; cur = ''; continue; }
+    if (depth === 0 && c.startsWith('&&', i)) { parts.push(cur); cur = ''; i++; continue; }
+    cur += ch;
+  }
+  parts.push(cur);
+  const yes = new Set([flag, '!!' + flag, flag + '===!0', '!0===' + flag]);
+  return parts.some((x) => yes.has(x.trim().replace(/^\((.*)\)$/, '$1').trim()));
+}
 function correctionSiteOf(text, wwName, corrNames) {
   const out = { sig: null, site: null, cond: null, branch: '', inBranch: [], caller: null, callerArg: null, ran: false, misses: [] };
   // (1) the signature: FOUR bare parameters, the second compared to "user_interrupted" first thing in the body
@@ -88,10 +109,10 @@ function correctionSiteOf(text, wwName, corrNames) {
   if (sm && wwName) {
     const body = text.slice(sm.index, sm.index + SITE_WINDOW);
     const tern = new RegExp(`(${CS_COND}"remote-cancel"${CS_COND})\\?([^]{0,400}?):${csE(wwName)}(?![\\w$])`, 'g');
-    const flag = csWord(sm[4]);
     const found = [...body.matchAll(tern)].map((m) => ({ m, cond: m[1], branch: m[2], inBranch: corrNames.filter((n) => csWord(n).test(m[2])) }));
-    const hit = found.find((f) => flag.test(f.cond) && f.inBranch.length === corrNames.length) || found[0];
-    if (hit) { out.site = { at: sm.index + hit.m.index, text: hit.m[0] }; out.cond = hit.cond; out.branch = hit.branch; out.inBranch = hit.inBranch; out.flagHeld = flag.test(hit.cond); }
+    const qual = found.find((f) => flagConjunct(f.cond, sm[4]) && f.inBranch.length === corrNames.length);
+    const hit = qual || found[0];   // a red names the first ternary it saw, and says it did not qualify (siteQualified false)
+    if (hit) { out.site = { at: sm.index + hit.m.index, text: hit.m[0] }; out.cond = hit.cond; out.branch = hit.branch; out.inBranch = hit.inBranch; out.flagHeld = flagConjunct(hit.cond, sm[4]); out.siteQualified = !!qual; }
     else out.misses.push(`a «…"remote-cancel"… ? … : ${wwName}» ternary within ${SITE_WINDOW} characters of the signature`);
   }
   // (3) the caller: (call.id, "user_interrupted", call.assistantMessage, F(call)) — F reads call.callRunning === true — or that read inline
@@ -108,6 +129,16 @@ function correctionSiteOf(text, wwName, corrNames) {
   } else out.misses.push('the caller createSyntheticErrorMessage(c.id,"user_interrupted",c.assistantMessage,F(c))');
   out.ok = !!out.sig && !!out.site && out.flagHeld === true && out.inBranch.length === corrNames.length && !!out.caller && out.ran;
   return out;
+}
+/** PURE (r1682): on a hosted run, why the installed claude is not the tree's pin — or null. Off a hosted run, null (the box judges by
+ *  its own strict oracle; a test machine has no agent CLI). */
+function hostedPinWhy({ hosted, bin, size, installed, pinned }) {
+  if (!hosted) return null;
+  if (!bin) return `no claude binary on the hosted runner (the pin step installs ${pinned})`;
+  if (size < 4 * 1024 * 1024) return `${bin} is ${size} bytes — a launcher/shim, not the pinned ${pinned}`;
+  if (!installed) return `the installed build could not be read off ${bin} (the pin is ${pinned})`;
+  if (installed !== pinned) return `the installed ${installed} is not the pin ${pinned}: a failed pin step, or a claude that shadows it on PATH`;
+  return null;
 }
 // THE BUNDLE'S OWN TEXT where the reader looks (≤ 300 characters each): every USE of a correction (never its declaration),
 // createSyntheticErrorMessage( and callRunning===. Printed to STDERR on a red: the runner shows a red suite's stderr WHOLE.
@@ -476,6 +507,11 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
     ok('§4d …RED: a remote-cancel branch that writes ww for the running call (no correction in it) fails, by its empty branch', !wwRan.ok && wwRan.inBranch.length === 0, wwRan);
     const notFlag = correctionSiteOf(mut('Yq(c&&l==="remote-cancel"', 'Yq(a&&l==="remote-cancel"'), 'Bh', C2);
     ok('§4d …RED: a condition without the 4th parameter (the running-call flag) fails', !notFlag.ok && notFlag.flagHeld === false, notFlag);
+    // r1682 (round wynbby0e0): the flag must be a POSITIVE conjunct — a negated one, or one or-ed in, is a bundle where the law is FALSE
+    const negated = correctionSiteOf(mut('Yq(c&&l==="remote-cancel"', 'Yq(!c&&l==="remote-cancel"'), 'Bh', C2);
+    const ored = correctionSiteOf(mut('Yq(c&&l==="remote-cancel"', 'Yq(c||l==="remote-cancel"'), 'Bh', C2);
+    ok('§4d …RED: the flag NEGATED (`!c&&…`: the corrections written for a call that was NOT running) fails, and so does an «or» (`c||…`): the flag stands as a positive conjunct', !negated.ok && negated.flagHeld === false && !ored.ok && ored.flagHeld === false, { negated, ored });
+    ok('§4d …and a positive conjunct in any place, any shape, is the flag: `l==="remote-cancel"&&c`, `(c)&&…`, `!!c&&…`, `c===!0&&…`, after a comma', ['l==="remote-cancel"&&c', '(c)&&l==="remote-cancel"', '!!c&&l==="remote-cancel"', 'c===!0&&l==="remote-cancel"', 'x,c&&l==="remote-cancel"'].every((cnd) => flagConjunct(cnd, 'c')) && !['!c&&l', 'c||l', 'l??c', 'ac&&l', 'x.c&&l', 'c,l'].some((cnd) => flagConjunct(cnd, 'c')));
     const notRun = correctionSiteOf(mut('return t.callRunning===!0', 'return t.status==="running"'), 'Bh', C2);
     ok('§4d …RED: a caller whose argument does not read callRunning === true fails, naming it', !notRun.ok && !notRun.ran && notRun.misses.some((m) => /^Kl\(call\) = call\.callRunning === true/.test(m)), notRun);
     const far = correctionSiteOf(mut('if(i==="user_interrupted"){', 'if(i==="user_interrupted"){return null}' + ';'.repeat(SITE_WINDOW) + '{'), 'Bh', C2);
@@ -490,22 +526,30 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   }
   const bin = findBinary();
   const size = bin ? fs.statSync(bin).size : 0;
-  // the installed BUILD vs the build the shapes were dumped from (src/record-shape.js SCHEMA_CLI_VERSION):
-  // strict on this developer box and whenever the two match; on the Actions mirror — which installs whatever
-  // npm serves today (2.1.278 on 2026-09-21 vs the pinned 2.1.274) — a newer build's drift is PRINTED and
-  // skipped, so the mirror stays readable and the developer box stays the place that goes red on a CLI update.
+  // the installed BUILD vs the build the shapes were dumped from (src/record-shape.js SCHEMA_CLI_VERSION): STRICT wherever the
+  // oracle runs. The Actions mirror once installed whatever npm served that day (2.1.278 on 2026-09-21 vs the pinned 2.1.274) and
+  // printed a newer build's drift as skips; since B-28b1 (1) it installs the tree's pin, and since r1682 a hosted build that is
+  // not the pin is RED (hostedPinWhy), never lenient.
   const pinned = process.env.VIBESPACE_ORACLE_PINNED || R.SCHEMA_CLI_VERSION;
   // B-5e52 (lane bl-tests-e): the oracle READS the binary, never runs it — the build is the versions-dir name, else the bundle's
   // own VERSION stamp (scripts/claude-cli-dump.mjs versionOfBinary); its strings are read ONCE, here and for §4 below
   let binText = null;
   const binTextOf = () => { if (binText === null) { try { binText = execFileSync('strings', ['-n', '8', bin], { maxBuffer: 1024 * 1024 * 1024, encoding: 'latin1' }); } catch { try { binText = fs.readFileSync(bin, 'latin1'); } catch { binText = ''; } } } return binText; };
   const installed = !bin ? null : (DUMP.versionOfBinary(bin, null) || (size >= 4 * 1024 * 1024 ? DUMP.versionOfBinary(bin, binTextOf()) : null));
-  // pinned PER CLI VERSION (lane cli-2-1-288-records): any build in R.SCHEMA_CLI_VERSIONS is strict everywhere
-  const lenient = !!process.env.GITHUB_ACTIONS && installed !== pinned && !R.SCHEMA_CLI_VERSIONS.includes(installed);
-  console.log(`  installed claude ${installed || '(unknown)'} vs pinned schema ${pinned} — ${lenient ? 'INFORMATIONAL (mirror, newer build): drift is printed, not red' : 'STRICT'}`);
+  // ON A HOSTED RUN THE INSTALLED BUILD IS THE PIN, or the suite is RED (the coordinator's r1682, round wynbby0e0). The lenient branch
+  // (a newer build's drift printed, not red) was for the mirror before B-28b1 (1); every hosted job installs the tree's pin since, so a
+  // build that is not it is a failed pin step, a claude that shadows it on PATH, or no binary at all — never a skip.
+  const hostedWhy = hostedPinWhy({ hosted: !!process.env.GITHUB_ACTIONS, bin, size, installed, pinned });
+  if (process.env.GITHUB_ACTIONS) ok(`§4 the hosted runner's claude IS the tree's pin: installed ${installed || '(none)'}, pinned ${pinned} (B-28b1, r1682: never lenient)`, !hostedWhy, hostedWhy);
+  {
+    const H = (o) => hostedPinWhy({ hosted: true, bin: '/x/claude', size: 200 * 1024 * 1024, installed: '2.1.328', pinned: '2.1.328', ...o });
+    ok('§4 the hosted verdict (PURE): the pin is green; another build, a shim, no binary and an unread build are each RED by name; off a hosted run it judges nothing',
+      H({}) === null && /2\.1\.330 is not the pin 2\.1\.328/.test(H({ installed: '2.1.330' })) && /a launcher\/shim/.test(H({ size: 900 })) && /no claude binary/.test(H({ bin: null })) && /build could not be read/.test(H({ installed: null })) && hostedPinWhy({ hosted: false, bin: null, size: 0, installed: null, pinned: '2.1.328' }) === null);
+  }
+  console.log(`  installed claude ${installed || '(unknown)'} vs pinned schema ${pinned} — STRICT`);
   // B-28b1 (the coordinator's r238): the oracle's MODE rides the suite's CLOSING line too — the line a run's summary shows
-  ORACLE_MODE = !bin || size < 4 * 1024 * 1024 ? 'no binary (the binary oracle did not run)' : lenient ? `LENIENT on ${installed || '(unknown)'} (≠ the pinned ${pinned}: drift printed, not red)` : `STRICT on ${installed || '(unknown)'} (pinned ${pinned})`;
-  const oracleOk = lenient ? (n, c, e) => { if (c) ok(n, c, e); else skip(n, 'informational on the mirror (installed ' + installed + ' ≠ pinned ' + pinned + '): ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600)); } : ok;
+  ORACLE_MODE = !bin || size < 4 * 1024 * 1024 ? 'no binary (the binary oracle did not run)' : `STRICT on ${installed || '(unknown)'} (pinned ${pinned})${installed !== pinned ? ' — NOT THE PIN' : ''}`;
+  const oracleOk = ok;   // r1682: every oracle leg is strict wherever it runs (the hosted verdict above names a build that is not the pin)
   if (!bin || size < 4 * 1024 * 1024) {
     skip('binary oracle', bin ? `${bin} is ${size} bytes — a launcher/shim, not the CLI binary (install the native build to run this leg)` : 'no claude binary on PATH / ~/.local/bin / ~/.claude/local');
   } else {
