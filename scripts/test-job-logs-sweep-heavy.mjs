@@ -1093,7 +1093,9 @@ try {
   const law = typeof J4.sweepLogs === 'function';
   if (typeof J4.sweepLogs === 'function') { const orig = J4.sweepLogs.bind(J4); J4.sweepLogs = (o) => { const p = orig(o); p.then((a) => answers4.push({ at: Date.now(), ...a })); return p; }; }
   h.enable();
-  const done4 = await until(() => runsOn(d4, t4.id).length === 20 && J4._logsState && !J4._logsState.catchUp, law ? 30000 : 1500, 10);
+  // B-323e (the box run at 32894265a): the done line is said once its record is ON DISK (the fresh read's find 7) — after `catchUp` is null — so the
+  // wait is for the LINE and the pass's own end, never the record's field alone (it read the journal one durable write early: 9 answers, no done line)
+  const done4 = await until(() => runsOn(d4, t4.id).length === 20 && J4._logsState && !J4._logsState.catchUp && (!law || (L4.some((l) => /catch-up done/.test(l)) && !J4._logsPassP)), law ? 30000 : 1500, 10);
   h.disable();
   const worstMs = h.max / 1e6;
   ok(done4, 'the hub catches up BY ITSELF: the 5 000 dropped runs are gone, the 20 listed stay', `${runsOn(d4, t4.id).length} left`);
@@ -1126,7 +1128,7 @@ try {
   const leftAtRestart = runsOn(d5, t5.id).length - 20;
   ok(mid && leftAtRestart > 0 && leftAtRestart < 5000, `the first engine stopped mid catch-up (${5000 - leftAtRestart} removed, ${leftAtRestart} left)`);
   const { jm: B, logs: LB } = boot(d5, { max: 500, gapMs: 25, bootDelayMs: 20 });
-  const done5 = await until(() => runsOn(d5, t5.id).length === 20 && B._logsState && !B._logsState.catchUp, typeof B.sweepLogs === 'function' ? 20000 : 1500, 10);
+  const done5 = await until(() => runsOn(d5, t5.id).length === 20 && B._logsState && !B._logsState.catchUp && (typeof B.sweepLogs !== 'function' || (LB.some((l) => /catch-up done/.test(l)) && !B._logsPassP)), typeof B.sweepLogs === 'function' ? 20000 : 1500, 10);   // the done line, said once its record is on disk (as P4's wait)
   const jlA = LA.filter((l) => /job-logs/.test(l)), jlB = LB.filter((l) => /job-logs/.test(l));
   ok(done5, 'the restarted hub resumes by itself and finishes');
   ok(jlA.length === 1 && /catch-up: 5,000/.test(jlA[0]) && jlB.length === 1 && /catch-up done: 5,000 run dir\(s\) removed/.test(jlB[0]), 'said twice across the restart: the start once (the first engine), the done once with the WHOLE total (the second)', { A: jlA, B: jlB });
