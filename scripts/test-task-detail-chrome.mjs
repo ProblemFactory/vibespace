@@ -235,6 +235,39 @@ try {
   const foldOpen = await until(() => D.ev(`(() => { const f = (${W(ir.id)}).element.querySelector('.task-detail-more'); const row = f && f.querySelector('[data-more-row="visibility"]'); return f && f.open && row && row.getBoundingClientRect().height > 0 ? true : null; })()`), 5000);
   check('a chip on the fold opens 更多选项 on its row', !!foldOpen);
 
+  // B-5736's follow (主开发 r1218 1, «the product's own suggestion is meant»): A FIRST EXPORT WORKS IN ONE PRESS — the export box's
+  // prefill (the group's notes folder / <id>.md) is the product's suggestion: ONE press of 导出 writes the file, no tick asked; a path the
+  // person typed keeps the tick rule: refused with the field's words, nothing written. (RED: the tip before the follow, 3ee1ed432 —
+  // its first press refused and asked for the tick)
+  {
+    const expRow = `(${W(ir.id)}).element.querySelector('[data-more-row="export"]')`;
+    const onDisk = (p) => (p.startsWith('~/') ? H(p.slice(2)) : p);
+    await D.ev(`(() => { const f = (${W(ir.id)}).element.querySelector('.task-detail-more'); if (f) f.open = true; return true; })()`);
+    const pre = await D.ev(`(() => { const r = ${expRow}; const i = r && r.querySelector('input.task-detail-input'); return i ? i.value : null; })()`);
+    const preFile = pre ? onDisk(pre) : '';
+    check(`B-5736 follow: the export box is prefilled with the product's suggestion, a file not there yet (${pre})`, !!pre && /\.md$/.test(pre) && !fs.existsSync(preFile), { pre, exists: !!preFile && fs.existsSync(preFile) });
+    const exportBtn = `JS:[...${expRow}.querySelectorAll('.task-detail-btn')].find((b) => b.textContent.trim() === '导出')`;
+    await press(D, exportBtn);
+    const wrote = await until(() => (preFile && fs.existsSync(preFile) ? true : null), 8000, 100);
+    const toasts1 = await D.ev('window.__toastTexts()');
+    console.log('  B-5736 follow, the first export (the facts judged): ' + JSON.stringify({ pre, wrote: !!wrote, toasts: (toasts1 || []).slice(-3) }));
+    check('B-5736 follow: ONE press of 导出 on the untouched prefill writes the file — no tick asked (the step back of 3ee1ed432 undone)', !!wrote && fs.readFileSync(preFile, 'utf8').length > 0, { toasts: (toasts1 || []).slice(-3) });
+    // …and an Import RIGHT AFTER it reads the file the export wrote (the field asked again: never refused on its old «absent» answer)
+    const nImp = ((await D.ev('window.__toastTexts()')) || []).length;
+    await press(D, `JS:[...${expRow}.querySelectorAll('.task-detail-btn')].find((b) => b.textContent.trim() === '导入')`);
+    const imp = await until(() => D.ev(`(() => { const t = window.__toastTexts().slice(${nImp}); return t.find((x) => /已导入|没有可导入的文件/.test(x)) || null; })()`), 8000, 100);
+    check(`B-5736 follow: an Import right after the export takes the file it wrote (${imp}), never «there is no file»`, !!imp && /已导入/.test(imp), imp);
+    // a path the PERSON typed keeps the tick rule
+    const typed = H('work/ir/typed-export-zz.md');
+    await typeInto(D, `JS:${expRow}.querySelector('input.task-detail-input')`, typed);
+    await blurAway(D, ir.id);
+    const before = ((await D.ev('window.__toastTexts()')) || []).length;
+    await press(D, exportBtn);
+    const said = await until(() => D.ev(`(() => { const t = window.__toastTexts(); return t.length > ${before} && t.slice(${before}).some((x) => /未生效/.test(x)) ? t.slice(${before}) : null; })()`), 8000, 100);
+    console.log('  B-5736 follow, a typed missing path (the facts judged): ' + JSON.stringify({ said, written: fs.existsSync(typed) }));
+    check('B-5736 follow: a missing path the person TYPED keeps the tick rule — refused with the field\'s words (未生效 …), nothing written', !!said && !fs.existsSync(typed), { said, written: fs.existsSync(typed) });
+  }
+
   // Backlog — the full viewer, its box saves on blur
   await press(D, IN(ir.id, '.task-detail-tabs .sidebar-subtab[data-tab="backlog"]'));
   const blView = await until(() => D.ev(`(() => { const el = (${W(ir.id)}).element; const v = el.querySelector('.task-log-embedded'); return v && v.querySelector('.task-log-add') && /季度会前对齐数字口径/.test(v.textContent) ? { tabs: !!v.querySelector('.task-log-tabs'), search: !!v.querySelector('.task-log-search') } : null; })()`), 10000);

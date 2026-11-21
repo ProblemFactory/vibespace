@@ -3,7 +3,7 @@
 // app launcher, the Files path bar, the first chat, the session palette's /path) — it replaces setupDirAutocomplete.
 // The contract the other lanes embed is frozen:
 //   pathField(input, { bases, groupsOf, host, kind: 'folder'|'file', onCommit, name, onState, create, createWhen, picker,
-//                      chips, id }) → { el, input, value, verdict, commit, set, refresh, open, close, ensure, destroy,
+//                      chips, id, suggests }) → { el, input, value, verdict, commit, set, refresh, open, close, ensure, destroy,
 //                      setDerived }
 // ADDED (lane new-session-group-folder-link — additive, nothing renamed): `pf.setDerived(text, { note, commit = false })`
 //   fills the field FOR the door (a value derived from something else — New Session: the first picked Task Group's folder)
@@ -713,6 +713,7 @@ export function pathField(input, opts = {}) {
       else if (e.as === 'create' && x.missing) info = infoOf(x.path, { exists: false, create: true, isFile: kind === 'file', via: { base: x.base, relative: !!(x.base && x.base !== 'home' && x.base !== 'abs'), kind: how === 'pick' ? 'pick' : 'exact', alias: '' }, how });
     }
     if (info) { st.committed = info; paint(); }
+    else if (e.as !== 'empty' && st.valueAt) st.valueAt = { ...st.valueAt, voided: true };   // B-5736 (r1218 4): the model said «commit» but the target no longer takes — no value either
     answer(e.doors, info);   // B-225c: the presses hear their own outcome FIRST — an onCommit that destroys the field never turns it into «nothing»
     if (info) try { o.onCommit?.(info); } catch (err) { console.warn('[path-field] onCommit', err); }
     if (info && st.committed === info) st.valueAt = { keys: [tickKeyNow(keyText(e.key)), tickKeyNow()], voided: false };   // B-5736: the PATH's key of the press, and of the box as its door's onCommit left it (an absolute text's bases are not in it: the same folder under any Task Group)
@@ -975,6 +976,11 @@ export function pathField(input, opts = {}) {
     input.removeEventListener('input', onInput);
     list.remove();
   }
+  // B-5736's follow (主开发 r1218, the law «lower friction for a person's own step»): THE PRODUCT'S OWN SUGGESTION IS MEANT — a door that
+  // prefills the box with its own suggestion (`suggests`) gives the «create» choice FOR that path: while the box still holds it untouched
+  // a press creates it in one go (the tick is shown, in the field's words); a path the person typed keeps the tick rule (B-f3a1: the tick
+  // belongs to the path it was given for — any other text drops it for good)
+  if (createMode === 'ask' && typeof o.suggests === 'string' && o.suggests.trim() && input.value === o.suggests) giveTick(true, o.suggests.trim());
   paint();   // the chips row waits for refresh() (a field is built while the page boots — no fetch then)
   // B-ckpt61 A1 (主开发 21:51Z): a field BUILT over a saved text asks NOTHING at its build — its line stays quiet (status pending: a form
   // still refuses) until a person touches it, a commit, or a refresh with the list open; a text SET from outside (set / setDerived) asks at once

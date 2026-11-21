@@ -29,6 +29,8 @@
 //   ⑫ IME: a composing Enter (keyCode 229) never picks; the composed word (合同) finds ~/work/contracts by its link alias
 //   ⑬ never offered unasked: ~/ lists no ~/vibespace (the checkout) and no dot-folder; typed, it resolves
 //   ⑭ the phone: the list sits in the flow (not floating)
+//   ⑯ (B-5736's follow) the REAL mounts dialog's Save while a field is edited: B's text held (only it), A edited meanwhile — the Save
+//      asks A again once and saves what A's box shows (RED: the tip before the follow, 3ee1ed432, saved A's earlier folder)
 //   ⑮ 0 page errors
 // Run: node scripts/test-path-field-chrome.mjs   (SKIPs without chrome)
 import fs from 'node:fs';
@@ -88,10 +90,10 @@ app.use((req, res, next) => {
   if (req.path === '/api/dir-complete' && partialFor.failLeft > 0 && String(req.query.path || '') === partialFor.path) { partialFor.failLeft--; res.status(500).json({ error: 'the listing failed (the leg\'s plant)' }); return; }
   if (req.path === '/api/home' && homeFailsLeft > 0) { homeFailsLeft--; res.status(500).json({ error: 'the home read failed (the leg\'s plant)' }); return; }
   const h = HOLD.get(req.path);
-  if (h) { h.p.then(() => next()); return; }
+  if (h && (h.text == null || String(req.query.path || '') === h.text)) { h.p.then(() => next()); return; }   // ⑯: a hold may name ONE text
   next();
 });
-const holdPath = (p) => { let open = null; const h = { p: new Promise((r) => { open = r; }) }; h.open = () => { HOLD.delete(p); open(); }; HOLD.set(p, h); return h; };
+const holdPath = (p, text = null) => { let open = null; const h = { p: new Promise((r) => { open = r; }), text }; h.open = () => { HOLD.delete(p); open(); }; HOLD.set(p, h); return h; };
 app.get('/api/hosts/:id/dir-complete', async (req, res) => { try { res.json(await hm.dirSlice(req.params.id, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder') })); } catch (e) { res.json({ suggestions: [], error: e.message }); } });
 const NOW = Date.now();
 app.get('/api/hosts/:id/recent-cwds', (req, res) => res.json({ cwds: [], recent: PC.recentCounts([{ cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 3 * 86400 }, { cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 4 * 86400 }, { cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 5 * 86400 }, { cwd: MAC + '/Downloads', mtime: NOW / 1000 - 7 * 86400 }]) }));
@@ -118,6 +120,7 @@ for (let i = 0; i < 3; i++) SESS.push({ cwd: HOME + '/work/weekly-admin', starte
 SESS.push({ cwd: HOME + '/work/payments', startedAt: NOW - 7 * 86400e3 });
 fs.writeFileSync(path.join(TMP, 'entry.js'), `
 import { pathField, appGroups } from ${JSON.stringify(path.join(REPO, 'src/lib/path-field.js'))};
+import { mountsDialog } from ${JSON.stringify(path.join(REPO, 'src/lib/mounts-dialog.js'))};
 const G = ${JSON.stringify(G)};
 window.__log = [];
 window.app = { isMobile: !!window.__phone, sidebar: { _allSessions: ${JSON.stringify(SESS)}, _taskBoardOrder: () => Object.values(G), getTaskColor: (g) => g.color, _folderPaths: (g) => g.folders } };
@@ -144,6 +147,8 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.__l
 // ⑨e (A1): a field BUILT over a saved text before it is attached (a form queued behind a dirty one), attached later
 window.mkQueued = (v) => { const box = document.createElement('div'); box.id = 'qbox'; const i = document.createElement('input'); i.id = 'queued'; i.type = 'text'; i.value = v; box.appendChild(i); window.qf = pathField(i, { kind: 'folder', id: 'harness-queued' }); window.qbox = box; return true; };
 window.attachQueued = () => { document.getElementById('dlg').appendChild(window.qbox); return true; };
+// ⑯ (B-5736's follow, 主开发 r1218 5): the REAL mounts dialog with two folder fields on this machine; its Save hands what it took here
+window.mkMounts = () => { window.__saved = null; mountsDialog('B-5736', [{ key: 'a', label: 'A', autocomplete: 'local' }, { key: 'b', label: 'B', autocomplete: 'local' }], 'Save', async (vals) => { window.__saved = vals; }, { id: 'b5736-dlg', key: 'b5736' }); return true; };
 window.__ready = true;
 `);
 try { execFileSync(path.join(REPO, 'node_modules/.bin/esbuild'), [path.join(TMP, 'entry.js'), '--bundle', `--outfile=${path.join(D, 'b.js')}`, '--format=iife', '--platform=browser', '--target=es2020', '--log-level=error'], { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] }); }
@@ -753,6 +758,37 @@ console.log('\n── ⑭ the phone ──');
   const inFlow = await ev(`(() => { const l = document.querySelector('.pf-list'); return !!l && !l.classList.contains('pf-float') && !!l.closest('.path-field'); })()`);
   ok('on the phone the list sits in the flow under the field (not floating)', inFlow, null);
   await shot('14-phone');
+}
+
+console.log('\n── ⑯ the mounts dialog\'s Save while a field is edited (B-5736\'s follow) ──');
+{
+  // THE SCENE (r1218 5): Save commits the fields one after another; field B's answer is HELD (a stall placed in the listing's reply),
+  // ONLY B's text (A's asks answered), and while it is held the person edits field A to another folder. A's box no longer shows the path its press took: its value is
+  // nothing (B-5736), so the Save asks A again, once, and saves what A's box shows. (RED: the tip before the follow, 3ee1ed432 — no
+  // re-check: A saved its OLD folder under the new text)
+  await load();
+  await ev('window.mkMounts()');
+  const inA = `document.querySelectorAll('#b5736-dlg .path-field input')[0]`, inB = `document.querySelectorAll('#b5736-dlg .path-field input')[1]`;
+  const fieldsSeen = await until(`document.querySelectorAll('#b5736-dlg .path-field input').length === 2`, 5000);
+  ok('⑯ the real mounts dialog draws its two folder fields (the field at the door)', !!fieldsSeen, await ev(`document.querySelectorAll('#b5736-dlg .path-field input').length`));
+  const focusType = async (which, text) => { await ev(`(() => { const i = ${which}; i.focus(); i.select(); return true; })()`); await type(text); };
+  await focusType(inA, '~/work/payments');
+  await ev(`(() => { ${inB}.focus(); return true; })()`);   // A left: its blur commits ~/work/payments (answered)
+  const aTook = await until(`(() => { const v = ${inA}._pathField.value(); return v && v.path === ${JSON.stringify(path.join(HOME, 'work/payments'))} ? v.path : null; })()`, 8000);
+  ok('⑯ A took ~/work/payments on its blur (its value is that folder)', !!aTook, aTook);
+  const held = holdPath('/api/dir-complete', '~/work/contracts');   // ONLY B's text is held: A's own asks are answered
+  await focusType(inB, '~/work/contracts');
+  await ev(`(() => { document.querySelector('#b5736-dlg .btn-create').click(); return true; })()`);   // Save: A judged, then B's press waits on its held answer
+  const aJudged = await until(`(() => { const v = ${inA}._pathField.value(); return v && v.path === ${JSON.stringify(path.join(HOME, 'work/payments'))} && document.querySelector('#b5736-dlg .btn-create').disabled ? true : null; })()`, 8000);
+  ok('⑯ the Save took A and now waits on B (B\'s text held, the Save still running)', !!aJudged, await ev(`({ a: ${inA}._pathField.verdict(), busy: document.querySelector('#b5736-dlg .btn-create').disabled })`));
+  await focusType(inA, '~/work/compute-deal');   // the person edits A while B's answer is held (A's own ask is answered)
+  const aShows = await until(`(() => { const v = ${inA}._pathField.verdict(); return v.status === 'ok' && v.path === ${JSON.stringify(path.join(HOME, 'work/compute-deal'))} ? v.path : null; })()`, 8000);
+  ok('⑯ A\'s line shows the folder its box now holds (~/work/compute-deal), while B is still held', !!aShows, await ev(`${inA}._pathField.verdict()`));
+  held.open();
+  const saved = await until('window.__saved', 10000);
+  console.log('  · ⑯ the Save (the facts judged): ' + JSON.stringify({ saved, boxA: await ev(`${inA}.value`), err: await ev(`document.querySelector('#b5736-dlg .cfg-err')?.textContent || ''`) }));
+  ok('⑯ the Save saves what A\'s box SHOWS when it took (~/work/compute-deal, asked again once), never the folder of A\'s earlier press', !!saved && saved.a === path.join(HOME, 'work/compute-deal') && saved.b === path.join(HOME, 'work/contracts'), saved);
+  await ev(`document.getElementById('b5736-dlg')?.remove(); true`);
 }
 
 ok(`⑮ 0 page errors`, errors.length === 0, errors);

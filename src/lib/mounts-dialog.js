@@ -301,6 +301,16 @@ export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
         if (!v || !(await pf.ensure())) { err.textContent = pf.verdict().text; submit.disabled = false; el.focus(); return; }
         took[k] = v.path;
       }
+      // r1218 5: a box edited while a later field's press was judged no longer shows the path its press took — its value is nothing
+      // then (B-5736): asked again, once; one that still does not take is said, nothing saved
+      for (const k of Object.keys(took)) {
+        const pf = inputs[k]._pathField;
+        if (!inputs[k].value.trim()) { delete took[k]; continue; }   // emptied meanwhile: nothing to take, as the first pass
+        if (pf.value()) continue;
+        const v = await pf.commit();
+        if (!v || !(await pf.ensure())) { err.textContent = pf.verdict().text; submit.disabled = false; inputs[k].focus(); return; }
+        took[k] = v.path;
+      }
       const vals = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, k in took ? took[k] : el.value.trim()]));
       await onSubmit(vals, { close, body, err });
     } catch (e) { const door = e && e.door && typeof e.door.run === 'function' ? e.door : null; err.replaceChildren(e.message || tr('Failed'), ...(door ? [' ', needDoorButton(door)] : [])); submit.disabled = false; } // e.door: lane ui-needs-a-button — the line drawn in ONE call (test-control-says-why ④)

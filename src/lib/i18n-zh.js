@@ -970,6 +970,7 @@ export default {
   "Encryption passphrase": "加密口令",
   "Enter a file path first": "请先输入文件路径",
   "Enter the .md file path first": "请先输入 .md 文件路径",
+  "There is no file at {path} to import": "{path} 处没有可导入的文件", // B-5736 follow (r1218 3): Import refuses Export's «create» answer by name
   "Enter the current password first": "请先输入当前密码",
   "Enter the passphrase": "请输入口令",
   "Error": "错误",

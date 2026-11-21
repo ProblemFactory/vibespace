@@ -833,27 +833,33 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     repoInput.value = task.contextDir ? `${task.contextDir}/${task.id}.md` : '';
     // lane path-field: the file field — a relative path resolves, a missing file is made only once ticked, and what does not
     // take is said under the field (「未生效：…」) — the export / import buttons read its resolution
-    const repoPf = pathField(repoInput, { kind: 'file', create: 'ask', id: 'task-export-file', createWhen: t('Create this file when exporting') });
+    // B-5736's follow (r1218 1): the box's prefill is the PRODUCT's suggestion — a first export writes it in one press (the field gives the
+    // «create» choice for that path while the box holds it untouched); a path the person types keeps the tick rule
+    const repoPf = pathField(repoInput, { kind: 'file', create: 'ask', id: 'task-export-file', createWhen: t('Create this file when exporting'), suggests: repoInput.value });
     // the field's resolution (a relative one too) — B-5736: one that does not take is said under the field and nothing is sent: never the
     // box's raw text (it skipped the field's judge and its «create» tick)
-    const repoPath = async () => { if (!repoInput.value.trim()) return ''; const v = await repoPf.commit(); if (!v) { const w = repoPf.verdict()?.text; if (w) showToast(w, { type: 'error' }); return null; } return v.path; };
+    const repoAnswer = async () => { if (!repoInput.value.trim()) return ''; const v = await repoPf.commit(); if (!v) { const w = repoPf.verdict()?.text; if (w) showToast(w, { type: 'error' }); return null; } return v; };
     const exportBtn = document.createElement('button'); exportBtn.className = 'task-detail-btn'; exportBtn.textContent = t('Export');
     exportBtn.onclick = async () => {
-      const p = await repoPath();
-      if (p === null) return;   // said under the field (and in the toast)
-      if (!p) { showToast(t('Enter a file path first'), { type: 'error' }); return; }
+      const v = await repoAnswer();
+      if (v === null) return;   // said under the field (and in the toast)
+      if (!v) { showToast(t('Enter a file path first'), { type: 'error' }); return; }
+      const p = v.path;
       try {
         const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
         const d = await res.json().catch(() => ({}));
-        if (res.ok) showToast(t('Exported to {path}', { path: d.path })); else showToast(d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Export failed')), { type: 'error' });   // THE STORE HELD UNREAD: the page's own words
+        if (res.ok) { showToast(t('Exported to {path}', { path: d.path })); repoPf.refresh(); }   // the file is there now: the field's «absent» answer is stale (an Import next is asked again, never refused on it) else showToast(d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Export failed')), { type: 'error' });   // THE STORE HELD UNREAD: the page's own words
       } catch { showToast(t('Export failed — server unreachable'), { type: 'error' }); }
     };
     const importBtn = document.createElement('button'); importBtn.className = 'task-detail-btn'; importBtn.textContent = t('Import');
     importBtn.title = t('Read a task markdown file back into the store (its frontmatter id/title/status are authoritative; existing sessions/folders/progress are preserved)');
     importBtn.onclick = async () => {
-      const p = await repoPath();
-      if (p === null) return;   // said under the field (and in the toast)
-      if (!p) { showToast(t('Enter the .md file path first'), { type: 'error' }); return; }
+      const v = await repoAnswer();
+      if (v === null) return;   // said under the field (and in the toast)
+      if (!v) { showToast(t('Enter the .md file path first'), { type: 'error' }); return; }
+      // r1218 3: the one field is Export's too — its «create» answer is no file to read: Import refuses it by name, in its own words
+      if (v.create) { showToast(t('There is no file at {path} to import', { path: v.display || v.path }), { type: 'error' }); return; }
+      const p = v.path;
       try {
         const res = await fetch('/api/tasks/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
         const d = await res.json().catch(() => ({}));

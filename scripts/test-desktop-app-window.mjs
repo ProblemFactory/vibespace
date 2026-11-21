@@ -533,6 +533,31 @@ try {
   check('the dialog states the ladder verdict in the chip\'s words', /vnc-display/.test(availText), availText);
   check('the catalog lists xterm as a card (presence-checked; dimmed+disabled with its reason when absent, enabled when present)', await p1.evalJs(`(() => { const b = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="xterm"]'); if (!b) return false; const absent = ${!XTERM_PRESENT ? 'true' : 'false'}; /* 2.369.131: hostFacts.bins never carries xterm — derive presence from PATH, not from a key that is always undefined (the leg passed only while xterm was absent; xpra's install pulled it in) */ return b.disabled === absent && b.classList.contains('is-unavailable') === absent && (!absent || /not on PATH/.test(b.textContent)); })()`));
   await p1.evalJs(`(() => { const d = document.getElementById('desktop-launch-dialog'); d.querySelector('.desktop-launch-exec').value = ${JSON.stringify(appBin)}; d.querySelector('.desktop-launch-args').value = ${JSON.stringify(appArgs.map((a) => (/\\s/.test(a) ? '"' + a + '"' : a)).join(' '))}; return true; })()`);
+  // B-5736 (主开发 r1218 5): RUN JUDGES ITS FOLDER through the field — a typed folder that does not resolve is SAID and nothing is sent;
+  // a «~» folder resolves on the machine and the launch carries the ABSOLUTE folder. The launch POST is caught by a page-side stand-in
+  // here (answered with an error: nothing started; the real launch below is untouched). (RED: the release before B-5736 sent the box's
+  // raw text — the first press POSTed «zz-…», the second «~/…»)
+  {
+    const runDir = path.join(home, 'b5736-run-dir'); fs.mkdirSync(runDir, { recursive: true });
+    await p1.evalJs(`(() => { const tg = document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle'); if (tg && tg.getAttribute('aria-expanded') !== 'true') tg.click();
+      window.__b5736 = []; const f0 = window.fetch; window.__b5736f0 = f0;
+      window.fetch = (u, o) => { if (String(u) === '/api/desktop/apps' && o && o.method === 'POST') { try { window.__b5736.push(JSON.parse(o.body || '{}')); } catch { window.__b5736.push({}); } return Promise.resolve(new Response(JSON.stringify({ error: 'stand-in: not launched (B-5736 leg)' }), { status: 400, headers: { 'Content-Type': 'application/json' } })); } return f0(u, o); };
+      document.querySelectorAll('#global-toasts > *').forEach((e) => e.remove()); return true; })()`);
+    const typeCwd = async (text) => { await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-cwd'); await p1.evalJs(`(() => { const i = document.querySelector('#desktop-launch-dialog .desktop-launch-cwd'); i.select(); return true; })()`); await p1.cdp('Input.insertText', { text }); };
+    await typeCwd('zz-no-such-folder-b5736');
+    await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-run');
+    const refused = await until(() => p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent).find((t) => /Not applied/.test(t)) || null`), 10000, 150);
+    const posts1 = await p1.evalJs('window.__b5736.length');
+    console.log('  B-5736 Run, a folder that does not resolve (the facts judged): ' + JSON.stringify({ refused, posts: posts1 }));
+    check('B-5736: Run with a typed folder that does not resolve — the field\'s words are said («Not applied: …») and NOTHING is sent', !!refused && posts1 === 0, { refused, posts1 });
+    await p1.evalJs(`document.querySelectorAll('#global-toasts > *').forEach((e) => e.remove()); true`);
+    await typeCwd('~/b5736-run-dir');
+    await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-run');
+    const sent = await until(() => p1.evalJs('window.__b5736[0] || null'), 10000, 150);
+    console.log('  B-5736 Run, a «~» folder (the facts judged): ' + JSON.stringify({ sent: sent && { exec: sent.exec, cwd: sent.cwd } }));
+    check(`B-5736: Run with «~/b5736-run-dir» — the launch carries the field's judged ABSOLUTE folder (${runDir}), never the raw text`, !!sent && sent.cwd === runDir, sent && { cwd: sent.cwd });
+    await p1.evalJs(`(() => { window.fetch = window.__b5736f0; delete window.__b5736f0; const i = document.querySelector('#desktop-launch-dialog .desktop-launch-cwd'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); document.querySelectorAll('#global-toasts > *').forEach((e) => e.remove()); return true; })()`);
+  }
   // the idle-out defaults to never (2026-09-25) — opt in to 30 min, as a user would in Settings, so the countdown
   // chip below has a record to count down (the timeout is stamped at launch; restored to the default after the chip leg)
   check('PATCH /api/settings opts in to a 30 min idle-out', (await p1.evalJs(`fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'desktop.idleTimeoutMin': 30 }) }).then((r) => r.status)`)) === 200);

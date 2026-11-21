@@ -1428,12 +1428,13 @@ export async function showLaunchDialog(app, opts = {}) {
   recheckBtn.onclick = async () => { rechecking = true; render({ seenOnly: true }); try { await refresh({ recheck: true }); } finally { rechecking = false; if (live()) render({ seenOnly: true }); } }; // the spinner in the group head, the rest usable
   $('.desktop-launch-seen-show').onclick = () => { showSystem = !showSystem; patchUserState({ [SHOW_SYSTEM_KEY]: showSystem }); render({ seenOnly: true }); };
   runBtn.onclick = async () => {
+    // r1218 2: ONE guard for the button whatever the boxes hold — a press while the folder is judged says so (never a second launch)
+    if (runBtn.dataset.judging) { showToast(t('Asking the machine…')); return; }
     if (!execIn.value.trim()) { showToast(t('Type a command to run'), { type: 'error' }); focusQuiet(execIn); return; }
     // B-5736: the working folder is the FIELD'S judged folder (a relative text or a few letters resolved on the chosen machine), never
     // the box's raw text; one that does not take stays in the box, says why under it, and nothing is sent
     let cwd;
     if (cwdIn.value.trim()) {
-      if (runBtn.dataset.judging) return;
       const asked = host;
       runBtn.dataset.judging = '1';
       let v = null; try { v = await cwdPf.commit(); } finally { delete runBtn.dataset.judging; }

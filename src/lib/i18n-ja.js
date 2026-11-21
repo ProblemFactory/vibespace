@@ -969,6 +969,7 @@ export default {
   "Encryption passphrase": "暗号化パスフレーズ",
   "Enter a file path first": "先にファイルパスを入力してください",
   "Enter the .md file path first": "先に .md ファイルのパスを入力してください",
+  "There is no file at {path} to import": "{path} にインポートするファイルがありません", // B-5736 follow (r1218 3): Import refuses Export's «create» answer by name
   "Enter the current password first": "先に現在のパスワードを入力してください",
   "Enter the passphrase": "パスフレーズを入力してください",
   "Error": "エラー",
