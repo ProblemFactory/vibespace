@@ -401,17 +401,17 @@ else await (async () => {
       return anchored;
     };
     // RED CONTROL (⑦): app.js takes ANY broadcast during the press as its own (round 1's line) — the refused press says «restored»
-    const a7 = await mutBoot('mut7', [[AP, 'if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(); } else own.landed(); return; }', 'if (own) { own.landed(); return; }']]);
+    const a7 = await mutBoot('mut7', [[AP, 'if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(msg.unsaved); } else own.landed(); return; }', 'if (own) { own.landed(); return; }']]);
     const r7 = await probe7(P1);
     ok(a7 && !own7(r7), `RED CONTROL (⑦): app.js matching any broadcast during the press${a7 ? '' : ' — AN ANCHOR MOVED'} ⇒ the refused press reads as restored (${J(r7.after && r7.after.toasts)}, ${r7.reloads} reloads) — ⑦ red`, r7);
     // RED CONTROL (⑥ r3): app.js's r2 line — its own broadcast only marked, the reload left to the POST's answer ⇒ none, for ever
-    const a8 = await mutBoot('mut8', [[AP, 'if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(); } else own.landed(); return; }', 'if (own && msg.rid && msg.rid === own.rid) { own.heard = true; return; }']]);
+    const a8 = await mutBoot('mut8', [[AP, 'if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(msg.unsaved); } else own.landed(); return; }', 'if (own && msg.rid && msg.rid === own.rid) { own.heard = true; return; }']]);
     const r8 = await probe8(P1);
     ok(a8 && !lost8(r8) && r8.reloads === 0, `RED CONTROL (⑥ r3): app.js's r2 line${a8 ? '' : ' — AN ANCHOR MOVED'} ⇒ the lost answer leaves ${J(r8.toasts)}, ${r8.reloads} reloads, the button «${r8.stuck}» — ⑥ r3 red`, r8);
     // RED CONTROL: the same probe over the base's dialog (the lane's lines put back) — each leg goes red by name
     const back = [[SF, "t('Reading the layout history…')", "t('Loading…')"], [SF, 'if (!r || r.error || !Array.isArray(r.entries)) {', 'if (false) {'], [SF, 'const entries = r.entries;', 'const entries = r?.entries || [];'],
       [SF, "b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = own;", ''],
-      [AP, 'if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(); } else own.landed(); return; }', ''], [AP, "if (own) { showToast(t('Layout restored on another device')); return; }", '']];
+      [AP, 'if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(msg.unsaved); } else own.landed(); return; }', ''], [AP, "if (own) { showToast(t('Layout restored on another device')); return; }", '']];
     const anchored = await mutBoot('mut6', back);
     const r6 = await probe6(P1);
     ok(anchored && !good6(r6) && !fail6(r6) && !busy6(r6) && !toast6(r6), `RED CONTROL (⑥): the base's dialog (the lane's ${back.length} lines put back${anchored ? '' : ' — AN ANCHOR MOVED'}) — the shell says «${r6.shell && r6.shell.says}», a failed read «${r6.failSays}», the pressed button «${r6.busy && r6.busy.words}», the toasts ${J(r6.toasts)} — each ⑥ leg red`, r6);

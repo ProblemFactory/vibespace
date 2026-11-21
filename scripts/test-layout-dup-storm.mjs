@@ -39,6 +39,7 @@ import { pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { landingWriter } from './scratch.mjs';   // B-0248 (a)+(b): the route's stores land at the call here (the release's timing; the off-loop road is test-store-write-census ⑭'s)
 const require = createRequire(import.meta.url);
 const member = (w, tabs) => ({ ...w, tabChain: { tabs: [...tabs], active: 0, layout: 'tabs', order: [...tabs] }, isTabGuest: tabs[0] !== w.winId });
 let pass = 0, fail = 0;
@@ -272,7 +273,7 @@ async function persistLegs(P, { quiet = false } = {}) {
   const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
   const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ldup-k-'));
   try {
-    P.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    P.setup({ writer: landingWriter(), dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
     const R = P.router, Wl = R.writeLayouts;
     const route = R.stack.find((l) => l.route && l.route.path === '/api/layout-history/:id/restore').route.stack[0];
     const sink = { json: () => {}, status: () => ({ json: () => {} }) };
@@ -304,7 +305,7 @@ await section('§2b r4 K — THE TRACE IS A FACT ABOUT THE RECORD (the real pers
   const PS = src('src/routes/persistence.js'), WS = src('src/ws-handler.js'), HR = src('src/server/home-rename.js');   // B-8033: the home rename left server.js for its own module
   const body = (t, name) => { const i = t.indexOf('function ' + name + '('); return i < 0 ? '' : t.slice(i, t.indexOf('\n  }\n', i)); };
   ok(/tracesTrue\(data\);/.test(body(PS, 'writeLayouts')) && /tracesTrue\(_layoutsCache\)/.test(body(PS, 'readLayouts')), '§2b census: writeLayouts (THE CHOKE POINT) and the first read of the file keep every trace true to its record (tracesTrue)');
-  ok((PS.match(/layoutsHold\.(?:write|flush)\(/g) || []).length === 1 && /layoutsHold\.flush\(\(\) => \{ if \(!_layoutsCache\) return null; ensureDir\(dataDir\); return \[_layoutsCache\]; \}/.test(body(PS, 'flushLayouts')) && !/writeJsonAtomic\(LAYOUTS_FILE/.test(PS) && (PS.match(/_layoutsCache = /g) || []).length === 4 && /_layoutsCache = data;/.test(body(PS, 'writeLayouts')), '§2b census: layouts.json is written ONLY by flushLayouts, from the cache, through its hold\'s ONE write — its flush, whose failure is OWED (B-225b, its second half) — and the cache is set only by its declaration, the read again\'s reset (layoutsAgain), readLayouts and writeLayouts', (PS.match(/.*_layoutsCache = .*/g) || []).map((l) => l.trim().slice(0, 80)));   // stale-pins: kept — an ABSENCE check (the desktops are never written by writeJsonAtomic again)
+  ok((PS.match(/layoutsHold\.(?:write|flush|owe)\(/g) || []).length === 1 && /doc = _layoutsCache, text = doc \? JSON\.stringify\(doc, null, 2\) : null;/.test(body(PS, 'flushLayouts')) && /if \(!f\.doc\) return done\(true\);\n\s*try \{ layoutsHold\.owe\(f\.doc, \{ name: 'layouts\.write', bytes: \(\) => f\.text \}\); \}/.test(body(PS, 'landLayouts')) && !/writeJsonAtomic\(LAYOUTS_FILE/.test(PS) && (PS.match(/_layoutsCache = /g) || []).length === 4 && /_layoutsCache = data;/.test(body(PS, 'writeLayouts')), '§2b census: layouts.json is written ONLY by flushLayouts, from the cache, through its hold\'s ONE write — since B-0248 (a) its owe, the store writer\'s road, whose failure is OWED (B-225b, its second half) — and the cache is set only by its declaration, the read again\'s reset (layoutsAgain), readLayouts and writeLayouts', (PS.match(/.*_layoutsCache = .*/g) || []).map((l) => l.trim().slice(0, 80)));   // stale-pins: kept — an ABSENCE check (the desktops are never written by writeJsonAtomic again)
   const ROWS = { 'src/routes/persistence.js': [9, 'the presets, the active preset, the custom grids, the autosave slot, the two restores, the import — each through writeLayouts'], 'src/ws-handler.js': [7, 'layout-sync (noteDupsLeft: listed / gone / ended) + the refused newcomers a desktop\'s record remembers (r4 N4 — written at a refusal that adds one; never the record itself) + desktop-create (an empty record) / -delete (the trace goes with it) / -rename / -reorder (no record changes) + the end seam (endTraces — r5 N: a killed conversation leaves every trace) — each through writeLayouts (ctx)'] };
   const counts = Object.fromEntries(Object.keys(ROWS).map((f) => [f, (src(f).match(/\bwriteLayouts\(/g) || []).length - (f === 'src/routes/persistence.js' ? 1 : 0)]));
   ok(Object.entries(ROWS).every(([f, [n]]) => counts[f] === n), `§2b census: every writeLayouts( call is a row (a new writer is RED until it is one) — ${J(counts)}`, ROWS);

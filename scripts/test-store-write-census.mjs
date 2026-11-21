@@ -80,7 +80,7 @@ const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta', 'patchSess
 // snapshot's call, its truncate and writeBuffersAtomic's own three) go to zero ⇒ 893
 // B-48a4 (the exit door's cost; restacked on 2.369.410): the two audit rings onto the store writer through ONE appender — device-audit.js's
 // 3 and exit-proxy.js audit's 3 go to zero; every save of hosts.json through the store writer — hosts.js _save's 2 go to zero ⇒ 881 − 8 = 873
-const DEBT_MAX = 843;   // lane bl-loop-b (B-0248 (c)): −4 — persistence.js's «*» row 20 → 16 (the conversation list, the bookmarks and the custom themes written by the store writer: no data-folder make at each write). B-f276 1b (bl-windows): −1 — the channels' torn-file set-aside at the load (held by src/store-hold.js now); lane bl-keys-misc (B-360d): −1 — the jobs' collection pass removes its old spill files off the loop (fs.promises.unlink: the synchronous unlink gone). lane lg-store-writes (B-225b, the persistence holds — cut 4): −1 — the settings onto src/store-hold.js's one write; cut 3: −3 — the desktops (layouts.json), the bookmarks and the custom themes onto src/store-hold.js's one write; cut 2: −2 — the conversation list (user-state.json) onto src/store-hold.js's one write (its normalizer's write-back and its whole write: the hold refuses a list it could not read); before: lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −4 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main), −2 — device-alerts' ledger onto the writer ⇒ 868 − 6; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516 [moved onto the .414 train: its own 850 -1 = 849]
+const DEBT_MAX = 837;   // lane bl-loop-b (B-0248 (a)+(b)): −6 — persistence.js's «*» row 16 → 10 (the rollback points and the desktops through the store writer). lane bl-loop-b (B-0248 (c)): −4 — persistence.js's «*» row 20 → 16 (the conversation list, the bookmarks and the custom themes written by the store writer: no data-folder make at each write). B-f276 1b (bl-windows): −1 — the channels' torn-file set-aside at the load (held by src/store-hold.js now); lane bl-keys-misc (B-360d): −1 — the jobs' collection pass removes its old spill files off the loop (fs.promises.unlink: the synchronous unlink gone). lane lg-store-writes (B-225b, the persistence holds — cut 4): −1 — the settings onto src/store-hold.js's one write; cut 3: −3 — the desktops (layouts.json), the bookmarks and the custom themes onto src/store-hold.js's one write; cut 2: −2 — the conversation list (user-state.json) onto src/store-hold.js's one write (its normalizer's write-back and its whole write: the hold refuses a list it could not read); before: lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −4 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main), −2 — device-alerts' ledger onto the writer ⇒ 868 − 6; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516 [moved onto the .414 train: its own 850 -1 = 849]
 // [file, scope, n, class, other readers, what a lost last write costs, why]
 const ROWS = [
   ["src/agy-store-fs.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
@@ -177,7 +177,7 @@ const ROWS = [
   ["src/remote-fs.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/routes/editor.js","*",2,"not-a-store","—","—","a person's own file (the editor's save)"],
   ["src/routes/files.js","*",21,"not-a-store","—","—","a person's own files (the file explorer); ckpt61 cure 3: + the archive entry's temp folder removed on its two new refusals (a reader that never started, a write that failed)"],
-  ["src/routes/persistence.js","*",16,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (bl-windows batch-4 cure: the layout-history prune's two unlinks went async, 28 → 26; lane bl-loop-b, B-0248 (c): the conversation list's, the bookmarks' and the custom themes' writes are the store writer's — they no longer make the data folder at each write, the start read made it: 20 → 16)"],
+  ["src/routes/persistence.js","*",10,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (bl-windows batch-4 cure: the layout-history prune's two unlinks went async, 28 → 26; lane bl-loop-b, B-0248 (c): the conversation list's, the bookmarks' and the custom themes' writes are the store writer's — they no longer make the data folder at each write, the start read made it: 20 → 16; B-0248 (a)+(b): the rollback points and the desktops are the store writer's too — the module's own atomic writer, its temp, its rename and the points' folder go: 16 → 10)"],
   ["src/safe-fs-worker.js","*",15,"not-main","—","—","the SafeFs worker thread"],
   ["src/search-index-worker.js","*",3,"not-main","—","—","the search index worker thread"],
   ["src/secret-box.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","a store key file (secrets) — must be on disk before the answer"],
@@ -2114,7 +2114,9 @@ console.log('⑬ every registry save of the browser keeper has its side (lands /
 // EXCLUSIVELY (a file that appeared is adopted, never written over); every temp name carries the pid. Stand-ins for the storage.
 console.log('⑪ the store hold: a store that could not be read has no value, and nothing is written over it');
 {
-  const { scratchDir, anchored } = await import('./scratch.mjs');
+  // (B-0248 (a)+(b): the persistence route's stores are the store writer's — these scenes read their files right after a door, as the
+  // release's write at the call allowed: each route is handed the writer's contract AT THE CALL, a failure owed — scratch.mjs landingWriter)
+  const { scratchDir, anchored, landingWriter } = await import('./scratch.mjs');
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const HSRC = fs.readFileSync(path.join(REPO, 'src/store-hold.js'), 'utf8');
   const HMOD = require(path.join(REPO, 'src/store-hold.js'));
@@ -2212,7 +2214,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         const d = scratchDir('hold-list-' + tag); roots.push(d); const F = path.join(d, 'user-state.json');
         if (bytes != null) fs.writeFileSync(F, bytes);
         const sent = [];
-        const boot = () => P.setup({ dataDir: d, wss: { clients: new Set([{ readyState: 1, send: (t) => sent.push(String(t)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        const boot = () => P.setup({ writer: landingWriter(), dataDir: d, wss: { clients: new Set([{ readyState: 1, send: (t) => sent.push(String(t)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
         if (code) failing(F, code, boot); else boot();
         const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
         const call = (method, p, body) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; } }; handler(method, p)({ body, query: {}, params: {}, headers: {} }, res, (e) => { status = 500; o = { error: String(e) }; }); return { status, body: o }; };
@@ -2253,7 +2255,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         const files = { layouts: path.join(d, 'layouts.json'), bookmarks: path.join(d, 'bookmarks.json'), themes: path.join(d, 'custom-themes.json') };
         fs.writeFileSync(files.layouts, JSON.stringify(LAY)); fs.writeFileSync(files.bookmarks, JSON.stringify(BMK)); fs.writeFileSync(files.themes, JSON.stringify(THM));
         const bytes = Object.fromEntries(Object.entries(files).map(([k, f]) => [k, fs.readFileSync(f, 'utf8')]));
-        P.setup({ dataDir: d, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        P.setup({ writer: landingWriter(), dataDir: d, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
         const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
         const call = (method, p, body, params = {}) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; } }; handler(method, p)({ body, query: {}, params, headers: {} }, res, (e) => { status = 500; o = { error: String(e) }; }); return { status, body: o }; };
         const first = (method, p, body, params) => (held ? Object.values(files).reduceRight((fn, f) => () => failing(f, 'EIO', fn), () => call(method, p, body, params))() : call(method, p, body, params));
@@ -2291,12 +2293,12 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const WSRC = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
       ok((WSRC.match(/const layoutData = layoutsOrHeld\(ws, data\); if \(!layoutData\) (?:break|return);/g) || []).length === 5 && !/\n {10}const layoutData = readLayouts\(\);/.test(WSRC) && /type: 'layout-held', op: /.test(WSRC), '⑪ (e) the five ws layout doors (layout-sync, desktop-create / -delete / -rename / -reorder) read the desktops through ONE guard: held ⇒ `layout-held` by name to the sender, nothing applied (a pin)');
       // REDs
-      const ANS_L = "    const doc = layoutsHold.answer();", DRAIN_A = "    drainPoints();   // B-225b R10";
+      const ANS_L = "    const doc = layoutsHold.answer();", DRAIN_A = "    const upTo = handPointsOwed();   // (the points' callbacks are the writer's answer road: at the hub's stop they run inside its exit flush)\n";
       ok([ANS_L, DRAIN_A].every((x) => PSRC.split(x).length === 2), 'control setup: the layouts\' answer and the flush\'s drain are found once each in src/routes/persistence.js');
       const XE = sceneE(mutantCopies('swc-lay-cut', REPO).load(PREL, anchored(PSRC, ANS_L, "    let doc; try { doc = layoutsHold.answer(); } catch { doc = undefined; }   /* MUTANT: the release — the desktops it could not read are the EMPTY layout */", 'lay-cut'), 'lay-cut'), 'eio-red', true);
       const xl = XE.first('get', '/api/layouts');
       ok(xl.status === 200 && xl.body && Array.isArray(xl.body.customGrids) && xl.body.customGrids.length === 0 && !xl.body.desktops, 'CONTROL (the layouts\' answer cut, in a copy — the release): the desktops it could not read are served as the EMPTY layout (a page makes «Desktop 1» over them) (red)', xl.body);
-      const xo = order(mutantCopies('swc-drain-cut', REPO).load(PREL, anchored(PSRC, DRAIN_A, "    /* MUTANT: no drain */ (() => {})();   // B-225b R10", 'drain-cut'), 'drain-cut'), 'order-red');
+      const xo = order(mutantCopies('swc-drain-cut', REPO).load(PREL, anchored(PSRC, DRAIN_A, "    const upTo = -1;   // MUTANT: no wait for the points (B-0248 (b)'s R10 by landing) — handed later by the drain\n", 'drain-cut'), 'drain-cut'), 'order-red');
       const xp = xo.renames.findIndex((n) => /^layout-.*\.json$/.test(n) && !n.endsWith('.meta.json'));
       ok(xp === -1 || xp > xo.renames.indexOf('layouts.json'), 'CONTROL (the flush\'s drain cut, in a copy): layouts.json is written while its rollback point is still owed (red)', xo.renames);
     }
@@ -2315,7 +2317,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const sceneF = (P, tag) => {
         const d = scratchDir('hold-f-' + tag); roots.push(d); const F = path.join(d, 'settings.json'); fs.writeFileSync(F, JSON.stringify(SET));
         const sent = [];
-        P.setup({ dataDir: d, wss: { clients: new Set([{ readyState: 1, send: (t) => sent.push(String(t)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        P.setup({ writer: landingWriter(), dataDir: d, wss: { clients: new Set([{ readyState: 1, send: (t) => sent.push(String(t)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
         failing(F, 'EIO', () => P.router.readSettings());   // the START read fails
         const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
         const call = (method, p, body) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; } }; handler(method, p)({ body, query: {}, params: {}, headers: {} }, res, (e) => { status = 500; o = { error: String(e) }; }); return { status, body: o }; };
@@ -2371,7 +2373,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       {
         const relScene = (P, tag) => {
           const d = scratchDir('hold-f-rel-' + tag); roots.push(d); const F = path.join(d, 'settings.json'); const sent = [];
-          P.setup({ dataDir: d, wss: { clients: new Set([{ readyState: 1, send: (t) => sent.push(String(t)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+          P.setup({ writer: landingWriter(), dataDir: d, wss: { clients: new Set([{ readyState: 1, send: (t) => sent.push(String(t)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
           P.router.readSettings();   // NOT THERE at the start
           fs.writeFileSync(F, JSON.stringify(SET));   // a migration writes it
           P.router.reloadSettings();
@@ -2426,7 +2428,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const sceneG = (P, tag, files, { onSettingsWrite = () => { } } = {}) => {
         const d = scratchDir('hold-g-' + tag); roots.push(d);
         for (const [n, b] of Object.entries(files)) fs.writeFileSync(path.join(d, n), b);
-        P.setup({ dataDir: d, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite });
+        P.setup({ writer: landingWriter(), dataDir: d, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite });
         const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
         const call = async (method, p, body, { params = {}, headers = {} } = {}) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; }, set() { return res; }, setHeader() { } }; await handler(method, p)({ body, query: {}, params, headers }, res, (e) => { status = 500; o = { error: String(e) }; }); return { status, body: o }; };
         return { d, call, P, f: (n) => path.join(d, n) };
@@ -2522,7 +2524,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const SETI = JSON.stringify({ 'spend.unattendedPerIdentityHour': 2 });
       const staleScene = async (P, tag) => {
         const d = scratchDir('hold-i-' + tag); roots.push(d); const F = path.join(d, 'settings.json'); fs.writeFileSync(F, SETI);
-        P.setup({ dataDir: d, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        P.setup({ writer: landingWriter(), dataDir: d, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
         const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
         const call = async (method, p, body) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; }, set() { return res; }, setHeader() { } }; try { await handler(method, p)({ body, query: {}, params: {}, headers: {} }, res, (e) => { status = 500; o = { error: String(e && e.message || e) }; }); } catch (e) { status = 500; o = { error: String(e && e.message || e) }; } return { status, code: o && o.code, held: o && o.held };
         };
@@ -2748,9 +2750,9 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         return out;
       };
       const real = chokeCensus(PSRC);
-      ok(real.bad.length === 0 && real.direct.length === 8 && real.atomic.length === 2,
-        `⑪ (h) THE ONE CHOKE: every write of a held store's file is its hold's ONE write (${Object.entries(real.holdWrites).map(([h, n]) => `${h} ${n}`).join(', ')}) or the damaged door's setAside; the ${real.direct.length} direct fs writes are the data and rollback folders, the rollback points (pid temp + rename, the prune's unlinks) and the agent CLIs' credentials — none a store's file`, real);
-      const plant = (add, name) => chokeCensus(anchored(PSRC, '  function flushLayouts({ press = false, stop = false } = {}) {\n', '  function flushLayouts({ press = false, stop = false } = {}) {\n' + add, name)).bad;
+      ok(real.bad.length === 0 && real.direct.length === 5 && real.atomic.length === 0,
+        `⑪ (h) THE ONE CHOKE: every write of a held store's file is its hold's ONE write (${Object.entries(real.holdWrites).map(([h, n]) => `${h} ${n}`).join(', ')}) or the damaged door's setAside; the ${real.direct.length} direct fs writes are the data folder, the rollback points' prune (its two unlinks) and the agent CLIs' credentials — none a store's file (B-0248 (b): the points themselves are the store writer's)`, real);
+      const plant = (add, name) => chokeCensus(anchored(PSRC, '  function flushLayouts({ press = false, stop = false } = {}, answer = null) {\n', '  function flushLayouts({ press = false, stop = false } = {}, answer = null) {\n' + add, name)).bad;
       const p1 = plant('    fs.writeFileSync(LAYOUTS_FILE, JSON.stringify(_layoutsCache));\n', 'swc-h-direct');
       const p2 = plant('    layoutsHold.write(_layoutsCache);\n', 'swc-h-second');
       const p3 = plant('    writeJsonAtomic(SETTINGS_FILE, {});\n', 'swc-h-atomic');
@@ -2833,13 +2835,15 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       // THE DESKTOPS (src/routes/persistence.js): the autosave's flush, a press's, the stop's, and the two restore doors
       const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
       const freshP = () => { for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; return require(path.join(REPO, PREL)); };
+      // (B-0248 (a): the flush answers by callback — at once on the writer's contract at the call)
+      const flushed = (R, o = {}) => { let got; R.flushLayouts(o, (ok) => { got = ok; }); return got; };
       const refusing = async (fn) => { const wf = fs.writeFileSync; fs.writeFileSync = function (f, ...a) { if (/layouts\.json\.\d+\.tmp$/.test(String(f))) throw refusedWrite(); return wf.call(this, f, ...a); }; try { return await fn(); } finally { fs.writeFileSync = wf; } };
       const tick = () => new Promise((r) => setImmediate(() => setImmediate(r)));
       const lay = (spec) => ({ current: null, autoSave: null, saved: {}, customGrids: [], desktops: Object.fromEntries(Object.entries(spec).map(([k, ws]) => [k, { autoSave: { windows: ws.map((w) => ({ winId: w })) } }])), desktopMeta: Object.keys(spec).map((k) => ({ id: k, name: k.toUpperCase() })) });
       const sceneM = async (P, tag) => {
         const d = scratchDir('owed-lay-' + tag); roots.push(d);
         const sent = []; const client = { readyState: 1, send: (x) => { try { sent.push(JSON.parse(x)); } catch { } } };
-        P.setup({ dataDir: d, wss: { clients: new Set([client]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        P.setup({ writer: landingWriter(), dataDir: d, wss: { clients: new Set([client]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
         const R = P.router;
         const handler = (method, p) => { const l = R.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
         const call = async (method, p, body, params = {}) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; }, set() { return res; }, setHeader() { } }; await handler(method, p)({ body, query: {}, params, headers: {} }, res, (e) => { status = 500; o = { error: String(e) }; }); return { status, body: o }; };
@@ -2852,22 +2856,22 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const W = (t) => M.sent.filter((x) => x.type === t);
       // the autosave: a refused flush is kept, nothing said in its silent rungs
       const before = fs.readFileSync(M.F, 'utf8');
-      const auto = await refusing(() => { M.R.writeLayouts(lay({ a: ['w1', 'w2', 'w3', 'w4'], b: [] })); return M.R.flushLayouts(); });
+      const auto = await refusing(() => { M.R.writeLayouts(lay({ a: ['w1', 'w2', 'w3', 'w4'], b: [] })); return flushed(M.R); });
       const heldAuto = await M.call('get', '/api/stores/held');
       ok(auto === false && fs.readFileSync(M.F, 'utf8') === before && W('store-unsaved').length === 0 && Array.isArray(heldAuto.body.unsaved) && heldAuto.body.unsaved.length === 0,
         '⑪ (m) the desktops: an autosave whose write the storage refuses is KEPT (the flush answers «not landed», the file holds the older desktops) and nothing is said in its silent rungs', { auto, words: W('store-unsaved'), unsaved: heldAuto.body.unsaved });
       // a press's flush: said at once on every page, listed for a page that was away; a landing lifts it
-      const pr = await refusing(() => M.R.flushLayouts({ press: true }));
+      const pr = await refusing(() => flushed(M.R, { press: true }));
       const heldNow = await M.call('get', '/api/stores/held');
       const u = W('store-unsaved')[0];
-      const landedAfter = M.R.flushLayouts();
+      const landedAfter = flushed(M.R);
       const heldAfter = await M.call('get', '/api/stores/held');
       ok(pr === false && !!u && u.file === 'layouts.json' && u.code === 'EIO' && u.rung === 'said' && !('why' in u) && heldNow.body.unsaved.length === 1 && heldNow.body.unsaved[0].file === 'layouts.json' && !('why' in heldNow.body.unsaved[0])
         && landedAfter === true && W('store-saved').length === 1 && W('store-saved')[0].file === 'layouts.json' && heldAfter.body.unsaved.length === 0 && (M.disk().desktops.a.autoSave.windows || []).length === 4,
         '⑪ (m) the desktops: a press\'s refused flush is SAID to every page at once (store-unsaved: the file, its code) and listed for a page that was away (GET /api/stores/held → unsaved); the next landing LIFTS it (store-saved) with memory\'s desktops on disk', { u, unsaved: heldNow.body.unsaved, landedAfter, saved: W('store-saved') });
       // the stop: a last flush that fails is the journal's line, by the store's name
       const errs = []; const ce = console.error; console.error = (...a) => errs.push(a.join(' '));
-      let st; try { st = await refusing(() => { M.R.writeLayouts(lay({ a: ['w1'], b: ['w2', 'w3', 'w4'] })); return M.R.flushLayouts({ stop: true }); }); } finally { console.error = ce; }
+      let st; try { st = await refusing(() => { M.R.writeLayouts(lay({ a: ['w1'], b: ['w2', 'w3', 'w4'] })); return flushed(M.R, { stop: true }); }); } finally { console.error = ce; }
       ok(st === false && errs.some((l) => /\[layouts\] layouts\.json could NOT be written at the stop \(EIO\) — the desktops changed since .* are not on disk: the next start reads the older file/.test(l)),
         '⑪ (m) the hub\'s stop: a last flush the storage refuses is said in the journal BY THE STORE\'S NAME (the next start reads the older file)', errs);
       M.R.flushLayouts();   // (lands: the next scene starts clean)
@@ -2887,8 +2891,8 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         && RS.told.length === 2 && RS.told.every((x) => x.unsaved && x.unsaved.file === 'layouts.json' && x.unsaved.code === 'EIO') && RS.unsavedWords >= 2,
         '⑪ (m) the two restore doors (the whole point, one desktop) answer a refused write BY NAME (503 store_unsaved, the file and its code) and their broadcast carries it — the restoring page never says «restored»; the strip is told at once (a press)', RS);
       // RED: the release's swallow, in a copy — the restore answers success over a write that failed, nothing is said
-      const SWALLOW_A = /^ {4}try \{ landed = layoutsHold\.flush\([^\n]*\n {4}catch \(e\) \{ if \(e && e\.code === 'store_appeared'\) layoutsAgain\([^\n]*\n/m;
-      const XS = await restoreScene(mutantCopies('swc-owed-swallow', REPO).load(PREL, anchored(PSRC, SWALLOW_A, "    try { ensureDir(dataDir); layoutsHold.write(_layoutsCache); } catch (e) { /* MUTANT: the release's swallow */ }\n    landed = true;\n", 'owed-swallow'), 'owed-swallow'), 'restore-red');
+      const SWALLOW_A = /^ {4}try \{ layoutsHold\.owe\(f\.doc, \{ name: 'layouts\.write'[^\n]*\n {4}catch \(e\) \{ if \(e && e\.code === 'store_appeared'\) layoutsAgain\([^\n]*\n/m;   // (B-0248 (a): the flush's hand-off to the writer)
+      const XS = await restoreScene(mutantCopies('swc-owed-swallow', REPO).load(PREL, anchored(PSRC, SWALLOW_A, "      try { ensureDir(dataDir); layoutsHold.write(_layoutsCache); } catch (e) { /* MUTANT: the release's swallow */ }\n      return done(true);\n", 'owed-swallow'), 'owed-swallow'), 'restore-red');
       ok(XS.whole.status === 200 && XS.whole.body.success === true && XS.unsavedWords === 0 && XS.told.every((x) => !x.unsaved),
         'CONTROL (the release\'s swallow, in a copy): the restore answers SUCCESS over a write the storage refused and nothing is said — red', { whole: XS.whole, words: XS.unsavedWords });
     }
@@ -2917,10 +2921,10 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
   // by the leg: ONE write of a file in flight at a time, its bytes made when it starts (produce — the latest state), landed only when
   // the leg says so; then its waiters (a version at or before the landed one) are answered, then onWritten, then the next version
   // starts — made NOW. A failed landing keeps the change owed and answers its waiters false (the writer's own failure road)
-  const gatedWriter = () => {
-    const S = new Map(), names = [];
+  const gatedWriter = ({ lateProduce = false } = {}) => {   // lateProduce: the bytes made at the LANDING (a writer busy with another store)
+    const S = new Map(), names = [], landedLog = [];
     const st = (f) => { if (!S.has(f)) S.set(f, { v: 0, wv: 0, flight: null, dirty: false, o: null, waiters: [] }); return S.get(f); };
-    const start = (s) => { if (s.flight || !s.dirty) return; s.dirty = false; const b = s.o.produce(); s.flight = { v: s.v, bytes: Array.isArray(b) ? b.join('') : String(b) }; };
+    const start = (s) => { if (s.flight || !s.dirty) return; s.dirty = false; if (lateProduce) { s.flight = { v: s.v, bytes: null }; return; } const b = s.o.produce(); s.flight = { v: s.v, bytes: Array.isArray(b) ? b.join('') : String(b) }; };
     const W = {
       dirty(f, o) { names.push(o && o.name); const s = st(f); s.o = o; s.v++; s.dirty = true; start(s); },
       pending: (f) => { const s = S.get(f); return !!s && (s.dirty || !!s.flight); },
@@ -2929,14 +2933,17 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
         if (!s || (!s.dirty && !s.flight)) return Promise.resolve(done(true));
         const want = s.v; return new Promise((res) => s.waiters.push({ want, cb: (ok) => res(done(ok)) }));
       },
-      whyNotDurable: () => ({ why: 'failed', code: 'EIO' }),
+      whyNotDurable: (f) => { const s = S.get(f); return s && s.why === 'queued' ? { why: 'queued', code: null } : { why: 'failed', code: 'EIO' }; },   // (timeout below: a write only QUEUED past the writer's bound)
       flushSync(files) { for (const f of files || [...S.keys()]) { const s = S.get(f); for (let i = 0; s && (s.flight || s.dirty) && i < 10; i++) land1(f, true); } return { written: [], left: [] }; },
+      forget: (f) => { S.delete(f); },
     };
     function land1(gwFile, ok = true) {
       const s = S.get(gwFile); if (!s) return; if (!s.flight) start(s); const fl = s.flight; if (!fl) return;
       s.flight = null;
       if (ok) {
-        const gwTmp = gwFile + '.gw.tmp'; fs.writeFileSync(gwTmp, fl.bytes); fs.renameSync(gwTmp, gwFile); s.wv = fl.v;
+        if (fl.bytes === null) { const b = s.o.produce(); fl.bytes = Array.isArray(b) ? b.join('') : String(b); }
+        if (s.o.makeDir) fs.mkdirSync(path.dirname(gwFile), { recursive: true });
+        const gwTmp = gwFile + '.gw.tmp'; fs.writeFileSync(gwTmp, fl.bytes); fs.renameSync(gwTmp, gwFile); s.wv = fl.v; s.why = null; landedLog.push(path.basename(gwFile));
         const keep = []; for (const w of s.waiters) { if (w.want <= s.wv) w.cb(true); else keep.push(w); } s.waiters = keep;
         try { s.o.onWritten && s.o.onWritten(true, null); } catch { }
         start(s);
@@ -2945,7 +2952,10 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
         try { s.o.onWritten && s.o.onWritten(false, Object.assign(new Error('EIO: a stand-in'), { code: 'EIO' })); } catch { }
       }
     }
-    return { W, names, land: (ok = true) => { for (const f of [...S.keys()]) land1(f, ok); }, inFlight: () => [...S.values()].filter((s) => s.flight).length };
+    return { W, names, land: (ok = true) => { for (const f of [...S.keys()]) land1(f, ok); }, inFlight: () => [...S.values()].filter((s) => s.flight).length, log: () => landedLog.slice(),
+      flying: () => [...S.entries()].filter(([, s]) => s.flight).map(([f]) => f), landOnly: (pred, ok = true) => { for (const f of [...S.keys()]) if (pred(f) && S.get(f).flight) land1(f, ok); },
+      // the writer's BOUND passes while a write is still QUEUED (the real writer's durableMs): its waiters answer false, the write stays
+      timeout: (pred) => { for (const [f, s] of [...S.entries()]) if (pred(f) && (s.flight || s.dirty) && s.waiters.length) { s.why = 'queued'; const ws = s.waiters; s.waiters = []; for (const w of ws) w.cb(false); } } };
   };
   const fresh = (P) => { for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; return P(); };
   const setupP = (P, d, W, told, hooked) => {
@@ -3059,9 +3069,9 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     ok(J(XO.getInFlight) === J({ 'claude:a': 'one', 'claude:b': 'two' }), 'CONTROL (the readers handed the pending list, in a copy): the GET shows both renames while neither is on disk (red)', XO.getInFlight);
     // RED: the hold answers BEFORE it tells (the store hold, in a copy loaded in its place)
     const SHREL = 'src/store-hold.js', SHSRC = fs.readFileSync(path.join(REPO, SHREL), 'utf8'), SHP = require.resolve(path.join(REPO, SHREL));
-    const TELL_A = "    w.durable(file, { answer: (ok) => { if (ok) tell(); answer(ok); } });\n";
+    const TELL_A = "    w.durable(file, { answer: (ok) => { if (ok) tell(); else notOnDiskOwed(press); answer(ok); } });\n";
     ok(SHSRC.split(TELL_A).length === 2, 'control setup: the hold\'s tell-then-answer is found once');
-    const holdX = mutantCopies('swc-pl-answerfirst', REPO).load(SHREL, anchored(SHSRC, TELL_A, "    w.durable(file, { answer: (ok) => { answer(ok); if (ok) tell(); } });   // MUTANT: answered first\n", 'pl-answer-first'));
+    const holdX = mutantCopies('swc-pl-answerfirst', REPO).load(SHREL, anchored(SHSRC, TELL_A, "    w.durable(file, { answer: (ok) => { if (!ok) notOnDiskOwed(press); answer(ok); if (ok) tell(); } });   // MUTANT: answered first\n", 'pl-answer-first'));
     const savedHold = require.cache[SHP];
     let XF;
     try { require.cache[SHP] = { id: SHP, filename: SHP, loaded: true, exports: holdX, children: [], paths: [] }; XF = await lawScene(() => require(path.join(REPO, PREL)), 'answerfirst'); }
@@ -3478,6 +3488,370 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     ok(DWSRC.split(WW_A).length === 2, 'control setup: the wake\'s un-archive words are found once');
     const WWX = await wakeWordsScene(mutantCopies('swc-pl-wakewords', REPO).load(DWREL, anchored(DWSRC, WW_A, "false ?", 'pl-wake-words')), 'cut');
     ok(WWX.a && WWX.a.code === 'archived' && WWX.a.why === 'it is archived', 'CONTROL (the words cut, in a copy): the refusal says only «it is archived» while the person\'s page shows it un-archived (red)', WWX.a);
+
+    // (i)–(k) B-0248 (a)+(b): THE DESKTOPS AND THEIR ROLLBACK POINTS — the release's 500 ms debounce kept, then an act; R10 by LANDING
+    const L0 = { current: null, autoSave: null, saved: {}, customGrids: [], desktopMeta: [{ id: 'd0', name: 'One' }, { id: 'd1', name: 'Two' }], desktops: { d0: { autoSave: { windows: [{ winId: 'w0' }, { winId: 'w1' }, { winId: 'w2' }] } }, d1: { autoSave: { windows: [{ winId: 'w3', x: 0 }] } } } };
+    const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+    const layScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-lay-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter();
+      const R = setupP(fresh(load), d, g.W, [], []);
+      R.readLayouts();
+      const out = {};
+      const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);   // a window closed: its rollback point, then the desktops
+      R.writeLayouts(shape);
+      await sleepMs(60); out.pointInFlight = g.inFlight(); out.layoutsAt60 = g.W.pending(LF);
+      await sleepMs(560); out.layoutsAfterDebounce = g.W.pending(LF);   // the release's 500 ms debounce fired: the point is not on disk yet
+      g.land(); out.layoutsAfterPoint = g.W.pending(LF);                // the point landed, its header in flight
+      g.land(); out.layoutsAfterHead = g.W.pending(LF);                 // the header landed: the desktops handed now
+      g.land();
+      out.order = g.log().slice(0, 3).map((f) => (/\.meta\.json$/.test(f) ? 'header' : /^layout-/.test(f) ? 'point' : f));
+      out.onDisk = JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d0.autoSave.windows.map((w) => w.winId);
+      const geo = JSON.parse(J(shape)); geo.desktops.d1.autoSave.windows[0].x = 40;   // a GEOMETRY change: no point
+      R.writeLayouts(geo);
+      await sleepMs(300); out.geoAt300 = g.W.pending(LF);
+      await sleepMs(300); out.geoAt600 = g.W.pending(LF);
+      g.land(); out.geoOnDisk = JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d1.autoSave.windows[0].x;
+      return out;
+    };
+    const LY = await layScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(LY.pointInFlight >= 1 && LY.layoutsAt60 === false && LY.layoutsAfterDebounce === false && LY.layoutsAfterPoint === false && LY.layoutsAfterHead === true && J(LY.order) === J(['point', 'header', 'layouts.json']) && J(LY.onDisk) === J(['w1', 'w2']),
+      '⑭i R10 BY LANDING: a window closed — its rollback point handed at the next turn; at the release\'s 500 ms debounce the desktops are NOT handed while the point (then its header) is not on disk; they land third: point, header, layouts.json', LY);
+    ok(LY.geoAt300 === false && LY.geoAt600 === true && LY.geoOnDisk === 40, '⑭i THE BOUND: a window moved is handed to the writer at the release\'s own 500 ms debounce (not at 300 ms, at 600 ms) — a hub that dies loses no more than the release did', { at300: LY.geoAt300, at600: LY.geoAt600, onDisk: LY.geoOnDisk });
+    const WAIT_A = "    if (!pointsLeftUpTo(upTo)) { landLayouts(f); return; }\n";
+    ok(PSRC.split(WAIT_A).length === 2, 'control setup: the desktops\' wait for their points is found once');
+    const LYX = await layScene(() => mutantCopies('swc-pl-nowaitpoints', REPO).load(PREL, anchored(PSRC, WAIT_A, "    landLayouts(f); return;   // MUTANT: the desktops handed without waiting for their points\n", 'pl-no-wait-points')), 'nowait');
+    ok(LYX.layoutsAfterDebounce === true, 'CONTROL (the desktops handed without waiting for their points, in a copy): layouts.json is handed while its rollback point is not on disk (red)', LYX);
+    const DEB_A = "    _layoutsSaveTimer = setTimeout(flushLayouts, 500);\n  }\n";
+    ok(PSRC.split(DEB_A).length === 2, 'control setup: writeLayouts\' 500 ms debounce is found once');
+    const LYD = await layScene(() => mutantCopies('swc-pl-debounce1s', REPO).load(PREL, anchored(PSRC, DEB_A, "    _layoutsSaveTimer = setTimeout(flushLayouts, 1000);   // MUTANT: a debounce of 1 s\n  }\n", 'pl-debounce-1s')), 'debounce1s');
+    ok(LYD.geoAt600 === false, 'CONTROL (a debounce of 1 s, in a copy): a window moved is NOT handed at 600 ms — past the release\'s 500 ms bound (red)', { at600: LYD.geoAt600 });
+
+    // (j) THE LOOP NO LONGER WAITS for the desktops: the real store writer, 300 ms placed in each main-thread rename / fsync — RED: the
+    // release's write at the call (in a copy)
+    const layLoop = async (load, tag) => {
+      const d = scratchDir('swc-pl-layloop-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const w = SW.create({ log: quiet, graceMs: 5000 });
+      const R = setupP(fresh(load), d, w, [], []);
+      R.readLayouts();
+      const oRen = fs.renameSync, oFsync = fs.fsyncSync;
+      fs.renameSync = function (a, ...r) { if (String(a).startsWith(d)) Atomics.wait(SAB, 0, 0, STALL); return oRen.call(this, a, ...r); };
+      fs.fsyncSync = function (...r) { Atomics.wait(SAB, 0, 0, STALL); return oFsync.apply(this, r); };
+      let last = performance.now(), gap = 0, on = true;
+      const tick = () => { const t = performance.now(); if (t - last > gap) gap = t - last; last = t; if (on) setTimeout(tick, 1); };
+      setTimeout(tick, 1);
+      const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
+      let onDisk = null;
+      try {
+        R.writeLayouts(shape);
+        for (let i = 0; i < 300; i++) { await sleepMs(10); try { onDisk = JSON.parse(oReadFile(LF)).desktops.d0.autoSave.windows.length; } catch { onDisk = null; } if (onDisk === 2) break; }   // a wait for WHAT HAPPENED: the desktops on disk
+      } finally { fs.renameSync = oRen; fs.fsyncSync = oFsync; on = false; }
+      await sleepMs(5);
+      const hd = path.join(d, 'layout-history'); const points = fs.existsSync(hd) ? fs.readdirSync(hd).filter((f) => !f.endsWith('.meta.json')).length : 0;
+      try { w.stop(); } catch { }
+      return { gap: Math.round(gap), onDisk, points };
+    };
+    const oReadFile = (f) => fs.readFileSync(f, 'utf8');
+    const LL = await layLoop(() => require(path.join(REPO, PREL)), 'real');
+    console.log(`  ⊙ ⑭j the loop's longest turn with ${STALL} ms placed in each main-thread rename / fsync, a window closed (its point and the desktops): ${LL.gap} ms`);
+    const OWE_A = "    try { layoutsHold.owe(f.doc, { name: 'layouts.write', bytes: () => f.text }); }\n";
+    ok(PSRC.split(OWE_A).length === 2, 'control setup: the desktops\' hand-off to the writer is found once');
+    const LLX = await layLoop(() => mutantCopies('swc-pl-layatcall', REPO).load(PREL, anchored(PSRC, OWE_A, "    try { layoutsHold.write(f.doc, f.text); }   // MUTANT: the release's write at the call\n", 'pl-layouts-at-call')), 'atcall');
+    const HP_A = "  function handPoint(p, done) {\n    const w = storeW();\n";
+    ok(PSRC.split(HP_A).length === 2, 'control setup: the point\'s hand-off is found once');
+    const LLP = await layLoop(() => mutantCopies('swc-pl-pointsatcall', REPO).load(PREL, anchored(PSRC, HP_A, "  function handPoint(p, done) {\n    { fs.mkdirSync(path.dirname(p.pointFile), { recursive: true }); for (const [f, t] of [[p.pointFile, p.pointText], [p.metaFile, p.metaText]]) { const tmp = f + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, t); fs.renameSync(tmp, f); } done(true); return; }   // MUTANT: the release's points at the call\n    const w = storeW();\n", 'pl-points-at-call')), 'pointsatcall');
+    console.log(`  ⊙ ⑭j the reds' own figures: the desktops at the call ${LLX.gap} ms, the points at the call ${LLP.gap} ms; the tree ${LL.gap} ms`);
+    // (r1053's rule for a fast suite on a busy machine: judged against the red's own figure, under half of it)
+    ok(LL.onDisk === 2 && LL.points === 1 && LL.gap * 2 < Math.min(LLX.gap, LLP.gap), `⑭j the loop no longer waits for the desktops or their point: the longest turn ${LL.gap} ms — under half of each red's own figure (${LLX.gap} / ${LLP.gap} ms); both on disk`, { tree: LL, desktopsAtCall: LLX.gap, pointsAtCall: LLP.gap });
+    ok(LLX.gap >= STALL && LLX.onDisk === 2, `CONTROL (the release's write of the desktops at the call, in a copy): the loop is held ${LLX.gap} ms (≥ ${STALL}) by its rename (red)`, LLX);
+    ok(LLP.gap >= STALL && LLP.points === 1, `CONTROL (the release's points at the call, in a copy): the loop is held ${LLP.gap} ms (≥ ${STALL}) by the point's renames (red)`, LLP);
+
+    // (k) THE STOP lands a rollback point and the desktops IN ORDER, inside the writer's exit (the server's order: beginExit, the
+    // rank-0 pass, the stores' own flushes — flushLayouts({stop}) —, the last pass): RED: the point's chain on a promise (never run
+    // inside the exit's one synchronous run)
+    const layStop = async (load, tag) => {
+      const d = scratchDir('swc-pl-laystop-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const w = SW.create({ log: quiet, graceMs: 5000 });
+      const R = setupP(fresh(load), d, w, [], []);
+      R.readLayouts();
+      const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
+      R.writeLayouts(shape);   // …and the stop at once: before the next turn's drain and before the debounce
+      try { w.beginExit(); w.exitFlush({ only: 'rank0' }); R.flushLayouts({ stop: true }); w.exitFlush({ debtMs: 0 }); } catch (e) { return { threw: String(e && e.message || e) }; }
+      const hd = path.join(d, 'layout-history');
+      const files = fs.existsSync(hd) ? fs.readdirSync(hd) : [];
+      const out = { onDisk: JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d0.autoSave.windows.length, points: files.filter((f) => !f.endsWith('.meta.json')).length, heads: files.filter((f) => f.endsWith('.meta.json')).length };
+      try { w.stop(); } catch { }
+      return out;
+    };
+    const LS = await layStop(() => require(path.join(REPO, PREL)), 'real');
+    ok(LS.onDisk === 2 && LS.points === 1 && LS.heads === 1, '⑭k the stop lands the rollback point, its header and the desktops (the window closed just before it) — all three on disk after the writer\'s exit', LS);
+    const PT_A = "    w.durable(p.pointFile, { answer: (ok) => settle(p.pointFile, ok, () => {\n";
+    const PT_B = "      w.durable(p.metaFile, { answer: (ok2) => settle(p.metaFile, ok2, () => done(true)) });\n    }) });\n";
+    ok(PSRC.split(PT_A).length === 2 && PSRC.split(PT_B).length === 2, 'control setup: the point\'s answer road is found once');
+    const LSX = await layStop(() => mutantCopies('swc-pl-pointpromise', REPO).load(PREL, anchored(anchored(PSRC, PT_A, "    w.durable(p.pointFile).then((ok) => settle(p.pointFile, ok, () => {   // MUTANT: a promise's .then\n", 'pl-point-promise-a'), PT_B, "      w.durable(p.metaFile, { answer: (ok2) => settle(p.metaFile, ok2, () => done(true)) });\n    }));\n", 'pl-point-promise-b')), 'promise');
+    ok(LSX.onDisk === 3, 'CONTROL (the point\'s chain on a promise, in a copy): at the stop the header and the desktops are never handed — layouts.json keeps the window the person closed (red)', LSX);
+
+    // (v) THE FLUSH'S BYTES ARE MADE AT THE FLUSH (the fresh read's MUST — R10): the writer busy elsewhere makes the desktops' bytes late;
+    // meanwhile the socket's apply edits the cache IN PLACE — the desktops that land are the flush's, never the later change (whose
+    // own flush waits for its own point). RED: the bytes made from the live object
+    const lateScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-late-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter({ lateProduce: true });
+      const R = setupP(fresh(load), d, g.W, [], []);
+      R.readLayouts();
+      const geo = JSON.parse(J(L0)); geo.desktops.d1.autoSave.windows[0].x = 40;
+      R.writeLayouts(geo);
+      await sleepMs(600);                                      // the debounce fired: the desktops owed, their bytes not made yet
+      R.readLayouts().desktops.d1.autoSave.windows[0].x = 99;  // the socket's apply edits the cache in place (a later change)
+      g.land();
+      return { x: JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d1.autoSave.windows[0].x };
+    };
+    const LT = await lateScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(LT.x === 40, '⑭v the flush\'s bytes are made AT THE FLUSH: a writer that makes them late lands the desktops the flush saw (x 40), never the later in-place change (x 99) that its own flush, after its own point, writes', LT);
+    const LTX = await lateScene(() => mutantCopies('swc-pl-livebytes', REPO).load(PREL, anchored(PSRC, OWE_A, "    try { layoutsHold.owe(f.doc, { name: 'layouts.write', bytes: (v) => JSON.stringify(v, null, 2) }); }   // MUTANT: the bytes from the live object\n", 'pl-live-bytes')), 'livebytes');
+    ok(LTX.x === 99, 'CONTROL (the bytes made from the live object, in a copy): the desktops that land hold a later change made after the flush — ahead of that change\'s rollback point (red)', LTX);
+
+    // (w) A FLUSH WAITS ONLY FOR THE POINTS HANDED UP TO ITS OWN CALL (the fresh read's should — never starved by shape changes in a
+    // row): a point handed after the flush does not hold it. RED: every outstanding point counted
+    const seqScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-seq-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter();
+      const R = setupP(fresh(load), d, g.W, [], []);
+      R.readLayouts();
+      const one = JSON.parse(J(L0)); one.desktops.d0.autoSave.windows.splice(0, 1);   // shape change 1: point 1
+      let flushed = null; R.writeLayouts(one); await sleepMs(30);
+      const p1 = g.flying().find((f) => /layout-history/.test(f));
+      R.flushLayouts({}, (ok) => { flushed = ok; });           // the flush: it waits for point 1
+      const two = JSON.parse(J(one)); two.desktops.d0.autoSave.windows.splice(0, 1);   // shape change 2: point 2, after the flush
+      R.writeLayouts(two); await sleepMs(30);
+      g.landOnly((f) => f === p1); g.landOnly((f) => /\.meta\.json$/.test(f) && f.startsWith(p1.replace(/\.json$/, '')));   // point 1 and its header land; point 2 still in flight
+      return { handedWhilePoint2: g.W.pending(LF), point2InFlight: g.flying().some((f) => /layout-history/.test(f) && f !== p1), flushed };
+    };
+    const SQ = await seqScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(SQ.point2InFlight === true && SQ.handedWhilePoint2 === true, '⑭w a flush waits only for the points handed up to its own call: with point 1 landed and a LATER change\'s point 2 still in flight, the desktops are handed', SQ);
+    const SEQ_A = "  const pointsLeftUpTo = (upTo) => { for (const id of _pointsOutIds) if (id <= upTo) return true; return false; };\n";
+    ok(PSRC.split(SEQ_A).length === 2, 'control setup: the flush\'s own mark is found once');
+    const SQX = await seqScene(() => mutantCopies('swc-pl-allpoints', REPO).load(PREL, anchored(PSRC, SEQ_A, "  const pointsLeftUpTo = (upTo) => _pointsOutIds.size > 0;   // MUTANT: every outstanding point counted\n", 'pl-all-points')), 'allpoints');
+    ok(SQX.handedWhilePoint2 === false, 'CONTROL (every outstanding point counted, in a copy): the desktops wait for a later change\'s point — shape changes in a row would starve them (red)', SQX);
+
+    // (x) A STORE NOT THERE whose exclusive create the STORAGE refuses is KEPT on the hold's ladder (owed, said for a press) — never
+    // dropped, never «appeared». RED: the storage's refusal answered as nothing kept
+    const firstScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-first-' + tag); roots.push(d); seed(d);   // NO layouts.json
+      const g = gatedWriter();
+      const sent = [];
+      const P0 = fresh(load);
+      P0.setup({ dataDir: d, wss: { clients: new Set([{ readyState: 1, send: (t) => sent.push(JSON.parse(t)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, writer: g.W });
+      const R = P0.router;
+      R.readLayouts();
+      R.writeLayouts(JSON.parse(J(L0)));
+      const wf = fs.writeFileSync;
+      fs.writeFileSync = function (f, ...a) { if (/layouts\.json\.\d+\.tmp$/.test(String(f))) throw Object.assign(new Error('EIO: a stand-in refused write'), { code: 'EIO' }); return wf.call(this, f, ...a); };
+      let landed = null;
+      try { R.flushLayouts({ press: true }, (ok) => { landed = ok; }); } finally { fs.writeFileSync = wf; }
+      const held = call(R, 'get', '/api/stores/held');
+      return { landed, unsaved: (held.body && held.body.unsaved || []).map((u) => u.file), said: sent.filter((x) => x.type === 'store-unsaved').map((x) => x.file) };
+    };
+    const FS1 = await firstScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(FS1.landed === false && J(FS1.unsaved) === J(['layouts.json']) && J(FS1.said) === J(['layouts.json']), '⑭x layouts.json NOT THERE and its first write refused by the storage (EIO): KEPT on the hold\'s ladder — owed, said at once for the press, listed as unsaved; never dropped, never «appeared»', FS1);
+    // RED: the hold's keep cut (the store hold, in a copy loaded in its place) — the refused create throws to the flush, which drops it
+    const FIRST_A = "      else if (!flush(() => [next, bytes])) { accepted?.(); return false; }\n";
+    const SHREL_X = 'src/store-hold.js', SHSRC_X = fs.readFileSync(path.join(REPO, SHREL_X), 'utf8'), SHP_X = require.resolve(path.join(REPO, SHREL_X));
+    ok(SHSRC_X.split(FIRST_A).length === 2, 'control setup: the hold\'s keep of a write refused at the call is found once');
+    const holdFirstX = mutantCopies('swc-pl-firstdropped', REPO).load(SHREL_X, anchored(SHSRC_X, FIRST_A, "      else write(next, bytes);   // MUTANT: the storage's refusal thrown to the flush\n", 'pl-first-dropped'));
+    const savedHoldX = require.cache[SHP_X];
+    let FSX;
+    try { require.cache[SHP_X] = { id: SHP_X, filename: SHP_X, loaded: true, exports: holdFirstX, children: [], paths: [] }; FSX = await firstScene(() => require(path.join(REPO, PREL)), 'dropped'); }
+    finally { if (savedHoldX) require.cache[SHP_X] = savedHoldX; else delete require.cache[SHP_X]; }
+    ok(FSX.landed === false && FSX.unsaved.length === 0 && FSX.said.length === 0, 'CONTROL (the storage\'s refusal answered as nothing kept, in a copy): the first desktops are neither owed nor said — a restart reads NOT THERE (red)', FSX);
+    // RED (the second fresh read's small): the kept road's own answer cut — the hold asks a writer that owes nothing, which says «landed»
+    const KEPT_A = "    if (owed && owed.produce) { if (press && owed.rung !== 'said') say(); answer(false); return; }\n";
+    ok(SHSRC_X.split(KEPT_A).length === 2, 'control setup: the answer while the hold\'s own ladder owes is found once');
+    const holdKeptX = mutantCopies('swc-pl-keptanswer', REPO).load(SHREL_X, anchored(SHSRC_X, KEPT_A, "    /* MUTANT: the kept road's answer cut */\n", 'pl-kept-answer'));
+    let FKX;
+    try { require.cache[SHP_X] = { id: SHP_X, filename: SHP_X, loaded: true, exports: holdKeptX, children: [], paths: [] }; FKX = await firstScene(() => require(path.join(REPO, PREL)), 'keptanswer'); }
+    finally { if (savedHoldX) require.cache[SHP_X] = savedHoldX; else delete require.cache[SHP_X]; }
+    ok(FKX.landed === true, 'CONTROL (the kept road\'s answer cut, in a copy): a first create the storage refused is answered «landed» — a restore would say «restored» over it (red)', FKX);
+
+    // (y) A ROLLBACK POINT THE STORAGE REFUSES is LET GO (the release dropped it): said once, its header never handed, its bytes never
+    // kept; the desktops' write goes on. RED: the failed point kept owed
+    const failPointScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-failpt-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter();
+      const R = setupP(fresh(load), d, g.W, [], []);
+      R.readLayouts();
+      const warns = []; const cw = console.warn; console.warn = (...a) => warns.push(a.join(' '));
+      let out;
+      try {
+        const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
+        R.writeLayouts(shape); await sleepMs(30);
+        const pf = g.flying().find((f) => /layout-history/.test(f));
+        g.landOnly((f) => f === pf, false);                   // the storage refuses the point
+        await sleepMs(560);                                   // the debounce: the desktops' write goes on
+        out = { pointOwed: g.W.pending(pf), header: g.flying().some((f) => /\.meta\.json$/.test(f)), handed: g.W.pending(LF), said: warns.filter((l) => /snapshot FAILED/.test(l)).length };
+      } finally { console.warn = cw; }
+      return out;
+    };
+    const FP = await failPointScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(FP.pointOwed === false && FP.header === false && FP.handed === true && FP.said === 1, '⑭y a rollback point the storage refuses is LET GO (no longer owed, its header never handed), said once, and the desktops\' write goes on', FP);
+    const FORGET_A = "      try { w.forget(file); } catch { /* the writer's */ }\n";
+    ok(PSRC.split(FORGET_A).length === 2, 'control setup: the failed point\'s release is found once');
+    const FPX = await failPointScene(() => mutantCopies('swc-pl-keepfailed', REPO).load(PREL, anchored(PSRC, FORGET_A, "      /* MUTANT: the failed point kept owed */\n", 'pl-keep-failed')), 'keep');
+    ok(FPX.pointOwed === true, 'CONTROL (the failed point kept owed, in a copy): its bytes — a whole layouts copy — stay owed for the life of the process (red)', FPX);
+
+    // (z) A READ AGAIN WHOLE ends every flush still waiting (the fresh read's small): a file that appeared meanwhile — no waiter tells
+    // «landed» for a change that was not made. RED: the generation's check cut
+    const genScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-gen-' + tag); roots.push(d); seed(d);   // NO layouts.json at the start
+      const LF = path.join(d, 'layouts.json');
+      const g = gatedWriter();
+      const R = setupP(fresh(load), d, g.W, [], []);
+      R.readLayouts();
+      R.writeLayouts(JSON.parse(J(L0))); await sleepMs(10);
+      const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
+      R.writeLayouts(shape); await sleepMs(30);                 // point 1 in flight: the first flush waits for it
+      let a = null, b = null;
+      R.flushLayouts({}, (ok) => { a = ok; });
+      // a second shape change: point 2 — the second flush waits for ITS OWN mark (two waiting flushes, never one shared: ⑭ad)
+      const shape2 = JSON.parse(J(shape)); shape2.desktops.d0.autoSave.windows.splice(0, 1);
+      R.writeLayouts(shape2);
+      R.flushLayouts({ press: true }, (ok) => { b = ok; });
+      fs.writeFileSync(LF, J({ ...L0, desktopMeta: [{ id: 'd9', name: 'appeared' }] }));   // a file appears (a late mount)
+      for (let i = 0; i < 6; i++) g.land();
+      return { a, b, onDisk: JSON.parse(fs.readFileSync(LF, 'utf8')).desktopMeta.map((m) => m.id) };
+    };
+    const GN = await genScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(GN.a === false && GN.b === false && J(GN.onDisk) === J(['d9']), '⑭z a file that appeared while two flushes waited (each for its own point): BOTH answer not landed (the change was not made — read again whole), the file that appeared kept', GN);
+    const GEN_A = "    if (f.gen !== _layoutsGen) return done(false);   // read again WHOLE meanwhile (a file appeared, a hold lifted): this change was not made\n";
+    ok(PSRC.split(GEN_A).length === 2, 'control setup: the flush\'s generation check is found once');
+    const GNX = await genScene(() => mutantCopies('swc-pl-nogen', REPO).load(PREL, anchored(PSRC, GEN_A, "      /* MUTANT: the generation's check cut */\n", 'pl-no-gen')), 'nogen');
+    ok(GNX.b === true, 'CONTROL (the generation\'s check cut, in a copy): the second waiter writes its stale desktops over the file that appeared and answers «landed» for a restore that was dropped (red)', GNX);
+
+    // (aa) A WRITE ONLY QUEUED PAST THE WRITER'S BOUND (the second fresh read's should): the restore door's 503 says it is QUEUED, by
+    // name — never «could not be written (write failed)» — and the page-facing fact keeps the code «queued»; it lifts at its landing.
+    // RED: the code dropped (the queued answer owed with no code)
+    const holdIn = async (shx, run) => { const saved = require.cache[SHP_X]; try { require.cache[SHP_X] = { id: SHP_X, filename: SHP_X, loaded: true, exports: shx, children: [], paths: [] }; return await run(); } finally { if (saved) require.cache[SHP_X] = saved; else delete require.cache[SHP_X]; } };
+    const queuedScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-queued-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter(); const told = [];
+      const R = setupP(fresh(load), d, g.W, told, []);
+      R.readLayouts();
+      const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
+      R.writeLayouts(shape); await sleepMs(30);
+      for (let i = 0; i < 4 && g.flying().length; i++) g.land();   // the point and its header land
+      R.flushLayouts(); for (let i = 0; i < 4 && g.flying().length; i++) g.land();
+      const pt = R.listLayoutHistory()[0];
+      const out = call(R, 'post', '/api/layout-history/:id/restore', { body: { rid: 'r-q' }, params: { id: pt.id } });
+      await sleepMs(10);
+      for (let i = 0; i < 4 && g.flying().some((f) => /layout-history/.test(f)); i++) g.landOnly((f) => /layout-history/.test(f));   // the restore's own point
+      g.timeout((f) => f === LF);                                 // the writer's bound passes: layouts.json still queued
+      await sleepMs(10);
+      const restored = told.find((x) => x.type === 'layout-restored' && x.rid === 'r-q');
+      const unsavedWords = told.filter((x) => x.type === 'store-unsaved');
+      g.land();                                                   // it lands
+      return { status: out.status, body: out.body, restoredUnsaved: restored && restored.unsaved, unsavedWords, saved: told.filter((x) => x.type === 'store-saved').length };
+    };
+    const QD = await queuedScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(QD.status === 503 && QD.body && QD.body.code === 'store_unsaved' && /layouts\.json is not on disk yet \(its write is still queued behind the storage\)/.test(QD.body.error) && !/could not be written/.test(QD.body.error)
+      && QD.body.unsaved && QD.body.unsaved.code === 'queued' && QD.restoredUnsaved && QD.restoredUnsaved.code === 'queued' && QD.unsavedWords.length === 1 && QD.unsavedWords[0].code === 'queued' && QD.saved === 1,
+      '⑭aa a restore whose write is only QUEUED past the writer\'s bound: 503 by name, said as queued (never «could not be written»), the page-facing fact keeps the code «queued» (the answer, its broadcast, the word), lifted at its landing', QD);
+    const QCODE_A = "code: nd.code || (queued ? 'queued' : null),";
+    ok(SHSRC_X.split(QCODE_A).length === 2, 'control setup: the queued answer\'s code is found once');
+    const QDX = await holdIn(mutantCopies('swc-pl-queuednocode', REPO).load(SHREL_X, anchored(SHSRC_X, QCODE_A, "code: nd.code || null,   /* MUTANT: the queued code dropped */", 'pl-queued-nocode')), () => queuedScene(() => require(path.join(REPO, PREL)), 'nocode'));
+    ok(QDX.status === 503 && /could not be written \(write failed\)/.test(QDX.body.error) && QDX.body.unsaved.code === null, 'CONTROL (the queued answer owed with no code, in a copy): the restore says «could not be written (write failed)» for a write only queued, and the pages get no code (red)', { error: QDX.body && QDX.body.error, unsaved: QDX.body && QDX.body.unsaved });
+
+    // (ab) A ROLLBACK POINT ONLY QUEUED PAST THE WRITER'S BOUND is waited for again (the second fresh read's should) — never let go: it
+    // lands late, its header follows, the desktops after both; nothing said. RED: the wait again cut (the point forgotten as refused)
+    const queuedPointScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-qpt-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter();
+      const R = setupP(fresh(load), d, g.W, [], []);
+      R.readLayouts();
+      const warns = []; const cw = console.warn; console.warn = (...a) => warns.push(a.join(' '));
+      try {
+        const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
+        R.writeLayouts(shape); await sleepMs(30);
+        const pf = g.flying().find((f) => /layout-history/.test(f) && !/\.meta\.json$/.test(f));
+        g.timeout((f) => f === pf);                                 // the bound passes: the point still queued
+        await sleepMs(560);                                         // the debounce: the flush waits for the point
+        const handedBefore = g.W.pending(LF);
+        g.landOnly((f) => f === pf); g.landOnly((f) => /\.meta\.json$/.test(f));   // the point lands late, then its header
+        const handedAfter = g.W.pending(LF);
+        g.land();
+        return { handedBefore, handedAfter, pointOnDisk: !!pf && fs.existsSync(pf), said: warns.filter((l) => /snapshot FAILED/.test(l)).length, order: g.log() };
+      } finally { console.warn = cw; }
+    };
+    const QP = await queuedPointScene(() => require(path.join(REPO, PREL)), 'real');
+    const qpi = (o, re) => o.findIndex((n) => re.test(n));
+    ok(QP.handedBefore === false && QP.handedAfter === true && QP.pointOnDisk === true && QP.said === 0 && qpi(QP.order, /^layout-.*\.json$/) >= 0 && qpi(QP.order, /^layout-.*\.json$/) < QP.order.indexOf('layouts.json'),
+      '⑭ab a rollback point only QUEUED past the writer\'s bound is waited for again: it lands late, its header follows, and the desktops are handed only then — nothing said, nothing let go', QP);
+    const REWAIT_A = "      if (why && why.why === 'queued') { w.durable(file, { answer: (ok2) => settle(file, ok2, then) }); return; }\n";
+    ok(PSRC.split(REWAIT_A).length === 2, 'control setup: the point\'s wait again is found once');
+    const QPX = await queuedPointScene(() => mutantCopies('swc-pl-norewait', REPO).load(PREL, anchored(PSRC, REWAIT_A, "      /* MUTANT: the wait again cut */\n", 'pl-no-rewait')), 'norewait');
+    ok(QPX.handedBefore === true && QPX.pointOnDisk === false && QPX.said === 1, 'CONTROL (the point\'s wait again cut, in a copy): a point only queued is let go as refused — never on disk, the desktops written without it (red)', QPX);
+
+    // (ac) THE OWED WORDS LIFT ONLY AT A LANDING THAT LEAVES NOTHING NEWER OWED (the first fresh read's small; the second's should: its
+    // leg): a press said «unsaved», then two changes; the first lands while the second is still owed — no «saved» until the second lands.
+    // RED: lifted at any landing
+    const liftScene = async (shx, tag) => holdIn(shx, async () => {
+      const d = scratchDir('swc-pl-lift-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter(); const told = [];
+      const R = setupP(fresh(() => require(path.join(REPO, PREL))), d, g.W, told, []);
+      R.readLayouts();
+      const geo = (x) => { const v = JSON.parse(J(L0)); v.desktops.d1.autoSave.windows[0].x = x; return v; };
+      const W2 = (t) => told.filter((x) => x.type === t).length;
+      R.writeLayouts(geo(1)); R.flushLayouts({ press: true }, () => { });
+      g.land(false);                                              // refused: owed, said at once for the press
+      const saidAtRefusal = W2('store-unsaved');
+      R.writeLayouts(geo(2)); R.flushLayouts();                   // in flight (the writer's write again carries it)
+      R.writeLayouts(geo(3)); R.flushLayouts();                   // owed behind it
+      g.landOnly((f) => f === LF);
+      const savedAtFirst = W2('store-saved');
+      g.landOnly((f) => f === LF);
+      return { saidAtRefusal, savedAtFirst, savedAtLast: W2('store-saved'), x: JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d1.autoSave.windows[0].x };
+    });
+    const LIFT = await liftScene(require(SHP_X), 'real');
+    ok(LIFT.saidAtRefusal === 1 && LIFT.savedAtFirst === 0 && LIFT.savedAtLast === 1 && LIFT.x === 3, '⑭ac the owed words lift only at a landing that leaves nothing newer owed: a landing while a newer write is still owed says no «saved»; the last one does, once', LIFT);
+    const LIFT_A = "onWritten: (ok, err) => { if (ok) { tell(); if (!(typeof w.pending === 'function' && w.pending(file))) landed(); } else failedAtWriter(err); } }";
+    ok(SHSRC_X.split(LIFT_A).length === 2, 'control setup: the lift\'s check for a newer write is found once');
+    const LIFTX = await liftScene(mutantCopies('swc-pl-liftany', REPO).load(SHREL_X, anchored(SHSRC_X, LIFT_A, "onWritten: (ok, err) => { if (ok) { tell(); landed(); } else failedAtWriter(err); } }   /* MUTANT: lifted at any landing */", 'pl-lift-any')), 'liftany');
+    ok(LIFTX.savedAtFirst === 1, 'CONTROL (lifted at any landing, in a copy): «saved» is said while a newer write is still owed — a page would flicker «saved» then «unsaved» if it is refused (red)', LIFTX);
+
+    // (ad) ONE WAITING COPY OF THE DESKTOPS A MARK (the second fresh read's small): flushes in a row behind the SAME point (window moves
+    // while it is in flight) share one waiting flush — one write handed at its landing, the newest desktops, every answer told.
+    // RED: each flush waits with its own copy
+    const markScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-mark-' + tag); roots.push(d); seed(d);
+      const LF = path.join(d, 'layouts.json'); fs.writeFileSync(LF, J(L0));
+      const g = gatedWriter();
+      const R = setupP(fresh(load), d, g.W, [], []);
+      R.readLayouts();
+      const shape = JSON.parse(J(L0)); shape.desktops.d0.autoSave.windows.splice(0, 1);
+      R.writeLayouts(shape); await sleepMs(30);                   // a point in flight
+      const pf = g.flying().find((f) => /layout-history/.test(f) && !/\.meta\.json$/.test(f));
+      const answers = [];
+      for (const x of [11, 12, 13]) { const v = JSON.parse(J(shape)); v.desktops.d1.autoSave.windows[0].x = x; R.writeLayouts(v); R.flushLayouts({}, (ok) => answers.push(ok)); }
+      const handedWhileWaiting = g.names.filter((n) => n === 'layouts.write').length;
+      g.landOnly((f) => f === pf); g.landOnly((f) => /\.meta\.json$/.test(f));
+      const handed = g.names.filter((n) => n === 'layouts.write').length;
+      for (let i = 0; i < 4 && g.flying().length; i++) g.land();
+      return { handedWhileWaiting, handed, answers, x: JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d1.autoSave.windows[0].x };
+    };
+    const MK = await markScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(MK.handedWhileWaiting === 0 && MK.handed === 1 && J(MK.answers) === J([true, true, true]) && MK.x === 13, '⑭ad three flushes behind the same point share ONE waiting copy of the desktops: one write handed at its landing (the newest desktops), every answer told «landed»', MK);
+    const MERGE_A = "    if (q && q.upTo === upTo && q.gen === gen) { q.doc = doc; q.text = text; q.press = q.press || press; q.stop = q.stop || stop; if (answer) q.answers.push(answer); return; }\n";
+    ok(PSRC.split(MERGE_A).length === 2, 'control setup: the shared waiting flush is found once');
+    const MKX = await markScene(() => mutantCopies('swc-pl-nomerge', REPO).load(PREL, anchored(PSRC, MERGE_A, "    /* MUTANT: each flush waits with its own copy */\n", 'pl-no-merge')), 'nomerge');
+    ok(MKX.handed === 3, 'CONTROL (each flush waiting with its own copy, in a copy): three whole copies of the desktops wait and are handed — one for each flush (red)', MKX);
 
     // (e) THE STOP lands every store moved here: the REAL writer's exit (beginExit + exitFlush) right after three acts, before any landing
     const stopScene = async (load, tag) => {

@@ -102,7 +102,7 @@ export const scratchState = () => scratch;
 /** the app's dialogs a damaged store's door opens: { importBackup, rollback } */
 export function setStoreDoors(d) { doors = d && typeof d === 'object' ? d : {}; }
 
-const KIND_WORDS = { unsaved: () => t('not being saved — the storage refused the write'), damaged: () => t('damaged — not what it should be'), 'not-allowed': () => t('not allowed to read it'), unreadable: () => t('cannot be read right now') };
+const KIND_WORDS = { unsaved: (code) => (code === 'queued' ? t('not saved yet — the storage has not taken the write in time') : t('not being saved — the storage refused the write')), damaged: () => t('damaged — not what it should be'), 'not-allowed': () => t('not allowed to read it'), unreadable: () => t('cannot be read right now') };
 /** THE STRIP'S MODEL (PURE but for t): the holds → { text, rows, scratch } or null (nothing to say). Each row: what, file, kind
  *  in words, code, and the doors a damaged store has. */
 export function stripModel(list, { scratch: sc = null, unsaved: unsavedList = [] } = {}) {
@@ -118,7 +118,7 @@ export function stripModel(list, { scratch: sc = null, unsaved: unsavedList = []
     file: h.file, what: storeWhatOf(h.file), kind: h.kind, kindWords: (KIND_WORDS[h.kind] || KIND_WORDS.unreadable)(), code: h.code || null,
     doors: h.kind === 'damaged' ? ['empty', 'import', ...(h.file === 'layouts.json' ? ['rollback'] : [])] : [],
   }));
-  for (const u of unsaved) rows.push({ file: u.file, what: storeWhatOf(u.file), kind: 'unsaved', kindWords: KIND_WORDS.unsaved(), code: u.code || null, doors: [] });
+  for (const u of unsaved) rows.push({ file: u.file, what: storeWhatOf(u.file), kind: 'unsaved', kindWords: KIND_WORDS.unsaved(u.code), code: u.code || null, doors: [] });
   const unsavedText = unsaved.length ? storeUnsavedWords(unsaved) : '';
   return { text, unsavedText, scratchText, rows, scratch: sc, damaged: rows.some((r) => r.doors.length), unsaved: unsaved.map((u) => u.file) };
 }

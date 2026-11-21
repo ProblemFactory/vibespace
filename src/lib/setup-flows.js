@@ -566,7 +566,7 @@ export function installSetupFlows(App) {
         return false;
       };
       own.landed = () => end({ success: true });
-      own.unsaved = () => end({ code: 'store_unsaved', error: storeRestoreUnsavedWords() });
+      own.unsaved = (u) => end({ code: 'store_unsaved', error: storeRestoreUnsavedWords(u && u.code) });
       end.rid = own.rid;
       return end;
     };

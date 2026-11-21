@@ -35,7 +35,7 @@ import http from 'node:http';
 import { spawnSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { scratch, freePort } from './scratch.mjs';
+import { scratch, freePort, landingWriter } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs'; // the verify-r1 controls: a store's door with its pre-fix rule, outside the checkout
 
 const require = createRequire(import.meta.url);
@@ -1355,7 +1355,7 @@ console.log('§5b a layout record keeps no record\'s words (the Job input window
       desktops: { d1: { autoSave: { windows: [JOBWIN('w1', `digest ${MARK} — needs your input`), LOGWIN('w2')] } }, d2: { autoSave: { windows: [JOBWIN('w3', `digest ${MARK} — needs your input`)] } } },
       saved: { mine: { windows: [JOBWIN('w4', `digest ${MARK} — needs your input`)] } } }, null, 2));
     const { router, setup } = mod;
-    setup({ dataDir: dir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    setup({ writer: landingWriter(), dataDir: dir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
     const r = {};
     const first = router.readLayouts();
     r.read = J(first);

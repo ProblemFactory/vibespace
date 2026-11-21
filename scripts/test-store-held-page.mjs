@@ -618,10 +618,22 @@ console.log('§8 a write the storage refused: the strip says «not being saved»
   const rr = await U.fetchJson('/api/layout-history/layout-x.json/restore', { method: 'POST' });
   ROUTE = () => ({ ok: false, status: 599, json: async () => ({}) });
   ok(!!rr && rr.error === U.storeRestoreUnsavedWords() && /^Restored here, but not saved: the storage refused the write\./.test(rr.error) && /restored here, but NOT saved/.test(rr.said), 'a restore whose write was refused answers the page\'s own words (never «Layout restored»); the hub\'s English kept as `said`', J(rr));
+  // B-0248 step 2 (the second fresh read's should): a write only QUEUED past the store writer's bound (code «queued») is not refused —
+  // the restoring page, the strip's sentence and its row say it was not taken in time; a refused one keeps «refused». RED: the queued words cut
+  ROUTE = () => answer(503, { error: 'restored here, but NOT saved: layouts.json is not on disk yet (its write is still queued behind the storage)', code: 'store_unsaved', unsaved: { file: 'layouts.json', code: 'queued' } });
+  const rq = await U.fetchJson('/api/layout-history/layout-x.json/restore', { method: 'POST' });
+  ROUTE = () => ({ ok: false, status: 599, json: async () => ({}) });
+  const qm = SH.stripModel([], { unsaved: [UNS('layouts.json', 'queued')] }), em = SH.stripModel([], { unsaved: [UNS('layouts.json')] });
+  const queuedSaid = (r, m) => !!r && /^Restored here, but not saved yet: the storage has not taken the write in time\./.test(r.error) && !!m && /not saved yet: the storage has not taken the write in time/.test(m.unsavedText) && /^not saved yet/.test(m.rows[0].kindWords);
+  ok(queuedSaid(rq, qm) && rq.error === U.storeRestoreUnsavedWords('queued') && /refused the write/.test(em.unsavedText) && /refused the write/.test(em.rows[0].kindWords) && U.storeRestoreUnsavedWords('EIO') === U.storeRestoreUnsavedWords(),
+    'a write only QUEUED past the writer\'s bound (code «queued») is said as not taken in time — the restoring page, the strip\'s sentence and its row; a refused one keeps «refused»', J({ rq: rq && rq.error, qm: qm && qm.unsavedText, row: qm && qm.rows[0].kindWords }));
+  const UQX = await esmCopy('src/lib/utils.js', anchored(read('src/lib/utils.js'), "  if (u && u.code === 'queued') return t(", "  if (false) return t(", 'queued-words-cut'), 'queued-words-cut');
+  const qmx = UQX.storeUnsavedWords(UNS('layouts.json', 'queued'));
+  ok(/refused the write/.test(qmx), 'CONTROL (the queued words cut, in a copy): the strip says «the storage refused the write» for a write only queued (red)', J(qmx));
   const APP = read('src/lib/app.js'), SF = read('src/lib/setup-flows.js');
   ok(APP.includes("else if (msg.type === 'store-unsaved') noteStoreUnsaved(msg);") && APP.includes("else if (msg.type === 'store-saved') noteStoreSaved(msg.file);")
-    && /if \(own && msg\.rid && msg\.rid === own\.rid\) \{ if \(msg\.unsaved\) \{ noteStoreUnsaved\(msg\.unsaved\); own\.unsaved\(\); \} else own\.landed\(\); return; \}/.test(APP)
-    && /if \(res\?\.code === 'store_unsaved'\) \{ own\.over = true;[^\n]*showToast\(res\.error \|\| storeRestoreUnsavedWords\(\), \{ type: 'error'/.test(SF) && /own\.unsaved = \(\) => end\(\{ code: 'store_unsaved', error: storeRestoreUnsavedWords\(\) \}\);/.test(SF),
+    && /if \(own && msg\.rid && msg\.rid === own\.rid\) \{ if \(msg\.unsaved\) \{ noteStoreUnsaved\(msg\.unsaved\); own\.unsaved\(msg\.unsaved\); \} else own\.landed\(\); return; \}/.test(APP)
+    && /if \(res\?\.code === 'store_unsaved'\) \{ own\.over = true;[^\n]*showToast\(res\.error \|\| storeRestoreUnsavedWords\(\), \{ type: 'error'/.test(SF) && /own\.unsaved = \(u\) => end\(\{ code: 'store_unsaved', error: storeRestoreUnsavedWords\(u && u\.code\) \}\);/.test(SF),
     'the page\'s wiring: the hub\'s two words reach the strip; the restoring page\'s own broadcast with the unsaved fact says the refusal (never «restored»), and so does its POST\'s 503 (pins)');
   // (round wg2vawd0o) an owed write that ENDED BY NAME says only `store-lifted`: the strip lets «not being saved» go at that word
   const liftClears = (S) => { S.noteStoreUnsaved(UNS('layouts.json')); S.noteStoreLifted('layouts.json'); const left = S.storesUnsaved().length; S.noteStoreSaved('layouts.json'); return left; };

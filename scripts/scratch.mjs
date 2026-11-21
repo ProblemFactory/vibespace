@@ -72,6 +72,34 @@ const MINTED = (globalThis[Symbol.for('vibespace.scratch.minted')] ??= new Map()
  *  page sends (Sec-Fetch-Site same-origin and its Origin). A spend.* row changes ONLY with them (src/routes/persistence.js
  *  refuseSpendRows: a bearer, or a request with no mark of the page, is refused): a suite that writes a spending row on its scratch
  *  hub writes it with these headers, so «who may write» has one place in the tests too (test-spend-rows-owner ⑤ is the census). */
+/** B-0248 (lane bl-loop-b): THE STORE WRITER'S CONTRACT AT THE CALL, for a suite whose world reads a store's file right after its door
+ *  (the release wrote at the call): dirty() writes the bytes NOW on this thread — a pid temp, then the rename, as the writer names
+ *  them; `makeDir` made — and calls onWritten; a write that throws is OWED (pending, durable() answers false, onWritten(false, err))
+ *  until the next hand-off of that file lands it. Never a measure of the off-loop road: test-store-write-census ⑭ is */
+export function landingWriter() {
+  const failed = new Map();
+  const write = (file, o) => {
+    const b = o.produce ? o.produce() : null;
+    if (b == null) return;
+    const parts = Array.isArray(b) ? b : [b];
+    if (o.makeDir) fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    for (let i = 0; i < parts.length; i++) fs.writeFileSync(tmp, parts[i], { flag: i ? 'a' : 'w' });
+    fs.renameSync(tmp, file);
+  };
+  return {
+    dirty(file, o = {}) {
+      try { write(file, o); failed.delete(file); }
+      catch (e) { failed.set(file, e); try { if (o.onWritten) o.onWritten(false, e); } catch { /* the store's */ } return; }
+      try { if (o.onWritten) o.onWritten(true, null); } catch { /* the store's */ }
+    },
+    durable(file, { answer = null } = {}) { const ok = !failed.has(file); if (answer) answer(ok); return Promise.resolve(ok); },
+    pending: (file) => failed.has(file),
+    flushSync: (files) => ({ written: [], left: (files || []).filter((f) => failed.has(f)).map((f) => ({ file: f, why: String((failed.get(f) && failed.get(f).code) || 'failed') })) }),
+    whyNotDurable: (file) => (failed.has(file) ? { why: 'failed', code: (failed.get(file) && failed.get(file).code) || null } : null),
+    forget: (file) => { failed.delete(file); },
+  };
+}
 export function ownerPageHeaders(base) { return { Origin: new URL(base).origin, 'Sec-Fetch-Site': 'same-origin' }; }
 
 /** r1213: the temp-sweeper row (src/temp-sweepers.js) whose prefix the folder a scratch NAME mints (`vs-<name>-<pid>`) would wear,

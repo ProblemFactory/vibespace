@@ -67,7 +67,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { scratchDir, scratchHome } from './scratch.mjs';
+import { scratchDir, scratchHome, landingWriter } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const LIB = path.join(REPO, 'src/lib');
@@ -464,7 +464,7 @@ await section('§4 THE DOOR TO RECOVER — one desktop restored alone (the real 
   try {
     const p = require(path.join(REPO, 'src/routes/persistence.js'));
     const heard = [];
-    p.setup({ dataDir: dd, wss: { clients: new Set([{ readyState: 1, send: (s) => heard.push(JSON.parse(s)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    p.setup({ writer: landingWriter(), dataDir: dd, wss: { clients: new Set([{ readyState: 1, send: (s) => heard.push(JSON.parse(s)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
     const R = p.router;
     // the 06:50Z point: 个人 TWELVE (eleven named + an editor), 工作 six, 研究 six — as a rollback point on disk
     const editor = { winId: 'win-ed', title: '…/notes/plan.md', type: 'editor', isMinimized: false, isMaximized: false, gridBounds: GB(11), zIndex: 7200, openSpec: { action: 'openEditor', path: '/srv/u/notes/plan.md', name: 'plan.md' }, filePath: '/srv/u/notes/plan.md', fileName: 'plan.md' };
@@ -639,7 +639,7 @@ await section('§7 r3 the rollback door opens the dialog ON the newest point tha
   try {
     delete require.cache[require.resolve(path.join(REPO, 'src/routes/persistence.js'))]; // §4 set up another data dir on the cached module
     const p = require(path.join(REPO, 'src/routes/persistence.js'));
-    p.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    p.setup({ writer: landingWriter(), dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
     const R = p.router;
     fs.mkdirSync(path.join(dd, 'layout-history'), { recursive: true });
     const put = (id, at, p) => { const doc = DOC(p), sum = { 工作: 5, 个人: p.length, 研究: 6 }; fs.writeFileSync(path.join(dd, 'layout-history', id), J({ at, summary: sum, totalWindows: 11 + p.length, change: null, layouts: doc })); fs.writeFileSync(path.join(dd, 'layout-history', id.replace(/\.json$/, '.meta.json')), J({ at, summary: sum, totalWindows: 11 + p.length, change: null })); };
@@ -742,7 +742,7 @@ await section('§8 r4 a second tile\'s «Restore a previous layout…» draws IT
   try {
     delete require.cache[require.resolve(path.join(REPO, 'src/routes/persistence.js'))];
     const p = require(path.join(REPO, 'src/routes/persistence.js'));
-    p.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    p.setup({ writer: landingWriter(), dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
     fs.mkdirSync(path.join(dd, 'layout-history'), { recursive: true });
     const put = (id, at, pp) => { const doc = DOC(pp), sum = { 工作: 5, 个人: pp.length, 研究: 6 }; fs.writeFileSync(path.join(dd, 'layout-history', id), J({ at, summary: sum, totalWindows: 11 + pp.length, change: null, layouts: doc })); fs.writeFileSync(path.join(dd, 'layout-history', id.replace(/\.json$/, '.meta.json')), J({ at, summary: sum, totalWindows: 11 + pp.length, change: null })); };
     const OLD = 'layout-2026-10-30T06-50-53-927Z-1h.json', MID = 'layout-2026-10-30T09-18-22-111Z-2h.json', NEW = 'layout-2026-10-30T09-19-35-222Z-3h.json';
@@ -788,7 +788,7 @@ await section('§8 r4 a point that holds the slot ITSELF never matches by name (
   try {
     delete require.cache[require.resolve(path.join(REPO, 'src/routes/persistence.js'))];
     const p = require(path.join(REPO, 'src/routes/persistence.js'));
-    p.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    p.setup({ writer: landingWriter(), dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
     fs.mkdirSync(path.join(dd, 'layout-history'), { recursive: true });
     const put = (id, at, pp) => { const doc = DOC(pp), sum = { 工作: 5, 个人: pp.length, 研究: 6 }; fs.writeFileSync(path.join(dd, 'layout-history', id), J({ at, summary: sum, totalWindows: 11 + pp.length, change: null, layouts: doc })); fs.writeFileSync(path.join(dd, 'layout-history', id.replace(/\.json$/, '.meta.json')), J({ at, summary: sum, totalWindows: 11 + pp.length, change: null })); };
     const OLD = 'layout-2026-10-30T06-50-53-927Z-1h.json', NOW = 'layout-2026-10-30T10-02-00-000Z-4h.json';
@@ -877,7 +877,7 @@ async function ringBurst(P, { dialog = false } = {}) {
     const thisHour = put(Math.floor(now / HOUR) * HOUR);
     const yesterday = Object.values(hourly).filter((f) => Math.floor(Date.parse(f.slice(7, 17) + 'T00:00:00Z') / DAY) === Math.floor(now / DAY) - 1).sort()[0];
     fs.writeFileSync(path.join(dd, 'layouts.json'), J(DOC(P_BEFORE()))); // the layout as the restart finds it: 个人 eleven
-    P.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    P.setup({ writer: landingWriter(), dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
     const R = P.router;
     // the burst's prunes read NO meta (the cure of the batch-4 verdict: the restarts' points are known by their names — data/ may be a network mount)
     // …and the prune is OFF THE LOOP: no synchronous readdir / unlink of the ring (fs.promises)
@@ -955,7 +955,7 @@ await section('§9 B-b05e THE RING IS SPREAD OVER TIME — the REAL router resta
       const meta = { at: now, summary: { 个人: 3 }, totalWindows: 3, change: null }, early = ringName(Math.floor(now / HOUR) * HOUR, seq++); // earlier THIS hour and day
       fs.writeFileSync(path.join(dd, 'layout-history', early), J({ ...meta, layouts: DOC(P_BEFORE().slice(0, 3)) })); fs.writeFileSync(path.join(dd, 'layout-history', early.replace(/\.json$/, '.meta.json')), J(meta));
       fs.writeFileSync(path.join(dd, 'layouts.json'), J(DOC(P_BEFORE())));
-      const boot = async (n) => { const P = load(); P.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null }); const R = P.router;
+      const boot = async (n) => { const P = load(); P.setup({ writer: landingWriter(), dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null }); const R = P.router;
         for (let i = 0; i < n; i++) { const d = R.readLayouts(); d.desktops['desk-p'].autoSave.windows = P_SENT().slice(0, 1 + (i % 9)); R.writeLayouts(d); await new Promise((r) => setImmediate(() => setImmediate(r))); }
         await ringSettle(H); R.flushLayouts(); return R; };
       await boot(20); // restart 1, then a burst
@@ -989,7 +989,7 @@ await section('§9 B-b05e THE RING IS SPREAD OVER TIME — the REAL router resta
         fs.writeFileSync(path.join(dd, 'layout-history', f.replace(/\.json$/, '.meta.json')), J(f === legacy ? { ...meta, restart: true } : meta));
       }
       fs.writeFileSync(path.join(dd, 'layouts.json'), J(DOC(P_BEFORE())));
-      const P = load(); P.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+      const P = load(); P.setup({ writer: landingWriter(), dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
       const said = P.router.listLayoutHistory().filter((e) => e.restart).map((e) => e.id).sort();
       return { said, pinned: P.ringSort(boots).slice(-P.RING_KEEP.boots).sort(), legacy, oldest: boots[0] };
     } finally { fs.rmSync(dd, { recursive: true, force: true }); }

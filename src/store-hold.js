@@ -27,7 +27,7 @@
 // writer keeps it and writes it again). onLanded(value): the value that LANDED, told once a write — what a store tells its pages and
 // hooks is never ahead of the disk, and is told before the answer. A store NOT THERE is born by the exclusive create AT THE CALL (R6:
 // the appeared refusal needs the link, which the writer's rename cannot give) — once a file. A store with no writer writes at the
-// call, as before (the layouts and the settings, R11).
+// call, as before (the settings, R11; the desktops are the writer's since B-0248 (a)).
 
 const fs = require('fs');
 const path = require('path');
@@ -189,14 +189,25 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
    *  when the write is due — for the LATEST value; `name` the writer's row; `accepted()` the caller's own commit (its cache, its facts),
    *  run once the change is taken and BEFORE anything is told of it (a hook told at the landing reads the caller's copy). Refuses a
    *  store with no value BY NAME (R1), synchronously, before anything moves. → true when it landed at the call (no writer, or the
-   *  exclusive create of a store NOT THERE), false when the writer owes it */
+   *  exclusive create of a store NOT THERE), false when the writer owes it — or, for a store that SAYS its owed words (`onUnsaved`),
+   *  when the storage refused that write at the call: KEPT on the hold's own ladder (below) */
   function owe(next, { name, bytes: bytesOf, accepted = null } = {}) {
     if (!started) throw unreadError(file, NOT_READ(), 'this change');
     if (held) throw unreadError(file, held, 'this change');
     if (typeof bytesOf !== 'function') throw new Error(`store-hold: ${path.basename(file)}: owe() needs its bytes`);
     const w = W();
     if (w && !name) throw new Error(`store-hold: ${path.basename(file)}: a write handed to the store writer names its row (src/timed-sync.js STORES)`);
-    if (!w || missing) { write(next, bytesOf(next)); producedValue = next; producedSeq++; try { accepted?.(); } finally { tell(); } return true; }
+    // B-0248 (b), the fresh read: a store that says its owed words (the desktops) keeps a write AT THE CALL that the STORAGE refuses
+    // (the exclusive create of a store NOT THERE, an EIO or a full disk; no writer) on its OWN ladder (flush: written again, said past
+    // the silent rungs, at once for a press through after()) — never dropped; a refusal BY NAME throws as before. While that ladder
+    // owes, the next change takes the same road (one road at a time: a later write never lands under an older one retried). A store
+    // that says nothing throws to its door, which answers not-durable itself
+    if (!w || missing || (onUnsaved && owed && owed.produce)) {
+      const bytes = bytesOf(next);
+      if (!onUnsaved) write(next, bytes);
+      else if (!flush(() => [next, bytes])) { accepted?.(); return false; }
+      producedValue = next; producedSeq++; try { accepted?.(); } finally { tell(); } return true;
+    }
     value = next; text = null;
     accepted?.();   // (before the hand-off: a stand-in writer may make the bytes, land them and tell inside dirty())
     // urgent: an ACT — written at the writer's next turn, as durable() asks, whether or not a door waits on it (a rename over the
@@ -204,16 +215,35 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     // THE PRODUCER HAS A SIDE EFFECT (r1053 (6)): it notes WHICH value its bytes are — the one told at their landing. Only the writer's
     // own write calls it; nothing may ask the writer what it owes for these files (its owed() read calls the producer and would
     // re-note a value whose bytes never land as the one to tell)
-    w.dirty(file, { name, rank: 0, urgent: true, produce: () => { const v = value; const bytes = bytesOf(v); producedValue = v; producedSeq++; return bytes; }, onWritten: (ok) => { if (ok) tell(); } });
+    w.dirty(file, { name, rank: 0, urgent: true, produce: () => { const v = value; const bytes = bytesOf(v); producedValue = v; producedSeq++; return bytes; }, onWritten: (ok, err) => { if (ok) { tell(); if (!(typeof w.pending === 'function' && w.pending(file))) landed(); } else failedAtWriter(err); } });   // (lifted only when nothing newer is owed: never a «saved» then «unsaved» flicker)
     return false;
   }
   /** THE ANSWER AFTER THE LANDING: `answer(ok)` once what the store owes NOW is on disk (true), or its write failed / passed the
    *  writer's bound (false — the writer keeps it and writes it again). Nothing owed ⇒ answered at once. The writer's `answer` road
    *  (never a promise's .then): an answer the hub's exit flush frees is sent inside that flush */
-  function after(answer) {
+  function after(answer, { press = false } = {}) {
+    // the hold's OWN ladder owes the store (a write at the call the storage refused, owe() above): NOT on disk — said at once for a press
+    if (owed && owed.produce) { if (press && owed.rung !== 'said') say(); answer(false); return; }
     const w = W();
     if (!w) { answer(true); return; }
-    w.durable(file, { answer: (ok) => { if (ok) tell(); answer(ok); } });
+    w.durable(file, { answer: (ok) => { if (ok) tell(); else notOnDiskOwed(press); answer(ok); } });
+  }
+  /** B-0248 (b): THE OWED WORDS ON THE WRITER'S ROAD (B-225b's second half, for a store that says them — `onUnsaved`): a write the
+   *  storage refused is the store writer's to write again (its own backoff: 1 s, 2 s, 4 s …); SAID once at its 4th refusal (the
+   *  hold's silent rungs counted in tries — about 7 s on the writer's backoff), at once for a person's PRESS, LIFTED at the landing
+   *  that leaves nothing newer owed (onSaved, a said one only). A store that says nothing (no onUnsaved) keeps none of this: its doors say not-durable themselves */
+  function failedAtWriter(err) {
+    if (!onUnsaved) return;
+    const code = (err && err.code) || null, why = String((err && err.message) || err || 'write failed').slice(0, 200);
+    if (!owed) { owed = { produce: null, code, why, since: now(), rung: 'silent', tries: 0 }; log.warn?.(`[store-hold] ${path.basename(file)} could not be written (${code || why}) — the change is kept in memory and the store writer writes it again`); }
+    owed.tries++; owed.code = code || owed.code; owed.why = why;
+    if (owed.rung === 'silent' && owed.tries >= silentMs.length) say();
+  }
+  /** an answer that is NOT on disk (failed, or past the writer's bound while queued): owed (its words), said at once for a press */
+  function notOnDiskOwed(press) {
+    if (!onUnsaved) return;
+    if (!owed) { const nd = notDurable() || {}, queued = nd.why === 'queued'; owed = { produce: null, code: nd.code || (queued ? 'queued' : null), why: queued ? 'its write is still queued behind the storage' : (nd.why || 'not on disk'), since: now(), rung: 'silent', tries: 0 }; }   // (a write still QUEUED keeps the code «queued» — the page-facing fact — and is said as queued, never «could not be written»)
+    if (press && owed.rung !== 'said') say();
   }
   /** why the store's last act is not on disk yet ({ why, code, ahead, lastMs }) — the door's 503 words — or null */
   const notDurable = () => { try { const w = W(); return w && typeof w.whyNotDurable === 'function' ? w.whyNotDurable(file) : null; } catch { return null; } };

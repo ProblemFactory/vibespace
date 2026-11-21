@@ -428,7 +428,7 @@ class App {
         // its POST); another during its press is another device's — said, the reload left to the press (a refused one keeps
         // its error on screen; the hub's staleness gate holds this page's next write)
         const own = this._layoutRestoring;
-        if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(); } else own.landed(); return; }   // B-225b's second half: a restore whose write the storage refused is never «restored»
+        if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(msg.unsaved); } else own.landed(); return; }   // B-225b's second half: a restore whose write the storage refused is never «restored»
         if (own) { showToast(t('Layout restored on another device')); return; }
         showToast(t('Layout restored on another device — reloading…'));
         if (this.layoutManager) this.layoutManager._restoreReload = true; // the restore armed the reload: nothing of this page's leaves (layout.js _restoreArmed)

@@ -7,13 +7,14 @@
 // real persistence module over a temp data dir.
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { createRequire } from 'node:module';
+import { landingWriter } from './scratch.mjs';   // B-0248 (a)+(b): the route's stores land at the call here (the release's timing; the off-loop road is test-store-write-census ⑭'s)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass=0, fail=0; const ok=(c,n,e)=>{if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lh-'));
 const { router, setup } = require(REPO + '/src/routes/persistence.js');
-setup({ dataDir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+setup({ writer: landingWriter(), dataDir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
 const { readLayouts, writeLayouts, flushLayouts, listLayoutHistory } = router;
 
 const lay = (map) => ({
@@ -113,7 +114,7 @@ ok(legacy.totalWindows === 2, `legacy top-level layout counted in the rollback p
   fs.writeFileSync(path.join(dd, 'layouts.json'), JSON.stringify(lay({ a: ['k1', 'k2'], b: ['k3'] })));
   delete require.cache[require.resolve(REPO + '/src/routes/persistence.js')];
   const p2 = require(REPO + '/src/routes/persistence.js');
-  p2.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+  p2.setup({ writer: landingWriter(), dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
   // simulate the restore handler's own first action on a COLD cache
   p2.router.readLayouts();
   p2.router.writeLayouts(lay({ a: ['k1'], b: [] }));
@@ -134,7 +135,7 @@ ok(legacy.totalWindows === 2, `legacy top-level layout counted in the rollback p
   delete require.cache[require.resolve(REPO + '/src/routes/persistence.js')];
   const p3 = require(REPO + '/src/routes/persistence.js');
   const heard = [];
-  p3.setup({ dataDir: dd, wss: { clients: new Set([{ readyState: 1, send: (s) => heard.push(JSON.parse(s)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+  p3.setup({ writer: landingWriter(), dataDir: dd, wss: { clients: new Set([{ readyState: 1, send: (s) => heard.push(JSON.parse(s)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
   const R3 = p3.router, W3 = R3.writeLayouts;
   const stamped = (map, at) => { const d = lay(map); for (const v of Object.values(d.desktops)) v.autoSave.updatedAt = at; return d; };
   W3(stamped({ work: ['k1', 'k2', 'k3', 'k4', 'k5'], res: ['r1'] }, 1000)); await tick();
