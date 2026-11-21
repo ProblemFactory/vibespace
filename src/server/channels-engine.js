@@ -1239,26 +1239,30 @@ function create(deps = {}) {
       const late = [];
       let more = false;
       for (let i = 0; i < ix.keys.length && ix.keys[i].at <= t; i++) { if (late.length >= turnMax) { more = true; break; } cand.add(ix.keys[i].key); late.push(ix.keys[i].key); }
-      if (more) { out.more = true; out.lateTotal = dueSeek(ix.keys, t, '\uffff'); }   // B-dfa4 cut 3: the overdue count from the sorted index
+      if (more) { out.more = true; out.lateTotal = dueSeek(ix.keys, t, '\uffff'); out.beyond = Math.max(0, out.lateTotal - late.length); }   // B-dfa4 cut 3: the overdue count from the sorted index; `beyond` (r764): the due rows this turn did not take
       // B-dfa4 cut 3c: while a merge brings the touched rows' keys up to date they are POSSIBLY DUE — judged here by dueRow
       // (the one rule): nothing polled that is not due; the rows touched SINCE the merge began first (a birth, a watch start, an
       // owed mark), then the pending rows — by their fresh key once the merge keyed them (only those due by it), before that
       // a cursor that moves each turn; at most turnMax a turn, `more` past it
       const job = ix.merging ? dueMerging.get(rec.id) : null;
-      const extra = new Set();   // the touched rows this turn took as candidates (each judged by dueRow below)
-      let pendingWaiting = 0;
+      let pendingDue = 0, pendingWaiting = 0;   // the pending rows due by their fresh keys (whose list key is not overdue): all / not taken
       if (job && job.ix === ix) {
         // cut 3d (round wu3c992y5): the rows touched SINCE the merge began and the PENDING rows each have their OWN turnMax —
         // a pass's stamps (thousands of just-polled rows in `dirty`) never starve a pending row whose instant moved earlier
-        const budget = () => { let left = turnMax; return (k) => { if (cand.has(k)) return true; if (left <= 0) { out.more = true; return false; } cand.add(k); extra.add(k); left--; return true; }; };
+        const budget = () => { let left = turnMax; return (k) => { if (cand.has(k)) return true; if (left <= 0) { out.more = true; return false; } cand.add(k); left--; return true; }; };
         const takeDirty = budget(), takePending = budget();
-        for (const k of ix.dirty) if (!takeDirty(k)) break;
+        // the rows touched since the merge began from a cursor that moves each turn (r764): a pass's 2000 stamps ahead of a row
+        // touched later never hold it to the landing; `dirty` only grows during a merge (its order is the touches' order)
+        { const dn = ix.dirty.size, d0 = dn && Number.isFinite(turnMax) ? (job.dirtyCursor || 0) % dn : 0; let pos = 0, full = false;
+          for (const k of ix.dirty) { if (pos++ < d0) continue; if (!takeDirty(k)) { full = true; break; } }
+          if (!full && d0) { pos = 0; for (const k of ix.dirty) { if (pos++ >= d0) break; if (!takeDirty(k)) break; } }
+          job.dirtyCursor = Number.isFinite(turnMax) ? d0 + turnMax : 0; }
         // the pending rows by their FRESH keys once known: the most overdue first (job.sorted), a row touched since the merge
         // began left to the touched-since budget (a polled row's stamp moved it: never the same polled rows each turn)
         if (job.sorted) {
           let i = 0;
-          for (; i < job.sorted.length && job.sorted[i].at <= t; i++) { const k = job.sorted[i].key; if (ix.dirty.has(k)) continue; if (!takePending(k)) break; }
-          for (; i < job.sorted.length && job.sorted[i].at <= t; i++) { const k = job.sorted[i].key; if (!ix.dirty.has(k) && !cand.has(k) && !(ix.at.get(k) <= t)) pendingWaiting++; }   // due, not taken, not counted below
+          for (; i < job.sorted.length && job.sorted[i].at <= t; i++) { const k = job.sorted[i].key; if (ix.dirty.has(k)) continue; const counted = !(ix.at.get(k) <= t); if (!takePending(k)) break; if (counted) pendingDue++; }
+          for (; i < job.sorted.length && job.sorted[i].at <= t; i++) { const k = job.sorted[i].key; if (!ix.dirty.has(k) && !(ix.at.get(k) <= t)) { pendingDue++; if (!cand.has(k)) pendingWaiting++; } }   // due, not taken (the list's overdue keys are counted apart)
           for (const k of job.owed) if (!takePending(k)) break;
         }
         else {
@@ -1270,10 +1274,11 @@ function create(deps = {}) {
       }
       const rows0 = store.index.rows();   // B-dfa4 cut 3c: read-only, no copy (dueRow reads only) — a copy a candidate was the release's 0.8 s
       for (const k of cand) { const en = rows0[k]; if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, false); }
-      // cut 3d (round wu3c992y5): during a merge the card's WAITING count is the index's overdue keys plus the pending rows
-      // due by their fresh keys that this turn did NOT take (never every candidate taken; each row once — one whose live key
-      // is overdue is in the first) — set whenever the turn says `more`
-      if (job && job.ix === ix && out.more) out.lateTotal = dueSeek(ix.keys, t, '\uffff') + pendingWaiting;
+      // cut 3d (round wu3c992y5) + r764: during a merge `lateTotal` is every row due as the index knows it — the list's overdue
+      // keys plus the pending rows due by their fresh keys (each once: one whose list key is overdue is in the first) — and
+      // `beyond` the due rows this turn did NOT take (the overdue keys past its heads, the due pending rows past its budget); set
+      // whenever the turn says `more`. A row touched since the merge began and not yet judged is in neither (its instant unknown)
+      if (job && job.ix === ix && out.more) { const ov = dueSeek(ix.keys, t, '\uffff'); out.lateTotal = ov + pendingDue; out.beyond = Math.max(0, ov - late.length) + pendingWaiting; }
       // a head the clock did not make due after all (its tier relaxed since it was keyed — the key is a LOWER bound) moves
       // to its true instant: each row is re-keyed once per tier step, never re-judged every pass
       const due = new Set(out.map((d) => d.key));
@@ -1346,7 +1351,7 @@ function create(deps = {}) {
     const cur = dueMerging.get(rec.id);
     if ((cur && cur.ix === ix) || stopped || dueFailed.has(rec.id)) return;   // one merge an index; a job of a replaced index is superseded
     const pending = ix.dirty; ix.dirty = new Set(); ix.pending = pending; ix.merging = true;
-    const job = { ix, keys: [...pending], cursor: 0, fresh: null, sorted: null, owed: new Set(), moved: new Set(), promise: null };
+    const job = { ix, keys: [...pending], cursor: 0, dirtyCursor: 0, fresh: null, sorted: null, owed: new Set(), moved: new Set(), promise: null };
     dueMerging.set(rec.id, job);
     const alive = () => !stopped && !ix.stale && dueIx.get(rec.id) === ix && dueMerging.get(rec.id) === job;
     job.promise = (async () => {
@@ -1440,7 +1445,7 @@ function create(deps = {}) {
   }
   /** The due build in flight for this account (the pass awaits it before its due turn), or null. */
   const dueBuildOf = (adapterId) => { const b = dueBuilding.get(adapterId); return b ? b.promise : null; };
-  const dueStats = { builds: 0, rekeys: 0, lastBuildMs: 0, sliced: 0, slices: 0, maxSliceMs: 0, maxSortMs: 0, whole: 0, merged: 0, lastMergeMs: 0, rekeyBatches: 0 };
+  const dueStats = { builds: 0, rekeys: 0, lastBuildMs: 0, sliced: 0, slices: 0, maxSliceMs: 0, maxSortMs: 0, whole: 0, merged: 0, lastMergeMs: 0, rekeyBatches: 0, listRebuilds: 0, listRebuildRows: 0 };
   // lane scheduler-census-index: the scheduler card's CENSUS INDEX (`clockIndexed`, beside `schedulerScan`) is re-judged
   // at the same writes as the due index
   const censusIx = new Map();   // adapterId -> { sig, t, kept, rows: Map<key, judgement>, order: [judgement], dirty: Set<key>, stale }
@@ -1497,6 +1502,7 @@ function create(deps = {}) {
   const DUE_REKEY_ONE = 64;
   /** The sorted due list `old` without the entries whose key is in `drop`, merged with the sorted `adds` — ONE pass. */
   function dueListMerge(old, adds, drop) {
+    dueStats.listRebuilds++; dueStats.listRebuildRows += old.length;   // r764: the fixed cost of the one merge on a big account, for the measure
     const out = [];
     let i = 0, j = 0;
     while (i < old.length || j < adds.length) {
@@ -2833,7 +2839,7 @@ function create(deps = {}) {
           if (Drain.wantsTurn(e.dq, e.timerDue)) {
             e.timerDue = false;
             const dueNow = await dueListReady(rec, e, { all: e.dq.pass.force, turnMax: DUE_TURN_MAX });   // B-dfa4 cut 3: a sliced due build lands first
-            e.dueBeyond = dueNow.more ? Math.max(0, (dueNow.lateTotal || 0) - DUE_TURN_MAX) : 0;   // the overdue rows past this turn (the card counts them as waiting)
+            e.dueBeyond = dueNow.more ? (Number.isFinite(dueNow.beyond) ? dueNow.beyond : Math.max(0, (dueNow.lateTotal || 0) - DUE_TURN_MAX)) : 0;   // the due rows past this turn, as the turn says them (r764: during a merge the heads alone need not fill one budget)
             const fd = feedDecl(rec);
             e.dq = Drain.turn(e.dq, { due: dueNow, discoveryDue: discoveryDue(rec, e), feedDue: feedDue(rec, e, now()), feedPerPass: fd ? fd.pagesPerPass : undefined, recheckDue: recheckDueFor(rec) });   // lane lark-threads: rule 22a's rows
           }
@@ -2846,7 +2852,7 @@ function create(deps = {}) {
           let result;
           try {
             if (act.type === 'fetch') result = await fetchOne(act);
-            else if (act.type === 'discover') { e.chargeBy = 'timer'; await discover(rec, e); const dd = await dueListReady(rec, e, { all: e.dq.pass.force, turnMax: DUE_TURN_MAX }); e.dueBeyond = dd.more ? Math.max(0, (dd.lateTotal || 0) - DUE_TURN_MAX) : 0; result = { due: dd }; }
+            else if (act.type === 'discover') { e.chargeBy = 'timer'; await discover(rec, e); const dd = await dueListReady(rec, e, { all: e.dq.pass.force, turnMax: DUE_TURN_MAX }); e.dueBeyond = dd.more ? (Number.isFinite(dd.beyond) ? dd.beyond : Math.max(0, (dd.lateTotal || 0) - DUE_TURN_MAX)) : 0; result = { due: dd }; }
             else if (act.type === 'feed') { e.chargeBy = 'timer'; result = await feedPage(rec, e); }   // lane lark-search-poll: ONE change-feed page (rule 21)
             else if (act.type === 'recheck') { e.chargeBy = 'timer'; result = await recheckOne(rec, e, idOf(act.key), { by: 'timer' }); }   // lane lark-threads: ONE recent-roots page (rule 22a)
             else if (act.type === 'scanHost') {

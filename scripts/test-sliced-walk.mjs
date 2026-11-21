@@ -446,7 +446,9 @@ async function underLeg(EM, tag) {
 
 // (c7) THE TURN'S CAP DURING A MERGE, AND A DELETION (cut 3d, round wu3c992y5): the due turn as the tick reads it (turnMax 50)
 // DURING a merge — it says `more`, takes at most turnMax heads, turnMax touched-since rows and turnMax pending rows, and every row
-// it serves is due by a whole build of that instant (nothing not due); its waiting count (lateTotal) is printed. A row DELETED from the map during a merge (a whole touch) ends it: the index is built again in slices and
+// it serves is due by a whole build of that instant (nothing not due); with no overdue head (every row polled, then 500 due again),
+// its waiting numbers — every row due (lateTotal) and the due rows past this turn (beyond: what the pass's timer turn shows) —
+// are the whole build's own turn's (r764: the reader assumed the heads fill one budget). A row DELETED from the map during a merge (a whole touch) ends it: the index is built again in slices and
 // then answers the whole build's
 async function capLeg(EM, tag) {
   const applied = [], caps = [];
@@ -458,10 +460,11 @@ async function capLeg(EM, tag) {
     await apply({ kind: 'stamp', from: 900, n: 120, at: T });   // the pass's stamps: touched since the merge began
     const served = e.dueListOf(A, { sync: false, turnMax: 50 });
     const whole = await replayWhole(applied.slice(), `c7-${tag}-w${caps.length}`);
+    const wt = mkEng(ENG, copyOf(TPL_C, `c7-${tag}-t${caps.length}`), { syncRows: 1e9 }); for (const op of applied) await replayOp(wt, op); const wturn = wt.dueListOf(A, { turnMax: 50 }); wt.stop();   // the whole build's own turn
     const wk = new Set(whole.map((d) => `${d.key}|${d.dueAt}`));
     const idx = (d) => { const m = /\/m-(\d+)$/.exec(d.key); return m ? Number(m[1]) : -1; };
     const pendServed = [...served].filter((d) => { const i = idx(d); return (i >= 600 && i < 900) || (i >= 1020 && i < 1100); }).length;   // merge 2's pending rows, not re-stamped — never a head (their keys in the list are past the clock)
-    caps.push({ more: !!served.more, n: served.length, sub: [...served].every((d) => wk.has(`${d.key}|${d.dueAt}`)), late: served.lateTotal, wholeDue: whole.length, pendServed });
+    caps.push({ more: !!served.more, n: served.length, sub: [...served].every((d) => wk.has(`${d.key}|${d.dueAt}`)), late: served.lateTotal, beyond: served.beyond, wholeLate: wturn.lateTotal, wholeBeyond: wturn.beyond, wholeDue: whole.length, pendServed });
     if (!del) { del = true; await apply({ kind: 'delete', key: `${A}/m-5` }); }   // a deletion: a whole touch (the merge ends)
   } });
   await until('the due index to land', () => !e.dueListOf(A, { sync: false }).notReady);
@@ -472,7 +475,7 @@ async function capLeg(EM, tag) {
   await until('merge 1 read, ended by the deletion, the index built again', () => { l = e.dueListOf(A, { sync: false }); return armed === 1 && !l.notReady && !(e.dueIndexStats().merging > 0); }, 15000);
   const s1b = e.dueIndexStats();
   armed = 0;
-  await apply({ kind: 'stamp', from: 600, n: 500, at: T });   // those rows polled NOW: landed past the clock (never a head below)
+  await apply({ kind: 'stamp', from: 0, n: NC, at: T });   // EVERY row polled NOW: landed past the clock (no overdue head below — the scene where heads alone never fill a budget)
   await until('those rows landed', () => { l = e.dueListOf(A, { sync: false }); return !l.notReady && !(e.dueIndexStats().merging > 0); }, 15000);
   const s1c = e.dueIndexStats();
   armed = 1;
@@ -486,8 +489,8 @@ async function capLeg(EM, tag) {
 {
   const r = await capLeg(ENG, 'cap');
   const c = r.caps;
-  ok(c.length === 2 && c.every((x) => x.more && x.sub && x.n > 0 && x.n <= 150 && Number.isFinite(x.late)) && c[1].pendServed >= 1, `(c7) THE CAP DURING A MERGE: the turn as the tick reads it (turnMax 50) said more (its waiting count set), served ${c.map((x) => x.n).join(' / ')} rows (at most 3 × 50: the heads, the rows touched since, the pending rows), every one due by a whole build of that instant; with 120 just-stamped rows spending the touched-since budget, ${c[1].pendServed} pending rows (no head, no stamp) were served all the same`, c);
-  info(`(c7) the waiting count during the merges, printed (lower-bound keys: never asserted against the whole build's) — ${c.map((x) => x.late).join(' / ')} (the whole build's due rows ${c.map((x) => x.wholeDue).join(' / ')})`);
+  ok(c.length === 2 && c.every((x) => x.more && x.sub && x.n > 0 && x.n <= 150 && Number.isFinite(x.late)) && c[1].pendServed >= 1 && c[1].late === c[1].wholeLate && c[1].beyond === c[1].wholeBeyond && c[1].beyond > 0, `(c7) THE CAP DURING A MERGE: the turn as the tick reads it (turnMax 50) said more (its waiting count set), served ${c.map((x) => x.n).join(' / ')} rows (at most 3 × 50: the heads, the rows touched since, the pending rows), every one due by a whole build of that instant; with 120 just-stamped rows spending the touched-since budget, ${c[1].pendServed} pending rows (no head, no stamp) were served all the same; with no overdue head its WAITING numbers are the whole build's own turn's — due ${c[1].late} (whole ${c[1].wholeLate}), past this turn ${c[1].beyond} (whole ${c[1].wholeBeyond})`, c);
+  info(`(c7) the first merge's waiting numbers, printed (its list's keys are lower bounds: a stale overdue key counts) — due ${c[0].late}, past the turn ${c[0].beyond} (the whole build's ${c[0].wholeLate} / ${c[0].wholeBeyond})`);
   const EMb = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), 'const takeDirty = budget(), takePending = budget();', 'const takeDirty = budget(), takePending = takeDirty;', 'cut 3c: one budget for the touched-since and the pending rows'), 'one-budget');
   const rb = await capLeg(EMb, 'cap-red');
   ok(rb.caps.length === 2 && rb.caps[1].pendServed === 0, `(c7) RED CONTROL: ONE budget for the rows touched since and the pending rows (cut 3c's) — the 120 just-stamped rows spend it, ${rb.caps.length === 2 ? rb.caps[1].pendServed : '?'} pending rows served — the leg above would go red`, rb.caps);
