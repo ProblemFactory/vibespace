@@ -1380,7 +1380,8 @@ const BUF_PROBE = 4096;   // the kept buffer's identity: its first BUF_PROBE cha
 const flatCopy = (s) => (' ' + s).slice(1);   // a copy: a plain slice would keep the whole old ring alive after a trim
 /** The buffer's records — parsed once per session: a buffer that only GREW parses the complete lines it gained; a last line
  *  still being written is parsed each time (never kept). Every writer of session.buffer appends or trims its head (+=,
- *  .slice(-N), the acp cut at a line; the restore assigns a NEW session) — so the same first chars and the same chars before
+ *  .slice(-N), the acp cut at a line, the claude ring's trimRing — a cut at a line with the owed records carried in front,
+ *  src/chat-ring.js; the restore assigns a NEW session) — so the same first chars and the same chars before
  *  the kept end, at a length no shorter, say it only grew; a trimmed head parses the whole buffer again (bounded by the ring).
  *  `resolve` = the kept copies'; a new kept map (the restore's preload landing) parses again. */
 function bufferRecordsOf(session, buffer, kept, resolve) {

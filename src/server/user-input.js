@@ -53,6 +53,7 @@
 // cards draw what it carried once the wrapper says it was handed). In the one edge — the turn was already finishing — the
 // CLI runs it as a turn of its own right after, exactly as it runs an Enter at that moment.
 const fs = require('fs');
+const { trimRing } = require('../chat-ring.js');   // B-5a4d: the ring's ONE trim (the held copy + its queue records carried while owed)
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const path = require('path');
 const { wrapperCaps } = require('./wrapper-files.js');
@@ -228,7 +229,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
       // verify r1 ① (lane worker-dispatch): the live record of a frame an AGENT typed carries who typed it — the
       // owner's viewers and the buffer replay see `origin {kind:'dispatch', name}`, never a user turn of their own
       if (!human) userMsg.origin = { kind: 'dispatch', name: (by && by.name) || null };
-      session.buffer = (session.buffer + JSON.stringify(userMsg) + '\n').slice(-500000);
+      session.buffer = trimRing(session.buffer + JSON.stringify(userMsg) + '\n');
       feedLive(session, userMsg);
     }
     // Detect broken pty stdin: the wrapper writes _stdin_ack on

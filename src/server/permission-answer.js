@@ -18,6 +18,8 @@
  * inside a turn somebody started (no spend-census row — the census counts turn
  * openers, test-spend-paths §2).
  */
+const { trimRing } = require('../chat-ring.js');   // B-5a4d: the ring's ONE trim (the held copy + its queue records carried while owed)
+
 function answerPermission(session, data, { adapterRegistry, feedLive } = {}) {
   if (session && !session.pty && typeof session._attachPending === 'function') session._attachPending();   // B-cd4b: a restored survivor whose batched attach still waits is attached at its first use
   if (session && !session.pty && session._attachFailed) return { ok: false, why: `this conversation could not be reconnected after the restart (${session._attachFailed})` };
@@ -27,7 +29,7 @@ function answerPermission(session, data, { adapterRegistry, feedLive } = {}) {
   const payload = adapter.formatPermissionResponse(data || {});
   session.pty.write(payload + '\n');
   // Record in buffer so permission state survives refresh/restart
-  session.buffer = (session.buffer + payload + '\n').slice(-500000);
+  session.buffer = trimRing(session.buffer + payload + '\n');
   try { if (typeof feedLive === 'function') feedLive(session, JSON.parse(payload)); } catch { /* a non-JSON frame is the adapter's business — it was written */ }
   return { ok: true, payload };
 }

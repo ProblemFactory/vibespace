@@ -24,6 +24,7 @@
  * If the answer cannot be written (no live process) the door steps aside and the card forms — never silent.
  */
 const { redactSecrets } = require('../secret-shapes');
+const { trimRing } = require('../chat-ring.js');   // B-5a4d: the ring's ONE trim (the held copy + its queue records carried while owed)
 
 const SETTING = 'permissions.bypassAnswersAsks';
 const HEAD_MAX = 120;
@@ -75,7 +76,7 @@ function door(session, id, msg, { feedLive, serverSetting = settingOf, adapterRe
   try { input = JSON.stringify(v.input).slice(0, INPUT_MAX); } catch { }
   const mark = { type: 'system', subtype: 'vs_auto_allow', request_id: v.requestId, tool_use_id: v.toolUseId, agent_id: v.agentId,
     tool: v.tool, reason_type: v.reasonType, reason: v.reason, head: v.head, input, at: Date.now() };
-  session.buffer = (session.buffer + JSON.stringify(mark) + '\n').slice(-500000);
+  session.buffer = trimRing(session.buffer + JSON.stringify(mark) + '\n');
   try { if (typeof feedLive === 'function') feedLive(session, mark); } catch (e) { try { log.warn(`[bypass] the auto-allow line was not drawn: ${e.message}`); } catch { } }
   try { log.log(`[bypass] auto-allow ${JSON.stringify({ op: 'auto-allow', session: id, tool: v.tool, reasonType: v.reasonType, head: redactSecrets(v.head).text, helper: !!v.agentId })}`); } catch { }
   try { global.__vsEvent?.('bypass-auto-allow', String(v.reasonType || 'none').slice(0, 40)); } catch { }

@@ -27,6 +27,7 @@
 const { notifyCompactionEnd } = require('../../server/compaction-watch.js');
 const { liveWallOf } = require('../../signin-model.js'); // PURE (lane signin-card-real-screen): the CLI's live login refusal, a table row   // lane worker-dispatch: endCompaction notifies the ONE observer (spelled from src/ like every require here — patched copies rebase '../../')
 const fs = require('fs');
+const { trimRing } = require('../../chat-ring.js');   // B-5a4d: THE ONE TRIM of a claude chat's ring (a held message's copy + its queue records are carried while owed)
 const WD = require('../../watch-door.js');   // 主开发 2026-11-19: every file watch through the one door (a refused watch is a poll, never a throw)
 const os = require('os');
 const path = require('path');
@@ -578,8 +579,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
 
     ptyProcess.onData((output) => {
       if (session._reattachAttempts) session._reattachAttempts = 0;
-      session.buffer += output;
-      if (session.buffer.length > 750000) session.buffer = session.buffer.slice(-500000);
+      // B-5a4d (lane bl-keys-misc): past 750 000 chars the ring keeps its last 500 000 at a line, and the records a person's
+      // HELD message still needs (its copy, its queue records) are carried in front — never cut while owed (src/chat-ring.js)
+      session.buffer = trimRing(session.buffer + output);
       lineBuf += output;
       let nlIdx;
       while ((nlIdx = lineBuf.indexOf('\n')) !== -1) {
