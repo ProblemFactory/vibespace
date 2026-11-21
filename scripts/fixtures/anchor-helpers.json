@@ -2,27 +2,16 @@
  "//": "B-0d3e (lane lg-leak-census): per script, the anchor helpers (a function whose own parameter is an anchor and whose body reaches a loader — a suite's cut / swap / mutantOf / patch) that neither throw or check ABOUT their anchor (B-287c: under a test of it, or judging its edit / test) nor build through scripts/scratch.mjs anchored(): when the anchor moves they answer null or an unpatched copy. ONE-WAY (test-suite-files-parse §3): a file that adds one is red by name; a fall is only said. A helper that fails by name through a wrapper hands the wrapper its anchor's test, so the walk sees it (test-channel-touch's okAnchor(text.split(from).length - 1, tag, file, from) — «mutation anchor missing: <tag> (<file>: <n> times, one meant) — it wanted <anchor>», a red row of the leg it serves). A converted helper THROWS: the first moved anchor stops its suite and the controls after it get no verdict — red by name, the trade ruling B took (test-design-model's helpers keep their per-rule red on purpose: the row is the helper's own, naming the anchor and the file). A COUNT NEVER RISES WITHOUT A BACKLOG ROW'S ID BESIDE IT: every count stands under `rows` — { \"B-xxxx\": { \"why\": …, \"files\": { … } } } — a file's cap is the largest count any row gives it; a unit that must raise one ADDS A ROW under its own backlog id with a why of 20 or more characters; the founding row B-0d3e is FALL-ONLY (pinned in census-founding-pins.json); a plain number with no row id, or a count that is not a whole number, is red.",
  "rows": {
   "B-0d3e": {
-   "why": "the list B-0d3e brought (lane lg-leak-census): 35 at fe1d59c41, 38 on 2.369.410, 40 with the 2.369.412 block's units counted in once (test-vault-run's patch, test-vault-standing-request's mutant); the bounded part (lane lg-text-legs-2, 2.369.414): 37 at 5538eecb7, 27 with test-channel-touch, 17 with seven more fast suites",
+   "why": "the list B-0d3e brought (lane lg-leak-census): 35 at fe1d59c41, 38 on 2.369.410, 40 with the 2.369.412 block's units counted in once (test-vault-run's patch, test-vault-standing-request's mutant); the bounded part (lane lg-text-legs-2, 2.369.414): 37 at 5538eecb7, 27 with test-channel-touch, 17 with seven more fast suites, 6 with six more",
    "files": {
     "test-browser-stuck.mjs": 1,
     "test-browser-unresponsive.mjs": 1,
     "test-cpu-capture-live.mjs": 1,
-    "test-loop-hold.mjs": 3,
     "test-mount-starting.mjs": 1,
-    "test-pool-auto.mjs": 2,
-    "test-reset-credit-verdict.mjs": 2,
     "test-stream-op.mjs": 1,
-    "test-user-state-echo.mjs": 2,
-    "test-vault-job-model.mjs": 1,
-    "test-vault-run-model.mjs": 1,
     "test-voice-proxy.mjs": 1
    }
   }
  },
- "why": {
-  "test-reset-credit-verdict.mjs#patched": "its caller reds «NEGATIVE CONTROL (<what>): the patch hit the product source» and goes on to the next control",
-  "test-user-state-echo.mjs#mutant": "its caller reds «MUTANTS (…) hit their anchors» before it judges them",
-  "test-vault-job-model.mjs#mutant": "it answers { anchor: n } and its caller's red says «its anchor found n×» beside the control's name",
-  "test-vault-run.mjs#mutate": "its caller's red says «the patch hits once» (it counts the anchor's hits, n)"
- }
+ "why": {}
 }

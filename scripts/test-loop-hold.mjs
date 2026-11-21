@@ -963,7 +963,9 @@ console.log('⑭ B-fe0b — the ask\'s own delivery names no hold; node\'s own c
     // written, the tree never touched) — its pin goes red
     const SRC = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8');
     const load = (src) => { const m = { exports: {} }; vm.compileFunction(src, ['module', 'exports', 'require'], { filename: 'loop-hold-fe0b-mutant.js' })(m, m.exports, require); return m.exports; };
-    const cut = (from, to) => (SRC.split(from).length === 2 ? load(SRC.replace(from, to)) : null);
+    // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (then null: the RED
+    // CONTROLS row below reds too, nothing crashes)
+    const cut = (from, to) => { const n = SRC.split(from).length - 1; if (n !== 1) { ok(false, `ANCHOR (src/loop-hold.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the red control builds nothing`); return null; } return load(SRC.replace(from, to)); };
     const noOwn = cut('  const o = nodeOwnOf(frames);\n', '  const o = null;\n'), noIns = cut('  return inspector > 0;\n', '  return false;\n'), noDeps = cut('if (DEPS_FILE.test(run[j].file)) owner = run[j];', '{ }');
     const noLoader = cut('    for (let j = k - 1; j >= 0 && !owner; j--) if (!LOADER_FILE.test(run[j].file)) owner = run[j];\n', ''), noHelper = cut('!HELPER_MODULE.has(moduleOf(run[j].file))', 'true');
     const noCut = cut("(cut ? ', the stack cut before any frame of ours' : ', with no frame of ours below it')", "', with no frame of ours below it'");
@@ -1054,7 +1056,9 @@ console.log('⑮ B-7c97 — a hold never names the measuring wrapper; every coun
   { // RED CONTROLS (patched copies compiled in memory): the release's trim, the helper list without diagnostics_channel, no spawner rule
     const SRC = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8');
     const load = (src) => { const m = { exports: {} }; vm.compileFunction(src, ['module', 'exports', 'require'], { filename: 'loop-hold-7c97-mutant.js' })(m, m.exports, require); return m.exports; };
-    const cut = (from, to) => (SRC.split(from).length === 2 ? load(SRC.replace(from, to)) : null);
+    // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (then null: the RED
+    // CONTROLS row below reds too, nothing crashes)
+    const cut = (from, to) => { const n = SRC.split(from).length - 1; if (n !== 1) { ok(false, `ANCHOR (src/loop-hold.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the red control builds nothing`); return null; } return load(SRC.replace(from, to)); };
     const oldTrim = cut(" && !(f === '' && !(raw[i] && raw[i].evalish))) break; }", ') break; }');
     const noHelper = cut("'per_context', 'diagnostics_channel']", "'per_context']");
     const noSpawnBy = cut("const spawnBy = !topOf('js') && v === V.blocked && h.afterModule === 'child_process'", 'const spawnBy = false && !topOf(\'js\') && v === V.blocked && h.afterModule === \'child_process\'');
@@ -1110,7 +1114,9 @@ console.log('⑯ the train\'s close (主开发 2026-11-18 12:37Z; test-loop-hold
   // RED CONTROLS: the tip as it was (01a4d9a73 / d1ff2d7c1), each law cut alone — a patched copy compiled in memory
   const SRC = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8');
   const load = (src) => { const m = { exports: {} }; vm.compileFunction(src, ['module', 'exports', 'require'], { filename: 'loop-hold-close410-mutant.js' })(m, m.exports, require); return m.exports; };
-  const cut = (from, to) => (SRC.split(from).length === 2 ? load(SRC.replace(from, to)) : null);
+  // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (then null: the RED
+  // CONTROLS row below reds too, nothing crashes)
+  const cut = (from, to) => { const n = SRC.split(from).length - 1; if (n !== 1) { ok(false, `ANCHOR (src/loop-hold.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the red control builds nothing`); return null; } return load(SRC.replace(from, to)); };
   const tipDriver = cut('driver: end < frames.length && frames[end] ? frames[end] : null };', 'driver: repoFrame(frames.slice(end)) };');   // stale-pins: kept (the red control rebuilds the tip's driver)
   const tipForged = cut("const runtimeOwn = (f) => !!f && f.cls === 'node' && f.notLoaded !== true;", "const runtimeOwn = (f) => !!f && f.cls === 'node';");
   const rd = tipDriver ? ans(D2, tipDriver) : null, rp = tipDriver ? ans(DEEP, tipDriver) : null, rf = tipForged ? ans(D3a, tipForged) : null;

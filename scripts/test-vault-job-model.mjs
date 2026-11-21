@@ -128,7 +128,9 @@ console.log('⑥ MUTANTS (each a copy compiled at the real path — RED)');
   const real = fs.readFileSync(SRC, 'utf8');
   const mutant = (from, to) => {
     const n = real.split(from).length - 1;
-    if (n !== 1) return { anchor: n };
+    // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (then { anchor: n }: the
+    // control's own row reds «its anchor found n×» too, nothing crashes)
+    if (n !== 1) { ok(false, `ANCHOR (src/vault-job.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the copy builds nothing`); return { anchor: n }; }
     const m = new Module(SRC, null); m.filename = SRC; m.paths = Module._nodeModulePaths(path.dirname(SRC));
     m._compile(real.replace(from, to), SRC);
     return m.exports;

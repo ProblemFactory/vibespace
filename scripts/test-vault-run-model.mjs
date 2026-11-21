@@ -1507,7 +1507,13 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
   for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));   // B-ef1b: vault-inventory reads the For-you registry (a band item's declared buttons)
   const real = fs.readFileSync(SRC, 'utf8');
-  const mutant = (name, from, to) => { const n = real.split(from).length - 1; const f = path.join(dir, 'src', `vault-run-${name}.js`); fs.writeFileSync(f, real.replace(from, to)); return { hit: n === 1, M: require(f) }; };
+  // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (the copy still loads, hit:
+  // false, and the mutant's own «the patch hits once» row reds too — nothing crashes)
+  const mutant = (name, from, to) => {
+    const n = real.split(from).length - 1;
+    if (n !== 1) ok(false, `ANCHOR (${name}, src/vault-run.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the mutant is not the control it says`);
+    const f = path.join(dir, 'src', `vault-run-${name}.js`); fs.writeFileSync(f, real.replace(from, to)); return { hit: n === 1, M: require(f) };
+  };
   const argvLeg = (Vm) => ['curl', 'gh', 'terraform'].filter((t) => Vm.planOf({ argv: [t, `--token=${M1}`] }).code !== 'argv_refused');
   const printLeg = (Vm) => ['cat', 'echo', 'printenv', 'head', 'tee'].filter((t) => Vm.planOf({ argv: [t, '$VAULT_FILE{mounts/m1/secretKey}'] }).code !== 'tool_prints_secrets');
   // the round-20 facts leg: a code a variant emits must be a member of its exported table (the mutant emits one that is not)

@@ -16,6 +16,9 @@ const withoutNames = (d) => { if (!d || typeof d !== 'object') return d; const {
 
 let pass = 0, fail = 0;
 const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
+// B-0d3e: a red control's anchor judged BY NAME — `n` = its count in the file; any count but one is a red row naming the anchor
+// and the file (the helper then answers { hit: false }: the caller's «… hits once» row reds too, nothing crashes)
+const okAnchor = (n, tag, file, from) => { if (n !== 1) ck(`ANCHOR (${tag}, ${file}): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the mutant builds nothing`, false); return n === 1; };
 /** THE PRE-FIX COPY a byte-identity sweep compares against (lane-mirror-197, 2026-09-29): `git show <ref>:<file>` needs the ref
  *  IN THIS CLONE, and the Actions mirror is a depth-1 checkout (the pushed commit alone) — the ref is absent there BY CONSTRUCTION
  *  (the fast job printed `fatal: invalid object name 'b970f16d'` three times and went red on six legs a full clone passes). The
@@ -689,7 +692,7 @@ await (async () => {
     try { fs.symlinkSync(path.resolve('node_modules'), path.join(root, 'node_modules')); } catch { }
     const fp = path.join(root, 'src/server/usage-pool-engine.js');
     const src = fs.readFileSync(fp, 'utf8');
-    if (!src.includes(from)) return { hit: false };
+    if (!okAnchor(src.split(from).length - 1, tag, 'src/server/usage-pool-engine.js', from)) return { hit: false };
     fs.writeFileSync(fp, src.replace(from, to));
     return { hit: true, mod: require(fp) };
   };
@@ -3833,7 +3836,7 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
     try { fs.symlinkSync(path.resolve('node_modules'), path.join(root, 'node_modules')); } catch { }
     const fp = path.join(root, 'src/server/usage-pool-engine.js');
     const src = fs.readFileSync(fp, 'utf8');
-    if (!src.includes(from)) return { hit: false };
+    if (!okAnchor(src.split(from).length - 1, tag, 'src/server/usage-pool-engine.js', from)) return { hit: false };
     fs.writeFileSync(fp, src.replace(from, to));
     return { hit: true, mod: require(fp) };
   };

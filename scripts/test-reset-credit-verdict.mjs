@@ -121,8 +121,12 @@ console.log('\n§6 NEGATIVE CONTROLS — patched copies of the module');
 {
   const src = fs.readFileSync(MOD, 'utf8');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rcverdict-'));
-  const patched = (tag, from, to) => {
-    if (!src.includes(from)) return { hit: false };
+  // B-0d3e: the helper judges its anchor BY NAME — the control's own «the patch hit» row, red on a moved or doubled anchor with the
+  // file, the anchor it wanted and its count (then { hit: false }: the loop goes on to the next control, nothing crashes)
+  const patched = (tag, from, to, what = tag) => {
+    const n = src.split(from).length - 1;
+    ok(`NEGATIVE CONTROL (${what}): the patch hit the product source`, n === 1, n === 1 ? '' : `src/reset-credit.js: it wanted ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant`);
+    if (n !== 1) return { hit: false };
     const f = path.join(dir, `reset-credit.${tag}.js`);
     fs.writeFileSync(f, src.replace(from, to));
     return { hit: true, mod: require(f) };
@@ -136,8 +140,7 @@ console.log('\n§6 NEGATIVE CONTROLS — patched copies of the module');
     ['unknown count treated as zero', 'if (credits !== null && credits <= 0)', 'if (credits === null || credits <= 0)', 'unknown credit count is NOT zero (the vendor answers harmlessly)'],
   ];
   for (const [what, from, to, row] of controls) {
-    const p = patched(what.replace(/\W+/g, '-'), from, to);
-    ok(`NEGATIVE CONTROL (${what}): the patch hit the product source`, p.hit);
+    const p = patched(what.replace(/\W+/g, '-'), from, to, what);
     if (!p.hit) continue;
     const red = runTable(p.mod).filter((r) => !r.good).map((r) => r.name);
     ok(`NEGATIVE CONTROL (${what}): the table goes red on "${row}"`, red.includes(row), red.join(' | ') || 'all green');
@@ -330,7 +333,12 @@ const ATTEMPT_TABLE = (M) => {
   // stale refusal as an answered error, a rung without the one-try-per-event bound
   const src = fs.readFileSync(MOD, 'utf8');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rcverdict-'));
-  const patched = (tag, from, to) => { if (!src.includes(from)) return null; const f = path.join(dir, `reset-credit.${tag}.js`); fs.writeFileSync(f, src.replace(from, to)); return require(f); };
+  const patched = (tag, from, to, what = tag) => {   // as the first table's (B-0d3e): the row is the helper's own
+    const n = src.split(from).length - 1;
+    ok(`§8 NEGATIVE CONTROL (${what}): the patch hit the product source`, n === 1, n === 1 ? '' : `src/reset-credit.js: it wanted ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant`);
+    if (n !== 1) return null;
+    const f = path.join(dir, `reset-credit.${tag}.js`); fs.writeFileSync(f, src.replace(from, to)); return require(f);
+  };
   const ctl = [
     ['the floor armed at the WRITE (the pre-fix engine)', '  const armedAt = armedByClock(t, { now, ackMs }); // r3: the clock, not the timer\'s stamp\n  if (!t.outcome && !sentAt && now - at < ackMs) return { code: \'in_flight\', until: at + ackMs, armedAt: 0 };', '  const armedAt = at;', 'block: refused by codex before the send — nothing (THE OWNER\'S REPORT)'],
     ['the stale refusal read as an answered error', "  if (!keyed && /idempotencyKey/.test(err)) return { outcome: 'refused-stale', sent: false, answered: true, keyed };\n", '', 'answer: a wrapper older than the key, refused locally — never sent, no floor'],
@@ -361,8 +369,7 @@ const ATTEMPT_TABLE = (M) => {
     ['a block that reads only the newest record', '  for (let x = t; x; x = x.prior) { if (!isUnsettled(x, opts)) continue;', '  for (let x = t; x; x = x.prior) { if (!isUnsettled(x, opts) || x !== t) continue;', 'chain (r3): a FREE newest record with an UNSETTLED prior behind it ⇒ the block is unsettled, naming the prior\'s send'],
   ];
   for (const [what, from, to, rowName] of ctl) {
-    const m = patched(what.replace(/\W+/g, '-'), from, to);
-    ok(`§8 NEGATIVE CONTROL (${what}): the patch hit the product source`, !!m);
+    const m = patched(what.replace(/\W+/g, '-'), from, to, what);
     if (!m) continue;
     const red = ATTEMPT_TABLE(m).filter((r) => !r.good).map((r) => r.name);
     ok(`§8 NEGATIVE CONTROL (${what}): the table goes red on "${rowName}"`, red.includes(rowName), red.join(' | ') || 'all green');
