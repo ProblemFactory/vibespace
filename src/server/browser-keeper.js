@@ -1164,8 +1164,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const ids = (xs) => (Array.isArray(xs) ? xs : []).filter((x) => x && Number.isInteger(x.pid)).map((x) => `pid ${x.pid}`).join(', ');
     if (r.outcome === 'stopped') return null;
     if (r.outcome === 'survived') return `${host}: its browser is still running there after the stop (${ids(r.survivors) || 'its daemon'}) — nothing was freed; the machine's own process list decides it`;
-    if (r.outcome === 'not_ours') return `${host}: a browser VibeSpace did not start holds this profile's folder there${r.holder && Number.isInteger(r.holder.pid) ? ` (pid ${r.holder.pid})` : ''} — it was left running`;
-    if (r.outcome === 'not_running') return `${host}: it was not running there — nothing was stopped`;
+    // round wvdrkjdvx (1)/(3): «not started by VibeSpace» ONLY for a holder the lock verdict calls the user's (no launch mark of ours);
+    // any other foreign holder is said in the verdict's own words; an idle daemon that ended is said as such
+    const hp = r.holder && Number.isInteger(r.holder.pid) ? ` (pid ${r.holder.pid})` : '';
+    if (r.outcome === 'not_ours') return r.holder && r.holder.user === true ? `${host}: a browser VibeSpace did not start holds this profile's folder there${hp} — it was left running` : `${host}: this profile's folder there is held by another process${hp}: ${String((r.holder && r.holder.why) || 'its holder is not this browser').slice(0, 200)} — it was left running`;
+    if (r.outcome === 'not_running') return r.daemonEnded && r.daemon && Number.isInteger(r.daemon.pid) ? `${host}: its browser was not running there; its idle daemon (pid ${r.daemon.pid}) was ended` : `${host}: it was not running there — nothing was stopped`;
     if (r.outcome === 'failed') return `${host}: its stop failed (${String(r.error || 'close --all failed').slice(0, 160)}) — the browser may still run there`;
     return `${host}: its stop answered an outcome VibeSpace does not know (${String(r.outcome).slice(0, 40)})`;
   };

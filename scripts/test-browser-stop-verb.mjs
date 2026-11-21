@@ -267,7 +267,7 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   let asked = 0;
   const v8 = OPS.automationVerbs({ activeSessions: sessions, browsers: { rows: () => keeper.stopRows(), stop: (id) => { asked++; return keeper.managerStop(id); } } });
   const r = await v8['browsers.stop']({ id: bid, closeTabs: true }, { caller: { conversationId: 'x' }, keyId: 'k1', reach: KEY2 });
-  ok(!r.ok && r.code === 'host_unavailable' && /nothing was stopped/.test(r.why || '') && asked === 1 && B.isLiveBrowser(keeper.browserOf(bid)), '⑧ B-e799: a machine that cannot be asked — refused host_unavailable by name, the record still live (nothing moved)', { r, asked });
+  ok(!r.ok && r.code === 'host_unavailable' && /whether it stopped there is not known/.test(r.why || '') && asked === 1 && B.isLiveBrowser(keeper.browserOf(bid)), '⑧ B-e799: a machine that cannot be asked — refused host_unavailable by name, the record still live (nothing moved); its words say what is known: whether it stopped there is NOT known (round wvdrkjdvx 3)', { r, asked });
   keeper.reshapeStore((reg) => { delete reg.browsers[bid].hostId; });
   const src = fs.readFileSync(new URL('../src/server/browser-keeper.js', import.meta.url), 'utf8');
   ok(!/NOT_CLEAN/.test(src) && src.includes('    const freed = !B.isLiveBrowser(rec) && !left;'), '⑧ the stop\'s text test is gone: any residue the stop left (the reason word aside) is «not freed»');
@@ -315,7 +315,7 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   const OPS_MO = MUT.load('src/server/conversation-ops.js', anchored(opsSrc5, "e.code === 'store_unread' || e.code === 'stop_facts_unsupported' || e.code === 'host_unavailable'", "e.code === 'store_unread'", 'b-e799-unnamed'), 'b-e799-unnamed');
   const cantAsk = async (O, code) => O.automationVerbs({ activeSessions: sessions, browsers: { rows: () => [{ id: 'bp-0000e799', kind: 'profile', machine: 'dev-mac', name: 'Mac', holders: [{ browserKey: KEY_A, sessionId: 'sess-a', turn: 'idle' }], takenOver: false, viewers: 0, personBrowsing: false, inFlight: null, tabsKept: false }], stop: async () => { throw Object.assign(new Error(`dev-mac: ${code === 'stop_facts_unsupported' ? 'this machine\'s agent predates the structured stop answer: VibeSpace updates it by itself when the machine next connects' : 'device link not responding'}`), { code }); } } })['browsers.stop']({ id: 'bp-0000e799', closeTabs: true }, { keyId: 'K-1', caller: { conversationId: CID_B }, reach: KEY1 });
   const okOld = await cantAsk(OPS, 'stop_facts_unsupported'), okDown = await cantAsk(OPS, 'host_unavailable'), redOld = await cantAsk(OPS_MO, 'stop_facts_unsupported');
-  ok(okOld.code === 'stop_facts_unsupported' && /next connects/.test(okOld.why) && /nothing was stopped/.test(okOld.why) && okDown.code === 'host_unavailable' && redOld.code === 'not_freed',
+  ok(okOld.code === 'stop_facts_unsupported' && /next connects/.test(okOld.why) && /nothing was stopped/.test(okOld.why) && okDown.code === 'host_unavailable' && /whether it stopped there is not known/.test(okDown.why) && redOld.code === 'not_freed',
     '⑤ B-e799: a machine that cannot be asked is said BY NAME (an old agent: how it gets updated; a link down) — RED: the names cut, the CODE is «not_freed» (the keeper\'s words ride inside it, but no code names the cause)', { okOld, okDown, redOld });
   const ksrc = fs.readFileSync(new URL('../src/server/browser-keeper.js', import.meta.url), 'utf8');
   const TK = 'tabsKept: own && !helper && !!keptStore() });';
@@ -346,7 +346,7 @@ console.log('⑯ the browser registry held: the stop and the list refuse BY NAME
   const CF = require('../src/server/conversation-facts.js');
   const opsSrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8'), cfSrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
   const ROWS_AT = "catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, target: args.id }; rows = null; }";
-  const STOP_AT = "catch (e) { if (e && (e.code === 'store_unread' || e.code === 'stop_facts_unsupported' || e.code === 'host_unavailable')) return { ok: false, code: e.code, why: `${e.message} — nothing was stopped`, target: row.name || row.id };";   // moved with B-e799 (the machine names beside store_unread)
+  const STOP_AT = "catch (e) { if (e && (e.code === 'store_unread' || e.code === 'stop_facts_unsupported' || e.code === 'host_unavailable')) return { ok: false, code: e.code, why: `${e.message} — ${e.code === 'host_unavailable' ? 'whether it stopped there is not known (the request may have reached the machine)' : 'nothing was stopped'}`, target: row.name || row.id };";   // moved with B-e799 (the machine names beside store_unread)
   const LIST_AT = "catch (e) { if (e && e.code === 'store_unread') return { why: String(e.message) }; rows = null; }";
   ok(opsSrc.split(ROWS_AT).length === 2 && opsSrc.split(STOP_AT).length === 2 && cfSrc.split(LIST_AT).length === 2, '⑯ control setup: the three named branches are found once each');
   const MH = mutantCopies('browser-stop-held', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));

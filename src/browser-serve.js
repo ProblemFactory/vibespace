@@ -289,30 +289,34 @@ async function runBrowserServeOp(bs, action, params = {}) {
     while (Date.now() < until && F.pidAlive(before.pid)) await sleep(100);
     if (F.pidAlive(before.pid)) left = `daemon pid ${before.pid} is still alive after close --all`;
   }
-  return { ok: !!r.ok || !before.active, closed: before.active ? 1 : 0, left, ...stopFactsOf({ before, daemon, closed: r, left: !!left, holder: before && before.active ? null : lockHolderOf(dir), ns }), ...(r.ok ? {} : { code: 'stop_failed', error: (r.stderr || r.error || '').trim().slice(0, 300) || 'close --all failed' }) };
+  return { ok: !!r.ok || !before.active, closed: before.active ? 1 : 0, left, ...(p.facts === true ? stopFactsOf({ before, daemon, closed: r, daemonAlive: !!left, lockFacts: lockFactsOf(bs, dir), dir, mark: place.id, hostname: typeof bs.hostname === 'string' ? bs.hostname : os.hostname() }) : {}),   /* B-e799 round wvdrkjdvx (4): the fields ONLY when asked — a person's stop keeps its road; the lock read AFTER the grace on every branch (2) */ ...(r.ok ? {} : { code: 'stop_failed', error: (r.stderr || r.error || '').trim().slice(0, 300) || 'close --all failed' }) };
 }
 /** B-e799 (capability `browser-stop-facts`): THE STRUCTURED OUTCOME of a stop on this machine — the hub's keeper reads these fields,
  *  never `left`'s words (piece 6's round: «freed» was read out of leftover text). A pid that survives is REPORTED, never signalled here.
- *   stopped      our daemon ran and is gone after the grace
- *   survived     our daemon (or a browser of OUR namespace that outlived it) is alive after the grace — its {pid, starttime}
- *   not_running  nothing of ours ran and no browser holds the profile's folder
- *   not_ours     nothing of ours ran, and the profile's folder is held by a browser of another namespace (a person's own Chrome)
+ *  Round wvdrkjdvx (1): WHO HOLDS THE PROFILE'S FOLDER is judged by the module that owns that rule — browser-profiles
+ *  profileLockVerdict (the keeper's launch mark, or the browser CLI's own `--remote-debugging-port=0` on a folder VibeSpace minted;
+ *  the real driver scrubs every AGENT_BROWSER_* from its Chrome, so the holder's environment is no witness). (2) The lock is read
+ *  AFTER the grace, on every branch: a daemon that ended while its Chrome still holds the folder is not «stopped». PURE.
+ *   stopped      our daemon ran and is gone, and nothing of ours holds the folder
+ *   survived     our daemon is alive after the grace, or OUR OWN Chrome (the verdict's own-orphan) still holds the folder — named
+ *   not_running  nothing of ours ran (free, a stale lock, a recycled pid); `daemonEnded` when an idle daemon without a browser ended
+ *   not_ours     nothing of ours ran, and a holder the verdict calls foreign holds the folder — `user: true` ONLY for a browser
+ *                VibeSpace did not start (no launch mark of ours); its why is the verdict's
  *   failed       close --all failed and our daemon is still alive */
-function stopFactsOf({ before, daemon, closed, left, holder = null, ns }) {   // PURE: `holder` = the profile folder's lock holder (the facts module's)
-  const idOf = (pid, st) => ({ pid, starttime: Number.isInteger(st) ? st : null });
-  if (!before || !before.active) {
-    const h = holder;
-    if (h && h.alive) {
-      const holder = idOf(h.pid, h.starttime);
-      return h.namespace === ns ? { outcome: 'survived', daemon, survivors: [holder], holder: null } : { outcome: 'not_ours', daemon, survivors: [], holder };
-    }
-    return { outcome: 'not_running', daemon, survivors: [], holder: null };
-  }
-  if (left) return { outcome: closed && closed.ok ? 'survived' : 'failed', daemon, survivors: daemon ? [daemon] : [], holder: null };
-  return { outcome: 'stopped', daemon, survivors: [], holder: null };
+function stopFactsOf({ before, daemon, closed, daemonAlive = false, lockFacts = null, dir = '', mark = null, hostname = '' }) {
+  const lf = lockFacts || {};
+  const v = B.profileLockVerdict({ lock: lf.lock || null, holder: lf.holder || null, hostname, dir, minted: true, recorded: null, mark, preMarkAllowed: true, launchHosts: [] });
+  const hh = lf.holder && lf.holder.alive && Number.isInteger(lf.holder.pid) ? { pid: lf.holder.pid, starttime: Number.isInteger(lf.holder.starttime) ? lf.holder.starttime : null } : null;
+  const ownHolder = v.kind === 'own-orphan' && hh ? hh : null;
+  const ran = !!(before && before.active);
+  if (daemonAlive) return { outcome: !closed || closed.ok ? 'survived' : 'failed', daemon, survivors: [daemon, ...(ownHolder && (!daemon || ownHolder.pid !== daemon.pid) ? [ownHolder] : [])].filter(Boolean), holder: null };
+  if (ownHolder) return { outcome: 'survived', daemon, survivors: [ownHolder], holder: null };
+  if (!ran && v.kind === 'foreign' && hh) return { outcome: 'not_ours', daemon, survivors: [], holder: { ...hh, user: v.user === true, why: String(v.why || '').slice(0, 240) } };
+  if (ran) return { outcome: 'stopped', daemon, survivors: [], holder: null };
+  return { outcome: 'not_running', daemon, survivors: [], holder: null, ...(daemon ? { daemonEnded: true } : {}) };
 }
-/** The profile folder's lock holder ({pid, alive, starttime, namespace}) or null — never throws. */
-function lockHolderOf(dir) { try { const f = F.lockHolderFacts(dir); return f && f.holder ? f.holder : null; } catch { return null; } }
+/** The profile folder's lock facts ({lock, holder}) — read through the facts module (a stand-in machine may inject `bs.lockFactsOf`). Never throws. */
+function lockFactsOf(bs, dir) { try { return typeof bs.lockFactsOf === 'function' ? bs.lockFactsOf(dir) : F.lockHolderFacts(dir); } catch { return null; } }
 /** lane daemon-orphan-end: one daemon's census facts (browser-orphans over this machine's process table). */
 async function daemonFactsOf(pid) {
   const d = require('./browser-orphans.js').daemonsFromRows(await F.daemonRows()).find((x) => x.pid === pid);

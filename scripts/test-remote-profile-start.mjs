@@ -7,6 +7,7 @@
 // capability gate (DeviceManager.prototype.browserServe) and the REAL access layer, keeper and routes. Each fix has a
 // patched-copy CONTROL that turns its leg red (the copy's relative requires re-pointed at this tree).
 import fs from 'node:fs';
+import os from 'node:os';
 import net from 'node:net';
 import http from 'node:http';
 import path from 'node:path';
@@ -184,23 +185,43 @@ console.log('— ②b the structured stop: the outcome in fields, the gate, the 
   const sSurvived = await stopWith({ info: async () => ({ active: true, pid: process.pid }), closeAll: async () => ({ ok: true }) });   // a pid that lives on (this suite's own: the op never signals)
   const sFailed = await stopWith({ info: async () => ({ active: true, pid: process.pid }), closeAll: async () => ({ ok: false, stderr: 'close --all: the daemon did not answer' }) });
   const sNone = await stopWith({ info: async () => ({ active: false, pid: null }), closeAll: async () => ({ ok: true }) });
-  // a browser of ANOTHER namespace holds the profile's folder (a person's own Chrome): its lock names a live pid
+  // round wvdrkjdvx (1): a lock whose pid is ALIVE but names no folder of ours (a recycled pid — here this suite's own node) is FREE
+  // by the owner rule (browser-profiles profileLockVerdict) ⇒ «not_running», never «not ours»
   const lockAt = path.join(place.dir, 'SingletonLock');
-  fs.symlinkSync(`stand-in-host-${process.pid}`, lockAt);
-  const sNotOurs = await stopWith({ info: async () => ({ active: false, pid: null }), closeAll: async () => ({ ok: true }) });
+  fs.symlinkSync(`${os.hostname()}-${process.pid}`, lockAt);   // written on THIS machine (a lock of another hostname is the verdict's other rule)
+  const sRecycled = await stopWith({ info: async () => ({ active: false, pid: null }), closeAll: async () => ({ ok: true }) });
   fs.unlinkSync(lockAt);
-  // a browser of OUR namespace that outlived its daemon (an orphan) holds the folder: «survived», named — the PURE verdict over the
-  // lock holder's facts (a fast suite starts no real program)
-  const sOrphan = S.stopFactsOf({ before: { active: false }, daemon: null, closed: { ok: true }, left: false, holder: { pid: 4321, alive: true, starttime: 777, namespace: place.ns }, ns: place.ns });
-  const sStranger = S.stopFactsOf({ before: { active: false }, daemon: null, closed: { ok: true }, left: false, holder: { pid: 4321, alive: true, starttime: 777, namespace: 'vs-bp-00000000' }, ns: place.ns });
+  // (4) the fields ONLY when asked: a stop without facts (a person's own stop) answers today's shape
+  const sPlain = await S.runBrowserServeOp({ ...m.bs, runtime: { ...m.bs.runtime, info: async () => ({ active: true, pid: DEAD }), closeAll: async () => ({ ok: true }) }, stopGraceMs: 50 }, 'stop', { profileId: SF });
   ok(sStopped.ok && sStopped.outcome === 'stopped' && sStopped.daemon && sStopped.daemon.pid === DEAD && sStopped.survivors.length === 0, 'B-e799: our daemon gone after the grace ⇒ outcome «stopped», its pid named', sStopped);
   ok(sSurvived.ok && sSurvived.outcome === 'survived' && sSurvived.survivors.length === 1 && sSurvived.survivors[0].pid === process.pid && Number.isInteger(sSurvived.survivors[0].starttime) && /still alive/.test(sSurvived.left || ''),
     'B-e799: a daemon alive after the grace ⇒ «survived» with its pid and start time (the words `left` kept for an older hub; the process NOT signalled)', sSurvived);
   ok(sFailed.ok === false && sFailed.code === 'stop_failed' && sFailed.outcome === 'failed', 'B-e799: a close that failed with the daemon still alive ⇒ «failed» (ok:false, its own code)', sFailed);
   ok(sNone.ok && sNone.outcome === 'not_running' && sNone.daemon === null, 'B-e799: nothing of ours ran and nothing holds its folder ⇒ «not_running»', sNone);
-  ok(sNotOurs.ok && sNotOurs.outcome === 'not_ours' && sNotOurs.holder && sNotOurs.holder.pid === process.pid && sNotOurs.survivors.length === 0, 'B-e799: a browser of ANOTHER namespace holds the profile\'s folder ⇒ «not_ours», its pid named', sNotOurs);
-  ok(sOrphan.outcome === 'survived' && sOrphan.survivors.length === 1 && sOrphan.survivors[0].pid === 4321 && sOrphan.survivors[0].starttime === 777 && sStranger.outcome === 'not_ours' && sStranger.holder.pid === 4321,
-    'B-e799: a browser of OUR namespace that outlived its daemon ⇒ «survived», named; of another namespace ⇒ «not_ours» (the pure verdict over the lock holder)', { sOrphan, sStranger });
+  ok(sRecycled.ok && sRecycled.outcome === 'not_running' && !sRecycled.holder, 'B-e799 (round wvdrkjdvx 1): a stale lock whose pid is alive but names no folder of ours (a recycled pid) ⇒ «not_running» — the owner rule says free, never «not ours»', sRecycled);
+  ok(sPlain.ok && sPlain.closed === 1 && !('outcome' in sPlain) && !('survivors' in sPlain), 'B-e799 (round wvdrkjdvx 4): a stop asked WITHOUT facts (a person\'s own stop) answers today\'s shape — no outcome fields: its road is kept', sPlain);
+  // the PURE outcome over the LOCK VERDICT's facts (a fast suite starts no real program): who holds the folder is judged by
+  // browser-profiles profileLockVerdict — the keeper's launch mark, or the browser CLI's own --remote-debugging-port=0 on a folder
+  // VibeSpace minted; the real driver scrubs every AGENT_BROWSER_* from its Chrome, so the environment is no witness
+  const HOST = 'stand-in-machine', D0 = place.dir;
+  const holderOf = (argv, extra = {}) => ({ lock: { host: HOST, pid: 4321 }, holder: { pid: 4321, alive: true, starttime: 777, cmdline: ['chrome', `--user-data-dir=${D0}`, ...argv].join('\0'), dirs: [D0], parentIsDaemon: false, ...extra } });
+  const pure = (S2, o) => S2.stopFactsOf({ daemon: null, closed: { ok: true }, daemonAlive: false, dir: D0, mark: SF, hostname: HOST, ...o });
+  const OWN_PRE = holderOf(['--remote-debugging-port=0']), OWN_MARK = holderOf([B.keeperMarkArg(SF)]), PERSON = holderOf([]);
+  const pOwnPre = pure(S, { before: { active: false }, lockFacts: OWN_PRE }), pOwnMark = pure(S, { before: { active: false }, lockFacts: OWN_MARK }), pPerson = pure(S, { before: { active: false }, lockFacts: PERSON });
+  const pLinger = pure(S, { before: { active: true }, daemon: { pid: DEAD, starttime: null }, lockFacts: OWN_PRE });   // (2) the daemon ended in the grace, its Chrome still holds the folder
+  const pIdle = pure(S, { before: { active: false }, daemon: { pid: DEAD, starttime: null }, lockFacts: { lock: null, holder: null } });   // (3) an idle daemon, no browser, ended
+  ok(pOwnPre.outcome === 'survived' && pOwnPre.survivors[0].pid === 4321 && pOwnMark.outcome === 'survived' && pPerson.outcome === 'not_ours' && pPerson.holder.user === true && pPerson.holder.pid === 4321,
+    'B-e799 (round wvdrkjdvx 1): OUR OWN orphan (the CLI\'s --remote-debugging-port=0, or the keeper\'s launch mark) ⇒ «survived», named; a browser with no mark of ours ⇒ «not_ours», user', { pOwnPre, pOwnMark, pPerson });
+  ok(pLinger.outcome === 'survived' && pLinger.survivors.some((x) => x.pid === 4321), 'B-e799 (round wvdrkjdvx 2): the daemon ended inside the grace while OUR Chrome still holds the folder ⇒ «survived» (never «stopped» with its memory still there)', pLinger);
+  ok(pIdle.outcome === 'not_running' && pIdle.daemonEnded === true, 'B-e799 (round wvdrkjdvx 3): an idle daemon with no browser, then ended ⇒ «not_running» with daemonEnded (the words say what happened)', pIdle);
+  // RED (two copies): (1) today's environment rule — the holder judged by its namespace — calls OUR OWN orphan «not ours» (the false
+  // cause a person would read); (2) the lock read only when the daemon was not active — a lingering Chrome after the grace is «stopped»
+  const SSRC = fs.readFileSync(path.join(REPO, 'src/browser-serve.js'), 'utf8');
+  const MS = mutantCopies('rps-stop-holder', REPO);
+  const S_ENV = MS.load('src/browser-serve.js', anchored(anchored(SSRC, "  const ownHolder = v.kind === 'own-orphan' && hh ? hh : null;", "  const ownHolder = lf.holder && lf.holder.namespace === 'vs-' + String(mark) && hh ? hh : null;", 'e799-env-rule'), "  if (!ran && v.kind === 'foreign' && hh) return", "  if (!ran && hh) return", 'e799-env-foreign'), 'e799-env-rule');
+  const S_LATE = MS.load('src/browser-serve.js', anchored(SSRC, "  if (ownHolder) return { outcome: 'survived'", "  if (!ran && ownHolder) return { outcome: 'survived'", 'e799-lock-not-active-only'), 'e799-lock-not-active-only');
+  const rEnv = pure(S_ENV, { before: { active: false }, lockFacts: OWN_PRE }), rLate = pure(S_LATE, { before: { active: true }, daemon: { pid: DEAD, starttime: null }, lockFacts: OWN_PRE });
+  ok(rEnv.outcome === 'not_ours' && rLate.outcome === 'stopped', 'B-e799 RED (two copies): the environment rule calls our own orphan «not ours» (a false cause); the lock read only when the daemon was not active calls a lingering Chrome «stopped» (FREED with its memory there)', { rEnv: rEnv.outcome, rLate: rLate.outcome });
 }
 
 // ═══ ③ THE HUB: keeper + access layer + routes over the fake machines ═══
@@ -441,14 +462,16 @@ console.log('— ④ the manager\'s stop of a paired machine\'s browser: the out
     mac.bs.runtime.info = async (ns) => ({ active: ns === qns, pid: ns === qns ? process.pid : null });
     const r2 = await k.managerStop(q.id);
     ok(r2.freed === false && new RegExp(`still running there after the stop \\(pid ${process.pid}\\)`).test(r2.why || ''), 'B-e799: outcome «survived» ⇒ NOT freed, the surviving pid named', r2);
-    // (d) «not_ours»: nothing of ours ran there, and a browser of another namespace holds the profile's folder ⇒ NOT freed, named
+    // (d) «not_ours»: nothing of ours ran there, and a browser VibeSpace did not start holds the profile's folder (its lock facts INJECTED
+    // through the stand-in machine: a holder that NAMES the folder and carries no mark of ours — the lock verdict calls it the user's) ⇒ NOT freed
+    const personLock = (dir) => ({ lock: { host: os.hostname(), pid: 4321 }, holder: { pid: 4321, alive: true, starttime: 777, cmdline: ['chrome', `--user-data-dir=${dir}`].join('\0'), dirs: [dir], parentIsDaemon: false } });
     mac.bs.runtime.info = info0;
     ok(await start(k, q.id) === true, 'B-e799: started again');
     mac.bs.runtime.info = async () => ({ active: false, pid: null });
-    fs.mkdirSync(qdir, { recursive: true }); const lockAt = path.join(qdir, 'SingletonLock'); try { fs.unlinkSync(lockAt); } catch { /* none */ }
-    fs.symlinkSync(`stand-in-host-${process.pid}`, lockAt);
+    mac.bs.lockFactsOf = personLock;
     const r3 = await k.managerStop(q.id);
-    ok(r3.freed === false && /a browser VibeSpace did not start holds this profile's folder there/.test(r3.why || '') && new RegExp(`pid ${process.pid}`).test(r3.why || ''), 'B-e799: outcome «not_ours» ⇒ NOT freed — a browser of another namespace holds its folder there, its pid named, left running', r3);
+    delete mac.bs.lockFactsOf;
+    ok(r3.freed === false && /a browser VibeSpace did not start holds this profile's folder there/.test(r3.why || '') && /pid 4321/.test(r3.why || ''), 'B-e799: outcome «not_ours» ⇒ NOT freed — a browser of another namespace holds its folder there, its pid named, left running', r3);
     // RED: the release's road — a keeper copy that reads only the op's words — reads the same machine answer as FREED
     const KSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const MK = mutantCopies('rps-stop-facts', REPO);
@@ -459,12 +482,20 @@ console.log('— ④ the manager\'s stop of a paired machine\'s browser: the out
     mac.bs.runtime.info = info0;
     const startedT = await start(kT, qT.id);
     mac.bs.runtime.info = async () => ({ active: false, pid: null });
-    const dT = S.placeOf(mac.bs, qT.id).dir; fs.mkdirSync(dT, { recursive: true }); fs.symlinkSync(`stand-in-host-${process.pid}`, path.join(dT, 'SingletonLock'));
+    mac.bs.lockFactsOf = personLock;
     const rT = await kT.managerStop(qT.id);
+    delete mac.bs.lockFactsOf;
     ok(startedT === true && rT.freed === true, 'B-e799 RED: a keeper that reads the op\'s words (the release\'s road) calls the same answer FREED while a browser of another namespace holds the folder there', rT);
-    try { fs.unlinkSync(path.join(dT, 'SingletonLock')); } catch { /* gone */ }
     try { kT.shutdown(); } catch { /* none */ }
-    fs.unlinkSync(lockAt);
+    // (e) round wvdrkjdvx (4): A PERSON'S OWN STOP KEEPS ITS ROAD on a new agent — no facts asked, so the machine answers today's
+    // shape and the keeper reads its words as before (a surviving daemon said in the record's error field, the record stopped)
+    mac.bs.runtime.info = info0;
+    ok(await start(k, q.id) === true, 'B-e799: started again');
+    mac.bs.runtime.info = async (ns) => ({ active: ns === qns, pid: ns === qns ? process.pid : null });
+    let personAnswer = null; const call0 = access.call; access.call = async (...a) => { const r = await call0(...a); if (a[1] === 'stop') personAnswer = r; return r; };
+    try { await k.stop(q.id, { why: 'user' }); } finally { access.call = call0; }
+    const recP = k.browserOf(q.id);
+    ok(personAnswer && !('outcome' in personAnswer) && !live(k, q.id) && recP.stoppedBy === 'user' && /daemon pid \d+ is still alive after close --all/.test(recP.lastError || ''), 'B-e799 (round wvdrkjdvx 4): a person\'s own stop asks no facts — the machine answers today\'s shape and the keeper reads its words as before (its road kept)', { answer: personAnswer, lastError: recP && recP.lastError });
   } finally { mac.bs.runtime.info = info0; delete mac.bs.stopGraceMs; }
 }
 
