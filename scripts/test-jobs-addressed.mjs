@@ -227,7 +227,7 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
     const named = (n) => [...jm.jobs.values()].filter((j) => j.name === n);
     const B_RT = { conversationId: CID.B, sessionId: 'B', sessionCreatedAt: 1, groups: new Set([GI]) };   // B as the route sees it (its real Task Group's id)
     // the two verdicts' table (PURE, exported by the routes): what is kept, what is refused
-    const V = AR.agentJobAccessVerdict, TV = AR.agentJobTaskVerdict, CF = ['kind', 'name', 'cmd', 'timeoutMs', 'notify', 'context', 'action', 'access', 'owner', 'schedule', 'catchUp'];
+    const V = AR.agentJobAccessVerdict, TV = AR.agentJobTaskVerdict, CF = ['kind', 'name', 'cmd', 'timeoutMs', 'notify', 'context', 'action', 'access', 'owner', 'schedule', 'catchUp', 'mayRead'];
     const VT = [
       ['absent ⇒ the engine\'s default', V(undefined), { ok: true, access: undefined }],
       ['null ⇒ the engine\'s default', V(null), { ok: true, access: undefined }],
@@ -240,12 +240,12 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
       ['a number for a word', V({ view: 2 }).code, 'bad-scope'],
       ['an array access', V(['all']).code, 'bad-access'],
       ['a falsy access (false / \'\' / 0) reads as absent, as the engine read it', [V(false), V(''), V(0)], [{ ok: true }, { ok: true }, { ok: true }]],
-      ['RUN_FROM_SCHEDULE: a run\'s name, schedule, catch-up, action, owner, access, notify and context are its schedule\'s', AR.RUN_FROM_SCHEDULE, ['owner', 'name', 'schedule', 'catchUp', 'action', 'access', 'notify', 'context']],
+      ['RUN_FROM_SCHEDULE: a run\'s name, schedule, catch-up, action, owner, access, notify, context and may-read grant are its schedule\'s', AR.RUN_FROM_SCHEDULE, ['owner', 'name', 'schedule', 'catchUp', 'action', 'access', 'notify', 'context', 'mayRead']],
       ['no task', TV({ action: { type: 'notify', text: 'x' } }, CF), { ok: true }],
       ['a task of run fields (+ notifyOk, the CLI\'s)', TV({ action: { type: 'spawn-task', task: { cmd: {}, kind: 'task', timeoutMs: 1, notifyOk: true } } }, CF), { ok: true }],
       ['a task field of another shape is named as such', TV({ action: { type: 'spawn-task', task: { cmd: {}, 'x y': 1 } } }, CF).error, "the scheduled task's field (a field of another shape): a run carries only what a task's create takes — nothing was created"],
       ['a task that is a string', TV({ action: { type: 'spawn-task', task: 'sh -c true' } }, CF).code, 'bad-task'],
-      ['every field a run takes from its schedule is refused in a task, by name', ['notify', 'context', 'action', 'access', 'owner', 'name', 'schedule', 'catchUp'].map((k) => (TV({ action: { type: 'spawn-task', task: { cmd: {}, [k]: 1 } } }, CF).error || '').startsWith(`the scheduled task's field ${k}:`)), [true, true, true, true, true, true, true, true]],
+      ['every field a run takes from its schedule is refused in a task, by name', ['notify', 'context', 'action', 'access', 'owner', 'name', 'schedule', 'catchUp', 'mayRead'].map((k) => (TV({ action: { type: 'spawn-task', task: { cmd: {}, [k]: 1 } } }, CF).error || '').startsWith(`the scheduled task's field ${k}:`)), [true, true, true, true, true, true, true, true, true]],
     ];
     for (const [n, got, want] of VT) ok(JSON.stringify(got) === JSON.stringify(want), `B-9407 verdict: ${n}`, { got, want });
     // the plant first: the route reaches the engine and keeps the words it is given

@@ -347,7 +347,8 @@ same-origin, no cookies) with a tiny postMessage bridge (`vsui.submit(obj)`,
   task (`{ ...action.task }`), so the task takes only the RUN fields of the
   create's copy — never what a run takes from its schedule (`RUN_FROM_SCHEDULE`:
   name, schedule, catch-up, action, owner, access, notify — a run's own on/off
-  beats its schedule's — and context, capped only on the schedule), nor any
+  beats its schedule's — context, capped only on the schedule, and the may-read
+  grant, handed from the schedule at every fire), nor any
   record field (`subscribers`, `interaction`, `clearedAt` … would ride every
   run): 400 `unknown_field`; a wake grant 403 as at the top. PURE
   `agentJobAccessVerdict` / `agentJobTaskVerdict` (src/agent-routes.js); the person's own create

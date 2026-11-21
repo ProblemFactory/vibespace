@@ -3068,8 +3068,9 @@ function agentJobAccessVerdict(acc) {
  *  action (a task inside a task would ride a nested grant past storedAction's one level), its owner and access (the child
  *  build sets them from the schedule), its notify (src/jobs.js _notifyOverrideOf puts a run's own on/off AHEAD of its
  *  schedule's — a task's `notify: 'on'` would beat the owner's later `notify <cron> off`, and the person's), its context (the
- *  create caps the schedule's at CONTEXT_PAYLOAD_CAP; a task's rode uncapped onto every run) */
-const RUN_FROM_SCHEDULE = Object.freeze(['owner', 'name', 'schedule', 'catchUp', 'action', 'access', 'notify', 'context']);
+ *  create caps the schedule's at CONTEXT_PAYLOAD_CAP; a task's rode uncapped onto every run), its mayRead (B-3992: the engine
+ *  hands the schedule's judged grant to the run at every fire — a task's own sat unjudged in the stored task) */
+const RUN_FROM_SCHEDULE = Object.freeze(['owner', 'name', 'schedule', 'catchUp', 'action', 'access', 'notify', 'context', 'mayRead']);
 /** the class (B-9407): a scheduled run's task takes only the RUN fields of the create's copy (`createFields` = its keys, minus
  *  RUN_FROM_SCHEDULE, + notifyOk). A wake grant there is refused as at the top (403, piece 7's words); any other field by
  *  name (400 unknown_field), nothing created */
