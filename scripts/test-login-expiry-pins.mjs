@@ -18,8 +18,9 @@ console.log('— §5 wiring');
 {
   const acc = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
   ck('accounts.js exposes loginStateOf through the DESCRIPTOR (never a backend-id branch)', /creds\.loginState|_credsOf\(be\)\?\.loginState/.test(acc) && !/backend === 'claude' \? loginState/.test(acc));
-  ck('every subscription row in list() carries loginState', /loginState: this\.loginStateOf\(a\.id\)/.test(acc));
-  ck("a pool's row carries its MEMBERS' worst", /loginState: this\.poolLoginState\(a\.id\)/.test(acc));
+  // B-360d: the row's loginState is the DISPLAY twin — the harness's own reader over the KEPT facts (no file on the loop)
+  ck('every subscription row in list() carries loginState (the display twin over the kept facts)', /loginState: this\._loginStateShown\(a\)/.test(acc));
+  ck("a pool's row carries its MEMBERS' worst (the display twin)", /loginState: this\.poolLoginStateShown\(a\.id\)/.test(acc));
   // ROUND 2: membership is TWO questions. An explicit list is what the user
   // NAMED (a signed-out member of it IS the finding); an implicit pool's
   // membership is DEFINED as poolMembers(), so an account that is signed out
@@ -112,13 +113,14 @@ console.log('— §5 wiring');
     && /const sweepOnLoginTransition = \(id, r, why\) => \{[\s\S]*?if \(lastLoginFingerprint\.get\(id\) === fp\) return false;/.test(aur));
   ck('...and the sweep never throws into the login route (a follow-up must not fail the login)', /const sweepLoginExpiry = \(why\) => \{\n\s*try \{[\s\S]*?\} catch \(e\) \{ console\.log\('\[login-expiry\] immediate sweep failed:'/.test(aur));
   // ONE READER: the chip (roster row `loginState`) and the inbox item both come
-  // from accounts.loginStateOf. The watch must never grow a credential reader
-  // of its own, or the two surfaces can disagree about the same file.
-  ck('the watch asks the ACCOUNT STORE for the login state — the same reader the chip is built from',
-    /accounts\.loginStateOf\(a\.id, t\)/.test(fs.readFileSync(path.join(REPO, 'src/server/login-expiry-watch.js'), 'utf8')));
+  // from the account store — B-360d: the chip from its display twin, the watch
+  // from its DECISION road, both the harness's own reader over the SAME kept
+  // snapshot. The watch must never grow a credential reader of its own.
+  ck('the watch asks the ACCOUNT STORE for the login state — its decision road over the facts the chip is built from',
+    /accounts\.decisionLoginStateOf\(a\.id, t\)/.test(fs.readFileSync(path.join(REPO, 'src/server/login-expiry-watch.js'), 'utf8')));
   ck('the harness descriptor is the one place that touches the credential FILE (it also reports the last write)', (() => {
     const cl = fs.readFileSync(path.join(REPO, 'src/harnesses/claude.js'), 'utf8');
-    return /writtenAt = fx && Number\.isFinite\(fx\.mtimeMs\) \? fx\.mtimeMs : null/.test(cl) && /fx = RR\.facts\(fp\)/.test(cl) && /return \{ \.\.\.loginState\(raw, now\), writtenAt \}/.test(cl);   // B-403e: the write time from the SAME open the read made (src/run-reads.js facts)
+    return /writtenAt = fx && Number\.isFinite\(fx\.mtimeMs\) \? fx\.mtimeMs : null/.test(cl) && /fx = rd\.facts\(fp\)/.test(cl) && /function claudeLoginState\(dir, now = Date\.now\(\), rd = RR\)/.test(cl) && /return \{ \.\.\.loginState\(raw, now\), writtenAt \}/.test(cl);   // B-403e: the write time from the SAME open the read made (src/run-reads.js facts); B-360d: the reader is handed (default RR) — the accounts list's kept snapshot answers it the same
   })());
 
   const ma = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
@@ -264,13 +266,15 @@ console.log('— §10 login × long-lived token: the source pins');
 {
   const src = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
   // CENSUS: every loginStateOf( call in src/ is either a ROW reader (listed) or passes { slot: true }
-  const ROW_READERS = { 'src/accounts.js': 1, 'src/server/login-expiry-watch.js': 1 }; // list()'s roster row · the For-you watch
+  // B-360d (lane chrome-157): NONE — list()'s roster row reads its display twin over the KEPT facts, the For-you watch the decision
+  // road (decisionLoginStateOf) over the same snapshot; the fresh reader without { slot: true } has no row reader left
+  const ROW_READERS = {};
   const rows = [];
   const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const p = d + '/' + e.name; if (e.isDirectory()) walk(p); else if (/\.(c?js|mjs)$/.test(e.name)) { const t = src(p); const re = /\.loginStateOf\(([^)]*)\)/g; let m; while ((m = re.exec(t))) { if (/^\s*id, now = Date\.now\(\), opts/.test(m[1])) continue; rows.push({ p, slot: /\{ slot: true \}/.test(t.slice(m.index, m.index + 120)) }); } } } };
   walk('src');
   const unslot = rows.filter((r) => !r.slot).reduce((o, r) => ((o[r.p] = (o[r.p] || 0) + 1), o), {});
   console.log('    loginStateOf sites: ' + rows.length + ' (slot ' + rows.filter((r) => r.slot).length + '); row readers ' + JSON.stringify(unslot));
-  ck('CENSUS: loginStateOf without { slot: true } only in the ROW readers (roster list + For-you watch); every pool reader passes it', JSON.stringify(unslot) === JSON.stringify(ROW_READERS) && rows.filter((r) => r.slot).length >= 6);
+  ck('CENSUS: loginStateOf without { slot: true } in NO row reader (the roster row and the For-you watch read the kept facts — B-360d); every pool reader passes it', JSON.stringify(unslot) === JSON.stringify(ROW_READERS) && rows.filter((r) => r.slot).length >= 6);
 
   ck('authFor (the no-host rung): a dead dir login with a valid token says how: oat', /const dirDead = loggedIn && hasOat && !loginUsable\(this\.loginStateOf\(a\.id, Date\.now\(\), \{ slot: true \}\)\);\n    if \(!hostFacts\) \{\n      if \(loggedIn && !dirDead\) return/.test(src('src/accounts.js')));
 
@@ -283,7 +287,7 @@ console.log('— §10 login × long-lived token: the source pins');
   // row is refused by name — loginNeeded, its own words — only when no fallback has a token either
   const ladderAt = ur.indexOf('IDENTITY-GROUP fallback (2.266.1'), namedAt = ur.indexOf("if (!token && refusedByName) return res.json(");
   // (acceptance r3: the words live in ONE `refusalAnswer(r)` — the lapsed row the door refused is told the same refusal)
-  ck('...the route answers loginNeeded by name once its token ladder has nothing either (the ladder FIRST, acceptance r2); the probe env strips the token anyway', /const refusedByName = !cliOk && pv && pv\.at >= t0 && \(pv\.code === 'login' \|\| pv\.code === 'unprobeable'\) \? pv : null;/.test(ur) && /: \{ error: 'needs re-login to refresh usage — ' \+ r\.why, loginNeeded: true/.test(ur) && /if \(!token && refusedByName\) return res\.json\(refusalAnswer\(refusedByName\)\);/.test(ur) && ladderAt > 0 && namedAt > ladderAt && /delete env\.CLAUDE_CODE_OAUTH_TOKEN;/.test(ur));
+  ck('...the route answers loginNeeded by name once its token ladder has nothing either (the ladder FIRST, acceptance r2); the probe env strips the token anyway', /const refusedByName = !cliOk && pv && pv\.at >= t0 && \(pv\.code === 'login' \|\| pv\.code === 'unprobeable' \|\| pv\.code === 'sign-in-unknown'\) \? pv : null;/.test(ur) && /: \{ error: 'needs re-login to refresh usage — ' \+ r\.why, loginNeeded: true/.test(ur) && /if \(!token && refusedByName\) return res\.json\(refusalAnswer\(refusedByName\)\);/.test(ur) && ladderAt > 0 && namedAt > ladderAt && /delete env\.CLAUDE_CODE_OAUTH_TOKEN;/.test(ur));
   const probeCallers = [];
   for (const p of ['src/usage-routes.js', 'src/server/account-usage-routes.js', 'src/server/auto-cli-loop.js', 'server.js']) { const n = (src(p).match(/spawnPanelProbe\(/g) || []).length; if (n) probeCallers.push(p + ':' + n); }
   console.log('    panel-probe sites: ' + probeCallers.join(' '));

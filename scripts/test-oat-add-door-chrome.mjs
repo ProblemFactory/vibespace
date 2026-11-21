@@ -50,6 +50,8 @@ const cred = (id) => { try { return JSON.parse(fs.readFileSync(path.join(am.subD
 let chrome = null, srv = null;
 try {
   await am.oatFileSettled();
+  for (const x of am.list().accounts) am.displayRefresh(x.id);   // B-360d: THE ONE SEAM — this suite wrote a sign-in file itself
+  await am.displaySettled();
   am.setOat(acct, OAT); am.setOat(acct2, OAT.replace('DOORfake_', 'DOORfak2_')); await am.oatFileSettled();
   const stub = { name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'build-version', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
   const entry = `import { openOatShapeDialog } from './oat-shape-dialog.js';

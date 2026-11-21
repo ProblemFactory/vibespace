@@ -305,7 +305,9 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
       if (a.type !== 'subscription') continue;
       alive.add(a.id);
       let info = null;
-      try { info = accounts.loginStateOf(a.id, t); } catch { info = null; }
+      // THE DECISION ROAD (B-360d, 主开发 r1221 — the timer row): the kept facts confirmed within its bound (the timer awaited the
+      // confirmation off the loop); null = not read / unreadable / not confirmed: NO notice and NO retraction this sweep
+      try { info = accounts.decisionLoginStateOf(a.id, t); } catch { info = null; }
       if (!info) continue;
       const name = a.name || a.id;
       const exp = info.refreshExpiresAt ?? null;
@@ -403,9 +405,13 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
   function start() {
     if (timer) return;
     timer = setTimeout(function tick() {
-      try { sweep(); } catch (e) { log('[login-expiry] sweep failed:', e.message); }
-      timer = setTimeout(tick, sweepMs);
-      if (timer.unref) timer.unref();
+      // the sign-in facts confirmed OFF the loop first (B-360d: awaited, each ask bounded by the file door's deadline), then the sweep
+      Promise.resolve().then(() => accounts.signinFactsSettled()).catch(() => null).then(() => {
+        if (!timer) return;   // stopped while the facts were confirmed
+        try { sweep(); } catch (e) { log('[login-expiry] sweep failed:', e.message); }
+        timer = setTimeout(tick, sweepMs);
+        if (timer.unref) timer.unref();
+      });
     }, BOOT_DELAY_MS);
     if (timer.unref) timer.unref();
   }

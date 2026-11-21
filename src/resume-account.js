@@ -45,6 +45,8 @@ function rowServes(a, { host = null, verdicts = null, logins = null } = {}) {
   }
   // a pool serves while ANY member can: the create re-points a dead target to a live member (resolveForSpawn's
   // self-heal) — `memberOptions` is the list of members with a valid login (poolMembers)
+  // B-360d: a row whose sign-in is not read yet (or could not be read) is no claim — the resume's own spawn reads it fresh
+  if (a.facts && a.facts.state !== 'read') return { ok: true, unjudged: true };
   if (isPool(a)) return (a.current && a.loggedIn) || (Array.isArray(a.memberOptions) && a.memberOptions.length) ? { ok: true } : { ok: false, why: 'pool-no-target', since: null };
   if (a.type !== 'subscription') return { ok: true }; // an API key always serves on this machine
   const ls = a.loginState && typeof a.loginState === 'object' ? a.loginState : null;

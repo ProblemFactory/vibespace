@@ -82,16 +82,18 @@ function codexState(raw, mtimeMs) {
 
 /**
  * @param {string} credsPath absolute path to .credentials.json (claude) or auth.json (codex)
- * @param {{now?:number, backend?:'claude'|'codex'}} opts
+ * @param {{now?:number, backend?:'claude'|'codex', rd?:object}} opts  `rd`: the reader (run-reads' shape; default RR) — the accounts
+ *        store's KEPT facts answer GET /api/usage's `logins` through it (B-360d: no file on the loop); a path it does not keep is unreadable
  * @returns {{state:string, usable:boolean, since:number|null, expiresAt:number|null, refreshExpiresAt:number|null, path:string}}
  */
-function loginState(credsPath, { now = Date.now(), backend = null } = {}) {
+function loginState(credsPath, { now = Date.now(), backend = null, rd = RR } = {}) {
   const base = { path: credsPath || null, expiresAt: null, refreshExpiresAt: null };
   if (!credsPath) return { ...base, state: 'missing', usable: false, since: null };
   // B-403e: the file's stat and text in the run's ONE ask (RR.facts) — the same three answers as the stat-then-read it replaces:
   // no file ⇒ missing; a file that cannot be read or parsed ⇒ unreadable, written at its mtime; else its state
   let fx = null, raw = null;
-  try { fx = RR.facts(credsPath); } catch (e) {
+  try { fx = rd.facts(credsPath); } catch (e) {
+    if (e && e.code === 'EUNREAD') return { ...base, state: 'unreadable', usable: false, since: null };   // a reader that never read it: no claim of «missing»
     if (e && e.code !== 'ENOENT' && Number.isFinite(e.mtimeMs)) return { ...base, state: 'unreadable', usable: false, since: _mtime(e) };
     return { ...base, state: 'missing', usable: false, since: null };
   }
@@ -132,8 +134,8 @@ function loginState(credsPath, { now = Date.now(), backend = null } = {}) {
  *         `oatMintedAt`; null/absent = no token). No decryption needed — the
  *         token's VALUE is irrelevant to this question.
  */
-function accountLoginState(credsPath, { oatMintedAt = null, oatTtlMs = OAT_TTL_MS, now = Date.now(), backend = 'claude' } = {}) {
-  const st = loginState(credsPath, { now, backend });
+function accountLoginState(credsPath, { oatMintedAt = null, oatTtlMs = OAT_TTL_MS, now = Date.now(), backend = 'claude', rd = RR } = {}) {
+  const st = loginState(credsPath, { now, backend, rd });
   const minted = Number(oatMintedAt) || 0;
   if (!minted) return st;
   const oatExpiresAt = minted + (Number(oatTtlMs) || OAT_TTL_MS);

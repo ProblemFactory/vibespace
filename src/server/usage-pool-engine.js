@@ -271,7 +271,9 @@ function usageIdentityGroups() {
   const groups = new Map(); // identityKey → {accountIds:[], cache, accountId}
   let files = [];
   try { files = usageWrite.listCacheDir(USAGE_CACHE_DIR, { via: RR }).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return groups; }
-  const roster = accounts.list().accounts || [];
+  // the identity key's EMAIL DECIDES a grouping (B-360d, 主开发 r1221 — the timer row): the decision road's rows, confirmed within
+  // two of this memo's lives (60 s; a confirmation asked behind at 30 s) — an account not confirmed is its own identity (no merge)
+  const roster = accounts.decisionList({ withinMs: 60000 }).accounts || [];
   for (const fn of files) {
     try {
       // '__global_codex__' is a PSEUDO id like '__global__' (the machine's

@@ -45,6 +45,11 @@ function create({ app, machineProbes, accounts, claudeCmd, codexCmd, cliCmds = n
       out.claude.namedLoggedIn = (l.accounts || []).filter((a) =>
         (a.backend || 'claude') === 'claude' && (a.loggedIn || (!a.pooled && a.type === 'api'))).length;   // an API-key account by its TYPE (B-ba7d: the list carries no key tail)
       if (out.codex) out.codex.namedLoggedIn = (l.accounts || []).filter((a) => a.backend === 'codex' && a.loggedIn).length; // onboarding readiness per backend (2.369.21)
+      // B-360d: a named login whose sign-in is not read yet (or could not be read) is counted APART — the chip says «reading»,
+      // never «Log in», for an account that may well be signed in
+      const count = (be, st) => (l.accounts || []).filter((a) => (a.backend || 'claude') === be && a.facts && a.facts.state === st).length;
+      out.claude.namedUnread = count('claude', 'unread'); out.claude.namedUnreadable = count('claude', 'unreadable');
+      if (out.codex) { out.codex.namedUnread = count('codex', 'unread'); out.codex.namedUnreadable = count('codex', 'unreadable'); }
     } catch {}
     // A harness whose DESCRIPTOR answers its own machine facts (creds.machineStatus — antigravity, lane
     // antigravity-harness): a stat only, never a spawn; its named-login count rides the same row.
@@ -52,7 +57,7 @@ function create({ app, machineProbes, accounts, claudeCmd, codexCmd, cliCmds = n
       const l = accounts.list();
       for (const h of require('../harnesses').list()) {
         if (!h.creds || typeof h.creds.machineStatus !== 'function' || out[h.id]) continue;
-        out[h.id] = { ...h.creds.machineStatus({ cmd: cmdOf(h.id) }), namedLoggedIn: (l.accounts || []).filter((a) => a.backend === h.id && a.loggedIn).length }; // the CHECKED path (null = not installed now)
+        out[h.id] = { ...h.creds.machineStatus({ cmd: cmdOf(h.id) }), namedLoggedIn: (l.accounts || []).filter((a) => a.backend === h.id && a.loggedIn).length, namedUnread: (l.accounts || []).filter((a) => a.backend === h.id && a.facts && a.facts.state === 'unread').length, namedUnreadable: (l.accounts || []).filter((a) => a.backend === h.id && a.facts && a.facts.state === 'unreadable').length }; // the CHECKED path (null = not installed now)
       }
     } catch {}
     // THE OBSERVED CENSUS (lane cli-shell-truth): per CLI where it was found and by whom — provenance 'shell' (the

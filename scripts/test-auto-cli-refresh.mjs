@@ -218,7 +218,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     const deps = {
       now: () => T, rand, dataDir, USAGE_CACHE_DIR: cacheDir, metric: () => {},
       serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined),
-      accounts: { list: () => ({ accounts: members.map((m) => ({ id: m.id, type: 'subscription', loggedIn: true, pooled: false, backend: 'claude' })) }) },
+      accounts: (() => { const l = () => ({ accounts: members.map((m) => ({ id: m.id, type: 'subscription', loggedIn: true, pooled: false, backend: 'claude' })) }); return { list: l, decisionList: l, signinFactsSettled: async () => ({ since: 0, facts: new Map() }) }; })(),   // B-360d: the tick reads the decision road
       autoCliReady: () => true, usageEstimator, projectionRereadFor, lastMemberReadAt: () => 0,
       // an org-merged identity (the engine's usageIdentityGroups): the freshest cache file of the group wins for every id
       usageIdentityGroupsCached: () => (groups ? new Map(groups.map((ids, i) => [`org-${i}`, { accountIds: ids, cache: ids.map((id) => readCache(id)).filter(Boolean).sort((a, b) => (b.fetchedAt || 0) - (a.fetchedAt || 0))[0] || null }])) : []),
@@ -484,8 +484,9 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   ok(AC.probeEligibility(row({}), { quotaProbe: null }) === null && AC.probeEligibility(null) === null && AC.probeEligibility('x') === null && AC.probeEligibility(row({ loginState: 'oat-only' })) === AC.PROBEABLE
     && AC.probeEligibility(oatRow({ oatCli: { measured: 'yes' } })) === AC.CLI_UNMEASURED && AC.probeEligibility(oatRow({ oatScopes: 'user:profile' })) === AC.OAT_NO_PROFILE,
     '§10a a harness without the cli-usage rung / hostile input ⇒ null; a garbage loginState is no oat-only claim; a truthy-but-not-true measured / a scopes STRING are no facts');
-  ok(AC.PROBE_ELIGIBILITY.join() === 'probeable,unprobeable:oat-no-profile,unprobeable:cli-unmeasured,unprobeable:oat-not-in-folder,unprobeable:oat-folder-no-panel,unprobeable:no-login' && AC.PROBE_ELIGIBILITY.slice(1).every(AC.isUnprobeable) && !AC.isUnprobeable(AC.PROBEABLE) && !AC.isUnprobeable('unprobeable:oat-only') && AC.PROFILE_SCOPE === 'user:profile',
-    '§10a the closed table: one probeable state (a LIVE login), four named oat-only facts + no login; the retired blanket `unprobeable:oat-only` is no state');
+  // B-360d: + `unknown:sign-in` (the row's sign-in facts not read / unreadable / unconfirmed) — NOT unprobeable: it decides nothing
+  ok(AC.PROBE_ELIGIBILITY.join() === 'probeable,unprobeable:oat-no-profile,unprobeable:cli-unmeasured,unprobeable:oat-not-in-folder,unprobeable:oat-folder-no-panel,unprobeable:no-login,unknown:sign-in' && AC.PROBE_ELIGIBILITY.slice(1, -1).every(AC.isUnprobeable) && !AC.isUnprobeable(AC.SIGNIN_UNKNOWN) && AC.probeEligibility({ type: 'subscription', facts: { state: 'unread' } }) === AC.SIGNIN_UNKNOWN && !AC.isUnprobeable(AC.PROBEABLE) && !AC.isUnprobeable('unprobeable:oat-only') && AC.PROFILE_SCOPE === 'user:profile',
+    '§10a the closed table: one probeable state (a LIVE login), four named oat-only facts + no login, + the sign-in not read (decides nothing — never unprobeable); the retired blanket `unprobeable:oat-only` is no state');
   ok(AC.notProbedWords(AC.OAT_FOLDER_NO_PANEL, { oatCli: { cli: '2.1.312' } }) === 'long-lived token in the account\'s folder: claude 2.1.312 prints no quota lines for a folder-token login; refreshes when a session uses it', '§10a R3: the folder-token row is said with the CLI that prints nothing for it', AC.notProbedWords(AC.OAT_FOLDER_NO_PANEL, { oatCli: { cli: '2.1.312' } }));
   // R3: A PANEL ANSWER WITH NO QUOTA LINE IS CLASSED BY WHAT THE CLI SAID (the two shapes in the owner's log, 10-28)
   const COST = 'Total cost:            $0.0000\nTotal duration (API):  0s\nTotal duration (wall): 1s\nTotal code changes:    0 lines added, 0 lines removed\nUsage:                 0 input, 0 output, 0 cache read, 0 cache write\n';
@@ -562,7 +563,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     const deps = {
       now: () => T, rand, dataDir, USAGE_CACHE_DIR: cacheDir, metric: () => {},
       serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined),
-      accounts: { list: () => ({ accounts: rows }) }, autoCliReady: () => true, usageIdentityGroupsCached: () => [],
+      accounts: { list: () => ({ accounts: rows }), decisionList: () => ({ accounts: rows }), signinFactsSettled: async () => ({ since: 0, facts: new Map() }) }, autoCliReady: () => true, usageIdentityGroupsCached: () => [],
       usageEstimator: { estimateFor: () => null }, projectionRereadFor: () => null, lastMemberReadAt: () => 0,
       usage: {
         // the probe door, stubbed AS IT ANSWERS: an unprobeable oat-only row refused by name with no spawn (code login),

@@ -300,7 +300,7 @@ const PLANS = { cli: '2.1.321', anchor: true, ...CAT, withheld: ['default_claude
   const ms = Object.entries({ en: tOf(null), zh: tOf(ZH), ja: tOf(JA) }).map(([L, t]) => { const m = PPM.memberState({ loggedIn: !!row.loggedIn, loginState: row.loginState }); return [L, m.code, t(m.key, m.params)]; });
   ok(row.loginState.oatNoType === true && ms.every(([, c, txt]) => c === 'oat-no-type' && !RELOGIN.test(txt) && !/expired|过期|期限切れ/.test(txt)), 'the Members roster: «no subscription type yet — sign in once, or choose the type», never «login expired»', ms);
   const R = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
-  ok(/const refusalAnswer = \(r\) => \(\(r\.wallWhy \? wallDoor\(r\.wallWhy\) !== 'relogin'/.test(R), '⟳: a wall whose door is not a re-login answers «not refreshed» with NO loginNeeded (usage-routes refusalAnswer reads wallDoor)');
+  ok(/const refusalAnswer = \(r\) => \(r\.code === 'sign-in-unknown' \? [^\n]*\n\s*: \(r\.wallWhy \? wallDoor\(r\.wallWhy\) !== 'relogin'/.test(R),   /* B-360d: a sign-in not read is answered first, never «re-login» */ '⟳: a wall whose door is not a re-login answers «not refreshed» with NO loginNeeded (usage-routes refusalAnswer reads wallDoor)');
   const ofPool = am.poolLoginState ? null : null; void ofPool;
 }
 

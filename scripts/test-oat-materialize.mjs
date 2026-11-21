@@ -432,7 +432,9 @@ const P = amP.createPool({ name: 'Pool' }).id;
   const fnText = (s, name) => { const i = s.indexOf('\n  ' + name + '('); if (i < 0) return ''; return s.slice(i + 1, s.indexOf('\n  }\n', i) + 4); };
   const fnTop = (s, name) => { const i = s.indexOf('\nfunction ' + name + '('); if (i < 0) return ''; return s.slice(i + 1, s.indexOf('\n}\n', i) + 2); };
   const h = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16);
-  const PIN = { ensureSessionPoolLink: 'ea444b5b7962469d', _noteSlot: 'f7c6d00977b723ab', setPoolTarget: '79b61f209800c3bc', repointPoolSymlink: '90eae116e782737a' };
+  // (B-360d, lane chrome-157: setPoolTarget + ONE line after the re-point — `this._displaySeedPool(a, subId)`, the pool folder's KEPT
+  // display facts set in the switch's own step (never an old identity after a switch); the slot, the link and the ledger unchanged)
+  const PIN = { ensureSessionPoolLink: 'ea444b5b7962469d', _noteSlot: 'f7c6d00977b723ab', setPoolTarget: 'd5e1be9cf1471633', repointPoolSymlink: '90eae116e782737a' };
   const now = { ensureSessionPoolLink: h(fnText(src, 'ensureSessionPoolLink')), _noteSlot: h(fnText(src, '_noteSlot')), setPoolTarget: h(fnText(src, 'setPoolTarget')), repointPoolSymlink: h(fnTop(mat, 'repointPoolSymlink')) };
   ok(JSON.stringify(now) === JSON.stringify(PIN), 'THE SLOT LAW (invariant 3): ensureSessionPoolLink / _noteSlot / setPoolTarget / repointPoolSymlink are byte-identical to rel267 (sha pins)', now);
   const mutated = h(fnText(src.replace("const from = this.poolCurrentFor(poolId, sessKey);", "const from = this.poolCurrentFor(poolId, sessKey) ;"), 'ensureSessionPoolLink'));

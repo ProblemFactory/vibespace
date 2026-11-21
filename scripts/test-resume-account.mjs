@@ -64,10 +64,15 @@ creds(D, { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresA
 const GONE = 'sub-' + 'f0e1d2c3b4a5';                                 // a removed account's id
 accounts.setDefault(K);
 
+// B-360d: THE ONE SEAM — this suite wrote the sign-in files itself: each folder asked again, then the settled wait (the list
+// answers from the facts read off the loop)
+for (const a of accounts.list().accounts) accounts.displayRefresh(a.id);
+await accounts.displaySettled();
 const list = () => accounts.list();
-// the usage route's `logins` map, built the way usage-routes builds it (src/login-state.js, account level)
-const loginsOf = (rows) => Object.fromEntries(rows.filter((a) => a.type === 'subscription' && (a.backend || 'claude') === 'claude')
-  .map((a) => { const st = accountLoginState(accounts.subCredsPath(a.id), { backend: 'claude', oatMintedAt: a.oat ? (a.oatMintedAt || null) : null }); return [a.id, { state: st.state, usable: st.usable, since: st.since || null }]; }));
+// the usage route's `logins` map, built the way usage-routes builds it (src/login-state.js, account level — B-360d: over the
+// KEPT facts' reader; a folder not read has no entry)
+const loginsOf = (rows) => Object.fromEntries(rows.filter((a) => a.type === 'subscription' && (a.backend || 'claude') === 'claude' && accounts.displayReaderOf(a.id))
+  .map((a) => { const st = accountLoginState(accounts.subCredsPath(a.id), { backend: 'claude', oatMintedAt: a.oat ? (a.oatMintedAt || null) : null, rd: accounts.displayReaderOf(a.id) }); return [a.id, { state: st.state, usable: st.usable, since: st.since || null }]; }));
 const L = list();
 const LOGINS = loginsOf(L.accounts);
 const nameOf = (id) => L.accounts.find((a) => a.id === id)?.name;

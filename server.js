@@ -669,7 +669,7 @@ const { scheduleCtxSync, remoteCtxBaseFor } = require('./src/server/task-groups-
 // identities coexist. Design: docs/design in CLAUDE.md "Accounts".
 const { AccountManager } = require('./src/accounts');
 const accounts = new AccountManager({
-  dataDir: path.join(__dirname, 'data'),
+  dataDir: path.join(__dirname, 'data'), safeFs: () => app.locals.safeFs,   // B-360d: the list's sign-in facts read OFF the loop through the file door
   onChange: (list) => {
     const json = JSON.stringify({ type: 'accounts-updated', ...list });
     for (const client of wss.clients) if (client.readyState === WS_OPEN) client.send(json);
@@ -799,7 +799,7 @@ const usageHistory = new UsageHistory({
 const otelIngest = require('./src/server/otel-ingest.js').create({
   dataDir: path.join(__dirname, 'data'), PORT, serverSetting,
   getUsageHistory: () => usageHistory, identityGroups: () => usageIdentityGroupsCached(),
-  listAccounts: () => accounts.list().accounts || [],
+  listAccounts: () => accounts.decisionList().accounts || [],   // B-360d: OTel's org→account email fallback DECIDES (per record, no wait: rows confirmed within 10 s, else no email)
 });
 otelIngest.registerRoutes(app); bootTrace.span('otel-replay', otelIngest.replayed); bootTrace.register(app); // B-1319: the stash replay runs off the loop; GET /api/boot-trace
 const bridgeWatch = require('./src/server/bridge-watch.js').create({ activeSessions, BUFFERS_DIR, SOCKETS_DIR, reattachLocalPty, serverSetting, getOtelIngest: () => otelIngest, feedPeerCard, log: console }); // THE DEAD-BRIDGE WATCH (lane-dead-bridge): the attach-pty teardown shared by shutdown + crash, the orphan sweep, silence judged against the CLI's own witnesses (buffer file / OTel), the catch-up card

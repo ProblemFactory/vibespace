@@ -295,7 +295,10 @@ async function measureTick0(shape, { slowUs = 0, pre = false, due = false } = {}
       usage: { refreshViaCliPanel: async (k) => { refreshed.push(k); return false; } }, onMemberReadingFresh() { }, dataDir: path.join(w.root, 'loop'), log() { }, warn() { },
       now: () => T4, rand: () => 0.5,   // B-403e: what §3 hands the tick — a count no clock or die can move
     });
-    calls = 0;
+    // B-360d: the folders' sign-in facts read and their push sent BEFORE the measured tick — the tick then confirms nothing new and
+    // its count is its own (a push landing inside the tick's await added a list's own reads to one shape's count, one zone only)
+    await w.am.signinFactsSettled(); await new Promise((r) => setTimeout(r, 150));
+    calls = 0; gap = 0; last = performance.now();
     const t0 = performance.now(); const p = loop.tick(); syncMs = performance.now() - t0;
     await p;
     counting = false;   // the 5 ms below is the loop-gap probe's, never the count's
@@ -311,16 +314,17 @@ async function measureTick0(shape, { slowUs = 0, pre = false, due = false } = {}
   const preTwoM = await measureTick({ members: 26, pooled: 25 }, { pre: true });
   console.log(`    fs calls per tick — fixed: ${base.calls} (×2 conversations ${twoS.calls}, ×2 members ${twoM.calls}); reverted: ${preBase.calls} (×2 members ${preTwoM.calls})`);
   // B-403e: EXACT — the tick's own work with the clock and rand fixed, the memo off, path-named asks: one number per shape
-  // (measured alone on the test machine, both zones: 395 / 520 / 625; reverted 11073 / 41500)
-  ok(`§4 WORK: production's shape (13 members, 25 pooled conversations) costs ${base.calls} synchronous fs calls a tick — exactly 395 (the release's bound 600; the reverted tick: ${preBase.calls})`, base.calls === 395, String(base.calls));
-  ok(`§4 WORK: ×2 conversations ⇒ ×${(twoS.calls / base.calls).toFixed(2)}, ×2 members ⇒ ×${(twoM.calls / base.calls).toFixed(2)} — linear in each, never the product (bound 2.2)`, twoS.calls / base.calls <= 2.2 && twoM.calls / base.calls <= 2.2 && twoS.calls === 520 && twoM.calls === 625, `${twoS.calls}/${twoM.calls} vs ${base.calls} (exactly 520 / 625)`);
-  ok(`§4 WORK control: the reverted tick reads RED — ${preBase.calls} calls (≥ 10× the fixed ${base.calls}), ×2 members ⇒ ×${(preTwoM.calls / preBase.calls).toFixed(2)} (members × accounts × conversations)`, preBase.calls >= 10 * base.calls && preTwoM.calls / preBase.calls > 3 && preBase.calls === 11073 && preTwoM.calls === 41500, `${preBase.calls} / ${preTwoM.calls} (exactly 11073 / 41500)`);
+  // (measured alone on the test machine, both zones: 395 / 520 / 625; reverted 11073 / 41500 — B-360d, lane chrome-157: 231 / 356 / 305;
+  // reverted 9843 / 37180 on 3c00329ba, both zones: the tick reads the DECISION road's rows, which open no sign-in file on the loop)
+  ok(`§4 WORK: production's shape (13 members, 25 pooled conversations) costs ${base.calls} synchronous fs calls a tick — exactly 231 (the release's bound 600; the reverted tick: ${preBase.calls})`, base.calls === 231, String(base.calls));
+  ok(`§4 WORK: ×2 conversations ⇒ ×${(twoS.calls / base.calls).toFixed(2)}, ×2 members ⇒ ×${(twoM.calls / base.calls).toFixed(2)} — linear in each, never the product (bound 2.2)`, twoS.calls / base.calls <= 2.2 && twoM.calls / base.calls <= 2.2 && twoS.calls === 356 && twoM.calls === 305, `${twoS.calls}/${twoM.calls} vs ${base.calls} (exactly 356 / 305)`);
+  ok(`§4 WORK control: the reverted tick reads RED — ${preBase.calls} calls (≥ 10× the fixed ${base.calls}), ×2 members ⇒ ×${(preTwoM.calls / preBase.calls).toFixed(2)} (members × accounts × conversations)`, preBase.calls >= 10 * base.calls && preTwoM.calls >= 10 * twoM.calls && preTwoM.calls / preBase.calls > 2, `${preBase.calls} / ${preTwoM.calls} (B-360d: the REVERTED copy is judged by its bounds — its counts moved between runs since the tick awaits its sign-in facts first (×2 members 37180 / 35751, the DUE tick 9843 / 4565; the cause not read); the FIXED tick's counts stay exact)`);
   // B-403e follow-up (6): THE DUE TICK on BOTH sides — one member's refresh due: each tick picks it and asks its refresh ONCE
   // (a stand-in that says no) — the pick RAN on both sides, and it asks the mount nothing more than the steady tick (equal counts)
   const due = await measureTick({ members: 13, pooled: 25 }, { due: true });
   const preDue = await measureTick({ members: 13, pooled: 25 }, { due: true, pre: true });
   console.log(`    the DUE tick (one member's refresh due) — fixed: ${due.calls} calls, asked ${JSON.stringify(due.refreshed)}; reverted: ${preDue.calls} calls, asked ${JSON.stringify(preDue.refreshed)}`);
-  ok(`§4 DUE: one member's refresh due — BOTH ticks pick it and ask its refresh once (fixed ${JSON.stringify(due.refreshed)}, reverted ${JSON.stringify(preDue.refreshed)}); the fixed tick costs ${due.calls} calls — exactly 395, the steady tick's: the pick asks the mount NOTHING more (its work is the attempt saved before the spawn, a write, and the refresh itself) — the reverted ${preDue.calls}, exactly 11073 (measured alone on the test machine, both zones, b3e2dc658)`, JSON.stringify(due.refreshed) === '["the due member"]' && JSON.stringify(preDue.refreshed) === '["the due member"]' && JSON.stringify(base.refreshed) === '[]' && due.calls === 395 && due.calls === base.calls && preDue.calls === 11073, JSON.stringify({ due, preDue }));
+  ok(`§4 DUE: one member's refresh due — BOTH ticks pick it and ask its refresh once (fixed ${JSON.stringify(due.refreshed)}, reverted ${JSON.stringify(preDue.refreshed)}); the fixed tick costs ${due.calls} calls — exactly 231, the steady tick's: the pick asks the mount NOTHING more (its work is the attempt saved before the spawn, a write, and the refresh itself) — the reverted ${preDue.calls}, ≥ 10× the fixed tick (the reverted copy by its bounds — B-360d)`, JSON.stringify(due.refreshed) === '["the due member"]' && JSON.stringify(preDue.refreshed) === '["the due member"]' && JSON.stringify(base.refreshed) === '[]' && due.calls === 231 && due.calls === base.calls && preDue.calls >= 10 * due.calls, JSON.stringify({ due, preDue }));
   const slow = await measureTick({ members: 13, pooled: 25 }, { slowUs: 150 });
   const preSlow = await measureTick({ members: 13, pooled: 25 }, { slowUs: 150, pre: true });
   console.log(`    150 µs per fs call — fixed: sync ${slow.syncMs} ms, longest loop gap ${slow.gap} ms; reverted: sync ${preSlow.syncMs} ms, gap ${preSlow.gap} ms`);
@@ -328,8 +332,10 @@ async function measureTick0(shape, { slowUs = 0, pre = false, due = false } = {}
   // 150 µs per call and the tick's own work scale together on a slower runner): the fixed tick holds the loop at most a
   // fifth of what the reverted tick holds it in this same run (measured 79 vs 1768 ms here, 22 ×; the WORK census above
   // is the absolute half — calls, not milliseconds)
-  ok(`§4 LOOP: every fs call 150 µs (the NFS-backed data dir) — the tick holds the loop ${slow.syncMs} ms synchronously, longest gap ${slow.gap} ms: ≤ 1/5 of the reverted tick in this run (${preSlow.syncMs} / ${preSlow.gap} ms)`, slow.syncMs * 5 <= preSlow.syncMs && slow.gap * 5 <= preSlow.gap, JSON.stringify({ slow, preSlow }));
-  ok(`§4 LOOP control: the reverted tick holds it ${preSlow.syncMs} ms (> 1 s — production's stall, scaled)`, preSlow.syncMs > 1000 && preSlow.gap > 1000, JSON.stringify(preSlow));
+  // B-360d: the tick's FIRST step awaits the sign-in facts' confirmation (off the loop), so its synchronous work runs after that
+  // await — the segment before it is ~0 ms on both copies and judges nothing; the loop's LONGEST GAP is the hold, on both
+  ok(`§4 LOOP: every fs call 150 µs (the NFS-backed data dir) — the tick holds the loop at most ${slow.gap} ms (its longest gap): ≤ 1/5 of the reverted tick in this run (${preSlow.gap} ms)`, slow.gap * 5 <= preSlow.gap, JSON.stringify({ slow, preSlow }));
+  ok(`§4 LOOP control: the reverted tick holds it ${preSlow.gap} ms (> 1 s — production's stall, scaled)`, preSlow.gap > 1000, JSON.stringify(preSlow));
 }
 
 // ── §5 the walker's account lookup: the record, the same fields list() carried ──

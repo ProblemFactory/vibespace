@@ -153,7 +153,7 @@ export const ROWS = Object.freeze([
   ['poolCurrent', 'src/accounts.js', '_poolLoginCandidates', 'pool', 1],
   ['poolCurrent', 'src/accounts.js', '_resolveHomeSpawn', 'spend', 1],   // the member a home spawn bills
   ['poolCurrent', 'src/accounts.js', 'evaluateOnHost', 'pool', 1],
-  ['poolCurrent', 'src/accounts.js', 'list', 'routes', 1],
+  // (B-360d, lane chrome-157: list()'s poolCurrent row LEFT — the roster's pool row reads the KEPT link target, read off the loop)
   ['poolCurrent', 'src/accounts.js', 'migrateManualPools', 'pool', 1],
   ['poolCurrent', 'src/accounts.js', 'poolCurrentFor', 'pile', 1],
   ['poolCurrent', 'src/accounts.js', 'poolMemberOfSession', 'pile', 1],
@@ -558,7 +558,6 @@ export const CONSUMERS = Object.freeze({
   "heldPoolUnknown": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (the held member's origin is unknown): a gate that refuses money moves and (B-87fd) files no reading, never the member itself."},
   "holdRemoved": {"file": "src/server/usage-pool-engine.js", "fields": ["to"], "why": "Parks a removed member's conversation; heldPoolMemberFor/poolCurrent/_wallScope only gate the act; to is the verdict's parking target."},
   "linkHold": {"file": "src/server/usage-pool-engine.js", "fields": ["on", "linked", "held", "via", "viaId", "soonest", "rejector"], "why": "Returns the link member's own quotaVerdictFor verdict when blocked; its callers read only usable/blockedUntil/reason to re-arm or hold."},
-  "list": {"file": "src/accounts.js", "fields": null, "why": "The account roster: each pool row echoes poolCurrent as current/currentName for menus and the page; a roster, not a spend's account.", "gap": "The member rides two levels down (accounts[i].current / currentName) beside default*Id fields named per harness at run time, and list() has dozens of readers."},
   "listOnce": {"file": "src/server/cli-models-door.js", "fields": [], "why": "Lists a CLI's models under resolveForSpawn's spawn env for the account; returns only the store's save promise, no account."},
   "logControlProbe": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Appends one probe-log line whose sessionKey field is resolveUsageKey(session), a journal write; returns nothing."},
   "markLimitBannerNow": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "The slot resolvers pick which cache file a limit banner's wall mark is written on and the wall signal's key; returns nothing."},

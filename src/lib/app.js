@@ -2218,8 +2218,12 @@ class App {
           continue;
         }
         if (a.type === 'subscription') {
+          // B-360d: a sign-in not read yet (or that could not be read) is offered with its state in words — never left out as
+          // «signed out»; the spawn's own placement decides it fresh
+          const unread = a.facts && a.facts.state !== 'read' ? (a.facts.state === 'unreadable' ? t('sign-in could not be read') : t('sign-in not read yet')) : null;
           if (!bill.hostLogin || !onHost) {
-            if (a.loggedIn && (!onHost || allowSubRemote)) opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
+            if (unread && (!onHost || allowSubRemote)) opts.push([a.id, a.name + ' — ' + unread]);
+            else if (a.loggedIn && (!onHost || allowSubRemote)) opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
             // Long-lived token (B-211a): usable locally via the env token even
             // with no local login (expired = disabled with the reason)
             else if (bill.longLivedToken && a.oat) opts.push(oatExpiredBy(a)   // B-8703 follow: the server's last day
@@ -2238,6 +2242,7 @@ class App {
           else if (v && v.reason === 'held-identity-mismatch') opts.push([a.id, a.name + ' — ' + t('host login belongs to {email}', { email: v.dirEmail || '?' }), true]);
           // !a.localOnly: macOS Keychain-backed logins never ship (PR #23) —
           // the verdict path already blocks via reason 'local-only-mac'
+          else if (unread && allowSubRemote && !a.localOnly && hostRec?.transport !== 'dial') opts.push([a.id, a.name + ' — ' + unread]);
           else if (a.loggedIn && allowSubRemote && !a.localOnly && hostRec?.transport !== 'dial') opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
           // Not usable there — show WHY instead of silently omitting (the
           // omission is what taught users the create-then-switch workaround).

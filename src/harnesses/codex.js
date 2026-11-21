@@ -76,9 +76,9 @@ function jwtPayload(tok) {
 /** Read-only parse of a codex auth.json (never refreshes): loggedIn + auth
  *  mode + identity (email/plan) from the id_token claims. `subscriptionType`
  *  mirrors `plan` so every harness reports the same shape. */
-function parseCodexAuthFile(file) {
+function parseCodexAuthFile(file, rd = null) {   // rd: the accounts list's kept snapshot (B-360d, src/account-display-facts.js); none = the file itself
   try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    const raw = JSON.parse(rd ? rd.readText(file) : fs.readFileSync(file, 'utf-8'));
     const mode = raw.auth_mode || (raw.tokens ? 'chatgpt' : (raw.OPENAI_API_KEY ? 'apikey' : null));
     const hasTok = !!(raw.tokens?.access_token || raw.tokens?.id_token || raw.OPENAI_API_KEY);
     if (!hasTok) return { loggedIn: false };
@@ -92,7 +92,7 @@ function parseCodexAuthFile(file) {
     return { loggedIn: true, authMode: mode, email, plan, subscriptionType: plan };
   } catch { return { loggedIn: false }; }
 }
-const parseCodexAuth = (dir) => parseCodexAuthFile(path.join(dir, 'auth.json'));
+const parseCodexAuth = (dir, rd = null) => parseCodexAuthFile(path.join(dir, 'auth.json'), rd);
 
 // THE CLI config files VibeSpace may write for codex (design-harness-settings
 // §2): paths spelled ONCE in the PURE table's `files`, resolved here. Both
@@ -248,6 +248,7 @@ module.exports = {
     keychainSensitive: false,                  // plain file ⇒ pools work wherever directory symlinks do
     parseAuth: parseCodexAuth,
     parseAuthFile: parseCodexAuthFile,
+    displayFiles: (dir) => [path.join(dir, 'auth.json')],   // the file parseAuth opens — read OFF the loop for the accounts list (B-360d)
   },
   // AUTO-RESUME'S RESUME VERB (owner ruling 2026-09-08) — see the claude
   // descriptor for the law. FORM 'turn-start': the wrapper owns the app-server

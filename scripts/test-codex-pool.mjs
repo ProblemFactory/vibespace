@@ -144,6 +144,9 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   const cur = am.poolCurrent(pid);
   const idTok = `${b64u({ alg: 'none', typ: 'JWT' })}.${b64u({ email: 'cxa@example.com', 'https://api.openai.com/auth': { chatgpt_plan_type: 'plus' } })}.sig`;
   fs.writeFileSync(path.join(am.codexSubDir(cur), 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'tok-cur', id_token: idTok } }));
+  // B-360d: THE ONE SEAM — this suite wrote the sign-in files itself: each folder asked again, then the settled wait
+  for (const x of am.list().accounts) am.displayRefresh(x.id);
+  await am.displaySettled();
   const row = am.list().accounts.find((a) => a.id === pid);
   ok('a codex pool row is POOLED (pooled:true, type pooled, backend codex)', row?.pooled === true && row.type === 'pooled' && row.backend === 'codex', JSON.stringify(row));
   ok('…carries current + currentName (the member the symlink points at)', row?.current === cur && row.currentName === am.get(cur)?.name, JSON.stringify({ current: row?.current, cur }));
@@ -164,6 +167,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const { id: cs } = am.createSubscription({ name: 'ClA' });
     fs.writeFileSync(am.subCredsPath(cs), JSON.stringify({ claudeAiOauth: { accessToken: 'at', subscriptionType: 'max' } }));
     const cp = am.createPool({ name: 'ClPool' });
+    am.displayRefresh(cs); await am.displayRefresh(cp.id);   // B-360d: the seam (the suite wrote the member's file itself)
     const crow = am.list().accounts.find((a) => a.id === cp.id);
     ok("a claude pool row says hotSupported:true ('verified') with the same pool shape", crow?.pooled === true && crow.backend === 'claude' && crow.hotSupported === true && crow.current === cs && crow.loggedIn === true && crow.subscriptionType === 'max', JSON.stringify(crow));
   } else console.log('  · SKIP claude pool contrast (pools unsupported on ' + process.platform + ')');
@@ -172,7 +176,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   const acc = read('src/accounts.js');
   const listBody = acc.slice(acc.indexOf('  list() {'), acc.indexOf('// ── Subscription accounts'));
   ok('accounts.list() evaluates the pooled branch BEFORE the (now harness-neutral, S2) subscription branch', listBody.indexOf("if (type === 'pooled')") > 0 && listBody.indexOf("if (type === 'pooled')") < listBody.indexOf("if (type === 'subscription')") && !/if \(backend === 'codex'\) \{/.test(listBody));
-  ok('…the pool row reads identity via the backend\'s own auth reader and carries the registry\'s hotSwitch verdict', /this\._readAuthFor\(backend, a\.id\)/.test(listBody) && /hotSupported: capsOf\(backend\)\.hotSwitch === 'verified'/.test(listBody));
+  ok('…the pool row reads identity via the backend\'s own auth reader and carries the registry\'s hotSwitch verdict', /this\._displayOf\(a\)/.test(listBody) && /\(rd\) => creds\.parseAuth\(dir, rd\)/.test(listBody) && /hotSupported: capsOf\(backend\)\.hotSwitch === 'verified'/.test(listBody));   // B-360d: the backend's own reader, over the kept facts read off the loop
   const ma = read('src/lib/manage-agents.js');
   const count = (s, re) => (s.match(re) || []).length;
   ok('manage-agents defines ONE pool menu block (_poolMenuItems)', count(ma, /_poolMenuItems\(id, a, refresh\) \{/g) === 1);

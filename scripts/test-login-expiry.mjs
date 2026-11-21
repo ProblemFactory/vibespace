@@ -381,7 +381,7 @@ console.log('— §3c the pool row summarises the pool');
   const LIVE_S = { accessToken: 'a', refreshToken: 'r', expiresAt: RNOW + H, scopes: ['user:inference'], subscriptionType: 'max' };
   const WIPED_S = { accessToken: '', refreshToken: '', expiresAt: 0, scopes: ['user:inference'], subscriptionType: 'max' };
   // subs: [id, name, refreshTokenExpiresAt, wiped?]
-  const buildStore = (subs, { members = null, current }) => {
+  const buildStore = async (subs, { members = null, current }) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-poolrow-'));
     fs.mkdirSync(path.join(dir, 'subs'), { recursive: true });
     const accounts = [];
@@ -394,6 +394,7 @@ console.log('— §3c the pool row summarises the pool');
     fs.writeFileSync(path.join(dir, 'accounts.json'), JSON.stringify({ version: 1, accounts }));
     fs.symlinkSync(path.join(dir, 'subs', current), path.join(dir, 'subs', 'pool-1'));
     const am = new AccountManager({ dataDir: dir, platform: 'linux' });
+    await am.displaySettled();   // B-360d: the list answers from the facts read off the loop — the ONE seam
     return { am, dir, row: () => am.list().accounts.find((a) => a.id === 'pool-1') };
   };
   const cleanup = [];
@@ -403,7 +404,7 @@ console.log('— §3c the pool row summarises the pool');
   // 'logged-out', named an account dead 700 h that the pool never routes to,
   // offered to re-login it, and MASKED the one warning that mattered.
   {
-    const s = buildStore([
+    const s = await buildStore([
       ['sub-fish', 'Fish Max', RNOW - 15 * H, true],
       ['sub-nat', 'Natural Max', RNOW - 700 * H, true],
       ['sub-pf', 'ProblemFactory Max', RNOW + 9 * 24 * H],
@@ -422,7 +423,7 @@ console.log('— §3c the pool row summarises the pool');
   // The current link target counts even after ITS login dies — the pool is
   // pointed at it, so it is the pool's problem however it got there.
   {
-    const s = buildStore([
+    const s = await buildStore([
       ['sub-out', 'Wiped Max', RNOW - 700 * H, true],
       ['sub-ok', 'Good Max', RNOW + 9 * 24 * H],
     ], { members: null, current: 'sub-out' });
@@ -434,7 +435,7 @@ console.log('— §3c the pool row summarises the pool');
   // NEGATIVE CONTROL: an EXPLICIT list is a different question — the user
   // NAMED those accounts, so a signed-out one IS the pool's finding.
   {
-    const s = buildStore([
+    const s = await buildStore([
       ['sub-out', 'Wiped Max', RNOW - 700 * H, true],
       ['sub-ok', 'Good Max', RNOW + 9 * 24 * H],
       ['sub-other', 'Not A Member', RNOW - 700 * H, true],
@@ -446,7 +447,7 @@ console.log('— §3c the pool row summarises the pool');
   }
   // NEGATIVE CONTROL: a fully healthy implicit pool says nothing at all.
   {
-    const s = buildStore([
+    const s = await buildStore([
       ['sub-a', 'A', RNOW + 9 * 24 * H],
       ['sub-b', 'B', RNOW + 12 * 24 * H],
       ['sub-dead', 'Long Gone', RNOW - 700 * H, true],
@@ -469,7 +470,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
   const filed = [];                 // every inbox item the watcher tried to file
   const accounts = {
     list: () => ({ accounts: [{ id: 'sub-1', name: 'Work Max', type: 'subscription', backend: 'claude' }] }),
-    loginStateOf: (id, t) => loginState(creds({ ...LIVE, refreshTokenExpiresAt: exp }), t || clock),
+    decisionLoginStateOf: (id, t) => loginState(creds({ ...LIVE, refreshTokenExpiresAt: exp }), t || clock),
   };
   const userTodos = { add: (key, item) => { filed.push({ key, ...item }); return item; } };
   const mk = () => watch.create({ accounts, userTodos, dataDir, now: () => clock, log: () => {} });
@@ -549,7 +550,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
     const wiped = (exp) => creds({ accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: exp, scopes: ['user:inference'] });
     const deaths = { 'sub-fresh': NOW - 15 * H, 'sub-old': NOW - 116 * H, 'sub-ancient': NOW - 700 * H };
     const rows = Object.keys(deaths).map((id) => ({ id, name: id, type: 'subscription', backend: 'claude' }));
-    const acct = { list: () => ({ accounts: rows }), loginStateOf: (id, t) => loginState(wiped(deaths[id]), t) };
+    const acct = { list: () => ({ accounts: rows }), decisionLoginStateOf: (id, t) => loginState(wiped(deaths[id]), t) };
     const dir4 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lew4-'));
     const filed4 = [];
     const w6 = watch.create({ accounts: acct, userTodos: { add: (k, i) => filed4.push({ k, ...i }) }, dataDir: dir4, now: () => NOW, log: () => {} });
@@ -568,7 +569,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
     const filed5 = [];
     let clock5 = NOW;
     const w7 = watch.create({
-      accounts: { list: () => ({ accounts: [{ id: 'sub-later', name: 'Later', type: 'subscription', backend: 'claude' }] }), loginStateOf: (id, t) => loginState(wiped(later[id]), t) },
+      accounts: { list: () => ({ accounts: [{ id: 'sub-later', name: 'Later', type: 'subscription', backend: 'claude' }] }), decisionLoginStateOf: (id, t) => loginState(wiped(later[id]), t) },
       userTodos: { add: (k, i) => filed5.push(i) }, dataDir: dir5, now: () => clock5, log: () => {},
     });
     w7.sweep();                                  // ledger born here, deadline 40 h out
@@ -580,7 +581,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
     const dir6 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lew6-'));
     const filed6 = [];
     const w8 = watch.create({
-      accounts: { list: () => ({ accounts: [{ id: 'sub-just', name: 'Just', type: 'subscription', backend: 'claude' }] }), loginStateOf: (id, t) => loginState(wiped(NOW - 20 * MIN), t) },
+      accounts: { list: () => ({ accounts: [{ id: 'sub-just', name: 'Just', type: 'subscription', backend: 'claude' }] }), decisionLoginStateOf: (id, t) => loginState(wiped(NOW - 20 * MIN), t) },
       userTodos: { add: (k, i) => filed6.push(i) }, dataDir: dir6, now: () => NOW, log: () => {},
     });
     w8.sweep();
@@ -645,7 +646,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
     const dir7 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lew7-'));
     const filed7 = [];
     const w9 = watch.create({
-      accounts: { list: () => ({ accounts: [{ id: 'sub-wiped', name: 'Fish Max', type: 'subscription', backend: 'claude' }] }), loginStateOf: (id, t) => loginState(wiped(NOW + 20 * 24 * H), t) },
+      accounts: { list: () => ({ accounts: [{ id: 'sub-wiped', name: 'Fish Max', type: 'subscription', backend: 'claude' }] }), decisionLoginStateOf: (id, t) => loginState(wiped(NOW + 20 * 24 * H), t) },
       userTodos: { add: (k, i) => filed7.push(i) }, dataDir: dir7, now: () => NOW, log: () => {},
     });
     w9.sweep(); w9.sweep();
@@ -655,7 +656,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       const dir8 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lew8-'));
       const f8 = [];
       watch.create({
-        accounts: { list: () => ({ accounts: [{ id: 'sub-p', name: 'P', type: 'subscription', backend: 'claude' }] }), loginStateOf: (id, t) => loginState(wiped(NOW - 20 * MIN), t) },
+        accounts: { list: () => ({ accounts: [{ id: 'sub-p', name: 'P', type: 'subscription', backend: 'claude' }] }), decisionLoginStateOf: (id, t) => loginState(wiped(NOW - 20 * MIN), t) },
         userTodos: { add: (k, i) => f8.push(i) }, dataDir: dir8, now: () => NOW, log: () => {},
       }).sweep();
       fs.rmSync(dir8, { recursive: true, force: true });
@@ -687,7 +688,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       st.journal = [];
       st.accounts = {
         list: () => ({ accounts: [{ id, name, type: 'subscription', backend: 'claude' }] }),
-        loginStateOf: (_id, t) => ({ ...loginState(st.creds, t || st.clock), ...(st.writtenAt != null ? { writtenAt: st.writtenAt } : {}) }),
+        decisionLoginStateOf: (_id, t) => ({ ...loginState(st.creds, t || st.clock), ...(st.writtenAt != null ? { writtenAt: st.writtenAt } : {}) }),
       };
       st.mk = () => watch.create({ accounts: st.accounts, userTodos: st.todos, dataDir: dir, now: () => st.clock, log: (...a) => st.journal.push(a.join(' ')) });
       st.w = st.mk();
@@ -770,7 +771,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       const w = watch.create({
         accounts: {
           list: () => ({ accounts: [{ id: 'sub-a', name: 'A Max', type: 'subscription', backend: 'claude' }, { id: 'sub-b', name: 'B Max', type: 'subscription', backend: 'claude' }] }),
-          loginStateOf: (id, t) => loginState(state[id === 'sub-a' ? 'a' : 'b'], t || clock),
+          decisionLoginStateOf: (id, t) => loginState(state[id === 'sub-a' ? 'a' : 'b'], t || clock),
         }, userTodos: todos, dataDir: dir, now: () => clock, log: () => {},
       });
       w.sweep();
@@ -1001,8 +1002,8 @@ console.log('— §5b the immediate sweep after a login (real routes factory)');
   const call = (fn, req = {}) => {
     let code = 200, body = null;
     const res = { status(c) { code = c; return this; }, json(b) { body = b; return this; } };
-    fn({ params: {}, query: {}, body: {}, headers: {}, ...req }, res);
-    return { code, body };
+    const p = fn({ params: {}, query: {}, body: {}, headers: {}, ...req }, res);
+    return p && typeof p.then === 'function' ? p.then(() => ({ code, body })) : { code, body };   // B-360d: an async handler's answer
   };
   // A watch stand-in that only counts. The real one is exercised in §4d/§5c.
   const mkWatch = () => { const w = { n: 0, sweep() { w.n++; return { emitted: [], resolved: [{ id: 'sub-1', n: 2 }] }; } }; return w; };
@@ -1077,7 +1078,7 @@ console.log('— §5b the immediate sweep after a login (real routes factory)');
   {
     const w = mkWatch();
     const h = build({}, w);
-    call(h.post.get('/api/accounts/subscription/:id/finalize'), { params: { id: 'sub-1' } });
+    await call(h.post.get('/api/accounts/subscription/:id/finalize'), { params: { id: 'sub-1' } });
     ck('the ADD-subscription finalize sweeps once too', w.n === 1);
   }
   {
@@ -1091,13 +1092,13 @@ console.log('— §5b the immediate sweep after a login (real routes factory)');
       list: () => ({ accounts: [{ id: 'sub-other', backend: 'claude', type: 'subscription', email: 'x@example.com' }] }),
       mergeSubscription: () => ({ id: 'sub-other' }),
     }, w);
-    const r = call(h.post.get('/api/accounts/subscription/:id/finalize'), { params: { id: 'sub-1' } });
+    const r = await call(h.post.get('/api/accounts/subscription/:id/finalize'), { params: { id: 'sub-1' } });
     ck('...the auto-merge branch sweeps once before the merge and once after it', w.n === 2 && r.body?.merged === true);
   }
   {
     const w = mkWatch();
     const h = build({}, w);
-    call(h.post.get('/api/accounts/codex-subscription/:id/finalize'), { params: { id: 'cx-1' } });
+    await call(h.post.get('/api/accounts/codex-subscription/:id/finalize'), { params: { id: 'cx-1' } });
     ck('the codex device-auth completion sweeps too (a login finished — the roster moved)', w.n === 1);
   }
   {
@@ -1137,8 +1138,8 @@ console.log('— §5c the immediate sweep RETRACTS, end to end');
   const call = (fn, req = {}) => {
     let code = 200, body = null;
     const res = { status(c) { code = c; return this; }, json(b) { body = b; return this; } };
-    fn({ params: {}, query: {}, body: {}, headers: {}, ...req }, res);
-    return { code, body };
+    const p = fn({ params: {}, query: {}, body: {}, headers: {}, ...req }, res);
+    return p && typeof p.then === 'function' ? p.then(() => ({ code, body })) : { code, body };   // B-360d: an async handler's answer
   };
   const wire = (accounts, w) => {
     const { app, h } = mkApp();
@@ -1178,7 +1179,7 @@ console.log('— §5c the immediate sweep RETRACTS, end to end');
   {
     const s = world([{ id: 'sub-1', name: 'Fish Max', type: 'subscription', backend: 'claude', email: 'fish@example.com' }]);
     putCreds(s.dir, 'sub-1', { exp: Date.now() - 20 * RMIN, email: 'fish@example.com', wiped: true });
-    s.w.sweep();
+    await s.accounts.signinFactsSettled(); s.w.sweep();   // B-360d: the timer's own order
     ck('(f) the signed-out member has an OPEN inbox item', s.open().length === 1 && /is signed out/.test(s.open()[0].text));
     putCreds(s.dir, 'sub-1', { exp: Date.now() + 29 * 24 * RH, email: 'fish@example.com' }); // the owner re-logs in
     const h = wire(s.accounts, s.w);
@@ -1193,12 +1194,12 @@ console.log('— §5c the immediate sweep RETRACTS, end to end');
   {
     const s = world([{ id: 'sub-old', name: 'Fish Max', type: 'subscription', backend: 'claude', email: 'fish@example.com' }]);
     putCreds(s.dir, 'sub-old', { exp: Date.now() - 20 * RMIN, email: 'fish@example.com', wiped: true });
-    s.w.sweep();
+    await s.accounts.signinFactsSettled(); s.w.sweep();   // B-360d: the timer's own order
     ck('(g) the survivor has an OPEN warning before the Add flow starts', s.open().length === 1);
     const created = s.accounts.createSubscription({ name: 'Subscription' });
     putCreds(s.dir, created.id, { exp: Date.now() + 29 * 24 * RH, email: 'fish@example.com' });
     const h = wire(s.accounts, s.w);
-    const r = call(h.post.get('/api/accounts/subscription/:id/finalize'), { params: { id: created.id } });
+    const r = await call(h.post.get('/api/accounts/subscription/:id/finalize'), { params: { id: created.id } });
     ck('(g) the auto-merge really folded the record', r.body?.merged === true && r.body?.account?.id === 'sub-old');
     ck("(g) ...and the SURVIVOR's credential file now carries the fresh login", s.accounts.loginStateOf('sub-old').state === 'ok');
     ck('(g) the warning is RETRACTED by the time the route answers (the EFFECT, not the call count)', s.open().length === 0);
@@ -1622,7 +1623,7 @@ console.log('— §10 login × long-lived token (oat-only)');
   const filed = [], store = new Map();
   const DIED = creds({ ...LIVE, refreshTokenExpiresAt: NOW - 2 * H }); // died 2 h before the first sweep: inside the stale grace, so it is news
   const accounts = { list: () => ({ accounts: [{ id: 'sub-o', name: 'LuMax', type: 'subscription', backend: 'claude' }] }),
-    loginStateOf: (id, t) => loginState(DIED, t || clock, { oat }) };
+    decisionLoginStateOf: (id, t) => loginState(DIED, t || clock, { oat }) };
   let seq = 0;
   const userTodos = { add: (key, item) => { const it = { id: 'td' + (++seq), sessionKey: key, status: 'open', ...item }; filed.push(it); store.set(it.id, it); return it; }, get: (id) => store.get(id), setStatus: (id, s) => { store.get(id).status = s; } };
   const w = watch.create({ accounts, userTodos, dataDir, now: () => clock, log: () => {} });

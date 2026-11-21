@@ -1832,8 +1832,12 @@ export function installSessionLifecycle(App, ctx = {}) {
       // config. Say the real reason instead of the ship explanation.
       if (a.pooled) { // pooled = local-only; loggedIn reads through the symlink
         if (rHostId) return t('Pooled accounts run on this machine only');
+        if (a.facts && a.facts.state !== 'read') return null;   // B-360d: its sign-in not read yet — no claim; the spawn reads it fresh
         return a.loggedIn ? null : t('This pooled account has no target — pick a subscription in Manage agents');
       }
+      // B-360d: a sign-in not read yet (or that could not be read) refuses NOTHING here — never «never finished signing in»;
+      // the spawn's own placement reads it fresh and refuses by name if it must
+      if (a.facts && a.facts.state !== 'read') return null;
       // Long-lived token (B-211a): usable anywhere via the secret env channel
       // — locally there ARE no verdicts (vOf needs a host), and remotely this
       // covers the probe-in-flight window. Expired is the one honest refusal.

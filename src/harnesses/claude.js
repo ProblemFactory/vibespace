@@ -52,9 +52,9 @@ const path = require('path');
 /** Read-only parse of a claude subscription account dir (NEVER writes or
  *  refreshes — rotation would break the account, issue #20): loggedIn +
  *  identity + the access token IF currently valid (for the usage poll). */
-function parseClaudeAuth(dir) {
+function parseClaudeAuth(dir, rd = RR) {   // rd: the reader — run-reads (the decision roads), or the accounts list's kept snapshot (src/account-display-facts.js)
   try {
-    const raw = JSON.parse(RR.facts(path.join(dir, '.credentials.json')).text);   // B-403e: the run's ONE ask of the file
+    const raw = JSON.parse(rd.facts(path.join(dir, '.credentials.json')).text);   // B-403e: the run's ONE ask of the file
     const o = raw?.claudeAiOauth;
     if (!o?.accessToken) return { loggedIn: false };
     const valid = !o.expiresAt || Date.now() < o.expiresAt - 60000;
@@ -63,7 +63,7 @@ function parseClaudeAuth(dir) {
     let email = o.email || o.emailAddress || null, org = null;
     if (!email) {
       try {
-        const cfg = JSON.parse(RR.readText(path.join(dir, '.claude.json')));
+        const cfg = JSON.parse(rd.readText(path.join(dir, '.claude.json')));
         email = cfg?.oauthAccount?.emailAddress || null;
         org = cfg?.oauthAccount?.organizationName || null;
       } catch { }
@@ -96,13 +96,13 @@ function parseClaudeAuth(dir) {
 // existing proves the CLI has run here; the directory itself is never created.
 const SETTINGS_FILE = cliConfigFile(HARNESS_SETTINGS.claude.files.settings, { createIfMissing: 'dir-exists' });
 
-function claudeLoginState(dir, now = Date.now()) {
+function claudeLoginState(dir, now = Date.now(), rd = RR) {
   const fp = path.join(dir, '.credentials.json');
   let raw = null;
   // a MISSING file is said apart from an unreadable one (lane pool-silent-members R1): `absent` lets the row's long-lived
   // token answer for it (login-expiry withOat) — never «not logged in» for a member whose token file was taken back
   let fx = null;   // B-403e: the file's text and its write time in the run's ONE ask
-  try { fx = RR.facts(fp); raw = JSON.parse(fx.text); } catch (e) { return e && e.code === 'ENOENT' ? { ...loginState(null, now), absent: true } : loginState(null, now); }
+  try { fx = rd.facts(fp); raw = JSON.parse(fx.text); } catch (e) { return e && e.code === 'ENOENT' ? { ...loginState(null, now), absent: true } : loginState(null, now); }
   // `writtenAt` = the file's last write. It is the ONLY on-disk clock that
   // says anything about when this login session STARTED, but it is NOT the
   // login time: every access-token refresh rewrites this file while
@@ -324,6 +324,8 @@ module.exports = {
     legacyGlobalKey: '__global__',             // the pre-registry harness: its machine login's usage key; its records may omit `backend`
     keychainSensitive: true,                   // darwin keychain service name hashes the env string ⇒ pools need Linux
     parseAuth: parseClaudeAuth,
+    // the files parseAuth and loginState open — the accounts list reads them OFF the loop (B-360d, src/account-display-facts.js)
+    displayFiles: (dir) => [path.join(dir, '.credentials.json'), path.join(dir, '.claude.json')],
   },
   // AUTO-RESUME'S RESUME VERB (owner ruling 2026-09-08: auto-resume is generic,
   // "形式可以不一样 — 有些是发消息, 有些是 start turn 之类的固有指令"). This is

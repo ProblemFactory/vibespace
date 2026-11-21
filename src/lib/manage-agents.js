@@ -374,7 +374,20 @@ export function planWordsOf(shape) {
   const n = shapeName(shape);
   return !n ? '' : n.formerly ? t('{name} (formerly {old})', { name: n.name, old: n.formerly }) : n.name;
 }
+/** B-360d (主开发 r1217): a row whose sign-in facts are not read yet — the hub reads them OFF its loop — or could not be read (a
+ *  share that did not answer: the reason by name) — never «not logged in»; '' when they are read */
+export const signinUnread = (a) => !!(a && a.facts && a.facts.state !== 'read');
+export function factsWordsHtml(a) {
+  if (!signinUnread(a)) return '';
+  const f = a.facts;
+  if (f.state === 'unreadable') {
+    const why = f.reason === 'timeout' ? t('the share did not answer in time') : f.reason === 'no-reader' ? t('no file reader on this hub') : String(f.reason || '');
+    return `<span class="ob-warn">${escHtml(why ? t('sign-in could not be read ({why})', { why }) : t('sign-in could not be read'))}</span>`;
+  }
+  return `<span class="acct-linked-hint">${escHtml(t('sign-in not read yet'))}</span>`;
+}
 export function subIdentHtml(a, { email = '', hostSub = false, hostTag = '', local = true } = {}) {
+  if (signinUnread(a)) return factsWordsHtml(a) + (hostTag ? ` ${hostTag}` : '');   // B-360d: no claim until read
   // A ROW WHOSE FILE IS ITS LONG-LIVED TOKEN never signed in (acceptance r1 item 5): never «logged in» — its address and the
   // plan its stated shape names (a sign-in's or the person's), by the table's names
   const tokenFile = !!(a.loggedIn && a.loginState && a.loginState.oatFile);
@@ -1354,7 +1367,7 @@ export function installManageAgents(App, ctx = {}) {
       try {
         const list = await fetchJson('/api/accounts');
         const a = (list?.accounts || []).find((x) => x.id === created.id);
-        if (a && !a.loggedIn && !a.oat) { await fetchJson(`/api/accounts/${encodeURIComponent(created.id)}`, { method: 'DELETE' }); refresh(); }
+        if (a && !signinUnread(a) && !a.loggedIn && !a.oat) { await fetchJson(`/api/accounts/${encodeURIComponent(created.id)}`, { method: 'DELETE' }); refresh(); }   // B-360d: a sign-in not read decides nothing
       } catch {}
     });
   },
@@ -1426,7 +1439,7 @@ export function installManageAgents(App, ctx = {}) {
         const explicit = Array.isArray(p.members) && p.members.length > 0;
         const members = (explicit ? p.members : subs.map((x) => x.id)).filter((id) => id !== a.id);
         if (!members.length) { showToast(t('“{name}” is the pool’s only member — add another subscription first, or remove the pool.', { name: a.name }), { type: 'error', duration: 8000 }); return; }
-        if (!members.some((mid) => subs.find((x) => x.id === mid)?.loggedIn)) {
+        if (!members.some((mid) => { const x = subs.find((y) => y.id === mid); return !!(x && (x.loggedIn || signinUnread(x))); })) {   // B-360d: a member not read yet is no «not signed in»
           showToast(t('None of the selected members is signed in — the pool would keep billing its current (non-member) target. Sign one in first.'), { type: 'error', duration: 8000 }); return;
         }
         let r;
@@ -1515,7 +1528,7 @@ export function installManageAgents(App, ctx = {}) {
     };
     const st0 = JSON.stringify(st);
     const nowSec = () => Date.now() / 1000;
-    const stateOf = (id) => { const x = subs.find((y) => y.id === id) || {}; return memberState({ serve: x.serve || null, loggedIn: !!x.loggedIn, loginState: x.loginState || null, usage: this._accountUsage?.[id] || null, nowSec: nowSec() }); };
+    const stateOf = (id) => { const x = subs.find((y) => y.id === id) || {}; return memberState({ serve: x.serve || null, loggedIn: signinUnread(x) ? true : !!x.loggedIn, loginState: x.loginState || null, usage: this._accountUsage?.[id] || null, nowSec: nowSec() }); };
     const fmtTime = (ms) => when(ms);
     const draw = () => {
       const rows = priorityRows({ members: subs, checked: st.checked, order: st.order, mode: st.mode, current: fresh.current || null, stateOf });
@@ -1593,7 +1606,7 @@ export function installManageAgents(App, ctx = {}) {
       // review B2: a selection with ZERO signed-in members can never take over
       // — the pool would keep billing the current (now non-member) target
       // while the row still shows it, with nothing telling the user why
-      if (members && !members.some((mid) => subs.find((x) => x.id === mid)?.loggedIn)) {
+      if (members && !members.some((mid) => { const x = subs.find((y) => y.id === mid); return !!(x && (x.loggedIn || signinUnread(x))); })) {   // B-360d
         showToast(t('None of the selected members is signed in — the pool would keep billing its current (non-member) target. Sign one in first.'), { type: 'error', duration: 8000 }); return;
       }
       const priority = st.mode === 'priority' ? st.order.filter((id) => (members ? members.includes(id) : true)) : [];
@@ -1888,7 +1901,7 @@ export function installManageAgents(App, ctx = {}) {
       // Local CLI login (unless it IS a named account — that account's own
       // refresh covers the shared quota via the server-side merge).
       if ((gl.loggedIn || gl.email) && !gl.accountId) targets.push({ host: '', id: '__global__', body: { account: '__global__' } });
-      for (const a of claudeSubs) if (a.loggedIn) targets.push({ host: '', id: a.id, body: { account: a.id } });
+      for (const a of claudeSubs) if (a.loggedIn || signinUnread(a)) targets.push({ host: '', id: a.id, body: { account: a.id } });   // B-360d: the ⟳ reads a sign-in not read yet fresh (refused by name if it cannot)
       for (const h of this._agentsHostsList || []) {
         targets.push({ host: h.id, id: '__global__', body: { host: h.id } });
         for (const [aid, v] of Object.entries(this._hostVerdicts?.[h.id] || {})) {
@@ -2058,6 +2071,7 @@ export function installManageAgents(App, ctx = {}) {
       let ident = isPool
         ? (a.current ? escHtml('→ ' + (a.currentName || a.current) + (a.email ? ' · ' + a.email : ''))
           : `<span class="ob-warn">${t('no target — pick a ChatGPT account in «Members & placement…»')}</span>`)
+        : signinUnread(a) ? factsWordsHtml(a)
         : a.loggedIn
         ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
         : `<span class="ob-warn">${t('not logged in')}</span>`;
@@ -2067,12 +2081,12 @@ export function installManageAgents(App, ctx = {}) {
       const iconTitle = isPool ? t('Pooled account — one billing identity auto-switching across your ChatGPT accounts') : t('ChatGPT account — runs on this machine (or a host you log into)');
       const usageCell = isPool
         ? (a.current && this._codexAccountUsage?.[a.current] ? this._acctUsageHtml(this._codexAccountUsage[a.current], this._usageEstimates?.[a.current], null, 'codex') : '')
-        : a.loggedIn ? usageHtml(this._codexAccountUsage?.[a.id]) : '';
+        : (a.loggedIn || signinUnread(a)) ? usageHtml(this._codexAccountUsage?.[a.id]) : '';
       // Redesign (2.178.0): star + ⋯ menu, same as the Anthropic roster
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : CROWN}</span>
         <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name" title="${escHtml(a.name)}">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(isPool ? a.current : a.loggedIn) ? creditsSlotHtml(this._codexAccountUsage?.[isPool ? a.current : a.id]) : ''}${!isPool && a.loggedIn ? resetSlot(a.id) : ''}</span></span>
-        <span class="acct-usage-cell"${isPool ? (a.current ? ` data-usage-src="codex" data-usage-key="${escHtml(a.current)}"` : '') : (a.loggedIn ? ` data-usage-src="codex" data-usage-key="${escHtml(a.id)}"` : '')}>${usageCell}</span>
+        <span class="acct-usage-cell"${isPool ? (a.current ? ` data-usage-src="codex" data-usage-key="${escHtml(a.current)}"` : '') : ((a.loggedIn || signinUnread(a)) ? ` data-usage-src="codex" data-usage-key="${escHtml(a.id)}"` : '')}>${usageCell}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>
@@ -2095,7 +2109,7 @@ export function installManageAgents(App, ctx = {}) {
     if (!selectedHost) { const pvBtn = document.createElement('button'); pvBtn.className = 'agent-btn acct-add'; pvBtn.textContent = '+ ' + t('Add a third-party model…'); pvBtn.onclick = () => { done(); openProviderWizard({ backend: 'codex', onDone: refresh }); }; head.append(pvBtn); } // lane lg-providers U5
     // codex pool (P2, cold-switch): same pseudo-account model as claude's —
     // needs ≥1 logged-in ChatGPT subscription to point at
-    if (!selectedHost && codexAccts.some((x) => x.type === 'subscription' && x.loggedIn)) {
+    if (!selectedHost && codexAccts.some((x) => x.type === 'subscription' && (x.loggedIn || signinUnread(x)))) {
       const poolBtn = document.createElement('button'); poolBtn.className = 'agent-btn acct-add'; poolBtn.textContent = '+ ' + t('Add pooled account…');
       poolBtn.title = t('One account entry that internally switches between your logged-in ChatGPT accounts. Sessions pick it like any account; you (or auto-switching) choose which real account it currently uses — every switch restarts the session (Codex cannot switch hot).');
       poolBtn.onclick = () => { done(); this._createPoolDialog('codex', () => this._refreshAgents?.()); };
@@ -2156,7 +2170,7 @@ export function installManageAgents(App, ctx = {}) {
       };
       const doTest = (model = '') => { // model: a 模型… row's id (the dialog's 「测试」); the menu's Test passes none
         const openAt = this._openStartNow?.();   // B-c87d r871: the probe terminal's start is this press
-        if (!a?.loggedIn) { showToast(t('This account isn’t signed in yet — use “Add ChatGPT account…” to finish the login first.'), { type: 'error' }); return; }
+        if (!a?.loggedIn && !signinUnread(a)) { showToast(t('This account isn’t signed in yet — use “Add ChatGPT account…” to finish the login first.'), { type: 'error' }); return; }
         if (keyRow.dataset.blocked) {
           showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on “Ship subscription logins to remote hosts”.', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000, action: settingsDoor(this, 'accounts.shipSubscriptionToRemote', { label: t('Turn on…') }) || undefined });
           return;
@@ -2241,7 +2255,7 @@ export function installManageAgents(App, ctx = {}) {
       <span class="acct-key-actions"><button class="acct-icon acct-def ${!defId ? 'on' : ''}" title="${!defId ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${!defId ? STAR_F : STAR_O}</button></span></div>`;
     const lines = list.map((a) => {
       const isDef = defId === a.id;
-      const ident = a.loggedIn ? escHtml(a.email || t('logged in')) : `<span class="ob-warn">${t('not logged in')}</span>`;
+      const ident = signinUnread(a) ? factsWordsHtml(a) : a.loggedIn ? escHtml(a.email || t('logged in')) : `<span class="ob-warn">${t('not logged in')}</span>`;
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}">
         <span class="acct-type-icon" title="${escHtml(t('{login} account — runs on this machine', { login }))}">${CROWN}</span>
         <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name" title="${escHtml(a.name)}">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${readsNote(a.id)}</span></span></span>
@@ -3441,7 +3455,7 @@ export function installManageAgents(App, ctx = {}) {
         let u = null, estKey = null;
         if (selectedHost && v?.how === 'host-login') u = hostOwnReading(this._hostOwnUsage?.[selectedHost]);
         else if (selectedHost && v?.how === 'host-held') u = this._hostAccountUsage?.[selectedHost + ':' + a.id] || null;
-        else if (a.loggedIn || a.oat) { u = this._accountUsage?.[a.id]; estKey = a.id; }
+        else if (a.loggedIn || a.oat || signinUnread(a)) { u = this._accountUsage?.[a.id]; estKey = a.id; }
         return u ? { u, est: estKey ? this._usageEstimates?.[estKey] : null } : null;
       })();
       // WHERE THIS CELL'S NUMBERS COME FROM, stamped on the cell so the 8 s usage
@@ -3451,7 +3465,7 @@ export function installManageAgents(App, ctx = {}) {
         : !isSub ? null
         : (selectedHost && v?.how === 'host-login') ? { src: 'host-own', key: selectedHost }
         : (selectedHost && v?.how === 'host-held') ? { src: 'host-account', key: selectedHost + ':' + a.id }
-        : (a.loggedIn || a.oat) ? { src: 'accounts', key: a.id } : null;
+        : (a.loggedIn || a.oat || signinUnread(a)) ? { src: 'accounts', key: a.id } : null;
       // …and the PROBE NOTE (lane auto-cli-oat-unprobeable) rides the same stamp: this machine's own row only (a host's reading
       // is not this hub's probe)
       const probeNote = !selectedHost && usageStamp && usageStamp.src === 'accounts' && usageStamp.key === a.id ? acctProbeNote(a) : null;
@@ -3571,7 +3585,7 @@ export function installManageAgents(App, ctx = {}) {
       );
       // Pooled pseudo-account (local only): one switchable identity over the
       // logged-in subscriptions. Needs at least one to point at.
-      if (!selectedHost && claudeAccts.some((x) => x.type === 'subscription' && x.loggedIn)) {
+      if (!selectedHost && claudeAccts.some((x) => x.type === 'subscription' && (x.loggedIn || signinUnread(x)))) {
         items.push({ separator: true }, { label: t('Add pooled account…'), action: () => { done(); this._createPoolDialog('claude', refresh); } });
       }
       // Machine-wide login lives HERE when it's down but named accounts run
@@ -3685,7 +3699,7 @@ export function installManageAgents(App, ctx = {}) {
         // in"): dataset.hostsub/linked come from page caches that start COLD —
         // with a host selected the server resolves against live host facts
         // and errors honestly, so the client must not veto on stale data.
-        if (isSub && !a.loggedIn && !a.oat && !selectedHost && !keyRow.dataset.hostsub && !linkedHere) {
+        if (isSub && !a.loggedIn && !a.oat && !signinUnread(a) && !selectedHost && !keyRow.dataset.hostsub && !linkedHere) {   // B-360d: a sign-in not read yet is the spawn's to read
           showToast(t('This subscription isn’t signed in yet — use “Sign in with Claude (recommended)…” to finish the login first.'), { type: 'error' });
           return;
         }

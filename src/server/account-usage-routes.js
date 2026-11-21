@@ -302,14 +302,18 @@ app.get('/api/hosts/:id/accounts-status', async (req, res) => {
     // context, so keep duplicate records rather than silently selecting stale
     // credentials or orphaning the fresh service.
     if (accounts && r.hostSubEmails && r.platform && r.platform !== 'darwin') {
+      // THE BACKFILL AND THE FOLD DECIDE on the rows' emails (B-360d, 主开发 r1221 — a person's act): the sign-ins read NOW off the
+      // loop and awaited; a row whose sign-in could not be read is neither backfilled nor folded into
+      const { since } = await accounts.signinFactsSettled(null, { withinMs: 0 });
+      const readNow = (x) => !x.facts || x.facts.state === 'read';
       for (const [dirId, email] of Object.entries(r.hostSubEmails)) {
         try {
           const em = String(email).trim().toLowerCase();
-          const all = accounts.list().accounts || [];
+          const all = accounts.decisionList({ since }).accounts || [];
           const rec = all.find((x) => x.id === dirId);
           if (!rec) continue;
-          if (!rec.email) { try { accounts.setEmail(dirId, email); } catch { } }
-          const dup = all.find((x) => x.id !== dirId && oauthUsageAccount(x)
+          if (!rec.email && readNow(rec)) { try { accounts.setEmail(dirId, email); } catch { } }
+          const dup = all.find((x) => x.id !== dirId && oauthUsageAccount(x) && readNow(x)
             && String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase() === em);
           if (dup) {
             // A Darwin VibeSpace marks these records local-only even when this
@@ -815,7 +819,7 @@ const adoptFirstSignin = (cardRow, fin, id) => {
     return { madeDefault: true };
   } catch { return {}; }
 };
-app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
+app.post('/api/accounts/subscription/:id/finalize', async (req, res) => {
   try {
     const cardRow = !!(accounts.get(req.params.id) || {}).signinPending;
     const fin = accounts.finalizeSubscription(req.params.id);
@@ -838,12 +842,19 @@ app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
     // THE LOOKUP IS HOISTED ABOVE THE WAKE (r3, reproduced): it is a pure read
     // of the roster, and it is the ONLY thing that knows whether this record
     // will still exist in a moment.
-    const dupOf = (fin?.loggedIn && fin?.email && !fin.localOnly && accounts) ? (() => {
+    // THE FOLD DECIDES ON THE OTHER ROWS' EMAILS (B-360d, 主开发 r1221 — a person's act): their sign-ins read NOW off the loop
+    // and awaited (each ask bounded by the file door's deadline); a candidate whose sign-in could not be read is never folded
+    // into (both records kept, as a failed merge keeps them). After the wait the record is asked again: a concurrent poll that
+    // folded it already answered for it (mergeSubscription is synchronous — nothing runs between this check and that fold).
+    let dupOf = null;
+    if (fin?.loggedIn && fin?.email && !fin.localOnly && accounts) {
       const em = String(fin.email).trim().toLowerCase();
-      return (accounts.list().accounts || []).find((x) =>
-        x.id !== req.params.id && oauthUsageAccount(x)
+      const { since } = await accounts.signinFactsSettled(null, { withinMs: 0 });   // every sign-in account's folder, read now
+      if (!accounts.get(req.params.id)) return res.json({ success: true, ...fin, merged: true, account: null, foldedElsewhere: true });
+      dupOf = (accounts.decisionList({ since }).accounts || []).find((x) =>
+        x.id !== req.params.id && oauthUsageAccount(x) && (!x.facts || x.facts.state === 'read')
         && String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase() === em) || null;
-    })() : null;
+    }
     // The wake is FINGERPRINT-GATED where the sweep is not: this route is
     // polled every 3 s for 5 minutes and the sweep is local file reads while
     // the wake spawns a CLI panel.

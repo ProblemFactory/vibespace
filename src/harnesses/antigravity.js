@@ -133,8 +133,8 @@ function seedHomeRoot(dir, real = machineHome()) {
   }
 }
 /** Signed in? A STAT of the login file — never a read (it is the account's secret). */
-function parseAgyAuthDir(dir) {
-  let st = null; try { st = fs.statSync(path.join(dir, TOKEN_REL)); } catch { st = null; }
+function parseAgyAuthDir(dir, rd = null) {   // rd: the accounts list's kept snapshot (B-360d); none = the file itself
+  let st = null; try { st = rd ? rd.stat(path.join(dir, TOKEN_REL)) : fs.statSync(path.join(dir, TOKEN_REL)); } catch { st = null; }
   return st && st.isFile() && st.size > 0 ? { loggedIn: true, authMode: 'google-login', email: null, subscriptionType: null } : { loggedIn: false };
 }
 const shq = (v) => "'" + String(v).replace(/'/g, "'\\''") + "'";
@@ -228,6 +228,7 @@ const creds = {
   spawnForm: 'isolated-home',                // accounts.resolveForSpawn: spawnEnv(the account's root)
   keychainSensitive: false,
   parseAuth: parseAgyAuthDir,
+  displayFiles: (dir) => [path.join(dir, TOKEN_REL)],   // the file parseAuth stats — read OFF the loop for the accounts list (B-360d)
   parseAuthFile: (file) => parseAgyAuthDir(path.resolve(path.dirname(file), '..', '..')),
   /** The machine's own login for the Agents panel (GET /api/backend-status) — a stat, never a spawn, never a read.
    *  No file may still mean signed in: with a session bus agy keeps the machine login in the OS keyring (unknown). */

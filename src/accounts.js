@@ -15,6 +15,11 @@
  * how the CLI's own trust list (customApiKeyResponses) fingerprints keys.
  */
 const fs = require('fs');
+const DISPLAY = require('./account-display-facts.js'); // B-360d (lane chrome-157): the list's sign-in facts, read OFF the loop and kept a folder
+// B-360d, THE DECISION ROAD's bound (主开发 r1221): a DECIDER counts a folder's kept sign-in facts only while the snapshot that read
+// or confirmed them (each sign-in file's stamp: size + time) started within this — a sign-in changed under the hub from a terminal is
+// seen by a decider within it; a confirmation is asked behind the ask at half of it
+const DECIDE_WITHIN_MS = 10000;
 const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 const { get: harnessOf, list: listHarnesses } = require('./harnesses'); // S2: per-harness credential mechanics live on the descriptor (creds)
 const path = require('path');
@@ -85,7 +90,7 @@ function localFacetOf(caps, now = Date.now()) {
 const { publicNameOf, maskDefaultKeyName } = require('./key-names.js');
 
 class AccountManager {
-  constructor({ dataDir, onChange, onSessionLinks, platform = process.platform, oatFixture = null, mintFixture = null }) {
+  constructor({ dataDir, onChange, onSessionLinks, platform = process.platform, oatFixture = null, mintFixture = null, safeFs = null, displayMaxAgeMs = 60000 }) {
     this.dataDir = dataDir;
     this._file = path.join(dataDir, 'accounts.json');
     this._keyFile = path.join(dataDir, '.accounts-key');
@@ -126,11 +131,23 @@ class AccountManager {
     this._oatFileFacts = new Map(); // id → the last verdict (the row's door)
     this._oatChain = Promise.resolve(); // THE ONE QUEUE of the oat's acts on member credential files (verify r1 F13 / F7)
     this._oatSweeps = new Set();       // sweeps in flight (oatFileSettled waits for them too)
+    // B-360d (lane chrome-157; 主开发 r1201 / r1217): THE LIST READS NO FILE ON THE LOOP. Each account folder's DISPLAY facts (who it
+    // is, its sign-in state) are read OFF the loop through the tree's file door (SafeFs: a worker, a deadline a call) and KEPT a
+    // folder; list(), rowOf() and their broadcast answer from what is kept, a row in one of three honest states (read with its age,
+    // not read yet, could not be read by name). The DECISION readers (_placeable, evaluateOnHost, the finalizes) read fresh.
+    this._displayMaxAgeMs = displayMaxAgeMs;
+    // the file door: the hub hands its own (server.js); a store built with none (a tool, a suite) makes its OWN — the same door, a
+    // worker thread with its deadline (one, unref'd: it never holds a process open), built at the first read. ONE road either way.
+    let ownDoor = null;
+    const door = safeFs != null ? (typeof safeFs === 'function' ? safeFs : () => safeFs)
+      : () => ownDoor || (ownDoor = new (require('./safe-fs.js').SafeFs)({ poolSize: 1, name: 'accounts-door' }));
+    this._display = DISPLAY.create({ safeFs: door, onLanded: () => this._notifyRowsSoon() });
     this._state = { version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [] };
     this._load();
     // Console-login scratch dirs (con-*) are transient; drop any abandoned by a
     // login that never completed before a prior restart.
     try { for (const d of fs.readdirSync(this._subsDir)) if (/^con-/.test(d)) fs.rmSync(path.join(this._subsDir, d), { recursive: true, force: true }); } catch { }
+    this._displayAll();   // B-360d: the start — every account folder read once, off the loop (each row «not read yet» until it lands)
   }
 
   _acctType(a) { return a.type || 'api'; } // legacy records (no type) = API key
@@ -207,6 +224,35 @@ class AccountManager {
       // (the token cannot reach it), so the pool's row tells the slot truth —
       // and names the member's token, so the chip can say why it does not help
       const st = this.loginStateOf(m.id, now, { slot: true });
+      const oat = !loginUsable(st) ? this._oatFact(this.get(m.id)) : null;
+      if (oat && oat.validUntil > now) {
+        st.oatValidUntil = oat.validUntil;
+        // why the token is not in its folder (lane pool-oat-materialize): this CLI unmeasured / no subscription shape
+        const f = this._oatFileFacts.get(m.id);
+        const why = f && (f.reason || f.verdict);
+        if (why && OAT_FILE_REFUSALS.includes(why)) st.oatFileRefused = why;
+        if (why === 'no-scopes') st.oatChoose = this.oatShapeOffer().choices.length > 0;   // lane oat-add-door: the guided door's way ② — offered here or not
+      }
+      out.members.push({ id: m.id, name: m.name, state: st.state, refreshExpiresAt: st.refreshExpiresAt, msLeft: st.msLeft });
+      if (!worst || loginRank(st) > loginRank(worst.st) || (loginRank(st) === loginRank(worst.st) && (st.msLeft ?? Infinity) < (worst.st.msLeft ?? Infinity))) worst = { m, st };
+    }
+    if (!worst) return out;
+    // worstOatValidUntil = THE ESCAPE (a dead slot whose row holds a valid token); a materialized
+    // slot carries its own oatValidUntil but serves, so it is never the escape
+    return { ...worst.st, worstId: worst.m.id, worstName: worst.m.name, ...(worst.st.oatValidUntil && !loginUsable(worst.st) ? { worstOatValidUntil: worst.st.oatValidUntil } : {}), ...(worst.st.oatFileRefused ? { worstOatFileRefused: worst.st.oatFileRefused, oatFileCli: this.oatFileCaps().cli } : {}), members: out.members };
+  }
+  /** poolLoginState's display twin (B-360d): the members' kept facts, never a file */
+  poolLoginStateShown(poolId, now = Date.now()) {
+    const out = { ...LOGIN_UNKNOWN(now), members: [] };
+    let members = [];
+    try { members = this._poolLoginCandidatesShown(poolId); } catch { return out; }
+    if (!members.length) return out;
+    let worst = null;
+    for (const m of members) {
+      // the SLOT's verdict: a pooled session reads the member's credential file
+      // (the token cannot reach it), so the pool's row tells the slot truth —
+      // and names the member's token, so the chip can say why it does not help
+      const st = this._loginStateShown(this.get(m.id), now, { slot: true });
       const oat = !loginUsable(st) ? this._oatFact(this.get(m.id)) : null;
       if (oat && oat.validUntil > now) {
         st.oatValidUntil = oat.validUntil;
@@ -361,13 +407,19 @@ class AccountManager {
   // Sanitized — NEVER includes key material. Subscription accounts add a
   // read-only identity probe (email/plan/loggedIn) from their creds dir.
   list() {
-    let offerOnce = null;   // the guided door's offer, read once per roster (lane oat-add-door: oatShapeOffer)
     let providerRows = [];
     try { providerRows = this._providerRows ? this._providerRows() || [] : []; } catch { providerRows = []; }
     return {
       providerRows,   // lane lg-providers U5: BESIDE `accounts`, never in it (the hub's account readers see records only)
       ...Object.fromEntries(this._defaultIdFields().map((f) => [f, this._state[f] || null])), // defaultAccountId, defaultCodexAccountId, defaultAntigravityAccountId …
-      accounts: this._state.accounts.map((a) => {
+      accounts: this._rowsOf(this._state.accounts),
+      tailsGen: this.tailsGen(),   // B-ee0a: the page reuses its read of the tails only for the same word
+    };
+  }
+  /** THE LIST'S ROWS for `accs`, from the kept display facts only (B-360d): no file is opened here */
+  _rowsOf(accs) {
+    let offerOnce = null;   // the guided door's offer, read once per roster (lane oat-add-door: oatShapeOffer)
+    return accs.map((a) => {
         const type = this._acctType(a);
         const backend = this._acctBackend(a);
         const base = { id: a.id, name: publicNameOf(a), type, backend, source: a.source, originHost: a.originHost || null, note: a.note || null, hostLogins: a.hostLogins || null, createdAt: a.createdAt, localOnly: this._localOnlyClaudeSub(a), ...(a.serve ? { serve: { ...a.serve }, inPools: this.poolsWithMember(a.id).length > 0 } : {}) }; // inPools: a lapse's words differ for an account no pool lists (verify r2 ③)
@@ -380,13 +432,15 @@ class AccountManager {
         // own auth reader; hot-switch support is the capability registry's
         // verdict (codex: 'impossible' — the client hides the toggle).
         if (type === 'pooled') {
-          const cur = this.poolCurrent(a.id);
-          const info = this._readAuthFor(backend, a.id); // resolves through the symlink
+          // B-360d: the KEPT facts of the pool's folder (its link and its current member's files, read off the loop) — no file here
+          const d = this._displayOf(a);
+          const cur = this._poolCurrentShown(a.id);
+          const info = (d.state === 'read' && d.auth) || {};
           const curAcct = cur ? this.get(cur) : null;
           // loginState on a pool = its MEMBERS' worst (a pool has no login of
           // its own); the row names the member that earned it so the user can
           // act without opening the pool's Members dialog.
-          return { ...base, pooled: true, loggedIn: !!info.loggedIn, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, crossProvider: a.crossProvider === 'allow' ? 'allow' : 'never', currentProvider: cur ? this._providerBrief(this.memberProviderOf(cur)) : null, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: !this._credsOf(backend).keychainSensitive || this.poolSupported(), loginState: this.poolLoginState(a.id) };
+          return { ...base, pooled: true, facts: this._factsOf(d), loggedIn: d.state === 'read' ? !!info.loggedIn : null, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembersShown(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, crossProvider: a.crossProvider === 'allow' ? 'allow' : 'never', currentProvider: cur ? this._providerBrief(this.memberProviderOf(cur)) : null, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: !this._credsOf(backend).keychainSensitive || this.poolSupported(), loginState: this.poolLoginStateShown(a.id) };
         }
         if (type === 'subscription') {
           // ONE branch for every harness (S2): the descriptor's parseAuth reads
@@ -394,11 +448,12 @@ class AccountManager {
           // (codex), long-lived-token meta only where the harness has one.
           // a.email = manual backfill (setEmail) for dirs whose login never
           // wrote the identity file; the dir's own identity wins when present.
-          const info = this._readAuthFor(backend, a.id);
+          const d = this._displayOf(a);   // B-360d: the folder's KEPT facts — no file is opened here
+          const info = (d.state === 'read' && d.auth) || {};
           // loginState (2026-09-07): the LOGIN SESSION's own deadline, so every
           // surface can warn BEFORE the refresh fails instead of after a dead
           // turn. 'unknown' where the harness declares no reader.
-          const row = { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, ...(info.rateLimitTier ? { rateLimitTier: info.rateLimitTier } : {}), loginState: this.loginStateOf(a.id), ...(info.authMode !== undefined ? { authMode: info.authMode } : {}), ...(this._credsOf(backend).longLivedToken ? this._oatMeta(a) : {}) };
+          const row = { ...base, facts: this._factsOf(d), loggedIn: d.state === 'read' ? !!info.loggedIn : null, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, ...(info.rateLimitTier ? { rateLimitTier: info.rateLimitTier } : {}), loginState: this._loginStateShown(a), ...(info.authMode !== undefined ? { authMode: info.authMode } : {}), ...(this._credsOf(backend).longLivedToken ? this._oatMeta(a) : {}) };
           if (row.oat) { const door = this._oatFileDoor(a, row.loginState); if (door) row.oatFile = door; }
           // THE QUOTA PROBE (lane auto-cli-oat-unprobeable): the SAME verdict the auto-cli loop and the probe door read, off
           // the row's own facts — an oat-only row is probed through the token in its folder when the token carries
@@ -426,9 +481,170 @@ class AccountManager {
           return row;
         }
         return base;   // NO key tail (B-ba7d, the owner's decision 2026-11-18): this list and its push reach every client and every agent-readable mirror — the person's read is keyTails() (POST /api/accounts/tails)
-      }),
-      tailsGen: this.tailsGen(),   // B-ee0a: the page reuses its read of the tails only for the same word
-    };
+    });
+  }
+  /** ONE row by its id (B-360d: the callers that built a whole list for one row) — null = no such account */
+  rowOf(id) { const a = this.get(id); return a ? this._rowsOf([a])[0] : null; }
+  // ── B-360d: the display facts (src/account-display-facts.js) ─────────────
+  /** account `a`'s folder's kept facts — a folder not read yet, or read longer ago than the stated age, is asked of the keeper
+   *  (off the loop) and the caller goes on with what is kept: { state: 'read', at, auth, target, rd } | { state: 'unread' } |
+   *  { state: 'unreadable', at, reason } */
+  _displayOf(a) {
+    if (this._decideSince != null) return this._factsSince(a, this._decideSince);   // the decision road's rows (decisionList / decisionRowOf)
+    const dir = this._acctDir(this._acctBackend(a), a.id);
+    if (this._display.stale(dir, this._displayMaxAgeMs)) this._displayRead(a);
+    return this._display.get(dir);
+  }
+  _displayFilesOf(a) { const be = this._acctBackend(a), creds = this._credsOf(be), dir = this._acctDir(be, a.id); return { creds, dir, files: typeof creds.displayFiles === 'function' ? creds.displayFiles(dir) : [] }; }
+  _displayRead(a, { after = 0, ensure = false } = {}) {
+    try {
+      const { creds, dir, files } = this._displayFilesOf(a);
+      const p = this._display[ensure ? 'ensure' : 'refresh'](dir, files, (rd) => creds.parseAuth(dir, rd), { link: this._acctType(a) === 'pooled', after });
+      p.catch(() => { });
+      return p;
+    } catch { return Promise.resolve(null); }
+  }
+  _displayAll() { for (const a of this._state.accounts) { const ty = this._acctType(a); if (ty === 'subscription' || ty === 'pooled') this._displayRead(a); } }
+  /** A WRITER THAT KNOWS THE FACTS SETS THEM IN ITS OWN STEP (主开发 r1217): a person's own sign-in or re-authorisation has just
+   *  parsed this folder through run-reads — the same run's answers seed the kept facts, so the next list shows the row at once;
+   *  an off-loop read then only confirms */
+  _displaySeed(a) {
+    try { const { creds, dir, files } = this._displayFilesOf(a); this._display.seed(dir, files, (rd) => creds.parseAuth(dir, rd), RR); this._displayRead(a); } catch { }
+  }
+  /** the switch: the pool's folder now shows `subId`'s files — seeded from the member the switch has just checked, target set */
+  _displaySeedPool(pool, subId) {
+    try {
+      const m = this.get(subId); if (!m) return;
+      const { creds, dir: mdir, files } = this._displayFilesOf(m);
+      this._display.seed(this._acctDir(this._acctBackend(pool), pool.id), files, (rd) => creds.parseAuth(mdir, rd), RR, { target: subId });
+      this._displayRead(pool);
+    } catch { }
+  }
+  /** a removal: the folder's kept facts go with it */
+  _displayForget(a) { try { this._display.drop(this._acctDir(this._acctBackend(a), a.id)); } catch { } }
+  /** every display read in flight landed (the suites' ONE seam; a clean shutdown) */
+  displaySettled() { return this._display.settled(); }
+  /** ask a folder again now — a suite that wrote a sign-in file itself (the ONE seam, then displaySettled) */
+  displayRefresh(id) { const a = this.get(id); if (a) this._displayRead(a, { after: this._display.clock() }); return this._display.settled(); }   // a read that started before the suite's own write is chained once
+  /** a landed read that changed what is kept: ONE broadcast for the landings of 100 ms (a start lands many folders together) */
+  _notifyRowsSoon() {
+    if (this._rowsSoon) return;
+    this._rowsSoon = true;
+    const t = setTimeout(() => { this._rowsSoon = false; try { this._onChange(this.list()); } catch { } }, 100);   // a start's landings, ~100 ms apart at most, ride one push
+    if (t.unref) t.unref();
+  }
+  // ── B-360d: THE DECISION ROAD over the kept facts (主开发 r1221 / r1231) ──────────────────────────────────────────────────────
+  // DISPLAY reads list() / rowOf() (kept facts, three states). A DECIDER reads these: the facts count only when the snapshot
+  // that read or confirmed them started at or after its bound — a timer decider awaits signinFactsSettled first, a person's act
+  // asks it with withinMs 0 (read now), a per-record one asks signinFacts without a wait. «unknown» DECIDES NOTHING.
+  _decideSinceOf(opts) { return opts && Number.isFinite(opts.since) ? opts.since : Date.now() - (opts && Number.isFinite(opts.withinMs) ? opts.withinMs : DECIDE_WITHIN_MS); }
+  /** account `a`'s kept facts as a decider may use them (read or unreadable since `since`, else «unread»); a confirmation is asked
+   *  behind once the kept one is older than half the bound (the next ask finds it) */
+  _factsSince(a, since) {
+    const dir = this._acctDir(this._acctBackend(a), a.id), half = (Date.now() + since) / 2;
+    if (!this._display.askedSince(dir, half)) this._displayRead(a, { after: half, ensure: true });
+    const d = this._display.get(dir);
+    return (d.state === 'read' || d.state === 'unreadable') && d.from >= since ? d : { state: 'unread' };
+  }
+  /** THE DECISION ACCESSOR (sync): { state: 'read', auth, at, from, target } when confirmed within the bound (`opts.since`, an
+   *  instant, or `opts.withinMs`, default DECIDE_WITHIN_MS) — else { state: 'unknown', why: 'not-read-yet' | 'unreadable', reason } */
+  signinFacts(id, opts = {}) {
+    const a = this.get(id), ty = a ? this._acctType(a) : null;
+    if (ty !== 'subscription' && ty !== 'pooled') return { state: 'unknown', why: a ? 'no-sign-in' : 'no-account' };
+    const d = this._factsSince(a, this._decideSinceOf(opts));
+    if (d.state === 'read') return { state: 'read', auth: d.auth || {}, at: d.at, from: d.from, target: d.target || null };
+    return { state: 'unknown', why: d.state === 'unreadable' ? 'unreadable' : 'not-read-yet', ...(d.reason ? { reason: d.reason } : {}) };
+  }
+  /** THE DECISION ACCESSOR (async): the named accounts' folders (default every sign-in account) confirmed OFF the loop — a snapshot
+   *  started at or after (the ask − withinMs; 0 = a person's act: read now), awaited, each ask bounded by the file door's deadline —
+   *  → { since, facts: Map(id → signinFacts) }; pass `since` on to decisionList / decisionRowOf / decisionLoginStateOf */
+  async signinFactsSettled(ids = null, { withinMs = DECIDE_WITHIN_MS } = {}) {
+    // withinMs 0 = a read that starts AFTER this ask: the keeper's strictly increasing stamp (a write and the ask can share a ms)
+    const since = withinMs > 0 ? Date.now() - withinMs : this._display.clock();
+    const accs = (Array.isArray(ids) ? ids.map((id) => this.get(id)) : this._state.accounts)
+      .filter((a) => a && (this._acctType(a) === 'subscription' || this._acctType(a) === 'pooled'));
+    await Promise.all(accs.map((a) => this._displayRead(a, { after: since, ensure: true })));
+    const facts = new Map();
+    for (const a of accs) facts.set(a.id, this.signinFacts(a.id, { since }));
+    return { since, facts };
+  }
+  /** the list's rows as a DECIDER reads them: the same rows over the decision road's facts (a row not confirmed since the bound
+   *  carries facts { state: 'unread' } and no sign-in field) */
+  decisionList(opts = {}) { const was = this._decideSince; this._decideSince = this._decideSinceOf(opts); try { return this.list(); } finally { this._decideSince = was; } }
+  decisionRowOf(id, opts = {}) { const was = this._decideSince; this._decideSince = this._decideSinceOf(opts); try { return this.rowOf(id); } finally { this._decideSince = was; } }
+  /** loginStateOf on the decision road — null = unknown (decides nothing: no notice, no retraction) */
+  decisionLoginStateOf(id, now = Date.now(), opts = {}) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'subscription') return null;
+    const was = this._decideSince; this._decideSince = this._decideSinceOf(opts);
+    try { return this._displayOf(a).state === 'read' ? this._loginStateShown(a, now, opts) : null; } finally { this._decideSince = was; }
+  }
+  /** the kept facts' reader of account `id`'s folder (run-reads' shape, scrubbed) — null = not read yet / unreadable: no claim */
+  displayReaderOf(id) { const a = this.get(id); if (!a) return null; const d = this._displayOf(a); return d.state === 'read' ? d.rd : null; }
+  /** the facts a row carries: { state: 'read', at } | { state: 'unread' } | { state: 'unreadable', at, reason } */
+  _factsOf(d) { return d.state === 'read' ? { state: 'read', at: d.at } : d.state === 'unreadable' ? { state: 'unreadable', at: d.at, reason: d.reason } : { state: 'unread' }; }
+  /** loginStateOf's display twin: the harness's own reader over the KEPT, scrubbed snapshot, its clock the caller's; a folder
+   *  not read (or unreadable) is LOGIN_UNKNOWN — «no claim», which every consumer treats as «do not block», never «expired» */
+  _loginStateShown(a, now = Date.now(), opts = {}) {
+    try {
+      if (!a) return LOGIN_UNKNOWN(now);
+      const type = this._acctType(a);
+      if (type === 'pooled') return this.poolLoginStateShown(a.id, now);
+      if (type !== 'subscription') return LOGIN_UNKNOWN(now);
+      const fn = this._credsOf(this._acctBackend(a))?.loginState;
+      if (typeof fn !== 'function') return LOGIN_UNKNOWN(now);
+      const d = this._displayOf(a);
+      if (d.state !== 'read') return { ...LOGIN_UNKNOWN(now), facts: d.state, ...(d.reason ? { factsReason: d.reason } : {}) };
+      const info = fn(this._acctDir(this._acctBackend(a), a.id), now, d.rd);
+      return opts && opts.slot ? info : withOat(info, this._oatFact(a), now);
+    } catch { return LOGIN_UNKNOWN(now); }
+  }
+  /** _placeable's display twin (the member a pool's dialog offers): the same rule over the kept facts; a member not read yet is
+   *  offered, its row saying so — never dropped as «signed out» */
+  _placeableShown(x) {
+    const d = this._displayOf(x);
+    if (d.state !== 'read') return true;
+    const info = d.auth || {};
+    if (!info.loggedIn) return false;
+    if (!info.oatFile) return true;
+    if (this.oatCheckOf(x.id)?.state === 'mismatch') return false;
+    const c = this.oatFileCaps();
+    return !c.known || c.ok;   // the same rule as _placeable's, its own spelling (that line is a mutant anchor of test-oat-materialize)
+  }
+  /** poolMembers' display twin */
+  poolMembersShown(id) {
+    const a = this.get(id);
+    const be = this._acctBackend(a) || 'claude';
+    const all = this._state.accounts.filter((x) => this._acctBackend(x) === be && this._acctType(x) === 'subscription');
+    const wanted = Array.isArray(a?.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;
+    return wanted.filter((x) => this._placeableShown(x)).map((x) => ({ id: x.id, name: x.name, provider: this._providerBrief(this.memberProviderOf(x.id)), facts: this._factsOf(this._displayOf(x)) }));
+  }
+  /** poolCurrent's display twin: the pool folder's link target, as the keeper read it */
+  _poolCurrentShown(id) {
+    const a = this.get(id); if (!a) return null;
+    const d = this._displayOf(a);
+    return d.state === 'read' && d.target && this.get(d.target) ? d.target : null;
+  }
+  /** _poolLoginCandidates' display twin */
+  _poolLoginCandidatesShown(poolId) {
+    const a = this.get(poolId);
+    const explicit = Array.isArray(a?.members) && a.members.length ? a.members : null;
+    const out = new Map();
+    if (explicit) {
+      const be = this._acctBackend(a);
+      for (const x of this._state.accounts) {
+        if (this._acctBackend(x) !== be || this._acctType(x) !== 'subscription') continue;
+        if (explicit.includes(x.id)) out.set(x.id, { id: x.id, name: x.name });
+      }
+    } else {
+      for (const m of this.poolMembersShown(poolId)) out.set(m.id, { id: m.id, name: m.name });
+    }
+    const cur = this._poolCurrentShown(poolId);
+    if (cur && !out.has(cur)) {
+      const c = this.get(cur);
+      if (c && this._acctType(c) === 'subscription') out.set(cur, { id: cur, name: c.name });
+    }
+    return [...out.values()];
   }
   /** (B-ba7d) the name an account is SHOWN by (publicNameOf) — null for an unknown id */
   nameShownOf(id) { const a = this.get(id); return a ? publicNameOf(a) : null; }
@@ -464,6 +680,7 @@ class AccountManager {
     const a = { id, name: String(name || '').trim().slice(0, 60) || 'Subscription', type: 'subscription', source: 'login', createdAt: Date.now(), ...(signinPending ? { signinPending: Date.now() } : {}) };
     this._state.accounts.push(a);
     this._save();
+    this._displaySeed(a);   // B-360d: the writer made this folder — its facts set in the same step (the row says «not signed in», never «not read yet»)
     this._notify();
     return { id, dir: this.subDir(id) };
   }
@@ -556,11 +773,13 @@ class AccountManager {
       && norm(x.email || (String(x.name || '').includes('@') ? x.name : '')) === freshEmail);
     if (other) {
       moveLogin(this.subDir(other.id));
+      this._displaySeed(this.get(other.id)); this._displaySeed(a);   // B-360d: both folders just changed — their facts set in this step
       this._notify();
       return { outcome: 'moved', movedTo: { id: other.id, name: other.name }, freshEmail: fresh.email, keptName: a.name };
     }
     const created = this.createSubscription({ name: (fresh.email || 'Subscription').slice(0, 60) });
     moveLogin(this.subDir(created.id));
+    this._displaySeed(a);   // B-360d: this record's folder lost its login in this step (the created one is seeded by its finalize)
     const finalized = this.finalizeSubscription(created.id);
     this._notify();
     return { outcome: 'split', account: finalized, freshEmail: fresh.email, keptName: a.name };
@@ -576,6 +795,7 @@ class AccountManager {
       this._save();
     }
     if (info.loggedIn && a.signinPending) { delete a.signinPending; this._save(); } // the card's row logged in: an account now, never swept
+    this._displaySeed(a);   // B-360d: the person's own sign-in — the row right at once
     this._notify();
     const { accessToken: _accessToken, ...publicInfo } = info;
     return {
@@ -600,6 +820,7 @@ class AccountManager {
     const a = { id, name: String(name || '').trim().slice(0, 60) || 'ChatGPT', type: 'subscription', backend: 'codex', source: 'login', createdAt: Date.now() };
     this._state.accounts.push(a);
     this._save();
+    this._displaySeed(a);   // B-360d: the writer made this folder — its facts set in the same step (the row says «not signed in», never «not read yet»)
     this._notify();
     return { id, dir: this.codexSubDir(id) };
   }
@@ -618,6 +839,7 @@ class AccountManager {
     const a = { id, name: String(name || '').trim().slice(0, 60) || c.loginLabel, type: 'subscription', backend, source: 'login', createdAt: Date.now() };
     this._state.accounts.push(a);
     this._save();
+    this._displaySeed(a);   // B-360d: the writer made this folder — its facts set in the same step (the row says «not signed in», never «not read yet»)
     this._notify();
     return { id, dir, loginCmd: c.loginCommand(dir) };
   }
@@ -641,6 +863,7 @@ class AccountManager {
     if (!a || this._acctType(a) !== 'subscription' || this._credsOf(be)?.spawnForm !== 'isolated-home') throw new Error('not an isolated-login account');
     const info = this._readAuthFor(be, id);
     if (info.loggedIn && info.email && (!a.name || a.name === this._credsOf(be).loginLabel)) { a.name = String(info.email).slice(0, 60); this._save(); }
+    this._displaySeed(a);   // B-360d: the person's own sign-in — the row right at once
     this._notify();
     return { id, ...info, name: a.name };
   }
@@ -670,6 +893,7 @@ class AccountManager {
       a.name = (info.email || (info.plan ? 'ChatGPT ' + info.plan : 'ChatGPT')).slice(0, 60);
       this._save();
     }
+    this._displaySeed(this.get(id));   // B-360d: the person's own sign-in — the row right at once
     this._notify();
     return { id, ...info, name: a.name };
   }
@@ -857,8 +1081,9 @@ class AccountManager {
     this._save();
     this._oatCheckReplaced(fromId, foldedCheck, 'the row was folded into ' + (into.name || intoId));
     if (into.oatEnc) this.syncOatFile(intoId).catch(() => { }); // ours is re-derived on the survivor
+    this._displayForget(from); this._displaySeed(into);   // B-360d: the folded folder is gone; the survivor's facts are what the fold just wrote
     this._notify();
-    return this.list().accounts.find((x) => x.id === intoId) || null;
+    return this.rowOf(intoId);   // B-360d: one row by its id, never a whole list
   }
 
   /** Write-through from a host identity probe (2.204.0): remember which
@@ -1053,7 +1278,7 @@ class AccountManager {
     const v = String(note || '').trim().slice(0, 120);
     if (v) a.note = v; else delete a.note;
     this._save();
-    return this.list().accounts.find((x) => x.id === id) || null;
+    return this.rowOf(id);   // B-360d: one row by its id, never a whole list
   }
 
   add({ name, key, source = 'manual', originHost = null } = {}) {
@@ -1131,6 +1356,7 @@ class AccountManager {
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
     if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this._acctDir(this._acctBackend(a), id)); } catch { } try { fs.rmSync(this.poolLinksDir(id), { recursive: true, force: true }); } catch { } } // unlink ONLY — the target is a real account's dir; the links dir holds only symlinks (rm never follows)
     else if (this._acctType(a) === 'subscription') { try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { } }
+    this._displayForget(a);   // B-360d: the folder's kept facts go with it
     this._save();
     this._notify();
   }
@@ -1582,7 +1808,10 @@ class AccountManager {
   /** ONE QUEUE for every act on a member's credential file (F13 + F7): a setOat, a clearOat and a sweep row
    *  never interleave on one file. → a promise of the row's result. */
   syncOatFile(id, opts = {}) {
-    const run = this._oatChain.then(() => this._syncOatFileNow(id, opts));
+    // B-360d: THE WRITER SETS THE FACTS IN ITS OWN STEP — the token file was written: the folder is read again off the loop (a
+    // read that started after the write) and the act ends when it lands, so whoever awaits the act reads the row it left
+    const again = () => { const a = this.get(id); return a ? this._displayRead(a, { after: this._display.clock() }) : null; };
+    const run = this._oatChain.then(() => this._syncOatFileNow(id, opts)).then(async (r) => { await again(); return r; }, async (e) => { await again(); throw e; });
     this._oatChain = run.catch(() => null);
     return run;
   }
@@ -2220,6 +2449,7 @@ class AccountManager {
     const bump = this._credsOf(be).bumpFile;
     const fromDefault = this.poolCurrent(id); // BEFORE the re-point
     mat.repointPoolSymlink(this._poolLinkDir(a), this._poolMemberDir(a, subId), bump ? path.join(this._acctDir(be, subId), bump) : null);
+    this._displaySeedPool(a, subId);   // B-360d: the switch — the pool's row shows its new member at once, never the old identity
     // sessionId null = the POOL DEFAULT moved; it decides for every session
     // that has no link of its own, so the ledger's slotAt() falls back to it.
     this._noteSlot({ sessionId: null, poolId: id, from: fromDefault, to: subId, why });

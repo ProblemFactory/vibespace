@@ -30,6 +30,10 @@ const roster = [
 let globalStatus = { loggedIn: true, email: 'work@example.com' }; // STALE config identity
 const accounts = {
   list: () => ({ accounts: roster }),
+  // B-360d: the link DECIDES on the decision road's rows (these stand-in rows carry no `facts`: read, as before)
+  decisionList: () => ({ accounts: roster }),
+  signinFactsSettled: async () => ({ since: 0, facts: new Map() }),
+  displayReaderOf: () => null,
   subscriptionStatus: () => globalStatus,
   codexGlobalStatus: () => ({ loggedIn: false, email: null }),
 };

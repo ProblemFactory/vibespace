@@ -62,6 +62,7 @@ ck('setServeState writes the record INTO accounts.json (the account record — n
 ck('…atomically (tmp + rename: no .tmp left behind) and the roster hears it (onChange)', !fs.existsSync(path.join(DATA, 'accounts.json.tmp')) && changes > c0);
 const am2 = new AccountManager({ dataDir: DATA });
 ck('the state SURVIVES a reload (a restart keeps a lapsed member lapsed)', am2.serveStateOf(U)?.state === 'lapsed' && am2.serveStateOf(U)?.lastFail === T0);
+await am2.displaySettled();   // B-360d: a store just built reads its folders off the loop — the list answers once they land
 const row = am2.list().accounts.find((a) => a.id === U);
 ck('the roster row carries `serve`; the note and the login are KEPT (nothing to re-add after renewal)', row.serve?.state === 'lapsed' && row.note === '0248 08 Canceled' && row.loggedIn === true && !('serve' in am2.list().accounts.find((a) => a.id === M)));
 let bad = []; for (const s of [{ state: 'gone', since: 1, lastFail: 1 }, { state: 'lapsed', since: 0, lastFail: 1 }, { state: 'lapsed', since: 1 }]) { try { am2.setServeState(U, s); bad.push('accepted'); } catch { bad.push('refused'); } }

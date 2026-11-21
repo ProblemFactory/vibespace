@@ -23,7 +23,8 @@
  *                      in», the measured oat-file-scopes refusal) | `unprobeable:cli-unmeasured` (the hub's claude CLI
  *                      is not one oatInFile measured — the folder never gets the token) | `unprobeable:oat-not-in-folder`
  *                      (measured, but the token is not written there: a refusal the row's token chip names) |
- *                      `unprobeable:no-login` (nothing to read with)
+ *                      `unprobeable:no-login` (nothing to read with) | `unknown:sign-in` (B-360d: the row's sign-in
+ *                      facts not read yet, unreadable, or not confirmed on the decision road — nothing decided on it)
  *   probeEligibility   an accounts.list() row → one of them, read off the row's OWN facts (`loginState`, `loggedIn`,
  *                      `oatScopes`, `oatCli.measured`, `oatFile.state`, `loginState.oatFile`); null = not a subject of
  *                      the panel rung (not a subscription, a pool — it has no login of its own — or a harness whose
@@ -50,7 +51,11 @@ const NO_LOGIN = 'unprobeable:no-login';
 // using your subscription to power your Claude Code usage» with no quota line. The 2.369.342 premise («the folder's token IS
 // probed») does not hold: such a row is read passively (a session on it) or by the owner's own session, never spawned for.
 const OAT_FOLDER_NO_PANEL = 'unprobeable:oat-folder-no-panel';
-const PROBE_ELIGIBILITY = Object.freeze([PROBEABLE, OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER, OAT_FOLDER_NO_PANEL, NO_LOGIN]);
+// THE SIGN-IN NOT READ (B-360d, 主开发 r1221): a row whose sign-in facts are not read yet, could not be read, or (on the decision
+// road) were not confirmed within its bound — NOT «unprobeable» (that clears what was booked and is said): NOTHING is decided on
+// it, no probe this tick, no attempt, no failure, no line; ⟳ refuses it by name with no spawn
+const SIGNIN_UNKNOWN = 'unknown:sign-in';
+const PROBE_ELIGIBILITY = Object.freeze([PROBEABLE, OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER, OAT_FOLDER_NO_PANEL, NO_LOGIN, SIGNIN_UNKNOWN]);
 const OAT_KINDS = Object.freeze([OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER, OAT_FOLDER_NO_PANEL]); // the oat-only row's four named facts
 const PROFILE_SCOPE = 'user:profile'; // the scope the /usage panel reads the account with (measured: oat-file-scopes)
 const VERSION_RE = /^[0-9A-Za-z.+-]{1,40}$/;
@@ -61,6 +66,7 @@ const WHY_MAX = 200;                   // characters of a stored / logged reason
 /** An accounts.list() row → its panel-probe eligibility; null = not a subject of the `cli-usage` rung. */
 function probeEligibility(row, { quotaProbe = 'cli-usage' } = {}) {
   if (!row || typeof row !== 'object' || row.type !== 'subscription' || row.pooled || quotaProbe !== 'cli-usage') return null;
+  if (row.facts && row.facts.state !== 'read') return SIGNIN_UNKNOWN;   // B-360d: an unread sign-in decides nothing
   const ls = row.loginState && typeof row.loginState === 'object' ? row.loginState : null;
   if (ls && ls.state === 'oat-only') { // checked FIRST: an expired login (or our token file) still parses loggedIn
     if (!(Array.isArray(row.oatScopes) && row.oatScopes.includes(PROFILE_SCOPE))) return OAT_NO_PROFILE;
@@ -81,6 +87,7 @@ function notProbedWords(el, row = null) {
   if (el === OAT_NOT_IN_FOLDER) return `long-lived token only, not written to the account's folder${why ? ` (${why})` : ''}; refreshes when a session uses it`;
   if (el === OAT_FOLDER_NO_PANEL) return `long-lived token in the account's folder: claude ${cli} prints no quota lines for a folder-token login; refreshes when a session uses it`;
   if (el === NO_LOGIN) return 'not logged in; nothing to read its quota with until it is';
+  if (el === SIGNIN_UNKNOWN) return 'its sign-in has not been read yet (or could not be read); nothing is decided on it until it is';
   return '';
 }
 
@@ -137,4 +144,4 @@ function probeRecordOf(raw) {
   return why ? { at, ok: false, why } : null;
 }
 
-module.exports = { PROBEABLE, OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER, OAT_FOLDER_NO_PANEL, NO_LOGIN, PROBE_ELIGIBILITY, OAT_KINDS, PROFILE_SCOPE, NOT_PROBED_SAY_MS, WHY_MAX, probeEligibility, isUnprobeable, notProbedWords, probeWhyText, panelAnswerClass, probeFailWhy, probeRecordOf };
+module.exports = { SIGNIN_UNKNOWN, PROBEABLE, OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER, OAT_FOLDER_NO_PANEL, NO_LOGIN, PROBE_ELIGIBILITY, OAT_KINDS, PROFILE_SCOPE, NOT_PROBED_SAY_MS, WHY_MAX, probeEligibility, isUnprobeable, notProbedWords, probeWhyText, panelAnswerClass, probeFailWhy, probeRecordOf };

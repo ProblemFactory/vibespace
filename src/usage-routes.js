@@ -45,7 +45,7 @@ const { authoritativeScopesOf } = quotaModel;
 const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe ring (2.369.109)
 const { usageBearerOk, usageBearerRefusal } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW — the CLI's own login token (a refresh token beside it), never a long-lived one (acceptance r3/r4)
 const { unplaceableText, wallDoor } = require('./account-pool-auto.js'); // PURE: the roster's words — ⟳ says the SAME sentence for the same fact (acceptance r3)
-const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWords, panelAnswerClass, OAT_FOLDER_NO_PANEL } = require('./auto-cli-model.js'); // PURE: may the probe PROVE this row, a failed probe's reason + THE ONE scrub (lane auto-cli-oat-unprobeable)
+const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWords, panelAnswerClass, OAT_FOLDER_NO_PANEL, SIGNIN_UNKNOWN } = require('./auto-cli-model.js'); // PURE: may the probe PROVE this row, a failed probe's reason + THE ONE scrub (lane auto-cli-oat-unprobeable)
 // THE PANEL PROBE'S ARGV (B-9b40): `/usage` and no MCP server at all. Measured on
 // the claude 2.1.288 binary: print mode loads the account's claude.ai connectors
 // unless the MCP config is strict (`headlessSyncsClaudeAiConnectors: !strictConfig
@@ -337,6 +337,13 @@ function reloadRateLimitCache() { _rateLimitCache = readUsageCache(); ingestPass
 function ingestPassiveUsage() {
   const allAccts = accounts.list().accounts || [];
   const roster = allAccts.filter((a) => oauthUsageAccount(a));
+  // THE MACHINE LOGIN'S LINK DECIDES (B-360d, 主开发 r1221 — the timer row): it moves readings between the machine login and a
+  // named account, so its emails are the DECISION road's (rows confirmed within the bound; the 30 s timer awaits the
+  // confirmation). With no match while a row of that harness is not confirmed, NOTHING is decided this pass: the link keeps its
+  // last decision and no merge runs. `roster` (the list) only names and shows.
+  const dec = accounts.decisionList().accounts || [];
+  const unsureOf = (rows) => rows.some((a) => a.facts && a.facts.state !== 'read');
+  let linkUndecided = false;
   const subIds = new Set(roster.map((a) => a.id));
   for (const id of Object.keys(_accountUsage)) if (!subIds.has(id)) delete _accountUsage[id]; // drop removed accounts
   // Same-account link for CODEX: the machine's own ~/.codex login vs the named
@@ -344,8 +351,9 @@ function ingestPassiveUsage() {
   try {
     const cst = accounts.codexGlobalStatus();
     const cem = cst.loggedIn && cst.email ? String(cst.email).toLowerCase() : null;
-    const cm = cem ? allAccts.find((a) => a.backend === 'codex' && a.email && String(a.email).toLowerCase() === cem) : null;
-    _codexUsageGlobalLink = { email: cst.email || null, loggedIn: !!cst.loggedIn, accountId: cm ? cm.id : null };
+    const cx = dec.filter((a) => a.backend === 'codex' && a.type === 'subscription');
+    const cm = cem ? cx.find((a) => a.email && String(a.email).toLowerCase() === cem) : null;
+    if (!(cem && !cm && unsureOf(cx))) _codexUsageGlobalLink = { email: cst.email || null, loggedIn: !!cst.loggedIn, accountId: cm ? cm.id : null };
   } catch { _codexUsageGlobalLink = { email: null, loggedIn: false, accountId: null }; }
   let entries = [];
   try { entries = usageWrite.listCacheDir(USAGE_CACHE_DIR); } catch { entries = []; }
@@ -382,7 +390,8 @@ function ingestPassiveUsage() {
   try {
     const st = accounts.subscriptionStatus();
     const em = st.loggedIn && st.email ? String(st.email).toLowerCase() : null;
-    const emailMatch = em ? roster.find((a) => a.email && String(a.email).toLowerCase() === em) : null;
+    const droster = dec.filter((a) => oauthUsageAccount(a));
+    const emailMatch = em ? droster.find((a) => a.email && String(a.email).toLowerCase() === em) : null;
     const gOrg = _rateLimitCache?.orgUuid || null;
     let m = emailMatch;
     if (gOrg) {
@@ -391,7 +400,8 @@ function ingestPassiveUsage() {
       else if (emailMatch && _accountUsage[emailMatch.id]?.orgUuid) m = null; // both identities known, different orgs
     }
     const actualEmail = _rateLimitCache?.orgEmail || null;
-    _usageGlobalLink = {
+    linkUndecided = !m && !!em && !emailMatch && unsureOf(droster) && !(gOrg && roster.some((a) => _accountUsage[a.id]?.orgUuid === gOrg));
+    if (!linkUndecided) _usageGlobalLink = {
       email: st.email || null, loggedIn: !!st.loggedIn, accountId: m ? m.id : null,
       // Stale-identity surfacing: what the token ACTUALLY belongs to, when the
       // on-demand refresh captured it and it contradicts the config file.
@@ -399,8 +409,8 @@ function ingestPassiveUsage() {
       identityMismatch: !!(actualEmail && st.email && actualEmail.toLowerCase() !== String(st.email).toLowerCase()),
     };
   } catch { _usageGlobalLink = { email: null, loggedIn: false, accountId: null, actualEmail: null, identityMismatch: false }; }
-  // Same-account merge (see _usageGlobalLink above): freshest view wins for both.
-  const gid = _usageGlobalLink.accountId;
+  // Same-account merge (see _usageGlobalLink above): freshest view wins for both — never on a link this pass could not decide
+  const gid = linkUndecided ? null : _usageGlobalLink.accountId;
   if (gid) {
     const a = _accountUsage[gid] || null;
     const g = _rateLimitCache || null;
@@ -431,7 +441,10 @@ function ingestPassiveModels(fn) {
   if (add.length) AVAILABLE_MODELS.claude = [...(AVAILABLE_MODELS.claude || []), ...add];
 }
 ingestPassiveUsage();
-setInterval(ingestPassiveUsage, 30000); // local disk read only — no network
+// B-360d: the timer pass decides the machine login's link on sign-in facts confirmed OFF the loop first (awaited, bounded)
+const ingestConfirmed = () => accounts.signinFactsSettled().catch(() => null).then(() => { try { ingestPassiveUsage(); } catch { } });
+ingestConfirmed();
+setInterval(ingestConfirmed, 30000); // local disk read only — no network
 // Normalizer-visible settings (chat.hideEmptyHooks) — lazy, store-safe getter.
 
 // OPT-IN active poll (default OFF; see usagePollingEnabled + the stark warning
@@ -575,7 +588,7 @@ const _panelVerdict = {};            // key → the last probe's {at, outcome, i
 // the row says why already), a removed account has no record, and `__global__` is no account.
 function panelSays(key, v) {
   _panelVerdict[key] = v;
-  if (key === '__global__' || !v || v.code === 'login' || v.code === 'unprobeable') return v; // the door's refusal is no failed probe either (acceptance r2)
+  if (key === '__global__' || !v || v.code === 'login' || v.code === 'unprobeable' || v.code === 'sign-in-unknown') return v; // the door's refusal is no failed probe either (acceptance r2; B-360d: a sign-in not read asked nothing)
   try {
     if (v.outcome === 'written') accounts.noteProbe?.(key, null);
     else accounts.noteProbe?.(key, { at: v.at, ok: false, why: probeWhyText(v.why) || v.outcome });
@@ -647,8 +660,17 @@ async function refreshViaCliPanel(key) {
   const isGlobal = key === '__global__';
   let acctMeta = null;
   if (!isGlobal) {
-    acctMeta = (accounts.list().accounts || []).find((x) => x.id === key && x.type === 'subscription');
-    if (!acctMeta) return false;
+    // A PERSON'S ⟳ OR THE TICK'S PICK DECIDES A SPAWN (B-360d, 主开发 r1221): the account's sign-in read NOW, off the loop (awaited,
+    // bounded by the file door's deadline), and the decision road's row decides; a sign-in that could not be read is refused by
+    // name — no spawn, no failed probe booked, never «re-login»
+    const { since } = await accounts.signinFactsSettled([key], { withinMs: 0 });
+    acctMeta = accounts.decisionRowOf(key, { since });
+    if (!acctMeta || acctMeta.type !== 'subscription') return false;
+    if (probeEligibility(acctMeta) === SIGNIN_UNKNOWN) {
+      const fr = (acctMeta.facts && acctMeta.facts.reason) || null;
+      panelSays(key, { at: Date.now(), outcome: 'not-probed', code: 'sign-in-unknown', el: SIGNIN_UNKNOWN, identityVerified: false, why: `the account's sign-in could not be read${fr ? ` (${fr})` : ''}; nothing was asked`, rung: 'panel' });
+      return false;
+    }
     // OAT-ONLY (2026-10-13): the OAuth login ended and the row lives on its long-lived token. The ONE door for ⟳ and
     // auto-cli alike asks the verdict the loop and the row read (src/auto-cli-model.js probeEligibility, lane
     // auto-cli-oat-unprobeable + its addendum): a token with user:profile, on a CLI measured with it in the folder, and
@@ -1179,11 +1201,12 @@ app.post('/api/usage/refresh', async (req, res) => {
   // a panel that answered «no login in the folder» (code 'login') or a door that refused the spawn (code 'unprobeable') ENDS
   // NOTHING here (acceptance r2): the token ladder below — the same-account and identity-group fallbacks 90c995a3 reached
   // for both — is tried first, and the refusal is said by name only when it has no token either (below the ladder)
-  const refusedByName = !cliOk && pv && pv.at >= t0 && (pv.code === 'login' || pv.code === 'unprobeable') ? pv : null;
+  const refusedByName = !cliOk && pv && pv.at >= t0 && (pv.code === 'login' || pv.code === 'unprobeable' || pv.code === 'sign-in-unknown') ? pv : null;
   // the refusal BY NAME: what was refused and its remedy — the row's own state (a folder token, a locked vault: no re-login)
   // …and the answer carries the cause as a CODE (`wall`: the pool's verdict) — the client says it in the person's language,
   // ONE sentence with its count and its door; the English `error` stays for the journal and an older bundle
-  const refusalAnswer = (r) => ((r.wallWhy ? wallDoor(r.wallWhy) !== 'relogin' : (r.el === OAT_FOLDER_NO_PANEL || r.wall === 'vault-locked'))
+  const refusalAnswer = (r) => (r.code === 'sign-in-unknown' ? { error: 'not refreshed — ' + r.why, signinUnknown: true, rung: 'panel', identityVerified: false, why: r.why, skipped }   // B-360d: never «re-login» on a sign-in not read
+    : (r.wallWhy ? wallDoor(r.wallWhy) !== 'relogin' : (r.el === OAT_FOLDER_NO_PANEL || r.wall === 'vault-locked'))
     ? { error: 'not refreshed — ' + r.why, rung: 'panel', identityVerified: false, why: r.why, skipped, ...(r.wallWhy ? { wall: r.wallWhy } : {}) }
     : { error: 'needs re-login to refresh usage — ' + r.why, loginNeeded: true, rung: 'panel', identityVerified: false, why: r.why, skipped, ...(r.wallWhy ? { wall: r.wallWhy } : {}) });
   // A LAPSED SUBSCRIPTION (2026-10-08) is re-admitted only by the panel's own answer: when the panel did not answer,
@@ -1227,11 +1250,15 @@ app.post('/api/usage/refresh', async (req, res) => {
   if (!token) {
     try {
       const gl = accounts.subscriptionStatus();
+      // WHICH LOGIN'S TOKEN READS THE PANEL is a DECISION on a person's ⟳ (B-360d, 主开发 r1221): the emails read NOW off the loop
+      // (awaited); a row whose sign-in could not be read carries no email — no token chosen by it
+      const { since } = await accounts.signinFactsSettled(null, { withinMs: 0 });
+      const rowsNow = accounts.decisionList({ since }).accounts || [];
       if (!isGlobal) {
-        const email = String(acctMeta.email || '').toLowerCase();
+        const email = String((rowsNow.find((x) => x.id === key) || {}).email || '').toLowerCase();
         if (email && gl?.loggedIn && String(gl.email || '').toLowerCase() === email) token = getOAuthToken();
       } else if (gl?.email) {
-        const linked = (accounts.list().accounts || []).find((x) => x.type === 'subscription' && String(x.email || '').toLowerCase() === String(gl.email).toLowerCase());
+        const linked = rowsNow.find((x) => x.type === 'subscription' && String(x.email || '').toLowerCase() === String(gl.email).toLowerCase());
         if (linked) token = accounts.usageToken(linked.id);
       }
     } catch { }
@@ -1716,7 +1743,11 @@ app.get('/api/usage', (req, res) => {
         const out = {};
         for (const a of (accounts.list().accounts || [])) {
           if (!oauthUsageAccount(a)) continue;
-          const st = accountLoginState(accounts.subCredsPath(a.id), { backend: 'claude', oatMintedAt: a.oat ? (a.oatMintedAt || null) : null });
+          // B-360d (ALSO CURED, 主开发 r1231): over the KEPT facts' reader — this read every named account's credential file ON THE
+          // LOOP at every GET /api/usage; a folder not read yet (or unreadable) has no entry: no claim
+          const rd = accounts.displayReaderOf(a.id);
+          if (!rd) continue;
+          const st = accountLoginState(accounts.subCredsPath(a.id), { backend: 'claude', oatMintedAt: a.oat ? (a.oatMintedAt || null) : null, rd });
           out[a.id] = { state: st.state, usable: st.usable, since: st.since || null };
         }
         return out;

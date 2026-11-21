@@ -66,7 +66,7 @@ const { decideCliRefresh, cliRefreshWhy, projectionReadsAfter, projectionBucketB
 const { cliRefreshDrift } = require('../usage-estimator.js');
 const { withOwnAbsence } = require('../quota-model.js'); // PURE: a sibling's 5h window never outranks this account's «no 5h limit»
 const { capsOf } = require('../backend-caps.js'); // PURE: caps.quotaProbe — the harness whose quota rung IS `<cli> -p /usage`
-const { probeEligibility, isUnprobeable, notProbedWords, NOT_PROBED_SAY_MS, probeWhyText } = require('../auto-cli-model.js'); // PURE: may the panel probe PROVE this account (lane auto-cli-oat-unprobeable)
+const { probeEligibility, isUnprobeable, notProbedWords, NOT_PROBED_SAY_MS, probeWhyText, SIGNIN_UNKNOWN } = require('../auto-cli-model.js'); // PURE: may the panel probe PROVE this account (lane auto-cli-oat-unprobeable)
 
 const STATE_FILE = 'auto-cli-state.json';
 const ATTEMPT_KEEP_MS = 24 * 3600e3; // an attempt older than a day paces nothing (the longest backoff is 5 min × 2^6 = 5.3 h)
@@ -160,6 +160,9 @@ function createAutoCliLoop(d) {
   async function tick() {
     try {
       if (d.serverSetting('accounts.onDemandQuotaRefresh') !== 'auto-cli') return;
+      // THE TIMER ROW (B-360d, 主开发 r1221): the sign-in facts confirmed OFF the loop first — awaited, each ask bounded by the
+      // file door's deadline — then the decision road's rows; a row not confirmed decides NOTHING: no probe this tick
+      const { since: factsSince } = await d.accounts.signinFactsSettled();
       const now = clock();
       if (clampStamps(st, now)) warn('[auto-cli] the clock stepped back — pacing stamps clamped to now');
       const list = [];
@@ -173,7 +176,8 @@ function createAutoCliLoop(d) {
       // seen by the next tick exactly as before.
       let billing;
       const billingIndex = () => (billing === undefined ? (billing = d.projectionBillingIndex ? d.projectionBillingIndex() : null) : billing);
-      for (const a of (d.accounts.list().accounts || [])) {
+      for (const a of (d.accounts.decisionList({ since: factsSince }).accounts || [])) {
+        if (probeEligibility(a) === SIGNIN_UNKNOWN) continue;   // no attempt, no failure, nothing said (a skipped probe costs nothing)
         if (a.type !== 'subscription' || a.pooled || capsOf(a.backend).quotaProbe !== 'cli-usage' || unprobeable(a, now) || !d.autoCliReady(a.id)) continue; // auto-cli spawns `claude -p /usage` — claude accounts only, an account the probe cannot PROVE is never sent (oat-only / no login — unprobeable, lane auto-cli-oat-unprobeable), and NOT READY IS NOT FAILED (autoCliReady, 2026-09-08)
         let raw = null, mem = [a.id];
         try { raw = usageWrite.readCacheJson(path.join(d.USAGE_CACHE_DIR, a.id + '.json')); } catch { }
@@ -202,12 +206,18 @@ function createAutoCliLoop(d) {
         // a crossing before the next scheduled read asks this same rung now — once per BUCKET (projLabel/projResetsAt vs projReads, quota r2)
         list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, lastAttemptAt: Math.max(...mem.map((x) => Math.max(attempts.get(x) || 0, d.lastMemberReadAt(x) || 0))), estDriftPct: dr.triggerDrift, activeBurn: dr.moved, drift: dr.drift, rolled: dr.rolled, projCrossInMs: pj ? pj.inMs : null, estBurnPtPerMin: pj ? pj.burnPtPerMin : 0, projLabel: pj ? pj.label : null, projResetsAt: pj ? (pj.resetsAt || 0) : 0, projReads: reads, projReadCrossAt: lastBoughtInstant(reads), pj, mem });
       }
-      const picks = decideCliRefresh(list, now, { maxAgeMs: 45 * 60e3 * jitter, idleMaxAgeMs });
+      const picks = decideCliRefresh(list, now, { maxAgeMs: 45 * 60e3 * jitter, idleMaxAgeMs }); const attemptWas = new Map(picks.map((k) => [k, attempts.get(k)]));   // B-360d: given back if the door could not read the sign-in
       for (const key of picks) {
         const it = list.find((x) => x.key === key), why = cliRefreshWhy(it && { ...it, lastAttemptAt: 0 }, now, { maxAgeMs: 45 * 60e3 * jitter, idleMaxAgeMs }); // the pick's own reason (the attempt floor already passed)
         attempts.set(key, now);
         saveState(d.dataDir, st, warn); // the attempt reaches disk BEFORE the spawn (quota r3: a restart mid-spawn must see it)
         let ok = false; try { ok = !!(await d.usage.refreshViaCliPanel(key)); } catch { ok = false; }
+        // B-360d: the door read the sign-in again NOW and could not — nothing was asked: no failure booked, the attempt given back
+        // (in memory: the next save carries it — a restart before it keeps the stamped attempt, which only paces the next try)
+        if (!ok) {
+          let pv0 = null; try { pv0 = d.usage.panelVerdictFor?.(key); } catch { }
+          if (pv0 && pv0.at >= now && pv0.code === 'sign-in-unknown') { if (attemptWas.get(key) == null) attempts.delete(key); else attempts.set(key, attemptWas.get(key)); continue; }
+        }
         // A FAILED PROBE NAMES ITS REASON (lane auto-cli-oat-unprobeable): the probe door's verdict for THIS attempt (stamped
         // after this tick's clock) — its class and the CLI's first line, scrubbed there (probeWhyText again here: the ONE
         // scrub, idempotent)

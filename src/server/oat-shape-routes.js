@@ -24,7 +24,7 @@ function registerOatShapeRoutes(app, { accounts, isAgentBearer, plans: plansOf =
     res.status(403).json({ error: 'a person’s door — no bearer token is accepted here', code: agent ? 'agent_forbidden' : 'human_only' });
     return true;
   };
-  const shapeRowOf = (id) => { try { return (accounts.list().accounts || []).find((x) => x.id === id) || null; } catch { return null; } };
+  const shapeRowOf = (id) => { try { return accounts.rowOf(id); } catch { return null; } };   // B-360d: ONE row by its id, never a whole list for one
   app.get('/api/accounts/:id/oat-shape', (req, res) => {
     if (refuseBearer(req, res)) return;
     if (!accounts.get(req.params.id)) return res.status(404).json({ error: 'unknown account', code: 'unknown' });

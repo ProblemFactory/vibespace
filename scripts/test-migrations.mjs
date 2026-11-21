@@ -467,7 +467,7 @@ try {
       const routes = {};
       const app = { get: (p, h) => { routes[`GET ${p}`] = h; }, post: (p, h) => { routes[`POST ${p}`] = h; }, locals: {} };
       const roster = [{ id: 'sub-fixture-max', name: 'Member Max', type: 'subscription', email: null }, { id: 'sub-panel', name: 'Member P', type: 'subscription', email: null }];
-      const accounts = { list: () => ({ accounts: roster }), subscriptionStatus: () => ({ loggedIn: false, email: null }), codexGlobalStatus: () => ({ loggedIn: false, email: null }), subCredsPath: (id) => path.join(d6, 'subs', id, '.credentials.json') };
+      const accounts = { list: () => ({ accounts: roster }), decisionList: () => ({ accounts: roster }), signinFactsSettled: async () => ({ since: 0, facts: new Map() }), displayReaderOf: () => null, subscriptionStatus: () => ({ loggedIn: false, email: null }), codexGlobalStatus: () => ({ loggedIn: false, email: null }), subCredsPath: (id) => path.join(d6, 'subs', id, '.credentials.json') };
       const { setupUsage } = require('../src/usage-routes.js');
       setupUsage({ app, accounts, activeSessions: new Map(), serverSetting: () => null, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(d6, 'usage-cache.json'), USAGE_CACHE_DIR: cache6, CODEX_SESSIONS_DIR: path.join(d6, 'codex-sessions'), META_DIR: path.join(d6, 'session-meta'), AVAILABLE_MODELS: { claude: [] }, BUFFERS_DIR: path.join(d6, 'session-buffers') });
       const payload = await new Promise((resolve) => routes['GET /api/usage']({}, { json: resolve }));

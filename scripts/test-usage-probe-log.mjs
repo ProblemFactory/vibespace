@@ -188,6 +188,9 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   const OAT = ['sk-ant-', 'oat01-', 'Wd4Kp8'.repeat(14)].join('');
   const root = mkd(`vs-probelog-why-${process.pid}-`), dataDir = path.join(root, 'data');
   const am = new AccountManager({ dataDir });
+  // B-360d: the ⟳ door decides on the DECISION road's row (decisionRowOf); this world stubs a row's facts through am.list, so its
+  // decision row is read through that same (stubbed) list, on the decision road
+  am.decisionRowOf = (rid, o = {}) => { const was = am._decideSince; am._decideSince = am._decideSinceOf(o); try { return (am.list().accounts || []).find((x) => x.id === rid) || null; } finally { am._decideSince = was; } };
   const id = am.createSubscription({ name: 'Why Acct' }).id;
   fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 29 * 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
   const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
@@ -203,6 +206,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
     AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(dataDir, 'session-buffers'),
     probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: bin,
   });
+  await am.displayRefresh(id);   // B-360d: THE ONE SEAM — this world wrote the sign-in file itself
   const rowOf = () => (am.list().accounts || []).find((a) => a.id === id);
   ok('§5 a logged-in row is probeable (the roster row carries the verdict the loop reads) and holds no failure yet', rowOf().probeEligibility === 'probeable' && rowOf().probe === undefined, JSON.stringify(rowOf()));
   // ① the CLI fails with the stdin warning first and a token-shaped error line after it
@@ -613,7 +617,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
     const a = am._state.accounts.find((x) => x.id === id);
     fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok', refreshToken: 'r', expiresAt: Date.now() - 36e5, refreshTokenExpiresAt: Date.now() - 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
     a.oatEnc = 'not-a-real-ciphertext'; a.oatMintedAt = Date.now() - 86400e3; a.oatShape = { scopes: SCOPES, subscriptionType: 'max' };
-    am.noteCliVersion('2.1.306 (Claude Code)'); await am.oatFileSettled();
+    am.noteCliVersion('2.1.306 (Claude Code)'); await am.oatFileSettled(); await am.displayRefresh(id);   // B-360d: the seam (this world wrote the file itself)
     const r1 = rowOf();
     ok('§5 ⑤ list(): an expired login + a token on record ⇒ oat-only; oatScopes = the recorded shape\'s; oatCli = {cli, measured} from oatFileCaps; not in its folder (the token does not even decrypt here) ⇒ oat-not-in-folder',
       r1.loginState.state === 'oat-only' && JSON.stringify(r1.oatScopes) === JSON.stringify(SCOPES) && r1.oatCli.cli === '2.1.306' && r1.oatCli.measured === true && r1.probeEligibility === 'unprobeable:oat-not-in-folder', JSON.stringify({ ls: r1.loginState.state, scopes: r1.oatScopes, cli: r1.oatCli, file: r1.oatFile, el: r1.probeEligibility }));

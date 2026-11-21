@@ -315,6 +315,8 @@ export function installSetupFlows(App) {
           // Advanced road, or a named account/pool, also counts as signed in)
           const obReady = (k) => { const b = st[k] || {}; return !!(b.loggedIn || (b.namedLoggedIn || 0) > 0); };
           this._obReady = obReady('claude') || obReady('codex');
+          // a sign-in still being read is asked ONCE more after the file door's deadline (it ends read or named unreadable)
+          if (!this._obReread && Object.values(st).some((b) => b && (b.namedUnread || 0) > 0)) { this._obReread = true; setTimeout(() => { if (content.isConnected) refresh(); }, 6000); }
           if (this._obReady) { const w = content.querySelector('#ob-signin-warn'); if (w) w.hidden = true; }
           const card = (key, label, loginCmd, installCmd) => {
             const b = st[key] || {};
@@ -324,9 +326,13 @@ export function installSetupFlows(App) {
             // …for EVERY backend (2.369.21): the 2.267.4 fix was claude-only, so
             // codex named accounts / pools never satisfied onboarding
             const named = b.namedLoggedIn || 0;
+            // B-360d: a named account whose sign-in is not read yet (or could not be read) is said so — never «not logged in»
+            const unread = b.namedUnread || 0, unreadable = b.namedUnreadable || 0;
             const state = !b.installed ? `<span class="ob-bad">${t('not installed')}</span>`
               : b.loggedIn ? `<span class="ob-ok">✓ ${t('ready')}</span>`
               : named > 0 ? `<span class="ob-ok">✓ ${t('{n} named account(s) in use', { n: named })}</span>`
+              : unread > 0 ? `<span class="ob-warn">${t('reading {n} account sign-in(s)…', { n: unread })}</span>`
+              : unreadable > 0 ? `<span class="ob-warn">${t('{n} account sign-in(s) could not be read', { n: unreadable })}</span>`
               : `<span class="ob-warn">${t('installed, not logged in')}</span>`;
             // Not installed → one-click install; installed but logged out →
             // log in. Both just run the command in a visible shell terminal.
