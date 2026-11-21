@@ -28,7 +28,9 @@
 // SPLIT (lane fast-tier-ratchet, 2026-10-20): the one process ran 37 s — over THE TIER RULE's 10 s, and this LAW row stays
 // fast — so the sections are now seven suites, each ≤ 10 s, their text unchanged: THIS file keeps §1 and §2 (§2b–§2g);
 // scripts/test-ci-gate-push.mjs §3–§5 · test-ci-gate-tiers.mjs §6–§8 + §8d · test-ci-gate-shards.mjs §8b–§8c ·
-// test-ci-gate-reaper.mjs §9–§10 · test-ci-gate-hang.mjs §11 · test-ci-gate-watchdog.mjs §12; what they share is
+// test-ci-gate-reaper.mjs §9–§10 · test-ci-gate-hang.mjs §11 · test-ci-gate-watchdog.mjs §12 · test-ci-gate-hook-env.mjs §A–§B
+// (B-e381 r6: the push hook's own env, split from -push §4 and -tiers §8i; the HEAVY twins test-ci-gate-push-deep and
+// test-ci-gate-tiers-deep run -push and -tiers whole with their deepest legs); what they share is
 // scripts/ci-gate-kit.mjs.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';

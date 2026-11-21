@@ -4,7 +4,8 @@
 // TIER RULE's 10 s for a fast row, and a LAW row (architecture) stays in the fast tier whatever it costs. Its sections were
 // already independent blocks, so they are now SEVEN suites of ≤ 10 s each (test-ci-gate, -push, -tiers, -shards, -reaper,
 // -hang, -watchdog), every section's text unchanged; what they share lives here, MOVED VERBATIM from its head: the assert
-// counter, the scratch dirs, a REAL git repository + commit, the stub gate repository, a marker writer. One process per
+// counter, the scratch dirs, a REAL git repository + commit, the stub gate repository, a marker writer — and, since B-e381 r6
+// (an eighth part, test-ci-gate-hook-env), the pre-push hook rig test-ci-gate-push §4 built. One process per
 // part ⇒ this module's counter is that part's own, and `report()` is its verdict line.
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -81,6 +82,79 @@ export const writeMarker = (dir, sha, result, failed = [], partial = undefined, 
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${sha}.${result}`), JSON.stringify({ sha, result, failed, partial, flaky, endedAt: Date.now(), ms: 1000, suites: 3 }));
 };
+
+// THE PRE-PUSH HOOK RIG — test-ci-gate-push §4's fixture, MOVED here (B-e381 r6, 主开发 r1063: the hook's own-env legs
+// are their own suite, test-ci-gate-hook-env, over the same rig): a real repository whose scripts/ci.mjs is a STUB recording
+// every call (its mode, flags, PATH and env names) in calls.ndjson and answering --check-heavy with the REAL heavyBlocker, the
+// REAL hook and secret scan copied in, the tiers' private node folder (B-e381) in this run's scratch. runHookRefs(stdin, env,
+// hook) drives the hook (or a pre-fix copy) with a push's stdin; preFixHook(tag, ...edits) writes a copy of the REAL hook.
+// Its one change in the move: the stub imports the real ci.mjs (1.3 MB) only for --check-heavy — its fast and heavy-launch
+// calls never read it, and each hook run made both (~70 ms a run, the suites drive it ~50 times).
+export function hookRig(tag) {
+  const repo = makeRepo(tag);
+  fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(repo, 'data', 'ci-heavy'), { recursive: true });
+  const realCi = path.join(REPO, 'scripts', 'ci.mjs').replace(/\\/g, '/');
+  fs.writeFileSync(path.join(repo, 'scripts', 'ci.mjs'), `#!/usr/bin/env node
+import fs from 'node:fs'; import path from 'node:path';
+const repo = ${JSON.stringify(repo)};
+const dir = path.join(repo, 'data', 'ci-heavy');
+const argv = process.argv.slice(2);
+const KNOWN = ['keep-going'];   // B-6e71: the real ci.mjs's CI_FLAGS row the hook greps for before it passes the flag
+const note = (o) => fs.appendFileSync(path.join(repo, 'calls.ndjson'), JSON.stringify(o) + '\\n');
+const headArg = (argv.find((a) => a.startsWith('--head=')) || '').slice(7) || null;
+if (argv.includes('--check-heavy')) {
+  note({ mode: 'check-heavy', head: headArg });
+  const { heavyBlocker } = await import(${JSON.stringify(realCi)});   // B-e381 r6: read only here — the fast and heavy-launch calls never need the 1.3 MB module
+  const b = heavyBlocker({ dir, repoRoot: repo, head: headArg || undefined });
+  if (b) { console.error('PUSH BLOCKED failed: ' + (b.failed || []).join(', ')); process.exit(1); }
+  process.exit(0);
+}
+const li = argv.indexOf('--heavy-launch');
+if (li >= 0) { note({ mode: 'heavy-launch', sha: argv[li + 1], range: (argv.find((a) => a.startsWith('--range=')) || '').slice(8), path: process.env.PATH, keys: Object.keys(process.env).sort() }); process.exit(0); }
+note({ mode: 'fast', isolate: argv.includes('--isolate'), keepGoing: argv.includes('--keep-going'), sha: (argv.find((a) => a.startsWith('--sha=')) || '').slice(6) || null, path: process.env.PATH, keys: Object.keys(process.env).sort() });
+process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
+`);
+  fs.copyFileSync(path.join(REPO, 'scripts', 'git-hooks', 'pre-push'), path.join(repo, 'pre-push'));
+  fs.chmodSync(path.join(repo, 'pre-push'), 0o755);
+  fs.copyFileSync(path.join(REPO, 'scripts', 'secret-scan.mjs'), path.join(repo, 'scripts', 'secret-scan.mjs')); // B-89da: the hook's secret scan runs before every step below (test-secret-scan drives it)
+  const ZERO = '0'.repeat(40);
+  const calls = () => { try { return fs.readFileSync(path.join(repo, 'calls.ndjson'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  // `hook` is a parameter so a PRE-FIX COPY of the real hook can be driven
+  // through the exact same fixture: every round-4 leg below states the answer
+  // the shipped hook gives AND the answer the defect gave, or it proves nothing.
+  const hookNodeDir = path.join(mktmp('e381-hook-node'), 'root');
+  const runHookRefs = (stdin, env = {}, hook = path.join(repo, 'pre-push')) => {
+    try { fs.unlinkSync(path.join(repo, 'calls.ndjson')); } catch {}
+    const r = spawnSync('bash', [hook, 'origin', 'git@example.invalid:x/y.git'], {
+      cwd: repo, input: stdin, encoding: 'utf-8', env: { ...GIT_ENV, VIBESPACE_HOOK_NODE_DIR: hookNodeDir, ...env },   // B-e381: the tiers' node folder in this run's scratch, never the machine's
+    });
+    return { status: r.status, out: (r.stdout || '') + (r.stderr || ''), calls: calls() };
+  };
+  // A copy of the REAL hook with one guard reverted to the shape that caused
+  // the finding. An anchor that no longer matches is a RED assert (not a
+  // throw): a control that quietly becomes "the same hook twice" proves
+  // nothing, and the suite still has to report the behavioural asserts around
+  // it — that is what the mutation battery reads.
+  const hookSrc = fs.readFileSync(path.join(REPO, 'scripts', 'git-hooks', 'pre-push'), 'utf-8');
+  const preFixHook = (tag, ...edits) => {
+    let patched = hookSrc;
+    for (const [from, to] of edits) {
+      const next = patched.replace(from, to);
+      if (next === patched) {
+        ok(false, `pre-fix control "${tag}": the anchor ${JSON.stringify(String(from).slice(0, 50))} is not in the shipped hook — the control would be a second copy of it, so its NEG leg proves nothing`);
+        return null;
+      }
+      patched = next;
+    }
+    const p = path.join(repo, `pre-push.prefix-${tag}`);
+    fs.writeFileSync(p, patched); fs.chmodSync(p, 0o755);
+    return p;
+  };
+  const runHook = (localSha, remoteSha = ZERO, env = {}) =>
+    runHookRefs(`refs/heads/main ${localSha} refs/heads/main ${remoteSha}\n`, env);
+  return { repo, ZERO, calls, hookNodeDir, runHookRefs, runHook, hookSrc, preFixHook };
+}
 
 /** the part's verdict line and exit code (the giant's last two lines) */
 export function report() {

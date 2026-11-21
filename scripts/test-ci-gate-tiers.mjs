@@ -16,6 +16,16 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 import { REPO, GIT_ENV, ok, tmpDirs, mktmp, git, makeRepo, commit, STUB_SLICE, stubGateRepo, writeMarker, report } from './ci-gate-kit.mjs'; // the shared kit (lane fast-tier-ratchet: the gate is seven ≤ 10 s parts)
 
+// THE HEAVY TWIN (B-e381 r6 — 主开发 r1063: each gate row states what it reads ALONE and stands under 10 s; this one read ~15 s
+// alone on the test machine, its deepest legs going to a heavy twin as the consent-road suite did): the three censuses over the
+// REAL table — §6's fixed-port / /tmp-path scan of every gated suite (~2 s), §8's four real-table selections (~4.5 s, one walk
+// of the import graph) and its census of every heavy row's product input (~1.6 s) — run only under CI_GATE_TIERS_DEEP=1, which
+// scripts/test-ci-gate-tiers-deep.mjs (a HEAVY row) sets before it runs this whole file. Every other leg stays here, the stub
+// trees' legs of the same rules included (the product-input census keeps its own predicate control beside it, in the twin); the
+// fast run says, at each place, where the census runs.
+const DEEP = process.env.CI_GATE_TIERS_DEEP === '1';
+const inTwin = (what) => console.log(`    (${what}: in the heavy twin test-ci-gate-tiers-deep — B-e381 r6)`);
+
 try {
 
 // ── §6 MACHINE-GLOBAL FIXTURES + "NO VERDICT" HONESTY (round 2) ──────────
@@ -42,12 +52,15 @@ console.log('\n§6 machine-global fixtures + no-verdict honesty');
   // the retry's `worktree add` hit the path the other had just recreated).
   // A lock cannot cover a process that never takes it; a name nobody shares
   // can. scripts/scratch.mjs is the shared idiom (per-pid paths, free ports).
-  const scanned = SUITES.filter((s) => s.tier === 'fast' || s.tier === 'heavy');
-  const offenders = scanned.map((s) => ({ s, f: machineGlobalFixtures(srcOf(s.name)) }))
-    .filter(({ f }) => f.ports.length || f.paths.length);
-  ok(!offenders.length, `no gated suite (either tier) claims a fixed port or /tmp path (${offenders.map(({ s, f }) => `${s.name}: ${[...f.ports, ...f.paths].join(' ')}`).join('; ') || `${scanned.length} suites clean`})`);
-  ok(scanned.some((s) => s.tier === 'heavy') && scanned.some((s) => s.name === 'test-chat-paging'),
-    'the scan covers the heavy tier (the suite that collided is in the scanned set)');
+  if (!DEEP) inTwin('the fixed-port / /tmp-path scan of every gated suite');
+  else {
+    const scanned = SUITES.filter((s) => s.tier === 'fast' || s.tier === 'heavy');
+    const offenders = scanned.map((s) => ({ s, f: machineGlobalFixtures(srcOf(s.name)) }))
+      .filter(({ f }) => f.ports.length || f.paths.length);
+    ok(!offenders.length, `no gated suite (either tier) claims a fixed port or /tmp path (${offenders.map(({ s, f }) => `${s.name}: ${[...f.ports, ...f.paths].join(' ')}`).join('; ') || `${scanned.length} suites clean`})`);
+    ok(scanned.some((s) => s.tier === 'heavy') && scanned.some((s) => s.name === 'test-chat-paging'),
+      'the scan covers the heavy tier (the suite that collided is in the scanned set)');
+  }
 
   const launcherSrc = srcOf('test-ci-heavy-launch');
   const slice = (/const SLICE = '([^']+)'/.exec(launcherSrc) || [])[1];
@@ -518,19 +531,22 @@ console.log('\n§8 lanes, the serial table, the impact scope, the full-tier cloc
   // tier can never select for a product change, so it would only ever run in
   // the 24 h full tier. Non-vacuity: the same predicate over a stub row that
   // reads nothing says so.
-  const realHeavy = SUITES.filter((s) => s.tier === 'heavy');
-  const realMemo = new Map(); // ONE walk + ONE reach context for the four real-table selections (an unchanged tree)
-  for (const [changedFile, suite] of [['src/conversation-index.js', 'test-conversation-index'], ['src/normalizers.js', 'test-session-brain-dark'], ['src/machine-probes.js', 'test-machine-probes'], ['src/routes/persistence.js', 'test-layout-history']]) {
-    if (!realHeavy.some((s) => s.name === suite)) continue; // the row may leave the tier; the stub legs above pin the shapes
-    const why = affectedSuites({ suites: realHeavy, changed: [changedFile], range: 'x..y', memo: realMemo }).why.get(suite);
-    ok(!!why && /^loads /.test(why), `${changedFile} selects ${suite} (${why || 'MISSED — the measured defect'})`);
+  if (!DEEP) inTwin('the four real-table selections and the census of every heavy row\'s product input');
+  else {
+    const realHeavy = SUITES.filter((s) => s.tier === 'heavy');
+    const realMemo = new Map(); // ONE walk + ONE reach context for the four real-table selections (an unchanged tree)
+    for (const [changedFile, suite] of [['src/conversation-index.js', 'test-conversation-index'], ['src/normalizers.js', 'test-session-brain-dark'], ['src/machine-probes.js', 'test-machine-probes'], ['src/routes/persistence.js', 'test-layout-history']]) {
+      if (!realHeavy.some((s) => s.name === suite)) continue; // the row may leave the tier; the stub legs above pin the shapes
+      const why = affectedSuites({ suites: realHeavy, changed: [changedFile], range: 'x..y', memo: realMemo }).why.get(suite);
+      ok(!!why && /^loads /.test(why), `${changedFile} selects ${suite} (${why || 'MISSED — the measured defect'})`);
+    }
+    const isProduct = (p) => p === 'server.js' || p.startsWith('src/') || p.startsWith('data/bin/');
+    const walkMemo = new Map(); // ONE walk of the table (ci.mjs suiteInputs: a memo lives for one computation over an unchanged tree)
+    const inputless = (s, r) => { const { files, prefixes } = suiteInputs(s, { root: r, memo: walkMemo }); return ![...files, ...prefixes].some(isProduct); };
+    const silent = realHeavy.filter((s) => !s.always && !(s.reads && s.reads.length) && inputless(s, REPO)).map((s) => s.name);
+    ok(silent.length === 0, `every heavy row without always:/reads: has a PRODUCT input the affected tier can match (silent rows: ${silent.join(', ') || 'none'})`);
+    ok(inputless({ name: 'test-d' }, root) && !inputless({ name: 'test-a' }, root), 'CONTROL: the census predicate flags a suite that reads no product file and passes one that does');
   }
-  const isProduct = (p) => p === 'server.js' || p.startsWith('src/') || p.startsWith('data/bin/');
-  const walkMemo = new Map(); // ONE walk of the table (ci.mjs suiteInputs: a memo lives for one computation over an unchanged tree)
-  const inputless = (s, r) => { const { files, prefixes } = suiteInputs(s, { root: r, memo: walkMemo }); return ![...files, ...prefixes].some(isProduct); };
-  const silent = realHeavy.filter((s) => !s.always && !(s.reads && s.reads.length) && inputless(s, REPO)).map((s) => s.name);
-  ok(silent.length === 0, `every heavy row without always:/reads: has a PRODUCT input the affected tier can match (silent rows: ${silent.join(', ') || 'none'})`);
-  ok(inputless({ name: 'test-d' }, root) && !inputless({ name: 'test-a' }, root), 'CONTROL: the census predicate flags a suite that reads no product file and passes one that does');
   // THE SUITES' ONE HUB BOOT (lane boot-helper, 主开发 2026-11-17): a suite on scripts/hub-boot.mjs spawns no server.js itself —
   // the BOOT INPUTS reach it through the helper's own text (BOOTS_THE_PRODUCT matches its 'server.js'), which sits in every helper
   // suite's import closure. Pinned over the helper ALONE: a stub tree holding a suite that imports and calls startHub and the
@@ -776,7 +792,7 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
   const wiredClosing = (x) => {
     const a = x.indexOf('} = await runFastLanes(plan, {'), b = x.indexOf('const closing = fastClosing(', a);
     return a > 0 && b > a && !/\breturn\b/.test(x.slice(a, b))
-      && /\n\s*const closing = fastClosing\(\{ reds, flaky, skippedLegs, keepGoing, ran: fast\.length - absent\.length - skippedByName\.length, hangDir, part, env: process\.env, envReds \}\);\n\s*for \(const \[w, l\] of closing\.out\) \(w === 'err' \? console\.error : console\.log\)\(l\);\n\s*if \(closing\.code === 1\) return 1;\n/.test(x)
+      && /\n\s*const closing = fastClosing\(\{ reds, flaky, skippedLegs, keepGoing, ran: fast\.length - absent\.length - skippedByName\.length, hangDir, part, env: process\.env \}\);\n\s*for \(const \[w, l\] of closing\.out\) \(w === 'err' \? console\.error : console\.log\)\(l\);\n\s*if \(closing\.code === 1\) return 1;\n/.test(x)
       && /\n {2}fastGate\(\{ sha: str\('sha'\), isolate: !!arg\('isolate'\), keepGoing: !!arg\('keep-going'\), part \}\)\n\s*\.then\(\(code\) => exitFlushed\(code\), /.test(x);
   };
   ok(wiredClosing(src), 'WIRING: fastGate hands every fact to fastClosing (env and part included), nothing returns between the lanes\' end and it, its 1 is returned, and main() exits with fastGate\'s code');
@@ -784,9 +800,8 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
   const wiringMutants = [
     ['the exit on the flag', 'if (closing.code === 1) return 1;', 'if (closing.code === 1 && !keepGoing) return 1;'],
     ['an early return before the closing', '    const closing = fastClosing(', '    if (keepGoing) return 0;\n    const closing = fastClosing('],
-    ['the annotation\'s env dropped', 'hangDir, part, env: process.env, envReds });', 'hangDir, part, env: {}, envReds });'],
-    ['the part dropped', 'hangDir, part, env: process.env, envReds });', 'hangDir, part: null, env: process.env, envReds });'],
-    ['the environment reds dropped (B-e381)', 'hangDir, part, env: process.env, envReds });', 'hangDir, part, env: process.env });'],
+    ['the annotation\'s env dropped', 'hangDir, part, env: process.env });', 'hangDir, part, env: {} });'],
+    ['the part dropped', 'hangDir, part, env: process.env });', 'hangDir, part: null, env: process.env });'],
     ['the skipped legs dropped (B-4829 meets the closing here)', 'fastClosing({ reds, flaky, skippedLegs, keepGoing,', 'fastClosing({ reds, flaky, keepGoing,'],
     ['main() swallowing a part\'s 1', "part })\n    .then((code) => exitFlushed(code), ", "part })\n    .then((code) => exitFlushed(part ? 0 : code), "],
   ];
@@ -935,102 +950,6 @@ console.log('\n§8g a version-only bump is no global input; --rules names the on
   ok(/const all = SUITES\.filter\(\(s\) => s\.tier === tier\);/.test(ciSrc) && /return rules \? \{ names, summary, \.\.\.rulesReport\(names, a\.ruleOf, \{ range \}\) \} : \{ names, summary \};/.test(ciSrc)
     && /tier: str\('tier'\) === 'fast' \? 'fast' : 'heavy', rules: !!arg\('rules'\)/.test(ciSrc) && /if \(l\.ruleLines\) \{[^\n]*console\.log\(l\.ruleLines\.join\('\\n'\)\); \} else console\.log\(l\.names\.join\(','\)\);/.test(ciSrc),
     'WIRING: --list-affected --tier=fast lists the FAST rows; --rules prints the report (the count on stderr); without it the comma-joined names as before');
-}
-
-// ── §8i A MOUNT-GUARD RED (B-e381 part 3 — 主开发's RULING r962, CHANGED r1039 on round wyx4vuerd) ──
-// A red whose EVERY failed line IS the mount guard's own refusal line is said by that name with each refused path; it BLOCKS
-// (in `reds` / `failed`); it is NOT retried as a flake; whose it is the reader decides from the path (the hook builds its own env,
-// so a refusal that remains may be the product's own). The recogniser's table (only a failed line that IS the guard's line, every
-// other failure form an ordinary red); the real runner over two planted suites; the closings; checkHeavy driven; the heavy loop's
-// branch and marker field by their text. CONTROLS: the release's refusal retries it, the release's closing call counts it among
-// the others, the old ALL GREEN line does not count a by-name skip.
-console.log('\n§8i a MOUNT-GUARD red — every failed line the guard\'s own refusal: said with its paths, still red, not retried (B-e381, 主开发 r962 → r1039)');
-{
-  const ci = await import('./ci.mjs');
-  const P0 = '/srv/storage/data/bin/tmux';
-  const GX = `  ✗ [mount-guard] statSync(${P0}) from src/session-store.js:120 refused — use SafeFs/async; the mount «/srv/storage»`;
-  const gx = (p) => GX.replace(P0, p), CLOSE = (n) => `${n} FAILED (0 passed)`;
-  const WORDS = '  ✗ the session lists its tmux — Error EVSMOUNTSYNC: refused: a synchronous fs call on a storage mount from the main thread';
-  const T = [
-    ['every failed line IS the guard\'s own refusal line', [GX, '', CLOSE(1)].join('\n'), '', {}, { paths: [P0], n: 1 }],
-    ['a failed line that merely CONTAINS the guard\'s code and words ⇒ ordinary', [WORDS, CLOSE(1)].join('\n'), '', {}, null],
-    ['one failed line of another kind beside them ⇒ ordinary', [GX, '  ✗ the count is 3 — got 2', CLOSE(2)].join('\n'), '', {}, null],
-    ['an uncaught throw beside them (its stack) ⇒ ordinary', [GX, CLOSE(1)].join('\n'), 'TypeError: x is undefined\n    at f (/srv/x.js:1:2)', {}, null],
-    ['a FAIL line beside them ⇒ ordinary', [GX, 'FAIL: the wrapper', CLOSE(1)].join('\n'), '', {}, null],
-    ['output after the last failed line (no count close) ⇒ ordinary', [GX, 'done'].join('\n'), '', {}, null],
-    ['an exit other than the suite\'s own 1 ⇒ ordinary', [GX, CLOSE(1)].join('\n'), '', { status: 2 }, null],
-    ['no failed line (a crash) ⇒ ordinary', 'starting', 'boom', {}, null],
-    ['a ✓ label quoting the guard\'s line is no failed line', ['  ✓ the guard said: [mount-guard] statSync(/srv/x) from a.js:1 refused', '  ✗ the count — got 2', CLOSE(1)].join('\n'), '', {}, null],
-    ['a refusal of a path inside the run\'s own roots (a fixture mount) ⇒ ordinary', [gx('/tmp/vs-fixture/store/x'), CLOSE(1)].join('\n'), '', { roots: ['/tmp'] }, null],
-    ['six paths ⇒ five named, the count kept', [1, 2, 3, 4, 5, 6].map((i) => gx('/srv/storage/p' + i)).concat([CLOSE(6)]).join('\n'), '', {}, { paths: [1, 2, 3, 4, 5].map((i) => '/srv/storage/p' + i), n: 6 }],
-  ];
-  for (const [what, out, err, opts, want] of T) ok(JSON.stringify(ci.envRedOf(out, err, opts)) === JSON.stringify(want), `B-e381 envRedOf: ${what}`, ci.envRedOf(out, err, opts));
-  ok(ci.envRedWords({ paths: ['/a', '/b'], n: 3 }) === "every failed line of this suite is the mount guard's own refusal — /a, /b (and 1 more)", 'B-e381: its words claim only what the check knows (r1039: never «not the product\'s»), the paths and the count past them');
-  const sw = fs.readFileSync(path.join(REPO, 'src', 'server', 'sync-fs-witness.js'), 'utf-8');
-  ok(sw.includes('`[mount-guard] ${fn}(${curPath}) from ${site} refused — use SafeFs/async;'), 'B-e381: the recogniser reads the mount guard\'s OWN line (src/server/sync-fs-witness.js)');
-  // THE RUNNER: a mount-guard red is red, named apart, its row says it, NOT retried — an ordinary red is retried as before
-  const root = mktmp('envred');
-  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
-  const tries = (n) => { try { return fs.readFileSync(path.join(root, n + '.tries'), 'utf-8').length; } catch { return 0; } };
-  const plant = (n, lines) => fs.writeFileSync(path.join(root, 'scripts', n + '.mjs'), `import fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(path.join(root, n + '.tries'))}, 'x');\n${lines.map((l) => `console.log(${JSON.stringify(l)});`).join('\n')}\nprocess.exit(1);\n`);
-  plant('test-er-env', [GX, CLOSE(1)]);
-  plant('test-er-product', ['  ✗ the count is 3 — got 2', CLOSE(1)]);
-  const row = (name) => ({ name, tier: 'fast', budgetMs: 8000 });
-  const drive = async (refusal) => {
-    for (const n of ['test-er-env', 'test-er-product']) fs.rmSync(path.join(root, n + '.tries'), { force: true });
-    const said = [], rows = [], inflight = new Set();
-    const res = await ci.runFastLanes({ parallel: [row('test-er-env'), row('test-er-product')], serial: [] }, {
-      lanes: 1, keepGoing: true, inflight, sha: 'e381e381e381', log: (l) => said.push(l), refusal,
-      run: (s, { lane }) => ci.runSuiteAsync(s, { root, sha: 'e381e381e381', lane, inflight }),
-      after: async (r) => { rows.push(r.lines.join('\n')); },
-    });
-    return { ...res, said, rows, tries: { env: tries('test-er-env'), product: tries('test-er-product') } };
-  };
-  const now = await drive(ci.fastRetryRefusal);
-  const envRow = now.rows.find((l) => /✗ test-er-env FAILED/.test(l)) || '';
-  console.log(`    judged (the runner): reds ${now.reds.join(',')} · envReds ${JSON.stringify(now.envReds)} · tries ${JSON.stringify(now.tries)} · ${now.said.filter((l) => /not retried|retrying/.test(l)).join(' | ')}`);
-  ok(now.reds.join(',') === 'test-er-env,test-er-product' && JSON.stringify(now.envReds) === JSON.stringify([{ name: 'test-er-env', paths: [P0], n: 1 }])
-    && now.tries.env === 1 && now.tries.product === 2 && now.said.includes(`  · test-er-env is not retried — ${ci.ENV_RED_NO_RETRY}`) && envRow.includes(` — MOUNT-GUARD red: every failed line of this suite is the mount guard's own refusal — ${P0}`),
-    'B-e381: the mount-guard red is RED (in reds), named apart with its path, its row says MOUNT-GUARD, and it is NOT retried (one try); the ordinary red beside it is retried as before (two tries)', { reds: now.reds, envReds: now.envReds, tries: now.tries });
-  const before = await drive((s, r) => ci.fastRetryRefusal(s, { ...r, envRed: undefined }));
-  ok(before.tries.env === 2, 'B-e381 CONTROL (the release\'s refusal — no mount-guard clause): the same red is retried as a flake (two tries)', before.tries);
-  // THE CLOSINGS: apart, still red, the keep-going line and the hosted annotation name it; the release's call counts it among the others
-  const errs = (c) => c.out.filter(([w]) => w === 'err').map(([, l]) => l.trim());
-  const c1 = ci.fastClosing({ reds: now.reds, envReds: now.envReds, ran: 2, hangDir: '/x', env: {} });
-  const c2 = ci.fastClosing({ reds: ['test-er-env'], envReds: now.envReds, ran: 1, hangDir: '/x', env: {} });
-  const c0 = ci.fastClosing({ reds: now.reds, ran: 2, hangDir: '/x', env: {} });
-  const kg = ci.fastClosing({ reds: now.reds, envReds: now.envReds, keepGoing: true, ran: 2, hangDir: '/x', env: { GITHUB_ACTIONS: 'true' } });
-  ok(c1.code === 1 && errs(c1).includes(`[ci] MOUNT-GUARD red — blocking, not retried as a flake (主开发 r1039); whose it is, read from its path: test-er-env (every failed line of this suite is the mount guard's own refusal — ${P0})`)
-    && errs(c1).includes('✗ test-er-product · MOUNT-GUARD: test-er-env — release gate is RED, do not push') && c2.code === 1 && errs(c2).includes('✗ no other red · MOUNT-GUARD: test-er-env — release gate is RED, do not push')
-    && kg.out.some(([, l]) => l.includes('--keep-going: 2 red of 2 suites that ran — test-er-env, test-er-product (of them MOUNT-GUARD: test-er-env)')) && kg.out.some(([, l]) => l === '::error title=fast::2 red: test-er-env, test-er-product (of them MOUNT-GUARD: test-er-env)'),
-    'B-e381: the fast closing says the mount-guard red APART (its path; whose it is, the reader decides), still BLOCKING — alone too (exit 1); the --keep-going line and the hosted ::error name it', { c1: errs(c1), c2: errs(c2) });
-  ok(c0.code === 1 && errs(c0).includes('✗ test-er-env, test-er-product — release gate is RED, do not push'), 'B-e381 CONTROL (the release\'s closing call, no envReds): it is listed among the others', errs(c0));
-  // THE HEAVY BLOCK'S WORDS, driven: a red marker on this tree's HEAD naming a mount-guard red — checkHeavy blocks (exit 1), says it;
-  // a hand-edited field of another shape never throws inside it
-  {
-    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf-8', env: GIT_ENV }).stdout.trim();
-    const md = mktmp('e381-markers');
-    const said = (mg) => { fs.writeFileSync(path.join(md, `${head}.red`), JSON.stringify({ sha: head, result: 'red', failed: ['test-er-env', 'test-er-product'], mountGuard: mg, endedAt: Date.now(), ms: 1000, suites: 2 })); const e = [], e0 = console.error; console.error = (...a) => e.push(a.join(' ')); let code; try { code = ci.checkHeavy({ dir: md, head }); } finally { console.error = e0; } return { code, e }; };
-    const a = said([{ name: 'test-er-env', paths: [P0], n: 1 }]), b = said([null, { name: 7 }, { name: 'test-er-env', paths: 'x' }]);
-    ok(head && a.code === 1 && a.e.some((l) => l.includes(`     of them MOUNT-GUARD reds (B-e381 — whose, read from the path): test-er-env (every failed line of this suite is the mount guard's own refusal — ${P0})`)) && b.code === 1,
-      'B-e381: checkHeavy BLOCKS on a red marker naming a mount-guard red and says it; a field of another shape is read defensively (no throw, still blocked)', { a: a.e.filter((l) => /MOUNT-GUARD/.test(l)), b: b.code });
-  }
-  // THE HEAVY LOOP (its text): not retried, still in `failed` (the block unchanged), named in the marker's `mountGuard`, said at the close
-  const cs = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
-  const hv = cs.slice(cs.indexOf('async function heavyGate('), cs.indexOf('function checkHeavy('));
-  const branch = hv.indexOf('        if (!r.ok && r.envRed) {'), retry = hv.indexOf('// RETRY ONCE.');
-  ok(branch > 0 && branch < retry && /if \(!r\.ok && r\.envRed\) \{[^\n]*\n {10}failed\.push\(s\.name\); envFailed\.push\(\{ name: s\.name, paths: r\.envRed\.paths, n: r\.envRed\.n \}\);\n {10}console\.log\(`  · \$\{s\.name\} is not retried — \$\{ENV_RED_NO_RETRY\}`\);\n {8}\} else if \(!r\.ok\) \{/.test(hv)
-    && /\n {6}mountGuard: envFailed\.length \? envFailed : undefined,/.test(hv) && /if \(envFailed\.length\) console\.log\(`\[ci:heavy\] MOUNT-GUARD red/.test(hv)
-    && /if \(Array\.isArray\(blocker\.mountGuard\) && blocker\.mountGuard\.length\) console\.error\(/.test(cs),
-    'B-e381: the HEAVY loop does not retry a mount-guard red, keeps it in `failed` (the block unchanged), names it in the marker\'s `mountGuard`; the heavy closing and the PUSH BLOCKED words say it');
-  const noBranch = cs.replace('        if (!r.ok && r.envRed) {', '        if (false) {');
-  ok(noBranch !== cs && !/if \(!r\.ok && r\.envRed\) \{/.test(noBranch.slice(noBranch.indexOf('async function heavyGate('), noBranch.indexOf('function checkHeavy('))),
-    'B-e381 CONTROL: the heavy pin is refused by a copy without its branch (its anchor is in the source once)');
-  // 主开发 r1037: A SKIP IS NOT A GREEN — the push's own ALL GREEN line counts a by-name skip (the hook's VS_NO_REAL_CLI=1 skips the
-  // one real turn); the control is the line as it was (only absent suites counted)
-  const greenLine = (x) => /ALL GREEN — fast gate[^\n]*\$\{skippedByName\.length \? ` — SKIPPED by name, not run and not passed: \$\{skippedByName\.join\(', '\)\}` : ''\}\$\{skipCount\(skippedLegs\)\}/.test(x);
-  ok(greenLine(cs), 'B-e381 (r1037): the fast tier\'s ALL GREEN line names every suite SKIPPED BY NAME («not run and not passed») — the hook\'s skipped real turn is counted on the push\'s own closing line');
-  ok(!greenLine(cs.replace("${skippedByName.length ? ` — SKIPPED by name, not run and not passed: ${skippedByName.join(', ')}` : ''}", '')), 'B-e381 CONTROL: the line as it was (only absent suites counted) is refused by the pin');
 }
 
 // ── §8h A SKIP IS NOT A GREEN (B-4829) ──

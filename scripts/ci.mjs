@@ -1081,14 +1081,17 @@ export const SUITES = [
   // THE GATE'S OWN GATE, in seven parts (lane fast-tier-ratchet, 2026-10-20): the one process ran 37 s alone — over THE TIER
   // RULE's 10 s, and a LAW row stays fast — so its independent sections are seven suites of ≤ 10 s, every section's text
   // unchanged, the shared kit scripts/ci-gate-kit.mjs (the checkout allowance rides the two parts that make one: §5, §8).
-  { name: 'test-ci-gate', tier: 'fast', why: 'LAW architecture · 18.5 s (B-a2c9 remainder, restated 2026-11-18 RAW: alone on the test machine, both zones, the median of four — 18651 / 18271 / 17171 / 18713 ms; was 16.8 s) (B-a2c9, restated 2026-11-18 in the box\'s scale: 19.9 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 13.9–19.7 s); was 6.6 s) — the gate\'s own gate, part 1/7: §1 the census, §2 tier hygiene + THIS rule (§2b) + §2e the wall-clock census + §2f the apt installs + §2h every setup step bounded, the ONE fonts road + §2i a red names its legs + §2j a suite reads no history master does not have (B-4291) (the rest: test-ci-gate-push / -tiers / -shards / -reaper / -hang / -watchdog)', over: 'reads 18.5 s alone on the test machine (the B-a2c9 remainder, raw) — slow: it grew with the gate\'s own legs (the false-row judge in a scratch repository, the fast parts\' plans over the whole table, §2f\'s stub apt-gets with their bounded stalls) on a part that read 12.6 s already in 2.369.403\'s tiers — next-list item B-54a9: profile by section and cut it back under 10 s, or move it heavy' },
+  { name: 'test-ci-gate', tier: 'fast', why: 'LAW architecture · 18.5 s (B-a2c9 remainder, restated 2026-11-18 RAW: alone on the test machine, both zones, the median of four — 18651 / 18271 / 17171 / 18713 ms; was 16.8 s) (B-a2c9, restated 2026-11-18 in the box\'s scale: 19.9 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 13.9–19.7 s); was 6.6 s) — the gate\'s own gate, part 1/8: §1 the census, §2 tier hygiene + THIS rule (§2b) + §2e the wall-clock census + §2f the apt installs + §2h every setup step bounded, the ONE fonts road + §2i a red names its legs + §2j a suite reads no history master does not have (B-4291) (the rest: test-ci-gate-push / -tiers / -shards / -reaper / -hang / -watchdog / -hook-env; heavy twins -push-deep, -tiers-deep)', over: 'reads 18.5 s alone on the test machine (the B-a2c9 remainder, raw) — slow: it grew with the gate\'s own legs (the false-row judge in a scratch repository, the fast parts\' plans over the whole table, §2f\'s stub apt-gets with their bounded stalls) on a part that read 12.6 s already in 2.369.403\'s tiers — next-list item B-54a9: profile by section and cut it back under 10 s, or move it heavy' },
   { name: 'test-suite-files-parse', tier: 'fast', why: 'in-process · 5.9 s (B-0d3e, lane lg-leak-census: + §3, the unanchored control edits and the anchor helpers on §1\'s one parse — alone ×2: 5.63 / 5.70 s at load 7–8 before the helper walk; 5.53 / 5.92 s with it, measured at load 44 and scaled by that run\'s median 1.54 over 407 unchanged suites; was 4.1 s) — EVERY SUITE FILE PARSES (the coordinator\'s law, the train int402, 2026-11-14): every *.mjs / *.cjs / *.js under scripts/ (node_modules aside) is parsed ONCE in-process by acorn as the module kind Node gives it (.mjs a module, .cjs CommonJS as Node wraps it, .js by the nearest package.json or Node\'s detection); an unparseable file is red by its name and line. Born of a hosted-only heavy that had not parsed since a lane\'s first pick, which only the mirror would have met; the controls are a scratch tree with six planted reds' },
-  { name: 'test-ci-gate-push', tier: 'fast', why: 'LAW architecture · 6.3 s — the gate\'s own gate, part 2/7: §3 the block rule over real commits, §4 the real pre-push hook end to end, §5 the detached child\'s git environment (a real git worktree add, the damage as the control)', allow: ['checkout'] },
-  { name: 'test-ci-gate-tiers', tier: 'fast', why: 'LAW architecture · 9.5 s (int411 seam 2026-11-18, both restatements kept by arithmetic: 6.0 + 0.8 + 2.7 = 9.5 s — restated 2026-11-18 by arithmetic, the selector\'s restack on 2.369.410: the release\'s 6.0 s + §8g\'s 0.8 s, measured side by side at 5de10e38d — 7.46 s vs 8.22 s; before it, restated 2026-11-17, lane bl-tests-e: 5.50–5.97 s on the test machine with §7b; and B-4829 2026-11-18: + §8h — planted suites through the real runner + a walk of scripts/; measured 12.3 / 13.5 s in a test-machine run at load 44, scaled by that run\'s median 1.54 over 407 unchanged suites against the base\'s run; was 6.0 s) — the gate\'s own gate, part 3/7: §6 machine-global fixtures + no-verdict honesty, §7 no literal date, §7b a leg never passes by its name (B-1747: the swap census over every script, ~0.4 s), §8 lanes / the serial table / the impact scope (a real git worktree add), §8d the xpra window family, §8h a skip is never a green (a green suite\'s SKIP lines counted on its row and named at the close)', allow: ['checkout'] },
-  { name: 'test-ci-gate-shards', tier: 'fast', why: 'LAW architecture · 7.4 s (B-a2c9 remainder, restated 2026-11-18 RAW: alone on the test machine, both zones, the median of four — 7460 / 7376 / 7371 / 7330 ms; was 5.5 s) (B-a2c9, restated 2026-11-18 in the box\'s scale: 6.51 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 4.6–6.4 s); was 4.2 s) — the gate\'s own gate, part 4/7: §8b every heavy suite in exactly one shard, §8c the self-hosted batch + the hosted shards partition the tier' },
-  { name: 'test-ci-gate-reaper', tier: 'fast', why: 'LAW architecture · 1.5 s — the gate\'s own gate, part 5/7: §9 the scratch-orphan reaper, §9b the singleton Desktop\'s X server, §9c a scratch root off the arguments, §9d the directory sweep, §10 the launcher once for real (a stub repository)' },
-  { name: 'test-ci-gate-hang', tier: 'fast', why: 'LAW architecture · 5.2 s — the gate\'s own gate, part 6/7: §11 a hang leaves a report (five planted suites under a 3 s budget, at once)' },
-  { name: 'test-ci-gate-watchdog', tier: 'fast', why: 'LAW architecture · 4.1 s — the gate\'s own gate, part 7/7: §12 a suite\'s own clock fires before the gate\'s and names its leg (two planted suites under a 4 s row, at once)' },
+  { name: 'test-ci-gate-push', tier: 'fast', why: 'LAW architecture · 6.0 s (B-e381 r6, 主开发 r1063: ALONE on the test machine at 6a2d47b4e, both zones — 5997 / 5463 ms, runs 6a2d47b4e-20261121091340-box and -091451-UTC — the tip\'s suite code, only comments and the rows\' text moved after; was 6.3 s stated, a false row: 13.1 / 14.5 s alone at 9629b65dc, ~15.9 s at 2849f713e) — the gate\'s own gate, part 2/8: §3 the block rule over real commits, §4 the real pre-push hook end to end (the kit\'s rig; its rounds 5 (a), 5 (b), 5 (c) and 6 are the HEAVY twin test-ci-gate-push-deep\'s, B-e381 r6), §5 the detached child\'s git environment (a real git worktree add, the damage as the control)', allow: ['checkout'] },
+  { name: 'test-ci-gate-push-deep', tier: 'heavy', why: 'slow for the fast tier — in-process (the real pre-push hook over a scratch repository and a stub ci.mjs) · 13.5 s (alone on the test machine, box zone: 13 455 ms, run a19fbac03-20261121090432-box — the tip\'s bytes with this row dropped, as `--one` runs no heavy row; B-e381 r6, lane bl-release 2026-11-21, 主开发 r1063: each gate row stands ALONE under 10 s, its deepest legs going to a heavy twin as the consent-road suite did): test-ci-gate-push WHOLE with CI_GATE_PUSH_DEEP=1 — §4\'s round 5 (a) the gate-input docs derived from the table\'s own suite sources, round 5 (b) their pushes end to end, round 5 (c) the pushed commit is the tier\'s subject, round 6 the multi-ref pushes, beside every leg of the fast row', reads: ['scripts/', 'src/'] },
+  { name: 'test-ci-gate-tiers', tier: 'fast', why: 'LAW architecture · 6.0 s (B-e381 r6, 主开发 r1063: ALONE on the test machine at 6a2d47b4e, both zones — 4971 / 6027 ms, runs 6a2d47b4e-20261121091640-box and -091812-UTC — the tip\'s suite code, only comments and the rows\' text moved after; was 9.5 s stated, a false row: 14.2 / 14.2 s alone at 9629b65dc, ~15.8 s at 2849f713e) — the gate\'s own gate, part 3/8: §6 machine-global fixtures + no-verdict honesty, §7 no literal date, §7b a leg never passes by its name (B-1747: the swap census over every script), §8 lanes / the serial table / the impact scope (a real git worktree add), §8d the xpra window family, §8e–§8g the fast tier\'s keep-going, retry and version-only rules, §8h a skip is never a green; its three censuses over the REAL table (§6\'s fixed-port scan of every gated suite, §8\'s four real-table selections and every heavy row\'s product input) are the HEAVY twin test-ci-gate-tiers-deep\'s (B-e381 r6); §8i left it — its ALL GREEN pin for test-ci-gate-hook-env, its mount-guard legs with the label (主开发 r1063\'s other option)', allow: ['checkout'] },
+  { name: 'test-ci-gate-tiers-deep', tier: 'heavy', why: 'slow for the fast tier — in-process (the real table, its suites\' sources and the import graph walked) · 12.1 s (alone on the test machine, box zone: 12 107 ms, run a19fbac03-20261121090902-box — the tip\'s bytes with this row dropped, as `--one` runs no heavy row; B-e381 r6, lane bl-release 2026-11-21, 主开发 r1063: each gate row stands ALONE under 10 s, its deepest legs going to a heavy twin as the consent-road suite did): test-ci-gate-tiers WHOLE with CI_GATE_TIERS_DEEP=1 — §6\'s fixed-port / /tmp-path scan of every gated suite, §8\'s four real-table selections and its census of every heavy row\'s product input, beside every leg of the fast row', reads: ['scripts/', 'src/'] },
+  { name: 'test-ci-gate-shards', tier: 'fast', why: 'LAW architecture · 7.4 s (B-a2c9 remainder, restated 2026-11-18 RAW: alone on the test machine, both zones, the median of four — 7460 / 7376 / 7371 / 7330 ms; was 5.5 s) (B-a2c9, restated 2026-11-18 in the box\'s scale: 6.51 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 4.6–6.4 s); was 4.2 s) — the gate\'s own gate, part 4/8: §8b every heavy suite in exactly one shard, §8c the self-hosted batch + the hosted shards partition the tier' },
+  { name: 'test-ci-gate-reaper', tier: 'fast', why: 'LAW architecture · 1.5 s — the gate\'s own gate, part 5/8: §9 the scratch-orphan reaper, §9b the singleton Desktop\'s X server, §9c a scratch root off the arguments, §9d the directory sweep, §10 the launcher once for real (a stub repository)' },
+  { name: 'test-ci-gate-hang', tier: 'fast', why: 'LAW architecture · 5.2 s — the gate\'s own gate, part 6/8: §11 a hang leaves a report (five planted suites under a 3 s budget, at once)' },
+  { name: 'test-ci-gate-watchdog', tier: 'fast', why: 'LAW architecture · 4.1 s — the gate\'s own gate, part 7/8: §12 a suite\'s own clock fires before the gate\'s and names its leg (two planted suites under a 4 s row, at once)' },
+  { name: 'test-ci-gate-hook-env', tier: 'fast', why: 'LAW architecture · 3.0 s (B-e381 r6: ALONE on the test machine, both zones — 2688 / 3001 ms, runs 0ea8c3b9f-20261121093919-box and -094326-UTC: the tip\'s suite bytes, only the rows\' text moved after) — the gate\'s own gate, part 8/8 (B-e381 r6, 主开发 r1063: the unit\'s own legs, split from test-ci-gate-push §4 and test-ci-gate-tiers §8i): §A the real pre-push hook (the kit\'s rig) runs its tiers in its own env — every refusal it adds driven (no node, a link root, a folder holding more, a manager\'s shim, a folder made before npm), each cut in a copy of the hook; §B the push\'s own ALL GREEN line counts a by-name skip (r1037)' },
   { name: 'test-ci-heavy-verdict', tier: 'fast', why: 'LAW architecture · 4.7 s (B-18eb, restated 2026-11-18: + the re-run attempt legs and their §5 mutants — alone on the test machine, alternated with the release\'s own suite file, 6 pairs over both zones: 7.47 s against 7.27 s, the medians — ×1.03 over 4.6 s) (B-a2c9, restated 2026-11-18 in the box\'s scale: 5.46 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 3.8–5.4 s); read on a run with legs red that this stack cures — the time of a whole run; was 3.6 s) (measured under the box\'s thermal cap, 2026-11-10: 3.64 s alone — not restated at full speed yet) — B-e381, lane ci-heavy-verdict r4: the CI mirror\'s verified run written as the HOSTED half\'s listed green (never full, the list read from the commit), the union reader (a red clears when every failed suite has run green since), LAW A (a marker that cannot be read never opens the gate; the writer, status and already-green see it too), LAW B (a list-scoped `absent` covers nothing; a FULL green clears), pruning by commits, five mutant controls, the parity over production\'s 30 markers; every refusal writes nothing' },
   { name: 'test-ci-heavy-queue', tier: 'fast', why: 'LAW architecture · 8.9 s (measured under the box\'s thermal cap, 2026-11-10: 8.61–8.87 s alone — not restated at full speed yet) — lane ci-heavy-queue (+ THE BUILD STAMP: a claim does not rebuild a tree built at its commit; a red build writes no verdict): the machine\'s heavy lock serves its waiters oldest first (a ticket each in <lock>.q, held only while its waiter is alive AND polling — dead, recycled and silent tickets reaped, the head at 200 ms), the wait line names the holder uncut, ONE door (only ci.mjs names the lock); real processes, three mutant controls' },
   { name: 'test-ci-heavy-queue-window', tier: 'fast', why: 'LAW architecture · 4.1 s (measured alone on the test machine, 2026-11-20: 4.08 s, run 966e33dbf-20261120210633-box, node v24.22.1 — its ten scenes side by side; the r406 form was 2.40 s; with r571\'s steal scene, twelve: 4.14 s in run 5becc7b1f-20261120222134-box) — lane bl-ci (r406): the heavy lock\'s FRESH LOOK after the take (a waiter frozen between its head decision and its take gives back a lock an older live ticket is owed, and at its deadline times out by name), each ticket judged by the clock around its own stat, the lock taken in ONE step (never empty: r518), and the steal of a dead holder\'s lock undone when it moved a live one (r571) — every window PLACED by a copy and said when reached, the staleness the queue\'s own 15 s (load decides nothing), each with its red control; real processes, seven mutant copies, an exit guard' },
@@ -2544,42 +2547,6 @@ export function failLegs(stdout, stderr) {
     + xs.slice(0, FAIL_LINES_MAX).map((l) => (l.length > FAIL_LINE_CHARS ? l.slice(0, FAIL_LINE_CHARS) + '…' : l)).join('\n')
     + (more > 0 ? `\n  [ci] … ${more} more ✗ line(s) not shown` : '');
 }
-// A MOUNT-GUARD RED (B-e381 part 3 — 主开发's RULING r962, CHANGED r1039 on round wyx4vuerd's evidence; part 2 is the hook's own
-// env, launchPath its first half). A full tier the push hook launched from an interactive shell showed 26 mount-guard refusals and
-// 183 failed lines for a sha the hosted runner ran green. Now that the hook builds its own env the pushing shell is gone as a cause,
-// so a refusal that remains may be the PRODUCT's own (a new synchronous read of a path outside the run's roots is exactly what the
-// guard exists to catch): the words claim only what the check knows — «MOUNT-GUARD red: every failed line of this suite is the
-// guard's own refusal», with each refused path; it BLOCKS; it is NOT retried as a flake; the reader decides whose it is from the
-// path. envRedOf(stdout, stderr, { roots, status }) → { paths, n } | null, only when EVERY failed (✗) line IS the guard's own
-// refusal line — its exact marker at the line's head after the ✗ («✗ [mount-guard] fn(path) from site refused …»,
-// src/server/sync-fs-witness.js), never a line that merely contains the guard's code or words — of a path outside the run's own
-// roots (the gated tree, /tmp, /var/tmp, TMPDIR: a suite's fixture mount is its own), the suite closed with its own count line
-// («N FAILED …») and exit 1, and NO other failure form sits beside them (an uncaught throw's stack or error head, a FAIL line, a
-// hang, a timeout, a signal — runSuiteAsync never asks then). Anything else is an ordinary red. PURE.
-export const MOUNT_GUARD_REFUSED = /^\s*✗\s+\[mount-guard\] \w+\((.*?)\) from .* refused\b/;   // a FAILED line that IS the guard's own refusal line
-const OTHER_FAILURE = /^\s+at \S.*:\d+:\d+\)?\s*$|^(?:Uncaught\b|\w*Error\b[:\s]|\s*(?:FAIL|FAILED)\b(?!\s*\())/;   // a stack frame, an error head, a FAIL line (never the closing «N FAILED (…)»)
-export function envRedOf(stdout, stderr, { roots = [], status = 1 } = {}) {
-  if (status !== 1) return null;   // a suite's own red closes with exit 1 (its report()); any other exit is another failure form
-  const out = String(stdout || '').split('\n'), err = String(stderr || '').split('\n'), lines = [...out, ...err], seen = new Set();
-  const own = (p) => roots.some((r) => r && (p === r || p.startsWith(r.replace(/\/+$/, '') + '/')));
-  const xs = lines.filter((l) => /^\s*✗ /.test(l));
-  if (!xs.length) return null;
-  const paths = [];
-  let n = 0;
-  for (const l of xs) {
-    const m = MOUNT_GUARD_REFUSED.exec(l);
-    if (!m || !m[1].startsWith('/') || own(m[1])) return null;   // ONE failed line of another form ⇒ an ordinary red
-    if (!seen.has(m[1])) { seen.add(m[1]); n++; if (paths.length < 5) paths.push(m[1]); }
-  }
-  if (lines.some((l) => !/^\s*✗ /.test(l) && OTHER_FAILURE.test(l))) return null;
-  const last = out.map((l) => l.trim()).filter(Boolean).pop() || '';
-  if (!/^\d+ FAILED\b/.test(last)) return null;   // the suite's own count line closes it — anything after its last failed line is another form
-  return { paths, n };
-}
-export const envRedWords = (e) => `every failed line of this suite is the mount guard's own refusal — ${(e.paths || []).join(', ')}${e.n > (e.paths || []).length ? ` (and ${e.n - e.paths.length} more)` : ''}`;
-export const ENV_RED_NO_RETRY = "a MOUNT-GUARD red — every failed line is the mount guard's own refusal (主开发 r1039): not retried as a flake";
-/** the closing's words for the mount-guard reds (both tiers): «a (every failed line … — /x), b (…)» */
-export const envRedsSaid = (list) => (Array.isArray(list) ? list : []).filter((x) => x && typeof x.name === 'string').map((x) => `${x.name} (${envRedWords({ paths: Array.isArray(x.paths) ? x.paths.filter((p) => typeof p === 'string') : [], n: Number(x.n) || 0 })})`).join(', ');   // a marker's field read defensively (a hand-edited marker never throws inside checkHeavy)
 // A FAILED RUN'S WHOLE OUTPUT, kept: <dir>/<sha8>.<suite>.<try>.log, said on its own line → the file, or null. The heavy
 // tier's <markers>/fail-logs since lane ci-aidev-desktop-batch; the FAST tier's FAST_FAIL_LOGS since lane
 // ci-mirror-hygiene (its hang reports there too) — ci.yml's fast job uploads it on a red, as the heavy shards do theirs.
@@ -2595,20 +2562,15 @@ export const FAST_NO_RETRY = Object.freeze([
  *  named (with --keep-going: the count of what ran, then the red line); on the hosted runner (GITHUB_ACTIONS) ONE `::error`
  *  annotation names every red on the run page; and ANY red is exit 1 — a keep-going part that ran to its end is never a green.
  *  → { out: [['log' | 'err', line]], code: 1 | null } (null: no red — the caller goes on to its other checks) */
-export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env, envReds = [] } = {}) {
+export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env } = {}) {
   if (!Array.isArray(reds)) throw new TypeError('fastClosing: reds is not a list — a closing never reads a missing fact as «no red»');   // (the verdict's own fact has no default: the run crashes, exit 1)
   const out = [];
-  const envOf = new Set((envReds || []).map((x) => x.name)), envTail = envOf.size ? ` (of them MOUNT-GUARD: ${[...envOf].join(', ')})` : '';   // B-e381
-  if (keepGoing && reds.length) out.push(['err', `\n[ci] --keep-going: ${reds.length} red of ${ran} suites that ran — ${reds.join(', ')}${envTail} (each one's whole output: ${hangDir})`]);
+  if (keepGoing && reds.length) out.push(['err', `\n[ci] --keep-going: ${reds.length} red of ${ran} suites that ran — ${reds.join(', ')} (each one's whole output: ${hangDir})`]);
   if (flaky.length) out.push(['log', `\n[ci] FLAKY — red, then green on its one retry (counted in ${FAST_RERUNS}): ${flaky.join(', ')}`]);
   if (skippedLegs.length) out.push(['log', `\n${skippedLegsSaid('ci', skippedLegs).join('\n')}`]); // B-4829: a skip is never a green — a line per suite that skipped
   // a workflow command's message escapes %, CR and LF (GitHub's rule); suite names hold none, the escape keeps it so
   const ghEsc = (t) => String(t).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
-  if (reds.length && env && env.GITHUB_ACTIONS) out.push(['log', `::error title=fast${part ? ` ${part.i}/${part.n}` : ''}::${ghEsc(`${reds.length} red: ${reds.join(', ')}${envTail}`)}`]);
-  // B-e381 (主开发 r1039): a MOUNT-GUARD red still blocks — said apart, by name with its refused paths; whose it is, the reader decides from the path
-  const envNames = envOf, productReds = reds.filter((n) => !envNames.has(n));
-  if (envNames.size) out.push(['err', `\n[ci] MOUNT-GUARD red — blocking, not retried as a flake (主开发 r1039); whose it is, read from its path: ${envRedsSaid(envReds)}`]);
-  if (envNames.size && reds.length) { out.push(['err', `\n✗ ${productReds.length ? productReds.join(', ') : 'no other red'} · MOUNT-GUARD: ${[...envNames].join(', ')} — release gate is RED, do not push${skipCount(skippedLegs)}\n`]); return { out, code: 1 }; }
+  if (reds.length && env && env.GITHUB_ACTIONS) out.push(['log', `::error title=fast${part ? ` ${part.i}/${part.n}` : ''}::${ghEsc(`${reds.length} red: ${reds.join(', ')}`)}`]);
   if (reds.length) { out.push(['err', `\n✗ ${reds.join(', ')} — release gate is RED, do not push${skipCount(skippedLegs)}\n`]); return { out, code: 1 }; } // (B-4829: the verdict line carries the skip count)
   return { out, code: null };
 }
@@ -2621,7 +2583,6 @@ export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = fa
 export function fastRetryRefusal(s, r, { noRetry = FAST_NO_RETRY } = {}) {
   const row = noRetry.find((x) => x.name === (s && s.name));
   if (row) return row.why;
-  if (r && r.envRed) return ENV_RED_NO_RETRY;   // B-e381
   if (r && Array.isArray(r.egress) && r.egress.length) {
     if (r.egress.some((x) => x.host === EGRESS_UNLOADED)) return 'its egress reader did not load (B-9dd0) — its sockets were never counted, and a second try is not the first';
     if (r.egress.some((x) => x.host === EGRESS_LOST)) return 'its egress reader lost a host line (B-9dd0) — what the first try dialed is not known, and a second try is not the first';
@@ -2874,9 +2835,8 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       // the suite's OWN watchdog wrote the report before this clock ran (its digest is in the stdout tail): the row names the file
       const own = !asked && hr.armed && (() => { try { return fs.statSync(hr.file).mtimeMs >= t - 1000; } catch { return false; } })() ? hr.file : '';
       // B-9dd0 (r321 should 5): a row that FAILED and opened sockets keeps them in its result — its green retry cannot hide them
-      const er = !signal && !(error && error.code === 'ETIMEDOUT') && !hl && !own ? envRedOf(stdout, stderr, { roots: [root, '/tmp', '/var/tmp', process.env.TMPDIR], status }) : null;   // B-e381: a MOUNT-GUARD red (every failed line the guard's own refusal); a hang / timeout / signal is an ordinary red
-      resolve({ ok: false, ms, load, ...(er ? { envRed: er } : {}), ...(opened.length || lostN ? { egress: egressRows } : {}), killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
-        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${egressNote}${er ? ` — MOUNT-GUARD red: ${envRedWords(er)}` : ''}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
+      resolve({ ok: false, ms, load, ...(opened.length || lostN ? { egress: egressRows } : {}), killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
+        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${egressNote}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
         stdout.split('\n').slice(-40).join('\n'),
         stderr || ''] });
     };
@@ -4582,7 +4542,7 @@ function falseRowsVerb() {
  * → { reds, flaky, absent, skipped, timings, parMs, serMs, stoppedBy }
  */
 export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, after = async () => {}, skip = () => '', inflight = new Set(), failDir = null, ledger = null, sha = '', log = console.log, refusal = fastRetryRefusal } = {}) {
-  const reds = [], flaky = [], absent = [], skipped = [], timings = [], skippedLegs = [], envReds = [];   // envReds (B-e381): reds that are the environment's — still red
+  const reds = [], flaky = [], absent = [], skipped = [], timings = [], skippedLegs = [];
   let stoppedBy = null; // fail-fast only: the red that stopped the tier
   // B-4829: a green that skipped a leg is named (its count, its first reason) and its whole output kept beside the reds'
   const noteSkips = (s, r, attempt) => { if (r.skips) skippedLegs.push({ name: s.name, n: r.skips.n, first: r.skips.first, file: failDir ? writeSkipLog(failDir, sha, s, r, attempt, { log }) : null }); };
@@ -4618,7 +4578,6 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
         if (again.ok) { flaky.push(s.name); timings.push({ name: s.name, ms: again.ms, lane: String(lane) }); noteSkips(s, again, 2); continue; }
       }
       reds.push(s.name);
-      if (r.envRed) envReds.push({ name: s.name, paths: r.envRed.paths, n: r.envRed.n });
       if (!keepGoing && !stoppedBy) {
         stoppedBy = s.name;
         const others = [...inflight];
@@ -4632,7 +4591,7 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
   await Promise.all(Array.from({ length: Math.max(1, Math.min(lanes, parallelQ.length)) }, (_, i) => laneWorker(parallelQ, i + 1)));
   const parMs = Date.now() - tPar, tSer = Date.now();
   if (!stoppedBy && plan.serial.length) await laneWorker([...plan.serial], 'S');
-  return { reds, flaky, absent, skipped, skippedLegs, envReds, timings, parMs, serMs: Date.now() - tSer, stoppedBy };
+  return { reds, flaky, absent, skipped, skippedLegs, timings, parMs, serMs: Date.now() - tSer, stoppedBy };
 }
 
 /**
@@ -4679,7 +4638,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
     const hangDir = fastFailDir(); // the fast tier's fail-log dir: a timed-out suite's hang report (ci-hang-report) + a red suite's whole output (ci-mirror-hygiene)
     const pruned = pruneFailLogs(hangDir); // B-c327: the newest FAIL_LOGS_KEEP commits' logs stay, nothing else of ours
     if (pruned.length) console.log(`[ci] fail logs: ${pruned.length} file(s) of commits older than the newest ${FAIL_LOGS_KEEP} removed from ${hangDir}`);
-    const { reds, flaky, absent, skipped: skippedByName, skippedLegs, envReds, timings, parMs, serMs } = await runFastLanes(plan, {
+    const { reds, flaky, absent, skipped: skippedByName, skippedLegs, timings, parMs, serMs } = await runFastLanes(plan, {
       lanes, keepGoing, inflight, failDir: hangDir, sha, ledger: path.join(repo, ...FAST_RERUNS.split('/')),
       // VS_NO_REAL_CLI=1 (r6, §ban-safety): the real-turn row is not started at all — SKIPPED by name (the wire leg skips inside its suite).
       // Only a suite PRESENT in the tree being gated (r7c): an absent one stays ABSENT, so a commit that contains none of
@@ -4696,7 +4655,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
       },
     });
     dirPace.boundary("the fast tier's end"); // B-9ec9: whatever the pace left since its last sweep
-    const closing = fastClosing({ reds, flaky, skippedLegs, keepGoing, ran: fast.length - absent.length - skippedByName.length, hangDir, part, env: process.env, envReds });
+    const closing = fastClosing({ reds, flaky, skippedLegs, keepGoing, ran: fast.length - absent.length - skippedByName.length, hangDir, part, env: process.env });
     for (const [w, l] of closing.out) (w === 'err' ? console.error : console.log)(l);
     if (closing.code === 1) return 1;
     // NOTHING RAN IS NOT A PASS. An old tag or a commit that predates the gate
@@ -4935,7 +4894,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // the round-2 supersede cost one step earlier.
     let abandonedWhy = abandoned();
     const build = abandonedWhy ? { ok: false } : noteChildResult(runBuild({ cwd: runRoot, reuse: !isolate }));   // a built IN-PLACE tree is not rebuilt (THE BUILD STAMP); an --isolate checkout is fresh: no stamp asked, nothing hashed
-    const failed = [], flaky = [], timings = [], absent = [], selfSkipped = [], skippedLegs = [], envFailed = [];   // envFailed (B-e381): of `failed`, the environment's // skippedLegs: B-4829, the greens that skipped a leg (selfSkipped: B-479e, the ones that ran nothing)
+    const failed = [], flaky = [], timings = [], absent = [], selfSkipped = [], skippedLegs = []; // skippedLegs: B-4829, the greens that skipped a leg (selfSkipped: B-479e, the ones that ran nothing)
     let laneN = 0, serialNames = [];
     const dirPace = dirSweepPacer();
     // The build is the first thing a supersede kill lands on, so ask before
@@ -4987,10 +4946,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
         // not counted in `timings` — a marker that named 97 suites when 42 of
         // them do not exist at that sha is a claim nobody made.
         if (r.absent) { absent.push(s.name); if (par) { parInFlight--; overlapCheck(); } continue; }
-        if (!r.ok && r.envRed) {   // B-e381: a MOUNT-GUARD red — still red (in `failed`: the marker blocks as before), not retried
-          failed.push(s.name); envFailed.push({ name: s.name, paths: r.envRed.paths, n: r.envRed.n });
-          console.log(`  · ${s.name} is not retried — ${ENV_RED_NO_RETRY}`);
-        } else if (!r.ok) {
+        if (!r.ok) {
           // …BUT NEVER RETRY A SUITE WE OURSELVES KILLED. Supersession SIGTERMs
           // the process GROUP, so the suite in flight dies with the runner's
           // own kill — and `noteChildResult` has just recorded that. Asking
@@ -5073,7 +5029,6 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     }
     const rec = {
       sha, result: failed.length ? 'red' : 'green', failed,
-      mountGuard: envFailed.length ? envFailed : undefined,   // B-e381: which of `failed` are MOUNT-GUARD reds (every failed line the guard's own refusal)
       flaky: flaky.length ? flaky : undefined,
       skippedLegs: skippedLegs.length ? skippedLegs.map(({ name, n, first }) => ({ name, n, first })) : undefined, // B-4829: the greens that skipped a leg
       startedAt: t0, endedAt: Date.now(), ms: Date.now() - t0,
@@ -5128,7 +5083,6 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     console.log('\n' + verdict + (scope === 'affected' ? ` — AFFECTED scope: ${heavy.length} of ${all.length} heavy suites selected by ${range}; a FULL run is still owed once per 24 h` : '') + (shard ? ` — SHARD ${shard.i}/${shard.n} of the tier (${all.length} heavy suites over ${shard.n} shards)` : '') + (noVerdict ? ` — NO VERDICT WRITTEN (${noVerdict})` : ''));
     if (absent.length) console.log(`[ci:heavy] SKIPPED (absent at ${shortSha(sha)}, not run and not judged): ${absent.join(', ')}`);
     if (flaky.length) console.log(`[ci:heavy] FLAKY (failed, passed on retry — not blocking, but they did fail once): ${flaky.join(', ')}`);
-    if (envFailed.length) console.log(`[ci:heavy] MOUNT-GUARD red — of the failed, every failed line the guard's own refusal; blocking, not retried (主开发 r1039); whose it is, read from its path: ${envRedsSaid(envFailed)}`);
     for (const l of skippedLegsSaid('ci:heavy', skippedLegs)) console.log(l); // B-4829: every suite that skipped a leg, by name
     // AN ABORTED TIER MUST NEVER EXIT 0 (round 4 finding). `failed` is empty
     // for an abandoned run by construction — it stopped instead of judging —
@@ -5358,7 +5312,6 @@ export function checkHeavy({ dir, head } = {}) {
   const when = blocker.endedAt ? new Date(blocker.endedAt).toLocaleString() : '?';
   console.error(`\n[ci] PUSH BLOCKED — the heavy tier went RED on ${shortSha(blocker.commit || blocker.sha)} (${when}), which is an ancestor of HEAD${blocker.commit && blocker.commit !== blocker.sha && !blocker.commit.startsWith(blocker.sha) ? ` (the marker ${path.basename(blocker.file || '')} names it in its sha field)` : ''}.`);
   console.error(`     failed: ${(blocker.failed || []).join(', ') || '(no suite names recorded)'}`);
-  if (Array.isArray(blocker.mountGuard) && blocker.mountGuard.length) console.error(`     of them MOUNT-GUARD reds (B-e381 — whose, read from the path): ${envRedsSaid(blocker.mountGuard)}`);
   if (blocker.unreadable) console.error(`     its marker ${path.relative(repo, blocker.file)} is UNREADABLE (${blocker.unreadable}) — it blocks until a FULL green on a descendant`);
   console.error(`     log:    ${path.relative(repo, path.join(markerDir(dir), blocker.sha + '.log'))}`);
   // The recovery has to be REACHABLE. It used to also offer "or wait for the

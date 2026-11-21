@@ -14,7 +14,17 @@ import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machine
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
-import { REPO, GIT_ENV, ok, tmpDirs, mktmp, git, makeRepo, commit, STUB_SLICE, stubGateRepo, writeMarker, report } from './ci-gate-kit.mjs'; // the shared kit (lane fast-tier-ratchet: the gate is seven ≤ 10 s parts)
+import { REPO, GIT_ENV, ok, tmpDirs, mktmp, git, makeRepo, commit, STUB_SLICE, stubGateRepo, writeMarker, hookRig, report } from './ci-gate-kit.mjs'; // the shared kit (lane fast-tier-ratchet: the gate is seven ≤ 10 s parts)
+
+// THE HEAVY TWIN (B-e381 r6 — 主开发 r1063: each gate row states what it reads ALONE and stands under 10 s; this one read ~15.9 s
+// alone on the test machine — §4's ~35 runs of the real hook at ~0.3 s each — its deepest legs going to a heavy twin as the
+// consent-road suite did): §4's round 5 (a) (the gate-input docs derived from the table's own suite sources, ~1.6 s), round 5 (b)
+// (a gate-input doc push runs the tier, five hook runs, ~1.5 s), round 5 (c) (the commit being pushed is what the tier gates,
+// ~0.8 s) and round 6 (one fast subject per push — the multi-ref pushes, ~4 s) run only under CI_GATE_PUSH_DEEP=1, which scripts/test-ci-gate-push-deep.mjs (a HEAVY row) sets before it runs this whole
+// file. Each is a block over branches made from SIDE (round 6 reads round 5 (c)'s — both deep; no FAST leg reads what they leave;
+// round 4 (d) stays fast: its exclude file and HEAD are read after it); the fast run says, at each place, where it runs.
+const DEEP = process.env.CI_GATE_PUSH_DEEP === '1';
+const inTwin = (what) => console.log(`    (${what}: in the heavy twin test-ci-gate-push-deep — B-e381 r6)`);
 
 try {
 
@@ -70,72 +80,11 @@ console.log('\n§3 the block rule (real git history)');
 // launches — so the fast tier is the only thing stubbed.
 console.log('\n§4 the pre-push hook, end to end');
 {
-  const repo = makeRepo('hook');
-  fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
-  fs.mkdirSync(path.join(repo, 'data', 'ci-heavy'), { recursive: true });
-  const realCi = path.join(REPO, 'scripts', 'ci.mjs').replace(/\\/g, '/');
-  fs.writeFileSync(path.join(repo, 'scripts', 'ci.mjs'), `#!/usr/bin/env node
-import fs from 'node:fs'; import path from 'node:path';
-import { heavyBlocker } from ${JSON.stringify(realCi)};
-const repo = ${JSON.stringify(repo)};
-const dir = path.join(repo, 'data', 'ci-heavy');
-const argv = process.argv.slice(2);
-const KNOWN = ['keep-going'];   // B-6e71: the real ci.mjs's CI_FLAGS row the hook greps for before it passes the flag
-const note = (o) => fs.appendFileSync(path.join(repo, 'calls.ndjson'), JSON.stringify(o) + '\\n');
-const headArg = (argv.find((a) => a.startsWith('--head=')) || '').slice(7) || null;
-if (argv.includes('--check-heavy')) {
-  note({ mode: 'check-heavy', head: headArg });
-  const b = heavyBlocker({ dir, repoRoot: repo, head: headArg || undefined });
-  if (b) { console.error('PUSH BLOCKED failed: ' + (b.failed || []).join(', ')); process.exit(1); }
-  process.exit(0);
-}
-const li = argv.indexOf('--heavy-launch');
-if (li >= 0) { note({ mode: 'heavy-launch', sha: argv[li + 1], range: (argv.find((a) => a.startsWith('--range=')) || '').slice(8), path: process.env.PATH, keys: Object.keys(process.env).sort() }); process.exit(0); }
-note({ mode: 'fast', isolate: argv.includes('--isolate'), keepGoing: argv.includes('--keep-going'), sha: (argv.find((a) => a.startsWith('--sha=')) || '').slice(6) || null, path: process.env.PATH, keys: Object.keys(process.env).sort() });
-process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
-`);
-  fs.copyFileSync(path.join(REPO, 'scripts', 'git-hooks', 'pre-push'), path.join(repo, 'pre-push'));
-  fs.chmodSync(path.join(repo, 'pre-push'), 0o755);
-  fs.copyFileSync(path.join(REPO, 'scripts', 'secret-scan.mjs'), path.join(repo, 'scripts', 'secret-scan.mjs')); // B-89da: the hook's secret scan runs before every step below (test-secret-scan drives it)
-  const ZERO = '0'.repeat(40);
-  const calls = () => { try { return fs.readFileSync(path.join(repo, 'calls.ndjson'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  // `hook` is a parameter so a PRE-FIX COPY of the real hook can be driven
-  // through the exact same fixture: every round-4 leg below states the answer
-  // the shipped hook gives AND the answer the defect gave, or it proves nothing.
-  const hookNodeDir = path.join(mktmp('e381-hook-node'), 'root');
-  const runHookRefs = (stdin, env = {}, hook = path.join(repo, 'pre-push')) => {
-    try { fs.unlinkSync(path.join(repo, 'calls.ndjson')); } catch {}
-    const r = spawnSync('bash', [hook, 'origin', 'git@example.invalid:x/y.git'], {
-      cwd: repo, input: stdin, encoding: 'utf-8', env: { ...GIT_ENV, VIBESPACE_HOOK_NODE_DIR: hookNodeDir, ...env },   // B-e381: the tiers' node folder in this run's scratch, never the machine's
-    });
-    return { status: r.status, out: (r.stdout || '') + (r.stderr || ''), calls: calls() };
-  };
-  // A copy of the REAL hook with one guard reverted to the shape that caused
-  // the finding. An anchor that no longer matches is a RED assert (not a
-  // throw): a control that quietly becomes "the same hook twice" proves
-  // nothing, and the suite still has to report the behavioural asserts around
-  // it — that is what the mutation battery reads.
-  const hookSrc = fs.readFileSync(path.join(REPO, 'scripts', 'git-hooks', 'pre-push'), 'utf-8');
-  const preFixHook = (tag, ...edits) => {
-    let patched = hookSrc;
-    for (const [from, to] of edits) {
-      const next = patched.replace(from, to);
-      if (next === patched) {
-        ok(false, `pre-fix control "${tag}": the anchor ${JSON.stringify(String(from).slice(0, 50))} is not in the shipped hook — the control would be a second copy of it, so its NEG leg proves nothing`);
-        return null;
-      }
-      patched = next;
-    }
-    const p = path.join(repo, `pre-push.prefix-${tag}`);
-    fs.writeFileSync(p, patched); fs.chmodSync(p, 0o755);
-    return p;
-  };
+  const { repo, ZERO, runHookRefs, runHook, hookSrc, preFixHook } = hookRig('hook');   // the kit's rig (moved there — B-e381 r6: test-ci-gate-hook-env drives it too)
   // The docs-only block, verbatim, so the "it used to exit before asking"
   // control can put it back where it was instead of approximating it.
   const DOCS_ONLY_BLOCK = 'if [ "$only_docs" = "1" ] && [ "${#REFS[@]}" -gt 0 ]; then\n  echo "[ci] docs-only push — fast tier skipped" >&2\n  exit 0\nfi\n';
   const HEAVY_FIRST_ANCHOR = '# ── HEAVY-TIER VERDICT FIRST (2026-09-07) ─';
-  const runHook = (localSha, remoteSha = ZERO, env = {}) =>
-    runHookRefs(`refs/heads/main ${localSha} refs/heads/main ${remoteSha}\n`, env);
 
   const A = commit(repo, 'src/a.js', '//a\n', 'A');
   const r1 = runHook(A);
@@ -173,82 +122,6 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
   fs.writeFileSync(stubPath, stubSrc);
   ok(stubSrc.includes("const KNOWN = ['keep-going'];") && rOld.status === 0 && fastOf(rOld).length === 1 && fastOf(rOld)[0].keepGoing === false && /has no --keep-going \(an older tree\) — its fast tier stops at the first red/.test(rOld.out),
     'B-6e71: a checkout whose ci.mjs predates the flag runs the fast tier WITHOUT it (no false GATE RED) and says so', { status: rOld.status, calls: rOld.calls });
-  // B-e381 part 2 (主开发 r962): THE TIERS RUN IN THE HOOK'S OWN ENV. A push from an interactive shell — its search path carrying
-  // a checkout's data/bin and the agent programs' folder, its own NODE_OPTIONS, a session token, the real turn's token, a shell's
-  // own variable — must not reach a tier: every fast call and the full launcher are born under `env -i` with the allowlist (a
-  // PRIVATE folder holding only node / npm / npx, then the system folders; the service env's names + TZ + the tier's knobs BY
-  // NAME; VS_NO_REAL_CLI=1 and VIBESPACE_SKIP_AGENT_HOOKS=1 as the cut scripts set them), and the hook says which node and which
-  // path in one line. RED: a copy of the hook with today's pass-through (no env prefix) hands the planted env through.
-  {
-    const realNode = fs.realpathSync(process.execPath), nodeDir = path.dirname(process.execPath);
-    const shellBin = mktmp('e381-shell-bin'), agentBin = mktmp('e381-agent-bin');   // real dirs, no node in them
-    const PLANT = { PATH: `${shellBin}:${agentBin}:${nodeDir}:/usr/bin:/bin`, NODE_OPTIONS: '--max-old-space-size=64', VIBESPACE_SESSION_TOKEN: 'vsst_' + 'planted', VIBESPACE_CI_OAT: 'oat-' + 'planted', E381_SHELL_ADDITION: '1', VIBESPACE_CI_FAST_LANES: '2', LC_TIME: 'C.UTF-8' };
-    const keyed = new RegExp(`^${hookNodeDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\d+$`), hookTZ = ({ ...GIT_ENV, ...PLANT }).TZ;   // ONE folder per node, in this run's scratch
-    const tierPathOf = (c) => (c && c.path ? c.path.split(':') : []);
-    const clean = (c) => !!c && keyed.test(tierPathOf(c)[0]) && tierPathOf(c).slice(1).join(':') === '/usr/local/bin:/usr/bin:/bin' && !c.keys.includes('NODE_OPTIONS') && !c.keys.includes('VIBESPACE_SESSION_TOKEN') && !c.keys.includes('VIBESPACE_CI_OAT') && !c.keys.includes('E381_SHELL_ADDITION')
-      && !c.keys.some((k) => /^GIT_/.test(k)) && c.keys.includes('VS_NO_REAL_CLI') && c.keys.includes('VIBESPACE_SKIP_AGENT_HOOKS') && c.keys.includes('VIBESPACE_CI_FAST_LANES') && c.keys.includes('LC_TIME') && (!hookTZ || c.keys.includes('TZ'));
-    const B = commit(repo, 'src/e381.js', '//e381\n', 'E381 — a push from an interactive-looking shell');
-    const rEnv = runHook(B, ZERO, PLANT);
-    const fe = fastOf(rEnv)[0], he = rEnv.calls.find((c) => c.mode === 'heavy-launch');
-    const said = (rEnv.out.split('\n').find((l) => l.startsWith("[ci] the tiers run in the hook's own env:")) || '');
-    const privateBin = tierPathOf(fe)[0] || '', tierPath = fe ? fe.path : '';
-    const linked = (() => { try { return fs.readlinkSync(path.join(privateBin, 'node')); } catch { return null; } })();
-    const holds = (() => { try { return fs.readdirSync(privateBin).sort(); } catch { return []; } })();
-    console.log(`    judged (the tier env): ${said} · fast PATH ${fe && fe.path} · heavy-launch PATH ${he && he.path} · fast keys ${fe ? fe.keys.join(',') : '(none)'} · ${privateBin}/node → ${linked}`);
-    ok(rEnv.status === 0 && clean(fe) && clean(he) && he.path === fe.path && linked === realNode && holds.includes('node') && holds.every((n) => ['node', 'npm', 'npx'].includes(n)),
-      'B-e381: a push from an interactive-looking shell — its data/bin and agent-programs dirs, NODE_OPTIONS, a session token, the real turn\'s token, a shell variable — reaches neither the fast tier nor the full launcher: both are born with a private folder holding only node (its real file) + the system folders, the service env\'s names + TZ, the tier\'s knob by name and the cut scripts\' two switches', { status: rEnv.status, fast: fe, heavy: he, linked });
-    ok(said === `[ci] the tiers run in the hook's own env: node ${realNode} (${process.version}) · PATH ${tierPath}${hookTZ ? ` · TZ=${hookTZ}` : ''} (B-e381: no shell additions)`,
-      'B-e381: the hook says in ONE line which node (its version) and which search path its tiers run under', said);
-    const altDir = mktmp('e381-other-node'), alt = path.join(altDir, 'node');
-    fs.writeFileSync(alt, `#!/bin/sh\nexec ${JSON.stringify(realNode)} "$@"\n`); fs.chmodSync(alt, 0o755);
-    const rAlt = runHook(B, ZERO, { ...PLANT, PATH: `${altDir}:${PLANT.PATH}` });
-    const fa = fastOf(rAlt)[0], altBin = tierPathOf(fa)[0] || '';
-    ok(rAlt.status === 0 && keyed.test(altBin) && altBin !== privateBin && fs.readlinkSync(path.join(altBin, 'node')) === fs.realpathSync(alt) && fs.readlinkSync(path.join(privateBin, 'node')) === realNode,
-      'B-e381: a push with ANOTHER node gets its own folder — the first one\'s link (a full tier may still run on it) is never swapped', { altBin, privateBin });
-    // the folder is trusted only as it was made: a root that is a LINK, and a node's folder holding anything more, are refused
-    const realRoot = mktmp('e381-real-root'), linkRoot = path.join(mktmp('e381-link-root'), 'root');
-    fs.symlinkSync(realRoot, linkRoot);
-    const rLink = runHook(B, ZERO, { ...PLANT, VIBESPACE_HOOK_NODE_DIR: linkRoot });
-    fs.writeFileSync(path.join(privateBin, 'git'), '#!/bin/sh\n');
-    const rExtra = runHook(B, ZERO, PLANT);
-    fs.rmSync(path.join(privateBin, 'git'), { force: true });
-    ok(rLink.status === 1 && /REFUSED — the tiers' private node folder .* is a link, writable by others or not this user's own: nothing was judged/.test(rLink.out) && !fastOf(rLink).length
-      && rExtra.status === 1 && /REFUSED — .* does not hold exactly this push's node .* and its npm \/ npx: nothing was judged/.test(rExtra.out) && !fastOf(rExtra).length,
-      'B-e381: a private-folder root that is a link, and a node folder holding one more entry (a planted git), are REFUSED by name — no tier ran', { link: rLink.out.slice(-200), extra: rExtra.out.slice(-200) });
-    const passThrough = preFixHook('e381-pass-through',
-      ['      "${tier_env[@]}" node scripts/ci.mjs $kg || {', '      node scripts/ci.mjs $kg || {'],
-      ['  "${tier_env[@]}" node scripts/ci.mjs --heavy-launch', '  node scripts/ci.mjs --heavy-launch']);
-    if (passThrough) {
-      const rOldEnv = runHookRefs(`refs/heads/main ${B} refs/heads/main ${ZERO}\n`, PLANT, passThrough);
-      const fo = fastOf(rOldEnv)[0], ho = rOldEnv.calls.find((c) => c.mode === 'heavy-launch');
-      ok(!!fo && !!ho && fo.path.startsWith(`${shellBin}:${agentBin}:`) && fo.keys.includes('NODE_OPTIONS') && fo.keys.includes('VIBESPACE_CI_OAT') && ho.keys.includes('E381_SHELL_ADDITION'),
-        'B-e381 CONTROL (today\'s pass-through, in a copy of the hook): the planted shell env — its search path, NODE_OPTIONS, the tokens, the shell variable — reaches the tiers', { fast: fo && fo.path, heavy: ho && ho.keys });
-    }
-    // the CENSUS: every line of the hook that launches a TIER (a ci.mjs call that is no --check-heavy read) is born under tier_env —
-    // a fifth launch added tomorrow without it is red by name; its control drops the prefix from the isolated call
-    const tierCalls = (src) => src.split('\n').filter((l) => !/^\s*#/.test(l) && /\bnode scripts\/ci\.mjs\b/.test(l) && !/--check-heavy\b/.test(l.split('||')[0]));
-    const unprefixed = (src) => tierCalls(src).filter((l) => !/"\$\{tier_env\[@\]\}" node scripts\/ci\.mjs\b/.test(l));
-    ok(/vendor turn skipped by name, as at a cut — B-e381:\n#[^\n]*nothing of ours bills a turn nobody typed; the turn\n#[^\n]*is proven once a run by the HOSTED fast job, the part\n#[^\n]*holding test-chat-e2e, with VIBESPACE_CI_OAT — ci\.yml\)/.test(hookSrc),
-      'B-e381 (r1037): the hook\'s head says its one real turn is skipped by name and WHERE it is still proven (the hosted fast job\'s part holding test-chat-e2e)');
-    ok(tierCalls(hookSrc).length === 4 && unprefixed(hookSrc).length === 0, `B-e381 census: the hook's tier launches are ${tierCalls(hookSrc).length} (three fast calls, the full launcher), each under tier_env`, unprefixed(hookSrc));
-    const bare = hookSrc.replace('"${tier_env[@]}" node scripts/ci.mjs --isolate', 'node scripts/ci.mjs --isolate');
-    ok(bare !== hookSrc && unprefixed(bare).length === 1 && /--isolate/.test(unprefixed(bare)[0]), 'B-e381 census CONTROL: the hook with the isolated call outside tier_env is refused, naming that line');
-    // no node on the push's path ⇒ refused by name, nothing judged (never a «GATE RED» about the tree)
-    // no node on the push's path ⇒ REFUSED by name at the hook's TOP — DRIVEN on every machine (主开发 r1039's law): a planted search
-    // path holding only bash and git (the hook's first line needs git; nothing else runs before the refusal), never a node.
-    // CONTROL: the hook with that refusal cut does not say it (its secret scan then dies on the missing node: another failure)
-    const noNodeBin = mktmp('e381-no-node-bin');
-    for (const t of ['bash', 'git']) { const at = ['/usr/local/bin', '/usr/bin', '/bin'].map((d) => path.join(d, t)).find((f) => fs.existsSync(f)); if (at) fs.symlinkSync(at, path.join(noNodeBin, t)); }
-    const NOREF = "[ci] REFUSED — no node on this push's PATH: the gate cannot run, nothing was judged";
-    const rNoNode = runHookRefs(`refs/heads/main ${B} refs/heads/main ${ZERO}\n`, { PATH: noNodeBin });
-    ok(fs.existsSync(path.join(noNodeBin, 'git')) && rNoNode.status === 1 && rNoNode.out.includes(NOREF) && !rNoNode.calls.length,
-      'B-e381: no node on the push\'s path is REFUSED by name at the hook\'s top — no step ran (no false GATE RED, no «could not read»), driven on every machine', { status: rNoNode.status, out: rNoNode.out.slice(-300) });
-    const cutRefusal = preFixHook('e381-no-node-cut', [`command -v node >/dev/null 2>&1 || { echo "${NOREF}" >&2; exit 1; }\n`, '']);
-    if (cutRefusal) {
-      const rCut = runHookRefs(`refs/heads/main ${B} refs/heads/main ${ZERO}\n`, { PATH: noNodeBin }, cutRefusal);
-      ok(!rCut.out.includes(NOREF) && rCut.status !== 0, 'B-e381 CONTROL (the top refusal cut, in a copy of the hook): the same push says no such words — it fails elsewhere, for another reason', { status: rCut.status, out: rCut.out.slice(-200) });
-    }
-  }
   ok(r1.calls.map((c) => c.mode).join(',') === 'check-heavy,fast,heavy-launch',
     `the hook checks the heavy verdict FIRST, then runs fast, then launches heavy (got: ${r1.calls.map((c) => c.mode).join(',')})`);
   ok(r1.calls.find((c) => c.mode === 'heavy-launch')?.sha === A, 'the heavy run is launched for the sha being PUSHED');
@@ -462,7 +335,7 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
   // table's own suite sources plus src/agent-routes.js's AGENT_DOC_TOPICS, and
   // classified by running the hook's OWN `is_code_path` — no re-spelling of
   // the pattern, so drift in either direction is caught.
-  {
+  if (!DEEP) inTwin('round 5 (a): the gate-input docs derived from the table\'s own suite sources and classified by the hook\'s own is_code_path'); else {
     const scratch = mktmp('classify');
     /** The `name() { … }` function, verbatim, out of the tracked hook. */
     const hookFn = (name, src) => {
@@ -653,7 +526,7 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
   }
 
   // ── ROUND 5 (b): A GATE-INPUT DOC PUSH RUNS THE TIER, END TO END ──────
-  {
+  if (!DEEP) inTwin('round 5 (b): a gate-input doc push runs the tier, end to end (four pushes and the NEG copy)'); else {
     git(repo, ['checkout', '-q', '-b', 'docsinput', SIDE]);
     const BASE5 = commit(repo, 'src/base5.js', '//base\n', 'the commit the docs legs below sit on');
     const KB = commit(repo, 'docs/kb-file-structure.md', '# kb\n', 'kb only — this branch\'s own tip shape');
@@ -688,7 +561,7 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
   // the working tree. Reproduced: standing on `marked`, pushing `ungated`
   // (tip F adds src/broken.js) ⇒ the tier ran in a tree without that file and
   // said ALL GREEN. r13 above proved a fast run HAPPENED — never its SUBJECT.
-  {
+  if (!DEEP) inTwin('round 5 (c): the fast tier gates the commit being pushed (a tip that is not HEAD, --isolate, its NEG copy)'); else {
     git(repo, ['checkout', '-q', '-b', 'elsewhere5', SIDE]);
     const STANDING = commit(repo, 'src/standing.js', '//the tree we have checked out\n', 'STANDING — where the developer is');
     git(repo, ['checkout', '-q', '-b', 'ungated5', SIDE]);
@@ -729,7 +602,7 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
   // The other refs are not ungated: `--heavy-launch` still runs for every
   // pushed sha, which is the tier that gives a multi-ref push its per-commit
   // coverage — and the hook SAYS which commits the fast tier did not look at.
-  {
+  if (!DEEP) inTwin('round 6: one fast subject per push (the multi-ref pushes and their NEG copy)'); else {
     git(repo, ['checkout', '-q', '-b', 'multi6', SIDE]);
     const M_HEAD = commit(repo, 'src/m-head.js', '//head\n', 'M_HEAD — the commit we are standing on');
     git(repo, ['checkout', '-q', '-b', 'multi6b', SIDE]);

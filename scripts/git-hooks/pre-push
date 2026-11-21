@@ -270,7 +270,8 @@ fi
 #    (keyed by its real path), made whole and moved in at once, never relinked — so the detached full tier keeps it after
 #    this hook exits and a second push with another node never swaps it. The tree pins no node: the pushing shell's, said.
 #    VIBESPACE_HOOK_NODE_DIR moves the folder's root — the test seam: the suites that run this hook point it into their scratch.
-#    A node that does not run under this env (a version manager's shim) is refused at the banner, by name.
+#    A node that does not run under this env (a version manager's shim) is refused at the banner, by name; its version call
+#    there is bounded (timeout -k 2 10 — coreutils, on the tier path).
 #  - the names kept are the service env's (HOME, LANG, LC_*, TMPDIR, XDG_RUNTIME_DIR, TERM) + USER / LOGNAME + TZ (a push
 #    that mirrors the hosted runner's zone keeps it) + VS_CHROME + the tier's own knobs BY NAME (never a token: the real
 #    turn's VIBESPACE_CI_OAT stays out, and VIBESPACE_CI_RUN, ci.mjs's own); the switches are the cut scripts': VS_NO_REAL_CLI=1 (the one real vendor turn is
@@ -317,8 +318,8 @@ done
 for v in $(compgen -e); do
   case "$v" in LC_*) tier_env+=("$v=${!v}") ;; esac
 done
-tier_ver="$(env -i "PATH=$tier_path" HOME="${HOME:-/}" "$tier_bin/node" --version 2>/dev/null || true)"
-case "$tier_ver" in v[0-9]*) ;; *) echo "[ci] REFUSED — the node this push resolves ($tier_node → $tier_real) does not run under the tiers' own env (a version manager's shim needs its manager on PATH): point PATH at a real node and push again — nothing was judged" >&2; exit 1 ;; esac
+tier_ver="$(env -i "PATH=$tier_path" HOME="${HOME:-/}" timeout -k 2 10 "$tier_bin/node" --version 2>/dev/null || true)"   # bounded: timeout is coreutils, on the tier path; -k: a shim deaf to TERM is KILLed
+case "$tier_ver" in v[0-9]*) ;; *) echo "[ci] REFUSED — the node this push resolves ($tier_node → $tier_real) does not run under the tiers' own env (a version manager's shim needs its manager on PATH; its --version has 10 s): point PATH at a real node and push again — nothing was judged" >&2; exit 1 ;; esac
 echo "[ci] the tiers run in the hook's own env: node $tier_real ($tier_ver) · PATH $tier_path${TZ:+ · TZ=$TZ} (B-e381: no shell additions)" >&2
 
 # GREEN MARKER (2.369.51): scripts/ci.mjs writes .git/ci-green = "<sha> <epoch-ms>"
