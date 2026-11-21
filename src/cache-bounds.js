@@ -87,24 +87,27 @@ function evictLru(map, { maxBytes = Infinity, maxEntries = Infinity, sizeOf }) {
  *  entry). The LIVE set has its own ceiling liveMaxBytes — r4 (verify #3): ADMISSION, not cyclic eviction:
  *  past it the NEWEST entry (the one just put) is served but not kept (notAdmitted), so a cyclic working set
  *  larger than the ceiling keeps hitting on the kept part; only if still over (an entry grew) do the
- *  oldest-touched live entries go (liveEvicted). → {bytes, evicted, live, liveBytes, liveEvicted, notAdmitted}. */
-function evictIdle(map, { floorBytes = Infinity, maxEntries = Infinity, idleMs = Infinity, liveMaxBytes = Infinity, now = 0, sizeOf, usedAt }) {
+ *  oldest-touched live entries go (liveEvicted). → {bytes, evicted, live, liveBytes, liveEvicted, notAdmitted}.
+ *  B-360d (A) (主开发 r1358): `held(key)` — a key the caller HOLDS (a window open on it, a turn running) is live whatever its
+ *  last read; the live ceiling still bounds it. A caller with no newcomer (the memory census's tick) passes liveMaxBytes:
+ *  Infinity: only the idle trim runs (the admission step judges the NEWEST entry, which a tick never put). */
+function evictIdle(map, { floorBytes = Infinity, maxEntries = Infinity, idleMs = Infinity, liveMaxBytes = Infinity, now = 0, sizeOf, usedAt, held = null }) {
   // (the newest entry is admitted unless the live set would pass its ceiling — see below)
   let bytes = 0, live = 0, liveBytes = 0;
-  const isLive = (v) => now - (usedAt(v) || 0) < idleMs;
-  for (const v of map.values()) { const b = sizeOf(v) || 0; bytes += b; if (isLive(v)) { live++; liveBytes += b; } }
+  const isLive = (k, v) => (typeof held === 'function' && !!held(k)) || now - (usedAt(v) || 0) < idleMs;
+  for (const [k, v] of map) { const b = sizeOf(v) || 0; bytes += b; if (isLive(k, v)) { live++; liveBytes += b; } }
   let evicted = 0, liveEvicted = 0, notAdmitted = 0;
   for (const [k, v] of [...map]) { // idle first, oldest first
     if (map.size <= 1) break;
-    if (isLive(v)) continue;
+    if (isLive(k, v)) continue;
     if (bytes > floorBytes || map.size > maxEntries) { map.delete(k); bytes -= sizeOf(v) || 0; evicted++; }
   }
   if (liveBytes > liveMaxBytes && map.size > 1) { // admission: the newcomer is not kept
     const k = [...map.keys()].pop(), v = map.get(k);
-    if (isLive(v)) { const b = sizeOf(v) || 0; map.delete(k); bytes -= b; liveBytes -= b; live--; notAdmitted++; }
+    if (isLive(k, v)) { const b = sizeOf(v) || 0; map.delete(k); bytes -= b; liveBytes -= b; live--; notAdmitted++; }
   }
   if (liveBytes > liveMaxBytes) {
-    const order = [...map].filter(([, v]) => isLive(v)).sort((x, y) => (usedAt(x[1]) || 0) - (usedAt(y[1]) || 0));
+    const order = [...map].filter(([k, v]) => isLive(k, v)).sort((x, y) => (usedAt(x[1]) || 0) - (usedAt(y[1]) || 0));
     for (const [k, v] of order) {
       if (liveBytes <= liveMaxBytes || map.size <= 1) break;
       const b = sizeOf(v) || 0;
@@ -374,10 +377,13 @@ class HashIndex {
 }
 
 /** A census row. bytes in the CEILING's unit (unit says which); kind = where it lives: 'heap' (counted in
- *  the main heap) or 'arraybuffers' (typed-array stores, counted in External). over = past the ceiling. */
-function cacheRow(name, { bytes = 0, count = 0, unit = 'entries', ceiling = null, kind = 'heap', basis = 'bytes', live = null } = {}) {
+ *  the main heap) or 'arraybuffers' (typed-array stores, counted in External). over = past the ceiling.
+ *  B-360d (A) (主开发 r1358): A STATED CEILING SAYS WHAT ENFORCES IT — `enforced` = { by: [the functions that hold the row to its
+ *  ceiling], when: words } or { not: why it is not enforced, and whose it is }. test-cache-bounds §5b sweeps every row the hub
+ *  states: a ceiling with neither is red by name. */
+function cacheRow(name, { bytes = 0, count = 0, unit = 'entries', ceiling = null, kind = 'heap', basis = 'bytes', live = null, enforced = null } = {}) {
   const b = Math.max(0, Math.round(Number(bytes) || 0));
-  return { name: String(name), bytes: b, count: Math.max(0, Number(count) || 0), unit, ceiling, kind, basis, live, over: !!(ceiling && b > ceiling) };
+  return { name: String(name), bytes: b, count: Math.max(0, Number(count) || 0), unit, ceiling, kind, basis, live, enforced, over: !!(ceiling && b > ceiling) };
 }
 
 module.exports = {

@@ -643,10 +643,11 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const sidC = `cccccccc-0000-4000-8000-0000000c${String(k).padStart(4, '0')}`, fC = path.join(projDir, sidC + '.jsonl');
       fs.writeFileSync(fC, Array.from({ length: NC }, (_, i) => JSON.stringify({ uuid: `pc${k}-${i}`, timestamp: T1, type: 'assistant', message: { id: `msg_pc${k}_${i}`, role: 'assistant', content: [{ type: 'text', text: 'x' }] } })).join('\n') + '\n');
       await M.warmSessionJsonlAsync(sidC, cwd);
-      const before = M.jsonlCacheCensus(), ix0 = M._jsonlPosCensus();
+      const tails = () => { const r = M.jsonlCacheCensus(); const rows = Array.isArray(r) ? r : [r]; return { bytes: rows.reduce((a, x) => a + x.bytes, 0), basis: rows.map((x) => x.basis).join(' · ') }; };   // B-360d (A): the idle and live rows together
+      const before = tails(), ix0 = M._jsonlPosCensus();
       const session = { backend: 'claude', backendSessionId: sidC, claudeSessionId: sidC, cwd, buffer: JSON.stringify({ uuid: `pcb${k}`, timestamp: T3, type: 'assistant', message: { id: `msg_pcb${k}`, role: 'assistant', content: [{ type: 'text', text: 'live' }] } }) + '\n' };
       new M.SessionMessages(session, null, { buffersDir: path.join(os.homedir(), 'buf'), permissionModes: [] }).raw();   // the merge builds the tail's index
-      const after = M.jsonlCacheCensus(), ix = M._jsonlPosCensus();
+      const after = tails(), ix = M._jsonlPosCensus();
       return { grew: after.bytes - before.bytes, keys: ix.keys - ix0.keys, ords: ix.ords - ix0.ords, ixBytes: ix.bytes - ix0.bytes, basis: after.basis };
     };
     const c = await sceneC(SS, 1), r = await sceneC(RelC, 2);
@@ -747,7 +748,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     const want = [[1, 0], [0, 1], [0, 1], [0, 1], [1, 0], [1, 0], [1, 0], [1, 0], [1, 0], [1, 0]];
     ok(cure.every((s, i) => s.scans === want[i][0] && s.kept === want[i][1]), `⑧ COUNTS — walked / kept per step: ${cure.map((s) => `${s.scans}/${s.kept}`).join(' · ')} (a re-attach of an unchanged conversation walks nothing; a plain append, a task append, the live buffer, the wrapper's restart, the task events read again and the task events changed each rescan)`, cure.map((s) => [s.step, s.scans, s.kept]));
     ok(cure[3].answer === cure[0].answer, '⑧ a caller that changes its copy changes nobody else\'s: the next attach answers the first answer');
-    const ts = SS._taskStateCensus(), row = SS.jsonlCacheCensus();
+    const ts = SS._taskStateCensus(), row = [].concat(SS.jsonlCacheCensus()).pop();   // B-360d (A): two rows (idle, live): the kept answers ride the LIVE row, with the indexes
     ok(ts.answers >= 1 && ts.rows > 0 && ts.bytes === ts.rows * 160 && /kept task-state answers \(\d+, \d+ entries/.test(row.basis), `⑧ the kept answers are in the transcript tails' census row (${ts.answers} kept, ${ts.rows} entries ≈ ${ts.bytes} B): «${row.basis.slice(0, 200)}»`, ts);
     // RED CONTROLS — each a copy of the cure with ONE thing cut
     const R1 = await scenario(M8.load('src/session-store.js', anchored(SRC8, KEPT_HIT, '', 'no kept answer'), 'no-kept-answer'));

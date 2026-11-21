@@ -552,6 +552,21 @@ const { evictIdle, cacheRow, JSONL_CACHE_MAX_BYTES, JSONL_CACHE_IDLE_MS, JSONL_C
 const _jsonlBytes = (e) => (e && e.spanEnd != null && e.spanStart != null ? e.spanEnd - e.spanStart : (e && e.size) || 0);
 let _jsonlResident = 0, _jsonlLive = 0, _jsonlLiveEvicted = 0;
 const _jsonlUsed = new WeakMap(); // entry → last touched (ms)
+// B-360d (A) (主开发 r1358): WHAT «TOUCHED» MEANS — a tail is LIVE (kept whatever the 128 MB idle floor says) while:
+//   · it was READ through this cache in the last 10 min: an attach (a live session's or a history window's), a page-up or
+//     page-down (/api/session-messages), a WS reconnect's re-attach, the search and turn-map reads; OR
+//   · its conversation is HELD: a window is open on it (a client attached to the live session, or a history window opened
+//     by a socket still open — a draw in the page never reaches the server, so the open window itself is what counts),
+//     or a TURN IS RUNNING on it (session._isStreaming). The live set's own ceiling (512 MB) still bounds the held ones.
+// The idle floor is enforced at every put AND at the memory census's tick (jsonlCacheTrim — server/memory-enforce.js),
+// so an idle set is at its floor within a minute of going idle, never «at the next put».
+let _jsonlHeldFn = () => null;   // → a Set of held conversation ids (server/memory-enforce.js wires it), or null
+const _jsonlViews = new Map();   // a socket → the conversation ids of the history windows it opened (dropped at its close)
+function setJsonlHeld(fn) { _jsonlHeldFn = typeof fn === 'function' ? fn : () => null; }
+function noteJsonlView(ws, id) { if (!ws || !id) return; let s = _jsonlViews.get(ws); if (!s) { s = new Set(); _jsonlViews.set(ws, s); } s.add(String(id)); }
+function dropJsonlViews(ws) { _jsonlViews.delete(ws); }
+/** the conversation ids held now: the live sessions' (from the wiring) + every history window an open socket holds */
+function _jsonlHeldNow() { let h = null; try { h = _jsonlHeldFn(); } catch { h = null; } const out = new Set(h || []); for (const s of _jsonlViews.values()) for (const id of s) out.add(id); return out; }
 // A grown file the ASYNC warm folds in inline (on the loop) instead of handing
 // a full re-parse to the worker: the append is the only work, bounded here.
 const WARM_INLINE_APPEND_MAX = 4 * 1024 * 1024;
@@ -560,16 +575,37 @@ function _jsonlCachePut(id, entry) {
   _jsonlCache.delete(id);
   _jsonlCache.set(id, entry);
   _jsonlUsed.set(entry, Date.now());
-  const r = evictIdle(_jsonlCache, { floorBytes: JSONL_CACHE_MAX_BYTES, maxEntries: JSONL_CACHE_MAX, idleMs: JSONL_CACHE_IDLE_MS, liveMaxBytes: JSONL_LIVE_MAX_BYTES, now: Date.now(), sizeOf: _jsonlBytes, usedAt: (e) => _jsonlUsed.get(e) });
+  const held = _jsonlHeldNow();
+  const r = evictIdle(_jsonlCache, { floorBytes: JSONL_CACHE_MAX_BYTES, maxEntries: JSONL_CACHE_MAX, idleMs: JSONL_CACHE_IDLE_MS, liveMaxBytes: JSONL_LIVE_MAX_BYTES, now: Date.now(), sizeOf: _jsonlBytes, usedAt: (e) => _jsonlUsed.get(e), held: (k) => held.has(k) });
   _jsonlResident = r.bytes; _jsonlLive = r.live; _jsonlLiveEvicted += r.liveEvicted;
 }
+/** B-360d (A): THE MEMORY CENSUS'S TICK — the idle trim with no newcomer (a cache drop: nothing read, nothing asked). The live
+ *  set is untouched (its ceiling is the put's admission). → { evicted, freedBytes, ms, entries } — a walk of the map (≤ 30 idle
+ *  entries + the live ones), no parse. */
+function jsonlCacheTrim(now = Date.now()) {
+  const t0 = performance.now(), before = _jsonlResident, held = _jsonlHeldNow();
+  const r = evictIdle(_jsonlCache, { floorBytes: JSONL_CACHE_MAX_BYTES, maxEntries: JSONL_CACHE_MAX, idleMs: JSONL_CACHE_IDLE_MS, liveMaxBytes: Infinity, now, sizeOf: _jsonlBytes, usedAt: (e) => _jsonlUsed.get(e), held: (k) => held.has(k) });
+  _jsonlResident = r.bytes; _jsonlLive = r.live;
+  return { evicted: r.evicted, freedBytes: Math.max(0, before - r.bytes), ms: performance.now() - t0, entries: _jsonlCache.size };
+}
+/** (a suite's) a parsed tail of `bytes` put as if last read at `usedAt` — the trim's and the rows' legs over this very map */
+function jsonlHas(id) { return _jsonlCache.has(id); }
+function jsonlCacheTestPut(id, bytes, usedAt = Date.now()) { const e = { spanStart: 0, spanEnd: bytes }; _jsonlCachePut(id, e); _jsonlUsed.set(e, usedAt); return e; }
 /** The census row (tail bytes ≈ the parsed messages' share of the heap) + the position indexes their merges keep (the agy
  *  chain's cure: that memory was out of sight) — an index lives beside its tail's array, so the row counts it with them. */
-function jsonlCacheCensus() {
-  const ix = jsonlPosCensus(), ts = taskStateCensus();
+function jsonlCacheCensus(now = Date.now()) {
+  const ix = jsonlPosCensus(), ts = taskStateCensus();   // the root's kept task-state answers (B-360d part 2) ride the live row with the indexes
+  // B-360d (A) (主开发 r1358): TWO ROWS, each judged against its own ceiling — the idle set's 128 MB floor and the live set's 512 MB
+  // (the one row said «ceiling 128 · OVER» for a live set the code lawfully keeps, and nothing of how long an idle set stayed over)
+  const held = _jsonlHeldNow(); let idleB = 0, idleN = 0, liveB = 0, liveN = 0;
+  for (const [k, e] of _jsonlCache) { const b = _jsonlBytes(e); if (held.has(k) || now - (_jsonlUsed.get(e) || 0) < JSONL_CACHE_IDLE_MS) { liveB += b; liveN++; } else { idleB += b; idleN++; } }
+  const idleRow = cacheRow('transcript tails (idle)', { bytes: idleB, count: idleN, unit: 'entries', ceiling: JSONL_CACHE_MAX_BYTES, enforced: { by: ['_jsonlCachePut', 'jsonlCacheTrim'], when: 'at every put, and at the memory census tick (a minute): idle tails go oldest-first past the floor' }, basis: `tails not read for ${JSONL_CACHE_IDLE_MS / 60e3} min and not held (no window open on them, no turn running)` });
+  const liveRow = cacheRow('transcript tails (live)', { bytes: liveB, count: liveN, unit: 'entries', ceiling: JSONL_LIVE_MAX_BYTES, enforced: { by: ['_jsonlCachePut'], when: 'at every put: past the ceiling a newcomer is served and not kept, then the oldest-touched go' }, basis: `tails read in the last ${JSONL_CACHE_IDLE_MS / 60e3} min or held (a window open, a turn running)` });
   const row = cacheRow('transcript tails', { bytes: _jsonlResident + ix.bytes + ts.bytes, count: _jsonlCache.size, unit: 'entries', ceiling: JSONL_CACHE_MAX_BYTES, basis: `tail bytes + their position indexes (${ix.keys} keys, ${ix.ords} ordinals ≈ ${Math.round(ix.bytes / 1024)} KB, estimated at ${POS_KEY_BYTES} B a key + ${POS_ORD_BYTES} B an ordinal) + the kept task-state answers (${ts.answers}, ${ts.rows} entries ≈ ${Math.round(ts.bytes / 1024)} KB at ${TASK_ROW_BYTES} B an entry; an answer whose tail was evicted while a reader still holds its records lives with that reader, uncounted) (128 MB floor for idle tails; the live set ≤ ${JSONL_LIVE_MAX_BYTES / 1048576} MB${_jsonlLiveEvicted ? ', ' + _jsonlLiveEvicted + ' live tails evicted past it' : ''})`, live: _jsonlLive });
   row.over = !!(JSONL_CACHE_MAX_BYTES && _jsonlResident > JSONL_CACHE_MAX_BYTES);   // its read (S3): OVER is judged on what the bound counts (the tails), never on the index estimate
-  return row;
+  // the position indexes ride the live row (they live beside their tails' arrays); OVER stays judged on the tails alone
+  liveRow.bytes += Math.max(0, row.bytes - _jsonlResident); liveRow.basis += ` + their position indexes (${ix.keys} keys ≈ ${Math.round(ix.bytes / 1048576)} MB) — ${row.basis}`;
+  return [idleRow, liveRow];
 }
 function _stampJsonlParse(bytes, ms) {
   global.__vsMetric?.('srv-jsonl-parse-bytes', bytes);
@@ -1827,7 +1863,7 @@ function dedupWebuiSockets(entries) {
   return { winners, retire };
 }
 
-module.exports = { claudeTranscriptIndex, stuckSaid,
+module.exports = { setJsonlHeld, noteJsonlView, dropJsonlViews, jsonlCacheTrim, jsonlCacheTestPut, jsonlHas, claudeTranscriptIndex, stuckSaid,
   warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus,
   taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache, _mergeCounts, _taskScanCounts, _taskStateCensus: taskStateCensus, _spanFromStart: spanFromStart, _jsonlPosOf: jsonlPosOf, _userAtOrAfter: userAtOrAfter, _jsonlPosCensus: jsonlPosCensus, POS_KEY_BYTES, POS_ORD_BYTES,
   extractSessionMeta,

@@ -989,6 +989,7 @@
 - (2026-11-20) A WINDOW THAT FINISHED OPENING TOOK THE KEYBOARD FROM THE WINDOW THE PERSON CLICKED MEANWHILE — typing went unseen into the other conversation (B-c87d). 不变量 = a late focus asks ONE door; a race lost is dropped ⇒ kb-bugfix-invariants
 - (2026-11-21) THE CUT RACE in test-codex-effort-meta ⑩ (B-1217 / B-3a3c): its claim checks read the integration branch per call — a cut mid-run judged two branches. 不变量 = ONE commit read, the reads counted (one log, REF only to rev-parse) ⇒ kb-bugfix-invariants
 - (2026-11-21) THE HOURLY JOB-LOG CLEAN-UP FORKED ITS REMOVER FROM THE HUB (B-323e). 不变量 = one child a batch through the starter, no IPC; names in its arguments ≤ 32 KiB, else its request file; a count file read with a bound (missing or torn = unknown), counted once ⇒ kb-file-structure
+- (2026-11-21) THE MEMORY CENSUS SAID «TRANSCRIPT TAILS 276/128 MB · OVER» AND NOTHING ENFORCED THE 128 (B-360d (A)): the idle floor was trimmed only at a put; the live set lawfully holds 512. 不变量 = every stated ceiling is enforced where stated or says «not enforced». (kb-bugfix-invariants)
 
 ## AN OLD ENGINE'S RAW «>» IN A TITLE ENDED THE ANCHOR TAG THREE PASSES READ (lane setting-doors, the acceptance's F4, 2026-11-15)
 
@@ -10609,3 +10610,28 @@ Found by reading during the 2.369.412 release red of test-internal-links-chrome 
     - §L over the stand-in vendor with a placed clock: the 11-minute press and the agent's 11-minute `--full` ask again, and a slow account's page counts from its answer;
     - RED controls: the release's road (every read a look), the life counted from the press, and the PURE row removed.
   - test-channels-agent-cli ㉒: the CLI's note inside the life, then the account asked again 11 minutes later.
+
+## THE MEMORY CENSUS SAID «TRANSCRIPT TAILS 276/128 MB · OVER» — AND NOTHING ENFORCED THE 128 (B-360d (A), lane gmail-connect-wall, 2026-11-21; 主开发 r1320 / r1358)
+
+- **What was measured** (the test machine, a scratch hub on 2.369.414, 30 history windows attached):
+  - the tails' cache held 276 MB, and the census row said «ceiling 128 · OVER»;
+  - eleven idle minutes with no put: still 276 MB;
+  - one put (a 31st window): 110 MB;
+  - the trim plus a full GC took the hub's RSS from 776 MB to 567 MB.
+- **Why:** cache-bounds evictIdle ran only inside session-store's _jsonlCachePut. So the 128 MB idle floor held only «at the next put», and an idle set could stay over it for as long as nothing new arrived. The one row also judged OVER against the IDLE floor, while the code lawfully keeps a LIVE set (touched ≤ 10 min) up to 512 MB. The estimator's anchor lines had the same shape (a 32 MB idle floor, a 128 MB live set, a trim only at a read).
+- **The fix:**
+  - (a) the memory census's tick (memory-sampler's `enforce` hook → src/server/memory-enforce.js) runs both idle trims once a minute: a cache drop, nothing read, nothing asked;
+  - (b) two rows each, «(idle)» against the floor and «(live)» against the live ceiling;
+  - (c) cacheRow takes `enforced` ({by: [functions], when} or {not: 'not enforced: … whose'}), and every row states it. The ledger's cold columns say «not enforced — lane lg-providers' unit 3».
+- **«Touched», as the code means it:**
+  - a read through the cache: an attach, a page-up or page-down, a reconnect's re-attach, the search and turn-map reads;
+  - OR a HELD conversation: a client attached to the live session (a window open), a turn running (session._isStreaming), or a history window opened by a socket still open (noteJsonlView; dropped at the socket's close).
+  - A draw in the page never reaches the server, so the open window itself is what counts.
+- **The cost to a person:** a big window's tail trimmed after ten idle minutes costs ~0.27 s once, at its next page-up (354 ms against 85–128 cached, local disk). The coordinator names it to the owner.
+- **The tick's own cost:** a walk of two small maps, measured in test-cache-bounds §4b (40 tails + 150 live sessions).
+- **不变量** = every ceiling the memory census states is enforced where it is stated, or the row says «not enforced» and whose it is; a held conversation keeps its tail; a census tick drops, never reads.
+- **Gates:** test-cache-bounds:
+  - §4b: two rows; the live set not OVER; RED, the idle set held over its floor with no put; the tick brings it to its floor; held keeps t0/t1/t2, RED nothing held; the sampler calls enforce before its rows; the tick's cost;
+  - §5b: the sweep of every real row, with a planted unstated ceiling and a made-up enforcer each red.
+  test-task-scan-loop's census scene sums the two rows.
+

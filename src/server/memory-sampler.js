@@ -24,7 +24,7 @@ const readSmaps = () => (process.platform === 'linux' ? fsp.readFile('/proc/self
 
 function create({ record = () => {}, log = console, intervalMs = 60000, metricEvery = 5, eventEvery = 10, askTimeoutMs = 2000,
   readMainMemory = readMain, readSmapsText = readSmaps, ask = (o) => askMemory(undefined, o), now = () => Date.now(),
-  timers = { setInterval, clearInterval }, caches = () => [], hourEvery = 60, hr = () => Number(process.hrtime.bigint()) / 1e6, uptimeH = () => process.uptime() / 3600 } = {}) {
+  timers = { setInterval, clearInterval }, caches = () => [], enforce = () => null, hourEvery = 60, hr = () => Number(process.hrtime.bigint()) / 1e6, uptimeH = () => process.uptime() / 3600 } = {}) {
   let latest = null, n = 0, busy = null, timer = null, booted = false, highSaidAt = -Infinity;
 
   /** One census. A sample still running is joined, never doubled. Never rejects. */
@@ -40,11 +40,15 @@ function create({ record = () => {}, log = console, intervalMs = 60000, metricEv
         Promise.resolve().then(() => ask({ timeoutMs: askTimeoutMs })).catch(() => []),
       ]);
       h0 = hr();
+      // B-360d (A) (主开发 r1358): every ceiling the census states is ENFORCED at its tick — the caches' idle trims (a cache drop),
+      // timed with the census's own synchronous part (loopMs)
+      let enforced = null; try { enforced = enforce(); } catch { }
       let rows = []; try { rows = caches() || []; } catch { } // the bounded caches by name (B-9428)
       const c = memoryCensus({ main, workers, smaps: parseSmapsRollup(text), at: now(), caches: rows });
       loopMs += hr() - h0;
       c.tookMs = now() - t0;
       c.loopMs = loopMs;   // what this census held the loop (its synchronous parts)
+      if (enforced) c.enforced = enforced;   // B-360d (A): what the tick's trims dropped, and in how long
       latest = c;
       const k = n++;
       try {

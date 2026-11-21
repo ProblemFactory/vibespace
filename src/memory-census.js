@@ -69,7 +69,7 @@ function memoryCensus({ main = {}, workers = [], smaps = null, at = null, caches
     native: Math.max(0, rest), over: Math.max(0, -rest),
     // B-9428: the bounded caches inside the main heap, BY NAME (the owner's snapshot needed a heap dump to
     // find them): [{name, bytes, count, unit, ceiling}] from cache-bounds' cacheRow
-    caches: (Array.isArray(caches) ? caches : []).filter((x) => x && x.name).map((x) => ({ name: String(x.name), bytes: num(x.bytes), count: num(x.count), unit: String(x.unit || ''), ceiling: Number.isFinite(x.ceiling) ? x.ceiling : null, kind: x.kind === 'arraybuffers' ? 'arraybuffers' : 'heap', basis: String(x.basis || 'bytes'), over: !!x.over })),
+    caches: (Array.isArray(caches) ? caches : []).filter((x) => x && x.name).map((x) => ({ name: String(x.name), bytes: num(x.bytes), count: num(x.count), unit: String(x.unit || ''), ceiling: Number.isFinite(x.ceiling) ? x.ceiling : null, kind: x.kind === 'arraybuffers' ? 'arraybuffers' : 'heap', basis: String(x.basis || 'bytes'), enforced: x.enforced && typeof x.enforced === 'object' ? x.enforced : null, over: !!x.over })),
   };
 }
 

@@ -172,7 +172,7 @@ function _memoNow(usageHistory, { forPrime = false } = {}) {
   return m;
 }
 /** The cost memo's census row (condition 3): its keys at ≈ 509 bytes a key (the verifier's measure), its cap. */
-function costMemoCensus(usageHistory) { const m = _costMemos.get(usageHistory); const n = m ? m.map.size : 0; return { bytes: n * 509, count: n, unit: 'intervals (ids|from)', ceiling: COST_MEMO_MAX * 509, kind: 'heap', basis: '≈ 509 bytes a key (measured)' }; }
+function costMemoCensus(usageHistory) { const m = _costMemos.get(usageHistory); const n = m ? m.map.size : 0; return { bytes: n * 509, count: n, unit: 'intervals (ids|from)', ceiling: COST_MEMO_MAX * 509, kind: 'heap', basis: '≈ 509 bytes a key (measured)', enforced: { by: ['_memoPut'], when: 'at every put: past COST_MEMO_MAX keys the oldest go' } }; }
 /** The memo's epoch (a new one at every emptying) — the estimator primes every identity's pairs once per epoch; null =
  *  nothing is memoized here (see _memoNow). */
 function costMemoEpoch(usageHistory) { const m = _memoNow(usageHistory, { forPrime: true }); return m ? m.epoch : null; } // the memo's own epoch — its priming hold is not a reason to have none

@@ -1941,6 +1941,7 @@ function registerWsHandler(wss, ctx) {
           } else if (data.viewOnly && (data.backendSessionId || data.claudeSessionId)) {
             // View-only: load JSONL history without an active session
             const backendSessionId = data.backendSessionId || data.claudeSessionId;
+            try { require('./session-store').noteJsonlView(ws, data.claudeSessionId || backendSessionId); } catch { } // B-360d (A): a window open on its history HOLDS the tail
             // Remote session: pull the transcript over ssh into the local
             // cache first (findSessionJsonlPath scans it) — history then
             // loads through the normal path. Stale cache beats no history.
@@ -2166,6 +2167,7 @@ function registerWsHandler(wss, ctx) {
     ws.on('close', () => {
       try { const de = getDesign && getDesign(); if (de) de.unwatchSocket(ws); } catch { }   // a closed socket's design watches end with it
       try { require('./server/claude-signin.js').socketClosed(ws); } catch { }   // lane door-signin-fixes: the sign-in runs this page held
+      try { require('./session-store').dropJsonlViews(ws); } catch { }   // B-360d (A): its history windows hold their tails no more
       for (const sid of attachedSessions) {
         const session = activeSessions.get(sid);
         if (session) {

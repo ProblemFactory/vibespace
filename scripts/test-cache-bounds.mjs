@@ -267,7 +267,7 @@ ok(m2 !== ss && !bytesBound(m2), 'control ②: a count-only jsonl bound ⇒ RED'
   const per = fs.statSync(est._file('i1')).size;
   const save = CB.ESTIMATOR_LINES_MAX_BYTES;
   for (const k of ['i1', 'i2', 'i3']) est.lines(k);
-  eq([est._lineCache.size, est.lineCacheCensus().bytes], [3, 3 * per], 'the estimator lines are counted by file bytes');
+  eq([est._lineCache.size, est.lineCacheCensus().reduce((a, r) => a + r.bytes, 0)], [3, 3 * per], 'the estimator lines are counted by file bytes (its idle and live rows together)');
   ok(save === 32 * CB.MB && /evictIdle\(this\._lineCache, \{ floorBytes: ESTIMATOR_LINES_MAX_BYTES, maxEntries: 256, idleMs: ESTIMATOR_LINES_IDLE_MS, liveMaxBytes: ESTIMATOR_LIVE_MAX_BYTES/.test(files['src/usage-estimator.js']), 'the estimator lines: the live identities stay, the floor applies to idle ones');
   // verify #3/#11: 5 identities × 7 MB = 35 MB (> the 32 MB floor) read every sweep — counted reads per cycle
   const big = JSON.stringify({ fetchedAt: 1, accountId: 'a', utilization: { fiveHour: 0.1 }, pad: 'x'.repeat(500) }) + '\n';
@@ -281,6 +281,51 @@ ok(m2 !== ss && !bytesBound(m2), 'control ②: a count-only jsonl bound ⇒ RED'
   for (let c = 0; c < 3; c++) { lreads = 0; for (const k of ['j1', 'j2', 'j3', 'j4', 'j5']) { if (!lru.has(k)) { lreads++; lru.set(k, 7 * CB.MB); } else { const v = lru.get(k); lru.delete(k); lru.set(k, v); } CB.evictLru(lru, { maxBytes: 32 * CB.MB, sizeOf: (v) => v }); } lcyc.push(lreads); }
   ok(lcyc[2] > 0, `control (the r1 rule, a 32 MB byte LRU over the same cycle): re-reads ${JSON.stringify(lcyc)} ⇒ RED (thrash)`);
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced where it is stated — the idle floors at the census tick; a held conversation keeps its tail');
+{
+  const SS = require('../src/session-store.js');
+  const ME = require('../src/server/memory-enforce.js');
+  const MB = CB.MB, FLOOR = CB.JSONL_CACHE_MAX_BYTES;
+  const fill = () => { SS.jsonlCacheClear(); SS.setJsonlHeld(() => null); for (let k = 0; k < 30; k++) SS.jsonlCacheTestPut('t' + k, k < 6 ? 32 * MB : 3 * MB); };   // the probe's shape: 6 × 32 MiB + 24 smaller ≈ 264 MB
+  fill();
+  const t0 = Date.now(), later = t0 + 11 * 60e3;
+  const [idle0, live0] = SS.jsonlCacheCensus(t0);
+  const [idle1] = SS.jsonlCacheCensus(later);
+  console.log(`      30 tails just read: idle ${(idle0.bytes / MB).toFixed(0)} MB · live ${(live0.bytes / MB).toFixed(0)} MB (ceiling ${live0.ceiling / MB}) · 11 min later with no put: idle ${(idle1.bytes / MB).toFixed(0)} MB (floor ${idle1.ceiling / MB})`);
+  ok(idle0.name === 'transcript tails (idle)' && live0.name === 'transcript tails (live)' && live0.bytes > 250 * MB && !live0.over && live0.ceiling === CB.JSONL_LIVE_MAX_BYTES && idle0.bytes === 0, '(b) TWO ROWS: a live set of ~264 MB is NOT over — its own ceiling is 512 MB (the one row said «ceiling 128 · OVER»)');
+  ok(idle1.bytes > 250 * MB && idle1.over, 'RED (the release\'s road: the floor enforced only at the next put): eleven idle minutes and no put — the idle row holds ~264 MB over its 128 MB floor');
+  const tk = ME.tick({ now: later });
+  const [idle2, live2] = SS.jsonlCacheCensus(later);
+  console.log(`      the census tick: evicted ${tk.tails.evicted}, freed ${(tk.tails.freedBytes / MB).toFixed(0)} MB in ${tk.tails.ms.toFixed(3)} ms → idle ${(idle2.bytes / MB).toFixed(0)} MB, ${tk.tails.entries} entries`);
+  ok(idle2.bytes <= FLOOR && !idle2.over && tk.tails.evicted > 0 && tk.tails.freedBytes > 100 * MB && live2.bytes === 0, '(a) THE TICK enforces the idle floor (a cache drop, no put): the idle set is at ≤ 128 MB within a minute of going idle');
+  // HELD: a window open on the live session (a client attached), a turn running, a history window an open socket opened —
+  // each keeps its 32 MiB tail through the tick; RED: the same tick with nothing held drops them (the oldest go first)
+  const sessions = new Map([['s-open', { claudeSessionId: 't0', clients: new Map([[{}, {}]]) }], ['s-turn', { claudeSessionId: 't1', _isStreaming: true, clients: new Map() }], ['s-shut', { claudeSessionId: 't3', clients: new Map() }]]);
+  const sock = {};
+  fill(); SS.noteJsonlView(sock, 't2');
+  const kept = ME.tick({ activeSessions: sessions, now: later });
+  const heldAfter = ['t0', 't1', 't2', 't3'].map((k) => SS.jsonlHas(k));
+  ok(JSON.stringify(heldAfter) === '[true,true,true,false]' && kept.tails.evicted > 0, `HELD through the tick: a window open (t0), a turn running (t1), a history window of an open socket (t2) keep their tails; a session with nothing open (t3) does not — ${JSON.stringify(heldAfter)}`);
+  fill(); SS.dropJsonlViews(sock); ME.tick({ activeSessions: new Map(), now: later });
+  const unheld = ['t0', 't1', 't2'].map((k) => SS.jsonlHas(k));
+  ok(JSON.stringify(unheld) === '[false,false,false]', `RED (nothing held — the release's rule): the same tick drops all three — ${JSON.stringify(unheld)}`);
+  // (a)'s place: the sampler calls the trims at EVERY tick, before it reads the rows
+  const MS = require('../src/server/memory-sampler.js');
+  const order = [];
+  const smp = MS.create({ readMainMemory: () => ({}), readSmapsText: () => '', ask: async () => [], caches: () => { order.push('rows'); return []; }, enforce: () => { order.push('enforce'); return { tails: { evicted: 0 } }; }, timers: { setInterval: () => 0, clearInterval: () => { } }, record: () => { } });
+  const c = await smp.sample();
+  ok(JSON.stringify(order) === '["enforce","rows"]' && c.enforced && typeof c.loopMs === 'number', `the memory census's tick runs the trims first, then reads its rows (timed in its own loopMs) — ${JSON.stringify(order)}`);
+  ok(/enforce: \(\) => require\('\.\/src\/server\/memory-enforce\.js'\)\.tick\(\{ activeSessions, usageEstimator \}\)/.test(files['server.js']), 'server.js hands the sampler the tick (beside its owners)');
+  // THE TICK'S OWN COST at the owner's order: 40 tails (30 the cache's count, 10 held past it) and 150 live sessions — a walk, no parse
+  SS.jsonlCacheClear(); const many = new Map(); for (let k = 0; k < 150; k++) many.set('s' + k, { claudeSessionId: 'u' + k, clients: new Map(k < 40 ? [[{}, {}]] : []) });
+  for (let k = 0; k < 40; k++) SS.jsonlCacheTestPut('u' + k, 4 * MB);
+  const runs = []; for (let i = 0; i < 20; i++) runs.push(ME.tick({ activeSessions: many, now: later }).tails.ms);
+  runs.sort((a, b) => a - b);
+  console.log(`      the tick's cost: 40 tails + 150 live sessions — median ${runs[10].toFixed(3)} ms, worst ${runs[19].toFixed(3)} ms of 20 (a walk of two maps; nothing read)`);
+  ok(runs[10] < 50, `the tick is a walk, never a parse (median ${runs[10].toFixed(3)} ms at the owner's order)`);
+  SS.jsonlCacheClear(); SS.setJsonlHeld(() => null);
 }
 
 console.log('§5 the boot census names the owners');
@@ -308,6 +353,29 @@ ok(/caches = \(\) => \[\][\s\S]*memoryCensus\(\{[^}]*caches: rows/.test(files['s
   t.warm();
   const cc = t.cacheCensus();
   ok(cc[0].bytes === t._evCache.hotBytes && cc[0].bytes <= cc[0].ceiling && cc[0].basis === 'raw line bytes' && cc[1].kind === 'arraybuffers' && cc[1].ceiling === CB.COLD_COLUMNS_MAX_BYTES, '§12 the window row is raw line bytes against its raw ceiling; the cold row is ArrayBuffers with a DECLARED ceiling (verify #2)');
+}
+
+console.log('§5b B-360d (A): THE SWEEP — every ceiling the census states is paired with the code that enforces it, or says «not enforced»');
+{
+  const SS = require('../src/session-store.js');
+  const { UsageEstimator } = require('../src/usage-estimator.js');
+  const t = mkUh('sweep', 40 * DAY, 60 * 1024); fs.mkdirSync(t.dir, { recursive: true }); writeRows(t.dir, all.slice(0, 300)); t.warm();
+  const edir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cache-bounds-sweep-'));
+  const est = new UsageEstimator({ anchorsDir: edir, usageHistory: null });
+  const rows = [...t.cacheCensus(), ...SS.jsonlCacheCensus(), ...est.lineCacheCensus()];
+  const SRC = Object.entries(files).filter(([f]) => f.startsWith('src/')).map(([, x]) => x).join('\n');
+  const defined = (n) => new RegExp(`(?:function\\s+${n}\\b|^\\s*(?:async\\s+)?${n}\\s*\\(.*\\)\\s*\\{|\\b${n}\\s*=\\s*(?:function|\\())`, 'm').test(SRC);
+  const judge = (r) => { if (r.ceiling == null) return null; const e = r.enforced; if (!e || typeof e !== 'object') return `${r.name}: a ceiling and no statement of what enforces it`; if (typeof e.not === 'string') return /^not enforced: .{8,}/.test(e.not) ? null : `${r.name}: «not enforced» says no why`; if (!Array.isArray(e.by) || !e.by.length || typeof e.when !== 'string' || !e.when) return `${r.name}: an enforcement with no function or no «when»`; const gone = e.by.filter((n) => !defined(n)); return gone.length ? `${r.name}: names ${gone.join(', ')}, which the tree does not define` : null; };
+  for (const r of rows) console.log(`      ${r.name}: ${r.ceiling == null ? 'no ceiling' : r.enforced && r.enforced.not ? r.enforced.not : r.enforced ? `enforced by ${r.enforced.by.join(' + ')} — ${r.enforced.when}` : 'UNSTATED'}`);
+  const bad = rows.map(judge).filter(Boolean);
+  ok(rows.length >= 10 && !bad.length, `every census row with a ceiling states what enforces it, by functions the tree defines, or «not enforced: …» with its why (${rows.length} rows) — ${bad.join('; ')}`);
+  ok(rows.some((r) => r.name === 'usage ledger cold columns' && r.enforced && /^not enforced: .*lg-providers/.test(r.enforced.not || '')), 'the cold columns say «not enforced», and whose it is (lane lg-providers\' unit 3)');
+  // CONTROLS: a ceiling with no statement, and a statement naming a function no file defines, are each red by name
+  const plantA = judge(CB.cacheRow('planted', { bytes: 1, ceiling: 2 })), plantB = judge(CB.cacheRow('planted2', { bytes: 1, ceiling: 2, enforced: { by: ['noSuchTrimAnywhere'], when: 'never' } }));
+  ok(!!plantA && /no statement/.test(plantA) && !!plantB && /noSuchTrimAnywhere/.test(plantB), `CONTROL: an unstated ceiling and a made-up enforcer are each red by name — «${plantA}» · «${plantB}»`);
+  const mc = MC.memoryCensus({ main: {}, caches: rows });
+  ok(mc.caches.every((x, i) => JSON.stringify(x.enforced) === JSON.stringify(rows[i].enforced || null)), 'the census (the System window, /api/sysinfo) carries each row\'s statement');
+  fs.rmSync(edir, { recursive: true, force: true });
 }
 
 console.log('§6–§11 r2: the cold walk off the loop, held, single-flight; the popup reads one line');

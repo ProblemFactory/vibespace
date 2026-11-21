@@ -757,7 +757,23 @@ class UsageEstimator {
     } catch { return null; } finally { if (fd !== null) { try { fs.closeSync(fd); } catch { } } }
   }
   /** The census row (anchor-file bytes; the parsed lines cost ~1.6× that, measured on the owner's snapshot). */
-  lineCacheCensus() { return cacheRow('estimator anchor lines', { bytes: this._lineBytes || 0, count: this._lineCache.size, unit: 'identities', ceiling: ESTIMATOR_LINES_MAX_BYTES, basis: `anchor-file bytes (32 MB floor for idle identities; the live set ≤ ${ESTIMATOR_LIVE_MAX_BYTES / 1048576} MB${this._lineLiveEvicted ? ', ' + this._lineLiveEvicted + ' live evicted past it' : ''})`, live: this._lineLive || 0 }); }
+  /** B-360d (A) (主开发 r1358): the memory census's tick — the idle trim with no newcomer (a cache drop; the live set is the put's). */
+  lineCacheTrim(now = Date.now()) {
+    const t0 = performance.now(), before = this._lineBytes || 0;
+    const r = evictIdle(this._lineCache, { floorBytes: ESTIMATOR_LINES_MAX_BYTES, maxEntries: 256, idleMs: ESTIMATOR_LINES_IDLE_MS, liveMaxBytes: Infinity, now, sizeOf: (e) => e.size, usedAt: (e) => e.usedAt });
+    this._lineBytes = r.bytes; this._lineLive = r.live;
+    return { evicted: r.evicted, freedBytes: Math.max(0, before - r.bytes), ms: performance.now() - t0, entries: this._lineCache.size };
+  }
+  /** B-360d (A): TWO ROWS, each against its own ceiling — idle identities (the 32 MB floor) and the live ones (the put's 128 MB). */
+  lineCacheCensus(now = Date.now()) {
+    let idleB = 0, idleN = 0, liveB = 0, liveN = 0;
+    for (const e of this._lineCache.values()) { const b = e.size || 0; if (now - (e.usedAt || 0) < ESTIMATOR_LINES_IDLE_MS) { liveB += b; liveN++; } else { idleB += b; idleN++; } }
+    const liveMax = this.linesLiveMaxBytes || ESTIMATOR_LIVE_MAX_BYTES;
+    return [
+      cacheRow('estimator anchor lines (idle)', { bytes: idleB, count: idleN, unit: 'identities', ceiling: ESTIMATOR_LINES_MAX_BYTES, enforced: { by: ['lines', 'lineCacheTrim'], when: 'at every read of an identity, and at the memory census tick (a minute): idle identities go oldest-first past the floor' }, basis: `anchor-file bytes of identities not read for ${ESTIMATOR_LINES_IDLE_MS / 60e3} min` }),
+      cacheRow('estimator anchor lines (live)', { bytes: liveB, count: liveN, unit: 'identities', ceiling: liveMax, enforced: { by: ['lines'], when: 'at every read: past the ceiling a newcomer is served and not kept, then the oldest-touched go' }, basis: `anchor-file bytes of identities read in the last ${ESTIMATOR_LINES_IDLE_MS / 60e3} min${this._lineLiveEvicted ? ', ' + this._lineLiveEvicted + ' live evicted past it' : ''}` }),
+    ];
+  }
   // Every account id this identity has EVER anchored under — ledger events
   // for removed/re-added subs live under their old ids. '__global__' is the
   // ONE reassignable id (a machine /login switch hands it to a DIFFERENT
