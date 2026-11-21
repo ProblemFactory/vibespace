@@ -36,7 +36,8 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const express = require(path.join(REPO, 'node_modules/express'));
@@ -58,7 +59,7 @@ const LOGS = [], FRAMES = [], STASH = [], ANSWERS = [];
 const VALUE = ['words', 'suite', 'value', crypto.randomBytes(6).toString('hex')].join('-');
 const TOKEN_SHAPE = ['sk', 'proj', crypto.randomBytes(20).toString('hex')].join('-');   // built at run time (the secret scan)
 
-function makeWorld(name, dataDir = path.join(ROOT, name)) {
+function makeWorld(name, dataDir = path.join(ROOT, name), routes = require(path.join(REPO, 'src/routes/vault.js'))) {   // B-bc3b: `routes` = a patched copy for a RED control
   fs.mkdirSync(dataDir, { recursive: true });
   const auth = new Auth(dataDir, {});
   auth.setPassword('signin-' + name);
@@ -78,8 +79,8 @@ function makeWorld(name, dataDir = path.join(ROOT, name)) {
   ]);
   const app = express();
   app.use(auth.middleware()); auth.registerRoutes(app); app.use(express.json());
-  require(path.join(REPO, 'src/routes/vault.js')).registerVaultRoutes(app, { vault, activeSessions, getJobs: () => ({ jobByToken: () => null }), contents: VC.create({ vault, sources }), run: vaultRun, paste, log: (m) => LOGS.push(String(m)) });
-  return { dataDir, auth, vault, userTodos, vaultRun, paste, app, T1, T2, activeSessions };
+  routes.registerVaultRoutes(app, { vault, activeSessions, getJobs: () => ({ jobByToken: () => null }), contents: VC.create({ vault, sources }), run: vaultRun, paste, log: (m) => LOGS.push(String(m)) });
+  return { dataDir, auth, vault, userTodos, vaultRun, paste, app, T1, T2, activeSessions, useGrants };
 }
 async function serve(w) {
   const srv = await new Promise((r) => { const s = w.app.listen(0, '127.0.0.1', () => r(s)); });
@@ -168,6 +169,35 @@ let PID;
   ok(sec.status === 400 && sec.json.code === 'note_secret', 'a secret\'s shape ⇒ 400 note_secret', sec.json);
   const other = await S.agent(W.T2, '/api/agent/vault/words', { entry: REF, note: 'mine now' });
   ok(other.status === 404 && other.json.code === 'entry_unknown', 'a conversation whose list does not hold it ⇒ 404 entry_unknown (it cannot name it)', other.json);
+  // B-bc3b (the row's missing leg): THE WORDS-PROPOSE GUARD OF A SHARED ENTRY. The owner shares T1's minted entry with T2 through
+  // its grant row, so T2's list now HOLDS it (the plant proves itself first) — and still its words are its own conversation's to
+  // propose: T2's proposal is refused as one it cannot name (404 entry_unknown), nothing is filed (src/routes/vault.js foreignAgent)
+  {
+    const VRm = require(path.join(REPO, 'src/vault-run.js'));
+    const shareTo = async (w, s, mref) => { const add = w.useGrants.addMember(VRm.parseRef(mref).id, { kind: 'conversation', key: 'cid-words-2', name: 'Other lane' }, { hosts: ['api.example.com'] }); return add && add.ok && (await listOf(s, w.T2)).some((e) => e.ref === mref); };
+    const held = await shareTo(W, S, MREF);
+    const n0 = open(W, P.WORDS_TYPE).length;
+    const sharedWords = await S.agent(W.T2, '/api/agent/vault/words', { entry: MREF, note: 'the other lane\'s words' });
+    ok(held && sharedWords.status === 404 && sharedWords.json.code === 'entry_unknown' && open(W, P.WORDS_TYPE).length === n0,
+      'B-bc3b: an entry SHARED with T2 (its list holds it — the plant proves itself) ⇒ T2\'s proposal of its words is refused (404 entry_unknown) and NOTHING is filed — a shared entry is used, never re-worded, by another conversation', { held, status: sharedWords.status, json: sharedWords.json });
+    // RED — the routes without «!foreignAgent &&» (an anchored copy): the same proposal is FILED (a card asks the owner to re-word
+    // T1's entry in T2's words) — the leg above goes red there
+    const M = mutantCopies('vault-words', REPO);
+    const SRCr = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8');
+    const noGuard = M.load('src/routes/vault.js', anchored(SRCr, 'const seen = !foreignAgent && !!(pr && list', 'const seen = !!(pr && list', 'test-vault-entry-words bc3b-no-guard'), 'bc3b-no-guard');
+    let red = null;
+    if (noGuard) {
+      const Wr = makeWorld('red-bc3b', undefined, noGuard);
+      const set = (await Wr.vault.setup(PW)).ok, Sr = await serve(Wr);
+      try {
+        const m = await Sr.agent(Wr.T1, '/api/agent/vault/mint', { name: 'red-token', note: 'A red-control entry.' });
+        const heldR = m.status === 200 && await shareTo(Wr, Sr, m.json.ref);
+        const x = await Sr.agent(Wr.T2, '/api/agent/vault/words', { entry: m.json.ref, note: 'the other lane\'s words' });
+        red = { set, heldR, status: x.status, filed: open(Wr, P.WORDS_TYPE).length };
+      } finally { Sr.srv.close(); }
+    }
+    ok(!!noGuard && red && red.set && red.heldR && red.status === 200 && red.filed === 1, 'RED — the words route without its foreign-agent guard: T2\'s proposal for the entry shared with it is FILED (200, one card) — the guard is what refuses it', red);
+  }
   const ghost = await S.agent(W.T1, '/api/agent/vault/words', { entry: 'vault://secrets/secret:0000000000/secret', note: 'x' });
   ok(ghost.status === 404 && ghost.json.code === 'entry_unknown', 'an entry that is not there ⇒ 404 entry_unknown', ghost.json);
   const totp = W.paste.propose({ caller: { conversationId: 'cid-words-1', scope: 'w1', name: 'Words asker' }, entry: 'totp:acme', ref: 'vault://secrets/totp:acme/seed', seen: true, note: 'x' });

@@ -192,7 +192,7 @@ const STATUS = Object.freeze({
   vault_not_set_up: 409, vault_locked: 423, bad_flag: 400, bad_reference: 400, bad_env_name: 400, duplicate_name: 400, no_command: 400,
   cmd_too_long: 400, no_reference: 400, template_unread: 400, template_too_long: 400, hidden_chars: 400, card_too_long: 400,
   env_refused: 403, argv_refused: 403, tool_prints_secrets: 403, tool_wraps_another: 403, tool_has_its_own_door: 403, tool_not_sealed: 409, two_hosts: 409, bad_host: 400, url_userinfo: 403,
-  entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, grant_expired: 403, entry_too_short_to_mask: 403, use_not_granted: 403,   // B-a14b: + grant_expired
+  entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, grant_expired: 403, entry_too_short_to_mask: 403, use_not_granted: 403, run_not_admitted: 403,   // B-a14b: + grant_expired · B-bc3b: + run_not_admitted
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, ask_redrawn: 409, restore_failed: 500, caller_gone: 410, too_many_runs: 429,   // r4: + ask_redrawn (the card drawn again at the press) · restore_failed (a partial write not put back — by name)
   spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500, git_not_on_seal: 500,
@@ -212,6 +212,9 @@ const MORE_WORDS = Object.freeze({
   run_path_unsafe: 'no directory on the hub PATH is safe to run this tool from — none is a root-owned system directory (every one is missing, or owned by this user, who could plant a program there) — nothing ran',   // round 11 (MAJOR 2) / round 12 (BLOCKER): a runSeal tool whose sealed PATH (ROOT-OWNED dirs only) came out empty
   git_not_on_seal: 'this gh command drives git (a clone / fork / push / checkout), but git is not on a root-owned PATH directory — a git loaded from a directory this user can write could run the agent\'s own program with the minted value in its environment; install git where only root writes (`sudo apt install git`); nothing ran',   // round 15 (MINOR): a git-DRIVING gh verb on a hub whose sealed PATH lacks git (gh api / issue list never run git and are NOT refused)
   tool_not_sealed: 'this tool lives in a directory this user can write, so its program could be replaced after the hub hashed it (the fd pins WHICH file runs, root ownership pins WHAT is in it) — a tool that runs with a minted secret must live where ONLY root writes: /usr/bin or /usr/local/bin (`sudo apt install gh`); nothing ran',   // round 14 (BLOCKER): a uid-owned pinned tool is unsealed — r13's fd exec'd the CURRENT bytes after an in-place rewrite
+  // B-bc3b: a run naming an entry the user SHARED with this conversation is admitted ENTRY BY ENTRY and never draws a card; the
+  // door prefixes the entry it names and why that one is not admitted
+  run_not_admitted: 'a run that names an entry the user shared with this conversation is judged entry by entry and never draws a card — run that entry on its own (it draws its own card), or without the shared entry; nothing ran',
   two_hosts: 'this command names two different hosts it could contact (a URL in a positional vs -R / GH_HOST or a repo spec) — a sealed credential tool homes the token to ONE host, so which one receives it cannot be told; name a single host — nothing ran',   // round 16 (BLOCKER): a <url> positional whose host differs from the routing host is two route hosts
   bad_host: 'a host this command would CONTACT does not parse — an empty or malformed name in a host list (`-h ,db.example.com`), or a URL the WHATWG parser rejects yet the tool still dials (an out-of-range port `https://evil.test:99999/`, a non-DNS name, a label over 63 or a name over 253 chars); name each host plainly — nothing ran',   // round 16 (MINOR) + round 19 (item 1 BLOCKER): a routing value that normalises to null — a bad host-list entry OR a located URL token the parser rejects (urlHostsBad) — never reaches the verdict as «null»; a rejected token is bad_host, never a dropped host (Go/curl would dial it)
   url_userinfo: 'a URL on this command line carries a user[:password] before the host (`https://user@host/…`) — a credential-carrying URL can disguise which host the tool really contacts (the userinfo runs up to the last `@`, not the first), and a stored secret is never routed by one; write the host plainly and pass any credential with --env / --file — nothing ran',   // round 18 (item 1): a URL\'s host is what the WHATWG parser says; a userinfo URL is never a route
@@ -2220,8 +2223,42 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       }
       // B-bc3b (the read): a run that names an entry SHARED with this caller never draws a card — the owner shared it for the hosts
       // the row names, nothing more; a card here (a mixed run: + an own minted value bound elsewhere, + a free entry not covered)
-      // would let «Allow once» fail on it and «Always» / «Allow for 1 hour» write this caller a member the owner never gave
-      if (!verdict.ok && verdict.ask && sharedIds.size) { const r0 = spec.refs.find((r) => sharedIds.has(r.id)); note('use_not_granted', { ...head, ref: r0.ref, why: 'shared-card' }); return named('use_not_granted', { ref: r0.ref }); }
+      // would let «Allow once» fail on it and «Always» / «Allow for 1 hour» write this caller a member the owner never gave.
+      // B-bc3b (the cure, 主开发 r840): such a run is ADMITTED ENTRY BY ENTRY, each by ITS OWN rule — the shared one by its grant row
+      // (judged above: this caller, every host of the run, its member exceptions; a refused store left it closed), the caller's OWN
+      // agent entry by ownership exactly as the own road judges it alone (a value it PUT always; a value it MINTED only for a run
+      // that goes where it was minted for — the verdict's `away` names the ones that do not), any other entry by a standing grant ON
+      // for this member (the short-circuit's own test) — and it runs, by:grant with no card, only when EVERY entry is admitted; the
+      // FIRST that is not is named, with why (run_not_admitted). The exec is the same exec; no value's bytes reach the caller.
+      if (!verdict.ok && verdict.ask && sharedIds.size) {
+        const awayKnown = Array.isArray(verdict.away), away = awayKnown ? verdict.away : [];
+        const ownIds = new Set(entries.filter((e) => e && e.own === true).map((e) => e.id));
+        const whyNot = (r) => {
+          if (sharedIds.has(r.id)) return refused ? 'the vault\'s run store failed its mark, so every shared entry stays closed until the user marks it again' : null;   // a belt: a refused store already closed it (entry_not_runnable) before this
+          if (ownIds.has(r.id)) {
+            if (!awayKnown) return 'its own road could not be judged in this run';   // fail closed: the verdict named no hosts to judge it by
+            const a = away.find((x) => x && x.id === r.id);
+            if (!a) return null;
+            return a.unknown ? `its value was minted for ${a.forHost || 'one host'} and where this run goes cannot be read` : `its value was minted for ${a.forHost || 'one host'} and this run goes to ${a.host}`;
+          }
+          const st = standing.get(r.id) || {};
+          if (!refused && st.ok === true && memberUsable(d, r.id, st.id)) return null;
+          return `no standing approval of the user's lets this conversation use it for ${dest.hosts.length ? dest.hosts.join(', ') : 'a command whose destination cannot be read'} (a once-only or a pasted approval needs its card)`;
+        };
+        const r0 = spec.refs.find((r) => whyNot(r) !== null);
+        if (r0) { const why = whyNot(r0); note('run_not_admitted', { ...head, ref: r0.ref, why }); return named('run_not_admitted', { ref: r0.ref, why, words: `«${r0.ref}» is not admitted in this run: ${why}. ${MORE_WORDS.run_not_admitted}` }); }
+        for (const r of spec.refs) if (!ownIds.has(r.id)) standingIds.set(r.id, standing.get(r.id).id);   // an own entry's use line carries no grant: ownership admitted it
+        verdict = { ok: true, by: 'grant', grants: [...new Set(standingIds.values())] };
+        head.grants = verdict.grants;
+        // an entry let through by its 1-hour WINDOW says so here as in the short-circuit above (the run line's scope, the purpose, ONE notice)
+        const winsM = spec.refs.filter((r) => !ownIds.has(r.id) && (standing.get(r.id) || {}).scope === 'window');
+        if (winsM.length) {
+          const end = Math.min(...winsM.map((r) => Number(standing.get(r.id).until))), left = Math.max(1, Math.ceil((end - now()) / 60e3));
+          for (const r of winsM) purposes.set(r.id, `under the 1-hour approval · ${left} min left`);
+          head.scope = 'window'; head.windowLeft = left;
+          verdict.window = { until: end, left, who: String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80), entry: winsM.map((r) => nameById[r.id] || r.ref).join('”, “'), program: toolName || path.basename(String(spec.tool || '')), where: shape.destKnown && dest.hosts.length ? dest.hosts.join(', ') : null };
+        }
+      }
       // lane vault-use-grants round 7 (MINOR): AN 8-HOUR PASTE GRANT is HOST-SCOPED — it admits a run with no card ONLY for the
       // HOSTS the request named (the Settings words «may use it in commands to those hosts for 8 hours» now match the code). A run
       // whose destinations are not ALL covered — another host, an opaque route, or a paste that named no hosts — draws its card.

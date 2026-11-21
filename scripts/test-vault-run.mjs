@@ -383,8 +383,8 @@ console.log('②c B-bc3b — the owner SHARES an agent\'s own entry through its 
 {
   const VUG = R('src/server/vault-use-grants.js'), GS = R('src/server/grants-store.js');
   const ID = 'secrets:agent:conv-1/gh-token#secret', REF = 'vault://agent:conv-1/gh-token';
-  async function shareWorld(doorMod = DOOR) {
-    const w = await world({ doorMod, askMs: 50 });   // the read: a mutant that lets a card through ends it in 50 ms, never the real 60 s
+  async function shareWorld(doorMod = DOOR, { askMs = 50 } = {}) {
+    const w = await world({ doorMod, askMs });   // the read: a mutant that lets a card through ends it in 50 ms, never the real 60 s
     const gs = GS.create({ memory: true }), groups = new Map();
     const ug = VUG.create({ grants: () => gs, vault: w.vault, dataDir: w.dataDir, log: (m) => w.logs.push(String(m)) });
     const door = w.mk(doorMod, { useGrants: ug, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: groups.get(c.conversationId) || [] }) });
@@ -417,11 +417,89 @@ console.log('②c B-bc3b — the owner SHARES an agent\'s own entry through its 
   const viaGroup = await s.runAs('conv-4', TO('api.example.com'));
   ok(viaGroup.ok && viaGroup.by === 'grant', 'shared with a Task Group ⇒ its member conv-4 runs it for the row\'s host', viaGroup.code || viaGroup.by);
   // the read (r1): a MIXED run — the shared entry + a free entry the owner switched ON but granted conv-2 nothing for — never draws
-  // a card (an «Always» there would write conv-2 a member the owner never gave): use_not_granted by name
+  // a card (an «Always» there would write conv-2 a member the owner never gave). B-bc3b (the cure): each entry by ITS OWN rule —
+  // the free entry has no standing grant for conv-2, so IT is the one named (run_not_admitted), never the shared one it was before
   s.door.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });
   const MIXED = ['--env', `T=${REF}`, '--env', 'U=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/items'];
   const mixed = await s.runAs('conv-2', MIXED);
-  ok(mixed.code === 'use_not_granted' && !cardsOf(s.w).length, 'a MIXED run naming the shared entry (+ a free entry with no grant for conv-2) ⇒ use_not_granted, NO card — a card there could widen the share', { code: mixed.code, cards: cardsOf(s.w).length });
+  ok(mixed.code === 'run_not_admitted' && mixed.ref === 'vault://mounts/m1/secretKey' && /^«vault:\/\/mounts\/m1\/secretKey» is not admitted in this run: no standing approval of the user's lets this conversation use it for api\.example\.com \(a once-only or a pasted approval needs its card\)\. /.test(mixed.words || '') && !cardsOf(s.w).length,
+    'a MIXED run naming the shared entry (+ a free entry with no grant for conv-2) ⇒ run_not_admitted naming the FREE entry (the one not admitted) and why, NO card — a card there could widen the share', { code: mixed.code, ref: mixed.ref, words: mixed.words, cards: cardsOf(s.w).length });
+  // B-bc3b (the cure, 主开发 r840) — THE CALLER'S OWN ENTRY + A SHARED ONE: each admitted by its own rule (ownership · the grant row)
+  const OWN_ROWS = [{ entry: 'agent:conv-2/own-put', field: 'secret', label: 'Agent secret · own-put', bytes: 30, v: 'conv2-put-value-0123456789ab' },
+    { entry: 'agent:conv-2/own-mint', field: 'secret', label: 'Agent secret · own-mint', bytes: 30, provenance: { by: 'agent', prov: 'minted', sawPlaintext: false, actor: 'Lane conv-2', forHost: 'own.example.test' }, v: 'conv2-mint-value-0123456789ab' },
+    { entry: 'agent:conv-2/own-here', field: 'secret', label: 'Agent secret · own-here', bytes: 30, provenance: { by: 'agent', prov: 'minted', sawPlaintext: false, actor: 'Lane conv-2', forHost: 'api.example.com' }, v: 'conv2-here-value-0123456789ab' }];
+  ROWS.secrets.push(...OWN_ROWS);
+  try {
+    const ownSolo = await s.runAs('conv-2', ['--env', 'U=vault://agent:conv-2/own-put', '--', 'curl', '-s', 'https://api.example.com/v1/items']);
+    ok(ownSolo.ok && ownSolo.by === 'own', 'the plant proves itself: conv-2\'s OWN put entry runs alone by ownership (own), the shared entry alone by its grant (above)', ownSolo.code || ownSolo.by);
+    const OWNMIX = ['--env', `T=${REF}`, '--env', 'U=vault://agent:conv-2/own-put', '--', 'curl', '-s', 'https://api.example.com/v1/items'];
+    const om = await s.runAs('conv-2', OWNMIX);
+    ok(om.ok && om.by === 'grant' && !cardsOf(s.w).length && !leaks((om.stdout || '') + (om.stderr || ''), 'agent-minted-value-0123456789').length && !leaks((om.stdout || '') + (om.stderr || ''), 'conv2-put-value-0123456789ab').length,
+      'B-bc3b (the cure): its OWN put entry + the entry SHARED with it, to the shared row\'s host ⇒ RUNS by:grant with NO card (each admitted by its own rule) — neither value in what comes back (the release refused it naming the shared entry)', { ok: om.ok, by: om.by, code: om.code, words: om.words });
+    const mintAway = await s.runAs('conv-2', ['--env', `T=${REF}`, '--env', 'U=vault://agent:conv-2/own-mint', '--', 'curl', '-s', 'https://api.example.com/v1/items']);
+    ok(mintAway.code === 'run_not_admitted' && mintAway.ref === 'vault://agent:conv-2/own-mint' && /minted for own\.example\.test and this run goes to api\.example\.com/.test(mintAway.words || '') && !cardsOf(s.w).length,
+      'its OWN value minted for another host + the shared entry ⇒ run_not_admitted naming the OWN entry (its own road would draw its card; a run naming a shared entry never does), NO card', { code: mintAway.code, ref: mintAway.ref, words: mintAway.words });
+    const mintHere = await s.runAs('conv-2', ['--env', `T=${REF}`, '--env', 'U=vault://agent:conv-2/own-here', '--', 'curl', '-s', 'https://api.example.com/v1/items']);
+    ok(mintHere.ok && mintHere.by === 'grant' && !cardsOf(s.w).length, 'its OWN value minted FOR this run\'s host + the shared entry ⇒ runs by:grant, no card (its own road admits it where it was minted for)', { ok: mintHere.ok, by: mintHere.by, code: mintHere.code, words: mintHere.words });
+    // a THIRD kind beside them — the owner's entry, ON, with a STANDING grant for conv-2 to the same host — is admitted by that grant
+    const m1g = s.ug.addMember('mounts:m1#secretKey', { kind: 'conversation', key: 'conv-2', name: 'Lane conv-2' }, { hosts: ['api.example.com'] });
+    const three = await s.runAs('conv-2', [...OWNMIX.slice(0, 4), '--env', 'V=vault://mounts/m1/secretKey', ...OWNMIX.slice(4)]);
+    const tl = runLines(s.w).pop() || {};
+    ok(m1g && m1g.ok && three.ok && three.by === 'grant' && (tl.grants || []).length === 2 && !cardsOf(s.w).length && !leaks((three.stdout || '') + (three.stderr || ''), VALUE).length,
+      'shared + its OWN put entry + the owner\'s entry under a STANDING grant for conv-2 ⇒ runs by:grant, no card — the run line names the TWO grants (the shared row\'s, the owner\'s entry\'s); the own entry needs none', { ok: three.ok, by: three.by, code: three.code, grants: tl.grants });
+    // the 1-hour WINDOW still says itself in a mixed run (its own world: ②c's cards end in 50 ms by design)
+    {
+      const hw = await shareWorld(DOOR, { askMs: null });
+      hw.ug.addMember(ID, { kind: 'conversation', key: 'conv-2', name: 'Lane conv-2' }, { hosts: ['api.example.com'] });
+      hw.door.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });
+      const M1RUN = ['--env', 'V=vault://mounts/m1/secretKey', '--', '/bin/sh', '-c', 'true'];   // a card that offers NO «Always» is the one that offers «Allow for 1 hour» (the door's winWould) — a shell's
+      const p = hw.door.run({ caller: hw.as('conv-2'), args: M1RUN, cwd: hw.w.work });
+      const c = await waitCard(hw.w);
+      const ans = c ? hw.door.answer(c.action.askId, { answer: 'window', reauthed: true, person: true }) : null;
+      const first = await Promise.race([p, sleep(5000).then(() => ({ ok: false, code: 'the card was never settled (5 s)' }))]);   // a bound: a card left waiting is a red by name, never a hang
+      const mixW = await hw.runAs('conv-2', [...OWNMIX.slice(0, 4), '--env', 'V=vault://mounts/m1/secretKey', ...OWNMIX.slice(4)]);
+      const wl = runLines(hw.w).pop() || {};
+      ok(!!c && first.ok && mixW.ok && mixW.by === 'grant' && wl.scope === 'window' && Number(wl.windowLeft) >= 1, 'shared + own + the owner\'s entry under its 1-HOUR WINDOW ⇒ runs, and the run line says scope «window» with the minutes left (the window\'s one notice per use is kept in a mixed run)', { card: !!c, answered: ans && ans.ok, first: first.ok && first.by, mix: mixW.ok && mixW.by, code: mixW.code, scope: wl.scope, left: wl.windowLeft });
+    }
+    // RED — the release's rule (a run naming a shared entry is refused, naming the shared entry, whenever the verdict asks)
+    const SRCm = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const oldRule = M.load('src/server/vault-run-door.js', anchored(SRCm, '        const r0 = spec.refs.find((r) => whyNot(r) !== null);', "        const r0 = spec.refs.find((r) => sharedIds.has(r.id)); if (r0) { note('use_not_granted', { ...head, ref: r0.ref }); return named('use_not_granted', { ref: r0.ref }); }", 'test-vault-run ②c bc3b-old-rule'), 'bc3b-old-rule');
+    let ro = null;
+    if (oldRule) { const m = await shareWorld(oldRule); m.ug.addMember(ID, { kind: 'conversation', key: 'conv-2' }, { hosts: ['api.example.com'] }); const solo = await m.runAs('conv-2', TO('api.example.com')); const x = await m.runAs('conv-2', OWNMIX); ro = { solo: solo.ok && solo.by, code: x.code, ref: x.ref }; }
+    ok(!!oldRule && ro && ro.solo === 'grant' && ro.code === 'use_not_granted' && ro.ref === REF, 'RED — the release\'s rule (the patched copy\'s plant proves itself: its shared run alone still runs by:grant): the OWN + SHARED run is refused naming the SHARED entry — the cure\'s leg above goes red there', ro);
+  } finally { for (const x of OWN_ROWS) ROWS.secrets.splice(ROWS.secrets.indexOf(x), 1); }
+  // B-bc3b (the row's missing leg) — `&& !refused` on a SHARED entry: a store that fails its mark closes it too. The store is read
+  // ONCE PER UNLOCK, so the leg needs a lock cycle: the hand edit alone changes nothing on this door (the plant proves itself first)
+  {
+    const sf = path.join(s.w.dataDir, DOOR.STORE_FILE), raw = JSON.parse(fs.readFileSync(sf, 'utf8'));
+    fs.writeFileSync(sf, JSON.stringify({ ...raw, runnable: [...(raw.runnable || []), 'app-secrets:app1#item.0.1'] }));   // a hand edit: its mark no longer verifies
+    const cached = await s.runAs('conv-2', TO('api.example.com'));
+    s.w.vault.lock('door'); await s.w.vault.unlock(PW);
+    const closed = await s.runAs('conv-2', TO('api.example.com'));
+    const lr = (s.door.runnableFor(s.as('conv-2')).entries || []).find((x) => x.ref === REF);
+    ROWS.secrets.push(OWN_ROWS[0]);
+    let mixClosed = null;
+    try { mixClosed = await s.runAs('conv-2', ['--env', `T=${REF}`, '--env', 'U=vault://agent:conv-2/own-put', '--', 'curl', '-s', 'https://api.example.com/v1/items']); } finally { ROWS.secrets.splice(ROWS.secrets.indexOf(OWN_ROWS[0]), 1); }
+    ok(mixClosed && !mixClosed.ok && (mixClosed.code === 'entry_not_runnable' || mixClosed.code === 'run_not_admitted') && !cardsOf(s.w).length, 'under the refused store an OWN + SHARED run is closed too (never admitted entry by entry over a store that failed its mark)', mixClosed && mixClosed.code);
+    ok(cached.ok && cached.by === 'grant' && closed.code === 'entry_not_runnable' && /vault-run-store-refused/.test(auditOf(s.w)) && lr && lr.paused === true && !cardsOf(s.w).length,
+      'B-bc3b: a hand-edited store (its mark fails) — read once per unlock: the SAME door still runs the shared entry before a lock (its cached store: the plant is where it claims), after a lock + unlock the shared entry is CLOSED (entry_not_runnable, said in the audit) and its list row paused — no card', { cached: cached.ok && cached.by, closed: closed.code, listed: lr && { paused: lr.paused } });
+    // RED — both guards of a refused store taken away (the entry's `&& !refused` and the admission's belt): the shared entry RUNS
+    // over a store that failed its mark — the leg above goes red there
+    const SRCf = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const noRefuse = M.load('src/server/vault-run-door.js', anchored(anchored(SRCf, '(sharedIds.has(r.id) && !refused)', 'sharedIds.has(r.id)', 'test-vault-run ②c bc3b-refused (open)'), "return refused ? 'the vault\\'s run store failed its mark", "return false ? 'the vault\\'s run store failed its mark", 'test-vault-run ②c bc3b-refused (belt)'), 'bc3b-refused');
+    let rr = null;
+    if (noRefuse) {
+      const m = await shareWorld(noRefuse); m.ug.addMember(ID, { kind: 'conversation', key: 'conv-2' }, { hosts: ['api.example.com'] });
+      const before = await m.runAs('conv-2', TO('api.example.com'));
+      m.door.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });   // a fresh world has no store file until a switch writes one (its mark) — the plant needs it
+      const mf = path.join(m.w.dataDir, DOOR.STORE_FILE), mraw = JSON.parse(fs.readFileSync(mf, 'utf8'));
+      fs.writeFileSync(mf, JSON.stringify({ ...mraw, runnable: [...(mraw.runnable || []), 'app-secrets:app1#item.0.1'] }));
+      m.w.vault.lock('door'); await m.w.vault.unlock(PW);
+      const x = await m.runAs('conv-2', TO('api.example.com'));
+      rr = { before: before.ok && before.by, refusedSaid: /vault-run-store-refused/.test(auditOf(m.w)), after: x.ok ? x.by : x.code };
+    }
+    ok(!!noRefuse && rr && rr.before === 'grant' && rr.refusedSaid && rr.after === 'grant', 'RED — both refused-store guards removed (its plant proves itself: the store was refused, said in its audit): the shared entry RUNS by:grant over a store that failed its mark', rr);
+  }
   const rv = s.ug.revoke(ID, 'conversation:conv-2');
   const after = await s.runAs('conv-2', TO('api.example.com'));
   ok(rv && rv.ok && after.code === 'use_not_granted', 'the owner\'s ✕ takes it back ⇒ conv-2 is refused again', { rv: rv && rv.ok, code: after.code });
