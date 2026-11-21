@@ -113,7 +113,9 @@ ok(touched.r === true && touched.sent.join() === 'touchStart,touchEnd', 'a touch
 }
 
 console.log('④ MUTANTS — each RED by name');
-const mutate = (fn, from, to) => { const s = fn.toString(); if (!s.includes(from)) return null; return new Function(`return (${s.replace(from, to)})`)(); };
+// B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the function (scripts/scratch.mjs);
+// then null, and the mutant's own leg reds «(the anchor is gone)» too — nothing crashes
+const mutate = (fn, from, to) => { const s = fn.toString(), n = s.split(from).length - 1; if (n !== 1) { ok(false, `ANCHOR (${fn.name} of scripts/scratch.mjs): ${JSON.stringify(from).slice(0, 100)} — found ${n} times in its source, one meant: the mutant builds nothing`); return null; } return new Function(`return (${s.replace(from, to)})`)(); };
 const blindToMovers = mutate(stillVerdict, "if (Array.isArray(now.movers) && now.movers.length) return 'moving';", '');
 const redV = blindToMovers ? table(blindToMovers).filter(([, got, want]) => got !== want).map(([name]) => name) : ['(the anchor is gone)'];
 ok(redV.length === 1 && /^MID-SLIDE/.test(redV[0]), `MUTANT the verdict ignores a running mover ⇒ RED by name: «${redV[0]}»`, redV);

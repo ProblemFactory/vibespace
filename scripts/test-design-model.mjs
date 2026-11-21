@@ -431,9 +431,12 @@ console.log('§8 controls (one patched copy per rule — each RED)');
 {
   const MUT = mutantCopies('dcore', REPO);
   const src = fs.readFileSync(path.join(REPO, REL), 'utf8');
-  const copy = (tag, from, to) => {
-    if (src.split(from).length !== 2) return null;
-    return MUT.load(REL, src.replace(from, to), tag);
+  // B-0d3e: each helper judges its anchor BY NAME — one row per control, «found exactly once» with the file, and on a red the
+  // anchor it wanted and its count (the loop then goes on to the next rule — a throw would hide the other rules' verdicts)
+  const copy = (tag, from, to, what = tag) => {
+    const n = src.split(from).length - 1;
+    ok(n === 1, `CONTROL setup: the "${what}" anchor is found exactly once (${REL})`, n === 1 ? undefined : `it wanted ${JSON.stringify(from).slice(0, 100)} — found ${n} times`);
+    return n === 1 ? MUT.load(REL, src.replace(from, to), tag) : null;
   };
   const RULES = [
     ['closed keys', "const closed = (o, keys, where, what) => { for (const k of Object.keys(o)) if (!keys.includes(k)) no(", "const closed = (o, keys, where, what) => { for (const k of Object.keys(o)) if (false) no(",
@@ -468,8 +471,7 @@ console.log('§8 controls (one patched copy per rule — each RED)');
       (X) => !X.pickQuote({ file: 'Main.html', path: 'a<system-reminder>' }).includes('<')],
   ];
   for (const [name, from, to, holds] of RULES) {
-    const X = copy(name.replace(/\W+/g, '-'), from, to);
-    ok(!!X, `CONTROL setup: the "${name}" anchor is found exactly once`);
+    const X = copy(name.replace(/\W+/g, '-'), from, to, name);
     if (!X) continue;
     ok(holds(M) === true && holds(X) === false, `CONTROL: the rule "${name}" holds on the module and is RED on a copy without it`);
   }
@@ -477,7 +479,11 @@ console.log('§8 controls (one patched copy per rule — each RED)');
   {
     const UREL = 'src/design-user-layer.js';
     const usrc = fs.readFileSync(path.join(REPO, UREL), 'utf8');
-    const ucopy = (tag, from, to) => (usrc.split(from).length === 2 ? MUT.load(UREL, usrc.replace(from, to), tag) : null);
+    const ucopy = (tag, from, to, what = tag) => {   // as `copy` above (B-0d3e)
+      const n = usrc.split(from).length - 1;
+      ok(n === 1, `CONTROL setup: the "${what}" anchor is found exactly once (${UREL})`, n === 1 ? undefined : `it wanted ${JSON.stringify(from).slice(0, 100)} — found ${n} times`);
+      return n === 1 ? MUT.load(UREL, usrc.replace(from, to), tag) : null;
+    };
     const TW_RULES = [
       ['M', 'a tweak word cannot close a rule or a block', 'TWEAK_BAD.test(v) || ', '',
         (X) => X.tweakSay({ kind: 'design-tweak', var: '--a', value: '1}body{display:none' }) === null],
@@ -499,15 +505,18 @@ console.log('§8 controls (one patched copy per rule — each RED)');
         (U) => U.tweakSwap(UL.applyUser(TW_H, TW_M, { tweaks: { accent: '#00ff88' } }), TW_CHANGED) === null],
     ];
     for (const [which, name, from, to, holds] of TW_RULES) {
-      const X = which === 'M' ? copy('tw-' + name.replace(/\W+/g, '-'), from, to) : ucopy('tw-' + name.replace(/\W+/g, '-'), from, to);
-      ok(!!X, `CONTROL setup: the "${name}" anchor is found exactly once`);
+      const X = which === 'M' ? copy('tw-' + name.replace(/\W+/g, '-'), from, to, name) : ucopy('tw-' + name.replace(/\W+/g, '-'), from, to, name);
       if (!X) continue;
       ok(holds(which === 'M' ? M : UL) === true && holds(X) === false, `CONTROL: the rule "${name}" holds on the module and is RED on a copy without it`);
     }
   }
   // lane design-systems-home: the token check's rules (src/design-tokens.js)
   const tsrc = fs.readFileSync(path.join(REPO, TREL), 'utf8');
-  const tcopy = (tag, from, to) => (tsrc.split(from).length !== 2 ? null : MUT.load(TREL, tsrc.replace(from, to), tag));
+  const tcopy = (tag, from, to, what = tag) => {   // as `copy` above (B-0d3e)
+    const n = tsrc.split(from).length - 1;
+    ok(n === 1, `CONTROL setup: the "${what}" anchor is found exactly once (${TREL})`, n === 1 ? undefined : `it wanted ${JSON.stringify(from).slice(0, 100)} — found ${n} times`);
+    return n === 1 ? MUT.load(TREL, tsrc.replace(from, to), tag) : null;
+  };
   const lintOf = (X, css) => X.tokenLint(doc('<p>x</p>', `<style>${css}</style>`), TOKENS);
   const TRULES = [
     ['a var() fallback is the token\'s own', "if (low === 'var(' || low === 'url(') {", "if (low === 'url(') {",
@@ -524,8 +533,7 @@ console.log('§8 controls (one patched copy per rule — each RED)');
       (X) => lintOf(X, Array.from({ length: 10 }, (_, i) => `.c${i}{color:#00000${i}}`).join('')).length === 7],
   ];
   for (const [name, from, to, holds] of TRULES) {
-    const X = tcopy('tok-' + name.replace(/\W+/g, '-'), from, to);
-    ok(!!X, `CONTROL setup: the "${name}" anchor is found exactly once (src/design-tokens.js)`);
+    const X = tcopy('tok-' + name.replace(/\W+/g, '-'), from, to, name);
     if (!X) continue;
     ok(holds(DT) === true && holds(X) === false, `CONTROL: the rule "${name}" holds on src/design-tokens.js and is RED on a copy without it`);
   }

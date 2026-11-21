@@ -1082,7 +1082,14 @@ ok(!bj['F3·engine'], `F3 the lanes through a real engine: an agent's direct rep
   const SS = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8'), LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8');
   const PLAN_REQ = "require('../channel-upload-plan.js')";
   const onPlan = (from, to, tag) => {
-    if (!PS.includes(from) || !SS.includes(PLAN_REQ) || !LS.includes(PLAN_REQ)) return null;
+    // B-0d3e: each anchor judged BY NAME — the plan's line and both adapters' require, each exactly once; any other count is a red
+    // row naming the anchor and its file (then null: the control's own row reds «the patch site is gone», nothing crashes)
+    const nP = PS.split(from).length - 1, nS = SS.split(PLAN_REQ).length - 1, nL = LS.split(PLAN_REQ).length - 1;
+    if (nP !== 1 || nS !== 1 || nL !== 1) {
+      const off = [[nP, from, 'src/channel-upload-plan.js'], [nS, PLAN_REQ, 'src/channels/slack.js'], [nL, PLAN_REQ, 'src/channels/lark.js']].filter(([k]) => k !== 1);
+      ok(false, `ANCHOR (${tag}): ${off.map(([k, a, f]) => `${JSON.stringify(a).slice(0, 100)} found ${k} times in ${f}`).join('; ')} — one meant: the control builds nothing`);
+      return null;
+    }
     const pp = MC.write('src/channel-upload-plan.js', PS.replace(from, to), tag);
     return { S: require(MC.write('src/channels/slack.js', SS.replace(PLAN_REQ, `require(${JSON.stringify(pp)})`), `${tag}-slack`)), L: require(MC.write('src/channels/lark.js', LS.replace(PLAN_REQ, `require(${JSON.stringify(pp)})`), `${tag}-lark`)) };
   };

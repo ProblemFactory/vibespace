@@ -275,7 +275,10 @@ console.log('⑤ MUTANTS (patched copies outside the tree)');
     fs.copyFileSync(path.join(ROOT, 'src/conversation-spec.js'), path.join(dir, 'src/conversation-spec.js'));
     fs.copyFileSync(path.join(ROOT, 'src/task-membership.js'), path.join(dir, 'src/task-membership.js')); // PURE (lane open-task-binds): the birth bind's verdict
     fs.writeFileSync(path.join(dir, 'src/backend-caps.js'), 'module.exports = { capsOf: () => ({}) };\n'); // the rename body's one import
-    if (!src.includes(from)) return { dir, missing: true };
+    // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (then «anchor missing»:
+    // the mutant's own leg below reds too, nothing crashes)
+    const n = src.split(from).length - 1;
+    if (n !== 1) { ok(false, `ANCHOR (${name}, src/server/conversation-ops.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the mutant builds nothing`); return { dir, missing: true }; }
     fs.writeFileSync(path.join(dir, 'src/server/conversation-ops.js'), src.replace(from, to));
     return { dir, M: require(path.join(dir, 'src/server/conversation-ops.js')) };
   };

@@ -2835,28 +2835,28 @@ async function chatReadLegs(ENGmod, name) {
         // the MUTANTS — the verdict's source with one line changed, loaded from this section's scratch dir
         const mutant = async (name, from, to) => {
           const src = fs.readFileSync(OC_PATH, 'utf-8');
-          if (src.split(from).length !== 2) return null;
+          // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor throws with it and the file, and legOSC reports the throw
+          // as the red row of this mutant's own leg (never a crash, never a silent pass)
+          const n = src.split(from).length - 1;
+          if (n !== 1) throw new Error(`ANCHOR (${name}, src/outbox-chip.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the mutant builds nothing`);
           const f = path.join(dir, `outbox-chip-${name}.js`);
           fs.writeFileSync(f, src.replace(from, to).replace("require('./outbox-census.js')", `require(${JSON.stringify(path.join(REPO, 'src/outbox-census.js'))})`));
           return require(f);
         };
         await legOSC('MUTANT the chip counting EVERY proposal (no drafter filter) ⇒ RED by name on the «only this conversation» legs', async () => {
           const M = await mutant('count-all', '  const mine = outboxRowsOf(rows, { keys });\n', '  const mine = outboxRowsOf(rows, null);\n');
-          if (!M) return [false, 'the drafter line is not spelled once'];
           const red = [];
           for (const [n, fn] of chipLegs(M)) { let r; try { r = fn(); } catch { r = [false]; } if (!r[0]) red.push(n); }
           return [red.some((n) => /only the proposals THIS conversation drafted count/.test(n)) && red.some((n) => /a conversation with NO proposal/.test(n)) && red.some((n) => /another conversation/.test(n)), red];
         });
         await legOSC('MUTANT the filter dropping «replaced» cards ⇒ RED by name on the «every state» leg', async () => {
           const M = await mutant('drop-replaced', 'return keys.length ? list.filter((p) => draftedByAny(p, keys)) : list;', 'return keys.length ? list.filter((p) => draftedByAny(p, keys) && !p.replacedBy) : list;');
-          if (!M) return [false, 'the filter line is not spelled once'];
           const red = [];
           for (const [n, fn] of chipLegs(M)) { let r; try { r = fn(); } catch { r = [false]; } if (!r[0]) red.push(n); }
           return [red.length >= 1 && red.some((n) => /the filter keeps EVERY state/.test(n)), red];
         });
         await legOSC('MUTANT N1 the tip\'s proposals-only chip (the census fed no API call) ⇒ RED by name on the N1 legs', async () => {
           const M = await mutant('proposals-only', '  const c = outboxCensus({ proposals: mine.proposals, apiCards: mine.apiCards, apiFate: fate });\n', '  const c = outboxCensus({ proposals: mine.proposals, apiCards: [], apiFate: fate });\n');
-          if (!M) return [false, 'the census line is not spelled once'];
           const red = [];
           for (const [n, fn] of chipLegs(M)) { let r; try { r = fn(); } catch { r = [false]; } if (!r[0]) red.push(n); }
           return [red.some((n) => /^N1 the chip counts the SAME rows/.test(n)) && red.some((n) => /^N1 the chip's total \/ waiting ARE the window's head census/.test(n)) && red.some((n) => /^N1 a conversation whose ONLY Outbox row is a pending API call/.test(n)), red];
@@ -3727,7 +3727,9 @@ async function chatReadLegs(ENGmod, name) {
         };
         for (const [n, r] of await noListLegs('real', OCD_TEXT)) await legOSC(n, () => r);
         const ocdRed = async (name, from, to, want) => {
-          if (OCD_TEXT.split(from).length !== 2) return null;
+          // B-0d3e: the anchor judged BY NAME (as `mutant` above) — legOSC reports the throw as this mutant's own red row
+          const n = OCD_TEXT.split(from).length - 1;
+          if (n !== 1) throw new Error(`ANCHOR (${name}, the bundle osc-r3-real.mjs of src/lib/channel-outbox.js + outbox-feed.js + channel-touch-view.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the mutant builds nothing`);
           const f = path.join(dir, `osc-ocd-${name}.mjs`);
           fs.writeFileSync(f, OCD_TEXT.replace(from, to));
           return (await runOCD(await import(f), want)).filter(([, r]) => !r[0]).map(([n]) => n);   // the leg it must red, not all of them: the row's budget
@@ -3743,7 +3745,7 @@ async function chatReadLegs(ENGmod, name) {
           ['j3a', 'the failed read forgetting the press though the feed holds a list ⇒ RED on J3a', 'if (last) showPending();', '', /^OCD J3a /],
           ['j3b', 'a press from inside not lifting a forced All ⇒ RED on J3b', 'if (inside) pressAll = false;', '', /^OCD J3b /],
         ]) {
-          await legOSC(`MUTANT OCD ${label}`, async () => { const red = await ocdRed(name, from, to, want); return [!!red && red.some((n) => want.test(n)), red === null ? `not spelled once in the bundle: ${from}` : red]; });
+          await legOSC(`MUTANT OCD ${label}`, async () => { const red = await ocdRed(name, from, to, want); return [red.some((n) => want.test(n)), red]; });
         }
         for (const [name, label, from, to, want] of [
           ['h4', 'a row naming its proposal with no list held (r1\'s guess) ⇒ RED on the reply\'s conversation', 'return row.convId ? null : String(row.proposalId);', 'return String(row.proposalId);', /^OCD H4 no list held \(the feed/],

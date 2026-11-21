@@ -133,7 +133,10 @@ check('boot-splash: a request that gave up NEVER resolves (restoring from nothin
 // ── ④ patched-copy controls: each mutant must turn its leg red ──
 const mutant = (rel, from, to, ext) => {
   const src = read(rel);
-  if (!src.includes(from)) return null;
+  // B-0d3e: the anchor is judged BY NAME — a moved or doubled anchor is a red row naming it and the file (then null: the
+  // control's own leg reds «(anchor moved)», nothing crashes)
+  const n = src.split(from).length - 1;
+  if (n !== 1) { check(`ANCHOR (${rel}): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the control builds nothing`, false); return null; }
   const f = path.join(tmp, path.basename(rel, ext) + '-' + Math.random().toString(36).slice(2, 8) + ext);
   fs.writeFileSync(f, src.replace(from, to));
   return f;
