@@ -35,6 +35,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): a read whose state never came is SAID on its own line, right above the
+// judge that reads it, and MARKED (an object or a list carries `timedOut`) — so its red reads that, never a verdict on the product
+const markTimedOut = (v, ms, what) => { console.log(`    (${what}: the state it waits for did not come in ${ms / 1000} s (a wait that expects nothing ends so too); its last read ${JSON.stringify(v === undefined ? null : v).slice(0, 160)})`); return v && typeof v === 'object' ? Object.assign(v, { timedOut: `the state never came in ${ms / 1000} s` }) : v; };
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -217,7 +220,7 @@ const realClickEl = async (expr) => {
 };
 const stdinFrames = () => (fs.existsSync(STDIN_LOG) ? fs.readFileSync(STDIN_LOG, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean) : []);
 const responsesFor = (rid) => stdinFrames().filter((m) => m.type === 'control_response' && m.response?.request_id === rid);
-const waitResponses = async (rid) => { for (let i = 0; i < 60; i++) { const r = responsesFor(rid); if (r.length) return r; await sleep(100); } return responsesFor(rid); };
+const waitResponses = async (rid) => { for (let i = 0; i < 60; i++) { const r = responsesFor(rid); if (r.length) return r; await sleep(100); } return markTimedOut(responsesFor(rid), 6000, 'waitResponses ' + rid); };
 
 // page-side helpers: the PARENT chat's list, a helper's ask row in it, a card
 const VIEW = (sid) => `[...app.sessions.values()].find((v) => v && v.sessionId === ${JSON.stringify(sid)})`;
