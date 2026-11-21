@@ -97,7 +97,7 @@ export function installTrailingBar(app) {
   // a long press (touch: the synthesized contextmenu) says the label beside the button
   let tip = null, tipTimer = null;
   nav.addEventListener('contextmenu', (e) => {
-    const b = e.target.closest?.('.mnav-bar-btn, .mnav-dest, #mobile-nav-gear');
+    const b = e.target.closest?.('.mnav-bar-btn, .mnav-dest, #mobile-nav-gear, .mnav-state[data-form="dot"]');   // the state's dot says its word too (主开发 r1344)
     if (!b || !regular()) return;
     e.preventDefault(); e.stopPropagation();
     if (!tip) { tip = document.createElement('div'); tip.className = 'mnav-tip'; tip.setAttribute('role', 'status'); document.body.appendChild(tip); }
@@ -133,9 +133,12 @@ export function installTrailingBar(app) {
     const state = st?.state && (running || !['working', 'needs-input'].includes(st.state)) ? st.state : (running ? 'working' : '');
     const meta = state ? SESSION_STATE_META[state] : null;
     if (w?.titleSpan) { w.titleSpan.dataset.state = meta ? meta.label : ''; w.titleSpan.style.setProperty('--state-color', meta?.color || 'var(--text-dim)'); }
+    const had = !!stateEl.textContent.trim();
     stateEl.textContent = meta ? meta.label : '';
     stateEl.style.setProperty('--state-color', meta?.color || 'var(--text-dim)');
-    if (moved) app._mobileNav?._paintHead?.();
+    // a new word: whole, or its dot alone (主开发 r1344) — a word that appears or leaves moves the room the head's ladder
+    // measured the name in (the dot's room held or not), so the head runs again; a word that only changes is re-decided
+    if (moved || had !== !!stateEl.textContent.trim()) app._mobileNav?._paintHead?.(); else app._mobileNav?._paintState?.();
   }
   update();
   /** The list moved (sidebar.js _mergeAndRender — every poll, every frame). Of it the bar reads only the window on show's own
@@ -149,7 +152,7 @@ export function installTrailingBar(app) {
     listSeen = key;
     update();
   }
-  return { update, onList, el: nav };
+  return { update, onList, el: nav, state: stateEl };   // the head's state word (mobile-nav.js _paintState reads it here)
 }
 
 // ⚙ folded into ⋯ (lane phone-six r2 — the name keeps 8 em, mobile-nav.js _paintHead's 'gear' step): ⋯'s last row is it

@@ -150,11 +150,50 @@ if (H) {
     'RED CONTROL: the round-1 rule (the part before « — », whole) names a files window by its path — at 669 px «/tm…», three glyphs of nothing; the module names the folder');
   const m2 = mutant('return Math.min(Math.max(0, Number(full) || 0), floorEm * (Number(em) || 0));', 'return Math.min(Math.max(0, Number(full) || 0), 3.5 * (Number(em) || 0));', HEAD_SRC);
   ok(H.nameFits(96, 300, 14, 96) && !H.nameFits(94, 300, 14, 96) && H.nameFits(79, 79, 14, 96) && !H.nameFits(104, 300, 14), 'the ladder\'s minimum is THE RELEASE\'S when measured (主开发 09:33Z: six CJK / twelve Latin glyphs + «…» — the 700 px tablet keeps its five): 96 px fits, 94 does not, a 79 px name whole fits; 8 em without it');
-  ok(/probe\.textContent = navTitleMinText\(name\); el\.appendChild\(probe\); const minPx = probe\.getBoundingClientRect\(\)\.width; probe\.remove\(\);/.test(read('src/lib/mobile-nav.js')) && /if \(nameFits\(el\.getBoundingClientRect\(\)\.width, el\.scrollWidth, em, minPx\) && barFits\(lastRight\(nav\), nav\.getBoundingClientRect \? nav\.getBoundingClientRect\(\)\.right : Infinity\)\) return;/.test(read('src/lib/mobile-nav.js')), 'the head measures that minimum in its own font and the ladder reads it');
+  ok(/probe\.textContent = navTitleMinText\(name\); el\.appendChild\(probe\); const minPx = probe\.getBoundingClientRect\(\)\.width; probe\.remove\(\);/.test(read('src/lib/mobile-nav.js')) && /if \(nameFits\(el\.getBoundingClientRect\(\)\.width, el\.scrollWidth, em, minPx\) && barFits\(lastRight\(nav\), nav\.getBoundingClientRect \? nav\.getBoundingClientRect\(\)\.right : Infinity\)\) \{ this\._paintState\(\); return; \}/.test(read('src/lib/mobile-nav.js')), 'the head measures that minimum in its own font and the ladder reads it');
   ok(m2.nameFits(54, 300, 14) === true && H.nameFits(54, 300, 14) === false, 'RED CONTROL: round 1\'s 3.5 em floor calls 54 px («/tm…») enough; the module wants 8 em');
   // (lane mask-value-shape, the strip's step two — the hosted test-duo-layout: at 669 × 867 the top bar's magnifier pushed ⚙ off
   // the screen while the name still fit) the ladder also yields while the ROW overflows its bar: every button stays on screen
   ok(H.barFits(348, 348) && H.barFits(349, 348) && !H.barFits(392, 348) && !H.barFits(350, 348), `the bar holds its buttons: a row as wide as its box (or within a px) fits, 44 px more does not (${[H.barFits(348, 348), H.barFits(349, 348), H.barFits(392, 348)].join('/')})`);
+  // ⑦b THE STATE WORD SHOWS WHOLE OR AS ITS DOT ALONE (主开发 r1344 — the release at 669 px beside the list column drew «工…» for
+  // «工作中», 4 of its 43 px, beside a long name): PURE stateForm, the painter RUN over a stand-in, its wiring
+  ok(H.stateForm(43, 43) === 'whole' && H.stateForm(42.995, 43) === 'whole' && H.stateForm(42.6, 43) === 'dot' && H.stateForm(4, 43) === 'dot' && H.stateForm(0, 0) === 'none' && H.stateForm(60, 0) === 'none',
+    'stateForm: a word whose room holds its whole run is drawn whole; short of it by any fraction (an ellipsis is drawn on any overflow) its dot alone; no word, nothing');
+  const m3 = mutant("  return (Number(got) || 0) + 0.01 >= n ? 'whole' : 'dot';\n", "  return 'whole';\n", HEAD_SRC);
+  ok(m3.stateForm(4, 43) === 'whole' && H.stateForm(4, 43) === 'dot', 'RED CONTROL: the release\'s form (the word takes whatever room it is given) calls 4 of 43 px whole — «工…»; the module draws its dot');
+  const m4 = mutant("  return (Number(got) || 0) + 0.01 >= n ? 'whole' : 'dot';\n", "  return (Number(got) || 0) + 0.5 >= n ? 'whole' : 'dot';\n", HEAD_SRC);
+  ok(m4.stateForm(42.6, 43) === 'whole' && H.stateForm(42.6, 43) === 'dot', 'RED CONTROL: the first cut\'s half-pixel slack calls 42.6 of 43 px whole — an ellipsis there; the module draws its dot');
+  const mnSrc = read('src/lib/mobile-nav.js'), pAt = mnSrc.indexOf('  _paintState() {'), pEnd = mnSrc.indexOf('\n  }\n', pAt) + 4, PAINT_SRC = mnSrc.slice(pAt, pEnd);
+  // _paintState sliced from mobile-nav.js and RUN over a stand-in that answers as the browser does: its box (padding 4 px
+  // included) and its word's run — and, while it wears the dot, the dot's 8 px box and no run (its font is 0)
+  const painter = (form, src = PAINT_SRC) => {
+    const el = { textContent: '', box: 0, need: 0, display: 'inline', dataset: {}, attrs: {}, set title(v) { this.attrs.title = v; }, get title() { return this.attrs.title; },
+      setAttribute(k, v) { this.attrs[k] = String(v); }, removeAttribute(k) { delete this.attrs[k]; }, getBoundingClientRect() { return { width: this.dataset.form === 'dot' ? 8 : this.box }; } };
+    const doc = { createRange: () => ({ selectNodeContents(n) { this.n = n; }, getBoundingClientRect() { return { width: this.n.dataset.form === 'dot' ? 0 : this.n.need }; } }) };
+    const o = new Function('stateForm', 'document', 'getComputedStyle', 'return { ' + src.trim() + ' };')(form, doc, (e) => ({ display: e.display, paddingLeft: '4px', paddingRight: '0px' }));
+    o.bar = { state: el };
+    return (s) => { Object.assign(el, s); o._paintState(); return { form: el.dataset.form || '', role: el.attrs.role || '', label: el.attrs['aria-label'] || '', title: el.attrs.title || '' }; };
+  };
+  const run = painter(H.stateForm);
+  const cut = run({ textContent: '工作中', box: 8, need: 43 }), back = run({ box: 64, need: 47 }), sub = run({ box: 46.6, need: 43 }), none = run({ textContent: '', box: 60, need: 0 }), hid = run({ textContent: '空闲', display: 'none', box: 0, need: 30 });
+  ok(pAt > 0 && cut.form === 'dot' && cut.role === 'img' && cut.label === '工作中' && cut.title === '工作中', 'the painter, RUN: «工作中» with 4 of its 43 px is drawn as its DOT, the word its accessible name and its title', cut);
+  ok(!back.form && !back.role && !back.label && !back.title && sub.form === 'dot' && !none.form && !hid.form, 'the painter, RUN: given its room the word is whole again (the dot\'s name and title gone); 42.6 of 43 px is its dot (no rounding); no word, or a hidden one, draws nothing', { back, sub, none, hid });
+  const cutOld = painter(m3.stateForm)({ textContent: '工作中', box: 8, need: 43 });
+  ok(!cutOld.form, 'RED CONTROL: the painter over the release\'s form keeps «工作中» as a word in 4 px — the cut the law forbids', cutOld);
+  // ORDER (the read's 6): the word is measured AFTER its dot is taken off — measured while it still wears the dot, it reads the
+  // dot's 8 px against no run and lets the word back in, cut
+  const early = PAINT_SRC.replace('    delete s.dataset.form;\n', '').replace("    let form = 'none';\n", "    let form = 'none';\n    const was = s.dataset.form;\n");
+  const swapped = early.replace("    if (form === 'dot')", "    delete s.dataset.form;\n    if (form === 'dot')");
+  const runSw = painter(H.stateForm, swapped); runSw({ textContent: '工作中', box: 8, need: 43 }); const wrong = runSw({ box: 8, need: 43 });
+  run({ textContent: '工作中', display: 'inline', box: 8, need: 43 }); const right = run({ box: 8, need: 43 });   // from a dot already drawn, as the browser re-decides
+  ok(swapped !== PAINT_SRC && right.form === 'dot' && wrong.form !== 'dot', 'RED CONTROL: the same painter measuring BEFORE it takes the dot off reads the dot\'s box and draws the word back, cut — the module measures after', { right, wrong });
+  const ph = mnSrc.slice(mnSrc.indexOf('  _paintHead() {'), mnSrc.indexOf('  _paintState() {')), fb = mnSrc.slice(mnSrc.indexOf('  _fitBar() {'), mnSrc.indexOf('\n  }\n', mnSrc.indexOf('  _fitBar() {'))), tb = read('src/lib/trailing-bar.js'), cssS = read('public/style.css');
+  const pStart = cssS.indexOf('.mnav-state { display: none; }\n@media (orientation: portrait) {'), pStop = cssS.indexOf('/* Mobile terminal key toolbar', pStart), dotAt = cssS.indexOf('html[data-vc="regular"] #mobile-nav .mnav-state[data-form="dot"] { flex: none; width: 8px; height: 8px;');
+  ok((ph.match(/this\._paintState\(\);/g) || []).length === 3 && ph.includes("if (st) { if ((st.textContent || '').trim()) st.dataset.form = 'dot'; else delete st.dataset.form; }")
+    && fb.includes("if (this.app.viewportClass?.() === 'regular') this._paintState();")
+    && tb.includes('return { update, onList, el: nav, state: stateEl };') && tb.includes("if (moved || had !== !!stateEl.textContent.trim()) app._mobileNav?._paintHead?.(); else app._mobileNav?._paintState?.();")
+    && tb.includes('.mnav-state[data-form="dot"]\');') && pStart > 0 && dotAt > pStart && dotAt < pStop,
+    'the wiring: the head paints its state on every way out (the dot\'s room held while the ladder measures the name, none for no word); a bar refit re-decides it (a button\'s width moved); a word that appears or leaves re-runs the head, a changed word re-decides; the dot says its word on a long press; the dot is drawn inside the portrait block (the regular class only)');
 }
 {
   const sv = read('src/lib/phone-split-view.js'), mn = read('src/lib/mobile-nav.js'), w = read('src/lib/window.js'), css = read('public/style.css');
@@ -165,7 +204,7 @@ if (H) {
     'no dead pair: «Split» beside a minimized window restores it BEFORE the pair is kept; a pane\'s window minimized / closed after it stood / moved away drops the pair at apply() with a toast (a window not built yet is none of these)');
   ok(/addEventListener\('pointerdown', \(e\) => \{ const w = e\.target\.closest\?\.\('\.window\.phone-pane'\); pressedAside = !!w && !w\.classList\.contains\('window-active'\); \}, true\);/.test(mn) && /if \(pressedAside\) \{ pressedAside = false; return; \}/.test(mn),
     'one tap = one act: the press on the pane NOT on show (read in the capture phase, before the press focuses it) only makes it the one on show — the switcher opens from the head of the pane on show');
-  ok(/import \{ headName, nameFits, (?:barFits, )?YIELD_LADDER(?:, ROW_YIELD_LADDER, rowParts)? \} from '\.\.\/phone-head\.js';/.test(mn) && /const name = win \? \(headName\(win\.title\) \|\| windowKindWords\(win\.type\)\) : t\('No window'\);/.test(mn) && /el\.title = !home && full !== name \? full : t\('Switch window'\);/.test(mn) && /new ResizeObserver\(\(\) => this\._paintHead\(\)\)\.observe\(document\.getElementById\('mobile-nav'\)\)/.test(mn)
+  ok(/import \{ headName, nameFits, (?:barFits, )?stateForm, YIELD_LADDER(?:, ROW_YIELD_LADDER, rowParts)? \} from '\.\.\/phone-head\.js';/.test(mn) && /const name = win \? \(headName\(win\.title\) \|\| windowKindWords\(win\.type\)\) : t\('No window'\);/.test(mn) && /el\.title = !home && full !== name \? full : t\('Switch window'\);/.test(mn) && /new ResizeObserver\(\(\) => this\._paintHead\(\)\)\.observe\(document\.getElementById\('mobile-nav'\)\)/.test(mn)
     && /titleSpan\.dataset\.name = headName\(title\);/.test(w) && /win\.titleSpan\.dataset\.name = headName\(t\);/.test(w)
     && /#mobile-nav\[data-yield\] :is\(#mobile-nav-viewer-close, #mobile-nav-artifacts, #mobile-nav-live\) \{ display: none !important; \}/.test(css) && /#mobile-nav:is\(\[data-yield="gear"\], \[data-yield="icon"\]\):has\(#mobile-nav-more\.on\) #mobile-nav-gear:not\(\.vault-locked\) \{ display: none !important; \}/.test(css)
     && /registerMenuItem\(\{ menu: 'window', group: '9_bar', order: 10, id: 'window\/bar-gear', when: gearFolded, label: \(\) => t\('Global settings'\), run: \(c\) => c\.app\._pressGlobalSettings\(document\.getElementById\('mobile-nav-more'\)\) \}\);/.test(read('src/lib/trailing-bar.js')),
@@ -228,11 +267,11 @@ console.log('⑧ the phone bar\'s search door comes with its method: the title p
   const MIN_OF = (/^const minimizedOf = [^\n]+$/m.exec(MN) || [null])[0];
   const SHOWN = sliceOf(MN, '_shownChat');
   const paint = (src, ids) => {
-    const Probe = new Function('t', 'headName', 'nameFits', 'barFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle', 'windowWords', 'windowKindWords',   // + the two window-types names the head reads (lane ui-plain-words closure F13)
-      `${MIN_OF}\nreturn class Probe {\n${sliceOf(src, 'updateTitle')}\n${sliceOf(src, '_paintHead')}\n${sliceOf(src, '_titleWin')}\n${sliceOf(src, '_shownChat') || ''}\n};`);
+    const Probe = new Function('t', 'headName', 'nameFits', 'barFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle', 'windowWords', 'windowKindWords', 'stateForm',   // + the two window-types names the head reads (lane ui-plain-words closure F13)
+      `${MIN_OF}\nreturn class Probe {\n${sliceOf(src, 'updateTitle')}\n${sliceOf(src, '_paintHead')}\n${sliceOf(src, '_paintState') || ''}\n${sliceOf(src, '_titleWin')}\n${sliceOf(src, '_shownChat') || ''}\n};`);
     const nav = { dataset: {}, style: {} };
     const doc = { getElementById: (id) => (ids.has(id) ? (id === 'mobile-nav' ? nav : { classList: { toggle() { } }, dataset: {} }) : null), createElement: () => ({ style: {}, getBoundingClientRect: () => ({ width: 10 }), remove() { } }) };
-    const P = Probe((x) => x, H ? H.headName : (x) => x, () => true, H ? H.barFits : () => true, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }), (w) => String(w.title || ''), () => 'Window');
+    const P = Probe((x) => x, H ? H.headName : (x) => x, () => true, H ? H.barFits : () => true, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }), (w) => String(w.title || ''), () => 'Window', H ? H.stateForm : () => 'none');
     const el = { textContent: '', title: '', classList: { toggle() { } }, removeAttribute() { }, setAttribute() { }, appendChild() { }, getBoundingClientRect: () => ({ width: 200 }), scrollWidth: 200 };
     const win = { id: 1, title: 'Fix the login page — /w/demo', element: { classList: { contains: () => false } } };
     const p = Object.assign(Object.create(P.prototype), { _noteShown() { }, _titleEl: el, _shown: {}, bar: null, split: null, updateDesktopsDoor() { },
@@ -280,11 +319,11 @@ console.log('⑨ closure F13 on phone-six\'s painter: a title-less window is nam
   // fits: true ⇒ the head keeps its words (the first step of the ladder fits); false ⇒ the ladder ends at the icon, whose
   // accessible name is the window's FULL name (el.setAttribute('aria-label', full))
   const paint = (src, fits) => {
-    const Probe = new Function('t', 'headName', 'nameFits', 'barFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle', 'windowWords', 'windowKindWords',
-      `${MIN_OF}\nreturn class Probe {\n${sliceOf(src, 'updateTitle')}\n${sliceOf(src, '_paintHead')}\n${sliceOf(src, '_titleWin')}\n};`);
+    const Probe = new Function('t', 'headName', 'nameFits', 'barFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle', 'windowWords', 'windowKindWords', 'stateForm',
+      `${MIN_OF}\nreturn class Probe {\n${sliceOf(src, 'updateTitle')}\n${sliceOf(src, '_paintHead')}\n${sliceOf(src, '_paintState') || ''}\n${sliceOf(src, '_titleWin')}\n};`);
     const nav = { dataset: {}, style: {} };
     const doc = { getElementById: (id) => (id === 'mobile-nav' ? nav : null), createElement: () => ({ style: {}, getBoundingClientRect: () => ({ width: 10 }), remove() { } }) };
-    const P = Probe((x) => x, H ? H.headName : (x) => x, () => fits, H ? H.barFits : () => true, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }), WT.windowWords, WT.windowKindWords);
+    const P = Probe((x) => x, H ? H.headName : (x) => x, () => fits, H ? H.barFits : () => true, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }), WT.windowWords, WT.windowKindWords, H ? H.stateForm : () => 'none');
     const attrs = {};
     const el = { textContent: '', title: '', innerHTML: '', classList: { toggle() { } }, removeAttribute(k) { delete attrs[k]; }, setAttribute(k, v) { attrs[k] = v; }, appendChild() { }, getBoundingClientRect: () => ({ width: 200 }), scrollWidth: 200 };
     const win = { id: 1, title: '', type: KIND, element: { classList: { contains: () => false } } };
@@ -332,12 +371,12 @@ console.log('⑩ the bar\'s ⋯ stands only when the window\'s menu holds a row'
   const TBAR = read('src/lib/trailing-bar.js'), TBK = read('src/lib/taskbar.js'), SBR = read('src/lib/sidebar.js'), css = read('public/style.css');
   const merge = SBR.slice(SBR.indexOf('  _mergeAndRender() {'), SBR.indexOf('\n  }\n', SBR.indexOf('  _mergeAndRender() {')));
   ok(/const holds = !!w && regular\(\) && windowMenuHolds\(app, w\.id\), moved = holds !== more\.classList\.contains\('on'\);[^\n]*\n    more\.classList\.toggle\('on', holds\);/.test(TBAR) && !/more\.classList\.toggle\('on', !!w\);/.test(TBAR)   // stale-pins: kept — a deliberate absence check: the old line must stay gone
-    && /if \(!windowMenuHolds\(app, w\.id\)\) \{ update\(\); return; \}/.test(TBAR) && /if \(moved\) app\._mobileNav\?\._paintHead\?\.\(\);/.test(TBAR),
+    && /if \(!windowMenuHolds\(app, w\.id\)\) \{ update\(\); return; \}/.test(TBAR) && /if \(moved \|\| had !== !!stateEl\.textContent\.trim\(\)\) app\._mobileNav\?\._paintHead\?\.\(\);/.test(TBAR),
     'the bar: ⋯ is on only while the window\'s menu holds a row (never «on for every window»), judged only in the regular class (where it is drawn); a press after its rows left opens nothing and the bar follows; its coming or going re-fits the head');
   ok(/export function windowMenuHolds\(app, id\) \{\n  return moreHolds\(windowMenuRows\(app, id\)\);/.test(TBK) && /return ctx \? contribMenuItems\('window', ctx\) : null;/.test(TBK) && /const ctx = windowMenuCtx\(app, id, \{ closeLabel, switchSubmenu, group, rowYielded \}\);/.test(TBK),
     'ONE reader: the question and the menu share windowMenuCtx and the window registry');
   ok(merge.includes('this.app.syncSessionIdentity?.(this._allSessions);') && merge.includes('this.app?._mobileNav?.bar?.onList?.();') && !merge.includes('this.app?._mobileNav?.bar?.update?.();')
-    && /if \(key === listSeen\) return;\n    listSeen = key;\n    update\(\);/.test(TBAR) && /const key = JSON\.stringify\(\[w\?\.id \|\| null, regular\(\), s && \[s\.webuiId, s\.sessionId, s\.status, s\.browserKey, s\.host, s\.browserProfileActive, !!s\.browserInput\], /.test(TBAR) && /return \{ update, onList, el: nav \};/.test(TBAR),
+    && /if \(key === listSeen\) return;\n    listSeen = key;\n    update\(\);/.test(TBAR) && /const key = JSON\.stringify\(\[w\?\.id \|\| null, regular\(\), s && \[s\.webuiId, s\.sessionId, s\.status, s\.browserKey, s\.host, s\.browserProfileActive, !!s\.browserInput\], /.test(TBAR) && /return \{ update, onList, el: nav, state: stateEl \};/.test(TBAR),
     'every merge of the list asks the bar (a conversation\'s menu holds its rows once its session is in the list) — and the bar updates only when the window on show\'s own session facts moved (the reading w7vpg6swt: a 5 s poll that moved nothing runs no registry)');
   ok(/winInfo\._desktopAppCaps = rec\.caps \|\| null;[^\n]*\n    app\._mobileNav\?\.bar\?\.update\?\.\(\);/.test(read('src/lib/desktop-app-window.js')) && /winInfo\._fileDownload = target;\n  globalThis\.app\?\._mobileNav\?\.bar\?\.update\?\.\(\);/.test(read('src/lib/file-download.js')),
     'the rows that land after the bar was drawn ask it at once: a desktop app\'s caps and state (its render), a viewer\'s Download (wireFileDownload)');

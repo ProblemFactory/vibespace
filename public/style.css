@@ -3284,6 +3284,10 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
      keeps 3.5em — the six 44 px buttons of a 348 px column leave it ~58 px, so none of them leaves the screen */
   html[data-vc="regular"] #mobile-nav-title { flex: 0 1 auto; min-width: 3.5em; text-align: left; padding-left: 4px; }
   html[data-vc="regular"] #mobile-nav .mnav-state { display: inline; order: 3; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 0 0 4px; font-size: 13px; font-weight: 500; color: var(--state-color, var(--text-dim)); white-space: nowrap; }
+  /* 主开发 r1344: the state word shows WHOLE or AS ITS DOT ALONE, never a cut word — mobile-nav.js _paintState sets
+     data-form="dot" when the room the bar leaves it is shorter than the word; the dot keeps the state's colour, the word lives
+     in its title and accessible name; its auto right margin keeps the bar's buttons where the whole word kept them */
+  html[data-vc="regular"] #mobile-nav .mnav-state[data-form="dot"] { flex: none; width: 8px; height: 8px; min-width: 8px; padding: 0; margin: 0 auto 0 6px; font-size: 0; border-radius: 50%; background: var(--state-color, var(--text-dim)); align-self: center; }
   /* round 2 (the integrator's pass: «/tm…» — three glyphs of a path): the name keeps ≥ 8 em or its whole width, the bar's
      buttons yield first (mobile-nav.js _paintHead over PURE src/phone-head.js YIELD_LADDER, each step tried in the layout):
      'win' — the window's own extras leave the bar (the switcher row's ✕ closes, the chat's status bar holds Artifacts, ⋯

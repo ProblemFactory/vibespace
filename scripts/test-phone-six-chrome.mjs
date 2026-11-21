@@ -73,6 +73,9 @@ const wt = path.join(root, 't');
 const fakeHome = path.join(root, 'home');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
+// ⑦f THE HEAD'S STATE WORD (主开发 r1344): at 669 beside the list column a long name leaves the state its DOT alone (the word
+// its accessible name and title); at 1000 × 1300 a short name the word WHOLE — never «工…»; RED CONTROL: the painter held at
+// the release's form cuts it.
 // ⑦e's files window shows a folder NAMED AT LENGTH (the 2.369.412 checkpoint's red): the boot helper's home is «home» — four
 // letters that fit beside the list column with nothing yielded, so ⚙ never folded and ⋯ held no row to read. Before §57c the
 // suite's home was /tmp/vs-phone-six-home-<pid>, whose readable minimum «vs-phone-six…» (114 px) made the ladder reach ⚙
@@ -675,6 +678,33 @@ try {
     await shot('r2-title-669-chat.png', { x: 0, y: 0, width: 669, height: 48 });
     const mn1 = await minW(e1.text);
     check(`⑦e …a conversation there: its name drawn whole or ≥ the release's readable minimum (${Math.round(mn1)} px)`, e1.listShown && e1.text === e1.full && e1.w + 0.5 >= Math.min(e1.textW, mn1), { e1, mn1 });
+    // ⑦f THE STATE WORD, WHOLE OR ITS DOT ALONE (主开发 r1344 — the release's own picture at 669 beside the list column drew «工…»
+    // for «工作中», 4 of its 43 px, beside a long name). The name is set, the head painted and the state read in ONE evaluation
+    // (the identity sync writes the real title back on its own beat). At 669 × 867 with every button the bar leaves the word
+    // ~11 px (the read's arithmetic): a long name → its DOT alone, the word its accessible name and title. At 1000 × 1300 (the
+    // regular class's widest portrait) a short name → the word WHOLE. RED CONTROL there: the painter held at the release's form
+    // (no decision; the dot's room taken off by hand) cuts the same word under a long name.
+    const LONG = '发布前的集成测试重试说明，以及退款重试的等待时间为什么这么短';
+    const AT = (n, release = false) => evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(A)}); if (!w) return null; w.title = ${JSON.stringify(n)}; app._mobileNav.updateTitle();
+      const s = document.getElementById('mobile-nav-state'); if (!s) return null; if (${release}) delete s.dataset.form;
+      const cs = getComputedStyle(s), r = s.getBoundingClientRect(), rg = document.createRange(); rg.selectNodeContents(s);
+      return { word: (s.textContent || '').trim(), form: s.dataset.form || '', label: s.getAttribute('aria-label') || '', title: s.title || '', w: Math.round(r.width * 10) / 10,
+        room: Math.round((r.width - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)) * 10) / 10, need: Math.round(rg.getBoundingClientRect().width * 10) / 10, shown: cs.display !== 'none', yield: document.getElementById('mobile-nav').dataset.yield || '' }; })()`);
+    const short0 = await evalJs(`app.wm.windows.get(${JSON.stringify(A)}).title`);
+    const s1 = await AT(LONG);
+    await shot('r1344-state-669-long.png', { x: 0, y: 0, width: 669, height: 48 });
+    check(`⑦f the premise: the conversation's state word stands in the bar at 669 («${s1 && s1.word}»)`, !!(s1 && s1.word && s1.shown), s1);
+    check(`⑦f 669, a long name: the state is its DOT alone (${s1 && s1.w} px), «${s1 && s1.word}» its accessible name and its title — never a cut word`, !!(s1 && s1.form === 'dot' && s1.label === s1.word && s1.title === s1.word && s1.w <= 10), s1);
+    await AT(short0);
+    await phone(1000, 1300); await load(); await windowArea(); await settled('regular');
+    await evalJs(`app._mobileNav.switchDesktop(${JSON.stringify(DESK.one)}); true`); await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(DESK.one)} && app.wm.windows.has(${JSON.stringify(A)})`, 8000);
+    await evalJs(`app.wm.revealWindow(${JSON.stringify(A)}); true`); await waitFor(`app.wm.activeWindowId === ${JSON.stringify(A)} && !!(document.getElementById('mobile-nav-state')?.textContent || '').trim()`, 6000); await sleep(800);
+    const s2 = await AT(short0);
+    await shot('r1344-state-1000-short.png', { x: 0, y: 0, width: 1000, height: 48 });
+    check(`⑦f 1000, a short name («${short0}»): the word WHOLE (${s2 && s2.room} px of room for its ${s2 && s2.need}), no dot`, !!(s2 && s2.word && !s2.form && !s2.label && s2.need > 0 && s2.room + 0.01 >= s2.need), s2);
+    await evalJs(`(() => { app._mobileNav._paintState = () => {}; return true; })()`);   // the release's form: nothing decides it
+    const s3 = await AT(LONG, true);
+    check(`⑦f RED CONTROL at 1000: the release's form cuts the same word under a long name (${s3 && s3.room} px of room for its ${s3 && s3.need})`, !!(s3 && s3.word && !s3.form && s3.room + 0.01 < s3.need), s3);
   }
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) {

@@ -16,7 +16,7 @@ import { doorState, followDesktops, windowWaits } from '../desktop-switch.js';
 import { paintSwitcherRow } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): a switcher row's prompt-cache band
 import { windowListMark } from './agent-meta.js'; // lane phone-take-photo: a row wears its conversation's harness mark
 import { installPhoneSplit } from './phone-split-view.js'; // lane phone-six: side by side — two windows, left and right
-import { headName, nameFits, barFits, YIELD_LADDER, ROW_YIELD_LADDER, rowParts } from '../phone-head.js'; // lane phone-six r2: the head's name keeps its width (and the switcher row's)
+import { headName, nameFits, barFits, stateForm, YIELD_LADDER, ROW_YIELD_LADDER, rowParts } from '../phone-head.js'; // lane phone-six r2: the head's name keeps its width (and the switcher row's)
 import { windowTypeIcon } from './window-types.js';
 
 const SHOWN_KEY = 'vibespace.phoneShown'; // { [desktopId]: winId } — this tab's window on show per desktop (§6b guard 10)
@@ -294,6 +294,9 @@ export class MobileNav {
       this._barVerdict = v;
     }
     this._folded = folded;
+    // the regular class's state word (主开发 r1344): a button that changed its width (a For-you tier, a badge) moved the room
+    // its box takes — re-decide whole or dot (its own attributes only: the bar's observer does not watch attributes)
+    if (this.app.viewportClass?.() === 'regular') this._paintState();
     // THE LOCK STAYS LOUD (r3, PURE navMoreLoud — lane vault-locked-loud's law: «the vault is locked» is said wherever Settings is
     // reached from): ⚙ folded while the vault is locked ⇒ the ⋯ that stands in for it wears ⚙'s red lock — vault-unlock.js
     // drawGearMark's mark, the same colour, its name says it; an unlock (any client's broadcast) takes it off at the next pass
@@ -661,18 +664,45 @@ export class MobileNav {
     const nav = document.getElementById('mobile-nav');
     if (!nav) return;
     const row = regular && !home && !!win && getComputedStyle(nav).flexDirection !== 'column';
-    if (!row) { delete nav.dataset.yield; return; }
+    if (!row) { delete nav.dataset.yield; this._paintState(); return; }
+    // the state word's least room — its dot — is held while the ladder measures the name (a name that fits beside the dot fits
+    // beside the whole word too: the word's box only takes the room the name leaves); then the word is tried whole
+    const st = this.bar?.state;
+    if (st) { if ((st.textContent || '').trim()) st.dataset.form = 'dot'; else delete st.dataset.form; }
     const em = parseFloat(getComputedStyle(el).fontSize) || 14;
     // the release's readable minimum (lane phone-titlebar-title's navTitleMinText), measured in the head's own font
     const probe = document.createElement('span'); probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:inherit';
     probe.textContent = navTitleMinText(name); el.appendChild(probe); const minPx = probe.getBoundingClientRect().width; probe.remove();
     for (const step of YIELD_LADDER.slice(0, -1)) {
       if (step) nav.dataset.yield = step; else delete nav.dataset.yield;
-      if (nameFits(el.getBoundingClientRect().width, el.scrollWidth, em, minPx) && barFits(lastRight(nav), nav.getBoundingClientRect ? nav.getBoundingClientRect().right : Infinity)) return;   // the name AND every button (a button past the bar's edge is a yield too)
+      if (nameFits(el.getBoundingClientRect().width, el.scrollWidth, em, minPx) && barFits(lastRight(nav), nav.getBoundingClientRect ? nav.getBoundingClientRect().right : Infinity)) { this._paintState(); return; }   // the name AND every button (a button past the bar's edge is a yield too)
     }
     nav.dataset.yield = YIELD_LADDER[YIELD_LADDER.length - 1];
+    this._paintState();
     el.innerHTML = `<span class="mnav-title-icon" aria-hidden="true">${windowTypeIcon(win.type) || ''}</span><span class="mnav-title-count">${Number(count) || 1}</span>`;
     el.setAttribute('aria-label', full);
+  }
+
+  /** THE STATE WORD, WHOLE OR ITS DOT ALONE (主开发 r1344's law — the release at 669 px drew «工…», 4 of its 43 px, beside a long
+   *  name: its box took only the room the bar left and cut the word). Tried as its word (its flex box takes the room the bar
+   *  leaves it), it is drawn whole when it fits there, else as its dot alone in the state's colour — the word then said by
+   *  the dot's title and its accessible name (PURE phone-head.js stateForm). Never a cut word. Called when the head is
+   *  painted and when trailing-bar.js writes a new word. */
+  _paintState() {
+    const s = this.bar?.state;
+    if (!s) return;
+    const word = (s.textContent || '').trim();
+    delete s.dataset.form;
+    const cs = getComputedStyle(s);
+    let form = 'none';
+    if (word && cs.display !== 'none') {
+      // FRACTIONAL (the word's run against the box's room less its padding — an ellipsis is drawn on any overflow, and the
+      // whole-px clientWidth / scrollWidth can round a sub-pixel cut to equality)
+      const rg = document.createRange(); rg.selectNodeContents(s);
+      form = stateForm(s.getBoundingClientRect().width - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0), rg.getBoundingClientRect().width);
+    }
+    if (form === 'dot') { s.dataset.form = 'dot'; s.setAttribute('role', 'img'); s.setAttribute('aria-label', word); s.title = word; }
+    else { s.removeAttribute('role'); s.removeAttribute('aria-label'); s.removeAttribute('title'); }
   }
 
   /** The window the title names (lane phone-six): the active one while the active desktop shows it, else the window this

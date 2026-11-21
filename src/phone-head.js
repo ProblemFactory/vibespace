@@ -76,4 +76,14 @@ function moreHolds(items) {
   return Array.isArray(items) && items.some((it) => !!it && !it.separator && it.id !== FOLDED_GEAR_ROW && it.id !== FOLDED_SEARCH_ROW);
 }
 
-module.exports = { NAME_FLOOR_EM, YIELD_LADDER, ROW_YIELD_LADDER, FOLDED_GEAR_ROW, FOLDED_SEARCH_ROW, headName, nameNeed, nameFits, barFits, rowParts, moreHolds };
+/** THE STATE WORD SHOWS WHOLE OR AS ITS DOT ALONE, NEVER A CUT WORD (主开发 r1344 — the release at 669 px beside the list
+ *  column drew «工…» for «工作中», 4 of its 43 px, beside a long name): a word whose box gives it `got` px of room and that needs
+ *  `need` px (its whole run, fractional — an ellipsis is drawn on ANY overflow, so no rounding is allowed: 0.01 px of float)
+ *  → 'whole' when it has them, 'dot' when it does not; no word → 'none'. */
+function stateForm(got, need) {
+  const n = Math.max(0, Number(need) || 0);
+  if (!n) return 'none';
+  return (Number(got) || 0) + 0.01 >= n ? 'whole' : 'dot';
+}
+
+module.exports = { NAME_FLOOR_EM, YIELD_LADDER, ROW_YIELD_LADDER, FOLDED_GEAR_ROW, FOLDED_SEARCH_ROW, headName, nameNeed, nameFits, barFits, stateForm, rowParts, moreHolds };
