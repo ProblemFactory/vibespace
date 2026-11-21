@@ -1051,7 +1051,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (hostsHeld() && !localSessionFor(cid) && ownerHostOf(cid)) return { parked: false, live: true, held: true };   // B-95fc U1: a held list makes only a REMOTE owner «unknown» — nothing parked for it (round w00h341sv: a conversation the index calls LOCAL is parked as before)
     if (liveForWake(cid)) return { parked: false, live: true };   // B-95fc U1: a remote conversation its machine said ended is not «live»
     const same = (retry[cid] || []).find(isEnded);
+    // B-2566's remainder (r1277): a wake owed while its machine cannot be reached carries that on ITSELF (`away`, written with the
+    // entry) — the hold stands from what is durable, read with the link's state, so a restart changes nothing
+    const away = (() => { const u = unreachableOf(cid); return u ? { hostId: u.hostId, since: u.since } : null; })();
     if (same) {
+      if (away && !same.away) same.away = away;
       if (sender && !same.senders.includes(sender)) same.senders.push(sender);
       same.producers = mergeProducers(same, { producer });
       if (meta) same.metas = [...metasOf(same), meta].slice(-ENDED_METAS);
@@ -1063,7 +1067,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       return { parked: true, id: same.id, merged: true, inLine: !!same.inflight };
     }
     const now = clock.now();
-    const e = { id: `rt-${now.toString(36)}-${retryRun}-${++retrySeq}`, cid, text: null, fromName, cardText: cardText ? String(cardText).slice(0, 2000) : null, kind, spendReason, producer, producers: [producer], key: null, meta, metas: meta ? [meta] : [], senders: sender ? [sender] : [], held: { why: 'ended', reason: String(reason || '').slice(0, 200) }, charged: null, firstAt: now, nextAt: now, attempts: [], deliveries: 1 };
+    const e = { id: `rt-${now.toString(36)}-${retryRun}-${++retrySeq}`, cid, text: null, fromName, cardText: cardText ? String(cardText).slice(0, 2000) : null, kind, spendReason, producer, producers: [producer], key: null, meta, metas: meta ? [meta] : [], senders: sender ? [sender] : [], held: { why: 'ended', reason: String(reason || '').slice(0, 200) }, charged: null, firstAt: now, nextAt: now, attempts: [], deliveries: 1 , ...(away ? { away } : {}) };
     retryQueue(cid).push(e);
     writeRetryNow();
     scheduleRetry();
@@ -1085,9 +1089,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     const waiting = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && x.waitsReadopt && !aside(x));   // …unless it runs again first (a person resumed it): then that is its answer too
     if (!ends.length && !waiting.length) return;
     if (hostsHeld() && !localSessionFor(cid) && ownerHostOf(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 30e3; writeRetrySoon(); scheduleRetry(); return; }   // B-95fc U1: a held list ENDS NOTHING (bl-jobs: never «running» with nobody to carry it) — asked again after the read
-    // B-2566's remainder: a machine that cannot be reached KEEPS what it is owed, in order — asked again in a minute, never resumed
-    // there while it is away (a resume of a closed laptop's conversation only fails); its reply ends this hold
-    if (!localSessionFor(cid) && unreachableOf(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 60e3; writeRetrySoon(); scheduleRetry(); return; }
+    // B-2566's remainder — THE LAW (主开发 r1277): a wake held for a machine that did not reply ends «running» ONLY on that machine's
+    // own word about THAT conversation (a delivery that landed there; its own answer: it runs ⇒ running, it ended ⇒ the resume line),
+    // never on the link's word alone and never on the absence of a mark; the hold stands from the entry's own `away` (durable)
+    const held = [...ends, ...waiting].filter((e) => e.away && e.away.hostId);
+    if (held.length && !localSessionFor(cid)) { judgeAway(cid, held[0].away.hostId, [...ends, ...waiting]); return; }
     if (liveForWake(cid)) { for (const e of [...ends, ...waiting]) endEnded(e, { outcome: 'running', why: 'it runs again — its next turn carries the words' }); return; }
     if (!ends.length) return;
     if (!endedHook) return;   // the line is not wired yet (the boot): registerEndedWake schedules the attempt again
@@ -1739,11 +1745,57 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (clock.now() - e.at < REMOTE_ENDED_MS || link === 'offline') return e;
     unreachable.delete(hid); return null;
   }
-  /** → {hostId, since} while this conversation's machine cannot be reached (fresh evidence), else null — the park's «live» reads it */
+  /** the park's wakes owed while their machine could not be reached (their own durable `away`) */
+  const awayHeldOf = (cid) => (retry[cid] || []).filter((e) => e && isEnded(e) && e.away && e.away.hostId);
+  /** → {hostId, since} while this conversation's machine cannot be reached, else null — the park's «live» reads it. Fresh evidence
+   *  (the rung's own miss), or what is DURABLE: a wake parked for it while it was away, read with the link's state (r1277: a restart
+   *  changes nothing — the empty map of a new process is never «reachable») */
   function unreachableOf(cid) {
     if (!cid || localSessionFor(cid)) return null;
     const hid = ownerHostOf(cid), e = hostUnreachable(hid);
-    return e ? { hostId: hid, since: e.since } : null;
+    if (e) return { hostId: hid, since: e.since };
+    const h = awayHeldOf(cid)[0];
+    return h && linkOf(h.away.hostId) !== 'online' ? { hostId: h.away.hostId, since: Number(h.away.since) || null } : null;
+  }
+  /** → {since: THIS outage's start, held: wakes still owed its word} while machine `hid` is away or has not yet answered for a
+   *  conversation held for it, else null. `since` is the dial facts' disconnect when the list keeps one (r1277 (3): never an earlier
+   *  outage's entry), else the rung's first miss, else the oldest held wake's */
+  function machineAwayOf(hid) {
+    if (!hid) return null;
+    const m = hostUnreachable(hid);
+    let held = 0, first = Infinity;
+    for (const q of Object.values(retry)) for (const e of q || []) if (e && isEnded(e) && e.away && e.away.hostId === hid) { held++; first = Math.min(first, Number(e.away.since) || Infinity); }
+    if (!m && !held) return null;
+    return { since: silentSinceOf(hid) || (m ? m.since : Number.isFinite(first) ? first : clock.now()), held };
+  }
+  /** is `hid` still a paired machine? A HELD list cannot say — it is kept (the hold's own rule); only a list that READ it gone says no */
+  const hostPaired = (hid) => { try { return !!getHosts?.()?.get?.(hid); } catch (e) { return !!(e && e.code === 'hosts-unread') || hostsHeld(); } };
+  /** a wake's `away` is over: the machine gave its word about this conversation (a delivery landed; its answer) — written (durable) */
+  function clearAway(cid) { let n = 0; for (const e of retry[cid] || []) if (e && e.away) { delete e.away; n++; } if (n) writeRetrySoon(); return n; }
+  const AWAY_HOLD_MS = 60e3;
+  const awayAsking = new Set();
+  /** THE HOLD and THE ASK (r1277). Away (the link not online): held — its next look in a minute, moved in memory only (r1277 (1): the
+   *  park's file is written when something durable changes, never once a minute for a machine in a drawer). The link back: the
+   *  machine is ASKED about this conversation (peer-state, one ask at a time); its answer ends the hold — it runs ⇒ «running», it
+   *  ended ⇒ the resume line; no answer ⇒ still held; an OLDER agent (no peer-state) gives no answer — a delivery that lands is its
+   *  word. A machine no longer paired: the wake is refused by name (the words wait for the conversation to be opened). */
+  function judgeAway(cid, hid, all) {
+    if (!hostPaired(hid)) { for (const e of all) endEnded(e, { outcome: 'refused', code: 'unpaired', why: 'its machine is no longer paired — open the conversation to read what waits for it' }); return; }
+    for (const e of all) e.nextAt = clock.now() + AWAY_HOLD_MS;
+    scheduleRetry();
+    if (linkOf(hid) !== 'online' || awayAsking.has(cid)) return;
+    awayAsking.add(cid);
+    (async () => {
+      let st;
+      try { const dm = await getHosts().deviceBounded(hid, 6000); st = await remoteStateOf(dm, cid, hid); }
+      catch { st = undefined; markUnreachable(hid); }
+      finally { awayAsking.delete(cid); }
+      if (!st) return;   // no answer (still away), or an older agent's none: held — its next look in a minute
+      if (st.live === false) { remoteEnded.delete(cid); remoteEnded.set(cid, { at: clock.now(), hostId: hid }); if (remoteEnded.size > 500) remoteEnded.delete(remoteEnded.keys().next().value); }
+      log(`[deliver] ${cid}: its machine answered for it after being away — ${st.live === false ? 'it ended there: the resume line' : 'it runs there: its next turn and the hand-over carry the words'}`);
+      clearAway(cid);
+      attemptEnded(cid);
+    })();
   }
   const saidOlder = new Set();
   // B-95fc follow-up (主开发 r491): a machine whose conversations' registry cannot be read is said ONCE a machine in the journal (unknown, by name)
@@ -2213,7 +2265,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           // posts once; one authorization and one charge either way, and a wait that ran out charges nothing (undo2, the ladder's finally)
           const waitMs = Number.isFinite(opts.inboxWaitMs) && opts.inboxWaitMs > 0 ? opts.inboxWaitMs : 0;
           const r = await dm.peerPost({ cid, text, by: require('../device-acts.js').validBy(opts.by) ? opts.by : require('../device-acts.js').bySystem(spendReason), ...(waitMs ? { waitMs } : {}) });
-          if (r && r.ok) { remoteEnded.delete(cid); unreachable.delete(hid); }   // B-95fc U1: it runs there again (B-2566: and its machine answers)
+          if (r && r.ok) { remoteEnded.delete(cid); unreachable.delete(hid); clearAway(cid); }   // B-95fc U1: it runs there again (B-2566: its machine answered for it — the held wake's word)
           if (r && r.ok) { spent(); cardOk(); return { ok: true, lane: 'remote-message', kind, peerName: r.peerName || null, hostId: hid, ...(Number.isFinite(r.waited) ? { waited: r.waited } : {}) }; }
           undo2();
           if (r && r.code === 'inbox_not_open') return { ok: false, lane: 'remote-message', hostId: hid, code: 'inbox_not_open', reason: String(r.reason || 'its inbox did not open on that machine') };
@@ -2296,7 +2348,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   }
 
   return {
-    deliverToConversation, peerReachable, liveForWake, unreachableOf, machineUnreachable: (hid) => !!hostUnreachable(hid), machineNameOf: (hid) => { try { const h = getHosts?.()?.get?.(hid); return String((h && (h.name || h.id)) || hid || '').slice(0, 80); } catch { return String(hid || '').slice(0, 80); } }, stashFor, stashSlot, slotHolders, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
+    deliverToConversation, peerReachable, liveForWake, unreachableOf, machineAwayOf, machineNameOf: (hid) => { try { const h = getHosts?.()?.get?.(hid); return String((h && (h.name || h.id)) || hid || '').slice(0, 80); } catch { return String(hid || '').slice(0, 80); } }, stashFor, stashSlot, slotHolders, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
     stashEntries, stashKeptCount, heldWhyOf, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer

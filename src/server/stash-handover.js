@@ -287,6 +287,9 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       const d = getDeliver(), wid = ownWidOf(cid), s = wid != null ? activeSessions.get(wid) : null;
       if ((!d || !s) && now() - bootAt < BOOT_GRACE_MS) { next = [step + 1, null]; return; }   // the boot's first minute: sessions still attaching
       if (!d || !s) { try { if (jm && jm.sayWakeWaiting) jm.sayWakeWaiting(cid); } catch { } quiet(cid, 'away'); return; }   // AWAY: said once, the chain ends
+      // B-2566's remainder (r1277 (5)): its machine is known AWAY — no knock (no connect, no authorization); looked at here, locally,
+      // at the longest step; the link back lets the hand-over post (a post that lands is the machine's word for the held wake)
+      if (typeof d.unreachableOf === 'function' && d.unreachableOf(cid)) { next = [WAKE_STEPS_MS.length - 1, null]; return; }
       if (typeof d.peerReachable === 'function' && !d.peerReachable(cid)) { next = [step + 1, null]; return; }   // live, not taking frames yet
       if (s._isStreaming) { next = [WAKE_BUSY_STEP, null]; return; }
       const floor = Number(d.RETRY_FLOOR_MS) || 30 * 1000;

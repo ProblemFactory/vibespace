@@ -63,7 +63,7 @@ console.log('① the shared lookup: a CLI still starting');
 }
 
 /** the rig: the REAL ladder + park; a stand-in machine (its peerPost misses, its peerState says what it says) and machines list */
-function rig(name, { state = { live: false, inbox: false }, held = () => false, mod = DELIVER, post = null, owner = () => 'h-1', hello = null, connect = null, link = null, dial = null } = {}) {
+function rig(name, { state = { live: false, inbox: false }, held = () => false, mod = DELIVER, post = null, owner = () => 'h-1', hello = null, connect = null, link = null, dial = null, paired = () => true } = {}) {
   const dataDir = path.join(ROOT, name); fs.mkdirSync(dataDir, { recursive: true });
   const c = { now: 1_790_000_000_000, timers: [] };
   const retryClock = { now: () => c.now, setTimeout: (fn, ms) => { const t = { at: c.now + Math.max(0, ms), fn }; c.timers.push(t); return t; }, clearTimeout: (t) => { const i = c.timers.indexOf(t); if (i >= 0) c.timers.splice(i, 1); } };
@@ -72,7 +72,7 @@ function rig(name, { state = { live: false, inbox: false }, held = () => false, 
   if (hello) dm.helloInfo = () => ({ capabilities: hello });
   // B-2566's remainder: `connect` = the bounded connect (it may throw: the machine did not answer), `link` = the list's own classifier
   // (hosts.linkState: never a probe), `dial` = the host record's dial facts (when it was last connected / disconnected)
-  const hosts = { deviceBounded: connect || (async () => dm), device: async () => dm, get: () => ({ id: 'h-1', name: 'box-p', ...(dial ? { dial: dial() } : {}) }), held, ...(link ? { linkState: (id) => link(id) } : {}) };
+  const hosts = { deviceBounded: connect || (async () => dm), device: async () => dm, get: () => (paired() ? { id: 'h-1', name: 'box-p', ...(dial ? { dial: dial() } : {}) } : undefined), held, ...(link ? { linkState: (id) => link(id) } : {}) };
   R.dm = dm;
   const sessions = new Map();
   R.deliver = mod.create({
@@ -341,7 +341,7 @@ console.log('⑪ the ten-minute memory of «ended there»: a post that lands cle
   const g = await life(DELIVER);
   ok(g.afterPost.live === true && g.afterPost.parked === false && g.before.parked === true && g.afterTtl.live === true && g.afterTtl.parked === false,
     'a post that LANDS clears «ended there» (it runs again: live); unlanded, the memory parks a wake, and past ten minutes it is forgotten (live again — the machine is asked anew)', g);
-  const KEEP = mutantCopies('peer-state-memory-kept', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "          if (r && r.ok) { remoteEnded.delete(cid); unreachable.delete(hid); }   // B-95fc U1: it runs there again (B-2566: and its machine answers)\n", "          if (r && r.ok) { unreachable.delete(hid); }\n", 'landed-post-keeps-ended'), 'landed-post-keeps-ended');
+  const KEEP = mutantCopies('peer-state-memory-kept', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "          if (r && r.ok) { remoteEnded.delete(cid); unreachable.delete(hid); clearAway(cid); }   // B-95fc U1: it runs there again (B-2566: its machine answered for it — the held wake's word)\n", "          if (r && r.ok) { unreachable.delete(hid); clearAway(cid); }\n", 'landed-post-keeps-ended'), 'landed-post-keeps-ended');
   const gr = await life(KEEP);
   ok(gr.afterPost.live !== true, '⑪ RED CONTROL: a landed post that does not clear the memory — a conversation running again there still reads «ended»', gr.afterPost);
 }
@@ -414,38 +414,92 @@ console.log('⑬ an UNREADABLE registry is said BY NAME: the wait stops at its f
 
 console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED — not «live»; the park keeps what is owed, in order, until it replies');
 {
-  // the bounded connect got no handle AND the machines list calls the machine offline ⇒ UNREACHABLE: typed «not running» with its own
-  // word beside it, silent since the dial facts' lastDisconnectAt; the park's «live» reads it; the owed wake is HELD — never resumed
-  // there while the machine is away, never ended «running» with nobody to carry the words — and it goes at the machine's reply
-  const X = CID(140), box = { up: false, link: 'offline' };
-  const run = async (mod) => {
-    const R = rig('unreachable-' + Math.random().toString(36).slice(2, 7), { mod, link: () => box.link, connect: async () => { if (box.up) return R.dm; throw Object.assign(new Error('the machine did not answer within 6000 ms'), { code: 'connect_timeout' }); },
-      dial: () => ({ lastConnectAt: R.c.now - 5 * 3600e3, lastDisconnectAt: R.c.now - 2 * 3600e3 }) });
-    box.up = false; box.link = 'offline';
-    const { r, p } = await R.result(X, 'nightly report finished');
-    const live0 = R.deliver.liveForWake(X), u0 = R.deliver.unreachableOf ? R.deliver.unreachableOf(X) : null;
-    await R.fire(); await R.fire();
-    const held = { owed: R.deliver.endedEntries(X).length, hooked: R.hooked.length, running: R.wakes.filter((w) => w.cid === X && w.outcome === 'running').length };
-    R.c.now += 11 * 60e3;   // past the bound an ended reply has — the list still says offline
-    const live11 = R.deliver.liveForWake(X);
-    await R.fire();
-    const night = { owed: R.deliver.endedEntries(X).length, hooked: R.hooked.length };
-    box.link = 'online';   // the machine replies: its link is back
-    const back = { live: R.deliver.liveForWake(X), u: R.deliver.unreachableOf ? R.deliver.unreachableOf(X) : null };
-    await R.fire(); await R.fire();
-    const after = { owed: R.deliver.endedEntries(X).length, running: R.wakes.filter((w) => w.cid === X && w.outcome === 'running').length };
-    return { r, p, live0, u0, held, live11, night, back, after, posts: R.posts, spend: R.spend };
+  // THE LAW (主开发 r1277): a wake held for a machine that did not reply ends «running» ONLY on that machine's own word about THAT
+  // conversation — a delivery that landed there, or its answer (peer-state: it runs ⇒ running; it ended ⇒ the resume line) — never on
+  // the link's word alone and never on the absence of a mark; the hold stands from what is durable (the entry's `away`), read with the
+  // link's state. Three scenes on stand-ins with a placed clock, each with its RED copy of the ladder.
+  const X = CID(140);
+  const OLD_HOLD = "    if (!localSessionFor(cid) && hostUnreachable(ownerHostOf(cid))) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 60e3; writeRetrySoon(); scheduleRetry(); return; }";   // de4ba0831's hold: the mark in memory, the link's word
+  const LAW = "    if (held.length && !localSessionFor(cid)) { judgeAway(cid, held[0].away.hostId, [...ends, ...waiting]); return; }";
+  const DURABLE = "    return h && linkOf(h.away.hostId) !== 'online' ? { hostId: h.away.hostId, since: Number(h.away.since) || null } : null;";
+  const LINKS_WORD = mutantCopies('peer-state-links-word', REPO).load('src/server/conversation-deliver.js', anchored(anchored(DSRC, LAW, OLD_HOLD, 'the-links-word'), DURABLE, '    return null;', 'no-durable-hold'), 'the-links-word');
+  /** one rig over `dir`: the machine shut (no handle, the list offline) unless `box` says otherwise; its answer = `state` */
+  const machine = (name, mod, box, state) => {
+    const R = rig(name, { mod, state, link: () => box.link, paired: () => box.paired !== false, connect: async () => { if (box.up) return R.dm; throw Object.assign(new Error('the machine did not answer within 6000 ms'), { code: 'connect_timeout' }); },
+      dial: () => ({ lastConnectAt: 1_790_000_000_000 - 5 * 3600e3, lastDisconnectAt: 1_790_000_000_000 - 2 * 3600e3 }) });
+    return R;
   };
-  const g = await run(DELIVER);
-  ok(g.r && g.r.ok === false && g.r.notRunning === true && g.r.unreachable === true && g.r.hostId === 'h-1' && g.u0 && g.u0.hostId === 'h-1' && g.r.since === g.u0.since && g.live0 === false && g.p && g.p.parked === true && g.posts === 0,
-    'no handle + the list says offline ⇒ UNREACHABLE: typed «not running» with its own word, silent since the dial facts\' disconnect; the park\'s «live» is false and ONE wake is owed; nothing posted', { r: g.r, unreachableOf: g.u0, live: g.live0, parked: g.p });
-  ok(g.held.owed === 1 && g.held.hooked === 0 && g.held.running === 0 && g.live11 === false && g.night.owed === 1 && g.night.hooked === 0,
-    'the owed wake is HELD while it is away — never handed to the resume line (a closed laptop\'s conversation only fails to resume), never ended «running»; past the ten-minute bound too, while the list still says offline (a night)', { held: g.held, liveAfter11min: g.live11, night: g.night });
-  ok(g.back.live === true && g.back.u === null && g.after.owed === 0 && g.after.running === 1 && g.spend.note === 0,
-    '…and at the machine\'s REPLY (its link back) it is live again: the owed wake ends «running» (its next turn and the hand-over carry the words) — nothing billed while it was away', { back: g.back, after: g.after, spend: g.spend });
-  const NOHOLDU = mutantCopies('peer-state-unreachable-resumed', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "    if (!localSessionFor(cid) && unreachableOf(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 60e3; writeRetrySoon(); scheduleRetry(); return; }", '', 'unreachable-not-held'), 'unreachable-not-held');
-  const gr = await run(NOHOLDU);
-  ok(gr.held.hooked === 1, '⑭ RED CONTROL: the hold removed (a copy of the ladder) ⇒ the owed wake goes to the resume line while the machine is away', { held: gr.held });
+  const facts = (R) => ({ owed: R.deliver.endedEntries(X).length, away: R.deliver.endedEntries(X).map((e) => !!e.away), hooked: R.hooked.length, running: R.wakes.filter((w) => w.cid === X && w.outcome === 'running').length, live: R.deliver.liveForWake(X) });
+
+  // the park: no handle + the list says offline ⇒ typed «not running» + unreachable; ONE wake owed, carrying its `away` (durable)
+  const box0 = { up: false, link: 'offline' };
+  const R0 = machine('law-park', DELIVER, box0, { live: true, inbox: true });
+  const { r, p } = await R0.result(X, 'nightly report finished');
+  const ent = R0.deliver.endedEntries(X)[0];
+  ok(r.notRunning === true && r.unreachable === true && r.hostId === 'h-1' && r.since === 1_790_000_000_000 - 2 * 3600e3 && p.parked === true && ent && ent.away && ent.away.hostId === 'h-1' && R0.deliver.liveForWake(X) === false && R0.posts === 0,
+    'no handle + the list says offline ⇒ UNREACHABLE (silent since the dial facts\' disconnect); ONE wake owed, carrying `away` ON ITSELF (written with the entry); nothing posted', { r, parked: p, away: ent && ent.away });
+  // held while away — and NO file write while only its next look moves (r1277 (1))
+  const file = path.join(ROOT, 'law-park', 'msg-retry.json'), before = fs.statSync(file).mtimeMs;
+  await new Promise((res) => setTimeout(res, 20));
+  for (let i = 0; i < 4; i++) { R0.c.now += 61e3; await R0.fire(); }
+  await new Promise((res) => setTimeout(res, 120));
+  const heldF = facts(R0), after = fs.statSync(file).mtimeMs;
+  ok(heldF.owed === 1 && heldF.hooked === 0 && heldF.running === 0 && heldF.live === false && after === before,
+    'HELD while away (four looks, a minute apart): never the resume line, never «running» — and the park\'s file is NOT rewritten for a look that changes nothing durable', { ...heldF, fileWritten: after !== before });
+
+  // SCENE 1 — A RESTART: a fresh ladder over the SAME park file, the link still offline ⇒ the wake still owed and held
+  const restart = async (mod, tag) => {
+    const box = { up: false, link: 'offline' };
+    const A = machine('law-restart-' + tag, mod, box, { live: true, inbox: true });
+    await A.result(X, 'nightly report finished');
+    const B = machine('law-restart-' + tag, mod, box, { live: true, inbox: true });   // the same data folder: the next process
+    for (let i = 0; i < 3; i++) { B.c.now += 61e3; await B.fire(); }
+    return facts(B);
+  };
+  const s1 = await restart(DELIVER, 'g'), s1r = await restart(LINKS_WORD, 'r');
+  ok(s1.owed === 1 && s1.away[0] === true && s1.hooked === 0 && s1.running === 0 && s1.live === false,
+    'SCENE 1, A RESTART: the next process over the same park file, the list still offline ⇒ the wake is STILL owed and held (its `away` is durable) — never «running»', s1);
+  ok(s1r.running === 1 && s1r.owed === 0, 'SCENE 1 RED: the hold read from memory and the link alone (a copy of the ladder) ⇒ the new process ends it «running» while the laptop is shut', s1r);
+
+  // SCENE 2 — A FLAP: the link reads «online» for a moment inside the outage, the machine never answers ⇒ still held
+  const flap = async (mod, tag) => {
+    const box = { up: false, link: 'offline' };
+    const F = machine('law-flap-' + tag, mod, box, { live: true, inbox: true });
+    await F.result(X, 'nightly report finished');
+    box.link = 'online';   // a dark wake: the link is up, the machine does not answer (no handle)
+    F.c.now += 61e3; await F.fire(); await settle();
+    box.link = 'offline';
+    F.c.now += 61e3; await F.fire();
+    return facts(F);
+  };
+  const s2 = await flap(DELIVER, 'g'), s2r = await flap(LINKS_WORD, 'r');
+  ok(s2.owed === 1 && s2.running === 0 && s2.hooked === 0, 'SCENE 2, A FLAP: the link «online» for a moment, the machine silent ⇒ the wake is still owed and held (the link\'s word alone ends nothing)', s2);
+  ok(s2r.running === 1, 'SCENE 2 RED: the link\'s word alone (a copy of the ladder) ⇒ the flap ends it «running»', s2r);
+
+  // SCENE 3 — THE LAPTOP REBOOTED OVERNIGHT: the link returns, the machine answers that the conversation ENDED there ⇒ the resume line
+  const rebooted = async (mod, tag, state) => {
+    const box = { up: false, link: 'offline' };
+    const M3 = machine('law-reboot-' + tag, mod, box, state);
+    await M3.result(X, 'nightly report finished');
+    box.link = 'online'; box.up = true;   // 08:00: the machine replies
+    M3.c.now += 61e3; await M3.fire(); await settle(); await M3.fire(); await settle();
+    return { ...facts(M3), asked: M3.asked };
+  };
+  const s3 = await rebooted(DELIVER, 'g', { live: false, inbox: false }), s3r = await rebooted(LINKS_WORD, 'r', { live: false, inbox: false });
+  ok(s3.asked === 1 && s3.hooked === 1 && s3.running === 0, 'SCENE 3, A REBOOTED LAPTOP: at the reply the machine is ASKED about this conversation, answers it ENDED there ⇒ the RESUME LINE is asked (the results go out through it)', s3);
+  ok(s3r.running === 1 && s3r.hooked === 0 && s3r.asked === 0, 'SCENE 3 RED: the link\'s word alone (a copy of the ladder) ⇒ «running» without asking, no resume: the results would wait for a typed prompt', s3r);
+  const s4 = await rebooted(DELIVER, 'live', { live: true, inbox: true });
+  ok(s4.asked === 1 && s4.running === 1 && s4.hooked === 0 && s4.owed === 0, '…and a machine that answers the conversation RUNS there ⇒ «running» on its own word (its next turn and the hand-over carry the words)', s4);
+
+  // A PAIRING REMOVED (r1277 (6)): the list READ the machine gone ⇒ the held wake is refused BY NAME — never held for ever
+  const boxU = { up: false, link: 'offline' };
+  const U = machine('law-unpaired', DELIVER, boxU, { live: true, inbox: true });
+  await U.result(X, 'nightly report finished');
+  boxU.paired = false; boxU.link = 'unknown';
+  U.c.now += 61e3; await U.fire();
+  const uw = U.wakes.filter((w) => w.cid === X);
+  ok(U.deliver.endedEntries(X).length === 0 && uw.length === 1 && uw[0].outcome === 'refused' && uw[0].code === 'unpaired' && /no longer paired/.test(uw[0].why || ''),
+    'A PAIRING REMOVED: the held wake is refused by name (code unpaired — «its machine is no longer paired — open the conversation to read what waits for it»)', uw);
 }
 {
   // a machine the list knows NOTHING of ('unknown': an ssh host with no facts) is never marked — today's road (an untyped miss); and a

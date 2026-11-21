@@ -1026,7 +1026,7 @@ function create({
         // piece 7: a stopped member a wake names alone is OWED a resume — its pace slot is KEPT (the owed wake is the billed
         // turn) and the sender holds «being resumed» (`parked`: the CLI's «held (not billed yet)» line)
         const owe = r.notRunning ? endedWakeOf(g, m, rec, v.why, r.cardText) : null;
-        if (owe && owe.parked) { refused.push({ member: m, name, why: v.why, reason: DW.senderWords(r.unreachable ? 'unreachable' : 'owed'), refused: r.unreachable ? 'unreachable' : 'ended', parked: true, owed: true }); continue; }   // B-2566's remainder: a machine that cannot be reached is never «ended»
+        if (owe && owe.parked) { refused.push({ member: m, name, why: v.why, reason: DW.senderWords(r.unreachable ? 'unreachable' : 'owed'), refused: 'ended', parked: true, owed: true }); continue; }   // B-2566's remainder: the sender is told its MACHINE cannot be reached — never «ended» (the code stays the closed list's own)
         // not billed ⇒ the pace slot goes back (r2: a refused wake used to
         // floor the next legitimate one with words that said a turn was billed)
         if (typeof mayWake === 'function' && typeof mayWake.refund === 'function') { try { mayWake.refund(m); } catch { } }

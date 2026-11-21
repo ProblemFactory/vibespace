@@ -306,6 +306,30 @@ console.log('⑥ the groups producer');
   ok(!!quiet.ok && R.deliver.endedEntries(Dd).length === 0, 'a message with NO wake only waits — nothing is owed', R.deliver.endedEntries(Dd));
 }
 
+console.log('⑥b B-2566\'s remainder (r1277 (7)): a wake to a member whose MACHINE cannot be reached tells its sender so — never «ended»');
+{
+  // the groups producer over the REAL park, its delivery answered as conversation-deliver answers a machine it cannot reach (no
+  // handle, the list offline): the sender holds the wake (owed, not billed) with the machine's words — RED: the branch removed (a
+  // copy of the groups engine) ⇒ the sender is told the conversation «was ended»
+  const A = cidOf(40), Z = cidOf(41);
+  const GSRC = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf8');
+  const NOWORD = mutantCopies('dwl-unreachable-words', REPO).load('src/server/groups-engine.js', anchored(GSRC, "reason: DW.senderWords(r.unreachable ? 'unreachable' : 'owed'),", "reason: DW.senderWords('owed'),", 'unreachable-words-removed'), 'unreachable-words-removed');   // stale-pins: kept (the red copy's text: the words as they read before)
+  const send = async (G, tag) => {
+    const R = rig('groups-away-' + tag);
+    R.live.add(A);
+    const roster = [{ cid: A, name: 'alpha', groups: ['tg1'], reachability: null }, { cid: Z, name: 'zeta', groups: ['tg1'], reachability: null }];
+    const store = createChannelStore({ dir: path.join(R.dataDir, 'channels'), log: { info() { }, warn() { }, log() { } } });
+    const deliver = { ...R.deliver, deliverToConversation: async (cid, text, opts) => (cid === Z ? { ok: false, lane: 'remote-message', hostId: 'h-1', reason: 'the machine did not answer within 6000 ms', notRunning: true, unreachable: true, since: T0 - 3600e3 } : R.deliver.deliverToConversation(cid, text, opts)) };
+    const eng = G.create({ store, deliver, broadcast: () => { }, now: () => R.c.now, paceClock: () => R.c.now, roster: () => roster, groupSetting: () => 'none', log: { info() { }, warn() { }, log() { } } });
+    const one = await eng.sendToAgent({ from: A, to: 'zeta', text: 'the nightly numbers are in', wake: true });
+    return { held: (one.refused || []).find((x) => x.member === Z) || null, owed: R.deliver.endedEntries(Z).length };
+  };
+  const g = await send(GE, 'g'), r = await send(NOWORD, 'r');
+  ok(!!g.held && g.held.parked === true && g.held.owed === true && g.held.refused === 'ended' && g.held.reason === D.senderWords('unreachable') && /cannot be reached/.test(g.held.reason) && g.owed === 1,
+    'a wake to a member whose machine cannot be reached: OWED (the park keeps it), and its sender is told the MACHINE cannot be reached — «kept and goes out when it replies»', g);
+  ok(!!r.held && r.held.reason === D.senderWords('owed') && /was ended/.test(r.held.reason), '⑥b RED CONTROL: the branch removed (a copy of the groups engine) ⇒ the sender is told the conversation «was ended» — the leg above would be red', r);
+}
+
 console.log('⑦ money: a delivery keeps piece 4\'s refusals — a goal runs many turns, a wake authorises one');
 {
   const cases = [['goal_active', { goal: 'active' }], ['timer_marked', { timerMark: true }], ['goal_unknown', { goal: 'unknown' }]];

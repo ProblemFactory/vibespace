@@ -15032,4 +15032,6 @@ export default {
   "They are kept in order and go out by themselves when {machine} replies — nothing is lost or billed meanwhile. To let them through, open {machine} and keep VibeSpace’s device agent running there.": "結果は順番どおりに保たれ、{machine} が応答すると自動で送られます——その間に失われることも課金されることもありません。届けるには、{machine} を開き、VibeSpace のデバイスエージェントをそこで動かし続けてください。",
   "they arrived while the machine this conversation runs on could not be reached — delivered now that it replies": "届いたとき、この会話が動いているマシンに接続できませんでした——マシンが応答したので今届けます",
   "the machine this conversation runs on cannot be reached; delivered when it replies": "この会話が動いているマシンに接続できません。マシンが応答したときに届けます",
+  "they waited for a machine that is no longer paired": "ペアリングが解除されたマシンを待っていました",
+  "its machine is no longer paired; open the conversation to read them": "このマシンはペアリングが解除されました。会話を開くと読めます",
 };

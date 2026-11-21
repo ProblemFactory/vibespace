@@ -15033,4 +15033,6 @@ export default {
   "They are kept in order and go out by themselves when {machine} replies — nothing is lost or billed meanwhile. To let them through, open {machine} and keep VibeSpace’s device agent running there.": "它们按顺序保留，{machine}回应后会自动发出——期间不会丢失，也不计费。要让它们发出，请打开{machine}，并让 VibeSpace 的设备代理在那里保持运行。",
   "they arrived while the machine this conversation runs on could not be reached — delivered now that it replies": "它们到达时，这个对话所在的机器连不上——机器已回应，现在送达",
   "the machine this conversation runs on cannot be reached; delivered when it replies": "这个对话所在的机器连不上；机器回应后送达",
+  "they waited for a machine that is no longer paired": "它们在等一台已不再配对的机器",
+  "its machine is no longer paired; open the conversation to read them": "它所在的机器已不再配对；打开这个对话即可读到",
 };

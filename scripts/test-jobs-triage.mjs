@@ -1446,7 +1446,8 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
   // parks; `ended` = a reachable PAIRED owner whose machine said it ended there (the remote rung's notRunning + remoteEnded). The park's own
   // «live» (liveForWake) = a session here, or a reachable machine that has not said it ended — any other conversation is NOT RUNNING
   const rig = (name, wiringMod = wiring) => {
-    const dir = mkDir(name), todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 }), logs = [], live = new Set(), local = new Set(), ended = new Set(), metas = [];
+    const clock = { skew: 0 };   // the For-you store's own clock, placed (r1277: the next-outage leg steps it, never the store's internals)
+    const dir = mkDir(name), todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0, now: () => Date.now() + clock.skew }), logs = [], live = new Set(), local = new Set(), ended = new Set(), metas = [];
     // B-2566's remainder: `down` = a conversation on a paired machine (cid → its host id); `hostsDown` = a machine that cannot be reached
     // (host id → since when it is silent) — the ladder's verdict as conversation-deliver answers it (its connect missed, the list says offline)
     const down = new Map(), hostsDown = new Map();
@@ -1456,12 +1457,12 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
         peerReachable: (cid) => live.has(cid),
         liveForWake: (cid) => !away(cid) && (local.has(cid) || (live.has(cid) && !ended.has(cid))),
         unreachableOf: (cid) => away(cid),
-        machineUnreachable: (hid) => hostsDown.has(hid),
+        machineAwayOf: (hid) => (hostsDown.has(hid) ? { since: hostsDown.get(hid), held: 1 } : null),   // the ladder's: away, or a held wake still owed its word
         machineNameOf: (hid) => (hid === 'h-b' ? 'laptop-b' : String(hid)),
         deliverToConversation: async (cid, text, opts) => { if (opts && opts.retry) metas.push({ cid, meta: opts.retry.meta }); const u = away(cid); if (u) return { ok: false, lane: 'remote-message', hostId: u.hostId, reason: 'the machine did not answer within 6000 ms', notRunning: true, unreachable: true, since: u.since }; if (down.has(cid)) return { ok: true, lane: 'remote-message', hostId: down.get(cid) }; return ended.has(cid) ? { ok: false, lane: 'remote-message', hostId: 'h-paired', reason: 'no live inbox for this conversation on that machine', notRunning: true, remoteEnded: true } : live.has(cid) ? { ok: true, lane: 'message' } : local.has(cid) ? { ok: false, parked: true, reason: 'busy', phase: 'mid-turn', busy: true } : AWAY; },
       } });
     W.initAfterListen();
-    return { W, jm: W.jm, todos, logs, live, local, ended, metas, down, hostsDown, stop: () => { W.shutdown?.(); todos.stop(); } };
+    return { W, jm: W.jm, todos, logs, live, local, ended, metas, down, hostsDown, clock, stop: () => { W.shutdown?.(); todos.stop(); } };
   };
   const owner = (cid) => ({ conversation: { backend: 'claude', id: cid }, sessionId: 's-' + cid, sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] });
   const task = (R, id, name, cid, extra = {}) => { const j = { id, kind: 'task', name, note: '', state: 'failed', desiredUp: false, owner: owner(cid), access: { view: 'group', control: 'session' }, runs: [{ startedAt: Date.now() - 60e3, endedAt: Date.now(), exit: 1, cause: 'error', lastLine: 'Error: frame 7 failed to render' }], notifyLog: [], ...extra }; R.jm.jobs.set(id, j); return j; };
@@ -1792,6 +1793,7 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     const R = rig('machine-night'), C1 = cidOf(0xf001), C2 = cidOf(0xf002), C3 = cidOf(0xf003), since = Date.now() - 2 * HOUR;
     for (const c of [C1, C2, C3]) R.down.set(c, 'h-b');
     R.hostsDown.set('h-b', since);
+    R.clock.skew = -90 * 60e3;   // the store's clock: the item is filed 90 minutes ago — inside this outage (silent since two hours)
     const cron = schedule(R, 'jb-n-cron', 'sync-hourly', C1), child = task(R, 'jb-n-cron-run', 'sync-hourly run', C1, { cronParent: cron.id });
     const report = task(R, 'jb-n-report', 'nightly-report', C2, { state: 'done' }), build = task(R, 'jb-n-build', 'build', C3, { state: 'done' });
     for (let h = 0; h < 10; h++) { nudge(R, C1); failOf(R, child, `failed exit=1 error (1m) — fire ${h}`); }
@@ -1821,10 +1823,10 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     const kept = machineItems(R);
     okP(kept.length === 1 && kept[0].status === 'dismissed',
       'a person\'s close stands for the outage: a later result does not reopen it', { status: kept[0].status, owedC2: owedAway(R, C2) });
-    // a NEW outage (silent again after a reply) files again — the item was filed in the outage before (its filing instant moved back
-    // there: the store keeps no clock of its own to step), the new silence began after it
-    R.todos._state.items.find((i) => i.id === id0).createdAt = Date.now() - 3 * HOUR;
-    R.hostsDown.set('h-b', Date.now() - 90 * 60e3);
+    // a NEW outage (silent again after a reply, 70 minutes ago) files again — the item was filed in the outage before (90 minutes ago
+    // by the store's placed clock), the new silence began after it
+    R.clock.skew = 0;
+    R.hostsDown.set('h-b', Date.now() - 70 * 60e3);
     nudge(R, C2); failOf(R, report, 'done exit=0 (6m) — the next night');
     await settle(() => machineItems(R)[0].status === 'open');
     okP(machineItems(R).length === 1 && machineItems(R)[0].status === 'open', '…and the NEXT outage (silent since a later instant) files it again — one item a machine an outage', { status: machineItems(R)[0].status });
@@ -1838,7 +1840,7 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     failOf(R, g);
     await settle(() => owedAway(R, G) === 1);
     const quiet = machineItems(R).length;
-    const RG = rig('machine-grace-red', wiringWith(anchored(JSRC, '    if (!w.n || now() - w.since < M.MACHINE_AWAY_GRACE_MS) return null;', '    if (!w.n) return null;', 'b2566r-no-grace'), 'b2566r-no-grace'));
+    const RG = rig('machine-grace-red', wiringWith(anchored(JSRC, '    if (!a || !w.n || now() - a.since < M.MACHINE_AWAY_GRACE_MS) return null;', '    if (!a || !w.n) return null;', 'b2566r-no-grace'), 'b2566r-no-grace'));
     RG.down.set(G, 'h-b'); RG.hostsDown.set('h-b', Date.now() - 10 * 60e3);
     const gr = task(RG, 'jb-g', 'render-g', G);
     failOf(RG, gr);
@@ -1878,6 +1880,76 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     await settle(() => machineItems(R)[0].status === 'done');
     okP(machineItems(R)[0].status === 'done' && owedAway(R, S2) === 1,
       '…and when the machine REPLIES (a delivery lands on it) the item goes, even while one result still waits for a conversation there (its own road carries it)', { status: machineItems(R)[0].status, stillOwedS2: owedAway(R, S2) });
+    R.stop();
+  }
+  {
+    // r1277 (3): THIS outage's start — results left from an EARLIER outage never make a 20-minute close file at once
+    const R = rig('machine-old-entries'), O = cidOf(0xf401);
+    R.down.set(O, 'h-b'); R.hostsDown.set('h-b', Date.now() - 3 * HOUR);
+    const o = task(R, 'jb-o', 'render-o', O);
+    failOf(R, o);
+    await settle(() => machineItems(R).length === 1);
+    R.todos.setStatus(machineItems(R)[0].id, 'done', 'agent');   // that outage is over (the machine replied; this result still waits there)
+    R.hostsDown.set('h-b', Date.now() - 20 * 60e3);   // a new close, twenty minutes ago
+    nudge(R, O); failOf(R, o, 'failed exit=4 error (1m)');
+    await settle(() => owedAway(R, O) === 2);
+    okP(owedAway(R, O) === 2 && machineItems(R)[0].status === 'done',
+      'r1277 (3): an earlier outage\'s result still waiting + a NEW 20-minute close ⇒ nothing filed (the grace is THIS outage\'s, the ladder\'s own start)', { owed: owedAway(R, O), item: machineItems(R)[0].status });
+    R.stop();
+  }
+  {
+    // r1277 (2): results owed to a machine away are NOT counted again in the conversation's «notices wait» item — RED: the filter removed
+    const twice = async (wmod, tag) => {
+      const R = rig('machine-twice-' + tag, wmod), D = cidOf(0xf501);
+      R.down.set(D, 'h-b'); R.hostsDown.set('h-b', Date.now() - 2 * HOUR);
+      failOf(R, task(R, 'jb-d', 'render-d', D));
+      await settle(() => owedAway(R, D) === 1);
+      (R.jm._stoppedThisRun || (R.jm._stoppedThisRun = new Set())).add(D);   // an earlier «not running» stash of this run
+      const said = R.jm.sayWakeWaiting(D), n = waitItems(R, D).length;
+      R.stop();
+      return { said: !!said, waitItems: n };
+    };
+    const g = await twice(wiring, 'g');
+    const r = await twice(wiringWith(anchored(JSRC, "n.held.kind !== 'rate-floor' && n.held.kind !== 'machine-away' && ", "n.held.kind !== 'rate-floor' && ", 'b2566r-twice'), 'b2566r-twice'), 'r');
+    okP(g.said === false && g.waitItems === 0 && r.waitItems === 1, 'r1277 (2): a conversation\'s «notices wait» does not count the results its MACHINE\'s item counts — RED: the filter removed ⇒ said twice', { green: g, red: r });
+  }
+  {
+    // r1277 (7): a person's close stands for the outage — RED: the guard removed (a copy of the wiring) ⇒ a later result reopens it
+    const WSRC = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8');
+    const NOGUARD = MC.load('src/server/jobs-wiring.js', anchored(WSRC, "      if (had.some((i) => i.status !== 'open' && i.resolvedBy !== 'agent' && !i.clearedAt && Number(i.createdAt) >= Number(since))) return null;", '', 'b2566r-close-guard'), 'b2566r-close-guard');
+    const R = rig('machine-close-red', NOGUARD), P = cidOf(0xf601);
+    R.down.set(P, 'h-b'); R.hostsDown.set('h-b', Date.now() - 2 * HOUR);
+    const pj = task(R, 'jb-p', 'render-p', P);
+    failOf(R, pj);
+    await settle(() => machineItems(R).length === 1);
+    R.todos.setStatus(machineItems(R)[0].id, 'dismissed');
+    nudge(R, P); failOf(R, pj, 'failed exit=5 error (1m)');
+    await settle(() => machineItems(R)[0].status === 'open');
+    okP(machineItems(R)[0].status === 'open', 'r1277 (7) RED CONTROL: the person-close guard removed (a copy of the wiring) ⇒ a later result REOPENS the item the person closed — the close leg would be red', { status: machineItems(R)[0].status });
+    R.stop();
+  }
+  {
+    // r1277 (7): the item goes BY ITSELF — RED: the drain's settle removed (a copy of the engine) ⇒ it stays open after the results went out
+    const R = rig('machine-settle-red', wiringWith(anchored(JSRC, "    this._machineAwaySettle();   // B-2566's remainder: nothing waits for a machine any more — its item goes by itself\n", '', 'b2566r-no-settle'), 'b2566r-no-settle')), Q = cidOf(0xf701);
+    R.down.set(Q, 'h-b'); R.hostsDown.set('h-b', Date.now() - 2 * HOUR);
+    failOf(R, task(R, 'jb-q', 'render-q', Q));
+    await settle(() => machineItems(R).length === 1);
+    R.jm.drainNotifs(Q);
+    okP(machineItems(R)[0].status === 'open' && owedAway(R, Q) === 0, 'r1277 (7) RED CONTROL: the drain\'s settle removed (a copy of the engine) ⇒ the item stays OPEN after its results went out — the «goes by itself» leg would be red', { status: machineItems(R)[0].status });
+    R.stop();
+  }
+  {
+    // r1277 (6): A PAIRING REMOVED — the park refuses the held wake by name (code unpaired): the notices waiting for that machine say
+    // the truth now (machine-unpaired: never «delivered when it replies»; open the conversation to read them) and the machine's item goes
+    const R = rig('machine-unpaired'), V = cidOf(0xf801);
+    R.down.set(V, 'h-b'); R.hostsDown.set('h-b', Date.now() - 2 * HOUR);
+    failOf(R, task(R, 'jb-v', 'render-v', V));
+    await settle(() => machineItems(R).length === 1);
+    R.hostsDown.delete('h-b');   // the list no longer has it: nothing says «away» any more
+    R.jm._onRetryEvent('wake', V, { producer: 'jobs', meta: { jobId: 'jb-v' } }, { outcome: 'refused', code: 'unpaired', why: 'its machine is no longer paired — open the conversation to read what waits for it' });
+    const kinds = (R.jm.pendingNotifs.get(V) || []).map((n) => n.held && n.held.kind), digest = JM_MODEL.heldDigest(R.jm.pendingNotifs);
+    okP(kinds.join() === 'machine-unpaired' && machineItems(R)[0].status === 'done' && JM_MODEL.HELD_KINDS.includes('machine-unpaired') && !!JM_MODEL.NOTIF_TAIL['machine-unpaired'],
+      'r1277 (6): a pairing removed ⇒ its waiting results are «machine-unpaired» (their words: no longer paired — open the conversation to read them; never «when it replies») and the machine\'s item goes', { kinds, item: machineItems(R)[0].status, digest: digest.byConversation && digest.byConversation[V] });
     R.stop();
   }
 }

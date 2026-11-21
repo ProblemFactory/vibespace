@@ -1112,6 +1112,7 @@ const NOTIF_TAIL = Object.freeze({
   'not-running': 'These arrived while this conversation was not running.',
   'not-reachable': 'The agent did not accept these when they arrived (busy or unreachable) — delivered now.',
   'machine-away': 'These arrived while the machine this conversation runs on could not be reached — delivered now that it replies.',
+  'machine-unpaired': 'These waited for a machine that is no longer paired.',
   'retrying': 'These were waiting for a retry — delivered now.',
   'rate-floor': 'These were paced by the 30 s per-conversation floor.',
   'spend-cap': 'These were held by the spending ceiling for turns nobody typed.',
@@ -1291,7 +1292,7 @@ function lastLineOf(text, max = 200) {
 // 'retrying' = parked in the ladder's retry park (the fact's kind, never a stash entry's).
 // lane bl-windows (the Task Groups store held unread): 'groups-unread' = a line only a Task Group could prove, held while the store
 // cannot be read — its own kind and words (never «not running»), judged when the store reads
-const HELD_KINDS = ['spend-cap', 'rate-floor', 'not-reachable', 'not-running', 'retrying', 'off', 'wrapper-no-steer', 'groups-unread', 'machine-away'];
+const HELD_KINDS = ['spend-cap', 'rate-floor', 'not-reachable', 'not-running', 'retrying', 'off', 'wrapper-no-steer', 'groups-unread', 'machine-away', 'machine-unpaired'];
 /** B-2566's remainder (主开发 r1149, the number 10:45Z): the For-you item for a paired machine that cannot be reached waits this long
  *  after it fell silent — a laptop shut for lunch says nothing; a night says it once */
 const MACHINE_AWAY_GRACE_MS = 60 * 60 * 1000;

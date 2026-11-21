@@ -170,10 +170,10 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       for (const id of ids) { try { userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log('[jobs] For-you resolve failed:', e.message); } }
       return ids.length;
     },
-    /** the machines an open «results wait» item names (an earlier run's too) — the engine asks once a run */
-    machineAwayOpen: () => { if (userTodos.isHeldUnread?.()) return []; return userTodos.idsWhere((i) => typeof i.itemKey === 'string' && i.itemKey.startsWith('jobs-machine-away:') && i.status === 'open').map((id) => String((userTodos.get(id) || {}).itemKey || '').slice('jobs-machine-away:'.length)).filter(Boolean); },
+    /** the machines an open «results wait» item names (an earlier run's too) — the engine asks once a run it could READ (null: held) */
+    machineAwayOpen: () => { if (userTodos.isHeldUnread?.()) return null; return userTodos.idsWhere((i) => typeof i.itemKey === 'string' && i.itemKey.startsWith('jobs-machine-away:') && i.status === 'open').map((id) => String((userTodos.get(id) || {}).itemKey || '').slice('jobs-machine-away:'.length)).filter(Boolean); },
     ownerUnreachable: (cid) => { try { return deliver.unreachableOf(cid); } catch { return null; } },   // B-2566's remainder: the ladder's own verdict
-    machineUnreachable: (hid) => { try { return deliver.machineUnreachable(hid); } catch { return false; } },
+    machineAwayOf: (hid) => { try { return deliver.machineAwayOf(hid); } catch { return null; } },   // r1277: away, or a held wake still owed the machine's word
     log, getTelemetry, // optional: an archive write failure names itself (jobs-archive-write-failed)
     // B-44f3: For you held unread — the close is refused by name; it runs again at the read (the ask's item never reopens over an answered panel)
     resolveJobAsk: (jobId, opts) => { try { return userTodos.resolveByJob(jobId, opts); } catch (e) { if (e && e.code === 'todos-unread' && typeof userTodos.whenRead === 'function') { userTodos.whenRead(() => { try { userTodos.resolveByJob(jobId, opts); } catch (e2) { log('[jobs] inbox resolve failed at the read:', e2.message); } }, "a job's answered ask"); log(`[jobs] ${jobId}: its For-you ask closes once For you reads its list`); return 0; } log('[jobs] inbox resolve failed:', e.message); return 0; } },

@@ -1474,6 +1474,7 @@ class JobManager {
     try { this.d.broadcast('jobs-updated', { id: wj.id }); } catch { }
   }
   _onRetryEvent(ev, cid, entry, extra = {}) {
+    if (ev === 'wake' && extra && extra.code === 'unpaired') this._machineUnpaired(cid);   // B-2566's remainder (r1277 (6))
     // the manager design's piece 7: an owed wake's ANSWER reaches EVERY job it carries, whichever producer asked first (a
     // peer's wake and a job's result ride ONE wake; each delivery's own facts are in `metas`)
     if (ev === 'wake' && entry && Array.isArray(entry.metas)) { for (const id of new Set(entry.metas.filter((m) => m && m.jobId).map((m) => m.jobId))) this._wakeAnswered(cid, id, extra); return false; }
@@ -1657,29 +1658,45 @@ class JobManager {
    *  open (a person's close stands for the outage — the wiring); it goes by itself when nothing waits for that machine any more */
   _machineAway(hid) {
     if (!hid || typeof this.d.noticeMachineAway !== 'function') return null;
+    // THIS outage's start, the ladder's (r1277 (3)): the dial facts' disconnect — never an earlier outage's entry still waiting
+    const a = typeof this.d.machineAwayOf === 'function' ? this.d.machineAwayOf(hid) : null;
     const w = this._machineAwayOwed(hid);
-    if (!w.n || now() - w.since < M.MACHINE_AWAY_GRACE_MS) return null;
+    if (!a || !w.n || now() - a.since < M.MACHINE_AWAY_GRACE_MS) return null;
     (this._machineAwaySaid || (this._machineAwaySaid = new Set())).add(hid);
-    try { return this.d.noticeMachineAway({ hid, n: w.n, convs: w.convs, since: w.since }) || null; }
+    try { return this.d.noticeMachineAway({ hid, n: w.n, convs: w.convs, since: a.since }) || null; }
     catch (e) { this.d.log(`[jobs] ${hid}: the «results wait for a machine» For-you item was not filed — ${e && e.message}`); return null; }
   }
-  /** the notices owed to the conversations of machine `hid` while it cannot be reached → {n, convs, since: when it fell silent} */
+  /** B-2566's remainder (r1277 (6)): the conversation's machine is NO LONGER PAIRED (the park refused its held wake by name) — its
+   *  notices waiting for the machine's reply say the truth now (kind machine-unpaired: never owed a wake; open the conversation to
+   *  read them), and the machine's item goes */
+  _machineUnpaired(cid) {
+    let n = 0;
+    for (const e of this.pendingNotifs.get(cid) || []) if (e && e.held && e.held.kind === 'machine-away') { e.held = { ...e.held, kind: 'machine-unpaired' }; n++; }
+    if (!n) return 0;
+    this._dirty = true;
+    try { this._save(); } catch { }
+    this._machineAwaySettle();
+    try { this.d.broadcast('jobs-updated', { held: cid }); } catch { }
+    return n;
+  }
+  /** the notices owed to the conversations of machine `hid` while it cannot be reached → {n, convs} */
   _machineAwayOwed(hid) {
-    let n = 0, since = Infinity; const convs = new Set();
+    let n = 0; const convs = new Set();
     for (const [cid, q] of this.pendingNotifs) for (const e of q || []) {
       if (!e || !e.held || e.held.kind !== 'machine-away' || e.held.hostId !== hid || e.held.maybeDelivered) continue;
-      n++; convs.add(cid); since = Math.min(since, Number(e.held.since) || Number(e.ts) || now());
+      n++; convs.add(cid);
     }
-    return { n, convs: convs.size, since: Number.isFinite(since) ? since : now() };
+    return { n, convs: convs.size };
   }
-  /** a machine's item is over when its machine REPLIES (the ladder's verdict) or nothing owed waits for it (handed over, drained):
-   *  asked of every machine this run filed for, and once a run of the items an earlier run left open (the store's own list) */
+  /** a machine's item is over when nothing owed waits for it (handed over, drained), or when the machine has given its word for every
+   *  conversation held for it (the ladder: no mark, no wake still held for it — r1277: never the link's word alone). Asked of every
+   *  machine this run filed for, and of the items an earlier run left open — the store's list, once it could be READ (r1277 (4)) */
   _machineAwaySettle() {
     if (typeof this.d.resolveMachineAway !== 'function') return;
     const said = this._machineAwaySaid || (this._machineAwaySaid = new Set());
-    if (!this._machineAwayLooked) { this._machineAwayLooked = true; try { for (const hid of (typeof this.d.machineAwayOpen === 'function' && this.d.machineAwayOpen()) || []) said.add(hid); } catch { } }
+    if (!this._machineAwayLooked) { try { const open = typeof this.d.machineAwayOpen === 'function' ? this.d.machineAwayOpen() : []; if (Array.isArray(open)) { this._machineAwayLooked = true; for (const hid of open) said.add(hid); } } catch { } }
     for (const hid of [...said]) {
-      const back = typeof this.d.machineUnreachable === 'function' && !this.d.machineUnreachable(hid);
+      const back = typeof this.d.machineAwayOf === 'function' && !this.d.machineAwayOf(hid);
       if (!back && this._machineAwayOwed(hid).n) continue;
       said.delete(hid);
       try { this.d.resolveMachineAway(hid); } catch (e) { this.d.log(`[jobs] ${hid}: the «results wait for a machine» For-you item was not closed — ${e && e.message}`); }
@@ -2122,7 +2139,7 @@ class JobManager {
     // HUB RAN (stopped then) is said — the item then counts every notice waiting there; what a boot finds waits where it waits
     // today (the Background Work panel) and is still handed over when the conversation runs again
     if (!this._stoppedThisRun || !this._stoppedThisRun.has(cid)) return null;
-    const owed = this.wakeOwed(cid).filter((n) => n.held.kind !== 'rate-floor' && !(this._namedAway && this._namedAway.has(n)));   // B-2566 MUST 2: a failure said by name is ONE item
+    const owed = this.wakeOwed(cid).filter((n) => n.held.kind !== 'rate-floor' && n.held.kind !== 'machine-away' && !(this._namedAway && this._namedAway.has(n)));   // B-2566 MUST 2: a failure said by name is ONE item; r1277 (2): its machine's item counts machine-away
     if (!owed.length || typeof this.d.noticeWakeWaiting !== 'function') return null;
     try {
       const id = this.d.noticeWakeWaiting({ cid, since: Math.min(...owed.map((n) => Number(n.ts) || now())) }) || null;
