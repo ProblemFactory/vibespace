@@ -658,7 +658,8 @@ const termKey = ([pid, st]) => `${pid}:${st}`;
 // NAMES ITS PASS — 'stop' (the stop step), 'drain' (the drain, with grace left: a wait follows), 'kill' (the drain once the grace is
 // up: its SIGTERM and its SIGKILL in the same pass, nothing between — r11 took that one for heard: a helper forked after the stop
 // step, SIGTERMed at 2051 ms of a 2 s grace and killed the same millisecond, was never said)
-const termOnce = (p, pass = 'stop') => { if (termed.has(termKey(p)) || !same(p)) return false; termed.set(termKey(p), { at: Date.now(), pass }); try { process.kill(p[0], 'SIGTERM'); return true; } catch { return false; } };
+const termOnce = (p, pass = 'stop') => { if (termed.has(termKey(p)) || !same(p)) return false; const rec = { at: Date.now(), pass }; termed.set(termKey(p), rec); try { process.kill(p[0], 'SIGTERM'); rec.ok = true; return true; } catch { return false; } };
+const landed = (k) => !!(termed.get(k) || {}).ok;   // B-d8f4 (unit 1's round, lens 1): a SIGTERM that LANDED — one that threw (EPERM) never makes a process the stop's
 const rowOf = (pid) => { const r = pid ? statOf(pid) : null; return r && r[0] !== 'Z' ? [Number(pid), Number(r[19]), Number(r[2])] : null; }; // [pid, start, pgid]
 // ── SHIPPED TWIN (B-c134) BEGIN — data/bin/job-wrapper.js carries these lines byte-for-byte (a wrapper copied into a scratch data
 // folder cannot require src/); scripts/test-stop-tree.mjs pins the copy to this source ──
@@ -997,7 +998,7 @@ async function drainGroup() {
   { const g = new Set(left.map(termKey)); for (const p of stopping ? stopTree.filter(same) : []) if (!g.has(termKey(p))) { left.push(p); g.add(termKey(p)); outKeys.add(termKey(p)); } }
   // B-d8f4 (主开发 r902): what the stop step reached outside our group is the stop's even when NOTHING is alive at the drain — the exit
   // record still carries its count (the early returns kept none)
-  const stepReached = taskStop ? [...stopEsc.keys(), ...stopTreeOut.keys()].filter((k) => termed.has(k)) : [];
+  const stepReached = taskStop ? [...stopEsc.keys(), ...stopTreeOut.keys()].filter(landed) : [];
   if (!left.length && !out.length && !stepReached.length) return {};
   // round 10c: EVERY COUNT IN THE RECORD IS THE SIZE OF ONE SET of processes (`pid:start`) — one both scans saw (it left our group
   // between them) is one process, never two
@@ -1043,11 +1044,11 @@ async function drainGroup() {
   }
   const still = killed.size;
   if (still && !forced) forced = `${still} process${still === 1 ? '' : 'es'} it left ${still === 1 ? 'was' : 'were'} still running ${stopMs / 1000} s after ${stopping ? 'the stop' : 'its SIGTERM'} — killed`;
-  const runStopped = taskStop ? runOut.filter((p) => termed.has(termKey(p)) || killed.has(termKey(p))) : [];   // B-7ca1 (its read r2): what the STOP reached — never one that ended by itself before it
+  const runStopped = taskStop ? runOut.filter((p) => landed(termKey(p)) || killed.has(termKey(p))) : [];   // B-7ca1 (its read r2): what the STOP reached — never one that ended by itself before it
   // B-d8f4 (7, its read's M1 + M2): what the stop step signalled outside our group — escapees and its tree's members — is the stop's, on
   // EITHER road (a stop before the drain, a stop that lands while it drains), whatever this drain still finds alive
   if (taskStop) { for (const k of stopEsc.keys()) outKeys.add(k); for (const k of stopTreeOut.keys()) outKeys.add(k); }
-  const reachedKeys = taskStop ? [...outKeys].filter((k) => termed.has(k) || killed.has(k)) : [];
+  const reachedKeys = taskStop ? [...outKeys].filter((k) => landed(k) || killed.has(k)) : [];
   const outsideReached = reachedKeys.length;   // B-d8f4 (7): the count «outside» — never low
   const counted = new Set([...rows.filter((p) => !runOut.includes(p) || runStopped.includes(p)).map(termKey), ...killed, ...runStopped.map(termKey), ...reachedKeys]), all = counted.size;   // its read's M2: n holds every one «outside» counts — never outside > n // forked while it drained: counted with the rest
   // what got less than the full grace — OF WHAT IT LEFT (round 10c: r10 counted every SIGTERM of the run, one that ended before

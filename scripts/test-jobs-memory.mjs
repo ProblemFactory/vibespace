@@ -777,6 +777,12 @@ leg('§3 IN-PROCESS ㊽ A COUNT IN THE RECORD IS THE SIZE OF A SET — of what a
     && said(bad).length === 1 && said(sound).length === 0 && (lastRun(bad).left || {}).short === 3 && (lastRun(sound).left || {}).short === 2 && /\(3 processes got less than the full grace\)/.test(words),
     `a record past its set is said once in the hub's log — «${(said(bad)[0] || '').replace(/^\[jobs\] \S+ /, '')}» — and its words say no more than it left: «${words}»; a sound record says nothing (63a311ad0: no such line — clamped in silence)`, { bad: said(bad), sound: said(sound), left: lastRun(bad).left });
   ok(/outside 4 of n 3/.test(F({ n: 3, force: true, outside: 4 })) && F({ n: 3, outside: 3 }) === '' && F({ n: 3, outside: 0 }) === '', 'B-d8f4 (8): leftRecordFault\'s branch for «outside» over n — a record that counts more stopped outside its group than it left is a fault, said; at n or under it is none', { over: F({ n: 3, outside: 4 }), at: F({ n: 3, outside: 3 }) });
+  { // B-d8f4 (unit 1's round, lens 3): ITS CONTROL — leftRecordFault compiled from the source with the «outside» branch cut says nothing (red)
+    const MSRC = fs.readFileSync(path.join(REPO, 'src/job-model.js'), 'utf8'), a0 = MSRC.indexOf('function leftRecordFault(l) {'), b0 = MSRC.indexOf('\n}\n', a0) + 2;
+    const body = MSRC.slice(a0, b0), OUTL = '  if (Number.isInteger(l.outside) && l.outside > l.n) return';
+    const F2 = a0 >= 0 && body.includes(OUTL) ? new Function(`${body.split('\n').filter((x) => !x.startsWith(OUTL)).join('\n')}; return leftRecordFault;`)() : null;
+    ok(!!F2 && F2({ n: 3, outside: 4 }) === '' && /short 4 of n 3/.test(F2({ n: 3, short: 4 })), 'CONTROL (the «outside» branch cut, compiled from the source): the record that counts more outside than it left says NOTHING (red)', F2 && F2({ n: 3, outside: 4 }));
+  }
   stopEngine(E);
 });
 
