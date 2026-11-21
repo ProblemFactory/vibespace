@@ -1101,6 +1101,7 @@ export const SUITES = [
   { name: 'test-ci-heavy-verdict', tier: 'fast', why: 'LAW architecture · 4.7 s (B-18eb, restated 2026-11-18: + the re-run attempt legs and their §5 mutants — alone on the test machine, alternated with the release\'s own suite file, 6 pairs over both zones: 7.47 s against 7.27 s, the medians — ×1.03 over 4.6 s) (B-a2c9, restated 2026-11-18 in the box\'s scale: 5.46 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 3.8–5.4 s); read on a run with legs red that this stack cures — the time of a whole run; was 3.6 s) (measured under the box\'s thermal cap, 2026-11-10: 3.64 s alone — not restated at full speed yet) — B-e381, lane ci-heavy-verdict r4: the CI mirror\'s verified run written as the HOSTED half\'s listed green (never full, the list read from the commit), the union reader (a red clears when every failed suite has run green since), LAW A (a marker that cannot be read never opens the gate; the writer, status and already-green see it too), LAW B (a list-scoped `absent` covers nothing; a FULL green clears), pruning by commits, five mutant controls, the parity over production\'s 30 markers; every refusal writes nothing' },
   { name: 'test-ci-heavy-queue', tier: 'fast', why: 'LAW architecture · 8.9 s (measured under the box\'s thermal cap, 2026-11-10: 8.61–8.87 s alone — not restated at full speed yet) — lane ci-heavy-queue (+ THE BUILD STAMP: a claim does not rebuild a tree built at its commit; a red build writes no verdict): the machine\'s heavy lock serves its waiters oldest first (a ticket each in <lock>.q, held only while its waiter is alive AND polling — dead, recycled and silent tickets reaped, the head at 200 ms), the wait line names the holder uncut, ONE door (only ci.mjs names the lock); real processes, three mutant controls' },
   { name: 'test-ci-heavy-queue-window', tier: 'fast', why: 'LAW architecture · 4.1 s (measured alone on the test machine, 2026-11-20: 4.08 s, run 966e33dbf-20261120210633-box, node v24.22.1 — its ten scenes side by side; the r406 form was 2.40 s; with r571\'s steal scene, twelve: 4.14 s in run 5becc7b1f-20261120222134-box) — lane bl-ci (r406): the heavy lock\'s FRESH LOOK after the take (a waiter frozen between its head decision and its take gives back a lock an older live ticket is owed, and at its deadline times out by name), each ticket judged by the clock around its own stat, the lock taken in ONE step (never empty: r518), and the steal of a dead holder\'s lock undone when it moved a live one (r571) — every window PLACED by a copy and said when reached, the staleness the queue\'s own 15 s (load decides nothing), each with its red control; real processes, seven mutant copies, an exit guard' },
+  { name: 'test-ci-heavy-signal', tier: 'fast', why: 'LAW architecture · 4.1 s (measured alone on the test machine, 2026-11-21: 4.07 s, run 55a2ce065-20261121161123-box, node v24.22.1 — its six real gate runs side by side) — lane bl-ci (B-1217 member 3, r1427): the heavy gate SEES an outside signal that landed in a synchronous stretch (one loopTurn before the pre-build question and again before the post-build one): a SIGTERM before the build builds nothing, one at the build\'s own start starts no suite, and the scratch checkout is gone on the three exit roads — each window PLACED by a stall in a copy of ci.mjs in a stub repository, each with its RED control; real ci.mjs --heavy runs side by side' },
   { name: 'test-usage-ledger-perf', tier: 'fast', why: 'in-process · 4.7 s (restated 2026-10-20, was 551 ms)' }, // inc-mtox23xw: the estimator's per-pair ledger walk is O(log n + k) + interval-memoized (it blocked the loop 10-59s); parity vs brute force + timing pins
   { name: 'test-ledger-boot-load', tier: 'fast', why: 'in-process · 4.4 s measured in a depth-1 clone, three runs 4.37–4.42 s at a box load of ~5 (ledger-boot-load, 2.369.397: a 9 876-row real-shape ledger, 16 worker loads incl. 7 planted failures, three planted copies; the failing load\'s road in test-ledger-boot-fail)' }, // THE LEDGER'S FIRST LOAD OFF THE LOOP: «loading» until the worker's cache is swapped in; rows once; a dead worker said once, never a sync fallback
   { name: 'test-ledger-boot-fail', tier: 'fast', why: 'in-process · 6.0 s measured in a depth-1 clone, three runs 5.94–6.00 s at a box load of ~5 (ledger-boot-load round 2 + its follow-up, 2.369.397 — split from test-ledger-boot-load under the 10 s: a real-shape ledger, throwing and hung first loads, transcripts walked by the real scan through the real route handler on a fake app, eight planted copies)' }, // NOTHING WAITS ON A LOAD THAT IS FAILING: bounded by the try, a person\'s Retry tries now, LOADING a state
@@ -1808,6 +1809,10 @@ export const budgetFor = (s) => (Number(s.budgetMs) > 0 ? Number(s.budgetMs) : s
 // spawnSync reports ETIMEDOUT for that one (measured: {signal:'SIGTERM',
 // error:{code:'ETIMEDOUT'}}), and a hung suite IS a red.
 export const OUTSIDE_SIGNALS = ['SIGTERM', 'SIGINT', 'SIGHUP'];
+/** ONE WHOLE TURN OF THE EVENT LOOP (B-1217 member 3, the coordinator's r1427, lane bl-ci): a signal that lands while synchronous code
+ *  runs is only QUEUED — its handler runs when the loop turns. A question that must see an outside signal is asked after two check
+ *  phases, so a whole poll phase (where libuv hands over the queued signal) runs between them. */
+export const loopTurn = () => new Promise((res) => setImmediate(() => setImmediate(res)));
 export const killedFromOutside = (r) => !!(r && r.signal && OUTSIDE_SIGNALS.includes(r.signal) && !(r.error && r.error.code === 'ETIMEDOUT'));
 
 // A SUITE THE GATED COMMIT DOES NOT CONTAIN IS AN ABSENCE, NOT A RED (round
@@ -4906,6 +4911,11 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // Ask BEFORE the build too: a signal that landed during `git worktree add`
     // is only noticed here, and a build for a run that is already over is
     // the round-2 supersede cost one step earlier.
+    // A QUEUED SIGNAL IS SEEN (B-1217 member 3, the coordinator's r1427): everything since the scratch checkout was made is synchronous,
+    // so a SIGTERM that landed there is only queued and the question below could not see it — the build then ran to its end (it was
+    // spawned after the signal, outside the group that got it) and the checkout went only after it. The loop is given one whole turn
+    // first, so the handler runs and the question sees it: no build for a run that is over, and `finally` removes the checkout at once.
+    await loopTurn();
     let abandonedWhy = abandoned();
     const build = abandonedWhy ? { ok: false } : noteChildResult(runBuild({ cwd: runRoot, reuse: !isolate }));   // a built IN-PLACE tree is not rebuilt (THE BUILD STAMP); an --isolate checkout is fresh: no stamp asked, nothing hashed
     const failed = [], flaky = [], timings = [], absent = [], selfSkipped = [], skippedLegs = []; // skippedLegs: B-4829, the greens that skipped a leg (selfSkipped: B-479e, the ones that ran nothing)
@@ -4913,6 +4923,10 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     const dirPace = dirSweepPacer();
     // The build is the first thing a supersede kill lands on, so ask before
     // believing its failure — and before spending the rest of the tier.
+    // …after one whole turn of the loop (r1427): a signal that landed during the build's own START (before its child was in the group)
+    // did not kill the build, and the build's spawnSync held the loop — synchronously the question was blind to it, and a lane started
+    // a suite before the handler ran; now no lane starts for a run that is over.
+    if (!abandonedWhy) await loopTurn();
     abandonedWhy = abandonedWhy || abandoned();
     // Say it wherever it is first noticed — the abort can be true before the
     // suite loop is ever entered (a supersede that lands during the build),
