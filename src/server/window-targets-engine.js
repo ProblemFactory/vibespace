@@ -546,12 +546,22 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    *  (screenshot, click --at, type, key, scroll); every other verb (attach, detach, size, mode, stop, watch, snapshot, a tree
    *  verb with @ref) is refused by name on a window's handle. A subject is resolved here (the lease, a desktop the app owns, the
    *  record ready, the window in the app's own list) or refused by name — audited as refused, nothing injected, nothing done. */
+  /** r1623 (the coordinator's ruling, shape B — the release's order back): THE APP's OWN HANDLE's DOOR ANSWERS SYNCHRONOUSLY. A verb
+   *  takes it BEFORE any await, so a tree verb reaches its synchronous part (its re-check and the call that acts) with no await in
+   *  front — it runs wholly BEFORE a revoke made in the same tick, as at the release. THE LAW is lane E verify's (stillHeld): an act
+   *  is linearized — wholly before a revoke, or refused after it, never across; every re-ask after a REAL await stays. Unit 2 had put
+   *  `await subjectDoor` in front of every verb (an async function answers a turn later even when it does nothing async), so a
+   *  tree act a same-tick revoke used to follow resumed after it and was refused. null for a window's own handle (its door awaits
+   *  the window list: those verbs are pixel roads, with their re-ask after that await). */
+  function plainDoor(handle0, facts, verb) {
+    const { handle, sub } = splitSubject(handle0);
+    if (sub != null) return null;
+    const { rec, lease } = requireLease(handle, facts, verb);
+    return { handle, sub: null, rec, lease };
+  }
   async function subjectDoor(handle0, facts, verb, { subjectVerb = false, tree = false } = {}) {
     const { handle, sub } = splitSubject(handle0);
-    // r1472/r1486 (the box's test-window-targets red at 5b4176f46): THE LEASE IS READ AT THE CALL — synchronously, before any await —
-    // for the app's own handle too, and the verbs use THIS read: an act issued before a revoke stands (the release's order); a
-    // second read after the door's await let a revoke issued right after the act refuse it
-    if (sub == null) { const { rec, lease } = requireLease(handle, facts, verb); return { handle, sub: null, rec, lease }; }
+    if (sub == null) return plainDoor(handle0, facts, verb); // the verbs take plainDoor first (r1623); a caller here is answered the same
     // r989 (2): the LEASE and the REACH first — a conversation the record was never shared with is told what it is told for the
     // app's own handle, never a subject's word first
     const { rec, lease } = requireLease(handle, facts, verb);
@@ -1250,7 +1260,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
 
   // ── snapshot ──
   async function snapshot(handle, facts, { budget, text = true, under = null } = {}) {
-    const { rec, lease } = await subjectDoor(handle, facts, 'snapshot', { subjectVerb: true, tree: true }); // B-dbb4 (r946): the one door — a tree verb on a window's handle is refused; r1486: its lease read at the call, never again after the wait
+    const { rec, lease } = plainDoor(handle, facts, 'snapshot') || await subjectDoor(handle, facts, 'snapshot', { subjectVerb: true, tree: true }); // B-dbb4 (r946): the one door — a tree verb on a window's handle is refused; r1623: the app's own handle answered synchronously (the release's order)
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: rec.origin || ORIGIN };
     gateMode(rec, lease, 'snapshot', false, who); // lane E (D7): an explicit pixel share refuses the tree by name; auto snapshots AS the probe
     const pids = pidsOf(rec);
@@ -1309,8 +1319,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   const nodeLine = (e, action) => ({ role: e.role, name: e.name, ...(action ? { action } : {}) });
   async function act(handle0, facts, body = {}) {
     const verb = String(body.verb || '');
-    const door = await subjectDoor(handle0, facts, verb || 'act', { subjectVerb: ['click', 'type', 'key', 'scroll'].includes(verb), tree: !!body.ref }); // B-dbb4 (r946): the one door
-    const { handle, sub, rec, lease } = door; // r1486: the door's lease read (at the call), never a second read after its wait
+    const door = plainDoor(handle0, facts, verb || 'act') || await subjectDoor(handle0, facts, verb || 'act', { subjectVerb: ['click', 'type', 'key', 'scroll'].includes(verb), tree: !!body.ref }); // B-dbb4 (r946): the one door; r1623: the app's own handle answered synchronously, so a tree act runs before a same-tick revoke
+    const { handle, sub, rec, lease } = door; // the door's one read; the verb's re-asks after its real awaits stay (lane E: never across a revoke)
     // B-dbb4 M3: the chosen window IS the plan's main (its own plan) — keys and text focus it and go to its X window
     const subjectWin = (px) => (sub != null && px && px.plan && px.plan.subject && px.plan.main ? px.plan.main : null);
     const centreOf = (m) => ({ x: m.x + Math.min(20, Math.floor(m.w / 2)), y: m.y + Math.min(20, Math.floor(m.h / 2)) });
@@ -1518,8 +1528,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   // ── screenshot (the pixel road's read) ──
   async function screenshot(handle0, facts) {
-    const door = await subjectDoor(handle0, facts, 'screenshot', { subjectVerb: true }); // B-dbb4 (r946): the one door — before the desktop record's own early return
-    const { handle, sub, rec, lease } = door; // r1486: the door's lease read (at the call), never a second read after its wait
+    const door = plainDoor(handle0, facts, 'screenshot') || await subjectDoor(handle0, facts, 'screenshot', { subjectVerb: true }); // B-dbb4 (r946): the one door — before the desktop record's own early return; r1623: the app's own handle answered synchronously
+    const { handle, sub, rec, lease } = door; // the door's one read; the verb's re-asks after its real awaits stay (lane E: never across a revoke)
     if (rec.origin === 'desktop') return desktopScreenshot(rec, facts);
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, ...(sub != null ? { subject: UN.subHandle(rec.id, sub) } : {}) };
     gateMode(rec, lease, 'screenshot', false, who); // always allowed — notes a mode change for the audit

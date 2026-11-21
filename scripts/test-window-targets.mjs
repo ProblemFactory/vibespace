@@ -1268,11 +1268,12 @@ console.log('§4 the engine over a fake keeper + the routes');
       const aud = fs.readFileSync(Er.plain.auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
       ok(aud.filter((l) => l.code === 'not_exposed' && l.by === 'reach').length >= 8, 'every stopped verb is audited by:reach not_exposed');
       ok(aud.some((l) => l.cancelled === true && l.partial === true && l.by === 'inject' && l.code === 'window_paused') && aud.some((l) => l.cancelled === true && l.partial === true && l.code === 'not_exposed'), 'L5: a cancelled injection is audited by:inject {cancelled, partial} with the refusal that stopped it');
-      // the linearization's other side: a revoke AFTER the act started lets it finish (it ran before the revoke)
+      // the linearization's other side: a tree act whose synchronous part ran before the revoke finishes (it ran before the revoke);
+      // r1623: the app's own handle's door answers synchronously, so no await stands in front of that part
       await prep(Er.plain, { mode: 'tree', refs: true });
       const pre = Er.plain.act('da-race', fD, { verb: 'click', ref: '@e1' }); Er.plain.revokeReach('da-race', P);
       const preR = await pre.then((r) => r, (e) => ({ code: e.code }));
-      ok(preR.ok === true && acts.includes('do_action') && !Er.plain.leaseOf('da-race'), 'a revoke AFTER the act was issued: that act stands (it was first) and the lease is gone for the next verb');
+      ok(preR.ok === true && acts.includes('do_action') && !Er.plain.leaseOf('da-race'), 'an act that RAN before the revoke stands — a tree act\'s synchronous part (its re-check and its call) runs wholly before a revoke made in the same tick (r1623: linearized, never across) — and the lease is gone for the next verb');
       // L4 (r2): the Task Group store THROWS while a group row holds the window — the verb is refused BY NAME, the lease is KEPT
       const l4 = async (E) => {
         await prep(E, { mode: 'tree', via: 'group' });

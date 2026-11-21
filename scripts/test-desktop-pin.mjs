@@ -635,7 +635,7 @@ console.log('CONTROLS (patched copies)');
     ok(noSubj.length === 0, 'r946: the audit row of EVERY cell carries the window\'s own handle as its subject (one assertion over the table)', noSubj.slice(0, 12));
     // RED CONTROLS: the door taken out of one verb (screenshot); a record kind's early return put back before the door
     const EST = read(ENGINE_REL);
-    const noDoor = EST.replace("const door = await subjectDoor(handle0, facts, 'screenshot', { subjectVerb: true }); // B-dbb4 (r946): the one door — before the desktop record's own early return", "const door = { ...splitSubject(handle0), plan: null };"); // stale-pins: kept (a RED control plants the pre-door text)
+    const noDoor = EST.replace("const door = plainDoor(handle0, facts, 'screenshot') || await subjectDoor(handle0, facts, 'screenshot', { subjectVerb: true }); // B-dbb4 (r946): the one door — before the desktop record's own early return; r1623: the app's own handle answered synchronously", "const door = { ...splitSubject(handle0), plan: null };"); // r1623: the anchor moved with the door's line (plainDoor first)
     const earlyBack = EST.replace("  async function screenshot(handle0, facts) {\n", "  async function screenshot(handle0, facts) {\n    { const r0 = liveAny(splitSubject(handle0).handle); if (r0 && r0.origin === 'desktop') return { handle: r0.id, file: null, w: 1, h: 1, coords: 'display', planted: 'the early return before the door' }; }\n");
     ok(noDoor !== EST && earlyBack !== EST, 'controls planted: screenshot without the door; the desktop record\'s early return put back before it');
     const tableCopy = async (src, tag) => { const EC = MUT.load(ENGINE_REL, src, tag); const E2 = EC.create({ keeper: keeperT, dataDir: path.join(dir, 'dbb4-table-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 }); for (const id of Object.keys(RECS)) { E2.grantReach(id, { kind: 'session', id: 's1' }); E2.setShareMode(id, 'pixels'); try { E2.attach(id, fP); } catch { /* */ } } return tableRun(E2, tag); };
@@ -643,39 +643,58 @@ console.log('CONTROLS (patched copies)');
     const tRed1 = R1.cells.filter((c) => !c.pass && c.cell.endsWith('·screenshot')), tRed2 = R2.cells.filter((c) => !c.pass && c.cell.startsWith('desktop·') && c.cell.endsWith('·screenshot'));
     ok(tRed1.length > 0, `RED CONTROL: screenshot without the door — its cells go red by name (${tRed1.map((c) => c.cell).slice(0, 4).join(', ')})`, tRed1.slice(0, 4));
     ok(tRed2.length > 0, `RED CONTROL: the desktop record's early return before the door — the person's own desktop's screenshot cells go red (${tRed2.map((c) => c.cell).slice(0, 4).join(', ')})`, tRed2.slice(0, 4));
-    // r1472/r1486 (the box's test-window-targets red at 5b4176f46, «a revoke AFTER the act was issued: that act stands»): THE LEASE
-    // IS READ AT THE CALL — synchronously, before the verb's promise is handed back — for the app's own handle too, and the verbs use
-    // the door's read (never a second read after its wait): a revoke issued right after a call cannot refuse it. Each of the door's
-    // three verbs is CALLED with a facts spy; the read is counted at the moment the call returns. RED CONTROL: 5b4176f46's code (the door
-    // returns nothing for the app's own handle, each verb reads the lease after the wait) — no read at the call
+    // r1623 (the coordinator's ruling, shape B): AN ACT IS LINEARIZED — it runs WHOLLY BEFORE a revoke, or it is refused AFTER it,
+    // NEVER ACROSS (lane E verify's law, stillHeld). The box's test-window-targets red at 5b4176f46 / 2a753121e: unit 2 put `await
+    // subjectDoor` in front of every verb, so a tree act that a same-tick revoke used to follow resumed AFTER it and was refused. The
+    // cure: the app's own handle's door answers synchronously (plainDoor); every re-ask after a REAL await stays. BOTH SIDES, each
+    // with its red, in the box's own order (the call, the revoke in the SAME tick, then the turn):
+    //   (i) a TREE act (click @e1 on a tree share — no await before its re-check and its call) ⇒ it RAN; the next verb after the
+    //       revoke is refused by name. RED: 2a753121e's act (the door awaited even for the app's own handle) — refused, nothing done;
+    //   (ii) a PIXEL road (key — the input-backend probe is a real await before its injection), the revoke made DURING that await ⇒
+    //       refused not_exposed and the injector saw NOTHING. RED: a copy that carries the call's admission across the await — keys land.
+    // (the old leg here counted lease READS at the call — a mechanism, not the law: the readers of round ww0g2eq5l; it was green on a
+    // tip the box's leg failed, because a read at the call is not an act that runs before the revoke)
     {
-      const leaseAtCall = async (Emod, tag) => {
-        const E4 = Emod.create({ keeper: keeperT, dataDir: path.join(dir, 'dbb4-call-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 });
-        E4.grantReach('da-pop', { kind: 'session', id: 's1' }); E4.setShareMode('da-pop', 'pixels'); try { E4.attach('da-pop', fP); } catch { /* the record's own rule */ }
-        const out = {};
-        for (const [verb, call] of [['screenshot', (f) => E4.screenshot('da-pop', f)], ['act', (f) => E4.act('da-pop', f, { verb: 'click', at: { x: 5, y: 5 } })], ['snapshot', (f) => E4.snapshot('da-pop', f)]]) {
-          let reads = 0;
-          const spy = new Proxy(fP, { get(t, k) { if (k === 'sessionId') reads++; return t[k]; } });
-          const p = call(spy); const atCall = reads;
-          await p.catch(() => { /* the verb's own answer — only WHEN the lease was read is judged here */ });
-          out[verb] = atCall;
-        }
-        return out;
+      const SNAPL = { apps: [], nodes: [{ ref: '@e1', pid: 4545, path: [0], role: 'push button', name: 'Go', actions: ['click'], editable: false, states: [] }], census: { nodes: 1 }, unreadable: [], truncated: false, budget: 400, callTimeoutMs: 1, ms: 1 };
+      const actsL = [], keysL = [], sleepL = (ms) => new Promise((r) => setTimeout(r, ms));
+      let duringProbe = null;
+      const wtL = { ...wtP, probeA11y: async () => ({ ok: true, apps: 1 }),
+        snapshotTarget: async () => ({ ok: true, snapshot: SNAPL, refs: WT.refTableOf(SNAPL) }),
+        actOnNode: async (o) => { actsL.push(o.verb); return { ok: true, did: { action: 'click' }, ms: 1 }; },
+        probeInputBackends: async () => { if (duringProbe) { const f = duringProbe; duringProbe = null; f(); } await sleepL(5); return { rows: [{ backend: 'xtest', ok: true }], injection: { backend: 'xtest' }, ours: true }; },
+        injectKey: async () => { keysL.push('key'); return { ok: true, did: { verb: 'key', chord: 'Return' } }; } };
+      const P1 = { kind: 'session', id: 's1' };
+      const world = (Emod, tag) => { const E5 = Emod.create({ keeper: keeperP, dataDir: path.join(dir, 'dbb4-lin-' + tag), env: () => ({}), activeSessions: sessP, wt: wtL, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 }); return E5; };
+      const share = async (E5, mode) => { E5.grantReach('da-pop', P1); E5.setShareMode('da-pop', 'tree'); E5.attach('da-pop', fP); await E5.snapshot('da-pop', fP); E5.setShareMode('da-pop', mode); E5.attach('da-pop', fP); };
+      const sideI = async (E5) => {
+        await share(E5, 'tree'); actsL.length = 0;
+        const p = E5.act('da-pop', fP, { verb: 'click', ref: '@e1' }); E5.revokeReach('da-pop', P1); // the call, the revoke in the SAME tick
+        const r = await p.then((x) => x, (e) => ({ code: e && e.code }));
+        const after = {};
+        for (const [v, call] of [['act', () => E5.act('da-pop', fP, { verb: 'click', ref: '@e1' })], ['snapshot', () => E5.snapshot('da-pop', fP)], ['screenshot', () => E5.screenshot('da-pop', fP)]]) { try { await call(); after[v] = 'ran'; } catch (e) { after[v] = e && e.code; } }
+        return { ran: !!(r && r.ok), code: r && r.code, acts: [...actsL], after };
       };
-      const SRC = read(ENGINE_REL);
-      const PLAIN = "    if (sub == null) { const { rec, lease } = requireLease(handle, facts, verb); return { handle, sub: null, rec, lease }; }";
-      const SNAP = "    const { rec, lease } = await subjectDoor(handle, facts, 'snapshot', { subjectVerb: true, tree: true }); // B-dbb4 (r946): the one door — a tree verb on a window's handle is refused; r1486: its lease read at the call, never again after the wait";
-      const ACTS = "    const { handle, sub, rec, lease } = door; // r1486: the door's lease read (at the call), never a second read after its wait";
-      const n = (x) => SRC.split(x).length - 1;
-      ok(n(PLAIN) === 1 && n(SNAP) === 1 && n(ACTS) === 2 && !/await subjectDoor\([^\n]*\n[^\n]*requireLease\(/.test(SRC), 'r1486 PIN: the door reads the lease for the app\'s own handle too, and snapshot / act / screenshot take the door\'s read — no requireLease after its wait', { PLAIN: n(PLAIN), SNAP: n(SNAP), ACTS: n(ACTS) });
-      let rel = anchored(SRC, PLAIN, '    if (sub == null) return { handle, sub: null };', 'r1486: the door\'s plain-handle read taken away'); // stale-pins: kept (r1486's RED CONTROL rebuilds 5b4176f46's lines on purpose)
-      rel = anchored(rel, SNAP, "    await subjectDoor(handle, facts, 'snapshot', { subjectVerb: true, tree: true }); // B-dbb4 (r946): the one door — a tree verb on a window's handle is refused\n    const { rec, lease } = requireLease(handle, facts, 'snapshot');", 'r1486: snapshot reads after the wait'); // stale-pins: kept (r1486's RED CONTROL rebuilds 5b4176f46's lines on purpose)
-      const DESKBACK = "\n    if (rec.origin === 'desktop') return desktopScreenshot(rec, facts);";
-      rel = anchored(rel, ACTS + DESKBACK, "    const { handle, sub } = door;\n    const { rec, lease } = requireLease(handle, facts, 'screenshot');" + DESKBACK, 'r1486: screenshot reads after the wait'); // stale-pins: kept (r1486's RED CONTROL rebuilds 5b4176f46's lines on purpose)
-      rel = anchored(rel, ACTS, "    const { handle, sub } = door;\n    const { rec, lease } = requireLease(handle, facts, verb || 'act');", 'r1486: act reads after the wait'); // stale-pins: kept (r1486's RED CONTROL rebuilds 5b4176f46's lines on purpose)
-      const [nowC, relC] = [await leaseAtCall(ENGINE, 'now'), await leaseAtCall(MUT.load(ENGINE_REL, rel, 'r1486-read-after-wait'), 'release')];
-      ok(Object.values(nowC).every((x) => x >= 1), `r1486: snapshot / act / screenshot read the lease AT THE CALL — an act issued before a revoke stands, as in the release (reads at the call: ${JSON.stringify(nowC)})`, nowC);
-      ok(Object.values(relC).every((x) => x === 0), `r1486 RED CONTROL: 5b4176f46's code reads it only after the door's wait — a revoke issued right after the call lands first (reads at the call: ${JSON.stringify(relC)})`, relC);
+      const sideII = async (E5) => {
+        await share(E5, 'pixels'); keysL.length = 0;
+        duringProbe = () => E5.revokeReach('da-pop', P1); // the revoke made DURING the real await in front of the injection
+        let code = null; try { await E5.act('da-pop', fP, { verb: 'key', chord: 'Return' }); } catch (e) { code = e && e.code; }
+        duringProbe = null;
+        return { code, keys: keysL.length };
+      };
+      const SRCL = read(ENGINE_REL);
+      const i1 = await sideI(world(ENGINE, 'now-i'));
+      ok(i1.ran && i1.acts.includes('do_action') && i1.after.act === 'not_exposed' && i1.after.snapshot === 'not_exposed' && i1.after.screenshot === 'not_exposed',
+        'r1623 (i): a TREE act called, then the revoke in the SAME tick — the act RAN (do_action, it was wholly before the revoke); every verb called AFTER the revoke (act, snapshot, screenshot) is refused not_exposed by name', i1);
+      const ii1 = await sideII(world(ENGINE, 'now-ii'));
+      ok(ii1.code === 'not_exposed' && ii1.keys === 0, 'r1623 (ii): a PIXEL road (key: the input-backend probe is a real await before its injection), the revoke made DURING that await — refused not_exposed and the injector saw NOTHING (never across a revoke)', ii1);
+      // (i)'s RED: 2a753121e's act — the door awaited for the app's own handle too
+      const awaited = anchored(SRCL, "    const door = plainDoor(handle0, facts, verb || 'act') || await subjectDoor(handle0, facts, verb || 'act',", "    const door = await subjectDoor(handle0, facts, verb || 'act',", 'r1623 (i) control: 2a753121e\'s awaited door'); // stale-pins: kept (r1623's RED CONTROL rebuilds 2a753121e's act head on purpose)
+      const i2 = await sideI(world(MUT.load(ENGINE_REL, awaited, 'r1623-awaited-door'), 'red-i'));
+      ok(!i2.ran && i2.code === 'not_exposed' && !i2.acts.includes('do_action'), 'r1623 (i) RED CONTROL: 2a753121e\'s act (the door awaited even for the app\'s own handle) — the same-tick revoke lands first and the act issued before it is REFUSED, nothing done (the box\'s red)', i2);
+      // (ii)'s RED: a copy that carries the call's admission across the await (its re-check answers the lease it was admitted with)
+      const carried = anchored(SRCL, '    const held = () => stillHeld(rec, facts, verb);', '    const held = () => lease;', 'r1623 (ii) control: the admission carried across the await');
+      const ii2 = await sideII(world(MUT.load(ENGINE_REL, carried, 'r1623-carried'), 'red-ii'));
+      ok(ii2.code == null && ii2.keys === 1, 'r1623 (ii) RED CONTROL: the admission carried across the await — the key is INJECTED after the person revoked the reach (the leak lane E cured)', ii2);
     }
     // THROUGH THE REAL ROUTE AND THE SHIPPED CLI: the header carries a title outside latin-1 (escaped), the CLI prints the words
     const appP = express(); appP.use(express.json()); ROUTES.setup({ engine: EP }); appP.use(ROUTES.router);
