@@ -287,7 +287,7 @@ function sourcesFrom({ hosts = null, getJobs = () => null, userTodos = null, per
       let rows = null; try { rows = k.stopRows(); } catch (e) { if (e && e.code === 'store_unread') return { why: String(e.message) }; rows = null; }   // piece 6 meets the hold laws: unknown BY NAME while the registry is unread, never «none»
       if (!Array.isArray(rows)) return { why: 'the browser keeper did not answer' };
       const keyOfSid = (sid) => { const s = sid && activeSessions && typeof activeSessions.get === 'function' ? activeSessions.get(sid) : null; const cid = idOf(s); return cid ? `${s.backend || 'claude'}:${cid}` : null; };
-      return rows.map((r) => ({ id: r.id, kind: r.kind, name: r.name || null, running: true, memBytes: Number.isFinite(r.memBytes) ? r.memBytes : null, lastCommandAt: Number.isFinite(r.lastCommandAt) ? r.lastCommandAt : null,
+      return rows.map((r) => ({ id: r.id, kind: r.kind, ...(r.machine ? { machine: String(r.machine) } : {}), name: r.name || null, running: true, memBytes: Number.isFinite(r.memBytes) ? r.memBytes : null, lastCommandAt: Number.isFinite(r.lastCommandAt) ? r.lastCommandAt : null,
         holders: (Array.isArray(r.holders) ? r.holders : []).map((h) => keyOfSid(h && h.sessionId) || 'a conversation not running here') }));
     },
     prepare: () => (persistenceRouter && typeof persistenceRouter.layoutsAsync === 'function' ? persistenceRouter.layoutsAsync() : null),

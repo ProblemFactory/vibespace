@@ -191,7 +191,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  *   end-daemon {profileId, pid, starttime} → {ok, result, xvfb}   (lane daemon-orphan-end, capability `browser-end-daemon`:
  *                             ONLY that profile's daemon, by pid + starttime, only with no Chrome under it; its Xvfb with it)
  *   start   {profileId, idleMs?, headed?, noDisplayMode?} → {ok, pid, starttime, socketDir, cdpUrl, cdpPort, dir, active, display}
- *   stop    {profileId}     → {ok, closed, left|null}
+ *   stop    {profileId}     → {ok, closed, left|null}   + (B-e799, capability `browser-stop-facts`) the STRUCTURED outcome the hub
+ *                             reads, never `left`'s words: {outcome: stopped|survived|not_running|not_ours|failed, daemon: {pid,
+ *                             starttime}|null, survivors: [{pid, starttime}], holder: {pid, starttime}|null}
  *   cdp-url {profileId}     → {ok, url, port}
  *   builds                  → {ok, listing, ready}   (lane browser-admin 2a: this machine's Chrome builds — browser-builds.js;
  *                             lane remote-profile-start: `ready` = machineReady, can a browser run here at all)
@@ -279,15 +281,38 @@ async function runBrowserServeOp(bs, action, params = {}) {
   // a pid that survives the grace is reported, never signalled by THIS op —
   // the hub's keeper decides what to do with a machine's stray process.
   const before = await bs.runtime.info(ns, { dir });
+  const daemon = before && Number.isInteger(before.pid) ? { pid: before.pid, starttime: F.procStart(before.pid) } : null;
   const r = await bs.runtime.closeAll(ns, { dir, extraEnv: viewEnvOf(bs, ns) });
   let left = null;
   if (before.pid) {
-    const until = Date.now() + STOP_GRACE_MS;
+    const until = Date.now() + (Number.isInteger(bs.stopGraceMs) && bs.stopGraceMs >= 0 ? bs.stopGraceMs : STOP_GRACE_MS);   // B-e799: a suite's stand-in machine may shorten the grace; a machine's install() never sets it
     while (Date.now() < until && F.pidAlive(before.pid)) await sleep(100);
     if (F.pidAlive(before.pid)) left = `daemon pid ${before.pid} is still alive after close --all`;
   }
-  return { ok: !!r.ok || !before.active, closed: before.active ? 1 : 0, left, ...(r.ok ? {} : { code: 'stop_failed', error: (r.stderr || r.error || '').trim().slice(0, 300) || 'close --all failed' }) };
+  return { ok: !!r.ok || !before.active, closed: before.active ? 1 : 0, left, ...stopFactsOf({ before, daemon, closed: r, left: !!left, holder: before && before.active ? null : lockHolderOf(dir), ns }), ...(r.ok ? {} : { code: 'stop_failed', error: (r.stderr || r.error || '').trim().slice(0, 300) || 'close --all failed' }) };
 }
+/** B-e799 (capability `browser-stop-facts`): THE STRUCTURED OUTCOME of a stop on this machine — the hub's keeper reads these fields,
+ *  never `left`'s words (piece 6's round: «freed» was read out of leftover text). A pid that survives is REPORTED, never signalled here.
+ *   stopped      our daemon ran and is gone after the grace
+ *   survived     our daemon (or a browser of OUR namespace that outlived it) is alive after the grace — its {pid, starttime}
+ *   not_running  nothing of ours ran and no browser holds the profile's folder
+ *   not_ours     nothing of ours ran, and the profile's folder is held by a browser of another namespace (a person's own Chrome)
+ *   failed       close --all failed and our daemon is still alive */
+function stopFactsOf({ before, daemon, closed, left, holder = null, ns }) {   // PURE: `holder` = the profile folder's lock holder (the facts module's)
+  const idOf = (pid, st) => ({ pid, starttime: Number.isInteger(st) ? st : null });
+  if (!before || !before.active) {
+    const h = holder;
+    if (h && h.alive) {
+      const holder = idOf(h.pid, h.starttime);
+      return h.namespace === ns ? { outcome: 'survived', daemon, survivors: [holder], holder: null } : { outcome: 'not_ours', daemon, survivors: [], holder };
+    }
+    return { outcome: 'not_running', daemon, survivors: [], holder: null };
+  }
+  if (left) return { outcome: closed && closed.ok ? 'survived' : 'failed', daemon, survivors: daemon ? [daemon] : [], holder: null };
+  return { outcome: 'stopped', daemon, survivors: [], holder: null };
+}
+/** The profile folder's lock holder ({pid, alive, starttime, namespace}) or null — never throws. */
+function lockHolderOf(dir) { try { const f = F.lockHolderFacts(dir); return f && f.holder ? f.holder : null; } catch { return null; } }
 /** lane daemon-orphan-end: one daemon's census facts (browser-orphans over this machine's process table). */
 async function daemonFactsOf(pid) {
   const d = require('./browser-orphans.js').daemonsFromRows(await F.daemonRows()).find((x) => x.pid === pid);
@@ -305,4 +330,4 @@ async function endByIdentity(pid, starttime) {
 }
 function dirExists(d) { try { return fs.statSync(d).isDirectory(); } catch { return false; } }
 
-module.exports = { BROWSER_SERVE_OPS, install, runBrowserServeOp, placeOf, STOP_GRACE_MS, planFileOf, buildFileOf, machineReady, stepFor, STEP_COMMANDS };
+module.exports = { BROWSER_SERVE_OPS, install, runBrowserServeOp, placeOf, STOP_GRACE_MS, stopFactsOf, planFileOf, buildFileOf, machineReady, stepFor, STEP_COMMANDS };

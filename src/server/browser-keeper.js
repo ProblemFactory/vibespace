@@ -1157,6 +1157,18 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    * as the idle release reads it (null = unknown). Nothing here judges: src/browser-profiles.js stopVerdict does.
    */
   const IN_FLIGHT = Object.freeze({ dialog: 'a page dialog', prompt: 'a browser prompt (a file chooser or a sign-in)', passkey: 'a passkey ceremony' });
+  // B-e799: a paired machine's stop outcome, kept for the manager's stop that asked it (read once, then dropped) — in memory only
+  const stopOutcomes = new Map();
+  /** The record's words for a paired machine's structured stop outcome (null = clean). A survivor is NAMED, never signalled. */
+  const remoteStopWords = (host, r) => {
+    const ids = (xs) => (Array.isArray(xs) ? xs : []).filter((x) => x && Number.isInteger(x.pid)).map((x) => `pid ${x.pid}`).join(', ');
+    if (r.outcome === 'stopped') return null;
+    if (r.outcome === 'survived') return `${host}: its browser is still running there after the stop (${ids(r.survivors) || 'its daemon'}) — nothing was freed; the machine's own process list decides it`;
+    if (r.outcome === 'not_ours') return `${host}: a browser VibeSpace did not start holds this profile's folder there${r.holder && Number.isInteger(r.holder.pid) ? ` (pid ${r.holder.pid})` : ''} — it was left running`;
+    if (r.outcome === 'not_running') return `${host}: it was not running there — nothing was stopped`;
+    if (r.outcome === 'failed') return `${host}: its stop failed (${String(r.error || 'close --all failed').slice(0, 160)}) — the browser may still run there`;
+    return `${host}: its stop answered an outcome VibeSpace does not know (${String(r.outcome).slice(0, 40)})`;
+  };
   function stopRows() {
     refuseIfHeld('the running browsers');   // piece 6 meets the hold laws: while held the registry is EMPTY because it is unread — «none runs» would be a false answer
     const out = [];
@@ -1179,21 +1191,34 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         if (st && (!st.profileId || st.profileId === p.id) && Object.prototype.hasOwnProperty.call(IN_FLIGHT, st.state)) { inFlight = IN_FLIGHT[st.state]; break; }
       }
       const u = live.get(p.id);
-      out.push({ id: p.id, kind: rec.external ? 'external' : !isLocalRec(rec) ? 'remote' : helper ? 'helper' : own ? 'own' : 'profile', name: p.label || null, running: true,
+      out.push({ id: p.id, kind: rec.external ? 'external' : helper ? 'helper' : own ? 'own' : 'profile', machine: !rec.external && !isLocalRec(rec) ? (rec.hostId || null) : null, name: p.label || null, running: true,   // B-e799: a paired machine's browser is a named profile on its machine (own and helper browsers run only here)
         memBytes: u && Number.isFinite(u.memBytes) ? u.memBytes : null, lastCommandAt: Number.isFinite(p.lastVerbAt) ? p.lastVerbAt : null,
         holders, takenOver, viewers, personBrowsing: !!human, inFlight, tabsKept: own && !helper && !!keptStore() });
     }
     return out;
   }
   /** lane browsers-stop: the manager's stop — the keeper's own stop under its own closed reason (`manager`: automatic for the
-   *  kept tabs, never deliberate), for a browser ON THIS MACHINE (the verb refuses a paired machine's before it gets here).
-   *  → { freed, why } — the TRUTH of what was freed: a browser still running, or ANY residue the stop left in its error field
-   *  (the reason word aside), is NOT freed. Who stopped it is the record's `stoppedBy` (the Browser panel words it). */
+   *  kept tabs, never deliberate). → { freed, why } — the TRUTH of what was freed: a browser still running, or ANY residue the stop
+   *  left in its error field (the reason word aside), is NOT freed. Who stopped it is the record's `stoppedBy` (the Browser panel
+   *  words it). B-e799: a PAIRED MACHINE's browser is asked for its structured outcome (`facts`) and is FREED only on «stopped»: a
+   *  survivor is named (never signalled), a browser of another namespace holding its folder, a failed close, nothing running there —
+   *  each its own why; a machine that cannot be asked refuses by name before anything moves (stop() throws). */
   async function managerStop(profileId) {
     refuseIfHeld('the stop');   // piece 6 meets the hold laws: refused by name before anything is stopped (the registry unread names no record)
+    const rec0 = reg.browsers[profileId];
+    const remote = !!rec0 && !isLocalRec(rec0) && !rec0.external;
+    stopOutcomes.delete(profileId);
     await stop(profileId, { why: 'manager' });
     const rec = reg.browsers[profileId];
     if (!rec) return { freed: false, why: 'its record is gone' };
+    if (remote) {
+      const o = stopOutcomes.get(profileId) || null; stopOutcomes.delete(profileId);
+      if (rec.lastError === 'manager') rec.lastError = null;   // who stopped it is `stoppedBy` — the panel says it; never the error field
+      else if (typeof rec.lastError === 'string' && rec.lastError.startsWith('manager; ')) rec.lastError = rec.lastError.slice('manager; '.length);
+      commit();
+      if (!o) return { freed: false, why: `${rec.hostId || 'the machine'} did not say what its stop did` };
+      return o.outcome === 'stopped' ? { freed: true, why: null } : { freed: false, why: o.why || `${rec.hostId}: ${o.outcome}` };
+    }
     let left = typeof rec.lastError === 'string' ? rec.lastError : '';
     if (left === 'manager') left = ''; else if (left.startsWith('manager; ')) left = left.slice('manager; '.length);
     rec.lastError = left || null;   // who stopped it is `stoppedBy: 'manager'` (the stop wrote it) — the panel says it; never the error field
@@ -5500,7 +5525,24 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         // paired machine's browser is stopped by ITS browser-serve op, and a
         // machine that cannot be reached is said so — never a silent success.
         let left = null;
-        if (!rec.external) { try { const r = await acc().call(rec.hostId, 'stop', { profileId }); if (r.left) left = `${rec.hostId}: ${r.left}`; } catch (e) { left = `${rec.hostId} could not be asked to stop it (${e.message}) — the browser may still run there`; } }
+        // B-e799: a machine whose agent announces `browser-stop-facts` answers its OUTCOME in fields — read, never its words; asked
+        // with `facts` (the manager's stop), a machine that cannot be asked — unreachable, or an agent that predates the answer —
+        // REFUSES by name and nothing here moves (the record, the forward, the lease stay as they were). A person's stop keeps its road.
+        if (!rec.external) {
+          const facts = why === 'manager';   // B-e799: the manager's stop (and only it) asks for the STRUCTURED outcome — its call stays `stop(id, { why })`
+          let r = null;
+          try { r = await acc().call(rec.hostId, 'stop', { profileId, ...(facts ? { facts: true } : {}) }); }
+          catch (e) {
+            if (e && e.code === 'stop_failed') r = { outcome: 'failed', error: String(e.message || ''), survivors: [], holder: null };   // the machine ANSWERED: its close failed (an ok:false answer reaches us thrown)
+            else if (facts) throw namedError(e && e.code === 'stop_facts_unsupported' ? 'stop_facts_unsupported' : 'host_unavailable', `${rec.hostId}: ${(e && e.message) || 'the machine could not be asked'}`);
+            else left = `${rec.hostId} could not be asked to stop it (${e.message}) — the browser may still run there`;
+          }
+          if (r && typeof r.outcome === 'string') {
+            const said = remoteStopWords(rec.hostId, r);
+            stopOutcomes.set(profileId, { outcome: r.outcome, survivors: Array.isArray(r.survivors) ? r.survivors.slice(0, 8) : [], holder: r.holder || null, why: said });
+            if (said) left = said;
+          } else if (r && r.left) left = `${rec.hostId}: ${r.left}`;
+        }
         if (rec.forward) acc().closeForward(`${rec.hostId}:${rec.forward.remotePort}`);
         rec.state = why === 'failed' ? 'failed' : 'stopped';
         rec.endedAt = now(); rec.stoppedBy = why;

@@ -11,7 +11,8 @@ import net from 'node:net';
 import http from 'node:http';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const S = require('../src/browser-serve.js');
@@ -155,6 +156,51 @@ console.log('— ② the capability gate');
   ok((await ask(['browser-serve', 'browser-builds', 'browser-remove'], 'remove')).asked === 'remove' && (await ask(['browser-serve'], 'status')).asked === 'status', 'with the capability it is asked; other ops are unchanged');
   const daemon = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
   ok(/capabilities: \[[^\]]*'browser-remove'[^\]]*\]/.test(daemon) && S.BROWSER_SERVE_OPS.includes('remove'), 'the daemon announces `browser-remove`; `remove` is in the shared op table');
+}
+
+// ═══ ②b B-e799: THE STRUCTURED STOP — the machine's `stop` answers its OUTCOME in fields (capability `browser-stop-facts`) ═══
+// The hub's keeper reads these fields, never the op's words. A pid that outlives the grace is REPORTED, never signalled by the op.
+console.log('— ②b the structured stop: the outcome in fields, the gate, the announcement');
+{
+  // the gate (the REAL DeviceManager method): a stop asked WITH facts of an agent that does not announce them is refused BY NAME,
+  // before any request — its words true to how an agent is updated (the hub pushes its signed agent at the machine's next connection)
+  const askP = async (caps, action, params) => { let asked = 0; const self = { connect: async () => ({ info: { capabilities: caps, daemonVersion: '2.369.414' } }), _request: async () => { asked++; return { result: { ok: true, asked: action } }; } }; try { const r = await DeviceManager.prototype.browserServe.call(self, action, params); return { ...r, asked }; } catch (e) { return { thrown: e.code, message: e.message, asked }; } };
+  const OLD = ['browser-serve', 'browser-builds', 'browser-remove'], NEW = [...OLD, 'browser-stop-facts'];
+  const g0 = await askP(OLD, 'stop', { profileId: 'bp-0a0b0c0d', facts: true });
+  ok(g0.thrown === 'stop_facts_unsupported' && g0.asked === 0 && /\(2\.369\.414\) predates the structured stop answer/.test(g0.message) && /updates it by itself when the machine next connects/.test(g0.message) && /do not try to update it yourself/.test(g0.message),
+    'B-e799: an agent without `browser-stop-facts` is NEVER asked a stop with facts — refused by name, its words true to the update road (the hub updates it at its next connection; never by the asker)', g0);
+  const g1 = await askP(NEW, 'stop', { profileId: 'bp-0a0b0c0d', facts: true }), g2 = await askP(OLD, 'stop', { profileId: 'bp-0a0b0c0d' });
+  ok(g1.asked === 1 && g1.ok === true && g2.asked === 1 && g2.ok === true, 'B-e799: with the capability it is asked; a stop WITHOUT facts (a person\'s own stop) is asked of an older agent as before', { g1, g2 });
+  const daemon = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
+  ok(/capabilities: \[[^\]]*'browser-stop-facts'[^\]]*\]/.test(daemon), 'B-e799: the daemon announces `browser-stop-facts`');
+
+  // the op's five outcomes over a stand-in machine (its runtime injected per case; the grace shortened to 50 ms)
+  const m = machine('stop-facts', { files: ['/usr/bin/google-chrome'] });
+  const SF = 'bp-5f5f0e79', place = S.placeOf(m.bs, SF);
+  fs.mkdirSync(place.dir, { recursive: true });
+  const stopWith = (rt) => S.runBrowserServeOp({ ...m.bs, runtime: { ...m.bs.runtime, ...rt }, stopGraceMs: 50 }, 'stop', { profileId: SF, facts: true });
+  const DEAD = 4194301;   // a pid no process holds (the stand-in daemon is gone the moment its close runs)
+  const sStopped = await stopWith({ info: async () => ({ active: true, pid: DEAD }), closeAll: async () => ({ ok: true }) });
+  const sSurvived = await stopWith({ info: async () => ({ active: true, pid: process.pid }), closeAll: async () => ({ ok: true }) });   // a pid that lives on (this suite's own: the op never signals)
+  const sFailed = await stopWith({ info: async () => ({ active: true, pid: process.pid }), closeAll: async () => ({ ok: false, stderr: 'close --all: the daemon did not answer' }) });
+  const sNone = await stopWith({ info: async () => ({ active: false, pid: null }), closeAll: async () => ({ ok: true }) });
+  // a browser of ANOTHER namespace holds the profile's folder (a person's own Chrome): its lock names a live pid
+  const lockAt = path.join(place.dir, 'SingletonLock');
+  fs.symlinkSync(`stand-in-host-${process.pid}`, lockAt);
+  const sNotOurs = await stopWith({ info: async () => ({ active: false, pid: null }), closeAll: async () => ({ ok: true }) });
+  fs.unlinkSync(lockAt);
+  // a browser of OUR namespace that outlived its daemon (an orphan) holds the folder: «survived», named — the PURE verdict over the
+  // lock holder's facts (a fast suite starts no real program)
+  const sOrphan = S.stopFactsOf({ before: { active: false }, daemon: null, closed: { ok: true }, left: false, holder: { pid: 4321, alive: true, starttime: 777, namespace: place.ns }, ns: place.ns });
+  const sStranger = S.stopFactsOf({ before: { active: false }, daemon: null, closed: { ok: true }, left: false, holder: { pid: 4321, alive: true, starttime: 777, namespace: 'vs-bp-00000000' }, ns: place.ns });
+  ok(sStopped.ok && sStopped.outcome === 'stopped' && sStopped.daemon && sStopped.daemon.pid === DEAD && sStopped.survivors.length === 0, 'B-e799: our daemon gone after the grace ⇒ outcome «stopped», its pid named', sStopped);
+  ok(sSurvived.ok && sSurvived.outcome === 'survived' && sSurvived.survivors.length === 1 && sSurvived.survivors[0].pid === process.pid && Number.isInteger(sSurvived.survivors[0].starttime) && /still alive/.test(sSurvived.left || ''),
+    'B-e799: a daemon alive after the grace ⇒ «survived» with its pid and start time (the words `left` kept for an older hub; the process NOT signalled)', sSurvived);
+  ok(sFailed.ok === false && sFailed.code === 'stop_failed' && sFailed.outcome === 'failed', 'B-e799: a close that failed with the daemon still alive ⇒ «failed» (ok:false, its own code)', sFailed);
+  ok(sNone.ok && sNone.outcome === 'not_running' && sNone.daemon === null, 'B-e799: nothing of ours ran and nothing holds its folder ⇒ «not_running»', sNone);
+  ok(sNotOurs.ok && sNotOurs.outcome === 'not_ours' && sNotOurs.holder && sNotOurs.holder.pid === process.pid && sNotOurs.survivors.length === 0, 'B-e799: a browser of ANOTHER namespace holds the profile\'s folder ⇒ «not_ours», its pid named', sNotOurs);
+  ok(sOrphan.outcome === 'survived' && sOrphan.survivors.length === 1 && sOrphan.survivors[0].pid === 4321 && sOrphan.survivors[0].starttime === 777 && sStranger.outcome === 'not_ours' && sStranger.holder.pid === 4321,
+    'B-e799: a browser of OUR namespace that outlived its daemon ⇒ «survived», named; of another namespace ⇒ «not_ours» (the pure verdict over the lock holder)', { sOrphan, sStranger });
 }
 
 // ═══ ③ THE HUB: keeper + access layer + routes over the fake machines ═══
@@ -361,6 +407,65 @@ console.log('— ⑤ verify r1');
   const Kc = mutant('src/server/browser-keeper.js', 'hostKnown: p && p.host ? knownHost(p.host) : true, control: p && !isEph(p)', 'hostKnown: p && p.host ? knownHost(p.host) : true, eaten: p && !isEph(p)');
   const e2 = await browseErr(kOf(Kc, path.join(ROOT, 'data-f1c')));
   ok(e1 && e1.code === 'backend_unavailable' && /can't run on this computer right now/.test(e1.message) && e2 && !/can't run on this computer right now/.test(e2.message), 'Browse yourself, its backend unavailable: the verdict\'s own words (CONTROL: without `control` the start\'s raw sentence)', { e1: e1 && e1.message, e2: e2 && e2.message });
+}
+
+
+// ═══ ④ B-e799: THE MANAGER'S STOP OF A PAIRED MACHINE'S BROWSER — the keeper asks for the outcome and reads its FIELDS ═══
+// The real keeper + access layer + the machine's real op over the stand-in runtime. FREED only on «stopped»; every other outcome
+// is its own why; an agent that predates the answer is refused by name and NOTHING moves. RED: a keeper copy that reads the op's
+// words (the release's road) — a browser of another namespace holding the folder there reads as FREED.
+console.log('— ④ the manager\'s stop of a paired machine\'s browser: the outcome in fields, an old agent refused by name');
+{
+  const q = k.createProfile({ label: 'Reports on the Mac', host: 'dev-mac' }, owner);
+  const qns = S.placeOf(mac.bs, q.id).ns, qdir = S.placeOf(mac.bs, q.id).dir;
+  const start = async (kk, id) => { try { await kk.start(id, { why: 'user' }); } catch (e) { return e; } return (kk.browserOf(id) || {}).state === 'ready'; };
+  const live = (kk, id) => B.isLiveBrowser(kk.browserOf(id));
+  const info0 = mac.bs.runtime.info;
+  mac.bs.stopGraceMs = 50;
+  try {
+    ok(await start(k, q.id) === true, 'B-e799: the named profile runs on dev-mac (the keeper\'s own start)');
+    const row = k.stopRows().find((r) => r.id === q.id);
+    ok(row && row.kind === 'profile' && row.machine === 'dev-mac' && row.tabsKept === false, 'B-e799: its stop row is a NAMED PROFILE on its machine (kind profile, machine dev-mac; its tabs are not kept — as a named profile here)', row);
+    // (a) the machine's agent predates the answer (dev-mac announces no `browser-stop-facts`): refused BY NAME, nothing moves
+    const launches0 = mac.st.launches.length;
+    let e1 = null; try { await k.managerStop(q.id); } catch (e) { e1 = e; }
+    ok(e1 && e1.code === 'stop_facts_unsupported' && /updates it by itself when the machine next connects/.test(e1.message) && live(k, q.id) && mac.st.running.get(qns) === true && access.forwards().some((f) => f.hostId === 'dev-mac'),
+      'B-e799: an agent that predates the structured answer — refused stop_facts_unsupported by name; the record, the browser there and its forward are untouched', { code: e1 && e1.code, live: live(k, q.id) });
+    CAPS['dev-mac'].push('browser-stop-facts');
+    // (b) «stopped»: freed, the record stopped by the manager, nothing left in its error field
+    const r1 = await k.managerStop(q.id);
+    const rec1 = k.browserOf(q.id);
+    ok(r1.freed === true && !live(k, q.id) && rec1.stoppedBy === 'manager' && !rec1.lastError && !mac.st.running.get(qns), 'B-e799: outcome «stopped» ⇒ FREED: the browser gone there, the record stopped by the manager, no residue', { r1, lastError: rec1 && rec1.lastError });
+    // (c) «survived»: a daemon alive after the grace there ⇒ NOT freed, its pid named (the op never signals it)
+    ok(await start(k, q.id) === true && mac.st.launches.length > launches0, 'B-e799: started again');
+    mac.bs.runtime.info = async (ns) => ({ active: ns === qns, pid: ns === qns ? process.pid : null });
+    const r2 = await k.managerStop(q.id);
+    ok(r2.freed === false && new RegExp(`still running there after the stop \\(pid ${process.pid}\\)`).test(r2.why || ''), 'B-e799: outcome «survived» ⇒ NOT freed, the surviving pid named', r2);
+    // (d) «not_ours»: nothing of ours ran there, and a browser of another namespace holds the profile's folder ⇒ NOT freed, named
+    mac.bs.runtime.info = info0;
+    ok(await start(k, q.id) === true, 'B-e799: started again');
+    mac.bs.runtime.info = async () => ({ active: false, pid: null });
+    fs.mkdirSync(qdir, { recursive: true }); const lockAt = path.join(qdir, 'SingletonLock'); try { fs.unlinkSync(lockAt); } catch { /* none */ }
+    fs.symlinkSync(`stand-in-host-${process.pid}`, lockAt);
+    const r3 = await k.managerStop(q.id);
+    ok(r3.freed === false && /a browser VibeSpace did not start holds this profile's folder there/.test(r3.why || '') && new RegExp(`pid ${process.pid}`).test(r3.why || ''), 'B-e799: outcome «not_ours» ⇒ NOT freed — a browser of another namespace holds its folder there, its pid named, left running', r3);
+    // RED: the release's road — a keeper copy that reads only the op's words — reads the same machine answer as FREED
+    const KSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const MK = mutantCopies('rps-stop-facts', REPO);
+    const KT = MK.load('src/server/browser-keeper.js', anchored(anchored(KSRC, "          if (r && typeof r.outcome === 'string') {", "          if (false) {", 'b-e799-no-fields'), "    if (remote) {\n      const o = stopOutcomes.get(profileId) || null;", "    if (false) {\n      const o = stopOutcomes.get(profileId) || null;", 'b-e799-text-road'), 'b-e799-text-road');
+    const kT = KT.create({ dataDir: path.join(ROOT, 'data-e799-red'), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME }), broadcast: () => { }, serverSetting: () => undefined, serverNotice: () => { },
+      getTelemetry: () => null, liveKeys: () => new Set(), limits: { ...LIMITS, CONCURRENT_CAP: 4 }, log, tickMs: 3600e3, install: false, access, hostKnown: (h) => access.hostKnown(h) });
+    const qT = kT.createProfile({ label: 'Reports, read by words', host: 'dev-mac' }, owner);
+    mac.bs.runtime.info = info0;
+    const startedT = await start(kT, qT.id);
+    mac.bs.runtime.info = async () => ({ active: false, pid: null });
+    const dT = S.placeOf(mac.bs, qT.id).dir; fs.mkdirSync(dT, { recursive: true }); fs.symlinkSync(`stand-in-host-${process.pid}`, path.join(dT, 'SingletonLock'));
+    const rT = await kT.managerStop(qT.id);
+    ok(startedT === true && rT.freed === true, 'B-e799 RED: a keeper that reads the op\'s words (the release\'s road) calls the same answer FREED while a browser of another namespace holds the folder there', rT);
+    try { fs.unlinkSync(path.join(dT, 'SingletonLock')); } catch { /* gone */ }
+    try { kT.shutdown(); } catch { /* none */ }
+    fs.unlinkSync(lockAt);
+  } finally { mac.bs.runtime.info = info0; delete mac.bs.stopGraceMs; }
 }
 
 console.log(`\ntest-remote-profile-start: ${pass} passed, ${fail} failed`);

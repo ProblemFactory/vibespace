@@ -100,7 +100,6 @@ const CID_A = 'e2e00000-0000-4000-8000-0000000000a1', CID_B = 'e2e00000-0000-400
   const idle = { live: true, holders: [{ turn: 'idle', granted: true }], kind: 'own', takenOver: false, watched: false, personBrowsing: false, inFlight: null, tabsKept: true };
   ok(B.stopVerdict(idle).stop === true, '① an idle own browser nobody uses, within reach, may stop');
   const rows = [['no_holder', { holders: [] }], ['not_granted', { holders: [{ unknown: true }] }], ['holder_unknown', { holders: [{ turn: 'idle', granted: true }, { unknown: true }] }], ['holder_unknown', { holders: null }],
-    ['other_machine', { kind: 'remote' }],
     ['not_granted', { holders: [{ turn: 'idle', granted: true }, { turn: 'idle', granted: false }] }], ['not_ours', { kind: 'external' }],
     ['person_driving', { takenOver: true }], ['person_driving', { takenOver: null }], ['watched', { watched: true }], ['watched', { watched: null }],
     ['person_browsing', { personBrowsing: true }], ['person_browsing', { personBrowsing: null }], ['in_flight', { inFlight: 'a page dialog' }],
@@ -123,9 +122,11 @@ const CID_A = 'e2e00000-0000-4000-8000-0000000000a1', CID_B = 'e2e00000-0000-400
   ok(exw.code === 'excepted' && exw.why.includes(EXC_WHY) && exw.reach === 'instance' && !/not yours|drives|dialog|turn is/.test(exw.why) && exw.why.includes(B.STOP_DOOR), '① an EXCEPTED holder is refused in the exception\'s own words (excepted, the grant\'s reach named) — never «it is not yours», no live fact said', exw);
   const lone = B.stopVerdict({ ...idle, holders: [{ unknown: true }] });
   ok(lone.code === 'not_granted' && !/not running here/.test(lone.why), '① «a holder is not running here» is said only to a key that reaches a holder — to any other it is simply not its own', lone);
-  const far = B.stopVerdict({ ...idle, kind: 'remote', takenOver: true });
-  ok(far.code === 'other_machine' && /paired machine/.test(far.why) && far.why.includes(B.STOP_DOOR) && B.stopVerdict({ ...idle, kind: 'remote', holders: [{ turn: 'idle', granted: false }] }).code === 'not_granted',
-    '① THIS MACHINE ONLY: a paired machine\'s browser is refused by name (after reach, before any live fact), with the door that exists', far);
+  // B-e799: a paired machine's browser is a NAMED PROFILE on its machine, judged as here — reach first, the live facts, and a loss
+  // accepted before (its tabs close: tabs_lost unless --close-tabs); the machine's own stop is the keeper's (asked for its outcome)
+  const far = { ...idle, kind: 'profile', machine: 'dev-mac', tabsKept: false };
+  ok(B.stopVerdict(far).code === 'tabs_lost' && B.stopVerdict({ ...far, closeTabs: true }).stop === true && B.stopVerdict({ ...far, holders: [{ turn: 'idle', granted: false }], takenOver: true }).code === 'not_granted' && B.stopVerdict({ ...far, takenOver: true, closeTabs: true }).code === 'person_driving',
+    '① B-e799: a paired machine\'s named profile is judged as here — reach first, the live facts, its tabs close only with --close-tabs (no blanket «other machine» refusal any more)');
   ok(B.stopVerdict({ ...idle, kind: 'profile', tabsKept: false, closeTabs: true }).stop === true && /--close-tabs/.test(B.stopVerdict({ ...idle, kind: 'profile', tabsKept: false }).why), '① MUST 5 a loss is accepted BEFORE: a named profile stops only with closeTabs, and the refusal names how to say so');
   ok(rows.filter(([c]) => c !== 'already_stopped').every(([, over]) => B.stopVerdict({ ...idle, ...over }).why.includes(B.STOP_DOOR)) && /Browser panel/.test(B.STOP_DOOR), '① MUST 4 every refusal names the door that EXISTS today: the Browser panel\'s Stop');
 }
@@ -254,9 +255,10 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   try { await keeper.attach({ profileId: np2.id, browserKey: KEY_A, sessionId: 'sess-a', by: 'user' }); } catch { }
   await until(() => liveId(np2.id), 5000);
   const h = await call(np2.id, KEY1, { closeTabs: true });
-  ok(h.ok && h.freed === true && h.kind === 'profile' && h.tabs === 'Its tabs closed; its sign-ins stay.' && !liveId(np2.id), '⑦ a named profile nobody uses, the loss accepted: FREED, and the answer says its tabs closed and its sign-ins stay', h);
+  ok(h.ok && h.freed === true && h.kind === 'profile' && h.tabs === 'Its tabs closed; its sign-ins stay.' && !liveId(np2.id), '⑦ a named profile nobody uses, the loss accepted: FREED, and the answer says its tabs closed and its sign-ins stay', h);   // stale-pins: kept — the words at RUNTIME for a profile on this machine (the source builds them, naming a paired machine's folder)
 }
-// ⑧ THIS MACHINE ONLY (主开发's ruling): a paired machine's browser, reached and idle ⇒ refused by its own code — nothing is asked of the machine
+// ⑧ B-e799: a record whose machine CANNOT BE ASKED (this keeper has no access layer wired — as a machine whose link is down): the
+// keeper asks it for its outcome, cannot, and REFUSES host_unavailable by name — the record untouched, nothing stopped
 {
   const envB = beK.envFor({ browserKey: KEY_B, cwd: HOME });
   await keeper.ensureEphemeral({ browserKey: KEY_B, sessionId: 'sess-b', envPairs: envB.pairs, sessionName: 'Other', variant: envB.variant });
@@ -265,7 +267,7 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   let asked = 0;
   const v8 = OPS.automationVerbs({ activeSessions: sessions, browsers: { rows: () => keeper.stopRows(), stop: (id) => { asked++; return keeper.managerStop(id); } } });
   const r = await v8['browsers.stop']({ id: bid, closeTabs: true }, { caller: { conversationId: 'x' }, keyId: 'k1', reach: KEY2 });
-  ok(!r.ok && r.code === 'other_machine' && r.why.includes(B.STOP_DOOR) && asked === 0, '⑧ a paired machine\'s browser, reached and idle: refused (other_machine) with the door that exists — the keeper is never asked to stop it', { r, asked });
+  ok(!r.ok && r.code === 'host_unavailable' && /nothing was stopped/.test(r.why || '') && asked === 1 && B.isLiveBrowser(keeper.browserOf(bid)), '⑧ B-e799: a machine that cannot be asked — refused host_unavailable by name, the record still live (nothing moved)', { r, asked });
   keeper.reshapeStore((reg) => { delete reg.browsers[bid].hostId; });
   const src = fs.readFileSync(new URL('../src/server/browser-keeper.js', import.meta.url), 'utf8');
   ok(!/NOT_CLEAN/.test(src) && src.includes('    const freed = !B.isLiveBrowser(rec) && !left;'), '⑧ the stop\'s text test is gone: any residue the stop left (the reason word aside) is «not freed»');
@@ -308,10 +310,13 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   ok(mr.code === 'person_driving', '⑤ RED reach moved below the live facts: an unreached key is told that a person drives it', mr);
   const MI = MUT.load('src/browser-profiles.js', src.replace(IF, ''), 'no-in-flight');
   ok(MI.stopVerdict({ ...base5, inFlight: 'a passkey ceremony' }).stop === true, '⑤ RED the in-flight line removed: a passkey ceremony would be cut');
-  const OM = "  if (kind === 'remote') return no('other_machine', 'it runs on a paired machine — a key stops browsers on this machine only, for now');\n";
-  if (src.split(OM).length !== 2) throw new Error('anchor missing: other_machine');
-  const MO = MUT.load('src/browser-profiles.js', src.replace(OM, ''), 'no-other-machine');
-  ok(MO.stopVerdict({ ...base5, kind: 'remote' }).stop === true, '⑤ RED the new refusal removed: a paired machine\'s browser would be stopped through a road whose answer is not read');
+  // B-e799: the handler's two machine names cut (a copy) — a machine that could not be asked reads as «not freed» by the keeper, the cause unsaid
+  const opsSrc5 = fs.readFileSync(new URL('../src/server/conversation-ops.js', import.meta.url), 'utf8');
+  const OPS_MO = MUT.load('src/server/conversation-ops.js', anchored(opsSrc5, "e.code === 'store_unread' || e.code === 'stop_facts_unsupported' || e.code === 'host_unavailable'", "e.code === 'store_unread'", 'b-e799-unnamed'), 'b-e799-unnamed');
+  const cantAsk = async (O, code) => O.automationVerbs({ activeSessions: sessions, browsers: { rows: () => [{ id: 'bp-0000e799', kind: 'profile', machine: 'dev-mac', name: 'Mac', holders: [{ browserKey: KEY_A, sessionId: 'sess-a', turn: 'idle' }], takenOver: false, viewers: 0, personBrowsing: false, inFlight: null, tabsKept: false }], stop: async () => { throw Object.assign(new Error(`dev-mac: ${code === 'stop_facts_unsupported' ? 'this machine\'s agent predates the structured stop answer: VibeSpace updates it by itself when the machine next connects' : 'device link not responding'}`), { code }); } } })['browsers.stop']({ id: 'bp-0000e799', closeTabs: true }, { keyId: 'K-1', caller: { conversationId: CID_B }, reach: KEY1 });
+  const okOld = await cantAsk(OPS, 'stop_facts_unsupported'), okDown = await cantAsk(OPS, 'host_unavailable'), redOld = await cantAsk(OPS_MO, 'stop_facts_unsupported');
+  ok(okOld.code === 'stop_facts_unsupported' && /next connects/.test(okOld.why) && /nothing was stopped/.test(okOld.why) && okDown.code === 'host_unavailable' && redOld.code === 'not_freed',
+    '⑤ B-e799: a machine that cannot be asked is said BY NAME (an old agent: how it gets updated; a link down) — RED: the names cut, the CODE is «not_freed» (the keeper\'s words ride inside it, but no code names the cause)', { okOld, okDown, redOld });
   const ksrc = fs.readFileSync(new URL('../src/server/browser-keeper.js', import.meta.url), 'utf8');
   const TK = 'tabsKept: own && !helper && !!keptStore() });';
   if (ksrc.split(TK).length !== 2) throw new Error('anchor missing: tabsKept');
@@ -341,11 +346,11 @@ console.log('⑯ the browser registry held: the stop and the list refuse BY NAME
   const CF = require('../src/server/conversation-facts.js');
   const opsSrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8'), cfSrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
   const ROWS_AT = "catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, target: args.id }; rows = null; }";
-  const STOP_AT = "catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, target: row.name || row.id }; return";
+  const STOP_AT = "catch (e) { if (e && (e.code === 'store_unread' || e.code === 'stop_facts_unsupported' || e.code === 'host_unavailable')) return { ok: false, code: e.code, why: `${e.message} — nothing was stopped`, target: row.name || row.id };";   // moved with B-e799 (the machine names beside store_unread)
   const LIST_AT = "catch (e) { if (e && e.code === 'store_unread') return { why: String(e.message) }; rows = null; }";
   ok(opsSrc.split(ROWS_AT).length === 2 && opsSrc.split(STOP_AT).length === 2 && cfSrc.split(LIST_AT).length === 2, '⑯ control setup: the three named branches are found once each');
   const MH = mutantCopies('browser-stop-held', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));
-  const OPS_CUT = MH.load('src/server/conversation-ops.js', anchored(anchored(opsSrc, ROWS_AT, 'catch (e) { rows = null; }', 'rows-held-unnamed'), STOP_AT, 'catch (e) { return', 'stop-held-unnamed'), 'stop-held-unnamed');
+  const OPS_CUT = MH.load('src/server/conversation-ops.js', anchored(anchored(opsSrc, ROWS_AT, 'catch (e) { rows = null; }', 'rows-held-unnamed'), STOP_AT, 'catch (e) {', 'stop-held-unnamed'), 'stop-held-unnamed');
   const CF_CUT = MH.load('src/server/conversation-facts.js', anchored(cfSrc, LIST_AT, 'catch (e) { rows = null; }', 'list-held-unnamed'), 'list-held-unnamed');
   const row = { id: 'bp-0000a0f1', kind: 'own', name: 'Research', holders: [{ browserKey: KEY_A, sessionId: 'sess-a', turn: 'idle' }], takenOver: false, viewers: 0, personBrowsing: false, inFlight: null, tabsKept: true };
   const stopWith = async (O, rows, stop) => { let asked = 0; const v = O.automationVerbs({ activeSessions: sessions, browsers: { rows, stop: async (id) => { asked++; return stop(id); } } }); const r = await v['browsers.stop']({ id: row.id }, { keyId: 'K-1', caller: { conversationId: CID_B }, reach: KEY1 }); return { r, asked }; };

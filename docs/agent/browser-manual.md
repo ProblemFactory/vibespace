@@ -911,7 +911,7 @@ default with `*`.
 ---
 
 ### Freeing a browser another conversation holds — `vibespace-api browsers stop <id>`
-With a key that carries `browsers.stop` (the person grants it), you can stop a running browser ON THIS MACHINE to free memory — a paired machine's browser is refused (`other_machine`) for now. The id comes from `vibespace-api list`: each running browser your key may see prints as «browser label (bp-…) · kind» (a conversation's own browser, a helper's, a named profile); `vibespace-browser profiles` lists named profiles only. It goes through the keeper's own stop.
+With a key that carries `browsers.stop` (the person grants it), you can stop a running browser to free memory — on this machine, or a named profile's browser on a paired machine (it prints «… on <machine>»; that machine's own agent stops it and says what it did: freed only when its browser is gone there; a process still running there is named, never killed by the stop). A paired machine that cannot be asked is refused (`host_unavailable`); one whose agent predates the structured stop answer is refused (`stop_facts_unsupported`): VibeSpace updates that agent by itself when the machine next connects — ask again after it, and never try to update it yourself. The id comes from `vibespace-api list`: each running browser your key may see prints as «browser label (bp-…) · kind» (a conversation's own browser, a helper's, a named profile); `vibespace-browser profiles` lists named profiles only. It goes through the keeper's own stop.
 
 It is REFUSED, with the reason, and nothing is stopped:
 - when your key does not reach every conversation holding it (`not_granted`, asked before anything else is said);

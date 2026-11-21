@@ -1492,6 +1492,10 @@ class DeviceManager {
     // lane remote-profile-start: removing a profile's folder is its own capability — an older agent is never asked (said by name)
     // lane daemon-orphan-end: ending a daemon that has no browser is its own capability — an older agent is never asked (reported in the row)
     if (action === 'end-daemon' && !conn.info.capabilities.includes('browser-end-daemon')) { const e = new Error('this machine\'s agent cannot end a browser daemon (it predates it) -- upgrade the agent on this machine'); e.code = 'end_daemon_unsupported'; throw e; }
+    // B-e799: a stop whose STRUCTURED outcome is asked (facts: true — the manager's stop) is its own capability — an older agent is
+    // never asked (its answer is words only); the sentence says how the agent gets the update: the hub pushes its signed agent at the
+    // machine's next connection (src/server/device-upgrade-watch.js), so nothing is the asker's to do but ask again after it
+    if (action === 'stop' && params && params.facts === true && !conn.info.capabilities.includes('browser-stop-facts')) { const e = new Error(`this machine's agent${conn.info.daemonVersion ? ' (' + conn.info.daemonVersion + ')' : ''} predates the structured stop answer: VibeSpace updates it by itself when the machine next connects — ask again after that; do not try to update it yourself (if its update is stuck, the machine's row in Machines and For you say why and the one step)`); e.code = 'stop_facts_unsupported'; throw e; }
     if (action === 'remove' && !conn.info.capabilities.includes('browser-remove')) { const e = new Error('this machine\'s agent cannot remove a profile\'s folder (it predates it) -- upgrade the agent on this machine'); e.code = 'remove_unsupported'; throw e; }
     const r = await this._request({ op: 'browser-serve', action, params, timeoutMs, by });
     if (r.error) throw new Error(r.error);

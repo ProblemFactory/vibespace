@@ -157,7 +157,7 @@ function listWords(d, now = Date.now()) {
   if (d.beyondReach) out.push('', `${d.beyondReach} more beyond this key's reach`);
   if (d.beyondWhy) out.push(String(d.beyondWhy));   // the hub's own sentence (the store HELD: rows NOT JUDGED are not rows outside the reach) — never the count alone
   if (!Array.isArray(d.browsers)) out.push(`browsers: unknown (${d.browsersWhy || 'the hub did not say why'})`);
-  for (const b of d.browsers || []) out.push(`browser ${b.name ? b.name + ' (' + b.id + ')' : b.id}${b.kind ? ' · ' + b.kind : ''}: ${b.running ? 'running' : 'stopped'}${GB(b.memBytes) ? ' · ' + GB(b.memBytes) : ''}${Array.isArray(b.holders) && b.holders.length ? ' · held by ' + b.holders.join(', ') : ''}`);
+  for (const b of d.browsers || []) out.push(`browser ${b.name ? b.name + ' (' + b.id + ')' : b.id}${b.kind ? ' · ' + b.kind : ''}${b.machine ? ' on ' + b.machine : ''}: ${b.running ? 'running' : 'stopped'}${GB(b.memBytes) ? ' · ' + GB(b.memBytes) : ''}${Array.isArray(b.holders) && b.holders.length ? ' · held by ' + b.holders.join(', ') : ''}`);
   if (d.pass && d.pass.ranOut) out.push('', `the facts pass ran out of time after ${d.pass.reached} of ${d.pass.of} — the rows after it print unknown; ask again`);
   return out.join('\n');
 }
