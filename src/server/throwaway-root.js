@@ -62,6 +62,20 @@ const HUB_DROPS = Object.freeze([
   Object.freeze({ name: 'SSH_AUTH_SOCK', why: "the person's ssh-agent — their keys are their identity; a throwaway hub dials, if at all, through its own ssh on its own files (sshOnOwnFiles)" }),
 ]);
 
+/** THE HUB'S SEAM (主开发 r1412, road (ii)): `VIBESPACE_REHOME_NOT_TEMP=<a folder a suite made under a temp root>` — that folder
+ *  is NOT a temp root for the HOME's judgment, so a STAND-IN home the suite made in it is re-homed as a person's would be: the
+ *  heavy pin's stand-in lives inside the boot helper's minted root and is never a real home on any machine. It can only make a hub
+ *  re-home MORE: it touches no gate (the root verdict and its temp roots never read it), a value outside every temp root is
+ *  ignored, a temp root itself is refused, and a root that is no linked worktree is never re-homed whatever it names. Read here
+ *  alone, set by the pin alone (test-architecture §113 (j)). → null | { path } | { refused, path } */
+const SEAM_ENV = 'VIBESPACE_REHOME_NOT_TEMP';
+function seamOf(env, roots) {
+  const v = env && env[SEAM_ENV];
+  if (typeof v !== 'string' || !v.startsWith('/') || path.resolve(v) === '/') return null;
+  const p = realOr(v), q = path.resolve(v);
+  if (roots.includes(p) || roots.includes(q)) return { refused: true, path: p };
+  return roots.some((t) => p.startsWith(t + '/')) ? { path: p } : null;
+}
 /** THE ONE TEST, for a root and the home it was handed (`roots`: the temp roots, tmpRootsOf's by default — a seam for the
  *  suites' tables). The home is judged by its real path too; an unread home is never a «temp» one (no answer is never throwaway). */
 function judge(root, handed, { roots = tmpRoots(handed) } = {}) {
@@ -92,9 +106,10 @@ function rehomeAtBoot({ root, env = process.env, execPath = process.execPath } =
   const mctx = { mountRoots: MPC.rootsOf({ mounts, rootDir: hubRoot }), rootDir: hubRoot };
   const onMount = (p) => !!MPC.rootOf(p, mctx);
   const resolve = HL.makeResolver({ refuse: onMount });
-  const v = HV.hubRehome({ root: hubRoot, home: handed, tmpRoots: tmpRoots(handed), resolve, linkedWorktree: j.linkedWorktree, override });
+  const roots = tmpRoots(handed), seam = seamOf(env, roots);
+  const v = HV.hubRehome({ root: hubRoot, home: handed, tmpRoots: roots, notTemp: seam && !seam.refused ? [seam.path] : [], resolve, linkedWorktree: j.linkedWorktree, override });
   // the override is the person's word «this copy is my real install»: no re-home, and every gate treats it as real
-  verdict = { root: hubRoot, throwaway: j.throwaway && !override, sign: j.linkedWorktree ? 'worktree' : j.throwaway ? 'scratch-clone' : null, override, checkout: (j.rootVerdict && j.rootVerdict.checkout) || null, ...v };
+  verdict = { root: hubRoot, throwaway: j.throwaway && !override, sign: j.linkedWorktree ? 'worktree' : j.throwaway ? 'scratch-clone' : null, override, checkout: (j.rootVerdict && j.rootVerdict.checkout) || null, seam: seam || null, ...v };
   if (!v.rehome) return verdict;
   // THE BOUND: every handed name that is neither a hub row nor a hub NOT, by name (judged before the env is rebuilt)
   const unruled = HV.unruledNames(env, {}, { rows: HV.HUB_ROWS, not: HV.HUB_NOT });
@@ -139,6 +154,7 @@ function bootLine(v = verdict) {
     const n = v.dropped.length;
     return `[throwaway] this copy runs from a git worktree (${v.root}): its home is ${v.home}, for itself and everything it starts, instead of the home it was handed. `
       + `Your CLIs, logins and plugins are not here. To run your real install, start it from your clone — or set ${OVERRIDE_ENV}=1 for this copy. `
+      + (v.seam && !v.seam.refused ? `A suite's seam (${SEAM_ENV}) named ${v.seam.path} no temp root, so its stand-in home counted as a person's. ` : '')
       + `${n} name${n === 1 ? '' : 's'} not carried into its environment${n ? ` (${v.dropped.join(', ')})` : ''}; its PATH is its own (${v.linked.length ? v.linked.join(', ') + ' + ' : ''}the system's directories; ${v.notCarried.length} entr${v.notCarried.length === 1 ? 'y' : 'ies'} of the handed PATH not carried).`;
   }
   if (v.why === 'override') return `[throwaway] this copy runs from a git worktree (${v.root}) but ${OVERRIDE_ENV}=1 is set: it uses the home it was handed, as an installed copy does`;
@@ -150,4 +166,4 @@ function unruledLine(v = verdict) {
   return `[throwaway] handed ${v.unruled.length} name${v.unruled.length === 1 ? '' : 's'} that ${v.unruled.length === 1 ? 'is' : 'are'} neither a hub row nor a named NOT (src/home-verdict.js HUB_ROWS / HUB_NOT; not carried): ${v.unruled.join(', ')} — one the hub needs: add it to src/hub-env-knobs.json (its code must read it)`;
 }
 
-module.exports = { setHubRoot, hub, OWN_HOME_DIR, OVERRIDE_ENV, HUB_DROPS, sshOnOwnFiles, tmpRootsOf, tmpRoots, judge, throwaway, rehomeAtBoot, boot, view, bootLine, unruledLine };
+module.exports = { setHubRoot, hub, OWN_HOME_DIR, OVERRIDE_ENV, SEAM_ENV, seamOf, HUB_DROPS, sshOnOwnFiles, tmpRootsOf, tmpRoots, judge, throwaway, rehomeAtBoot, boot, view, bootLine, unruledLine };

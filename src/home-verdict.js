@@ -109,12 +109,14 @@ function suiteRehome({ home, tmpRoots, varRoots = [], notTemp = [], resolve = no
  *  person's clone, or a tree with no .git, never is, wherever it lives) AND the handed home would be re-homed by the suite
  *  verdict (it is outside every temp root — a suite already gave it one) AND the person did not say otherwise (`override`:
  *  VIBESPACE_REAL_INSTALL=1, read by the caller, printed at boot).
+ *  `notTemp` (the hub's SEAM, src/server/throwaway-root.js — 主开发 r1412 road (ii)): folders under a temp root that are NOT temp
+ *  roots for the HOME's judgment — suiteRehome's own rule: it can only turn a re-home ON, never off, and it touches no gate.
  *  → { rehome, why }   why: 'throwaway' · 'no-root' · 'not-worktree' · 'temp-home' · 'override' */
-function hubRehome({ root, home, tmpRoots, varRoots = [], resolve = noLinks, linkedWorktree = false, override = false } = {}) {
+function hubRehome({ root, home, tmpRoots, varRoots = [], notTemp = [], resolve = noLinks, linkedWorktree = false, override = false } = {}) {
   const r = trimSlash(root);
   if (!isAbs(r)) return { rehome: false, why: 'no-root' };
   if (linkedWorktree !== true) return { rehome: false, why: 'not-worktree' };
-  const s = suiteRehome({ home, tmpRoots, varRoots, resolve });
+  const s = suiteRehome({ home, tmpRoots, varRoots, notTemp, resolve });
   if (!s.rehome) return { rehome: false, why: s.why };
   if (override === true) return { rehome: false, why: 'override' };
   return { rehome: true, why: 'throwaway' };

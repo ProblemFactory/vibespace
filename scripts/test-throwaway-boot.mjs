@@ -180,6 +180,19 @@ const PLANT = ['const h = os.', 'userInfo', '().', 'homedir;'].join('');   // bu
 ok(reads(PLANT) === 1 && reads('// os.userInfo() in a comment') === 0 && reads("const s = 'x'; /* os.userInfo() */") === 0, 'CONTROL: a new os.userInfo() read is counted; one in a comment is not');
 
 
+console.log("— ⑥ THE HUB'S SEAM (主开发 r1412 road (ii)): it names a folder under a temp root that is no temp root for the HOME's judgment — it can only make a hub re-home MORE");
+{
+  const TRs = require(path.join(REPO, 'src/server/throwaway-root.js'));
+  const roots = ['/tmp', '/var/tmp'], S = (v) => TRs.seamOf(v === undefined ? {} : { [TRs.SEAM_ENV]: v }, roots);
+  ok(TRs.SEAM_ENV === 'VIBESPACE_REHOME_NOT_TEMP' && JSON.stringify(S('/tmp/vs-pin/outside')) === JSON.stringify({ path: '/tmp/vs-pin/outside' }) && S('/tmp').refused === true && S('/var/tmp/').refused === true
+    && S('/home/u/x') === null && S('relative/x') === null && S('/') === null && S('') === null && S() === null,
+    "⑥ the seam: a folder under a temp root counts; a temp root itself is REFUSED; a value outside every temp root, relative, the disk's root or empty is IGNORED");
+  const src = fs.readFileSync(path.join(REPO, 'src/server/throwaway-root.js'), 'utf8');
+  const judgeFn = src.slice(src.indexOf('function judge('), src.indexOf('function throwaway('));
+  ok(/const roots = tmpRoots\(handed\), seam = seamOf\(env, roots\);/.test(src) && /notTemp: seam && !seam\.refused \? \[seam\.path\] : \[\]/.test(src) && !/seam|SEAM/.test(judgeFn) && !/SEAM_ENV|seamOf/.test(src.slice(src.indexOf('function tmpRootsOf('), src.indexOf('const tmpRoots =')))
+    && (src.match(/seamOf\(/g) || []).length === 2,
+    "⑥ …it reaches ONE judgment — the home's, in the re-home (hubRehome's notTemp) — and never a gate: the one test (judge) and the temp roots never read it");
+}
 console.log("— ⑤ the first screen's banner: the route, the strip, its words in three languages");
 {
   const ops = fs.readFileSync(path.join(REPO, 'src/server/ops-routes.js'), 'utf8'), appJs = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
