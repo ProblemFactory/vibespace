@@ -115,7 +115,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
     readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled, agentdRemote, dialBridge,
-    harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, ownerWriteRefusal,
+    harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, cliConfigGate, ownerWriteRefusal,
     sessionCounterRef, createSessionMessages, poolChooser,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
@@ -1068,6 +1068,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           const ownGot = keyHelperNamed !== undefined && keyHelperNamed !== false && !data.hostId && !onProvider ? BILLPICK.ownSettingsOf(ownRead.text) : null;
           const ownSettings = ownGot && !BILLPICK.namesHelper(ownGot.settings, harness && harness.creds && harness.creds.keyHelper) ? ownGot.settings : null;
           const ownDropped = ownSettings ? ownGot.dropped : [];   // the names the merged copy does not carry — said once at the start
+          // B-ddf3 unit 2 line 1 (the coordinator's r1407 (a)): a LOCAL start waits, bounded, for this machine's CLI config to land
+          // (the shipped helper's run through the starter). A person is never refused their conversation for it: past the bound,
+          // or after a failed landing, it STARTS and says once, by name, what may be missing (below, after the start)
+          const cliLate = !data.hostId && !data.keeperSid && typeof cliConfigGate === 'function' ? await Promise.resolve(cliConfigGate()).catch(() => null) : null;
           const sessionSpec = adapter.buildSessionArgs({
             cwd,
             model: commandModel,
@@ -1826,6 +1830,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           if (!data.keeperSid && mergedDropped.length) {
             const w = SFW.MERGE_DROPPED_WORDS, name = String(session.name || data.name || '').slice(0, 80) || 'This conversation', names = [...new Set(mergedDropped)].join(', ').slice(0, 400);
             try { serverNotice?.(`settings-file-mergeDropped-${id}`, w.replace('{name}', () => name).replace('{names}', () => names), { level: 1, i18n: { key: w, params: { name, names } } }); } catch { }
+          }
+          if (cliLate) {   // (r1407 (a)) said once, by name: the start ran on the CLI config as it stood before
+            const w = SFW.CLI_CONFIG_LATE_WORDS, name = String(session.name || data.name || '').slice(0, 80) || 'This conversation', why = String(cliLate.why || (cliLate.late ? 'late' : 'failed')).slice(0, 200);
+            try { serverNotice?.(`cli-config-late-${id}`, w.replace('{name}', () => name).replace('{why}', () => why), { level: 1, i18n: { key: w, params: { name, why } } }); } catch { }
           }
           // B-6c55 (c): the CLI's own catalog gives the locked model no 1M form — SAID here, after the start's refusals (batch 21's cure);
           // an adopted process keeps the context it started with

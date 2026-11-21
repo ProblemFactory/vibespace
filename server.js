@@ -1305,7 +1305,7 @@ const wsApi = registerWsHandler(wss, {
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
   setupSessionPty, reattachLocalPty, ptyQuietSince, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta, autoResume,
   readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled,
-  harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, ownerWriteRefusal: refuseOwnerWrite, rootFactsNow, // harness settings (design-harness-settings §5/§6)
+  harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, cliConfigGate: () => harnessConfig.startGate(), ownerWriteRefusal: refuseOwnerWrite, rootFactsNow, // (B-ddf3 u2 line 1: the spawn gate) harness settings (design-harness-settings §5/§6)
   sessionCounterRef, createSessionMessages,
   SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,

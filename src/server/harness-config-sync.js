@@ -138,6 +138,16 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     if (!cliRunner) return Promise.resolve({ ok: false, receipts: [], created: [], why: 'no helper road on this server (no helper path given): nothing written' });
     return cliRunner.apply(() => encodePlan(planFor({ hooks: strip ? false : hooks })), reason, { uninstall: strip });
   }
+  /** THE SPAWN GATE (r1407 (a)): null when this machine's config has landed (or nothing was asked: a refused or skipped
+   *  server), else { late | failed, why } once the bound passes — the start goes on either way and says it once. A failed
+   *  last landing is asked again here. */
+  function startGate() {
+    if (!cliRunner) return Promise.resolve(null);
+    const last = cliRunner.last();
+    if (!last && !cliRunner.busy()) return Promise.resolve(null);
+    if (last && !last.ok && !cliRunner.busy()) syncCliConfig({ reason: 'a start asks again' });
+    return cliRunner.landedWithin(cliRunner.BOUND_MS).then((g) => (g.landed ? null : g));
+  }
   let heldSkipped = false;
   function syncCliConfig({ reason = 'boot' } = {}) {
     // B-225b (round wyzvr7567's MUST 2 — a WRITE TO A PERSON'S OWN FILE takes its strict side): while the SETTINGS are held no
@@ -214,7 +224,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     return harnesses.list().filter((h) => !harnesses.isBuiltin(h.id) && h.settings).map((h) => ({ id: h.id, settings: h.settings }));
   }
 
-  return { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigKeys, cliConfigPlan, cliConfigPlanB64, syncCliConfig, applyThisMachine, cliRunner, cliConfigStatus, onSettingsWrite, liveRows, contributedTables, HARNESS_SETTINGS };
+  return { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigKeys, cliConfigPlan, cliConfigPlanB64, syncCliConfig, applyThisMachine, cliRunner, startGate, cliConfigStatus, onSettingsWrite, liveRows, contributedTables, HARNESS_SETTINGS };
 }
 
 module.exports = { create, configPlanSpecs, accessorsFor };

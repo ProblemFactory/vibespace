@@ -49,4 +49,7 @@ const fileGoverns = (session, kind) => !!(session && Array.isArray(session._sett
 const KIND_OF_ROW = Object.freeze({ disableModelFallback: 'noFallback' });
 /** B-e7c0 cure: a settings file MERGED under a subscription pick dropped these names — said once, by name, with the door to the pick */
 const MERGE_DROPPED_WORDS = '{name}: under the subscription chosen for it, these entries of your settings file are not applied — {names} — they decide where its requests go or what credential they carry; to use them, set its billing to «CLI login»';
-module.exports = { SETTINGS_FILE_WORDS, SETTINGS_FILE_KINDS, PROVIDER_BILLING_WORDS, GOVERNED_KINDS, fileGoverns, KIND_OF_ROW, MERGE_DROPPED_WORDS };
+/** B-ddf3 unit 2 line 1 (r1407 (a)): a start that did not wait for this machine's CLI config to land (late or failed) — said once,
+ *  by name; the conversation runs with the config as it stood before, and the next start asks again */
+const CLI_CONFIG_LATE_WORDS = '{name} started before VibeSpace\'s hooks and CLI settings were written on this machine ({why}): it runs with them as they stood before, and the next start asks again.';
+module.exports = { SETTINGS_FILE_WORDS, SETTINGS_FILE_KINDS, PROVIDER_BILLING_WORDS, GOVERNED_KINDS, fileGoverns, KIND_OF_ROW, MERGE_DROPPED_WORDS, CLI_CONFIG_LATE_WORDS };
