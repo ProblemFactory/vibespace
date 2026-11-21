@@ -53,7 +53,29 @@ const NO_POST = planted(anchored(SRC, POST_TURN, '', 'no post turn'), 'no post t
 
 // ── a stub repository: the module, its siblings, a build and a suite that say when they run ──
 const STUB_SLICE = 'test-eml';   // a name the table puts in the HEAVY tier (ci-gate-kit's stub)
-const SIBLINGS = ['scripts/git-env.mjs', 'scripts/scratch-run.mjs', 'scripts/scratch-sweep.mjs', 'scripts/scratch.mjs', 'src/fixture-guard.js', 'src/mount-path-class.js', 'scripts/affected-model.mjs', 'scripts/i18n-extract.mjs', 'scripts/reach-model.mjs', 'scripts/hang-report.mjs'];
+// THE STUB HOLDS ci.mjs's WHOLE STATIC CLOSURE (the coordinator's r1668): the module's siblings are READ off the tree, never a hand
+// list. The hand list this suite had (3a6176298) lacked src/temp-sweepers.js, which scratch.mjs requires since r1213 (cced038ce). On
+// the root every stub's ci.mjs then died at import, before any stall, and no scene formed. Every relative `from` / `import '…'` /
+// `import(` / `require(` / `createRequire(…)(` specifier on a non-comment line, followed from scripts/ci.mjs; one that names no file is MISSING.
+function closureOf(over = {}) {
+  const SPEC = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*|\)\s*\(\s*)(['"])(\.{1,2}\/[^'"]+)\1/g;
+  const files = [], missing = [], seen = new Set(), todo = ['scripts/ci.mjs'];
+  while (todo.length) {
+    const f = todo.pop();
+    if (seen.has(f)) continue;
+    seen.add(f);
+    let text = over[f];
+    if (text === undefined) { try { text = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { missing.push(f); continue; } }
+    files.push(f);
+    for (const line of text.split('\n')) {
+      if (/^\s*(?:\/\/|\/?\*)/.test(line)) continue;
+      for (const m of line.matchAll(SPEC)) todo.push(path.posix.normalize(path.posix.join(path.posix.dirname(f), m[2])));
+    }
+  }
+  return { files: files.sort(), missing: missing.sort() };
+}
+const CLOSURE = closureOf();
+const SIBLINGS = CLOSURE.files.filter((f) => f !== 'scripts/ci.mjs');
 function stub(tag, ciText) {
   const dir = mktmp('sig-' + tag), root = path.join(dir, 'repo');
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
@@ -120,6 +142,20 @@ async function road(tag, when) {
   return { tag, reached, wt: !!wt, ...(await settle(st, k, wt, 8000)) };
 }
 
+console.log('⓪ the stub repository: ci.mjs and its whole static closure');
+{
+  ok(CLOSURE.missing.length === 0 && SIBLINGS.length >= 8 && ['scripts/scratch.mjs', 'src/fixture-guard.js', 'scripts/git-env.mjs'].every((f) => SIBLINGS.includes(f)),
+    `the stub holds ci.mjs's static closure, read off the tree: ${SIBLINGS.length} siblings (${SIBLINGS.join(', ')}), none named and missing`, CLOSURE);
+  // stale-pins: kept — the hand list this suite had at 3a6176298, rebuilt for the control
+  const HAND = ['scripts/git-env.mjs', 'scripts/scratch-run.mjs', 'scripts/scratch-sweep.mjs', 'scripts/scratch.mjs', 'src/fixture-guard.js', 'src/mount-path-class.js', 'scripts/affected-model.mjs', 'scripts/i18n-extract.mjs', 'scripts/reach-model.mjs', 'scripts/hang-report.mjs'];
+  const lost = SIBLINGS.filter((f) => !HAND.includes(f));
+  ok(lost.includes('src/temp-sweepers.js'),
+    `…RED CONTROL: the 3a6176298 hand list, against this tree, lacks what the closure holds — ${lost.join(', ') || 'nothing'} (the root's red: scratch.mjs requires src/temp-sweepers.js since r1213)`, { lost });
+  const planted = closureOf({ 'scripts/ci.mjs': fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf8') + "\nimport { z } from './zz-planted-sibling.mjs';\n// import './zz-in-a-comment.mjs';\n" });
+  ok(planted.missing.join() === 'scripts/zz-planted-sibling.mjs',
+    '…and a sibling a future ci.mjs adds is FOLLOWED: a planted import is named missing (one in a comment is not)', planted.missing);
+}
+
 console.log('the scenes, side by side (each stall or step said when reached):');
 const [preCure, preCtl, startCure, startCtl, during, after] = await Promise.all([
   stalled(CURE, 'pre-cure', 'VS_SIG_STALL_PRE'), stalled(NO_PRE, 'pre-no-turn', 'VS_SIG_STALL_PRE'),
@@ -127,23 +163,28 @@ const [preCure, preCtl, startCure, startCtl, during, after] = await Promise.all(
   road('during-build', 'build'), road('after-build', 'suite'),
 ]);
 const brief = (r) => ({ ...r, out: r.out.split('\n').filter((l) => /stopping|✗|FAILED|build|VERDICT|ABORT/.test(l)).slice(0, 8) });
+// A SCENE THAT DID NOT FORM IS RED BY NAME (r1668): its stub's own first error line is said, and the legs that judge it say NOT JUDGED
+const diedOf = (r) => (r.out.split('\n').find((l) => /\b(?:Error|Cannot find module|MODULE_NOT_FOUND)\b/.test(l)) || '').trim().slice(0, 240);
+const madeStall = (s, built = false) => s.inStall && s.wt && !s.builtBefore && (!built || s.built);
+const notMade = (s) => ` — NOT MADE: ${diedOf(s) || 'the stall/step was never reached and the stub printed no error'}`;
+const judged = (s, made, cond, name, data) => ok(made && cond, made ? name : name + ' — NOT JUDGED: its scene was not made (' + (diedOf(s) || 'no error printed') + ')', data);
 
 console.log('①② the window before the build');
-for (const s of [preCure, preCtl]) ok(s.inStall && s.wt && !s.builtBefore, `${s.tag}: the scene was made — the gate stalled right after its scratch checkout, before any build, and was SIGTERMed there`, brief(s));
-ok(!preCure.built && preCure.goneMs !== null && preCure.goneMs < BOUND && preCure.unregistered && preCure.lockGone && preCure.verdict.length === 0 && /stopping: this run was terminated from outside \(SIGTERM\)/.test(preCure.out),
+for (const s of [preCure, preCtl]) ok(madeStall(s), `${s.tag}: the scene was made — the gate stalled right after its scratch checkout, before any build, and was SIGTERMed there${madeStall(s) ? '' : notMade(s)}`, brief(s));
+judged(preCure, madeStall(preCure), !preCure.built && preCure.goneMs !== null && preCure.goneMs < BOUND && preCure.unregistered && preCure.lockGone && preCure.verdict.length === 0 && /stopping: this run was terminated from outside \(SIGTERM\)/.test(preCure.out),
   `① THE CURE: one whole loop turn before the pre-build question — the queued SIGTERM is SEEN: NO build, the checkout gone in ${preCure.goneMs} ms (< ${BOUND}), unregistered, the lock released, no verdict, and the run says why`, brief(preCure));
-ok(preCtl.built && (preCtl.goneMs === null || preCtl.goneMs >= BOUND),
+judged(preCtl, madeStall(preCtl), preCtl.built && (preCtl.goneMs === null || preCtl.goneMs >= BOUND),
   `② RED CONTROL (the loop turn before the pre-build question cut, as released): the build RUNS after the signal and the checkout outlives ${BOUND} ms (${preCtl.goneMs === null ? 'not gone in 8 s' : preCtl.goneMs + ' ms'}) — the leg's red, made at will`, brief(preCtl));
 
 console.log('③④ the build\'s own start');
-for (const s of [startCure, startCtl]) ok(s.inStall && s.wt && !s.builtBefore && s.built, `${s.tag}: the scene was made — the gate stalled inside runBuild before its spawn, was SIGTERMed there, and the build (spawned after the signal) ran`, brief(s));
-ok(!startCure.suiteRan && !/✗ test-eml FAILED/.test(startCure.out) && startCure.goneMs !== null && startCure.unregistered && startCure.lockGone && startCure.verdict.length === 0,
+for (const s of [startCure, startCtl]) ok(madeStall(s, true), `${s.tag}: the scene was made — the gate stalled inside runBuild before its spawn, was SIGTERMed there, and the build (spawned after the signal) ran${madeStall(s, true) ? '' : notMade(s)}`, brief(s));
+judged(startCure, madeStall(startCure, true), !startCure.suiteRan && !/✗ test-eml FAILED/.test(startCure.out) && startCure.goneMs !== null && startCure.unregistered && startCure.lockGone && startCure.verdict.length === 0,
   '③ THE CURE: one whole loop turn before the post-build question — NO lane starts a suite for a run that is over; the checkout gone, unregistered, the lock released, no verdict', brief(startCure));
-ok(/✗ test-eml FAILED/.test(startCtl.out) || startCtl.suiteRan,
+judged(startCtl, madeStall(startCtl, true), /✗ test-eml FAILED/.test(startCtl.out) || startCtl.suiteRan,
   '④ RED CONTROL (the loop turn before the post-build question cut, as released): a lane STARTS the suite after the build and the signal kills it — «✗ test-eml FAILED»', brief(startCtl));
 
 console.log('⑤ the checkout is gone on the three exit roads');
-for (const s of [during, after]) ok(s.reached && s.wt && s.goneMs !== null && s.goneMs < BOUND + 3000 && s.unregistered && s.lockGone && s.verdict.length === 0,
+for (const s of [during, after]) judged(s, s.reached && s.wt, s.goneMs !== null && s.goneMs < BOUND + 3000 && s.unregistered && s.lockGone && s.verdict.length === 0,
   `${s.tag}: a SIGTERM while the ${s.tag === 'during-build' ? 'build' : 'suite'} runs — the checkout gone in ${s.goneMs} ms, unregistered, the lock released, no verdict`, brief(s));
 ok(!!preCure.goneMs, '…and before the build: ① above');
 
