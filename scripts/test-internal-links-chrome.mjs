@@ -180,6 +180,10 @@ const active = () => evalJs('app.desktopManager.activeDesktopId');
 const winsOf = (sid) => evalJs(`[...app.sessions.keys()].filter((w) => { const s = app.wm.windows.get(w)?._openSpec; return s && s.backendSessionId === ${JSON.stringify(sid)}; }).map((w) => ({ w, desk: app.wm.windows.get(w)._desktopId || null }))`);
 const toasts = () => evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((t) => t.textContent.trim())`);
 const menuLabels = () => evalJs(`[...document.querySelectorAll('.context-menu')].filter(${VISIBLE}).pop() ? [...[...document.querySelectorAll('.context-menu')].filter(${VISIBLE}).pop().querySelectorAll('.context-menu-item, [role=menuitem], .ctx-item')].map((i) => i.textContent.trim()).filter(Boolean) : []`);
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): the open menu's labels, MARKED when no menu came — the judge says
+// that by name («the state never came»), never «the menu says something else»
+const menuWhenUp = async (tries) => { for (let i = 0; i < tries; i++) { const l = await menuLabels(); if (l.length) return l; await sleep(100); } return Object.assign(await menuLabels(), { timedOut: `no menu came in ${(tries * 100) / 1000} s` }); };
+const never = (got) => (got && got.timedOut ? ` — THE STATE NEVER CAME: ${got.timedOut}, so this red is that, not a verdict on the product` : '');
 
 try {
   console.log('① a scratch hub of this tree, the page in zh: three live conversations, two ended ones, two desktops');
@@ -262,7 +266,8 @@ try {
   await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
   const plant1 = await armLateRaise(C.sid, C.srv);
   check(`the late raise of C is planted again for the D leg below (the new press must meet it): ${plantSaid(plant1)}`, !!(plant1 && plant1.armed), plant1);
-  check('D (ended, no window): the press opens «在这里恢复» · «查看历史记录» at the link — nothing started', (await pressLink(linkSel(SID_D))) === true && JSON.stringify(await (async () => { for (let i = 0; i < 30; i++) { const l = await menuLabels(); if (l.length) return l; await sleep(100); } return menuLabels(); })()) === JSON.stringify(['在这里恢复', '查看历史记录']) && stubRuns().length === runs0,
+  const pressedD = (await pressLink(linkSel(SID_D))) === true, menuD = pressedD ? await menuWhenUp(30) : null;
+  check('D (ended, no window): the press opens «在这里恢复» · «查看历史记录» at the link — nothing started' + never(menuD), pressedD && JSON.stringify(menuD) === JSON.stringify(['在这里恢复', '查看历史记录']) && stubRuns().length === runs0,
     { menu: await menuLabels(), runs: stubRuns().length - runs0 });
   await shot('zh-press-ended-menu');
   const menuUp = (await menuLabels()).length > 0;
@@ -279,7 +284,8 @@ try {
   await evalJs(`app.desktopManager.switchTo(${JSON.stringify(D1)})`); await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D1)}`);
   await frontA();
   await evalJs(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(linkSel(B.sid))})].pop(); const r = e.getBoundingClientRect(); e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 4, clientY: r.top + 4, button: 2 })); return true; })()`);
-  check('the menu says «前往» · «复制链接»', JSON.stringify(await (async () => { for (let i = 0; i < 30; i++) { const l = await menuLabels(); if (l.length) return l; await sleep(100); } return menuLabels(); })()) === JSON.stringify(['前往', '复制链接']), await menuLabels());
+  const menu2 = await menuWhenUp(30);
+  check('the menu says «前往» · «复制链接»' + never(menu2), JSON.stringify(menu2) === JSON.stringify(['前往', '复制链接']), await menuLabels());
   check('«前往» goes (Desktop 2, B)', (await press(`.context-menu .context-menu-item:first-child, .context-menu [role=menuitem]:first-child`)) === true && (await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D2)}`, { timeout: 8000 })) === true);
 
   console.log('⑤ after a reload: B\'s row is on a desktop this page has not built — the press switches there and builds it');
