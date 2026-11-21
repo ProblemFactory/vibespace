@@ -434,11 +434,16 @@ leg('§3 IN-PROCESS ⑮ A REAP THAT DID NOT FINISH IS ALWAYS RETRIED — the boo
   const E = engine(dir, { reapReadMs: 5, reapConfirmMs: 10, reapTries: 3, cgroupRoot: root, memorySample: { stopMs: 5 } }); // stopMs: the replay's wait (10 s), 0.005 s
   const [a, b, c, d] = jobs.map((j) => E.jobs.get(j.id));
   await until(() => E.spawned.length === 1, 1000, 5); // the replay: past its wait, «starts anyway»
-  const atSpawn = { pending: [...E._reapLater.keys()].map((r) => [a, b, c, d].find((j) => j.runs.includes(r)).id).sort(), dProcs: D.procs() };
+  // r1649 (the load row — seen red at aa1a73f97-20261121223303-both, UTC: «… jb-bootexit, jb-bootnoex, jb-bootrepl», no
+  // jb-bootnever): the pending set was read AT THE SPAWN, an event of its own — C's read gives up on ITS 5 ms bound, the replay
+  // starts on ITS 5 ms wait, and on a loaded runner the replay came first. A reap enters _reapLater when its bound runs out and
+  // leaves only at a later reap (E._sweep below): so the leg WAITS FOR THAT STATE — every reap queued — bounded, red by name
+  const queued = await until(() => E._reapLater.size >= 4, 1000, 5);
+  const atSpawn = { pending: [...E._reapLater.keys()].map((r) => [a, b, c, d].find((j) => j.runs.includes(r)).id).sort(), dProcs: D.procs(), queued };
   openD(); // the threadpool lets D's kill through — late: still ours
   ok(lastRun(a).cause === 'ok' && a.state === 'done' && lastRun(b).cause === 'env-restart' && E.spawned.length === 1 && E.spawned[0].trigger === 'boot' && journal(E, d, /^its last run's scope did not answer a read in 0\.005 s — its next run starts anyway \(the reap is retried\)$/),
     'the boot judges what it finds (done; env-restart) without its reads; the replay waits out its bound, then starts — said', { a: lastRun(a).cause, b: lastRun(b).cause, spawned: E.spawned });
-  ok(JSON.stringify(atSpawn.pending) === JSON.stringify(['jb-bootexit', 'jb-bootnever', 'jb-bootnoex', 'jb-bootrepl']), `every reap that did not finish ENQUEUED ITSELF — the boot's, and the one the replay waited on: ${atSpawn.pending.join(', ') || 'none'} (ef0012b5: none — the boot's answers dropped, the replay's given up)`, atSpawn);
+  ok(JSON.stringify(atSpawn.pending) === JSON.stringify(['jb-bootexit', 'jb-bootnever', 'jb-bootnoex', 'jb-bootrepl']), `every reap that did not finish ENQUEUED ITSELF — the boot's, and the one the replay waited on: ${atSpawn.pending.join(', ') || 'none'}${atSpawn.queued ? '' : ' — NOT ALL QUEUED within 1 s of the replay\'s start (the last read above)'} (ef0012b5: none — the boot's answers dropped, the replay's given up)`, atSpawn);
   await until(() => [a, b, d].every((j) => j.runs[0]._reap && j.runs[0]._reap.killed), 500, 5); // the held kills land (late — still ours)
   for (const s of [A, B, D]) Object.assign(FAULTS.get(s.unit), { readMs: 0, writeMs: 0 }); // the threadpool is free again
   await E._sweep(); // a later tick, whatever the jobs' states (done, interrupted, up)
