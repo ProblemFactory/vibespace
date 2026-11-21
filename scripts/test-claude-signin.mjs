@@ -517,6 +517,68 @@ process.stdin.on('data', (d) => { buf += d; if (!/[\\r\\n]/.test(buf)) return;
   }
 });
 
+// ⑱ r1213 — THE SCRATCH'S OWNER MARK (主开发's law — A SWEEP REMOVES ONLY WHAT IT CAN PROVE IS ITS OWN DEAD THING): a sign-in's
+//    scratch folder's FIRST file is this hub's mark; the start sweep removes only a folder a GONE hub marked that is older than the
+//    life + 5 min (the release's age bar, kept) — a gone hub's FRESH folder, a LIVE hub's marked folder and an UNMARKED one of the
+//    name stay; a run's end removes its own folder, the mark last
+await leg('⑱', async () => {
+  const OMk = require(path.join(ROOT, 'src/owner-mark.js')), PIm = require(path.join(ROOT, 'src/proc-identity.js'));
+  const Module = require('node:module'), ORCHP = path.join(ROOT, 'src/server/claude-signin.js'), SRC = fs.readFileSync(ORCHP, 'utf8');
+  const copyOf = (src) => { const m = new Module(ORCHP, null); m.filename = ORCHP; m.paths = Module._nodeModulePaths(path.dirname(ORCHP)); m._compile(src, ORCHP); return m.exports; };
+  // the order: the first file made in the folder is the mark
+  const orderOf = (mod) => {
+    const made = [], saved = { openSync: fs.openSync, writeFileSync: fs.writeFileSync };
+    const under = (q) => { try { return path.dirname(String(q)).startsWith(path.join(tmpRoot, SIGNIN.SCRATCH_PREFIX)); } catch { return false; } };
+    let fake = null;
+    const orch = mod.create({ accounts, claudeCmd: '/opt/claude', nodeCmd: '/opt/node', helperPath: '/opt/helper.mjs', env: SECRET_ENV, tmpRoot, spawnPty: (file, args, opts) => { fake = makeFake(); fake.opts = opts; return fake; }, log: () => { } });
+    fs.openSync = function (q, ...rest) { if (under(q)) made.push(path.basename(String(q))); return saved.openSync.call(this, q, ...rest); };
+    fs.writeFileSync = function (q, ...rest) { if (under(q)) made.push(path.basename(String(q))); return saved.writeFileSync.call(this, q, ...rest); };
+    let r = null; try { r = orch.start({ accountId: 'acc-1' }); } finally { Object.assign(fs, saved); }
+    const scratch = fake && fake.opts && fake.opts.cwd, mark = scratch ? OMk.ownerOf(scratch) : null;
+    orch.cancel('acc-1');
+    return { ok: !!(r && r.ok), made, mark, gone: !!scratch && !fs.existsSync(scratch) };
+  };
+  const me = PIm.identityOf(process.pid), od = orderOf(SIGNIN);
+  ok(od.ok && od.made[0] === OMk.OWNER_FILE && od.made.includes('open-url') && od.mark && od.mark.pid === process.pid && me && String(od.mark.starttime) === String(me.starttime) && od.gone,
+    '⑱ r1213: the scratch folder\'s FIRST file is this hub\'s owner mark (its pid and start), then the opener; the run\'s end removes the folder, the mark with it', od);
+  const MK = "    try { OM.writeMark(scratch, ownerId); } catch (e) { OM.removeMarked(scratch); throw e; }", ENV = "    const e = mintEnvOf(agentEnv(env), { home: scratch, configDir: dir, browser: opener });\n";
+  const fM = SRC.split(MK).length - 1, fE = SRC.split(ENV).length - 1;
+  const odR = fM === 1 && fE === 1 ? orderOf(copyOf(SRC.split(MK).join('').split(ENV).join('    OM.writeMark(scratch, ownerId);\n' + ENV))) : null;
+  ok(!!odR && odR.ok && odR.made[0] !== OMk.OWNER_FILE && odR.made.includes(OMk.OWNER_FILE), '⑱ RED — the mark written after the opener (its anchors found once; the copy\'s run still starts): the folder\'s first file is not the mark — the order leg goes red there', { fM, fE, made: odR && odR.made });
+  // the sweep: only a GONE hub's marked folder past the age bar
+  const deadId = JSON.parse(require('child_process').execFileSync(process.execPath, ['-e', `console.log(JSON.stringify(require(${JSON.stringify(path.join(ROOT, 'src/proc-identity.js'))}).identityOf(process.pid)))`], { encoding: 'utf8' }));
+  const liveKid = require('child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  try {
+    const liveId = PIm.identityOf(liveKid.pid), P = SIGNIN.SCRATCH_PREFIX, hourAgo = (Date.now() - 3600e3) / 1000;
+    const plant = (pre) => {
+      const sw = fs.mkdtempSync(path.join(tmpRoot, pre));
+      const d = { sw, dead: path.join(sw, P + 'DEAD1'), fresh: path.join(sw, P + 'FRESH1'), live: path.join(sw, P + 'LIVE1'), unmarked: path.join(sw, P + 'NOMARK1'), other: path.join(sw, 'vs-other-OLD') };
+      for (const k of ['dead', 'fresh', 'live', 'unmarked', 'other']) { fs.mkdirSync(d[k]); fs.writeFileSync(path.join(d[k], 'open-url'), '#!/bin/sh\n'); }
+      OMk.writeMark(d.dead, deadId); fs.mkdirSync(path.join(d.dead, '.claude')); fs.writeFileSync(path.join(d.dead, '.claude', 'left.json'), '{}');
+      OMk.writeMark(d.fresh, deadId); OMk.writeMark(d.live, liveId);
+      for (const k of ['dead', 'live', 'unmarked', 'other']) fs.utimesSync(d[k], hourAgo, hourAgo);   // FRESH stays fresh
+      return d;
+    };
+    const left = (d) => ({ dead: fs.existsSync(d.dead), fresh: fs.existsSync(path.join(d.fresh, OMk.OWNER_FILE)), live: fs.existsSync(path.join(d.live, OMk.OWNER_FILE)), unmarked: fs.existsSync(path.join(d.unmarked, 'open-url')), other: fs.existsSync(d.other) });
+    const mk = (mod, d, log = () => { }) => mod.create({ accounts, claudeCmd: '/opt/claude', nodeCmd: '/opt/node', helperPath: '/opt/helper.mjs', env: SECRET_ENV, tmpRoot: d.sw, spawnPty: () => makeFake(), log });
+    const d = plant('sweep-'), logs = []; mk(SIGNIN, d, (l) => logs.push(l));
+    const L = left(d);
+    ok(!!liveId && !L.dead && L.fresh && L.live && L.unmarked && L.other && logs.some((l) => /boot sweep: removed 1 /.test(l)),
+      '⑱ r1213: the start sweep removes the folder a GONE hub marked that is older than the life + 5 min (its whole tree); a gone hub\'s FRESH marked folder, a LIVE hub\'s marked folder and an UNMARKED one of the name stay (the last two an hour old); a non-sign-in dir stays', { L, logs });
+    // RED (a) — the release's sweep by AGE alone (the mark test cut; its anchor found once): the hour-old UNMARKED folder is removed
+    const A = "        if (!OM.provenDead(p)) continue;\n        OM.removeMarked(p); n++;\n", B = "        fs.rmSync(p, { recursive: true, force: true }); n++;\n";   // stale-pins: kept (a RED's replacement text — the release's line, gone from the product on purpose)
+    const AGE = "        if (!st.isDirectory() || (process.getuid && st.uid !== process.getuid()) || now() - st.mtimeMs < sweepAgeMs) continue;\n", NOAGE = "        if (!st.isDirectory() || (process.getuid && st.uid !== process.getuid())) continue;\n";
+    const fA = SRC.split(A).length - 1, fG = SRC.split(AGE).length - 1;
+    const dA = plant('sweep-red-age-'); if (fA === 1) mk(copyOf(SRC.split(A).join(B)), dA);
+    const LA = left(dA);
+    ok(fA === 1 && !LA.unmarked, '⑱ RED (a) — the release\'s sweep by age alone (its anchor found once): the hour-old UNMARKED folder of the name is removed — the leg above goes red there', { fA, LA });
+    // RED (b) — the mark test ALONE (the age bar cut): the gone hub's FRESH folder is removed
+    const dB = plant('sweep-red-mark-'); if (fG === 1) mk(copyOf(SRC.split(AGE).join(NOAGE)), dB);
+    const LB = left(dB);
+    ok(fG === 1 && !LB.fresh && LB.unmarked, '⑱ RED (b) — the mark test alone without the age bar (its anchor found once): the gone hub\'s FRESH marked folder is removed (a live run in another pid space would be) — the leg above goes red there', { fG, LB });
+  } finally { try { liveKid.kill('SIGKILL'); } catch { } }
+});
+
 try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { }
 console.log(`\ntest-claude-signin: ${pass} passed, ${fail} failed (${Date.now() - T_START} ms)`);
 process.exit(fail ? 1 : 0);

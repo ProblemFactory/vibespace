@@ -201,7 +201,7 @@ const ROWS = [
   ["src/server/channel-api-cards.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/channel-api.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/channels-attention.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/claude-signin.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","a sign-in's credential files — must be on disk before the answer"],
+  ["src/server/claude-signin.js","*",3,"durable","—","NOT idempotent: money / authority / a credential","a sign-in's credential files — must be on disk before the answer"],
   ["src/server/cli-env.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/cli-registration.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/cli-unmeasured-notice.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
@@ -232,7 +232,8 @@ const ROWS = [
   ["src/server/login-expiry-watch.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/migrations.js","*",50,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
   ["src/server/mounts-plugins-wiring.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/oat-mint.js","*",5,"durable","—","NOT idempotent: money / authority / a credential","a minted OAuth token (credential) — must be on disk before the answer"],
+  ["src/owner-mark.js","*",6,"durable","—","a mark lost: its folder is LEFT by every later sweep (kept, never removed wrongly)","lg-vault-env r1213: a product temp folder's owner mark (its first file, the write checked) and the marked folder's removal (the mark last, only once nothing else is left) — claude-signin's / oat-mint's scratch under os.tmpdir() (r1213: the scratch removal and its helper `wipe` moved here — claude-signin 6→3, oat-mint 5→1; here 6: the mark\'s open + write, ownerOf\'s open (its flags are no literal) and provenDead\'s call of it, the rm, the mark\'s unlink)"],
+  ["src/server/oat-mint.js","*",1,"durable","—","NOT idempotent: money / authority / a credential","a minted OAuth token (credential) — must be on disk before the answer"],
   ["src/server/ops-routes.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/otel-ingest.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"], // usage-cpu U4: −2 — the stash's per-post mkdirSync + appendFileSync moved onto the store writer (the token's first write and the trim's rename stay)
   ["src/server/plugin-install.js","*",14,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],

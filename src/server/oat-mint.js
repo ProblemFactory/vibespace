@@ -50,6 +50,7 @@ const RAW_AFTER_MS = 4000; // the owner's N — the sign-in card's (src/signin-m
 const { machineOauthAccount } = require('./usage-probe-log.js');
 const readingLag = require('../reading-lag.js');
 const { anchorFromProbe, anchorWriteVerdict, probeAgainstAnchor, identityWindows, isIdentityAnchor } = require('../oat-identity-model.js');
+const OM = require('../owner-mark.js');   // r1213: the scratch folder's owner mark — the start sweep removes only a marked folder whose owner is gone
 
 const MINT_TTL_MS = 10 * 60e3;
 const SCRATCH_PREFIX = 'vs-oat-mint-';
@@ -57,6 +58,7 @@ const SCRATCH_PREFIX = 'vs-oat-mint-';
 function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spawnPty = null, env = process.env,
   tmpRoot = os.tmpdir(), ttlMs = MINT_TTL_MS, ttlTimer = setTimeout, now = () => Date.now(), log = (...a) => console.log(...a),
   probePanel = null, windows = () => ({}), journal = () => { }, exitHook = false, sweepAgeMs = MINT_TTL_MS + 5 * 60e3, rawAfterMs = RAW_AFTER_MS } = {}) {
+  const ownerId = OM.selfIdentity();   // r1213: this hub's identity, read once here — every scratch folder's mark
   const mints = new Map(); // id → { id, accountId, phase, url, localUrl, error, verdict, signedInAs, other, choices, startedAt, endedAt, mintedAt, pty, dir, parse, lastLine, timer } — publicMint whitelists what leaves
   // a token waiting for the person's pick (F1 `confirm`): hub memory only, keyed
   // by mint id — never a field of a mint, so no copy of one can carry it
@@ -67,7 +69,7 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   const live = (m) => m && !MINT_DONE.includes(m.phase);
   const wipe = (m) => {
     m.parse = null;
-    if (m.dir) { try { fs.rmSync(m.dir, { recursive: true, force: true }); } catch { } m.dir = null; }
+    if (m.dir) { OM.removeMarked(m.dir); m.dir = null; }   // r1213: the mark last, only once nothing else is left
   };
   const kill = (m) => { const p = m.pty; m.pty = null; if (p) { try { p.kill('SIGKILL'); } catch { } } };
   const end = (m, phase, error = null) => {
@@ -200,7 +202,9 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
     if (live(running)) return { ok: false, status: 409, error: 'a sign-in for this account is already running', code: 'mint_running', mint: publicMint(running) };
     const id = 'om-' + crypto.randomBytes(6).toString('hex');
     const dir = fs.mkdtempSync(path.join(tmpRoot, SCRATCH_PREFIX));
-    fs.chmodSync(dir, 0o700);
+    // r1213: the folder's FIRST file is this hub's owner mark (the write checked) — a folder of this name with no mark is never
+    // this hub's to sweep; a chmod or a mark that fails removes the folder and fails as a failed mkdtemp does
+    try { fs.chmodSync(dir, 0o700); OM.writeMark(dir, ownerId); } catch (e) { OM.removeMarked(dir); throw e; }   // empty, or a torn mark its only file: removed with the folder
     const opener = path.join(dir, 'open-url');
     fs.writeFileSync(opener, '#!/bin/sh\nprintf \'%s\\n\' "$1" > "$(dirname "$0")/browser-url"\nexit 0\n', { mode: 0o700 });
     const e = childEnv(dir);
@@ -289,9 +293,14 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   function stopAll() { for (const m of mints.values()) { end(m, 'cancelled'); if (m.timer) clearTimeout(m.timer); } held.clear(); }
 
   // F3: a hub killed mid-mint (SIGKILL, a crash) leaves its 0700 scratch dir —
-  // swept at boot by AGE (another instance's live mint is younger than its own
-  // TTL); an orderly exit stops every mint (exitHook: the server's SIGINT /
-  // SIGTERM path ends in process.exit).
+  // swept at boot; an orderly exit stops every mint (exitHook: the server's
+  // SIGINT / SIGTERM path ends in process.exit). r1213 (主开发's law — A SWEEP
+  // REMOVES ONLY WHAT IT CAN PROVE IS ITS OWN DEAD THING): only a folder that
+  // carries this product's owner mark AND whose owner (pid and start) is proven
+  // gone, AND older than the TTL + 5 min (the release's age bar, kept: a mint in
+  // another pid space reads as gone here, yet a live one is never that old); an
+  // unmarked folder of the name is LEFT — age alone took a suite's scratch of the
+  // name once it was that old.
   function sweep() {
     let n = 0, names = [];
     try { names = fs.readdirSync(tmpRoot); } catch { }
@@ -301,7 +310,8 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
       try {
         const st = fs.lstatSync(p);
         if (!st.isDirectory() || (process.getuid && st.uid !== process.getuid()) || now() - st.mtimeMs < sweepAgeMs) continue;
-        fs.rmSync(p, { recursive: true, force: true }); n++;
+        if (!OM.provenDead(p)) continue;
+        OM.removeMarked(p); n++;
       } catch { }
     }
     if (n) log(`[oat-mint] boot sweep: removed ${n} orphaned sign-in scratch dir(s)`);

@@ -61,7 +61,7 @@ const out = await esbuild.build({
     b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: stubs[a.path], loader: 'js', resolveDir: ROOT }));
   } }],
 });
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-signin-ui-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-card-ui-signin-'));   // r1213: never the sign-in card's own scratch shape (vs-signin-…, which a hub's start sweep judges — src/temp-sweepers.js)
 const bundle = path.join(tmp, 'signin-card.cjs');
 fs.writeFileSync(bundle, out.outputFiles[0].text);
 const { SignInCard } = require(bundle);

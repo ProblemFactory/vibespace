@@ -43,6 +43,7 @@ const crypto = require('crypto');
 const { agentEnv } = require('../agent-env.js');
 const { initialSigninParse, signinStep, publicSignin, codeVerdict, SIGNIN_DONE, ENDED_AFTER_CODE, RAW_AFTER_MS } = require('../signin-model.js');
 const { mintEnvOf, initialRawScreen, rawAppend, rawSince } = require('../oat-mint-model.js');
+const OM = require('../owner-mark.js');   // r1213: the scratch folder's owner mark — the start sweep removes only a marked folder whose owner is gone
 
 const SIGNIN_TTL_MS = 10 * 60e3;
 // how long a run outlives its last holder's socket (a page reconnecting, a
@@ -57,11 +58,12 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
   broadcastAll = () => { }, spawnPty = null, env = process.env, tmpRoot = os.tmpdir(),
   ttlMs = SIGNIN_TTL_MS, now = () => Date.now(), log = (...a) => console.log(...a),
   exitHook = false, sweepAgeMs = SIGNIN_TTL_MS + 5 * 60e3, orphanMs = SIGNIN_ORPHAN_MS, hub = false, rawAfterMs = RAW_AFTER_MS } = {}) {
+  const ownerId = OM.selfIdentity();   // r1213: this hub's identity, read once here — every scratch folder's mark
   const runs = new Map(); // accountId -> { id, accountId, dir, scratch, phase, url, email, error, rev, startedAt, endedAt, pty, parse, lastLine, timer, codeSent, holders, orphanTimer }
   const spawn = spawnPty || ((file, args, opts) => require('node-pty').spawn(file, args, opts));
   const live = (m) => m && !SIGNIN_DONE.includes(m.phase);
   const emit = (m) => { m.rev = (Number(m.rev) || 0) + 1; try { broadcastAll({ type: 'claude-signin', signin: publicSignin(m) }); } catch { } };
-  const wipe = (m) => { m.parse = null; if (m.scratch) { try { fs.rmSync(m.scratch, { recursive: true, force: true }); } catch { } m.scratch = null; } };
+  const wipe = (m) => { m.parse = null; if (m.scratch) { OM.removeMarked(m.scratch); m.scratch = null; } };   // r1213: the mark last, only once nothing else is left
   const kill = (m) => { const p = m.pty; m.pty = null; if (p) { try { p.kill('SIGKILL'); } catch { } } };
   const end = (m, phase, error = null) => {
     if (!live(m)) return;
@@ -150,6 +152,9 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
     const id = 'si-' + crypto.randomBytes(6).toString('hex');
     const scratch = fs.mkdtempSync(path.join(tmpRoot, SCRATCH_PREFIX));
     try { fs.chmodSync(scratch, 0o700); } catch { }
+    // r1213: the folder's FIRST file is this hub's owner mark (the write checked) — a folder of this name with no mark is never
+    // this hub's to sweep; a mark that fails removes the folder and fails as a failed mkdtemp does
+    try { OM.writeMark(scratch, ownerId); } catch (e) { OM.removeMarked(scratch); throw e; }   // a torn mark is its only file: removed with the folder
     const opener = path.join(scratch, 'open-url');
     try { fs.writeFileSync(opener, '#!/bin/sh\nexit 0\n', { mode: 0o700 }); } catch { }
     const e = mintEnvOf(agentEnv(env), { home: scratch, configDir: dir, browser: opener });
@@ -231,7 +236,11 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
     }
   }
 
-  // a hub killed mid-run leaves its 0700 scratch dir — swept at boot by AGE.
+  // a hub killed mid-run leaves its 0700 scratch dir — swept at boot. r1213 (主开发's law — A SWEEP REMOVES ONLY WHAT IT CAN
+  // PROVE IS ITS OWN DEAD THING): only a folder that carries this product's owner mark AND whose owner (pid and start) is proven
+  // gone, AND older than the life plus five minutes (the release's age bar, kept: a run in another pid space reads as gone here,
+  // yet a live run is never that old — its TTL ends it); an unmarked folder of the name is LEFT (another program's, a suite's, a
+  // second hub's before its mark) — age alone took a suite's scratch of the name once it was that old
   function sweep() {
     let n = 0, names = [];
     try { names = fs.readdirSync(tmpRoot); } catch { }
@@ -241,7 +250,8 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
       try {
         const st = fs.lstatSync(p);
         if (!st.isDirectory() || (process.getuid && st.uid !== process.getuid()) || now() - st.mtimeMs < sweepAgeMs) continue;
-        fs.rmSync(p, { recursive: true, force: true }); n++;
+        if (!OM.provenDead(p)) continue;
+        OM.removeMarked(p); n++;
       } catch { }
     }
     if (n) log(`[claude-signin] boot sweep: removed ${n} orphaned sign-in scratch dir(s)`);

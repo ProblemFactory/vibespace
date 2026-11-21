@@ -78,7 +78,8 @@ const OWNERS = Object.freeze([
       name('ws-heartbeat|ws-keepalive|session-broadcast|sync-store|op-seq|static-public|app-csp|csp-reports|frame-host|auth|clerk-auth|write-origin|tls|tls-plan|login-words|persistence|user-state-ops|editor|custom-theme-normalize|retired-settings|desktop-record|layout-sync-door|day-one|phone-doors|changelog-style|instance-url'),
       name('runtime-boot|runtime-floor|node-runtime|boot-phase|boot-trace|migration-runner|ops-routes|exit-hook|exit-settle|child-starter|child-starter-proc|store-writer|store-writer-worker|store-read|store-hold|settings-held-strict|fd-close|store-exit-keeper|telemetry|opslog|timed-sync|fd-budget|fd-gauge|memory-census|memory-sampler|worker-memory|cpu-capture|sync-fs-witness|sync-fs-witness-worker'),
       lead('loop|incident'),
-      name('ui-needs')] },   // lane ui-needs-a-button: the need table of the page's sentences (PURE, no state; read by test-needs-doors)
+      name('ui-needs'),   // lane ui-needs-a-button: the need table of the page's sentences (PURE, no state; read by test-needs-doors)
+      name('temp-sweepers')] },   // r1213: the table of the hub's own temp-root sweepers at boot (PURE data; scripts/scratch.mjs reads it)
   { id: 'vault', words: 'the vault: the key and every sealed entry, the mask and its belt, the integration credentials, web logins',
     rules: [lead('vault|secret|key-file|sealed-json|totp|integrations?|app-secrets|cluster-presets|preset-layers|ssh-key|credential-words|agent-output-belt|webauthn-sign|login-hold-words'),
       name(`browser-(?:${BROWSER_VAULT})`)] },
@@ -142,6 +143,7 @@ const HELPERS = Object.freeze([
   ['src/cache-bounds.js', 'PURE: no fs, no clock, nothing at module level — the ceilings, and eviction and slab classes acting on the map or slab their CALLER owns'],
   ['src/fixture-guard.js', 'PURE: the one declaration of what a test fixture looks like'],
   ['src/client-swap-step.js', 'PURE, imports nothing: the client-swap rule (what was said, the client in force, who must act → the act) the channel accounts and the storage mounts share'],
+  ['src/owner-mark.js', 'r1213: a temp folder\'s owner mark — written, read and judged per call on the folder its CALLER made (the sign-in card, the token mint); nothing kept'],
 ].map(([path, why]) => Object.freeze({ path, why })));
 const HELPER = 'helper';
 const HELPER_SET = new Set(HELPERS.map((h) => h.path));

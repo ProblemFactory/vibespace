@@ -555,15 +555,71 @@ console.log('§6 F2 — the mint child gets an ALLOWLIST env');
 
 console.log('§7 F3 — orphaned scratch dirs are swept at boot; an orderly exit stops every mint');
 {
-  const root = path.join(tmpBase, 'sweep'); fs.mkdirSync(root);
-  const old = path.join(root, 'vs-oat-mint-OLD1'), fresh = path.join(root, 'vs-oat-mint-NEW1'), other = path.join(root, 'vs-other-OLD');
-  for (const d of [old, fresh, other]) { fs.mkdirSync(d); fs.writeFileSync(path.join(d, 'browser-url'), 'https://claude.example/x\n'); }
-  const hourAgo = (Date.now() - 3600e3) / 1000; fs.utimesSync(old, hourAgo, hourAgo); fs.utimesSync(other, hourAgo, hourAgo);
-  const noSweep = fs.readFileSync(ORCH, 'utf8').replace('  sweep();\n', '');
-  loadOrch(noSweep).create({ accounts: am, tmpRoot: root, log: () => { } });
-  ok(fs.existsSync(old), 'RED control: without the boot sweep the hour-old orphan stays');
-  const logs = []; loadOrch().create({ accounts: am, tmpRoot: root, log: (l) => logs.push(l) });
-  ok(!fs.existsSync(old) && fs.existsSync(fresh) && fs.existsSync(other) && logs.some((l) => /boot sweep: removed 1 /.test(l)), 'boot sweep: the hour-old vs-oat-mint-* dir is gone; a fresh one (another instance\'s live mint) and a non-mint dir stay', logs);
+  // r1213 (主开发's law — A SWEEP REMOVES ONLY WHAT IT CAN PROVE IS ITS OWN DEAD THING): a folder MARKED by a hub that is gone AND
+  // older than the life + 5 min (the release's age bar, kept) is removed (its whole tree); a gone hub's marked folder that is FRESH
+  // stays (a run in another pid space reads as gone, yet a live run is never that old); a LIVE hub's marked folder stays, whatever
+  // its age; a folder of the name with NO mark is LEFT, however old; a non-mint dir stays
+  const OMk = require(path.join(REPO, 'src/owner-mark.js')), PIm = require(path.join(REPO, 'src/proc-identity.js'));
+  const deadId = JSON.parse(require('child_process').execFileSync(process.execPath, ['-e', `console.log(JSON.stringify(require(${JSON.stringify(path.join(REPO, 'src/proc-identity.js'))}).identityOf(process.pid)))`], { encoding: 'utf8' }));
+  const liveKid = require('child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  try {
+    const liveId = PIm.identityOf(liveKid.pid);
+    const SRC7 = fs.readFileSync(ORCH, 'utf8');
+    const hourAgo = (Date.now() - 3600e3) / 1000;
+    const plant = (root) => {
+      fs.mkdirSync(root);
+      const d = { old: path.join(root, 'vs-oat-mint-OLD1'), fresh: path.join(root, 'vs-oat-mint-FRESH1'), live: path.join(root, 'vs-oat-mint-LIVE1'), unmarked: path.join(root, 'vs-oat-mint-NOMARK1'), other: path.join(root, 'vs-other-OLD') };
+      for (const x of Object.values(d)) { fs.mkdirSync(x); fs.writeFileSync(path.join(x, 'browser-url'), 'https://claude.example/x\n'); }
+      OMk.writeMark(d.old, deadId); fs.mkdirSync(path.join(d.old, '.claude')); fs.writeFileSync(path.join(d.old, '.claude', 'left.json'), '{}');   // a tree, as a CLI leaves one
+      OMk.writeMark(d.fresh, deadId); OMk.writeMark(d.live, liveId);
+      for (const x of [d.old, d.live, d.unmarked, d.other]) fs.utimesSync(x, hourAgo, hourAgo);   // FRESH stays fresh
+      return d;
+    };
+    const left = (d) => ({ old: fs.existsSync(d.old), fresh: fs.existsSync(path.join(d.fresh, OMk.OWNER_FILE)), live: fs.existsSync(path.join(d.live, OMk.OWNER_FILE)), unmarked: fs.existsSync(path.join(d.unmarked, 'browser-url')), other: fs.existsSync(d.other) });
+    const dN = plant(path.join(tmpBase, 'sweep-none'));
+    loadOrch(SRC7.replace('  sweep();\n', '')).create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep-none'), log: () => { } });
+    ok(fs.existsSync(dN.old), 'RED control: without the boot sweep the gone hub\'s marked folder stays');
+    const d = plant(path.join(tmpBase, 'sweep')), logs = [];
+    loadOrch().create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep'), log: (l) => logs.push(l) });
+    const L = left(d);
+    ok(!!liveId && !L.old && L.fresh && L.live && L.unmarked && L.other && logs.some((l) => /boot sweep: removed 1 /.test(l)),
+      'r1213: the boot sweep removes the folder a GONE hub marked that is older than the TTL + 5 min (its whole tree); a gone hub\'s FRESH marked folder, a LIVE hub\'s marked folder and an UNMARKED folder of the name stay (the last two an hour old); a non-mint dir stays', { L, logs });
+    // RED (a) — the release's sweep by AGE alone (the mark test cut; its anchor found once): the hour-old UNMARKED folder is removed
+    const A7 = "        if (!OM.provenDead(p)) continue;\n        OM.removeMarked(p); n++;\n", B7 = "        fs.rmSync(p, { recursive: true, force: true }); n++;\n";   // stale-pins: kept (a RED's replacement text — the release's line, gone from the product on purpose)
+    const AGE7 = "        if (!st.isDirectory() || (process.getuid && st.uid !== process.getuid()) || now() - st.mtimeMs < sweepAgeMs) continue;\n", NOAGE7 = "        if (!st.isDirectory() || (process.getuid && st.uid !== process.getuid())) continue;\n";
+    const fA = SRC7.split(A7).length - 1, fG = SRC7.split(AGE7).length - 1;
+    const dA = plant(path.join(tmpBase, 'sweep-red-age')); if (fA === 1) loadOrch(SRC7.split(A7).join(B7)).create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep-red-age'), log: () => { } });
+    const LA = left(dA);
+    ok(fA === 1 && !LA.unmarked, 'RED (a) — the release\'s sweep by age alone (its anchor found once): the hour-old UNMARKED folder of the name is removed — the leg above goes red there', { fA, LA });
+    // RED (b) — the mark test ALONE (the age bar cut): the gone hub's FRESH folder is removed — the leg above goes red there
+    const dB = plant(path.join(tmpBase, 'sweep-red-mark')); if (fG === 1) loadOrch(SRC7.split(AGE7).join(NOAGE7)).create({ accounts: am, tmpRoot: path.join(tmpBase, 'sweep-red-mark'), log: () => { } });
+    const LB = left(dB);
+    ok(fG === 1 && !LB.fresh && LB.unmarked, 'RED (b) — the mark test alone without the age bar (its anchor found once): the gone hub\'s FRESH marked folder is removed (a live mint in another pid space would be) — the leg above goes red there', { fG, LB });
+    // r1213: THE MARK IS THE FOLDER'S FIRST FILE — a mint's scratch carries this hub's identity before anything else is made in it
+    const orderOf = (O, rootO) => {
+      fs.mkdirSync(rootO);
+      const made = [], saved = { openSync: fs.openSync, writeFileSync: fs.writeFileSync };
+      const under = (q) => { try { return path.dirname(String(q)).startsWith(path.join(rootO, 'vs-oat-mint-')); } catch { return false; } };
+      let opts = null;
+      const fake = { onData() { }, onExit() { }, write() { }, kill() { } };
+      const M = O.create({ accounts: am, claudeCmd: '/opt/claude', env: baseEnv(), tmpRoot: rootO, log: () => { }, spawnPty: (file, args, o) => { opts = o; return fake; } });
+      const accM = am.createSubscription({ name: 'Mark order' }).id;
+      fs.openSync = function (q, ...rest) { if (under(q)) made.push(path.basename(String(q))); return saved.openSync.call(this, q, ...rest); };
+      fs.writeFileSync = function (q, ...rest) { if (under(q)) made.push(path.basename(String(q))); return saved.writeFileSync.call(this, q, ...rest); };
+      let st = null; try { st = M.start({ accountId: accM }); } finally { Object.assign(fs, saved); }
+      const dir = opts && opts.cwd, mark = dir ? OMk.ownerOf(dir) : null;
+      M.stopAll();
+      return { ok: !!(st && st.ok), made, mark, gone: !!dir && !fs.existsSync(dir) };
+    };
+    const me = PIm.identityOf(process.pid), od = orderOf(loadOrch(), path.join(tmpBase, 'mark-order'));
+    ok(od.ok && od.made[0] === OMk.OWNER_FILE && od.made.length >= 2 && od.mark && od.mark.pid === process.pid && me && String(od.mark.starttime) === String(me.starttime) && od.gone,
+      'r1213: a mint\'s scratch folder\'s FIRST file is this hub\'s owner mark (its pid and start), then the rest; the mint\'s end removes the folder, the mark with it', od);
+    // RED — the mark written AFTER the opener (an in-place copy; its anchors found once): the order leg goes red there
+    const MK7 = "    try { fs.chmodSync(dir, 0o700); OM.writeMark(dir, ownerId); } catch (e) { OM.removeMarked(dir); throw e; }", ENV7 = "    const e = childEnv(dir);\n";
+    const fM = SRC7.split(MK7).length - 1, fE = SRC7.split(ENV7).length - 1;
+    const odR = fM === 1 && fE === 1 ? orderOf(loadOrch(SRC7.split(MK7).join('    fs.chmodSync(dir, 0o700);').split(ENV7).join('    OM.writeMark(dir, ownerId);\n' + ENV7)), path.join(tmpBase, 'mark-order-red')) : null;   // stale-pins: kept (a RED's replacement text — the release's line, gone from the product on purpose)
+    ok(!!odR && odR.ok && odR.made[0] !== OMk.OWNER_FILE && odR.made.includes(OMk.OWNER_FILE), 'RED — the mark written after the opener (its anchors found once; the copy\'s mint still starts): the folder\'s first file is not the mark — the order leg goes red there', { fM, fE, made: odR && odR.made });
+  } finally { try { liveKid.kill('SIGKILL'); } catch { } }
   const child = path.join(tmpBase, 'hub-child.cjs');
   fs.writeFileSync(child, `const O = require(${JSON.stringify(ORCH)}); const { AccountManager } = require(${JSON.stringify(path.join(REPO, 'src/accounts.js'))});
 const am = new AccountManager({ dataDir: process.argv[2] }); const id = am.createSubscription({ name: 'Child' }).id;

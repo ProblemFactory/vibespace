@@ -1000,7 +1000,7 @@ console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program o
     };
     const ul = await unlinkOrder(DOOR);
     ok(ul.n === 1 && ul.gone && ul.order.length === 3 && ul.order[2] === DOOR.OWNER_FILE, 'r1152: a dead folder is shredded MARK LAST — every value file first, then .owner, then the folder', ul);
-    const FOR_LINE = "  for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));\n", MARK_ANY = "  if (names.includes(OWNER_FILE)) shredFile(path.join(dir, OWNER_FILE));\n", LEFT_LINE = "  if (left && left.length === 1 && left[0] === OWNER_FILE) shredFile(path.join(dir, OWNER_FILE));\n";
+    const FOR_LINE = "  for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));\n", MARK_ANY = "  if (names.includes(OWNER_FILE)) shredFile(path.join(dir, OWNER_FILE));\n", LEFT_LINE = "  if (left && left.length === 1 && left[0] === OWNER_FILE) shredFile(path.join(dir, OWNER_FILE));\n";   // stale-pins: kept (MARK_ANY is the r1152 line, a RED's replacement — gone from the door on purpose)
     const markFirst = M.load('src/server/vault-run-door.js', anchored(anchored(SRCs, FOR_LINE, MARK_ANY + FOR_LINE, 'test-vault-run ⑥b r1152 mark-first'), LEFT_LINE, '', 'test-vault-run ⑥b r1152 mark-first (its last line)'), 'r1152-mark-first');
     const ulR = await unlinkOrder(markFirst);
     ok(ulR.n === 1 && ulR.order.length === 3 && ulR.order[0] === DOOR.OWNER_FILE, 'RED — a shred that takes the mark FIRST (its plant proves itself: three files were unlinked): the mark-last leg goes red there', ulR);
@@ -1072,31 +1072,81 @@ console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program o
     };
     const sh = await shortOf(DOOR);
     ok(sh.shorts === 1 && !sh.ok && sh.code === 'spawn_failed' && !sh.ran && sh.dirs === 0, 'r1213 (b): the mark\'s write is CHECKED — a write one byte short is a failed mark: spawn_failed, nothing ran, no run folder left', sh);
-    const unchecked = M.load('src/server/vault-run-door.js', anchored(SRCo, MARK_W, "      try { fs.writeSync(ofd, JSON.stringify(hubIdentity || { pid: process.pid })); } finally { fs.closeSync(ofd); }\n", 'test-vault-run ⑥b r1213 mark-unchecked'), 'r1213-mark-unchecked');
+    const unchecked = M.load('src/server/vault-run-door.js', anchored(SRCo, MARK_W, "      try { fs.writeSync(ofd, JSON.stringify(hubIdentity || { pid: process.pid })); } finally { fs.closeSync(ofd); }\n", 'test-vault-run ⑥b r1213 mark-unchecked'), 'r1213-mark-unchecked');   // stale-pins: kept (the release's unchecked write is this RED's replacement — gone from the door on purpose)
     const shR = unchecked ? await shortOf(unchecked) : null;
     ok(!!unchecked && shR && shR.shorts === 1 && shR.ok && shR.ran, 'RED — the unchecked write (the release\'s line; its plant proves itself: the mark was written short): the run GOES over a torn mark — the leg above goes red there', shR);
   }
-  // r1152 (A — the suites' hygiene): NO SUITE'S SCRATCH WEARS A NAME A PRODUCT SWEEPER OWNS — the scratch helper refuses the
-  // vault run door's folder shape by name (as it refuses `ab`), and no tracked suite asks for it (a census over scripts/)
+  // r1152 (A — the suites' hygiene) + r1213 (THE CLASS): NO SUITE'S SCRATCH WEARS A NAME A PRODUCT SWEEPER OWNS, AND NO PRODUCT
+  // SWEEPER IS OFF THE TABLE. src/temp-sweepers.js is the product's table of every file that removes folders under the temp root
+  // by a name prefix; the scratch helper refuses each row's prefix by READING it. This census holds (1) every src file that
+  // sweeps by such a prefix to a row, and every row to a live sweep whose exported constant IS the row's prefix; (2) the refusal
+  // of every row through each door into scratch(); (3) no tracked script asking for a row's shape — a scratch / scratchDir /
+  // mutantCopies name, or a mkdtemp under the temp folder. Each half has its RED over a planted text
   {
     const SCR = await import(pathToFileURL(path.join(REPO, 'scripts/scratch.mjs')).href);
     const GE = await import(pathToFileURL(path.join(REPO, 'scripts/git-env.mjs')).href);   // the tree's git env (a caller's GIT_DIR never steers the census)
-    const FG = R('src/fixture-guard.js');
+    const FG = R('src/fixture-guard.js'), TS = R('src/temp-sweepers.js');
     const MCm = await import(pathToFileURL(path.join(REPO, 'scripts/mutant-copy.mjs')).href);
     const refusedBy = (fn) => { try { fn(); return null; } catch (e) { return String(e.message || e); } };
-    const VR_ = ['vault', 'run'].join('-');   // built at run time: the census below reads LITERALS, and these probes are the refusal's own
-    const r1 = refusedBy(() => SCR.scratch(VR_)), r2 = refusedBy(() => SCR.scratch(VR_ + '-mut')), ok3 = refusedBy(() => SCR.scratch('vaultrun-census-probe'));
-    const r4 = refusedBy(() => SCR.scratchDir(VR_ + '-x')), r5 = refusedBy(() => MCm.mutantCopies(VR_, REPO));   // the two doors into scratch() a suite uses
-    const shapeIsTheDoors = FG.FIXTURE_CWD_PREFIX + 'vault-run-' === DOOR.RUN_DIR_PREFIX;
-    const names = [];
-    let listed = [];
-    try { listed = require('child_process').execFileSync('git', ['ls-files', '--', 'scripts/*.mjs', 'scripts/*.cjs', 'scripts/*.js'], { cwd: REPO, encoding: 'utf8', env: GE.gitEnvFrom(process.env) }).split('\n').filter(Boolean); } catch (e) { names.push(`git ls-files failed: ${String((e && e.message) || e).slice(0, 120)}`); }
-    for (const f of listed) {
-      const t = fs.readFileSync(path.join(REPO, f), 'utf8');
-      for (const m of t.matchAll(/\b(?:scratchDir|scratch|mutantCopies)\(\s*(['"`])([a-z0-9-]+)\1/g)) if (/^vault-run(?:-|$)/.test(m[2])) names.push(`${f}: ${m[2]}`);
-    }
-    ok(/would mint \/tmp\/vs-vault-run-<pid> — the vault run door's own run-folder shape/.test(r1 || '') && /vs-vault-run-mut-<pid>/.test(r2 || '') && /vs-vault-run-x-<pid>/.test(r4 || '') && /vs-vault-run-mut-<pid>/.test(r5 || '') && ok3 === null && shapeIsTheDoors && listed.length > 100 && !names.length,
-      'r1152 (A): the scratch helper REFUSES by name a folder in the vault run door\'s shape — through scratch(), scratchDir() and mutantCopies() (vault-run ⇒ vs-vault-run-<pid>; a copies folder vault-run-mut) — that shape IS the door\'s RUN_DIR_PREFIX, another name passes, and no tracked script asks for it in any quote (the census over scripts/, git failing is a red by name)', { r1, r2, r4, r5, ok3, shapeIsTheDoors, listed: listed.length, names });
+    const problems = [];
+    const lsOf = (globs) => { try { return require('child_process').execFileSync('git', ['ls-files', '--', ...globs], { cwd: REPO, encoding: 'utf8', env: GE.gitEnvFrom(process.env) }).split('\n').filter(Boolean); } catch (e) { problems.push(`git ls-files failed: ${String((e && e.message) || e).slice(0, 120)}`); return []; } };
+    const textsOf = (rels) => rels.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf8')]);
+    // (1) THE PRODUCT SIDE: a file sweeps by a prefix when it tests names with startsWith(<a 'vs-<word>-' prefix>) — a literal or a
+    // const of its own — AND removes something; every such (file, prefix) is a row, every row is such a pair, the row's `export`
+    // is the file's const of that very prefix and is exported
+    const FOLDER_PREFIX = /^vs-[a-z0-9]+(?:-[a-z0-9]+)*-$/;
+    const REMOVES = /\b(?:rmSync|rmdirSync|unlinkSync|shredDir|removeMarked)\(|\bfsp?\.rm\(|\bfs\.promises\.rm\(/;
+    const constOf = (text, id) => { const d = new RegExp(`\\bconst\\s+${id}\\s*=\\s*(['"\`])([^'"\`]*)\\1`).exec(text); return d ? d[2] : null; };
+    const sweepsOf = (text) => {
+      if (!REMOVES.test(text)) return [];
+      const out = new Set();
+      for (const m of text.matchAll(/\.startsWith\(\s*(?:(['"`])([^'"`]*)\1|([A-Za-z_$][\w$]*))\s*\)/g)) { const v = m[2] != null ? m[2] : constOf(text, m[3]); if (v != null && FOLDER_PREFIX.test(v)) out.add(v); }
+      return [...out];
+    };
+    const productCensus = (files, rows) => {
+      const bad = [], found = new Map();
+      for (const [rel, text] of files) { const ps = sweepsOf(text); if (ps.length) found.set(rel, { ps, text }); }
+      for (const [rel, { ps }] of found) for (const pf of ps) if (!rows.some((r) => r.file === rel && r.prefix === pf)) bad.push(`${rel} sweeps «${pf}…» and is no row of src/temp-sweepers.js`);
+      for (const r of rows) {
+        const f = found.get(r.file);
+        if (!f || !f.ps.includes(r.prefix)) { bad.push(`row ${r.file} «${r.prefix}» names no live sweep (a dead row)`); continue; }
+        if (constOf(f.text, r.export) !== r.prefix || !new RegExp(`module\\.exports\\s*=\\s*\\{[^}]*\\b${r.export}\\b`).test(f.text)) bad.push(`row ${r.file}: its exported ${r.export} is not «${r.prefix}»`);
+        if (!r.prefix.startsWith(FG.FIXTURE_CWD_PREFIX) || !String(r.proof || '').trim()) bad.push(`row ${r.file}: no proof, or a prefix scratch could never mint`);
+      }
+      return bad;
+    };
+    const SRC_FILES = textsOf(lsOf(['src/*.js', 'server.js']));
+    const prodBad = productCensus(SRC_FILES, TS.ROWS);
+    const plantSweep = productCensus([...SRC_FILES, ['src/server/planted-sweeper.js', "const P = 'vs-planted-x-';\nfor (const f of names) if (f.startsWith(P)) fs.rmSync(path.join(root, f), { recursive: true });\nmodule.exports = { P };\n"]], TS.ROWS);
+    const plantDead = productCensus(SRC_FILES, [...TS.ROWS, { file: 'src/server/gone-sweeper.js', export: 'P', prefix: 'vs-gone-x-', proof: 'a plant' }]);
+    ok(SRC_FILES.length > 500 && TS.ROWS.length === 3 && !prodBad.length && plantSweep.length === 1 && /planted-sweeper\.js sweeps «vs-planted-x-…» and is no row/.test(plantSweep[0]) && plantDead.length === 1 && /gone-sweeper\.js «vs-gone-x-» names no live sweep/.test(plantDead[0]),
+      'r1213 (THE CLASS, the product side): every src file that removes folders by a vs-<word>- name prefix is a row of src/temp-sweepers.js (the vault run door, the sign-in card\'s scratch, the token mint\'s), each row a live sweep whose exported prefix IS the row\'s — RED: a planted sweeper off the table is named, a planted dead row is named', { files: SRC_FILES.length, rows: TS.ROWS.map((r) => r.prefix), prodBad, plantSweep, plantDead });
+    // (2) THE REFUSAL, read from the table: every row through scratch(), a copies folder, scratchDir() and mutantCopies()
+    const refusals = TS.ROWS.map((r) => {
+      const nm = r.prefix.slice(FG.FIXTURE_CWD_PREFIX.length, -1);
+      const said = [refusedBy(() => SCR.scratch(nm)), refusedBy(() => SCR.scratch(nm + '-mut')), refusedBy(() => SCR.scratchDir(nm + '-x')), refusedBy(() => MCm.mutantCopies(nm, REPO))];
+      return { row: r.file, nm, ok: said.every((w) => w && w.includes(`the folder shape of ${r.file}`) && w.includes(`/tmp/${r.prefix}`)) };
+    });
+    const passes = refusedBy(() => SCR.scratch('vaultrun-census-probe')) === null && SCR.sweeperRowOf('oat') === null && SCR.sweeperRowOf('signincard') === null;
+    const planted = SCR.sweeperRowOf('zz-planted', [...TS.ROWS, { file: 'src/server/planted.js', prefix: 'vs-zz-planted-' }]);
+    ok(refusals.every((x) => x.ok) && passes && planted && planted.file === 'src/server/planted.js' && SCR.sweeperRowOf('zz-planted') === null,
+      'r1152 (A) + r1213: the scratch helper REFUSES, by reading the table, a name that would mint ANY row\'s folder shape — through scratch(), a copies folder (<name>-mut), scratchDir() and mutantCopies(); a name beside a row\'s (oat, signincard, vaultrun…) passes — RED: a row planted in the table is refused, the same name without it passes', { refusals, passes, planted: planted && planted.file });
+    // (3) THE SUITES: no tracked script asks for a row's shape — a scratch / scratchDir / mutantCopies name (a copies folder is
+    // <name>-mut), or a mkdtemp under the temp folder (path.join(os.tmpdir(), '<lit>'), os.tmpdir() + '/<lit>')
+    const scriptsCensus = (files, rows) => {
+      const bad = [];
+      for (const [rel, t] of files) {
+        for (const m of t.matchAll(/\b(scratchDir|scratch|mutantCopies)\(\s*(['"`])([a-z0-9-]+)\2/g)) { const names = m[1] === 'mutantCopies' ? [m[3], m[3] + '-mut'] : [m[3]]; for (const nm of names) { const r = SCR.sweeperRowOf(nm, rows); if (r) bad.push(`${rel}: ${m[1]}('${m[3]}') wears ${r.prefix}…`); } }
+        for (const m of t.matchAll(/mkdtemp(?:Sync)?\(\s*(?:path\.join\(\s*(?:os\.)?tmpdir\(\)\s*,\s*|(?:os\.)?tmpdir\(\)\s*\+\s*)(['"`])\/?([^'"`$]+)\1/g)) { const r = TS.rowOfName(m[2], rows); if (r) bad.push(`${rel}: mkdtemp '${m[2]}' wears ${r.prefix}…`); }
+      }
+      return bad;
+    };
+    const SCRIPT_FILES = textsOf(lsOf(['scripts/*.mjs', 'scripts/*.cjs', 'scripts/*.js']));
+    const scrBad = scriptsCensus(SCRIPT_FILES, TS.ROWS);
+    const SIGN = ['sign', 'in'].join('');   // built at run time: the census reads LITERALS, and these plants are its own
+    const plantScr = scriptsCensus([['scripts/test-planted.mjs', `const a = scratch('${SIGN}-x');\nconst b = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oat-${'mint'}-y-'));\n`]], TS.ROWS);
+    ok(SCRIPT_FILES.length > 100 && !problems.length && !scrBad.length && plantScr.length === 2 && plantScr.some((l) => /scratch\('signin-x'\) wears vs-signin-/.test(l)) && plantScr.some((l) => /mkdtemp 'vs-oat-mint-y-' wears vs-oat-mint-/.test(l)),
+      'r1152 (A) + r1213: no tracked script asks for a row\'s shape — no scratch / scratchDir / mutantCopies name and no mkdtemp under the temp folder (test-signin-card-ui\'s folder renamed) — RED: a planted scratch(\'signin-…\') and a planted mkdtemp of vs-oat-mint-… are each named', { scripts: SCRIPT_FILES.length, problems, scrBad, plantScr });
   }
   try { liveKid.kill('SIGKILL'); } catch { }
   // THE STORE'S MARK: a non-hex mark reads as empty (never a throw); a restored OLDER copy is a replay

@@ -25,6 +25,7 @@ import { createRequire } from 'node:module';
 import { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD } from './scratch-run.mjs';
 const require = createRequire(import.meta.url);
 const { FIXTURE_CWD_PREFIX, TMP_ROOTS, FIXTURE_SID_PREFIX } = require('../src/fixture-guard.js');
+const TEMP_SWEEPERS = require('../src/temp-sweepers.js');   // r1213: the PRODUCT's table of its temp-root sweepers (pure)
 export { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD };
 
 /** The first-run Welcome wizard is skipped when localStorage 'vs-onboarded' is
@@ -73,15 +74,21 @@ const MINTED = (globalThis[Symbol.for('vibespace.scratch.minted')] ??= new Map()
  *  hub writes it with these headers, so «who may write» has one place in the tests too (test-spend-rows-owner ⑤ is the census). */
 export function ownerPageHeaders(base) { return { Origin: new URL(base).origin, 'Sec-Fetch-Site': 'same-origin' }; }
 
+/** r1213: the temp-sweeper row (src/temp-sweepers.js) whose prefix the folder a scratch NAME mints (`vs-<name>-<pid>`) would wear,
+ *  or null — `rows` for a census's plant. */
+export function sweeperRowOf(name, rows = TEMP_SWEEPERS.ROWS) { return TEMP_SWEEPERS.rowOfName(`${FIXTURE_CWD_PREFIX}${name}-`, rows); }
+
 export function scratch(name) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`scratch(): bad name ${JSON.stringify(name)}`);
   // lane H verify r2: `vs-ab-<n>` is the PRODUCT's socket-dir fallback shape (src/browser-profiles.js socketDirDecision),
   // which the scratch reaper (scripts/ci.mjs PRODUCT_ROOT_RE) never judges — a suite minting it would hide from the sweep
   if (name === 'ab') throw new Error('scratch(): "ab" would mint /tmp/vs-ab-<pid> — the product\'s own socket-dir shape; pick another name');
-  // r1152 (A — the suites' hygiene): `vault-run…` would mint /tmp/vs-vault-run-…, the PRODUCT's vault-run folder shape
-  // (src/server/vault-run-door.js RUN_DIR_PREFIX), which a hub's start sweep judges: on 2026-11-21 another suite's hub shredded
-  // a running test-vault-run's copies. No suite's folder wears a name a product sweeper owns (a mutant-copy folder is `<name>-mut`)
-  if (/^vault-run(?:-|$)/.test(name)) throw new Error(`scratch(): "${name}" would mint /tmp/vs-${name}-<pid> — the vault run door's own run-folder shape (vs-vault-run-…, which a hub's start sweep judges); pick another name`);
+  // r1152 (A — the suites' hygiene) + r1213 (THE CLASS): no suite's folder wears a name a PRODUCT SWEEPER owns — every row of
+  // src/temp-sweepers.js (the product's own table of the files that remove folders under the temp root by a name prefix: the
+  // vault run door's run folders, the sign-in card's scratch, the token mint's) is refused by READING that table, never a hand
+  // list: on 2026-11-21 another suite's hub shredded a running test-vault-run's copies (a mutant-copy folder is `<name>-mut`)
+  const sw = sweeperRowOf(name);
+  if (sw) throw new Error(`scratch(): "${name}" would mint /tmp/${FIXTURE_CWD_PREFIX}${name}-<pid> — the folder shape of ${sw.file} (${sw.prefix}…, which a hub's start sweep judges); pick another name`);
   if (MINTED.has(name)) return MINTED.get(name);
   let p = path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}${name}-${process.pid}`);
   if (fs.existsSync(p)) p = leftoverAside(p);
