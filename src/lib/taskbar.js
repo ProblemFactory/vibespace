@@ -129,12 +129,10 @@ function switchWindowItems(app, selfId) {
  * Rebuild the taskbar items from the current window state.
  * Called as app.updateTaskbar() — the App method delegates here.
  */
-export function updateTaskbar(app) {
-  const container = document.getElementById('taskbar-items');
+// Collect visible entries + per-entry star prefix (one sidebar map instead
+// of an Array.find per window) — updateTaskbar's and the frame's later text paint's ONE list (B-6cf9 follow)
+function _stripEntries(app) {
   const activeDesk = app.desktopManager?.activeDesktopId;
-
-  // Collect visible entries + per-entry star prefix (one sidebar map instead
-  // of an Array.find per window)
   const webuiIdToSession = new Map();
   for (const s of app.sidebar?._allSessions || []) { if (s.webuiId) webuiIdToSession.set(s.webuiId, s); }
   const entries = [];
@@ -158,6 +156,15 @@ export function updateTaskbar(app) {
     }
     entries.push({ id, win, starPrefix, group });
   }
+  return entries;
+}
+/** the strip's two names over its entries (PURE taskbar-fit.js stripKeys) */
+const _stripNames = (entries) => stripKeys(entries.map((e) => ({ id: e.id, title: e.win.title, star: e.starPrefix,
+  group: e.group ? { tabs: e.group.tabWins.map((x) => ({ id: x.id, title: x.win.title })), active: e.group.active } : null })));
+export function updateTaskbar(app) {
+  const container = document.getElementById('taskbar-items');
+  const activeDesk = app.desktopManager?.activeDesktopId;
+  const entries = _stripEntries(app);
 
   // Structure unchanged → update state classes in place. onWindowsChanged
   // fires on EVERY focus (each mousedown); a full innerHTML rebuild + listener
@@ -166,13 +173,11 @@ export function updateTaskbar(app) {
   // order, a group's tab ids and active tab) rebuilds the tiles; its TEXT (a title, a star, a group's tab titles) is
   // painted IN PLACE by paintTaskbarText — a title used to rebuild every tile, so a press whose down and up straddled it
   // had its up on a new element and fired no click. A press across a real STRUCTURE change may still be lost (kb-features).
-  const { structure: structKey, text: textKey } = stripKeys(entries.map((e) => ({ id: e.id, title: e.win.title, star: e.starPrefix,
-    group: e.group ? { tabs: e.group.tabWins.map((x) => ({ id: x.id, title: x.win.title })), active: e.group.active } : null })));
+  const { structure: structKey, text: textKey } = _stripNames(entries);
   if (container._structKey === structKey) {
-    if (container._textKey !== textKey) {
+    if (container._textKey !== textKey && _textPaintNow(app)) {   // B-6cf9 follow: at most once a frame (the first change at once)
       container._textKey = textKey;
-      const byId = new Map(entries.map((e) => [e.id, e]));
-      for (const el of container.children) { const e = byId.get(el.dataset.winId); if (e && paintTaskbarText(app, el, e)) paintTile(app, el); } // a refilled icon takes its warmth ring again
+      _paintTextInPlace(app, container, entries);
     }
     for (const el of container.children) _applyTaskbarItemState(app, el);
   } else {
@@ -305,7 +310,41 @@ function showHiddenTiles(app, chip) {
 // one markup it sets is the product's own type icon, as the builder always did. An icon is refilled only when ITS key
 // changed (a press on an icon kept still keeps its element too); → true when an icon was refilled (its warmth ring went
 // with it: the caller paints it again).
+// The icon key only DETECTS a change (refill when it moved); _buildStackIcon's own key (`_typeIcon || type`) decides which
+// layers a group's stack draws. They need not match: a window with no type icon refills its stack once more, nothing else
+// (round wc34w0kxj's should — do not «align» one to the other)
 const _tileIconKey = (w) => (w?.backendIconSlot?.children.length ? 'b:' + w.backendIconSlot.children[0].outerHTML : 't:' + (w?._typeIcon || ''));
+// B-6cf9 FOLLOW (the coordinator's r1649; round wc34w0kxj's should): THE STRIP'S TEXT IS PAINTED AT MOST ONCE A FRAME. The first
+// change of a frame paints at once (a rename reads in place the moment it is made, and a press across it keeps its tile); a
+// burst's later changes wait for the next frame, which runs updateTaskbar once more and paints what the strip says THEN — a
+// title that ticks many times a second no longer walks the strip on every call. A frame = the next animation frame, or 100 ms
+// when the page draws none (a hidden page still paints, later).
+let _textPaintedThisFrame = false, _textPaintDue = false;
+// (its one callback is named apart: test-late-focus §4 marks by NAME every function a timer is handed — the group chooser's own
+// keydown helper is a `go`, and a timer's `go` here made that key handler's focus read as late)
+const _nextFrame = (fn) => { let done = false; const _frameDone = () => { if (done) return; done = true; clearTimeout(t); fn(); }; const t = setTimeout(_frameDone, 100); requestAnimationFrame(_frameDone); };
+function _textPaintNow(app) {
+  if (!_textPaintedThisFrame) { _textPaintedThisFrame = true; _nextFrame(() => { _textPaintedThisFrame = false; }); return true; }
+  if (!_textPaintDue) { _textPaintDue = true; _nextFrame(() => { _textPaintDue = false; _paintTextLater(app); }); }
+  return false;
+}
+// the burst's later paint, on its frame: the TEXT ONLY, painted in place when the strip's structure is still the one drawn (a
+// structure change runs its own updateTaskbar, which rebuilds). It reaches no builder and no other road: the late-focus census
+// (test-late-focus §4) follows every call a frame callback makes within this file, and a rebuild's builders lead to the group
+// chooser's keyboard focus
+function _paintTextLater(app) {
+  const container = document.getElementById('taskbar-items');
+  if (!container) return;
+  const entries = _stripEntries(app);
+  const { structure, text } = _stripNames(entries);
+  if (container._structKey !== structure || container._textKey === text || !_textPaintNow(app)) return;
+  container._textKey = text;
+  _paintTextInPlace(app, container, entries);
+}
+function _paintTextInPlace(app, container, entries) {
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  for (const el of container.children) { const e = byId.get(el.dataset.winId); if (e && paintTaskbarText(app, el, e)) paintTile(app, el); } // a refilled icon takes its warmth ring again
+}
 function paintTaskbarText(app, item, { win, starPrefix, group }) {
   const title = item.querySelector(':scope > .taskbar-text > .taskbar-title');
   const subtitle = item.querySelector(':scope > .taskbar-text > .taskbar-subtitle');
@@ -384,8 +423,12 @@ function _rebuildTaskbarItems(app, container, entries) {
     });
     item.addEventListener('dragend', () => app.desktopManager?.dragDone?.()); // its drag over — a sprung desktop list closes (lane desktop-small r3 ①)
     item.addEventListener('click', () => {
+      // B-6cf9 follow (round wc34w0kxj's should): the window AT THE ACT, by its id — never the object this tile was built with
+      // (a title change no longer rebuilds the tile, so a build-time object could outlive the window it named)
+      const w = app.wm.windows.get(id);
+      if (!w) return;
       // the focused window's tile minimizes it — unless its title bar is out of reach: then the click brings it back (lane desktop-small P2-1)
-      if (!win.isMinimized && id === app.wm.activeWindowId && app.wm.isReachable?.(id) !== false) { app.wm.witnessGeometry?.(id); app.wm.minimize(id); } // the user's act: witnessed (verify r4 ③)
+      if (!w.isMinimized && id === app.wm.activeWindowId && app.wm.isReachable?.(id) !== false) { app.wm.witnessGeometry?.(id); app.wm.minimize(id); } // the user's act: witnessed (verify r4 ③)
       else activateWindow(app, id); // restore a minimized one, else focus + raise (the grouped button's activation too)
     });
     // Right-click context menu for window recovery

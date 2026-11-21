@@ -592,6 +592,43 @@ const stripRebuildFact = async (id) => {
   await ready();
   return { control, planted };
 };
+/** B-6cf9 FOLLOW (the coordinator's r1649; round wc34w0kxj's should, lens 3): THE PAINTER'S OWN LEG — the fast tier sees only
+ *  the strip's two names (taskbar-fit.js stripKeys), never the paint. (1) a single tile's window renamed reads its new title on
+ *  THE SAME tile element; (2) a GROUPED tab renamed while its group's chooser is open reads its new title in the chooser's row;
+ *  each with 0 rebuilds of #taskbar-items; (3) five renames in ONE task are painted at most twice (the first at once, the rest on
+ *  the next frame — the paint is bounded to once a frame) and the tile ends on the last. RED on fc086a05f: (3) painted five
+ *  times. Every read waits for a frame; the explorers it opens are closed and the title put back. */
+const paintInPlaceFact = async (id) => evalJs(`(async () => {
+  const strip = document.getElementById('taskbar-items'); if (!strip) return { error: 'no #taskbar-items' };
+  const frame = () => new Promise((r) => { const t = setTimeout(r, 200); requestAnimationFrame(() => { clearTimeout(t); r(); }); });
+  const tileOf = (wid) => strip.querySelector('.taskbar-item[data-win-id="' + wid + '"]');
+  let removed = 0; const mo = new MutationObserver((ms) => { for (const m of ms) removed += m.removedNodes.length; }); mo.observe(strip, { childList: true });
+  const out = {}; const w0 = app.wm.windows.get(${J(id)}); const t0 = w0 ? String(w0.title) : '';
+  try {
+    await frame(); await frame(); removed = 0;
+    const el0 = tileOf(${J(id)}); app.wm.setTitle(${J(id)}, t0 + ' · renamed'); await frame();
+    const el1 = tileOf(${J(id)});
+    out.single = { same: !!el0 && el0 === el1, tip: el1 ? el1.title : null, want: t0 + ' · renamed', removed };
+    const a = app.openFileExplorer('/tmp'), b = app.openFileExplorer('/usr'); out.ids = { a: a && a.id, b: b && b.id };
+    app.wm.createTabChain(a, b); await frame(); await frame();
+    app.wm.focusWindow(a.id); await frame();
+    const g0 = strip.querySelector('.taskbar-group[data-win-id="' + a.id + '"]'); if (g0) g0.click(); await frame();
+    const pop = document.querySelector('.taskbar-group-chooser'); removed = 0;
+    app.wm.setTitle(b.id, 'B · renamed'); await frame();
+    const row = pop && pop.querySelector('.overlap-switcher-item[data-win-id="' + b.id + '"] .taskbar-chooser-label');
+    out.group = { tile: !!g0, chooser: !!pop && pop.isConnected, row: row ? row.textContent : null, same: !!g0 && g0 === strip.querySelector('.taskbar-group[data-win-id="' + a.id + '"]'), removed };
+    if (pop) pop.remove();
+    app.wm.closeWindow(b.id); app.wm.closeWindow(a.id); await frame(); await frame();
+    const el2 = tileOf(${J(id)}); let paints = 0; const mo2 = el2 ? new MutationObserver((ms) => { paints += ms.length; }) : null;
+    if (mo2) mo2.observe(el2, { attributes: true, attributeFilter: ['title'] });
+    for (let i = 1; i <= 5; i++) app.wm.setTitle(${J(id)}, t0 + ' · ' + i);
+    await frame(); await frame(); await frame();
+    if (mo2) mo2.disconnect();
+    out.burst = { paints, tip: el2 ? el2.title : null, want: t0 + ' · 5' };
+  } catch (e) { out.error = String((e && e.message) || e); }
+  finally { mo.disconnect(); if (w0) app.wm.setTitle(${J(id)}, t0); }
+  return out;
+})()`);
 /** the legs RED in the control, shared by both runs (`red` = the mutant: the verdicts are inverted) */
 const legDragOverTaskbar = async (tag) => {
   await closeAll(); await attach(0); await attach(1); await attach(2);
@@ -773,6 +810,9 @@ const runViewport = async ([VW, VH], font) => {
       const f = await stripRebuildFact(d.id);
       console.log(`  ⓘ B-6cf9 ${tag}: the CONTROL press (no title change) ${f.control.pressed ? (f.control.took ? 'TOOK (minimized)' : 'did NOT take') : 'was not made: ' + f.control.why} · the PLANTED press (its title changed in its own mousedown) ${f.planted.pressed ? (f.planted.took ? 'TOOK (minimized)' : 'did NOT take') + (f.planted.rebuiltBetween ? ', the strip rebuilt between its press and release' : ', no rebuild between its press and release') : 'was not made: ' + f.planted.why} — the control's record ${J(f.control.rec)} · the plant's record ${J(f.planted.rec)}`);
       check(`① ${tag}: B-6cf9 — a tile press whose window's title changes in its own mousedown TAKES (minimized), the strip NOT rebuilt between its press and release (${f.planted.rebuilds} rebuilds), as the control's press (${f.control.took ? 'took' : 'did NOT take'}) — the title is painted in place (the base rebuilt every tile and lost the press)`, f.control.pressed && f.control.took && f.planted.pressed && f.planted.planted === true && f.planted.took && f.planted.rebuilds === 0, f);
+      const pf = await paintInPlaceFact(d.id);   // B-6cf9 follow (r1649): the painter's own leg
+      check(`① ${tag}: B-6cf9 follow — a tile's window renamed reads its new title on THE SAME tile, a grouped tab renamed while its chooser is open reads it in the chooser's row, 0 rebuilds of the strip (${pf.single && pf.single.removed} / ${pf.group && pf.group.removed}); five renames in one task painted ${pf.burst && pf.burst.paints} time(s) (at most twice: once a frame) and ending on the last`,
+        !pf.error && !!pf.single && pf.single.same && pf.single.tip === pf.single.want && pf.single.removed === 0 && !!pf.group && pf.group.tile && pf.group.chooser && pf.group.same && pf.group.removed === 0 && typeof pf.group.row === 'string' && pf.group.row.includes('B · renamed') && !!pf.burst && pf.burst.paints >= 1 && pf.burst.paints <= 2 && pf.burst.tip === pf.burst.want, pf);
     }
     check(`① ${tag}: …and its tile, clicked twice, leaves it reachable (${d.afterTiles.bar[0]}×${d.afterTiles.bar[1]})`, d.pressed && reachableBar(d.afterTiles) && !d.afterTiles.min, d.pressed ? d.afterTiles : { notPressed: 'the tile was not on screen', strip: d.strip });
     await layout('freeform');
