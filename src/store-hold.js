@@ -166,11 +166,21 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   let owed = null;           // { produce, code, why, since, rung, tries } — a write the storage refused, kept until one lands
   let owedTimer = null;
   const named = (e) => !!e && (e.code === 'store_unread' || e.code === 'store_appeared');   // a refusal BY NAME, never a storage failure
-  const owedFacts = () => (owed ? { file: path.basename(file), code: owed.code, why: owed.why, since: owed.since, rung: owed.rung } : null);
-  /** ONE try of what `produce()` makes ([next, bytes], or null: nothing to write) → { landed, error } */
+  // (the page-facing facts carry no `why`: the raw error names the temp path under the data folder — it stays in the hub's journal)
+  const owedFacts = () => (owed ? { file: path.basename(file), code: owed.code, since: owed.since, rung: owed.rung } : null);
+  /** ONE try of what `produce()` makes ([next, bytes], or null: nothing to write — never a landing) → { landed, nothing, error } */
   function tryWrite(produce) {
-    try { const made = produce(); if (made) write(made[0], made[1]); return { landed: true }; }
+    try { const made = produce(); if (!made) return { landed: false, nothing: true }; write(made[0], made[1]); return { landed: true }; }
     catch (error) { return { landed: false, error }; }
+  }
+  /** the owed chain ENDS without a landing (nothing to write any more, or a refusal by name): no «written again», no onSaved — its
+   *  timer goes with it (round wg2vawd0o: one clearing on every road) */
+  function endOwed(why) {
+    if (!owed) return null;
+    const was = owedFacts(); owed = null;
+    if (owedTimer) { (schedule ? null : clearTimeout(owedTimer)); owedTimer = null; }
+    log.warn?.(`[store-hold] ${path.basename(file)}: the owed write ends — ${why}`);
+    return was;
   }
   function landed() {
     if (!owed) return;
@@ -192,9 +202,9 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     owed.tries++;
     const r = tryWrite(owed.produce);
     if (r.landed) { landed(); return true; }
+    if (r.nothing) { endOwed('nothing to write any more (the store was read again)'); return false; }   // round wg2vawd0o: nothing written is no landing
     if (named(r.error)) {   // the store is held or adopted now: no change of the caller's lands over it — the owed write ends, said by name
-      const was = owedFacts(); owed = null;
-      log.warn?.(`[store-hold] ${path.basename(file)}: the owed write ends — ${(r.error && r.error.message) || r.error}`);
+      const was = endOwed((r.error && r.error.message) || String(r.error));
       try { onOwedRefused?.(r.error, was); } catch { /* the caller's */ }
       return false;
     }
@@ -209,7 +219,8 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   function flush(produce, { press = false } = {}) {
     const r = tryWrite(produce);
     if (r.landed) { landed(); return true; }
-    if (named(r.error)) throw r.error;
+    if (r.nothing) { endOwed('nothing to write any more'); return true; }   // nothing owed: no landing said, nothing kept
+    if (named(r.error)) { endOwed((r.error && r.error.message) || String(r.error)); throw r.error; }   // the same clearing as the ladder's road
     const code = (r.error && r.error.code) || null, why = String((r.error && r.error.message) || r.error).slice(0, 200);
     if (!owed) { owed = { produce, code, why, since: now(), rung: 'silent', tries: 0 }; log.warn?.(`[store-hold] ${path.basename(file)} could not be written (${code || why}) — the change is kept in memory and written again`); }
     else { owed.produce = produce; owed.code = code || owed.code; owed.why = why; }

@@ -56,6 +56,8 @@ export function noteStoreLifted(file) {
   if (!f) return;
   gen++;
   HELD.delete(f); QUIET.delete(f);
+  UNSAVED.delete(f);   // B-225b (round wg2vawd0o): a store read again owes no write of this page's — an owed write that ENDED BY NAME (the
+                       // store held, a file that appeared) says only this word; its «not being saved» never stays up until a reconnect
   draw();
   for (const fn of [...(LIFTS.get(f) || [])]) { try { fn(); } catch (e) { console.warn(`[store-held] a reader of ${f} failed at its lift`, e); } }
 }

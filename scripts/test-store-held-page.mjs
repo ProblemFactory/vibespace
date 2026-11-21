@@ -623,6 +623,11 @@ console.log('§8 a write the storage refused: the strip says «not being saved»
     && /if \(own && msg\.rid && msg\.rid === own\.rid\) \{ if \(msg\.unsaved\) \{ noteStoreUnsaved\(msg\.unsaved\); own\.unsaved\(\); \} else own\.landed\(\); return; \}/.test(APP)
     && /if \(res\?\.code === 'store_unsaved'\) \{ own\.over = true;[^\n]*showToast\(res\.error \|\| storeRestoreUnsavedWords\(\), \{ type: 'error'/.test(SF) && /own\.unsaved = \(\) => end\(\{ code: 'store_unsaved', error: storeRestoreUnsavedWords\(\) \}\);/.test(SF),
     'the page\'s wiring: the hub\'s two words reach the strip; the restoring page\'s own broadcast with the unsaved fact says the refusal (never «restored»), and so does its POST\'s 503 (pins)');
+  // (round wg2vawd0o) an owed write that ENDED BY NAME says only `store-lifted`: the strip lets «not being saved» go at that word
+  const liftClears = (S) => { S.noteStoreUnsaved(UNS('layouts.json')); S.noteStoreLifted('layouts.json'); const left = S.storesUnsaved().length; S.noteStoreSaved('layouts.json'); return left; };
+  ok(liftClears(SH) === 0, 'the store read again (store-lifted) also takes «not being saved» off: an owed write that ended by name never keeps the strip up until a reconnect');
+  const NOLIFT = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), /^ {2}UNSAVED\.delete\(f\);[^\n]*\n[^\n]*\n/m, '', 'lift-keeps-unsaved'), 'lift-keeps-unsaved');
+  ok(liftClears(NOLIFT) === 1, 'CONTROL (the lift without the clearing, in a copy): the strip keeps «not being saved» for a store whose owed write ended — red');
   const CUT = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), "  const unsavedText = unsaved.length ? storeUnsavedWords(unsaved) : '';", "  const unsavedText = '';   // MUTANT: the unsaved sentence cut", 'unsaved-cut'), 'unsaved-cut');
   const cm = CUT.stripModel([], { unsaved: [UNS('layouts.json')] });
   ok(!!cm && cm.unsavedText === '', 'CONTROL (the strip\'s unsaved sentence cut, in a copy): the word arrives and the strip says nothing of it — red', J(cm && cm.unsavedText));

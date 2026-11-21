@@ -2788,6 +2788,45 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         const H = SH.create({ file: F, valid: (v) => !!v && typeof v === 'object', schedule: () => ({}), log: { warn() { } } }); H.readAtStart();
         let code = null; try { H.flush(() => [{ v: 1 }]); } catch (e) { code = e.code; }
         ok(code === 'store_unread' && H.owed() === null, '⑪ (m) a refusal BY NAME is no storage failure: a held store\'s flush throws store_unread and owes nothing', { code }); }
+      // ROUND wg2vawd0o's FOLLOW (主开发 r721): nothing to write is no landing; a refusal BY NAME inside a flush ends the owed chain the
+      // same as on the ladder's road; the page-facing facts carry no `why` (the raw error names a path under the data folder)
+      {
+        const SHREL = 'src/store-hold.js', SHSRC = fs.readFileSync(path.join(REPO, SHREL), 'utf8');
+        const nothingScene = (M, tag) => {
+          const d = scratchDir('owed-nothing-' + tag); roots.push(d); const F = path.join(d, 'store.json'); fs.writeFileSync(F, JSON.stringify({ v: 0 }));
+          const timers = [], said = [], saved = [], warns = [];
+          const H = M.create({ file: F, schedule: (fn) => { timers.push(fn); return {}; }, onUnsaved: (u) => said.push(u), onSaved: (u) => saved.push(u), log: { warn: (l) => warns.push(String(l)) } });
+          H.readAtStart();
+          let first = true;
+          H.flush(() => { if (first) { first = false; throw refusedWrite(); } return null; }, { press: true });   // said at once, then nothing to write
+          for (let i = 0; i < 12 && timers.length; i++) timers.shift()();   // bounded: a copy whose chain never ends re-arms
+          return { said: said.length, saved: saved.length, owed: H.owed(), ends: warns.some((l) => /the owed write ends — nothing to write/.test(l)), again: warns.some((l) => /is written again/.test(l)), facts: said[0] || null };
+        };
+        const nt = nothingScene(SH, 'real');
+        ok(nt.said === 1 && nt.saved === 0 && nt.owed === null && nt.ends && !nt.again && nt.facts && !('why' in nt.facts),
+          '⑪ (m) nothing to write is NO landing: an owed write whose producer has nothing left ends quietly — no «written again», no lift said over nothing written; the said facts carry no `why`', nt);
+        const XN = nothingScene(mutantCopies('swc-owed-nothing', REPO).load(SHREL, anchored(SHSRC, "if (!made) return { landed: false, nothing: true }; write(made[0], made[1]); return { landed: true };", "if (made) write(made[0], made[1]); return { landed: true };", 'owed-nothing'), 'owed-nothing'), 'red');   // stale-pins: kept (the OLD line, rebuilt for the red copy)
+        ok(XN.saved === 1 && XN.again, 'CONTROL (nothing to write counted as landed, in a copy): «written again» and the lift said over a write that never happened — red', XN);
+        const namedScene = (M, tag) => {
+          const d = scratchDir('owed-named-' + tag); roots.push(d); const F = path.join(d, 'store.json');   // NOT THERE at the start: its first write is an exclusive create
+          const timers = [];
+          const H = M.create({ file: F, schedule: (fn) => { timers.push(fn); return {}; }, log: { warn() { } } });
+          H.readAtStart();
+          H.flush(() => { throw refusedWrite(); });   // owed
+          fs.writeFileSync(F, JSON.stringify({ v: 'appeared' }));   // a file that appeared (a late mount)
+          let code = null; try { H.flush(() => [{ v: 'memory' }]); } catch (e) { code = e.code; }
+          const owedAfter = H.owed();
+          for (let i = 0; i < 12 && timers.length; i++) timers.shift()();   // a stale rung, if one was left armed (bounded: a copy re-arms)
+          return { code, owedAfter, disk: JSON.parse(fs.readFileSync(F, 'utf8')).v };
+        };
+        const nm = namedScene(SH, 'real');
+        ok(nm.code === 'store_appeared' && nm.owedAfter === null && nm.disk === 'appeared', '⑪ (m) a refusal BY NAME inside a flush (a file appeared) ENDS the owed chain — its timer and its producer go, the same as on the ladder\'s road; the appeared file is kept', nm);
+        const XNM = namedScene(mutantCopies('swc-owed-named', REPO).load(SHREL, anchored(SHSRC, "if (named(r.error)) { endOwed((r.error && r.error.message) || String(r.error)); throw r.error; }", "if (named(r.error)) throw r.error;", 'owed-named'), 'owed-named'), 'red');   // stale-pins: kept (the OLD line, rebuilt for the red copy)
+        ok(XNM.code === 'store_appeared' && XNM.owedAfter !== null, 'CONTROL (the flush\'s named road without the clearing, in a copy): the owed chain stays armed over a store that was adopted — red', { owed: XNM.owedAfter });
+        const PV = fs.readFileSync(path.join(REPO, 'src/routes/persistence.js'), 'utf8');
+        ok((PV.match(/if \(!landed && !layoutsHold\.owed\(\)\) return res\.status\(409\)\.json\(restoreDropped\(\)\);/g) || []).length === 2 && /const restoreDropped = \(\) => \(\{ error: 'the restore was not made: layouts\.json appeared since VibeSpace started[^']*', code: 'store_appeared' \}\);/.test(PV),
+          '⑪ (m) both restore doors: a write that ended BY NAME (a file appeared — the restore dropped, the file adopted) answers the store\'s own appeared refusal and broadcasts nothing — never «kept in memory and written again» (pins)');
+      }
       // THE DESKTOPS (src/routes/persistence.js): the autosave's flush, a press's, the stop's, and the two restore doors
       const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
       const freshP = () => { for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; return require(path.join(REPO, PREL)); };
@@ -2820,7 +2859,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const u = W('store-unsaved')[0];
       const landedAfter = M.R.flushLayouts();
       const heldAfter = await M.call('get', '/api/stores/held');
-      ok(pr === false && !!u && u.file === 'layouts.json' && u.code === 'EIO' && u.rung === 'said' && heldNow.body.unsaved.length === 1 && heldNow.body.unsaved[0].file === 'layouts.json'
+      ok(pr === false && !!u && u.file === 'layouts.json' && u.code === 'EIO' && u.rung === 'said' && !('why' in u) && heldNow.body.unsaved.length === 1 && heldNow.body.unsaved[0].file === 'layouts.json' && !('why' in heldNow.body.unsaved[0])
         && landedAfter === true && W('store-saved').length === 1 && W('store-saved')[0].file === 'layouts.json' && heldAfter.body.unsaved.length === 0 && (M.disk().desktops.a.autoSave.windows || []).length === 4,
         '⑪ (m) the desktops: a press\'s refused flush is SAID to every page at once (store-unsaved: the file, its code) and listed for a page that was away (GET /api/stores/held → unsaved); the next landing LIFTS it (store-saved) with memory\'s desktops on disk', { u, unsaved: heldNow.body.unsaved, landedAfter, saved: W('store-saved') });
       // the stop: a last flush that fails is the journal's line, by the store's name

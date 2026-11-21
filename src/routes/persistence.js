@@ -192,6 +192,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   /** the restore door's answer when its write did not land (B-225b's second half): BY NAME — never «restored» over a write the storage
    *  refused; the restore stands in memory (every page shows it) and is written by the hold's ladder */
   const restoreUnsaved = () => { const o = layoutsHold.owed() || {}; return { error: `restored here, but NOT saved: layouts.json could not be written (${o.code || o.why || 'write failed'}) — the restore is kept in memory and written again by itself; a restart before it lands brings back the older desktops`, code: 'store_unsaved', unsaved: { file: 'layouts.json', code: o.code || null, since: o.since || null } }; };
+  /** a restore whose write ended BY NAME (a saved layouts.json appeared since the start — read and kept, the restore dropped): the
+   *  store's own appeared refusal, never «kept in memory and written again» (round wg2vawd0o) */
+  const restoreDropped = () => ({ error: 'the restore was not made: layouts.json appeared since VibeSpace started — it was read and kept; restore again', code: 'store_appeared' });
   /** the layout-restored broadcast with the unsaved fact riding it: the restoring page says the refusal, never «restored» */
   const toldUnsaved = (told) => { const o = layoutsHold.owed() || {}; const w = JSON.parse(told); return JSON.stringify({ ...w, unsaved: { file: 'layouts.json', code: o.code || null, since: o.since || null } }); };
   /** → true when the desktops are on disk. A write the storage refuses is OWED (the hold keeps trying, says it past the silent rungs,
@@ -577,6 +580,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       noteLayout({ via: 'restore', from: id, desktop: only });
       writeLayouts(doc);
       const landed = flushLayouts({ press: true });   // B-225b's second half: a restore that did not land never looks landed
+      if (!landed && !layoutsHold.owed()) return res.status(409).json(restoreDropped());   // (round wg2vawd0o) ended by name: nothing kept
       try {
         const word = landed ? told : toldUnsaved(told);
         wss?.clients?.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(word); } catch {} } });
@@ -616,6 +620,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     noteLayout({ via: 'restore', from: id }); // the restore's own write names it (its point's `writer`)
     writeLayouts(saved.layouts);
     const landed = flushLayouts({ press: true });   // B-225b's second half: a restore that did not land never looks landed
+    if (!landed && !layoutsHold.owed()) return res.status(409).json(restoreDropped());   // (round wg2vawd0o) ended by name: nothing kept
     // BROADCAST (adversarial review): every other layout mutation broadcasts;
     // this one did not. Another open tab keeps its pre-restore state and the
     // next window change there writes that desktop's OLD window set straight
