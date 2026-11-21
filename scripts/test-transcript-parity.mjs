@@ -83,6 +83,31 @@ const cxRecords = [
 ];
 fs.writeFileSync(path.join(cxDir, `rollout-2026-08-10T12-00-00-${TID}.jsonl`), cxRecords.map((r) => JSON.stringify(r)).join('\n') + '\n');
 
+// B-9a2e part 1 — WHAT VIBESPACE SENT, READ ON THE PAIRED MACHINE: VibeSpace's continue in a stopped codex conversation (X; X2 the
+// same records under another id, for the control), a codex native fork of it (Y, Y2: a Referenced fork — its read PREPENDS X's
+// records, so X's id is consulted too) and a claude one (C, C2). The rows are the hub's (installed below); the agent has none.
+const SR_CONT = 'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.';
+const SR = { X: 'cccccccc-1111-2222-3333-000000000001', X2: 'cccccccc-1111-2222-3333-000000000002', Y: 'cccccccc-1111-2222-3333-000000000003', Y2: 'cccccccc-1111-2222-3333-000000000004', C: 'eeeeeeee-1111-2222-3333-000000000001', C2: 'eeeeeeee-1111-2222-3333-000000000002' };
+const srAt = Date.UTC(2026, 7, 10, 12, 0, 30);   // the continue's send; its record lands 2 s later (inside the match window)
+const srTs = (s) => new Date(srAt + s * 1000).toISOString();
+const srLines = (recs) => recs.map((r) => JSON.stringify(r)).join('\n') + '\n';
+for (const id of [SR.X, SR.X2]) fs.writeFileSync(path.join(cxDir, `rollout-2026-08-10T12-00-30-${id}.jsonl`), srLines([
+  { timestamp: srTs(0), type: 'session_meta', payload: { id, cwd: CWD } },
+  { timestamp: srTs(1), type: 'turn_context', payload: { model: 'gpt-5.6', cwd: CWD } },
+  { timestamp: srTs(2), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: SR_CONT }] } },
+  { timestamp: srTs(3), type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'continuing 继续' }], id: 'item_sr_' + id.slice(-1) } },
+]));
+for (const id of [SR.Y, SR.Y2]) fs.writeFileSync(path.join(cxDir, `rollout-2026-08-10T12-01-00-${id}.jsonl`), srLines([
+  { timestamp: srTs(30), type: 'session_meta', payload: { id, cwd: CWD, forked_from_id: SR.X, forked_from_ordinal_exclusive: 99 } },
+  { timestamp: srTs(31), type: 'turn_context', payload: { model: 'gpt-5.6', cwd: CWD } },
+  { timestamp: srTs(32), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'the fork asks 世界' }] } },
+  { timestamp: srTs(33), type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'fork reply' }], id: 'item_fk_' + id.slice(-1) } },
+]));
+for (const id of [SR.C, SR.C2]) fs.writeFileSync(path.join(PROJ, id + '.jsonl'), srLines([
+  { type: 'user', uuid: 'sru-' + id.slice(-1), timestamp: srTs(2), sessionId: id, promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: SR_CONT }] } },
+  { type: 'assistant', uuid: 'sra-' + id.slice(-1), timestamp: srTs(3), sessionId: id, requestId: 'req_sr' + id.slice(-1), message: { id: 'msg_sr' + id.slice(-1), model: 'claude-fable-5', role: 'assistant', content: [{ type: 'text', text: 'continuing 继续' }] } },
+]));
+
 // lane chat-attachments-persist (the cut): a conversation whose tool results carry pictures — the main file and a
 // sub-agent's (<session>/subagents/agent-<id>.jsonl), as the real 2.1.322 writes them
 const PSID = '9a9a9a9a-1111-2222-3333-444444444444', PAG = 'a0b1c2d3e4f50617';   // an id no other leg of this suite writes
@@ -237,6 +262,49 @@ try { await dm.transcriptOp('rm-rf', ref, {}); } catch (e) { unknownErr = e; }
 ok(unknownErr && /unknown transcript method/.test(unknownErr.message), 'unknown method surfaces as a NAMED error, never hangs');
 const missing = await dm.transcriptOp('gapInfo', { backend: 'claude', sessionId: 'ffffffff-0000-0000-0000-000000000000', cwd: CWD }, {});
 ok(missing.hasFile === false && missing.gap === null, 'missing transcript answers honestly (hasFile:false), not an error');
+
+// B-9a2e part 1 — THE HUB'S ROWS ON THE PAIRED MACHINE. The hub's read (its record installed as the PURE module's source) and the
+// REAL agent's read handed {id: rows} by THE ONE HELPER (sent-provenance sentFor; the agent's hand → release) are byte-identical:
+// VibeSpace's continue keeps its origin on both. The parity of this suite is the law: the agent runs the same shared module.
+{
+  const SP = require(REPO + '/src/sent-provenance.js');
+  const row = SP.rowOf(SR_CONT, 'auto-resume', srAt);
+  const hubRows = Object.fromEntries(Object.values(SR).map((id) => [id, [row]]));
+  SP.setSource((conv) => hubRows[conv] || null);
+  const sentParity = async (name, ref, method, params, from) => {
+    const full = async () => { const g2 = await svc.gapInfo(ref); return { turns: g2.fp ? await svc.fullTurnmap(ref, g2.fp) : [], ...(g2.gap || {}) }; };   // the agent's op shape
+    const hub = J(await (method === 'page' ? svc.page(ref, params) : method === 'turnmap' ? svc.turnmap(ref) : full()));
+    const dev = J(await dm.transcriptOp(method, ref, { ...params, sent: SP.sentFor(ref.sessionId, from) }));
+    ok(dev === hub && hub.includes('auto-resume'), `B-9a2e ${name}: the agent handed the hub's rows answers BYTE-IDENTICAL to the hub's own read — VibeSpace's continue keeps its origin (${hub.length}b)`);
+    if (dev !== hub) console.error('    diff ' + firstDiff(hub, dev));
+    return hub;
+  };
+  const bareOf = async (ref, method) => J(await dm.transcriptOp(method, ref, {}));
+  try {
+    const ref = (id, backend = 'codex') => ({ backend, sessionId: id, cwd: CWD });
+    const hubX = await sentParity('codex page', ref(SR.X), 'page', {});
+    await sentParity('codex turnmap', ref(SR.X), 'turnmap', {});
+    await sentParity('codex fullTurnmap', ref(SR.X), 'fullTurnmap', {});
+    const bareX2 = await bareOf(ref(SR.X2), 'page');
+    ok(!bareX2.includes('auto-resume') && bareX2.replaceAll(SR.X2, SR.X) !== hubX, 'B-9a2e CONTROL: the same records under another id, the op WITHOUT the rows (the road before this unit) — the agent reads the continue as the person\'s');
+    await sentParity('codex FORK page (the parent\'s records prepended: the parent\'s id handed beside the fork\'s)', ref(SR.Y), 'page', {}, [SR.X]);
+    const ownOnly = J(await dm.transcriptOp('page', ref(SR.Y2), { sent: SP.sentFor(SR.Y2) }));
+    ok(!ownOnly.includes('auto-resume'), 'B-9a2e CONTROL: the fork handed ONLY its own id\'s rows — the parent\'s continue reads as the person\'s on the agent (why the helper hands every id the read consults)');
+    // THE HUB'S OWN ROAD to the real agent (src/transcript-service.js tryDevice): a fork the hub cannot name the parent of — the agent's
+    // ack names the parent its read consulted with nothing handed, the hub hands it in ONE more ask: the hub's own read, byte for byte
+    const asks = [];
+    const counted = { connect: () => dm.connect(), transcriptOp: (m, r2, p, info) => { asks.push(Object.keys((p && p.sent) || {}).join('+')); return dm.transcriptOp(m, r2, p, info); } };
+    const roadSvc = createTranscriptService({ activeSessions: new Map(), createSessionMessages: (s) => (s?.backend === 'codex' ? new CodexSessionMessages(s, undefined, {}) : new SessionMessages(s, undefined, {})), hosts: { deviceBounded: async () => counted } });
+    const viaRoad = J(await roadSvc.page({ ...ref(SR.Y2), host: 'h-paired' }, {}));
+    const hubY2 = J(await svc.page(ref(SR.Y2), {}));
+    ok(viaRoad === hubY2 && hubY2.includes('auto-resume') && asks.join() === `${SR.Y2},${SR.Y2}+${SR.X}`, `B-9a2e: the hub's road to the paired machine — the fork's parent, named by the agent's ack, handed in one more ask: BYTE-IDENTICAL to the hub's own read (asks: ${asks.join(' | ')})`);
+    if (viaRoad !== hubY2) console.error('    diff ' + firstDiff(hubY2, viaRoad));
+    await sentParity('claude page', ref(SR.C, 'claude'), 'page', {});
+    await sentParity('claude turnmap', ref(SR.C, 'claude'), 'turnmap', {});
+    const bareC2 = await bareOf(ref(SR.C2, 'claude'), 'page');
+    ok(!bareC2.includes('auto-resume') && bareC2.includes('"typed":true'), 'B-9a2e CONTROL (claude): the op without the rows — the continue reads as typed by the person');
+  } finally { SP.setSource(null); }
+}
 
 os.homedir = origHomedir;
 // Teardown: the daemon keeps writing its state files while it shuts down, so a

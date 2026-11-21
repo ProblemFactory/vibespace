@@ -25,6 +25,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';   // (mutant-copy.mjs loads scratch.mjs already)
 
 const T0 = process.hrtime.bigint();
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -537,6 +538,98 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
   const ui = read('src/server/user-input.js'), ar = read('src/server/auto-resume.js'), cd = read('src/server/conversation-deliver.js');
   ok('bound 2: the three send doors note their own sends (typed / dispatch / a group hand-over\'s peer frame at the typed door — B-02a3 at the 2.369.412 restack, auto-resume, peer) — and nothing else writes the record',
     /SENT\.note\(\{ conv: SENT\.convOf\(session\), text: wordsOfFrame\(text\), kind: handing \? 'peer' : human \? 'typed' : 'dispatch' \}\);/.test(ui) && /kind: 'auto-resume' \}\); return sent; \}/.test(ar) && /kind: kind === 'notification' \? 'notice' : 'peer' \}\);/.test(cd));
+  // B-9a2e — THE TWO REMAINDERS (主开发 r1119; the 11-17 cure's own read left them). PART 1: a stopped conversation read ON ITS
+  // PAIRED MACHINE — the device has no record, so the hub hands each transcript op {id: rows} through THE ONE HELPER
+  // (sent-provenance sentFor) behind the device's 'sent-rows' capability; the device holds them for that op (hand → release).
+  // The REAL agent's read is test-transcript-parity's (byte-identical to the hub's own); here the hub's side and the module's keep.
+  console.log('§5b B-9a2e part 1: the rows handed to the paired machine');
+  {
+    const TS_REL = 'src/transcript-service.js', TS_SRC = read(TS_REL);
+    const tmpd = fs.mkdtempSync(path.join(MUTC.dir, 'dev-'));
+    const fpd = path.join(tmpd, 'rollout.jsonl');
+    fs.writeFileSync(fpd, JSON.stringify({ timestamp: new Date(T0 + 20000).toISOString(), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: CONT }] } }) + '\n');
+    // THE STAND-IN DEVICE: what src/agentd/agentd.js's transcript-op does — the op's params.sent held by the shared module for THIS
+    // op (hand → release), then the shared module's read (the huge-session scan) — with the hub's record OFF while it plays the device
+    // (`consults`: the other ids its read consults — a fork's parent — and, as the agent does, the ack names those read with nothing handed)
+    const standIn = (caps, seen, consults = []) => ({
+      connect: async () => ({ info: { capabilities: caps } }),
+      transcriptOp: async (method, ref, params, info) => {
+        const entry = { method, sent: params && Object.prototype.hasOwnProperty.call(params, 'sent') ? Object.keys(params.sent || {}) : null };
+        seen.push(entry);
+        const hub = SP._source;
+        SP.setSource(null);
+        const mark = SP.unhandedMark(), release = SP.hand(params && params.sent);
+        try {
+          entry.parents = consults.map((id) => !!SP.rowsOf(id));   // the parent's rows reached this read or not
+          const turns = CX.scanJsonlUserTurns(fpd, ref.backend, SP.rowsOf(ref.sessionId));
+          if (info && params && params.sent) info.unhanded = SP.unhandedSince(mark);
+          return { turns, parents: entry.parents };   // the answer says what reached the read (as a page's stamps would)
+        } finally { release(); SP.setSource(hub); }
+      },
+    });
+    const viaDevice = async (TSmod, caps, { conv = 'th-dev', live = null, consults = [], svc = null, seen = [] } = {}) => {
+      const activeSessions = new Map(live ? [['w-live', live]] : []);
+      const s = svc || TSmod.createTranscriptService({ activeSessions, createSessionMessages: () => null, hosts: { deviceBounded: async () => standIn(caps, seen, consults) } });
+      const got = await s.fullTurnmap({ backend: 'codex', sessionId: conv, host: 'h-paired', cwd: '/w' }, '\u0000device:' + conv);
+      return { turns: got, seen, svc: s };
+    };
+    const hubRows = (conv) => (conv === 'th-dev' || conv === 'th-parent' || conv === 'th-kid' ? [SP.rowOf(CONT, 'auto-resume', T0)] : null);
+    SP._source = hubRows; SP.setSource(hubRows);
+    try {
+      const TS = require(path.join(REPO, TS_REL));
+      const now = await viaDevice(TS, ['transcript-op', 'sent-rows']), old = await viaDevice(TS, ['transcript-op']);
+      ok('PART 1: a stopped codex conversation read on its PAIRED machine (a stand-in device): the hub hands {its id: its rows} in the op\'s params and the device lists VibeSpace\'s «You can continue now…» as VibeSpace\'s — never the person\'s',
+        now.seen.length === 1 && now.seen[0].method === 'fullTurnmap' && JSON.stringify(now.seen[0].sent) === '["th-dev"]' && now.turns.length === 1 && now.turns[0].other === 'auto-resume', now);
+      ok('…an OLDER agent (no \'sent-rows\' in its capabilities) is never sent the field: today\'s answer (the person\'s), never a hang', old.seen.length === 1 && old.seen[0].sent === null && old.turns.length === 1 && !old.turns[0].other, old);
+      const empty = await viaDevice(TS, ['transcript-op', 'sent-rows'], { conv: 'th-none' });
+      ok('…a conversation the hub holds no rows for is still sent the field — {} (the device then holds nothing for the op: never an earlier op\'s rows)', empty.seen.length === 1 && JSON.stringify(empty.seen[0].sent) === '[]' && !empty.turns[0].other, empty);
+      const live = await viaDevice(TS, ['transcript-op', 'sent-rows'], { live: { backend: 'codex', backendSessionId: 'th-dev', host: 'h-paired', forkedFrom: ['th-parent', 'th-dev', 'not an id!'] } });
+      ok('…a live session not yet read here: the ids of its own chain (forkedFrom) are handed beside its own, each once, an id of the wrong shape never', live.seen.length === 1 && JSON.stringify(live.seen[0].sent) === '["th-dev","th-parent"]', live);
+      // a fork the hub never saw made (no link): the agent's ack names the parent its read consulted with nothing handed — the hub
+      // holds the parent's rows, so ONE more ask hands them; the next read of that conversation hands them at once (one ask); an id
+      // the hub holds no rows for is never asked again
+      const kidSeen = [];
+      const kid1 = await viaDevice(TS, ['transcript-op', 'sent-rows'], { conv: 'th-kid', consults: ['th-parent', 'th-nobody'], seen: kidSeen });
+      const asks1 = kidSeen.map((x) => x.sent.join('+'));
+      const kid2 = await viaDevice(TS, ['transcript-op', 'sent-rows'], { conv: 'th-kid', svc: kid1.svc, seen: kidSeen });
+      const asks2 = kidSeen.slice(asks1.length).map((x) => x.sent.join('+'));
+      const reached = kidSeen.map((x) => JSON.stringify(x.parents)).join(' ');
+      ok('…a read that consults an id the hub could not name (a fork made elsewhere): the agent names it, the hub hands it in ONE more ask (only an id it holds rows for — the parent\'s rows reach that read) and, as they changed the answer, remembers it for the conversation\'s next read',
+        JSON.stringify(asks1) === '["th-kid","th-kid+th-parent"]' && JSON.stringify(asks2) === '["th-kid+th-parent"]' && reached === '[false,false] [true,false] [true,false]', { asks1, asks2, reached });
+      let TSx = null, why = null;
+      try { TSx = MUTC.load(TS_REL, anchored(TS_SRC, "if (!SENT_OPS.has(method) || !caps.includes('sent-rows')) return await", 'if (true) return await', 'the op without the rows'), 'b9a2e-norows'); } catch (e) { why = e.message; }
+      const nx = TSx ? await viaDevice(TSx, ['transcript-op', 'sent-rows']) : null;
+      ok('CONTROL (the op without the rows — the road before this unit): the paired machine lists the continue as the person\'s — the leg goes RED', !!nx && nx.turns.length === 1 && !nx.turns[0].other, nx || why);
+    } finally { SP.setSource(null); delete SP._source; }
+    // THE DEVICE'S KEEP: per op and per id — two ops at once never see each other's ids; an id lives while an op holding it runs
+    SP.setSource(null);
+    const rowA = SP.rowOf(CONT, 'auto-resume', T0), rowB = SP.rowOf(NOTICE, 'notice', T0);
+    const k = (conv, text) => SP.kindFor({ conv, at: T0 + 1000, text });
+    const r1 = SP.hand({ 'th-a': [rowA] }), r2 = SP.hand({ 'th-a': [rowA], 'th-b': [rowB] }), r3 = SP.hand({ 'th-x': [{ at: T0, n: 1, h: 'nothex', k: 'typed' }, null], 'not an id!': [rowA] });
+    const during = [k('th-a', CONT), k('th-b', NOTICE), k('th-b', CONT), k('th-x', CONT), k('not an id!', CONT)];
+    r1(); const afterOne = k('th-a', CONT);
+    r2(); r2(); r3(); const afterAll = [k('th-a', CONT), k('th-b', NOTICE)];
+    const many = SP.hand(Object.fromEntries(Array.from({ length: SP.HAND_IDS_MAX + 4 }, (_, i) => ['th-m' + i, [rowA]])));
+    const held = Array.from({ length: SP.HAND_IDS_MAX + 4 }, (_, i) => k('th-m' + i, CONT)).filter(Boolean).length;
+    many(); const heldAfter = Array.from({ length: SP.HAND_IDS_MAX + 4 }, (_, i) => k('th-m' + i, CONT)).filter(Boolean).length;
+    ok('…the device holds the handed rows per op and per id: th-a\'s rows never answer th-b\'s read; a malformed row or id is dropped; an id stays while ANY op holding it runs and is gone when the last one ends (a second release does nothing); at most HAND_IDS_MAX ids per op',
+      JSON.stringify(during) === '["auto-resume","notice",null,null,null]' && afterOne === 'auto-resume' && JSON.stringify(afterAll) === '[null,null]' && held === SP.HAND_IDS_MAX && heldAfter === 0, { during, afterOne, afterAll, held, heldAfter });
+    SP.setLinks((id) => ({ 'th-y': ['th-x'], 'th-x': ['th-w', 'th-y'], 'th-w': ['not an id!'] })[id] || null);
+    const linked = SP.idsFor('th-y', ['th-live']), unlinkedBad = SP.idsFor('not an id!', ['th-x']);
+    SP.setLinks(null);
+    ok('…the helper names the ids each named id was adopted from (the links the hub\'s store installs — part 2): breadth first, oldest parents too, each once, a wrong-shaped id never; without the links only the conversation and the chain it was given',
+      JSON.stringify(linked) === '["th-y","th-live","th-x","th-w"]' && JSON.stringify(unlinkedBad) === '[]' && JSON.stringify(SP.idsFor('th-y', ['th-live'])) === '["th-y","th-live"]', { linked, unlinkedBad });
+    SP.setSource(null);
+    const um = SP.unhandedMark(), rq = SP.hand({ 'th-held': [rowA] });
+    k('th-held', CONT); k('th-asked', CONT); k('th-asked', CONT);
+    const named = SP.unhandedSince(um); rq();
+    ok('…the device notes each id read with nothing handed (once, the newest last) — never one it was handed; an op names those noted since it began', JSON.stringify(named) === '["th-asked"]' && JSON.stringify(SP.unhandedSince(SP.unhandedMark())) === '[]', named);
+    const AG = read('src/agentd/agentd.js');
+    ok('…the real device does what the stand-in does: its capabilities name \'sent-rows\' (after peer-post-wait — the list\'s head and its last twelve stay as the suites pin them) and its transcript-op hands msg.params.sent to the shared module before it reads, released on both roads out',
+      /'peer-post-wait' \/\*[^*]*\*\/, 'sent-rows' \/\* B-9a2e[^*]*\*\/, 'stream-offer',/.test(AG) && /sentMark = SPd\.unhandedMark\(\);\n {12}release = SPd\.hand\(msg\.params\?\.sent\);\n {12}let result;\n {12}if \(m === 'page'\)/.test(AG)
+      && /else throw new Error\('unknown transcript method: ' \+ m\);\n {12}release\(\);\n {12}const unhanded = msg\.params && msg\.params\.sent \? SPd\.unhandedSince\(sentMark\) : \[\];\n/.test(AG)
+      && /sending: buf\.length, \.\.\.\(unhanded\.length \? \{ unhanded \} : \{\}\) \}\);/.test(AG) && /\} catch \(e\) \{ release\(\); mux\.control\(\{ op: 'fs-result', id: msg\.id, error: e\.message \}\); \}/.test(AG));
+  }
 }
 
 const ms = Number(process.hrtime.bigint() - T0) / 1e6;

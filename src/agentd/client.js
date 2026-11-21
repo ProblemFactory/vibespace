@@ -1280,7 +1280,7 @@ class DeviceManager {
    *  the read-range count-gating contract (never resolve on the done marker:
    *  control overtakes data, 2.187.0). DARK: no production consumer yet — the
    *  parity suite is the only caller until the switchover round. */
-  async transcriptOp(method, ref, params = {}) {
+  async transcriptOp(method, ref, params = {}, info = null) {   // B-9a2e: `info` (optional) gets the ack's `unhanded` — the ids the read consulted with nothing handed
     const conn = await this.connect();
     const chan = conn.nextChan++;
     const chunks = [];
@@ -1305,6 +1305,7 @@ class DeviceManager {
     if (ack?.error) { cleanup(); throw new Error(ack.error); }
     if (typeof ack?.sending === 'number') sending = ack.sending;
     else { cleanup(); throw new Error('daemon lacks transcript-op counts'); }
+    if (info && typeof info === 'object') info.unhanded = Array.isArray(ack.unhanded) ? ack.unhanded.filter((x) => typeof x === 'string').slice(0, 16) : [];
     maybeFinish();
     await donePromise;
     return JSON.parse(Buffer.concat(chunks).toString('utf-8'));

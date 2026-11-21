@@ -63,14 +63,40 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   // normalizer, which the daemon-side service has no knowledge of — asking
   // the device there would drop the not-yet-flushed tail.
   let _devWarnedAt = 0;
+  // B-9a2e part 1: the ops whose answer draws the person's own rows carry the rows VibeSpace noted for every id the read may consult
+  // that the hub can name ({id: rows}, the PURE sent-provenance module's ONE helper sentFor — {} included, so the device never reads
+  // an earlier op's rows) to an agent that names 'sent-rows'; an older agent is never sent a field it does not know
+  const SENT_OPS = new Set(['page', 'turnmap', 'searchIndexed', 'gapSlab', 'fullTurnmap']);
+  // …and when the agent's answer names ids its read consulted with nothing handed (`unhanded`: a fork the hub never saw made) that
+  // the hub holds rows for, ONE more ask hands them (first: never cut by the cap); when they changed the answer they are remembered
+  // for that conversation's next reads (per machine: 4 ids, 256 conversations); a failed second ask leaves the first answer
+  const sentMore = new Map();
   async function tryDevice(r, method, params) {
     if (!r.host || !hosts?.deviceBounded) return undefined;
     if (liveWithHistory(r)) return undefined; // server-owned overlay wins
     try {
       const dm = await hosts.deviceBounded(r.host, 6000);
       if (!dm?.transcriptOp) return undefined;
-      if (!(await dm.connect?.())?.info?.capabilities?.includes?.('transcript-op')) return undefined;
-      return await dm.transcriptOp(method, { backend: r.backend, sessionId: r.sessionId, cwd: r.cwd }, params || {});
+      const caps = (await dm.connect?.())?.info?.capabilities;
+      if (!caps?.includes?.('transcript-op')) return undefined;
+      const dref = { backend: r.backend, sessionId: r.sessionId, cwd: r.cwd };
+      if (!SENT_OPS.has(method) || !caps.includes('sent-rows')) return await dm.transcriptOp(method, dref, params || {});
+      const SPh = require('./sent-provenance.js'), key = `${r.host}\n${r.sessionId}`;
+      const from = [...(sentMore.get(key) || []), ...(liveSession(r)?.forkedFrom || [])];
+      const sent = SPh.sentFor(r.sessionId, from), info = {};
+      const answer = await dm.transcriptOp(method, dref, { ...(params || {}), sent }, info);
+      const more = (info.unhanded || []).filter((id) => !Object.prototype.hasOwnProperty.call(sent, id) && (SPh.rowsOf(id) || []).length > 0).slice(0, 4);
+      if (!more.length) return answer;
+      let again;
+      try { again = await dm.transcriptOp(method, dref, { ...(params || {}), sent: SPh.sentFor(r.sessionId, [...more, ...from]) }); }   // the named ids first: never cut by the cap
+      catch { return answer; }   // the first answer stands (today's for those ids)
+      // remembered only when they changed the answer (an op beside this one may have named ids this read never consults)
+      if (JSON.stringify(again) !== JSON.stringify(answer)) {
+        const kept = (sentMore.get(key) || []).filter((id) => !more.includes(id));
+        sentMore.delete(key); sentMore.set(key, [...more, ...kept].slice(0, 4));
+        while (sentMore.size > 256) sentMore.delete(sentMore.keys().next().value);
+      }
+      return again;
     } catch (e) {
       // Degradation must be VISIBLE (the swallowed-degrade lesson): one log
       // per minute, then the legacy path runs — never a silent hang.

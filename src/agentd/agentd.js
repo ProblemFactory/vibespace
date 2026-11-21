@@ -2115,7 +2115,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'settings-merge' /* B-e7c0: a subscription pick's merge of the person's own settings file, made HERE */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'browser-stop-facts' /* B-e799: the stop answers its outcome in fields */, 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'peer-post-wait' /* B-95fc U2: peer-post's waitMs — the machine waits for its own registry record, then posts */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'settings-merge' /* B-e7c0: a subscription pick's merge of the person's own settings file, made HERE */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'browser-stop-facts' /* B-e799: the stop answers its outcome in fields */, 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'peer-post-wait' /* B-95fc U2: peer-post's waitMs — the machine waits for its own registry record, then posts */, 'sent-rows' /* B-9a2e: a transcript op's params may carry {id: rows} — what VibeSpace sent, held for that op's reads */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2438,10 +2438,17 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       if (msg.op === 'transcript-op') {
         (async () => {
           const rid = msg.id;
+          let release = () => { };
           try {
             const svc = getTranscriptService();
             const m = String(msg.method || '');
             const ref = { backend: msg.ref?.backend, sessionId: msg.ref?.sessionId, cwd: msg.ref?.cwd };
+            // B-9a2e part 1: what VibeSpace sent ({id: rows}, the hub's record) held for THIS op's reads by the shared module — the
+            // person's own rows keep their origin here as on the hub; released when the read ends (a later op never reads them).
+            // The ack names the ids the read consulted with nothing handed (`unhanded`, an op that carried `sent` only): the hub
+            // hands the ones it holds rows for in one more ask
+            const SPd = require('../sent-provenance.js'), sentMark = SPd.unhandedMark();
+            release = SPd.hand(msg.params?.sent);
             let result;
             if (m === 'page') result = await svc.page(ref, msg.params || {});
             else if (m === 'turnmap') result = await svc.turnmap(ref);
@@ -2470,8 +2477,10 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             // runs (src/transcript-picture.js); the hub asks only an agent whose hello-ack names 'transcript-picture'
             else if (m === 'picture') result = await svc.pictureHere(ref, { agent: msg.params?.agent || null, key: String(msg.params?.key || ''), n: Number(msg.params?.n) });
             else throw new Error('unknown transcript method: ' + m);
+            release();
+            const unhanded = msg.params && msg.params.sent ? SPd.unhandedSince(sentMark) : [];
             const buf = Buffer.from(JSON.stringify(result), 'utf-8');
-            mux.control({ op: 'fs-result', id: rid, size: buf.length, sending: buf.length });
+            mux.control({ op: 'fs-result', id: rid, size: buf.length, sending: buf.length, ...(unhanded.length ? { unhanded } : {}) });
             let sent = 0;
             const CHUNK = 65536;
             for (let o2 = 0; o2 < buf.length; o2 += CHUNK) {
@@ -2482,7 +2491,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               else await new Promise((r2) => setImmediate(r2));
             }
             mux.control({ op: 'fs-done', id: rid, chan: msg.chan, sent });
-          } catch (e) { mux.control({ op: 'fs-result', id: msg.id, error: e.message }); }
+          } catch (e) { release(); mux.control({ op: 'fs-result', id: msg.id, error: e.message }); }
         })();
         return;
       }
