@@ -274,9 +274,12 @@ try {
   check('no «Unknown event» / «New fields on a known record» card and none of their words in the chat', c1.unknown === 0 && !c1.words, c1);
   check('ONE line says «3 record kinds this version added — Diagnostics» (two invented record kinds, the grown result) — and the strip draws no chip for it', c1.chip === '3 record kinds this version added — Diagnostics' && /later-build-blob/.test(c1.title) && /result: new fields/.test(c1.title) && !c1.onStrip, c1);
   await png('1-turn-and-bar');
-  // its home: Session Properties' «At its start» section says it (opened as the person does, from the conversation)
-  await evalJs(`app.openSessionProps(window.__sid); true`);
+  // its home: Session Properties' «At its start» section says it — opened as the person's doors open it, on the conversation's
+  // sidebar ROW (session-card / the command pass the row; a bare webui id finds no row, the hosted run's red)
+  const rowSeen = await waitFor(`(app.sidebar._allSessions || []).some((s) => s.webuiId === window.__sid)`, 10000);
+  await evalJs(`app.openSessionProps((app.sidebar._allSessions || []).find((s) => s.webuiId === window.__sid)); true`);
   const sp = (await waitFor(`!!document.querySelector('.session-props-start')`, 8000)) ? await evalJs(`document.querySelector('.session-props-start').innerText`) : null;
+  console.log(`  the sidebar row seen: ${rowSeen}; «At its start» reads: ${JSON.stringify(sp)}`);
   check('…and Session Properties says it in «At its start» (the kinds\' home off the strip; ⚙ Diagnostics holds the builds without a record table)', !!sp && /3 record kinds this version added/.test(sp), sp);
   await evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x._sessionPropsKey); if (w) app.wm.closeWindow(w.id); return true; })()`);
 

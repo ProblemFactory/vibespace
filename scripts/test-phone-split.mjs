@@ -150,8 +150,11 @@ if (H) {
     'RED CONTROL: the round-1 rule (the part before « — », whole) names a files window by its path — at 669 px «/tm…», three glyphs of nothing; the module names the folder');
   const m2 = mutant('return Math.min(Math.max(0, Number(full) || 0), floorEm * (Number(em) || 0));', 'return Math.min(Math.max(0, Number(full) || 0), 3.5 * (Number(em) || 0));', HEAD_SRC);
   ok(H.nameFits(96, 300, 14, 96) && !H.nameFits(94, 300, 14, 96) && H.nameFits(79, 79, 14, 96) && !H.nameFits(104, 300, 14), 'the ladder\'s minimum is THE RELEASE\'S when measured (主开发 09:33Z: six CJK / twelve Latin glyphs + «…» — the 700 px tablet keeps its five): 96 px fits, 94 does not, a 79 px name whole fits; 8 em without it');
-  ok(/probe\.textContent = navTitleMinText\(name\); el\.appendChild\(probe\); const minPx = probe\.getBoundingClientRect\(\)\.width; probe\.remove\(\);/.test(read('src/lib/mobile-nav.js')) && /if \(nameFits\(el\.getBoundingClientRect\(\)\.width, el\.scrollWidth, em, minPx\)\) return;/.test(read('src/lib/mobile-nav.js')), 'the head measures that minimum in its own font and the ladder reads it');
+  ok(/probe\.textContent = navTitleMinText\(name\); el\.appendChild\(probe\); const minPx = probe\.getBoundingClientRect\(\)\.width; probe\.remove\(\);/.test(read('src/lib/mobile-nav.js')) && /if \(nameFits\(el\.getBoundingClientRect\(\)\.width, el\.scrollWidth, em, minPx\) && barFits\(lastRight\(nav\), nav\.getBoundingClientRect \? nav\.getBoundingClientRect\(\)\.right : Infinity\)\) return;/.test(read('src/lib/mobile-nav.js')), 'the head measures that minimum in its own font and the ladder reads it');
   ok(m2.nameFits(54, 300, 14) === true && H.nameFits(54, 300, 14) === false, 'RED CONTROL: round 1\'s 3.5 em floor calls 54 px («/tm…») enough; the module wants 8 em');
+  // (lane mask-value-shape, the strip's step two — the hosted test-duo-layout: at 669 × 867 the top bar's magnifier pushed ⚙ off
+  // the screen while the name still fit) the ladder also yields while the ROW overflows its bar: every button stays on screen
+  ok(H.barFits(348, 348) && H.barFits(349, 348) && !H.barFits(392, 348) && !H.barFits(350, 348), `the bar holds its buttons: a row as wide as its box (or within a px) fits, 44 px more does not (${[H.barFits(348, 348), H.barFits(349, 348), H.barFits(392, 348)].join('/')})`);
 }
 {
   const sv = read('src/lib/phone-split-view.js'), mn = read('src/lib/mobile-nav.js'), w = read('src/lib/window.js'), css = read('public/style.css');
@@ -162,7 +165,7 @@ if (H) {
     'no dead pair: «Split» beside a minimized window restores it BEFORE the pair is kept; a pane\'s window minimized / closed after it stood / moved away drops the pair at apply() with a toast (a window not built yet is none of these)');
   ok(/addEventListener\('pointerdown', \(e\) => \{ const w = e\.target\.closest\?\.\('\.window\.phone-pane'\); pressedAside = !!w && !w\.classList\.contains\('window-active'\); \}, true\);/.test(mn) && /if \(pressedAside\) \{ pressedAside = false; return; \}/.test(mn),
     'one tap = one act: the press on the pane NOT on show (read in the capture phase, before the press focuses it) only makes it the one on show — the switcher opens from the head of the pane on show');
-  ok(/import \{ headName, nameFits, YIELD_LADDER(?:, ROW_YIELD_LADDER, rowParts)? \} from '\.\.\/phone-head\.js';/.test(mn) && /const name = win \? \(headName\(win\.title\) \|\| windowKindWords\(win\.type\)\) : t\('No window'\);/.test(mn) && /el\.title = !home && full !== name \? full : t\('Switch window'\);/.test(mn) && /new ResizeObserver\(\(\) => this\._paintHead\(\)\)\.observe\(document\.getElementById\('mobile-nav'\)\)/.test(mn)
+  ok(/import \{ headName, nameFits, (?:barFits, )?YIELD_LADDER(?:, ROW_YIELD_LADDER, rowParts)? \} from '\.\.\/phone-head\.js';/.test(mn) && /const name = win \? \(headName\(win\.title\) \|\| windowKindWords\(win\.type\)\) : t\('No window'\);/.test(mn) && /el\.title = !home && full !== name \? full : t\('Switch window'\);/.test(mn) && /new ResizeObserver\(\(\) => this\._paintHead\(\)\)\.observe\(document\.getElementById\('mobile-nav'\)\)/.test(mn)
     && /titleSpan\.dataset\.name = headName\(title\);/.test(w) && /win\.titleSpan\.dataset\.name = headName\(t\);/.test(w)
     && /#mobile-nav\[data-yield\] :is\(#mobile-nav-viewer-close, #mobile-nav-artifacts, #mobile-nav-live\) \{ display: none !important; \}/.test(css) && /#mobile-nav:is\(\[data-yield="gear"\], \[data-yield="icon"\]\):has\(#mobile-nav-more\.on\) #mobile-nav-gear:not\(\.vault-locked\) \{ display: none !important; \}/.test(css)
     && /registerMenuItem\(\{ menu: 'window', group: '9_bar', order: 10, id: 'window\/bar-gear', when: gearFolded, label: \(\) => t\('Global settings'\), run: \(c\) => c\.app\._pressGlobalSettings\(document\.getElementById\('mobile-nav-more'\)\) \}\);/.test(read('src/lib/trailing-bar.js')),
@@ -209,25 +212,27 @@ console.log('⑨ the switcher row yields (主开发 2026-11-17, ruling B on the 
   ok(/"Billing: \{name\}": "计费：\{name\}"/.test(read('src/lib/i18n-zh.js')) && /"Billing: \{name\}": "課金：\{name\}"/.test(read('src/lib/i18n-ja.js')), 'the billing row\'s words in zh / ja');
 }
 
-// ⑧ THE RESTACK ONTO 2.369.410 (lane bl-chat-a, a hand; 主开发 20:03Z): the release has NO search door in the phone bar — the
-// chat status strip's step two left with it (#mobile-nav-search and mobile-nav.js _shownChat are gone) — so phone-six's cure
-// carried no line that names one. Two legs: (a) the phone title PAINTS on the release's bar (the real updateTitle / _paintHead
-// / _titleWin, compiled from mobile-nav.js over stand-ins; a page with exactly the release's element ids) and nothing throws;
-// (b) a CENSUS that can fail: every `this._x(` the bar's module calls is a method its class makes, every getElementById('<id>')
-// names an element the page or the module makes. RED controls, each proving its plant first: the cure's line put back.
-console.log('⑧ the release\'s phone bar — no search door: the title paints, and the module names nothing the page lacks');
+// ⑧ THE PHONE BAR'S SEARCH DOOR AND ITS METHOD TRAVEL TOGETHER. Written for the restack onto 2.369.410 (lane bl-chat-a, a hand;
+// 主开发 20:03Z), when the chat status strip's step two had left with the door; restated by lane mask-value-shape for 2.369.414,
+// when the step two brings the door (#mobile-nav-search, its toggle in updateTitle) back WITH its method (mobile-nav.js
+// _shownChat). Two legs: (a) the phone title PAINTS on the page's bar WITH the door (the real updateTitle / _paintHead /
+// _titleWin / _shownChat, compiled from mobile-nav.js over stand-ins; a page with exactly index.html's element ids) and nothing
+// throws; (b) a CENSUS that can fail: every `this._x(` the module calls is a method its class makes, every getElementById('<id>')
+// names an element the page or the module makes. RED controls (scripts/scratch.mjs anchored), each proving its plant first: the
+// method cut out of the class — the door's line then throws, and the census names it.
+console.log('⑧ the phone bar\'s search door comes with its method: the title paints, and the module names nothing the page lacks');
 {
+  const { anchored } = await import('./scratch.mjs');
   const MN = read('src/lib/mobile-nav.js'), PAGE = read('public/index.html');
   const sliceOf = (src, name) => { const a = src.indexOf(`\n  ${name}(`); const b = a < 0 ? -1 : src.indexOf('\n  }\n', a); return a < 0 || b < 0 ? null : src.slice(a + 1, b + 4); };
   const MIN_OF = (/^const minimizedOf = [^\n]+$/m.exec(MN) || [null])[0];
-  const CURE = "    { const sb = document.getElementById('mobile-nav-search'); if (sb) sb.classList.toggle('on', !this.app.phoneHome?.shown?.() && !!this._shownChat()?._search); }\n";
-  const PAINT = '    this._paintHead();\n';
-  const paint = (updateSrc, ids) => {
-    const Probe = new Function('t', 'headName', 'nameFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle', 'windowWords', 'windowKindWords',   // + the two window-types names the head reads (lane ui-plain-words closure F13)
-      `${MIN_OF}\nreturn class Probe {\n${updateSrc}\n${sliceOf(MN, '_paintHead')}\n${sliceOf(MN, '_titleWin')}\n};`);
+  const SHOWN = sliceOf(MN, '_shownChat');
+  const paint = (src, ids) => {
+    const Probe = new Function('t', 'headName', 'nameFits', 'barFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle', 'windowWords', 'windowKindWords',   // + the two window-types names the head reads (lane ui-plain-words closure F13)
+      `${MIN_OF}\nreturn class Probe {\n${sliceOf(src, 'updateTitle')}\n${sliceOf(src, '_paintHead')}\n${sliceOf(src, '_titleWin')}\n${sliceOf(src, '_shownChat') || ''}\n};`);
     const nav = { dataset: {}, style: {} };
     const doc = { getElementById: (id) => (ids.has(id) ? (id === 'mobile-nav' ? nav : { classList: { toggle() { } }, dataset: {} }) : null), createElement: () => ({ style: {}, getBoundingClientRect: () => ({ width: 10 }), remove() { } }) };
-    const P = Probe((x) => x, H ? H.headName : (x) => x, () => true, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }), (w) => String(w.title || ''), () => 'Window');
+    const P = Probe((x) => x, H ? H.headName : (x) => x, () => true, H ? H.barFits : () => true, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }), (w) => String(w.title || ''), () => 'Window');
     const el = { textContent: '', title: '', classList: { toggle() { } }, removeAttribute() { }, setAttribute() { }, appendChild() { }, getBoundingClientRect: () => ({ width: 200 }), scrollWidth: 200 };
     const win = { id: 1, title: 'Fix the login page — /w/demo', element: { classList: { contains: () => false } } };
     const p = Object.assign(Object.create(P.prototype), { _noteShown() { }, _titleEl: el, _shown: {}, bar: null, split: null, updateDesktopsDoor() { },
@@ -235,14 +240,14 @@ console.log('⑧ the release\'s phone bar — no search door: the title paints, 
     try { p.updateTitle(); return { threw: null, title: el.textContent }; } catch (e) { return { threw: String(e && e.message), title: el.textContent }; }
   };
   const PAGE_IDS = new Set([...PAGE.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
-  const UPDATE = sliceOf(MN, 'updateTitle');
-  ok(!!UPDATE && !!MIN_OF && !!sliceOf(MN, '_paintHead') && !!sliceOf(MN, '_titleWin'), 'the three methods and minimizedOf are read whole out of mobile-nav.js');
-  const a = paint(UPDATE, PAGE_IDS);
-  ok(a.threw === null && a.title.startsWith('Fix the login page'), `(a) the phone title paints on the release's bar (its element ids only — ${PAGE_IDS.has('mobile-nav-search') ? 'WITH' : 'no'} search door) and nothing throws («${a.title}»)`, a);
-  // RED (a): the cure's line put back, on a page that HAS the door (the shape a chain bringing the door back without its method would make)
-  ok(UPDATE.split(PAINT).length === 2, 'CONTROL (a) proves its plant first: «this._paintHead();» is in updateTitle once');
-  const ra = paint(UPDATE.replace(PAINT, CURE + PAINT), new Set([...PAGE_IDS, 'mobile-nav-search']));
-  ok(!!ra.threw && /_shownChat/.test(ra.threw), `CONTROL (a): the cure's line with the door on the page and no _shownChat throws — the leg can go RED («${ra.threw}»)`, ra);
+  ok(!!sliceOf(MN, 'updateTitle') && !!MIN_OF && !!sliceOf(MN, '_paintHead') && !!sliceOf(MN, '_titleWin') && !!SHOWN, 'the four methods and minimizedOf are read whole out of mobile-nav.js');
+  ok(PAGE_IDS.has('mobile-nav-search') && /document\.getElementById\('mobile-nav-search'\)[^\n]*this\._shownChat\(\)\?\._search/.test(sliceOf(MN, 'updateTitle') || ''), 'the page draws the door (#mobile-nav-search) and updateTitle toggles it on the conversation on show (this._shownChat()._search)');
+  const a = paint(MN, PAGE_IDS);
+  console.log(`  (a) painted: ${JSON.stringify(a)}`);
+  ok(a.threw === null && a.title.startsWith('Fix the login page'), `(a) the phone title paints on the bar WITH its search door and nothing throws («${a.title}»)`, a);
+  const noMethod = anchored(MN, SHOWN || '\u0000', '', 'the search door\'s method cut out of mobile-nav.js');
+  const ra = paint(noMethod, PAGE_IDS);
+  ok(!!ra.threw && /_shownChat/.test(ra.threw), `CONTROL (a): the door's line with its method cut out throws — the leg can go RED («${ra.threw}»)`, ra);
   const census = (src) => {
     const made = new Set([...src.matchAll(/^  (?:async |static |get |set )?(_?[A-Za-z0-9_$]+)\s*\(/gm)].map((m) => m[1]).concat([...src.matchAll(/this\.(_[A-Za-z0-9_$]+)\s*=(?!=)/g)].map((m) => m[1])));
     const calls = [...new Set([...src.matchAll(/this\.(_[A-Za-z0-9_$]+)\(/g)].map((m) => m[1]))];
@@ -252,9 +257,8 @@ console.log('⑧ the release\'s phone bar — no search door: the title paints, 
   };
   const c = census(MN);
   ok(c.calls > 10 && c.ids > 5 && c.notMade.length === 0 && c.notOnPage.length === 0, `(b) mobile-nav.js calls only methods its class makes and names only elements the page makes (${c.calls} private calls, ${c.ids} element ids)`, c);
-  ok(MN.split(PAINT).length === 2, 'CONTROL (b) proves its plant first: «this._paintHead();» is in mobile-nav.js once');
-  const rc = census(MN.replace(PAINT, CURE + PAINT));
-  ok(rc.notMade.includes('_shownChat') && rc.notOnPage.includes('mobile-nav-search'), `CONTROL (b): the cure's line put back names a method and an element the release does not have — the census goes RED (${JSON.stringify({ notMade: rc.notMade, notOnPage: rc.notOnPage })})`, rc);
+  const rc = census(noMethod);
+  ok(rc.notMade.includes('_shownChat'), `CONTROL (b): the door's method cut out — the census names the call nobody makes (${JSON.stringify({ notMade: rc.notMade })})`, rc);
 }
 
 // ⑨ lane ui-plain-words closure F13 ON PHONE-SIX'S PAINTER (the move -moved2; 主开发 2026-11-19 01:13Z, a MUST): a window with no
@@ -276,11 +280,11 @@ console.log('⑨ closure F13 on phone-six\'s painter: a title-less window is nam
   // fits: true ⇒ the head keeps its words (the first step of the ladder fits); false ⇒ the ladder ends at the icon, whose
   // accessible name is the window's FULL name (el.setAttribute('aria-label', full))
   const paint = (src, fits) => {
-    const Probe = new Function('t', 'headName', 'nameFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle', 'windowWords', 'windowKindWords',
+    const Probe = new Function('t', 'headName', 'nameFits', 'barFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle', 'windowWords', 'windowKindWords',
       `${MIN_OF}\nreturn class Probe {\n${sliceOf(src, 'updateTitle')}\n${sliceOf(src, '_paintHead')}\n${sliceOf(src, '_titleWin')}\n};`);
     const nav = { dataset: {}, style: {} };
     const doc = { getElementById: (id) => (id === 'mobile-nav' ? nav : null), createElement: () => ({ style: {}, getBoundingClientRect: () => ({ width: 10 }), remove() { } }) };
-    const P = Probe((x) => x, H ? H.headName : (x) => x, () => fits, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }), WT.windowWords, WT.windowKindWords);
+    const P = Probe((x) => x, H ? H.headName : (x) => x, () => fits, H ? H.barFits : () => true, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }), WT.windowWords, WT.windowKindWords);
     const attrs = {};
     const el = { textContent: '', title: '', innerHTML: '', classList: { toggle() { } }, removeAttribute(k) { delete attrs[k]; }, setAttribute(k, v) { attrs[k] = v; }, appendChild() { }, getBoundingClientRect: () => ({ width: 200 }), scrollWidth: 200 };
     const win = { id: 1, title: '', type: KIND, element: { classList: { contains: () => false } } };
@@ -312,11 +316,19 @@ console.log('⑩ the bar\'s ⋯ stands only when the window\'s menu holds a row'
   const GEAR = { id: 'window/bar-gear', label: 'Global settings' }, SEP = { separator: true };
   ok(H.FOLDED_GEAR_ROW === 'window/bar-gear' && H.moreHolds([]) === false && H.moreHolds([SEP]) === false && H.moreHolds([SEP, GEAR, SEP]) === false && H.moreHolds(null) === false,
     'PURE moreHolds: no row, a separator, the folded ⚙\'s «Global settings» alone, no list — ⋯ does not stand');
+  // (lane mask-value-shape) the search door folded into ⋯ never makes ⋯ stand either — a view-only window whose ⋯ holds nothing
+  // keeps its search on the bar (the stylesheet folds it only into a ⋯ that stands)
+  ok(H.FOLDED_SEARCH_ROW === 'window/bar-search' && H.moreHolds([{ id: 'window/bar-search', label: 'Search this conversation' }]) === false && H.moreHolds([{ id: 'window/bar-search' }, { id: 'window/rename', label: 'Rename' }]) === true && /id: 'window\/bar-search', when: searchFolded,/.test(read('src/lib/trailing-bar.js')) && /#mobile-nav\[data-yield\]:has\(#mobile-nav-more\.on\) #mobile-nav-search \{ display: none !important; \}/.test(read('public/style.css')), 'the folded search row is not a row that makes ⋯ stand; the search door folds only into a ⋯ that stands');
   ok(H.moreHolds([{ id: 'window/session-rename', label: 'Rename…' }]) === true && H.moreHolds([GEAR, { label: 'Download' }]) === true && H.moreHolds([{ caption: 'a word' }]) === true,
     'PURE moreHolds: a row of its own (a conversation\'s Rename…, a Download beside the folded ⚙, a caption) — ⋯ stands');
-  const m3 = mutant('items.some((it) => !!it && !it.separator && it.id !== FOLDED_GEAR_ROW)', 'items.some((it) => !!it && !it.separator)', HEAD_SRC);
+  const m3 = mutant('items.some((it) => !!it && !it.separator && it.id !== FOLDED_GEAR_ROW && it.id !== FOLDED_SEARCH_ROW)', 'items.some((it) => !!it && !it.separator && it.id !== FOLDED_SEARCH_ROW)', HEAD_SRC);
   ok(m3.moreHolds([SEP, GEAR]) === true && H.moreHolds([SEP, GEAR]) === false,
     'RED CONTROL: the folded ⚙\'s row counted ⇒ a files window\'s ⋯ stands to hold only ⚙ — the step that was to give the name room takes it back');
+  // (lane mask-value-shape) its twin: the folded search row counted ⇒ ⋯ stands to hold only search — no room given
+  const SEARCH = { id: 'window/bar-search', label: 'Search this conversation' };
+  const m4 = mutant('items.some((it) => !!it && !it.separator && it.id !== FOLDED_GEAR_ROW && it.id !== FOLDED_SEARCH_ROW)', 'items.some((it) => !!it && !it.separator && it.id !== FOLDED_GEAR_ROW)', HEAD_SRC);   // stale-pins: kept — the RED control plants the old line (the search row counted)
+  ok(m4.moreHolds([SEP, SEARCH]) === true && H.moreHolds([SEP, SEARCH]) === false,
+    'RED CONTROL: the folded search row counted ⇒ ⋯ stands to hold only search — the step that was to give the name room takes it back');
   const TBAR = read('src/lib/trailing-bar.js'), TBK = read('src/lib/taskbar.js'), SBR = read('src/lib/sidebar.js'), css = read('public/style.css');
   const merge = SBR.slice(SBR.indexOf('  _mergeAndRender() {'), SBR.indexOf('\n  }\n', SBR.indexOf('  _mergeAndRender() {')));
   ok(/const holds = !!w && regular\(\) && windowMenuHolds\(app, w\.id\), moved = holds !== more\.classList\.contains\('on'\);[^\n]*\n    more\.classList\.toggle\('on', holds\);/.test(TBAR) && !/more\.classList\.toggle\('on', !!w\);/.test(TBAR)   // stale-pins: kept — a deliberate absence check: the old line must stay gone

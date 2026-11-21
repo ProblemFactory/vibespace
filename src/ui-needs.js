@@ -318,6 +318,11 @@ const NEEDS = Object.freeze([
   { id: 'resume-batch-cap', need: 'a resume of stopped sessions refused by a spend ceiling — the row it names, as its LINK on the refusal\'s own line (lane auto-resume-bulk / lg-recovery: a refusal names where its value changes; B-d073 took the menu path out of the words — the link is the whole door)',
     match: /^Change «\{setting\}»: \{link\}$|^\{member\} can take \{left\} more turns nobody typed (?:this hour|today); this batch needs \{need\}\.$|^This VibeSpace can take \{left\} more turns nobody typed today; this batch needs \{need\}\.$/,
     door: { present: { marker: /link: spendRowLink\(\{ why \}\)/, surfaces: ['src/lib/bulk-resume.js'], shape: { link: 'toastWordsInto', words: 'batchRefusalWords(' } } } },
+  // ── the chat status strip's step two (lane mask-value-shape): a tool that did not start, said in plain words where the
+  //    conversation's start facts live (Session Properties «At its start», ⚙ Diagnostics «Tools that did not start») ──
+  { id: 'start-tool-failed', need: 'a tool of the conversation (an MCP server, a plugin) failed to start or waits for a sign-in — said by what it is, beside the protocol row',
+    match: /^The \{name\} plugin isn’t working: it failed to load when this conversation started\.$|^The \{name\} tool needs you to sign in before the agent can use it\.$|^The \{name\} tool isn’t connected: it failed when this conversation started, so the agent can’t use it\.$/,
+    door: { none: 'the act is the agent CLI\'s own (its MCP / plugin configuration and its sign-in, which the CLI runs); VibeSpace starts none of these tools, so no door here could do it — the words name WHICH tool, the row beside them the CLI\'s own record' } },
 ]);
 /** The net's catches that state no need with a missing door — each with its reason. */
 const NOT_NEEDS = Object.freeze([

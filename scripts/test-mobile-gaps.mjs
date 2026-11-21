@@ -608,14 +608,17 @@ try {
   check('the view-only fixture chat renders', await waitFor(`document.querySelectorAll('.chat-view .chat-msg').length >= 6`, 20000));
   await sleep(600);
   const chips = await evalJs(`(() => { const bar = document.querySelector('.window-active .chat-view .chat-status-bar');
-    return { barH: Math.round(bar.getBoundingClientRect().height), search: !!bar.querySelector('.chat-status-search'), searchBar: !!document.querySelector('.window-active .chat-search-bar'),
+    return { barH: Math.round(bar.getBoundingClientRect().height), search: !!document.querySelector('#mobile-nav-search.on'), onStrip: !!bar.querySelector('.chat-status-search'), searchBar: !!document.querySelector('.window-active .chat-search-bar'),
       chips: [...bar.querySelectorAll('.chat-status-clickable')].filter((c) => c.offsetWidth > 0).map((c) => ({ cls: c.className.split(' ')[0], h: Math.round(c.getBoundingClientRect().height) })) }; })()`);
   check(`every status-bar chip is ≥ 36 px tall (${chips.chips.map((c) => c.h).join('/')})`, chips.chips.length >= 3 && chips.chips.every((c) => c.h >= 36), chips);
   // 2.369.221 (lane global-search-chrome): every chat view mounts ChatSearch — Search everything lands a hit on a read-only viewer
   // too — so the chip, which follows Ctrl+F's own gate, shows on a VIEW-ONLY window as well (before: neither)
-  check('a VIEW-ONLY window builds ChatSearch (Search everything lands there), so it shows the magnifier too (the chip follows Ctrl+F\'s own gate)', chips.search && chips.searchBar, chips);
-  await evalJs(`document.querySelector('.window-active .chat-view .chat-status-search')?.click(); true`); await sleep(250);
-  check('…and tapping it opens the view-only window\'s search bar', await evalJs(`(() => { const b = document.querySelector('.window-active .chat-view .chat-search-bar'); return !!b && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none'; })()`));
+  // (lane mask-value-shape, the strip's step two) search lives where the conversation's NAME lives — the top bar's magnifier
+  // (#mobile-nav-search), never the strip — for a view-only window too
+  check('a VIEW-ONLY window builds ChatSearch (Search everything lands there), so the TOP BAR shows its magnifier too — and the strip none (it follows Ctrl+F\'s own gate)', chips.search && chips.searchBar && !chips.onStrip, chips);
+  await evalJs(`document.querySelector('#mobile-nav-search')?.click(); true`);
+  const vsOpen = await waitFor(`(() => { const b = document.querySelector('.window-active .chat-view .chat-search-bar'); return !!b && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none'; })()`, 4000);
+  check('…and tapping it opens the view-only window\'s search bar', vsOpen, { open: vsOpen });
   await evalJs(`document.querySelector('.window-active .chat-view .chat-search-close')?.click(); true`); await sleep(150);
   await evalJs(`document.querySelector('.window-active .chat-view .chat-status-model').click(); true`); await sleep(250);
   const ddRows = await evalJs(`[...document.querySelectorAll('.chat-view .chat-status-dropdown-item')].map((el) => Math.round(el.getBoundingClientRect().height))`);
@@ -721,7 +724,8 @@ try {
       const VIEW = `[...(app.sessions?.values?.() || [])].find((v) => v && v._statusBar && v._statusBar._sessionId === ${JSON.stringify(sid)})`;
       check('the scene window attaches on the phone', await waitFor(`!!(${VIEW}) && !!(${VIEW})._statusBar.element.querySelector('[data-chip="model"]') && /served by claude-fable-5-2/.test((${VIEW})._messageList.textContent)`, 20000));
       const look = `(() => { const v = ${VIEW}; const el = v._statusBar.element.querySelector('[data-chip="model"]'); const txt = v._messageList.textContent;
-        return { text: el.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), locked: !!v._statusBar._modelLocked,
+        const lab = el.querySelector('.chat-status-model-label') || el;   // (the strip's MUST 4) the chip's FACE is a label; its value is data-raw
+        return { text: (lab.dataset.raw ?? lab.textContent).trim(), face: lab.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), locked: !!v._statusBar._modelLocked,
           old: (txt.match(/old turn \\d+ served by claude-fable-5-1/g) || []).length, neu: (txt.match(/new turn \\d+ served by claude-fable-5-2/g) || []).length }; })()`;
       const tail = await evalJs(look);
       // (round 14: WHILE A LOCK STANDS the chip is master's code — a page that attached after the served change names the lock's target)

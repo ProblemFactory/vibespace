@@ -15,8 +15,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+import { checker } from './lib/check.mjs';   // THE ONE assertion helper (B-1747): the condition FIRST, a boolean; a swap throws
+const { ok, report } = checker();
 const T = await import(path.join(REPO, 'src/lib/strip-table.js'));
 const { STRIP_ROWS, ROW_OF, DOORS, HOMES, PAGE_REMOVES, arrange, censusOfBar, homesCensus, onStrip, insideOf, ONE_ROW_PX, SHORT_FORM_PX } = T;
 
@@ -145,5 +145,4 @@ console.log('⑥ the faces');
   ok(undeclared.length === 0, 'every mode a harness lists has its face declared beside it', undeclared);
 }
 
-console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+report();

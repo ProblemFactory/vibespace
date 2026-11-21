@@ -3291,6 +3291,9 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
      window whose menu holds a row — ⋯ stands only then, phone-head.js moreHolds), never with the locked vault's mark;
      'icon' — the head is the window's type icon + the count, the name lives in the switcher */
   html[data-vc="regular"] #mobile-nav[data-yield] :is(#mobile-nav-viewer-close, #mobile-nav-artifacts, #mobile-nav-live) { display: none !important; }
+  /* the conversation's search door yields with them — but, as ⚙, only into a ⋯ that STANDS (its row «Search this conversation»,
+     trailing-bar.js window/bar-search; a view-only window whose ⋯ holds nothing keeps its search on the bar) */
+  html[data-vc="regular"] #mobile-nav[data-yield]:has(#mobile-nav-more.on) #mobile-nav-search { display: none !important; }
   html[data-vc="regular"] #mobile-nav:is([data-yield="gear"], [data-yield="icon"]):has(#mobile-nav-more.on) #mobile-nav-gear:not(.vault-locked) { display: none !important; }
   html[data-vc="regular"] #mobile-nav[data-yield="icon"] #mobile-nav-title { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
   html[data-vc="regular"] #mobile-nav[data-yield="icon"] .mnav-state { display: none; }

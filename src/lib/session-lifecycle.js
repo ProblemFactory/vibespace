@@ -536,6 +536,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         if (msg.mode === 'chat' || sessionMode === 'chat') {
           const chatView = new ChatView(winInfo, this.ws, msg.sessionId, this);
           this.sessions.set(winInfo.id, chatView); this.wm.syncHiddenViews?.(); // a view born hidden (mobile/tab/minimized) starts suspended (inc-mu6bfv1t-4drq)
+          this._mobileNav?.updateTitle?.();   // the top bar's search door follows the conversation now on show (its view is registered after its window became active — a view-only window's magnifier stayed off; lane mask-value-shape)
           // Commanded-at-spawn effort (the CLI never reports effort back, so
           // the commanded value is the display source — same as the server's
           // attach-time merge). On a RESUME the client deliberately commands
@@ -1059,6 +1060,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         if (msg.mode === 'chat' || isChat) {
           const chatView = new ChatView(winInfo, this.ws, serverId, this);
           this.sessions.set(winInfo.id, chatView); this.wm.syncHiddenViews?.(); // a view born hidden (mobile/tab/minimized) starts suspended (inc-mu6bfv1t-4drq)
+          this._mobileNav?.updateTitle?.();   // the top bar's search door follows the conversation now on show (its view is registered after its window became active — a view-only window's magnifier stayed off; lane mask-value-shape)
           if (msg.messages?.length) {
             // The attach payload IS the meta (2.368.4): this hand-copied key
             // list silently dropped outputStyle/autoResume/streamingKind — the
@@ -2235,6 +2237,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     const viewId = viewIdFor(backend, backendSessionId);
     const chatView = new ChatView(winInfo, this.ws, viewId, this, { readOnly: true, subagentView });
     this.sessions.set(winInfo.id, chatView); this.wm.syncHiddenViews?.(); // a view born hidden (mobile/tab/minimized) starts suspended (inc-mu6bfv1t-4drq)
+    this._mobileNav?.updateTitle?.();   // the top bar's search door follows the conversation now on show (its view is registered after its window became active — a view-only window's magnifier stayed off; lane mask-value-shape)
     const hostName = this._hostLabel(hostId);
     // For a REMOTE session the server first pulls the transcript over ssh
     // (seconds, up to the 15s ssh budget) — the pane used to be BLANK for all

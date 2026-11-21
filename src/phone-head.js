@@ -32,6 +32,7 @@ const YIELD_LADDER = ['', 'win', 'badges', 'gear', 'icon'];
 const ROW_YIELD_LADDER = ['', 'compact', 'split', 'chip'];
 const PATH_RE = /^(?:[/~…]|[A-Za-z]:[\\/])/;
 const FOLDED_GEAR_ROW = 'window/bar-gear';   // trailing-bar.js's row for a folded ⚙
+const FOLDED_SEARCH_ROW = 'window/bar-search';   // lane mask-value-shape: the search door folded into ⋯ (trailing-bar.js) — like ⚙'s, it never makes ⋯ stand
 
 /** The name a phone head shows for window title `title`. */
 function headName(title) {
@@ -55,6 +56,13 @@ function nameFits(got, full, em, minPx = null) {
   const need = minPx == null ? nameNeed(full, em) : Math.min(Math.max(0, Number(full) || 0), Math.max(0, Number(minPx) || 0));
   return (Number(got) || 0) + 0.5 >= need;
 }
+/** Does the bar hold every button it draws? (lane mask-value-shape, the strip's step two — the hosted run's test-duo-layout:
+ *  at 669 × 867 portrait the top bar's magnifier, a seventh 44 px button, pushed ⚙ off the screen while the NAME still fit):
+ *  the right edge of the row's last drawn button `lastRight` within the bar's right edge `barRight` (one px of rounding
+ *  allowed). The ladder yields a step until the name fits AND every button does. */
+function barFits(lastRight, barRight) {
+  return (Number(lastRight) || 0) <= (Number(barRight) || 0) + 1;
+}
 
 /** What a switcher row draws at yield step `step` (ROW_YIELD_LADDER): the chip's form ('full' | 'compact' | null = it is in
  *  the ⋯ menu) and whether the Split door stands on the row (false = it is in the ⋯ menu). An unknown step draws everything. */
@@ -63,9 +71,9 @@ function rowParts(step) {
   return { chip: i >= 3 ? null : i >= 1 ? 'compact' : 'full', split: i < 2 };
 }
 
-/** Does the bar's ⋯ hold a row? `items` = the window menu's items: a row other than a separator and the folded ⚙'s. */
+/** Does the bar's ⋯ hold a row? `items` = the window menu's items: a row other than a separator and the folded ⚙'s or search's. */
 function moreHolds(items) {
-  return Array.isArray(items) && items.some((it) => !!it && !it.separator && it.id !== FOLDED_GEAR_ROW);
+  return Array.isArray(items) && items.some((it) => !!it && !it.separator && it.id !== FOLDED_GEAR_ROW && it.id !== FOLDED_SEARCH_ROW);
 }
 
-module.exports = { NAME_FLOOR_EM, YIELD_LADDER, ROW_YIELD_LADDER, FOLDED_GEAR_ROW, headName, nameNeed, nameFits, rowParts, moreHolds };
+module.exports = { NAME_FLOOR_EM, YIELD_LADDER, ROW_YIELD_LADDER, FOLDED_GEAR_ROW, FOLDED_SEARCH_ROW, headName, nameNeed, nameFits, barFits, rowParts, moreHolds };

@@ -177,7 +177,9 @@ try {
   const agySid = await createChat('__agy', { cwd: CWD, name: 'agy-facts', mode: 'chat', backend: 'antigravity', model: 'gemini-4-argon-high' });
   check('an Antigravity chat is created through the page\'s own createSession (the fake agy behind the real agy-wrapper)', !!agySid);
   check('the turn played (the fake agy wrote reports/summary.md)', await turn(agySid, '__agy', 'please write the summary', /Antigravity \(gemini-4-argon-high/) && fs.existsSync(SUMMARY));
-  await waitFor(`(() => { const v = ${viewOf('__agy')}; const el = v && v._statusBar && v._statusBar.element; return !!el && !!(v._statusBar._doorRows || []).some((y) => y.key === 'odometer') && !!el.querySelector('[data-chip="ctx"]') && !!el.querySelector('.chat-status-artifacts-text'); })()`, 15000);
+  // (lane mask-value-shape) 产出 is ALWAYS drawn now: the gate waits for the COUNT, never the chip's presence («Artifacts · 0»
+  // stands before the list's fetch lands — the hosted run read it)
+  await waitFor(`(() => { const v = ${viewOf('__agy')}; const el = v && v._statusBar && v._statusBar.element; return !!el && !!(v._statusBar._doorRows || []).some((y) => y.key === 'odometer') && !!el.querySelector('[data-chip="ctx"]') && el.querySelector('.chat-status-artifacts-text')?.textContent === 'Artifacts · 1'; })()`, 15000);
   const a = await facts('__agy');
   check('context: a % of the model\'s DOCUMENTED window (1.0m, gemini-4-argon) — the title names the window\'s source (the door\'s face the %, its [used/total] in data-*)', a?.ctx && /\d+%/.test(a.ctx.text) && a.ctx.total === '1.0m' && /^\d+(\.\d+)?k?$/.test(a.ctx.used || '') && /documented window/.test(a.ctx.title) && !a.unknown, a);
   check('⚡ the cache hit rate of the turn\'s last call (a row of the context door)', a?.cache && /\d+%/.test(a.cache.text) && /Prompt cache hit rate/.test(a.cache.title), a?.cache);

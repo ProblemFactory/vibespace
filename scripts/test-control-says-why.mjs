@@ -302,7 +302,7 @@ console.log('⑩b NO PRESS AROUND THE WHY · EVERY CONTROL HAS ITS WORDS — cen
   ok(off.rows[1][0] === 'artifacts' && armed.rows[1][0] === 'artifacts' && armed.rows[0].includes('autoresume') && !off.rows.flat().includes('autoresume'),
     'the strip at 390 px (evaluated arrange): 产出 keeps row 2\'s first place — auto-continue ARMED is row 1\'s, not armed it is not on the strip', JSON.stringify({ off: off.rows, armed: armed.rows }));
   const pin = (src) => /\(a\.armed \? chip : inDoor\)\('autoresume', /.test(src) && /const offWords = ' ' \+ escHtml\(t\('Auto-continue: off'\)\);/.test(src) && /: \(a\.enabled \? ' ' \+ escHtml\(t\('auto'\)\) : offWords\);/.test(src) && /' ' \+ escHtml\(t\('continues at \{t\}', \{ t: resetAt \}\)\)/.test(src);
-  ok(pin(CSB3) && !pin(CSB3.replace("(a.armed ? chip : inDoor)('autoresume', ", "chip('autoresume', ")),
+  ok(pin(CSB3) && !pin(CSB3.replace("(a.armed ? chip : inDoor)('autoresume', ", "chip('autoresume', ")),   // stale-pins: kept — a red control: the mutant PLANTS the old chip spelling
     'the rule in one sentence: an auto-continue that is OFF (or on, not armed) is a row of «⚙ 对话设置» saying its words; armed, with its time, it keeps its words on row 1 — RED: the off state drawn on the strip again'); }
 { const UT2 = read('src/lib/user-todos-row.js');
   const btns = [...UT2.matchAll(/<button([^>]*class="ut-act[^"]*"[^>]*)>([\s\S]*?)<\/button>/g)];

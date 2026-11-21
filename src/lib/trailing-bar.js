@@ -155,3 +155,8 @@ export function installTrailingBar(app) {
 // ⚙ folded into ⋯ (lane phone-six r2 — the name keeps 8 em, mobile-nav.js _paintHead's 'gear' step): ⋯'s last row is it
 const gearFolded = () => { const nav = document.getElementById('mobile-nav'), g = document.getElementById('mobile-nav-gear'); return !!nav && !!g && ['gear', 'icon'].includes(nav.dataset.yield) && getComputedStyle(g).display === 'none'; };
 registerMenuItem({ menu: 'window', group: '9_bar', order: 10, id: 'window/bar-gear', when: gearFolded, label: () => t('Global settings'), run: (c) => c.app._pressGlobalSettings(document.getElementById('mobile-nav-more')) });
+// lane mask-value-shape (the strip's step two): the conversation's search door yields with the window's own extras (the head's
+// ladder, from its first step — the hosted test-duo-layout at 669 portrait: a seventh button pushed ⚙ off) — its row in ⋯, so
+// search stays one press away there
+const searchFolded = () => { const nav = document.getElementById('mobile-nav'), s = document.getElementById('mobile-nav-search'); return !!nav && !!s && s.classList.contains('on') && !!nav.dataset.yield && getComputedStyle(s).display === 'none'; };
+registerMenuItem({ menu: 'window', group: '9_bar', order: 5, id: 'window/bar-search', when: searchFolded, label: () => t('Search this conversation'), run: (c) => c.app._mobileNav?._shownChat?.()?._search?.open?.() });

@@ -175,6 +175,27 @@
 /* the table's bound (strip-table.js: browser / channels `title: { maxCh: 18 }`): on the two rows a long profile or conversation
    title is cut at 18 characters INSIDE its chip, never pushing row 2 onto a third line (the one row keeps its wider caps) */
 .chat-status-bar.chat-status-two-rows :is(.chat-status-browser-text, .chat-status-channels-text) { max-width: 18ch; }
+/* A ROW ENDS ONLY AT THE TABLE'S BREAK, WHATEVER THE FONT (the cure of the strip's hosted reds: on the runner's DejaVu Sans
+   the rows wrapped to three to ten lines — every chip was flex-shrink 0 and a row wider than the bar spilled onto new lines).
+   Every mark GIVES WAY: it starts from nothing and grows to its own words (flex 1 1 0 · max-width max-content) above its floor,
+   so a line holds every mark of its row at once and the table's break is the only place a row ends. A mark narrower than its
+   words cuts them INSIDE itself — the words' span ellipsized; its icon, the context's number and its ▾ / › stay whole. With
+   room to spare every mark is its own width, as before. (Selectors outrank the phone block's `> * { flex-shrink: 0 }` and its
+   clickable `min-width: auto`.) */
+.chat-status-bar > [data-chip]:not(.chat-status-rowbreak, .chat-status-classline) { flex: 1 1 0; max-width: max-content; min-width: 24px; overflow: hidden; text-overflow: ellipsis; }
+.chat-status-bar > [data-chip]:not(.chat-status-rowbreak, .chat-status-classline) > :is(svg, img, .chat-status-ctx-pie) { flex-shrink: 0; }
+.chat-status-bar > [data-chip]:not(.chat-status-rowbreak, .chat-status-classline)::after { flex-shrink: 0; }
+.chat-status-bar > [data-chip]:not(.chat-status-rowbreak, .chat-status-classline) > span:not(.chat-status-ctx-pie) { min-width: 0; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-status-bar > .chat-status-ctx[data-chip] > span:last-child:not(.chat-status-ctx-pie) { flex-shrink: 0; }   /* the context's number is never cut («99%»): it outranks the span rule above */
+/* …and the marks a person reads at every moment (the model door, the permission, the context, 产出, the outbox, «⚙ 对话设置»)
+   fill to their whole words FIRST: the long, transient titles (waiting, a lost link, auto-continue, the browser's profile, a
+   channel, background work) give way before them (the pictures at 1280 with every mark: equal shares cut the counts too) */
+.chat-status-bar > [data-chip]:not(.chat-status-rowbreak, .chat-status-classline):is(.chat-status-model, .chat-status-perm, .chat-status-ctx, .chat-status-artifacts, .chat-status-outbox, .chat-status-settings) { flex-grow: 4; }
+/* a dim chip on the strip takes no extra margin (.chat-status-dim's 1 px is for dim words inside a line — on the strip it read as
+   a 9 px gap; below the short forms' push to the row's end, which outranks it) */
+.chat-status-bar > .chat-status-dim[data-chip] { margin-left: 0; }
+/* inside the model door the thinking level gives way before the model's name (a narrow window keeps «Fable 1M») */
+.chat-status-bar > .chat-status-model[data-chip]:not(.chat-status-rowbreak) > span.chat-status-effort:not(.chat-status-ctx-pie) { flex-shrink: 8; }
 /* «⚙ 对话设置»'s panel: each row its name and its present value */
 .chat-status-dropdown .chat-status-settings-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .chat-status-dropdown .chat-status-settings-row .chat-status-settings-value { color: var(--text-dim); text-align: end; min-width: 0; overflow-wrap: anywhere; }

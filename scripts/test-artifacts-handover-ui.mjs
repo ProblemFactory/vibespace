@@ -308,8 +308,9 @@ try {
   { // CONTROL, RE-MADE AGAIN (lane mask-value-shape, the chat status strip's step two — its premise moved): the strip has no
     // ⋯ fold any more (the owner's arrangement of 2026-11-14: the same two rows at every width, nothing behind «show more»), and
     // the goal is a row of «⚙ 对话设置», not a strip chip — no planted width can fold the Artifacts chip. The control is the
-    // census's own: the chip planted HIDDEN leaves the row (red), taken off it is back (both faces).
-    const shown = (on) => evalJs(`(() => { const st = document.getElementById('ah-hide-ctl'); if (on && !st) { const s2 = document.createElement('style'); s2.id = 'ah-hide-ctl'; s2.textContent = '.chat-status-bar .chat-status-artifacts { display: none !important; }'; document.head.appendChild(s2); } if (!on && st) st.remove(); const c = document.querySelector('.chat-status-artifacts'); const r = c && c.getBoundingClientRect(); return !!(r && r.width > 0 && r.height > 0); })()`);
+    // census's own: the chip planted HIDDEN leaves the row (red), taken off it is back (both faces). The flag is INTERPOLATED into
+    // the page's expression (the hosted run's ReferenceError: «on» written as a bare name lived only in Node).
+    const shown = (on) => evalJs(`(() => { const on = ${on ? 'true' : 'false'}; const st = document.getElementById('ah-hide-ctl'); if (on && !st) { const s2 = document.createElement('style'); s2.id = 'ah-hide-ctl'; s2.textContent = '.chat-status-bar .chat-status-artifacts { display: none !important; }'; document.head.appendChild(s2); } if (!on && st) st.remove(); const c = document.querySelector('.chat-status-artifacts'); const r = c && c.getBoundingClientRect(); return !!(r && r.width > 0 && r.height > 0); })()`);
     const hiddenShown = await shown(true); await sleep(100); const backShown = await shown(false);
     const noFold = await evalJs(`(() => !document.querySelector('.chat-status-bar .chat-status-more') && !document.querySelector('.chat-status-bar .chat-status-folded'))()`);
     check(`CONTROL (${FONT}): the strip has no fold (no ⋯, no folded chip); the Artifacts chip planted hidden leaves the row (${!hiddenShown}) and is back when taken off (${backShown})`, noFold === true && hiddenShown === false && backShown === true, { noFold, hiddenShown, backShown });

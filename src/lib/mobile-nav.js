@@ -16,7 +16,7 @@ import { doorState, followDesktops, windowWaits } from '../desktop-switch.js';
 import { paintSwitcherRow } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): a switcher row's prompt-cache band
 import { windowListMark } from './agent-meta.js'; // lane phone-take-photo: a row wears its conversation's harness mark
 import { installPhoneSplit } from './phone-split-view.js'; // lane phone-six: side by side — two windows, left and right
-import { headName, nameFits, YIELD_LADDER, ROW_YIELD_LADDER, rowParts } from '../phone-head.js'; // lane phone-six r2: the head's name keeps its width (and the switcher row's)
+import { headName, nameFits, barFits, YIELD_LADDER, ROW_YIELD_LADDER, rowParts } from '../phone-head.js'; // lane phone-six r2: the head's name keeps its width (and the switcher row's)
 import { windowTypeIcon } from './window-types.js';
 
 const SHOWN_KEY = 'vibespace.phoneShown'; // { [desktopId]: winId } — this tab's window on show per desktop (§6b guard 10)
@@ -644,6 +644,7 @@ export class MobileNav {
    *  then ⚙ folds into ⋯ (trailing-bar.js), then the head shows the window's type icon + the count and the name lives in
    *  the switcher. Never a fragment under four glyphs. */
   _paintHead() {
+    const lastRight = (bar) => Math.max(0, ...[...((bar && bar.children) || [])].filter((b) => b.offsetWidth > 0).map((b) => b.getBoundingClientRect().right));   // the row's last drawn button
     const el = this._titleEl, h = this._head;
     if (!el || !h) return;
     const { win, count } = h, regular = this.app.viewportClass?.() === 'regular', home = !!this.app.phoneHome?.shown?.();
@@ -667,7 +668,7 @@ export class MobileNav {
     probe.textContent = navTitleMinText(name); el.appendChild(probe); const minPx = probe.getBoundingClientRect().width; probe.remove();
     for (const step of YIELD_LADDER.slice(0, -1)) {
       if (step) nav.dataset.yield = step; else delete nav.dataset.yield;
-      if (nameFits(el.getBoundingClientRect().width, el.scrollWidth, em, minPx)) return;
+      if (nameFits(el.getBoundingClientRect().width, el.scrollWidth, em, minPx) && barFits(lastRight(nav), nav.getBoundingClientRect ? nav.getBoundingClientRect().right : Infinity)) return;   // the name AND every button (a button past the bar's edge is a yield too)
     }
     nav.dataset.yield = YIELD_LADDER[YIELD_LADDER.length - 1];
     el.innerHTML = `<span class="mnav-title-icon" aria-hidden="true">${windowTypeIcon(win.type) || ''}</span><span class="mnav-title-count">${Number(count) || 1}</span>`;

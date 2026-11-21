@@ -1038,6 +1038,11 @@ if (!CHROME) {
           worstOverflow: Math.max(0, ...rows.map((x) => x.scrollWidth - x.clientWidth)) };
       };
       const after = measure();
+      // the cascade's half, measured WITH the clamp in place (the hosted run: the panel grown to its nowrap rows never clipped —
+      // the control read the unclamped panel): the same rows forced back to nowrap inside the same clamped overflow:hidden panel
+      for (const x of rows) x.style.whiteSpace = 'nowrap';
+      const clipped = measure();
+      for (const x of rows) x.style.whiteSpace = '';
       const wsAll = [...new Set(rows.map((x) => getComputedStyle(x).whiteSpace))];
       const longest = rows.map((x) => ({ t: x.textContent.replace(/\s+/g, ' ').trim(), sw: x.scrollWidth, cw: x.clientWidth }))
         .sort((a, b) => b.t.length - a.t.length)[0];
@@ -1053,7 +1058,7 @@ if (!CHROME) {
       for (const x of rows) x.style.whiteSpace = 'nowrap';
       const preFix = measure();
       return { vw: innerWidth, docScrollW: document.documentElement.scrollWidth, docClientW: document.documentElement.clientWidth,
-        overflow: getComputedStyle(dd).overflow, nRows: rows.length, wsAll, longest, after, unclamped, preFix, label: ${JSON.stringify(label)} };
+        overflow: getComputedStyle(dd).overflow, nRows: rows.length, wsAll, longest, after, clipped, unclamped, preFix, label: ${JSON.stringify(label)} };
     })()`);
 
     // (lane mask-value-shape) the health panel is gone with its chip; the panel of LONG rows is the context door's now — the
@@ -1062,8 +1067,8 @@ if (!CHROME) {
     const ddH = await ddProbe('.chat-status-ctx', 'context', CTX_STATE);
     ok(`375×667: every context-panel row computes white-space NORMAL and none of them clips (worst overflow ${ddH.after && ddH.after.worstOverflow}px over ${ddH.nRows} rows; longest "${ddH.longest && ddH.longest.t.slice(0, 60)}…" ${ddH.longest && ddH.longest.sw}/${ddH.longest && ddH.longest.cw}) — the panel is overflow:hidden, so a row that cannot fit must WRAP, never clip`,
       !!ddH.after && ddH.wsAll.length === 1 && ddH.wsAll[0] === 'normal' && ddH.after.worstOverflow <= 1, ddH);
-    ok(`NEGATIVE CONTROL: forcing the rows back to the cascade's PRE-FIX value (white-space: nowrap) clips them again by ${ddH.preFix && ddH.preFix.worstOverflow}px inside the same overflow:hidden panel — so the assert above measures the cascade, not the text`,
-      !!ddH.preFix && ddH.preFix.worstOverflow > 20, ddH.preFix);
+    ok(`NEGATIVE CONTROL: forcing the rows back to the cascade's PRE-FIX value (white-space: nowrap) clips them again by ${ddH.clipped && ddH.clipped.worstOverflow}px inside the same CLAMPED overflow:hidden panel (${ddH.clipped && ddH.clipped.width}px wide) — so the assert above measures the cascade, not the text`,
+      !!ddH.clipped && ddH.clipped.worstOverflow > 20, ddH.clipped);
     ok(`375×667: the panel stays fully ON SCREEN with the clamp's own 8px gap (left ${ddH.after && ddH.after.left} → right ${ddH.after && ddH.after.right} ≤ ${ddH.vw} − 8) — and it has to, because the page itself does not scroll sideways (documentElement scrollWidth ${ddH.docScrollW} === clientWidth ${ddH.docClientW}), so anything past the edge is UNREACHABLE, not merely ugly. The gap is asserted, not just "fits": with wrapping restored the pre-fix placement lands EXACTLY on the edge, so a leg that only checked \u2264 innerWidth would stay green with the clamp deleted`,
       !!ddH.after && ddH.after.fits && ddH.after.right <= ddH.vw - 7.5 && ddH.docScrollW === ddH.docClientW, ddH.after);
     ok(`NEGATIVE CONTROL: restoring the WHOLE pre-fix state (raw anchor offset + the nowrap the cascade computed) puts the same panel at right ${ddH.preFix && ddH.preFix.right} — ${ddH.preFix && Math.round(ddH.preFix.right - ddH.vw)}px off a ${ddH.vw}px screen, unreachable. The two halves are not independent: with wrapping restored but the clamp removed the panel lands exactly ON the edge (right ${ddH.unclamped && ddH.unclamped.right}), which is why the fix is BOTH the cascade and the placement`,
@@ -1200,7 +1205,7 @@ if (!CHROME) {
       ${mkBarFull('')};
       const host = document.getElementById('host');
       host.style.width = '0px';
-      document.querySelector('.chat-status-design').click();
+      document.querySelector('.chat-status-artifacts').click();   // (lane mask-value-shape) the design panel is 产出's press with no file yet — the design chip is a row inside it
       const dd = document.querySelector('.chat-status-dropdown');
       const r = dd.getBoundingClientRect();
       const out = { width: +r.width.toFixed(2), styleMinW: dd.style.minWidth, styleMaxW: dd.style.maxWidth, display: getComputedStyle(dd).display };
@@ -1216,7 +1221,7 @@ if (!CHROME) {
       ${mkBarFull('')};
       const host = document.getElementById('host');
       host.style.width = '200px';   // the design panel asks for 300 — 100px more than exists
-      document.querySelector('.chat-status-design').click();
+      document.querySelector('.chat-status-artifacts').click();   // (lane mask-value-shape) the design panel is 产出's press with no file yet — the design chip is a row inside it
       const dd = document.querySelector('.chat-status-dropdown');
       const containerW = +host.getBoundingClientRect().width.toFixed(2);
       const clamped = dd.getBoundingClientRect();

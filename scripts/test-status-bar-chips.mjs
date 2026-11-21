@@ -1638,6 +1638,13 @@ console.log('— ⑫ the doors, pressed: the context door and «⚙ 对话设置
     const note = vo.host.querySelector('.chat-status-artifacts-none');
     ok(!voThrew && !/\d/.test(voAf.textContent) && /\b0\b/.test(liveAf.textContent) && !!note && /does not load the files/.test(note.textContent),
       `⑬ 产出 at zero: «${voAf.textContent.trim()}» in a view-only window (no count — it never loads the files) and its press says so («${note && note.textContent}»); «${liveAf.textContent.trim()}» where the files are read`, String(voThrew));
+    // …and where the conversation's Artifacts WINDOW can be opened (every chat view gives the bar that door — the top bar's own),
+    // the view-only 产出 opens it: the server's list, nothing lost on a tablet whose top bar yields its Artifacts button (主开发 r918)
+    let opened = 0;
+    const vo2 = mk13({ onDesignRequest: null, onOpenArtifactsWindow: () => { opened++; } });
+    const vo2Af = vo2.bar.element.querySelector('.chat-status-artifacts'); vo2Af._bar = vo2.bar; const vo2Threw = press(vo2Af);
+    ok(!vo2Threw && opened === 1 && !vo2.host.querySelector('.chat-status-artifacts-none'), `⑬ a view-only window's 产出 opens the conversation's Artifacts window when one can be opened (opened ${opened}, no note)`, String(vo2Threw));
+    vo2.bar.dispose(); vo2.host.remove();
     // a tool that did not start, by what it is (the status vocabulary is open: an unknown state is its own word, never «failed»)
     own.bar.setInitHealth([{ kind: 'mcp-server', name: 'plugin:x:github', detail: 'failed' }, { kind: 'mcp-server', name: 'docs', detail: 'needs-auth' }, { kind: 'mcp-server', name: 'slow', detail: 'pending' }, { kind: 'mcp-server', name: 'odd', detail: 'disabled' }, { kind: 'mcp-config', name: '', detail: 'parse: bad json' }, { kind: 'plugin', name: 'lint', detail: 'load: missing' }]);
     const hw = own.bar.initHealthWords().map((h) => h.words);

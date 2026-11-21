@@ -200,14 +200,18 @@ export class ChatStatusBar {
 
   /** THE LAYOUT VERDICT — ONE place, read by render (the «后台» face), _arranged and _onSize: ONE row when the chat WINDOW is
    *  ONE_ROW_PX wide or more (the page's widths are window widths — the cure of 644a67ec2: the bar's own width is a few px
-   *  narrower), else the two rows; the short forms at SHORT_FORM_PX or narrower. Outside a window (a test page, a detached
+   *  narrower), else the two rows; the short forms at SHORT_FORM_PX or narrower; a desk window under SHORT_WINDOW_PX high is ONE
+   *  row in its short forms (the strip yields to the messages). Outside a window (a test page, a detached
    *  bar) the bar's own width stands for it; an unmeasured bar is one row and decides nothing — its first size re-draws it. */
   _layout() {
     const bar = this._element;
     const win = typeof bar.closest === 'function' ? bar.closest('.window') : null;
     const w = (win ? win.offsetWidth : 0) || bar.clientWidth || 0;
-    const one = !(w > 0) || w >= ONE_ROW_PX, short = w > 0 && w <= SHORT_FORM_PX;
-    return { w, one, short, key: `${one ? 1 : 2}${short ? 's' : ''}` };
+    // THE STRIP YIELDS IN A SMALL WINDOW (主开发's ruling 2026-11-20 22:33Z: a chat window under SHORT_WINDOW_PX high keeps 45 %
+    // of itself for messages): there the strip is ONE row in its short forms — every mark still on it, each cut inside itself
+    const low = !!win && !PHONE_MQ?.matches && win.offsetHeight > 0 && win.offsetHeight < SHORT_WINDOW_PX;
+    const one = !(w > 0) || w >= ONE_ROW_PX || low, short = w > 0 && (w <= SHORT_FORM_PX || (low && w < ONE_ROW_PX));
+    return { w, one, short, low, key: `${one ? 1 : 2}${short ? 's' : ''}` };
   }
   /** A size change of the bar or its window: re-drawn when the arrangement's layout flips (one row ↔ the two rows, the
    *  short forms — strip-table.js); a desk window under SHORT_WINDOW_PX marks its view `chat-short` (the composer starts at
@@ -956,7 +960,7 @@ export class ChatStatusBar {
     if (this._turnState === 'requires_action' || this._pendingAsks.length) {
       const wc = waitingChip(this._pendingAsks, t);
       const canJump = wc.clickable && typeof this._onJumpToAsk === 'function';
-      chip('turnstate', `chat-status-turnstate chat-status-needs-action${canJump ? ' chat-status-clickable' : ''}`, wc.title, `${UI_ICONS.hourglass} ${escHtml(t('waiting for you'))}`);
+      chip('turnstate', `chat-status-turnstate chat-status-needs-action${canJump ? ' chat-status-clickable' : ''}`, wc.title, `${UI_ICONS.hourglass} <span class="chat-status-words">${escHtml(t('waiting for you'))}</span>`);
     }
     // lane chat-needs-you-card (the owner 2026-10-26: «这个界面里是不是应该有个地方能让我看到需要approve？»): THIS conversation's own
     // For-you items — a channel watch's approval, an ask with its choices, a secret to paste — are cards in the chat; the
@@ -1079,7 +1083,7 @@ export class ChatStatusBar {
       const arLabel = a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(t('continues at {t}', { t: resetAt }))) : (a.enabled ? ' ' + escHtml(t('auto')) : offWords);
       title = title.replace(CANCEL_TAIL, '');   // a press OPENS the panel now and cancelling is its own row: the old «Click to cancel.» is not said (the acceptance reader)
       this._autoResumeTitle = title;   // the panel's first line (the reset, whose account) — the same words as the tooltip
-      (a.armed ? chip : inDoor)('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}${arLabel}`);   // ARMED: its time on row 1; else a row of «对话设置»
+      (a.armed ? chip : inDoor)('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}<span class="chat-status-words">${arLabel}</span>`);   // ARMED: its time on row 1; else a row of «对话设置»
     }
 
     // Design canvas entry (2.366.0): rendered like the goal chip — the
@@ -1188,7 +1192,7 @@ export class ChatStatusBar {
     const permLabel = permissionModeFace(BACKEND_META[this._backend]?.permissionModeFaces, permMode, tc, t);
     const permWords = permissionModeWords(this._backend, permMode, t);
     const permTitle = (permWords ? permWords + (permMode ? ' · ' + permMode : '') + ' — ' : (permMode ? permMode + ' — ' : '')) + (this._statusSandbox ? t('Click to change permission mode \u00B7 sandbox: {sandbox}', { sandbox: this._statusSandbox }) : t('Click to change permission mode'));
-    chip('perm', `chat-status-perm chat-status-clickable${permissionModeDanger(this._backend, permMode) ? ' danger' : ''}`, permTitle, `${UI_ICONS.lock} ${escHtml(permLabel)}`, { attrs: { 'data-raw': permMode } });
+    chip('perm', `chat-status-perm chat-status-clickable${permissionModeDanger(this._backend, permMode) ? ' danger' : ''}`, permTitle, `${UI_ICONS.lock} <span class="chat-status-words">${escHtml(permLabel)}</span>`, { attrs: { 'data-raw': permMode } });
 
     // THE «后台» DOOR (lane mask-value-shape, the strip's step two — page.md §4): background tasks AND running workflows
     // behind ONE door on row 2 (the table: tasks = the door, wf = in:tasks). Its face says the ONE item's own sentence at the
@@ -1228,8 +1232,8 @@ export class ChatStatusBar {
     // Context: used tokens without a fake percentage when the window is unknown
     if (facts.context && !ctxWindow && this._statusLastInputTokens) {
       const usedK = fmtK(this._statusLastInputTokens);
-      if (facts.context === 'table') chip('ctx-unknown', 'chat-status-ctx chat-status-clickable chat-status-dim', t("Context used last turn: {used} tokens. The model's context window is unknown (it is not in this harness's window table), so no percentage is shown.", { used: usedK }), `${escHtml(usedK)}/${escHtml(t('window unknown'))}`);
-      else chip('ctx-unknown', 'chat-status-ctx chat-status-clickable chat-status-dim', t('Context used last turn: {used} tokens. The context window size was not reported by the CLI, so no percentage is shown.', { used: usedK }), `${escHtml(usedK)}/?`);
+      if (facts.context === 'table') chip('ctx-unknown', 'chat-status-ctx chat-status-clickable chat-status-dim', t("Context used last turn: {used} tokens. The model's context window is unknown (it is not in this harness's window table), so no percentage is shown.", { used: usedK }), `<span class="chat-status-words">${escHtml(usedK)}/${escHtml(t('window unknown'))}</span>`);
+      else chip('ctx-unknown', 'chat-status-ctx chat-status-clickable chat-status-dim', t('Context used last turn: {used} tokens. The context window size was not reported by the CLI, so no percentage is shown.', { used: usedK }), `<span class="chat-status-words">${escHtml(usedK)}/?</span>`);
     }
     // Context % with pie chart
     if (facts.context && ctxWindow && this._statusLastInputTokens) {
@@ -1749,7 +1753,12 @@ export class ChatStatusBar {
       this._renderDesignPopover(dropdown);
       return;
     }
-    if (afEl && !this._artifacts && !this._onDesignRequest) {   // (the cure of 644a67ec2) a view-only window at zero: the door says so
+    if (afEl && !this._artifacts && !this._onDesignRequest && this._onOpenArtifactsWindow) {   // a view-only window never loads the files itself: its 产出 opens the conversation's Artifacts window (the server's list — the top bar's own door, so a tablet that yields that button loses nothing; 主开发 r918)
+      e.stopPropagation();
+      this._onOpenArtifactsWindow();
+      return;
+    }
+    if (afEl && !this._artifacts && !this._onDesignRequest) {   // (the cure of 644a67ec2) a view-only window at zero with no window to open: the door says so
       e.stopPropagation();
       const dropdown = showDropdown(afEl);
       if (!dropdown) return;

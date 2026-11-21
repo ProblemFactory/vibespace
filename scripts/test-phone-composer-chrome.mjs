@@ -210,11 +210,17 @@ async function phoneLeg(w, minRatio) {
     const row = area.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
     const ta = document.querySelector('#frame textarea').getBoundingClientRect();
     const bar = document.querySelector('#frame .chat-status-bar');
-    const kids = [...bar.children].filter((e) => e.offsetWidth > 0 && !e.classList.contains('chat-status-rowbreak')).map((e) => e.getBoundingClientRect());
-    let gap = 0; for (let i = 1; i < kids.length; i++) gap = Math.max(gap, kids[i].left - kids[i - 1].right);
+    const els = [...bar.children].filter((e) => e.offsetWidth > 0 && !e.classList.contains('chat-status-rowbreak'));
+    const kids = els.map((e) => e.getBoundingClientRect());
+    // (lane mask-value-shape, the strip's step two) a gap is judged between NEIGHBOURS ON ONE ROW; the space before a mark the
+    // arrangement pushes to its row's end («⚙ 对话设置» on row 2, the context at the short forms — margin-left: auto) is the
+    // arrangement's, not a gap (the hosted run: 9 px before ⚙ at 390 and 412)
+    const pushed = (e) => e.matches('.chat-status-two-rows > .chat-status-settings, .chat-status-two-rows.chat-status-short > .chat-status-ctx');
+    const gaps = []; for (let i = 1; i < kids.length; i++) { const same = Math.abs((kids[i].top + kids[i].height / 2) - (kids[i - 1].top + kids[i - 1].height / 2)) <= 6; if (same && !pushed(els[i])) gaps.push({ at: els[i].getAttribute('data-chip'), px: Math.round((kids[i].left - kids[i - 1].right) * 10) / 10 }); }
+    const gap = gaps.reduce((m, g) => Math.max(m, g.px), 0);
     const mids = []; for (const y of kids.map((r) => r.top + r.height / 2).sort((a, b) => a - b)) if (!mids.length || y - mids[mids.length - 1] > 6) mids.push(y);
     const shown = [...document.querySelectorAll('#frame .chat-input-wrap > *')].filter((e) => e.offsetWidth > 0).map((e) => e.className);
-    return { ratio: ta.width / row, row, ta: ta.width, taH: ta.height, barH: bar.getBoundingClientRect().height, sw: bar.scrollWidth, cw: bar.clientWidth, gap, browser: !!bar.querySelector('.chat-status-browser'), more: !!bar.querySelector('.chat-status-more'), folded: bar.querySelectorAll('.chat-status-folded').length, rows: mids.length, shown };
+    return { ratio: ta.width / row, row, ta: ta.width, taH: ta.height, barH: bar.getBoundingClientRect().height, sw: bar.scrollWidth, cw: bar.clientWidth, gap, gaps, browser: !!bar.querySelector('.chat-status-browser'), more: !!bar.querySelector('.chat-status-more'), folded: bar.querySelectorAll('.chat-status-folded').length, rows: mids.length, shown };
   })()`);
   ok(`${w}: the field owns ≥ ${minRatio * 100} % of the composer row (${(m.ratio * 100).toFixed(1)} % of ${m.row} px)`, m.ratio >= minRatio, m);
   ok(`${w}: the field is ≥ 44 px tall at rest`, m.taH >= 44 && m.taH < 60, m.taH);
@@ -225,7 +231,8 @@ async function phoneLeg(w, minRatio) {
   ok(`${w}: the mic sits INSIDE the field at its trailing edge (a 40×40 hit area — lane voice-everywhere)`, inside(mic, field) && field.r - mic.r <= 8 && Math.round(mic.h) === 40, { mic, field });
   ok(`${w}: the status bar is the strip's TWO rows ≤ 84 px (${m.rows} rows, ${Math.round(m.barH)} px)`, m.rows === 2 && m.barH <= 84, { rows: m.rows, barH: m.barH });
   ok(`${w}: no horizontal overflow with the agent-browser chip present`, m.browser && m.sw <= m.cw, m);
-  ok(`${w}: no gap between bar chips > 8 px, nothing behind ⋯ (no ⋯, nothing folded)`, m.gap <= 8 && !m.more && m.folded === 0, m);
+  console.log(`    ${w}: the gaps judged (neighbours on one row): ${JSON.stringify(m.gaps)}`);
+  ok(`${w}: no gap between neighbouring bar chips > 8 px (⚙ pushed to row 2's end is the arrangement's), nothing behind ⋯ (no ⋯, nothing folded)`, m.gap <= 8 && !m.more && m.folded === 0, m);
   // the + sheet: four rows (lane phone-take-photo: 拍照 first, on a finger device), each reaching its own hidden input
   const picked = [];
   for (const i of [0, 1, 2, 3]) {
@@ -329,8 +336,12 @@ console.log('② desk 1100 — the composer + bar untouched (DOM signature pinne
   // bl-tests-chrome (98f87f3662f7 → a91b527c602d, the hash the second hosted run 44661171878 measured at 3a207bf23; by
   // arithmetic: the .412 signature + exactly div.chat-resumed-line right after div.chat-agent-cards hashes to a91b527c602d).
   // That the hidden line takes no room is a law the pin cannot give: the leg below the pin
-  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || 'a91b527c602d';
-  ok('desk: the composer + bar DOM signature is the pinned desk one (no + door, no in-field mic, no ⋯)', crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) === DESK_SIG && !/chat-plus-btn|chat-input-field|chat-status-more/.test(sig), sig);
+  // re-pinned for the chat status strip's step two (lane mask-value-shape, the chain onto 944de13f9 for 2.369.414): the bar
+  // is the strip's table — door classes (chat-status-door-word / -door-short / -door-sep), the class hairlines
+  // (span.chat-status-classline) at one row, the words' spans (span.chat-status-words), no ⋯ (a91b527c602d → e3f1f68357cd, the
+  // hash the chain's own heavy read measured at 0e9d5765e on the first test machine, its whole signature printed in that log)
+  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || 'e3f1f68357cd';
+  ok('desk: the composer + bar DOM signature is the pinned desk one (no + door, no in-field mic, no ⋯)', crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) === DESK_SIG && !/chat-plus-btn|chat-input-field|chat-status-more/.test(sig), sig);   // stale-pins: kept — a «gone» check: no ⋯ in the desk signature
   // ALSO (lane bl-tests-chrome, .412): a missed pin prints the WHOLE signature, in pieces a log keeps whole (ok() cuts a detail at
   // 700 chars and the signature is ~1650), so the next re-pin is placed by a diff against the last one, not by arithmetic
   if (crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) !== DESK_SIG) for (let i = 0, n = Math.ceil(sig.length / 180); i < n; i++) console.log(`    desk sig whole [${i + 1}/${n}]: ${sig.slice(i * 180, (i + 1) * 180)}`);

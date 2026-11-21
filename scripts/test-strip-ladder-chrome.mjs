@@ -11,7 +11,12 @@
 //      its own chip (its words ellipsized, the chip inside the bar)
 //   ③ the short forms at 360 and below (the doors' words hidden: «38%», «⟳ 1», «⚙ 设置»), the full ones above
 //   ④ the height: one row ≤ 30 px, two rows ≤ 60 px
-//   RED CONTROL: the base's ONE row put back (nowrap) at 500 px ⇒ ① and ② go red; taken back, the same case is green.
+//   RED CONTROL: the base's ONE row put back (nowrap, every chip its full width) at 500 px ⇒ ① and ② go red; taken back, green.
+// FONT LEGS (the cure of its first, hosted run — red at every width on the runner's DejaVu Sans, never run before): the whole
+// ladder runs once per leg of scripts/scratch.mjs fontLegs() — `dejavu` (Chrome under a scratch fontconfig naming only the runner's
+// font dirs) and `box` (this machine's own sans) — and prints the face Chrome DREW the bar in; the dejavu leg judges it is DejaVu
+// Sans. The widths add 375 and 390 (phones), 768 (a tablet) and 1280 (a desk) — the owner's picture widths; the pictures carry the
+// leg in their names.
 // The faces: the laws are judged on the dark face; the light face is pictured (the geometry is the stylesheet's, not the colours).
 // The widths are WINDOW widths (page §4): the bar judges them on its .window (_layout); this page has no window, so its host —
 // the bar's own box — stands for the window, the same number in the page and the ladder.
@@ -21,20 +26,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePort, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
+import { fileURLToPath } from 'node:url';
+import { freePort, scratch, ONBOARDED_SOURCE, runFontLegs, runnerFontEnv, drawnFace, CHROME_QUIET } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } return c; };
+import { checker } from './lib/check.mjs';   // THE ONE assertion helper (B-1747): the condition FIRST, a boolean; a swap throws
+const { ok, report } = checker();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome on this machine'); process.exit(0); }
-const ROOT = scratch('strip-ladder'); fs.mkdirSync(ROOT, { recursive: true });
+const fi = process.argv.indexOf('--font'), FONT = fi > 0 ? process.argv[fi + 1] : null;   // one font leg; none = every leg, each a child
+if (!FONT) process.exit(runFontLegs(fileURLToPath(import.meta.url)));
+const ROOT = scratch(`strip-ladder-${FONT}`); fs.mkdirSync(ROOT, { recursive: true });
 const PNG_DIR = process.env.STRIP_LADDER_PNG_DIR || path.join(ROOT, 'png'); fs.mkdirSync(PNG_DIR, { recursive: true });
 const { STRIP_ROWS, ONE_ROW_PX, SHORT_FORM_PX } = await import(path.join(REPO, 'src/lib/strip-table.js'));
 const PLACE = Object.fromEntries(STRIP_ROWS.map((r) => [r.key, r.place]));
-const WIDTHS = [280, 320, 360, 420, 500, 720, 960, 1200, 1440];
+const WIDTHS = [280, 320, 360, 375, 390, 420, 500, 720, 768, 960, 1200, 1280, 1440];   // + 375 / 390 phones, 768 a tablet, 1280 a desk (the owner's picture widths)
 const LANGS = ['zh', 'ja', 'en'];
 const FACES = ['dark', 'light'];
 
@@ -95,9 +103,9 @@ const pageUrl = (lang, face) => 'file://' + path.join(ROOT, 'index.html') + `?la
 
 // ── Chrome: its own scratch profile, no keyring, no bus, no display ──
 const CDP = await freePort();
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--allow-file-access-from-files',
+const chrome = spawn(CHROME, ['--headless=new', ...CHROME_QUIET, `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--allow-file-access-from-files',
   '--password-store=basic', `--user-data-dir=${path.join(ROOT, 'chrome')}`, 'about:blank'],
-{ stdio: ['ignore', 'ignore', 'pipe'], detached: true, env: { ...process.env, HOME: ROOT, XDG_RUNTIME_DIR: ROOT, DISPLAY: '', DBUS_SESSION_BUS_ADDRESS: '' } });
+{ stdio: ['ignore', 'ignore', 'pipe'], detached: true, env: { ...process.env, ...(FONT === 'dejavu' ? runnerFontEnv(path.join(ROOT, 'fonts')) : {}), HOME: ROOT, XDG_RUNTIME_DIR: ROOT, DISPLAY: '', DBUS_SESSION_BUS_ADDRESS: '' } });
 const done = async () => {
   try { process.kill(-chrome.pid, 'SIGKILL'); } catch { }
   if (chrome.exitCode === null && chrome.signalCode === null) await new Promise((r) => { chrome.once('exit', r); setTimeout(r, 5000); });
@@ -139,13 +147,19 @@ try {
   for (const lang of LANGS) {
     for (const face of FACES) {
       if (!ok(await open(lang, face), `${lang}/${face}: the static page booted (the real bar + the real stylesheets)`)) continue;
+      if (face === 'dark') {   // the face Chrome DREW the bar in (CSS.getPlatformFontsForNode), printed; the dejavu leg judges it
+        await at('full', 500);
+        const drawn = await drawnFace(async (method, params) => (await send(method, params)).result || {}, '.chat-status-bar .chat-status-model-label');
+        console.log(`  ${FONT} leg, ${lang}: the bar is drawn in «${drawn}»`);
+        if (FONT === 'dejavu') ok(drawn === 'DejaVu Sans', `${lang}: the dejavu leg draws the bar in the hosted runner's DejaVu Sans («${drawn}»)`);
+      }
       for (const fixture of ['full', 'bare']) {
         for (const width of WIDTHS) {
           const m = await at(fixture, width);
-          await shot(`${lang}-${face}-${fixture}-${width}.png`);
+          await shot(`${FONT}-${lang}-${face}-${fixture}-${width}.png`);
           if (face !== 'dark') continue; // the laws on one face; the other is pictured
           const L = lawsOf(m, width);
-          ok(L.all, `${lang} ${fixture} ${width} px: ${m.rows} row(s) (want ${width >= ONE_ROW_PX ? 1 : 2}) — row 1 «${m.row1}»${m.rows > 1 ? `, row 2 «${m.row2}»` : ''}; nothing cut, nothing behind ⋯; ${width <= SHORT_FORM_PX ? 'the short forms' : 'the full forms'}; ${m.h} px`,
+          ok(L.all, `${FONT} ${lang} ${fixture} ${width} px: ${m.rows} row(s) (want ${width >= ONE_ROW_PX ? 1 : 2}) — row 1 «${m.row1}»${m.rows > 1 ? `, row 2 «${m.row2}»` : ''}; nothing cut, nothing behind ⋯; ${width <= SHORT_FORM_PX ? 'the short forms' : 'the full forms'}; ${m.h} px`,
             { L, m });
         }
       }
@@ -153,7 +167,7 @@ try {
   }
   // RED CONTROL — the base's ONE row put back (nowrap, overflow hidden) at 500 px: the arrangement's laws go red; taken back, green
   await open('zh', 'dark');
-  await ev(`(() => { const st = document.createElement('style'); st.id = 'ladder-red'; st.textContent = '.chat-status-bar { flex-wrap: nowrap !important; overflow: hidden !important; }'; document.head.appendChild(st); return true; })()`);
+  await ev(`(() => { const st = document.createElement('style'); st.id = 'ladder-red'; st.textContent = '.chat-status-bar { flex-wrap: nowrap !important; overflow: hidden !important; } .chat-status-bar > * { flex: none !important; max-width: none !important; }'; document.head.appendChild(st); return true; })()`);
   const red = lawsOf(await at('full', 500), 500);
   await ev(`(() => { document.getElementById('ladder-red').remove(); return true; })()`);
   const back = lawsOf(await at('full', 500), 500);
@@ -161,5 +175,4 @@ try {
   ok(pageErrors.length === 0, `no page error on the way (${pageErrors.length})`, pageErrors.slice(0, 3));
   console.log(`  pictures: ${PNG_DIR} (${fs.readdirSync(PNG_DIR).filter((f) => f.endsWith('.png')).length} PNGs)`);
 } finally { try { cdp.close(); } catch { } await done(); }
-console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+report();

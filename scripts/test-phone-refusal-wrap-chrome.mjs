@@ -236,9 +236,12 @@ const runTree = async (label, srv) => {
 
     // ② A TOAST OFF THE COMPOSER (P2-1)
     await clearToasts(); await portNotice(); await sleep(450);
-    const t1 = await toastFacts(['.chat-view .chat-input-area']);
+    // (lane mask-value-shape) the phone's ONE bottom panel is the composer AND the strip under it (two rows since the strip's
+    // step two — the taller panel moved the composer up, and the unplaced base toast sat on the strip instead): both are judged
+    const t1 = await toastFacts(['.chat-view .chat-input-area', '.chat-view .chat-status-bar']);
+    console.log(`    ${tag} — the toast against the bottom panel: ${JSON.stringify(t1)}`);
     await shot(`${tag}-toast`);
-    want('② the toast stands off the composer — its rect does not meet the composer\'s', !!t1 && t1.inView && t1.over.length === 0, t1);
+    want('② the toast stands off the phone\'s bottom panel — its rect meets neither the composer\'s nor the strip\'s', !!t1 && t1.inView && t1.over.length === 0, t1);
     want('② its ✕ is a 44 × 44 touch target', !!t1 && t1.x[0] >= 44 && t1.x[1] >= 44, t1 && t1.x);
     want('② plain words + the plug SVG, no emoji: «A program on this machine started listening on port 9835 (chrome) — …»', !!t1 && t1.text.startsWith('A program on this machine started listening on port 9835 (chrome)') && t1.svg && !t1.emoji, t1 && t1.text);
 
