@@ -227,17 +227,33 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const nE = unanchoredEdits(P("const m = MUT.load('src/x.js', editAnchor(src, 'a', 'b', 'src/x.js').replace('c', 'd'), 't');")).length;
   const nE2 = unanchoredEdits(P("const m = MUT.load('src/x.js', anchored(src, 'a', 'b', 't').split('c').join('d'), 't');")).length;
   const nE3 = unanchoredEdits(P("const c = editAnchor(src, 'a', 'b', 'src/x.js'); const m = MUT.load('src/x.js', c.replace('c', 'd'), 't');")).length;
-  ok(nE === 1 && nE2 === 1 && nE3 === 1, `CONTROL (the planted red): a SECOND EDIT appended to a cured chain is counted — after editAnchor() ${nE}, after anchored() ${nE2}, after a cured link held in a name ${nE3} (1 each; the census before followed no cured link and counted 0)`);
-  const L = (e) => `const m = MUT.load('src/x.js', ${e}, 't');`;
-  const CASES = [   // [the body, the count meant, what it is]
+  const nE4 = unanchoredEdits(P("let c; c = anchored(src, 'a', 'b', 't'); const m = MUT.load('src/x.js', c.replace('c', 'd'), 't');")).length;
+  ok(nE === 1 && nE2 === 1 && nE3 === 1 && nE4 === 1, `CONTROL (the planted red): a SECOND EDIT appended to a cured chain is counted — after editAnchor() ${nE}, after anchored() ${nE2}, after a cured link held in a name ${nE3} / assigned to one ${nE4} (1 each; the census before followed no cured link and counted 0)`);
+  const L = (e) => `const m = MUT.load('src/x.js', ${e}, 't');`, G = "src.replace(/require\\('\\.\\/([\\w-]+\\.js)'\\)/g, ";
+  const CASES = [   // [the body, the count meant, what it is] — a REBASE (0), then one look-alike per rule it must keep counted (1)
     [L("anchored(anchored(src, 'a', 'b', 't'), 'c', 'd', 't2').replace(/require\\('\\.\\//g, `require('${ROOT}/`)"), 0, 'cured links chained, then a prefix rebase'],
-    [L("src.replace(/require\\('\\.\\/([\\w-]+\\.js)'\\)/g, (_, f) => 'require(' + JSON.stringify(path.join(ROOT, f)) + ')')"), 0, 'a rebase by a function of the captured name'],
+    [L("src.replace(/require\\('\\.\\.\\//g, `require('${path.join(ROOT, 'src')}/`)"), 0, 'a prefix rebase to a plain path call'],
+    [L(G + "(_, f) => 'require(' + JSON.stringify(path.join(ROOT, f)) + ')')"), 0, 'a rebase by a function of the captured name'],
+    ["const S = JSON.stringify; " + L("src.replace(/from '\\.\\.\\/([^']+)'/g, (m, f) => `from ${S(path.join(ROOT, f))}`)"), 0, 'the same through a name bound to a plain call'],
     [L("src.split(\"require('../\").join(`require('${ROOT}/`)"), 0, 'a split/join prefix rebase (its pattern is split\'s)'],
-    [L("src.replace(/require\\('\\.\\/([\\w-]+\\.js)'\\)/g, (_, f) => 'require(' + JSON.stringify(map[f] || path.join(ROOT, f)) + ')')"), 1, 'a map lookup picks what loads'],
-    [L("src.split(\"require('./store.js')\").join(\"require('./fake.js')\")"), 1, 'a fixed module swapped'],
-    [L("src.replace(/require\\('\\.\\/([\\w-]+\\.js)'\\)/g, () => \"require('./fake.js')\")"), 1, 'one module named for every path'],
+    [L(G + "(_, f) => 'require(' + JSON.stringify(map[f]) + ')')"), 1, 'a lookup x[y]'],
+    [L(G + "(_, f) => 'require(' + JSON.stringify(f === 'a.js' ? FAKE : path.join(ROOT, f)) + ')')"), 1, 'a choice ?:'],
+    [L(G + "(_, f) => 'require(' + JSON.stringify(path.join(ROOT, f || 'index.js')) + ')')"), 1, 'a choice ||'],
+    [L(G + "function (_, f) { if (f === 'a.js') return FAKE; return 'require(' + JSON.stringify(path.join(ROOT, f)) + ')'; })"), 1, 'a choice by if'],
+    [L(G + "function (_, f) { switch (f) { default: return 'require(' + JSON.stringify(path.join(ROOT, f)) + ')'; } })"), 1, 'a choice by switch'],
+    [L(G + "function (_, f) { let r; for (r of [f]); return 'require(' + JSON.stringify(path.join(ROOT, r)) + ')'; })"), 1, 'a loop'],
+    [L(G + "(_, f) => 'require(' + JSON.stringify(path.join(ROOT, pick(f))) + ')')"), 1, 'a call that is not a path\'s own (a lookup by call)'],
+    [L(G + "(m) => m + ' ')"), 1, 'the whole match, no captured name read'],
+    [L(G + "() => \"require('./fake.js')\")"), 1, 'one module named for every path'],
+    [L(G + "\"require('./fake.js')\")"), 1, 'a captured name, a fixed string for it'],
     [L("src.replace(/require\\('\\.\\/store\\.js'(\\))/g, (_, close) => \"require('./fake.js'\" + close)"), 1, 'a fixed module in the pattern, its tail caught'],
+    [L("src.replace(/require\\('\\.\\/(store)\\.js'\\)/g, (_, f) => 'require(' + JSON.stringify(path.join(ROOT, f + '.js')) + ')')"), 1, 'a group that fixes the name'],
+    [L("src.replace(/require\\('\\.\\//g, () => `require('${FAKE}/`)"), 1, 'a prefix pattern with a function'],
+    [L("src.replace(/require\\('\\.\\//g, `require('${useMut ? MUTDIR : ROOT}/`)"), 1, 'a choice inside a prefix template'],
+    [L("src.replace(/'\\.\\//g, `'${ROOT}/`)"), 1, 'a relative path with no require / import / from'],
+    [L("src.split(\"require('./store.js')\").join(\"require('./fake.js')\")"), 1, 'a fixed module swapped'],
     [L("src.replace(/require\\('\\.\\//, `require('${ROOT}/`)"), 1, 'the first match only'],
+    [L("src.replace(\"require('../\", `require('${ROOT}/`)"), 1, 'a string prefix, the first match only'],
     [L("src.replace(\"require('./a.js')\", 'R')"), 1, 'one require, not every'],
     [L("src.replaceAll('moved from the queue', 'R')"), 1, 'prose that says «from»'],
     [L("src.split('a').join(\"require('../\")"), 1, 'a path in the REPLACEMENT is no pattern'],

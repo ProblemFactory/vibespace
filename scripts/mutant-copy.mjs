@@ -138,7 +138,7 @@ export function mutantCopies(name, repo) {
  *  `editAnchor(text, …)` or scratch.mjs `anchored(text, …)` hands its first argument on, and a name bound to one is the product's
  *  text still — so a second edit appended to a cured chain (`editAnchor(src, a, b, f).replace(c, d)`) is counted like any other.
  *  Only a REBASE of module paths is left out (`rebase` below: every match, a relative path and no module's name in the pattern, a
- *  replacement that re-roots each path the same way); a lookup, a swap, a first match, prose that says «from» stay counted. */
+ *  replacement that re-roots each path the same way, choosing nothing); a lookup, a swap, a first match, prose stay counted. */
 export function unanchoredEdits(src, { ast: given = null } = {}) {
   // the cheap door first: no line that reads a product file, or no edit, or no loader ⇒ nothing to parse
   if (!/\.(?:replace|replaceAll|join)\(/.test(src) || !/(?:\.load|\.write|_compile|runIn\w*Context|compileFunction|writeFileSync|new Function)\(/.test(src)) return [];
@@ -165,11 +165,23 @@ export function unanchoredEdits(src, { ast: given = null } = {}) {
     }
   };
   // a REBASE of module paths (not counted): a rewrite of EVERY match (a /g RegExp, replaceAll, split/join) whose pattern is a
-  // literal naming require / import / from and a RELATIVE path (./ ../) and NO module's name — it ends there, or a group / class
-  // reads the name — and whose replacement re-roots each path the same way: a literal when the pattern ends at the opener, else a
-  // function of the captured name with no lookup and no choice in it (no x[y], no ?: / || / &&, no if / switch). A fixed module's
-  // swap, a map lookup, a choice by name, a first match only, or prose that says «from» stay counted: each picks what loads.
+  // literal naming require / import / from and a RELATIVE path (./ ../) and NO module's name — it ends there, or a group / class /
+  // \w / . reads the name — and whose replacement re-roots each path the same way: a literal (a template of plain path calls) when
+  // the pattern ends at the opener, else a function reading its captured name with no CHOICE in it. A choice is x[y], ?: , || / &&,
+  // an if / switch / loop, or any call but a path's own (path.join / resolve / dirname, JSON.stringify, pathToFileURL, String):
+  // `pick(f)`, `map.get(f)`, `f.replace(…)` choose. A fixed module's swap, a lookup, a first match, prose that says «from» stay counted.
   const OPENER = /\\\.(?:\\\.\??|\{1,2\})?\\\//g;   // ./ ../ ..?/ .{1,2}/ as a RegExp source spells them
+  const PLAIN = /^(?:path\.(?:posix\.)?(?:join|resolve|dirname)|JSON\.stringify|pathToFileURL|String)$/;
+  const plainAlias = new Set();   // a name bound to one of them (`const S = JSON.stringify`) — met by the walk before its use
+  const chooses = (node) => {
+    let c = false;
+    walk(node, (x) => {
+      if ((x.type === 'MemberExpression' && x.computed) || x.type === 'ConditionalExpression' || x.type === 'LogicalExpression') c = true;
+      else if (/^(?:If|Switch|For|ForIn|ForOf|While|DoWhile)Statement$/.test(x.type)) c = true;
+      else if ((x.type === 'CallExpression' || x.type === 'NewExpression') && !PLAIN.test(text(x.callee)) && !(x.callee.type === 'Identifier' && plainAlias.has(x.callee.name))) c = true;
+    });
+    return c;
+  };
   const rebase = (n, prop) => {
     const pat = prop === 'join' ? n.callee.object.arguments[0] : n.arguments[0], to = prop === 'join' ? n.arguments[0] : n.arguments[1];
     if (!pat || !to || pat.type !== 'Literal') return false;
@@ -181,20 +193,17 @@ export function unanchoredEdits(src, { ast: given = null } = {}) {
       for (const m of s.matchAll(OPENER)) last = m.index + m[0].length;
       if (last < 0) return false;
       rest = s.slice(last);
-      if (rest !== '' && !/^[([]/.test(rest)) return false;
+      if (rest !== '' && !/^(?:\((?:\?:)?)*(?:\[|\\w|\.)/.test(rest)) return false;   // a literal name after the opener: one module
     } else if (typeof pat.value === 'string' && prop !== 'replace') {
       if (!/(?:require\(|import\(|from )\s*['"`]\.\.?\/$/.test(pat.value)) return false;
       rest = '';
     } else return false;
-    if (rest === '') return (to.type === 'Literal' && typeof to.value === 'string') || to.type === 'TemplateLiteral';
+    if (rest === '') return (to.type === 'Literal' && typeof to.value === 'string') || (to.type === 'TemplateLiteral' && !chooses(to));
     if (to.type !== 'ArrowFunctionExpression' && to.type !== 'FunctionExpression') return false;
     const caught = new Set(to.params.slice(1).filter((q) => q.type === 'Identifier').map((q) => q.name));
-    let choice = false, reads = false;
-    walk(to.body, (x) => {
-      if ((x.type === 'MemberExpression' && x.computed) || x.type === 'ConditionalExpression' || x.type === 'LogicalExpression' || x.type === 'IfStatement' || x.type === 'SwitchStatement') choice = true;
-      if (x.type === 'Identifier' && caught.has(x.name)) reads = true;
-    });
-    return !choice && reads;
+    let reads = false;
+    walk(to.body, (x) => { if (x.type === 'Identifier' && caught.has(x.name)) reads = true; });
+    return reads && !chooses(to.body);
   };
   const ids = (n, into) => walk(n, (x) => { if (x.type === 'Identifier') into.add(x.name); });
   const curedOf = (x) => { if (!x || x.type !== 'CallExpression' || x.callee.type !== 'Identifier' || !CURED.has(x.callee.name)) return false; const b = baseOf(x); return !!b && b.type === 'Identifier' && product.has(b.name); };
@@ -204,6 +213,7 @@ export function unanchoredEdits(src, { ast: given = null } = {}) {
     // a cured link's result held in a name is the product's text still (`const c = editAnchor(src, …)`; then `c.replace(…)`)
     else if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && curedOf(n.init)) product.add(n.id.name);
     else if (n.type === 'AssignmentExpression' && n.left.type === 'Identifier' && curedOf(n.right)) product.add(n.left.name);
+    if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && PLAIN.test(text(n.init))) plainAlias.add(n.id.name);
     if ((n.type === 'CallExpression' || n.type === 'NewExpression') && isLoader(n)) for (const a of n.arguments) ids(a, loaderArgs);
     if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed) return;
     const prop = n.callee.property.name;
