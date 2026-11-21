@@ -698,6 +698,13 @@ This file is the engineers' record of every release: the lanes, the verification
 - PURE `unshownOf` / `unshownText` in a NEW module src/window-unshown.js (never src/window-reach.js: that one rides the device agent's bundle): every named top-level ≥ 100×100 the image leaves out or cuts, with why and how it can be reached today. The engine's plan carries it; the screenshot answer has `unshown` + `note`; X-Window-Shot carries them ASCII-escaped; the CLI prints the note under the image line. No window is moved by a read (r772).
 - Gate: test-desktop-pin §DBB4 (PURE cells, the real engine over a fake xpra keeper with its control, the real route + the shipped CLI with an en-dash title). Unit 2 (owed): the handle as the call's subject; the stand-in heavy leg (a real chromium's window.open popup at the origin and one far outside).
 
+### lg-recovery — B-299b, the history warm: ONE agy history warm reads and parses at a time
+- MEASURED FIRST (probe run 6653f18b5-20261121012258-box, never lined; the real watchdog + a 2 ms ticker; each transcript at the 16 MB read budget, all warmed at once as after a restart): N = 10 — 906 ms in all, the longest loop gap 181 ms; N = 30 — 2 183 ms, 608 ms (over the 250 ms bar); one conversation with an 8 MB step (one line) — 85 ms. WHY IT GREW WITH N: src/agy-backfill.js warmHistory yields with setImmediate after each 8 ms slice (PARSE_SLICE_MS), but N warms' yields land in the SAME check phase, so one loop turn ran N slices back to back (30 × 8 ms ≈ 240 ms), plus the chunks' splits and the collections of ~480 MB of lines.
+- THE CURE: a module queue (`oneWarm`) — one warm reads and parses at a time across conversations; the read (the gate's linesFrom), the parse and its slices unchanged. The longest hold is one slice (+ one chunk's split) whatever N.
+- AFTER (run 2b939bc14-20261121013322-box, the same probe on the cure): N = 10 — 835 ms in all, the longest loop gap 32 ms; N = 30 — 1 824 ms, 41 ms; the 8 MB step — 55 ms, 17 ms (the warms in turn finish sooner than in a crowd).
+- LEG (test-agy-store ⑪, after the bounded cache): two conversations warmed at once parse ONE after the other — a clock that moves 10 ms a call makes every slice check due (each warm yields every 64 lines): 1 280 lines, one hand-over; CONTROL a copy without the queue interleaves their slices.
+- The law's full form (the read and the parse in the agy-cards worker, its steps paged back) stays the row's: offered as its own unit.
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
