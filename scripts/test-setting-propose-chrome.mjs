@@ -129,6 +129,10 @@ const boxOf = (sel) => evalJs(`(() => { const b = [...document.querySelectorAll(
   return { fits, text: b.textContent, press: b.dataset.press, now: (b.querySelector('.ut-sc-now') || {}).textContent || '', moved: !!b.querySelector('.ut-sc-moved'), held: (b.querySelector('.ut-sc-held') || {}).textContent || '', why: (b.querySelector('.ut-sc-why') || {}).textContent || '',
     go: go ? { words: go.textContent, shown: go.dataset.shown, whole: go.scrollWidth <= go.clientWidth + 1, inside: r.left >= -1 && r.right <= innerWidth + 1 && r.width > 0 } : null }; })()`);
 
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): the box's facts, MARKED when the state it waits for never came — its
+// judge says that by name («the state never came»), never a verdict on the product
+const boxWhen = async (sel, test, what) => { for (let i = 0; i < 40; i++) { const b = await boxOf(sel); if (b && test(b)) return b; await sleep(150); } return { ...(await boxOf(sel)), timedOut: `${what} in 6 s` }; };
+const never = (got) => (got && got.timedOut ? ` — THE STATE NEVER CAME: ${got.timedOut}, so this red is that, not a verdict on the product` : '');
 try {
   console.log('① a scratch hub of this tree (sign-in off), a live conversation, the page in zh');
   await cdp('Page.enable'); await cdp('Runtime.enable');
@@ -174,8 +178,8 @@ try {
 
   console.log('④ a value that MOVED since the ask is said, and the button follows it; the row\'s link opens Settings and writes nothing');
   check('the owner changes the row by hand (the owner\'s page): 1200', (await ownerPatch({ [DAY]: 1200 })).status === 200 && stored()[DAY] === 1200);
-  const b2 = await (async () => { for (let i = 0; i < 40; i++) { const b = await boxOf(box(DAY)); if (b && b.moved) return b; await sleep(150); } return boxOf(box(DAY)); })();
-  check('the box says it is 1200 now and was 800 when asked; the button now carries 1200 as what it saw', !!b2 && b2.moved && /1200/.test(b2.now) && /800/.test(b2.now) && !!b2.go && b2.go.shown === '1200', b2);
+  const b2 = await boxWhen(box(DAY), (b) => b.moved, 'the box never said the value moved');
+  check('the box says it is 1200 now and was 800 when asked; the button now carries 1200 as what it saw' + never(b2), !!b2 && b2.moved && /1200/.test(b2.now) && /800/.test(b2.now) && !!b2.go && b2.go.shown === '1200', b2);
   await shot('zh-tray-moved');
   const bytes0 = settingsBytes();
   check('a real press on «Open this setting»', (await press(`${box(DAY)} .ut-sc-link`)) === true);
@@ -251,8 +255,8 @@ try {
   check('LAW B: the owner types 1300 into the held row (the owner\'s page writes it)', (await ownerPatch({ [DAY]: 1300 })).status === 200 && stored()[DAY] === 1300);
   check('…the hold ENDS where the write lands — the hub keeps none, every page is told', !!(await until(`fetch('/api/setting-holds').then((r) => r.json()).then((j) => j.holds.length === 0)`, { timeout: 8000 })));
   check('…no return can write over it: the settings file holds the hand\'s 1300', stored()[DAY] === 1300 && !sameBytes(bytesH, settingsBytes()));
-  const bD2 = await (async () => { for (let i = 0; i < 40; i++) { const b = await boxOf(byId(D)); if (b && !b.held) return b; await sleep(150); } return boxOf(byId(D)); })();
-  check('LAW C ON THE CARD: no held line any more; the timed 2000 now goes back to the hand\'s 1300 — never «then 1200»', !!bD2 && !bD2.held && /1300/.test(bD2.text) && !/之后回到 1200/.test(bD2.text), bD2 && bD2.text);
+  const bD2 = await boxWhen(byId(D), (b) => !b.held, 'the held line never went');
+  check('LAW C ON THE CARD: no held line any more; the timed 2000 now goes back to the hand\'s 1300 — never «then 1200»' + never(bD2), !!bD2 && !bD2.held && /1300/.test(bD2.text) && !/之后回到 1200/.test(bD2.text), bD2 && bD2.text);
   await shotOf('zh-held-case-after-hand-change', byId(D));
   await evalJs(`app.openSettingAt(${JSON.stringify(DAY)}); true`);
   await until(`!!document.querySelector('.settings-row[data-path="${DAY}"]')`, { timeout: 10000 }); await sleep(400);
