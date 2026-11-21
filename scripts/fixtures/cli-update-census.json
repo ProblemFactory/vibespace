@@ -703,6 +703,16 @@
    "suite": "test-conversation-facts",
    "match": "version-literal",
    "sites": 2
+  },
+  {
+   "id": "rewind-files-none-restored",
+   "file": "src/rewind-files.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "READ_CLI (row B-437e, the files tier) — the ONE build the files judge was read for: its tool table (each row's evidence a recorded frame) and the CLI's «No files were restored» words (scripts/fixtures/claude-cli/2.1.322-rewind-files.json, judged against it). A build not named reads «could not be checked» for every listed file and «some files may have been put back» for a failed press (the safe side, never «same» or «nothing put back») — an ordinary update never needs a release",
+   "suite": "test-rewind-files",
+   "match": "version-literal",
+   "sites": 1
   }
  ]
 }
