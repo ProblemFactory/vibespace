@@ -27,6 +27,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After a page reload, the line saying what a stopped turn left running is shown again, with its «End them» while it still applies.
 - A slow paired machine's list now comes back in seconds, its last list marked old, instead of that machine being walked a second time.
 - Pasting a picture into a terminal conversation no longer holds up the other windows, and a paste the clipboard does not take now says why.
+- In Channels, an account's own search repeated after ten minutes now asks the account again, and an agent is told how old a remembered result is.
 
 ## 2.369.415 — 2026-11-21
 
