@@ -34,6 +34,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A Task Group's Export and Import use the file as checked: a path that does not resolve, or a new file not ticked to create, is said instead of used as typed.
 - A live view no longer says VibeSpace is not watching a browser it is only reconnecting to; if reconnecting gives up, it says so and offers Retry.
 - «Who may use it…» no longer saves over a change someone made since you opened it: it shows theirs with your own changes kept, to save again.
+- A file written through a folder link into a paired machine's mounted folder is no longer refused as «not mounted».
+- Where two rows share one folder, a refusal there now names the row that holds it.
 
 ### Changed
 - The chat window's status bar is arranged by what you need: one row on a wide window, the same two rows on a narrow one, nothing hidden behind «⋯».
