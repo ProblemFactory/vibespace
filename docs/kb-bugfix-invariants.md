@@ -10631,6 +10631,7 @@ Found by reading during the 2.369.412 release red of test-internal-links-chrome 
 - **The tick's own cost:** a walk of two small maps, measured in test-cache-bounds §4b (40 tails + 150 live sessions).
 - **The follow (r1374):**
   - a history window's hold ends with the WINDOW (the page's `view-close`, keyed by socket and window, under the cache's own key), the socket's close ending the rest;
+  - two history windows of one conversation on one page share one id: the holders are COUNTED, so the hold ends with the last (r1470);
   - the sweep names each enforcer WITH its file;
   - THE HELD PREDICATE IS ASKED AT EVERY PUT: keep it a walk (no file call, no parse).
 - **不变量** = every ceiling the memory census states is enforced where it is stated, or the row says «not enforced» and whose it is; a held conversation keeps its tail; a census tick drops, never reads.

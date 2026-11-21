@@ -353,6 +353,26 @@ console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced whe
     ME.tick({ activeSessions: new Map([['x', { claudeSessionId: 'zz', clients: new Map() }]]), now: Date.now() + 11 * 60e3 });
     ok(!SS.jsonlHas('t0') && SS.jsonlHas('t1'), `a CLOSED history window's hold is gone, its socket's other window still holds (t0 ${SS.jsonlHas('t0')}, t1 ${SS.jsonlHas('t1')})`);
     SS.dropJsonlViews(sock2); SS.jsonlCacheClear(); SS.setJsonlHeld(() => null);
+    // r1470 (2): two history windows of ONE conversation on one page share ONE id — the holders are COUNTED: one closed, the tail
+    // is still HELD; both closed, it is not. Read from the census's live row eleven idle minutes on (only a held tail is live
+    // then; the trim's floor counts every byte, held ones too, so a trim is no witness of a hold). RED: a copy that does not
+    // count ends the hold at the FIRST close
+    const fill3 = (M) => { M.jsonlCacheClear(); M.setJsonlHeld(() => null); for (let k = 0; k < 4; k++) M.jsonlCacheTestPut('t' + k, 3 * MB); };
+    const heldN = (M) => M.jsonlCacheCensus(Date.now() + 11 * 60e3)[1].count;
+    fill3(SS);
+    const sock3 = {}; SS.noteJsonlView(sock3, 't0', 'view-t0'); SS.noteJsonlView(sock3, 't0', 'view-t0');
+    const twoOpen = heldN(SS); SS.dropJsonlView(sock3, 'view-t0');
+    const oneOpen = heldN(SS); SS.dropJsonlView(sock3, 'view-t0');
+    const noneOpen = heldN(SS);
+    const ssSrc = files['src/session-store.js'], COUNT = 'if (h && h.key === k) h.n++; else m.set(w, { key: k, n: 1 });';
+    const SSu = mutantCopies('cachebounds-views', REPO).load('src/session-store.js', ssSrc.replace(COUNT, () => 'm.set(w, { key: k, n: 1 });'), 'uncounted');
+    fill3(SSu);
+    const sock4 = {}; SSu.noteJsonlView(sock4, 't0', 'view-t0'); SSu.noteJsonlView(sock4, 't0', 'view-t0');
+    const redTwo = heldN(SSu); SSu.dropJsonlView(sock4, 'view-t0');
+    const redOne = heldN(SSu);
+    SSu.jsonlCacheClear(); SS.jsonlCacheClear(); SS.setJsonlHeld(() => null);
+    ok(twoOpen === 1 && oneOpen === 1 && noneOpen === 0, `two history windows of one conversation share one id: held with both open (${twoOpen}), with one closed (${oneOpen}), not with both closed (${noneOpen})`);
+    ok(ssSrc.split(COUNT).length === 2 && redTwo === 1 && redOne === 0, `RED (the holders not counted): the FIRST close ends the hold while the other window still shows the history (held ${redTwo} → ${redOne})`);
   }
   // r1374 (2): the rows FLATTENED in server.js — without it the four idle / live rows are nested arrays the census drops
   {

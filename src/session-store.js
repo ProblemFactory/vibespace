@@ -563,16 +563,18 @@ const _jsonlUsed = new WeakMap(); // entry → last touched (ms)
 // THE HELD PREDICATE IS ASKED AT EVERY PUT (r1374): a walk of the live sessions and the open history windows, no file call
 // and no parse — keep it a walk (a put runs on every parse or read hit).
 let _jsonlHeldFn = () => null;   // → a Set of held conversation ids (server/memory-enforce.js wires it), or null
-const _jsonlViews = new Map();   // a socket → its history windows: window id → the CACHE's key (r1374: a window's hold ends with the window)
+const _jsonlViews = new Map();   // a socket → its history windows: window id → { key: the CACHE's key, n: the windows open under that id }
+// (r1374: a window's hold ends with the window; r1470: two history windows of ONE conversation on one page share one id, so
+// the holders are COUNTED and the hold ends with the last of them)
 function setJsonlHeld(fn) { _jsonlHeldFn = typeof fn === 'function' ? fn : () => null; }
 /** a history window `windowId` of socket `ws` is open on the conversation whose tail the cache keeps under `key` */
-function noteJsonlView(ws, key, windowId = key) { if (!ws || !key) return; let m = _jsonlViews.get(ws); if (!m) { m = new Map(); _jsonlViews.set(ws, m); } m.set(String(windowId), String(key)); }
+function noteJsonlView(ws, key, windowId = key) { if (!ws || !key) return; let m = _jsonlViews.get(ws); if (!m) { m = new Map(); _jsonlViews.set(ws, m); } const w = String(windowId), k = String(key), h = m.get(w); if (h && h.key === k) h.n++; else m.set(w, { key: k, n: 1 }); }
 /** the window is gone (the page's `view-close`): its hold with it */
-function dropJsonlView(ws, windowId) { const m = _jsonlViews.get(ws); if (!m) return; m.delete(String(windowId)); if (!m.size) _jsonlViews.delete(ws); }
+function dropJsonlView(ws, windowId) { const m = _jsonlViews.get(ws); if (!m) return; const w = String(windowId), h = m.get(w); if (h && --h.n > 0) return; m.delete(w); if (!m.size) _jsonlViews.delete(ws); }
 /** the socket is gone: every window it held */
 function dropJsonlViews(ws) { _jsonlViews.delete(ws); }
 /** the conversation ids held now: the live sessions' (from the wiring) + every history window an open socket holds */
-function _jsonlHeldNow() { let h = null; try { h = _jsonlHeldFn(); } catch { h = null; } const out = new Set(h || []); for (const m of _jsonlViews.values()) for (const key of m.values()) out.add(key); return out; }
+function _jsonlHeldNow() { let h = null; try { h = _jsonlHeldFn(); } catch { h = null; } const out = new Set(h || []); for (const m of _jsonlViews.values()) for (const v of m.values()) out.add(v.key); return out; }
 // A grown file the ASYNC warm folds in inline (on the loop) instead of handing
 // a full re-parse to the worker: the append is the only work, bounded here.
 const WARM_INLINE_APPEND_MAX = 4 * 1024 * 1024;
