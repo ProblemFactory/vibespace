@@ -11,6 +11,11 @@
 // THE PROOF: an INVENTED episode of the shape the owner's instance showed (no real id, instant or figure: scripts/fixtures/
 // reading-truth-episode.json), replayed through the REAL engine and the REAL account manager — a pool of two members that share
 // one weekly reset instant, the pool's move at a stop, the next turn's readings: the first member's number never moves.
+//
+// B-6a92's TABLE (the held row's door), its reach said plainly (主开发 r1034): the oracle is REAL on the truth side — laws a, c, e
+// judge the verdict against the true accounts a world was drawn from; on «the facts suffice» — laws b, d, f and the cannot-tell
+// count — it restates the verdict's own conditions (the same address, the row's own field). The generator never draws one
+// address in two organisations (every true account has its own address): that limit is named in the kb, not drawn.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -854,15 +859,27 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   for (const r of T1.cannot) console.log('      cannot tell: ' + r);
   for (const r of T1.refusing) console.log('      ' + r);
   ok('B-6a92 THE TABLE: every law holds on every world (a never refused as another\'s when it is the row\'s own · b a name only for the reply\'s true account the facts know · c a lift only for the row\'s own shown read · d «not the row\'s» only when shown · e the honest row never stuck · f the r6 refusal), and every refusal\'s remedy leads to the row\'s own proven read', T1.bad.length === 0 && T1.remedyBad.length === 0 && T1.refusing.length > 0 && Object.values(reach).every((x) => x > 0), { bad: T1.bad.slice(0, 3), n: T1.bad.length, remedyBad: T1.remedyBad.slice(0, 2) });
-  // RED CONTROLS: the hit put back BEFORE proven (r8's verdict) — the Team seats break law a / e; and ONE FIXED DIMENSION put back
-  // (no shared organisation, every login carrying both fields, every witness present: r8's generator) — the same mutant is green
-  // there by blindness: the control proves the generator's reach
+  // RED CONTROLS: the hit put back BEFORE proven (r8's verdict) — the Team seats break law a / e; and r8's BLIND generator put back
+  // — FOUR dimensions fixed at once, not one: no shared organisation, every login carrying both fields, every login readable,
+  // every witness present — the same mutant is green there by blindness: the control proves the generator's reach
   const RLF = 'src/reading-lag.js', rlsrc = read(RLF), PROVEN = "  if (proven) return !liftable ? { act: 'none' } : onHeld ? { act: 'lift' } : { act: 'own' };";
   const R8HIT = "  if (rowKey && answer) { const k = (l) => (l && l.org ? 'org:' + String(l.org).toLowerCase() : l && l.email ? 'email:' + String(l.email).trim().toLowerCase() : null); const hit = others.filter((h) => k(h.login) && k(h.login) === k(answer)); if (hit.length) return { act: 'refuse', code: 'signed-in-as', names: hit.map((h) => h.name) }; }\n";
   const mHit = rlsrc.includes(PROVEN) ? require(MUT.write(RLF, rlsrc.split(PROVEN).join(R8HIT + PROVEN), 'b6a92-hit-before-proven')).heldLiftVerdict : null;
   const T2 = mHit ? tableOf(mHit, { seed: SEED, n: N }) : null, T3 = mHit ? tableOf(mHit, { seed: SEED, n: N, blind: true }) : null;
   ok('B-6a92 RED CONTROL (the hit before proven): the free generator finds worlds where an honest seat is refused as its pool-mate', !!T2 && T2.bad.some((b) => b.laws.includes('a') || b.laws.includes('e')), T2 && { n: T2.bad.length, first: T2.bad[0] });
-  ok('B-6a92 RED CONTROL (one fixed dimension put back — r8\'s generator): the same mutant is GREEN there by blindness (the generator\'s reach is what found it)', !!T3 && T3.bad.length === 0, T3 && { n: T3.bad.length, first: T3.bad[0] });
+  ok('B-6a92 RED CONTROL (r8\'s blind generator put back — four dimensions fixed at once: no shared organisation, both fields, every login readable, every witness): the same mutant is GREEN there by blindness (the generator\'s reach is what found it)', !!T3 && T3.bad.length === 0, T3 && { n: T3.bad.length, first: T3.bad[0] });
+  // PRIVACY (主开发 r975 ALSO CURED, pinned r1034): a panel that answers for ANOTHER login (the CLI rewrote the probe's isolated
+  // login file to another account) is refused on the organisation — and its words, the probe record's identity block and the
+  // refusal's archive row carry NO organisation and NO address (labels and the verdict only)
+  const binDiffer = (() => { const f = path.join(binDir, 'claude-panel-other-login.sh'); fs.writeFileSync(f, `#!/bin/sh\nprintf '%s' '${J({ oauthAccount: { emailAddress: THIRD.email, organizationUuid: THIRD.org } })}' > "$CLAUDE_CONFIG_DIR/.claude.json"\ncat <<'PANEL'\n${tP}PANEL\n`, { mode: 0o755 }); return f; })();
+  const PV = held(realEng, { ro: roP, cli: binDiffer, logins: { V: VELA, O: ORIN } });
+  const pvr = await hush(() => PV.api.refreshViaCliPanel(PV.V));
+  const pvWhy = wordsOf(PV);
+  const lastOf = (f) => { try { const t = fs.readFileSync(f, 'utf8').trim().split('\n'); return JSON.parse(t[t.length - 1]); } catch { return null; } };
+  const probeRec = lastOf(path.join(PV.root, 'data', require(path.join(REPO, 'src/server/usage-probe-log.js')).FILE));
+  const archRow = lastOf(path.join(PV.root, 'data', 'archive', 'readings-window-mismatch.ndjson'));
+  const blocks = J([probeRec && probeRec.identity, archRow && archRow.identity]);
+  ok('B-6a92 PRIVACY: a panel answering for another login is refused on the organisation, and its words, the probe record\'s identity block and the archive row\'s carry no organisation and no address', pvr.v === false && /answered for/.test(pvWhy) && noId(pvWhy) && !!(probeRec && probeRec.identity && probeRec.identity.org === 'differ') && !!(archRow && archRow.identity && archRow.identity.org === 'differ') && noId(blocks) && !/expected|"panel"/.test(blocks), { v: pvr.v, why: pvWhy, blocks });
   // …a held row's panel answering a THIRD window is refused (nothing written, the hold stands), and its words say what is true
   const Q = held(realEng, { cli: standIn('claude-panel-third.sh', panelText(hourAt(3 * 86400 + 11 * 3600), 7)) });
   await run6(Q);

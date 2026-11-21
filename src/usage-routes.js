@@ -606,12 +606,14 @@ const _panelVerdictSaid = new Map(); // key → the verdict class last journaled
 const acctNameOf = (id) => { try { return (accounts.list().accounts || []).find((x) => x.id === id)?.name || id; } catch { return id; } };
 // B-6a92 r7: the held accounts by LABEL in a sentence a person reads — the machine's own login by what it is, a name holding «@»
 // (an address) or no name: «another account»
+// B-6a92 follow (主开发 r1034): a ROW's own label in a sentence a person reads — never an address: a name holding «@», or none, reads «this account»
+const rowLabel = (key) => { const n = acctNameOf(key); return typeof n === 'string' && n && n !== key && !n.includes('@') ? n : 'this account'; };
 const heldWho = (ids) => ids.map((id) => { if (id === '__global__') return "this machine's own login (CLI login)"; const n = acctNameOf(id); return typeof n === 'string' && n && n !== id && !n.includes('@') ? n : 'another account'; }).join(', ');
 // B-6a92 r8 (主开发 r873 item 4): EVERY REFUSAL OF THE HELD ROW'S DOOR, by the verdict's code — the sentence and its remedy, which
 // is the remedy column of reading-lag HELD_REFUSALS (all four: sign the row in again with its own account → its next read is its
 // own proven read). Rows by LABEL; no identity value ever.
 const heldRefusalWords = (code, key, names) => {
-  const id = acctNameOf(key), me = typeof id === 'string' && id && id !== key && !id.includes('@') ? id : 'this account', them = heldWho(names);
+  const me = rowLabel(key), them = heldWho(names);
   const remedy = `sign ${me} in again with its own account — its next own read then proves its window`;
   if (code === 'signed-in-as') return `${me}'s sign-in folder is signed in as ${them}: this read answered as ${them}, which proves nothing about ${me}'s own window — ${remedy}`;
   if (code === 'other-answered') return `${me}'s sign-in folder is signed in as an account that is not ${me}'s own (by its record): this read proves nothing about ${me}'s window (its readings name ${them}'s) — ${remedy}`;
@@ -669,7 +671,7 @@ function panelIdentityVerdict({ key, cliPanel, expected, before, after, apiWin, 
   const movedLikely = ringAgree > 0;
   // B-6a92 r9 (主开发 r975, ALSO CURED — older than the unit, the tree's own rule): the words name rows by their LABEL only — never
   // an organisation id or an address (a label holding «@» reads «this account» / «another account»)
-  const me = (() => { const n = acctNameOf(key); return typeof n === 'string' && n && n !== key && !n.includes('@') ? n : 'this account'; })();
+  const me = rowLabel(key);
   const foreign = matched.length ? heldWho(matched) : (panelIdent.orgUuid || panelIdent.email ? 'another login' : `an account with weekly window ${windowFingerprint(panelWindow)}`);
   let why;
   if (org === 'differ') why = `the /usage panel for ${me} answered for ${foreign} — the login it reported names another organisation or address than ${me}'s own login`;
@@ -680,7 +682,7 @@ function panelIdentityVerdict({ key, cliPanel, expected, before, after, apiWin, 
       ? ` — ${me}'s own weekly window is unknown: its readings name ${heldWho(held.names)}'s window, and no run of them re-anchors it; ${me}'s own /usage read proves its window when the login that answers is ${me}'s own account (by its record)`
       : movedLikely ? ` — but ${ringAgree} of ${me}'s own last ${ring.length} API readings share the panel's window: ${me}'s weekly window may have MOVED; ${ringK} consecutive agreeing readings re-anchor it automatically (or run the identity repair)` : '');
   else if (verified) why = org === 'agree' ? `panel org matches ${me}'s own login` : `panel weekly window matches ${me}'s API-derived window (${windowFingerprint(apiWin)})`;
-  else if (shared) why = `panel weekly window matches ${me}'s API-derived window (${windowFingerprint(apiWin)}) but that phase is shared with ${matched.map(acctNameOf).join(', ')} — not identifying; the panel names no org`;
+  else if (shared) why = `panel weekly window matches ${me}'s API-derived window (${windowFingerprint(apiWin)}) but that phase is shared with ${heldWho(matched)} — not identifying; the panel names no org`;
   else why = `no identity evidence to compare for ${me} (no API-derived window yet; the panel names no org)`;
   return { refused, verified, shared, movedLikely, org, phase, why, expected: expected || null, panel: panelIdent, matched, panelWindow, apiWindow: apiWin || null };
 }
@@ -824,7 +826,7 @@ async function refreshViaCliPanel(key) {
   // A RENEWED SUBSCRIPTION (verify r1 ③): a lapsed member's panel refused on its PRE-LAPSE window alone (no other account
   // holds the panel's window, the org does not differ) re-anchors the window on this answer and is written as verified
   if (idv && idv.refused && !isGlobal && typeof app.locals.reanchorLapsedMember === 'function' && app.locals.reanchorLapsedMember(key, idv)) {
-    idv = { ...idv, refused: false, verified: true, why: `${acctNameOf(key)} was lapsed and answered with a new weekly window no other account holds — re-anchored (a renewal)` };
+    idv = { ...idv, refused: false, verified: true, why: `${rowLabel(key)} was lapsed and answered with a new weekly window no other account holds — re-anchored (a renewal)` };
   }
   // B-6a92 r5 (主开发 r677, ruled in 1): A HELD ROW'S OWN READ IS ITS DOOR — this panel is the row's OWN credential (isolated);
   // answering in the window its readings were held on (an honest shared window) it is the row's proven read: the hold ends,
@@ -832,7 +834,7 @@ async function refreshViaCliPanel(key) {
   if (idv && !isGlobal && typeof app.locals.liftHeldWindow === 'function') {
     // r8 (主开发 r873): the engine executes ONE PURE VERDICT (reading-lag heldLiftVerdict) — here only its act becomes the answer
     const lift = app.locals.liftHeldWindow(key, idv);
-    if (lift && lift.act === 'lift') idv = { ...idv, refused: false, verified: true, verifiedBy: 'own-panel', why: `${acctNameOf(key)}'s own /usage read answered in the weekly window its readings were held on — its own read proves it: stamped there, the hold ended` };
+    if (lift && lift.act === 'lift') idv = { ...idv, refused: false, verified: true, verifiedBy: 'own-panel', why: `${rowLabel(key)}'s own /usage read answered in the weekly window its readings were held on — its own read proves it: stamped there, the hold ended` };
     else if (lift && lift.act === 'refuse') idv = { ...idv, refused: true, verified: false, why: heldRefusalWords(lift.code, key, lift.names || []) };
   }
   probeRec.identity = { org: idv.org || null, phase: idv.phase || null, matched: idv.matched, shared: !!idv.shared, movedLikely: !!idv.movedLikely, apiWindow: idv.apiWindow || null };   // r9: the verdict, never the two identities it compared
