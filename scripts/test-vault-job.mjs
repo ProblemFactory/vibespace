@@ -645,16 +645,24 @@ async function legWrapperSkip(doorSrc = null) {
   const onPath = (w) => { for (const d of String(process.env.PATH || '').split(':').filter(Boolean)) { try { const p = fs.realpathSync(path.join(d, w)); if (fs.statSync(p).isFile()) return p; } catch { } } return w; };
   const understood = [['timeout', '3600'], ['nohup'], ['nice', '-n', '5'], ['env', 'A=1', 'B=2'], ['timeout', '--signal=KILL', '30s', 'nice', '-n', '5'], [],
     // 主开发 r1042 item 2: an option that takes a VALUE — never named as the program
-    ['timeout', '-s', 'KILL', '60'], ['timeout', '--signal', 'KILL', '60'], ['timeout', '-k', '5', '60'], ['env', '-u', 'HOME'], ['env', '-C', dir], ['stdbuf', '-o', 'L'], ['stdbuf', '-oL'], ['taskset', '0x3'], ['taskset', '-c', '0-1'], ['nice', '-5']];
-  const notUnderstood = [['timeout', '--weird', '5'], ['env', '-S', 'node bot.js'], ['taskset', '-p', '123'], ['stdbuf', '-x', 'L']];
+    ['timeout', '-s', 'KILL', '60'], ['timeout', '--signal', 'KILL', '60'], ['timeout', '-k', '5', '60'], ['env', '-u', 'HOME'], ['env', 'FOO.BAR=1'], ['stdbuf', '-o', 'L'], ['stdbuf', '-oL'], ['taskset', '0x3'], ['taskset', '-c', '0-1'], ['nice', '-5']];
+  // …and (主开发 r1091 — follow 3) every env word that changes WHERE the program is looked up: a change of folder, PATH assigned or
+  // unset, an empty environment — the card names env itself, counted as one an agent can change
+  const notUnderstood = [['timeout', '--weird', '5'], ['env', '-S', 'node bot.js'], ['taskset', '-p', '123'], ['stdbuf', '-x', 'L'],
+    ['env', '-C', dir], ['env', `PATH=${path.dirname(process.execPath)}:/usr/bin`], ['env', '-u', 'PATH'], ['env', '--unset=PATH'], ['env', '-i'], ['env', '-']];
+  // options end at the FIRST operand (as GNU reads them): a dash word after it is the program the wrapper would exec
+  const operandEnds = [[['env', 'A=1', '-i'], '-i'], [['timeout', '60', '--'], '--']];
   const got = [], wrap = [];
   for (const pre of understood) { const p = await D.programFacts({ argv: [...pre, process.execPath, script, '--poll', '60'], cwd: dir }); got.push({ pre: pre.join(' ') || '(none)', program: p.program.path, script: p.script && p.script.path, command: p.command, unread: !!p.program.unread }); }
-  for (const pre of notUnderstood) { const p = await D.programFacts({ argv: [...pre, process.execPath, script], cwd: dir }); wrap.push({ pre: pre.join(' '), program: p.program.path, want: onPath(pre[0]), script: p.script && p.script.path, command: p.command }); }
+  for (const pre of notUnderstood) { const p = await D.programFacts({ argv: [...pre, process.execPath, script], cwd: dir }); wrap.push({ pre: pre.join(' '), program: p.program.path, want: onPath(pre[0]), script: p.script && p.script.path, command: p.command, unparsed: p.program.unparsed === true, writable: p.program.writable === true }); }
+  const ends = [];
+  for (const [pre, want] of operandEnds) { const p = await D.programFacts({ argv: [...pre, process.execPath, script], cwd: dir }); ends.push({ pre: pre.join(' '), program: p.program.path, want }); }
   rows.got = got;
   row(got.every((g) => g.program === node && g.script === real && g.command.endsWith('bot.js --poll 60') && !g.unread) && got.filter((g) => g.pre !== '(none)').every((g) => g.command.startsWith(g.pre.split(' ')[0] + ' ')),
     'THE WRAPPERS IN FRONT (rounds w6tezed7d, whmslzr9y): `timeout 3600`, `nohup`, `nice -n 5`, `env A=1 B=2`, two in a row — and an option that takes a VALUE (`timeout -s KILL 60`, `--signal KILL`, `-k 5`, `env -u HOME`, `env -C <dir>`, `stdbuf -o L`, `stdbuf -oL`, `taskset 0x3`, `taskset -c 0-1`, `nice -5`): the card names the program it RUNS (node\'s real path) and its script — never an option\'s value', got.filter((g) => !(g.program === node && g.script === real && g.command.endsWith('bot.js --poll 60') && !g.unread && (g.pre === '(none)' || g.command.startsWith(g.pre.split(' ')[0] + ' ')))));   // the cases that missed, whatever they missed
-  row(wrap.every((w) => w.program === w.want && !w.script && w.command.startsWith(w.pre.split(' ')[0] + ' ')),
-    'a word the wrapper\'s grammar does not know (`timeout --weird`, `env -S`, `taskset -p`, `stdbuf -x`): the card names THE WRAPPER itself — what is literally run — the whole command as typed', wrap);
+  row(wrap.every((w) => w.program === w.want && !w.script && w.command.startsWith(w.pre.split(' ')[0] + ' ') && w.unparsed && w.writable),
+    'a word the wrapper\'s grammar does not understand (`timeout --weird`, `env -S`, `taskset -p`, `stdbuf -x`) — and every env word that changes WHERE the program is found (`env -C <dir>`, `env PATH=…`, `env -u PATH`, `--unset=PATH`, `env -i`, `env -`): the card names THE WRAPPER itself — what is literally run — the whole command as typed, what it starts counted as one an agent can change', wrap.filter((w) => !(w.program === w.want && !w.script && w.unparsed && w.writable)));
+  row(ends.every((e) => e.program === e.want), 'options end at the FIRST operand, as GNU reads them: `env A=1 -i …` names «-i», `timeout 60 -- …` names «--» — the word the wrapper would exec', ends);
   return rows;
 }
 // ⑫c THE SECOND FOLLOW (主开发 r1042 — the narrow round whmslzr9y): ONE read on the pool at a time · a held read said · the wrappers' words
@@ -675,6 +683,13 @@ async function legOneSlot(doorSrc = null) {
   const [pa, pb] = await Promise.all([a, b]);
   const out = { a: pa.program, b: pb.program, okReads: h.calls.filter((c) => c.startsWith('/srv/ok/')).length, heldReads: h.calls.filter((c) => c.startsWith('/srv/held/')).length };
   h.free();
+  // two cards on a HEALTHY folder (round wtjb84nh2): both read; the slot is a card's for its whole sequence — the second card's reads
+  // all come after the first card's
+  const h2 = heldFs(), st2 = D.newReadState();
+  const [q1, q2] = await Promise.all([D.programFacts({ argv: ['/srv/ok1/bin/prog'], cwd: '/srv/ok1' }, { fsp: h2.fsp, ms: 2000, state: st2 }), D.programFacts({ argv: ['/srv/ok2/bin/prog'], cwd: '/srv/ok2' }, { fsp: h2.fsp, ms: 2000, state: st2 })]);
+  h2.free();
+  const i1 = h2.calls.map((c, i) => (c.startsWith('/srv/ok1/') ? i : -1)).filter((i) => i >= 0), i2 = h2.calls.map((c, i) => (c.startsWith('/srv/ok2/') ? i : -1)).filter((i) => i >= 0);
+  out.pair = { read1: i1.length, read2: i2.length, unread: !!(q1.program.unread || q2.program.unread), inOrder: i1.length > 0 && i2.length > 0 && Math.max(...i1) < Math.min(...i2) };
   return out;
 }
 async function legHeldSaid() {
@@ -1109,7 +1124,7 @@ const MUT_NOBOUND = dmut('t = setTimeout(() => res(LATE), left);', 't = setTimeo
 const MUT_SYNCREAD = dmut('const realOf = async (p) => (await call((x) => fsp.realpath(x), p)).v || null;', 'const realOf = async (p) => fsp.realpathSync(p);');
 const MUT_ONSTATUS = dmut("  if (userTodos && typeof userTodos.onStatus === 'function') {\n", '  if (false) {\n');
 // ⑫c's controls: the slot guard cut (a second card reads while the first is held) · an option's value named as the program (planted)
-const MUT_NOSLOT = dmut('    if (!(await slot())) throw LATE;', '    void slot;');
+const MUT_NOSLOT = dmut('    if (lateHere || !(await take())) throw LATE;', '    if (lateHere) throw LATE;');
 const MUT_VALUEPROG = dmut('function pastWrapper(argv, i) {\n', "function pastWrapper(argv, i) {\n  if (argv[i + 1] === '-s') return i + 2;\n");
 const [oneSlot, oneSlotMut, heldSaid, wrapMut] = await Promise.all([legOneSlot(), MUT_NOSLOT ? legOneSlot(MUT_NOSLOT) : null, legHeldSaid(), MUT_VALUEPROG ? legWrapperSkip(MUT_VALUEPROG) : null]);
 const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
@@ -1161,7 +1176,8 @@ print('⑫b THE CARD AT ITS LANDING · THE WRAPPERS IN FRONT · A CARD CLOSED EL
 ok(!!MUT_ONSTATUS && closedMut.state === 'waiting', 'CONTROL — another door\'s close not heard (the store\'s listener removed): the job waits for ever with no card — RED on the copy', MUT_ONSTATUS ? closedMut.state : 'the copy could not be built (its anchor is missing)');
 { const o = oneSlot || {};
   ok(!!o.a && o.a.unread === true && !!o.b && o.b.unread === true && o.okReads === 0 && o.heldReads === 1,
-    'ONE READ ON THE POOL AT A TIME (主开发 r1042 item 1): a SECOND card filed while the first card\'s read is held reads NOTHING (its facts «could not be read in time»), the held read the only one taken', o); }
+    'ONE READ ON THE POOL AT A TIME (主开发 r1042 item 1): a SECOND card filed while the first card\'s read is held reads NOTHING (its facts «could not be read in time»), the held read the only one taken', o);
+  ok(!!o.pair && o.pair.read1 > 0 && o.pair.read2 > 0 && !o.pair.unread && o.pair.inOrder === true, '…two cards on a HEALTHY folder both read — the second card\'s reads all after the first card\'s (the slot is a card\'s for its whole sequence: in a burst the earlier cards finish first)', o.pair); }
 ok(!!MUT_NOSLOT && !!oneSlotMut && oneSlotMut.okReads > 0, 'CONTROL — the slot guard cut: the second card reads while the first is held (another pool thread) — RED on the copy', MUT_NOSLOT ? oneSlotMut && { okReads: oneSlotMut.okReads } : 'the copy could not be built (its anchor is missing)');
 print('⑫c A HELD READ, SAID · THE NEXT CARD READS AGAIN', heldSaid);
 ok(!!MUT_VALUEPROG && !!wrapMut && ((wrapMut.got || []).find((g) => g.pre === 'timeout -s KILL 60') || {}).program === 'KILL', 'CONTROL — an option\'s value taken for the program (planted: `-s` skipped without its value): the card says «Program: KILL» — RED on the copy', MUT_VALUEPROG ? wrapMut && ((wrapMut.got || []).find((g) => g.pre === 'timeout -s KILL 60') || {}) : 'the copy could not be built (its anchor is missing)');

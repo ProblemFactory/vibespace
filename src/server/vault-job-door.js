@@ -74,7 +74,9 @@ const WRAP_GRAMMAR = {
   timeout: { value: ['-s', '--signal', '-k', '--kill-after'], flags: ['--preserve-status', '--foreground', '-v', '--verbose'], positional: [/^\d+(\.\d+)?[smhd]?$/] },
   nohup: { value: [], flags: [], positional: [] },
   nice: { value: ['-n', '--adjustment'], flags: [], positional: [], attached: /^-\d+$/ },
-  env: { value: ['-u', '--unset', '-C', '--chdir'], flags: ['-i', '--ignore-environment', '-0', '--null', '-v', '--debug', '-'], positional: [], assigns: true },
+  // env (主开发 r1091 — follow 3): a word that changes WHERE the program is looked up (an empty environment, a change of folder, a split
+  // string, PATH assigned or unset) is NOT understood — the card names env itself; every other «NAME=value» word is an assignment
+  env: { value: ['-u', '--unset'], flags: ['-0', '--null', '-v', '--debug'], positional: [], assigns: true, lookup: ['-i', '--ignore-environment', '-', '-C', '--chdir', '-S', '--split-string'], unsetLookup: ['PATH'] },
   setsid: { value: [], flags: ['-c', '--ctty', '-f', '--fork', '-w', '--wait'], positional: [] },
   stdbuf: { value: ['-i', '--input', '-o', '--output', '-e', '--error'], flags: [], positional: [], attached: /^-[ioe].+$/ },
   ionice: { value: ['-c', '--class', '-n', '--classdata'], flags: ['-t', '--ignore'], positional: [], attached: /^-[cn]\d+$/ },
@@ -83,23 +85,26 @@ const WRAP_GRAMMAR = {
   time: { value: ['-o', '--output', '-f', '--format'], flags: ['-p', '--portability', '-a', '--append', '-v', '--verbose', '-q', '--quiet'], positional: [] },
   unbuffer: { value: [], flags: ['-p'], positional: [] },
 };
-/** PURE: the index of the program the wrapper at `i` runs | -1 (not a wrapper, or a word its grammar does not know) */
+/** PURE: the index of the program the wrapper at `i` runs | -1 (not a wrapper, or a word its grammar does not understand). Options are read
+ *  until the first operand (an assignment, a positional word) or `--`, as GNU coreutils / util-linux read them — a dash word after that
+ *  is the program itself (what the wrapper would exec) */
 function pastWrapper(argv, i) {
   const g = WRAP_GRAMMAR[VR.toolNameOf(argv[i] || '')];
   if (!g) return -1;
-  let j = i + 1, pos = 0, ended = false;
+  let j = i + 1, pos = 0, opts = true;
   while (j < argv.length) {
     const a = argv[j];
-    if (!ended && a === '--') { ended = true; j++; continue; }
-    if (!ended && a.length > 1 && a.startsWith('-') && pos === 0) {
+    if (opts && a === '--') { opts = false; j++; continue; }
+    if (opts && a === '-' && g.lookup && g.lookup.includes('-')) return -1;
+    if (opts && a.length > 1 && a.startsWith('-')) {
       const eq = a.indexOf('='), name = eq > 0 ? a.slice(0, eq) : a;
-      if (g.value.includes(name)) { j += eq > 0 ? 1 : 2; continue; }   // its value: attached (=) or the next word
+      if (g.lookup && g.lookup.includes(name)) return -1;   // it changes where the program is looked up: not understood
+      if (g.value.includes(name)) { const v = eq > 0 ? a.slice(eq + 1) : argv[j + 1]; if (g.unsetLookup && g.unsetLookup.includes(v)) return -1; j += eq > 0 ? 1 : 2; continue; }   // its value: attached (=) or the next word
       if (g.flags.includes(a) || (g.attached && g.attached.exec(a))) { j++; continue; }
       return -1;   // an option this table does not know: the card names the wrapper
     }
-    if (!ended && a === '-' && g.flags.includes('-')) { j++; continue; }
-    if (g.assigns && pos === 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(a)) { j++; continue; }
-    if (pos < g.positional.length) { if (!g.positional[pos].exec(a)) return -1; pos++; j++; continue; }
+    if (g.assigns && !a.startsWith('-') && a.includes('=')) { if (a.slice(0, a.indexOf('=')) === 'PATH') return -1; opts = false; j++; continue; }   // GNU env: any word with «=» before the program is an assignment — PATH's changes where the program is found
+    if (pos < g.positional.length) { if (!g.positional[pos].exec(a)) return -1; pos++; opts = false; j++; continue; }
     break;   // the program
   }
   return pos < g.positional.length || j >= argv.length ? -1 : j;
@@ -121,11 +126,15 @@ async function programFacts(cmd = {}, { fsp = fs.promises, ms = FACTS_MS, state:
     });
   };
   const release = () => { if (state.late) { state.late = false; state.said = false; } const w = state.waiters.shift(); if (w) w.go(); else state.busy = false; };
+  // THE CARD holds the one slot for its WHOLE sequence (round wtjb84nh2): its reads run one after another inside it, so in a burst the
+  // earlier cards finish first; the slot goes back at the card's end — or, when a read ran past the deadline, only when THAT read returns
+  let mine = false, lateHere = false;
+  const take = async () => { if (mine) return true; if (await slot()) { mine = true; return true; } return false; };
   const call = async (fn, p) => {
     if (DOOR.blocked(p)) return {};   // a mount the sweep found dead: never touched
-    if (!(await slot())) throw LATE;   // THE one slot (a card that cannot have it before its deadline reads nothing)
+    if (lateHere || !(await take())) throw LATE;   // THE one slot (a card that cannot have it before its deadline reads nothing)
     const left = deadline - Date.now();
-    if (left <= 0) { release(); throw LATE; }
+    if (left <= 0) throw LATE;
     const raw = Promise.resolve().then(() => fn(p));
     let t = null;
     const r = await Promise.race([raw.then((v) => ({ v }), () => ({})), new Promise((res) => { t = setTimeout(() => res(LATE), left); if (t.unref) t.unref(); })]);
@@ -133,12 +142,13 @@ async function programFacts(cmd = {}, { fsp = fs.promises, ms = FACTS_MS, state:
     if (r === LATE) {
       state.late = true;
       if (!state.said) { state.said = true; try { log(`[vault-job] a file read for a Background job's approval card did not reply within ${ms} ms (in ${SS.redactSecrets(path.dirname(String(p))).text}) — every later card says its file facts could not be read until it replies or the hub restarts`); } catch { } }
+      lateHere = true; mine = false;
       raw.then(release, release);   // the slot is freed only when the read RETURNS
       throw LATE;
     }
-    release();
     return r;
   };
+  try {
   const rootOwned = async (p) => { const r = await call((x) => fsp.stat(x), p); return !!(r.v && r.v.uid === 0 && (r.v.mode & 0o022) === 0); };
   const chainRootOwned = async (p) => { const parts = String(p).split('/'); let cur = ''; for (let i = 1; i < parts.length; i++) { cur += '/' + parts[i]; if (!(await rootOwned(cur))) return false; } return true; };
   const realOf = async (p) => (await call((x) => fsp.realpath(x), p)).v || null;
@@ -156,13 +166,13 @@ async function programFacts(cmd = {}, { fsp = fs.promises, ms = FACTS_MS, state:
   // a WRAPPER runs the program (`timeout 3600 python3 bot.py`, `nohup`, `nice -n 5`, `env A=1 …`): the program on the card is the one it
   // runs ONLY when its grammar (WRAP_GRAMMAR) understood every word before it — else the outermost wrapper itself is named
   const whole = argv.slice();   // the command as it runs — the card shows it whole
-  let at = 0;
+  let at = 0, unparsed = false;
   for (let guard = 0; guard < 4 && WRAP_GRAMMAR[VR.toolNameOf(argv[at] || '')]; guard++) {
     const nx = pastWrapper(argv, at);
-    if (nx < 0) { at = 0; break; }   // a word not understood: what is literally run is named
+    if (nx < 0) { at = 0; unparsed = true; break; }   // a word not understood: what is literally run is named
     at = nx;
   }
-  if (at > 0 && WRAP_GRAMMAR[VR.toolNameOf(argv[at] || '')]) at = 0;   // wrappers deeper than four: the outermost is named
+  if (at > 0 && WRAP_GRAMMAR[VR.toolNameOf(argv[at] || '')]) { at = 0; unparsed = true; }   // wrappers deeper than four: the outermost is named
   if (at > 0) argv.splice(0, at);
   let real = null, unread = false, writable = true;
   try { real = await find(argv[0]); if (real) writable = !(await chainRootOwned(real)); } catch (e) { unread = late(e); writable = true; }
@@ -185,7 +195,9 @@ async function programFacts(cmd = {}, { fsp = fs.promises, ms = FACTS_MS, state:
     }
   }
   const mask = (s) => SS.redactSecrets(String(s)).text;
-  return { ...(held ? { held: true } : {}), program: { path: mask(real || String(argv[0] || '')), writable, ...(unread ? { unread: true } : {}) }, script: script ? { ...script, path: mask(script.path) } : null, folder: mask(cwd), command: mask(whole.map((a) => (a === '' || /[\s'"\\$`]/.test(a) ? JSON.stringify(a) : a)).join(' ')) };
+  // unparsed (round wtjb84nh2): the wrapper itself is named — what it starts could not be read from its words, counted as one an agent can change
+  return { ...(held ? { held: true } : {}), program: { path: mask(real || String(argv[0] || '')), writable: writable || unparsed, ...(unread ? { unread: true } : {}), ...(unparsed ? { unparsed: true } : {}) }, script: script ? { ...script, path: mask(script.path) } : null, folder: mask(cwd), command: mask(whole.map((a) => (a === '' || /[\s'"\\$`]/.test(a) ? JSON.stringify(a) : a)).join(' ')) };
+  } finally { if (mine) { mine = false; release(); } }   // the card's end gives the slot back (a late read's own return does it instead)
 }
 
 /**
