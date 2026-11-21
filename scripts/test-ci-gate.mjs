@@ -1466,7 +1466,7 @@ console.log('\n§2o a picture is of the page in front: every script that opens a
   const t0 = Date.now();
   const CAP = ['Page', 'captureScreenshot'].join('.'), NEWP = '/json/' + 'new', CT = ['Target', 'createTarget'].join('.');
   const FIRST = new RegExp('\\.(?:find|filter)\\(\\(?\\s*(\\w+)\\s*\\)?\\s*=>\\s*\\1\\.type === \'page\'\\)|' + ['waitPage', 'List\\('].join('') + '|' + ['cdpPage', 'Target\\('].join(''));
-  const FRONTED = new RegExp([['bringTo', 'Front'].join(''), ['to', 'Front\\('].join(''), ['activate', 'Target'].join(''), '\\.front\\(\\)'].join('|'));
+  const FRONTED = new RegExp([['bringTo', 'Front'].join(''), ['to', 'Front\\('].join(''), ['activate', 'Target'].join(''), '\\.front\\(\\)', ['front', 'Shot\\('].join('')].join('|'));   // frontShot( = scripts/cdp-front-shot.mjs, the ONE helper
   const backgroundShape = (t) => {
     if (!t.includes(CAP)) return null;
     const L = t.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l)), body = L.join('\n');
@@ -1517,6 +1517,11 @@ console.log('\n§2o a picture is of the page in front: every script that opens a
   const lost = Object.entries(VERDICTS).filter(([k, [, , a]]) => named.has(k) && !texts.get(k).includes(a)).map(([k]) => k);
   const stale = Object.keys(VERDICTS).filter((k) => !named.has(k));
   const real = Object.entries(VERDICTS).filter(([, [v]]) => v === 'REAL');
+  // THE RATCHET (主开发 r1125): the REAL list may only SHRINK — a script newly read as REAL is red by name that day (never a row
+  // added to pass), and a cured one leaves BOTH this list and its verdict in its cure's own commit (its picture through frontShot)
+  const REAL_RATCHET = ['scripts/test-claude-steer-chrome.mjs', 'scripts/test-browser-mediation-chrome.mjs', 'scripts/test-chat-needs-card-chrome.mjs', 'scripts/test-wake-approve-card-chrome.mjs', 'scripts/test-browser-who-ui.mjs', 'scripts/test-mobile-gaps.mjs', 'scripts/test-desktop-small-chrome.mjs'];
+  const grown = real.filter(([k]) => !REAL_RATCHET.includes(k)).map(([k]) => k), leftOver = REAL_RATCHET.filter((k) => !(VERDICTS[k] && VERDICTS[k][0] === 'REAL'));
+  ok(grown.length === 0 && leftOver.length === 0, `…the REAL list is a RATCHET (${REAL_RATCHET.length} today; it only shrinks)${grown.length ? ' — NEW REAL, red by name (bring its page to the front with frontShot): ' + grown.join(', ') : ''}${leftOver.length ? ' — CURED but still on the ratchet (take it off in the cure\'s commit): ' + leftOver.join(', ') : ''}`);
   ok(files.length > 300 && unread.length === 0, `every script that opens a second page and captures with no bring-to-front at its capture is READ — ${files.length} scripts walked, ${named.size} named, ${named.size - unread.length} with a verdict${unread.length ? ' — NOT READ (read it: a verdict below, or bring its page to the front): ' + unread.join(' · ') : ''}`);
   ok(lost.length === 0 && Object.values(VERDICTS).every(([v, why, a]) => (v === 'REAL' || v === 'front') && why.length > 20 && a.length > 8), `…each verdict's reason still stands in its script (its anchor)${lost.length ? ' — GONE in: ' + lost.join(', ') + ' (read it again)' : ''}`);
   ok(stale.length === 0, `…and no verdict outlives its shape (a cured script's row goes)${stale.length ? ': ' + stale.join(', ') : ''}`);
@@ -1536,6 +1541,23 @@ console.log('\n§2o a picture is of the page in front: every script that opens a
   const seenShape = Object.entries(SHAPE).map(([k, v]) => [k, backgroundShape(v)]), seenNot = Object.entries(NOT).map(([k, v]) => [k, backgroundShape(v)]);
   ok(seenShape.every(([, r]) => !!r), `CONTROLS: the shape, planted, is NAMED (${seenShape.map(([k, r]) => `${k}: ${r ? 'named' : 'MISSED'}`).join(' · ')})`);
   ok(seenNot.every(([, r]) => !r), `CONTROLS: its cures and its look-alikes are NOT named (${seenNot.map(([k, r]) => `${k}: ${r ? 'NAMED' : 'not named'}`).join(' · ')})`);
+  // THE ONE HELPER, its law driven over stand-ins (scripts/cdp-front-shot.mjs): brings the picture's page to the front only when it is
+  // not there, hands the front back, retries ONCE said by name, and is red by name on a second miss
+  {
+    const FS = await import('./cdp-front-shot.mjs');
+    const log = [], said = [], st = FS.frontState(), mk = (k) => () => { log.push('front ' + k); return Promise.resolve(true); };
+    FS.becameFront(st, 'B', mk('B'));
+    const q = { sleep: async () => {}, say: (m) => said.push(m), name: 'the picture x.png', ms: 50 };
+    const r1 = await FS.frontShot(st, 'A', mk('A'), async () => { log.push('capture A'); return 'pngA'; }, q);
+    const okBack = r1 === 'pngA' && log.join(' > ') === 'front A > capture A > front B' && st.front.key === 'B' && said.length === 0;
+    log.length = 0; const r2 = await FS.frontShot(st, 'B', mk('B'), async () => { log.push('capture B'); return 'pngB'; }, q);
+    const okNoBring = r2 === 'pngB' && log.join(' > ') === 'capture B';
+    log.length = 0; let n = 0;
+    const r3 = await FS.frontShot(st, 'A', mk('A'), () => (n++ ? Promise.resolve('late') : new Promise(() => {})), q);
+    const okRetry = r3 === 'late' && said.some((x) => /the picture x\.png: the picture x\.png: no answer in 50 ms — once more/.test(x)) && said.some((x) => /came on its one retry/.test(x)) && st.front.key === 'B';
+    let threw = ''; try { await FS.frontShot(st, 'A', mk('A'), () => new Promise(() => {}), q); } catch (e) { threw = String(e.message); }
+    ok(okBack && okNoBring && okRetry && /^the picture x\.png did not come twice, its page brought to the front each time — /.test(threw), `the ONE helper (cdp-front-shot.mjs) over stand-ins: a picture of a page behind brings it to the front and hands the front back («${'front A > capture A > front B'}»); a picture of the page in front brings nothing; a capture that never answers is retried ONCE, said; two misses are red by name («${threw.slice(0, 80)}»)`, { okBack, okNoBring, okRetry, said, threw });
+  }
   console.log(`  (§2o read ${files.length} scripts in ${Date.now() - t0} ms)`);
 }
 } finally {
