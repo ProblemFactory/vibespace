@@ -1310,7 +1310,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     const plr2 = await plantLeg(mpl2);
     ok(plr2.valueBack, `RED control: the loaded purpose without the belt ⇒ the value written into it comes back — ${JSON.stringify(plr2)}`, plr2);
     // …a store whose READ fails (no permission: mode 000) is HELD until the next start: the ends stay in memory, nothing is written
-    // over it (src/store-read.js). RED: a held read that lets the writer write (the file replaced). Root reads a mode-000 file: said, not judged
+    // over it (src/store-read.js). RED: a held read that lets the writer write (the file replaced). Root reads a mode-000 file: SKIPPED there
     const heldLeg = async (mod) => {
       const wh = await world(), f = path.join(wh.dataDir, 'vault-grant-ends.json'), bytes = '{"v":1,"ends":[]}';
       fs.writeFileSync(f, bytes, { mode: 0o600 }); fs.chmodSync(f, 0o000);
@@ -1325,7 +1325,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       fs.chmodSync(f, 0o600);
       return out;
     };
-    if (process.getuid && process.getuid() === 0) console.log('  · B-a14b held store: not judged — root reads a mode-000 file');
+    if (process.getuid && process.getuid() === 0) console.log('  – B-a14b held store SKIPPED: running as root (root reads a mode-000 file)');
     else {
       const hl = await heldLeg(DOOR);
       ok(hl.listed === 1 && hl.modeKept && hl.sizeKept, `B-a14b: an ends store whose read fails is HELD — the end said from memory, the file never written over — ${JSON.stringify(hl)}`, hl);
@@ -1366,24 +1366,23 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     const mdl2 = M.load('src/server/vault-run-door.js', anchored(SRCa, "endedBy === 'used' && g && g.spentAt ? g.spentAt : ", "endedBy === 'used' && g && g.spentAt ? g.at : ", 'test-vault-run the fold read: «used» dated at the approval'), 'a14b-dated-at');
     const dlr2 = await datedLeg(mdl2);
     ok(dlr2.running && dlr2.endedBy === 'used' && dlr2.endedAt === dlr2.approvedAt && dlr2.endedAt !== dlr2.spentAt, `RED control: «used» dated at the approval ⇒ the end says a minute before the run took it — ${JSON.stringify(dlr2)}`, dlr2);
-    // 3b: a BURNED run (nothing ran — its run directory cannot be made: the world's run root unwritable for that one run ⇒
-    // spawn_failed, after the spend) clears the mark — the once-grant given back carries no «spent» (judged on the grant itself; the
-    // timer's end said as a fact). RED: the mark kept — its timer would say «used» for a run that never ran. Root writes anywhere: said, not judged
+    // 3b: a BURNED run (nothing ran — its run directory cannot be made: the run root a folder never made, for that one run ⇒
+    // spawn_failed, after the spend; judged as root too) clears the mark — the once-grant given back carries no «spent» (judged on the
+    // grant itself; the timer's end said as a fact). RED: the mark kept — its timer would say «used» for a run that never ran
     const burnedLeg = async (mod) => {
-      const wb2 = await world(), heldB2 = [];
-      wb2.door = wb2.mk(mod, { timers: { set: (fn, ms) => { heldB2.push({ fn, ms }); return heldB2.length; }, clear: () => { } } });
+      const wb2 = await world(), heldB2 = []; let burn = false;
+      wb2.door = wb2.mk(mod, { runRoot: () => (burn ? path.join(wb2.dir, 'run-never-made') : wb2.runRoot), timers: { set: (fn, ms) => { heldB2.push({ fn, ms }); return heldB2.length; }, clear: () => { } } });
       const qb2 = wb2.door.request({ caller: c8, entry: M1, purpose: 'a run that burns' });
       wb2.door.answerRequest(qb2.askId, { answer: 'once', reauthed: true, person: true });
-      fs.chmodSync(wb2.runRoot, 0o500);
-      let code = null;
-      try { code = (await runAnswered(wb2, ENV('env'), { caller: c8 })).r.code; } finally { fs.chmodSync(wb2.runRoot, 0o700); }
+      burn = true;
+      const code = (await runAnswered(wb2, ENV('env'), { caller: c8 })).r.code;
+      burn = false;
       const back = [...wb2.door._grants.values()].filter((g) => g.conv === c8.scope && g.once);   // the once-grant the burned run gave back
       const mark = back.map((g) => ({ spent: g.spent === true, spentAt: g.spentAt != null }));
       for (const x of heldB2.filter((y) => y.ms > 3600e3)) x.fn();
       return { code, givenBack: back.length === 1, mark, endedBy: (wb2.door.usesFor(c8).ended[0] || {}).endedBy || null };   // endedBy: a fact said, the mark is what is judged
     };
-    if (process.getuid && process.getuid() === 0) console.log('  · wl932b4e8 burned run: not judged — root makes the run directory anyway');
-    else {
+    {
       const bl = await burnedLeg(DOOR);
       ok(bl.code === 'spawn_failed' && bl.givenBack && bl.mark.length === 1 && !bl.mark[0].spent && !bl.mark[0].spentAt, `wl932b4e8: a BURNED run clears the mark — the once-grant given back carries no «spent» (its 8 hours would end «time») — ${JSON.stringify(bl)}`, bl);
       const mbl = M.load('src/server/vault-run-door.js', anchored(SRCa, 'if (burned) for (const a of spent) { a.g.spent = false; delete a.g.spentAt; }', 'if (false) { }', 'test-vault-run wl932b4e8: the mark kept'), 'a14b-burned');
@@ -1392,23 +1391,116 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     }
     // the fold's read: a BURNED run the vault's LOCK crosses (the lock lands after the spend, inside the run — at its run root's
     // reading — and the run directory cannot be made ⇒ spawn_failed): the grant is not given back (never across a lock) and it ENDS
-    // «lock», as each grant the lock ended: its For-you record and `uses` say so. RED: no end at all (the record kept «allowed once»)
+    // «lock», as each grant the lock ended: its For-you record and `uses` say so, DATED AT THE LOCK (the door's clock moves a second
+    // past the approval before the lock and five past the lock before the burn comes back — round w2ipz7162 + the follow's read).
+    // REDs: no end at all (the record kept «allowed once»); dated at the burn
     const burnedLock = async (mod) => {
-      const wk = await world(); let armed = false, atLock = null;
-      wk.door = wk.mk(mod, { runRoot: () => { if (!armed) return wk.runRoot; armed = false; atLock = { spent: ![...wk.door._grants.values()].some((g) => g.conv === c8.scope && g.once) }; wk.door.onLocked('test'); return path.join(wk.dir, 'run-never-made'); } });
+      const wk = await world(), clk = { t: Date.now() }; let armed = false, atLock = null;
+      wk.door = wk.mk(mod, { now: () => clk.t, runRoot: () => { if (!armed) return wk.runRoot; armed = false; clk.t += 1000; atLock = { spent: ![...wk.door._grants.values()].some((g) => g.conv === c8.scope && g.once), lockClock: clk.t }; wk.door.onLocked('test'); clk.t += 5000; atLock.burnClock = clk.t; return path.join(wk.dir, 'run-never-made'); } });
       const qk = wk.door.request({ caller: c8, entry: M1, purpose: 'a run the lock crosses' });
       wk.door.answerRequest(qk.askId, { answer: 'once', reauthed: true, person: true });
       const g = [...wk.door._grants.values()].find((x) => x.conv === c8.scope && x.once), todoId = g ? g.todoId : null;
       armed = true;
       const r = (await runAnswered(wk, ENV('env'), { caller: c8 })).r;
       const it = todoId ? wk.userTodos.get(todoId) : null;
-      return { code: r.code, todo: !!todoId, lockAfterSpend: !!(atLock && atLock.spent), givenBack: [...wk.door._grants.values()].some((x) => x.conv === c8.scope && x.once), recordEnd: (it && it.resolvedFact && it.resolvedFact.endedBy) || null, listed: wk.door.usesFor(c8).ended.map((e) => e.endedBy) };
+      return { code: r.code, todo: !!todoId, lockAfterSpend: !!(atLock && atLock.spent), givenBack: [...wk.door._grants.values()].some((x) => x.conv === c8.scope && x.once), recordEnd: (it && it.resolvedFact && it.resolvedFact.endedBy) || null, recordAtLock: !!(it && it.resolvedFact && atLock && it.resolvedFact.endedAt === atLock.lockClock), recordAtBurn: !!(it && it.resolvedFact && atLock && it.resolvedFact.endedAt === atLock.burnClock), recordClock: it && it.resolvedFact ? it.resolvedFact.endedAt : null, lockClock: atLock ? atLock.lockClock : null, burnClock: atLock ? atLock.burnClock : null, listed: wk.door.usesFor(c8).ended.map((e) => e.endedBy) };
     };
     const bk = await burnedLock(DOOR);
-    ok(bk.code === 'spawn_failed' && bk.todo && bk.lockAfterSpend && !bk.givenBack && bk.recordEnd === 'lock' && bk.listed.includes('lock'), `the fold read: a burned run the lock crosses ENDS «lock» — not given back; its For-you record and \`uses\` say the lock — ${JSON.stringify(bk)}`, bk);
-    const mbk = M.load('src/server/vault-run-door.js', anchored(SRCa, "else for (const a of spent) grantEnded(a.g, burned ? 'lock' : 'used');", "else if (!burned) for (const a of spent) grantEnded(a.g, 'used');", 'test-vault-run the fold read: no end across a lock'), 'a14b-burned-lock');   // stale-pins: kept — a mutant that rebuilds the release's line on purpose
+    ok(bk.code === 'spawn_failed' && bk.todo && bk.lockAfterSpend && !bk.givenBack && bk.recordEnd === 'lock' && bk.recordAtLock && bk.listed.includes('lock'), `the fold read: a burned run the lock crosses ENDS «lock» — not given back; its For-you record (dated at the lock) and \`uses\` say the lock — ${JSON.stringify(bk)}`, bk);
+    const mbk2 = M.load('src/server/vault-run-door.js', anchored(SRCa, "lockT = lockGen !== lg0 ? lockedAt : now();", 'lockT = now();', 'test-vault-run follow: the lock end dated at the burn'), 'a14b-lock-dated');
+    const bkr2 = await burnedLock(mbk2);
+    ok(bkr2.recordEnd === 'lock' && !bkr2.recordAtLock && bkr2.recordAtBurn, `RED control: the lock end dated at the burn ⇒ the record says the grant ended five seconds after the lock did — ${JSON.stringify(bkr2)}`, bkr2);
+    const mbk = M.load('src/server/vault-run-door.js', anchored(SRCa, "else if (!open) grantEnded(a.g, 'lock', lockT); else if (a.g.until > now())", 'else if (open && a.g.until > now())', 'test-vault-run the fold read: no end across a lock'), 'a14b-burned-lock');
     const bkr = await burnedLock(mbk);
     ok(bkr.code === 'spawn_failed' && bkr.todo && bkr.lockAfterSpend && !bkr.givenBack && bkr.recordEnd === null, `RED control: no end for a burned run across a lock ⇒ its For-you record keeps «allowed once» with no end — ${JSON.stringify(bkr)}`, bkr);
+    // r901 (1): a BURNED run the owner's OFF crosses (the OFF lands after the spend, inside the run — at its run root's reading — and
+    // the run directory is never made ⇒ spawn_failed): the grant is NOT given back (never after the owner's OFF) and it ENDS
+    // «revoked» DATED AT THE OFF, as each grant the OFF ended (its For-you record says so). With a LOCK in the same window the FIRST
+    // of the two is its end (the first end stands, as for a live grant); an OFF BEFORE the approval is not the news — that grant comes
+    // back. REDs: the give-back that reads the lock alone (the release); dated at the burn; the lock read first; the OFF read alone;
+    // an OFF at any time read as after the approval
+    const offBurn = async (mod, { order = 'off' } = {}) => {
+      const wf = await world(), clk = { t: Date.now() }; let armed = false, atOff = null;
+      const offNow = () => { const o = wf.door.setRunnable({ id: 'mounts:m1#secretKey', on: false }); return o && o.ok === false ? o.code : 'ok'; };
+      wf.door = wf.mk(mod, { now: () => clk.t, runRoot: () => {
+        if (!armed) return wf.runRoot;
+        armed = false; clk.t += 1000;
+        atOff = { spent: ![...wf.door._grants.values()].some((g) => g.conv === c8.scope && g.once) };
+        if (order === 'lockOff') { atOff.lockClock = clk.t; wf.door.onLocked('test'); clk.t += 1000; }
+        if (order !== 'offBefore') { atOff.offClock = clk.t; atOff.off = offNow(); }
+        if (order === 'offLock') { clk.t += 1000; atOff.lockClock = clk.t; wf.door.onLocked('test'); }
+        clk.t += 5000; atOff.burnClock = clk.t;
+        return path.join(wf.dir, 'run-never-made');
+      } });
+      const before = order === 'offBefore' ? offNow() : null;   // the owner's OFF of the closed entry, a second BEFORE the approval
+      if (order === 'offBefore') clk.t += 1000;
+      const qf = wf.door.request({ caller: c8, entry: M1, purpose: 'a run the OFF crosses' });
+      wf.door.answerRequest(qf.askId, { answer: 'once', reauthed: true, person: true });
+      const g = [...wf.door._grants.values()].find((x) => x.conv === c8.scope && x.once), todoId = g ? g.todoId : null;
+      armed = true;
+      const r = (await runAnswered(wf, ENV('env'), { caller: c8 })).r;
+      const it = todoId ? wf.userTodos.get(todoId) : null, f = it && it.resolvedFact ? it.resolvedFact : null;
+      const k = atOff || {};
+      return { order, code: r.code, todo: !!todoId, before, off: k.off || null, offAfterSpend: !!k.spent, givenBack: [...wf.door._grants.values()].some((x) => x.conv === c8.scope && x.once), recordEnd: (f && f.endedBy) || null,
+        recordAtOff: !!(f && k.offClock != null && f.endedAt === k.offClock), recordAtLock: !!(f && k.lockClock != null && f.endedAt === k.lockClock), recordAtBurn: !!(f && k.burnClock != null && f.endedAt === k.burnClock),
+        recordClock: f ? f.endedAt || null : null, offClock: k.offClock || null, lockClock: k.lockClock || null, burnClock: k.burnClock || null };
+    };
+    const ob = await offBurn(DOOR);
+    ok(ob.code === 'spawn_failed' && ob.todo && ob.off === 'ok' && ob.offAfterSpend && !ob.givenBack && ob.recordEnd === 'revoked' && ob.recordAtOff, `r901: a burned run the owner's OFF crosses is NOT given back — it ends «revoked» at the OFF, as each grant the OFF ended — ${JSON.stringify(ob)}`, ob);
+    const mob = M.load('src/server/vault-run-door.js', anchored(SRCa, "if (offT && (open || offT <= lockT)) grantEnded(a.g, 'revoked', offT); else ", '', 'test-vault-run follow: the give-back reads the lock alone'), 'a14b-off-burn');
+    const obr = await offBurn(mob);
+    ok(obr.code === 'spawn_failed' && obr.offAfterSpend && obr.givenBack && obr.recordEnd === null, `RED control: the give-back that reads the lock alone ⇒ the once-grant comes back after the owner's OFF — ${JSON.stringify(obr)}`, obr);
+    const mob2 = M.load('src/server/vault-run-door.js', anchored(SRCa, "grantEnded(a.g, 'revoked', offT);", "grantEnded(a.g, 'revoked');", 'test-vault-run follow: «revoked» dated at the burn'), 'a14b-off-dated');
+    const obr2 = await offBurn(mob2);
+    ok(obr2.recordEnd === 'revoked' && !obr2.recordAtOff && obr2.recordAtBurn, `RED control: «revoked» dated at the burn ⇒ the record says the grant ended five seconds after the OFF did — ${JSON.stringify(obr2)}`, obr2);
+    const ol = await offBurn(DOOR, { order: 'offLock' });
+    ok(ol.code === 'spawn_failed' && ol.off === 'ok' && ol.offAfterSpend && !ol.givenBack && ol.recordEnd === 'revoked' && ol.recordAtOff, `the follow's read: an OFF and then a LOCK in one burned run's window ⇒ the OFF is its end («revoked» at the OFF — the first end stands, as for a live grant) — ${JSON.stringify(ol)}`, ol);
+    const mol = M.load('src/server/vault-run-door.js', anchored(SRCa, "if (offT && (open || offT <= lockT))", 'if (offT && open)', 'test-vault-run follow: the lock read first'), 'a14b-off-lock');
+    const olr = await offBurn(mol, { order: 'offLock' });
+    ok(olr.recordEnd === 'lock', `RED control: the lock read first ⇒ an OFF that came before the lock is said as the lock — ${JSON.stringify(olr)}`, olr);
+    const lo2 = await offBurn(DOOR, { order: 'lockOff' });
+    ok(lo2.code === 'spawn_failed' && lo2.off === 'ok' && lo2.offAfterSpend && !lo2.givenBack && lo2.recordEnd === 'lock' && lo2.recordAtLock, `the narrow read: a LOCK and then an OFF in that window ⇒ the lock is its end («lock» at the lock) — ${JSON.stringify(lo2)}`, lo2);
+    const mlo2 = M.load('src/server/vault-run-door.js', anchored(SRCa, "if (offT && (open || offT <= lockT))", 'if (offT)', 'test-vault-run follow: the OFF read alone'), 'a14b-lock-off');
+    const lor2 = await offBurn(mlo2, { order: 'lockOff' });
+    ok(lor2.recordEnd === 'revoked', `RED control: the OFF read alone ⇒ an OFF that came after the lock is said as the end — ${JSON.stringify(lor2)}`, lor2);
+    const oa = await offBurn(DOOR, { order: 'offBefore' });
+    ok(oa.code === 'spawn_failed' && oa.before === 'ok' && oa.offAfterSpend && oa.givenBack && oa.recordEnd === null, `the narrow read: an OFF BEFORE the approval is not the news — the burned run's once-grant comes back, nothing ended — ${JSON.stringify(oa)}`, oa);
+    const moa = M.load('src/server/vault-run-door.js', anchored(SRCa, 'if (o && o >= since && o > t) t = o;', 'if (o && o >= 0 && o > t) t = o;', 'test-vault-run follow: any OFF read as after the approval'), 'a14b-off-before');
+    const oar = await offBurn(moa, { order: 'offBefore' });
+    ok(oar.code === 'spawn_failed' && !oar.givenBack && oar.recordEnd === 'revoked', `RED control: an OFF at any time read as after the approval ⇒ a grant given after the OFF is never given back — ${JSON.stringify(oar)}`, oar);
+    // the follow's read: a LATE «allow once» pass (an expired run card the owner still allowed) — (a) the owner's OFF takes it back
+    // (as it takes back every «always» and seen shape — never outliving its switch); (b) one a run TOOK is never given back after an
+    // OFF during that run (the OFF placed at the run root's reading, the run burned); (c) an OFF and an ON BEFORE the pass was minted
+    // are not the news — the burned run gives that pass back. REDs: the OFF keeps the pass; the late give-back that reads the lock
+    // alone; any OFF read as during the run
+    const lateOff = async (mod, { inRun = false, offBefore = false } = {}) => {
+      const wq = await world({ instance: 'cluster', askMs: 40 }); let armed = false, atOff = null;
+      wq.door = wq.mk(mod, { runRoot: () => { if (!armed) return wq.runRoot; armed = false; atOff = { taken: wq.door._lateOnce.size === 0 }; if (!offBefore) wq.door.setRunnable({ id: 'mounts:m1#secretKey', on: false }); return path.join(wq.dir, 'run-never-made'); } });
+      openRow(wq);
+      if (offBefore) { wq.door.setRunnable({ id: 'mounts:m1#secretKey', on: false }); openRow(wq); }   // an OFF and an ON before the pass is minted
+      const a1 = await runAnswered(wq, ENV('env'), { answer: null }); await a1.r;   // its card expires unanswered ⇒ a late card
+      const lc = cardsOf(wq)[0]; if (lc) wq.door.answer(lc.action.askId, { answer: 'once' });   // the owner allows it late ⇒ ONE pass
+      const passes = wq.door._lateOnce.size;
+      if (!inRun) { wq.door.setRunnable({ id: 'mounts:m1#secretKey', on: false }); return { lateCard: !!lc, passes, afterOff: wq.door._lateOnce.size }; }
+      armed = true;
+      const r = await wq.door.run({ caller: wq.caller, args: ENV('env'), cwd: wq.work });   // the pass's own command: taken at the verdict, then burned
+      return { offBefore, lateCard: !!lc, passes, code: r.code, offAfterTake: !!(atOff && atOff.taken), afterRun: wq.door._lateOnce.size };
+    };
+    const lo = await lateOff(DOOR);
+    ok(lo.lateCard && lo.passes === 1 && lo.afterOff === 0, `the follow's read: the owner's OFF takes back a late «allow once» pass naming the entry — ${JSON.stringify(lo)}`, lo);
+    const mlo = M.load('src/server/vault-run-door.js', anchored(SRCa, "    if (!on) for (const [pair, lp] of [...lateOnce]) if (lp && (lp.entries || []).includes(key)) lateOnce.delete(pair);", '', 'test-vault-run follow: the OFF keeps a late pass'), 'a14b-late-off');
+    const lor = await lateOff(mlo);
+    ok(lor.passes === 1 && lor.afterOff === 1, `RED control: an OFF that keeps the late pass ⇒ after an ON the exact command would run once with no card — ${JSON.stringify(lor)}`, lor);
+    const li = await lateOff(DOOR, { inRun: true });
+    ok(li.lateCard && li.passes === 1 && li.code === 'spawn_failed' && li.offAfterTake && li.afterRun === 0, `the follow's read: a late pass a burned run took is never given back after the owner's OFF during that run — ${JSON.stringify(li)}`, li);
+    const mli = M.load('src/server/vault-run-door.js', anchored(SRCa, " && !offTimeOf(lateConsumed.lp, t0)) {", ') {', 'test-vault-run follow: the late give-back reads the lock alone'), 'a14b-late-back');
+    const lir = await lateOff(mli, { inRun: true });
+    ok(lir.code === 'spawn_failed' && lir.offAfterTake && lir.afterRun === 1, `RED control: the late give-back that reads the lock alone ⇒ the pass comes back after the owner's OFF — ${JSON.stringify(lir)}`, lir);
+    const lb = await lateOff(DOOR, { inRun: true, offBefore: true });
+    ok(lb.lateCard && lb.passes === 1 && lb.code === 'spawn_failed' && lb.offAfterTake && lb.afterRun === 1, `the narrow read: an OFF and an ON BEFORE the pass was minted are not the news — the burned run gives the late pass back — ${JSON.stringify(lb)}`, lb);
+    const mlb = M.load('src/server/vault-run-door.js', anchored(SRCa, " && !offTimeOf(lateConsumed.lp, t0)) {", ' && !offTimeOf(lateConsumed.lp, 0)) {', 'test-vault-run follow: any OFF read as during the run'), 'a14b-late-before');
+    const lbr = await lateOff(mlb, { inRun: true, offBefore: true });
+    ok(lbr.code === 'spawn_failed' && lbr.offAfterTake && lbr.afterRun === 0, `RED control: any OFF read as during the run ⇒ a pass minted after an old OFF is never given back — ${JSON.stringify(lbr)}`, lbr);
     // 4: THE SCENE THE RECORD-TIME OFF SKIP EXISTS FOR — a once-grant a run spent, the owner's OFF while it runs (a second after the
     // approval on the door's clock), the run ends («used»), then a NEW door over the same data (a restart: the OFF's time is memory):
     // the end is not said. RED: the skip taken away — the end recorded, said after the restart over the owner's OFF

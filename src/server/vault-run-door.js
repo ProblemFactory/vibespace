@@ -402,7 +402,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const reqQuiet = new Map();  // pair → until (a Deny / a dismissed card: no new card for that pair for 10 minutes)
   let asking = { id: null, n: 0, quiet: false, batch: false };   // B-4934: the «N conversations are asking» notice (its item, its count, set aside by the owner)
   let db = null, dbEpoch = -1;
-  let lockGen = 0, bootSealMs = 0, gitOnSeal = null, sealedDirs = [];   // round 14/15: a lock epoch (restoreOnce never restores a once-grant across a lock) + the boot-computed seal facts (the sealed PATH's ms, dirs, whether git is on it)
+  let lockGen = 0, lockedAt = 0, bootSealMs = 0, gitOnSeal = null, sealedDirs = [];   // round 14/15: a lock epoch (restoreOnce never restores a once-grant across a lock) + the boot-computed seal facts (the sealed PATH's ms, dirs, whether git is on it)
   const digestMemo = new Map();   // round 15: fd digest keyed by inode identity `${dev}:${ino}:${size}:${mtimeMs}:${ctimeMs}` ⇒ Promise<sha> — one hash per tool change, shared by concurrent callers
   const hubIdentity = (() => { try { return PI.identityOf(process.pid); } catch { return null; } })();   // written into every run folder (the boot sweep's proof)
   const vaultState = () => { try { return vault.state(); } catch { return 'locked'; } };
@@ -441,7 +441,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         if (!e || typeof e !== 'object' || typeof e.conv !== 'string' || typeof e.id !== 'string' || !ENDS_SAID.has(e.endedBy) || !(t0 - Number(e.endedAt) <= ENDED_MS)) continue;
         if (e.conv.length > 200 || e.id.length > 400) continue;   // a record kept WHOLE or not at all — ONE string for its key and its fields (wl932b4e8): a cut would put two pairs under one key
         const conv = e.conv, id = e.id;
-        endedGrants.set(`${conv}\n${id}`, { conv, id, endedAt: Number(e.endedAt), endedBy: e.endedBy, once: !!e.once, purpose: SS.redactSecrets(String(e.purpose || '')).text.slice(0, 400), grantAt: Number(e.grantAt) || 0 });   // the pair's key, as pairOf spells it; the purpose through the request's own belt FIRST, then cut (a value across the cut is whole for the belt)
+        endedGrants.set(`${conv}\n${id}`, { conv, id, endedAt: Number(e.endedAt), endedBy: e.endedBy, once: !!e.once, purpose: SS.redactSecrets(String(e.purpose || '')).text.slice(0, 400), grantAt: Number(e.grantAt) || 0 });   // the pair's key, as pairOf spells it; the purpose through the request's own belt FIRST, then cut (a value across the cut is whole for the belt; the belt bounds its own input, INPUT_MAX, and the file is read bounded — no head cut before it: a shrinking belt would pull a cut value under the 400)
       }
       while (endedGrants.size > ENDED_MAX) endedGrants.delete(endedGrants.keys().next().value);
     }
@@ -455,6 +455,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       w.dirty(ENDS_FILE, { name: 'vault-grant-ends.write', produce: () => JSON.stringify({ v: 1, ends: [...endedGrants.values()].filter((e) => now() - e.endedAt <= ENDED_MS) }), mode: 0o600 });
     } catch (e) { log(`the grant ends could not be handed to the writer (${e.message})`); }
   }
+  const offTimeOf = (g, since = Number(g && g.at) || 0) => { let t = 0; for (const id of (g && Array.isArray(g.entries) ? g.entries : [])) { const o = offAt.has(id) ? (offAt.get(id) || 0) : 0; if (o && o >= since && o > t) t = o; } return t; };   // when the owner switched an entry of this grant (or late pass) OFF at or after `since` — its approval; 0: not since (B-a14b follow, r901)
   const offAt = new Map();   // entry id → when the owner last switched it OFF (≤ ENDED_MAX): an end of a grant given BEFORE that OFF is not the news
   function noteEnded(g, endedBy, endedAt) {
     if (!g || !g.conv || !Array.isArray(g.entries) || !g.entries.length || !ENDS_SAID.has(endedBy)) return;
@@ -860,6 +861,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const always = on ? d.always : d.always.filter((a) => !a.entries.includes(key));
     if (!on) { for (const [p, e] of endedGrants) if (e.id === key && endedGrants.delete(p)) endsSave(); offAt.delete(key); offAt.set(key, now()); while (offAt.size > ENDED_MAX) offAt.delete(offAt.keys().next().value); }   // B-a14b: the owner's OFF is its own news (entry_not_runnable) — and an end of a grant given before it never speaks over it
     if (!on) for (const a of d.always) if (a.entries.includes(key)) grantEnded(a, 'revoked');   // r6: each «always» record says «revoked»
+    if (!on) for (const [pair, lp] of [...lateOnce]) if (lp && (lp.entries || []).includes(key)) lateOnce.delete(pair);   // B-a14b follow (its read): a late «allow once» pass naming the entry is taken back too — never outliving its switch (as forgetEntry takes its passes back; an open late card stays the owner's own to answer)
     if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) { shortAlways.delete(p); grantEnded(x, 'revoked'); } for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) { grants.delete(p); grantEnded(x, 'revoked'); } }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation; r6: each grant's record says «revoked»)
     const r = save({ runnable, suspended, always, opened, touched });
     if (!r.ok) return r;
@@ -2158,7 +2160,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const lg0 = lockGen;
     // round 23 (MINOR, your own r16 rule): a late «allow once» pass is spent at the verdict; if the run is then REFUSED (too_many_runs /
     // caller_gone / a BURNED code — nothing ran), give it back (never across a lock: the epoch moved / the vault re-locked ⇒ the pass ended).
-    const giveBackLate = () => { if (lateConsumed && lockGen === lg0 && vaultState() === 'unlocked' && lateConsumed.lp.until > now()) { lateOnce.set(lateConsumed.pair, lateConsumed.lp); lateConsumed = null; } };
+    const giveBackLate = () => { if (lateConsumed && lockGen === lg0 && vaultState() === 'unlocked' && lateConsumed.lp.until > now() && !offTimeOf(lateConsumed.lp, t0)) {   // (B-a14b follow: never after the owner's OFF during this run)
+      lateOnce.set(lateConsumed.pair, lateConsumed.lp); lateConsumed = null; } };
     try {
       if (sealedTool) {
         // round 15 (BLOCKER): a KNOWN credential tool (gh) runs with a minted value ONLY when SEALED — its realpath chain is
@@ -2366,8 +2369,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // / spawn_failed), but NEVER across a lock (the epoch moved, or the vault is no longer unlocked): a lock ends every grant
       // (vault_locked is not in BURNED; onLocked cleared them), so restoreOnce must not bring a spent once-grant back after one.
       const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe', 'git_not_on_seal', 'tool_not_sealed']);
-      const restoreOnce = (r) => { const burned = r && r.ok === false && BURNED.has(r.code); if (burned) for (const a of spent) { a.g.spent = false; delete a.g.spentAt; }   // nothing ran: not spent. Across a lock it is not given back (below): it was out of `grants` when onLocked ended the live ones and cleared every end timer — so it ENDS here «lock», as each grant the lock ended (its For-you record and `uses` say so)
-      if (burned && lockGen === lg0 && vaultState() === 'unlocked') { for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); giveBackLate(); } else for (const a of spent) grantEnded(a.g, burned ? 'lock' : 'used'); return r; };   // wake-approve-card r6 (int361 over vault-agent-own's lock epoch): a once-grant that RAN ends on its record («allowed once · ended HH:MM»); a burned one is restored (never across a lock)   // round 23: a BURNED refusal after the spend gives the late pass back too (nothing ran)
+      const restoreOnce = (r) => { const burned = r && r.ok === false && BURNED.has(r.code); if (burned) for (const a of spent) { a.g.spent = false; delete a.g.spentAt; }   // nothing ran: not spent. It comes back only when nothing ENDED it meanwhile: the owner's OFF of an entry it holds (an OFF landing between the spend and here — the asynchronous spawn error's road) ends it «revoked» at the OFF, as each grant the OFF ended (r901); a lock ends it «lock» at the lock — it was out of `grants` when onLocked ended the live ones and cleared every end timer — as each grant the lock ended; the FIRST of the two is its end (the first end stands; its For-you record and `uses` say so)
+      const open = burned && lockGen === lg0 && vaultState() === 'unlocked', lockT = lockGen !== lg0 ? lockedAt : now();
+      if (!burned) for (const a of spent) grantEnded(a.g, 'used'); else for (const a of spent) { const offT = offTimeOf(a.g); if (offT && (open || offT <= lockT)) grantEnded(a.g, 'revoked', offT); else if (!open) grantEnded(a.g, 'lock', lockT); else if (a.g.until > now()) grants.set(a.pair, a.g); }
+      if (open) giveBackLate(); return r; };   // wake-approve-card r6 (int361 over vault-agent-own's lock epoch): a once-grant that RAN ends on its record («allowed once · ended HH:MM»); a burned one is restored (never across a lock)   // round 23: a BURNED refusal after the spend gives the late pass back too (nothing ran)
       if (sealedTool && toolFd != null && !toolSealed(spec.tool, toolFd)) { note('tool_not_sealed', { ...head, tool: toolName, why: 'ownership changed between the hash and the spawn' }); return restoreOnce(named('tool_not_sealed', { tool: toolName, words: "the tool's ownership changed between the hub's check and the run — a root-owned program became writable before it could start, so it was not run; nothing ran" })); }   // round 15: tool_changed's one remaining case — a sealed tool whose fstat ownership moved before the exec; round 16 (MINOR): a refusal AFTER the spend restores the once-grant (nothing ran), and the words say THIS path's cause
       fdHandedOff = true;
       const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt, toolFd, closeTool, toolName });
@@ -2519,7 +2524,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     asking.batch = true;   // B-4934: one recount after the whole withdrawal, not one per request
     try { for (const q of [...requests.values()]) settleRequest(q, 'vault_locked', 'locked'); } finally { asking.batch = false; }   // lane vault-manual-and-lock: every open request is withdrawn
     askingLine();
-    lockGen++;   // round 14: the lock epoch moves — restoreOnce never brings a spent once-grant back across it
+    lockGen++; lockedAt = now();   // (B-a14b follow: a burned run the lock crossed is dated at the lock's own instant) round 14: the lock epoch moves — restoreOnce never brings a spent once-grant back across it
     for (const lq of [...lateAsks.values()]) removeLate(lq, 'vault_locked', 'vault');   // lane vault-agent-own r20b: an open late card settles vault_locked, its pass ends
     lateOnce.clear(); lateByShape.clear();
     for (const g of grants.values()) grantEnded(g, 'lock');   // r6: each grant's record says it ended («allowed for 8 hours · ended HH:MM»)
