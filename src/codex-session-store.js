@@ -802,8 +802,8 @@ class CodexSessionMessages {
   rawAsync({ bulk = false, wanted = null } = {}) {
     // THE ATTACH'S RECORDS OFF THE LOOP (lane resume-all-paced, L2 — measured on a 120 MB rollout: the sync _ensureParsed held the
     // hub's loop 380–880 ms per attach — the parse 73–123 ms, mergeCodexRecords TWICE at 163–343 ms each): _ensureParsed's SAME
-    // steps, the parse in the transcript worker (readJsonlBoundedParsedAsync — the same parse; the sync one when the pool is down or
-    // the rollout is missing) and every merge in slices. ws-handler's live attach and its read-only view, and the transcript service's
+    // steps, the parse in the transcript worker (readJsonlBoundedParsedPagedAsync — the same parse; row B-422c: «not loaded yet» when
+    // the POOL refuses, the sync one for a missing rollout, an op's own error or the device's in-place road) and every merge in slices. ws-handler's live attach and its read-only view, and the transcript service's
     // view and status, await it before they read raw(). NOT named prepare(): a reader with prepare() is «serve-backed» to the search
     // index (src/search-index-worker.js), which then skips it — codex conversations must stay searchable.
     if (this._all) return Promise.resolve(this._all);

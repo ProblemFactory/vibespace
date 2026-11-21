@@ -195,14 +195,34 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   await SS0.warmSessionJsonlAsync(sid, cwd);
   const after = SS0.parseSessionJsonl(sid, cwd);
   ok(Array.isArray(after) && !after.notLoaded && after.length === 2000, `the note ends when a warm ends in anything but the refusal (an op's own EACCES): the parse is the old road again (${after.length} records, no «not loaded»)`, { n: after.length, notLoaded: after.notLoaded });
-  // THE STORAGE'S REFUSAL: a hung path — the parse asks NO warm (its find and stat would run on this loop); the next attach's warm asks
-  fs.writeFileSync(claudeFp, lines.slice(0, 1500).join('\n') + '\n');   // rewritten again (never an append — that one is folded in inline): the warm asks the pool
+  // THE STORAGE'S REFUSAL: a hung path. From a FRESH note (a warm that READ ends the last one — at any tree: the rate limit of an
+  // older note never answers for the guard), the file rewritten (never an append — that one is folded in inline)
+  C._setTranscriptPoolForTest(up()); await SS0.warmSessionJsonlAsync(sid, cwd);
+  fs.writeFileSync(claudeFp, lines.slice(0, 1500).join('\n') + '\n');
   const H = refusing({ status: 503, code: 'path-hung' }); C._setTranscriptPoolForTest(H);
   await SS0.warmSessionJsonlAsync(sid, cwd);
   const asked0 = tails(H);
   SS0.parseSessionJsonl(sid, cwd); SS0.parseSessionJsonl(sid, cwd);
   await new Promise((res) => setImmediate(res));
   ok(asked0 === 1 && tails(H) === asked0, `a hung path (the storage's) ⇒ the parse asks no warm again (${tails(H) - asked0} more asks after two parses; the warm itself asked ${asked0})`, { asked0, asked1: tails(H) });
+  // …and a warm while the storage's note stands (an attach's, a page's) runs NOTHING on this loop — no find, no stat: the pool alone
+  const Rh = await road('④d a warm while the storage\'s note stands', () => SS0.warmSessionJsonlAsync(sid, cwd));
+  ok(Rh.reads.length === 0 && Rh.out === false && tails(H) === asked0 + 1, `${Rh.name}: ${Rh.reads.length} sync calls of any kind on the transcript (no find, no stat) — the pool alone was asked (${tails(H) - asked0} ask), refused again`, { reads: Rh.reads.slice(0, 6), out: Rh.out });
 }
 C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
+
+// ── THE PAGE'S WIRING (the page's words are drawn by the chrome suites; these pins hold the roads that say them) ──
+{
+  const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), csr = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8'), sl = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
+  const pins = [
+    ['the page fetch of a refused history FAILS (the view that stands kept), «try again» unless quiet', /if \(data && data\.notLoaded\) \{\n\s+if \(!quietRefusal\) this\._sayReaderRestarting\(\);\n\s+throw /.test(cv)],
+    ['the read-only 2 s poll asks quietly', /_fetchMessagePage\(nextOffset, 200, \{ withStatus: true, quietRefusal: true \}\)/.test(cv)],
+    ['the view reset says the line again', /this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\);\n\s+if \(msg && msg\.historyNotLoaded\) this\._sayHistoryNotLoaded\(msg\.historyNotLoaded, \{ again: true \}\);/.test(cv)],
+    ['the minimap fallback draws nothing from it', /if \(d\.turns\?\.length && !d\.notLoaded\) this\._chatMinimap\.render\(d\.turns\)/.test(cv)],
+    ['/api/subagents\' reason in the page\'s words', /if \(r\?\.reason === 'transcript_reader_restarting'\) \{ this\._sayReaderRestarting\(\); return; \}/.test(cv)],
+    ['a search of it says «try again», never «No results»', /if \(data && data\.notLoaded\) \{ if \(!stale\(\)\) this\._searchStatus\.textContent = t\('The transcript reader is restarting — try again in a moment\.'\); return; \}/.test(csr)],
+    ['the resume road says the line', /if \(data\.notLoaded\) chatView\._sayHistoryNotLoaded\?\.\(data\.notLoaded\);/.test(sl)],
+  ];
+  for (const [name, held] of pins) ok(held, `the page: ${name}`);
+}
 report();

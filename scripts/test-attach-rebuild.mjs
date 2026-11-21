@@ -495,5 +495,26 @@ console.log('— ④ verify r6: cards fed BEFORE the first attach — bounded (s
   ok(/emitPeerCard\?\.\(cid, \{ fromName: opts\.fromName \|\| null, text: opts\.cardText \|\| text, recorded: text(, kind)?(?:, \.\.\.\(opts\.channel \? \{ channel: opts\.channel \} : \{\}\))?(?:, \.\.\.\(opts\.group \? \{ group: opts\.group \} : \{\}\))? \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8')), 'WIRED: conversation-deliver\'s cardOk carries `recorded` (the exact text the CLI recorded)');
 }
 
+// ═══ ⑤ ROW B-422c: a history the transcript reader REFUSED — the rebuild says so, keeps the held cards, places live cards ═══
+console.log('— ⑤ row B-422c: a rebuild of a history the reader refused (notLoaded)');
+{
+  const N = require(path.join(REPO, 'src/normalizers.js'));
+  const peerCards = (mm) => mm.messages.filter((m) => m.originKind === 'peer-message').map((m) => (m.content || []).map((b) => b.text || '').join(''));
+  const rec = (uuid, content) => ({ type: 'user', message: { role: 'user', content }, uuid, timestamp: new Date().toISOString(), promptSource: 'sdk' });
+  const mk = (id) => ({ backend: 'claude', claudeSessionId: 'conv-' + id, _normalizer: createMessageManager('claude', id), _historyLoaded: false });
+  const s = mk('nl');
+  feedPeerCard(s, { fromName: 'VibeSpace browser', text: 'held across' });
+  const other = mk('nl-pre');
+  await rebuildHistory(s, 'nl', [rec('n0', 'hi')], { budgetMs: 1, notLoaded: 'transcript_reader_restarting' });
+  ok(s._historyLoaded === false && s._historyNotLoaded === 'transcript_reader_restarting' && Array.isArray(s._heldPeerCards) && s._heldPeerCards.length === 1 && peerCards(s._normalizer).includes('held across'),
+    'not loaded: the history stays unloaded, THE REBUILD says so (_historyNotLoaded), the held card is shown AND kept for the next rebuild', JSON.stringify({ loaded: s._historyLoaded, nl: s._historyNotLoaded, held: s._heldPeerCards && s._heldPeerCards.length }));
+  const block = { type: 'browser_proposal', id: 'bl-0a1b2c3d', at: Date.now() };
+  ok(N.feedProposalCard(s, block) === true && N.feedProposalCard(other, { ...block, id: 'bl-0a1b2c3e' }) === false,
+    'a live card is placed in the rebuilt-but-not-loaded view (rebuiltView); the control: before any rebuild it waits for the first');
+  await rebuildHistory(s, 'nl', [rec('n0', 'hi')], { budgetMs: 1 });
+  ok(s._historyLoaded === true && s._historyNotLoaded === null && s._heldPeerCards === null && peerCards(s._normalizer).filter((x) => x === 'held across').length === 1,
+    'the next rebuild loads it: loaded, nothing said, the held card replayed ONCE into the new view, the hold cleared', JSON.stringify({ loaded: s._historyLoaded, nl: s._historyNotLoaded, cards: peerCards(s._normalizer) }));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

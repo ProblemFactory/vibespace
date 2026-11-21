@@ -1583,7 +1583,7 @@ class ChatView {
       const { backend, backendSessionId, cwd, host } = this._getSessionIds();
       if (backendSessionId) {
         fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&turnmap=1${host ? `&host=${encodeURIComponent(host)}` : ''}`)
-          .then(r => r.json()).then(d => { if (d.turns?.length) this._chatMinimap.render(d.turns); }).catch(() => {});
+          .then(r => r.json()).then(d => { if (d.turns?.length && !d.notLoaded) this._chatMinimap.render(d.turns); }).catch(() => {});   // row B-422c: never a minimap of a history the reader refused
       }
     }
     // Huge (elided) session? Switch the minimap to whole-conversation view up

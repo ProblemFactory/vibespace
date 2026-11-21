@@ -710,6 +710,7 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
       // cards' replay, which matched the record by its original text)
       try { upgradeWakeCards(mm, session._groupCards); } catch (err) { console.error('[normalizer] group wake cards skipped:', err.message); }
       if (!notLoaded) session._historyLoaded = true;   // row B-422c: a history the transcript reader refused stays unloaded — the next attach reads it again
+      session._historyNotLoaded = notLoaded || null;   // …and THIS rebuild says so — never an attach that joined it with its own reader's answer
       // lane S1: the rebuilt cards carry the helpers' unanswered asks — every
       // helper view that already exists is handed them, and the inbox re-syncs
       // verify r4: the rebuilt pending set is what the attach payload hands the clients — sealed, so

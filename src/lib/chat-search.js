@@ -162,6 +162,8 @@ class ChatSearch {
     try {
       const res = await fetch(`/api/session-messages?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}${host ? `&host=${encodeURIComponent(host)}` : ''}`);
       const data = await res.json();
+      // row B-422c: a history the transcript reader refused cannot be searched — said, never «No results»
+      if (data && data.notLoaded) { if (!stale()) this._searchStatus.textContent = t('The transcript reader is restarting — try again in a moment.'); return; }
       matches = data.matches || [];
     } catch {}
     if (stale()) return; // a newer search superseded this one
