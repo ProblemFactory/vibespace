@@ -505,9 +505,33 @@ console.log('— ⑫ B-346d\'s RECORDER (r1228, r1311): ONE journal record at «
   const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), wsrc = fs.readFileSync(path.join(REPO, 'src/server/sysinfo-wiring.js'), 'utf8');
   const n = (t, x) => t.split(x).length - 1;
   const SITES = [[ksrc, "try { process.kill(pid, 'SIGTERM'); SL.noteSignal(pid, site, 'SIGTERM', now(), starttime); }"], [ksrc, "try { process.kill(pid, 'SIGKILL'); SL.noteSignal(pid, site, 'SIGKILL', now(), starttime); }"],
-    [ksrc, "try { process.kill(rec.pid, 'SIGTERM'); SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGTERM', now(), rec.starttime); }"], [ksrc, "try { process.kill(rec.pid, 'SIGKILL'); SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGKILL', now(), rec.starttime); }"],
-    [wsrc, "try { process.kill(pid, 'SIG' + sig); require('./signal-ledger.js').noteSignal(pid, 'the person: the process panel', 'SIG' + sig); }"]];
-  ok(SITES.every(([t, x]) => n(t, x) === 1), `B-346d recorder (c): the hub's ${SITES.length} signal sites each note the ONE ledger after their kill, inside its try (a failed kill notes nothing)`, SITES.map(([t, x]) => [x.slice(0, 50), n(t, x)]));
+    [ksrc, "try { process.kill(rec.pid, 'SIGTERM'); SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGTERM', now(), rec.starttime); }"], [ksrc, "try { process.kill(rec.pid, 'SIGKILL'); SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGKILL', now(), rec.starttime); }"]];
+  // the panel's site (r1455): the kill's own try, whose catch only throws (a failed kill never reaches the note), then the note
+  // in its OWN fence — only comment lines between them
+  const W_KILL = "    try { process.kill(pid, 'SIG' + sig); } catch (e) {\n      if (e.code === 'ESRCH') throw new Error('no such process (already gone)');\n      if (e.code === 'EPERM') throw new Error(\"permission denied (another user's process)\");\n      throw e;\n    }\n";
+  const W_NOTE = "    try { require('./signal-ledger.js').noteSignal(pid, 'the person: the process panel', 'SIG' + sig); } catch { /* the ledger is a record, never the kill's answer */ }\n";
+  const wBetween = n(wsrc, W_KILL) === 1 && n(wsrc, W_NOTE) === 1 ? wsrc.slice(wsrc.indexOf(W_KILL) + W_KILL.length, wsrc.indexOf(W_NOTE)) : null;
+  SITES.push([wsrc, W_KILL], [wsrc, W_NOTE]);
+  ok(SITES.every(([t, x]) => n(t, x) === 1) && wBetween != null && /^(?:[ \t]*\/\/[^\n]*\n)*$/.test(wBetween), `B-346d recorder (c): the hub's 5 signal sites each note the ONE ledger after their kill succeeded (the keeper's inside its try; the panel's after the kill's try, whose catch throws, in its OWN fence — r1455): a failed kill notes nothing`, { sites: SITES.map(([t, x]) => [x.slice(0, 50), n(t, x)]), between: wBetween });
+  // r1455: A NOTE THAT FAILS NEVER SAYS A KILL THAT LANDED FAILED — a real child (sleep) killed through the panel's signalProc
+  // with the ledger's noteSignal throwing ⇒ the answer is ok and the child ended by SIGTERM. CONTROL: 32554283d's line (the
+  // note inside the kill's try, whose catch throws again), rebuilt by anchored() ⇒ the person is told the kill failed while
+  // the child is dead — RED
+  const panelKill = async (Wm) => {
+    const ch = spawn('sleep', ['30'], { stdio: 'ignore' }); kids.push(ch);
+    const real = SLm.noteSignal; SLm.noteSignal = () => { throw new Error('the ledger is down (planted)'); };
+    let out;
+    try { out = { r: await Wm.create({ getHosts: () => ({}) }).signalProc(null, ch.pid, 'TERM') }; } catch (e) { out = { err: String(e && e.message) }; } finally { SLm.noteSignal = real; }
+    out.sig = (await isEnded(ch)) ? ch.signalCode : 'alive';
+    return out;
+  };
+  const WIRING = 'src/server/sysinfo-wiring.js';
+  const ownFence = await panelKill(require(path.join(REPO, WIRING)));
+  ok(ownFence.r && ownFence.r.ok === true && !ownFence.err && ownFence.sig === 'SIGTERM', 'B-346d recorder (r1455): the panel\'s kill that LANDED answers ok while the ledger\'s note throws (the note in its own fence)', ownFence);
+  const inTry = await panelKill(M.load(WIRING, anchored(wsrc, W_KILL + wsrc.slice(wsrc.indexOf(W_KILL) + W_KILL.length, wsrc.indexOf(W_NOTE)) + W_NOTE,
+    "    try { process.kill(pid, 'SIG' + sig); require('./signal-ledger.js').noteSignal(pid, 'the person: the process panel', 'SIG' + sig); } catch (e) {\n      if (e.code === 'ESRCH') throw new Error('no such process (already gone)');\n      if (e.code === 'EPERM') throw new Error(\"permission denied (another user's process)\");\n      throw e;\n    }\n", // stale-pins: kept (r1455: 32554283d's line, the control's rebuilt text — gone from the product on purpose)
+    'r1455 control: the note inside the kill\'s try'), 'note-in-kill-try'));
+  ok(!!inTry.err && /ledger is down/.test(inTry.err) && inTry.sig === 'SIGTERM', 'CONTROL (r1455): 32554283d\'s line — the note inside the kill\'s try, whose catch throws again — tells the person a kill that LANDED failed — RED', inTry);
   ok(n(ksrc, 'function forgetEndedRuns() { for (const pid of [...aliveRuns.keys()]) { const r0 = reg.browsers[pid]; if (!r0 || !B.isLiveBrowser(r0)) aliveRuns.delete(pid); } }') === 1 && n(ksrc, '    refreshOom(); forgetEndedRuns();') === 1,
     'B-346d recorder (r1311 (3)): every tick forgets the runs whose record is no longer live — a stop, an idle end, a removal (the gone path forgets its own at once: judged above)');
   // r1311 THE MUST — THE RECORDER NEVER GATES THE TICK: a counter whose read never answers (a FIFO nobody writes: a held file

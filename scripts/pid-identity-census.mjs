@@ -115,7 +115,7 @@ export const ROWS = [
   ['src/server/session-stdout.js', 'if (!HAS_PROC) { try { process.kill(pid, 0)', 'probe', 'no-/proc liveness', 'nothing'],
   ['src/server/vault-engine.js', "try { process.kill(pid, 0); return true; } catch (e) { return Boolean(e && e.code === 'EPERM'); }", 'probe', 'boot sweep of orphan vault.json.tmp-<pid>-<hex> files (existence probe only; signals nothing)', 'nothing'],
   ['src/server/sysinfo-wiring.js', 'if kill -${sig} ${p} 2>/dev/null; then', 'user', 'the owner\'s process-panel kill on a host', 'a pid the owner named'],
-  ['src/server/sysinfo-wiring.js', "try { process.kill(pid, 'SIG' + sig); require('./signal-ledger.js').noteSignal(", 'user', 'the owner\'s process-panel kill', 'a pid the owner named'],
+  ['src/server/sysinfo-wiring.js', "try { process.kill(pid, 'SIG' + sig); }", 'user', 'the owner\'s process-panel kill', 'a pid the owner named'],
   ['src/server/sysinfo-wiring.js', 'try { process.kill(pid, 0); } catch { gone = true; }', 'probe', 'did the owner\'s kill land', 'nothing'],
   ['src/server/window-targets-engine.js', 'const pidAlive = (pid) => { try { process.kill(pid, 0)', 'probe', 'a window\'s pid — liveness for listing', 'nothing'],
   ['src/session-store.js', 'try { process.kill(pid, 0); return true; } catch { return false; }', 'probe', 'a claude lock pid (isLockClaude proves procStart)', 'nothing'],
