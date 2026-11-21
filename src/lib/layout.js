@@ -1,5 +1,6 @@
 import { track } from './telemetry-client.js';
 import { bootJson } from './boot-splash.js';
+import { handOff } from './layout-handoff.js'; // B-46fc part 2: a closed socket's queued saves at the leave (PURE + the driver)
 import { cssVarDefault, showToast, showConfirmDialog, storeHeldWords } from './utils.js';
 import { heldBodyOf, noteStoreHeld, onStoreLift, setScratch } from './store-held.js'; // B-225b: the desktops HELD — the scratch surface, the stale base, the lift
 import { t } from './i18n.js';
@@ -1799,32 +1800,18 @@ class LayoutManager {
    *  built, and an add-only frame half-carried a move). A deferral re-arms the dirty bit only for a PERSON's act it holds
    *  (`_deferUserAt`, the 1.1 s kind) — an owed-recipe deferral sends only its recipes (_doAutoSave's own road). A socket that is not
    *  open queues the frame (ws.js) and the page takes it away: said, not solved here. → whether a save left. */
-  /** B-46fc part 2 — A SAVE NEVER STAYS IN A CLOSED SOCKET'S QUEUE AT THE LEAVE: the layout-sync frames the socket queued (it is not open
-   *  — ws.js `pending`) are taken OUT of the queue (a page that comes back from the back-forward cache never sends them twice), the
-   *  newest per desktop, and handed to the hub by a request that outlives the page (fetch keepalive → POST /api/layout-sync — the same
-   *  «apply a layout save» as the socket's, every guard of it). Within the keepalive budget (60 KB in all); a frame over it stays queued,
-   *  said. → how many left. */
+  /** B-46fc part 2 — A SAVE NEVER STAYS IN A CLOSED SOCKET'S QUEUE AT THE LEAVE: the layout-sync frames the socket queued (it is not open)
+   *  go to the hub by a request that outlives the page (fetch keepalive → POST /api/layout-sync — the same «apply a layout save» as the
+   *  socket's). THE LAW (its round wgk4tnn0w): a frame leaves the queue for good only when the hub took it; a failed hand-off is owed again,
+   *  and the hub's answers are heard as the socket's (src/lib/layout-handoff.js — PURE plan + the driver). → how many left. */
   _handOffQueued(why) {
-    const ws = this.app.ws;
-    if (!ws || !Array.isArray(ws.pending) || !ws.pending.length || ws.ws?.readyState === 1) return 0;
-    const newest = new Map(), keep = [];
-    for (const text of ws.pending) {
-      let f = null; try { f = JSON.parse(text); } catch { f = null; }
-      if (f && f.type === 'layout-sync') { newest.set(f.desktopId || '', text); continue; }
-      keep.push(text);
-    }
-    if (!newest.size) return 0;
-    let budget = 60 * 1024, sent = 0;
-    const left = [];
-    for (const text of newest.values()) {
-      const bytes = new Blob([text]).size;
-      if (bytes > budget) { left.push(text); console.warn(`[layout] a layout save of ${Math.round(bytes / 1024)} KB is over the hand-off budget — it waits for the socket`); continue; }
-      budget -= bytes;
-      try { fetch('/api/layout-sync', { method: 'POST', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: text }).catch(() => { }); sent++; } catch { left.push(text); }
-    }
-    ws.pending = [...keep, ...left];
-    if (sent) { try { window.__vsOp?.('layout-handed-off', { why, n: sent }); } catch { } }
-    return sent;
+    const runs = handOff(this.app.ws, {
+      post: (text) => fetch('/api/layout-sync', { method: 'POST', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: text }),
+      inFlight: this._handOffInFlight || (this._handOffInFlight = new Set()),
+      warn: (m) => console.warn('[layout] ' + m),
+    });
+    if (runs.length) { try { window.__vsOp?.('layout-handed-off', { why, n: runs.length }); } catch { } }
+    return runs.length;
   }
 
   _flushOnLeave(why) {

@@ -32,6 +32,8 @@
 //      record has gone QUIET and the page's two restoring gates are down (measured, never a clock)
 //   ⑥ (lane lg-recovery — B-46fc part 2) a socket NOT OPEN at the reload: the leave's flush queues the save in the closed socket and the
 //      page hands the queue to POST /api/layout-sync (fetch keepalive) ⇒ the window is on show after the reload; RED the hand-off cut
+//   ⑦ (its round wgk4tnn0w) a page that only goes HIDDEN offline: the hand-off's request fails ⇒ the frame stays OWED and the socket carries
+//      it when the page is shown and reconnects (the hub holds the window); RED the first cut's swallow (the frame lost)
 // Screenshots go to $PRK_SHOTS_DIR when set (the lane's report), else nowhere.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -443,26 +445,65 @@ else await (async () => {
       await P2.ev('(window.__b46fcOld = 1, true)');
       await P2.send('Page.reload', {});
       const booted = await until(async () => { try { return await P2.ev('!window.__b46fcOld && !!(window.app && app.desktopManager && app.desktopManager.activeDesktopId && app.layoutManager && !app.layoutManager._restoring)'); } catch { return false; } }, 30000, 250);
-      if (booted && (await P2.ev('app.desktopManager.activeDesktopId')) !== desk) { await P2.ev(`(app.desktopManager.switchTo(${J(desk)}), true)`); await sleep(1500); }
-      await sleep(1500);
+      if (booted && (await P2.ev('app.desktopManager.activeDesktopId')) !== desk) await P2.ev(`(app.desktopManager.switchTo(${J(desk)}), true)`);
+      const quiet = booted ? await settle(P2) : null; // measured, never a clock (its round): every record quiet, the gates down
       const after = (await P2.ev(FILESWIN).catch(() => null)) || [];
       const leave = await P2.ev(`JSON.parse(sessionStorage.getItem(${J(LEAVE_LOG)}) || '[]')`).catch(() => null);
       const hub = (((await api('/api/layouts')).desktops[desk] || {}).autoSave?.windows || []).filter((w) => w.type === 'files').map((w) => w.winId);
       const mine = opened ? after.find((w) => w.id === opened.id) || null : null;
-      return { press, opened, due, desk, booted, leave, mine, hub, inHub: !!opened && hub.includes(opened.id) };
+      return { press, opened, due, desk, booted, quiet: !!(quiet && quiet.ok), leave, mine, hub, inHub: !!opened && hub.includes(opened.id) };
     };
     const s6 = await settle(P2);
     ok(s6.ok, '⑥ before the plant: every record quiet, this page\'s gates down (as ⑤)', s6);
     const cutR = await closedScene(true);
     ok(!!cutR.opened && cutR.due.due && cutR.due.dirty && !cutR.due.gate && cutR.due.held && cutR.due.open === false && cutR.due.road === 'cutRoad', '⑥ RED CONTROL proves its plant first: a files window opened, its save DUE and HELD, the page\'s socket NOT OPEN, the hand-off cut', cutR.due);
-    ok(cutR.booted && !cutR.mine && !cutR.inHub && Array.isArray(cutR.leave) && cutR.leave.some((l) => /^flush:/.test(l.why) && l.sent === true) && cutR.leave.every((l) => !/^handoff:/.test(l.why) || l.sent === 0),
+    ok(cutR.booted && cutR.quiet && !cutR.mine && !cutR.inHub && Array.isArray(cutR.leave) && cutR.leave.some((l) => /^flush:/.test(l.why) && l.sent === true) && cutR.leave.every((l) => !/^handoff:/.test(l.why) || l.sent === 0),
       '⑥ RED CONTROL — the release\'s road: the leave\'s flush ran and QUEUED the save in the closed socket, nothing handed it off ⇒ after the reload the window is GONE and the hub\'s record lacks it', { leave: cutR.leave, hub: cutR.hub, mine: cutR.mine });
     const s6b = await settle(P2);
     ok(s6b.ok, '⑥ …and again before the second plant', s6b);
     const road = await closedScene(false);
     ok(!!road.opened && road.due.due && road.due.held && road.due.open === false && road.due.road === 'loggedHandOff', '⑥ the plant: a files window opened, its save DUE and HELD, the page\'s socket NOT OPEN', road.due);
-    ok(road.booted && !!road.mine && road.mine.desk === road.desk && road.mine.shown && road.inHub && Array.isArray(road.leave) && road.leave.some((l) => /^handoff:/.test(l.why) && l.sent >= 1),
+    ok(road.booted && road.quiet && !!road.mine && road.mine.desk === road.desk && road.mine.shown && road.inHub && Array.isArray(road.leave) && road.leave.some((l) => /^handoff:/.test(l.why) && l.sent >= 1),
       '⑥ B-46fc PART 2\'S GATE: the page reloaded with its socket closed ⇒ the leave queued the save and HANDED IT OFF (POST /api/layout-sync) — the hub\'s record holds the window and the reloaded page shows it', { leave: road.leave, hub: road.hub, mine: road.mine });
+    // ⑦ ITS ROUND (wgk4tnn0w — the MUST): a page that only goes HIDDEN (no unload) while offline: the hand-off's request FAILS — the
+    //    frame must stay owed, and the socket carries it when the page is shown and reconnects (the release's road). The plant: ⑥'s held
+    //    save and closed socket, and the page's requests to the route rejected (offline) until it is shown. RED CONTROL FIRST: the first
+    //    cut's swallow (the frame left the queue before the request had an outcome; a rejection dropped) ⇒ the hub never gets the window.
+    const hiddenScene = async (swallow) => {
+      await P2.ev(`(() => { const lm = app.layoutManager, sock = app.ws; clearTimeout(lm._autoSaveTimer); lm._autoSaveTimer = null;
+        window.__b46fcFails = 0; window.__b46fcOffline = true;
+        if (!window.__b46fcRealFetch) window.__b46fcRealFetch = window.fetch;
+        window.fetch = function offlineFetch(u, o) { if (window.__b46fcOffline && String(u).includes('/api/layout-sync')) return Promise.resolve().then(() => { window.__b46fcFails++; throw new TypeError('Failed to fetch'); }); return window.__b46fcRealFetch.call(this, u, o); };
+        ${swallow ? `lm._handOffQueued = function firstCutSwallow(why) { const ws = app.ws; if (!ws || !ws.pending.length || (ws.ws && ws.ws.readyState === 1)) return 0; const newest = new Map(), keep = []; for (const t of ws.pending) { let f = null; try { f = JSON.parse(t); } catch { } if (f && f.type === 'layout-sync') { newest.set(f.desktopId || '', t); continue; } keep.push(t); } let n = 0; for (const t of newest.values()) { fetch('/api/layout-sync', { method: 'POST', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: t }).catch(() => { }); n++; } ws.pending = keep; return n; };` : ''}
+        lm.scheduleAutoSave = function heldSave() { lm._saveAskedAt = Date.now(); if (!lm._autoSaveTimer) lm._autoSaveTimer = setTimeout(() => {}, 600000); };
+        window.__b46fcConnect = sock.connect; sock.connect = function noReconnect() { }; try { sock.ws && sock.ws.close(); } catch { }
+        return true; })()`);
+      const before = ((await P2.ev(FILESWIN)) || []).map((w) => w.id);
+      const press = await pressFiles();
+      const fresh = async () => ((await P2.ev(FILESWIN)) || []).find((w) => !before.includes(w.id) && w.path) || null;
+      const opened = (await until(async () => !!(await fresh()), 10000, 100)) ? await fresh() : null;
+      const desk = await P2.ev('app.desktopManager.activeDesktopId');
+      // HIDDEN (no unload): the page's own visibilitychange listeners run — the leave's flush queues the save, the hand-off tries the route
+      await P2.ev(`(Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }), document.dispatchEvent(new Event('visibilitychange')), true)`);
+      const failed = await until(async () => (await P2.ev('window.__b46fcFails')) >= 1, 8000, 50);
+      await sleep(0);
+      const owed = await P2.ev(`app.ws.pending.filter((t) => { try { return JSON.parse(t).type === 'layout-sync'; } catch { return false; } }).length`);
+      // SHOWN, online again, the socket reconnects (its queue flushed at the open)
+      await P2.ev(`(window.__b46fcOffline = false, delete document.hidden, document.dispatchEvent(new Event('visibilitychange')), app.ws.connect = window.__b46fcConnect, app.ws.connect(), true)`);
+      const open = await until(async () => !!(await P2.ev('!!(app.ws.ws && app.ws.ws.readyState === 1 && app.ws.pending.length === 0)')), 15000, 100);
+      const quiet = await settle(P2);
+      const hub = (((await api('/api/layouts')).desktops[desk] || {}).autoSave?.windows || []).filter((w) => w.type === 'files').map((w) => w.winId);
+      await P2.ev(`(window.fetch = window.__b46fcRealFetch, true)`);
+      return { press, opened, failed: !!failed, owed, open: !!open, quiet: !!(quiet && quiet.ok), hub, inHub: !!opened && hub.includes(opened.id) };
+    };
+    const s7 = await settle(P2);
+    ok(s7.ok, '⑦ before the plant: every record quiet, the gates down', s7);
+    const swal = await hiddenScene(true);
+    ok(!!swal.opened && swal.failed && swal.owed === 0 && swal.open && swal.quiet && !swal.inHub, '⑦ RED CONTROL — the first cut\'s swallow: the page went HIDDEN offline, the hand-off\'s request FAILED and took the frame with it (0 owed) ⇒ shown and reconnected, the hub\'s record still lacks the window', swal);
+    const s7b = await settle(P2);
+    ok(s7b.ok, '⑦ …and again before the second plant', s7b);
+    const owedR = await hiddenScene(false);
+    ok(!!owedR.opened && owedR.failed && owedR.owed >= 1 && owedR.open && owedR.quiet && owedR.inHub, '⑦ ITS ROUND\'S MUST: the page went HIDDEN offline, the hand-off FAILED and the frame stayed OWED (back in the queue) ⇒ shown and reconnected, the socket carried it: the hub\'s record holds the window', owedR);
   } catch (e) {
     ok(false, 'the suite threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e));
   } finally {

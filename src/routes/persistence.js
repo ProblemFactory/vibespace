@@ -498,10 +498,17 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // B-46fc part 2: A PAGE THAT LEAVES WITH ITS SOCKET NOT OPEN hands its queued layout save here (fetch keepalive at pagehide / hidden) —
   // the frame the socket would have carried, through the ONE «apply a layout save» (src/server/layout-sync-door.js → ws-handler's
   // applyLayoutSync: every guard the socket's save meets). Bounded (256 KB, refused by name); the answer = what the socket would have heard.
+  // its round (wgk4tnn0w): the 256 KB bound holds BEFORE the body is parsed — the route reads its own body (server.js skips its 50 MB
+  // parser for the paths `ownsBody` names, below), refused past it by name
+  const layoutSyncBody = (() => { const parse = express.json({ limit: require('../server/layout-sync-door.js').MAX_BYTES }); return (req, res, next) => parse(req, res, (err) => {
+    if (!err) return next();
+    if (err.type === 'entity.too.large' || err.status === 413) return res.status(413).json({ error: require('../server/layout-sync-door.js').sizeVerdict(Number(req.headers['content-length']) || Infinity), code: 'too-large' });
+    return res.status(err.status && err.status < 500 ? err.status : 400).json({ error: `the body could not be read (${err.type || err.message})`, code: 'malformed' });
+  }); })();
+  router.use('/api/layout-sync', layoutSyncBody);
+  const layoutSyncLayer = router.stack[router.stack.length - 1];
   router.post('/api/layout-sync', (req, res) => {
     const door = require('../server/layout-sync-door.js');
-    const too = door.sizeVerdict(Number(req.headers['content-length']) || Buffer.byteLength(JSON.stringify(req.body || {})));
-    if (too) return res.status(413).json({ error: too });
     const r = door.apply(req.body);
     if (r.status !== 200) return res.status(r.status).json({ error: r.error });
     res.json({ ok: true, answers: r.answers });
@@ -1122,7 +1129,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return res.status(err.status && err.status < 500 ? err.status : 400).json({ error: `the body could not be read (${err.type || err.message})`, code: 'malformed' });
   }); };
   router.use('/api/user-state/batches', userStateBody(UO.MAX_BODY_BYTES));
-  { const layer = router.stack[router.stack.length - 1]; router.ownsBody = (p) => layer.regexp.test(p); }   // (the parser's own layer: ONE match)
+  { const layer = router.stack[router.stack.length - 1]; router.ownsBody = (p) => layer.regexp.test(p) || layoutSyncLayer.regexp.test(p); }   // (the parsers' own layers: user-state's, and B-46fc's layout-sync)
   router.get('/api/user-state', (req, res) => {   // lane sidebar-echo-order: + stateEpoch, − stateBatches
     let st; try { st = readUserState(); } catch (e) { if (storeRefused(res, e)) return; throw e; }
     res.json(wireOf(st));

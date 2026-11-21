@@ -43,14 +43,7 @@ class WsManager {
       // (+ chunk D: whether it carried a slab at all, and how many ops a held resume replayed)
       if ((d.type === 'attached' || d.type === 'error') && d.sessionId) this._attachInFlight.delete(d.sessionId);
       if (d.type === 'attached') { try { const r = (window.__vsAttachFrames = window.__vsAttachFrames || []); r.push({ sid: d.sessionId, len: e.data.length, n: Array.isArray(d.messages) ? d.messages.length : 0, slab: Array.isArray(d.messages), held: d.slab === 'held', replay: Array.isArray(d.replay) ? d.replay.length : 0, total: d.totalCount || 0, t: Date.now() }); if (r.length > 32) r.shift(); } catch { } }
-      // Isolate each handler: one throwing handler (a disposed ChatView, a stale
-      // closure) must NOT abort delivery to every later handler — layout-sync,
-      // settings-updated, editor-open etc. all ride these same lists.
-      const call = (h) => { try { h(d); } catch (err) { console.error('[ws] handler error', err); } };
-      if (d.sessionId) [...(this.handlers.get(d.sessionId) || [])].forEach(call);
-      // Snapshot: one-time handlers self-remove via offGlobal during dispatch;
-      // splicing the live array inside forEach skips the next handler.
-      [...this.globalHandlers].forEach(call);
+      this.heard(d);
     };
     this.ws.onclose = () => {
       // Only notify on a real transition: while the server is down, each failed
@@ -73,6 +66,18 @@ class WsManager {
     this.ws.onerror = () => {};
   }
   get connected() { return this._connected; }
+  /** A frame from the hub, delivered to this page's handlers — the socket's own, and (B-46fc part 2) the answers of a layout save the page
+   *  handed off by POST /api/layout-sync, heard exactly as the socket's would be. */
+  heard(d) {
+    // Isolate each handler: one throwing handler (a disposed ChatView, a stale
+    // closure) must NOT abort delivery to every later handler — layout-sync,
+    // settings-updated, editor-open etc. all ride these same lists.
+    const call = (h) => { try { h(d); } catch (err) { console.error('[ws] handler error', err); } };
+    if (d.sessionId) [...(this.handlers.get(d.sessionId) || [])].forEach(call);
+    // Snapshot: one-time handlers self-remove via offGlobal during dispatch;
+    // splicing the live array inside forEach skips the next handler.
+    [...this.globalHandlers].forEach(call);
+  }
   /** B-46fc part 2: this page load's layout writer token — rides every layout-sync frame (the route's save is then judged as this page's own) */
   get layoutWriter() { return this._layoutWriter || (this._layoutWriter = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10)); }
   send(d) {

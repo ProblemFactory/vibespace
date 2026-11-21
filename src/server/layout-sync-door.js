@@ -10,7 +10,7 @@ const MAX_BYTES = 256 * 1024;   // a frame's body, refused by name past it (413)
 let _apply = null;
 function set(fn) { _apply = typeof fn === 'function' ? fn : null; }
 /** a request body's size → null (ok) or the refusal's words */
-function sizeVerdict(bytes) { return Number(bytes) > MAX_BYTES ? `a layout save of ${Math.round(Number(bytes) / 1024)} KB is over the ${MAX_BYTES / 1024} KB a page may hand off` : null; }
+function sizeVerdict(bytes) { const n = Number(bytes); return n > MAX_BYTES ? (Number.isFinite(n) ? `a layout save of ${Math.round(n / 1024)} KB is over the ${MAX_BYTES / 1024} KB a page may hand off` : `a layout save is over the ${MAX_BYTES / 1024} KB a page may hand off`) : null; }
 /** ONE frame through the one door → {status, answers}: the answers are the frames the hub would have sent the page's socket. */
 function apply(data) {
   if (!_apply) return { status: 503, answers: [], error: 'the layout door is not ready' };
