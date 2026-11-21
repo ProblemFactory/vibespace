@@ -190,13 +190,17 @@ const foreignBodyLeakedSecret = (rows, sec) => {
 };
 
 // B-21cc, ALSO CURED: the ref is read with the TREE's parser — anywhere in the bracket after the name («[required, ref=e3]»); a
-// bracket exactly «[ref=…]» found no ref on an attributed field, and the legs' CSS fallbacks would have hidden the miss
+// bracket exactly «[ref=…]» found no ref on an attributed field, and the legs' CSS fallbacks would have hidden the miss.
+// Its box run (int361 r1187, 0e1096d9d): a label regex matches a whole LINE, so /Account/i also matched the heading «Sign in with
+// your account» [level=1, ref=e18] — whose attributed bracket the old finder could not read, so it skipped the heading BY ACCIDENT.
+// A finder of fields says so: it returns the ref of a field or a button, never of a structural line (a heading, a frame, a text).
+const STRUCTURAL_ROLES = new Set(['heading', 'iframe', 'paragraph', 'text', 'statictext', 'generic', 'img', 'image', 'list', 'listitem', 'region', 'group', 'document', 'main', 'navigation', 'banner', 'contentinfo', 'separator']);
 const findRef = (snapOut, labelRe) => {
   const PV = require(path.join(REPO, 'src/browser-verbs.js'));
   for (const line of String(snapOut || '').split('\n')) {
     if (!labelRe.test(line)) continue;
     const r = PV.parseSnapshotRefs(line)[0];
-    if (r && r.ref) return r.ref;
+    if (r && r.ref && !STRUCTURAL_ROLES.has(r.role)) return r.ref;
   }
   return null;
 };
