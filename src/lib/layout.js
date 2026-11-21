@@ -907,7 +907,10 @@ class LayoutManager {
   _onLayoutAnswer(desk, sentAt, { refused = false } = {}) {
     if (!refused) this._serverAcks = true;
     const key = desk || '';
-    const s = (sentAt && this._unacked.find((x) => x.sentAt === sentAt && x.desks.includes(key))) || this._unacked.find((x) => x.desks.includes(key) && !x.refused.has(key) && x.pending > 0);
+    // B-46fc follow: A LATE REPLY NEVER SETTLES ANOTHER SAVE — a handed-off save's answer (heard 'route') whose own entry is no longer held
+    // settles nothing; the socket's own answers keep their fallback (the first unanswered save of that desktop), as before
+    const own = this.app.ws?._heardHow === 'route';
+    const s = (sentAt && this._unacked.find((x) => x.sentAt === sentAt && x.desks.includes(key))) || (own ? null : this._unacked.find((x) => x.desks.includes(key) && !x.refused.has(key) && x.pending > 0));
     if (!s) return;
     if (refused) s.refused.add(key);
     if (refused) this._recipesRefused(s, key); // a recipe that save carried is owed again (r4 N1)

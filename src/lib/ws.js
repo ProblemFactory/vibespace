@@ -68,7 +68,14 @@ class WsManager {
   get connected() { return this._connected; }
   /** A frame from the hub, delivered to this page's handlers — the socket's own, and (B-46fc part 2) the answers of a layout save the page
    *  handed off by POST /api/layout-sync, heard exactly as the socket's would be. */
-  heard(d) {
+  heard(d, how = null) {
+    this._heardHow = how; // B-46fc follow: 'route' while a handed-off save's answer is dispatched (a late one settles nothing it does not name)
+    try { this._dispatch(d); } finally { this._heardHow = null; }
+  }
+  /** B-46fc follow: the newest layout-sync frame of a desktop this page handed its socket (sent or queued) — a failed hand-off older than
+   *  it is never sent again (never older after newer). */
+  lastLayoutOf(desk) { return (this._layoutLast && this._layoutLast.get(desk || '')) || null; }
+  _dispatch(d) {
     // Isolate each handler: one throwing handler (a disposed ChatView, a stale
     // closure) must NOT abort delivery to every later handler — layout-sync,
     // settings-updated, editor-open etc. all ride these same lists.
@@ -83,6 +90,7 @@ class WsManager {
   send(d) {
     if (d && d.type === 'layout-sync' && !d.writer) d = { ...d, writer: this.layoutWriter }; // B-46fc part 2: this page load's writer token (a save handed off at the leave is judged as its writer's)
     const m = wireText(d);
+    if (d && d.type === 'layout-sync') (this._layoutLast || (this._layoutLast = new Map())).set(d.desktopId || '', m); // B-46fc follow: the newest save of each desktop this page made (sent or queued)
     if (d && d.type === 'attach' && d.sessionId) this._attachInFlight.set(d.sessionId, Date.now());
     this.ws?.readyState === 1 ? this.ws.send(m) : this.pending.push(m);
   }

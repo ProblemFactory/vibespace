@@ -4,7 +4,9 @@
 // when the hub has TAKEN it — while the page lives, a hand-off that failed (no answer, a refused request) is OWED again: back in the queue
 // (unless a newer frame of its desktop is already there), or straight onto the socket if it has opened meanwhile; and the hub's answers
 // (the ack, a refusal, the held store) are HEARD by the page exactly as its socket's would be (the same handlers). A page that really
-// unloads loses nothing more than at the release.
+// unloads loses nothing more than at the release. ITS FOLLOW (the narrow round wb5m1q1ge): NEVER OLDER AFTER NEWER, also for what has
+// already left — a failed frame is sent again only when no newer save of its desktop has been made since (in the queue, in flight or
+// already sent: the socket's `lastLayoutOf`); else it is dropped (the page's own state is the newer one), said.
 const BUDGET = 60 * 1024;      // the keepalive quota a page may use, counted with the frames still in flight
 const DESK_OPS = new Set(['desktop-create', 'desktop-delete', 'desktop-rename', 'desktop-reorder']);
 const frameOf = (text) => { try { return JSON.parse(text); } catch { return null; } };
@@ -52,9 +54,11 @@ function handOff(sock, { post, inFlight = new Set(), warn = () => { }, budget = 
     return Promise.resolve().then(() => post(text)).then(async (res) => {
       if (!res || !res.ok) throw new Error(`the hub answered ${res ? res.status : 'nothing'}`);
       const body = await res.json();
-      for (const d of (body && Array.isArray(body.answers) ? body.answers : [])) { try { sock.heard(d); } catch { } }
+      for (const d of (body && Array.isArray(body.answers) ? body.answers : [])) { try { sock.heard(d, 'route'); } catch { } }
       return true;
     }).catch((e) => {
+      const last = typeof sock.lastLayoutOf === 'function' ? sock.lastLayoutOf(deskOf(frameOf(text))) : null;
+      if (last && last !== text) { warn(`a layout save handed off at the leave did not reach the hub (${(e && e.message) || e}) — a newer save of that desktop was made since: this one is dropped (never older after newer)`); return false; }
       if (sock.ws && sock.ws.readyState === 1) { try { sock.ws.send(text); } catch { sock.pending = requeue(sock.pending, text); } }
       else sock.pending = requeue(sock.pending, text);
       warn(`a layout save handed off at the leave did not reach the hub (${(e && e.message) || e}) — it is owed again: it goes with the socket`);

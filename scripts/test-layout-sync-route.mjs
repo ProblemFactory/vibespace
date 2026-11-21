@@ -127,7 +127,9 @@ console.log('⑤ wiring');
     'the route reads its OWN body (server.js\'s 50 MB parser skips it: ownsBody) — 256 KB refused by name BEFORE the parse; through the door; guarded like every desktops door');
   ok(/addEventListener\?\.\('pagehide', \(\) => this\._flushOnLeave\('pagehide'\)\);[\s\S]{0,600}addEventListener\?\.\('pagehide', \(\) => this\._handOffQueued\('pagehide'\)\);/.test(lay) && /const runs = handOff\(this\.app\.ws, \{\s*post: \(text\) => fetch\('\/api\/layout-sync', \{ method: 'POST', keepalive: true/.test(lay) && /inFlight: this\._handOffInFlight \|\| \(this\._handOffInFlight = new Set\(\)\)/.test(lay),
     'the page: its queued layout frames go through the ONE hand-off (src/lib/layout-handoff.js) AFTER the leave flush — by keepalive, one in-flight set across calls');
-  ok(/this\.heard\(d\);/.test(sock) && /heard\(d\) \{[\s\S]{0,600}\[\.\.\.this\.globalHandlers\]\.forEach\(call\);/.test(sock), 'the socket\'s own frames and the route\'s answers reach the page\'s handlers through ONE door (ws.js heard)');
+  ok(/this\.heard\(d\);/.test(sock) && /heard\(d, how = null\) \{[\s\S]{0,300}this\._dispatch\(d\);/.test(sock) && /_dispatch\(d\) \{[\s\S]{0,600}\[\.\.\.this\.globalHandlers\]\.forEach\(call\);/.test(sock), 'the socket\'s own frames and the route\'s answers reach the page\'s handlers through ONE door (ws.js heard → _dispatch)');
+  ok(/const own = this\.app\.ws\?\._heardHow === 'route';\s*const s = \(sentAt && this\._unacked\.find\(\(x\) => x\.sentAt === sentAt && x\.desks\.includes\(key\)\)\) \|\| \(own \? null : /.test(lay) && /sock\.heard\(d, 'route'\)/.test(fs.readFileSync(path.join(REPO, 'src/lib/layout-handoff.js'), 'utf8')),
+    'the follow\'s ②: A LATE REPLY NEVER SETTLES ANOTHER SAVE — a handed-off save\'s answer (heard \'route\') whose own entry is gone settles nothing; the socket\'s answers keep their fallback');
   ok(/if \(d && d\.type === 'layout-sync' && !d\.writer\) d = \{ \.\.\.d, writer: this\.layoutWriter \}/.test(sock) && /POST \/api\/layout-sync/.test(api), 'every layout-sync frame carries this page\'s writer token; kb-api names the route');
 }
 console.log('⑥ THE HAND-OFF, driven (a stand-in queue and post)');
@@ -175,6 +177,40 @@ console.log('⑥ THE HAND-OFF, driven (a stand-in queue and post)');
     const sock3 = sockOf([LS('desk-a', 1)]);
     await Promise.all(HO.handOff(sock3, { post: async () => { sock3.ws.readyState = 1; return { ok: false, status: 503, json: async () => ({}) }; } }));
     ok(J(sock3.sent) === J([LS('desk-a', 1)]) && !sock3.pending.length, '(e) a refused request (503) while the socket OPENED meanwhile: the frame goes straight onto the socket', { sent: sock3.sent.length, pending: sock3.pending.length });
+  }
+  // THE FOLLOW (the narrow round wb5m1q1ge) ①: NEVER OLDER AFTER NEWER, also for what has already LEFT — a failed hand-off is dropped when a
+  // newer save of its desktop was made since (the socket's lastLayoutOf), in both places it would be sent again; each with its RED
+  const SRC0 = fs.readFileSync(path.join(REPO, 'src/lib/layout-handoff.js'), 'utf8');
+  const NONEWER = mutantCopies('layout-handoff-no-newer', REPO).load('src/lib/layout-handoff.js', anchored(SRC0, '      if (last && last !== text) {', /* stale-pins: kept — the control's PLANT (the newer check off), not a pin */ '      if (false) {', 'the newer check off'), 'nonewer');
+  const lateScene = async (HOX, opened) => {
+    const v1 = LS('desk-a', 1), v2 = LS('desk-a', 2), sock = sockOf([v1]), said = [];
+    sock.lastLayoutOf = (d) => (d === 'desk-a' ? sock.last : null); sock.last = v1;
+    let fail = null; const gate = new Promise((r, j) => { fail = j; });
+    const runs = HOX.handOff(sock, { post: () => gate, warn: (m) => said.push(m) });
+    sock.last = v2;                                     // a NEWER save of that desktop was made…
+    if (opened) { sock.ws.readyState = 1; sock.sent.push(v2); } // …and left on the socket that opened (or it left by its own hand-off)
+    fail(new TypeError('Failed to fetch')); await Promise.all(runs);
+    return { sentOld: sock.sent.includes(v1), queuedOld: sock.pending.includes(v1), said: said.some((m) => /never older after newer/.test(m)) };
+  };
+  {
+    const a1 = await lateScene(HO, true), r1 = await lateScene(NONEWER, true);
+    ok(!a1.sentOld && !a1.queuedOld && a1.said && r1.sentOld, '(f) the hand-off failed LATE after a newer save of its desktop left on the socket that opened: the old frame is DROPPED, said (never older after newer); CONTROL the newer check off ⇒ the old frame goes onto the socket after the newer one', { cure: a1, control: r1 });
+    const a2 = await lateScene(HO, false), r2 = await lateScene(NONEWER, false);
+    ok(!a2.sentOld && !a2.queuedOld && a2.said && r2.queuedOld, '(g) …with the socket still closed and the newer save already gone from the queue (it left): the old frame is NOT put back; CONTROL the check off ⇒ back at the queue\'s head', { cure: a2, control: r2 });
+  }
+  // (h) a REFUSAL reply is heard through the same door, marked 'route'
+  {
+    const sock = sockOf([LS('desk-a', 1)]), how = [];
+    sock.heard = (d, h) => { sock.heardFrames.push(d); how.push(h); };
+    await Promise.all(HO.handOff(sock, { post: async () => answer([{ type: 'layout-sync-refused', desktopId: 'desk-a', reason: 'stale', state: { windows: [] } }]) }));
+    ok(sock.heardFrames.length === 1 && sock.heardFrames[0].type === 'layout-sync-refused' && sock.heardFrames[0].reason === 'stale' && how[0] === 'route' && !sock.pending.length, '(h) the hub REFUSED the handed-off save (stale): the refusal is heard by the page\'s handlers through the same door, marked \'route\' (it adopts the record kept, as from its socket); nothing re-queued', { heard: sock.heardFrames, how });
+  }
+  // (i) RED for «not put back when a newer frame is queued»: a copy whose requeue always puts back
+  {
+    const ALWAYS = mutantCopies('layout-handoff-always-back', REPO).load('src/lib/layout-handoff.js', anchored(SRC0, "  if (list.some((t) => { const g = frameOf(t); return g && g.type === 'layout-sync' && deskOf(g) === d; })) return list;\n", /* stale-pins: kept — the control's PLANT (always put back), not a pin */ '', 'always put back'), 'alwaysback');
+    const sock = sockOf([LS('desk-a', 1)]);
+    await Promise.all(ALWAYS.handOff(sock, { post: async () => { sock.pending.push(LS('desk-a', 2)); throw new TypeError('Failed to fetch'); } }));
+    ok(J(sock.pending) === J([LS('desk-a', 1), LS('desk-a', 2)]), 'CONTROL (e)\'s second leg: a requeue that always puts back ⇒ the OLD frame queued ahead of the newer one (the leg above can fail)', sock.pending.length);
   }
   // RED: the unit's first cut (the frame left the queue before the post had an outcome, a rejection swallowed)
   {
