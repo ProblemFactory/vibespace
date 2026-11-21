@@ -344,6 +344,76 @@ ok((await plain) === null && plainNow === false, '…a long-poll that did not as
 const again = await w3.waitForOpen(pl.t, 2000, { prompt: true });
 ok(again && again.via === 'already-waiting' && again.prompt.realm === 'Lane Realm', '…and a verb that starts while the sign-in stands is answered at once');
 w3.shutdown(); await pl.ch.close();
+// B-9584 U2c: a profile whose location the PERSON set (a place, or «blocked») is held on every tab by the keeper's hold — nobody's
+// `permission geolocation allow` reaches Chrome there (a grant beside a hold that drops would read this machine's real position), a
+// deny never clears the place, and the watch's own replay of a grant made BEFORE the place on a new tab sets no position over it.
+// REDs (anchored): a watch copy that ignores the hold clears the place at a deny; the hand-over without its guard; the allow as before.
+async function heldLeg(Dmod, tag) {
+  const ch = await fakeChrome2().listen();
+  let held = null;   // no place yet: the leg's first grant is an agent's from BEFORE the person set one (it stands in the watch's grants)
+  let holders = [], leaseFn = null;
+  const kH = { cdpEndpointFor: async () => ({ ok: true, url: ch.url }), notePermission: () => true, geoHeldFor: () => held, onLease: (fn) => { leaseFn = fn; return () => {}; } };
+  const wH = Dmod.create({ keeper: kH, holdersOf: () => holders, log: { warn() {}, log() {}, error() {} } });
+  const PH = `bp-a00000${{ real: '09', red: '0a', red2: '0b', red3: '0c' }[tag]}`, tH = { profileId: PH, browserKey: 'bk-0000d1a9' };
+  await wH.arm(PH); await sleep(60);
+  const o = {};
+  const since = (n) => ch.calls.slice(n);
+  o.pre = await wH.setPermission(tH, { kind: 'geolocation', setting: 'allow', origin: 'http://127.0.0.1:9' });
+  held = { kind: 'place', latitude: 35.6762, longitude: 139.6503, accuracy: 100 };   // the person's place, from here on
+  let n = ch.calls.length;
+  o.at = await wH.setPermission(tH, { kind: 'geolocation', setting: 'allow', origin: 'http://127.0.0.1:9', at: '51.5,-0.12' });
+  o.atCalls = since(n).filter((m) => /setPermission|GeolocationOverride/.test(m.method)).length;
+  n = ch.calls.length;
+  o.allow = await wH.setPermission(tH, { kind: 'geolocation', setting: 'allow', origin: 'http://127.0.0.1:9' });
+  o.allowGranted = since(n).some((m) => m.method === 'Browser.setPermission' && m.params.setting === 'granted');
+  o.allowOverride = since(n).filter((m) => /GeolocationOverride/.test(m.method)).length;
+  o.allowCalls = since(n).filter((m) => /setPermission|GeolocationOverride/.test(m.method)).length;
+  n = ch.calls.length;
+  ch.emit('Target.targetCreated', { targetInfo: { targetId: 'T5', type: 'page', url: 'http://127.0.0.1:9/five', browserContextId: 'C1' } }); await sleep(80);
+  o.replayOverride = since(n).filter((m) => m.method === 'Emulation.setGeolocationOverride').length;
+  o.replayEnabled = since(n).some((m) => m.method === 'Page.enable');
+  // r1264 must 1: the person TAKES OVER (the watch moves agent → person) while an agent's geolocation grant stands — the hand-over resets the
+  // permission overrides as ever, and NEVER clears the place the person set
+  n = ch.calls.length;
+  holders = [{ human: true, browserKey: 'bk-person' }];
+  if (leaseFn) await leaseFn({ kind: 'attach', profileId: PH });
+  await sleep(80);
+  o.handReset = since(n).some((m) => m.method === 'Browser.resetPermissions');
+  o.handClear = since(n).filter((m) => m.method === 'Emulation.clearGeolocationOverride').length;
+  holders = [];
+  if (leaseFn) await leaseFn({ kind: 'attach', profileId: PH });   // back to the agent's watch for the legs below
+  await sleep(80);
+  n = ch.calls.length;
+  o.deny = await wH.setPermission(tH, { kind: 'geolocation', setting: 'deny', origin: 'http://127.0.0.1:9' });
+  o.denyClear = since(n).filter((m) => m.method === 'Emulation.clearGeolocationOverride').length;
+  held = { kind: 'blocked' };
+  n = ch.calls.length;
+  o.blocked = await wH.setPermission(tH, { kind: 'geolocation', setting: 'allow', origin: 'http://127.0.0.1:9' });
+  o.blockedCalls = since(n).filter((m) => /setPermission|GeolocationOverride/.test(m.method)).length;
+  wH.shutdown(); await ch.close();
+  return o;
+}
+{
+  const h = await heldLeg(D, 'real');
+  ok(!h.at.ok && h.at.code === 'place_held' && h.atCalls === 0, 'B-9584 U2c: on a profile whose place the person set, an agent\'s own position is refused BY NAME (place_held) — nothing sent', h.at);
+  ok(h.pre.ok && !h.allow.ok && h.allow.code === 'place_held' && /reads it as blocked/.test(h.allow.error) && h.allowCalls === 0, '…and an allow WITHOUT one is refused by name too: no site is allowed the location on a place profile (a grant beside a hold that drops, or a tab left unplaced, would read this machine\'s real position) — nothing sent', h.allow);
+  ok(h.replayEnabled && h.replayOverride === 0, '…the watch\'s replay of a grant made before the place, on a NEW tab, sets no position over the held place', h);
+  ok(h.handReset && h.handClear === 0, 'r1264 must 1: the person takes over (the watch moves agent → person) with an agent\'s geolocation grant standing — the overrides reset as ever, the held place NEVER cleared on an open tab', h);
+  ok(h.deny.ok && h.denyClear === 0, '…a deny is the site\'s denial — the held place is never cleared', h);
+  ok(!h.blocked.ok && h.blocked.code === 'place_held' && /blocked/.test(h.blocked.error) && h.blockedCalls === 0, '…and on a profile whose location is «blocked», a site is never allowed the location (refused by name, nothing sent)', h.blocked);
+  const MUh = mutantCopies('prompts-geo-held', REPO);
+  const dsH = read('src/server/browser-dialogs.js');
+  const Dh = MUh.load('src/server/browser-dialogs.js', anchored(dsH, "    if (v.kind === 'geolocation' && !held) for (const e of [...w.targets.values()])", "    if (v.kind === 'geolocation') for (const e of [...w.targets.values()])", 'prompts RED held ignored'), 'held-ignored');   // stale-pins: kept (the RED's own replacement: a watch that ignores the hold)
+  const hr = await heldLeg(Dh, 'red');
+  ok(hr.denyClear > 0, 'RED — a watch that ignores the hold: a deny CLEARS the held place on every tab (this machine\'s place then)', hr);
+  const Dg = MUh.load('src/server/browser-dialogs.js', anchored(dsH, "    if (!placeHeld(w.profileId) && [...w.grants.values()].some((g) => g.kind === 'geolocation' && g.setting === 'granted'))", "    if ([...w.grants.values()].some((g) => g.kind === 'geolocation' && g.setting === 'granted'))", 'prompts RED hand-over clears'), 'hand-over-clears');   // stale-pins: kept (the RED's own replacement: the release's hand-over)
+  const hg = await heldLeg(Dg, 'red2');
+  ok(hg.handClear > 0, 'RED — the release\'s hand-over: the takeover CLEARS the held place on every open tab (then a site allowed earlier reads this machine\'s position)', hg);
+  const Da = MUh.load('src/server/browser-dialogs.js', anchored(dsH, "    if (held && v.setting === 'granted') return { ok: false, code: 'place_held',", "    if (held && v.setting === 'granted' && held.kind === 'blocked') return { ok: false, code: 'place_held',", 'prompts RED place allowed'), 'place-allowed');   // stale-pins: kept (the RED's own replacement: the allow refused on «blocked» only)
+  const ha = await heldLeg(Da, 'red3');
+  ok(ha.allow.ok && ha.allowGranted, 'RED — the allow as before (refused on «blocked» only): an agent\'s allow on a place profile is SENT to Chrome (granted), so a hold that drops leaves that site this machine\'s real position', ha);
+  for (const c of copiesCensus(MUh.files, MUh.dir, REPO, { label: 'B-9584 U2c held-place control: ' })) ok(c.pass, c.name, c.detail);
+}
 // the control: a rule that releases a NORMAL page goes red
 const dsrcM = read('src/server/browser-dialogs.js').replace('if (ST.printTargetVerdict(info)) return releasePrint(w, info);', "if (info && info.type === 'page' && info.targetId === 'T2') return releasePrint(w, info);").replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`);
 ok(dsrcM !== read('src/server/browser-dialogs.js'), 'the print-rule mutation anchor is found');

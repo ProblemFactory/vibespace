@@ -280,7 +280,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   browser_driven: 409, // verify r1 (F1): the user drives that browser by hand right now — never restarted under his hands
   // lane engine-plugin: a browser ENGINE plugin's refusals (src/browser-engines.js ENGINE_CODES, merged into BUILD_CODES)
   browser_engine_missing: 409, browser_engine_kernel_missing: 409, browser_engine_not_executable: 409, browser_engine_protocol: 409, browser_engine_unanswered: 409, browser_engine_env: 409, engine_source_user: 409,
-  browser_engine_environment_unread: 409, browser_engine_location_unsupported: 409, browser_engine_environment_refused: 409, browser_engine_environment_mismatch: 409, // B-9584 U2a: a profile's own environment
+  browser_engine_environment_unread: 409, browser_engine_location_unsupported: 409, browser_engine_environment_refused: 409, browser_engine_environment_mismatch: 409, browser_place_not_held: 409, // B-9584 U2a: a profile's own environment (U2c: a stock profile's place that could not be held on its browser)
   // lane browser-propose (2026-09-30): a proposal's Approve / Reject — not in a state to decide, a card that is not the proposal as it stands, nothing to approve here
   proposal_state: 409, proposal_changed: 409, proposal_unavailable: 409,
   // lane site-reset: a tab that is not this conversation's; a stop the tab did not answer; the site-reset refusals

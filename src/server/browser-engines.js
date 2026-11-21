@@ -61,14 +61,16 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
   /** B-9584 U2a: does the engine `id` STATE that its launch reads a profile's environment (its manifest's capabilities.browserEngine
    *  holds src/browser-engines.js ENVIRONMENT_WORD)? THREE ANSWERS (round wyx4vuerd MUST — a refusal names ITS door): `true` = the
    *  loader lists it valid, enabled, trusted, an engine, and it states the word · `false` = listed so, and it does NOT state it (the
-   *  door: update the browser plugin) · `null` = not listed so — switched off, untrusted, not installed, a built-in engine, a list that
-   *  cannot be read: the engine's own verdict names that door (browser_engine_missing with its For-you line, as at the release). */
+   *  door: update the browser plugin) · `null` = not listed so — switched off, untrusted, not installed, NOT RUNNING (r1120: its true door,
+   *  «not running», first), a list that cannot be read: the engine's own verdict names that door (browser_engine_missing with its
+   *  For-you line, as at the release). A BUILT-IN engine (in the table, never a plugin) states nothing: `false`. */
   function statesEnvironment(id) {
+    if (builtinRows().some((r) => r.id === String(id))) return false;   // r1120: a built-in engine reads no environment (its own words by U3 at the latest)
     const l = L();
     let list = null;
     try { list = l && typeof l.list === 'function' ? l.list() : null; } catch { list = null; }
     if (!Array.isArray(list)) return null;
-    const p = list.find((x) => x && String(x.id) === String(id) && x.valid && x.enabled && x.trusted && x.contributes && x.contributes.browserEngine === true);
+    const p = list.find((x) => x && String(x.id) === String(id) && x.valid && x.enabled && x.trusted && x.state === 'running' && x.contributes && x.contributes.browserEngine === true);
     return p ? BE.statesEnvironment(p.capabilities) : null;
   }
   async function askManifest(row, verb, input) {

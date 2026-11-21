@@ -2006,6 +2006,7 @@ console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — 
   const mOk = await mismatchOf(K, 'equal', { timezone: 'Asia/Tokyo', language: null, location: 'fixed' });
   ok(!mOk.code && !!mOk.rec && mOk.rec.confirmed === true, '⑦e ③ r991: the echo EQUALS what was told (the zone, no language, the place as its word «fixed») ⇒ the start runs, recorded confirmed', mOk);
   // the real statesEnvironment over the loader's OWN list: the fixture states nothing; a copy of it that declares the word (trusted) states it
+  await waitRows(1);   // r1120: «states» is read of a RUNNING plugin only
   ok(ENGR.statesEnvironment(EID) === false, '⑦e ④ the REAL table over the loader\'s own list: the fixture engine (no capabilities.browserEngine) states nothing', ENGR.statesEnvironment(EID));
   const EROOT2 = path.join(ROOT, 'engine-root-env');
   fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(EROOT2, 'data', 'plugins', EID), { recursive: true });
@@ -2014,6 +2015,7 @@ console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — 
   process.on('exit', () => { try { LDR2.shutdown(); } catch { /* gone */ } });
   LDR2.setEnabled(EID, true, { trusted: true });
   const ENGR2 = require('../src/server/browser-engines.js').create({ loader: LDR2, dataDir: path.join(EROOT2, 'data'), timeoutMs: 400 });
+  { const t0w = Date.now(); while (ENGR2.rows().length !== 1 && Date.now() - t0w < 8000) await new Promise((r) => setTimeout(r, 25)); }   // r1120: running first
   ok(ENGR2.statesEnvironment(EID) === true, '⑦e ④ …and a copy of it whose manifest declares capabilities.browserEngine ["environment"] (enabled, trusted) STATES it', ENGR2.statesEnvironment(EID));
   try { LDR2.shutdown(); } catch { /* gone */ }
   // r991 (small): the stated-word check comes BEFORE a first-use kernel download (and before the place hold and the probe)
@@ -2022,7 +2024,7 @@ console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — 
   // REDs: the keeper with each rule taken back (anchored, THE one door for a red control's edit)
   const MUTe = mutantCopies('envm-builds', REPO);
   const ksE = read('src/server/browser-keeper.js');
-  const Kno = MUTe.load('src/server/browser-keeper.js', anchored(anchored(ksE, '    if (statesEnv === false) throw unread();', '    if (false) throw unread();', '⑦e RED unread (early)'), '    if (statesEnv !== true) throw unread();   // the belt', '    if (false) throw unread();   // the belt', '⑦e RED unread (belt)'), 'env-unread-off');
+  const Kno = MUTe.load('src/server/browser-keeper.js', anchored(anchored(ksE, '    if (statesEnv === false) throw unread();', '    if (false) throw unread();', '⑦e RED unread (early)'), '    if (statesEnv !== true && typeof engs().statesEnvironment', '    if (false && typeof engs().statesEnvironment', '⑦e RED unread (belt)'), 'env-unread-off');
   const rn = await roadOf(Kno, 'red-unread');
   ok(!rn.ee && rn.asked === 1, '⑦e RED — the keeper without the stated-word check: the start ASKS the launch of an engine that does not read the environment (a browser in the machine\'s own zone)', { ee: rn.ee && rn.ee.code, asked: rn.asked });
   const Kal = MUTe.load('src/server/browser-keeper.js', anchored(ksE, '...(envR.told ? { environment: envR.told } : {})', 'environment: envR.told', '⑦e RED always'), 'env-always');
@@ -2121,8 +2123,32 @@ console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — 
   ok(/another time zone than/.test(String(w1)) && /set the time zone to «This machine's»/.test(String(w1)) && /another time zone and language than/.test(String(w2)) && /time zone, language or location/.test(String(w0))
     && rs.c === 409 && J(rs.o.settings) === '["timezone"]',
     '⑦e (round wyx4vuerd 2): the mismatch says WHICH on the page — «another time zone», «the time zone and language» (the route forwards the setting words, only the three), the general sentence when none is named', { w1, w2, rs: rs.o });
+  // r1120 (1)(2)(4) and the built-in engine — over stub loaders and the verdict (each a one-line cure)
+  { const rowOf = (state, caps = {}) => ({ id: EID, valid: true, enabled: true, trusted: true, state, contributes: { browserEngine: true }, capabilities: caps });
+    const SE = (list, plugins = null) => require('../src/server/browser-engines.js').create({ loader: { list: () => list }, plugins }).statesEnvironment(EID);
+    const sStopped = SE([rowOf('stopped', { browserEngine: ['environment'] })]), sRunNo = SE([rowOf('running')]), sRunYes = SE([rowOf('running', { browserEngine: ['environment'] })]);
+    const sBuiltin = require('../src/server/browser-engines.js').create({ loader: { list: () => [] }, plugins: { providerIds: () => ['kx'], defs: () => ({ kx: { label: 'K' } }) } }).statesEnvironment('builtin.kx');
+    ok(sStopped === null && sRunNo === false && sRunYes === true && sBuiltin === false, '⑦e r1120 (2): a trusted, enabled plugin that is NOT RUNNING is not «listed so» (null: the verdict says «not running» first); running ⇒ false / true by its word; a BUILT-IN engine ⇒ false (it reads no environment)', { sStopped, sRunNo, sRunYes, sBuiltin });
+    const acc = ENGN.engineAnswerVerdict('launchOptions', { status: 500, body: { code: 'EPLUGIN', error: "Error [ERR_ACCESS_DENIED]: Access to this API has been restricted. resource: '/etc/kernel.json' — while reading latitude 35.6762" } }, { id: EID, label: 'Kernel', told: true });
+    ok(/ERR_ACCESS_DENIED/.test(acc.error) && /\/etc\/kernel\.json/.test(acc.error) && !/35\.67/.test(J(acc)), '⑦e r1120 (4): an ACCESS refusal under another code keeps its access words (the mark and the resource) when an environment was told — never the text\'s numbers', acc.error); }
+  { const answers = [];
+    const ENGS = { ...ENGR, statesEnvironment: () => answers.shift(), launchOptions: (id, input) => ENGR.launchOptions(id, input) };
+    const beltOf = async (Kmod, tag, seq) => {
+      const kb = mkKeeper(path.join(ROOT, `data-eng-belt-${tag}`), { engines: ENGS, serverSetting: (k) => settingsE[k], fleetFacts: () => fleetE, liveKeys: () => new Set([KEY_A, KEY_E]) }, Kmod);
+      const pb = kb.createProfile({ label: `Kernel belt ${tag}`, browser: { kind: 'plugin', id: EID } }, { engine: await kb.engineFactOf(EID) });
+      kb._reg().profiles.find((x) => x && x.id === pb.id).environment = ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Tokyo' } }).value;
+      answers.length = 0; answers.push(...seq);
+      const e = await thr(() => kb.start(pb.id, { why: 'test' }));
+      if (!e) await kb.stop(pb.id, { why: 'user' });
+      return e ? e.code : 'started';
+    };
+    const b1 = await beltOf(K, 'race', [null, true]), b2 = await beltOf(K, 'plain', [null, false]);
+    ok(b1 === 'started' && b2 === 'browser_engine_environment_unread', `⑦e r1120 (1): the belt past the verdict asks ONCE MORE — a plugin that states the word by then starts (${b1}); a plain «does not state it» is refused (${b2})`, { b1, b2 });
+    const Kbelt = MUTe.load('src/server/browser-keeper.js', anchored(ksE, "    if (statesEnv !== true && typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id) === false) throw unread();", '    if (statesEnv !== true) throw unread();', '⑦e RED belt once'), 'env-belt-once');   // stale-pins: kept (the RED's own replacement: the belt reusing the early answer)
+    const b3 = await beltOf(Kbelt, 'red-race', [null, true]);
+    ok(b3 === 'browser_engine_environment_unread', '⑦e RED — the belt that reuses the early answer: a plugin turned on between the two reads is refused «update the browser plugin»', b3); }
   // REDs (anchored)
-  const Kdoor = MUTe.load('src/server/browser-keeper.js', anchored(ksE, '    if (statesEnv === false) throw unread();', '    if (statesEnv !== true) throw unread();', '⑦e RED early check'), 'env-door-early');
+  const Kdoor = MUTe.load('src/server/browser-keeper.js', anchored(ksE, '    if (statesEnv === false) throw unread();', '    if (statesEnv !== true) throw unread();', '⑦e RED early check'), 'env-door-early');   // stale-pins: kept (the RED's own replacement: today's early check)
   const drR = await doorOf(Kdoor, 'red');
   ok(['off', 'untrusted', 'absent'].every((k) => drR[k] && drR[k].code === 'browser_engine_environment_unread' && !drR[k].marked && drR[k].todos === 0),
     '⑦e RED — today\'s early check (refused unless the engine states the word): a switched-off, an untrusted and an absent plugin are each told «update the browser plugin» — the real door never named, no For-you line', { off: drR.off, untrusted: drR.untrusted, absent: drR.absent });
@@ -2202,6 +2228,87 @@ console.log('— ⑦f B-9584 U2b: the stock browser\'s own language and zone —
   const Kv = MUTs.load('src/server/browser-keeper.js', anchored(ksS, '      if (stockEnv && stockEnv.env.TZ) launchEnv.TZ = stockEnv.env.TZ;\n', '', '⑦f RED view'), 'env-tz-view-off');
   const sv = await stockRoad(Kv, 'red-view');
   ok(sv.la1 && sv.la1.tz === 'Asia/Tokyo' && sv.view1 === null && sv.calls1.some((c) => c.tz === null), '⑦f RED — the zone on the launch only, not its view: the later calls (a heal\'s relaunch among them) name no zone — a Chrome started again comes back in the machine\'s zone', { view: sv.view1, calls: sv.calls1 });
+}
+
+// ═══ ⑦g B-9584 U2c — A PROFILE'S PLACE ON THE STOCK BROWSER: the keeper's half, FAIL CLOSED AT THE BROWSER (主开发 r1264; measured on a
+// real Chrome). The REAL keeper over the fake driver with a STAND-IN hold that records every arm. Before its Chrome starts, a place or
+// «blocked» writes the profile's OWN stored denial (the default and every stored geolocation row «block»), the person's values kept
+// first; «blocked» is that denial alone (no hold); a place arms the hold BEFORE the browser is anyone's; back at «this machine's» the
+// person's values are given back; an untouched profile writes nothing and never reaches the hold.
+console.log('— ⑦g B-9584 U2c: the stored denial at the start; a place held on top of it — never an untouched profile');
+{
+  const J = JSON.stringify;
+  const ENVm = require('../src/browser-environment.js');
+  const prefsOf = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'Default', 'Preferences'), 'utf8')); } catch { return null; } };
+  const keptOf = (dir) => fs.existsSync(path.join(dir, 'vibespace-geo-kept.json'));
+  const geoOf = (pr) => { const p = (pr || {}).profile || {}; return { default: (p.default_content_setting_values || {}).geolocation ?? null, maps: ((((p.content_settings || {}).exceptions || {}).geolocation || {})['https://maps.example:443,*'] || {}).setting ?? null }; };
+  const geoRoad = async (Kmod, tag, { refuse = false } = {}) => {
+    const log = { makers: 0, arms: [], disarms: [], order: [] };
+    let kg2 = null;
+    const stub = { arm: async (pid, o) => { log.arms.push({ pid, plan: o.plan, after: o.after || null, url: typeof o.url, stateAtArm: (kg2._reg().browsers[pid] || {}).state || null }); log.order.push('arm'); return refuse ? { ok: false, code: 'place_not_held', error: 'a stand-in refusal' } : { ok: true }; }, disarm: (pid) => { log.disarms.push(pid); return true; }, heldOf: () => null, factOf: () => null, rearmNow: () => false, dispose() { } };
+    kg2 = mkKeeper(path.join(ROOT, `data-geo-${tag}`), { geoHold: (o) => { log.makers++; return stub; } }, Kmod);
+    kg2.onLease((ev) => { if (ev && ev.kind) log.order.push(ev.kind); });
+    const pu = kg2.createProfile({ label: `Geo untouched ${tag}` }), pz = kg2.createProfile({ label: `Geo zone only ${tag}` }), pp = kg2.createProfile({ label: `Geo place ${tag}` }), pb = kg2.createProfile({ label: `Geo blocked ${tag}` });
+    const profOf = (id) => kg2._reg().profiles.find((x) => x && x.id === id);
+    profOf(pz.id).environment = ENVm.environmentVerdict({ timezone: { mode: 'value', value: 'Asia/Tokyo' } }).value;
+    profOf(pp.id).environment = ENVm.environmentVerdict({ location: { mode: 'value', value: { latitude: 35.6762, longitude: 139.6503 } } }).value;   // a stand-in for U3's writer
+    profOf(pb.id).environment = ENVm.environmentVerdict({ location: { mode: 'block' } }).value;
+    // a site the person allowed BEFORE, in the place profile's own Chrome profile (as Chrome keeps it)
+    fs.mkdirSync(path.join(profOf(pp.id).dir, 'Default'), { recursive: true });
+    fs.writeFileSync(path.join(profOf(pp.id).dir, 'Default', 'Preferences'), J({ profile: { content_settings: { exceptions: { geolocation: { 'https://maps.example:443,*': { setting: 1 } } } } } }));
+    const out = { log };
+    await kg2.start(pu.id, { why: 'test' }); await kg2.stop(pu.id, { why: 'user' });
+    await kg2.start(pz.id, { why: 'test' }); await kg2.stop(pz.id, { why: 'user' });
+    out.makersUntouched = log.makers; out.armsUntouched = log.arms.length;
+    out.prefsU = prefsOf(profOf(pu.id).dir); out.keptU = keptOf(profOf(pu.id).dir) || keptOf(profOf(pz.id).dir);
+    log.order.length = 0;
+    out.ep = await thr(() => kg2.start(pp.id, { why: 'test' }));
+    out.orderP = log.order.slice();
+    out.recP = (kg2._reg().browsers[pp.id] || {}).environment || null;
+    out.geoP = geoOf(prefsOf(profOf(pp.id).dir)); out.keptP = keptOf(profOf(pp.id).dir);
+    if (!out.ep) await kg2.stop(pp.id, { why: 'user' }); else { const t0s = Date.now(); while ((kg2._reg().browsers[pp.id] || {}).state === 'ready' && Date.now() - t0s < 5000) await new Promise((r) => setTimeout(r, 25)); }   // the stop runs once the refused start settles
+    out.stateP = (kg2._reg().browsers[pp.id] || {}).state;
+    const armsBefore = log.arms.length;
+    out.eb = await thr(() => kg2.start(pb.id, { why: 'test' }));
+    out.recB = (kg2._reg().browsers[pb.id] || {}).environment || null;
+    out.geoB = geoOf(prefsOf(profOf(pb.id).dir)); out.armsForBlocked = log.arms.length - armsBefore;
+    if (!out.eb) await kg2.stop(pb.id, { why: 'user' });
+    // back at «this machine's»: the person's own values given back, the kept file gone
+    delete profOf(pp.id).environment;
+    const e2 = await thr(() => kg2.start(pp.id, { why: 'test' })); if (!e2) await kg2.stop(pp.id, { why: 'user' });
+    out.geoP2 = geoOf(prefsOf(profOf(pp.id).dir)); out.keptP2 = keptOf(profOf(pp.id).dir);
+    return out;
+  };
+  const g0 = await geoRoad(K, 'real');
+  ok(g0.makersUntouched === 0 && g0.armsUntouched === 0 && g0.prefsU === null && !g0.keptU,
+    '⑦g (U2c bound 3) a profile with neither a place nor «blocked» (untouched, or a zone only): nothing written into its browser profile, the hold never reached (its maker not even called) — the release\'s start', { makers: g0.makersUntouched, arms: g0.armsUntouched, prefs: g0.prefsU });
+  ok(!g0.ep && g0.geoP.default === 2 && g0.geoP.maps === 2 && g0.keptP,
+    '⑦g FAIL CLOSED (r1264): before a place\'s Chrome starts, its OWN stored setting denies — the default «block» AND the site the person allowed before rewritten to «block» (measured: alone, the default loses to it); the person\'s values kept first', g0.geoP);
+  const aP = g0.log.arms[0] || {};
+  ok(J(aP.plan) === J({ kind: 'place', latitude: 35.6762, longitude: 139.6503, accuracy: 100 }) && aP.url === 'function' && aP.stateAtArm === 'starting' && g0.orderP.indexOf('browser-ready') > g0.orderP.indexOf('arm'),
+    '⑦g a place: the hold is armed with the plan BEFORE the browser is anyone\'s — the record still «starting» (ahead of ready and the mediator\'s repoint), its address read live (a relaunch moves it)', { arm: aP, order: g0.orderP });
+  ok(!!g0.recP && g0.recP.applied.location === 'fixed' && g0.recP.confirmed === true && !/35\.67|139\.65/.test(J(g0.recP)),
+    '⑦g the record says «fixed», confirmed once held — never the place\'s numbers', g0.recP);
+  ok(!g0.eb && g0.armsForBlocked === 0 && g0.geoB.default === 2 && !!g0.recB && g0.recB.applied.location === 'blocked' && g0.recB.confirmed === true,
+    '⑦g «blocked» is the profile\'s OWN stored denial ALONE — written before its Chrome, NO hold armed (nothing of ours needs to be alive), recorded confirmed', { geo: g0.geoB, arms: g0.armsForBlocked, rec: g0.recB });
+  ok(g0.geoP2.default === null && g0.geoP2.maps === 1 && !g0.keptP2,
+    '⑦g back at «this machine\'s»: the person\'s own values GIVEN BACK at the next start (the site allowed before allowed again, no default of ours), the kept file gone', g0.geoP2);
+  ok(g0.log.disarms.includes(aP.pid), '⑦g the stop disarms the hold (it ends with its browser)', g0.log.disarms);
+  const gr = await geoRoad(K, 'refused', { refuse: true });
+  ok(!!gr.ep && gr.ep.code === 'browser_place_not_held' && /never runs with this machine's location/.test(String(gr.ep.message)) && gr.stateP !== 'ready' && !gr.orderP.includes('browser-ready'),
+    '⑦g a refused arm ⇒ the start refused BY NAME (browser_place_not_held), no browser-ready, the browser stopped once the start settles', { code: gr.ep && gr.ep.code, state: gr.stateP, order: gr.orderP });
+  // REDs (anchored): the arm taken out; the hold asked for every start; the stored denial not written
+  const MUTg = mutantCopies('geo-builds', REPO), ksG = read('src/server/browser-keeper.js');
+  const ARM_LINE = "      if (stockEnv && stockEnv.geolocation && stockEnv.geolocation.kind === 'place') await armGeo(p, rec, stockEnv.geolocation);";
+  const Knoarm = MUTg.load('src/server/browser-keeper.js', anchored(ksG, ARM_LINE, "      if (false) await armGeo(p, rec, stockEnv.geolocation);", '⑦g RED no arm'), 'geo-no-arm');
+  const gn = await geoRoad(Knoarm, 'red-noarm');
+  ok(gn.log.arms.length === 0 && gn.orderP.includes('browser-ready'), '⑦g RED — the driver road without the arm: a place\'s browser is anyone\'s with no place on it (the arm leg goes red)', gn.log);
+  const Kalways = MUTg.load('src/server/browser-keeper.js', anchored(ksG, ARM_LINE, "      if (stockEnv) await geo().arm(p.id, { url: rec.cdpUrl, plan: stockEnv.geolocation });", '⑦g RED always'), 'geo-always');
+  const ga = await geoRoad(Kalways, 'red-always');
+  ok(ga.makersUntouched > 0 && ga.armsUntouched > 0, '⑦g RED — the hold asked for every stock start: an untouched profile reaches the hold (its start is no longer the release\'s)', { makers: ga.makersUntouched, arms: ga.armsUntouched });
+  const Knostore = MUTg.load('src/server/browser-keeper.js', anchored(ksG, "      { const gs = await geoStoreAt(p, stockEnv && stockEnv.geolocation);", "      { const gs = { ok: true, why: 'skipped' }; void geoStoreAt;", '⑦g RED no store'), 'geo-no-store');
+  const gs = await geoRoad(Knostore, 'red-nostore');
+  ok(gs.geoP.maps === 1 && gs.geoP.default === null, '⑦g RED — the start without the stored denial: the site allowed before keeps «allow» (with nothing of ours alive it reads this machine\'s position — measured)', gs.geoP);
 }
 
 // ═══ ⑧ lane engine-distribution: THE KERNEL DOWNLOADED (design-custom-browser-plugin §5.3 as built) ═══════════════════════

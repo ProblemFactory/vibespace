@@ -2757,7 +2757,9 @@ await section(async () => {
   // + 'turn-idle' (MULTIVIEW B-325a, docs/design-browser-multiview.zh.md §4): the release of a conversation's ephemeral
   //   browser a few minutes after its TURN ended — a lifecycle why, never a resource one (the verdict is not read there)
   // + 'manager' (lane browsers-stop, majordomo piece 6): browsers.stop — a lifecycle why (the stop verdict reads no resource fact)
-  const STOP_WHYS = ['user', 'idle', 'relaunch', 'switch', 'conversation gone', 'child handle dropped', 'turn-idle', 'manager'];
+  // + 'place-not-held' (B-9584 U2c, src/server/browser-geo-hold.js): a stock browser whose PLACE could not be held on it (its arm refused,
+  //   its hold gone for good) is stopped rather than run with this machine's location — the person's privacy, never a resource why
+  const STOP_WHYS = ['user', 'idle', 'relaunch', 'switch', 'conversation gone', 'child handle dropped', 'turn-idle', 'manager', 'place-not-held'];
   const argsAt = (t, i) => { let d = 0, j = i; for (; j < t.length; j++) { const c = t[j]; if (c === '(') d++; else if (c === ')' && --d === 0) break; } return t.slice(i + 1, j); };
   const sampledBlock = (t) => {
     const m = /const (\w+) = RG\.resourceVerdict\(/.exec(t); if (!m) return null;

@@ -34,6 +34,8 @@
  *                                       language and region — when the resolved locale is not a tag the kernel rule takes)
  *   · withEnvironmentArgs(args, extra) — a launch config's `args` (a list or the driver's comma / newline text) with the switches added
  *   · canonicalZone(v) / canonicalTag(v) — the hub's own two canonical forms: an engine's echo is compared through them, both sides
+ *   · geoStoredDenial(prefs) / geoStoredRestore(prefs, kept) — U2c: the profile's OWN stored denial (fail closed at the browser) and
+ *                                       the person's own values given back
  * THE DEFAULT IS UNCHANGED: a profile with no `environment`, or one whose every setting is «this machine's», keeps nothing and hands
  * nothing (told null) — its start is the release's, byte for byte.
  * The runtime decides two facts: a zone name by its date formatter (src/browser-exit.js zoneVerdict, the exit check's one rule) and a
@@ -200,6 +202,53 @@ function machineLanguageTag(locale = (() => { try { return Intl.DateTimeFormat()
   const b = base ? languageVerdict(base) : null;
   return b && b.ok ? b.value : null;
 }
+/** B-9584 U2c (主开发 r1264, FAIL CLOSED AT THE BROWSER; measured on a real Chrome): THE PROFILE'S OWN STORED DENIAL. Chrome keeps a
+ *  default geolocation «block» written into the profile's Preferences before its launch, and a site with no row of its own is denied —
+ *  but a site the person allowed before keeps its stored «allow» and WINS over that default; its row rewritten to «block» is denied.
+ *  So a profile whose location is a place or «blocked» starts with the default AND every stored geolocation row at «block»: whatever
+ *  of VibeSpace is down (the hold, the hub, a relaunch, a hand-over), the browser itself denies the position. PURE over the parsed
+ *  Preferences (`prefs`, or null for a profile Chrome never opened) → { ok, changed, prefs, kept } — `kept` = the person's OWN values
+ *  (the default and each row's setting, never a place: these are site names and their allow / ask / block), kept beside the profile to
+ *  give back when the location returns to «this machine's» (geoStoredRestore). A file of another shape is refused, never overwritten. */
+const GEO_BLOCK = 2;
+function geoStoredDenial(prefs) {
+  if (prefs !== null && (typeof prefs !== 'object' || Array.isArray(prefs))) return { ok: false, why: 'its Preferences are not an object' };
+  const p = prefs ? JSON.parse(JSON.stringify(prefs)) : {};
+  const prof = p.profile && typeof p.profile === 'object' && !Array.isArray(p.profile) ? p.profile : (p.profile = {});
+  const dflt = prof.default_content_setting_values && typeof prof.default_content_setting_values === 'object' ? prof.default_content_setting_values : (prof.default_content_setting_values = {});
+  const cs = prof.content_settings && typeof prof.content_settings === 'object' ? prof.content_settings : (prof.content_settings = {});
+  const ex = cs.exceptions && typeof cs.exceptions === 'object' ? cs.exceptions : (cs.exceptions = {});
+  const rows = ex.geolocation && typeof ex.geolocation === 'object' && !Array.isArray(ex.geolocation) ? ex.geolocation : (ex.geolocation = {});
+  const kept = { default: Object.prototype.hasOwnProperty.call(dflt, 'geolocation') ? dflt.geolocation : null, rows: {} };
+  let changed = dflt.geolocation !== GEO_BLOCK;
+  dflt.geolocation = GEO_BLOCK;
+  for (const [key, row] of Object.entries(rows)) {
+    if (!row || typeof row !== 'object') continue;
+    kept.rows[key] = Object.prototype.hasOwnProperty.call(row, 'setting') ? row.setting : null;
+    if (row.setting !== GEO_BLOCK) { row.setting = GEO_BLOCK; changed = true; }
+  }
+  return { ok: true, changed, prefs: p, kept };
+}
+/** Give the person's own values back (the location is «this machine's» again): the default and each row still there, as they were;
+ *  a row added since stays as Chrome keeps it. PURE → { ok, changed, prefs }. */
+function geoStoredRestore(prefs, kept) {
+  if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) return { ok: false, why: 'its Preferences are not an object' };
+  if (!kept || typeof kept !== 'object') return { ok: false, why: 'nothing kept to give back' };
+  const p = JSON.parse(JSON.stringify(prefs));
+  const prof = p.profile && typeof p.profile === 'object' ? p.profile : (p.profile = {});
+  const dflt = prof.default_content_setting_values && typeof prof.default_content_setting_values === 'object' ? prof.default_content_setting_values : (prof.default_content_setting_values = {});
+  let changed = false;
+  if (kept.default === null || kept.default === undefined) { if ('geolocation' in dflt) { delete dflt.geolocation; changed = true; } }
+  else if (dflt.geolocation !== kept.default) { dflt.geolocation = kept.default; changed = true; }
+  const rows = (((prof.content_settings || {}).exceptions || {}).geolocation) || {};
+  for (const [key, setting] of Object.entries(kept.rows || {})) {
+    const row = rows[key];
+    if (!row || typeof row !== 'object') continue;
+    if (setting === null) { if ('setting' in row) { delete row.setting; changed = true; } }
+    else if (row.setting !== setting) { row.setting = setting; changed = true; }
+  }
+  return { ok: true, changed, prefs: p };
+}
 /** THE HUB'S TWO CANONICAL FORMS (round wyx4vuerd 3) — a zone as the runtime's date formatter spells it (a legacy alias and its zone,
  *  another case: one name), a tag as Intl.getCanonicalLocales spells it; a value neither reads is kept as given (it then differs).
  *  An engine's echo is compared to what was told through these, on BOTH sides (src/browser-engines.js echoMismatch). */
@@ -227,4 +276,4 @@ function environmentLogView(environment) {
   return out;
 }
 
-module.exports = { stockLaunchOf, machineLanguageTag, canonicalZone, canonicalTag, withEnvironmentArgs, MODES, PLACE_ACCURACY_M, KERNEL_TAG, LANGUAGE_ROWS, languageOfCountry, SETTINGS, SETTING_KEYS, environmentVerdict, keptExitOf, resolveEnvironment, environmentLogView, languageVerdict, placeVerdict, timezoneVerdict };
+module.exports = { stockLaunchOf, machineLanguageTag, canonicalZone, canonicalTag, geoStoredDenial, geoStoredRestore, GEO_BLOCK, withEnvironmentArgs, MODES, PLACE_ACCURACY_M, KERNEL_TAG, LANGUAGE_ROWS, languageOfCountry, SETTINGS, SETTING_KEYS, environmentVerdict, keptExitOf, resolveEnvironment, environmentLogView, languageVerdict, placeVerdict, timezoneVerdict };

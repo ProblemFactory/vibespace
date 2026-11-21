@@ -506,6 +506,11 @@
   "why": "build mark re-judged every launch"
  },
  {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > armGeo · commit()",
+  "verdict": "none",
+  "why": "refusal words; the stop re-records"
+ },
+ {
   "key": "browser-keeper · src/server/browser-keeper.js · create > noteBuildMissing · commit()",
   "verdict": "none",
   "why": "notice mark; worst case duplicate item"

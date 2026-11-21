@@ -89,6 +89,7 @@ const HC = require('../hidden-chars.js'); // lane browser-propose: a proposal ca
 const KB = require('../browser-kept.js'); // lane browser-resume (§3.9): the conversation's KEPT browser — tabs, D2's restore kind (PURE)
 const BB = require('../browser-builds.js');
 const ENV = require('../browser-environment.js'); // B-9584: a profile's own environment — the contract (U1): one resolve per start
+const GH = require('./browser-geo-hold.js'); // B-9584 U2c: a stock profile's place (or «blocked») held on its browser — road B
 const ENG = require('../browser-engines.js'); // lane engine-plugin: PURE — an engine plugin's verdicts, its launch env view, the default policy
 const BE = require('../browser-stderr.js'); // lane browser-stderr-pipe: the quiet log switches + the stderr-pipe-full verdict
 const CL = require('../browser-clone.js'); // lane browser-profile-clone (B-9669): New profile… copied from a stopped profile — the PURE tables + verdict
@@ -155,7 +156,7 @@ function keeper() { return installed; }
  *                    never admitted, never added to a list (identity verify r2, 2026-09-28); default none
  *   facts / runtime / limits / log / now / tickMs / guardSampleMs — injectable for the gate
  */
-function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} of the held registry's read again (a suite's fast clock) */, dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined, proxyLogins = null /* B-8b87: src/server/browser-proxy-logins.js — a profile proxy's login, read by the forwarder alone */,
+function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} of the held registry's read again (a suite's fast clock) */, geoHold = null /* B-9584 U2c: the place hold's maker ({log, now, onEvent}) ⇒ src/server/browser-geo-hold.js create — a suite's stand-in */, dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined, proxyLogins = null /* B-8b87: src/server/browser-proxy-logins.js — a profile proxy's login, read by the forwarder alone */,
   // B-7a30 unit 1': the CLI judge's one file check (injectable: the gate PLACES a stall in it), the doors' bound, the re-judge period
   cliFileFact = null, cliActMs = 5 * 1000, cliEveryMs = 10 * 1000,
   serverNotice = null, getTelemetry = () => null, liveKeys: sessionLiveKeys = () => new Set(), remoteKeys = () => new Set(), userTodos = null,
@@ -552,6 +553,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const digestExtras = new Set();
   const changeListeners = new Set(); // lane S2: `onChange` — the browser fact's re-publish hook (notify() fans out)
   function emitLease(ev) {
+    if (ev && ev.profileId && ev.kind === 'browser-stopped') { if (geoHoldOwn) geoHoldOwn.disarm(String(ev.profileId), 'the browser stopped'); geoSaid.delete(String(ev.profileId)); }   // B-9584 U2c
     // verify r3 #2 (site-reset): the persisted witness dies with the browser — a stop, or a FRESH start (an adoption keeps it:
     // the tabs are still there; a named browser that outlives a VibeSpace restart is adopted at load with no event at all)
     if (ev && ev.profileId && (ev.kind === 'browser-stopped' || (ev.kind === 'browser-ready' && !ev.adopted))) { dropLeaseTabs(ev.profileId); endFolderNotice(ev.profileId, ev.kind === 'browser-stopped' ? 'browser-ended' : 'browser-restarted'); }   // B-0645 cure: the folder notice ends with its browser
@@ -1604,8 +1606,90 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function stockEnvFor(p) {
     const envR = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p));
     const st = ENV.stockLaunchOf(envR, { languageTold: !!p.languageTold, machineTag: ENV.machineLanguageTag() });
+    const geolocation = geoPlanOf(envR.geolocation);   // B-9584 U2c: a place (the stored denial + the hold on top) or «blocked» (the stored denial alone); null ⇒ nothing written, nothing armed
     const says = !!p.environment || st.args.length > 0;
-    return { ...st, environment: says ? { applied: { timezone: st.env.TZ || null, language: st.language, location: 'machine' }, confirmed: true, by: 'stock', unfollowed: envR.unfollowed } : null };
+    return { ...st, geolocation, environment: says ? { applied: { timezone: st.env.TZ || null, language: st.language, location: geolocation ? (geolocation.kind === 'place' ? 'fixed' : 'blocked') : 'machine' }, confirmed: !geolocation || geolocation.kind === 'blocked', by: 'stock', unfollowed: envR.unfollowed } : null };   // «blocked» = the stored denial, written before its Chrome or the start is refused; a place is confirmed once held
+  }
+  // ── B-9584 U2c — THE PLACE ON THE STOCK BROWSER (road B: src/server/browser-geo-hold.js) ──
+  // A stock profile whose location is a place or «blocked» gets the hold on its browser at its start, before the browser is anyone's
+  // (both roads, before browser-ready), and again at a restart's adoption. A profile with neither never reaches the hold: nothing is
+  // armed, its start is the release's. What the hold does is said where the person is (the For-you tray), never a place's value.
+  let geoHoldOwn = null;
+  const geo = () => geoHoldOwn || (geoHoldOwn = (typeof geoHold === 'function' ? geoHold : GH.create)({ log, now, onEvent: onGeoEvent }));
+  const geoSaid = new Map();   // profile id → the hold's notices filed for its browser's run (one of each)
+  /** The plan a STOCK profile's browser is held to (a named profile on this machine, never an engine's — the kernel takes its own). */
+  function geoPlanFor(p) {
+    if (!p || isEph(p) || p.host || (p.browser && p.browser.kind === 'plugin')) return null;
+    return geoPlanOf(ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p)).geolocation);
+  }
+  /** U1's `geolocation` → this road's plan: «blocked» (the stored denial alone) or a place the hold can hold (GH.planOf); else null. */
+  function geoPlanOf(g) { return g && g.kind === 'blocked' ? { kind: 'blocked' } : GH.planOf(g); }
+  /** B-9584 U2c (主开发 r1264, MEASURED on a real Chrome): THE PROFILE'S OWN STORED DENIAL, written before its Chrome starts (no Chrome
+   *  holds the folder: its lock was judged just before). A place or «blocked» ⇒ the default and EVERY stored geolocation row «block»
+   *  (src/browser-environment.js geoStoredDenial: a site allowed before would win over the default alone), the person's own values
+   *  kept beside the profile FIRST (GEO_KEPT_FILE, 0600, once — never a later denial's over them). Back at «this machine's» with values
+   *  kept ⇒ given back (geoStoredRestore), the file removed. An untouched profile: one look for the file, nothing else. A file of
+   *  another shape is never overwritten: the start is refused by name instead. */
+  const GEO_KEPT_FILE = 'vibespace-geo-kept.json';
+  async function geoStoreAt(p, plan) {
+    if (!p || !p.dir || isEph(p) || p.host || (p.browser && p.browser.kind === 'plugin')) return { ok: true, why: 'not a stock profile on this machine' };
+    const file = path.join(p.dir, 'Default', 'Preferences'), keptFile = path.join(p.dir, GEO_KEPT_FILE);
+    let kept = null;
+    try { kept = JSON.parse(await fs.promises.readFile(keptFile, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') return { ok: false, why: `its kept values: ${e.code || 'not JSON'}` }; }
+    if (!plan && !kept) return { ok: true, why: 'nothing kept' };
+    let prefs = null;
+    try { const raw = await fs.promises.readFile(file, 'utf8'); try { prefs = JSON.parse(raw); } catch { return { ok: false, why: 'its Preferences are not JSON' }; } }
+    catch (e) { if (e.code !== 'ENOENT') return { ok: false, why: e.code || 'unreadable' }; }
+    const writeAtomic = async (f, obj) => { await fs.promises.mkdir(path.dirname(f), { recursive: true, mode: 0o700 }); const tmp = `${f}.vibespace-${process.pid}.tmp`; await fs.promises.writeFile(tmp, JSON.stringify(obj), { mode: 0o600 }); await fs.promises.rename(tmp, f); };
+    try {
+      if (plan) {
+        const v = ENV.geoStoredDenial(prefs);
+        if (!v.ok) return v;
+        if (!kept) await writeAtomic(keptFile, v.kept);   // the person's own values FIRST: a crash between the two writes loses nothing
+        if (v.changed) await writeAtomic(file, v.prefs);
+        return { ok: true, why: 'denied' };
+      }
+      if (prefs) { const r = ENV.geoStoredRestore(prefs, kept); if (!r.ok) return r; if (r.changed) await writeAtomic(file, r.prefs); }
+      await fs.promises.rm(keptFile, { force: true });
+      return { ok: true, why: 'given back' };
+    } catch (e) { return { ok: false, why: e.code || 'not written' }; }
+  }
+  /** Arm the hold (bounded). Refused ⇒ the start is refused BY NAME and the browser is stopped once it settles — never left running
+   *  with this machine's place; the record's word becomes «confirmed» only once every open tab holds the place. */
+  async function armGeo(p, rec, plan, { after = null } = {}) {
+    const r = await geo().arm(p.id, { url: () => ((reg.browsers[p.id] || {}).cdpUrl || rec.cdpUrl), plan, after });   // the record's CURRENT address: a relaunch moves it (r1264 must 2)
+    if (r.ok) { if (rec.environment) rec.environment.confirmed = true; return r; }
+    const what = plan.kind === 'blocked' ? 'its blocked location' : 'its place';
+    const msg = `"${p.label}" ${after === 'restart' ? 'was stopped at the restart' : 'was not started'}: ${what} could not be held on its browser (${r.error}) — it never runs with this machine's location; start it again, or set the location to «This machine's»`;
+    log.warn?.(`[browser] ${p.id} ${msg}`);
+    rec.lastError = msg; commit();
+    const pid = p.id;
+    setImmediate(() => { stop(pid, { why: 'place-not-held' }).catch((e) => log.warn?.(`[browser] ${pid}: the stop after its place could not be held failed — ${e && e.message}`)); });
+    throw namedError('browser_place_not_held', msg);
+  }
+  /** The hold's events, said where the person is: a tab closed (its place not taken in time), the place not held for a while (the
+   *  hold dropped, VibeSpace restarted) once it is held again, the hold that cannot come back (the browser is stopped). */
+  function onGeoEvent(ev) {
+    if (!ev || !ev.profileId) return;
+    const pid = String(ev.profileId);
+    let p = null; try { p = profile(pid); } catch { p = null; }
+    const label = p ? p.label : pid;
+    const f = geoHoldOwn ? geoHoldOwn.factOf(pid) : null;
+    const what = f && f.kind === 'blocked' ? 'its blocked location' : 'its place';
+    const said = geoSaid.get(pid) || new Set(); geoSaid.set(pid, said);
+    const file = (key, text, detail, kind = 'notice') => {
+      if (said.has(key)) return; said.add(key);
+      if (!userTodos || typeof userTodos.add !== 'function') return;
+      try { userTodos.add('browser', { origin: 'browser', kind, urgency: kind === 'action' ? 'high' : 'normal', by: 'agent', text, detail, sessionName: 'Agent browser' }); }
+      catch (e) { log.warn?.(`[browser] ${pid} "${label}": the place hold's notice was not filed (${e && e.message})`); }
+    };
+    if (ev.kind === 'unplaced') {
+      file('unplaced', `"${label}": a tab ${ev.opened ? 'opened' : 'was open'} without its place — sites there are denied the location`, `VibeSpace gives every tab of "${label}" its place before the tab runs. Its browser did not take the place on this one in time, so the tab runs with the profile's own setting: sites are denied the location — never given this machine's. Open the page again to get the place; if this keeps happening, restart the browser.`);
+    } else if (ev.kind === 'held' && (ev.after === 'lost' || ev.after === 'restart')) {
+      file(`gap:${ev.lostAt || ev.at}`, `"${label}": ${what} was not given to its tabs for a while — ${ev.after === 'restart' ? 'VibeSpace restarted' : "VibeSpace's hold on its browser dropped"}; it is given again`, `While it was not given, sites were DENIED the location (the profile's own setting) — never given this machine's. Every tab has ${what} again from now on.`);
+    } else if (ev.kind === 'down') {
+      file('down', `"${label}": ${what} cannot be given to its tabs right now — sites are denied the location`, `VibeSpace's hold on the browser dropped and could not be armed again. The browser goes on with the profile's own setting: sites are denied the location, never given this machine's. Restart the browser to have ${what} again.`);
+    }
   }
   /** B-9584 U2b: the store's mark, set by the LAUNCH that tells a language — on each road right before its OWN synchronous landing
    *  (commitSync before Chrome): on disk before the browser could keep a language, no deferred save of its own; a start refused
@@ -1675,7 +1759,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!v.ok && fetching && fetching.answered === false && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace has asked ${fetching.host} for it and has no answer yet; start the browser again in a moment`;
     else if (!v.ok && fetching && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace is downloading it now (${fetching.total || fetching.bytes ? `${Math.round(Number(fetching.total || fetching.bytes) / 1e6)} MB` : 'its kernel.json\'s archive'}); start the browser again when it is done`;
     if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id, ...(v.failed ? { failed: v.failed } : {}) }); }
-    if (statesEnv !== true) throw unread();   // the belt past the verdict: an engine that runs and states nothing (a built-in one) — never asked to launch
+    if (statesEnv !== true && typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id) === false) throw unread();   // the belt past the verdict (r1120: asked ONCE MORE — a plugin turned on meanwhile is no refusal): only a plain «does not state it»
     // the exit check (the owner 2026-11-17): the profile's KEPT exit rides resolve-launch as `egress` {publicIp, country, timezone,
     // checkedAt, source} — the names settled with the plugin's conversation; absent when none is kept. NO request is made here.
     const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}), ...(p.egress && typeof p.egress === 'object' ? { egress: egressHandOf(p.egress) } : {}), ...(envR.told ? { environment: envR.told } : {}) });
@@ -5108,6 +5192,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } }
       const lk = await clearProfileLock(p, ns, prevRec);
       if (!lk.ok) { const e = failed(lk.code, lk.error); e.holderPid = lk.holderPid; throw e; }
+      { const gs = await geoStoreAt(p, stockEnv && stockEnv.geolocation); if (!gs.ok) throw failed('browser_place_not_held', `"${p.label}" was not started: its location setting could not be written into its browser profile (${gs.why}) — it never runs where a site could read this machine's location; start it again, or set the location to «This machine's»`); }   // B-9584 U2c: FAIL CLOSED AT THE BROWSER (the profile's own stored denial), before its Chrome starts
       stampLaunchHost(rec, prevRec, p.dir || null); // lane profile-lock-roll (L1): THIS machine's name on the record — the witness the next pod reads
       rec.mark = p.id; // r4 (MAJOR 2): the launch carries this profile's MARK (machine-<id>.json); every later keeper call keeps that file
       rec.holdDialogs = true; // lane browser-stuck: …and holds page dialogs (noAutoDialog) from this launch on
@@ -5158,6 +5243,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         noteHeal(rec, { lastOutcome: 'unidentified' });
         log.warn?.(lr ? `[browser] ${profileId} "${p.label}": started (daemon pid ${rec.pid}) but ${lr.tookOver ? `a lock of this machine's previous name ${lr.tookOver} reached the launch (taken over now)` : 'the directory is held by somebody else'}: ${lr.error}` : `[browser] ${profileId} "${p.label}": started (daemon pid ${rec.pid}) but no browser process holds ${p.dir} — it died at birth: browser_closed (a command retries at once, the tick in ${HEAL_RETRY_MS / 1000} s)`);
       }
+      if (stockEnv && stockEnv.geolocation && stockEnv.geolocation.kind === 'place') await armGeo(p, rec, stockEnv.geolocation);   // B-9584 U2c: the place ADDED on top of the stored denial BEFORE the browser is anyone's (r1264: ahead of ready and the repoint; «blocked» is the stored denial alone)
       rec.state = 'ready';
       if (mediator) mediator.repoint(profileId, rec.cdpUrl); // P6: a restarted browser ⇒ live mediated connections close 1012, the SAME url reconnects
       p.lastUsedAt = now(); p.lastBackend = p.provider;
@@ -5232,6 +5318,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const c = await rt.cdpUrl(rec.ns, { dir: p.dir, extraEnv: rec.launchEnv || { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } }); // the launch's own view (a different one restarts the daemon)
     if (!(c.ok && B.isLoopbackCdpUrl(c.url)) || reg.browsers[profileId] !== rec) return null;
     rec.cdpUrl = c.url;
+    if (geoHoldOwn && geoHoldOwn.heldOf(profileId)) geoHoldOwn.rearmNow(profileId);   // B-9584 U2c (r1264 must 2): a Chrome its daemon relaunched on a new address is held again THERE, at once
     if (mediator) mediator.repoint(profileId, rec.cdpUrl); // P6: the mediated leases follow the url too
     commit();
     return rec.cdpUrl;
@@ -5407,6 +5494,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } }
     const lk = await clearProfileLock(p, ns, prevRec);
     if (!lk.ok) { const e = failed(lk.code, lk.error); e.holderPid = lk.holderPid; throw e; }
+    { const gs = await geoStoreAt(p, stockEnv && stockEnv.geolocation); if (!gs.ok) throw failed('browser_place_not_held', `"${p.label}" was not started: its location setting could not be written into its browser profile (${gs.why}) — it never runs where a site could read this machine's location; start it again, or set the location to «This machine's»`); }   // B-9584 U2c: FAIL CLOSED AT THE BROWSER (the profile's own stored denial), before its Chrome starts
     const so = ATL.ensureSocketDir(AT.attachSocketDir({ base: attachSocketBase || B.SOCKET_DIR_BASE, uid: typeof process.getuid === 'function' ? process.getuid() : null, profileId }));
     if (!so.ok) throw failed(so.code, so.error);
     let ds = null;
@@ -5475,6 +5563,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (rec.starttime == null && F.startsReadable()) { try { r.child.kill('SIGKILL'); } catch { /* gone */ } sayNotStarted('launch_failed', unrecordedLaunch(r.pid)); await endDisplay(rec, 'its browser could not be identified'); throw failed('launch_failed', unrecordedLaunch(r.pid), {}, { said: true }); }
     rec.browser = { pid: r.pid, starttime: rec.starttime, dir: p.dir, devtoolsPort: r.port };
     rec.socketDir = so.dir; rec.cdpPort = r.port; rec.cdpUrl = AT.cdpUrlOf(r.port, r.wsPath); rec.executable = exe;
+    if (stockEnv && stockEnv.geolocation && stockEnv.geolocation.kind === 'place') await armGeo(p, rec, stockEnv.geolocation);   // B-9584 U2c: the place ADDED on top of the stored denial BEFORE the browser is anyone's (r1264: ahead of ready and the repoint; «blocked» is the stored denial alone)
     rec.state = 'ready';
     if (mediator) mediator.repoint(profileId, rec.cdpUrl); // P6: every mediated lease follows the browser
     p.lastUsedAt = now(); p.lastBackend = p.provider;
@@ -8561,7 +8650,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         mediator.adopt(p.id, rec.cdpUrl).catch(() => { });
       }
       if (v.state === 'ready') { rec.state = 'ready'; rec.adoptedAt = now(); recaptureBrowser(rec, 'boot'); if (rec.closed && rec.closed.code === 'browser_unstable' && rec.closed.unstable === 'failing') bootRejudge.add(rec.profileId); // lane browser-unstable-rejudge
-        log.log?.(`[browser] adopted ${rec.profileId} "${p ? p.label : ''}" (daemon pid ${rec.pid})`); if (isEph(p)) keptNote('start', p); }
+        log.log?.(`[browser] adopted ${rec.profileId} "${p ? p.label : ''}" (daemon pid ${rec.pid})`); if (isEph(p)) keptNote('start', p); if (p) { const gp = geoPlanFor(p); if (gp && gp.kind === 'place') { try { await armGeo(p, rec, gp, { after: 'restart' }); } catch { /* refused by name: its stop is scheduled */ } } } }   // B-9584 U2c: a place held again (the stored denial stood while VibeSpace was down); inside the ready block — the release's else stays its own
       else {
         rec.state = v.state; rec.lastError = v.lastError; rec.endedAt = now(); log.warn?.(`[browser] ${rec.profileId} ${v.state} at boot: ${v.lastError}`);
         if (isEph(p)) keptNote('stop', p, { why: 'restart' }); // lane browser-resume: it died while VibeSpace was down — its last persisted tabs are kept (D2: reopened at its next start)
@@ -9082,7 +9171,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     tabVisibilityFor, captureTabFor, watchTabFor, // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames
     setViewportFor, freshFrameFor, // lane S4: size the page to the pane (never starting a browser) + a fresh frame after a navigation
     watchCopiesFor, // lane live-input: the copies the page performs while the user drives (copy out)
-    cdpEndpointFor, viewersFor: (profileId) => { let p = null; try { p = profile(String(profileId || '')); } catch { p = null; } return p ? viewersOf(p).n : 0; }, /* B-346d: the live views watching a browser now — the dialog watch re-arms while one is open */ setStuckSource, setPasskeyDrop, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
+    cdpEndpointFor, geoHeldFor: (profileId) => { let gp = null; try { gp = profile(String(profileId || '')); } catch { gp = null; } return geoPlanFor(gp); }, /* B-9584 U2c: the PERSON's setting (a place or «blocked») — the dialog watch never replaces or clears it, alive hold or not */ viewersFor: (profileId) => { let p = null; try { p = profile(String(profileId || '')); } catch { p = null; } return p ? viewersOf(p).n : 0; }, /* B-346d: the live views watching a browser now — the dialog watch re-arms while one is open */ setStuckSource, setPasskeyDrop, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
     // lane browser-stuck: the dialog watch's upstream by profile id; the conversation's stuck fact on factView
     viewportNoteFor, noteViewport, // verify r1: the page-size note on the browser's own record (agent choice / applied / baseline / floor)
     // MULTIVIEW D4 / B-325a: the per-conversation cap, the own count, the release after the turn, the viewers the bridge reports

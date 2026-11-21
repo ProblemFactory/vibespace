@@ -287,7 +287,7 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
   // «does not speak this VibeSpace's engine protocol» over it (the code stays browser_engine_protocol; `failed` carries the facts)
   // B-9584 (round wyx4vuerd, also cured): a launch that was TOLD an environment quotes the plugin's own error by its CODE only — its text
   // may echo the input (a fixed place's numbers), and these words reach the journal and a For-you line
-  const codeOnly = (pe) => (pe && told && verb === 'launchOptions' ? { ...pe, message: null } : pe);
+  const codeOnly = (pe) => (pe && told && verb === 'launchOptions' ? { ...pe, message: isDenied(pe) ? 'ERR_ACCESS_DENIED' : null } : pe);   // r1120: an access refusal keeps its mark (its words), never the text
   const failedAs = (verbWord) => { const pe = pluginErrorOf(status, body); return pe ? { ...bad('browser_engine_protocol', pluginErrorWords(codeOnly(pe), verbWord, denied)), failed: { ...codeOnly(pe), label: clip(label || id, 80) || null } } : null; };
   if (verb === 'probe') {
     { const f = status === 200 ? null : failedAs('probe'); if (f) return f; }

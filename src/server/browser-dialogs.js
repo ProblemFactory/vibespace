@@ -1018,7 +1018,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (e.enabled) { await syncTabFetchMode(w, e); await call(w, 'Page.setInterceptFileChooserDialog', { enabled: false }, e.sid); }
       if (e.pk.auth) { const id = e.pk.auth; e.pk.auth = null; e.pk.once = false; const x = await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid), d = await call(w, 'WebAuthn.disable', {}, e.sid); const xa = pkAnswer(w, e, x), da = pkAnswer(w, e, d); if ((xa === 'refused' || xa === 'silent') && (da === 'refused' || da === 'silent')) { const uvHeld = [...e.pk.holds.values()].some((h) => h.auth === id && h.uv); const seen = await pkLook(w, e, id, [], uvHeld, { anyKey: true }); if (seen) pkLeftSet(w, e, id, seen, [pkWhy('WebAuthn.removeVirtualAuthenticator', x, xa), pkWhy('WebAuthn.disable', d, da)]); } } // round 3: the same look as the others (its UV too) // B-97ae round 2 MUST 3(ii): the handover's removal judged and said as (b)'s
     }));
-    if ([...w.grants.values()].some((g) => g.kind === 'geolocation' && g.setting === 'granted')) await Promise.all(tabs.map((e) => call(w, 'Emulation.clearGeolocationOverride', {}, e.sid)));
+    if (!placeHeld(w.profileId) && [...w.grants.values()].some((g) => g.kind === 'geolocation' && g.setting === 'granted')) await Promise.all(tabs.map((e) => call(w, 'Emulation.clearGeolocationOverride', {}, e.sid)));   // B-9584 U2c (r1264 must 1): the hand-over never clears a place the person set
     const ctxs = [...w.permCtx.keys()]; w.permCtx.clear();
     for (const k of ctxs) await call(w, 'Browser.resetPermissions', k ? { browserContextId: k } : {});
   }
@@ -2330,11 +2330,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ≤ 5 ms and the page runs on; the CLI's own `upload` (DOM.setFileInputFiles on ITS session) still lands while we intercept.
   // Fetch pauses DOCUMENT requests only (a sub-resource never waits on this socket; on '*' a 100-image page cost +12 ms); a
   // sign-in on a sub-resource is not caught (named in the kb table).
+  /** B-9584 U2c: the place the keeper's hold keeps on this browser's every tab (a place, or «blocked»), or null — never replaced here. */
+  function placeHeld(pid) { try { return keeper && typeof keeper.geoHeldFor === 'function' ? keeper.geoHeldFor(String(pid || '')) : null; } catch { return null; } }
   function armPrompts(w, e) {
     if (!e.sid) return;
     call(w, 'Page.setInterceptFileChooserDialog', { enabled: true }, e.sid).then((r) => { if (r && r.error) say('fc:' + r.error.message, `${w.profileId}: the file chooser was not hooked — ${r.error.message}`); });
     syncTabFetchMode(w, e);
-    const geo = [...w.grants.values()].find((g) => g.kind === 'geolocation' && g.setting === 'granted'); if (geo) call(w, 'Emulation.setGeolocationOverride', geo.position || {}, e.sid); // lane browser-ui-prompts-r2
+    const geo = [...w.grants.values()].find((g) => g.kind === 'geolocation' && g.setting === 'granted'); if (geo && !placeHeld(w.profileId)) call(w, 'Emulation.setGeolocationOverride', geo.position || {}, e.sid); // lane browser-ui-prompts-r2 · B-9584 U2c: a held place is never replaced
   }
   function onPrompt(w, m, type, p) {
     const sid = String(m.sessionId || ''); const tid = w.sessions.get(sid); const e = tid ? w.targets.get(tid) : null;
@@ -2449,9 +2451,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const cur = tabs.filter((e) => /^https?:/.test(e.url)).sort((a, b) => (b.seenAt || 0) - (a.seenAt || 0))[0];
     const v = ST.permissionVerdict({ kind, setting, origin: origin || (cur ? cur.url : ''), at });
     if (!v.ok) return v;
+    // B-9584 U2c: a profile whose location the PERSON set (a place, or «blocked») — the profile's own stored denial, the keeper's hold
+    // adding the place. NOBODY here allows a site the location there (an agent's verb, a press in the live view): a grant beside a hold
+    // that drops, or beside a tab left unplaced, would read this machine's REAL position. Refused by name; a deny is a denial and stands;
+    // the place's own road (the person lets a site know it) is a later step. Nothing here replaces or clears the place
+    const held = v.kind === 'geolocation' ? placeHeld(pid) : null;
+    if (held && v.setting === 'granted') return { ok: false, code: 'place_held', error: held.kind === 'blocked' ? "this profile's location is blocked (its Environment, set by the person) — a site is never allowed the location here" : "this profile's location is set by the person (its Environment) — no site is allowed the location here: every site reads it as blocked" };
     const ctxs = [...w.permCtx.keys()];
     for (const c of ctxs.length ? ctxs : ['']) { const r = await call(w, 'Browser.setPermission', { permission: v.permission, setting: v.setting, origin: v.origin, ...(c ? { browserContextId: c } : {}) }); if (r && (r.error || r.timeout)) return { ok: false, code: 'cdp', error: `Chrome did not take the decision — ${r.error ? r.error.message : 'timed out'}` }; }
-    if (v.kind === 'geolocation') for (const e of [...w.targets.values()]) if (e.sid) await call(w, v.setting === 'granted' ? 'Emulation.setGeolocationOverride' : 'Emulation.clearGeolocationOverride', v.setting === 'granted' ? (v.position || {}) : {}, e.sid);
+    if (v.kind === 'geolocation' && !held) for (const e of [...w.targets.values()]) if (e.sid) await call(w, v.setting === 'granted' ? 'Emulation.setGeolocationOverride' : 'Emulation.clearGeolocationOverride', v.setting === 'granted' ? (v.position || {}) : {}, e.sid);
     const rec = { kind: v.kind, permission: v.permission, setting: v.setting, origin: v.origin, position: v.position, by: by === 'user' ? 'user' : 'agent', at: now() };
     w.grants.set(v.kind + ' ' + v.origin, rec);
     if (keeper && typeof keeper.notePermission === 'function') { try { keeper.notePermission(pid, browserKey, rec); } catch (err) { say('perm-note:' + (err && err.message), `${pid}: the permission was not recorded on its lease — ${err && err.message}`); } }

@@ -11,8 +11,8 @@
 //   ④ THE ONE READER of the kept exit
 //   ⑤ WHAT EACH SETTING IS — told (the hand-over's own object, or null), geolocation, unfollowed, case by case
 //   ⑥ THE SEEDED LAW — 3 seeds × 400 environments × exits; the facts judged printed
-//   ⑦ REDS — nine mutants of the module (through anchored()), each judged by the same legs (the ninth, round wyx4vuerd: a kept value
-//      used raw at a start — the hostile-values leg goes red)
+//   ⑦ REDS — ten mutants of the module (through anchored()), each judged by the same legs (the ninth, round wyx4vuerd: a kept value
+//      used raw at a start — the hostile-values leg goes red; the tenth, B-9584 U2c: the stored denial writing the default only)
 // The runtime decides two facts here: a zone name (its date formatter) and a language tag (Intl.getCanonicalLocales, its ICU data);
 // where the runtime's own spelling is the expected value (a legacy alias, Etc/UTC, a three-letter code), the leg asks the runtime.
 import fs from 'node:fs';
@@ -168,6 +168,20 @@ function legs(M) {
   ];
   const hs = HOSTILE.map(([env, keys]) => { const r = R(env); const s = M.stockLaunchOf(r, { languageTold: false, machineTag: 'en-US' }); return { pass: J(s.args) === '[]' && J(s.env) === '{}' && r.told === null && J(r.unfollowed.map((u) => u.key).sort()) === J(keys), args: s.args, env: s.env, unf: r.unfollowed }; });
   leg('U2b hostile stored values at use: no switch, no zone, each listed as not followed', hs.every((h) => h.pass), hs);
+  // B-9584 U2c (r1264, measured on a real Chrome): THE PROFILE'S OWN STORED DENIAL — the default AND every stored site row «block»
+  // (a site allowed before would win over the default alone), the person's own values kept to give back; another shape refused
+  { const before = { profile: { default_content_setting_values: { notifications: 1 }, content_settings: { exceptions: { geolocation: { 'https://maps.example:443,*': { setting: 1, last_modified: '1' }, 'https://x.example:443,*': { setting: 3 } }, cookies: { 'a,*': { setting: 1 } } } } }, other: { kept: true } };
+    const d0 = M.geoStoredDenial(null), d1 = M.geoStoredDenial(before), bad = M.geoStoredDenial([1]);
+    const rows = (d1.prefs.profile.content_settings.exceptions.geolocation);
+    const back = d1.ok ? M.geoStoredRestore(d1.prefs, d1.kept) : null;
+    leg('U2c the stored denial: no file ⇒ the default «block» alone; a file ⇒ the default AND every geolocation row «block» (the allowed site and the ask), the rest of the file as it was; the person\'s own values kept; back at «this machine\'s» ⇒ given back exactly; another shape refused, never written',
+      d0.ok && d0.changed && d0.prefs.profile.default_content_setting_values.geolocation === 2 && J(d0.kept) === J({ default: null, rows: {} })
+      && d1.ok && d1.changed && d1.prefs.profile.default_content_setting_values.geolocation === 2 && d1.prefs.profile.default_content_setting_values.notifications === 1
+      && rows['https://maps.example:443,*'].setting === 2 && rows['https://x.example:443,*'].setting === 2 && rows['https://maps.example:443,*'].last_modified === '1'
+      && J(d1.prefs.profile.content_settings.exceptions.cookies) === J(before.profile.content_settings.exceptions.cookies) && J(d1.prefs.other) === J(before.other)
+      && J(d1.kept) === J({ default: null, rows: { 'https://maps.example:443,*': 1, 'https://x.example:443,*': 3 } }) && J(before.profile.content_settings.exceptions.geolocation['https://maps.example:443,*'].setting) === '1'
+      && !!back && back.ok && J(back.prefs) === J(before) && !bad.ok && !M.geoStoredRestore(null, d1.kept).ok,
+      { kept: d1.kept, back: back && back.prefs }); }
   // round wyx4vuerd (3): THE HUB'S TWO CANONICAL FORMS — a zone's and a tag's case and the runtime's own spelling; a value neither reads kept as given
   leg('the hub\'s two canonical forms: asia/tokyo ⇒ Asia/Tokyo, ja-jp ⇒ ja-JP; a name that is no zone or tag kept as given (it then differs)',
     M.canonicalZone('asia/tokyo') === 'Asia/Tokyo' && M.canonicalTag('ja-jp') === 'ja-JP' && M.canonicalZone('Mars/Base') === 'Mars/Base' && M.canonicalTag('--no-sandbox') === '--no-sandbox' && M.canonicalZone(M.canonicalZone('Asia/Calcutta')) === M.canonicalZone('Asia/Kolkata'),
@@ -239,6 +253,7 @@ const REDS = [
   ['the start left unsaid (no unfollowed list)', ['    if (r.said) unfollowed.push({ key: row.key, mode, said: r.said });\n', ''], '⑤ «SAYS SO» AT THE START', 'U'],
   ['an untouched profile hands {} (the told object always present)', ['  return { settings, told: Object.keys(told).length ? told : null, geolocation, unfollowed };', '  return { settings, told, geolocation, unfollowed };'], '⑤ THE DEFAULT', 'E'],
   ['the language rule wider than the kernel\'s (its shape not checked)', ['  if (!KERNEL_TAG.test(canon[0])) return refuse(', '  if (false) return refuse('], '③ refused by name: an extension the kernel refuses', null],
+  ['the stored denial writes the default only (a site allowed before keeps its «allow» and wins — measured)', ['    if (row.setting !== GEO_BLOCK) { row.setting = GEO_BLOCK; changed = true; }', '    void 0;'], 'U2c the stored denial', null],
   ['a kept value used raw at a start (the judgment at use bypassed)', ['    if (mode === MODES.VALUE) { const v = row.value(c.value);', '    if (mode === MODES.VALUE) { const v = { ok: true, value: c.value };'], 'U2b hostile stored values at use', null],
   ['a hex or an exponent read as a number', ["typeof x === 'string' && DECIMAL.test(x.trim()) ? Number(x.trim()) : NaN", "typeof x === 'string' && x.trim() !== '' ? Number(x.trim()) : NaN"], '③ refused by name: a hex latitude', null],
 ];
