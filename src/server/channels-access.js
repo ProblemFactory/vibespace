@@ -1062,7 +1062,7 @@ function create(engineCtx) {
     // verify r1 F1: the USER removed this agent's own row here (Notify…'s whole-list save) — the removal STICKS: a direct
     // re-registration is refused by name; a `wake` ask may still be filed (the user decides; their Approve lifts the mark)
     const scopeW = tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId };
-    const blk = agentWatchBlockOf(scopeW, pk);
+    const blk = ownWatchBlockOf(scopeW, CG.grainResource(tg.key ? 'conversation' : 'account', tg.key || tg.adapterId), pk);   // r937 (a): the index's mark, else the record's
     if (blk && d !== 'wake') return { ok: false, code: 'removed-by-user', error: `the user removed your notification on ${tg.key ? agentId(tg.key) : tg.adapterId} (${OF.when(blk.at)}) — it is theirs to restore: ask them (vibespace-ask), or file a wake ask (--mode wake) they approve; re-registering it yourself is refused` };
     // verify r1 F2: a bound on the rows one agent may hold of its OWN across every grain, said with the count
     if (!(mine && F.watchOriginOf(mine) === 'agent') && agentWatchCount(pk) >= F.MAX_AGENT_WATCHES) return { ok: false, code: 'watch-limit', error: `you already hold ${F.MAX_AGENT_WATCHES} notifications of your own (the limit) — \`vibespace-channels unwatch <conv>\` frees one; the user can set more for you in Notify…` };
@@ -1101,7 +1101,7 @@ function create(engineCtx) {
       if (!tg.ok) return tg;
       const scope = tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId };
       const ask = openWatchRequestsOf(pk).find((r) => r.scope && r.scope.kind === scope.kind && r.scope.id === scope.id);
-      const blk = agentWatchBlockOf(scope, pk);
+      const blk = ownWatchBlockOf(scope, CG.grainResource(tg.key ? 'conversation' : 'account', tg.key || tg.adapterId), pk);   // r937 (a)
       return { ok: true, target: tg.key ? agentId(tg.key) : tg.adapterId, title: tg.key ? agentTitle(tg.en, tg.en.id) : tg.title, grain: tg.grain.kind, rows: rowsOf(grainReadAt(tg.adapterId, tg.grain), tg.grain.kind), request: ask ? askView(ask) : null, removedByUser: blk ? { at: blk.at } : null };
     }
     const out = [];
@@ -2425,7 +2425,7 @@ function create(engineCtx) {
           } else if (!filterFor(w.filterId)) return { ok: false, code: 'no-such-filter', error: `filter ${w.filterId} does not exist — save the filter first (or send it inline as \`filter\`)`, principal: w.principal };
         }
         const pw = prevW.get(pk);
-        watchers.push({ ...w, createdAt: pw ? (pw.createdAt || t) : t, updatedAt: t, createdBy: pw ? (pw.createdBy || by) : by, estimateAtSet: estimateOf(src.estimateAtSet, t) || (pw ? pw.estimateAtSet || null : null), stats: pw && pw.stats ? pw.stats : { wakes: [], hits: [] } });
+        watchers.push({ ...w, createdAt: pw ? (pw.createdAt || t) : t, updatedAt: stampAfter(pw, t), createdBy: pw ? (pw.createdBy || by) : by, estimateAtSet: estimateOf(src.estimateAtSet, t) || (pw ? pw.estimateAtSet || null : null), stats: pw && pw.stats ? pw.stats : { wakes: [], hits: [] } });
       }
     } else {
       // access removed ⇒ its watcher goes too (notification needs access) — unless access ABOVE this grain still holds it (W3)
@@ -2463,10 +2463,11 @@ function create(engineCtx) {
     // mints, else the index's), the agents' blocks at this grain as they stand after this write, a rule's record
     const bodies = new Map(filterWrites.map((fw) => [fw.id, fw.filter]));
     for (const w of stored) if (w && w.mode === 'filtered' && w.filterId && !bodies.has(w.filterId) && inlineFilterId(w.filterId)) { const f0 = filterFor(w.filterId); if (f0) bodies.set(w.filterId, filterBody(f0)); }
-    const blocksAfter = scopeBlocksOf(site.scope);
+    const blocksAfter = scopeBlocksOf(site.scope, res);   // r937 (a): the index's and the record's
     for (const pk of liftBlocks) blocksAfter.delete(pk);
     for (const w of droppedAgent) blocksAfter.set(pkOf(w.principal), { at: t, by });
-    const carry = { bodies, blocks: [...blocksAfter].map(([key, v]) => ({ key, ...(v && Number(v.at) > 0 ? { at: Number(v.at) } : {}), ...(v && typeof v.by === 'string' && v.by ? { by: v.by } : {}) })), ...(kind === 'pattern' && pattern ? { rule: { adapterId, pattern, at: t } } : {}) };
+    const ruleStamp = kind === 'pattern' ? stampAfter(site.holder, t) : t;   // r937 (b): the rule record's stamp, monotonic per rule
+    const carry = { clearedAt: t, bodies, blocks: [...blocksAfter].map(([key, v]) => ({ key, ...(v && Number(v.at) > 0 ? { at: Number(v.at) } : {}), ...(v && typeof v.by === 'string' && v.by ? { by: v.by } : {}) })), ...(kind === 'pattern' && pattern ? { rule: { adapterId, pattern, at: ruleStamp } } : {}) };
     // lane held-except-doors: + the exceptions the person's Save NAMES as taken away (one left out unnamed ⇒ except_unnamed);
     // r2: a row this write keeps the stored list of and gives a member BY ITSELF lifts that member's own exception, named
     // (`lift` — the owner's writes always; an agent's own only where no Task Group / All agents entry makes it live)
@@ -2489,7 +2490,7 @@ function create(engineCtx) {
         if (empty && kind === 'account') { delete tb[site.id]; holder = null; }
         else {
           holder = tb[site.id] ? liftGrainInPlace(ix, tb[site.id], kind) : (tb[site.id] = { adapterId, scope: { kind, id: site.id }, createdAt: t, createdBy: by });
-          holder.adapterId = adapterId; holder.scope = { kind, id: site.id }; holder.updatedAt = t;
+          holder.adapterId = adapterId; holder.scope = { kind, id: site.id }; holder.updatedAt = kind === 'pattern' ? ruleStamp : t;
           if (kind === 'pattern') { holder.id = site.id; holder.pattern = pattern; }
           holder.watchers = stored;   // lane grants-unify: the access list and the account's reach are the grants store's rows
         }
@@ -2500,7 +2501,11 @@ function create(engineCtx) {
     };
     // lane lg-group-parents (B-526c): the act is on disk in the grants rows — the index's copy is applied now and written at its
     // pace (the boot completes it after a stop); only a value the rows could not carry (`short`) waits for the index's disk
-    if (wr.short && wr.short.length) await store.index.update(writeIndex, { durable: true });
+    // r937 MUST 1: a conversation the disk's index does not list yet (its row born inside the pace) — that act keeps the index's
+    // durable write before its answer: its journal line carries the conversation's row whole, so a stop never leaves an act whose
+    // row the boot's completion cannot find (the save waits only in that window: a conversation the hub met moments ago)
+    const unlandedRow = kind === 'conversation' && typeof store.index.landed === 'function' && !store.index.landed(site.key);
+    if ((wr.short && wr.short.length) || unlandedRow) await store.index.update(writeIndex, { durable: true });
     else await store.index.update(writeIndex);
     // every changed watcher's wake windows (its held hits stay pending — the
     // new shape delivers them, or the prune below drops the orphans)
@@ -2520,40 +2525,58 @@ function create(engineCtx) {
    *  a stored filter's BODY (what validateFilter answers), the agents' blocks at one grain as they stand (pk → {at, by}). */
   const inlineFilterId = (fid) => /\|/.test(fid) || /^f-(account|pattern)-/.test(fid);
   const filterBody = (f) => ({ name: f.name || null, match: f.match, rules: f.rules });
-  function scopeBlocksOf(scope) {
-    const b = store.index.table('agentWatchBlocks'), pre = `${scope.kind}:${scope.id}|`, out = new Map();
-    if (b && typeof b === 'object') for (const k of Object.keys(b)) if (k.startsWith(pre)) out.set(k.slice(pre.length), b[k]);
+  /** The agents' blocks at ONE grain as they stand (pk → {at, by}): the index's table at that scope — a key split at its LAST «|»
+   *  (a scope id may hold one: never a sibling scope's key) — AND (r937 (a)) the record's own on the grain's watch row, so neither
+   *  a boot's order nor a write served before its completion can lose the person's removal. */
+  function scopeBlocksOf(scope, res = null) {
+    const b = store.index.table('agentWatchBlocks'), want = `${scope.kind}:${scope.id}`, out = new Map();
+    if (b && typeof b === 'object') for (const k of Object.keys(b)) { const i = k.lastIndexOf('|'); if (i > 0 && k.slice(0, i) === want) out.set(k.slice(i + 1), b[k]); }
+    for (const x of (res ? CG.rowOf('channel-watch', res).blocks : null) || []) if (!out.has(x.key)) out.set(x.key, { at: x.at || null, by: x.by || 'user' });
     return out;
   }
+  /** r937 (a): the person's removal of an agent's own watch at ONE grain — the index's mark, else the record's (never the start order). */
+  const ownWatchBlockOf = (scope, res, pk) => agentWatchBlockOf(scope, pk) || (((res ? CG.rowOf('channel-watch', res).blocks : null) || []).find((x) => x.key === pk) || null);
+  /** r937 (b) — «OLDER» NEVER TRUSTS A CLOCK THAT STEPPED BACK: every grain write stamps a row `max(the clock, the row's last stamp
+   *  + 1)` — the stamps are MONOTONIC per row, so the newer act's stamp is always the greater, whatever the wall clock did; the
+   *  boot's completion compares those stamps (an index row changed outside a grain write, its stamp kept — a migration, an old
+   *  row's census — is never «corrected» back). An inline filter body, which only a grain write writes, is judged by content. */
+  const stampAfter = (row, t) => (row ? Math.max(t, (Number(row.updatedAt) || Number(row.createdAt) || 0) + 1) : t);
   /**
    * lane lg-group-parents (B-526c) — THE BOOT COMPLETES A GRAIN WRITE THE STOP CUT SHORT. setGrain's durable half is the grants
    * rows (synchronous, before the answer); its index copy is written at the index's pace — a stop inside it leaves the rows
-   * ahead of the index. Once both are read and before the first pass, every row that CARRIES is read against the index: a
-   * watcher it lacks or holds with older settings (its `updatedAt` before the entry's `at`), an inline filter it lacks or holds
-   * older, a rule's record it lacks or holds with an older pattern, a block it lacks; a watcher the person wrote lifts its
-   * agent's block (as setGrain does). ALL of it in ONE paced update, said in the journal ONCE. A second boot finds nothing.
-   * An older record (an entry with no settings, a row with no record) is left exactly as it reads; WHO stays the rows'.
-   * → {completed: [words], skipped: [words]}.
+   * ahead of the index. Once both are read and before the first pass, every row that CARRIES (a watch entry's settings, a rule's
+   * record, the agents' blocks, a `cleared` mark) is read against the index — by each row's MONOTONIC stamp (r937 (b), stampAfter):
+   * a watcher it lacks or holds older, a rule record it lacks or holds with an older pattern; an inline filter it lacks or holds
+   * with another body (content — only a grain write writes one); the scope's blocks made the record's (added, and lifted where the record lists none — r937 round lens 2 (c)); an
+   * index watcher the row no longer lists REMOVED (a row a removal emptied is kept `cleared` for exactly this — r937 MUST 2).
+   * ALL of it in ONE paced update, said in the journal ONCE. A second boot finds nothing. An older record (an entry with no
+   * settings, a row with no record) is left exactly as it reads; WHO stays the rows'. A row it cannot complete (its account gone,
+   * a conversation the index no longer lists) is said ONCE per version of that row (the index's `grainSkipsSaid` — r937 (c)).
+   * → {completed: [words], skipped: [words], newSkips: {resource: stamp}}.
    */
   function grainActsOwed(apply, ix = null) {
-    const done = [], skipped = [];
+    const done = [], skipped = [], newSkips = {};
     const accounts = new Set(adapterRecords().adapters.map((r) => r.id));
     const tableOf = (name) => (apply ? (ix[name] && typeof ix[name] === 'object' ? ix[name] : (ix[name] = {})) : (store.index.table(name) || {}));
+    const said = store.index.table('grainSkipsSaid') || {};
     const rows = CG.rowsCarrying();
     const ruleOf = new Map(rows.filter((r) => r.rule).map((r) => [r.resource, r.rule])), rulesRead = new Set();
+    const stampOf = (row) => Math.max(Number(row.cleared) || 0, ...row.to.map((e) => Number(e.at) || 0), ...((row.rule && [Number(row.rule.at) || 0]) || []));
+    const skip = (row, words) => { const st = stampOf(row); if (said[row.resource] === st) return; skipped.push(words); newSkips[row.resource] = st; };
     for (const row of rows) {
       const m = /^(account|rule|conversation):(.+)$/.exec(row.resource);
       if (!m) continue;
       const kind = m[1] === 'rule' ? 'pattern' : m[1];
-      let aid, convId = null, id = m[2];
+      let aid, convId = null;
+      const id = m[2];
       if (kind === 'account') aid = id;
       else if (kind === 'pattern') aid = (ruleOf.get(row.resource) || {}).adapterId || ((store.index.table('patternAssignments') || {})[id] || {}).adapterId;
       else { aid = [...accounts].find((a) => id.startsWith(`${a}/`)); convId = aid ? id.slice(aid.length + 1) : null; }
-      if (!aid || !accounts.has(aid)) { skipped.push(`${row.resource}: its account is not here`); continue; }
+      if (!aid || !accounts.has(aid)) { skip(row, `${row.resource}: its account is not here`); continue; }
       const scope = kind === 'conversation' ? { kind: 'conversation', id } : kind === 'account' ? { kind: 'adapter', id: aid } : { kind: 'pattern', id };
       const owe = [];
-      // the holder: a conversation's index row (never made here — a conversation the index does not list holds nothing), the
-      // account's record, a rule's record (made from its carried record when the index lacks it)
+      // the holder: a conversation's index row (never made here — r937 MUST 1: a grain write on a conversation the disk's index did
+      // not list kept its durable write, so its row is on disk), the account's record, a rule's record (made from its carried record)
       let holder = null;
       if (kind === 'conversation') holder = apply ? store.index.entry(aid, convId, { create: false }) : (store.index.live()[`${aid}/${convId}`] || null);   // the dry run reads the live row (a boot reads without copying)
       else holder = tableOf(kind === 'account' ? 'accountAssignments' : 'patternAssignments')[id] || null;
@@ -2562,18 +2585,18 @@ function create(engineCtx) {
       if (kind === 'pattern' && rec && !rulesRead.has(id)) {
         rulesRead.add(id);   // a rule's record rides both of its rows: read once
         const pv = F.validatePattern(rec.pattern);
-        if (!pv.ok) { skipped.push(`rule ${id}: its carried pattern does not read (${pv.code})`); continue; }
+        if (!pv.ok) { skip(row, `rule ${id}: its carried pattern does not read (${pv.code})`); continue; }
         if (!holder) {
           owe.push(`rule ${id} (its record)`);
           if (apply) { holder = tableOf('patternAssignments')[id] = { adapterId: aid, scope: { kind: 'pattern', id }, id, pattern: pv.pattern, createdAt: rec.at || now(), createdBy: 'user', updatedAt: rec.at || now(), watchers: [] }; }
         } else if (Number(rec.at) > Number(holder.updatedAt || 0) && JSON.stringify(holder.pattern) !== JSON.stringify(pv.pattern)) {
           owe.push(`rule ${id} (its pattern)`);
-          if (apply) { liftGrainInPlace(ix, holder, 'pattern'); holder.pattern = pv.pattern; holder.updatedAt = rec.at; }
+          if (apply) { liftGrainInPlace(ix, holder, 'pattern'); holder.pattern = pv.pattern; holder.updatedAt = rec.at || holder.updatedAt; }
         }
       }
       if (row.door === DOORS_WATCH) {
         const entries = row.to.filter((e) => e.notify === 'wake' || e.notify === 'digest');
-        if (!holder && kind === 'conversation') { if (entries.length || row.blocks) skipped.push(`${row.resource}: the index lists no such conversation`); }
+        if (!holder && kind === 'conversation') { if (entries.length || row.blocks) skip(row, `${row.resource}: the index lists no such conversation`); }
         else {
           if (!holder && kind === 'account' && (entries.length || row.blocks)) {
             owe.push(`account ${aid} (its record)`);
@@ -2586,56 +2609,65 @@ function create(engineCtx) {
             const pk = pkOf(GM_toChannel(e));
             const i = ws.findIndex((w) => w && pkOf(w.principal) === pk);
             const prev = i >= 0 ? ws[i] : null;
-            if (!prev || Number(e.at) > Number(prev.updatedAt || prev.createdAt || 0)) {
+            if (!prev || Number(e.at) > Number(prev.updatedAt || prev.createdAt || 0)) {   // r937 (b): by the row's monotonic stamp
               owe.push(`${pk} on ${row.resource} (${prev ? 'its settings' : 'its watcher'})`);
-              if (apply && holder) { const nw = CG.watcherOfEntry(e, prev); if (i >= 0) ws[i] = nw; else ws.push(nw); if (e.origin !== 'agent') delete blocks[blockKey(scope, pk)]; }
+              if (apply && holder) { const nw = CG.watcherOfEntry(e, prev); if (i >= 0) ws[i] = nw; else ws.push(nw); }
             }
             if (e.mode === 'filtered' && e.filterId && e.filter) {
               const f0 = filters[e.filterId];
-              if (!f0 || (Number(e.at) > Number(f0.updatedAt || 0) && JSON.stringify(filterBody(f0)) !== JSON.stringify(e.filter))) {
+              if (!f0 || JSON.stringify(filterBody(f0)) !== JSON.stringify(e.filter)) {
                 const fv = F.validateFilter(e.filter);
-                if (!fv.ok) { skipped.push(`filter ${e.filterId}: its carried body does not read (${fv.code})`); continue; }
+                if (!fv.ok) { skip(row, `filter ${e.filterId}: its carried body does not read (${fv.code})`); continue; }
                 owe.push(`filter ${e.filterId}`);
                 if (apply) filters[e.filterId] = { id: e.filterId, ...fv.filter, createdAt: f0 ? f0.createdAt : e.at, updatedAt: e.at, estimateAtSet: f0 ? f0.estimateAtSet || null : null };
               }
             }
           }
-          // a row that CARRIES was written by a grain write of this release, which lists EVERY row the grain stores (inert ones
-          // too): an index watcher it does not list was REMOVED by that act (the person's Save, an agent's own unwatch) — it goes
-          if (holder && Array.isArray(holder.watchers) && (entries.length || row.blocks)) {
+          // a row that CARRIES was written by a grain write of this release, which lists EVERY row the grain stores (inert ones too)
+          // and the grain's whole set of blocks: an index watcher it does not list was REMOVED by that act (the person's Save, an
+          // agent's own unwatch; a row it emptied is kept `cleared`) — it goes; the scope's blocks become the record's
+          if (holder && Array.isArray(holder.watchers)) {
             const listed = new Set(row.to.map((e) => pkOf(GM_toChannel(e))));
             const gone = holder.watchers.filter((w) => w && w.principal && !listed.has(pkOf(w.principal)));
             for (const w of gone) owe.push(`${pkOf(w.principal)} on ${row.resource} (removed)`);
             if (apply && gone.length) holder.watchers = holder.watchers.filter((w) => !gone.includes(w));
           }
-          for (const b of row.blocks || []) {
-            const k = blockKey(scope, b.key);
-            if (blocks[k]) continue;
-            owe.push(`${b.key}'s own watch on ${row.resource} (its block)`);
-            if (apply) blocks[k] = { at: b.at || now(), by: b.by || 'user' };
+          const want = new Map((row.blocks || []).map((b) => [b.key, b]));
+          for (const [pk, b] of want) {
+            if (blocks[blockKey(scope, pk)]) continue;
+            owe.push(`${pk}'s own watch on ${row.resource} (its block)`);
+            if (apply) blocks[blockKey(scope, pk)] = { at: b.at || now(), by: b.by || 'user' };
+          }
+          for (const pk of scopeBlocksOf(scope).keys()) {
+            if (want.has(pk)) continue;
+            owe.push(`${pk}'s own watch on ${row.resource} (its block lifted)`);
+            if (apply) delete blocks[blockKey(scope, pk)];
           }
         }
       }
       done.push(...owe);
     }
-    return { completed: done, skipped };
+    return { completed: done, skipped, newSkips };
   }
   const DOORS_WATCH = 'channel-watch', DOORS_REACH = 'channel-reach';   // the doors' names (CG is the context's — read at call time only)
   const GM_toChannel = (e) => ({ kind: e.kind === 'conversation' ? 'agent' : e.kind, id: e.kind === 'conversation' ? e.key : e.kind === 'everyone' ? '*' : e.id });
-  /** How many parts the boot would complete now (the engine's start orders its boot sweep after a completion that owes any). */
-  const grainActsOwedNow = () => { try { return grainActsOwed(false).completed.length; } catch { return 0; } };   // never a throw into the start
-  async function completeGrainActs() {
-    const owed = grainActsOwed(false);
-    if (owed.skipped.length) log.warn(`[channels] boot: ${owed.skipped.length} carried grain record(s) not completed: ${owed.skipped.slice(0, 5).join(' · ')}${owed.skipped.length > 5 ? ` · and ${owed.skipped.length - 5} more` : ''}`);
-    if (!owed.completed.length) return { completed: [], skipped: owed.skipped };
+  /** THE BOOT's ONE walk of the owed parts (r937 (e)): the engine's start reads it, then hands the same answer to the completion. */
+  const grainActsOwedNow = () => { try { return grainActsOwed(false); } catch { return { completed: [], skipped: [], newSkips: {} }; } };   // never a throw into the start
+  async function completeGrainActs(owed = grainActsOwedNow()) {
+    if (owed.skipped.length) log.warn(`[channels] boot: ${owed.skipped.length} carried grain record(s) not completed (said once a version): ${owed.skipped.slice(0, 5).join(' · ')}${owed.skipped.length > 5 ? ` · and ${owed.skipped.length - 5} more` : ''}`);
+    const skips = Object.keys(owed.newSkips || {}).length;
+    if (!owed.completed.length && !skips) return { completed: [], skipped: owed.skipped };
     let got = null;
-    await store.index.update((ix) => { got = grainActsOwed(true, ix); });
+    await store.index.update((ix) => {
+      got = owed.completed.length ? grainActsOwed(true, ix) : { completed: [], skipped: [] };
+      if (skips) { const t2 = ix.grainSkipsSaid && typeof ix.grainSkipsSaid === 'object' ? ix.grainSkipsSaid : (ix.grainSkipsSaid = {}); Object.assign(t2, owed.newSkips); }
+    });
     const n = got.completed.length;
-    if (!n) return { completed: [], skipped: got.skipped };
+    if (!n) return { completed: [], skipped: owed.skipped };
     log.log(`[channels] boot: completed ${n} part${n === 1 ? '' : 's'} of the Access dialog's acts the stop cut short (on disk in the grants record, not yet in the channel index): ${got.completed.slice(0, 8).join(' · ')}${n > 8 ? ` · and ${n - 8} more` : ''}`);
     try { store.audit({ kind: 'watch', op: 'complete', parts: got.completed.slice(0, 50), at: now(), by: 'boot' }); } catch {}
     notify([], { full: true });
-    return { completed: got.completed, skipped: got.skipped };
+    return { completed: got.completed, skipped: owed.skipped };
   }
   function auditGrant(op, principal, site, t, by) {
     try { store.audit({ kind: 'acl', op, principal, scope: site.scope, level: op === 'grant' ? 'visible' : null, origin: 'access', at: t, by }); } catch {}
@@ -3297,7 +3329,7 @@ function create(engineCtx) {
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, completeGrainActs, grainActsOwedNow, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, completeGrainActs, grainActsOwedNow, agentWatchCount, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
   };
 }
 

@@ -579,6 +579,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   let ix = ixLoad.value;
 
   let dirty = false;
+  // lane lg-group-parents (B-526c r937, MUST 1): the conversation rows BORN since the index file last LANDED — rows the disk's
+  // index does not list yet. A person's or an agent's grain write on such a conversation keeps the index's durable write before
+  // its answer (the act's journal line carries the row whole), so a stop inside the pace never leaves an act whose row the
+  // boot's completion cannot find. `landed(key)` asks; a landing clears what it carried (the set at the write's produce)
+  const unlanded = new Set();
+  let producedUnlanded = null;
 
   // ── A PERSON'S ACTS LIVE IN A SMALL FILE OF THEIR OWN (lane hub-loop-stalls commit 2, the coordinator's freeze item 2) ──
   // The index (22 MB at the owner's scale) is written at the pace stated for its size (~11 s apart); a person's act, a
@@ -871,9 +877,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     dirty = false;   // handed to the writer — a failed write dirties it again (indexWritten)
     if (!p) return null;
     pendingTop = p.top;
+    producedUnlanded = new Set(unlanded);   // B-526c r937: what this write carries of the rows born since the last landing
     return p.parts;
   }
   function indexWritten(ok) {
+    if (ok && producedUnlanded) { for (const k of producedUnlanded) unlanded.delete(k); }   // B-526c r937: those rows are on disk now
+    producedUnlanded = null;
     if (ok) {
       bytesOwed = false; lastTop = pendingTop; flushStats.writes++;
       actsOverSaid = 0;   // round 4 (true words 5): the index LANDED — a later bound is a new episode, never «not landed since»
@@ -1279,6 +1288,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     let e = ix.conversations[key];
     if (!e && !create) return null;
     if (!e) {
+      unlanded.add(key);   // B-526c r937: not on the disk's index until a write that carries it lands
       if (layout && layout.chunkOf.has(key)) touchAll('a row re-born before its old place was rewritten');   // verify r1: the file keeps the map's order
       if (stampMap.delete(key)) { stampsDirty = true; journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps
       e = ix.conversations[key] = {
@@ -2705,6 +2715,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath, purgeAccount,
     // `blocked()` = the refusal sentence while a family's file could not be set aside (null = writable)
     index: {
+      landed: (key) => hasOwn(ix.conversations, key) && !unlanded.has(key),   // B-526c r937: is this conversation's row on the disk's index?
       update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, durable: durableIndex, isDirty: () => dirty, blocked: () => ixLoad.blocked || null, held: () => !!ixLoad.held,
       // B-dfa4 U2: `keysOf(adapterId)` = that account's row keys, kept (a walk of one account reads its own rows); `keysStats()` for the gates
       keysOf, rowsOf, keysReady, keysStats: () => ({ ...acctStats, kept: !!byAcct, warming: !!acctWarm, odd: oddKeys.size }),   // B-dfa4 cut 1: `rowsOf(adapterId)` = those rows, read-only

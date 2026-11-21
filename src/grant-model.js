@@ -150,6 +150,8 @@ const textOk = (v) => typeof v === 'string' && v.length > 0 && v.length <= TEXT_
  *   `rule`    a `rule:<id>` row of channel-reach / channel-watch: `{adapterId, pattern, at?}` — the rule's account and its pattern
  *   `blocks`  a channel-watch row: `[{key, at?, by?}]` — the agents whose OWN watch the person removed at this grain (the mark
  *             that refuses their own re-watch there)
+ *   `cleared` a channel-watch row a grain write EMPTIED: the instant (r937 MUST 2 — the row is kept, so the boot can redo the
+ *             removal its index copy may not have landed)
  * A row holding only these is a row (the grants store keeps it). → `{fields, bad}` — `bad` names the first field that cannot be
  * read: the write refuses it (`bad_row`), the read drops THAT field (the lists still read).
  */
@@ -175,6 +177,11 @@ function rowFieldsOf(door, resource, src) {
     }
     if (!readable) bad = bad || 'blocks';
     else if (out.length) fields.blocks = out;
+  }
+  if (o.cleared !== undefined && o.cleared !== null) {   // r937 MUST 2
+    const c = Number(o.cleared);
+    if (door !== 'channel-watch' || !(c > 0) || c > 8.64e15) bad = bad || 'cleared';
+    else fields.cleared = Math.floor(c);
   }
   return { fields, bad };
 }
@@ -428,7 +435,7 @@ function normRow(r) {
  * each (`too_many`), a principal both given and excepted is a contradiction (`except_conflicts` — the picker greys a
  * member with its own row «有自己的授权»). → `{ok:true, row}` | `{ok:false, code, error}`.
  */
-function validateWrite(door, resource, { to = [], except = [], rule = undefined, blocks = undefined } = {}, { at = null, by = null } = {}) {   // lane lg-group-parents B-526c: + what a channel row carries
+function validateWrite(door, resource, { to = [], except = [], rule = undefined, blocks = undefined, cleared = undefined } = {}, { at = null, by = null } = {}) {   // lane lg-group-parents B-526c: + what a channel row carries
   const no = (code, error) => ({ ok: false, code, error });
   if (!DOORS.includes(door)) return no('unknown_door', `no door "${str(door).slice(0, 40)}" — one of ${DOORS.join(', ')}`);
   if (!RESOURCE_RE.test(str(resource))) return no('bad_resource', 'a resource is a non-empty id (≤ 400 characters, no control characters)');
@@ -452,8 +459,8 @@ function validateWrite(door, resource, { to = [], except = [], rule = undefined,
     if (seen.has(principalKey(n))) return no('except_conflicts', `${principalKey(n)} is both given and excepted — a member with its own grant here cannot also be left out of it`);
     seenX.add(principalKey(n)); outX.push(n);
   }
-  const rf = rowFieldsOf(door, resource, { rule, blocks });
-  if (rf.bad) return no('bad_row', rf.bad === 'rule' ? 'a rule\'s carried record is `{adapterId, pattern}` on a rule:<id> row of channel-reach / channel-watch (the pattern an object of at most ' + BLOB_MAX + ' bytes)' : 'blocks are a list of `{key}` (agent:<id> / group:<id>) on a channel-watch row');   // lane lg-group-parents B-526c
+  const rf = rowFieldsOf(door, resource, { rule, blocks, cleared });
+  if (rf.bad) return no('bad_row', rf.bad === 'cleared' ? 'a cleared mark is a time on a channel-watch row' : rf.bad === 'rule' ? 'a rule\'s carried record is `{adapterId, pattern}` on a rule:<id> row of channel-reach / channel-watch (the pattern an object of at most ' + BLOB_MAX + ' bytes)' : 'blocks are a list of `{key}` (agent:<id> / group:<id>) on a channel-watch row');   // lane lg-group-parents B-526c
   const row = { door, resource: str(resource), to: outTo, except: outX, ...rf.fields };
   if (Number.isFinite(Number(at)) && at !== null) row.at = Number(at);
   if (typeof by === 'string' && by) row.by = by.slice(0, 64);

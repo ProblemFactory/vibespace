@@ -16,7 +16,14 @@
 //   ③ THE KILL BETWEEN THE TWO WRITES — that process SIGKILLed right after its answers; a SECOND real process boots over the same
 //      data folder: the journal says the completion once; the rule matches its pattern and its watcher wakes with its settings
 //      (only the message its filter names is held, its digest delivers it); the agent's own re-watch is refused (the block came
-//      back). A THIRD boot completes nothing. RED: a boot without the completion — no rule, nothing held, the re-watch let through
+//      back). A THIRD boot completes nothing. RED: a boot without the completion — no rule, nothing held; the re-watch is still
+//      refused by the RECORD's block (r937 (a)) — and with the index-only check, let through
+//   ④ r937 — THE LAW: an act told «done» is at every instant either on the index's disk or completable from the record; after a
+//      completed boot the count an agent's own limit (and its wake-ask card) is judged by EQUALS the record's. Real killed
+//      processes, each with its red: MUST 1 an agent's own watch on a conversation BORN inside the pace (its act keeps the
+//      durable write: the row rides its journal line); MUST 2 an agent's own unwatch that EMPTIES the row (kept `cleared`, the
+//      boot redoes the removal); (b) an edit across a clock that stepped back (its stamp monotonic); a body over its bound waits
+//      for the index's disk; (c) a row the boot cannot complete is said ONCE
 // Run: node scripts/test-grain-act-durable.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,25 +48,29 @@ const say = (o) => fs.writeSync(1, 'FACTS ' + J(o) + '\n');   // synchronous: a 
 
 // ── THE CHILD: one process of the world (`write` — the person's acts, then the kill; `boot` — a start over the same folder) ──
 if (process.argv[2] === '--child') {
-  const [, , , role, dataDir, mutant, boundMs] = process.argv;
+  const [, , , role, dataDir, mutant, boundMs, holdMode] = process.argv;
   // a stand-in for the process's store writer: the real one until HELD — then the index's writes never happen (the pace
   // never comes, a durable write never settles): the stop lands between the grants record and the index's copy
   const SWM = require(path.join(REPO, 'src/store-writer.js'));
   const real = SWM.storeWriter();
   let held = false;
+  // `index` mode (r937 legs): only the index FILE's paced writes are held — an act's journal line lands (a durable act is on disk)
+  const onlyIndex = holdMode === 'index';
   const stand = new Proxy(real, { get(t, k) {
-    if (held && k === 'dirty') return () => {};
-    if (held && k === 'durable') return () => new Promise(() => {});
+    if (held && k === 'dirty') return onlyIndex ? (file, o) => (/index\.json$/.test(String(file)) ? undefined : t.dirty(file, o)) : () => {};
+    if (held && k === 'durable' && !onlyIndex) return () => new Promise(() => {});
     const v = t[k]; return typeof v === 'function' ? v.bind(t) : v;
   } });
   SWM.storeWriter = () => stand;
   // a RED control's patched copy stands in for its module (`<file>=<copy>`): installed in the require cache before the engine loads
-  if (mutant) { const [rel, copy] = mutant.split('='); const realPath = path.join(REPO, rel); require.cache[realPath] = { id: realPath, filename: realPath, loaded: true, exports: require(copy), children: [], paths: [] }; }
+  if (mutant) { for (const one of mutant.split(',').filter(Boolean)) { const [rel, copy] = one.split('='); const realPath = path.join(REPO, rel); require.cache[realPath] = { id: realPath, filename: realPath, loaded: true, exports: require(copy), children: [], paths: [] }; } }
   const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
   const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
   const FAKE = require(path.join(REPO, 'src/channels/fake.js'));
   const { createChannelRegistry } = require(path.join(REPO, 'src/channels/index.js'));
-  const t0 = Date.now(), clock = () => t0 + (Date.now() - t0);
+  const t0 = Date.now();
+  let skew = 0;
+  const clock = () => t0 + (Date.now() - t0) + skew;   // r937 (b): a leg may step the clock BACK
   const registry = createChannelRegistry();
   registry.register(FAKE.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], now: clock }));
   const lines = [], delivered = [];
@@ -91,6 +102,50 @@ if (process.argv[2] === '--child') {
       index: { rule: !!pid && ix.includes(pid), filter: ix.includes('"deploy"'), block: ix.includes('agentWatchBlocks') } });
     process.kill(process.pid, 'SIGKILL');
   }
+  const NEW = 'fake-poll-b526c-new', KEY_NEW = `${A}/${NEW}`;
+  const recordCount = () => grantsRows().filter((r) => r.door === 'channel-watch').reduce((n, r) => n + (r.to || []).filter((e) => e && e.kind === 'conversation' && e.key === 'agent-1' && e.origin === 'agent').length, 0);
+  const seed = async () => { await eng.pass(A, { force: true }); await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] }); };
+  const ms = Number(boundMs) || 5000;
+  if (role === 'write-new') {   // MUST 1: an agent's own watch on a conversation the hub met inside the pace
+    await seed(); eng.store.index.flush(); held = true;
+    await eng.store.index.update(() => { const e = eng.store.index.entry(A, NEW); e.title = 'Fresh room'; e.kind = 'group'; });   // a row born, only queued
+    const landedBefore = typeof eng.store.index.landed === 'function' ? eng.store.index.landed(KEY_NEW) : null;
+    const r = await bound(eng.agentWatch(AG, KEY_NEW, { delivery: 'next-turn' }), ms);
+    const ix = read(path.join(dataDir, 'channels', 'index.json')), acts = read(path.join(dataDir, 'channels', 'index-acts.ndjson'));
+    say({ role, landedBefore, watch: { answered: r.answered, ok: !!(r.v && r.v.ok), code: r.v && r.v.code }, inIndexFile: ix.includes(NEW), inJournal: acts.includes(NEW), recordCount: recordCount() });
+    process.kill(process.pid, 'SIGKILL');
+  }
+  if (role === 'write-unwatch') {   // MUST 2: an agent's own unwatch that EMPTIES the room's watch row
+    await seed();
+    const own = await eng.agentWatch(AG, KEY, { delivery: 'next-turn' });
+    eng.store.index.flush(); held = true;
+    const r = await bound(eng.agentUnwatch(AG, KEY), ms);
+    const row = grantsRows().find((x) => x.door === 'channel-watch' && x.resource === `conversation:${KEY}`) || null;
+    say({ role, own: !!own.ok, unwatch: { answered: r.answered, ok: !!(r.v && r.v.ok), removed: !!(r.v && r.v.removed) }, row: row ? { to: row.to.length, cleared: !!row.cleared } : null, recordCount: recordCount(), countNow: eng.agentWatchCount ? eng.agentWatchCount('agent:agent-1') : null });
+    process.kill(process.pid, 'SIGKILL');
+  }
+  if (role === 'write-edit') {   // (b): the person's edit across a clock that stepped back an hour
+    await seed();
+    await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'wake', dailyWakeCap: 7 }] }, { by: 'user' });
+    eng.store.index.flush(); held = true;
+    skew = -3600e3;
+    const r = await bound(eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'next-turn', notify: 'digest', digestMinutes: 30, dailyWakeCap: 1 }] }, { by: 'user' }), ms);
+    say({ role, edit: { answered: r.answered, ok: !!(r.v && r.v.ok) } });
+    process.kill(process.pid, 'SIGKILL');
+  }
+  if (role === 'write-big') {   // a body over its bound is not carried: that save waits for the index's disk, as before
+    await seed(); eng.store.index.flush(); held = true;
+    const big = { match: 'any', rules: Array.from({ length: 40 }, (_, i) => ({ kind: 'keyword', value: `w${i}-` + 'x'.repeat(480) })) };
+    const r = await bound(eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'wake', mode: 'filtered', filter: big }] }, { by: 'user' }), ms);
+    say({ role, bodyBytes: Buffer.byteLength(JSON.stringify(big)), big: { answered: r.answered } });
+    process.kill(process.pid, 'SIGKILL');
+  }
+  if (role === 'write-gone') {   // (c): a carrying row whose conversation the index no longer lists (its row removed, on disk)
+    await seed(); await eng.agentWatch(AG, KEY, { delivery: 'next-turn' }); eng.store.index.flush();
+    await eng.store.index.update((ix) => { delete ix.conversations[KEY]; }); eng.store.index.flush(); eng.stop();
+    say({ role, gone: !eng.store.index.peek(KEY) });
+    process.exit(0);
+  }
   if (role === 'boot') {
     eng.start();
     await eng.store.index.update(() => {}); await eng.store.index.update(() => {});   // behind the boot's own queued completion
@@ -110,9 +165,13 @@ if (process.argv[2] === '--child') {
     const held = ((eng.store.index.live()[KEY] || {}).pending || []).filter((x) => x && x.for === 'agent:agent-1').map((x) => x.record && x.record.text);
     const fl = pid ? await eng.flushScope(A, 'pattern', pid, 'agent:agent-1') : null;
     if (eng.settleWakes) await eng.settleWakes();
+    const count = eng.agentWatchCount ? eng.agentWatchCount('agent:agent-1') : null, recCount = recordCount();
+    const newRow = eng.store.index.live()[KEY_NEW] || null;
+    const room = ((eng.store.index.live()[KEY] || {}).watchers || []).find((x) => x && x.principal && x.principal.id === 'agent-1') || null;
     const rewatch = await eng.agentWatch(AG, KEY, { delivery: 'next-turn' });
     eng.stop();
-    say({ role, journal: lines.filter((l) => /grain|completed|carried|without access/.test(l)), roomWatchers, rule: pa ? { pattern: pa.pattern } : null,
+    say({ role, count, recCount, newRow: newRow ? { watchers: (newRow.watchers || []).map((x) => x && x.principal && x.principal.id) } : null, roomW: room ? { notify: room.notify, delivery: room.delivery || null, digestMinutes: room.digestMinutes, dailyWakeCap: room.dailyWakeCap } : null,
+      journal: lines.filter((l) => /grain|completed|carried|without access/.test(l)), roomWatchers, rule: pa ? { pattern: pa.pattern } : null,
       watcher: w ? { notify: w.notify, mode: w.mode, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap, delivery: w.delivery || null, filter: w.filterId && filters[w.filterId] ? filters[w.filterId].rules : null } : null,
       block: Object.keys(blocks).filter((k) => k.endsWith('|agent:agent-1')), held, flushed: fl ? !!fl.ok : null, delivered: delivered.filter((d) => d.cid === 'agent-1').map((d) => /deploy at noon/.test(d.text) && !/lunch at noon/.test(d.text)), rewatch: { ok: !!rewatch.ok, code: rewatch.code || null } });
     process.exit(0);
@@ -163,6 +222,30 @@ console.log('① PURE: what the record carries — typed, an older record read a
   console.log('    an older model reads the newer record: ' + J(facts2));
   ok(!!(nOld.ok && nOld.row.to.length === 1 && J(Object.keys(nOld.row.to[0]).sort()) === J(['at', 'by', 'key', 'kind', 'name']) && facts2.oldAdmits && facts2.newAdmits && !facts2.otherOld),
     'an OLDER model (no channel-watch fields) keeps the entry — its WHO judged exactly as this release judges it — and drops the settings it cannot read', facts2);
+  // THE RELEASE's model (a frozen copy of an older tree's grant-model, no channel-watch fields, no row fields) reads the newer record
+  const REL = MUT.load('src/grant-model.js', fs.readFileSync(path.join(REPO, 'scripts/fixtures/grants-read-lookup/base/src/grant-model.js.frozen'), 'utf8'), 'release-model');
+  const nRel = REL.normRow({ ...newer, blocks: [{ key: 'agent:agent-2' }], cleared: 9 });
+  console.log('    the release model reads the newer record: ' + J(nRel.row));
+  ok(!!(nRel.ok && J(Object.keys(nRel.row).sort()) === J(['door', 'except', 'resource', 'to']) && nRel.row.to.length === 1 && !('notify' in nRel.row.to[0]) && REL.admits([nRel.row], { conversationKey: 'agent-1', groupIds: [] }).ok),
+    'THE RELEASE\'s model (a frozen older copy): the row\'s rule / blocks / cleared dropped, the entry kept with its settings dropped, WHO judged the same', nRel.row);
+  const FW = GM.ENTRY_FIELDS['channel-watch'];
+  ok(!!(J(FW.notify) === J(F.NOTIFY_MODES) && J(FW.mode) === J(F.ASSIGN_MODES) && J(FW.delivery) === J(F.DELIVERY_MODES) && J(FW.origin) === J(F.WATCH_ORIGINS.filter((o) => o !== 'user'))), 'the carried closed sets are channel-filter\'s own (notify, mode, delivery; origin less its default)', { FW, F: [F.NOTIFY_MODES, F.ASSIGN_MODES, F.DELIVERY_MODES, F.WATCH_ORIGINS] });
+  const UD = path.join(ROOT, 'unreadable'); fs.mkdirSync(UD, { recursive: true }); fs.writeFileSync(path.join(UD, 'grants.json'), '{ not json');
+  const us = GS.create({ dataDir: UD }), uc = CGM.create({ grants: us });
+  ok(!!(us.health().readable === false && J(uc.rowsCarrying()) === J([])), 'an UNREADABLE grants record: the boot\'s completion reads no row (nothing completed, nothing erased)', { health: us.health(), rows: uc.rowsCarrying() });
+  {
+    const bs = GS.create({ memory: true }), bc = CGM.create({ grants: bs });
+    const body = { match: 'any', rules: Array.from({ length: 30 }, (_, i) => ({ kind: 'keyword', value: `k${i}-` + 'y'.repeat(480) })) };
+    const fid = 'f-account-a|agent:agent-1', bodies = new Map([[fid, body]]);
+    const w0 = { principal: AGENT, notify: 'wake', mode: 'filtered', filterId: fid, digestMinutes: 30, dailyWakeCap: 40, receiptWake: false, updatedAt: 5 };
+    const shorts = [];
+    for (let i = 0; i < 20; i++) shorts.push((bc.setGrainRows(`account:a${i}`, { watchers: [w0], bodies, clearedAt: 5 }, 'user').short || []).includes('bodies'));
+    const first = shorts.indexOf(true), bytes = Buffer.byteLength(JSON.stringify(body));
+    console.log('    the bodies bound: ' + J({ bytes, bound: bc.CARRY_BODIES_MAX, firstShort: first }));
+    ok(!!(bytes < GM.BLOB_MAX && first > 0 && first === Math.floor(bc.CARRY_BODIES_MAX / bytes) && shorts.slice(first).every(Boolean)), `the carried bodies' TOTAL bound (${bc.CARRY_BODIES_MAX} bytes): the write that would pass it (the ${first + 1}th of ${bytes}-byte bodies) carries none of its bodies — that save waits for the index's disk`, { first, bytes });
+  }
+  const csa = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8');
+  ok(!!(/const own = agentWatchCount\(pkR\);/.test(csa) && /agentWatchCount\(pk\) >= F\.MAX_AGENT_WATCHES/.test(csa)), 'the wake-ask card and the agent\'s own limit read ONE count (agentWatchCount) — the count the ④ legs judge');
   // THE STORE: a row holding only a block is a row; a change of what it carries alone lands
   const s = GS.create({ memory: true });
   const b1 = s.setMany([{ door: 'channel-watch', resource: 'account:a', to: [], except: [], blocks: [{ key: 'agent:x', at: 1 }] }], 'user');
@@ -191,9 +274,9 @@ console.log('① PURE: what the record carries — typed, an older record read a
 }
 
 /** run ONE child of the world (a process this suite starts — the only one it may signal: its own bound) → its FACTS + how it ended */
-function child(role, dir, { mutant = '', boundMs = 5000 } = {}) {
+function child(role, dir, { mutant = '', boundMs = 5000, mode = 'all' } = {}) {
   return new Promise((resolve) => {
-    const c = spawn(process.execPath, [SELF, '--child', role, dir, mutant, String(boundMs)], { env: { ...process.env, VS_NO_REAL_CLI: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const c = spawn(process.execPath, [SELF, '--child', role, dir, mutant, String(boundMs), mode], { env: { ...process.env, VS_NO_REAL_CLI: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '';
     c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
     const bound = setTimeout(() => c.kill('SIGKILL'), 60000);
@@ -208,21 +291,35 @@ function child(role, dir, { mutant = '', boundMs = 5000 } = {}) {
 const asrc = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8');
 // the two RED copies (each built by its anchor — gone or twice ⇒ the suite stops by name)
 const OLD_DURABLE = MUT.write('src/server/channels-access.js', anchored(asrc, '    else await store.index.update(writeIndex);', '    else await store.index.update(writeIndex, { durable: true });', 'the old spelling: the answer waits for the index\'s disk'), 'old-durable');
-const NO_COMPLETION = MUT.write('src/server/channels-access.js', anchored(asrc, '  async function completeGrainActs() {\n', '  async function completeGrainActs() {\n    return { completed: [], skipped: [] };\n', 'no boot completion'), 'no-completion');
+const CA = '  async function completeGrainActs(owed = grainActsOwedNow()) {\n';
+const NO_COMPLETION = MUT.write('src/server/channels-access.js', anchored(asrc, CA, CA + '    return { completed: [], skipped: [] };\n', 'no boot completion'), 'no-completion');
+const OWN_BLK = "  const ownWatchBlockOf = (scope, res, pk) => agentWatchBlockOf(scope, pk) || (((res ? CG.rowOf('channel-watch', res).blocks : null) || []).find((x) => x.key === pk) || null);\n";
+const INDEX_ONLY = MUT.write('src/server/channels-access.js', anchored(anchored(asrc, CA, CA + '    return { completed: [], skipped: [] };\n', 'no boot completion (a)'), OWN_BLK, '  const ownWatchBlockOf = (scope, res, pk) => agentWatchBlockOf(scope, pk);\n', 'the refusal reads the index alone'), 'index-only');
+const MUST1_OFF = MUT.write('src/server/channels-access.js', anchored(asrc, "    const unlandedRow = kind === 'conversation' && typeof store.index.landed === 'function' && !store.index.landed(site.key);\n", '    const unlandedRow = false;\n', 'an act on a conversation the disk does not list, paced'), 'must1-off');
+const csrc = fs.readFileSync(path.join(REPO, 'src/server/channels-grants.js'), 'utf8');
+const MUST2_OFF = MUT.write('src/server/channels-grants.js', anchored(csrc, '      const emptied = !ch.to.length && clearedAt && doorIndex(DOORS.watch).rows.has(String(res));\n', '      const emptied = false;\n', 'an emptied watch row deleted from the record'), 'must2-off');
+const BY_CLOCK = MUT.write('src/server/channels-access.js', anchored(asrc, 'updatedAt: stampAfter(pw, t),', 'updatedAt: t,', 'the stamp the bare clock (not monotonic)'), 'by-clock');
 const NO_REMOVAL = MUT.write('src/server/channels-access.js', anchored(asrc, '            if (apply && gone.length) holder.watchers = holder.watchers.filter((w) => !gone.includes(w));\n', '', 'the completion keeps a removed watcher'), 'no-removal');
 const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-const SWEEP_FIRST = MUT.write('src/server/channels-engine.js', anchored(esrc, '    if (owedAtBoot) track(completing.then(sweepNow)); else sweepNow();\n', '    sweepNow();\n', 'the boot sweep before the completion'), 'sweep-first');
-const ACC = (f) => `src/server/channels-access.js=${f}`, ENGF = (f) => `src/server/channels-engine.js=${f}`;
+const SWEEP_FIRST = MUT.write('src/server/channels-engine.js', anchored(esrc, '    if (owedAtBoot.completed.length) track(completing.then(sweepNow)); else sweepNow();\n', '    sweepNow();\n', 'the boot sweep before the completion'), 'sweep-first');
+const ACC = (f) => `src/server/channels-access.js=${f}`, ENGF = (f) => `src/server/channels-engine.js=${f}`, CGF = (f) => `src/server/channels-grants.js=${f}`;
 // THREE independent worlds at once: the kill and two boots · the RED writer · the RED boot (after its own kill)
-const D1 = path.join(ROOT, 'w1'), D2 = path.join(ROOT, 'w2'), D3 = path.join(ROOT, 'w3'), D4 = path.join(ROOT, 'w4');
+const D1 = path.join(ROOT, 'w1');
 const t0 = Date.now();
-const killThenBoot = async (dir, mutant) => { const w2 = await child('write', dir); const b = await child('boot', dir, { mutant }); return { w2, b }; };
-const [W1, RED_W, RED_B, RED_R, RED_S] = await Promise.all([
-  (async () => { const w = await child('write', D1); const b1 = await child('boot', D1); const b2 = await child('boot', D1); return { w, b1, b2 }; })(),
-  child('write', path.join(ROOT, 'w-red'), { mutant: ACC(OLD_DURABLE), boundMs: 2500 }),
-  killThenBoot(D2, ACC(NO_COMPLETION)), killThenBoot(D3, ACC(NO_REMOVAL)), killThenBoot(D4, ENGF(SWEEP_FIRST)),
-]);
-console.log(`    (the five worlds, ten processes, in ${Date.now() - t0} ms)`);
+const killThenBoot = async (dir, mutant, { role = 'write', wm = '', mode = 'all', boots = 1 } = {}) => { const w2 = await child(role, path.join(ROOT, dir), { mutant: wm, mode }); const b = await child('boot', path.join(ROOT, dir), { mutant }); const b2 = boots > 1 ? await child('boot', path.join(ROOT, dir)) : null; return { w2, b, b2 }; };
+// THE WORLDS, at most FOUR at once (each a real node process or a chain of them)
+const pool = async (jobs, n) => { const out = new Array(jobs.length); let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < jobs.length) { const k = i++; out[k] = await jobs[k](); } })); return out; };
+const [W1, RED_W, RED_B, RED_R, RED_S, RED_A, M1, M1R, M2, M2R, BE, BER, BIG, GONE] = await pool([
+  async () => { const w = await child('write', D1); const b1 = await child('boot', D1); const b2 = await child('boot', D1); return { w, b1, b2 }; },
+  () => child('write', path.join(ROOT, 'w-red'), { mutant: ACC(OLD_DURABLE), boundMs: 2500 }),
+  () => killThenBoot('w2', ACC(NO_COMPLETION)), () => killThenBoot('w3', ACC(NO_REMOVAL)), () => killThenBoot('w4', ENGF(SWEEP_FIRST)), () => killThenBoot('w5', ACC(INDEX_ONLY)),
+  () => killThenBoot('m1', '', { role: 'write-new', mode: 'index' }), () => killThenBoot('m1r', '', { role: 'write-new', mode: 'index', wm: ACC(MUST1_OFF) }),
+  () => killThenBoot('m2', '', { role: 'write-unwatch' }), () => killThenBoot('m2r', '', { role: 'write-unwatch', wm: CGF(MUST2_OFF) }),
+  () => killThenBoot('be', '', { role: 'write-edit' }), () => killThenBoot('ber', '', { role: 'write-edit', wm: ACC(BY_CLOCK) }),   // the stamp is the WRITER's
+  () => child('write-big', path.join(ROOT, 'big'), { boundMs: 2500 }),
+  () => killThenBoot('gone', '', { role: 'write-gone', boots: 2 }),
+], 4);
+console.log(`    (the fourteen worlds, at most four at once, in ${Date.now() - t0} ms)`);
 
 console.log('② THE ANSWER BEFORE THE INDEX\'S DISK — a real process whose store writer never writes');
 const w1 = W1.w;
@@ -268,8 +365,11 @@ console.log('③ THE KILL BETWEEN THE TWO WRITES — a second real process boots
   const { w2, b } = RED_B;
   const f = b.facts || {};
   console.log('    RED boot: ' + J({ writer: w2.facts && w2.facts.act1, boot: f }));
-  ok(!!(w2.facts && w2.facts.act1 && w2.facts.act1.ok && b.facts && !f.rule && !f.watcher && J(f.held) === J([]) && f.rewatch && f.rewatch.ok === true),
-    'RED «no boot completion»: the same kill ⇒ no rule, nothing held for the watcher, the agent\'s own re-watch let through — the act half on disk, half lost', f);
+  ok(!!(w2.facts && w2.facts.act1 && w2.facts.act1.ok && b.facts && !f.rule && !f.watcher && J(f.held) === J([]) && f.rewatch && f.rewatch.code === 'removed-by-user'),
+    'RED «no boot completion»: the same kill ⇒ no rule, nothing held for the watcher — and still (r937 (a)) the agent\'s own re-watch refused by the RECORD\'s block, whatever the boot completed', f);
+  const fa = (RED_A.b && RED_A.b.facts) || {};
+  console.log('    RED boot (no completion, the refusal reading the index alone): ' + J({ rewatch: fa.rewatch }));
+  ok(!!(RED_A.b.facts && fa.rewatch && fa.rewatch.ok === true), 'RED «the refusal reads the index alone» (r937 (a)): with the completion not run, the agent\'s re-watch is let through — the person\'s removal undone by the start order', fa.rewatch);
 }
 { // RED: the completion keeps a removed watcher — the person's removal half done
   const f = (RED_R.b && RED_R.b.facts) || {};
@@ -283,4 +383,29 @@ console.log('③ THE KILL BETWEEN THE TWO WRITES — a second real process boots
     'RED «the boot sweep before the completion»: its census reports the removed row as a notification «without access» — a row the completion takes away a moment later', f.journal);
 }
 
+console.log('④ r937 — the law: an act told «done» is on the index\'s disk or completable from the record; the counts equal the record\'s');
+{
+  const w = M1.w2.facts || {}, b = M1.b.facts || {}, rb = M1R.b.facts || {};
+  console.log('    MUST 1 writer: ' + J(w) + ' · boot: ' + J({ newRow: b.newRow, count: b.count, recCount: b.recCount }) + ' · RED boot: ' + J({ newRow: rb.newRow, count: rb.count, recCount: rb.recCount }));
+  ok(!!(w.landedBefore === false && w.watch && w.watch.answered && w.watch.ok && w.inIndexFile === false && w.inJournal === true && M1.w2.signal === 'SIGKILL'),
+    'MUST 1: an agent\'s own watch on a conversation the disk\'s index does not list yet (born inside the pace) is ANSWERED only with its act on disk — the row in the act\'s journal line, not in the index file; then SIGKILL', w);
+  ok(!!(b.newRow && J(b.newRow.watchers) === J(['agent-1']) && b.count === 1 && b.recCount === 1), `MUST 1: the boot finds the conversation with the agent's watcher; the count its limit is judged by (${b.count}) EQUALS the record's (${b.recCount})`, b);
+  ok(!!(rb.newRow === null && rb.recCount === 1 && rb.count === 0), `RED «that act paced» (the cut): the same kill ⇒ no conversation row, the watcher never reaches the index — the count ${rb.count} against the record's ${rb.recCount}`, rb);
+  const u = M2.w2.facts || {}, ub = M2.b.facts || {}, ur = M2R.b.facts || {}, uw = M2R.w2.facts || {};
+  console.log('    MUST 2 writer: ' + J(u) + ' · boot: ' + J({ count: ub.count, recCount: ub.recCount, roomWatchers: ub.roomWatchers, journal: ub.journal }) + ' · RED: ' + J({ row: uw.row, count: ur.count, recCount: ur.recCount }));
+  ok(!!(u.own && u.unwatch && u.unwatch.answered && u.unwatch.ok && u.unwatch.removed && u.row && u.row.to === 0 && u.row.cleared && u.recordCount === 0 && M2.w2.signal === 'SIGKILL'),
+    'MUST 2: the agent\'s own unwatch that empties the room\'s watch row is answered — the record KEEPS the row, emptied and stamped `cleared`; then SIGKILL', u);
+  ok(!!(ub.count === 0 && ub.recCount === 0 && J(ub.roomWatchers) === J([]) && (ub.journal || []).some((l) => /agent:agent-1 on conversation:fake-poll\/fake-poll-ops \(removed\)/.test(l))), `MUST 2: the boot redoes the removal from the kept row — the count (${ub.count}) EQUALS the record's (${ub.recCount}); the room stores no watcher`, ub);
+  ok(!!(uw.row === null && ur.count === 1 && ur.recCount === 0), `RED «the emptied row deleted from the record»: the same kill ⇒ the boot cannot read the removal back — the count ${ur.count} against the record's ${ur.recCount} (a slot the agent was told it freed)`, { uw, ur });
+  const e = BE.b.facts || {}, er = BER.b.facts || {};
+  console.log('    (b) edit across a clock stepped back: ' + J({ writer: BE.w2.facts, boot: e.roomW, red: er.roomW }));
+  ok(!!(BE.w2.facts && BE.w2.facts.edit && BE.w2.facts.edit.ok && J(e.roomW) === J({ notify: 'digest', delivery: 'next-turn', digestMinutes: 30, dailyWakeCap: 1 })), '(b) the person\'s edit, saved an hour «earlier» by a clock that stepped back, is what the boot completes (its stamp monotonic: never older than the row it replaces)', e.roomW);
+  ok(!!(er.roomW && er.roomW.notify === 'wake' && er.roomW.dailyWakeCap === 7), 'RED «the stamp the bare clock» (not monotonic): the same kill ⇒ the boot keeps the settings the person had replaced', er.roomW);
+  const g = BIG.facts || {};
+  ok(!!(g.bodyBytes > 16384 && g.big && g.big.answered === false), `a filter body over its bound (${g.bodyBytes} bytes) is not carried: that save waits for the index's disk, as before (no answer while the index never writes)`, g);
+  const g1 = (GONE.b && GONE.b.facts) || {}, g2 = (GONE.b2 && GONE.b2.facts) || {};
+  const once = (j) => (j || []).filter((l) => /not completed \(said once a version\).*the index lists no such conversation/.test(l)).length;
+  console.log('    (c) a row the boot cannot complete: ' + J({ first: g1.journal, second: g2.journal }));
+  ok(!!(GONE.w2.facts && GONE.w2.facts.gone && once(g1.journal) === 1 && once(g2.journal) === 0), '(c) a carrying row whose conversation the index no longer lists is said ONCE — the first boot says it, the next says nothing', { first: g1.journal, second: g2.journal });
+}
 report();

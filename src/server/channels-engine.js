@@ -9877,7 +9877,7 @@ function create(deps = {}) {
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, completeGrainActs, grainActsOwedNow, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, completeGrainActs, grainActsOwedNow, agentWatchCount, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
@@ -10258,7 +10258,7 @@ function create(deps = {}) {
     timer = setInterval(tick, 5000);
     if (timer.unref) timer.unref();
     // lane lg-group-parents (B-526c): an Access-dialog act the stop cut short (on disk in the grants rows, its index copy still in the pace) is completed FIRST — queued on the index before anything this boot reads a grain through it; a boot that owes any part sweeps after it (every other boot sweeps in this turn, as before)
-    const owedAtBoot = grainActsOwedNow(), completing = completeGrainActs().catch((err) => log.warn(`[channels] boot: the grain completion failed: ${(err && err.message) || err}`));
+    const owedAtBoot = grainActsOwedNow(), completing = completeGrainActs(owedAtBoot).catch((err) => log.warn(`[channels] boot: the grain completion failed: ${(err && err.message) || err}`));
     track(completing);
     // B-dfa4 cut 3: the three censuses and the heal's plan — ONE walk (bootSweep), in this turn for a small store, in slices for a big one
     const bootSaid = (r) => {
@@ -10270,10 +10270,11 @@ function create(deps = {}) {
     };
     try { const w = digestWarmStart(); if (w && typeof w.catch === 'function') w.catch((err) => log.warn(`[channels] the first digest's warm-up failed: ${(err && err.message) || err} — the first read builds whole`)); } catch (err) { log.warn(`[channels] the first digest's warm-up failed: ${(err && err.message) || err}`); }   // B-dfa4 cut 4
     const sweepNow = () => { try { const sw = bootSweep(); if (sw.promise) track(sw.promise.then(bootSaid, (err) => log.warn(`[channels] the boot sweep failed: ${(err && err.message) || err}`))); else bootSaid(sw.sync); } catch (err) { log.warn(`[channels] the boot sweep failed: ${(err && err.message) || err}`); } };
-    if (owedAtBoot) track(completing.then(sweepNow)); else sweepNow();
+    if (owedAtBoot.completed.length) track(completing.then(sweepNow)); else sweepNow();
     try { track(releaseStaleReservations()); } catch (err) { log.warn(`[channels] boot reservation release failed: ${(err && err.message) || err}`); }
     reconcileReceiptFates().catch((err) => log.warn(`[channels] boot receipt-fate reconcile failed: ${(err && err.message) || err}`));
-    try { scheduleBootPending(); } catch (err) { log.warn(`[channels] boot pending scan failed: ${(err && err.message) || err}`); }
+    const pendingNow = () => { try { scheduleBootPending(); } catch (err) { log.warn(`[channels] boot pending scan failed: ${(err && err.message) || err}`); } };
+    if (owedAtBoot.completed.length) track(completing.then(pendingNow)); else pendingNow();   // r937 round: a boot that completes plans its pending after the completion (the watcher's settings the act left)
     // lane wake-approve-card r3: the asks' boot reconcile — wake asks past their lifetime expire, one whose item ended while
     // nobody listened is settled, an open access request's hidden pointer comes back to the tray
     // B-44f3: it judges each card by what For you holds — while For you is held unread (an empty list because it is unread) it waits
@@ -10578,6 +10579,7 @@ function create(deps = {}) {
     agentWatch: ['refused', 'async', 'agent door: setGrain channels-access.js:1025 or fileWatchRequest = For-you + index writes :1023, 1153, 1185'],
     agentUnwatch: ['refused', 'async', 'agent door: setGrain drop channels-access.js:1097'],
     agentWatchesFor: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (index live + accountAssignments/patternAssignments tables channels-access.js'],
+    agentWatchCount: ['refused', 'sync', 'an agent’s own notifications counted over the index rows and its two tables (its limit, the wake-ask card; B-526c r937): while paused the held list counts none — an agent would be told of room it may not have — refused by name; the engine’s own callers use the access module’s count, never this door'],
     setAgentDirectory: ['refused', 'async', 'refused while paused (no allow row): adapters.json only an accounts write channels-access.js:948'],
     directoryLists: ['refused', 'sync', 'refused while paused (no allow row): pure over rec/en via ACL.directoryOf channels-access.js:936'],
     attention: ['allow', 'const', 'a constant — answers the same held or not'],
@@ -10763,7 +10765,7 @@ function create(deps = {}) {
     wakeHeldAt,   // lane wake-approve-card r4: does this grain hold a wake? (the routes ask it before EVERY grain write — wakeRefused)
     grainReadAt,   // r5: THE one reader of a grain (the access above it included; every stored row, active or inert) — «held» reads it
     resurfacePointers, openAccessPointers,   // r4: the 2026-10-closed-access-pointers-hidden migration (src/server/migrations.js) goes through these
-    agentWatch, agentUnwatch, agentWatchesFor, setAgentDirectory, directoryLists,   // lane channel-agent-watch
+    agentWatch, agentUnwatch, agentWatchesFor, agentWatchCount, setAgentDirectory, directoryLists,   // lane channel-agent-watch; B-526c r937: agentWatchCount — what an agent's own limit and its wake-ask card count
     attention, setJudge, labelJudged,   // lane decision-attention: the judged rows' scan, the account's "never judge", a label
     owedPass, judgedRoadFor,
     heldPass, membershipChanged: () => { if (heldDigest.size) heldDigestPass(); return heldUnread.size ? track(heldPass()) : Promise.resolve(0); },   // B-43bc cure: the kept deliveries' look (the store's signal; a suite drives heldPass by hand)   // lane judged-watch-state: the owed re-judgment's look (a suite drives it by hand) + the doors' reading of a judged road

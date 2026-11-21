@@ -148,15 +148,15 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
   }
   /** The change one `{door, resource, to, except, removeExcept?}` asks for → `{ok:true, change|null (nothing to do), row, was}` |
    *  a refusal (lane held-except-doors: an exception `was` holds that `except` leaves out unnamed ⇒ `except_unnamed`). */
-  function plan(door, resource, { to = [], except = [], removeExcept = [], rule = undefined, blocks = undefined } = {}, by, at, { named = true } = {}) {   // lane lg-group-parents B-526c: + what a channel row carries (GM.rowFieldsOf)
-    let v = GM.validateWrite(door, resource, { to, except, rule, blocks }, { at, by });
+  function plan(door, resource, { to = [], except = [], removeExcept = [], rule = undefined, blocks = undefined, cleared = undefined } = {}, by, at, { named = true } = {}) {   // lane lg-group-parents B-526c: + what a channel row carries (GM.rowFieldsOf)
+    let v = GM.validateWrite(door, resource, { to, except, rule, blocks, cleared }, { at, by });
     if (!v.ok) return v;
     const k = keyOf(door, v.row.resource);
     const was = rows.get(k) || null;
     // lane lg-group-parents: «仅本组» leaves by name only (GM.onlyCarried) — a write silent on the flag keeps it; a marked entry ⇒ only_unnamed
     const co = GM.onlyCarried(was, to);
     if (co.refused) return { ok: false, code: 'only_unnamed', error: GM.ONLY_UNNAMED_WORDS, principal: co.refused };
-    if (co.to !== to) { v = GM.validateWrite(door, resource, { to: co.to, except, rule, blocks }, { at, by }); if (!v.ok) return v; }
+    if (co.to !== to) { v = GM.validateWrite(door, resource, { to: co.to, except, rule, blocks, cleared }, { at, by }); if (!v.ok) return v; }
     // lane held-except-doors r4 (主开发's acceptance of r3, MAJOR): a row this release cannot read (kept «judged as it is» at load)
     // holds NO exception a door could have shown (GM.publicRow publishes none for it) — so none can be named, and the Save
     // that replaces it is a REPAIR (the dialogs promise it: «save it again»). The writer accepts it and names what it drops
@@ -167,8 +167,8 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     if (unnamed) return { ok: false, code: 'except_unnamed', error: GM.EXCEPT_UNNAMED_WORDS, principal: unnamed };
     // lane lg-group-parents B-526c: a row that carries a rule's record or the agents' blocks is a row (never removed for empty
     // lists); a change of what it carries alone is a change
-    const carried = (r) => (r ? { rule: r.rule, blocks: r.blocks } : {});
-    const removing = !v.row.to.length && !v.row.except.length && !v.row.rule && !v.row.blocks;
+    const carried = (r) => (r ? { rule: r.rule, blocks: r.blocks, cleared: r.cleared } : {});
+    const removing = !v.row.to.length && !v.row.except.length && !v.row.rule && !v.row.blocks && !v.row.cleared;   // r937 MUST 2: a row a removal emptied is KEPT (`cleared`)
     if (removing ? !was : (was && JSON.stringify({ to: was.to, except: was.except, ...carried(was) }) === JSON.stringify({ to: v.row.to, except: v.row.except, ...carried(v.row) }))) return { ok: true, change: null, row: was, was };
     // r9: the audit's own key lists pass the masker too, by value (a token-shaped conversation key is never written in clear)
     const byValue = (dd) => ({ added: dd.added.map((x) => redactSecrets(String(x)).text), removed: dd.removed.map((x) => redactSecrets(String(x)).text) });

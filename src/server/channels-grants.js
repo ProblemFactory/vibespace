@@ -35,6 +35,10 @@ const GM = require('../grant-model.js'); // PURE: THE grant model
 const GS = require('./grants-store.js'); // ORCH: THE store (the instance's installed one, or one per data dir)
 
 const DOORS = Object.freeze({ reach: 'channel-reach', watch: 'channel-watch', api: 'channel-api' });
+/** lane lg-group-parents (B-526c r937 (d)): the inline filter bodies the record carries, ALL watch rows together — past it a write
+ *  carries none of its own and waits for the index's disk. The record's worst size: this + each entry's settings (~0.3 KB × the
+ *  entries) — the grants file is written whole and synchronously at every grant write of every door. */
+const CARRY_BODIES_MAX = 256 * 1024;
 const CHANNEL_DOORS = Object.freeze(Object.values(DOORS));
 /** The resource grammar (one place). */
 const RES = Object.freeze({
@@ -89,7 +93,7 @@ function create({ grants = null, dataDir = null } = {}) {
     for (const r of s ? s.rowsOfDoor(door) : []) {
       if (!r || r.unreadable || r.to === null) { ix.unreadable = true; continue; }
       const n = GM.normRow(r);
-      ix.rows.set(String(r.resource), Object.freeze(n.ok ? { to: Object.freeze(n.row.to), except: Object.freeze(n.row.except), ...(n.row.rule ? { rule: n.row.rule } : {}), ...(n.row.blocks ? { blocks: n.row.blocks } : {}) } : { to: Object.freeze([]), except: Object.freeze([]), unknown: true, why: n.why }));   // B-526c: + what the row carries
+      ix.rows.set(String(r.resource), Object.freeze(n.ok ? { to: Object.freeze(n.row.to), except: Object.freeze(n.row.except), ...(n.row.rule ? { rule: n.row.rule } : {}), ...(n.row.blocks ? { blocks: n.row.blocks } : {}), ...(n.row.cleared ? { cleared: n.row.cleared } : {}) } : { to: Object.freeze([]), except: Object.freeze([]), unknown: true, why: n.why }));   // B-526c: + what the row carries
     }
     cache.set(door, ix);
     return ix;
@@ -323,7 +327,7 @@ function create({ grants = null, dataDir = null } = {}) {
    *  that member's own exception BY NAME (`lift`: 'always' — the owner's writes —, 'dormant' — an agent's own: only where
    *  no Task Group / All agents entry is on the row, a live exception is the owner's to lift —, false); a list the caller
    *  sent is never edited here (a member both given and left out there ⇒ except_conflicts, the caller's contradiction). */
-  function grainChanges(res, { access = null, watchers = null, except = undefined, watchExcept = undefined, removeExcept = [], watchRemoveExcept = [], lift = false, bodies = null, rule = undefined, blocks = undefined, short = null } = {}) {   // lane lg-group-parents B-526c: + the carried settings (`bodies` = filter id → an inline filter's body), `rule`, `blocks`; `short` collects what could not be carried
+  function grainChanges(res, { access = null, watchers = null, except = undefined, watchExcept = undefined, removeExcept = [], watchRemoveExcept = [], lift = false, bodies = null, rule = undefined, blocks = undefined, clearedAt = null, short = null } = {}) {   // lane lg-group-parents B-526c: + the carried settings (`bodies` = filter id → an inline filter's body), `rule`, `blocks`; `short` collects what could not be carried
     const rowOfChange = (door, to, stored, given, named) => {
       let ex = given === undefined ? stored : exceptEntries(given);
       const rx = Array.isArray(named) ? [...named] : [];
@@ -340,7 +344,10 @@ function create({ grants = null, dataDir = null } = {}) {
     if (watchers) {
       const bodyOf = (w) => (bodies && w && w.mode === 'filtered' && w.filterId && bodies.get(w.filterId)) || null;
       const ch = ruleOf(rowOfChange(DOORS.watch, watchers.map((w) => entryOfWatch(w, bodyOf(w), short)).filter(Boolean), [...watchOf(res).except], watchExcept, watchRemoveExcept));   // B-526c: each entry its watcher's settings
-      out.push(Array.isArray(blocks) && blocks.length ? { ...ch, blocks } : ch);
+      // r937 MUST 2: a write that EMPTIES a stored watch row keeps it, stamped `cleared` — the boot can then redo the removal its
+      // index copy may not have landed (a row deleted from the record is a removal no boot can read back)
+      const emptied = !ch.to.length && clearedAt && doorIndex(DOORS.watch).rows.has(String(res));
+      out.push({ ...ch, ...(Array.isArray(blocks) && blocks.length ? { blocks } : {}), ...(emptied ? { cleared: clearedAt } : {}) });
     }
     return out;
   }
@@ -352,7 +359,20 @@ function create({ grants = null, dataDir = null } = {}) {
     const short = [];
     const rule = lists && lists.rule !== undefined && lists.rule !== null ? (GM.rowFieldsOf(DOORS.reach, res, { rule: lists.rule }).fields.rule || null) : undefined;
     if (rule === null) short.push('rule');
-    const ch = grainChanges(res, { ...lists, rule: rule || undefined, short });
+    // r937: the agents' blocks the record cannot carry (past LIST_MAX, a key it cannot read) are not carried — that act waits for
+    // the index's disk (never a refusal of the person's whole save)
+    let blocks = lists && Array.isArray(lists.blocks) ? lists.blocks : undefined;
+    if (blocks && GM.rowFieldsOf(DOORS.watch, res, { blocks }).bad) { blocks = undefined; short.push('blocks'); }
+    // r937 (d): THE RECORD'S CARRIED BODIES HAVE A TOTAL BOUND (CARRY_BODIES_MAX, every watch row's inline filter bodies together):
+    // past it this write carries none of its bodies and waits for the index's disk, as a body over its own bound does
+    let bodies = lists && lists.bodies instanceof Map ? lists.bodies : null;
+    if (bodies && bodies.size) {
+      let total = 0;
+      for (const [r2, row] of doorIndex(DOORS.watch).rows) if (r2 !== String(res)) for (const e of row.to) if (e && e.filter) total += Buffer.byteLength(JSON.stringify(e.filter), 'utf8');
+      for (const b of bodies.values()) total += Buffer.byteLength(JSON.stringify(b), 'utf8');
+      if (total > CARRY_BODIES_MAX) { bodies = null; short.push('bodies'); }
+    }
+    const ch = grainChanges(res, { ...lists, bodies, blocks, rule: rule || undefined, short });
     const r = ch.length ? s.setMany(ch, by) : { ok: true, changed: [] };
     return r && r.ok ? { ...r, short } : r;
   }
@@ -367,7 +387,7 @@ function create({ grants = null, dataDir = null } = {}) {
       for (const [resource, r] of ix.rows) {
         if (r.unknown) continue;
         const settings = door === DOORS.watch && r.to.some((e) => e.notify === 'wake' || e.notify === 'digest');
-        if (settings || r.rule || r.blocks) out.push({ door, resource, to: r.to, ...(r.rule ? { rule: r.rule } : {}), ...(r.blocks ? { blocks: r.blocks } : {}) });
+        if (settings || r.rule || r.blocks || r.cleared) out.push({ door, resource, to: r.to, ...(r.rule ? { rule: r.rule } : {}), ...(r.blocks ? { blocks: r.blocks } : {}), ...(r.cleared ? { cleared: r.cleared } : {}) });
       }
     }
     return out;
@@ -418,7 +438,7 @@ function create({ grants = null, dataDir = null } = {}) {
   return {
     DOORS, RES, grainResource, rowOf, resourcesOf, refusalOf, watchAdmitsFor, exceptBare, generation, plainGeneration, hasConversationRows, ruleIdsWithRows, ownConversationKeys, accessOf, exceptOf, conversationGrants, accountGrants, ruleGrants, apiGrants, watchOf,
     watchLists, wakeAdmits, anyReachExcept, hasAnyExcept, grainChanges, setGrainRows, setLevel, setApiRows, removeAccount, removeRule, store: S,
-    entryOfWatch, watcherOfEntry, rowsCarrying,   // lane lg-group-parents B-526c
+    entryOfWatch, watcherOfEntry, rowsCarrying, CARRY_BODIES_MAX,   // lane lg-group-parents B-526c
   };
 }
 
