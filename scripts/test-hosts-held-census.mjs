@@ -162,7 +162,6 @@ console.log('§1 every caller of a lookup (get / list / findByDeviceId, and the 
     {"file": "src/server/artifact-registry.js", "at": "for (const id of new Set(ids.map((x) => String(x || '')).filter((x) => x && x !== 'local'))) { l", "n": 1, "cls": "harmless", "why": "artifact rows' machine names — ids show meanwhile", "bare": "display only"},
     {"file": "src/server/boot-restore.js", "at": "const h = hosts.get?.(meta.host);", "n": 1, "cls": "waits", "why": "the boot's re-adoption of remote sessions left running WAITS for the read (whenRead) — it ended the boot's one pass and a later resume killed the agent it would adopt"},
     {"file": "src/server/browser-access.js", "at": "try { return !!hosts.get(hostId); } catch { return false; }", "n": 1, "cls": "refuses", "why": "browser-access hostKnown: its readers ask machinesHeld() first (host_unavailable by name — H9, H25)", "bare": "its readers ask the hold first; false here is «not this machine» only after them"},
-    {"file": "src/server/conversation-deliver.js", "at": "const hid = idx.ownerHost(cid, (id) => { try { return !!hosts.get(id); } catch (e) { return !!(e", "n": 1, "cls": "waits", "why": "the delivery's owner question: held keeps the claim — the remote rung meets the hold by name and the stash keeps the message (never «not running», H2)"},
     {"file": "src/server/cwd-wait.js", "at": "const h = hosts ? call(() => hosts.get(hostId), null) : null;", "n": 1, "cls": "harmless", "why": "a mount's machine named in the cwd wait's words — its id meanwhile (the call answers null on the hold)"},
     {"file": "src/server/desktop-access.js", "at": "try { return !!hosts.get(hostId); } catch { return false; }", "n": 1, "cls": "refuses", "why": "desktop-access hostKnown: notHeld() refuses host_unavailable first", "bare": "notHeld() runs before it"},
     {"file": "src/server/desktop-access.js", "at": "const hostList = () => { try { return hosts && typeof hosts.list === 'function' ? hosts.list() :", "n": 1, "cls": "harmless", "why": "desktop-access hostList: the machines' desktop rows — none listed while held, nothing dropped", "bare": "display: an empty list drops no record"},
@@ -247,9 +246,8 @@ console.log('§1 every caller of a lookup (get / list / findByDeviceId, and the 
     {"file": "src/routes/sessions.js", "at": "const dm = await hosts.device(null);", "n": 1, "cls": "harmless", "why": "device(null) is the local daemon: isLocal(null) returns before the store, so the hold cannot reach it."},
     {"file": "src/server/boot-restore.js", "at": "hosts.device(null).then(async (dm) => {", "n": 1, "cls": "harmless", "why": "device(null) is the local daemon (re-opening a local pipe session); the hold cannot reach it."},
     {"file": "src/server/browser-access.js", "at": "try { dm = await hosts.deviceBounded(hostId, connectMs); }", "n": 1, "cls": "harmless", "why": "Cannot run while held: deviceOf() refuses at :73 with host_unavailable carrying the hold's words (never 'not paired') before the device is asked. Its catch rethrows named."},
+    {"file": "src/server/conversation-deliver.js", "at": "try { const host = hosts.get(hid); return host ? { reply: 'paired', host } : UNKNOWN; }", "n": 1, "cls": "waits", "why": "THE PAIRING READ of the deliver engine (B-2566's remainder, r1645): ONE function, three replies — a HELD list, no list or a read that failed any other way is «cannot say» (every caller keeps what it holds: the delivery's owner claim — the remote rung meets the hold by name, the stash keeps the message, never «not running» (H2) — and a wake held for the machine); only the store's own «host not found» is «gone»; every reader of a machine there asks it"},
     {"file": "src/server/conversation-deliver.js", "at": "const dm = await (hosts.deviceBounded ? hosts.deviceBounded(hid, 6000) : hosts.device(hid));", "n": 2, "cls": "harmless", "why": "Dead branch with the real store: HostManager always has deviceBounded, so hosts.device(hid) is never taken; if it were, the same catch and stash apply."},
-    {"file": "src/server/conversation-deliver.js", "at": "const silentSinceOf = (hid) => { try { const d = getHosts?.()?.get?.(hid)?.dial;", "n": 1, "cls": "harmless", "why": "B-2566's remainder: when an unreachable machine fell silent (its dial facts' lastDisconnectAt), read only after the rung's connect missed; a held list marks nothing (linkOf answers unknown while held)", "bare": "held or a removed machine: no dial facts, so the outage's start falls back to the rung's first miss; nothing is decided by it"},
-    {"file": "src/server/conversation-deliver.js", "at": "machineNameOf: (hid) => { try { const h = getHosts?.()?.get?.(hid);", "n": 1, "cls": "harmless", "why": "B-2566's remainder: the machine's NAME in the «results wait for a machine» item; held or removed, the item names it by its id; nothing is decided by it"},
     {"file": "src/server/conversation-deliver.js", "at": "try { const dm = await getHosts().deviceBounded(hid, 6000); st = await remoteStateOf(dm, cid, hid); }", "n": 1, "cls": "harmless", "why": "B-2566's remainder (r1277): the machine is ASKED about a held conversation only once its link is back; a held list reads as unknown here (linkOf), so the ask is unreachable while held; a refusal keeps the wake held"},
     {"file": "src/server/desktop-access.js", "at": "try { dm = await hosts.deviceBounded(hostId, connectMs); }", "n": 1, "cls": "harmless", "why": "Cannot run while held: deviceOf's notHeld() (:126) refuses with host_unavailable + the hold's words first, never unsupported-host (the app keeper's 'removed' code)."},
     {"file": "src/server/desktop-access.js", "at": "try { const dm = await hosts.deviceBounded(h.id, Math.min(connectMs, 3000)); return dm && dm.sta", "n": 1, "cls": "harmless", "why": "Not reached while held: handleIfConnected gets its host only from hosts.list() rows (empty while held), so no probe runs and no machine row is written.", "bare": "catch -> null: the picker row reads not connected for this probe only and is re-probed; never reached while held"},
@@ -420,17 +418,20 @@ console.log('§3 a message to a conversation on a paired machine is never told �
   ok(h === 'h-0001' && hx === null, 'hosts.conversationOwner on a HELD list keeps the conversation\'s claim; CONTROL (the release\'s filter, in a copy): null — the conversation reads as on no machine', { h, hx });
 
   const CD = fs.readFileSync(path.join(ROOT, 'src/server/conversation-deliver.js'), 'utf8');
-  const head = '  function ownerHostOf(cid) {\n', i = CD.indexOf(head), j = i < 0 ? -1 : CD.indexOf('\n  }\n', i);
-  const fn = i < 0 || j < 0 ? null : CD.slice(i, j + 4);
-  const CATCH = "catch (e) { return !!(e && e.code === 'hosts-unread'); } });";
-  ok(!!fn && fn.split(CATCH).length === 2, 'control setup: ownerHostOf is sliced from conversation-deliver.js and carries the held catch (the control\'s anchor)');
-  const ownerHostOf = (src) => {
-    const hosts = { get: () => { throw Object.assign(new Error('hosts.json could not be read (EACCES)'), { code: 'hosts-unread', status: 503 }); } };
+  // B-2566's remainder (r1645): ownerHostOf asks THE PAIRING READ (pairingOf) — sliced together, run over a HELD store
+  const slice = (head) => { const i = CD.indexOf(head), j = i < 0 ? -1 : CD.indexOf('\n  }\n', i); return i < 0 || j < 0 ? null : CD.slice(i, j + 4); };
+  const pair = slice('  function pairingOf(hid) {\n'), fn = slice('  function ownerHostOf(cid) {\n');
+  const HELD_READ = "    try { if (typeof hosts.held === 'function' && hosts.held()) return UNKNOWN; } catch { return UNKNOWN; }";
+  const CATCH = "    catch (e) { return e && e.code !== 'hosts-unread' && e.message === 'host not found' ? { reply: 'gone' } : UNKNOWN; }";
+  ok(!!pair && !!fn && pair.includes(HELD_READ) && pair.includes(CATCH) && fn.includes("idx.ownerHost(cid, (id) => pairingOf(id).reply !== 'gone')"), 'control setup: pairingOf and ownerHostOf are sliced from conversation-deliver.js — the held read, the store\'s own «gone», the claim asked of it (the control\'s anchors)');
+  const ownerHostOf = (pairSrc) => {
+    const hosts = { held: () => true, get: () => { throw Object.assign(new Error('hosts.json could not be read (EACCES)'), { code: 'hosts-unread', status: 503 }); } };
     // eslint-disable-next-line no-new-func
-    return new Function('getHosts', 'getConvIndex', `${src}\nreturn ownerHostOf;`)(() => hosts, () => one);
+    return new Function('getHosts', 'getConvIndex', `${pairSrc}\n${fn}\nreturn ownerHostOf;`)(() => hosts, () => one);
   };
-  const d = fn && ownerHostOf(fn)('conv-1'), dx = fn && ownerHostOf(fn.replace(CATCH, 'catch { return false; } });'))('conv-1');
-  ok(d === 'h-0001' && dx === null, 'the delivery\'s owner question on a HELD list answers the conversation\'s machine (the remote rung meets the hold by name, the stash keeps the message); CONTROL (the bare catch, in the slice): null — the local rung\'s miss says «no live inbox … not running»', { d, dx });
+  const d = pair && fn && ownerHostOf(pair)('conv-1');
+  const dx = pair && fn && ownerHostOf(pair.replace(HELD_READ, "    try { if (typeof hosts.held === 'function' && hosts.held()) return { reply: 'gone' }; } catch { return UNKNOWN; }").replace(CATCH, "    catch { return { reply: 'gone' }; }"))('conv-1');
+  ok(d === 'h-0001' && dx === null, 'the delivery\'s owner question on a HELD list answers the conversation\'s machine (the remote rung meets the hold by name, the stash keeps the message); CONTROL (the held read answering «gone», in the slice): null — the local rung\'s miss says «no live inbox … not running»', { d, dx });
 }
 
 // ── §4 the page's readers of GET /api/hosts — each a row; its PIN is the line that reads the hold's mark (or why none is needed) ──

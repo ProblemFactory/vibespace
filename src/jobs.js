@@ -1664,7 +1664,7 @@ class JobManager {
     const a = typeof this.d.machineAwayOf === 'function' ? this.d.machineAwayOf(hid) : null;
     const w = this._machineAwayOwed(hid);
     if (!a || !w.n || now() - a.since < M.MACHINE_AWAY_GRACE_MS) return null;
-    return this._fileMachineAway(hid, w, a.since);
+    return this._fileMachineAway(hid, w, a.since, (this._machineWordlessOf && this._machineWordlessOf.get(hid)) || null);   // a machine that could not give its word keeps saying why (r1645's should)
   }
   /** the one filing of the machine's item: a PERSON's close stands for the outage (an item a person closed after this outage began is
    *  kept closed — the engine's own judgement, over the store's answer; the wiring files what it is handed) */
@@ -1711,7 +1711,8 @@ class JobManager {
     for (const hid of hids) {
       wl.set(hid, code);
       const w = this._machineAwayOwed(hid), said = this._machineAwaySaid && this._machineAwaySaid.has(hid);
-      if (said && w.n) this._fileMachineAway(hid, w, Number(this._machineAwaySince && this._machineAwaySince.get(hid)) || 0, code);
+      const since = Number(this._machineAwaySince && this._machineAwaySince.get(hid)) || Number(typeof this.d.machineAwayOf === 'function' && (this.d.machineAwayOf(hid) || {}).since) || 0;   // after a restart: the ladder's own start
+      if (said && w.n) this._fileMachineAway(hid, w, since, code);
     }
     return hids.size;
   }

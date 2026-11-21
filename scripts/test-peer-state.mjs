@@ -63,7 +63,7 @@ console.log('① the shared lookup: a CLI still starting');
 }
 
 /** the rig: the REAL ladder + park; a stand-in machine (its peerPost misses, its peerState says what it says) and machines list */
-function rig(name, { state = { live: false, inbox: false }, held = () => false, mod = DELIVER, post = null, owner = () => 'h-1', hello = null, connect = null, link = null, dial = null, paired = () => true } = {}) {
+function rig(name, { state = { live: false, inbox: false }, held = () => false, mod = DELIVER, post = null, owner = () => 'h-1', hello = null, connect = null, link = null, dial = null, paired = () => true, store = null, noList = false } = {}) {
   const dataDir = path.join(ROOT, name); fs.mkdirSync(dataDir, { recursive: true });
   const c = { now: 1_790_000_000_000, timers: [] };
   const retryClock = { now: () => c.now, setTimeout: (fn, ms) => { const t = { at: c.now + Math.max(0, ms), fn }; c.timers.push(t); return t; }, clearTimeout: (t) => { const i = c.timers.indexOf(t); if (i >= 0) c.timers.splice(i, 1); } };
@@ -72,13 +72,16 @@ function rig(name, { state = { live: false, inbox: false }, held = () => false, 
   if (hello) dm.helloInfo = () => ({ capabilities: hello });
   // B-2566's remainder: `connect` = the bounded connect (it may throw: the machine did not answer), `link` = the list's own classifier
   // (hosts.linkState: never a probe), `dial` = the host record's dial facts (when it was last connected / disconnected)
-  const hosts = { deviceBounded: connect || (async () => dm), device: async () => dm, get: () => { const pd = paired(); if (pd === 'throws') throw new Error('hosts.json could not be read'); return pd ? { id: 'h-1', name: 'box-p', ...(dial ? { dial: dial() } : {}) } : undefined; }, held, ...(link ? { linkState: (id) => link(id) } : {}) };
-  R.dm = dm;
+  // r1645: a leg that needs a machine's PAIRING hands a REAL machines list (`store`, src/hosts.js on a scratch folder) — its get / held
+  // are the store's own; only the machine's link (linkState) and its connect stay the rig's stand-ins
+  const hosts = store ? Object.assign(store, { deviceBounded: connect || (async () => dm), device: async () => dm, ...(link ? { linkState: (id) => link(id) } : {}) })
+    : { deviceBounded: connect || (async () => dm), device: async () => dm, get: () => { const pd = paired(); if (pd === 'throws') throw new Error('hosts.json could not be read'); return pd ? { id: 'h-1', name: 'box-p', ...(dial ? { dial: dial() } : {}) } : undefined; }, held, ...(link ? { linkState: (id) => link(id) } : {}) };
+  R.dm = dm; R.store = store;
   const sessions = new Map();
   R.deliver = mod.create({
     dataDir, activeSessions: sessions, serverSetting: () => undefined, retryClock, log: (...a) => R.logs.push(a.join(' ')), renderBatch: AR.renderMsgStash,
     peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) },
-    getHosts: () => hosts, getConvIndex: () => ({ ownerHost: (cid) => owner(cid) }), emitPeerCard: () => true,
+    getHosts: () => (noList ? null : hosts), getConvIndex: () => ({ ownerHost: (cid) => owner(cid) }), emitPeerCard: () => true,
     authorizeSpend: () => { R.spend.auth++; return { ok: true, identity: { key: 'slot-1', name: 'Personal' }, hold: { id: 'h' } }; }, noteSpend: () => { R.spend.note++; }, releaseSpend: () => { R.spend.release++; },
   });
   R.deliver.onRetry?.((ev, cid, e, extra) => { if (ev === 'wake') R.wakes.push({ cid, ...extra }); });
@@ -95,6 +98,15 @@ function rig(name, { state = { live: false, inbox: false }, held = () => false, 
   return R;
 }
 const DSRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
+const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
+/** THE REAL machines list on a scratch folder (r1645): `records` written as its hosts.json; `'held'` = a hosts.json that cannot be read
+ *  (a folder in its place: the read fails ⇒ the store HOLDS, by its own law); the store reads it as it boots */
+function realStore(tag, records) {
+  const dir = path.join(ROOT, 'store-' + tag); fs.mkdirSync(dir, { recursive: true });
+  if (records === 'held') fs.mkdirSync(path.join(dir, 'hosts.json'), { recursive: true }); else fs.writeFileSync(path.join(dir, 'hosts.json'), JSON.stringify({ hosts: records }));
+  return new HostManager({ dataDir: dir });
+}
+const MACHINE_H1 = () => ({ id: 'h-1', name: 'box-p', transport: 'dial', deviceId: 'dev-h1', dial: { lastConnectAt: 1_790_000_000_000 - 5 * 3600e3, lastDisconnectAt: 1_790_000_000_000 - 2 * 3600e3 } });
 
 console.log('② a conversation that ENDED on the paired machine: «not running» on its reply, ONE wake owed');
 {
@@ -425,8 +437,7 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
   const LINKS_WORD = mutantCopies('peer-state-links-word', REPO).load('src/server/conversation-deliver.js', anchored(anchored(DSRC, LAW, OLD_HOLD, 'the-links-word'), DURABLE, '    return null;', 'no-durable-hold'), 'the-links-word');
   /** one rig over `dir`: the machine shut (no handle, the list offline) unless `box` says otherwise; its answer = `state` */
   const machine = (name, mod, box, state) => {
-    const R = rig(name, { mod, state, hello: box.hello || null, link: () => box.link, paired: () => (box.paired === 'throws' ? 'throws' : box.paired !== false), connect: async () => { if (box.gate) await box.gate; if (box.up) return R.dm; throw Object.assign(new Error('the machine did not answer within 6000 ms'), { code: 'connect_timeout' }); },
-      dial: () => ({ lastConnectAt: 1_790_000_000_000 - 5 * 3600e3, lastDisconnectAt: box.off || 1_790_000_000_000 - 2 * 3600e3 }) });
+    const R = rig(name, { mod, state, hello: box.hello || null, link: () => box.link, store: realStore(name, [MACHINE_H1()]), connect: async () => { if (box.gate) await box.gate; if (box.up) return R.dm; throw Object.assign(new Error('the machine did not answer within 6000 ms'), { code: 'connect_timeout' }); } });
     return R;
   };
   const facts = (R) => ({ owed: R.deliver.endedEntries(X).length, away: R.deliver.endedEntries(X).map((e) => !!e.away), hooked: R.hooked.length, running: R.wakes.filter((w) => w.cid === X && w.outcome === 'running').length, live: R.deliver.liveForWake(X) });
@@ -495,7 +506,8 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
   const boxU = { up: false, link: 'offline' };
   const U = machine('law-unpaired', DELIVER, boxU, { live: true, inbox: true });
   await U.result(X, 'nightly report finished');
-  boxU.paired = false; boxU.link = 'unknown';
+  Promise.resolve(U.store.remove('h-1')).catch(() => { });   // a person unpairs it: the REAL store's own removal (its get now throws «host not found»)
+  boxU.link = 'unknown';
   U.c.now += 61e3; await U.fire();
   const uw = U.wakes.filter((w) => w.cid === X);
   ok(U.deliver.endedEntries(X).length === 0 && uw.length === 1 && uw[0].outcome === 'refused' && uw[0].code === 'unpaired' && /no longer paired/.test(uw[0].why || ''),
@@ -513,8 +525,8 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
     M.c.now += 11 * 60e3; await M.fire(); await settle(); await M.fire(); await settle();
     return { early, late: facts(M), answer: M.deliver.endedAnswerOf ? M.deliver.endedAnswerOf(X) : null, asked: M.asked };
   };
-  const WORDLESS_OLDER = mutantCopies('peer-state-older-forever', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "      if (st === null) { if (!wordlessSince.has(cid)) wordlessSince.set(cid, clock.now()); return; }", "      if (st === null) return;", 'older-held-for-ever'), 'older-held-for-ever');
-  const WORDLESS_LINK = mutantCopies('peer-state-nolink-forever', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "    if (link === 'unknown') { const from = Math.max(...all.map((e) => Number(e.away && e.away.at) || 0)); if (from && clock.now() - from >= REMOTE_ENDED_MS) releaseWordless(cid, all, 'no_link'); return; }", "    if (link === 'unknown') return;", 'nolink-held-for-ever'), 'nolink-held-for-ever');
+  const WORDLESS_OLDER = mutantCopies('peer-state-older-forever', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "      if (st === null) { if (!wordlessSince.has(cid)) { wordlessSince.set(cid, clock.now()); if (wordlessSince.size > 500) wordlessSince.delete(wordlessSince.keys().next().value); } return; }   // an older agent: it cannot say — the bound starts", "      if (st === null) return;", 'older-held-for-ever'), 'older-held-for-ever');
+  const WORDLESS_LINK = mutantCopies('peer-state-nolink-forever', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "    if (link === 'unknown') { const from = Math.max(...all.map((e) => Number(e.away && (e.away.at || e.away.since)) || Number(e.firstAt) || 0)); if (from && clock.now() - from >= REMOTE_ENDED_MS) releaseWordless(cid, all, 'no_link'); return; }", "    if (link === 'unknown') return;", 'nolink-held-for-ever'), 'nolink-held-for-ever');
   const o = await release(DELIVER, 'g', 'older'), or = await release(WORDLESS_OLDER, 'r', 'older');
   ok(o.early.owed === 1 && o.early.running === 0 && o.late.owed === 0 && o.late.running === 1 && o.late.hooked === 0 && o.answer && o.answer.code === 'agent_older',
     'an OLDER agent (no such op: never asked) with its link back: held a bound, then the release\'s road — «running», and the row says why (agent_older: update it)', { early: o.early, late: o.late, answer: o.answer });
@@ -529,14 +541,15 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
     const box = { up: false, link: 'offline' };
     const C = machine('law-cannot-say-' + tag, mod, box, { live: true, inbox: true });
     await C.result(X, 'nightly report finished');
-    box.paired = 'throws';
+    Object.defineProperty(C.store, '_state', { configurable: true, get() { throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); } });   // the REAL store's read fails some other way
     C.c.now += 61e3; await C.fire();
     return { owed: C.deliver.endedEntries(X).length, refused: C.wakes.filter((w) => w.cid === X && w.code === 'unpaired').length };
   };
-  const OLD_PAIRED = mutantCopies('peer-state-guessed-unpaired', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "  const hostPaired = (hid) => { const h = getHosts?.(); if (!h || typeof h.get !== 'function' || hostsHeld()) return true; try { return !!h.get(hid); } catch { return true; } };", "  const hostPaired = (hid) => { try { return !!getHosts?.()?.get?.(hid); } catch (e) { return !!(e && e.code === 'hosts-unread') || hostsHeld(); } };", 'list-read-as-unpaired'), 'list-read-as-unpaired');   // stale-pins: kept (the red copy's text: the cure's first check, as it read)
+  const PAIR_CATCH = "    catch (e) { return e && e.code !== 'hosts-unread' && e.message === 'host not found' ? { reply: 'gone' } : UNKNOWN; }";
+  const OLD_PAIRED = mutantCopies('peer-state-guessed-unpaired', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, PAIR_CATCH, "    catch { return { reply: 'gone' }; }", 'any-throw-is-gone'), 'any-throw-is-gone');
   const cs = await cannotSay(DELIVER, 'g'), csr = await cannotSay(OLD_PAIRED, 'r');
   ok(cs.owed === 1 && cs.refused === 0, '(2) a machines list whose read THROWS cannot say — the wake is KEPT (never «unpaired»: that turns its notices for good)', cs);
-  ok(csr.refused === 1 && csr.owed === 0, '(2) RED: the cure\'s first check (a copy) ⇒ a list that could not be read refuses the wake as «unpaired»', csr);
+  ok(csr.refused === 1 && csr.owed === 0, '(2) RED: every throw read as «gone» (a copy) ⇒ a list that could not be read refuses the wake as «unpaired»', csr);
 
   // (4) an «ended» answer landing DURING A STOP hands nothing to the resume line — RED: the stop's check removed
   const stopped = async (mod, tag) => {
@@ -560,7 +573,7 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
   const F5 = machine('law-since', DELIVER, boxF, { live: true, inbox: true });
   await F5.result(X, 'nightly report finished');
   const sinceA = F5.deliver.machineAwayOf('h-1');
-  boxF.off = 1_790_000_000_000 - 60e3;   // a two-second dark wake: the dial facts now say it disconnected a minute ago
+  F5.store.get('h-1').dial.lastDisconnectAt = 1_790_000_000_000 - 60e3;   // a two-second dark wake: the record's dial facts now say it disconnected a minute ago
   await F5.deliver.deliverToConversation(CID(143), 'another result', { kind: 'notification', spendReason: 'job-notification' });
   const sinceB = F5.deliver.machineAwayOf('h-1');
   ok(sinceA && sinceB && sinceA.since === 1_790_000_000_000 - 2 * 3600e3 && sinceB.since === sinceA.since, '(5) «silent since» is the OUTAGE\'s start — a later disconnect (a flap) never moves it', { before: sinceA, after: sinceB });
@@ -590,7 +603,8 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
   // (the hold's own rule: a remote owner is «unknown», never ended) — RED CONTROL: the hold's word removed from the link's reader
   const Z = CID(142);
   const held = async (mod) => {
-    const R = rig('unreachable-held-' + Math.random().toString(36).slice(2, 7), { mod, held: () => true, link: () => 'offline', connect: async () => { throw new Error('the machines list is held — read again'); } });
+    const tag = 'unreachable-held-' + Math.random().toString(36).slice(2, 7);
+    const R = rig(tag, { mod, store: realStore(tag, 'held'), link: () => 'offline', connect: async () => { throw new Error('the machines list is held — read again'); } });
     const r = await R.deliver.deliverToConversation(Z, 'x', { kind: 'notification', spendReason: 'job-notification' });
     return { unreachable: !!(r && r.unreachable), mark: R.deliver.unreachableOf(Z) };
   };
@@ -599,6 +613,39 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
   const HELDMARK = mutantCopies('peer-state-held-marks', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "  const linkOf = (hid) => { if (hostsHeld()) return 'unknown'; try {", "  const linkOf = (hid) => { try {", 'held-reads-offline'), 'held-reads-offline');
   const hr = await held(HELDMARK);
   ok(hr.unreachable === true, '⑭ RED CONTROL: the hold\'s word removed from the link\'s reader ⇒ a held list marks every paired machine unreachable', hr);
+}
+
+
+console.log('⑮ B-2566\'s remainder (r1645): THE PAIRING READ — one function, three replies, judged by ONE TABLE over the REAL machines list');
+{
+  // the table: each row a REAL store (src/hosts.js) on a scratch folder, read through the deliver engine's own pairing read
+  const PAIR_CATCH = "    catch (e) { return e && e.code !== 'hosts-unread' && e.message === 'host not found' ? { reply: 'gone' } : UNKNOWN; }";
+  const ROWS = [
+    ['a paired machine', () => realStore('pair-paired', [MACHINE_H1()]), 'paired'],
+    ['a machine the list READ gone (another machine paired, not this one)', () => realStore('pair-absent', [{ ...MACHINE_H1(), id: 'h-2' }]), 'gone'],
+    ['a machine a person REMOVED (the store\'s own remove)', () => { const st = realStore('pair-removed', [MACHINE_H1()]); Promise.resolve(st.remove('h-1')).catch(() => { }); return st; }, 'gone'],
+    ['a list HELD unread (its hosts.json cannot be read)', () => realStore('pair-held', 'held'), 'unknown'],
+    ['no list at all', () => null, 'unknown'],
+    ['a read that fails some other way (EIO)', () => { const st = realStore('pair-eio', [MACHINE_H1()]); Object.defineProperty(st, '_state', { configurable: true, get() { throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); } }); return st; }, 'unknown'],
+  ];
+  const table = (mod) => ROWS.map(([what, make, want]) => { const store = make(); const R = rig('pair-' + Math.random().toString(36).slice(2, 7), { mod, ...(store ? { store } : { noList: true }) }); return { what, want, got: R.deliver.pairingOf('h-1') }; });
+  const t = table(DELIVER);
+  ok(t.every((r) => r.got === r.want), 'THE TABLE over the real store: paired ⇒ paired · read gone / removed ⇒ gone · held / no list / another failure ⇒ cannot say (unknown) — each row\'s reply named', t);
+  const ALLKEEP = mutantCopies('peer-state-pair-catch-all-keeps', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, PAIR_CATCH, '    catch { return UNKNOWN; }', 'any-throw-keeps'), 'any-throw-keeps');
+  const ALLGONE = mutantCopies('peer-state-pair-catch-all-gone', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, PAIR_CATCH, "    catch { return { reply: 'gone' }; }", 'any-throw-gone'), 'any-throw-gone');
+  const tk = table(ALLKEEP), tg = table(ALLGONE);
+  ok(tk.filter((r) => r.got !== r.want).map((r) => r.what).join(' | ') === ROWS.filter((r) => r[2] === 'gone').map((r) => r[0]).join(' | '),
+    '⑮ RED (the must of r1645): every throw read as «cannot say» (a copy) ⇒ the REMOVED machines read as kept — named', tk.filter((r) => r.got !== r.want));
+  ok(tg.filter((r) => r.got !== r.want).map((r) => r.what).join(' | ') === 'a read that fails some other way (EIO)',
+    '⑮ RED (r1397 (2)): every throw read as «gone» (a copy) ⇒ a read that failed some other way refuses as unpaired — named', tg.filter((r) => r.got !== r.want));
+
+  // THE CENSUS: every reader of a machine in the deliver engine asks pairingOf — the store's own get is called in ONE place
+  const fnAt = (src, at) => { const before = src.slice(0, at); const m = [...before.matchAll(/\n  (?:async )?function (\w+)\(|\n  const (\w+) = /g)].pop(); return m ? (m[1] || m[2]) : '?'; };
+  const readers = (src) => [...src.matchAll(/(?:\bhosts|getHosts\s*(?:\?\.)?\(\s*\))\s*(?:\?\.|\.)\s*get\s*(?:\?\.)?\(/g)].map((m) => fnAt(src, m.index));
+  const here = readers(DSRC);
+  const planted = DSRC.replace("  const silentSinceOf = (hid) => {", "  const silentSinceOf = (hid) => { const _x = getHosts().get(hid);");
+  ok(here.join() === 'pairingOf' && readers(planted).length === 2 && readers(planted).includes('silentSinceOf'),
+    'THE CENSUS: the machines list\'s get is called in ONE place in the deliver engine — pairingOf; every reader of a machine asks it (CONTROL: a planted direct read is named)', { readers: here, planted: readers(planted) });
 }
 
 report();
