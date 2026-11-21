@@ -756,6 +756,11 @@
   "why": "process ended first; boot re-marks stopped"
  },
  {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > managerStop · commit()",
+  "verdict": "none",
+  "why": "error-field tidy; boot re-marks stopped"
+ },
+ {
   "key": "browser-keeper · src/server/browser-keeper.js · create > ownWindowAtAttach · commit()",
   "verdict": "none",
   "why": "lease window bookkeeping; re-bound next attach"
