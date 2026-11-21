@@ -73,7 +73,8 @@ console.log('② no second writer: a starter that does not answer is a failed la
   const r = R.createCliConfigRunner({ starter: { run: async () => { n++; return { unknown: true, why: 'no starter' }; } }, helperPath: '/x/h.mjs', stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
   const l1 = await r.apply(() => 'P', 'boot'), l2 = await r.apply(() => 'P', 'again');
   ok(!l1.ok && /the starter did not answer/.test(l1.why) && /nothing was written by this hub/.test(l1.why) && n === 2 && !l2.ok, 'the landing FAILS by name («the starter did not answer … nothing was written by this hub»), and the next request asks the starter again', { l1, n });
-  ok(!/applyConfigPlan|writeJsonManaged|writeTomlManaged/.test(src(RUNNER_REL)) && !/applyConfigPlan\(/.test(src(SYNC_REL)), 'there is no in-process writer to fall back to: neither the runner nor harness-config-sync calls the applier');
+  const code = (rel) => src(rel).replace(/\/\/[^\n]*/g, ''), APPLIER = /\b(?:applyConfigPlan|writeJsonManaged|writeTomlManaged|ensureCliConfig)\b/;   // the code, its comments set aside
+  ok(!APPLIER.test(code(RUNNER_REL)) && !APPLIER.test(code(SYNC_REL)), 'there is no in-process writer to fall back to: neither the runner nor harness-config-sync calls the applier');
 }
 
 console.log('③ the spawn gate (r1407 (a)): it waits within the bound, then the start goes on and says it');

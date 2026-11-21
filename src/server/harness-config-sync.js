@@ -29,7 +29,7 @@
 // Literal harness ids are FORBIDDEN in this tier (test-architecture's census):
 // every id here arrives from a session, an account or the registry.
 const { HARNESS_SETTINGS, settingPath, rowOf, rowsOfKind, coerce, readRow, refusedValue, buildConfigPlan } = require('../harness-settings');
-const { applyConfigPlan, readConfigPlan, encodePlan } = require('../harness-config');
+const { readConfigPlan, encodePlan } = require('../harness-config');   // B-ddf3 unit 2 line 1: no applier here — this machine is written by the shipped helper
 const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loaded with the module, never on a push's pass (batch 21's cure)
 
 /** Descriptor facts → plan specs for buildConfigPlan (ONE spelling: the
