@@ -304,7 +304,7 @@ console.log("— ④d the accessors answer a row's FILE in this checkout (主开
     "a row's own file is answered; a file with its name in another folder, another file, or no main file is not");
   ok(JSON.stringify(SM.cliCandidatesOf('claude', { HOME: '/home/u', PATH: '/a::/b', VS_CLAUDE_BIN: '/x/claude' })) === JSON.stringify(['/x/claude', '/a/claude', '/b/claude', '/home/u/.local/bin/claude']),
     'the CLI candidates are read from the HANDED env: $VS_<CLI>_BIN, each handed PATH dir, the handed ~/.local/bin');
-  ok(SM.NOT_REHOMED.map((r) => r.file).join() === 'ci.mjs,probe-claude-stdout.mjs,measure-tier3.mjs,measure-browser-windows.mjs,measure-dialog-hold.mjs,measure-held-enable.mjs,measure-hidden-window-cpu.mjs,measure-input-receipts.mjs,measure-navigation-loop.mjs,measure-shared-profile-freeze.mjs' && SM.NOT_REHOMED.every((r) => r.why.length > 40),
+  ok(SM.NOT_REHOMED.map((r) => r.file).join() === 'ci.mjs,probe-claude-stdout.mjs,measure-tier3.mjs,ci-remote.mjs,measure-browser-windows.mjs,measure-dialog-hold.mjs,measure-held-enable.mjs,measure-hidden-window-cpu.mjs,measure-input-receipts.mjs,measure-navigation-loop.mjs,measure-shared-profile-freeze.mjs' && SM.NOT_REHOMED.every((r) => r.why.length > 40),
     '(f) the main files that run on the handed home ON PURPOSE are named rows, each with its reason: the tier runner, the real-CLI probe, the measure script that reads the person\'s browser install, and the seven by-hand browser measurements (cure 6: one family reason)');
 }
 
@@ -708,6 +708,47 @@ const legsRowLink = (r) => [{ name: '8a a LINK named like a not-re-homed row (ci
   ok(v('/var/tmp/vs-node-hv-x', 30 * day) === 'keep' && v(K, 30 * day, false) === 'keep' && v('/var/tmp/vs-node-ABCDEF0123456789', 30 * day) === 'keep', "(c) …and ONLY by its own shape: a name merely beginning the same way, a folder without its stamp, a key not of its form — kept");
   ok(v(`/var/tmp/vs-node-${KEY}`, 8 * day) === 'reap', 'cure 4: an OLDER form of the folder (no version in its name) is aged out by the same sweep');
   ok(v('/var/tmp/vs-hv-a1B2c3', 25 * 3600e3) === 'reap' && v('/var/tmp/vs-hv-a1B2c3', 60e3) === 'keep' && v('/var/tmp/vs-hv-anything-else', 30 * day) === 'keep' && v('/var/tmp/vs-hv-a1B2c', 30 * day) === 'keep', "cure 3: the sweep takes the suite's stand-in folders ONLY in the exact form the suite makes (vs-hv- + six), a day old — never a folder whose name merely begins the same way");
+}
+
+// ── THE RUNNER'S NAMES REACH A RE-HOMED SUITE'S CHILDREN (主开发 r1083 cure 1) ──────────────────────────────────────────────────
+// The tier runner hands every fast suite the egress sampler (--require) and its file (VIBESPACE_SUITE_EGRESS_FILE); a fork()ed
+// child carries the --require by its execArgv and the file by the env. A re-homed suite's env is BUILT from the rows, so the file's
+// name must be one: a stand-in suite handed a home outside every temp root forks a child that opens a socket past the loopback,
+// and the sampler's file holds that child's line. CONTROL: the same stand-in through a copy of the tree whose home-verdict.js lacks
+// the row — the child's line is gone (the tip before this cure).
+console.log('— the runner\'s egress file reaches a re-homed suite\'s forked child (B-9dd0 × the re-home)');
+{
+  const SAMPLER = path.join(REPO, 'scripts/egress-sampler.cjs');
+  const CHILD = path.join(DIR, 'egress-child.cjs');
+  fs.writeFileSync(CHILD, "const net = require('net'); const s = net.connect({ host: 'egress-child.invalid', port: 9 }); s.on('error', () => {}); s.destroy(); setTimeout(() => process.exit(0), 20);\n");
+  const probeSrc = (scratchUrl) => `import ${JSON.stringify(scratchUrl)};\nimport { fork } from 'node:child_process';\nconst c = fork(${JSON.stringify(CHILD)}, [], { stdio: 'ignore' });\nc.on('exit', (code) => { process.stdout.write(JSON.stringify({ code, home: process.env.HOME, file: process.env.VIBESPACE_SUITE_EGRESS_FILE || null }) + '\\n'); });\n`;
+  // the control's tree: scripts/ (scratch.mjs as shipped, scratch-run.mjs linked) and a src/ of links but home-verdict.js, a copy without the row
+  const ctlTree = (() => {
+    const d = path.join(DIR, 'mut', 'egress-row'), sd = path.join(d, 'scripts'), srcd = path.join(d, 'src');
+    fs.mkdirSync(sd, { recursive: true }); fs.mkdirSync(srcd, { recursive: true });
+    for (const e of fs.readdirSync(path.join(REPO, 'src'))) if (e !== 'home-verdict.js') fs.symlinkSync(path.join(REPO, 'src', e), path.join(srcd, e));
+    const HVS = fs.readFileSync(path.join(REPO, 'src/home-verdict.js'), 'utf8');
+    const row = HVS.split('\n').find((l) => l.includes("R('VIBESPACE_SUITE_EGRESS_FILE', 'path',")) || '';
+    fs.writeFileSync(path.join(srcd, 'home-verdict.js'), SM.anchored(HVS, row + '\n', '', 'control «the egress file’s row cut»'));
+    fs.writeFileSync(path.join(sd, 'scratch.mjs'), SCR_SRC); fs.symlinkSync(path.join(REPO, 'scripts/scratch-run.mjs'), path.join(sd, 'scratch-run.mjs'));
+    return { scratchUrl: pathToFileURL(path.join(sd, 'scratch.mjs')).href, dir: sd };
+  })();
+  const egressRun = (tag, scratchUrl, dir) => new Promise((resolve) => {
+    const file = path.join(DIR, `egress-${tag}.ndjson`), probe = path.join(dir, `test-hv-egress-${tag}.mjs`);
+    fs.writeFileSync(probe, probeSrc(scratchUrl));
+    const c = spawn(process.execPath, ['--require', SAMPLER, probe], { env: { ...process.env, ...handed, VIBESPACE_SUITE_EGRESS_FILE: file }, timeout: 60000 });
+    let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
+    c.on('close', (status) => {
+      let j = null; try { j = JSON.parse(out.trim().split('\n').pop()); } catch { }
+      let lines = []; try { lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { }
+      resolve({ j, status, err: err.slice(-400), lines, child: lines.some((l) => String(l.host || '').startsWith('egress-child.invalid')) });
+    });
+  });
+  const [real, ctl] = await Promise.all([egressRun('real', SCRATCH_URL, DIR), egressRun('ctl', ctlTree.scratchUrl, ctlTree.dir)]);
+  ok(!!real.j && /^\/tmp\/vs-rehome-/.test(real.j.home || '') && real.j.file !== null && real.child,
+    'a RE-HOMED suite keeps the runner\'s egress file, and its fork()ed child\'s socket past the loopback is in the sampler\'s file', { j: real.j, lines: real.lines.slice(0, 4), err: real.err });
+  ok(!!ctl.j && /^\/tmp\/vs-rehome-/.test(ctl.j.home || '') && ctl.j.file === null && !ctl.child && ctl.lines.length >= 1,
+    'CONTROL: the same suite through a home-verdict.js without the row loses the file at the re-home — its child records nothing while the parent\'s sentinel stays', { j: ctl.j, lines: ctl.lines.slice(0, 4), err: ctl.err });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

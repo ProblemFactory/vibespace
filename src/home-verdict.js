@@ -191,6 +191,9 @@ const ENV_ROWS = Object.freeze([
   R('VIBESPACE_CI_DIR_SWEEP', 'word', "the tier runner's directory-sweep switch, set for each suite"),
   R('VIBESPACE_SUITE_BUDGET_MS', 'word', "the tier runner's budget for the suite it runs"),
   R('VIBESPACE_SUITE_HANG_REPORT', 'path', "where the tier runner asks a suite's hang report to go — a path, judged three ways"),
+  // the re-land's census (主开发 r1083 cure 1: every name the runner, the workflow file or the kit hands a suite is a row or a named NOT)
+  R('VIBESPACE_SUITE_EGRESS_FILE', 'path', "where the tier runner's egress sampler writes a suite's sockets (B-9dd0): a fork()ed child and a Worker carry the sampler by its --require and the file by this name — a path, judged three ways"),
+  R('VIBESPACE_CI_SCRATCH_ROOTS', 'paths', "the gate's configured scratch roots (scripts/scratch-run.mjs SCRATCH_ROOTS_ENV): a suite's own stamp and the reaper's judgment read them — a list, carried whole or not at all"),
   // THE PROCESS MARKS (B-ba47's follow-up, 主开发 r863 MUST 2): ids, no route and no credential — how the person's Stop and a
   // job's stop find what a suite's children left behind; the scratch import keeps them, so the built env carries them too
   ...CONVERSATION_MARKS.map((n) => R(n, 'word', "a process MARK (src/conversation-env.js CONVERSATION_MARKS): an id the person's Stop or a job's stop finds escapees by — no route, no credential")),
@@ -207,6 +210,9 @@ const ENV_NOT = Object.freeze([
   ...AGENT_CLIS.map((c) => `VS_${c.toUpperCase().replace(/-/g, '_')}_BIN`).map(N("a PINNED agent CLI: the person's real CLI — a suite reaches one only through the real-CLI accessor (scripts/scratch.mjs REAL_CLI_ALLOW)", 'a pinned agent CLI', () => 'the real-CLI accessor (scripts/scratch.mjs handedCliCandidates)')),
   ...['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME'].map(N("an XDG base folder: it follows each process's OWN home", 'an XDG base folder', (n) => (n === 'XDG_STATE_HOME' ? 'every XDG program' : null))),
   ...['PWD'].map(N("the caller's shell's folder, not the suite's", "the caller's shell")),
+  // the tier runner's OWN knobs and the kit's switch (主开发 r1083 cure 1): how the runner runs, never what a suite is handed for itself
+  ...['VIBESPACE_CI_LANES', 'VIBESPACE_CI_LANE_ROOT', 'VIBESPACE_CI_REMOTE_RUN'].map(N("the tier runner's own (how many lanes, where they live, a remote run's word): a suite is handed what each means for it (its HOME, its budget), never the runner's knob", "the runner's own")),
+  ...['VIBESPACE_SKIP_AGENT_HOOKS'].map(N("the kit's switch for the hubs it starts itself: a suite that needs it sets it for its own child, by name", "the kit's switch")),
   ...['NODE_OPTIONS'].map(N('free text that can preload code from anywhere — not a shape', 'free text')),
   ...['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'NVM_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'CODEX_API_KEY'].map(N("the person's agent CLIs: their folders, their sign-ins", "the person's agent CLIs", (n) => (['ANTHROPIC_AUTH_TOKEN', 'CODEX_API_KEY'].includes(n) ? 'the agent CLIs' : null))),
 ]);

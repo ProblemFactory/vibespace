@@ -415,6 +415,29 @@ export function outsideReaders(dir, outside) {
   }).filter((x) => x.own || x.via.length);
 }
 /** THE ROW (主开发 14:15Z: many ⇒ a row, they ride with H) — measured 2026-11-14 on 91ac6db0b: 153 of the 317 files outside. */
+/** THE SUITES THAT LOOK A VENDOR PROGRAM UP BY THEMSELVES (主开发 r1083 cure 2): they are no scripts/scratch.mjs REAL_CLI_ALLOW
+ *  row (a new row is the owner's to give, never a lane's). Each finds its program on its OWN PATH / HOME / VS_<CLI>_BIN, so
+ *  re-homed (the hosted runner, the push hook, the cut) it finds a system copy or none, and prints a named SKIP; a HIDE row
+ *  drops the folders holding it. test-architecture §113 holds this list both ways against the suites that look a program up,
+ *  and the kb names them beside the allow table. */
+export const SELF_LOOKUP = Object.freeze({
+  'test-claude-update-needs-nothing-hub.mjs': 'claude — §L reads the installed catalog; re-homed, it says by name that it did not run',
+  'test-codex-sandbox-net.mjs': 'codex — the loopback A/B over the real `codex sandbox` (binary); re-homed, it says by name that it did not run',
+  'test-harness-honesty.mjs': 'codex — the fixture-vs-live schema diff; re-homed, it says by name that it did not run',
+  'test-harness-settings.mjs': 'codex — its load leg (--version, `features list`); re-homed, it says by name that it did not run',
+  'test-opencode-s9.mjs': 'opencode — a real `opencode serve` (binary, the box); re-homed, it says by name that it did not run',
+  'test-permission-rules.mjs': 'codex — the live oracle run; re-homed, it says by name that it did not run',
+  'test-pricing-tiers.mjs': 'claude — §3 reads the installed catalog as an oracle; re-homed, it says by name that it did not run',
+  'test-queue-steer.mjs': 'codex — ⑥ / ⑩ the real `codex app-server`; re-homed, it says by name that it did not run',
+  'test-record-clear-walk.mjs': 'claude — a HIDE row: its hub\u2019s PATH drops the folders holding it',
+  'test-record-shape.mjs': 'claude — the installed binary\u2019s shapes READ off it; re-homed, it says by name that it did not run',
+  'test-toolbar-fold-ui.mjs': 'claude, codex — a HIDE row: its hub\u2019s PATH drops the folders holding them',
+  'test-vendor-whitelist.mjs': 'the shipped oracles — (b) the live re-measurement under strace; re-homed, it says by name that it did not run',
+});
+/** THE NAMES THE KIT HANDS ITS SUITES (the test machines' kit is outside the tree: testbox/remote/runner.mjs and heavy-run.sh,
+ *  read by fixed string 2026-11-21 for 主开发 r1083 cure 1) — test-architecture §113 holds each as a row or a named NOT. */
+export const KIT_HANDED = Object.freeze(['HOME', 'LANG', 'PATH', 'TZ', 'TMPDIR', 'XDG_RUNTIME_DIR', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_SUITE_EGRESS_FILE',
+  'VS_NO_REAL_CLI', 'VIBESPACE_CI_DIR_SWEEP', 'VIBESPACE_CI_LANES', 'VIBESPACE_CI_LANE_ROOT', 'VIBESPACE_CI_REMOTE_RUN']);
 export const OUTSIDE_ROW = Object.freeze({ max: 194, why: 'in-process suites / debug scripts with no path to scratch.mjs that load a home-reading product module or read the home themselves — restated 153 → 194 by the wider loader reader (any string literal naming src/<x>.js or server.js, 主开发 17:06Z BOUNDARY-4): pick C gives them the import; the count may only fall; a NEW one takes the import (scratch.mjs first)' });
 
 // ── THE ENVIRONMENT'S TABLE, HELD BOTH WAYS (B-ba47, 主开发 01:23Z amendment 7) ─────────────────────────────────────────

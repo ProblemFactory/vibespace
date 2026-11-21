@@ -25,7 +25,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import { format as formatArgs } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
-import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, reachesScratch, lateLoads, envCensus, outsideReaders, OUTSIDE_ROW } from './hub-home-census.mjs';   // §57 + §113: the one reader of a server.js spawn
+import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, reachesScratch, lateLoads, envCensus, outsideReaders, OUTSIDE_ROW, SELF_LOOKUP, KIT_HANDED } from './hub-home-census.mjs';   // §57 + §113: the one reader of a server.js spawn
 import { trackedFiles } from './tracked-files.mjs';   // lane grants-unify: §97 (b) lists src via git ls-files
 import * as acorn from 'acorn';   // lane grants-unify (verify F3): §97 (a) judges each reader's function body, not its lines
 import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';
@@ -8344,7 +8344,7 @@ await section(async () => {
     return red;
   };
   const rr112 = roads112(files112);
-  ok(Object.keys(ROADS112).length > 0 && !rr112.length, `§112 the computed mark: the ${Object.keys(ROADS112).length} roads that finish a child's env (the local line, the remote command, a job's run, the boot's re-adopt) each write VIBESPACE_HANDED, and each of the ${Object.keys(SITES112).length} injector sites reaches one or is named${rr112.length ? ' — RED: ' + rr112.join(' | ') : ''}`, rr112);
+  ok(Object.keys(ROADS112).length >= 4 && !rr112.length, `§112 the computed mark: the ${Object.keys(ROADS112).length} roads that finish a child's env (the local line, the remote command, a job's run, the boot's re-adopt) each write VIBESPACE_HANDED, and each of the ${Object.keys(SITES112).length} injector sites reaches one or is named${rr112.length ? ' — RED: ' + rr112.join(' | ') : ''}`, rr112);
   ok(roads112({ ...files112, 'src/remote-shell.js': (files112['src/remote-shell.js'] || '').replace('${HANDED_MARK}=', '${HANDED}=') }).some((r) => /remote-shell\.js finishes a child's env and no longer writes the mark/.test(r))
     && roads112(files112, ROADS112, { ...SITE_ROAD112, 'src/spawn/dial.js': undefined }).some((r) => /dial\.js writes a conversation's names and reaches NO road/.test(r))
     && roads112({ ...files112, 'src/spawn/ssh.js': (files112['src/spawn/ssh.js'] || '').split('buildRemoteExec(').join('buildRemote(') }).some((r) => /ssh\.js no longer reaches src\/remote-shell\.js/.test(r)),
@@ -8504,10 +8504,57 @@ await section(async () => {
   const missing = envc.knobs.filter((n) => !knobsFile.includes(n)), stale = knobsFile.filter((n) => !envc.knobs.includes(n));
   ok(missing.length === 0 && stale.length === 0 && envc.unread.length === 0 && HVm.ENV_ROWS.length >= 10 && HVm.ENV_NOT.length >= 10,
     `§113 THE ENVIRONMENT IS BUILT, its table held both ways: every name a suite reads is carried (${HVm.ENV_ROWS.length} rows), not carried by name (${HVm.ENV_NOT.length}), set first, or one of the ${knobsFile.length} suites' own knobs (scripts/suite-env-knobs.json, derived) — and every row is read or names its program${missing.length ? ' — NEW knobs (regenerate the list or give each a row): ' + missing.join(', ') : ''}${stale.length ? ' — STALE knobs: ' + stale.join(', ') : ''}${envc.unread.length ? ' — rows nothing reads: ' + envc.unread.join(', ') : ''}`);
+  // (e5) EVERY NAME THE RUNNER, THE WORKFLOW FILE OR THE KIT HANDS A SUITE IS A ROW OR A NAMED NOT (主开发 r1083 cure 1): read as
+  // DATA — the runner's own assignments (scripts/ci.mjs: `env.N =` / `out.N =`, and the keys of an env it builds over laneEnv /
+  // env), the workflow files' env blocks (workflow and job level, and each step that RUNS a suite: `node scripts/…`), and the kit's
+  // names (outside the tree: hub-home-census.mjs KIT_HANDED). HOME and PATH are the re-home's own (built). A name in none is red.
+  const handed113 = new Map(), addH = (n, at) => { if (!handed113.has(n)) handed113.set(n, at); };
+  read('scripts/ci.mjs').split('\n').forEach((l, i) => {
+    const c = l.replace(/(^|\s)\/\/.*$/, '');
+    for (const m of c.matchAll(/\b(?:env|out)\.([A-Z][A-Z0-9_]+)\s*=(?!=)/g)) addH(m[1], `scripts/ci.mjs:${i + 1}`);
+    if (/\{\s*\.\.\.(?:laneEnv\(|env\b)/.test(c)) for (const m of c.matchAll(/[{,]\s*([A-Z][A-Z0-9_]{2,})\s*:/g)) addH(m[1], `scripts/ci.mjs:${i + 1}`);
+  });
+  const wfNames = (text, file) => {
+    const L = text.split('\n'), ind = (x) => x.length - x.trimStart().length, out = [];
+    L.forEach((l, i) => {
+      if (!/^\s*env:\s*$/.test(l)) return;
+      const e = ind(l); let j = i - 1; while (j >= 0 && (L[j].trim() === '' || ind(L[j]) >= e)) j--;
+      const owner = j >= 0 ? L[j] : '';
+      if (/^\s*-\s/.test(owner)) {   // a STEP's own env: it counts only when the step runs a suite
+        const si = ind(owner); let k = j + 1, body = owner; while (k < L.length && (L[k].trim() === '' || ind(L[k]) > si)) body += '\n' + L[k++];
+        if (!/\bnode scripts\/|scripts\/ci\.mjs|\bnpm (?:test|run)\b/.test(body)) return;
+      }
+      for (let k = i + 1; k < L.length && (L[k].trim() === '' || ind(L[k]) > e); k++) { const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/.exec(L[k]); if (m) out.push([m[1], `${file}:${k + 1}`]); }
+    });
+    return out;
+  };
+  for (const wf of fs.readdirSync(path.join(REPO, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) for (const [n, at] of wfNames(read(`.github/workflows/${wf}`), `.github/workflows/${wf}`)) addH(n, at);
+  for (const n of KIT_HANDED) addH(n, 'the kit (hub-home-census.mjs KIT_HANDED)');
+  const ruled113 = (n, HVx = HVm) => ['HOME', 'PATH'].includes(n) || HVx.ENV_ROWS.some((r) => r.name === n || (r.prefix && n.startsWith(r.prefix))) || HVx.ENV_NOT.some((r) => r.name === n);
+  const unruled113 = [...handed113].filter(([n]) => !ruled113(n));
+  ok(handed113.size >= 10 && handed113.has('VIBESPACE_SUITE_EGRESS_FILE') && handed113.has('VIBESPACE_CI_OAT') && !unruled113.length,
+    `§113 (e5) every name the runner, the workflow file or the kit hands a suite is a row (carried) or a named NOT (${handed113.size} names: ${[...handed113.keys()].sort().join(', ')})${unruled113.length ? ' — RED: ' + unruled113.map(([n, at]) => `${n} (${at})`).join(', ') + ' is neither: give it a row or a named NOT with its reason' : ''}`);
+  const wfCtl = wfNames("jobs:\n  a:\n    steps:\n      - name: gh\n        env:\n          GH_ONLY: x\n        run: install-gh\n      - run: node scripts/ci.mjs --fast\n        env:\n          SUITE_NEW: y\n", 'ctl.yml').map(([n]) => n);
+  ok(wfCtl.join() === 'SUITE_NEW' && !ruled113('VIBESPACE_NEW_HANDED') && ruled113('VIBESPACE_SUITE_EGRESS_FILE') && ruled113('VIBESPACE_CI_LANES'),
+    '§113 (e5) CONTROL: a step that runs a suite hands its env, a step that does not hands none; a handed name in no row and no named NOT is red by name');
+  // (c5) A SUITE REACHES A REAL PROGRAM AFTER THE RE-HOME ONLY THROUGH A NAMED ALLOW ROW (主开发 r1083 cure 2): every suite that
+  // looks a vendor program up — §50's REAL_CLI shape, read from this file, or a PATH walk / VS_<CLI>_BIN read — is an allow row
+  // (and then goes through the accessor, never its own lookup) or a named self-lookup (hub-home-census.mjs SELF_LOOKUP), both ways
+  const rcLine113 = read('scripts/test-architecture.mjs').split('\n').find((l) => l.trim().startsWith('const REAL_CLI = /'));
+  const RC113 = rcLine113 ? new Function(`return ${rcLine113.trim().replace(/^const REAL_CLI = /, '').replace(/;$/, '')};`)() : null;
+  const PROGS113 = RC113 ? (/^command -v \(([^()]*)\)\\b\|/.exec(RC113.source) || [, ''])[1].split('|').filter(Boolean) : [];
+  const WALK113 = [new RegExp(String.raw`\bsplit\(\s*['"]:['"]\s*\)[^;\n]*path\.join\(\s*[\w$]+\s*,\s*['"](?:${PROGS113.join('|')})['"]\s*\)`), new RegExp(String.raw`\bprocess\.env\.VS_(?:${PROGS113.map((x) => x.toUpperCase()).join('|')})_BIN\b`)];
+  const looksUp113 = (src) => !!RC113 && src.split('\n').filter((l) => !/^\s*(?:\/\/|\*)/.test(l)).some((l) => RC113.test(l) || WALK113.some((r) => r.test(l)));
+  const lookers113 = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && f !== 'test-architecture.mjs').filter((f) => looksUp113(read('scripts/' + f))).sort();
+  const noRow113 = lookers113.filter((f) => !allow.includes(f) && !SELF_LOOKUP[f]), staleSelf113 = Object.keys(SELF_LOOKUP).filter((f) => !lookers113.includes(f)), rowLooks113 = allow.filter((f) => lookers113.includes(f));
+  ok(PROGS113.length >= 2 && lookers113.length >= 10 && !noRow113.length && !staleSelf113.length && !rowLooks113.length && allow.includes('test-claude-wrapper-queue.mjs'),
+    `§113 (c5) a suite reaches a real program after the re-home only through an allow row: ${lookers113.length} suites look one up by themselves, each a named self-lookup (${Object.keys(SELF_LOOKUP).length}); every allow row goes through the accessor${noRow113.length ? ' — RED, no row: ' + noRow113.join(', ') : ''}${staleSelf113.length ? ' — a self-lookup row that no longer looks one up: ' + staleSelf113.join(', ') : ''}${rowLooks113.length ? ' — an allow row that looks it up by itself: ' + rowLooks113.join(', ') : ''}`);
+  ok(looksUp113("const b = spawnSync('claude', ['--version']);") && looksUp113("const c = String(process.env.PATH).split(':').map((d) => path.join(d, 'codex'));") && !looksUp113("const c = handedCliCandidates('claude');"),
+    '§113 (c5) CONTROL: a bare start and a PATH walk are a lookup, the accessor is not');
   // (f) the main files that run on the handed home ON PURPOSE: named rows, each a file of scripts/ with its reason
   const nrBlock = (sm.match(/export const NOT_REHOMED = Object\.freeze\(\[([\s\S]*?)\n\]\);/) || [, ''])[1];
   const nr = [...nrBlock.matchAll(/'([\w.-]+\.mjs)'/g)].map((m) => m[1]);
-  ok(nr.length === 10 && nr.slice(0, 3).join() === 'ci.mjs,probe-claude-stdout.mjs,measure-tier3.mjs' && nr.every((f) => fs.existsSync(path.join(REPO, 'scripts', f))) && /BY_HAND_BROWSER = "by hand: it drives the person's OWN browser driver/.test(sm),
+  ok(nr.length === 11 && nr.slice(0, 3).join() === 'ci.mjs,probe-claude-stdout.mjs,measure-tier3.mjs' && nr.every((f) => fs.existsSync(path.join(REPO, 'scripts', f))) && /BY_HAND_BROWSER = "by hand: it drives the person's OWN browser driver/.test(sm),
     `§113 (f) every scripts/ main file that loads the scratch module re-homes, except the NAMED rows (${nr.join(', ')}), each a file with its reason`);
   // (g) said limits: a worker's own execPath, the process title and the report's command line still name the handed node — nothing reads them
   const codeFiles = trackedFiles(REPO).filter((f) => /^(?:scripts|src)\/.*\.(?:m?js|cjs)$/.test(f) && !f.startsWith('scripts/fixtures/') && f !== 'scripts/test-architecture.mjs');
@@ -8525,7 +8572,7 @@ await section(async () => {
   ok(titleReads.length === 0 && reportReads.length === 0 && workerExec.length === 0, `§113 (g) the said limits: nothing reads the process title (${titleReads.length}), the report's command line (${reportReads.length}), or a worker's own execPath (${workerExec.length})`, { titleReads, reportReads, workerExec });
   // (e3) A1's said limit: the suite's own executable link in the process table still names the handed node — so nothing reads it
   // a READ in code (a comment that names the kernel's link, as test-agentd-stay's does, reads nothing)
-  const codeOf113 = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+  const codeOf113 = (t) => { const a = t.split(''); for (const [x, y, k] of dataRanges(t)) if (k === 'comment') for (let i = x; i < y; i++) a[i] = ' '; return a.join(''); };   // the file's own reader (a // in a string or a regex stays)
   const selfExe = trackedFiles(REPO).filter((f) => /^(?:scripts|src)\/.*\.(?:m?js|cjs)$/.test(f) && !f.startsWith('scripts/fixtures/') && f !== 'scripts/test-architecture.mjs').filter((f) => { try { return codeOf113(read(f)).includes('/proc/self/exe'); } catch { return false; } });
   ok(selfExe.length === 0, `§113 A1's limit: no file in scripts/ or src/ reads /proc/self/exe (the suite's own process keeps the kernel's answer; ${selfExe.length})`, selfExe);
   // (f) THE SUITES OUTSIDE BOTH FENCES — one row (主开发 14:15Z: many ⇒ a row; they ride with shape H): the count may only fall

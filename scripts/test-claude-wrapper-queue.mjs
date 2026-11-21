@@ -32,7 +32,7 @@ import http from 'node:http';
 import { spawn, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, stopWrapper, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, stopWrapper, endRootedProcesses, CHROME_STORE, CHROME_QUIET, handedCliCandidates } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,11 +49,17 @@ console.log('§A the real claude CLI behind the real wrapper, a local mock of th
 // B-ddb9 (lane bl-scratch, 2026-11-17): VS_NO_REAL_CLI=1 (every acceptance run, every lane env, the test machine) means the
 // REAL CLI is not run here — SKIP by name, whatever the PATH holds (a claude on it ran this leg under the flag before)
 const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1';
+// B-ba47 pick B (主开发 r1083 cure 2): the HANDED env's candidates — this suite is a row of scratch.mjs REAL_CLI_ALLOW (a suite
+// handed a non-temp home runs re-homed, so its own PATH / HOME no longer name the person's CLI; test-architecture §113)
+const claudeCands = NO_REAL_CLI ? [] : handedCliCandidates('claude');
+const claudeSaid = claudeCands[0] || null;   // the HANDED VS_CLAUDE_BIN: the run SAYS where its claude is
 const claudeBin = NO_REAL_CLI ? null : (() => {
-  const cands = [process.env.VS_CLAUDE_BIN, ...String(process.env.PATH || '').split(':').filter(Boolean).map((d) => path.join(d, 'claude')), path.join(process.env.HOME || '/nonexistent', '.local/bin/claude')].filter(Boolean);
-  for (const c of cands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile() && fs.statSync(real).size > 10 * 1048576) return real; } catch { } }
+  for (const c of claudeCands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile() && fs.statSync(real).size > 10 * 1048576) return real; } catch { } }
   return null;
 })();
+// the checks the real CLI would have run, counted off this file's own block — a skip says its leg count, never a pass
+const legsOf = (marker) => { const t = fs.readFileSync(new URL(import.meta.url), 'utf8'), i = t.indexOf(marker), j = t.indexOf('else {', i) + 6; let d = 1, k = j; while (d && k < t.length) { const c = t[k++]; if (c === '{') d++; else if (c === '}') d--; } return (t.slice(j, k).match(/(?<![\w.])ok\(/g) || []).length; };
+const skips = [];
 /** The mock: a prompt whose LAST user message holds `LONG-` streams for `longMs`; `BG-START` answers with ONE background
  *  Agent tool call, whose own requests (`SUBAGENT-WORK`) stream for `longMs`; anything else answers at once. */
 async function startMock(longMs) {
@@ -137,8 +143,12 @@ async function realRun(name, wrapperPath, longMs, script, extraArgs = []) {
     await stopWrapper(w, { dir });
   }
 }
-if (!claudeBin) {
-  skip('§A ①–⑤ the real CLI', `${NO_REAL_CLI ? 'VS_NO_REAL_CLI=1 — the real claude is not run here' : 'no claude binary ($VS_CLAUDE_BIN, `claude` on PATH, $HOME/.local/bin/claude)'} — the stand-in legs in test-queue-putback §6 / test-queue-steer ⑯ still ran`);
+if (!claudeBin && claudeSaid) {
+  ok(false, `§A ①–⑤ the run NAMES its claude (${claudeSaid}) and it is not a usable binary there — a fenced leg is RED, never a skip (主开发 r1083)`);
+} else if (!claudeBin) {
+  const n = legsOf("} else if (!claudeBin) {");
+  skip(`§A ①–⑤ + §B the real CLI (${n} checks)`, `${NO_REAL_CLI ? 'VS_NO_REAL_CLI=1 — the real claude is not run here' : 'no claude binary by the handed env ($VS_CLAUDE_BIN, `claude` on PATH, $HOME/.local/bin/claude)'} — the stand-in legs in test-queue-putback §6 / test-queue-steer ⑯ still ran`);
+  skips.push(`§A ①–⑤ + §B: ${n} checks`);
 } else {
   const LANE = path.join(REPO, 'data/bin/chat-wrapper.js');
   // a copy of the wrapper with the HOLD switched off (every user frame forwarded at once — the pre-.354 behaviour)
@@ -346,5 +356,5 @@ else {
   try { ctl.close(); } catch { }
 }
 
-console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skipped} skipped)` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);
+console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skipped} skipped${skips.length ? ` — ${skips.join('; ')}` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped — ${skips.join('; ') || 'by name above'}` : ''})`);
 process.exit(fail ? 1 : 0);

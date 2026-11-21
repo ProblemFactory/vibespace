@@ -50,7 +50,8 @@ const { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.j
 
 let pass = 0; const fails = [];
 const ok = (name, cond, detail) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fails.push(name); console.log(`  ✗ ${name}${detail ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
-const skip = (name, why) => { pass++; console.log(`  ⊘ SKIP ${name} — ${why}`); };
+const skipNames = [];   // a skip is not a green (主开发 r1083 should): COUNTED apart and named in the closing line
+const skip = (name, why) => { skipNames.push(name); console.log(`  ⊘ SKIP ${name} — ${why}`); };
 /** A SATURATED machine (this repo's box runs many agents) hits EMFILE/ENOSPC on
  *  inotify and then: fs.watch cannot attach, and OpenCode cannot boot the
  *  instance a pty needs. That is the ENVIRONMENT failing, not the mechanism —
@@ -2749,5 +2750,5 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
   }
 }
 
-console.log(`\n${fails.length ? fails.length + ' FAILED' : 'ALL PASS'} (${pass} passed)`);
+console.log(`\n${fails.length ? fails.length + ' FAILED' : 'ALL PASS'} (${pass} passed${skipNames.length ? `, ${skipNames.length} skipped — ${skipNames.join('; ')}` : ''})`);
 if (fails.length) { for (const f of fails) console.log('  - ' + f); process.exit(1); }
