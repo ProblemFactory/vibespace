@@ -312,7 +312,7 @@ const ROWS = [
   ["src/store-hold.js", "unsynced", "b0248", "the hold's write (the desktops and their rollback points)", "create > write", "create > write"],
   ["src/store-hold.js", "move", "move", "a DAMAGED copy set aside under its dated name, its bytes untouched: setAside, and its off-the-loop twin setAsideAsync (line 349, B-f276 1c — r1143 (3): the rename through fs.promises, a person's press)", "create > setAside", "create > setAsideAsync"],
   ["src/store-writer-worker.js", "move", "move", "a ring's rotation (the live log to .1; each append was synced)", "writeJob"],
-  ["src/store-writer-worker.js", "synced", "writer", "the store writer's thread: every store the writer holds", "writeJob"],
+  ["src/store-writer-worker.js", "synced", "writer", "the store writer's thread: every store the writer holds (a whole write in pieces too: pieceJob)", "writeJob", "pieceJob"],
   ["src/store-writer-worker.js", "synced", "writer", "the store writer's thread: the REWRITE of an append store from its own bytes (row B-360d — the OTel stash's trim), synced, then renamed over the file", "rewriteJob"],
   ["src/sync-store.js", "unsynced", "store", "", "SyncStore.flush"],
   ["src/sysinfo.js", "unsynced", "store", "", "persistHistory"],

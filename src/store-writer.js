@@ -59,11 +59,20 @@ const mbOf = (b) => (b >= P.MB ? `${(b / P.MB).toFixed(1)} MB` : `${Math.max(1, 
 const RESTARTS_MAX = 3, RESTART_WINDOW_MS = 3600000;
 const EXIT_ROUNDS = 4;          // round 6's amend: the exit's last pass writes what its own writes' callbacks dirtied, at most 4 more rounds   // the writer's thread restarted at most 3 times an hour, then the main thread — said
 
+const BYREF = Symbol.for('vibespace.store-writer.byRef');
+const PIECE_BYTES = 4 * 1024 * 1024;   // measure 6 (r1323, the test machine): a 4 MB piece's turn 3.8–5.2 ms; the join of 186 MB 127–265 ms
+/** A WHOLE WRITE HANDED BY REFERENCE (the produce contract, 主开发 r1328): `list` = the Buffers of ONE turn (a store's chunk cache
+ *  — its buffers are REPLACED, never written into), with that turn's seq read in the same turn. The store PROMISES none of them
+ *  is written into until that write's answer; the writer copies the list piece by piece, a turn each (law 1: no whole write
+ *  holds a turn). A producer that cannot promise it returns a plain list: copied in its turn, as before. */
+function byRef(list) { return Object.freeze({ [BYREF]: true, list: Array.isArray(list) ? list : [list] }); }
+/** a handed buffer's bytes, summed (suites only — `verifyByRef`): a buffer written into after the hand-over fails its write */
+const sumOf = (b) => require('crypto').createHash('sha1').update(b).digest('base64');
 /** the bytes `produce()` returned → {parts, transfer, size, append}: ONE exact ArrayBuffer (a copy — a Buffer the store keeps,
  *  a cached chunk, is never handed away), transferred. `{append: bytes}` = an APPEND job (the acts journal). Bytes that are
  *  not a string / Buffer / an array of them, or EMPTY (unless the store said `allowEmpty`), THROW — that store's failed
  *  write, said (round 2, law E iii: `[]` or `''` renamed an empty file over a store with durable() true). */
-function partsOf(bytes, { allowEmpty = false } = {}) {
+function partsOf(bytes, { allowEmpty = false, verify = false } = {}) {
   // A REWRITE of an append store from its own bytes (row B-360d, the OTel stash's trim — 主开发 r725 a): `{rewrite: {ranges,
   // size}, then: bytes, as}` = the byte ranges [s, e) of the file's first `size` bytes (a Float64Array, ascending; a range
   // that ends at size + 1 ends with the newline the file lacks), then every byte the file holds past `size`, then `then`,
@@ -77,6 +86,14 @@ function partsOf(bytes, { allowEmpty = false } = {}) {
     return { parts: then ? then.parts : [], transfer: [...(then ? then.transfer : []), ranges.buffer], size: then ? then.size : 0, append: false, rewrite: { ranges, size: R.size }, as: typeof bytes.as === 'string' ? bytes.as : null };
   }
   let append = false;
+  if (bytes && bytes[BYREF]) {   // ONE TURN'S SNAPSHOT, BY REFERENCE (the writer unit, r1328): copied piece by piece, a turn each
+    const list = bytes.list;
+    let size = 0;
+    for (const b of list) { if (!(b && typeof b === 'object' && typeof b.byteLength === 'number' && b.buffer)) throw Object.assign(new Error(`its bytes handed by reference are not Buffers (${b === null ? 'null' : typeof b})`), { code: 'EBADBYTES' }); size += b.byteLength; }
+    if (!size && !allowEmpty) throw Object.assign(new Error('its bytes are empty'), { code: 'EEMPTY' });
+    if (size > PIECE_BYTES) return { parts: null, transfer: [], size, append: false, pieces: list.slice(), sums: verify ? list.map(sumOf) : null };
+    bytes = list;   // one piece or less: copied in this turn, as any list
+  }
   if (bytes && typeof bytes === 'object' && !Array.isArray(bytes) && typeof bytes.byteLength !== 'number' && 'append' in bytes) { append = true; bytes = bytes.append; }
   const list = Array.isArray(bytes) ? bytes : [bytes];
   let size = 0;
@@ -91,55 +108,73 @@ function partsOf(bytes, { allowEmpty = false } = {}) {
   return { parts: [ab], transfer: [ab], size, append };
 }
 
-function create({ log = console, now = mono, record = null, graceMs: graceIn = null, exitBudgetMs = null, slowMs = SLOW_MS, pace = {}, fs = require('fs'), path = require('path'), workerPath = null, restartsMax = RESTARTS_MAX, durableMs = 60000, keeper: keeperOn = false, keeperPath = null } = {}) {
+function create({ log = console, now = mono, record = null, graceMs: graceIn = null, exitBudgetMs = null, slowMs = SLOW_MS, pace = {}, fs = require('fs'), path = require('path'), workerPath = null, verifyByRef = false, restartsMax = RESTARTS_MAX, durableMs = 60000, keeper: keeperOn = false, keeperPath = null } = {}) {
   // the stop grace (round 6): stated, or rounds 3–5's `exitBudgetMs` (a third of it), or the process's own
   const graceMs = Number.isFinite(graceIn) && graceIn > 0 ? graceIn : Number.isFinite(exitBudgetMs) && exitBudgetMs > 0 ? exitBudgetMs * 3 : GRACE.graceMs;
   const syncBound = P.syncBoundMs(graceMs);
   const stores = new Map();
   let waitsTimedOut = 0;
-  let worker = null, S = null, seq = 0, posted = 0, inflight = null, timer = null, timerAt = 0, exiting = false, exited = false, exitAnswered = false, stopped = false;
-  let mainOnly = false, lastCls = null;   // round 3 (law 1): the class of the write just started — the two classes alternate
-  const restarts = [];
+  let seq = 0, timer = null, timerAt = 0, exiting = false, exited = false, exitAnswered = false, stopped = false, verify = !!verifyByRef;
+  // THE TWO LANES (the writer unit, 主开发 r1328): W writes WHOLE files (and unlinks), A APPENDS — each its OWN thread (the same
+  // script), its own cells, its own job in flight, restart count and main-only fallback, said by its own name. THE FENCE IS A
+  // FILE: a file has at most ONE job across both (in flight, or made and waiting for its lane) — an append and a whole write or
+  // fold of THAT file never interleave; an append never waits behind ANOTHER file's whole write (law 2). Each lane's lastCls:
+  // round 3 (law 1) — the class of the lane's write just started, the two classes alternating on each lane.
+  const lane = (name) => ({ name, worker: null, S: null, posted: 0, inflight: null, mainOnly: false, lastCls: null, restarts: [], parked: [], feed: null });
+  const LW = lane('W'), LA = lane('A'), LANES = [LW, LA];
+  const laneOf = (p) => (p && p.append ? LA : LW);
+  const threadWord = (l) => (l === LW ? 'writer thread' : 'append thread');
+  /** the lane that holds this FILE (its job in flight there, or made and waiting there) — the fence */
+  const holder = (file) => LANES.find((l) => (l.inflight && l.inflight.name === file) || l.parked.some((j) => j.s.file === file)) || null;
+  const inflightOf = (file) => { const l = LANES.find((x) => x.inflight && x.inflight.name === file); return l ? l.inflight : null; };
   const say = (line) => { try { log.warn?.(line); } catch { } };
   const W = () => require('./store-writer-worker.js');   // writeJob (the main thread's own road uses the SAME code)
 
-  function startWorker() {
-    if (worker || mainOnly || stopped) return worker;
+  function startWorker(l) {
+    if (l.worker || l.mainOnly || stopped) return l.worker;
     try {
       const { Worker } = require('worker_threads');
       const sab = new SharedArrayBuffer(48);   // [0..3] the cells, then a failed job's error code (≤ 32 bytes) — store-writer-worker.js
-      S = new Int32Array(sab); posted = 0;
+      l.S = new Int32Array(sab); l.posted = 0;
       const w = new Worker(workerPath || path.join(__dirname, 'store-writer-worker.js'), { workerData: { sab }, stdout: false, stderr: false });
-      worker = w;
-      try { require('./worker-memory.js').trackWorker('store-writer', w); } catch { }   // the memory census (src/worker-memory.js)
-      w.on('message', onMessage);
-      w.on('error', (e) => { if (worker === w) lost(`an error: ${(e && e.message) || e}`); });
-      w.on('exit', (code) => { if (worker === w && !stopped) lost(`it exited (${code})`); });
+      l.worker = w;
+      try { require('./worker-memory.js').trackWorker(l === LW ? 'store-writer' : 'store-writer-append', w); } catch { }   // the memory census (src/worker-memory.js)
+      w.on('message', (m) => onMessage(l, m));
+      w.on('error', (e) => { if (l.worker === w) lost(l, `an error: ${(e && e.message) || e}`); });
+      w.on('exit', (code) => { if (l.worker === w && !stopped) lost(l, `it exited (${code})`); });
       w.unref();
-    } catch (e) { goMain(`no writer thread (${(e && e.message) || e})`); }
-    return worker;
+    } catch (e) { goMain(l, `no ${threadWord(l)} (${(e && e.message) || e})`); }
+    return l.worker;
   }
-  /** THE THREAD IS GONE (round 2, law E i): its write in flight is owed again; it is RESTARTED — at most restartsMax an
-   *  hour, each said — and past that every store is written on the main thread, SAID ONCE (and a write there never claims
-   *  the loop did not wait) */
-  function lost(why) {
-    worker = null;
-    requeueInflight();
+  /** A LANE'S THREAD IS GONE (round 2, law E i — per lane since the writer unit): its job in flight is owed again; the thread
+   *  is RESTARTED — at most restartsMax an hour, each said — and past that the lane's writes run on the main thread, SAID ONCE
+   *  (and a write there never claims the loop did not wait) */
+  function lost(l, why) {
+    l.worker = null;
+    requeueInflight(l);
     const t = now();
-    while (restarts.length && t - restarts[0] > RESTART_WINDOW_MS) restarts.shift();
-    if (restarts.length < restartsMax) { restarts.push(t); say(`[store-write] the writer thread stopped (${why}) — restarted (${restarts.length} of ${restartsMax} this hour)`); schedule(); return; }
-    goMain(`the writer thread stopped ${restarts.length + 1} times within an hour (${why})`);
+    while (l.restarts.length && t - l.restarts[0] > RESTART_WINDOW_MS) l.restarts.shift();
+    if (l.restarts.length < restartsMax) { l.restarts.push(t); say(`[store-write] the ${threadWord(l)} stopped (${why}) — restarted (${l.restarts.length} of ${restartsMax} this hour)`); schedule(); return; }
+    goMain(l, `the ${threadWord(l)} stopped ${l.restarts.length + 1} times within an hour (${why})`);
   }
-  function goMain(why) {
-    if (!mainOnly) say(`[store-write] ${why} — from now on every store is written ON THE MAIN THREAD (each write holds the loop for its whole time) until a restart`);
-    mainOnly = true; worker = null;
+  function goMain(l, why) {
+    if (!l.mainOnly) say(l === LW ? `[store-write] ${why} — from now on every store is written ON THE MAIN THREAD (each write holds the loop for its whole time) until a restart`
+      : `[store-write] ${why} — from now on every append is written ON THE MAIN THREAD (each write holds the loop for its whole time) until a restart`);
+    l.mainOnly = true; l.worker = null;
     schedule();
   }
-  function requeueInflight() {
-    if (!inflight) return;
-    const f = inflight; inflight = null;
-    const s = stores.get(f.name);
-    if (s && !f.unlink && !s.forgotten && !s.dirty && s.produce) { s.dirty = true; s.dirtySince = f.since; }
+  /** the lane's job in flight is owed again. A WHOLE write: its store is dirty again (the next write makes its NEWER state; a
+   *  temp the thread left is truncated by that write, or swept by the next process — never renamed, never read). AN APPEND
+   *  whose thread died after its bytes left this thread (r1328 (3)/(4)): a FAILED write — its tail on disk is unknown, so the
+   *  store's own rule runs (onWritten(false): its next journal job a whole one), its waiters hear false and the writer writes
+   *  it again: never lost and answered true. Jobs made and waiting for the lane stay (its restarted thread takes them). */
+  function requeueInflight(l) {
+    const f = l.inflight; l.inflight = null; l.feed = null;
+    if (f) {
+      const s = stores.get(f.name);
+      if (s && f.append && !f.unlink && !s.forgotten) fail(s, f.since, Object.assign(new Error(`the ${threadWord(l)} stopped during the append`), { code: 'ETHREAD' }));
+      else if (s && !f.unlink && !s.forgotten && !s.dirty && s.produce) { s.dirty = true; s.dirtySince = f.since; }
+    }
     schedule();
   }
   function store(file) {   // keyed by the FILE (two stores of one name in one process — a suite's — never share a queue)
@@ -181,6 +216,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (mode !== undefined) s.mode = mode;
     if (makeDir) s.makeDir = true;
     if (Number.isFinite(rotateAt) && rotateAt > 0) s.rotateAt = rotateAt;   // B-48a4: an append store that is a RING — the thread moves the live file to `.1` past this size, before the append
+    if (s.rotateAt) s.appends = true;   // a ring is an append store: the append lane's from its first write
     if (typeof onWritten === 'function') s.onWritten = onWritten;
     if (!s.dirty) { s.dirty = true; s.dirtySince = now(); }
     // `urgent`: an act nobody waits on here (its answer waits through durable() elsewhere, or none does) — the writer's next
@@ -191,10 +227,16 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   const backoffEnd = (s) => (s.failures > 0 && Number.isFinite(s.failedAt) ? s.failedAt + P.retryMs(s.failures) : -Infinity);
   const rowOf = (s) => ({ name: s.file, dirtySince: s.dirtySince, urgent: s.urgent, failedAt: s.failures > 0 ? s.failedAt : null,
     due: s.urgent ? Math.max(s.dirtySince, backoffEnd(s)) : P.dueAt({ dirtySince: s.dirtySince, lastEndAt: s.lastEndAt, bytes: s.bytes, debounceMs: s.debounceMs, failures: s.failures, failedAt: s.failedAt, lastMs: s.lastMs }, pace) });
-  const dueRows = () => [...stores.values()].filter((s) => s.dirty && !s.later && s.produce && s.file && !(inflight && inflight.name === s.file)).map(rowOf);
+  // a lane's due stores: none fenced (no job of its file in flight or waiting on either lane). W takes every store not known
+  // as an append store; A every store that ever appended (the acts journal — its whole compaction then goes to W by its
+  // bytes) AND every store not known yet (a first append never waits behind another file's whole write; a first WHOLE write
+  // made there waits for W, made — one at a time: never a pile of whole writes made early behind a busy W)
+  const dueRows = (l) => [...stores.values()].filter((s) => s.dirty && !s.later && s.produce && s.file && !holder(s.file) && (l === LA ? (!!s.appends || (!s.lane && !LW.parked.length)) : s.lane !== 'A')).map(rowOf);
   function schedule() {
-    if (stopped || exiting || inflight) return;
-    const rows = dueRows();
+    if (stopped || exiting) return;
+    const free = LANES.filter((l) => !l.inflight);
+    if (free.some((l) => l.parked.length)) { if (timer) clearTimeout(timer); timerAt = now(); timer = setTimeout(tick, 0); timer.unref?.(); return; }   // a job made and waiting for a lane now free
+    const rows = free.flatMap((l) => dueRows(l));
     if (!rows.length) { if (timer) { clearTimeout(timer); timer = null; timerAt = 0; } return; }
     const t = Math.min(...rows.map((r) => r.due));
     if (timer && timerAt <= t) return;
@@ -206,14 +248,18 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   /** the writer NEVER throws out of its own timer (round 2, law E iii): a store's bad bytes are its failed write, said */
   function tick() {
     timer = null; timerAt = 0;
-    if (stopped || exiting || inflight) return;
-    try { step(); } catch (e) { say(`[store-write] the writer's own step failed (${(e && e.message) || e}) — the stores stay owed`); }
+    if (stopped || exiting) return;
+    for (const l of LANES) { if (l.inflight) continue; try { step(l); } catch (e) { say(`[store-write] the writer's own step failed (${(e && e.message) || e}) — the stores stay owed`); } }
     schedule();
   }
-  function step() {
-    const next = P.nextOf(dueRows(), now(), { last: lastCls });
+  /** ONE job for a FREE lane: a job made earlier and waiting for it, first; else the lane's next due store, its bytes made now.
+   *  The BYTES decide the lane (an append → A, any whole write → W): a job for the OTHER lane while that one is busy waits
+   *  there, made (its file fenced meanwhile) — never a second job of one file */
+  function step(l) {
+    if (l.parked.length) { const j = l.parked.shift(); post(l, j.s, j.p, j.since); return; }
+    const next = P.nextOf(dueRows(l), now(), { last: l.lastCls });
     if (!next) return;
-    lastCls = next.urgent ? 'urgent' : 'paced';
+    l.lastCls = next.urgent ? 'urgent' : 'paced';
     const s = stores.get(next.name);
     const since = s.dirtySince;
     s.dirty = false; s.dirtySince = null; s.urgent = false;   // a change from here on dirties it again, with its own time
@@ -223,35 +269,85 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
       const bytes = s.produce();
       if (bytes === LATER) { s.dirty = true; s.dirtySince = since; s.later = true; if (s.waiters.length) s.urgentNext = true; schedule(); return; }   // still OWED (an exit's flush writes it; stats say it) but not due until its store dirties it again   // B-dfa4 cut 3: NOT READY — nothing written, nothing settled: its waiters wait for the write its store asks for when ready
       if (bytes === null) { settled(s, s.writingVersion); return; }   // equal to the disk: nothing to write — ONLY null says so (round 3, smaller 4: undefined is a failed write, said)
-      p = partsOf(bytes, { allowEmpty: s.allowEmpty });
+      p = partsOf(bytes, { allowEmpty: s.allowEmpty, verify });
     } catch (e) { fail(s, since, e); return; }
-    if (mainOnly || !startWorker()) { writeHere(s, p, since); return; }
-    const id = ++seq;
-    inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append || !!p.rewrite, as: p.as || null };   // a rewrite keeps the store an append store (its pace, never unlinked as a forgotten whole file)
-    posted++;
-    LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
-    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append, exclusive: !!s.exclusive, ownOnly: !!s.ownOnly, own: s.own || null, rewrite: p.rewrite || null }, p.transfer); }
-    catch (e) { inflight = null; posted--; fail(s, since, e); }
+    const to = laneOf(p);
+    s.lane = to.name; if (p.append) s.appends = true;
+    if (to !== l && (to.inflight || to.parked.length)) { to.parked.push({ s, p, since }); return; }
+    post(to, s, p, since);
   }
-  function onMessage(m) {
+  /** hand ONE job to a lane's thread — or, its thread gone for good (said), write it here */
+  function post(l, s, p, since) {
+    if (l.mainOnly || !startWorker(l)) { writeHere(s, p.pieces ? { ...p, parts: p.pieces.filter(Boolean) } : p, since); return; }
+    const id = ++seq;
+    l.inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append || !!p.rewrite, as: p.as || null };   // line 42: a rewrite keeps the store an append store (its pace, never unlinked as a forgotten whole file)
+    l.posted++;
+    LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
+    const msg = { ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, append: p.append, exclusive: !!s.exclusive, ownOnly: !!s.ownOnly, own: s.own || null, rewrite: p.rewrite || null };   // B-f276 1b's exclusive create, 1c's own-only fields and line 42's rewrite ride every job of a lane (a piece's too; a rewrite is never in pieces)
+    if (p.pieces) { feedPieces(l, s, msg, p, since); return; }
+    try { l.worker.postMessage({ ...msg, parts: p.parts }, p.transfer); }
+    catch (e) { l.inflight = null; l.posted--; fail(s, since, e); }
+  }
+  // ── LAW 1, NO WHOLE WRITE HOLDS A TURN (主开发 r1328): one turn's snapshot handed BY REFERENCE (byRef), copied PIECE_BYTES at a
+  // time, ONE PIECE A TURN. The file is in flight from its first piece to the thread's answer (the fence): a second whole write
+  // of it waits and takes the NEWER snapshot — never two temps of one file. A synchronous flush or the exit mid-pieces sends the
+  // rest IN ITS CALL, in order (drainPieces); a thread lost mid-pieces drops its temp (the write is owed again from a newer
+  // snapshot — never a renamed temp that lacks pieces). The snapshot pins the buffers it names until each is copied: at most
+  // the store's size, falling piece by piece. With `verifyByRef` (suites) a handed buffer WRITTEN INTO before its piece fails
+  // the write by name (EBYREF), said.
+  function feedPieces(l, s, msg, p, since) {
+    const f = { l, s, msg, since, list: p.pieces, sums: p.sums, i: 0, off: 0, first: true, done: false };
+    l.feed = f;
+    sendPiece(f);
+    if (!f.done) setImmediate(() => pumpPieces(f));
+  }
+  function pumpPieces(f) { if (f.done || f.l.feed !== f) return; sendPiece(f); if (!f.done) setImmediate(() => pumpPieces(f)); }
+  function drainPieces(l) { const f = l.feed; while (f && !f.done && l.feed === f) sendPiece(f); }
+  function sendPiece(f) {
+    const l = f.l;
+    if (f.done || l.feed !== f || !l.worker) return;
+    const take = [];
+    let bytes = 0, bad = null;
+    while (f.i < f.list.length && bytes < PIECE_BYTES) {
+      const b = f.list[f.i];
+      if (f.sums && f.off === 0 && sumOf(b) !== f.sums[f.i]) { bad = f.i; break; }
+      const n = Math.min(b.byteLength - f.off, PIECE_BYTES - bytes);
+      take.push(Buffer.from(b.buffer, b.byteOffset + f.off, n)); bytes += n; f.off += n;
+      if (f.off >= b.byteLength) { f.list[f.i] = null; f.i++; f.off = 0; }   // copied: the snapshot lets it go
+    }
+    const last = bad !== null || f.i >= f.list.length;
+    let msg, transfer = [];
+    if (bad !== null) msg = { ...f.msg, ev: 'piece', parts: [], first: f.first, last: true, abort: true, code: 'EBYREF', why: `a buffer it handed by reference (#${bad}) was written into before its write ended` };
+    else {
+      const one = Buffer.concat(take, bytes), ab = one.byteOffset === 0 && one.byteLength === one.buffer.byteLength ? one.buffer : one.buffer.slice(one.byteOffset, one.byteOffset + one.byteLength);
+      msg = { ...f.msg, ev: 'piece', parts: [ab], first: f.first, last }; transfer = [ab];
+    }
+    f.first = false;
+    if (last) { f.done = true; l.feed = null; }
+    try { l.worker.postMessage(msg, transfer); }
+    catch (e) { f.done = true; if (l.feed === f) l.feed = null; if (l.inflight && l.inflight.id === f.msg.id) { l.inflight = null; l.posted--; } fail(f.s, f.since, e); schedule(); }   // the bytes could not go: a failed write, said (the thread's half temp is its next first piece's to drop)
+  }
+  function onMessage(l, m) {
     if (m && m.ev === 'memory') return;   // the census's answer (src/worker-memory.js)
     if (m && m.ev === 'written' && m.own && m.file) { const s0 = stores.get(m.file); if (s0) s0.own = m.own; }   // B-f276 1c: also a write the shared cells settled
-    if (!m || !inflight || m.id !== inflight.id) return;
-    if (m.ev === 'unlinked') { const f = inflight; inflight = null; const s0 = stores.get(f.name); if (s0 && s0.forgotten) stores.delete(f.name); schedule(); return; }
+    if (!m || !l.inflight || m.id !== l.inflight.id) return;
+    if (m.ev === 'unlinked') { const f = l.inflight; l.inflight = null; const s0 = stores.get(f.name); if (s0 && s0.forgotten) stores.delete(f.name); schedule(); return; }
     if (m.ev !== 'written') return;
-    const f = inflight; inflight = null;
+    const f = l.inflight; l.inflight = null;
     const s = stores.get(f.name);
+    if (m.dropped) say(`[store-write] ${s ? s.name : path.basename(f.name)}: the temp of an earlier write that never finished could not be closed (${m.dropped}) — it was removed`);
     if (s) finish(s, m.err, m.ms, f.size, f.since, false, f.append, null, f.as);
-    if (s && s.forgotten && !m.err && !f.append) { postUnlink(s); return; }   // forgotten while its write flew: the file it renamed goes again
+    if (s && s.forgotten && !m.err && !f.append) { postUnlink(l, s); return; }   // forgotten while its write flew: the file it renamed goes again
     if (s && s.forgotten) stores.delete(f.name);
     schedule();
   }
-  function postUnlink(s) {
-    if (!worker) { try { fs.unlinkSync(s.file); } catch { } stores.delete(s.file); schedule(); return; }
+  /** a forgotten store's file goes again — on the lane whose write of it just ended (that lane is free now) */
+  function postUnlink(l, s) {
+    if (!l.worker) { try { fs.unlinkSync(s.file); } catch { } stores.delete(s.file); schedule(); return; }
     const id = ++seq;
-    inflight = { id, name: s.file, since: null, startedAt: now(), size: 0, unlink: true };
-    posted++;
-    try { worker.postMessage({ ev: 'unlink', id, file: s.file }); } catch { inflight = null; posted--; stores.delete(s.file); schedule(); }
+    l.inflight = { id, name: s.file, since: null, startedAt: now(), size: 0, unlink: true };
+    l.posted++;
+    try { l.worker.postMessage({ ev: 'unlink', id, file: s.file }); } catch { l.inflight = null; l.posted--; stores.delete(s.file); schedule(); }
   }
   function finish(s, err, ms, size, since, onMain = false, append = false, waitedBy = null, as = null) {
     if (err) { fail(s, since, err); return; }
@@ -304,7 +400,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const s = stores.get(file);
     const now1 = (ok) => { if (answer) { try { answer(ok); } catch (e) { answerThrew(s ? s.name : path.basename(file), e); } } return Promise.resolve(ok); };
     if (s && s.appeared) { s.notDurable = { why: 'failed', code: 'EEXIST' }; return now1(false); }   // B-f276 1b: its file appeared — nothing of it is written
-    if (!s || (!s.dirty && !(inflight && inflight.name === file) && s.writtenVersion >= s.version)) return now1(true);
+    if (!s || (!s.dirty && !holder(file) && s.writtenVersion >= s.version)) return now1(true);
     if (exitAnswered) return now1(false);   // the exit's last pass is over: owed now = not on disk, and nothing writes it
     const want = s.version;
     if (s.dirty) { s.urgent = true; s.rank = 0; }
@@ -358,7 +454,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     };
     let ran = false;
     const go = () => { if (ran) return; ran = true; let v, err = null; try { v = step(); } catch (e) { err = e; stepThrew(name, what, e); } reply(true, v, err); };
-    if (!s || (!s.dirty && !(inflight && inflight.name === file) && s.writtenVersion >= s.version)) { go(); return p; }
+    if (!s || (!s.dirty && !holder(file) && s.writtenVersion >= s.version)) { go(); return p; }
     if (exitAnswered) { reply(false); return p; }   // the exit's last pass is over: owed now is not on disk and nothing writes it
     (s.afterLanded || (s.afterLanded = [])).push({ version: s.version, go, end: () => reply(false) });
     if (s.dirty) { s.urgent = true; s.rank = 0; }   // as durable(): the writer's next writes, its pace set aside
@@ -385,9 +481,9 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
    *  another store + the urgent stores DUE NOW (not in their failure backoff) whose place in the urgent order comes first
    *  (store-pace placeOf: a failed store by the time it failed). The paced turns between them only add to it. */
   function aheadOf(s) {
-    const t = now(), mine = P.placeOf(rowOf(s));
-    let n = inflight && inflight.name !== s.file ? 1 : 0;
-    for (const x of stores.values()) if (x !== s && x.dirty && x.urgent && x.produce && !(inflight && inflight.name === x.file) && backoffEnd(x) <= t && P.placeOf(rowOf(x)) < mine) n++;
+    const t = now(), mine = P.placeOf(rowOf(s)), l = s.appends ? LA : LW, onL = (x) => (x.appends ? LA : LW) === l;   // its own lane's writes only
+    let n = l.inflight && l.inflight.name !== s.file ? 1 : 0;
+    for (const x of stores.values()) if (x !== s && x.dirty && x.urgent && x.produce && !holder(x.file) && onL(x) && backoffEnd(x) <= t && P.placeOf(rowOf(x)) < mine) n++;
     return n;
   }
   /** why a durable act of this store is not on disk yet — {why: 'queued' | 'failed', ahead?, lastMs?} — for its caller's line */
@@ -430,42 +526,45 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     } catch (e) { if (!p.append) { try { fs.unlinkSync(tmp); } catch { } } fail(s, since, e); return false; }
   }
   /** the failed job's own error code, from the shared cells (round 6's amend: the exit road said «EWRITE» for an EIO) */
-  function jobErrorCode() {
+  function jobErrorCode(l) {
+    const S = l.S;
     try { const n = Atomics.load(S, 3); if (n > 0 && S.byteLength >= 48) return Buffer.from(new Uint8Array(S.buffer, 16, Math.min(32, n))).toString('latin1'); } catch { }
     return 'EWRITE';
   }
   /** wait (blocking — the loop cannot turn here) for the thread's job in flight, at most until `deadline`. The thread
    *  NOTIFIES the cell this waits on: a waited write ends when the write ends (round 6's amend — it ended at the 50 ms
    *  poll); `waitsTimedOut` counts a wait that ended by its poll with the job still in flight (the fast pin reads it) */
-  function settleInflight(deadline, waitedBy = 'the exit') {
-    if (!inflight) return true;
+  function settleInflight(l, deadline, waitedBy = 'the exit') {
+    if (!l.inflight) return true;
+    const S = l.S;
     if (!S) return false;
-    while (Atomics.load(S, 1) < posted) {
+    if (l.feed) drainPieces(l);   // a whole write mid-pieces: the rest goes out NOW, in this call, in order (r1328 (2))
+    while (Atomics.load(S, 1) < l.posted) {
       const rest = deadline - now();
       if (rest <= 0) return false;
-      if (Atomics.wait(S, 1, Atomics.load(S, 1), Math.min(rest, 50)) === 'timed-out' && Atomics.load(S, 1) < posted) waitsTimedOut++;
+      if (Atomics.wait(S, 1, Atomics.load(S, 1), Math.min(rest, 50)) === 'timed-out' && Atomics.load(S, 1) < l.posted) waitsTimedOut++;
     }
-    const f = inflight; inflight = null;
+    const f = l.inflight; l.inflight = null;
     const s = stores.get(f.name);
     if (f.unlink) { if (s && s.forgotten) stores.delete(f.name); return true; }
-    if (s) finish(s, Atomics.load(S, 2) === 2 ? { code: jobErrorCode() } : null, now() - f.startedAt, f.size, f.since, false, f.append, waitedBy, f.as);
-    if (s && s.forgotten && !f.append && Atomics.load(S, 2) !== 2) postUnlink(s);   // forgotten while it flew: gone again — on the thread
+    if (s) finish(s, Atomics.load(S, 2) === 2 ? { code: jobErrorCode(l) } : null, now() - f.startedAt, f.size, f.since, false, f.append, waitedBy, f.as);
+    if (s && s.forgotten && !f.append && Atomics.load(S, 2) !== 2) postUnlink(l, s);   // forgotten while it flew: gone again — on the thread
     return true;
   }
   /** ROUND 3 (law 2): a write the main thread needs NOW is still the THREAD's — posted, then waited for (Atomics, bounded by
    *  `deadline`); the main thread never writes a moved store's bytes itself (only a writer whose thread is gone — law E i's
    *  fallback, said once — writes here). → 'ok' | 'failed' | 'held' (the thread still has it at the deadline) */
   function writeWaiting(s, p, since, deadline, waitedBy) {
-    if (inflight && !settleInflight(deadline, waitedBy)) return 'held';
-    if (mainOnly || !startWorker() || !S) return writeHere(s, p, since) ? 'ok' : 'failed';
-    const id = ++seq, f0 = s.failures;
-    inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append || !!p.rewrite, as: p.as || null };
-    posted++;
-    LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
-    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append, exclusive: !!s.exclusive, ownOnly: !!s.ownOnly, own: s.own || null, rewrite: p.rewrite || null }, p.transfer); }
-    catch (e) { inflight = null; posted--; fail(s, since, e); return 'failed'; }
+    const l = laneOf(p);
+    s.lane = l.name; if (p.append) s.appends = true;
+    if (l.inflight && !settleInflight(l, deadline, waitedBy)) return 'held';   // its OWN lane's job first (an append never waits on W)
+    if (l.mainOnly || !startWorker(l) || !l.S) return writeHere(s, p.pieces ? { ...p, parts: p.pieces.filter(Boolean) } : p, since) ? 'ok' : 'failed';
+    const f0 = s.failures;
+    post(l, s, p, since);
+    if (!l.inflight) return s.failures > f0 ? 'failed' : 'ok';   // the bytes could not go: failed, said
+    if (l.feed) drainPieces(l);   // a write in pieces: every piece in this call, in order
     if (exiting) publishExit();   // round 6's amend: the keeper's line names this write as IN FLIGHT, not «still owed»
-    if (!settleInflight(deadline, waitedBy)) return 'held';
+    if (!settleInflight(l, deadline, waitedBy)) return 'held';
     return s.failures > f0 ? 'failed' : 'ok';
   }
   /** THE SYNCHRONOUS FLUSH of the stores of these FILES (all when `names` is null): every OTHER dirty store first, in the
@@ -477,9 +576,17 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const t0 = now(), deadline = dl != null ? dl : t0 + budgetMs, written = [], left = [];
     if (exiting && !exited && names) return { written, left, ms: 0, budgetMs, deferred: true };
     const want = (s) => s.dirty && s.produce && s.file && (!names || names.includes(s.file)) && (!only || only(s));
-    let held = false;   // the thread holds a write past the deadline: nothing more can be written (one write in flight)
+    const held = new Set();   // the LANES whose thread holds a write past the deadline: nothing more can be written on them
+    const laneGuess = (s) => (s.lane === 'A' ? LA : LW);
+    const land = (s, p, since) => {
+      const l = laneOf(p);
+      const r = writeWaiting(s, p, since, deadline, waitedBy);
+      if (r === 'ok') written.push(s.name);
+      else if (r === 'failed') left.push({ name: s.name, file: s.file, why: `the write failed (${(s.notDurable && s.notDurable.code) || 'an error'}; ${s.failures} attempt${s.failures === 1 ? '' : 's'})` });   // round 6's amend: its own code
+      else { held.add(l); s.dirty = true; s.dirtySince = since; left.push({ name: s.name, file: s.file, why: `its write was still held by the storage at the bound (${((now() - (l.inflight ? l.inflight.startedAt : t0)) / 1000).toFixed(1)} s)` }); }
+    };
     const writeOne = (s) => {
-      if (held || now() >= deadline) { left.push({ name: s.name, file: s.file, why: held ? 'the writer thread was still held by the storage' : 'the bound was spent' }); return; }
+      if (held.has(laneGuess(s)) || now() >= deadline) { left.push({ name: s.name, file: s.file, why: held.has(laneGuess(s)) ? `the ${threadWord(laneGuess(s))} was still held by the storage` : 'the bound was spent' }); return; }
       const since = s.dirtySince;
       s.dirty = false; s.dirtySince = null; s.urgent = false; s.writingVersion = s.version;
       let p;
@@ -487,17 +594,24 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
         const bytes = s.produce({ sync: true });   // B-dfa4 cut 3: a synchronous flush (close, the exit, a suite) — a store makes its bytes in this turn
         if (bytes === LATER) { s.dirty = true; s.dirtySince = since; s.later = true; left.push({ name: s.name, file: s.file, why: 'its bytes were not ready' }); return; }
         if (bytes === null) { settled(s, s.writingVersion); return; }
-        p = partsOf(bytes, { allowEmpty: s.allowEmpty });
+        p = partsOf(bytes, { allowEmpty: s.allowEmpty, verify });
       }
       catch (e) { fail(s, since, e); left.push({ name: s.name, file: s.file, why: `its bytes could not be made (${(e && e.message) || e})` }); return; }
-      const r = writeWaiting(s, p, since, deadline, waitedBy);
-      if (r === 'ok') written.push(s.name);
-      else if (r === 'failed') left.push({ name: s.name, file: s.file, why: `the write failed (${(s.notDurable && s.notDurable.code) || 'an error'}; ${s.failures} attempt${s.failures === 1 ? '' : 's'})` });   // round 6's amend: its own code
-      else { held = true; s.dirty = true; s.dirtySince = since; left.push({ name: s.name, file: s.file, why: `its write was still held by the storage at the bound (${((now() - (inflight ? inflight.startedAt : t0)) / 1000).toFixed(1)} s)` }); }
+      land(s, p, since);
     };
-    // the write in flight lands first (one write at a time — its state is older than any owed now)
-    const busy = inflight && !inflight.unlink ? inflight : null;
-    if (busy && !settleInflight(deadline, waitedBy)) { held = true; const s0 = stores.get(busy.name); left.push({ name: s0 ? s0.name : busy.name, file: busy.name, why: `its write was still held by the storage after ${((now() - busy.startedAt) / 1000).toFixed(1)} s` }); }
+    // the writes in flight of the files asked (every lane's, for a flush of all) land first — their state is older than any
+    // owed now; a write mid-pieces sends its rest in this call
+    for (const l of LANES) {
+      const busy = l.inflight && !l.inflight.unlink ? l.inflight : null;
+      if (!busy || (names && !names.includes(busy.name))) continue;
+      if (!settleInflight(l, deadline, waitedBy)) { held.add(l); const s0 = stores.get(busy.name); left.push({ name: s0 ? s0.name : busy.name, file: busy.name, why: `its write was still held by the storage after ${((now() - busy.startedAt) / 1000).toFixed(1)} s` }); }
+    }
+    // the jobs MADE and waiting for a lane (their bytes are this turn's or older): written next, in the order they were made
+    for (const l of LANES) for (const j of l.parked.filter((x) => !names || names.includes(x.s.file))) {
+      l.parked.splice(l.parked.indexOf(j), 1);
+      if (held.has(l) || now() >= deadline) { j.s.dirty = true; j.s.dirtySince = j.since; left.push({ name: j.s.name, file: j.s.file, why: held.has(l) ? `the ${threadWord(l)} was still held by the storage` : 'the bound was spent' }); continue; }
+      land(j.s, j.p, j.since);
+    }
     const tried = new Set();
     for (const s of P.exitOrder([...stores.values()].filter(want))) { tried.add(s.file); writeOne(s); }   // what cannot be re-derived first
     // round 6's amend: THE EXIT'S LAST PASS RUNS UNTIL NOTHING IS DIRTY — a store a write's own callback dirtied meanwhile
@@ -573,7 +687,8 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (!KS) return;
     try {
       const owed = [...stores.values()].filter((s) => s.dirty && s.produce).map((s) => s.name);
-      const text = P.exitSummary({ written: exitWritten, owed, inflight: inflight && !inflight.unlink ? (stores.get(inflight.name) || {}).name || 'a write' : null });
+      const fly = LANES.filter((l) => l.inflight && !l.inflight.unlink).map((l) => (stores.get(l.inflight.name) || {}).name || 'a write');
+      const text = P.exitSummary({ written: exitWritten, owed, inflight: fly.length ? fly.join(' + ') : null });
       KI[1] = new TextEncoder().encodeInto(text.length > 1500 ? text.slice(0, 1500) + '…' : text, new Uint8Array(KS, 64)).written;
     } catch { }
   }
@@ -620,7 +735,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     s.dirty = false; s.dirtySince = null; s.produce = null; s.urgent = false;
     if (s.waiters.length) { const ws = s.waiters; s.waiters = []; for (const w of ws) { try { w.resolve(true); } catch { } } }   // the file is gone by its owner's word
     runLanded(s, true);   // …and so are the steps riding it (afterLanding): the record they waited for is its owner's removal
-    if (inflight && inflight.name === file) { s.forgotten = true; return; }
+    if (holder(file)) { s.forgotten = true; return; }
     stores.delete(file);
   }
   /** the bytes this writer still OWES `file` — its newest state, made now by its store's producer (lane lg-store-writes, the moved2
@@ -637,21 +752,25 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
       return null;
     } catch { return null; }
   }
-  const pending = (file) => { const s = stores.get(file); return !!(s && (s.dirty || (inflight && inflight.name === file && !inflight.unlink))); };
+  const pending = (file) => { const s = stores.get(file), f = inflightOf(file); return !!(s && (s.dirty || (f && !f.unlink) || LANES.some((l) => l.parked.some((j) => j.s.file === file)))); };
   function stats() {
     const t = now();
     return [...stores.values()].map((s) => ({ name: s.name, writes: s.writes, bytes: s.bytes, bytesWritten: s.bytesWritten, lastMs: Math.round(s.lastMs), maxMs: Math.round(s.maxMs), slow: s.slow,
-      failures: s.failures, dirty: s.dirty, inflight: !!(inflight && inflight.name === s.file), file: s.file, oldestAgeMs: s.dirty ? Math.round(t - s.dirtySince) : 0,
+      failures: s.failures, dirty: s.dirty, inflight: !!holder(s.file), file: s.file, oldestAgeMs: s.dirty ? Math.round(t - s.dirtySince) : 0,
       version: s.version,   // the store's change count (dirty() bumps it): a caller tells «changed since» by it (the boot's migrations)
       // round 3: maxAgeMs is MEASURED (the oldest change's age when a write of it landed, or the one still owed now) —
       // never the designed bound; the bound the queue keeps is store-pace.js's, in writes
       gapMs: Math.max(P.minGapMs(s.bytes, pace), Math.round(s.lastMs)), maxAgeMs: Math.round(Math.max(s.ageMaxMs || 0, s.dirty ? t - s.dirtySince : 0)), urgent: !!s.urgent }));
   }
-  const mode = () => (mainOnly ? 'main' : worker ? 'thread' : 'idle');
-  function stop() { stopped = true; if (timer) clearTimeout(timer); timer = null; const w = worker; worker = null; try { w && w.terminate(); } catch { } const k = keeperT; keeperT = null; try { k && k.terminate(); } catch { } }
+  const modeOf = (l) => (l.mainOnly ? 'main' : l.worker ? 'thread' : 'idle');
+  const mode = () => modeOf(LW);   // the whole-write lane's (every store's but the appends)
+  const modes = () => ({ whole: modeOf(LW), append: modeOf(LA) });
+  function stop() { stopped = true; if (timer) clearTimeout(timer); timer = null; for (const l of LANES) { const w = l.worker; l.worker = null; l.feed = null; try { w && w.terminate(); } catch { } } const k = keeperT; keeperT = null; try { k && k.terminate(); } catch { } }
+  /** suites: a handed buffer's bytes checked at its piece (byRef's promise) — a buffer written into fails its write (EBYREF) */
+  const verifyByRefOn = (on = true) => { verify = !!on; };
   if (keeperOn) startKeeper();   // a suite's own writer may ask for one; the server's is started by bootKeeper() at its boot
   const waits = () => ({ timedOut: waitsTimedOut });   // round 6's amend: waits that ended by their poll, not the write's end
-  return { LATER, dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, stop, graceMs, durableMs, _now: now };   // durableMs: the bound a durable() waits by default (B-0248: the desktops' doors and points read it)
+  return { LATER, dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, modes, verifyByRef: verifyByRefOn, stop, graceMs, durableMs, _now: now };   // durableMs: the bound a durable() waits by default (B-0248: the desktops' doors and points read it)
 }
 
 /** THE process's writer (one thread, one queue for every store) */
@@ -689,4 +808,4 @@ function ride(W, file, step, opts = {}) {
   return Promise.resolve({ landed: true, value: v, ...(error ? { error } : {}) });
 }
 
-module.exports = { create, storeWriter, bootKeeper, partsOf, identityAtExit, ride, GRACE, SLOW_MS, RESTARTS_MAX, LATER };
+module.exports = { create, storeWriter, bootKeeper, partsOf, byRef, identityAtExit, ride, GRACE, SLOW_MS, RESTARTS_MAX, LATER, PIECE_BYTES };
