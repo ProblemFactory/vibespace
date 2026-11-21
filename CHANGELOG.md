@@ -73,6 +73,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - OpenCode's own terminals and conversations now start below VibeSpace's CPU priority, as other conversations do.
 - On an ssh machine whose agent names its nice program, conversations and terminals now start below that agent's CPU priority.
 - The accounts list no longer freezes VibeSpace when account folders sit on a slow share; a sign-in still being read says so, never «not logged in».
+- A click on a taskbar tile no longer does nothing when a window's title changes at that moment, such as an agent's status shown in its title.
 
 ## 2.369.415 — 2026-11-21
 
