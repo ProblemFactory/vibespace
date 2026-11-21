@@ -138,11 +138,12 @@ console.log('— ④ THE WRITER CENSUS: every site that can write the owner\'s C
 // is a WRITER; each must carry a guard on its line or in the 12 lines before
 // it, and each must be a named row below — a new writer without a row is red.
 // verify r1 ②: + any raw writeFileSync whose target is a CLI config file NAME — each such line is a NOT_A_WRITE row with its reason, or a writer
-const WRITER = /writeJsonManaged\(|writeTomlManaged\(|applyConfigPlan\(|ensureCliConfig\(|_patchHookFile\(|vibespace-hook-register\.mjs"|writeFileSync\(.*?'(?:config\.toml|settings\.json|hooks\.json|\.claude\.json)'/;
+const WRITER = /writeJsonManaged\(|writeTomlManaged\(|applyConfigPlan\(|ensureCliConfig\(|_patchHookFile\(|applyThisMachine\(\{|cliRunner\.apply\(|vibespace-hook-register\.mjs"|writeFileSync\(.*?'(?:config\.toml|settings\.json|hooks\.json|\.claude\.json)'/;
 const NOT_A_WRITE = [
   [/--status/, 'the READ-ONLY receipts probe'],
   [/grep -q VIBESPACE_CLI_CONFIG/, 'a grep of the shipped helper (read-only)'],
-  [/^const _patchHookFile = /, 'the alias definition (its two calls are rows)'],
+  [/^function applyThisMachine\(\{/, 'the ONE write road of this machine (B-ddf3 unit 2 line 1): its three callers are rows, each guarded'],
+  [/return cliRunner\.apply\(\(\) => encodePlan\(/, 'the road\'s own run (reached only through its guarded callers)'],
   [/__applier\./, "the generated helper's own text (runs only where a gated site runs it)"],
   [/writeFileSync\(path\.join\(shared, 'config\.toml'\), ''\)/, 'codex seedDir: an EMPTY symlink target created only when absent (a harness prerequisite, never content — verify r1 ②)'],
   [/writeFileSync\(path\.join\(dir, '\.claude\.json'\)/, "claude seedDir: an ISOLATED login dir's .claude.json (never ~/.claude.json)"],
@@ -151,9 +152,10 @@ const NOT_A_WRITE = [
 ];
 const GUARD = /ownerWriteRefusal\(\)|refuseOwnerWrite\(\)|refusalNow\(\)|\(refused \? /;
 const SITES = [
-  { file: 'src/server/agent-tool-generators.js', re: /_patchHookFile\(def\.file\(\), def\.createIfMissing/, what: 'ensureAgentHooks — register our hook entries in ~/.claude/settings.json + ~/.codex/hooks.json' },
-  { file: 'src/server/agent-tool-generators.js', re: /_patchHookFile\(def\.file\(\), false/, what: 'stripAgentHookEntries — strip them (Integration OFF / Remove)' },
-  { file: 'src/server/harness-config-sync.js', re: /applyConfigPlan\(plan, \{ home \}\)/, what: 'syncCliConfig — the managed keys at boot and on every settings write (onSettingsWrite)' },
+  // B-ddf3 unit 2 line 1: THIS machine's writes all go through applyThisMachine (the shipped helper, through the starter)
+  { file: 'src/server/agent-tool-generators.js', re: /applyThisMachine\(\{ reason: auto \? 'hooks'/, what: 'ensureAgentHooks — register our hook entries in ~/.claude/settings.json + ~/.codex/hooks.json (through the shipped helper)' },
+  { file: 'src/server/agent-tool-generators.js', re: /applyThisMachine\(\{ reason: 'hooks removed', strip: true \}\)/, what: 'stripAgentHookEntries — strip them (Integration OFF / Remove; the helper\'s --uninstall)' },
+  { file: 'src/server/harness-config-sync.js', re: /return applyThisMachine\(\{ reason \}\)/, what: 'syncCliConfig — the managed keys at boot and on every settings write (onSettingsWrite; through the shipped helper)' },
   { file: 'src/hosts.js', re: /VIBESPACE_CLI_CONFIG=\$\{this\._cliConfigPlanB64\(\)\} "\$VS_NODE" "\$HOME\/\.vibespace\/bin\/vibespace-hook-register\.mjs" 2>/, what: 'hosts.installAgentTools — the remote register' },
   { file: 'src/hosts.js', re: /vibespace-hook-register\.mjs" --uninstall/, what: 'hosts.uninstallAgentTools — the remote strip' },
   { file: 'src/spawn/ssh.js', re: /VIBESPACE_CLI_CONFIG=\$\{cliConfigPlanB64\(\)\} "\$VS_NODE" "\$HOME\/\.vibespace\/bin\/vibespace-hook-register\.mjs"/, what: 'the ssh per-spawn prelude' },
@@ -199,7 +201,7 @@ ok(unlisted.length === 0, 'no writer outside the table', unlisted);
   const lost = editAnchor(syncSrc, /refusalNow\(\)|ownerWriteRefusal\(\)|refuseOwnerWrite\(\)|\(refused \? /g, (m) => (m === '(refused ? ' ? '(false ? ' : 'null'), "src/server/harness-config-sync.js");
   const f = M.write('src/server/harness-config-sync.js', lost, 'no-guard');
   const w = writersIn('src/server/harness-config-sync.js', fs.readFileSync(f, 'utf8'));
-  ok(lost !== syncSrc && w.length === 1 && !w[0].guarded && /applyConfigPlan\(plan, \{ home \}\)/.test(w[0].text), 'CONTROL: a copy of harness-config-sync.js without its guard is found UNGUARDED (the census goes red on a real file)', w);
+  ok(lost !== syncSrc && w.length === 1 && !w[0].guarded && /return applyThisMachine\(\{ reason \}\)/.test(w[0].text), 'CONTROL: a copy of harness-config-sync.js without its guard is found UNGUARDED (the census goes red on a real file)', w);
   const nameHit = writersIn('src/x.js', "  fs.writeFileSync(path.join(os.homedir(), '.codex', 'config.toml'), toml);\n");
   ok(nameHit.length === 1 && !nameHit[0].guarded, 'CONTROL: a raw writeFileSync toward a CLI config file NAME is a writer (unguarded, no row)');
 }
@@ -252,24 +254,24 @@ console.log('— ⑦ verify r2: the unknown verdict is RE-JUDGED with backoff, s
   const timers = []; const notices = []; let verdict = { refused: { kind: 'unknown', why: 'the server root could not be judged: /x/.git cannot be read (EIO)', line: 'hooks not registered: the server root could not be judged: /x/.git cannot be read (EIO)' } };
   let registered = null; let clients = 1;
   const w = HW.create({ dataDir: wdir, ensureAgentHooks: () => (verdict.refused ? { skipped: true, refused: verdict.refused } : { claude: { ok: true } }), rootRecovery: () => ({ lastError: null, registeredAfterError: registered }), ownerWriteRefusal: () => verdict.refused || null, integrationEnabled: () => true, serverNotice: (key, text, o) => { notices.push({ key, text, i18n: o && o.i18n }); return clients; }, setTimer: (fn, ms) => { const h = { fn, ms, unref() { } }; timers.push(h); return h; }, now: () => 0 });
-  const fire = () => { const h = timers.shift(); if (h) h.fn(); };
-  w.sync();
+  const fire = async () => { const h = timers.shift(); if (h) h.fn(); await new Promise((r) => setImmediate(r)); };   // (B-ddf3 u2 line 1: sync() lands a moment later — a Promise)
+  await w.sync();
   ok(notices.length === 1 && notices[0].key === 'hook-root-unknown' && notices[0].i18n && notices[0].i18n.key === HW.UNKNOWN_KEY && /EIO/.test(notices[0].i18n.params.error) && fs.existsSync(w.memoFile) && JSON.parse(fs.readFileSync(w.memoFile, 'utf8')).cause === verdict.refused.why && timers.length === 1 && timers[0].ms === 30000, 'REAL: a boot unknown posts ONE notice (i18n, the error named), writes the memo (a client saw it) and arms the first re-judge at 30 s', { notices, timers: timers.map((t) => t.ms), memo: fs.existsSync(w.memoFile) });
-  fire(); fire(); fire(); fire();
+  await fire(); await fire(); await fire(); await fire();
   ok(notices.length === 1 && w._state.delays.join() === '30000,60000,120000,300000,600000', 'REAL: four re-judges later the SAME cause posted nothing more and the ladder climbed 30 s → 60 s → 2 → 5 → 10 min', { notices: notices.length, delays: w._state.delays });
   const w2 = HW.create({ dataDir: wdir, ensureAgentHooks: () => ({ skipped: true, refused: verdict.refused }), rootRecovery: () => ({}), ownerWriteRefusal: () => verdict.refused, serverNotice: (key) => { notices.push({ key, boot: 2 }); return 1; }, setTimer: (fn, ms) => ({ fn, ms, unref() { } }) });
-  w2.sync();
+  await w2.sync();
   ok(notices.length === 1, 'REAL: the NEXT BOOT under the same cause (a fresh watch, the memo on disk) posts NOTHING — never one per boot', notices);
   verdict = { refused: { kind: 'unknown', why: 'the server root could not be judged: /x/.git/commondir cannot be read (EACCES)', line: 'hooks not registered: …' } };
-  fire();
+  await fire();
   ok(notices.length === 2 && notices[1].key === 'hook-root-unknown' && JSON.parse(fs.readFileSync(w.memoFile, 'utf8')).cause === verdict.refused.why, 'REAL: a NEW cause posts again and replaces the memo', notices.length);
   clients = 0; fs.rmSync(w.memoFile, { force: true }); verdict = { refused: { kind: 'unknown', why: 'the server root could not be judged: nobody watching', line: 'x' } };
-  fire();
+  await fire();
   ok(notices.length === 3 && !fs.existsSync(w.memoFile), 'REAL: a notice nobody saw (no client) does not burn the memo — the next judge may say it to someone', { memo: fs.existsSync(w.memoFile) });
   clients = 1; verdict = {}; registered = { at: new Date(2026, 9, 2, 9, 41).getTime(), error: '/x/.git cannot be read (EIO)', since: 0 };
-  fire();
+  await fire();
   ok(notices.length === 4 && notices[3].key === 'hook-root-registered' && notices[3].i18n.key === HW.REGISTERED_KEY && notices[3].i18n.params.time === '09:41' && /09:41 after an earlier read error \(\/x\/\.git cannot be read \(EIO\)\)/.test(notices[3].text) && !fs.existsSync(w.memoFile) && w._state.attempt === 0 && timers.length === 0, 'REAL: the recovery — the registration after the error said ONCE (i18n, HH:MM + the error), the memo gone, the ladder reset, no timer left', { notices: notices.slice(3), attempt: w._state.attempt, timers: timers.length });
-  w.sync(); w.recovered();
+  await w.sync(); w.recovered();
   ok(notices.length === 4 && w.probeMayRun() === true && w.saidRecoveryInstead({ stale: false }, false) === true && w.saidRecoveryInstead({ stale: true }, false) === false && notices.length === 4, 'REAL: said once only; the probe may run on a judged root; after a self-heal the recovery is "said instead" of repaired (unless the file was stale) — without a second toast');
   verdict = { refused: { kind: 'unknown', why: 'again', line: 'x' } };
   ok(w.probeMayRun() === false && timers.length === 1 && timers[0].ms === 30000 && w.probeMayRun() === false && timers.length === 1, 'REAL: the probe on an unjudgeable root arms the loop (from the reset ladder: 30 s) and never a second timer');

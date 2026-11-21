@@ -676,18 +676,24 @@ function ensureAgentHooks({ auto = false } = {}) {
   if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return Promise.resolve({ optedOut: true });
   if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
   if (typeof applyThisMachine !== 'function') return Promise.resolve(Object.fromEntries(Object.keys(HOOK_FILES).map((k) => [k, { ok: false, error: 'no helper road on this server: nothing written' }])));
-  return applyThisMachine({ reason: auto ? 'hooks' : 'hooks (asked)', hooks: true }).then((landing) => {
-    const results = {};
+  return applyThisMachine({ reason: auto ? 'hooks' : 'hooks (asked)', hooks: true }).then(async (landing) => {
+    // the helper prints KEY receipts only: each hook file is VERIFIED here, off the loop (fs.promises), after the landing
+    const fsp = fs.promises, hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`, results = {};
     for (const [key, def] of Object.entries(HOOK_FILES)) {
-      const rel = def.rel.join('/');
+      const rel = def.rel.join('/'), file = def.file(), dir = path.dirname(file);
       if (!landing || !landing.ok) { console.log(`Hook registration (${key}) not done on this machine: ${landing && landing.why}`); results[key] = { ok: false, error: (landing && landing.why) || 'no landing' }; continue; }
+      let dirThere = true; try { await fsp.stat(dir); } catch { dirThere = false; }
+      if (!dirThere) { const why = `~/${path.dirname(rel)} not found — the CLI has not run on this machine; nothing is created`; console.log(`Hook registration (${key}) skipped:`, why); results[key] = { ok: false, error: why, missing: 'no-dir' }; continue; }
+      let root = null; try { root = JSON.parse(await fsp.readFile(file, 'utf8')); } catch (e) { const why = e && e.code === 'ENOENT' ? `~/${rel} does not exist and was not created` : `~/${rel} cannot be read as JSON`; console.log(`Hook registration (${key}) skipped:`, why); results[key] = { ok: false, error: why }; continue; }
+      const ours = HOOK_EVENTS_FOR(key).every((ev) => { const h = _findOurHookIn(root && root.hooks && root.hooks[ev]); return !!h && h.command === hookCmd; });
+      if (!ours) { const why = `our hook entries are not in ~/${rel} after the helper ran`; console.log(`Hook registration (${key}) skipped:`, why); results[key] = { ok: false, error: why }; continue; }
       if ((landing.created || []).some((c) => c.rel === rel)) {
         // THE FILE THE CLI NEVER WROTE (lane hooks-create): created because its directory proves the CLI has run ('dir-exists');
         // a session already running snapshotted its hooks without ours — the caller tells them
         console.log(`created ~/${rel} (the CLI had never written one) and registered VibeSpace hooks`);
         results[key] = { ok: true, created: true };
         if (typeof onHookFileCreated === 'function') {
-          try { onHookFileCreated({ harness: key, file: def.file(), rel, at: Date.now() }); } catch (e) { console.warn(`[hooks] ${key}: the sessions that predate ~/${rel} were not told — ${e && e.message}`); }
+          try { onHookFileCreated({ harness: key, file, rel, at: Date.now() }); } catch (e) { console.warn(`[hooks] ${key}: the sessions that predate ~/${rel} were not told — ${e && e.message}`); }
         }
       } else results[key] = { ok: true };
     }
