@@ -909,6 +909,9 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
     ['a percent-encoded password', 'curl https://ops:' + pe + '@api.example/v1', 'curl https://ops:' + REDACTED + '@api.example/v1', [pe, 'ss%21']],
     ['a raw @ inside the password (the LAST @ ends the userinfo)', 'amqp://worker:' + pa + '@mq.example:5672', 'amqp://worker:' + REDACTED + '@mq.example:5672', [pa, 'ssW0rd']],
     ['in prose, in parentheses and in a markdown link (an upper-case scheme)', 'see (https://ci:' + pw + '@build.example) and [x](HTTPS://ci:' + pw + '@build.example/a)', 'see (https://ci:' + REDACTED + '@build.example) and [x](HTTPS://ci:' + REDACTED + '@build.example/a)', [pw]],
+    // round wiagjybli: a real password with Chinese prose glued after it (a full-width comma ends the host) and JSON's escaped slashes
+    ['a real password, Chinese prose glued after the host', '见https://ci:' + pw + '@h.example，谢谢', '见https://ci:' + REDACTED + '@h.example，谢谢', [pw]],
+    ['JSON with escaped slashes (PHP json_encode)', '{"dsn":"mysql:\\/\\/app:' + pw + '@db.example\\/main"}', '{"dsn":"mysql:\\/\\/app:' + REDACTED + '@db.example\\/main"}', [pw]],
   ];
   // THE SHAPES THAT MUST STAY, byte for byte (over-masking is a defect)
   const KEEP = [
@@ -917,12 +920,19 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
     ['a port after the host', 'curl https://example.com:8443/health'], ['a user, a port and an @ in the path', 'open https://ops@social.example:443/@ops'],
     ['an EMPTY password (hides nothing)', 'curl https://ci:@api.example/v1'], ['a bare user over ftp', 'ftp://anonymous@ftp.example.org/pub'],
     ['an IPv6 host (colons, no userinfo)', 'curl http://[2001:db8::5]:8080/x'],
+    // round wiagjybli (THE MUST): unspaced CJK prose — a host ends where a host can end; the readers' three sentences word for word
+    ['lens 1: a port, a full-width comma, a mention later', '已部署到http://10.0.0.5:' + '8080，请@lead验收'],
+    ['lens 2: the same with another mention', '已部署到http://10.0.0.5:' + '8080，请@alice验收'],
+    ['lens 3: a blank before the URL, a mention with a blank after', '服务起在 http://10.0.0.5:' + '8080，有问题@ops 看一下'],
+    ['a mail address later in the sentence', '服务在http://10.0.0.5:' + '3456，请联系ops@corp.example'],
+    ['CJK letters glued to the port (no punctuation)', 'http://h.example:' + '8080请@lead'],
+    ['a compact table cell (a pipe ends the host)', '|http://h.example:' + '8080|ops@corp.example|'],
     ['a JSON with no blanks (a quote ends the authority)', '{"url":"https://x.example","mail":"ops@y.example"}'],
   ];
   const roads = (S, t) => ({ head: S.redactSecrets(t).text, message: S.redactSecrets(t, { message: true }).text, name: S.redactByValue(t, { typed: true }).text, stored: S.redactByValue(t).text });
   const goBad = GO.filter(([, t, want]) => { const o = roads(SS, t); return o.head !== want || o.message !== want || o.name !== want || o.stored !== want || belt.maskForSink(t, { message: true }) !== want || belt.maskForSink(t, { byValue: true, typed: true }) !== want || SS.redactSecrets(want).text !== want; });
   for (const [what, t, want] of GO) console.log(`      ${J(t).slice(0, 70).padEnd(72)} → ${roads(SS, t).head === want ? 'only the password masked' : J(roads(SS, t))}   (${what})`);
-  ok(!goBad.length, `R9 THE SIX: a URL's password standing on its own — ONLY it goes, the scheme, the user and the host stay — through the output belt (an output head), the message mode, maskForSink (a message and a job's name), the name rule (typed and stored); idempotent${goBad.length ? ' — wrong: ' + goBad.map(([w, t]) => w + ' ' + J(roads(SS, t))).join(' · ') : ''}`);
+  ok(!goBad.length, `R9 THE SIX (and the round's two: Chinese prose after the host, JSON's escaped slashes): a URL's password standing on its own — ONLY it goes, the scheme, the user and the host stay — through the output belt (an output head), the message mode, maskForSink (a message and a job's name), the name rule (typed and stored); idempotent${goBad.length ? ' — wrong: ' + goBad.map(([w, t]) => w + ' ' + J(roads(SS, t))).join(' · ') : ''}`);
   const vendor = GO.filter(([, t, , frags]) => frags.some((f) => DM.scrub(t, 2000).includes(f)));
   ok(!vendor.length, 'R9: the vendor scrub (a text bound for a vendor\'s model, R8 on) keeps no piece of the six passwords', vendor.map(([w]) => w));
   const keepBad = KEEP.filter(([, t]) => { const o = roads(SS, t); return o.head !== t || o.message !== t || o.name !== t || o.stored !== t || belt.maskForSink(t, { message: true }) !== t || DM.scrub(t, 2000) !== t || FY.maskedNoteOf(belt.maskForSink(t, { message: true })) !== ''; });
@@ -932,12 +942,15 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   ok(M.resolveName(NAME, new Set()).name === WANT_NAME && M.resolveName('clone ssh://git@github.com/o/r', new Set()).name === 'clone-ssh-git-github.com-o-r', 'R9 a job\'s NAME: «' + NAME.replace(pw, '<password>') + '» is stored as ' + WANT_NAME + ' (the user and the host stay); an ssh remote\'s name keeps its user', M.resolveName(NAME, new Set()).name);
   // the sender is told what was masked (the head as written), each mask counted once; a query value is still R7's (masked whole, once)
   const said = []; SS.redactSecrets(GO[0][1], { message: true, said });
-  ok(said.includes('https://deploy:') && SS.redactSecrets(GO[0][1]).redacted === 1 && SS.redactSecrets(GO[5][1]).redacted === 2 && SS.redactSecrets('https://x.example/a?next=https://u:' + pw + '@db/x').text === 'https://x.example/a?next=' + REDACTED && SS.redactSecrets('https://x.example/a?next=https://u:' + pw + '@db/x').redacted === 1 && SS.redactSecrets('git push https://ci:ghp_' + 'A1b2'.repeat(9) + '@github.com/o/r').text === 'git push https://ci:ghp_' + REDACTED + '@github.com/o/r',
-    'R9: the sender is told «https://deploy:» (what was masked); one mask per password; inside a query value R7 still masks the whole value ONCE; a family token in the password keeps its head (R4 masked it first — R9 never masks a mask)', said);
+  const PART = 'git push https://ci:abc-ghp_' + 'A1b2'.repeat(9) + '@github.com/o/r', WHOLE = 'git push https://ci:ghp_' + 'A1b2'.repeat(9) + '@github.com/o/r', VMARK = 'curl https://u:[vault:ci-token]@h.example/x';
+  ok(said.includes('https://deploy:') && SS.redactSecrets(GO[0][1]).redacted === 1 && SS.redactSecrets(GO[5][1]).redacted === 2 && SS.redactSecrets('https://x.example/a?next=https://u:' + pw + '@db/x').text === 'https://x.example/a?next=' + REDACTED && SS.redactSecrets('https://x.example/a?next=https://u:' + pw + '@db/x').redacted === 1
+    && SS.redactSecrets(PART).text === 'git push https://ci:' + REDACTED + '@github.com/o/r' && SS.redactSecrets(WHOLE).text === 'git push https://ci:' + REDACTED + '@github.com/o/r' && SS.redactByValue(PART, { typed: true }).text === 'git push https://ci:' + REDACTED + '@github.com/o/r'
+    && SS.redactSecrets(VMARK).text === VMARK && SS.redactSecrets(VMARK, { message: true }).text === VMARK,
+    'R9: the sender is told «https://deploy:» (what was masked); one mask per password; inside a query value R7 still masks the whole value ONCE; a password a row masked IN PART is masked whole (nothing of «abc-» kept, round wiagjybli); a password that IS a vault mark stays (its entry\'s name)', said);
   // a masked URL is drawn as WORDS with a note in the For-you card (lane mask-value-shape law 2 — never a link that looks whole)
   ok(FY.maskedNoteOf(belt.maskForSink(GO[0][1], { message: true })) !== '' && SS.maskedLink(GO[0][2]) && SS.maskedLink(GO[0][2]).shape === true, 'R9: a URL whose password was masked is a MASKED LINK — the For-you card draws it as words with its note');
   // bounded and linear BY COUNT: the authority walk's steps, counted in an instrumented copy (never clocked)
-  const STEP_AT = "    const c = d.charCodeAt(j);\n    if (c === 47 || c === 63 || c === 35 || isBlankCode(c) || (quotes && QUOTE_END.has(c))) break;   // the authority ended\n";
+  const STEP_AT = "    const c = d.charCodeAt(j);\n    if (c === 47 || c === 63 || c === 35 || isBlankCode(c)) break;                 // `/ ? #` or a blank: the authority ended\n";
   const MS = mutantCopies('da2d-steps', REPO).load('src/secret-shapes.js', anchored(SRC, STEP_AT, '    globalThis.__r9Steps++;\n' + STEP_AT, 'R9 the walk counted'), 'steps');
   // each storm holds an `@` (no `@`, no walk); the walks of one text never overlap (each ends at the `/` of the next `://`)
   const HOSTILE = ['x://' + 'a:@'.repeat(21000), 'a://b'.repeat(13000) + '@', ('h://u:p@' + 'x'.repeat(1100) + ' ').repeat(55), 'h://' + ':'.repeat(30000) + '@'.repeat(30000), ('a://' + 'b'.repeat(1020) + '/').repeat(60) + '@', ('see https://u:' + pw + '@h.example/x ').repeat(1800)];
@@ -959,6 +972,35 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   ok(NOQ.redactSecrets(jsonKeep).text !== jsonKeep, 'RED CONTROL — NO QUOTE ENDS THE AUTHORITY: the compact JSON\'s mail address is over-masked (' + J(NOQ.redactSecrets(jsonKeep).text) + ') — the KEPT leg goes red');
   const FIRST = mutantCopies('da2d-firstat', REPO).load('src/secret-shapes.js', anchored(SRC, '    if (c === 64) at = j; else', '    if (c === 64) { if (at < 0) at = j; } else', 'R9 the first @'), 'firstat');
   ok(FIRST.redactSecrets(GO[4][1]).text.includes('ssW0rd'), 'RED CONTROL — THE FIRST @ ENDS THE USERINFO: the tail of a password holding a raw @ is kept (' + J(FIRST.redactSecrets(GO[4][1]).text) + ') — the six go red');
+  // ── round wiagjybli (the readers' must, the coordinator's law): IN FREE TEXT A HOST ENDS WHERE A HOST CAN END
+  // every stop of a message — the module's ONE list, MESSAGE_STOPS, read from the module — ends the walk: a port, the stop, a mention after
+  const msm = /\nconst MESSAGE_STOPS = new Set\(\[\.\.\.'([^']+)'\]/.exec(SRC), STOPS = msm ? [...msm[1]] : [];
+  const stopBad = STOPS.filter((ch) => { const t = 'http://10.0.0.5:' + '8080' + ch + '@lead'; return SS.redactSecrets(t).text !== t || SS.redactSecrets(t, { message: true }).text !== t || SS.redactByValue(t, { typed: true }).text !== t; });
+  ok(STOPS.length >= 15 && !stopBad.length, `CJK: every one of the ${STOPS.length} stops of a message (MESSAGE_STOPS, the ONE list) ends a free text's authority — a port, the stop, then «@lead» — kept on every road${stopBad.length ? ' — moved at: ' + stopBad.join(' ') : ''}`);
+  // an at-mention's place is unmoved (the mention = the sentence's LAST @): the owner's @-picker place is moved by the mask of the words BEFORE it (groups-engine's own
+  // arithmetic: maskForSink of the prefix) — it lands on the mention when the URL's authority ends before it
+  const MENTIONS = [...KEEP.filter(([w]) => w.startsWith('lens')).map(([, t]) => t), '见https://ci:' + pw + '@h.example，请@lead验收'];
+  const placeOf = (mask, g) => { const ps = g.lastIndexOf('@'), m = /^@[a-z]+/.exec(g.slice(ps))[0], body = mask(g), d = mask(g.slice(0, ps)).length - ps; return body.slice(ps + d, ps + d + m.length) === m && !body.includes(pw); };
+  const sinkMask = (t) => belt.maskForSink(t, { message: true });
+  ok(MENTIONS.every((g) => placeOf(sinkMask, g)), `CJK: an at-mention's place is unmoved — the picker's place moved by its prefix's mask lands on the mention (${MENTIONS.length} sentences: the readers' three, and a real password before a mention, masked)`);
+  // the mask's own mark is read WHOLE inside the walk: a user masked before never lets its password through
+  const MUSER = 'git push https://ghp_' + 'A1b2'.repeat(9) + ':' + pw + '@github.com/o/r';
+  ok(SS.redactSecrets(MUSER).text === 'git push https://ghp_' + REDACTED + ':' + REDACTED + '@github.com/o/r' && SS.redactSecrets(MUSER, { message: true }).text === 'git push https://ghp_' + REDACTED + ':' + REDACTED + '@github.com/o/r', 'CJK: the belts\' own mark «redacted» is read whole inside a free text\'s authority — a user R4 masked first keeps its password masked too');
+  // a host with a port of digits: an image reference's tag and digest are no login (round wiagjybli, lens 2)
+  const DOCKER = 'skopeo copy docker://alpine:3.19@sha256:' + 'ab12'.repeat(16) + ' oci:./img';
+  ok(SS.redactSecrets(DOCKER).text === DOCKER && SS.redactSecrets(DOCKER, { message: true }).text === DOCKER && SS.redactByValue(DOCKER, { typed: true }).text === DOCKER, 'the part after a userinfo must be a host with a port of DIGITS — «docker://alpine:3.19@sha256:<digest>» keeps its tag');
+  // a password that starts inside the vendor scrub's kept window is read whole (VALUE_MAX ≥ the walk's 1 024): no prefix at the cut
+  const CUT = 'x'.repeat(300) + ' https://u:' + pw.repeat(100) + '@h.example/x', cp = DM.cleanPart(CUT, 100);
+  ok(SS.VALUE_MAX >= 1024 && !cp.includes(pw) && !cp.includes(pw.slice(0, 5)), `the vendor scrub cuts BEFORE it redacts, at 4× + VALUE_MAX (${SS.VALUE_MAX} ≥ the walk's 1 024): a 900-character password starting inside the kept window leaves no piece — ${J(cp.slice(-60))}`);
+  // RED CONTROLS of the round, each RED by name
+  const TIP_WALK = "    if (free) {\n      if (c === 0xAB && d.startsWith(REDACTED, j)) { j += REDACTED.length - 1; continue; }   // the belts' own mark, read WHOLE\n      if (c > 127 || !AUTH_CH[c]) break;                                           // a free text: where a host can end\n    }\n";
+  const TIP_PORT = '  return !free || portOk(d, at + 1, j) ? [colon, at] : null;';
+  const TIP = mutantCopies('da2d-tip', REPO).load('src/secret-shapes.js', anchored(anchored(SRC, TIP_WALK, "    if (free && (c === 34 || c === 39 || c === 60 || c === 62 || c === 96)) break;   // the tip 831481e7d: a quote only\n", 'the tip\'s walk'), TIP_PORT, '  return [colon, at];', 'the tip: no port test'), 'tip');
+  const tipEaten = KEEP.filter(([w]) => w.startsWith('lens')).filter(([, t]) => TIP.redactSecrets(t, { message: true }).text !== t);
+  const tipMoved = MENTIONS.filter((g) => !placeOf((t) => TIP.redactSecrets(t, { message: true }).text, g));
+  ok(tipEaten.length === 3 && tipMoved.length >= 3 && TIP.redactSecrets(DOCKER).text !== DOCKER, `RED CONTROL — THE TIP 831481e7d's WALK: the readers' ${tipEaten.length}/3 sentences eaten (${tipEaten.map(([, t]) => J(TIP.redactSecrets(t, { message: true }).text)).join(' · ')}), ${tipMoved.length} mention places moved, the image's tag masked — the legs above go red`);
+  const NOMARK = mutantCopies('da2d-nomark', REPO).load('src/secret-shapes.js', anchored(SRC, "      if (c === 0xAB && d.startsWith(REDACTED, j)) { j += REDACTED.length - 1; continue; }   // the belts' own mark, read WHOLE\n", '', 'the mark not read whole'), 'nomark');
+  ok(NOMARK.redactSecrets(MUSER).text.includes(pw), 'RED CONTROL — THE MARK ENDS THE WALK (« outside the alphabet): a user masked before lets its password through (' + J(NOMARK.redactSecrets(MUSER).text.replace(pw, '<the password>')) + ')');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

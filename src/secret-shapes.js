@@ -56,7 +56,8 @@
  *      keeps its commit shas and hashes (diagnosis); a text bound for a vendor's model loses them (nothing to diagnose)
  *   R9 a URL's PASSWORD standing on its own (B-da2d — found 2026-11-20: R7 read a userinfo only inside a query value) —
  *      `scheme://user:pw@host` anywhere in the text: ONLY the password goes (`scheme://user:«redacted»@host` — the
- *      scheme, the user and the host stay); a bare `user@`, a port, an empty password are kept (the block above redactUserinfo)
+ *      scheme, the user and the host stay); a bare `user@`, a port, an empty password are kept; in a free text a host ends where a
+ *      host can end (a full-width stop, a CJK letter: ordinary prose keeps its words) — the block above authorityAt
  * THE NAME GRAMMAR (lane mask-value-shape r2, the owner 2026-11-07 — «URL被替换和redact了»: R7 masked gcloud's PUBLIC
  *   `token_usage=remote` because its name holds «token», and the sign-in link on his For-you card opened nothing). The
  *   belt NEVER judges a value's shape in order to KEEP it (r1's value floor kept `API_KEY=changeme`, `REDIS_AUTH=foobared`,
@@ -528,19 +529,40 @@ const DESCRIPTOR_HEADS = new Set(['usage', 'type', 'ttl', 'sock', 'policy', 'sca
 // bound, scheme 32 + userinfo 512 + slack); an authority never runs past the next `://` (its `/` ends it), so no character is read twice
 const SCHEME_CH = (c) => (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c === 43 || c === 45 || c === 46;
 // B-da2d: THE AUTHORITY WALK — ONE for both readers (passwordUserinfo in a decoded query value, R9 over a whole text): from the first
-// character after a scheme's `://` to its first `/ ? #` or blank (≤ 1 024); `quotes` (R9 — a free text): a `" ' < >` or a backtick ends
-// it too (`{"a":"https://x","b":"m@y"}`: the next string holds no userinfo). → [colon, at] when the authority carries a PASSWORD: its
+// character after a scheme's `://` to its first `/ ? #` or blank (≤ 1 024). → [colon, at] when the authority carries a PASSWORD: its
 // LAST `@` (WHATWG's reading — a raw `@` inside a password is the password's) with its FIRST `:` before it; else null (a bare `user@`,
-// a port after the host: `user@host:8443`)
-const QUOTE_END = new Set([34, 39, 60, 62, 96]);
-function authorityAt(d, from, quotes) {
-  let at = -1, colon = -1;
-  for (let j = from, end = Math.min(d.length, from + 1024); j < end; j++) {
+// a port after the host: `user@host:8443`).
+// `free` (R9 — a FREE TEXT; the cure of round wiagjybli, the readers' must): A HOST ENDS WHERE A HOST CAN END — at the first character
+// outside the ADDRESS ALPHABET (AUTH_CH: RFC 3986's unreserved, `%`, the sub-delims but the quote `'`, `:` `@` `[ ]`): a quote, `< > \ ^
+// { } |`, a control and EVERY character outside ASCII — so every stop of a message (MESSAGE_STOPS: ， 。 、 ： ！ ？ 「 」 …, the ONE list a
+// leg reads) and every CJK letter end it: a sentence with no blanks — an address with a port, a full-width comma, a mention later —
+// keeps its port and its words. The belts' own mark
+// `«redacted»` is read WHOLE inside it (a user masked before — `https://ghp_«redacted»:<pw>@h` — never lets its password through); any
+// other « or » ends it. And the part after the userinfo must be a HOST with a port of digits (portOk): `docker://alpine:3.19@sha256:…`
+// is an image's tag and digest, never a login. The query-value reader (`free` unset) reads as r5 did.
+const AUTH_CH = new Uint8Array(128);
+for (const ch of 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~%!$&()*+,;=:@[]') AUTH_CH[ch.charCodeAt(0)] = 1;
+function portOk(d, s, e) {   // [s, e) after the userinfo: a host (a bracketed IPv6 one read to its `]`), then nothing or `:` + digits
+  let i = s;
+  if (i < e && d.charCodeAt(i) === 91) { while (i < e && d.charCodeAt(i) !== 93) i++; if (i === e) return false; i++; }
+  else while (i < e && d.charCodeAt(i) !== 58) i++;
+  if (i < e && d.charCodeAt(i++) !== 58) return false;
+  for (; i < e; i++) { const c = d.charCodeAt(i); if (c < 48 || c > 57) return false; }
+  return true;
+}
+function authorityAt(d, from, free) {
+  let at = -1, colon = -1, j = from;
+  for (const end = Math.min(d.length, from + 1024); j < end; j++) {
     const c = d.charCodeAt(j);
-    if (c === 47 || c === 63 || c === 35 || isBlankCode(c) || (quotes && QUOTE_END.has(c))) break;   // the authority ended
+    if (c === 47 || c === 63 || c === 35 || isBlankCode(c)) break;                 // `/ ? #` or a blank: the authority ended
+    if (free) {
+      if (c === 0xAB && d.startsWith(REDACTED, j)) { j += REDACTED.length - 1; continue; }   // the belts' own mark, read WHOLE
+      if (c > 127 || !AUTH_CH[c]) break;                                           // a free text: where a host can end
+    }
     if (c === 64) at = j; else if (c === 58 && colon < 0) colon = j;
   }
-  return colon >= 0 && colon < at ? [colon, at] : null;
+  if (colon < 0 || colon > at) return null;
+  return !free || portOk(d, at + 1, j) ? [colon, at] : null;
 }
 function passwordUserinfo(d) {
   for (let from = 0, i; (i = d.indexOf('://', from)) >= 0;) {
@@ -552,17 +574,26 @@ function passwordUserinfo(d) {
 }
 // R9 (B-da2d — row B-a3fe's remainder): a URL's PASSWORD standing on its own — a message, an output head, a job's name, not only
 // inside a query value (R7): ONLY the password goes (`scheme://user:«redacted»@host`: a reader still sees which host and
-// which user), after a scheme and `://` only. Kept: a bare `user@` (an ssh / scp address, a mail address, a git remote), a port, an
-// EMPTY password (`key:@` hides nothing here — inside a query value R7 still masks the whole value), a password a row before already
-// masked (`glpat-«redacted»`). A percent-encoded password is one, read as written (`p%40ss`). One forward read: the walk above
+// which user), after a scheme and `://` — or JSON's escaped `:\/\/` (PHP's json_encode, a Java serializer: the walk ends at its `\`).
+// Kept: a bare `user@` (an ssh / scp address, a mail address, a git remote), a port, an EMPTY password (`key:@` hides nothing here —
+// inside a query value R7 still masks the whole value), a password that IS a mark (`«redacted»`, a vault mark `[vault:<entry>]`: the
+// entry's name stays). A password a row before masked IN PART (`abc-ghp_«redacted»`) is masked whole. A percent-encoded password is
+// one, read as written (`p%40ss`). One forward read: each `://` / `:\/\/` found once (its next place kept while ahead), the walk above
+const VAULT_MARK_RE = /^\[vault:[^\]\[\s]{1,440}\]$/;
 function redactUserinfo(text, onMask) {
   if (text.indexOf('@') < 0) return text;
-  let out = '', last = 0;
-  for (let from = 0, i; (i = text.indexOf('://', from)) >= 0;) {
-    from = i + 3;
+  let out = '', last = 0, na = text.indexOf('://'), ne = text.indexOf(':\\/\\/');
+  for (let from = 0; ;) {
+    if (na >= 0 && na < from) na = text.indexOf('://', from);
+    if (ne >= 0 && ne < from) ne = text.indexOf(':\\/\\/', from);
+    const i = na < 0 ? ne : ne < 0 ? na : Math.min(na, ne);
+    if (i < 0) break;
+    from = i + (i === ne ? 5 : 3);
     if (i === 0 || !SCHEME_CH(text.charCodeAt(i - 1))) continue;
     const a = authorityAt(text, from, true);
-    if (!a || a[0] + 1 === a[1] || text.slice(a[0] + 1, a[1]).includes(REDACTED)) continue;   // none, an empty one, one masked before
+    if (!a) continue;
+    const pw = text.slice(a[0] + 1, a[1]);
+    if (!pw || pw === REDACTED || VAULT_MARK_RE.test(pw)) continue;                // an empty one, one that IS a mark
     let s = i; while (s > i - 32 && s > 0 && SCHEME_CH(text.charCodeAt(s - 1))) s--;
     onMask(text.slice(s, a[0] + 1));                                                // what was masked: `https://deploy:`
     out += text.slice(last, a[0] + 1) + REDACTED; last = from = a[1];
