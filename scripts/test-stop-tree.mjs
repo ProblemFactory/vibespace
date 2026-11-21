@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { stopScenes } from './lib/stop-scenes.mjs';
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PI = require(path.join(ROOT, 'src/proc-identity.js'));
@@ -124,46 +125,7 @@ const PIsrc = fs.readFileSync(path.join(ROOT, 'src/proc-identity.js'), 'utf8'), 
 ok(twinOf(PIsrc) && twinOf(PIsrc) === twinOf(WRAP), 'data/bin/job-wrapper.js carries src/proc-identity.js childTreeOf byte-for-byte (the wrapper cannot require src/)');
 
 console.log('§4 THE JOB DOOR — the wrapper\'s one table: a stopped job leaves nothing of its tree, each heard ONCE, its queue marker free');
-const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAlone = false, before = null, ready = null, jobsMod = null, deps = {} } = {}) => {
-  const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true });
-  fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), wrapperText);
-  const marker = path.join(dd, 'queue.lock'), heard = path.join(dd, 'heard');
-  const { JobManager } = jobsMod || require(path.join(ROOT, 'src/jobs.js'));   // B-7ca1: a control's copy of the engine
-  const logs = [];
-  const jm = new JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log: (...a) => logs.push(a.join(' ')), apiBase: 'http://127.0.0.1:9', memoryRungs: [], ...deps });   // deps: B-d8f4's grace seam (memorySample.stopMs)
-  jm.init();
-  const caller = { conversationId: 'conv-st', sessionId: 'sess-st', sessionCreatedAt: 1, groups: new Set() };
-  const owner = { conversation: { backend: 'claude', id: 'conv-st' }, sessionId: 'sess-st', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
-  // the pipeline's shape: a waiter holding the queue's lock in a session of its own with no environ (it cleans up on its first
-  // SIGTERM and writes each one it hears), a child under timeout
-  const waiter = `trap 'echo TERM >> ${JSON.stringify(heard)}; sleep 0.3; exit 0' TERM; while :; do sleep 0.1; done`;
-  const cmd = argv || ['sh', '-c', `setsid env -i flock ${JSON.stringify(marker)} sh -c ${JSON.stringify(waiter)} & timeout 305 sleep 305 & wait`];
-  const r = jm.create({ kind: 'task', name: 'pipeline', cmd: { argv: cmd }, owner }, caller);
-  const job = jm.jobs.get(r.job.id);
-  let tree = [];
-  let stamp = null;
-  await until(async () => { const st = jm._readStamp(job); if (!st || !jm._verifyAlive(st)) return false; stamp = st; tree = PI.treeOf([Number(st.pid)], { since: Number(st.starttime) || 0 }); return ready ? ready(tree) : tree.some((m) => m.comm === 'flock') && tree.filter((m) => m.comm === 'sleep').length >= 2; }, 8000);
-  mine.push(...tree);
-  const held = spawnSync('flock', ['-n', marker, 'true']).status !== 0;
-  const pre = before ? before({ dd, stamp, tree, jm }) : null;
-  const heldOut = !!stamp && PI.keptOut([]).some((x) => x[0] === Number(stamp.pid));   // the engine keeps its wrappers out of other stops' walks
-  if (signalAlone) process.kill(Number(stamp.pid), 'SIGTERM'); else jm.stop(job, { force });
-  await until(async () => { await jm._sweep(); return ['interrupted', 'failed', 'done'].includes(job.state); }, 8000);
-  const kept = (m) => !!(pre && pre.keep && pre.keep.has(m.pid));   // what the scene expects to live on (never waited for)
-  await until(() => tree.filter((m) => !kept(m)).every((m) => PI.aliveIdentity(m) === false), 4000);
-  const after = pre && pre.after ? await pre.after() : null;   // read before this scene ends what is left
-  const left = tree.filter((m) => PI.aliveIdentity(m) === true);
-  const free = spawnSync('flock', ['-n', marker, 'true']).status === 0;
-  const terms = (() => { try { return fs.readFileSync(heard, 'utf8').trim().split('\n').filter(Boolean).length; } catch { return 0; } })();
-  const readLog = () => { try { const run = job.runs[job.runs.length - 1]; return fs.readFileSync(path.join(dd, 'job-logs', job.id, String(run.startedAt), 'current.log'), 'utf8'); } catch { return ''; } };
-  if (force) await until(() => readLog().includes('[jobs] stop: its forced end'), 3000);   // the engine's line lands off the loop
-  const log = readLog();
-  const said = logs.filter((l) => l.includes(job.id)).join(' | ');
-  let intent = null; try { const run = job.runs[job.runs.length - 1]; intent = JSON.parse(fs.readFileSync(path.join(dd, 'job-logs', job.id, String(run.startedAt), 'stop.json'), 'utf8')); } catch { }
-  for (const m of left) PI.signalIdentity(m, 'SIGKILL');
-  try { jm.shutdown(); } catch { }
-  return { tree, left, held, free, terms, state: job.state, log, said, intent, heldOut, after };
-};
+const { jobScene, timed, escScene } = stopScenes({ D, mine, ROOT });   // B-d8f4 (r1045): the scene builders live in scripts/lib/stop-scenes.mjs (one file for both stop suites)
 const real = await jobScene(WRAP, 'job');
 ok(real.tree.length >= 4 && real.held && real.state === 'interrupted', 'the scene: the job\'s tree holds the setsid env -i flock + its waiter and the timeout + its sleep, the queue\'s lock HELD', { tree: names(real.tree), held: real.held, state: real.state });
 ok(!real.left.length && real.free, 'B-c134: the job\'s STOP leaves NOTHING of its tree running — and its queue marker is free', { left: names(real.left), free: real.free });
@@ -904,35 +866,6 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   // the reported shape where jobs have no scope (a container, a pod): a child that made its OWN group (setsid) and was re-parented
   // BEFORE the stop (its parent, a subshell, ended at once) — neither in the job's process group nor under the tree the stop reads;
   // it still carries the job's mark (VIBESPACE_JOB_ID, inherited). It writes its pid, so the scene can follow it
-  const timed = (fn) => async (...a) => { const t0 = Date.now(), r = await fn(...a); r.ms = Date.now() - t0; console.log(`  · ${a[1]}: ${r.ms} ms, the job ${r.state}`); return r; };   // each scene's own time, printed
-  const escScene = timed(async (wrapperText, tag, opts = {}) => {
-    const ESC = path.join(D, tag, 'esc.pid');
-    const argv = ['sh', '-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(ESC)}; exec sleep 318' &); timeout 319 sleep 319 & wait`];
-    return jobScene(wrapperText, tag, { ...opts, argv,
-      ready: (tree) => tree.some((m) => m.comm === 'timeout') && fs.existsSync(ESC) && fs.readFileSync(ESC, 'utf8').trim().length > 0,
-      before: ({ tree, jm }) => {
-        const pid = Number(fs.readFileSync(ESC, 'utf8').trim()), id = PI.identityOf(pid); mine.push(id);
-        const job = [...jm.jobs.values()][0], ownGroup = PI.pgidOf(pid) === pid, inTree = tree.some((m) => m.pid === pid);   // read BEFORE the stop (its read's NIT)
-        // its read's MUST: a STRANGER carrying the job's mark but ANOTHER run's (an earlier run's leftover forks it during this run) —
-        // started after the wrapper, outside its group: a stop of THIS run never ends it
-        // its read r2 (MUST): the stranger is NOT the hub's child (this suite is the hub: the keep-out would spare it by its parent chain,
-        // and the run's mark would go untested) — a subshell that exits re-parents it, as an earlier run's leftover's fork is
-        const STR = path.join(D, tag, 'stranger.pid');
-        spawnSync('sh', ['-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(STR)}; exec sleep 320' &)`], { env: { ...process.env, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:1` }, stdio: 'ignore' });
-        let spid = 0; for (let k = 0; k < 100 && !(spid > 1); k++) { try { spid = Number(fs.readFileSync(STR, 'utf8').trim()); } catch { } if (!(spid > 1)) spawnSync('sleep', ['0.02']); }
-        const sid = PI.identityOf(spid); mine.push(sid);
-        const strangerOwn = PI.ppidOf(spid) !== process.pid && PI.pgidOf(spid) === spid;   // re-parented, its own group
-        return { after: async () => {
-          await until(() => PI.aliveIdentity(id) === false, 200);   // the drain (or the engine's SIGKILL) ended it before the run's end — its reaping by the subreaper is what is left: milliseconds
-          const alive = PI.aliveIdentity(id) === true, stranger = PI.aliveIdentity(sid) === true, run = job && job.runs[job.runs.length - 1];
-          if (alive) PI.signalIdentity(id, 'SIGKILL');
-          if (stranger) PI.signalIdentity(sid, 'SIGKILL');
-          let view = null; try { view = ((jm.snapshot(job) || {}).run || {}).left || null; } catch (e) { view = { threw: String(e && e.message) }; }   // the API's view (the card's row reads it)
-          let viewCut = null; if (opts.viewMod) { try { viewCut = ((opts.viewMod.JobManager.prototype.snapshot.call(jm, job) || {}).run || {}).left || null; } catch (e) { viewCut = { threw: String(e && e.message) }; } }   // the control's view, over THIS run (no scene of its own)
-          return { pid, alive, stranger, strangerOwn, inTree, ownGroup, left: (run && run.left) || null, view, viewCut };
-        } };
-      } });
-  });
   // (a) a stop through the wrapper (its stop step and its drain)
   const VW = 'escaped: run.left.escaped || 0, outside: run.left.outside || 0, short: run.left.short || 0 } } : {})';
   const viewCut = MJ.load('src/jobs.js', anchored(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), VW, 'escaped: run.left.escaped || 0, short: run.left.short || 0 } } : {})', 'b7ca1-view-cut'), 'b7ca1-view-cut');   // stale-pins: kept (the control plants the release's text in a copy)

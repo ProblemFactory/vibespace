@@ -739,7 +739,7 @@ const mainKept = () => { if (!mainLive()) return false; const k = keptTest(); re
 let mainKeptSaid = 0, refusedAt = 0;
 const sayMainKept = (sig) => { if (mainKeptSaid++) return; try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] stop: ${sig} refused — ${HUB_MAIN_WORDS} (its main process is the VibeSpace hub, started as this job)\n`)); } catch { } };
 const killMain = () => { if (mainKept()) { sayMainKept('SIGKILL'); return false; } try { child.kill('SIGKILL'); return true; } catch { return false; } };
-const termMain = (p, sig) => { if (termed.has(termKey(p)) || !mainLive()) return false; if (mainKept()) { sayMainKept(sig); return false; } termed.set(termKey(p), { at: Date.now(), pass: 'stop' }); try { process.kill(child.pid, sig); return true; } catch { return false; } };
+const termMain = (p, sig) => { if (termed.has(termKey(p)) || !mainLive()) return false; if (mainKept()) { sayMainKept(sig); return false; } const rec = { at: Date.now(), pass: 'stop' }; termed.set(termKey(p), rec); try { process.kill(child.pid, sig); rec.ok = true; return true; } catch { return false; } };   // B-d8f4 (主开发 r1045): every writer of the table says whether its signal landed
 // round 10: the manager's kill of the scope is a delivery too — recorded, once per stop step (r9 sent a natural end's leftovers
 // their SIGTERM by it unrecorded: a stop while they drained SIGTERMed them again)
 let scopeSent = 0;
@@ -776,11 +776,11 @@ function onStop(sig, at, by) {
   // reached: the main heard it twice, 3 ms apart); a scope whose list cannot be read, the manager's kill (as before)
   const ko = keptOutHere(), tree = childTreeOf(process.pid, { since: Number(stamp.starttime) || 0, exclude: ko });   // B-c134: the tree FIRST — after the first signal a child is re-parented; never into what is not the job's (cure, MUST A)
   const main = mainLive() ? rowOf(child.pid) : null; // the main first — its own stat names its group (no walk before it hears the stop)
-  if (main && by === 'engine' && main[2] === process.pid) termed.set(termKey(main), { at, pass: 'stop' });
+  if (main && by === 'engine' && main[2] === process.pid) termed.set(termKey(main), { at, pass: 'stop', ok: true });   // B-d8f4 (r1045): the engine's group signal LANDED on what was in our group at the stop (we heard it with them)
   mainBy = main ? (termed.has(termKey(main)) ? 'engine' : termMain(main, sig) ? 'wrapper' : '') : child && !mainLive() ? 'ended' : '';
   const listed = scoped() ? scopeRows() : null;
   const rows = scoped() ? listed || [] : groupLeft().map(([p, st]) => [p, st, process.pid]); // our group's: its pgid ours
-  if (by === 'engine') for (const p of rows) if (p[2] === process.pid && !termed.has(termKey(p))) termed.set(termKey(p), { at, pass: 'stop' });
+  if (by === 'engine') for (const p of rows) if (p[2] === process.pid && !termed.has(termKey(p))) termed.set(termKey(p), { at, pass: 'stop', ok: true });   // B-d8f4 (r1045): landed, as the main's
   const who = by === 'engine' ? `the engine signalled its process group${mainBy === 'wrapper' ? '; its main process had left that group — the wrapper signals it' : ''}`
     : by === 'intent' ? "the engine's stop never reached its group — the wrapper signals it"
       : by === 'alone-hub' ? 'the VibeSpace hub runs in its process group (started inside the job) — the engine signalled the wrapper alone; the wrapper signals the job\'s processes, once'

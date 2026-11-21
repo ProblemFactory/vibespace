@@ -33,79 +33,11 @@ const D = scratch('stop-rung'); fs.rmSync(D, { recursive: true, force: true }); 
 process.on('exit', () => { try { fs.rmSync(D, { recursive: true, force: true }); } catch { } });
 const WRAP = fs.readFileSync(path.join(ROOT, 'data/bin/job-wrapper.js'), 'utf8');
 const MJ = mutantCopies('stop-rung', ROOT);
-const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAlone = false, before = null, ready = null, jobsMod = null, deps = {} } = {}) => {
-  const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true });
-  fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), wrapperText);
-  const marker = path.join(dd, 'queue.lock'), heard = path.join(dd, 'heard');
-  const { JobManager } = jobsMod || require(path.join(ROOT, 'src/jobs.js'));   // B-7ca1: a control's copy of the engine
-  const logs = [];
-  const jm = new JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log: (...a) => logs.push(a.join(' ')), apiBase: 'http://127.0.0.1:9', memoryRungs: [], ...deps });   // deps: B-d8f4's grace seam (memorySample.stopMs)
-  jm.init();
-  const caller = { conversationId: 'conv-st', sessionId: 'sess-st', sessionCreatedAt: 1, groups: new Set() };
-  const owner = { conversation: { backend: 'claude', id: 'conv-st' }, sessionId: 'sess-st', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
-  // the pipeline's shape: a waiter holding the queue's lock in a session of its own with no environ (it cleans up on its first
-  // SIGTERM and writes each one it hears), a child under timeout
-  const waiter = `trap 'echo TERM >> ${JSON.stringify(heard)}; sleep 0.3; exit 0' TERM; while :; do sleep 0.1; done`;
-  const cmd = argv || ['sh', '-c', `setsid env -i flock ${JSON.stringify(marker)} sh -c ${JSON.stringify(waiter)} & timeout 305 sleep 305 & wait`];
-  const r = jm.create({ kind: 'task', name: 'pipeline', cmd: { argv: cmd }, owner }, caller);
-  const job = jm.jobs.get(r.job.id);
-  let tree = [];
-  let stamp = null;
-  await until(async () => { const st = jm._readStamp(job); if (!st || !jm._verifyAlive(st)) return false; stamp = st; tree = PI.treeOf([Number(st.pid)], { since: Number(st.starttime) || 0 }); return ready ? ready(tree) : tree.some((m) => m.comm === 'flock') && tree.filter((m) => m.comm === 'sleep').length >= 2; }, 8000);
-  mine.push(...tree);
-  const held = spawnSync('flock', ['-n', marker, 'true']).status !== 0;
-  const pre = before ? before({ dd, stamp, tree, jm }) : null;
-  const heldOut = !!stamp && PI.keptOut([]).some((x) => x[0] === Number(stamp.pid));   // the engine keeps its wrappers out of other stops' walks
-  if (signalAlone) process.kill(Number(stamp.pid), 'SIGTERM'); else jm.stop(job, { force });
-  await until(async () => { await jm._sweep(); return ['interrupted', 'failed', 'done'].includes(job.state); }, 8000);
-  const kept = (m) => !!(pre && pre.keep && pre.keep.has(m.pid));   // what the scene expects to live on (never waited for)
-  await until(() => tree.filter((m) => !kept(m)).every((m) => PI.aliveIdentity(m) === false), 4000);
-  const after = pre && pre.after ? await pre.after() : null;   // read before this scene ends what is left
-  const left = tree.filter((m) => PI.aliveIdentity(m) === true);
-  const free = spawnSync('flock', ['-n', marker, 'true']).status === 0;
-  const terms = (() => { try { return fs.readFileSync(heard, 'utf8').trim().split('\n').filter(Boolean).length; } catch { return 0; } })();
-  const readLog = () => { try { const run = job.runs[job.runs.length - 1]; return fs.readFileSync(path.join(dd, 'job-logs', job.id, String(run.startedAt), 'current.log'), 'utf8'); } catch { return ''; } };
-  if (force) await until(() => readLog().includes('[jobs] stop: its forced end'), 3000);   // the engine's line lands off the loop
-  const log = readLog();
-  const said = logs.filter((l) => l.includes(job.id)).join(' | ');
-  let intent = null; try { const run = job.runs[job.runs.length - 1]; intent = JSON.parse(fs.readFileSync(path.join(dd, 'job-logs', job.id, String(run.startedAt), 'stop.json'), 'utf8')); } catch { }
-  for (const m of left) PI.signalIdentity(m, 'SIGKILL');
-  try { jm.shutdown(); } catch { }
-  return { tree, left, held, free, terms, state: job.state, log, said, intent, heldOut, after };
-};
+import { stopScenes } from './lib/stop-scenes.mjs';
+const { jobScene, timed, escScene } = stopScenes({ D, mine, ROOT });
 
 console.log('§1 B-d8f4 — the group rung\'s counts and words (the scenes run together)');
 {
-  const timed = (fn) => async (...a) => { const t0 = Date.now(), r = await fn(...a); r.ms = Date.now() - t0; console.log(`  · ${a[1]}: ${r.ms} ms, the job ${r.state}`); return r; };   // each scene's own time, printed
-  const escScene = timed(async (wrapperText, tag, opts = {}) => {
-    const ESC = path.join(D, tag, 'esc.pid');
-    const argv = ['sh', '-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(ESC)}; exec sleep 318' &); timeout 319 sleep 319 & wait`];
-    return jobScene(wrapperText, tag, { ...opts, argv,
-      ready: (tree) => tree.some((m) => m.comm === 'timeout') && fs.existsSync(ESC) && fs.readFileSync(ESC, 'utf8').trim().length > 0,
-      before: ({ tree, jm }) => {
-        const pid = Number(fs.readFileSync(ESC, 'utf8').trim()), id = PI.identityOf(pid); mine.push(id);
-        const job = [...jm.jobs.values()][0], ownGroup = PI.pgidOf(pid) === pid, inTree = tree.some((m) => m.pid === pid);   // read BEFORE the stop (its read's NIT)
-        // its read's MUST: a STRANGER carrying the job's mark but ANOTHER run's (an earlier run's leftover forks it during this run) —
-        // started after the wrapper, outside its group: a stop of THIS run never ends it
-        // its read r2 (MUST): the stranger is NOT the hub's child (this suite is the hub: the keep-out would spare it by its parent chain,
-        // and the run's mark would go untested) — a subshell that exits re-parents it, as an earlier run's leftover's fork is
-        const STR = path.join(D, tag, 'stranger.pid');
-        spawnSync('sh', ['-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(STR)}; exec sleep 320' &)`], { env: { ...process.env, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:1` }, stdio: 'ignore' });
-        let spid = 0; for (let k = 0; k < 100 && !(spid > 1); k++) { try { spid = Number(fs.readFileSync(STR, 'utf8').trim()); } catch { } if (!(spid > 1)) spawnSync('sleep', ['0.02']); }
-        const sid = PI.identityOf(spid); mine.push(sid);
-        const strangerOwn = PI.ppidOf(spid) !== process.pid && PI.pgidOf(spid) === spid;   // re-parented, its own group
-        return { after: async () => {
-          await until(() => PI.aliveIdentity(id) === false, 200);   // the drain (or the engine's SIGKILL) ended it before the run's end — its reaping by the subreaper is what is left: milliseconds
-          const alive = PI.aliveIdentity(id) === true, stranger = PI.aliveIdentity(sid) === true, run = job && job.runs[job.runs.length - 1];
-          if (alive) PI.signalIdentity(id, 'SIGKILL');
-          if (stranger) PI.signalIdentity(sid, 'SIGKILL');
-          let view = null; try { view = ((jm.snapshot(job) || {}).run || {}).left || null; } catch (e) { view = { threw: String(e && e.message) }; }   // the API's view (the card's row reads it)
-          let viewCut = null; if (opts.viewMod) { try { viewCut = ((opts.viewMod.JobManager.prototype.snapshot.call(jm, job) || {}).run || {}).left || null; } catch (e) { viewCut = { threw: String(e && e.message) }; } }   // the control's view, over THIS run (no scene of its own)
-          return { pid, alive, stranger, strangerOwn, inTree, ownGroup, left: (run && run.left) || null, view, viewCut };
-        } };
-      } });
-  });
-  const LS = "  if (!taskStop && !keeps && stopping) {";
   // B-d8f4 (10): WHERE THERE IS NO /proc the sweep cannot run — said in the job's log, never silent. The absence is PLACED in a copy: its
   // escapee scan lists a /proc path that does not exist (every other /proc read of the wrapper stays real). CONTROL: the copy without the line
   const NP = "  try { ents = fs.readdirSync('/proc').filter((e) => /^\\d+$/.test(e))";
@@ -147,7 +79,22 @@ console.log('§1 B-d8f4 — the group rung\'s counts and words (the scenes run t
   const HEARD = "const landed = (k) => !!(termed.get(k) || {}).ok;";
   const epermOld = anchored(epermOf(EPX), HEARD, "const landed = (k) => termed.has(k);   /* MUTANT: «termed» alone */", 'd8f4-heard-cut');
   const treeOutOf = (r) => { const m = ((r && r.log) || '').match(/stop: (\d+) process(?:es)? it started outside its group \([^)]*\) hears? it from the wrapper(?: \((\d+) could not be signalled)?/); return m ? Number(m[1]) - Number(m[2] || 0) : 0; };
-  const [np, npx, nl, fo, fox, dp, dpx, ep, epx] = await Promise.all([
+  // 主开发 r1045 (THE LAW: every writer of the termed table says whether its signal landed): the ENGINE's group signal reaches a member of
+  // the job's group, which then LEAVES the group (its TERM trap execs `setsid`: the same process, a session of its own) and ends during the
+  // drain. The stop reached it — counted outside its group. CONTROL: the engine's mark on the group's members without its field (r1045's
+  // shape: «not landed»: never counted)
+  const leaverScene = timed(async (wrapperText, tag) => {
+    const dd = path.join(D, tag); fs.mkdirSync(dd, { recursive: true });
+    const LP = path.join(dd, 'leaver.pid'), LS = path.join(dd, 'leaver.sh');
+    fs.writeFileSync(LS, `echo $$ > ${JSON.stringify(LP)}\ntrap 'exec setsid sh -c "sleep 0.6"' TERM\nwhile :; do sleep 0.05; done\n`);
+    return jobScene(wrapperText, tag, { deps: { memorySample: { stopMs: 1000 } }, argv: ['sh', '-c', `trap 'sleep 0.25; exit 0' TERM; sh ${JSON.stringify(LS)} & wait`],
+      ready: () => fs.existsSync(LP) && Number(fs.readFileSync(LP, 'utf8').trim()) > 1,
+      before: ({ jm }) => { const id = PI.identityOf(Number(fs.readFileSync(LP, 'utf8').trim())); mine.push(id); const job = [...jm.jobs.values()][0];
+        return { after: async () => { await until(() => PI.aliveIdentity(id) === false, 2000); const alive = PI.aliveIdentity(id) === true; if (alive) PI.signalIdentity(id, 'SIGKILL'); return { alive, left: (job.runs[job.runs.length - 1] || {}).left || null }; } }; } });
+  });
+  const ER = "if (p[2] === process.pid && !termed.has(termKey(p))) termed.set(termKey(p), { at, pass: 'stop', ok: true });";
+  const engineRowsUnlanded = anchored(WRAP, ER, "if (p[2] === process.pid && !termed.has(termKey(p))) termed.set(termKey(p), { at, pass: 'stop' });   /* MUTANT: the field unset */", 'd8f4-engine-rows-landed');
+  const [np, npx, nl, fo, fox, dp, dpx, ep, epx, lv, lvx] = await Promise.all([
     escScene(noProc, 'esc-no-proc'),
     escScene(noProcSilent, 'esc-no-proc-mut'),
     escScene(noList, 'esc-no-list'),
@@ -156,8 +103,13 @@ console.log('§1 B-d8f4 — the group rung\'s counts and words (the scenes run t
     deafScene(WRAP, 'deaf'),
     deafScene(killFilterCut, 'deaf-mut'),
     escScene(epermOf(EP), 'esc-eperm', { deps: GRACE }),   // the escapee no signal reaches: the drain waits the grace, never the default 10 s
-    escScene(epermOld, 'esc-eperm-mut', { deps: GRACE })
+    escScene(epermOld, 'esc-eperm-mut', { deps: GRACE }),
+    leaverScene(WRAP, 'leaver'),
+    leaverScene(engineRowsUnlanded, 'leaver-mut')
   ]);
+  console.log(`    facts (r1045 leaver) ${JSON.stringify({ leaver: lv.after, cut: lvx.after })}`);
+  ok(lv.after && !lv.after.alive && lv.after.left && lv.after.left.outside === 1, 'B-d8f4 (主开发 r1045): a member the ENGINE\'s group signal reached, which then LEFT the group and ended during the drain, is the stop\'s — counted outside its group (every writer of the table says its signal landed)', lv.after);
+  ok(lvx.after && lvx.after.left && !lvx.after.left.outside, 'CONTROL (the engine\'s mark on the group without its field, in a copy): the member the stop reached is left out of what the stop reached (red)', lvx.after);
   ok(np.after && np.after.alive && /this machine has no process file system \(\/proc\)/.test(np.log), 'B-d8f4 (10): where the escapee scan cannot list /proc (placed: the copy\'s path does not exist) the re-parented child is not found — and the job\'s log SAYS so', { alive: np.after && np.after.alive, log: (np.log || '').slice(-400) });
   ok(npx.after && npx.after.alive && !/no process file system/.test(npx.log || ''), 'CONTROL (B-d8f4 (10), the line cut, in a copy): the child is left running and nothing says why (red)', { alive: npx.after && npx.after.alive });
   ok(nl.after && nl.after.alive && /it could not list the processes in \/proc \(ENOTDIR\) — what left its group cannot be found/.test(nl.log || ''), 'B-d8f4 (10, 主开发 r902): a listing that fails with ANOTHER errno (placed: ENOTDIR) — said with its errno, never as «no process file system»', { alive: nl.after && nl.after.alive, log: (nl.log || '').slice(-300) });
@@ -207,6 +159,10 @@ console.log('§1 B-d8f4 — the group rung\'s counts and words (the scenes run t
     const cut = engineKill(real, 'mark-cut', { members: [STR], scan: { scanned: 5, total: 9, cut: true } });
     ok(/its mark's scan read 5 of 9 processes: what left its group may be left/.test(cut.said), 'B-d8f4 (8): a mark scan cut at its bound is said with its count — «its mark\'s scan read 5 of 9 processes»', cut.said);
     const unread = engineKill(real, 'mark-unread', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
+    const HEAD = "what = [...(n ? [`${n} process${es(n)} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`] : []), ...(escaped ? [`${escaped} process${es(escaped)} carrying its run's mark outside its group (re-parented)`] : [])], line = `its forced end${what.length ? ` killed ${what.join(' and ')}` : ''}`";
+    const oldHead = MJ.load('src/jobs.js', anchored(JSRC, HEAD, "what = [], line = `its forced end killed ${[...(n || !escaped ? [`${n} process${es(n)} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`] : []), ...(escaped ? [`${escaped} process${es(escaped)} carrying its run's mark outside its group (re-parented)`] : [])].join(' and ')}`   /* MUTANT: the old head */", 'd8f4-old-head'), 'd8f4-old-head');
+    const unreadOld = engineKill(oldHead, 'mark-unread-old', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
+    ok(/its forced end killed 0 processes/.test(unreadOld.said), 'CONTROL (主开发 r1045: the old head, in a copy): a failed listing with nothing killed opens «killed 0 processes …» (red)', unreadOld.said);
     ok(/its forced end — its mark's scan could not list the processes \(EMFILE\): what left its group may be left/.test(unread.said) && !/killed 0/.test(unread.said), 'B-d8f4 (10): a force stop whose mark scan could not list the processes says so with its errno (the hub\'s log); 主开发 r902: nothing killed never opens with «killed 0»', unread.said);
     const unreadX = engineKill(noMark, 'mark-unread-mut', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
     ok(!/could not list the processes/.test(unreadX.said), 'CONTROL (the words cut, in a copy): a failed listing and nothing said (red)', unreadX.said);
