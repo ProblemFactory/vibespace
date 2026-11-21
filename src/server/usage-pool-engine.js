@@ -436,7 +436,7 @@ async function pushSealedOrders(poolId) {
   const dm = await hosts.device(null); // device #0 — pools are local-only
   // (the memo below is per-pool AND the daemon now stores per-pool slots, so a
   // second pool's push can no longer evict the first — review finding)
-  await dm.poolOrders(orders, (events) => {
+  await dm.poolOrders(orders, (events, report) => {   // (r1155) `report`: the reply's own token, handed back with the ack
     // fallback switches executed while this server was down: surface them AND
     // RECORD THEM (2026-09-07 r2). The by-time attribution is only as honest
     // as the transition ledger, and a device-executed re-point that leaves no
@@ -449,7 +449,7 @@ async function pushSealedOrders(poolId) {
       try { console.log('[sealed-orders] device-executed fallback switch:', JSON.stringify(ev)); } catch { }
       try { accounts.noteDeviceRepoint({ link: ev.link, poolId: ev.poolId, from: ev.from, to: ev.to, at: ev.ts, why: 'sealed-orders' }); } catch { }
     }
-    try { dm.ackPoolOrdersLog(); } catch { }
+    try { dm.ackPoolOrdersLog(report); } catch { }
   }, { by: 'system:usage-pool' }); // lane device-act-audit: the pool engine's sealed orders
   _sealedOrdersSent.set(poolId, j);
 }

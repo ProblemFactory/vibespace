@@ -106,12 +106,13 @@ function appendVerdict(text, line) {
  *  consumed (a torn one counted), and what waits past it counted (`more`). `bytes` is where the consumed lines end (UTF-8 bytes):
  *  the hub's ack removes exactly those. A last line with no newline is never consumed (a write in flight; the next append closes it). */
 function reportHead(text, max = POOL_LOG_EVENTS_MAX) {
-  const t = String(text || ''), events = [];
+  // (r1155) on the file's BYTES, never the decoded text: a torn line cut inside a many-byte character decodes longer than it is
+  const b = Buffer.isBuffer(text) ? text : Buffer.from(String(text || ''), 'utf-8'), events = [];
   let torn = 0, more = 0, at = 0, end = 0;
   for (;;) {
-    const nl = t.indexOf('\n', at);
+    const nl = b.indexOf(10, at);
     if (nl < 0) break;
-    const line = t.slice(at, nl);
+    const line = b.subarray(at, nl).toString('utf-8');
     if (line.trim()) {
       if (events.length >= max) { more++; at = nl + 1; continue; }
       let ev = null; try { ev = JSON.parse(line); } catch { ev = null; }
@@ -120,7 +121,7 @@ function reportHead(text, max = POOL_LOG_EVENTS_MAX) {
     if (!more) end = nl + 1;
     at = nl + 1;
   }
-  return { events, torn, more, bytes: Buffer.byteLength(t.slice(0, end)) };
+  return { events, torn, more, bytes: end };
 }
 
 module.exports = { providerAware, recordedProviderOf, deviceFallback, orderProviderFields, reportOf, POOL_LOG_EVENTS_MAX, POOL_LOG_BYTES_MAX, appendVerdict, reportHead };

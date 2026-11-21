@@ -40,6 +40,8 @@
 //   ⑫ r1135: the pool's report answers its head and counts what waits; the ack removes only what was read (RED: the whole-file
 //     ack); a counts-only report is acked; the passive readings one rule — the device's readPassive and the twin's shell on one
 //     fixture home, the same readings, order and count (RED: the release's twin).
+//   ⑬ r1155: the ack names what it acks (two reads in flight, the second reply lost: nothing lost; RED: the one slot), the
+//     head on the file's bytes (RED: on the decoded text), the truncated mark through every rung, the twin bounded at its read.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -215,7 +217,7 @@ console.log('⑤ find 2: the pool\'s report is read line by line — one torn li
   const before = RelS.reportOf(text), after = SO.reportOf(text);
   ok(before.events.length === 0, `THE FAULT, on the release's parse (a copy): one torn line (a crash mid-append) among three whole ones ⇒ ${before.events.length} events reported — the hub acks nothing, the torn line stays, every later report hidden`);
   ok(after.events.length === 3 && after.torn === 1 && after.events.map((e) => e.to).join() === 'a,b,c', `the tree's parse: the three whole switches reported (${after.events.map((e) => e.to).join()}), the torn line left out and counted (${after.torn})`);
-  ok(AGSRC.includes('      const r = SO.reportHead(text);\n      if (r.torn && !this._tornSaid)') && SO.reportHead(text).torn === 1 && SO.reportHead(text).events.length === 3, 'the agent reads its pool report line by line (its head within its bound: ⑩ / ⑫), and says a torn line once');
+  ok(AGSRC.includes('      const r = SO.reportHead(buf);\n      if (r.torn && !this._tornSaid)') && SO.reportHead(text).torn === 1 && SO.reportHead(text).events.length === 3, 'the agent reads its pool report line by line (its head within its bound: ⑩ / ⑫), and says a torn line once');
 }
 
 console.log('⑥ r951, THE LAW of item 4: a machine that replied is never called unreachable ANYWHERE its list is drawn; the device\'s own reply is remembered through the hub\'s fallback and said');
@@ -522,10 +524,10 @@ console.log('⑩ the unit\'s last piece: the other producers bounded by construc
   const pool = (seed) => {
     const d = fs.mkdtempSync(path.join(tmp, 'pool10-')), f = path.join(d, 'pool-orders-log.ndjson'), dr = path.join(d, 'pool-orders-dropped');
     if (seed != null) fs.writeFileSync(f, seed);
-    const deps = ['fs', 'ORDERS_LOG', 'ORDERS_DROPPED', 'SO', 'log'], vals = [fs, f, dr, SO, () => { }];
+    const deps = ['fs', 'ORDERS_LOG', 'ORDERS_DROPPED', 'SO', 'log', 'require'], vals = [fs, f, dr, SO, () => { }, require];
     const append = (ev) => new Function(...deps, 'ev', fnSrc('readAtMost') + fnSrc('readDropped') + fnSrc('writeDropped') + fnSrc('appendOrderEvent') + 'return appendOrderEvent(ev);')(...vals, ev);
     const a = AGSRC.indexOf('  pendingReport() {'), b = AGSRC.indexOf('\n  },\n', a);
-    const report = () => new Function(...deps, fnSrc('readAtMost') + fnSrc('readHeadOf') + fnSrc('readDropped') + 'return ({' + AGSRC.slice(a, b + 4) + '}).pendingReport();')(...vals);
+    const report = () => new Function(...deps, fnSrc('readAtMost') + fnSrc('readHeadOf') + fnSrc('readDropped') + fnSrc('headSum') + 'return ({' + AGSRC.slice(a, b + 4) + '}).pendingReport();')(...vals);
     return { append, report, size: () => (fs.existsSync(f) ? fs.statSync(f).size : 0) };
   };
   const ev = (i) => ({ ts: i, poolId: 'p1', sid: 's', banner: 'limit', from: '/home/u/.vibespace/subs/a', to: 'b', link: '/home/u/.claude' });
@@ -537,7 +539,7 @@ console.log('⑩ the unit\'s last piece: the other producers bounded by construc
   ok(w2 === false && p2.size() === big.length && r2.cut === true && r2.dropped === 1, 'an older agent\'s report past its bound: never read past it, nothing appended to it, the record counted; its report read to the bound only (cut)');
   const p3 = pool(null), w3 = p3.append(ev(1)), r3 = p3.report();
   ok(w3 === true && r3.events.length === 1 && !r3.dropped && !r3.cut, 'no report yet: the first record is written and reported');
-  ok(AGSRC.includes("...(rep.dropped ? { eventsDropped: rep.dropped } : {}), ...(rep.cut ? { eventsCut: true } : {}), ...(rep.more ? { eventsMore: rep.more } : {}), ...(rep.torn ? { eventsTorn: rep.torn } : {}) });"), 'the reply carries what was not written (eventsDropped), what waits (eventsMore / eventsCut) and torn lines; the hub\'s ack removes what was answered (⑫)');
+  ok(AGSRC.includes("...(rep.dropped ? { eventsDropped: rep.dropped } : {}), ...(rep.cut ? { eventsCut: true } : {}), ...(rep.more ? { eventsMore: rep.more } : {}), ...(rep.torn ? { eventsTorn: rep.torn } : {}), reportAck: rep.ack });"), 'the reply carries what was not written (eventsDropped), what waits (eventsMore / eventsCut) and torn lines; the hub\'s ack removes what was answered (⑫)');
   // THE PASSIVE READINGS: the ssh twin's own bound, one picker
   const names = [...Array.from({ length: 70 }, (_, i) => `sub-${String(i).padStart(3, '0')}.json`), '__models__x.json', 'notes.txt', '__global__.json'];
   const pk = AC.passivePick(names), HS10 = read('src/hosts.js');
@@ -598,12 +600,12 @@ console.log('⑫ r1135 (into part 5): the pool\'s report answers its HEAD and co
 {
   const SO = require('../src/sealed-orders.js'), H12 = require('../src/hosts.js');
   const fnSrc = (name) => { const a = AGSRC.indexOf('function ' + name + '('), b = AGSRC.indexOf('\n}\n', a); return a >= 0 && b > a ? AGSRC.slice(a, b + 2) : ''; };
-  const method = (name, src = AGSRC) => { const a = src.indexOf('  ' + name + '() {'), b = src.indexOf('\n  },\n', a); return a >= 0 && b > a ? src.slice(a, b + 5) + '\n' : ''; };
-  const FNS = fnSrc('readAtMost') + fnSrc('readHeadOf') + fnSrc('readDropped') + fnSrc('writeDropped') + fnSrc('dropReportHead') + fnSrc('appendOrderEvent');
+  const method = (name, src = AGSRC) => { let a = src.indexOf('  ' + name + '() {'); if (a < 0) a = src.indexOf('  ' + name + '(token) {'); const b = src.indexOf('\n  },\n', a); return a >= 0 && b > a ? src.slice(a, b + 5) + '\n' : ''; };
+  const FNS = fnSrc('readAtMost') + fnSrc('readHeadOf') + fnSrc('readDropped') + fnSrc('writeDropped') + fnSrc('headSum') + fnSrc('dropReportHead') + fnSrc('appendOrderEvent');
   const agentPool = (seed, { clear = method('clearReport') } = {}) => {
     const d = fs.mkdtempSync(path.join(tmp, 'pool12-')), f = path.join(d, 'pool-orders-log.ndjson'), dr = path.join(d, 'pool-orders-dropped');
     if (seed != null) fs.writeFileSync(f, seed);
-    const so = new Function('fs', 'ORDERS_LOG', 'ORDERS_DROPPED', 'SO', 'log', FNS + 'return ({ appendOrderEvent, writeDropped, readDropped, obj: {' + method('pendingReport') + clear + '} });')(fs, f, dr, SO, () => { });
+    const so = new Function('fs', 'ORDERS_LOG', 'ORDERS_DROPPED', 'SO', 'log', 'require', FNS + 'return ({ appendOrderEvent, writeDropped, readDropped, obj: {' + method('pendingReport') + clear + '} });')(fs, f, dr, SO, () => { }, require);
     return { ...so, lines: () => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).length : 0) };
   };
   const ev = (i) => JSON.stringify({ ts: i, poolId: 'p1', sid: 's', banner: 'limit', from: '/a', to: 'b', link: '/l' });
@@ -616,10 +618,10 @@ console.log('⑫ r1135 (into part 5): the pool\'s report answers its HEAD and co
     `a report of 2005 records answers its head (${r1.events.length}) and counts what waits (${r1.more}); after the ack the 5 are the next report, never deleted unsaid`);
   // 2. THE ACK REMOVES ONLY WHAT WAS READ — a record appended meanwhile, and the dropped count, stay
   const Q = agentPool(ev(1) + '\n' + ev(2) + '\n');
-  Q.writeDropped(3);
+  Q.writeDropped({ total: 3, acked: 0 });
   const q1 = Q.obj.pendingReport();
   Q.appendOrderEvent({ ts: 77, poolId: 'p1', to: 'z' });
-  Q.writeDropped(Q.readDropped() + 2);
+  { const x = Q.readDropped(); Q.writeDropped({ total: x.total + 2, acked: x.acked }); }
   Q.obj.clearReport();
   const q2 = Q.obj.pendingReport();
   ok(q1.events.length === 2 && q1.dropped === 3 && q2.events.length === 1 && q2.events[0].ts === 77 && q2.dropped === 2,
@@ -658,6 +660,62 @@ console.log('⑫ r1135 (into part 5): the pool\'s report answers its HEAD and co
   ok(rel.left === 0 && (JSON.stringify(Object.keys(rel.passive)) !== JSON.stringify(keysD) || rel.left !== device.left), `CONTROL (the release's twin script): it counts nothing left out (${rel.left}) where the device counts ${device.left} — the two roads disagree — RED`);
   ok(AGSRC.includes("const { passive, left: passiveLeft } = readPassive(path.join(home, '.vibespace', 'usage-cache'));") && fnSrc('writeDropped').includes("fs.renameSync(tmp, ORDERS_DROPPED);"),
     'the agent\'s quota answer reads through that one function; the dropped counter is written whole or not at all (temp + rename)');
+}
+
+console.log('⑬ r1155 (part 5\'s follow): the ack names what it acks; the head on the file\'s bytes; the truncated mark through every rung; the twin bounded at its read');
+{
+  const SO = require('../src/sealed-orders.js'), OR = require('../src/opencode-remote.js');
+  const fnSrc = (name) => { const a = AGSRC.indexOf('function ' + name + '('), b = AGSRC.indexOf('\n}\n', a); return a >= 0 && b > a ? AGSRC.slice(a, b + 2) : ''; };
+  const method = (name) => { const a = AGSRC.indexOf('  ' + name + '() {') >= 0 ? AGSRC.indexOf('  ' + name + '() {') : AGSRC.indexOf('  ' + name + '(token) {'), b = AGSRC.indexOf('\n  },\n', a); return a >= 0 && b > a ? AGSRC.slice(a, b + 5) + '\n' : ''; };
+  const FNS = ['readAtMost', 'readHeadOf', 'readDropped', 'writeDropped', 'headSum', 'dropReportHead', 'appendOrderEvent'].map(fnSrc).join('');
+  const agentPool = (seed) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'pool13-')), f = path.join(d, 'pool-orders-log.ndjson'), dr = path.join(d, 'pool-orders-dropped');
+    if (seed != null) fs.writeFileSync(f, seed);
+    return new Function('fs', 'ORDERS_LOG', 'ORDERS_DROPPED', 'SO', 'log', 'require', FNS + 'return ({ appendOrderEvent, readDropped, writeDropped, obj: {' + method('pendingReport') + method('clearReport') + '} });')(fs, f, dr, SO, () => { }, require);
+  };
+  const ev = (i) => JSON.stringify({ ts: i, poolId: 'p1', to: 'b' });
+  // 1. TWO READS IN FLIGHT (two pools, or a second hub): the first ack names ITS report; the second reply is lost — nothing lost
+  const P = agentPool(ev(1) + '\n' + ev(2) + '\n');
+  const A = P.obj.pendingReport();
+  P.appendOrderEvent({ ts: 3, poolId: 'p1', to: 'c' });
+  P.obj.pendingReport();                                   // the second read — its reply never reaches a hub
+  P.obj.clearReport(A.ack);                                // the first hub acks what IT was answered
+  const after = P.obj.pendingReport();
+  ok(A.events.length === 2 && after.events.length === 1 && after.events[0].ts === 3, `two reads in flight, the first ack names its own report: the record only the second (lost) reply carried stays (${after.events.map((e) => e.ts)})`);
+  const Q = agentPool(ev(1) + '\n' + ev(2) + '\n');
+  Q.obj.pendingReport(); Q.appendOrderEvent({ ts: 3, poolId: 'p1', to: 'c' }); Q.obj.pendingReport();
+  Q.obj.clearReport(null);                                 // an older hub's bare ack: the last read's slot, as before
+  ok(Q.obj.pendingReport().events.length === 0, 'CONTROL (today\'s one slot — a bare ack after two reads): the latest read\'s bytes go, and the record only the lost reply carried is lost — RED');
+  const S = agentPool(ev(1) + '\n');
+  const sA = S.obj.pendingReport();
+  S.obj.clearReport({ ...sA.ack, sum: 'f'.repeat(32) });   // a token whose head is not what the file starts with
+  ok(S.obj.pendingReport().events.length === 1, 'an ack naming a head the report no longer starts with removes nothing');
+  const D = agentPool(ev(1) + '\n');
+  D.writeDropped({ total: 3, acked: 0 });
+  const dA = D.obj.pendingReport(); { const x = D.readDropped(); D.writeDropped({ total: x.total + 2, acked: x.acked }); }
+  const dB = D.obj.pendingReport();
+  D.obj.clearReport(dB.ack); D.obj.clearReport(dA.ack);   // two acks, the later first: the watermark only rises
+  ok(dA.dropped === 3 && dB.dropped === 5 && D.obj.pendingReport().dropped === 0, `the dropped count as a total and an acked watermark: two acks in any order count exactly (${dA.dropped}, ${dB.dropped} ⇒ 0)`);
+  // 2. THE HEAD ON THE FILE's BYTES: a torn line cut inside a many-byte character
+  const buf = Buffer.concat([Buffer.from(ev(1) + '\n'), Buffer.from('{"ts":2,"to":"'), Buffer.from([0xE2]), Buffer.from('\n' + ev(3) + '\n' + ev(4) + '\n')]);
+  const real = buf.indexOf(Buffer.from(ev(4))), h2 = SO.reportHead(buf, 2);
+  const SOSRC = read('src/sealed-orders.js');
+  const TextSO = M.load('src/sealed-orders.js', anchored(SOSRC, "  const b = Buffer.isBuffer(text) ? text : Buffer.from(String(text || ''), 'utf-8'), events = [];\n", "  const b = Buffer.from(Buffer.isBuffer(text) ? text.toString('utf-8') : String(text || ''), 'utf-8'), events = [];\n", 'head-on-text'), 'head-on-text');
+  const h2t = TextSO.reportHead(buf, 2);
+  ok(h2.events.length === 2 && h2.torn === 1 && h2.bytes === real && h2t.bytes === real + 2, `the head is measured on the file's bytes (${h2.bytes} = where the next record starts); measured on the decoded text it ran ${h2t.bytes - real} bytes into the next record — RED`);
+  // 3. THE TRUNCATED MARK SURVIVES EVERY RUNG (the access layer: local, device, ssh)
+  const SES = { ts: '0', type: 'acp', kind: 'session', sessionId: 'ses_a1' };
+  const bigRecs = [SES, ...Array.from({ length: 35 }, (_, i) => ({ ts: String(i + 1), type: 'acp', kind: 'update', update: { text: 'x'.repeat(1024 * 1024) } }))];
+  const facts13 = { readConversation: async () => ({ session: { id: 'ses_a1' }, records: bigRecs }) };
+  const msgs = Array.from({ length: 35 }, (_, i) => ({ info: { id: 'msg_' + i, sessionID: 'ses_a1', role: 'assistant', time: { created: 1700000000000 + i } }, parts: [{ type: 'text', text: 'y'.repeat(1024 * 1024) }] }));
+  const accessMod = require('../src/server/opencode-access.js');
+  const rung = (kind) => accessMod.create({ facts: facts13, hosts: { opencodeOp: async (_h, op, p) => (kind === 'device' ? OR.runOpencodeOp(facts13, op, p) : { session: { id: 'ses_a1' }, messages: msgs, records: null }) } });
+  const viaLocal = await rung('device').readConversation(null, 'ses_a1'), viaDevice = await rung('device').readConversation('h1', 'ses_a1'), viaSsh = await rung('ssh').readConversation('h1', 'ses_a1');
+  ok([viaLocal, viaDevice, viaSsh].every((r) => r.truncated === true && r.total > r.kept && r.kept > 0), `the truncated mark survives every rung of the access layer (local ${viaLocal.kept}/${viaLocal.total}, device ${viaDevice.kept}/${viaDevice.total}, ssh ${viaSsh.kept}/${viaSsh.total})`);
+  // 4. THE TWIN BOUNDED AT ITS READ, after its size check (a file replaced between the two is never shipped whole)
+  const SH = require('../src/hosts.js').PASSIVE_PEEK_SH;
+  ok(/if \[ "\$s" -gt 65536 \]; then left=\$\(\(left\+1\)\); continue; fi; printf '\\n@@vs-passive@@ %s\\n' "\$b"; head -c 65536 "\$b"; done;/.test(SH) && !/cat "\$b"/.test(SH),
+    'the twin reads each file within 64 KiB at the read itself, after the size check (the parity leg ⑫ still holds the two roads equal)');
 }
 
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);

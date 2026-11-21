@@ -1265,11 +1265,12 @@ class DeviceManager {
     // waiting past its head for the next report (eventsMore, eventsCut), torn lines (eventsTorn); a report with any of them but no
     // record is acked too, so the agent removes exactly what it answered
     const nD = Number(r?.eventsDropped) || 0, nM = Number(r?.eventsMore) || 0, nT = Number(r?.eventsTorn) || 0;
-    if (nD > 0 || nM > 0 || r?.eventsCut) this._saidLeftOnce('pool', [nD > 0 ? `${nD} switch record(s) were not written (more than 2000, or 1 MiB)` : '', nM > 0 || r?.eventsCut ? `${nM > 0 ? nM + ' record(s)' : 'records'} wait past the head of the pool's report for its next read` : ''].filter(Boolean).join('; '));
-    if ((r?.events?.length || nD > 0 || nT > 0) && this._onPoolOrdersExecuted) this._onPoolOrdersExecuted(r.events || []);
+    if (nD > 0 || nM > 0 || nT > 0 || r?.eventsCut) this._saidLeftOnce('pool', [nD > 0 ? `${nD} switch record(s) were not written (more than 2000, or 1 MiB)` : '', nM > 0 || r?.eventsCut ? `${nM > 0 ? nM + ' record(s)' : 'records'} wait past the head of the pool's report for its next read` : '', nT > 0 ? `${nT} torn line(s) left out` : ''].filter(Boolean).join('; '));
+    // (r1155) the reply's own token rides to the ack: the device removes exactly what THIS reply answered
+    if ((r?.events?.length || nD > 0 || nT > 0) && this._onPoolOrdersExecuted) this._onPoolOrdersExecuted(r.events || [], r?.reportAck || null);
     return r?.events || [];
   }
-  ackPoolOrdersLog() { try { this._conn?.mux?.control({ op: 'pool-orders-log-ack' }); } catch { } }
+  ackPoolOrdersLog(report = null) { try { this._conn?.mux?.control({ op: 'pool-orders-log-ack', ...(report && typeof report === 'object' ? { report } : {}) }); } catch { } }   // (r1155) names the report it acks
 
   ackUsageEvents(seq) {
     try { this._conn?.mux?.control({ op: 'usage-events-ack', seq }); } catch { }

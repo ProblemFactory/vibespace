@@ -237,15 +237,15 @@ function getTranscriptService() {
 const DISCOVERY_FOLDERS_MAX = 5000;
 const discoveryKept = { snap: null, at: 0 };   // B-5278 unit 2 (r849): the last snapshot a child answered, and when
 // B-5278 unit 2, part 3: a file's text, or null when it holds more than max bytes (it is never read past max + 1)
-function readAtMost(p, max) {
+function readAtMost(p, max, raw = false) {
   const fd = fs.openSync(p, 'r');
-  try { const b = Buffer.alloc(max + 1); const n = fs.readSync(fd, b, 0, max + 1, 0); return n > max ? null : b.subarray(0, n).toString('utf-8'); }
+  try { const b = Buffer.alloc(max + 1); const n = fs.readSync(fd, b, 0, max + 1, 0); return n > max ? null : raw ? b.subarray(0, n) : b.subarray(0, n).toString('utf-8'); }
   finally { fs.closeSync(fd); }
 }
 // …and its first max bytes (an older agent's file past a bound is read to that bound only)
-function readHeadOf(p, max) {
+function readHeadOf(p, max, raw = false) {
   const fd = fs.openSync(p, 'r');
-  try { const b = Buffer.alloc(max); const n = fs.readSync(fd, b, 0, max, 0); return b.subarray(0, n).toString('utf-8'); }
+  try { const b = Buffer.alloc(max); const n = fs.readSync(fd, b, 0, max, 0); return raw ? b.subarray(0, n) : b.subarray(0, n).toString('utf-8'); }
   finally { fs.closeSync(fd); }
 }
 // B-5278 unit 2 (r1135, THE PASSIVE READINGS ARE ONE RULE on both roads — the ssh twin is hosts.js PASSIVE_PEEK_SH, held equal by
@@ -1300,14 +1300,23 @@ const ORDERS_DROPPED = path.join(STATE, 'pool-orders-dropped');   // B-5278 unit
 // B-5278 unit 2, the last piece: one switch's record into the pool's report — within its bound (sealed-orders POOL_LOG_*: a record
 // past it is counted in ORDERS_DROPPED and said with the report), never glued to a torn last line (find 2's follow), and the
 // report is never read past its bound
-// (r1135) the records past the report's bound, counted — written whole or not at all (temp + rename)
-function readDropped() { try { return Number(fs.readFileSync(ORDERS_DROPPED, 'utf-8')) || 0; } catch (e) { if (!e || e.code !== 'ENOENT') log('sealed-orders: the dropped count could not be read: ' + e.message); return 0; } }
-function writeDropped(n) {
-  if (!(n > 0)) { fs.rmSync(ORDERS_DROPPED, { force: true }); return; }
+// (r1135) the records past the report's bound, counted — written whole or not at all (temp + rename). (r1155) As a TOTAL and an
+// ACKED watermark: the report says total − acked; an ack raises the watermark to the total its report said (never lowers by
+// a difference), so two acks in any order, or one twice, count exactly
+function readDropped() {
+  let t = ''; try { t = fs.readFileSync(ORDERS_DROPPED, 'utf-8'); } catch (e) { if (!e || e.code !== 'ENOENT') log('sealed-orders: the dropped count could not be read: ' + e.message); return { total: 0, acked: 0 }; }
+  let j = null; try { j = JSON.parse(t); } catch { j = null; }
+  const total = Math.max(0, Number(j && j.total) || 0), acked = Math.min(total, Math.max(0, Number(j && j.acked) || 0));
+  return { total, acked };
+}
+function writeDropped(d) {
+  if (!(d.total > d.acked)) { fs.rmSync(ORDERS_DROPPED, { force: true }); return; }
   const tmp = ORDERS_DROPPED + '.tmp';
-  fs.writeFileSync(tmp, String(n));
+  fs.writeFileSync(tmp, JSON.stringify({ total: d.total, acked: d.acked }));
   fs.renameSync(tmp, ORDERS_DROPPED);
 }
+// (r1155) THE REPORT's TOKEN: the head's bytes, their digest, the dropped total it said — the ack hands it back
+function headSum(buf, bytes) { return require('crypto').createHash('sha256').update(buf.subarray(0, bytes)).digest('hex').slice(0, 32); }
 // (r1135) THE ACK REMOVES ONLY WHAT WAS READ: the report's first `bytes` go, every record after them stays (a record appended
 // meanwhile, and what waited past the reported head) — copied whole into a temp file, renamed over the report
 function dropReportHead(bytes) {
@@ -1327,7 +1336,7 @@ function appendOrderEvent(ev) {
   try { text = readAtMost(ORDERS_LOG, SO.POOL_LOG_BYTES_MAX); } catch (e) { if (!e || e.code !== 'ENOENT') { text = null; log(`sealed-orders: the pool's report could not be read (${(e && e.code) || e}): this record is counted, not written`); } }
   const v = SO.appendVerdict(text, line);
   if (!v.ok) {
-    writeDropped(readDropped() + 1);
+    const d = readDropped(); writeDropped({ total: d.total + 1, acked: d.acked });
     return false;
   }
   fs.appendFileSync(ORDERS_LOG, v.lead + line);
@@ -1448,25 +1457,38 @@ const sealedOrders = {
   // records; what waits past it is counted, `more`, and stays for the next report), and the ack removes exactly what was
   // answered: its bytes and its dropped count
   pendingReport() {
-    const dropped = readDropped();
+    const d = readDropped(), dropped = d.total - d.acked;
     try {
-      let text = readAtMost(ORDERS_LOG, SO.POOL_LOG_BYTES_MAX), cut = false;
-      if (text == null) { text = readHeadOf(ORDERS_LOG, SO.POOL_LOG_BYTES_MAX); cut = true; }
-      const r = SO.reportHead(text);
+      let buf = readAtMost(ORDERS_LOG, SO.POOL_LOG_BYTES_MAX, true), cut = false;
+      if (buf == null) { buf = readHeadOf(ORDERS_LOG, SO.POOL_LOG_BYTES_MAX, true); cut = true; }
+      const r = SO.reportHead(buf);
       if (r.torn && !this._tornSaid) { this._tornSaid = true; log(`sealed-orders: ${r.torn} torn line(s) in the pool's report left out`); }
-      this._reported = { bytes: r.bytes, dropped };
-      return { events: r.events, dropped, cut, more: r.more, torn: r.torn };
+      const ack = { bytes: r.bytes, sum: headSum(buf, r.bytes), droppedTotal: d.total };
+      this._reported = ack;
+      return { events: r.events, dropped, cut, more: r.more, torn: r.torn, ack };
     } catch (e) {
       if (e && e.code !== 'ENOENT') log('sealed-orders: the pool\'s report could not be read: ' + e.message);
-      this._reported = { bytes: 0, dropped };
-      return { events: [], dropped, cut: false, more: 0, torn: 0 };
+      const ack = { bytes: 0, sum: '', droppedTotal: d.total };
+      this._reported = ack;
+      return { events: [], dropped, cut: false, more: 0, torn: 0, ack };
     }
   },
-  clearReport() {
-    const rep = this._reported; this._reported = null;
-    if (!rep) return;   // an ack with nothing answered before it removes nothing
-    if (rep.bytes > 0) { try { dropReportHead(rep.bytes); } catch (e) { if (!e || e.code !== 'ENOENT') log('sealed-orders: the reported head was not removed: ' + e.message); } }
-    if (rep.dropped > 0) { try { writeDropped(readDropped() - rep.dropped); } catch (e) { log('sealed-orders: the dropped count was not lowered: ' + e.message); } }
+  // (r1155) THE ACK NAMES WHAT IT ACKS: a hub that hands back its report's token removes exactly that — its head, only while the
+  // file's first bytes still match its digest (nothing when they do not), and the dropped watermark raised to its total. An
+  // older hub's bare ack keeps the last piece's behaviour (the last report answered)
+  clearReport(token) {
+    const named = token && typeof token === 'object' && Number.isInteger(token.bytes) && token.bytes >= 0 && token.bytes <= 2 * SO.POOL_LOG_BYTES_MAX && typeof token.sum === 'string' && token.sum.length <= 64 && Number.isInteger(token.droppedTotal) && token.droppedTotal >= 0;
+    const rep = named ? token : this._reported;
+    if (!named) this._reported = null;
+    if (!rep) return;   // a bare ack with nothing answered before it removes nothing
+    if (rep.bytes > 0) {
+      try {
+        const head = readHeadOf(ORDERS_LOG, rep.bytes, true);
+        if (head.length === rep.bytes && headSum(head, rep.bytes) === rep.sum) dropReportHead(rep.bytes);
+        else log('sealed-orders: an ack named a head the pool\'s report no longer starts with: nothing removed');
+      } catch (e) { if (!e || e.code !== 'ENOENT') log('sealed-orders: the reported head was not removed: ' + e.message); }
+    }
+    if (rep.droppedTotal > 0) { try { const d = readDropped(); if (rep.droppedTotal > d.acked) writeDropped({ total: d.total, acked: Math.min(d.total, rep.droppedTotal) }); } catch (e) { log('sealed-orders: the dropped watermark was not raised: ' + e.message); } }
   },
 };
 sealedOrders.load();
@@ -2588,12 +2610,12 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // executions from a server-down window ride the reply — pushing at
           // hello RACED the client's control-routing installation (observed)
           const rep = sealedOrders.pendingReport();   // B-5278 unit 2: bounded; what was not written, or cut, said with it
-          mux.control({ op: 'pool-orders-ok', id: msg.id, events: rep.events, ...(rep.dropped ? { eventsDropped: rep.dropped } : {}), ...(rep.cut ? { eventsCut: true } : {}), ...(rep.more ? { eventsMore: rep.more } : {}), ...(rep.torn ? { eventsTorn: rep.torn } : {}) });
+          mux.control({ op: 'pool-orders-ok', id: msg.id, events: rep.events, ...(rep.dropped ? { eventsDropped: rep.dropped } : {}), ...(rep.cut ? { eventsCut: true } : {}), ...(rep.more ? { eventsMore: rep.more } : {}), ...(rep.torn ? { eventsTorn: rep.torn } : {}), reportAck: rep.ack });   // (r1155) the token its ack hands back
         } catch (e) { mux.control({ op: 'pool-orders-ok', id: msg.id, error: e.message }); }
         return;
       }
       if (msg.op === 'pool-orders-log-ack') {
-        sealedOrders.clearReport();
+        sealedOrders.clearReport(msg.report || null);   // (r1155) the report it names, or the last one (an older hub)
         return;
       }
       if (msg.op === 'place-secret') {

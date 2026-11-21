@@ -168,7 +168,7 @@ const PASSIVE_PEEK_SH = 'cd "$HOME/.vibespace/usage-cache" 2>/dev/null || exit 0
   + 'n=$((n+1)); if [ "$n" -gt ' + PASSIVE_PEEK_FILES + ' ]; then left=$((left+1)); continue; fi; '
   + 'if [ ! -f "$b" ] || [ ! -r "$b" ]; then left=$((left+1)); continue; fi; s=$(wc -c < "$b" 2>/dev/null) || { left=$((left+1)); continue; }; s=$((s+0)); '
   + 'if [ "$s" -gt ' + PASSIVE_PEEK_BYTES + ' ]; then left=$((left+1)); continue; fi; '
-  + "printf '\\n" + PASSIVE_PEEK_MARK + " %s\\n' \"$b\"; cat \"$b\"; done; printf '\\n" + PASSIVE_PEEK_LEFT + " %s\\n' \"$left\"; }; true";
+  + "printf '\\n" + PASSIVE_PEEK_MARK + " %s\\n' \"$b\"; head -c " + PASSIVE_PEEK_BYTES + " \"$b\"; done; printf '\\n" + PASSIVE_PEEK_LEFT + " %s\\n' \"$left\"; }; true";
 /** PURE: the peek's output → {<stem>: reading} (a file that is not a reading with fetchedAt is left out, as the agent leaves it). */
 /** (r1135) the twin's own count of what it left out (the line after the readings) */
 function passiveLeftOfPeek(raw) { const s = String(raw || ''), i = s.lastIndexOf('\n' + PASSIVE_PEEK_LEFT + ' '); return i < 0 ? 0 : Math.max(0, parseInt(s.slice(i + PASSIVE_PEEK_LEFT.length + 2), 10) || 0); }

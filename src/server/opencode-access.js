@@ -65,7 +65,7 @@ function create({ app = null, hosts = null, facts = null, broadcast = null, log 
   /** {session, records} for a conversation on any machine. */
   async function readConversation(hostId, id) {
     const r = await call(hostId, 'read', { id });
-    if (Array.isArray(r?.records)) return { session: r.session || null, records: r.records };
+    if (Array.isArray(r?.records)) return { session: r.session || null, records: r.records, ...(r.truncated ? { truncated: true, total: r.total, kept: r.kept } : {}) };   // (r1155) the mark survives every rung
     // ssh rung: raw v1 messages → the SHARED synthesis, here, once
     return boundRead(r?.session || null, messagesToAcpRecords(Array.isArray(r?.messages) ? r.messages : [], r?.session || {}));   // B-5278: the same bound as the other rungs
   }
