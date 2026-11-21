@@ -24,8 +24,29 @@ const JOIN_ANSWER_MS = 5000;
  *  ended first, or no answer inside `answerMs` (e.code 'no-answer'). `server` = the hub's http.Server (each channel:
  *  server.emit('connection', socket)); `onDead(why)` once an admitted link dies (the hub has no page road left: the
  *  caller ends). */
-function join({ start, server, connect = (p) => net.connect(p), onDead = () => { }, answerMs = JOIN_ANSWER_MS } = {}) {
+const EXCHANGE = Symbol('one exchange');
+const HEAD_EVENTS = new Set(['request', 'upgrade', 'checkContinue', 'checkExpectation', 'connect']);   // an http.Server's events that serve a head
+/** ONE CHANNEL IS ONE EXCHANGE (the framing unit, 主开发 r922 law 2): the interface opens a channel for ONE head and its answer,
+ *  so a SECOND head on a channel's socket is never served — refused by name in the hub's journal, the socket destroyed,
+ *  nothing more written. Installed once on the hub's own http.Server; a socket that is no channel (the plain form) is untouched. */
+function oneExchange(server, log = console) {
+  if (!server || server[EXCHANGE]) return;
+  const emit = server.emit;
+  server.emit = function (ev, req, ...rest) {
+    const x = HEAD_EVENTS.has(ev) && req && req.socket ? req.socket[EXCHANGE] : null;
+    if (x && x.heads++ > 0) {
+      try { log.error?.(`[interface-party] a second head on one channel (chan ${x.chan}) is never served — refused, nothing written`); } catch { }
+      try { req.socket.destroy(); } catch { }
+      return false;
+    }
+    return emit.call(this, ev, req, ...rest);
+  };
+  server[EXCHANGE] = true;
+}
+
+function join({ start, server, connect = (p) => net.connect(p), onDead = () => { }, answerMs = JOIN_ANSWER_MS, log = console } = {}) {
   if (!start || typeof start.link !== 'string' || typeof start.secret !== 'string') return Promise.reject(new Error('join: the start line names no link or secret'));
+  oneExchange(server, log);
   return new Promise((resolve, reject) => {
     const sock = connect(start.link);
     let admitted = false, router = null, silent = null;
@@ -37,7 +58,7 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
           else if (m && m.op === 'auth-fail') { clearTimeout(silent); reject(new Error('the interface refused this party (auth-fail)')); try { mux.destroy(); } catch { } }
           return;
         }
-        if (m && m.op === 'open' && Number.isInteger(m.chan)) server.emit('connection', router.open(m.chan, m.stamp || {}));
+        if (m && m.op === 'open' && Number.isInteger(m.chan)) { const s = router.open(m.chan, m.stamp || {}); s[EXCHANGE] = { heads: 0, chan: m.chan }; server.emit('connection', s); }   // ONE exchange this channel
       },
       onData: (chan, buf) => { if (!router.onData(chan, buf)) mux.credit(chan, buf.length); },   // a channel the router does not hold: dropped, never owed
       onWritable: (chan) => { router.onWritable(chan); },
@@ -53,4 +74,4 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
   });
 }
 
-module.exports = { join, PROTO_VERSION, MAX_CONTROL, JOIN_ANSWER_MS };
+module.exports = { join, oneExchange, PROTO_VERSION, MAX_CONTROL, JOIN_ANSWER_MS };

@@ -2,7 +2,10 @@
 // THE INTERFACE'S LAWS AND ITS RELAY (the separation, M1 — lane B, piece B2's first half; design «The processes (revision)»
 // — interface, «The link», M1's proof). src/interface/ is driven in-process: its one listener on a loopback port, a far
 // party behind a REAL link (the tree's src/agentd/mux.js over a unix socket) that serves each channel as an HTTP connection
-// (a test-only channel stream) or as a raw echo.
+// (a test-only channel stream) or as a raw echo. THE FRAMING UNIT (主开发 r922, shape (A)): a channel is ONE exchange — a
+// request, or an upgrade — so every raw leg (③ ④ ⑦ ⑪ ⑫ ⑬) rides an HTTP Upgrade: the page says its head, the party answers
+// 101, and from there the bytes are raw both ways (never parsed after the head). Its other laws are
+// scripts/test-interface-framing.mjs's.
 //   ① THE MODULE GRAPH: src/interface's requires reach only src/interface/*, the frame code and node built-ins — no engine,
 //     vault, secret-box, store or normaliser module. RED CONTROL: a planted require is caught.
 //   ② NO SYNCHRONOUS DISK CALL once it listens: plain and TLS exchanges and a 2 MB answer relayed — 0 fs *Sync calls.
@@ -13,7 +16,7 @@
 //     rest in the party's own queue. RED CONTROL: credit given back for every byte received holds megabytes here.
 //   ⑤ TLS: no certificate live ⇒ a ClientHello is closed; a pushed certificate ⇒ decrypted here, the party gets the bytes
 //     with stamp.secure; a renewal is taken without a restart.
-//   ⑥ THE OPEN LINE: one per channel, written by this process only — {op, chan, to: the owner map's answer, trace, stamp}; a
+//   ⑥ THE OPEN LINE: one per exchange (one channel each), written by this process only — {op, chan, to: the owner map's answer, trace, stamp}; a
 //     page's own header claiming a stamp reaches the party as bytes, never as the stamp.
 //   ⑦ CLOSES: a page's end closes its channel; the party's close ends the page; a dead link closes every page.
 //   The cure round (主开发 2026-11-17 05:26Z, accept-B2a.json):
@@ -25,13 +28,14 @@
 //     the other direction: an owner that stops reading while a page uploads — the page socket is paused and at most one
 //     window waits here (RED CONTROL: no pause).
 //   On lane readings' cured frame code (78f27628f — the queued close OPT-IN, set by the interface's link):
-//   ⑩ MUST 2 — EVERY PAGE CONNECTION LEAVES NOTHING IN THE LINK'S FRAME CODE: 1 000 page connections opened and closed ⇒
+//   ⑩ MUST 2 — EVERY EXCHANGE LEAVES NOTHING IN THE LINK'S FRAME CODE: 1 000 requests answered, each its own channel ⇒
 //     the link keeps no send window and no queue for any of them (every pair drop goes through closeChan, which forgets
 //     once its CLOSE is out — the relay needs no forget of its own; 10 000 by hand, the same). RED CONTROL: the frame code's
 //     forget neutered.
 //   ⑪ MUST 4 — A CLOSE NEVER OVERTAKES ITS OWN BYTES: a page uploads one window + 1000 bytes and ends, to an owner that
-//     holds its credit ⇒ the owner has every byte when the close arrives. RED CONTROL: the interface's link built without
-//     closeAfterQueue (the frame code's released close) ⇒ the close arrives first.
+//     holds its credit ⇒ the owner has every byte when the close arrives. RED CONTROL: the page's end sent as a CLOSE at once,
+//     past the bytes still waiting in the channel's socket ⇒ the close arrives first. (A link without closeAfterQueue is
+//     refused by the channel sockets themselves: src/agentd/chan-socket.js, scripts/test-chan-socket.mjs.)
 // in-process; a scratch dir under os.tmpdir(); a throwaway self-signed pair made with openssl.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -101,7 +105,7 @@ function farJoin(sockPath, secret = HUB_SECRET) {
         if (!m || m.op !== 'open') return;
         far.opens.push(m);
         if (far.mode === 'http') { const d = new ChanStream(mux, m.chan); far.chans.set(m.chan, { d }); d.on('error', () => { }); app.emit('connection', d); return; }
-        far.chans.set(m.chan, { raw: true, acc: '' });
+        far.chans.set(m.chan, { raw: true, acc: '', head: '' });   // an UPGRADE: its head first, answered 101, then raw
       },
       onData: (chan, buf) => {
         const c = far.chans.get(chan);
@@ -110,6 +114,12 @@ function farJoin(sockPath, secret = HUB_SECRET) {
         if (c.sink) { c.sunk = (c.sunk || 0) + buf.length; return; }   // THE OWNER STOPS READING: no credit goes back
         if (c.slow) { c.got += buf.length; setTimeout(() => mux.credit(chan, buf.length), c.slow); return; }   // A SLOW OWNER: credit comes late
         mux.credit(chan, buf.length);
+        if (c.head !== null) {   // the upgrade's head: read whole, answered 101 — what follows it is raw
+          c.head += buf.toString('latin1'); const e = c.head.indexOf('\r\n\r\n'); if (e < 0) return;
+          const rest = c.head.slice(e + 4); c.reqHead = c.head.slice(0, e); c.head = null;
+          mux.data(chan, Buffer.from('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: raw\r\n\r\n'));
+          buf = Buffer.from(rest, 'latin1'); if (!buf.length) return;
+        }
         c.acc += buf.toString();
         let i;
         while ((i = c.acc.indexOf('\n')) >= 0) {
@@ -154,8 +164,19 @@ const get = (port, p, { secure = false, headers = {} } = {}) => new Promise((res
 function rawClient(port) {
   return new Promise((resolve) => { const s = net.connect(port, '127.0.0.1', () => resolve(s)); s.on('error', () => { }); });
 }
+/** the head of a raw page's upgrade (one channel, raw after the head) */
+const UPGRADE = 'GET /raw HTTP/1.1\r\nHost: hub.example\r\nConnection: Upgrade\r\nUpgrade: raw\r\n\r\n';
+/** a page socket UPGRADED through the interface: its head said, the party's 101 read — from here every byte is raw */
+function upgraded(port) {
+  return new Promise((resolve) => {
+    const s = net.connect(port, '127.0.0.1', () => s.write(UPGRADE)); s.on('error', () => { });
+    let acc = '';
+    const onData = (b) => { acc += b.toString('latin1'); const e = acc.indexOf('\r\n\r\n'); if (e < 0) return; s.removeListener('data', onData); s.head101 = acc.slice(0, e); resolve(s); };   // the party says nothing more until it is asked
+    s.on('data', onData); s.once('close', () => resolve(s));
+  });
+}
 async function roundTrips(port, n = 30) {
-  const s = await rawClient(port); const times = [];
+  const s = await upgraded(port); const times = [];
   let acc = '', waiter = null; s.on('data', (b) => { acc += b.toString(); if (acc.includes('PONG\n')) { acc = acc.replace('PONG\n', ''); const w = waiter; waiter = null; w && w(); } });
   for (let i = 0; i < n; i++) { const t0 = performance.now(); await new Promise((r) => { waiter = r; s.write('PING\n'); }); times.push(performance.now() - t0); }
   s.destroy();
@@ -180,9 +201,9 @@ console.log('— ① THE MODULE GRAPH');
   };
   const g = graph('src/interface/index.js');
   const FORBIDDEN = /engine|vault|secret|store|normali[sz]er|message-manager|accounts|channel|auth\b|session/;
-  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/mux.js', 'src/interface/admission.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/owners.js', 'src/interface/relay.js', 'src/pairing-token.js']) && g.files.every((f) => !FORBIDDEN.test(f)),
-    `its module graph: ${g.files.join(', ')} — no engine, vault, secret-box, store or normaliser module (src/pairing-token.js: the constant-time compare of the admission, crypto only)`, g.files);
-  ok(JSON.stringify(g.builtins) === JSON.stringify(['crypto', 'net', 'tls']), `node built-ins only: ${g.builtins.join(', ')}`, g.builtins);
+  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/chan-socket.js', 'src/agentd/mux.js', 'src/interface/admission.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/owners.js', 'src/interface/relay.js', 'src/pairing-token.js']) && g.files.every((f) => !FORBIDDEN.test(f)),
+    `its module graph: ${g.files.join(', ')} — no engine, vault, secret-box, store or normaliser module (src/pairing-token.js: the constant-time compare of the admission, crypto only; src/agentd/chan-socket.js: a channel as a socket, the framing unit's)`, g.files);
+  ok(JSON.stringify(g.builtins) === JSON.stringify(['crypto', 'http', 'net', 'stream', 'tls']), `node built-ins only: ${g.builtins.join(', ')} (http: Node's own parser and writer of each head — the framing unit)`, g.builtins);
   const planted = graph('src/interface/index.js', (rel) => (rel === 'src/interface/relay.js' ? read(rel).replace("const crypto = require('crypto');", "const crypto = require('crypto'); require('../server/vault-engine.js');") : read(rel)));
   ok(planted.files.includes('src/server/vault-engine.js') && planted.files.some((f) => FORBIDDEN.test(f)), 'RED CONTROL — a vault module planted in the relay is caught by the walk', planted.files);
 }
@@ -216,11 +237,11 @@ async function syncCalls(I) {
   const law = await syncCalls();
   ok(law.ok && law.n === 0, `10 plain and 4 TLS exchanges, a certificate pushed and renewed, a 2 MB answer: ${law.n} synchronous fs / child_process / zlib calls`, law);
   const files = fs.readdirSync(path.join(REPO, 'src/interface')).filter((f) => f.endsWith('.js'));
-  const syncForms = [...files.map((f) => `src/interface/${f}`), 'src/start-pipe.js'].flatMap((rel) => [...read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1').matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `${rel}: ${m[0]}`));   // + the reader the interface shares with the hub
-  ok(JSON.stringify(files.sort()) === JSON.stringify(['admission.js', 'front.js', 'index.js', 'main.js', 'owners.js', 'relay.js']) && syncForms.length === 0, `and read statically: no …Sync name in src/interface's ${files.length} files nor in src/start-pipe.js, the reader it shares (a reference taken at load is seen too)`, syncForms);
-  const mutRelay = mutant('src/interface/relay.js', "      stats.toPage += buf.length;", "      stats.toPage += buf.length; require('fs').statSync(__filename);");
+  const syncForms = [...files.map((f) => `src/interface/${f}`), 'src/start-pipe.js', 'src/agentd/chan-socket.js'].flatMap((rel) => [...read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1').matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `${rel}: ${m[0]}`));   // + the reader the interface shares with the hub
+  ok(JSON.stringify(files.sort()) === JSON.stringify(['admission.js', 'front.js', 'index.js', 'main.js', 'owners.js', 'relay.js']) && syncForms.length === 0, `and read statically: no …Sync name in src/interface's ${files.length} files nor in src/start-pipe.js, the reader it shares, nor in src/agentd/chan-socket.js (a reference taken at load is seen too)`, syncForms);
+  const mutRelay = mutant('src/interface/relay.js', "    stats.exchanges++;", "    stats.exchanges++; require('fs').statSync(__filename);");
   const mut = await syncCalls(interfaceWith({ relay: mutRelay }));
-  ok(mut.ok && mut.n > 0, `RED CONTROL — one stat planted on the relay's byte path: ${mut.n} counted`, mut);
+  ok(mut.ok && mut.n > 0, `RED CONTROL — one stat planted on the relay's exchange path: ${mut.n} counted`, mut);
 }
 
 console.log('— ③ THE LAW OF THE SOCKET\'S OWNER (a keystroke\'s echo in two pieces)');
@@ -230,7 +251,7 @@ async function optionsSeen(I, n = 4) {
   const seen = { noDelay: 0, keepAlive: 0 }, P = net.Socket.prototype, nd = P.setNoDelay, ka = P.setKeepAlive;
   P.setNoDelay = function (on) { if (on === true || on === undefined) seen.noDelay++; return nd.apply(this, arguments); };
   P.setKeepAlive = function (on) { if (on === true) seen.keepAlive++; return ka.apply(this, arguments); };
-  try { for (let i = 0; i < n; i++) { const s = await rawClient(B.port); s.write('PING\n'); await sleep(20); s.destroy(); } }
+  try { for (let i = 0; i < n; i++) { const s = await upgraded(B.port); s.write('PING\n'); await sleep(20); s.destroy(); } }
   finally { P.setNoDelay = nd; P.setKeepAlive = ka; }
   await B.close();
   return seen;
@@ -253,7 +274,7 @@ console.log('— ④ UNDER CREDIT, BOTH WAYS');
 const BIG = 64 * 1024 * 1024;   // far larger than any kernel's loopback buffers: what is held here cannot be the kernel's doing
 async function stalledThenResumed(I, { resumeMs = 15000 } = {}) {
   const B = await boot(I); far.mode = 'raw';
-  const s = await rawClient(B.port); s.pause();   // the page stops reading
+  const s = await upgraded(B.port); s.pause();   // the page stops reading
   s.write(`BIG ${BIG}\n`);
   let last = -1, steady = 0, maxHeld = 0;
   for (let i = 0; i < 300 && steady < 10; i++) { await sleep(10); const h = B.iface.stats().held; maxHeld = Math.max(maxHeld, h); steady = h === last ? steady + 1 : 0; last = h; }
@@ -265,16 +286,16 @@ async function stalledThenResumed(I, { resumeMs = 15000 } = {}) {
 }
 {
   const law = await stalledThenResumed();
-  ok(law.maxHeld > 0 && law.held <= INITIAL_WINDOW + 65536, `a page that stops reading a 64 MB answer: ${law.held} bytes wait in the interface (seen above zero: ${law.maxHeld}) — one window (${INITIAL_WINDOW}) and at most one 64 KiB write below the socket's line; the rest waits in the party's own queue`, law);
+  ok(law.maxHeld > 0 && law.held <= INITIAL_WINDOW + 2 * 65536, `a page that stops reading a 64 MB answer: ${law.held} bytes wait in the interface (seen above zero: ${law.maxHeld}) — one window (${INITIAL_WINDOW}) in the channel's socket, and the page socket's queue at its line (one 64 KiB write past it at most); the rest waits in the party's own queue`, law);
   ok(law.got === BIG, `the page reads again: all ${law.got} bytes arrive (the withheld credit goes back at each drain)`, law);
-  const onReceipt = await stalledThenResumed(interfaceWith({ relay: mutant('src/interface/relay.js', '        if (p.page.write(buf)) m.credit(chan, buf.length);\n        else { p.owed += buf.length; stats.withheld++; }', '        p.page.write(buf); m.credit(chan, buf.length);') }), { resumeMs: 15000 });
-  ok(onReceipt.held > 4 * INITIAL_WINDOW, `RED CONTROL — credit given back for every byte received: ${onReceipt.held} bytes wait in the interface`, onReceipt.held);
-  const noDrain = await stalledThenResumed(interfaceWith({ relay: mutant('src/interface/relay.js', "    page.on('drain', () => { if (p.owed && live()) { const n = p.owed; p.owed = 0; m.credit(chan, n); } });\n", '') }), { resumeMs: 1500 });
-  ok(noDrain.got < BIG, `RED CONTROL — the drain's credit removed: the page reads again and gets ${noDrain.got} of ${BIG} bytes, then nothing`, noDrain);
+  const onReceipt = await stalledThenResumed(interfaceWith({ relay: mutant('src/interface/relay.js', '    socket.pipe(sock); sock.pipe(socket); tap(socket);\n', "    socket.pipe(sock); sock.on('data', (b) => socket.write(b)); tap(socket);\n") }), { resumeMs: 15000 });
+  ok(onReceipt.held > 4 * INITIAL_WINDOW, `RED CONTROL — the channel read with no back-pressure (every byte taken as it comes, so credited): ${onReceipt.held} bytes wait in the interface`, onReceipt.held);
+  const noDrain = await stalledThenResumed(interfaceWith({ relay: mutant('src/interface/relay.js', '    socket.pipe(sock); sock.pipe(socket); tap(socket);\n', "    socket.pipe(sock); sock.on('data', (b) => { if (!socket.write(b)) sock.pause(); }); tap(socket);\n") }), { resumeMs: 1500 });
+  ok(noDrain.got < BIG, `RED CONTROL — the page's drain never resumes the channel: the page reads again and gets ${noDrain.got} of ${BIG} bytes, then nothing`, noDrain);
 }
 async function uploadToDeafOwner(I) {
   const B = await boot(I); far.mode = 'raw';
-  const s = await rawClient(B.port);
+  const s = await upgraded(B.port);
   s.write('SINK\n');
   await until(() => [...far.chans.values()].some((c) => c.sink));
   const chunk = Buffer.alloc(65536, 3); let sent = 0;
@@ -289,7 +310,7 @@ async function uploadToDeafOwner(I) {
 {
   const law = await uploadToDeafOwner();
   ok(law.paused >= 1 && law.toLink <= INITIAL_WINDOW + 2 * 65536, `a page uploads 16 MB to an owner that stopped reading: the page socket is paused (${law.paused}) and ${law.toLink} bytes were taken from it — one window and a chunk; the rest stays in the page's own buffers`, law);
-  const noPause = await uploadToDeafOwner(interfaceWith({ relay: mutant('src/interface/relay.js', "    page.on('data', (b) => { stats.toLink += b.length; if (live() && !m.data(chan, b)) { page.pause(); stats.paused++; } });", "    page.on('data', (b) => { stats.toLink += b.length; if (live()) m.data(chan, b); });") }));
+  const noPause = await uploadToDeafOwner(interfaceWith({ relay: mutant('src/interface/relay.js', '    socket.pipe(sock); sock.pipe(socket); tap(socket);\n', "    socket.on('data', (b) => sock.write(b)); sock.pipe(socket); tap(socket);\n") }));
   ok(noPause.toLink > 8 * INITIAL_WINDOW, `RED CONTROL — no pause: ${noPause.toLink} bytes taken from the page and queued here for an owner that reads nothing`, noPause);
 }
 
@@ -334,13 +355,13 @@ console.log('— ⑥ THE OPEN LINE');
 console.log('— ⑦ CLOSES');
 {
   const B = await boot(); far.mode = 'raw';
-  const s = await rawClient(B.port); s.write('PING\n');
+  const s = await upgraded(B.port); s.write('PING\n');
   await until(() => far.chans.size === 1);
   const c0 = far.closed || 0; s.end();
   ok(await until(() => (far.closed || 0) > c0), 'a page\'s end closes its channel at the party');
-  const s2 = await rawClient(B.port); let ended = false; s2.on('end', () => { ended = true; }); s2.write('BYE\n');
+  const s2 = await upgraded(B.port); let ended = false; s2.on('end', () => { ended = true; }); s2.write('BYE\n');
   ok(await until(() => ended), 'the party\'s close ends the page');
-  const s3 = await rawClient(B.port); let gone = false; s3.on('close', () => { gone = true; }); s3.resume(); s3.write('PING\n');   // a page that reads (a socket holding unread bytes never says close)
+  const s3 = await upgraded(B.port); let gone = false; s3.on('close', () => { gone = true; }); s3.resume(); s3.write('PING\n');   // a page that reads (a socket holding unread bytes never says close)
   await until(() => far.chans.size >= 3);
   far.mux.destroy();
   const wentAway = await until(() => gone), st = B.iface.stats();
@@ -350,7 +371,7 @@ console.log('— ⑦ CLOSES');
 
 console.log('— ⑩ EVERY PAGE CONNECTION LEAVES NOTHING IN THE LINK\'S FRAME CODE');
 async function connectionsLeave(I, N = 1000) {
-  const B = await boot(I);   // HTTP: each page connection one exchange its server answers and closes (Connection: close)
+  const B = await boot(I);   // HTTP: each request one exchange on its own channel, answered and let go
   const before = { win: B.link()._sendWin.size, q: B.link()._sendQ.size };
   const one = () => new Promise((res) => { const t = setTimeout(res, 5000); get(B.port, '/c').then(() => { clearTimeout(t); res(); }); });
   for (let i = 0; i < N; i += 100) await Promise.all(Array.from({ length: Math.min(100, N - i) }, one));
@@ -361,12 +382,12 @@ async function connectionsLeave(I, N = 1000) {
 }
 {
   const law = await connectionsLeave();
-  ok(law.after.opened === 1000 && law.after.channels === 0 && law.after.win === law.before.win && law.after.q === law.before.q, `1 000 page connections opened and closed: the link's frame code keeps ${law.after.win} send windows and ${law.after.q} queues (it started with ${law.before.win} / ${law.before.q}); every pair drop goes through closeChan, which forgets once its CLOSE is out`, law);
+  ok(law.after.opened === 1000 && law.after.channels === 0 && law.after.win === law.before.win && law.after.q === law.before.q, `1 000 requests answered, each on its own channel: the link's frame code keeps ${law.after.win} send windows and ${law.after.q} queues (it started with ${law.before.win} / ${law.before.q}); every pair drop goes through closeChan, which forgets once its CLOSE is out`, law);
   const MUX = read('src/agentd/mux.js'), FORGET = /  forget\(chan\) \{[^\n]*\}/g;
   ok((MUX.match(FORGET) || []).length === 1, 'CONTROL needle present (exactly once): the frame code\'s forget(chan)');
   const todays = interfaceWith({ mux: compileAt('src/agentd/mux.js', MUX.replace(FORGET, '  forget(chan) { }')) });
   const red = await connectionsLeave(todays);
-  ok(red.after.win >= 900, `RED CONTROL — the frame code that never forgets a channel: ${red.after.win} send windows kept after 1 000 connections`, red);
+  ok(red.after.win >= 900, `RED CONTROL — the frame code that never forgets a channel: ${red.after.win} send windows kept after 1 000 requests`, red);
 }
 
 console.log('— ⑪ A CLOSE NEVER OVERTAKES ITS OWN BYTES');
@@ -374,7 +395,7 @@ async function uploadThenEnd(I) {
   // one write of a window and 1000 bytes, then the end, to an owner that holds its credit 200 ms: the 1000 bytes are still
   // queued in the interface's frame code when the page's end is read — the moment a close could overtake them
   const B = await boot(I); far.mode = 'raw';
-  const s = await rawClient(B.port); s.resume();
+  const s = await upgraded(B.port); s.resume();
   s.write('SLOW 200\n');
   await until(() => [...far.chans.values()].some((c) => c.slow));
   const total = INITIAL_WINDOW + 1000;
@@ -389,11 +410,9 @@ async function uploadThenEnd(I) {
 {
   const law = await uploadThenEnd();
   ok(law.gotAtClose === law.total, `a page uploads one window and 1000 bytes (${law.total}) to an owner that holds its credit, and ends: the owner has all ${law.gotAtClose} bytes when the close arrives`, law);
-  const IDX = read('src/interface/index.js'), OPT = 'closeAfterQueue: true, ';
-  ok(IDX.split(OPT).length === 2, 'CONTROL needle present (exactly once): the interface\'s link sets closeAfterQueue (src/interface/index.js)');
-  const todays = interfaceWith({ index: IDX.replace(OPT, '') });
-  const red = await uploadThenEnd(todays);
-  ok(red.gotAtClose !== undefined && red.gotAtClose < red.total, `RED CONTROL — the interface's link without closeAfterQueue (the frame code's released close): the owner sees the close after ${red.gotAtClose} of ${red.total} bytes`, red);
+  const early = mutant('src/interface/relay.js', '    socket.pipe(sock); sock.pipe(socket); tap(socket);\n', "    socket.pipe(sock, { end: false }); socket.on('end', () => { try { sock.mux.closeChan(sock.chan); } catch { } }); sock.pipe(socket); tap(socket);\n");
+  const red = await uploadThenEnd(interfaceWith({ relay: early }));
+  ok(red.gotAtClose !== undefined && red.gotAtClose < red.total, `RED CONTROL — the page's end sent as a CLOSE at once, past the bytes still in the channel's socket: the owner sees the close after ${red.gotAtClose} of ${red.total} bytes`, red);
 }
 
 console.log('— ⑧ THE LISTENER NEVER ENDS ON ITS OWN ERROR (judged in a child)');
@@ -406,12 +425,12 @@ const file = path.join(repo, 'src/interface/front.js');
 let src = fs.readFileSync(file, 'utf8');
 if (which === 'cut') src = src.replace(/\\n  server\\.on\\('error', [^\\n]*\\n/, '\\n');
 const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src, file);
-const f = m.exports.create({ onPage: (s) => s.end('ok') });
+const f = m.exports.create({ onExchange: (req, res) => { res.writeHead(200, { 'content-length': 2 }); res.end('ok'); }, onUpgrade: (req, s) => s.destroy() });
 f.server.listen(0, '127.0.0.1', () => {
   const e = Object.assign(new Error('accept failed (the file limit)'), { code: 'EMFILE' });
   f.server.emit('error', e);   // a failed accept, as the server reports it
-  const c = net.connect(f.server.address().port, '127.0.0.1', () => c.write('x'));
-  c.on('data', (b) => { console.log(JSON.stringify({ answered: String(b), counted: f.acceptErrors() })); c.destroy(); f.server.close(); });
+  const c = net.connect(f.server.address().port, '127.0.0.1', () => c.write('GET / HTTP/1.1\\r\\nHost: hub.example\\r\\n\\r\\n'));
+  let got = ''; c.on('data', (b) => { got += b; if (!got.includes('\\r\\n\\r\\n')) return; console.log(JSON.stringify({ answered: got.split('\\r\\n\\r\\n')[1], counted: f.acceptErrors() })); c.destroy(); f.server.close(); f.close(); });
   c.on('error', () => process.exit(3));
 });
 `);
@@ -449,10 +468,10 @@ async function admission(I, secret, admits = [HUB_DIGEST], opts = {}) {
   far.opens = []; far.chans = new Map(); far.mode = 'raw'; far.acked = null; far.refused = false; far.certAcks = [];
   await farJoin(sock, secret);
   await until(() => far.acked || far.refused || (link && link._dead), 3000);
-  const page = await rawClient(addr.port); let pageClosed = false; page.on('close', () => { pageClosed = true; }); page.write('PING\n');
+  const page = await rawClient(addr.port); let pageClosed = false, pageGot = ''; page.on('close', () => { pageClosed = true; }); page.on('data', (b) => { pageGot += b; }); page.write(UPGRADE + 'PING\n');
   await until(() => far.opens.length || pageClosed, 1000);
   const st = iface.stats();
-  const r = { acked: !!far.acked, capabilities: far.acked && far.acked.capabilities, refused: far.refused, linkEnded: !!(link && link._dead), opens: far.opens.length, pageClosed, lastRefused: st.lastRefused };
+  const r = { acked: !!far.acked, capabilities: far.acked && far.acked.capabilities, refused: far.refused, linkEnded: !!(link && link._dead), opens: far.opens.length, pageClosed, pageGot: pageGot.split('\r\n')[0] + (pageGot.includes('no-owner') ? ' «no-owner»' : ''), lastRefused: st.lastRefused };
   page.destroy(); try { far.mux.destroy(); } catch { } await iface.close(); srv.close();
   return r;
 }
@@ -461,7 +480,7 @@ async function admission(I, secret, admits = [HUB_DIGEST], opts = {}) {
   const right = await admission(IDX, HUB_SECRET);
   ok(right.acked && Array.isArray(right.capabilities) && right.opens === 1, `the admitted secret: hello-ack (${(right.capabilities || []).join(', ')}) and the page relayed`, right);
   const wrong = await admission(IDX, crypto.randomBytes(32).toString('hex'));
-  ok(wrong.refused && wrong.linkEnded && wrong.opens === 0 && wrong.pageClosed && wrong.lastRefused === 'secret', `a wrong secret: auth-fail, the link ended, and a page arriving meanwhile closed at once with no link — nothing relayed (${wrong.lastRefused})`, wrong);
+  ok(wrong.refused && wrong.linkEnded && wrong.opens === 0 && wrong.pageClosed && /^HTTP\/1\.1 503 .*«no-owner»$/.test(wrong.pageGot) && wrong.lastRefused === 'secret', `a wrong secret: auth-fail, the link ended, and a page arriving meanwhile answered by name with no link (${wrong.pageGot}) and closed — nothing relayed (${wrong.lastRefused})`, wrong);
   const none = await admission(IDX, HUB_SECRET, []);
   ok(none.refused && none.lastRefused === 'not-admitted' && none.opens === 0, `no admit line for the hub: refused (${none.lastRefused})`, none);
   const S2 = crypto.randomBytes(32).toString('hex'), D2 = crypto.createHash('sha256').update(S2).digest('hex');
@@ -479,14 +498,14 @@ console.log('— ⑬ A RE-ATTACH: the old link goes first, and an old link\'s la
 async function reattach(I, { lateDeath = false, bound = null } = {}) {
   const t0 = performance.now(), took = {};
   const Bt = await boot(I); far.mode = 'raw';
-  const pA = await rawClient(Bt.port); let aClosed = false; pA.on('end', () => { aClosed = true; }); pA.on('close', () => { aClosed = true; }); pA.resume(); pA.write('PING\n');   // ended BY the interface: its FIN or its close (read, or no 'end' is ever emitted)
+  const pA = await upgraded(Bt.port); let aClosed = false; pA.on('end', () => { aClosed = true; }); pA.on('close', () => { aClosed = true; }); pA.resume(); pA.write('PING\n');   // ended BY the interface: its FIN or its close (read, or no 'end' is ever emitted)
   await until(() => far.opens.length === 1);
   const far1 = far.mux; far.acked = null;
   await farJoin(Bt.sock, HUB_SECRET);   // the hub's next start joins as the same party
   await until(() => far.acked, 3000);
   const oldEnded = await until(() => far1._dead, bound ? bound.old : 3000); took.old = performance.now() - t0;
   if (oldEnded) await until(() => aClosed, 3000);   // its page's end arrives after the link's
-  const pB = await rawClient(Bt.port); let got = ''; pB.on('data', (b) => { got += b; }); pB.write('PING\n');
+  const pB = await upgraded(Bt.port); let got = ''; pB.on('data', (b) => { got += b; }); pB.write('PING\n');
   await until(() => got.includes('PONG'), 2000);
   if (lateDeath) { try { far1.destroy(); } catch { } await sleep(50); }   // the OLD link dies now, after the new one carries pages
   got = ''; const t1 = performance.now(); pB.write('PING\n'); const bAnswers = await until(() => got.includes('PONG'), bound ? bound.pong : 3000); took.pong = performance.now() - t1;
@@ -502,8 +521,8 @@ async function reattach(I, { lateDeath = false, bound = null } = {}) {
   const keeps = await reattach(interfaceWith({ index: (() => { const t = read(IDXS); if (t.split(FIRST).length !== 2) throw new Error('CONTROL needle: the re-attach line'); return t.replace(FIRST, ''); })() }), { lateDeath: true, bound });
   ok(!keeps.oldEnded && keeps.bAnswers, 'with the old link left alive (the «first» line cut) and dying only AFTER the new one carries pages: the new link\'s page still answers — the relay binds each link\'s death to its own pairs', keeps);
   ok(!keeps.oldEnded, 'RED CONTROL — the «first» line cut: the old link is NOT ended by a re-attach (two links for one party)', keeps);
-  const RLY = 'src/interface/relay.js', BIND = '        if (mux === m) mux = null;   // only THIS link stops being the one pages open on\n        for (const [chan, p] of pairs) if (p.mux === m) {';
-  const both = await reattach(interfaceWith({ index: read(IDXS).replace(FIRST, ''), relay: mutant(RLY, BIND, '        mux = null;\n        for (const [chan, p] of pairs) if (true) {') }), { lateDeath: true, bound });
+  const RLY = 'src/interface/relay.js', BIND = '      onDead: (why) => { rt.dead(why); routers.delete(m); if (mux === m) { mux = null; router = null; } },';
+  const both = await reattach(interfaceWith({ index: read(IDXS).replace(FIRST, ''), relay: mutant(RLY, BIND, '      onDead: (why) => { for (const r of routers.values()) r.dead(why); routers.clear(); mux = null; router = null; },') }), { lateDeath: true, bound });
   ok(!both.bAnswers, 'RED CONTROL — the relay\'s per-link death cut too: the old link\'s late death empties the NEW link\'s pairs (its page never answers)', both);
 }
 
@@ -545,52 +564,62 @@ async function stalledHello(I, handshakeMs) {
   ok(!unbound.closed, 'RED CONTROL — the bound not passed: after four times the bound the stalled handshake is still open', unbound);
 }
 
-console.log('— ⑯ THE OWNER DESTROYS ITS CHANNEL MID-UPLOAD, THEN THE PAGE CLOSES — on the REAL socket-shaped channel');
-async function midUpload(I, bound = null) {
-  // the far end is today's hub's own road: src/server/interface-party.js join() — the REAL ChanSocket router behind an http.Server
+console.log('— ⑯ THE OWNER DESTROYS ITS CHANNEL MID-UPLOAD, THEN THE PAGE CLOSES; AND A PAGE THAT LEAVES MID-UPLOAD — on the REAL socket-shaped channel');
+async function midUpload(I, bound = null, { hubDestroys = true } = {}) {
+  // the far end is today's hub's own road: src/server/interface-party.js join() — the REAL ChanSocket router behind an http.Server.
+  // hubDestroys: the hub's handler destroys its socket after 100 KB, then the page resets; else the page resets while the hub
+  // still reads (law 2: when the page leaves, both processes let the channel go — the hub's handler sees its socket gone)
   const iface = I.create(); const addr = await iface.listen(0, '127.0.0.1');
   const sock = path.join(T, `u${++nIface}.sock`); let link = null;
   const srv = net.createServer((x) => { link = iface.attachLink(x); }).listen(sock); await new Promise((r) => srv.once('listening', r));
   iface.admit({ party: 'hub', digest: HUB_DIGEST });
-  let destroyedAt = 0;
-  const hubServer = http.createServer((req, res) => { req.on('data', (c) => { destroyedAt += c.length; if (destroyedAt > 100000) req.socket.destroy(); }); req.on('error', () => { }); });
+  let destroyedAt = 0, hubSawGone = false;
+  const hubServer = http.createServer((req, res) => { req.socket.once('close', () => { hubSawGone = true; }); req.on('data', (c) => { destroyedAt += c.length; if (hubDestroys && destroyedAt > 100000) req.socket.destroy(); }); req.on('error', () => { }); });
   const party = await require(path.join(REPO, 'src/server/interface-party.js')).join({ start: { party: 'hub', secret: HUB_SECRET, link: sock }, server: hubServer });
   // the page holds its side open after the interface's FIN (allowHalfOpen), so its going is a RESET, never an answered FIN
   const page = await new Promise((res) => { const x = net.connect({ port: addr.port, host: '127.0.0.1', allowHalfOpen: true }, () => res(x)); x.on('error', () => { }); });
   let ended = false; page.on('end', () => { ended = true; }); page.on('close', () => { ended = true; });
   page.write('POST /up HTTP/1.1\r\nHost: x\r\nContent-Length: 4000000\r\n\r\n');
   const chunk = Buffer.alloc(65536, 7); for (let i = 0; i < 8; i++) page.write(chunk);   // 512 KiB of a 4 MB upload
-  await until(() => destroyedAt > 100000 && ended, 3000);
-  await sleep(30); page.resetAndDestroy();   // the page goes too (an RST: no FIN — its close handler's road)
+  if (hubDestroys) await until(() => destroyedAt > 100000 && ended, 3000); else await until(() => destroyedAt > 100000, 3000);
+  await sleep(30); page.resetAndDestroy();   // the page goes (an RST: no FIN — its close handler's road)
   const t0 = performance.now(); await until(() => iface.stats().channels === 0 && party.router.size === 0, bound || 3000); const took = performance.now() - t0; await sleep(20);
   const L = link;
-  const r = { channels: iface.stats().channels, routerSize: party.router.size, held: { closeAfter: L._closeAfter.size, sendQ: L._sendQ.size, sendWin: L._sendWin.size }, took };
+  const r = { channels: iface.stats().channels, routerSize: party.router.size, held: { closeAfter: L._closeAfter.size, sendQ: L._sendQ.size, sendWin: L._sendWin.size }, took, hubSawGone };
   try { party.mux.destroy(); } catch { } await iface.close(); srv.close(); hubServer.close();
   return r;
 }
 {
   const law = await midUpload(require(path.join(REPO, 'src/interface/index.js')));
   ok(law.channels === 0 && law.routerSize === 0 && law.held.closeAfter === 0 && law.held.sendQ === 0 && law.held.sendWin === 0, `the hub's socket destroyed after 100 KB of a 4 MB upload, then the page reset: no pair here, the hub's router empty (its sink removed by the interface's CLOSE), and the link's frame code holds nothing for the channel (held-close ${law.held.closeAfter}, queue ${law.held.sendQ}, window ${law.held.sendWin})`, law);
-  const RLY = 'src/interface/relay.js', CLOSE = "    page.on('close', () => { if (!p.ended.page) { p.ended.page = true; if (live()) m.closeChan(chan); } p.ended.owner = true; pairs.delete(chan); });";
-  const leaks = await midUpload(interfaceWith({ relay: mutant(RLY, CLOSE, "    page.on('close', () => { p.ended.owner = true; pairs.delete(chan); });") }), Math.max(50, 4 * law.took));
-  ok(leaks.routerSize >= 1, `RED CONTROL — the page's close sends no CLOSE: the hub's router keeps the channel as a sink for good (${leaks.routerSize})`, leaks);
+  const left = await midUpload(require(path.join(REPO, 'src/interface/index.js')), null, { hubDestroys: false });
+  ok(left.channels === 0 && left.routerSize === 0 && left.hubSawGone && left.held.closeAfter === 0 && left.held.sendQ === 0 && left.held.sendWin === 0, `the page resets after 100 KB of a 4 MB upload while the hub still reads: no pair here, the hub's router empty, the hub's handler saw its socket gone (${left.hubSawGone}), the frame code holds nothing (${JSON.stringify(left.held)})`, left);
+  const RLY = 'src/interface/relay.js', GONE = "    res.on('close', () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } });";
+  const leaks = await midUpload(interfaceWith({ relay: mutant(RLY, GONE, "    res.on('close', () => { });") }), Math.max(50, 4 * Math.max(law.took, left.took)), { hubDestroys: false });
+  ok(leaks.routerSize >= 1 && !leaks.hubSawGone, `RED CONTROL — the page's going ends nothing (its answer's close cut): the hub's router keeps the channel (${leaks.routerSize}) and its handler waits on (saw its socket gone: ${leaks.hubSawGone})`, leaks);
 }
 
 console.log('— the B2b cure 2: a page with NO address is closed at once and never stamped (the far side reads a null address as loopback)');
 {
   const { EventEmitter } = await import('node:events');
+  const { Duplex: D } = await import('node:stream');
   const run = (mod) => {
     const sent = [], R = mod.create({ ownerOf: () => 'hub' });
-    R.attach({ control: (m) => sent.push(m), data: () => true, credit: () => { }, closeChan: () => { } });
-    const page = Object.assign(new EventEmitter(), { destroyed: false, destroy() { this.destroyed = true; }, pause() { }, resume() { } });
-    const chan = R.open(page, { secure: false, addr: null, port: null });
-    const kept = Object.assign(new EventEmitter(), { destroyed: false, destroy() { this.destroyed = true; }, pause() { }, resume() { } });
-    R.open(kept, { secure: false, addr: '203.0.113.7', port: 4100 });
-    return { chan, destroyed: page.destroyed, opens: sent.filter((m) => m && m.op === 'open').map((m) => m.stamp), kept: !kept.destroyed };
+    const fake = { closesAfterQueue: true, control: (m) => sent.push(m), data: () => true, credit: () => { }, closeChan: () => { } };
+    R.handlersFor(fake); R.attach(fake);
+    const head = { method: 'GET', url: '/ws', httpVersion: '1.1', rawHeaders: ['Host', 'hub.example', 'Connection', 'Upgrade', 'Upgrade', 'websocket'] };
+    const pageOf = () => { const d = new D({ read() { }, write(c, e, cb) { cb(); } }); d.on('error', () => { }); return d; };
+    const page = pageOf(), kept = pageOf();
+    R.upgrade(head, page, Buffer.alloc(0), { secure: false, addr: null, port: null });
+    R.upgrade(head, kept, Buffer.alloc(0), { secure: false, addr: '203.0.113.7', port: 4100 });
+    return { destroyed: page.destroyed, opens: sent.filter((m) => m && m.op === 'open').map((m) => m.stamp), kept: !kept.destroyed };
   };
+  void EventEmitter;
   const law = run(require(path.join(REPO, 'src/interface/relay.js')));
-  ok(law.chan === null && law.destroyed && law.opens.length === 1 && law.opens[0].addr === '203.0.113.7' && law.kept, `a page whose address is unknown (already gone): closed, no open line; one with an address: stamped «${law.opens[0] && law.opens[0].addr}»`, law);
-  const G = "    if (!facts.addr) { page.destroy(); return null; }   // no address: the page is already gone, and is never stamped (src/agentd/chan-socket.js reads a null address as loopback)\n";
+  ok(law.destroyed && law.opens.length === 1 && law.opens[0].addr === '203.0.113.7' && law.kept, `a page whose address is unknown (already gone): closed, no open line; one with an address: stamped «${law.opens[0] && law.opens[0].addr}»`, law);
+  const RS = read('src/interface/relay.js');
+  ok(RS.split('    if (!facts.addr) { req.socket.destroy(); return; }').length === 2, 'and the request road holds the same guard (its own line, exactly once)');
+  const G = "    if (!facts.addr) { socket.destroy(); return; }\n";
   const red = run(mutant('src/interface/relay.js', G, ''));
   ok(red.opens.length === 2 && red.opens.some((s) => s.addr === null), 'RED CONTROL — the guard cut: the unknown page is stamped with a null address (loopback on the far side)', red);
 }

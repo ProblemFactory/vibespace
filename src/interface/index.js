@@ -1,10 +1,12 @@
 'use strict';
 // THE INTERFACE (the separation, M1 — lane B, piece B2: the skeleton and the relay; design: «The processes (revision)» —
 // interface, «The link», THE PROGRAMME M1). The one process that must always answer: the ONE listener of the hub's port
-// (plain and TLS by the first byte, ./front.js), and the relay of every page connection to the party that owns it over
-// that party's link (./relay.js), routed by the owner map (./owners.js — a stub until the owner-map lane's module is
-// taken). It owns no work: no engine, no store, no key, no child start, no parse of a payload, and no synchronous disk call
-// once it listens (scripts/test-interface-relay.mjs holds each as a law). Its link to a party is the tree's own frame code
+// (plain and TLS by the first byte, ./front.js), and the relay of every EXCHANGE — one head and its answer, or one
+// upgrade — to the party that owns it over that party's link (./relay.js; the framing unit, 主开发 r922), routed by the
+// owner map (./owners.js — a stub until the owner-map lane's module is taken). It owns no work: no engine, no store, no
+// key, no child start, no parse of a body's content (it parses request and answer HEADS with Node's own parser — the
+// design's sentence as r922 amends it), and no synchronous disk call once it listens (scripts/test-interface-relay.mjs
+// and scripts/test-interface-framing.mjs hold each as a law). Its link to a party is the tree's own frame code
 // (src/agentd/mux.js); a same-machine link runs with the heartbeat OFF (a silent party is late, never dead).
 // Piece B2b: a link is a PARTY only once its hello is admitted (./admission.js — the start secret the supervisor minted for
 // this start; lane readings' contract v1 §3). Until then nothing is relayed to it and its bytes are credited and dropped;
@@ -24,9 +26,9 @@ const MAX_CONTROL = 64 * 1024;   // contract v1 §3: an outer control line over 
 const CAPABILITIES = ['relay@1', 'certificate@1'];   // what a party may ask of this interface (each name carries its shape's version)
 
 /** → { listen(port, host) → Promise, useCertificate(pem), admit(line), attachLink(stream), close(), stats() } */
-function create({ ownerOf = owners.ownerOf, firstByteMs, handshakeMs, helloMs = HELLO_MS } = {}) {
-  const r = relay.create({ ownerOf });
-  const f = front.create({ onPage: (socket, facts) => r.open(socket, facts), firstByteMs, handshakeMs });
+function create({ ownerOf = owners.ownerOf, firstByteMs, handshakeMs, helloMs = HELLO_MS, clocks, firstChan } = {}) {
+  const r = relay.create({ ownerOf, firstChan });
+  const f = front.create({ onExchange: r.exchange, onUpgrade: r.upgrade, firstByteMs, handshakeMs, clocks });   // THE FRAMING UNIT: Node's parser on every page socket, ONE exchange a channel
   const gate = admission.create();
   const links = new Map();   // party → its admitted link
   const said = { refused: 0, lastRefused: null, certRefused: 0, lastCertRefused: null };

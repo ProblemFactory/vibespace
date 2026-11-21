@@ -15,11 +15,24 @@
 //   A PUSHED CERTIFICATE THAT CANNOT BE LOADED KEEPS THE OLD CONTEXT and never throws: it is pushed on the link's control
 //     channel, whose callback the frame code calls with no guard, so a malformed pair is answered { ok: false, why } and
 //     TLS goes on with the certificate it had (or none).
+// THE FRAMING UNIT (主开发 r922, shape (A)): every page connection, plain or decrypted, is handed to ONE page HTTP server here —
+// Node's OWN parser reads each head (no hand-written reader of HTTP anywhere) and the relay carries each exchange on its own
+// channel (./relay.js). A head Node refuses is refused the same way as in the plain form (Node's own answer, no listener of
+// ours). EVERY CLOCK ON A PAGE SOCKET IS THIS PROCESS'S, named, never shorter than the plain form's (law 8): the head, the
+// whole request, the idle kept-alive connection, the head's size, how often the first two are looked at — each the hub's own
+// http.Server's (it sets none: Node's).
 const net = require('net');
 const tls = require('tls');
+const http = require('http');
 
 const FIRST_BYTE_MS = 120000;   // a connection that never says anything is dropped (today's front: the same bound)
 const HANDSHAKE_MS = 120000;    // a TLS handshake that does not finish is dropped (Node's default, today's front's — said here)
+const PAGE_HEAD_MS = 60000;     // a head that does not arrive whole in this long is refused with Node's 408 (the plain form's: Node's headersTimeout)
+const PAGE_REQUEST_MS = 300000; // a whole request, head and body, in this long (the plain form's: Node's requestTimeout)
+const PAGE_IDLE_MS = 5000;      // a kept-alive page connection idle this long between requests is closed (the plain form's keepAliveTimeout)
+const PAGE_MAX_HEAD = 16384;    // a head larger than this is refused with Node's 431 (the plain form's: Node's maxHeaderSize)
+const PAGE_CHECK_MS = 30000;    // how often Node looks for a head or a request past its clock (the plain form's: Node's connectionsCheckingInterval)
+const FACTS = Symbol('page facts');   // what this process alone knows of a page socket: { secure, addr, port }
 
 /** the options a page socket gets here — the ONE place (the law's leg reads it) */
 function pageSocket(socket) {
@@ -30,9 +43,22 @@ function pageSocket(socket) {
 
 /** → { server, useCertificate(pem | null) → { ok, why? }, serving(), acceptErrors() } — `onPage(socket, facts)` gets every
  *  accepted page connection, plain or decrypted, with the facts this process alone knows: { secure, addr, port } */
-function create({ onPage, firstByteMs: fb, handshakeMs: hb } = {}) {
+function create({ onExchange, onUpgrade, firstByteMs: fb, handshakeMs: hb, clocks = {} } = {}) {
   const firstByteMs = Number(fb) > 0 ? Number(fb) : FIRST_BYTE_MS;
   const handshakeMs = Number(hb) > 0 ? Number(hb) : HANDSHAKE_MS;
+  // THE PAGE SERVER: Node's own parser on every page socket; its clocks are named above (a suite may hand shorter ones)
+  const clock = (v, d) => (Number(v) > 0 ? Number(v) : d);
+  const pages = http.createServer({ maxHeaderSize: clock(clocks.maxHead, PAGE_MAX_HEAD), headersTimeout: clock(clocks.headMs, PAGE_HEAD_MS), requestTimeout: clock(clocks.requestMs, PAGE_REQUEST_MS), connectionsCheckingInterval: clock(clocks.checkMs, PAGE_CHECK_MS) });
+  pages.keepAliveTimeout = clock(clocks.idleMs, PAGE_IDLE_MS);
+  // Node starts the checker of the head and request clocks when a server LISTENS (lib/_http_server.js, setupConnectionsTracking
+  // on 'listening'). This server never listens — the front's listener accepts for it — so it is told once, or those two clocks
+  // would never fire on a page socket.
+  pages.emit('listening');
+  const factsOf = (req) => (req.socket && req.socket[FACTS]) || {};
+  pages.on('request', (req, res) => onExchange(req, res, factsOf(req)));
+  pages.on('checkContinue', (req, res) => onExchange(req, res, factsOf(req)));   // Expect: 100-continue goes to the owner, whose 100 (or answer) comes back
+  pages.on('upgrade', (req, socket, head) => onUpgrade(req, socket, head, factsOf(req)));
+  const onPage = (socket, facts) => { socket[FACTS] = facts; pages.emit('connection', socket); };
   let tlsServer = null, live = false, acceptErrors = 0, lastAcceptError = null;
   const sockets = new Set();   // every accepted socket until it closes — a close of the listener ends them (a half-open page never holds it)
   const plainFacts = (s) => ({ secure: false, addr: s.remoteAddress || null, port: s.remotePort || null });
@@ -70,8 +96,8 @@ function create({ onPage, firstByteMs: fb, handshakeMs: hb } = {}) {
   });
   server.on('error', (e) => { acceptErrors++; lastAcceptError = (e && (e.code || e.message)) || 'error'; });   // the permanent listener: counted, the server keeps listening
   /** the listener closed and every socket it accepted ended — those still waiting for a first byte, half-open pages, TLS pages */
-  const close = () => new Promise((resolve) => { server.close(() => resolve()); for (const s of sockets) { try { s.destroy(); } catch { } } sockets.clear(); });
-  return { server, useCertificate, close, serving: () => live, acceptErrors: () => ({ count: acceptErrors, last: lastAcceptError }) };
+  const close = () => new Promise((resolve) => { server.close(() => resolve()); try { pages.close(() => { }); } catch { } for (const s of sockets) { try { s.destroy(); } catch { } } sockets.clear(); });   // pages.close: its clocks' checker stops
+  return { server, pages, useCertificate, close, serving: () => live, acceptErrors: () => ({ count: acceptErrors, last: lastAcceptError }) };
 }
 
-module.exports = { create, pageSocket, FIRST_BYTE_MS, HANDSHAKE_MS };
+module.exports = { create, pageSocket, FIRST_BYTE_MS, HANDSHAKE_MS, PAGE_HEAD_MS, PAGE_REQUEST_MS, PAGE_IDLE_MS, PAGE_MAX_HEAD, PAGE_CHECK_MS };
