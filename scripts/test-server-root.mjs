@@ -199,7 +199,7 @@ ok(/rootVerdict\(\{\s*\.\.\.f,\s*tmpRoots: f\.tmpRoots \|\| tmpSpellings\(\),\s*
   "the ORCH reads os.tmpdir() + fixture-guard's TMP_ROOTS, both env flags as booleans, and the real HOME — realpath'd in the facts' own read (B-1425: off the loop)");
 ok(/if \(st\.isDirectory\(\)\) \{ facts\.gitDir = facts\.gitCommonDir = await realOr\(dotGit\); return facts; \}/.test(gen) && /path\.join\(facts\.gitDir, 'commondir'\)/.test(gen) && !/execFileSync\('git'/.test(gen.slice(gen.indexOf('function readRootFacts'), gen.indexOf('function rootVerdict'))),
   'the facts come from fs: .git dir → checkout, .git file → gitdir + commondir (never a git child at boot)');
-ok(/if \(r && !_refusalSaid\) \{ _refusalSaid = true; console\.log\(r\.line\); \}/.test(gen), 'ONE journal line per boot: the first refused writer says it, the latch keeps the rest quiet');
+ok(/const k = r && !r\.pending \? `\$\{r\.kind\}\|\$\{r\.why\}` : null;\n  if \(k && _refusalSaid !== k\) \{ _refusalSaid = k; console\.log\(r\.line\); \}/.test(gen), 'ONE journal line per refusal: the first refused writer says it, the latch keeps the rest quiet — never spent on «not judged yet» (B-1425 r827)');
 ok(/function hookRegistrationSafe\(\) \{ return rootVerdict\(\)\.ok; \}/.test(gen) && !/here\.startsWith\(tmp\)/.test(gen), 'hookRegistrationSafe() IS the verdict now (the old /tmp-only prefix test is gone)');
 ok(/refused: ownerWriteRefusal\(\), registeredAfterError: _registeredAfterError \};/.test(gen) && /const refused = refusalNow\(\);\n\s*return \{ safe: !refused, refused, registeredAfterError: recoveryNow\(\), files:/.test(sync), 'agentHooksStatus and cliConfigStatus carry the refusal (verify r2: and the recovery fact)');
 ok(/hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery,\n\s*log:/.test(srv) && /hosts\.ownerWriteRefusal = refuseOwnerWrite;/.test(srv) && /cliConfigPlanB64, ownerWriteRefusal: refuseOwnerWrite,/.test(srv),
@@ -409,14 +409,14 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
   // LAW 2 — WHO WAITS (the roads that can await do): pinned at their sources
   const srv8 = read('server.js'), dial8 = read('src/spawn/dial.js'), ssh8 = read('src/spawn/ssh.js'), hosts8 = read('src/hosts.js'), late8 = read('src/server/hooks-late.js'), watch8 = read('src/server/hook-root-watch.js');
   const waits = [
-    ['the boot\'s hook registration', /\nrootFactsNow\(\)\.then\(syncHookRegistration\);/.test(srv8)],
-    ['the boot\'s cli-config sync', /rootFactsNow\(\)\.then\(\(\) => harnessConfig\.syncCliConfig\(\{ reason: 'boot' \}\)\)/.test(srv8)],
-    ['the integration switch\'s sync', /if \(was !== now\) rootFactsNow\(\)\.then\(syncHookRegistration\);/.test(srv8)],
-    ['the hook-health probe (60 s, then 6 h)', /setTimeout\(\(\) => rootFactsNow\(\)\.then\(checkAgentHookHealth\), 60000\)/.test(srv8) && /setInterval\(\(\) => rootFactsNow\(\)\.then\(checkAgentHookHealth\), 6 \* 3600 \* 1000\)/.test(srv8)],
-    ['GET /api/agent-hooks', /app\.get\('\/api\/agent-hooks', async \(req, res\) => \(await rootFactsNow\(\), res\.json\(/.test(srv8)],
+    ['the boot\'s hook registration', /\nrootFactsNow\(\)\.then\(syncHookRegistration\)\.catch\(\(e\) => console\.warn\(/.test(srv8)],
+    ['the boot\'s cli-config sync', /rootFactsNow\(\)\.then\(\(\) => harnessConfig\.syncCliConfig\(\{ reason: 'boot' \}\)\)\.catch\(/.test(srv8)],
+    ['the integration switch\'s sync', /if \(was !== now\) rootFactsNow\(\)\.then\(syncHookRegistration\)\.catch\(\(e\) => console\.warn\(/.test(srv8)],
+    ['the hook-health probe (60 s, then 6 h)', /setTimeout\(\(\) => rootFactsNow\(\)\.then\(checkAgentHookHealth\)\.catch\([^\n]*\), 60000\)/.test(srv8) && /setInterval\(\(\) => rootFactsNow\(\)\.then\(checkAgentHookHealth\)\.catch\([^\n]*\), 6 \* 3600 \* 1000\)/.test(srv8)],
+    ['GET /api/agent-hooks', /app\.get\('\/api\/agent-hooks', async \(req, res\) => \{ try \{ await rootFactsNow\(\); res\.json\(/.test(srv8)],
     ['the install route', /app\.post\('\/api\/agent-hooks\/install', async \(req, res\) => \{[\s\S]{0,2000}?await rootFactsNow\(\); createHookHelper\(\);/.test(srv8)],
-    ['the uninstall route', /app\.post\('\/api\/agent-hooks\/uninstall', async \(req, res\) => \{\n\s*await rootFactsNow\(\); removeAgentHooks\(\);/.test(srv8)],
-    ['the Apply route (hooks-late)', /app\.post\('\/api\/cli-config\/apply', async \(req, res\) => \{\n\s*if \(typeof rootFactsNow === 'function'\) await rootFactsNow\(\);/.test(late8) && /hookRegistrationSafe, rootFactsNow \}\);/.test(srv8)],
+    ['the uninstall route', /app\.post\('\/api\/agent-hooks\/uninstall', async \(req, res\) => \{ try \{\n\s*await rootFactsNow\(\); removeAgentHooks\(\);/.test(srv8)],
+    ['the Apply route (hooks-late)', /app\.post\('\/api\/cli-config\/apply', async \(req, res\) => \{ try \{[^\n]*\n\s*if \(typeof rootFactsNow === 'function'\) await rootFactsNow\(\);/.test(late8) && /hookRegistrationSafe, rootFactsNow \}\);/.test(srv8)],
     ['a paired machine\'s conversation start (spawn/dial.js)', /if \(typeof rootFactsNow === 'function'\) await rootFactsNow\(\);[^\n]*\n\s*await dm\.runCmd\('sh', \['-c',/.test(dial8)],
     ['an ssh machine\'s conversation start (spawn/ssh.js)', /if \(typeof rootFactsNow === 'function'\) await rootFactsNow\(\);[^\n]*\n\s*prelude \+= \(ownerWriteRefusal\(\)/.test(ssh8)],
     ['a machine\'s agent-tools install (hosts.js)', /async installAgentTools\(id, toolDir\) \{\n\s*if \(typeof this\.rootFactsNow === 'function'\) await this\.rootFactsNow\(\);/.test(hosts8) && /hosts\.rootFactsNow = rootFactsNow;/.test(srv8)],
@@ -426,6 +426,94 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
   ok(waits.every(([, k]) => k), 'B-1425 LAW 2: every road that can wait AWAITS the facts — the boot, the switch, the probe, the routes, both remote conversation starts, the tools install, the watch', waits.filter(([, k]) => !k).map(([n]) => n));
   const gen8 = read('src/server/agent-tool-generators.js'), body8 = gen8.slice(gen8.indexOf('const realOr = async'), gen8.indexOf('function rootRecovery()'));
   ok(body8.length > 500 && !/fs\.(statSync|readFileSync|realpathSync|existsSync|readdirSync)\(/.test(body8) && /if \(_rootRead\) return _rootRead;/.test(body8), 'B-1425: the root reader and the verdict hold NO synchronous file call, and the read is single-flight at its one door', body8.length);
+  // r827: the hosts' status and uninstall await the facts; an UNKNOWN root's uninstall is refused BY NAME (never a half uninstall)
+  waits.push(['a machine\'s agent-tools status / uninstall (hosts.js)', /async agentToolsStatus\(id\) \{\n\s*if \(typeof this\.rootFactsNow === 'function'\) await this\.rootFactsNow\(\);/.test(hosts8) && /async uninstallAgentTools\(id\) \{\n\s*if \(typeof this\.rootFactsNow === 'function'\) await this\.rootFactsNow\(\);/.test(hosts8)]);
+  ok(waits[waits.length - 1][1], 'B-1425 r827: a machine\'s agent-tools status and uninstall await the facts too (the list of the roads that wait)');
+  {
+    const { HostManager: HM8 } = require(path.join(REPO, 'src/hosts.js'));
+    const hm = new HM8({ dataDir: path.join(R8, 'hosts') }); let factsAsked = 0;
+    hm.rootFactsNow = async () => { factsAsked++; }; hm.ownerWriteRefusal = () => ({ kind: 'unknown', why: 'the checkout\'s .git did not answer in 2 s', line: 'x' });
+    let e8 = null; try { await hm.uninstallAgentTools('h-none'); } catch (e) { e8 = e; }
+    console.log(`  (an unknown root's uninstall: ${e8 ? `${e8.code} «${e8.message}»` : 'not refused'}; the facts asked ${factsAsked}×)`);
+    ok(!!e8 && e8.code === 'root_unknown' && /were not removed: the checkout's \.git did not answer/.test(e8.message) && factsAsked === 1, 'B-1425 r827: an UNKNOWN root\'s uninstall is refused BY NAME before anything is removed (the facts awaited first)', e8 && e8.message);
+  }
+  // r827: the journal's once-a-boot line is never spent on «not judged yet»: a pending refusal is not said, the real one is, once
+  {
+    let rel2 = null; const held2 = new Promise((r) => { rel2 = r; });
+    const G2 = Gm.create({ rootDir: R8, port: 0 });   // (its create's own [tools] lines come before the journal is listened to)
+    G2._setRootFs({ realpath: async (q) => q, stat: async () => { await held2; throw Object.assign(new Error('no .git'), { code: 'ENOENT' }); }, readFile: async () => { throw Object.assign(new Error('no'), { code: 'ENOENT' }); } });
+    G2._setRootReadMs(5000);
+    const say = []; const log0 = console.log; console.log = (...a) => { say.push(a.join(' ')); };
+    let pend = null, real = null, again = null;
+    try {
+      pend = G2.refuseOwnerWrite();   // the read just started: «not judged yet»
+      const saidPend = say.length;
+      rel2();
+      for (let i = 0; i < 500 && G2.rootReadStats().ended < 1; i++) await new Promise((r) => setImmediate(r));
+      real = G2.refuseOwnerWrite(); again = G2.refuseOwnerWrite();
+      console.log = log0;
+      console.log(`  (the latch: pending ${pend && pend.pending ? 'refusal (pending)' : JSON.stringify(pend)} said ${saidPend}×; then the landed verdict ${real ? real.kind : 'ok'} — the journal said ${say.length} line(s): ${say.map((x) => '«' + x.slice(0, 80) + '»').join(' ')})`);
+      ok(!!pend && pend.pending === true && saidPend === 0 && (!real || say.length === 1), 'B-1425 r827: a «not judged yet» refusal is never journaled (the once-a-boot line is kept for the real verdict, said once)', { pend, real, say });
+    } finally { console.log = log0; }
+  }
+  // the BOOT WITH FACTS THAT NEVER COME: the watch's sync over a held read — the owner notice names the late fact, the re-judge finds
+  // the read still out (no second read, no pile of timers), and nothing is registered
+  {
+    let rel3 = null; const held3 = new Promise((r) => { rel3 = r; });
+    const G3 = Gm.create({ rootDir: R8, port: 0 });
+    G3._setRootFs({ realpath: async (q) => q, stat: async () => { await held3; throw Object.assign(new Error('no .git'), { code: 'ENOENT' }); }, readFile: async () => { throw Object.assign(new Error('no'), { code: 'ENOENT' }); } });
+    G3._setRootReadMs(30);
+    const notes = [], timers = [];
+    const log0 = console.log; console.log = () => { };
+    const W3 = HW.create({ dataDir: path.join(R8, 'w3'), ensureAgentHooks: G3.ensureAgentHooks, rootRecovery: G3.rootRecovery, ownerWriteRefusal: G3.ownerWriteRefusal, factsNow: G3.rootFactsNow, serverNotice: (key, text) => { notes.push(`${key}: ${text}`); return 1; }, setTimer: (fn) => { timers.push(fn); return { unref() { } }; }, log: () => { } });
+    fs.mkdirSync(path.join(R8, 'w3'), { recursive: true });
+    try {
+      await G3.rootFactsNow();   // the boot's await: past the deadline, the named late fact
+      const r1 = W3.sync();
+      const t1 = timers.length;
+      timers.shift()();   // the first re-judge: it awaits the facts (still out), then syncs again
+      for (let i = 0; i < 50 && timers.length < 1; i++) await new Promise((r) => setImmediate(r));
+      const st3 = G3.rootReadStats();
+      console.log = log0;
+      console.log(`  (the boot with facts that never come: the sync ${r1 && r1.refused ? r1.refused.kind : JSON.stringify(r1)}; notices ${JSON.stringify(notes.map((x) => x.slice(0, 120)))}; timers armed ${t1} then ${timers.length}; reads ${JSON.stringify(st3)})`);
+      ok(!!r1 && r1.skipped === true && r1.refused && r1.refused.kind === 'unknown' && notes.length === 1 && /did not answer in/.test(notes[0]) && t1 === 1 && timers.length === 1 && st3.started === 1 && st3.inFlight === true,
+        'B-1425 r827: a BOOT whose facts never come registers nothing, posts ONE owner notice naming the late fact, and its re-judge (one timer at a time) starts NO second read', { r1, notes, t1, timers: timers.length, st3 });
+    } finally { console.log = log0; rel3(); }
+  }
+  // r827 THE MUST — the person's CLI index at listen. Its role is fixed for the WHOLE run from the owner verdict it is handed
+  // (src/server/local-index.js: `owner.kind` ⇒ a throwaway, placed under the hub's own root, the person's CLI not installed)
+  {
+    const LIsrc = read('src/server/local-index.js');
+    ok(/const role = throwaway \? \(typeof throwaway === 'string' \? throwaway : 'tmp'\) : owner && owner\.kind \? String\(owner\.kind\) : false;/.test(LIsrc),
+      'B-1425 r827: the index takes ANY owner kind as its role for the run (the rule the scene below reads)');
+    waits.push(['the person\'s CLI index at listen (server.js)', /\n  rootFactsNow\(\)\.then\(\(\) => \{ try \{ require\('\.\/src\/server\/local-index\.js'\)\.configure\(\{[^\n]*owner: \(\(\) => \{ try \{ return ownerWriteRefusal\(\); \}/.test(srv8)]);
+    ok(waits[waits.length - 1][1], 'B-1425 r827: the index\'s configure at listen is among the roads that WAIT (rootFactsNow first, then the owner verdict)');
+    let rel9 = null; const held9 = new Promise((r) => { rel9 = r; });
+    const G9 = Gm.create({ rootDir: R8, port: 0 });
+    G9._setRootFs({ realpath: async (q) => q, stat: async () => { await held9; throw Object.assign(new Error('no .git'), { code: 'ENOENT' }); }, readFile: async () => { throw Object.assign(new Error('no'), { code: 'ENOENT' }); } });
+    G9._setRootReadMs(5000);
+    const roleOf = (owner) => (owner && owner.kind ? String(owner.kind) : false);   // the index's own rule, as pinned above
+    // THE SCENE (r827): no live conversation, the listen fires before the first read lands — THE RELEASE'S ROAD reads the verdict
+    // synchronously there: RED — «not judged yet» would be the index's role for the whole run
+    G9.rootVerdict();   // the boot's first read is out (rootFactsNow at the top of the boot)
+    const sync9 = G9.ownerWriteRefusal();
+    // THE CURE'S ROAD: the listen awaits the facts, then reads the verdict
+    let settled9 = null; const p9 = G9.rootFactsNow().then(() => { settled9 = G9.ownerWriteRefusal(); return settled9; });
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+    const beforeLand = settled9;
+    rel9();
+    const landed9 = await p9;
+    console.log(`  (r827's scene, the first read held: the release's synchronous read at listen ⇒ ${JSON.stringify(sync9 && { kind: sync9.kind, pending: !!sync9.pending })} — the index's role would be «${roleOf(sync9)}» for the run; the waiting road while held: ${beforeLand === null ? 'not answered yet' : JSON.stringify(beforeLand)}; once landed: ${landed9 ? `${landed9.kind}${landed9.pending ? ' (pending)' : ''}` : 'no refusal (a checkout)'})`);
+    ok(!!sync9 && sync9.kind === 'unknown' && sync9.pending === true && roleOf(sync9) === 'unknown', 'B-1425 r827 RED (the release\'s road): the synchronous read at listen, the first read not landed, hands the index «not judged yet» — its role would be «unknown» for the whole run', sync9);
+    ok(beforeLand === null && (!landed9 || (landed9.pending !== true && landed9.kind !== 'unknown')), 'B-1425 r827: the cure\'s road does not answer while the first read is held, and once it lands the index is handed the LANDED verdict — never «not judged yet»', { beforeLand, landed9 });
+    // a read that never answers inside the bound: the index gets the NAMED late fact (a real unknown), never «not yet»
+    const G10 = Gm.create({ rootDir: R8, port: 0 });
+    G10._setRootFs({ realpath: async (q) => q, stat: () => new Promise(() => { }), readFile: async () => { throw new Error('no'); } });
+    G10._setRootReadMs(30);
+    const late10 = await G10.rootFactsNow().then(() => G10.ownerWriteRefusal());
+    console.log(`  (a first read that never answers: the index is handed ${JSON.stringify(late10 && { kind: late10.kind, pending: !!late10.pending, why: String(late10.why).slice(0, 90) })})`);
+    ok(!!late10 && late10.kind === 'unknown' && late10.pending !== true && /did not answer in/.test(late10.why), 'B-1425 r827: a first read past the bound hands the index the NAMED late fact (a real unknown, said) — never «not judged yet»', late10);
+  }
   clearInterval(keep8);
 }
 

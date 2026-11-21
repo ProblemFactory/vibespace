@@ -59,7 +59,7 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
 
   /** POST /api/cli-config/apply — the "Apply" a missing-file chip offers (human-triggered). */
   function registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe, rootFactsNow = null }) {
-    app.post('/api/cli-config/apply', async (req, res) => {
+    app.post('/api/cli-config/apply', async (req, res) => { try {   // B-1425: an async route answers a throw (500), never hangs
       if (typeof rootFactsNow === 'function') await rootFactsNow();   // B-1425: the root's true facts first (off the loop, bounded)
       if (!hookRegistrationSafe()) return res.status(409).json({ error: 'This server runs from a temporary directory and never writes the real CLI config.', code: 'unsafe_root' });
       let hooks = null;
@@ -75,7 +75,7 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
         ...(cfg && cfg.error ? [cfg.error] : []),
       ];
       res.json({ ok: !failed.length, ...(failed.length ? { error: failed.join('; ') } : {}), hooks, cliConfig: harnessConfig.cliConfigStatus(), status: agentHooksStatus() });
-    });
+    } catch (e) { if (!res.headersSent) res.status(500).json({ error: String((e && e.message) || e) }); } });
   }
 
   return { noteCreated, ready, registerApplyRoute, _pending: () => pending.slice(), _told: () => [...told] };

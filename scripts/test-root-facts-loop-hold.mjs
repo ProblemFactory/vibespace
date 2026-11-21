@@ -81,7 +81,14 @@ const pingDuring = () => new Promise((resolve) => {
   let out = ''; p.stdout.on('data', (d) => { out += d; }); p.on('exit', () => { kids.delete(p); resolve(out.trim()); });
 });
 // THE WRITER: the other end of the FIFO, opened at RELEASE_MS (it ends itself after it wrote; its own deadline bounds it)
-const releaseAt = (fifo, ms) => { const w = spawn(process.execPath, ['-e', `setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(fifo)}, 'not a gitdir line\\n'); process.exit(0); }, ${ms});`], { stdio: 'ignore', timeout: 15000 }); kids.add(w); w.on('exit', () => kids.delete(w)); return w; };
+// (r827) A SECOND, INDEPENDENT RELEASER: another writer that opens the other end 5 s later, on its own clock. If the first writer ever fails — a parent's spawn
+// timeout cannot fire while the red control blocks this loop — the hold still ends; unneeded, it waits in its open() and is ended with
+// the suite's other children (by the pid held)
+const releaseAt = (fifo, ms) => {
+  const w = spawn(process.execPath, ['-e', `setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(fifo)}, 'not a gitdir line\\n'); process.exit(0); }, ${ms});`], { stdio: 'ignore', timeout: 15000 }); kids.add(w); w.on('exit', () => kids.delete(w));
+  const belt = spawn(process.execPath, ['-e', `setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(fifo)}, 'not a gitdir line\\n'); process.exit(0); }, 5000);`], { stdio: 'ignore' }); kids.add(belt); belt.on('exit', () => kids.delete(belt));   // its own timer, one process
+  return w;
+};
 const rootWithFifo = (tag) => { const r = path.join(tmp, tag); fs.mkdirSync(path.join(r, 'data'), { recursive: true }); execFileSync('mkfifo', [path.join(r, '.git')]); return r; };
 // one measured span: the control beside it, the clock's gaps inside it judged
 const measure = async (tag, fn) => {

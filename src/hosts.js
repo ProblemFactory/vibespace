@@ -1868,6 +1868,7 @@ class HostManager {
    *  (grep in the remote's own settings), node availability, keeper session
    *  files. Read-only probe. */
   async agentToolsStatus(id) {
+    if (typeof this.rootFactsNow === 'function') await this.rootFactsNow();   // B-1425 (r827): the status reads the root's true facts
     const h = this.get(id);
     const agentNode = await this._agentNodeOf(h);   // B-b83c: a dial device's own node (its hello said it); none ⇒ the release's text
     const probe = REMOTE_PRELUDE
@@ -2177,6 +2178,10 @@ class HostManager {
    *  files are left alone (running sessions own them); NOTE a future remote
    *  session spawn re-installs everything by design (per-spawn distribution). */
   async uninstallAgentTools(id) {
+    if (typeof this.rootFactsNow === 'function') await this.rootFactsNow();   // B-1425 (r827): the root's true facts first
+    // an UNKNOWN root (unread, or a read that never answered) is refused BY NAME — never a half uninstall that removes the tools
+    // (the register helper with them) and skips the machine's hook strip, so every hook call there would fail
+    { const r = this._ownerWriteRefusal(); if (r && r.kind === 'unknown') throw Object.assign(new Error(`the agent tools were not removed: ${r.why}`), { code: 'root_unknown' }); }
     const h = this.get(id);
     const rms = HostManager.agentTools().map((n) => `"$HOME/.vibespace/bin/${n}"`).join(' ');
     // plugin shims of plugins disabled/uninstalled since the last ship are not

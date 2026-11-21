@@ -619,6 +619,7 @@ function rootVerdict() {
     home: f.home || os.homedir(),
   });
   if (!v.ok && v.kind === 'unknown' && !f.pending) _lastRootError = { at: t, error: f.error || v.why };   // «not read yet» is no read error
+  if (f.pending) v.pending = true;   // r827: the refusal says it is «not judged yet» (the journal's once-a-boot line is never spent on it)
   return v;
 }
 /** B-1425 suite seams: the reader's file calls, its deadline, and what it started / finished. */
@@ -632,14 +633,15 @@ function rootRecovery() { return { lastError: _lastRootError, registeredAfterErr
 function ownerWriteRefusal() {
   const v = rootVerdict();
   if (v.ok) return null;
-  return { kind: v.kind, why: v.why, ...(v.checkout ? { checkout: v.checkout } : {}), line: serverRoot.refusalLine(v) };
+  return { kind: v.kind, why: v.why, ...(v.checkout ? { checkout: v.checkout } : {}), ...(v.pending ? { pending: true } : {}), line: serverRoot.refusalLine(v) };
 }
 // EVERY owner-config writer asks this first. ONE journal line per boot (the
 // first refused writer says it; the status surfaces carry it after that).
-let _refusalSaid = false;
+let _refusalSaid = null;   // r827: the refusal last said (kind + why) — a pending one never; a NEW refusal (the read landed: a worktree) is said once
 function refuseOwnerWrite() {
   const r = ownerWriteRefusal();
-  if (r && !_refusalSaid) { _refusalSaid = true; console.log(r.line); }
+  const k = r && !r.pending ? `${r.kind}|${r.why}` : null;
+  if (k && _refusalSaid !== k) { _refusalSaid = k; console.log(r.line); }
   return r;
 }
 function hookRegistrationSafe() { return rootVerdict().ok; }
