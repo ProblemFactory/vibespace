@@ -1814,7 +1814,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // B-ddf3 unit 2 line 1 (the coordinator's r1407 (b)): a write that moves a CLI-config row (or the Integration switch) is
   // answered at the LANDING of the shipped helper's run on this machine — or told BY NAME that it did not land (refused,
   // failed, or still writing past the bound: the landing still comes and is journalled). Never «applied» before it.
-  let _landing = null;
+  var _landing = null;   // (var: a write during setup, before this line runs, meets no TDZ)
   const LANDING_BOUND_MS = 10000;
   function answerAtLanding(res, body) {
     const p = _landing; _landing = null;
