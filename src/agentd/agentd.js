@@ -941,12 +941,14 @@ function log(msg) {
 // via /proc cmdline (linux) or ps (macOS) is equivalent for our scope)
 let blockingPid = null; // set when a live sibling daemon holds the lock
 let lockExitArmed = false;
+// B-27e8 (r569): another agent's lock is EMPTY for the instant between its open and its write — an empty lock younger than this is
+// that agent's (refused); an older one is stale (its write failed: ENOSPC)
+const LOCK_EMPTY_GRACE_MS = 5000;
 function acquireSingleton() {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = fs.openSync(LOCK, 'wx');
-      fs.writeSync(fd, String(process.pid));
-      fs.closeSync(fd);
+      try { fs.writeSync(fd, String(process.pid)); } finally { fs.closeSync(fd); }   // B-27e8 (ALSO CURED): a write that fails (ENOSPC) still closes its descriptor
       // B-147f (round w59hqoiqb, MUST 3): the exit removes the lock ONLY while it still names this process — an exit 75 of a stay that
       // found another agent's lock never unlinks THAT agent's (a fourth start would run beside it). A pid names one live process: a
       // lock naming this pid while it lives is its own (one naming it from before is removed above, before the write). Armed ONCE —
@@ -956,6 +958,11 @@ function acquireSingleton() {
     } catch {
       try {
         const pid = Number(fs.readFileSync(LOCK, 'utf-8').trim());
+        // B-27e8 (r569, older than B-147f): a lock that names NO process — EMPTY (its open succeeded, its write failed: ENOSPC) or not a
+        // number — was read as pid 0, and process.kill(0, 0) SUCCEEDS (it signals this process's own group): «alive, a genuine second
+        // instance», and every later start was refused for good. A number that is not above nothing is STALE once the lock is older
+        // than a write's moment (LOCK_EMPTY_GRACE_MS); younger, it is another agent's open before its write — refused, as it was
+        if (!(pid > 0)) { let age = 0; try { age = Date.now() - fs.statSync(LOCK).mtimeMs; } catch { } if (age >= LOCK_EMPTY_GRACE_MS) { fs.unlinkSync(LOCK); continue; } return false; }
         // A LOCK THAT NAMES THIS PROCESS IS STALE BY DEFINITION (主开发 2026-11-17): this agent has not written it yet. A
         // previous agent died without its exit handler — a container killed while the lock lives on the home volume, whose
         // fresh process table hands the new agent THE SAME pid; a reboot that repeats the number — and the check below read

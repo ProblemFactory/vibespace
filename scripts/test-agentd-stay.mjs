@@ -17,9 +17,9 @@
 //    handler: it is removed.
 // Each RED is the built bundle with ONE edit (each said applied). Every wait is bounded on what happened, and the laws are waited
 // for TOGETHER: a red's window is the green's own road (the at-once re-dial, the dial's 1 s first backoff) plus a margin.
-// NOT RUN here (read only; row B-27e8): a listening server's later error after a stay (serverFatal, as at the boot), a successor
-// start that fails with EMFILE inside a real daemon (this drives ENOENT; test-hub-start-failures ④m drives the full table
-// in-process), the pipe conversation's real start.
+// NOT RUN here, run ELSEWHERE (row B-27e8): a listening server's later error after a stay, a successor start that fails with EMFILE
+// inside a real daemon and a third process in the stay's window — scripts/test-agentd-stay-window.mjs; the pipe conversation's real
+// start and a lock that names no process — scripts/test-agentd-debts.mjs.
 // Run: node scripts/test-agentd-stay.mjs
 import fs from 'node:fs';
 import os from 'node:os';
