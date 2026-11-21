@@ -208,8 +208,11 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
     ok('B-99b9 the ssh rung runs the script under PLAIN sh (`exec sh -c …`), never the login shell\'s prelude', runs.length > 0 && runs.every((r) => r.plain), runs.filter((r) => !r.plain).length);
   } finally {
     await sleep(80);
-    for (const pid of planted()) { if (alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } }   // this leg's own stalls, known by their pid file and their sleep
-    const end = Date.now() + 3000; while (planted().some(alive) && Date.now() < end) await sleep(30);
+    // this leg's own stalls, known by their pid file and their sleep — killed at EVERY pass of the wait (B-1217: a stall a late background
+    // run plants after a single kill pass lived out the wait on a loaded box; each pass now ends what is planted by then)
+    const killPlanted = () => { for (const pid of planted()) { if (alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } } };
+    killPlanted();
+    const end = Date.now() + 3000; while (planted().some(alive) && Date.now() < end) { await sleep(30); killPlanted(); }
     ok('B-99b9 the leg ends its own planted stalls (none left)', !planted().some(alive), planted().filter(alive));
   }
 }
