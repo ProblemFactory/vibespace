@@ -619,6 +619,24 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const srr = SR ? await hush(() => SR.api.refreshViaCliPanel(SR.V)) : { v: null };
   const srSt = SR && SR.stamp(), srOwn = SR && SR.own();
   ok('B-6a92 RED CONTROL (r5\'s door, no verdict): the folder signed in as Orin lifts — Vela stamped on Orin\'s window and the panel\'s numbers written on Vela as verified', !!SR && srr.v === true && !!(srSt && srSt.sevenDay === roP) && !!(srOwn && srOwn.sevenDay && srOwn.sevenDay.utilization === 0.12), { v: srr.v, srSt, own: srOwn && srOwn.sevenDay });
+  // THE r8 MUST (round weorx6iw2): VELA AND ORIN ARE TWO SEATS OF ONE TEAM ORGANISATION (one organisation, two addresses), neither
+  // cache naming it — the group reads two accounts. Vela is held naming Orin; signed in rightly, its own read LIFTS (proven
+  // stands before the hit: a reply that IS the row's own identity is never another account's)
+  const TEAMV = { email: 'mail-vela-0001', org: 'org-team-0001' }, TEAMO = { email: 'mail-orin-0001', org: 'org-team-0001' };   // invented
+  const TSW = held(realEng, { ro: roP, cli: binHeld, logins: { V: TEAMV, O: TEAMO } });
+  await run6(TSW);
+  const tsBefore = sideOf(TSW.usage(), TSW.V);
+  const tsr = await hush(() => TSW.api.refreshViaCliPanel(TSW.V));
+  ok('B-6a92 THE r8 MUST: two seats of one Team organisation, Vela held naming Orin — Vela\'s honest own read lifts (stamped by its own read, written, the row no longer «unknown»)', !!(tsBefore && tsBefore.otherNames[0] === 'Orin') && tsr.v === true && (TSW.stamp() || {}).sevenDay === roP && !sideOf(TSW.usage(), TSW.V), { tsBefore, v: tsr.v, st: TSW.stamp(), why: wordsOf(TSW) });
+  // RED CONTROL: r8's verdict order (the hit, by organisation first, before the proof) — the honest seat refused «signed in as Orin»
+  const RLF0 = 'src/reading-lag.js', rlsrc0 = read(RLF0), PROVEN0 = "  if (proven) return !liftable ? { act: 'none' } : onHeld ? { act: 'lift' } : { act: 'own' };";
+  const R8HIT0 = "  if (rowKey && answer) { const k = (l) => (l && l.org ? 'org:' + String(l.org).toLowerCase() : l && l.email ? 'email:' + String(l.email).trim().toLowerCase() : null); const hit = others.filter((h) => k(h.login) && k(h.login) === k(answer)); if (hit.length) return { act: 'refuse', code: 'signed-in-as', names: hit.map((h) => h.name) }; }\n";
+  const rlHitPath = rlsrc0.includes(PROVEN0) ? MUT.write(RLF0, rlsrc0.split(PROVEN0).join(R8HIT0 + PROVEN0), 'b6a92-world-hit-before-proven') : null;
+  const mSeat = rlHitPath && esrc.includes(VCALL) ? require(MUT.write(ENG, esrc.split(VCALL).join(`    const v = require(${J(rlHitPath)}).heldLiftVerdict(heldLiftFacts(key, idv, h));`), 'b6a92-engine-r8-order')) : null;
+  const TSR = mSeat ? held(mSeat, { ro: roP, cli: binHeld, logins: { V: TEAMV, O: TEAMO } }) : null;
+  if (TSR) await run6(TSR);
+  const tsrr = TSR ? await hush(() => TSR.api.refreshViaCliPanel(TSR.V)) : { v: null };
+  ok('B-6a92 RED CONTROL (r8\'s order, the hit before the proof): the honest seat is refused «signed in as Orin» and stays «unknown»', !!TSR && tsrr.v === false && /Vela's sign-in folder is signed in as Orin/.test(wordsOf(TSR)) && !!sideOf(TSR.usage(), TSR.V), { v: tsrr.v, why: TSR && wordsOf(TSR) });
   // BOUND 1 (r890): Vela's cache names NO organisation and its folder holds Orin's login — by the group Vela IS Orin's account under
   // a second name (one quota in the pool), so no hold forms: its window follows its readings and nothing reads «unknown»
   const M = held(realEng, { ro: roP, cli: binHeld, logins: { V: ORIN, O: ORIN } });
@@ -661,8 +679,8 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   ok('B-6a92 THE DOOR, Vela (its own organisation on file) with its folder holding the hub\'s login: refused by the hub\'s label — nothing written, the hold standing, no identity value', gsr.v === false && (GS.stamp() || {}).sevenDay === GS.RV && !!sideOf(GS.usage(), GS.V) && /Vela's sign-in folder is signed in as this machine's own login \(CLI login\)/.test(gsWhy) && noId(gsWhy), { v: gsr.v, why: gsWhy });
   // RED CONTROL: the folder-only read (r6's form: every held name from its pool folder) — the hub's own login has none, so the
   // refusal can no longer NAME it (another code, not the hub's label)
-  const ONE = "  const held = h.names.map((n) => ({ name: n, inGroup: group.has(n), login: asLogin((() => { try { return probeLog.loginOfAccount(n, { accounts }); } catch { return null; } })()) }));";
-  const FOLDER = "  const held = h.names.map((n) => ({ name: n, inGroup: group.has(n), login: asLogin((() => { try { return probeLog.machineOauthAccount(accounts.subDir(n)); } catch { return null; } })()) }));";
+  const ONE = "loginOf: (n) => probeLog.loginOfAccount(n, { accounts })";
+  const FOLDER = "loginOf: (n) => probeLog.machineOauthAccount(accounts.subDir(n))";
   const mFolder = esrc.includes(ONE) ? require(MUT.write(ENG, esrc.split(ONE).join(FOLDER), 'b6a92-folder-only')) : null;
   const GR2 = mFolder ? held(mFolder, { ro: roP, cli: binHeld, logins: { V: GLOBAL, O: ORIN }, withGlobal: true, rowOrg: VELA.org }) : null;
   if (GR2) await run6(GR2);
@@ -718,86 +736,133 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const planted = loginCensus({ [ENG]: esrc.split(ONE).join(FOLDER) });
   const plantedBare = loginCensus({ 'src/usage-routes.js': read('src/usage-routes.js').replace('  const expected = probeLog.loginOfAccount(', '  const homeAgain = probeLog.machineOauthAccount(); void homeAgain;\n  const expected = probeLog.loginOfAccount(') });
   ok('B-6a92 RED CONTROL (the census): a planted second reader (a held name read from its pool folder by hand) is red BY NAME, and so is a second read of the home\'s login in the route', planted.length === 1 && planted[0] === 'src/server/usage-pool-engine.js › accounts.subDir(n)' && plantedBare.length === 1 && plantedBare[0] === 'src/usage-routes.js › (none)', { planted, plantedBare });
-  // ── THE WHOLE TABLE (主开发 r873 item 3), GENERATED, against an ORACLE written from the law alone ─────────────────────────────
-  // The fixture knows which vendor account every name truly is (letters); the facts are built as the engine gathers them (the
-  // group's keys, the one reader's logins, the panel's verdict); the oracle reads the LAW over the letters:
-  //   «the account a row is» = what the group says (its organisation · else its folder's login · else its declared address);
-  //   the row's own account under any name (its group, or a login that is it) is never «another»; another account's window
-  //   reaches a row ONLY by that row's own proven read; an answer that IS a held other account's is refused naming it; unknown
-  //   never lifts. Every refusal's remedy (reading-lag HELD_REFUSALS) is applied and must lead to the state it names.
+  // ── THE TABLE (r9, 主开发 r975): THE GENERATOR KNOWS THE TRUTH; THE ORACLE IS THE LAW IN PLAIN SENTENCES ─────────────────────
+  // Every world has TRUE accounts (letters) apart from the facts the product can see of them, drawn FREELY by a seeded generator:
+  // an organisation of its own or one SHARED with another account (seats of a Team); a login carrying both an organisation and an
+  // address, only one, or nothing readable; a cache that names its organisation or not, for the row AND every other name; the
+  // reply naming the row's account, a pool-mate's, the hub's, a stranger's, or nobody; a panel with or without its window witness.
+  // The facts go through THE ENGINE'S OWN FACT BUILDER (usage-pool-engine heldLiftFactsOf, groupKeyOf) and the verdict; the
+  // oracle is a list of laws over the truth — never the verdict's branches.
   const RL = require(path.join(REPO, 'src/reading-lag.js'));
-  const LOG = (acct) => ({ org: 'org-' + acct.toLowerCase() + '-0001', email: 'mail-' + acct.toLowerCase() + '-0001' });
-  const NAMES = {   // a held name: its true account · its cache's organisation (the group's key) · whether its login can be read
-    'H=A merged': { name: '__global__', acct: 'A', cacheOrg: 'A', readable: true },
-    'H=A apart': { name: '__global__', acct: 'A', cacheOrg: null, readable: true },
-    'H=C': { name: '__global__', acct: 'C', cacheOrg: 'C', readable: true },
-    A2: { name: 'acct-a2', acct: 'A', cacheOrg: 'A', readable: true },
-    B: { name: 'acct-b', acct: 'B', cacheOrg: 'B', readable: true },
-    U: { name: 'acct-u', acct: 'D', cacheOrg: null, readable: false },
+  const { heldLiftFactsOf, groupKeyOf } = realEng;
+  const HELDW = 1_800_000_000, OWNW = HELDW - 3 * 86400;   // the held window · the row's own (any two phases apart)
+  const rngOf = (seed) => { let a = seed | 0; return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+  const genWorlds = ({ seed, n, blind = false }) => {
+    const rnd = rngOf(seed), pick = (xs) => xs[Math.floor(rnd() * xs.length)];
+    const worlds = [];
+    for (let i = 0; i < n; i++) {
+      // THE TRUTH: R the row's account, S a seat-mate (shares R's organisation when R is a Team seat), P another account, X a
+      // stranger never in the pool; the hub's own login is one of them
+      const team = blind ? false : rnd() < 0.5;
+      const ORG = { R: team ? 'team' : 'r', S: 'team', P: 'p', X: 'x' };
+      const acct = (L) => ({ org: 'org-' + ORG[L] + '-0001', email: 'mail-' + L.toLowerCase() + '-0001' });   // invented, opaque
+      const hub = pick(['R', 'S', 'P', 'X']);
+      const TRUE = { vela: 'R', vela2: 'R', seat: 'S', other: 'P', __global__: hub, ghost: pick(['S', 'P']) };
+      const fieldsOf = () => (blind ? 'both' : pick(['both', 'org', 'email']));
+      const show = (L, f) => (L && f ? { orgUuid: f !== 'email' ? acct(L).org : null, email: f !== 'org' ? acct(L).email : null } : null);
+      const cands = ['seat', 'other', '__global__', 'vela2', 'ghost'];
+      const first = pick(cands), second = rnd() < 0.4 ? pick(cands.filter((c) => c !== first)) : null;
+      const held = second ? [first, second] : [first];
+      const folderL = pick(['R', 'S', 'P', 'H', 'X', null]), folderTrue = folderL === 'H' ? hub : folderL;
+      const folder = folderTrue ? show(folderTrue, fieldsOf()) : null;
+      // each name's own facts: its folder's login (the ghost's never readable) and whether its cache names its organisation
+      const login = {}, cacheOrg = {};
+      for (const n of ['vela2', 'seat', 'other', 'ghost']) { login[n] = n === 'ghost' ? null : (rnd() < (blind ? 0 : 0.15) ? null : show(TRUE[n], fieldsOf())); cacheOrg[n] = rnd() < 0.5; }
+      login.__global__ = rnd() < (blind ? 0 : 0.15) ? null : show(hub, fieldsOf()); cacheOrg.__global__ = rnd() < 0.5;
+      const rowCacheOrg = rnd() < 0.5, declared = rnd() < 0.3 ? acct('R').email : null;
+      const replyL = pick(['folder', 'R', 'S', 'P', 'H', 'X']), replyTrue = replyL === 'folder' ? null : replyL === 'H' ? hub : replyL;
+      const panelShows = replyTrue ? show(replyTrue, fieldsOf()) : null;
+      const window = pick(['held', 'own']), witness = blind ? true : rnd() < 0.8;
+      worlds.push({ i, team, ORG, acct, TRUE, held, folderTrue, folder, login, cacheOrg, rowCacheOrg, declared, replyTrue, panelShows, window, witness });
+    }
+    return worlds;
   };
-  const HS = ['H=A merged', 'H=A apart', 'H=C'], REST = ['A2', 'B', 'U'];
-  const HELD_SETS = [...HS.map((x) => [x]), ...REST.map((x) => [x]), ...HS.flatMap((x) => REST.map((y) => [x, y])), ['A2', 'B'], ['A2', 'U'], ['B', 'U']];
-  const cases = [];
-  for (const held0 of HELD_SETS) for (const rowId of ['org', 'declared', 'none']) for (const folder of ['A', 'B', 'hub', 'unreadable']) for (const panelNames of ['A', 'B', null]) for (const window of ['held', 'own']) {
-    const hub = held0.find((x) => x.startsWith('H')), folderAcct = folder === 'unreadable' ? null : folder === 'hub' ? (hub ? NAMES[hub].acct : 'C') : folder;
-    cases.push({ held: held0, rowId, folder, folderAcct, panelNames, window });
-  }
-  const groupKeyOfRow = (c) => (c.rowId === 'org' ? 'org:org-a-0001' : c.folderAcct ? 'email:mail-' + c.folderAcct.toLowerCase() + '-0001' : c.rowId === 'declared' ? 'email:mail-a-0001' : null);
-  const factsOf = (c) => {
-    const rowKey = groupKeyOfRow(c);
-    const held = c.held.map((x) => { const n = NAMES[x], nKey = n.cacheOrg ? 'org:org-' + n.cacheOrg.toLowerCase() + '-0001' : null; return { name: n.name, inGroup: !!rowKey && nKey === rowKey, login: n.readable ? LOG(n.acct) : null }; });
-    const expected = c.folderAcct ? LOG(c.folderAcct) : null, panelIdent = c.panelNames ? LOG(c.panelNames) : null;
-    const org = panelIdent && expected ? (panelIdent.org === expected.org ? 'agree' : 'differ') : 'unknown', phase = c.window === 'held' ? 'differ' : 'agree';
-    const refused = org === 'differ' || phase === 'differ';
-    return { rowKey, held, answer: panelIdent || expected, onHeld: c.window === 'held', panel: { refused, verified: !refused && (org === 'agree' || phase === 'agree'), phase, org } };
+  // THE FACTS a world hands the product — files as the engine would read them, through the ENGINE'S builder
+  const factsOfWorld = (w) => {
+    const recordEmail = (w.folder && w.folder.email) || w.declared || null;   // list(): the folder's address first, the declared one after
+    const rowCache = { fetchedAt: 1, ...(w.rowCacheOrg ? { orgUuid: w.acct(w.TRUE.vela).org } : {}) };
+    const keyOf = (n) => (n === 'vela' ? groupKeyOf({ accountId: 'vela', cache: rowCache, email: recordEmail })
+      : groupKeyOf({ accountId: n === '__global__' ? null : n, cache: { fetchedAt: 1, ...(w.cacheOrg[n] ? { orgUuid: w.acct(w.TRUE[n]).org } : {}) }, email: n === '__global__' ? undefined : ((w.login[n] && w.login[n].email) || undefined) }));
+    const rk = keyOf('vela'), groupIds = ['vela', ...['vela2', 'seat', 'other', 'ghost', '__global__'].filter((n) => keyOf(n) === rk)];
+    const expected = w.folder, panelIdent = w.panelShows || { orgUuid: null, email: null };
+    const cmp = (a, b, f) => (a && b && a[f] && b[f] ? (a[f] === b[f] ? 'agree' : 'differ') : null);
+    const org = cmp(expected, w.panelShows, 'orgUuid') || cmp(expected, w.panelShows, 'email') || 'unknown';
+    const phase = w.witness ? (w.window === 'held' ? 'differ' : 'agree') : 'unknown';
+    const refused = org === 'differ' || phase === 'differ', verified = !refused && (org === 'agree' || phase === 'agree');
+    const idv = { panel: panelIdent, expected, panelWindow: { sevenDay: w.window === 'held' ? HELDW : OWNW, scoped: {} }, refused, verified, phase, org };
+    return heldLiftFactsOf({ key: 'vela', idv, h: { names: w.held, phase: HELDW }, sameAccountIds: groupIds, rowCache, rowEmail: recordEmail, loginOf: (n) => w.login[n] || null });
   };
-  const oracle = (c) => {
-    const rowAcct = c.rowId === 'org' ? 'A' : c.folderAcct || (c.rowId === 'declared' ? 'A' : null);
-    const isRow = (x) => !!rowAcct && NAMES[x].acct === rowAcct && (NAMES[x].readable || (c.rowId === 'org' && NAMES[x].cacheOrg === 'A'));
-    const others = c.held.filter((x) => !isRow(x));
-    const answerAcct = c.panelNames || c.folderAcct || null;
-    const orgDiffer = !!(c.panelNames && c.folderAcct && c.panelNames !== c.folderAcct);
-    const proven = !!rowAcct && answerAcct === rowAcct;
-    if (!others.length) return c.window === 'held' && !orgDiffer && proven ? { act: 'lift' } : { act: 'unhold' };
-    if (orgDiffer) return { act: 'none' };
-    const theirs = others.filter((x) => NAMES[x].readable && NAMES[x].acct === answerAcct);
-    if (rowAcct && answerAcct && theirs.length) return { act: 'refuse', code: 'signed-in-as', names: theirs.map((x) => NAMES[x].name) };
-    if (c.window === 'own') return proven ? { act: 'own' } : { act: 'none' };
-    const names = others.map((x) => NAMES[x].name);
-    if (!rowAcct) return { act: 'refuse', code: 'row-unknown', names };
-    if (!answerAcct) return { act: 'refuse', code: 'answer-unnamed', names };
-    if (!proven) return { act: 'refuse', code: 'other-answered', names };
-    return { act: 'lift' };
+  // THE LAWS, over the truth (never the verdict's branches):
+  const lawsOf = (w, v) => {
+    const A = w.acct, broken = [];
+    // «the account a row is» = what its group says (r890): its organisation on file (every account of that organisation), else
+    // its record's address (the folder's, else the declared one), else nothing
+    const recordEmail = (w.folder && w.folder.email) || w.declared || null;
+    const rowSet = w.rowCacheOrg ? ['R', 'S', 'P', 'X'].filter((L) => A(L).org === A('R').org) : recordEmail ? ['R', 'S', 'P', 'X'].filter((L) => A(L).email === recordEmail) : [];
+    const inRow = (L) => !!L && rowSet.includes(L);
+    const reply = w.replyTrue || w.folderTrue || null;                   // who truly answered
+    const shown = w.panelShows || w.folder;                               // what the reply shows of itself
+    const shownOwn = w.rowCacheOrg ? !!(shown && shown.orgUuid === A('R').org) : !!(recordEmail && shown && shown.email === recordEmail);
+    const shownNotOwn = w.rowCacheOrg ? !!(shown && shown.orgUuid && shown.orgUuid !== A('R').org) : !!(recordEmail && shown && shown.email && shown.email !== recordEmail);
+    const knowsSame = (n) => !!(shown && shown.email && w.login[n] && w.login[n].email && shown.email === w.login[n].email);
+    const shownNotRow = (n) => !!(w.login[n] && (w.rowCacheOrg ? (w.login[n].orgUuid && w.login[n].orgUuid !== A('R').org) : (recordEmail && w.login[n].email && w.login[n].email !== recordEmail)));
+    const orgDiffer = !!(w.folder && w.panelShows && ((w.folder.orgUuid && w.panelShows.orgUuid && w.folder.orgUuid !== w.panelShows.orgUuid) || (!(w.folder.orgUuid && w.panelShows.orgUuid) && w.folder.email && w.panelShows.email && w.folder.email !== w.panelShows.email)));
+    const passes = !orgDiffer;   // the panel's own verdict does not deny the read (its organisations or addresses do not differ)
+    // (a) a reply whose true account is the row's own is never refused as another account's, nor said not to be the row's
+    if (inRow(reply) && v.act === 'refuse' && (v.code === 'signed-in-as' || v.code === 'other-answered')) broken.push('a');
+    // (b) a refusal that NAMES an account names the reply's TRUE account, one not the row's, and only when the facts know it
+    if (v.act === 'refuse' && v.code === 'signed-in-as' && !(v.names || []).every((n) => w.TRUE[n] === reply && !inRow(w.TRUE[n]) && knowsSame(n) && shownNotRow(n))) broken.push('b');
+    // (c) a hold is lifted — or ended as the row's own read — only when the reply's true account is the row's own and the facts show it
+    if ((v.act === 'lift' && !(inRow(reply) && shownOwn && w.window === 'held')) || (v.act === 'own' && !(inRow(reply) && shownOwn && w.window === 'own'))) broken.push('c');
+    // (d) «not the row's» only when the facts show it; a hold ends as «only the row's own names» only when every held name truly is
+    if (v.act === 'refuse' && v.code === 'other-answered' && !(shownNotOwn && !inRow(reply))) broken.push('d');
+    if (v.act === 'unhold' && !w.held.every((n) => inRow(w.TRUE[n]))) broken.push('d2');
+    // (e) THE HONEST ROW IS NEVER STUCK: a reply the facts show to be the row's own, through a panel that does not deny it, in the
+    // held window, lifts; on its own window it ends the hold
+    if (shownOwn && passes && inRow(reply) && w.window === 'held' && v.act !== 'lift') broken.push('e');
+    // (f) THE r6 LAW: the facts know the reply IS a held account that is not the row's — refused, naming it
+    const named = w.held.filter((n) => knowsSame(n) && shownNotRow(n) && !inRow(w.TRUE[n]) && w.TRUE[n] === reply);
+    if (rowSet.length && !orgDiffer && !shownOwn && named.length && !(v.act === 'refuse' && v.code === 'signed-in-as' && named.every((n) => (v.names || []).includes(n)))) broken.push('f');
+    return { broken, cannotTell: !!reply && !shownOwn && !shownNotOwn };
   };
-  const tableRun = (verdict) => {
-    const bad = [], refusing = [], remedyBad = [];
-    for (const c of cases) {
-      const v = verdict(factsOf(c)), o = oracle(c);
-      if (J(v) !== J(o)) bad.push({ c: `${c.held.join('+')} · row ${c.rowId} · folder ${c.folder} · panel ${c.panelNames || '—'} · ${c.window}`, v, o });
+  const tableOf = (verdict, opts) => {
+    const worlds = genWorlds(opts), bad = [], refusing = [], remedyBad = [], cannot = [];
+    const desc = (w) => `#${w.i} ${w.team ? 'team' : 'own-org'} · held ${w.held.map((n) => n + '=' + w.TRUE[n]).join('+')} · row cache ${w.rowCacheOrg ? 'org' : '—'}${w.declared ? ' declared' : ''} · folder ${w.folderTrue || '—'}${w.folder ? '(' + (w.folder.orgUuid ? 'o' : '') + (w.folder.email ? 'e' : '') + ')' : ''} · reply ${w.replyTrue || 'folder'} · ${w.window}${w.witness ? '' : ' no-witness'}`;
+    for (const w of worlds) {
+      const v = verdict(factsOfWorld(w)), L = lawsOf(w, v);
+      if (L.broken.length) bad.push({ w: desc(w), laws: L.broken, v });
+      if (L.cannotTell) cannot.push(desc(w) + ' → ' + v.act + (v.code ? ' ' + v.code : ''));
       if (v.act === 'refuse') {
-        refusing.push(`${v.code}: ${c.held.join('+')} · row ${c.rowId} · folder ${c.folder} · panel ${c.panelNames || '—'} · ${c.window}`);
-        // THE REMEDY COLUMN: «sign the row in again with its own account» — its folder then holds the row's own account (A), and
-        // a panel that named someone names it; the state it leads to: the row's own proven read (a lift on the held window)
+        refusing.push(`${v.code}: ${desc(w)}`);
+        // THE REMEDY COLUMN: «sign the row in again with its own account» — its folder then holds R's login (both fields), the
+        // record's address follows it, a panel that named someone names R; the state it names: the row's own proven read
         const rem = RL.HELD_REFUSALS[v.code] || {};
-        const after = verdict(factsOf({ ...c, folder: 'A', folderAcct: 'A', panelNames: c.panelNames ? 'A' : null }));
-        const okState = c.window === 'held' ? after.act === 'lift' : (after.act === 'own' || after.act === 'unhold');
+        const R = w.acct('R'), signed = { orgUuid: R.org, email: R.email };
+        const w2 = { ...w, folderTrue: 'R', folder: signed, replyTrue: w.replyTrue ? 'R' : null, panelShows: w.replyTrue ? signed : null };
+        const after = verdict(factsOfWorld(w2));
+        const okState = w.window === 'held' ? after.act === 'lift' : (after.act === 'own' || after.act === 'unhold');
         if (!(rem.remedy === 'sign-in-own' && rem.leadsTo === 'proven' && okState)) remedyBad.push({ row: refusing[refusing.length - 1], rem, after });
       }
     }
-    return { bad, refusing, remedyBad };
+    return { worlds, bad, refusing, remedyBad, cannot };
   };
-  const T1 = tableRun(RL.heldLiftVerdict);
+  const SEED = 0x6a92, N = 4000;
+  const T1 = tableOf(RL.heldLiftVerdict, { seed: SEED, n: N });
   const byCode = T1.refusing.reduce((m, r) => { const k = r.split(':')[0]; m[k] = (m[k] || 0) + 1; return m; }, {});
-  console.log(`    THE TABLE: ${cases.length} rows (${HELD_SETS.length} held sets × 3 row identities × 4 folders × 3 panel names × 2 windows) — ${T1.refusing.length} refuse ${J(byCode)}; the refusing rows:`);
+  const reach = { team: T1.worlds.filter((w) => w.team).length, heldHub: T1.worlds.filter((w) => w.held.includes('__global__')).length, seatsHonest: T1.worlds.filter((w) => w.team && w.held.includes('seat') && !w.rowCacheOrg && w.folderTrue === 'R').length, noWitness: T1.worlds.filter((w) => !w.witness).length, onlyOneField: T1.worlds.filter((w) => w.folder && !(w.folder.orgUuid && w.folder.email)).length };
+  console.log(`    THE TABLE: ${T1.worlds.length} worlds (seed ${SEED}) — reach ${J(reach)} — ${T1.refusing.length} refuse ${J(byCode)}; ${T1.cannot.length} where the facts cannot tell the reply's account apart from the row's (printed below, then the refusing rows):`);
+  for (const r of T1.cannot) console.log('      cannot tell: ' + r);
   for (const r of T1.refusing) console.log('      ' + r);
-  ok('B-6a92 THE TABLE: the verdict equals the oracle on EVERY row, and every refusal\'s remedy leads to the row\'s own proven read', T1.bad.length === 0 && T1.remedyBad.length === 0 && T1.refusing.length > 0, { bad: T1.bad.slice(0, 3), n: T1.bad.length, remedyBad: T1.remedyBad.slice(0, 3) });
-  // RED CONTROLS (mutants of the pure verdict): rule 1 taken out (nothing is the row's own); the compare by name (the group's
-  // names only, never the login that IS the row's account)
-  const RLF = 'src/reading-lag.js', rlsrc = read(RLF), OWNV = "  const own = (h) => !!h.inGroup || loginIsKey(h.login, rowKey);";
-  const redOf = (to, tag) => (rlsrc.includes(OWNV) ? tableRun(require(MUT.write(RLF, rlsrc.split(OWNV).join(to), tag)).heldLiftVerdict) : null);
-  const T2 = redOf('  const own = (h) => false;', 'b6a92-table-no-rule1'), T3 = redOf('  const own = (h) => !!h.inGroup;', 'b6a92-table-by-name');
-  ok('B-6a92 RED CONTROL (the table, rule 1 out): rows where the row\'s own account is held now differ from the oracle', !!T2 && T2.bad.length > 0, T2 && { n: T2.bad.length, first: T2.bad[0] });
-  ok('B-6a92 RED CONTROL (the table, the compare by name): rows where the hub\'s login IS the row\'s account apart from its group differ from the oracle', !!T3 && T3.bad.length > 0 && T3.bad.some((b) => b.c.startsWith('H=A apart')), T3 && { n: T3.bad.length, first: T3.bad[0] });
+  ok('B-6a92 THE TABLE: every law holds on every world (a never refused as another\'s when it is the row\'s own · b a name only for the reply\'s true account the facts know · c a lift only for the row\'s own shown read · d «not the row\'s» only when shown · e the honest row never stuck · f the r6 refusal), and every refusal\'s remedy leads to the row\'s own proven read', T1.bad.length === 0 && T1.remedyBad.length === 0 && T1.refusing.length > 0 && Object.values(reach).every((x) => x > 0), { bad: T1.bad.slice(0, 3), n: T1.bad.length, remedyBad: T1.remedyBad.slice(0, 2) });
+  // RED CONTROLS: the hit put back BEFORE proven (r8's verdict) — the Team seats break law a / e; and ONE FIXED DIMENSION put back
+  // (no shared organisation, every login carrying both fields, every witness present: r8's generator) — the same mutant is green
+  // there by blindness: the control proves the generator's reach
+  const RLF = 'src/reading-lag.js', rlsrc = read(RLF), PROVEN = "  if (proven) return !liftable ? { act: 'none' } : onHeld ? { act: 'lift' } : { act: 'own' };";
+  const R8HIT = "  if (rowKey && answer) { const k = (l) => (l && l.org ? 'org:' + String(l.org).toLowerCase() : l && l.email ? 'email:' + String(l.email).trim().toLowerCase() : null); const hit = others.filter((h) => k(h.login) && k(h.login) === k(answer)); if (hit.length) return { act: 'refuse', code: 'signed-in-as', names: hit.map((h) => h.name) }; }\n";
+  const mHit = rlsrc.includes(PROVEN) ? require(MUT.write(RLF, rlsrc.split(PROVEN).join(R8HIT + PROVEN), 'b6a92-hit-before-proven')).heldLiftVerdict : null;
+  const T2 = mHit ? tableOf(mHit, { seed: SEED, n: N }) : null, T3 = mHit ? tableOf(mHit, { seed: SEED, n: N, blind: true }) : null;
+  ok('B-6a92 RED CONTROL (the hit before proven): the free generator finds worlds where an honest seat is refused as its pool-mate', !!T2 && T2.bad.some((b) => b.laws.includes('a') || b.laws.includes('e')), T2 && { n: T2.bad.length, first: T2.bad[0] });
+  ok('B-6a92 RED CONTROL (one fixed dimension put back — r8\'s generator): the same mutant is GREEN there by blindness (the generator\'s reach is what found it)', !!T3 && T3.bad.length === 0, T3 && { n: T3.bad.length, first: T3.bad[0] });
   // …a held row's panel answering a THIRD window is refused (nothing written, the hold stands), and its words say what is true
   const Q = held(realEng, { cli: standIn('claude-panel-third.sh', panelText(hourAt(3 * 86400 + 11 * 3600), 7)) });
   await run6(Q);

@@ -50,7 +50,7 @@ const { normalizeCodexRateLimit } = require(path.join(REPO, 'src/usage-routes.js
   const cxCreds = H.get('codex').creds, clCreds = H.get('claude').creds;
   const codexOwnKey = cxCreds && !cxCreds.legacyGlobalKey && clCreds && clCreds.legacyGlobalKey === '__global__';
   ok('codex identity keys are backend-prefixed (email collision with a claude login must never merge quotas)',
-    /\(ownBe \? ownBe \+ ':' : ''\) \+ identityKeyFor/.test(eng) && /ownBe = gOwner \|\| \(acctRec\?\.backend && globalUsageKey\(acctRec\.backend\) !== '__global__'/.test(eng) && codexOwnKey);
+    /\(ownBe \? ownBe \+ ':' : ''\) \+ require\('\.\.\/usage-anchors\.js'\)\.identityKeyFor/.test(eng) && /groupKeyOf\(\{ accountId, cache, email: acctRec\?\.email, ownBe \}\)/.test(eng) && /ownBe = gOwner \|\| \(acctRec\?\.backend && globalUsageKey\(acctRec\.backend\) !== '__global__'/.test(eng) && codexOwnKey);
   ok("'__global_codex__' is a pseudo id, not a deleted account",
     /const gOwner = globalKeyOwner\(fn\.slice\(0, -5\)\)/.test(eng) && /accountId = \(fn === '__global__\.json' \|\| gOwner\) \? null/.test(eng) && codexOwnKey);
   // usage-predict pick 3: the pool asks each source's own adapter (codex declares no prior), never a name test

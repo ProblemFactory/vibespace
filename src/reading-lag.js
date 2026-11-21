@@ -364,11 +364,12 @@ function isolatedPanelAnchorVerdict({ anchor = null, panelWindow = null, apiWind
 //   onHeld  the answer's weekly window is the held one
 //   panel   {refused, verified, phase, org} — the panel's own identity verdict
 // THE LAW: another account's window reaches a row ONLY by that row's own proven read (the answer IS the row's identity); an
-// answer that IS another held account's is refused, naming that account; unknown never lifts; the row's own account under
-// any name (its group, or a login that is its identity — merged or not) is never «another».
+// answer that IS another held account's is refused, naming that account — only when both logins carry the same address (r9);
+// a reply shown to be the row's own is never «another account's» (r9: proven before the hit); «not the row's» is said only
+// when the facts show it; unknown never lifts and names nobody; the row's own account under any name (its group, or a login
+// that is its identity — merged or not) is never «another».
 // → {act: 'lift'} the held window is the row's own proven read · {act: 'own'} verified on its own window by its own read (the
 //   hold ends) · {act: 'unhold'} no other account is held (the row's own names only) · {act: 'refuse', code, names} · {act: 'none'}
-const loginKeyOf = (l) => (l && l.org ? 'org:' + String(l.org).toLowerCase() : l && l.email ? 'email:' + String(l.email).trim().toLowerCase() : null);
 const loginIsKey = (l, key) => {
   if (!l || typeof key !== 'string') return false;
   if (key.startsWith('org:')) return !!l.org && 'org:' + String(l.org).toLowerCase() === key;
@@ -377,31 +378,42 @@ const loginIsKey = (l, key) => {
 };
 /** Every refusal's remedy and the state it leads to — ONE column (the table leg applies each and checks the state). */
 const HELD_REFUSALS = {
-  'signed-in-as': { remedy: 'sign-in-own', leadsTo: 'proven' },     // the row's folder holds a held account's login
-  'other-answered': { remedy: 'sign-in-own', leadsTo: 'proven' },   // the row's folder holds a login that is not the row's (by its record)
+  'signed-in-as': { remedy: 'sign-in-own', leadsTo: 'proven' },     // the row's folder holds a held account's login (both name the same address)
+  'other-answered': { remedy: 'sign-in-own', leadsTo: 'proven' },   // the login that answered is shown NOT to be the row's (by its record)
+  'cannot-tell': { remedy: 'sign-in-own', leadsTo: 'proven' },      // the login that answered does not carry what the row is known by
   'answer-unnamed': { remedy: 'sign-in-own', leadsTo: 'proven' },   // nothing names whose login answered
   'row-unknown': { remedy: 'sign-in-own', leadsTo: 'proven' },      // nothing on file names which account the row is
 };
+const hasField = (l, key) => !!(l && typeof key === 'string' && (key.startsWith('org:') ? l.org : key.startsWith('email:') ? l.email : null));
+// r9 (主开发 r975): a refusal NAMES an account only when the facts know the reply IS it — both logins carry an address and it is
+// the same (an organisation alone can be several seats of one Team)
+const sameAddress = (a, b) => !!(a && b && a.email && b.email && String(a.email).trim().toLowerCase() === String(b.email).trim().toLowerCase());
 function heldLiftVerdict({ rowKey = null, held = [], answer = null, onHeld = false, panel = {} } = {}) {
   const own = (h) => !!h.inGroup || loginIsKey(h.login, rowKey);
   const others = (held || []).filter((h) => h && !own(h));
-  const aKey = loginKeyOf(answer);
-  const proven = !!rowKey && loginIsKey(answer, rowKey);
+  const proven = !!rowKey && loginIsKey(answer, rowKey);                       // the facts show the reply IS the row's own identity
+  const disproven = !!rowKey && hasField(answer, rowKey) && !proven;           // the facts show it is NOT
   const p = panel || {};
-  const liftable = p.org !== 'differ' && (p.refused ? (!!onHeld && p.phase === 'differ') : !!p.verified);
+  // the panel does not DENY the read: its logins do not differ, and its only refusal is the held window's phase (r9: a panel with no
+  // witness to compare is not a denial — the identity proof is the login's, so a proven own read through it is not stuck)
+  const liftable = p.org !== 'differ' && (p.refused ? (!!onHeld && p.phase === 'differ') : true);
   if (!others.length) return onHeld && liftable && proven ? { act: 'lift' } : { act: 'unhold' };
   if (p.org === 'differ') return { act: 'none' };
-  if (rowKey && aKey) {
-    const hit = others.filter((h) => loginKeyOf(h.login) === aKey);
+  // r9 (THE MUST of round weorx6iw2): a reply that IS the row's own identity can never be «another account's» — proven stands
+  // BEFORE the hit (two seats of one organisation share it; the row's own address decides)
+  if (proven) return !liftable ? { act: 'none' } : onHeld ? { act: 'lift' } : { act: 'own' };
+  // a NAME only when the facts know both: the reply IS that held login (the same address), and that login is NOT the row's (it
+  // carries what the row is known by, and it differs) — then the reply is not the row's either
+  if (rowKey) {
+    const hit = others.filter((h) => sameAddress(answer, h.login) && hasField(h.login, rowKey));
     if (hit.length) return { act: 'refuse', code: 'signed-in-as', names: hit.map((h) => h.name) };
   }
-  if (!liftable) return { act: 'none' };
-  if (!onHeld) return proven ? { act: 'own' } : { act: 'none' };
+  if (!liftable || !onHeld) return { act: 'none' };
   const names = others.map((h) => h.name);
   if (!rowKey) return { act: 'refuse', code: 'row-unknown', names };
-  if (!aKey) return { act: 'refuse', code: 'answer-unnamed', names };
-  if (!proven) return { act: 'refuse', code: 'other-answered', names };
-  return { act: 'lift' };
+  if (!answer) return { act: 'refuse', code: 'answer-unnamed', names };
+  if (!disproven) return { act: 'refuse', code: 'cannot-tell', names };
+  return { act: 'refuse', code: 'other-answered', names };
 }
 
 module.exports = {

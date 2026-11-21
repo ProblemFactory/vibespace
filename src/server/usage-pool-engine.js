@@ -301,7 +301,7 @@ function usageIdentityGroups() {
       // must never merge into one identity (different quotas entirely).
       const ownBe = gOwner || (acctRec?.backend && globalUsageKey(acctRec.backend) !== '__global__' ? acctRec.backend : null);
       const key = gOwner ? gOwner + ':__global__'
-        : (ownBe ? ownBe + ':' : '') + identityKeyFor({ accountId, cache, email: acctRec?.email });
+        : groupKeyOf({ accountId, cache, email: acctRec?.email, ownBe });   // B-6a92 r9: the ONE keying (module-level, the door's table runs it too)
       const g = groups.get(key) || { accountIds: [], cache: null, accountId: null, backend: ownBe || 'claude', tomb5h: null };
       g.accountIds.push(gOwner ? fn.slice(0, -5) : (accountId || '__global__'));
       // freshest cache is the identity's anchor source (the same real login can
@@ -1464,6 +1464,8 @@ const HELD_MAX = 4096;   // r6: far past any roster; the oldest key is dropped b
 // (usageIdentityAccountIds — the ONE notion of «the same account») is the row itself and is dropped wherever held names are
 // built (the guard's verdict, the ring's entry, the run) AND wherever a hold is read (memory, the warm, the carry): a hold on disk
 // naming only the row's own group is no hold
+// r9 (a small): this unit's journal lines name rows by LABEL — a name holding «@» (an address) is said by its id
+const labelOf = (id) => { const n = nameOf(id); return typeof n === 'string' && n && !n.includes('@') ? n : String(id || '?'); };
 const ownGroupOf = (key) => { try { return new Set(usageIdentityAccountIds(key)); } catch { return new Set([key]); } };
 const othersOf = (key, names) => { const own = ownGroupOf(key); return (Array.isArray(names) ? names : []).filter((k) => typeof k === 'string' && k && !own.has(k)); };
 const heldFactOf = (key, f) => { if (!(f && Array.isArray(f.names) && Number(f.phase) > 0)) return null; const names = othersOf(key, f.names).slice(0, 4); return names.length ? { names, phase: Number(f.phase), at: Number(f.at) || null } : null; };
@@ -1550,7 +1552,7 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
         const was = raw.foreign && Array.isArray(raw.foreign.names) ? raw.foreign.names.join(',') + '@' + raw.foreign.phase : null;
         next.foreign = { names: heldBy.slice(0, 4), phase: entry.resetsAt, at: entry.at, n: run };
         res.held = { names: next.foreign.names, phase: entry.resetsAt };
-        if (was !== next.foreign.names.join(',') + '@' + entry.resetsAt) console.log(`[usage] window held: ${nameOf(key)}'s readings name ${next.foreign.names.map(nameOf).join(', ')}'s weekly window (${run} in a row) — not re-anchored, nothing filed; ${nameOf(key)}'s own window is unknown until its own read proves it`);
+        if (was !== next.foreign.names.join(',') + '@' + entry.resetsAt) console.log(`[usage] window held: ${labelOf(key)}'s readings name ${next.foreign.names.map(labelOf).join(', ')}'s weekly window (${run} in a row) — not re-anchored, nothing filed; ${labelOf(key)}'s own window is unknown until its own read proves it`);
         const ok0 = usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), next);
         if (ok0) noteHeldWindow(key, next.foreign);
         return ok0 ? res : null;
@@ -6825,33 +6827,12 @@ function reanchorLapsedMember(key, idv) {
     return true;
   } catch (e) { console.warn('[usage] renewal re-anchor failed:', e.message); return false; }
 }
-/** B-6a92 r6 — WHO ANSWERED a panel: its own printed / rewritten org (idv.panel), else the folder's login it ran through
- *  (idv.expected) — {org, email} in memory, or null when neither names anyone. */
-function answeringLogin(idv) {
-  const has = (x) => x && (x.orgUuid || x.email);
-  const l = has(idv && idv.panel) ? idv.panel : has(idv && idv.expected) ? idv.expected : null;
-  return l ? { org: l.orgUuid || null, email: l.email || null } : null;
-}
-/** B-6a92 r8 (主开发 r873 / r879) — THE FACTS the door's ONE PURE VERDICT (reading-lag heldLiftVerdict) is judged on. The engine
- *  READS here and decides nothing:
- *  - the row's own identity as its RECORD says it — the identity group's key over its cache and its roster record (the ONE
- *    notion: src/usage-anchors.js identityKeyFor, the organisation first), never its folder's login;
- *  - each held name: in the row's own identity group or not, and its login through THE ONE READER (probeLog.loginOfAccount);
- *  - the login that answered; whether the answer is in the held window; the panel's own verdict. Values stay in memory. */
+/** B-6a92 r8/r9 — THE FACTS the door's ONE PURE VERDICT is judged on: the engine's own builder (heldLiftFactsOf, module level)
+ *  over this engine's READERS — the row's identity group, its cache and roster record, and THE ONE READER of a name's login. */
 function heldLiftFacts(key, idv, h) {
-  const group = new Set(usageIdentityAccountIds(key));
-  const asLogin = (l) => (l && (l.orgUuid || l.email) ? { org: l.orgUuid || null, email: l.email || null } : null);
-  let rowKey = null;
-  try {
-    const rec = (accounts.list().accounts || []).find((a) => a && a.id === key) || null;
-    let cache = null; try { cache = usageWrite.readCacheJson(usageWrite.cacheFileFor(USAGE_CACHE_DIR, key)); } catch { cache = null; }
-    const k = identityKeyFor({ accountId: key, cache, email: rec && rec.email });
-    rowKey = /^(org|email):/.test(k) ? k : null;
-  } catch { rowKey = null; }
-  const held = h.names.map((n) => ({ name: n, inGroup: group.has(n), login: asLogin((() => { try { return probeLog.loginOfAccount(n, { accounts }); } catch { return null; } })()) }));
-  const pw = (idv && idv.panelWindow) || {};
-  const p7 = Number(pw.sevenDay) > 0 ? Number(pw.sevenDay) : null;
-  return { rowKey, held, answer: answeringLogin(idv), onHeld: !!p7 && readingLag.weeklyNear(p7, h.phase) === true, panel: { refused: !!(idv && idv.refused), verified: !!(idv && idv.verified), phase: (idv && idv.phase) || null, org: (idv && idv.org) || null } };
+  let rec = null; try { rec = (accounts.list().accounts || []).find((a) => a && a.id === key) || null; } catch { rec = null; }
+  let cache = null; try { cache = usageWrite.readCacheJson(usageWrite.cacheFileFor(USAGE_CACHE_DIR, key)); } catch { cache = null; }
+  return heldLiftFactsOf({ key, idv, h, sameAccountIds: usageIdentityAccountIds(key), rowCache: cache, rowEmail: rec && rec.email, loginOf: (n) => probeLog.loginOfAccount(n, { accounts }) });
 }
 /** B-6a92 — A HELD ROW'S OWN READ IS ITS DOOR (r5, 主开发 r677 ruled in 1; r8: one pure verdict). The row says its own window is
  *  unknown «until its own read proves it»; the person's ⟳ on that row — or the approved automatic usage read on its own schedule
@@ -6881,7 +6862,7 @@ function liftHeldWindow(key, idv) {
       if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { sevenDay, scoped, at: now, sessionId: null, source: 'own-panel', n: 1, ring: [], ringAt: now })) return { act: 'none' };
       if (!windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer)) {
         const back = raw0 || { sevenDay: null, scoped: {}, at: h.at, sessionId: null, source: null, ring: [], foreign: { names: h.names.slice(), phase: h.phase, at: h.at } };
-        if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), back)) console.warn(`[usage] window hold: ${nameOf(key)}'s stamp could not be written and its witness could not be put back — the hold stands in memory only until the next start`);
+        if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), back)) console.warn(`[usage] window hold: ${labelOf(key)}'s stamp could not be written and its witness could not be put back — the hold stands in memory only until the next start`);
         return { act: 'none' };
       }
       try { oatIdentity.onReanchor(key, { window: stamp, source: 'own-panel', independent: producer === 'login' }); } catch { }
@@ -6890,7 +6871,7 @@ function liftHeldWindow(key, idv) {
       if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { ...rest, ring: [], ringAt: now })) return { act: 'none' };
     } else return v;   // refuse / none: nothing written here
     noteHeldWindow(key, null); _ownWin = null; _ownWinAt = 0;
-    console.log(`[usage] window hold ended (${v.act}): ${nameOf(key)}'s ${v.act === 'unhold' ? 'hold named only its own account' : v.act === 'lift' ? 'own /usage read answered in the weekly window its readings were held on — stamped there by its own read' : 'own /usage read proved its own weekly window'}; its readings write again where they agree`);
+    console.log(`[usage] window hold ended (${v.act}): ${labelOf(key)}'s ${v.act === 'unhold' ? 'hold named only its own account' : v.act === 'lift' ? 'own /usage read answered in the weekly window its readings were held on — stamped there by its own read' : 'own /usage read proved its own weekly window'}; its readings write again where they agree`);
     try { global.__vsEvent?.('usage-window-hold-ended', `${key}:${v.act}`); } catch { }
     return v;
   } catch (e) { console.warn('[usage] window hold: the own read could not end it:', e.message); return false; }
@@ -8536,4 +8517,34 @@ function maybeStopOnFallback(session, id, from, to) {
     estOverlayCache, predictCalib,
   };
 }
-module.exports = { create };
+/** B-6a92 r9 (主开发 r975) — THE GROUP'S KEY of one usage-cache entry, as usageIdentityGroups keys it: the ONE notion of «the
+ *  same account» (the organisation on the cache first, else the record's address, else the id; a harness's own prefix). One place:
+ *  the engine's grouping and the door's table both run it. */
+function groupKeyOf({ accountId = null, cache = null, email = null, ownBe = null } = {}) {
+  return (ownBe ? ownBe + ':' : '') + require('../usage-anchors.js').identityKeyFor({ accountId, cache, email });
+}
+/** WHO ANSWERED a panel: its own printed / rewritten org (idv.panel), else the folder's login it ran through (idv.expected) —
+ *  {org, email} in memory, or null when neither names anyone. */
+function answeringLogin(idv) {
+  const has = (x) => x && (x.orgUuid || x.email);
+  const l = has(idv && idv.panel) ? idv.panel : has(idv && idv.expected) ? idv.expected : null;
+  return l ? { org: l.orgUuid || null, email: l.email || null } : null;
+}
+/** B-6a92 r8/r9 — THE ENGINE'S OWN FACT BUILDER for the door's verdict (reading-lag heldLiftVerdict). PURE over its readers, so
+ *  the engine (its real readers) and the door's generated table (a world's readers) run the SAME code:
+ *  - the row's own identity as its RECORD says it — its group's key over its cache and its record's address (groupKeyOf), never
+ *    its folder's login as such; an id-only key ('acct:') is no identity;
+ *  - each held name: in the row's own identity group (`groupIds`) or not, and its login (`loginOf`: the one reader);
+ *  - the login that answered; whether the answer is in the held window; the panel's own verdict. Values stay in memory. */
+function heldLiftFactsOf({ key, idv, h, sameAccountIds = null, rowCache = null, rowEmail = null, loginOf = () => null } = {}) {
+  const group = new Set(Array.isArray(sameAccountIds) ? sameAccountIds : [key]);   // the row's own identity group (its ids)
+  const asLogin = (l) => (l && (l.orgUuid || l.email) ? { org: l.orgUuid || null, email: l.email || null } : null);
+  let rowKey = null;
+  try { const k = groupKeyOf({ accountId: key, cache: rowCache, email: rowEmail || null }); rowKey = /^(org|email):/.test(k) ? k : null; } catch { rowKey = null; }
+  const held = ((h && h.names) || []).map((n) => ({ name: n, inGroup: group.has(n), login: asLogin((() => { try { return loginOf(n); } catch { return null; } })()) }));
+  const pw = (idv && idv.panelWindow) || {};
+  const p7 = Number(pw.sevenDay) > 0 ? Number(pw.sevenDay) : null;
+  const facts = { rowKey, held, answer: answeringLogin(idv), onHeld: !!p7 && !!h && require('../reading-lag.js').weeklyNear(p7, h.phase) === true, panel: { refused: !!(idv && idv.refused), verified: !!(idv && idv.verified), phase: (idv && idv.phase) || null, org: (idv && idv.org) || null } };
+  return facts;   // (never a line «  return {» after create's own: a census finds the engine's exports by its last one)
+}
+module.exports = { create, heldLiftFactsOf, groupKeyOf };
