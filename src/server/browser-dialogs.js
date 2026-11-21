@@ -492,12 +492,19 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     // (`window.open`, a `target=_blank` link — `openerId` set even under `noopener`, measured) is its OPENER's, whoever's verb
     // runs: before, a stranger's popup born during A's verb was A's — A's verb was cut with the stranger's addresses and A's
     // `stop` stopped the stranger's page (the kill + credential shape: that popup carried the stranger's session)
-    if (e.seenAt) e.owner = e.opener ? openerOwner(w, e.opener) : createdOwner(w);
+    // B-e674 follow (r694 (2)): while the person drives THEIR OWN browsing window they are a possible parent of a tab no page opened —
+    // with an agent's verb in flight too, such a birth is UNCLEAR: nobody's (never the verb's by the witness, never the person's)
+    const personOwn = !!(e.seenAt && !e.opener && keeper && typeof keeper.personBrowsing === 'function' && (() => { try { return keeper.personBrowsing(w.profileId) === true; } catch { return false; } })());
+    const inFlight = e.seenAt && !e.opener ? verbsInFlight(w) : 0;
+    if (e.seenAt) e.owner = e.opener ? openerOwner(w, e.opener) : personOwn ? null : createdOwner(w);
     // verify r3 #2: the witness is WRITTEN on the lease record (the keeper's registry is on disk) — a VibeSpace restart read it
     // back through `tabsOf`; before, in memory per watch, the restart made the conversation's own tab nobody's again
     // B-e674 unit 2: THE BIRTH STAMP — the keeper is told of every page tab born while this watch is open (with its opener and
     // the agent's verb this witness saw in flight): who drove the browser at that instant is the keeper's fact to stamp
-    if (e.seenAt && keeper && typeof keeper.noteTabBorn === 'function') { try { keeper.noteTabBorn(w.profileId, tid, { opener: e.opener, witness: !e.opener ? e.owner : null, unclear: !e.opener && !e.owner && verbsInFlight(w) > 1 }); } catch (err) { say('tab-born:' + (err && err.message), `${w.profileId}: a new tab's birth was not stamped — ${err && err.message}`); } }
+    if (e.seenAt && keeper && typeof keeper.noteTabBorn === 'function') {
+      const fail = (err) => say('tab-born:' + (err && err.message), `${w.profileId}: a new tab's birth was not stamped — ${err && err.message}`);
+      try { Promise.resolve(keeper.noteTabBorn(w.profileId, tid, { opener: e.opener, witness: !e.opener ? e.owner : null, unclear: !e.opener && !e.owner && (personOwn ? inFlight >= 1 : inFlight > 1) })).catch(fail); } catch (err) { fail(err); }
+    }
     if (e.owner && keeper && typeof keeper.noteOwnTab === 'function') { try { keeper.noteOwnTab(w.profileId, e.owner, tid); } catch (err) { say('note-tab:' + (err && err.message), `${w.profileId}: a witnessed tab was not recorded on its lease — ${err && err.message}`); } }
     w.targets.set(tid, e);
     e.enabling = (async () => {

@@ -471,6 +471,23 @@ function madeText(m, owner, tIn) {
   if (!m.person && m.made === 'takeover' && m.mine === true && owner === 'agent') return { mark: t('opened in your takeover'), tip: t('Opened during your takeover — it stays this conversation’s tab') };
   return { mark: '', tip: '' };
 }
+/** B-e674 follow (r694 (3)): THE HANDBACK SAYS WHAT STAYS — how many of the tabs this view lists were opened in the takeover that
+ *  began at `since` and stay with this conversation (its own, marked «opened in your takeover»: `mine`). One pass over the list. */
+function takeoverStays({ tabs = [], made = {}, since = 0 } = {}) {
+  const from = Number(since) || 0; const seen = new Set(); let n = 0;
+  for (const tb of Array.isArray(tabs) ? tabs : []) {
+    const id = tb && tb.targetId ? String(tb.targetId).toUpperCase() : ''; if (!id || seen.has(id)) continue; seen.add(id);
+    const m = isObj(made) ? made[id] : null;
+    if (isObj(m) && m.made === 'takeover' && m.mine === true && !m.person && (Number(m.at) || 0) >= from) n++;
+  }
+  return n;
+}
+/** …and its words, said with the handback (the person's last look before the agent may read them). '' when none stays. */
+function handbackStayText(n, tIn) {
+  const t = tOf(tIn); const k = Number.isInteger(n) && n > 0 ? n : 0;
+  if (!k) return '';
+  return k === 1 ? t('1 tab opened in your takeover stays with this conversation — its agent can read it now') : t('{n} tabs opened in your takeover stay with this conversation — its agent can read them now', { n: k });
+}
 /** A FOREIGN front this view does NOT list (the bridge sends its state alone — no id, no name, no title): one general line. */
 function frontNoteText(tIn) {
   const t = tOf(tIn);
@@ -618,4 +635,5 @@ module.exports = {
   FRONT_READS_MAX, FRONT_STATES, frontVerdict, frontText, // B-e674 unit 1: the front of this view's window, said
   FRONT_READ_MS, frontNoteText, // B-e674 unit 2: one front read's bound; the unlisted foreign front's general line
   madeText, // B-e674 unit 2: the birth stamp in words
+  takeoverStays, handbackStayText, // B-e674 follow (r694 (3)): the handback says what stays
 };

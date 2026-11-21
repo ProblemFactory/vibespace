@@ -975,7 +975,7 @@ async function witnessRows(Dmod) {
   ok(r.keeperWins.a === false && r.keeperWins.b.length === 1 && r.keeperWins.b[0] === 'W1' && r.keeperWins.ownsA === 'not_your_tab', 'verify r2: the keeper\'s own naming of a tab (a pinned tab, a mediated grant, the user\'s own) wins over the witness at every read', r.keeperWins);
   ok(r.loop.a && r.loop.bShared && r.loop.stB === 'not_watched:unattributed' && r.loop.stA, 'verify r2: the loop on its witnessed tab is ITS fact (not unattributed), the other conversation hears only `loopShared`; its `stop` lands, the other\'s is still refused', r.loop);
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
-  const needle = 'if (e.seenAt) e.owner = e.opener ? openerOwner(w, e.opener) : createdOwner(w);';
+  const needle = 'if (e.seenAt) e.owner = e.opener ? openerOwner(w, e.opener) : personOwn ? null : createdOwner(w);'; // B-e674 follow (r694 (2)): the person browsing their own window makes it unclear (this suite's keeper stub has no personBrowsing: personOwn is false)
   ok(src.includes(needle), 'control setup: the creation witness (with the opener rule) is found in src/server/browser-dialogs.js');
   const c = await witnessRows(MUT.load('src/server/browser-dialogs.js', src.replace(needle, ''), 'r2-no-witness'));
   ok(c.one.a.length === 0 && c.loop.a === false && c.loop.stA === false, 'CONTROL: a watch without the witness leaves the conversation\'s own tab out of its scope — the rows above redden on it (the real 0.38.1 shape before the fix)', c);

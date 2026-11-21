@@ -1245,7 +1245,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       const fr = r.front && typeof r.front === 'object' ? r.front : null;
       const front = fr && fr.state === 'foreign' && listed.has(String(fr.targetId || '').toUpperCase()) ? { state: 'foreign', windowId: WIN.windowIdOf(fr.windowId), targetId: String(fr.targetId).toUpperCase(), owner: String(fr.owner || 'orphan') } : fr ? { state: String(fr.state || 'none') } : null;
       // B-e674 unit 2: the birth stamps of the tabs this view lists (opened in the person's takeover / the person's own)
-      const made = {}; for (const [id, m] of Object.entries(r.made || {})) if (listed.has(id) && m && typeof m === 'object') made[id] = { made: m.made === 'browse' ? 'browse' : 'takeover', person: !!m.person, mine: !!m.mine };
+      const made = {}; for (const [id, m] of Object.entries(r.made || {})) if (listed.has(id) && m && typeof m === 'object') made[id] = { made: m.made === 'browse' ? 'browse' : 'takeover', person: !!m.person, mine: !!m.mine, at: Number.isFinite(Number(m.at)) ? Number(m.at) : 0 };
       const text = JSON.stringify({ type: 'tab-owners', owners, titles, names, windows, leases, front, made, mediated: !!r.mediated, adoptable: !!r.adoptable });
       if (text === relay.lastOwners) return;
       relay.lastOwners = text;

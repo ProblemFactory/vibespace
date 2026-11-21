@@ -137,7 +137,9 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { ownerDots, livePlacement, bindDoor } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
 import { stripOrder, stripFold, chipFoldText, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFit } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
-import { tabRowModel, tabRefusalText, tabGroups, tabsCountText, tabsStaleStep } from '../browser-tabs.js';
+import { tabRowModel, tabRefusalText, tabGroups, tabsCountText, tabsStaleStep, takeoverStays, handbackStayText } from '../browser-tabs.js';
+/** B-e674 follow (r694 (3)): a handback's own words, then what stays with the conversation (one sentence after the other). */
+const withStays = (text, stays) => (stays ? t('{first}. {second}', { first: text, second: stays }) : text);
 import { tabClickVerdict, watchLineWords, foldMenuRows, watchRefusalWords } from '../browser-windows.js'; // lane browser-windows (U3/U0b): what a chip click does — bring forward / switch (driving) · watch / follow (watching) // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
 import { avatarOf } from './channel-avatar.js'; // lane browser-resume C (D3): a tab's badge = the host's initial on a stable hue (no network — never a favicon fetch)
 import { UI_ICONS } from './icons.js';
@@ -2294,7 +2296,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       case 'x-seat': xp.seat = m.seat === 'size' || m.seat === 'active' ? m.seat : 'watch'; syncX(); break; // lane browser-x-in-window: this view's seat on the X picture (the relay's ruler) // lane browser-x-in-window: the X picture's ticket (or why this view keeps the page's picture)
       // P3 (§4.3): the bridge's answer to a takeover/handback — ours or anybody's
       case 'mode': {
-        const was = st.mode, wasMine = st.mine;
+        const was = st.mode, wasMine = st.mine, wasSince = st.modeSince;
+        // B-e674 follow (r694 (3)): the handback says what stays — this takeover's tabs this view lists, marked as opened in it
+        if (was === 'takeover' && wasMine && (m.mode || 'watch') === 'watch') st.lastStays = handbackStayText(takeoverStays({ tabs: st.tabs, made: st.tabMade, since: wasSince }), t);
         st.mode = m.mode || 'watch'; st.holder = m.holder || null; st.mine = !!m.mine; st.modeSince = Number(m.since) || 0; st.modeCause = m.cause || null;
         st.wakes = Number.isInteger(m.wakes) ? m.wakes : null; // r6 A-F9: what a Hand back from this view wakes
         renderMode(); renderFit(); // builder r2: the fit chip's words name who drives (a shared browser held while YOU drive)
@@ -2309,8 +2313,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         const rerunList = Array.isArray(m.rerun) ? m.rerun.map(String).filter(Boolean).slice(0, 8).join(', ') : '';
         st.lastRerun = rerunList;
         if (was === 'takeover' && st.mode === 'watch' && wasMine) {
-          if (m.cause === 'idle') showToast(rerunList ? t('Your takeover lapsed (no input) — the agent is driving again and was told to re-run: {verbs}', { verbs: rerunList }) : t('Your takeover lapsed (no input) — the agent is driving again'), { duration: 5000 });
-          else if (m.cause !== 'explicit' && m.cause !== 'continue') showToast(t('Control returned to the agent'), { duration: 3500 }); // lane browser-resume B: the hand-back says its own words
+          if (m.cause === 'idle') showToast(withStays((rerunList ? t('Your takeover lapsed (no input) — the agent is driving again and was told to re-run: {verbs}', { verbs: rerunList }) : t('Your takeover lapsed (no input) — the agent is driving again')), st.lastStays), { duration: st.lastStays ? 7000 : 5000 }); // r694 (3)
+          if (m.cause !== 'explicit' && m.cause !== 'continue') { if (m.cause !== 'idle') showToast(withStays(t('Control returned to the agent'), st.lastStays), { duration: st.lastStays ? 7000 : 3500 }); st.lastStays = ''; } // only Hand back's own ack says it after this
+          // (lane browser-resume B: any other cause says «Control returned to the agent», with what stays — above)
         } else if (st.mode === 'takeover' && st.mine && !wasMine && m.cause !== 'pass') { // a PASS (fold-back) says its own words
           const it = m.interrupted && Number(m.interrupted.n) > 0 ? m.interrupted : null;
           // verify r6: a script running in the page was stopped with the agent's call (Runtime.terminateExecution is page-context) — said to the human
@@ -2319,7 +2324,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         }
         break;
       }
-      case 'mode-ack': if (m.ok && m.mode === 'watch') showToast(st.lastRerun ? t('Control handed back to the agent — it was told to re-run: {verbs}', { verbs: st.lastRerun }) : t('Control handed back to the agent'), { duration: st.lastRerun ? 5000 : 3500 }); break;
+      case 'mode-ack': if (m.ok && m.mode === 'watch') { const stays = st.lastStays || ''; st.lastStays = ''; showToast(withStays(st.lastRerun ? t('Control handed back to the agent — it was told to re-run: {verbs}', { verbs: st.lastRerun }) : t('Control handed back to the agent'), stays), { duration: stays ? 7000 : st.lastRerun ? 5000 : 3500 }); } break;
       case 'confirmation': if (m.id) {
         // r6 A-F8: FIRST WRITE WINS here too — a record under a held id with other content never repaints the card
         const next = { id: m.id, action: m.action, category: m.category || null, target: m.target || null, expiresAt: Number(m.expiresAt) || (Date.now() + 60000) };
