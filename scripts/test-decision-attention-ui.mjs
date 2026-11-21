@@ -196,7 +196,10 @@ async function page(w, h, query) {
 }
 const ROWS = `(() => [...document.querySelectorAll('.chan-grow[data-grow^="im/"]')].map((r) => { const g = r.querySelector('.chan-grow-tag'); const rr = r.getBoundingClientRect(); return { key: r.dataset.grow, tag: g ? g.dataset.tag : null, text: g ? g.textContent : '', btns: [...r.querySelectorAll('.chan-judge-btn')].map((b) => b.dataset.judge + ':' + b.title), right: Math.round(rr.right), vis: rr.width > 0 }; }))()`;
 const judgedKeys = (rows) => rows.filter((r) => r.tag === 'judged').map((r) => r.key).sort().join();
-async function until(p, pred, ms = 8000) { const t = Date.now(); let v; while (Date.now() - t < ms) { v = await p.ev(ROWS).catch(() => []); if (pred(v)) return v; await sleep(50); } return v; }
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): a read whose state never came is SAID on its own line, right above the
+// judge that reads it, and MARKED (an object or a list carries `timedOut`) — never a verdict on the product
+const markTimedOut = (v, ms, what) => { console.log(`    (${what}: the state it waits for did not come in ${ms / 1000} s (a wait that expects nothing ends so too); its last read ${JSON.stringify(v).slice(0, 160)})`); return v && typeof v === 'object' ? Object.assign(v, { timedOut: `the state never came in ${ms / 1000} s` }) : v; };
+async function until(p, pred, ms = 8000) { const t = Date.now(); let v; while (Date.now() - t < ms) { v = await p.ev(ROWS).catch(() => []); if (pred(v)) return v; await sleep(50); } return markTimedOut(v, ms, 'until (the rows)'); }
 
 console.log('① desk 1100 px: the rows first, then the judged chips');
 const d = await page(1100, 900, 'w=100%25');
