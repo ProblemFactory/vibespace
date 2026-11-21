@@ -532,7 +532,12 @@ ok(/const \{ addressableId \} = require\('\.\.\/claude-lock-capture\.js'\);\s*\n
 { const jobsSrc = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8'), wrap = fs.readFileSync(path.join(REPO, 'data/bin/job-wrapper.js'), 'utf8');
   // B-ba47's follow-up (9fa653133): the run's env is jobRunEnv — jobEnv over the owner's own words plus the hub's additions, those
   // marked (VIBESPACE_HANDED) — written over several lines: the pin reads the spawn's whole env property, up to the next one
-  const envAt = jobsSrc.indexOf('env: jobRunEnv({'), spawnEnv = envAt < 0 ? '' : jobsSrc.slice(envAt, jobsSrc.indexOf('\n      logCapBytes:', envAt));
+  // 主开发 r1278's small: the slice ends at the CALL'S OWN CLOSE (its parentheses counted), and a close not found within 4000
+  // characters is a red by name — never a slice that runs on into the rest of the file
+  const envAt = jobsSrc.indexOf('env: jobRunEnv(');
+  const closeOf = (t, open) => { let d = 0; for (let i = open; i < t.length && i < open + 4000; i++) { if (t[i] === '(') d++; else if (t[i] === ')' && --d === 0) return i + 1; } return -1; };
+  const envEnd = envAt < 0 ? -1 : closeOf(jobsSrc, envAt + 'env: jobRunEnv'.length), spawnEnv = envEnd < 0 ? '' : jobsSrc.slice(envAt, envEnd);
+  ok(envAt >= 0 && envEnd > envAt && spawnEnv.endsWith(')'), `the job spawn's env call is found and closed within 4000 characters (${envAt}..${envEnd}) — the pin below reads exactly that call`);
   ok(/if \(\/\^\(VIBESPACE_\|npm_\|CLAUDE_CODE_\)\/\.test\(k\)\) delete env\[k\];/.test(jobsSrc) && /return withHandedMark\(jobEnv\(\{ \.\.\.own, \.\.\.handed \}, base\), jobEnv\(own, base\)/.test(jobsSrc) && spawnEnv.length > 0 && /VIBESPACE_JOB_TOKEN: this\._jobToken\(job\)/.test(spawnEnv) && !/VIBESPACE_SESSION_TOKEN/.test(spawnEnv) && /env: spec\.env,/.test(wrap) && !/process\.env/.test(wrap), 'PIN (verify r1 ④): a job\'s child env is jobEnv (through jobRunEnv since B-ba47\'s follow-up: the hub\'s additions marked) — every VIBESPACE_* of the server stripped, VIBESPACE_JOB_TOKEN set, NEVER a session token; the wrapper hands spec.env to the child unchanged and never falls back to its own env (lane job-spec-off-argv)'); }
 // ── ③ mutant-copy controls ──
 console.log('— ③ mutant-copy controls (a weakened rule must turn named rows red)');
