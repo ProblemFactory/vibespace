@@ -14,6 +14,10 @@
 //      the keeper without the shared ask — VIEWS asks
 //   ④ CENSUS: the chat view seeds from the app's keeper (no list GET left); the app keeps it from every frame and drops it on a
 //      lost socket; the keeper is PURE (no DOM, no socket, nothing required)
+//   ⑤ (r972) EVERY CHANGE OF THE HELD NOTICES SENDS ITS FRAME, at the ONE entry point (src/jobs.js _notifsChanged): a hand-over that
+//      comes back undelivered (restoreNotifs) and a notice put aside inside the notify step after that step's frame went (the rate
+//      floor) — a page that keeps the newest frame then holds the engine's own count; RED each: a copy whose road sends no frame (the
+//      release's). A turn's stashes send ONE frame. A census: every writer of pendingNotifs reaches the one entry point
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -138,6 +142,85 @@ WD.section('④');
   ok(/import \{ createHeldKeeper \} from '\.\/jobs-held\.js';/.test(APP) && APP.includes('this.jobsHeld = createHeldKeeper({ fetchJson });') && APP.includes('this.ws.onGlobal((msg) => this.jobsHeld.note(msg));') && APP.includes('this.ws.onStateChange((connected) => { if (!connected) this.jobsHeld.drop(); });'),
     'the app keeps it from every frame and drops it when the socket goes away');
   ok(!/\brequire\(|\bdocument\b|\bwindow\b|WebSocket|localStorage/.test(KSRC.replace(/^\s*\/\/.*$/gm, '')), 'the keeper is PURE: no DOM, no socket, nothing required (fetchJson is handed in)');
+}
+say('⑤ EVERY CHANGE OF THE HELD NOTICES SENDS ITS FRAME (r972: the ONE entry point)');
+WD.section('⑤');
+{
+  const JSRC = read('src/jobs.js');
+  const MJ = mutantCopies('jobs-held-roads', ROOT);
+  const copy = (anchor, edit, tag) => { ok(JSRC.split(anchor).length === 2, `control setup (${tag}): its line is in src/jobs.js once`); return MJ.load('src/jobs.js', anchored(JSRC, anchor, edit, tag), tag); };
+  const NO_RESTORE = copy("    this._notifsChanged(cid);   // r972: a hand-over that came back undelivered — the page's count follows (it sent no frame before)\n",
+    "    try { this.d.onStash?.(cid); } catch { }   // MUTANT: the release's put-back — the stash fact only, no frame\n", 'held-restore-no-frame');
+  const NO_STASH = copy("    this._notifsChanged(cid);   // the conversation's `stash` session fact (the strip above its composer) follows — and the page's frame (r972)\n",
+    "    try { this.d.onStash?.(cid); } catch { }   // MUTANT: the release's stash — the stash fact only, no frame\n", 'held-stash-no-frame');
+  const JOBS = require(path.join(ROOT, 'src/jobs.js'));
+  const turn = () => new Promise((r) => setImmediate(r));
+  // a world: the engine with the wiring's own frame (every jobs-updated carries jm.heldDigest() at its send) and a page's keeper fed by
+  // every frame, in order
+  function world(Mod, tag) {
+    const d = scratch('jobs-held-roads-' + tag); fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(path.join(d, 'bin'), { recursive: true }); dirs.push(d);
+    fs.writeFileSync(path.join(d, 'jobs.json'), JSON.stringify([{ id: 'jb-road0001', kind: 'task', name: 'road', state: 'done', owner: {}, access: acc, runs: [{ startedAt: T0 - 5000, endedAt: T0 - 4000, exit: 0 }], createdAt: T0 - 5000 }]));
+    const frames = [];
+    const page = K.createHeldKeeper({ fetchJson: async () => ({ held: { total: -1, byConversation: {} } }) });   // never asked here: every count comes by frame
+    let e = null;
+    e = new Mod.JobManager({ dataDir: d, broadcast: (type, payload) => { const m = { type, ...payload, held: e.heldDigest() }; frames.push(m); page.note(m); }, notifyUser: () => ({ ok: true }), log() { }, archivePolicy: () => ({ doneAfterHours: 0, failedAfterDays: 7 }) });
+    e.init(); for (const t of e._timers || []) clearInterval(t);
+    return { e, frames, page, job: e.jobs.get('jb-road0001') };
+  }
+  const countOf = (dg, cid) => (dg && dg.byConversation && dg.byConversation[cid] ? dg.byConversation[cid].count : 0);
+  async function handBack(Mod, tag) {
+    const w = world(Mod, tag), cid = 'conv-road-a';
+    const f0 = w.frames.length;
+    for (let i = 0; i < 3; i++) w.e._stashNotif(cid, w.job, { what: `run ${i}` }, 'not running', { stampLast: false, held: { kind: 'not-running' } });
+    await turn();
+    const stashFrames = w.frames.length - f0;
+    const items = w.e.drainNotifs(cid);   // a hand-over takes them (its own frame: 0 held)
+    const afterDrain = countOf(w.page.kept, cid);
+    w.e.restoreNotifs(cid, items);   // …and its frame comes back undelivered: they are put back
+    await turn();
+    const kept = await w.page.seed(), engine = countOf(w.e.heldDigest(), cid);
+    w.e.shutdown();
+    return { stashFrames, afterDrain, items: items.length, kept: countOf(kept, cid), engine };
+  }
+  const a = await handBack(JOBS, 'a'), aR = await handBack(NO_RESTORE, 'a-m');
+  ok(a.stashFrames === 1, `three notices put aside in one turn send ONE frame, after them (${a.stashFrames})`);
+  ok(a.items === 3 && a.afterDrain === 0 && a.engine === 3 && a.kept === 3, `(1) A HAND-OVER THAT COMES BACK UNDELIVERED: the drain's frame said 0, the put-back's own frame says ${a.kept} — a view opened now seeds the engine's count (${a.engine})`, a);
+  ok(aR.engine === 3 && aR.kept === 0, `RED CONTROL (the release's put-back, in a copy — the stash fact only, no frame): the page still keeps 0 while the engine holds ${aR.engine}`, aR);
+  async function floored(Mod, tag) {
+    const w = world(Mod, tag), cid = 'conv-road-b';
+    try { w.e.d.broadcast('jobs-updated', { id: w.job.id }); } catch { }   // THE STEP'S OWN FRAME goes first (as _touch's, before the notify step)
+    const before = countOf(w.page.kept, cid);
+    w.e._notifyRate.set(cid, { ts: Date.now() - 1000 });   // a post 1 s ago: the floor holds the next one
+    w.e._deliverTo(cid, w.job, { what: 'it ended' }, {});   // put aside at the rate floor, inside the notify step
+    await turn();
+    const kept = await w.page.seed(), engine = countOf(w.e.heldDigest(), cid);
+    w.e.shutdown();
+    return { before, kept: countOf(kept, cid), engine };
+  }
+  const b = await floored(JOBS, 'b'), bR = await floored(NO_STASH, 'b-m');
+  ok(b.before === 0 && b.engine === 1 && b.kept === 1, `(2) A NOTICE PUT ASIDE INSIDE THE NOTIFY STEP after that step's frame went (the rate floor): its own frame follows the step — the page keeps ${b.kept}, the engine holds ${b.engine}`, b);
+  ok(bR.engine === 1 && bR.kept === 0, `RED CONTROL (the release's stash, in a copy — no frame of its own): the page keeps the step's earlier frame, 0, while the engine holds ${bR.engine}`, bR);
+  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 2, label: 'B-360d held roads ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  // THE CENSUS: every method that writes pendingNotifs (set / delete) reaches the ONE entry point — but the load (_notifsFrom: at the
+  // boot no page is open; its read again is framed by its caller, pinned here)
+  const writers = (src) => {
+    const lines = src.split('\n'), out = new Map();
+    let cur = null;
+    for (const l of lines) {
+      const m = /^  (?:async )?([_a-zA-Z][\w]*)\([^)]*\) \{/.exec(l);
+      if (m) cur = m[1];
+      if (cur && /this\.pendingNotifs\.(set|delete|clear)\(/.test(l)) out.set(cur, true);
+    }
+    return [...out.keys()];
+  };
+  const bodyOf = (src, name) => { const i = src.search(new RegExp(`\\n  (?:async )?${name}\\([^)]*\\) \\{`)); if (i < 0) return ''; const j = src.slice(i + 1).search(/\n  (?:async )?[_a-zA-Z][\w]*\([^)]*\) \{/); return j < 0 ? src.slice(i) : src.slice(i, i + 1 + j); };
+  const LOAD = new Set(['_notifsFrom']);
+  const unframed = (src) => writers(src).filter((n) => !LOAD.has(n) && !bodyOf(src, n).includes('this._notifsChanged('));
+  const ws = writers(JSRC);
+  ok(ws.length >= 5 && unframed(JSRC).length === 0 && /for \(const cid of this\.pendingNotifs\.keys\(\)\) \{ try \{ this\.d\.onStash\?\.\(cid\); \} catch \{ \} \}[^\n]*\n\s*try \{ this\.d\.broadcast\('jobs-updated', \{ notifs: true \}\); \} catch \{ \}/.test(JSRC),
+    `every writer of the held notices (${ws.join(', ')}) reaches the ONE entry point; the load is framed by its read again ({ notifs: true })`, unframed(JSRC));
+  const planted = JSRC.replace('\n  _notifsChanged(cid, payload = null) {', '\n  _plantedWriter(cid) { this.pendingNotifs.delete(cid); }\n  _notifsChanged(cid, payload = null) {');
+  ok(unframed(planted).join() === '_plantedWriter', `CONTROL: a planted writer that sends no frame is RED by name (${unframed(planted).join()})`);
 }
 jm.shutdown();
 say(`\n${failed ? `${failed} FAILED (${passed} passed)` : `ALL PASS (${passed})`}`);

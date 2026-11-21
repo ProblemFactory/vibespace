@@ -1688,8 +1688,27 @@ class JobManager {
     if (stampLast) job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
     this._notifyLogPush(job, { lane: 'stash', ok: false, reason: reason || 'not reachable', to: String(cid).slice(0, 8) });
     this.d.log(`[jobs] notify → stashed for ${cid} (${reason || 'not reachable'})`);
-    try { this.d.onStash?.(cid); } catch { } // the conversation's `stash` session fact (the strip above its composer) follows
+    this._notifsChanged(cid);   // the conversation's `stash` session fact (the strip above its composer) follows — and the page's frame (r972)
     return item;
+  }
+  /** B-360d unit 3 follow (主开发 r972, the tree's law for a count the page keeps): THE ONE ENTRY POINT OF A CHANGE OF A
+   *  CONVERSATION'S HELD NOTICES — every writer of pendingNotifs ends here (a census in test-jobs-held-seed holds it). The
+   *  conversation's `stash` fact follows (onStash), and the page's kept digest gets its FRAME (every jobs-updated carries the
+   *  digest: src/server/jobs-wiring.js; the page keeps the newest, src/lib/jobs-held.js). A drain says so in its own frame at once
+   *  (`payload`); a stash or a put-back — often inside a step whose own frame already went (the notify step's, a hand-over's
+   *  undelivered return) — is framed ONCE a turn, AFTER the step: a fan-out to many subscribers sends one frame, not one each. */
+  _notifsChanged(cid, payload = null) {
+    try { this.d.onStash?.(cid); } catch { }
+    if (payload) { try { this.d.broadcast('jobs-updated', payload); } catch { } return; }
+    (this._notifsFramed || (this._notifsFramed = new Set())).add(cid);
+    if (this._notifsFrameT) return;
+    this._notifsFrameT = setImmediate(() => {
+      this._notifsFrameT = null;
+      const cids = [...this._notifsFramed];
+      this._notifsFramed.clear();
+      try { this.d.broadcast('jobs-updated', { notifsOf: cids }); } catch { }
+    });
+    if (this._notifsFrameT.unref) this._notifsFrameT.unref();
   }
   /** THE EVICTION IS SAID TO THE OWNER (B-dfb4, 2026-10-01 decision): the journal line above was the only trace — the
    *  panel shows the 30 still waiting, never the ones that fell off. One For-you notice (origin jobs, kind notice) per
@@ -1835,7 +1854,7 @@ class JobManager {
     for (const n of gone) this._letParkGo(n);   // B-54b7: a taken copy dropped here is not owed — its park copy is not either
     this._saveNotifs(); this._dirty = true;
     this.d.log(`[jobs] ${cid}: ${gone.length} held notification(s) of job(s) it can no longer view — dropped at the drain, never printed (${[...new Set(gone.map((n) => n.jobId))].join(', ')})`);
-    try { this.d.broadcast('jobs-updated', { drained: cid }); } catch { }
+    this._notifsChanged(cid, { drained: cid });   // the ONE entry point: the drop's frame + (r972) the stash fact it never sent
     this.wakeSettled(cid);   // B-6721 (the round's should): the drop may leave nothing owed — For you's «notices wait» goes with it
   }
   /** r5 — THE VIEW VERDICT: the ONE answer the push, the drain and the ladder's retry share to «may this conversation be told of
@@ -1983,7 +2002,7 @@ class JobManager {
     // no cap on a restore (verify r4): the restored are the oldest — trimming here would evict exactly what came back
     this.pendingNotifs.set(cid, q);
     this._saveNotifs();
-    try { this.d.onStash?.(cid); } catch { }
+    this._notifsChanged(cid);   // r972: a hand-over that came back undelivered — the page's count follows (it sent no frame before)
     return mine.length;
   }
   /** drain + clear a conversation's stash (called by the injection routes at render time). `only` (a Set of entries
@@ -2024,8 +2043,7 @@ class JobManager {
       const job = n && this.jobs.get(n.jobId);
       if (job && Number(n.ts) >= M.terminalAt(job)) this.markAck(job, 'notified', now(), { quiet: true });
     }
-    try { this.d.broadcast('jobs-updated', { drained: cid }); } catch { }
-    try { this.d.onStash?.(cid); } catch { }
+    this._notifsChanged(cid, { drained: cid });   // the ONE entry point: the drain's own frame + the stash fact
     this._awaySettled(cid, q);   // B-2566: the owner received them — an away failure's item is over
     this.wakeSettled(cid);   // B-6721: what was owed a wake left the stash (a hand-over, the person's prompt) — For you's line about it goes
     return q;
