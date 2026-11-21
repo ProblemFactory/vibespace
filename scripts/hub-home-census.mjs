@@ -553,3 +553,36 @@ export function hubKnobCensus(reads, HV) {
   const unread = [...HV.HUB_KNOBS.knobs, ...HV.HUB_KNOBS.credentials.map((c) => c.name)].filter((n) => !reads.has(n)).sort();
   return { unruled, unread };
 }
+
+// ── THE LINE-1 CENSUS (B-ba47 shape H, the plan's PROOFS-9): the re-home is runtime-boot's first act, and runtime-boot is
+// server.js's FIRST line — so every module server.js loads after it, and every home a module CAPTURES WHEN IT LOADS (a top-level
+// const built from os.homedir() or $HOME), reads the re-homed home. The captures are a named list held both ways (a new one is
+// red until named: it must be loaded after line 1, never by runtime-boot's own graph).
+export const BOOT_LINE = "require('./src/server/runtime-boot.js').boot({ rootDir: __dirname });";
+export const LOAD_TIME_HOME = Object.freeze(['src/adapters/codex.js', 'src/peer-messaging.js', 'src/plugins.js', 'src/session-store.js']);
+const LOAD_HOME_RE = /^(?:const|let|var)\s+[^=\n]+=[^\n]*(?:\bos\.homedir\(\)|process\.env\.HOME\b)/;
+/** PURE over one file's text: the top-level lines (column 0, not a function) that capture a home when the module loads. */
+export function loadTimeHomeOf(text) {
+  return String(text).split('\n').filter((l) => LOAD_HOME_RE.test(l) && !/=>|\bfunction\b/.test(l));   // a line that defines a function reads the home when CALLED, not at load
+}
+/** The files of server.js + src/ (the device agent's src/agentd/ aside) that capture a home at load. */
+export function loadTimeHomeFiles(repo) {
+  const files = execFileSync('git', ['-C', repo, 'ls-files', '-z', '--', 'server.js', 'src'], { encoding: 'utf8', maxBuffer: 1 << 28 }).split('\0')
+    .filter((f) => /\.(?:m?js|cjs)$/.test(f) && !f.startsWith('src/agentd/'));
+  return files.filter((f) => { try { return loadTimeHomeOf(fs.readFileSync(path.join(repo, f), 'utf8')).length > 0; } catch { return false; } }).sort();
+}
+/** The relative-require closure of `start` (repo-relative paths; comments stripped; .js / /index.js tried) — runtime-boot's own
+ *  graph loads BEFORE its first act re-homes, so no home-capturing module may be in it. */
+export function requireClosure(repo, start) {
+  const seen = new Set(), q = [start];
+  while (q.length) {
+    const f = q.shift(); if (seen.has(f)) continue; seen.add(f);
+    let t = ''; try { t = fs.readFileSync(path.join(repo, f), 'utf8'); } catch { continue; }
+    const body = t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+    for (const m of body.matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)) {
+      const p = path.normalize(path.join(path.dirname(f), m[1]));
+      for (const c of [p, p + '.js', p + '/index.js']) { try { if (fs.statSync(path.join(repo, c)).isFile()) { q.push(c); break; } } catch { } }
+    }
+  }
+  return [...seen].sort();
+}

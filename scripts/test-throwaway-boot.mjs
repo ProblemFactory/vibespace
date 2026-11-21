@@ -72,8 +72,9 @@ const lines = []; RB.boot({ rootDir: process.argv[2], log: (l) => lines.push(l) 
 rec.phase = 'after';
 const TR = require(${JSON.stringify(path.join(REPO, 'src/server/throwaway-root.js'))});
 const home = require('os').homedir();
+const pm = require(${JSON.stringify(path.join(REPO, 'src/peer-messaging.js'))}).REGISTRY_DIR;   // a home CAPTURED WHEN A MODULE LOADS, loaded after line 1 (§113 (i))
 const kid = require('child_process').spawnSync(process.execPath, ['-e', 'process.stdout.write(require("os").homedir())'], { encoding: 'utf8' }).stdout;
-setImmediate(() => console.log(JSON.stringify({ rec, home, kid, env: Object.fromEntries(['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'SSH_AUTH_SOCK', 'PATH', 'LANG', 'PORT', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'CLAUDE_WEBUI_PORT', 'VIBESPACE_PASSWORD', 'HUBGUARD_PLANTED'].map((k) => [k, process.env[k] ?? null])), lines, verdict: TR.boot(), throwaway: TR.throwaway(process.argv[2]) })));
+setImmediate(() => console.log(JSON.stringify({ rec, home, pm, kid, env: Object.fromEntries(['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'SSH_AUTH_SOCK', 'PATH', 'LANG', 'PORT', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'CLAUDE_WEBUI_PORT', 'VIBESPACE_PASSWORD', 'HUBGUARD_PLANTED'].map((k) => [k, process.env[k] ?? null])), lines, verdict: TR.boot(), throwaway: TR.throwaway(process.argv[2]) })));
 `);
 const NODE_BIN = path.dirname(process.execPath);
 const SYS = createRequire(import.meta.url)('../src/home-verdict.js').SYSTEM_PATHS[process.platform === 'darwin' ? 'darwin' : 'linux'].join(':');
@@ -99,6 +100,7 @@ const NOT_CARRIED = ['CLAUDE_CONFIG_DIR', 'CLAUDE_WEBUI_PORT', 'SSH_AUTH_SOCK', 
     && j.env.LANG === 'C.UTF-8' && j.env.PORT === '39999' && j.env.NO_AUTO_UPDATE === '1' && j.env.VIBESPACE_SKIP_AGENT_HOOKS === '1',
     "(a) the env is BUILT from the hub's rows: its port, the locale and the kit's switches carried (the hub's own knobs, derived); the caller's conversation names and family, the agent CLI's folder, the person's ssh agent and the person's own hub password NOT carried; the XDG base dirs unset; PATH its own .vs-bin + the system's fixed directories, nothing of the handed PATH", j.env);
   ok(fs.existsSync(own) && (fs.statSync(own).mode & 0o777) === 0o700 && j.kid === own, '(a) the own home is made 0700, and a child the hub starts inherits it', j.kid);
+  ok(j.pm === path.join(own, '.claude', 'sessions'), "(a) a home a module CAPTURES WHEN IT LOADS (src/peer-messaging.js REGISTRY_DIR, one of §113 (i)'s named four), loaded after the boot as server.js loads it, is the hub's own — never the handed one", j.pm);
   { // ssh, read by ssh itself: `ssh -G` resolves the config it would use, and dials nothing
     const w = path.join(own, '.vs-bin', 'ssh'), g = fs.existsSync(w) ? spawnSync(w, ['-G', 'host.invalid'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: own } }) : null;
     const cfg = (g && g.stdout) || '', has = (k, v) => new RegExp(`^${k} ${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'mi').test(cfg);

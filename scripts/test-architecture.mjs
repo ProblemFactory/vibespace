@@ -25,7 +25,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import { format as formatArgs } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
-import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, reachesScratch, lateLoads, envCensus, outsideReaders, OUTSIDE_ROW, hubEnvReads, hubKnobCensus, hubReadsOfText, PICK_C, outsideByTier, SELF_LOOKUP, KIT_HANDED, KIT_HANDED_READ, kitNamesOf } from './hub-home-census.mjs';   // §57 + §113: the one reader of a server.js spawn
+import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, reachesScratch, lateLoads, envCensus, outsideReaders, OUTSIDE_ROW, hubEnvReads, hubKnobCensus, hubReadsOfText, BOOT_LINE, LOAD_TIME_HOME, loadTimeHomeOf, loadTimeHomeFiles, requireClosure, PICK_C, outsideByTier, SELF_LOOKUP, KIT_HANDED, KIT_HANDED_READ, kitNamesOf } from './hub-home-census.mjs';   // §57 + §113: the one reader of a server.js spawn
 import { trackedFiles } from './tracked-files.mjs';   // lane grants-unify: §97 (b) lists src via git ls-files
 import * as acorn from 'acorn';   // lane grants-unify (verify F3): §97 (a) judges each reader's function body, not its lines
 import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';
@@ -8611,6 +8611,15 @@ await section(async () => {
     && formsCtl === 'HC_A1,HC_B2,HC_C3',
     `§113 (h) THE HUB'S OWN KNOBS: ${hubReads.size} env names the hub's code reads — each a hub row (${HVh.HUB_KNOBS.knobs.length} derived knobs of src/hub-env-knobs.json) or a hub NOT (${HVh.HUB_KNOBS.credentials.length} credentials of the person's own hub; the conversation's names and families), and every knob read — CONTROLS: a planted unruled read is red by name, a knob no code reads is red, the reader takes process.env / env.N / a *_ENV constant and never an assignment, a string or a delete`,
     { unruled: hubC.unruled, unread: hubC.unread, formsCtl });
+  // (i) THE LINE-1 CENSUS (B-ba47 shape H, the plan's PROOFS-9): server.js's FIRST line is the runtime boot (the re-home is its first
+  // act: nothing loads above it); every home a module CAPTURES WHEN IT LOADS is a named row, both ways; and none of them is in
+  // runtime-boot's own require graph (that graph loads before the first act) — so each reads the re-homed home
+  const srv1 = read('server.js').split('\n')[0], lth = loadTimeHomeFiles(REPO), bootGraph = requireClosure(REPO, 'src/server/runtime-boot.js');
+  const lthCtl = loadTimeHomeOf("const A = path.join(os.homedir(), '.x');\nconst f = (h = process.env.HOME) => h;\nfunction g() { return os.homedir(); }\n  const inner = os.homedir();\nlet B = process.env.HOME + '/y';");
+  ok(srv1.startsWith(BOOT_LINE) && JSON.stringify(lth) === JSON.stringify([...LOAD_TIME_HOME].sort()) && !LOAD_TIME_HOME.some((f) => bootGraph.includes(f)) && bootGraph.includes('src/server/throwaway-root.js')
+    && lthCtl.length === 2 && lthCtl[0].startsWith('const A') && lthCtl[1].startsWith('let B'),
+    `§113 (i) THE LINE-1 CENSUS: server.js's FIRST line is the runtime boot; the ${LOAD_TIME_HOME.length} modules that capture a home when they load (${LOAD_TIME_HOME.join(', ')}) are the named list both ways, and none is in runtime-boot's own graph (${bootGraph.length} files, the re-home's among them) — each loads after the first act — CONTROL: a top-level capture is counted; a function's read, a default parameter and an indented line are not`,
+    { srv1: srv1.slice(0, 120), found: lth, inBoot: LOAD_TIME_HOME.filter((f) => bootGraph.includes(f)) });
   // (d) ONE VERDICT: scratch.mjs decides by src/home-verdict.js, and no copy of its functions lives anywhere else
   const copies = ['server.js', ...fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => 'src/' + f), ...fs.readdirSync(path.join(REPO, 'scripts')).map((f) => 'scripts/' + f)]
     .filter((f) => /\.(m?js)$/.test(f) && f !== 'src/home-verdict.js' && /\b(?:function\s+|(?:const|let)\s+)(?:suiteRehome|hubRehome|rehomeEnv|namesUnder)\b/.test(read(f)));
