@@ -46,6 +46,15 @@ process.on('exit', () => { for (const d of DIRS) { try { fs.rmSync(d, { recursiv
 const T0 = Date.now();
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const throws = (fn) => { try { fn(); return null; } catch (e) { return e.message; } };
 const FACTS = { platform: 'linux', apt: '/usr/bin/apt-get', sudo: true, root: false, rootFree: 50e9, homeFree: 80e9 };
@@ -398,7 +407,7 @@ console.log('§8c verify-r1 H1 — THE PIN of an approved source (a PURE table =
   const mo = mineRun(A.APP_SCRIPT, 'https://vs-fixture.test:8443/repo', 'own');
   ok(mo.code === 0 && /passed/.test(mo.out), '…a source on a host of its own is not (another VibeSpace source\'s host is not the machine\'s)', mo.out);
   // CONTROL: the pre-fix order (no re-pin before the dispatch, the source live before its pin, no shared-host check)
-  const preOrder = MUT.load('src/app-manifest.js', MANIFEST_SRC.replace("  'pins',\n  'case $MODE in',", "  'case $MODE in',").replace('"$R/sources/$ID.sources"; pins; install', '"$R/sources/$ID.sources"; install').replace(/\n {2}'  h=\$\(printf[^\n]*shared-host[^\n]*/, ''), 'pre-order');
+  const preOrder = MUT.load('src/app-manifest.js', editAnchor(editAnchor(editAnchor(MANIFEST_SRC, "  'pins',\n  'case $MODE in',", "  'case $MODE in',", "src/app-manifest.js"), '"$R/sources/$ID.sources"; pins; install', '"$R/sources/$ID.sources"; install', "src/app-manifest.js"), /\n {2}'  h=\$\(printf[^\n]*shared-host[^\n]*/, '', "src/app-manifest.js"), 'pre-order');
   const pmn = mineRun(preOrder.APP_SCRIPT, 'https://Deb.Debian.org/debian', 'ctl');
   ok(same(orderOf(preOrder.APP_SCRIPT), { repin: false, pinFirst: false, refuseFirst: false }) && pmn.code === 0, 'CONTROL (the pre-fix order): no re-pin before the dispatch, the source live before its pin, a deb.debian.org source passes', { order: orderOf(preOrder.APP_SCRIPT), mine: pmn });
 }

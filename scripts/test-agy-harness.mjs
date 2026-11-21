@@ -56,6 +56,15 @@ const STUB = path.join(REPO, 'scripts/fixtures/antigravity-agy');
 const FX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/antigravity-cli-1.4.3.json'), 'utf8'));
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ROOT = scratchDir('agy-harness');
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
@@ -149,7 +158,7 @@ console.log('— ①b agy\'s OWN slash commands: ONE closed list (the measured f
   const cut = "  const head = String(text == null ? '' : text).trimStart().split(/\\s/, 1)[0].toLowerCase();\n  return AGY_SLASH_COMMANDS.includes(head) ? head : null;\n";
   const BASE_RULE = "  const t = String(text == null ? '' : text).trimStart();\n  return /^\\/[A-Za-z]/.test(t) ? (t.match(/^\\/[\\w:-]+/) || ['/'])[0] : null;\n";
   const mp = path.join(ROOT, 'antigravity-slash-base.js');
-  fs.writeFileSync(mp, modSrc.replace(cut, BASE_RULE));
+  fs.writeFileSync(mp, editAnchor(modSrc, cut, BASE_RULE, "src/harnesses/antigravity-slash.js"));
   const base = require(mp).agySlashCommand;
   ok('RED CONTROL (the base\'s first-character rule): the attachment message IS the command «/home», /tmp/a.txt «/tmp», /notacommand a command',
     modSrc.includes(cut) && base('/home/u/x.zip 这里是…') === '/home' && base('/tmp/a.txt') === '/tmp' && base('/notacommand hello') === '/notacommand' && base('/model') === '/model', [base('/home/u/x.zip 这里是…'), base('/tmp/a.txt'), base('/notacommand hello')]);
@@ -676,7 +685,7 @@ console.log('— ③ THE SLASH REFUSAL (agy would end the stream, exit 2)');
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const cut = "      if (slashRefused(n.text)) return;\n";
   const mutated = path.join(MUTBIN, 'agy-wrapper-noslash.js');
-  fs.writeFileSync(mutated, src.replace(cut, ''));
+  fs.writeFileSync(mutated, editAnchor(src, cut, '', "data/bin/agy-wrapper.js"));
   const m = startWrapper({ wrapper: mutated });
   try {
     await m.until(() => m.find('session'), 8000, 'session');
@@ -730,7 +739,7 @@ const streamStarts = (w) => w.stub().filter((x) => x.argv && x.argv.includes('--
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const line = "  if (SOFT_DENY_RE.test(line)) {";   // B-bba6: the line's head (its body now also words a skip said as agy ends)
   const mutated = path.join(MUTBIN, 'agy-wrapper-nodeny.js');
-  fs.writeFileSync(mutated, src.replace(line, '  if (false && SOFT_DENY_RE.test(line)) {'));
+  fs.writeFileSync(mutated, editAnchor(src, line, '  if (false && SOFT_DENY_RE.test(line)) {', "data/bin/agy-wrapper.js"));
   const m = startWrapper({ wrapper: mutated });
   try {
     await m.until(() => m.find('session'), 8000, 'session');
@@ -764,7 +773,7 @@ console.log('— ④b THE ONE-TURN BYPASS never reaches a user turn (a reorder d
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const guard = '  if (wantBypass !== childRetryBypass) {';
   const mutated = path.join(MUTBIN, 'agy-wrapper-leak.js');
-  fs.writeFileSync(mutated, src.replace(guard, '  if (wantBypass && !retryBypass) {'));
+  fs.writeFileSync(mutated, editAnchor(src, guard, '  if (wantBypass && !retryBypass) {', "data/bin/agy-wrapper.js"));
   const tm = await reorderLeg(mutated);
   ok('RED control: a copy that checks only "retry wants it" (not what the process was started with) runs the moved user turn with every tool approved', src.includes(guard) && /always-proceed\): mine/.test(tm), tm);
 }
@@ -814,7 +823,7 @@ console.log('— ④c ON A NAMED ACCOUNT: "Allow <rule> and retry" writes the ru
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const chk = 'if (!fs.lstatSync(d).isDirectory())';
   const mutated = path.join(MUTBIN, 'agy-wrapper-statdir.js');
-  fs.writeFileSync(mutated, src.replace(chk, 'if (!fs.statSync(d).isDirectory())'));
+  fs.writeFileSync(mutated, editAnchor(src, chk, 'if (!fs.statSync(d).isDirectory())', "data/bin/agy-wrapper.js"));
   const r5 = await ruleLeg(root3, mutated);
   ok('RED control: a copy that follows the link writes the rule into the person\'s global settings.json (the leg above can go red)', src.includes(chk) && r5.card.options.some((o) => o.optionId === 'rule') && /command\(rm\)/.test(fs.readFileSync(path.join(globalDir, 'settings.json'), 'utf8')));
   // the machine login (no mark in HOME): the auth notice names the terminal sign-in; an account: its own sign-in door
@@ -936,7 +945,7 @@ console.log('— ⑥b THE STEER (lane agy-harness-fixes, bug 4): a queued messag
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const verbs = "const QUEUE_VERBS = ['remove', 'steer', 'reorder', 'edit'];";
   const mutated = path.join(MUTBIN, 'agy-wrapper-nosteer.js');
-  fs.writeFileSync(mutated, src.replace(verbs, "const QUEUE_VERBS = ['remove', 'reorder', 'edit'];"));
+  fs.writeFileSync(mutated, editAnchor(src, verbs, "const QUEUE_VERBS = ['remove', 'reorder', 'edit'];", "data/bin/agy-wrapper.js"));
   const m = startWrapper({ wrapper: mutated, env: { AGY_STUB_SLOW_MS: '1500' } });
   try {
     await m.until(() => m.find('session'), 8000, 'session');
@@ -1041,7 +1050,7 @@ console.log('— ⑦ resume, an agent error, text only');
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const keep = "      if (b.type === 'image') { images++; try { const fp = quotePath(savePicture(b)); if (!paths.includes(fp)) paths.push(fp); } catch (e) { failed.push(e && e.message ? e.message : String(e)); } }\n";
   const mutated = path.join(MUTBIN, 'agy-wrapper-nopicture.js');
-  fs.writeFileSync(mutated, src.replace(keep, "      if (b.type === 'image') { images++; failed.push('text only'); }\n"));
+  fs.writeFileSync(mutated, editAnchor(src, keep, "      if (b.type === 'image') { images++; failed.push('text only'); }\n", "data/bin/agy-wrapper.js"));
   const m = startWrapper({ wrapper: mutated });
   try {
     await m.until(() => m.find('session'), 8000, 'session');
@@ -1211,7 +1220,7 @@ console.log('— ⑩ THE /usage READING: the judge (the brief\'s STOP rule) + th
   const src = fs.readFileSync(path.join(REPO, 'src/harnesses/antigravity-usage.js'), 'utf8');
   const cut = '  if (signs.length) return { verdict: \'turn-started\'';
   const mutated = path.join(ROOT, 'antigravity-usage-noturn.js');
-  fs.writeFileSync(mutated, src.replace(cut, '  if (false && signs.length) return { verdict: \'turn-started\'').replace("require('../quota-model.js')", `require(${JSON.stringify(path.join(REPO, 'src/quota-model.js'))})`)); // the copy lives in scratch: its one relative require made absolute
+  fs.writeFileSync(mutated, editAnchor(editAnchor(src, cut, '  if (false && signs.length) return { verdict: \'turn-started\'', "src/harnesses/antigravity-usage.js"), "require('../quota-model.js')", `require(${JSON.stringify(path.join(REPO, 'src/quota-model.js'))})`, "src/harnesses/antigravity-usage.js")); // the copy lives in scratch: its one relative require made absolute
   ok('RED control: a judge copy without the turn check calls a billed answer "unparsed" (the STOP rule can go red)', src.includes(cut) && require(mutated).judgeUsageAnswer({ code: 0, stdout: JSON.stringify(billed[0]) }).verdict === 'unparsed');
   ok('redactCapture: e-mails, project ids and opaque tokens become placeholders', JSON.stringify(U.redactCapture({ a: 'me@x.com', p: 'proj-name-123456', t: 'x'.repeat(48) })) === '{"a":"<email>","p":"<project>","t":"<opaque>"}');
   // the capture script, against the fake agy
@@ -1258,7 +1267,7 @@ console.log('— ⑪ THE EXECUTABLE (lane antigravity-spawn-argv): argv[4] is ag
   // RED copy: the refusal cut ⇒ /usr/bin/env runs and the session says only the exit code (the owner's 125)
   const src = fs.readFileSync(WRAPPER, 'utf8'), cut = "  if (refused) { notice('error', refused, 'spawn-failed'); finalizeExit(1); return; }\n";
   const mutated = path.join(MUTBIN, 'agy-wrapper-no-refusal.js');
-  fs.writeFileSync(mutated, src.replace(cut, ''));
+  fs.writeFileSync(mutated, editAnchor(src, cut, '', "data/bin/agy-wrapper.js"));
   const m = await run('/usr/bin/env', mutated);
   ok('RED copy (the refusal cut): /usr/bin/env runs and the session says only «exit code 125 — see agy-wrapper.log»', src.split(cut).length === 2 && m.code === 125 && m.errors.some((t) => /exited \(exit code 125\) — see agy-wrapper\.log/.test(t)), m);
 }
@@ -1386,7 +1395,7 @@ console.log('— ⑫ THE SUBAGENT CARD (lane agy-subagent-cards): the invoke_sub
     const src = fs.readFileSync(WRAPPER, 'utf8');
     const cut = "  if (!looking && ![...subs.values()].some((s) => !s.done)) stopSubTail();\n";
     const mutated = path.join(MUTBIN, 'agy-wrapper-tail-forever.js');
-    fs.writeFileSync(mutated, src.replace(cut, ''));
+    fs.writeFileSync(mutated, editAnchor(src, cut, '', "data/bin/agy-wrapper.js"));
     const D = await mkStore('agy-sub-d', { lines: 10 });
     fs.copyFileSync(path.join(FIXS, 'answer.json'), path.join(D.store, 'brain', P, SG, 'messages', 'c0000000-0000-4000-8000-0000000000c3.json'));
     const m = startWrapper({ wrapper: mutated, env: env(D.home) });
@@ -1487,7 +1496,7 @@ console.log('— ⑬ THE TURN\'S USAGE (lane agy-status-bar-facts; ⑫ is lane a
   const red = path.join(ROOT, 'red-gate', 'data', 'bin', 'agy-wrapper.js');
   fs.mkdirSync(path.dirname(red), { recursive: true });
   try { fs.symlinkSync(path.join(REPO, 'src'), path.join(ROOT, 'red-gate', 'src')); } catch { }
-  fs.writeFileSync(red, src.replace(cut, ''));
+  fs.writeFileSync(red, editAnchor(src, cut, '', "data/bin/agy-wrapper.js"));
   const [viaLink, leaked] = await Promise.all([linkTurn(WRAPPER, 'real'), linkTurn(red, 'red')]); // independent: run together (the suite's 10 s tier)
   ok('THE GATE: a brain dir that LINKS out of agy\'s store is never read — `last` null, the stream\'s total still recorded', viaLink.last === null && viaLink.total.total > 0 && viaLink.total.input !== 777777, viaLink);
   ok('RED copy (the realpath check cut): the link is followed and its counts become the context (777 777 tokens)', src.split(cut).length === 2 && leaked.last && leaked.last.input === 777777, leaked);

@@ -36,6 +36,15 @@ const { Mux, PROTO_VERSION } = require('../src/agentd/mux.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const readMark = (f) => { try { return fs.existsSync(f) && JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } }; // a mark still landing reads as 'not yet', never a crash
 const until = async (fn, ms = 10000, step = 50) => { const end = Date.now() + ms; for (;;) { const v = fn(); if (v) return v; if (Date.now() > end) return v; await sleep(step); } };
@@ -114,7 +123,7 @@ try {
   const SRC_SIG = fs.readFileSync(path.join(REPO, 'src/agentd-signature.js'), 'utf8');
   const R1_LINE = "+ (extra.allowDowngradeTo != null ? `allow-downgrade-to ${extra.allowDowngradeTo}\\n` : ''), 'utf8');";
   const R1_EXTRA = "const extra = { ...(keys ? { keys } : {}), ...(opts.allowDowngradeTo != null ? { allowDowngradeTo: version } : {}) };";
-  const r1Text = SRC_SIG.replace(R1_LINE, "+ (extra.allowDowngradeTo != null ? `allow-downgrade-to ${extra.allowDowngradeTo}\\n` : '') + (extra.helper != null ? `${helperLine(extra.helper)}\\n` : ''), 'utf8');").replace(R1_EXTRA, "const extra = { ...(keys ? { keys } : {}), ...(opts.allowDowngradeTo != null ? { allowDowngradeTo: version } : {}), ...(helper ? { helper } : {}) };"); // a0d876c5f's two lines: the row in `extra` and in the message
+  const r1Text = editAnchor(editAnchor(SRC_SIG, R1_LINE, "+ (extra.allowDowngradeTo != null ? `allow-downgrade-to ${extra.allowDowngradeTo}\\n` : '') + (extra.helper != null ? `${helperLine(extra.helper)}\\n` : ''), 'utf8');", "src/agentd-signature.js"), R1_EXTRA, "const extra = { ...(keys ? { keys } : {}), ...(opts.allowDowngradeTo != null ? { allowDowngradeTo: version } : {}), ...(helper ? { helper } : {}) };", "src/agentd-signature.js"); // a0d876c5f's two lines: the row in `extra` and in the message
   const r1File = path.join(tmp, 'agentd-signature-round1.js'); fs.writeFileSync(r1File, r1Text);
   const SIGR1 = require(r1File);
   const xr1 = SIGR1.sign(KS, XB, '2.369.363', { ...C, keys: null, helper: AROW });

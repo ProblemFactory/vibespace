@@ -37,6 +37,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const TMP = scratchDir('agy-models-door');
@@ -776,7 +785,7 @@ console.log('⑥ negative controls (patched copies outside the tree)');
   const noFail = M.load('src/server/cli-models-door.js', DSRC.replace(FAILF, '        if (false) return'), 'no-fail-floor');
   const redN = (await doorLegs(noFail, 'no-fail-floor')).filter((r) => !r.pass).map((r) => r.name);
   ok(`control no-fail-floor: «10 openings against a signed-out account» is RED (${redN.length} red)`, redN.some((n) => /^10 openings/.test(n)), redN.join(' | ').slice(0, 300));
-  const errRead = M.load('src/server/cli-models-door.js', DSRC.replace(STDIO, "stdio: ['pipe', 'pipe', 'pipe']").replace("    try { child.stdout.setEncoding('utf8'); child.stdout.on('error', () => { }); } catch { }", "    try { child.stdout.setEncoding('utf8'); child.stdout.on('error', () => { }); child.stderr.setEncoding('utf8'); child.stderr.on('data', (d) => { stdout += d; }); } catch { }"), 'reads-stderr');
+  const errRead = M.load('src/server/cli-models-door.js', editAnchor(editAnchor(DSRC, STDIO, "stdio: ['pipe', 'pipe', 'pipe']", "src/server/cli-models-door.js"), "    try { child.stdout.setEncoding('utf8'); child.stdout.on('error', () => { }); } catch { }", "    try { child.stdout.setEncoding('utf8'); child.stdout.on('error', () => { }); child.stderr.setEncoding('utf8'); child.stderr.on('data', (d) => { stdout += d; }); } catch { }", "src/server/cli-models-door.js"), 'reads-stderr');
   const redE = (await doorLegs(errRead, 'reads-stderr')).filter((r) => !r.pass).map((r) => r.name);
   ok(`control reads-stderr: «STDOUT ONLY» is RED (${redE.length} red)`, redE.some((n) => /^STDOUT ONLY/.test(n)), redE.join(' | ').slice(0, 300));
   const KILL = "    const timer = setTimeout(() => { timedOut = true; finish(null, 'timeout'); }, timeoutMs);";

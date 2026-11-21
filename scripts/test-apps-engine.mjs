@@ -33,6 +33,15 @@ const { UserTodoManager } = (() => { const m = require('../src/user-todos.js'); 
 const T0 = Date.now();
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const dir = scratchDir('apps-engine');
 process.on('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } });
@@ -316,7 +325,7 @@ console.log('§2b verify-r1 F2 — the same ask again is the open proposal; one 
   ok(real.srcCards === 2 && /a\.example/.test(real.card1Detail || ''), 'two package sources under one name (two different addresses) are two cards — the second never re-points the first card\'s Install or its words', real);
   ok(real.nothing === 'nothing', 'an app VibeSpace already keeps there, with nothing to install, is refused by name — never a card that does nothing', real);
   const eSrc = fs.readFileSync(path.join(repo, 'src/server/apps-engine.js'), 'utf8');
-  const noDedup = MUT.load('src/server/apps-engine.js', eSrc.replace('if (openOne()) return again(openOne());\n    // design 009', '// design 009').replace('if (openOne()) { await drop([fetched && fetched.staged, pl.app && pl.app.icon]); return again(openOne()); }\n    // …and', '// …and'), 'no-dedup');
+  const noDedup = MUT.load('src/server/apps-engine.js', editAnchor(editAnchor(eSrc, 'if (openOne()) return again(openOne());\n    // design 009', '// design 009', "src/server/apps-engine.js"), 'if (openOne()) { await drop([fetched && fetched.staged, pl.app && pl.app.icon]); return again(openOne()); }\n    // …and', '// …and', "src/server/apps-engine.js"), 'no-dedup');
   const ctlA = await probe(noDedup, UserTodoManager, 'f2a');
   ok(new Set(ctlA.ids).size === 3 && ctlA.gimpCards === 3, 'CONTROL (no-dedup): the same ask three times = three proposals and three cards', ctlA);
   const uSrc = fs.readFileSync(path.join(repo, 'src/user-todos.js'), 'utf8');
