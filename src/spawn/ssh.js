@@ -26,7 +26,7 @@ function sshLadder(c) {
   const answer = () => ({ spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd });
   // B-460d's remainder (主开发 r1362 (3)): a FRESH start on this machine (new or resumed — one door) starts below ITS agent when the
   // machine's agent, on a link already up, names a nice program the hub's own list holds; else the release's start, at once
-  const sshPri = () => SPRI.sshPriorityFor({ serverSetting, hello: SPRI.linkedHello(hosts, h && h.id) });
+  const sshPri = () => SPRI.sshPriorityFor({ serverSetting, hello: SPRI.linkedHello(hosts, h && h.id), machine: h });
           // Remote agent enablement (P3): a remote session can't reach the local
           // API at 127.0.0.1:<PORT>, and the vibespace-status/-task tools don't
           // exist on the remote box. So for any remote session we (1) open an
@@ -244,7 +244,7 @@ function sshLadder(c) {
             spawnCmd = 'ssh';
             const tPri = sshPri();   // (dtach -A attaches to a live one: the prefix only ever starts a NEW shell)
             spawnArgs = [...hosts.sshArgs(h, { tty: true, reverse: ra.reverse }), '--', `dtach -A /tmp/vs-${id} -r winch ${priorityArgv(tPri.priority).map((x) => x + ' ').join('')}sh -lc ${shq(inner)}`];
-            session._cpuNice = tPri.fact;
+            session._cpuNice = SPRI.sshFactOf(tPri.fact, { join: true });   // below the ssh login; a joined shell keeps its own (the round's should)
             spawnEnvPairs = [];
             spawnCwd = os.homedir(); // remote cwd rides inside the ssh command
             session.host = h.id;
@@ -405,7 +405,7 @@ function sshLadder(c) {
               spawnCwd = os.homedir();
               session.host = h.id;
               session.hostName = h.name;
-              session._cpuNice = keeperSid ? null : (cPri ? cPri.fact : null);   // B-460d's remainder: the keeper road's fresh start, as the device road's
+              session._cpuNice = keeperSid ? null : (cPri ? SPRI.sshFactOf(cPri.fact) : null);   // B-460d's remainder: the keeper road's fresh start — below the ssh login (the keeper starts under it), not the agent
             }
     return answer();
   }

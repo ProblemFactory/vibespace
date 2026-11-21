@@ -84,7 +84,7 @@ const { X_ENV, detectXDisplay, refreshXEnv, stabilizeXAuth, adapterRegistry,
   EFFORT_LEVELS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
   noteModelSeen, refreshAvailableModels, harnessAvailability, noteHarnessModels, cliCmds,
 } = require('./src/server/cli-env.js').create({
-  rootDir: __dirname, CLAUDE_CMD_RAW, CODEX_CMD_RAW, resolveCmd,
+  rootDir: __dirname, CLAUDE_CMD_RAW, CODEX_CMD_RAW, resolveCmd, serverSetting: (k) => serverSetting(k),
   getOAuthToken: (...a) => getOAuthToken(...a),
   usagePollingEnabled: (...a) => usagePollingEnabled(...a),
   refreshHarnessModels: (...a) => refreshHarnessModels(...a), broadcast: (m) => bcastAll(m), getTelemetry: () => { try { return telemetry; } catch { return null; } }, getPlugins: () => { try { return plugins; } catch { return null; } }, // S9: opencode serve caps verdict → 'harness-caps-updated'; runaway telemetry + the 'opencode-serve' PLUGIN is the autostart switch (lazy — both defined below)

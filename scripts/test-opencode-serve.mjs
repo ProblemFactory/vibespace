@@ -499,7 +499,7 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
 {
   const SPRI = require(path.join(REPO, 'src/server/spawn-priority.js')), LINE = require(path.join(REPO, 'src/spawn/line.js'));
   const pri = SPRI.priorityFor({});
-  ok('SETUP: this machine has a nice program (the hub\'s own look) — the step can be read back', !!pri.priority, pri);
+  ok('SETUP: this machine has a nice program (the hub\'s own look) — the step can be read back (Linux by premise: the step is read back from /proc)', !!pri.priority && process.platform === 'linux', { pri, platform: process.platform });
   const dirN = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), standin = path.join(dirN, 'opencode');
   fs.writeFileSync(standin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(MOCK)} "$@"\n`, { mode: 0o755 });
   const spawned = [];
@@ -513,6 +513,15 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
   ok('THE SERVE STARTS BELOW THE HUB: its spawn is `<the hub\'s nice> -n 5 <opencode> serve …` and the serve\'s own process runs at the hub\'s niceness + 5 (read back from /proc — everything it starts inherits it); a serve this process started states {by: 5}',
     !!cN && spawned.length === 1 && spawned[0].cmd === (pri.priority && pri.priority.nice) && JSON.stringify(spawned[0].args.slice(0, 4)) === JSON.stringify(['-n', '5', standin, 'serve']) && gotNice === want && factN && factN.by === 5,
     { spawned, gotNice, want, factN });
+  // THE SERVE TERMINAL'S FACT, END TO END (the round's should, lens 3): ws-create's OWN ocServeFact — its source text, run — over
+  // this serve's REAL facts (createFacts over this locator); RED: the same expression with the facts' key renamed reads null
+  const WSC0 = read('src/ws-create.js'), OCF_A = 'const ocServeFact = () => ', i1 = WSC0.indexOf(OCF_A), OCF = i1 < 0 ? '' : WSC0.slice(i1 + OCF_A.length, WSC0.indexOf(';\n', i1));
+  const ocFactOver = (factsObj, expr = OCF) => { try { return new Function('SPRI', 'require', `return (() => ${expr})();`)(SPRI, (m) => (m === './opencode-serve' ? { facts: () => factsObj } : require(m))); } catch (e) { return { threw: e.message }; } };
+  const FN = serve.createFacts(locN, { log: null });
+  const termFact = ocFactOver(FN), termNone = ocFactOver(null);
+  ok('THE SERVE TERMINAL\'S FACT, END TO END: ws-create\'s own ocServeFact (its source, run) over this serve\'s real facts states {by: 5}; no serve installed ⇒ null', !!OCF && JSON.stringify(termFact) === '{"by":5}' && termNone === null, { OCF: OCF.slice(0, 120), termFact, termNone });
+  const termCut = OCF ? ocFactOver(FN, anchored(OCF, '?.locator?.', '?.loc?.', 'the facts key renamed')) : 'no expression';
+  ok('RED CONTROL (the facts\' key renamed, in a copy of the expression): the serve terminal\'s fact reads null — the leg above is red on it', termCut === null, termCut);
   locN.stop();
   // the person's setting governs it: off ⇒ the release's argv and the fact «off»
   const dirF = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), captF = [];
@@ -536,11 +545,27 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
   const cR = await locR.client({ budgetMs: 3000 });
   ok('a serve REUSED from the record (another life started it) claims nothing — never re-prioritised (B-460d (4))', !!cR && locR.state().source === 'reused' && locR.state().cpuNice === null, locR.state().cpuNice);
   locR.stop(); await mockR.close();
+  // the round's should (lens 3): the leg above could not go red (that locator never started, so it held no start's fact). A locator
+  // that STARTED once — its start's fact {by: 5} taken, its spawn refused — and then ADOPTS from the record claims nothing
+  const reAdopt = async (S) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), m = await startMockServe(), capt = [];
+    try {
+      const loc = S.createServeLocator({ dataDir: d, command: 'opencode', log: null, maxCrashes: 5, spawnImpl: (cmd, args) => { capt.push({ cmd, args }); throw new Error('captured'); }, startPrefix: prefix });
+      await loc.ensure().catch(() => null);
+      fs.writeFileSync(path.join(d, 'opencode-serve.json'), JSON.stringify({ port: m.port, pid: process.pid, startedAt: Date.now() }));
+      const c = await loc.client({ budgetMs: 3000 });
+      const st = loc.state(); loc.stop();
+      return { started: capt.length, client: !!c, source: st.source, cpuNice: st.cpuNice };
+    } finally { await m.close(); fs.rmSync(d, { recursive: true, force: true }); }
+  };
+  const claimsNothing = (r) => r.started >= 1 && r.client && r.source === 'reused' && r.cpuNice === null;
+  const RA = await reAdopt(serve);
+  ok('A LOCATOR THAT STARTED ONCE, THEN ADOPTS FROM THE RECORD, claims nothing: its start\'s fact is never handed to a serve another life started', claimsNothing(RA), RA);
   // the terminal's fact: a serve terminal states the serve's fact (ws-create); the hub hands the ONE verdict (cli-env)
   const WSC = read('src/ws-create.js'), CLI = read('src/server/cli-env.js');
   ok('THE WIRING: a serve terminal\'s fact is the serve\'s (ws-create ocServeFact over the locator\'s state — no longer null); the hub hands the serve the ONE verdict read at each start, composed by the ONE composer (cli-env)',
     WSC.includes('session._cpuNice = ocPty ? ocServeFact() : (') && WSC.includes("SPRI.factOf(require('./opencode-serve').facts()?.locator?.state?.()?.cpuNice)")
-      && CLI.includes("const pri = require('./spawn-priority.js').priorityFor({ serverSetting:") && CLI.includes("return { argv: require('../spawn/line.js').priorityArgv(pri.priority), fact: pri.fact };"));
+      && CLI.includes("const pri = require('./spawn-priority.js').priorityFor({ serverSetting });") && !CLI.includes('readSettings()[k]') && CLI.includes("return { argv: require('../spawn/line.js').priorityArgv(pri.priority), fact: pri.fact };"));   // stale-pins: kept (a deliberate absence check: no second settings reader)
   // RED: a copy whose spawn drops the prefix (the release's spawn) — the serve starts at the hub's own priority
   const { mutantCopies } = await import(path.join(REPO, 'scripts/mutant-copy.mjs'));
   const MO = mutantCopies('opencode-serve-nice', REPO), OSRC = read('src/opencode-serve.js');
@@ -548,7 +573,17 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
   const SM = MO.load('src/opencode-serve.js', anchored(OSRC, NEEDLE, 'child = spawnImpl(cmd, serveArgs, {', 'the serve\'s prefix dropped'), 'serve-prefix-dropped');
   const captM = [], dirM = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-'));
   if (SM) { const locM = SM.createServeLocator({ dataDir: dirM, command: 'opencode', log: null, spawnImpl: (cmd, args) => { captM.push({ cmd, args }); throw new Error('captured'); }, startPrefix: prefix }); await locM.ensure().catch(() => null); }
-  ok('RED CONTROL: a copy whose spawn drops the prefix starts the serve at the hub\'s own priority — the leg above is red on it', !!SM && captM.length >= 1 && captM[0].cmd === 'opencode', captM);
+  // the round's should (lens 3): the control RE-RUNS the start's own check over both — the tree's spawn and the copy's
+  const lowered = (c, prog) => !!c && c.cmd === (pri.priority && pri.priority.nice) && JSON.stringify((c.args || []).slice(0, 4)) === JSON.stringify(['-n', '5', prog, 'serve']);
+  const captT = [], dirT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-'));
+  { const locT = serve.createServeLocator({ dataDir: dirT, command: 'opencode', log: null, spawnImpl: (cmd, args) => { captT.push({ cmd, args }); throw new Error('captured'); }, startPrefix: prefix }); await locT.ensure().catch(() => null); }
+  fs.rmSync(dirT, { recursive: true, force: true });
+  ok('RED CONTROL: a copy whose spawn drops the prefix starts the serve at the hub\'s own priority — the start\'s check, re-run: green on the tree\'s spawn, RED on the copy\'s', !!SM && lowered(captT[0], 'opencode') && captM.length >= 1 && !lowered(captM[0], 'opencode') && captM[0].cmd === 'opencode', { captT, captM });
+  // and the adopt's guard: a copy without it hands the reused serve that start's fact
+  const GUARD = "state.cpuNice = source === 'spawned' ? (state.startFact || null) : null;";
+  const SG = MO.load('src/opencode-serve.js', anchored(OSRC, GUARD, 'state.cpuNice = state.startFact || null;', 'the adopt guard cut'), 'serve-adopt-guard-cut');
+  const RAX = SG ? await reAdopt(SG) : null;
+  ok('RED CONTROL (the adopt\'s guard cut, in a copy): the serve another life started is told {by: 5} — the re-adopt leg above is red on it', !!RAX && !claimsNothing(RAX) && RAX.cpuNice && RAX.cpuNice.by === 5, RAX);
   for (const x of [() => fs.rmSync(dirN, { recursive: true, force: true }), () => fs.rmSync(dirF, { recursive: true, force: true }), () => fs.rmSync(dirD, { recursive: true, force: true }), () => fs.rmSync(dirR, { recursive: true, force: true }), () => fs.rmSync(dirM, { recursive: true, force: true })]) { try { x(); } catch { } }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

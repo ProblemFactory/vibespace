@@ -409,7 +409,7 @@ export const PRIORITY_ROADS = Object.freeze([
   ['src/agentd/agentd.js', '…the machine\'s agent says its own nice program in its hello (the shared look the hub\'s starts use)', 'nicePath: niceProgram(),', 1],
   // B-460d's remainder, its ssh half (lane login-request-card, 主开发 r1362 (3)): an ssh-ONLY machine's fresh start asks the SAME verdict,
   // fed by its agent's hello on a link already up and taken as a CHOICE among the hub's own list (src/nice-program.js listedNicePath)
-  ['src/spawn/ssh.js', 'B-460d\'s remainder: an ssh-only machine\'s start asks the SAME verdict from a link already up (memory only)', 'SPRI.sshPriorityFor({ serverSetting, hello: SPRI.linkedHello(hosts, h && h.id) })', 1],
+  ['src/spawn/ssh.js', 'B-460d\'s remainder: an ssh-only machine\'s start asks the SAME verdict from a link already up (memory only)', 'SPRI.sshPriorityFor({ serverSetting, hello: SPRI.linkedHello(hosts, h && h.id), machine: h })', 1],   // (B-460d follow: the machine named, so a no-answer is said once a machine)
   ['src/spawn/ssh.js', '…the terminal\'s dtach line takes the words in front of its shell (composed from the hub\'s own constants)', "-r winch ${priorityArgv(tPri.priority).map((x) => x + ' ').join('')}sh -lc", 1],
   ['src/spawn/ssh.js', '…the keeper road\'s fresh run takes them in front of the command', '[...priorityArgv(cPri && cPri.priority), rcmd, ...rargs.map(shq)]', 1],
   ['src/spawn/ssh.js', '…and the device road\'s pipe-session spec is built with the SAME builder', "withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, cPri && cPri.priority)", 1],

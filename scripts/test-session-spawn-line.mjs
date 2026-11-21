@@ -449,16 +449,16 @@ console.log('\n── B-460d\'s remainder (ssh half): an ssh-only machine starts
   // THE LADDER ITSELF: the real ssh terminal / chat, a stand-in machine
   const SL = require(path.join(REPO, 'src/spawn/ssh.js')), slDir = scratchDir('sline-ssh');
   let sn = 0;
-  const driveS = async (mode, { hosts, data = {}, setting, agentd = true } = {}) => {
+  const driveS = async (mode, { hosts, data = {}, setting, agentd = true, agentdFails = false, SLm = SL } = {}) => {
     const sent = [], session = {}, id = `s6-${mode}-${++sn}`;
     const hostsAll = new Proxy(hosts || {}, { get: (t, k) => (k in t ? t[k] : (k === 'sshArgs' ? () => ['-o', 'BatchMode=yes', 'u@ssh-host'] : k === 'sshEnv' ? () => ({}) : (typeof k === 'string' ? async () => null : undefined))) });
     const ctx = { hosts: hostsAll, path, fs, os, AGENT_BIN_DIR: '/x/bin', EDITOR_CMD: '/x/code', PORT: 3999, ownerWriteRefusal: () => null, cliConfigPlanB64: () => '', serverSetting: setting || (() => undefined),
       ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), NODE_CMD: '/n/node',
-      agentdRemote: agentd ? { lockedWhy: () => null, agentdDir: slDir, attachBundle: '/a/attach.js', ensureAgentdOnHost: async () => true } : null };
+      agentdRemote: agentd ? { lockedWhy: () => null, agentdDir: slDir, attachBundle: '/a/attach.js', ensureAgentdOnHost: async () => { if (agentdFails) throw new Error('provisioning refused (a stand-in)'); return true; } } : null };
     const c = { ctx, execFileAsync: async () => ({ stdout: '' }), ws: { send: (m) => sent.push(m) }, data: { reqId: 1, ...data }, id, backend: 'claude', SP: {}, sessionMode: mode, session, cwd: '/home/u/p',
       spawnAccount: null, integrationOn: false, spawnBrowserPre: '', needsClaudeLoginHelper: false, sweepOpts: () => ({}), h: { id: 'ssh-6', name: 's6' },
       shq: (x) => `'${String(x).split("'").join(`'\\''`)}'`, rcmd: 'claude', rargs: [], spawnCmd: 'claude', spawnArgs: [], spawnEnvPairs: [], spawnCwd: '/home/u/p' };
-    const ans = await SL[mode](c);
+    const ans = await SLm[mode](c);
     let cfg = null; try { cfg = JSON.parse(fs.readFileSync(path.join(slDir, 'session-' + id + '.json'), 'utf8')); } catch { }
     return { ans, cfg, session, sent };
   };
@@ -495,6 +495,102 @@ console.log('\n── B-460d\'s remainder (ssh half): an ssh-only machine starts
   const RAW = MS.load('src/server/spawn-priority.js', anchored(SPSRC, '  const p = NP.listedNicePath(hello && hello.nicePath, { platform: hello && hello.platform });', '  const p = hello && typeof hello.nicePath === \'string\' ? hello.nicePath : null;', 'ssh verdict fed the raw answer'), 'ssh-raw-answer');
   const rawV = RAW.sshPriorityFor({ hello: { nicePath: '/tmp/evil-nice', platform: 'linux' } });
   ok(!!rawV.priority && rawV.priority.nice === '/tmp/evil-nice', 'RED CONTROL: a verdict fed the machine\'s own bytes (no choice among the list, in a copy) puts THAT machine\'s string in front of the line — the legs above are red on it', rawV);
+  // the round's should (wmm5vpkhl, lens 3): the control RE-RUNS the ladder's own check — the real ssh.js, its verdict swapped for the
+  // copy's for the length of one drive (ssh.js asks SPRI.sshPriorityFor on the one module at each start), then put back
+  const onlyListed = async () => {
+    const t = await driveS('terminal', { hosts: upAs('/tmp/evil-nice') }), c = await driveS('chat', { hosts: upAs('/tmp/evil-nice') });
+    return { ok: / -r winch sh -lc /.test(tLine(t)) && !tLine(t).includes('evil') && !!c.cfg && c.cfg.spawn.cmd === 'sh' && t.session._cpuNice?.why === 'remote', t: tLine(t), c: c.cfg && c.cfg.spawn };
+  };
+  const realOL = await onlyListed(), keepF = SPRI.sshPriorityFor;
+  let rawOL = null; SPRI.sshPriorityFor = RAW.sshPriorityFor; try { rawOL = await onlyListed(); } finally { SPRI.sshPriorityFor = keepF; }
+  ok(realOL.ok && !!rawOL && !rawOL.ok && SPRI.sshPriorityFor === keepF, 'RED CONTROL, RE-RUN: the ladder\'s own check (another path named ⇒ the release\'s line, «set by its own machine») is green on the tree and RED with the copy\'s verdict in its place', { realOL, rawOL });
+}
+// ── THE FOLLOW (lane login-request-card, round wmm5vpkhl's shoulds on line 208): an ssh road's fact says what its step is BELOW,
+// the terminal's says it may have JOINED a running shell, an ssh-only machine with no answer is said once, the device road's
+// fallback keeps the keeper road's fact, a stored fact keeps its base across a restart, the serve's start reads server.js's ONE
+// serverSetting
+console.log('\n── B-460d follow: the ssh roads\' facts say what they are below; a machine with no answer is said once ──');
+{
+  const SPRI = require(path.join(REPO, 'src/server/spawn-priority.js'));
+  const SL = require(path.join(REPO, 'src/spawn/ssh.js')), slDir = scratchDir('sline-ssh-fu');
+  let sn = 0;
+  const driveF = async (mode, { hosts, data = {}, agentdFails = false, SLm = SL, log = null } = {}) => {
+    const sent = [], session = {}, id = `s7-${mode}-${++sn}`;
+    const hostsAll = new Proxy(hosts || {}, { get: (t, k) => (k in t ? t[k] : (k === 'sshArgs' ? () => ['-o', 'BatchMode=yes', 'u@ssh-host'] : k === 'sshEnv' ? () => ({}) : (typeof k === 'string' ? async () => null : undefined))) });
+    const ctx = { hosts: hostsAll, path, fs, os, AGENT_BIN_DIR: '/x/bin', EDITOR_CMD: '/x/code', PORT: 3999, ownerWriteRefusal: () => null, cliConfigPlanB64: () => '', serverSetting: () => undefined,
+      ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), NODE_CMD: '/n/node',
+      agentdRemote: { lockedWhy: () => null, agentdDir: slDir, attachBundle: '/a/attach.js', ensureAgentdOnHost: async () => { if (agentdFails) throw new Error('provisioning refused (a stand-in)'); return true; } } };
+    const c = { ctx, execFileAsync: async () => ({ stdout: '' }), ws: { send: (m) => sent.push(m) }, data: { reqId: 1, ...data }, id, backend: 'claude', SP: {}, sessionMode: mode, session, cwd: '/home/u/p',
+      spawnAccount: null, integrationOn: false, spawnBrowserPre: '', needsClaudeLoginHelper: false, sweepOpts: () => ({}), h: { id: 'ssh-7', name: 's7' },
+      shq: (x) => `'${String(x).split("'").join(`'\\''`)}'`, rcmd: 'claude', rargs: [], spawnCmd: 'claude', spawnArgs: [], spawnEnvPairs: [], spawnCwd: '/home/u/p' };
+    const warn = console.warn, said = [];
+    console.warn = (...a) => { said.push(a.join(' ')); };
+    let ans; try { ans = await SLm[mode](c); } finally { console.warn = warn; }
+    let cfg = null; try { cfg = JSON.parse(fs.readFileSync(path.join(slDir, 'session-' + id + '.json'), 'utf8')); } catch { }
+    return { ans, cfg, session, sent, said };
+  };
+  const upAs = (nicePath) => ({ connectedDevice: () => ({ helloInfo: () => ({ nicePath, platform: 'linux' }) }) });
+  const LOW = '/usr/bin/nice', J = (x) => JSON.stringify(x), lineOf = (x) => String((x.ans && x.ans.spawnArgs || []).slice(-1)[0] || '');
+  // (1) THE BASE OF THE STEP, per road — the check the RED below re-runs
+  const basesOf = async (SLm = SL) => {
+    const t = await driveF('terminal', { hosts: upAs(LOW), SLm }), k = await driveF('chat', { hosts: upAs(LOW), agentdFails: true, SLm }), d = await driveF('chat', { hosts: upAs(LOW), SLm });
+    return { t: t.session._cpuNice, k: k.session._cpuNice, d: d.session._cpuNice, kLine: lineOf(k), kCfg: k.cfg, kSaid: k.said, dCfg: d.cfg && d.cfg.spawn };
+  };
+  const B = await basesOf();
+  const basesRight = (b) => J(b.t) === J({ by: 5, of: 'login', join: true }) && J(b.k) === J({ by: 5, of: 'login' }) && J(b.d) === J({ by: 5 });
+  ok(basesRight(B), 'EACH ROAD SAYS WHAT ITS STEP IS BELOW: the ssh terminal {by: 5, of: login, join} (its dtach -A may join a running shell, which keeps its own), the keeper road {by: 5, of: login} (the keeper starts under the ssh session), the device road {by: 5} (its machine\'s agent spawns it)', B);
+  // (4) THE DEVICE ROAD's FALLBACK (lens 3): a provisioning the machine refuses falls to the keeper road — its line lowered, its fact the keeper road's, said
+  ok(/ -- \/usr\/bin\/nice -n 5 claude\b/.test(B.kLine) && B.kCfg === null && B.kSaid.some((l) => /keeper fallback/.test(l)) && !!B.dCfg && B.dCfg.cmd === LOW,
+    'THE DEVICE ROAD\'S FALLBACK, DRIVEN: a refused provisioning starts the keeper road (`… -- /usr/bin/nice -n 5 claude`, no device config written, the fallback said) and its fact is the keeper road\'s', { kLine: B.kLine, kSaid: B.kSaid });
+  // RED: a copy whose terminal states the bare verdict (the line as taken) claims a step for a joined shell
+  const MF = mutantCopies('session-spawn-line-fu', REPO), SSHSRC = read('src/spawn/ssh.js');
+  const SLX = MF.load('src/spawn/ssh.js', anchored(SSHSRC, '            session._cpuNice = SPRI.sshFactOf(tPri.fact, { join: true });', '            session._cpuNice = tPri.fact;', 'the terminal states the bare verdict'), 'ssh-bare-fact');   // stale-pins: kept (the red control puts the taken line back)
+  const BX = SLX ? await basesOf(SLX) : null;
+  ok(!!BX && !basesRight(BX) && J(BX.t) === J({ by: 5 }), 'RED CONTROL (the terminal stating the bare verdict, in a copy — the line as taken): a terminal that may have joined a running shell claims {by: 5} — the check above is red on it', BX && BX.t);
+  // (2) THE WORDS a person reads, and a stored fact keeps its base across a restart (boot-restore reads it through factOf)
+  const { cpuPriorityWords } = await import(path.join(REPO, 'src/lib/cpu-priority-words.js'));
+  const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? p[x] : m));
+  const KL = 'Below its ssh login on that machine (nice +{n}), and everything it starts', KJ = 'Below its ssh login on that machine (nice +{n}) when this terminal started its shell — a terminal that joined a shell already running keeps that shell’s';
+  const wL = cpuPriorityWords({ by: 5, of: 'login' }, tt, { remote: true }), wJ = cpuPriorityWords({ by: 5, of: 'login', join: true }, tt, { remote: true }), wA = cpuPriorityWords({ by: 5 }, tt, { remote: true });
+  const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js'), BR = read('src/server/boot-restore.js');
+  ok(wL === tt(KL, { n: '5' }) && wJ === tt(KJ, { n: '5' }) && wA === 'Below its machine’s agent (nice +5), and everything it starts' && [KL, KJ].every((k) => ZH.includes(J(k) + ': ') && JA.includes(J(k) + ': ')),
+    'Session Properties says it: «Below its ssh login on that machine (nice +5)…», and for the terminal «… when this terminal started its shell — a terminal that joined a shell already running keeps that shell’s» (en, zh, ja); the device road keeps «Below its machine’s agent»', { wL, wJ, wA });
+  // the boot's restore: sessionFromMeta stands alone (its suites hand it os, poolPinFromMeta, restoreMarks, BUILD_VERSION only) — so its
+  // rule is inline; held equal to factOf over every shape here
+  const restoredSame = () => {
+    const br = read('src/server/boot-restore.js'), body = (br.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0];
+    if (!body) return false;
+    const sfm = new Function('os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', `${body}\nreturn sessionFromMeta;`)(os, () => null, () => ({}), '');
+    const shapes = [{ by: 5, of: 'login', join: true }, { by: 5, of: 'login' }, { by: 5 }, { by: 5, of: 'agent' }, { by: 5, join: true }, { by: 0, why: 'remote', of: 'login' }, { by: 0, why: 'other' }, { by: 30 }, null, 'x', [5]];
+    return shapes.every((c) => { let got; try { got = sfm({ id: 'x', cwd: '/w', cpuNice: c }, {})._cpuNice; } catch { return false; } return J(got === undefined ? null : got) === J(SPRI.factOf(c)); });
+  };
+  const kept = [{ by: 5, of: 'login', join: true }, { by: 5, of: 'login' }, { by: 5 }, { by: 5, of: 'agent' }, { by: 5, join: true }, { by: 0, why: 'remote', of: 'login' }].map((x) => SPRI.factOf(x));
+  ok(J(kept) === J([{ by: 5, of: 'login', join: true }, { by: 5, of: 'login' }, { by: 5 }, { by: 5 }, { by: 5 }, { by: 0, why: 'remote' }])
+    && restoredSame(),
+    'A STORED FACT keeps its base: factOf keeps `of: login` (and `join` only with it), drops any other base; the boot\'s restore (sessionFromMeta, evaluated ON ITS OWN as test-seen-marks and test-oat-identity evaluate it) rebuilds every fact exactly as factOf reads it — its inline copy dropped the base at a restart', kept);
+  // (3) AN ssh-ONLY MACHINE WITH NO ANSWER IT CAN USE is said ONCE a machine — never its bytes; RED: a copy without the line
+  const noAnswerLines = (SP) => {
+    const got = [], log = { warn: (l) => got.push(l) };
+    SP._reset?.();
+    SP.sshPriorityFor({ hello: null, machine: { id: 'm1', name: 'desk one' }, log }); SP.sshPriorityFor({ hello: null, machine: { id: 'm1', name: 'desk one' }, log });
+    SP.sshPriorityFor({ hello: { nicePath: '/tmp/evil-nice', platform: 'linux' }, machine: { id: 'm2', name: 'desk two' }, log });
+    SP.sshPriorityFor({ hello: { nicePath: '/usr/bin/nice', platform: 'linux' }, machine: { id: 'm3', name: 'desk three' }, log });
+    SP.sshPriorityFor({ serverSetting: (k) => (k === SP.SETTING ? false : undefined), hello: null, machine: { id: 'm4', name: 'desk four' }, log });
+    return got;
+  };
+  const NL = noAnswerLines(SPRI);
+  ok(NL.length === 2 && /desk one: no answer it can use from its agent/.test(NL[0]) && /desk two/.test(NL[1]) && !NL.some((l) => /evil|desk three|desk four/.test(l)),
+    'AN ssh-ONLY MACHINE WITH NO ANSWER IT CAN USE is said ONCE a machine in the journal (no link up, another path named), as a paired machine\'s is; never the path it named; a listed answer and the setting off say nothing', NL);
+  const SPSRC = read('src/server/spawn-priority.js');
+  const SPX = MF.load('src/server/spawn-priority.js', anchored(SPSRC, '  if (id && !saidNoSsh.has(id) && saidNoSsh.size < 256) {', '  if (false) {', 'the ssh no-answer line cut'), 'ssh-no-line');
+  const NLX = SPX ? noAnswerLines(SPX) : null;
+  ok(!!NLX && NLX.length === 0, 'RED CONTROL (the line cut, in a copy): a machine with no answer starts at its own priority and the journal never says why — the check above is red on it', NLX);
+  // (5) the serve's start reads server.js's ONE serverSetting (lens 1): handed in, no second reader in cli-env
+  const CLI = read('src/server/cli-env.js'), SRV = read('server.js');
+  ok(CLI.split("priorityFor({ serverSetting });").length === 2 && !CLI.includes('readSettings()[k]') && /getHeldPtyIds = \(\) => \[\], serverSetting = \(\) => undefined \}\) \{/.test(CLI)   // stale-pins: kept (a deliberate absence check: no second settings reader)
+    && SRV.split('resolveCmd, serverSetting: (k) => serverSetting(k),').length === 2,
+    'THE SERVE\'S START reads the setting through server.js\'s ONE serverSetting, handed to cli-env\'s create — no second reader of the settings in cli-env');
+  SPRI._reset();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

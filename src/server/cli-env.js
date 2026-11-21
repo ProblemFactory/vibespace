@@ -44,7 +44,7 @@ function storeFailureReason(h, st = null) {
 
 function create({ rootDir, CLAUDE_CMD_RAW, CODEX_CMD_RAW, resolveCmd,
   getOAuthToken, usagePollingEnabled, refreshHarnessModels, broadcast = null,
-  getTelemetry = () => null, getPlugins = () => null, getHeldPtyIds = () => [] }) {
+  getTelemetry = () => null, getPlugins = () => null, getHeldPtyIds = () => [], serverSetting = () => undefined }) {
   const USAGE_CACHE_DIR = path.join(rootDir, 'data', 'usage-cache');
 // ── X display detection (Linux clipboard / xclip) ──
 // The inherited DISPLAY is unreliable: the server is often (re)started from
@@ -241,10 +241,10 @@ const opencodeServe = opencodeServeModule.install({
   stopOnExit: true,
   autostart: opencodeServeAutostart,
   // B-460d's remainder (主开发 r1362): the serve STARTS below the hub — the ONE start verdict, read at each start where every other
-  // start reads it (the person's `agents.lowerCpuPriority`, read as server.js serverSetting reads a setting), composed by the ONE
+  // start reads it (the person's `agents.lowerCpuPriority`, through server.js's serverSetting itself), composed by the ONE
   // composer (src/spawn/line.js priorityArgv). Unproven on the real program: the box and the test machines hold no `opencode`
   startPrefix: () => {
-    const pri = require('./spawn-priority.js').priorityFor({ serverSetting: (k) => { try { const p = require('../routes/persistence').router; return p.readSettings ? p.readSettings()[k] : undefined; } catch { return undefined; } } });
+    const pri = require('./spawn-priority.js').priorityFor({ serverSetting });   // server.js's ONE serverSetting, handed in (the round's should: no second reader)
     return { argv: require('../spawn/line.js').priorityArgv(pri.priority), fact: pri.fact };
   },
   telemetry: (ev) => { try { getTelemetry()?.record({ kind: 'event', ...ev }); } catch { } },

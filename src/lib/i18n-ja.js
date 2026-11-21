@@ -1054,6 +1054,8 @@ export default {
   "CPU priority": "CPU 優先度",
   "Below the server (nice +{n}) — and everything it starts": "サーバーより低い（nice +{n}）——起動するものもすべて同じ",
   "Below its machine’s agent (nice +{n}), and everything it starts": "そのマシンのエージェントより低い（nice +{n}）、起動するものもすべて同じ",
+  "Below its ssh login on that machine (nice +{n}), and everything it starts": "そのマシンの ssh ログインより低い（nice +{n}）、起動するものもすべて同じ",   // B-460d follow (login-request-card)
+  "Below its ssh login on that machine (nice +{n}) when this terminal started its shell — a terminal that joined a shell already running keeps that shell’s": "この端末がシェルを起動したときはそのマシンの ssh ログインより低い（nice +{n}）——すでに動いているシェルに接続した端末はそのシェルの優先度のまま",   // B-460d follow (login-request-card)
   "The server’s own — lowering it is off in Settings": "サーバーと同じ——設定で引き下げがオフ",
   "The server’s own — this machine has no nice program": "サーバーと同じ——このマシンには nice プログラムがない",
   "Set by its own machine — not lowered from here": "そのマシンが決める——ここからは下げない",
