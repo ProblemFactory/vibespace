@@ -26,6 +26,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A long-lived token on its last day no longer reads as expired anywhere: it still runs conversations, as the server lets it.
 - After a page reload, the line saying what a stopped turn left running is shown again, with its «End them» while it still applies.
 - A slow paired machine's list now comes back in seconds, its last list marked old, instead of that machine being walked a second time.
+- Pasting a picture into a terminal conversation no longer holds up the other windows, and a paste the clipboard does not take now says why.
 
 ## 2.369.415 — 2026-11-21
 
