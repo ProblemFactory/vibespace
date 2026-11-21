@@ -84,6 +84,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The Memory bound field on a Background Work job’s card follows the theme instead of showing a white box.
 - While VibeSpace tidies the usage history, it no longer stops by itself, and a save made at that moment no longer fails.
 - Opening a conversation whose helper agents wrote hundreds of files no longer pauses VibeSpace while those files are listed.
+- In a folder field, the «create» tick you gave one missing folder no longer carries over when the text changes to another path; you are asked again.
 
 ## 2.369.413 — 2026-11-20
 
