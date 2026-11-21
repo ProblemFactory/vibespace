@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const KB = require('../src/browser-kept.js');
@@ -110,6 +110,12 @@ const CID_A = 'e2e00000-0000-4000-8000-0000000000a1', CID_B = 'e2e00000-0000-400
   ok(bad.length === 0, `① each refusal alone, and each UNKNOWN, refuses with its code (${rows.length} rows)`, bad);
   const reachFirst = B.stopVerdict({ ...idle, holders: [{ turn: 'running', granted: false }], takenOver: true, watched: true, personBrowsing: true, inFlight: 'a page dialog' });
   ok(reachFirst.code === 'not_granted' && !/drives|watch|browses|dialog|turn/.test(reachFirst.why), '① MUST 3 REACH FIRST: an unreached holder answers «not yours» and says NOTHING of the live facts behind it', reachFirst);
+  // piece 6 meets the hold laws: a holder whose Task Groups could not be read is UNKNOWN by name (groups_unreadable) — never «not yours»,
+  // and like «not yours» it says nothing of the live facts behind it; a holder plainly outside the reach still answers not_granted
+  const unread = B.stopVerdict({ ...idle, holders: [{ turn: 'running', granted: false, unreadable: true }], takenOver: true, watched: true, personBrowsing: true, inFlight: 'a page dialog' });
+  ok(unread.code === 'groups_unreadable' && /could not be read/.test(unread.why) && !/not yours|drives|watch|browses|dialog|turn is/.test(unread.why) && unread.why.includes(B.STOP_DOOR), '① HOLD LAW: a holder whose Task Groups could not be read refuses BY NAME (groups_unreadable), before any live fact — never «it is not yours»', unread);
+  ok(B.stopVerdict({ ...idle, holders: [{ turn: 'idle', granted: false, unreadable: true }, { turn: 'idle', granted: false }] }).code === 'not_granted' && B.stopVerdict({ ...idle, holders: [{ turn: 'idle', granted: true }, { turn: 'idle', granted: false, unreadable: true }] }).code === 'groups_unreadable',
+    '① HOLD LAW: a holder plainly outside the reach answers not_granted beside an unreadable one; a reached holder beside an unreadable one is still unknown by name');
   const lone = B.stopVerdict({ ...idle, holders: [{ unknown: true }] });
   ok(lone.code === 'not_granted' && !/not running here/.test(lone.why), '① «a holder is not running here» is said only to a key that reaches a holder — to any other it is simply not its own', lone);
   const far = B.stopVerdict({ ...idle, kind: 'remote', takenOver: true });
@@ -278,14 +284,18 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   const M = MUT.load('src/browser-profiles.js', src.replace(NEEDLE, "  const busy = holders.find((h) => h.turn === 'running' || h.turn === 'waiting');"), 'unknown-turn-stops');
   const v = M.stopVerdict({ live: true, holders: [{ turn: null, granted: true }], kind: 'own', takenOver: false, watched: false, personBrowsing: false, tabsKept: true });
   ok(v.stop === true, '⑤ RED a verdict that reads an UNKNOWN turn as idle would stop it — the unknown leg above would be red', v);
-  const N2 = "  if (known.some((h) => h.granted !== true)) return no('not_granted'";
+  const N2 = "  if (known.some((h) => h.granted !== true && h.unreadable !== true)) return no('not_granted'";   // moved with piece 6's hold-law cure (an unreadable holder is its own refusal)
   const M2 = MUT.load('src/browser-profiles.js', src.replace(N2, "  if (false) return no('not_granted'"), 'no-reach');
   ok(src.split(N2).length === 2 && M2.stopVerdict({ live: true, holders: [{ turn: 'idle', granted: false }], kind: 'own', takenOver: false, watched: false, personBrowsing: false, tabsKept: true }).stop === true, '⑤ RED without the reach line an unreached holder\'s browser would stop');
+  // piece 6 meets the hold laws: without the unreadable line a holder whose Task Groups could not be read (its reach UNKNOWN) would be STOPPED
+  const NU = "  if (known.some((h) => h.unreadable === true)) return no('groups_unreadable'";
+  const MU = MUT.load('src/browser-profiles.js', anchored(src, NU, "  if (false) return no('groups_unreadable'", 'no-unreadable'), 'no-unreadable');
+  ok(src.split(NU).length === 2 && MU.stopVerdict({ live: true, holders: [{ turn: 'idle', granted: false, unreadable: true }], kind: 'own', takenOver: false, watched: false, personBrowsing: false, tabsKept: true }).stop === true, '⑤ RED without the unreadable line a holder whose Task Groups could not be read would have its browser STOPPED — an unknown reach admitted');
   const N3 = "  if (holders.length === 0) return no('no_holder'";
   const M3 = MUT.load('src/browser-profiles.js', src.replace(N3, "  if (false) return no('no_holder'"), 'vacuous');
   // 主开发's four in-suite mutants: reach moved below the live facts; the in-flight line removed; the new refusal removed; a helper's tabs forced kept
   const base5 = { live: true, holders: [{ turn: 'idle', granted: true }], kind: 'own', takenOver: false, watched: false, personBrowsing: false, inFlight: null, tabsKept: true };
-  const RL = "  if (known.some((h) => h.granted !== true)) return no('not_granted', 'it is not yours: a conversation outside this key\\'s reach holds it');\n";
+  const RL = "  if (known.some((h) => h.granted !== true && h.unreadable !== true)) return no('not_granted', 'it is not yours: a conversation outside this key\\'s reach holds it');\n";
   const IF = "  if (inFlight) return no('in_flight', `${inFlight} is in progress on it — a stop would cut it`);\n";
   if (src.split(RL).length !== 2 || src.split(IF).length !== 2) throw new Error('anchor missing: reach / in-flight');
   const MR = MUT.load('src/browser-profiles.js', src.replace(RL, '').replace(IF, IF + RL), 'reach-below-facts');
@@ -314,6 +324,37 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   ok(hrow && hrow.tabsKept === true && hv.stop === true, '⑤ RED a helper\'s tabs forced kept (the keeper\'s row): its browser would stop with no loss accepted — tabs promised that are never kept', { tabsKept: hrow && hrow.tabsKept, hv });
   try { await keeper2.stop(hrow.id, { why: 'user' }); } catch { }
   ok(src.split(N3).length === 2 && M3.stopVerdict({ live: true, holders: [], kind: 'profile', takenOver: false, watched: false, personBrowsing: false, tabsKept: false, closeTabs: true }).stop === true, '⑤ RED without the no-holder line a profile nobody holds would be anybody\'s (vacuous checks)');
+}
+
+// ⑯ piece 6 meets the release's hold laws (主开发 r957/r968): while the browser registry is UNREAD the keeper refuses by name
+// (its refuseIfHeld: store_unread — its registry is EMPTY then, because unread), and the stop and the list SAY it: never «no running
+// browser by that id» (already_stopped), never «none runs». The REAL handler and the REAL list source over a keeper that refuses as
+// the held keeper does (the held keeper's own two refusals are legs of test-browser-registry-held §1). RED: each named branch cut.
+console.log('⑯ the browser registry held: the stop and the list refuse BY NAME (store_unread), nothing stopped');
+{
+  const heldErr = () => Object.assign(new Error('the running browsers: browser-profiles.json in VibeSpace\'s data folder could not be read (EACCES)'), { code: 'store_unread' });
+  const CF = require('../src/server/conversation-facts.js');
+  const opsSrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8'), cfSrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
+  const ROWS_AT = "catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, target: args.id }; rows = null; }";
+  const STOP_AT = "catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, target: row.name || row.id }; return";
+  const LIST_AT = "catch (e) { if (e && e.code === 'store_unread') return { why: String(e.message) }; rows = null; }";
+  ok(opsSrc.split(ROWS_AT).length === 2 && opsSrc.split(STOP_AT).length === 2 && cfSrc.split(LIST_AT).length === 2, '⑯ control setup: the three named branches are found once each');
+  const MH = mutantCopies('browser-stop-held', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));
+  const OPS_CUT = MH.load('src/server/conversation-ops.js', anchored(anchored(opsSrc, ROWS_AT, 'catch (e) { rows = null; }', 'rows-held-unnamed'), STOP_AT, 'catch (e) { return', 'stop-held-unnamed'), 'stop-held-unnamed');
+  const CF_CUT = MH.load('src/server/conversation-facts.js', anchored(cfSrc, LIST_AT, 'catch (e) { rows = null; }', 'list-held-unnamed'), 'list-held-unnamed');
+  const row = { id: 'bp-0000a0f1', kind: 'own', name: 'Research', holders: [{ browserKey: KEY_A, sessionId: 'sess-a', turn: 'idle' }], takenOver: false, viewers: 0, personBrowsing: false, inFlight: null, tabsKept: true };
+  const stopWith = async (O, rows, stop) => { let asked = 0; const v = O.automationVerbs({ activeSessions: sessions, browsers: { rows, stop: async (id) => { asked++; return stop(id); } } }); const r = await v['browsers.stop']({ id: row.id }, { keyId: 'K-1', caller: { conversationId: CID_B }, reach: KEY1 }); return { r, asked }; };
+  const rowsHeld = () => { throw heldErr(); }, stopHeld = async () => { throw heldErr(); }, freed = async () => ({ freed: true });
+  const a = await stopWith(OPS, rowsHeld, freed), b = await stopWith(OPS, () => [row], stopHeld), ctl = await stopWith(OPS, () => [row], freed);
+  const aR = await stopWith(OPS_CUT, rowsHeld, freed), bR = await stopWith(OPS_CUT, () => [row], stopHeld);
+  ok(a.r.code === 'store_unread' && /could not be read/.test(a.r.why || '') && /nothing was stopped/.test(a.r.why || '') && a.asked === 0, '⑯ the rows held: the stop refuses BY NAME (store_unread, the keeper\'s words) — nothing is asked to stop, never «no running browser by that id»', a.r);
+  ok(b.r.code === 'store_unread' && /could not be read/.test(b.r.why || '') && b.asked === 1, '⑯ the manager\'s stop refused by the keeper\'s held door: said BY NAME (store_unread) — never «not freed»', b.r);
+  ok(ctl.r.ok === true && ctl.asked === 1, '⑯ CONTROL: the same row and key with the registry read — stopped (the refusals above are the hold\'s)', ctl.r);
+  ok(aR.r.code === 'not_ready' && !/could not be read/.test(aR.r.why || '') && bR.r.code === 'not_freed', '⑯ RED CONTROL (both names cut, in a copy): the hold reads as «the keeper did not answer» and «not freed» — the cause unsaid', { rows: aR.r, stop: bR.r });
+  const listOf = (M, k) => M.sourcesFrom({ keeper: () => k, activeSessions: sessions }).browsers();
+  const heldK = { stopRows: () => { throw heldErr(); } }, lb = listOf(CF, heldK), lbR = listOf(CF_CUT, heldK);
+  ok(lb && !Array.isArray(lb) && /could not be read/.test(lb.why || ''), '⑯ the LIST\'s browsers while held: UNKNOWN by name (the keeper\'s words), never «none runs»', lb);
+  ok(lbR && /did not answer/.test(lbR.why || '') && !/could not be read/.test(lbR.why || ''), '⑯ RED CONTROL (the name cut, in a copy): the list says only «the browser keeper did not answer»', lbR);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

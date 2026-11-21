@@ -917,6 +917,8 @@ It is REFUSED, with the reason, and nothing is stopped:
 - when your key does not reach every conversation holding it (`not_granted`, asked before anything else is said);
 - when no conversation holds it (`no_holder` — its own idle clock stops it);
 - when a holder is not running here (`holder_unknown`);
+- when a holder's Task Groups could not be read just now (`groups_unreadable` — whether it is yours is unknown; ask again);
+- when VibeSpace could not read its browser registry just now (`store_unread` — nothing is stopped; ask again);
 - when a person drives it, watches it or browses in it;
 - when a page dialog, a browser prompt (a file chooser or a sign-in) or a passkey ceremony is open on THAT browser (`in_flight`);
 - when a conversation holding it is mid-turn, or its turn is unknown (`holder_busy`) — your OWN browser is refused while your own turn runs;

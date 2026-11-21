@@ -465,6 +465,25 @@ console.log('⑩ THE STORE HELD UNREAD (the hold\'s law, 主开发 2026-11-19 05
   ok(red.unnamed.r.code === 'not_granted' && red.unnamed.ended === 0, 'RED CONTROL: the reach judge without its named refusal — refused as «not in the Task Groups this grant reaches» (the wrong words; the law says unknown)', red.unnamed.r.code);
   const rel = await run(OPS, 'conversations.end', { target: CID }), relList = await run(OPS, 'conversations.list', {});
   ok(rel.ended === 1 && listed(relList) && !relList.r.groupsUnreadable, 'CONTROL — the store READ (no hold): the same key ends and lists the target (its groups read [] are real: in no group)', { ended: rel.ended, listed: listed(relList) });
+  // piece 6 (browsers.stop, re-landed for the next block — 主开发 r957/r968): THE STOP while held, the same key «everything except
+  // T-G» — a browser held by T-G's conversation is NOT stopped: refused groups_unreadable BY NAME (never «it is not yours»), nothing
+  // stopped. RED: the stop's fact dropped — the key STOPS it. CONTROL: the store read, the same key stops it (in no group is real).
+  const STOP_AT = "groups: gl, ...require('./groups-hold.js').fact() }, glr === null ? null : lineageOfIds(gl))); } catch { v = null; }   // the stop's reach";
+  const stopRun = async (O) => {
+    let stopped = 0;
+    const row = { id: 'bp-0000e0f1', kind: 'own', name: 'Worker', holders: [{ browserKey: 'vs-bk-eeeeeeeeeeee', sessionId: 'sess-1', turn: 'idle' }], takenOver: false, viewers: 0, personBrowsing: false, inFlight: null, tabsKept: true };
+    const verbs = O.automationVerbs({ activeSessions: new Map([['sess-1', session()]]), browsers: { rows: () => [row], stop: async () => { stopped++; return { freed: true }; } } });
+    const r = await verbs['browsers.stop']({ id: row.id }, { caller: { conversationId: CALLER, sessionKey: `claude:${CALLER}`, name: 'Manager' }, keyId: 'K-1', reach: reachBy(AK) });
+    return { r, stopped };
+  };
+  ok(OPS_SRC.split(STOP_AT).length === 2, 'control setup: the stop\'s reach call (with the hold\'s fact) is found once');
+  GH.setHeld(() => true);
+  let stopHeld, stopRed;
+  try { stopHeld = await stopRun(OPS); stopRed = await stopRun(dropped(STOP_AT, 'stop-fact-dropped')); } finally { GH.setHeld(() => false); }
+  const stopRead = await stopRun(OPS);
+  ok(stopHeld.r.code === 'groups_unreadable' && /could not be read/.test(stopHeld.r.why || '') && !/not yours/.test(stopHeld.r.why || '') && stopHeld.stopped === 0, 'the STOP while held: a key reaching «everything except T-G» does not stop the browser of T-G\'s conversation — refused BY NAME (groups_unreadable), nothing stopped', stopHeld.r);
+  ok(stopRed.stopped === 1 && stopRed.r.ok === true, 'RED CONTROL: the stop\'s fact dropped — the key «except T-G» STOPS the browser of T-G\'s conversation (the harm the law exists for)', stopRed.r);
+  ok(stopRead.stopped === 1 && stopRead.r.ok === true, 'CONTROL — the store READ (no hold): the same key stops it (its groups read [] are real: in no group)', stopRead.r);
 }
 
 console.log('⑪ THE NAME LADDER (主开发 2026-11-20 03:06Z): keeping a record of an end never LOWERS a conversation\'s name');

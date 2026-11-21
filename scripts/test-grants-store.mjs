@@ -560,8 +560,9 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ok(use2(g2([P]), ['tg-p']) && !use2(g2([P]), []) && !use2(g2([PO]), ['tg-p']) && !use2(g2([EV], [P]), ['tg-p']), 'automation-key-use: a parent\'s grant serves the child\'s conversation (with the lineage only); «仅本组» does not; «All except the parent» leaves it out');
     const reach2 = (inh) => AK2.reachVerdict({ keyId: key2.id, caller: 'c0', target: { conversationId: 'k1', groups: ['tg-c'], inherited: inh }, grants: [], opened: [], reach: { taskGroups: ['tg-p'] }, reachRows: [{ door: 'automation-key-reach', resource: 'ag-1', to: [P], except: [] }] });
     ok(reach2(['tg-p']).ok && !reach2([]).ok, 'automation-key-reach: a key reaching the parent reaches a conversation of its child (the target\'s lineage)', [reach2(['tg-p']), reach2([])]);
+    // + piece 6's stop door (browsers.stop, re-landed onto 2.369.414): conversation-ops' lineageOfIds(gl) 2 → 3, reach(targetOf( 5 → 6
     const wSrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8'), opsSrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf-8'), aeSrc = fs.readFileSync(path.join(REPO, 'src/server/automation-engine.js'), 'utf-8');
-    ok(/const ids = grantMemberIds\(tasks, \{ sessionKey: sessionStatusKey\(s, id\)[^\n]*?const gg = tasks\.grantGroupsOf\(ids\); return \{ ids: gg\.ids, inherited: gg\.inherited, unreadable: !!ids\.unread \};/.test(wSrc) && /groups: g\.ids, inherited: g\.inherited \|\| \[\]/.test(wSrc) && /inherited = tasks \? tasks\.grantGroupsOf\(groups\)\.inherited : null;/.test(wSrc) && /lineageOf: \(ids\) => \{ const tk = getTasks && getTasks\(\); if \(!tk\) throw new Error\('the Task Group store is not ready'\); return tk\.grantGroupsOf\(ids\)\.inherited; \}/.test(wSrc) && (opsSrc.match(/lineageOfIds\(gl\)/g) || []).length === 2 && (opsSrc.match(/reach\(targetOf\(/g) || []).length === 5 && (aeSrc.match(/subjectInherited: inherited,/g) || []).length === 3 && /inherited: lineageIn\(caller\.inherited\),/.test(aeSrc) && (aeSrc.match(/lineageIn\(/g) || []).length === 4, 'the automation producers: the caller and every target (live or stopped) carry the lineage from the ONE reader; the engine hands it to every use / pick verdict and records it on an ask');
+    ok(/const ids = grantMemberIds\(tasks, \{ sessionKey: sessionStatusKey\(s, id\)[^\n]*?const gg = tasks\.grantGroupsOf\(ids\); return \{ ids: gg\.ids, inherited: gg\.inherited, unreadable: !!ids\.unread \};/.test(wSrc) && /groups: g\.ids, inherited: g\.inherited \|\| \[\]/.test(wSrc) && /inherited = tasks \? tasks\.grantGroupsOf\(groups\)\.inherited : null;/.test(wSrc) && /lineageOf: \(ids\) => \{ const tk = getTasks && getTasks\(\); if \(!tk\) throw new Error\('the Task Group store is not ready'\); return tk\.grantGroupsOf\(ids\)\.inherited; \}/.test(wSrc) && (opsSrc.match(/lineageOfIds\(gl\)/g) || []).length === 3 && (opsSrc.match(/reach\(targetOf\(/g) || []).length === 6 && (aeSrc.match(/subjectInherited: inherited,/g) || []).length === 3 && /inherited: lineageIn\(caller\.inherited\),/.test(aeSrc) && (aeSrc.match(/lineageIn\(/g) || []).length === 4, 'the automation producers: the caller and every target (live or stopped) carry the lineage from the ONE reader; the engine hands it to every use / pick verdict and records it on an ask');
     // the U3d read (1): a parent's grant never outranks the caller's own group's — ONE order (grant-model specificityOf)
     ok(GM.specificityOf('group', true) < GM.specificityOf('group') && GM.specificityOf('group', true) > GM.specificityOf('everyone') && GM.specificityOf('conversation', true) === GM.specificityOf('conversation') && GM.specificityOf('group', 'yes') === GM.specificityOf('group'), 'the rank: a parent\'s group entry sits below the caller\'s own group and above All agents (only `true` says so; a conversation\'s rank is its own)');
     const kOld = { id: 'ak-00000000001a', name: 'parent-key', scopes: [verb2], digest: 'd', at: 1 }, kNew = { id: 'ak-00000000001b', name: 'own-key', scopes: [verb2], digest: 'd', at: 2 };
@@ -662,6 +663,37 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
       ok(/const endProposals = require\('\.\/end-proposals\.js'\)\.create\(\{[^\n]*\n  lineageOf: \(ids\) => \{ const tk = getTasks && getTasks\(\); if \(!tk\) throw new Error\('the Task Group store is not ready'\); return tk\.grantGroupsOf\(ids\)\.inherited; \},/.test(mpw)
         && /automationVerbs\(\{ jobs: [^\n]*ownerFactsOf: \(cid\) => \{ const k = endedKeyOf\(cid\); return k \? \{ groups: Array\.isArray\(k\.groups\) \? k\.groups : \[\], inherited: k\.inherited, \.\.\.\(k\.inherited === null \? \{ groupsUnreadable: true \} : \{\}\) \} : null; \},/.test(mpw),
         'the wiring hands both new doors the ONE reader: the proposals its grantGroupsOf (no store ⇒ it throws: unknown), the wake verb the ended record\'s groups AND lineage in ONE read (endedKeyOf — restack 416)');
+      // piece 6 (browsers.stop, re-landed onto 2.369.414 — 主开发 r968): the STOP's reach door hands the SAME target (targetOf: the
+      // groups hold's fact and the lineage of the holder's groups). Judged by the REAL reach: «everyone except the parent» does not stop
+      // a browser held by the CHILD's conversation, a grant to the parent does, a lineage read that throws refuses groups_unreadable BY
+      // NAME. RED (anchored): the stop's door with its ancestors planted as [] — «everyone except the parent» STOPS the child's browser.
+      {
+        const stopDoor = async (O, rows, lineageOf) => {
+          const judged = []; let stopped = 0;
+          const reach = (t) => { const v = AK2.reachVerdict({ keyId: key2.id, caller: 'c0', target: t, opened: [], reach: 'instance', reachRows: rows }); judged.push(v.ok ? 'ok' : v.code); return v; };
+          const ctx = { caller: { conversationId: 'c0', sessionKey: 'claude:c0', name: 'Manager' }, keyId: key2.id, reach };
+          const row = { id: 'bp-0000c0f1', kind: 'own', name: 'child', holders: [{ browserKey: 'vs-bk-cccccccccccc', sessionId: 'w-0001', turn: 'idle' }], takenOver: false, viewers: 0, personBrowsing: false, inFlight: null, tabsKept: true };
+          const ops = O.automationVerbs({ activeSessions: new Map([['w-0001', { claudeSessionId: 'k1', backend: 'claude', name: 'child' }]]), groupsOf: () => ['tg-c'], lineageOf,
+            browsers: { rows: () => [row], stop: async () => { stopped++; return { freed: true }; } } });
+          const r = await ops['browsers.stop']({ id: row.id }, ctx);
+          return { judged, code: r.ok ? 'stopped' : r.code, stopped };
+        };
+        const SRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf-8');
+        const STOP_AT = "}, glr === null ? null : lineageOfIds(gl))); } catch { v = null; }   // the stop's reach (as the end verb's)";
+        ok(SRC.split(STOP_AT).length === 2, 'control setup: the stop\'s reach door (its lineage) is found once');
+        const MS = mutantCopies('stop-door-415', REPO);
+        try {
+          const REDO = MS.load('src/server/conversation-ops.js', anchored(SRC, STOP_AT, "}, [])); } catch { v = null; }   // the stop's reach (as the end verb's)", 'stop-no-ancestors'), 'stop-no-ancestors');
+          const OPSR = require('../src/server/conversation-ops.js');
+          const exc = await stopDoor(OPSR, EXC, READS), thr = await stopDoor(OPSR, EXC, THROWS), par = await stopDoor(OPSR, PAR, READS), excR = await stopDoor(REDO, EXC, READS), parR = await stopDoor(REDO, PAR, READS);
+          for (const [n, x] of [['stop, except-parent', exc], ['stop, lineage throws', thr], ['stop, grant to the parent', par], ['RED stop, except-parent', excR], ['RED stop, grant to the parent', parR]]) console.log(`    judged (${n}): ${J(x)}`);
+          ok(J(exc.judged) === J(['excepted']) && exc.code === 'not_granted' && exc.stopped === 0, 'the STOP door: a key «everyone except the parent» does not stop a browser held by the CHILD\'s conversation — refused, nothing stopped', exc);
+          ok(J(thr.judged) === J(['groups_unreadable']) && thr.code === 'groups_unreadable' && thr.stopped === 0, 'the STOP door, a lineage read that THROWS: refused groups_unreadable BY NAME (never «it is not yours»), nothing stopped', thr);
+          ok(J(par.judged) === J(['ok']) && par.code === 'stopped' && par.stopped === 1, 'the STOP door, a key granted to the PARENT group: the child\'s browser nobody uses is stopped', par);
+          ok(J(excR.judged) === J(['ok']) && excR.code === 'stopped' && excR.stopped === 1, 'RED CONTROL: the stop door without the ancestors — «everyone except the parent» STOPS the child\'s browser: the harm the law closes', excR);
+          ok(J(parR.judged) === J(['not_granted']) && parR.code === 'not_granted' && parR.stopped === 0, 'RED CONTROL: without the ancestors a grant to the parent stops none', parR);
+        } finally { try { fs.rmSync(MS.dir, { recursive: true, force: true }); } catch { } }
+      }
     }
     // restack 416 — 主开发 r311 (a): a list / propose ROW whose own Task Groups are still being read (the facts builder's mark, from the
     // wiring's STRICT read) is refused unreadable BY NAME at both doors — never «in no group»; (b): a door wired with NO lineage reader

@@ -1157,7 +1157,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    */
   const IN_FLIGHT = Object.freeze({ dialog: 'a page dialog', prompt: 'a browser prompt (a file chooser or a sign-in)', passkey: 'a passkey ceremony' });
   function stopRows() {
-    ensureLoaded();
+    refuseIfHeld('the running browsers');   // piece 6 meets the hold laws: while held the registry is EMPTY because it is unread — «none runs» would be a false answer
     const out = [];
     for (const p of reg.profiles) {
       const rec = reg.browsers[p.id];
@@ -1189,6 +1189,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  → { freed, why } — the TRUTH of what was freed: a browser still running, or ANY residue the stop left in its error field
    *  (the reason word aside), is NOT freed. Who stopped it is the record's `stoppedBy` (the Browser panel words it). */
   async function managerStop(profileId) {
+    refuseIfHeld('the stop');   // piece 6 meets the hold laws: refused by name before anything is stopped (the registry unread names no record)
     await stop(profileId, { why: 'manager' });
     const rec = reg.browsers[profileId];
     if (!rec) return { freed: false, why: 'its record is gone' };

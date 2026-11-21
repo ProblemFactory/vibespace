@@ -687,7 +687,8 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
     // outside the key's reach — every unknown refuses. The rows come from the keeper (stopRows: a read, no file).
     'browsers.stop': async (args, ctx) => {
       if (!browsers || typeof browsers.rows !== 'function' || typeof browsers.stop !== 'function') return { ok: false, code: 'not_ready', why: 'the browser keeper is not wired yet' };
-      let rows = null; try { rows = browsers.rows(); } catch { rows = null; }
+      // piece 6 meets the hold laws: while the browser registry is unread the keeper refuses BY NAME — never «no running browser»
+      let rows = null; try { rows = browsers.rows(); } catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, target: args.id }; rows = null; }
       if (!Array.isArray(rows)) return { ok: false, code: 'not_ready', why: 'the browser keeper did not answer — nothing was stopped' };
       const row = rows.find((r) => r && r.id === args.id) || null;
       if (!row) return { ok: false, code: 'already_stopped', why: 'no running browser by that id — nothing was stopped', target: args.id };
@@ -696,16 +697,18 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       const holders = (Array.isArray(row.holders) ? row.holders : []).map((h) => {
         const s = h && h.sessionId ? activeSessions.get(h.sessionId) || null : null;
         if (!s) return { turn: null, granted: false, unknown: true };
-        let granted = false;
-        try { const v = ctx.reach({ conversationId: idOf(s), webuiId: h.sessionId, groups: groupsOfLive(s, h.sessionId) }); granted = !!(v && v.ok); } catch { granted = false; }
-        return { turn: h && h.turn !== undefined ? h.turn : null, granted };
+        // piece 6 meets the hold laws and the lineage law: the ONE target every reach door hands (targetOf) — the groups hold's fact
+        // and the ancestors of the holder's groups; a group read that fails (groupsOfLive null) is refused unreadable BY NAME
+        const glr = groupsOfLive(s, h.sessionId), gl = glr || [];
+        let v = null; try { v = ctx.reach(targetOf({ conversationId: idOf(s), webuiId: h.sessionId, groups: gl, ...require('./groups-hold.js').fact() }, glr === null ? null : lineageOfIds(gl))); } catch { v = null; }   // the stop's reach (as the end verb's)
+        return { turn: h && h.turn !== undefined ? h.turn : null, granted: !!(v && v.ok), ...(v && v.code === 'groups_unreadable' ? { unreadable: true } : {}) };
       });
       const v = require('../browser-profiles.js').stopVerdict({ live: true, holders, kind: row.kind || null, takenOver: typeof row.takenOver === 'boolean' ? row.takenOver : null,
         watched: Number.isInteger(row.viewers) ? row.viewers > 0 : null, personBrowsing: typeof row.personBrowsing === 'boolean' ? row.personBrowsing : null,
         inFlight: row.inFlight || null, tabsKept: row.tabsKept === true, closeTabs: args.closeTabs === true });
       if (!v.stop) return { ok: false, code: v.code, why: v.why, target: row.name || row.id };
       let r = null;
-      try { r = await browsers.stop(row.id); } catch (e) { return { ok: false, code: 'not_freed', why: `the keeper could not stop it — ${(e && e.message) || 'no reason given'}; nothing was freed`, target: row.name || row.id }; }
+      try { r = await browsers.stop(row.id); } catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, target: row.name || row.id }; return { ok: false, code: 'not_freed', why: `the keeper could not stop it — ${(e && e.message) || 'no reason given'}; nothing was freed`, target: row.name || row.id }; }
       // THE ANSWER TELLS THE TRUTH ABOUT WHAT WAS FREED: «not freed» is not ok
       if (!r || r.freed !== true) return { ok: false, code: 'not_freed', why: `not freed — ${(r && r.why) || 'the keeper did not say it stopped'}`, target: row.name || row.id };
       const tabs = row.kind === 'own' ? 'Its tabs reopen at the next browser command.' : row.kind === 'helper' ? 'A helper\'s browser keeps nothing: its tabs are closed.' : 'Its tabs closed; its sign-ins stay.';
