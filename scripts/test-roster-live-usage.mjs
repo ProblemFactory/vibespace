@@ -409,6 +409,14 @@ console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset R
   const umRed = await patchedImport('src/lib/usage-meter.js', 'claude-auto-fallback', [["      rl = !claudeDefId ? this._rateLimit : ((claudeDefKey && this._accountUsage?.[claudeDefKey]) || (claudeDefKey && gl.accountId === claudeDefKey ? this._rateLimit : null) || null);", "      rl = (claudeDefId && this._accountUsage?.[claudeDefId]) ? this._accountUsage[claudeDefId] : this._rateLimit;"]]);   // stale-pins: kept (the RED copy plants the release's fallback on purpose)
   const AW2dr = umRed ? autoLegs(umRed) : null;
   ok('B-2d35 RED: a copy with the CLI login\'s fallback put back draws B\'s 90 % under «Acct A» (no reading of its own) — the legs see it', !!AW2dr && /Acct A/.test(AW2dr.w2.title) && AW2dr.w2.n90, AW2dr ? showW(AW2dr.w2) : 'the patched line is not there');
+  // B-2d35 small (round wfm9rn69h): a POOL default's note names what the view shows — the pool's CURRENT member, never «Default
+  // account» (an account default keeps its note); RED: the release's note line in an anchored copy says «Default account» for the pool
+  const poolNote = /current member · refreshes when you run it in a terminal session/, defNote = /Default account · refreshes when you run it in a terminal session/;
+  ok('B-2d35 the POOL default\'s note says «The pool\'s current member · …», never «Default account»', poolNote.test(AW2d.w3.pop) && !defNote.test(AW2d.w3.pop), AW2d.w3.pop.slice(0, 300));
+  ok('B-2d35 …an ACCOUNT default keeps «Default account · …»', defNote.test(AW2d.w1.pop) && !poolNote.test(AW2d.w1.pop), AW2d.w1.pop.slice(0, 300));
+  const umNote = await patchedImport('src/lib/usage-meter.js', 'claude-pool-note', [["      if (defAcct) usageNote = claudeDefRow && claudeDefRow.type === 'pooled' ? t('The pool\\'s current member · refreshes when you run it in a terminal session') : t('Default account · refreshes when you run it in a terminal session');", "      if (defAcct) usageNote = t('Default account · refreshes when you run it in a terminal session');"]]); // stale-pins: kept — the RED plants the release's note line
+  const wNoteRed = umNote ? autoWorld(umNote, { def: 'P', cur: 'A' }) : null;
+  ok('B-2d35 RED (the note): the release\'s line says «Default account» for the pool — the leg sees it', !!wNoteRed && defNote.test(wNoteRed.pop) && !poolNote.test(wNoteRed.pop), wNoteRed ? wNoteRed.pop.slice(0, 200) : 'the patched line is not there');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(r.name, r.pass, r.detail);
 }
 console.log(`\n${pass} passed, ${fail} failed`);

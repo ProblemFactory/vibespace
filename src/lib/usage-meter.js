@@ -343,7 +343,8 @@ export function installUsageMeter(App, ctx = {}) {
       const defAcct = claudeDefKey ? claudeSubs.find(a => a.id === claudeDefKey) : null;
       rl = !claudeDefId ? this._rateLimit : ((claudeDefKey && this._accountUsage?.[claudeDefKey]) || (claudeDefKey && gl.accountId === claudeDefKey ? this._rateLimit : null) || null);
       claudeUsageLabel = defAcct ? defAcct.name : 'Claude';
-      if (defAcct) usageNote = t('Default account · refreshes when you run it in a terminal session');
+      // B-2d35 (round wfm9rn69h): a POOL as the default names its CURRENT member — the note says that, never «Default account»
+      if (defAcct) usageNote = claudeDefRow && claudeDefRow.type === 'pooled' ? t('The pool\'s current member · refreshes when you run it in a terminal session') : t('Default account · refreshes when you run it in a terminal session');
     } else if (sel === '__global__') {
       rl = this._rateLimit;
       // Prefer the token-derived identity (actualEmail, captured by ⟳) over
@@ -393,7 +394,7 @@ export function installUsageMeter(App, ctx = {}) {
       // under the plain «Codex» label (no account named)
       codex = codexDefId ? ((codexDefKey && cBuckets[codexDefKey]) || null) : this._codexRateLimit;
       codexLabel = defAcct ? defAcct.name : 'Codex';
-      if (defAcct) codexNote = t('Default account · refreshes as its sessions run');
+      if (defAcct) codexNote = codexDefRow && codexDefRow.type === 'pooled' ? t('The pool\'s current member · refreshes as its sessions run') : t('Default account · refreshes as its sessions run');
     } else if (cSel === '__global_codex__') {
       codex = cBuckets['__global_codex__'] || null;
       codexLabel = t('Codex CLI login') + (cgl.email ? ` · ${cgl.email}` : '');
