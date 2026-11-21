@@ -164,8 +164,11 @@ const S = await soundStream(...viaDevice(dm));
     const T = tonePackets(), i0 = T.findIndex((p) => p.equals(S.rtp[3].payload));
     ok(i0 >= 0 && S.rtp.slice(3, 30).every((r, k) => r.payload.equals(T[(i0 + k) % T.length])) && FE.runs().length === 1 && FE.runs()[0].argv.join(' ') === SND.soundEncoderArgs(Number(/:(\d+)\?/.exec(FE.runs()[0].argv.at(-1))[1])).join(' '), 'THE ENCODER\'S packets reach the stand-in byte for byte (the fake replays the committed tone); it was run with the product\'s argv (soundEncoderArgs)', FE.runs());
   }
+  // the stream's own numbers ride its once-a-second push (as §3 below says): the count is WAITED for, bounded at four pushes, and red
+  // by name past the bound — never one read of a moving number right after the stand-in's 75 packets (主开发 r999: the box read 39 / 39)
+  const counted = await until(() => { const a = S.stats() && S.stats().audio; return !!a && a.packets > 40 && a.sent > 40; }, 4000);
   const st = S.stats() && S.stats().audio;
-  ok(st && st.state === 'live' && st.road === 'loopback' && st.packets > 40 && st.sent > 40 && st.stray === 0 && st.kbps > 20 && st.endpoint === 'Speakers (Sound Blaster X3)', 'the stream\'s numbers say it: live, the loopback road, its packets / kbps, nothing stray', st);
+  ok(counted && st && st.state === 'live' && st.road === 'loopback' && st.packets > 40 && st.sent > 40 && st.stray === 0 && st.kbps > 20 && st.endpoint === 'Speakers (Sound Blaster X3)', `the stream\'s numbers say it: live, the loopback road, its packets / kbps, nothing stray${counted ? '' : ' — its own count never passed 40 within 4 s of its pushes'}`, st);
   const nOn = S.rtp.length, last1 = S.rtp[S.rtp.length - 1];
   const off = await dm.streamAudio(S.off.sid, { on: false });
   ok(off && off.ok && off.on === false && off.was === true, 'the second press (stream-audio off) ⇒ off', off);
@@ -226,7 +229,7 @@ console.log('§3 refusals by name');
   const stray = dgram.createSocket('udp4');
   const fake = Buffer.concat([Buffer.from([0x80, 0x60, 0, 1, 0, 0, 0, 1, 0x12, 0x34, 0x56, 0x78]), Buffer.from([0xfc, 1, 2, 3])]);
   await new Promise((res) => stray.send(fake, sock.address().port, '127.0.0.1', res));
-  await sleep(300);
+  await until(() => cap.stats().stray >= 1, 3000);   // r999's law: the stray's count is waited for, bounded (it was a fixed 300 ms sleep)
   const st = cap.stats(); cap.stop('test'); stray.close();
   ok(rs.ok && st.stray === 1 && !got.some((p) => p.payload.length === 4 && p.payload[0] === 0xfc && p.payload[1] === 1), 'THE SENDER IS PINNED: ffmpeg\'s first datagram names its port + SSRC; a stray datagram from another socket of this box is dropped and counted, never sent', { stray: st.stray });
 }
