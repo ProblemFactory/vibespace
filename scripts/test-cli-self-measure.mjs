@@ -23,6 +23,7 @@ import { EventEmitter } from 'node:events';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { anchored } from './scratch.mjs';   // 主开发 r1393: the heavy census pin's RED (a planted text)
 import { mutantCopies } from './mutant-copy.mjs'; // B-f1a2's RED CONTROL: the release's lines of src/message-window.js
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -861,6 +862,24 @@ console.log('§12 the incident: a hub whose data dir is under a home that is a g
       W.o.stop();
     } finally { crypto.randomBytes = realRB; }
   }
+}
+
+console.log('§ the heavy census, pinned in a FAST suite (主开发 r1393): a listener added to the launcher with the heavy census unmoved reds HERE');
+{
+  // test-oat-measure-fake is heavy (the hosted runner skips it by design): its error-listener census is read from ITS OWN text
+  // and compared with what the module holds — the census count, its stubbed control's swaps, its belt's swaps
+  const HEAVY = read('scripts/test-oat-measure-fake.mjs'), PRAW = read('src/claude-oat-probe.js');
+  const listeners = (PRAW.match(/\.on\('error', /g) || []).length, client = (PRAW.match(/server\.on\('clientError'/g) || []).length, proc = (PRAW.match(/process\.on\('(?:uncaughtException|unhandledRejection)'/g) || []).length;
+  const judgeHeavy = (text) => {
+    const stated = (re) => { const m = re.exec(text); return m ? Number(m[1]) : NaN; };
+    const N = stated(/count\(\/\\\.on\\\('error', \/g\) === (\d+)/), D = stated(/dead\.n === (\d+)/), Bt = stated(/belt\.n === (\d+)/);
+    return { ok: listeners > 0 && N === listeners && D === listeners + client + proc && Bt === listeners + client, N, D, Bt };
+  };
+  const { N, D, Bt } = judgeHeavy(HEAVY);
+  ok(judgeHeavy(HEAVY).ok,
+    `the heavy census (test-oat-measure-fake) states the launcher's error listeners as src/claude-oat-probe.js holds them: ${listeners} .on('error') (stated ${N}), its stubbed control ${listeners + client + proc} swaps (stated ${D}), its belt ${listeners + client} (stated ${Bt})`, { N, D, Bt, listeners, client, proc });
+  const unmoved = anchored(HEAVY, "count(/\\.on\\('error', /g) === " + listeners, "count(/\\.on\\('error', /g) === " + (listeners - 1), 'heavy census unmoved');
+  ok(!judgeHeavy(unmoved).ok, `RED CONTROL: the heavy census left at ${listeners - 1} while the module holds ${listeners} listeners — the pin reds (as it would have at 0c2513b59)`);
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
