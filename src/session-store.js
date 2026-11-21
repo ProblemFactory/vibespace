@@ -566,8 +566,8 @@ function _jsonlCachePut(id, entry) {
 /** The census row (tail bytes ≈ the parsed messages' share of the heap) + the position indexes their merges keep (the agy
  *  chain's cure: that memory was out of sight) — an index lives beside its tail's array, so the row counts it with them. */
 function jsonlCacheCensus() {
-  const ix = jsonlPosCensus();
-  const row = cacheRow('transcript tails', { bytes: _jsonlResident + ix.bytes, count: _jsonlCache.size, unit: 'entries', ceiling: JSONL_CACHE_MAX_BYTES, basis: `tail bytes + their position indexes (${ix.keys} keys, ${ix.ords} ordinals ≈ ${Math.round(ix.bytes / 1024)} KB, estimated at ${POS_KEY_BYTES} B a key + ${POS_ORD_BYTES} B an ordinal) (128 MB floor for idle tails; the live set ≤ ${JSONL_LIVE_MAX_BYTES / 1048576} MB${_jsonlLiveEvicted ? ', ' + _jsonlLiveEvicted + ' live tails evicted past it' : ''})`, live: _jsonlLive });
+  const ix = jsonlPosCensus(), ts = taskStateCensus();
+  const row = cacheRow('transcript tails', { bytes: _jsonlResident + ix.bytes + ts.bytes, count: _jsonlCache.size, unit: 'entries', ceiling: JSONL_CACHE_MAX_BYTES, basis: `tail bytes + their position indexes (${ix.keys} keys, ${ix.ords} ordinals ≈ ${Math.round(ix.bytes / 1024)} KB, estimated at ${POS_KEY_BYTES} B a key + ${POS_ORD_BYTES} B an ordinal) + the kept task-state answers (${ts.answers}, ${ts.rows} entries ≈ ${Math.round(ts.bytes / 1024)} KB at ${TASK_ROW_BYTES} B an entry) (128 MB floor for idle tails; the live set ≤ ${JSONL_LIVE_MAX_BYTES / 1048576} MB${_jsonlLiveEvicted ? ', ' + _jsonlLiveEvicted + ' live tails evicted past it' : ''})`, live: _jsonlLive });
   row.over = !!(JSONL_CACHE_MAX_BYTES && _jsonlResident > JSONL_CACHE_MAX_BYTES);   // its read (S3): OVER is judged on what the bound counts (the tails), never on the index estimate
   return row;
 }
@@ -812,6 +812,31 @@ function extractSessionMeta(filePath, st0 = null) {   // st0 (B-891e): the walk'
 const TASK_EVENT_CACHE_MAX = 256; // conversations whose task events are kept (least recently warmed out first)
 const _taskEventCache = new Map(); // conversation id → {fp, ino, offset, size, seq, pending, events, uuids}
 const _taskWarming = new Map();
+// THE TASK-STATE ANSWER KEPT WHILE ITS INPUTS ARE THE SAME OBJECTS (B-360d part 2, 主开发 r1223 — every attach builds a FRESH
+// reader and its task state walked the reader's whole window again, 78–230 ms a time, when nothing had changed): keyed by the
+// reader's merged records (`_all` — the merge memo hands every fresh reader the SAME array until the transcript or its buffer
+// moves), and kept only while the kept task events (the entry, its seq and length: they only grow) and the wrapper's start (the
+// phantom rule reads it) are the ones it was built from. A WeakMap by the records array: it dies with them (the transcript
+// tails' census row counts it). Every caller gets its own copy.
+const _taskStateMemo = new WeakMap();   // the reader's merged records array → { kept, seq, n, wStart, answer }
+const _taskScanCounts = { scans: 0, kept: 0, records: 0 };   // what taskState walked / answered from the kept answer (test-task-scan-loop ⑧ counts them)
+const TASK_ROW_BYTES = 160;   // a kept answer's entry ≈ a small object of a few short strings (an estimate, stated)
+function copyTaskState(st) {
+  const tasks = {};
+  for (const [k, v] of Object.entries(st.tasks)) tasks[k] = v && typeof v === 'object' ? { ...v } : v;
+  return { tasks, todos: st.todos.map((t) => (t && typeof t === 'object' ? { ...t } : t)) };
+}
+/** The kept answers' memory: those of the cached tails' merged records (the merge memo of each entry's array). */
+function taskStateCensus() {
+  let answers = 0, rows = 0;
+  for (const e of _jsonlCache.values()) {
+    const m = e && e.messages && _mergeMemo.get(e.messages);
+    const k = m && m.all && _taskStateMemo.get(m.all);
+    if (!k) continue;
+    answers++; rows += Object.keys(k.answer.tasks).length + k.answer.todos.length;
+  }
+  return { answers, rows, bytes: rows * TASK_ROW_BYTES };
+}
 const TASK_NEEDLES = ['"TaskCreate"', '"TaskUpdate"', '"TodoWrite"', 'Task #'];
 /** THE WORKER'S READ (B-299b A2): the complete lines of `fp` from byte `offset` that may carry a task-tool event (the full
  *  scan's own pre-filter), each parsed to its facts → {size, ino, next, reset, items: [{uuid, ts, type, blocks}]} | null (no
@@ -1395,8 +1420,23 @@ class SessionMessages {
 
   _scanTaskState() {
     this._ensureParsed();
+    // B-360d part 2: the answer kept for these very inputs (the merged records, the kept task events as they stand, the
+    // wrapper's start) — a fresh reader of an unchanged conversation (every re-attach) walks nothing
+    let key = null;
+    try {
+      const hid0 = getHistorySessionId(this._session);
+      const kept0 = (hid0 ? (_taskEventCache.get(hid0) || (this._session?.claudeSessionId && _taskEventCache.get(this._session.claudeSessionId))) : null) || null;
+      key = { kept: kept0, seq: kept0 ? kept0.seq : -1, n: kept0 && Array.isArray(kept0.events) ? kept0.events.length : -1, wStart: Number(this.wrapperMeta()?.startedAt) || 0 };
+      const was = this._all ? _taskStateMemo.get(this._all) : null;
+      if (was && was.kept === key.kept && was.seq === key.seq && was.n === key.n && was.wStart === key.wStart) { _taskScanCounts.kept++; return copyTaskState(was.answer); }
+    } catch { key = null; }
+    _taskScanCounts.scans++; _taskScanCounts.records += (this._all || []).length;
     const tasks = {};
     const todos = [];
+    // a launch's task id → the tool_use ids of the entries that carry it (B-360d part 2: the supersede below asked every entry
+    // of `tasks` at every launch — quadratic in the launches of the window; 61 % of the scan measured)
+    const byTaskId = new Map();
+    const putTask = (k, v) => { tasks[k] = v; if (v && v.id != null) { const ks = byTaskId.get(v.id); if (ks) ks.add(k); else byTaskId.set(v.id, new Set([k])); } };
     // Newer task-tool family (TaskCreate/TaskUpdate, CLI ≥2.1.2xx): CRUD by id
     // — replay into a list. The created id only appears in the RESULT text
     // ("Task #N created successfully: …").
@@ -1457,8 +1497,8 @@ class SessionMessages {
           const syn = parseBackgroundLaunch(lu.name, lu.input, txt);
           if (syn) {
             // supersede an earlier launch of the SAME task id (workflow resume)
-            if (syn.id) for (const tk of Object.values(tasks)) { if (tk.id === syn.id && tk.status === 'running') tk.status = 'completed'; }
-            tasks[b.tool_use_id] = { ...syn, status: 'running', _launchTs: Date.parse(msg.timestamp || '') || 0 };
+            if (syn.id) for (const k of byTaskId.get(syn.id) || []) { const tk = tasks[k]; if (tk && tk.id === syn.id && tk.status === 'running') tk.status = 'completed'; }
+            putTask(b.tool_use_id, { ...syn, status: 'running', _launchTs: Date.parse(msg.timestamp || '') || 0 });
           }
         }
       }
@@ -1478,7 +1518,7 @@ class SessionMessages {
       }
       if (msg.type === 'system' && msg.tool_use_id) {
         if (msg.subtype === 'task_started') {
-          tasks[msg.tool_use_id] = { id: msg.task_id, type: msg.task_type === 'local_agent' ? 'agent' : 'command', description: msg.description || '', status: 'running' };
+          putTask(msg.tool_use_id, { id: msg.task_id, type: msg.task_type === 'local_agent' ? 'agent' : 'command', description: msg.description || '', status: 'running' });
         } else if (msg.subtype === 'task_progress' && tasks[msg.tool_use_id]) {
           if (msg.description) tasks[msg.tool_use_id].description = msg.description;
           if (msg.last_tool_name) tasks[msg.tool_use_id].lastTool = msg.last_tool_name;
@@ -1535,6 +1575,7 @@ class SessionMessages {
     if (!todos.length && taskList.size) {
       todos.push(...[...taskList.entries()].sort((a, b) => Number(a[0]) - Number(b[0])).map(([, v]) => v));
     }
+    if (key && this._all) _taskStateMemo.set(this._all, { ...key, answer: copyTaskState({ tasks, todos }) });
     return { tasks, todos };
   }
 }
@@ -1778,7 +1819,7 @@ function dedupWebuiSockets(entries) {
 
 module.exports = { claudeTranscriptIndex, stuckSaid,
   warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus,
-  taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache, _mergeCounts, _jsonlPosOf: jsonlPosOf, _userAtOrAfter: userAtOrAfter, _jsonlPosCensus: jsonlPosCensus, POS_KEY_BYTES, POS_ORD_BYTES,
+  taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache, _mergeCounts, _taskScanCounts, _taskStateCensus: taskStateCensus, _jsonlPosOf: jsonlPosOf, _userAtOrAfter: userAtOrAfter, _jsonlPosCensus: jsonlPosCensus, POS_KEY_BYTES, POS_ORD_BYTES,
   extractSessionMeta,
   SESSIONS_DIR,
   dedupWebuiSockets,
