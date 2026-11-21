@@ -179,6 +179,10 @@ const TW = require(path.join(REPO, 'src/transcript-worker.js'));
 const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); } });
 {
   const P = up(); C._setTranscriptPoolForTest(P);
+  // the refusal kinds above left the file the STORAGE's (the mark stands until a history read answers): a history read the pool
+  // answers ends it — as at a hub whose storage came back
+  try { await C.readJsonlTailAsync(claudeFp, { dropSubagent: true }); } catch { }
+  ok(!C.fileStorageHung(claudeFp) && !C.fileRefused(claudeFp), 'premise of the note legs: a history read answered — no refusal of the file stands');
   const warmed = await SS0.warmSessionJsonlAsync(sid, cwd);   // the pool answers: the cache holds the 3 MB tail, the note (road ④'s) cleared
   const whole = SS0.parseSessionJsonl(sid, cwd);
   ok(warmed === true && Array.isArray(whole) && whole.length > 1000 && !whole.notLoaded, `the pool answering: the warm reads it, the note ends — ${whole.length} records, loaded`, { warmed, n: whole.length, notLoaded: whole.notLoaded });
