@@ -650,24 +650,21 @@ function jsonlCacheClear() { _jsonlCache.clear(); _jsonlResident = 0; }
 // in inline — reading the appended bytes costs less than the worker round trip
 // plus the structured-clone of a whole tail — and the worker's full read
 // returns the same span entry, so the NEXT change is an append too.
-// ROW B-422c (lane hub-loop-stalls, 主开发 r1006 — A for every road): A WARM WHOSE READ THE TRANSCRIPT POOL REFUSED leaves its
-// session NOTED here; while the note stands the history's sync parse reads NOTHING on the loop — parseSessionJsonl answers the
-// kept copy (the cache's entry as it stands — behind the file, or the warm would not have asked) or an empty list, BOTH tagged
-// `notLoaded` (the attach keeps the history unloaded: the next one reads again), and asks the warm again off the loop (at most one
-// every RETRY_WARM_MS a session). Any warm that does not end in the refusal clears it. A deadline or a hung path is the
-// STORAGE's (`storageHung`): the parse asks no warm there, and a warm (an attach's, a page's) runs NO find and NO stat on this
-// loop — it asks the pool alone for the noted path (the pool's path memory answers at once while it remembers).
-const _historyRefused = new Map();   // claudeSessionId → {at, why, storageHung, fp, retryAt}
+// ROW B-422c (lane hub-loop-stalls, 主开发 r1006 — A for every road; unit 2 re-made it on the FILE): while the transcript pool
+// refuses this session's FILE (src/adapters/codex.js `fileRefused`: a refusal of it with no pool answer for it since) — or refuses
+// every call (`poolRefusing`: closed, no worker) — the history's sync parse reads NOTHING of it on the loop: it answers the kept
+// copy, LOADED when one stat shows it IS the file (the main process read it: the sliced road, an append folded in), else tagged
+// `notLoaded` (the attach keeps the history unloaded: the next one reads again), and asks the warm again off the loop (one every
+// RETRY_WARM_MS a session). A file whose record is the STORAGE's (a deadline, a hung path, a blocked mount): the parse makes no
+// stat and asks no warm, and a warm asks the pool alone for it — no find, no stat. The state is the FILE's, kept by the pool's
+// doors (a refusal notes it, any answer for the file forgives it): no per-session note to race. A refusal of the file that is not
+// the storage's and stood past the stated time ⇒ the warm reads it on the main process in slices (readJsonlTailSliced).
 const RETRY_WARM_MS = 2000;
 const NOT_LOADED = 'transcript_reader_restarting';
-function noteHistoryRefused(id, e, fp, { stillHung = false } = {}) {
-  const was = _historyRefused.get(id);
-  // `stillHung`: a refusal of the hung storage's own retry stays the STORAGE's whatever its kind (a no-worker answer between a
-  // deadline kill and the respawn is the same hung storage) — never back to the 2 s re-warm and its find + stat on this loop
-  const rec = { at: Date.now(), why: (e && e.why) || (e && e.message) || 'refused', storageHung: stillHung || !!(e && e.storageHung), fp: fp || (was && was.fp) || null, retryAt: was ? was.retryAt : 0 };
-  _historyRefused.set(id, rec);
-  return rec;
-}
+const _fpOf = new Map();       // claudeSessionId → its transcript's path, as the last find answered (the storage's guard needs no find)
+const _reWarmAt = new Map();   // claudeSessionId → when the parse may ask the warm again
+const FP_OF_MAX = 4096;
+const knowFp = (id, fp) => { _fpOf.delete(id); _fpOf.set(id, fp); while (_fpOf.size > FP_OF_MAX) _fpOf.delete(_fpOf.keys().next().value); };
 const notLoadedList = () => Object.assign([], { notLoaded: NOT_LOADED });
 const C = () => require('./adapters/codex');   // lazily (the adapter requires nothing of this module at load)
 // the kept copy's tagged twin, ONE per cache entry (an entry's list never changes in place): the merge memo keys on the array
@@ -715,38 +712,31 @@ function warmPaged(fp, { fresh = null, bulk = false } = {}) {
 }
 const promoteWarm = (job) => { if (!job || !job.bulk) return; const i = _warmQ.bulk.indexOf(job); if (i < 0) return; _warmQ.bulk.splice(i, 1); job.bulk = false; _warmQ.person.push(job); };
 async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
-  let tasks = null, refusedNow = false, ownRead = false;   // ownRead: an end with no word from the pool (already warm, an append folded in)
   const bulk = !!(opts && opts.bulk === true);   // r935: a bulk resume's first attach (ws-handler `_bulkRead`); every other ask is a person's
-  const hung = _historyRefused.get(claudeSessionId), noteAtStart = hung;
-  if (hung && hung.fp && (hung.storageHung || C().fileStorageHung(hung.fp))) {   // the note's, or the file's record (another road's deadline, the mount door)
-    // row B-422c: the STORAGE hung under this transcript (a deadline, a path the pool remembers hung, a blocked mount) — NO find and
-    // NO stat on this loop: the pool alone is asked again for the noted path (its path memory refuses at once while it remembers;
-    // then a worker tries, off the loop). Only the note this warm found is touched (another warm may have read or noted meanwhile).
-    const mine = () => _historyRefused.get(claudeSessionId) === hung;
+  const known = _fpOf.get(claudeSessionId);
+  if (known && C().fileStorageHung(known)) {
+    // the STORAGE hung under this transcript (a deadline, a hung path, a blocked mount — its record says so) — NO find and NO stat on
+    // this loop: the pool alone is asked again (its path memory refuses at once while it remembers; then a worker tries, off the loop)
     const t0 = performance.now();
     let r = null;
-    try { r = await require('./adapters/codex').readJsonlTailAsync(hung.fp, { dropSubagent: true }); }
-    catch (e) { if (mine()) { if (e && e.code === NOT_LOADED) noteHistoryRefused(claudeSessionId, e, hung.fp, { stillHung: C().fileStorageHung(hung.fp) }); else _historyRefused.delete(claudeSessionId); } return false; }   // the storage's while the file's record says so (another road's answer may have forgiven it)
-    if (mine()) _historyRefused.delete(claudeSessionId);
+    try { r = await C().readJsonlTailAsync(known, { dropSubagent: true }); } catch { return false; }
     if (!r || !r.entry) return false;
     _stampJsonlParse(r.bytes, performance.now() - t0);
     _jsonlCachePut(claudeSessionId, r.entry);
-    await warmTaskEvents(claudeSessionId, hung.fp, { ino: r.entry.ino, size: r.entry.size });   // the storage answers again: the task scan beside it, as the normal road
+    await warmTaskEvents(claudeSessionId, known, { ino: r.entry.ino, size: r.entry.size });   // the storage answers again: the task scan beside it
     return true;
   }
+  let tasks = null;
   try {
     const fp = findSessionJsonlPath(claudeSessionId, cwd);
     if (!fp) return false;
+    knowFp(claudeSessionId, fp);
+    if (C().fileStorageHung(fp)) return false;   // found now, and the memory calls it the storage's: no stat (the next warm: the pool alone)
     const stat = fs.statSync(fp);
     tasks = warmTaskEvents(claudeSessionId, fp, stat); // B-299b A2: the task-tool scan, in the transcript worker, beside the tail's warm
     const cached = _jsonlCache.get(claudeSessionId);
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) {
-      ownRead = true;
-      const n1 = _historyRefused.get(claudeSessionId);   // unit 2: the stat just proved the cache IS the file — a read note's mark follows it
-      if (n1 && n1.sliced) n1.sliced = cached;
-      _jsonlCachePut(claudeSessionId, cached); return true;
-    } // already warm (touched: the working set)
-    const { readJsonlTail } = require('./adapters/codex');
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) { _jsonlCachePut(claudeSessionId, cached); return true; } // already warm (touched: the working set)
+    const { readJsonlTail } = C();
     if (cached && cached.incr && stat.size > cached.size && stat.size - cached.spanEnd <= WARM_INLINE_APPEND_MAX) {
       const t0 = performance.now();
       const r = readJsonlTail(fp, cached, { dropSubagent: true, stat, appendOnly: true });
@@ -754,11 +744,6 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
         if (r.mode === 'append') carryPosFrom(r.entry, cached);   // B-299b A5 r4: the merge's index follows the append
         _stampJsonlParse(r.bytes, performance.now() - t0);
         _jsonlCachePut(claudeSessionId, r.entry);
-        ownRead = true;
-        // unit 2: the main process READ the copy now — a note that stands while the pool still refuses this file is marked with it
-        // (sliced or not: its parse answers this copy by a stat, never a read of a grown file on this loop)
-        const n0 = _historyRefused.get(claudeSessionId);
-        if (n0 && (n0.sliced || C().fileRefused(n0.fp || fp))) n0.sliced = r.entry;
         return true;
       }
     }
@@ -781,55 +766,44 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
       })().finally(() => { if (_warmInFlight.get(fp) === w) _warmInFlight.delete(fp); });
       _warmInFlight.set(fp, w);
     }
-    // row B-422c: a pool refusal of the warm's read (the pager's one-shot fallback refuses by name) — noted, nothing parsed on the loop
+    // row B-422c: a pool refusal of the warm's read (the pager's one-shot fallback refuses by name) — noted on the file, nothing parsed on the loop
     let ok;
     try { ok = await w.p; }
-    catch (e) {   // row B-422c: noted — nothing parsed on the loop for it; unless a warm that READ answered meanwhile (the cache matches the file)
-      const now = _jsonlCache.get(claudeSessionId), cur = _historyRefused.get(claudeSessionId);
-      // a STORAGE note another warm took meanwhile stays the storage's (this late refusal of another kind never brings back the 2 s
-      // re-warm and its find + stat on the loop)
-      let mine = null;
-      if (e && e.code === NOT_LOADED && !(now && now !== cached && now.mtimeMs === stat.mtimeMs && now.size === stat.size && now.ino === stat.ino)) { refusedNow = true; mine = noteHistoryRefused(claudeSessionId, e, fp, { stillHung: !!(cur && cur !== noteAtStart && cur.storageHung) || C().fileStorageHung(fp) }); }
-      // ROW B-422c UNIT 2: a refusal of THIS FILE that is not the storage's and has stood past the stated time ⇒ the main process
-      // reads it in bounded slices (src/adapters/codex.js readJsonlTailSliced — the same entry, every file call async, the guard)
-      if (mine && !mine.storageHung && C().slicedRoadFor(fp).ok) {
-        const t1 = performance.now();
-        try {
-          const r2 = await C().readJsonlTailSliced(fp, { dropSubagent: true });
-          if (r2 && r2.entry) {
-            _stampJsonlParse(r2.bytes, performance.now() - t1);
-            _jsonlCachePut(claudeSessionId, r2.entry);
-            // the note STAYS (the pool still refuses), marked: the parse answers this copy as LOADED while the file is what it read —
-            // a parse of a changed file asks the warm again (sliced again), never a read on this loop
-            mine.sliced = r2.entry;
-            return true;
-          }
-        } catch (e2) { mine.why = `${mine.why}; the main process's read failed too (${(e2 && e2.message) || e2})`; if (e2 && e2.storageHung) mine.storageHung = true; }
-      }
+    catch (e) {
+      // the pool's refusal is noted on the FILE by its door; a refusal that is not the storage's and stood past the stated time ⇒
+      // UNIT 2: the main process reads it in bounded slices (the same entry, every file call async, the guard)
+      if (!(e && e.code === NOT_LOADED) || e.storageHung || !C().slicedRoadFor(fp).ok) return false;
+      const t1 = performance.now();
+      try {
+        const r2 = await C().readJsonlTailSliced(fp, { dropSubagent: true });
+        if (r2 && r2.entry) { _stampJsonlParse(r2.bytes, performance.now() - t1); _jsonlCachePut(claudeSessionId, r2.entry); return true; }
+      } catch { }
       return false;
     }
     return ok;
-  } catch { return false; } finally {
-    // the note this warm found ends on any end but the refusal — at once; a READ note at an end with no word from the pool
-    // («already warm», an append folded in) only once the pool has answered for its file: decided after the task scan (its word)
-    const decide = () => { const cur = _historyRefused.get(claudeSessionId); if (!refusedNow && cur === noteAtStart && !(cur && cur.sliced && ownRead && C().fileRefused(cur.fp))) _historyRefused.delete(claudeSessionId); };
-    if (!ownRead) decide();
-    if (tasks) await tasks;
-    if (ownRead) decide();
-  }   // unit 2: a note of a history the main process read ends only on the POOL's word (or the file's end) — never at an end with none   // row B-422c: any end but the refusal clears the note it found (the file gone, an op's own error, an append folded in) — never one another warm took meanwhile
+  } catch { return false; } finally { if (tasks) await tasks; }
 }
 
 function parseSessionJsonl(claudeSessionId, cwd) {
-  const refused = _historyRefused.get(claudeSessionId);
-  if (refused) {   // row B-422c: the warm's read was refused — the kept copy or «not loaded yet», never a parse on the loop
-    const kept = _jsonlCache.get(claudeSessionId);
-    if (!refused.storageHung && refused.fp && C().fileStorageHung(refused.fp)) refused.storageHung = true;   // the memory calls it the storage's now: no warm from here (the next warm: the pool alone)
-    if (!refused.storageHung && Date.now() >= refused.retryAt) { refused.retryAt = Date.now() + RETRY_WARM_MS; warmSessionJsonlAsync(claudeSessionId, cwd).catch(() => false); }
-    // unit 2: the copy the MAIN PROCESS read under this note (the sliced road, an append folded in, a stat that proved it) answers as
-    // loaded — as of that read, never a stat or a read here; the warm asked above keeps it fresh
-    if (refused.sliced && kept && kept === refused.sliced && Array.isArray(kept.messages)) { _jsonlUsed.set(kept, Date.now()); return kept.messages; }   // in use: never idle-evicted under the reader
-    // the kept copy is BEHIND the file (the warm asked for a full read): a copy of its list, tagged — never the cache's own array
-    return kept && Array.isArray(kept.messages) ? taggedKeptOf(kept.messages) : notLoadedList();
+  const known = _fpOf.get(claudeSessionId);
+  if (C().poolRefusing() || (known && C().fileRefused(known))) {
+    // row B-422c: the pool refuses this file (or every call) — nothing of it is read on this loop
+    const hung = !!known && C().fileStorageHung(known);
+    if (!hung) {
+      const now = Date.now();
+      if (now >= (_reWarmAt.get(claudeSessionId) || 0)) {
+        _reWarmAt.delete(claudeSessionId); _reWarmAt.set(claudeSessionId, now + RETRY_WARM_MS);
+        while (_reWarmAt.size > FP_OF_MAX) _reWarmAt.delete(_reWarmAt.keys().next().value);
+        warmSessionJsonlAsync(claudeSessionId, cwd).catch(() => false);
+      }
+    }
+    const kept = _jsonlCache.get(claudeSessionId);   // after the warm's synchronous part (an append it folded in)
+    if (!kept || !Array.isArray(kept.messages)) return notLoadedList();
+    if (!hung && known) {
+      let st = null; try { st = fs.statSync(known); } catch { st = null; }
+      if (st && st.mtimeMs === kept.mtimeMs && st.size === kept.size && st.ino === kept.ino) { _jsonlUsed.set(kept, Date.now()); return kept.messages; }   // the copy IS the file: loaded
+    }
+    return taggedKeptOf(kept.messages);   // BEHIND the file (or its storage hung): a copy of its list, tagged — never the cache's own array
   }
   const fp = findSessionJsonlPath(claudeSessionId, cwd);
   if (!fp) return [];

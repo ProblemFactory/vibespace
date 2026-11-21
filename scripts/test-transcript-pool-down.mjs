@@ -260,7 +260,8 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   D1.release(); await lateA;
   const h1a = tails(H1); SS0.parseSessionJsonl(sid, cwd); await new Promise((res) => setImmediate(res));
   ok(!!D1.release && tails(H1) === h1a, `a late refusal of another kind (no worker) lands after another warm noted the STORAGE: the note stays the storage's — the parse asks no warm (${tails(H1) - h1a} more)`, { before: h1a, after: tails(H1) });
-  // (2) a warm's end clears only the note it FOUND: a storage note taken meanwhile survives a read that lands after it
+  // (2) the POOL'S ANSWER is the file's last word: a pool READ that lands after another warm noted a hung path forgives the file —
+  // the pool just read it (unit 2 keeps the state on the FILE: a refusal notes it, any answer for it forgives it)
   await freshNote(); fs.writeFileSync(claudeFp, lines.slice(0, 600).join('\n') + '\n');
   const D2 = holding('read'); C._setTranscriptPoolForTest(D2);
   const readB = SS0.warmSessionJsonlAsync(sid, cwd);
@@ -268,12 +269,13 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   await SS0.warmSessionJsonlAsync(sid, cwd);
   D2.release(); const readOut = await readB;
   const h2a = tails(H2), stands = SS0.parseSessionJsonl(sid, cwd); await new Promise((res) => setImmediate(res));
-  ok(readOut === true && stands.notLoaded === 'transcript_reader_restarting' && tails(H2) === h2a, `a read that lands after another warm noted the storage clears only the note it found: the storage's note STANDS (the parse answers it, asks no warm: ${tails(H2) - h2a})`, { readOut, notLoaded: stands.notLoaded, more: tails(H2) - h2a });
+  ok(readOut === true && !stands.notLoaded && stands.length === 600 && !C.fileRefused(claudeFp), `a pool read that lands after another warm noted a hung path forgives the file (the pool just read it): the history loaded (${stands.length} records), no refusal of it stands`, { readOut, notLoaded: stands.notLoaded, n: stands.length });
   // (3) the hung retry, too, touches only its own note: a retry refused AFTER another retry read the file notes nothing — and the
   // retry that read stamps its parse and warms the task scan beside it, as the normal road
   fs.writeFileSync(claudeFp, lines.slice(0, 500).join('\n') + '\n');
+  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' })); await SS0.warmSessionJsonlAsync(sid, cwd);   // the file the storage's
   const D3 = holding('refuse'); C._setTranscriptPoolForTest(D3);
-  const lateC = SS0.warmSessionJsonlAsync(sid, cwd);   // the storage's note stands: the hung retry, held
+  const lateC = SS0.warmSessionJsonlAsync(sid, cwd);   // the storage's: the hung retry (the pool alone), held
   const U = up(), metrics = [], metricWas = global.__vsMetric;
   global.__vsMetric = (n) => metrics.push(n);
   C._setTranscriptPoolForTest(U);

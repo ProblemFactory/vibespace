@@ -711,12 +711,17 @@ function readerRefusal(e) {
 }
 /** one op through the transcript pool → its answer; a pool failure ⇒ the refusal by name, never a read on this loop */
 async function poolRead(op, payload, opts) {
-  const fp = payload && payload.fp;   // unit 2: the file's refusals are noted (the histories' sliced road reads the record), its answer forgives them
+  const fp = payload && payload.fp;   // unit 2: the FILE's state — a refusal notes it, any answer for it (a result, or the op's own error) forgives it
   const pool = _transcriptPoolGet();
-  if (!pool) { const r = readerRefusal(null); noteFileRefusal(fp, r); throw r; }
+  if (!pool) { const r = readerRefusal(null); notePoolRefusing(r); noteFileRefusal(fp, r); throw r; }
   let out;
-  try { out = await pool.call(op, payload, opts); } catch (e) { if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e); noteFileRefusal(fp, r); throw r; } throw e; }
-  forgiveFile(fp);
+  try { out = await pool.call(op, payload, opts); }
+  catch (e) {
+    if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e); notePoolRefusing(e); noteFileRefusal(fp, r); throw r; }
+    poolAnswered(fp);   // the op's own error: a worker ran it — the pool answered for this file
+    throw e;
+  }
+  poolAnswered(fp);
   return out;
 }
 async function jsonlGapInfoAsync(fp) { return poolRead('gapInfo', { fp }); }
@@ -752,10 +757,10 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
  *  → the records (or, with `entry`, { entry, mode, bytes }), or null */
 async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false } = {}) {
   let refusal = null;   // the LAST pool failure on this road (a later op error clears it: then the op's failure is the answer)
-  const seen = (e) => { refusal = pool && !pool.inPlace && isPoolFailure(e) ? readerRefusal(e) : null; if (refusal) noteFileRefusal(fp, refusal); };
+  const seen = (e) => { refusal = pool && !pool.inPlace && isPoolFailure(e) ? readerRefusal(e) : null; if (refusal) { notePoolRefusing(e); noteFileRefusal(fp, refusal); } };
   const said = (why) => { _pagedStats.failed++; try { onFail?.(why, refusal); } catch { } return null; };
   const pool = _transcriptPoolGet();
-  if (!pool) { refusal = readerRefusal(null); noteFileRefusal(fp, refusal); return said('no transcript pool on this process'); }
+  if (!pool) { refusal = readerRefusal(null); notePoolRefusing(refusal); noteFileRefusal(fp, refusal); return said('no transcript pool on this process'); }
   let why = null;
   for (let tries = 0; tries < 2; tries++) {
     try {
@@ -771,8 +776,8 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
         if (entry && r.starts) for (const x of r.starts) startsOut.push(x);
         start = Number.isInteger(r.next) && r.next > start ? r.next : start + page;
       }
-      if (!gone && entry) { _pagedStats.reads++; forgiveFile(fp); return head ? { entry: { ...head.facts, messages: out, starts: startsOut }, mode: head.mode, bytes: head.bytes } : said('the paged entry came without its facts'); }
-      if (!gone) { _pagedStats.reads++; forgiveFile(fp); return out; }
+      if (!gone && entry) { _pagedStats.reads++; poolAnswered(fp); return head ? { entry: { ...head.facts, messages: out, starts: startsOut }, mode: head.mode, bytes: head.bytes } : said('the paged entry came without its facts'); }
+      if (!gone) { _pagedStats.reads++; poolAnswered(fp); return out; }
     } catch (e) {
       const code = e && e.code;
       seen(e);
@@ -789,7 +794,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
   let r = null;
   try { r = await pool.call('boundedParsed', { fp, tailOnly, dropSubagent: !!dropSubagent }); } catch (e) { seen(e); why = `${why}; then the one-shot read failed too (${(e && e.message) || e})`; return said(why); }
   if (r == null) return said(`${why}; then the one-shot read answered nothing`);
-  forgiveFile(fp);
+  poolAnswered(fp);
   return r;
 }
 /** B-f3f9: a codex conversation's WHOLE history read, parsed and MERGED in the transcript worker's `history` lane (its fork
@@ -821,12 +826,12 @@ async function codexHistoryMergedPagedAsync({ files = [], liveBuffer = () => '' 
         for (let i = 0; i < r.records.length; i++) { records.push(r.records[i]); threads.push(r.tix[i] >= 0 ? r.tids[r.tix[i]] : ''); }
         start = Number.isInteger(r.next) && r.next > start ? r.next : start + page;
       }
-      if (!gone) { _mergedStats.reads++; for (const f of files || []) forgiveFile(f && f.fp); return { records, threads }; }   // unit 2: its answer forgives every file it named
+      if (!gone) { _mergedStats.reads++; for (const f of files || []) poolAnswered(f && f.fp); return { records, threads }; }   // unit 2: its answer forgives every file it named
     } catch (e) {
       const code = e && e.code;
       // row B-422c unit 2: the merged call names its files in `files`, never `fp` — a POOL failure of it (a deadline above all: one of
       // them hung) is noted for EVERY file it names, so no file of it is read on the main process after a deadline
-      if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e); for (const f of files || []) noteFileRefusal(f && f.fp, r); }
+      if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e); notePoolRefusing(e); for (const f of files || []) noteFileRefusal(f && f.fp, r); }
       if (code === 'heap_bound') return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
       return said(code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`);
     }
@@ -845,8 +850,16 @@ async function codexHistoryMergedPagedAsync({ files = [], liveBuffer = () => '' 
 // (the worker's). Said once a file in the journal. The four other roads never take it.
 let SLICED_AFTER_MS = 10000, SLICED_READ_DEADLINE_MS = 60000;
 const SLICE_MS = 8, SLICE_LINES = 256, SLICE_BYTES = 1 << 20, ZSTD_MAGIC = 0xFD2FB528;
-let STAND_GAP_MS = 30000;          // a refusal STANDS while the file is refused again within 30 s; past that it starts over
-const FILE_REFUSALS_MAX = 512, FILE_REFUSALS_HUNG_MAX = 4096;   // the storage's records are kept past the first bound (never forgotten first)
+let STAND_GAP_MS = 120000;         // a refusal STANDS while the file is refused again within 2 min; past that it starts over (a re-open after «not loaded» still stands)
+const FILE_REFUSALS_MAX = 4096, FILE_REFUSALS_HUNG_MAX = 8192;  // the storage's records are kept past the first bound (never forgotten first)
+// THE POOL REFUSING EVERY CALL (closed, no worker, no idle one): a fact of the pool, not of one file — a parse of a session whose
+// file the pool was never asked about reads nothing on the loop either while it stands; any answer of the pool ends it
+const POOL_REFUSING_MS = 30000;
+let _poolRefusedAt = 0;
+const POOL_WIDE = new Set(['no-worker', 'no-idle']);
+function notePoolRefusing(e) { if (!e || POOL_WIDE.has(e.code) || /safeFs closed/.test(String(e.message || '')) || e.why === 'no transcript pool on this process') _poolRefusedAt = Date.now(); }
+function poolAnswered(fp) { _poolRefusedAt = 0; forgiveFile(fp); }
+function poolRefusing() { return !!_poolRefusedAt && Date.now() - _poolRefusedAt <= POOL_REFUSING_MS; }
 const _fileRefusals = new Map();   // fp → { firstAt, lastAt, count, storageHung, why } — the pool's refusals of ONE file, standing
 const _slicedSaid = new Set();
 let _slicedChain = Promise.resolve(), _slicedParked = 0;
@@ -975,7 +988,7 @@ function readCodexRolloutSliced(fp) {
   });
 }
 /** row B-422c unit 2's legs: the stated time and the read's deadline (ms; null = the product's), and the file records' state */
-function _setSlicedForTest({ afterMs = null, deadlineMs = null, standGapMs = null } = {}) { SLICED_AFTER_MS = afterMs == null ? 10000 : afterMs; SLICED_READ_DEADLINE_MS = deadlineMs == null ? 60000 : deadlineMs; STAND_GAP_MS = standGapMs == null ? 30000 : standGapMs; }
+function _setSlicedForTest({ afterMs = null, deadlineMs = null, standGapMs = null } = {}) { SLICED_AFTER_MS = afterMs == null ? 10000 : afterMs; SLICED_READ_DEADLINE_MS = deadlineMs == null ? 60000 : deadlineMs; STAND_GAP_MS = standGapMs == null ? 120000 : standGapMs; }
 const slicedState = () => ({ files: _fileRefusals.size, parked: _slicedParked, said: _slicedSaid.size });
 
 /** Generic off-loop call (S3: codex discovery ops) → the worker's result. Row B-422c: `whenRefused(refusal)` is what a POOL
@@ -1724,7 +1737,7 @@ class CodexAdapter extends BackendAdapter {
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
   _setTranscriptPoolForTest, // row B-422c's legs
-  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, fileRefused, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
+  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, fileRefused, poolRefusing, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,
