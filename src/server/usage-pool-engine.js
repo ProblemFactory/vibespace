@@ -43,6 +43,10 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
   // lane auto-resume-bulk: the session list's ONE notify point (server.js broadcastActiveSessions) — a stop fact that
   // appears or clears moves the sidebar card's chip and the filter's count; debounced here, one broadcast per burst
   onSessionListChange = () => { }}) {
+  // B-360d part 3 U3: THE FOLDER'S ONE READER OFF THE LOOP — its first fill is the boot's one synchronous pass; then the
+  // refreshes (fs.promises: usage-routes' 30-s pass, a request's, this engine's sweep) whose reply the groups read; the hub's own
+  // writes replace their entries at once
+  const usageFolder = require('../usage-cache-folder.js').forDir(USAGE_CACHE_DIR, { log: (m) => console.log(m) });
   RR.watch(USAGE_CACHE_DIR);   // B-403e: the readings folder — each reading asked once per synchronous run (a pass, a record, a broadcast)
   // the model facts' broadcaster (lane fable-52-cli-321): a verdict reached on either feed (a refusal) is told at once
   try { const MA = require('./model-ask.js'); MA.useBroadcast((s) => MA.broadcastFacts(s, s._webuiId, broadcastToSession)); } catch { }
@@ -272,7 +276,7 @@ const READING_ARCHIVE = path.join(rootDir, 'data', 'archive', 'readings-window-m
 function usageIdentityGroups() {
   const groups = new Map(); // identityKey → {accountIds:[], cache, accountId}
   let files = [];
-  try { files = usageWrite.listCacheDir(USAGE_CACHE_DIR, { via: RR }).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return groups; }
+  try { files = usageWrite.listCacheDir(USAGE_CACHE_DIR, { via: usageFolder.via }).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return groups; }
   // the identity key's EMAIL DECIDES a grouping (B-360d, 主开发 r1221 — the timer row): the decision road's rows, confirmed within
   // two of this memo's lives (60 s; a confirmation asked behind at 30 s) — an account not confirmed is its own identity (no merge)
   const roster = accounts.decisionList({ withinMs: 60000 }).accounts || [];
@@ -282,7 +286,7 @@ function usageIdentityGroups() {
       // ChatGPT login) — roster-less by design, never a "deleted account".
       const gOwner = globalKeyOwner(fn.slice(0, -5)); // a harness's own machine login ('__global_<id>__')
       const accountId = (fn === '__global__.json' || gOwner) ? null : fn.slice(0, -5);
-      const cache = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn), { via: RR });
+      const cache = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn), { via: usageFolder.via });
       if (!cache?.fetchedAt) continue;
       const acctRec = accountId ? roster.find((x) => x.id === accountId) : null;
       // A DELETED account's cache file is a zombie (nothing removes the file
@@ -479,8 +483,14 @@ function sweepUsageAnchorsNow() {
   // estimator view (its anchors file's stat and the bytes the estimator will ask) read off the loop first, ONE identity at a
   // time: its step runs in the same synchronous run as that read's answer, so nothing lands between the decision and the
   // append. A sweep that needs no read runs whole now, as before; one sweep at a time.
+  // B-360d part 3 U3 (主开发 r1459): the groups read the folder's kept reply — this sweep first asks a refresh off the loop
+  // (src/usage-cache-folder.js fresh: a reply no older than the sweep's start; past its bound the kept one, its age said)
   if (_anchorSweep) return _anchorSweep;
-  const groups = [...usageIdentityGroups()];
+  const run = usageFolder.fresh().then(() => sweepGroups([...usageIdentityGroups()])).catch(() => { }).finally(() => { if (_anchorSweep === run) _anchorSweep = null; });
+  _anchorSweep = run;
+  return run;
+}
+function sweepGroups(groups) {
   const step = (identityKey, g) => {
     try {
       sweepAnchorGroup({
@@ -493,7 +503,7 @@ function sweepUsageAnchorsNow() {
   };
   const fresh = (identityKey, g) => { try { return anchorGroupFresh({ identityKey, group: g, anchors: usageAnchors }).fresh; } catch { return false; } };
   if (usageAnchors.ready() && !groups.some(([k, g]) => fresh(k, g))) { for (const [k, g] of groups) step(k, g); return undefined; }
-  const run = (async () => {
+  return (async () => {
     for (let n = 0; !usageAnchors.ready() && n < 3; n++) { try { await usageAnchors.prime(); } catch { } }
     for (const [k, g] of groups) {
       if (!fresh(k, g)) { step(k, g); continue; }
@@ -501,9 +511,7 @@ function sweepUsageAnchorsNow() {
       try { view = await usageEstimator.viewFor(k); } catch { view = null; }
       usageEstimator.withView(view, () => step(k, g));
     }
-  })().catch(() => { }).finally(() => { if (_anchorSweep === run) _anchorSweep = null; });
-  _anchorSweep = run;
-  return run;
+  })();
 }
 let _anchorSweep = null;   // the sweep reading off the loop (one at a time: a second ask joins it)
 // boot-time sealed-orders push: a restarted server re-arms every pool's
@@ -8561,7 +8569,7 @@ function maybeStopOnFallback(session, id, from, to) {
     _wallRing, _sessionWalls, _sessionWallLanes, noteSessionWall, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
     _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, poolKickRerun, _poolDecisions, _basisOf, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
     sessionModelFor, sweepUsageAnchors, usageAnchors, usageCacheKeyFor,
-    usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
+    usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached, usageFolder,
     writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
     estOverlayCache, predictCalib,
   };

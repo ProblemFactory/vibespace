@@ -305,6 +305,10 @@ const keyName = (key) => (key === '__global__' ? 'the machine login' : (accounts
 // (the store hears the write path's statements of ITS data dir itself — usage-reset-claim at(): the lanes a write stated
 // settle a claim, a reset a write showed is said once, named here)
 const resetClaims = require('./usage-reset-claim.js').at(path.dirname(USAGE_CACHE_DIR), { known: claimable, nameOf: keyName });
+// B-360d part 3 U3 (主开发 r1459): THE FOLDER'S ONE READER OFF THE LOOP (src/usage-cache-folder.js) — the ingestion, the host
+// files' boot read and the codex seed read its kept reply (no file call of their own); the ingestion runs when a refresh brings
+// its reply (ONE CLOCK: the reader's 30-s refresh, a request's, the anchor sweep's); a held folder keeps the last reply, its age said
+const usageFolder = require('./usage-cache-folder.js').forDir(USAGE_CACHE_DIR, { log: (m) => console.log(m) });
 resetClaims.onChange(() => { try { accounts._notify?.(); } catch { } });   // every device redraws at once (the accounts frame re-reads usage)
 
 // ── §ban-safety: background /api/oauth/usage polling is OPT-IN, default OFF ───
@@ -362,13 +366,13 @@ function ingestPassiveUsage() {
     else if (String(_codexUsageGlobalLink.email || '').toLowerCase() !== cem) _codexUsageGlobalLink = { email: cst.email || null, loggedIn: !!cst.loggedIn, accountId: null };
   } catch { _codexUsageGlobalLink = { email: null, loggedIn: false, accountId: null }; _codexLinkUndecided = false; }
   let entries = [];
-  try { entries = usageWrite.listCacheDir(USAGE_CACHE_DIR); } catch { entries = []; }
+  try { entries = usageWrite.listCacheDir(USAGE_CACHE_DIR, { via: usageFolder.via }); } catch { entries = []; }
   for (const fn of entries) {
     if (!fn.endsWith('.json')) continue;
     const key = fn.slice(0, -5);
     if (key === '__models__') { ingestPassiveModels(fn); continue; }
     let u = null;
-    try { u = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn)); } catch { continue; }
+    try { u = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn), { via: usageFolder.via }); } catch { continue; }
     if (!u || typeof u.fetchedAt !== 'number') continue;
     // A RESET THE SHIPPED STATUSLINE'S OWN WRITE SHOWS (lane account-reset-door r2): it writes the file itself, so its reading is
     // compared HERE against the last one ingested — once a write (a file the write path wrote is compared there, never twice)
@@ -441,18 +445,21 @@ function ingestPassiveUsage() {
 // (now opt-in) /v1/models fetch.
 function ingestPassiveModels(fn) {
   let list = [];
-  try { list = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn)); } catch { return; }
+  try { list = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn), { via: usageFolder.via }); } catch { return; }
   if (!Array.isArray(list) || !list.length) return;
   const have = new Set((AVAILABLE_MODELS.claude || []).map((m) => m.id));
   const add = list.filter((m) => m && typeof m.id === 'string' && !have.has(m.id))
                   .map((m) => ({ id: m.id, label: m.label || m.id }));
   if (add.length) AVAILABLE_MODELS.claude = [...(AVAILABLE_MODELS.claude || []), ...add];
 }
-ingestPassiveUsage();
-// B-360d: the timer pass decides the machine login's link on sign-in facts confirmed OFF the loop first (awaited, bounded)
-const ingestConfirmed = () => accounts.signinFactsSettled().catch(() => null).then(() => { try { ingestPassiveUsage(); } catch { } });
+ingestPassiveUsage();   // the boot's ingestion, over the folder's first fill (the boot's one synchronous pass)
+usageFolder.onReply(() => ingestPassiveUsage());   // ONE CLOCK (B-360d U3): every reply a refresh brings runs the ingestion
+// B-360d: the timer pass decides the machine login's link on sign-in facts confirmed OFF the loop first (awaited, bounded) —
+// then the folder's refresh (fs.promises, at most one in flight; a read not replying past its period is said held), whose reply
+// runs the ingestion: the ONE 30-s clock of the usage folder (src/usage-cache-folder.js)
+const ingestConfirmed = () => accounts.signinFactsSettled().catch(() => null).then(() => { try { usageFolder.tick(); } catch { } });
 ingestConfirmed();
-setInterval(ingestConfirmed, 30000); // local disk read only — no network
+setInterval(ingestConfirmed, 30000); // the folder read off the loop — no network
 // Normalizer-visible settings (chat.hideEmptyHooks) — lazy, store-safe getter.
 
 // OPT-IN active poll (default OFF; see usagePollingEnabled + the stark warning
@@ -510,11 +517,11 @@ const _hostAcctUsage = {};
 // NORMALISER AT LOAD, not a migration: nothing is written; the file keeps its bytes until its next write
 const heldSource = (snap) => { if (snap && typeof snap === 'object') { if (snap.source === 'on-demand') snap.source = 'on-demand-held'; if (Array.isArray(snap.limits)) for (const l of snap.limits) if (l && l.source === 'on-demand') l.source = 'on-demand-held'; } return snap; };
 try {
-  for (const f of usageWrite.listCacheDir(USAGE_CACHE_DIR)) {
+  for (const f of usageWrite.listCacheDir(USAGE_CACHE_DIR, { via: usageFolder.via })) {
     const ma = /^host-([\w-]+)-(sub-[\w-]+)\.json$/.exec(f);
-    if (ma) { try { _hostAcctUsage[ma[1] + ':' + ma[2]] = heldSource(usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, f))); } catch {} continue; }
+    if (ma) { try { _hostAcctUsage[ma[1] + ':' + ma[2]] = heldSource(usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, f), { via: usageFolder.via })); } catch {} continue; }
     const m = /^host-([\w-]+)\.json$/.exec(f);
-    if (m) { try { _hostUsage[m[1]] = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, f)); } catch {} }
+    if (m) { try { _hostUsage[m[1]] = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, f), { via: usageFolder.via }); } catch {} }
   }
 } catch {}
 // Ledger harvest from remote hosts (ssh, incremental via remote-side cursors).
@@ -1518,11 +1525,11 @@ function summarizeCodexRateLimits() {
   // account's quota silently VANISHED. Persisted files also make codex
   // identities visible to the anchors sweep / estimator like claude's.
   try {
-    for (const fn of usageWrite.listCacheDir(USAGE_CACHE_DIR)) {
+    for (const fn of usageWrite.listCacheDir(USAGE_CACHE_DIR, { via: usageFolder.via })) {
       const m = /^(cxs-[\w-]+|__global_codex__)\.json$/.exec(fn);
       if (!m) continue;
       try {
-        const stored = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn));
+        const stored = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn), { via: usageFolder.via });
         // A stored file may ALREADY carry the typed limits (everything written
         // since this model shipped); seed from those rather than from its
         // projected buckets, so a limit the projection cannot show is not lost
@@ -1707,8 +1714,10 @@ function onDemandReadings() {
   return out;
 }
 
-app.get('/api/usage', (req, res) => {
-  ingestPassiveUsage(); // pick up whatever active sessions' statuslines just wrote
+app.get('/api/usage', async (req, res) => {
+  // pick up whatever active sessions' statuslines just wrote: a refresh asked NOW, off the loop — its reply runs the ingestion
+  // (one clock); a folder that does not reply within its bound answers the kept reply, and `usageFolder` says how old
+  try { await usageFolder.fresh(); } catch { }
   const codexRl = summarizeCodexRateLimits();
   const codexAccounts = {};
   const acctList = Object.keys(codexRl.byAccount || {}).length ? (accounts.list().accounts || []) : [];
@@ -1738,6 +1747,7 @@ app.get('/api/usage', (req, res) => {
   for (const id of new Set([...Object.keys(viewedAccounts), ...subIds])) { const u = unknownOf(id); if (u) accountsOut[id] = { ...(accountsOut[id] && typeof accountsOut[id] === 'object' ? accountsOut[id] : {}), windowUnknown: u }; }
   const globalOut = lanesAt.__global__ && viewedGlobal && typeof viewedGlobal === 'object' ? { ...viewedGlobal, lanesReadAt: lanesAt.__global__ } : viewedGlobal;
   res.json({
+    usageFolder: usageFolder.state(),   // B-360d U3: { asOf, ageMs, held, since, error } — a held folder's readings are its last reply's
     rateLimit: globalOut, codexRateLimit: codexRl.overall, resetClaims: claimsForClients, lanesReadAt: lanesAt,
     subscriptionSignedOut: _oauthSignedOut, subscriptionSignedOutCause: _oauthSignedOutCause, accounts: accountsOut,
     // Dead-reckoned CURRENT utilization per account key (B-fcff v2): anchor +

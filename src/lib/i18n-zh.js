@@ -1330,6 +1330,8 @@ export default {
   "Untagged": "未打标签",
   "Update": "更新",
   "Updated {ago}": "更新于 {ago}",
+  "⚠ The usage folder is not answering: the readings shown are as of {ago}.": "⚠ 用量文件夹没有响应：显示的读数截至 {ago}。",
+  "⚠ The usage folder is not answering: no reading from it yet.": "⚠ 用量文件夹没有响应：还没有读到它的读数。",
   "Upload failed — no files could be read": "上传失败——无法读取任何文件",
   "Upload failed: {msg}": "上传失败：{msg}",
   "Upload file(s)": "上传文件",

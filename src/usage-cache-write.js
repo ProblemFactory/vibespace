@@ -420,9 +420,14 @@ function noteDirectWrite(key, prev, next, { nowMs = Date.now(), cacheDir = null 
   return sayVendorResets(key, seen, cacheDir);
 }
 
+// B-360d part 3 U3: a file the hub wrote replaces its entry in the folder's kept reply at once (src/usage-cache-folder.js)
+const _onWritten = new Set();
+function onWritten(fn) { if (typeof fn === 'function') _onWritten.add(fn); return () => _onWritten.delete(fn); }
+function noteWritten(file, text) { for (const fn of _onWritten) { try { fn(file, text); } catch { } } }
 function atomicWrite(file, text) {
   fs.writeFileSync(file + '.tmp', text);
   fs.renameSync(file + '.tmp', file);
+  noteWritten(file, text);
 }
 
 /**
@@ -656,5 +661,6 @@ module.exports = {
   backendOfCacheObject, liftCacheObject, limitsOfCache,
   writeCacheObject, writeReading, writeSidecar,
   carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange, PASSIVE_WITNESSES, onReading, onVendorReset, noteVendorResets, noteDirectWrite, onLanesRead, lanesReadAt,
+  onWritten, noteWritten,
   DERIVED_KEYS,
 };

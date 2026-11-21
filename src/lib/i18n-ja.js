@@ -1329,6 +1329,8 @@ export default {
   "Untagged": "未タグ",
   "Update": "更新",
   "Updated {ago}": "更新 {ago}",
+  "⚠ The usage folder is not answering: the readings shown are as of {ago}.": "⚠ 使用量フォルダが応答していません。表示中の値は {ago} 時点のものです。",
+  "⚠ The usage folder is not answering: no reading from it yet.": "⚠ 使用量フォルダが応答していません。まだ値を読めていません。",
   "Upload failed — no files could be read": "アップロードに失敗しました——ファイルを読み取れませんでした",
   "Upload failed: {msg}": "アップロードに失敗しました: {msg}",
   "Upload file(s)": "ファイルをアップロード",

@@ -112,6 +112,7 @@ export function installUsageMeter(App, ctx = {}) {
     if (data?.codexRateLimit) this._codexRateLimit = data.codexRateLimit;
     else if (this._codexRateLimit === undefined) this._codexRateLimit = null;
     this._subSignedOut = !!data?.subscriptionSignedOut;
+    this._usageFolder = data?.usageFolder || null;   // B-360d U3: the usage folder's last reply — held ⇒ its age is said
     this._subSignedOutCause = data?.subscriptionSignedOutCause || 'console';
     this._accountUsage = data?.accounts || {}; // per-subscription usage (Manage Agents rows)
     // WHEN EACH LANE WAS LAST STATED rides its account's reading (r3, the age badge): the popup and the roster donut read
@@ -747,6 +748,7 @@ export function installUsageMeter(App, ctx = {}) {
           ${laneAge(atOf('plan:7d'))}${claimBtn('plan:7d', v7)}
         </div>
       </div>${scopedSections.join('')}${outcomeNotes}
+      ${this._usageFolder && this._usageFolder.held ? `<div class="usage-warn">${escHtml(this._usageFolder.asOf ? t('⚠ The usage folder is not answering: the readings shown are as of {ago}.', { ago: agoText(this._usageFolder.asOf) }) : t('⚠ The usage folder is not answering: no reading from it yet.'))}</div>` : ''}
       ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${this._subSignedOutCause === 'console'
         ? t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')
         : t('⚠ The machine’s own CLI login has no valid token (it sat idle until its refresh token expired — named/pooled accounts handle the sessions, so nothing refreshes it). This is NORMAL under pooling and needs no action; named accounts are unaffected. Do NOT run /logout to “clean it up” — on a multi-copy account that revokes the login everywhere. Run /login in a terminal only if you actually use the bare CLI login.')}</div>` : ''}

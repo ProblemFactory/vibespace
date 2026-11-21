@@ -2442,8 +2442,8 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   ok(E2E.back.fiveHour && E2E.back.windowChangeUnsaid && E2E.back.windowChangeUnsaid.change === 'restored' && E2E.got[E2E.got.length - 1] === 'restored' && !E2E.backSettled.fiveHourAbsent && !E2E.backSettled.windowChangeUnsaid,
     '㉑2f a render that states a 5h window NEWER than the removal brings the window BACK, said the same way (restored) once the ingest settles it');
   const UR21 = fs.readFileSync(path.join(ROOT, 'src/usage-routes.js'), 'utf8');
-  ok(/if \(u\.windowChangeUnsaid\) \{\n\s+try \{ const w = usageWrite\.writeCacheObject\(\{ cacheDir: USAGE_CACHE_DIR, key, obj: u, familyOf: familyOfScopedBucket, backend: 'claude' \}\);/.test(UR21) && /setInterval\(ingestConfirmed, 30000\)/.test(UR21) && /const ingestConfirmed = \(\) => accounts\.signinFactsSettled\(\)[^\n]*ingestPassiveUsage\(\)/.test(UR21),   // B-360d: the 30 s pass runs after the sign-in facts' confirmation
-    '㉑2f the hub\'s passive ingest (every 30 s) settles a file carrying the marker through the ONE write path');
+  ok(/if \(u\.windowChangeUnsaid\) \{\n\s+try \{ const w = usageWrite\.writeCacheObject\(\{ cacheDir: USAGE_CACHE_DIR, key, obj: u, familyOf: familyOfScopedBucket, backend: 'claude' \}\);/.test(UR21) && /setInterval\(ingestConfirmed, 30000\)/.test(UR21) && /const ingestConfirmed = \(\) => accounts\.signinFactsSettled\(\)[^\n]*usageFolder\.tick\(\)/.test(UR21) && /usageFolder\.onReply\(\(\) => ingestPassiveUsage\(\)\)/.test(UR21),   // B-360d: the 30 s pass runs after the sign-in facts' confirmation
+    '㉑2f the hub\'s passive ingest (every 30 s: the pass after the sign-in facts\' confirmation asks the usage folder\'s refresh, whose reply runs it — B-360d U3) settles a file carrying the marker through the ONE write path');
   // ㉑3a–㉑3d: THE ACCEPTANCE r2 BLOCKER'S OWN SHAPES (the reviewer's names)
   const shapes = (toolArgs, wcm = W) => {
     const out = {};

@@ -384,6 +384,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const cacheOf = (k) => { try { return JSON.parse(fs.readFileSync(path.join(cacheDir, k + '.json'), 'utf8')); } catch { return null; } };
     return { root, wam, eng, newEngine, ar: arRef, P, A, B, s1, ss, mk, wall, reading, verbs, charges, notices, inbox, cards, arms, recovered, sentWs, attrib, sent, cacheOf, current: () => wam.poolCurrent(P), settings, cacheDir, nowS, sessions };
   };
+  const quietlyAwait = async (fn) => { const o = console.log, w = console.warn; console.log = console.warn = () => { }; try { return await fn(); } finally { console.log = o; console.warn = w; } };   // B-360d U3: the usage route awaits its folder refresh
   const quietly = (fn) => { const o = console.log, w = console.warn; const lines = []; console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' ')); try { fn(); } finally { console.log = o; console.warn = w; } return lines; };
 
   // (1) WARM + AUTO: the credit BEFORE the switch — authorizer, one verb, the floor
@@ -1418,7 +1419,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
     const usageWrite = require(path.join(REPO, 'src/usage-cache-write.js'));
     const cq = require(path.join(REPO, 'src/harnesses/codex-quota.js'));
-    const run = (setup = setupUsage) => {
+    const run = async (setup = setupUsage) => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxrung-ur-')); worlds.push(root);
       const prevHome = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(root, 'shared-codex');
       const wam = new AccountManager({ dataDir: path.join(root, 'data') });
@@ -1436,17 +1437,17 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() { }, delete() { }, use() { }, locals: {} };
       quietly(() => setup({ app, accounts: wam, hosts: null, usageHistory: { scan() { }, warm() { } }, activeSessions: new Map([['cx1', { backend: 'codex', mode: 'chat', _accountId: A }]]), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(root, 'data', 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'nocodex'), META_DIR: path.join(root, 'data', 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: buffers, apiDerivedWindow: () => null, establishedWindows: () => null }));
       const res = { body: null, json(o) { this.body = o; return this; }, status() { return this; } };
-      quietly(() => routes['GET /api/usage']({ query: {}, headers: {} }, res));
+      await quietlyAwait(() => routes['GET /api/usage']({ query: {}, headers: {} }, res));
       return res.body && res.body.codexAccounts && res.body.codexAccounts[A];
     };
-    const out = run();
+    const out = await run();
     ok('R20 the file\'s count survives a newer sidecar push that states none (the wrapper\'s startup read failed): the roster still shows 3, usage from the push', out && out.resetCredits && out.resetCredits.availableCount === 3 && Math.round(out.sevenDay?.usedPercent) === 55, JSON.stringify({ rc: out && out.resetCredits, u: out && out.sevenDay?.usedPercent }));
     const src = read('src/usage-routes.js');
     const from = "    if (out.resetCredits === undefined && prev && prev.resetCredits && typeof prev.resetCredits === 'object') out.resetCredits = prev.resetCredits;\n";
     ok('R20 NEGATIVE CONTROL: the patch hit the product source', src.includes(from));
     const f = copyPath('src/usage-routes.js', 'nocarry');
     writeCopy(f, src.replace(from, ''));
-    try { const outN = run(require(f).setupUsage); ok('R20 NEGATIVE CONTROL: without the carry the chip disappears — the leg sees it', !(outN && outN.resetCredits), JSON.stringify(outN && outN.resetCredits)); } finally { /* MUTCP's scratch dir is removed at exit */ }
+    try { const outN = await run(require(f).setupUsage); ok('R20 NEGATIVE CONTROL: without the carry the chip disappears — the leg sees it', !(outN && outN.resetCredits), JSON.stringify(outN && outN.resetCredits)); } finally { /* MUTCP's scratch dir is removed at exit */ }
   }
   // (21) lane reset-path — THE AUTO RUNG'S ATTEMPTS ARM THE FLOOR ONLY WHEN THE CONSUME WENT OUT, and it
   //      tries ONE time per limit event whatever the answer (the floor no longer covers a refusal)
@@ -1496,7 +1497,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   //      the pool points at B: A's row carries the reading, neither the pool nor B does. RED: the release's line (the pool's id).
   {
     const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
-    const runP = (setup = setupUsage) => {
+    const runP = async (setup = setupUsage) => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxpool-key-')); worlds.push(root);
       const prevHome = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(root, 'shared-codex');
       const wam = new AccountManager({ dataDir: path.join(root, 'data') });
@@ -1513,11 +1514,11 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() { }, delete() { }, use() { }, locals: {} };
       quietly(() => setup({ app, accounts: wam, hosts: null, usageHistory: { scan() { }, warm() { } }, activeSessions: new Map([['cx1', { backend: 'codex', mode: 'chat', _accountId: P, _webuiId: 'w1', _heldPoolMember: A }]]), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(root, 'data', 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'nocodex'), META_DIR: path.join(root, 'data', 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: buffers, apiDerivedWindow: () => null, establishedWindows: () => null }));
       const res = { body: null, json(o) { this.body = o; return this; }, status() { return this; } };
-      quietly(() => routes['GET /api/usage']({ query: {}, headers: {} }, res));
+      await quietlyAwait(() => routes['GET /api/usage']({ query: {}, headers: {} }, res));
       const acc = (res.body && res.body.codexAccounts) || {};
       return { A, B, P, a: acc[A] || null, b: acc[B] || null, p: acc[P] || null, target: wam.poolCurrent(P) };
     };
-    const r = runP();
+    const r = await runP();
     ok('B-87fd: a pooled codex conversation that HOLDS member A while the pool points at B — its live reading is filed under A (61%), never under the pool, nor under B',
       r.target === r.B && !!r.a && !!r.a.sevenDay && !r.p && !r.b, JSON.stringify({ target: r.target, a: !!r.a, p: !!r.p, b: !!r.b, a7: r.a && r.a.sevenDay }));
     const { anchored } = await import('./scratch.mjs');
@@ -1526,7 +1527,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     try {
       const f = copyPath('src/usage-routes.js', 'poolkey');
       writeCopy(f, anchored(src, "    const key = codexKeyOf(session._accountId, session);\n    if (key) keep(key, readCodexWrapperRateLimit(id), 'codex-rate-limits');", "    keep(session._accountId || '__global_codex__', readCodexWrapperRateLimit(id), 'codex-rate-limits');", 'B-87fd: the release\'s raw key'));   // stale-pins: kept — the RED copy plants the release's line
-      redOut = runP(require(f).setupUsage);
+      redOut = await runP(require(f).setupUsage);
     } catch (e) { redErr = e.message; }
     ok('B-87fd RED: a copy with the release\'s line (the conversation\'s own account id) files the member\'s reading under the POOL — the leg sees it', !!redOut && !!redOut.p && !redOut.a, redErr || JSON.stringify({ p: !!(redOut && redOut.p), a: !!(redOut && redOut.a) }));
   }
@@ -1542,7 +1543,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const { anchored } = await import('./scratch.mjs');
     const SRC = read('src/usage-routes.js');
     const TH = '0193a1b2-c3d4-4e5f-8a9b-0c1d2e3f4a5b';
-    const roll = (o, mut = null) => {
+    const roll = async (o, mut = null) => {
       const f = copyPath('src/usage-routes.js', mut ? mut.tag : 'rollout');
       writeCopy(f, mut ? anchored(SRC, mut.from, mut.to, mut.why) : SRC);
       const { setupUsage } = require(f);
@@ -1569,7 +1570,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() { }, delete() { }, use() { }, locals: {} };
       quietly(() => setupUsage({ app, accounts: wam, hosts: null, usageHistory: { scan() { }, warm() { } }, activeSessions: sessions, serverSetting: () => undefined, ensureDir: (dd) => fs.mkdirSync(dd, { recursive: true }), USAGE_CACHE_FILE: path.join(root, 'data', 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'codex-sessions'), META_DIR: metaDir, AVAILABLE_MODELS: [], BUFFERS_DIR: buffers, apiDerivedWindow: () => null, establishedWindows: () => null }));
       const res = { body: null, json(x) { this.body = x; return this; }, status() { return this; } };
-      quietly(() => routes['GET /api/usage']({ query: {}, headers: {} }, res));
+      await quietlyAwait(() => routes['GET /api/usage']({ query: {}, headers: {} }, res));
       const acc = (res.body && res.body.codexAccounts) || {};
       const nameOf = (key) => (Object.entries(ids).find(([, id]) => id === key) || [key === '__global_codex__' ? 'global' : 'other:' + key])[0];
       return Object.keys(acc).filter((k) => !!acc[k]).map(nameOf).sort().join(',') || 'nowhere';
@@ -1595,11 +1596,11 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     ];
     for (const c of CASES) {
       let got = null, err = null;
-      try { got = roll(c.o); } catch (e) { err = e.message; }
+      try { got = await roll(c.o); } catch (e) { err = e.message; }
       ok(`B-87fd rollout: ${c.name}`, got === c.want, err || `filed: ${got}`);
       if (!c.red) continue;
       let redGot = null, redErr = null;
-      try { redGot = roll(c.o, c.red); } catch (e) { redErr = e.message; }
+      try { redGot = await roll(c.o, c.red); } catch (e) { redErr = e.message; }
       ok(`B-87fd rollout RED (${c.red.why}): the copy files it under ${c.red.redWant} — the leg sees it`, redGot === c.red.redWant, redErr || `filed: ${redGot}`);
     }
   }
