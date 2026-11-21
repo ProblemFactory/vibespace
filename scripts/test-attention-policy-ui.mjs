@@ -224,7 +224,14 @@ ok(has(rows, 'im/c6', 'direct') && has(rows, 'im/c1', 'assigned') && judgedKeys(
 await idle();
 await d.ev(`(${DOOR}.click(), true)`);
 let st = await waitFor(d, BLOCK, (s) => s && /今天：判断了 \d+ 条/.test(s.today));
-ok(st && st.inPop && st.rows.length === 12 && st.head === '需关注 · 怎么判断' && st.radio === 'both' && st.rows.filter((r) => r.on === true).length === 9 && st.rows.some((r) => r.label === AT_YOU && r.on === true), 'the door: a popover holding 「需关注 · 怎么判断」 — 12 rows, the preset on 固定规则 + 判断模型, the 8 rules (+ 「有人 @ 了我、我还没读的」, lane attention-rule-at-you) and the judge on', st);
+// THE JUDGE'S SWITCH IS ITS OWN ANSWER (主开发 r1292 — the hosted run 44903979657, its 4th showing since 2026-11-16: the row read OFF beside
+// the preset «both»): the switch is drawn DISABLED and unchecked until GET /api/plugins answers (src/lib/settings-ui.js
+// _createStoredElsewhere — no person can press it in that gap), and the «today» line above is ANOTHER reply (the status). The leg
+// waits for the switch's own answer — the fact it judges — then reads the block again; a switch that answers OFF stays red by name
+const JUDGE_ANSWERED = `(() => { const i = document.querySelector('[data-settings-block="attention"] input[data-plugin-feature="llm.attention"]'); return !!i && !i.disabled; })()`;
+const judgeAnswered = (await waitFor(d, JUDGE_ANSWERED, (v) => v === true)) === true;
+st = await waitFor(d, BLOCK, (s) => s && /今天：判断了 \d+ 条/.test(s.today));
+ok(judgeAnswered && st && st.inPop && st.rows.length === 12 && st.head === '需关注 · 怎么判断' && st.radio === 'both' && st.rows.filter((r) => r.on === true).length === 9 && st.rows.some((r) => r.label === AT_YOU && r.on === true), 'the door: a popover holding 「需关注 · 怎么判断」 — 12 rows, the preset on 固定规则 + 判断模型, the 8 rules (+ 「有人 @ 了我、我还没读的」, lane attention-rule-at-you) and the judge on', { judgeAnswered, ...(st || {}) });
 ok(st && /今天：判断了 4 条 · 命中 2 条/.test(st.today), 'the readout under the judge\'s switch: 今天：判断了 4 条 · 命中 2 条 (four rows judged, two at 0.86)', st && st.today);
 // lane decision-spend-readout: the same line says what the judge COST today (the PURE decisionTodayLine's money half) —
 // four calls to the fake provider moved money, so it is never 「$0」 nor $0.00; the by-use breakdown is the hover
