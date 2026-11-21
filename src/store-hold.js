@@ -79,8 +79,22 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   function readAtStart(pre) {
     // A START READS WHAT THIS PROCESS STILL OWES (B-0248 (c), as the decision engine's): a store made again in the same process (a
     // suite's restart) lands the write the last one handed the writer BEFORE it reads — a hub's start owes nothing (no wait)
-    let owedHere = false;
-    try { const w = W(); if (w && typeof w.pending === 'function' && w.pending(file) && typeof w.flushSync === 'function') { w.flushSync([file]); owedHere = true; } } catch { /* read as it is */ }
+    let owedHere = false, leftHere = null;
+    try {
+      const w = W();
+      if (w && typeof w.pending === 'function' && w.pending(file) && typeof w.flushSync === 'function') {
+        const r = w.flushSync([file]); owedHere = true;
+        leftHere = r && Array.isArray(r.left) ? (r.left.find((x) => x === file || (x && x.file === file)) || null) : null;
+      }
+    } catch (e) { if (owedHere) leftHere = { why: (e && e.message) || String(e) }; }
+    // r1054 (8): A FILE THE FLUSH LEFT UNWRITTEN IS OLDER THAN THE STORE — its bytes are never taken as the store's state: HELD (no value,
+    // every door refuses by name), read again off the loop only once this process owes it nothing (readAgain below)
+    if (leftHere) {
+      started = true;
+      held = { kind: 'unreadable', code: 'EOWED', why: `this process still owes ${path.basename(file)} a write that did not land (${(leftHere && leftHere.why) || 'not written'}) — the file on disk is older than the store`, since: now(), rung: 'silent' };
+      tries = 0; arm();
+      return 'held';
+    }
     const read = !owedHere && pre && (typeof pre.text === 'string' || pre.error) ? pre : readSync(file);
     const a = answerOf(read);
     started = true;   // (only once the read has an answer: a throw above leaves the store NOT READ — refused by name, read again next time)
@@ -98,6 +112,8 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   /** ONE read again, OFF the loop, one in flight → true when the hold lifted */
   async function readAgain() {
     if (!held || inflight) return false;
+    // r1054 (8): a write this process still owes the file — its bytes on disk are older than the store: not read, held, the next rung
+    { const w = W(); if (w && typeof w.pending === 'function' && w.pending(file)) { tries++; if (held.rung === 'silent' && tries >= silentMs.length) { held.rung = 'said'; const fileName = path.basename(file); try { onSaid?.({ file: fileName, ...held }); } catch { /* said by the caller */ } } arm(); return false; } }   // (the said word carries the file, as the read's own below)
     inflight = fs.promises.readFile(file, 'utf8').then((text) => ({ text }), (error) => ({ error }));
     const read = await inflight; inflight = null;
     if (!held || stopped) return false;
@@ -184,6 +200,9 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     accepted?.();   // (before the hand-off: a stand-in writer may make the bytes, land them and tell inside dirty())
     // urgent: an ACT — written at the writer's next turn, as durable() asks, whether or not a door waits on it (a rename over the
     // socket has no waiter; paced, a large list would wait its gap before any page is told)
+    // THE PRODUCER HAS A SIDE EFFECT (r1053 (6)): it notes WHICH value its bytes are — the one told at their landing. Only the writer's
+    // own write calls it; nothing may ask the writer what it owes for these files (its owed() read calls the producer and would
+    // re-note a value whose bytes never land as the one to tell)
     w.dirty(file, { name, rank: 0, urgent: true, produce: () => { const v = value; const bytes = bytesOf(v); producedValue = v; producedSeq++; return bytes; }, onWritten: (ok) => { if (ok) tell(); } });
     return false;
   }

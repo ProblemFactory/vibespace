@@ -275,7 +275,7 @@ function endedKeyOf(target) {
   const cid = t.includes(':') ? t.slice(t.indexOf(':') + 1) : t;
   let backend = t.includes(':') ? t.slice(0, t.indexOf(':')) : null, name = null;
   let st = {};   // B-225b: a HELD list names nothing (no name, no backend from it) — the doors after this ask isArchived, which answers UNKNOWN
-  try { st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {}; } catch (e) { if (!(e && e.code === 'store_unread')) throw e; }
+  try { st = (persistenceRouter && (persistenceRouter.readUserStatePending || persistenceRouter.readUserState) && (persistenceRouter.readUserStatePending || persistenceRouter.readUserState)()) || {}; } catch (e) { if (!(e && e.code === 'store_unread')) throw e; }   // B-0248 (c) r1053 (1): the PENDING list — the backend the wake's turn runs on, the moment it was set
   const keyed = (o) => Object.keys(o || {}).find((k) => k.endsWith(`:${cid}`));
   const known = keyed(st.customNames) || keyed(st.sessionConfigs) || keyed(st.sessionModes) || null;
   if (!backend && known) backend = known.slice(0, known.indexOf(':'));
@@ -294,7 +294,7 @@ const resumeRowOf = (backend) => RL_PURE.harnessRowOf(require('../backend-caps.j
 // piece 7's seams: what a delivery's start reads of an ended conversation, through piece 4's own readers and road
 const deliveryWakeSeams = { keyOf: endedKeyOf, factsOf: (key) => resumeFactsOf(key),   // which account the reopen will bill (主开发 12:46Z, the read): the conversation's STATED one (its saved settings — the
   // reopen's own cfg, state key else the bare id); null ⇒ the account it is held on (the kept record's)
-  configAccountOf: (key) => { const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {}; const m = st.sessionConfigs || {}; const id = String(key).slice(String(key).indexOf(':') + 1); const c = Object.hasOwn(m, key) ? m[key] : Object.hasOwn(m, id) ? m[id] : null; return c && typeof c.account === 'string' && c.account ? c.account : null; },
+  configAccountOf: (key) => { const st = (persistenceRouter && (persistenceRouter.readUserStatePending || persistenceRouter.readUserState) && (persistenceRouter.readUserStatePending || persistenceRouter.readUserState)()) || {};   /* B-0248 (c) r1053 (1): the PENDING list — the account the reopen bills, the moment a person changed it */ const m = st.sessionConfigs || {}; const id = String(key).slice(String(key).indexOf(':') + 1); const c = Object.hasOwn(m, key) ? m[key] : Object.hasOwn(m, id) ? m[id] : null; return c && typeof c.account === 'string' && c.account ? c.account : null; },
   // …and with none stated and none kept: the account whose index lists the conversation — the create's OWN lookup (14:26Z)
   heldAccountOf: (key) => { const k = String(key); try { return require('../routes/sessions').heldAccountOf(k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)); } catch { return null; } },
   // the wake entry's POSTING mark, durable before its hand-over can land (conversation-deliver markEndedPosting — 14:26Z)
@@ -351,6 +351,7 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
   // an ENDED conversation's facts (its session key from the stores that still name it — the sidebar's names, the Task Groups — else claude:<id>)
   verbs: { ...require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsStrict, lineageOf: (ids) => { const tk = getTasks && getTasks(); if (!tk) throw new Error('the Task Group store is not ready'); return tk.grantGroupsOf(ids).inherited; },
     archive: (key) => persistenceRouter.archiveSession(key),
+    nameLanded: (key, name) => (persistenceRouter && typeof persistenceRouter.nameLanded === 'function' ? persistenceRouter.nameLanded(key, name) : Promise.resolve(true)),   // B-0248 (c) r1054 (7): the rename verb's «renamed» once the list is on disk
     asksOf: (key) => { if (userTodos.isHeldUnread?.()) throw Object.assign(new Error(userTodos.unreadRefusal('archiving a conversation (its open asks are unread)')), { code: 'todos-unread' }); try { return userTodos.forSession([key]).filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page'); } catch { return []; } },   // B-44f3: held ⇒ refused by name (never «no open asks»)
     resolveAsks: (ids, by) => userTodos.setStatusMany(ids, 'dismissed', by),
     turnOf: require('./turn-facts.js').turnOf,

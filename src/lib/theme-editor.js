@@ -554,7 +554,9 @@ class ThemeEditor {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, css, terminal: this._termValues }),
       });
-      if (!res.ok) { const e = await res.json(); if (heldBodyOf(e)) noteStoreHeld(e.held); showToast(heldWordsOf(e) || e.error || t('Save failed'), { type: 'error' }); return; }
+      // B-0248 (c) r1053 (3): NOT ON DISK YET — the hub KEEPS the theme and writes it again: it is applied here as saved, and the door's
+      // own sentence said (never «save failed» for a theme every page now has)
+      if (!res.ok) { const e = await res.json().catch(() => ({})); if (e && e.code === 'not-durable') showToast(t('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.'), { type: 'warn' }); else { if (heldBodyOf(e)) noteStoreHeld(e.held); showToast(heldWordsOf(e) || e.error || t('Save failed'), { type: 'error' }); return; } }
     } catch (e) { showToast(t('Save failed: {error}', { error: e.message }), { type: 'error' }); return; }
 
     // Register locally
@@ -577,7 +579,7 @@ class ThemeEditor {
 
     try {
       const res = await fetch('/api/custom-themes/' + encodeURIComponent(name), { method: 'DELETE' });
-      if (!res.ok) { const e = await res.json(); if (heldBodyOf(e)) noteStoreHeld(e.held); showToast(heldWordsOf(e) || e.error || t('Delete failed'), { type: 'error' }); return; }
+      if (!res.ok) { const e = await res.json().catch(() => ({})); if (e && e.code === 'not-durable') showToast(t('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.'), { type: 'warn' }); else { if (heldBodyOf(e)) noteStoreHeld(e.held); showToast(heldWordsOf(e) || e.error || t('Delete failed'), { type: 'error' }); return; } }   // (B-0248 (c) r1053 (3): not on disk yet — the deletion stands, said)
     } catch (e) { showToast(t('Delete failed: {error}', { error: e.message }), { type: 'error' }); return; }
 
     const wasActive = this.app.themeManager.current === name;

@@ -395,7 +395,7 @@ function stopNudgeReason(T = {}, extra = '') {
   if (T.task) steps.push('if you completed meaningful work, log it — vibespace-task progress "summary"');
   return (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale; this note is from VibeSpace, not from the user): ' + steps.map((t, i) => `(${i + 1}) ${t}`).join('; ') + '. ' + STOP_NUDGE_CLOSE;
 }
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getChannels = () => null, getGroups = () => null, getTouches = () => null, getRecordClear = () => null, getSendUserInput = () => null, getSessionMetaStore = () => null, carryDir = null }) {
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, readUserStatePending = null, getJobs, deliver, getPublishedPages = () => null, getChannels = () => null, getGroups = () => null, getTouches = () => null, getRecordClear = () => null, getSendUserInput = () => null, getSessionMetaStore = () => null, carryDir = null }) {
 // lane report-mark-on-ack r3: deliveries handed out and not yet confirmed, by CONVERSATION — a restart is said from it
 const carryOutstanding = TC.createOutstanding(carryDir);
   // THE NUMBERED LIST EACH SESSION WAS SHOWN (2026-09-22): `vibespace-task
@@ -571,10 +571,13 @@ const MANAGER_UNKNOWN = 'whether this session is a Group manager is not known ye
 function isManagerSession(key) {
   if (!serverSetting('agents.allowGroupManagement')) return false;
   if (!key || key.startsWith('webui:')) return false;
-  let us;
-  try { us = (readUserState && readUserState()) || {}; }
+  let us, pend;
+  try { us = (readUserState && readUserState()) || {}; pend = readUserStatePending ? (readUserStatePending() || {}) : us; }
   catch (e) { if (e && e.code === 'store_unread') return null; throw e; }   // B-225b R3: UNKNOWN while the conversation list is held — no manager power is used on it
-  return ((us.sessionConfigs || {})[key] || {}).groupManager === true;
+  // B-0248 (c) r1053: A POWER GATE FAILS CLOSED in both directions — a manager only while BOTH the landed list and the pending one say
+  // so (a power just granted waits for its landing; one just taken back is gone at once)
+  const mgr = (st) => ((st.sessionConfigs || {})[key] || {}).groupManager === true;
+  return mgr(us) && mgr(pend);
 }
 // Taught ONCE to a designated manager session (2.152.0, user directive: the
 // manager must LEARN its powers in context — before this, nothing ever told

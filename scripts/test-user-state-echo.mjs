@@ -86,6 +86,7 @@ const freshPersistence = () => {
 };
 const handlerOf = (router, method, p) => { const l = router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l && l.route.stack[0].handle; };
 
+const { anchored } = await import('./scratch.mjs');
 const { mutantCopies } = await import('./mutant-copy.mjs');
 const MC = mutantCopies('user-state-echo', REPO);
 const STATE_SRC = read('src/lib/sidebar-state.js'), WB_SRC = read('src/lib/sidebar-workbench.js');
@@ -168,10 +169,10 @@ const newBrowser = () => ({ ls: fakeLs() });
 // B-0248 (c): the route's stores are THE STORE WRITER's (src/store-hold.js owe/after) — this suite's world lands each write AT ITS CALL (the writer's contract, no latency: its bytes written whole, then onWritten, and every answer at once), as the release's write at the call did; the off-loop laws are test-store-write-census ⑭'s
 const landingWriter = () => ({ dirty(lwFile, o) { const b = o.produce(), parts = Array.isArray(b) ? b : [b], lwTmp = lwFile + '.lw.tmp'; for (let i = 0; i < parts.length; i++) fs.writeFileSync(lwTmp, parts[i], { flag: i ? 'a' : 'w' }); fs.renameSync(lwTmp, lwFile); if (o.onWritten) o.onWritten(true, null); }, durable(lwFile, o) { if (o && o.answer) o.answer(true); return Promise.resolve(true); }, pending: () => false, flushSync: () => ({ written: [], left: [] }), whyNotDurable: () => null });
 /** a world: the real route over a temp data dir, a stub socket, pages, and a virtual clock with a queue of events */
-function createWorld({ seed = 1, sessions, lag = null, landMs = null } = {}) {
+function createWorld({ seed = 1, sessions, lag = null, landMs = null, persistence = null } = {}) {
   const R = rng(seed);
   const dataDir = fs.mkdtempSync(path.join(TMP, 'w-'));
-  const P = freshPersistence();
+  const P = persistence ? persistence() : freshPersistence();   // (B-0248 (c) §24: a copy's route, for its red)
   const clients = new Set();
   const hookSaw = [];
   let now = 0, evSeq = 0;
@@ -3452,22 +3453,37 @@ console.log('§23 round 14: the fork-title road refuses before the window\'s tit
 
 // ════════ §8 THE MUTANTS ════════
 // ════════ §24 B-0248 (c) — THE LIST IS THE STORE WRITER'S: a write lands LATER than its call (on the world's clock) ════════
-console.log('§24 B-0248 (c): the writes land later than their calls — a burst of acts lands as ONE write and ONE frame, answers after later frames; every page converges, every act once');
+console.log('§24 B-0248 (c): the writes land later than their calls — a burst of acts lands as ONE write and ONE frame, answers after later frames; every page converges, every act once, no answer ahead of the disk');
 {
-  const Sb = await loadPage(STATE_SRC);
-  const w = createWorld({ seed: 241, sessions: mkSessions(12), landMs: 150 });
-  const A = await addPage(w, Sb, 'tabA', { browser: newBrowser() }), B = await addPage(w, Sb, 'tabB', { browser: newBrowser() }), C = await addPage(w, Sb, 'tabC', { browser: newBrowser() });
-  await w.run(800);
-  const pages = [A, B, C];
-  for (let i = 0; i < 9; i++) { const p = pages[i % 3], s0 = w.sessions[1 + i]; w.at(w.now() + 7 * i, () => (i % 2 ? p.toggleStar(s0) : p.toggleArchive(s0)), 'act'); }
-  await w.run(w.now() + 600000);
-  const st = w.serverState(), disk = JSON.parse(fs.readFileSync(path.join(w.dataDir, 'user-state.json'), 'utf8'));
-  const arch = [0, 2, 4, 6, 8].map((i) => w.sessions[1 + i].sessionKey), star = [1, 3, 5, 7].map((i) => w.sessions[1 + i].sessionKey);
-  const ws = w.writerStats();
+  // RED (r1053 (5)): the batches door answering at once, in a copy — an answer names a state the disk does not hold yet
+  const PREL = 'src/routes/persistence.js', PSRC = read(PREL);
+  const NOW_A = "    const answer = (extra = {}) => { const rev = UO.revOf(_userStateCache || readUserState()); answerAfter(userStateHold, res, () => res.json({ success: true, rev, epoch: userStateEpoch(), ...extra })); };\n";
+  ok(PSRC.split(NOW_A).length === 2, 'control setup: the batches door\'s answer after the landing is found once');
+  const run24 = async (persistence) => {
+    const Sb = await loadPage(STATE_SRC);
+    const w = createWorld({ seed: 241, sessions: mkSessions(12), landMs: 150, persistence });
+    const A = await addPage(w, Sb, 'tabA', { browser: newBrowser() }), B = await addPage(w, Sb, 'tabB', { browser: newBrowser() }), C = await addPage(w, Sb, 'tabC', { browser: newBrowser() });
+    await w.run(800);
+    // each answer of the ops door, at the moment it is sent: its rev against the stateRev ON DISK
+    const ahead = [], realOps = w.H.ops;
+    const diskRev = () => { try { return Number(JSON.parse(fs.readFileSync(path.join(w.dataDir, 'user-state.json'), 'utf8')).stateRev) || 0; } catch { return 0; } };
+    w.H.ops = (req, res, next) => realOps(req, { status(c) { res.status(c); return this; }, json(o) { if (o && o.success && Number(o.rev) > diskRev()) ahead.push([o.rev, diskRev()]); return res.json(o); } }, next);
+    const pages = [A, B, C];
+    for (let i = 0; i < 9; i++) { const p = pages[i % 3], s0 = w.sessions[1 + i]; w.at(w.now() + 7 * i, () => (i % 2 ? p.toggleStar(s0) : p.toggleArchive(s0)), 'act'); }
+    await w.run(w.now() + 600000);
+    const st = w.serverState(), disk = JSON.parse(fs.readFileSync(path.join(w.dataDir, 'user-state.json'), 'utf8'));
+    const arch = [0, 2, 4, 6, 8].map((i) => w.sessions[1 + i].sessionKey), star = [1, 3, 5, 7].map((i) => w.sessions[1 + i].sessionKey);
+    const ws = w.writerStats();
+    return { w, pages, st, disk, arch, star, ws, ahead };
+  };
+  const R24 = await run24(null);
+  const { w, pages, st, disk, arch, star, ws } = R24;
   const onDisk = arch.every((k) => disk.archivedSessions.includes(k)) && star.every((k) => disk.starredSessions.includes(k));
-  ok(onDisk && slotDiff(slotsOf(st), slotsOf(disk)).length === 0 && converged(w, pages) && opsApplied(w, (o) => o.key === 'archivedSessions') === 5 && opsApplied(w, (o) => o.key === 'starredSessions') === 4 && ws && ws.versions.some((n) => n > 1),
-    `§24 nine acts on three pages, each write landing 150 ms after it starts: every act on disk once (5 archive ops, 4 star ops), the hub's answer = the file, all three pages converge — ${ws ? ws.landings : 0} landings for ${ws ? ws.versions.reduce((a, n) => a + n, 0) : 0} writes (a burst landed as one: ${ws ? ws.versions.filter((n) => n > 1).length : 0})`,
-    { landings: ws && ws.landings, versions: ws && ws.versions, archived: st.archivedSessions.length, starred: st.starredSessions.length, dup: w.dup });
+  ok(onDisk && slotDiff(slotsOf(st), slotsOf(disk)).length === 0 && converged(w, pages) && opsApplied(w, (o) => o.key === 'archivedSessions') === 5 && opsApplied(w, (o) => o.key === 'starredSessions') === 4 && ws && ws.versions.some((n) => n > 1) && R24.ahead.length === 0,
+    `§24 nine acts on three pages, each write landing 150 ms after it starts: every act on disk once (5 archive ops, 4 star ops), the hub's answer = the file, all three pages converge, NO answer ahead of the disk — ${ws ? ws.landings : 0} landings for ${ws ? ws.versions.reduce((a, n) => a + n, 0) : 0} writes (a burst landed as one: ${ws ? ws.versions.filter((n) => n > 1).length : 0})`,
+    { landings: ws && ws.landings, versions: ws && ws.versions, archived: st.archivedSessions.length, starred: st.starredSessions.length, dup: w.dup, ahead: R24.ahead });
+  const X24 = await run24(() => MC.load(PREL, anchored(PSRC, NOW_A, "    const answer = (extra = {}) => { const rev = UO.revOf(_userStateCache || readUserState()); res.json({ success: true, rev, epoch: userStateEpoch(), ...extra }); };   // MUTANT: answered at once\n", 'echo-ops-answer-now')));
+  ok(X24.ahead.length > 0, `CONTROL (the batches door answering at once, in a copy): ${X24.ahead.length} answer(s) name a state the disk does not hold yet (red)`, X24.ahead.slice(0, 4));
 }
 
 console.log('§8 the mutants — each RED by name');

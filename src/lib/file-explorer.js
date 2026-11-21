@@ -343,7 +343,10 @@ class FileExplorer {
         let b = null;
         try { b = await r.json(); } catch { b = null; }
         const h = heldBodyOf(b);
-        if (h) { this._bkLanded = false; this._bkHeld = h; noteStoreHeld(h); throw Object.assign(new Error(storeHeldWords(h)), { said: true }); }   // (B-225b: this page's list is no longer the hub's — the next change is refused here until a read lands)
+        if (h) { this._bkLanded = false; this._bkHeld = h; noteStoreHeld(h); throw Object.assign(new Error(storeHeldWords(h)), { said: true }); }
+        // B-0248 (c) r1053 (3): NOT ON DISK YET — the hub KEEPS the change and writes it again: the list stays as shown (a reload here
+        // would show it undone, then done again when the write lands); the door's own sentence, in the person's language
+        if (b && b.code === 'not-durable') { showToast(t('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.'), { type: 'warn' }); return; }   // (B-225b: this page's list is no longer the hub's — the next change is refused here until a read lands)
         throw new Error(`HTTP ${r.status}`);
       }
     } catch (e) {

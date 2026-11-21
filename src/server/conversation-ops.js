@@ -445,7 +445,7 @@ function beltRow(r) {
 const OPEN_ID_WAIT_MS = 20 * 1000;     // a claude CLI reports its conversation id within seconds of the spawn
 const BUSY_TURNS = ['running', 'waiting'];   // turn-facts' non-idle states: mid-turn, or paused on the user (requires_action)
 function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null, ops = null, waitMs = OPEN_ID_WAIT_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
-  archive = null, asksOf = () => [], resolveAsks = () => ({ changed: [], unknown: [] }), turnOf = () => 'idle', deadOf = () => null, listFacts = null,
+  archive = null, nameLanded = null, asksOf = () => [], resolveAsks = () => ({ changed: [], unknown: [] }), turnOf = () => 'idle', deadOf = () => null, listFacts = null,
   // the manager design's piece 4 (conversations.resume): the hub's one line of resumes nobody pressed (src/server/resume-line.js), an
   // ended conversation's kept facts ({goal, timerMark, mode, cwd, hostId}), the archived list, its harness's row (src/resume-line.js
   // harnessRowOf: {resumeContinues, headless}), and the desktop of the row that shows it (or null — the hub never picks one)
@@ -540,7 +540,14 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       const t = reached(args.target, ctx);
       if (!t.ok) return t;
       const r = callOp('rename', { webuiId: t.id, name: args.name });
-      return r && r.ok ? { ok: true, target: idOf(t.s) || t.id, name: r.name } : r;
+      if (!(r && r.ok)) return r;
+      const done = { ok: true, target: idOf(t.s) || t.id, name: r.name };
+      // B-0248 (c), r1054 (7): «renamed» is told once the conversation list holding the name is ON DISK (as the archive verb's «archived»):
+      // the name lives in the session and its meta already; not on disk ⇒ not-durable, by name (a hub wires the seam; without it the
+      // answer is the rename's own, at once)
+      const key = keyOf(t.s);
+      if (typeof nameLanded !== 'function' || !key) return done;
+      return Promise.resolve(nameLanded(key, r.name)).then((landed) => (landed ? done : { ok: false, code: 'not-durable', why: 'the conversation is renamed, but the conversation list could not be written to disk yet — it is kept and written again; ask again to know when it is on disk', target: idOf(t.s) || t.id }));
     },
     'conversations.bind': async (args, ctx) => {   // async (the deferred-save census, lane lg-store-writes): its answer waits for the store
       const t = reached(args.target, ctx);
@@ -612,7 +619,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       if (!a || !a.ok) return { ok: false, code: (a && a.code) || 'failed', why: (a && a.why) || 'the archived list could not be written', target: label };
       // B-0248 (c): the archived list is the store writer's — «archived» (or «already archived») is told once it is ON DISK: a caller
       // told so never asks again; one told not-durable asks again and hears already_archived once the list landed
-      if (a.landed && !(await a.landed)) return { ok: false, code: 'not-durable', why: 'the archived list could not be written to disk yet — it is kept and written again; ask again: already_archived says it is on disk', target: label };
+      if (a.landed && !(await a.landed)) return { ok: false, code: 'not-durable', why: 'the archived list could not be written to disk yet — it is kept and written again; ask again: it answers once the list is on disk', target: label };
       if (a.already && !ended) return { ok: false, code: 'already_archived', why: 'that conversation is already in the archived list', target: label };
       return { ok: true, target: f.conversationId, sessionKey: f.sessionKey, ended, archived: true, already: !!a.already, resolvedAsks: resolved };
     },

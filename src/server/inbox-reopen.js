@@ -59,6 +59,7 @@ function create({ getOpenConversation, activeSessions, discover = async () => nu
       if (fp && !/[\\/]remote-jsonl[\\/]/.test(String(fp))) entry = { cwd: item.cwd, located: true };
     }
     let us = {};
+    // (B-0248 (c) r1053 (1): server.js hands the PENDING list — the config and the account the reopened turn is billed to, the moment a person set them)
     try { us = readUserState() || {}; } catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `the conversation's saved settings cannot be read yet — ${e.message}` }; }   // B-225b R3: never reopened on the defaults (another account, another model)
     const name = stateOf(us.customNames, key) || (entry && entry.name) || item.sessionName || '';
     let taskId = null;

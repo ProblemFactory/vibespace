@@ -3100,10 +3100,12 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     };
     const LR = await loopScene(() => require(path.join(REPO, PREL)), 'real');
     console.log(`  ⊙ ⑭c the loop's longest turn with ${STALL} ms placed in each main-thread rename / fsync: ${LR.gap} ms over ${LR.ms} ms (a rename and a bookmarks save, both answered after their landing)`);
-    ok(LR.answered && J(LR.status) === J([200, 200]) && LR.onDisk === 'loop' && J(LR.bm) === J(['L']) && LR.gap < STALL / 2, `⑭c the loop no longer waits on the storage: with ${STALL} ms placed in each main-thread rename / fsync the longest turn is ${LR.gap} ms (< ${STALL / 2}); both acts answered after their landing, both on disk`, LR);
     const NOW_A = "  const storeW = () => writer || require('../store-writer.js').storeWriter();\n";
     ok(PSRC.split(NOW_A).length === 2, 'control setup: the stores\' writer is found once');
     const XC = await loopScene(() => mutantCopies('swc-pl-nowriter', REPO).load(PREL, anchored(PSRC, NOW_A, '  const storeW = () => null;   // MUTANT: no writer — the write at the call (the release)\n', 'pl-no-writer')), 'nowriter');
+    console.log(`  ⊙ ⑭c the red's own figure: no writer (the release's write at the call) ${XC.gap} ms; the tree ${LR.gap} ms`);
+    // (r1053 (5): a fast suite on a busy machine — the bound is the red's own figure: under half of it, never a fixed 150 ms)
+    ok(LR.answered && J(LR.status) === J([200, 200]) && LR.onDisk === 'loop' && J(LR.bm) === J(['L']) && LR.gap * 2 < XC.gap, `⑭c the loop no longer waits on the storage: with ${STALL} ms placed in each main-thread rename / fsync the longest turn is ${LR.gap} ms — under half the red's own ${XC.gap} ms; both acts answered after their landing, both on disk`, { tree: LR, red: XC.gap });
     ok(XC.gap >= STALL && XC.onDisk === 'loop', `CONTROL (no writer — the release's write at the call, in a copy): the loop is held ${XC.gap} ms (≥ ${STALL}) by the rename (red)`, XC);
 
     // (d) THE ARCHIVE VERB tells «archived» only once the list is ON DISK (an agent told so never asks again)
@@ -3148,8 +3150,8 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       return out;
     };
     const RV = await realVerb(() => require(path.join(REPO, PREL)), 'real');
-    ok(RV.inFlight === null && RV.isArchivedInFlight === false && RV.landed && RV.landed.ok === true && RV.landed.archived === true && RV.onDisk && RV.refused && RV.refused.code === 'not-durable' && RV.againInFlight === null && RV.again && RV.again.code === 'already_archived',
-      '⑭d THE VERB ON THE REAL ROUTER: no answer while the list is in flight (and isArchived still false — what landed); «archived» at the landing, on disk; a refused write ⇒ not-durable; asked again, it waits, then already_archived once on disk', RV);
+    ok(RV.inFlight === null && RV.isArchivedInFlight === true && RV.landed && RV.landed.ok === true && RV.landed.archived === true && RV.onDisk && RV.refused && RV.refused.code === 'not-durable' && RV.againInFlight === null && RV.again && RV.again.ok === true && RV.again.archived === true,
+      '⑭d THE VERB ON THE REAL ROUTER: no answer while the list is in flight (isArchived already true — the gate fails closed, r1053); «archived» at the landing, on disk; a refused write ⇒ not-durable; asked again, it waits, then «archived» once its own archive lands («already» is the landed list\'s, r1053 (2))', RV);
     const LAND_A = "    return { ok: true, already: false, landed: landedOf(userStateHold) };\n";
     ok(PSRC.split(LAND_A).length === 2, 'control setup: archiveSession\'s landing promise is found once');
     const RVX = await realVerb(() => mutantCopies('swc-pl-landnow', REPO).load(PREL, anchored(PSRC, LAND_A, "    return { ok: true, already: false, landed: Promise.resolve(true) };   // MUTANT: «landed» at once\n", 'pl-landed-now')), 'landnow');
@@ -3208,6 +3210,168 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     ok(PSRC.split(REW_A).length === 2, 'control setup: the start read\'s rewrite is found once');
     const MRX = await moreScene(() => mutantCopies('swc-pl-rewriteowed', REPO).load(PREL, anchored(PSRC, REW_A, "      try { userStateHold.owe(_userStateCache, { name: 'user-state.write', bytes: userStateBytes }); }   // MUTANT: handed to the writer\n", 'pl-rewrite-owed')), 'rewriteowed');
     ok(MRX.rewrite.owed === 1 && J(MRX.rewrite.onDisk) !== J(MRX.rewrite.served), 'CONTROL (the start read\'s rewrite handed to the writer, in a copy): when the start read returns the file still holds the legacy ref — a migration reading it then reads the old list (red)', MRX.rewrite);
+
+    // (l) r1053's MUST — THE WAKE'S GATE FAILS CLOSED: an archive whose write is IN FLIGHT already stops the wake (isArchived reads the
+    // pending AND the landed list); an un-archive in flight still refuses until it lands. RED: the gate handed the landed list alone
+    const DW = require(path.join(REPO, 'src/delivery-wake.js'));
+    const wakeScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-wake-' + tag); roots.push(d); seed(d);
+      const g = gatedWriter();
+      const R = setupP(fresh(load), d, g.W, [], []);
+      call(R, 'get', '/api/user-state');
+      const key = 'claude:c-9', harness = { resumeContinues: 'nothing', headless: true };
+      const out = {};
+      R.archiveSession(key);   // the archive accepted: its write in flight
+      out.archInFlight = R.isArchived(key); out.verdictInFlight = DW.deliveryResumeVerdict({ archived: R.isArchived(key), goal: 'none', queue: 0 }, harness).code || 'ok';
+      g.land(); out.archLanded = R.isArchived(key);
+      call(R, 'patch', '/api/user-state', { body: { archivedSessions: [] } });   // the person un-archives: in flight
+      out.unarchInFlight = R.isArchived(key);
+      g.land(); out.unarchLanded = R.isArchived(key);
+      // r1053 (1): the reader that chooses what a turn is billed to reads the PENDING list
+      call(R, 'patch', '/api/user-state', { body: { sessionConfigs: { [key]: { accountId: 'acct-new' } } } });
+      out.cfgPending = ((R.readUserStatePending().sessionConfigs || {})[key] || {}).accountId || null;
+      out.cfgLanded = ((R.readUserState().sessionConfigs || {})[key] || {}).accountId || null;
+      g.land();
+      return out;
+    };
+    const WK = await wakeScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(WK.archInFlight === true && WK.verdictInFlight === 'archived' && WK.archLanded === true && WK.unarchInFlight === true && WK.unarchLanded === false,
+      '⑭l THE WAKE\'S GATE FAILS CLOSED (r1053\'s MUST): an archive IN FLIGHT already reads archived and the wake\'s own verdict refuses («archived»); an un-archive in flight still refuses until it lands', WK);
+    ok(WK.cfgPending === 'acct-new' && WK.cfgLanded === null, '⑭l the reader that chooses what a turn is billed to (readUserStatePending) sees the account a person just set while its write is in flight; the landed reader not yet', { pending: WK.cfgPending, landed: WK.cfgLanded });
+    const GATE_A = "    try { pending = readUserState(); landed = userStateOut(); }\n";
+    ok(PSRC.split(GATE_A).length === 2, 'control setup: the gate\'s two lists are found once');
+    const WKX = await wakeScene(() => mutantCopies('swc-pl-gatelanded', REPO).load(PREL, anchored(PSRC, GATE_A, "    try { pending = userStateOut(); landed = pending; }   // MUTANT: the landed list alone\n", 'pl-gate-landed')), 'gatelanded');
+    ok(WKX.archInFlight === false && WKX.verdictInFlight !== 'archived', 'CONTROL (the gate handed the landed list alone, in a copy): while the archive is in flight it reads «not archived» and the wake RESUMES the conversation the person just archived (red)', WKX);
+
+    // (m) r1053 (2): «ALREADY ARCHIVED» IS JUDGED FROM THE LANDED LIST — an archive on disk, then an UNRELATED change whose write the
+    // storage refuses: asked again, the verb answers already_archived AT ONCE (never not-durable for what is on disk). RED: the
+    // «already» road waiting on whatever the store owes now
+    const alreadyScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-already-' + tag); roots.push(d); seed(d);
+      const g = gatedWriter();
+      const R = setupP(fresh(load), d, g.W, [], []);
+      call(R, 'get', '/api/user-state');
+      const V = CO.automationVerbs({ activeSessions: new Map(), archive: (k) => R.archiveSession(k), deadOf: (t) => ({ conversationId: t, sessionKey: 'claude:' + t, name: t }), isArchived: (k) => R.isArchived(k) });
+      const ask = (t) => { let r = null; const p = V['conversations.archive']({ target: t }, { caller: { conversationId: 'c-0', sessionKey: 'claude:c-0' }, keyId: 'k-1', reach: () => ({ ok: true, by: 'opener' }), scopes: [] }); p.then((x) => { r = x; }, (e) => { r = { threw: String(e && e.message || e) }; }); return { p, now: () => r }; };
+      const a1 = ask('c-5'); await new Promise((r) => setTimeout(r, 15)); g.land(); await a1.p;
+      call(R, 'patch', '/api/user-state', { body: { archivedFolders: ['/unrelated'] } });   // an unrelated change…
+      g.land(false);                                                                           // …whose write the storage refuses (kept, owed)
+      const a2 = ask('c-5'); await new Promise((r) => setTimeout(r, 15));
+      const out = { first: a1.now(), again: a2.now() };
+      g.land(); await a2.p.catch(() => { });
+      return out;
+    };
+    const AL = await alreadyScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(AL.first && AL.first.archived === true && AL.again && AL.again.code === 'already_archived', '⑭m «already archived» is judged from the landed list: with an unrelated write owed and failing, asking again answers already_archived AT ONCE', AL);
+    const ALR_A = "      if (holds(userStateOut().archivedSessions)) return { ok: true, already: true, landed: Promise.resolve(true) };\n";
+    ok(PSRC.split(ALR_A).length === 2, 'control setup: the «already» road is found once');
+    const ALX = await alreadyScene(() => mutantCopies('swc-pl-alreadywaits', REPO).load(PREL, anchored(PSRC, ALR_A, "      if (holds(userStateOut().archivedSessions)) return { ok: true, already: true, landed: landedOf(userStateHold) };   // MUTANT: waits on what the store owes now\n", 'pl-already-waits')), 'alreadywaits');
+    ok(ALX.again === null, 'CONTROL (the «already» road waiting on what the store owes now, in a copy): the verb gives no answer for an archive that IS on disk while an unrelated write fails (red)', ALX);
+
+    // (n) THE NOT-DURABLE REPLY IS THE ROUTE'S OWN DOING (r1053 (5)): RED — a copy whose answer after the landing ignores the verdict
+    const ANS_OK_A = "  const answerAfter = (hold, res, ok200) => hold.after((ok) => { exitSafe(res); if (ok) ok200(); else notOnDisk(res, hold); });\n";
+    ok(PSRC.split(ANS_OK_A).length === 2, 'control setup: the doors\' answer after the landing is found once');
+    const XN = await lawScene(() => mutantCopies('swc-pl-ignoreok', REPO).load(PREL, anchored(PSRC, ANS_OK_A, "  const answerAfter = (hold, res, ok200) => hold.after(() => { exitSafe(res); ok200(); });   // MUTANT: the landing's verdict ignored\n", 'pl-ignore-ok')), 'ignoreok');
+    ok(XN.fail.status === 200, 'CONTROL (the doors\' answer ignoring the landing\'s verdict, in a copy): a write the storage refused is answered 200 «saved» (red) — the 503 not-durable is the route\'s own', XN.fail);
+
+    // (o) THE IMPORT'S THREE UNHAPPY ROADS (r1053 (5)): a store not on disk; the groups not on disk (the tasks section's EVSNOTONDISK);
+    // a wrong passphrase — each answered only once the stores the import wrote before it are settled, each by its own code
+    const PAGE_HEADERS = { host: '127.0.0.1:1', origin: 'http://127.0.0.1:1', 'sec-fetch-site': 'same-origin' };   // the owner's page (the person verdict reads these; no request is made)
+    const impScene = async (kind) => {
+      const d = scratchDir('swc-pl-imp-' + kind); roots.push(d); seed(d);
+      const g = gatedWriter();
+      const P0 = fresh(() => require(path.join(REPO, PREL)));
+      P0.setup({ dataDir: d, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, writer: g.W,
+        getTasks: () => ({ unreadRefusal: () => null, importBundle: () => { throw Object.assign(new Error('the groups are not on disk yet (a stand-in)'), { code: 'EVSNOTONDISK' }); } }) });
+      const R = P0.router;
+      call(R, 'get', '/api/user-state');
+      const sections = { userState: { customNames: { 'claude:i': 'imported' } }, ...(kind === 'tasks' ? { tasks: { tasks: {} } } : {}) };
+      const body = { file: { app: 'vibespace-config', sections, ...(kind === 'pass' ? { sensitive: 'not-a-sealed-bundle' } : {}) }, sections: Object.keys(sections), ...(kind === 'pass' ? { includeSensitive: ['claudeCreds'], passphrase: 'wrong' } : {}) };
+      const r = call(R, 'post', '/api/config/import', { body, headers: PAGE_HEADERS });
+      const before = r.answered;
+      g.land(kind !== 'store');
+      return { kind, before, answered: r.answered, status: r.status, code: r.body && r.body.code, error: r.body && r.body.error && String(r.body.error).slice(0, 80), notOnDisk: r.body && r.body.notOnDisk };
+    };
+    const I1 = await impScene('store'), I2 = await impScene('tasks'), I3 = await impScene('pass');
+    ok(!I1.before && I1.answered && I1.status === 503 && I1.code === 'not-durable' && J(I1.notOnDisk) === J(['user-state.json'])
+      && !I2.before && I2.answered && I2.status === 503 && I2.notOnDisk === true
+      && !I3.before && I3.answered && I3.status === 400 && /passphrase/i.test(I3.error || ''),
+      '⑭o THE IMPORT\'S THREE UNHAPPY ROADS — a store not on disk (503 not-durable, named), the groups not on disk (503 EVSNOTONDISK), a wrong passphrase (400): none answered before the stores it wrote settled', { I1, I2, I3 });
+
+    // (p) THE NUMBER (r1053 (4)): the conversation list's bytes and their making at the produce, on the main thread, for a stand-in of a
+    // hub with thousands of conversations — printed (the line quotes it)
+    {
+      const d = scratchDir('swc-pl-size'); roots.push(d);
+      const N = 5000, keyOf = (i) => `claude:${String(i).padStart(8, '0')}-0000-4000-8000-000000000000`;
+      const big = { customNames: {}, sessionConfigs: {}, sessionModes: {}, starredSessions: [], archivedSessions: [], sessionGroups: {}, groupFolders: {} };
+      for (let i = 0; i < N; i++) { const k = keyOf(i); big.customNames[k] = `conversation ${i} — a name of an ordinary length`; big.sessionConfigs[k] = { model: 'opus', effort: 'high', accountId: 'acct-' + (i % 7) }; if (i % 10 === 0) big.starredSessions.push(k); }
+      for (let i = N; i < N * 5; i++) big.archivedSessions.push(keyOf(i));
+      for (let gi = 0; gi < 40; gi++) big.sessionGroups['group ' + gi] = Array.from({ length: 100 }, (_, j) => keyOf((gi * 100 + j) % N));
+      fs.writeFileSync(path.join(d, 'user-state.json'), J(big));
+      const g = gatedWriter();
+      let made = null;
+      // (the making's MAIN-THREAD CPU time — the bytes are made on the main thread; a CPU reading, never a wall clock: a fast suite judges no
+      // wall-clock span, and this one is printed only)
+      const W2 = { ...g.W, dirty: (f, o) => { const c0 = process.threadCpuUsage(); const b = o.produce(); const c = process.threadCpuUsage(c0); const bytes = (Array.isArray(b) ? b : [b]).reduce((a, x) => a + Buffer.byteLength(x), 0); made = { cpuMs: Math.round((c.user + c.system) / 100) / 10, mb: Math.round(bytes / 1048576 * 100) / 100 }; g.W.dirty(f, { ...o, produce: () => b }); } };
+      const R = setupP(fresh(() => require(path.join(REPO, PREL))), d, W2, [], []);
+      call(R, 'get', '/api/user-state');
+      R.setCustomName(keyOf(1), 'renamed');
+      console.log(`  ⊙ ⑭p THE NUMBER: the conversation list of ${N} conversations (${N * 4} archived, ${N} configs, 40 groups of 100): ${made ? made.mb : '?'} MB made at the produce in ${made ? made.cpuMs : '?'} ms of main-thread CPU`);
+      ok(!!made && made.mb > 0, '⑭p the conversation list\'s produce measured at a hub-sized stand-in (printed: its bytes and its making on the main thread)', made);
+    }
+
+    // (q) r1054 (7): THE RENAME VERB tells «renamed» once the list holding the name is on disk (as «archived»); not on disk ⇒ not-durable.
+    // RED: the verb's wait cut (in a copy)
+    const renameScene = async (COm, tag) => {
+      const d = scratchDir('swc-pl-rename-' + tag); roots.push(d); seed(d);
+      const g = gatedWriter();
+      const R = setupP(fresh(() => require(path.join(REPO, PREL))), d, g.W, [], []);
+      call(R, 'get', '/api/user-state');
+      const activeSessions = new Map([['sess-7', { backend: 'claude', backendSessionId: 'c-7', name: 'old', mode: 'chat' }]]);
+      const deps = { activeSessions, setCustomName: (k, n) => R.setCustomName(k, n), writeSessionMeta: () => { }, readSessionMeta: () => null, broadcastActiveSessions: () => { }, getSessionKey: (x) => `${x.backend}:${x.backendSessionId}` };
+      COm.provide({ rename: (data) => COm.renameSession(deps, data) });
+      const V = COm.automationVerbs({ activeSessions, nameLanded: (k, n) => R.nameLanded(k, n) });
+      const ask = (name) => { let r = null; const p = Promise.resolve(V['conversations.rename']({ target: 'c-7', name }, { caller: { conversationId: 'c-0', sessionKey: 'claude:c-0' }, keyId: 'k-1', reach: () => ({ ok: true, by: 'opener' }), scopes: [] })); p.then((x) => { r = x; }, (e) => { r = { threw: String(e && e.message || e) }; }); return { p, now: () => r }; };
+      const tick = () => new Promise((r) => setTimeout(r, 15));
+      const out = {};
+      const a1 = ask('new name'); await tick(); out.inFlight = a1.now(); g.land(); await a1.p; out.landed = a1.now();
+      out.onDisk = (disk(d, 'user-state.json').customNames || {})['claude:c-7'] || null;
+      const a2 = ask('third name'); await tick(); g.land(false); await a2.p; out.refused = a2.now();
+      g.land();
+      COm.provide({ rename: undefined });
+      return out;
+    };
+    const RN = await renameScene(CO, 'real');
+    ok(RN.inFlight === null && RN.landed && RN.landed.ok === true && RN.landed.name === 'new name' && RN.onDisk === 'new name' && RN.refused && RN.refused.code === 'not-durable',
+      '⑭q THE RENAME VERB (r1054 (7)): no answer while the list holding the name is in flight; «renamed» at its landing (on disk); a refused write ⇒ not-durable by name', RN);
+    const REN_A = "      if (typeof nameLanded !== 'function' || !key) return done;\n";
+    ok(COSRC.split(REN_A).length === 2, 'control setup: the rename verb\'s wait for the landing is found once');
+    const RNX = await renameScene(mutantCopies('swc-pl-renamenow', REPO).load(COREL, anchored(COSRC, REN_A, "      return done;   // MUTANT: the verb's wait cut\n", 'pl-rename-now')), 'renamenow');
+    ok(RNX.inFlight && RNX.inFlight.ok === true, 'CONTROL (the rename verb\'s wait cut, in a copy): «renamed» told while the list holding the name is not on disk (red)', RNX.inFlight);
+
+    // (r) r1054 (8): A START READ WHOSE FLUSH LEAVES THE FILE UNWRITTEN starts the store HELD — the old bytes are never taken as its state.
+    // RED: the flush's result ignored (the store hold, in a copy loaded in its place)
+    const restartScene = async (tag) => {
+      const d = scratchDir('swc-pl-restart-' + tag); roots.push(d); seed(d);
+      const g = gatedWriter();
+      const R1 = setupP(fresh(() => require(path.join(REPO, PREL))), d, g.W, [], []);
+      call(R1, 'get', '/api/user-state');
+      R1.setCustomName('claude:r-1', 'kept in memory');   // owed to the writer, never landed
+      const leftW = { ...g.W, pending: () => true, flushSync: (files) => ({ written: [], left: (files || []).map((f) => ({ file: f, why: 'held by the storage (a stand-in)' })) }) };
+      const R2 = setupP(fresh(() => require(path.join(REPO, PREL))), d, leftW, [], []);   // a suite's restart in the same process
+      const got = call(R2, 'get', '/api/user-state');
+      return { status: got.status, code: got.body && got.body.code, names: got.body && got.body.customNames ? Object.keys(got.body.customNames) : null };
+    };
+    const RS = await restartScene('real');
+    ok(RS.status === 503 && RS.code === 'store_unread', '⑭r a start read whose flush LEAVES the file unwritten starts the store HELD (503 store_unread) — the older bytes on disk are never served as the list', RS);
+    const LEFT_A = "    if (leftHere) {\n      started = true;\n";
+    ok(SHSRC.split(LEFT_A).length === 2, 'control setup: the start read\'s check of its flush is found once');
+    const holdL = mutantCopies('swc-pl-leftignored', REPO).load(SHREL, anchored(SHSRC, LEFT_A, "    if (false && leftHere) {   // MUTANT: the flush's result ignored\n      started = true;\n", 'pl-left-ignored'));
+    const savedHold2 = require.cache[SHP];
+    let RSX;
+    try { require.cache[SHP] = { id: SHP, filename: SHP, loaded: true, exports: holdL, children: [], paths: [] }; RSX = await restartScene('leftignored'); }
+    finally { if (savedHold2) require.cache[SHP] = savedHold2; else delete require.cache[SHP]; }
+    ok(RSX.status === 200 && Array.isArray(RSX.names) && !RSX.names.includes('claude:r-1'), 'CONTROL (the flush\'s result ignored, in a copy): the restart serves the OLDER bytes on disk as the list — the change the process still owed is gone from it (red)', RSX);
 
     // (e) THE STOP lands every store moved here: the REAL writer's exit (beginExit + exitFlush) right after three acts, before any landing
     const stopScene = async (load, tag) => {

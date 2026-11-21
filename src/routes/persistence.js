@@ -717,6 +717,14 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     writeUserState({ ...cur, customNames: names });
     return true;
   };
+  /** r1054 (7): THE NAME'S LANDING, for the rename verb — a promise: true once the list ON DISK holds `name` for `key` (at once when
+   *  it already does), false when the write that carries it failed or passed the writer's bound (kept, written again) */
+  router.nameLanded = (key, name) => {
+    const k = String(key || ''), v = String(name == null ? '' : name).trim();
+    let landedNow = false;
+    try { landedNow = ((userStateOut().customNames || {})[k] || '') === v; } catch { landedNow = false; }
+    return landedNow ? Promise.resolve(true) : landedOf(userStateHold);
+  };
 
   // lane conversations-archive-verb: ONE archive from the server (the automation verb conversations.archive) through the same
   // store + broadcast the sidebar's own 归档 PATCHes — `archivedSessions` holds `<backend>:<conversation id>` keys (older
@@ -725,10 +733,15 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const k = String(key || '');
     if (!k || !k.includes(':')) return { ok: false, code: 'bad_args', why: 'an archive key is <backend>:<conversation id>' };
     try {
-      const cur = readUserState();
+      const cur = readUserState();   // (the PENDING list: the change is built on it)
       const list = Array.isArray(cur.archivedSessions) ? cur.archivedSessions : [];
       const bare = k.slice(k.indexOf(':') + 1);
-      if (list.some((x) => String(x) === k || String(x) === bare)) return { ok: true, already: true, landed: landedOf(userStateHold) };
+      const holds = (l) => Array.isArray(l) && l.some((x) => String(x) === k || String(x) === bare);
+      // r1053 (2): «ALREADY ARCHIVED» IS JUDGED FROM THE LANDED LIST ALONE — on disk ⇒ already, at once (never a wait on whatever the
+      // store owes now: an unrelated later change failing would answer not-durable for an archive that IS on disk, at every retry);
+      // in the pending list only ⇒ its own archive is still owed: told when that lands
+      if (holds(userStateOut().archivedSessions)) return { ok: true, already: true, landed: Promise.resolve(true) };
+      if (holds(list)) return { ok: true, already: false, landed: landedOf(userStateHold) };
       writeUserState({ ...cur, archivedSessions: [...list, k] });
     } catch (e) { if (e && (e.code === 'store_unread' || e.code === 'store_appeared')) return { ok: false, code: e.code, why: e.message }; throw e; }   // B-225b: by name
     // B-0248 (c): `landed` — a promise of the LANDING (true on disk; false: not yet, kept and written again) — the archive verb tells
@@ -739,17 +752,24 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   function landedOf(hold) { return new Promise((resolve) => hold.after(resolve)); }
 
   // the manager design (piece 4's verbs, piece 7's deliveries): ONE read of the archived list — the state in memory (the
-  // cache archiveSession writes through), never a file read per ask; an older entry is a bare id, so either form answers
+  // cache archiveSession writes through), never a file read per ask; an older entry is a bare id, so either form answers.
+  // B-0248 (c), r1053's MUST — A READER THAT ACTS FOR NOBODY FAILS CLOSED IN BOTH DIRECTIONS: «archived» when EITHER the pending list
+  // or the landed list holds the conversation (a pending archive stops the wake of a job's result at once; a pending un-archive
+  // still refuses until it lands); held ⇒ UNKNOWN. The wake of an ended conversation and the resume verb ask it
   router.isArchived = (key) => {
     const k = String(key || '');
     if (!k) return false;
-    let st;
-    try { st = userStateOut(); }   // B-0248 (c): what LANDED — an archive still owed is not acted on (the wake, the resume verb)
+    let pending, landed;
+    try { pending = readUserState(); landed = userStateOut(); }
     catch (e) { if (e && e.code === 'store_unread') return null; throw e; }   // B-225b R3: UNKNOWN while the list is held — a door that acts for nobody refuses on it by name
-    const list = st.archivedSessions;
     const bare = k.includes(':') ? k.slice(k.indexOf(':') + 1) : k;
-    return Array.isArray(list) && list.some((x) => String(x) === k || String(x) === bare);
+    const holds = (st) => Array.isArray(st && st.archivedSessions) && st.archivedSessions.some((x) => String(x) === k || String(x) === bare);
+    return holds(pending) || holds(landed);
   };
+  // r1053 (1): THE READERS THAT CHOOSE WHAT A TURN IS BILLED TO OR RUNS ON read the PENDING list — a conversation's account, its
+  // config, its backend, the moment a person changed them (the wake's configAccountOf and endedKeyOf, the inbox's reopen); a power
+  // gate asks both lists (src/agent-routes.js isManagerSession: a manager only while BOTH say so)
+  router.readUserStatePending = () => readUserState();
 
   // ── Bookmarks ──
   const BOOKMARKS_FILE = path.join(dataDir, 'bookmarks.json');
@@ -1143,9 +1163,12 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return _userStateCache;
   }
 
-  /** B-0248 (c): WHAT LEAVES THE STORE IS WHAT LANDED — every reader outside the list's own doors (the hub's readers through the
-   *  router: the groups' liveness and signature, isArchived for the wake and the resume verb, the owner's facts, the inbox; the GET; the
-   *  export) is handed the state ON DISK, as the release's cache was; the doors build the next change on the PENDING one */
+  /** B-0248 (c): WHAT LEAVES THE STORE IS WHAT LANDED — the readers outside the list's own doors that only SHOW or COUNT it (the
+   *  router's readUserState: the groups' liveness and signature, the owner's facts, the names; the GET; the export) are handed the
+   *  state ON DISK. (The release's cache moved in the same synchronous step as its write, so it had one state; here the doors' state
+   *  runs ahead of the disk by the write in flight.) Two kinds read otherwise (r1053): isArchived — a gate that acts for nobody —
+   *  reads BOTH lists and fails closed; the readers that choose what a turn is billed to or runs on read the PENDING one
+   *  (readUserStatePending). The doors build the next change on the PENDING one */
   function userStateOut() { const st = readUserState(); return _userStateLandedSt || st; }
   /** the list read again WHOLE (its hold lifted, or a file appeared where the start found none): a NEW life — every page takes it
    *  whatever its number (the life's rule) — and the write hook runs on it (the archived list the groups judge). R11's «the lift is a change» */
