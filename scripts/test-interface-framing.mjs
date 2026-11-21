@@ -13,8 +13,8 @@
 //     nothing in the hub. RED CONTROLS: the channel's end cut ⇒ the counts stay at 1 000; the drop cut ⇒ the next request
 //     is never answered; the party's channel listener cut ⇒ the dead link's error is thrown out of the hub. And (r1057 items
 //     2–4): an open line with NO address is refused by the hub (RED: read as the local one); pipelined requests the hub holds
-//     leave no channel when the page resets (RED: the page socket's close cut); an old link's late close never removes the
-//     new link's channel of the same number (RED: the map keyed by the number).
+//     leave no channel when the page resets (RED: a response's close ends nothing); an old link's late close never removes
+//     the new link's channel of the same number (RED: the map keyed by the number).
 //   ④ THE HUB OBEYS NO CLASS (leg 4): an open line that CLAIMS a class, and a page header that claims a stamp, on a cookie-less
 //     head for /api/sessions, are answered 401 by the hub's own gate (src/auth.js); the open line's keys and the stamp's
 //     keys are exactly the declared ones. RED CONTROL: a hub whose gate reads the claimed class serves the request.
@@ -228,9 +228,10 @@ console.log('— ③ IN REQUEST ORDER, AND NOTHING LEFT');
   }
   const pr = await pipelinedReset();
   ok(pr.before.channels === 4 && pr.channels === 0 && pr.router === 0, `four pipelined requests the hub holds, then the page resets: ${pr.before.channels} channels → ${pr.channels} in the interface, ${pr.router} in the hub's router (the three waiting their turn go with the first)`, pr);
-  const HOOK = "    const page = req.socket; page.once('close', gone); res.once('finish', () => page.removeListener('close', gone));";
-  const prRed = await pipelinedReset(mutant('src/interface/relay.js', HOOK, ''));
-  ok(prRed.channels >= 1, `RED CONTROL — the page socket's own close cut: ${prRed.channels} channels of answers waiting their turn stay behind (Node never closes a response that has no socket yet)`, prRed);
+  // (measured on the first run: Node closes a pipelined response that waits its turn when its page socket goes, so the response's own close is the one road)
+  const GONE = '    const gone = () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } };';
+  const prRed = await pipelinedReset(mutant('src/interface/relay.js', GONE, '    const gone = () => { };'));
+  ok(prRed.channels >= 4, `RED CONTROL — a response's close ends nothing: ${prRed.channels} channels of the four stay behind`, prRed);
   /** the late close of an OLD link's channel never empties the NEW link's entry of the same number (r1057 item 3) */
   const lateClose = (mod) => {
     const R = mod.create({ ownerOf: () => 'hub' });
@@ -313,7 +314,7 @@ console.log('— ④ THE HUB OBEYS NO CLASS');
   ok(keys === 'chan,op,stamp,to,trace' && skeys === 'addr,port,secure' && lines[0].stamp.secure === false, `the open line's keys: ${keys}; the stamp's: ${skeys} (secure: ${lines[0] && lines[0].stamp.secure}) — no class, no who, nothing a page wrote`, lines[0]);
   try { mx.destroy(); } catch { } await I.close(); recSrv.close();
   // RED CONTROL: a hub whose gate READS the claimed class — the party puts it on the socket, the gate obeys it
-  const OPEN = 'const s = router.open(m.chan, m.stamp || {}); s[EXCHANGE] = { heads: 0, chan: m.chan };';
+  const OPEN = 'const s = router.open(m.chan, m.stamp); s[EXCHANGE] = { heads: 0, chan: m.chan };';
   const tells = mutant('src/server/interface-party.js', OPEN, OPEN + ' s.claimedClass = m.class;');
   const GATE = '      const d = doorClassOf({ method: req.method, path: req.path, headers: req.headers, encrypted: !!(req.socket && req.socket.encrypted) }, { enabled: this.enabled });';
   const obeys = mutant('src/auth.js', GATE, GATE.replace('const d = doorClassOf(', 'const d = req.socket && req.socket.claimedClass ? { kind: req.socket.claimedClass } : doorClassOf(')).Auth;

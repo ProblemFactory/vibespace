@@ -9,8 +9,9 @@
 //     what the interface took from it stays within one window and the streams' marks. RED CONTROL: the body taken with no
 //     back-pressure — megabytes taken from the page.
 //   ③ A REFUSED UPGRADE'S WORDS REACH A SLOW PAGE WHOLE (law 9: by name, never a closed socket): the hub answers an upgrade
-//     with a 16 MB refusal and ends; the page reads it 200 ms later and gets every byte. RED CONTROL: the page socket destroyed
-//     the moment its channel closed (the framing unit's first form) ⇒ the last words are lost.
+//     with a 16 MB refusal and ends; the page reads it 200 ms later and gets every byte; and in-process, deterministically, a
+//     page whose writes land late gets every byte of a 1 MB refusal. RED CONTROL: the page socket destroyed the moment its
+//     channel closed (the framing unit's first form) ⇒ the slow page loses the last words.
 // in-process; a scratch dir under os.tmpdir().
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,6 +19,7 @@ import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { Duplex } from 'node:stream';
 import Module, { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -121,11 +123,29 @@ console.log('— ③ A REFUSED UPGRADE\'S WORDS REACH A SLOW PAGE WHOLE (law 9: 
     const r = { got, want: HEAD.length + N }; s.destroy(); await P.close(); return r;
   }
   const law = await refused();
-  ok(law.got === law.want, `a hub's 401 with a 16 MB body to an upgrade, read 200 ms late by the page: ${law.got} of ${law.want} bytes — every word, then the close`, law);
+  ok(law.got === law.want, `end to end: a hub's 401 with a 16 MB body to an upgrade, read 200 ms late by the page: ${law.got} of ${law.want} bytes — every word, then the close`, law);
+  // the same road, in-process and deterministic: a page whose every write lands 2 ms late still holds unwritten words when its
+  // channel closes (over a real socket the kernel takes them first, so a destroy there loses nothing a run can see)
+  const RELAY = require(path.join(REPO, 'src/interface/relay.js'));
+  async function slowPage(mod) {
+    const R = mod.create({ ownerOf: () => 'hub' });
+    const fake = { closesAfterQueue: true, control: () => { }, data: () => true, credit: () => { }, closeChan: () => { } };
+    const h = R.handlersFor(fake); R.attach(fake);
+    let delivered = 0;
+    const page = new Duplex({ read() { }, write(c, e, cb) { setTimeout(() => { delivered += c.length; cb(); }, 2); } }); page.on('error', () => { });
+    R.upgrade({ method: 'GET', url: '/ws', httpVersion: '1.1', rawHeaders: ['Host', 'hub.example', 'Connection', 'Upgrade', 'Upgrade', 'websocket'] }, page, Buffer.alloc(0), { secure: false, addr: '203.0.113.5', port: 5 });   // channel 1
+    const words = Buffer.concat([Buffer.from(HEAD.replace(String(N), String(1 << 20))), Buffer.alloc(1 << 20, 0x61)]);   // a 1 MB refusal
+    for (let i = 0; i < words.length; i += 65536) h.onData(1, words.subarray(i, i + 65536));
+    h.onClose(1);   // then the hub's CLOSE
+    await until(() => delivered >= words.length || page.destroyed, 5000); await sleep(30);
+    return { delivered, want: words.length, destroyed: page.destroyed };
+  }
+  const slow = await slowPage(RELAY);
+  ok(slow.delivered === slow.want, `a page whose writes land late: all ${slow.delivered} of ${slow.want} bytes of the refusal reach it before its socket goes`, slow);
   const LINGER = "    sock.once('close', () => {   // an upgraded socket never outlives its channel — but its last words (a 401, a 404) are written first\n";
   const hasty = mutant('src/interface/relay.js', LINGER, "    sock.once('close', () => { socket.destroy(); return;   // the first form: destroyed at once\n");
-  const red = await refused(hasty);
-  ok(red.got < red.want, `RED CONTROL — the page socket destroyed the moment its channel closed: ${red.got} of ${red.want} bytes — the last words lost`, red);
+  const red = await slowPage(hasty);
+  ok(red.delivered < red.want, `RED CONTROL — the page socket destroyed the moment its channel closed: ${red.delivered} of ${red.want} bytes — the last words lost`, red);
 }
 
 lap('the end');

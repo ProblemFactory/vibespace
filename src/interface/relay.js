@@ -89,7 +89,9 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
     const m = mux, rt = router, chan = next++;
     m.control({ op: 'open', chan, to: ownerOf({ kind: 'route', method: req.method, path: req.url }), trace: newTrace(), stamp: { secure: !!facts.secure, addr: facts.addr || null, port: facts.port || null } });
     const sock = rt.open(chan, {});
-    live.set(keyOf(sock), { kind, mux: m, sock, page: null, req: null, res: null, out: null, a: null }); sock.once('close', () => live.delete(keyOf(sock)));
+    const e = { kind, mux: m, sock, page: null, req: null, res: null, out: null, a: null, left: 2 };
+    e.done = () => { if (--e.left === 0) live.delete(keyOf(sock)); };   // gone when the channel AND its page side have closed: a byte may wait on the page side after its channel ended
+    live.set(keyOf(sock), e); sock.once('close', e.done);
     sock.on('error', () => { });
     return sock;
   }
@@ -105,6 +107,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
     if (!facts.addr) { req.socket.destroy(); return; }   // no address: the page is already gone, and is never stamped (the far side reads a null address as loopback)
     const sock = openChan('exchange', req, facts);
     if (!sock) { stats.noOwner++; answerItself(res, 503, exhausted ? SPENT : NO_OWNER); req.resume(); return; }
+    res.once('close', live.get(keyOf(sock)).done);
     let out;
     // NO agent: with `agent: false` Node builds an Agent of its own, which dials TCP and never calls createConnection
     try { out = http.request({ createConnection: () => headsAsLatin1(sock), method: req.method, path: req.url, headers: requestLines(req.rawHeaders), setDefaultHeaders: false }); }
@@ -143,10 +146,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
       if (!res.headersSent) answerItself(res, 502, { error: 'owner-lost', why: 'the hub\'s channel ended before its answer' }, { close: true }); else res.destroy();
     });
     const gone = () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } };   // the page left mid-answer: the channel goes, and the party's handler sees its socket gone
-    res.on('close', gone);
-    // a PIPELINED request whose answer waits its turn has no socket of its own yet: Node never closes that response when the page
-    // goes, so the page socket's own close ends its channel too
-    const page = req.socket; page.once('close', gone); res.once('finish', () => page.removeListener('close', gone));
+    res.on('close', gone);   // Node closes a PIPELINED response that waits its turn too, when its page socket goes (measured: test-interface-framing ③)
     req.pipe(out, { end: false }); tap(req);
     req.on('end', () => { if (req.rawTrailers.length) { try { out.addTrailers(pairsOf(req.rawTrailers)); } catch { } } out.end(); });
   }
@@ -155,7 +155,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
     if (!facts.addr) { socket.destroy(); return; }
     const sock = openChan('upgrade', req, facts);
     if (!sock) { stats.noOwner++; try { socket.end('HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json; charset=utf-8\r\nconnection: close\r\n\r\n' + JSON.stringify(exhausted ? SPENT : NO_OWNER)); } catch { } return; }
-    stats.upgrades++; Object.assign(live.get(keyOf(sock)) || {}, { page: socket });
+    stats.upgrades++; Object.assign(live.get(keyOf(sock)) || {}, { page: socket }); socket.once('close', live.get(keyOf(sock)).done);
     socket.on('error', () => { });
     sock.write(head && head.length ? Buffer.concat([headOf(req), head]) : headOf(req));   // ONE write: the bytes that came with the head reach the party with it, as its own 'upgrade' head
     socket.pipe(sock); sock.pipe(socket); tap(socket);
