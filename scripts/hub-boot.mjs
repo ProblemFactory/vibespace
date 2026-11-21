@@ -139,7 +139,7 @@ export function refusalOf(root, { homes = null, mounts = null, checkout = REPO, 
  *  daemon root an enclosing run set (rule 8), and a caller conversation's names (src/conversation-env.js — B-ba47's follow-up),
  *  the process marks too: the suite's own process keeps them (scratch.mjs), a hub under test never inherits them (主开发 r863). */
 export function strippedEnv(env = process.env) {
-  const out = withoutConversationNames(withoutVendorKeys(env)).env;
+  const out = withoutConversationNames(withoutVendorKeys(env), { floorToo: true }).env;   // a mark's names AND the floor, the marks too
   for (const k of DAEMON_ROOT_ENV) delete out[k];
   return out;
 }

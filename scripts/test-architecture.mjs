@@ -8342,6 +8342,45 @@ await section(async () => {
     && kept112.kept.join() === 'CLAUDE_WEBUI_SESSION_ID,VIBESPACE_JOB_ID,VIBESPACE_JOB_RUN' && kept112.dropped.join() === 'CLAUDE_WEBUI_PORT,VIBESPACE_SESSION_TOKEN' && kept112.env.PATH === '/bin'
     && strict112.dropped.length === 2 && !strict112.kept.length,
     `§112 the three process marks (${CE112.CONVERSATION_MARKS.join(', ')}) are conversation names read as marks (src/left-behind.js, src/jobs.js): kept when asked (a suite's own process), dropped otherwise (a hub under test)`);
+  // THE COMPUTED MARK'S ROADS (主开发 r979): every place that FINISHES a conversation's (or a job's) child env writes
+  // VIBESPACE_HANDED, and every injector site above reaches one of them (or is named: no conversation runs in its child)
+  const ROADS112 = Object.freeze({
+    'src/spawn/line.js': /env: handedFrom \? withHandedMark\(finished, handedFrom\) : finished/,
+    'src/remote-shell.js': /\$\{HANDED_MARK\}=\$\{shq\(markOf\(remoteWrittenNames\(\{ parts, tokenAssign, acctEnv, browser \}\)\)\)\} `\s*\n\s*\+ 'exec env '/,
+    'src/jobs.js': /withHandedMark\(jobEnv\(\{ \.\.\.own, \.\.\.handed \}, base\), jobEnv\(own, base\), \{ familyToo: false \}\)/,
+    'src/server/boot-restore.js': /readoptEnv\[HANDED_MARK\] = markOf\(handedNames\(readoptEnv, agentEnv\(\)\)\)/,
+  });
+  const SITE_ROAD112 = Object.freeze({
+    'src/ws-create.js': ['src/spawn/line.js', /sessionSpawnLine\(\{[^}]*\n[^}]*\n\s*handedFrom: agentEnv\(\)/],
+    'src/spawn/local.js': ['src/spawn/line.js', null],            // its account names join the create's line
+    'src/server/otel-ingest.js': ['src/spawn/line.js', null],     // the pair the create merges
+    'src/spawn/ssh.js': ['src/remote-shell.js', /buildRemoteExec\(/],
+    'src/spawn/dial.js': ['src/remote-shell.js', /buildRemoteExec\(/],
+    'src/remote-shell.js': ['src/remote-shell.js', null],
+    'src/jobs.js': ['src/jobs.js', /env: jobRunEnv\(\{ own: /],
+    'src/server/boot-restore.js': ['src/server/boot-restore.js', null],
+    'src/hosts.js': [null, 'the remote hook-register run: an install command, no conversation runs in it'],
+    'src/claude-oat-probe.js': [null, 'the oat probe’s own CLI: a probe child, no conversation runs in it'],
+  });
+  const roads112 = (files, roads = ROADS112, siteRoad = SITE_ROAD112) => {
+    const red = [];
+    for (const [f, re] of Object.entries(roads)) if (!re.test(files[f] || '')) red.push(`${f} finishes a child's env and no longer writes the mark (VIBESPACE_HANDED)`);
+    for (const f of Object.keys(SITES112)) {
+      const row = siteRoad[f];
+      if (!row) { red.push(`${f} writes a conversation's names and reaches NO road that writes the mark — name its road (SITE_ROAD112) or why no conversation runs in its child`); continue; }
+      const [road, how] = row;
+      if (road && !roads[road]) red.push(`${f} names the road ${road}, which is no road`);
+      if (road && how instanceof RegExp && !how.test(files[f] || '')) red.push(`${f} no longer reaches ${road} the way the row says (${how.source.slice(0, 40)}…)`);
+      if (!road && !(typeof how === 'string' && how.length > 20)) red.push(`${f} reaches no road and gives no reason`);
+    }
+    return red;
+  };
+  const rr112 = roads112(files112);
+  ok(Object.keys(ROADS112).length === 4 && !rr112.length, `§112 the computed mark: the ${Object.keys(ROADS112).length} roads that finish a child's env (the local line, the remote command, a job's run, the boot's re-adopt) each write VIBESPACE_HANDED, and each of the ${Object.keys(SITES112).length} injector sites reaches one or is named${rr112.length ? ' — RED: ' + rr112.join(' | ') : ''}`, rr112);
+  ok(roads112({ ...files112, 'src/remote-shell.js': (files112['src/remote-shell.js'] || '').replace('${HANDED_MARK}=', '${HANDED}=') }).some((r) => /remote-shell\.js finishes a child's env and no longer writes the mark/.test(r))
+    && roads112(files112, ROADS112, { ...SITE_ROAD112, 'src/spawn/dial.js': undefined }).some((r) => /dial\.js writes a conversation's names and reaches NO road/.test(r))
+    && roads112({ ...files112, 'src/spawn/ssh.js': (files112['src/spawn/ssh.js'] || '').split('buildRemoteExec(').join('buildRemote(') }).some((r) => /ssh\.js no longer reaches src\/remote-shell\.js/.test(r)),
+    '§112 CONTROL: a road that stops writing the mark, a site with no road, and a site that stops reaching its road are each red by name');
   // CONTROLS, one per rule — each red by name
   const plant112 = (f, add) => census112({ ...files112, [f]: (files112[f] || '') + '\n' + add });
   const has112 = (r, re) => r.red.some((x) => re.test(x));

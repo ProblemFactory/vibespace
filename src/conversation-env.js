@@ -10,8 +10,9 @@
 // THE CLASS, asked once more (主开发 r863): a route or a credential the hub hands a conversation's child under NEITHER prefix —
 // the telemetry pair (the hub's address + the credential it minted for its receiver), the account's sign-in (the names the
 // harness descriptors declare for an account pick) and the conversation's browser (the AGENT_BROWSER_ family). Each is a group
-// below. NOT in it: a harness's homeEnvVar (CLAUDE_CONFIG_DIR, CODEX_HOME — the machine login's home rides the same name, the
-// agent door keeps it, src/harness-env.js), and the person's session names (GENERIC_SESSION_ENV).
+// below — and since 主开发 r979 they are only the FLOOR: the names a road hands are COMPUTED where it builds the env (the mark,
+// below), so a provider's plan or an account's folder (CODEX_HOME set to a member's folder) is dropped because a road wrote it,
+// never because a list remembered it. A homeEnvVar the person's own machine set and no road touched is in no mark and stays.
 // THE PROCESS MARKS (主开发 r863 MUST 2) are conversation names too, but ids, no route and no credential: src/left-behind.js finds
 // a stopped turn's escaped processes by CLAUDE_WEBUI_SESSION_ID, src/jobs.js a stopped job's by VIBESPACE_JOB_ID /
 // VIBESPACE_JOB_RUN. A suite KEEPS them in its own process (the import says so), so the person's Stop and a job's stop still
@@ -58,15 +59,55 @@ function isConversationName(name) {
   if (GENERIC.has(n)) return false;
   return EXACT.has(n) || CONVERSATION_ENV_FAMILIES.some((p) => n.startsWith(p) && n.length > p.length);
 }
-/** A copy of `env` without the conversation's names; `dropped` = the names it removed, `kept` = the marks it kept (with
- *  `keepMarks`: a suite's own process), both sorted. */
-function withoutConversationNames(env = {}, { keepMarks = false } = {}) {
+// THE COMPUTED MARK (主开发 r979 — the names are computed where the env is built, not listed where it is read). Each road that
+// finishes a conversation's (or a job's) child env writes VIBESPACE_HANDED: the names it ADDED or CHANGED against the sanitized
+// base it started from, and every VIBESPACE_* name of the finished env (the hub's own, handed on) — names only, never a value.
+// A name nobody ever listed is in it by construction: a provider's plan, an account's folder, whatever the next unit adds. The
+// person's session names a road also writes are never in it (PERSON_SESSION_ENV): dropping them breaks the suite, and a
+// dropped HOME sends os.homedir() to the passwd home (a HOME set to an account's root is the re-home's to replace).
+const HANDED_MARK = 'VIBESPACE_HANDED';
+const PERSON_SESSION_ENV = Object.freeze([...GENERIC_SESSION_ENV, 'HOME']);
+const PERSON = new Set(PERSON_SESSION_ENV);
+const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** The names a road hands on: added or changed against `base`, and every VIBESPACE_* name (`familyToo`: the hub's own family
+ *  the sanitized base kept unchanged — the keeper's folder, the instance, the device and daemon roots; 主开发 r985), never a
+ *  person's session name or the mark. A job's road passes familyToo:false — its base is the owner's own words over an env
+ *  with NO VIBESPACE_* left, so every hub name there is added anyway and an owner's own VIBESPACE_* word stays theirs. */
+function handedNames(finished = {}, base = {}, { familyToo = true } = {}) {
+  const out = [];
+  for (const [k, v] of Object.entries(finished || {})) {
+    if (!NAME_RE.test(k) || k === HANDED_MARK || PERSON.has(k)) continue;
+    if ((familyToo && k.startsWith('VIBESPACE_')) || !Object.prototype.hasOwnProperty.call(base || {}, k) || String(base[k]) !== String(v)) out.push(k);
+  }
+  return out.sort();
+}
+/** The mark's value for a list of names (a road that knows the names it writes, not a base: the remote command). */
+function markOf(names = []) {
+  return [...new Set((names || []).filter((n) => NAME_RE.test(n) && n !== HANDED_MARK && !PERSON.has(n)))].sort().join(',');
+}
+/** `finished` with its mark written (a copy). */
+function withHandedMark(finished = {}, base = {}, opts = {}) {
+  return { ...finished, [HANDED_MARK]: markOf(handedNames(finished, base, opts)) };
+}
+/** The names a mark holds (a malformed entry is dropped, never trusted as a pattern). */
+function namesOfMark(value) {
+  return String(value == null ? '' : value).split(',').map((x) => x.trim()).filter((x) => NAME_RE.test(x));
+}
+/** A copy of `env` without the conversation's names. WITH a mark (VIBESPACE_HANDED): exactly the names it holds, and the mark;
+ *  WITHOUT one (a parent started before the mark): the list above, the FLOOR, never the proof. `keepMarks` (a suite's own
+ *  process) keeps the three process marks; `floorToo` (a hub under test) drops the floor beside a mark. A person's session
+ *  name is never dropped. `dropped` / `kept` sorted; `by` = 'mark' | 'floor'. */
+function withoutConversationNames(env = {}, { keepMarks = false, floorToo = false } = {}) {
+  const has = Object.prototype.hasOwnProperty.call(env || {}, HANDED_MARK);
+  const handed = has ? new Set(namesOfMark(env[HANDED_MARK])) : null;
   const out = {}, dropped = [], kept = [];
   for (const [k, v] of Object.entries(env || {})) {
-    if (!isConversationName(k)) out[k] = v;
+    const named = k === HANDED_MARK || (handed ? handed.has(k) || (floorToo && isConversationName(k)) : isConversationName(k));
+    if (!named || PERSON.has(k)) out[k] = v;
     else if (keepMarks && MARKS.has(k)) { out[k] = v; kept.push(k); } else dropped.push(k);
   }
-  return { env: out, dropped: dropped.sort(), kept: kept.sort() };
+  return { env: out, dropped: dropped.sort(), kept: kept.sort(), by: has ? 'mark' : 'floor' };
 }
 
-module.exports = { CONVERSATION_ENV, CONVERSATION_TELEMETRY_ENV, CONVERSATION_ACCOUNT_ENV, CONVERSATION_ENV_FAMILIES, CONVERSATION_MARKS, isConversationName, withoutConversationNames };
+module.exports = { CONVERSATION_ENV, CONVERSATION_TELEMETRY_ENV, CONVERSATION_ACCOUNT_ENV, CONVERSATION_ENV_FAMILIES, CONVERSATION_MARKS,
+  HANDED_MARK, PERSON_SESSION_ENV, isConversationName, withoutConversationNames, handedNames, markOf, withHandedMark, namesOfMark };

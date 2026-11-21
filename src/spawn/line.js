@@ -27,6 +27,7 @@
  */
 'use strict';
 
+const { withHandedMark } = require('../conversation-env.js');   // PURE: the computed mark (B-ba47's follow-up, 主开发 r979)
 const ASSIGN = /^([A-Za-z_][A-Za-z0-9_]*)=([\s\S]*)$/;
 
 /** `K=V` strings (the pairs the create path collects) → an env object; a later pair wins, as `env K=V` did. */
@@ -72,13 +73,17 @@ function withPriority({ cmd, args = [] }, priority) {
 
 /** THE LINE: { argv, env } — argv for dtach's tail / the daemon pipe, env for that spawn's `env` option.
  *  `env` = the base the create built (agentEnv + the session's names); `pairs` join it (a later pair wins).
- *  `priority` (B-460d) = { nice, by } — the line starts with `<nice> -n <by>` — or null (none). */
-function sessionSpawnLine({ node, wrapper, bufFile, metaFile, exe, args = [], env = {}, pairs = [], priority = null }) {
+ *  `priority` (B-460d) = { nice, by } — the line starts with `<nice> -n <by>` — or null (none).
+ *  `handedFrom` (B-ba47's follow-up, 主开发 r979) = the SANITIZED base the create started from (agentEnv()): the finished env
+ *  then carries VIBESPACE_HANDED, the names this line added or changed against it and every VIBESPACE_* name — names only, never
+ *  a value (src/conversation-env.js) — so a suite run inside the conversation drops exactly what the hub handed it. */
+function sessionSpawnLine({ node, wrapper, bufFile, metaFile, exe, args = [], env = {}, pairs = [], priority = null, handedFrom = null }) {
   const why = exeRefusal(exe);
   if (why) throw new Error(why);
+  const finished = { ...env, ...pairsEnv(pairs) };
   return {
     argv: [...priorityArgv(priority), node, wrapper, bufFile, metaFile, String(exe), ...(args || []).map(String)],
-    env: { ...env, ...pairsEnv(pairs) },
+    env: handedFrom ? withHandedMark(finished, handedFrom) : finished,
   };
 }
 

@@ -24,6 +24,7 @@ const DW = require('./delivery-wake.js');   // the manager design's piece 7: whi
 const VJ = require('./vault-job.js'); // PURE (lane vault-job-road): a job's --vault values — the grammar, the verdict at every spawn, the fd plan, the frame
 const JN = require('./job-notice.js'); // PURE (lane job-notice-dedupe): a published service's notice is a STATE CHANGE — the verdict over its down record
 const { credentialEnvNames } = require('./harness-env.js'); // PURE: B-6be2 — the job door's credential strip, derived from the descriptors
+const { withHandedMark } = require('./conversation-env.js'); // PURE: the computed mark a suite this job runs reads (B-ba47's follow-up)
 const { list: harnessList } = require('./harnesses');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const { applyClear, CLEARED_TEXT } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — this engine holds the door (clearJobs)
@@ -112,6 +113,13 @@ function jobEnv(extra = {}, base = process.env) {
     if (['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS'].includes(k) || credentials.has(k)) delete env[k];
   }
   return { ...env, ...extra };
+}
+/** THE RUN'S ENV (B-ba47's follow-up, 主开发 r979/r985): the owner's OWN words (`own`: the job's cmd.env, the heap it names) and
+ *  the hub's additions (`handed`: its id, run, token, route, the vault plan's names, the bin PATH) over jobEnv's stripped base —
+ *  marked VIBESPACE_HANDED with exactly what the hub added over the owner's words, so a suite the job runs drops those and keeps
+ *  the owner's own. PURE over its inputs. */
+function jobRunEnv({ own = {}, handed = {}, base = process.env } = {}) {
+  return withHandedMark(jobEnv({ ...own, ...handed }, base), jobEnv(own, base), { familyToo: false });
 }
 // THE WRAPPER'S OWN ENV IS BUILT, NEVER INHERITED (lane job-spec-off-argv, 2026-10-20): the wrapper reads its spec file
 // and hands spec.env to the job — nothing of the server's env is its to carry (measured: it runs on an EMPTY env; a bare
@@ -3059,7 +3067,10 @@ class JobManager {
       argv: job.cmd.argv, cwd: job.cmd.cwd || process.cwd(),
       // B-d73c: a job that NAMES its memory hands its Node a heap that follows it (75 %), beside its own NODE_OPTIONS — never over a
       // heap its own options name; a job that names none hands on no flag (today's behaviour exactly)
-      env: jobEnv({ ...M.withNodeHeap(job.cmd.env, M.nodeHeapOf({ boundMb: hub.mb, source: hub.source, nodeOptions: (job.cmd.env || {}).NODE_OPTIONS })), ...(vj ? VJ.envOf(vj.plan) : {}), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:${runTs}`, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
+      // B-ba47's follow-up (主开发 r979/r985): the run's env carries VIBESPACE_HANDED — the names the hub added over the owner's
+      // OWN words (its id, run, token, route, and the vault plan's names: they open something); a suite this job runs drops them
+      env: jobRunEnv({ own: M.withNodeHeap(job.cmd.env, M.nodeHeapOf({ boundMb: hub.mb, source: hub.source, nodeOptions: (job.cmd.env || {}).NODE_OPTIONS })),
+        handed: { ...(vj ? VJ.envOf(vj.plan) : {}), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:${runTs}`, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') } }),
       logCapBytes: 50 * 1024 * 1024, stdinOpen: !!job.stdinOpen,
       kind: job.kind === 'service' ? 'service' : 'task', // round 5 (the ruling): a service keeps what its run leaves running, a task's are stopped
       // round 4: the ASKED bound rides too — the cgroup rung caps it by what contains ITS scope, read once the scope exists
@@ -5129,4 +5140,4 @@ class JobManager {
   _hum(ms) { const m = Math.round(Math.abs(ms) / 60000); return m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; }
 }
 
-module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS, GC_FILES_MS, GC_SAY_AGAIN_MS, jobEnv, wrapperEnv, WRAPPER_ENV_KEEP, WRAPPER_PROTO, UPDATE_WINDOW_MS };
+module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS, GC_FILES_MS, GC_SAY_AGAIN_MS, jobEnv, jobRunEnv, wrapperEnv, WRAPPER_ENV_KEEP, WRAPPER_PROTO, UPDATE_WINDOW_MS };

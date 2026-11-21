@@ -113,7 +113,7 @@ const jm = engine('jobs');
 }
 console.log('§2b RED: a copy of src/jobs.js whose spawn hands the job\'s env as it was');
 {
-  const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), 'env: jobEnv({ ...M.withNodeHeap(job.cmd.env, M.nodeHeapOf({ boundMb: hub.mb, source: hub.source, nodeOptions: (job.cmd.env || {}).NODE_OPTIONS })),', 'env: jobEnv({ ...(job.cmd.env || {}),   /* MUTANT: the release\'s spawn */', 'the spawn\'s heap line'), 'release-spawn');
+  const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), 'env: jobRunEnv({ own: M.withNodeHeap(job.cmd.env, M.nodeHeapOf({ boundMb: hub.mb, source: hub.source, nodeOptions: (job.cmd.env || {}).NODE_OPTIONS })),', 'env: jobRunEnv({ own: (job.cmd.env || {}),   /* MUTANT: the release\'s spawn */', 'the spawn\'s heap line'), 'release-spawn');
   const jx = engine('jobs-mut', JX.JobManager);
   const s = await specOf(jx, mk(jx, 'named-4g', { mem: '4G' }));
   ok(!!s && !('NODE_OPTIONS' in s.env), 'CONTROL (the release\'s spawn, in a copy): a job that named 4G hands Node nothing — the 2 240 MB of the row', s && Object.keys(s.env).filter((k) => /NODE/.test(k)));

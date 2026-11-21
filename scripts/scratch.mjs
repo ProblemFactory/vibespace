@@ -33,11 +33,16 @@ const TEMP_SWEEPERS = require('../src/temp-sweepers.js');   // r1213: the PRODUC
 // THE PROCESS MARKS STAY (主开发 r863 MUST 2): the conversation id and the two job marks are ids — no route, no credential — and
 // they are how the person's Stop (src/left-behind.js) and a job's stop (src/jobs.js) find what a suite's children left behind;
 // the line says they were kept. Names only on stderr, never a value.
+// THE COMPUTED MARK (主开发 r979): with the hub's VIBESPACE_HANDED (the names the road that started the caller ADDED or
+// CHANGED, written where the env was built), exactly those names go — a name nobody listed included — and the mark with
+// them; a name the person's own shell set and the hub did not touch is in no mark and stays. Without a mark (a conversation
+// started before it), the list in src/conversation-env.js is the floor. A harness that needs such a name sets it AFTER this
+// import, in its own child, by name — never by inheritance.
 const { withoutConversationNames } = require('../src/conversation-env.js');
 export const CALLER_CONVERSATION_NAMES = (() => {
-  const { dropped, kept } = withoutConversationNames(process.env, { keepMarks: true });
+  const { dropped, kept, by } = withoutConversationNames(process.env, { keepMarks: true });
   for (const k of dropped) delete process.env[k];
-  if (dropped.length) process.stderr.write(`scratch: the caller's conversation names are not carried: ${dropped.join(', ')}${kept.length ? `; the process marks are kept: ${kept.join(', ')}` : ''}\n`);
+  if (dropped.length) process.stderr.write(`scratch: the caller's conversation names are not carried: ${dropped.join(', ')}${kept.length ? `; the process marks are kept: ${kept.join(', ')}` : ''} (${by === 'mark' ? "by the hub's mark" : 'by the list: no mark'})\n`);
   return Object.freeze(dropped);
 })();
 export { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD };

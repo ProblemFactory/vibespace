@@ -21,6 +21,8 @@
  * without any shell-specific machinery and exports its dir onto PATH.
  */
 
+const { HANDED_MARK, markOf } = require('./conversation-env.js');   // PURE: the computed mark (B-ba47's follow-up)
+
 /** PATH + nvm — the base every remote command needs. */
 const REMOTE_PRELUDE = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ';
 
@@ -96,7 +98,21 @@ const AMBIENT_OAT_UNSET = 'unset CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
  */
 function buildRemoteExec({ cwd, shq, pre = '', browser = '', resolve = '', tokenAssign = '', acctEnv = '', parts = [], tail = '' }) {
   return `cd ${shq(cwd)} 2>/dev/null; ` + sessionCwdExport(cwd, shq) + pre + browser + resolve + AMBIENT_OAT_UNSET + tokenAssign + acctEnv
+    + `${HANDED_MARK}=${shq(markOf(remoteWrittenNames({ parts, tokenAssign, acctEnv, browser })))} `
     + 'exec env ' + parts.join(' ') + tail;
+}
+
+/** THE REMOTE ROADS' MARK (B-ba47's follow-up, 主开发 r979): the names THIS command writes into the remote child's env — the cwd
+ *  export, the token / account `$(cat)` assignments, the browser prelude's export, every pre-quoted `NAME=` pair before the
+ *  program — handed to the child as VIBESPACE_HANDED (names only, never a value), so a suite run inside that remote
+ *  conversation drops exactly them. The remote machine's own environment is that machine's, never marked. */
+const ASSIGNED_RE = /(?:^|[\s;])([A-Za-z_][A-Za-z0-9_]*)=/g;
+function remoteWrittenNames({ parts = [], tokenAssign = '', acctEnv = '', browser = '' } = {}) {
+  const names = ['VIBESPACE_SESSION_CWD'];
+  for (const p of parts || []) { const m = /^'?([A-Za-z_][A-Za-z0-9_]*)=/.exec(String(p)); if (!m) break; names.push(m[1]); }
+  for (const t of [tokenAssign, acctEnv]) for (const m of String(t || '').matchAll(ASSIGNED_RE)) names.push(m[1]);
+  for (const m of String(browser || '').matchAll(/\bexport\s+([A-Za-z_][A-Za-z0-9_]*)/g)) names.push(m[1]);
+  return names;
 }
 
 /** lane L r5 F3 — THE SESSION'S DIRECTORY, EXPORTED beside the `cd` (the
@@ -123,4 +139,4 @@ function agentNodeOf(info) {
   return p.startsWith('/') ? p : null;
 }
 
-module.exports = { REMOTE_PRELUDE, TOOLS_ON_PATH, nodeFinder, agentNodeOf, buildRemoteShellPrelude, buildRemoteExec, AMBIENT_OAT_UNSET, sessionCwdExport };
+module.exports = { REMOTE_PRELUDE, TOOLS_ON_PATH, nodeFinder, agentNodeOf, buildRemoteShellPrelude, buildRemoteExec, remoteWrittenNames, AMBIENT_OAT_UNSET, sessionCwdExport };

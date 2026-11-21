@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import { scratchDir } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 import * as HB from './hub-boot.mjs';
@@ -523,6 +524,111 @@ console.log('— the caller\'s conversation names: removed at the scratch import
   const st = HB.strippedEnv({ PATH: '/usr/bin', HOME: '/tmp/vs-ba47-x', TERM: 'xterm', ...CALLER, ACP_WEBUI_MODE: 'x' });
   ok(st.PATH === '/usr/bin' && st.HOME === '/tmp/vs-ba47-x' && st.TERM === 'xterm' && !Object.keys(st).some((k) => k in CALLER || k === 'ACP_WEBUI_MODE'),
     'strippedEnv drops a caller conversation\'s names from any env it is handed — the marks too, a hub under test inherits none — and keeps the person\'s session (PATH, HOME, TERM)', Object.keys(st));
+}
+// ── THE COMPUTED MARK IS THE CLASS (B-ba47's follow-up, 主开发 r979 / r985) ─────────────────────────────────────────────────────
+// Not its members: for EVERY road that finishes a conversation's (or a job's) child env — the local line, the remote command,
+// the job's run — and for every harness and every account kind the tree can spawn (read from the harness table and each
+// descriptor's own creds, so a new harness, a new creds field or a new provider auth joins by itself), the child env is built
+// by the PRODUCT'S OWN road with stand-in values, the scratch import runs in that child, and the child's env is judged: no name
+// the road handed survives but the three process marks; none of the stand-in values is anywhere in it; what the person (the
+// hub's own untouched name, the remote machine's, a job owner's word) set stays. RED: the mark cut from one road; one handed
+// name left out of the mark.
+console.log('— the computed mark (B-ba47 follow-up, r979): every road × every harness × every account kind — the import drops exactly what the road handed');
+{
+  const req = createRequire(import.meta.url);
+  const CE = req(path.join(REPO, 'src/conversation-env.js'));
+  const HARNESSES = req(path.join(REPO, 'src/harnesses')).list();
+  const MP = req(path.join(REPO, 'src/model-providers.js'));
+  const { agentEnv } = req(path.join(REPO, 'src/agent-env.js'));
+  const { sessionSpawnLine } = req(path.join(REPO, 'src/spawn/line.js'));
+  const { buildRemoteExec } = req(path.join(REPO, 'src/remote-shell.js'));
+  const { jobRunEnv } = req(path.join(REPO, 'src/jobs.js'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-handed-'));
+  process.on('exit', () => { try { fs.rmSync(root, { recursive: true, force: true }); } catch { } });
+  let seq = 0; const SV = (tag) => ['sv', tag, process.pid, ++seq].join('-');   // stand-in values, minted per run: never a credential
+  const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+  const SCRATCH_URL2 = pathToFileURL(path.join(REPO, 'scripts/scratch.mjs')).href;
+  const CHILD = `await import(${JSON.stringify(SCRATCH_URL2)}); process.stdout.write(JSON.stringify(process.env));`;
+  // THE HUB a conversation starts from: its own family (the keeper's folder, the instance, the device and daemon roots — 主开发
+  // r985: each is a road to the hub's own keeper or daemon), a name the person set on it that no road touches, the session
+  const HUB = { PATH: '/usr/bin:/bin', HOME: path.join(root, 'home'), LANG: 'C.UTF-8', VIBESPACE_KEEPER_DIR: path.join(root, SV('keeper')),
+    VIBESPACE_INSTANCE_NAME: SV('inst'), VIBESPACE_DEVICE_ROOT: path.join(root, SV('dev')), VIBESPACE_AGENTD_ROOT: path.join(root, SV('agentd')), PERSON_OWN_NAME: 'person-kept' };
+  const probeProvider = (auth) => ({ id: 'pv-standin', kind: 'self-hosted', label: 'stand-in', preset: 'other', baseUrl: `https://${SV('prov')}.invalid/v1`, auth, wire: 'anthropic-messages', models: [{ id: SV('model') }], defaultModel: '', aliases: {} });
+  // THE ACCOUNT KINDS, from each descriptor's own creds: the machine login (no account), an account folder (spawnEnvVar), an
+  // isolated home (creds.spawnEnv), each key name (keyEnvVars), the provider plan under every auth the tree knows (MP.AUTHS)
+  const kindsOf = (d) => {
+    const c = d.creds || {}, out = [{ kind: 'machine login', env: {} }];
+    if (typeof c.spawnEnv === 'function') { try { out.push({ kind: 'isolated home', env: c.spawnEnv(path.join(root, SV('acct'))) }); } catch { } }
+    else if (c.spawnEnvVar) out.push({ kind: `account folder (${c.spawnEnvVar})`, env: { [c.spawnEnvVar]: path.join(root, SV('acct')) } });
+    for (const k of c.keyEnvVars || []) out.push({ kind: `key (${k})`, env: { [k]: SV('key') } });
+    if (typeof c.providerSpawn === 'function') for (const auth of MP.AUTHS) {
+      try { const sp = c.providerSpawn({ provider: probeProvider(auth), key: SV('pkey'), home: path.join(root, 'provider-homes', 'pv-standin', d.id) }); out.push({ kind: `provider plan (${auth})`, env: (sp && sp.localEnv) || {} }); } catch { }
+    }
+    return out;
+  };
+  // the harness's own adapter env (the families: <FAMILY>WEBUI_*) — the adapter as the registry builds it
+  const adapterEnv = (d) => { try { return (new d.Adapter(d.adapterConfig({})).buildSessionArgs({ cwd: root, mode: 'chat', resumeId: null }) || {}).env || {}; } catch { return {}; } };
+  // the values a road handed that must be gone (a person's session name — HOME set to an isolated account's root among them —
+  // stays by rule, so its value is not judged here; the re-home is what replaces such a HOME)
+  const vals = (o) => Object.entries(o).filter(([n]) => !CE.PERSON_SESSION_ENV.includes(n)).map(([, v]) => v);
+  const sessionNames = () => ({ VIBESPACE_API: `http://${SV('api')}.invalid`, VIBESPACE_SESSION_TOKEN: SV('tok'), CLAUDE_WEBUI_SESSION_ID: SV('sid') });
+  const CASES = [];
+  for (const d of HARNESSES) for (const k of kindsOf(d)) {
+    const fam = adapterEnv(d), names = sessionNames();
+    // ROAD (a) — the local line, as the create calls it: the sanitized base, the session's names, the adapter's env, the account
+    const base = agentEnv(HUB);
+    const env = sessionSpawnLine({ node: process.execPath, wrapper: 'w.js', bufFile: 'b', metaFile: 'm', exe: 'x', env: { ...base, TERM: 'xterm-256color', COLORTERM: 'truecolor', ...names, ...fam, ...k.env },
+      pairs: [`PATH=${path.join(root, 'agent-bin')}:${HUB.PATH}`, 'EDITOR=/usr/bin/true'], handedFrom: base }).env;
+    CASES.push({ road: 'local', harness: d.id, kind: k.kind, env, handed: CE.handedNames(env, base), values: [...vals(k.env), ...vals(names), ...vals(fam), HUB.VIBESPACE_KEEPER_DIR, HUB.VIBESPACE_INSTANCE_NAME, HUB.VIBESPACE_DEVICE_ROOT, HUB.VIBESPACE_AGENTD_ROOT], keep: { PERSON_OWN_NAME: 'person-kept', LANG: 'C.UTF-8' } });
+    // ROAD (b) — the remote command, as the five remote builders call it: pre-quoted pairs and the token by $(cat), run by sh
+    const tokFile = path.join(root, SV('tokfile'));
+    const tok = SV('rtok'); fs.writeFileSync(tokFile, tok, { mode: 0o600 });
+    const pairs = Object.entries({ ...names, ...fam, ...k.env }).filter(([n]) => n !== 'VIBESPACE_SESSION_TOKEN').map(([n, v]) => shq(`${n}=${v}`));
+    const cmd = buildRemoteExec({ cwd: root, shq, tokenAssign: `VIBESPACE_SESSION_TOKEN="$(cat ${shq(tokFile)})" `, parts: [...pairs, shq(process.execPath), '--input-type=module', '-e', shq(CHILD)] });
+    CASES.push({ road: 'remote', harness: d.id, kind: k.kind, sh: cmd, env: { PATH: HUB.PATH, HOME: HUB.HOME, LANG: 'C.UTF-8', REMOTE_OWN_NAME: 'remote-kept' },
+      handed: [...new Set(['VIBESPACE_SESSION_CWD', 'VIBESPACE_SESSION_TOKEN', ...Object.keys({ ...names, ...fam, ...k.env })])].filter((n) => !CE.PERSON_SESSION_ENV.includes(n)), values: [tok, ...vals({ ...names, ...fam, ...k.env }).filter((v) => v !== names.VIBESPACE_SESSION_TOKEN)], keep: { REMOTE_OWN_NAME: 'remote-kept' } });
+  }
+  // ROAD (c) — a job's run (src/jobs.js jobRunEnv): the owner's own words (a VIBESPACE_* switch among them) and the hub's additions,
+  // the vault plan's names marked (主开发 r985 4 (ii))
+  {
+    const own = { OWNER_WORD: 'owner-kept', VIBESPACE_SKIP_AGENT_HOOKS: '1' };
+    const handed = { VAULT_STANDIN_SECRET: SV('vault'), VIBESPACE_API: `http://${SV('api')}.invalid`, VIBESPACE_JOB_ID: SV('job'), VIBESPACE_JOB_RUN: SV('run'), VIBESPACE_JOB_TOKEN: SV('jtok'), VIBESPACE_JOB_CWD: path.join(root, 'job'), PATH: `${path.join(root, 'bin')}:${HUB.PATH}` };
+    const env = jobRunEnv({ own, handed, base: HUB });
+    CASES.push({ road: 'job', harness: '-', kind: 'a run with a vault grant', env, handed: Object.keys(handed).filter((n) => n !== 'PATH'), values: Object.values(handed).filter((v) => !v.includes(path.join(root, 'bin'))), keep: own });
+  }
+  const runCase = (c, envOverride) => new Promise((resolve) => {
+    const args = c.sh ? ['sh', ['-c', c.sh]] : [process.execPath, ['--input-type=module', '-e', CHILD]];
+    const ch = spawn(args[0], args[1], { env: envOverride || c.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = ''; ch.stdout.on('data', (b) => { out += b; }); ch.stderr.on('data', (b) => { err += b; });
+    const t = setTimeout(() => ch.kill('SIGKILL'), 20000);
+    ch.on('close', (code) => { clearTimeout(t); let env = null; try { env = JSON.parse(out); } catch { } resolve({ code, env, err: err.slice(0, 16000) }); });   // whole: a plan's names make the line long, its «(by …)» is at its end
+  });
+  const pool = async (items, n, fn) => { const res = new Array(items.length); let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const k = i++; res[k] = await fn(items[k]); } })); return res; };
+  const MARKS = new Set(CE.CONVERSATION_MARKS);
+  const judge = (c, r) => {
+    const env = (r && r.env) || null;
+    if (!env) return { ok: false, why: 'no env read', err: r && r.err };
+    const survived = c.handed.filter((n) => !MARKS.has(n) && n in env);
+    // the values judged are the ones this leg MINTED (sv-…): an adapter's own words ('1', 'never') say nothing of a leak
+    const leaked = c.values.filter((v) => /\bsv-[a-z]+-\d+-\d+/.test(String(v || ''))).filter((v) => Object.entries(env).some(([k, x]) => !MARKS.has(k) && String(x).includes(String(v))));
+    const lost = Object.entries(c.keep).filter(([k, v]) => env[k] !== v).map(([k]) => k);
+    const marksOk = c.road === 'job' ? true : !!env.CLAUDE_WEBUI_SESSION_ID;
+    return { ok: r.code === 0 && !survived.length && !leaked.length && !lost.length && marksOk && !(CE.HANDED_MARK in env), survived, leaked: leaked.length, lost, marksOk };
+  };
+  const results = await pool(CASES, 8, runCase);
+  const bad = CASES.map((c, i) => ({ c, j: judge(c, results[i]) })).filter((x) => !x.j.ok).map((x) => `${x.c.road}/${x.c.harness}/${x.c.kind}: ${JSON.stringify(x.j)}`);
+  const kinds = new Set(CASES.map((c) => c.kind));
+  ok(HARNESSES.length >= 4 && CASES.length >= 30 && [...kinds].some((k) => /provider plan/.test(k)) && [...kinds].some((k) => /CODEX_HOME/.test(k)) && [...kinds].some((k) => /isolated home/.test(k)) && !bad.length,
+    `EVERY road × harness × account kind (${CASES.length} children: ${HARNESSES.length} harnesses, ${kinds.size} kinds read from their own creds, the local line, the remote command, a job's run): after the import no handed name survives but the three marks, no stand-in value is anywhere in the child's env, and what the person set stays`, bad.slice(0, 4));
+  ok(results.filter((r, i) => CASES[i].road !== 'job').every((r) => /\(by the hub's mark\)/.test(r.err)), 'each import says it went by the hub\'s mark (names only)', (results.map((r) => r.err).find((e) => !/\(by the hub's mark\)/.test(e)) || '').slice(-300));
+  // RED CONTROLS: the mark cut from one road; one handed name left out of the mark
+  const prov = CASES.find((c) => c.road === 'local' && /provider plan/.test(c.kind) && Object.keys(c.env).some((k) => /BASE_URL/.test(k)));
+  const urlName = prov && Object.keys(prov.env).find((k) => /BASE_URL/.test(k));
+  const cut = prov && Object.fromEntries(Object.entries(prov.env).filter(([k]) => k !== CE.HANDED_MARK));
+  const short = prov && { ...prov.env, [CE.HANDED_MARK]: CE.namesOfMark(prov.env[CE.HANDED_MARK]).filter((n) => n !== urlName).join(',') };
+  const [rCut, rShort] = prov ? await Promise.all([runCase(prov, cut), runCase(prov, short)]) : [null, null];
+  ok(!!prov && !judge(prov, rCut).ok && rCut.env && urlName in rCut.env, `RED CONTROL: the mark cut from the local road — the floor list alone keeps the provider plan's address (${urlName}) in the child`, prov && judge(prov, rCut));
+  ok(!!prov && !judge(prov, rShort).ok && rShort.env && urlName in rShort.env && !('VIBESPACE_SESSION_TOKEN' in rShort.env), `RED CONTROL: one handed name (${urlName}) left out of the mark survives the import, while every name the mark holds is gone`, prov && judge(prov, rShort));
 }
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(fail ? 1 : 0);

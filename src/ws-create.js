@@ -1753,6 +1753,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             session._cpuNice = ocPty ? ocServeFact() : (session.host && session._cpuNice !== undefined ? (session._cpuNice || SPRI.factOf((readSessionMeta(sockName) || {}).cpuNice)) : r6Pri.fact);   // an OpenCode serve terminal runs in the serve's pty, not this line: no fact; a paired machine's start brings ITS fact (src/spawn/dial.js, B-460d's remainder); an ADOPTED one keeps what its meta holds and claims nothing new (r705 (3))
             const r6Line = sessionSpawnLine({ node: NODE_CMD, wrapper, bufFile, metaFile: metaFileW, env: r6Base, pairs: r6Pairs,
               exe: spawnCmd, args: spawnArgs, priority: r6Pri.priority,
+              handedFrom: agentEnv(),   // B-ba47's follow-up (主开发 r979): the mark = what this create handed against its sanitized base
             });
             const r6Argv = r6Line.argv, r6Env = r6Line.env;
             if (r6Wanted && hosts?.device) {

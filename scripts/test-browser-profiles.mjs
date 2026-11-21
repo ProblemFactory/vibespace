@@ -1142,7 +1142,7 @@ console.log('\n⑭ the remote rung: a shell fragment the host runs (r3)');
   const line = buildRemoteExec({ cwd: '/w', shq, pre: 'PRE; ', browser: frag, parts: [shq('AGENT_BROWSER_SESSION=vs-' + KEY), 'agent-browser'] });
   ok(line.indexOf("cd '/w'") < line.indexOf('PRE; ') && line.indexOf('PRE; ') < line.indexOf('vs_ab_d=') && line.indexOf('vs_ab_d=') < line.indexOf('exec env'),
     'the fragment lands after the cd (so ./agent-browser.json is the session dir) and after the prelude, before exec env');
-  ok(buildRemoteExec({ cwd: '/w', shq, parts: ['x'] }) === "cd '/w' 2>/dev/null; " + sessionCwdExport('/w', shq) + AMBIENT_OAT_UNSET + 'exec env x',
+  ok(buildRemoteExec({ cwd: '/w', shq, parts: ['x'] }) === "cd '/w' 2>/dev/null; " + sessionCwdExport('/w', shq) + AMBIENT_OAT_UNSET + "VIBESPACE_HANDED='VIBESPACE_SESSION_CWD' " + 'exec env x',
     'an empty `browser` changes nothing (every non-browser caller is byte-identical to round 2\'s composition + lane L r5\'s session-cwd export)');
   // (⑭ the five remote sites + the schema row pins — MOVED to the fast scripts/test-browser-profiles-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }

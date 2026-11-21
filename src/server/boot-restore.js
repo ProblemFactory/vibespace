@@ -29,6 +29,7 @@ const BUILD_VERSION = (() => { try { return require('../../package.json').versio
 
 const { mk } = require('./lazy.js');
 const { sessionSpawnLine } = require('../spawn/line.js'); // PURE (lane antigravity-spawn-argv): the ONE session line, shared with ws-create
+const { HANDED_MARK, markOf, handedNames } = require('../conversation-env.js'); // PURE: the computed mark (B-ba47's follow-up)
 
 /** THE CONVERSATION'S POOL PIN from a session meta (2026-09-28): {memberId, at, by} or null —
  *  the ONE expression all three restore sites use (a pin the pool no longer lists is kept: the
@@ -1271,6 +1272,7 @@ async function readoptOrphanKeeperSessions() {
       for (const k of ['VIBESPACE_SESSION_TOKEN', 'VIBESPACE_API', 'VIBESPACE_TASK_ID', 'ANTHROPIC_API_KEY', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR']) delete readoptEnv[k];
       // THE ONE LINE (lane antigravity-spawn-argv, src/spawn/line.js): the wrapper runs `ssh …`, its names ride the env
       readoptEnv.CLAUDE_WEBUI_PORT = String(PORT); readoptEnv.CLAUDE_WEBUI_SESSION_ID = id;
+      readoptEnv[HANDED_MARK] = markOf(handedNames(readoptEnv, agentEnv()));   // B-ba47's follow-up (主开发 r979): the mark = what the re-adopt handed
       const { argv } = sessionSpawnLine({ node: NODE_CMD, wrapper: CHAT_WRAPPER, bufFile, metaFile: metaFileW, exe: 'ssh', args: sshArgs });
       ptyProc = pty.spawn(DTACH_CMD, ['-c', socketPath, '-E', '-r', 'none', ...argv], {
         name: 'xterm-256color', cols: 190, rows: 45, cwd: os.homedir(),
