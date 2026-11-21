@@ -37,6 +37,15 @@ const MUT = mutantCopies('desktop-seamless', repo);
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) { console.error('  ✗ src/lib/build-version.js missing — run `npm run build` first'); process.exit(1); }
@@ -242,7 +251,7 @@ console.log('§4 the REAL WindowManager seams over a fake DOM (the title bar\'s 
   const fixA = "          if (win.onResize) { try { win.onResize(); } catch {} }\n        }\n        // Restore pre-snap size when dragging out of a snap";
   const fixB = "        if (wasMax !== win.isMaximized && win.onResize) { try { win.onResize(); } catch {} } // a cancel that RE-maximizes says so too\n";
   ok(wsrc.split(fixA).length === 2 && wsrc.split(fixB).length === 2, 'CONTROL: each un-maximize notification is spelled exactly once in window.js (the control pulls exactly those)');
-  const Wpre = await import(pathToFileURL(MUT.write('src/lib/window.js', wsrc.replace(fixA, "        }\n        // Restore pre-snap size when dragging out of a snap").replace(fixB, ''), 'premax')).href);
+  const Wpre = await import(pathToFileURL(MUT.write('src/lib/window.js', editAnchor(editAnchor(wsrc, fixA, "        }\n        // Restore pre-snap size when dragging out of a snap", "src/lib/window.js"), fixB, '', "src/lib/window.js"), 'premax')).href);
   const mxc = await maxLeg(Wpre.WindowManager);
   ok(!mxc.atUnmax.max && mxc.atUnmax.calls.length === 0 && mxc.after.max && mxc.after.calls.length === 0, `CONTROL: the pre-fix window.js un-maximizes on the drag and re-maximizes on the cancel with NO onResize (${JSON.stringify(mxc.after.calls)}) — the app is never told`, mxc);
 }
@@ -313,7 +322,7 @@ console.log('§6 lane D (a) item C — CHROME draws its own frame (MEASURED 2026
   const from = "  return { ok: true, changed: true, prefs: { ...prefs, browser: { ...(b || {}), custom_chrome_frame: true } }, why: 'absent' };";
   const from0 = "  if (prefs === null || prefs === undefined) return { ok: true, changed: true, prefs: { browser: { custom_chrome_frame: true } }, why: 'new' };";
   ok(srcA.split(from).length === 2 && srcA.split(from0).length === 2, 'the seeding is spelled once per branch (the control patches exactly them)');
-  const mf = MUT.write('src/desktop-browser-app.js', srcA.replace(from, "  return { ok: true, changed: false, prefs, why: 'absent' }; // CONTROL: never seeded").replace(from0, "  if (prefs === null || prefs === undefined) return { ok: true, changed: false, prefs: null, why: 'new' }; // CONTROL"), 'noseed');
+  const mf = MUT.write('src/desktop-browser-app.js', editAnchor(editAnchor(srcA, from, "  return { ok: true, changed: false, prefs, why: 'absent' }; // CONTROL: never seeded", "src/desktop-browser-app.js"), from0, "  if (prefs === null || prefs === undefined) return { ok: true, changed: false, prefs: null, why: 'new' }; // CONTROL", "src/desktop-browser-app.js"), 'noseed');
   const MC = require(mf);
   ok(same(pipeline(MC, null), { seamless: false, why: 'ssd' }) && same(pipeline(MC, {}), { seamless: false, why: 'ssd' }), `CONTROL: without the seeding a fresh profile stays SSD (${JSON.stringify(pipeline(MC, null))}) — both bars stacked, as in the owner's screenshot`);
   // WIRING: the keeper seeds before the browser starts (a fresh scaffold, a kept profile, one carried to a relaunch)

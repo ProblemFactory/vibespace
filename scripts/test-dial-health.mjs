@@ -29,6 +29,15 @@ const { UserTodoManager } = require('../src/user-todos.js');
 const { HostManager } = require('../src/hosts.js');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const SCR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-dhl-'));
 const NOW = Date.parse('2026-10-12T10:00:00Z');
 const MIN = 60000;
@@ -269,11 +278,11 @@ console.log('— lane device-node-version: the node a machine\'s agent runs on (
   // controls: patched copies of the table's compare
   const M2 = mutantCopies('dhlrt', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/device-runtime.js'), 'utf8');
-  const mA = src.replace('const below = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };', 'const below = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return true; };');
+  const mA = editAnchor(src, 'const below = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };', 'const below = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return true; };', "src/device-runtime.js");
   ok(mA !== src, '(rt-a) the patch applies');
   const ra = runRT(M2.load('src/device-runtime.js', mA, 'atfloor')).filter(([, s, f, ws, wf]) => s !== ws || f !== wf);
   ok(ra.length === 3 && ra.every(([n]) => /AT its floor/.test(n)), `CONTROL (rt-a): the floor itself read as old ⇒ the three AT-the-floor rows red (${ra.length})`, ra);
-  const mB = src.replace("  const old = below(t, tripleOf('v' + row.floor));", '  const old = node.slice(1) < row.floor;');
+  const mB = editAnchor(src, "  const old = below(t, tripleOf('v' + row.floor));", '  const old = node.slice(1) < row.floor;', "src/device-runtime.js");
   ok(mB !== src, '(rt-b) the patch applies');
   const rb = runRT(M2.load('src/device-runtime.js', mB, 'lexical')).filter(([, s, f, ws, wf]) => s !== ws || f !== wf);
   ok(rb.length >= 1 && rb.some(([n]) => n.startsWith('22.9.9')), `CONTROL (rt-b): versions compared as text ⇒ 22.9.9 reads as fixed (${rb.length} rows red)`, rb);
@@ -284,12 +293,12 @@ console.log('— controls (patched copies) —');
 {
   const M = mutantCopies('dhl', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/dial-health.js'), 'utf8');
-  const mA = src.replace('  if (refAt <= accAt) return NONE;', '  if (false) return NONE;');
+  const mA = editAnchor(src, '  if (refAt <= accAt) return NONE;', '  if (false) return NONE;', "src/dial-health.js");
   ok(mA !== src, '(a) the patch applies');
   const A = M.load('src/dial-health.js', mA, 'noorder');
   const ra = runTable(A).filter(([, got, want]) => got !== want);
   ok(ra.length >= 1 && ra.some(([n]) => n.startsWith('an accept newer')), `CONTROL (a): without "refusal newer than the accept" an old refusal reads as a second agent — ${ra.length} table rows red`, ra);
-  const mB = src.replace('  const live = !!connected || (accAt > 0 && now - accAt <= RECENT_MS);', '  const live = true;');
+  const mB = editAnchor(src, '  const live = !!connected || (accAt > 0 && now - accAt <= RECENT_MS);', '  const live = true;', "src/dial-health.js");
   ok(mB !== src, '(b) the patch applies');
   const rb = runTable(M.load('src/dial-health.js', mB, 'nolive')).filter(([, got, want]) => got !== want);
   ok(rb.length >= 2, `CONTROL (b): without the connected rule a disconnected device's re-pair reads as a second agent — ${rb.length} rows red`, rb);

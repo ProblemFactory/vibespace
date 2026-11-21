@@ -44,6 +44,15 @@ const GS = require(path.join(REPO, 'src/server/grants-store.js'));
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, n) => ok(JSON.stringify(a) === JSON.stringify(b), n, { got: a, want: b });
 const SCR = scratch('exitreach');
 fs.mkdirSync(SCR, { recursive: true });
@@ -903,9 +912,9 @@ console.log('controls (patched copies)');
   }
   // (f) the manager without stillGranted — a revoke during the wait no longer stops the run
   const msrc = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
-  const ms = msrc.replace("if (answer === 'revoked') { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: 'not_granted', grant: 'run', h, has: j.has, cmd }); }", '')
-    .replace("const again = E.exitVerdict(accNow, 'run', ctxNow);", "const again = { ok: true, via: 'session' };")   // B-48a4 U3 + (B): run's stillGranted line
-    .replace("        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || (() => { const c = this.ctxFor(s, k.sessionId); return this._endsOn(E.exitVerdict(this.access(k.hostId), 'run', c), c); })()) ? 'revoked' : null;", "        const kwhy = !s ? 'conversation-gone' : null;"); // verify-r3: setAccess re-judges through THE ONE rejudgeAll — its ask branch is what a revoke settles
+  const ms = editAnchor(editAnchor(editAnchor(msrc, "if (answer === 'revoked') { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: 'not_granted', grant: 'run', h, has: j.has, cmd }); }", '', "src/exit-proxy.js"),
+    "const again = E.exitVerdict(accNow, 'run', ctxNow);", "const again = { ok: true, via: 'session' };", "src/exit-proxy.js"),   // B-48a4 U3 + (B): run's stillGranted line
+    "        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || (() => { const c = this.ctxFor(s, k.sessionId); return this._endsOn(E.exitVerdict(this.access(k.hostId), 'run', c), c); })()) ? 'revoked' : null;", "        const kwhy = !s ? 'conversation-gone' : null;", "src/exit-proxy.js"); // verify-r3: setAccess re-judges through THE ONE rejudgeAll — its ask branch is what a revoke settles
   ok(ms !== msrc && !ms.includes("? 'revoked' : null;") && ms.includes("const again = { ok: true, via: 'session' };"), '(f) the patch applies (all three edits — run\'s stillGranted line among them: the plant proves itself first)');
   const MF = M.load('src/exit-proxy.js', ms, 'nostill').ExitProxyManager;
   const w = world({ Mgr: MF });
@@ -919,8 +928,8 @@ console.log('controls (patched copies)');
   const rf = await pf;
   ok(rf.v && rf.v.code === 0 && w.runs.length === 1, 'CONTROL (f): without stillGranted the revoke-during-ask leg goes red (the command RAN after its access was removed)');
   // (i) verify-r2 ask-a: the manager without the liveness checks — an Allow after the conversation died RUNS the command
-  const mi = msrc.replace("    if (!this._stillLive(null, k.sessionId)) { this._settleAsk(k, 'denied', 'conversation-gone'); throw namedError('conversation_gone', 'the conversation that asked has ended — nothing to run it for'); }", '')
-    .replace("    if (!this._stillLive(session, sessionId)) throw this._refused(session, sessionId, { code: 'conversation_gone', grant: 'run', h, cmd });", '');
+  const mi = editAnchor(editAnchor(msrc, "    if (!this._stillLive(null, k.sessionId)) { this._settleAsk(k, 'denied', 'conversation-gone'); throw namedError('conversation_gone', 'the conversation that asked has ended — nothing to run it for'); }", '', "src/exit-proxy.js"),
+    "    if (!this._stillLive(session, sessionId)) throw this._refused(session, sessionId, { code: 'conversation_gone', grant: 'run', h, cmd });", '', "src/exit-proxy.js");
   ok(mi !== msrc && mi.split('_stillLive(').length === msrc.split('_stillLive(').length - 2, '(i) the patch applies (both liveness checks removed)');
   const MI = M.load('src/exit-proxy.js', mi, 'nolive').ExitProxyManager;
   const wi = world({ Mgr: MI });
@@ -936,7 +945,7 @@ console.log('controls (patched copies)');
   // (j) verify-r2 ask-b: the manager without the store subscription — the item done, the ask still waiting and allowable
   // verify-r5: …and without X1's belt (answerAsk refuses an Allow whose item is no longer open / no longer shows the
   // command) — a new guard layer is taken out of the OLD layer's control, or the control proves nothing about the old one
-  const mj = msrc.replace("    if (this.userTodos && typeof this.userTodos.onStatus === 'function') {", "    if (false) {").replace("if (v.state === 'allowed' && k.todoId && this.userTodos && typeof this.userTodos.get === 'function') {", 'if (false) {');
+  const mj = editAnchor(editAnchor(msrc, "    if (this.userTodos && typeof this.userTodos.onStatus === 'function') {", "    if (false) {", "src/exit-proxy.js"), "if (v.state === 'allowed' && k.todoId && this.userTodos && typeof this.userTodos.get === 'function') {", 'if (false) {', "src/exit-proxy.js");
   ok(mj !== msrc, '(j) the patch applies');
   const MJ = M.load('src/exit-proxy.js', mj, 'nostatus').ExitProxyManager;
   const wj = world({ Mgr: MJ });

@@ -21,6 +21,15 @@ const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const keeperSrc = () => read('src/server/desktop-app-keeper.js') + '\n' + read('src/desktop-serve.js');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 // Patched copies of the bridge (negative controls) are written OUTSIDE the tree
 // (scripts/mutant-copy.mjs, `require` re-bound to the real module's path); §tree
 // measures that while they exist. They used to be src/server/vs-dak-mut-*.
@@ -1137,7 +1146,7 @@ console.log('§14 lane D (a) (docs/design-desktop-apps-seamless §3.4, the owner
   const srcA = read('src/desktop-fit.js');
   const fromA = "  const gdkScale = r === 'dpi' ? Math.max(1, Math.min(SCALE_MAX, Math.floor(s))) : Math.max(1, Math.min(SCALE_MAX, Math.ceil(s - 1e-9)));";
   ok(srcA.split(fromA).length === 2, 'the GDK_SCALE rule is spelled once (the control patches exactly it)');
-  const fileA = MUTD.write('src/desktop-fit.js', srcA.replace(fromA, '  const gdkScale = Math.max(1, Math.min(SCALE_MAX, Math.floor(s))); // pre-lane-D CONTROL').replace("  const dpi = r === 'dpi' ? Math.round(96 * s / gdkScale) : 96;", '  const dpi = Math.round(96 * s / gdkScale);').replace("  const pictureScale = r === 'dpi' ? 1 : round4(s / gdkScale);", '  const pictureScale = 1;'), 'floorknobs');
+  const fileA = MUTD.write('src/desktop-fit.js', editAnchor(editAnchor(editAnchor(srcA, fromA, '  const gdkScale = Math.max(1, Math.min(SCALE_MAX, Math.floor(s))); // pre-lane-D CONTROL', "src/desktop-fit.js"), "  const dpi = r === 'dpi' ? Math.round(96 * s / gdkScale) : 96;", '  const dpi = Math.round(96 * s / gdkScale);', "src/desktop-fit.js"), "  const pictureScale = r === 'dpi' ? 1 : round4(s / gdkScale);", '  const pictureScale = 1;', "src/desktop-fit.js"), 'floorknobs');
   try {
     const MC = require(fileA); // F-S1: the scale family's copy; the record is the model's (newRecord carries the knobs it is handed)
     const kc = MC.scaleKnobs(1.5), rc = M.newRecord({ id: 'x', label: 'x', exec: '/x', source: 'registry', backend: 'xpra', now: 1, scale: kc.scale, dpi: kc.dpi, gdkScale: kc.gdkScale, pictureScale: kc.pictureScale });

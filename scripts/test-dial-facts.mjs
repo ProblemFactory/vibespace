@@ -38,6 +38,15 @@ const src0 = fs.readFileSync(path.join(REPO, 'src/dial-facts.js'), 'utf8');
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, n) => ok(JSON.stringify(a) === JSON.stringify(b), n, { got: a, want: b });
 
 // verify-r5 G1: the smallest DOM the address picker builds on (createElement, the tree, `.class` / tag queries, events)
@@ -927,7 +936,7 @@ console.log('controls (patched copies)');
   const guard = { transport: 'dial', online: false, dial: { tokenMintedAt: 30, lastRefusal: { code: 'token-mismatch', at: 20 } } };
   ok(B.dialRowState(guard).state === 'refused' && DF.dialRowState(guard).state === 'never', 'CONTROL (b): dialRowState without the mint guard reads a retired token\'s refusal as `refused`');
   // (c) loopback candidates
-  const c = src.replace("if (p[0] === 127 || p[0] === 0) return null;", "if (p[0] === 0) return null;").replace('if (!a || a.internal) continue;', 'if (!a) continue;');
+  const c = editAnchor(editAnchor(src, "if (p[0] === 127 || p[0] === 0) return null;", "if (p[0] === 0) return null;", "src/dial-facts.js"), 'if (!a || a.internal) continue;', 'if (!a) continue;', "src/dial-facts.js");
   ok(c !== src, '(c) the patch applies');
   const C = M.load('src/dial-facts.js', c, 'loopback');
   ok(C.dialAddressCandidates({ interfaces: IF, port: 1 }).some((r) => r.base.includes('127.0.0.1')) && !DF.dialAddressCandidates({ interfaces: IF, port: 1 }).some((r) => r.base.includes('127.')), 'CONTROL (c): candidates including loopback are caught');
@@ -961,7 +970,7 @@ console.log('controls (patched copies)');
   const F = M.load('src/dial-facts.js', f, 'nobootpass');
   ok(F.duplicateDialVerdict({ current: { boot: 'aabbccdd', alive: true }, incoming: {} }).action === 'replace' && DF.duplicateDialVerdict({ current: { boot: 'aabbccdd', alive: true }, incoming: {} }).action === 'refuse', 'CONTROL (f): r1\'s "no boot id ⇒ replace" turns the header-less newcomer cell red (the eviction by omission)');
   // (g) verify-r2 the dial endpoint: a budget keyed by the raw address (no /64 fold, no window ceiling) — rotation logs every knock
-  const g = src.replace("if (all.lines >= globalMax) {", "if (false) {").replace("return full.slice(0, 4).map((h) => (h || '0').replace(/^0+(?=.)/, '')).join(':') + '::/64';", 'return s;');
+  const g = editAnchor(editAnchor(src, "if (all.lines >= globalMax) {", "if (false) {", "src/dial-facts.js"), "return full.slice(0, 4).map((h) => (h || '0').replace(/^0+(?=.)/, '')).join(':') + '::/64';", 'return s;', "src/dial-facts.js");
   ok(g !== src, '(g) the patch applies');
   const G = M.load('src/dial-facts.js', g, 'rawaddr');
   {
@@ -984,7 +993,7 @@ console.log('controls (patched copies)');
   const I2 = M.load('src/dial-facts.js', i2, 'argvinstall');
   ok(/vsdt_/.test(I2.sshInstallInvocation({ args: GRAD_ARGS, installer: '#!/usr/bin/env bash' }).remote), 'CONTROL (i): r2\'s composition puts the dial token in the ssh remote command (the argv) — the B-grad leg goes red');
   // (j) naive-user N-loop: the pre-fix list — the loopback origin first (rank by kind only) and the first row the default
-  const j2 = src.replace('rank: loop ? CANDIDATE_KINDS.length : CANDIDATE_KINDS.indexOf(kind)', 'rank: CANDIDATE_KINDS.indexOf(kind)').replace('const reach = rows.find((c) => !c.loopback && !isLoopbackBase(c.base));', 'const reach = rows[0];');
+  const j2 = editAnchor(editAnchor(src, 'rank: loop ? CANDIDATE_KINDS.length : CANDIDATE_KINDS.indexOf(kind)', 'rank: CANDIDATE_KINDS.indexOf(kind)', "src/dial-facts.js"), 'const reach = rows.find((c) => !c.loopback && !isLoopbackBase(c.base));', 'const reach = rows[0];', "src/dial-facts.js");
   ok(j2 !== src && j2.split('rows[0];').length === 2, '(j) the patch applies (both halves)');
   const J2 = M.load('src/dial-facts.js', j2, 'loopfirst');
   {

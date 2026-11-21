@@ -30,14 +30,23 @@ const C = require(path.join(REPO, 'src/cpu-capture.js'));
 const LH = require(path.join(REPO, 'src/loop-hold.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1200) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const near = (a, b, e = 0.05) => Math.abs(a - b) <= e;
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cpu-capture-'));
 /** a MUTANT of the pure module: one text swap, loaded from a scratch copy (its own require of loop-hold.js made absolute) */
 function mutant(from, to) {
   const src = fs.readFileSync(path.join(REPO, 'src/cpu-capture.js'), 'utf8');
-  if (!src.includes(from)) throw new Error('mutant anchor missing: ' + from.slice(0, 60));
+  // B-0d3e (round w8wjd2717): the control's own edit through the helper — a wrong count is a red row of its own, never a throw
   const p = path.join(TMP, `mut-${Math.random().toString(36).slice(2)}.js`);
-  fs.writeFileSync(p, src.replace(from, to).replace("require('./loop-hold.js')", `require(${JSON.stringify(path.join(REPO, 'src/loop-hold.js'))})`));
+  fs.writeFileSync(p, editAnchor(editAnchor(src, from, to, "src/cpu-capture.js"), "require('./loop-hold.js')", `require(${JSON.stringify(path.join(REPO, 'src/loop-hold.js'))})`, "src/cpu-capture.js"));
   return require(p);
 }
 

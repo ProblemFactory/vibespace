@@ -51,6 +51,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const DH = require(path.join(REPO, 'src/desktop-handover.js'));
 const SH = require(path.join(REPO, 'src/agentd/stream-host.js'));
 const ENG = require(path.join(REPO, 'src/server/desktop-handover-engine.js'));
@@ -465,7 +474,7 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
   ok(m.act.code === 'window_paused' && m.act.did && m.act.did.partial === true && m.act.did.of === 6000 && m.act.did.sent < 6000 && m.act.did.charsTyped >= 0 && m.act.did.charsTyped < 1500 && /records went in \(\d+ of 1500 characters typed\)/.test(m.act.message) && m.input === 'user', `the act answers window_paused, partial: ${m.act.did && m.act.did.sent} of 6000 records, ${m.act.did && m.act.did.charsTyped} of 1500 characters said; the lease paused`, m.act);
   // CONTROL: the same leg over a copy of the stream host with ONE ordered chain (the owner's records queue behind the agent's, no drop)
   const shSrc = fs.readFileSync(path.join(REPO, 'src/agentd/stream-host.js'), 'utf8');
-  const chainSrc = shSrc.replace('(lane === \'owner\' ? s.ownerQ : s.agentQ).push(', 's.agentQ.push(').replace('if (s.agentQ.length || s.agentHeld.size || s.inFlight === \'agent\') dropAgent(s, \'owner_input\');', '');
+  const chainSrc = editAnchor(editAnchor(shSrc, '(lane === \'owner\' ? s.ownerQ : s.agentQ).push(', 's.agentQ.push(', "src/agentd/stream-host.js"), 'if (s.agentQ.length || s.agentHeld.size || s.inFlight === \'agent\') dropAgent(s, \'owner_input\');', '', "src/agentd/stream-host.js");
   ok(chainSrc !== shSrc && !chainSrc.includes('dropAgent(s, \'owner_input\')'), 'CONTROL copy: one chain, no drop (the anchors exist)');
   const ctl = await measure(mutantCopies('dho-chain', REPO).load('src/agentd/stream-host.js', chainSrc, 'one-chain'), 'ctl');
   ok(ctl.ownerMs != null && ctl.ownerMs > 50, `CONTROL (one chain, today's chunks): the owner's click waits behind the chunk in flight — ${ctl.ownerMs} ms ⇒ the leg tells`, { ownerMs: ctl.ownerMs, md: ctl.md });
