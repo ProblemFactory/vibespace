@@ -6,7 +6,11 @@
 //   ① FIND 1 (it leads the unit — a person's newest conversations missing): device discovery took the first 500 project
 //     folders in readdir order BEFORE its time sort. The release's walk (a copy) misses the newest conversation of a
 //     machine with 520 folders; the tree's lists it first. The bound (a copy with it lowered to 10): the most recently
-//     changed folders are read and the number left out is said; the hub says it once.
+//     changed folders are read and the number left out is said (CONTROL: the time sort cut, in a copy, reads the oldest);
+//     the hub says it once, on either road.
+//   ② THE LAW (r849): a discovery walk NEVER runs on the agent's loop. A stand-in child that outlives its bound (placed, no
+//     load): the reply is the kept snapshot with its age, or that end by name when there is none, and the loop — measured by
+//     the leg's own clock — is never held for a walk. CONTROL: the inline fallback put back (a copy) holds it.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -52,13 +56,21 @@ console.log('① find 1: every project folder is listed BEFORE the time sort; pa
     `the tree's walk: every folder listed before the time sort — the newest conversation leads its list (${after.snap && after.snap.jsonls[0] ? after.snap.jsonls[0].projDir : '?'}); nothing left out under the bound`, { code: after.code, err: after.err });
   // THE BOUND (a copy with it lowered to 10): the most recently changed folders read, the number left out said
   const hb = homeOf('f1-bound'), PB = path.join(hb, '.claude', 'projects');
-  for (let i = 0; i < 20; i++) { const d = path.join(PB, `-home-u-b${String(i).padStart(2, '0')}`); fs.mkdirSync(d); const f = path.join(d, sidOf(i) + '.jsonl'); fs.writeFileSync(f, rec('req_b' + i)); fs.utimesSync(f, OLD + i, OLD + i); fs.utimesSync(d, OLD + i, OLD + i); }
+  for (let i = 0; i < 20; i++) { const d = path.join(PB, `-home-u-b${String(i).padStart(2, '0')}`); fs.mkdirSync(d); fs.writeFileSync(path.join(d, sidOf(i) + '.jsonl'), rec('req_b' + i)); }
+  // the folders' own times run AGAINST the directory's order (the first it lists are the oldest), so only the time sort reads the newest
+  const orderB = fs.readdirSync(PB);
+  orderB.forEach((name, k) => { const d = path.join(PB, name); for (const f of fs.readdirSync(d)) fs.utimesSync(path.join(d, f), OLD + k, OLD + k); fs.utimesSync(d, OLD + k, OLD + k); });
+  const newest10 = orderB.slice(10).sort();
   const low = M.write('src/agentd/agentd.js', anchored(AGSRC, 'const DISCOVERY_FOLDERS_MAX = 5000;', 'const DISCOVERY_FOLDERS_MAX = 10;', 'folders-max-10'), 'folders-max-10');
   const b = snapshotOf(low, hb);
-  const dirsRead = b.snap ? [...new Set(b.snap.jsonls.map((j) => j.projDir))].sort() : [];
-  ok(b.code === 0 && b.snap && b.snap.left && b.snap.left.folders === 10 && dirsRead.length === 10 && dirsRead[0] === '-home-u-b10' && dirsRead[9] === '-home-u-b19',
-    `past its bound (10, in a copy): the 10 most recently changed folders read (${dirsRead[0]}…${dirsRead[9]}), the 10 left out said (left.folders ${b.snap && b.snap.left ? b.snap.left.folders : '?'})`, { code: b.code, err: b.err });
-  ok(/const DISCOVERY_FOLDERS_MAX = 5000;/.test(AGSRC) && AGSRC.includes("codexRollouts: snap.codexRollouts, ...(snap.left ? { left: snap.left } : {}), codexOpen: snap.codexOpen || [], realCwds: snap.realCwds || [] });"), 'the bound is 5000 folders, and the agent\'s answer carries what it left out to the hub');
+  const readOf = (x) => (x.snap ? [...new Set(x.snap.jsonls.map((j) => j.projDir))].sort() : []);
+  const dirsRead = readOf(b);
+  ok(b.code === 0 && b.snap && b.snap.left && b.snap.left.folders === 10 && JSON.stringify(dirsRead) === JSON.stringify(newest10),
+    `past its bound (10, in a copy): the 10 most recently changed folders read — the LAST ten the directory lists — and the 10 left out said (left.folders ${b.snap && b.snap.left ? b.snap.left.folders : '?'})`, { code: b.code, err: b.err, dirsRead, newest10 });
+  const noSort = M.write('src/agentd/agentd.js', anchored(anchored(AGSRC, 'const DISCOVERY_FOLDERS_MAX = 5000;', 'const DISCOVERY_FOLDERS_MAX = 10;', 'folders-max-10-nosort'), 'dirs = dirs.map((d) => [d, changed(d)]).sort((a, b) => b[1] - a[1]).slice(0, DISCOVERY_FOLDERS_MAX).map((x) => x[0]);', 'dirs = dirs.slice(0, DISCOVERY_FOLDERS_MAX);', 'folders-sort-cut'), 'folders-sort-cut');
+  const ns = snapshotOf(noSort, hb);
+  ok(ns.code === 0 && JSON.stringify(readOf(ns)) !== JSON.stringify(newest10), 'CONTROL (the time sort cut, in a copy): the first ten the directory lists are read — the OLDEST — RED', { read: readOf(ns) });
+  ok(/const DISCOVERY_FOLDERS_MAX = 5000;/.test(AGSRC) && AGSRC.includes("codexRollouts: snap.codexRollouts, ...(snap.left ? { left: snap.left } : {}), ...(stale ? { stale } : {}), codexOpen: snap.codexOpen || [], realCwds: snap.realCwds || [] });") && AGSRC.includes("mux.control({ op: 'discovery-result', id: msg.id, sessions, ...(snap.left ? { left: snap.left } : {}), ...(stale ? { stale } : {}) });"), 'the bound is 5000 folders, and BOTH of the agent\'s answers (the snapshot\'s, the claims\') carry what it left out to the hub');
   const { DeviceManager } = require('../src/agentd/client.js');
   const D = new DeviceManager({ dataDir: path.join(tmp, 'dm'), bundlePath: path.join(tmp, 'none.js'), version: '1.0.0', machine: 'box-1', transport: { kind: 'stream', hostToken: () => 'x', getStream: () => null } });
   const logs = []; D._log = (l) => logs.push(String(l));
@@ -66,6 +78,39 @@ console.log('① find 1: every project folder is listed BEFORE the time sort; pa
   await D.discoverySnapshot(); await D.discoverySnapshot();
   const said = logs.filter((l) => /project folders left out/.test(l));
   ok(said.length === 1 && /7 of its project folders/.test(said[0]), `the hub says what the list left out ONCE («${said[0] || 'nothing'}»)`, logs);
+}
+
+console.log('② THE LAW (the coordinator\'s r849): a discovery walk NEVER runs on the agent\'s loop — a child that outlives its bound answers the kept snapshot, its age said, or that end by name');
+{
+  const DF = require('../src/discovery-facts.js');
+  const { execFile } = require('node:child_process');
+  const outlives = (cb) => execFile(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { timeout: 300 }, cb);   // a stand-in child: it outlives its bound (placed, no load)
+  const answers = (cb) => execFile(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({ jsonls: [{ file: "a.jsonl" }], locks: [] }))'], { timeout: 5000 }, cb);
+  const unstartable = (cb) => execFile(path.join(tmp, 'no-such-node'), [], { timeout: 300 }, cb);
+  // the agent's loop, measured by the leg's own clock: the worst gap between 5 ms ticks while the reply is made
+  const onLoop = async (fn) => { let last = performance.now(), worst = 0; const t = setInterval(() => { const n = performance.now(); worst = Math.max(worst, n - last); last = n; }, 5); const r = await fn(); clearInterval(t); worst = Math.max(worst, performance.now() - last); return { r, worst: Math.round(worst) }; };
+  const HOLD = 400;   // the RED's inline walk holds the loop this long (a placed wait, no load)
+  const none = await onLoop(() => DF.snapshotReply({ runChild: outlives, kept: { snap: null, at: 0 } }));
+  ok(none.r.code === 'discovery-timeout' && !none.r.snap && none.worst < HOLD, `a child that outlives its bound, nothing kept: refused BY NAME («${none.r.error}»), the loop's worst gap ${none.worst} ms (never held for a walk)`, none);
+  const keptOld = { snap: { jsonls: [{ file: 'old.jsonl' }], locks: [] }, at: 1000 };
+  const old = await onLoop(() => DF.snapshotReply({ runChild: outlives, kept: keptOld, now: () => 61000 }));
+  ok(old.r.snap === keptOld.snap && old.r.stale && old.r.stale.ageMs === 60000 && old.r.stale.why === 'discovery-timeout' && old.worst < HOLD, `…with a snapshot kept a minute ago: THAT snapshot, its age said (${old.r.stale && old.r.stale.ageMs} ms, ${old.r.stale && old.r.stale.why}), the loop's worst gap ${old.worst} ms`, old);
+  const kept2 = { snap: null, at: 0 }, fresh = await DF.snapshotReply({ runChild: answers, kept: kept2, now: () => 5000 });
+  const noStart = await DF.snapshotReply({ runChild: unstartable, kept: { snap: null, at: 0 } });
+  ok(fresh.snap && fresh.snap.jsonls[0].file === 'a.jsonl' && kept2.snap === fresh.snap && kept2.at === 5000 && !fresh.stale && noStart.code === 'discovery-child-unstarted',
+    `a child that answers: its snapshot, kept for the next refusal; one that could not START: by name too («${noStart.error}») — never the walk inline`, { noStart });
+  // RED: the inline fallback put back (a copy) — the walk on the loop holds it
+  const DSRC = read('src/discovery-facts.js');
+  const Back = M.load('src/discovery-facts.js', anchored(DSRC, '  if (v.snap) { kept.snap = v.snap; kept.at = now(); return { snap: v.snap }; }', '  if (!v.snap && arguments[0].walkInline) return { snap: arguments[0].walkInline() };\n  if (v.snap) { kept.snap = v.snap; kept.at = now(); return { snap: v.snap }; }', 'inline-back'), 'inline-back');
+  const walkInline = () => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, HOLD); return { jsonls: [], locks: [] }; };
+  const held = await onLoop(() => Back.snapshotReply({ runChild: outlives, kept: { snap: null, at: 0 }, walkInline }));
+  ok(held.worst >= HOLD - 20, `CONTROL (the inline fallback put back, in a copy): the walk runs on the loop and holds it ${held.worst} ms — RED`, held);
+  const nAg = (t) => AGSRC.split(t).length - 1;
+  ok(nAg('snapshotReply({ kept: discoveryKept, runChild: (cb) => {') === 2 && nAg('} else snap = computeDiscoverySnapshot();   // msg.forceInline') === 2 && nAg('computeDiscoverySnapshot()') === 4,
+    'both discovery ops answer through it; the walk is called only by its child and under a parity suite\'s forceInline, which the hub never sends (its definition, the child, the two forceInline arms: 4)');
+  const HS = read('src/hosts.js');
+  ok(HS.includes('claimed = res.stale ? staleSessions(res.sessions, res.stale) : res.sessions;') && HS.includes('const sessions = snapStale ? staleSessions(read, snapStale) : read;') && HS.includes('if (!snapStale) this._persistDiscovery(id, sessions);'),
+    'the hub says the truth: a kept snapshot\'s rows are marked stale with their age (both roads), and an old list is never kept as the last-known one');
 }
 
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);

@@ -925,7 +925,32 @@ function synthesizeDiscoveryLines(snap) {
   return lines.join('\n');
 }
 
+// B-5278 unit 2 (the coordinator's r849, THE LAW): A DISCOVERY WALK NEVER RUNS ON THE DEVICE AGENT's LOOP. The walk runs in a
+// CHILD (a slow or network home never holds the agent); the release fell back to the SAME walk INLINE on any end of that
+// child — its bound's kill among them — so on a slow home every conversation of that machine stalled for the whole walk, at
+// each discovery. Now a child that ends without a snapshot (killed at its bound, failed, could not start, no snapshot)
+// answers what the agent already has: its LAST snapshot, its age said (`stale`), or that end BY NAME when it has none.
+// PURE: the child is handed in (runChild(cb) → cb(err, stdout)); `kept` is the agent's own {snap, at}.
+function snapshotChildVerdict(err, stdout) {
+  if (!err) {
+    let r = null; try { r = JSON.parse(stdout); } catch { }
+    return r && r.jsonls ? { snap: r } : { error: 'the discovery walk answered no snapshot', code: 'discovery-child-failed' };
+  }
+  if (err.spawnFailed || (typeof err.code === 'string' && /^E[A-Z0-9]+$/.test(err.code) && err.syscall !== undefined)) return { error: `the discovery walk could not start (${err.code || 'spawn'})`, code: 'discovery-child-unstarted' };
+  if (err.killed || err.signal) return { error: `the discovery walk did not finish (${err.signal || 'killed'} at its bound)`, code: 'discovery-timeout' };
+  return { error: `the discovery walk failed (${String((err && err.message) || err).split('\n')[0].slice(0, 160)})`, code: 'discovery-child-failed' };
+}
+async function snapshotReply({ runChild, kept, now = Date.now }) {
+  const v = await new Promise((resolve) => {
+    try { runChild((err, stdout) => resolve(snapshotChildVerdict(err, stdout))); } catch (e) { resolve(snapshotChildVerdict(Object.assign(e instanceof Error ? e : new Error(String(e)), { spawnFailed: true }), '')); }
+  });
+  if (v.snap) { kept.snap = v.snap; kept.at = now(); return { snap: v.snap }; }
+  if (kept.snap) return { snap: kept.snap, stale: { ageMs: Math.max(0, now() - kept.at), why: v.code } };
+  return { error: v.error, code: v.code };
+}
+
 module.exports = {
+  snapshotChildVerdict, snapshotReply,
   cwdsToResolve, realCwdsOf, // B-16d7: one list for both roads, the device's bounded resolver
   extractTailIds, nameFromUserRecord, nameFromUserLine, nameFromText, titleFromRecord, titleFromText, titleLinesOf, TITLE_NEEDLE, TITLE_HEAD_BYTES, TITLE_TAIL_BYTES, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, NAME_MAX,
   // S3 (codex facts + zstd rollouts)

@@ -169,6 +169,9 @@ function passiveOfPeek(raw) {
 // run is held to (usageScanBound: half the bytes, a third of the seconds), passed down in the command. The scanner keeps
 // its cursor when its stdout write fails; without a bound a backlog over these limits failed every harvest the same way.
 const USAGE_HARVEST_LIMITS = Object.freeze({ maxBuffer: 128 * 1024 * 1024, timeoutMs: 180000 });
+// B-5278 unit 2 (r849): a device that could not walk answered its LAST list, its age said — every row says it is old (the
+// marks the hub's own last-known list carries: stale, staleAt)
+const staleSessions = (sessions, stale) => { const at = Date.now() - Math.max(0, Number(stale && stale.ageMs) || 0); return sessions.map((x) => ({ ...x, stale: true, staleAt: at })); };
 const usageScanBound = (L) => ({ maxBytes: Math.floor(L.maxBuffer / 2), maxMs: Math.floor(L.timeoutMs / 3) });
 // …and a harvest that failed backs off: 1 min, doubling, at most 30 min (a forced harvest — the owner's own ask — goes)
 const HARVEST_BACKOFF_MS = 60 * 1000, HARVEST_BACKOFF_MAX_MS = 30 * 60 * 1000;
@@ -3624,7 +3627,7 @@ class HostManager {
 ${codexOpenRolloutsShell()}
       fi
     `.trim();
-    let out;
+    let out, snapStale = null;   // B-5278 unit 2 (r849): the device answered its LAST snapshot, its age said
     try {
       // CS data-plane (device data plane — always on since the 2.175.0 flag graduation): the daemon's raw-facts snapshot
       // SYNTHESIZED into the exact LOCK/J/H/N/T line format the ssh script
@@ -3659,20 +3662,24 @@ ${codexOpenRolloutsShell()}
             try {
               const res = await deadline(dm.discoveryClaims({ hostId: h.id, hostName: h.name }), 15000, 'device-claims');
               if (res?.error) throw new Error(res.error);
-              if (Array.isArray(res?.sessions)) claimed = res.sessions;
+              if (Array.isArray(res?.sessions)) claimed = res.stale ? staleSessions(res.sessions, res.stale) : res.sessions;
             } catch (e3) {
-              console.warn(`[discovery] device claims failed for ${h.name} — falling back to server-side interpretation:`, e3.message);
+              // B-5278 unit 2 (r849): a refusal is said ONCE a machine and reason (the rungs below stay as they were)
+              if (!this._claimsSaid) this._claimsSaid = new Set();
+              const said = `${id}\n${String(e3.message).slice(0, 80)}`;
+              if (!this._claimsSaid.has(said)) { this._claimsSaid.add(said); console.warn(`[discovery] device claims failed for ${h.name} — falling back to server-side interpretation:`, e3.message); }
             }
           }
           if (claimed) {
             this._discoveryCache.set(id, { at: Date.now(), sessions: claimed });
             this._noteRealCwds(id, claimed);   // B-16d7
             try { this.convIndex.noteDiscovery(id, claimed); } catch { }
-            this._persistDiscovery(id, claimed);
+            if (!claimed.some((s) => s && s.stale)) this._persistDiscovery(id, claimed);   // an OLD list is never kept as the last-known one
             return claimed;
           }
           const snap = await deadline(dm.discoverySnapshot(), 12000, 'device-discovery');
           out = synthesizeDiscoveryLines(snap); // shared with the device's own discovery.v2 chain
+          snapStale = snap && snap.stale ? snap.stale : null;
         } catch (e2) { out = null; /* legacy fallback below */ }
       }
       if (out == null) out = await this._ssh(h, script, { timeoutMs: 20000 });
@@ -3686,11 +3693,12 @@ ${codexOpenRolloutsShell()}
       }
       throw e;
     }
-    const sessions = interpretDiscoveryLines(out, { hostId: h.id, hostName: h.name, claimJsonls });
+    const read = interpretDiscoveryLines(out, { hostId: h.id, hostName: h.name, claimJsonls });
+    const sessions = snapStale ? staleSessions(read, snapStale) : read;
     this._discoveryCache.set(id, { at: Date.now(), sessions });
     this._noteRealCwds(id, sessions);   // B-16d7
     try { this.convIndex.noteDiscovery(id, sessions); } catch { }
-    this._persistDiscovery(id, sessions);
+    if (!snapStale) this._persistDiscovery(id, sessions);   // an OLD list is never kept as the last-known one
     return sessions;
   }
 }

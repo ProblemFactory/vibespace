@@ -228,6 +228,7 @@ function getTranscriptService() {
 // Bounded by construction: past DISCOVERY_FOLDERS_MAX folders the most recently changed ones are read (a folder's own
 // time moves when a transcript is made in it) and the number left out is said (`left.folders`, the hub's journal).
 const DISCOVERY_FOLDERS_MAX = 5000;
+const discoveryKept = { snap: null, at: 0 };   // B-5278 unit 2 (r849): the last snapshot a child answered, and when
 function computeDiscoverySnapshot() {
   const home = os.homedir();
   const locks = [];
@@ -2177,20 +2178,18 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         // (same function); msg.forceInline lets the parity test pin that.
         (async () => {
           try {
-            let snap = null;
+            let snap = null, stale = null;
             if (!msg.forceInline) {
-              snap = await new Promise((resolve) => {
-                try {
-                  const { execFile } = require('child_process');
-                  execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
-                    if (err) return resolve(null);
-                    try { const r = JSON.parse(stdout); resolve(r && r.jsonls ? r : null); } catch { resolve(null); }
-                  });
-                } catch { resolve(null); }
-              });
-            }
-            if (!snap) snap = computeDiscoverySnapshot();
-            mux.control({ op: 'discovery-result', id: msg.id, locks: snap.locks, jsonls: snap.jsonls, codexRollouts: snap.codexRollouts, ...(snap.left ? { left: snap.left } : {}), codexOpen: snap.codexOpen || [], realCwds: snap.realCwds || [] });
+              // B-5278 unit 2 (r849): the walk NEVER on this loop — a child that ends without a snapshot answers the kept one,
+              // its age said, or that end by name (discovery-facts snapshotReply)
+              const r = await require('./../discovery-facts.js').snapshotReply({ kept: discoveryKept, runChild: (cb) => {
+                const { execFile } = require('child_process');
+                execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);
+              } });
+              if (r.error) { mux.control({ op: 'discovery-result', id: msg.id, error: r.error, code: r.code }); return; }
+              snap = r.snap; stale = r.stale || null;
+            } else snap = computeDiscoverySnapshot();   // msg.forceInline: a parity suite's pin only (the hub never sends it)
+            mux.control({ op: 'discovery-result', id: msg.id, locks: snap.locks, jsonls: snap.jsonls, codexRollouts: snap.codexRollouts, ...(snap.left ? { left: snap.left } : {}), ...(stale ? { stale } : {}), codexOpen: snap.codexOpen || [], realCwds: snap.realCwds || [] });
           } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
         })();
         return;
@@ -2205,25 +2204,23 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       if (msg.op === 'discovery-claims') {
         (async () => {
           try {
-            let snap = null;
+            let snap = null, stale = null;
             if (!msg.forceInline) {
-              snap = await new Promise((resolve) => {
-                try {
-                  const { execFile } = require('child_process');
-                  execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
-                    if (err) return resolve(null);
-                    try { const r = JSON.parse(stdout); resolve(r && r.jsonls ? r : null); } catch { resolve(null); }
-                  });
-                } catch { resolve(null); }
-              });
-            }
-            if (!snap) snap = computeDiscoverySnapshot();
+              // B-5278 unit 2 (r849): the walk NEVER on this loop — a child that ends without a snapshot answers the kept one,
+              // its age said, or that end by name (discovery-facts snapshotReply)
+              const r = await require('./../discovery-facts.js').snapshotReply({ kept: discoveryKept, runChild: (cb) => {
+                const { execFile } = require('child_process');
+                execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, cb);
+              } });
+              if (r.error) { mux.control({ op: 'discovery-result', id: msg.id, error: r.error, code: r.code }); return; }
+              snap = r.snap; stale = r.stale || null;
+            } else snap = computeDiscoverySnapshot();   // msg.forceInline: a parity suite's pin only (the hub never sends it)
             const { claimJsonls } = require('./../session-store.js');
             const sessions = interpretDiscoveryLines(
               synthesizeDiscoveryLines(snap),
               { hostId: msg.hostId || null, hostName: msg.hostName || null, claimJsonls },
             );
-            mux.control({ op: 'discovery-result', id: msg.id, sessions });
+            mux.control({ op: 'discovery-result', id: msg.id, sessions, ...(snap.left ? { left: snap.left } : {}), ...(stale ? { stale } : {}) });
           } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
         })();
         return;

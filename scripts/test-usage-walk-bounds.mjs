@@ -287,6 +287,21 @@ console.log('④ L3 one event\'s strings: an over-long id dropped AND counted, n
   const onDisk = JSON.parse(fs.readFileSync(cfE, 'utf8')), dig = led._hostCursorDigest && led._hostCursorDigest.get('host-e');
   ok(!led._hostCursorJson && typeof dig === 'string' && dig.length === 44 && onDisk.cursorsDigest === dig && onDisk.cursors['/p/a.jsonl'].offset === 99 && onDisk.v === 1,
     'r806: the hub keeps the map\'s DIGEST to compare (44 characters a machine), never a second copy of its text; the record is written from the one string, its digest in it (a restart compares without a second stringify)', { dig: dig && dig.length, keys: Object.keys(onDisk) });
+  // the RESTART roads (round wf9pjdvd9): a record an OLDER hub wrote (no digest: computed once from its map) and one this hub
+  // wrote (its digest read back) — after a restart (a new ledger over the same folder) the same cursors write nothing
+  const dirR = path.join(tmp, 'ledger-restart'), noHome = path.join(tmp, 'nohome');
+  const legacy = { v: 1, host: 'host-r', cursors: { '/p/x.jsonl': { offset: 5, lastRid: 'q' } }, since: 'hub', lastTs: null, lastRid: null, events: 0, at: 1 };
+  const R1 = new UH2({ dataDir: dirR, homeDir: noHome }); R1.codexSessionsDir = path.join(noHome, '.codex', 'sessions');
+  fs.mkdirSync(R1.hostCursorsDir, { recursive: true }); const cfR = R1._hostCursorFile('host-r'); fs.writeFileSync(cfR, JSON.stringify(legacy));
+  const inoL = fs.statSync(cfR).ino;
+  await R1.ingestRemoteEvents('host-r', 'box-r', '', { cursors: { '/p/x.jsonl': { offset: 5, lastRid: 'q' } }, since: 'hub' });
+  const legacySame = fs.statSync(cfR).ino === inoL;
+  await R1.ingestRemoteEvents('host-r', 'box-r', '', { cursors: { '/p/x.jsonl': { offset: 6, lastRid: 'q' } }, since: 'hub' });   // moved: written, its digest in it
+  const inoM = fs.statSync(cfR).ino;
+  const R2 = new UH2({ dataDir: dirR, homeDir: noHome }); R2.codexSessionsDir = R1.codexSessionsDir;   // the restart
+  await R2.ingestRemoteEvents('host-r', 'box-r', '', { cursors: { '/p/x.jsonl': { offset: 6, lastRid: 'q' } }, since: 'hub' });
+  ok(legacySame && inoM !== inoL && fs.statSync(cfR).ino === inoM && typeof JSON.parse(fs.readFileSync(cfR, 'utf8')).cursorsDigest === 'string',
+    'after a restart the same cursors write nothing on both roads: a record an older hub wrote (no digest — computed once from its map) and one this hub wrote (its digest read back); a moved cursor is written', { legacySame, moved: inoM !== inoL, restartSame: fs.statSync(cfR).ino === inoM });
   // (r557 (2)) no bound named (an OLDER hub keeps no cursor of an event-less walk): the default bound fires only once an event went
   const hn = homeOf('l3-floor'); put(path.join(projOf(hn, '-home-u-floor'), SID1 + '.jsonl'), Array.from({ length: 5 }, () => JSON.stringify({ type: 'user', timestamp: TS }) + '\n').join('') + rec('req_n1') + rec('req_n2') + rec('req_n3'));
   const bare = walk(W, hn, { maxMs: 500, now: seqClock([0]) }), floor = walk(W, hn, { maxMs: 500, now: seqClock([0]), needEvent: true });
