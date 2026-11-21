@@ -1554,6 +1554,47 @@ console.log('\n§2o a picture is of the page in front: every script that opens a
   }
   console.log(`  (§2o read ${files.length} scripts in ${Date.now() - t0} ms)`);
 }
+// ── §2p A WAIT THAT RUNS OUT SAYS SO (主开发 r1141 (2), 2026-11-21, lane bl-tests-chrome — the class of 2.369.414's mirror: the
+// control of test-browser-resume-ui was read as a PRODUCT verdict because its settle() returned its last read when its bound ran
+// out, with no timed-out mark). THE SHAPE (scripts/last-read-waits.mjs, read from the code, the Node code AND the page code a
+// suite ships in template literals): a bounded poll that returns its READ when a separate test on it passes, and the same read
+// (or one more) when its bound runs out. Its caller cannot tell «the state came» from «the bound ran out» and judges the
+// product on a state that never came. Cured shapes are not named: a timed-out mark (a new object, a null or a false on
+// exhaustion), or a wait whose test IS its read's truthiness. THE RATCHET (per heavy suite, the count it holds today) may only
+// SHRINK: a wait more than its row is red by name that day; a cured one lowers its row in its cure's own commit. KNOWN BLIND
+// SPOTS (said): a wait split over helpers (the read and its loop in two functions), a page code built from pieces (a template
+// whose loop is an interpolation), a fast suite (the class is the heavy suites').
+console.log('\n§2p a wait that runs out says so: no heavy suite returns its last read as an answer when its bound runs out (a ratchet)');
+{
+  const t0 = Date.now();
+  const acorn = createRequire(import.meta.url)('acorn');
+  const { lastReadWaits } = await import('./last-read-waits.mjs');
+  const RATCHET = { 'test-machine-app-chrome': 1, 'test-desktop-webrtc-chrome': 4, 'test-browser-resume-ui': 3, 'test-setting-propose-chrome': 2, 'test-internal-links-chrome': 2, 'test-setting-links-chrome': 5, 'test-decision-attention-ui': 1, 'test-attention-policy-ui': 2, 'test-channels-engine': 1, 'test-channel-api-chrome': 1, 'test-browser-live': 1, 'test-window-binding': 1, 'test-chat-needs-strip-chrome': 1, 'test-helper-ask-ui': 1, 'test-new-session-dialog': 3, 'test-jobs-panel': 1, 'test-desktop-app-snap': 1, 'test-desktop-app-fixed': 1, 'test-parked-ask-ui': 1, 'test-channels-groups-e2e': 2 };   // 2026-11-21: 35 waits in 20 heavy suites; each cure lowers its row
+  const heavy = SUITES.filter((x) => x.tier === 'heavy'), per = new Map(), unread = [];
+  for (const x of heavy) {
+    const f = path.join(REPO, 'scripts', x.name + '.mjs'); if (!fs.existsSync(f)) continue;
+    const w = lastReadWaits(fs.readFileSync(f, 'utf8'), acorn);
+    for (const e of w.filter((y) => y.error)) unread.push(`${x.name}: ${e.error}`);
+    const real = w.filter((y) => !y.error); if (real.length) per.set(x.name, real);
+  }
+  const sum = [...per.values()].reduce((a, w) => a + w.length, 0);
+  const grown = [...per].filter(([k, w]) => w.length > (RATCHET[k] || 0)).map(([k, w]) => `${k} ${w.length} (its row ${RATCHET[k] || 0}): ${w.map((y) => `line ${y.line}${y.page ? ' (page code)' : ''} ${y.hit}`).join('; ')}`);
+  const fell = Object.keys(RATCHET).filter((k) => (per.get(k) || []).length < RATCHET[k]).map((k) => `${k} ${(per.get(k) || []).length} < its row ${RATCHET[k]}`);
+  ok(heavy.length > 300 && grown.length === 0, `no heavy suite returns its last read as an answer when its bound runs out beyond the ratchet — ${heavy.length} heavy suites read, ${sum} wait(s) in ${per.size}${grown.length ? ' — NEW, red by name (give it a timed-out mark): ' + grown.join(' · ') : ''}`);
+  ok(fell.length === 0, `…the ratchet only shrinks: a cured wait lowers its row in its cure's own commit${fell.length ? ' — lower: ' + fell.join(', ') : ''}`);
+  ok(unread.length === 0, `…and every heavy suite parses (an unparsable one would hide the shape)${unread.length ? ': ' + unread.slice(0, 4).join(', ') : ''}`);
+  console.log(`  THE NAMED (${sum}, each a cure owed): ${[...per].map(([k, w]) => `${k} ${w.map((y) => y.line + (y.page ? 'p' : '')).join('/')}`).join(' · ')}`);
+  // CONTROLS: the shape planted (Node code; page code in a template literal) is NAMED; its cures and look-alikes are NOT
+  const POLL = (body) => `const sleep = (ms) => new Promise((r) => setTimeout(r, ms));\nconst settle = async () => { let r = null; for (let i = 0; i < 40; i++) { r = await read(); if (${'r.more && r.more.marked'}) return r; await sleep(25); } ${body} };`;
+  const PAGE = (body) => "await ev(`const read = () => ({ more: document.querySelector('.m') }); for (let i = 0; i < 200; i++) { const r = read(); if (${cond}) return r; await new Promise((q) => setTimeout(q, 25)); } " + body + "`);";
+  const NAMED = { 'its last read, returned': POLL('return r;'), 'one more read, returned': POLL('return read();'), 'in page code, one more read': PAGE('return read();') };
+  const NOT = { 'a timed-out mark': POLL('return { ...r, timedOut: true };'), 'a null when it runs out': POLL('return null;'), 'its test IS its read': 'const until = async (f) => { for (let i = 0; i < 9; i++) { const v = await f(); if (v) return v; await sleep(9); } return f(); };', 'in page code, a timed-out mark': PAGE('return { timedOut: true, last: read() };') };
+  const seen = (o) => Object.entries(o).map(([k, v]) => [k, lastReadWaits(v, acorn).filter((y) => !y.error).length]);
+  const sN = seen(NAMED), sX = seen(NOT);
+  ok(sN.every(([, n]) => n === 1), `CONTROLS: the shape, planted, is NAMED (${sN.map(([k, n]) => `${k}: ${n}`).join(' · ')})`);
+  ok(sX.every(([, n]) => n === 0), `CONTROLS: its cures and look-alikes are NOT named (${sX.map(([k, n]) => `${k}: ${n}`).join(' · ')})`);
+  console.log(`  (§2p read ${heavy.length} heavy suites in ${Date.now() - t0} ms)`);
+}
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }
