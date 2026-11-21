@@ -54,6 +54,9 @@
  *      hex with a digit and a letter, or of base64 / base64url with an upper, a lower and a digit and no lowercase word of
  *      4+ between its `/ _ - + =` (a path, a slug, an identifier keeps its words). Opt-in: a command's stored head
  *      keeps its commit shas and hashes (diagnosis); a text bound for a vendor's model loses them (nothing to diagnose)
+ *   R9 a URL's PASSWORD standing on its own (B-da2d — found 2026-11-20: R7 read a userinfo only inside a query value) —
+ *      `scheme://user:pw@host` anywhere in the text: ONLY the password goes (`scheme://user:«redacted»@host` — the
+ *      scheme, the user and the host stay); a bare `user@`, a port, an empty password are kept (the block above redactUserinfo)
  * THE NAME GRAMMAR (lane mask-value-shape r2, the owner 2026-11-07 — «URL被替换和redact了»: R7 masked gcloud's PUBLIC
  *   `token_usage=remote` because its name holds «token», and the sign-in link on his For-you card opened nothing). The
  *   belt NEVER judges a value's shape in order to KEEP it (r1's value floor kept `API_KEY=changeme`, `REDIS_AUTH=foobared`,
@@ -76,7 +79,7 @@
  * NAME is a label a person reads. The SHAPE rows are this table's own (R1, the JWT scan, R4 — one source) plus a 40 / 64-hex
  * digest standing alone and, on the name AS TYPED only (never a stored slug), a random RUN (20+, 3 classes, none of the six
  * readable shapes); a WORD row (R2, R3, R5, R6, R7 — this table's own heads) hides only the ONE token after its word, and only
- * a value (wordValue). See the rule's own block below
+ * a value (wordValue); R9 hides a URL's password whatever it is (a password by its place). See the rule's own block below
  * Every quantifier is bounded at the input bound and every run is consumed WHOLE (verify r2 F2: a cut inside a value kept
  * the value's tail past 4096 characters — a 6 KB bearer, an RSA-4096 `client-key-data`); no pass throws (a text that
  * cannot be judged is returned unchanged — never a stall, never a crash, and the caller's belt still runs).
@@ -521,22 +524,50 @@ const DESCRIPTOR_HEADS = new Set(['usage', 'type', 'ttl', 'sock', 'policy', 'sca
 // r5 (M2 + M3): a userinfo HOLDS a secret only when it carries a PASSWORD — `scheme://user:pw@`, `scheme://:pw@`, and an EMPTY one
 // `scheme://key:@` (HTTP Basic's API-key form, curl's `-u key:` — the key is the user) — and it is looked for ANYWHERE in the decoded value
 // (a redirect nests one: `?next=https://a/b?r=https://u:pw@h`); a bare `user@` (`ssh://git@github.com`, `https://alice@social.example`) is
-// an identity and public. One forward read: each `://` found once, its authority walked to its first `/ ? # @` or blank (≤ 1 024 — r4's
+// an identity and public. One forward read: each `://` found once, its authority walked to its first `/ ? #` or blank (≤ 1 024 — r4's
 // bound, scheme 32 + userinfo 512 + slack); an authority never runs past the next `://` (its `/` ends it), so no character is read twice
 const SCHEME_CH = (c) => (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c === 43 || c === 45 || c === 46;
+// B-da2d: THE AUTHORITY WALK — ONE for both readers (passwordUserinfo in a decoded query value, R9 over a whole text): from the first
+// character after a scheme's `://` to its first `/ ? #` or blank (≤ 1 024); `quotes` (R9 — a free text): a `" ' < >` or a backtick ends
+// it too (`{"a":"https://x","b":"m@y"}`: the next string holds no userinfo). → [colon, at] when the authority carries a PASSWORD: its
+// LAST `@` (WHATWG's reading — a raw `@` inside a password is the password's) with its FIRST `:` before it; else null (a bare `user@`,
+// a port after the host: `user@host:8443`)
+const QUOTE_END = new Set([34, 39, 60, 62, 96]);
+function authorityAt(d, from, quotes) {
+  let at = -1, colon = -1;
+  for (let j = from, end = Math.min(d.length, from + 1024); j < end; j++) {
+    const c = d.charCodeAt(j);
+    if (c === 47 || c === 63 || c === 35 || isBlankCode(c) || (quotes && QUOTE_END.has(c))) break;   // the authority ended
+    if (c === 64) at = j; else if (c === 58 && colon < 0) colon = j;
+  }
+  return colon >= 0 && colon < at ? [colon, at] : null;
+}
 function passwordUserinfo(d) {
   for (let from = 0, i; (i = d.indexOf('://', from)) >= 0;) {
     from = i + 3;
     if (i === 0 || !SCHEME_CH(d.charCodeAt(i - 1))) continue;                      // no scheme before it
-    let colon = false;
-    for (let j = from, end = Math.min(d.length, from + 1024); j < end; j++) {
-      const c = d.charCodeAt(j);
-      if (c === 64) { if (colon) return true; break; }                            // `@`: a password before it ⇒ a credential
-      if (c === 47 || c === 63 || c === 35 || isBlankCode(c)) break;               // `/ ? #` or a blank: the authority ended, no userinfo
-      if (c === 58) colon = true;
-    }
+    if (authorityAt(d, from, false)) return true;                                  // a password (an empty one too) ⇒ a credential
   }
   return false;
+}
+// R9 (B-da2d — row B-a3fe's remainder): a URL's PASSWORD standing on its own — a message, an output head, a job's name, not only
+// inside a query value (R7): ONLY the password goes (`scheme://user:«redacted»@host`: a reader still sees which host and
+// which user), after a scheme and `://` only. Kept: a bare `user@` (an ssh / scp address, a mail address, a git remote), a port, an
+// EMPTY password (`key:@` hides nothing here — inside a query value R7 still masks the whole value), a password a row before already
+// masked (`glpat-«redacted»`). A percent-encoded password is one, read as written (`p%40ss`). One forward read: the walk above
+function redactUserinfo(text, onMask) {
+  if (text.indexOf('@') < 0) return text;
+  let out = '', last = 0;
+  for (let from = 0, i; (i = text.indexOf('://', from)) >= 0;) {
+    from = i + 3;
+    if (i === 0 || !SCHEME_CH(text.charCodeAt(i - 1))) continue;
+    const a = authorityAt(text, from, true);
+    if (!a || a[0] + 1 === a[1] || text.slice(a[0] + 1, a[1]).includes(REDACTED)) continue;   // none, an empty one, one masked before
+    let s = i; while (s > i - 32 && s > 0 && SCHEME_CH(text.charCodeAt(s - 1))) s--;
+    onMask(text.slice(s, a[0] + 1));                                                // what was masked: `https://deploy:`
+    out += text.slice(last, a[0] + 1) + REDACTED; last = from = a[1];
+  }
+  return last ? out + text.slice(last) : text;
 }
 /** Percent-decoded ONCE, tolerant: a malformed escape keeps its bytes, an ASCII one still decodes (a nested `?token=` is never hidden
  *  behind one broken `%`). Linear. */
@@ -688,6 +719,7 @@ function redactSecrets(raw, { runs = false, message = false, said = null, mentio
     text = text.replace(WORD_NEXT_RE, (m, w, sp) => { const tok = m.slice(w.length + sp.length), ml = mset && mentionLead(tok, mset); if (ml === tok) return m; n++; if (say) say(w); return `${w}${sp}${ml || REDACTED}`; });   // cure 2 (MUST 1): a MEMBER's @ is spared (the caller's set, a message only)
     text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });
     text = redactQuery(text, (head) => { n++; if (say) say(head); });   // R7 — lane mask-value-shape r3: ONE linear walk (THE NAME GRAMMAR; a public name's value walked on)
+    text = redactUserinfo(text, (head) => { n++; if (say) say(head); });   // R9 (B-da2d): a URL's password standing on its own — only it goes
     if (runs) text = text.replace(RUN_RE, (m) => { if (!keyMaterial(m)) return m; n++; if (say) say('a key-material run'); return REDACTED; });
   } catch { if (message) return redactSecrets(raw, { runs, said });   /* the cure r5: a message mode that fails is the line rule, never a partial text */ /* a text that cannot be judged is returned as far as it got — the caller's belt still runs */ }
   return { text, redacted: n };
@@ -895,6 +927,7 @@ function redactByValue(raw, { typed = false } = {}) {
     row(nameWord(text, WORD_NEXT_NAME_RE, (m) => m.index + m[1].length + m[2].length));   // r10: the name's own blank run (up to 16, a no-break space too)
     row(nameWord(text, WORD_RUN_NAME_RE, (m) => m.index + m[1].length + m[2].length));
     row(nameQuery(text));   // r10 (B-a3fe, on 2.369.413): R7 at a name — the release's linear walk and its name grammar
+    text = redactUserinfo(text, () => { n++; });   // R9 (B-da2d): a URL's password, whatever it is — only it goes (the output belt's own row, after R7 as there)
     // (a) the run row — the name as typed, never a slug
     if (typed) text = text.replace(NAME_RUN_RE, (m) => { const g = versionGlued(m); if (g !== null) { n++; return g; } if (!randomRun(m)) return m; n++; const core = coreOf(m), at = m.indexOf(core); return m.slice(0, at) + REDACTED + m.slice(at + core.length); });   // r10: the punctuation around a hidden run stays
   } catch {

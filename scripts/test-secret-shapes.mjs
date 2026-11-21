@@ -173,7 +173,9 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
     // the release's own query walk with its name grammar (nameQuery over QUERY_HEAD_RE, holderName)
     WORD_NEXT_RE: /\bWORD_NEXT_NAME_RE = NAME_BLANKS\(WORD_NEXT_RE\)/.test(ssrc) && bV.includes('nameWord(text, WORD_NEXT_NAME_RE,') ? bV : '',
     WORD_RUN_RE: /\bWORD_RUN_NAME_RE = NAME_BLANKS\(WORD_RUN_RE\)/.test(ssrc) && bV.includes('nameWord(text, WORD_RUN_NAME_RE,') ? bV : '',
-    redactQuery: bV.includes('row(nameQuery(text))') && body('nameQuery').includes('QUERY_HEAD_RE') && body('nameQuery').includes('holderName(m[2])') ? bV : '' };
+    redactQuery: bV.includes('row(nameQuery(text))') && body('nameQuery').includes('QUERY_HEAD_RE') && body('nameQuery').includes('holderName(m[2])') ? bV : '',
+    // B-da2d: R9 is the very same call at a name (a password by its place — no word test)
+    redactUserinfo: bS.includes('text = redactUserinfo(text, (head) =>') && bV.includes('text = redactUserinfo(text, () =>') ? bV : '' };
   const sRows = [...new Set([...bS.matchAll(/\b(redact[A-Z]\w*|[A-Z][A-Z_]*_RE)\b/g)].map((m) => m[1]))].filter((k) => k !== 'redactSecrets');
   const MAPPED = new Set(['redactKv', 'redactContinuations', 'RUN_RE', 'WORD_NEXT_RE', 'WORD_RUN_RE', 'HTTP_RE', 'redactQuery']);   // answered by the name's own row
   const unanswered = sRows.filter((k) => !(k in ANSWER) || !ANSWER[k] || (!MAPPED.has(k) && !bV.includes(k)));
@@ -882,6 +884,81 @@ console.log('lane bl-msg B-be02: a secret NAME=value INSIDE a prose line — the
   ok(SRC.split(GIVE).length === 2, 'the control finds its line (the give-back)');
   const noBack = mutantCopies('blmbe', REPO).load('src/secret-shapes.js', SRC.replace(GIVE, ''), 'no-give-back');
   ok(leaks(judge(noBack, {})).length >= 3 && leaks(judge(noBack, { message: true })).length >= 3, `RED CONTROL (the head keeps its trailing blank): the prose lines leak again (${leaks(judge(noBack, {})).length}/${PROSE.length}) — the legs above go red`);
+}
+
+// ── B-da2d (lane paced-wake-retry — row B-a3fe's remainder, found by lane lg-recovery on 2026-11-20): R9, A URL'S PASSWORD STANDING
+// ON ITS OWN. The release read a userinfo only inside a query value (R7 hidesHolder): `https://deploy:<pw>@git.example/x` in a
+// message, a job's output head or a job's name was kept in plain. THE LAWS (the coordinator's ruling, 2026-11-21): only the password
+// goes — the scheme, the user and the host stay; only after a scheme and `://`; a bare user (ssh / scp / a mail address / a git
+// remote) is kept; a port is no password; a percent-encoded one still is; an empty one hides nothing; the mark is the belts' own;
+// OVER-MASKING IS A DEFECT — each shape that must stay is a leg, beside the six that must go and the red control (the release's rows)
+console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes (a message, an output head, a job\'s name); every kept shape kept');
+{
+  const SS = r('src/secret-shapes.js'), J = JSON.stringify, M = r('src/job-model.js');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const FY = await import(path.join(REPO, 'src/lib/foryou-links.js'));
+  const DM = r('src/decision-model.js');
+  const SRC = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
+  // values built at run time (secret-scan safe)
+  const pw = ['Hx7', 'q2', 'Lm9', 'z'].join(''), pe = ['p', '%40', 'ss', '%21', 'Q9'].join(''), pa = ['pa', '@', 'ss', 'W0rd'].join('');
+  // THE SIX THAT MUST GO — [what, the text, what every reader gets back]
+  const GO = [
+    ['a git remote over https', 'git push https://deploy:' + pw + '@git.example/org/repo.git main', 'git push https://deploy:' + REDACTED + '@git.example/org/repo.git main', [pw]],
+    ['a connection string, a port after its host', 'DATABASE_URL=postgres://app:' + pw + '@db.internal:5432/main', 'DATABASE_URL=postgres://app:' + REDACTED + '@db.internal:5432/main', [pw]],
+    ['a password with no user', 'redis://:' + pw + '@cache.internal:6379/0', 'redis://:' + REDACTED + '@cache.internal:6379/0', [pw]],
+    ['a percent-encoded password', 'curl https://ops:' + pe + '@api.example/v1', 'curl https://ops:' + REDACTED + '@api.example/v1', [pe, 'ss%21']],
+    ['a raw @ inside the password (the LAST @ ends the userinfo)', 'amqp://worker:' + pa + '@mq.example:5672', 'amqp://worker:' + REDACTED + '@mq.example:5672', [pa, 'ssW0rd']],
+    ['in prose, in parentheses and in a markdown link (an upper-case scheme)', 'see (https://ci:' + pw + '@build.example) and [x](HTTPS://ci:' + pw + '@build.example/a)', 'see (https://ci:' + REDACTED + '@build.example) and [x](HTTPS://ci:' + REDACTED + '@build.example/a)', [pw]],
+  ];
+  // THE SHAPES THAT MUST STAY, byte for byte (over-masking is a defect)
+  const KEEP = [
+    ['an ssh remote (a bare user)', 'git clone ssh://git@github.com/org/repo.git'], ['an scp remote (no scheme)', 'git remote add origin git@github.com:org/repo.git'],
+    ['an scp copy (a colon after the host)', 'scp ./a.txt ops@backup.example:/srv/a.txt'], ['a mail address', 'write to ops@example.com or mailto:ops@example.com'],
+    ['a port after the host', 'curl https://example.com:8443/health'], ['a user, a port and an @ in the path', 'open https://ops@social.example:443/@ops'],
+    ['an EMPTY password (hides nothing)', 'curl https://ci:@api.example/v1'], ['a bare user over ftp', 'ftp://anonymous@ftp.example.org/pub'],
+    ['an IPv6 host (colons, no userinfo)', 'curl http://[2001:db8::5]:8080/x'],
+    ['a JSON with no blanks (a quote ends the authority)', '{"url":"https://x.example","mail":"ops@y.example"}'],
+  ];
+  const roads = (S, t) => ({ head: S.redactSecrets(t).text, message: S.redactSecrets(t, { message: true }).text, name: S.redactByValue(t, { typed: true }).text, stored: S.redactByValue(t).text });
+  const goBad = GO.filter(([, t, want]) => { const o = roads(SS, t); return o.head !== want || o.message !== want || o.name !== want || o.stored !== want || belt.maskForSink(t, { message: true }) !== want || belt.maskForSink(t, { byValue: true, typed: true }) !== want || SS.redactSecrets(want).text !== want; });
+  for (const [what, t, want] of GO) console.log(`      ${J(t).slice(0, 70).padEnd(72)} → ${roads(SS, t).head === want ? 'only the password masked' : J(roads(SS, t))}   (${what})`);
+  ok(!goBad.length, `R9 THE SIX: a URL's password standing on its own — ONLY it goes, the scheme, the user and the host stay — through the output belt (an output head), the message mode, maskForSink (a message and a job's name), the name rule (typed and stored); idempotent${goBad.length ? ' — wrong: ' + goBad.map(([w, t]) => w + ' ' + J(roads(SS, t))).join(' · ') : ''}`);
+  const vendor = GO.filter(([, t, , frags]) => frags.some((f) => DM.scrub(t, 2000).includes(f)));
+  ok(!vendor.length, 'R9: the vendor scrub (a text bound for a vendor\'s model, R8 on) keeps no piece of the six passwords', vendor.map(([w]) => w));
+  const keepBad = KEEP.filter(([, t]) => { const o = roads(SS, t); return o.head !== t || o.message !== t || o.name !== t || o.stored !== t || belt.maskForSink(t, { message: true }) !== t || DM.scrub(t, 2000) !== t || FY.maskedNoteOf(belt.maskForSink(t, { message: true })) !== ''; });
+  ok(!keepBad.length, `R9 KEPT: ${KEEP.length} shapes byte-identical through every road (an output head, a message, a job's name typed and stored, the vendor scrub) and drawn as links with no note — ${KEEP.map(([w]) => w).join(' · ')}${keepBad.length ? ' — MOVED: ' + keepBad.map(([w, t]) => w + ' ' + J(roads(SS, t))).join(' · ') : ''}`);
+  // a job's NAME end to end (resolveName → the name rule → the slug): the user and the host stay readable in it
+  const NAME = 'deploy https://ci:' + pw + '@git.example/x', WANT_NAME = 'deploy-https-ci-' + REDACTED + '-git.example-x';
+  ok(M.resolveName(NAME, new Set()).name === WANT_NAME && M.resolveName('clone ssh://git@github.com/o/r', new Set()).name === 'clone-ssh-git-github.com-o-r', 'R9 a job\'s NAME: «' + NAME.replace(pw, '<password>') + '» is stored as ' + WANT_NAME + ' (the user and the host stay); an ssh remote\'s name keeps its user', M.resolveName(NAME, new Set()).name);
+  // the sender is told what was masked (the head as written), each mask counted once; a query value is still R7's (masked whole, once)
+  const said = []; SS.redactSecrets(GO[0][1], { message: true, said });
+  ok(said.includes('https://deploy:') && SS.redactSecrets(GO[0][1]).redacted === 1 && SS.redactSecrets(GO[5][1]).redacted === 2 && SS.redactSecrets('https://x.example/a?next=https://u:' + pw + '@db/x').text === 'https://x.example/a?next=' + REDACTED && SS.redactSecrets('https://x.example/a?next=https://u:' + pw + '@db/x').redacted === 1 && SS.redactSecrets('git push https://ci:ghp_' + 'A1b2'.repeat(9) + '@github.com/o/r').text === 'git push https://ci:ghp_' + REDACTED + '@github.com/o/r',
+    'R9: the sender is told «https://deploy:» (what was masked); one mask per password; inside a query value R7 still masks the whole value ONCE; a family token in the password keeps its head (R4 masked it first — R9 never masks a mask)', said);
+  // a masked URL is drawn as WORDS with a note in the For-you card (lane mask-value-shape law 2 — never a link that looks whole)
+  ok(FY.maskedNoteOf(belt.maskForSink(GO[0][1], { message: true })) !== '' && SS.maskedLink(GO[0][2]) && SS.maskedLink(GO[0][2]).shape === true, 'R9: a URL whose password was masked is a MASKED LINK — the For-you card draws it as words with its note');
+  // bounded and linear BY COUNT: the authority walk's steps, counted in an instrumented copy (never clocked)
+  const STEP_AT = "    const c = d.charCodeAt(j);\n    if (c === 47 || c === 63 || c === 35 || isBlankCode(c) || (quotes && QUOTE_END.has(c))) break;   // the authority ended\n";
+  const MS = mutantCopies('da2d-steps', REPO).load('src/secret-shapes.js', anchored(SRC, STEP_AT, '    globalThis.__r9Steps++;\n' + STEP_AT, 'R9 the walk counted'), 'steps');
+  // each storm holds an `@` (no `@`, no walk); the walks of one text never overlap (each ends at the `/` of the next `://`)
+  const HOSTILE = ['x://' + 'a:@'.repeat(21000), 'a://b'.repeat(13000) + '@', ('h://u:p@' + 'x'.repeat(1100) + ' ').repeat(55), 'h://' + ':'.repeat(30000) + '@'.repeat(30000), ('a://' + 'b'.repeat(1020) + '/').repeat(60) + '@', ('see https://u:' + pw + '@h.example/x ').repeat(1800)];
+  const ROADS = [['the output belt', (t) => MS.redactSecrets(t)], ['the message mode', (t) => MS.redactSecrets(t, { message: true })], ['the name rule', (t) => MS.redactByValue(t, { typed: true })]];
+  const steps = HOSTILE.flatMap((t) => ROADS.map(([road, f]) => { globalThis.__r9Steps = 0; f(t); return { road, len: Math.min(t.length, INPUT_MAX), n: globalThis.__r9Steps }; }));
+  ok(steps.every((x) => x.n <= x.len) && steps.every((x) => x.n > 1000), `R9 LINEAR BY COUNT (${HOSTILE.length} storms × ${ROADS.length} roads): ${steps.filter((x, i) => i % ROADS.length === 0).map((x) => `${x.n} steps / ${x.len} chars`).join(' · ')} — every road's walk ≤ the text's length, each walk seen`);
+  // the walk's bound (r4's, ≤ 1 024 characters of authority): a 1 000-character password is masked whole
+  const LONG = 'https://u:' + pw.repeat(111) + '@h.example/x';
+  ok(SS.redactSecrets(LONG).text === 'https://u:' + REDACTED + '@h.example/x' && SS.redactByValue(LONG, { typed: true }).text === 'https://u:' + REDACTED + '@h.example/x', 'R9: a password of ' + pw.length * 111 + ' characters (inside the walk\'s 1 024 bound) is masked whole on both roads');
+  // THE RED CONTROLS, each RED by name
+  const R9S = "    text = redactUserinfo(text, (head) => { n++; if (say) say(head); });   // R9 (B-da2d): a URL's password standing on its own — only it goes\n";
+  const R9V = "    text = redactUserinfo(text, () => { n++; });   // R9 (B-da2d): a URL's password, whatever it is — only it goes (the output belt's own row, after R7 as there)\n";
+  const REL = mutantCopies('da2d-release', REPO).load('src/secret-shapes.js', anchored(anchored(SRC, R9S, '', 'R9 in the output belt'), R9V, '', 'R9 in the name rule'), 'release');
+  const relLeak = GO.filter(([, t, , frags]) => { const o = roads(REL, t); return frags.some((f) => o.head.includes(f) && o.message.includes(f) && o.name.includes(f)); });
+  const relName = M.resolveName(NAME, new Set(), { mask: (t) => REL.redactByValue(t, { typed: true }).text }).name;
+  ok(relLeak.length === GO.length && relName.includes(pw), `RED CONTROL — THE RELEASE'S ROWS (no R9): all ${relLeak.length}/${GO.length} passwords kept in plain on every road; the job's name stored as ${relName.replace(pw, '<the password>')} — the legs above go red`);
+  const NOQ = mutantCopies('da2d-noquote', REPO).load('src/secret-shapes.js', anchored(SRC, '    const a = authorityAt(text, from, true);', '    const a = authorityAt(text, from, false);', 'R9 no quote ends'), 'noquote');
+  const jsonKeep = KEEP.find(([w]) => w.startsWith('a JSON'))[1];
+  ok(NOQ.redactSecrets(jsonKeep).text !== jsonKeep, 'RED CONTROL — NO QUOTE ENDS THE AUTHORITY: the compact JSON\'s mail address is over-masked (' + J(NOQ.redactSecrets(jsonKeep).text) + ') — the KEPT leg goes red');
+  const FIRST = mutantCopies('da2d-firstat', REPO).load('src/secret-shapes.js', anchored(SRC, '    if (c === 64) at = j; else', '    if (c === 64) { if (at < 0) at = j; } else', 'R9 the first @'), 'firstat');
+  ok(FIRST.redactSecrets(GO[4][1]).text.includes('ssW0rd'), 'RED CONTROL — THE FIRST @ ENDS THE USERINFO: the tail of a password holding a raw @ is kept (' + J(FIRST.redactSecrets(GO[4][1]).text) + ') — the six go red');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

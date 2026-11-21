@@ -143,7 +143,11 @@ separate setting — not audience 1's auto-notify:
   shape: a `KEY=`, `--key=`, `KEY:=` or `KEY:` with no blank whose name
   says secret, and a query parameter like `?token=`; after `bearer` the
   next six characters or more are hidden, after `basic` sixteen or
-  more (the header forms). A name typed as one long run of mixed
+  more (the header forms). A password written into a URL is hidden
+  whatever it is, and only the password: the scheme, the user and the
+  host stay (`get ftp://ops:pw@files.example` is stored
+  `get-ftp-ops-«redacted»-files.example`); a bare user
+  (`ssh://git@github.com`, a mail address) stays. A name typed as one long run of mixed
   case and digits with no plain word in it
   (`TestHandlerReturns404WhenMissing`) is hidden whole — use spaces. A secret goes in the vault
   (`vibespace-vault`), never in a name.
