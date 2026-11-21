@@ -17,8 +17,8 @@ A question about people, mail, deals, chats or what someone said: search
 here FIRST — `vibespace-channels search "<words>"` covers every conversation
 you can see (mail, chats, threads), `list` names them, `read <conv>` reads
 one — before any other connector, a shared folder or another session's
-transcript. Never read the store under data/channels/ (index.json, msgs/) as
-files: that read has no card, no read marker and no budget record, and it
+transcript. Never read the store under data/channels/ (index.json, its journal
+index-acts.ndjson, msgs/) as files: that read has no card, no read marker and no budget record, and it
 skips the reach the user set. When `list` shows only rows marked
 `requestable` (or `list --all` shows titles), ask with `request <conv> "why"`.
 

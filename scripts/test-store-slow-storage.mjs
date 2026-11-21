@@ -50,6 +50,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, vncEnv, endRootedProcesses } from './scratch.mjs';
 const require = createRequire(import.meta.url);
+const ixFamily = (chDir) => require(path.join(path.resolve(new URL('..', import.meta.url).pathname), 'src/channel-store.js')).readIndexFamily(chDir);   // B-360d unit 1 (law 8): the channels index ON DISK = index.json + its journal, read by the store's one reader
 const { WebSocket } = require('ws');
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const argv = process.argv.slice(2);
@@ -329,7 +330,7 @@ if (r5) {
     const sigAt = Date.now();
     const stopMs = await stopHub(r5.h, 'SIGTERM', 30000);
     const log = fs.readFileSync(r5.h.logf, 'utf8'); const line = (log.match(/\[store-write\] exit: \d+ stores? written[^\n]*/) || [''])[0];
-    let row = null; try { row = JSON.parse(fs.readFileSync(path.join(r5.h.wtB, 'data/channels/index.json'), 'utf8')).conversations[`agents/${id}`]; } catch (e) { row = { error: e.message }; }
+    let row = null; try { row = ixFamily(path.join(r5.h.wtB, 'data/channels')).conversations[`agents/${id}`]; } catch (e) { row = { error: e.message }; }
     const flushMs = +((/written in (\d+) ms/.exec(line) || [])[1] || NaN);
     table.runs.tree500.sigterm = { stopMs, line, readAtOnDisk: row && row.readAt, want: at }; save();
     info(`(c) SIGTERM ${c1 === 200 ? 'right after a mark + a usage walk' : '(the mark answered ' + c1 + ')'}: the hub exited in ${stopMs} ms; ${line || '(no exit line)'}`);
@@ -391,7 +392,7 @@ if (!OTHER && leg('g')) {
       await req('GET', '/api/usage-stats');
       const stopMs = await stopHub(h, 'SIGTERM', 60000);
       const log = fs.readFileSync(h.logf, 'utf8'); const line = (log.match(/\[store-write\] exit: \d+ stores? written[^\n]*/) || [''])[0], keeperSaid = (log.match(/\[store-write\] exit: [\d.]+ s after the stop signal[^\n]*/) || [''])[0];
-      let row = null; try { row = JSON.parse(fs.readFileSync(path.join(h.wtB, 'data/channels/index.json'), 'utf8')).conversations[`agents/${id}`]; } catch (e) { row = { error: e.message }; }
+      let row = null; try { row = ixFamily(path.join(h.wtB, 'data/channels')).conversations[`agents/${id}`]; } catch (e) { row = { error: e.message }; }
       const written = +((/exit: (\d+) stores? written/.exec(line) || [])[1] || 0), flushMs = +((/written in (\d+) ms/.exec(line) || [])[1] || 0);
       const left = /NOT written[^:]*: (.*?) — their last changes/.exec(line);
       const r = { delayMs, grace: label2, graceMs: bnd.graceMs, mark: c1, stopMs, written, flushMs, left: left ? left[1] : null, markOnDisk: !!(row && row.readAt === at), keeperSaid: keeperSaid || null };
@@ -456,7 +457,7 @@ if (!OTHER && leg('i')) {
     const crashMs = gone ? gone - tC : null; endHub(); await sleep(300);
     const log = fs.readFileSync(h.logf, 'utf8'); const line = (log.match(/\[store-write\] exit after the crash: \d+ stores? written[^\n]*/) || [''])[0];
     const acts = (() => { try { return fs.readFileSync(path.join(h.wtB, 'data/channels/index-acts.ndjson'), 'utf8'); } catch { return ''; } })();
-    let row = null; try { row = JSON.parse(fs.readFileSync(path.join(h.wtB, 'data/channels/index.json'), 'utf8')).conversations[`agents/${id}`]; } catch { }
+    let row = null; try { row = ixFamily(path.join(h.wtB, 'data/channels')).conversations[`agents/${id}`]; } catch { }
     const onDisk = acts.includes(`"readAt":${at}`) || !!(row && row.readAt === at);
     const m = /written in (\d+) ms \(([^)]*)\)(?:; the first (\d+) before the crash road's own unmoved stores \(census debt\), which took (\d+) ms)?/.exec(line) || [];
     const first = m[3] ? +m[3] : 0, debtMs = m[4] ? +m[4] : null, names = (m[2] || '').split(', ');

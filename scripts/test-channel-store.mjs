@@ -1309,7 +1309,7 @@ console.log('\n⑬ the incremental index write (B-f32b verify r1): an async upda
   ok(head.born, '⑬ a row born outside entry() reaches the disk within one sweep cycle (the cycle end counts the map against the cached chunks)');
   ok(head.reborn && head.early, `⑬ the incremental file = the whole-file bytes when a row is removed + re-born (${head.reborn}) and when a row is touched before its birth (${head.early})`);
   const DONE = "const done = () => { curTouch = null; if (t.all) { touchAll('update reached the whole map'); } else for (const k of t) { dirtyKeys.add(k); fire(k); } };";
-  const CYCLE = /\n    \/\/ verify r1: a row BORN outside `entry\(\)`[^\n]*\n    if \(!drift && sweepAt[^\n]*\n[^\n]*\n[^\n]*\n    \}/;
+  const CYCLE = /\n    \/\/ verify r1: a row BORN outside `entry\(\)`[^\n]*\n    const bornOutside = [^\n]*\n    if \(bornOutside !== undefined\) \{[^\n]*\n[^\n]*\n[^\n]*\n    \}/;   // B-360d unit 1: the check found beside the rows owed to the next write
   const REBORN = /\n      if \(layout && layout\.chunkOf\.has\(key\)\) touchAll\([^\n]*/;
   const TOUCH = /  function touch\(key\) \{[^\n]*/;
   ok(src.includes(DONE) && CYCLE.test(src) && REBORN.test(src) && TOUCH.test(src), '⑬ fixture: the three rules are where the controls cut them');

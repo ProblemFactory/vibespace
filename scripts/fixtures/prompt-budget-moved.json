@@ -184,7 +184,7 @@
   {
    "from": "section",
    "topic": "channels",
-   "text": "Never read the store under data/channels/ (index.json, msgs/) as files: that read has no card, no read marker and no budget record, and it skips the reach the user set."
+   "text": "Never read the store under data/channels/ (index.json, its journal index-acts.ndjson, msgs/) as files: that read has no card, no read marker and no budget record, and it skips the reach the user set."
   },
   {
    "from": "section",

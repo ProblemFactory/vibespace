@@ -50,7 +50,7 @@ const BASE_SRC = (() => {
   back('fs.mkdirSync(msgsDir, { recursive: true, mode: 0o700 });', 'fs.mkdirSync(msgsDir, { recursive: true });', 1);   // stale-pins: kept (the base's line, restored by the red control)
   back('fs.mkdirSync(archiveDir, { recursive: true, mode: 0o700 });', 'fs.mkdirSync(archiveDir, { recursive: true });', 1);   // stale-pins: kept (the base's line, restored by the red control)
   back('fs.mkdirSync(path.dirname(fp), { recursive: true, mode: 0o700 });', 'fs.mkdirSync(path.dirname(fp), { recursive: true });', 3);   // stale-pins: kept (the base's line, restored by the red control)
-  back('debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, ', 'debounceMs: FLUSH_DEBOUNCE_MS, ', 4);   // stale-pins: kept (the base's line, restored by the red control)
+  back('debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, ', 'debounceMs: FLUSH_DEBOUNCE_MS, ', 5);   // stale-pins: kept (the base's line, restored by the red control) — B-360d unit 1: +1, durableIndex's journal write
   back("fs.openSync(fp, 'a+', 0o600);", "fs.openSync(fp, 'a+');", 1);   // stale-pins: kept (the base's line, restored by the red control)
   const i = s.indexOf('  const rootClosed = fs.promises.stat(dir)'); if (i < 0) throw new Error('control anchor: the root close');
   const j = s.indexOf('return false; });', i); if (j < 0) throw new Error('control anchor: the root close\'s end');

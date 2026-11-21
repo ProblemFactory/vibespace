@@ -764,7 +764,9 @@ const VENDOR_BYPASS = [
   { vendor: 'microsoft', word: 'Microsoft 365', why: 'host', re: /\bgraph\.microsoft\.com\b/i, sample: 'curl https://graph.microsoft.com/v1.0/me/messages' },
   // lane channels-teach (a fleet user's incident 2026-10-18: python over data/channels/index.json and msgs/): VibeSpace's
   // OWN channel store read as files is the same bypass — no card, no read marker, no reach asked
-  { vendor: 'vibespace', word: 'VibeSpace data/channels', why: 'store', re: /\bdata\/channels\/(?:index\.json|msgs\/)/, sample: "python3 - <<'EOF'\nimport json\nidx = json.load(open('/home/u/vibespace/data/channels/index.json'))\nEOF" },
+  // B-360d unit 1 (law 9): the WHOLE index family — index.json and its journal index-acts.ndjson (whole rows with their last
+  // message, every change since the last whole write) — and any later index* file
+  { vendor: 'vibespace', word: 'VibeSpace data/channels', why: 'store', re: /\bdata\/channels\/(?:index[\w.-]*|msgs\/)/, sample: "python3 - <<'EOF'\nimport json\nidx = json.load(open('/home/u/vibespace/data/channels/index.json'))\nEOF" },
 ];
 /** A shell line → null | {vendor, word, why}: the first table row whose signature the text carries. */
 function vendorBypassOf(command) {

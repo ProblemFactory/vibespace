@@ -202,7 +202,7 @@ console.log('(k) the two ORDER laws of test-channel-store ⑭ on the writer\'s t
       const st = m.exports.createChannelStore({ dir: ${JSON.stringify(dir)}, log: { log() {}, info() {}, warn() {}, error() {} } });
       let jl = 0; try { jl = fs.readFileSync(st.stamps.log, 'utf8').split('\\n').filter(Boolean).length; } catch { }
       await st.index.update(() => { st.index.entry('a', 'l1').title = 'changed'; });
-      const landed = await st.index.durable();
+      const landed = await st.index.fold();   // B-360d unit 1: a change rides the journal — the FOLD is the writer's whole write of the index
       process.stdout.write(JSON.stringify({ jl, landed, side: fs.existsSync(st.stamps.file) }) + '\\n');
       process.kill(process.pid, 'SIGKILL');
     })()`;

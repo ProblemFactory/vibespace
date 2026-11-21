@@ -507,6 +507,8 @@ console.log('⑭ r6 — what you approve is what runs (F4 inert tails · F5 ever
     ok(!!got && got.vendor === r.vendor && got.why === r.why && got.word === r.word && /^[A-Z]/.test(r.word), `${r.vendor}/${r.why}: its sample is named (${r.word})`, got);
     ok(!T.filter((x) => x !== r).some((x) => x.re.test(r.sample)), `${r.vendor}/${r.why} RED CONTROL: the table without this row misses its sample — the row is load-bearing`);
   }
+  // B-360d unit 1 (law 9): the index's JOURNAL is the store too — a read of it is named on the same card
+  { const j = R.vendorBypassOf('tail -n 5 /home/u/vibespace/data/channels/index-acts.ndjson'); ok(!!j && j.vendor === 'vibespace' && j.why === 'store', 'B-360d law 9: a read of data/channels/index-acts.ndjson (the index\'s journal) is the store card', j); }
   // the owner's measured shape: a heredoc whose BODY carries the SDK (the head is plain python3)
   const owner = "cd /tmp && python3 - <<'EOF'\nimport sys; sys.path.insert(0, '/home/u/bin')\nfrom larkhelp import call, children, text_of\nfor m in children('oc_e53d'): print(text_of(m))\nEOF";
   ok(eq(R.vendorBypassOf(owner), { vendor: 'lark', word: 'Lark', why: 'sdk' }), 'HEREDOC: the owner\'s `python3 - <<EOF … from larkhelp import …` is a Lark read (the body counts)');

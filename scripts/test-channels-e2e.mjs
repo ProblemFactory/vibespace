@@ -62,6 +62,7 @@ import { frontState, becameFront, frontShot, bringTab } from './cdp-front-shot.m
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
+const ixFamily = (chDir) => require(path.join(path.resolve(new URL('..', import.meta.url).pathname), 'src/channel-store.js')).readIndexFamily(chDir);   // B-360d unit 1 (law 8): the channels index ON DISK = index.json + its journal, read by the store's one reader
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -98,7 +99,7 @@ const onDisk = async (read, holds, boundMs) => {
 };
 /** item 8 (store-writer follow-up): the words a miss adds to its assert — the fact and the bound it ran out ('' once it landed) */
 const late = (w, what) => (w.ok ? '' : ` — ${what} not on disk within ${Math.round(w.ms / 1000)} s`);
-const readIndex = () => JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8'));
+const readIndex = () => ixFamily(path.join(wt, 'data/channels'));
 /** item 8 (store-writer follow-up): ONE row of index.json as it is on disk now (null: no row, or no readable file yet) */
 const indexRow = (key) => { try { return readIndex().conversations[key] || null; } catch { return null; } };
 /** item 8 (store-writer follow-up): the conversation windows the next boot RESTORES from layouts.json, by convId — the first
@@ -286,7 +287,7 @@ ok(opsRow && /^within /.test(opsRow.chip), 'a poll-lane row says how long its ev
 
 // ── ⑤ two simultaneous passes each advance their own cursor (real routes) ──
 {
-  const before = JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8'));
+  const before = ixFamily(path.join(wt, 'data/channels'));
   // two simultaneous REFRESHES (2026-09-26: the owner's "Refresh now"; there is no track step)
   await Promise.all([
     fetch(`http://127.0.0.1:${PORT}/api/channels/fake-push/fake-push-ops/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
@@ -348,7 +349,7 @@ ok(synced.ok, `EXIT ④(b): a change on ONE client repaints the OTHER from the b
 // sentAs / identityMarking on every line. Then the other decision: reject
 // with a reason, and the pointer goes with it.
 const readTodos = async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/user-todos`)).json()).todos || { open: [], resolved: [] };
-const readRow = () => JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8')).conversations['fake-poll/fake-poll-ops'];
+const readRow = () => ixFamily(path.join(wt, 'data/channels')).conversations['fake-poll/fake-poll-ops'];
 // item 8 (store-writer follow-up): the index reaches the disk at the store writer's pace (500 ms after its first unwritten
 // change, at this size); wait for the write, bounded — `{ok, row, ms}`, and a miss names its bound (late())
 const waitRow = async (pred) => { const w = await onDisk(readRow, (r) => !!r && !r.unreadable && pred(r), INDEX_BOUND_MS); return { ...w, row: w.v && !w.v.unreadable ? w.v : null }; };

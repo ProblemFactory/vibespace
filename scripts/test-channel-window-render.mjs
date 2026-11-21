@@ -104,6 +104,7 @@ import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, evalInBlankTab, takeCspReports, CHROME_STORE, relayBroadcastJs, CHROME_QUIET } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
+const ixFamily = (chDir) => require(path.join(path.resolve(new URL('..', import.meta.url).pathname), 'src/channel-store.js')).readIndexFamily(chDir);   // B-360d unit 1 (law 8): the channels index ON DISK = index.json + its journal, read by the store's one reader
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -1589,7 +1590,7 @@ console.log('⑦ a credential change reaches the open windows (inc-muk9jj0j-rel3
   g.auth = { ...(g.auth || {}), scopes: ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.compose'], updatedAt: Date.now() };
   g.lastAuthAt = Date.now();
   fs.writeFileSync(adFile, JSON.stringify(ad));
-  const ix = JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8'));
+  const ix = ixFamily(path.join(wt, 'data/channels'));
   const staleOnDisk = ix.conversations['gmail/t_render2'] && ix.conversations['gmail/t_render2'].convCaps && ix.conversations['gmail/t_render2'].convCaps.why === 'send-scope-not-granted';
   srv = boot();
   ok(ro0 && staleOnDisk && await waitServer(), 'FIXTURE: the Gmail window is read-only, the index holds the pre-consent verdict, and the server restarts on the post-consent account (the owner\'s exact state)', JSON.stringify([ro0, staleOnDisk]));

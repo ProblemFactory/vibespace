@@ -537,7 +537,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           // No engine on this boot: an index still carrying `tracked` makes the
           // run FAIL by name so a boot with an engine retries it (a recorded
           // no-op would leave the rows with a gate nothing reads).
-          let doc; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'index.json'), 'utf-8')); } catch { return; }
+          let doc; try { doc = require('../channel-store.js').readIndexFamily(path.join(dataDir, 'channels')); } catch { return; }   // B-360d unit 1 (law 8): the family, never index.json alone
           const pending = Object.values((doc && doc.conversations) || {}).filter((e) => e && 'tracked' in e).length;
           if (pending) throw new Error(`no channels engine to migrate ${pending} conversation(s) off the retired tracked flag — retried on a boot that has one`);
           return;
@@ -565,7 +565,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         if (!eng || typeof eng.migrateGrants !== 'function') {
           // No engine on this boot: an index still holding a pre-split record
           // FAILS the run by name (retried on a boot that has one).
-          let doc; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'index.json'), 'utf-8')); } catch { return; }
+          let doc; try { doc = require('../channel-store.js').readIndexFamily(path.join(dataDir, 'channels')); } catch { return; }   // B-360d unit 1 (law 8): the family, never index.json alone
           const convs = Object.values((doc && doc.conversations) || {}).filter((e) => e && e.assignment && e.assignment.principal).length;
           const grains = [...Object.values((doc && doc.accountAssignments) || {}), ...Object.values((doc && doc.patternAssignments) || {})].filter((g) => g && g.principal).length;
           if (convs || grains) throw new Error(`no channels engine to split ${convs} conversation assignment(s) and ${grains} account/rule assignment(s) into access + notification — retried on a boot that has one`);

@@ -125,7 +125,7 @@ async function layoutLeg(SM, tag, place = null) {
     if (place && seen.placedAt === null) { seen.placedAt = i * S.INDEX_CHUNK; await place(s); }
   } } });
   await s.index.update(() => { s.index.entry('gmail', 'thr_1', { create: false }).unread = 9; });
-  const landed = await s.index.durable();
+  const landed = await s.index.fold();
   const disk = fs.readFileSync(s.indexFile, 'utf8');
   const r = { landed, same: disk === wholeOf(s), rows: JSON.parse(disk).conversations, seen, stats: s.index.flushStats() };
   s.close();
@@ -167,13 +167,15 @@ const placedRight = (r) => r.rows['gmail/thr_1'].title === 'changed after its ch
 async function applyLeg(tag, mid = null, mass = null, SM = S) {
   const dir = copyOf(TPL_B, `b4-${tag}`);
   let s = null, armed = false, placed = false;
-  s = SM.createChannelStore({ dir, log: quiet, walk: { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => { if (what === 'layout' && armed && mid && !placed) { placed = true; await mid(s); } } } });
+  // B-360d unit 1: a 64 KB journal bound (bursts past 128 touched rows) — the mass touch is a BURST, so no journal line
+  // moves actsSeq and the write after a takeover is judged by its chunks' bytes alone (the road a journaled row never needs)
+  s = SM.createChannelStore({ dir, log: quiet, actsMaxBytes: 64 * 1024, walk: { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => { if (what === 'layout' && armed && mid && !placed) { placed = true; await mid(s); } } } });
   await s.index.update(() => { s.index.entry('gmail', 'thr_1', { create: false }).unread = 9; });
-  await s.index.durable();   // the first write: the sliced layout
+  await s.index.fold();   // the first WHOLE write (B-360d unit 1: a change rides the journal; the fold writes the index): the sliced layout
   const f0 = s.index.flushStats();
   armed = true;
   await s.index.update(() => { if (mass) mass(s); else for (let i = 0; i < NB; i += 2) s.index.entry(i % 3 ? 'gmail' : 'lark', `thr_${i}`, { create: false }).title = `mass ${i}`; });
-  const landed = await s.index.durable();
+  const landed = await s.index.fold();
   const disk = fs.readFileSync(s.indexFile, 'utf8');
   const r = { landed, same: disk === wholeOf(s), rows: JSON.parse(disk).conversations, f0, stats: s.index.flushStats(), placed };
   s.close();
@@ -200,16 +202,21 @@ async function applyLeg(tag, mid = null, mass = null, SM = S) {
 // said once, and durable() resolves with the rows on disk (never a wait of 60 s)
 {
   const dir = copyOf(TPL_B, 'b6'), warns = [];
-  let s = null, touched = 0;
+  let s = null, touched = 0, armed = false;
   s = S.createChannelStore({ dir, log: { log() { }, warn: (...a) => warns.push(a.join(' ')), error() { } }, walk: { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => {
-    if (what === 'layout' && i === 1 && touched < 3) { touched++; await s.index.update((x) => { x.conversations; }); }   // reaching the map: a whole touch
+    if (armed && what === 'layout' && i === 1 && touched < 3) { touched++; await s.index.update((x) => { x.conversations; }); }   // reaching the map: a whole touch
   } } });
+  // B-360d unit 1: the open warms its layout in slices — the leg's layouts are the WRITE's, so it arms after that landing,
+  // and a whole touch owes the sliced layout the release made at its first write
+  for (let k = 0; k < 400 && !(s.index.flushStats().layoutSliced >= 1); k++) await new Promise((z) => setTimeout(z, 5));
+  armed = true;
   await s.index.update(() => { s.index.entry('gmail', 'thr_1', { create: false }).unread = 9; });
-  const landed = await s.index.durable();
+  await s.index.update((x) => { x.conversations; });
+  const landed = await s.index.fold();   // the whole write (a paced change alone is durable on its journal line)
   const disk = fs.readFileSync(s.indexFile, 'utf8'), st = s.index.flushStats();
   const said = warns.filter((w) => /started again 3 times by whole-map writes/.test(w)).length;
   s.close();
-  ok(touched === 3 && landed === true && JSON.parse(disk).conversations['gmail/thr_1'].unread === 9 && st.layoutRestarts === 3 && said === 1, `(b6) THE BOUND: three whole-map touches, each during a sliced layout (restarts ${st.layoutRestarts}) — the next write laid out in one turn, said ONCE (${said}), durable() true with the row on disk`, { st, warns: warns.slice(0, 3) });
+  ok(touched === 3 && landed === true && JSON.parse(disk).conversations['gmail/thr_1'].unread === 9 && st.layoutRestarts === 3 && said === 1, `(b6) THE BOUND: three whole-map touches, each during a sliced layout (restarts ${st.layoutRestarts}) — the next write laid out in one turn, said ONCE (${said}), fold() true with the row on disk`, { st, warns: warns.slice(0, 3) });
 }
 // (b7) A SYNCHRONOUS FLUSH DURING THE FIRST SLICED LAYOUT (the exit's case on a stop): it lays out whole in its own turn
 {

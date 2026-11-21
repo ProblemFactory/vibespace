@@ -45,6 +45,7 @@ import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out sa
 // read back through the engine's reach view (the account's and a rule's derived rows left out)
 const ownRows = (eng, key) => (eng.reachView(eng.store.index.peek(key)) || { entries: [] }).entries.filter((g) => g.scope && g.scope.kind === 'conversation' && !g.derived);
 const require = createRequire(import.meta.url);
+const ixFamily = (chDir) => require(path.join(path.resolve(new URL('..', import.meta.url).pathname), 'src/channel-store.js')).readIndexFamily(chDir);   // B-360d unit 1 (law 8): the channels index ON DISK = index.json + its journal, read by the store's one reader
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let BYPASS_COPY = null;   // ⑫: the (h) control copy — a receipt started outside the ONE door
 let pass = 0, fail = 0;
@@ -761,7 +762,7 @@ function dayStartClock() {
       if (told) said++; else silent++;
     }
     eng.store.index.flush();
-    const onDisk = Object.values(JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'index.json'), 'utf-8')).conversations).filter((c) => c.refresh && c.refresh.every === 300).length;
+    const onDisk = Object.values(ixFamily(path.join(dataDir, 'channels')).conversations).filter((c) => c.refresh && c.refresh.every === 300).length;
     return { silent, said, onDisk, budgetHit };
   };
   const r = await drive(ENG, 'override-budget');
@@ -1829,7 +1830,7 @@ const esrc2 = engineSource(REPO);
     e.stop();   // one wake inside the ladder, one queued on the account's scope chain
     release(); await pp; await e.settleWakes();
     ladder.deliverToConversation = orig;
-    const disk = JSON.parse(fs.readFileSync(path.join(ROOT, name, 'channels', 'index.json'), 'utf-8'));
+    const disk = ixFamily(path.join(ROOT, name, 'channels'));
     const held = Object.values(disk.conversations).filter((x) => x.adapterId === A).reduce((n, x) => n + (x.pending || []).filter((p) => p.for === 'agent:agent-A').length, 0);
     const rows = ((((disk.accountAssignments || {})[A] || {}).watchers || [])[0] || { stats: { wakes: [] } }).stats.wakes || [];
     return { inside, calls: ladder.calls.slice(c0).filter((c) => c.opts.spendReason === 'channel-message').length, held, rows: rows.length, final: rows.filter((r) => r.ok === true && r.lane === 'message' && !r.reserved).length };
@@ -1935,7 +1936,7 @@ const esrc2 = engineSource(REPO);
       const t = base + offset;
       await e1.store.index.update((ix) => { const w = ix.accountAssignments[A].watchers[0]; if (!w.stats) w.stats = { wakes: [], hits: [] }; for (let i = 0; i < 3; i++) w.stats.wakes.push({ at: t, n: 1, cid: 'agent-A', ok: true, lane: 'reserved', reserved: true, bootId: 'dead-boot', pid: 999999, id: `ghost-${i}` }); });
       e1.stop();   // the process is gone; the reserved rows are flushed to disk
-      const diskRows = (n) => ((((JSON.parse(fs.readFileSync(path.join(ROOT, n, 'channels', 'index.json'), 'utf-8')).accountAssignments || {})[A] || {}).watchers || [])[0] || { stats: { wakes: [] } }).stats.wakes;
+      const diskRows = (n) => ((((ixFamily(path.join(ROOT, n, 'channels')).accountAssignments || {})[A] || {}).watchers || [])[0] || { stats: { wakes: [] } }).stats.wakes;
       const before = diskRows(name).filter((r) => r.reserved).length;
       const e2 = mk(ENGmod2, name);   // a fresh boot (new BOOT_ID) over the same store
       e2.start(); await e2.settleWakes();
@@ -3748,7 +3749,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
     const before = count();
     failOn = calls + 3;
     const w1 = await eng.threadRefresh(K, C, root.vendorId);
-    const cutOnDisk = (() => { try { const ixf = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'index.json'), 'utf-8')); const en = ixf.conversations[`${K}/${C}`]; return en && en.threadCuts && en.threadCuts[TK] ? en.threadCuts[TK].stopAt : null; } catch { return null; } })();
+    const cutOnDisk = (() => { try { const ixf = ixFamily(path.join(dataDir, 'channels')); const en = ixf.conversations[`${K}/${C}`]; return en && en.threadCuts && en.threadCuts[TK] ? en.threadCuts[TK].stopAt : null; } catch { return null; } })();
     const afterCut = count();
     failOn = 0; off += 61e3;
     if (restart) { eng.stop(); eng = boot(); }

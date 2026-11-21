@@ -1251,8 +1251,13 @@ function create(engineCtx) {
     await store.outbox.update((ob) => { for (const [id, q] of Object.entries(ob.proposals)) if (q && q.adapterId === rec.id && P.isTerminal(q.state)) { ended.push(id); delete ob.proposals[id]; } });
     for (const id of ended) { try { OF.remove(store.dir, id); } catch { /* the sweep takes it */ } }
     const r = store.purgeAccount(rec.id);
+    // B-360d unit 1 (law 11): A PURGE LEAVES NO BYTE — the rows left index.json in the removal's whole write; their older
+    // journal lines leave with the compaction that write owes: it LANDS before the removal says done
+    let journalClean = true;
+    try { if (store.index.journalDurable) journalClean = (await store.index.journalDurable()) !== false; } catch { journalClean = false; }
+    if (!journalClean) log.warn(`[channels] ${rec.id}: removed — its rows left index.json, but the index's journal could not be rewritten now (the storage did not take it): its older lines leave at the next compaction`);
     log.log(`[channels] ${rec.id}: removed with its local copy (${r.logs ? 'message logs' : 'no logs'}, ${r.files ? 'fetched files' : 'no files'}, ${ended.length} ended proposal(s)) — the adapter declares purge-on-remove`);
-    try { store.audit({ kind: 'account', op: 'purge', id: rec.id, proposals: ended.length, at: now() }); } catch {}
+    try { store.audit({ kind: 'account', op: journalClean ? 'purge' : 'purge-owed', id: rec.id, proposals: ended.length, at: now() }); } catch {}
     return { purged: true, proposals: ended.length };
   }
   /** DUPLICATE an account (r4 §8.1 #2, D4): a NEW record of the same type
