@@ -56,7 +56,8 @@
 //   5. No pattern, parent-id, group or pid-zero kill, anywhere.
 //   6. Every wait is a bounded poll on a named effect.
 //   7. Two hubs that must outlive each other's stop take a root each.
-//   8. The env handed to startHub starts from strippedEnv() — no inherited daemon root, no vendor keys.
+//   8. The env handed to startHub starts from strippedEnv() — no inherited daemon root, no vendor keys, no caller conversation
+//      names (src/conversation-env.js; scratch.mjs removed them at import already — B-ba47's follow-up).
 //   9. A browser or ANY other process a suite starts itself carries a HOME inside the root (主开发 10:04Z): the helper then ends it
 //      by its environ and start time BEFORE the root is removed. At an exit the helper's end runs FIRST (it was registered at the
 //      mint) and the suite's own kill by its handle runs after it (a no-op by then); a suite on the helper calls no rooted end of
@@ -75,6 +76,7 @@ import { stampScratchRun } from './scratch-run.mjs';
 import { withoutVendorKeys } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const { FIXTURE_CWD_PREFIX, TMP_ROOTS } = require('../src/fixture-guard.js');
+const { withoutConversationNames } = require('../src/conversation-env.js');
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** src/agentd/agentd.js ROOT: VIBESPACE_DEVICE_ROOT, else VIBESPACE_AGENTD_ROOT (scratch.mjs DAEMON_ROOT_ENV). */
@@ -133,10 +135,10 @@ export function refusalOf(root, { homes = null, mounts = null, checkout = REPO, 
   return null;
 }
 
-/** The env a suite hands its hub, stripped of what it must never inherit: the vendor keys (scratch.mjs withoutVendorKeys) and a
- *  daemon root an enclosing run set (rule 8). */
+/** The env a suite hands its hub, stripped of what it must never inherit: the vendor keys (scratch.mjs withoutVendorKeys), a
+ *  daemon root an enclosing run set (rule 8), and a caller conversation's names (src/conversation-env.js — B-ba47's follow-up). */
 export function strippedEnv(env = process.env) {
-  const out = withoutVendorKeys(env);
+  const out = withoutConversationNames(withoutVendorKeys(env)).env;
   for (const k of DAEMON_ROOT_ENV) delete out[k];
   return out;
 }

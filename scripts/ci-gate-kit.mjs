@@ -63,11 +63,12 @@ export function stubGateRepo(tag) {
   fs.copyFileSync(path.join(REPO, 'scripts', 'ci.mjs'), path.join(root, 'scripts', 'ci.mjs'));
   fs.copyFileSync(path.join(REPO, 'scripts', 'git-env.mjs'), path.join(root, 'scripts', 'git-env.mjs'));
   fs.copyFileSync(path.join(REPO, 'scripts', 'scratch-run.mjs'), path.join(root, 'scripts', 'scratch-run.mjs')); // ci.mjs's other sibling (B-1d08: the run record its reaper reads)
-  // B-60d2: the directory sweep (scratch-sweep.mjs) and the unit declarations it reads (scratch.mjs ← src/fixture-guard.js)
+  // B-60d2: the directory sweep (scratch-sweep.mjs) and the unit declarations it reads (scratch.mjs ← src/fixture-guard.js,
+  // and src/conversation-env.js — B-ba47's follow-up: scratch.mjs removes a caller conversation's names at import)
   // lane affected-heavy-deps: the shared tables' rules (affected-model.mjs ← i18n-extract.mjs's one dictionary parser)
   // lane affected-static-reach: the static reach (reach-model.mjs, PURE)
   // lane ci-hang-report: the deadline's ask + the digest (hang-report.mjs)
-  for (const f of ['scripts/scratch-sweep.mjs', 'scripts/scratch.mjs', 'src/fixture-guard.js', 'src/temp-sweepers.js', 'src/mount-path-class.js', 'scripts/affected-model.mjs', 'scripts/i18n-extract.mjs', 'scripts/reach-model.mjs', 'scripts/hang-report.mjs']) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.copyFileSync(path.join(REPO, f), path.join(root, f)); }
+  for (const f of ['scripts/scratch-sweep.mjs', 'scripts/scratch.mjs', 'src/fixture-guard.js', 'src/conversation-env.js', 'src/temp-sweepers.js', 'src/mount-path-class.js', 'scripts/affected-model.mjs', 'scripts/i18n-extract.mjs', 'scripts/reach-model.mjs', 'scripts/hang-report.mjs']) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.copyFileSync(path.join(REPO, f), path.join(root, f)); }
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0', private: true, scripts: { build: 'node -e "0"' } }) + '\n');
   fs.writeFileSync(path.join(root, 'scripts', STUB_SLICE + '.mjs'), "console.log('ALL PASS (1)');\n");
   git(root, ['init', '-q', '-b', 'main']);

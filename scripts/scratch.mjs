@@ -26,6 +26,17 @@ import { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD } from './scr
 const require = createRequire(import.meta.url);
 const { FIXTURE_CWD_PREFIX, TMP_ROOTS, FIXTURE_SID_PREFIX } = require('../src/fixture-guard.js');
 const TEMP_SWEEPERS = require('../src/temp-sweepers.js');   // r1213: the PRODUCT's table of its temp-root sweepers (pure)
+// B-ba47's follow-up pick (主开发 r791): A SUITE CARRIES NO CALLER CONVERSATION NAMES. Run from inside a conversation, a suite's
+// children would reach the CALLER's hub with the caller's own credential (and a wrapper's leg read the caller's id). Removed at
+// the FIRST import of this module, whether or not anything re-homes; src/conversation-env.js is the one list (test-architecture
+// §112 holds it to the hub's injector sites). A suite that needs a conversation's names mints its own after the import.
+const { withoutConversationNames } = require('../src/conversation-env.js');
+export const CALLER_CONVERSATION_NAMES = (() => {
+  const { dropped } = withoutConversationNames(process.env);
+  for (const k of dropped) delete process.env[k];
+  if (dropped.length) process.stderr.write(`scratch: the caller's conversation names are not carried: ${dropped.join(', ')}\n`);
+  return Object.freeze(dropped);
+})();
 export { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD };
 
 /** The first-run Welcome wizard is skipped when localStorage 'vs-onboarded' is

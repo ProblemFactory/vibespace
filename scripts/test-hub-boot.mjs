@@ -479,5 +479,33 @@ c1.hub.stop(); endKeeper(P2);
 const rb = b1.hub.stop();
 ok(rb.signalled.length === 4 && await waitFor(() => bPids.slice(1).every((p, i) => !alive(p, b1.kids[['g1', 'g2', 'g3'][i]].starttime))), 'B\'s own stop ends B\'s four', rb);
 endKeeper(O);
+
+// ── B-ba47's follow-up pick (主开发 r791): A SUITE CARRIES NO CALLER CONVERSATION NAMES ──────────────────────────────────────
+// scripts/scratch.mjs removes them at its first import (src/conversation-env.js, the one list), so a child a suite spawns cannot
+// reach the caller's hub with the caller's token; strippedEnv drops them from any env it is handed. RED CONTROL: the same child
+// WITHOUT the scratch import carries the caller's token and id (the class before the pick — and every suite pick C has not reached).
+console.log('— the caller\'s conversation names: removed at the scratch import, dropped by strippedEnv (B-ba47 follow-up)');
+{
+  const STAND_IN = (tag) => ['stand', 'in', tag, process.pid].join('-');   // invented values, minted per run: never a credential
+  const CALLER = { VIBESPACE_API: 'http://caller-hub.invalid', VIBESPACE_SESSION_TOKEN: STAND_IN('s'), CLAUDE_WEBUI_SESSION_ID: STAND_IN('id'), CODEX_WEBUI_MODEL: STAND_IN('m'), VIBESPACE_JOB_TOKEN: STAND_IN('j') };
+  const SCRATCH_URL = pathToFileURL(path.join(REPO, 'scripts/scratch.mjs')).href;
+  const probe = (withImport) => {
+    const code = (withImport ? `await import(${JSON.stringify(SCRATCH_URL)});\n` : '')
+      + "const { spawnSync } = await import('node:child_process');\n"
+      + "const r = spawnSync(process.execPath, ['-e', \"process.stdout.write(JSON.stringify(Object.keys(process.env).filter((k) => /^(VIBESPACE_(API|SESSION_TOKEN|JOB_TOKEN)|CLAUDE_WEBUI_|CODEX_WEBUI_)/.test(k)).sort()))\"], { encoding: 'utf8' });\n"
+      + 'process.stdout.write(r.stdout);';
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { env: { ...process.env, ...CALLER }, encoding: 'utf8', timeout: 20000 });
+    let names = null; try { names = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { }
+    return { names, stderr: String(r.stderr || '').slice(0, 400), status: r.status };
+  };
+  const on = probe(true), off = probe(false);
+  ok(Array.isArray(on.names) && on.names.length === 0 && on.status === 0 && /the caller's conversation names are not carried: [^\n]*VIBESPACE_SESSION_TOKEN/.test(on.stderr),
+    'a suite\'s child, spawned after the scratch import, carries NONE of the caller\'s conversation names (token, route, id, job, a harness family) — and the import says which it removed, by name', on);
+  ok(Array.isArray(off.names) && off.names.includes('VIBESPACE_SESSION_TOKEN') && off.names.includes('CLAUDE_WEBUI_SESSION_ID') && off.names.includes('CODEX_WEBUI_MODEL'),
+    'RED CONTROL: the same child WITHOUT the scratch import carries the caller\'s token, conversation id and harness name', off);
+  const st = HB.strippedEnv({ PATH: '/usr/bin', HOME: '/tmp/vs-ba47-x', TERM: 'xterm', ...CALLER, ACP_WEBUI_MODE: 'x' });
+  ok(st.PATH === '/usr/bin' && st.HOME === '/tmp/vs-ba47-x' && st.TERM === 'xterm' && !Object.keys(st).some((k) => k in CALLER || k === 'ACP_WEBUI_MODE'),
+    'strippedEnv drops a caller conversation\'s names from any env it is handed, and keeps the person\'s session (PATH, HOME, TERM)', Object.keys(st));
+}
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(fail ? 1 : 0);
