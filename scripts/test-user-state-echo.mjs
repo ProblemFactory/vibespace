@@ -1370,7 +1370,7 @@ async function pageLoss(src, { acts, leaveAfter = 50, delay = 200, kill = false,
   const mutant = (from, to, name) => {
     // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file. The copy is still
     // written (§14 builds on its folder: nothing crashes); a moved anchor leaves it unpatched, hit: false, and the «hit their
-    // anchors» row below reds too
+    // anchors» row below reds too (a doubled one is patched at its first: hit stays true, the ANCHOR row is the red)
     const n = SRC.split(from).length - 1;
     if (n !== 1) ok(false, `ANCHOR (${name}, src/user-state-ops.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the mutant is not the control it says`);
     const MUT = SRC.replace(from, to);

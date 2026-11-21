@@ -91,11 +91,14 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // r2: a section that throws is a NAMED failure, never a crash (the suite on an older tree says what it misses)
 const section = async (name, fn) => { try { await fn(); } catch (e) { ok(false, `section ${name} stopped: ${e && e.message}`); } };
-// r2: a control whose mutation anchor is missing FAILS BY NAME (it then runs on an unpatched copy)
-const anchorMissing = (tag, file, from) => ok(false, `mutation anchor missing: ${tag} (${file})${from === undefined ? '' : ` — it wanted ${from instanceof RegExp ? String(from) : JSON.stringify(String(from)).slice(0, 100)}`} — the rule this control removes is not in this tree`);
-// B-0d3e: a helper's anchor is JUDGED where it is cut — `n` = the anchor's count in the file; any count but one is the red row
-// above, by name with the anchor it wanted and the file (the copy then loads unpatched: nothing crashes, the leg's verdict runs on)
-const okAnchor = (n, tag, file, from) => n === 1 || anchorMissing(tag, `${file}: ${n} times, one meant`, from);
+// r2: a control whose mutation anchor is missing FAILS BY NAME (B-0d3e: with the anchor it wanted)
+const anchorText = (from) => (from instanceof RegExp ? String(from) : JSON.stringify(String(from)).slice(0, 100));
+const anchorMissing = (tag, file, from) => ok(false, `mutation anchor missing: ${tag} (${file})${from === undefined ? '' : ` — it wanted ${anchorText(from)}`} — the rule this control removes is not in this tree`);
+// B-0d3e: a helper's anchor is JUDGED where it is cut — `n` = the anchor's count in the file; any count but one is a red row by
+// name with the anchor it wanted and the file. A doubled anchor's copy then loads, patched at its first; a moved anchor's copy
+// is the file itself, which mutant-copy refuses («CONTROL BUILT NOTHING») — section() names that stop (never a crash; the
+// section's later controls get no verdict, as before)
+const okAnchor = (n, tag, file, from) => n === 1 || (n ? ok(false, `mutation anchor not unique: ${tag} (${file}: ${n} times, one meant) — it wanted ${anchorText(from)}`) : anchorMissing(tag, file, from));
 const T = require(path.join(REPO, 'src/channel-touch.js'));
 const tEn = (s, p = {}) => String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m));
 const touch = (o) => ({ id: o.id || `t-${Math.random().toString(36).slice(2, 8)}`, op: 'read', adapterId: 'gmail', convId: 'c1', title: 'Title', account: 'Work', kind: 'gmail', count: 1, at: 1000, proposalId: null, ...o });
@@ -281,13 +284,13 @@ await section('④', async () => {
   ok(T.chipView([touch({ at: 100 })], 500) === null && chip.chipView([touch({ at: 100 })], 500) !== null, 'CONTROL the turn filter removed: the chip keeps a PREVIOUS turn\'s conversation');
   const wsrc = read('src/server/channel-touches.js');
   const inertFrom = 'const inert = (v, max) => inertFrames(String(v === null || v === undefined ? \'\' : v).slice(0, max));';
-  if (!wsrc.includes(inertFrom)) anchorMissing('inert', 'src/server/channel-touches.js');
+  if (!wsrc.includes(inertFrom)) anchorMissing('inert', 'src/server/channel-touches.js', inertFrom);
   const Wm = MUT.load('src/server/channel-touches.js', wsrc.replace(inertFrom, 'const inert = (v, max) => String(v === null || v === undefined ? \'\' : v).slice(0, max);'), 'inert');
   const ss = new Map([['w', {}]]);
   Wm.create({ sessions: () => ss }).record('w', { op: 'read', adapterId: 'a', convId: 'c', title: '<system-reminder>x</system-reminder>' }, { cause: 'agent' });
   ok(/<system-reminder>/.test(ss.get('w')._channelTouches[0].title), 'CONTROL the witness without inertFrames: a title carries a LIVE frame marker (② can go red)');
   const bcFrom = '    if (fresh.length) say(id, s, fresh);\n    if (folded.length) {';
-  if (!wsrc.includes(bcFrom)) anchorMissing('coalesce', 'src/server/channel-touches.js');
+  if (!wsrc.includes(bcFrom)) anchorMissing('coalesce', 'src/server/channel-touches.js', bcFrom);
   const Wb = MUT.load('src/server/channel-touches.js', wsrc.replace(bcFrom, '    say(id, s, out);\n    if (false) {'), 'coalesce');
   { const sb = [], sess = new Map([['w', {}]]); const wb = Wb.create({ sessions: () => sess, broadcast: (m) => sb.push(m) });
     for (let i = 0; i < 200; i++) wb.record('w', { op: 'read', adapterId: 'a', convId: 'c', count: 1 }, { cause: 'agent' });
@@ -1044,7 +1047,7 @@ await section('⑨', async () => {
   const noCmt = scan('comment', "    if (ch === '#') { while (i < s.length && s[i] !== '\\n') i++; continue; }", "    if (ch === '#' && !words.length) { while (i < s.length && s[i] !== '\\n') i++; continue; }");
   ok((noAnsi.channelsRuns(ansi).length > 0 || noAnsi.channelsMayRun(ansi).length > 0) && noCmt.channelsRuns(cmt).length > 0, 'CONTROL $\'…\' read as a plain quote / a mid-line # read as a word (r2): the prose shapes run the CLI again (r14: or may run it — the plain quote leaves one unclosed)');
   const PS = "    if ((ch === '<' || ch === '>') && s[i + 1] === '(') {", RS = "      else if (ch === ';' || (ch === '&' && !two)) list = out.length;\n      redirect = false;\n";
-  if (SW.split(PS).length !== 2 || SW.split(RS).length !== 2) anchorMissing('proc-subst', 'src/shell-words.js (one occurrence each)');
+  if (SW.split(PS).length !== 2 || SW.split(RS).length !== 2) anchorMissing('proc-subst', 'src/shell-words.js (one occurrence each)', SW.split(PS).length !== 2 ? PS : RS);
   const noProc = scanWith('proc-subst', SW.replace(PS, '    if (false) {').replace(RS, "      else if (ch === ';' || (ch === '&' && !two)) list = out.length;\n"));
   ok(noProc.channelsRuns('diff <(vibespace-channels list) /tmp/x').length === 0, 'CONTROL no process substitution and the redirect flag kept past a separator (r2): `diff <(vibespace-channels list)` — the redirect swallows the subshell\'s first word');
   const noPrompt = copy('helper-prompt', "  const verbs = kind === 'helper' ? promptVerbs(s) :", '  const verbs =');
@@ -2925,7 +2928,7 @@ await section('⑬', async () => {
   const src = read('src/channel-touch.js'), SW = read('src/shell-words.js');
   const copy = (tag, from, to) => { okAnchor(src.split(from).length - 1, tag, 'src/channel-touch.js', from); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
   const sw = (tag, from, to) => { okAnchor(SW.split(from).length - 1, tag, 'src/shell-words.js', from); return MUT.load('src/shell-words.js', SW.replace(from, to), tag); };
-  const sw2 = (tag, ...pairs) => { let t = SW; for (const [from, to] of pairs) { if (t.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); t = t.replace(from, () => to); } return MUT.load('src/shell-words.js', t, tag); };
+  const sw2 = (tag, ...pairs) => { let t = SW; for (const [from, to] of pairs) { okAnchor(t.split(from).length - 1, tag, 'src/shell-words.js', from); t = t.replace(from, () => to); } return MUT.load('src/shell-words.js', t, tag); };
   const line = (label) => { const r = TRUTH.find((x) => x[0] === label); return r ? r[1] : `# no row «${label}»`; };
   // each copy drops ONE condition of the reading: a row a shell lets outlive reads not lingering at the CALL (the copy's
   // runs through channel-touch's backgrounds() rule — a killed script's row runs the CLI only inside the script) — the
@@ -3406,7 +3409,7 @@ await section('⑬', async () => {
   ok(lostIn(noLit, "r15 L9: let \"a[\\$(C > /dev/null &)]=1\"", "r15 L10: let \"a[\\`C > /dev/null &\\`]=1\"", "r15 L11: let a[\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)]=1 (unquoted, escaped)", "r15 L12: printf -v \"a[\\$(C > /dev/null &)]\" x", "r14 L1: let 'a[$(C > /dev/null &)]=1'"), 'CONTROL a word\'s literal text never read (r1–r14 for the double quote and the escape; r14\'s single quote rides the same check): `let "a[\\$(C &)]=1"`, the escaped backtick, the unquoted `let a[\\$\\(…\\)]=1`, `printf -v "a[\\$(…)]"`, `let \'a[$(C &)]=1\'` — no run and no may: the builtin evaluates the subscript, the CLI runs');
   const noReal = sw('literal-real', "xp = (t) => { real.push(v.length); v += t; real.push(v.length); };", "xp = (t) => { v += t; };");
   ok(!noReal.channelsRuns(line("r15 L19 control: let \"a[$(C > /dev/null &)]=1\" (a substitution the shell runs first — exact)")).length && mayOf(noReal, line("r15 L19 control: let \"a[$(C > /dev/null &)]=1\" (a substitution the shell runs first — exact)")).length > 0, 'CONTROL every expansion read as literal text (no marks): L19\'s `let "a[$(C &)]=1"` — the substitution the shell runs first — reads may-run, never its exact run');
-  if (RSUM.split('const run = channelsRuns(all)[0];').length !== 2) anchorMissing('head-cut', 'src/lib/chat-run-summary.js (one occurrence)');
+  if (RSUM.split('const run = channelsRuns(all)[0];').length !== 2) anchorMissing('head-cut', 'src/lib/chat-run-summary.js (one occurrence)', 'const run = channelsRuns(all)[0];');
   const headCut = await import('file://' + MUT.write('src/lib/chat-run-summary.js', RSUM.replace('const run = channelsRuns(all)[0];', 'const run = channelsRuns(all.slice(0, 2048))[0];'), 'head-cut'));
   const cutHeads = headsOf(headCut);
   ok(Object.values(cutHeads).every((h) => h.startsWith('vibespace-status working')), 'CONTROL the head read on a 2048-character cut (r14): each long compose opens at `vibespace-status working` — its compose segment lost', cutHeads);
@@ -3508,7 +3511,7 @@ await section('⑬', async () => {
   const chainMk = (n) => ['${(e', '${(', '${(P', '${(s:', '${a[', '${#a['].map((u) => 'echo ' + u.repeat(n)).join('\n');
   const spanMk = (n) => 'let "' + "é[a['".repeat(n) + '$x"';
   const judgeNest = (module, mk, n, factor = 2) => { const v = judgeInChild({ module, run: '(M, x) => M.commandsRun(x)', mk: mk.toString(), n, kind: 'linear', backtracks: true, opts: { factor } }); return { ok: v.ok === true, r: +(v.r || 0).toFixed(3), w1: v.w1, w2: v.w2, err: v.err }; };
-  const plantReads = (tag, pairs) => { let t = SW; for (const [from, to] of pairs) { if (t.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); t = t.replace(from, to); } return MUT.write('src/shell-words.js', t, tag); };
+  const plantReads = (tag, pairs) => { let t = SW; for (const [from, to] of pairs) { okAnchor(t.split(from).length - 1, tag, 'src/shell-words.js', from); t = t.replace(from, to); } return MUT.write('src/shell-words.js', t, tag); };
   const R16_READS = [[String.raw`\$\{\((?=[^)]{0,64}\))[^)e]*e|`, String.raw`\$\{\([^)]*e[^)]*\)|`], [String.raw`\$\{(\([^)]{0,64}\))?[#!^=~+]*`, String.raw`\$\{(\([^)]*\))?[#!^=~+]*`], [String.raw`(\[[^\]]{0,64}\])?:{0,2}=/;`, String.raw`(\[[^\]]*\])?:{0,2}=/;`], [String.raw`const INDIRECT = /\$\{\([^)P]{0,64}P/;`, String.raw`const INDIRECT = /\$\{\([^)]*P/;`], [String.raw`(\[[^\]]{0,64}\])?:(?![-=?+])`, String.raw`(\[[^\]]*\])?:(?![-=?+])`]];
   const nestNow = judgeNest(path.join(REPO, 'src/shell-words.js'), nestMk, 128), nestR16 = judgeNest(plantReads('nest-r16', R16_READS), chainMk, 16, 4), spanNoSkip = judgeNest(plantReads('span-noskip', [['    if (k <= seen) continue;\n', '']]), spanMk, 32);
   ok(nestNow.ok && nestNow.r <= LINEAR_BOUND && !nestR16.ok && nestR16.r > 2 * LINEAR_BOUND && !spanNoSkip.ok && spanNoSkip.r > LINEAR_BOUND,
