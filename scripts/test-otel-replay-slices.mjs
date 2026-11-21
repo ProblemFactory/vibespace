@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// test-otel-replay-slices.mjs — FAST (in-process + three node children): THE STORED-EVENTS REPLAY AT A START, each law on a
+// test-otel-replay-slices.mjs — HEAVY, slow for the fast tier (in-process + three node children, ~11 s in a 12-lane gate): THE STORED-EVENTS REPLAY AT A START, each law on a
 // small placed stash (row B-360d, lane hub-loop-stalls — 主开发 r713 / r725 / r738). The owner's size is measured by the heavy
 // test-otel-replay-measure; here every law has a leg and, where an earlier form could break it, a RED control. The release's
 // own ingest is one of them: scripts/fixtures/otel-replay/otel-ingest-944de13f9.js.frozen, loaded over the same files.

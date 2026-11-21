@@ -234,12 +234,12 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     if (st.bytes <= FILE_MAX) return;
     // recorded as run with NO rows over a stash that holds known rows from before the law: the release's reader failed on it (its one
     // string past the runtime's longest) and answered «no stash» — those rows were never read: kept whole (the adversarial read's 6)
-    if (ran && rows === 0 && oldestKnown < BACKFILL_LAW_MS) { console.log(`[otel] the stash is kept WHOLE (${st.bytes} bytes): the migration ${BACKFILL_ID} is recorded as run with 0 rows, yet the stash holds known rows from before 2026-09-07 (the oldest of ${new Date(oldestKnown).toISOString().slice(0, 10)}) — it never read them`); return; }
+    if (ran && rows === 0 && oldestKnown < BACKFILL_LAW_MS) { console.log(`[otel] the stash is kept WHOLE (${st.bytes} bytes): the migration ${BACKFILL_ID} is recorded as run with 0 rows, yet the stash holds known rows from before 2026-09-07 (the oldest of ${new Date(oldestKnown).toISOString()}) — it never read them`); return; }
     if (!ran) { console.log(`[otel] the stash is kept WHOLE (${st.bytes} bytes): the migration ${BACKFILL_ID} is not recorded as run in data/migrations.json — it reads every old row; once it has run, the trim keeps the newest ${MAX_TRUTH} known lines inside 30 days`); return; }
     const { ranges, kept } = keptRanges();
     if (kept === st.bytes) return;   // the kept lines ARE the file: nothing to write
     trimOwed = { ranges, size: st.bytes, kept, what: `kept the newest ${Math.min(ringN, MAX_TRUTH)} known lines inside 30 days and ${unknownN} unknown-org ones` };
-    W().dirty(file, { name: 'otel-truth.write', produce: produceStash, onWritten: stashWritten, allowEmpty: true });
+    W().dirty(file, { name: 'otel-truth.write', produce: produceStash, onWritten: stashWritten, allowEmpty: true, urgent: true });   // at once, as the release's own write was (no pace to wait: a start's one rewrite)
   };
   // the posts that waited, in their order, once the map is whole; then the records a stopped hub left in the spill
   let leftover = null;

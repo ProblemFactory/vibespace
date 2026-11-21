@@ -225,7 +225,6 @@ const PAYLOAD = (recs) => ({
     const SWk = require(REPO + '/src/store-writer.js').storeWriter(), dzk = SWk.dirty; let owedK = false;
     SWk.dirty = function (f, o) { if (o && o.name === 'otel-truth.write') owedK = true; return dzk.call(this, f, o); };   // a trim owed to the writer = a rewrite on its way
     try { await mk3().replayed; } finally { console.log = log0; SWk.dirty = dzk; }
-    await new Promise((r) => setTimeout(r, 300));
     ok(!owedK && fs.statSync(stash3).ino === st1.ino && fs.statSync(stash3).size === st1.size && fs.readFileSync(stash3, 'utf8').includes('req_old2') && said.filter((l) => l.includes('kept WHOLE')).length === 1,
       'row B-360d: the ledger backfill migration NOT recorded as run ⇒ a stash with a line past the horizon is kept WHOLE (that migration reads every old row), said once', said.join(' | '));
     fs.writeFileSync(ledger3, ran3);
