@@ -24,6 +24,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A machine that answered is no longer called unreachable when its list is late or could not be read; the remote list and search say why it is old.
 - A remote machine's conversation list no longer empties when it refreshes on its own (after a conversation there ends or changes); it stayed empty until ⟳.
 - A long-lived token on its last day no longer reads as expired anywhere: it still runs conversations, as the server lets it.
+- After a page reload, the line saying what a stopped turn left running is shown again, with its «End them» while it still applies.
 
 ## 2.369.415 — 2026-11-21
 
