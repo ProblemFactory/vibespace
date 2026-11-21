@@ -59,7 +59,14 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
           return;
         }
         if (m && m.op === 'open' && Number.isInteger(m.chan)) {
-          const s = router.open(m.chan, m.stamp || {}); s[EXCHANGE] = { heads: 0, chan: m.chan };   // ONE exchange this channel
+          // A CHANNEL WITH NO ADDRESS IS REFUSED: the channel socket reads a missing address as the local one, and two doors of the
+          // hub trust the local address — the interface never sends one without it, and the default fails closed (r1057 item 2)
+          if (!m.stamp || typeof m.stamp.addr !== 'string' || !m.stamp.addr) {
+            try { log.error?.(`[interface-party] an open line with no address (chan ${m.chan}) is refused — a channel is never read as the local one`); } catch { }
+            try { mux.closeChan(m.chan); } catch { }
+            return;
+          }
+          const s = router.open(m.chan, m.stamp); s[EXCHANGE] = { heads: 0, chan: m.chan };   // ONE exchange this channel
           s.on('error', () => { });   // a dead link destroys its channels «with an error»; an UPGRADED socket has no http.Server listener left, so that error would end the hub — the death is said by name (onDead), never thrown
           server.emit('connection', s);
         }

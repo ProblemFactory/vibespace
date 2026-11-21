@@ -35,6 +35,7 @@ const DECLARED = Object.freeze({
   chunks: 'a chunked body\'s chunk sizes and chunk extensions are Node\'s; the body is equal by digest',
 });
 const OLD_PAGE_DROPS = new Set(['transfer-encoding', 'connection', 'keep-alive', 'trailer']);   // DECLARED.oldPage
+const UPGRADE_LINGER_MS = 2000;   // a refused upgrade's last words: the page socket is destroyed once they are written, or after this long (law 9: by name, never a closed socket)
 const RE_TE_CHUNKED = /(?:^|\W)chunked(?:$|\W)/i;   // Node's own test of a Transfer-Encoding line (lib/_http_outgoing.js)
 
 /** a flat [name, value, …] list without the lines whose lower-cased name is in `drop` */
@@ -66,11 +67,19 @@ const hintsOf = (raw) => { const h = {}; for (const [k, v] of pairsOf(raw)) { co
 function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'), firstChan = 1, log = console } = {}) {
   let mux = null, router = null, next = Math.max(1, Number(firstChan) >>> 0 || 1), exhausted = false;
   const routers = new Map();   // a link → its channel sockets (createChanSockets), so a re-attached link's late death ends only its own
-  const live = new Map();      // chan → { kind: 'exchange' | 'upgrade', mux, sock, page | res, out } — every stream a byte waits in here
+  const live = new Map();      // the channel's SOCKET → { kind, mux, sock, page | req + res + out + a } — every stream a byte waits in here
+  const keyOf = (sock) => sock;   // a channel is named by its link AND its number: numbers start again at 1 on a re-attached link, its socket is its own
   const stats = { exchanges: 0, upgrades: 0, noOwner: 0, exhausted: 0, unforwardable: 0, toLink: 0, paused: 0 };
   /** what waits in THIS process now: every live channel's socket (both ways) and the page side's queue (law 8: one window a
    *  channel and direction — the channel socket credits only what its reader takes) */
-  const held = () => { let n = 0; for (const e of live.values()) n += e.sock.readableLength + e.sock.writableLength + (e.page ? e.page.writableLength : 0) + (e.res ? e.res.writableLength || 0 : 0) + (e.out ? e.out.writableLength || 0 : 0); return n; };
+  const held = () => {   // each byte counted once: a response's writableLength holds its page socket's, a client request's its channel socket's
+    let n = 0;
+    for (const e of live.values()) {
+      if (e.kind === 'upgrade') n += e.sock.readableLength + e.sock.writableLength + (e.page ? e.page.writableLength : 0);
+      else n += e.sock.readableLength + (e.out ? e.out.writableLength || 0 : e.sock.writableLength) + (e.res ? e.res.writableLength || 0 : 0) + (e.req ? e.req.readableLength : 0) + (e.a ? e.a.readableLength : 0);
+    }
+    return n;
+  };
   /** the page side's bytes, counted as this process takes them, and each pause back-pressure puts on it */
   const tap = (from) => { from.on('data', (b) => { stats.toLink += b.length; }); from.on('pause', () => { stats.paused++; }); };
   /** a new channel on the current link with its open line, or null (no link, or the numbers are spent) */
@@ -80,7 +89,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
     const m = mux, rt = router, chan = next++;
     m.control({ op: 'open', chan, to: ownerOf({ kind: 'route', method: req.method, path: req.url }), trace: newTrace(), stamp: { secure: !!facts.secure, addr: facts.addr || null, port: facts.port || null } });
     const sock = rt.open(chan, {});
-    live.set(chan, { kind, mux: m, sock, page: null, res: null, out: null }); sock.once('close', () => live.delete(chan));
+    live.set(keyOf(sock), { kind, mux: m, sock, page: null, req: null, res: null, out: null, a: null }); sock.once('close', () => live.delete(keyOf(sock)));
     sock.on('error', () => { });
     return sock;
   }
@@ -104,7 +113,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
       try { log.error?.(`[interface] a head Node's writer refuses was answered 400 «unforwardable» (${String(e && e.code || e).slice(0, 60)})`); } catch { }
       answerItself(res, 400, { error: 'unforwardable', why: 'Node\'s writer refuses this head, so it cannot reach the hub as it came' }); return;
     }
-    stats.exchanges++; Object.assign(live.get(sock.chan) || {}, { res, out });
+    stats.exchanges++; Object.assign(live.get(keyOf(sock)) || {}, { req, res, out });
     out.on('information', (i) => {
       try {
         if (i.statusCode === 100) { if (req.httpVersion !== '1.0') res.writeContinue(); }   // DECLARED.oldPage: Node says no 100 to HTTP/1.0
@@ -114,6 +123,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
       } catch { }
     });
     out.on('response', (a) => {
+      Object.assign(live.get(keyOf(sock)) || {}, { a });
       const lines = answerLines(req, a.rawHeaders);
       res.sendDate = false;   // the party's Date line, or none — never one of the interface's
       if (!has(lines, 'content-length') && !has(lines, 'transfer-encoding')) { res.removeHeader('content-length'); res.removeHeader('transfer-encoding'); }   // the party framed it by its channel's close: so is the page's
@@ -132,7 +142,11 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
       if (res.writableEnded || res.destroyed) return;   // the answer was whole (a write after it failed): nothing to undo
       if (!res.headersSent) answerItself(res, 502, { error: 'owner-lost', why: 'the hub\'s channel ended before its answer' }, { close: true }); else res.destroy();
     });
-    res.on('close', () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } });   // the page left mid-answer: the channel goes, and the party's handler sees its socket gone
+    const gone = () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } };   // the page left mid-answer: the channel goes, and the party's handler sees its socket gone
+    res.on('close', gone);
+    // a PIPELINED request whose answer waits its turn has no socket of its own yet: Node never closes that response when the page
+    // goes, so the page socket's own close ends its channel too
+    const page = req.socket; page.once('close', gone); res.once('finish', () => page.removeListener('close', gone));
     req.pipe(out, { end: false }); tap(req);
     req.on('end', () => { if (req.rawTrailers.length) { try { out.addTrailers(pairsOf(req.rawTrailers)); } catch { } } out.end(); });
   }
@@ -141,12 +155,18 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
     if (!facts.addr) { socket.destroy(); return; }
     const sock = openChan('upgrade', req, facts);
     if (!sock) { stats.noOwner++; try { socket.end('HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json; charset=utf-8\r\nconnection: close\r\n\r\n' + JSON.stringify(exhausted ? SPENT : NO_OWNER)); } catch { } return; }
-    stats.upgrades++; Object.assign(live.get(sock.chan) || {}, { page: socket });
+    stats.upgrades++; Object.assign(live.get(keyOf(sock)) || {}, { page: socket });
     socket.on('error', () => { });
     sock.write(head && head.length ? Buffer.concat([headOf(req), head]) : headOf(req));   // ONE write: the bytes that came with the head reach the party with it, as its own 'upgrade' head
     socket.pipe(sock); sock.pipe(socket); tap(socket);
     socket.once('close', () => sock.destroy());
-    sock.once('close', () => socket.destroy());   // an upgraded socket never outlives its channel
+    sock.once('close', () => {   // an upgraded socket never outlives its channel — but its last words (a 401, a 404) are written first
+      if (socket.destroyed) return;
+      if (socket.writableFinished) { socket.destroy(); return; }
+      const t = setTimeout(() => socket.destroy(), UPGRADE_LINGER_MS); t.unref?.();
+      socket.once('finish', () => { clearTimeout(t); socket.destroy(); });
+      socket.end();
+    });
   }
   /** the callbacks of ONE link, bound to it (a re-attached link gets its own router) */
   function handlersFor(m) {
@@ -163,4 +183,4 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
   return { handlersFor, attach, current: () => mux, exchange, upgrade, stats: () => ({ ...stats, channels: live.size, held: held(), opened: stats.exchanges + stats.upgrades }), LAST_CHAN };
 }
 
-module.exports = { create, requestLines, answerLines, headOf, DECLARED, OLD_PAGE_DROPS, LAST_CHAN, NO_OWNER, SPENT };
+module.exports = { create, requestLines, answerLines, headOf, DECLARED, OLD_PAGE_DROPS, LAST_CHAN, NO_OWNER, SPENT, UPGRADE_LINGER_MS };
