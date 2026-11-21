@@ -732,6 +732,27 @@ console.log('— ④ the words every surface says it with, and where they are dr
   ok(W.displayFactText(sub) === 'The browser settings ask for Wayland, which this machine does not have right now — it runs on X11 instead', 'the substituted sentence names both displays', W.displayFactText(sub));
   ok(W.displayFactText(back) === 'The desktop session is back — the browser runs in a window again' && W.displayFactText(D.displayFact({ display: wl, wanted: { headed: true } })) === '' && W.displayFactText(null) === '', 'the window-is-back sentence; a plain launch / no fact says nothing');
   ok(W.displayFactOf({ browsers: { 'bp-1': { display: noD } } }, 'bp-1') === noD && W.displayFactOf({ browsers: {} }, 'bp-1') === null && W.displayFactOf(null, 'bp-1') === null, 'displayFactOf reads the digest\'s record');
+  // B-346d (the coordinator's r1228): a browser that runs OUT OF SIGHT is a quiet MARK on the bar (a word, its tip the full sentence)
+  // — a state, never a door — and its line is said once a browser run; every other fact has no mark (its line stays)
+  {
+    const mh = W.displayMarkOf(hid), mn = W.displayMarkOf(noD);
+    ok(!!mh && mh.word === 'Hidden window' && mh.tip === W.displayFactText(hid) && !!mn && mn.word === 'No window' && mn.tip === W.displayFactText(noD),
+      'B-346d r1228: the out-of-sight facts are a MARK — «Hidden window» / «No window», each with its full sentence as the tip', { mh, mn });
+    ok(W.displayMarkOf(sub) === null && W.displayMarkOf(back) === null && W.displayMarkOf(null) === null, 'B-346d r1228 CONTROL: a substituted kind, a window that is back, no fact — no mark (their lines stay as they were)');
+    const LW = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+    const n = (x) => LW.split(x).length - 1;
+    const PINS = [
+      ["the mark is a SPAN (a state)", "const hiddenMark = document.createElement('span'); hiddenMark.className = 'browser-live-hidden-mark';"],
+      ['…on the bar, folding first with the backend', 'kbd: kbdChip, kbdBtn, hidden: hiddenMark, echo: echoEl,'], ['…its priority', 'backend: 4, backendLabel: 4, hidden: 4,'],
+      ['…folded: an info row (no act)', "else if (key === 'hidden') rows.push({ caption: hiddenMark.textContent, title: hiddenMark.title });"],
+      ['the line said ONCE a browser run (keyed by the record\'s start), then the mark alone', "if (Date.now() - saidRuns.get(run) >= DISPLAY_SAY_MS) line = '';"],
+      ['…the run key', 'const run = `${pid}:${(rec && rec.startedAt) || \'\'}`;'], ['…the mark drawn while the fact holds', "hiddenMark.style.display = mark ? '' : 'none';"],
+    ];
+    const miss = PINS.filter(([, x]) => n(x) !== 1).map(([w, x]) => ({ w, n: n(x) }));
+    ok(miss.length === 0 && !/hiddenMark\.(onclick|addEventListener)/.test(LW), `B-346d r1228: the live view's wiring of the mark, each line ONCE (${PINS.length} pins), and no act on it (a state, never a door)`, miss);
+    const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+    ok(['Hidden window', 'No window'].every((k) => zh.includes('  ' + JSON.stringify(k) + ': ') && ja.includes('  ' + JSON.stringify(k) + ': ')), 'B-346d r1228: the mark\'s words have zh and ja rows');
+  }
   ok(/Wayland desktop session \(wayland-0\)/.test(W.machineDisplayText({ display: wl })) && /X11 display \(:0\)/.test(W.machineDisplayText({ display: x11Only })) && /no desktop session now .* runs headless/.test(W.machineDisplayText({ display: D.displayVerdict({}) })) && /Could not check this machine's display: boom/.test(W.machineDisplayText({ error: 'boom' })), 'Settings\' line: Wayland / X11 / none / an error said by name');
   // B-d635 (lane browser-reliability, userW's inc-murizo36-ecri): VibeSpace's own VNC desktop (Desktop apps' Xtigervnc, :7)
   // is a desktop the user sees — beside it no surface says "no desktop session"; the words say the browser is NOT on it

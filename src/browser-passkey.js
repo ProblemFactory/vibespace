@@ -214,7 +214,7 @@ const UNKNOWN_TEXT = 'VibeSpace cannot see passkey requests on this browser (it 
 // acceptance r1 of lane passkey-browse-yourself: an unwatched browser's TRUE cause, when the watch knows it — never the false «started before»
 const REMOTE_TEXT = 'This browser runs on another machine — VibeSpace cannot see its passkey requests from here; a page that will not move may be waiting for one there.';
 // acceptance r2: the gave-up line names the door that WORKS — his clicks never re-arm (only Retry, a Browse press or a command does)
-const GAVE_UP_TEXT = 'VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one. Retry in the browser window (or the next command on this browser) connects again.';
+const GAVE_UP_TEXT = 'VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one. «Connect again now» in the browser window (or the next command on this browser) connects again.'; // B-346d r1228: the button's own word
 const REFUSED_TEXT = 'VibeSpace cannot watch this browser ({cause}) — it cannot see its passkey requests; a page that will not move may be waiting for one.';
 /** acceptance r3: no watch is open on this browser and none was refused — before the first arm (a hub just restarted) the cause is
  *  not known, so none is claimed (UNKNOWN_TEXT's «started before» stays the open watch's tab whose hook never armed). */
@@ -227,7 +227,17 @@ function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k
 function passkeyWords(b, tIn, { headed = false, card = null, display = null, deskDoor = false, temporary = false } = {}) {
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   // lane passkey-browse-yourself: the watch cannot see this browser — the view says so (a quiet line; a Retry press when the re-arms stopped), never nothing
-  if (b && b.state === 'unknown') return { unknown: true, title: '', line: b.why === 'remote' ? t('This browser runs on another machine — VibeSpace cannot see its passkey requests from here; a page that will not move may be waiting for one there.') : b.why === 'gave-up' ? t('VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one. Retry connects again.') : b.why === 'refused' && b.cause ? t('VibeSpace cannot watch this browser ({cause}) — it cannot see its passkey requests; a page that will not move may be waiting for one.', { cause: str(b.cause) }) : b.why === 'not-watched' ? t('VibeSpace is not watching this browser right now — it cannot see its passkey requests; a page that will not move may be waiting for one.') : t('VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.'), desktop: '', cancel: '', chip: '', retry: b.why === 'gave-up' ? t('Retry') : '' }; // acceptance r2: gave-up ⇒ the Retry press (the bridge re-arms)
+  // B-346d (the coordinator's r1228): the line says what the person can DO, in the words they know («sign-in prompts»), and its
+  // button's word names the moment — only where a fresh watch can help (not watched now / the tries stopped / a refusal); a browser
+  // on another machine, or one whose tab started before the watch, has no button (closing the tab is the way)
+  if (b && b.state === 'unknown') {
+    const why = b.why;
+    if (why === 'remote') return { unknown: true, title: '', line: t('This browser runs on another machine — VibeSpace cannot see its sign-in prompts from here. If the page seems stuck, close the tab there.'), desktop: '', cancel: '', chip: '', retry: '' };
+    if (why === 'gave-up') return { unknown: true, title: '', line: t('VibeSpace lost its connection to this browser and stopped retrying, so it cannot see its sign-in prompts. If the page seems stuck, connect again now, or close the tab.'), desktop: '', cancel: '', chip: '', retry: t('Connect again now') };
+    if (why === 'refused' && b.cause) return { unknown: true, title: '', line: t('VibeSpace cannot watch this browser ({cause}), so it cannot see its sign-in prompts. If the page seems stuck, try again now, or close the tab.', { cause: str(b.cause) }), desktop: '', cancel: '', chip: '', retry: t('Try again now') };
+    if (why === 'not-watched') return { unknown: true, title: '', line: t('VibeSpace cannot see this browser’s sign-in prompts right now. If the page seems stuck, watch it again now, or close the tab.'), desktop: '', cancel: '', chip: '', retry: t('Watch again now') };
+    return { unknown: true, title: '', line: t('VibeSpace cannot see this browser’s sign-in prompts (it started before VibeSpace could watch them). If the page seems stuck, go to another page or close the tab.'), desktop: '', cancel: '', chip: '', retry: '' };
+  }
   if (!b || (b.state !== PASSKEY_OPEN_CODE && b.state !== PASSKEY_ASK_CODE)) return null;
   const rp = rpWord(b.rpId) || t('this site');
   if (b.state === PASSKEY_ASK_CODE) {

@@ -27,6 +27,16 @@ export function displayFactOf(digest, profileId) {
   return b && b.display && typeof b.display === 'object' ? b.display : null;
 }
 
+/** B-346d (the coordinator's r1228): the QUIET MARK on the live view's bar for a fact a person needs once a browser run — the
+ *  browser runs out of sight (a hidden window, or headless): a word and its tip (the full sentence), a state, never a door.
+ *  null for every other fact (a substituted kind keeps its line). */
+export function displayMarkOf(fact) {
+  const c = factCode(fact);
+  if (c === 'hidden-window') return { word: t('Hidden window'), tip: displayFactText(fact) };
+  if (c === 'headless') return { word: t('No window'), tip: displayFactText(fact) };
+  return null;
+}
+
 /** One sentence for a browser's launch fact — '' when there is nothing to say (a window as asked, or none asked). */
 export function displayFactText(fact) {
   const c = factCode(fact);

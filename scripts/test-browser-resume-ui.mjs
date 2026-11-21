@@ -48,7 +48,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET, relayBroadcastJs } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // never the machine-global :7/5901 (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket, WebSocketServer } = require('ws');
@@ -713,6 +713,68 @@ else await (async () => {
           if (shot && shot.result?.data) { const f = path.join(PNG_DIR, `after-front-${wpx}-zh.png`); fs.writeFileSync(f, Buffer.from(shot.result.data, 'base64')); console.log(`    PNG ${f} (the row at a ${wpx} px viewport)`); }
           else console.log(`    PNG at ${wpx} px NOT written: the row has no box (${S(r)})`);
         }
+      }
+      await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    }
+    // ── ⑩ B-346d (the coordinator's r1228): THE TWO BANNERS — en and zh, at desk width (1280) and at 390 — judged, then pictured ──
+    //    (1) a browser that runs OUT OF SIGHT: a quiet MARK on the bar (a state, never a door), its line said ONCE a browser run
+    //    (DISPLAY_SAY_MS, 20 s) then the mark alone; (2) the sign-in prompts line says what to do, its button's word naming the
+    //    moment («Watch again now» / «Connect again now»), none for another machine's browser. The digest and the bridge's passkey
+    //    fact are planted in the page (the hub's own words are proved by test-browser-display / test-browser-passkey); PNGs where
+    //    VIBESPACE_TABS_PNG_DIR names a dir.
+    console.log('— ⑩ B-346d: the out-of-sight mark (its line once a run) and the sign-in prompts line with its button — en + zh, 1280 + 390');
+    {
+      const D10 = require(path.join(repo, 'src/browser-display.js'));
+      const PK10 = require(path.join(repo, 'src/browser-passkey.js'));
+      const hidFact = D10.displayFact({ display: { ...D10.displayVerdict({}), xvfb: true }, wanted: { headed: true, args: '--no-sandbox' } });
+      const WORDS = { en: { mark: 'Hidden window', watch: 'Watch again now', connect: 'Connect again now', prompts: /sign-in prompts/ }, zh: { mark: '隐藏窗口', watch: '现在重新监看', connect: '现在重新连接', prompts: /登录提示/ } };
+      const sizeTo = async (wpx) => { await send('Emulation.setDeviceMetricsOverride', { width: wpx, height: 900, deviceScaleFactor: 1, mobile: false }); await ev(`const w = live(); const el = w.element; wm.setMinSize && wm.setMinSize(w.id, null); el.style.left = "0px"; el.style.width = "${wpx - 10}px"; el.style.height = "560px"; window.dispatchEvent(new Event("resize")); const l = L(); l.layoutBar && l.layoutBar(); return true;`); await sleep(300); };
+      // planted on EVERY browser record of the digest (the view reads the shown one by its strip row's profile), again before every read
+      // (the hub's own digest push would put the real fact back)
+      const plantRun = (run) => ev(`const s = L().state(); const d = JSON.parse(JSON.stringify(app._browserProfiles || { profiles: [] })); d.browsers = d.browsers || {}; const ids = new Set(Object.keys(d.browsers)); if (s.target && s.target.profileId) ids.add(s.target.profileId); for (const id of ids) d.browsers[id] = { ...(d.browsers[id] || {}), display: ${S(hidFact)}, startedAt: ${Number(run)} }; const m = { type: 'browser-profiles-updated', ...d }; app._onBrowserProfilesUpdated(m); ${relayBroadcastJs('m')} return [...ids];`); // the page's handlers through the ONE relay (scratch.mjs)
+      const feedPk = (why) => ev(`const s = L().state(); const pid = s.target && s.target.profileId; const fact = ${why ? `{ state: 'passkey', passkey: ${S(null)}, headed: false, since: 0, profileId: pid }` : 'null'}; if (fact) fact.passkey = ${why ? S(PK10.passkeyBlock({ state: 'unknown', why })) : 'null'}; L().ws().onmessage({ data: JSON.stringify({ type: 'passkey', fact, profileId: pid }) }); return !!pid;`);
+      const bars = () => ev(`const root = L().el(); const vis = (e) => !!e && e.style.display !== 'none' && e.getBoundingClientRect().width > 0; const bar = root.querySelector('.browser-live-bar'); const mk = root.querySelector('.browser-live-hidden-mark'); const note = root.querySelector('.browser-live-display-note:not(.browser-live-reset-note)'); const db = root.querySelector('.browser-live-dialog'); const line = root.querySelector('.browser-live-passkey-unknown'); const btn = root.querySelector('.browser-live-passkey-retry');
+        const s = L().state(); const br = rect(bar); const boxes = [bar, vis(note) ? note : null, vis(db) ? db : null].filter(Boolean).map(rect);
+        return { mark: vis(mk) ? { text: mk.textContent, title: mk.title, right: rect(mk).left + rect(mk).width, barRight: br.left + br.width, tag: mk.tagName } : null, folded: (s.folded || []).includes('hidden'), note: vis(note) ? note.textContent : '', line: vis(line) ? line.textContent : '', btn: vis(btn) ? { text: btn.textContent, right: rect(btn).left + rect(btn).width, dbRight: db ? rect(db).left + rect(db).width : 0 } : null,
+          clip: boxes.length ? { left: Math.min(...boxes.map((b) => b.left)), top: Math.min(...boxes.map((b) => b.top)), right: Math.max(...boxes.map((b) => b.left + b.width)), bottom: Math.max(...boxes.map((b) => b.top + b.height)) } : null };`);
+      const shoot = async (name, b, wpx) => {
+        if (!PNG_DIR || !b || !b.clip) return;
+        const c = b.clip, shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, c.left), y: Math.max(0, c.top), width: Math.max(1, Math.min(c.right - c.left, wpx)), height: Math.max(1, c.bottom - c.top), scale: 1 } });
+        if (shot.result?.data) { const f = path.join(PNG_DIR, name); fs.writeFileSync(f, Buffer.from(shot.result.data, 'base64')); console.log(`    PNG ${f}`); }
+      };
+      const markOk = (b, w) => !!b && ((b.mark && b.mark.text === w.mark && b.mark.tag === 'SPAN' && b.mark.right <= b.mark.barRight + 1) || (!b.mark && b.folded)) && (!b.mark || b.mark.title.length > 20);
+      for (const lang of ['en', 'zh']) {
+        const w = WORDS[lang];
+        await send('Runtime.evaluate', { expression: `localStorage.setItem('vibespace.lang', ${S(lang)}); true` });
+        if (!ok(await boot(), `⑩ ${lang}: the app booted again in ${lang}`)) continue;
+        await sleep(600);
+        await ev(`await app.refreshBrowserProfiles(); if (!chatWin()) app.attachSession(${S(SID)}, 'Resume chat', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); return true;`);
+        await until(() => ev('return !!chatWin();'), 10000);
+        await ev(`if (!live()) app.openBrowserLive({ sessionId: ${S(SID)} }); return true;`);
+        await until(() => ev('const l = L(); return !!(l && l.state().connected && l.state().target && l.state().target.profileId);'), 12000);
+        // (1) THE MARK — a new run: its line said, beside the mark (at 1280, then 390 within the same 20 s)
+        await sizeTo(1280);
+        const runA = Date.now();
+        const pids = await plantRun(runA);
+        await sleep(300);
+        const first = {};
+        for (const wpx of [1280, 390]) { await sizeTo(wpx); await plantRun(runA); await sleep(150); first[wpx] = await bars(); await shoot(`b346d-mark-first-${lang}-${wpx}.png`, first[wpx], wpx); }
+        ok(Array.isArray(pids) && pids.length > 0 && [1280, 390].every((x) => markOk(first[x], w) && first[x].note.length > 20) && first[1280].mark && first[1280].note === first[1280].mark.title,
+          `⑩ ${lang}: a browser in a hidden window — the bar's quiet MARK «${w.mark}» (a span, its tip the full sentence; inside the bar, or folded into ⋯ at 390) and its line said, at 1280 and 390`, S(first));
+        // …then the mark alone, once the run's 20 s have passed
+        await sleep(20600);
+        const later = {};
+        for (const wpx of [390, 1280]) { await sizeTo(wpx); await plantRun(runA); await sleep(150); later[wpx] = await bars(); await shoot(`b346d-mark-later-${lang}-${wpx}.png`, later[wpx], wpx); }
+        ok([1280, 390].every((x) => markOk(later[x], w) && later[x].note === ''), `⑩ ${lang}: the line is said ONCE a browser run — after its 20 s the mark alone stays, at 1280 and 390`, S(later));
+        // (2) THE SIGN-IN PROMPTS LINE: what to do, a button whose word names the moment (none for another machine's browser)
+        for (const [why, btnWord] of [['not-watched', w.watch], ['gave-up', w.connect], ['remote', null]]) {
+          await feedPk(why); await sleep(200);
+          const got = {};
+          for (const wpx of [1280, 390]) { await sizeTo(wpx); await plantRun(runA); await feedPk(why); await sleep(150); got[wpx] = await bars(); await shoot(`b346d-signin-${why}-${lang}-${wpx}.png`, got[wpx], wpx); }
+          ok([1280, 390].every((x) => w.prompts.test(got[x].line) && (btnWord ? !!got[x].btn && got[x].btn.text === btnWord && got[x].btn.right <= got[x].btn.dbRight + 1 : !got[x].btn)),
+            `⑩ ${lang}: «${why}» — the line speaks of sign-in prompts and says what to do; ${btnWord ? `its button «${btnWord}», whole inside the bar` : 'no button (another machine: close the tab there)'}, at 1280 and 390`, S(got));
+        }
+        await feedPk(null);
       }
       await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     }

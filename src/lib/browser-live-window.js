@@ -172,7 +172,7 @@ import { surfaceWords } from '../browser-surfaces.js'; // lane browser-surfaces:
 import { createLoopBanner, loopTabRowOf, loopDoorsShown } from './browser-loop-banner.js';
 import { patchPasskeyButtons } from './browser-proposal-card.js'; // lane passkey-ui: the passkey_ask banner's choices = the card's (one approve route)
 import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
-import { displayFactOf, displayFactText, stoppedText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
+import { displayFactOf, displayFactText, stoppedText, displayMarkOf } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 import { enterSubmits } from './chat-enter-keys.js';
 import { pictureSourceOf, pictureForView, BG_SETTLE_MS } from '../browser-picture.js'; // lane browser-x-in-window (B2): THE picture source verdict (PURE — the keeper's own)
 import { deskDoorOf, deskDoorStuck, settlesOnClear } from '../browser-picture.js'; // lane desktop-x-seat-browser: the raw fallback's door (PURE); deskDoorStuck = the .367 seam
@@ -225,9 +225,11 @@ export const URL_MIN_PX = 120;
    *  and the touch Keyboard button (3). */
 /*  lane browser-resume B (§3.9, the owner's ruling 2): "Hand back and continue…" folds with the URL (2) — before the badge
    *  (which folds last); the toggle's own Hand back stays the never-fold act; folded, it is a ⋯ row with its own words and act. */
-export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, close: 0, agentBrowser: 1, badge: 1, bind: 1, continue: 2, url: 2, open: 2, fit: 2, copy: 2, viewers: 3, rec: 3, kbd: 3, kbdBtn: 3, quit: 3, backend: 4, backendLabel: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
+export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, close: 0, agentBrowser: 1, badge: 1, bind: 1, continue: 2, url: 2, open: 2, fit: 2, copy: 2, viewers: 3, rec: 3, kbd: 3, kbdBtn: 3, quit: 3, backend: 4, backendLabel: 4, hidden: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
 /** lane J r2: how long the bar's "input sent · n" stays bright after an act, and a ripple lives. */
 const ECHO_MS = 1600;
+/** B-346d (r1228): how long the out-of-sight line is said, once a browser run, before the bar's mark alone says it. */
+const DISPLAY_SAY_MS = 20000;
 const RIPPLE_MS = 650;
 const RIPPLE_KEEP = 8;
 // (isEditable — an element a caret can live in — is src/lib/keyboard-yield.js's, ONE definition for the view and the yield.
@@ -489,6 +491,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   moreBtn.title = t('More'); moreBtn.setAttribute('aria-label', t('More'));
   // lane J r2: "typing goes to the browser" while this view owns the keyboard, and the "input sent · n" echo
   const kbdChip = document.createElement('span'); kbdChip.className = 'browser-live-kbd-chip'; kbdChip.style.display = 'none';
+  const hiddenMark = document.createElement('span'); hiddenMark.className = 'browser-live-hidden-mark'; hiddenMark.style.display = 'none'; // B-346d r1228: the browser runs out of sight — a quiet mark, a state (never a door)
   kbdChip.innerHTML = KBD_SVG; const kbdText = document.createElement('span'); kbdText.textContent = t('Typing goes to the browser'); kbdChip.appendChild(kbdText);
   kbdChip.title = t('While you drive, every key goes to the page. Press a chat box or a terminal to type there instead — the browser stays yours; click the picture to come back (Ctrl+Backslash and Ctrl+Alt+Left/Right stay the app’s).');
   const echoEl = document.createElement('span'); echoEl.className = 'browser-live-echo'; echoEl.style.display = 'none'; echoEl.setAttribute('aria-live', 'polite');
@@ -504,7 +507,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const closeBtn = document.createElement('button'); closeBtn.className = 'file-tool-btn browser-live-close'; closeBtn.style.display = 'none';
   const quitBtn = document.createElement('button'); quitBtn.className = 'file-tool-btn browser-live-quit'; quitBtn.style.display = 'none';
   const kbdBtn = document.createElement('button'); kbdBtn.className = 'file-tool-btn browser-live-kbd-btn'; kbdBtn.style.display = 'none'; kbdBtn.innerHTML = KBD_SVG; { const s0 = document.createElement('span'); s0.textContent = t('Keyboard'); kbdBtn.appendChild(s0); } kbdBtn.title = t('Show the keyboard to type into the page');
-  bar.append(modeBadge, takeBtn, handBtn, contBtn, closeBtn, quitBtn, kbdChip, kbdBtn, echoEl, bindBtn, urlEl, openBtn, viewersEl, recEl, fitChip, copyChip, backendBtn, backendLabelEl, tabsBtn, consBtn, traceBtn, reBtn, abBtn, moreBtn);
+  bar.append(modeBadge, takeBtn, handBtn, contBtn, closeBtn, quitBtn, kbdChip, kbdBtn, echoEl, bindBtn, urlEl, openBtn, hiddenMark, viewersEl, recEl, fitChip, copyChip, backendBtn, backendLabelEl, tabsBtn, consBtn, traceBtn, reBtn, abBtn, moreBtn);
   // BROWSE YOURSELF: THE ADDRESS ROW (his windows only) — Back · Forward · Reload · the address (web addresses only); the
   // daemon's own verbs under HIS session (the screencast has no omnibox: without this a fresh profile is a blank page)
   const addrRow = document.createElement('div'); addrRow.className = 'browser-live-address'; addrRow.style.display = 'none';
@@ -2075,11 +2078,28 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   recEl.onclick = () => { const pid = st.target && st.target.profileId ? st.target.profileId : null; if (app.openBrowserProfiles) app.openBrowserProfiles({ focus: pid }); else showToast(t('Agent browser is not available'), { type: 'warn' }); };
   /** P4 (§7.4): the browser's name + the blocked-claim banner, both read from the profile digest (never fetched here). */
   /** lane headless-fallback: the shown browser's launch fact, from the digest (the row's record id — an ephemeral / a helper's too). */
+  // B-346d (the coordinator's r1228): a browser that runs OUT OF SIGHT (a hidden window, headless) is a quiet MARK on the bar, its
+  // tip the full sentence; its LINE is said once a browser run — for DISPLAY_SAY_MS from the first time this view shows that run
+  // (keyed by its record's start), then the mark alone. A run started again says it again; every other fact keeps its line.
+  const saidRuns = new Map(); // `${profileId}:${startedAt}` → when this view first said it
   const renderDisplay = () => {
     const r = (st.rows || []).find((x) => x && x.ref === curRef()) || null;
-    const txt = displayFactText(displayFactOf(app._browserProfiles, (r && r.profileId) || (st.target && st.target.profileId) || null));
-    if (displayNote.textContent !== txt) displayNote.textContent = txt;
-    displayNote.style.display = txt ? '' : 'none';
+    const pid = (r && r.profileId) || (st.target && st.target.profileId) || null;
+    const fact = displayFactOf(app._browserProfiles, pid);
+    const txt = displayFactText(fact), mark = displayMarkOf(fact);
+    let line = txt;
+    if (mark) {
+      const rec = app._browserProfiles && app._browserProfiles.browsers && pid ? app._browserProfiles.browsers[pid] : null;
+      const run = `${pid}:${(rec && rec.startedAt) || ''}`;
+      if (!saidRuns.has(run)) { saidRuns.set(run, Date.now()); setTimeout(() => { if (!st.closed) renderDisplay(); }, DISPLAY_SAY_MS + 50); }
+      if (Date.now() - saidRuns.get(run) >= DISPLAY_SAY_MS) line = '';
+    }
+    if (displayNote.textContent !== line) displayNote.textContent = line;
+    displayNote.style.display = line ? '' : 'none';
+    const mw = mark ? mark.word : '', mt = mark ? mark.tip : '';
+    if (hiddenMark.textContent !== mw) hiddenMark.textContent = mw;
+    if (hiddenMark.title !== mt) hiddenMark.title = mt;
+    hiddenMark.style.display = mark ? '' : 'none';
     renderPicture(); // lane browser-x-in-window: the record decides the picture (a restart on another road switches it)
   };
   const renderBackend = () => {
@@ -2143,7 +2163,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
 
   // ── lane I: THE FOLD — every item keeps its words on one line; what the bar has no room for goes into ⋯ by
   // LIVE_BAR_PRIORITY (PURE barLayout; the ruler + observers + rAF live in bar-fold.js, bound to this window's signal) ──
-  const barItems = { badge: modeBadge, take: takeBtn, handback: handBtn, continue: contBtn, close: closeBtn, quit: quitBtn, kbd: kbdChip, kbdBtn, echo: echoEl, copy: copyChip, bind: bindBtn, url: urlEl, open: openBtn, viewers: viewersEl, rec: recEl, fit: fitChip, backend: backendBtn, backendLabel: backendLabelEl, tabs: tabsBtn, console: consBtn, trace: traceBtn, reconnect: reBtn, agentBrowser: abBtn };
+  const barItems = { badge: modeBadge, take: takeBtn, handback: handBtn, continue: contBtn, close: closeBtn, quit: quitBtn, kbd: kbdChip, kbdBtn, hidden: hiddenMark, echo: echoEl, copy: copyChip, bind: bindBtn, url: urlEl, open: openBtn, viewers: viewersEl, rec: recEl, fit: fitChip, backend: backendBtn, backendLabel: backendLabelEl, tabs: tabsBtn, console: consBtn, trace: traceBtn, reconnect: reBtn, agentBrowser: abBtn };
   const fold = createBarFold(bar, {
     more: moreBtn,
     items: () => Object.entries(barItems).map(([key, el]) => ({ key, el, priority: key === 'kbd' && st.claimed && (ky.yielded || ky.dialogHolds) ? LIVE_BAR_PRIORITY.badge : LIVE_BAR_PRIORITY[key], flexMin: key === 'url' ? URL_MIN_PX : undefined })), // lane takeover-keyboard: where the keys went outranks the rest while yielded
@@ -2169,6 +2189,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     for (const key of out) {
       if (key === 'badge') rows.push({ caption: modeBadge.title || modeBadge.textContent, title: modeBadge.title }); // who drives, in full (an info row — the toggle is the act)
       else if (key === 'kbd') rows.push({ caption: kbdChip.textContent, title: kbdChip.title }); // lane J r2's chip, folded: an info row
+      else if (key === 'hidden') rows.push({ caption: hiddenMark.textContent, title: hiddenMark.title }); // B-346d r1228: the quiet mark, folded: an info row
       else if (key === 'kbdBtn') rows.push({ label: t('Keyboard'), title: kbdBtn.title, action: () => kbdBtn.onclick() }); // BROWSE YOURSELF: the touch keyboard, folded
       else if (key === 'continue') rows.push({ label: contBtn.textContent, title: contBtn.title, action: () => contBtn.onclick() }); // lane browser-resume B: the between-turns hand-back, folded
       else if (key === 'quit') rows.push({ label: quitBtn.textContent, title: quitBtn.title, action: () => quitBtn.onclick() }); // BROWSE YOURSELF: "Quit the whole browser", folded on a narrow bar (Close never folds)

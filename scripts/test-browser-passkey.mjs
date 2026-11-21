@@ -1110,7 +1110,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const words = fact && PK.passkeyWords(fact.passkey, null);
     X.world.refuse = false; await X.D.arm(PID);
     const back = { state: X.w() && X.w().state, fact: X.D.passkeyFactOf({ profileId: PID, browserKey: HK }) };
-    ok(n1 === 5 && n2 === 5 && !!fact && fact.passkey.state === 'unknown' && fact.passkey.why === 'gave-up' && fact.passkey.text === PK.GAVE_UP_TEXT && words && words.unknown && /stopped retrying/.test(words.line) && words.retry === 'Retry' && X.events.some((e) => e.kind === 'passkey' && e.why === 'gave-up') && back.state === 'open' && back.fact === null,
+    ok(n1 === 5 && n2 === 5 && !!fact && fact.passkey.state === 'unknown' && fact.passkey.why === 'gave-up' && fact.passkey.text === PK.GAVE_UP_TEXT && words && words.unknown && /stopped retrying/.test(words.line) && words.retry === 'Connect again now' /* B-346d r1228: the button's word names the moment */ && X.events.some((e) => e.kind === 'passkey' && e.why === 'gave-up') && back.state === 'open' && back.fact === null,
       '⑨r2 the re-arm is BOUNDED: a refused port (ECONNREFUSED reaches the close) is tried 5 times with a doubling backoff, then never again — his fact says the watch stopped (`gave-up`, its own words), never the endless 2-s loop; the next arm starts over', { n1, n2, fact: fact && fact.passkey, back });
     X.D.shutdown();
   }
@@ -1120,7 +1120,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     await X.lease({ kind: 'human-start', profileId: PID, key: HK, launched: true });
     const fact = X.D.passkeyFactOf({ profileId: PID, browserKey: HK }), row = X.D.factFor({ profileId: PID, browserKey: HK, consume: false }).passkey;
     const words = fact && PK.passkeyWords(fact.passkey, null);
-    ok(!X.w() && !!fact && fact.passkey.why === 'remote' && fact.passkey.text === PK.REMOTE_TEXT && row && row.text === PK.REMOTE_TEXT && words && words.line === PK.REMOTE_TEXT && !/started before/.test(words.line),
+    ok(!X.w() && !!fact && fact.passkey.why === 'remote' && fact.passkey.text === PK.REMOTE_TEXT && row && row.text === PK.REMOTE_TEXT && words && /^This browser runs on another machine — VibeSpace cannot see its sign-in prompts from here\. /.test(words.line) /* B-346d r1228: the view's own words; the agent's REMOTE_TEXT above */ && !/started before/.test(words.line),
       '⑨r2 a paired machine\'s browser (the hub never watches it) says the TRUE cause — it runs on another machine — never the false «started before VibeSpace could watch them»', { fact: fact && fact.passkey, row });
     X.D.shutdown();
   }
@@ -1613,8 +1613,29 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
     const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
     const unk = (live.split('    } else if (pkUnknown) {')[1] || '').split('\n    }\n')[0];
-    ok(words.retry === 'Retry' && plain.retry === '' && /Retry in the browser window/.test(PK.GAVE_UP_TEXT) && !/the next action on this browser reconnects/.test(PK.GAVE_UP_TEXT + words.line) && arms.length === a0 + 1 && !!arms[a0] && arms[a0].by === 'person' && arms[0].by === 'person' && !refused && /textBtn\(pkUnknown\.retry, \(\) => send\(\{ type: 'passkey-retry' \}\)/.test(unk),
+    ok(words.retry === 'Connect again now' && plain.retry === '' && /«Connect again now» in the browser window/.test(PK.GAVE_UP_TEXT) && !/the next action on this browser reconnects/.test(PK.GAVE_UP_TEXT + words.line) && arms.length === a0 + 1 && !!arms[a0] && arms[a0].by === 'person' && arms[0].by === 'person' && !refused && /textBtn\(pkUnknown\.retry, \(\) => send\(\{ type: 'passkey-retry' \}\)/.test(unk),
       '⑨r3 TO VERIFY 2: the gave-up line names a door that WORKS — his window draws a Retry press (only on gave-up), the bridge turns `passkey-retry` into a fresh arm (the tries start over; his own browsing window arms as HIM — ⑨r4, the opener a hub restart keeps); never the false «the next action on this browser reconnects» (his clicks never re-arm)', { retry: words.retry, plain: plain.retry, arms, refused });
+  }
+  // B-346d (the coordinator's r1228): THE LINE SAYS WHAT THE PERSON CAN DO, in their words («sign-in prompts»), its button's word
+  // naming the moment — where a fresh watch can help (not watched now / the tries stopped / a refusal); another machine's browser
+  // and a tab that started before the watch have no button (closing the tab is the way). CONTROL: the release's words (no button
+  // on «not watched», «passkey requests», nothing to do) — RED
+  {
+    const W1 = (why, cause) => PK.passkeyWords(PK.passkeyBlock({ state: 'unknown', ...(why ? { why } : {}), ...(cause ? { cause } : {}) }), null);
+    const cases = { 'not-watched': W1('not-watched'), 'gave-up': W1('gave-up'), refused: W1('refused', 'the browser answered no CDP url'), remote: W1('remote'), plain: W1(null) };
+    const btn = Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, v && v.retry]));
+    const lines = Object.values(cases).map((v) => v && v.line);
+    ok(btn['not-watched'] === 'Watch again now' && btn['gave-up'] === 'Connect again now' && btn.refused === 'Try again now' && btn.remote === '' && btn.plain === '',
+      'B-346d r1228: the button\'s word names the moment — «Watch again now» (not watched), «Connect again now» (the tries stopped), «Try again now» (a refusal); none for another machine\'s browser or a tab that started before the watch', btn);
+    ok(lines.every((l) => /sign-in prompts/.test(l) && /If the page seems stuck/.test(l) && !/passkey requests/.test(l)) && cases.refused.line.includes('(the browser answered no CDP url)') && /close the tab there\.$/.test(cases.remote.line),
+      'B-346d r1228: every line says, in the person\'s words («sign-in prompts», never «passkey requests»), what to do if the page seems stuck; a refusal keeps its cause', lines);
+    const psrc = fs.readFileSync(path.join(REPO, 'src/browser-passkey.js'), 'utf8');
+    const NW_BTN = ", retry: t('Watch again now') };";
+    const MUTW = mutantCopies('browser-passkey-b346d-words', REPO);
+    const relPath = MUTW.write('src/browser-passkey.js', anchored(psrc, NW_BTN, ", retry: '' };", 'b346d r1228: the not-watched line\'s button'), 'b346d-no-watch-button');
+    const PKrel = require(relPath); // the copy's own requires are rebased onto the tree (mutant-copy)
+    const rel = PKrel.passkeyWords(PKrel.passkeyBlock({ state: 'unknown', why: 'not-watched' }), null);
+    ok(rel && rel.retry === '', 'B-346d r1228 CONTROL: a copy whose not-watched line carries no button — the button leg above reads «no button» there — RED', rel && rel.retry);
   }
   // ⑨r4 — acceptance r3 of lane passkey-browse-yourself (cd3185a84): every leg below is RED on cd3185a84 by name
   console.log('⑨r4 acceptance r3: one WebAuthn request per page (Chrome as measured) — a modal request ends the open autofill one first; the once-authenticator leaves with its own ceremony; a refusal goes with its browser; «not watching right now»; the cancel names its site');
