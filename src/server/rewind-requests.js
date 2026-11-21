@@ -49,7 +49,12 @@ function conversationOut(session, now = Date.now()) {
 // fence see it exactly as a conversation rewind out. Held in the hub's memory only: a hub restart forgets it (said in the kb).
 const FILES_OUT = new WeakMap();   // conversation → {id, at, files: true}
 function setFilesOut(session, mark) { if (!session) return; if (mark) FILES_OUT.set(session, mark); else FILES_OUT.delete(session); }
-function filesOutOf(session) { return (session && FILES_OUT.get(session)) || null; }
+// tied to the CLI process it waits on (its reader): a new process (a respawn, a CLI that died) leaves no mark behind
+function filesOutOf(session) {
+  const m = session ? FILES_OUT.get(session) : null;
+  if (m && m.pty && session.pty !== m.pty) { FILES_OUT.delete(session); return null; }
+  return m || null;
+}
 function rewindOut(session, now = Date.now()) { return filesOutOf(session) || conversationOut(session, now); }
 
 /** WHEN THE REQUEST WENT OUT, by the hub's clock: the press's own mark when it is this request; else the wrapper's stamp,

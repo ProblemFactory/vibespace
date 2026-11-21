@@ -584,7 +584,7 @@ say('— §6 the claude road');
   const verbs = require(path.join(REPO, 'src/automation-keys.js')).VERBS || [];
   // a road that PRESSES one (the door, its module, the CLI verb, the ws frame) — the For-you reply route only maps the typing
   // path's refusal code `rewind_out` (one life), it presses nothing
-  const routeHits = spawnSync('git', ['-C', REPO, 'grep', '-l', '-F', '-e', 'requestRewind', '-e', 'rewind-requests', '-e', 'rewind_conversation', '-e', "type: 'rewind'", '-e', 'type: "rewind"', '-e', 'rewindRoad', '-e', 'rewindRequest', '-e', 'buildRewind', '-e', 'REWIND_REQUEST_PREFIX', '--', 'src/routes', 'src/server/automation-engine.js', 'data/bin/vibespace-msg', 'data/bin/vibespace-task'], { encoding: 'utf8' }).stdout.trim();
+  const routeHits = spawnSync('git', ['-C', REPO, 'grep', '-l', '-F', '-e', 'requestRewind', '-e', 'rewind-requests', '-e', 'rewind_conversation', '-e', "type: 'rewind'", '-e', 'type: "rewind"', '-e', 'rewindRoad', '-e', 'rewindRequest', '-e', 'buildRewind', '-e', 'REWIND_REQUEST_PREFIX', '-e', 'rewind_files', '-e', 'REWIND_FILES_PREFIX', '-e', 'rewindFilesRoad', '-e', 'rewindFilesRequest', '--', 'src/routes', 'src/server/automation-engine.js', 'data/bin/vibespace-msg', 'data/bin/vibespace-task'], { encoding: 'utf8' }).stdout.trim();
   ok(JSON.stringify(callers.sort()) === JSON.stringify(['src/server/rewind-files-door.js', 'src/server/rewind-requests.js', 'src/ws-handler.js']) && /by: ws\._personPage === true \? byOfWs\(ws\) : null/.test(wsCase)
     && /by = ws\._personPage === true \? byOfWs\(ws\) : null/.test(filesCase) && JSON.stringify(filesCallers) === '["src/ws-handler.js"]'
     && /reqId: typeof data\.reqId === 'string' \? data\.reqId : null/.test(wsCase)

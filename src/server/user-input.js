@@ -88,7 +88,10 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     // B-437e: a rewind is out — the CLI would run it FIRST and this message after it: the person's words wait, refused by
     // name with their door (the answer, at most the seconds left of the stated expiry; or Stop) — never past the expiry;
     // nothing written; an agent's dispatch is not the person's mistake
-    const fence = origin !== 'dispatch' ? require('./rewind-requests.js').rewindFenceLeft(session) : 0;
+    // B-437e files tier (its reader): a FILES press out holds an agent's dispatch too — a compaction while the CLI puts files back
+    // would leave «both» half done (the dispatch road reads a refusal as «not sent» and gives its hold back)
+    const RQF = require('./rewind-requests.js');
+    const fence = origin !== 'dispatch' ? RQF.rewindFenceLeft(session) : RQF.filesOutOf(session) ? RQF.rewindFenceLeft(session) : 0;
     if (fence > 0 && origin === 'group-handover') return { ok: false, code: 'rewind_out', left: Math.ceil(fence / 1000), error: 'A rewind is on its way — the group messages were not handed over; they keep waiting for the agent\'s next turn.' };   // B-02a3: nothing is lost
     if (fence > 0) { const left = Math.ceil(fence / 1000); return { ok: false, code: 'rewind_out', left, i18n: { key: 'A rewind is on its way — your message was not sent. Send it after the rewind answers (in {s} s at the latest), or stop the conversation.', params: { s: left } }, error: `A rewind is on its way — this message was not sent. Send it after the rewind answers (in ${left} s at the latest), or stop the conversation.` }; }
     const handing = origin === 'group-handover';   // B-02a3: the group messages a person's press hands to the RUNNING turn

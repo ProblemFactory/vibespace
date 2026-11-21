@@ -17,7 +17,7 @@
 //      or rebuilt from the transcript's first byte (the store's span → rebuildHistory `fromStart`); the listener rides a REAL
 //      rebuild; «No files were restored» read only from the program measured (the init's version)
 //   RED CONTROLS (anchored copies): the press without its re-check, the door without its dark check, the press without both dark
-//   gates, «both» without the conversation's dry run first, a files press tier one cannot see
+//   gates, «both» without the conversation's dry run (first and right before the files), a files press tier one cannot see
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -32,6 +32,8 @@ const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
 const D = require(path.join(REPO, 'src/server/rewind-files-door.js'));
 const RQ = require(path.join(REPO, 'src/server/rewind-requests.js'));
 const { rebuildHistory } = require(path.join(REPO, 'src/normalizers.js'));
+const { createUserInputSender } = require(path.join(REPO, 'src/server/user-input.js'));
+const senderOf = (mod, id, session) => mod.createUserInputSender({ activeSessions: new Map([[id, session]]), adapterRegistry: { get: () => null }, BUFFERS_DIR: os.tmpdir(), broadcastToSession() { }, feedLive() { }, autoResume: null, reattachLocalPty: () => false, ptyQuietSince: () => null, log() { } });
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const F = require(path.join(REPO, 'src/rewind-files.js'));
 const { ok, report } = checker();
@@ -50,6 +52,7 @@ const REC = {
   result: () => ({ type: 'result', subtype: 'success', is_error: false, result: '', session_id: 's' }),
   init: (v) => ({ type: 'system', subtype: 'init', session_id: 's', cwd: '/w', model: 'claude-sonnet-4-5', tools: [], claude_code_version: v }),
   answer: (requestId, body) => ({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: body } }),
+  empty: (requestId) => ({ type: 'control_response', response: { subtype: 'success', request_id: requestId } }),   // a success with no body
   error: (requestId, text) => ({ type: 'control_response', response: { subtype: 'error', request_id: requestId, error: text } }),
 };
 const DRY = (files = ['/w/a.js']) => ({ canRewind: true, filesChanged: files, insertions: 2, deletions: 1 });
@@ -63,7 +66,7 @@ function conv({ answers = [], fact = true, host = null, whole = true, cli = F.RE
   if (whole) mm.recordsFromStart = true;
   const written = [], queue = [...answers];
   const session = { mode: 'chat', backend: 'claude', _normalizer: mm, _historyLoaded: true, ...(fact ? { _fileCheckpoints: true } : {}), ...(host ? { host } : {}),
-    pty: { write: (line) => { written.push(line); let q = null; try { q = JSON.parse(line); } catch { } if (q && String(q.request_id || '').startsWith('vsf-') && queue.length) { const a = queue.shift(); if (a !== 'silent') setImmediate(() => mm.processLive(a.error ? REC.error(q.request_id, a.error) : REC.answer(q.request_id, a))); } } } };
+    pty: { write: (line) => { written.push(line); let q = null; try { q = JSON.parse(line); } catch { } if (q && String(q.request_id || '').startsWith('vsf-') && queue.length) { const a = queue.shift(); if (a !== 'silent') setImmediate(() => mm.processLive(a === 'empty' ? REC.empty(q.request_id) : a.error ? REC.error(q.request_id, a.error) : REC.answer(q.request_id, a))); } } } };
   const pid = (mm.messages.find((m) => m && m.role === 'user') || {}).id;   // the person's card: the page names it by its id
   return { mm, ops, session, written, recs, pid, sent: () => written.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean) };
 }
@@ -208,6 +211,40 @@ console.log('— ④ the press');
   console.log(`    (the door's refusals: ${cases.map(([n, , r]) => `${n} → ${r.reason}`).join(' · ')} · a press whose write failed → ${JSON.stringify(rb.results && rb.results.files)})`);
   ok(cases.every(([, c, r]) => r.ok === false && pressed(c) === 0 && !r.results) && rb.ok && rb.results.files.sent === false && rb.results.files.ok === false && rb.outcome.maybePartial === false && pressed(broken) === 0,
     '④ «SENT FALSE» ON EVERY REFUSAL THE DOOR MAKES (r1307): dark, a page behind, changed since, not a choice, a rewind out — refused with nothing pressed; a press whose write failed carries sent: false, and the outcome says «nothing put back»');
+  // ITS READER's round (the second follow): an agent's dispatch held while a FILES press is out; the mark tied to its CLI process
+  const fd = conv();
+  const typing = senderOf({ createUserInputSender }, 'rf-fence', fd.session);
+  const before = typing.send('rf-fence', '/compact', { origin: 'dispatch' });
+  RQ.setFilesOut(fd.session, { id: 'vsf-x', at: Date.now(), files: true, pty: fd.session.pty });
+  const during = typing.send('rf-fence', '/compact', { origin: 'dispatch' });
+  fd.session.pty = { write: () => { } };   // a new CLI process (a respawn)
+  const respawned = RQ.filesOutOf(fd.session), afterRespawn = typing.send('rf-fence', '/compact', { origin: 'dispatch' });
+  RQ.setFilesOut(fd.session, null);
+  console.log(`    (dispatch: before ${before.code || 'past the fence'} · during a files press ${during.code} · after a respawn ${afterRespawn.code || 'past the fence'})`);
+  ok(before.code !== 'rewind_out' && during.ok === false && during.code === 'rewind_out' && respawned === null && afterRespawn.code !== 'rewind_out',
+    '④ AN AGENT\'s DISPATCH (a compaction) WAITS while a files press is out — it would leave «both» half done; the mark is TIED to its CLI process: a respawn leaves none behind');
+  // «both» asks the conversation AGAIN right before the files: a person message that arrived during the judge refuses here
+  let open2 = null, reached2 = null;
+  const gate2 = new Promise((r) => { open2 = r; }), atStat2 = new Promise((r) => { reached2 = r; });
+  const mv = conv({ answers: [DRY(), PRESS] });
+  const pr2 = D.pressFiles({ session: mv.session, msgId: mv.pid, by: HUMAN, choice: 'both', drawn, lastSeenUuid: U(1), stat: async (q) => { reached2(); await gate2; return MT[q] ?? null; } });
+  await atStat2;
+  mv.mm.processLive(REC.send('and one more thing', 'm-9')); mv.mm.processLive(REC.stamp('m-9', U(9)));   // a message arrived while the files were judged
+  open2();
+  const r2 = await pr2;
+  console.log(`    (a message during the judge: refused ${r2.reason})`);
+  ok(!r2.ok && pressed(mv) === 0 && RQ.filesOutOf(mv.session) === null, '④ «both» ASKS THE CONVERSATION AGAIN right before the files (its reader): a message that arrived while the files were judged — refused by the conversation\'s own verdict, NOTHING put back, the mark released', r2);
+  // a press answered with an EMPTY body: answered — never a mark held ten minutes
+  const em = conv({ answers: [DRY(), 'empty'] });
+  const re = await D.pressFiles({ session: em.session, msgId: em.pid, by: HUMAN, choice: 'files', drawn, stat: stat(MT), pressMs: 5000 });
+  ok(re.ok && re.results.files.ok === false && re.results.files.reason === 'no-answer' && re.outcome.maybePartial === true && RQ.filesOutOf(em.session) === null,
+    '④ a press ANSWERED WITH NO BODY: «some files may have been put back» (no-answer), and the mark released at once (its reader: it was held ten minutes)', re.results.files);
+  // the hold's own bound: a press never answered releases its mark when the hold ends
+  const hd = conv({ answers: [DRY(), 'silent'] });
+  const rh = await D.pressFiles({ session: hd.session, msgId: hd.pid, by: HUMAN, choice: 'files', drawn, stat: stat(MT), pressMs: 20, holdMs: 1 });
+  const heldAt = RQ.filesOutOf(hd.session);
+  while (RQ.filesOutOf(hd.session)) await new Promise((r) => setTimeout(r, 5));   // waits for what happens: the hold's end
+  ok(rh.ok && rh.outcome.maybePartial === true && !!heldAt && RQ.filesOutOf(hd.session) === null, '④ a press never answered: the mark held, then released when its hold ends (its reader: no leg had it)');
 }
 
 console.log('— ⑤ file times');
@@ -222,6 +259,14 @@ console.log('— ⑤ file times');
   fs.writeFileSync(f, 'x'); fs.utimesSync(f, new Date(at(10)), new Date(at(10)));
   const local = await D.timesOf({}, [f, path.join(dir, 'gone.txt')]);
   fs.rmSync(dir, { recursive: true, force: true });
+  // ONE AFTER ANOTHER: /w/1 answers only once /w/2 is asked — all at once (the old road) it reads; one after another it reaches its
+  // own bound first («could not be checked») and /w/2 then reads
+  let release1 = null; const p1 = new Promise((r) => { release1 = r; });
+  const seq = await D.timesOf({}, ['/w/1', '/w/2'], { stat: (p) => (p === '/w/1' ? p1.then(() => at(10)) : (release1(), Promise.resolve(at(20)))), statMs: 40, judgeMs: 5000 });
+  const all = await D.timesOf({}, ['/w/1', '/w/2', '/w/3'], { stat: async () => at(10), statMs: 40, judgeMs: 5000 });
+  const spent = await D.timesOf({}, ['/w/1', '/w/2'], { stat: () => new Promise(() => { }), statMs: 5000, judgeMs: 40 });
+  ok(seq['/w/1'] === null && seq['/w/2'] === at(20) && Object.values(all).every((v) => v === at(10)) && Object.values(spent).every((v) => v === null),
+    '⑤ ONE AFTER ANOTHER under ONE bound (its reader: JUDGE_MS never applied): a file is asked only when the one before it answered or reached its own bound; once the bound for all is spent, the rest read «could not be checked»', { seq, all, spent });
   ok(Math.round(local[f]) === at(10) && local[path.join(dir, 'gone.txt')] === null && !/\bfsp?\.(?:promises\.)?stat\(|require\('fs\/promises'\)/.test(SRC) && /new SafeFs\(\{ name: 'rewind-stat', poolSize: 1/.test(SRC),
     '⑤ this machine: the door\'s own ONE-WORKER file pool behind the mount door (a hung storage ends a worker, never a thread of the hub\'s shared pool — MINOR 8); a file that is not there ⇒ null', local);
 }
@@ -249,7 +294,7 @@ console.log('— ⑥ whole records, the version');
   const spans = [[{ messages: arr, spanStart: 0 }, arr, true], [{ messages: arr, spanStart: 33554432 }, arr, false], [null, arr, false], [{ messages: [...arr], spanStart: 0 }, arr, false]].map(([e, j, want]) => SS._spanFromStart(e, j) === want);
   ok(spans.every(Boolean), '⑥ «whole» only when the store\'s span reaches the start (r1307): the parse IS the cache entry\'s array and its span starts at byte 0 — a tail read (span past 0), no entry, another array: not whole', spans);
   ok(/this\._fromStart = spanFromStart\(historySessionId \? _jsonlCache\.get\(historySessionId\) : null, jsonl\);/.test(store) && /get fromStart\(\) \{ this\._ensureParsed\(\); return this\._fromStart === true; \}/.test(store)
-    && /fromStart: sm\.fromStart === true \}\);/.test(wh) && /\{ session\._historyLoaded = true; session\._normalizer\.recordsFromStart = true; \}/.test(wc),
+    && /fromStart: sm\.fromStart === true && !session\.host \}\);/.test(wh) && /\{ session\._historyLoaded = true; session\._normalizer\.recordsFromStart = true; \}/.test(wc),
     '⑥ THE WIRING: the session store says its records reach the transcript\'s first byte (the span the tail reader kept starts at 0), the attach rebuild passes it on, a conversation born here is whole from its birth');
   const v1 = conv({ answers: [DRY(), { error: 'Failed to rewind: No files were restored: 1 file failed (backup missing, or the file could not be updated)' }], cli: '2.1.322' });
   const v2 = conv({ answers: [DRY(), { error: 'Failed to rewind: No files were restored: 1 file failed (backup missing, or the file could not be updated)' }], cli: '2.1.399' });
@@ -282,11 +327,25 @@ console.log('— red controls');
   const dp = conv({ fact: false, answers: [DRY(), PRESS] });
   await noDarkPress.pressFiles({ session: dp.session, msgId: dp.pid, by: HUMAN, choice: 'files', drawn, stat: stat(MT) });
   ok(dp.sent().some((q) => q.request && q.request.subtype === 'rewind_files' && !q.request.dry_run), 'RED CONTROL (the press without BOTH dark gates — its own and the verdict\'s fact): a conversation without the checkpoint fact has its files put back');
-  const noFirst = M.load('src/server/rewind-files-door.js', anchored(SRC, '    if (!c.ok) return c;\n', '', 'both without the conversation first'), 'no-conversation-first');
+  // the second follow re-asks the conversation right before the files: removing the FIRST ask alone is caught there (nothing put back);
+  // the half-done press MAJOR 2 named needs BOTH asks gone
+  const noFirst = M.load('src/server/rewind-files-door.js', anchored(anchored(SRC, '    if (!c.ok) return c;\n', '', 'both without the conversation first'), '      if (!c2.ok) return c2;\n', '', 'nor its re-ask'), 'no-conversation-first');
   const nf = conv({ answers: [DRY(), PRESS] });
   const rnf = await noFirst.pressFiles({ session: nf.session, msgId: nf.pid, by: HUMAN, choice: 'both', drawn, lastSeenUuid: U(9), stat: stat(MT) });
   ok(nf.sent().some((q) => q.request && q.request.subtype === 'rewind_files' && !q.request.dry_run) && rnf.ok && rnf.outcome.failed === 'conversation',
-    'RED CONTROL («both» without the conversation\'s dry run first): a page behind the conversation has its files put back, then the conversation step is refused — the half-done press MAJOR 2 named');
+    'RED CONTROL («both» without the conversation\'s dry run — neither first nor right before the files): a page behind the conversation has its files put back, then the conversation step is refused — the half-done press MAJOR 2 named');
+  const USRC = read('src/server/user-input.js');
+  const unfenced = M.load('src/server/user-input.js', anchored(USRC, "    const fence = origin !== 'dispatch' ? RQF.rewindFenceLeft(session) : RQF.filesOutOf(session) ? RQF.rewindFenceLeft(session) : 0;", "    const fence = origin !== 'dispatch' ? RQF.rewindFenceLeft(session) : 0;", 'dispatch unfenced'), 'dispatch-unfenced');
+  const ud = conv(); RQ.setFilesOut(ud.session, { id: 'vsf-y', at: Date.now(), files: true, pty: ud.session.pty });
+  const passed = senderOf(unfenced, 'rf-unf', ud.session).send('rf-unf', '/compact', { origin: 'dispatch' }); RQ.setFilesOut(ud.session, null);
+  ok(passed.code !== 'rewind_out', 'RED CONTROL (an agent\'s dispatch unfenced): a compaction goes out while a files press puts files back');
+  const noRecheck = M.load('src/server/rewind-files-door.js', anchored(SRC, "      if (!c2.ok) return c2;\n", '', 'no re-check before the press'), 'no-recheck');
+  let open3 = null, reached3 = null;
+  const gate3 = new Promise((r) => { open3 = r; }), atStat3 = new Promise((r) => { reached3 = r; });
+  const nr = conv({ answers: [DRY(), PRESS] });
+  const pr3 = noRecheck.pressFiles({ session: nr.session, msgId: nr.pid, by: HUMAN, choice: 'both', drawn, lastSeenUuid: U(1), stat: async (q) => { reached3(); await gate3; return MT[q] ?? null; } });
+  await atStat3; nr.mm.processLive(REC.send('and one more thing', 'm-9')); nr.mm.processLive(REC.stamp('m-9', U(9))); open3(); await pr3;
+  ok(nr.sent().some((q) => q.request && q.request.subtype === 'rewind_files' && !q.request.dry_run), 'RED CONTROL (no re-check before the press): a message that arrived during the judge — the files are put back, then the conversation step refused');
   const RSRC = read('src/server/rewind-requests.js');
   const blind = M.load('src/server/rewind-requests.js', anchored(RSRC, 'function rewindOut(session, now = Date.now()) { return filesOutOf(session) || conversationOut(session, now); }', 'function rewindOut(session, now = Date.now()) { return conversationOut(session, now); }', 'files press unseen'), 'files-out-unseen');
   const bl = conv(), mark = { id: null, at: Date.now(), files: true };

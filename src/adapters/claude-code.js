@@ -575,7 +575,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
     return { line: JSON.stringify(req), requestId: req.request_id };
   }
 
-  // B-437e files tier: a rewind_files BODY (the PURE src/rewind-files.js filesRequestOf — its one spelling) under a vsf- id ⇒ kb-file-structure «rewind-files-door.js»
+  // B-437e files tier: a rewind_files BODY (the PURE src/rewind-files.js filesRequestOf — its one spelling) under a vsf- id ⇒ kb-features «the FILES tier, the server half»
   static rewindFilesRequest(body, { id = null } = {}) {
     if (!body || body.subtype !== 'rewind_files' || typeof body.user_message_id !== 'string' || !body.user_message_id) throw new Error('rewind files: no request body');
     const { REWIND_FILES_PREFIX } = require('../rewind-cut.js');

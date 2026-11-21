@@ -1674,7 +1674,7 @@ function registerWsHandler(wss, ctx) {
                   // transcript worker, the merge in slices — measured 380–880 ms of one sync hold per 120 MB rollout); raw() then reads it.
                   // L3: its turn in the hub's line — a person's window first, the first attach of a bulk resume's conversation after them
                   await readOffLoop(sm, { bulk: bulkRead, label: data.sessionId });
-                  await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null, fromStart: sm.fromStart === true }); // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
+                  await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null, fromStart: sm.fromStart === true && !session.host });   // B-437e: a paired machine's copy may be a stale fetch: never whole on a rebuild // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
                 }
                 finally { clearInterval(progressTimer); }
                 // A kill / CLI exit can land during the (now non-blocking)

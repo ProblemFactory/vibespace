@@ -1133,7 +1133,7 @@ class MessageManager extends MessageWindow {
     if (emit) this._emit({ op: 'meta', subtype: 'rewind-answer', data: { requestId, answer: body, taken: cut ? cut.taken : 0, already: !!(cut && cut.already) } });
   }
 
-  // B-437e files tier: the CLI's answer to OUR rewind_files (vsf-) — ONE meta with the reply as it came; the hub's files door waits on it ⇒ kb-file-structure «rewind-files-door.js»
+  // B-437e files tier: the CLI's answer to OUR rewind_files (vsf-) — ONE meta with the reply as it came; the hub's files door waits on it ⇒ kb-features «the FILES tier, the server half»
   _processRewindFilesAnswer(resp, emit) {
     const requestId = String((resp && resp.request_id) || '');
     const body = resp && resp.subtype === 'error' ? { error: String(resp.error || 'error') } : (resp && resp.response) || null;

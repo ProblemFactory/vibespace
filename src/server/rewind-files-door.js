@@ -87,9 +87,10 @@ async function askCli(session, body, { timeoutMs = DRY_MS, id = null, onLate = n
   clearTimeout(timer);
   if (answer === undefined) {   // no answer in its bound: a late one is dropped — or handed to `onLate` (a press still out)
     if (typeof onLate === 'function') w.set(out.requestId, onLate); else w.delete(out.requestId);
-    return { sent: true, answer: null, why: 'no-answer', requestId: out.requestId };
+    return { sent: true, answered: false, answer: null, why: 'no-answer', requestId: out.requestId };
   }
-  return { sent: true, answer, requestId: out.requestId };
+  // ANSWERED — a body or none (the normalizer reads a success with no body as null: answered all the same, never a held mark)
+  return { sent: true, answered: true, answer, why: answer == null ? 'no-answer' : null, requestId: out.requestId };
 }
 
 /** each listed file's time, off the loop and bounded: {path: ms | null} (null = could not be read in its bound) */
@@ -103,15 +104,18 @@ async function timesOf(session, files, { hosts = null, statMs = STAT_MS, judgeMs
     one = async (p) => { const r = await dm.fsStat(p); const m = r && r.stat ? Number(r.stat.mtimeMs) : NaN; return Number.isFinite(m) && m > 0 ? m : null; };
   }
   if (!one) one = async (p) => { if (DOOR.blocked(p)) return null; const safeFs = statPool(); const st = await safeFs.call('stat', { path: p }, { timeoutMs: statMs }); return st && Number.isFinite(st.mtimeMs) ? st.mtimeMs : null; };
+  // ONE AFTER ANOTHER under ONE bound (its reader: all at once on a one-worker pool spent each file's own bound in the queue):
+  // each file at most STAT_MS, all of them at most JUDGE_MS — a file the bound did not reach is «could not be checked»
   const t0 = Date.now();
-  const bounded = (p) => new Promise((resolve) => {
-    const left = Math.max(0, Math.min(statMs, judgeMs - (Date.now() - t0)));
+  const bounded = (p, left) => new Promise((resolve) => {
     let done = false;
     const tm = setTimeout(() => { if (!done) { done = true; resolve(null); } }, left);
     Promise.resolve().then(() => one(p)).then((m) => { if (!done) { done = true; clearTimeout(tm); resolve(typeof m === 'number' && Number.isFinite(m) ? m : null); } }, () => { if (!done) { done = true; clearTimeout(tm); resolve(null); } });
   });
-  const ms = await Promise.all(list.map(bounded));
-  list.forEach((p, i) => { out[p] = ms[i]; });
+  for (const p of list) {
+    const left = Math.min(statMs, judgeMs - (Date.now() - t0));
+    out[p] = left > 0 ? await bounded(p, left) : null;
+  }
   return out;
 }
 
@@ -142,7 +146,7 @@ const drawnOk = (d) => !!d && Array.isArray(d.files) && d.files.every((x) => typ
 /** THE DRY RUN + THE JUDGE → {dry, judged} | {ok: false, reason, cls} */
 async function judgeOf(session, f, { hosts = null, stat = null, dryMs = DRY_MS } = {}) {
   const ask = await askCli(session, F.filesRequestOf(f.msg.uuid, { dryRun: true }), { timeoutMs: dryMs });
-  if (!ask.answer) return { ok: false, reason: ask.why === 'no-answer' ? 'no-answer' : ask.why, cls: F.FILES_REFUSALS[ask.why] || REWIND_REFUSALS[ask.why] || 'failed' };
+  if (!ask.answer) { const why = ask.why || 'no-answer'; return { ok: false, reason: why, cls: F.FILES_REFUSALS[why] || REWIND_REFUSALS[why] || 'failed' }; }
   const dry = F.filesAnswerOf(ask.answer, { dryRun: true });
   if (!dry.ok || !dry.filesKnown || !dry.files.length) return { dry, judged: [] };
   const mtimes = await timesOf(session, dry.files, { hosts, stat });
@@ -185,7 +189,7 @@ async function pressFiles({ session, msgId, by, choice, drawn = null, lastSeenUu
     if (!c.ok) return c;
     if (Number.isFinite(expectTaken) && expectTaken !== c.taken) return { ok: false, reason: 'changed-since', cls: REWIND_REFUSALS['changed-since'] || F.FILES_REFUSALS['changed-since'] };
   }
-  const mark = { id: null, at: Date.now(), files: true };
+  const mark = { id: null, at: Date.now(), files: true, pty: session.pty || null };   // tied to the CLI process it waits on
   setFilesOut(session, mark);   // ONE REWIND AT A TIME: from here to the press's answer, every other rewind and the person's send wait
   let held = false;
   const release = () => { if (filesOutOf(session) === mark) setFilesOut(session, null); };
@@ -197,6 +201,14 @@ async function pressFiles({ session, msgId, by, choice, drawn = null, lastSeenUu
     if (conversationOut(session, Date.now())) return { ok: false, reason: 'pending', cls: REWIND_REFUSALS.pending };   // one out while the dry run ran
     const now2 = { files: j.dry.files, judged: j.judged, plus: j.dry.plus, minus: j.dry.minus };
     if (!drawnOk(drawn) || !F.sameDrawOf(drawn, now2)) return { ok: false, reason: 'changed-since', cls: F.FILES_REFUSALS['changed-since'], files: j.judged, plus: j.dry.plus, minus: j.dry.minus };
+    if (F.STEPS[choice].includes('conversation')) {   // its reader: the conversation asked AGAIN right before the files — what moved during the judge (an agent's own message) refuses here, nothing put back
+      setFilesOut(session, null);   // this press's own mark aside for ONE synchronous dry run (no await between: nothing slips in)
+      const c2 = requestRewind({ session, msgId, lastSeenUuid, by, dryRun: true, now: Date.now() });
+      setFilesOut(session, mark);
+      if (!c2.ok) return c2;
+      if (Number.isFinite(expectTaken) && expectTaken !== c2.taken) return { ok: false, reason: 'changed-since', cls: REWIND_REFUSALS['changed-since'] || F.FILES_REFUSALS['changed-since'] };
+    }
+    mark.at = Date.now();   // the person's fence counts from the press itself (the dry run and the stats came before it)
     const results = {};
     const onLate = (answer) => {   // the press's answer after its bound: journalled, and the mark is released
       clearTimeout(hold);
@@ -206,7 +218,7 @@ async function pressFiles({ session, msgId, by, choice, drawn = null, lastSeenUu
     let hold = null;
     const ask = await askCli(session, F.filesRequestOf(f.msg.uuid), { timeoutMs: pressMs, onLate });
     mark.id = ask.requestId || null;
-    if (ask.sent && !ask.answer) {   // not answered in its bound: the CLI may still be writing — the mark HOLDS (bounded)
+    if (ask.sent && !ask.answered) {   // not answered in its bound: the CLI may still be writing — the mark HOLDS (bounded)
       held = true;
       hold = setTimeout(() => { const w = WAITS.get(session); if (w && mark.id) w.delete(mark.id); release(); }, holdMs);
       if (hold && typeof hold.unref === 'function') hold.unref();
