@@ -308,5 +308,19 @@ console.log('— ④ real processes and the End door');
   }
 }
 
+console.log('— ⑤ the «End them» line after a press (the page): the latest outcome in place, never appended');
+{
+  const { endLineWords } = await import(new URL('../src/lib/left-behind-line.js', import.meta.url));
+  const base = 'Stopped — Its command tool left 1 process(es) running: node';
+  const first = endLineWords(base, ['Already ending them']), second = endLineWords(base, ['Ended: node', '1 had already ended']), none = endLineWords(base, []);
+  console.log(`    (after a first press: «${first}» · after a second: «${second}»)`);
+  ok(first === `${base} — Already ending them` && second === `${base} — Ended: node · 1 had already ended` && none === base,
+    '⑤ PURE endLineWords: the line\'s own words, then the LATEST press\'s outcome only — a second press says its outcome in place of the first', { first, second, none });
+  const CV = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), at = CV.indexOf('  _endLeftBehind(btn, words, at) {');
+  const body = at >= 0 ? CV.slice(at, CV.indexOf('\n  }\n', at)) : '';
+  ok(body.includes('words.textContent = endLineWords(words.dataset.base || words.textContent, said);') && !/words\.textContent \+=/.test(body) && CV.includes('words.dataset.base = words.textContent;'),   // stale-pins: kept — a deliberate absence check: the press must never append to the line
+    '⑤ the page sets the line from its OWN words + the latest outcome (src/lib/chat-view.js _endLeftBehind) — no `textContent +=` left in the press', { found: at >= 0 });
+}
+
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
 report();

@@ -57,6 +57,7 @@ import { endedWaitLine } from './wake-grant-rows.js'; // the manager design's pi
 import { stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: the read-only window says why its session stopped
 import { fineScrollEntry, pushFine, FINE_SCROLL_MS } from './scroll-forensics.js'; // lane run-open-jump (B-a7a9): the FINE scroll trace after a run toggle / the ↓ (PURE)
 import { NeedsCards, hiddenRecord } from './chat-needs-card.js'; // lane chat-needs-you-card: this conversation's own For-you items as cards in its chat + the «waiting for you · N» chip
+import { endLineWords } from './left-behind-line.js'; // B-69a7: a press's outcome said in place (the line never grows)
 import { badgeTail } from './account-tails.js'; // B-ba7d: the badge carries no key tail — the person's read does (by account id)
 import { lateFocus, openClock, PAGE_START } from './late-focus.js'; // B-c87d: the rewind answer's focus goes through THE door (the keyboard stays where the person last put it)
 
@@ -7123,6 +7124,7 @@ class ChatView {
     line.className = 'chat-system';
     const words = document.createElement('span');
     words.textContent = t('Stopped — {what}', { what: parts.join(' · ') });
+    words.dataset.base = words.textContent;   // B-69a7: the line's own words — a press's outcome is said AFTER them, the latest only
     line.appendChild(words);
     if (d.door) {
       const b = document.createElement('button');
@@ -7154,7 +7156,7 @@ class ChatView {
         if (m.held > 0) said.push(t('{n} not ended: VibeSpace or a background job holds it now', { n: m.held }));
         if (m.unread > 0) said.push(t('{n} could not be checked again — not ended; press again', { n: m.unread }));
       }
-      if (said.length) words.textContent += ' — ' + said.join(' · ');
+      words.textContent = endLineWords(words.dataset.base || words.textContent, said);   // the LATEST outcome in place: a repeat press never grows the line
       return true;
     }, { isAlive: () => !this._disposed, timeoutMs: 15000, onTimeout: () => { btn.disabled = false; showToast(t('No answer to «End them» yet'), { duration: 5000 }); } });
   }
