@@ -116,11 +116,32 @@ WD.section('⑤');
   ok(execs.length === 1 && /function runProgram\(bin, args[\s\S]{0,300}?execFile\(bin, args,/.test(code), `src/sysinfo.js's ONE execFile is the helper's own (${execs.length})`);
   const starts = (code.match(/\brunProgram\('(?:ps|df|sysctl|vm_stat)'/g) || []).length;
   ok(starts === 6, `every program start is a runProgram call: ${starts} (ps aux --sort, ps aux, ps axo, df, sysctl, vm_stat)`);
-  const KEEP = fs.readFileSync(path.join(ROOT, 'src/server/desktop-app-keeper.js'), 'utf8');
-  ok(KEEP.includes("require('../sysinfo.js').useStarter(require('./child-starter').execFileVia(require('./child-starter').childStarter()));"), 'the hub hands its starter in execFile\'s shape (beside the desktop belt\'s, at the keeper\'s load — before the hub listens)');
+  const WIRE = fs.readFileSync(path.join(ROOT, 'src/server/sysinfo-wiring.js'), 'utf8'), KEEP = fs.readFileSync(path.join(ROOT, 'src/server/desktop-app-keeper.js'), 'utf8');
+  const at = WIRE.indexOf('function create({ getHosts }) {\n'), hand = "  sysinfo.useStarter(require('./child-starter').execFileVia(require('./child-starter').childStarter()));";
+  ok(at > 0 && WIRE.indexOf(hand) === at + 'function create({ getHosts }) {\n'.length && !KEEP.includes('sysinfo'), 'the hub hands its starter in execFile\'s shape where it WIRES the System facts (src/server/sysinfo-wiring.js create — the boot, before the hub listens); the desktop keeper no longer does (r1072)');
   ok(!/_starter\.run|the starter gave no answer/.test(code), 'the starter\'s words live in the hub-only helper (child-starter.js execFileVia): the device agent\'s bundle carries none of them');
   const agentd = ['src/agentd/agentd.js'].map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
   ok(!/sysinfo[^\n]{0,40}\.useStarter\(/.test(agentd), 'the device agent hands none (its own small process starts them)');
+}
+say('⑥ THE REAL STARTER (r1072): its small process runs a real ps, a large output crosses its line protocol, the child is held and ended');
+WD.section('⑥');
+{
+  const real = CS.createChildStarter({ log: { warn() { }, log() { }, error() { } } });
+  hand(real);
+  direct.length = 0;
+  const r = await SI.read(ROOT);
+  const lp = await SI.listProcs();
+  const proc = real._proc();
+  ok(direct.length === 0 && Array.isArray(r.procs) && r.procs.length > 0 && r.procs.every((p) => Number.isInteger(p.pid) && p.pid > 0) && lp.total > 0 && !lp.error && !!r.disk && r.disk.total > 0,
+    `a REAL ps / df through the starter's own process (pid ${proc && proc.pid}): ${r.procs.length} top processes, the table's ${lp.total} rows, the disk ${r.disk && r.disk.pct} % — this process started none of them itself`);
+  const BIG = 5 * 1024 * 1024;   // larger than the 4.2 MB table src/sysinfo.js's comment measured (2 404 processes)
+  const big = await SI.runProgram('sh', ['-c', `head -c ${BIG} /dev/zero | tr '\\0' x`], { timeout: 8000, maxBuffer: 32 * 1024 * 1024 });
+  ok(!big.err && big.stdout.length === BIG && /^x+$/.test(big.stdout.slice(0, 64)), `an output of ${BIG} bytes crosses the starter's line protocol whole (${big.stdout.length} bytes back${big.err ? ' — ' + big.err.message : ''})`);
+  const over = await SI.runProgram('sh', ['-c', `head -c ${2 * 1048576} /dev/zero | tr '\\0' x`], { timeout: 8000, maxBuffer: 1048576 });
+  ok(!!over.err && /its output passed 1048576 bytes/.test(over.err.message), `past its bound the read fails, said («${over.err && over.err.message}»)`);
+  const ended = await new Promise((res) => { if (!proc) return res(false); if (proc.exitCode != null || proc.signalCode) return res(true); const t = setTimeout(() => res(false), 5000); proc.once('exit', () => { clearTimeout(t); res(true); }); real.closePipe(); });
+  ok(ended, 'the suite\'s own starter is ended by closing its pipe (it never outlives its parent)');
+  hand(null);
 }
 console.warn = w0;
 say(`\n${failed ? `${failed} FAILED (${passed} passed)` : `ALL PASS (${passed})`}`);

@@ -2,6 +2,9 @@
 // SYSINFO WIRING (decomposition #3): the remote machine snapshot ladder —
 // device op first, ssh script fallback. Extracted verbatim; `hosts` arrives
 // lazily (created later in boot order). ORCH tier.
+// B-360d (r1020 / r1072): THE HUB HANDS THE SYSTEM FACTS ITS STARTER HERE, where it wires them (create, at the boot, before the
+// hub listens): every program src/sysinfo.js starts then runs in the starter's small process (src/server/child-starter.js
+// execFileVia), never a fork of the hub. The device agent hands none.
 const sysinfo = require('../sysinfo');
 const { pidAliveShellFn } = require('../cli-identity');
 
@@ -55,6 +58,7 @@ if kill -${sig} ${p} 2>/dev/null; then `
 }
 
 function create({ getHosts }) {
+  sysinfo.useStarter(require('./child-starter').execFileVia(require('./child-starter').childStarter()));   // B-360d: the System facts' programs from the starter, never a fork of the hub
   const hostsProxy = new Proxy({}, { get: (_, k) => { const h = getHosts(); return typeof h[k] === 'function' ? h[k].bind(h) : h[k]; } });
   const hosts = hostsProxy;
 // Remote machine snapshot for the System panel's machine switcher.

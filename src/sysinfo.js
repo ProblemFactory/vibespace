@@ -17,7 +17,7 @@ const { execFile } = require('child_process');
 // the owner's 4.5–5 GB hub). EVERY program this module starts goes through `runProgram`: the runner the hub hands (its starter in
 // execFile's shape, child-starter.js execFileVia — the starter's words live THERE, hub-only, so the device agent's signed bundle
 // keeps its bytes) else execFile from this process — the device agent hands none (its own small process, as the desktop belt's).
-// → Promise<{ err, stdout }>
+// The hub hands it in src/server/sysinfo-wiring.js create (where it wires these facts). → Promise<{ err, stdout }>
 let _run = null;
 function useStarter(run) { _run = typeof run === 'function' ? run : null; }
 function runProgram(bin, args, { timeout = 8000, maxBuffer = 1024 * 1024 } = {}) {
