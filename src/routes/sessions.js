@@ -899,7 +899,9 @@ function setup(ctx) {
         const why = discoveryPaused() ? `discovery is paused (a storage mount is not answering)${_sweepFailWhy ? ' — ' + _sweepFailWhy : ''}` : late && !_sweepFails ? `a rebuild has run ${Math.round(runFor / 1000)} s` : _sweepFailWhy;
         const said = _sweepFails >= SWEEP_STALE_SAY_AFTER || (_sweepFails >= 1 && _sweepFailDeadline) || late;   // (2): a deadline at once; a long sweep while it runs
         const stale = said && _sessionsBuiltAt ? { listStale: { since: _sessionsBuiltAt, ageMs: Math.max(0, Date.now() - _sessionsBuiltAt), fails: _sweepFails, why, ...(late ? { running: Math.round(runFor / 1000) } : {}), ...(discoveryPaused() ? { paused: true } : {}) } } : null;   // ageMs: the hub's own reading (a device's clock may be off)
-        return sendSessions(res, body, warm || stale ? { ...(warm || {}), ...(stale || {}) } : null);
+        // B-80cb (主开发 r1355 B): a list answered from the last whole sweep while another runs says its age — every time, not only late
+        const aged = _sweepInFlight && body === _sessionsCache && _sessionsBuiltAt ? { listAge: { since: _sessionsBuiltAt, ageMs: Math.max(0, Date.now() - _sessionsBuiltAt) } } : null;
+        return sendSessions(res, body, warm || stale || aged ? { ...(warm || {}), ...(stale || {}), ...(aged || {}) } : null);
       };
       // the page's Retry (?rebuild=1): past the 4.5 s cache, now — and it WAITS for that sweep (its answer is the fresh list or
       // the failure counted); a discovery pause still holds it (a wedged mount is never walked for a Retry)

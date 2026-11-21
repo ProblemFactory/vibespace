@@ -191,7 +191,7 @@ console.log('— ④ the session-list diff');
     JSON.stringify(dT.warmth) === JSON.stringify({ 'sess-turn': { lastRequestAt: null, cacheTtlSec: 3600, lost: false, inFlight: true, turnStartedAt: 4 } }), JSON.stringify(dT));
   const rt = code('src/routes/sessions.js');
   ok('WIRING: the 5 s poll\'s answer (cached AND fresh sweep) carries the diff ONLY while desktop.cacheWarmth is on — off is not even computed (B-360d rank 9: through sendSessions, the sweep\'s bytes made once)',
-    /const warm = serverSetting\?\.\('desktop\.cacheWarmth'\) === true \? warmthDiff\(activeSessions, ctx\.cacheFactsOf\) : null;/.test(rt) && /return sendSessions\(res, body, warm \|\| stale \? \{ \.\.\.\(warm \|\| \{\}\), \.\.\.\(stale \|\| \{\}\) \} : null\);/.test(rt) // the sweep's -cure: answer() also joins listStale
+    /const warm = serverSetting\?\.\('desktop\.cacheWarmth'\) === true \? warmthDiff\(activeSessions, ctx\.cacheFactsOf\) : null;/.test(rt) && /return sendSessions\(res, body, warm \|\| stale(?: \|\| aged)? \? \{ \.\.\.\(warm \|\| \{\}\), \.\.\.\(stale \|\| \{\}\)(?:, \.\.\.\(aged \|\| \{\}\))? \} : null\);/.test(rt) // the sweep's -cure: answer() also joins listStale
     && /return answer\(_sessionsCache\);/.test(rt) && /answer\(await _sweepInFlight\);/.test(rt) && (rt.match(/res\.json\(_sessionsCache\)|res\.json\(await _sweepInFlight\)|res\.json\(answer\(/g) || []).length === 0);
   // B-360d rank 9: THE SESSION LIST IS SERIALISED ONCE PER SWEEP — by the sweep's worker (src/sessions-assemble.js
   // answerBytes); every answer of that sweep sends those bytes and their ETag, nothing serialised on this thread; with the

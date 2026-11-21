@@ -938,6 +938,13 @@ const _sessionMetaCache = new Map();
 // B-891e: the memo's cap is at least the last walk's transcript count (+ room) — a fixed 8 192 under the owner's 12 543 evicted
 // every entry before the next sweep reached it, so EVERY sweep re-parsed EVERY head; entries the last walk did not visit go
 let _metaCap = 8192;
+// B-80cb: the conversations' walk gives the loop back every this many transcript reads (a stat or a head read: ~0.1 ms each on
+// stand-ins, ~1 ms a real transcript's head and title windows cold) or this many ms, whichever comes first — the time bound is the one
+// that holds at real sizes; no step near the 250 ms law at the owner's order of sizes
+const SWEEP_STEP_READS = 256, SWEEP_STEP_MS = 20;
+let _lastWalkSteps = null;
+/** B-80cb: the last walk's steps → { reads, yields, maxPerStep } (the law's leg counts them; null before a walk). */
+const lastWalkSteps = () => (_lastWalkSteps ? { ..._lastWalkSteps } : null);
 const META_SCAN_CHUNK = 65536;
 const META_SCAN_MAX = 2 * 1024 * 1024;
 
@@ -1892,7 +1899,7 @@ class SessionMessages {
 // discovery snapshot when agentd.localDiscovery is on (facts pre-verified
 // device-side), null ⇒ the local scan. Returns plain entries (the route adds
 // sessionKey/realCwd). ──
-async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), devSnap = null } = {}) {
+async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), devSnap = null, stepClock = null } = {}) {
   const projectsDir = path.join(os.homedir(), '.claude', 'projects');
   // snapshot jsonls grouped by projDir for the walk below
   const snapByDir = devSnap ? (() => {
@@ -1957,6 +1964,20 @@ async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), d
   const sessions = [];
   const visited = new Set();   // B-891e: the transcripts this walk read — the memo's floor and its prune
   const sessionMap = new Map(); // sessionId → index in sessions[] (dedup: running wins over stopped)
+  // B-80cb: THE WALK IN BOUNDED STEPS. On the healthy road it runs in the «sessions-sweep» worker (src/sessions-sweep.js); when that
+  // pool has no worker at the FIRST sweep the route runs it HERE, on the hub's loop (its inline fallback) — and each transcript's stat
+  // and head read ran there in one go (measured on stand-ins at the owner's order of sizes: one step of about a second cold). The walk
+  // gives the loop back every SWEEP_STEP_READS transcript reads or SWEEP_STEP_MS, whichever comes first (at real sizes a cold read is
+  // ~1 ms: the 20 ms bound is the one that holds); its steps are counted (lastWalkSteps — the law's legs in test-sessions-sweep-steps).
+  const steps = { reads: 0, yields: 0, maxPerStep: 0 };
+  const now = typeof stepClock === 'function' ? stepClock : () => performance.now();   // `stepClock`: a suite's clock (the time bound counted)
+  let stepAt = now(), inStep = 0;
+  const stepDue = () => { steps.reads++; inStep++; return inStep >= SWEEP_STEP_READS || now() - stepAt >= SWEEP_STEP_MS; };   // an await only when a step ends
+  const stepEnd = async () => {
+    if (inStep > steps.maxPerStep) steps.maxPerStep = inStep;
+    await new Promise((r) => setImmediate(r));
+    steps.yields++; inStep = 0; stepAt = now();
+  };
   if (snapByDir || fs.existsSync(projectsDir)) {
     for (const projDir of (snapByDir ? [...snapByDir.keys()] : fs.readdirSync(projectsDir))) {
       // A SUITE'S THROWAWAY cwd is not a conversation (2026-09-09). Its
@@ -1977,6 +1998,7 @@ async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), d
         .filter(f => !isFixtureSid(f.replace(/\.jsonl$/, ''))); // synthetic conversation id, wherever it landed
       const statMap = new Map(), stOf = new Map();   // stOf (B-891e): the stat itself, handed to extractSessionMeta — one stat per transcript
       for (const f of jsonls) {
+        if (stepDue()) await stepEnd();
         if (snapFiles) { statMap.set(f, snapFiles.get(f)?.mtimeMs || 0); continue; }
         try { const st = fs.statSync(path.join(projPath, f)); statMap.set(f, st.mtimeMs); stOf.set(f, st); } catch { statMap.set(f, 0); }
       }
@@ -2008,6 +2030,7 @@ async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), d
       ) : new Map();
 
       for (const f of jsonls) {
+        if (stepDue()) await stepEnd();
         const sessionId = f.replace('.jsonl', '');
         const filePath = path.join(projPath, f);
         const mtime = statMap.get(f) || 0;
@@ -2085,6 +2108,8 @@ async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), d
     _metaCap = Math.max(8192, visited.size + 1024);
     if (_sessionMetaCache.size > visited.size + 1024) for (const k of [..._sessionMetaCache.keys()]) if (!visited.has(k)) _sessionMetaCache.delete(k);
   }
+  if (inStep > steps.maxPerStep) steps.maxPerStep = inStep;
+  _lastWalkSteps = steps;
   return sessions;
 }
 
@@ -2135,5 +2160,5 @@ module.exports = { setJsonlHeld, noteJsonlView, dropJsonlView, dropJsonlViews, j
   parseSessionJsonl,
   getHistorySessionId, historyWaitersOf, noteAwaiting, noteReadable,
   SessionMessages,
-  discoverClaudeSessions,
+  discoverClaudeSessions, lastWalkSteps,
 };
