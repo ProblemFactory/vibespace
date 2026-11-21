@@ -29,7 +29,7 @@ function answerPermission(session, data, { adapterRegistry, feedLive } = {}) {
   const payload = adapter.formatPermissionResponse(data || {});
   session.pty.write(payload + '\n');
   // Record in buffer so permission state survives refresh/restart
-  session.buffer = trimRing(session.buffer + payload + '\n');
+  session.buffer = trimRing(session.buffer + payload + '\n', session);
   try { if (typeof feedLive === 'function') feedLive(session, JSON.parse(payload)); } catch { /* a non-JSON frame is the adapter's business — it was written */ }
   return { ok: true, payload };
 }

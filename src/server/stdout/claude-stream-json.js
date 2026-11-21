@@ -579,9 +579,10 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
 
     ptyProcess.onData((output) => {
       if (session._reattachAttempts) session._reattachAttempts = 0;
-      // B-5a4d (lane bl-keys-misc): past 750 000 chars the ring keeps its last 500 000 at a line, and the records a person's
-      // HELD message still needs (its copy, its queue records) are carried in front — never cut while owed (src/chat-ring.js)
-      session.buffer = trimRing(session.buffer + output);
+      // B-5a4d (lane bl-keys-misc): past 750 000 chars of text that is not owed the ring keeps its last 500 000 at a line, and
+      // the records a person's HELD message still needs (its copy, its queue records) are carried in front, whatever their size —
+      // never cut while owed (src/chat-ring.js)
+      session.buffer = trimRing(session.buffer + output, session, id);
       lineBuf += output;
       let nlIdx;
       while ((nlIdx = lineBuf.indexOf('\n')) !== -1) {

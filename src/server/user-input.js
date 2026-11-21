@@ -229,7 +229,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
       // verify r1 ① (lane worker-dispatch): the live record of a frame an AGENT typed carries who typed it — the
       // owner's viewers and the buffer replay see `origin {kind:'dispatch', name}`, never a user turn of their own
       if (!human) userMsg.origin = { kind: 'dispatch', name: (by && by.name) || null };
-      session.buffer = trimRing(session.buffer + JSON.stringify(userMsg) + '\n');
+      session.buffer = trimRing(session.buffer + JSON.stringify(userMsg) + '\n', session, sessionId);
       feedLive(session, userMsg);
     }
     // Detect broken pty stdin: the wrapper writes _stdin_ack on
