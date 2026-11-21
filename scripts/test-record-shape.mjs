@@ -60,6 +60,76 @@ const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
 const driftCards = (mm) => mm.messages.filter((m) => m.noticeKind === 'unknown-fields');
 const unknownCards = (mm) => mm.messages.filter((m) => m.noticeKind === 'unknown-record');
 const ledgerOf = (conversation, MMx = MM) => MMx.driftLedgerRows().filter((r) => r.conversation === conversation); // THE drift ledger (lane record-oracle-2-1-296)
+// §4d THE CORRECTION'S CALL SITE, read BY STRUCTURE (B-28b1's side run, the coordinator's r1539/r1543): the first STRICT hosted
+// run (44953729818, 2.1.328) read none of the leg's three patterns — they spelled 2.1.314's minified LETTERS (e,n,r,s / e.id /
+// e.callRunning) and 2.1.328 renamed its letters (the tracked dumps' helpers: u/T through 2.1.322, c/E in 2.1.328). Here every LOCAL
+// name is CAPTURED; only what a minifier keeps is spelled (property names, string literals). A miss carries the bundle's own text.
+const CS_ID = '[A-Za-z_$][\\w$]*';
+const csE = (n) => n.replace(/[$]/g, '\\$');
+const csWord = (n) => new RegExp('(^|[^\\w$.])' + csE(n) + '(?![\\w$])');
+const SITE_WINDOW = 4000; // the site sits INSIDE createSyntheticErrorMessage: at most this far after its signature
+// a ternary's condition: no `?` but optional chaining, no `:` `;` `{` `}`, a call's parentheses kept whole
+const CS_COND = '(?:[^?:;{}()]|\\?\\.|\\([^()]{0,120}\\)){0,240}';
+// `F=(c)=>c.callRunning===!0` (or a body returning it), found by indexOf — no unanchored pattern over a 200 MB bundle
+function arrowReads(text, name) {
+  const re = new RegExp(`^=\\(?(${CS_ID})(?:,${CS_ID})*\\)?=>(?:\\{[^}]{0,160}return )?\\1\\.callRunning===!0(?![\\w$.])`);
+  for (let i = text.indexOf(name + '='); i >= 0; i = text.indexOf(name + '=', i + 1)) {
+    if (!/[\w$.]/.test(text[i - 1] || '') && re.test(text.slice(i + name.length, i + name.length + 240))) return true;
+  }
+  return false;
+}
+function correctionSiteOf(text, wwName, corrNames) {
+  const out = { sig: null, site: null, cond: null, branch: '', inBranch: [], caller: null, callerArg: null, ran: false, misses: [] };
+  // (1) the signature: FOUR bare parameters, the second compared to "user_interrupted" first thing in the body
+  const sm = new RegExp(`createSyntheticErrorMessage\\((${CS_ID}),(${CS_ID}),(${CS_ID}),(${CS_ID})\\)\\{if\\((?:\\2==="user_interrupted"|"user_interrupted"===\\2)\\)`).exec(text);
+  if (sm) out.sig = { at: sm.index, params: sm.slice(1, 5), text: sm[0] }; else out.misses.push('the signature createSyntheticErrorMessage(a,b,c,d){if(b==="user_interrupted")');
+  // (2) the site, inside that body: a ternary whose condition holds "remote-cancel" AND the 4th parameter as a bare word, with every
+  // correction in its true branch (in any shape) and ww its false branch
+  if (sm && wwName) {
+    const body = text.slice(sm.index, sm.index + SITE_WINDOW);
+    const tern = new RegExp(`(${CS_COND}"remote-cancel"${CS_COND})\\?([^]{0,400}?):${csE(wwName)}(?![\\w$])`, 'g');
+    const flag = csWord(sm[4]);
+    const found = [...body.matchAll(tern)].map((m) => ({ m, cond: m[1], branch: m[2], inBranch: corrNames.filter((n) => csWord(n).test(m[2])) }));
+    const hit = found.find((f) => flag.test(f.cond) && f.inBranch.length === corrNames.length) || found[0];
+    if (hit) { out.site = { at: sm.index + hit.m.index, text: hit.m[0] }; out.cond = hit.cond; out.branch = hit.branch; out.inBranch = hit.inBranch; out.flagHeld = flag.test(hit.cond); }
+    else out.misses.push(`a «…"remote-cancel"… ? … : ${wwName}» ternary within ${SITE_WINDOW} characters of the signature`);
+  }
+  // (3) the caller: (call.id, "user_interrupted", call.assistantMessage, F(call)) — F reads call.callRunning === true — or that read inline
+  const cm = new RegExp(`createSyntheticErrorMessage\\((${CS_ID})\\.id,"user_interrupted",\\1\\.assistantMessage,(?:(${CS_ID})\\(\\1\\)|(\\1\\.callRunning===!0))\\)`).exec(text);
+  if (cm) {
+    out.caller = cm[0]; out.callerArg = cm[2] || cm[3];
+    if (cm[3]) out.ran = true;
+    else {
+      const F = csE(cm[2]);
+      out.ran = new RegExp(`function ${F}\\((${CS_ID})(?:,${CS_ID})*\\)\\{[^}]{0,160}return \\1\\.callRunning===!0(?![\\w$.])`).test(text)
+        || arrowReads(text, cm[2]);
+      if (!out.ran) out.misses.push(`${cm[2]}(call) = call.callRunning === true (function or arrow)`);
+    }
+  } else out.misses.push('the caller createSyntheticErrorMessage(c.id,"user_interrupted",c.assistantMessage,F(c))');
+  out.ok = !!out.sig && !!out.site && out.flagHeld === true && out.inBranch.length === corrNames.length && !!out.caller && out.ran;
+  return out;
+}
+// THE BUNDLE'S OWN TEXT where the reader looks (≤ 300 characters each): every USE of a correction (never its declaration),
+// createSyntheticErrorMessage( and callRunning===. Printed to STDERR on a red: the runner shows a red suite's stderr WHOLE.
+function correctionEvidence(text, corrNames, cap = 300) {
+  const lines = [];
+  const at = (label, i) => lines.push(`${label} @${i}: ${JSON.stringify(text.slice(Math.max(0, i - cap / 2), i + cap / 2))}`);
+  for (const n of corrNames) {
+    let i = -1, k = 0;
+    while (k < 3 && (i = text.indexOf(n, i + 1)) >= 0) {
+      const before = text[i - 1] || '', after = text.slice(i + n.length, i + n.length + 2);
+      if (/[\w$.]/.test(before) || /^[\w$]/.test(after) || (/^=/.test(after) && after !== '==')) continue; // a longer name, a property, the declaration
+      at(`a use of ${n}`, i); k++;
+    }
+    if (!k) lines.push(`a use of ${n}: NONE in the bundle (only its declaration)`);
+  }
+  for (const [needle, max] of [['createSyntheticErrorMessage(', 3], ['callRunning===', 2]]) {
+    let i = -1, k = 0;
+    while (k < max && (i = text.indexOf(needle, i + 1)) >= 0) { at(needle, i); k++; }
+    if (!k) lines.push(`${needle}: NOT in the bundle`);
+  }
+  return lines;
+}
 
 // ── the census walker (shared by §1, the local leg and §5) ──
 const CODEX_RECORD_TYPES = new Set(['session_meta', 'response_item', 'event_msg', 'turn_context', 'wrapper_meta', 'token_usage_record', 'compacted', 'world_state', 'server_request', 'server_request_resolved', 'inter_agent_communication_metadata', '_stdin_ack']);
@@ -388,6 +458,36 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
     for (const c of cands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile()) return real; } catch { } }
     return null;
   };
+  // §4d THE CORRECTION'S CALL-SITE READER on made-up bundles — needs no binary (B-28b1's side run, the coordinator's r1543)
+  {
+    const WW = 'The user doesn\'t want to proceed with this tool use.';
+    const B314 = 'var Nh="' + WW + '",m9t=`${Nh} Correction to the text above: stopped while running.`;class Pq{createSyntheticErrorMessage(e,n,r,s){if(n==="user_interrupted"){let o=this.abortController.signal.reason;return cq({toolUseID:e,content:dq(s&&o==="remote-cancel"?m9t:Nh),assistantMessage:r})}return null}}function ql(e,n){if(!e)return!1;return e.callRunning===!0}x.createSyntheticErrorMessage(e.id,"user_interrupted",e.assistantMessage,ql(e));';
+    // the same code with EVERY local name renamed (as 2.1.328 renamed its letters), two corrections, a ternary in the branch
+    const B328 = 'var Bh="' + WW + '",nHn=`${Bh} Correction to the text above: stopped while running.`,rHn=`${Bh} Correction to the text above: files may have reached the connector.`;class Wc{createSyntheticErrorMessage(t,i,a,c){if(i==="user_interrupted"){let l=this.abortController?.signal.reason;return Zq({toolUseID:t,content:Yq(c&&l==="remote-cancel"?(Vf(this.tool)?rHn:nHn):Bh),assistantMessage:a})}return null}}function Kl(t,i){if(!t)return!1;return t.callRunning===!0}g.createSyntheticErrorMessage(t.id,"user_interrupted",t.assistantMessage,Kl(t));';
+    const C2 = ['nHn', 'rHn'];
+    const r314 = correctionSiteOf(B314, 'Nh', ['m9t']), r328 = correctionSiteOf(B328, 'Bh', C2);
+    ok('§4d the call-site reader on a made-up bundle in the 2.1.314 spelling: the signature (e,n,r,s), the site with s in its condition and m9t in its branch, the caller ql(e), ql reading callRunning', r314.ok && r314.sig.params.join() === 'e,n,r,s' && r314.inBranch.join() === 'm9t' && r314.callerArg === 'ql' && r314.misses.length === 0, r314);
+    ok('§4d …and the SAME code with every local name renamed (2.1.328\'s two corrections, a ternary inside the branch): read by captured names — (t,i,a,c), c in the condition, both corrections, Kl(t)', r328.ok && r328.sig.params.join() === 't,i,a,c' && r328.inBranch.join() === 'nHn,rHn' && r328.callerArg === 'Kl' && r328.misses.length === 0, r328);
+    // stale-pins: kept — the a9751279e leg's three patterns, rebuilt for this control (fixed letters e,n,r,s / e.id / site[1] 's')
+    const oldRead = (t, wwN) => { const site = new RegExp('content:[\\w$]+\\(([\\w$]+)&&([\\w$]+)==="remote-cancel"\\?([^]{0,400}?):' + csE(wwN) + '\\)').exec(t); return !!site && site[1] === 's' && /createSyntheticErrorMessage\(e,n,r,s\)\{if\(n==="user_interrupted"\)/.test(t) && /createSyntheticErrorMessage\(e\.id,"user_interrupted",e\.assistantMessage,([\w$]+)\(e\)\)/.test(t); };
+    ok('§4d …RED CONTROL: the a9751279e leg\'s fixed-letter patterns read the 2.1.314 spelling and NOT the renamed one (the run 44953729818 red, in its letters)', oldRead(B314, 'Nh') && !oldRead(B328, 'Bh'));
+    const mut = (from, to) => { if (!B328.includes(from)) throw new Error('§4d control: the made-up bundle no longer holds ' + from); return B328.replace(from, to); };
+    const wwRan = correctionSiteOf(mut('?(Vf(this.tool)?rHn:nHn):Bh)', '?Bh:Bh)'), 'Bh', C2);
+    ok('§4d …RED: a remote-cancel branch that writes ww for the running call (no correction in it) fails, by its empty branch', !wwRan.ok && wwRan.inBranch.length === 0, wwRan);
+    const notFlag = correctionSiteOf(mut('Yq(c&&l==="remote-cancel"', 'Yq(a&&l==="remote-cancel"'), 'Bh', C2);
+    ok('§4d …RED: a condition without the 4th parameter (the running-call flag) fails', !notFlag.ok && notFlag.flagHeld === false, notFlag);
+    const notRun = correctionSiteOf(mut('return t.callRunning===!0', 'return t.status==="running"'), 'Bh', C2);
+    ok('§4d …RED: a caller whose argument does not read callRunning === true fails, naming it', !notRun.ok && !notRun.ran && notRun.misses.some((m) => /^Kl\(call\) = call\.callRunning === true/.test(m)), notRun);
+    const far = correctionSiteOf(mut('if(i==="user_interrupted"){', 'if(i==="user_interrupted"){return null}' + ';'.repeat(SITE_WINDOW) + '{'), 'Bh', C2);
+    ok('§4d …RED: a ternary outside the signature\'s body (past ' + SITE_WINDOW + ' characters) is not its site', !far.ok && !far.site && far.misses.some((m) => /ternary within/.test(m)), far);
+    const arrow = correctionSiteOf(mut('function Kl(t,i){if(!t)return!1;return t.callRunning===!0}', 'Kl=(t)=>t.callRunning===!0;'), 'Bh', C2);
+    const inline = correctionSiteOf(mut('t.assistantMessage,Kl(t))', 't.assistantMessage,t.callRunning===!0)'), 'Bh', C2);
+    ok('§4d …and the caller\'s read in an arrow, or inline as the 4th argument, is read too', arrow.ok && inline.ok && inline.callerArg === 't.callRunning===!0', { arrow, inline });
+    const ev = correctionEvidence(B328, C2), none = correctionEvidence('var nHn=`x`;', ['nHn']);
+    ok('§4d …a red carries THE BUNDLE\'S OWN TEXT: one excerpt per USE of each correction (never its declaration), createSyntheticErrorMessage( and callRunning===, each at most 300 characters; a correction never used says NONE', ev.filter((l) => /^a use of nHn @/.test(l)).length === 1 && ev.filter((l) => /^a use of rHn @/.test(l)).length === 1 && ev.filter((l) => /^createSyntheticErrorMessage\( @/.test(l)).length === 2 && ev.some((l) => /^callRunning=== @/.test(l)) && ev.every((l) => JSON.parse(l.slice(l.indexOf(': ') + 2)).length <= 300) && /^a use of nHn: NONE/.test(none[0]), ev);
+    const me = read('scripts/test-record-shape.mjs'); // the needles in two pieces: this pin's own line never matches itself
+    ok('§4d …the live leg reads the installed bundle through this reader and, on a red, prints the evidence to STDERR (the runner shows a red suite\'s stderr whole)', me.includes('const cs = correction' + 'SiteOf(text, sw ? sw.name : null, corr.map((x) => x.name));') && me.includes('if (!good) for (const [k, l] of correction' + 'Evidence(text, corr.map((x) => x.name)).entries()) console.error('));
+  }
   const bin = findBinary();
   const size = bin ? fs.statSync(bin).size : 0;
   // the installed BUILD vs the build the shapes were dumped from (src/record-shape.js SCHEMA_CLI_VERSION):
@@ -463,17 +563,14 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
           const sw = cen.sentences.find((x) => x.text === WWR.text), corr = cen.sentences.filter((x) => x.text !== WWR.text && x.text.startsWith(WWR.text + ' Correction to the text above'));
           if (!corr.length) console.log('    §4d the stopped-while-running sentence: not in this build (row m9t since ' + ((PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'm9t') || {}).since || '—') + ')');
           else {
-            const E = (n) => n.replace(/\$/g, '\\$');
-            const site = !!sw && new RegExp('content:[\\w$]+\\(([\\w$]+)&&([\\w$]+)==="remote-cancel"\\?([^]{0,400}?):' + E(sw.name) + '\\)').exec(text);
-            const branch = site ? site[3] : '';
-            const inBranch = corr.filter((x) => new RegExp('(^|[^\\w$])' + E(x.name) + '([^\\w$]|$)').test(branch)).map((x) => x.name);
             const rowsOf = corr.map((x) => { const r = PO.PERMISSION_OUTCOME_ROWS.find((y) => y.text === x.text); return [x.name, r ? r.id + ' ' + r.outcome : 'NO ROW']; });
-            const sig = /createSyntheticErrorMessage\(e,n,r,s\)\{if\(n==="user_interrupted"\)/.test(text);
-            const caller = /createSyntheticErrorMessage\(e\.id,"user_interrupted",e\.assistantMessage,([\w$]+)\(e\)\)/.exec(text);
-            const ran = !!caller && new RegExp('function ' + E(caller[1]) + '\\(e,n\\)\\{[^}]{0,160}return e\\.callRunning===!0').test(text);
-            console.log(`    §4d the correction's call site, as the bundle has it: ${site ? JSON.stringify(site[0].slice(0, 300)) : 'NOT FOUND (no «content:…(s&&r==="remote-cancel"?…:' + (sw ? sw.name : 'ww') + ')» in the bundle)'} · corrections ${corr.map((x) => x.name).join(', ')} · rows ${rowsOf.map(([n, r]) => n + ' → ' + r).join(', ')}`);
-            oracleOk(`§4d the ${corr.length} correction(s) ${corr.map((x) => x.name).join(', ')} are written ONLY for a RUNNING call a Stop cut off: createSyntheticErrorMessage("user_interrupted") names every one in its remote-cancel branch, ${sw ? sw.name : 'ww'} otherwise — the caller passes ${caller ? caller[1] : '?'}(call) = call.callRunning === true — and each is the table's row of ITS OWN text, outcome stopped (never denied)`,
-              !!site && site[1] === 's' && inBranch.length === corr.length && sig && ran && rowsOf.every(([, r]) => / stopped$/.test(r)), { site: site ? site[0].slice(0, 300) : null, inBranch, rowsOf, sig, caller: caller && caller[0], ran });
+            const cs = correctionSiteOf(text, sw ? sw.name : null, corr.map((x) => x.name));
+            const said = cs.sig ? `createSyntheticErrorMessage(${cs.sig.params.join(',')})` : 'createSyntheticErrorMessage(?)';
+            console.log(`    §4d the correction's call site, as the bundle has it: ${cs.site ? JSON.stringify(cs.site.text.slice(0, 300)) : 'NOT FOUND'} · ${said} · caller ${cs.caller ? JSON.stringify(cs.caller.slice(0, 160)) : 'NOT FOUND'} · corrections ${corr.map((x) => x.name).join(', ')} · rows ${rowsOf.map(([n, r]) => n + ' → ' + r).join(', ')}`);
+            const good = !!sw && cs.ok && rowsOf.every(([, r]) => / stopped$/.test(r));
+            oracleOk(`§4d the ${corr.length} correction(s) ${corr.map((x) => x.name).join(', ')} are written ONLY for a RUNNING call a Stop cut off: ${said} names every one in its remote-cancel branch, its 4th parameter in the condition, ${sw ? sw.name : 'ww'} otherwise — the caller passes ${cs.callerArg || '?'}(call) = call.callRunning === true — and each is the table's row of ITS OWN text, outcome stopped (never denied); every local name read, none spelled`,
+              good, { misses: cs.misses, site: cs.site ? cs.site.text.slice(0, 200) : null, flagHeld: cs.flagHeld === true, inBranch: cs.inBranch, rowsOf, sig: !!cs.sig, caller: !!cs.caller, ran: cs.ran, evidence: 'the bundle\'s own text: on stderr, «§4d evidence» lines' });
+            if (!good) for (const [k, l] of correctionEvidence(text, corr.map((x) => x.name)).entries()) console.error(`    §4d evidence ${k + 1} (not a leg; the bundle's own text where the reader looked) — ${l}`);
           }
         }
       }
