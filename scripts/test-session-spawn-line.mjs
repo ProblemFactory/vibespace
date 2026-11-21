@@ -26,7 +26,8 @@
 //     (src/nice-program.js — the hub's verdict and the device agent's hello); the device's verdict IS priorityFor with the
 //     machine's own program (nicePathOf: its shape); the paired spec's builder (none ⇒ the release's spec byte for byte); both
 //     dial branches wired; the spawn census RED for a spec without the builder and a hello without nicePath; the Windows shell
-//     door still sees `sh`; the row's words. The REAL agent's processes: test-sysinfo-op 4c.
+//     door still sees `sh`; the row's words; r705: the switch off said as off, the journal line once a machine, ONE real
+//     dial create driven to its meta write (an adopted start keeps its meta's fact). The REAL agent's processes: test-sysinfo-op 4c.
 // Run: node scripts/test-session-spawn-line.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -74,7 +75,7 @@ console.log('— ① PURE: the builder table, one row per harness (each producti
 
 console.log('— ② the REAL ws-create: a chat create per harness, down to the (stub) pty spawn');
 const SOCK = scratchDir('sline-sock'), BUF = scratchDir('sline-buf'), CWD = scratchDir('sline-cwd');
-async function drive(mod, data, { setting = () => undefined, hosts = null } = {}) {
+async function drive(mod, data, { setting = () => undefined, hosts = null, extra = {} } = {}) {
   const sent = [], spawned = [], metas = [], active = new Map(), noop = () => undefined;
   const ctx = new Proxy({
     activeSessions: active, WS_OPEN: 1, sessionCounterRef: { value: 0 }, adapterRegistry: registry(), hosts, accounts: null, os, fs, path, writeSessionMeta: (sock, m) => { metas.push(m); },
@@ -86,6 +87,7 @@ async function drive(mod, data, { setting = () => undefined, hosts = null } = {}
     integrationEnabled: () => true, readSessionMeta: () => null, readLayouts: () => ({}), getSyncStore: () => null,
     pty: { spawn: (cmd, args, opts) => { spawned.push({ cmd, args, env: opts.env }); return { pid: 4242, onData() { }, onExit() { }, write() { }, resize() { }, kill() { } }; } },
     setupSessionPty: (s, id, p) => { s.pty = p; },
+    ...extra,   // a create's own stand-ins (r705 (5): the dial bridge, the agent root, a stored meta)
   }, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' && /^[a-z]/.test(k) ? noop : undefined)) });
   const handler = mod.createWsCreateHandler({
     ctx, agentEnv: () => ({ PATH: '/usr/bin:/bin', HOME: '/home/u' }), crashLoopRef: { map: new Map() }, noConvoRef: { map: new Map() },
@@ -302,7 +304,7 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   ok(!clean.length && cutWs.some((r) => /PRIORITY ROAD src\/ws-create\.js/.test(r)) && cutJob.some((r) => /PRIORITY ROAD src\/jobs\.js/.test(r)) && newRoad.some((r) => /UNLISTED session line src\/server\/new-road\.js/.test(r))
     && twoInBr.some((r) => /PRIORITY EXCEPTION src\/server\/boot-restore\.js: 2 session line/.test(r)) && cutVault.some((r) => /PRIORITY ROAD src\/server\/vault-run-door\.js/.test(r)),
     `THE SPAWN CENSUS: the ${C.PRIORITY_ROADS.length} places read clean; RED for the ws-create line with its priority cut, the job spawn without it, the vault run door's command without it (B-7f18), a NEW caller of the session line with no row, and a SECOND (local) line in the excepted file`, { clean, cutWs, cutJob, cutVault, newRoad, twoInBr });
-  ok(/session\._cpuNice = ocPty \? null : \(session\.host && session\._cpuNice !== undefined \? session\._cpuNice : r6Pri\.fact\);/.test(src) && /child\.once\('error', /.test(JSRC),
+  ok(/session\._cpuNice = ocPty \? null : \(session\.host && session\._cpuNice !== undefined \? \(session\._cpuNice \|\| SPRI\.factOf\(\(readSessionMeta\(sockName\) \|\| \{\}\)\.cpuNice\)\) : r6Pri\.fact\);/.test(src) && /child\.once\('error', /.test(JSRC),
     'an OpenCode serve terminal (its pty is the serve\'s, never this line) gets no fact — no row claims it lowered; a job wrapper whose exec fails late is an error event the engine catches, never the hub\'s crash');
   // the words a person reads (Session Properties' row, src/lib/cpu-priority-words.js)
   const { cpuPriorityWords } = await import(path.join(REPO, 'src/lib/cpu-priority-words.js'));
@@ -332,8 +334,16 @@ console.log('— ⑤ B-460d\'s remainder: a PAIRED machine\'s conversation start
   const dNone = SPRI.devicePriorityFor({ hello: { nicePath: null, platform: 'linux' } }), dWin = SPRI.devicePriorityFor({ hello: { nicePath: '/usr/bin/nice', platform: 'win32' } }), dNo = SPRI.devicePriorityFor({});
   const dThrow = SPRI.devicePriorityFor({ serverSetting: () => { throw new Error('settings not ready'); }, hello: H });
   const remoteFact = (x) => x.priority === null && x.fact.by === 0 && x.fact.why === 'remote';
-  ok(JSON.stringify(dOn) === JSON.stringify({ priority: { nice: '/usr/bin/nice', by: 5 }, fact: { by: 5 } }) && dThrow.priority && dThrow.priority.by === 5 && [dOff, dOld, dNone, dWin, dNo].every(remoteFact),
-    'the device\'s verdict IS priorityFor with the machine\'s own nice program: on ⇒ ITS nice -n 5, the fact {by: 5}; a setting that cannot be read = on; the setting off, an older agent (no nicePath), a machine with none, a Windows agent, no hello ⇒ today\'s answer (none, «set by its own machine»)', { dOn, dOff, dOld, dNone, dWin, dNo });
+  ok(JSON.stringify(dOn) === JSON.stringify({ priority: { nice: '/usr/bin/nice', by: 5 }, fact: { by: 5 } }) && dThrow.priority && dThrow.priority.by === 5 && [dOld, dNone, dWin, dNo].every(remoteFact)
+    && dOff.priority === null && dOff.fact.by === 0 && dOff.fact.why === 'off' && SPRI.devicePriorityFor({ serverSetting: OFFS, hello: {} }).fact.why === 'off',
+    'the device\'s verdict IS priorityFor with the machine\'s own nice program: on ⇒ ITS nice -n 5, the fact {by: 5}; a setting that cannot be read = on; the hub\'s switch OFF ⇒ none, the fact «off in Settings» (r705 (1): the reason a person can change, as a local start says it — an older agent too); an older agent (no nicePath), a machine with none, a Windows agent, no hello ⇒ today\'s answer (none, «set by its own machine»)', { dOn, dOff, dOld, dNone, dWin, dNo });
+  SPRI._reset();
+  { const jl = [], jlog = { warn: (l) => jl.push(l) }, m1 = { id: 'dial-m1', name: 'desk one' }, m2 = { id: 'dial-m2', name: 'desk two' };
+    SPRI.devicePriorityFor({ hello: { platform: 'linux' }, machine: m1, log: jlog }); SPRI.devicePriorityFor({ hello: { nicePath: null, platform: 'linux' }, machine: m1, log: jlog });
+    SPRI.devicePriorityFor({ hello: { platform: 'win32' }, machine: m2, log: jlog }); SPRI.devicePriorityFor({ hello: H, machine: { id: 'dial-m3', name: 'desk three' }, log: jlog });
+    SPRI.devicePriorityFor({ serverSetting: OFFS, hello: {}, machine: { id: 'dial-m4', name: 'desk four' }, log: jlog });
+    ok(jl.length === 2 && /desk one: its agent states no nice program/.test(jl[0]) && /desk two/.test(jl[1]) && !jl.some((l) => /desk three|desk four/.test(l)),
+      'r705 (2): a paired machine whose agent states no nice program (an older agent, none there, Windows) is said in the journal ONCE a machine; a lowered one and the switch off say nothing', jl); }
   SPRI._reset(); const said = []; SPRI.devicePriorityFor({ hello: { nicePath: null } }); SPRI.devicePriorityFor({ hello: H });
   const hubNone = SPRI.priorityFor({ nice: () => null, log: { warn: (l) => said.push(l) } }); SPRI._reset();
   ok(hubNone.fact.why === 'no-nice' && said.length === 1, 'a paired machine\'s answer never says nor spends the hub\'s own once-said «no nice program» line', said);
@@ -342,11 +352,11 @@ console.log('— ⑤ B-460d\'s remainder: a PAIRED machine\'s conversation start
   ok(JSON.stringify({ ...plainSpec, cwd: '/w' }) === JSON.stringify({ cmd: 'sh', args: ['-lc', 'x'], cwd: '/w' }) && JSON.stringify(lowSpec) === JSON.stringify({ cmd: '/usr/bin/nice', args: ['-n', '5', 'sh', '-lc', 'x'] }) && /absolute/.test(String(badW)),
     'the paired spec\'s builder: none ⇒ the release\'s spec byte for byte (its keys in their order); a priority ⇒ `<its nice> -n 5 sh -lc …` (priorityArgv\'s words); a bare name refused by name', { plainSpec, lowSpec, badW });
   const DIAL = read('src/spawn/dial.js'), WSC = read('src/ws-create.js'), cnt = (s, x) => s.split(x).length - 1;
-  ok(cnt(DIAL, 'const devPri = SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello() });') === 2
+  ok(cnt(DIAL, 'SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello(), machine: h })') === 2 && cnt(DIAL, 'const devPri = dialKeeperSid ? null : SPRI.devicePriorityFor(') === 1
     && cnt(DIAL, "pty: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd,") === 1
     && cnt(DIAL, "spawn: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd } }") === 1
     && cnt(DIAL, "{ cmd: 'sh', args: ['-lc', shellCmd]") === 2 && cnt(DIAL, 'session._cpuNice = devPri.fact;') === 1 && cnt(DIAL, 'session._cpuNice = dialKeeperSid ? null : devPri.fact;') === 1 && DIAL.includes('hosts.connectedDevice(h.id)')
-    && WSC.includes('session._cpuNice = ocPty ? null : (session.host && session._cpuNice !== undefined ? session._cpuNice : r6Pri.fact);'),
+    && WSC.includes('session._cpuNice = ocPty ? null : (session.host && session._cpuNice !== undefined ? (session._cpuNice || SPRI.factOf((readSessionMeta(sockName) || {}).cpuNice)) : r6Pri.fact);'),
     'THE WIRING: both dial branches (the terminal\'s pty, the chat\'s pipe session) ask the device\'s verdict from a link already up and build their spec with the builder — no spec left without it; each fresh start keeps ITS machine\'s fact (ws-create keeps a paired start\'s own)');
   // THE LADDER ITSELF (the round's S2): src/spawn/dial.js's terminal and chat, driven with a stand-in device — Integration off, no
   // account, a bridge that answers a port — and the cfg file each writes read back (what the attach client hands the device)
@@ -374,9 +384,28 @@ console.log('— ⑤ B-460d\'s remainder: a PAIRED machine\'s conversation start
   ok(lowCfg(reD.cfg && reD.cfg.spawn) && reD.session._cpuNice?.by === 5, 'a cached handle a re-dial left behind (connectedDevice: none): the create asks the dial road itself and still lowers');
   const noneC = await drive5('chat', { hosts: {} }), noneT = await drive5('terminal', { hosts: {} }), offC = await drive5('chat', { hosts: upH, setting: OFFS }), adopt = await drive5('chat', { hosts: upH, data: { keeperSid: 'k-live-1' } });
   ok(relCfg(noneC.cfg && noneC.cfg.spawn, ['cmd', 'args', 'cwd']) && relCfg(noneT.cfg && noneT.cfg.pty, ['cmd', 'args', 'cwd', 'env', 'cols', 'rows']) && noneC.session._cpuNice?.why === 'remote' && noneT.session._cpuNice?.why === 'remote'
-    && relCfg(offC.cfg && offC.cfg.spawn, ['cmd', 'args', 'cwd']) && offC.session._cpuNice?.why === 'remote' && !!adopt.cfg && !adopt.cfg.spawn && adopt.session._cpuNice === null
+    && relCfg(offC.cfg && offC.cfg.spawn, ['cmd', 'args', 'cwd']) && offC.session._cpuNice?.why === 'off' && !!adopt.cfg && !adopt.cfg.spawn && adopt.session._cpuNice === null
     && !lowCfg(noneC.cfg && noneC.cfg.spawn) && !lowCfg(offC.cfg && offC.cfg.spawn),
-    'the release\'s spec, its keys in their order, and the fact «set by its own machine»: no hello (an older agent, no handle) — both branches — and the setting off; an ADOPTED start sends no spec and states NO fact (no row: its child keeps the priority it started with); the judge reads each of them NOT lowered (the control)', { noneC: noneC.cfg, offC: offC.cfg, adopt: adopt.cfg, adoptFact: adopt.session._cpuNice });
+    'the release\'s spec, its keys in their order: no hello (an older agent, no handle) — both branches — with the fact «set by its own machine», and the setting off with «off in Settings»; an ADOPTED start sends no spec and states NO fact (no row: its child keeps the priority it started with); the judge reads each of them NOT lowered (the control)', { noneC: noneC.cfg, offC: offC.cfg, adopt: adopt.cfg, adoptFact: adopt.session._cpuNice });
+  // THE CREATE TO ITS META WRITE (主开发 r705 (5)): the REAL ws-create with a dial host — the fact the ladder sets survives to
+  // the meta write; an ADOPTED start keeps what its meta held and claims nothing when it held none (r705 (3)). RED CONTROL: a
+  // ws-create copy whose line drops the ladder's fact (the release's form) writes «set by its own machine» for a lowered start
+  const H5 = { id: 'dial-d5c', name: 'd5c', deviceId: 'd5c', transport: 'dial' };
+  const hostsC = new Proxy({ get: (hid) => (hid === H5.id ? H5 : null), connectedDevice: () => helloDm }, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' ? () => undefined : undefined)) });
+  const DCTX = { dialBridge: { ensure: async () => 41235 }, agentdRemote: { lockedWhy: () => null, agentdDir: dlDir, attachBundle: '/a/attach.js' } };
+  const metaFact = (x) => { const m = x.metas.find((mm) => mm && 'cpuNice' in mm && 'host' in mm); return m ? m.cpuNice : 'no meta'; };
+  const sentOf = (x) => x.sent.map((m) => m.type + (m.message ? ': ' + String(m.message).slice(0, 120) : ''));
+  const xLow = await drive(wsCreate, { hostId: H5.id, backend: 'claude' }, { hosts: hostsC, extra: DCTX });
+  const xKept = await drive(wsCreate, { hostId: H5.id, backend: 'claude', keeperSid: 'k-live-2' }, { hosts: hostsC, extra: { ...DCTX, readSessionMeta: () => ({ cpuNice: { by: 5 } }) } });
+  const xNone = await drive(wsCreate, { hostId: H5.id, backend: 'claude', keeperSid: 'k-live-3' }, { hosts: hostsC, extra: DCTX });
+  const MD = mutantCopies('session-spawn-line-dial', REPO), WSRC = read('src/ws-create.js');
+  const KEEP = '(session.host && session._cpuNice !== undefined ? (session._cpuNice || SPRI.factOf((readSessionMeta(sockName) || {}).cpuNice)) : r6Pri.fact)';
+  let xRel = null; try { xRel = await drive(MD.load('src/ws-create.js', anchored(WSRC, KEEP, 'r6Pri.fact', 'r705 the ladder fact dropped'), 'dial-fact-dropped'), { hostId: H5.id, backend: 'claude' }, { hosts: hostsC, extra: DCTX }); } catch (e) { xRel = { error: String(e && e.message).slice(0, 200) }; }
+  ok(xLow.session && xLow.session._cpuNice?.by === 5 && metaFact(xLow)?.by === 5 && xKept.session && xKept.session._cpuNice?.by === 5 && metaFact(xKept)?.by === 5
+    && xNone.session && xNone.session._cpuNice === null && metaFact(xNone) === undefined,
+    'THE CREATE (the real ws-create, a dial host): the fact the ladder sets survives to the meta write ({by: 5}); an ADOPTED start keeps the fact its meta held ({by: 5}) and, holding none, claims nothing (no cpuNice)',
+    { low: [xLow.session && xLow.session._cpuNice, metaFact(xLow), sentOf(xLow)], kept: [xKept.session && xKept.session._cpuNice, metaFact(xKept), sentOf(xKept)], none: [xNone.session && xNone.session._cpuNice, metaFact(xNone), sentOf(xNone)] });
+  ok(!!xRel && !xRel.error && xRel.session && metaFact(xRel)?.why === 'remote', 'RED CONTROL: a ws-create whose line drops the ladder\'s fact writes «set by its own machine» for that lowered start — the leg above is red on it', xRel && (xRel.error || { fact: metaFact(xRel), sent: sentOf(xRel) }));
   const C = await import(path.join(REPO, 'scripts/spawn-env-census.mjs'));
   const FILES = C.filesOf(REPO), rdp = (patch) => (f) => (f in patch ? patch[f] : (() => { try { return read(f); } catch { return ''; } })());
   const cutPty = C.priorityJudge(rdp({ 'src/spawn/dial.js': DIAL.replace("pty: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd,", "pty: { cmd: 'sh', args: ['-lc', shellCmd], cwd,") }), FILES);   // stale-pins: kept (the red control rebuilds the release's pty spec on purpose)

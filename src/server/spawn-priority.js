@@ -29,11 +29,12 @@ let saidMissing = false;
 /** THE START'S PRIORITY. → { priority: {nice, by} | null (src/spawn/line.js priorityArgv), fact: {by} | {by: 0, why} }:
  *  the fact is what the conversation's properties say (`why` ∈ FACT_WHY). `local` false = a remote conversation's local
  *  transport (its agent runs on the other machine: not lowered from here). */
+/** the setting read at THIS start — on unless it says false; a setting that cannot be read is on (never a start refused) */
+function settingOn(serverSetting) { try { return serverSetting(SETTING) !== false; } catch { return true; } }
+
 function priorityFor({ serverSetting = () => undefined, local = true, log = console, nice = niceProgram } = {}) {
   if (!local) return { priority: null, fact: { by: 0, why: 'remote' } };
-  let on = true;
-  try { on = serverSetting(SETTING) !== false; } catch { on = true; }
-  if (!on) return { priority: null, fact: { by: 0, why: 'off' } };
+  if (!settingOn(serverSetting)) return { priority: null, fact: { by: 0, why: 'off' } };
   const p = nice();
   if (!p) {
     if (!saidMissing) { saidMissing = true; try { log.warn?.(`[spawn-priority] no nice program in ${NICE_DIRS.join(', ')} — conversations, jobs and vault runs start at the server's own CPU priority (${SETTING} is on)`); } catch { } }
@@ -54,10 +55,20 @@ function nicePathOf(info) {
  *  input — the one its agent's hello names. Lowered only when the agent named one and the setting is on; every other case
  *  (an older agent that says none, a machine with none, Windows, the setting off) is today's remote answer: the release's
  *  spec, the fact «set by its own machine». The step is relative to the device agent's own niceness, as +5 is the hub's. */
-function devicePriorityFor({ serverSetting = () => undefined, hello = null } = {}) {
+const saidNoPath = new Set();   // the machines whose agent stated no nice program: ONE journal line each, per process (bounded)
+function devicePriorityFor({ serverSetting = () => undefined, hello = null, machine = null, log = console } = {}) {
+  // 主开发 r705 (1): the hub's own switch first — OFF is the reason a person can change, said as a local start says it
+  if (!settingOn(serverSetting)) return priorityFor({ serverSetting });
   const p = nicePathOf(hello);
-  const pri = p ? priorityFor({ serverSetting, local: true, nice: () => p }) : null;
-  return pri && pri.priority ? pri : priorityFor({ local: false });
+  if (p) { const pri = priorityFor({ serverSetting, local: true, nice: () => p }); if (pri.priority) return pri; }
+  // r705 (2): an agent that states no program (an older agent, a machine without one, a Windows agent) is said ONCE a machine
+  const id = machine && (machine.id || machine.deviceId);
+  if (!p && id && !saidNoPath.has(id) && saidNoPath.size < 256) {
+    saidNoPath.add(id);
+    const name = String((machine && machine.name) || id).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 64);
+    try { log.warn?.(`[spawn-priority] ${name}: its agent states no nice program (an older agent, a machine without one, or Windows) — its conversations start at that agent's own priority`); } catch { }
+  }
+  return priorityFor({ local: false });
 }
 
 /** PURE: a stored fact (a session's meta `cpuNice`) → the fact, or null when it is not one */
@@ -68,6 +79,6 @@ function factOf(x) {
 }
 
 /** a suite's seam: forget the one look and the said line */
-function _reset() { NP._resetNice(); saidMissing = false; }
+function _reset() { NP._resetNice(); saidMissing = false; saidNoPath.clear(); }
 
 module.exports = { priorityFor, devicePriorityFor, nicePathOf, niceProgram, factOf, SETTING, NICE_DIRS, FACT_WHY, _reset };

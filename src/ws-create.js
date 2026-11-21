@@ -1736,7 +1736,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // carries its path; a file that cannot be written sets the person's file aside as before (only what this start adds)
             if (sessionSpec.ownFileMerged) spawnArgs = await ownSettingsOnDisk(spawnArgs, id, sessionSpec);
             const r6Pri = SPRI.priorityFor({ serverSetting, local: !session.host });
-            session._cpuNice = ocPty ? null : (session.host && session._cpuNice !== undefined ? session._cpuNice : r6Pri.fact);   // an OpenCode serve terminal runs in the serve's pty, not this line: no fact; a paired machine's start brings ITS fact, none for an adopted one (src/spawn/dial.js, B-460d's remainder)
+            session._cpuNice = ocPty ? null : (session.host && session._cpuNice !== undefined ? (session._cpuNice || SPRI.factOf((readSessionMeta(sockName) || {}).cpuNice)) : r6Pri.fact);   // an OpenCode serve terminal runs in the serve's pty, not this line: no fact; a paired machine's start brings ITS fact (src/spawn/dial.js, B-460d's remainder); an ADOPTED one keeps what its meta holds and claims nothing new (r705 (3))
             const r6Line = sessionSpawnLine({ node: NODE_CMD, wrapper, bufFile, metaFile: metaFileW, env: r6Base, pairs: r6Pairs,
               exe: spawnCmd, args: spawnArgs, priority: r6Pri.priority,
             });

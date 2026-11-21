@@ -196,7 +196,7 @@ function dialLadder(c) {
                 });
                 // B-460d's remainder: it starts below ITS machine's agent — the hub's SAME verdict with that machine's own nice
                 // program (its hello's nicePath); an older agent, none there, the setting off ⇒ the release's spec and today's fact
-                const devPri = SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello() });
+                const devPri = SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello(), machine: h });
                 // tools PATH only while integrated — leftover tools from an
                 // earlier ON spawn must not be name-resolvable in a pristine one
                 const shellCmd = buildRemoteExec({
@@ -321,7 +321,7 @@ function dialLadder(c) {
                 });
                 // B-460d's remainder: it starts below ITS machine's agent — the hub's SAME verdict with that machine's own nice
                 // program (its hello's nicePath); an older agent, none there, the setting off ⇒ the release's spec and today's fact
-                const devPri = SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello() });
+                const devPri = dialKeeperSid ? null : SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello(), machine: h });   // r705 (4): an adopted start sends no spec — no hello asked
                 // tools PATH only while integrated (see the pty branch note)
                 const shellCmd = buildRemoteExec({
                   cwd, shq,

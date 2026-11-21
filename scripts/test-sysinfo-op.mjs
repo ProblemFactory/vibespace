@@ -164,8 +164,8 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
     ok(lowP.priority && lowP.fact.by === 5 && low.spec.cmd === own && JSON.stringify(low.spec.args.slice(0, 4)) === JSON.stringify(['-n', '5', 'sh', '-lc']) && (premise ? low.nice.length === 2 && low.nice.every((v) => v === 19) : lowered(low)),
       premise ? `PREMISE (judged): the agent runs at niceness 19, the cap — the dial road's spec still starts with ITS nice (${low.spec.cmd} -n 5 sh -lc …), and no step below 19 can be shown (read ${JSON.stringify(low.nice)})`
         : `REAL agent: the dial road's spec starts with ITS nice (${low.spec.cmd} -n 5 sh -lc …); the started process and its child, each read from its own /proc entry, run at niceness ${want} — the agent's ${agentNice} + 5, at most 19 (read ${JSON.stringify(low.nice)})`);
-    ok(offP.priority === null && offP.fact.why === 'remote' && JSON.stringify(off.spec) === release('off') && off.nice.every((v) => v === agentNice),
-      `the setting off: the release's spec byte for byte, both at the agent's own niceness ${agentNice} (read ${JSON.stringify(off.nice)}), the fact «set by its own machine»`);
+    ok(offP.priority === null && offP.fact.why === 'off' && JSON.stringify(off.spec) === release('off') && off.nice.every((v) => v === agentNice),
+      `the setting off: the release's spec byte for byte, both at the agent's own niceness ${agentNice} (read ${JSON.stringify(off.nice)}), the fact «off in Settings» (r705 (1))`);
     ok(oldP.priority === null && oldP.fact.why === 'remote' && JSON.stringify(old.spec) === release('old') && old.nice.every((v) => v === agentNice),
       `an OLDER agent (a hello with no nicePath): the release's spec byte for byte, never asked anything new, at its own niceness (read ${JSON.stringify(old.nice)})`);
     if (!premise) ok(!lowered(off) && !lowered(old), 'RED CONTROL: the same judge on the spec with the prefix dropped (the release\'s) reads NOT lowered — this leg can go red');

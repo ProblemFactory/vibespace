@@ -413,7 +413,7 @@ export const PRIORITY_ROADS = Object.freeze([
   ['src/server/vault-run-door.js', '…through the door\'s own setter: the step below the hub\'s own niceness, at most 19 (each thread /proc lists for it too)', 'const n = Math.min(19, os.getPriority() + by);', 1],
   ['src/server/vault-run-door.js', '…which is the door\'s default (a suite hands its own)', 'lowerImpl = lowerRun,', 1],
   ['src/server/mounts-plugins-wiring.js', 'the vault run door is handed the start\'s priority (the setting read per run)', "spawnPriority: () => require('./spawn-priority.js').priorityFor({ serverSetting, local: true, log: console }),", 1],
-  ['src/spawn/dial.js', 'B-460d\'s remainder: a PAIRED machine\'s start (the chat\'s pipe session, the terminal\'s pty) asks the SAME verdict with ITS machine\'s nice program, from its agent\'s hello', 'const devPri = SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello() });', 2],
+  ['src/spawn/dial.js', 'B-460d\'s remainder: a PAIRED machine\'s start (the chat\'s pipe session, the terminal\'s pty) asks the SAME verdict with ITS machine\'s nice program, from its agent\'s hello', 'SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello(), machine: h })', 2],
   ['src/spawn/dial.js', '…and both specs are built with the SAME words in front (src/spawn/line.js withPriority)', "withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority)", 2],
   ['src/agentd/agentd.js', '…the machine\'s agent says its own nice program in its hello (the shared look the hub\'s starts use)', 'nicePath: niceProgram(),', 1],
 ]);
