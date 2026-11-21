@@ -1813,11 +1813,13 @@ function readView(vw, buf, end, final) {
 const COMPILED = Symbol('vault-run.compiledForms');
 function compileForms(secrets) {
   const table = new Map();
+  let vi = 0;   // r858: each value's own index (`v`) — two values may share a placeholder (a web login's passwords): the overlap rule tells them apart by it
   for (const s of Array.isArray(secrets) ? secrets : []) {
     const v = String(s && s.value != null ? s.value : '');
     if (bytesOf(v) < MIN_MASK_BYTES) { const e = new Error(WORDS.entry_too_short_to_mask); e.code = 'entry_too_short_to_mask'; throw e; }
     const ph = placeholderOf(s.ref && typeof s.ref === 'object' ? s.ref : s.label != null ? { label: s.label } : parseRef(String(s.ref)) || String(s.ref));
-    for (const f of formsOf(v)) if (!table.has(f.text)) table.set(f.text, { ph, form: f.form });
+    vi++;
+    for (const f of formsOf(v)) if (!table.has(f.text)) table.set(f.text, { ph, form: f.form, v: vi });
   }
   const texts = [...table.keys()].sort((a, b) => b.length - a.length);
   const re = texts.length ? new RegExp(texts.map(reEscape).join('|'), 'g') : null;
@@ -1832,10 +1834,12 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
   const { table, texts, re, W } = C;
   const names = [...streams];
   let held = [];   // [[stream, text]] in arrival order — what the run has not handed on yet
-  const st = { hits: 0, bytes: 0, byForm: {} };
-  /** ONE text read plainly and through every view → { safe (what is decided), finds [{ s, e, ph, form }], spans [[s, e]] }. */
-  function scan(buf, final) {
+  const st = { hits: 0, bytes: 0, byForm: {}, scanned: 0 };   // scanned: the characters every scan read (the suites' cost count)
+  /** ONE text read plainly and through every view → { safe (what is decided), finds [{ s, e, ph, form }], spans [[s, e]] }.
+   *  `at` (the arrival order's): each character's index in its own stream's held text — a find's PLACE, the same in every read. */
+  function scan(buf, final, at) {
     const L = buf.length;
+    st.scanned += L;
     let safe = final ? L : L - W;
     const views = [];
     for (const vw of VIEWS) {
@@ -1853,16 +1857,31 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
     const look = (sk, r, form) => {
       re.lastIndex = 0;
       let m;
+      const vEnd = new Map();   // THE SCRUBBER'S OVERLAP (r858): each value's last find's end, in the read's own text
+      let gStart = -1, gEnd = -1, gAt = -1;   // THE SCRUBBER'S OVERLAP: the current group of overlapping finds (its first start and its union's end in the read's own text, its last find's place)
+      const G = 4 * (W + 1);   // THE SCRUBBER'S OVERLAP: the grid a long group breaks on
       while ((m = re.exec(sk)) !== null) {
         const s = r ? r.at[m.index] : m.index;
         if (s >= safe) break;
         const t = table.get(m[0]);
+        const p = at ? at[s] : s;   // THE SCRUBBER'S OVERLAP: the find's place in its stream's held text — every read of one step (plain, each view, the arrival order) gives one occurrence the same place
+        if (!final && m.index < gEnd && gEnd - gStart > 2 * (W + 1) && Math.floor(p / G) > Math.floor(gAt / G)) { finds.push({ s, e: r ? r.to[m.index + m[0].length - 1] : m.index + m[0].length, ph: t.ph, form: form || t.form }); vEnd.set(t.v, m.index + m[0].length); re.lastIndex = Math.max(gEnd, m.index + m[0].length); gStart = gEnd = gAt = -1; continue; }   // THE SCRUBBER'S OVERLAP: while text is held back (never in a final read, which holds nothing: read 5), a group past 2 × (W + 1) — only values that tile a repeating text make one — BREAKS at the first find past each multiple of 4 × (W + 1) of the place: that find is taken and jumped past, as the release jumped past every match. The place is the same in every read, so the reads past 2 × (W + 1) that see that occurrence break at it, and the finds step joins across them stop there too (read 4: a break at each read's own length was bridged by another read after a line end or a stderr line, and one that skipped its find left that find's tail in the clear). Lines shorter than 2 × (W + 1) still bridge (read 5; said in the engineering log)
+        if ((vEnd.get(t.v) || -1) > m.index) { re.lastIndex = m.index + 1; continue; }   // THE SCRUBBER'S OVERLAP: the SAME value inside its own last find (`0000…`, a value overlapping itself) is no new find — so it tiles as the release did (one placeholder, one hit, a tile) — yet the next position is still asked for another value
         finds.push({ s, e: r ? r.to[m.index + m[0].length - 1] : m.index + m[0].length, ph: t.ph, form: form || t.form });
+        vEnd.set(t.v, m.index + m[0].length); if (m.index >= gEnd) gStart = m.index; gEnd = Math.max(gEnd, m.index + m[0].length); gAt = p; re.lastIndex = m.index + 1;   // THE SCRUBBER'S OVERLAP (lane lg-vault-file, r858): asked again INSIDE the match — ANOTHER value that starts inside it is found (the masks' union is one placeholder); the leftmost match had jumped past it and left its tail in the clear
       }
     };
     look(buf, null, null);
     for (const [vw, r] of views) { look(r.sk, r, vw.form); for (let k = 0; k < r.spans.length; k += 2) spans.push([r.spans[k], r.spans[k + 1]]); }
     return { safe, finds, spans };
+  }
+  /** THE ARRIVAL ORDER of held entries (shared by `step` and the cut — lane lg-vault-file, r858): `all` = their texts joined;
+   *  rangesOf(a, b) → each stream's [k, a, b] in that stream's own kept text. */
+  function arrivalOf(list) {
+    const all = list.map((x) => x[1]).join(''), streamAt = [], idxAt = [], seen = new Map();
+    for (const [k, x] of list) for (let j = 0; j < x.length; j++) { const i = seen.get(k) || 0; streamAt.push(k); idxAt.push(i); seen.set(k, i + 1); }
+    const rangesOf = (a, b) => { const m = new Map(); for (let i = a; i < b; i++) { const k = streamAt[i], x = m.get(k); if (x) x[2] = idxAt[i] + 1; else m.set(k, [k, idxAt[i], idxAt[i] + 1]); } return [...m.values()]; };
+    return { all, streamAt, idxAt, rangesOf };
   }
   function step(final) {
     const out = {}; for (const k of names) out[k] = '';
@@ -1880,10 +1899,8 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
       for (const [a, b] of sc.spans) groups.push({ r: [[k, a, b]], tok: true });
     }
     if (own.size > 1) {   // the run's text in arrival order: a value split between the pipes
-      const all = held.map((x) => x[1]).join(''), streamAt = [], idxAt = [], seen = new Map();
-      for (const [k, x] of held) for (let j = 0; j < x.length; j++) { const i = seen.get(k) || 0; streamAt.push(k); idxAt.push(i); seen.set(k, i + 1); }
-      const rangesOf = (a, b) => { const m = new Map(); for (let i = a; i < b; i++) { const k = streamAt[i], x = m.get(k); if (x) x[2] = idxAt[i] + 1; else m.set(k, [k, idxAt[i], idxAt[i] + 1]); } return [...m.values()]; };
-      const sc = scan(all, final);
+      const { all, streamAt, idxAt, rangesOf } = arrivalOf(held);
+      const sc = scan(all, final, idxAt);
       if (!final) { const n = new Map(); for (let i = 0; i < sc.safe; i++) n.set(streamAt[i], (n.get(streamAt[i]) || 0) + 1); for (const [k] of own) cut.set(k, Math.min(cut.get(k), n.get(k) || 0)); }
       for (const f of sc.finds) groups.push({ r: rangesOf(f.s, f.e), ph: f.ph, form: f.form });
       for (const [a, b] of sc.spans) groups.push({ r: rangesOf(a, b), tok: true });
@@ -1929,24 +1946,68 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
   function cutTailStart(buf) {
     const L = buf.length;
     if (!L) return L;
-    const isPrefix = (sfx) => { if (!sfx) return false; for (const t of texts) if (t.length > sfx.length && t.startsWith(sfx)) return true; return false; };   // a NON-EMPTY proper prefix of some spelled form
-    const prefixStart = (str) => { const n = str.length; for (let q = Math.max(0, n - W); q < n; q++) if (isPrefix(str.slice(q))) return q; return n; };   // earliest offset whose suffix-to-the-end is a value prefix (W bounds the search)
-    let start = prefixStart(buf);                                  // a raw / encoded form half present at the tail
-    for (const vw of VIEWS) {
-      for (let q = Math.max(0, L - vw.max + 1); q < L; q++) if (vw.triggers.includes(buf[q])) { if (q < start) start = q; break; }   // a trailing INCOMPLETE view token (its first trigger within the last vw.max-1 chars) — its decode is unknown ⇒ uncertain from there
+    const isPrefix = (sfx, broken) => { if (!sfx || /^\uFFFD+$/.test(sfx)) return false; for (const t of texts) if (t.length > sfx.length && t.startsWith(sfx) && (!broken || t.charCodeAt(sfx.length) >= 0x80)) return true; return false; };   // a NON-EMPTY proper prefix of some spelled form — never one of only U+FFFD (a broken character is no value's character, though a non-ASCII value's UTF-16 form, read as UTF-8, may begin with one: read 4); before a BROKEN character, only a head whose next character is not ASCII — the character the cut broke was the value's own (read 5: a one-character head, NUL or `%` or a hex digit, before a binary tail's U+FFFD counted a hit)
+    const prefixStart = (str, n = str.length, broken = false) => { for (let q = Math.max(0, n - W); q < n; q++) if (isPrefix(str.slice(q, n), broken)) return q; return n; };   // earliest offset whose suffix up to n is a value prefix (W bounds the search)
+    // THE ENDS a half value may run off (r858, the scrubber's reads): the text's own end; the start of a trailing UNFINISHED view token
+    // (its first trigger within the last vw.max − 1 characters — a colour code, a `=`, a `\x` cut short: its decode is unknown, so it is
+    // uncertain from there); and the start of a trailing run of U+FFFD (the 2 MiB bound counts BYTES: a character cut there is decoded
+    // as U+FFFD) — the text BEFORE such an end may end with a value's head, which the old reading (to the very end) never saw
+    let start = L;
+    const ends = new Set([L]);
+    for (const vw of VIEWS) for (let q = Math.max(0, L - vw.max + 1); q < L; q++) if (vw.triggers.includes(buf[q])) { if (q < start) start = q; ends.add(q); break; }
+    let fffd = -1;
+    { let q = L; while (q > 0 && buf[q - 1] === '\uFFFD') q--; if (q < L) ends.add(q), fffd = q; }   // a character the cut broke — only an END (the third read: as the tail itself, every binary output cut at the bound counted a scrubbed hit where no value was)
+    for (const e of ends) { const p = prefixStart(buf, e, e === fffd); if (p < e && p < start) start = p; }   // a raw / encoded form half present before an end (prefixStart answers the end itself for none: an end is no tail by itself — read 4)
+    for (const vw of VIEWS) {   // each view read ONCE over the whole text (as the release did); each end mapped into its decode
       const r = readView(vw, buf, L, false);
-      if (r) { const ps = prefixStart(r.sk); if (ps < r.sk.length) { const raw = r.at[ps]; if (raw != null && raw < start) start = raw; } }   // a complete-token VIEW decode whose tail is a value prefix — mapped back to a raw offset
+      if (!r) continue;
+      for (const e of ends) {
+        let n = r.sk.length;
+        if (e < L) { let lo = 0, hi = r.sk.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (r.at[mid] < e) lo = mid + 1; else hi = mid; } n = lo; }   // the decoded characters that start before e
+        const ps = prefixStart(r.sk, n, e === fffd);
+        if (ps < n) { const raw = r.at[ps]; if (raw != null && raw < start) start = raw; }   // a complete-token VIEW decode whose tail is a value prefix — mapped back to a raw offset
+      }
     }
     return start;
   }
+  // THE CUT'S TWO FAULTS (lane lg-vault-file, r858 — every version back to round 21): (1) the uncertain tail could start INSIDE a
+  // value printed just before the cut (its last characters read as a half value's start, or a colour code inside it as an unfinished
+  // token): the certain prefix held only the value's head, which no form matches, and flushed it in the clear; (2) the cut rebuilt
+  // the held text STREAM BY STREAM, so a value the program wrote half to stdout and half to stderr was never found and went out whole.
+  // Now each stream's tail is decided against the finds of its own text AND of the arrival order: a find that reaches into a tail
+  // pulls the tail of every stream it covers back to its start there (to a fixpoint), and the certain prefixes keep the arrival order.
+  // A tail outside every find is unchanged; a run that is not cut never comes here.
   function endStep(cut) {
     if (!cut || !re) return step(true);   // a COMPLETE stream (or no secrets): flush all, every complete match masked — no partial to fear
     const own = new Map(); for (const [k, x] of held) own.set(k, (own.get(k) || '') + x);
-    const keepFrom = new Map(); for (const [k, x] of own) keepFrom.set(k, cutTailStart(x));
-    held = [];
-    for (const [k, x] of own) { const sIdx = keepFrom.get(k); if (sIdx > 0) held.push([k, x.slice(0, sIdx)]); }   // the CERTAIN prefix (no trailing partial) — step(true) masks its complete values and flushes the rest clean
+    const start = new Map(); for (const [k, x] of own) start.set(k, cutTailStart(x));
+    const ar = own.size > 1 ? arrivalOf(held) : null;
+    if (ar) {   // the ARRIVAL order's own uncertain tail: a value whose head went to one pipe and its middle to the other, cut before its end — every stream's text from there on is uncertain too
+      const q = cutTailStart(ar.all);
+      for (let i = q; i < ar.all.length; i++) { const k = ar.streamAt[i]; if (ar.idxAt[i] < start.get(k)) start.set(k, ar.idxAt[i]); }
+    }
+    // the complete finds of each stream's text and of the arrival order — the WHOLE held text (the scrubber's second read: a window
+    // sized in raw characters missed a value a view spreads without bound — colour codes, soft breaks, line ends between its characters)
+    const finds = [];
+    for (const [k, x] of own) for (const f of scan(x, true).finds) finds.push([[k, f.s, f.e]]);
+    if (ar) for (const f of scan(ar.all, true, ar.idxAt).finds) finds.push(ar.rangesOf(f.s, f.e));
+    for (let moved = true; moved;) {
+      moved = false;
+      for (const rs of finds) {
+        if (!rs.some(([k, , b]) => b > start.get(k))) continue;   // wholly before every tail: the flush below masks it
+        for (const [k, a] of rs) if (a < start.get(k)) { start.set(k, a); moved = true; }
+      }
+    }
+    // the CERTAIN prefixes, in arrival order — step(true) masks every complete value in them (one split between the pipes too)
+    const used = new Map(), next = [];
+    for (const [k, x] of held) {
+      const u = used.get(k) || 0, keep = x.slice(0, Math.max(0, start.get(k) - u));
+      used.set(k, u + x.length);
+      if (keep) { const p = next[next.length - 1]; if (p && p[0] === k) p[1] += keep; else next.push([k, keep]); }
+    }
+    held = next;
     const out = step(true);
-    for (const [k, x] of own) { const sIdx = keepFrom.get(k); if (sIdx < x.length) { out[k] = (out[k] || '') + CUT_PH; st.hits++; st.bytes += bytesOf(x.slice(sIdx)); } }   // ONLY the uncertain trailing window becomes a placeholder (and counts one hit); a clean tail adds nothing
+    for (const [k, x] of own) { const s = start.get(k); if (s < x.length) { out[k] = (out[k] || '') + CUT_PH; st.hits++; st.bytes += bytesOf(x.slice(s)); } }   // ONLY the uncertain trailing window becomes a placeholder (and counts one hit); a clean tail adds nothing
     return out;
   }
   return {
@@ -1957,7 +2018,7 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
       return step(false);
     },
     end: (cut = false) => endStep(cut),
-    get hits() { return st.hits; }, get bytes() { return st.bytes; }, get byForm() { return { ...st.byForm }; }, window: W, streams: names,
+    get hits() { return st.hits; }, get bytes() { return st.bytes; }, get byForm() { return { ...st.byForm }; }, get scanned() { return st.scanned; }, window: W, streams: names,
   };
 }
 /** ONE stream's scrubber (a whole text, the belt's): the run masker with one stream. `secrets` = a secrets list or a compiled set
@@ -1971,15 +2032,18 @@ function maskText(text, secrets) { const m = createMasker(secrets); return m.pus
 const VIEW_TRIGGER_RE = /[=\\&\x1b\r\n]/;
 /** Memoizable text scrubber built ONCE per secret-set change (lane vault-login-chrome r5 MAJOR A + r6 MINOR E' + r7 MAJOR 2:
  *  never rebuild formsOf + RegExp per string node on the event loop). `fn(text)` matches `maskText(text, secrets)` across all
- *  spelled + view forms; `fn.spelled(text)` scrubs unparseable raw blobs by masking all forms inside JSON strings (`"…"`) and
+ *  spelled + view forms (but for values that tile a repeating text: the run's scan, while it holds text back, breaks that one
+ *  long group into several placeholders, where this gives one); `fn.spelled(text)` scrubs unparseable raw blobs by masking all forms inside JSON strings (`"…"`) and
  *  read views while skipping bare JSON number tokens outside quotes. */
 function compileTextScrubber(secrets) {
   const table = new Map();
+  let nv = 0;
   for (const s of Array.isArray(secrets) ? secrets : []) {
     const v = String(s && s.value != null ? s.value : '');
     if (bytesOf(v) < MIN_MASK_BYTES) continue;
     const ph = placeholderOf(s.ref && typeof s.ref === 'object' ? s.ref : s.label != null ? { label: s.label } : parseRef(String(s.ref)) || String(s.ref));
-    for (const f of formsOf(v)) if (!table.has(f.text)) table.set(f.text, { ph, form: f.form });
+    const vi = ++nv;   // r858: this value's own index (two values may share a placeholder)
+    for (const f of formsOf(v)) if (!table.has(f.text)) table.set(f.text, { ph, form: f.form, v: vi });
   }
   const texts = [...table.keys()].sort((a, b) => b.length - a.length);
   const maxFormLen = texts.length ? texts[0].length : 0;
@@ -2015,11 +2079,14 @@ function compileTextScrubber(secrets) {
     const look = (sk, r) => {
       re.lastIndex = 0;
       let m;
+      const vEnd = new Map();   // the dialog scrubber's overlap (r858): each value's last find's end
       while ((m = re.exec(sk)) !== null) {
         const s = r ? r.at[m.index] : m.index;
         if (s >= L) break;
         const t = table.get(m[0]);
+        if ((vEnd.get(t.v) || -1) > m.index) { re.lastIndex = m.index + 1; continue; }   // the dialog scrubber's overlap: the same value inside its own last find is no new find
         finds.push({ a: s, b: r ? r.to[m.index + m[0].length - 1] : m.index + m[0].length, ph: t.ph });
+        vEnd.set(t.v, m.index + m[0].length); re.lastIndex = m.index + 1;   // the dialog scrubber's overlap (r858): asked again inside the match for another value, as the run's scan is
       }
     };
     if (plainHit) look(raw, null);
@@ -2050,10 +2117,13 @@ function compileTextScrubber(secrets) {
     if (plainHit) {
       re.lastIndex = 0;
       let m;
+      const vEnd = new Map();   // its spelled pass (r858): each value's last candidate's end
       while ((m = re.exec(raw)) !== null) {
         if (m.index >= L) break;
         const t = table.get(m[0]);
+        if ((vEnd.get(t.v) || -1) > m.index) { re.lastIndex = m.index + 1; continue; }   // its spelled pass: the same value inside its own last candidate is none
         cands.push({ a: m.index, b: m.index + m[0].length, ph: t.ph, digits: /^\d+$/.test(m[0]) });
+        vEnd.set(t.v, m.index + m[0].length); re.lastIndex = m.index + 1;   // its spelled pass (r858): asked again inside the match for another value
       }
     }
     if (hasView && maxFormLen > 0) {
@@ -2075,12 +2145,15 @@ function compileTextScrubber(secrets) {
           if (!r) continue;
           re.lastIndex = 0;
           let m;
+          const vEnd = new Map();   // its spelled pass through a view (r858): each value's last candidate's end
           while ((m = re.exec(r.sk)) !== null) {
             const s = ws + r.at[m.index];
             if (s >= L) break;
             const b = ws + r.to[m.index + m[0].length - 1];
             const t = table.get(m[0]);
+            if ((vEnd.get(t.v) || -1) > m.index) { re.lastIndex = m.index + 1; continue; }   // its spelled pass through a view: the same value inside its own last candidate is none
             cands.push({ a: s, b, ph: t.ph, digits: /^\d+$/.test(raw.slice(s, b)) });
+            vEnd.set(t.v, m.index + m[0].length); re.lastIndex = m.index + 1;   // its spelled pass through a view (r858): asked again inside the match for another value
           }
         }
       }
