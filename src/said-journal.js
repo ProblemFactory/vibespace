@@ -11,15 +11,21 @@
 // rewrite (the ring's trim, a held copy's edit, the lines that are never said) stays on its timer and REPLACES the file:
 // `rewritten()` after its rename forgets the descriptor (it names the file the rename replaced) and the lines that rewrite carried.
 // Never an append onto a previous life's file: until the wrapper's first whole rewrite, a flush asks for that rewrite instead
-// (`rewrite`). A failed append is SAID once (the wrapper's log) and the timer stays the fallback: nothing here throws.
+// (`rewrite`). A failed append is SAID (the wrapper's log) and the timer stays the fallback: nothing here throws. Its follow (主开发
+// r1236): AFTER A FAILURE NOTHING IS APPENDED until a whole rewrite has succeeded — a write that threw after a partial write left half a
+// record, and the next append would merge two records into one line no reader parses; each failure EPISODE (a failure after a
+// recovery) is said again. THE APPEND BUDGET: past APPEND_BUDGET bytes appended since the last whole rewrite (the rewrite keeps
+// failing while small appends still land: a nearly full disk) nothing more is appended, and that is said — the file the hub's
+// registration reads whole stays bounded.
 // THE FENCE (the restore's last gap — src/server/session-stdout.js): `_fence` is the one record a wrapper says ONLY when a hub asks
 // for it (`webui_fence`, written once its attach is connected). It is in the file AT ITS PLACE before it is said, so the restore
 // reads exactly what was said between its catch-up and its connect (dtach dropped it) and nothing the live stream also brings.
 // SHARED: required by data/bin/chat-wrapper.js and data/bin/codex-chat-wrapper.js (guarded: a tree without it keeps the timer
 // alone), and by the hub (the fence's words). Node builtins only.
-const fs = require('fs');
+const FS = require('fs');
 const { closeWritten } = require('./fd-close.js');
 
+const APPEND_BUDGET = 4 * 1024 * 1024;   // bytes appended since the last whole rewrite, at most (the follow r1236)
 const FENCE_TYPE = '_fence';
 const FENCE_VERSION = 1;   // a wrapper's sidecar adverts `caps.fence` = this: the hub asks a fence of no other
 /** the fence record a wrapper says for a hub's ask (its id bounded: an ask's id is the hub's own random word) */
@@ -27,12 +33,13 @@ function fenceLine(id) { return JSON.stringify({ type: FENCE_TYPE, id: String(id
 /** the hub's ask of a fence (a stdin frame; never forwarded to a CLI) */
 function fenceAsk(id) { return JSON.stringify({ type: 'webui_fence', id: String(id == null ? '' : id).slice(0, 64) }); }
 
-function create({ file, rewrite = null, say = () => { } } = {}) {
-  let fd = null, pending = '', armed = false, armTried = false, failedSaid = false;
+function create({ file, rewrite = null, say = () => { }, fs = FS, budget = APPEND_BUDGET } = {}) {   // fs: a leg's own (open / write only; a close is fd-close's)
+  let fd = null, pending = '', armed = false, armTried = false, failedSaid = false, since = 0, overSaid = false;
   const where = 'the said journal';
-  const fail = (e) => {
-    fd = closeWritten(fd, where, say);
-    if (!failedSaid) { failedSaid = true; try { say(`${where} could not append to the history file (${(e && e.code) || (e && e.message) || e}) — the timer's whole rewrite carries what it held`); } catch { /* a sink that throws says nothing more */ } }
+  const tell = (line) => { try { say(line); } catch { /* a sink that throws says nothing more */ } };
+  const fail = (e) => {   // the episode: closed, DISARMED until a whole rewrite succeeds (a torn record is never appended to)
+    fd = closeWritten(fd, where, say); armed = false;
+    if (!failedSaid) { failedSaid = true; tell(`${where} could not append to the history file (${(e && e.code) || (e && e.message) || e}) — nothing more is appended until a whole rewrite succeeds; the timer's rewrite carries every line`); }
   };
   return {
     /** a line the wrapper is about to SAY joined its ring: it goes to the file at the next flush */
@@ -46,15 +53,22 @@ function create({ file, rewrite = null, say = () => { } } = {}) {
         return armed;
       }
       const b = Buffer.from(pending, 'utf8'); pending = '';
+      if (since + b.length > budget) {   // the budget: the whole rewrite has not succeeded for this many bytes — stop, said
+        fd = closeWritten(fd, where, say); armed = false;
+        if (!overSaid) { overSaid = true; tell(`${where} appended ${since} bytes since the last whole rewrite (the bound ${budget}) — nothing more is appended until a whole rewrite succeeds`); }
+        return false;
+      }
       try {
         if (fd === null) fd = fs.openSync(file, 'a');
         let off = 0;
         while (off < b.length) off += fs.writeSync(fd, b, off, b.length - off);   // O_APPEND: at the end the last rewrite left
+        since += b.length;
         return true;
       } catch (e) { fail(e); return false; }
     },
-    /** the wrapper's whole rewrite RENAMED its ring over the file: the descriptor names the replaced file — forgotten; armed */
-    rewritten() { pending = ''; armed = true; fd = closeWritten(fd, where, say); },
+    /** the wrapper's whole rewrite RENAMED its ring over the file: the descriptor names the replaced file — forgotten; armed, its
+     *  budget and its episodes begun again */
+    rewritten() { pending = ''; armed = true; since = 0; failedSaid = false; overSaid = false; fd = closeWritten(fd, where, say); },
     /** the wrapper ends (its last whole rewrite done or not): the descriptor closed once */
     close() { fd = closeWritten(fd, where, say); },
     get armed() { return armed; },
@@ -90,4 +104,4 @@ function fenceGap(cu, line, live) {
   return { lost, drop: cu.drop || '' };
 }
 
-module.exports = { create, FENCE_TYPE, FENCE_VERSION, fenceLine, fenceAsk, fenceGap };
+module.exports = { create, APPEND_BUDGET, FENCE_TYPE, FENCE_VERSION, fenceLine, fenceAsk, fenceGap };

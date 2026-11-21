@@ -20,6 +20,13 @@
 //     site is red BY NAME (planted controls)
 //  ⑩ THE RESTORE'S WIRING (src/server/boot-restore.js): a fence only for a wrapper whose sidecar adverts it, from where the catch-up's
 //     read ended (restoreCatchUp's own end, driven)
+// ITS FOLLOW (主开发 r1236):
+//  ⑪ THE RESTORE READS WHOLE LINES ONLY: a catch-up read landing in the middle of an append (placed half-written under the read) feeds
+//     its whole lines; the torn tail is that read's partial and arrives WHOLE through the fence, parsed by the real claude consumer;
+//     RED: the tail fed as it lay (the base's shape) ⇒ that line is lost
+//  ⑫ AFTER A FAILED APPEND (a planted write: half its bytes, then ENOSPC) nothing is appended until a whole rewrite succeeds; a second
+//     episode is said again; REDs: the journal left armed (two records merged), said once a life
+//  ⑬ THE APPEND BUDGET: past it nothing more is appended, said once; RED: no budget ⇒ the file grows
 // Run: node scripts/test-wrapper-said-journal.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -156,7 +163,7 @@ try {
       return { appended: !!(a2 && a2.inFile), renamed: ino0 !== ino1, after: !!(b && b.inFile) };
     };
     const g = await life(REPO);
-    const r = await life(mirror('keeps-fd', { 'src/said-journal.js': anchored(sjSrc, "rewritten() { pending = ''; armed = true; fd = closeWritten(fd, where, say); },", "rewritten() { pending = ''; armed = true; },", 'the descriptor kept') }));
+    const r = await life(mirror('keeps-fd', { 'src/said-journal.js': anchored(sjSrc, "overSaid = false; fd = closeWritten(fd, where, say); },", "overSaid = false; },", 'the descriptor kept') }));
     ok(g.appended && g.renamed && g.after, 'a line appended, the ring renamed over the file (a durable result), a line said after it — in the NEW file the moment it is said', g);
     ok(r.renamed && !r.after, 'RED: the descriptor kept across the rename ⇒ the line said after it went to the replaced file', r);
   }
@@ -226,17 +233,19 @@ setInterval(() => {}, 1e3);
       const exited = new Promise((res) => w.on('exit', res));
       const readMeta = () => { try { return JSON.parse(readFile(meta)); } catch { return null; } };
       await until(() => !!(readMeta() && readMeta().threadId), 10000);
+      const n0 = said.length;
       w.stdin.write(SJ.fenceAsk('X-1') + '\n');
       await until(() => said.some((e) => e.r.type === SJ.FENCE_TYPE && e.r.id === 'X-1'), root === REPO ? 3000 : 300);   // the red's wrapper answers none
       const m = readMeta() || {};
       try { w.kill('SIGKILL'); } catch { } await exited;
       const lines = said.filter((e) => !String(e.r.type || '').startsWith('_'));
       const fence = said.find((e) => e.r.type === SJ.FENCE_TYPE && e.r.id === 'X-1');
-      return { n: lines.length, all: lines.length > 0 && lines.every((e) => e.inFile), anyOut: lines.some((e) => !e.inFile), fence: !!(fence && fence.inFile), caps: (m.caps && m.caps.fence) || null, thread: m.threadId || null };
+      const fenceAcks = said.slice(n0).filter((e) => e.r.type === '_stdin_ack').length;   // r1236: the two wrappers agree — never acked
+      return { n: lines.length, all: lines.length > 0 && lines.every((e) => e.inFile), anyOut: lines.some((e) => !e.inFile), fence: !!(fence && fence.inFile), fenceAcks, caps: (m.caps && m.caps.fence) || null, thread: m.threadId || null };
     };
     const g = await life(REPO);
     const r = await life(mirror('cx-no-journal', { [CX]: anchored(cxSrc, CX_JOURNAL_PLANT, 'const JOURNAL = null;', 'the codex journal cut') }));
-    ok(g.thread === 'th-said-1' && g.all && g.fence && g.caps === SJ.FENCE_VERSION, `the codex wrapper: every record it said (${g.n}) was in its file at that moment; its fence the same; the sidecar adverts caps.fence ${g.caps}`, g);
+    ok(g.thread === 'th-said-1' && g.all && g.fence && g.fenceAcks === 0 && g.caps === SJ.FENCE_VERSION, `the codex wrapper: every record it said (${g.n}) was in its file at that moment; its fence the same, and never acked (${g.fenceAcks} acks: the claude wrapper's rule); the sidecar adverts caps.fence ${g.caps}`, g);
     ok(r.thread === 'th-said-1' && r.anyOut && !r.fence, 'RED: its journal cut ⇒ a record is said with nothing of it in the file (the 1 s timer alone), and no fence is answered', r);
   }
 
@@ -337,6 +346,89 @@ setInterval(() => {}, 1e3);
     ok(pl.unlisted.length === 2 && pl.unlisted.every((u) => u.startsWith(`${CW}:`)), `CONTROL: a planted ring add and a planted stdout write outside the journal are named (${pl.unlisted.join(', ')})`, pl);
   }
 
+  console.log('— ⑪ THE RESTORE READS WHOLE LINES ONLY (主开发 r1236): a catch-up that lands in the middle of an append');
+  {
+    const BR = require(path.join(REPO, 'src/server/boot-restore.js'));
+    const brSrc = read('src/server/boot-restore.js');
+    const BRr = require(M.write('src/server/boot-restore.js', anchored(brSrc, "const whole = body.subarray(0, nl + 1), text = whole.toString('utf-8')", "const whole = body.subarray(0, nl + 1), text = body.toString('utf-8')", 'feeds-the-torn-tail'), 'feeds-the-torn-tail'));   // the base's shape: the read's tail fed as it lay
+    const { ptyListeners } = require(path.join(REPO, 'src/pty-duck.js'));
+    const { createMessageManager } = require(path.join(REPO, 'src/normalizers'));
+    const SO = require(path.join(REPO, 'src/server/session-stdout.js'));
+    const anyFn = () => new Proxy(function () { }, { get: (t, k) => (k === 'then' || typeof k === 'symbol' ? undefined : anyFn()), apply: () => undefined });
+    const soOf = (tag) => { const dd = fs.mkdtempSync(path.join(HOME, `so11-${tag}-`)); for (const x of ['buffers', 'meta']) fs.mkdirSync(path.join(dd, x)); const engine = new Proxy({ _vsuPending: new Map() }, { get: (t, k) => (k in t ? t[k] : anyFn()), has: () => true });
+      return SO.create({ rootDir: dd, BUFFERS_DIR: path.join(dd, 'buffers'), META_DIR: path.join(dd, 'meta'), DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(dd, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: new Map(), engine,
+        checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { }, daemonPtyShim: (h) => h, sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null,
+        getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn(), getPages: () => null, getPermissionRules: () => null, agentEnv: () => ({}) }); };
+    const rec = (k) => JSON.stringify({ type: 'system', subtype: 'informational', level: 'info', content: `GAP-${k}` });
+    const BIG = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'w11', cwd: '/' + 'p'.repeat(9000), apiKeySource: 'the-whole-line' });   // a line over two pages
+    const run = async (BRm) => {
+      const dir = fs.mkdtempSync(path.join(HOME, 'whole-')), file = path.join(dir, 'w.buf');
+      fs.writeFileSync(file, rec(0) + '\n');
+      const rb0 = BRm.restoreBufOf(file, fs.readFileSync(file));
+      const head = BIG.slice(0, 4000);
+      fs.appendFileSync(file, rec(1) + '\n' + head);   // THE PLACED STALL: the append of BIG half-written under the catch-up's read
+      const cu = BRm.restoreCatchUp(rb0);
+      fs.appendFileSync(file, BIG.slice(4000) + '\n');   // the append completes after the read
+      const Ld = ptyListeners(), Le = ptyListeners(), writes = [];
+      const duck = { pid: 0, onData: (cb) => Ld.on(cb), onExit: (cb) => Le.on(cb), write(x) { writes.push(String(x)); }, resize() { }, kill() { } };
+      const sid = 'w-whole11';
+      const sess = { mode: 'chat', backend: 'claude', buffer: rec(0) + '\n', sockName: null, clients: new Set(), _normalizer: createMessageManager('claude', sid) };
+      const so = soOf(BRm === BR ? 'g' : 'r');
+      const w0 = console.warn; console.warn = () => { };
+      let threw = null;
+      try {
+        try { so.setupSessionPty(sess, sid, duck, { catchUp: cu && cu.text ? cu : null, fence: { rb: cu && cu.text ? cu.rb : rb0, read: BRm.restoreCatchUp } }); } catch (e) { threw = String((e && e.stack) || e); }
+        Ld.emit('\x1b[H\x1b[J');
+        const ask = writes.map((x) => { try { return JSON.parse(x); } catch { return null; } }).find((o) => o && o.type === 'webui_fence');
+        const fl = SJ.fenceLine(ask ? ask.id : 'none');
+        fs.appendFileSync(file, fl + '\n' + rec(3) + '\n'); Ld.emit(fl + '\r\n' + rec(3) + '\r\n');
+      } finally { console.warn = w0; }
+      return { threw, fedText: !!(cu && cu.text), tornFed: !!(cu && cu.text && cu.text.includes(head) && !cu.text.includes(BIG)), partial: cu && cu.rb ? cu.rb.partial.length : null, parsed: sess._apiKeySource || null, gap1: sess.buffer.split('GAP-1').length - 1, gap3: sess.buffer.split('GAP-3').length - 1 };
+    };
+    const g = await run(BR), r = await run(BRr);
+    ok(!g.threw && g.fedText && !g.tornFed && g.partial === 4000 && g.parsed === 'the-whole-line' && g.gap1 === 1 && g.gap3 === 1,
+      `a catch-up read landing in the middle of an append feeds only its WHOLE lines: the torn tail (${g.partial} bytes) is that read's partial, and the line arrives WHOLE through the fence, parsed by the real claude consumer (its apiKeySource «${g.parsed}»), once`, g);
+    ok(!r.threw && r.tornFed && r.parsed === null, 'RED: the read\'s tail fed as it lay (the base\'s shape) ⇒ the consumer holds the head, the whole line lands on top of it, and that said line is lost (nothing parsed)', r);
+  }
+
+  console.log('— ⑫ AFTER A FAILED APPEND NOTHING IS APPENDED until a whole rewrite · ⑬ THE APPEND BUDGET');
+  {
+    const SJr = require(M.write('src/said-journal.js', anchored(sjSrc, 'fd = closeWritten(fd, where, say); armed = false;\n    if (!failedSaid)', 'fd = closeWritten(fd, where, say);\n    if (!failedSaid)', 'armed-after-failure'), 'armed-after-failure'));   // stale-pins: kept (the red plants the base's fail(): armed left set)
+    const SJo = require(M.write('src/said-journal.js', anchored(sjSrc, 'rewritten() { pending = \'\'; armed = true; since = 0; failedSaid = false; overSaid = false;', 'rewritten() { pending = \'\'; armed = true; since = 0; overSaid = false;', 'said-once-a-life'), 'said-once-a-life'));
+    const SJb = require(M.write('src/said-journal.js', anchored(sjSrc, 'if (since + b.length > budget) {', 'if (false) {', 'no-budget'), 'no-budget'));
+    const line = (k) => `{"type":"a","n":${k},"pad":"${'x'.repeat(40)}"}\n`;
+    const episode = (SJm) => {
+      const dir = fs.mkdtempSync(path.join(HOME, 'fail-')), f = path.join(dir, 'j.buf'); fs.writeFileSync(f, '');
+      let calls = 0, failAt = 2; const said = []; let ring = '';
+      const plan = { openSync: (p, m) => fs.openSync(p, m), writeSync: (fd, b, off, len) => { calls++; if (calls === failAt) { fs.writeSync(fd, b, off, Math.floor(len / 2)); const e = new Error('planted: no space left'); e.code = 'ENOSPC'; throw e; } return fs.writeSync(fd, b, off, len); } };
+      const j = SJm.create({ file: f, rewrite: () => { fs.writeFileSync(f, ring); j.rewritten(); }, say: (l) => said.push(l), fs: plan });
+      const put = (k) => { ring += line(k); j.add(line(k)); return j.flush(); };
+      put(1); put(2); put(3); put(4);   // 1 arms (a whole rewrite), 2 appended, 3 torn (half, then ENOSPC), 4 after the failure
+      const afterFail = readFile(f), saidFirst = said.length;
+      fs.writeFileSync(f, ring); j.rewritten();   // the timer's whole rewrite succeeds: the episode ends
+      put(5); calls = 0; failAt = 1; put(6);   // a second episode
+      j.close();
+      return { torn: afterFail.includes(line(3).slice(0, 20)) && !afterFail.includes(line(3)), four: afterFail.includes('"n":4'), saidFirst, saidAll: said.length, fiveWhole: readFile(f).includes(line(5)) };
+    };
+    const g = episode(SJ), r = episode(SJr), o = episode(SJo);
+    ok(g.torn && !g.four && g.saidFirst === 1 && g.fiveWhole && g.saidAll === 2,
+      'a write that throws after a partial write leaves half a record — and NOTHING more is appended until a whole rewrite succeeds; after it the journal appends again; a second failure episode is said again', g);
+    ok(r.four, 'RED: the journal left armed after the failure ⇒ the next record is appended onto the torn one (two records, one line no reader parses)', r);
+    ok(o.saidAll === 1, 'RED: said once a life ⇒ the second episode is silent', o);
+    const budget = (SJm) => {
+      const dir = fs.mkdtempSync(path.join(HOME, 'budget-')), f = path.join(dir, 'b.buf'); fs.writeFileSync(f, '');
+      const said = []; let ring = '';
+      const j = SJm.create({ file: f, rewrite: () => { fs.writeFileSync(f, ring); j.rewritten(); }, say: (l) => said.push(l), budget: 3 * line(0).length });
+      const res = []; for (let k = 1; k <= 7; k++) { ring += line(k); j.add(line(k)); res.push(j.flush()); }   // 1 arms; then appends with no rewrite
+      j.close();
+      return { res: res.map((x) => (x ? 1 : 0)).join(''), size: fs.statSync(f).size, said: said.filter((l) => /since the last whole rewrite/.test(l)).length };
+    };
+    const gb = budget(SJ), rb = budget(SJb);
+    ok(gb.res === '1111000' && gb.said === 1 && gb.size === 4 * line(0).length,
+      `the append budget: past ${3 * line(0).length} bytes appended since the last whole rewrite nothing more is appended, and that is said once (${gb.res}; the file ${gb.size} bytes)`, gb);
+    ok(rb.res === '1111111' && rb.size === 7 * line(0).length, 'RED: no budget ⇒ the file grows with every append while the whole rewrite never comes', rb);
+  }
+
   console.log('— ⑩ THE RESTORE\'S WIRING (src/server/boot-restore.js)');
   {
     const BR = require(path.join(REPO, 'src/server/boot-restore.js'));
@@ -351,7 +443,8 @@ setInterval(() => {}, 1e3);
     const brSrc = read('src/server/boot-restore.js'), ssSrc = read('src/server/session-stdout.js');
     ok(!!cu && cu.text === a(1) && !!cu.rb && cu.rb.len === a(0).length + a(1).length && !!nx && nx.text === a(2)
       && /if \(restoreBuf && wrapperObs && wrapperObs\.caps && wrapperObs\.caps\.fence === SJ\.FENCE_VERSION\) restoreBuf\.fence = true;/.test(brSrc)
-      && /const rb0 = session\._restoreBuf, fence = rb0 && rb0\.fence && !\(cu && cu\.skipped\) \? \{ rb: \(cu && cu\.rb\) \|\| rb0, read: restoreCatchUp \} : null;/.test(brSrc)
+      && /const rb0 = session\._restoreBuf, fence = rb0 && rb0\.fence && !\(cu && cu\.skipped\) && !\(cu && cu\.text && !cu\.rb\) \? \{ rb: cu && cu\.text \? cu\.rb : rb0, read: restoreCatchUp \} : null;/.test(brSrc)
+      && /k = gate\.held\.indexOf\(fl, Math\.max\(0, gate\.held\.length - data\.length - fl\.length\)\)/.test(ssSrc) && !/tailAt/.test(brSrc)
       && /attachToDtach\(id, socketPath, session, \{ restore: true, catchUp: cu && cu\.text \? cu : null, fence \}\);/.test(brSrc)
       && /setupSessionPty\(session, id, attachPty, \{ catchUp, fence \}\);/.test(ssSrc),
       'a fence only for a wrapper whose sidecar adverts it, read from where the catch-up\'s read ENDED (restoreCatchUp returns its own end: the next read is exactly what came after), handed to the local attach only (pinned by text)', { cu: cu && { text: cu.text, len: cu.rb && cu.rb.len }, nx: nx && nx.text });

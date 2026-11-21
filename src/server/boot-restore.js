@@ -670,7 +670,8 @@ function drainSurvivorAttaches(queue, { tRestore, tBuilt, regTurns = null }) {
     const cu = restoreCatchUp(session._restoreBuf);   // the SAME turn as the attach below (the round's law: one turn, as at the release)
     if (cu && cu.skipped) console.warn(`[boot-restore] ${session.name || id}: what it wrote since the restore's read is not caught up — ${cu.skipped}`);
     // B-cd4b (the wrapper's hold): its fence reads on from where THIS catch-up's read ended (or the registration's, nothing written since)
-    const rb0 = session._restoreBuf, fence = rb0 && rb0.fence && !(cu && cu.skipped) ? { rb: (cu && cu.rb) || rb0, read: restoreCatchUp } : null;
+    // (r1236: a catch-up that fed text reads on from ITS end, never the registration's — the lines it fed are never fed again)
+    const rb0 = session._restoreBuf, fence = rb0 && rb0.fence && !(cu && cu.skipped) && !(cu && cu.text && !cu.rb) ? { rb: cu && cu.text ? cu.rb : rb0, read: restoreCatchUp } : null;
     try {
       attachToDtach(id, socketPath, session, { restore: true, catchUp: cu && cu.text ? cu : null, fence });
       release(entry);
@@ -1347,10 +1348,16 @@ function restoreCatchUp(rb, { max = RESTORE_CATCHUP_MAX } = {}) {
     }
     if (start < 0) return { skipped: `its buffer was rewritten (${rb.len} → ${size} bytes) and the read's end is not in it` };
     if (size - start > max) return { skipped: `${size - start} bytes since the read — over the ${max}-byte bound` };
-    const text = read(start, size - start).toString('utf-8');
-    // B-cd4b (the wrapper's hold): where THIS read ends — the fence reads on from it (restoreBufOf's shape, from the bytes read)
-    const tailAt = Math.max(0, size - Math.max(RESTORE_GUARD * 4, 65536)), tail = read(tailAt, size - tailAt), nl = tail.lastIndexOf(10);
-    const rbEnd = nl < 0 && tailAt > 0 ? null : { file: rb.file, len: size, lineAt: tailAt + nl + 1, guard: Buffer.from(tail.subarray(Math.max(0, nl + 1 - RESTORE_GUARD), nl + 1)), partial: tail.subarray(nl + 1).toString('utf-8') };
+    // B-cd4b (the wrapper's hold, its follow r1236): THE RESTORE READS WHOLE LINES ONLY. The file is APPENDED now (the said journal), so
+    // a read can land in the middle of an append: a tail with no line end is not text yet — never fed (a consumer would hold its head,
+    // and the line arriving whole after it would be lost to both). It is THIS read's partial: the fence, or the next catch-up, reads on
+    // from the last line end, so that line arrives whole, once. No line end since the read ⇒ nothing to feed (null): the fence reads
+    // from the read's own end, exactly what was fed. THIS read's end comes from the bytes it read (no second read of the tail): its
+    // guard is the 256 bytes before that line end — this read's own, after the read's guard (which ends where `start` begins)
+    const body = read(start, size - start), nl = body.lastIndexOf(10);
+    if (nl < 0) return null;
+    const whole = body.subarray(0, nl + 1), text = whole.toString('utf-8'), ctx = Buffer.concat([rb.guard, whole]);
+    const rbEnd = { file: rb.file, len: size, lineAt: start + nl + 1, guard: Buffer.from(ctx.subarray(Math.max(0, ctx.length - RESTORE_GUARD))), partial: body.subarray(nl + 1).toString('utf-8') };
     return text.length > rb.partial.length ? { text, drop: text.startsWith(rb.partial) ? rb.partial : '', rb: rbEnd } : null;
   } catch (e) { return { skipped: `its buffer could not be read (${(e && e.code) || (e && e.message) || e})` }; }
   finally {   // one owner, closed once, the number forgotten at its close; a failed close is SAID (its errno and the file), never swallowed — what was read is returned whatever the close answered (test-fd-close-census)

@@ -216,7 +216,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchU
         gate.id = `${process.pid.toString(36)}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
         try { ptyProcess.write(SJ.fenceAsk(gate.id) + '\n'); } catch (e) { openGate(`its fence could not be asked (${(e && e.message) || e})`); return; }
       }
-      const fl = SJ.fenceLine(gate.id), k = gate.held.indexOf(fl);
+      const fl = SJ.fenceLine(gate.id), k = gate.held.indexOf(fl, Math.max(0, gate.held.length - data.length - fl.length));   // r1236: the NEW bytes only (never the whole hold again at every chunk)
       if (k < 0) { if (gate.held.length > FENCE_HELD_MAX) openGate(`${gate.held.length} bytes came before its fence`); return; }
       let end = k + fl.length; if (gate.held[end] === '\r') end++; if (gate.held[end] === '\n') end++;
       const before = gate.held.slice(0, k), after = gate.held.slice(end);

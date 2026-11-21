@@ -3766,13 +3766,13 @@ async function boot() {
       let msg = safeJsonParse(line);
       // the ack names its frame (lane human-cli r2): `msg_id` = the chat-input's msgId; a frame that asks for a RECEIPT
       // (`webui_receipt`, the person's CLI — it never reads this stream) gets it in its receipts file (never the replay buffer)
+      if (msg && typeof msg === 'object' && msg.type === 'webui_fence') { if (JOURNAL) sayFence(msg.id); continue; }   // B-cd4b: a restoring hub's fence — never acked (the claude wrapper's rule), never codex's
       const receipt = !!(msg && typeof msg === 'object' && msg.webui_receipt === true);
       if (receipt) delete msg.webui_receipt;
       const ack = { type: '_stdin_ack', timestamp: Date.now(), ...(msg && typeof msg === 'object' && (msg.msgId || msg.webui_msg_id) ? { msg_id: String(msg.msgId || msg.webui_msg_id) } : {}) };
       if (receipt) writeReceipt(ack);
       try { process.stdout.write(JSON.stringify(ack) + '\n'); } catch {}
       if (!msg || typeof msg !== 'object') { rejectStdinLine(line); continue; }
-      if (msg.type === 'webui_fence') { if (JOURNAL) sayFence(msg.id); continue; }   // B-cd4b: a restoring hub's fence — never codex's
       // Large-frame FILE BYPASS: the payload rides the filesystem, stdin only
       // carries the pointer. Resolved HERE (not inside handleInput) so the file
       // is consumed + unlinked immediately, before the ready gate.
