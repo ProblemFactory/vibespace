@@ -17,6 +17,7 @@ import { execSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const VNC_ENV = await vncEnv();
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -58,7 +59,9 @@ async function boot(t, port) {
 const adaptersFile = (t) => path.join(t.wt, 'data/channels/adapters.json');
 /** Wait for the fake account's row to exist (the first boot writes it), stop the server, seed `feed`, write the memo. */
 async function seed(t, port, srv, feedOf, memoRows) {
-  for (let i = 0; i < 120; i++) { try { const d = JSON.parse(fs.readFileSync(adaptersFile(t), 'utf-8')); const rows = Array.isArray(d) ? d : d.adapters; if (rows.some((r) => r.id === 'fake-poll' && r.lastOkAt && r.feed && r.feed.lastOkAt)) break; } catch {} await sleep(250); }
+  let seeded = false, rowsSeen = null;
+  for (let i = 0; i < 120; i++) { try { const d = JSON.parse(fs.readFileSync(adaptersFile(t), 'utf-8')); const rows = Array.isArray(d) ? d : d.adapters; rowsSeen = rows; if (rows.some((r) => r.id === 'fake-poll' && r.lastOkAt && r.feed && r.feed.lastOkAt)) { seeded = true; break; } } catch {} await sleep(250); }
+  if (!seeded) markTimedOut(rowsSeen, 120 * 250, "seed (the fake poll's rows persisted)");   // a wait that runs out says so: what follows reads an unseeded state (r1372; test-ci-gate §2p)
   await sleep(1500);   // the account's first pass persisted (its sign-in, its rows)
   srv.kill('SIGKILL'); await sleep(500);
   try { endRootedProcesses(t.wt); } catch {}
