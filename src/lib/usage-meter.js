@@ -10,7 +10,7 @@ import { backendFeatureCaps } from './agent-meta.js';
 // panel's latest number, and — for a member that can no longer produce one at
 // all — how old the last REAL reading is. DOM-free so scripts/test-readings-
 // attribution.mjs pins it in node.
-import { corroborationNote, creditsChipHtml, overageChip, readingSource, spendControlChip, stampText, staleSince, windowNotStarted, windowNote, limitRows, codexRefreshToast, bucketView, unconfirmedText, capRing, NO5H_RINGS } from './usage-source.js';
+import { corroborationNote, creditsChipHtml, overageChip, readingSource, spendControlChip, stampText, staleSince, windowNotStarted, windowNote, limitRows, codexRefreshToast, spendLedgerNote, bucketView, unconfirmedText, capRing, NO5H_RINGS } from './usage-source.js';
 import { bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the cap ring's «resets in …» (PURE)
 // The ONE overage verdict (PURE, CJS — the same function the spend
 // authorizer and the pool's voluntary-target rule read).
@@ -121,6 +121,7 @@ export function installUsageMeter(App, ctx = {}) {
     try { this._sayClaimOutcomes(); } catch { }
     this._usageGlobal = data?.globalLogin || null; // CLI-login identity (+ linked named account)
     this._usageCodexGlobal = data?.codexGlobalLogin || null;
+    this._spendLedger = data?.spendLedger || null;   // B-ef83 r1648 (d): the spend ledger's lock state, drawn at the popup's head
     this._codexAccountUsage = data?.codexAccounts || {}; // per-account codex quota buckets
     this._hostUsage = data?.hosts || {}; // remote hosts' own-login quota (on-demand ⟳ only)
     this._hostOwnUsage = this._hostUsage; // canonical alias the Agents machine sections read
@@ -842,7 +843,9 @@ export function installUsageMeter(App, ctx = {}) {
     if (rowsHtml !== this._usageRowsHtml) { this._usageRowsHtml = rowsHtml; usageEl.innerHTML = rowsHtml; }
     // Per-SECTION freshness: claude and codex poll independently — a stalled
     // claude poll (e.g. signed out) must not make codex's data look stale too.
-    const secHtml = sections.join('');
+    // B-ef83 r1648 (d): the spend ledger's lock, at the popup's HEAD (where the owner looks at usage), while it lasts
+    const ledgerSay = spendLedgerNote(this._spendLedger, { t });
+    const secHtml = (ledgerSay ? `<div class="usage-warn usage-spend-ledger">${escHtml(ledgerSay)}</div>` : '') + sections.join('');
     if (secHtml !== this._usageSecHtml) { this._usageSecHtml = secHtml; popup.innerHTML = secHtml; }
     // Mobile nav quota chip: one worst-of donut (there's no room for the full
     // per-backend pie rows in the nav bar). Same change-guard discipline.

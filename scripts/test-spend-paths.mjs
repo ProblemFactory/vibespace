@@ -2270,25 +2270,30 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     // (m) AT BOOT: kept WITHOUT the lock, said by its code, asked again every LOCK_UNMADE_RETRY_MS — made once the folder lets it
     const bootUnmade = async (mod) => {
       const dM = tmpdir('vs-spend-3h-unmade-');
-      const tM = [], logsM = [];
+      const tM = [], logsM = [], inM = [];
       const undo = refuseLock(lockTmpIn(dM));
-      let gM; try { gM = mk(mod, dM, [], logsM, { lockSchedule: (fn, ms) => { tM.push({ fn, ms }); return tM.length; } }); } finally { undo(); }
+      let gM; try { gM = mk(mod, dM, inM, logsM, { lockSchedule: (fn, ms) => { tM.push({ fn, ms }); return tM.length; } }); } finally { undo(); }
       const vM = gM.authorize({ reason: 'auto-resume', identity: ID, now: t3h });
-      const un0 = gM.snapshot().ledgerLockUnmade;
+      const un0 = gM.snapshot().ledgerLockUnmade, note0 = typeof gM.ledgerNotice === 'function' ? gM.ledgerNotice() : null;
+      const items0 = inM.filter((i) => i.itemKey === 'spend-ledger-unlocked');
+      const open0 = items0.filter((i) => i.status === 'open').length;
       const rM = tM.find((x) => x.ms === guardMod.LOCK_UNMADE_RETRY_MS);
       if (rM) rM.fn();
-      return { vM, un0, said: unmadeSaid(logsM), retry: !!rM, made: fs.existsSync(LF(dM, 'spend-budget.lock')) && JSON.parse(fs.readFileSync(LF(dM, 'spend-budget.lock'), 'utf8')).pid === process.pid,
-        un1: gM.snapshot().ledgerLockUnmade, madeSaid: logsM.some((l) => /spend-budget\.lock is made now \(it could not be since .*: EACCES\)/.test(l)), beat: tM.some((x) => x.ms === guardMod.LOCK_BEAT_MS) };
+      return { vM, un0, note0, items0: items0.length, open0, itemKey0: items0[0] && items0[0].i18n && items0[0].i18n.text && items0[0].i18n.text.key, closed: items0.length > 0 && items0.every((i) => i.status !== 'open'),
+        said: unmadeSaid(logsM), retry: !!rM, made: fs.existsSync(LF(dM, 'spend-budget.lock')) && JSON.parse(fs.readFileSync(LF(dM, 'spend-budget.lock'), 'utf8')).pid === process.pid,
+        un1: gM.snapshot().ledgerLockUnmade, note1: typeof gM.ledgerNotice === 'function' ? gM.ledgerNotice() : null, madeSaid: logsM.some((l) => /spend-budget\.lock is made now \(it could not be since .*: EACCES\)/.test(l)), beat: tM.some((x) => x.ms === guardMod.LOCK_BEAT_MS) };
     };
     const bm = await bootUnmade(guardMod);
-    ok('§3h a lock the folder REFUSES at boot (EACCES) and nobody holds: the ledger is kept WITHOUT it — turns allowed, said by its code, asked again every LOCK_UNMADE_RETRY_MS',
+    ok('§3h a lock the folder REFUSES at boot (EACCES) and nobody holds: the ledger is kept WITHOUT it (the release\'s road) — turns allowed, said by its code, asked again every LOCK_UNMADE_RETRY_MS',
       bm.vM.ok === true && !!bm.un0 && bm.un0.error === 'EACCES' && bm.said && bm.retry, JSON.stringify({ ok: bm.vM.ok, why: bm.vM.why, un0: bm.un0, said: bm.said, retry: bm.retry }));
-    ok('§3h …the folder lets it again: the retry MAKES the lock (this process\'s), said, and its heartbeat follows', bm.made && bm.un1 === null && bm.madeSaid && bm.beat, JSON.stringify({ made: bm.made, un1: bm.un1, madeSaid: bm.madeSaid, beat: bm.beat }));
+    ok('§3h …the OWNER SEES it (r1648 (d)): ONE For-you item for the episode (its words translated by key) and the usage meter\'s state «unlocked»',
+      bm.items0 === 1 && bm.open0 === 1 && /counts turns nobody typed without the lock of their record/.test(String(bm.itemKey0)) && !!bm.note0 && bm.note0.state === 'unlocked' && bm.note0.error === 'EACCES', JSON.stringify({ items: bm.items0, open: bm.open0, key: bm.itemKey0, note: bm.note0 }));
+    ok('§3h …the folder lets it again: the retry MAKES the lock (this process\'s), said, its heartbeat follows, the episode\'s item CLOSES and the meter has nothing to say', bm.made && bm.un1 === null && bm.madeSaid && bm.beat && bm.closed && bm.note1 === null, JSON.stringify({ made: bm.made, un1: bm.un1, madeSaid: bm.madeSaid, beat: bm.beat, closed: bm.closed, note1: bm.note1 }));
     const redBoot = copyOf('    } else keepUnmade(lk.error, now0);\n', "    } else log(`[spend] data/spend-budget.lock could not be made (${lk.error}) — this process keeps the ledger without it`);\n", 'B-ef83 smalls: the release\'s boot road (never asked again)'); // stale-pins: kept — the RED plants the release's boot line
     ok('§3h CONTROL: the anchored copy (the release\'s boot road) is built', !redBoot.err, redBoot.err || '');
-    if (!redBoot.err) { const br = await bootUnmade(redBoot); ok('§3h CONTROL: in that copy the refused lock is never asked again — never made (RED: a second process could take the lock and keep its own count)', !br.retry && !br.made, JSON.stringify({ retry: br.retry, made: br.made })); }
-    // (n) THE LOCK REMOVED while this process keeps the ledger, and the folder now refuses a new one: the record stays this
-    // process's — never a refusal in the name of «another process» nobody is
+    if (!redBoot.err) { const br = await bootUnmade(redBoot); ok('§3h CONTROL: in that copy the refused lock is never asked again — never made, and the owner is told nothing (RED: a second process could take the lock and keep its own count)', !br.retry && !br.made && br.items0 === 0, JSON.stringify({ retry: br.retry, made: br.made, items: br.items0 })); }
+    // (n) THE LOCK REMOVED while this process keeps the ledger, and the folder now refuses a new one (r1648 (b)): the release's
+    // direction — every unattended turn REFUSED — by the TRUE reason (never «another process» nobody is), HEALED by the retry
     const removedRefused = async (mod) => {
       const dN = tmpdir('vs-spend-3h-removed-refused-');
       const tN = [], logsN = [];
@@ -2296,22 +2301,30 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
       gN.note({ reason: 'auto-resume', identity: ID, now: t3h }); gN.flush();
       fs.rmSync(LF(dN, 'spend-budget.lock'));
       const undo = refuseLock(lockTmpIn(dN));
+      let vN = null, snapN = null, noteN = null;
       try {
         const beatN = tN.find((x) => x.ms === guardMod.LOCK_BEAT_MS);
         if (beatN) beatN.fn();
         for (let i = 0; i < 200 && !gN.snapshot().ledgerLockUnmade && !gN.snapshot().ledgerHeldBy; i++) await new Promise((r) => setTimeout(r, 25));
+        vN = gN.authorize({ reason: 'auto-resume', identity: ID, now: t3h + 1000 });
+        snapN = gN.snapshot(); noteN = typeof gN.ledgerNotice === 'function' ? gN.ledgerNotice() : null;
       } finally { undo(); }
-      const vN = gN.authorize({ reason: 'auto-resume', identity: ID, now: t3h + 1000 });
-      return { vN, held: gN.snapshot().ledgerHeldBy, un: gN.snapshot().ledgerLockUnmade, said: unmadeSaid(logsN, 'was removed and '), named: logsN.some((l) => /names another VibeSpace process/.test(l)) };
+      // the folder writes again: the held retry takes the lock, the record read again (the file's 1)
+      const retryN = tN.find((x) => x.ms === guardMod.LOCK_RETRY_MS);
+      if (retryN) retryN.fn();
+      const vN2 = gN.authorize({ reason: 'auto-resume', identity: ID, now: t3h + 2000 });
+      return { vN, vN2, unwritable: snapN && snapN.ledgerLockUnwritable, unmade: snapN && snapN.ledgerLockUnmade, noteN, healed: !!retryN && gN.snapshot().ledgerHeldBy === null && gN.snapshot().ledgerLockUnwritable === null,
+        said: logsN.some((l) => l.includes('spend-budget.lock was removed and cannot be written again (EACCES: the folder refuses it)')), named: logsN.some((l) => /names another VibeSpace process/.test(l)) };
     };
     const rn = await removedRefused(guardMod);
-    ok('§3h the lock REMOVED while this process keeps the ledger and the folder now REFUSES a new one: the ledger stays this process\'s (count 1, turns allowed), said by its code — never «another process keeps it»',
-      rn.vN.ok === true && rn.vN.counts && rn.vN.counts.day === 1 && rn.held === null && !!rn.un && rn.said && !rn.named, JSON.stringify({ ok: rn.vN.ok, why: rn.vN.why, counts: rn.vN.counts, held: rn.held, un: rn.un, said: rn.said, named: rn.named }));
-    const redLost = copyOf("      if (!lk.holder) { keepUnmade(lk.error, Date.now(), 'was removed and '); return; }   // nobody holds it: the record stays this process's — never «another process»\n      h = lk.holder;\n", '      h = lk.holder || { contended: true };\n', 'B-ef83 smalls: the release\'s lost-lock road'); // stale-pins: kept — the RED plants the release's lost-lock line
+    ok('§3h the lock REMOVED while this process keeps the ledger and the folder REFUSES a new one: every unattended turn REFUSED by the TRUE reason (ledger-lock-unwritable, its code) — never «another process keeps it»; the meter says «refused»',
+      !!rn.vN && rn.vN.ok === false && rn.vN.why === 'ledger-lock-unwritable' && !!rn.unwritable && rn.unwritable.error === 'EACCES' && rn.unmade === null && rn.said && !rn.named && !!rn.noteN && rn.noteN.state === 'refused', JSON.stringify({ ok: rn.vN && rn.vN.ok, why: rn.vN && rn.vN.why, unwritable: rn.unwritable, unmade: rn.unmade, said: rn.said, named: rn.named, note: rn.noteN }));
+    ok('§3h …and it HEALS by itself: the folder writes again ⇒ the held retry takes the lock, the record read again (count 1), turns allowed — never held for ever', rn.healed && rn.vN2.ok === true && !!rn.vN2.counts && rn.vN2.counts.day === 1, JSON.stringify({ healed: rn.healed, ok: rn.vN2.ok, why: rn.vN2.why, counts: rn.vN2.counts }));
+    const redLost = copyOf('      h = lk.holder || { lockUnwritable: lk.error };\n', '      h = lk.holder || { contended: true };\n', 'B-ef83 smalls: the release\'s lost-lock road'); // stale-pins: kept — the RED plants the release's lost-lock line
     ok('§3h CONTROL: the anchored copy (the release\'s lost-lock road) is built', !redLost.err, redLost.err || '');
-    if (!redLost.err) { const lr = await removedRefused(redLost); ok('§3h CONTROL: in that copy the same scene refuses every unattended turn in the name of another process (RED: ledger-held-elsewhere, nobody holds it)', lr.vN.ok === false && lr.vN.why === 'ledger-held-elsewhere' && !!lr.held, JSON.stringify({ ok: lr.vN.ok, why: lr.vN.why, held: lr.held })); }
-    // (o) HELD, then the holder is GONE and the folder refuses a new lock: the record is taken over WITHOUT it — never a refusal in
-    // the gone holder's name for ever
+    if (!redLost.err) { const lr = await removedRefused(redLost); ok('§3h CONTROL: in that copy the same scene refuses in the name of ANOTHER PROCESS nobody is (RED: ledger-held-elsewhere — the false name)', !!lr.vN && lr.vN.ok === false && lr.vN.why === 'ledger-held-elsewhere', JSON.stringify({ ok: lr.vN && lr.vN.ok, why: lr.vN && lr.vN.why })); }
+    // (o) HELD, then the holder is GONE and the folder refuses a new lock (r1648 (c)): STILL held (the release's direction), by the TRUE
+    // reason, and healed the moment the folder writes — never held in a gone process's name for ever
     const heldGoneRefused = (mod) => {
       const dO = tmpdir('vs-spend-3h-held-gone-refused-');
       { const g0 = mk(guardMod, dO, [], []); g0.note({ reason: 'auto-resume', identity: ID, now: t3h }); g0.flush(); }
@@ -2321,16 +2334,35 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
       const held0 = !!gO.snapshot().ledgerHeldBy;
       fs.rmSync(LF(dO, 'spend-budget.lock'));   // the other machine's process ended and took its lock with it
       const undo = refuseLock(lockTmpIn(dO));
-      let kept; try { kept = gO.lockAgain(Date.now() + 1000); } finally { undo(); }
-      const vO = gO.authorize({ reason: 'auto-resume', identity: ID, now: t3h + 1000 });
-      return { held0, kept, vO, held: gO.snapshot().ledgerHeldBy, un: gO.snapshot().ledgerLockUnmade, said: logsO.some((l) => l.includes('— WITHOUT its lock: data/spend-budget.lock could not be made (EACCES: the folder refuses it)')), retry: tO.some((x) => x.ms === guardMod.LOCK_UNMADE_RETRY_MS) };
+      let kept, vO;
+      try { kept = gO.lockAgain(Date.now() + 1000); vO = gO.authorize({ reason: 'auto-resume', identity: ID, now: t3h + 1000 }); } finally { undo(); }
+      const unwritable = gO.snapshot().ledgerLockUnwritable;
+      const healed = gO.lockAgain(Date.now() + 2000);
+      const vO2 = gO.authorize({ reason: 'auto-resume', identity: ID, now: t3h + 2000 });
+      return { held0, kept, vO, vO2, unwritable, healed, said: logsO.some((l) => l.includes('the process that kept data/spend-budget.json is gone, and data/spend-budget.lock cannot be written (EACCES: the folder refuses it)')) };
     };
     const ho = heldGoneRefused(guardMod);
-    ok('§3h HELD, then the holder is GONE and the folder refuses a new lock: the record is taken over WITHOUT it (the keeper\'s count read: 1), said, asked again — never held in a gone process\'s name',
-      ho.held0 && ho.kept === true && ho.vO.ok === true && ho.vO.counts && ho.vO.counts.day === 1 && ho.held === null && !!ho.un && ho.said && ho.retry, JSON.stringify({ held0: ho.held0, kept: ho.kept, ok: ho.vO.ok, why: ho.vO.why, counts: ho.vO.counts, un: ho.un, said: ho.said, retry: ho.retry }));
+    ok('§3h HELD, then the holder is GONE and the folder refuses a new lock: STILL held, by the TRUE reason (ledger-lock-unwritable), said — never in the gone process\'s name',
+      ho.held0 && ho.kept === false && ho.vO.ok === false && ho.vO.why === 'ledger-lock-unwritable' && !!ho.unwritable && ho.unwritable.error === 'EACCES' && ho.said, JSON.stringify({ held0: ho.held0, kept: ho.kept, ok: ho.vO.ok, why: ho.vO.why, unwritable: ho.unwritable, said: ho.said }));
+    ok('§3h …and it HEALS: the folder writes again ⇒ the next retry takes the lock and the keeper\'s record (count 1) — turns allowed', ho.healed === true && ho.vO2.ok === true && !!ho.vO2.counts && ho.vO2.counts.day === 1, JSON.stringify({ healed: ho.healed, ok: ho.vO2.ok, why: ho.vO2.why, counts: ho.vO2.counts }));
     const redHeld = copyOf('    if (!lk.took && lk.holder) { heldBy = { ...heldOf(lk.holder, now), since: heldBy ? heldBy.since : now, saidWrite: heldBy ? heldBy.saidWrite : false }; return false; }\n', '    if (!lk.took) { if (lk.holder) heldBy = { ...heldOf(lk.holder, now), since: heldBy ? heldBy.since : now, saidWrite: heldBy ? heldBy.saidWrite : false }; return false; }\n', 'B-ef83 smalls: the release\'s held retry'); // stale-pins: kept — the RED plants the release's held retry
     ok('§3h CONTROL: the anchored copy (the release\'s held retry) is built', !redHeld.err, redHeld.err || '');
-    if (!redHeld.err) { const hr = heldGoneRefused(redHeld); ok('§3h CONTROL: in that copy the gone holder keeps the process held for ever (RED: every unattended turn refused in its name)', hr.kept === false && hr.vO.why === 'ledger-held-elsewhere' && !!hr.held, JSON.stringify({ kept: hr.kept, why: hr.vO.why, held: hr.held })); }
+    if (!redHeld.err) { const hr = heldGoneRefused(redHeld); ok('§3h CONTROL: in that copy the gone holder keeps the process held in ITS name (RED: ledger-held-elsewhere — the false name)', hr.kept === false && hr.vO.why === 'ledger-held-elsewhere', JSON.stringify({ kept: hr.kept, why: hr.vO.why })); }
+    // (q) THE ROOT FIX (round wm61ywdo4's MUST): a write error READS the lock first — a LIVE holder behind a folder that refuses the
+    // temp write is still NAMED (held, ledger-held-elsewhere), never kept without the lock beside it
+    const liveBehindRefused = (mod) => {
+      const dQ = tmpdir('vs-spend-3h-live-refused-');
+      fs.writeFileSync(LF(dQ, 'spend-budget.lock'), lockOf(4242, null, { host: 'another-machine.example', ns: 'pid:[1]' }));
+      const undo = refuseLock(lockTmpIn(dQ));
+      let gQ; try { gQ = mk(mod, dQ, [], []); } finally { undo(); }
+      return { held: gQ.snapshot().ledgerHeldBy, unmade: gQ.snapshot().ledgerLockUnmade, v: gQ.authorize({ reason: 'auto-resume', identity: ID, now: t3h }) };
+    };
+    const lq = liveBehindRefused(guardMod);
+    ok('§3h THE ROOT FIX: a LIVE holder\'s lock behind a folder that refuses the temp write is still read and NAMED — held (ledger-held-elsewhere), never kept without the lock beside the keeper',
+      !!lq.held && lq.unmade === null && lq.v.ok === false && lq.v.why === 'ledger-held-elsewhere', JSON.stringify({ held: lq.held, unmade: lq.unmade, why: lq.v.why }));
+    const redRoot = copyOf("        const cannot = !e || e.code !== 'EEXIST' ? String((e && e.code) || 'lock failed') : null;\n", "        if (!e || e.code !== 'EEXIST') return { took: false, error: String((e && e.code) || 'lock failed') };\n        const cannot = null;\n", 'B-ef83 smalls: the release\'s early return'); // stale-pins: kept — the RED plants the release's early return
+    ok('§3h CONTROL: the anchored copy (the release\'s early return at a write error) is built', !redRoot.err, redRoot.err || '');
+    if (!redRoot.err) { const rq = liveBehindRefused(redRoot); ok('§3h CONTROL: in that copy the process keeps the ledger WITHOUT the lock beside the LIVE keeper and allows the turn (RED: two counts on one budget)', rq.v.ok === true && !!rq.unmade && !rq.held, JSON.stringify({ ok: rq.v.ok, unmade: rq.unmade, held: rq.held })); }
 
     // ── THE LAW: A RESET NOTICE ONLY FOR A REAL LOSS ──
     // (1) A CRASH BETWEEN THE BOOT'S TWO WRITES, both orders. A: the marker (the reset said, the count restarted) landed, the
@@ -4053,6 +4085,39 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const kh = SSh.heldKeyOf({ kind: 'spend-cap', why: 'ledger-held-elsewhere' });
     ok('§5g B-ef83 THE RIGHT REASON ON THE CARD: what another process\'s ledger held says «another VibeSpace process on this data folder kept the record…» (zh/ja), never «the spending ceiling held them»',
       kh === 'spend-held' && /another VibeSpace process on this data folder kept the record of turns nobody typed/.test(SSh.HELD_WHY[kh]) && ZH.has(SSh.HELD_WHY[kh]) && JA.has(SSh.HELD_WHY[kh]), JSON.stringify({ kh }));
+    // B-ef83 r1648: a hold for a lock that cannot be written says THAT — on the card, in the agent's tail; the refusal's words and its door
+    const kl = SSh.heldKeyOf({ kind: 'spend-cap', why: 'ledger-lock-unwritable' });
+    ok('§5g B-ef83 r1648 the card for a frame held because the lock cannot be written: «VibeSpace could not write the lock of its record…» (zh/ja)', kl === 'spend-lock' && /could not write the lock of its record of turns nobody typed/.test(SSh.HELD_WHY[kl]) && ZH.has(SSh.HELD_WHY[kl]) && JA.has(SSh.HELD_WHY[kl]), JSON.stringify({ kl }));
+    const JMt = require(path.join(REPO, 'src/job-model.js'));
+    const tail = (why) => JMt.notifTailSentence([{ jobId: 'jb-1', text: 'x', ts: 1, held: { kind: 'spend-cap', why } }]);
+    ok('§5g B-ef83 r1648 the AGENT\'s tail says the true cause of a spend hold (another process\'s ledger / the lock / the unreadable record), the ceiling only for the ceiling',
+      /another VibeSpace process on this data folder kept the record/.test(tail('ledger-held-elsewhere')) && /could not write the lock of its record/.test(tail('ledger-lock-unwritable')) && /record of turns nobody typed could not be read/.test(tail('ledger-unreadable')) && /held by the spending ceiling/.test(tail('cap-lowered')) && !/spending ceiling/.test(tail('ledger-held-elsewhere')),
+      JSON.stringify([tail('ledger-held-elsewhere'), tail('ledger-lock-unwritable'), tail('cap-lowered')]));
+    const SAw = require(path.join(REPO, 'src/spend-authorizer.js'));
+    const vLk = SAw.authorizeUnattendedSpend({ reason: 'auto-resume', identity: { key: 'k', name: 'K' }, state: SAw.emptyBudget(), ledger: { lockUnwritable: true, error: 'EACCES' } });
+    const iLk = SAw.refusalI18n ? SAw.refusalI18n({ ...vLk, reason: 'auto-resume' }, { sessionName: 'c1' }) : null;
+    ok('§5g B-ef83 r1648 THE TRUE REASON: a lock nobody holds and this process cannot write refuses by ledger-lock-unwritable (its code), its words and its door «lock» translated (zh/ja)',
+      vLk.ok === false && vLk.why === 'ledger-lock-unwritable' && /EACCES/.test(String(vLk.detail)) && !!iLk && ZH.has(iLk.text.key) && JA.has(iLk.text.key) && /cannot write the lock of its record/.test(iLk.text.key) && read('src/spend-authorizer.js').includes("'ledger-lock-unwritable': 'lock'") && !!SAw.DOOR_WORDS && ZH.has(SAw.DOOR_WORDS.lock) && JA.has(SAw.DOOR_WORDS.lock),
+      JSON.stringify({ why: vLk.why, detail: vLk.detail, key: iLk && iLk.text && iLk.text.key }));
+    // r1648 (d): the usage meter's note — its sentence for both states (zh/ja), nothing when there is nothing; and the payload carries it
+    const USl = await import(path.join(REPO, 'src/lib/usage-source.js'));
+    const nRef = USl.spendLedgerNote({ state: 'refused', error: 'EACCES' }), nUnl = USl.spendLedgerNote({ state: 'unlocked', error: 'EROFS' });
+    ok('§5g B-ef83 r1648 (d) THE METER\'S NOTE: «Turns nobody typed are held — … (EACCES) …» / «… counted without the lock … (EROFS) …», none without a state; both sentences translated',
+      /^Turns nobody typed are held — VibeSpace cannot write the lock of their record \(EACCES\)/.test(String(nRef)) && /^Turns nobody typed are counted without the lock of their record — the data folder refuses it \(EROFS\)/.test(String(nUnl)) && USl.spendLedgerNote(null) === null
+        && ZH.has('Turns nobody typed are held — VibeSpace cannot write the lock of their record ({code}); they start again by themselves once it can') && JA.has('Turns nobody typed are counted without the lock of their record — the data folder refuses it ({code}); VibeSpace asks again every minute'),
+      JSON.stringify([nRef, nUnl]));
+    {
+      const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
+      const tmpU = tmpdir('vs-spend-5g-usage-'), cacheU = path.join(tmpU, 'usage-cache'); fs.mkdirSync(cacheU, { recursive: true });
+      const routesU = {};
+      setupUsage({ app: { get: (pt, h) => { routesU[pt] = h; }, post() { }, locals: {} }, accounts: { list: () => ({ accounts: [] }), subscriptionStatus: () => ({ loggedIn: false }), codexGlobalStatus: () => ({ loggedIn: false }) },
+        activeSessions: new Map(), serverSetting: () => null, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(tmpU, 'usage.json'), USAGE_CACHE_DIR: cacheU,
+        CODEX_SESSIONS_DIR: path.join(tmpU, 'cx'), META_DIR: path.join(tmpU, 'meta'), AVAILABLE_MODELS: { claude: [] }, BUFFERS_DIR: path.join(tmpU, 'buf'), spendGuard: { ledgerNotice: () => ({ state: 'refused', error: 'EACCES', since: 1 }) } });
+      const payU = await new Promise((resolve) => routesU['/api/usage']({}, { json: resolve }));
+      ok('§5g B-ef83 r1648 (d) /api/usage carries the guard\'s ledger state (spendLedger) — the meter\'s note reads it; server.js hands the guard on its EXISTING setupUsage line',
+        !!payU && !!payU.spendLedger && payU.spendLedger.state === 'refused' && /setupUsage\(\{ app, accounts, hosts, spendGuard, usageHistory,/.test(read('server.js')) && /spendLedgerNote\(this\._spendLedger, \{ t \}\)/.test(read('src/lib/usage-meter.js')),
+        JSON.stringify(payU && payU.spendLedger));
+    }
   }
   {   // S1 — ONLY A WRITE THAT MOVED THE LIMITS re-judges (an autosave of any other row asks nothing back out)
     const runSig = (gm) => {

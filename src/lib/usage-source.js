@@ -363,6 +363,15 @@ export function limitRows(model, set, { modelName = null, family = null, t = (s)
  *  nothing said so). `a` = POST /api/usage/codex-refresh's answer (null = the server never answered).
  *  → { text, error } — the reading (whose, each window's use and reset, the stored credits), the wrapper's
  *  refusal, the timeout, or the missing session, BY NAME. `fmtTime(sec)` words an instant on this device. */
+/** B-ef83 r1648 (d): THE SPEND LEDGER'S LOCK, said where the owner looks at usage — `sl` = /api/usage's `spendLedger`
+ *  ({state: 'unlocked' | 'refused', error}, or null): the sentence of the note, or null when there is nothing to say. */
+export function spendLedgerNote(sl, { t = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)) } = {}) {
+  if (!sl || typeof sl !== 'object') return null;
+  const code = String(sl.error || '?').slice(0, 40);
+  if (sl.state === 'refused') return t('Turns nobody typed are held — VibeSpace cannot write the lock of their record ({code}); they start again by themselves once it can', { code });
+  if (sl.state === 'unlocked') return t('Turns nobody typed are counted without the lock of their record — the data folder refuses it ({code}); VibeSpace asks again every minute', { code });
+  return null;
+}
 export function codexRefreshToast(a, { t = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)), fmtTime = (sec) => new Date(sec * 1000).toISOString() } = {}) {
   const who = (x) => (!x || !x.name || /^__global/.test(String(x.name)) ? t('CLI login') : String(x.name));
   if (!a || typeof a !== 'object') return { error: true, text: t('Codex ⟳: the server did not answer — try again') };

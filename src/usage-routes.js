@@ -84,7 +84,7 @@ function spawnPanelProbe(bin, { root, env: identityEnv }, done) {
 /** The probe's working directory: an empty dir INSIDE the isolated config dir
  *  (no config dir = the machine login's own probe, in the shared tmpdir). */
 function probeCwdOf(probeConfigDir) { return probeConfigDir ? path.join(probeConfigDir, 'cwd') : os.tmpdir(); }
-function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null }) {
+function setupUsage({ app, accounts, hosts, spendGuard = null, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null }) {
 const https = require('https');
 function readUsageCache() {
   try {
@@ -1806,6 +1806,9 @@ app.get('/api/usage', (req, res) => {
     // email matches) — the usage switchers render one entry, not two.
     globalLogin: _usageGlobalLink,
     codexGlobalLogin: _codexUsageGlobalLink,
+    // B-ef83 r1648 (d): the spend ledger's LOCK, said where the owner looks at usage — 'unlocked' (counted without it since boot) |
+    // 'refused' (turns nobody typed held: it cannot be written) | null; the meter draws its note (usage-meter `_renderUsage`)
+    spendLedger: (() => { try { return spendGuard && typeof spendGuard.ledgerNotice === 'function' ? spendGuard.ledgerNotice() : null; } catch { return null; } })(),
     // Per-account codex quota snapshots (key = cxs id / '__global_codex__')
     codexAccounts,
     // Remote hosts' own-login quota snapshots (on-demand ⟳ only), keyed by

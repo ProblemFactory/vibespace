@@ -345,13 +345,14 @@ const HELD_WHY = Object.freeze({
   'paced': 'they were held for the wake pace — delivered now',   // lane paced-wake-retry: a parked wake's frame
   'spend-cap': 'the spending ceiling held them',
   'spend-ledger': 'the record of turns nobody typed could not be read, so they were held',   // B-0a33 (2) r2: the ledger's own reason, never the cap's
+  'spend-lock': 'VibeSpace could not write the lock of its record of turns nobody typed, so they were held',   // B-ef83 r1648: the lock unwritable, no other process
   'spend-held': 'another VibeSpace process on this data folder kept the record of turns nobody typed, so they were held',   // B-ef83 smalls: a restart's overlap held them (ledger-held-elsewhere), never the cap's words
   'wrapper-no-steer': 'this agent’s process predates mid-turn notifications',
   'off': 'auto-notify was off for this conversation',
   'groups-unread': "VibeSpace could not read its Task Groups, so only a group could say whether this conversation may see them — judged now",   // lane bl-windows: the Task Groups store held unread (job-model HELD_KINDS)
 });
 /** the why-key of a held record: its kind, except a may-have-landed one (verify r2) — the hand-over card must say a repeat is possible */
-function heldKeyOf(held) { return held && typeof held === 'object' ? (held.maybeDelivered === true ? 'maybe-delivered' : held.kind === 'spend-cap' && held.why === 'ledger-unreadable' ? 'spend-ledger' : held.kind === 'spend-cap' && held.why === 'ledger-held-elsewhere' ? 'spend-held' : held.kind || null) : null; }
+function heldKeyOf(held) { return held && typeof held === 'object' ? (held.maybeDelivered === true ? 'maybe-delivered' : held.kind === 'spend-cap' && held.why === 'ledger-unreadable' ? 'spend-ledger' : held.kind === 'spend-cap' && held.why === 'ledger-held-elsewhere' ? 'spend-held' : held.kind === 'spend-cap' && held.why === 'ledger-lock-unwritable' ? 'spend-lock' : held.kind || null) : null; }
 function heldWhyOf(kinds) {
   const ks = [...new Set((Array.isArray(kinds) ? kinds : []).filter((k) => HELD_WHY[k]))];
   if (!ks.length) return null;
