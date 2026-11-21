@@ -2374,8 +2374,8 @@ Outside the law, said here so the table is true: Input.setIgnoreInputEvents and 
 act on the lease's OWN tab — the scope road forwards them. VibeSpace's own `vibespace-browser permission <kind> allow|deny
 [origin]` is another door (src/server/browser-dialogs.js `setPermission`, the hub's own connection): it sets ONE origin's
 permission in every browser context the watch decided — the person's own profile included on a shared profile — and, for
-geolocation, a position on every watched tab; an origin act, said in the agent manual; whether it becomes a proposal on a
-shared profile (as site-reset is) is still 主开发's to rule (B-771e's SECOND question — not covered by the 2026-11-18 ruling).
+geolocation, a position on every watched tab; an origin act, said in the agent manual; it is NO proposal on a shared
+profile (主开发 2026-11-21, B-771e's second question: the grant is the profile — a card for every site permission on a profile the owner already shared is a fence that holds nothing; `site-reset` is a proposal because it erases the person's login).
 Kept as they are: the origin-scoped cookie writes (Network.setCookies / deleteCookies, Storage.setCookies) and
 Storage.clearDataForOrigin — that they take ANY origin is RULED (B-771e, 主开发 2026-11-18, told to the owner): the grant is
 the profile (the line beside «a named profile is usable by all my conversations»). Nothing about connecting changes: the driver sends no whole-profile call when it connects.

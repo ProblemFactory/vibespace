@@ -837,7 +837,9 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   ONE site's permission in this browser — on a shared profile in the
   person's own profile too, and a geolocation position on every tab
   VibeSpace watches — and the person sees the line in the live view; set
-  only what your task needs, and `deny` it again when you are done.
+  only what your task needs, and `deny` it again when you are done. It asks
+  no card on a shared profile either: the grant is the profile (as for its
+  cookies), while `site-reset` asks because it erases the person's login.
 * **Downloads: the folder is lent, briefly.** `download` WORKS:
   VibeSpace lends you the profile's download folder from the moment your
   driver sets it until your download no longer needs it — 30 s after the set
