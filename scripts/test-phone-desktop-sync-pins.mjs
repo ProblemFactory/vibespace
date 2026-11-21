@@ -29,6 +29,7 @@ const CAPTURE_SITES = [
   ['desktop-manager.js', 'recordFor', 'captureBuilt', 1, 'through THE ONE CAPTURE', 'const built = this.captureBuilt(desktopId, held);'],
   ['desktop-manager.js', 'presetState', 'captureBuilt', 1, 'through THE ONE CAPTURE', 'windows: this.captureBuilt(this._activeId, held)'],
   ['desktop-manager.js', 'onSyncRefused', 'captureBuilt', 1, 'through THE ONE CAPTURE', 'built: this.captureBuilt(d, rec)'],
+  ['desktop-manager.js', '_standsInto', 'captureBuilt', 1, 'through THE ONE CAPTURE', 'const cap = this.captureBuilt(desk, state, [w]);'], // B-1d87: a window standing in a row's place
   ['desktop-manager.js', 'onSyncRefused', 'recordFor', 1, 'a record (recordFor captures through THE ONE CAPTURE) — the breaker compares it with the refused one (userW inc-mw1ogdno-5jny)', 'const same = ref.json != null && ref.json === this._writeJson(d, this.recordFor(d));'],
   ['desktop-manager.js', '_updateCachedDesktop', 'captureBuilt', 1, 'through THE ONE CAPTURE', 'const moved = this.captureBuilt(desktopId, '],
   ['desktop-manager.js', 'deleteDesktop', 'recordFor', 1, 'a record (recordFor captures through THE ONE CAPTURE)', ''],

@@ -656,7 +656,7 @@ await section('§D285 B-d285 (lane bl-windows) — the reveal door reads the one
 // while they run). → { failed: names, said: [[pass, name, detail]] }
 async function b1d87Legs({ DM = RealDM, LM = RealLM, install = null, legs = null } = {}) {
   const failed = [], said = [];
-  const leg = (c, n, extra) => { said.push([!!c, n, extra]); if (!c) failed.push(n); return !!c; };
+  const leg = (c, n, extra) => { if (typeof c !== 'boolean') throw new TypeError('§1D87: a leg\'s condition is a boolean — ' + n); said.push([c, n, extra]); if (!c) failed.push(n); return c; };
   const want = (k) => !legs || legs.includes(k);
   if (!install) return { failed, said };
   const recs = () => ({ 'desk-x': [files('x-1', 0)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0)] });
