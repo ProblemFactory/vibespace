@@ -3052,11 +3052,11 @@ await section(async () => {
   // hub-boot.mjs is the helper). THE ONE COUNT of this fact (主开发 2026-11-17 06:00Z — no second counter). A RATCHET that
   // only falls: a re-pointed batch lowers BOOTS_OUTSIDE_HELPER in the same commit, a new boot outside the helper is red, and
   // at 0 it is the law. RED CONTROL: a re-pointed suite with its own spawn line restored counts one more.
-  const BOOTS_OUTSIDE_HELPER = 171;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e (217), heavy batch 1 twenty suites (197); the rule WIDENED (主开发 06:00Z) found two the narrow pattern missed — test-boot-loop-hold's spread argv, test-update-road's stub server.js (its first line the real runtime boot) — 199. Heavy batch 2 re-pointed thirty-one: 199 → 168. THE FLOOR IS 1, not 0: test-update-road's stub is the one boot that can never move onto startHub (it measures the launcher's first line, no hub)
-  // 171 = the 168 above + the three suites of the links unit with setting-doors (lane login-request-card, restacked on the
+  const BOOTS_OUTSIDE_HELPER = 168;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e (217), heavy batch 1 twenty suites (197); the rule WIDENED (主开发 06:00Z) found two the narrow pattern missed — test-boot-loop-hold's spread argv, test-update-road's stub server.js (its first line the real runtime boot) — 199. Heavy batch 2 re-pointed thirty-one: 199 → 168. THE FLOOR IS 1, not 0: test-update-road's stub is the one boot that can never move onto startHub (it measures the launcher's first line, no hub)
+  // 171 on 2.369.411: the 168 above + the three suites of the links unit with setting-doors (lane login-request-card, restacked on the
   // release, the coordinator's word) — test-internal-links-chrome, test-setting-links-chrome and test-setting-propose-chrome,
-  // written before this rule shipped, one site each by the widened rule; the narrow rule had them at 217 + 3 = 220. Their
-  // re-point onto hub-boot.mjs startHub is OWED (lane chrome-157's batch); the ratchet comes down by three with it.
+  // written before this rule shipped, one site each by the widened rule; the narrow rule had them at 217 + 3 = 220. 168 again since
+  // lane chrome-157 re-pointed the three onto hub-boot.mjs startHub (on 2.369.413, 073cc4a1e): 171 → 168.
   const bootFiles = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.mjs$/.test(f) && !/^dbg-/.test(f) && f !== 'hub-boot.mjs').sort();
   // one argument's text from `i` to the first comma / closing bracket at depth 0 (quotes and templates skipped) → { text, end }
   const argAt = (t, i) => {

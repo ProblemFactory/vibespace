@@ -11,7 +11,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser, ownerPageHeaders, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, stillPresser, ownerPageHeaders, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (test-architecture §57c)
 import { waitPageTarget } from './cdp-page-target.mjs';
 import { markTimedOut, never } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const require = createRequire(import.meta.url);
@@ -22,8 +23,11 @@ const SHOTS = process.env.VS_SETTING_PROPOSE_SHOTS || '';   // a folder for the 
 const VNC_ENV = await vncEnv();
 const [PORT, CDP_PORT] = await freePorts(2);
 const BASE = `http://127.0.0.1:${PORT}`;
-const wt = scratch('propose-wt'), PROFILE = scratch('propose-chrome'), fakeHome = scratch('propose-home'), stubDir = scratch('propose-stub');
-for (const d of [fakeHome, stubDir]) fs.mkdirSync(d, { recursive: true });
+// the tree, the HOME and the stub live in ONE root the boot helper minted: at exit it ends the hub and every process carrying the
+// root's HOME (Chrome's too — rule nine), removes the worktree through git, then the root. Chrome's profile stays a scratch folder.
+const root = mintRoot('propose'), wt = path.join(root, 't'), PROFILE = scratch('propose-chrome'), fakeHome = path.join(root, 'home'), stubDir = path.join(root, 'stub');
+const chromeHome = path.join(root, 'chrome-home');
+for (const d of [fakeHome, stubDir, chromeHome]) fs.mkdirSync(d, { recursive: true });
 const CWD = path.join(fakeHome, 'project'); fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); if (typeof PAGE_ERRORS !== 'undefined' && PAGE_ERRORS.length) console.error('    the page said:', PAGE_ERRORS.splice(0).slice(-4).join(' | ')); } };
@@ -32,7 +36,6 @@ const SID = crypto.randomUUID();
 const DAY = 'spend.unattendedPerInstanceDay', IDDAY = 'spend.unattendedPerIdentityDay', HOUR = 'spend.unattendedPerIdentityHour';
 const REPLY = 'Noted.';
 
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin', 'docs/agent']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(`${wt}/${f}`)} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -54,24 +57,20 @@ process.stdin.on('data', (d) => { buf += d; if (answered || !/"type":"user"/.tes
 });
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
-const LOG = path.join(stubDir, 'server.log');
-const fd = fs.openSync(LOG, 'a');
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', fd, fd] });
-fs.closeSync(fd);
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });   // its output: <root>/hub.log
 const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
-  '--window-size=1280,800', '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
+  '--window-size=1280,800', '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });   // HOME: rule nine
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
+  // the helper's end ran first (registered at the mint): the hub, every process carrying the root's HOME, the worktree through git,
+  // then the root — the kill by handle is a no-op by then; a signal is the helper's (each ends in exit, so this runs)
   try { chrome.kill('SIGKILL'); } catch { }
-  try { srv.kill('SIGKILL'); } catch { }
-  for (const r of [wt, fakeHome, stubDir]) { try { endRootedProcesses(r); } catch { } }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [wt, PROFILE, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
+  try { fs.rmSync(PROFILE, { recursive: true, force: true }); } catch { }
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-for (let i = 0; i < 240; i++) { try { const r = await fetch(`${BASE}/api/home`); if (r.status < 500) break; } catch { } await sleep(250); }
+const homeUp = await hub.ready({ ms: 60000 }) && await (async () => { for (const until = Date.now() + 60000; Date.now() < until; await sleep(250)) { try { if ((await fetch(`${BASE}/api/home`)).status < 500) return true; } catch { } } return false; })();
+if (!homeUp) { console.error(`  ✗ boot: the hub's home route did not answer below 500 within its bound — its log:\n${hub.log().slice(-2000)}`); process.exit(1); }
 
 const WebSocket = require('ws');
 let target = null;
