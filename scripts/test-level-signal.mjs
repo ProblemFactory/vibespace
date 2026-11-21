@@ -20,14 +20,15 @@ import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';   // a red control's edit fails BY NAME when its anchor moves (RULES: a new red control is anchored)
 import { writeStandIn } from './claude-catalog-stand-in.mjs';
+import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CMC = require(path.join(REPO, 'src/claude-model-catalog.js'));
 const CAT = require(path.join(REPO, 'src/server/cli-model-catalog.js'));
 const CF = require(path.join(REPO, 'src/conversation-facts.js'));
 const COL = require(path.join(REPO, 'src/server/conversation-facts.js'));
-let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+
+const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-level-'));
 const BASE = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-model-catalog-2.1.321.json'), 'utf8'));
 // the declaration's SHAPE as the record union states it (a short stand-in written here — the helpers' names are the bundle's own)
@@ -55,13 +56,13 @@ console.log('B · the catalog\'s ONE read of the binary carries the fact (src/se
 {
   const yes = await CAT.readBinary(cli('2.1.990', DECL), {});
   const no = await CAT.readBinary(cli('2.1.991', MENTION), {});
-  ok(yes.state === 'read' && yes.models.length > 0 && yes.level && yes.level.declared === true && Number.isInteger(yes.level.at) && CMC.READER_VERSION === 3,
+  ok(yes.state === 'read' && yes.models.length > 0 && !!yes.level && yes.level.declared === true && Number.isInteger(yes.level.at) && CMC.READER_VERSION === 3,
     'a build that declares it: the same read keeps its models AND level {declared: true, at} (the reader\'s version moved to 3)', yes.level);
-  ok(no.state === 'read' && no.level && no.level.declared === false && no.level.at === null, 'a build that only names it: declared false — a verdict about the bytes', no.level);
+  ok(no.state === 'read' && !!no.level && no.level.declared === false && no.level.at === null, 'a build that only names it: declared false — a verdict about the bytes', no.level);
   // the window: past the catalog's parts the scan goes on at most LEVEL_SCAN_MAX (as the plan values do) — a declaration beyond it is not read
   const far = cli('2.1.992'); const fd = fs.openSync(far, 'r+'); const tail = 80 << 20; fs.ftruncateSync(fd, tail); fs.writeSync(fd, DECL, tail); fs.closeSync(fd);
   const ef = await CAT.readBinary(far, {});
-  ok(CAT.LEVEL_SCAN_MAX === 64 << 20 && ef.state === 'read' && ef.level && ef.level.declared === false && ef.level.whole === false && no.level.whole === true,
+  ok(CAT.LEVEL_SCAN_MAX === 64 << 20 && ef.state === 'read' && !!ef.level && ef.level.declared === false && ef.level.whole === false && no.level.whole === true,
     'a declaration past the bound (80 MiB into a sparse file, the window ends 64 MiB after the catalog) is not read: the scan stays bounded — and the entry says the file was NOT read whole (a small file read to its end says it was)', { far: ef.level, small: no.level });
   const dP = path.join(dir, 'dataP');
   await CAT.noteBinary({ cmd: far, version: '2.1.992', dataDir: dP, which: (c) => c, event: () => { }, log: () => { } });
@@ -145,5 +146,5 @@ console.log('C · the hub\'s judgment: the span is the FLOOR (src/conversation-f
 }
 
 fs.rmSync(dir, { recursive: true, force: true });
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+console.log(`\n${counts.pass} passed, ${counts.fail} failed`);
+process.exit(counts.fail ? 1 : 0);

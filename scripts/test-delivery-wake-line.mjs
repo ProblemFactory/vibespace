@@ -36,11 +36,12 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { checker } from './lib/check.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 700) : '')); } };
+
+const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DELIVER = require(path.join(REPO, 'src/server/conversation-deliver.js'));
 const SH = require(path.join(REPO, 'src/server/stash-handover.js'));
@@ -222,7 +223,7 @@ console.log('③ ended on purpose: only a delivery carrying the grant resumes it
   G.result(P, 'jb-sched', 'morning digest', 'the morning digest is ready');
   await G.at(10);
   const gl = G.lines[0] && G.lines[0].line;
-  ok(G.reopens.length === 1 && G.framesTo(P).length === 1 && G.notes.length === 1 && !!gl && /you allowed it/.test(gl.key) && gl.by && gl.by.kind === 'person' && gl.rule === 'granted' && gl.jobs[0] === 'jb-sched', 'the same schedule WITH the person\'s grant resumes it ONCE, and the window\'s line says the person allowed it', { reopens: G.reopens, lines: G.lines });
+  ok(G.reopens.length === 1 && G.framesTo(P).length === 1 && G.notes.length === 1 && !!gl && /you allowed it/.test(gl.key) && !!gl.by && gl.by.kind === 'person' && gl.rule === 'granted' && gl.jobs[0] === 'jb-sched', 'the same schedule WITH the person\'s grant resumes it ONCE, and the window\'s line says the person allowed it', { reopens: G.reopens, lines: G.lines });
   const A = cidOf(5);
   const Ag = rig('agent', { kept: { [A]: AGENT } });
   Ag.result(A, 'jb-build', 'build', 'build failed');
@@ -231,7 +232,7 @@ console.log('③ ended on purpose: only a delivery carrying the grant resumes it
   Ak.result(A, 'jb-build', 'build', 'build failed');
   await Ak.at(10);
   const kl = Ak.lines[0] && Ak.lines[0].line;
-  ok(Ag.reopens.length === 0 && Ag.wakes.some((w) => w.code === 'ended_on_purpose' && /coordinator/.test(w.why)) && Ak.reopens.length === 1 && !!kl && kl.params.by === 'dispatch' && kl.by && kl.by.kind === 'key',
+  ok(Ag.reopens.length === 0 && Ag.wakes.some((w) => w.code === 'ended_on_purpose' && /coordinator/.test(w.why)) && Ak.reopens.length === 1 && !!kl && kl.params.by === 'dispatch' && !!kl.by && kl.by.kind === 'key',
     'an AGENT-ended conversation: its job WITHOUT the grant waits (the agent named); WITH a manager key\'s grant it resumes and the line names the key', { waits: Ag.wakes, line: kl });
   const U = cidOf(6);
   const Un = rig('unknown', { grants: { 'jb-u': { granted: true, by: { kind: 'person' } } } });
@@ -269,7 +270,7 @@ console.log('⑤ a restart between the claim and the post delivers once');
   R1.result(X, 'jb-m', 'migration', 'the migration finished');
   R1.c.now = T0 + 10; for (const t of R1.c.timers.splice(0)) t.fn();
   for (let i = 0; i < 50 && !hung; i++) await sleep(5);
-  ok(hung && R1.posts.length === 0, 'the first hub claimed the words and died inside the resume — nothing was posted', { hung, posts: R1.posts.length });
+  ok(!!hung && R1.posts.length === 0, 'the first hub claimed the words and died inside the resume — nothing was posted', { hung, posts: R1.posts.length });
   const R2 = rig('mid2', { dir, kept: { [X]: RESTART } });
   await R2.at(20);
   const all = [...R1.posts, ...R2.posts].filter((p) => p.cid === X);
@@ -287,7 +288,7 @@ console.log('⑥ the groups producer');
   const eng = GE.create({ store, deliver: R.deliver, broadcast: () => { }, now: () => R.c.now, paceClock: () => R.c.now, roster: () => roster, groupSetting: () => 'none', log: { info() { }, warn() { }, log() { } } });
   const one = await eng.sendToAgent({ from: A, to: 'beta', text: 'please pick up the review', wake: true });
   const held = (one.refused || []).find((x) => x.member === B);
-  ok(one.ok && !!held && held.parked === true && held.reason === D.senderWords('owed') && R.deliver.endedEntries(B).length === 1 && R.deliver.endedEntries(B)[0].producer === 'groups',
+  ok(!!one.ok && !!held && held.parked === true && held.reason === D.senderWords('owed') && R.deliver.endedEntries(B).length === 1 && R.deliver.endedEntries(B)[0].producer === 'groups',
     'a wake naming ONE stopped member is OWED (producer groups, the pace\'s own reason) — the sender holds «owed», said whole', { refused: one.refused, ended: R.deliver.endedEntries(B).map((e) => e.producer) });
   await R.at(10);
   const fb = R.framesTo(B);
@@ -302,7 +303,7 @@ console.log('⑥ the groups producer');
   const fanned = (fan.refused || []).filter((x) => /member\(s\) are ended/.test(x.reason));
   ok(fanned.length >= 2 && fanned.every((x) => !x.parked) && R.deliver.endedEntries(Dd).length === 0, 'a FAN-OUT wake only waits: no owed wake, and the sender is told «k member(s) are ended; this rides their next turn»', fan.refused);
   const quiet = await eng.sendToAgent({ from: A, to: 'delta', text: 'no rush', wake: false });
-  ok(quiet.ok && R.deliver.endedEntries(Dd).length === 0, 'a message with NO wake only waits — nothing is owed', R.deliver.endedEntries(Dd));
+  ok(!!quiet.ok && R.deliver.endedEntries(Dd).length === 0, 'a message with NO wake only waits — nothing is owed', R.deliver.endedEntries(Dd));
 }
 
 console.log('⑦ money: a delivery keeps piece 4\'s refusals — a goal runs many turns, a wake authorises one');
@@ -403,7 +404,7 @@ console.log('⑫ a hand-over refused AFTER the resume leaves its line');
   R.result(X, 'jb-h', 'nightly report', 'done');
   await R.at(10);
   const ln = R.lines[0] && R.lines[0].line;
-  ok(R.reopens.length === 1 && R.posts.length === 0 && !!ln && ln.refused && ln.refused.code === 'spend' && R.deliver.stashCount(X) === 1 && R.wakes.some((w) => w.cid === X && w.outcome === 'refused'),
+  ok(R.reopens.length === 1 && R.posts.length === 0 && !!ln && !!ln.refused && ln.refused.code === 'spend' && R.deliver.stashCount(X) === 1 && R.wakes.some((w) => w.cid === X && w.outcome === 'refused'),
     'the ceiling refuses the hand-over after the resume ⇒ the now-live window says why (code spend), the words wait for its next turn', { lines: R.lines, stash: R.deliver.stashCount(X) });
 }
 
@@ -468,7 +469,7 @@ console.log('⑮ the key\'s verb: reach first, with the owner conversation\'s Ta
   ok(!a1.ok && a1.why === 'the key does not reach that job' && !a2.ok && a2.why === a1.why && !/schedule|person/.test(a2.why) && asked[0].conversationId === O && asked[0].groups.join() === 'T-ops' && jm.jobs.get(cron.id).wakesEndedOwner !== true,
     'out of reach ⇒ refused by name — the SAME words for a schedule and for a run (no more than an existence), the reach asked of the owner WITH its Task Groups, nothing written', { a1, a2, asked });
   const a3 = await V({ job: cron.id, grant: true }, { caller: {}, keyId: 'ak-1', identity: 'automation:ak-1', reach: () => ({ ok: true, by: 'grant' }) });
-  ok(a3.ok && a3.grant === true && a3.by.kind === 'key' && a3.by.name === 'dispatch' && jm.wakeGrantOf(cron.id).granted === true, 'in reach ⇒ the key sets the grant; the row records the key by name', a3);
+  ok(!!a3.ok && a3.grant === true && a3.by.kind === 'key' && a3.by.name === 'dispatch' && jm.wakeGrantOf(cron.id).granted === true, 'in reach ⇒ the key sets the grant; the row records the key by name', a3);
   // THE STORE HELD UNREAD (the hold's law, 主开发 2026-11-19 05:42Z): a key reaching «everything EXCEPT T-ops», the owner IS in T-ops,
   // the store held (its groups read []) — the reach hands the hold's fact, refused BY NAME, nothing written; RED: the fact dropped ⇒ set
   const GH = require(path.join(REPO, 'src/server/groups-hold.js')), AK = require(path.join(REPO, 'src/automation-keys.js'));
@@ -519,7 +520,7 @@ console.log('⑱ a hard kill between the frame\'s post and the entry\'s end deli
   for (let i = 0; i < 100 && !posted; i++) await sleep(5);
   const file = JSON.parse(fs.readFileSync(path.join(dir, fs.readdirSync(dir).find((f) => /retry/.test(f) && f.endsWith('.json')) || 'x'), 'utf8'));
   const marked = Object.values(file).flat().find((e) => e && e.held && e.held.why === 'ended');
-  ok(posted && R1.posts.length === 1 && !!marked && Number(marked.posting) > 0, 'the frame was posted and the hub died before the entry ended — the entry carries its POSTING mark on disk', { posted, marked });
+  ok(!!posted && R1.posts.length === 1 && !!marked && Number(marked.posting) > 0, 'the frame was posted and the hub died before the entry ended — the entry carries its POSTING mark on disk', { posted, marked });
   const R2 = rig('kill2', { dir, kept: { [X]: RESTART } });
   await R2.at(20);
   ok(R2.reopens.length === 0 && R2.posts.length === 0 && R2.deliver.endedEntries(X).length === 0 && R2.logs.some((l) => /POSTING its hand-over when the previous server stopped/.test(l)),
@@ -603,7 +604,7 @@ console.log('㉑ the hand-over waits for THE RESUMED SESSION\'s inbox, off the l
     'a CLI that never opens its inbox: the start waits its bound (60 s of steps, each at most 1 s) — nothing posted, nothing charged', { waited, steps: B.slept.length });
   ok(wz.outcome === 'failed' && wz.code === 'inbox_not_open' && /resumed as w-/.test(wz.why) && /did not open its inbox within 60 s/.test(wz.why) && /sending anything starts it, or end and resume it/.test(wz.why) && !/no live inbox/.test(wz.why),
     '…the end says it BY NAME — resumed (which session), no inbox within the bound, the message waits for its next turn — never «no live inbox»', wz);
-  ok(B.deliver.stashCount(Z) === 1 && B.deliver.claimedCount(Z) === 0 && lz.refused && lz.refused.code === 'inbox_not_open' && lz.params.seconds === 60 && lz.params.what === 'nightly report',
+  ok(B.deliver.stashCount(Z) === 1 && B.deliver.claimedCount(Z) === 0 && !!lz.refused && lz.refused.code === 'inbox_not_open' && lz.params.seconds === 60 && lz.params.what === 'nightly report',
     '…the claim went back: the words wait in the stash, owed to its next turn; the window\'s line carries the code and the bound', { stash: B.deliver.stashCount(Z), claimed: B.deliver.claimedCount(Z), line: lz });
   // the resumed session ends before its inbox opens
   const W = cidOf(93);
@@ -633,7 +634,7 @@ console.log('㉑ the hand-over waits for THE RESUMED SESSION\'s inbox, off the l
     return seen;
   };
   const off = await run(DWO, 'off');
-  ok(off.waiting === 3 && off.landed && off.reopens.length === 4, 'three resumed conversations wait for their inboxes OFF the line — a fourth is resumed and its frame lands meanwhile (the line serves the next)', off);
+  ok(off.waiting === 3 && !!off.landed && off.reopens.length === 4, 'three resumed conversations wait for their inboxes OFF the line — a fourth is resumed and its frame lands meanwhile (the line serves the next)', off);
   const ONLINE = mutantCopies('wake-wait-on-line', REPO).load('src/server/delivery-wake.js', anchored(DWSRC, "    return { ok: true, outcome: 'resumed', sessionId: r.sessionId, rest };", '    return await rest;', 'wait-on-line'), 'wait-on-line');
   const on = await run(ONLINE, 'on');
   ok(on.waiting === 2 && !on.landed && on.reopens.length === 2 && on.line.running === 2 && on.line.waiting === 2, '㉑ RED CONTROL: the wait put back ON the line — two waiting CLIs hold both places; the third and the fourth wait in line, not even resumed', on);
@@ -690,7 +691,7 @@ console.log('㉑b a claim taken is ALWAYS ended; a delivery reopens only a kind 
   N3.result(O3, 'jb-o3', 'nightly report', 'nightly report finished: the belt');
   await N3.at(10);
   const w3 = N3.wakes.find((w) => w.cid === O3) || {}, l3 = (N3.lines[N3.lines.length - 1] || {}).line || {};
-  ok(N3.reopens.length === 1 && N3.posts.length === 0 && N3.slept.length === 0 && w3.code === 'no_mid_session' && /takes no message mid-session/.test(w3.why) && N3.deliver.claimedCount(O3) === 0 && N3.deliver.stashCount(O3) === 1 && l3.refused && l3.refused.code === 'no_mid_session',
+  ok(N3.reopens.length === 1 && N3.posts.length === 0 && N3.slept.length === 0 && w3.code === 'no_mid_session' && /takes no message mid-session/.test(w3.why) && N3.deliver.claimedCount(O3) === 0 && N3.deliver.stashCount(O3) === 1 && !!l3.refused && l3.refused.code === 'no_mid_session',
     'the belt after a reopen: its agent takes no message mid-session — said at once by name (no wait), the claim back, the window\'s line carries the code', { w3, slept: N3.slept.length });
   // A PTY EXITED WITH ITS SOCKET ALIVE (the re-attach window) is a CLI still starting — never «it ended again»
   const Q = cidOf(105);
@@ -870,7 +871,7 @@ console.log('㉔ B-f276 1a (lane bl-windows): an ended wake whose stash holds on
   };
   const s0 = await startRun(DWO, 'head');
   console.log(`    facts: held at the start ${JSON.stringify(s0)}`);
-  ok(s0.during.reopens === 0 && s0.during.owed === 1 && s0.during.marked && s0.during.told.length === 0, 'B-f276 1a (the read\'s should 1): a producer held while the wake waits in the line — the start answers «held» before its claim: no resume, the wake owed and set aside', JSON.stringify(s0.during));
+  ok(s0.during.reopens === 0 && s0.during.owed === 1 && !!s0.during.marked && s0.during.told.length === 0, 'B-f276 1a (the read\'s should 1): a producer held while the wake waits in the line — the start answers «held» before its claim: no resume, the wake owed and set aside', JSON.stringify(s0.during));
   ok(s0.after.reopens === 1 && s0.after.carried === 1 && s0.after.owed === 0, 'B-f276 1a: …the lift: ONE resume, the words carried', JSON.stringify(s0.after));
   const startCut = MJ_DWL.load('src/server/delivery-wake.js', anchored(DWO_SRC, "    if (heldNow) return { ok: false, outcome: 'held', code: 'held',", "    if (false) return { ok: false, outcome: 'held', code: 'held',", 'the start never asks again'), 'start-held-cut');
   const sx = await startRun(startCut, 'cut');
@@ -880,5 +881,5 @@ console.log('㉔ B-f276 1a (lane bl-windows): an ended wake whose stash holds on
   ok(kp.after.reopens === 0 && kp.after.owed === 0, 'B-f276 1a CONTROL (the park ends a «held» answer like any other): nothing resumes it at the lift — red', JSON.stringify(kp));
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+console.log(`\n${counts.pass} passed, ${counts.fail} failed`);
+process.exit(counts.fail ? 1 : 0);

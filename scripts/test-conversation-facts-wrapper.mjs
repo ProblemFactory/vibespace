@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
 import { stopWrapper, scratch } from './scratch.mjs';
+import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CF = require(path.join(REPO, 'src/conversation-facts.js'));
@@ -31,8 +32,8 @@ const atExit = [];
 const cleanup = () => { for (const f of atExit.splice(0)) { try { f(); } catch { } } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } };
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
-let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+
+const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await f()) return true; await sleep(30); } return !!(await f()); };
 
@@ -67,30 +68,30 @@ async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
 {
   const h = await boot('facts');
   const m0 = h.meta();
-  ok(m0 && m0.caps && m0.caps.facts === CF.FACTS_VERSION && m0.facts && m0.facts.fromStart === true && m0.facts.bg === null && m0.facts.cli === null && Array.isArray(m0.facts.tools), 'at its start the sidecar advertises caps.facts and holds a tracker read from the CLI\'s first line', m0 && { caps: m0.caps, facts: m0.facts });
-  ok(await h.turn('hello'), 'a plain turn answers');
-  ok(await until(() => { const f = h.meta()?.facts; return f && f.bg === null && f.cli === '2.1.312'; }, 3000) && Array.isArray(CF.trackedFacts(CF.factsFromSidecar(h.meta().facts), { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' }).background), 'after a plain turn the sidecar RECORDS the version the CLI stated and no set seen (observations only) — the HUB judges the measured build\'s silence as known-empty (the empty set (the CLI\'s init named a level-publishing version)', h.meta()?.facts);
+  ok(!!m0 && !!m0.caps && m0.caps.facts === CF.FACTS_VERSION && !!m0.facts && m0.facts.fromStart === true && m0.facts.bg === null && m0.facts.cli === null && Array.isArray(m0.facts.tools), 'at its start the sidecar advertises caps.facts and holds a tracker read from the CLI\'s first line', m0 && { caps: m0.caps, facts: m0.facts });
+  ok(!!(await h.turn('hello')), 'a plain turn answers');
+  ok(!!(await until(() => { const f = h.meta()?.facts; return f && f.bg === null && f.cli === '2.1.312'; }, 3000)) && Array.isArray(CF.trackedFacts(CF.factsFromSidecar(h.meta().facts), { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' }).background), 'after a plain turn the sidecar RECORDS the version the CLI stated and no set seen (observations only) — the HUB judges the measured build\'s silence as known-empty (the empty set (the CLI\'s init named a level-publishing version)', h.meta()?.facts);
   const lastRec = h.recs.filter((r) => r.type !== '_stdin_ack').at(-1).__at;
-  ok(await until(() => { const f = h.meta()?.facts; return f && Math.abs(f.at - lastRec) < 400; }, 3000), 'the sidecar\'s record time is the turn\'s last record (written with the turn-end write)', { at: h.meta()?.facts?.at, lastRec });
+  ok(!!(await until(() => { const f = h.meta()?.facts; return f && Math.abs(f.at - lastRec) < 400; }, 3000)), 'the sidecar\'s record time is the turn\'s last record (written with the turn-end write)', { at: h.meta()?.facts?.at, lastRec });
   await h.turn('BGSET- start it');
-  ok(await until(() => h.meta()?.facts?.bg?.length === 1 && h.meta().facts.bg[0].description === 'a dev server', 3000), 'a background set: the sidecar holds it (id, type, description)', h.meta()?.facts);
+  ok(!!(await until(() => h.meta()?.facts?.bg?.length === 1 && h.meta().facts.bg[0].description === 'a dev server', 3000)), 'a background set: the sidecar holds it (id, type, description)', h.meta()?.facts);
   await h.turn('BGEMPTY- it ended');
-  ok(await until(() => Array.isArray(h.meta()?.facts?.bg) && h.meta().facts.bg.length === 0, 3000), 'the set went empty: the sidecar says so', h.meta()?.facts);
+  ok(!!(await until(() => Array.isArray(h.meta()?.facts?.bg) && h.meta().facts.bg.length === 0, 3000)), 'the set went empty: the sidecar says so', h.meta()?.facts);
   ok(h.meta()?.facts?.wake === false, 'no wakeup recorded yet');
   await h.turn('WAKE- a fired loop wakeup');
-  ok(await until(() => h.meta()?.facts?.wake === true, 3000), 'a fired wakeup: the one-way mark the record states is in the sidecar', h.meta()?.facts);
+  ok(!!(await until(() => h.meta()?.facts?.wake === true, 3000)), 'a fired wakeup: the one-way mark the record states is in the sidecar', h.meta()?.facts);
   const back = CF.trackedFacts(CF.factsFromSidecar(h.meta().facts), { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' });
   ok(Array.isArray(back.background) && back.timersWhy === CF.WHY.timerSet && Number.isFinite(back.idleSince), 'what a restarted hub reads from this sidecar: the set known, timers «it set a CLI timer», an idle age', back);
   // round two, answer 1 (+ round three): the task records AS SEEN and the background ask, kept by the REAL wrapper; the hub subtracts.
   // The stand-in follows 主开发's measured order on 2.1.322: the set names the shell BEFORE its start; at the end the outcomes, THEN the set empty.
   const K3 = { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' };
   await h.turn('BGSHELL- a dev server in the background');
-  ok(await until(() => { const f = h.meta()?.facts; return f && Array.isArray(f.bgStarted) && f.bgStarted.length === 1 && f.bgStarted[0].kind === 'local_bash' && Array.isArray(f.bgStarted[0].seen) && Array.isArray(f.bgAsk) && f.bgAsk.includes('Bash'); }, 3000),
+  ok(!!(await until(() => { const f = h.meta()?.facts; return f && Array.isArray(f.bgStarted) && f.bgStarted.length === 1 && f.bgStarted[0].kind === 'local_bash' && Array.isArray(f.bgStarted[0].seen) && Array.isArray(f.bgAsk) && f.bgAsk.includes('Bash'); }, 3000)),
     'a shell asked to run in the background: the sidecar holds its start (the kind as stated, its later kinds nested) and the ask', h.meta()?.facts);
   const mid = CF.trackedFacts(CF.factsFromSidecar(h.meta().facts), K3);
   ok(Array.isArray(mid.background) && mid.background.length === 1, 'what a restarted hub reads while it runs: the set names it — busy, known', mid);
   await h.turn('BGDONE- it ended');
-  ok(await until(() => { const t = (h.meta()?.facts?.bgStarted || [])[0]; return t && t.seen.includes('task_updated:completed') && t.seen.includes('task_notification:completed') && Array.isArray(h.meta().facts.bg) && h.meta().facts.bg.length === 0; }, 3000),
+  ok(!!(await until(() => { const t = (h.meta()?.facts?.bgStarted || [])[0]; return t && t.seen.includes('task_updated:completed') && t.seen.includes('task_notification:completed') && Array.isArray(h.meta().facts.bg) && h.meta().facts.bg.length === 0; }, 3000)),
     'its outcomes: the sidecar holds them as stated, nested in the task, and the set published empty', h.meta()?.facts);
   const sh = CF.trackedFacts(CF.factsFromSidecar(h.meta().facts), K3);
   ok(Array.isArray(sh.background) && sh.background.length === 0, 'what a restarted hub reads after it ended: known-empty — a background shell is a measured kind (2.1.322) and its outcomes are seen', sh);
@@ -129,7 +130,7 @@ async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
   const burst = async (h) => { await h.turn('hello'); await sleep(900); const w0 = h.writes().length; const ok1 = await h.turn('BURST- go'); await sleep(900); return { ok: ok1, writes: h.writes().length - w0, records: h.recs.filter((r) => r.type === 'assistant').length }; };
   const h = await boot('burst');
   const b = await burst(h);
-  ok(b.ok && b.records >= 2000 && b.writes >= 1 && b.writes <= 4, `a turn of 2000 records costs ${b.writes} sidecar write(s) — the turn's own (≤ 4), never one per record`, b);
+  ok(!!b.ok && b.records >= 2000 && b.writes >= 1 && b.writes <= 4, `a turn of 2000 records costs ${b.writes} sidecar write(s) — the turn's own (≤ 4), never one per record`, b);
   await h.stop();
   // RED CONTROL: a copy whose step writes per record
   const MUT = mutantCopies('conversation-facts-wrapper', REPO);
@@ -139,7 +140,7 @@ async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
   const red = MUT.write('data/bin/chat-wrapper.js', src.replace(NEEDLE, '  persistMeta(); return;'), 'write-per-record');
   const hr = await boot('burst-red', { wrapper: red });
   const br = await burst(hr);
-  ok(br.ok && br.writes >= 1000, `CONTROL a wrapper that writes per record: ${br.writes} writes over the same burst — the leg above would be red`, br);
+  ok(!!br.ok && br.writes >= 1000, `CONTROL a wrapper that writes per record: ${br.writes} writes over the same burst — the leg above would be red`, br);
   await hr.stop();
 }
 {
@@ -153,7 +154,7 @@ async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
   const w1 = h.writes().length;
   await sleep(2600);   // two scaled minutes with no record: at most one flush, then nothing (the flush re-arms only on a record)
   const w2 = h.writes().length;
-  ok(t && w1 - w0 >= 1 && w2 - w1 <= 1, `after a turn, the minute flush writes at most once (${w2 - w1}) and then nothing while no record comes`, { w0, w1, w2 });
+  ok(!!t && w1 - w0 >= 1 && w2 - w1 <= 1, `after a turn, the minute flush writes at most once (${w2 - w1}) and then nothing while no record comes`, { w0, w1, w2 });
   const lastRec = h.recs.filter((r) => r.type !== '_stdin_ack').at(-1).__at;
   ok(Math.abs((h.meta()?.facts?.at || 0) - lastRec) < 400, 'the sidecar ends on the last record\'s time', { at: h.meta()?.facts?.at, lastRec });
   await h.stop();
@@ -176,8 +177,8 @@ async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
       await sleep(800);
       w1 = h.writes().length; unchanged = JSON.stringify(h.meta()) === m0;
     } finally { fs.chmodSync(h.dir, 0o755); }
-    ok(w1 === w0 && unchanged, 'PREMISE the folder really refused: no sidecar write landed (the rename counter and the file unchanged) though the set changed', { w0, w1, unchanged });
-    ok(answered && answered2 && alive, 'with its sidecar folder refusing writes, the wrapper keeps answering turns (a failed write is caught)', { answered, answered2, alive });
+    ok(w1 === w0 && !!unchanged, 'PREMISE the folder really refused: no sidecar write landed (the rename counter and the file unchanged) though the set changed', { w0, w1, unchanged });
+    ok(!!answered && !!answered2 && !!alive, 'with its sidecar folder refusing writes, the wrapper keeps answering turns (a failed write is caught)', { answered, answered2, alive });
     await h.stop();
   }
 }
@@ -228,5 +229,5 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   fs.rmSync(FAKE, { recursive: true, force: true });
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+console.log(`\n${counts.pass} passed, ${counts.fail} failed`);
+process.exit(counts.fail ? 1 : 0);

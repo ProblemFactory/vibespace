@@ -31,11 +31,12 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { checker } from './lib/check.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 1500) : '')); } return !!c; };
+
+const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 const OPS = require(path.join(REPO, 'src/server/conversation-ops.js'));
 const IR = require(path.join(REPO, 'src/server/inbox-reopen.js'));
@@ -109,14 +110,14 @@ console.log('— ① END, THEN RESUME: live again, nothing sent, nothing billed'
   await W.ops.endConversation({ sessionId: liveId }, { kind: 'human', actBy: 'human:me' }, { reply: (m) => answers.push(m) });
   W.endedOne('claude:c-1', 'the build worker');
   const gone = ![...W.activeSessions.values()].some((s) => s.backendSessionId === 'c-1');
-  ok(live0 && gone && answers.some((m) => m && m.ok), `the conversation was live, then a person ended it (${JSON.stringify(answers)})`);
+  ok(!!live0 && !!gone && answers.some((m) => m && m.ok), `the conversation was live, then a person ended it (${JSON.stringify(answers)})`);
   const before = ledger(W), inputs0 = W.inputs(), creates0 = W.creates.length;
   const r = await W.resume('claude:c-1');
   const s = r.sessionId ? W.activeSessions.get(r.sessionId) : null;
   const made = W.creates[creates0];
-  ok(r.ok && s && s.backendSessionId === 'c-1' && W.creates.length === creates0 + 1, `① resumed: LIVE AGAIN as ${r.sessionId} on the same conversation (c-1), one create`, r);
-  ok(made && made.data.resume === true && made.data.resumeId === 'c-1' && made.data.mode === 'chat' && made.data.cwd === '/w/proj' && !made.data.initialPrompt, '① the create is the page\'s own resume of c-1 (the resume road\'s message, no first message)', made && made.data);
-  ok(made && made.ws._headless === true && made.ws._actBy === 'automation:ak1' && !s.clients.has(made.ws), '① …from a HEADLESS creator naming the key, which left the session the moment it answered', made && { h: made.ws._headless, by: made.ws._actBy });
+  ok(!!r.ok && !!s && s.backendSessionId === 'c-1' && W.creates.length === creates0 + 1, `① resumed: LIVE AGAIN as ${r.sessionId} on the same conversation (c-1), one create`, r);
+  ok(!!made && made.data.resume === true && made.data.resumeId === 'c-1' && made.data.mode === 'chat' && made.data.cwd === '/w/proj' && !made.data.initialPrompt, '① the create is the page\'s own resume of c-1 (the resume road\'s message, no first message)', made && made.data);
+  ok(!!made && made.ws._headless === true && made.ws._actBy === 'automation:ak1' && !s.clients.has(made.ws), '① …from a HEADLESS creator naming the key, which left the session the moment it answered', made && { h: made.ws._headless, by: made.ws._actBy });
   const after = ledger(W);
   ok(W.inputs() === inputs0 && W.cli.get(r.sessionId).inputs.length === 0, `① the fake CLI received ZERO input frames (${W.cli.get(r.sessionId).inputs.length})`);
   ok(rows(after) === rows(before), `① the spend ledger has NO new row (${rows(before)} → ${rows(after)})`, { before, after });
@@ -124,11 +125,11 @@ console.log('— ① END, THEN RESUME: live again, nothing sent, nothing billed'
   // CONTROL: one billed create in the same world — the probe sees it
   const o = await W.verbs['conversations.open']({ cwd: '/w/proj', backend: 'claude', mode: 'chat', name: 'a worker' }, W.ctx());
   const ctl = ledger(W);
-  ok(o.ok && rows(ctl) === rows(after) + 2 && ctl.instance === after.instance + 1 && ctl.reasons[ctl.reasons.length - 1] === 'automation-open', `① CONTROL: one conversations.open in the same world adds ONE automation-open row (instance ${after.instance} → ${ctl.instance}, the key's ${after.identities} → ${ctl.identities})`, { o, ctl });
+  ok(!!o.ok && rows(ctl) === rows(after) + 2 && ctl.instance === after.instance + 1 && ctl.reasons[ctl.reasons.length - 1] === 'automation-open', `① CONTROL: one conversations.open in the same world adds ONE automation-open row (instance ${after.instance} → ${ctl.instance}, the key's ${after.identities} → ${ctl.identities})`, { o, ctl });
   W.guard.flush();
   await tick(50);
   let disk = null; try { disk = JSON.parse(fs.readFileSync(path.join(W.dataDir, 'spend-budget.json'), 'utf8')); } catch { disk = null; }
-  ok(disk && disk.budget && disk.budget.instance.length === 1 && disk.budget.instance[0].reason === 'automation-open', '① …and on disk the ledger holds exactly that one row — none from the resume', disk && disk.budget);
+  ok(!!disk && !!disk.budget && disk.budget.instance.length === 1 && disk.budget.instance[0].reason === 'automation-open', '① …and on disk the ledger holds exactly that one row — none from the resume', disk && disk.budget);
 }
 {
   // RED CONTROL: the road with a first message (a mutant copy of the PURE resume message; the ORCH copy reads it) ⇒ the probe sees it
@@ -142,8 +143,8 @@ console.log('— ① END, THEN RESUME: live again, nothing sent, nothing billed'
   const W = world({ ir: require(M.write('src/server/inbox-reopen.js', orchCopy, 'first-message')), facts: { 'claude:c-2': CHAT } });
   W.endedOne('claude:c-2');
   const r = await W.resume('claude:c-2');
-  ok(r.ok && W.inputs() === 1, `① RED CONTROL: a road whose create carries a first message — the fake CLI received ${W.inputs()} input frame (the leg's zero would be red)`, r);
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: '① ' })) ok(c.pass, c.name, c.detail);
+  ok(!!r.ok && W.inputs() === 1, `① RED CONTROL: a road whose create carries a first message — the fake CLI received ${W.inputs()} input frame (the leg's zero would be red)`, r);
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: '① ' })) ok(!!c.pass, c.name, c.detail);
 }
 
 console.log('— ② REFUSED BY NAME, nothing created');
@@ -152,7 +153,7 @@ console.log('— ② REFUSED BY NAME, nothing created');
   await W.ops.openConversation({ type: 'create', backend: 'claude', mode: 'chat', cwd: '/w/proj', resume: true, resumeId: 'live-1', cols: 120, rows: 30 }, { kind: 'human', actBy: 'human:me' }, { ws: IR.headlessCreator('human:me'), attachedSessions: new Set() });
   const c0 = W.creates.length;
   const live = await W.resume('claude:live-1');
-  ok(!live.ok && live.code === 'not_ended' && /message it instead \(its link is in this answer\)/.test(live.why) && live.sessionId && live.link === 'vibespace://conversation/claude:live-1', '② a conversation that is running ⇒ not_ended (its id and link named)', live);
+  ok(!live.ok && live.code === 'not_ended' && /message it instead \(its link is in this answer\)/.test(live.why) && !!live.sessionId && live.link === 'vibespace://conversation/claude:live-1', '② a conversation that is running ⇒ not_ended (its id and link named)', live);
   const nf = await W.resume('claude:nobody');
   ok(!nf.ok && nf.code === 'not_found', '② a conversation neither live nor ended here ⇒ not_found', nf);
   W.endedOne('claude:a-1');
@@ -167,7 +168,7 @@ console.log('— ② REFUSED BY NAME, nothing created');
   ok(W.creates.length === c0, `② …none of them created anything (${W.creates.length - c0})`);
   W.endedOne('claude:t-2');
   const tc = await W.resume('claude:t-2');
-  ok(tc.ok && W.creates.length === c0 + 1, '② RED CONTROL: the same record in a CHAT window resumes (one create) — the refusal is the window\'s doing', tc);
+  ok(!!tc.ok && W.creates.length === c0 + 1, '② RED CONTROL: the same record in a CHAT window resumes (one create) — the refusal is the window\'s doing', tc);
   const R = world({ facts: { 'claude:r-1': CHAT }, reachable: ['someone-else'] });
   R.endedOne('claude:r-1');
   const rr = await R.resume('claude:r-1');
@@ -185,15 +186,15 @@ console.log('— ③ THE KEPT RECORD: a resume nobody pressed starts no turn nob
   ok(!u.ok && u.code === 'goal_unknown' && /continues an active goal by itself/.test(u.why), '③ codex (its resume continues a goal by itself) with a goal the record cannot speak for ⇒ goal_unknown', u);
   ok(W.creates.length === 0, `③ …none of the three created anything (${W.creates.length})`);
   const u2 = await W.resume('claude:u-2'), n1 = await W.resume('codex:n-1');
-  ok(u2.ok && n1.ok && W.creates.length === 2, '③ Claude (read to start nothing on a resume) with an unknown goal, and codex with NO goal: both resumed', { u2, n1 });
+  ok(!!u2.ok && !!n1.ok && W.creates.length === 2, '③ Claude (read to start nothing on a resume) with an unknown goal, and codex with NO goal: both resumed', { u2, n1 });
   // RED CONTROL: codex's row read as 'nothing' — the same unknown-goal record resumes: the refusal is the row's doing
   const R = world({ facts, rowOf: (b) => (b === 'codex' ? { resumeContinues: 'nothing', headless: true } : harnessRowOf(capsOf(b))) });
   R.endedOne('codex:u-1');
   const ru = await R.resume('codex:u-1');
-  ok(ru.ok && R.creates.length === 1, '③ RED CONTROL: codex\'s row read as \'nothing\' — the same record RESUMES (one create)', ru);
+  ok(!!ru.ok && R.creates.length === 1, '③ RED CONTROL: codex\'s row read as \'nothing\' — the same record RESUMES (one create)', ru);
   const rowsNow = Object.fromEntries(['claude', 'codex', 'opencode', 'antigravity', 'shell', 'no-such-harness'].map((b) => [b, harnessRowOf(capsOf(b))]));
   ok(rowsNow.claude.resumeContinues === 'nothing' && rowsNow.codex.resumeContinues === 'goal' && rowsNow.opencode.resumeContinues === 'nothing' && rowsNow.antigravity.resumeContinues === 'nothing'
-    && rowsNow.claude.headless && rowsNow.codex.headless && rowsNow.opencode.headless && rowsNow.antigravity.headless && rowsNow.shell.headless === false
+    && !!rowsNow.claude.headless && !!rowsNow.codex.headless && !!rowsNow.opencode.headless && !!rowsNow.antigravity.headless && rowsNow.shell.headless === false
     && rowsNow['no-such-harness'].resumeContinues === 'unread' && rowsNow['no-such-harness'].headless === false
     && rowsNow.claude.midSession === true && rowsNow.codex.midSession === true && rowsNow.antigravity.midSession === true && rowsNow.opencode.midSession === false && rowsNow.shell.midSession === false && rowsNow['no-such-harness'].midSession === false,
   '③ the declared rows (src/backend-caps.js): claude/opencode/antigravity \'nothing\', codex \'goal\'; the shell and an undeclared harness have no headless road; a message mid-session reaches claude/codex/antigravity, never opencode or the shell (piece 7 reads it: 主开发 2026-11-20 04:07Z)', rowsNow);
@@ -209,14 +210,14 @@ console.log('— ④ THE LINE IN THE VERB');
   const p0 = W.resume('claude:q-0'), p1 = W.resume('claude:q-1');
   const third = await W.resume('claude:q-2');
   await tick(2);
-  ok(third.ok && third.queued === true && third.position === 1 && W.creates.length === 2 && third.link === 'vibespace://conversation/claude:q-2', `④ two start, the third is answered at once: queued, place ${third.position} — ${W.creates.length} creates in flight`, third);
+  ok(!!third.ok && third.queued === true && third.position === 1 && W.creates.length === 2 && third.link === 'vibespace://conversation/claude:q-2', `④ two start, the third is answered at once: queued, place ${third.position} — ${W.creates.length} creates in flight`, third);
   W.gates.shift()();
   await tick(5);
   ok(W.creates.length === 3, `④ one start ENDED ⇒ the third starts (${W.creates.length} creates)`);
   await W.release();
   const [a0, a1] = await Promise.all([p0, p1]);
   await tick(5);
-  ok(a0.ok && a1.ok && [...W.activeSessions.values()].filter((s) => /^q-/.test(s.backendSessionId)).length === 3, '④ …and all three are live');
+  ok(!!a0.ok && !!a1.ok && [...W.activeSessions.values()].filter((s) => /^q-/.test(s.backendSessionId)).length === 3, '④ …and all three are live');
 }
 {
   const keys = Array.from({ length: 14 }, (_, k) => 'claude:f-' + k);
@@ -228,7 +229,7 @@ console.log('— ④ THE LINE IN THE VERB');
   const other = await W.resume(keys[13], 'ak2');
   ok(answers.filter((a) => a === 'started').length === 2 && answers.filter((a) => a && a.queued).length === 10 && !eleventh.ok && eleventh.code === 'line_full' && eleventh.count === 10 && /^10 of this key's resumes wait their turn — ask again once one of them has started \(conversations status names it live\)$/.test(eleventh.why),
     `④ one key: two running, ten waiting — its eleventh waiting resume ⇒ ${eleventh.code} with the count ${eleventh.count}`, eleventh);
-  ok(other.ok && other.queued && other.position === 11, `④ …another key is not refused (its place ${other.position})`, other);
+  ok(!!other.ok && !!other.queued && other.position === 11, `④ …another key is not refused (its place ${other.position})`, other);
   await W.release();
 }
 {
@@ -238,7 +239,7 @@ console.log('— ④ THE LINE IN THE VERB');
   await tick(2);
   await W.release();
   const [ra, rb] = await Promise.all([a, b]);
-  ok(ra.ok && rb.ok && ra.sessionId === rb.sessionId && W.creates.length === 1, `④ the same conversation asked by two keys at once ⇒ ONE create, both answered with ${ra.sessionId}`, { ra, rb });
+  ok(!!ra.ok && !!rb.ok && ra.sessionId === rb.sessionId && W.creates.length === 1, `④ the same conversation asked by two keys at once ⇒ ONE create, both answered with ${ra.sessionId}`, { ra, rb });
 }
 {
   // the stand-in answers resume-already-live naming the person's session (its backendSessionId the conversation's, as ws-create finds it)
@@ -249,7 +250,7 @@ console.log('— ④ THE LINE IN THE VERB');
   P.activeSessions.set('sess-person', { backend: 'claude', backendSessionId: 'k-3', clients: new Map() });   // the person's press won the race
   await P.release();
   const pr = await pending;
-  ok(pr.ok && pr.already === true && pr.sessionId === 'sess-person' && P.creates.length === 1, '④ a person\'s Resume racing the verb ⇒ ONE session: the verb answers `already` with the person\'s', pr);
+  ok(!!pr.ok && pr.already === true && pr.sessionId === 'sess-person' && P.creates.length === 1, '④ a person\'s Resume racing the verb ⇒ ONE session: the verb answers `already` with the person\'s', pr);
 }
 {
   const W = world({ facts: { 'claude:e-1': CHAT }, answer: 'error' });
@@ -264,14 +265,14 @@ console.log('— ④ THE LINE IN THE VERB');
   W.endedOne('claude:b-1');
   const r = await W.resume('claude:b-1');
   await tick(5);
-  ok(r.ok && r.queued === true && r.position === 1 && W.creates.length === 0, '④ before the boot ADOPTED the live sessions the line starts nothing (queued, place 1, no create)', r);
+  ok(!!r.ok && r.queued === true && r.position === 1 && W.creates.length === 0, '④ before the boot ADOPTED the live sessions the line starts nothing (queued, place 1, no create)', r);
   adopted();
   await tick(10);
   ok(W.creates.length === 1 && [...W.activeSessions.values()].some((s) => s.backendSessionId === 'b-1'), '④ …the boot adopted them ⇒ the waiting resume starts');
   const C = world({ facts: { 'claude:b-2': CHAT } });
   C.endedOne('claude:b-2');
   const rc = await C.resume('claude:b-2');
-  ok(rc.ok && !rc.queued && C.creates.length === 1, '④ CONTROL: with no boot gate the same resume starts at once');
+  ok(!!rc.ok && !rc.queued && C.creates.length === 1, '④ CONTROL: with no boot gate the same resume starts at once');
 }
 
 {
@@ -279,7 +280,7 @@ console.log('— ④ THE LINE IN THE VERB');
   const W = world({ facts: { 'claude:d-1': CHAT }, layouts: { desktopMeta: [{ id: 'desk-2', name: 'Desk 2' }], desktops: { 'desk-2': { autoSave: { windows: [{ winId: 'e-1', type: 'chat', backend: 'claude', backendSessionId: 'd-1' }] } } } } });
   W.endedOne('claude:d-1');
   const r = await W.resume('claude:d-1');
-  ok(r.ok && r.desktop && r.desktop.id === 'desk-2' && r.desktop.name === 'Desk 2', '④ the answer names the desktop of the conversation\'s row ({id, name}); with no row it is null (①)', r.desktop);
+  ok(!!r.ok && !!r.desktop && r.desktop.id === 'desk-2' && r.desktop.name === 'Desk 2', '④ the answer names the desktop of the conversation\'s row ({id, name}); with no row it is null (①)', r.desktop);
 }
 
 console.log('— ⑤ THE KEPT-RECORD FACTS');
@@ -349,9 +350,9 @@ console.log('— ⑦ THE RECORD OF THE LAST END, READ (a real boot-restore; the 
   E.ended('codex', 'thr-g', { goalStated: false, goalStatus: null, queueRead: true, queueCount: 0 });
   E.ended('claude', 'c0de0000-0000-4000-8000-0000000000c1', { goalStated: false, goalStatus: null, queueRead: false, queueCount: null });
   const ka = await E.kept('codex:thr-a');
-  ok(ka && ka.meta.stopReason === 'ended' && ka.meta.endFacts.queueRead === true, '⑦ an end\'s record in the contract\'s shape is read back through boot-restore\'s own reader (keptRecordOf)', ka && ka.meta);
+  ok(!!ka && ka.meta.stopReason === 'ended' && ka.meta.endFacts.queueRead === true, '⑦ an end\'s record in the contract\'s shape is read back through boot-restore\'s own reader (keptRecordOf)', ka && ka.meta);
   const ra = await E.resume('codex:thr-a');
-  ok(ra.ok && E.creates.length === 1 && E.creates[0].resumeId === 'thr-a', '⑦ codex whose end STATED no goal and a queue READ empty: resumed', ra);
+  ok(!!ra.ok && E.creates.length === 1 && E.creates[0].resumeId === 'thr-a', '⑦ codex whose end STATED no goal and a queue READ empty: resumed', ra);
   const rb = await E.resume('codex:thr-b');
   ok(!rb.ok && rb.code === 'goal_active', '⑦ codex whose end stated an ACTIVE goal: refused goal_active', rb);
   const rc = await E.resume('claude:c0de0000-0000-4000-8000-00000000000c');
@@ -363,7 +364,7 @@ console.log('— ⑦ THE RECORD OF THE LAST END, READ (a real boot-restore; the 
   const rg = await E.resume('codex:thr-g');
   ok(!rg.ok && rg.code === 'goal_unknown', '⑦ codex whose end did not state its goal: refused goal_unknown', rg);
   const rcl = await E.resume('claude:c0de0000-0000-4000-8000-0000000000c1');
-  ok(rcl.ok, '⑦ claude (read to start nothing on a resume) with neither its goal nor its queue stated: resumed — an unread queue refuses only a row that runs one by itself', rcl);
+  ok(!!rcl.ok, '⑦ claude (read to start nothing on a resume) with neither its goal nor its queue stated: resumed — an unread queue refuses only a row that runs one by itself', rcl);
   // THE ONE SHARED LEG (主开发 15:19Z — the same bytes in piece 3's suite): a sidecar holding a goal and NO status, through piece 3's
   // REAL writer (boot-restore endFactsBefore + keepEnded) ⇒ the record's goalStatus says active ⇒ the verdict refuses on codex
   {
@@ -380,7 +381,7 @@ console.log('— ⑦ THE RECORD OF THE LAST END, READ (a real boot-restore; the 
     const rec = await br.keptRecordOf('codex:thr-shared');
     const F = RL.keptFacts(rec, null);
     const v = require(path.join(REPO, 'src/resume-line.js')).resumeVerdict({ ...F, archived: false }, harnessRowOf(capsOf('codex')));
-    ok(facts.goalStated === true && rec && rec.meta.endFacts.goalStatus === 'active' && F.goal === 'active' && !v.ok && v.code === 'goal_active',
+    ok(facts.goalStated === true && !!rec && rec.meta.endFacts.goalStatus === 'active' && F.goal === 'active' && !v.ok && v.code === 'goal_active',
       '⑦ THE SHARED LEG: a sidecar holding a goal and no status ⇒ piece 3\'s writer keeps goalStatus active ⇒ this reader reads ACTIVE ⇒ refused goal_active on codex', { facts, endFacts: rec && rec.meta.endFacts, F: F.goal, v });
   }
   // a RESTART's record: the wrapper's sidecar states its queue only with the read's mark (queueReadAt)
@@ -388,7 +389,7 @@ console.log('— ⑦ THE RECORD OF THE LAST END, READ (a real boot-restore; the 
   R.restarted('codex', 'thr-r1', { mode: 'chat', goal: null, goalStatus: null, queue: [] });
   R.restarted('codex', 'thr-r2', { mode: 'chat', goal: null, goalStatus: null, queue: [], queueReadAt: 1793499999000 });
   const r1 = await R.resume('codex:thr-r1'), r2 = await R.resume('codex:thr-r2');
-  ok(!r1.ok && r1.code === 'queue_unknown' && r2.ok, '⑦ a restart\'s record: a sidecar whose empty queue was never READ ⇒ queue_unknown; with the wrapper\'s read mark (queueReadAt) ⇒ resumed', { r1, r2 });
+  ok(!r1.ok && r1.code === 'queue_unknown' && !!r2.ok, '⑦ a restart\'s record: a sidecar whose empty queue was never READ ⇒ queue_unknown; with the wrapper\'s read mark (queueReadAt) ⇒ resumed', { r1, r2 });
 }
 
 console.log('— ⑧ THE NEW-HARNESS CHECKLIST ASKS FOR THE ROW');
@@ -425,7 +426,7 @@ console.log('— ⑥ THE WIRING');
     && /router\.readLayouts = \(\) => readLayouts\(\);/.test(fs.readFileSync(path.join(REPO, 'src/routes/persistence.js'), 'utf8')), 'the answer\'s desktop reads the hub\'s layouts (the persistence router\'s reader, read only; the desktops held ⇒ no desktop named — B-225b)');
   const K = require(path.join(REPO, 'src/automation-keys.js'));
   const row = (K.SCOPES || []).find((x) => x && (x.verb === 'conversations.resume' || x.id === 'conversations.resume')) || (K.SCOPES && K.SCOPES['conversations.resume']);
-  ok(row && row.billed === false, 'the scope row: conversations.resume, not billed', row);
+  ok(!!row && row.billed === false, 'the scope row: conversations.resume, not billed', row);
   const ops = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
   const body = ops.slice(ops.indexOf("'conversations.resume': async"), ops.indexOf("'groups.invite': async"));
   const ir = fs.readFileSync(path.join(REPO, 'src/server/inbox-reopen.js'), 'utf8');
@@ -440,5 +441,5 @@ console.log('— ⑥ THE WIRING');
   ok(body.length > 200 && !/spendGuard|authorize\(|noteSpend/.test(body) && /await open\(spec\.data, \{ kind: 'human'/.test(ir), 'no spend in the verb\'s road: the handler asks no guard, the reopen opens as a person\'s create (no spend reason added)');
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+console.log(`\n${counts.pass} passed, ${counts.fail} failed`);
+process.exit(counts.fail ? 1 : 0);

@@ -19,9 +19,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO, J, tick, S, CID, DOC, hub, loadHandler, pageOn, loadLifecycle, files, chat } from './layout-dup-world.mjs';
+import { checker } from './lib/check.mjs';
 
-let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + J(extra).slice(0, 1500) : '')); } return !!c; };
+const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const NEW = 'sess-77-52000';   // the session the resume made (its conversation is CID — the ended window's)
 const OTHER = { id: 'sess-1-1', backend: 'claude', backendSessionId: 'c0de0000-0000-4000-8000-000000000001', name: 'other', cwd: '/srv/o', mode: 'chat' };
@@ -57,8 +57,8 @@ console.log('— ① page B holds the ENDED window: it turns live in its row, qu
   const n0 = B.app._followResumed([OTHER]);   // the page's first list: its baseline
   const n1 = B.app._followResumed([OTHER, RUNNING]);   // the conversation now runs (resumed by a key, not on this page)
   const after = B.wins.get('win-v-s'), view = B.app.sessions.get('win-v-s');
-  ok(n0 === 0 && n1 === 1 && after && after._openSpec.serverId === NEW && after._openSpec.backendSessionId === CID, `① the list shows it running ⇒ ITS window turned live in its row (win-v-s now shows ${after && after._openSpec.serverId})`, { n0, n1, spec: after && after._openSpec });
-  ok(after && after._desktopId === 'desk-v' && J(after.gridBounds) === box && B.dm.activeDesktopId === desk, '① …the same id, box and desktop; the page did not switch desktops', { desk: after && after._desktopId, box: after && after.gridBounds, was: box });
+  ok(n0 === 0 && n1 === 1 && !!after && after._openSpec.serverId === NEW && after._openSpec.backendSessionId === CID, `① the list shows it running ⇒ ITS window turned live in its row (win-v-s now shows ${after && after._openSpec.serverId})`, { n0, n1, spec: after && after._openSpec });
+  ok(!!after && after._desktopId === 'desk-v' && J(after.gridBounds) === box && B.dm.activeDesktopId === desk, '① …the same id, box and desktop; the page did not switch desktops', { desk: after && after._desktopId, box: after && after.gridBounds, was: box });
   ok(B.made.length === 1 && B.made[0].id === 'win-v-s' && B.made[0].quiet === true && B.focus.length === 0, '① …drawn QUIET (createWindow asked quiet), never focused', { made: B.made, focus: B.focus });
   ok(ofConv(B).length === 1 && !(view && view._readOnly), `① one window of the conversation (${ofConv(B).length}), no longer read-only`);
   await tick(900);
@@ -75,7 +75,7 @@ console.log('— ① page B holds the ENDED window: it turns live in its row, qu
   const C = page(await loadLifecycle(off));
   C.app._followResumed([OTHER]); C.app._followResumed([OTHER, RUNNING]);
   const cw = C.wins.get('win-v-s');
-  ok(cw && cw._readOnly === true && cw._openSpec.serverId === S && C.made.length === 0, '① RED CONTROL: the follow off — the window stays read-only on the ended session', cw && { ro: cw._readOnly, sid: cw._openSpec.serverId });
+  ok(!!cw && cw._readOnly === true && cw._openSpec.serverId === S && C.made.length === 0, '① RED CONTROL: the follow off — the window stays read-only on the ended session', cw && { ro: cw._readOnly, sid: cw._openSpec.serverId });
 }
 
 console.log('— ② page A on another desktop with no row of it');
@@ -122,7 +122,7 @@ console.log('— ⑥ THE FOLLOW IS QUIET');
   B.app._followResumed([OTHER]); B.app._followResumed([OTHER, RUNNING]);
   const w = B.wins.get('win-v-s');
   ok(B.app.wm.activeWindowId === 'v-1' && B.focus.length === 0, '⑥ the active window STAYS the active one (v-1), nothing focused', { active: B.app.wm.activeWindowId, focus: B.focus });
-  ok(w && Number(w.element.style.zIndex) === 105 && Number(B.wins.get('v-1').element.style.zIndex) > Number(w.element.style.zIndex), '⑥ the stacking is CARRIED: the followed row keeps its place under the window the person works in (never raised)', { row: w && w.element.style.zIndex, top: B.wins.get('v-1').element.style.zIndex });
+  ok(!!w && Number(w.element.style.zIndex) === 105 && Number(B.wins.get('v-1').element.style.zIndex) > Number(w.element.style.zIndex), '⑥ the stacking is CARRIED: the followed row keeps its place under the window the person works in (never raised)', { row: w && w.element.style.zIndex, top: B.wins.get('v-1').element.style.zIndex });
   ok(B.sidebarClosed === 0, '⑥ a phone\'s open sidebar stays (a quiet attach closes nothing)', B.sidebarClosed);
   const src = read('src/lib/session-lifecycle.js'), noZ = src.replace("{ endedOnly: true, carryZ: true }", "{ endedOnly: true, carryZ: false }");
   ok(noZ !== src, '⑥ (the carry-off patch applied)');
@@ -142,7 +142,7 @@ console.log('— ⑥ THE FOLLOW IS QUIET');
   const L = page(await loadLifecycle(loud));
   L.app.wm.activeWindowId = 'win-v-s';
   L.app._followResumed([OTHER]); L.app._followResumed([OTHER, RUNNING]);
-  ok(L.made[0] && L.made[0].quiet === false && L.sidebarClosed === 1, '⑥ RED CONTROL: the old shape (quiet turned off for the active row) — a phone\'s open sidebar closes under the finger', { made: L.made, sidebar: L.sidebarClosed });
+  ok(!!(L.made[0]) && L.made[0].quiet === false && L.sidebarClosed === 1, '⑥ RED CONTROL: the old shape (quiet turned off for the active row) — a phone\'s open sidebar closes under the finger', { made: L.made, sidebar: L.sidebarClosed });
   const sl = read('src/lib/session-lifecycle.js');
   const att = sl.slice(sl.indexOf('  attachSession(serverId, name, cwd, {'), sl.indexOf('  attachTmuxSession('));
   // B-c87d: the late focus goes through THE door with its window and the open's start (renewed when a pending attach is raised — round
@@ -159,5 +159,5 @@ console.log('— ⑤ the wiring');
     'the For-you reply\'s reopen and the follow share ONE row loop (_reopenRowOf) — not a copy');
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+console.log(`\n${counts.pass} passed, ${counts.fail} failed`);
+process.exit(counts.fail ? 1 : 0);

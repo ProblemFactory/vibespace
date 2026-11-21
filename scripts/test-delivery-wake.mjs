@@ -20,11 +20,12 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';   // a control whose anchor moved throws «ANCHOR GONE» by its name (test-suite-files-parse §3)
+import { checker } from './lib/check.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+
+const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
 const D = require(path.join(REPO, 'src/delivery-wake.js'));
 const SRC = fs.readFileSync(path.join(REPO, 'src/delivery-wake.js'), 'utf8');
 const M = mutantCopies('delivery-wake', REPO);
@@ -63,10 +64,10 @@ console.log('①b how it ended decides (the owner\'s narrowed rule; the grant on
   ok(restart.kind === 'restart' && older.kind === 'restart' && person.kind === 'person' && agent.kind === 'agent' && agent.name === 'coordinator' && none.kind === 'unknown' && other.kind === 'unknown',
     'the kept record says how it ended — by the reason\'s VALUE (a record without one is a restart\'s: boot-restore\'s default); who ended it is piece 3\'s field', { restart, older, person, agent, none, other });
   const r1 = D.endedRule(restart, plain), r2 = D.endedRule(person, plain), r3 = D.endedRule(person, granted), r4 = D.endedRule(agent, plain), r4b = D.endedRule(agent, granted), r5 = D.endedRule(none, granted), r6 = D.endedRule(person, [{ gid: 'g-1', granted: true }]);
-  ok(r1.ok && r1.rule === 'restart', 'rule 1: a conversation a RESTART ended is resumed by its delivery — no grant needed', r1);
+  ok(!!r1.ok && r1.rule === 'restart', 'rule 1: a conversation a RESTART ended is resumed by its delivery — no grant needed', r1);
   ok(!r2.ok && r2.code === 'ended_on_purpose' && /a person/.test(r2.why), 'rule 2: a schedule WITHOUT the grant at a PERSON-ended conversation WAITS — said with who ended it', r2);
-  ok(r3.ok && r3.rule === 'granted' && r3.jobs[0] === 'jb-nightly', '…the same schedule WITH the grant resumes it — and names the granting job', r3);
-  ok(!r4.ok && /coordinator/.test(r4.why) && r4b.ok && r4b.rule === 'granted', 'an AGENT-ended conversation: its job WITHOUT the grant waits (the agent named), WITH it resumes — a person\'s end and an agent\'s alike', { r4, r4b });
+  ok(!!r3.ok && r3.rule === 'granted' && r3.jobs[0] === 'jb-nightly', '…the same schedule WITH the grant resumes it — and names the granting job', r3);
+  ok(!r4.ok && /coordinator/.test(r4.why) && !!r4b.ok && r4b.rule === 'granted', 'an AGENT-ended conversation: its job WITHOUT the grant waits (the agent named), WITH it resumes — a person\'s end and an agent\'s alike', { r4, r4b });
   ok(!r5.ok && r5.code === 'ended_unknown' && !r6.ok, 'no record waits even for a granted job (unknown is not a restart); a PEER\'s wake never resumes an on-purpose end', { r5, r6 });
   const swapped = anchored(SRC, "if (h.kind === 'restart') return { ok: true, rule: 'restart', jobs: [] };", "if (h.kind === 'restart' || h.kind === 'person') return { ok: true, rule: 'restart', jobs: [] };", 'restart-road-for-person');
   const m = swapped !== SRC ? require(M.write('src/delivery-wake.js', swapped, 'restart-road-for-person')) : null;
@@ -152,6 +153,6 @@ console.log('⑤ no new spend reason');
   ok(D.WAKE_REASONS.length === 2 && D.WAKE_REASONS.every((r) => known.has(r)), `every reason a wake passes under is the producer's own, already known to the spend authorizer (${D.WAKE_REASONS.join(', ')})`, [...known].slice(0, 20));
 }
 
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: 'copies ' })) ok(r.pass, r.name, r.detail);
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: 'copies ' })) ok(!!r.pass, r.name, r.detail);
+console.log(`\n${counts.pass} passed, ${counts.fail} failed`);
+process.exit(counts.fail ? 1 : 0);

@@ -15,12 +15,13 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';   // a red control's edit fails BY NAME when its anchor moves (RULES: a new red control is anchored)
+import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CF = require(path.join(REPO, 'src/conversation-facts.js'));
-let pass = 0, fail = 0;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
 
 /** A row with every verdict fact known and nothing busy. */
 const IDLE = Object.freeze({ state: 'running', turn: 'idle', background: [], heldPrompts: 0, asks: 0, goal: 'none', continue: { armed: false },
@@ -64,13 +65,13 @@ function unknownLegs(M) {
   ok(bad.length === 0, `the ten reasons, each ALONE, refuse with its own code (${each.length} rows)`, bad.map(([n, v]) => [n, codes(v)]));
   ok(CF.REASONS.length === 10 && each.every(([, , c]) => CF.REASONS.includes(c)), 'REASONS is the design\'s ten, and every code above is one of them', CF.REASONS);
   const wake = CF.endVerdict({ ...IDLE, jobs: { running: 1, schedules: 2, items: [{ id: 'j1', kind: 'job', wakeGrant: true }, { id: 'j2', kind: 'schedule', wakeGrant: true }, { id: 'j3', kind: 'schedule', wakeGrant: true }] } });
-  ok(wake.endable, 'every job and schedule it owns carries the person\'s wake grant: the job reason does not hold (the owner\'s rule, 2026-11-17)', wake);
-  ok(CF.endVerdict({ ...IDLE, browser: { id: 'b', drivenBy: null, viewers: 0, personBrowsing: false } }).endable, 'an idle browser nobody uses is not busy');
+  ok(!!wake.endable, 'every job and schedule it owns carries the person\'s wake grant: the job reason does not hold (the owner\'s rule, 2026-11-17)', wake);
+  ok(!!(CF.endVerdict({ ...IDLE, browser: { id: 'b', drivenBy: null, viewers: 0, personBrowsing: false } }).endable), 'an idle browser nobody uses is not busy');
   const all = CF.endVerdict({ ...IDLE, turn: 'running', background: [{ id: 'a' }], heldPrompts: 1 });
   ok(codes(all).join() === 'turn,background,held', 'several reasons at once are each named, in the design\'s order', codes(all));
-  ok(CF.endVerdict({ ...IDLE, state: 'ended', turn: null, background: null }).endable, 'an ended row has nothing left to stop (endable, busy empty)');
+  ok(!!(CF.endVerdict({ ...IDLE, state: 'ended', turn: null, background: null }).endable), 'an ended row has nothing left to stop (endable, busy empty)');
   const legs = unknownLegs(CF);
-  for (const l of legs) ok(l.good, `UNKNOWN IS BUSY — ${l.name} ⇒ its own <reason>_unknown with the reason sentence`, l.got);
+  for (const l of legs) ok(!!l.good, `UNKNOWN IS BUSY — ${l.name} ⇒ its own <reason>_unknown with the reason sentence`, l.got);
 }
 {
   const noIdle = CF.VERDICT_FIELDS.filter((f) => /idle|mem|age|rss|pss|bytes/i.test(f));
@@ -93,7 +94,7 @@ function unknownLegs(M) {
   const term = CF.shapeRow({ key: 'claude:t', mode: 'terminal', turn: null, turnWhy: CF.WHY.terminal });
   ok(CF.cellOf(term, 'turn') === `unknown (${CF.WHY.terminal})` && !/idle/.test(CF.cellOf(term, 'turn')) && term.busy[0].code === 'turn_unknown', 'a terminal row prints «unknown (a terminal conversation publishes no turn)» — never «idle»', CF.cellOf(term, 'turn'));
   const ended = CF.shapeRow({ key: 'claude:e', state: 'ended' });
-  ok(ended.ended === null && ended.endedWhy === CF.WHY.noRecord && ended.turnWhy === CF.WHY.notLive && ended.endable, 'an ended row with no kept record says «no record kept»; its live facts say it is not running', ended);
+  ok(ended.ended === null && ended.endedWhy === CF.WHY.noRecord && ended.turnWhy === CF.WHY.notLive && !!ended.endable, 'an ended row with no kept record says «no record kept»; its live facts say it is not running', ended);
   const ref = CF.refusalOf(CF.endVerdict({ ...IDLE, background: [{ id: 'a' }, { id: 'b' }] }));
   ok(ref.ok === false && ref.code === 'subject_busy' && ref.why === 'not ended — 2 background tasks are running. Nothing was stopped. A person can terminate it from its card in the sidebar (Terminate in its menu).', 'the refusal says why, that nothing was stopped, and names the person\'s door (the design\'s sentence)', ref.why);
 }
@@ -131,7 +132,7 @@ function unknownLegs(M) {
   ok(wake.ch[1] === true && wake.ch[2] === false && wake.st.wake === true && wake.t.timersWhy === CF.WHY.timerSet, 'a fired wakeup the record states: the one-way mark (it never clears)');
   // the sidecar round trip, an older shape, an adopted process, the boot's pid rule
   const back = CF.factsFromSidecar(JSON.parse(JSON.stringify(wake.st)));
-  ok(back && back.cli === '2.1.312' && back.wake === true && back.fromStart === true && Array.isArray(back.tools), 'the sidecar copy reads back as the same observations', back);
+  ok(!!back && back.cli === '2.1.312' && back.wake === true && back.fromStart === true && Array.isArray(back.tools), 'the sidecar copy reads back as the same observations', back);
   ok(CF.factsFromSidecar(undefined) === null && CF.factsFromSidecar({ v: 1, fromStart: true, bg: [] }) === null, 'a sidecar with no observations, or the older shape, reads as null — never guessed');
   const adopted = CF.trackedFacts(CF.factsAdopted(), K);
   ok(adopted.background === null && adopted.backgroundWhy === CF.WHY.oldWrapper && adopted.timersWhy === CF.WHY.oldWrapper, 'an adopted conversation whose wrapper kept none: «its wrapper is older than this record; it learns at its next start»', adopted);
@@ -197,9 +198,9 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   const sessions = new Map([['sess-1', A], ['sess-2', T]]);
   const r = await COL.create({ activeSessions: sessions, keyOf: (s) => keys.get(s), ...known }).list();
   const a = r.conversations.find((c) => c.key === KEY_A), t = r.conversations.find((c) => c.key === KEY_T);
-  ok(a && a.endable && a.busy.length === 0 && Array.isArray(a.background) && a.timers === 'none-seen' && a.idleSince === 1794880000000 && a.memBytes === 2e9 && a.link === 'vibespace://conversation/' + KEY_A && a.desktop.link === 'vibespace://desktop/d1',
+  ok(!!a && !!a.endable && a.busy.length === 0 && Array.isArray(a.background) && a.timers === 'none-seen' && a.idleSince === 1794880000000 && a.memBytes === 2e9 && a.link === 'vibespace://conversation/' + KEY_A && a.desktop.link === 'vibespace://desktop/d1',
     'every fact KNOWN: an idle chat row is endable — its set, timers, idle age (the wrapper\'s record time), memory, desktop and ready link', a);
-  ok(t && !t.endable && t.turn === null && t.turnWhy === CF.WHY.terminal && t.backgroundWhy === CF.WHY.terminalNone && t.busy.some((b) => b.code === 'turn_unknown'), 'a terminal row: turn and its facts unknown with their reasons, busy — never «idle»', t && { turn: t.turnWhy, busy: t.busy.map((b) => b.code) });
+  ok(!!t && !t.endable && t.turn === null && t.turnWhy === CF.WHY.terminal && t.backgroundWhy === CF.WHY.terminalNone && t.busy.some((b) => b.code === 'turn_unknown'), 'a terminal row: turn and its facts unknown with their reasons, busy — never «idle»', t && { turn: t.turnWhy, busy: t.busy.map((b) => b.code) });
   ok(r.machine.memTotal === 64e9 && r.desktops[0].link === 'vibespace://desktop/d1' && r.pass.ranOut === false, 'the machine\'s memory and the desktops (with their links) ride the same snapshot', r.machine);
   // every fact × unknown: each source answers nothing, or throws
   for (const [label, over] of [['answers nothing', Object.fromEntries(Object.keys(known).map((k) => [k, () => undefined]))], ['throws', Object.fromEntries(Object.keys(known).map((k) => [k, () => { throw new Error('boom'); }]))]]) {
@@ -207,7 +208,7 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
     const row = r2.conversations[0];
     const blank = CF.ROW_FACTS.filter((f) => row[f] === null && !row[f + 'Why']);
     const unk = ['heldPrompts', 'asks', 'goal', 'continue', 'jobs', 'handover'].filter((f) => row[f] !== null);
-    ok(row && !row.endable && blank.length === 0 && unk.length === 0 && row.browser && row.browser.known === false, `every source ${label}: each fact unknown WITH a reason (never blank, never 0), the row busy — the builder never throws`, { blank, unk, busy: row && row.busy.map((b) => b.code) });
+    ok(!!row && !row.endable && blank.length === 0 && unk.length === 0 && !!row.browser && row.browser.known === false, `every source ${label}: each fact unknown WITH a reason (never blank, never 0), the row busy — the builder never throws`, { blank, unk, busy: row && row.busy.map((b) => b.code) });
   }
 }
 {
@@ -225,7 +226,7 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   const ms = Date.now() - t0;
   const after = second.conversations.filter((c) => ['S2', 'S3', 'S4', 'S5'].includes(c.name));
   console.log(`  · (evidence, not a bound: the pass with a tree that never answers returned after ${ms} ms; its time-out is 400 ms)`);
-  ok(second.pass.ranOut && after.every((c) => c.memBytes === null && c.memBytesWhy === CF.WHY.timedOut), 'a tree that never answers: the pass ENDS at its time-out (list() resolves — a pass that waited would never return) and every row it did not finish says «' + CF.WHY.timedOut + '» — not the first pass\'s numbers', after.map((c) => [c.name, c.memBytes]));
+  ok(!!second.pass.ranOut && after.every((c) => c.memBytes === null && c.memBytesWhy === CF.WHY.timedOut), 'a tree that never answers: the pass ENDS at its time-out (list() resolves — a pass that waited would never return) and every row it did not finish says «' + CF.WHY.timedOut + '» — not the first pass\'s numbers', after.map((c) => [c.name, c.memBytes]));
   ok(second.conversations.filter((c) => ['S0', 'S1'].includes(c.name)).every((c) => Number.isFinite(c.memBytes)), 'the rows it finished before the slow one keep what it measured this time');
   slow = false;
   let calls = 0;
@@ -251,7 +252,7 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   const io = idleOld.conversations[0];
   let sig = null;
   const hung = await COL.create({ activeSessions: new Map([['sess-1', { backend: 'claude', mode: 'chat', name: 'Old', _convFacts: CF.factsAdopted() }]]), keyOf: () => KEY_A, ...known, passMs: 300, agesOf: (entries, signal) => { sig = signal; return new Promise(() => {}); } }).list();
-  ok(hung.pass.ranOut && hung.conversations[0].idleSince === null && hung.conversations[0].idleSinceWhy === CF.WHY.timedOut && sig && sig.cancelled === true, 'an age pass that never answers: ended at the time-out, its signal CANCELLED (the walk stops), the idle age «ran out of time»', { why: hung.conversations[0].idleSinceWhy, cancelled: sig && sig.cancelled });
+  ok(!!hung.pass.ranOut && hung.conversations[0].idleSince === null && hung.conversations[0].idleSinceWhy === CF.WHY.timedOut && !!sig && sig.cancelled === true, 'an age pass that never answers: ended at the time-out, its signal CANCELLED (the walk stops), the idle age «ran out of time»', { why: hung.conversations[0].idleSinceWhy, cancelled: sig && sig.cancelled });
   ok(io.idleSince === 1794870000000 && io.idleSinceSource === 'output file' && io.backgroundWhy === CF.WHY.oldWrapper && !io.endable, 'an OLDER wrapper: its idle age from the output file\'s own time (the pass); its set and timers «its wrapper is older than this record» — busy', { idle: io.idleSince, bg: io.backgroundWhy });
 }
 {
@@ -274,7 +275,7 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   ok(S.goalOf(s) === 'active' && S.goalOf({ _goal: 'x', _goalStatus: 'complete' }) === 'none' && S.goalOf({ _goal: 'x' }) === undefined && S.goalOf({}) === 'none', 'goal: active · complete = none · a goal with no status = unknown · no goal = none');
   ok(S.asksOf(KEY_A).length === 1 && JSON.stringify(S.continueOf(s, 'sess-1')) === '{"armed":true,"resetsAt":5}' && S.handoverOf(s) === true, 'asks (its own, never a notice), the armed continue, a hand-over armed for the turn end');
   const b = S.browserOf(s, 'sess-1');
-  ok(b && b.drivenBy === 'person' && b.viewers === 0 && b.personBrowsing === false && CF.endVerdict({ ...IDLE, browser: b }).busy[0].code === 'browser', 'a browser the person took over: drivenBy person — busy (browser)', b);
+  ok(!!b && b.drivenBy === 'person' && b.viewers === 0 && b.personBrowsing === false && CF.endVerdict({ ...IDLE, browser: b }).busy[0].code === 'browser', 'a browser the person took over: drivenBy person — busy (browser)', b);
   ok(S.browserOf({}, 'x') === null && S.browsers().why === CF.WHY.notCollected, 'no browser key = no browser (a known answer); a keeper without its rows lists no browser — unknown, said');
   // lane browsers-stop (piece 6): the list's browsers ARE the keeper's rows — the id browsers.stop takes, holders as conversation keys
   const Sb = COL.sourcesFrom({ keeper: () => ({ stopRows: () => [{ id: 'bp-aa', kind: 'own', name: 'Research', memBytes: 5e8, lastCommandAt: 7, holders: [{ sessionId: 'sess-1' }] }, { id: 'bp-bb', kind: 'profile', name: 'Work', holders: [{ sessionId: 'sess-gone' }] }] }),
@@ -284,7 +285,7 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
     'the list\'s browsers come from the keeper\'s rows: each with the id browsers.stop takes, its kind, its holders as conversation keys (a holder not running here stays a mark no key matches)', bl);
   ok(JSON.stringify(S.desktopOf(KEY_A)) === '{"desktop":{"id":"d1","name":"Main"},"window":true}' && S.desktopOf(KEY_B).window === false && S.desktops().length === 1, 'the stored layout (in memory): its desktop and window; another conversation has no window; the stage is not a desktop');
   const S0 = COL.sourcesFrom({ persistenceRouter: { layoutsCached: () => null }, sysinfo: { history: () => [] } });
-  ok(S0.desktopOf(KEY_A).why && S0.desktops().why && (await S0.machineMem()).why === CF.WHY.measuring, 'no layout read since the boot, no memory sample yet: unknown with their reasons (never a guess)');
+  ok(!!(S0.desktopOf(KEY_A).why) && !!(S0.desktops().why) && (await S0.machineMem()).why === CF.WHY.measuring, 'no layout read since the boot, no memory sample yet: unknown with their reasons (never a guess)');
   ok(JSON.stringify(await S.machineMem()) === '{"memTotal":64000000000,"memAvailable":24000000000}' && (await S.memOf(s)) === 3e9 && JSON.stringify(await S.memOf({})) === JSON.stringify({ why: CF.WHY.noProcess }), 'the machine\'s memory from the sampler\'s last point; a tree\'s memory from its root pid; no pid = «no process found»');
   const ended = await S.endedRows();
   ok(ended.length === 1 && ended[0].key === 'claude:e2e00000-0000-4000-8000-0000000000d4' && ended[0].ended.by === 'restart', 'an ended conversation with a kept record: its key, and «ended by a restart»', ended);
@@ -306,7 +307,7 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   try { r = await COL.create({ activeSessions: new Map([['sess-1', fakeChat('A')]]), keyOf: () => KEY_A, ...known, ...(() => { const S = COL.sourcesFrom({ persistenceRouter: R }); return { prepare: S.prepare, desktopOf: S.desktopOf, desktops: S.desktops }; })() }).list(); }
   finally { fs.readFileSync = realSync; }
   const row = r.conversations[0];
-  ok(syncLayoutReads === 0 && r.desktops && r.desktops[0].name === 'Main' && row.desktop && row.desktop.id === 'd1' && row.window === true, 'after a restart with no page the list reads the layout itself — asynchronously (0 synchronous reads) — and knows the desktops and the window', { syncLayoutReads, desktops: r.desktops, row: row.desktop });
+  ok(syncLayoutReads === 0 && !!r.desktops && r.desktops[0].name === 'Main' && !!row.desktop && row.desktop.id === 'd1' && row.window === true, 'after a restart with no page the list reads the layout itself — asynchronously (0 synchronous reads) — and knows the desktops and the window', { syncLayoutReads, desktops: r.desktops, row: row.desktop });
   ok(R.layoutsCached() !== null && R.readLayouts() === R.layoutsCached(), 'it filled readLayouts\' own cache: the page\'s first read finds it there (no second read, no sync read)');
   const slow = await COL.create({ activeSessions: new Map([['sess-1', fakeChat('A')]]), keyOf: () => KEY_A, ...known, passMs: 200, ...(() => { const S = COL.sourcesFrom({ persistenceRouter: { layoutsCached: () => null, layoutsAsync: () => new Promise(() => {}) } }); return { prepare: S.prepare, desktopOf: S.desktopOf, desktops: S.desktops }; })() }).list();
   ok(slow.desktops === null && /still being read/.test(slow.desktopsWhy) && slow.conversations[0].window === null && /still being read/.test(slow.conversations[0].windowWhy), 'a layout read that runs out of time: desktops and window unknown, said so — the pass is not held', { why: slow.desktopsWhy, ms: slow.pass.ms });
@@ -339,10 +340,10 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   const verbs = OPS.automationVerbs({ activeSessions: sessions, listFacts });
   const caller = { conversationId: 'e2e00000-0000-4000-8000-0000000000ee', sessionKey: 'claude:e2e00000-0000-4000-8000-0000000000ee' };
   const opened = await verbs['conversations.list']({}, { caller, keyId: 'k1', reach: ({ conversationId }) => ({ ok: conversationId === 'e2e00000-0000-4000-8000-0000000000a1' }) });
-  ok(opened.ok && opened.conversations.length === 2 && opened.conversations.some((c) => c.key === KEY_A) && opened.conversations.find((c) => c.self)?.name === 'Me' && opened.beyondReach === 1,
+  ok(!!opened.ok && opened.conversations.length === 2 && opened.conversations.some((c) => c.key === KEY_A) && opened.conversations.find((c) => c.self)?.name === 'Me' && opened.beyondReach === 1,
     'reach «opened»: only what the key opened, plus the caller marked self; the rest only counted (beyondReach 1)', opened.conversations.map((c) => [c.name, !!c.self]));
   const all = await verbs['conversations.list']({}, { caller, keyId: 'k1', reach: () => ({ ok: true }) });
-  ok(all.ok && all.conversations.length === 3 && all.beyondReach === 0, 'the instance key lists all three');
+  ok(!!all.ok && all.conversations.length === 3 && all.beyondReach === 0, 'the instance key lists all three');
   const MUT = mutantCopies('conversation-facts-ops', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
   const NEEDLE = '        if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : beltRow(r)); else beyond++;';
@@ -352,7 +353,7 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   ok(leak.conversations.length === 3, 'CONTROL a handler without the reach filter hands an «opened» key all three — the leg above would be red', leak.conversations.length);
   const AK = require(path.join(REPO, 'src/automation-keys.js'));
   const row = AK.SCOPES.find((x) => x.verb === 'conversations.list');
-  ok(row && row.layer === 'read' && row.billed === false && row.args({}).ok && !row.args({ x: 1 }).ok, 'the closed table: conversations.list is a READ, not billed, and takes no argument');
+  ok(!!row && row.layer === 'read' && row.billed === false && !!(row.args({}).ok) && !row.args({ x: 1 }).ok, 'the closed table: conversations.list is a READ, not billed, and takes no argument');
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   ok(zh.includes(`"${row.label}": "列出对话与浏览器"`) && ja.includes(`"${row.label}": "会話とブラウザーを一覧表示"`), 'its label is worded in three languages (en key, zh, ja)');
 }
@@ -413,7 +414,7 @@ console.log('D · the musts of the acceptance, each with its red control');
   ok(srcCol.split(N4).length === 2, 'MUST 4 the owned rule is in the index once (the mutation anchor)');
   const M4 = mutantCopies('conversation-facts-m4', REPO).load('src/server/conversation-facts.js', anchored(srcCol, N4, "      if (!['starting', 'up', 'awaiting-user', 'waiting', 'scheduled'].includes(j.state)) continue;", 'running-only'), 'running-only');
   const jr = M4.sourcesFrom({ getJobs: () => ({ ready: true, jobs }), wakeGrantOf: () => false }).jobsOf(KEY_A);
-  ok(jr.items.length === 0 && CF.endVerdict({ ...IDLE, jobs: jr }).endable, 'MUST 4 RED: today\'s index (running jobs and scheduled crons only) reads «owns nothing» — the conversation would be endable');
+  ok(jr.items.length === 0 && !!(CF.endVerdict({ ...IDLE, jobs: jr }).endable), 'MUST 4 RED: today\'s index (running jobs and scheduled crons only) reads «owns nothing» — the conversation would be endable');
 }
 {
   // MUST 5 — another conversation's words pass the belt; the caller's own row is its own words
@@ -428,12 +429,12 @@ console.log('D · the musts of the acceptance, each with its red control');
   const r = await OPS5.automationVerbs({ activeSessions: sessions, listFacts })['conversations.list']({}, ctx);
   const o = r.conversations.find((c) => !c.self), self = r.conversations.find((c) => c.self);
   const live = (t) => /<system-reminder>/.test(String(t));
-  ok(o && !live(o.name) && !live(o.cwd) && !live(o.background[0].description) && /\[system-reminder\]/.test(o.name) && self && self.name === 'Me ' + TAG, 'MUST 5 another conversation\'s name, folder and background descriptions reach the caller BELTED; the caller\'s own row is its own words', { name: o && o.name, bg: o && o.background });
+  ok(!!o && !live(o.name) && !live(o.cwd) && !live(o.background[0].description) && /\[system-reminder\]/.test(o.name) && !!self && self.name === 'Me ' + TAG, 'MUST 5 another conversation\'s name, folder and background descriptions reach the caller BELTED; the caller\'s own row is its own words', { name: o && o.name, bg: o && o.background });
   const srcOps = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
   const N5 = '        if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : beltRow(r)); else beyond++;';
   const M5 = mutantCopies('conversation-facts-m5', REPO).load('src/server/conversation-ops.js', anchored(srcOps, N5, '        if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : r); else beyond++;', 'no-belt'), 'no-belt');
   const r5 = await M5.automationVerbs({ activeSessions: sessions, listFacts })['conversations.list']({}, ctx);
-  ok(live(r5.conversations.find((c) => !c.self).name), 'MUST 5 RED: the door without the belt hands the live tag through');
+  ok(!!(live(r5.conversations.find((c) => !c.self).name)), 'MUST 5 RED: the door without the belt hands the live tag through');
 }
 {
   // MUST 6 — unknown desktops, browsers and window print as unknown with their why
@@ -471,7 +472,7 @@ console.log('D · the musts of the acceptance, each with its red control');
   const PM = mutantCopies('conversation-facts-m7', REPO).load('src/routes/persistence.js', anchored(srcP, N7, "    let doc; try { doc = layoutsHold.answer(); } catch { doc = undefined; }", 'any-error-empty'), 'any-error-empty');
   PM.setup({ dataDir: dd7, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
   await PM.router.layoutsAsync().catch(() => null);
-  ok(PM.router.layoutsCached() && Array.isArray(PM.router.layoutsCached().customGrids), 'MUST 7 RED: today\'s read turns the error into the empty layout AND caches it (a page opened later would receive it)');
+  ok(!!(PM.router.layoutsCached()) && Array.isArray(PM.router.layoutsCached().customGrids), 'MUST 7 RED: today\'s read turns the error into the empty layout AND caches it (a page opened later would receive it)');
   fs.rmSync(dd7, { recursive: true, force: true });
   fresh();
 }
@@ -625,7 +626,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   const noRaw = CF.trackedFacts({ ...whole.st, bgRaw: null }, K);
   ok(noRaw.background === null && noRaw.backgroundWhy === CF.WHY.bgNoRaw, 'MUST 2 a set with no raw count beside it reads unknown, said');
   const back = CF.factsFromSidecar(JSON.parse(JSON.stringify(renamed.st)));
-  ok(back && back.bgRaw === 1 && back.bg[0].id === null && CF.trackedFacts(back, K).background === null, 'MUST 2 the sidecar round trip keeps the raw count and the id-less element — a restarted hub reads it unknown too', back);
+  ok(!!back && back.bgRaw === 1 && back.bg[0].id === null && CF.trackedFacts(back, K).background === null, 'MUST 2 the sidecar round trip keeps the raw count and the id-less element — a restarted hub reads it unknown too', back);
   const st2 = CF.factsFresh(); CF.factsStep(st2, init, 1); CF.factsStep(st2, bgc([{ task_id: 'a' }]), 2);
   ok(CF.factsStep(st2, bgc([{ task_id: 'a' }, 7]), 3) === true && st2.bgRaw === 2, 'MUST 2 a raw count that moved is a change the wrapper writes (the kept set alone did not move)');
   const tools = judge(CF, [init, ...Array.from({ length: 200 }, (_, i) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__srv__tool_' + i, input: {} }] } }))]);
@@ -640,7 +641,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   const oldSrc = (srcCF.slice(0, i0) + '  else if (st && Array.isArray(st.bg)) out.background = st.bg;\n' + srcCF.slice(i1 + J1.length)).replace(NB, OB);
   const m2 = mutantCopies('conversation-facts-r2-set', REPO).load('src/conversation-facts.js', oldSrc, 'round-one-set');
   const r2 = judge(m2, [init, bgc([{ id: 'b1', type: 'local_bash', description: 'a dev server' }])]);
-  ok(Array.isArray(r2.t.background) && r2.t.background.length === 0 && CF.endVerdict(row(r2.t)).endable, 'MUST 2 RED: round one\'s wrapper and judgment read the renamed key as «no background work» — endable while the work runs', r2.t);
+  ok(Array.isArray(r2.t.background) && r2.t.background.length === 0 && !!(CF.endVerdict(row(r2.t)).endable), 'MUST 2 RED: round one\'s wrapper and judgment read the renamed key as «no background work» — endable while the work runs', r2.t);
 }
 {
   // MUST 3 — owned = unverified, or down AND wanted up, or a state that is not terminal; a failed one is never owned
@@ -656,7 +657,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   ok(a.items.map((x) => x.id).join() === 'ws' && b.items.map((x) => x.id).join() === 'oc', 'MUST 3 a stopped cron and a parked service are NOT owned; a service waiting for its restart is; another conversation\'s job is ITS own', { a: a.items, b: b.items });
   const parkedOnly = new Map([...jobs].filter(([k]) => k === 'cs' || k === 'ps'));
   const jp = COL.sourcesFrom({ getJobs: () => ({ ready: true, jobs: parkedOnly }), wakeGrantOf: () => false }).jobsOf(KEY_A);
-  ok(jp.items.length === 0 && CF.endVerdict({ ...IDLE, jobs: jp }).endable, 'MUST 3 a conversation holding only a stopped cron and a parked service can be ended (neither runs again without a person)');
+  ok(jp.items.length === 0 && !!(CF.endVerdict({ ...IDLE, jobs: jp }).endable), 'MUST 3 a conversation holding only a stopped cron and a parked service can be ended (neither runs again without a person)');
   const srcCol = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
   const N3 = "  const ownedJob = (j) => j.state === 'unverified' || (j.state === 'down' ? j.desiredUp === true : !TERMINAL_STATES.has(j.state));";
   if (srcCol.split(N3).length !== 2) throw new Error('anchor missing: the owned rule');
@@ -673,7 +674,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   if (srcCol.split(NO).length !== 2) throw new Error('anchor missing: the owner-less count');
   const MO = mutantCopies('conversation-facts-r2-ownerless', REPO).load('src/server/conversation-facts.js', anchored(srcCol, NO, '      if (!cid) continue;', 'ownerless-skipped'), 'ownerless-skipped');
   const jo = MO.sourcesFrom({ getJobs: () => ({ ready: true, jobs: skel }), wakeGrantOf: () => false }).jobsOf(KEY_A);
-  ok(jo && jo.items && jo.items.length === 0 && CF.endVerdict({ ...IDLE, jobs: jo }).endable, 'RED: skipping the owner-less run reads a KNOWN zero — endable');
+  ok(!!jo && !!jo.items && jo.items.length === 0 && !!(CF.endVerdict({ ...IDLE, jobs: jo }).endable), 'RED: skipping the owner-less run reads a KNOWN zero — endable');
 }
 {
   // MUST 4 — the parse steps the observations only on a record the first-seen rule lets through: the REAL parse
@@ -801,7 +802,7 @@ console.log('F · the task records and the background asks: the wrapper records,
   // round three: an outcome ENDS only with a terminal status or none
   const running = judge(CF, [init, started('a4', 'local_agent'), set(), note('a4', 'running'), upd('a4', { status: 'pending' })]);
   const bare = judge(CF, [init, started('a5', 'local_agent'), set(), note('a5')]);
-  ok(running.t.background === null && Array.isArray(bare.t.background) && CF.TASK_ENDS('task_notification') && !CF.TASK_ENDS('task_notification:running') && !CF.TASK_ENDS('task_updated') && CF.TASK_ENDS('task_updated:killed'),
+  ok(running.t.background === null && Array.isArray(bare.t.background) && !!(CF.TASK_ENDS('task_notification')) && !CF.TASK_ENDS('task_notification:running') && !CF.TASK_ENDS('task_updated') && !!(CF.TASK_ENDS('task_updated:killed')),
     'round three: a task_notification or task_updated ends a task only with a terminal status — or a notification that states none; «running» / «pending» end nothing', { running: running.t, bare: bare.t });
   const fg = judge(CF, [init, started('b1', 'local_bash', false), note('b1', 'completed')]);
   ok(fg.st.bgStarted.length === 0 && Array.isArray(fg.t.background), 'a FOREGROUND task (is_backgrounded false) is no start and its records are not kept (86 of 107 starts in the tree\'s read were foreground)');
@@ -829,7 +830,7 @@ console.log('F · the task records and the background asks: the wrapper records,
   const v2old = JSON.parse(JSON.stringify(win.st)); delete v2old.bgStarted; delete v2old.bgAsk;
   const torn = JSON.parse(JSON.stringify(done.st)); torn.bgStarted.push(null);
   const tornSeen = JSON.parse(JSON.stringify(done.st)); tornSeen.bgStarted[0].seen = 'x';
-  ok(back && back.bgStarted.length === 1 && CF.trackedFacts(back, K).background === null && backAsk && backAsk.bgAsk.join() === 'Bash' && CF.factsFromSidecar(v2old) === null
+  ok(!!back && back.bgStarted.length === 1 && CF.trackedFacts(back, K).background === null && !!backAsk && backAsk.bgAsk.join() === 'Bash' && CF.factsFromSidecar(v2old) === null
     && CF.factsFromSidecar(torn).bgDropped === 1 && Array.isArray(CF.trackedFacts(CF.factsFromSidecar(torn), K).background) && CF.factsFromSidecar(tornSeen).bgDropped === 1 && CF.factsFromSidecar(tornSeen).bgStarted.length === 0,
     'the sidecar round trip keeps the tasks (their kinds nested) and the asks; a v2 sidecar without them reads as an older shape; an element that does not read back is COUNTED with those the bound let go (judged by the set alone), never dropped silently');
   // THE WRAPPER RECORDS, IT DOES NOT JUDGE: the step names none of the hub's tables
@@ -841,7 +842,7 @@ console.log('F · the task records and the background asks: the wrapper records,
   if (srcCF.split(NB).length !== 2) throw new Error('anchor missing: the subtraction');
   const mF = mutantCopies('conversation-facts-r2-tasks', REPO).load('src/conversation-facts.js', anchored(srcCF, NB, '', 'no-subtraction'), 'no-subtraction');
   const w2 = judge(mF, [init, started('a1', 'local_agent'), set('a1'), set()]);
-  ok(Array.isArray(w2.t.background) && w2.t.background.length === 0 && CF.endVerdict(row(w2.t)).endable, 'RED: without the hub\'s subtraction the omission window reads «no background work» — endable while the work runs');
+  ok(Array.isArray(w2.t.background) && w2.t.background.length === 0 && !!(CF.endVerdict(row(w2.t)).endable), 'RED: without the hub\'s subtraction the omission window reads «no background work» — endable while the work runs');
 }
 
 // ── G · ROUND THREE (主开发 2026-11-17 13:43Z) — the one bound, the measured kinds, the recovery's own skeletons, the smalls ─────────
@@ -912,7 +913,7 @@ console.log('G · round three: one bound for the tasks, the measured census repl
   const skel = new Map([['rec', { id: 'rec', kind: 'task', name: 'rec', state: 'unverified', note: RN, owner: {} }]]);
   const jp = COL.sourcesFrom({ getJobs: () => ({ ready: true, jobs: person }), wakeGrantOf: () => false }).jobsOf(KEY_B);
   const js = COL.sourcesFrom({ getJobs: () => ({ ready: true, jobs: skel }), wakeGrantOf: () => false }).jobsOf(KEY_B);
-  ok(jp && Array.isArray(jp.items) && jp.items.length === 0 && js && /recovered from the store with no owner/.test(js.why), 'MUST 3 a job a PERSON made that reads unverified after a restart leaves other conversations\' job facts known; the recovery\'s own skeleton (its mark) still makes them unknown', { person: jp, skeleton: js });
+  ok(!!jp && Array.isArray(jp.items) && jp.items.length === 0 && !!js && /recovered from the store with no owner/.test(js.why), 'MUST 3 a job a PERSON made that reads unverified after a restart leaves other conversations\' job facts known; the recovery\'s own skeleton (its mark) still makes them unknown', { person: jp, skeleton: js });
   const srcCol = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
   const NS = '      if (!cid) { if (isSkeleton(j)) by.ownerless++; continue; }';
   if (srcCol.split(NS).length !== 2) throw new Error('anchor missing: the skeleton count');
@@ -933,7 +934,7 @@ console.log('G · round three: one bound for the tasks, the measured census repl
     return { patch: a.bgStarted.length === 1, outcome: ((b.bgStarted[0] || {}).seen || []).includes('task_notification:completed'), ask: c.bgAsk.length === 1, first: first === true };
   };
   const real = stepLegs(CF);
-  ok(real.patch && real.outcome && real.ask && real.first, 'the step: a start read from a later record\'s patch, the outcome captured in its task, the generic ask look (any key that says background), a first start is a change (written)', real);
+  ok(!!real.patch && !!real.outcome && !!real.ask && !!real.first, 'the step: a start read from a later record\'s patch, the outcome captured in its task, the generic ask look (any key that says background), a first start is a change (written)', real);
   const reds = {
     patch: stepLegs(mut('    if (!t && (bgKeyOn(rec) || bgKeyOn(rec.patch))) {', '    if (!t && (bgKeyOn(rec))) {', 'no-patch-start')).patch,
     outcome: stepLegs(mut('        if (t.seen.length < SEEN_MAX) { t.seen.push(kind); changed = true; }', '        if (false) { t.seen.push(kind); changed = true; }', 'no-outcome')).outcome,
@@ -944,5 +945,5 @@ console.log('G · round three: one bound for the tasks, the measured census repl
   ok(Object.values(reds).every((v) => v === false), 'RED, the step\'s four mutants: the start not read from the patch, the outcome not captured, the ask look narrowed to one key name, a first start not a change — each reddens its own leg', reds);
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+console.log(`\n${counts.pass} passed, ${counts.fail} failed`);
+process.exit(counts.fail ? 1 : 0);

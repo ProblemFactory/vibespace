@@ -30,12 +30,13 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { freePort, ONBOARDED_SOURCE, vncEnv, stillPresser, CHROME_QUIET } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (§57c, B-cdb2): the tree, the home, the stub and Chrome's profile live in its root
+import { checker } from './lib/check.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 
-let pass = 0, fail = 0, skipped = 0;
-const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+let skipped = 0;
+const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -164,7 +165,7 @@ process.stdin.on('end', () => process.exit(0));
   // the hub's journal = its log through the helper (hub.log(): what THIS start wrote, stdout and stderr in one file, as the pipes held it)
   hub = startHub({ root: ROOT, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, PATH: BIN + ':' + (process.env.PATH || ''), CLAUDE_CMD: path.join(BIN, 'claude'), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VS_NO_REAL_CLI: '1', VIBESPACE_PASSWORD: '' } });
   const journal = () => hub.log();
-  if (!ok(await until(() => journal().includes('Ready.'), 60000, 100), 'the worktree server booted', journal().slice(-800))) return;
+  if (!ok(!!(await until(() => journal().includes('Ready.'), 60000, 100)), 'the worktree server booted', journal().slice(-800))) return;
 
   /** ONE request — a PERSON on the page (Sec-Fetch-Site same-origin) */
   const req = (method, p, body) => new Promise((resolve) => {
@@ -195,7 +196,7 @@ process.stdin.on('end', () => process.exit(0));
   const list = (await req('GET', '/api/automation/keys')).json;
   const grant = list && KEY && list.keys.find((k) => k.id === KEY).grants.find((g) => coord && g.subject === `session:${coord.sid}`);
   const widen = grant && await req('POST', `/api/automation/grants/${grant.id}/reach`, { reach: 'instance' });
-  if (!ok(!!coord && su.status === 200 && /^ak-/.test(String(KEY)) && gt && gt.status === 200 && widen && widen.status === 200, 'the coordinator is live with its own token; the vault set up; a key with conversations.resume + end granted to it, reach: this instance', { coord: !!coord, su: su.status, KEY, gt: gt && gt.status, widen: widen && widen.status })) return;
+  if (!ok(!!coord && su.status === 200 && /^ak-/.test(String(KEY)) && !!gt && gt.status === 200 && !!widen && widen.status === 200, 'the coordinator is live with its own token; the vault set up; a key with conversations.resume + end granted to it, reach: this instance', { coord: !!coord, su: su.status, KEY, gt: gt && gt.status, widen: widen && widen.status })) return;
 
   // ── headless chrome over raw CDP ──
   const CDP = await freePort();
@@ -251,14 +252,14 @@ process.stdin.on('end', () => process.exit(0));
   const declineOffer = async (X) => { const b = `(() => { const d = [...document.querySelectorAll('.dialog')].find((x) => /Resume interrupted sessions/.test(x.textContent)); return d ? [...d.querySelectorAll('button')].find((x) => !/Resume all/.test(x.textContent)) || null : null; })()`; if (await X.ev(`!!${b}`)) { await X.click(b); await sleep(300); } };
   let PA = null;
   try {
-    ok(await PB.boot(), 'page B (1440×900) booted');
+    ok(!!(await PB.boot()), 'page B (1440×900) booted');
     await declineOffer(PB);
     await goto(PB, 'desk-2');
     await until(async () => !!(await PB.ev(VIEW))?.readOnly, 15000, 200);
     const b0 = await PB.ev(VIEW);
-    ok(!!b0 && b0.readOnly && b0.note && b0.desk === 'desk-2' && b0.gb === J(GB) && (await PB.ev('app.desktopManager.activeDesktopId')) === 'desk-2', 'page B visits Desk 2: e-1 is built as a READ-ONLY view of the ended conversation («Session is read-only.»), at its box', b0);
+    ok(!!b0 && !!b0.readOnly && !!b0.note && b0.desk === 'desk-2' && b0.gb === J(GB) && (await PB.ev('app.desktopManager.activeDesktopId')) === 'desk-2', 'page B visits Desk 2: e-1 is built as a READ-ONLY view of the ended conversation («Session is read-only.»), at its box', b0);
     PA = await newPage();
-    ok(!!PA && await PA.boot(), 'page A (1440×900) booted');
+    ok(!!PA && !!(await PA.boot()), 'page A (1440×900) booted');
     await declineOffer(PA);
     if ((await PA.ev('app.desktopManager.activeDesktopId')) !== 'desk-1') await goto(PA, 'desk-1');
     ok((await PA.ev('app.desktopManager.activeDesktopId')) === 'desk-1' && (await PA.ev(OF_CONV)).length === 0, 'page A stays on Desk 1 (no window of the conversation there)');
@@ -270,14 +271,14 @@ process.stdin.on('end', () => process.exit(0));
     const up1 = await until(async () => (await liveOf()).length === 1, 20000, 250);
     await sleep(4000);
     const c1 = await PB.ev(VIEW);
-    ok(r1.code === 0 && up1 && !!c1 && c1.readOnly && c1.note && !c1.live, '① CONTROL: the follow OFF — the key resumed it (the hub lists it live) and B\'s window stays on «Session is read-only.»', { r1: r1.json || r1.err, up1, c1 });
+    ok(r1.code === 0 && !!up1 && !!c1 && !!c1.readOnly && !!c1.note && !c1.live, '① CONTROL: the follow OFF — the key resumed it (the hub lists it live) and B\'s window stays on «Session is read-only.»', { r1: r1.json || r1.err, up1, c1 });
     await PB.shot('b-control');
     const e1 = await cli(['conversations', 'end', `claude:${CID}`], coord.token);
-    ok(e1.code === 0 && await until(async () => (await liveOf()).length === 0, 20000, 250), '① …and the key ends it again', e1.json || e1.err);
+    ok(e1.code === 0 && !!(await until(async () => (await liveOf()).length === 0, 20000, 250)), '① …and the key ends it again', e1.json || e1.err);
     await PB.ev('delete app._followResumed, true');   // the follow back on (the prototype's)
     // a THIRD page C builds e-1 on Desk 2 (read-only, ended) and goes back to Desk 1: its window of the conversation is on a desktop it is not showing
     const PC = await newPage();
-    ok(!!PC && await PC.boot(), 'page C (1440×900) booted');
+    ok(!!PC && !!(await PC.boot()), 'page C (1440×900) booted');
     await declineOffer(PC);
     await goto(PC, 'desk-2');
     await until(async () => !!(await PC.ev(VIEW))?.readOnly, 15000, 200);
@@ -318,14 +319,14 @@ process.stdin.on('end', () => process.exit(0));
     const jTie = journal().length;
     const t0 = Date.now();
     const r2 = await cli(['conversations', 'resume', `claude:${CID}`], coord.token);
-    ok(r2.code === 0 && r2.json && /^sess-/.test(String(r2.json.sessionId)) && r2.json.desktop && r2.json.desktop.id === 'desk-2' && r2.json.desktop.name === 'Desk 2' && /nothing was sent to it/.test(String(r2.json.note)), '② the key resumes it: exit 0, its sessionId, the desktop of its row (Desk 2), the note', r2.json || r2.err);
+    ok(r2.code === 0 && !!r2.json && /^sess-/.test(String(r2.json.sessionId)) && !!r2.json.desktop && r2.json.desktop.id === 'desk-2' && r2.json.desktop.name === 'Desk 2' && /nothing was sent to it/.test(String(r2.json.note)), '② the key resumes it: exit 0, its sessionId, the desktop of its row (Desk 2), the note', r2.json || r2.err);
     const heldBoth = await until(async () => (await PB.ev('window.__heldOut.length')) === 1 && (await PC.ev('window.__heldOut.length')) === 1, 20000, 100);
     const heldBases = [await PB.ev('window.__heldOut[0] ? window.__heldOut[0].base ?? null : null'), await PC.ev('window.__heldOut[0] ? window.__heldOut[0].base ?? null : null')];
     const released = await Promise.all([PB.ev('window.__releaseOut()'), PC.ev('window.__releaseOut()')]);
     ok(!!heldBoth && released[0] === 1 && released[1] === 1, '② THE TIE IS MADE: B and C each wrote Desk 2\'s record on the same broadcast — each page\'s FIRST frame held, both released in one step', { heldBoth: !!heldBoth, released, heldBases });
     const live2 = await until(async () => !!(await PB.ev(VIEW))?.live, 20000, 250);
     const b2 = await PB.ev(VIEW);
-    ok(live2 && b2.id === 'e-1' && b2.desk === 'desk-2' && b2.gb === J(GB) && !b2.note && b2.sid === r2.json.sessionId, '② page B: e-1 is LIVE — the same row id, its box, on Desk 2, showing the resumed session', b2);
+    ok(!!live2 && b2.id === 'e-1' && b2.desk === 'desk-2' && b2.gb === J(GB) && !b2.note && b2.sid === r2.json.sessionId, '② page B: e-1 is LIVE — the same row id, its box, on Desk 2, showing the resumed session', b2);
     ok((await PB.ev('app.desktopManager.activeDesktopId')) === 'desk-2' && J(await PB.ev(OF_CONV)) === J(['e-1']), '② …B did not switch desktops; ONE window of the conversation', { desk: await PB.ev('app.desktopManager.activeDesktopId'), wins: await PB.ev(OF_CONV) });
     ok((await PA.ev('app.desktopManager.activeDesktopId')) === aDesk0 && aDesk0 === 'desk-1' && (await PA.ev(OF_CONV)).length === 0, '② page A did not switch and made no window (no row on its desktop)');
     await sleep(3000);
@@ -334,14 +335,14 @@ process.stdin.on('end', () => process.exit(0));
       '② QUIET on B: the focused element, the active window (f-2) and the stacking order are the SAME before and after — e-1 came back live UNDER f-2, never raised, never focused', { feel0, feel1 });
     const liveC = await until(async () => !!(await PC.ev(VIEW))?.live, 20000, 250);
     const feelC1 = await PC.ev(FEEL);
-    ok(liveC && (await PC.ev('app.desktopManager.activeDesktopId')) === 'desk-1' && J(await PC.ev(OF_CONV)) === J(['e-1']) && feelC0.ae === feelC1.ae && feelC0.active === feelC1.active && J(feelC0.order) === J(feelC1.order),
+    ok(!!liveC && (await PC.ev('app.desktopManager.activeDesktopId')) === 'desk-1' && J(await PC.ev(OF_CONV)) === J(['e-1']) && feelC0.ae === feelC1.ae && feelC0.active === feelC1.active && J(feelC0.order) === J(feelC1.order),
       '② page C follows too: its e-1 on Desk 2 is live (C still shows Desk 1 — no switch), one window; C\'s focused element, active window and stacking order the same', { feelC0, feelC1 });
     // THE FOLLOWERS' LAW over the made tie (followLaw, above): exactly ONE stale refusal; the refused page ONE frame more, accepted; the
     // kept page its one; none after the settle (a ping-pong stays red); A none; the hub's Desk 2 keeps its windows, e-1 on the resumed
     // session; no «disagree» toast; the journal's one stale line N → N
     const F2 = await passFacts(t0), rec1 = await deskRec(), sess2 = r2.json && r2.json.sessionId, toasts2 = await disagree(), lines2 = refusedLines(jTie);
     const L2 = followLaw({ made: 'tie', ...F2, rec0, rec1, session: sess2, toasts: toasts2, journal: lines2 });
-    ok(L2.ok, '② the frames END and nothing is lost — THE TIE MADE: exactly ONE stale refusal, the refused page one frame more (accepted), the kept page its one, none after the settle, none from A; the hub\'s Desk 2 keeps its windows with e-1 on the resumed session; no «disagree» toast; the journal\'s one stale line reads N → N', { why: L2.why, F2, rec0, rec1, lines2 });
+    ok(!!L2.ok, '② the frames END and nothing is lost — THE TIE MADE: exactly ONE stale refusal, the refused page one frame more (accepted), the kept page its one, none after the settle, none from A; the hub\'s Desk 2 keeps its windows with e-1 on the resumed session; no «disagree» toast; the journal\'s one stale line reads N → N', { why: L2.why, F2, rec0, rec1, lines2 });
     // CONTROLS — the law goes red where the harm is (a copy of these very facts): the refused page sending on and on (no settle); a
     // window lost at the refusal (the record one short, the journal's line N → N-1)
     const refusedK = Object.keys(F2.pages).find((k) => F2.pages[k].refused.length) || 'B';
@@ -360,7 +361,7 @@ process.stdin.on('end', () => process.exit(0));
     const endedU = eU.code === 0 && await until(async () => (await liveOf()).length === 0, 20000, 250) && await until(async () => !!(await PB.ev(VIEW))?.readOnly && !!(await PC.ev(VIEW))?.readOnly, 20000, 250);
     ok(!!endedU, '②b the key ends it again: B\'s and C\'s e-1 are ended (read-only) again', eU.json || eU.err);
     const tEnd = Date.now();
-    ok(await quiet(tEnd - 20000), '②b …what the end itself wrote has gone quiet before the pass (the journal leg below judges every line)');
+    ok(!!(await quiet(tEnd - 20000)), '②b …what the end itself wrote has gone quiet before the pass (the journal leg below judges every line)');
     const recU0 = await deskRec();
     await PC.ev('(window.__holdIn = true, true)');
     const jU = journal().length, tU = Date.now();
@@ -389,7 +390,7 @@ process.stdin.on('end', () => process.exit(0));
     ok(!!cHolds, '②b page C (it saw B\'s record first) holds NO read-only view of the running conversation, stays on Desk 1 (QUIET: no switch), and its own record of Desk 2 names e-1 on the resumed session (the product\'s re-key: the row is built from that record at the next switch)', factsC2);
     const FU = await passFacts(tU), recU1 = await deskRec(), toastsU = await disagree(), linesU = refusedLines(jU);
     const LU = followLaw({ made: 'untied', ...FU, rec0: recU0, rec1: recU1, session: sessU, toasts: toastsU, journal: linesU });
-    ok(LU.ok, '②b the frames END and nothing is lost — THE UNTIED CASE MADE: NO refusal, each page one frame at most, none after the settle, none from A; the hub\'s Desk 2 keeps its windows with e-1 on the resumed session; no «disagree» toast; no journal line', { why: LU.why, FU, recU0, recU1, linesU });
+    ok(!!LU.ok, '②b the frames END and nothing is lost — THE UNTIED CASE MADE: NO refusal, each page one frame at most, none after the settle, none from A; the hub\'s Desk 2 keeps its windows with e-1 on the resumed session; no «disagree» toast; no journal line', { why: LU.why, FU, recU0, recU1, linesU });
     if (sessU) rLive = sessU;
     // …and THE PERSON'S ROAD on C: a visit to Desk 2 (a real click on its preview) builds e-1 from the record — LIVE in its row
     await goto(PC, 'desk-2');
@@ -407,12 +408,12 @@ process.stdin.on('end', () => process.exit(0));
     await PA.ev('(window.__preReload = 1, 1)');
     await PA.send('Page.reload', {});
     const fresh = await until(async () => { try { return await PA.ev('!window.__preReload'); } catch { return false; } }, 20000, 100);
-    ok(!!fresh && await PA.boot(false), '③ page A reloaded — a NEW document (the old one\'s marker gone), its app booted');
+    ok(!!fresh && !!(await PA.boot(false)), '③ page A reloaded — a NEW document (the old one\'s marker gone), its app booted');
     await declineOffer(PA);
     await goto(PA, 'desk-2');
     const live3 = await until(async () => !!(await PA.ev(VIEW))?.live, 20000, 250);
     const a3 = await PA.ev(VIEW);
-    ok(live3 && a3.desk === 'desk-2' && a3.gb === J(GB) && J(await PA.ev(OF_CONV)) === J(['e-1']), '③ …and visits Desk 2: e-1 is live in place (same id, its box), one window', a3);
+    ok(!!live3 && a3.desk === 'desk-2' && a3.gb === J(GB) && J(await PA.ev(OF_CONV)) === J(['e-1']), '③ …and visits Desk 2: e-1 is live in place (same id, its box), one window', a3);
     // …and what it read was the LIVE record, not a stale one (the read: the leg above passes on either): the hub's own Desk 2 holds e-1 on
     // the RESUMED session
     const lay = (await req('GET', '/api/layouts')).json || {};
@@ -429,5 +430,5 @@ process.stdin.on('end', () => process.exit(0));
   }
 })();
 
-console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+console.log(`\n${counts.fail ? `${counts.fail} FAILED` : 'ALL PASS'} (${counts.pass} passed${skipped ? `, ${skipped} skipped` : ''})`);
+process.exit(counts.fail ? 1 : 0);

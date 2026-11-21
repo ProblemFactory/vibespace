@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, vncEnv } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (§57c, B-cdb2): the tree, the home, the stub and the folder live in its root
+import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VNC_ENV = await vncEnv();
@@ -37,8 +38,8 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const root = mintRoot('dr-hub');
 const wt = path.join(root, 'wt'), stubDir = path.join(root, 'stub'), fakeHome = path.join(root, 'home'), CWD = path.join(root, 'cwd');
 for (const d of [stubDir, fakeHome, CWD]) fs.mkdirSync(d, { recursive: true });
-let failed = 0, passed = 0;
-const check = (n, c, e) => { if (typeof n !== 'string') throw new TypeError('check(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+
+const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SECOND = 'deliveries resume leg second password';
 
@@ -125,7 +126,6 @@ async function liveConversation(reqId, extra = {}) {
   return { wid: created && created.sessionId, sid: st && st.sid, token: st && st.token, live: !!live };
 }
 
-
 const stdinOf = (sid) => { try { return fs.readFileSync(path.join(stubDir, `stdin-${sid}.ndjson`), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } };
 const userFrames = (sid) => stdinOf(sid).filter((m) => m.type === 'user');
 const frameText = (m) => { const c = m && m.message && m.message.content; return typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => (x && x.text) || '').join('') : JSON.stringify(m); };
@@ -157,39 +157,39 @@ const isoIn = (ms) => new Date(Date.now() + ms).toISOString();   // a one-time r
 try {
   console.log('① five conversations, their reminders, and the grant\'s writers');
   const su = await req('POST', '/api/vault/setup', { password: SECOND });
-  check('the vault set up by a person on the page (the keys need it)', su.status === 200 && su.json && su.json.state === 'unlocked', su);
+  ok(su.status === 200 && !!su.json && su.json.state === 'unlocked', 'the vault set up by a person on the page (the keys need it)', su);
   const C = await liveConversation('dr-coord', { name: 'coordinator' });
   const E = await liveConversation('dr-other', { name: 'no verb' });
   const R = await liveConversation('dr-r', { name: 'restart ended' });
   const P = await liveConversation('dr-p', { name: 'person ended' });
   const A = await liveConversation('dr-a', { name: 'agent ended' });
   const K = await liveConversation('dr-k', { name: 'key granted' });
-  check('six live conversations, each with its own token and conversation id', [C, E, R, P, A, K].every((x) => x.live && /^vsst_/.test(x.token)), [C, E, R, P, A, K].map((x) => x.live));
+  ok([C, E, R, P, A, K].every((x) => x.live && /^vsst_/.test(x.token)), 'six live conversations, each with its own token and conversation id', [C, E, R, P, A, K].map((x) => x.live));
   const T1 = isoIn(75e3), T2 = isoIn(120e3);
   const reg = async (who, name, at, text) => job(['notify-cron', '--name', name, '--at', at, '--text', text], who.token);
   const regs = [await reg(R, 'r-remind', T1, 'the R reminder'), await reg(P, 'p-remind', T1, 'the P reminder'), await reg(P, 'p-second', T2, 'the P second reminder'), await reg(A, 'a-plain', T1, 'the A plain result'), await reg(A, 'a-granted', T2, 'the A granted result'), await reg(K, 'k-remind', T2, 'the K reminder')];
-  check(`six one-time reminders registered by their own conversations (at ${T1} and ${T2})`, regs.every((r) => r.code === 0), regs.map((r) => r.err || r.out).join(' | '));
+  ok(regs.every((r) => r.code === 0), `six one-time reminders registered by their own conversations (at ${T1} and ${T2})`, regs.map((r) => r.err || r.out).join(' | '));
   const J = {}; for (const n of ['r-remind', 'p-remind', 'p-second', 'a-plain', 'a-granted', 'k-remind']) J[n] = await jobNamed(n);
-  check('…each owned by its conversation, no grant (the default)', Object.values(J).every((j) => j && j.wakesEndedOwner === false), Object.values(J).map((j) => j && [j.name, j.wakesEndedOwner]));
+  ok(Object.values(J).every((j) => j && j.wakesEndedOwner === false), '…each owned by its conversation, no grant (the default)', Object.values(J).map((j) => j && [j.name, j.wakesEndedOwner]));
 
   const byToken = await req('POST', `/api/agent/jobs/${J['p-remind'].id}/wake-grant`, { grant: true }, { bearer: P.token });
   const cookieWithBearer = await req('POST', `/api/jobs/${J['p-remind'].id}/wake-grant`, { grant: true }, { bearer: P.token });
-  check('an agent token\'s WRITE is refused by name — on its own route and on the person\'s — naming the doors that exist (the person\'s, the key verb) and the propose door',
-    byToken.status === 403 && byToken.json.code === 'wake_grant_person_only' && /Terminate confirm/.test(byToken.json.error) && /jobs\.wakeGrant/.test(byToken.json.error) && /vibespace-job propose-wake/.test(byToken.json.error) && cookieWithBearer.status === 403 && cookieWithBearer.json.code === 'wake_grant_person_only', { byToken, cookieWithBearer });
+  ok(byToken.status === 403 && byToken.json.code === 'wake_grant_person_only' && /Terminate confirm/.test(byToken.json.error) && /jobs\.wakeGrant/.test(byToken.json.error) && /vibespace-job propose-wake/.test(byToken.json.error) && cookieWithBearer.status === 403 && cookieWithBearer.json.code === 'wake_grant_person_only',
+    'an agent token\'s WRITE is refused by name — on its own route and on the person\'s — naming the doors that exist (the person\'s, the key verb) and the propose door', { byToken, cookieWithBearer });
   const created = await req('POST', '/api/agent/jobs', { kind: 'cron', name: 'sneaky', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: 'x' }, wakesEndedOwner: true }, { bearer: P.token });
-  check('…and a registration carrying the field is refused by name (nothing created)', created.status === 403 && created.json.code === 'wake_grant_person_only' && !(await jobNamed('sneaky')), created);
+  ok(created.status === 403 && created.json.code === 'wake_grant_person_only' && !(await jobNamed('sneaky')), '…and a registration carrying the field is refused by name (nothing created)', created);
   const prop = await job(['propose-wake', J['p-remind'].id, 'so the morning digest reaches it after an end'], P.token);
   const regProp = await job(['notify-cron', '--name', 'p-extra', '--at', isoIn(3600e3), '--text', 'extra', '--propose-wake', 'it carries the digest'], P.token);
   const cards = (((await req('GET', '/api/user-todos')).json || {}).todos || {}).open || [];
   const pCards = cards.filter((i) => i && i.action && i.action.type === 'end-proposal' && i.action.kind === 'wake' && String(i.sessionKey || '').endsWith(`:${P.sid}`));
-  check('propose-wake files ONE proposal card for the person (lane login-request-card binds the door); --propose-wake at registration creates the job and JOINS the same card — one card per proposer, a row per job',
-    prop.code === 0 && /proposed to the person/.test(prop.out) && regProp.code === 0 && /proposed to the person/.test(regProp.out) && pCards.length === 1
-      && JSON.stringify(((pCards[0].card || {}).rows || []).map((r) => r.id).sort()) === JSON.stringify([J['p-remind'].id, (await jobNamed('p-extra') || {}).id].sort()), { prop, regProp, pCards });
+  ok(prop.code === 0 && /proposed to the person/.test(prop.out) && regProp.code === 0 && /proposed to the person/.test(regProp.out) && pCards.length === 1
+      && JSON.stringify(((pCards[0].card || {}).rows || []).map((r) => r.id).sort()) === JSON.stringify([J['p-remind'].id, (await jobNamed('p-extra') || {}).id].sort()),
+    'propose-wake files ONE proposal card for the person (lane login-request-card binds the door); --propose-wake at registration creates the job and JOINS the same card — one card per proposer, a row per job', { prop, regProp, pCards });
   const rows0 = (await req('GET', `/api/jobs-wake-grants?conversation=${P.sid}`)).json || {};
-  check('…the grant stays NO until a person\'s press (the doors\' rows say so)', Array.isArray(rows0.rows) && rows0.rows.length >= 2 && rows0.rows.every((r) => r.grant === false), rows0);
+  ok(Array.isArray(rows0.rows) && rows0.rows.length >= 2 && rows0.rows.every((r) => r.grant === false), '…the grant stays NO until a person\'s press (the doors\' rows say so)', rows0);
 
   const pressA = await req('POST', `/api/jobs/${J['a-granted'].id}/wake-grant`, { grant: true });
-  check('the PERSON\'s press grants A\'s second job (the row records the person)', pressA.status === 200 && pressA.json.wakesEndedOwner === true && pressA.json.wakeGrantBy && pressA.json.wakeGrantBy.kind === 'person', pressA);
+  ok(pressA.status === 200 && pressA.json.wakesEndedOwner === true && !!pressA.json.wakeGrantBy && pressA.json.wakeGrantBy.kind === 'person', 'the PERSON\'s press grants A\'s second job (the row records the person)', pressA);
   const mk = await req('POST', '/api/automation/keys', { name: 'dispatch', scopes: ['jobs.wakeGrant'], limits: { cwdRoots: [CWD], accounts: 'any', permissionModes: ['default'], models: 'any', modes: ['chat'] } });
   const KEY = mk.json && mk.json.key && mk.json.key.id;
   await req('POST', `/api/automation/keys/${KEY}/grants`, { subjects: [`session:${C.sid}`] });
@@ -202,8 +202,8 @@ try {
   // would be ASKED for (pickKey's documented law: the owner's first-use card, the call waits for the owner) — not this leg's state
   const noVerb = await cli(['call', 'jobs.wakeGrant', '--job', J['k-remind'].id, '--grant', 'on', '--key', mk2.json.key.id], E.token);
   const kj = await jobNamed('k-remind');
-  check('a MANAGER KEY holding jobs.wakeGrant sets K\'s grant (the row records the key by name)', viaKey.code === 0 && !!widen && kj.wakesEndedOwner === true && kj.wakeGrantBy && kj.wakeGrantBy.kind === 'key' && kj.wakeGrantBy.name === 'dispatch', { viaKey, wg: kj && kj.wakeGrantBy });
-  check('…a key WITHOUT the verb, named by its holder (--key), is refused by name (verb_not_in_scope) — and nothing written', noVerb.code !== 0 && /verb_not_in_scope/.test(noVerb.err + noVerb.out) && kj.wakeGrantBy && kj.wakeGrantBy.name === 'dispatch', noVerb);
+  ok(viaKey.code === 0 && !!widen && kj.wakesEndedOwner === true && !!kj.wakeGrantBy && kj.wakeGrantBy.kind === 'key' && kj.wakeGrantBy.name === 'dispatch', 'a MANAGER KEY holding jobs.wakeGrant sets K\'s grant (the row records the key by name)', { viaKey, wg: kj && kj.wakeGrantBy });
+  ok(noVerb.code !== 0 && /verb_not_in_scope/.test(noVerb.err + noVerb.out) && !!kj.wakeGrantBy && kj.wakeGrantBy.name === 'dispatch', '…a key WITHOUT the verb, named by its holder (--key), is refused by name (verb_not_in_scope) — and nothing written', noVerb);
 
   console.log('② the machine restarts: R by the restart; P by a person, A by an agent, K by a person (piece 3\'s record, stood in)');
   try { ws.close(); } catch { }
@@ -212,50 +212,50 @@ try {
   const first = hub, ended = first.stop();
   const gone = await until(() => (first.child.exitCode !== null || first.child.signalCode ? true : null), 10000);
   console.log(`    the restart's stop: ${ended.signalled.length} ended by identity (${ended.signalled.map((x) => x.via).join(', ')}), ${ended.left.length} left${ended.left.length ? ' — ' + JSON.stringify(ended.left) : ''}`);
-  check('the restart ended the first hub (its process gone within 10 s) and everything it started', !!gone && ended.left.length === 0, { gone, ended });
+  ok(!!gone && ended.left.length === 0, 'the restart ended the first hub (its process gone within 10 s) and everything it started', { gone, ended });
   const kept = [endOnPurpose(P.sid, { kind: 'person', actorId: 'person', name: null }), endOnPurpose(A.sid, { kind: 'agent', actorId: `agent:${C.sid}`, name: 'coordinator' }), endOnPurpose(K.sid, { kind: 'person', actorId: 'person', name: null })];   // piece 3's endedBy {kind, actorId, name}
-  check('the kept records of the three ended on purpose (stand-in for piece 3\'s writer)', kept.every(Boolean), kept);
+  ok(kept.every(Boolean), 'the kept records of the three ended on purpose (stand-in for piece 3\'s writer)', kept);
   const booted = await boot();
   await connect();
   const keptR = await until(() => fs.readdirSync(path.join(wt, 'data', 'session-meta')).filter((f) => f.endsWith('.json.stopped')).map((f) => { try { return JSON.parse(fs.readFileSync(path.join(wt, 'data', 'session-meta', f), 'utf8')); } catch { return null; } }).find((m) => m && (m.claudeSessionId === R.sid || m.backendSessionId === R.sid) && m.stopReason === 'dead-socket-at-boot'), 20000);
-  check('the hub boots again; R\'s record says the restart ended it (dead-socket-at-boot — the boot wrote it)', booted && !!keptR, { booted, keptR: !!keptR });
+  ok(!!booted && !!keptR, 'the hub boots again; R\'s record says the restart ended it (dead-socket-at-boot — the boot wrote it)', { booted, keptR: !!keptR });
   const ledger0 = ledgerRows();
 
   console.log(`③ ${T1}: the first reminders`);
   const rBack = await until(() => (resumedRun(R.sid).length && userFrames(R.sid).length >= 1 && ledgerRows() > ledger0 ? true : null), 150000);   // waits on the ledger's row
   const rf = userFrames(R.sid);
-  check('R (ended by the restart, NO grant) is resumed: its CLI started with --resume, ONE user frame — the reminder and the design\'s sentence',
-    !!rBack && resumedRun(R.sid).length === 1 && rf.length === 1 && /the R reminder/.test(frameText(rf[0])) && /resumed to hand you this/.test(frameText(rf[0])), { runs: resumedRun(R.sid).length, frames: rf.map(frameText) });
+  ok(!!rBack && resumedRun(R.sid).length === 1 && rf.length === 1 && /the R reminder/.test(frameText(rf[0])) && /resumed to hand you this/.test(frameText(rf[0])),
+    'R (ended by the restart, NO grant) is resumed: its CLI started with --resume, ONE user frame — the reminder and the design\'s sentence', { runs: resumedRun(R.sid).length, frames: rf.map(frameText) });
   const rRow = await resumedRowOf(R.sid);   // the page's own door (the ws frame), never GET /api/active
-  check('…its window\'s line says what resumed it and when (the session\'s resumedBy)', !!rRow && rRow.resumedBy && rRow.resumedBy.params && /r-remind/.test(rRow.resumedBy.params.what) && Number(rRow.resumedBy.at) > 0, rRow && rRow.resumedBy);
+  ok(!!rRow && !!rRow.resumedBy && !!rRow.resumedBy.params && /r-remind/.test(rRow.resumedBy.params.what) && Number(rRow.resumedBy.at) > 0, '…its window\'s line says what resumed it and when (the session\'s resumedBy)', rRow && rRow.resumedBy);
   const wakeLine = (j) => (j.notifyLog || []).find((l) => l && l.lane === 'wake' && l.ok === false);
   const jobOf = async (n) => ((await req('GET', `/api/jobs/${J[n].id}`)).json || {}).job || {};
   await until(async () => (wakeLine(await jobOf('p-remind')) && wakeLine(await jobOf('a-plain')) ? true : null), 60000);   // waits on the journals' wake lines
   const pJ = await jobOf('p-remind'), aJ = await jobOf('a-plain');
-  check('P\'s schedule WITHOUT the grant fired at a PERSON-ended conversation: NOTHING starts (no --resume run, no frame)', resumedRun(P.sid).length === 0 && userFrames(P.sid).length === 0, { runs: resumedRun(P.sid).length });
-  check('…its journal says its owner was ended on purpose, and by whom', !!wakeLine(pJ) && /ended on purpose by a person/.test(wakeLine(pJ).reason), pJ.notifyLog);
+  ok(resumedRun(P.sid).length === 0 && userFrames(P.sid).length === 0, 'P\'s schedule WITHOUT the grant fired at a PERSON-ended conversation: NOTHING starts (no --resume run, no frame)', { runs: resumedRun(P.sid).length });
+  ok(!!wakeLine(pJ) && /ended on purpose by a person/.test(wakeLine(pJ).reason), '…its journal says its owner was ended on purpose, and by whom', pJ.notifyLog);
   const pRowW = await until(async () => { const rows = ((await req('GET', '/api/sessions')).json || {}).sessions || []; const r = rows.find((x) => (x.backendSessionId || x.sessionId) === P.sid); return r && r.waiting ? r : null; }, 15000);   // the sweep's cache answers for 4.5 s
-  check('…and P\'s ENDED row in the sessions list carries the waiting fact (n ≥ 1, ended on purpose) — the card and the window\'s bar word it', !!pRowW && pRowW.waiting && pRowW.waiting.n >= 1 && pRowW.waiting.code === 'ended_on_purpose', pRowW && pRowW.waiting);
-  check('A\'s job WITHOUT the grant at an AGENT-ended conversation waits — its journal names the agent', resumedRun(A.sid).length === 0 && !!wakeLine(aJ) && /coordinator/.test(wakeLine(aJ).reason), aJ.notifyLog);
+  ok(!!pRowW && !!pRowW.waiting && pRowW.waiting.n >= 1 && pRowW.waiting.code === 'ended_on_purpose', '…and P\'s ENDED row in the sessions list carries the waiting fact (n ≥ 1, ended on purpose) — the card and the window\'s bar word it', pRowW && pRowW.waiting);
+  ok(resumedRun(A.sid).length === 0 && !!wakeLine(aJ) && /coordinator/.test(wakeLine(aJ).reason), 'A\'s job WITHOUT the grant at an AGENT-ended conversation waits — its journal names the agent', aJ.notifyLog);
 
   console.log(`④ ${T2}: the granted ones`);
   const pressP = await req('POST', `/api/jobs/${J['p-second'].id}/wake-grant`, { grant: true });
-  check('the person grants P\'s second reminder between the two fires', pressP.status === 200 && pressP.json.wakesEndedOwner === true, pressP);
+  ok(pressP.status === 200 && pressP.json.wakesEndedOwner === true, 'the person grants P\'s second reminder between the two fires', pressP);
   const ledger1 = ledgerRows();
   const pBack = await until(() => (userFrames(P.sid).length && userFrames(A.sid).length && userFrames(K.sid).length && ledgerRows() >= ledger1 + 3 ? true : null), 150000);   // waits on the ledger's rows
   const rowOf = resumedRowOf;   // the page's own door (the ws frame), never GET /api/active
   const pRow = await rowOf(P.sid), kRow = await rowOf(K.sid), aRow = await rowOf(A.sid);
-  check('the same schedule WITH the grant resumes P ONCE (one run, one frame) — and the window says what resumed it and that the person allowed it',
-    !!pBack && resumedRun(P.sid).length === 1 && userFrames(P.sid).length === 1 && /the P second reminder/.test(frameText(userFrames(P.sid)[0])) && /the P reminder/.test(frameText(userFrames(P.sid)[0])) && pRow && pRow.resumedBy && /you allowed it/.test(pRow.resumedBy.key), { runs: resumedRun(P.sid).length, line: pRow && pRow.resumedBy });
-  check('A\'s job WITH the person\'s grant resumes the AGENT-ended conversation (its waiting plain result rides the same frame)',
-    resumedRun(A.sid).length === 1 && userFrames(A.sid).length === 1 && /the A granted result/.test(frameText(userFrames(A.sid)[0])) && /the A plain result/.test(frameText(userFrames(A.sid)[0])) && aRow && aRow.resumedBy, { frames: userFrames(A.sid).map(frameText) });
-  check('K\'s job, granted by the MANAGER KEY, resumes K — and the line names the key', resumedRun(K.sid).length === 1 && userFrames(K.sid).length === 1 && kRow && kRow.resumedBy && kRow.resumedBy.params && kRow.resumedBy.params.by === 'dispatch', kRow && kRow.resumedBy);
-  check('ONE ledger row per resumed delivery (R, P, A, K: four) — the resumes themselves charge nothing', ledgerRows() - ledger0 === 4, { before: ledger0, after: ledgerRows() });
+  ok(!!pBack && resumedRun(P.sid).length === 1 && userFrames(P.sid).length === 1 && /the P second reminder/.test(frameText(userFrames(P.sid)[0])) && /the P reminder/.test(frameText(userFrames(P.sid)[0])) && !!pRow && !!pRow.resumedBy && /you allowed it/.test(pRow.resumedBy.key),
+    'the same schedule WITH the grant resumes P ONCE (one run, one frame) — and the window says what resumed it and that the person allowed it', { runs: resumedRun(P.sid).length, line: pRow && pRow.resumedBy });
+  ok(resumedRun(A.sid).length === 1 && userFrames(A.sid).length === 1 && /the A granted result/.test(frameText(userFrames(A.sid)[0])) && /the A plain result/.test(frameText(userFrames(A.sid)[0])) && !!aRow && !!aRow.resumedBy && /you allowed it/.test(aRow.resumedBy.key),   // B-119d: it passed on the OBJECT (any reason) — now the reason's words, as P's
+    'A\'s job WITH the person\'s grant resumes the AGENT-ended conversation (its waiting plain result rides the same frame) — and the window says the person allowed it', { frames: userFrames(A.sid).map(frameText) });
+  ok(resumedRun(K.sid).length === 1 && userFrames(K.sid).length === 1 && !!kRow && !!kRow.resumedBy && !!kRow.resumedBy.params && kRow.resumedBy.params.by === 'dispatch', 'K\'s job, granted by the MANAGER KEY, resumes K — and the line names the key', kRow && kRow.resumedBy);
+  ok(ledgerRows() - ledger0 === 4, 'ONE ledger row per resumed delivery (R, P, A, K: four) — the resumes themselves charge nothing', { before: ledger0, after: ledgerRows() });
 } catch (e) {
-  failed++; console.error('  ✗ threw: ' + ((e && e.stack) || e));
+  counts.fail++; console.error('  ✗ threw: ' + ((e && e.stack) || e));
 } finally {
   try { ws.close(); } catch { }
   cleanup();
 }
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+console.log(`\n${counts.pass} passed, ${counts.fail} failed`);
+process.exit(counts.fail ? 1 : 0);

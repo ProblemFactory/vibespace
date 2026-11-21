@@ -19,11 +19,12 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';   // a red control's edit fails BY NAME when its anchor moves (RULES: a new red control is anchored)
+import { checker } from './lib/check.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 1500) : '')); } return !!c; };
+
+const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 const L = require(path.join(REPO, 'src/resume-line.js'));
 const { createResumeLine } = require(path.join(REPO, 'src/server/resume-line.js'));
@@ -61,7 +62,7 @@ console.log('— ① TEN AT ONCE: never more than two in flight');
   await tick(1);
   ok(R2.most() === 10, `① RED CONTROL: the constant patched to ten — ${R2.most()} creates in flight at once (the storm the line exists to prevent)`);
   await endAll(R2);
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: '① ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: '① ' })) ok(!!r.pass, r.name, r.detail);
 }
 
 console.log('— ② ONE ASKER\'S ELEVENTH WAITING RESUME is refused by name, with the count');
@@ -80,10 +81,10 @@ console.log('— ③ THE SAME CONVERSATION TWICE: joined');
   const R = rig(), line = createResumeLine({ start: R.start });
   const a = line.submit({ target: 'claude:same', by: 'key-4' }), b = line.submit({ target: 'claude:same', by: 'key-5' });
   await tick(1);
-  ok(a.ok && b.ok && b.joined === true && R.started.length === 1, `③ the second ask for a conversation in line JOINS it — ${R.started.length} start`, { a: a.position, b });
+  ok(!!a.ok && !!b.ok && b.joined === true && R.started.length === 1, `③ the second ask for a conversation in line JOINS it — ${R.started.length} start`, { a: a.position, b });
   await endAll(R);
   const [ra, rb] = await Promise.all([a.result, b.result]);
-  ok(ra && rb && ra === rb && ra.target === 'claude:same', '③ …both askers hear the same end');
+  ok(!!ra && !!rb && ra === rb && ra.target === 'claude:same', '③ …both askers hear the same end');
 }
 
 console.log('— ④ A START THAT THROWS OR REFUSES FREES ITS PLACE');
@@ -96,7 +97,7 @@ console.log('— ④ A START THAT THROWS OR REFUSES FREES ITS PLACE');
   await tick(5);
   ok(R.started.join() === 'claude:x0,claude:x1,claude:x2,claude:x3', `④ a thrown start and a refused one each free their place: the next two start (${R.started.join(' ')})`);
   const r0 = await s[0].result;
-  ok(r0 && r0.ok === false && /unreachable/.test(r0.why), '④ …and the thrown start answers its asker by name', r0);
+  ok(!!r0 && r0.ok === false && /unreachable/.test(r0.why), '④ …and the thrown start answers its asker by name', r0);
   await endAll(R);
 }
 
@@ -124,11 +125,11 @@ console.log('— ⑦ ONE START HAS A BOUND');
   const B = await run(40);
   const ra = await B.a.result;
   ok(B.started.join() === 'codex:hang-1,codex:hang-2,claude:next', `⑦ two starts that never answer: at their bound (40 ms) both places free — the third STARTS (${B.started.join(' ')})`, B.started);
-  ok(ra && ra.ok === false && /^the start did not answer in 40 ms — its place in line is freed$/.test(ra.why) && B.lines.filter((l) => /^\[resume-line\] codex:hang-1: did not start — the start did not answer in 40 ms/.test(l)).length === 1, '⑦ …its asker is answered with the reason, and ONE named line says it', { ra, lines: B.lines });
+  ok(!!ra && ra.ok === false && /^the start did not answer in 40 ms — its place in line is freed$/.test(ra.why) && B.lines.filter((l) => /^\[resume-line\] codex:hang-1: did not start — the start did not answer in 40 ms/.test(l)).length === 1, '⑦ …its asker is answered with the reason, and ONE named line says it', { ra, lines: B.lines });
   B.gates.get('codex:hang-1')({ ok: true, sessionId: 'sess-late' });
   await tick(5);
   const st = B.line.state();
-  ok(B.lines.some((l) => /^\[resume-line\] codex:hang-1: its start answered after its bound — dropped \(it started\)$/.test(l)) && st.running === 0 && st.waiting === 0 && (await B.c.result).ok, '⑦ a late answer is dropped and said (the in-flight map below keeps one conversation from starting twice); it frees nothing twice', { lines: B.lines, st });
+  ok(B.lines.some((l) => /^\[resume-line\] codex:hang-1: its start answered after its bound — dropped \(it started\)$/.test(l)) && st.running === 0 && st.waiting === 0 && !!((await B.c.result).ok), '⑦ a late answer is dropped and said (the in-flight map below keeps one conversation from starting twice); it frees nothing twice', { lines: B.lines, st });
   const N = await run(Infinity);
   ok(N.started.join() === 'codex:hang-1,codex:hang-2' && N.line.state().waiting === 1, `⑦ RED CONTROL: no bound — two starts that never answer hold both places and the third NEVER starts (${N.started.join(' ')}; waiting ${N.line.state().waiting})`);
 }
@@ -154,5 +155,5 @@ console.log('— ⑥ THE ROW\'S DESKTOP');
   ok(L.rowDesktopOf(L1, 'claude:c-1').id === 'desk-a', '⑥ rows on two desktops ⇒ the first in the desktops\' own order');
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+console.log(`\n${counts.pass} passed, ${counts.fail} failed`);
+process.exit(counts.fail ? 1 : 0);

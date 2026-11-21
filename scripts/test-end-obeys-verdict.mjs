@@ -18,6 +18,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
 import { scratch, anchored } from './scratch.mjs';
+import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CF = require(path.join(REPO, 'src/conversation-facts.js'));
@@ -27,8 +28,8 @@ const BR = require(path.join(REPO, 'src/server/boot-restore.js'));
 const ROOT = scratch('end-obeys-verdict');
 fs.mkdirSync(ROOT, { recursive: true });
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
-let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+
+const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
 
 const CID = 'e2e00000-0000-4000-8000-0000000000a1', CALLER = 'e2e00000-0000-4000-8000-0000000000ee';
 const KEEPS = { sidecarFacts: { background: true, timers: true, lastRecordAt: true } };
@@ -90,10 +91,10 @@ console.log('① the end obeys the verdict');
   const rp = await partial.call({ target: CID });
   ok(!rb.ok && rb.busy.some((b) => b.code === 'browser') && uk.every(([, c, b]) => c === 'subject_busy' && /_unknown/.test(b)) && rp.code === 'person_only' && /its harness/.test(rp.why),
     'the browser reason refuses; EACH unknown refuses with its _unknown code; a harness row that keeps only SOME sidecar facts (read from the same caps the rows use) is person_only', { browser: rb.code, uk, partial: rp.code });
-  ok(ft.ok && forcedTerm.ended.length === 1, 'force on a terminal conversation THIS key opened ends it (the coordinator\'s own terminal worker — the changelog says so)', ft);
+  ok(!!ft.ok && forcedTerm.ended.length === 1, 'force on a terminal conversation THIS key opened ends it (the coordinator\'s own terminal worker — the changelog says so)', ft);
   const idle = world();
   const r = await idle.call({ target: CID });
-  ok(r.ok && idle.ended.length === 1 && r.link === `vibespace://conversation/claude:${CID}`, 'an idle conversation with every fact known is ended — the answer carries its link', r);
+  ok(!!r.ok && idle.ended.length === 1 && r.link === `vibespace://conversation/claude:${CID}`, 'an idle conversation with every fact known is ended — the answer carries its link', r);
   // RED CONTROL: the verdict switched off
   const MUT = mutantCopies('end-obeys-verdict', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
@@ -102,7 +103,7 @@ console.log('① the end obeys the verdict');
   const M = MUT.load('src/server/conversation-ops.js', anchored(src, NEEDLE, '    void v;', 'verdict-cleared'), 'verdict-cleared');
   const red = world({ s: session({ _turn: 'running' }), ops: M });
   const rr = await red.call({ target: CID });
-  ok(rr.ok && red.ended.length === 1, 'RED CONTROL the verdict switched off: the mid-turn end goes THROUGH — the legs above would be red', rr);
+  ok(!!rr.ok && red.ended.length === 1, 'RED CONTROL the verdict switched off: the mid-turn end goes THROUGH — the legs above would be red', rr);
 }
 
 console.log('②b ONE GATE for the sibling verb, the recipe taught, the door that exists (主开发 15:0xZ musts 1–3)');
@@ -135,7 +136,7 @@ console.log('②b ONE GATE for the sibling verb, the recipe taught, the door tha
     return { call: (args) => verbs['conversations.archive'](args, { caller: { conversationId: CALLER, sessionKey: `claude:${CALLER}` }, keyId: 'k1', reach: () => ({ ok: true, by }) }), ended, archived, resolved };
   };
   const AR = archAsk('grant'); const ar0 = await AR.call({ target: CID }); const ar1 = await AR.call({ target: CID, resolveAsks: true });
-  ok(ar0.code === 'asks_open' && ar1.ok && ar1.archived === true && AR.resolved.join() === 'q1' && AR.ended.length === 1,
+  ok(ar0.code === 'asks_open' && !!ar1.ok && ar1.archived === true && AR.resolved.join() === 'q1' && AR.ended.length === 1,
     'the archive\'s own recipe: an idle granted conversation with one open ask — without --resolve-asks «asks open»; WITH it the gate discounts those asks: archived, the ask resolved', { ar0: ar0.code, ar1 });
   // «forced» only when the gate WOULD have refused: an idle own worker ended with the force word is no «ended mid-task»
   const idleOwn = world(); await idleOwn.call({ target: CID, force: true }, 'opener');
@@ -154,7 +155,7 @@ console.log('②b ONE GATE for the sibling verb, the recipe taught, the door tha
   const selfW = world({ s: session({ _turn: 'running', backendSessionId: CALLER }) });
   const s1 = await selfW.call({ target: CALLER });
   const s2 = await selfW.call({ target: CALLER, force: true });
-  ok(s1.code === 'subject_busy' && /It is this conversation itself: pass force \(--force\)/.test(s1.why) && s2.ok && selfW.ended.length === 1,
+  ok(s1.code === 'subject_busy' && /It is this conversation itself: pass force \(--force\)/.test(s1.why) && !!s2.ok && selfW.ended.length === 1,
     'MUST 2 a conversation ending ITSELF: its own turn runs, so it is refused — and taught; with force it ends (a conversation is its own: self counts as its opener)', { s1: s1.why, s2 });
   const inst = await world({ s: session({ _turn: 'running' }) }).call({ target: CID, force: true }, 'instance');
   const grp = await world({ s: session({ _turn: 'running' }) }).call({ target: CID, force: true }, 'groups');
@@ -169,13 +170,13 @@ console.log('② force — only for a conversation this key opened');
 {
   const opened = world({ s: session({ _turn: 'running' }) });
   const a = await opened.call({ target: CID, force: true }, 'opener');
-  ok(a.ok && opened.ended.length === 1, 'force on a conversation THIS key opened ends it, busy as it is (the coordinator\'s own worker)', a);
+  ok(!!a.ok && opened.ended.length === 1, 'force on a conversation THIS key opened ends it, busy as it is (the coordinator\'s own worker)', a);
   const granted = world({ s: session({ _turn: 'running' }) });
   const b = await granted.call({ target: CID, force: true }, 'grant');
   ok(!b.ok && b.code === 'force_not_yours' && granted.ended.length === 0 && /nothing was stopped/.test(b.why), 'force on a conversation reached through a GRANT ⇒ force_not_yours, nothing ended', b);
   const AK = require(path.join(REPO, 'src/automation-keys.js'));
   const row = AK.scopeOf('conversations.end');
-  ok(row.args({ target: CID, force: true }).ok && row.args({ target: CID, force: true }).args.force === true && !row.args({ target: CID, bogus: 1 }).ok, 'the closed table: conversations.end takes target and an optional force');
+  ok(!!(row.args({ target: CID, force: true }).ok) && row.args({ target: CID, force: true }).args.force === true && !row.args({ target: CID, bogus: 1 }).ok, 'the closed table: conversations.end takes target and an optional force');
 }
 
 // ③ + ④ the REAL boot-restore's kept record over scratch dirs, and the real ops' end road around a stub kill body
@@ -205,7 +206,7 @@ console.log('③ a person\'s Terminate ends a busy conversation');
   const t0 = Date.now();
   await ops().endConversation({ sessionId: 'sess-p' }, { kind: 'human', actBy: 'person@sign-in' });
   const row = await rowOf('e2e00000-0000-4000-8000-0000000000b2');
-  ok(!active.has('sess-p') && row && row.stopReason === 'ended' && row.endedBy && row.endedBy.kind === 'person' && row.endedBy.actorId === null && row.endedBy.name === null && row.stoppedAt >= t0,
+  ok(!active.has('sess-p') && !!row && row.stopReason === 'ended' && !!row.endedBy && row.endedBy.kind === 'person' && row.endedBy.actorId === null && row.endedBy.name === null && row.stoppedAt >= t0,
     'the person\'s Terminate ends it (the verdict is the agent\'s door only) — its row: ended, by a person, when', row);
 }
 
@@ -219,7 +220,7 @@ console.log('④ the kept record: who and when; the race; a resume');
   const r = await ops().endConversation({ webuiId: 'sess-a' }, { kind: 'automation', key: 'k1', cid: CALLER, sessionKey: `claude:${CALLER}`, name: 'Manager' });
   duringKill = null;
   const row = await rowOf('e2e00000-0000-4000-8000-0000000000c3');
-  ok(r.ok && row && row.stopReason === 'ended' && row.endedBy.kind === 'agent' && row.endedBy.actorId === 'k1' && row.endedBy.name === 'Lane dispatch' && row.stoppedAt >= t0 && row.name === 'Finished worker',
+  ok(!!r.ok && !!row && row.stopReason === 'ended' && row.endedBy.kind === 'agent' && row.endedBy.actorId === 'k1' && row.endedBy.name === 'Lane dispatch' && row.stoppedAt >= t0 && row.name === 'Finished worker',
     'after an admitted end the stopped row carries reason ended, WHO (an agent: its KEY\'s id and name — the contract) and when — and the name it had', row);
   ok(Array.isArray(readDuring) && fs.existsSync(path.join(META, 'cw-3-1794880000003.json.stopped')), 'a session-list read DURING the kill did not eat the kept record (it was written after the session left the live map)', { readDuring: readDuring && readDuring.length });
   // CONTROL: registering the copy BEFORE the kill — the read during the kill consumes it (its conversation is still live)
@@ -245,7 +246,7 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   await ops(api.keepEnded, { endFactsBefore: (s, id) => api.endFactsBefore(s, id, { boundMs: 80, read: never }) }).endConversation({ sessionId: 'sess-n' }, { kind: 'human', actBy: 'person@sign-in' });
   const rn = JSON.parse(fs.readFileSync(path.join(META, 'cw-6-1794880000006.json.stopped'), 'utf8'));   // the record itself (the page's row carries who and when)
   const src = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
-  ok(!active.has('sess-n') && rn && rn.endedBy && rn.endedBy.actorId === null && rn.endFacts && rn.endFacts.goalStated === false && rn.endFacts.queueRead === false && /not read within 80 ms/.test(rn.endFacts.notStated) && rn.endFacts.folder === '/srv/w' && rn.endFacts.mode === 'chat' && src.includes('const END_READ_MS = 1000;'),
+  ok(!active.has('sess-n') && !!rn && !!rn.endedBy && rn.endedBy.actorId === null && !!rn.endFacts && rn.endFacts.goalStated === false && rn.endFacts.queueRead === false && /not read within 80 ms/.test(rn.endFacts.notStated) && rn.endFacts.folder === '/srv/w' && rn.endFacts.mode === 'chat' && src.includes('const END_READ_MS = 1000;'),
     'a read that NEVER settles: the Terminate returns at the bound (a second by default), the record is written from memory and its facts say «not stated»', { facts: rn && rn.endFacts });
   // the facts read from a real sidecar: the goal keys HELD, the claude wrapper's own queue
   fs.writeFileSync(path.join(BUF, 'sess-g.json'), JSON.stringify({ mode: 'chat', goal: 'Ship the release', queue: [{ id: 1 }, { id: 2 }], queueReadAt: 1794880000000 }));
@@ -253,7 +254,7 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   await ops().endConversation({ sessionId: 'sess-g' }, { kind: 'human', actBy: 'person@sign-in' });
   const g = JSON.parse(fs.readFileSync(path.join(META, 'cw-7-1794880000007.json.stopped'), 'utf8'));
   const f = g.endFacts || {};
-  ok(g.endedBy && g.endedBy.kind === 'person' && g.endedBy.actorId === null && f.goalStated === true && f.goalStatus === 'active' && !('goal' in f) && f.queueRead === true && f.queueCount === 2 && f.mode === 'chat' && f.folder === '/srv/g' && f.machine === 'box-2' && !f.notStated,
+  ok(!!g.endedBy && g.endedBy.kind === 'person' && g.endedBy.actorId === null && f.goalStated === true && f.goalStatus === 'active' && !('goal' in f) && f.queueRead === true && f.queueCount === 2 && f.mode === 'chat' && f.folder === '/srv/g' && f.machine === 'box-2' && !f.notStated,
     'the facts as of the end, read once from its sidecar: goalStated (the goal keys HELD) and its status, queueRead (the wrapper\'s own mark) and the count, the mode, the folder, the machine', f);
   // the codex wrapper's queue: an empty list it began with is NOT a read; its `queueRead` mark is
   fs.writeFileSync(path.join(BUF, 'sess-c1.json'), JSON.stringify({ mode: 'chat', queue: [] }));
@@ -270,7 +271,7 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   const cut = (await rowOf('e2e00000-0000-4000-8000-0000000000e9')) || {};
   active.set('sess-t', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000ea', sockName: 'cw-12-1794880000012', name: 'Throws' }));
   const rt = await ops(async () => { throw new Error('disk full'); }).endConversation({ webuiId: 'sess-t' }, { kind: 'automation', key: 'k1' });
-  ok(cut.endedBy && cut.endedBy.forced === true && /^Ended mid-task by «Lane dispatch» at /.test(SW.stoppedWhyText('ended', cut)) && rt && rt.ok !== false && !active.has('sess-t'),
+  ok(!!cut.endedBy && cut.endedBy.forced === true && /^Ended mid-task by «Lane dispatch» at /.test(SW.stoppedWhyText('ended', cut)) && !!rt && rt.ok !== false && !active.has('sess-t'),
     'a FORCED end says so on the stopped row («Ended mid-task by «…»»); a record write that THROWS never fails the end', { by: cut.endedBy, rt });
   // an END OUTRANKS A RESTART: an earlier boot kept an ended record; a later restart's copy of the same conversation is newer
   const M2 = path.join(ROOT, 'meta2'); fs.mkdirSync(M2, { recursive: true });
@@ -316,7 +317,7 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
     return { before, planted, atTurn, row: row && { stopReason: row.stopReason, endedBy: row.endedBy || null }, file: fs.existsSync(file) };
   };
   const kept = await resumeThatFails(BR, path.join(ROOT, 'meta5'), 'e2e00000-0000-4000-8000-0000000000ee', 'cw-16-1794880000016');
-  ok(!createRoadConsumes(wc, BR) && kept.before && kept.planted === null && kept.atTurn === null && kept.row && kept.row.stopReason === 'ended' && kept.row.endedBy && kept.row.endedBy.kind === 'person' && kept.file,
+  ok(!createRoadConsumes(wc, BR) && !!kept.before && kept.planted === null && kept.atTurn === null && !!kept.row && kept.row.stopReason === 'ended' && !!kept.row.endedBy && kept.row.endedBy.kind === 'person' && !!kept.file,
     'THE CREATE ROAD CONSUMES NOTHING: a resume that FAILS keeps the copy and its end record — listed again «ended» by a person, its file kept (ws-create holds no consume, boot-restore exports none)', kept);
   // the RED: the create road's consume PUT BACK (the stack's piece 3 as it was: ws-create calls the module's consumeEnded, which
   // drops the kept copy, memory and file) — its plant proven first (it consumed at registration), then the copy and record are lost
@@ -326,14 +327,14 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   const MUTC = mutantCopies('create-road-consume', REPO).load('src/server/boot-restore.js', anchored(anchored(src, RET, '  liveConsume = async (key) => { await loadKept(); const e = keptStopped.get(String(key || \'\')); if (!e) return false; keptStopped.delete(String(key || \'\')); fs.unlink(keptFile(e.sockFile), () => { }); return true; };\n' + RET, 'consume-at-create'),
     EXP, 'let liveConsume = null;\nfunction consumeEnded(key) { return liveConsume ? liveConsume(key) : Promise.resolve(false); }\n' + EXP + ' consumeEnded,', 'consume-at-create'), 'consume-at-create');
   const lost = await resumeThatFails(MUTC, path.join(ROOT, 'meta6'), 'e2e00000-0000-4000-8000-0000000000ef', 'cw-17-1794880000017');
-  ok(createRoadConsumes(wc.replace(LIVE, LIVE + '          ' + PUT), BR) && lost.before && lost.planted === true && !lost.row && !lost.file,
+  ok(!!(createRoadConsumes(wc.replace(LIVE, LIVE + '          ' + PUT), BR)) && !!lost.before && lost.planted === true && !lost.row && !lost.file,
     'RED: the create road\'s consume put back — it consumed at registration (the plant took), and the failed resume LOST the copy and its end record', lost);
   // the ONE consume: a turn that RAN on the live conversation — memory and file; nothing kept ⇒ null
   active.set('sess-k', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000e8', sockName: 'cw-10-1794880000010', name: 'Consumed' }));
   await ops().endConversation({ sessionId: 'sess-k' }, { kind: 'human', actBy: 'person@sign-in' });
   const had = !!(await rowOf('e2e00000-0000-4000-8000-0000000000e8'));
   const gone = await api.consumeKeptOf({ backend: 'claude', mode: 'chat', claudeSessionId: 'e2e00000-0000-4000-8000-0000000000e8', backendSessionId: 'e2e00000-0000-4000-8000-0000000000e8' }, RAN);
-  ok(had && gone === 'cw-10-1794880000010' && !(await rowOf('e2e00000-0000-4000-8000-0000000000e8')) && !fs.existsSync(path.join(META, 'cw-10-1794880000010.json.stopped'))
+  ok(!!had && gone === 'cw-10-1794880000010' && !(await rowOf('e2e00000-0000-4000-8000-0000000000e8')) && !fs.existsSync(path.join(META, 'cw-10-1794880000010.json.stopped'))
     && (await api.consumeKeptOf({ backend: 'claude', claudeSessionId: 'e2e00000-0000-4000-8000-00000000none' }, RAN)) === null,
     'the end record leaves with its copy at a turn that RAN on the live conversation (boot-restore consumeKeptOf): memory and file; nothing kept ⇒ null', { had, gone });
   // 主开发 15:31Z must 2 — a PAIRED MACHINE's end: the row carries its machine (never a local row), the ageing leaves it alone
@@ -342,7 +343,7 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   const rh = (await rowOf('e2e00000-0000-4000-8000-0000000000eb')) || {};
   const SR = require(path.join(REPO, 'src/routes/sessions.js'));
   const merged = typeof SR.mergeKeptStopped === 'function' ? SR.mergeKeptStopped([], [rh]) : null;
-  ok(rh.host === 'box-9' && rh.cwd === '/home/far' && (!merged || (merged[0] && merged[0].host === 'box-9')) && src.includes("if (m.stopReason === STOP_ENDED && !m.host) {"),
+  ok(rh.host === 'box-9' && rh.cwd === '/home/far' && (!merged || (!!(merged[0]) && merged[0].host === 'box-9')) && src.includes("if (m.stopReason === STOP_ENDED && !m.host) {"),
     'a paired machine\'s Terminate: the stopped row carries its machine (never a local row; a resume goes there) and the ageing never asks this machine for its transcript', { host: rh.host, merged: merged && merged[0] && merged[0].host });
   // a Terminate sent with a STALE page id writes its record (the end's read uses the kill body's own fallback)
   active.set('sess-live', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000ec', sockName: 'cw-14-1794880000014', name: 'Stale page' }));
@@ -460,11 +461,11 @@ console.log('⑩ THE STORE HELD UNREAD (the hold\'s law, 主开发 2026-11-19 05
   ok(held.list.r.ok === true && !listed(held.list) && held.list.r.groupsUnreadable === true && /1 conversation\(s\)/.test(held.list.r.beyondWhy || ''), 'the LIST while held: the target is not listed, and the answer SAYS why (groupsUnreadable, beyondWhy) — never a silent «beyond reach»', held.list.r);
   ok(held.live.r.code === 'groups_unreadable' && held.dead.r.code === 'groups_unreadable' && UNREAD.test(held.dead.r.why || '') && held.live.submits === 0 && held.dead.submits === 0, 'the RESUME while held: refused BY NAME for a live target and for an ended one (its record\'s groups read from the same held store) — NOTHING queued (the counting resume line saw no submit)', { live: held.live, dead: held.dead });
   ok(red.end.ended === 1 && red.end.r.code !== 'groups_unreadable', 'RED CONTROL: the end\'s fact dropped — the key «except T-G» ENDS T-G\'s conversation (the harm the law exists for)', red.end);
-  ok(listed(red.list) && !red.list.r.groupsUnreadable, 'RED CONTROL: the list\'s fact dropped — T-G\'s conversation is LISTED to a key that excepts T-G', { listed: listed(red.list) });
+  ok(!!(listed(red.list)) && !red.list.r.groupsUnreadable, 'RED CONTROL: the list\'s fact dropped — T-G\'s conversation is LISTED to a key that excepts T-G', { listed: listed(red.list) });
   ok(red.live.r.code !== 'groups_unreadable' && red.dead.r.code !== 'groups_unreadable' && red.dead.submits === 1 && red.dead.r.queued === true, 'RED CONTROL: each resume\'s fact dropped — the reach ADMITS the target: the ended one is QUEUED on the resume line for a key that excepts its group (the live one goes on to «not ended»)', { live: red.live.r.code, dead: red.dead });
   ok(red.unnamed.r.code === 'not_granted' && red.unnamed.ended === 0, 'RED CONTROL: the reach judge without its named refusal — refused as «not in the Task Groups this grant reaches» (the wrong words; the law says unknown)', red.unnamed.r.code);
   const rel = await run(OPS, 'conversations.end', { target: CID }), relList = await run(OPS, 'conversations.list', {});
-  ok(rel.ended === 1 && listed(relList) && !relList.r.groupsUnreadable, 'CONTROL — the store READ (no hold): the same key ends and lists the target (its groups read [] are real: in no group)', { ended: rel.ended, listed: listed(relList) });
+  ok(rel.ended === 1 && !!(listed(relList)) && !relList.r.groupsUnreadable, 'CONTROL — the store READ (no hold): the same key ends and lists the target (its groups read [] are real: in no group)', { ended: rel.ended, listed: listed(relList) });
   // piece 6 (browsers.stop, re-landed for the next block — 主开发 r957/r968): THE STOP while held, the same key «everything except
   // T-G» — a browser held by T-G's conversation is NOT stopped: refused groups_unreadable BY NAME (never «it is not yours»), nothing
   // stopped. RED: the stop's fact dropped — the key STOPS it. CONTROL: the store read, the same key stops it (in no group is real).
@@ -516,5 +517,5 @@ console.log('⑪ THE NAME LADDER (主开发 2026-11-20 03:06Z): keeping a record
   ok(redName === 'Session 2', 'RED CONTROL: the merge taking the kept name whenever it has one — the ended untitled conversation reads «Session 2» (what the hosted run saw)', redName);
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+console.log(`\n${counts.pass} passed, ${counts.fail} failed`);
+process.exit(counts.fail ? 1 : 0);
