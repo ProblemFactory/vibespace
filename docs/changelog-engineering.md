@@ -184,6 +184,10 @@ This file is the engineers' record of every release: the lanes, the verification
 ### lg-providers — B-ee0a's smalls: the mount config door on the person verdict, no-store first, one carried-credential rule
 - B-ee0a's take's smalls (主开发 2026-11-19 08:50Z; moved onto 2.369.413): the mount config door with no vault on the same person verdict (GET, and the page's POST); the reveal's no-store before both branches, its GET kept only for older pages; the import's order and the kept GET's rows driven; ONE rule spots a carried credential (vault.js's, query tokens too — desktop-apps and exit-routes ask it); a removed machine takes its kept tail.
 
+### bl-machines-a B-8703 unit 2 follow, the smalls (主开发 r976, round weorx6iw2) — ONE verdict in every account list, ONE last day
+- `oatDeadFor` moves to src/login-expiry.js (PURE, imports nothing) beside `oatExpiredBy`, the ONE last day: the server serves a long-lived token until mint + TTL and a row's `oatDaysLeft` is the floor of the days left, so 0 days left still serves — expired is below 0. Every reader asks them: the billing menu, Session Properties, the New Session dialog (its remote branch now refuses by the menu's verdict, so a signed-in account the verdict lets through is no longer refused there), the resume's verdict (src/resume-account.js rowServes), Manage Agents' marks, labels and re-bind targets, and the server's expiry notice (no «EXPIRED» on the last day; its words name the menu item). accountBound's comment is back above accountBound.
+- LEGS (test-needs-doors): the three lists over one fixture of seven accounts (the last day among them, serving in all three); a census of hand-written day comparisons in the six files that judge them, with a planted control; the temporary browser's door opens the whole list. test-oat-identity: an expired mark at -1 days, none on the last day.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
