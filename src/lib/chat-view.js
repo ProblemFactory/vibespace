@@ -3524,9 +3524,8 @@ class ChatView {
   _sayHistoryNotLoaded(code, { again = false, info = null } = {}) {
     if (!code) return;
     this._historyNotLoadedCode = code;
-    const at = this._retryAtOf(info);
     const owed = this._historyReadyOwed; this._historyReadyOwed = false;   // `history-ready` came while this answer was on its way: ask again soon
-    this._scheduleHistoryReask(at, { prompt: owed });
+    const at = this._scheduleHistoryReask(this._retryAtOf(info), { prompt: owed });   // the time the page REALLY asks again (the back-off, an earlier ask kept)
     if (!again && this._historyNotLoadedSaid === code + (this._lastAttachedAt || 0)) return;
     this._historyNotLoadedSaid = code + (this._lastAttachedAt || 0);
     // ONE line: a later answer REPLACES it (a view's re-asks never pile lines up), and the history that loads removes it
@@ -3537,17 +3536,21 @@ class ChatView {
   /** the history loaded (an attach said nothing of it): no more re-asks, the line gone */
   _historyLoadedNow() {
     this._historyNotLoadedCode = null; this._historyReaskTries = 0; this._historyReadyOwed = false;
-    clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null;
+    clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null; this._historyReaskDue = 0;
     try { this._historyNotLoadedEl?.remove(); } catch { } this._historyNotLoadedEl = null;
   }
   /** one re-ask at `at` while the window lives and its history is still not loaded — never sooner than its BACK-OFF (2 s, doubling at
    *  each re-ask answered «not loaded» again: a re-ask of a live window is a whole re-attach), never later than 10 min; `prompt`
-   *  (the server said `history-ready` meanwhile): 2 s */
+   *  (the server said `history-ready` meanwhile): 2 s. An EARLIER ask already set stands (one answer is said twice — the attach
+   *  handler, then the reset its new rebuild arms — and the second must not push the first's prompt ask back). → the time it asks */
   _scheduleHistoryReask(at, { prompt = false } = {}) {
-    clearTimeout(this._historyReaskTimer);
     const floor = prompt ? 2000 : Math.min(10 * 60000, 2000 * 2 ** Math.min(this._historyReaskTries || 0, 9));
-    const wait = Math.min(10 * 60000, Math.max(floor, (Number(at) || 0) - Date.now()));
-    this._historyReaskTimer = setTimeout(() => this._reaskHistory(), wait);
+    const due = Date.now() + Math.min(10 * 60000, Math.max(floor, (Number(at) || 0) - Date.now()));
+    if (this._historyReaskTimer && this._historyReaskDue && this._historyReaskDue <= due) return this._historyReaskDue;
+    clearTimeout(this._historyReaskTimer);
+    this._historyReaskDue = due;
+    this._historyReaskTimer = setTimeout(() => this._reaskHistory(), due - Date.now());
+    return due;
   }
   /** the server's push (`history-ready`): ask again now — unless a re-ask is already on its way (its answer is the history, or it
    *  owes one more ask soon) */
@@ -3557,12 +3560,14 @@ class ChatView {
     this._reaskHistory();
   }
   _reaskHistory() {
-    clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null;
+    clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null; this._historyReaskDue = 0;
     if (this._disposed || !this._historyNotLoadedCode) return;
     this._historyReaskTries = (this._historyReaskTries || 0) + 1;
     this._historyReaskSentAt = Date.now();
     if (!this._readOnly) { this._reattach(false); return; }   // a live window: the attach reads it again (its answer re-renders, or says it again)
-    const spec = this._viewAttachSpec;   // a view-only window: its view request again — its OWN answer only (one socket, every window)
+    // a view-only window: its view request again — its OWN answer only (one socket, every window); a live window whose session
+    // ENDED meanwhile (read-only, no view request of its own) asks its conversation's view — the line said it fills in by itself
+    const spec = this._viewAttachSpec || (this._viewAttachSpec = this._viewSpecOfIds());
     if (!spec || !this.ws?.request) return;
     const sid = spec.sessionId;
     try { this._historyReaskCancel?.(); } catch { }
@@ -3577,14 +3582,27 @@ class ChatView {
       return true;
     }, { isAlive: () => !this._disposed, timeoutMs: 20000, onTimeout: () => this._scheduleHistoryReask(0), resend: true });
   }
-  /** a view-only window's re-asked slab REPLACES the one it drew (never added under it); a slab that is the tail it holds already
-   *  (the same records, the same total — the pages a person scrolled up to kept) is left as it is */
+  /** a view-only window's re-asked slab REPLACES the one it drew (never added under it) — unless it is still the copy drawn: «not
+   *  loaded» again over the same total, or the tail it holds already (where a person paged or jumped to stays as it is) */
   _reloadViewSlab(msg) {
-    const ms = msg.messages, cur = this._messages || [], off = cur.length - ms.length;
-    if (off >= 0 && this._total === (msg.totalCount || ms.length) && ms.every((m, i) => cur[off + i]?.id === m?.id)) return;
-    this._messageList.querySelectorAll('.chat-msg:not(.chat-msg-system)').forEach(el => el.remove());
+    const ms = msg.messages, cur = this._messages || [], off = cur.length - ms.length, total = msg.totalCount || ms.length;
+    if (msg.historyNotLoaded && this._total === total) return;
+    if (off >= 0 && this._total === total && ms.every((m, i) => cur[off + i]?.id === m?.id)) return;
+    // the RESET's road (_fullViewReset): every row it drew goes — a record drawn as a system row too (a peer message, a hook note, a
+    // compaction notice) — and the page's own lines are said again after the slab (the «not loaded» one by the caller)
+    this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
     this._resetGapAfterJump(); this._elements.clear(); this._renderedMsgIds.clear(); this._messages = []; this._newMsgCount = 0;
     this.loadHistory(ms, msg.totalCount, false, { chatStatus: msg.chatStatus });
+    if (this._rescueNoteSaid) this._renderers.appendSystem(t('The session is no longer running — showing saved history.'));
+  }
+  /** the view request of this window's own conversation (its ids) — for a re-ask of a window whose session ended; never a sub-agent's
+   *  viewer (its ids fall back to the PARENT's) nor a placeholder `sess-N` (no transcript) */
+  _viewSpecOfIds() {
+    if (this.sessionId.startsWith('sub-')) return null;
+    const ids = this._getSessionIds() || {}, bsid = ids.backendSessionId;
+    if (!bsid || /^sess-\d/.test(bsid)) return null;
+    const backend = ids.backend || 'claude';
+    return { type: 'attach', sessionId: viewIdFor(backend, bsid), viewOnly: true, backend, slab: this._attachSlabHint(), backendSessionId: bsid, claudeSessionId: legacyIdFor(backend, bsid) ?? undefined, host: ids.host || undefined, cwd: ids.cwd || '', name: this.winInfo?.title || '' };
   }
 
   // ── Whole-conversation minimap for gapped (huge) sessions ──
@@ -7457,7 +7475,7 @@ class ChatView {
       if (msg.messages?.length) this.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
       else if (!msg.historyNotLoaded) this._renderers.appendSystem(t("No messages in this session's transcript yet."));
       if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { info: msg.historyNotLoadedInfo || null });   // row B-422c: never «no messages» for a history the reader refused
-      this._renderers.appendSystem(t('The session is no longer running — showing saved history.'));
+      this._renderers.appendSystem(t('The session is no longer running — showing saved history.')); this._rescueNoteSaid = true;   // row B-422c: said again when a re-ask replaces the slab
       this._setReadOnly();
     };
     this.ws.onGlobal(handler);

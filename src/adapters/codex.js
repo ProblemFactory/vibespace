@@ -893,8 +893,8 @@ function notePoolRefusing(e) { if (!e || POOL_WIDE.has(e.code) || /safeFs closed
 const HISTORY_OPS = new Set(['jsonlTail', 'boundedParsed', 'boundedParsedPage', 'codexHistoryMergedPage']);
 function poolAnswered(fp, op) { _poolRefusedAt = 0; if (HISTORY_OPS.has(op)) forgiveFile(fp); }
 // the pool gone (its construction failed — retried, or given up after POOL_RETRY_MAX) refuses every call too, renewed by nothing
-function poolGone() { return _transcriptPool === false || !!(_transcriptPool && _transcriptPool._closed); }   // closed for good / none on this process: no call can answer
-function poolRefusing() { return poolGone() || (!!_poolRefusedAt && Date.now() - _poolRefusedAt <= POOL_REFUSING_MS); }   // + a pool closed for good: no call needed to say so
+function poolGone() { return (_transcriptPool === false && _poolFails >= POOL_RETRY_MAX) || !!(_transcriptPool && _transcriptPool._closed); }   // closed for good, or its build given up (B-f64b's tries spent): no call can answer until a restart — a build still to be tried again is NOT gone
+function poolRefusing() { return _transcriptPool === false || poolGone() || (!!_poolRefusedAt && Date.now() - _poolRefusedAt <= POOL_REFUSING_MS); }   // + a pool closed for good: no call needed to say so
 const _fileRefusals = new Map();   // fp → { firstAt, lastAt, count, storage, ownDeadline, why } — the pool's refusals of ONE file, standing
 const _slicedSaid = new Set();
 let _slicedChain = Promise.resolve(), _slicedParked = 0;
@@ -952,6 +952,7 @@ function slicedRoadFor(fp, { storageRetry = false } = {}) {
   if (_slicedParked) return { ok: false, why: 'a read on the main process is still parked in a file that never answered' };
   return { ok: true, why: `the transcript reader refused it for ${Math.round(stood / 1000)} s (${rec.count} refusals: ${rec.why})` };
 }
+const STORAGE_FAIL_CODES = new Set(['EIO', 'ETIMEDOUT', 'ESTALE', 'EHOSTDOWN', 'EHOSTUNREACH', 'ENOTCONN', 'ECONNRESET', 'ECONNABORTED', 'EREMOTEIO', 'ENXIO']);
 /** the file's bounded tail bytes, every call async, under ONE deadline (a deadline ⇒ the storage's, `storageHung`) */
 function _readTailBytesAsync(fp) {
   let parked = false, timer = null;
@@ -969,8 +970,10 @@ function _readTailBytesAsync(fp) {
       return { stat, size, lower, from, raw: off === raw.length ? raw : raw.subarray(0, off) };
     } finally { await fh.close().catch((e) => console.warn(`[transcript] the main-process read of ${path.basename(fp)}: its file handle did not close (${e.message})`)); }
   })();
-  const answered = () => { if (parked) { const r = _fileRefusals.get(fp); if (r) r.ownDeadline = false; } };   // ANY late reply — its bytes or its own error (a FIFO's ESPIPE, a gone file) — is the storage answering
-  work.then(answered, answered).finally(() => { if (parked) _slicedParked--; });   // a parked read that answers late frees its place — and the file answered: its own-deadline mark ends
+  // a late reply that is the FILE's answer — its bytes, or the file's own error (a FIFO's ESPIPE, a gone file, a folder) — is the storage
+  // answering; an I/O failure after the hang (EIO, ETIMEDOUT, ESTALE … a soft mount giving up) is the storage FAILING: the mark stays
+  const answered = () => { if (parked) { const r = _fileRefusals.get(fp); if (r) r.ownDeadline = false; } };
+  work.then(answered, (e) => { if (!STORAGE_FAIL_CODES.has(e && e.code)) answered(); }).finally(() => { if (parked) _slicedParked--; });   // a parked read that answers late frees its place — and the file answered: its own-deadline mark ends
   const deadline = new Promise((_, rej) => { timer = setTimeout(() => { parked = true; _slicedParked++; rej(Object.assign(new Error(`no answer in ${SLICED_READ_DEADLINE_MS / 1000} s — the storage hangs`), { code: 'sliced_read_deadline', storageHung: true })); }, SLICED_READ_DEADLINE_MS); });
   return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
 }
