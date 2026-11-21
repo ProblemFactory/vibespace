@@ -41,6 +41,15 @@ const J = JSON.stringify;
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 600) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // a fake DOM just wide enough for the client modules' imports and showToast (its history lands in localStorage)
 const store = new Map();
@@ -354,7 +363,7 @@ console.log('— §8 negative controls (patched copies, scripts/mutant-copy.mjs)
   ok(SMSRC.includes(smFind), 'control hero-alone: the patched line exists in stage-manager.js');
   if (SMSRC.includes(smFind)) {
     // the copy re-evaluates the module: its window-type registration would be a duplicate — the copy drops it (the class is what is judged)
-    const f = M.write('src/lib/stage-manager.js', SMSRC.replace(smFind, '    this.app.wm.setWindowHidden(win, { desktop: false, stage: false });\n').replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n'), 'hero-alone');
+    const f = M.write('src/lib/stage-manager.js', editAnchor(editAnchor(SMSRC, smFind, '    this.app.wm.setWindowHidden(win, { desktop: false, stage: false });\n', "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js"), 'hero-alone');
     const failed = await stageFrameLegs((await import(f)).StageManager, { quiet: true });
     ok(failed.some((n) => /WHOLE group/.test(n)), `control hero-alone: the borrow that shows the hero alone (2.369.196) turns the §10 leg RED (${failed.length}: ${failed.slice(0, 1).join(' | ').slice(0, 140)})`);
   }

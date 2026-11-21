@@ -91,6 +91,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const T0 = Date.now();
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 5000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(25); } return false; };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -415,7 +424,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
   ok(stateOf(n2.P).refused == null && rn6.state === 'ready' && rn6.how === 'prebuilt' && xn4.events.some((e) => e[1] === 'codesign'), 'at the agent\'s next start (another process) the same bytes are judged afresh before the time — a refusal born of unanswered runs does not outlive the process that recorded it', rn6);
   // (h) RED control: a copy of stream-mac.js that skips the verdict puts the unsigned push in place
   const srcText = fs.readFileSync(path.join(REPO, 'src/agentd/stream-mac.js'), 'utf8');
-  const mutantText = srcText.replace("const sv = MI.swapVerdict(", "const sv = { take: true, code: null, why: 'MUTANT' }; void MI.swapVerdict(").replace(/require\('\.\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`).replace(/require\('\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src/agentd', f))})`);
+  const mutantText = editAnchor(srcText, "const sv = MI.swapVerdict(", "const sv = { take: true, code: null, why: 'MUTANT' }; void MI.swapVerdict(", "src/agentd/stream-mac.js").replace(/require\('\.\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`).replace(/require\('\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src/agentd', f))})`);
   const mutantDir = home('smac-idmut'); const mutantFile = path.join(mutantDir, 'stream-mac-mutant.js'); fs.writeFileSync(mutantFile, mutantText);
   const MUT = require(mutantFile);
   const hm = mk('smac-idh', { pushed: true });
@@ -1001,7 +1010,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
       ok(['truncated', 'array', 'null'].every((k) => rec[k].ok === false && rec[k].code === 'helper_unsigned' && /vibespace-screen\.identity\.json unreadable: /.test(rec[k].error) && !/no vibespace-screen\.identity\.json beside it/.test(rec[k].error)) && /unreadable: not a JSON object \(an array\)/.test(rec.array.error) && /unreadable: not a JSON object \(null\)/.test(rec.null.error) && rec.nosha.ok === false && rec.nosha.code === 'helper_unsigned' && /malformed identity record \(vibespace-screen\.identity\.json names no sha256\)/.test(rec.nosha.error) && !/vs undefined/.test(rec.nosha.error) && writes.length === w0, 'r5 record unreadable — an identity record that is THERE but cannot be read (truncated, an array, null) is refused by name «vibespace-screen.identity.json unreadable: <why>», never taken for absent (acceptance r4: c9a6b6ede pushed and said «no record»); one that names no sha256 is called malformed (was «vs undefined»)', rec);
       { // the mutant control: a copy of desktop-webrtc.js whose unreadable-record refusal is skipped takes the truncated record for absent — pushes, and says «no record»
         const hubSrc = fs.readFileSync(path.join(REPO, 'src/server/desktop-webrtc.js'), 'utf8');
-        const mutText = hubSrc.replace('if (identBad !== null) return refuse(', 'if (false && identBad !== null) return refuse(').replace(/require\('\.\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`);
+        const mutText = editAnchor(hubSrc, 'if (identBad !== null) return refuse(', 'if (false && identBad !== null) return refuse(', "src/server/desktop-webrtc.js").replace(/require\('\.\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`);
         const mutFile = path.join(home('smac-hubmut'), 'desktop-webrtc-mutant.js'); fs.writeFileSync(mutFile, mutText);
         const MUT = require(mutFile);
         fs.writeFileSync(idp, '{"version":"vs-other","sha256":"');
@@ -1460,7 +1469,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
       const eEnd10 = await endRun10(DeviceManager);
       const clientText10 = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
       const END_LINE10 = "      if (linkGone()) throw Object.assign(new Error('the link to the machine dropped'), { code: 'stalled' }); // lane apple-signing r10";
-      const mutClient10 = clientText10.replace(END_LINE10, '      void 0; //').replace(/require\('\.\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`).replace(/require\('\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src/agentd', f))})`);
+      const mutClient10 = editAnchor(clientText10, END_LINE10, '      void 0; //', "src/agentd/client.js").replace(/require\('\.\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`).replace(/require\('\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src/agentd', f))})`);
       const mutFile10 = path.join(d10, 'client.r10-no-end-check.js'); fs.writeFileSync(mutFile10, mutClient10);
       const eMut10 = await endRun10(require(mutFile10).DeviceManager);
       ok(clientText10.includes(END_LINE10) && eEnd10 && eEnd10.code === 'stalled' && eEnd10.stage === undefined && mutClient10 !== clientText10 && eMut10 && eMut10.stage === 'connect', 'r10 the end of a push never redials — the link dropped after the last byte ⇒ `stalled` (a delivery: the bytes went), never `stage: \'connect\'`; RED control: client.js without that line marks the same drop «never sent» (a redial\'s connect() throw)', { end: eEnd10 && { code: eEnd10.code, stage: eEnd10.stage }, mut: eMut10 && { code: eMut10.code, stage: eMut10.stage } });

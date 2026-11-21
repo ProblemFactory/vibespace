@@ -16,6 +16,15 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const MUT = mutantCopies('srl', repo);
 const scratch = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'srl-'));
 const { WebSocket } = require('ws');
@@ -31,7 +40,7 @@ const REG = path.join(repo, 'src/server/stream-relays.js');
 const regSrc = read('src/server/stream-relays.js');
 const anchor = "  require('./stream-relay-xpra.js'),\n";
 ok(regSrc.split(anchor).length === 2, 'the registry lists the xpra relay once (the copy adds its line after it)');
-const regCopy = regSrc.replace(anchor, anchor + `  require(${JSON.stringify(fakeFile)}),\n`);
+const regCopy = editAnchor(regSrc, anchor, anchor + `  require(${JSON.stringify(fakeFile)}),\n`, "src/server/stream-relays.js");
 const diff = regCopy.split('\n').filter((l) => !regSrc.split('\n').includes(l));
 ok(diff.length === 1 && /stream-relay-fake\.js/.test(diff[0]), `the fake kind is ONE added line in the registry copy (${diff.length})`);
 const m = new Module(REG, null); m.filename = REG; m.paths = Module._nodeModulePaths(path.dirname(REG)); m._compile(regCopy, REG); m.loaded = true;

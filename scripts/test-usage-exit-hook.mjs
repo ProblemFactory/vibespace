@@ -32,6 +32,15 @@ const children = [];
 armWatchdog({ capMs: 120e3, exit: (code) => { for (const c of children) { try { c.kill('SIGKILL'); } catch { } } process.exit(code); } });
 let pass = 0, fail = 0;
 const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms, what) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await sleep(25); } console.log(`  … waited ${ms} ms for ${what}`); return false; };
 const tmp = scratch('usage-exit-hook');
@@ -130,7 +139,7 @@ const noHookSrc = uhSrc.replace(REG, 'LIVE.set(w, EH.threadAdded(threads));');
 const COUNT = 'const n = EH.unjoinable(live, EH.threadsLeft(live.map((x) => x.tid).filter(Boolean))).length;';
 const everySrc = uhSrc.replace(COUNT, 'const n = live.length;');
 const ehSrc = fs.readFileSync(path.join(REPO, 'src/server/exit-hook.js'), 'utf8');
-const listenerEh = ehSrc.replace('process.reallyExit = function reallyExit(code) {', "process.on('exit', function reallyExit(code) {").replace('return realExit.call(process, code);\n    };', '});');
+const listenerEh = editAnchor(editAnchor(ehSrc, 'process.reallyExit = function reallyExit(code) {', "process.on('exit', function reallyExit(code) {", "src/server/exit-hook.js"), 'return realExit.call(process, code);\n    };', '});', "src/server/exit-hook.js");
 const listenerSrc = uhSrc.replace("require('./server/exit-hook.js')", `require(${JSON.stringify(M.write('src/server/exit-hook.js', listenerEh, 'listener'))})`);
 ok(noHookSrc !== uhSrc && everySrc !== uhSrc && listenerEh !== ehSrc && listenerSrc !== uhSrc, 'the three controls\' edits each hit their anchor (the hook\'s registration, the count, the reallyExit wrap)');
 const legs = {

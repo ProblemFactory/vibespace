@@ -44,6 +44,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 import { rmWorld, DAY, NOW, world, near, same, tick, EST, STEP, stepper, counting } from './usage-relearn-world.mjs'; // the world and its helpers (shared with test-usage-relearn-cap)
 
@@ -310,7 +319,7 @@ console.log('§7 THE TAIL READ ONLY ON PROVEN BYTES (round 2, MUST 1)');
   }
   const M = mutantCopies('usage-relearn-stepped-splice', REPO), src = read('src/usage-estimator.js');
   const a = "    if (c && c.wins && c.ino === st.ino && (c.btime || 0) === (st.birthtimeMs || 0) && st.size > c.size && c.endsNl) {", b = '        for (const [off, want] of c.wins) {';
-  const EM = src.includes(a) && src.includes(b) ? require(M.write('src/usage-estimator.js', src.replace(a, '    if (c && c.wins && c.ino === st.ino && st.size > c.size && c.endsNl) {').replace(b, '        for (const [off, want] of []) {'), 'splice')) : null;
+  const EM = src.includes(a) && src.includes(b) ? require(M.write('src/usage-estimator.js', editAnchor(editAnchor(src, a, '    if (c && c.wins && c.ino === st.ino && st.size > c.size && c.endsNl) {', "src/usage-estimator.js"), b, '        for (const [off, want] of []) {', "src/usage-estimator.js"), 'splice')) : null;
   const R = EM ? run(EM.UsageEstimator) : null;
   ok(!!R && R.some((x) => !x.equal || !x.after), `RED: the round-1 rule (the same inode + a larger size = appended) splices: ${R && R.filter((x) => !x.equal || !x.after).map((x) => x.name + ' ' + x.n.join('/')).join(' · ')}`, R);
 }

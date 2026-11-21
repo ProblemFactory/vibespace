@@ -44,6 +44,15 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 let pass = 0, fail = 0;
 const ok = (c, msg, extra) => { if (typeof msg !== 'string') throw new Error(`ok: the condition goes FIRST, the name second (got a ${typeof msg} for the name)`); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? '\n      ' + JSON.stringify(extra) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 // EVERY RED CONTROL IS BUILT FROM AN ANCHOR IN THE SOURCE — and one whose anchor is gone fails BY NAME, never builds nothing in silence
 // (主开发 04:54Z: cure 4's «releases on failed» control searched for a line that very cure rewrote, built no mutant, and read as «the
 // mutant was not caught»). Every text red and every mutant copy of the suite goes through it.
@@ -120,7 +129,7 @@ const SRC = fs.readFileSync(path.join(REPO, 'src/lib/stale-watch.js'), 'utf-8');
 const GIVE_UP = "if (!(await d.waitReady()).ok) { m.n += 1; noteOnce('wait', { n: m.n }); d.say(srv, 'starting'); d.schedule(staleRetryWait(m.n)); return 'retry'; }";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stale-watch-'));
 fs.writeFileSync(path.join(TMP, 'boot-ladder.mjs'), fs.readFileSync(path.join(REPO, 'src/lib/boot-ladder.js'), 'utf-8'));
-fs.writeFileSync(path.join(TMP, 'mutant.mjs'), SRC.replace(GIVE_UP, "if (!(await d.waitReady()).ok) { noteOnce('wait', {}); return 'retry'; }").replace("from './boot-ladder.js'", "from './boot-ladder.mjs'"));
+fs.writeFileSync(path.join(TMP, 'mutant.mjs'), editAnchor(editAnchor(SRC, GIVE_UP, "if (!(await d.waitReady()).ok) { noteOnce('wait', {}); return 'retry'; }", "src/lib/stale-watch.js"), "from './boot-ladder.js'", "from './boot-ladder.mjs'", "src/lib/stale-watch.js"));
 const RELEASE_LOOK = SRC.includes(GIVE_UP) ? (await import(pathToFileURL(path.join(TMP, 'mutant.mjs')).href)).staleLook : null;
 process.on('exit', () => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { } });
 ok(!!RELEASE_LOOK, 'the RED control is a mutant COPY of the real module (its give-up line found once, schedule taken out)');

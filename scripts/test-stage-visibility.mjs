@@ -31,6 +31,15 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const J = JSON.stringify;
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) { console.error('src/lib/build-version.js is missing — run `npm run build` first'); process.exit(1); }
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
 
@@ -747,7 +756,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const borrowPre = "    try { this.app.sessions?.get(win.id)?.setSuspended?.(false); } catch { }\n    win._hiddenByDesktop = false;\n    this._showWin(win);\n    for (const id of (win._tabChain && Array.isArray(win._tabChain.tabs) ? win._tabChain.tabs : [])) {\n      const m = id !== win.id ? this.app.wm.windows.get(id) : null;\n      if (m && m._hiddenByStage) this._showWin(m);\n    }\n";
   ok(SMSRC.includes(showFind) && SMSRC.includes(borrowFind), 'control stage-own-show: the patched lines exist in stage-manager.js');
   if (SMSRC.includes(showFind) && SMSRC.includes(borrowFind)) {
-    const mut = SMSRC.replace(showFind, showPre).replace(borrowFind, borrowPre).replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(editAnchor(SMSRC, showFind, showPre, "src/lib/stage-manager.js"), borrowFind, borrowPre, "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'stage-own-show');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /THE RE-BORROWED HERO IS DRAWN/.test(n)), `control stage-own-show: the Stage's pre-fix show + borrow turns §2 B RED — the re-borrowed hero keeps content-visibility:hidden (${failed.length}: ${failed.slice(0, 3).join(' | ').slice(0, 220)})`);
@@ -760,7 +769,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const dmPre = "  _hideWin(win) {\n    win._hiddenByDesktop = true;\n    win.element.style.visibility = 'hidden';\n    win.element.style.pointerEvents = 'none';\n    try { win.element.setAttribute('aria-hidden', 'true'); } catch { }\n    try { this.app.sessions?.get(win.id)?.setSuspended?.(true); } catch { }\n    try { if (win.type === 'chat') win.element.style.contentVisibility = 'hidden'; } catch { }\n  }\n";
   ok(DMSRC.includes(dmFind), 'control desktop-own-hide: the patched lines exist in desktop-manager.js');
   if (DMSRC.includes(dmFind)) {
-    const mut = DMSRC.replace(dmFind, dmPre);
+    const mut = editAnchor(DMSRC, dmFind, dmPre, "src/lib/desktop-manager.js");
     M.write('src/lib/desktop-manager.js', mut, 'desktop-own-hide');
     const cc = census({ ...libFiles(), 'src/lib/desktop-manager.js': mut });
     ok(cc.cv.some((x) => x.startsWith('src/lib/desktop-manager.js:')) && cc.aria.some((x) => x.startsWith('src/lib/desktop-manager.js:')) && cc.flag.some((x) => x.startsWith('src/lib/desktop-manager.js:')) && cc.box.length >= 2, `control desktop-own-hide: the pre-fix _hideWin turns the census RED, named (${J({ cv: cc.cv, aria: cc.aria, flag: cc.flag })})`);
@@ -771,7 +780,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const tgPre = "    if (frame._hiddenByDesktop) { if (!win._hiddenByDesktop) this._app?.desktopManager?._hideWin?.(win); return; }\n    if (frame._hiddenByStage) { if (!win._hiddenByStage) this._app?.stage?._hideStage?.(win); return; }\n    const el = win.element;\n    win._hiddenByStage = false; win._hiddenByDesktop = false;\n    el.style.visibility = ''; el.style.pointerEvents = '';\n    try { el.removeAttribute('aria-hidden'); } catch { }\n    if (win.type === 'chat') el.style.contentVisibility = '';\n";
   ok(TGSRC.includes(tgFind), 'control tab-own-marks: the patched line exists in tab-group.js');
   if (TGSRC.includes(tgFind)) {
-    const mut = TGSRC.replace(tgFind, tgPre);
+    const mut = editAnchor(TGSRC, tgFind, tgPre, "src/lib/tab-group.js");
     M.write('src/lib/tab-group.js', mut, 'tab-own-marks');
     const cc = census({ ...libFiles(), 'src/lib/tab-group.js': mut });
     ok(cc.cv.some((x) => x.startsWith('src/lib/tab-group.js:')) && cc.aria.some((x) => x.startsWith('src/lib/tab-group.js:')) && cc.flag.some((x) => x.startsWith('src/lib/tab-group.js:')), `control tab-own-marks: a hand-written show in the tab-group (an alias of win.element) turns the census RED, named (${J({ cv: cc.cv, aria: cc.aria })})`);
@@ -792,7 +801,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const splitFind = '  onChainSplit(left, frame) {\n    if (!this._active || !this.enabled) return;\n';
   ok(SMSRC.includes(splitFind), 'control split-hands-nothing-back: the patched lines exist in stage-manager.js');
   if (SMSRC.includes(splitFind)) {
-    const mut = SMSRC.replace(splitFind, '  onChainSplit(left, frame) {\n    return;\n').replace(/\nregisterWindowType\(\{\n  type: \'stage-placeholder\'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, splitFind, '  onChainSplit(left, frame) {\n    return;\n', "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: \'stage-placeholder\'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'split-hands-nothing-back');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X1 the promoted xg/.test(n)) && failed.some((n) => /X1 leaving the Stage for Work/.test(n)), `control split-hands-nothing-back: c4f17e39's split (nothing handed back) turns §2 X1 RED — the standing session drawn, unowned, and on Work after the leave (verify r2: X2's torn-off guest is now hidden by the frame's own deactivation, so X1 alone is the discriminator) (${failed.length}: ${failed.slice(0, 3).join(' | ').slice(0, 240)})`);
@@ -801,7 +810,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const homeFind = '      if (home && borrowed !== w) this._giveHome(w, home, { beside: w === left, k });\n';
   ok(SMSRC.includes(homeFind), 'control split-keeps-slot: the patched line exists in stage-manager.js');
   if (SMSRC.includes(homeFind)) {
-    const mut = SMSRC.replace(homeFind, '').replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, homeFind, '', "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'split-keeps-slot');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X5 …and q2's box is the GROUP'S HOME/.test(n)) && failed.some((n) => /X6 the torn-off guest r2 is the hero and REMEMBERS/.test(n)), `control split-keeps-slot: 57e900ab's split (no home given) turns §2 X5 + X6 RED (${failed.length}: ${failed.slice(0, 3).join(' | ').slice(0, 240)})`);
@@ -810,7 +819,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const hostFind = "    return host && (host.type === 'chat' || host.type === 'terminal') ? host.id : (win ? win.id : null);\n";
   ok(SMSRC.includes(hostFind), 'control guest-as-hero: the patched line exists in stage-manager.js');
   if (SMSRC.includes(hostFind)) {
-    const mut = SMSRC.replace(hostFind, '    return win ? win.id : null;\n').replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, hostFind, '    return win ? win.id : null;\n', "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'guest-as-hero');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(['X2 THE FRAME IS THE HERO', 'X7 a press into the shown guest', 'X8 a guest of a hidden group', 'X9 re-entered', 'X10 the frame'].every((k) => failed.some((n) => n.includes(k))), `control guest-as-hero: 57e900ab's guest-as-hero (no frame resolution) turns §2 X2 + X7 + X8 + X9 + X10 RED (${failed.length}: ${failed.slice(0, 3).join(' | ').slice(0, 240)})`);
@@ -819,7 +828,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const syncFind = '    if (hero._tabChain) { try { this.app.wm._syncChainBounds(hero._tabChain); } catch {} }\n';
   ok(SMSRC.includes(syncFind), 'control guest-keeps-slot: the patched line exists in stage-manager.js');
   if (SMSRC.includes(syncFind)) {
-    const mut = SMSRC.replace(syncFind, '').replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, syncFind, '', "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'guest-keeps-slot');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X11 the hand-back re-syncs/.test(n)), `control guest-keeps-slot: no re-sync at the hand-back turns §2 X11 RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -840,7 +849,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const giveSyncFind = "    if (w._tabChain) { try { this.app.wm._syncChainBounds(w._tabChain); } catch {} } // its remaining guests mirror it (a 3-tab group: the third tab kept the slot — the r2 walk, seed 23)\n";
   ok(SMSRC.includes(giveSyncFind), 'control survivor-guest-keeps-slot: the patched line exists in stage-manager.js');
   if (SMSRC.includes(giveSyncFind)) {
-    const mut = SMSRC.replace(giveSyncFind, '').replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, giveSyncFind, '', "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'survivor-guest-keeps-slot');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X5 …and the third tab q3/.test(n)), `control survivor-guest-keeps-slot: _giveHome without its chain sync turns §2 X5's third-tab leg RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -849,7 +858,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const unmaxFind = '    if (hero.isMaximized) { try { this.app.wm.toggleMaximize(hero.id); } catch {} }\n    if (hero.gridBounds && !hero.isMaximized) this.app.wm._applyGridBounds(hero);\n';
   ok(SMSRC.includes(unmaxFind), 'control stage-max-leaks-slot: the patched lines exist in stage-manager.js');
   if (SMSRC.includes(unmaxFind)) {
-    const mut = SMSRC.replace(unmaxFind, '    if (hero.gridBounds && !hero.isMaximized) this.app.wm._applyGridBounds(hero);\n').replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, unmaxFind, '    if (hero.gridBounds && !hero.isMaximized) this.app.wm._applyGridBounds(hero);\n', "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'stage-max-leaks-slot');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X13 on Scra, un-maximized/.test(n)), `control stage-max-leaks-slot: a hand-back that leaves the hero maximized turns §2 X13 RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -858,7 +867,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const preMaxFind = "    if (win.isMaximized) { win._stageHomeMax = true; try { this.app.wm.toggleMaximize(win.id); } catch {} if (!win._stageHomeBounds) { try { this.app.wm._captureGridBounds(win); } catch {} } }\n    if (!win._stageHomeBounds) {\n";
   ok(SMSRC.includes(preMaxFind), 'control max-home-lost: the patched lines exist in stage-manager.js');
   if (SMSRC.includes(preMaxFind)) {
-    const mut = SMSRC.replace(preMaxFind, "    if (!win._stageHomeBounds) {\n").replace("      else win._stageHomeBounds = this._cascadeHome();\n    }\n", "      else win._stageHomeBounds = this._cascadeHome();\n    }\n    if (win.isMaximized) { win._stageHomeMax = true; try { this.app.wm.toggleMaximize(win.id); } catch {} }\n").replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(editAnchor(SMSRC, preMaxFind, "    if (!win._stageHomeBounds) {\n", "src/lib/stage-manager.js"), "      win._stageHomeBounds = win.gridBounds ? { ...win.gridBounds } : this._cascadeHome();\n    }\n", "      win._stageHomeBounds = win.gridBounds ? { ...win.gridBounds } : this._cascadeHome();\n    }\n    if (win.isMaximized) { win._stageHomeMax = true; try { this.app.wm.toggleMaximize(win.id); } catch {} }\n", "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'max-home-lost');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X14 borrowed: un-maximized for the slot/.test(n)) && failed.some((n) => /X14 un-maximized on Scra/.test(n)), `control max-home-lost: a snapshot taken before the un-maximize turns §2 X14 RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -875,7 +884,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const stepFind = "    return tornOffStep(gb, occupied); // (verify r4: the occupancy; the r3 counter is gone)\n"; // (verify r4: the occupancy line; a mutant gives every half the first step)
   ok(SMSRC.includes(stepFind), 'control tears-stack: the patched lines exist in stage-manager.js');
   if (SMSRC.includes(stepFind)) {
-    const mut = SMSRC.replace(stepFind, "    return 0;\n").replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, stepFind, "    return 0;\n", "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'tears-stack');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X18 on Scra the frame d1/.test(n)), `control tears-stack: the same step for every half turns §2 X18 RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -884,7 +893,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const rejoinFind = "    const given = host && !host._stageHomeBounds ? givenHomeOf(host._stageGivenHome, { gridBounds: host.gridBounds, isMaximized: host.isMaximized }) : null;\n"; // (verify r4: the verdict line; a mutant hands nothing back)
   ok(SMSRC.includes(rejoinFind), 'control regroup-creeps: the patched line exists in stage-manager.js');
   if (SMSRC.includes(rejoinFind)) {
-    const mut = SMSRC.replace(rejoinFind, '    const given = null;\n').replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, rejoinFind, '    const given = null;\n', "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'regroup-creeps');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X15 the re-formed frame/.test(n)) && failed.some((n) => /X15 on Scra the group/.test(n)), `control regroup-creeps: no home handed back to the re-formed frame turns §2 X15 RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -893,7 +902,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const beltFind = "      win._stageHomeBounds = win.gridBounds ? { ...win.gridBounds } : this._cascadeHome();\n";
   ok(SMSRC.includes(beltFind), 'control slot-belt: the patched line exists in stage-manager.js');
   if (SMSRC.includes(beltFind)) {
-    const mut = SMSRC.replace(beltFind, "      if (win.gridBounds && !this._nearSlot(win.gridBounds)) win._stageHomeBounds = { ...win.gridBounds };\n      else win._stageHomeBounds = this._cascadeHome();\n").replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, beltFind, "      if (win.gridBounds && !this._nearSlot(win.gridBounds)) win._stageHomeBounds = { ...win.gridBounds };\n      else win._stageHomeBounds = this._cascadeHome();\n", "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'slot-belt');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X16 borrowed: the slot-shaped box/.test(n)) && failed.some((n) => /X16 on Scra it is back/.test(n)), `control slot-belt: the r1 belt turns §2 X16 RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -913,7 +922,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const blackoutFind = "    if (this._applyingRemoteHero === true || (this._applyingRemoteHero && this._applyingRemoteHero === win.id)) return;\n";
   ok(SMSRC.includes(blackoutFind), 'control follow-blackout: the patched line exists in stage-manager.js');
   if (SMSRC.includes(blackoutFind)) {
-    const mut = SMSRC.replace(blackoutFind, "    if (this._applyingRemoteHero) return;\n").replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, blackoutFind, "    if (this._applyingRemoteHero) return;\n", "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'follow-blackout');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X20 the user's click on h2/.test(n)), `control follow-blackout: the time-boxed blackout turns §2 X20 RED — the click goes unpublished (its re-enter leg stays green since the publish law: a pick made after the record the page stood on is kept) (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -922,7 +931,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const stampFind = "    const given = host && !host._stageHomeBounds ? givenHomeOf(host._stageGivenHome, { gridBounds: host.gridBounds, isMaximized: host.isMaximized }) : null;\n";
   ok(SMSRC.includes(stampFind), 'control stale-stamp: the patched line exists in stage-manager.js');
   if (SMSRC.includes(stampFind)) {
-    const mut = SMSRC.replace(stampFind, "    const given = host && !host._stageHomeBounds && host._stageGivenHome && host._stageGivenHome.gridBounds ? { gridBounds: { ...host._stageGivenHome.gridBounds }, isMaximized: !!host._stageGivenHome.isMaximized } : null;\n").replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, stampFind, "    const given = host && !host._stageHomeBounds && host._stageGivenHome && host._stageGivenHome.gridBounds ? { gridBounds: { ...host._stageGivenHome.gridBounds }, isMaximized: !!host._stageGivenHome.isMaximized } : null;\n", "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'stale-stamp');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X15b the re-formed frame \[n2 host, n1\] remembers nB/.test(n)), `control stale-stamp: a stamp honoured after the user's own move turns §2 X15b RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -931,7 +940,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const occFind = "    return tornOffStep(gb, occupied); // (verify r4: the occupancy; the r3 counter is gone)\n";
   ok(SMSRC.includes(occFind), 'control step-count: the patched line exists in stage-manager.js');
   if (SMSRC.includes(occFind)) {
-    const mut = SMSRC.replace(occFind, "    const key = ['left', 'top', 'width', 'height'].map((x) => Math.round((gb[x] || 0) * 1000)).join(','); const m = this._besideSeq || (this._besideSeq = new Map()); const k = m.get(key) || 0; m.set(key, (k + 1) % 6); return k;\n").replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, occFind, "    const key = ['left', 'top', 'width', 'height'].map((x) => Math.round((gb[x] || 0) * 1000)).join(','); const m = this._besideSeq || (this._besideSeq = new Map()); const k = m.get(key) || 0; m.set(key, (k + 1) % 6); return k;\n", "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'step-count');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X18b a half torn off a home whose first step/.test(n)) && failed.some((n) => /X18c the first half actually placed/.test(n)) && !failed.some((n) => /X18 the second half torn off the same home/.test(n)), `control step-count: the in-memory count turns §2 X18b + X18c RED while X18 (two tears in one page) stays green (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -948,7 +957,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const adoptFind = "      if (shared && (!hero || shared !== this._heroWitness)) {\n", witnessFind = "    if (this._heroWinId && raw === this._heroWitness) return;\n";
   ok(SMSRC.includes(adoptFind) && SMSRC.includes(witnessFind), 'control adopt-any-record: the patched lines exist in stage-manager.js');
   if (SMSRC.includes(adoptFind) && SMSRC.includes(witnessFind)) {
-    const mut = SMSRC.replace(adoptFind, "      if (shared) {\n").replace(witnessFind, '').replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(editAnchor(SMSRC, adoptFind, "      if (shared) {\n", "src/lib/stage-manager.js"), witnessFind, '', "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'adopt-any-record');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X21 THE RUNNER'S RED/.test(n)), `control adopt-any-record: enter() adopting any shared record turns §2 X21 THE RUNNER'S RED RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -957,7 +966,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const landFind = "    if (!this.enabled || !this._heroWinId || (this._heroKey && !this._heroOwed)) return;\n";
   ok(SMSRC.includes(landFind), 'control landing-on-stage-only: the patched line exists in stage-manager.js');
   if (SMSRC.includes(landFind)) {
-    const mut = SMSRC.replace(landFind, "    if (!this._active || !this.enabled || !this._heroWinId || (this._heroKey && !this._heroOwed)) return;\n").replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const mut = editAnchor(editAnchor(SMSRC, landFind, "    if (!this._active || !this.enabled || !this._heroWinId || (this._heroKey && !this._heroOwed)) return;\n", "src/lib/stage-manager.js"), /\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n', "src/lib/stage-manager.js");
     const f = M.write('src/lib/stage-manager.js', mut, 'landing-on-stage-only');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
     ok(failed.some((n) => /X21 an id that lands AFTER leave\(\)/.test(n)), `control landing-on-stage-only: a landing gated on the Stage turns §2 X21's off-Stage landing RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);

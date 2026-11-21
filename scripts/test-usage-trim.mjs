@@ -55,6 +55,15 @@ const { UsageHistory } = require('../src/usage-history.js');
 armWatchdog();
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (typeof m !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof m} — the arguments are swapped?`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, m) => { const x = JSON.stringify(a), y = JSON.stringify(b); ok(x === y, m + (x === y ? '' : `\n     got  ${x.slice(0, 300)}\n     want ${y.slice(0, 300)}`)); };
 const DAY = 86400e3, BATCH = 16384; // BATCH = usage-history's TRIM_BATCH_ROWS (the hub's step)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-usage-trim-'));
@@ -114,8 +123,8 @@ try {
     const src = fs.readFileSync(path.join(REPO, 'src/cache-bounds.js'), 'utf8');
     const LOOP = 'while (this.rk.length && this.rk[this.rk.length - 1].length <= 4 * K.length)', MAIN = 'if (!this.rk.length && this.keys.length <= 4 * K.length)';
     const M = mutantCopies('usage-trim-levels', REPO);
-    const whole = M.load('src/cache-bounds.js', src.replace(LOOP, 'while (this.rk.length)').replace(MAIN, 'if (!this.rk.length)'), 'whole');
-    const never = M.load('src/cache-bounds.js', src.replace(LOOP, 'while (false)').replace(MAIN, 'if (!this.keys.length)'), 'never');
+    const whole = M.load('src/cache-bounds.js', editAnchor(editAnchor(src, LOOP, 'while (this.rk.length)', "src/cache-bounds.js"), MAIN, 'if (!this.rk.length)', "src/cache-bounds.js"), 'whole');
+    const never = M.load('src/cache-bounds.js', editAnchor(editAnchor(src, LOOP, 'while (false)', "src/cache-bounds.js"), MAIN, 'if (!this.keys.length)', "src/cache-bounds.js"), 'never');
     const aw = lv(40000, whole), bw = lv(200000, whole), nv = lv(40000, never);
     ok(src.split(LOOP).length === 2 && src.split(MAIN).length === 2 && bw.work > 3 * aw.work, `control (every settle merges the whole index — the release's): ${aw.work} vs ${bw.work} entries written ⇒ RED`);
     ok(nv.runs === 50, `control (a settle that never merges): ${nv.runs} runs pile up ⇒ RED by the runs' bound`);

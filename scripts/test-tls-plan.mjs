@@ -15,6 +15,15 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TP = require(path.join(REPO, 'src/tls-plan.js'));
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const DAY = 24 * 3600 * 1000, NOW = Date.parse('2026-10-12T10:00:00Z');
 const DNS = 'box-a.tail1a2b3c.ts.net';
@@ -115,7 +124,7 @@ console.log('§7b CONTROL — a cadence that forgets "served since boot"');
     const src = fs.readFileSync(path.join(REPO, 'src/tls-plan.js'), 'utf8');
     const from = 'if (!isMiss(plan) || liveOnce) return PASS_MS;';
     ok(src.includes(from), 'the control\'s anchor is in the module');
-    fs.writeFileSync(path.join(dir, 'tls-plan.js'), src.replace(from, 'if (!isMiss(plan)) return PASS_MS;'));
+    fs.writeFileSync(path.join(dir, 'tls-plan.js'), editAnchor(src, from, 'if (!isMiss(plan)) return PASS_MS;', "src/tls-plan.js"));
     const M = require(path.join(dir, 'tls-plan.js'));
     const got = M.nextPassMs({ plan: { mode: 'off', why: 'no-tailscale' }, misses: 1, liveOnce: true });
     ok(got !== 3600000, `CONTROL: a served-then-miss pass retries at ${got / 1000} s instead of the hourly cadence — RED`);
@@ -128,7 +137,7 @@ console.log('§6 CONTROL');
     const src = fs.readFileSync(path.join(REPO, 'src/tls-plan.js'), 'utf8');
     const from = ".trim() : '';\n  return n.replace(/\\.+$/, '').toLowerCase();";
     ok(src.includes(from), 'the control\'s anchor is in the module');
-    fs.writeFileSync(path.join(dir, 'tls-plan.js'), src.replace(from, ".trim() : '';\n  return n.toLowerCase();"));
+    fs.writeFileSync(path.join(dir, 'tls-plan.js'), editAnchor(src, from, ".trim() : '';\n  return n.toLowerCase();", "src/tls-plan.js"));
     const M = require(path.join(dir, 'tls-plan.js'));
     const p = M.tlsPlan({ now: NOW, tailscale: { status: status() } });
     ok(p.url !== `https://${DNS}:3456` && p.why === 'https-not-enabled', `CONTROL without the trailing-dot strip: RED (${p.why}, ${p.url})`);

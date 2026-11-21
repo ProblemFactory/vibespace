@@ -27,6 +27,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 console.log('§13 A FOLD OWNS WHAT IT FOLDS — past the live cap every identity lands, read once (round 3, the MUST)');
@@ -71,7 +80,7 @@ console.log('§13 A FOLD OWNS WHAT IT FOLDS — past the live cap every identity
   const R = EM ? fleet(EM.UsageEstimator, WORLDS[0][1], WORLDS[0][2]) : null;
   ok(!!R && (R.landed < R.ids || R.reads.some((n) => n > 1)), `RED: «no cache entry» read as moved (round 2) ⇒ ${R && R.landed} of ${R && R.ids} landed, whole reads ${R && R.reads.join('/')}, ${R && R.abandoned} folds abandoned`, R);
   const M2 = mutantCopies('usage-relearn-stepped-overdraft', REPO), from2 = "    if (!firstsWaiting && (cachedNow || (!own && (this._coldBytes || 0) < COLD_READ_TURN_BYTES))) f.open();";
-  const EM2 = src.includes(from2) ? require(M2.write('src/usage-estimator.js', src.replace(from2, '    if (!firstsWaiting) f.open();').replace("        if (!f.steps) { const own = this._ownFold && !this._ownFold.done && this._ownFold !== f; if (own || (!this._readsNoFile(f.key) && (this._coldBytes || 0) >= COLD_READ_TURN_BYTES) || (!f.first && this._firstsQueued(f))) return false; f.open(); }", '        if (!f.steps) { if (!f.first && this._firstsQueued(f)) return false; f.open(); }'), 'overdraft')) : null;
+  const EM2 = src.includes(from2) ? require(M2.write('src/usage-estimator.js', editAnchor(editAnchor(src, from2, '    if (!firstsWaiting) f.open();', "src/usage-estimator.js"), "        if (!f.steps) { const own = this._ownFold && !this._ownFold.done && this._ownFold !== f; if (own || (!this._readsNoFile(f.key) && (this._coldBytes || 0) >= COLD_READ_TURN_BYTES) || (!f.first && this._firstsQueued(f))) return false; f.open(); }", '        if (!f.steps) { if (!f.first && this._firstsQueued(f)) return false; f.open(); }', "src/usage-estimator.js"), 'overdraft')) : null;
   const R2 = EM2 ? fleet(EM2.UsageEstimator, WORLDS[0][1], WORLDS[0][2]) : null;
   ok(!!R2 && R2.maxOwn > 1, `RED: no bound on the folds that hold uncached lines ⇒ ${R2 && R2.maxOwn} at a time (the cap overdrawn by more than one identity)`, R2);
 }
@@ -465,7 +474,7 @@ console.log('§23 THE HOLDER OF THE ONE SLOT ALWAYS RUNS — a restart with a pa
   ok(ps.seeded === 20 && ps.holder0 && ps.holder0.seededRates && ps.all >= 0 && ps.all <= BOUND && ps.without === 0 && ps.stillSeeded === 0 && ps.idle === 0, `A RESTART WITH A PARTIAL SEED (the owner's 27 × ${SCALE}, ${ps.lines} lines, rates.json 20 of 27; the largest past the cache's cap): the slot taken at boot by a SEEDED identity's re-fold (${ps.holder0 && ps.holder0.key}) — all 27 learned and every seeded one refreshed at pass ${ps.all} (stated bound ${BOUND}: every line twice at ${PER} turns of ${STEP} a pass, + 6); ${ps.idle} turns spent nothing`, ps);
   const M = mutantCopies('usage-relearn-stepped-wall', REPO), src = read('src/usage-estimator.js');
   const a = "const foldOrder = (holder) => (x, y) => ((x.first ? 0 : x === holder ? 1 : 2) - (y.first ? 0 : y === holder ? 1 : 2)) || (", b = "      for (let ended = true; ended && Q.length && (this._turnLeft ?? 1) > 0;) { ended = false; for (let i = 0; i < Q.length && (this._turnLeft ?? 1) > 0; i++) if (this._foldRun(Q[i])) { Q.splice(i--, 1); ended = true; } }";
-  const EM = src.includes(a) && src.includes(b) ? require(M.write('src/usage-estimator.js', src.replace(a, "const foldOrder = (holder) => (x, y) => ((x.first ? 0 : 1) - (y.first ? 0 : 1)) || (").replace(b, '      while (Q.length && (this._turnLeft ?? 1) > 0) { if (this._foldRun(Q[0])) Q.shift(); else break; }'), 'wall')) : null; // round 5's turn: first learns first, the turn stops at its head
+  const EM = src.includes(a) && src.includes(b) ? require(M.write('src/usage-estimator.js', editAnchor(editAnchor(src, a, "const foldOrder = (holder) => (x, y) => ((x.first ? 0 : 1) - (y.first ? 0 : 1)) || (", "src/usage-estimator.js"), b, '      while (Q.length && (this._turnLeft ?? 1) > 0) { if (this._foldRun(Q[0])) Q.shift(); else break; }', "src/usage-estimator.js"), 'wall')) : null; // round 5's turn: first learns first, the turn stops at its head
   const R = EM ? partial(EM.UsageEstimator, SCALE, PER, 160) : null;
   ok(!!R && R.all < 0 && R.without > 0 && R.idle > 0 && /its head org:q\d+: it waits behind org:q\d+'s fold/.test(R.idleLine), `RED: round 5's turn (the queue stops at a head that cannot open) ⇒ after ${R && R.passes} passes ${R && R.without} identities never learned, ${R && R.stillSeeded} still on the seed; ${R && R.idle} turns spent nothing, said once: «${R && R.idleLine}»`, R);
 }
@@ -528,3 +537,4 @@ console.log('§24 THE FOLLOW-UP (round 6, picked): an idle turn looks again by i
   ok(!!RW && /still running \(\d+ of 32 chunks\)\)/.test(RW.bg) && /queued: it opens at the next turn/.test(RW.qq), `RED: round 6's words (the state, not why) ⇒ «${RW && RW.bg.slice(30, 90)}…» · «${RW && RW.qq.slice(30, 90)}…»`, RW);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+process.exitCode = fail ? 1 : 0;   // B-0d3e (ALSO CURED): a failed leg fails the gate — the suite set no exit code at all
