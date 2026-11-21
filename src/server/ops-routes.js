@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync, spawn } = require('child_process');
 
-function create({ app, rootDir, wss, WS_OPEN, bootPhase = null, throwaway = () => require('./throwaway-root.js').throwaway(rootDir) }) {   // `throwaway`: THE ONE TEST (B-ba47 shape H r1278), a seam for the suites
+function create({ app, rootDir, wss, WS_OPEN, bootPhase = null, throwaway = () => require('./throwaway-root.js').throwaway(rootDir), throwawayView = () => require('./throwaway-root.js').view() }) {   // `throwaway`: THE ONE TEST (B-ba47 shape H r1278), a seam for the suites
 // ── Version / update visibility (⚙ menu shows current + latest at the Update entry) ──
 // Latest = the canonical repo's master package.json — fetched LAZILY on
 // request only (never a background timer), cached 6h, best-effort: offline
@@ -144,6 +144,8 @@ function maintState() {
   return _maintenance?.active ? _maintenance : { active: false };
 }
 app.get('/api/maintenance', (req, res) => res.json(maintState()));
+// B-ba47 shape H (the plan's (b)): what a copy run from a git worktree says on its first screen — its own home, the two doors
+app.get('/api/throwaway', (req, res) => res.json(throwawayView()));
 app.post('/api/maintenance', (req, res) => {
   const b = req.body || {};
   if (b.update != null && _maintenance?.active) {

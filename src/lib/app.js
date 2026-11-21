@@ -525,6 +525,7 @@ class App {
     this._setupUsage();
     installUserTodos(this); // global "For you" inbox (agent-filed user TODOs)
     this._initMaintenanceBanner(); // operator-onsite transparency strip
+    this._initThrowawayBanner(); // B-ba47 shape H: a copy run from a git worktree says so on its first screen
     this._commandMode = new CommandMode(this, this.settings);
 
     // Listen for editor open/close requests (from editor-helper.sh via server HTTP→WebSocket)
@@ -905,6 +906,23 @@ class App {
   // amber strip says so (transparency for onsite debugging). Server state
   // survives restarts and auto-expires; the strip is a normal flex child of
   // #main-wrapper, so the workspace reflows proportionally under it.
+  // ── Throwaway banner (B-ba47 shape H, the plan's (b)): a copy of VibeSpace run from a git worktree uses a home of its own —
+  // the person's CLIs, logins and plugins are not there — so its FIRST screen says so, with the two doors as exact text: start
+  // VibeSpace from the clone, or run this copy as the real install. One strip, the first child of #main-wrapper; nothing when
+  // the hub is not re-homed.
+  _initThrowawayBanner() {
+    fetchJson('/api/throwaway').then((v) => {
+      if (!v || !v.rehomed || document.getElementById('throwaway-banner')) return;
+      const wrap = document.getElementById('main-wrapper');
+      if (!wrap) return;
+      const el = document.createElement('div');
+      el.id = 'throwaway-banner';
+      el.innerHTML = `<span class="tb-text">${escHtml(t('This copy of VibeSpace runs from a git worktree, so it uses a home of its own ({home}): your CLIs, logins and plugins are not here.', { home: v.home || '' }))}</span>`
+        + (v.checkout ? `<span class="tb-door">${escHtml(t('To use your real install, start VibeSpace from your clone:'))} <code>${escHtml(v.checkout)}</code></span>` : '')
+        + `<span class="tb-door">${escHtml(t('Or run this copy as your real install:'))} <code>${escHtml(`${v.overrideEnv || 'VIBESPACE_REAL_INSTALL'}=1`)}</code></span>`;
+      wrap.insertBefore(el, wrap.firstChild);
+    }).catch(() => {});
+  }
   _initMaintenanceBanner() {
     const fmtT = (ts) => clockOf(ts);
     const render = (m) => {

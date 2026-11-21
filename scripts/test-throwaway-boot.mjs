@@ -74,7 +74,7 @@ const TR = require(${JSON.stringify(path.join(REPO, 'src/server/throwaway-root.j
 const home = require('os').homedir();
 const pm = require(${JSON.stringify(path.join(REPO, 'src/peer-messaging.js'))}).REGISTRY_DIR;   // a home CAPTURED WHEN A MODULE LOADS, loaded after line 1 (§113 (i))
 const kid = require('child_process').spawnSync(process.execPath, ['-e', 'process.stdout.write(require("os").homedir())'], { encoding: 'utf8' }).stdout;
-setImmediate(() => console.log(JSON.stringify({ rec, home, pm, kid, env: Object.fromEntries(['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'SSH_AUTH_SOCK', 'PATH', 'LANG', 'PORT', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'CLAUDE_WEBUI_PORT', 'VIBESPACE_PASSWORD', 'VIBESPACE_APP_SYSTEM', 'HUBGUARD_PLANTED'].map((k) => [k, process.env[k] ?? null])), lines, verdict: TR.boot(), throwaway: TR.throwaway(process.argv[2]) })));
+setImmediate(() => console.log(JSON.stringify({ rec, home, pm, view: TR.view(), kid, env: Object.fromEntries(['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'SSH_AUTH_SOCK', 'PATH', 'LANG', 'PORT', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'CLAUDE_WEBUI_PORT', 'VIBESPACE_PASSWORD', 'VIBESPACE_APP_SYSTEM', 'HUBGUARD_PLANTED'].map((k) => [k, process.env[k] ?? null])), lines, verdict: TR.boot(), throwaway: TR.throwaway(process.argv[2]) })));
 `);
 const NODE_BIN = path.dirname(process.execPath);
 const SYS = createRequire(import.meta.url)('../src/home-verdict.js').SYSTEM_PATHS[process.platform === 'darwin' ? 'darwin' : 'linux'].join(':');
@@ -100,6 +100,9 @@ const NOT_CARRIED = ['CLAUDE_CONFIG_DIR', 'CLAUDE_WEBUI_PORT', 'SSH_AUTH_SOCK', 
     && j.env.LANG === 'C.UTF-8' && j.env.PORT === '39999' && j.env.NO_AUTO_UPDATE === '1' && j.env.VIBESPACE_SKIP_AGENT_HOOKS === '1',
     "(a) the env is BUILT from the hub's rows: its port, the locale and the kit's switches carried (the hub's own knobs, derived); the caller's conversation names and family, the agent CLI's folder, the person's ssh agent, the person's own hub password and the app system's switch (its acts run as root over the person's home) NOT carried; the XDG base dirs unset; PATH its own .vs-bin + the system's fixed directories, nothing of the handed PATH", j.env);
   ok(fs.existsSync(own) && (fs.statSync(own).mode & 0o777) === 0o700 && j.kid === own, '(a) the own home is made 0700, and a child the hub starts inherits it', j.kid);
+  const vw = j.view || {}, vwText = JSON.stringify(vw);
+  ok(vw.rehomed === true && vw.throwaway === true && vw.home === own && vw.checkout === path.join(DIR, 'wt-a-repo') && vw.overrideEnv === 'VIBESPACE_REAL_INSTALL' && !vwText.includes(POISON),
+    "(a) THE PAGE'S ANSWER (GET /api/throwaway, the first screen's banner): re-homed, its OWN home, the clone it is a worktree of (the first door), the override's name (the second) — no path of the home it was handed", vw);
   ok(j.pm === path.join(own, '.claude', 'sessions'), "(a) a home a module CAPTURES WHEN IT LOADS (src/peer-messaging.js REGISTRY_DIR, one of §113 (i)'s named four), loaded after the boot as server.js loads it, is the hub's own — never the handed one", j.pm);
   { // ssh, read by ssh itself: `ssh -G` resolves the config it would use, and dials nothing
     const w = path.join(own, '.vs-bin', 'ssh'), g = fs.existsSync(w) ? spawnSync(w, ['-G', 'host.invalid'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: own } }) : null;
@@ -177,6 +180,16 @@ const PLANT = ['const h = os.', 'userInfo', '().', 'homedir;'].join('');   // bu
 ok(reads(PLANT) === 1 && reads('// os.userInfo() in a comment') === 0 && reads("const s = 'x'; /* os.userInfo() */") === 0, 'CONTROL: a new os.userInfo() read is counted; one in a comment is not');
 
 
+console.log("— ⑤ the first screen's banner: the route, the strip, its words in three languages");
+{
+  const ops = fs.readFileSync(path.join(REPO, 'src/server/ops-routes.js'), 'utf8'), appJs = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const KEYS = ['This copy of VibeSpace runs from a git worktree, so it uses a home of its own ({home}): your CLIs, logins and plugins are not here.', 'To use your real install, start VibeSpace from your clone:', 'Or run this copy as your real install:'];
+  ok(/app\.get\('\/api\/throwaway', \(req, res\) => res\.json\(throwawayView\(\)\)\);/.test(ops) && /throwawayView = \(\) => require\('\.\/throwaway-root\.js'\)\.view\(\)/.test(ops)
+    && /this\._initMaintenanceBanner\(\);[^\n]*\n\s*this\._initThrowawayBanner\(\);/.test(appJs) && /fetchJson\('\/api\/throwaway'\)/.test(appJs) && /if \(!v \|\| !v\.rehomed/.test(appJs)
+    && KEYS.every((k) => appJs.includes(`t('${k}'`) && zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')),
+    "⑤ WIRING: GET /api/throwaway answers throwaway-root's view(); the page asks it at start beside the maintenance strip and shows the strip only for a re-homed hub; its three sentences have zh + ja (the picture is the heavy pin's)");
+}
 console.log("— ④ vibespace-browser under a throwaway hub: the account home its agent's ~, Downloads fence, config and profile root use is the hub's OWN (src/browser-account-home.js)");
 {
   const AH = require(path.join(REPO, 'src/browser-account-home.js'));

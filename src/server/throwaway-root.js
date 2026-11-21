@@ -94,7 +94,7 @@ function rehomeAtBoot({ root, env = process.env, execPath = process.execPath } =
   const resolve = HL.makeResolver({ refuse: onMount });
   const v = HV.hubRehome({ root: hubRoot, home: handed, tmpRoots: tmpRoots(handed), resolve, linkedWorktree: j.linkedWorktree, override });
   // the override is the person's word «this copy is my real install»: no re-home, and every gate treats it as real
-  verdict = { root: hubRoot, throwaway: j.throwaway && !override, sign: j.linkedWorktree ? 'worktree' : j.throwaway ? 'scratch-clone' : null, override, ...v };
+  verdict = { root: hubRoot, throwaway: j.throwaway && !override, sign: j.linkedWorktree ? 'worktree' : j.throwaway ? 'scratch-clone' : null, override, checkout: (j.rootVerdict && j.rootVerdict.checkout) || null, ...v };
   if (!v.rehome) return verdict;
   // THE BOUND: every handed name that is neither a hub row nor a hub NOT, by name (judged before the env is rebuilt)
   const unruled = HV.unruledNames(env, {}, { rows: HV.HUB_ROWS, not: HV.HUB_NOT });
@@ -125,6 +125,12 @@ function sshOnOwnFiles(binDir, PATH, own) {
   return true;
 }
 const boot = () => verdict;
+/** THE PAGE'S ANSWER (the plan's (b): GET /api/throwaway, the first screen's banner): re-homed or not, its OWN home, the clone it
+ *  is a worktree of (the first door), the override's name (the second) — never a path of the home it was handed. */
+function view(v = verdict) {
+  if (!v) return { throwaway: false, rehomed: false, home: null, checkout: null, override: false, overrideEnv: OVERRIDE_ENV };
+  return { throwaway: !!v.throwaway, rehomed: !!v.rehome, home: v.rehome ? v.home : null, checkout: v.checkout || null, override: !!v.override, overrideEnv: OVERRIDE_ENV };
+}
 
 /** The boot's words — NO path of the handed home (it is the person's), the names dropped, never a value. */
 function bootLine(v = verdict) {
@@ -144,4 +150,4 @@ function unruledLine(v = verdict) {
   return `[throwaway] handed ${v.unruled.length} name${v.unruled.length === 1 ? '' : 's'} that ${v.unruled.length === 1 ? 'is' : 'are'} neither a hub row nor a named NOT (src/home-verdict.js HUB_ROWS / HUB_NOT; not carried): ${v.unruled.join(', ')} — one the hub needs: add it to src/hub-env-knobs.json (its code must read it)`;
 }
 
-module.exports = { setHubRoot, hub, OWN_HOME_DIR, OVERRIDE_ENV, HUB_DROPS, sshOnOwnFiles, tmpRootsOf, tmpRoots, judge, throwaway, rehomeAtBoot, boot, bootLine, unruledLine };
+module.exports = { setHubRoot, hub, OWN_HOME_DIR, OVERRIDE_ENV, HUB_DROPS, sshOnOwnFiles, tmpRootsOf, tmpRoots, judge, throwaway, rehomeAtBoot, boot, view, bootLine, unruledLine };

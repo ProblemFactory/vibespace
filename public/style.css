@@ -867,6 +867,15 @@ html, body {
   color: var(--text);
 }
 #maintenance-banner .mb-since { color: var(--text-secondary); }
+/* B-ba47 shape H: a copy run from a git worktree — its own home, the two doors (src/lib/app.js _initThrowawayBanner) */
+#throwaway-banner {
+  display: flex; align-items: center; justify-content: center; gap: 4px 12px; flex-wrap: wrap;
+  padding: 5px 12px; font-size: 12px; flex-shrink: 0; text-align: center;
+  background: color-mix(in srgb, var(--accent, #61afef) 14%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent, #61afef) 40%, transparent);
+  color: var(--text);
+}
+#throwaway-banner code { font-size: 11px; padding: 0 4px; border-radius: 3px; background: color-mix(in srgb, var(--text) 8%, transparent); }
 #maintenance-banner { position: relative; flex-wrap: wrap; }
 #maintenance-banner .mb-update { font-weight: 600; transition: opacity 0.3s; }
 #maintenance-banner .mb-update.mb-pulse { animation: mb-pulse 1.5s ease; }
