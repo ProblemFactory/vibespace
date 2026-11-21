@@ -257,7 +257,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (r.memo) r.memo.view = { mm, session, notLoaded, notLoadedInfo };
     return { mm, session, notLoaded, notLoadedInfo };
   }
-  const saidOf = (v) => (v && v.notLoaded ? { notLoaded: v.notLoaded, ...(v.notLoadedInfo ? { storageHung: v.notLoadedInfo.storageHung, retryAt: v.notLoadedInfo.retryAt } : {}) } : {});
+  const saidOf = (v) => (v && v.notLoaded ? { notLoaded: v.notLoaded, ...(v.notLoadedInfo ? { storageHung: v.notLoadedInfo.storageHung, retryAt: v.notLoadedInfo.retryAt, retryIn: Number(v.notLoadedInfo.retryAt) ? Math.max(0, v.notLoadedInfo.retryAt - Date.now()) : null } : {}) } : {});   // retryIn: the delay from the hub's now (a page's clock is not the hub's)
 
   async function page(ref, { offset, limit, untilUuid } = {}) {
     const r0 = norm(ref);

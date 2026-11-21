@@ -577,7 +577,7 @@ export function installSessionLifecycle(App, ctx = {}) {
               .then(r => r.json())
               .then(data => {
                 if (data.messages?.length) chatView.loadHistory(data.messages, data.total);
-                if (data.notLoaded) chatView._sayHistoryNotLoaded?.(data.notLoaded, { info: { storageHung: !!data.storageHung, retryAt: data.retryAt || null } });   // row B-422c: a resumed history the reader refused says so
+                if (data.notLoaded) chatView._sayHistoryNotLoaded?.(data.notLoaded, { info: { storageHung: !!data.storageHung, retryAt: data.retryAt || null, retryIn: data.retryIn ?? null } });   // row B-422c: a resumed history the reader refused says so
                 else if (data.chatStatus) chatView.applyStatus(data.chatStatus);
               })
               .catch(() => {})

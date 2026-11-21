@@ -743,11 +743,13 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
     if (!C().storageRetryDue(known)) return false;   // asked of the pool again at most once a gap (30 s doubling, ≤ 8 min) — never stuck
     // the STORAGE hung under this transcript (a deadline, a hung path, a blocked mount — its record says so) — NO find and NO stat on
     // this loop: the pool alone is asked again (its path memory refuses at once while it remembers; then a worker tries, off the loop)
-    // the POOL refusing every call (closed, gone) cannot retry it: the due retry is the main process's own sliced read (r1243 item 3 —
-    // the guard holds: one at a time, none while one is parked, its own deadline; a door-blocked mount never)
+    // the POOL GONE (closed for good, none on this process) can never retry it: the due retry is the main process's own sliced read
+    // (r1243 item 3 — the guard holds: one at a time, none while one is parked, its own deadline; a door-blocked mount never). A pool
+    // that only REFUSED a moment ago (no worker, restarting) is asked again at the next gap — a file it called hung is never read
+    // on the main process while a worker can still come back
     const t0 = performance.now();
     let r = null;
-    if (C().poolRefusing()) { try { r = await C().readJsonlTailSliced(known, { dropSubagent: true, storageRetry: true }); } catch { return false; } }
+    if (C().poolGone()) { try { r = await C().readJsonlTailSliced(known, { dropSubagent: true, storageRetry: true }); } catch { return false; } }
     else { try { r = await C().readJsonlTailAsync(known, { dropSubagent: true }); } catch { return false; } }
     if (!r || !r.entry) return false;
     _stampJsonlParse(r.bytes, performance.now() - t0);

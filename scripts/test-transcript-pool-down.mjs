@@ -160,9 +160,15 @@ for (const [name, shape, hung, extra] of KINDS) {
   e = null; try { await C.jsonlGapInfoAsync(claudeFp); } catch (x) { e = x; }
   ok(!!e && e.code === 'no-worker', 'the device\'s IN-PLACE road (no worker script: its own loop) is no pool failure — its error passes as before', { code: e && e.code });
 }
-// SafeFs's own `no-idle-worker` is a pool-wide refusal (the round w5gioyat2: POOL_WIDE spelled it `no-idle`, a code SafeFs never sends)
+// SafeFs's own `no-idle-worker` (an `idleOnly` call while every worker is busy) is ORDINARY LOAD — never a refusal of every call
+// (round w5gioyat2 asked; POOL_WIDE spelled it `no-idle`, a code SafeFs never sends — as pool-wide, every Claude parse would answer
+// «not loaded» for 30 s under load). The control: «no worker» is one.
+C._setTranscriptPoolForTest({ call: async () => null }); try { await C.jsonlGapInfoAsync(claudeFp); } catch { }   // an answer ends the pool-wide mark
+ok(!C.poolRefusing(), 'premise: the pool answered — nothing refuses every call');
 C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-idle-worker' })); try { await C.jsonlGapInfoAsync(claudeFp); } catch { }
-ok(C.poolRefusing(), 'SafeFs\'s own «no idle worker» (no-idle-worker) is a refusal of every call (poolRefusing)');
+ok(!C.poolRefusing() && !C.poolGone(), 'SafeFs\'s «no idle worker» (no-idle-worker: every worker busy) is ordinary load — never a refusal of every call (poolRefusing)');
+C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); try { await C.jsonlGapInfoAsync(claudeFp); } catch { }
+ok(C.poolRefusing() && !C.poolGone(), 'the control: «no worker» refuses every call for a while — and is not a pool GONE (its storage retry still asks the pool)');
 // THE ARTIFACT PASS's own whole-file paged read (note: false) marks nothing of the file — a page past its deadline on a big healthy
 // file never makes the person's history «not loaded» (r1243 item 5); the control (a history read): the storage's
 {
@@ -335,6 +341,15 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   await new Promise((res) => setTimeout(res, 90));
   await SS0.warmSessionJsonlAsync(sid, cwd);   // past it: the pool asked once
   ok(g0 >= 1 && g1 === g0 && tails(Hg) === g0 + 1, `the storage's retry has a gap: inside it nothing asked (${g1 - g0}), past it the pool asked once (${tails(Hg) - g1})`, { g0, g1, g2: tails(Hg) });
+  // (5b) A DUE STORAGE RETRY WHILE THE POOL ONLY REFUSED A MOMENT AGO (no worker: refusing every call, NOT gone) asks the POOL again —
+  // never the main process's own read of a file the pool called hung (that road is the pool GONE's alone: the double fault, ⑤c of
+  // the heavy suite). RED (the follow's first tip): the warm read it on the main process and parked the hub's one sliced place in it
+  C._setSlicedForTest({ storageRetryMs: 0 });
+  const Nr = refusing({ status: 503, code: 'no-worker' }); C._setTranscriptPoolForTest(Nr);
+  try { await C.jsonlGapInfoAsync(path.join(projDir, 'gap-only.jsonl')); } catch { }   // the pool refuses every call now
+  const premise = C.poolRefusing() && !C.poolGone() && C.fileStorageHung(claudeFp);
+  const w5b = await SS0.warmSessionJsonlAsync(sid, cwd);
+  ok(premise && w5b === false && tails(Nr) === 1 && C.fileStorageHung(claudeFp), `a due storage retry while the pool refuses for a while (no worker) asks the pool (${tails(Nr)} ask) — the file the pool called hung is not read on the main process (warm ${w5b}, still the storage's)`, { premise, warmed: w5b, asks: tails(Nr) });
   C._setSlicedForTest({});
 }
 C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
@@ -388,16 +403,21 @@ C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
 {
   const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), csr = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8'), sl = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
   const pins = [
-    ['the page fetch of a refused history FAILS (the view that stands kept), «try again» unless quiet — in its door\'s words', /if \(data && data\.notLoaded\) \{\n\s+if \(!quietRefusal\) this\._sayReaderRestarting\(\{ storageHung: !!data\.storageHung, retryAt: data\.retryAt \|\| null \}\);\n\s+throw /.test(cv)],
+    ['the page fetch of a refused history FAILS (the view that stands kept), «try again» unless quiet — in its door\'s words', /if \(data && data\.notLoaded\) \{\n\s+if \(!quietRefusal\) this\._sayReaderRestarting\(\{ storageHung: !!data\.storageHung, retryAt: data\.retryAt \|\| null, retryIn: data\.retryIn \?\? null \}\);\n\s+throw /.test(cv)],
     ['the read-only 2 s poll asks quietly', /_fetchMessagePage\(nextOffset, 200, \{ withStatus: true, quietRefusal: true \}\)/.test(cv)],
     ['the view reset says the line again', /this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\);\n\s+if \(msg && msg\.historyNotLoaded\) this\._sayHistoryNotLoaded\(msg\.historyNotLoaded, \{ again: true, info: msg\.historyNotLoadedInfo \|\| null \}\);/.test(cv)],
-    ['r1243: the storage\'s own words (its file not answering, trying again at a time)', /if \(info && info\.storageHung\) this\._renderers\.appendSystem\(t\("This conversation's file is not answering, so its history is not loaded yet/.test(cv)],
-    ['r1243: the page asks again BY ITSELF at the server\'s time, and at history-ready', /this\._scheduleHistoryReask\(info && info\.retryAt\);/.test(cv) && /msg\.type === 'history-ready' && msg\.sessionId === sessionId\) \{\n\s+this\._reaskHistory\(\);/.test(cv) && /if \(!this\._readOnly\) \{ this\._reattach\(false\); return; \}/.test(cv)],
+    ['r1243: the storage\'s own words (its file not answering, trying again at a time)', /if \(info && info\.storageHung\) this\._historyNotLoadedEl = this\._renderers\.appendSystem\(t\("This conversation's file is not answering, so its history is not loaded yet/.test(cv)],
+    ['r1243: the page asks again BY ITSELF at the server\'s time, and at history-ready', /const at = this\._retryAtOf\(info\);/.test(cv) && /this\._scheduleHistoryReask\(at, \{ prompt: owed \}\);/.test(cv) && /msg\.type === 'history-ready' && msg\.sessionId === sessionId\) \{\n\s+this\._onHistoryReady\(\);/.test(cv) && /if \(!this\._readOnly\) \{ this\._reattach\(false\); return; \}/.test(cv)],
+    ['the re-ask BACKS OFF (2 s doubling at each «not loaded» again, ≤ 10 min) and a history-ready while one is on its way is that ask', /const floor = prompt \? 2000 : Math\.min\(10 \* 60000, 2000 \* 2 \*\* Math\.min\(this\._historyReaskTries \|\| 0, 9\)\);/.test(cv) && /this\._historyReaskTries = \(this\._historyReaskTries \|\| 0\) \+ 1;/.test(cv) && /\{ this\._historyReadyOwed = true; return; \}/.test(cv)],
+    ['the server\'s time on the page\'s clock: its delay (retryIn) from the page\'s now — the hub sends it with every refusal', /return Number\.isFinite\(d\) \? Date\.now\(\) \+ Math\.max\(0, d\) : \(Number\(info && info\.retryAt\) \|\| 0\);/.test(cv) && /const withRetryIn = \(info\) =>/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8')) && /retryIn: Number\(e\.retryAt\)/.test(fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8')) && /retryIn: Number\(v\.notLoadedInfo\.retryAt\)/.test(fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8'))],
+    ['the time in the page\'s own clock (page-time clockOf — its language, its zone), never toLocaleTimeString', /_clockOf\(ms\) \{ return clockOf\(Number\(ms\) \|\| Date\.now\(\), \{ seconds: true \}\); \}/.test(cv) && /const when = clockOf\(/.test(csr) && !/toLocaleTimeString/.test(csr)],   // stale-pins: kept (the absence check: chat-search prints no toLocaleTimeString any more)
+    ['a view-only re-ask takes ITS OWN answer only (one socket, every window) and replaces its slab and its line', /if \(!msg \|\| msg\.sessionId !== sid\) return false;/.test(cv) && /if \(msg\.messages\?\.length\) this\._reloadViewSlab\(msg\);/.test(cv) && /try \{ this\._historyNotLoadedEl\?\.remove\(\); \} catch \{ \}\n\s+if \(info && info\.storageHung\) this\._historyNotLoadedEl = /.test(cv)],
+    ['a closed view asks nothing again', /clearTimeout\(this\._historyReaskTimer\); this\._historyReaskTimer = null; try \{ this\._historyReaskCancel\?\.\(\); \} catch \{ \}   \/\/ row B-422c: a closed view/.test(cv)],
     ['r1243: a view-only window keeps its own request for the re-ask', /chatView\._viewAttachSpec = viewSpec;/.test(sl) && /this\._viewAttachSpec = spec;/.test(cv)],
     ['the minimap fallback draws nothing from it', /if \(d\.turns\?\.length && !d\.notLoaded\) this\._chatMinimap\.render\(d\.turns\)/.test(cv)],
     ['/api/subagents\' reason in the page\'s words', /if \(r\?\.reason === 'transcript_reader_restarting'\) \{ this\._sayReaderRestarting\(\); return; \}/.test(cv)],
     ['a search of it says «try again» (or the storage\'s words), never «No results»', /this\._searchStatus\.textContent = data\.storageHung \? t\("This conversation's file is not answering — trying again at \{time\}\.", \{ time: when \}\) : t\('The transcript reader is restarting — try again in a moment\.'\);/.test(csr)],
-    ['the resume road says the line', /if \(data\.notLoaded\) chatView\._sayHistoryNotLoaded\?\.\(data\.notLoaded, \{ info: \{ storageHung: !!data\.storageHung, retryAt: data\.retryAt \|\| null \} \}\);/.test(sl)],
+    ['the resume road says the line', /if \(data\.notLoaded\) chatView\._sayHistoryNotLoaded\?\.\(data\.notLoaded, \{ info: \{ storageHung: !!data\.storageHung, retryAt: data\.retryAt \|\| null, retryIn: data\.retryIn \?\? null \} \}\);/.test(sl)],
     ['the REBUILD alone sets _historyNotLoaded (never an attach that joined it)', /session\._historyNotLoaded = notLoaded \|\| null;/.test(fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8')) && !/session\._historyNotLoaded = /.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'))],   // stale-pins: kept (the absence check: ws-handler writes it no more)
   ];
   for (const [name, held] of pins) ok(held, `the page: ${name}`);

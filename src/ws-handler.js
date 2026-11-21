@@ -269,6 +269,10 @@ async function warmTaskStateFor(session) {
   } catch { } finally { if (t) clearTimeout(t); }
 }
 
+// row B-422c (r1243): the time the page asks again, said as a DELAY too (`retryIn`, ms from the hub's now) — a page's clock is not
+// the hub's; the page counts from its own now when the frame lands
+const withRetryIn = (info) => (info ? { ...info, retryIn: Number(info.retryAt) ? Math.max(0, info.retryAt - Date.now()) : null } : null);
+let _historyReadableOff = null;   // the one listener of this process (a later registration — a test's next scene — replaces it)
 function registerWsHandler(wss, ctx) {
   const missing = WS_CTX_CONTRACT.filter((k) => !(k in ctx));
   if (missing.length) throw new Error('[ws-handler] ctx contract violated — missing: ' + missing.join(', '));
@@ -289,7 +293,8 @@ function registerWsHandler(wss, ctx) {
   // ROW B-422c (主开发 r1243 item 2): A PAGE TOLD «NOT LOADED» IS NOTIFIED when the session store next loads that history (its one
   // entry point, src/session-store.js onHistoryReadable): every live conversation of that transcript whose history is not loaded
   // gets `history-ready` — its page asks again by itself (a re-attach), never a re-open
-  require('./session-store').onHistoryReadable((claudeSessionId) => {
+  try { _historyReadableOff?.(); } catch { }
+  _historyReadableOff = require('./session-store').onHistoryReadable((claudeSessionId) => {
     for (const [sid, s] of activeSessions) {
       if (!s || s.claudeSessionId !== claudeSessionId || s._historyLoaded || !(s.clients instanceof Map) || !s.clients.size) continue;
       try { broadcastToSession(s, sid, { type: 'history-ready', sessionId: sid }); } catch (e) { console.warn('[ws] history-ready not sent:', e && e.message); }
@@ -1848,7 +1853,7 @@ function registerWsHandler(wss, ctx) {
               })();
               // ONE builder for every live fact; the slab (messages + turnMap) is
               // the only thing the held rung leaves out.
-              const livePayload = { type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', historyNotLoaded: session._historyLoaded ? null : (session._historyNotLoaded || null), historyNotLoadedInfo: session._historyLoaded ? null : (session._historyNotLoadedInfo || null),   // row B-422c: the page says the history waits on the reader
+              const livePayload = { type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', historyNotLoaded: session._historyLoaded ? null : (session._historyNotLoaded || null), historyNotLoadedInfo: session._historyLoaded ? null : withRetryIn(session._historyNotLoadedInfo),   // row B-422c: the page says the history waits on the reader
                 totalCount, chatStatus, isStreaming, streamingLabel, streamingKind: isStreaming ? (session._streamingKind || null) : null, autoResume: autoResume?.statusFor?.(data.sessionId) || null, outputStyle: session._outputStyle || null, worktree: !!session._worktree, worktreePath: session._worktreePath || null, spawnOrigin: { model: session._modelOrigin || null, effort: session._effortOrigin || null }, taskState: sm.taskState(), pendingPermissions: pendingPerms,
                 // The input queue as the normalizer knows it (the wrapper's
                 // queue_changed replays through the buffer on a rebuild) —
@@ -2002,7 +2007,7 @@ function registerWsHandler(wss, ctx) {
             await require('./transcript-service.js').gatedRead({ host: data.host || null, conv: backendSessionId }, () => convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId }), { artifacts: artifactDeriveOpts({ backend: data.backend || 'claude', cwd: data.cwd || '' }) })); // lane artifacts-model: its deliverable cards, derived at the read // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once); its browser-session cards by time (2026-09-27)
             try { if (typeof mm.endLateAllows === 'function') mm.endLateAllows(false); } catch { }   // B-9ff2's remainder (r1296 (2)): a STOPPED conversation's waiting late Allows — the agent never said
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: data.name || '', cwd: data.cwd || '', mode: 'chat',
-              messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true, historyNotLoaded: sm.notLoaded || null, historyNotLoadedInfo: sm.notLoaded ? { storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null } : null }));   // row B-422c // the slab asked for, as the live attach (perf r1)
+              messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true, historyNotLoaded: sm.notLoaded || null, historyNotLoadedInfo: sm.notLoaded ? withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null }) : null }));   // row B-422c // the slab asked for, as the live attach (perf r1)
             if (ws.readyState === WS_OPEN) for (const [, s] of activeSessions) if (addressableId(s) === backendSessionId) BULK.replied(s);   // B-cd4b r1093, THE DOOR: View History replied the history of the live conversation it names (its own address: a pending fork carrying the id is not it)
           } else {
             // Include sessionId so the requesting ChatView can correlate the

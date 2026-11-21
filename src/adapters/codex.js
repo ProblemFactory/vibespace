@@ -885,14 +885,16 @@ function storageRetryDue(fp) {
   return true;
 }
 let _poolRefusedAt = 0;
-const POOL_WIDE = new Set(['no-worker', 'no-idle-worker']);   // SafeFs's own codes (src/safe-fs.js NO_WORKER / NO_IDLE)
+const POOL_WIDE = new Set(['no-worker']);   // SafeFs's own code (src/safe-fs.js NO_WORKER); its `no-idle-worker` (NO_IDLE: an `idleOnly` call while every worker
+// is busy) is ORDINARY LOAD, never a pool that refuses — dropped ON PURPOSE (round w5gioyat2 asked; no transcript call passes idleOnly)
 function notePoolRefusing(e) { if (!e || POOL_WIDE.has(e.code) || /safeFs closed/.test(String(e.message || '')) || e.why === 'no transcript pool on this process') _poolRefusedAt = Date.now(); }
 // an answer of the pool ends «refusing every call»; only a HISTORY READ's answer forgives the file (a task scan or a gap read answered
 // on the other worker says nothing of whether its tail can be read: the whole-state read's MUST)
 const HISTORY_OPS = new Set(['jsonlTail', 'boundedParsed', 'boundedParsedPage', 'codexHistoryMergedPage']);
 function poolAnswered(fp, op) { _poolRefusedAt = 0; if (HISTORY_OPS.has(op)) forgiveFile(fp); }
 // the pool gone (its construction failed — retried, or given up after POOL_RETRY_MAX) refuses every call too, renewed by nothing
-function poolRefusing() { return _transcriptPool === false || !!(_transcriptPool && _transcriptPool._closed) || (!!_poolRefusedAt && Date.now() - _poolRefusedAt <= POOL_REFUSING_MS); }   // + a pool closed for good: no call needed to say so
+function poolGone() { return _transcriptPool === false || !!(_transcriptPool && _transcriptPool._closed); }   // closed for good / none on this process: no call can answer
+function poolRefusing() { return poolGone() || (!!_poolRefusedAt && Date.now() - _poolRefusedAt <= POOL_REFUSING_MS); }   // + a pool closed for good: no call needed to say so
 const _fileRefusals = new Map();   // fp → { firstAt, lastAt, count, storage, ownDeadline, why } — the pool's refusals of ONE file, standing
 const _slicedSaid = new Set();
 let _slicedChain = Promise.resolve(), _slicedParked = 0;
@@ -1803,7 +1805,7 @@ class CodexAdapter extends BackendAdapter {
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
   _setTranscriptPoolForTest, // row B-422c's legs
-  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, fileRefused, poolRefusing, storageRetryDue, nextReadAt, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
+  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, fileRefused, poolRefusing, poolGone, storageRetryDue, nextReadAt, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,

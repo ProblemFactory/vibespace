@@ -20,7 +20,7 @@ const MOVED_PRESS_ROWS = '.chat-channel-touch, .chat-peer-name';
 /** the cure: a row by a KEY that outlives a re-render — a channel row's own key, else its record and its words (a peer's name is
  *  rebuilt by innerHTML when its message re-renders) — so no node is kept and a redrawn row is the same row */
 const pressKeyOf = (row) => (!row ? null : row.dataset?.key ? 'k:' + row.dataset.key : 'm:' + (row.closest?.('[data-msg-id]')?.dataset?.msgId || '') + '|' + (row.textContent || ''));
-import { stampAt as when, num, span, stampSpan } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { stampAt as when, num, span, stampSpan, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the message details' stored values in words (the walk's chat-core-4)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
 import { waitingTurnOf, signinWallOf } from '../signin-model.js'; // PURE (lane door-signin-fixes): the turn waiting at the wall; which wall a death gets
@@ -1410,7 +1410,7 @@ class ChatView {
         if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { info: msg.historyNotLoadedInfo || null });   // row B-422c: a re-attach whose history waits on the reader
         else this._historyLoadedNow();
       } else if (msg.type === 'history-ready' && msg.sessionId === sessionId) {
-        this._reaskHistory();   // r1243 item 2: the server loaded it — ask again now
+        this._onHistoryReady();   // r1243 item 2: the server loaded it — ask again now (once: a re-ask on its way is that ask)
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
         this._onSessionError(msg);
       } else if (msg.type === 'jobs-updated' && msg.held) {
@@ -2769,7 +2769,7 @@ class ChatView {
     // row B-422c: a history the transcript reader refused (its kept copy, or nothing) is a FAILED fetch — the view that stands is never
     // replaced by a short one; the person is told «try again» (a toast, at most one each few seconds; the 2 s poll stays quiet)
     if (data && data.notLoaded) {
-      if (!quietRefusal) this._sayReaderRestarting({ storageHung: !!data.storageHung, retryAt: data.retryAt || null });
+      if (!quietRefusal) this._sayReaderRestarting({ storageHung: !!data.storageHung, retryAt: data.retryAt || null, retryIn: data.retryIn ?? null });
       throw Object.assign(new Error(t('The transcript reader is restarting — try again in a moment.')), { code: data.notLoaded });
     }
     if (applyTotal && typeof data.total === 'number') this._total = data.total; // (a tail fetch applies its own once its slab is the view — r4)
@@ -3490,7 +3490,7 @@ class ChatView {
       if (!res.ok) {
         // row B-422c (主开发 r1006 item 3): a read the transcript reader REFUSED asks the person to try again — a toast, never silence
         let body = null; try { body = await res.json(); } catch { }
-        if (body && body.code === 'transcript_reader_restarting') this._sayReaderRestarting({ storageHung: !!body.storageHung, retryAt: body.retryAt || null });
+        if (body && body.code === 'transcript_reader_restarting') this._sayReaderRestarting({ storageHung: !!body.storageHung, retryAt: body.retryAt || null, retryIn: body.retryIn ?? null });
         return { ok: false, error: (body && body.error) || `HTTP ${res.status}`, code: (body && body.code) || null };
       }
       return { ok: true, data: await res.json() };
@@ -3505,10 +3505,17 @@ class ChatView {
     const now = Date.now();
     if (this._readerRestartingSaidAt && now - this._readerRestartingSaidAt < 5000) return;
     this._readerRestartingSaidAt = now;
-    if (info && info.storageHung) showToast(t("This conversation's file is not answering — trying again at {time}.", { time: this._clockOf(info.retryAt) }));
+    if (info && info.storageHung) showToast(t("This conversation's file is not answering — trying again at {time}.", { time: this._clockOf(this._retryAtOf(info)) }));
     else showToast(t('The transcript reader is restarting — try again in a moment.'));
   }
-  _clockOf(ms) { try { return new Date(Number(ms) || Date.now()).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { return ''; } }
+  /** the page's own clock (src/lib/page-time.js — the page's language and zone) */
+  _clockOf(ms) { return clockOf(Number(ms) || Date.now(), { seconds: true }); }
+  /** the time the server gave, on THIS page's clock: its delay (`retryIn`, counted from the hub's now) from the page's now — a page's
+   *  clock ahead or behind the hub's re-asks neither early nor late, and prints its own time; else the hub's instant */
+  _retryAtOf(info) {
+    const d = info && info.retryIn != null ? Number(info.retryIn) : NaN;
+    return Number.isFinite(d) ? Date.now() + Math.max(0, d) : (Number(info && info.retryAt) || 0);
+  }
 
   /** row B-422c (主开发 r1006 item 3): the history WAITS — said in plain words where it would be (never an empty pane), once per attach
    *  that says so, in the words of the door that refused (r1243 item 1); and (r1243 item 2) the page ASKS AGAIN BY ITSELF at the time
@@ -3517,35 +3524,67 @@ class ChatView {
   _sayHistoryNotLoaded(code, { again = false, info = null } = {}) {
     if (!code) return;
     this._historyNotLoadedCode = code;
-    this._scheduleHistoryReask(info && info.retryAt);
+    const at = this._retryAtOf(info);
+    const owed = this._historyReadyOwed; this._historyReadyOwed = false;   // `history-ready` came while this answer was on its way: ask again soon
+    this._scheduleHistoryReask(at, { prompt: owed });
     if (!again && this._historyNotLoadedSaid === code + (this._lastAttachedAt || 0)) return;
     this._historyNotLoadedSaid = code + (this._lastAttachedAt || 0);
-    if (info && info.storageHung) this._renderers.appendSystem(t("This conversation's file is not answering, so its history is not loaded yet (or not all of it). Trying again at {time} — it fills in here by itself.", { time: this._clockOf(info.retryAt) }));
-    else this._renderers.appendSystem(t('The history is not loaded yet, or not all of it — the transcript reader is restarting. It fills in here by itself in a moment.'));
+    // ONE line: a later answer REPLACES it (a view's re-asks never pile lines up), and the history that loads removes it
+    try { this._historyNotLoadedEl?.remove(); } catch { }
+    if (info && info.storageHung) this._historyNotLoadedEl = this._renderers.appendSystem(t("This conversation's file is not answering, so its history is not loaded yet (or not all of it). Trying again at {time} — it fills in here by itself.", { time: this._clockOf(at) }));
+    else this._historyNotLoadedEl = this._renderers.appendSystem(t('The history is not loaded yet, or not all of it — the transcript reader is restarting. It fills in here by itself in a moment.'));
   }
-  /** the history loaded (an attach said nothing of it): no more re-asks */
-  _historyLoadedNow() { this._historyNotLoadedCode = null; clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null; }
-  /** one re-ask at `at` (never sooner than 2 s, never later than 10 min) while the window lives and its history is still not loaded */
-  _scheduleHistoryReask(at) {
+  /** the history loaded (an attach said nothing of it): no more re-asks, the line gone */
+  _historyLoadedNow() {
+    this._historyNotLoadedCode = null; this._historyReaskTries = 0; this._historyReadyOwed = false;
+    clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null;
+    try { this._historyNotLoadedEl?.remove(); } catch { } this._historyNotLoadedEl = null;
+  }
+  /** one re-ask at `at` while the window lives and its history is still not loaded — never sooner than its BACK-OFF (2 s, doubling at
+   *  each re-ask answered «not loaded» again: a re-ask of a live window is a whole re-attach), never later than 10 min; `prompt`
+   *  (the server said `history-ready` meanwhile): 2 s */
+  _scheduleHistoryReask(at, { prompt = false } = {}) {
     clearTimeout(this._historyReaskTimer);
-    const wait = Math.min(10 * 60000, Math.max(2000, (Number(at) || 0) - Date.now()));
+    const floor = prompt ? 2000 : Math.min(10 * 60000, 2000 * 2 ** Math.min(this._historyReaskTries || 0, 9));
+    const wait = Math.min(10 * 60000, Math.max(floor, (Number(at) || 0) - Date.now()));
     this._historyReaskTimer = setTimeout(() => this._reaskHistory(), wait);
+  }
+  /** the server's push (`history-ready`): ask again now — unless a re-ask is already on its way (its answer is the history, or it
+   *  owes one more ask soon) */
+  _onHistoryReady() {
+    if (!this._historyNotLoadedCode) return;
+    if (this._historyReaskSentAt && this._historyReaskSentAt > (this._lastAttachedAt || 0) && Date.now() - this._historyReaskSentAt < 30000) { this._historyReadyOwed = true; return; }
+    this._reaskHistory();
   }
   _reaskHistory() {
     clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null;
     if (this._disposed || !this._historyNotLoadedCode) return;
+    this._historyReaskTries = (this._historyReaskTries || 0) + 1;
+    this._historyReaskSentAt = Date.now();
     if (!this._readOnly) { this._reattach(false); return; }   // a live window: the attach reads it again (its answer re-renders, or says it again)
-    const spec = this._viewAttachSpec;   // a view-only window: its view request again
+    const spec = this._viewAttachSpec;   // a view-only window: its view request again — its OWN answer only (one socket, every window)
     if (!spec || !this.ws?.request) return;
-    this.ws.request(spec, (msg) => {
+    const sid = spec.sessionId;
+    try { this._historyReaskCancel?.(); } catch { }
+    this._historyReaskCancel = this.ws.request(spec, (msg) => {
+      if (!msg || msg.sessionId !== sid) return false;
       if (this._disposed) return true;
-      if (msg.type === 'error') return true;
+      if (msg.type === 'error') { this._scheduleHistoryReask(0); return true; }   // its own error: asked again at the back-off, never stopped for good
       if (msg.type !== 'attached') return false;
-      if (msg.messages?.length) this.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
+      if (msg.messages?.length) this._reloadViewSlab(msg);
       if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { again: true, info: msg.historyNotLoadedInfo || null });
       else this._historyLoadedNow();
       return true;
-    });
+    }, { isAlive: () => !this._disposed, timeoutMs: 20000, onTimeout: () => this._scheduleHistoryReask(0), resend: true });
+  }
+  /** a view-only window's re-asked slab REPLACES the one it drew (never added under it); a slab that is the tail it holds already
+   *  (the same records, the same total — the pages a person scrolled up to kept) is left as it is */
+  _reloadViewSlab(msg) {
+    const ms = msg.messages, cur = this._messages || [], off = cur.length - ms.length;
+    if (off >= 0 && this._total === (msg.totalCount || ms.length) && ms.every((m, i) => cur[off + i]?.id === m?.id)) return;
+    this._messageList.querySelectorAll('.chat-msg:not(.chat-msg-system)').forEach(el => el.remove());
+    this._resetGapAfterJump(); this._elements.clear(); this._renderedMsgIds.clear(); this._messages = []; this._newMsgCount = 0;
+    this.loadHistory(ms, msg.totalCount, false, { chatStatus: msg.chatStatus });
   }
 
   // ── Whole-conversation minimap for gapped (huge) sessions ──
@@ -8465,6 +8504,7 @@ class ChatView {
   dispose() {
     this._statusBar?.dispose?.();
     clearTimeout(this._rewindAnswerTimer); this._rewindCancel?.(); // B-437e: a closed view says nothing about a rewind
+    clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null; try { this._historyReaskCancel?.(); } catch { }   // row B-422c: a closed view asks nothing again
     try { this._outboxOff?.(); } catch { } // lane outbox-session-chip: the chip stops hearing the outbox feed
     try { this._needsCards?.stop(); } catch { } // lane chat-needs-you-card
     try { this._signInCard?.destroy(); } catch { } // lane door-signin-card

@@ -704,8 +704,9 @@ async function parseCodexSessionJsonlAsync(threadId, { fp: known } = {}) {
           noteNotLoadedOnce(threadId, 'its storage hung (a deadline, a hung path or a blocked mount)');
           return Object.assign([], { notLoaded: NOT_LOADED, why: 'its storage hung', storageHung: true, retryAt: Cx.nextReadAt(fp) });
         }
-        // the due retry while the POOL refuses every call (closed, gone): the main process's own sliced read (r1243 item 3)
-        if (Cx.poolRefusing()) {
+        // the due retry while the POOL is GONE (closed for good, none here): the main process's own sliced read (r1243 item 3); a pool
+        // that only refused a moment ago is asked again below — a file it called hung is never read here while a worker can come back
+        if (Cx.poolGone()) {
           try { return await Cx.readCodexRolloutSliced(fp, { storageRetry: true }); } catch (e) { noteNotLoadedOnce(threadId, `its storage hung; the retry failed too (${(e && e.message) || e})`); return Object.assign([], { notLoaded: NOT_LOADED, why: 'its storage hung', storageHung: true, retryAt: Cx.nextReadAt(fp) }); }
         }
       } }
