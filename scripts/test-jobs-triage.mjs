@@ -45,6 +45,10 @@ const strip = (o) => JSON.parse(JSON.stringify(o, (k, v) => (k.startsWith('_') ?
 // lane lg-store-writes (B-0248 U4): jobs.json is the STORE WRITER's — a read of the FILE first lands what the process's writer owes
 const SWu4 = require(path.join(ROOT, 'src/store-writer.js'));
 const landedU4 = () => { const r = SWu4.storeWriter().flushSync(); if (r.deferred || (r.left && r.left.length)) throw new Error(`the store writer left owed writes (a disk check after it would prove nothing): ${JSON.stringify(r.deferred ? 'deferred' : r.left).slice(0, 300)}`); };   // lane lg-store-writes U4 (the move's read): LOUD — a landing that did not happen never leaves a disk check vacuous in silence
+// B-0248 step 3 (lane bl-loop-b): the archive rides the store writer — a sweep's records leave the store at its LANDING; the suite
+// lands it at once (the process's writer, twice: the archive, then jobs.json's save its landing made) and reads the landing's answer
+const flushU4 = () => { try { SWu4.storeWriter().flushSync(); } catch { /* a held store's own refusal */ } };
+const sweepNow = (eng, o = {}) => { let out = null; const h = eng.archiveSweep({ ...o, answer: (x) => { out = x; } }); flushU4(); flushU4(); return out || h; };
 const readStore = (d) => { landedU4(); return JSON.parse(fs.readFileSync(path.join(d, 'jobs.json'), 'utf-8')); };
 const readArchive = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, 'jobs-archive.json'), 'utf-8')); } catch { return null; } };
 
@@ -151,7 +155,7 @@ ok(drained.length >= 1 && byKind('stash').filter((id) => jm.jobs.get(id).owner.c
 console.log('§3 archival: who archives, who stays, one broadcast per sweep');
 policy.doneAfterHours = 24; policy.failedAfterDays = 7;
 bc1.length = 0;
-const r25 = jm.archiveSweep({ now: T0 + 25 * H });
+const r25 = sweepNow(jm, { now: T0 + 25 * H });
 const doneIds = fx.jobs.filter((j) => j.kind === 'task' && j.state === 'done' && !j.cronParent).map((j) => j.id);
 ok(r25.archived.length === doneIds.length && doneIds.every((id) => r25.archived.includes(id)), `+25 h: exactly the ${doneIds.length} done one-shots archive`);
 ok(failedIds.every((id) => jm.jobs.has(id)), 'no failed row archives at +25 h (the failed clock is 7 d after the ACK)');
@@ -160,29 +164,29 @@ ok(bc1.filter((m) => m.type === 'jobs-updated' && Array.isArray(m.archived)).len
 const store25 = readStore(dir1), arch25 = readArchive(dir1);
 ok(!store25.some((j) => doneIds.includes(j.id)) && doneIds.every((id) => arch25.some((r) => r.id === id)), 'EXIT: the done rows are gone from jobs.json and present in jobs-archive.json');
 ok(arch25.every((r) => r.archivedAt === T0 + 25 * H && r.archivedWhy === 'done' && r.runs && r.notifyLog), 'an archived record keeps runs/notifyLog and gains archivedAt + archivedWhy');
-ok(jm.archiveSweep({ now: T0 + 25 * H + 1 }).archived.length === 0, 'a second sweep at the same clock moves nothing (idempotent)');
+ok(sweepNow(jm, { now: T0 + 25 * H + 1 }).archived.length === 0, 'a second sweep at the same clock moves nothing (idempotent)');
 // acked failures: 7 d after the ACK; unacked: never
-const r8d = jm.archiveSweep({ now: T0 + 8 * D + H });
+const r8d = sweepNow(jm, { now: T0 + 8 * D + H });
 ok(ackedAtBoot.concat([target]).every((id) => r8d.archived.includes(id)), '+8 d: every ACKNOWLEDGED failure (notified / agent-read / user-opened, incl. the /seen one) archives with why=failed-acknowledged');
 ok(r8d.archived.every((id) => jm.archivedById(id).archivedWhy === 'failed-acknowledged'), '…each carrying why=failed-acknowledged');
 const stillUnacked = failedIds.filter((id) => jm.jobs.has(id));
 ok(stillUnacked.length && stillUnacked.every((id) => ackBy(id) === null), `the ${stillUnacked.length} unacknowledged failures stay`);
-ok(jm.archiveSweep({ now: T0 + 400 * D }).archived.filter((id) => stillUnacked.includes(id)).length === 0 && stillUnacked.every((id) => jm.jobs.has(id)), 'an UNACKNOWLEDGED failure never archives — not at +400 d either');
+ok(sweepNow(jm, { now: T0 + 400 * D }).archived.filter((id) => stillUnacked.includes(id)).length === 0 && stillUnacked.every((id) => jm.jobs.has(id)), 'an UNACKNOWLEDGED failure never archives — not at +400 d either');
 // the cron child follows its schedule
 ok(jm.jobs.has(fx.ids.cronChild), 'the cron child stayed while its parent schedules fires (it IS the run ring)');
 jm.jobs.get(fx.ids.cron).desiredUp = false;
-ok(jm.archiveSweep({ now: T0 + 400 * D }).archived.includes(fx.ids.cronChild), '…and archives once the schedule is stopped');
+ok(sweepNow(jm, { now: T0 + 400 * D }).archived.includes(fx.ids.cronChild), '…and archives once the schedule is stopped');
 // 0 = never
 policy.doneAfterHours = 0;
 {
   const j = { ...strip(fx.jobs[0]), id: 'jb-zero0', name: 'export-zero' };
   jm.jobs.set(j.id, j);
-  ok(jm.archiveSweep({ now: T0 + 400 * D }).archived.length === 0 && jm.jobs.has(j.id), 'jobs.archiveDoneAfterHours = 0 archives no done record');
+  ok(sweepNow(jm, { now: T0 + 400 * D }).archived.length === 0 && jm.jobs.has(j.id), 'jobs.archiveDoneAfterHours = 0 archives no done record');
   policy.doneAfterHours = 24;
-  ok(jm.archiveSweep({ now: T0 + 400 * D }).archived.includes(j.id), '…and the default policy archives it');
+  ok(sweepNow(jm, { now: T0 + 400 * D }).archived.includes(j.id), '…and the default policy archives it');
 }
 // live pid / open interaction never archive (the pure verdict, pinned through the engine)
-ok(jm.jobs.has(fx.ids.awaiting) && jm.archiveSweep({ now: T0 + 400 * D }).archived.length === 0, 'an awaiting-user job with an open panel is never archived');
+ok(jm.jobs.has(fx.ids.awaiting) && sweepNow(jm, { now: T0 + 400 * D }).archived.length === 0, 'an awaiting-user job with an open panel is never archived');
 
 // ── §4 read-through: a held id never 404s; the same shape ──
 console.log('§4 read-through + routes');
@@ -232,6 +236,7 @@ console.log('§6 the archive cap');
   fs.mkdirSync(path.join(dir2, 'job-logs', rows[0].id), { recursive: true }); fs.writeFileSync(path.join(dir2, 'job-logs', rows[0].id, 'current.log'), 'keep');
   const C = new JobManager({ dataDir: dir2, broadcast: () => { }, notifyUser: () => { }, log: () => { }, archivePolicy: () => policy });
   C.init(); // the boot sweep runs at the real clock — every row is ≥ 30 h old
+  flushU4(); flushU4();   // B-0248 step 3: the boot sweep's archive lands (the store writer), then jobs.json's save
   const arch = readArchive(dir2);
   ok(arch.length === ARCHIVE_CAP && C.jobs.size === 0, `${N} archived at once ⇒ the file holds exactly ARCHIVE_CAP=${ARCHIVE_CAP}`);
   const kept = new Set(arch.map((r) => r.id));
@@ -259,27 +264,28 @@ console.log('§6b an archive write that fails releases nothing');
   }
   fs.writeFileSync(path.join(dir3, 'jobs.json'), JSON.stringify(rows));
   const tmp = path.join(dir3, 'jobs-archive.json.tmp-' + process.pid);
-  fs.mkdirSync(tmp); // writeJsonAtomic's tmp path is a directory ⇒ writeFileSync throws EISDIR
+  fs.mkdirSync(tmp); fs.mkdirSync(tmp + '-w'); // B-0248 step 3: both temp names (this thread's, the store writer thread's) are directories ⇒ the write fails EISDIR
   const logs = [], bcs = [];
   const E = new JobManager({ dataDir: dir3, broadcast: (t, p) => bcs.push({ t, p }), notifyUser: () => { }, log: (...a) => logs.push(a.join(' ')), archivePolicy: () => policy });
-  E.init(); // the boot sweep tries at the real clock — and must fail LOUDLY, releasing nothing
-  const r = E.archiveSweep({ now: T0 + 400 * D });
-  ok(r.archived.length === 0 && r.failed === 'archive-write' && r.kept === N, `the sweep reports the failure (archived 0, failed:'archive-write', kept ${N}) — got ${JSON.stringify(r)}`);
-  ok(E.jobs.size === N && readStore(dir3).length === N, `every record is still LIVE in memory and on disk (${E.jobs.size} / ${readStore(dir3).length} of ${N})`);
+  E.init(); // the boot sweep hands the archive at the real clock — the storage refuses it: it must fail LOUDLY, releasing nothing
+  flushU4(); flushU4();   // the writer tries it (refused) — B-0248 step 3: the records leave only at a LANDING
+  const onDisk3 = () => JSON.parse(fs.readFileSync(path.join(dir3, 'jobs.json'), 'utf-8'));
+  ok(E.jobs.size === N && onDisk3().length === N, `every record is still LIVE in memory and on disk (${E.jobs.size} / ${onDisk3().length} of ${N})`);
   ok(readArchive(dir3) === null, 'no archive file was written');
   ok(logs.some((l) => /archive write FAILED/.test(l) && /EISDIR/.test(l)) && !logs.some((l) => /archived \d+ one-shot/.test(l)), 'the log says the write FAILED with the verbatim error and never claims "archived N"');
   ok(!bcs.some((b) => b.t === 'jobs-updated' && b.p && b.p.archived), 'no jobs-updated {archived} broadcast for a sweep that moved nothing');
   // CONTROL (the cheap wrong direction — a sweep that never moves anything):
-  // with the obstruction gone the SAME call archives all N on the next tick
-  fs.rmdirSync(tmp);
-  const r2 = E.archiveSweep({ now: T0 + 400 * D });
-  ok(r2.archived.length === N && E.jobs.size === 0 && readStore(dir3).length === 0 && readArchive(dir3).length === N, `…and the next sweep, once the archive is writable, moves all ${N} (a retry, not a loss)`);
+  // with the obstruction gone the writer's write AGAIN lands and moves all N
+  fs.rmdirSync(tmp); fs.rmdirSync(tmp + '-w');
+  flushU4(); flushU4();
+  ok(E.jobs.size === 0 && readStore(dir3).length === 0 && readArchive(dir3).length === N, `…and once the archive is writable, the store writer's write again lands and moves all ${N} (a retry, not a loss)`);
   E.shutdown();
   // a store flush that failed AFTER a successful archive write brings the record back at the next boot: the re-archive REPLACES its older copy, never duplicates it
   fs.writeFileSync(path.join(dir3, 'jobs.json'), JSON.stringify([rows[0]]));
   fs.rmSync(path.join(dir3, 'jobs.lock'), { force: true });
   const E2 = new JobManager({ dataDir: dir3, broadcast: () => { }, notifyUser: () => { }, log: () => { }, archivePolicy: () => policy });
   E2.init(); // the boot sweep re-archives rows[0] at the real clock
+  flushU4(); flushU4();   // B-0248 step 3: the boot sweep's archive lands (the store writer), then jobs.json's save
   const arch = readArchive(dir3);
   ok(E2.jobs.size === 0 && arch.length === N && arch.filter((a) => a.id === rows[0].id).length === 1, `a record re-archived after a failed store flush replaces its archive copy (${arch.length} = ${N}, one copy of ${rows[0].id})`);
   E2.shutdown();
@@ -552,7 +558,7 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   fs.writeFileSync(path.join(d12s, 'jobs-archive.json'), JSON.stringify([{ id: 'jb-5ke1e7s1', kind: 'task', name: 'the real one', state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: T0 - 9 * D, endedAt: T0 - 9 * D + 1 }], archivedAt: T0 - 8 * D, archivedWhy: 'done' }]));
   const { jm: Sw } = boot(d12s);
   Sw.jobs.set('jb-5ke1e7s1', { ...oldSkel('jb-5ke1e7s1'), access: { view: 'session', control: 'session' }, ack: { by: 'user-opened', at: T0 - 10 * D } });
-  const swr = Sw.archiveSweep({ now: T0 });
+  const swr = sweepNow(Sw, { now: T0 });
   const realOne = Sw._loadArchive().find((r) => r.id === 'jb-5ke1e7s1');
   ok(!swr.archived.length && realOne && realOne.name === 'the real one' && !Sw.jobs.has('jb-5ke1e7s1'), 'B-ef97: an acknowledged skeleton whose id the archive holds leaves the store — it never replaces the archived record', { swr, name: realOne && realOne.name });
   Sw.shutdown();
@@ -585,7 +591,7 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   fs.writeFileSync(path.join(dXs, 'jobs-archive.json'), JSON.stringify([{ id: 'jb-5ke1e7s1', kind: 'task', name: 'the real one', state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: T0 - 9 * D, endedAt: T0 - 9 * D + 1 }], archivedAt: T0 - 8 * D, archivedWhy: 'done' }]));
   const XS = new JMod.JobManager({ dataDir: dXs, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); XS.init();
   XS.jobs.set('jb-5ke1e7s1', { ...oldSkel('jb-5ke1e7s1'), ack: { by: 'user-opened', at: T0 - 10 * D } });
-  XS.archiveSweep({ now: T0 });
+  sweepNow(XS, { now: T0 });
   const xReal = XS._loadArchive().find((r) => r.id === 'jb-5ke1e7s1');
   ok(xReal && xReal.name === 'jb-5ke1e7s1', 'B-ef97 CONTROL (no guard, in a copy): the acknowledged skeleton is archived OVER the real record (its name is gone)', xReal && xReal.name);
   XS.shutdown();
@@ -717,7 +723,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(Bj._unread.archive && Bj._unread.archive.code === 'EISDIR' && fs.statSync(AF).isDirectory() && asides(dB, 'jobs-archive.json').length === 0 && Bj.jobs.has('jb-f2760b01') && lB.some((l) => /NOT archived — the store keeps them/.test(l)), 'B-f276: an archive whose read fails (EISDIR) is not set aside and not written over — the boot sweep\'s record stays in the store', { unread: Bj._unread.archive, asides: asides(dB, 'jobs-archive.json') });
   fs.rmdirSync(AF); fs.writeFileSync(AF, JSON.stringify([{ ...rec('jb-f2760b02'), archivedAt: T0 - D, archivedWhy: 'done' }]));
   const backB = await until(() => !Bj._unread.archive && Bj.archive && Bj.archive.some((r) => r.id === 'jb-f2760b02'));
-  const sw = backB ? Bj.archiveSweep({ now: T0 }) : null;
+  const sw = backB ? sweepNow(Bj, { now: T0 }) : null;
   const onDiskB = (() => { try { return JSON.parse(fs.readFileSync(AF, 'utf-8')).map((r) => r.id).sort().join(); } catch (e) { return e.code; } })();
   ok(backB && sw && sw.archived.includes('jb-f2760b01') && onDiskB === 'jb-f2760b01,jb-f2760b02', 'B-f276: the archive is read again; the next sweep archives beside what it held (nothing lost)', { backB, onDiskB });
   if (Bj._logsNoteP) await Bj._logsNoteP;
@@ -731,6 +737,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     fs.readFileSync = function (f, ...a) { if (String(f) === F) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rfg.call(this, f, ...a); };
     let J; try { J = engine(Mod, d, []); } finally { fs.readFileSync = rfg; }
     J._unreadStopped = true;
+    flushU4(); flushU4();   // B-0248 step 3: the boot sweep's archive write (if any) lands before the file is read
     return { J, kept: fs.readFileSync(F, 'utf-8') === before, inStore: J.jobs.has('jb-f2760g01') };
   };
   const g = guardScene({ JobManager }, 'jobs-triage-unread-archive-guard');
@@ -896,7 +903,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     fs.writeFileSync(path.join(d, 'jobs.json'), JSON.stringify([rec('jb-f2760o01')]));
     fs.mkdirSync(AF2);
     const J = engine({ JobManager }, d, lo, { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
-    J.archiveSweep({ now: T0 }); J.archiveSweep({ now: T0 + 1 }); J.archiveSweep({ now: T0 + 2 });
+    sweepNow(J, { now: T0 }); sweepNow(J, { now: T0 + 1 }); sweepNow(J, { now: T0 + 2 });
     const cl = J.clearJobs(['jb-f2760o01'], { allow: () => true });
     ok(lo.filter((l) => /released but NOT archived/.test(l)).length === 1 && J.jobs.has('jb-f2760o01'), 'B-f276 cure r2: while the archive cannot be read its sweep\'s refusal is said ONCE a hold, not every sweep — the record stays in the store', lo.filter((l) => /NOT archived/.test(l)));
     ok(cl && /archived records could not be reached, so their words were not cleared — clear them again once it reads — jobs-archive\.json in VibeSpace's data folder could not be read \(EISDIR\)/.test(cl.archiveUnread || ''), 'B-f276 cure r2: a clear that cannot reach a held archive SAYS so in its answer', cl);
@@ -2124,6 +2131,263 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
       'r1277 (6): a pairing removed ⇒ its waiting results are «machine-unpaired» (their words: no longer paired — open the conversation to read them; never «when it replies») and the machine\'s item goes', { kinds, item: machineItems(R)[0].status, digest: digest.byConversation && digest.byConversation[V] });
     R.stop();
   }
+}
+
+// ── §B-0248 step 3 (lane bl-loop-b, 主开发 r1478/r1506): THE ARCHIVE THROUGH THE STORE WRITER — its bytes frozen at the hand-off, the
+// records released at its LANDING; a reader sees the landed archive and the store as it was (a record listed ONCE, never twice, never
+// in neither); a person's ✕ answered at the landing; a refusal keeps every record; an owed write never read past; the loop's measure ──
+console.log('§B-0248 step 3: the archive through the store writer (bytes at the hand-off, records released at its landing)');
+{
+  // a stand-in writer the legs land by hand (one entry a file, the version a waiter wants, a refusal by EIO)
+  const gatedJobsWriter = ({ fifo = false } = {}) => {   // fifo: the real writer's order — a write's bytes made when IT starts, a later hand-off queued behind it (never merged into it)
+    const S = new Map();
+    const st = (f) => { if (!S.has(f)) S.set(f, { v: 0, wv: 0, o: null, waiters: [], rides: [], dirty: false, flight: null }); return S.get(f); };
+    const startF = (s) => { if (s.flight || !s.dirty) return; s.dirty = false; const b = s.o.produce(); s.flight = { v: s.v, bytes: Array.isArray(b) ? b.join('') : String(b) }; };
+    function land(f, ok = true) {
+      const s = S.get(f); if (!s) return;
+      if (fifo) {
+        if (!s.flight) startF(s); const fl = s.flight; if (!fl) return;
+        if (!ok) { s.dirty = true; s.flight = null; const ws = s.waiters; s.waiters = []; for (const w of ws) w.cb(false); try { s.o.onWritten && s.o.onWritten(false, Object.assign(new Error('EIO: a stand-in'), { code: 'EIO' })); } catch { } return; }
+        fs.writeFileSync(f, fl.bytes); s.flight = null; s.wv = fl.v;
+        const keepR = []; for (const r of s.rides) { if (r.version <= s.wv) r.go(); else keepR.push(r); } s.rides = keepR;
+        const keep = []; for (const w of s.waiters) { if (w.want <= s.wv) w.cb(true); else keep.push(w); } s.waiters = keep;
+        try { s.o.onWritten && s.o.onWritten(true, null); } catch { }
+        startF(s); return;
+      }
+      if (!s.dirty) return;
+      if (ok) {
+        const b = s.o.produce(); fs.writeFileSync(f, Array.isArray(b) ? b.join('') : String(b)); s.dirty = false; s.wv = s.v;
+        const keep = []; for (const w of s.waiters) { if (w.want <= s.wv) w.cb(true); else keep.push(w); } s.waiters = keep;
+        try { s.o.onWritten && s.o.onWritten(true, null); } catch { }
+        const keepR = []; for (const r of s.rides) { if (r.version <= s.wv) { r.go(); } else keepR.push(r); } s.rides = keepR;
+      } else { const ws = s.waiters; s.waiters = []; for (const w of ws) w.cb(false); try { s.o.onWritten && s.o.onWritten(false, Object.assign(new Error('EIO: a stand-in'), { code: 'EIO' })); } catch { } }
+    }
+    const W = {
+      dirty(f, o) { const s = st(f); s.o = o; s.v++; s.dirty = true; if (fifo) startF(s); },
+      pending: (f) => { const s = S.get(f); return !!s && (s.dirty || !!s.flight); },
+      durable(f, { answer = null } = {}) { const s = S.get(f); const done = (ok) => { if (answer) answer(ok); return ok; }; if (!s || (!s.dirty && !s.flight)) return Promise.resolve(done(true)); const want = s.v; return new Promise((res) => s.waiters.push({ want, cb: (ok) => res(done(ok)) })); },
+      whenDurable(files, o, answer) { let left = files.length, all = true; const one = (ok) => { all = all && ok; if (--left === 0 && answer) answer(all); }; for (const f of files) W.durable(f, { answer: one }); return Promise.resolve(true); },
+      whyNotDurable: () => ({ why: 'failed', code: 'EIO' }),
+      // the writer's afterLanding: `step` at the REAL landing (never at a bound), `answer` once — at the landing, or false at `timeoutMs`
+      afterLanding(f, step, { timeoutMs = null, answer = null } = {}) {
+        const s = S.get(f); let replied = false; const reply = (ok) => { if (replied) return; replied = true; if (answer) answer(ok); };
+        const go = () => { step(); reply(true); };
+        if (!s || (!s.dirty && !s.flight)) { go(); return Promise.resolve({ landed: true }); }
+        s.rides.push({ version: s.v, go });
+        if (Number.isFinite(timeoutMs) && timeoutMs > 0) { const t = setTimeout(() => reply(false), timeoutMs); if (t.unref) t.unref(); }
+        return Promise.resolve({ landed: null });
+      },
+      flushSync(files) { for (const f of files || [...S.keys()]) land(f, true); return { written: [], left: [] }; },
+      forget: (f) => { S.delete(f); },
+    };
+    return { W, land, landAll: () => { for (const f of [...S.keys()]) land(f, true); } };
+  };
+  const seedDone = () => fx.jobs.filter((j) => j.state === 'done' && !j.cron && !j.cronParent).map(strip);
+  const scene = (Mod, tag, g = gatedJobsWriter()) => {
+    const d = mkDir('jobs-archive-writer-' + tag);
+    fs.writeFileSync(path.join(d, 'jobs.json'), JSON.stringify(seedDone())); fs.writeFileSync(path.join(d, 'job-notifications.json'), '{}');
+    const logs = [], bcs = [];
+    const J = new Mod.JobManager({ dataDir: d, broadcast: (t, p) => bcs.push({ t, p }), notifyUser: () => ({ ok: true }), log: (...a) => logs.push(a.join(' ')), archivePolicy: () => policy, writer: g.W, logsSweep: { bootDelayMs: 3600e3 } });
+    J.init(); g.landAll();
+    return { d, g, J, AF: path.join(d, 'jobs-archive.json'), logs, bcs };
+  };
+  const MJb = mutantCopies('jobs-archive-b0248', ROOT);
+  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+  // (1) THE RECORDS LEAVE AT THE LANDING; the readers see what landed: in flight, every record listed ONCE (live), none archived
+  const releaseScene = (Mod, tag, { refuse = false } = {}) => {
+    const { g, J, AF } = scene(Mod, tag); const n0 = J.jobs.size; let ans = null;
+    const h = J.archiveSweep({ now: T0 + 25 * H, answer: (x) => { ans = x; } });
+    const inFlight = { handed: (h.handed || []).length, live: J.jobs.size, archived: J.archivedCount(), answered: !!ans };
+    g.land(AF, !refuse);
+    const after = { live: J.jobs.size, archived: J.archivedCount(), released: ans ? (ans.archived || []).length : null, failed: ans && ans.failed };
+    try { J.shutdown(); } catch { }
+    return { n0, inFlight, after };
+  };
+  const RL = releaseScene({ JobManager }, 'real');
+  ok(RL.inFlight.handed > 0 && RL.inFlight.live === RL.n0 && RL.inFlight.archived === 0 && RL.inFlight.answered === false
+    && RL.after.released === RL.inFlight.handed && RL.after.live === RL.n0 - RL.inFlight.handed && RL.after.archived === RL.inFlight.handed,
+    `the sweep HANDS the archive (${RL.inFlight.handed} records): in flight every one is still listed once, as a live job (none archived yet); at its LANDING they leave the store and the archive lists them`, RL);
+  const NOW_A = "    this._ride(this.archiveFile, 'the archive', step, { timeoutMs: replyMs, answer: reply });\n";
+  ok(JSRC.split(NOW_A).length === 2, 'control setup: the archive\'s step and reply at its landing are found once');
+  const atOnce = MJb.load('src/jobs.js', anchored(JSRC, NOW_A, "    step(); reply(true);   // MUTANT: landed at the hand-off\n", 'archive-at-once'), 'archive-at-once');
+  const RLX = releaseScene(atOnce, 'atonce');
+  ok(RLX.inFlight.live < RLX.n0 && RLX.inFlight.archived === 0, 'CONTROL (answered at the hand-off, in a copy): the records leave the store before the archive holding them landed — listed in NEITHER (red)', RLX.inFlight);
+  // (2) A REFUSED ARCHIVE KEEPS EVERY RECORD (the 2026-09-16 law), said FAILED once; the writer's write AGAIN lands them (never at a bound)
+  const refusedScene = (Mod, tag) => {
+    const { g, J, AF, logs } = scene(Mod, tag); const n0 = J.jobs.size;
+    const h = J.archiveSweep({ now: T0 + 25 * H });
+    g.land(AF, false);                                            // the storage refuses it
+    const refused = { live: J.jobs.size, archived: J.archivedCount(), said: logs.filter((l) => /archive write FAILED/.test(l)).length };
+    g.land(AF, true);                                             // the writer's write again lands
+    const after = { live: J.jobs.size, archived: J.archivedCount() };
+    try { J.shutdown(); } catch { }
+    return { n0, handed: (h.handed || []).length, refused, after };
+  };
+  const RF = refusedScene({ JobManager }, 'refused');
+  ok(RF.handed > 0 && RF.refused.live === RF.n0 && RF.refused.archived === 0 && RF.refused.said === 1 && RF.after.live === RF.n0 - RF.handed && RF.after.archived === RF.handed,
+    'an archive the storage refuses keeps every record in the store and is said FAILED once; the store writer\'s write again lands it — only then do the records leave (a retry, never a loss, never at a bound)', RF);
+  const RFX = refusedScene(atOnce, 'refusedx');
+  ok(RFX.refused.live < RFX.n0, 'CONTROL (released at the hand-off, in a copy): the records leave the store under an archive the storage refused — gone for good (red)', RFX.refused);
+  // (3) A PERSON's ✕ IS ANSWERED AT THE LANDING: in flight no answer, the row still listed; landed, answered and gone
+  const rmScene = (Mod, tag) => {
+    const { g, J, AF } = scene(Mod, tag);
+    J.archiveSweep({ now: T0 + 25 * H }); g.landAll();
+    const id = J.archivedList()[0].id; let ans = null;
+    const r = J.rmArchived(id, (x) => { ans = x; });
+    const inFlight = { sync: !!(r && r.pending), answered: !!ans, listed: !!J.archivedById(id) };
+    g.land(AF);
+    const out = { inFlight, answered: ans, listed: !!J.archivedById(id) };
+    try { J.shutdown(); } catch { }
+    return out;
+  };
+  const RM = rmScene({ JobManager }, 'real');
+  ok(RM.inFlight.sync && !RM.inFlight.answered && RM.inFlight.listed && RM.answered && RM.answered.ok === true && !RM.listed, 'a person\'s ✕ on an archived row: no answer while its removal is in flight (the row still listed); at the landing it is answered and the row is gone', RM);
+  const RMX = rmScene(atOnce, 'atonce');
+  ok(RMX.inFlight.answered === true && RMX.inFlight.listed === true, 'CONTROL (answered at the hand-off, in a copy): the ✕ is answered «gone» while the row is still on disk and listed (red)', RMX.inFlight);
+  // (4) AN ARCHIVE WRITE THIS PROCESS STILL OWES IS NEVER READ PAST: a second engine on the same folder (and writer) lands it first
+  const owedScene = (Mod2, tag) => {
+    const g = gatedJobsWriter(); const { d, J } = scene({ JobManager }, tag, g);
+    J.archiveSweep({ now: T0 + 25 * H });   // handed, not landed
+    const J2 = new Mod2.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: g.W, logsSweep: { bootDelayMs: 3600e3 } });
+    const n = J2.archivedCount();
+    try { J.shutdown(); } catch { } try { J2.shutdown(); } catch { }
+    return { n };
+  };
+  const OW = owedScene({ JobManager }, 'owed');
+  ok(OW.n > 0, 'an archive write this process still owes is never read past: a second engine\'s first read lands it first and reads what it holds', OW);
+  const OWED_A = "if (typeof W.pending === 'function' && W.pending(this.archiveFile)) {";
+  ok(JSRC.split(OWED_A).length === 2, 'control setup: the archive load\'s owed check is found once');
+  const OWX = owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWED_A, "if (false) {   /* MUTANT: the owed write read past */", 'archive-read-past'), 'archive-read-past'), 'owedx');
+  ok(OWX.n === 0, 'CONTROL (the owed check cut, in a copy): the second engine reads the older file past the write still owed (red)', OWX);
+  // (6) A RECORD CHANGED IN THE WINDOW STAYS THE STORE's (the read's MUST): ran again, removed or edited between the hand-off and the
+  // landing — kept live, its handed copy taken out of the archive again by a follow-up write; never listed twice. RED: the as-handed check cut
+  const changedScene = (Mod, tag) => {
+    const { g, J, AF } = scene(Mod, tag);
+    const h = J.archiveSweep({ now: T0 + 25 * H }); const id = (h.handed || [])[0];
+    J.jobs.get(id).note = 'edited while its archive was in flight';
+    g.land(AF);                                                   // the archive lands: the changed record is not released
+    const atLanding = { live: J.jobs.has(id), listedArchived: !!J.archivedById(id), inList: J.archivedList().some((r) => r.id === id) };
+    g.land(AF);                                                   // the follow-up lands: its copy is out of the file
+    let inFile = null; try { inFile = JSON.parse(fs.readFileSync(AF, 'utf8')).some((r) => r.id === id); } catch { }
+    try { J.shutdown(); } catch { }
+    return { atLanding, inFile, note: J.jobs.get(id) && J.jobs.get(id).note };
+  };
+  const CH = changedScene({ JobManager }, 'real');
+  ok(CH.atLanding.live && !CH.atLanding.listedArchived && !CH.atLanding.inList && CH.inFile === false && /edited/.test(CH.note || ''), 'a record changed while its archive was in flight stays the store\'s (its change kept), is listed once — live — and its handed copy is taken out of the archive by a follow-up write', CH);
+  const ASH_A = "if (j && storeBytes(j) === handedSigs.get(m.id)) out.push(m); else back.push(m.id);";
+  ok(JSRC.split(ASH_A).length === 2, 'control setup: the as-handed check is found once');
+  const CHX = changedScene(MJb.load('src/jobs.js', anchored(JSRC, ASH_A, "if (j) out.push(m); else back.push(m.id);   /* MUTANT: the as-handed check cut */", 'archive-as-handed-cut'), 'archive-as-handed-cut'), 'ashandedx');
+  ok(CHX.atLanding.live === false, 'CONTROL (the as-handed check cut, in a copy): the record edited in the window is released — the person\'s change is lost under the older copy (red)', CHX.atLanding);
+  // (7) A ✕ REPEATED WHILE ITS REMOVAL IS IN FLIGHT says «being removed» (409), never «no such archived job» for a row still listed
+  const rmTwice = (Mod, tag) => {
+    const { g, J, AF } = scene(Mod, tag);
+    J.archiveSweep({ now: T0 + 25 * H }); g.landAll();
+    const id = J.archivedList()[0].id;
+    J.rmArchived(id, () => { }); const again = J.rmArchived(id, () => { });
+    g.land(AF); try { J.shutdown(); } catch { }
+    return { code: again && again.code, error: again && again.error };
+  };
+  const RT = rmTwice({ JobManager }, 'real');
+  ok(RT.code === 'being-removed', 'a ✕ repeated while its removal is in flight says «being removed» (409) — the row is still listed, never «no such archived job»', RT);
+  const BR_A = "? { error: 'its removal is not on disk yet — it finishes by itself', code: 'being-removed' } : ";
+  ok(JSRC.split(BR_A).length === 2, 'control setup: the «being removed» answer is found once');
+  const RTX = rmTwice(MJb.load('src/jobs.js', anchored(JSRC, BR_A, "? { error: 'no such archived job' } : /* MUTANT: «being removed» cut */ ", 'archive-being-removed-cut'), 'archive-being-removed-cut'), 'beingx');
+  ok(RTX.code !== 'being-removed' && /no such archived job/.test(RTX.error || ''), 'CONTROL («being removed» cut, in a copy): the repeat says «no such archived job» for a row still listed (red)', RTX);
+  // (8) A CREATE's OR A STOP's ANSWER NEVER WAITS ON THE ARCHIVE (the read's should): persisted() waits for it only while a clear owes it
+  const persScene = (Mod, tag) => {
+    const { g, J, AF } = scene(Mod, tag);
+    J.archiveSweep({ now: T0 + 25 * H });                         // an archive in flight (a sweep's — no person waits on it)
+    let p1 = null; J.persisted((ok) => { p1 = ok; });
+    const out = { p1 }; g.land(AF); try { J.shutdown(); } catch { }
+    return out;
+  };
+  const PS = persScene({ JobManager }, 'real');
+  ok(PS.p1 === true, 'a door\'s persisted() answers once jobs.json and the notices are on disk — a sweep\'s archive in flight is not its to wait for', PS);
+  const PER_A = "...(archiveSeq > this._archiveLandedSeq ? [this.archiveFile] : [])";
+  ok(JSRC.split(PER_A).length === 2, 'control setup: the archive in persisted() only for a clear is found once');
+  const PSX = persScene(MJb.load('src/jobs.js', anchored(JSRC, PER_A, "this.archiveFile /* MUTANT: always */", 'archive-persisted-always'), 'archive-persisted-always'), 'persx');
+  ok(PSX.p1 === null, 'CONTROL (the archive always waited for, in a copy): a create\'s or a stop\'s answer waits on a sweep\'s archive (red)', PSX);
+  // (9) TWO SWEEPS IN FLIGHT NEVER HAND ONE RECORD TWICE (its second read's MUST): a record live AND in the landed archive (a crash
+  // between an archive's landing and jobs.json's release) handed by sweep A; sweep B while A's write is in flight skips it — whatever the
+  // landed archive holds. The real writer's order (each write made when it starts). RED: the handed set cut — A releases it, B's landing
+  // finds it gone and its follow-up takes the archived copy out: the record in NEITHER file
+  const twoSweeps = (Mod, tag) => {
+    const g = gatedJobsWriter({ fifo: true });
+    const d = mkDir('jobs-archive-twice-' + tag); const recs = seedDone();
+    fs.writeFileSync(path.join(d, 'jobs.json'), JSON.stringify(recs)); fs.writeFileSync(path.join(d, 'job-notifications.json'), '{}');
+    fs.writeFileSync(path.join(d, 'jobs-archive.json'), JSON.stringify(recs.map((r) => ({ ...r, archivedAt: 1, archivedWhy: 'done' }))));   // the crash's state: in both files
+    const J = new Mod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: g.W, logsSweep: { bootDelayMs: 3600e3 } });
+    J.init(); g.landAll();
+    const AF = path.join(d, 'jobs-archive.json'), id = recs[0].id;
+    const A = J.archiveSweep({ now: T0 + 25 * H }), B = J.archiveSweep({ now: T0 + 25 * H + 1 });
+    for (let i = 0; i < 6; i++) g.land(AF);
+    let inFile = false; try { inFile = JSON.parse(fs.readFileSync(AF, 'utf8')).some((r) => r.id === id); } catch { }
+    try { J.shutdown(); } catch { }
+    return { aHanded: (A.handed || []).length, bHanded: (B.handed || []).length, live: J.jobs.has(id), inFile };
+  };
+  const TW = twoSweeps({ JobManager }, 'real');
+  ok(TW.aHanded > 0 && TW.bHanded === 0 && TW.live === false && TW.inFile === true, 'two sweeps in flight never hand one record twice: the second skips what the first handed (whatever the landed archive holds) — released once, archived once', TW);
+  const HS_A = "      else if (this._archiveHandedIds.has(id)) moved.splice(i, 1);";
+  ok(JSRC.split(HS_A).length === 2, 'control setup: the handed set\'s skip is found once');
+  const TWX = twoSweeps(MJb.load('src/jobs.js', anchored(JSRC, HS_A, "      /* MUTANT: the handed set's skip cut */", 'archive-handed-twice'), 'archive-handed-twice'), 'twicex');
+  ok(TWX.live === false && TWX.inFile === false, 'CONTROL (the handed set cut, in a copy): the record is handed twice — released by the first landing, its copy taken out by the second\'s follow-up: in NEITHER file (red)', TWX);
+  // (10) A RECORD REMOVED IN THE WINDOW: its landed copy is hidden from every reader until the follow-up takes it out, and the pages are
+  // told at that landing (its second read's should). RED: the hiding cut — the removed job shows as an archived row meanwhile
+  const removedScene = (Mod, tag) => {
+    const { g, J, AF, bcs } = scene(Mod, tag);
+    const h = J.archiveSweep({ now: T0 + 25 * H }); const id = (h.handed || [])[0];
+    J.rm(J.jobs.get(id));                                         // the person removes it while its archive is in flight
+    g.land(AF);                                                   // the archive lands (holding it)
+    const atLanding = { listed: !!J.archivedById(id), inList: J.archivedList().some((r) => r.id === id) };
+    const told0 = bcs.filter((b) => b.t === 'jobs-updated').length;
+    g.land(AF);                                                   // the follow-up lands
+    let inFile = null; try { inFile = JSON.parse(fs.readFileSync(AF, 'utf8')).some((r) => r.id === id); } catch { }
+    const told = bcs.filter((b) => b.t === 'jobs-updated').length - told0;
+    try { J.shutdown(); } catch { }
+    return { atLanding, inFile, told };
+  };
+  const RV = removedScene({ JobManager }, 'real');
+  ok(!RV.atLanding.listed && !RV.atLanding.inList && RV.inFile === false && RV.told >= 1, 'a record removed while its archive was in flight is never listed as archived: hidden until the follow-up takes its copy out, the pages told at that landing', RV);
+  const TO_A = "  archivedById(id) { if (this.jobs.has(id) || this._archiveTakingOut.has(id)) return null;";
+  ok(JSRC.split(TO_A).length === 2, 'control setup: the hiding of a copy being taken out is found once');
+  const RVX = removedScene(MJb.load('src/jobs.js', anchored(JSRC, TO_A, "  archivedById(id) { if (this.jobs.has(id)) return null;   /* MUTANT: the hiding cut */", 'archive-hiding-cut'), 'archive-hiding-cut'), 'hidingx');
+  ok(RVX.atLanding.listed === true, 'CONTROL (the hiding cut, in a copy): the job the person removed shows as an archived row until the follow-up lands (red)', RVX.atLanding);
+  // (5) THE LOOP NO LONGER WAITS FOR THE ARCHIVE: the REAL store writer (its own thread), 300 ms placed in each main-thread rename /
+  // fsync of the scene's folder; judged against the red's own figure (the release's write at the call, in a copy)
+  const SWr = require(path.join(ROOT, 'src/store-writer.js'));
+  const SAB = new Int32Array(new SharedArrayBuffer(4)), STALL = 300;
+  const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+  const archLoop = async (Mod, tag) => {
+    const d = mkDir('jobs-archive-loop-' + tag);
+    fs.writeFileSync(path.join(d, 'jobs.json'), JSON.stringify(seedDone())); fs.writeFileSync(path.join(d, 'job-notifications.json'), '{}');
+    const w = SWr.create({ log: { warn() { }, log() { }, error() { } }, graceMs: 5000 });
+    const J = new Mod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: w, logsSweep: { bootDelayMs: 3600e3 } });
+    J.init();
+    const AF = path.join(d, 'jobs-archive.json');
+    const oRen = fs.renameSync, oFsync = fs.fsyncSync;
+    fs.renameSync = function (a, ...r) { if (String(a).startsWith(d)) Atomics.wait(SAB, 0, 0, STALL); return oRen.call(this, a, ...r); };
+    fs.fsyncSync = function (...r) { Atomics.wait(SAB, 0, 0, STALL); return oFsync.apply(this, r); };
+    let last = performance.now(), gap = 0, on = true;
+    const tick = () => { const t = performance.now(); if (t - last > gap) gap = t - last; last = t; if (on) setTimeout(tick, 1); };
+    setTimeout(tick, 1);
+    let onDisk = 0;
+    try {
+      J.archiveSweep({ now: T0 + 25 * H });
+      for (let i = 0; i < 300; i++) { await sleepMs(10); try { onDisk = JSON.parse(fs.readFileSync(AF, 'utf8')).length; } catch { onDisk = 0; } if (onDisk > 0) break; }   // a wait for WHAT HAPPENED: the archive on disk
+    } finally { fs.renameSync = oRen; fs.fsyncSync = oFsync; on = false; }
+    await sleepMs(5);
+    try { J.shutdown(); } catch { } try { w.stop(); } catch { }
+    return { gap: Math.round(gap), onDisk };
+  };
+  const AL = await archLoop({ JobManager }, 'real');
+  console.log(`  ⊙ the loop's longest turn with ${STALL} ms placed in each main-thread rename / fsync, a sweep that moves ${AL.onDisk} records: ${AL.gap} ms`);
+  const CALL_A = "    let bytes, W;\n    try { bytes = storeBytes(arr); W = this._writer(); } catch (e) { return { ok: false, error: e.message }; }\n";
+  ok(JSRC.split(CALL_A).length === 2, 'control setup: the archive\'s hand-off is found once');
+  const atCall = MJb.load('src/jobs.js', anchored(JSRC, CALL_A, "    try { writeJsonAtomic(this.archiveFile, arr); this.archive = arr; if (onLanded) onLanded(); if (answer) answer({ ok: true }); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }   // MUTANT: the release's write at the call\n    let bytes, W;\n", 'archive-at-call'), 'archive-at-call');
+  const ALX = await archLoop(atCall, 'atcall');
+  console.log(`  ⊙ the red's own figure: the release's write at the call ${ALX.gap} ms; the tree ${AL.gap} ms`);
+  ok(AL.onDisk > 0 && AL.gap * 2 < ALX.gap, `the loop no longer waits for the archive: the longest turn ${AL.gap} ms — under half of the red's own ${ALX.gap} ms; the archive on disk`, { tree: AL, atCall: ALX });
+  ok(ALX.gap >= STALL && ALX.onDisk > 0, `CONTROL (the release's write at the call, in a copy): the loop is held ${ALX.gap} ms (≥ ${STALL}) by the archive's rename (red)`, ALX);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

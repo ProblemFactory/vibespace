@@ -975,6 +975,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
       const J = new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, resolveNotice() { }, log: () => { }, logsSweep: { bootDelayMs: 3600e3 } });
       J.init();
       const r = J.rmArchived('jb-0a000001');
+      try { require(path.join(ROOT, 'src/store-writer.js')).storeWriter().flushSync(); } catch { }   // B-0248 step 3: a removal leaves the archive at its LANDING
       const out = { code: r && r.code, kept: (J.archive || []).some((x) => x && x.id === 'jb-0a000001') };
       unplant(NF, nbody); J.shutdown(); return out;
     };

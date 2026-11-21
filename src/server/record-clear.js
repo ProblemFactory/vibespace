@@ -62,7 +62,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
         if (--n) return;
         if (left.length) log(`[clear] cleared in memory, ${left.join(' and ')} not on disk yet — the store writer retries`);
         done(!left.length);
-      });
+      }, name === 'jobs' && touched.archiveSeq ? { archiveSeq: touched.archiveSeq } : undefined);   // B-0248 step 3: and the archive this clear wrote
     }
   }
   /** → a promise of the result; `answer(result)` (a route's) is called once, on the writer's synchronous road (whenStored) */
@@ -103,6 +103,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
       res.cleared += r.cleared.length;
       res.already += r.already.length;
       if (r.store) touched.add(r.store);   // the U4/U5 cure: a store whose file the answer waits for — once, at the end (whenStored)
+      if (r.archiveSeq) { touched.archiveSeq = Math.max(touched.archiveSeq || 0, r.archiveSeq); delete r.archiveSeq; }   // B-0248 step 3: the jobs' archive write this clear made
       res.ids.push(...r.cleared.map((id) => ({ kind, id: String(id) })));
       for (const id of r.unknown) res.unknown.push({ kind, id: String(id) });
       if (r.archiveUnread) res.archiveUnread = true;   // B-20b6: the job store could not reach its ARCHIVED records — their words were not cleared; said to the person

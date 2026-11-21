@@ -375,7 +375,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       const rec = jm.archivedById(req.params.id);
       if (!rec) return res.status(jm._unread && jm._unread.store ? 503 : 404).json(jm._unread && jm._unread.store ? unreadAnswer() : { error: 'no such job' });
       // lane job-logs-sweep: «gone for good» is said once its log dir is gone (removed off the main thread; ≤ 10 s, then `logsPending`)
-      if (act === 'rm') { const r = jm.rmArchived(rec.id); if (r.error) return res.status(400).json({ error: r.error }); return jm.logsGone(rec.id).then((v) => res.json({ success: true, ...r, ...(v.gone ? {} : v.kept && v.kept !== 'pending' ? { logsKept: v.kept } : { logsPending: true }) })); }   // round 2: what stays and why
+      if (act === 'rm') { const r = jm.rmArchived(rec.id, (x) => { if (x.error) return res.status(x.notDurable ? 503 : 400).json({ error: x.error, ...(x.notDurable ? { code: 'not-durable' } : {}) }); if (jm.exiting && jm.exiting()) return res.json({ success: true, ok: true, logsPending: true }); return jm.logsGone(rec.id).then((v) => res.json({ success: true, ok: true, ...(v.gone ? {} : v.kept && v.kept !== 'pending' ? { logsKept: v.kept } : { logsPending: true }) })); }); if (r.error) return res.status(r.code === 'being-removed' || r.code === 'live' ? 409 : 400).json({ error: r.error, ...(r.code ? { code: r.code } : {}) }); return; }   // B-0248 step 3: answered at the removal's LANDING   // round 2: what stays and why
       if (act === 'seen') return res.json({ success: true, changed: false, ack: M.ackState(rec), archived: true });
       return res.status(400).json({ error: `job ${rec.id} is archived — only rm applies` });
     }

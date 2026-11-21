@@ -881,7 +881,7 @@ ok(JSON.stringify(M.NOT_ADDRESSED) === JSON.stringify(FRAME), 'the frames are th
   X.jm.jobs.delete(jr.id);   // REMOVED: nothing of it remains
   for (const j of [ja, jn]) { j.state = 'done'; j.runs = [{ startedAt: Date.now() - 3 * 86400e3, endedAt: Date.now() - 2 * 86400e3, exit: 0, cause: 'ok' }]; }
   jn.access = { view: 'session', control: 'session' };   // archived with a view S may not read
-  const sw = X.jm.archiveSweep({ now: Date.now() });
+  let sw = null; { const h = X.jm.archiveSweep({ now: Date.now(), answer: (x) => { sw = x; } }); for (let i = 0; i < 2; i++) { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } } sw = sw || h; }   // B-0248 step 3: the records leave the store at the archive's landing
   ok(sw.archived && sw.archived.length === 2 && !X.jm.jobs.has(ja.id) && X.jm.archivedById(ja.id) && X.jm.archivedById(jn.id), 'r4 setup: two jobs ARCHIVED (a done task after a day), one REMOVED', sw);
   live.set(CID.S, new Set([G]));   // S resumes — a member of G
   const drained = X.jm.peekNotifs(CID.S).map((n) => n.jobId);

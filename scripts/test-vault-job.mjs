@@ -961,8 +961,15 @@ async function legArchivePrune() {
   const exited = await W.untilMs(() => !W.jm._verifyAlive(W.jm._readStamp(job)), 20000);   // the sweep keeps a job whose wrapper still lives (its last ms after the run's end)
   const named0 = JSON.stringify((((W.grants.rowsFor('vault-job', a.entry)[0] || {}).to || [])[0] || {}).jobs || []);
   const at = Date.now() + 30 * 86400e3, verdict = M.archiveVerdict(job, { now: at, alive: false, ...W.jm._archivePolicy() });   // the verdict under the ENGINE's policy (what the sweep reads)
-  const sw = W.jm.archiveSweep({ now: at, why: 'test' });
-  row(done.ok && exited.ok && named0 === JSON.stringify([job.id]) && (sw.archived || []).includes(job.id) && W.grants.rowsFor('vault-job', a.entry).length === 0, 'an ARCHIVED one-shot runs no more — its approval leaves the row (it never holds one of the member\'s 64 places for ever)', { done, exited, state: job.state, verdict, named0, sw });
+  // B-0248 step 3: the records (and their approvals) leave at the archive's LANDING. A record CHANGED while its write was in flight
+  // (its end notice booked after the hand-off: lastNotify, the notify log) stays the store's and the NEXT sweep moves it (the first
+  // gate of the move: {archived: []} at the landing) — so the leg sweeps again while it stays, bounded, and says how many sweeps
+  const tries = []; let sw = { archived: [] };
+  for (const t0 = Date.now(); !(sw.archived || []).includes(job.id) && Date.now() - t0 < 20000;) {
+    let got = null; const handed = W.jm.archiveSweep({ now: at, why: 'test', answer: (x) => { got = x; } });
+    await W.untilMs(() => got !== null, 20000); sw = got || handed; tries.push(sw);
+  }
+  row(done.ok && exited.ok && named0 === JSON.stringify([job.id]) && (sw.archived || []).includes(job.id) && W.grants.rowsFor('vault-job', a.entry).length === 0, 'an ARCHIVED one-shot runs no more — its approval leaves the row (it never holds one of the member\'s 64 places for ever)', { done, exited, state: job.state, verdict, named0, sw, sweeps: tries.length });
   W.grants.set('vault-job', a.entry, { to: [{ kind: 'conversation', key: 'conv-a', jobs: ['jb-deadbeef'] }] }, 'test');   // an id an older version left behind
   const j2 = W.jm.jobs.get(W.create({ name: 'next' }).job.id);
   await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)

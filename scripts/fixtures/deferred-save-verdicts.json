@@ -38,12 +38,17 @@
  {
   "key": "jobs · src/jobs.js · JobManager.archiveSweep · _dirty = true",
   "verdict": "none",
-  "why": "archive written synchronously first; idempotent"
+  "why": "skeleton dropped over its archived copy"
  },
  {
-  "key": "jobs · src/jobs.js · JobManager.archiveSweep · _save()",
+  "key": "jobs · src/jobs.js · JobManager._sweepLanded · _dirty = true",
   "verdict": "none",
-  "why": "dropped logs follow sync archive write"
+  "why": "released at the archive's landing"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._sweepLanded · _save()",
+  "verdict": "none",
+  "why": "released at the archive's landing"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.clearJobs · _dirty = true",

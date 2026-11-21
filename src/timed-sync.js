@@ -39,6 +39,7 @@ const STORES = Object.freeze({
   'task-groups.read': row('read', 'task-groups', 'src/task-groups.js'),
   'task-groups-archive.write': row('write', 'task-groups-archive-months', 'src/task-groups.js', ['_archiveAsk']),   // B-0248 step 3 (c): the Activity log's archive appends, through the store writer (THE archive writer)
   'jobs.write': row('write', 'jobs', 'src/jobs.js', ['_save']),
+  'jobs-archive.write': row('write', 'jobs-archive', 'src/jobs.js', ['_writeArchive']),   // through the store writer (lane bl-loop-b, B-0248 step 3: the archive — an act, the records released at its landing)
   'jobs-notifs.write': row('write', 'job-notifications', 'src/jobs.js', ['_save', '_saveNotifs']),
   'jobs.read': row('read', 'jobs', 'src/jobs.js'),
   'jobs-logs-sweep.write': row('write', 'jobs-logs-sweep', 'src/jobs.js', ['_logsSave']),   // through the store writer (lane job-logs-sweep: the job-logs catch-up's record — paced, the hub's bookkeeping)
