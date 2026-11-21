@@ -19,6 +19,9 @@
 //   §11 (lane settings-multiline-row) a textarea row STACKS (the renderer's line off the control it drew, the two textarea
 //      branches) and THE RAIL keeps a row's words ≥ 40 % — the style.css block's rules + its place; the chrome half
 //      (600 / 760 / 1200 / phone 390, the pre-fix control) is test-settings-row-layout (heavy)
+//   §14 (B-eca3) THE SETTINGS' FACES — the server reads schema keys only (one named exception), docs/settings.md names schema or
+//      retired keys only, every hand-off of the reader and every read the walk cannot name is in a closed list; the page's
+//      unread rows PRINTED (scripts/settings-faces.mjs, static); a planted red each
 // In-process, no DOM, no server.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -629,6 +632,94 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
   const downloadingUser = BMu.engineNote({ ...base, installed: false, executable: false, binary: { code: 'browser_engine_kernel_missing', why: 'unset' }, kernel: { state: 'downloading', bytes: 1, total: 2 } }, tr(null));
   ok(en.every(([s, re]) => re.test(s)) && !/download/i.test(downloadingUser) && z.every((s) => /[\u4e00-\u9fff]/.test(s) && !/the program/.test(s)) && j.every((s) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(s) && !/the program/.test(s)) && /没有设置程序/.test(z[1]) && /プログラムが設定されていません/.test(j[1]),
     'L1b: the engine card for the OWNER\'s program — «measured x» / «no program set (its Program file setting)» + its door on the line (lane ui-needs-a-button pick 5) / «the program you named can\'t be run (why)» / «did not say its version» / r2: «not measured yet» (never an older file\'s version) and an execute-only file «can\'t read the file to check it»; never a download word (a stale kernel state ignored), in zh / ja too', { en: en.map(([s]) => s), z, j });
+}
+
+// ── §14 THE SETTINGS' FACES (B-eca3, lane lg-text-legs-2) — the schema, docs/settings.md, the server's readers (and, printed,
+// the page's): a name in one face and not the others is red BY NAME. The census is scripts/settings-faces.mjs over this
+// checkout's TEXT (acorn + string reads, nothing run); each law has a planted red below.
+console.log('§14 the settings\' faces: the server reads schema keys only, the docs name schema or retired keys only, the walk is whole');
+{
+  const { settingsFaces } = await import('./settings-faces.mjs');
+  // THE ONE server read of a key with no row ON PURPOSE, by name with its why (test-architecture 44d keeps the same one): the
+  // retired switch, read ONCE inside the keeper's sayRetiredSwitch to say a stored value is ignored
+  const WARNS = Object.freeze({ 'browser.fenceScriptsWhileDriven': { at: 'src/server/browser-keeper.js', fn: 'sayRetiredSwitch', why: "the owner's ruling 2026-09-27: a stored value is said retired, never applied" } });
+  // THE HAND-OFFS: every place server code hands the reader on under ANOTHER name, with the receivers the census walks as reads
+  // ([file, the call it reads with, the argument holding the key, the first argument's text when the call is a helper]) — a NEW
+  // hand-off is red by name (name its receivers here)
+  const HANDOFFS = Object.freeze({
+    'server.js: setting': { why: "owner-facts.configure({ setting }): the owner's clock and the tray's keys", walk: [['src/server/owner-facts.js', 'read', 1, 'src.setting']] },
+    'server.js: settingOf': { why: 'the exit proxy and the hub-act asks', walk: [['src/exit-proxy.js', 'settingOf', 0], ['src/server/hub-act-ask.js', 'settingOf', 0]] },
+    'server.js: MessageManager.getSetting': { why: "the chat's message manager", walk: [['src/message-manager.js', 'getSetting', 0]] },
+    'src/server/mounts-plugins-wiring.js: getSetting': { why: 'the mount manager', walk: [['src/mounts.js', '_getSetting', 0]] },
+    'src/server/mounts-plugins-wiring.js: setting': { why: 'the vault paste door and the browser engines', walk: [['src/server/vault-paste-door.js', 'setting', 0], ['src/server/browser-engines.js', 'setting', 0]] },
+    'src/server/task-groups-wiring.js: getSetting': { why: 'the task groups', walk: [['src/task-groups.js', '_getSetting', 0]] },
+    'src/server/account-usage-routes.js: setting': { why: 'the CLI usage door', walk: [['src/server/cli-usage-door.js', 'setting', 0]] },
+    'src/server/channels-engine.js: setting': { why: "a vendor adapter's deps (the webhook reads its private-URL switch)", walk: [['src/channels/webhook.js', 'setting', 0]] },
+    'src/server/harness-config-sync.js: valueOf': { why: "the harness config plan's own reads (the derived harness rows)", walk: [['src/server/harness-config-sync.js', 'valueOf', 0]] },
+  });
+  const WALK = Object.values(HANDOFFS).flatMap((h) => h.walk);
+  // THE CLOSED LIST: every server read the walk cannot name, «<file>: <callee>(<argument>)», with HOW MANY sites read so and what
+  // they read — a NEW one, or one more site of a listed one, is red by name; one that went is only said
+  const DYNAMIC = Object.freeze({
+    'src/agent-routes/status.js: serverSetting(key0)': [1, "an agent's PROPOSED change («key=value»): agent-settings isProposable admits the key first"],
+    "src/agent-routes.js: serverSetting('agents.tool' + name)": [1, 'the agents.tool<Name> rows, one an agent tool'],
+    "src/server/task-context-routes.js: serverSetting('agents.tool' + name)": [1, 'the agents.tool<Name> rows (the same family)'],
+    'src/server/auto-resume.js: serverSetting(GENERIC_LEGACY_KEYS.autoResumeOnLimit)': [1, 'the generic auto-resume default under its legacy stored spelling (src/harness-settings.js GENERIC_LEGACY_KEYS)'],
+    'src/server/browser-engines.js: setting(BE.binaryRowPath(id))': [1, "an engine plugin's program-path row (src/browser-engines.js binaryRowPath: a plugin row)"],
+    'src/server/browser-env.js: setting(k)': [1, "the kept-browser limits' own names (src/browser-kept.js keptLimits asks its rows)"],
+    'src/server/browser-keeper.js: serverSetting(of.setting)': [1, "an engine plugin's declared setting (its `of.setting`: a plugin row)"],
+    'src/server/channels-engine.js: serverSetting(k)': [3, 'the attention policy (src/channel-focus.js ruleKey → channels.attention.rule.<code>) and the attention bands (attention.band.<code>)'],
+    'src/server/channels-engine.js: serverSetting(`channels.${s.key}`)': [1, "the channel vendors' derived rows (channels.<key>, src/channel-settings.js)"],
+    'src/server/channels-engine.js: serverSetting(key)': [1, "a vendor's declared name-field row (channel-settings declaredKey)"],
+    'src/server/channels-engine.js: setting(b.settingKey)': [2, "a budget's row named by its caps table (`settingKey`)"],
+    'src/server/channels-engine.js: setting(p.settingKey)': [1, "a pace's row named by its caps table (`settingKey`)"],
+    'src/server/cli-usage-door.js: setting(h.quota.readsRow)': [1, "a harness quota's own reads row (its descriptor names it)"],
+    'src/server/cli-usage-door.js: setting(`${tbl.prefix}.${AUTO_READS_KEY}`)': [1, "a harness table's auto-reads row (a derived harness row)"],
+    'src/server/desktop-app-keeper.js: serverSetting(k)': [1, 'the desktop settings handed to the machine (src/desktop-serve.js SETTING_KEYS)'],
+    'src/server/harness-config-sync.js: valueOf(settingPath(h.settings.prefix, row.key))': [1, "a harness table's cli-config rows (derived)"],
+    'src/server/harness-config-sync.js: serverSetting(settingPath(table.prefix, row.key))': [1, "the harness tables' derived rows"],
+    'src/server/harness-config-sync.js: serverSetting(settingPath(h.settings.prefix, row.key))': [1, "a contributed harness's derived rows"],
+    "src/server/harness-config-sync.js: serverSetting(Symbol.for('vibespace.settings-held'))": [1, "no key: the settings hold's marker"],
+    'src/server/owner-facts.js: read(k)': [1, "the tray's arrangement rows (src/tray-words.js TRAY_SETTING_KEYS)"],
+    'src/server/spend-guard.js: serverSetting(SETTINGS_HELD)': [1, "no key: the settings hold's marker"],
+    'server.js: serverSetting(...a)': [8, "the reader handed to a module as a dependency (a pass-through: the module's own reads are walked by name)"],
+    'server.js: serverSetting(k)': [6, 'the reader handed to a module as a dependency (a pass-through)'],
+  });
+  const judge = (F) => {
+    const count = new Map(); for (const d of F.dynamic) count.set(d, (count.get(d) || 0) + 1);
+    return {
+      l1: [...F.reads.keys()].filter((k) => !F.schema[k] && !(WARNS[k] && F.reads.get(k).length === 1 && F.reads.get(k)[0].startsWith(WARNS[k].at + ':') && F.reads.get(k)[0].endsWith(' in ' + WARNS[k].fn))).map((k) => `${k} ← ${F.reads.get(k).slice(0, 3).join(', ')}`),
+      l2: [...F.docNames.keys()].filter((k) => !F.schema[k] && !F.retired.has(k)),
+      l3: [...count].filter(([d, n]) => !Object.hasOwn(DYNAMIC, d) || n > DYNAMIC[d][0]).map(([d, n]) => `${d} ×${n}${Object.hasOwn(DYNAMIC, d) ? ` (listed ×${DYNAMIC[d][0]})` : ''}`),
+      l3gone: Object.keys(DYNAMIC).filter((d) => (count.get(d) || 0) < DYNAMIC[d][0]),
+      hand: F.handoffs.filter((h) => !Object.hasOwn(HANDOFFS, h)),
+      handGone: Object.keys(HANDOFFS).filter((h) => !F.handoffs.includes(h)),
+    };
+  };
+  const F = await settingsFaces(REPO, { walk: WALK }), J = judge(F);
+  console.log(`    ${F.keys.length} schema rows (${F.derived} derived, ${F.stored} with a store of their own) · ${F.retired.size} retired · the server reads ${F.reads.size} keys by name, ${F.dynamic.length} sites by kind, through ${F.handoffs.length} hand-offs · ${F.docNames.size} setting names in docs/settings.md · ${F.files} files read`);
+  ok(F.keys.length > 200 && F.reads.size > 80 && J.l1.length === 0, `L1 every key the server reads is a schema row (${F.reads.size} keys) — but the one retired switch read once to say so (${Object.keys(WARNS).join(', ')})${J.l1.length ? ' — NO ROW: ' + J.l1.join(' · ') : ''}`);
+  ok(F.docNames.size > 200 && J.l2.length === 0, `L2 every setting name docs/settings.md spells is a schema row or a RETIRED key (${F.docNames.size} names)${J.l2.length ? ' — UNKNOWN: ' + J.l2.join(', ') : ''}`);
+  ok(J.l3.length === 0 && J.hand.length === 0, `L3 the walk is whole: every hand-off of the reader is named with its receivers (${F.handoffs.length}), every server read it cannot name is in the closed list by its count (${F.dynamic.length} sites)${J.hand.length ? ' — NEW HAND-OFF: ' + J.hand.join(' · ') + ' (name its receivers in HANDOFFS)' : ''}${J.l3.length ? ' — NEW: ' + J.l3.join(' · ') + ' (resolve it, or give it a DYNAMIC row with its why)' : ''}`);
+  if (J.l3gone.length || J.handGone.length) console.log(`    (no longer found — not red; drop or lower them: ${[...J.l3gone, ...J.handGone].join(' · ')})`);
+  // L4, PRINTED (B-eca3's ruling: in the row only if the page's readers resolve by a static walk — they do not: a page read
+  // names its key through a variable, a template or a table): the count, never a verdict
+  console.log(`    L4 (printed, not judged): ${F.unreadByCall.length} of ${F.hand} hand-written rows have no RESOLVED read call — the server's above or the page's \`….settings.get('<key>')\` / \`onSetting('<key>')\` (${F.pageReads} keys) — and ${F.pageDynamic} page reads name their key so the walk cannot`);
+  // PLANTED REDS, each law once: a server file reading a key with no row, the warned key read outside its function; a docs
+  // line naming an unknown key (a retired one holds); an unnameable read and a new hand-off (L3); and the printed L4 sees a row
+  const P = await settingsFaces(REPO, {
+    walk: WALK,
+    patch: {
+      'src/server/planted-faces.js': "module.exports = (serverSetting, computeKey) => ({ a: [serverSetting('channels.plantedNoRow'), serverSetting('browser.fenceScriptsWhileDriven'), serverSetting(computeKey())], plantedReader: serverSetting });\n",
+      'docs/settings.md': read('docs/settings.md') + '\nPlanted: `browser.plantedNoRow` and the retired `agents.vibespaceChannel`.\n',
+    },
+    rows: { 'sidebar.plantedNobodyReads': { type: 'boolean', default: false, label: 'x', description: 'x', category: 'Sidebar' } },
+  });
+  const PJ = judge(P);
+  ok(PJ.l1.length === 2 && PJ.l1.some((x) => x.startsWith('channels.plantedNoRow ← src/server/planted-faces.js:')) && PJ.l1.some((x) => x.startsWith('browser.fenceScriptsWhileDriven ←'))
+    && PJ.l2.join() === 'browser.plantedNoRow' && PJ.l3.join() === 'src/server/planted-faces.js: serverSetting(computeKey()) ×1' && PJ.hand.join() === 'src/server/planted-faces.js: plantedReader'
+    && P.unreadByCall.includes('sidebar.plantedNobodyReads') && !F.unreadByCall.includes('sidebar.plantedNobodyReads'),
+    'CONTROL (RED, each law): a planted server read of a key with no row and the warned key read outside its function (L1), a docs name that is no row — a retired one holds (L2), an unnameable read and a new hand-off of the reader (L3) — each named; the printed L4 counts a planted row nobody reads', JSON.stringify(PJ));
 }
 
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);
