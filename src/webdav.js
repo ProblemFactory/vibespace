@@ -164,6 +164,20 @@ ${isDir ? '' : `<D:getcontentlength>${st.size}</D:getcontentlength>`}
  * Register the /dav route on an Express app. Must be registered BEFORE any
  * body parser (PUT bodies stream straight to disk).
  */
+/** A /dav request's pass: a Bearer mount token (rclone), or Basic with the token as the password or the user (macOS Finder /
+ *  Windows Explorer speak only Basic). → the raw token, or null. ONE reader: the /dav route and the push mount's own door. */
+function bearerOf(req) {
+  const auth = (req && req.headers && req.headers.authorization) || '';
+  if (auth.startsWith('Bearer ')) return auth.slice(7).trim() || null;
+  if (!auth.startsWith('Basic ')) return null;
+  try {
+    const dec = Buffer.from(auth.slice(6).trim(), 'base64').toString('utf8');
+    const i = dec.indexOf(':');
+    const user = i >= 0 ? dec.slice(0, i) : dec, pass = i >= 0 ? dec.slice(i + 1) : '';
+    return pass.startsWith('vsmt_') ? pass : (user.startsWith('vsmt_') ? user : null);
+  } catch { return null; }
+}
+
 function registerWebdav(app, { tokens }) {
   const WRITE_METHODS = new Set(['PUT', 'MKCOL', 'DELETE', 'MOVE', 'COPY', 'PROPPATCH', 'LOCK']);
 
@@ -175,18 +189,7 @@ function registerWebdav(app, { tokens }) {
     // password (macOS Finder / Windows Explorer WebDAV clients only speak
     // Basic — Cmd+K → https://…/dav, any username, password = vsmt_…). Same
     // scoped-token model, different framing. ──
-    const auth = req.headers.authorization || '';
-    let bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
-    if (!bearer && auth.startsWith('Basic ')) {
-      try {
-        const dec = Buffer.from(auth.slice(6).trim(), 'base64').toString('utf8');
-        const i = dec.indexOf(':');
-        const user = i >= 0 ? dec.slice(0, i) : dec;
-        const pass = i >= 0 ? dec.slice(i + 1) : '';
-        bearer = pass.startsWith('vsmt_') ? pass : (user.startsWith('vsmt_') ? user : null);
-      } catch {}
-    }
-    const tok = tokens.resolve(bearer);
+    const tok = tokens.resolve(bearerOf(req));
     if (!tok) {
       // Basic first: Finder needs a Basic challenge to show its login prompt.
       res.set('WWW-Authenticate', 'Basic realm="vibespace-dav", Bearer realm="vibespace-dav"');
@@ -342,4 +345,4 @@ function registerWebdav(app, { tokens }) {
   });
 }
 
-module.exports = { MountTokens, registerWebdav, LINK_PREFIX };
+module.exports = { MountTokens, registerWebdav, LINK_PREFIX, bearerOf };

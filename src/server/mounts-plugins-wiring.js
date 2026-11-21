@@ -446,6 +446,7 @@ try {
   hosts.dataPlaneOn = () => true; // GRADUATED (agentd.dataPlane flag removed) — ssh per-op remains the per-path failure fallback
   // lane lg-remote-hardening (B-7f0b — design q-042 D8b): THE AGENT DOOR — every reverse tunnel of a remote conversation ends
   // at this listener (agent routes only), never the whole hub (src/server/agent-listener.js)
+  require('./mount-door.js').setApp(app); // B-7f0b (r1220 (1)): a push mount's own door hands its /dav requests to this one app
   require('./agent-listener.js').start({ app, stateFile: path.join(rootDir, 'data', 'agent-door.json'), avoid: PORT }); // its port is kept across restarts (a remote session's -R is fixed in its argv)
 } catch (e) { console.warn('[device] data-plane deps wiring failed:', e.message); }
 // lane lg-remote-hardening (D3 half b), law 3: a NEW hub key is the person's act only (a lost one is never re-minted in silence) —

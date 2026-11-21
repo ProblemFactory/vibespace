@@ -110,7 +110,7 @@ console.log('— ④ EVERY tunnel end in the tree takes the door\'s port —');
 // tunnelPort(PORT) on that line, or is a push mount's (its own form, said); the one place an ssh -R goes into an argv
 // passes its caller's target. A sink written over two lines is red: the line that opens it must name its target.
 const SINK = /\.reverseForward\(|reverse:\s*`/;
-const PUSH = new Map([['src/machine-mounts.js', [/connectLocal: \(\) => net\.connect\(lp, '127\.0\.0\.1'\)/, 'a push mount\'s tunnel ends at the hub\'s /dav (a door of its own is not built — said in the line)']]]);
+const PUSH = new Map([['src/machine-mounts.js', [/connectLocal: \(\) => net\.connect\(door\.port, '127\.0\.0\.1'\)/, 'a push mount\'s tunnel ends at ITS OWN door (src/server/mount-door.js: that mount\'s /dav for its own pass — test-mount-door)']]]);
 const sinksOf = (f, text) => text.split('\n').map((l, i) => ({ f, at: i + 1, l })).filter((x) => !/^\s*(?:\/\/|\*)/.test(x.l) && SINK.test(x.l));
 const badOf = (sinks) => sinks.filter((x) => !x.l.includes('tunnelPort(PORT)') && !(PUSH.has(x.f) && PUSH.get(x.f)[0].test(x.l))).map((x) => `${x.f}:${x.at}`);
 const walk = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? walk(path.join(dir, d.name)) : d.name.endsWith('.js') ? [path.join(dir, d.name)] : []);

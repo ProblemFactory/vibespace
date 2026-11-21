@@ -5564,6 +5564,7 @@ await section(async () => {
     'src/server/browser-stream.js': 2, // a dispatcher target: handleUpgrade (+ its wss) reached only through server.js's dispatcher
     'src/server/desktop-stream.js': 2, // a dispatcher target
     'src/server/path-mounts.js': 1, // a dispatcher target
+    'src/server/mount-door.js': 1, // B-7f0b (r1220 (1)): a push mount's OWN loopback listener (127.0.0.1:<the system's port>) — not the hub's port; its accept errors said, no upgrade listener
     'src/server/agent-listener.js': 1, // its OWN loopback listener (the reverse tunnel's door, 127.0.0.1:<its own port>) — not the hub's port; its accept errors said, no upgrade listener
   };
   const sites = (text) => strip(text).split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => SITE.test(l));
