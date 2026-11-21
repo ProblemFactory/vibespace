@@ -43,6 +43,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When a channel rule gives access to the conversations it matches, the pause at every agent turn is much shorter.
 - In a dialog with many folder boxes, the folder you type or press in is now checked first instead of waiting behind the others.
 - Reopening a chat that has not changed no longer recounts its background tasks and task list, which held VibeSpace up to 0.25 s a window.
+- A folder you type into an automation key's folder picker before its list loads is no longer replaced by the list's folder, which the key then got instead.
 
 ### Changed
 - The chat window's status bar is arranged by what you need: one row on a wide window, the same two rows on a narrow one, nothing hidden behind «⋯».
