@@ -23,6 +23,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const F = require(path.join(REPO, 'src/channel-filter.js'));
 const { makeRecord, carriesFrame } = require(path.join(REPO, 'src/channel-record.js'));
@@ -238,7 +247,7 @@ console.log('⑦ the wake block is budgeted and frame-inert');
   const L2 = "const { toAgentText, cutText, foldHidden } = require('./peer-text.js');";
   ok(PSRC.split(L1).length === 2 && PSRC.split(L1b).length === 2 && FSRC.split(L2).length === 2, 'CONTROL setup: the belt applies the line rule once per kind, and channel-filter requires the belt once');
   const M = mutantCopies('chan-filter-lines', REPO);
-  const beltPath = M.write('src/peer-text.js', PSRC.replace(L1, '  if (line) return R.inertFrames(t);').replace(L1b, '  return R.inertFrames(t);'), 'complete-tags-only', { name: 'peer-text-complete-tags-only' });
+  const beltPath = M.write('src/peer-text.js', editAnchor(editAnchor(PSRC, L1, '  if (line) return R.inertFrames(t);', "src/peer-text.js"), L1b, '  return R.inertFrames(t);', "src/peer-text.js"), 'complete-tags-only', { name: 'peer-text-complete-tags-only' });
   const F0 = M.load('src/channel-filter.js', FSRC.replace(L2, `const { toAgentText, cutText, foldHidden } = require(${JSON.stringify(beltPath)});`), 'complete-tags-only');
   const b0 = blocksOf(F0);
   ok(Object.values(b0).every((x) => carriesFrame(x)), 'CONTROL: the copy whose helpers neuter only complete tags leaves a live frame in every block form', Object.entries(b0).map(([k, x]) => `${k}:${carriesFrame(x)}`).join(' '));
@@ -726,7 +735,7 @@ console.log('⑬ owner decision A: a topic wakes, a quote chain does not, a quot
     "      const ids = ctx.threadOf(rec);",
     "      return Array.isArray(ids) && ids.some((x) => str(x) !== self && mine.has(str(x)));",
     "    }"].join('\n');
-  const Fold = M.load('src/channel-filter.js', SRC.replace(NEW_CASE, OLD_CASE).replace(NEW_WHY, '    const placeWhy = undefined;'), 'pre-decision');
+  const Fold = M.load('src/channel-filter.js', editAnchor(editAnchor(SRC, NEW_CASE, OLD_CASE, "src/channel-filter.js"), NEW_WHY, '    const placeWhy = undefined;', "src/channel-filter.js"), 'pre-decision');
   const oldThreadOf = (r) => { const k = ix.byRecord.get(String(r.vendorId)); const th = k ? ix.threads.get(k) : null; if (!th || th.kind === 'conversation') return []; return [th.root || (th.kind === 'chain' ? th.key : null), ...(th.all || th.replies)].filter(Boolean); };
   const pre = run(Fold, { mine: MINE, threadOf: oldThreadOf });
   const redPre = pre.filter((x) => !x.ok).map((x) => x.id);
@@ -1088,7 +1097,7 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
   const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
   const G1 = "  if (isSystemRecord(record)) return { hit: false, why: [] };\n", G2 = "  if (isSystemRecord(rec)) return false;   // lane lark-system-records\n";
   ok(FSRC.split(G1).length === 2 && FSRC.split(G2).length === 2, 'control setup: each guard is one line');
-  const FX = M.load('src/channel-filter.js', FSRC.replace(G1, '').replace(G2, ''), 'no-system-guard');
+  const FX = M.load('src/channel-filter.js', editAnchor(editAnchor(FSRC, G1, '', "src/channel-filter.js"), G2, '', "src/channel-filter.js"), 'no-system-guard');
   const xHits = F.RULE_KINDS.filter((k) => FX.matchRecord({ rules: [RULE_FOR[k]] }, sys, ctx).hit);
   ok(xHits.includes('keyword') && xHits.includes('not-contains') && xHits.includes('time-window'), 'CONTROL: a copy without the system guard lets the notice match (keyword / not-contains / time-window) — the census goes RED', xHits.join(','));
   // lane gmail-draft-not-a-message (fb-9aa1d3bd1e): the account's unsent DRAFT is nobody's message either — the SAME census over a draft
@@ -1104,7 +1113,7 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
   ok(estD && estD.matched === 1 && estD.total === 2, 'the estimate of "every message" counts the peer message, never the draft', J2(estD));
   const DG1 = "  if (isDraftRecord(record)) return { hit: false, why: [] };\n", DG2 = "  if (isDraftRecord(rec)) return false;   // lane gmail-draft-not-a-message: an unsent draft went to nobody\n";
   ok(FSRC.split(DG1).length === 2 && FSRC.split(DG2).length === 2, 'control setup: each draft guard is one line');
-  const FD = M.load('src/channel-filter.js', FSRC.replace(DG1, '').replace(DG2, ''), 'no-draft-guard');
+  const FD = M.load('src/channel-filter.js', editAnchor(editAnchor(FSRC, DG1, '', "src/channel-filter.js"), DG2, '', "src/channel-filter.js"), 'no-draft-guard');
   const dHits = F.RULE_KINDS.filter((k) => FD.matchRecord({ rules: [RULE_FOR[k]] }, draft, dctx).hit);
   ok(dHits.includes('keyword') && dHits.includes('mention') && dHits.includes('time-window'), 'CONTROL: a copy without the draft guards lets the draft match (keyword / mention / time-window) — the census goes RED', dHits.join(','));
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
@@ -1250,7 +1259,7 @@ console.log('⑲ lane dm-reply-infers (B-6b4b): reply-to-sent `infer` — the sc
   const ROAD2 = '  if (rule && rule.kind === \'reply-to-sent\') { const s = sentHit(rec, ctx) || (rule.infer === true ? inferHit(rec, ctx) : null); return s ? s.why : null; }';
   const SPAN = '  const span = inferSpanMs(ctx);', MARK = '  if (str(rec.replyTo) || str(rec.root)) return null;', KIND = "  if (String(c.kind || 'plain') !== 'plain' || c.quotes || c.topic) return null;", EDGE = '  if (p === null || p < INFER.threshold) return null;';
   ok([ROAD1, ROAD2, SPAN, MARK, KIND, EDGE].every((x) => FSRC.split(x).length === 2), 'control setup: the two road reads, the span, the two unmarked checks and the threshold are each one line');
-  const BASE = MM.load('src/channel-filter.js', FSRC.replace(ROAD1, '    if (rule.kind === \'reply-to-sent\' && !sent) { const s = sentHit(record, ctx); if (s) sent = s.sent; }').replace(ROAD2, '  if (rule && rule.kind === \'reply-to-sent\') { const s = sentHit(rec, ctx); return s ? s.why : null; }'), 'marker-only');
+  const BASE = MM.load('src/channel-filter.js', editAnchor(editAnchor(FSRC, ROAD1, '    if (rule.kind === \'reply-to-sent\' && !sent) { const s = sentHit(record, ctx); if (s) sent = s.sent; }', "src/channel-filter.js"), ROAD2, '  if (rule && rule.kind === \'reply-to-sent\') { const s = sentHit(rec, ctx); return s ? s.why : null; }', "src/channel-filter.js"), 'marker-only');
   const fixtures = [plain2h, userW('om_q2', 60e3, { replyTo: 'om_a1' }), userW('om_t2', 90e3, { replyTo: 'om_a1', root: 'om_a1', threadKey: 'om_a1' }), userW('om_w12', 5 * 60e3), userW('m_r9', H)];
   const kinds = { om_q2: { kind: 'quote', topic: null, quotes: 'om_a1' }, om_t2: { kind: 'topic-reply', topic: 'om_a1', quotes: null } };
   const fctx = (k) => ctxOf({ convKind: k, kindOf: (r) => kinds[r.vendorId] || plainKind(), inferred: new Map(fixtures.map((r) => [F.inferKeyOf(r, A.get('om_a1')), { probability: 0.99 }])) });
@@ -1258,7 +1267,7 @@ console.log('⑲ lane dm-reply-infers (B-6b4b): reply-to-sent `infer` — the sc
   ok(same.every(Boolean) && same.length === 15, `infer OFF ⇒ the marker road byte for byte: ${same.length} fixtures (plain / quote / topic reply / mail × dm, group, thread) answer exactly as a copy without the judged road — even with a YES for every one of them handed in`);
   ok(BASE.matchRecord({ rules: [RI] }, plain2h, ctxOf({ inferred: said(0.99) })).hit === false && F.matchRecord({ rules: [RI] }, plain2h, ctxOf({ inferred: said(0.99) })).hit === true, 'CONTROL ⑧: the marker-only copy misses the 2 h plain answer even with infer on — the judged road is what wakes userW\'s agent');
   const S1 = MM.load('src/channel-filter.js', FSRC.replace(SPAN, '  const span = Infinity;'), 'no-span');
-  const S2 = MM.load('src/channel-filter.js', FSRC.replace(MARK, '').replace(KIND, ''), 'marked-judged');
+  const S2 = MM.load('src/channel-filter.js', editAnchor(editAnchor(FSRC, MARK, '', "src/channel-filter.js"), KIND, '', "src/channel-filter.js"), 'marked-judged');
   const S3 = MM.load('src/channel-filter.js', FSRC.replace(EDGE, '  if (p === null) return null;'), 'no-threshold');
   ok(outLegs(S1).includes('25 h after (the default span 24 h)'), 'CONTROL ⑨: a copy without the span judges the 25 h message — the scope leg goes RED', J2(outLegs(S1)));
   ok(outLegs(S2).includes('a quote of ANOTHER message') && outLegs(S2).includes('a topic reply under another root'), 'CONTROL ⑩: a copy without the unmarked checks judges a quote of another message and a topic reply — the scope leg goes RED', J2(outLegs(S2)));

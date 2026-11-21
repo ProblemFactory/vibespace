@@ -40,6 +40,15 @@ const require = createRequire(import.meta.url);
 const T0 = performance.now();
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const leg = async (name, fn) => { let r; try { r = await fn(); } catch (e) { r = { ok: false, extra: 'threw: ' + String((e && e.stack) || e).slice(0, 500) }; } ok(r === true || !!(r && r.ok), name, r && r.extra); };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const quiet = { log() {}, warn() {}, error() {} };
@@ -475,7 +484,7 @@ console.log('⑩ the sync-fs guard + RED controls');
   const src = read('src/transcript-picture.js').split("require('./harnesses')").join(`require(${JSON.stringify(path.join(REPO, 'src/harnesses'))})`), anchor = 'let pos = ix.to, lineAt = ix.to, skipping = false;';
   const mdir = scratch('cap-mutant'); fs.mkdirSync(mdir, { recursive: true });
   ok(src.includes(anchor), 'the mutant\'s anchor is in the reader (where a pass starts)');
-  fs.writeFileSync(path.join(mdir, 'tp.js'), src.replace(anchor, 'let pos = 0, lineAt = 0, skipping = false;'));
+  fs.writeFileSync(path.join(mdir, 'tp.js'), editAnchor(src, anchor, 'let pos = 0, lineAt = 0, skipping = false;', "src/transcript-picture.js"));
   const M = require(path.join(mdir, 'tp.js')).create({ chunk: 4096 });
   const fp = path.join(mdir, 't.jsonl'); fs.writeFileSync(fp, LINES.slice(0, 2).join('\n') + '\n');
   await M.find({ fp, backend: 'claude', key: U(1), n: 0 }); const b1 = M.held().bytesScanned; const more = userRec(U(8), [tr('t8', [img(PNG(30))])]) + '\n'; fs.appendFileSync(fp, more); await M.find({ fp, backend: 'claude', key: U(8), n: 0 });
@@ -484,7 +493,7 @@ console.log('⑩ the sync-fs guard + RED controls');
   {
     const KEYCHK = "if (keyOf(shape, buf, root) !== key) { ix.ino = null; continue; }";
     ok(src.includes(KEYCHK), 'the key check is in the reader (the third mutant\'s anchor)');
-    fs.writeFileSync(path.join(mdir, 'tp3.js'), src.replace(KEYCHK, ''));
+    fs.writeFileSync(path.join(mdir, 'tp3.js'), editAnchor(src, KEYCHK, '', "src/transcript-picture.js"));
     const M3 = require(path.join(mdir, 'tp3.js')).create();
     const sw = path.join(mdir, 'swap.jsonl');
     const A = userRec('aaaaaaaa-0000-4000-8000-0000000000a1', [tr('ta', [img(PNG(50))])]), B = userRec('aaaaaaaa-0000-4000-8000-0000000000b2', [tr('tb', [img(PNG(51))])]);

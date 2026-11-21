@@ -27,6 +27,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // B-1217 member 17 (主开发 r502): a racing act waits for the call's ARRIVAL at its hold — bounded, it says what never came (null)
@@ -759,7 +768,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   ok(/if \(refreshing\) \{ await refreshing; return accessToken\(depth \+ 1\); \}/.test(srcMain) && /refreshing = refreshAccessToken\(cred, token\)\.finally/.test(srcMain) && /cur\.refresh_token \|\| ''\) === String\(token\.refresh_token/.test(srcMain), 'the refresh is SINGLE-FLIGHT (siblings wait for the one POST and re-read) and a refused refresh stamps invalidGrantAt only while the stored token is still the one it tried');
   // NEGATIVE CONTROLS (patched copies in scratch, never src/): the census must SEE a bare call
   const M = mutantCopies('chan-gmail-gate', REPO);
-  const bare = srcMain.replace("  const selfEmail = () => {", "  const labels = () => callJson(fetchFn, `${API}/labels`, { what: 'gmail labels' });\n  const selfEmail = () => {");
+  const bare = editAnchor(srcMain, "  const selfEmail = () => {", "  const labels = () => callJson(fetchFn, `${API}/labels`, { what: 'gmail labels' });\n  const selfEmail = () => {", "src/channels/gmail.js");
   M.write('src/channels/gmail.js', bare, 'bare-call');
   const cb = gateCensus(bare, { gateRe: GATE, ungatedIds: ids });
   ok(bare !== srcMain && cb.problems.some((x) => /no marker/.test(x) && /gmail labels/.test(x)), 'CONTROL: a copy with one more callJson (a labels read, no marker) is RED on that line', cb.problems.join(' ; '));
@@ -1129,7 +1138,7 @@ console.log('\n⑲ verify r3: one response judge, the catch census (gmail.js + l
   const aListStart = src.indexOf('try { m = await nameFor(id); } catch (e) {'); const aListEnd = src.indexOf('\n          }', aListStart) + '\n          }'.length;
   const anchorList = aListStart >= 0 ? src.slice(aListStart, aListEnd) : '<no listing catch>';
   ok(src.includes(anchorApi) && src.includes(anchorHist) && src.includes(anchorJudge) && src.includes(anchorList), 'CONTROL anchors: the gate, the history read, the judge line, the listing\'s re-throw are in the file');
-  const bare = src.replace(anchorApi, anchorApi + "\n    if (opts.probe) { const z = await fetchFn('https://example.invalid/probe', {}); if (!z.ok) return null; }");
+  const bare = editAnchor(src, anchorApi, anchorApi + "\n    if (opts.probe) { const z = await fetchFn('https://example.invalid/probe', {}); if (!z.ok) return null; }", "src/channels/gmail.js");
   Mg.write('src/channels/gmail.js', bare, 'bare-send');
   const cb = responseCensus(bare, OPT());
   ok(cb.problems.some((p) => /raw send whose answer no judge reads/.test(p)), 'CONTROL ①: a bare fetch outside the judge is RED', cb.problems.join(' ; '));
@@ -1366,7 +1375,7 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
   const N1 = "      const q = narrow ? words.split(/\\s+/).map((w) => w.replace(/\"/g, '')).filter(Boolean).map((w) => `\"${w}\"`).join(' ') : words;\n";
   const N2 = '      const max = narrow ? SEARCH_IDS_NARROW : SEARCH_PAGE;\n';
   ok(GSRC.split(N1).length === 2 && GSRC.split(N2).length === 2, 'CONTROL 1c anchors: the quoted words and the narrow page are in gmail.js once');
-  const gc = mkA(MUT.load('src/channels/gmail.js', GSRC.replace(N1, '      const q = words;\n').replace(N2, '      const max = SEARCH_PAGE;\n'), 'operators'));
+  const gc = mkA(MUT.load('src/channels/gmail.js', editAnchor(editAnchor(GSRC, N1, '      const q = words;\n', "src/channels/gmail.js"), N2, '      const max = SEARCH_PAGE;\n', "src/channels/gmail.js"), 'operators'));
   const ask1c = async (msgs) => { v.state.oracle = (qq, max) => gq(qq, msgs, max); const r = await gc.search({ query: OPQ, shows: (cid) => cid === 'thr_ops_0001' }); v.state.oracle = null; return r.hits.map((h) => h.vendorId).join(); };
   const c0 = await ask1c([anchor]), c1 = await ask1c([anchor, ...hiddenMail(10, 'hr@corp.example', ['payroll'])]);
   ok(c0 === 'msg_ops_d' && c1 === '', 'CONTROL 1c: the copy without the quoting answers the visible hit with 0 hidden mails and NOTHING with 10 — the oracle legs above would be RED', JSON.stringify([c0, c1]));
@@ -1689,7 +1698,7 @@ console.log('\n㉒ lane gmail-anchor-churn: the anchor is a message the vendor w
   const SAME = '    if (L.id === String(id)) return;\n';
   ok([NEW_ANCHOR, NEW_WALK, NEW_LOST, HOLD, SAME].every((x) => SRC.split(x).length === 2), 'the anchor line, the history-walk line, the lost-anchor line, the hold and the same-id note are present ONCE each (the controls restore exactly them)');
   const MC = mutantCopies('chan-gmail-churn', REPO);
-  const gPre = MC.load('src/channels/gmail.js', SRC.replace(NEW_ANCHOR, OLD_ANCHOR).replace(NEW_WALK, OLD_WALK).replace(NEW_LOST, OLD_LOST).replace(HOLD, '      if (false'), 'pre-fix');
+  const gPre = MC.load('src/channels/gmail.js', editAnchor(editAnchor(editAnchor(editAnchor(SRC, NEW_ANCHOR, OLD_ANCHOR, "src/channels/gmail.js"), NEW_WALK, OLD_WALK, "src/channels/gmail.js"), NEW_LOST, OLD_LOST, "src/channels/gmail.js"), HOLD, '      if (false', "src/channels/gmail.js"), 'pre-fix');
   const gNewest = MC.load('src/channels/gmail.js', SRC.replace(NEW_ANCHOR, OLD_ANCHOR), 'newest-id');
   const gNoNews = MC.load('src/channels/gmail.js', SRC.replace(NEW_WALK, OLD_WALK), 'draft-is-news');
   const gNoHold = MC.load('src/channels/gmail.js', SRC.replace(HOLD, '      if (false'), 'no-hold');

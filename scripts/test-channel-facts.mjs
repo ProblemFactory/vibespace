@@ -30,6 +30,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = (x) => JSON.stringify(x);
 const R = require(path.join(REPO, 'src/channel-record.js'));
 const CF = require(path.join(REPO, 'src/channel-facts.js'));
@@ -174,7 +183,7 @@ console.log('§4 the summary, the details, the chips, the agent line');
     ok(CFS.split(PUSH).length === 2, 'CONTROL setup: the From row is pushed once');
     const cdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-facts-from-'));
     const cf = path.join(cdir, 'channel-facts-nofrom.js');
-    fs.writeFileSync(cf, CFS.replace(PUSH, '').replace("require('./channel-record.js')", `require(${J(path.join(REPO, 'src/channel-record.js'))})`));
+    fs.writeFileSync(cf, editAnchor(editAnchor(CFS, PUSH, '', "src/channel-facts.js"), "require('./channel-record.js')", `require(${J(path.join(REPO, 'src/channel-record.js'))})`, "src/channel-facts.js"));
     const CF0 = require(cf);
     const red = fromJudge(CF0);
     ok(red.length >= 1 && /From/.test(red[0]), 'CONTROL: a table with no From row is caught by the same judge (the sender\'s address lived nowhere but a name)', J(red));

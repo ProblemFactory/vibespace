@@ -33,6 +33,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const P = require(path.join(REPO, 'src/channel-policy.js'));
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
@@ -1419,7 +1428,7 @@ async function durableLeg(ladderMod, name) {
     // anywhere between claimed entries, so an unshift of what it dropped would re-order the queue
     const THROW = "    if (!stored && entry.ref) {\n      q.splice(0, q.length, ...before);";
     ok(dsrcV3.split(THROW).length === 2, 'the take-back line is present once (the control keeps the entry and says stashed)');
-    const uc = await unwritableLeg(MV3.load('src/server/conversation-deliver.js', dsrcV3.replace(THROW, "    if (false) {\n      q.splice(0, q.length, ...before);").replace("    if (!stored) { const why", "    if (false) { const why"), 'stash-write-ignored'), ENG, 'v4-unwritable-ctl');
+    const uc = await unwritableLeg(MV3.load('src/server/conversation-deliver.js', editAnchor(editAnchor(dsrcV3, THROW, "    if (false) {\n      q.splice(0, q.length, ...before);", "src/server/conversation-deliver.js"), "    if (!stored) { const why", "    if (false) { const why", "src/server/conversation-deliver.js"), 'stash-write-ignored'), ENG, 'v4-unwritable-ctl');
     ok(uc.stashed && uc.held === 1 && uc.fate0 === 'waiting' && uc.gone === 1 && uc.fate1 === 'handed', `CONTROL: a ladder that says "stashed" over a failed write is read as "handed with an earlier message" at the next boot (${JSON.stringify(uc)}) — the leg would go red`);
   }
   // …and the engine over the real ladder: the receipt is on disk before the outbox says `stashed`
@@ -1528,7 +1537,7 @@ async function durableLeg(ladderMod, name) {
   const BELT = "  return inertFrames(lines.join('\\n'));";
   const CLIP = "  const clip = (l) => { let v = inertFrames(l); if (v.length > 600) v = v.slice(0, 599) + '…'; return inertFrameLine(v); };";
   ok(psrcV3.split(BELT).length === 2 && psrcV3.split(CLIP).length === 2, 'the belt and the line rule are present once each (the control removes both)');
-  const PC = MV3.load('src/channel-policy.js', psrcV3.replace(BELT, "  return lines.join('\\n');").replace(CLIP, "  const clip = (l) => { const v = inertFrames(l); return v.length > 600 ? v.slice(0, 599) + '…' : v; };"), 'policy-no-line-rule');
+  const PC = MV3.load('src/channel-policy.js', editAnchor(editAnchor(psrcV3, BELT, "  return lines.join('\\n');", "src/channel-policy.js"), CLIP, "  const clip = (l) => { const v = inertFrames(l); return v.length > 600 ? v.slice(0, 599) + '…' : v; };", "src/channel-policy.js"), 'policy-no-line-rule');
   const live = cases.filter(([, proposed, final]) => REC.carriesFrame(PC.renderReceiptBlock({ proposalId: 'p-1', status: 'edited', adapterId: A, convId: C, sentAs: 'user', identityMarking: 'none' }, { adapterLabel: 'Fake', title: 'Ops', text: final, proposed }))).length;
   ok(live === cases.length, `CONTROL: the pre-fix rule (complete tags per line only) leaves a live frame in ${live} of ${cases.length} cases — the legs would go red`);
 }
@@ -2507,7 +2516,7 @@ async function chatReadLegs(ENGmod, name) {
       ok(OS.split(ROWPUSH).length === 2, 'CONTROL setup: the row push is spelled once');
       // the copy lives in this section's own scratch dir, its relative imports made absolute (esbuild bundles it)
       const srcF = path.join(dir, 'channel-outbox-bf467-base.js');
-      fs.writeFileSync(srcF, OS.replace(ROWPUSH, '    nodes.push(keyedCard(app, p, cards.get(p.id) || null));\n').replace(/from '\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src/lib', f)}'`).replace(/from '\.\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src', f)}'`));
+      fs.writeFileSync(srcF, editAnchor(OS, ROWPUSH, '    nodes.push(keyedCard(app, p, cards.get(p.id) || null));\n', "src/lib/channel-outbox.js").replace(/from '\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src/lib', f)}'`).replace(/from '\.\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src', f)}'`));
       const outF = path.join(dir, 'channel-outbox-base.mjs');
       await esbuild.build({ entryPoints: [srcF], bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: outF, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
       const COF = await import(outF);
@@ -2576,7 +2585,7 @@ async function chatReadLegs(ENGmod, name) {
       const LINED = "{ compact: true, line: true, onLine, onJump }";
       ok(OS2.split(LINED).length === 2, 'CONTROL setup: the decided line is asked for once');
       const srcT = path.join(dir, 'channel-outbox-tidy-base.js');
-      fs.writeFileSync(srcT, OS2.replace(LINED, '{ compact: true }').replace(/from '\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src/lib', f)}'`).replace(/from '\.\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src', f)}'`));
+      fs.writeFileSync(srcT, editAnchor(OS2, LINED, '{ compact: true }', "src/lib/channel-outbox.js").replace(/from '\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src/lib', f)}'`).replace(/from '\.\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src', f)}'`));
       const outT = path.join(dir, 'channel-outbox-tidy-base.mjs');
       await esbuild.build({ entryPoints: [srcT], bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: outT, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
       const tidyRed = tidyJudge(await import(outT));
@@ -2694,7 +2703,7 @@ async function chatReadLegs(ENGmod, name) {
         ok(OS2.split(MOUNT).length === 2 && OS2.split(PASS).length === 2, '§OW CONTROL setup: the API section is mounted once and handed to the census once');
         const bdir = fs.mkdtempSync(path.join(ROOT, 'ow-base-'));
         const abs = (src) => src.replace(/from '\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src/lib', f)}'`).replace(/from '\.\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src', f)}'`);
-        fs.writeFileSync(path.join(bdir, 'channel-outbox.js'), abs(OS2.replace(MOUNT, '  const apiSec = apiOutboxSection(app);\n  root.insertBefore(apiSec.el, list);\n').replace(PASS, '    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview, onAll });\n')));
+        fs.writeFileSync(path.join(bdir, 'channel-outbox.js'), abs(editAnchor(editAnchor(OS2, MOUNT, '  const apiSec = apiOutboxSection(app);\n  root.insertBefore(apiSec.el, list);\n', "src/lib/channel-outbox.js"), PASS, '    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview, onAll });\n', "src/lib/channel-outbox.js")));
         const bOut = path.join(bdir, 'channel-outbox-base.mjs');
         await esbuild.build({ entryPoints: [path.join(bdir, 'channel-outbox.js')], bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: bOut, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
         const redBase = judge(await winOf(await import(bOut)));
@@ -2866,7 +2875,7 @@ async function chatReadLegs(ENGmod, name) {
           const n = src.split(from).length - 1;
           if (n !== 1) throw new Error(`ANCHOR (${name}, src/outbox-chip.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the mutant builds nothing`);
           const f = path.join(dir, `outbox-chip-${name}.js`);
-          fs.writeFileSync(f, src.replace(from, to).replace("require('./outbox-census.js')", `require(${JSON.stringify(path.join(REPO, 'src/outbox-census.js'))})`));
+          fs.writeFileSync(f, editAnchor(src.replace(from, to), "require('./outbox-census.js')", `require(${JSON.stringify(path.join(REPO, 'src/outbox-census.js'))})`, "src/outbox-chip.js"));
           return require(f);
         };
         await legOSC('MUTANT the chip counting EVERY proposal (no drafter filter) ⇒ RED by name on the «only this conversation» legs', async () => {

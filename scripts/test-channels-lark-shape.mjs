@@ -49,6 +49,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // B-1217 member 17 (主开发 r502): a racing act waits for the call's ARRIVAL at its hold — bounded, it says what never came (null)
@@ -368,7 +377,7 @@ const world = (() => {
   // CONTROL: the pre-D3 author line (the literal 'app') in a patched copy ⇒ this leg's first assertion goes red
   const M3 = mutantCopies('chan-lark-d3', REPO);
   const srcL = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
-  const pre = srcL.replace("author: { id: sid, name: isApp ? appNameOf(sid, names) : (names.get(sid) || (PEOPLE.get(sid) || {}).name || ''),", "author: { id: sid, name: names.get(sid) || (isApp ? 'app' : ''),");
+  const pre = editAnchor(srcL, "author: { id: sid, name: isApp ? appNameOf(sid, names) : (names.get(sid) || (PEOPLE.get(sid) || {}).name || ''),", "author: { id: sid, name: names.get(sid) || (isApp ? 'app' : ''),", "src/channels/lark.js");
   const modPre = M3.load('src/channels/lark.js', pre, 'pre-d3');
   const cr = modPre.toRecord('lark', 'oc_d3', ITEMS[2], { names: new Map() });
   ok(pre !== srcL && cr.author.name === 'app', 'CONTROL: the pre-D3 author line in a patched copy names the bot "app" — the assertions above would be red on it', cr.author.name);
@@ -538,7 +547,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   M.write('src/channels/lark.js', unpaced, 'send-unpaced');
   const cu = gateCensus(unpaced, { gateRe: GATE, ungatedIds: ids });
   ok(unpaced !== src && cu.problems.filter((x) => /gated-inline 'send(-reply)?' has no 'await pace\('/.test(x)).length === 2, 'CONTROL: the P4 send (no pace, no meter) is RED on both send forms', cu.problems.join(' ; '));
-  const bare = src.replace("  const api = async (pathq, opts = {}) => {", "  const bots = () => callJson(fetchFn, `${H.open}/open-apis/bot/v3/info`, { what: 'lark bot info' });\n  const api = async (pathq, opts = {}) => {");
+  const bare = editAnchor(src, "  const api = async (pathq, opts = {}) => {", "  const bots = () => callJson(fetchFn, `${H.open}/open-apis/bot/v3/info`, { what: 'lark bot info' });\n  const api = async (pathq, opts = {}) => {", "src/channels/lark.js");
   M.write('src/channels/lark.js', bare, 'bare-call');
   const cb = gateCensus(bare, { gateRe: GATE, ungatedIds: ids });
   ok(bare !== src && cb.problems.some((x) => /no marker/.test(x) && /lark bot info/.test(x)), 'CONTROL: a copy with one more callJson (a bot-info read, no marker) is RED on that line', cb.problems.join(' ; '));
@@ -1563,7 +1572,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
       const srcJ = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
       const ASK = 'const consentScopes = (without = []) => [...SCOPES, ...UPLOAD_CONSENT_SCOPES,', GRP = 'Object.freeze([...UPLOAD_CONSENT_SCOPES]),';
       ok(srcJ.split(ASK).length === 2 && srcJ.split(GRP).length === 2, 'CONTROL setup: the consent\'s upload scope and its group are spelled once');
-      const mj = await capture(require(MJ.write('src/channels/lark.js', srcJ.replace(ASK, 'const consentScopes = (without = []) => [...SCOPES, ...UPLOAD_SCOPES,').replace(GRP, 'Object.freeze([...UPLOAD_SCOPES]),'), 'v2')), {});
+      const mj = await capture(require(MJ.write('src/channels/lark.js', editAnchor(editAnchor(srcJ, ASK, 'const consentScopes = (without = []) => [...SCOPES, ...UPLOAD_SCOPES,', "src/channels/lark.js"), GRP, 'Object.freeze([...UPLOAD_SCOPES]),', "src/channels/lark.js"), 'v2')), {});
       const kept = [...ENABLED]; ENABLED.add(OPT); ENABLED.delete(V2);
       let pm = null; try { pm = await browse(mj.build({ redirectUri: 'http://127.0.0.1:1/cb', state: 's' })); } finally { ENABLED.clear(); for (const x of kept) ENABLED.add(x); }
       ok(mj.scopes.includes(V2) && pm.status === 200 && /未开通的权限 im:resource:upload</.test(pm.body), 'CONTROL — V2 back in the consent: the owner\'s app refuses it (20027 naming im:resource:upload) — the owner-app asserts above would be red', pm.body.slice(0, 120));
@@ -2865,7 +2874,7 @@ console.log('\n⑯ lane lark-threads PART B: people named as Lark shows them (do
     const srcR = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     const THROWS = ["      if (e instanceof ChannelError && e.code === 'rate-limited') { peopleRefusedUntil = Math.max(peopleRefusedUntil, now() + peoplePauseMs(e)); throw e; }\n", "        if (e.code === 'rate-limited') throw e;\n", "if (e.code === 'rate-limited') throw e; return c ? c.name : null; }"];
     ok(THROWS.every((x) => srcR.split(x).length === 2), 'F1 r2 CONTROL setup: the three rethrows are each present once');
-    const pre = srcR.replace(THROWS[0], '').replace(THROWS[1], '').replace(THROWS[2], 'return c ? c.name : null; }');
+    const pre = editAnchor(editAnchor(editAnchor(srcR, THROWS[0], '', "src/channels/lark.js"), THROWS[1], '', "src/channels/lark.js"), THROWS[2], 'return c ? c.name : null; }', "src/channels/lark.js");
     const modPre = M9b.load('src/channels/lark.js', pre, 'pre-r2-rate');
     for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k); for (const k of Object.keys(USERS)) modPre.PEOPLE.delete(k);
     const aPre = mk9(modPre, 'lark-b9pre');
@@ -2931,7 +2940,7 @@ console.log('\n⑰ verify r3: one response judge, the catch census, the push pat
   const anchorMembers = "const d = await api(`/im/v1/chats/${encodeURIComponent(convId)}/members?${p}`, { what: 'lark chat members' });";
   const anchorJudge = 'if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));';
   ok(src.includes(anchorApi) && src.includes(anchorMembers) && src.includes(anchorJudge), 'CONTROL anchors: the gate, the members page, the judge line are in the file');
-  const bare = src.replace(anchorApi, anchorApi + "\n    if (opts.probe) { const z = await fetchFn('https://example.invalid/probe', {}); if (!z.ok) return null; }");
+  const bare = editAnchor(src, anchorApi, anchorApi + "\n    if (opts.probe) { const z = await fetchFn('https://example.invalid/probe', {}); if (!z.ok) return null; }", "src/channels/lark.js");
   M17.write('src/channels/lark.js', bare, 'bare-send');
   const cb = responseCensus(bare, OPT());
   ok(bare !== src && cb.problems.some((p) => /raw send whose answer no judge reads/.test(p)) && cls(cb, 'raw:unjudged') === 1, 'CONTROL ①: a bare fetch outside the judge (its answer read by nobody) is RED', cb.problems.join(' ; '));
@@ -2984,7 +2993,7 @@ console.log('\n⑰ verify r3: one response judge, the catch census, the push pat
   ok(src.includes(anchorScan), 'CONTROL anchor: the scan\'s re-throw is in the file');
   const anchorReissue = "          if (e instanceof ChannelError && e.code === 'rate-limited') throw e;   // verify r3: the re-issue's own 429 is the account's too\n";
   ok(src.includes(anchorReissue), 'CONTROL anchor: the re-issue\'s re-throw is in the file');
-  const preScan = src.replace(anchorScan, '      } catch (e) { scanErr = e; }').replace(anchorReissue, '');
+  const preScan = editAnchor(editAnchor(src, anchorScan, '      } catch (e) { scanErr = e; }', "src/channels/lark.js"), anchorReissue, '', "src/channels/lark.js");
   const modPre = M17.load('src/channels/lark.js', preScan, 'reconcile-swallow');
   const rc = await recRun(modPre);
   const cpre = responseCensus(preScan, OPT());

@@ -48,6 +48,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const Att = require(path.join(REPO, 'src/channel-attachments.js'));
@@ -573,7 +582,7 @@ console.log('④ negative controls (patched copies in this run\'s scratch dir)')
   const OLD_HIT = "    if (l.items[k]) { l.items[k].usedAt = now(); try { lruSave(adapterId); } catch (e) { warn('[channels] attachment LRU write failed:', (e && e.message) || e); } }";
   const NEW_HIT = '    if (l.items[k]) { l.items[k].usedAt = now(); lruTouch(adapterId); }';
   ok(STORE_SRC.includes(NEW_HIT), 'CONTROL setup: the coalesced hit is spelled once in the store');
-  const oldStorePath = MUT.write('src/channel-store.js', STORE_SRC.replace(NEW_HIT, OLD_HIT), null, { esm: false, name: `store-oldhit-${process.pid}` });
+  const oldStorePath = MUT.write('src/channel-store.js', editAnchor(STORE_SRC, NEW_HIT, OLD_HIT, "src/channel-store.js"), null, { esm: false, name: `store-oldhit-${process.pid}` });
   const engOld = MUT.load('src/server/channels-engine.js', ENGINE_SRC.replace("const { createChannelStore, pauseDoorsOf } = require('../channel-store.js');", `const { createChannelStore, pauseDoorsOf } = require(${JSON.stringify(oldStorePath)});`), 'old-hit');
   const C = await rig('ctl-lru', { engineMod: engOld });
   await C.get('pic-0');

@@ -45,6 +45,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const V = await import(path.join(REPO, 'src/lib/channel-groups-view.js'));
 const G = require(path.join(REPO, 'src/channel-groups.js'));
@@ -611,10 +620,10 @@ console.log('§verify r1 — a legacy chip after "İ" covers its @');
   ok(runs(V, rec) === 'İ [@beta] hi', 'F10: the legacy chip covers "@beta" exactly', runs(V, rec));
   const { pathToFileURL } = await import('node:url');
   const src = fs.readFileSync(path.join(REPO, 'src/lib/channel-groups-view.js'), 'utf-8');
-  const old = src.replace('const lower = foldCase(text);', 'const lower = text.toLowerCase();').replace("const needle = '@' + foldCase(m.name);", "const needle = '@' + String(m.name).toLowerCase();")
-    .replace("from '../channel-groups.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-groups.js')).href)).replaceAll("from './channel-focus.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-focus.js')).href))
-    .replace("from '../channel-ref.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-ref.js')).href))
-    .replace("from './channel-avatar.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-avatar.js')).href));   // + channels-polish's account badges   // memberName climbs channel-names' ladder (the 2.369.202 integration)
+  const old = editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(src, 'const lower = foldCase(text);', 'const lower = text.toLowerCase();', "src/lib/channel-groups-view.js"), "const needle = '@' + foldCase(m.name);", "const needle = '@' + String(m.name).toLowerCase();", "src/lib/channel-groups-view.js"),
+    "from '../channel-groups.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-groups.js')).href), "src/lib/channel-groups-view.js").replaceAll("from './channel-focus.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-focus.js')).href)),
+    "from '../channel-ref.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-ref.js')).href), "src/lib/channel-groups-view.js"),
+    "from './channel-avatar.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-avatar.js')).href), "src/lib/channel-groups-view.js");   // + channels-polish's account badges   // memberName climbs channel-names' ladder (the 2.369.202 integration)
   const oldFile = path.join(ROOT, 'channel-groups-view-v1-old.mjs');
   fs.writeFileSync(oldFile, old);
   const OLDV = await import(pathToFileURL(oldFile).href);

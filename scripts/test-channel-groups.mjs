@@ -56,6 +56,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const G = require(path.join(REPO, 'src/channel-groups.js'));
 // r6 verify F6: the approve route REQUIRES `shown` — the digest of the card being approved (the card's own PURE function)
@@ -2365,7 +2374,7 @@ console.log('§B-a354 mention = only what @mentions you reaches you (wake + deli
   ok(G.reachesReport(grpNow(), B, { raw: { kind: 'invite', member: B, context: 'why' } }) && !G.reachesReport(grpNow(), B, { raw: { kind: 'rename' } }) && G.reachesReport(grpNow(), C, { raw: { kind: 'rename' } }), '…its OWN invite (the context it was added with) still reaches it; other system records do not; every other mode is handed everything');
   // CONTROL — the old rule restored in a patched copy of the PURE model (mention = next-turn for delivery): red
   const src = read('src/channel-groups.js');
-  const oldSrc = src.replace("if (m.notify !== 'mention') return true;", 'return true;').replace("require('./channel-record.js')", JSON.stringify(path.join(REPO, 'src/channel-record.js')).replace(/^/, 'require(') + ')').replace("require('./peer-text.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/peer-text.js')) + ')');
+  const oldSrc = editAnchor(editAnchor(editAnchor(src, "if (m.notify !== 'mention') return true;", 'return true;', "src/channel-groups.js"), "require('./channel-record.js')", JSON.stringify(path.join(REPO, 'src/channel-record.js')).replace(/^/, 'require(') + ')', "src/channel-groups.js"), "require('./peer-text.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/peer-text.js')) + ')', "src/channel-groups.js");
   const oldFile = path.join(ROOT, 'channel-groups-old.js');
   fs.writeFileSync(oldFile, oldSrc);
   const OLD = require(oldFile);
@@ -2395,7 +2404,7 @@ console.log('§verify r1 — `later` names only who is handed it; the @ scan kee
   const now = await laterOf(GE, 'v1-later');
   ok(now.ok && now.later.includes(C) && !now.later.includes(B) && !now.handed, 'D3: a plain post\'s answer promises the next turn to the `next-turn` member and NOT to the `mention` member it is never handed', JSON.stringify(now));
   const eSrc = read('src/server/groups-engine.js');
-  const oldE = eSrc.replace(" && reachFor(g, m)(rec)) later.push(", ') later.push(');   // lane paced-wake-retry r8: the engine reads «reaches» through ONE function
+  const oldE = editAnchor(eSrc, " && reachFor(g, m)(rec)) later.push(", ') later.push(', "src/server/groups-engine.js");   // lane paced-wake-retry r8: the engine reads «reaches» through ONE function
   const oldEFile = path.join(ROOT, 'groups-engine-v1-old.js');
   fs.writeFileSync(oldEFile, absReq(oldE, path.join(REPO, 'src/server')));
   const was = await laterOf(require(oldEFile), 'v1-later-old');
@@ -2411,7 +2420,7 @@ console.log('§verify r1 — `later` names only who is handed it; the @ scan kee
   ok(p.ok && p.message.mentions.some((m) => m.id === B) && f.auths.some((x) => x.cid === B), '…through the engine: the post is sent, mentions beta and wakes it', JSON.stringify({ ok: p.ok, code: p.code, mentions: p.message && p.message.mentions, auths: f.auths }));
   f.close();
   const gSrc = read('src/channel-groups.js');
-  const oldG = gSrc.replace('const lower = foldCase(t);', 'const lower = t.toLowerCase();').replace('const key = foldCase(c.key);', 'const key = c.key.toLowerCase();');
+  const oldG = editAnchor(editAnchor(gSrc, 'const lower = foldCase(t);', 'const lower = t.toLowerCase();', "src/channel-groups.js"), 'const key = foldCase(c.key);', 'const key = c.key.toLowerCase();', "src/channel-groups.js");
   const oldGFile = path.join(ROOT, 'channel-groups-v1-old.js');
   fs.writeFileSync(oldGFile, absReq(oldG, path.join(REPO, 'src')));
   const OLDG = require(oldGFile);
@@ -2580,7 +2589,7 @@ console.log('§verify r1 — `later` names only who is handed it; the @ scan kee
   const CUT2 = "        if (sliceClock() - sliceAt >= SWEEP_SLICE_MS) return { yield: true };\n";   // lane roster-per-pass: the slice check is the segment judge's one line (cut ⇒ one segment, the one-tick sweep)
   ok(gsrc.split(CUT1).length === 2 && gsrc.split(CUT2).length === 2, 'SLICED SWEEP premise: the two slice lines are each one line of the engine');
   const MUTS = mutantCopies('chan-groups-slice', REPO);
-  const OneTick = MUTS.load('src/server/groups-engine.js', gsrc.replace(CUT1, '').replace(CUT2, ''), 'one-tick');
+  const OneTick = MUTS.load('src/server/groups-engine.js', editAnchor(editAnchor(gsrc, CUT1, '', "src/server/groups-engine.js"), CUT2, '', "src/server/groups-engine.js"), 'one-tick');
   const f0 = fixture('slice-src');
   for (const [from, to] of [[A, B], [A, C], [A, D], [E, B], [D, E], [C, E]]) await f0.eng.sendToAgent({ from, to, text: 'hello ' + to.slice(0, 4) });
   f0.close();

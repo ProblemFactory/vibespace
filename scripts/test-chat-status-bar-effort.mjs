@@ -34,6 +34,15 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 500) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const J = (x) => JSON.stringify(x);
 const FIVE = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -306,7 +315,7 @@ console.log('— ⑥ MUTANTS: each restores the base shape in a copy ⇒ the leg
   const asrc = read('src/adapters/agy.js');
   const R = "  if (!v || AGY_EFFORTS.includes(v)) return null;\n";
   ok(asrc.split(R).length === 2, 'setup: the refusal is ONE identifiable statement in src/adapters/agy.js');
-  const mut = M.load('src/adapters/agy.js', asrc.replace(R, "  return null; // the base: no refusal\n").replace("          AGY_WEBUI_EFFORT: effort || '',", "          AGY_WEBUI_EFFORT: AGY_EFFORTS.includes(effort) ? effort : '',"), 'agy-drops');
+  const mut = M.load('src/adapters/agy.js', editAnchor(editAnchor(asrc, R, "  return null; // the base: no refusal\n", "src/adapters/agy.js"), "          AGY_WEBUI_EFFORT: effort || '',", "          AGY_WEBUI_EFFORT: AGY_EFFORTS.includes(effort) ? effort : '',", "src/adapters/agy.js"), 'agy-drops');
   const reg = registry(), real = reg.get('antigravity');
   const mutAgy = new mut.AgyAdapter(real.config);
   const x = await drive(wsCreate, { backend: 'antigravity', effort: 'ultracode' }, { ...reg, get: (id) => (id === 'antigravity' ? mutAgy : reg.get(id)) });
@@ -315,8 +324,8 @@ console.log('— ⑥ MUTANTS: each restores the base shape in a copy ⇒ the leg
   const G1 = '    if (status.permissionModes?.length) this._permissionModes = status.permissionModes;\n';
   const G2 = "    const modes = this._permissionModes?.length ? this._permissionModes : ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'];\n";
   ok(bsrc.split(G1).length === 2 && bsrc.split(G2).length === 2, 'setup: the bar\'s two `[]` guards are ONE identifiable line each in src/lib/chat-status-bar.js');
-  const baseBar = await import(pathToFileURL(M.write('src/lib/chat-status-bar.js', bsrc.replace(G1, '    if (status.permissionModes) this._permissionModes = status.permissionModes;\n')
-    .replace(G2, "    const modes = this._permissionModes || ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'];\n"), 'perm-empty', { esm: true })).href);
+  const baseBar = await import(pathToFileURL(M.write('src/lib/chat-status-bar.js', editAnchor(editAnchor(bsrc, G1, '    if (status.permissionModes) this._permissionModes = status.permissionModes;\n', "src/lib/chat-status-bar.js"),
+    G2, "    const modes = this._permissionModes || ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'];\n", "src/lib/chat-status-bar.js"), 'perm-empty', { esm: true })).href);
   const e = await permMenu(baseBar, 'antigravity', { model: 'gemini-4-argon-high', permissionMode: 'bypassPermissions', permissionModes: [] });
   ok(!!e && Array.isArray(e.items) && e.items.length === 0 && J(e.list) === '[]', 'MUTANT the base guards (2.369.353: `[]` is truthy) ⇒ ④b RED: the status\'s [] replaced the declared list and the chip opens an EMPTY menu', e);
 }
